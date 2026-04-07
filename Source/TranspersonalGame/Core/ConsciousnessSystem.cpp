@@ -1,279 +1,223 @@
 #include "ConsciousnessSystem.h"
 #include "Engine/Engine.h"
-#include "Engine/World.h"
-#include "TimerManager.h"
-#include "Engine/DataTable.h"
+#include "Kismet/GameplayStatics.h"
+#include "Math/UnrealMathUtility.h"
 
-UConsciousnessSystem::UConsciousnessSystem()
+UConsciousnessComponent::UConsciousnessComponent()
 {
-    CurrentConsciousnessState = EConsciousnessState::Ordinary;
-    CurrentRealityLayer = ERealityLayer::Physical;
-    LastStateTransitionTime = 0.0f;
-}
-
-void UConsciousnessSystem::Initialize(FSubsystemCollectionBase& Collection)
-{
-    Super::Initialize(Collection);
+    PrimaryComponentTick.bCanEverTick = true;
     
-    UE_LOG(LogTemp, Warning, TEXT("ConsciousnessSystem: Initialized"));
+    CurrentState = EConsciousnessState::Ordinary;
+    AwarenessLevel = EAwarenessLevel::Conscious;
     
-    // Start metrics update timer
-    if (UWorld* World = GetWorld())
-    {
-        World->GetTimerManager().SetTimer(
-            MetricsUpdateTimer,
-            FTimerDelegate::CreateUObject(this, &UConsciousnessSystem::UpdateConsciousnessMetrics, 1.0f),
-            1.0f,
-            true
-        );
-    }
-}
-
-void UConsciousnessSystem::Deinitialize()
-{
-    if (UWorld* World = GetWorld())
-    {
-        World->GetTimerManager().ClearTimer(MetricsUpdateTimer);
-    }
+    Metrics.Awareness = 50.0f;
+    Metrics.Presence = 50.0f;
+    Metrics.Coherence = 50.0f;
+    Metrics.Transcendence = 0.0f;
+    Metrics.Unity = 0.0f;
     
-    Super::Deinitialize();
+    StateTransitionTimer = 0.0f;
+    MeditationDuration = 0.0f;
+    bInTranscendentExperience = false;
 }
 
-void UConsciousnessSystem::SetConsciousnessState(EConsciousnessState NewState)
+void UConsciousnessComponent::BeginPlay()
 {
-    if (NewState == CurrentConsciousnessState)
-    {
-        return;
-    }
-
-    if (!CanTransitionToState(NewState))
-    {
-        UE_LOG(LogTemp, Warning, TEXT("ConsciousnessSystem: Cannot transition to state %d"), (int32)NewState);
-        return;
-    }
-
-    EConsciousnessState OldState = CurrentConsciousnessState;
-    CurrentConsciousnessState = NewState;
-    LastStateTransitionTime = GetWorld()->GetTimeSeconds();
-
-    UE_LOG(LogTemp, Log, TEXT("ConsciousnessSystem: State changed from %d to %d"), (int32)OldState, (int32)NewState);
-
-    OnConsciousnessStateChanged.Broadcast(OldState, NewState);
+    Super::BeginPlay();
+    CalculateAwarenessLevel();
 }
 
-bool UConsciousnessSystem::CanTransitionToState(EConsciousnessState TargetState) const
+void UConsciousnessComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    // Check cooldown
-    if (GetWorld() && (GetWorld()->GetTimeSeconds() - LastStateTransitionTime) < StateTransitionCooldown)
-    {
-        return false;
-    }
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    UpdateConsciousnessState(DeltaTime);
+}
 
-    // Check consciousness requirements based on target state
-    switch (TargetState)
+void UConsciousnessComponent::UpdateConsciousnessState(float DeltaTime)
+{
+    StateTransitionTimer += DeltaTime;
+    
+    // Natural consciousness fluctuation
+    float NoiseValue = FMath::Sin(StateTransitionTimer * 0.1f) * 0.5f + 0.5f;
+    
+    // Gradually evolve metrics based on current state
+    switch (CurrentState)
     {
         case EConsciousnessState::Ordinary:
-            return true; // Can always return to ordinary
-            
-        case EConsciousnessState::Meditative:
-            return ConsciousnessMetrics.Awareness >= 30.0f;
-            
-        case EConsciousnessState::Lucid:
-            return ConsciousnessMetrics.Awareness >= 50.0f && ConsciousnessMetrics.Clarity >= 40.0f;
-            
-        case EConsciousnessState::Transcendent:
-            return ConsciousnessMetrics.Awareness >= 70.0f && 
-                   ConsciousnessMetrics.Clarity >= 60.0f && 
-                   ConsciousnessMetrics.Wisdom >= 50.0f;
-                   
-        case EConsciousnessState::Unity:
-            return ConsciousnessMetrics.Awareness >= 85.0f && 
-                   ConsciousnessMetrics.Clarity >= 80.0f && 
-                   ConsciousnessMetrics.Compassion >= 75.0f &&
-                   ConsciousnessMetrics.Integration >= 70.0f;
-                   
-        case EConsciousnessState::Void:
-            return ConsciousnessMetrics.Awareness >= 90.0f && 
-                   ConsciousnessMetrics.Clarity >= 85.0f && 
-                   ConsciousnessMetrics.Wisdom >= 80.0f;
-    }
-
-    return false;
-}
-
-void UConsciousnessSystem::ShiftToRealityLayer(ERealityLayer NewLayer)
-{
-    if (NewLayer == CurrentRealityLayer)
-    {
-        return;
-    }
-
-    if (!CanAccessRealityLayer(NewLayer))
-    {
-        UE_LOG(LogTemp, Warning, TEXT("ConsciousnessSystem: Cannot access reality layer %d"), (int32)NewLayer);
-        return;
-    }
-
-    ERealityLayer OldLayer = CurrentRealityLayer;
-    CurrentRealityLayer = NewLayer;
-
-    UE_LOG(LogTemp, Log, TEXT("ConsciousnessSystem: Reality layer changed from %d to %d"), (int32)OldLayer, (int32)NewLayer);
-
-    OnRealityLayerChanged.Broadcast(OldLayer, NewLayer);
-}
-
-bool UConsciousnessSystem::CanAccessRealityLayer(ERealityLayer TargetLayer) const
-{
-    // Reality layer access based on consciousness state and metrics
-    switch (TargetLayer)
-    {
-        case ERealityLayer::Physical:
-            return true; // Always accessible
-            
-        case ERealityLayer::Emotional:
-            return ConsciousnessMetrics.Compassion >= 40.0f;
-            
-        case ERealityLayer::Mental:
-            return ConsciousnessMetrics.Clarity >= 50.0f;
-            
-        case ERealityLayer::Archetypal:
-            return CurrentConsciousnessState >= EConsciousnessState::Lucid && 
-                   ConsciousnessMetrics.Wisdom >= 60.0f;
-                   
-        case ERealityLayer::Causal:
-            return CurrentConsciousnessState >= EConsciousnessState::Transcendent && 
-                   ConsciousnessMetrics.Integration >= 70.0f;
-                   
-        case ERealityLayer::Absolute:
-            return CurrentConsciousnessState >= EConsciousnessState::Unity && 
-                   ConsciousnessMetrics.Awareness >= 85.0f;
-    }
-
-    return false;
-}
-
-void UConsciousnessSystem::UpdateConsciousnessMetric(const FString& MetricName, float Delta)
-{
-    FConsciousnessMetrics OldMetrics = ConsciousnessMetrics;
-    
-    if (MetricName == "Awareness")
-    {
-        ConsciousnessMetrics.Awareness = FMath::Clamp(ConsciousnessMetrics.Awareness + Delta, 0.0f, 100.0f);
-    }
-    else if (MetricName == "Clarity")
-    {
-        ConsciousnessMetrics.Clarity = FMath::Clamp(ConsciousnessMetrics.Clarity + Delta, 0.0f, 100.0f);
-    }
-    else if (MetricName == "Compassion")
-    {
-        ConsciousnessMetrics.Compassion = FMath::Clamp(ConsciousnessMetrics.Compassion + Delta, 0.0f, 100.0f);
-    }
-    else if (MetricName == "Wisdom")
-    {
-        ConsciousnessMetrics.Wisdom = FMath::Clamp(ConsciousnessMetrics.Wisdom + Delta, 0.0f, 100.0f);
-    }
-    else if (MetricName == "Integration")
-    {
-        ConsciousnessMetrics.Integration = FMath::Clamp(ConsciousnessMetrics.Integration + Delta, 0.0f, 100.0f);
-    }
-
-    OnConsciousnessMetricsUpdated.Broadcast(ConsciousnessMetrics);
-}
-
-void UConsciousnessSystem::SetConsciousnessMetrics(const FConsciousnessMetrics& NewMetrics)
-{
-    ConsciousnessMetrics = NewMetrics;
-    
-    // Clamp all values
-    ConsciousnessMetrics.Awareness = FMath::Clamp(ConsciousnessMetrics.Awareness, 0.0f, 100.0f);
-    ConsciousnessMetrics.Clarity = FMath::Clamp(ConsciousnessMetrics.Clarity, 0.0f, 100.0f);
-    ConsciousnessMetrics.Compassion = FMath::Clamp(ConsciousnessMetrics.Compassion, 0.0f, 100.0f);
-    ConsciousnessMetrics.Wisdom = FMath::Clamp(ConsciousnessMetrics.Wisdom, 0.0f, 100.0f);
-    ConsciousnessMetrics.Integration = FMath::Clamp(ConsciousnessMetrics.Integration, 0.0f, 100.0f);
-
-    OnConsciousnessMetricsUpdated.Broadcast(ConsciousnessMetrics);
-}
-
-void UConsciousnessSystem::LoadRealityShiftData(UDataTable* DataTable)
-{
-    RealityShiftDataTable = DataTable;
-    UE_LOG(LogTemp, Log, TEXT("ConsciousnessSystem: Loaded reality shift data table"));
-}
-
-void UConsciousnessSystem::UpdateConsciousnessMetrics(float DeltaTime)
-{
-    // Natural decay of metrics over time (simulates need for practice)
-    bool bMetricsChanged = false;
-    
-    if (ConsciousnessMetrics.Awareness > 50.0f)
-    {
-        ConsciousnessMetrics.Awareness = FMath::Max(50.0f, ConsciousnessMetrics.Awareness - MetricDecayRate * DeltaTime);
-        bMetricsChanged = true;
-    }
-    
-    if (ConsciousnessMetrics.Clarity > 50.0f)
-    {
-        ConsciousnessMetrics.Clarity = FMath::Max(50.0f, ConsciousnessMetrics.Clarity - MetricDecayRate * DeltaTime);
-        bMetricsChanged = true;
-    }
-    
-    if (ConsciousnessMetrics.Compassion > 50.0f)
-    {
-        ConsciousnessMetrics.Compassion = FMath::Max(50.0f, ConsciousnessMetrics.Compassion - MetricDecayRate * DeltaTime);
-        bMetricsChanged = true;
-    }
-    
-    if (ConsciousnessMetrics.Wisdom > 50.0f)
-    {
-        ConsciousnessMetrics.Wisdom = FMath::Max(50.0f, ConsciousnessMetrics.Wisdom - MetricDecayRate * DeltaTime);
-        bMetricsChanged = true;
-    }
-    
-    if (ConsciousnessMetrics.Integration > 50.0f)
-    {
-        ConsciousnessMetrics.Integration = FMath::Max(50.0f, ConsciousnessMetrics.Integration - MetricDecayRate * DeltaTime);
-        bMetricsChanged = true;
-    }
-
-    if (bMetricsChanged)
-    {
-        OnConsciousnessMetricsUpdated.Broadcast(ConsciousnessMetrics);
-    }
-
-    ProcessStateTransitions();
-}
-
-void UConsciousnessSystem::ProcessStateTransitions()
-{
-    // Auto-downgrade consciousness state if metrics fall below thresholds
-    switch (CurrentConsciousnessState)
-    {
-        case EConsciousnessState::Unity:
-            if (ConsciousnessMetrics.Awareness < 80.0f || ConsciousnessMetrics.Integration < 65.0f)
-            {
-                SetConsciousnessState(EConsciousnessState::Transcendent);
-            }
-            break;
-            
-        case EConsciousnessState::Transcendent:
-            if (ConsciousnessMetrics.Awareness < 65.0f || ConsciousnessMetrics.Wisdom < 45.0f)
-            {
-                SetConsciousnessState(EConsciousnessState::Lucid);
-            }
-            break;
-            
-        case EConsciousnessState::Lucid:
-            if (ConsciousnessMetrics.Awareness < 45.0f || ConsciousnessMetrics.Clarity < 35.0f)
-            {
-                SetConsciousnessState(EConsciousnessState::Meditative);
-            }
+            Metrics.Awareness = FMath::Clamp(Metrics.Awareness + (NoiseValue - 0.5f) * DeltaTime * 5.0f, 0.0f, 100.0f);
+            Metrics.Presence = FMath::Clamp(Metrics.Presence + (NoiseValue - 0.5f) * DeltaTime * 3.0f, 0.0f, 100.0f);
             break;
             
         case EConsciousnessState::Meditative:
-            if (ConsciousnessMetrics.Awareness < 25.0f)
+            MeditationDuration += DeltaTime;
+            Metrics.Awareness = FMath::Clamp(Metrics.Awareness + DeltaTime * 10.0f, 0.0f, 100.0f);
+            Metrics.Presence = FMath::Clamp(Metrics.Presence + DeltaTime * 15.0f, 0.0f, 100.0f);
+            Metrics.Coherence = FMath::Clamp(Metrics.Coherence + DeltaTime * 8.0f, 0.0f, 100.0f);
+            
+            // Possibility of transcendent breakthrough
+            if (MeditationDuration > 30.0f && Metrics.Awareness > 80.0f && Metrics.Presence > 80.0f)
             {
-                SetConsciousnessState(EConsciousnessState::Ordinary);
+                if (FMath::RandRange(0.0f, 1.0f) < 0.1f * DeltaTime)
+                {
+                    TriggerTranscendentExperience();
+                }
             }
             break;
+            
+        case EConsciousnessState::Flow:
+            Metrics.Awareness = FMath::Clamp(Metrics.Awareness + DeltaTime * 5.0f, 0.0f, 100.0f);
+            Metrics.Coherence = FMath::Clamp(Metrics.Coherence + DeltaTime * 12.0f, 0.0f, 100.0f);
+            break;
+            
+        case EConsciousnessState::Transcendent:
+            Metrics.Transcendence = FMath::Clamp(Metrics.Transcendence + DeltaTime * 20.0f, 0.0f, 100.0f);
+            Metrics.Unity = FMath::Clamp(Metrics.Unity + DeltaTime * 5.0f, 0.0f, 100.0f);
+            
+            // Transcendent state naturally fades
+            if (bInTranscendentExperience)
+            {
+                if (StateTransitionTimer > 60.0f) // 1 minute max
+                {
+                    CurrentState = EConsciousnessState::Meditative;
+                    bInTranscendentExperience = false;
+                    StateTransitionTimer = 0.0f;
+                }
+            }
+            break;
+            
+        case EConsciousnessState::Unity:
+            Metrics.Unity = FMath::Clamp(Metrics.Unity + DeltaTime * 10.0f, 0.0f, 100.0f);
+            Metrics.Transcendence = FMath::Clamp(Metrics.Transcendence + DeltaTime * 5.0f, 0.0f, 100.0f);
+            break;
+    }
+    
+    CalculateAwarenessLevel();
+    ProcessStateTransitions(DeltaTime);
+}
+
+void UConsciousnessComponent::TriggerTranscendentExperience()
+{
+    CurrentState = EConsciousnessState::Transcendent;
+    bInTranscendentExperience = true;
+    StateTransitionTimer = 0.0f;
+    
+    // Immediate boost to transcendence metrics
+    Metrics.Transcendence = FMath::Clamp(Metrics.Transcendence + 30.0f, 0.0f, 100.0f);
+    
+    UE_LOG(LogTemp, Warning, TEXT("Transcendent experience triggered!"));
+}
+
+void UConsciousnessComponent::EnterMeditativeState()
+{
+    CurrentState = EConsciousnessState::Meditative;
+    MeditationDuration = 0.0f;
+    StateTransitionTimer = 0.0f;
+}
+
+void UConsciousnessComponent::ExitMeditativeState()
+{
+    CurrentState = EConsciousnessState::Ordinary;
+    MeditationDuration = 0.0f;
+    StateTransitionTimer = 0.0f;
+}
+
+float UConsciousnessComponent::GetOverallConsciousnessLevel() const
+{
+    return (Metrics.Awareness + Metrics.Presence + Metrics.Coherence + Metrics.Transcendence + Metrics.Unity) / 5.0f;
+}
+
+void UConsciousnessComponent::CalculateAwarenessLevel()
+{
+    float OverallLevel = GetOverallConsciousnessLevel();
+    
+    if (OverallLevel < 20.0f)
+        AwarenessLevel = EAwarenessLevel::Unconscious;
+    else if (OverallLevel < 40.0f)
+        AwarenessLevel = EAwarenessLevel::Subconscious;
+    else if (OverallLevel < 60.0f)
+        AwarenessLevel = EAwarenessLevel::Conscious;
+    else if (OverallLevel < 80.0f)
+        AwarenessLevel = EAwarenessLevel::Superconscious;
+    else
+        AwarenessLevel = EAwarenessLevel::Cosmic;
+}
+
+void UConsciousnessComponent::ProcessStateTransitions(float DeltaTime)
+{
+    // Implement natural state transitions based on metrics
+    if (CurrentState == EConsciousnessState::Ordinary)
+    {
+        if (Metrics.Coherence > 70.0f && Metrics.Awareness > 60.0f)
+        {
+            CurrentState = EConsciousnessState::Flow;
+            StateTransitionTimer = 0.0f;
+        }
+    }
+    else if (CurrentState == EConsciousnessState::Flow)
+    {
+        if (Metrics.Coherence < 50.0f)
+        {
+            CurrentState = EConsciousnessState::Ordinary;
+            StateTransitionTimer = 0.0f;
+        }
+    }
+}
+
+// Game Mode Implementation
+AConsciousnessGameMode::AConsciousnessGameMode()
+{
+    GlobalConsciousnessField = 50.0f;
+    MaxPlayers = 8;
+}
+
+void AConsciousnessGameMode::BeginPlay()
+{
+    Super::BeginPlay();
+    
+    // Initialize global consciousness field
+    GlobalConsciousnessField = 50.0f;
+    
+    UE_LOG(LogTemp, Warning, TEXT("Consciousness Game Mode initialized"));
+}
+
+void AConsciousnessGameMode::UpdateGlobalField()
+{
+    // Calculate global field based on all players' consciousness levels
+    float TotalConsciousness = 0.0f;
+    int32 PlayerCount = 0;
+    
+    for (UConsciousnessComponent* Component : PlayerConsciousnessComponents)
+    {
+        if (Component && IsValid(Component))
+        {
+            TotalConsciousness += Component->GetOverallConsciousnessLevel();
+            PlayerCount++;
+        }
+    }
+    
+    if (PlayerCount > 0)
+    {
+        GlobalConsciousnessField = TotalConsciousness / PlayerCount;
+        
+        // Amplify collective consciousness effects
+        if (PlayerCount > 1)
+        {
+            float CollectiveBonus = FMath::Sqrt(PlayerCount) * 5.0f;
+            GlobalConsciousnessField = FMath::Clamp(GlobalConsciousnessField + CollectiveBonus, 0.0f, 100.0f);
+        }
+    }
+}
+
+void AConsciousnessGameMode::SynchronizePlayerStates()
+{
+    // Synchronize consciousness states between players for collective experiences
+    for (UConsciousnessComponent* Component : PlayerConsciousnessComponents)
+    {
+        if (Component && IsValid(Component))
+        {
+            // Apply global field influence
+            float FieldInfluence = (GlobalConsciousnessField - Component->GetOverallConsciousnessLevel()) * 0.1f;
+            Component->Metrics.Coherence = FMath::Clamp(Component->Metrics.Coherence + FieldInfluence, 0.0f, 100.0f);
+        }
     }
 }
