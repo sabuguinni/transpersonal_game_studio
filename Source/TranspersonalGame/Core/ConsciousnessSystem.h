@@ -1,28 +1,31 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/GameModeBase.h"
-#include "Engine/World.h"
-#include "Components/ActorComponent.h"
+#include "Engine/GameInstanceSubsystem.h"
+#include "GameplayTagContainer.h"
+#include "Engine/DataTable.h"
 #include "ConsciousnessSystem.generated.h"
 
 UENUM(BlueprintType)
 enum class EConsciousnessState : uint8
 {
     Ordinary        UMETA(DisplayName = "Ordinary Consciousness"),
-    Expanded        UMETA(DisplayName = "Expanded Awareness"),
+    Meditative      UMETA(DisplayName = "Meditative State"),
+    Lucid           UMETA(DisplayName = "Lucid Awareness"),
     Transcendent    UMETA(DisplayName = "Transcendent State"),
-    Unity           UMETA(DisplayName = "Unity Consciousness")
+    Unity           UMETA(DisplayName = "Unity Consciousness"),
+    Void            UMETA(DisplayName = "Void State")
 };
 
 UENUM(BlueprintType)
-enum class EAwarenessLevel : uint8
+enum class ERealityLayer : uint8
 {
-    Unconscious     UMETA(DisplayName = "Unconscious"),
-    Subconscious    UMETA(DisplayName = "Subconscious"),
-    Conscious       UMETA(DisplayName = "Conscious"),
-    Superconscious  UMETA(DisplayName = "Superconscious"),
-    Cosmic          UMETA(DisplayName = "Cosmic Consciousness")
+    Physical        UMETA(DisplayName = "Physical Reality"),
+    Emotional       UMETA(DisplayName = "Emotional Layer"),
+    Mental          UMETA(DisplayName = "Mental Constructs"),
+    Archetypal      UMETA(DisplayName = "Archetypal Realm"),
+    Causal          UMETA(DisplayName = "Causal Dimension"),
+    Absolute        UMETA(DisplayName = "Absolute Reality")
 };
 
 USTRUCT(BlueprintType)
@@ -31,88 +34,144 @@ struct TRANSPERSONALGAME_API FConsciousnessMetrics
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Consciousness")
-    float AwarenessLevel = 0.0f;
+    float Awareness = 50.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Consciousness")
-    float IntegrationLevel = 0.0f;
+    float Clarity = 50.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Consciousness")
-    float TranscendenceProgress = 0.0f;
+    float Compassion = 50.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Consciousness")
-    float UnityConnection = 0.0f;
+    float Wisdom = 50.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Consciousness")
-    EConsciousnessState CurrentState = EConsciousnessState::Ordinary;
+    float Integration = 50.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Consciousness")
-    EAwarenessLevel CurrentAwareness = EAwarenessLevel::Conscious;
+    FConsciousnessMetrics()
+    {
+        Awareness = 50.0f;
+        Clarity = 50.0f;
+        Compassion = 50.0f;
+        Wisdom = 50.0f;
+        Integration = 50.0f;
+    }
 };
 
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UConsciousnessComponent : public UActorComponent
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FRealityShiftData : public FTableRowBase
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reality Shift")
+    ERealityLayer SourceLayer;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reality Shift")
+    ERealityLayer TargetLayer;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reality Shift")
+    float RequiredAwareness = 60.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reality Shift")
+    float TransitionDuration = 3.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reality Shift")
+    FGameplayTagContainer RequiredTags;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reality Shift")
+    TSoftObjectPtr<class UMaterialInterface> LayerMaterial;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reality Shift")
+    TSoftObjectPtr<class USoundBase> TransitionSound;
+};
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnConsciousnessStateChanged, EConsciousnessState, OldState, EConsciousnessState, NewState);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnRealityLayerChanged, ERealityLayer, OldLayer, ERealityLayer, NewLayer);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnConsciousnessMetricsUpdated, const FConsciousnessMetrics&, NewMetrics);
+
+/**
+ * Core consciousness simulation system for transpersonal experiences
+ * Manages consciousness states, reality layers, and awareness metrics
+ */
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UConsciousnessSystem : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
-    UConsciousnessComponent();
+    UConsciousnessSystem();
+
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+
+    // Consciousness State Management
+    UFUNCTION(BlueprintCallable, Category = "Consciousness")
+    void SetConsciousnessState(EConsciousnessState NewState);
+
+    UFUNCTION(BlueprintPure, Category = "Consciousness")
+    EConsciousnessState GetCurrentConsciousnessState() const { return CurrentConsciousnessState; }
+
+    UFUNCTION(BlueprintCallable, Category = "Consciousness")
+    bool CanTransitionToState(EConsciousnessState TargetState) const;
+
+    // Reality Layer Management
+    UFUNCTION(BlueprintCallable, Category = "Reality")
+    void ShiftToRealityLayer(ERealityLayer NewLayer);
+
+    UFUNCTION(BlueprintPure, Category = "Reality")
+    ERealityLayer GetCurrentRealityLayer() const { return CurrentRealityLayer; }
+
+    UFUNCTION(BlueprintCallable, Category = "Reality")
+    bool CanAccessRealityLayer(ERealityLayer TargetLayer) const;
+
+    // Consciousness Metrics
+    UFUNCTION(BlueprintCallable, Category = "Consciousness")
+    void UpdateConsciousnessMetric(const FString& MetricName, float Delta);
+
+    UFUNCTION(BlueprintPure, Category = "Consciousness")
+    FConsciousnessMetrics GetConsciousnessMetrics() const { return ConsciousnessMetrics; }
+
+    UFUNCTION(BlueprintCallable, Category = "Consciousness")
+    void SetConsciousnessMetrics(const FConsciousnessMetrics& NewMetrics);
+
+    // Events
+    UPROPERTY(BlueprintAssignable, Category = "Events")
+    FOnConsciousnessStateChanged OnConsciousnessStateChanged;
+
+    UPROPERTY(BlueprintAssignable, Category = "Events")
+    FOnRealityLayerChanged OnRealityLayerChanged;
+
+    UPROPERTY(BlueprintAssignable, Category = "Events")
+    FOnConsciousnessMetricsUpdated OnConsciousnessMetricsUpdated;
+
+    // Configuration
+    UFUNCTION(BlueprintCallable, Category = "Configuration")
+    void LoadRealityShiftData(UDataTable* DataTable);
 
 protected:
-    virtual void BeginPlay() override;
+    UPROPERTY(BlueprintReadOnly, Category = "State")
+    EConsciousnessState CurrentConsciousnessState;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Consciousness")
-    FConsciousnessMetrics ConsciousnessData;
+    UPROPERTY(BlueprintReadOnly, Category = "State")
+    ERealityLayer CurrentRealityLayer;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Consciousness")
-    float StateTransitionThreshold = 75.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
+    FConsciousnessMetrics ConsciousnessMetrics;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Consciousness")
-    float AwarenessGrowthRate = 1.0f;
+    UPROPERTY(EditDefaultsOnly, Category = "Configuration")
+    TObjectPtr<UDataTable> RealityShiftDataTable;
 
-public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    UPROPERTY(EditDefaultsOnly, Category = "Configuration")
+    float MetricDecayRate = 0.1f;
 
-    UFUNCTION(BlueprintCallable, Category = "Consciousness")
-    void ModifyAwareness(float Delta);
+    UPROPERTY(EditDefaultsOnly, Category = "Configuration")
+    float StateTransitionCooldown = 2.0f;
 
-    UFUNCTION(BlueprintCallable, Category = "Consciousness")
-    void TriggerConsciousnessShift(EConsciousnessState NewState);
-
-    UFUNCTION(BlueprintCallable, Category = "Consciousness")
-    FConsciousnessMetrics GetConsciousnessMetrics() const { return ConsciousnessData; }
-
-    UFUNCTION(BlueprintCallable, Category = "Consciousness")
-    bool CanTranscend() const;
-
-    UFUNCTION(BlueprintImplementableEvent, Category = "Consciousness")
-    void OnConsciousnessStateChanged(EConsciousnessState OldState, EConsciousnessState NewState);
-
-    UFUNCTION(BlueprintImplementableEvent, Category = "Consciousness")
-    void OnAwarenessLevelChanged(EAwarenessLevel OldLevel, EAwarenessLevel NewLevel);
-};
-
-UCLASS()
-class TRANSPERSONALGAME_API AConsciousnessGameMode : public AGameModeBase
-{
-    GENERATED_BODY()
-
-public:
-    AConsciousnessGameMode();
-
-protected:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Game Systems")
-    float GlobalConsciousnessField = 50.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Game Systems")
-    TArray<AActor*> ConsciousEntities;
-
-public:
-    UFUNCTION(BlueprintCallable, Category = "Consciousness")
-    void RegisterConsciousEntity(AActor* Entity);
-
-    UFUNCTION(BlueprintCallable, Category = "Consciousness")
-    void UpdateGlobalField();
-
-    UFUNCTION(BlueprintCallable, Category = "Consciousness")
-    float GetGlobalConsciousnessLevel() const { return GlobalConsciousnessField; }
+private:
+    void UpdateConsciousnessMetrics(float DeltaTime);
+    void ProcessStateTransitions();
+    
+    FTimerHandle MetricsUpdateTimer;
+    float LastStateTransitionTime;
 };
