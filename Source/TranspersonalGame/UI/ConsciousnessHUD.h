@@ -1,174 +1,88 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/HUD.h"
-#include "Core/ConsciousnessSystem.h"
+#include "Blueprint/UserWidget.h"
+#include "Components/ProgressBar.h"
+#include "Components/TextBlock.h"
+#include "Components/Image.h"
+#include "Components/CanvasPanel.h"
+#include "TranspersonalGame/Core/ConsciousnessComponent.h"
 #include "ConsciousnessHUD.generated.h"
 
-class UUserWidget;
-class UConsciousnessWidget;
-
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FHUDConfiguration
+struct FConsciousnessVisualTheme
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Display")
-    bool bShowConsciousnessMetrics = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Visual Theme")
+    EConsciousnessState ConsciousnessState = EConsciousnessState::Ordinary;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Display")
-    bool bShowCurrentState = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Visual Theme")
+    FLinearColor PrimaryColor = FLinearColor::White;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Display")
-    bool bShowRealityLayer = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Visual Theme")
+    FLinearColor SecondaryColor = FLinearColor::Gray;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Display")
-    bool bShowMeditationTimer = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Visual Theme")
+    FLinearColor BackgroundColor = FLinearColor::Black;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Display")
-    float HUDOpacity = 0.8f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Visual Theme")
+    float PulseSpeed = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Display")
-    bool bMinimalMode = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Visual Theme")
+    float GeometryComplexity = 0.5f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
-    float TransitionDuration = 0.5f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
-    bool bUseBreathingAnimation = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Visual Theme")
+    bool bEnableParticleEffects = false;
 };
 
-/**
- * HUD system for displaying consciousness-related information
- * Provides visual feedback for meditation, awareness levels, and reality states
- */
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AConsciousnessHUD : public AHUD
+UCLASS()
+class TRANSPERSONALGAME_API UConsciousnessHUD : public UUserWidget
 {
     GENERATED_BODY()
 
 public:
-    AConsciousnessHUD();
+    virtual void NativeConstruct() override;
+    virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
+
+    // UI Update Functions
+    UFUNCTION(BlueprintCallable, Category = "Consciousness HUD")
+    void UpdateConsciousnessDisplay(EConsciousnessState State, float Intensity);
+
+    UFUNCTION(BlueprintCallable, Category = "Consciousness HUD")
+    void SetVisualizationMode(bool bEnableAdvancedVisuals);
+
+    UFUNCTION(BlueprintImplementableEvent, Category = "Consciousness HUD")
+    void OnConsciousnessStateChanged(EConsciousnessState NewState, float Intensity);
+
+    UFUNCTION(BlueprintImplementableEvent, Category = "Consciousness HUD")
+    void TriggerTranspersonalVisualEffect(EConsciousnessState State);
 
 protected:
-    virtual void BeginPlay() override;
-    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+    // UI Components
+    UPROPERTY(meta = (BindWidget))
+    TObjectPtr<UProgressBar> ConsciousnessIntensityBar;
 
-public:
-    virtual void DrawHUD() override;
-    virtual void Tick(float DeltaTime) override;
+    UPROPERTY(meta = (BindWidget))
+    TObjectPtr<UTextBlock> ConsciousnessStateText;
 
-    // Widget Management
-    UFUNCTION(BlueprintCallable, Category = "UI")
-    void CreateConsciousnessWidget();
+    UPROPERTY(meta = (BindWidget))
+    TObjectPtr<UImage> ConsciousnessVisualization;
 
-    UFUNCTION(BlueprintCallable, Category = "UI")
-    void ShowConsciousnessWidget();
+    UPROPERTY(meta = (BindWidget))
+    TObjectPtr<UCanvasPanel> GeometricOverlay;
 
-    UFUNCTION(BlueprintCallable, Category = "UI")
-    void HideConsciousnessWidget();
+    // Visual Themes
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Visual Themes")
+    TMap<EConsciousnessState, FConsciousnessVisualTheme> VisualThemes;
 
-    UFUNCTION(BlueprintCallable, Category = "UI")
-    void ToggleConsciousnessWidget();
+    // Current state
+    EConsciousnessState CurrentDisplayState = EConsciousnessState::Ordinary;
+    float CurrentDisplayIntensity = 0.0f;
+    float PulseTimer = 0.0f;
 
-    // Configuration
-    UFUNCTION(BlueprintCallable, Category = "Configuration")
-    void SetHUDConfiguration(const FHUDConfiguration& NewConfig);
-
-    UFUNCTION(BlueprintPure, Category = "Configuration")
-    FHUDConfiguration GetHUDConfiguration() const { return HUDConfig; }
-
-    // Display Methods
-    UFUNCTION(BlueprintCallable, Category = "Display")
-    void ShowMeditationGuidance(bool bShow);
-
-    UFUNCTION(BlueprintCallable, Category = "Display")
-    void ShowStateTransitionFeedback(EConsciousnessState NewState);
-
-    UFUNCTION(BlueprintCallable, Category = "Display")
-    void ShowRealityShiftFeedback(ERealityLayer NewLayer);
-
-    // Breathing Visualization
-    UFUNCTION(BlueprintCallable, Category = "Meditation")
-    void StartBreathingVisualization();
-
-    UFUNCTION(BlueprintCallable, Category = "Meditation")
-    void StopBreathingVisualization();
-
-    UFUNCTION(BlueprintPure, Category = "Meditation")
-    bool IsShowingBreathingVisualization() const { return bShowingBreathingVisualization; }
-
-protected:
-    // Widget Classes
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "UI")
-    TSubclassOf<UUserWidget> ConsciousnessWidgetClass;
-
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "UI")
-    TSubclassOf<UUserWidget> MeditationGuidanceWidgetClass;
-
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "UI")
-    TSubclassOf<UUserWidget> BreathingVisualizationWidgetClass;
-
-    // Configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    FHUDConfiguration HUDConfig;
-
-    // State
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    bool bConsciousnessWidgetVisible = true;
-
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    bool bShowingBreathingVisualization = false;
-
-private:
-    // Widget Instances
-    UPROPERTY()
-    TObjectPtr<UUserWidget> ConsciousnessWidget;
-
-    UPROPERTY()
-    TObjectPtr<UUserWidget> MeditationGuidanceWidget;
-
-    UPROPERTY()
-    TObjectPtr<UUserWidget> BreathingVisualizationWidget;
-
-    // Consciousness System Reference
-    UPROPERTY()
-    TObjectPtr<UConsciousnessSystem> ConsciousnessSystem;
-
-    // Event Handlers
-    UFUNCTION()
-    void OnConsciousnessStateChanged(EConsciousnessState OldState, EConsciousnessState NewState);
-
-    UFUNCTION()
-    void OnRealityLayerChanged(ERealityLayer OldLayer, ERealityLayer NewLayer);
-
-    UFUNCTION()
-    void OnConsciousnessMetricsUpdated(const FConsciousnessMetrics& NewMetrics);
-
-    // Drawing Methods
-    void DrawConsciousnessMetrics();
-    void DrawCurrentState();
-    void DrawRealityLayer();
-    void DrawMeditationTimer();
-    void DrawBreathingGuide();
-
-    // Utility
-    FString GetConsciousnessStateDisplayName(EConsciousnessState State) const;
-    FString GetRealityLayerDisplayName(ERealityLayer Layer) const;
-    FLinearColor GetStateColor(EConsciousnessState State) const;
-    FLinearColor GetLayerColor(ERealityLayer Layer) const;
-
-    // Animation
-    void UpdateBreathingAnimation(float DeltaTime);
-    float BreathingAnimationTime = 0.0f;
-    float BreathingCycleDuration = 8.0f;
-
-    // Feedback Timers
-    FTimerHandle StateTransitionFeedbackTimer;
-    FTimerHandle LayerShiftFeedbackTimer;
-    
-    bool bShowingStateTransition = false;
-    bool bShowingLayerShift = false;
-    EConsciousnessState FeedbackState;
-    ERealityLayer FeedbackLayer;
+    void InitializeVisualThemes();
+    void ApplyVisualTheme(const FConsciousnessVisualTheme& Theme, float IntensityModifier);
+    void UpdateGeometricVisualization(EConsciousnessState State, float Intensity, float DeltaTime);
+    FLinearColor GetInterpolatedColor(const FConsciousnessVisualTheme& Theme, float Intensity);
 };
