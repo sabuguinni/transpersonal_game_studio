@@ -5,49 +5,42 @@ public class TranspersonalGame : ModuleRules
     public TranspersonalGame(ReadOnlyTargetRules Target) : base(Target)
     {
         PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
-
-        PublicDependencyModuleNames.AddRange(new string[] 
-        { 
+    
+        PublicDependencyModuleNames.AddRange(new string[] { 
             "Core", 
             "CoreUObject", 
             "Engine", 
             "InputCore",
-            "EnhancedInput",
             "UMG",
             "Slate",
             "SlateCore",
-            "NavigationSystem",
-            "AIModule",
-            "GameplayTasks",
+            "EnhancedInput",
             "GameplayTags",
-            "GameplayAbilities",
+            "GameplayTasks",
+            "AIModule",
+            "NavigationSystem",
             "Niagara",
-            "ProceduralMeshComponent",
-            "Landscape",
-            "Foliage"
+            "AudioMixer",
+            "MetasoundEngine"
         });
 
-        PrivateDependencyModuleNames.AddRange(new string[] 
-        { 
-            "Slate", 
-            "SlateCore",
-            "ToolMenus",
-            "EditorStyle",
-            "EditorWidgets",
-            "UnrealEd",
-            "PropertyEditor",
-            "Kismet",
-            "KismetCompiler",
-            "BlueprintGraph",
-            "AnimGraph"
+        PrivateDependencyModuleNames.AddRange(new string[] { 
+            "GameplayAbilities",
+            "GameplayMessageRuntime",
+            "StructUtils",
+            "TypedElementFramework",
+            "CommonUI",
+            "CommonInput",
+            "CommonGame"
         });
 
-        // Enable C++17 features for advanced consciousness simulation
-        CppStandard = CppStandardVersion.Cpp17;
-        
-        // Optimization for procedural generation
-        bUseUnity = true;
-        MinFilesUsingPrecompiledHeaderOverride = 1;
-        bFasterWithoutUnity = false;
+        // Consciousness and Transpersonal Systems
+        PublicIncludePaths.AddRange(new string[] {
+            "TranspersonalGame/Core",
+            "TranspersonalGame/Consciousness",
+            "TranspersonalGame/Narrative",
+            "TranspersonalGame/Audio",
+            "TranspersonalGame/UI"
+        });
     }
 }
