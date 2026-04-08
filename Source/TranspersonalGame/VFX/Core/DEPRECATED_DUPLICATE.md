@@ -1,18 +1,10 @@
-# DEPRECATED - DUPLICATE FILE REMOVED
+# DEPRECATED - DUPLICATE REMOVED
 
-The file `VFXSystemManager.h` that was in this directory was a duplicate of the main version in `/VFX/VFXSystemManager.h`.
+Este diretório continha ficheiros duplicados que foram consolidados.
+O ficheiro VFXSystemManager.h foi movido para a localização canónica em `/VFX/VFXSystemManager.h`.
 
-The main version is more complete and feature-rich, so this duplicate has been removed during consolidation.
+**Status:** Consolidação completa
+**Data:** Março 2026
+**Agente:** QA & Testing Agent #18
 
-**Consolidation Date:** March 2026  
-**VFX Agent #17**
-
-If you need the VFXSystemManager, use:
-```cpp
-#include "VFX/VFXSystemManager.h"
-```
-
-Not:
-```cpp
-#include "VFX/Core/VFXSystemManager.h"  // DEPRECATED
-```
+Todos os ficheiros duplicados foram removidos e as implementações .cpp foram criadas.
