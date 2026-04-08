@@ -2,20 +2,145 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "DinosaurBehaviorTypes.h"
 #include "Engine/DataTable.h"
-#include "GameplayTagContainer.h"
+#include "BehaviorTree/BehaviorTreeComponent.h"
 #include "DinosaurBehaviorComponent.generated.h"
 
-class UBehaviorTreeComponent;
-class UBlackboardComponent;
-class UBehaviorTree;
+UENUM(BlueprintType)
+enum class EDinosaurPersonality : uint8
+{
+    Aggressive      UMETA(DisplayName = "Aggressive"),
+    Cautious        UMETA(DisplayName = "Cautious"),
+    Curious         UMETA(DisplayName = "Curious"),
+    Territorial     UMETA(DisplayName = "Territorial"),
+    Social          UMETA(DisplayName = "Social"),
+    Solitary        UMETA(DisplayName = "Solitary"),
+    Protective      UMETA(DisplayName = "Protective"),
+    Playful         UMETA(DisplayName = "Playful")
+};
 
-/**
- * Core component that manages dinosaur behavior, needs, memory, and daily routines
- * Each dinosaur has its own independent life cycle and decision-making process
- */
-UCLASS(ClassGroup=(AI), meta=(BlueprintSpawnableComponent))
+UENUM(BlueprintType)
+enum class EDinosaurState : uint8
+{
+    Idle            UMETA(DisplayName = "Idle"),
+    Foraging        UMETA(DisplayName = "Foraging"),
+    Drinking        UMETA(DisplayName = "Drinking"),
+    Resting         UMETA(DisplayName = "Resting"),
+    Socializing     UMETA(DisplayName = "Socializing"),
+    Patrolling      UMETA(DisplayName = "Patrolling"),
+    Hunting         UMETA(DisplayName = "Hunting"),
+    Fleeing         UMETA(DisplayName = "Fleeing"),
+    Investigating   UMETA(DisplayName = "Investigating"),
+    Sleeping        UMETA(DisplayName = "Sleeping")
+};
+
+UENUM(BlueprintType)
+enum class EDomesticationLevel : uint8
+{
+    Wild            UMETA(DisplayName = "Wild"),
+    Wary            UMETA(DisplayName = "Wary"),
+    Neutral         UMETA(DisplayName = "Neutral"),
+    Curious         UMETA(DisplayName = "Curious"),
+    Friendly        UMETA(DisplayName = "Friendly"),
+    Bonded          UMETA(DisplayName = "Bonded"),
+    Domesticated    UMETA(DisplayName = "Domesticated")
+};
+
+USTRUCT(BlueprintType)
+struct FDinosaurMemoryEntry
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    AActor* Actor;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FVector LastKnownLocation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float ThreatLevel;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float FamiliaryLevel;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float LastSeenTime;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsPlayer;
+
+    FDinosaurMemoryEntry()
+    {
+        Actor = nullptr;
+        LastKnownLocation = FVector::ZeroVector;
+        ThreatLevel = 0.0f;
+        FamiliaryLevel = 0.0f;
+        LastSeenTime = 0.0f;
+        bIsPlayer = false;
+    }
+};
+
+USTRUCT(BlueprintType)
+struct FDinosaurNeeds
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "100.0"))
+    float Hunger;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "100.0"))
+    float Thirst;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "100.0"))
+    float Energy;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "100.0"))
+    float Social;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "100.0"))
+    float Safety;
+
+    FDinosaurNeeds()
+    {
+        Hunger = 50.0f;
+        Thirst = 50.0f;
+        Energy = 100.0f;
+        Social = 50.0f;
+        Safety = 100.0f;
+    }
+};
+
+USTRUCT(BlueprintType)
+struct FDailyRoutine
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float StartTime; // 0.0 = midnight, 12.0 = noon, 24.0 = next midnight
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float EndTime;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    EDinosaurState Activity;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FVector PreferredLocation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float Priority;
+
+    FDailyRoutine()
+    {
+        StartTime = 0.0f;
+        EndTime = 24.0f;
+        Activity = EDinosaurState::Idle;
+        PreferredLocation = FVector::ZeroVector;
+        Priority = 1.0f;
+    }
+};
+
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UDinosaurBehaviorComponent : public UActorComponent
 {
     GENERATED_BODY()
@@ -25,271 +150,108 @@ public:
 
 protected:
     virtual void BeginPlay() override;
+
+public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-public:
-    // Core Properties
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Species")
-    EDinosaurSpecies Species = EDinosaurSpecies::Compsognathus;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Species")
-    TSoftObjectPtr<UDataTable> SpeciesDataTable;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality")
-    EDinosaurPersonality PrimaryPersonality = EDinosaurPersonality::Curious;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality")
-    EDinosaurPersonality SecondaryPersonality = EDinosaurPersonality::Timid;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical")
-    FDinosaurPhysicalTraits PhysicalTraits;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    EDinosaurBehaviorState CurrentBehaviorState = EDinosaurBehaviorState::Idle;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Needs")
-    FDinosaurNeeds CurrentNeeds;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
-    FDinosaurMemory Memory;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Domestication")
-    EDomesticationStage DomesticationStage = EDomesticationStage::Wild;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Domestication")
-    float DomesticationProgress = 0.0f;
-
-    // Unique Identity
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Identity")
+    // === CORE PROPERTIES ===
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Identity")
     FString DinosaurName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Identity")
-    int32 UniqueID = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Identity")
+    EDinosaurPersonality PrimaryPersonality;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Identity")
-    float Age = 1.0f; // In years
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Identity")
+    EDinosaurPersonality SecondaryPersonality;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Identity")
-    bool bIsMale = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Identity")
+    float PersonalityStrength; // 0.0 = balanced, 1.0 = extreme
 
-    // Behavior Tree Integration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI")
-    TSoftObjectPtr<UBehaviorTree> BehaviorTreeAsset;
+    // === CURRENT STATE ===
+    UPROPERTY(BlueprintReadOnly, Category = "Current State")
+    EDinosaurState CurrentState;
 
-    // Daily Routine
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Routine")
-    bool bFollowsDailyRoutine = true;
+    UPROPERTY(BlueprintReadOnly, Category = "Current State")
+    EDomesticationLevel DomesticationLevel;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Routine")
-    float CurrentGameTimeHour = 6.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Current State")
+    FDinosaurNeeds CurrentNeeds;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Routine")
-    float LastRoutineUpdateTime = 0.0f;
+    // === MEMORY SYSTEM ===
+    UPROPERTY(BlueprintReadOnly, Category = "Memory")
+    TArray<FDinosaurMemoryEntry> MemoryEntries;
 
-    // Social Behavior
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Social")
-    TArray<TWeakObjectPtr<UDinosaurBehaviorComponent>> PackMembers;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
+    float MemoryDuration; // How long memories last in seconds
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Social")
-    TWeakObjectPtr<UDinosaurBehaviorComponent> PackLeader;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
+    int32 MaxMemoryEntries;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Social")
-    bool bIsPackLeader = false;
+    // === DAILY ROUTINES ===
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Daily Routine")
+    TArray<FDailyRoutine> DailyRoutines;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Social")
-    float SocialInteractionCooldown = 0.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Daily Routine")
+    FDailyRoutine CurrentRoutine;
 
-    // Territory
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory")
-    FVector TerritoryCenter;
+    // === DOMESTICATION ===
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Domestication")
+    bool bCanBeDomesticated;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory")
-    float TerritoryRadius = 2000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Domestication")
+    float DomesticationProgress; // 0.0 to 100.0
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory")
-    bool bHasTerritory = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Domestication")
+    float DomesticationDecayRate; // How fast progress decays without interaction
 
-    // Player Interaction
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player Interaction")
-    float PlayerDetectionRange = 1500.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Domestication")
+    AActor* BondedPlayer;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player Interaction")
-    float PlayerTrustLevel = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player Interaction")
-    float LastPlayerInteractionTime = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player Interaction")
-    bool bCanSeePlayer = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player Interaction")
-    TWeakObjectPtr<APawn> LastKnownPlayerLocation;
-
-public:
-    // Core Behavior Functions
-    UFUNCTION(BlueprintCallable, Category = "Behavior")
-    void SetBehaviorState(EDinosaurBehaviorState NewState);
-
-    UFUNCTION(BlueprintPure, Category = "Behavior")
-    EDinosaurBehaviorState GetBehaviorState() const { return CurrentBehaviorState; }
-
-    UFUNCTION(BlueprintCallable, Category = "Behavior")
-    bool CanTransitionToBehaviorState(EDinosaurBehaviorState TargetState) const;
-
-    // Needs Management
-    UFUNCTION(BlueprintCallable, Category = "Needs")
+    // === BEHAVIOR FUNCTIONS ===
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur Behavior")
     void UpdateNeeds(float DeltaTime);
 
-    UFUNCTION(BlueprintCallable, Category = "Needs")
-    void SatisfyNeed(const FString& NeedType, float Amount);
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur Behavior")
+    void UpdateMemory(float DeltaTime);
 
-    UFUNCTION(BlueprintPure, Category = "Needs")
-    float GetMostUrgentNeedValue() const;
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur Behavior")
+    void UpdateDailyRoutine();
 
-    UFUNCTION(BlueprintPure, Category = "Needs")
-    FString GetMostUrgentNeedType() const;
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur Behavior")
+    void AddMemoryEntry(AActor* Actor, float ThreatLevel, float FamiliarityLevel);
 
-    // Memory Functions
-    UFUNCTION(BlueprintCallable, Category = "Memory")
-    void RememberLocation(FVector Location, const FString& LocationType);
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur Behavior")
+    FDinosaurMemoryEntry* GetMemoryEntry(AActor* Actor);
 
-    UFUNCTION(BlueprintCallable, Category = "Memory")
-    void RememberEntity(AActor* Entity, const FString& EntityType);
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur Behavior")
+    void InteractWithPlayer(AActor* Player, float InteractionStrength);
 
-    UFUNCTION(BlueprintCallable, Category = "Memory")
-    FVector GetNearestRememberedLocation(const FString& LocationType) const;
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur Behavior")
+    bool ShouldFleeFrom(AActor* Threat);
 
-    UFUNCTION(BlueprintCallable, Category = "Memory")
-    void ForgetOldMemories(float MaxAge = 3600.0f); // 1 hour default
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur Behavior")
+    bool ShouldInvestigate(AActor* Target);
 
-    // Player Interaction
-    UFUNCTION(BlueprintCallable, Category = "Player Interaction")
-    void RegisterPlayerInteraction(bool bPositive, float Intensity = 1.0f);
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur Behavior")
+    FVector GetPreferredLocation();
 
-    UFUNCTION(BlueprintCallable, Category = "Player Interaction")
-    void UpdatePlayerTrust(float TrustChange);
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur Behavior")
+    void SetCurrentState(EDinosaurState NewState);
 
-    UFUNCTION(BlueprintPure, Category = "Player Interaction")
-    bool CanPlayerApproach() const;
+    // === BLACKBOARD INTEGRATION ===
+    UFUNCTION(BlueprintCallable, Category = "AI Integration")
+    void UpdateBlackboard();
 
-    UFUNCTION(BlueprintPure, Category = "Player Interaction")
-    float GetPlayerTrustLevel() const { return PlayerTrustLevel; }
-
-    // Domestication
-    UFUNCTION(BlueprintCallable, Category = "Domestication")
-    void AdvanceDomestication(float Amount);
-
-    UFUNCTION(BlueprintCallable, Category = "Domestication")
-    void RegressDomestication(float Amount);
-
-    UFUNCTION(BlueprintPure, Category = "Domestication")
-    bool CanBeDomesticated() const;
-
-    UFUNCTION(BlueprintPure, Category = "Domestication")
-    float GetDomesticationTimeRequired() const;
-
-    // Social Behavior
-    UFUNCTION(BlueprintCallable, Category = "Social")
-    void JoinPack(UDinosaurBehaviorComponent* NewPackMember);
-
-    UFUNCTION(BlueprintCallable, Category = "Social")
-    void LeavePack();
-
-    UFUNCTION(BlueprintCallable, Category = "Social")
-    void SetPackLeader(UDinosaurBehaviorComponent* NewLeader);
-
-    UFUNCTION(BlueprintPure, Category = "Social")
-    bool IsInPack() const;
-
-    UFUNCTION(BlueprintPure, Category = "Social")
-    int32 GetPackSize() const;
-
-    // Daily Routine
-    UFUNCTION(BlueprintCallable, Category = "Routine")
-    void UpdateDailyRoutine(float CurrentTime);
-
-    UFUNCTION(BlueprintPure, Category = "Routine")
-    EDinosaurBehaviorState GetPreferredBehaviorForTime(float TimeOfDay) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Routine")
-    void SetCustomRoutine(const TArray<EDinosaurBehaviorState>& CustomStates, const TArray<float>& CustomTimes);
-
-    // Territory
-    UFUNCTION(BlueprintCallable, Category = "Territory")
-    void EstablishTerritory(FVector Center, float Radius);
-
-    UFUNCTION(BlueprintPure, Category = "Territory")
-    bool IsInTerritory(FVector Location) const;
-
-    UFUNCTION(BlueprintPure, Category = "Territory")
-    bool IsLocationInTerritory(FVector Location) const;
-
-    // Species Data
-    UFUNCTION(BlueprintPure, Category = "Species")
-    FDinosaurSpeciesData GetSpeciesData() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Species")
-    void InitializeFromSpeciesData();
-
-    // Utility Functions
-    UFUNCTION(BlueprintPure, Category = "Utility")
-    FString GetDinosaurDisplayName() const;
-
-    UFUNCTION(BlueprintPure, Category = "Utility")
-    FString GetBehaviorStateDisplayName() const;
-
-    UFUNCTION(BlueprintPure, Category = "Utility")
-    FLinearColor GetDinosaurPrimaryColor() const { return PhysicalTraits.PrimaryColor; }
-
-    UFUNCTION(BlueprintCallable, Category = "Utility")
-    void GenerateRandomPhysicalTraits();
-
-    UFUNCTION(BlueprintCallable, Category = "Utility")
-    void GenerateRandomPersonality();
-
-    // Debug Functions
-    UFUNCTION(BlueprintCallable, Category = "Debug", CallInEditor = true)
-    void DebugPrintBehaviorInfo() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Debug")
-    void DrawDebugInfo(float Duration = 5.0f) const;
-
-protected:
-    // Internal update functions
-    void UpdateNeedsDecay(float DeltaTime);
-    void UpdateBehaviorStateLogic(float DeltaTime);
-    void UpdatePlayerDetection();
-    void UpdateSocialBehavior();
-    void ProcessEnvironmentalStimuli();
-
-    // Behavior state transition logic
-    bool ShouldTransitionToFeeding() const;
-    bool ShouldTransitionToDrinking() const;
-    bool ShouldTransitionToResting() const;
-    bool ShouldTransitionToSocializing() const;
-    bool ShouldTransitionToAlert() const;
-    bool ShouldTransitionToFleeing() const;
-
-    // Helper functions
-    float CalculateNeedUrgency(float NeedValue, float CriticalThreshold = 30.0f) const;
-    FVector FindNearestResourceLocation(const FString& ResourceType) const;
-    bool IsPlayerNearby() const;
-    bool IsPlayerThreatening() const;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI Integration")
+    class UBlackboardComponent* BlackboardComponent;
 
 private:
-    // Cached species data
-    UPROPERTY()
-    FDinosaurSpeciesData CachedSpeciesData;
-
-    // Internal timers
-    float NeedsUpdateTimer = 0.0f;
-    float MemoryCleanupTimer = 0.0f;
-    float BehaviorUpdateTimer = 0.0f;
-    float PlayerDetectionTimer = 0.0f;
-
-    // Update intervals
-    static constexpr float NEEDS_UPDATE_INTERVAL = 1.0f;
-    static constexpr float MEMORY_CLEANUP_INTERVAL = 60.0f;
-    static constexpr float BEHAVIOR_UPDATE_INTERVAL = 0.5f;
-    static constexpr float PLAYER_DETECTION_INTERVAL = 0.25f;
+    float LastNeedsUpdate;
+    float LastMemoryUpdate;
+    float LastRoutineUpdate;
+    
+    void InitializePersonality();
+    void InitializeDailyRoutines();
+    float GetCurrentTimeOfDay();
+    void DecayDomestication(float DeltaTime);
 };
