@@ -4,68 +4,68 @@
 #include "Engine/Engine.h"
 #include "Animation/AnimInstance.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "GameFramework/Character.h"
 #include "AnimationSystemCore.generated.h"
+
+DECLARE_LOG_CATEGORY_EXTERN(LogAnimationSystem, Log, All);
 
 /**
  * Core Animation System for Transpersonal Game
- * Handles Motion Matching, IK, and character expression systems
+ * Handles Motion Matching, IK, and character-specific animation logic
+ * Built around the principle: every movement tells a story
  */
 
 UENUM(BlueprintType)
 enum class ECharacterEmotionalState : uint8
 {
     Calm        UMETA(DisplayName = "Calm"),
-    Cautious    UMETA(DisplayName = "Cautious"),
-    Fearful     UMETA(DisplayName = "Fearful"),
+    Alert       UMETA(DisplayName = "Alert"), 
+    Afraid      UMETA(DisplayName = "Afraid"),
     Terrified   UMETA(DisplayName = "Terrified"),
-    Curious     UMETA(DisplayName = "Curious"),
-    Focused     UMETA(DisplayName = "Focused")
+    Exhausted   UMETA(DisplayName = "Exhausted"),
+    Injured     UMETA(DisplayName = "Injured")
 };
 
 UENUM(BlueprintType)
-enum class EMovementIntention : uint8
+enum class EMovementContext : uint8
 {
-    Idle        UMETA(DisplayName = "Idle"),
-    Walking     UMETA(DisplayName = "Walking"),
-    Sneaking    UMETA(DisplayName = "Sneaking"),
-    Running     UMETA(DisplayName = "Running"),
-    Crouching   UMETA(DisplayName = "Crouching"),
-    Climbing    UMETA(DisplayName = "Climbing"),
-    Gathering   UMETA(DisplayName = "Gathering"),
-    Crafting    UMETA(DisplayName = "Crafting")
+    Exploration     UMETA(DisplayName = "Exploration"),
+    Stealth         UMETA(DisplayName = "Stealth"),
+    Escape          UMETA(DisplayName = "Escape"),
+    Interaction     UMETA(DisplayName = "Interaction"),
+    Combat          UMETA(DisplayName = "Combat"),
+    Observation     UMETA(DisplayName = "Observation")
 };
 
 USTRUCT(BlueprintType)
-struct FCharacterAnimationState
+struct FCharacterAnimationProfile
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    ECharacterEmotionalState EmotionalState = ECharacterEmotionalState::Calm;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Profile")
+    FString CharacterName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EMovementIntention MovementIntention = EMovementIntention::Idle;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Profile")
+    float FearThreshold = 0.7f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float FearLevel = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Profile")
+    float ExhaustionRate = 0.1f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float StaminaLevel = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Profile")
+    float RecoveryRate = 0.05f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float GroundSlope = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Profile")
+    TMap<EMovementContext, float> ContextualSpeedModifiers;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FVector MovementDirection = FVector::ZeroVector;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float MovementSpeed = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bIsCarryingObject = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float ObjectWeight = 0.0f;
+    FCharacterAnimationProfile()
+    {
+        ContextualSpeedModifiers.Add(EMovementContext::Exploration, 1.0f);
+        ContextualSpeedModifiers.Add(EMovementContext::Stealth, 0.3f);
+        ContextualSpeedModifiers.Add(EMovementContext::Escape, 1.5f);
+        ContextualSpeedModifiers.Add(EMovementContext::Interaction, 0.8f);
+        ContextualSpeedModifiers.Add(EMovementContext::Combat, 1.2f);
+        ContextualSpeedModifiers.Add(EMovementContext::Observation, 0.1f);
+    }
 };
 
 UCLASS(BlueprintType, Blueprintable)
@@ -76,53 +76,35 @@ class TRANSPERSONALGAME_API UAnimationSystemCore : public UObject
 public:
     UAnimationSystemCore();
 
-    // Motion Matching Configuration
+    // Core system functions
+    UFUNCTION(BlueprintCallable, Category = "Animation System")
+    void InitializeForCharacter(class ACharacter* Character);
+
+    UFUNCTION(BlueprintCallable, Category = "Animation System")
+    void UpdateAnimationContext(EMovementContext NewContext, ECharacterEmotionalState EmotionalState);
+
+    UFUNCTION(BlueprintCallable, Category = "Animation System")
+    float CalculateBlendTime(EMovementContext FromContext, EMovementContext ToContext);
+
+    UFUNCTION(BlueprintCallable, Category = "Animation System")
+    FVector CalculateFootPlantingOffset(const FVector& GroundNormal, const FVector& FootLocation);
+
+protected:
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Profiles")
+    TMap<FString, FCharacterAnimationProfile> CharacterProfiles;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
     class UPoseSearchDatabase* LocomotionDatabase;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    class UPoseSearchDatabase* InteractionDatabase;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching") 
+    class UPoseSearchDatabase* StealthDatabase;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    class UPoseSearchDatabase* EmotionalDatabase;
-
-    // IK Configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK")
-    bool bEnableFootIK = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK")
-    float FootIKRange = 50.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK")
-    float FootIKInterpSpeed = 15.0f;
-
-    // Animation Blending
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blending")
-    float EmotionalBlendSpeed = 2.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blending")
-    float MovementBlendSpeed = 5.0f;
-
-    // Character Expression
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void UpdateCharacterState(const FCharacterAnimationState& NewState);
-
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    FCharacterAnimationState GetCurrentAnimationState() const { return CurrentAnimationState; }
-
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void SetFearLevel(float NewFearLevel);
-
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void TriggerEmotionalResponse(ECharacterEmotionalState NewEmotion, float Duration = 2.0f);
+    class UPoseSearchDatabase* EscapeDatabase;
 
 private:
-    UPROPERTY()
-    FCharacterAnimationState CurrentAnimationState;
-
-    UPROPERTY()
-    FCharacterAnimationState TargetAnimationState;
-
-    float EmotionalTransitionTimer = 0.0f;
-    float EmotionalTransitionDuration = 0.0f;
+    EMovementContext CurrentContext;
+    ECharacterEmotionalState CurrentEmotionalState;
+    float CurrentFearLevel;
+    float CurrentExhaustion;
 };
