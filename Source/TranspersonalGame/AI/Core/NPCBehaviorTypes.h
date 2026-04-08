@@ -5,249 +5,236 @@
 #include "GameplayTagContainer.h"
 #include "NPCBehaviorTypes.generated.h"
 
-// Enum para tipos básicos de comportamento
 UENUM(BlueprintType)
-enum class EBasicBehaviorType : uint8
+enum class EDinosaurSpeciesType : uint8
 {
-    Idle,
-    Feeding,
-    Drinking,
-    Patrolling,
-    Resting,
-    Socializing,
-    Hunting,
-    Fleeing,
-    Territorial,
-    Mating,
-    Nesting,
-    Grooming
+    SmallHerbivore    UMETA(DisplayName = "Small Herbivore"),
+    MediumHerbivore   UMETA(DisplayName = "Medium Herbivore"),
+    LargeHerbivore    UMETA(DisplayName = "Large Herbivore"),
+    SmallCarnivore    UMETA(DisplayName = "Small Carnivore"),
+    MediumCarnivore   UMETA(DisplayName = "Medium Carnivore"),
+    LargeCarnivore    UMETA(DisplayName = "Large Carnivore"),
+    Omnivore          UMETA(DisplayName = "Omnivore"),
+    Flying            UMETA(DisplayName = "Flying"),
+    Aquatic           UMETA(DisplayName = "Aquatic")
 };
 
-// Enum para estados emocionais
 UENUM(BlueprintType)
-enum class EEmotionalState : uint8
+enum class EBehaviorState : uint8
 {
-    Calm,
-    Alert,
-    Aggressive,
-    Fearful,
-    Curious,
-    Tired,
-    Hungry,
-    Thirsty,
-    Territorial,
-    Protective
+    Idle              UMETA(DisplayName = "Idle"),
+    Foraging          UMETA(DisplayName = "Foraging"),
+    Hunting           UMETA(DisplayName = "Hunting"),
+    Fleeing           UMETA(DisplayName = "Fleeing"),
+    Drinking          UMETA(DisplayName = "Drinking"),
+    Resting           UMETA(DisplayName = "Resting"),
+    Socializing       UMETA(DisplayName = "Socializing"),
+    Territorial       UMETA(DisplayName = "Territorial"),
+    Mating            UMETA(DisplayName = "Mating"),
+    Nesting           UMETA(DisplayName = "Nesting"),
+    Migrating         UMETA(DisplayName = "Migrating"),
+    Investigating     UMETA(DisplayName = "Investigating"),
+    Domesticated      UMETA(DisplayName = "Domesticated")
 };
 
-// Enum para tipos de dinossauros
 UENUM(BlueprintType)
-enum class EDinosaurType : uint8
+enum class EPersonalityTrait : uint8
 {
-    SmallHerbivore,     // Compsognathus, Parasaurolophus pequenos
-    MediumHerbivore,    // Triceratops, Stegosaurus
-    LargeHerbivore,     // Brontosaurus, Diplodocus
-    SmallCarnivore,     // Velociraptor, Deinonychus
-    MediumCarnivore,    // Allosaurus, Carnotaurus
-    LargeCarnivore,     // T-Rex, Giganotosaurus
-    Flying,             // Pteranodon, Quetzalcoatlus
-    Aquatic,            // Mosasaurus, Plesiosaurs
-    Omnivore            // Therizinosaurus, Oviraptor
+    Aggressive        UMETA(DisplayName = "Aggressive"),
+    Timid             UMETA(DisplayName = "Timid"),
+    Curious           UMETA(DisplayName = "Curious"),
+    Territorial       UMETA(DisplayName = "Territorial"),
+    Social            UMETA(DisplayName = "Social"),
+    Solitary          UMETA(DisplayName = "Solitary"),
+    Protective        UMETA(DisplayName = "Protective"),
+    Opportunistic     UMETA(DisplayName = "Opportunistic"),
+    Cautious          UMETA(DisplayName = "Cautious"),
+    Bold              UMETA(DisplayName = "Bold")
 };
 
-// Estrutura para necessidades básicas
+UENUM(BlueprintType)
+enum class ETrustLevel : uint8
+{
+    Hostile           UMETA(DisplayName = "Hostile"),
+    Fearful           UMETA(DisplayName = "Fearful"),
+    Wary              UMETA(DisplayName = "Wary"),
+    Neutral           UMETA(DisplayName = "Neutral"),
+    Curious           UMETA(DisplayName = "Curious"),
+    Accepting         UMETA(DisplayName = "Accepting"),
+    Trusting          UMETA(DisplayName = "Trusting"),
+    Bonded            UMETA(DisplayName = "Bonded")
+};
+
 USTRUCT(BlueprintType)
-struct FBasicNeeds
+struct FDinosaurPersonality
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "100.0"))
-    float Hunger = 100.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality")
+    TArray<EPersonalityTrait> PrimaryTraits;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "100.0"))
-    float Thirst = 100.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float AggressionLevel = 0.5f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "100.0"))
-    float Energy = 100.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float CuriosityLevel = 0.5f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "100.0"))
-    float Safety = 100.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float SocialLevel = 0.5f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "100.0"))
-    float Social = 100.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float TerritorialLevel = 0.5f;
 
-    FBasicNeeds()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float FearLevel = 0.5f;
+
+    FDinosaurPersonality()
     {
-        Hunger = 100.0f;
-        Thirst = 100.0f;
-        Energy = 100.0f;
-        Safety = 100.0f;
-        Social = 100.0f;
+        PrimaryTraits.Add(EPersonalityTrait::Cautious);
     }
 };
 
-// Estrutura para características físicas únicas
 USTRUCT(BlueprintType)
-struct FPhysicalTraits
+struct FMemoryEntry
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float SizeVariation = 1.0f; // 0.8 a 1.2 para variação de tamanho
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
+    FVector Location;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FLinearColor PrimaryColor = FLinearColor::White;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FLinearColor SecondaryColor = FLinearColor::Gray;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float AggressionLevel = 0.5f; // 0.0 = pacífico, 1.0 = muito agressivo
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float CuriosityLevel = 0.5f; // 0.0 = tímido, 1.0 = muito curioso
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float IntelligenceLevel = 0.5f; // Afeta capacidade de aprendizagem
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TArray<FString> UniqueMarkings; // Cicatrizes, padrões especiais, etc.
-
-    FPhysicalTraits()
-    {
-        SizeVariation = 1.0f;
-        PrimaryColor = FLinearColor::White;
-        SecondaryColor = FLinearColor::Gray;
-        AggressionLevel = 0.5f;
-        CuriosityLevel = 0.5f;
-        IntelligenceLevel = 0.5f;
-    }
-};
-
-// Estrutura para memória de eventos
-USTRUCT(BlueprintType)
-struct FMemoryEvent
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FVector Location = FVector::ZeroVector;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    AActor* InvolvedActor = nullptr;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
     FGameplayTag EventType;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float EmotionalImpact = 0.0f; // -1.0 (muito negativo) a 1.0 (muito positivo)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
+    float EmotionalWeight = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
     float Timestamp = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float MemoryStrength = 1.0f; // Degrada com o tempo
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
+    TWeakObjectPtr<AActor> AssociatedActor;
 
-    FMemoryEvent()
+    FMemoryEntry()
     {
         Location = FVector::ZeroVector;
-        InvolvedActor = nullptr;
-        EmotionalImpact = 0.0f;
+        EmotionalWeight = 0.0f;
         Timestamp = 0.0f;
-        MemoryStrength = 1.0f;
     }
 };
 
-// Estrutura para relacionamentos sociais
 USTRUCT(BlueprintType)
-struct FSocialRelationship
+struct FDailyRoutine
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    AActor* TargetActor = nullptr;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Routine")
+    float StartTime = 0.0f; // 0.0 = Dawn, 0.5 = Noon, 1.0 = Dusk
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float Familiarity = 0.0f; // 0.0 = desconhecido, 1.0 = muito familiar
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Routine")
+    float Duration = 0.25f; // Fraction of day
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float Trust = 0.0f; // -1.0 = inimigo, 0.0 = neutro, 1.0 = aliado
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Routine")
+    EBehaviorState BehaviorState;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float LastInteractionTime = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Routine")
+    FVector PreferredLocation;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 PositiveInteractions = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Routine")
+    float LocationRadius = 500.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 NegativeInteractions = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Routine")
+    int32 Priority = 1;
 
-    FSocialRelationship()
+    FDailyRoutine()
     {
-        TargetActor = nullptr;
-        Familiarity = 0.0f;
-        Trust = 0.0f;
-        LastInteractionTime = 0.0f;
-        PositiveInteractions = 0;
-        NegativeInteractions = 0;
+        BehaviorState = EBehaviorState::Idle;
+        PreferredLocation = FVector::ZeroVector;
     }
 };
 
-// Data Table Row para configuração de espécies
 USTRUCT(BlueprintType)
-struct FDinosaurSpeciesData : public FTableRowBase
+struct FSpeciesBehaviorData : public FTableRowBase
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EDinosaurType DinosaurType = EDinosaurType::SmallHerbivore;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Species")
+    EDinosaurSpeciesType SpeciesType;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString SpeciesName = TEXT("Unknown");
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Species")
+    FString SpeciesName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
+    TArray<FDailyRoutine> DefaultRoutines;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
+    TArray<EBehaviorState> AvailableBehaviors;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Domestication")
     bool bCanBeDomesticated = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float BaseDomesticationDifficulty = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Domestication")
+    float DomesticationDifficulty = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float BaseAggressionLevel = 0.5f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Domestication")
+    TArray<FGameplayTag> PreferredTrustActions;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float BaseMovementSpeed = 300.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Social")
+    bool bIsPackAnimal = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float SightRange = 1000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Social")
+    int32 PreferredPackSize = 1;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float HearingRange = 800.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory")
+    float TerritoryRadius = 1000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TArray<EBasicBehaviorType> AvailableBehaviors;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Needs")
+    float HungerRate = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TArray<FGameplayTag> PreferredFoodTypes;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Needs")
+    float ThirstRate = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TArray<FGameplayTag> FearTriggers;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Needs")
+    float RestRate = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float SocialGroupSize = 1.0f; // Tamanho médio do grupo social
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bIsNocturnal = false;
-
-    FDinosaurSpeciesData()
+    FSpeciesBehaviorData()
     {
-        DinosaurType = EDinosaurType::SmallHerbivore;
-        SpeciesName = TEXT("Unknown");
+        SpeciesType = EDinosaurSpeciesType::SmallHerbivore;
+        SpeciesName = TEXT("Unknown Species");
         bCanBeDomesticated = false;
-        BaseDomesticationDifficulty = 1.0f;
-        BaseAggressionLevel = 0.5f;
-        BaseMovementSpeed = 300.0f;
-        SightRange = 1000.0f;
-        HearingRange = 800.0f;
-        SocialGroupSize = 1.0f;
-        bIsNocturnal = false;
+        DomesticationDifficulty = 1.0f;
+        bIsPackAnimal = false;
+        PreferredPackSize = 1;
+        TerritoryRadius = 1000.0f;
+        HungerRate = 1.0f;
+        ThirstRate = 1.0f;
+        RestRate = 1.0f;
+    }
+};
+
+USTRUCT(BlueprintType)
+struct FRelationshipData
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Relationship")
+    TWeakObjectPtr<AActor> TargetActor;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Relationship")
+    ETrustLevel TrustLevel;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Relationship")
+    float Familiarity = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Relationship")
+    float LastInteractionTime = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Relationship")
+    TArray<FMemoryEntry> SharedMemories;
+
+    FRelationshipData()
+    {
+        TrustLevel = ETrustLevel::Neutral;
+        Familiarity = 0.0f;
+        LastInteractionTime = 0.0f;
     }
 };
