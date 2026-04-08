@@ -1,0 +1,43 @@
+// Blueprint for Environment Manager Actor
+// This is a placeholder for the actual Blueprint file that would be created in Unreal Editor
+
+/*
+Blueprint Class: BP_EnvironmentManager
+Parent Class: AEnvironmentManager
+
+Components:
+- Scene Component (Root)
+- Audio Component (Ambient Sound)
+- Particle System Component (Consciousness Effects)
+
+Variables:
+- Current Consciousness Level (Float, Range 0-1)
+- Environment State (Enum: Peaceful, Mystical, Transcendent, Chaotic)
+- Transition Speed (Float, Default: 2.0)
+- Material Instances Array (Dynamic Material Instances)
+
+Functions:
+- Begin Play: Initialize environment state
+- Update Environment: Called by C++ EnvironmentManager
+- Transition To State: Smooth transition between consciousness states
+- Apply Material Changes: Update all responsive materials
+- Spawn Consciousness Effects: Create particle effects based on state
+
+Event Graph:
+1. Begin Play → Initialize Default State
+2. Custom Event "OnConsciousnessChanged" → Update Environment
+3. Timer → Continuous environment pulse updates
+4. Overlap Events → Trigger localized consciousness responses
+
+Construction Script:
+- Setup default material instances
+- Configure particle system parameters
+- Initialize audio components
+*/
+
+// Blueprint nodes would include:
+// - Material Parameter Collection updates
+// - Particle system parameter modifications
+// - Audio volume and pitch adjustments
+// - Lighting intensity changes
+// - Fog density modifications
