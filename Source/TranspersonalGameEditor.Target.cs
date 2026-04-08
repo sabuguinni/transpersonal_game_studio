@@ -1,3 +1,5 @@
+// Copyright Transpersonal Game Studio. All Rights Reserved.
+
 using UnrealBuildTool;
 using System.Collections.Generic;
 
@@ -8,29 +10,20 @@ public class TranspersonalGameEditorTarget : TargetRules
         Type = TargetType.Editor;
         DefaultBuildSettings = BuildSettingsVersion.V4;
         IncludeOrderVersion = EngineIncludeOrderVersion.Unreal5_3;
+        ExtraModuleNames.Add("TranspersonalGame");
         
-        ExtraModuleNames.AddRange(new string[] { "TranspersonalGame" });
-
         // Editor-specific optimizations
+        bUseUnityBuild = true;
+        bUsePCHFiles = true;
         bBuildDeveloperTools = true;
         bBuildWithEditorOnlyData = true;
+        
+        // Enable all editor features for development
         bCompileWithPluginSupport = true;
         bIncludePluginsForTargetPlatforms = true;
-
-        // Enable all debugging features in editor
-        bUseLoggingInShipping = true;
-        bUseChecksInShipping = true;
-        bCompileWithStatsWithoutEngine = true;
-
-        // Editor performance
-        bUsePCHFiles = true;
-        bUseUnityBuild = true;
-        bForceUnityBuild = false;
-
-        // Enable modern C++ features
-        CppStandard = CppStandardVersion.Cpp17;
         
-        // Build optimization for editor
-        bBuildInSolutionByDefault = true;
+        // Development tools
+        bCompileWithAccessibilitySupport = true;
+        bWithLiveCoding = true;
     }
 }
