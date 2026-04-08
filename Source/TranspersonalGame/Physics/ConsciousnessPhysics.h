@@ -1,20 +1,19 @@
 /**
  * @file ConsciousnessPhysics.h
  * @brief Core physics system for consciousness expansion mechanics
- * 
- * Implements specialized physics for astral projection, reality layer transitions,
- * and temporal mechanics. Designed for 60 FPS performance on RTX 3070 / RX 6700 XT.
- * 
  * @author Core Systems Programmer
  * @version 1.0
- * @date 2024
+ * 
+ * Implements multi-layered reality physics with temporal manipulation
+ * and astral projection mechanics. Designed for 60 FPS performance
+ * on RTX 3070 / RX 6700 XT target hardware.
  */
 
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/ActorComponent.h"
 #include "Engine/World.h"
+#include "Components/ActorComponent.h"
 #include "PhysicsEngine/PhysicsSettings.h"
 #include "Chaos/ChaosEngineInterface.h"
 #include "ConsciousnessPhysics.generated.h"
@@ -23,20 +22,10 @@ UENUM(BlueprintType)
 enum class EConsciousnessLayer : uint8
 {
     Physical    UMETA(DisplayName = "Physical Reality"),
-    Etheric     UMETA(DisplayName = "Etheric Layer"),
-    Astral      UMETA(DisplayName = "Astral Plane"),
-    Mental      UMETA(DisplayName = "Mental Realm"),
-    Causal      UMETA(DisplayName = "Causal Dimension")
-};
-
-UENUM(BlueprintType)
-enum class ETemporalState : uint8
-{
-    Normal      UMETA(DisplayName = "Normal Time"),
-    Accelerated UMETA(DisplayName = "Accelerated Time"),
-    Decelerated UMETA(DisplayName = "Decelerated Time"),
-    Frozen      UMETA(DisplayName = "Time Frozen"),
-    Reversed    UMETA(DisplayName = "Time Reversed")
+    Emotional   UMETA(DisplayName = "Emotional Layer"),
+    Mental      UMETA(DisplayName = "Mental Layer"),
+    Spiritual   UMETA(DisplayName = "Spiritual Layer"),
+    Astral      UMETA(DisplayName = "Astral Projection")
 };
 
 USTRUCT(BlueprintType)
@@ -46,65 +35,61 @@ struct FConsciousnessPhysicsSettings
 
     /** Gravity multiplier for each consciousness layer */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Layer Physics")
-    TMap<EConsciousnessLayer, float> GravityMultipliers;
+    TMap<EConsciousnessLayer, float> LayerGravityMultipliers;
 
-    /** Air resistance coefficients per layer */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Layer Physics")
-    TMap<EConsciousnessLayer, float> AirResistance;
-
-    /** Maximum velocity in each layer */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Layer Physics")
-    TMap<EConsciousnessLayer, float> MaxVelocities;
-
-    /** Temporal distortion strength */
+    /** Time dilation factor for temporal mechanics */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Temporal", meta = (ClampMin = "0.1", ClampMax = "10.0"))
-    float TemporalDistortionStrength = 1.0f;
+    float TimeDilationFactor = 1.0f;
 
-    /** Astral projection movement speed */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Astral", meta = (ClampMin = "100.0", ClampMax = "5000.0"))
-    float AstralMovementSpeed = 1200.0f;
+    /** Maximum astral projection distance from physical body */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Astral", meta = (ClampMin = "100.0", ClampMax = "10000.0"))
+    float MaxAstralDistance = 5000.0f;
 
-    /** Phase transition duration */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transitions", meta = (ClampMin = "0.1", ClampMax = "5.0"))
-    float PhaseTransitionTime = 2.0f;
+    /** Physics simulation substeps for consciousness layers */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance", meta = (ClampMin = "1", ClampMax = "8"))
+    int32 ConsciousnessSubsteps = 4;
 
     FConsciousnessPhysicsSettings()
     {
-        // Initialize default values
-        GravityMultipliers.Add(EConsciousnessLayer::Physical, 1.0f);
-        GravityMultipliers.Add(EConsciousnessLayer::Etheric, 0.7f);
-        GravityMultipliers.Add(EConsciousnessLayer::Astral, 0.3f);
-        GravityMultipliers.Add(EConsciousnessLayer::Mental, 0.1f);
-        GravityMultipliers.Add(EConsciousnessLayer::Causal, 0.0f);
-
-        AirResistance.Add(EConsciousnessLayer::Physical, 1.0f);
-        AirResistance.Add(EConsciousnessLayer::Etheric, 0.8f);
-        AirResistance.Add(EConsciousnessLayer::Astral, 0.5f);
-        AirResistance.Add(EConsciousnessLayer::Mental, 0.2f);
-        AirResistance.Add(EConsciousnessLayer::Causal, 0.1f);
-
-        MaxVelocities.Add(EConsciousnessLayer::Physical, 2000.0f);
-        MaxVelocities.Add(EConsciousnessLayer::Etheric, 3000.0f);
-        MaxVelocities.Add(EConsciousnessLayer::Astral, 5000.0f);
-        MaxVelocities.Add(EConsciousnessLayer::Mental, 8000.0f);
-        MaxVelocities.Add(EConsciousnessLayer::Causal, 15000.0f);
+        LayerGravityMultipliers.Add(EConsciousnessLayer::Physical, 1.0f);
+        LayerGravityMultipliers.Add(EConsciousnessLayer::Emotional, 0.8f);
+        LayerGravityMultipliers.Add(EConsciousnessLayer::Mental, 0.6f);
+        LayerGravityMultipliers.Add(EConsciousnessLayer::Spiritual, 0.3f);
+        LayerGravityMultipliers.Add(EConsciousnessLayer::Astral, 0.1f);
     }
 };
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnLayerTransition, EConsciousnessLayer, FromLayer, EConsciousnessLayer, ToLayer);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnTemporalStateChanged, ETemporalState, OldState, ETemporalState, NewState);
+USTRUCT(BlueprintType)
+struct FLayerPhysicsState
+{
+    GENERATED_BODY()
+
+    /** Current active layer */
+    UPROPERTY(BlueprintReadOnly, Category = "State")
+    EConsciousnessLayer ActiveLayer = EConsciousnessLayer::Physical;
+
+    /** Transition progress between layers (0.0 to 1.0) */
+    UPROPERTY(BlueprintReadOnly, Category = "State")
+    float TransitionProgress = 0.0f;
+
+    /** Is currently transitioning between layers */
+    UPROPERTY(BlueprintReadOnly, Category = "State")
+    bool bIsTransitioning = false;
+
+    /** Layer-specific velocity modifiers */
+    UPROPERTY(BlueprintReadOnly, Category = "State")
+    TMap<EConsciousnessLayer, FVector> LayerVelocities;
+};
 
 /**
  * @class UConsciousnessPhysicsComponent
- * @brief Manages physics behavior for consciousness expansion mechanics
+ * @brief Manages physics behaviour across consciousness layers
  * 
- * This component handles:
- * - Layer-specific physics properties
- * - Astral projection movement
- * - Temporal mechanics
- * - Reality transition effects
+ * This component handles the physics simulation for objects that can
+ * exist across multiple layers of reality. It provides smooth transitions
+ * between layers and maintains performance through optimized calculations.
  */
-UCLASS(ClassGroup=(TranspersonalGame), meta=(BlueprintSpawnableComponent))
+UCLASS(ClassGroup=(Physics), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UConsciousnessPhysicsComponent : public UActorComponent
 {
     GENERATED_BODY()
@@ -117,109 +102,178 @@ protected:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 public:
+    /** Initialize consciousness physics for this actor */
+    UFUNCTION(BlueprintCallable, Category = "Consciousness Physics")
+    void InitializeConsciousnessPhysics();
+
+    /** Transition to a specific consciousness layer */
+    UFUNCTION(BlueprintCallable, Category = "Consciousness Physics")
+    void TransitionToLayer(EConsciousnessLayer TargetLayer, float TransitionDuration = 2.0f);
+
+    /** Get current active consciousness layer */
+    UFUNCTION(BlueprintPure, Category = "Consciousness Physics")
+    EConsciousnessLayer GetActiveLayer() const { return PhysicsState.ActiveLayer; }
+
+    /** Check if currently transitioning between layers */
+    UFUNCTION(BlueprintPure, Category = "Consciousness Physics")
+    bool IsTransitioning() const { return PhysicsState.bIsTransitioning; }
+
+    /** Apply temporal dilation effect */
+    UFUNCTION(BlueprintCallable, Category = "Temporal Physics")
+    void ApplyTemporalDilation(float DilationFactor, float Duration);
+
+    /** Enable astral projection physics */
+    UFUNCTION(BlueprintCallable, Category = "Astral Physics")
+    void EnableAstralProjection(const FVector& AstralStartLocation);
+
+    /** Disable astral projection and return to physical body */
+    UFUNCTION(BlueprintCallable, Category = "Astral Physics")
+    void DisableAstralProjection();
+
+    /** Get physics settings */
+    UFUNCTION(BlueprintPure, Category = "Consciousness Physics")
+    const FConsciousnessPhysicsSettings& GetPhysicsSettings() const { return PhysicsSettings; }
+
+    /** Set physics settings */
+    UFUNCTION(BlueprintCallable, Category = "Consciousness Physics")
+    void SetPhysicsSettings(const FConsciousnessPhysicsSettings& NewSettings);
+
+protected:
     /** Physics settings for consciousness mechanics */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Consciousness Physics")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
     FConsciousnessPhysicsSettings PhysicsSettings;
 
-    /** Current consciousness layer */
-    UPROPERTY(BlueprintReadOnly, Category = "Consciousness State")
-    EConsciousnessLayer CurrentLayer = EConsciousnessLayer::Physical;
+    /** Current physics state */
+    UPROPERTY(BlueprintReadOnly, Category = "State")
+    FLayerPhysicsState PhysicsState;
 
-    /** Current temporal state */
-    UPROPERTY(BlueprintReadOnly, Category = "Temporal State")
-    ETemporalState CurrentTemporalState = ETemporalState::Normal;
+    /** Target layer for transitions */
+    UPROPERTY()
+    EConsciousnessLayer TargetLayer = EConsciousnessLayer::Physical;
 
-    /** Is actor in astral projection mode */
-    UPROPERTY(BlueprintReadOnly, Category = "Astral State")
-    bool bIsAstralProjecting = false;
+    /** Transition duration */
+    UPROPERTY()
+    float TransitionDuration = 2.0f;
 
-    /** Layer transition events */
-    UPROPERTY(BlueprintAssignable, Category = "Events")
-    FOnLayerTransition OnLayerTransition;
+    /** Transition timer */
+    UPROPERTY()
+    float TransitionTimer = 0.0f;
 
-    /** Temporal state change events */
-    UPROPERTY(BlueprintAssignable, Category = "Events")
-    FOnTemporalStateChanged OnTemporalStateChanged;
+    /** Physical body location for astral projection */
+    UPROPERTY()
+    FVector PhysicalBodyLocation = FVector::ZeroVector;
 
-    /**
-     * Transition to a different consciousness layer
-     * @param TargetLayer The layer to transition to
-     * @param bInstant Whether to transition instantly or over time
-     */
-    UFUNCTION(BlueprintCallable, Category = "Consciousness Physics")
-    void TransitionToLayer(EConsciousnessLayer TargetLayer, bool bInstant = false);
+    /** Is astral projection active */
+    UPROPERTY()
+    bool bAstralProjectionActive = false;
 
-    /**
-     * Begin astral projection
-     * @param ProjectionDirection Initial direction for astral body
-     */
-    UFUNCTION(BlueprintCallable, Category = "Astral Physics")
-    void BeginAstralProjection(const FVector& ProjectionDirection = FVector::ZeroVector);
+    /** Temporal dilation timer */
+    UPROPERTY()
+    float TemporalDilationTimer = 0.0f;
 
-    /**
-     * End astral projection and return to physical body
-     */
-    UFUNCTION(BlueprintCallable, Category = "Astral Physics")
-    void EndAstralProjection();
-
-    /**
-     * Set temporal state for time manipulation
-     * @param NewTemporalState The new temporal state
-     * @param Duration How long the effect lasts (-1 for permanent)
-     */
-    UFUNCTION(BlueprintCallable, Category = "Temporal Physics")
-    void SetTemporalState(ETemporalState NewTemporalState, float Duration = -1.0f);
-
-    /**
-     * Get effective gravity for current layer
-     */
-    UFUNCTION(BlueprintPure, Category = "Consciousness Physics")
-    float GetEffectiveGravity() const;
-
-    /**
-     * Get effective time dilation factor
-     */
-    UFUNCTION(BlueprintPure, Category = "Temporal Physics")
-    float GetTimeDilationFactor() const;
-
-    /**
-     * Check if actor can interact with objects in current layer
-     */
-    UFUNCTION(BlueprintPure, Category = "Consciousness Physics")
-    bool CanInteractWithPhysicalObjects() const;
+    /** Original time dilation */
+    UPROPERTY()
+    float OriginalTimeDilation = 1.0f;
 
 private:
-    /** Timer handle for layer transitions */
-    FTimerHandle LayerTransitionTimer;
-
-    /** Timer handle for temporal effects */
-    FTimerHandle TemporalEffectTimer;
-
-    /** Target layer for ongoing transition */
-    EConsciousnessLayer TargetTransitionLayer;
-
-    /** Transition progress (0.0 to 1.0) */
-    float TransitionProgress = 0.0f;
-
-    /** Original physics settings before modifications */
-    TMap<FString, float> OriginalPhysicsSettings;
-
-    /** Cached primitive component for physics modifications */
-    UPROPERTY()
-    class UPrimitiveComponent* CachedPrimitiveComponent;
-
-    /** Apply physics settings for current layer */
-    void ApplyLayerPhysics();
-
-    /** Update transition progress */
+    /** Update layer transition */
     void UpdateLayerTransition(float DeltaTime);
 
-    /** Complete layer transition */
-    void CompleteLayerTransition();
+    /** Apply layer-specific physics */
+    void ApplyLayerPhysics(float DeltaTime);
 
-    /** Reset temporal state to normal */
-    void ResetTemporalState();
+    /** Update temporal effects */
+    void UpdateTemporalEffects(float DeltaTime);
 
-    /** Update astral projection physics */
-    void UpdateAstralProjection(float DeltaTime);
+    /** Validate astral projection distance */
+    void ValidateAstralDistance();
+
+    /** Calculate layer-specific gravity */
+    float CalculateLayerGravity(EConsciousnessLayer Layer) const;
+
+    /** Interpolate between layer physics */
+    FVector InterpolateLayerVelocity(EConsciousnessLayer FromLayer, EConsciousnessLayer ToLayer, float Alpha) const;
+};
+
+/**
+ * @class AConsciousnessPhysicsManager
+ * @brief World-level manager for consciousness physics systems
+ * 
+ * Singleton manager that coordinates consciousness physics across
+ * all actors in the world. Handles performance optimization and
+ * layer synchronization.
+ */
+UCLASS()
+class TRANSPERSONALGAME_API AConsciousnessPhysicsManager : public AActor
+{
+    GENERATED_BODY()
+
+public:
+    AConsciousnessPhysicsManager();
+
+protected:
+    virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
+
+public:
+    /** Get the singleton instance */
+    UFUNCTION(BlueprintPure, Category = "Consciousness Physics", CallInEditor = true)
+    static AConsciousnessPhysicsManager* GetInstance(const UObject* WorldContext);
+
+    /** Register a consciousness physics component */
+    UFUNCTION(BlueprintCallable, Category = "Consciousness Physics")
+    void RegisterConsciousnessComponent(UConsciousnessPhysicsComponent* Component);
+
+    /** Unregister a consciousness physics component */
+    UFUNCTION(BlueprintCallable, Category = "Consciousness Physics")
+    void UnregisterConsciousnessComponent(UConsciousnessPhysicsComponent* Component);
+
+    /** Set global consciousness layer for all registered components */
+    UFUNCTION(BlueprintCallable, Category = "Consciousness Physics")
+    void SetGlobalConsciousnessLayer(EConsciousnessLayer Layer);
+
+    /** Get performance metrics */
+    UFUNCTION(BlueprintPure, Category = "Performance")
+    float GetConsciousnessPhysicsFrameTime() const { return FrameTimeMs; }
+
+    /** Enable/disable consciousness physics globally */
+    UFUNCTION(BlueprintCallable, Category = "Consciousness Physics")
+    void SetConsciousnessPhysicsEnabled(bool bEnabled);
+
+protected:
+    /** Registered consciousness physics components */
+    UPROPERTY()
+    TArray<UConsciousnessPhysicsComponent*> RegisteredComponents;
+
+    /** Global consciousness physics settings */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Global Settings")
+    FConsciousnessPhysicsSettings GlobalSettings;
+
+    /** Is consciousness physics enabled globally */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Global Settings")
+    bool bConsciousnessPhysicsEnabled = true;
+
+    /** Performance monitoring */
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float FrameTimeMs = 0.0f;
+
+    /** Maximum allowed frame time for consciousness physics */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance", meta = (ClampMin = "0.1", ClampMax = "16.0"))
+    float MaxFrameTimeMs = 2.0f;
+
+private:
+    /** Singleton instance */
+    static AConsciousnessPhysicsManager* Instance;
+
+    /** Performance timer */
+    double PerformanceTimer = 0.0;
+
+    /** Update all registered components */
+    void UpdateRegisteredComponents(float DeltaTime);
+
+    /** Monitor performance */
+    void MonitorPerformance();
+
+    /** Optimize performance if needed */
+    void OptimizePerformance();
 };
