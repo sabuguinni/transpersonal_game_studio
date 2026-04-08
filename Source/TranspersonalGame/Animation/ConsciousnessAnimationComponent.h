@@ -9,21 +9,20 @@
 UENUM(BlueprintType)
 enum class EConsciousnessState : uint8
 {
-    Grounded        UMETA(DisplayName = "Grounded"),
-    Focused         UMETA(DisplayName = "Focused"),
+    Dormant         UMETA(DisplayName = "Dormant"),
+    Awakening       UMETA(DisplayName = "Awakening"), 
+    Expanding       UMETA(DisplayName = "Expanding"),
     Transcendent    UMETA(DisplayName = "Transcendent"),
-    Flowing         UMETA(DisplayName = "Flowing"),
-    Awakened        UMETA(DisplayName = "Awakened")
+    Unity           UMETA(DisplayName = "Unity")
 };
 
 UENUM(BlueprintType)
-enum class EMeditationPose : uint8
+enum class ETransformationType : uint8
 {
-    Lotus          UMETA(DisplayName = "Lotus"),
-    Seiza          UMETA(DisplayName = "Seiza"),
-    Standing       UMETA(DisplayName = "Standing"),
-    Walking        UMETA(DisplayName = "Walking"),
-    Lying          UMETA(DisplayName = "Lying")
+    Materialization     UMETA(DisplayName = "Materialization"),
+    Dematerialization   UMETA(DisplayName = "Dematerialization"),
+    EnergyShift         UMETA(DisplayName = "Energy Shift"),
+    ConsciousnessExpansion UMETA(DisplayName = "Consciousness Expansion")
 };
 
 USTRUCT(BlueprintType)
@@ -35,32 +34,24 @@ struct FConsciousnessAnimationData
     EConsciousnessState CurrentState;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float StateIntensity;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float BreathingRate;
+    float StateTransitionProgress;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     float EnergyLevel;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FVector AuraColor;
+    FVector AuraScale;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bIsInMeditation;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EMeditationPose MeditationPose;
+    float LuminosityIntensity;
 
     FConsciousnessAnimationData()
     {
-        CurrentState = EConsciousnessState::Grounded;
-        StateIntensity = 0.0f;
-        BreathingRate = 1.0f;
+        CurrentState = EConsciousnessState::Dormant;
+        StateTransitionProgress = 0.0f;
         EnergyLevel = 0.5f;
-        AuraColor = FVector(1.0f, 1.0f, 1.0f);
-        bIsInMeditation = false;
-        MeditationPose = EMeditationPose::Lotus;
+        AuraScale = FVector(1.0f, 1.0f, 1.0f);
+        LuminosityIntensity = 0.0f;
     }
 };
 
@@ -80,60 +71,67 @@ public:
 
     // Animation State Management
     UFUNCTION(BlueprintCallable, Category = "Consciousness Animation")
-    void SetConsciousnessState(EConsciousnessState NewState, float TransitionTime = 1.0f);
+    void SetConsciousnessState(EConsciousnessState NewState, float TransitionDuration = 2.0f);
 
     UFUNCTION(BlueprintCallable, Category = "Consciousness Animation")
-    void StartMeditation(EMeditationPose Pose);
+    void TriggerTransformation(ETransformationType TransformType, float Duration = 3.0f);
 
     UFUNCTION(BlueprintCallable, Category = "Consciousness Animation")
-    void StopMeditation();
+    void UpdateEnergyLevel(float NewEnergyLevel);
 
-    UFUNCTION(BlueprintCallable, Category = "Consciousness Animation")
-    void UpdateBreathingPattern(float Rate, float Depth);
-
-    UFUNCTION(BlueprintCallable, Category = "Consciousness Animation")
-    void TriggerEnergyPulse(float Intensity);
-
-    // Getters
     UFUNCTION(BlueprintPure, Category = "Consciousness Animation")
     FConsciousnessAnimationData GetAnimationData() const { return AnimationData; }
 
-    UFUNCTION(BlueprintPure, Category = "Consciousness Animation")
-    float GetStateTransitionProgress() const { return StateTransitionProgress; }
+    // Aura and Energy Effects
+    UFUNCTION(BlueprintCallable, Category = "Consciousness Animation")
+    void PulseAura(float Intensity, float Duration);
+
+    UFUNCTION(BlueprintCallable, Category = "Consciousness Animation")
+    void StartEnergyFlow(FVector Direction, float Speed);
+
+    UFUNCTION(BlueprintCallable, Category = "Consciousness Animation")
+    void StopEnergyFlow();
 
 protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Data")
     FConsciousnessAnimationData AnimationData;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transition")
-    float StateTransitionDuration;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
+    float BaseAnimationSpeed;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Transition")
-    float StateTransitionProgress;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
+    float TransformationIntensity;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Transition")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
+    bool bEnableAutoStateTransitions;
+
+    // State Transition
     EConsciousnessState TargetState;
+    float StateTransitionDuration;
+    float StateTransitionTimer;
+    bool bIsTransitioning;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Transition")
-    EConsciousnessState PreviousState;
+    // Transformation Effects
+    ETransformationType CurrentTransformation;
+    float TransformationDuration;
+    float TransformationTimer;
+    bool bIsTransforming;
 
-    // Breathing Animation
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Breathing")
-    float BreathingCycleTime;
+    // Aura Pulse
+    float AuraPulseIntensity;
+    float AuraPulseDuration;
+    float AuraPulseTimer;
+    bool bIsPulsing;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Breathing")
-    float CurrentBreathingPhase;
+    // Energy Flow
+    FVector EnergyFlowDirection;
+    float EnergyFlowSpeed;
+    bool bEnergyFlowing;
 
-    // Energy Pulse System
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Energy")
-    float EnergyPulseDuration;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Energy")
-    float CurrentEnergyPulse;
-
-private:
     void UpdateStateTransition(float DeltaTime);
-    void UpdateBreathingCycle(float DeltaTime);
-    void UpdateEnergyPulse(float DeltaTime);
-    void ApplyConsciousnessEffects();
+    void UpdateTransformation(float DeltaTime);
+    void UpdateAuraPulse(float DeltaTime);
+    void UpdateEnergyFlow(float DeltaTime);
+    
+    float CalculateStateBlendValue(EConsciousnessState FromState, EConsciousnessState ToState, float Progress);
 };
