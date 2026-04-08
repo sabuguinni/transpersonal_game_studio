@@ -1,207 +1,125 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/GameInstanceSubsystem.h"
+#include "Components/ActorComponent.h"
+#include "Engine/World.h"
 #include "ConsciousnessSystem.h"
 #include "RealitySystem.generated.h"
 
 UENUM(BlueprintType)
 enum class ERealityLayer : uint8
 {
-    Consensus       UMETA(DisplayName = "Consensus Reality"),
-    Personal        UMETA(DisplayName = "Personal Reality"),
-    Collective      UMETA(DisplayName = "Collective Unconscious"),
-    Archetypal      UMETA(DisplayName = "Archetypal Realm"),
-    Causal          UMETA(DisplayName = "Causal Plane"),
-    Absolute        UMETA(DisplayName = "Absolute Reality")
-};
-
-UENUM(BlueprintType)
-enum class ERealityStability : uint8
-{
-    Solid           UMETA(DisplayName = "Solid - Unchanging"),
-    Stable          UMETA(DisplayName = "Stable - Minor fluctuations"),
-    Fluid           UMETA(DisplayName = "Fluid - Moderate changes"),
-    Malleable       UMETA(DisplayName = "Malleable - Responsive to consciousness"),
-    Chaotic         UMETA(DisplayName = "Chaotic - Unpredictable shifts"),
-    Void            UMETA(DisplayName = "Void - No stable form")
+	Physical		UMETA(DisplayName = "Physical Reality"),
+	Emotional		UMETA(DisplayName = "Emotional Layer"),
+	Mental			UMETA(DisplayName = "Mental Constructs"),
+	Archetypal		UMETA(DisplayName = "Archetypal Realm"),
+	Causal			UMETA(DisplayName = "Causal Dimension"),
+	Void			UMETA(DisplayName = "The Void")
 };
 
 USTRUCT(BlueprintType)
-struct FRealityLayerData
+struct TRANSPERSONALGAME_API FRealityParameters
 {
-    GENERATED_BODY()
+	GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    ERealityLayer Layer;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	float Stability;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    ERealityStability Stability;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	float Coherence;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float Opacity = 1.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	float Permeability;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float Influence = 0.5f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	float SymbolicDensity;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TArray<EConsciousnessState> RequiredStates;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	ERealityLayer ActiveLayer;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    class UMaterialInterface* LayerMaterial;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    class USoundBase* AmbientSound;
-
-    FRealityLayerData()
-    {
-        Layer = ERealityLayer::Consensus;
-        Stability = ERealityStability::Solid;
-        Opacity = 1.0f;
-        Influence = 0.5f;
-    }
+	FRealityParameters()
+	{
+		Stability = 1.0f;
+		Coherence = 1.0f;
+		Permeability = 0.0f;
+		SymbolicDensity = 0.0f;
+		ActiveLayer = ERealityLayer::Physical;
+	}
 };
 
-USTRUCT(BlueprintType)
-struct FRealityDistortion
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnRealityShift, ERealityLayer, NewLayer);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnRealityDistortion, float, Intensity, float, Duration);
+
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API URealitySystem : public UActorComponent
 {
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FVector Location;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float Radius = 100.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float Intensity = 0.5f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    ERealityLayer AffectedLayer;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float Duration = 10.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bIsPermanent = false;
-
-    FRealityDistortion()
-    {
-        Location = FVector::ZeroVector;
-        Radius = 100.0f;
-        Intensity = 0.5f;
-        AffectedLayer = ERealityLayer::Consensus;
-        Duration = 10.0f;
-        bIsPermanent = false;
-    }
-};
-
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnRealityLayerChanged, ERealityLayer, NewLayer);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnRealityDistortionCreated, FVector, Location, float, Intensity);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnRealityStabilityChanged, ERealityStability, NewStability);
-
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API URealitySystem : public UGameInstanceSubsystem
-{
-    GENERATED_BODY()
+	GENERATED_BODY()
 
 public:
-    URealitySystem();
-
-    // Subsystem Interface
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
-    virtual void Tick(float DeltaTime) override;
-    virtual bool ShouldCreateSubsystem(UObject* Outer) const override { return true; }
-
-    // Core Reality Functions
-    UFUNCTION(BlueprintCallable, Category = "Reality")
-    void SetActiveRealityLayer(ERealityLayer NewLayer);
-
-    UFUNCTION(BlueprintCallable, Category = "Reality")
-    void BlendRealityLayers(const TArray<ERealityLayer>& Layers, const TArray<float>& Weights);
-
-    UFUNCTION(BlueprintCallable, Category = "Reality")
-    void CreateRealityDistortion(const FRealityDistortion& Distortion);
-
-    UFUNCTION(BlueprintCallable, Category = "Reality")
-    void RemoveRealityDistortion(int32 DistortionID);
-
-    UFUNCTION(BlueprintCallable, Category = "Reality")
-    void SetRealityStability(ERealityStability NewStability);
-
-    UFUNCTION(BlueprintCallable, Category = "Reality")
-    void ModifyLayerOpacity(ERealityLayer Layer, float NewOpacity);
-
-    UFUNCTION(BlueprintCallable, Category = "Reality")
-    void ModifyLayerInfluence(ERealityLayer Layer, float NewInfluence);
-
-    // Consciousness Integration
-    UFUNCTION(BlueprintCallable, Category = "Reality")
-    void UpdateFromConsciousnessState(EConsciousnessState NewState);
-
-    UFUNCTION(BlueprintCallable, Category = "Reality")
-    TArray<ERealityLayer> GetAvailableLayersForState(EConsciousnessState State) const;
-
-    // Query Functions
-    UFUNCTION(BlueprintPure, Category = "Reality")
-    ERealityLayer GetCurrentRealityLayer() const { return CurrentLayer; }
-
-    UFUNCTION(BlueprintPure, Category = "Reality")
-    ERealityStability GetCurrentStability() const { return CurrentStability; }
-
-    UFUNCTION(BlueprintPure, Category = "Reality")
-    TArray<FRealityLayerData> GetActiveLayerData() const { return ActiveLayers; }
-
-    UFUNCTION(BlueprintPure, Category = "Reality")
-    float GetRealityCoherence() const;
-
-    UFUNCTION(BlueprintPure, Category = "Reality")
-    bool IsLocationDistorted(FVector Location, float& DistortionIntensity) const;
-
-    UFUNCTION(BlueprintPure, Category = "Reality")
-    TArray<FRealityDistortion> GetActiveDistortions() const { return ActiveDistortions; }
-
-    // Events
-    UPROPERTY(BlueprintAssignable, Category = "Reality Events")
-    FOnRealityLayerChanged OnRealityLayerChanged;
-
-    UPROPERTY(BlueprintAssignable, Category = "Reality Events")
-    FOnRealityDistortionCreated OnRealityDistortionCreated;
-
-    UPROPERTY(BlueprintAssignable, Category = "Reality Events")
-    FOnRealityStabilityChanged OnRealityStabilityChanged;
+	URealitySystem();
 
 protected:
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    ERealityLayer CurrentLayer;
+	virtual void BeginPlay() override;
 
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    ERealityStability CurrentStability;
+public:
+	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    TArray<FRealityLayerData> ActiveLayers;
+	// Current reality parameters
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Reality")
+	FRealityParameters CurrentReality;
 
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    TArray<FRealityDistortion> ActiveDistortions;
+	// Reference to consciousness system
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Reality")
+	UConsciousnessSystem* ConsciousnessRef;
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Configuration")
-    TMap<ERealityLayer, FRealityLayerData> LayerDefinitions;
+	// Reality distortion effects
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reality")
+	float DistortionIntensity;
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Configuration")
-    float DistortionUpdateRate = 0.1f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reality")
+	float LayerTransitionSpeed;
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Configuration")
-    float MaxDistortions = 50;
+	// Events
+	UPROPERTY(BlueprintAssignable)
+	FOnRealityShift OnRealityShift;
+
+	UPROPERTY(BlueprintAssignable)
+	FOnRealityDistortion OnRealityDistortion;
+
+	// Functions
+	UFUNCTION(BlueprintCallable, Category = "Reality")
+	void ShiftToLayer(ERealityLayer NewLayer);
+
+	UFUNCTION(BlueprintCallable, Category = "Reality")
+	void ApplyRealityDistortion(float Intensity, float Duration);
+
+	UFUNCTION(BlueprintCallable, Category = "Reality")
+	void ModifyStability(float Delta);
+
+	UFUNCTION(BlueprintCallable, Category = "Reality")
+	void SetPermeability(float NewPermeability);
+
+	UFUNCTION(BlueprintPure, Category = "Reality")
+	float GetRealityCoherence() const { return CurrentReality.Coherence; }
+
+	UFUNCTION(BlueprintPure, Category = "Reality")
+	bool IsRealityStable() const { return CurrentReality.Stability > 0.7f; }
+
+	UFUNCTION(BlueprintPure, Category = "Reality")
+	ERealityLayer GetCurrentLayer() const { return CurrentReality.ActiveLayer; }
 
 private:
-    class UConsciousnessSystem* ConsciousnessSystem;
-    FTimerHandle DistortionUpdateTimer;
-    int32 NextDistortionID;
+	// Target reality for transitions
+	FRealityParameters TargetReality;
+	bool bIsTransitioning;
 
-    void InitializeLayerDefinitions();
-    void UpdateDistortions();
-    void ApplyLayerEffects();
-    FRealityLayerData GetLayerData(ERealityLayer Layer) const;
-    void CleanupExpiredDistortions();
+	// Distortion effects
+	float DistortionTimer;
+	float DistortionDuration;
+	float BaseDistortionIntensity;
+
+	void UpdateRealityTransition(float DeltaTime);
+	void UpdateDistortionEffects(float DeltaTime);
+	void SyncWithConsciousness();
+	void CalculateRealityParameters();
 };
