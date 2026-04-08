@@ -1,0 +1,66 @@
+// Niagara System: Dense Fog
+// Sistema de névoa densa para reduzir visibilidade e criar tensão
+//
+// CONFIGURAÇÃO DO SISTEMA:
+// - Emitter: Fog Volume
+//   - Spawn Rate: Continuous volumetric emission
+//   - Lifetime: 15-30 seconds per particle
+//   - Size: Large particles for volume coverage
+//   - Movement: Slow drift with wind patterns
+//   - Opacity: Variable based on distance and density
+//
+// PARÂMETROS EXPOSTOS:
+// - Density (0-1): Densidade da névoa
+// - Coverage (0-1): Cobertura da área
+// - DriftSpeed (0-1): Velocidade de movimento
+// - VisibilityReduction (0-1): Redução de visibilidade
+// - ParticleCount (0-1): Multiplicador para LOD
+// - GlobalQuality (0-1): Qualidade global
+//
+// MÓDULOS PRINCIPAIS:
+// 1. Spawn Rate - Emissão contínua volumétrica
+// 2. Initialize Particle - Posição e tamanho inicial
+// 3. Add Velocity - Movimento lento de deriva
+// 4. Curl Noise Force - Movimento orgânico da névoa
+// 5. Scale Color/Alpha - Fade in/out baseado na idade
+// 6. Sprite Renderer - Renderização volumétrica
+//
+// PERFORMANCE:
+// - LOD 0: Alta densidade, movimento complexo
+// - LOD 1: Densidade média, movimento simplificado  
+// - LOD 2: Baixa densidade, movimento básico
+//
+// INTEGRAÇÃO COM LIGHTING:
+// - Suporte a volumetric lighting
+// - Interação com luz solar filtrada
+// - Absorção de luz para criar atmosfera sombria
+
+{
+  "Type": "NiagaraSystem",
+  "Name": "NS_DenseFog",
+  "Description": "Sistema de névoa densa para reduzir visibilidade e criar tensão",
+  "Emitters": [
+    {
+      "Name": "FogVolume",
+      "SpawnRate": "50 * Density * ParticleCount",
+      "Lifetime": "Random(15.0, 30.0)",
+      "InitialSize": "Random(200, 500) * Coverage",
+      "InitialVelocity": "Vector(Random(-20, 20), Random(-20, 20), Random(-5, 5)) * DriftSpeed",
+      "Material": "/Game/Materials/Atmosphere/M_Fog_Volumetric"
+    }
+  ],
+  "Parameters": {
+    "Density": 0.7,
+    "Coverage": 1.0,
+    "DriftSpeed": 0.3,
+    "VisibilityReduction": 0.6,
+    "ParticleCount": 1.0,
+    "GlobalQuality": 1.0
+  },
+  "VolumetricSettings": {
+    "EnableVolumetricFog": true,
+    "ScatteringDistribution": 0.2,
+    "Albedo": "Color(0.8, 0.85, 0.9, 1.0)",
+    "Extinction": 1.5
+  }
+}
