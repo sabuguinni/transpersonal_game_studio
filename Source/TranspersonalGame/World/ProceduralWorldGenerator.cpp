@@ -1,485 +1,591 @@
-// ProceduralWorldGenerator.cpp
-// Implementação do sistema de geração procedural de mundo
+// Copyright Transpersonal Game Studio. All Rights Reserved.
+
 #include "ProceduralWorldGenerator.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "GameFramework/Pawn.h"
-#include "GameFramework/PlayerController.h"
-#include "ProceduralMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
-#include "Engine/StaticMeshActor.h"
+#include "Components/InstancedStaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
 #include "Materials/MaterialInterface.h"
 #include "Kismet/GameplayStatics.h"
-#include "Math/UnrealMathUtility.h"
+#include "GameFramework/PlayerController.h"
+#include "GameFramework/Pawn.h"
+#include "../Consciousness/ConsciousnessSystem.h"
+#include "../Physics/PhysicsOptimizer.h"
+
+// FastNoise implementation for procedural generation
+class UFastNoise : public UObject
+{
+public:
+    UFastNoise() : Seed(1337), Frequency(0.01f) {}
+    
+    void SetSeed(int32 InSeed) { Seed = InSeed; }
+    void SetFrequency(float InFrequency) { Frequency = InFrequency; }
+    
+    float GetNoise(float X, float Y)
+    {
+        return SimplexNoise(X * Frequency, Y * Frequency);
+    }
+    
+    float GetNoise(float X, float Y, float Z)
+    {
+        return SimplexNoise(X * Frequency, Y * Frequency, Z * Frequency);
+    }
+
+private:
+    int32 Seed;
+    float Frequency;
+    
+    // Simplified Simplex Noise implementation
+    float SimplexNoise(float X, float Y)
+    {
+        int32 i = FMath::FloorToInt(X);
+        int32 j = FMath::FloorToInt(Y);
+        
+        float x = X - i;
+        float y = Y - j;
+        
+        float n0 = Grad(Hash(i, j), x, y);
+        float n1 = Grad(Hash(i + 1, j), x - 1, y);
+        float n2 = Grad(Hash(i, j + 1), x, y - 1);
+        float n3 = Grad(Hash(i + 1, j + 1), x - 1, y - 1);
+        
+        float ix0 = FMath::InterpEaseInOut(n0, n1, x, 2.0f);
+        float ix1 = FMath::InterpEaseInOut(n2, n3, x, 2.0f);
+        
+        return FMath::InterpEaseInOut(ix0, ix1, y, 2.0f);
+    }
+    
+    float SimplexNoise(float X, float Y, float Z)
+    {
+        return (SimplexNoise(X, Y) + SimplexNoise(Y, Z) + SimplexNoise(X, Z)) / 3.0f;
+    }
+    
+    int32 Hash(int32 X, int32 Y)
+    {
+        int32 n = X + Y * 57 + Seed;
+        n = (n << 13) ^ n;
+        return (n * (n * n * 15731 + 789221) + 1376312589) & 0x7fffffff;
+    }
+    
+    float Grad(int32 Hash, float X, float Y)
+    {
+        int32 h = Hash & 7;
+        float u = h < 4 ? X : Y;
+        float v = h < 4 ? Y : X;
+        return ((h & 1) ? -u : u) + ((h & 2) ? -2.0f * v : 2.0f * v);
+    }
+};
 
 AProceduralWorldGenerator::AProceduralWorldGenerator()
 {
     PrimaryActorTick.bCanEverTick = true;
-
-    // Criar componente raiz
-    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
-    RootComponent = RootSceneComponent;
-
-    // Criar componente de mesh procedural
-    TerrainMesh = CreateDefaultSubobject<UProceduralMeshComponent>(TEXT("TerrainMesh"));
-    TerrainMesh->SetupAttachment(RootComponent);
-
-    // Configurações padrão
+    
+    // Initialize default values
     ChunkSize = 1000;
     ViewDistance = 3;
     NoiseScale = 0.01f;
-    HeightMultiplier = 500.0f;
-    Seed = 12345;
-    LastPlayerPosition = FVector::ZeroVector;
-    CachedPlayer = nullptr;
-
-    // Inicializar biomas padrão
-    FBiomeData GrasslandBiome;
-    GrasslandBiome.BiomeName = TEXT("Grassland");
-    GrasslandBiome.Temperature = 20.0f;
-    GrasslandBiome.Humidity = 0.6f;
-    GrasslandBiome.Elevation = 100.0f;
-    AvailableBiomes.Add(GrasslandBiome);
-
-    FBiomeData ForestBiome;
-    ForestBiome.BiomeName = TEXT("Forest");
-    ForestBiome.Temperature = 15.0f;
-    ForestBiome.Humidity = 0.8f;
-    ForestBiome.Elevation = 200.0f;
-    AvailableBiomes.Add(ForestBiome);
-
-    FBiomeData MountainBiome;
-    MountainBiome.BiomeName = TEXT("Mountain");
-    MountainBiome.Temperature = 5.0f;
-    MountainBiome.Humidity = 0.4f;
-    MountainBiome.Elevation = 800.0f;
-    AvailableBiomes.Add(MountainBiome);
+    Seed = 1337;
+    
+    ConsciousnessInfluenceRadius = 2000.0f;
+    ConsciousnessGenerationThreshold = 0.3f;
+    bUseConsciousnessBasedGeneration = true;
+    
+    BiomeTransitionSmoothness = 0.5f;
+    
+    MaxChunksPerFrame = 1;
+    ChunkUpdateInterval = 0.1f;
+    bUseInstancedMeshes = true;
+    
+    LastUpdateTime = 0.0f;
+    ChunksGeneratedThisFrame = 0;
+    
+    // Initialize default biomes
+    FBiomeData MeditativeBiome;
+    MeditativeBiome.BiomeName = TEXT("Meditative");
+    MeditativeBiome.ConsciousnessResonance = 1.5f;
+    MeditativeBiome.AmbientColor = FLinearColor(0.7f, 0.9f, 1.0f, 1.0f);
+    MeditativeBiome.EnergyFlowIntensity = 2.0f;
+    
+    FBiomeData GroundedBiome;
+    GroundedBiome.BiomeName = TEXT("Grounded");
+    GroundedBiome.ConsciousnessResonance = 1.0f;
+    GroundedBiome.AmbientColor = FLinearColor(0.9f, 0.8f, 0.6f, 1.0f);
+    GroundedBiome.EnergyFlowIntensity = 1.0f;
+    
+    FBiomeData TranscendentBiome;
+    TranscendentBiome.BiomeName = TEXT("Transcendent");
+    TranscendentBiome.ConsciousnessResonance = 2.0f;
+    TranscendentBiome.AmbientColor = FLinearColor(1.0f, 0.8f, 1.0f, 1.0f);
+    TranscendentBiome.EnergyFlowIntensity = 3.0f;
+    
+    AvailableBiomes.Add(MeditativeBiome);
+    AvailableBiomes.Add(GroundedBiome);
+    AvailableBiomes.Add(TranscendentBiome);
 }
 
 void AProceduralWorldGenerator::BeginPlay()
 {
     Super::BeginPlay();
-
-    // Inicializar gerador de números aleatórios
-    FMath::RandInit(Seed);
-
-    // Encontrar player
-    if (UWorld* World = GetWorld())
-    {
-        if (APlayerController* PC = World->GetFirstPlayerController())
-        {
-            CachedPlayer = PC->GetPawn();
-        }
-    }
-
-    // Gerar chunks iniciais
-    UpdateChunks();
+    
+    // Find system references
+    ConsciousnessSystem = Cast<AConsciousnessSystem>(
+        UGameplayStatics::GetActorOfClass(GetWorld(), AConsciousnessSystem::StaticClass())
+    );
+    
+    PhysicsOptimizer = Cast<APhysicsOptimizer>(
+        UGameplayStatics::GetActorOfClass(GetWorld(), APhysicsOptimizer::StaticClass())
+    );
+    
+    // Initialize noise generator
+    InitializeNoiseGenerator();
+    
+    UE_LOG(LogTemp, Log, TEXT("ProceduralWorldGenerator initialized"));
 }
 
 void AProceduralWorldGenerator::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
-
-    // Verificar se o player se moveu significativamente
-    if (CachedPlayer)
+    
+    UpdateChunkGeneration(DeltaTime);
+    
+    // Update world around all players
+    UWorld* World = GetWorld();
+    if (World)
     {
-        FVector CurrentPlayerPosition = CachedPlayer->GetActorLocation();
-        float DistanceMoved = FVector::Dist(CurrentPlayerPosition, LastPlayerPosition);
-        
-        if (DistanceMoved > ChunkSize * 0.5f) // Atualizar quando player mover meio chunk
+        for (FConstPlayerControllerIterator Iterator = World->GetPlayerControllerIterator(); Iterator; ++Iterator)
         {
-            LastPlayerPosition = CurrentPlayerPosition;
-            UpdateChunks();
+            APlayerController* PC = Iterator->Get();
+            if (PC && PC->GetPawn())
+            {
+                UpdateWorldAroundPlayer(PC->GetPawn()->GetActorLocation());
+            }
         }
     }
 }
 
-void AProceduralWorldGenerator::UpdateChunks()
+void AProceduralWorldGenerator::InitializeNoiseGenerator()
 {
-    if (!CachedPlayer) return;
+    NoiseGenerator = NewObject<UFastNoise>(this);
+    NoiseGenerator->SetSeed(Seed);
+    NoiseGenerator->SetFrequency(NoiseScale);
+}
 
-    FVector PlayerLocation = CachedPlayer->GetActorLocation();
-    FVector2D PlayerChunk = FVector2D(
-        FMath::FloorToInt(PlayerLocation.X / ChunkSize),
-        FMath::FloorToInt(PlayerLocation.Y / ChunkSize)
-    );
+void AProceduralWorldGenerator::UpdateChunkGeneration(float DeltaTime)
+{
+    LastUpdateTime += DeltaTime;
+    
+    if (LastUpdateTime >= ChunkUpdateInterval)
+    {
+        LastUpdateTime = 0.0f;
+        ChunksGeneratedThisFrame = 0;
+        ProcessChunkQueue();
+    }
+}
 
-    ChunksToGenerate.Empty();
+void AProceduralWorldGenerator::ProcessChunkQueue()
+{
+    // Generate new chunks
+    while (ChunksToGenerate.Num() > 0 && ChunksGeneratedThisFrame < MaxChunksPerFrame)
+    {
+        FVector2D ChunkCoord = ChunksToGenerate[0];
+        ChunksToGenerate.RemoveAt(0);
+        
+        if (!IsChunkLoaded(ChunkCoord))
+        {
+            GenerateChunk(ChunkCoord);
+            ChunksGeneratedThisFrame++;
+        }
+    }
+    
+    // Unload distant chunks
+    for (const FVector2D& ChunkCoord : ChunksToUnload)
+    {
+        UnloadChunk(ChunkCoord);
+    }
     ChunksToUnload.Empty();
+}
 
-    // Determinar chunks que devem estar carregados
-    TArray<FVector2D> RequiredChunks;
+void AProceduralWorldGenerator::GenerateChunk(FVector2D ChunkCoord)
+{
+    if (IsChunkLoaded(ChunkCoord))
+    {
+        return;
+    }
+    
+    FChunkData NewChunk;
+    NewChunk.ChunkCoordinates = ChunkCoord;
+    NewChunk.bIsLoaded = true;
+    NewChunk.bIsGenerated = false;
+    
+    // Calculate consciousness influence at chunk center
+    FVector ChunkWorldLocation = ChunkToWorldLocation(ChunkCoord);
+    NewChunk.ConsciousnessLevel = CalculateConsciousnessAtLocation(ChunkWorldLocation);
+    
+    // Get biome for this chunk
+    FBiomeData ChunkBiome = GetBiomeAtLocation(ChunkWorldLocation);
+    
+    // Generate terrain mesh
+    TArray<FVector> Vertices;
+    TArray<int32> Triangles;
+    GenerateTerrainMesh(ChunkCoord, Vertices, Triangles);
+    
+    // Place vegetation based on biome and consciousness
+    PlaceVegetation(ChunkCoord, ChunkBiome);
+    
+    // Spawn consciousness elements if threshold is met
+    if (NewChunk.ConsciousnessLevel >= ConsciousnessGenerationThreshold)
+    {
+        SpawnConsciousnessElements(ChunkCoord, NewChunk.ConsciousnessLevel);
+    }
+    
+    // Optimize performance
+    OptimizeChunkPerformance(ChunkCoord);
+    
+    NewChunk.bIsGenerated = true;
+    LoadedChunks.Add(ChunkCoord, NewChunk);
+    
+    OnChunkGenerated(ChunkCoord);
+    
+    UE_LOG(LogTemp, Log, TEXT("Generated chunk at (%f, %f) with consciousness level %f"), 
+           ChunkCoord.X, ChunkCoord.Y, NewChunk.ConsciousnessLevel);
+}
+
+void AProceduralWorldGenerator::UnloadChunk(FVector2D ChunkCoord)
+{
+    FChunkData* ChunkData = LoadedChunks.Find(ChunkCoord);
+    if (!ChunkData)
+    {
+        return;
+    }
+    
+    // Destroy all generated actors
+    for (AActor* Actor : ChunkData->GeneratedActors)
+    {
+        if (IsValid(Actor))
+        {
+            Actor->Destroy();
+        }
+    }
+    
+    LoadedChunks.Remove(ChunkCoord);
+    OnChunkUnloaded(ChunkCoord);
+    
+    UE_LOG(LogTemp, Log, TEXT("Unloaded chunk at (%f, %f)"), ChunkCoord.X, ChunkCoord.Y);
+}
+
+void AProceduralWorldGenerator::UpdateWorldAroundPlayer(FVector PlayerLocation)
+{
+    FVector2D PlayerChunk = WorldToChunkCoordinates(PlayerLocation);
+    
+    // Queue chunks for generation
     for (int32 X = -ViewDistance; X <= ViewDistance; X++)
     {
         for (int32 Y = -ViewDistance; Y <= ViewDistance; Y++)
         {
             FVector2D ChunkCoord = PlayerChunk + FVector2D(X, Y);
-            RequiredChunks.Add(ChunkCoord);
-
-            // Verificar se chunk precisa ser gerado
-            if (!LoadedChunks.Contains(ChunkCoord))
+            
+            if (!IsChunkLoaded(ChunkCoord) && !ChunksToGenerate.Contains(ChunkCoord))
             {
                 ChunksToGenerate.Add(ChunkCoord);
             }
         }
     }
-
-    // Determinar chunks para descarregar
-    for (auto& ChunkPair : LoadedChunks)
+    
+    // Queue distant chunks for unloading
+    TArray<FVector2D> ChunksToCheck;
+    LoadedChunks.GetKeys(ChunksToCheck);
+    
+    for (const FVector2D& ChunkCoord : ChunksToCheck)
     {
-        if (!RequiredChunks.Contains(ChunkPair.Key))
+        float Distance = FVector2D::Distance(PlayerChunk, ChunkCoord);
+        if (Distance > ViewDistance + 1)
         {
-            ChunksToUnload.Add(ChunkPair.Key);
+            ChunksToUnload.AddUnique(ChunkCoord);
         }
-    }
-
-    // Processar chunks (limitar para evitar lag)
-    int32 ChunksProcessedThisFrame = 0;
-    const int32 MaxChunksPerFrame = 2;
-
-    // Gerar novos chunks
-    for (const FVector2D& ChunkCoord : ChunksToGenerate)
-    {
-        if (ChunksProcessedThisFrame >= MaxChunksPerFrame) break;
-        GenerateChunk(ChunkCoord);
-        ChunksProcessedThisFrame++;
-    }
-
-    // Descarregar chunks distantes
-    for (const FVector2D& ChunkCoord : ChunksToUnload)
-    {
-        UnloadChunk(ChunkCoord);
     }
 }
 
-void AProceduralWorldGenerator::GenerateChunk(const FVector2D& ChunkCoord)
+float AProceduralWorldGenerator::GetHeightAtLocation(FVector2D WorldLocation)
 {
-    FChunkData NewChunk;
-    NewChunk.ChunkCoordinates = ChunkCoord;
-    NewChunk.bIsLoaded = true;
-    NewChunk.bIsGenerated = false;
-
-    // Gerar terreno
-    GenerateTerrain(NewChunk);
-
-    // Gerar vegetação
-    GenerateVegetation(NewChunk);
-
-    // Gerar estruturas
-    GenerateStructures(NewChunk);
-
-    NewChunk.bIsGenerated = true;
-    LoadedChunks.Add(ChunkCoord, NewChunk);
-
-    // Notificar Blueprint
-    OnChunkGenerated(ChunkCoord);
-
-    UE_LOG(LogTemp, Log, TEXT("Generated chunk at (%f, %f)"), ChunkCoord.X, ChunkCoord.Y);
+    if (!NoiseGenerator)
+    {
+        return 0.0f;
+    }
+    
+    float BaseHeight = NoiseGenerator->GetNoise(WorldLocation.X, WorldLocation.Y) * 500.0f;
+    float DetailHeight = NoiseGenerator->GetNoise(WorldLocation.X * 4, WorldLocation.Y * 4) * 100.0f;
+    
+    // Apply consciousness influence to terrain height
+    FVector WorldLoc3D(WorldLocation.X, WorldLocation.Y, 0.0f);
+    float ConsciousnessInfluence = GetConsciousnessInfluenceAtLocation(WorldLoc3D);
+    float ConsciousnessModifier = ConsciousnessInfluence * 200.0f;
+    
+    return BaseHeight + DetailHeight + ConsciousnessModifier;
 }
 
-void AProceduralWorldGenerator::UnloadChunk(const FVector2D& ChunkCoord)
+void AProceduralWorldGenerator::GenerateTerrainMesh(FVector2D ChunkCoord, TArray<FVector>& Vertices, TArray<int32>& Triangles)
 {
-    if (LoadedChunks.Contains(ChunkCoord))
+    const int32 Resolution = 32;
+    const float StepSize = ChunkSize / (float)Resolution;
+    
+    FVector ChunkWorldPos = ChunkToWorldLocation(ChunkCoord);
+    
+    // Generate vertices
+    for (int32 Y = 0; Y <= Resolution; Y++)
     {
-        LoadedChunks.Remove(ChunkCoord);
-        OnChunkUnloaded(ChunkCoord);
-        UE_LOG(LogTemp, Log, TEXT("Unloaded chunk at (%f, %f)"), ChunkCoord.X, ChunkCoord.Y);
+        for (int32 X = 0; X <= Resolution; X++)
+        {
+            FVector2D WorldPos2D = FVector2D(ChunkWorldPos.X + X * StepSize, ChunkWorldPos.Y + Y * StepSize);
+            float Height = GetHeightAtLocation(WorldPos2D);
+            
+            Vertices.Add(FVector(X * StepSize, Y * StepSize, Height));
+        }
+    }
+    
+    // Generate triangles
+    for (int32 Y = 0; Y < Resolution; Y++)
+    {
+        for (int32 X = 0; X < Resolution; X++)
+        {
+            int32 i = Y * (Resolution + 1) + X;
+            
+            // First triangle
+            Triangles.Add(i);
+            Triangles.Add(i + Resolution + 1);
+            Triangles.Add(i + 1);
+            
+            // Second triangle
+            Triangles.Add(i + 1);
+            Triangles.Add(i + Resolution + 1);
+            Triangles.Add(i + Resolution + 2);
+        }
     }
 }
 
-void AProceduralWorldGenerator::GenerateTerrain(FChunkData& ChunkData)
+void AProceduralWorldGenerator::PlaceVegetation(FVector2D ChunkCoord, const FBiomeData& Biome)
 {
-    const int32 VerticesPerSide = 33; // 32x32 quads
-    const float VertexSpacing = ChunkSize / (VerticesPerSide - 1);
-
-    TArray<FVector> Vertices;
-    TArray<int32> Triangles;
-    TArray<FVector2D> UVs;
-    TArray<FVector> Normals;
-
-    // Gerar vértices
-    for (int32 Y = 0; Y < VerticesPerSide; Y++)
+    if (Biome.VegetationMeshes.Num() == 0)
     {
-        for (int32 X = 0; X < VerticesPerSide; X++)
-        {
-            float WorldX = ChunkData.ChunkCoordinates.X * ChunkSize + X * VertexSpacing;
-            float WorldY = ChunkData.ChunkCoordinates.Y * ChunkSize + Y * VertexSpacing;
-            float Height = GenerateHeight(WorldX, WorldY);
-
-            Vertices.Add(FVector(X * VertexSpacing, Y * VertexSpacing, Height));
-            UVs.Add(FVector2D(X / (float)(VerticesPerSide - 1), Y / (float)(VerticesPerSide - 1)));
-            ChunkData.HeightmapData.Add(FVector(WorldX, WorldY, Height));
-
-            // Calcular normal (aproximada)
-            FVector Normal = FVector(0, 0, 1); // Placeholder - calcular baseado em vizinhos
-            Normals.Add(Normal);
-        }
+        return;
     }
-
-    // Gerar triângulos
-    for (int32 Y = 0; Y < VerticesPerSide - 1; Y++)
+    
+    FVector ChunkWorldPos = ChunkToWorldLocation(ChunkCoord);
+    const int32 VegetationCount = FMath::RandRange(50, 200);
+    
+    for (int32 i = 0; i < VegetationCount; i++)
     {
-        for (int32 X = 0; X < VerticesPerSide - 1; X++)
-        {
-            int32 BottomLeft = Y * VerticesPerSide + X;
-            int32 BottomRight = BottomLeft + 1;
-            int32 TopLeft = (Y + 1) * VerticesPerSide + X;
-            int32 TopRight = TopLeft + 1;
-
-            // Primeiro triângulo
-            Triangles.Add(BottomLeft);
-            Triangles.Add(TopLeft);
-            Triangles.Add(BottomRight);
-
-            // Segundo triângulo
-            Triangles.Add(BottomRight);
-            Triangles.Add(TopLeft);
-            Triangles.Add(TopRight);
-        }
-    }
-
-    // Determinar bioma para este chunk
-    float CenterX = ChunkData.ChunkCoordinates.X * ChunkSize + ChunkSize * 0.5f;
-    float CenterY = ChunkData.ChunkCoordinates.Y * ChunkSize + ChunkSize * 0.5f;
-    float CenterHeight = GenerateHeight(CenterX, CenterY);
-    ChunkData.BiomeData = DetermineBiome(CenterX, CenterY, CenterHeight);
-
-    // Criar mesh procedural
-    if (TerrainMesh)
-    {
-        TerrainMesh->CreateMeshSection(
-            LoadedChunks.Num(), // Section ID baseado no número de chunks
-            Vertices,
-            Triangles,
-            Normals,
-            UVs,
-            TArray<FColor>(),
-            TArray<FProcMeshTangent>(),
-            true
+        FVector2D RandomOffset(
+            FMath::RandRange(-ChunkSize * 0.5f, ChunkSize * 0.5f),
+            FMath::RandRange(-ChunkSize * 0.5f, ChunkSize * 0.5f)
         );
-
-        // Aplicar material do bioma se disponível
-        if (ChunkData.BiomeData.TerrainMaterial)
+        
+        FVector2D VegWorldPos2D = FVector2D(ChunkWorldPos.X, ChunkWorldPos.Y) + RandomOffset;
+        float Height = GetHeightAtLocation(VegWorldPos2D);
+        FVector VegWorldPos(VegWorldPos2D.X, VegWorldPos2D.Y, Height);
+        
+        // Check consciousness influence for vegetation density
+        float ConsciousnessInfluence = GetConsciousnessInfluenceAtLocation(VegWorldPos);
+        if (FMath::RandRange(0.0f, 1.0f) > ConsciousnessInfluence * Biome.ConsciousnessResonance)
         {
-            TerrainMesh->SetMaterial(LoadedChunks.Num(), ChunkData.BiomeData.TerrainMaterial);
+            continue;
+        }
+        
+        UStaticMesh* VegMesh = Biome.VegetationMeshes[FMath::RandRange(0, Biome.VegetationMeshes.Num() - 1)];
+        if (!VegMesh)
+        {
+            continue;
+        }
+        
+        FTransform VegTransform;
+        VegTransform.SetLocation(VegWorldPos);
+        VegTransform.SetRotation(FQuat::MakeFromEuler(FVector(0, 0, FMath::RandRange(0.0f, 360.0f))));
+        VegTransform.SetScale3D(FVector(FMath::RandRange(0.8f, 1.2f)));
+        
+        if (bUseInstancedMeshes)
+        {
+            TArray<FTransform> Transforms;
+            Transforms.Add(VegTransform);
+            CreateInstancedMeshForChunk(ChunkCoord, VegMesh, Transforms);
         }
     }
 }
 
-float AProceduralWorldGenerator::GenerateHeight(float X, float Y) const
+float AProceduralWorldGenerator::CalculateConsciousnessAtLocation(FVector WorldLocation)
 {
-    // Combinar múltiplas octavas de noise para terreno mais interessante
-    float Height = 0.0f;
+    if (!ConsciousnessSystem || !bUseConsciousnessBasedGeneration)
+    {
+        return 0.5f; // Default neutral consciousness
+    }
     
-    // Base terrain
-    Height += FractalNoise(X * NoiseScale, Y * NoiseScale, 4) * HeightMultiplier;
+    // Get consciousness data from the consciousness system
+    // This would integrate with the actual consciousness system implementation
+    float BaseConsciousness = 0.5f;
     
-    // Montanhas
-    Height += RidgedNoise(X * NoiseScale * 0.5f, Y * NoiseScale * 0.5f) * HeightMultiplier * 2.0f;
+    // Add noise-based consciousness variation
+    if (NoiseGenerator)
+    {
+        float ConsciousnessNoise = NoiseGenerator->GetNoise(
+            WorldLocation.X * 0.001f, 
+            WorldLocation.Y * 0.001f, 
+            0.0f
+        );
+        BaseConsciousness += ConsciousnessNoise * 0.3f;
+    }
     
-    // Detalhes finos
-    Height += PerlinNoise(X * NoiseScale * 4.0f, Y * NoiseScale * 4.0f) * HeightMultiplier * 0.1f;
-
-    return FMath::Max(0.0f, Height);
+    return FMath::Clamp(BaseConsciousness, 0.0f, 1.0f);
 }
 
-FBiomeData AProceduralWorldGenerator::DetermineBiome(float X, float Y, float Height) const
+FBiomeData AProceduralWorldGenerator::GetBiomeAtLocation(FVector WorldLocation)
 {
     if (AvailableBiomes.Num() == 0)
     {
-        return FBiomeData(); // Retornar bioma vazio se não há biomas definidos
+        return FBiomeData();
     }
-
-    // Determinar bioma baseado em altura e noise de temperatura/humidade
-    float Temperature = PerlinNoise(X * 0.001f, Y * 0.001f) * 30.0f + 10.0f; // -20 a 40 graus
-    float Humidity = PerlinNoise(X * 0.002f + 1000.0f, Y * 0.002f + 1000.0f) * 0.5f + 0.5f; // 0 a 1
-
-    // Ajustar temperatura baseado na altura
-    Temperature -= Height * 0.01f; // Mais frio em altitudes maiores
-
-    // Encontrar bioma mais adequado
-    int32 BestBiomeIndex = 0;
-    float BestScore = FLT_MAX;
-
-    for (int32 i = 0; i < AvailableBiomes.Num(); i++)
+    
+    float ConsciousnessLevel = CalculateConsciousnessAtLocation(WorldLocation);
+    
+    // Select biome based on consciousness level
+    if (ConsciousnessLevel < 0.3f)
     {
-        const FBiomeData& Biome = AvailableBiomes[i];
-        
-        float TempDiff = FMath::Abs(Temperature - Biome.Temperature);
-        float HumidityDiff = FMath::Abs(Humidity - Biome.Humidity);
-        float ElevationDiff = FMath::Abs(Height - Biome.Elevation) * 0.001f; // Menor peso para elevação
-        
-        float Score = TempDiff + HumidityDiff * 50.0f + ElevationDiff;
-        
-        if (Score < BestScore)
-        {
-            BestScore = Score;
-            BestBiomeIndex = i;
-        }
+        return AvailableBiomes[1]; // Grounded
     }
-
-    return AvailableBiomes[BestBiomeIndex];
+    else if (ConsciousnessLevel < 0.7f)
+    {
+        return AvailableBiomes[0]; // Meditative
+    }
+    else
+    {
+        return AvailableBiomes[2]; // Transcendent
+    }
 }
 
-void AProceduralWorldGenerator::GenerateVegetation(const FChunkData& ChunkData)
+float AProceduralWorldGenerator::GetConsciousnessInfluenceAtLocation(FVector WorldLocation)
 {
-    if (ChunkData.BiomeData.VegetationMeshes.Num() == 0) return;
+    return CalculateConsciousnessAtLocation(WorldLocation);
+}
 
-    const int32 VegetationSamples = 100; // Número de tentativas de colocação por chunk
-    
-    for (int32 i = 0; i < VegetationSamples; i++)
+void AProceduralWorldGenerator::UpdateChunkConsciousness(FVector2D ChunkCoord)
+{
+    FChunkData* ChunkData = LoadedChunks.Find(ChunkCoord);
+    if (!ChunkData)
     {
-        float LocalX = FMath::RandRange(0.0f, ChunkSize);
-        float LocalY = FMath::RandRange(0.0f, ChunkSize);
-        float WorldX = ChunkData.ChunkCoordinates.X * ChunkSize + LocalX;
-        float WorldY = ChunkData.ChunkCoordinates.Y * ChunkSize + LocalY;
-        float Height = GenerateHeight(WorldX, WorldY);
-
-        if (ShouldPlaceVegetation(WorldX, WorldY, Height, ChunkData.BiomeData))
+        return;
+    }
+    
+    FVector ChunkWorldLocation = ChunkToWorldLocation(ChunkCoord);
+    float NewConsciousnessLevel = CalculateConsciousnessAtLocation(ChunkWorldLocation);
+    
+    if (FMath::Abs(NewConsciousnessLevel - ChunkData->ConsciousnessLevel) > 0.1f)
+    {
+        ChunkData->ConsciousnessLevel = NewConsciousnessLevel;
+        OnConsciousnessLevelChanged(ChunkCoord, NewConsciousnessLevel);
+        
+        // Respawn consciousness elements if needed
+        if (NewConsciousnessLevel >= ConsciousnessGenerationThreshold)
         {
-            // Escolher mesh aleatória da vegetação do bioma
-            int32 MeshIndex = FMath::RandRange(0, ChunkData.BiomeData.VegetationMeshes.Num() - 1);
-            UStaticMesh* VegMesh = ChunkData.BiomeData.VegetationMeshes[MeshIndex];
+            SpawnConsciousnessElements(ChunkCoord, NewConsciousnessLevel);
+        }
+    }
+}
 
-            if (VegMesh && GetWorld())
+void AProceduralWorldGenerator::SpawnConsciousnessElements(FVector2D ChunkCoord, float ConsciousnessLevel)
+{
+    // This would spawn special consciousness-related elements
+    // Integration point with consciousness system
+    UE_LOG(LogTemp, Log, TEXT("Spawning consciousness elements at chunk (%f, %f) with level %f"), 
+           ChunkCoord.X, ChunkCoord.Y, ConsciousnessLevel);
+}
+
+void AProceduralWorldGenerator::OptimizeChunkPerformance(FVector2D ChunkCoord)
+{
+    if (PhysicsOptimizer)
+    {
+        // Apply physics optimizations to chunk
+        FChunkData* ChunkData = LoadedChunks.Find(ChunkCoord);
+        if (ChunkData)
+        {
+            for (AActor* Actor : ChunkData->GeneratedActors)
             {
-                // Spawnar actor de vegetação
-                FVector SpawnLocation = FVector(WorldX, WorldY, Height);
-                FRotator SpawnRotation = FRotator(0, FMath::RandRange(0.0f, 360.0f), 0);
-                
-                AStaticMeshActor* VegActor = GetWorld()->SpawnActor<AStaticMeshActor>(
-                    AStaticMeshActor::StaticClass(),
-                    SpawnLocation,
-                    SpawnRotation
-                );
-
-                if (VegActor)
+                if (IsValid(Actor))
                 {
-                    VegActor->GetStaticMeshComponent()->SetStaticMesh(VegMesh);
-                    
-                    // Variação de escala
-                    float Scale = FMath::RandRange(0.8f, 1.2f);
-                    VegActor->SetActorScale3D(FVector(Scale));
+                    // Apply physics optimizations
+                    // This would integrate with the PhysicsOptimizer
                 }
             }
         }
     }
 }
 
-bool AProceduralWorldGenerator::ShouldPlaceVegetation(float X, float Y, float Height, const FBiomeData& Biome) const
+UInstancedStaticMeshComponent* AProceduralWorldGenerator::GetOrCreateInstancedMeshComponent(UStaticMesh* Mesh)
 {
-    // Verificar inclinação do terreno
-    float SlopeThreshold = 0.7f; // Não colocar vegetação em encostas muito íngremes
-    
-    // Usar noise para distribuição natural
-    float VegetationDensity = PerlinNoise(X * 0.05f, Y * 0.05f) * 0.5f + 0.5f;
-    
-    // Diferentes densidades para diferentes biomas
-    float BiomeDensity = 0.3f; // Padrão
-    if (Biome.BiomeName == TEXT("Forest"))
+    if (!Mesh)
     {
-        BiomeDensity = 0.7f;
-    }
-    else if (Biome.BiomeName == TEXT("Grassland"))
-    {
-        BiomeDensity = 0.4f;
-    }
-    else if (Biome.BiomeName == TEXT("Mountain"))
-    {
-        BiomeDensity = 0.1f;
-    }
-
-    return VegetationDensity < BiomeDensity && Height > 10.0f && Height < 1000.0f;
-}
-
-void AProceduralWorldGenerator::GenerateStructures(const FChunkData& ChunkData)
-{
-    // Estruturas são mais raras que vegetação
-    const int32 StructureSamples = 5;
-    
-    for (int32 i = 0; i < StructureSamples; i++)
-    {
-        float LocalX = FMath::RandRange(0.0f, ChunkSize);
-        float LocalY = FMath::RandRange(0.0f, ChunkSize);
-        float WorldX = ChunkData.ChunkCoordinates.X * ChunkSize + LocalX;
-        float WorldY = ChunkData.ChunkCoordinates.Y * ChunkSize + LocalY;
-        float Height = GenerateHeight(WorldX, WorldY);
-
-        if (ShouldPlaceStructure(WorldX, WorldY, Height))
-        {
-            // Placeholder para estruturas - implementar com assets específicos
-            UE_LOG(LogTemp, Log, TEXT("Would place structure at (%f, %f, %f)"), WorldX, WorldY, Height);
-        }
-    }
-}
-
-bool AProceduralWorldGenerator::ShouldPlaceStructure(float X, float Y, float Height) const
-{
-    // Estruturas são muito raras
-    float StructureNoise = PerlinNoise(X * 0.001f, Y * 0.001f);
-    return StructureNoise > 0.95f && Height > 50.0f && Height < 500.0f;
-}
-
-float AProceduralWorldGenerator::PerlinNoise(float X, float Y) const
-{
-    // Implementação simplificada de Perlin noise
-    return FMath::PerlinNoise2D(FVector2D(X, Y));
-}
-
-float AProceduralWorldGenerator::FractalNoise(float X, float Y, int32 Octaves) const
-{
-    float Result = 0.0f;
-    float Amplitude = 1.0f;
-    float Frequency = 1.0f;
-    float MaxValue = 0.0f;
-
-    for (int32 i = 0; i < Octaves; i++)
-    {
-        Result += PerlinNoise(X * Frequency, Y * Frequency) * Amplitude;
-        MaxValue += Amplitude;
-        Amplitude *= 0.5f;
-        Frequency *= 2.0f;
-    }
-
-    return Result / MaxValue;
-}
-
-float AProceduralWorldGenerator::RidgedNoise(float X, float Y) const
-{
-    float Noise = PerlinNoise(X, Y);
-    return 1.0f - FMath::Abs(Noise);
-}
-
-// Implementações das funções públicas
-void AProceduralWorldGenerator::RegenerateWorld()
-{
-    // Limpar chunks existentes
-    LoadedChunks.Empty();
-    
-    // Limpar mesh
-    if (TerrainMesh)
-    {
-        TerrainMesh->ClearAllMeshSections();
+        return nullptr;
     }
     
-    // Regenerar
-    UpdateChunks();
+    UInstancedStaticMeshComponent** Found = InstancedMeshComponents.Find(Mesh);
+    if (Found)
+    {
+        return *Found;
+    }
+    
+    UInstancedStaticMeshComponent* NewComponent = CreateDefaultSubobject<UInstancedStaticMeshComponent>(
+        *FString::Printf(TEXT("InstancedMesh_%s"), *Mesh->GetName())
+    );
+    NewComponent->SetStaticMesh(Mesh);
+    NewComponent->AttachToComponent(RootComponent, FAttachmentTransformRules::KeepWorldTransform);
+    
+    InstancedMeshComponents.Add(Mesh, NewComponent);
+    return NewComponent;
 }
 
-void AProceduralWorldGenerator::SetSeed(int32 NewSeed)
+void AProceduralWorldGenerator::CreateInstancedMeshForChunk(FVector2D ChunkCoord, UStaticMesh* Mesh, const TArray<FTransform>& Transforms)
 {
-    Seed = NewSeed;
-    FMath::RandInit(Seed);
-    RegenerateWorld();
+    UInstancedStaticMeshComponent* InstancedComponent = GetOrCreateInstancedMeshComponent(Mesh);
+    if (!InstancedComponent)
+    {
+        return;
+    }
+    
+    for (const FTransform& Transform : Transforms)
+    {
+        InstancedComponent->AddInstance(Transform);
+    }
 }
 
-FBiomeData AProceduralWorldGenerator::GetBiomeAtLocation(const FVector& WorldLocation) const
+FVector2D AProceduralWorldGenerator::WorldToChunkCoordinates(FVector WorldLocation)
 {
-    float Height = GenerateHeight(WorldLocation.X, WorldLocation.Y);
-    return DetermineBiome(WorldLocation.X, WorldLocation.Y, Height);
+    return FVector2D(
+        FMath::FloorToFloat(WorldLocation.X / ChunkSize),
+        FMath::FloorToFloat(WorldLocation.Y / ChunkSize)
+    );
 }
 
-float AProceduralWorldGenerator::GetHeightAtLocation(const FVector& WorldLocation) const
+FVector AProceduralWorldGenerator::ChunkToWorldLocation(FVector2D ChunkCoord)
 {
-    return GenerateHeight(WorldLocation.X, WorldLocation.Y);
+    return FVector(
+        ChunkCoord.X * ChunkSize + ChunkSize * 0.5f,
+        ChunkCoord.Y * ChunkSize + ChunkSize * 0.5f,
+        0.0f
+    );
+}
+
+bool AProceduralWorldGenerator::IsChunkLoaded(FVector2D ChunkCoord)
+{
+    return LoadedChunks.Contains(ChunkCoord);
+}
+
+void AProceduralWorldGenerator::ClearAllChunks()
+{
+    TArray<FVector2D> ChunksToRemove;
+    LoadedChunks.GetKeys(ChunksToRemove);
+    
+    for (const FVector2D& ChunkCoord : ChunksToRemove)
+    {
+        UnloadChunk(ChunkCoord);
+    }
+    
+    ChunksToGenerate.Empty();
+    ChunksToUnload.Empty();
 }
