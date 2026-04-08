@@ -1,0 +1,141 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "AIController.h"
+#include "Perception/AIPerceptionComponent.h"
+#include "BehaviorTree/BehaviorTreeComponent.h"
+#include "BehaviorTree/BlackboardComponent.h"
+#include "CombatAITypes.h"
+#include "DinosaurAIController.generated.h"
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnThreatDetected, AActor*, ThreatActor, EThreatLevel, ThreatLevel);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnCombatStateChanged, ECombatState, NewState);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnDamageReceived, float, Damage, AActor*, DamageSource, FVector, HitLocation);
+
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API ADinosaurAIController : public AAIController
+{
+    GENERATED_BODY()
+
+public:
+    ADinosaurAIController(const FObjectInitializer& ObjectInitializer = FObjectInitializer::Get());
+
+    virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
+
+    // Perception Events
+    UFUNCTION()
+    void OnPerceptionUpdated(const TArray<AActor*>& UpdatedActors);
+
+    UFUNCTION()
+    void OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus);
+
+    // Combat State Management
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void SetCombatState(ECombatState NewState);
+
+    UFUNCTION(BlueprintPure, Category = "Combat AI")
+    ECombatState GetCombatState() const { return CurrentCombatState; }
+
+    // Threat Assessment
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void AssessThreat(AActor* PotentialThreat);
+
+    UFUNCTION(BlueprintPure, Category = "Combat AI")
+    EThreatLevel CalculateThreatLevel(AActor* Actor) const;
+
+    UFUNCTION(BlueprintPure, Category = "Combat AI")
+    AActor* GetPrimaryThreat() const { return PrimaryThreat.ThreatActor; }
+
+    // Behavior Tree Management
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void StartCombatBehavior();
+
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void StopCombatBehavior();
+
+    // Memory System
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void RememberLocation(const FVector& Location, const FString& LocationTag);
+
+    UFUNCTION(BlueprintPure, Category = "Combat AI")
+    FVector GetRememberedLocation(const FString& LocationTag) const;
+
+    // Personality-based decisions
+    UFUNCTION(BlueprintPure, Category = "Combat AI")
+    bool ShouldEngageTarget(AActor* Target) const;
+
+    UFUNCTION(BlueprintPure, Category = "Combat AI")
+    bool ShouldFleeFromTarget(AActor* Target) const;
+
+    UFUNCTION(BlueprintPure, Category = "Combat AI")
+    bool ShouldInvestigateSound(const FVector& SoundLocation, float SoundLoudness) const;
+
+public:
+    // Events
+    UPROPERTY(BlueprintAssignable, Category = "Combat AI Events")
+    FOnThreatDetected OnThreatDetected;
+
+    UPROPERTY(BlueprintAssignable, Category = "Combat AI Events")
+    FOnCombatStateChanged OnCombatStateChanged;
+
+    UPROPERTY(BlueprintAssignable, Category = "Combat AI Events")
+    FOnDamageReceived OnDamageReceived;
+
+protected:
+    // Components
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI Components")
+    class UAIPerceptionComponent* AIPerceptionComponent;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI Components")
+    class UBehaviorTreeComponent* BehaviorTreeComponent;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI Components")
+    class UBlackboardComponent* BlackboardComponent;
+
+    // Combat State
+    UPROPERTY(BlueprintReadOnly, Category = "Combat State")
+    ECombatState CurrentCombatState = ECombatState::Passive;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Combat State")
+    ECombatState PreviousCombatState = ECombatState::Passive;
+
+    // Threat Tracking
+    UPROPERTY(BlueprintReadOnly, Category = "Threat Assessment")
+    FThreatAssessment PrimaryThreat;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Threat Assessment")
+    TArray<FThreatAssessment> KnownThreats;
+
+    // Memory System
+    UPROPERTY(BlueprintReadOnly, Category = "Memory")
+    TMap<FString, FVector> RememberedLocations;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Memory")
+    TMap<AActor*, float> ActorMemory; // Actor -> Last seen time
+
+    // Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI Configuration")
+    float ThreatAssessmentInterval = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI Configuration")
+    float MemoryDecayTime = 30.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI Configuration")
+    float AlertStateTimeout = 10.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI Configuration")
+    bool bEnableAdvancedThreatAssessment = true;
+
+private:
+    // Internal state tracking
+    float LastThreatAssessmentTime = 0.0f;
+    float StateChangeTime = 0.0f;
+
+    // Helper functions
+    void UpdateThreatAssessment();
+    void CleanupMemory();
+    void UpdateBlackboardValues();
+    float CalculateActorThreatScore(AActor* Actor) const;
+    bool IsActorInLineOfSight(AActor* Actor) const;
+};
