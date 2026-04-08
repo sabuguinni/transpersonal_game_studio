@@ -1,0 +1,256 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "MassProcessor.h"
+#include "MassEntityTemplate.h"
+#include "MassCommonFragments.h"
+#include "DinosaurHerdBehavior.generated.h"
+
+// Dinosaur-specific fragments for Mass Entity system
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FDinosaurSpeciesFragment : public FMassFragment
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FString SpeciesName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsHerbivore = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsPackHunter = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float MaxSpeed = 1000.0f; // cm/s
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float DetectionRadius = 2000.0f; // cm
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float ThreatRadius = 5000.0f; // cm
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float Size = 1.0f; // Relative size (0.1 = tiny, 1.0 = medium, 5.0 = massive)
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    int32 UniqueID = 0; // For individual recognition
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FDinosaurHerdFragment : public FMassFragment
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    int32 HerdID = -1;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FVector HerdCenter = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    int32 HerdSize = 1;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsLeader = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float CohesionWeight = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float SeparationWeight = 2.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float AlignmentWeight = 1.0f;
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FDinosaurBehaviorFragment : public FMassFragment
+{
+    GENERATED_BODY()
+
+    UENUM(BlueprintType)
+    enum class EBehaviorState : uint8
+    {
+        Grazing,
+        Wandering,
+        Drinking,
+        Resting,
+        Alert,
+        Fleeing,
+        Hunting,
+        Stalking,
+        Feeding,
+        Socializing
+    };
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    EBehaviorState CurrentState = EBehaviorState::Wandering;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float StateTimer = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FVector TargetLocation = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float AlertLevel = 0.0f; // 0.0 = calm, 1.0 = maximum alert
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float HungerLevel = 0.5f; // 0.0 = full, 1.0 = starving
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float ThirstLevel = 0.5f; // 0.0 = hydrated, 1.0 = dehydrated
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float EnergyLevel = 1.0f; // 0.0 = exhausted, 1.0 = full energy
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FDinosaurPhysicalVariationFragment : public FMassFragment
+{
+    GENERATED_BODY()
+
+    // Physical variations that make each dinosaur unique and recognizable
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FVector ScaleVariation = FVector(1.0f); // XYZ scale multipliers
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FLinearColor ColorTint = FLinearColor::White;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float HornSize = 1.0f; // Relative horn size
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float TailLength = 1.0f; // Relative tail length
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float NeckLength = 1.0f; // Relative neck length
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TArray<FVector> ScarPositions; // Battle scars for recognition
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    int32 AgeCategory = 1; // 0=juvenile, 1=adult, 2=elder
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bHasLimp = false; // Injury affecting movement
+};
+
+/**
+ * Processor for managing herd behavior of herbivorous dinosaurs
+ * Implements flocking behavior: cohesion, separation, alignment
+ */
+UCLASS()
+class TRANSPERSONALGAME_API UDinosaurHerdProcessor : public UMassProcessor
+{
+    GENERATED_BODY()
+
+public:
+    UDinosaurHerdProcessor();
+
+protected:
+    virtual void ConfigureQueries() override;
+    virtual void Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context) override;
+
+private:
+    FMassEntityQuery HerdQuery;
+
+    // Herd behavior parameters
+    UPROPERTY(EditAnywhere, Category = "Herd Behavior")
+    float CohesionRadius = 2000.0f;
+
+    UPROPERTY(EditAnywhere, Category = "Herd Behavior")
+    float SeparationRadius = 500.0f;
+
+    UPROPERTY(EditAnywhere, Category = "Herd Behavior")
+    float AlignmentRadius = 1500.0f;
+
+    UPROPERTY(EditAnywhere, Category = "Herd Behavior")
+    float MaxForce = 500.0f;
+
+    // Calculate flocking forces
+    FVector CalculateCohesion(const FVector& Position, const TArray<FVector>& NeighborPositions);
+    FVector CalculateSeparation(const FVector& Position, const TArray<FVector>& NeighborPositions);
+    FVector CalculateAlignment(const FVector& Velocity, const TArray<FVector>& NeighborVelocities);
+};
+
+/**
+ * Processor for managing predator hunting behavior
+ * Implements pack hunting, stalking, and territorial behavior
+ */
+UCLASS()
+class TRANSPERSONALGAME_API UDinosaurPredatorProcessor : public UMassProcessor
+{
+    GENERATED_BODY()
+
+public:
+    UDinosaurPredatorProcessor();
+
+protected:
+    virtual void ConfigureQueries() override;
+    virtual void Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context) override;
+
+private:
+    FMassEntityQuery PredatorQuery;
+    FMassEntityQuery PreyQuery;
+
+    // Hunting behavior parameters
+    UPROPERTY(EditAnywhere, Category = "Hunting Behavior")
+    float HuntingRadius = 5000.0f;
+
+    UPROPERTY(EditAnywhere, Category = "Hunting Behavior")
+    float StalkDistance = 3000.0f;
+
+    UPROPERTY(EditAnywhere, Category = "Hunting Behavior")
+    float AttackDistance = 200.0f;
+
+    UPROPERTY(EditAnywhere, Category = "Hunting Behavior")
+    float PackCoordinationRadius = 1000.0f;
+
+    // Hunting logic
+    void ProcessSoloHunter(FMassEntityHandle Entity, FDinosaurBehaviorFragment& Behavior, 
+                          const FTransformFragment& Transform, const FDinosaurSpeciesFragment& Species);
+    void ProcessPackHunter(FMassEntityHandle Entity, FDinosaurBehaviorFragment& Behavior, 
+                          const FTransformFragment& Transform, const FDinosaurSpeciesFragment& Species);
+    FMassEntityHandle FindNearestPrey(const FVector& PredatorLocation, float SearchRadius);
+};
+
+/**
+ * Processor for managing dinosaur life simulation
+ * Handles hunger, thirst, energy, aging, and natural behaviors
+ */
+UCLASS()
+class TRANSPERSONALGAME_API UDinosaurLifeSimulationProcessor : public UMassProcessor
+{
+    GENERATED_BODY()
+
+public:
+    UDinosaurLifeSimulationProcessor();
+
+protected:
+    virtual void ConfigureQueries() override;
+    virtual void Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context) override;
+
+private:
+    FMassEntityQuery LifeSimulationQuery;
+
+    // Life simulation parameters
+    UPROPERTY(EditAnywhere, Category = "Life Simulation")
+    float HungerIncreaseRate = 0.1f; // Per minute
+
+    UPROPERTY(EditAnywhere, Category = "Life Simulation")
+    float ThirstIncreaseRate = 0.15f; // Per minute
+
+    UPROPERTY(EditAnywhere, Category = "Life Simulation")
+    float EnergyDecreaseRate = 0.05f; // Per minute
+
+    UPROPERTY(EditAnywhere, Category = "Life Simulation")
+    float RestEnergyGainRate = 0.3f; // Per minute while resting
+
+    // Behavior state transitions
+    void UpdateBehaviorState(FDinosaurBehaviorFragment& Behavior, const FDinosaurSpeciesFragment& Species);
+    bool ShouldSeekFood(const FDinosaurBehaviorFragment& Behavior);
+    bool ShouldSeekWater(const FDinosaurBehaviorFragment& Behavior);
+    bool ShouldRest(const FDinosaurBehaviorFragment& Behavior);
+};
