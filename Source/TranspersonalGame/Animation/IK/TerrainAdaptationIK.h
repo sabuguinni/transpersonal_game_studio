@@ -1,99 +1,18 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Animation/AnimInstance.h"
-#include "Animation/AnimNodeBase.h"
-#include "BoneContainer.h"
+#include "UObject/NoExportTypes.h"
 #include "Engine/Engine.h"
 #include "TerrainAdaptationIK.generated.h"
 
+class USkeletalMeshComponent;
+
 /**
- * Advanced IK system for foot placement on irregular prehistoric terrain
- * Ensures realistic foot contact with rocks, roots, uneven ground
- * 
- * Critical for maintaining immersion - every step must feel grounded and intentional
+ * Sistema de IK para adaptação automática dos pés ao terreno irregular
+ * Garante que o paleontologista sempre tenha contato realista com o solo
+ * independente da inclinação ou irregularidade do terreno
  */
-
-USTRUCT(BlueprintType)
-struct FFootIKData
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FBoneReference FootBone;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FBoneReference IKBone;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FVector FootOffset = FVector::ZeroVector;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FRotator FootRotation = FRotator::ZeroRotator;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float IKAlpha = 1.0f;
-
-    // Runtime data
-    FVector TargetLocation = FVector::ZeroVector;
-    FRotator TargetRotation = FRotator::ZeroRotator;
-    bool bValidIKTarget = false;
-    float LastTraceTime = 0.0f;
-
-    FFootIKData()
-    {
-        FootOffset = FVector::ZeroVector;
-        FootRotation = FRotator::ZeroRotator;
-        IKAlpha = 1.0f;
-        TargetLocation = FVector::ZeroVector;
-        TargetRotation = FRotator::ZeroRotator;
-        bValidIKTarget = false;
-        LastTraceTime = 0.0f;
-    }
-};
-
-USTRUCT(BlueprintType)
-struct FTerrainIKSettings
-{
-    GENERATED_BODY()
-
-    // Trace settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "10.0", ClampMax = "200.0"))
-    float TraceDistance = 50.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.1", ClampMax = "50.0"))
-    float InterpolationSpeed = 15.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "90.0"))
-    float MaxSlopeAngle = 45.0f;
-
-    // Foot placement precision
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.1", ClampMax = "10.0"))
-    float FootRadius = 5.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float TerrainConformity = 0.8f;
-
-    // Performance settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.01", ClampMax = "0.5"))
-    float TraceFrequency = 0.1f; // Seconds between traces
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bEnableDebugDraw = false;
-
-    FTerrainIKSettings()
-    {
-        TraceDistance = 50.0f;
-        InterpolationSpeed = 15.0f;
-        MaxSlopeAngle = 45.0f;
-        FootRadius = 5.0f;
-        TerrainConformity = 0.8f;
-        TraceFrequency = 0.1f;
-        bEnableDebugDraw = false;
-    }
-};
-
-UCLASS(BlueprintType, Blueprintable)
+UCLASS(BlueprintType, Category = "Transpersonal Game|Animation|IK")
 class TRANSPERSONALGAME_API UTerrainAdaptationIK : public UObject
 {
     GENERATED_BODY()
@@ -101,56 +20,70 @@ class TRANSPERSONALGAME_API UTerrainAdaptationIK : public UObject
 public:
     UTerrainAdaptationIK();
 
-    // Main IK configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK Setup")
-    TArray<FFootIKData> FootIKArray;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK Setup")
-    FTerrainIKSettings IKSettings;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK Setup")
-    FBoneReference PelvisBone;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK Setup", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float PelvisAdjustmentAlpha = 0.5f;
-
-    // Runtime functions
+    /** Atualiza o sistema de IK para ambos os pés */
     UFUNCTION(BlueprintCallable, Category = "Terrain IK")
-    void UpdateFootIK(class USkeletalMeshComponent* SkelMeshComp, float DeltaTime);
-
+    void UpdateFootIK(USkeletalMeshComponent* SkeletalMesh, float DeltaTime);
+    
+    /** Obtém a localização IK para um pé específico */
+    UFUNCTION(BlueprintPure, Category = "Terrain IK")
+    FVector GetFootIKLocation(const FName& FootBoneName, USkeletalMeshComponent* SkeletalMesh);
+    
+    /** Obtém o offset do quadril */
+    UFUNCTION(BlueprintPure, Category = "Terrain IK")
+    float GetHipOffset() const;
+    
+    /** Ativa/desativa debug drawing */
     UFUNCTION(BlueprintCallable, Category = "Terrain IK")
-    void SetIKEnabled(bool bEnabled);
-
-    UFUNCTION(BlueprintPure, Category = "Terrain IK")
-    FVector GetFootIKOffset(int32 FootIndex) const;
-
-    UFUNCTION(BlueprintPure, Category = "Terrain IK")
-    FRotator GetFootIKRotation(int32 FootIndex) const;
-
-    UFUNCTION(BlueprintPure, Category = "Terrain IK")
-    float GetPelvisOffset() const;
+    void SetDebugDrawing(bool bEnabled);
 
 protected:
-    // Internal IK processing
-    bool PerformFootTrace(const FVector& StartLocation, const FVector& TraceDirection, 
-                         FVector& OutHitLocation, FVector& OutHitNormal, UWorld* World);
-
-    void CalculateFootPlacement(FFootIKData& FootData, const FVector& FootWorldLocation, 
-                               UWorld* World, float DeltaTime);
-
-    void UpdatePelvisAdjustment(float DeltaTime);
-
-    FRotator CalculateFootRotationFromNormal(const FVector& SurfaceNormal, 
-                                            const FRotator& CurrentRotation);
-
-private:
-    // Runtime state
-    bool bIKEnabled = true;
-    float PelvisOffset = 0.0f;
-    float TargetPelvisOffset = 0.0f;
-    TArray<FVector> FootTraceStarts;
+    /** Atualiza IK para um pé individual */
+    void UpdateSingleFootIK(USkeletalMeshComponent* SkeletalMesh, 
+        const FName& FootBoneName, const FName& IKBoneName, 
+        float& FootOffset, float DeltaTime);
     
-    // Performance tracking
-    float LastUpdateTime = 0.0f;
-    int32 CurrentTraceIndex = 0;
+    /** Atualiza ajuste do quadril baseado na posição dos pés */
+    void UpdateHipAdjustment(USkeletalMeshComponent* SkeletalMesh, float DeltaTime);
+
+public:
+    /** Distância máxima que o pé pode ser ajustado */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK Settings")
+    float MaxFootOffset;
+    
+    /** Distância do trace para detectar o chão */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK Settings")
+    float FootTraceDistance;
+    
+    /** Velocidade de interpolação do IK */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK Settings")
+    float IKInterpSpeed;
+    
+    /** Proporção de ajuste do quadril baseado na diferença dos pés */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK Settings", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float HipAdjustmentRatio;
+
+protected:
+    /** Nomes dos bones */
+    UPROPERTY(EditAnywhere, Category = "Bone Names")
+    FName LeftFootBoneName;
+    
+    UPROPERTY(EditAnywhere, Category = "Bone Names")
+    FName RightFootBoneName;
+    
+    UPROPERTY(EditAnywhere, Category = "Bone Names")
+    FName LeftIKBoneName;
+    
+    UPROPERTY(EditAnywhere, Category = "Bone Names")
+    FName RightIKBoneName;
+    
+    UPROPERTY(EditAnywhere, Category = "Bone Names")
+    FName HipBoneName;
+    
+    /** Offsets atuais dos pés */
+    float LeftFootIKOffset = 0.0f;
+    float RightFootIKOffset = 0.0f;
+    float HipIKOffset = 0.0f;
+    
+    /** Debug drawing */
+    bool bEnableDebugDrawing;
 };
