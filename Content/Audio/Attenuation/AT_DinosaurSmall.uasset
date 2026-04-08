@@ -1,0 +1,24 @@
+{
+    "Type": "SoundAttenuation",
+    "Properties": {
+        "AttenuationShape": "Sphere",
+        "InnerRadius": 200.0,
+        "FalloffDistance": 1500.0,
+        "AttenuationFunction": "Natural Sound",
+        "EnableVolumeAttenuation": true,
+        "EnableSpatialization": true,
+        "SpatializationMethod": "Binaural",
+        "NonSpatializedRadius": 50.0,
+        "EnableAirAbsorption": true,
+        "AirAbsorptionMinDistance": 500.0,
+        "AirAbsorptionMaxDistance": 2000.0,
+        "AirAbsorptionLowPassCutoff": 8000.0,
+        "AirAbsorptionHighPassCutoff": 100.0,
+        "EnableOcclusion": true,
+        "OcclusionLowPassFilterFrequency": 2000.0,
+        "OcclusionVolumeAttenuation": 0.5,
+        "OcclusionInterpolationTime": 0.5,
+        "Priority": 1.0,
+        "CullDistance": 3000.0
+    }
+}
