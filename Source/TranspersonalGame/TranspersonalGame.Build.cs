@@ -1,5 +1,3 @@
-// Copyright Transpersonal Game Studio 2026
-
 using UnrealBuildTool;
 
 public class TranspersonalGame : ModuleRules
@@ -8,83 +6,71 @@ public class TranspersonalGame : ModuleRules
     {
         PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 
-        // Core dependencies for survival game
+        // Core dependencies
         PublicDependencyModuleNames.AddRange(new string[] 
         { 
             "Core", 
             "CoreUObject", 
             "Engine", 
             "InputCore",
-            "HeadMountedDisplay",
-            "EnhancedInput"
+            "EnhancedInput",
+            "UMG",
+            "Slate",
+            "SlateCore"
         });
 
-        // AI and behavior systems for dinosaur ecosystems
+        // Gameplay dependencies
         PrivateDependencyModuleNames.AddRange(new string[] 
         { 
-            "AIModule",
+            "GameplayAbilities",
+            "GameplayTags",
             "GameplayTasks",
+            "AIModule",
             "NavigationSystem",
-            "MassEntity",
-            "MassMovement",
-            "MassSpawner",
-            "MassCommon",
-            "MassActors",
-            "MassRepresentation",
-            "MassLOD",
-            "MassSimulation",
-            "StructUtils"
+            "Niagara",
+            "AudioMixer",
+            "MetasoundEngine"
         });
 
-        // UE5 specific features
+        // UE5 specific systems
         if (Target.Version.MajorVersion >= 5)
         {
-            PrivateDependencyModuleNames.AddRange(new string[]
+            PublicDependencyModuleNames.AddRange(new string[]
             {
-                "Niagara",
-                "MetasoundEngine",
-                "ProceduralMeshComponent",
-                "Landscape",
-                "Foliage",
-                "PCG" // Procedural Content Generation
+                "PCG",              // Procedural Content Generation
+                "MassEntity",       // Mass AI system
+                "MassMovement",
+                "MassSpawner",
+                "MassActors",
+                "WorldPartition"    // World streaming
             });
         }
 
-        // Physics and destruction for dynamic world
-        PrivateDependencyModuleNames.AddRange(new string[]
-        {
-            "PhysicsCore",
-            "Chaos",
-            "ChaosVehicles",
-            "GeometryCollectionEngine"
-        });
-
-        // Networking for potential multiplayer
-        PrivateDependencyModuleNames.AddRange(new string[]
-        {
-            "OnlineSubsystem",
-            "OnlineSubsystemUtils",
-            "NetCore",
-            "ReplicationGraph"
-        });
-
-        // Development and debugging tools
-        if (Target.Configuration != UnrealTargetConfiguration.Shipping)
+        // Editor-only dependencies
+        if (Target.Type == TargetType.Editor)
         {
             PrivateDependencyModuleNames.AddRange(new string[]
             {
                 "UnrealEd",
-                "ToolMenus",
                 "EditorStyle",
                 "EditorWidgets",
-                "GraphEditor",
-                "Kismet",
-                "PropertyEditor",
-                "SlateCore",
-                "Slate",
-                "ToolWidgets",
-                "WorkspaceMenuStructure"
+                "ToolMenus"
             });
         }
+
+        // Platform-specific optimizations
+        if (Target.Platform == UnrealTargetPlatform.Win64)
+        {
+            PublicDefinitions.Add("PLATFORM_WINDOWS=1");
+        }
+
+        // Performance settings
+        OptimizeCode = CodeOptimization.InShippingBuildsOnly;
+        
+        // Enable IWYU (Include What You Use)
+        bEnforceIWYU = true;
+        
+        // Disable unity builds for better incremental compilation during development
+        bUseUnity = false;
     }
 }
