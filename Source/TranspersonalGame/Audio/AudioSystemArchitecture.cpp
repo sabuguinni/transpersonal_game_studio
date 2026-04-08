@@ -3,324 +3,366 @@
 #include "TimerManager.h"
 #include "Kismet/GameplayStatics.h"
 #include "Components/AudioComponent.h"
-#include "Sound/SoundCue.h"
+#include "MetasoundParameterPack.h"
 
 UAudioSystemManager::UAudioSystemManager()
 {
-    CurrentEmotionalState = EEmotionalState::Calm;
-    CurrentEnvironment = EEnvironmentType::DenseForest;
-    bInSuspiciousSilence = false;
-    SilenceTimer = 0.0f;
-    
-    MasterMusicComponent = nullptr;
-    EnvironmentComponent = nullptr;
-    TensionComponent = nullptr;
+    // Initialize default state
+    CurrentAudioState = FAudioStateData();
 }
 
 void UAudioSystemManager::InitializeAudioSystem()
 {
-    UE_LOG(LogTemp, Warning, TEXT("Audio System: Initializing Jurassic Survival Audio System"));
-    
-    // Create master audio components
+    UE_LOG(LogTemp, Warning, TEXT("Audio System Manager: Initializing adaptive audio system"));
+
+    // Create audio components for each layer
     if (UWorld* World = GetWorld())
     {
-        // Master music component for adaptive soundtrack
-        MasterMusicComponent = UGameplayStatics::CreateSound2D(World, nullptr);
-        if (MasterMusicComponent)
+        // Music layer - handles emotional state and tension
+        if (!MusicAudioComponent)
         {
-            MasterMusicComponent->bAutoDestroy = false;
-            MasterMusicComponent->SetVolumeMultiplier(0.7f); // Base music volume
-        }
-
-        // Environment ambient component
-        EnvironmentComponent = UGameplayStatics::CreateSound2D(World, nullptr);
-        if (EnvironmentComponent)
-        {
-            EnvironmentComponent->bAutoDestroy = false;
-            EnvironmentComponent->SetVolumeMultiplier(0.5f);
-        }
-
-        // Tension layer component
-        TensionComponent = UGameplayStatics::CreateSound2D(World, nullptr);
-        if (TensionComponent)
-        {
-            TensionComponent->bAutoDestroy = false;
-            TensionComponent->SetVolumeMultiplier(0.0f); // Start silent
-        }
-    }
-
-    // Initialize default emotional state
-    SetEmotionalState(EEmotionalState::Calm, 0.0f);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Audio System: Initialization complete"));
-}
-
-void UAudioSystemManager::SetEmotionalState(EEmotionalState NewState, float TransitionTime)
-{
-    if (CurrentEmotionalState == NewState)
-    {
-        return; // Already in this state
-    }
-
-    UE_LOG(LogTemp, Warning, TEXT("Audio System: Transitioning from %d to %d over %.2f seconds"), 
-           (int32)CurrentEmotionalState, (int32)NewState, TransitionTime);
-
-    EEmotionalState PreviousState = CurrentEmotionalState;
-    CurrentEmotionalState = NewState;
-
-    // Handle special state transitions
-    switch (NewState)
-    {
-        case EEmotionalState::Terror:
-            // Immediate response for terror - no gradual transition
-            TransitionTime = FMath::Min(TransitionTime, 0.5f);
-            break;
-            
-        case EEmotionalState::Isolation:
-            // Trigger suspicious silence
-            TriggerSuspiciousSilence(15.0f);
-            break;
-            
-        case EEmotionalState::Wonder:
-            // Break any existing silence
-            if (bInSuspiciousSilence)
+            MusicAudioComponent = UGameplayStatics::CreateSound2D(World, nullptr);
+            if (MusicAudioComponent)
             {
-                BreakSilence(false);
+                MusicAudioComponent->bAutoDestroy = false;
+                MusicAudioComponent->VolumeMultiplier = 0.7f; // Music should support, not dominate
             }
-            break;
-    }
+        }
 
-    TransitionToEmotionalState(NewState, TransitionTime);
-}
-
-void UAudioSystemManager::SetEnvironmentType(EEnvironmentType NewEnvironment, float TransitionTime)
-{
-    if (CurrentEnvironment == NewEnvironment)
-    {
-        return;
-    }
-
-    UE_LOG(LogTemp, Warning, TEXT("Audio System: Environment transition from %d to %d"), 
-           (int32)CurrentEnvironment, (int32)NewEnvironment);
-
-    CurrentEnvironment = NewEnvironment;
-    
-    // Environment changes should be gradual to maintain immersion
-    // Implementation would involve MetaSound parameter changes
-    if (EnvironmentComponent && EnvironmentComponent->IsPlaying())
-    {
-        // Fade out current environment
-        EnvironmentComponent->FadeOut(TransitionTime, 0.0f);
-        
-        // Schedule fade in of new environment
-        FTimerHandle EnvironmentTransitionTimer;
-        GetWorld()->GetTimerManager().SetTimer(EnvironmentTransitionTimer, 
-            [this]()
-            {
-                // Load and play new environment audio
-                UpdateMusicLayers();
-            }, 
-            TransitionTime, false);
-    }
-}
-
-void UAudioSystemManager::UpdateThreatProximity(float DistanceToNearestThreat, bool bIsBeingHunted)
-{
-    // Dynamic threat response based on proximity
-    if (bIsBeingHunted)
-    {
-        SetEmotionalState(EEmotionalState::Terror, 0.2f);
-        return;
-    }
-
-    // Distance-based emotional state calculation
-    if (DistanceToNearestThreat < 500.0f) // Very close
-    {
-        SetEmotionalState(EEmotionalState::Danger, 1.0f);
-    }
-    else if (DistanceToNearestThreat < 1500.0f) // Nearby
-    {
-        SetEmotionalState(EEmotionalState::Tension, 2.0f);
-    }
-    else if (DistanceToNearestThreat > 5000.0f) // Very far or no threats
-    {
-        // Check if we should enter isolation state
-        if (CurrentEmotionalState != EEmotionalState::Wonder)
+        // Ambience layer - environmental sounds and creature presence
+        if (!AmbienceAudioComponent)
         {
-            SetEmotionalState(EEmotionalState::Isolation, 4.0f);
+            AmbienceAudioComponent = UGameplayStatics::CreateSound2D(World, nullptr);
+            if (AmbienceAudioComponent)
+            {
+                AmbienceAudioComponent->bAutoDestroy = false;
+                AmbienceAudioComponent->VolumeMultiplier = 0.8f;
+            }
+        }
+
+        // Creature layer - specific creature behaviors and vocalizations
+        if (!CreatureAudioComponent)
+        {
+            CreatureAudioComponent = UGameplayStatics::CreateSound2D(World, nullptr);
+            if (CreatureAudioComponent)
+            {
+                CreatureAudioComponent->bAutoDestroy = false;
+                CreatureAudioComponent->VolumeMultiplier = 0.9f;
+            }
         }
     }
 
-    // Update tension layer volume based on proximity
-    if (TensionComponent)
+    // Initialize with safe exploration state
+    SetTensionLevel(EAudioTensionLevel::Safe);
+}
+
+void UAudioSystemManager::UpdateAudioState(const FAudioStateData& NewState)
+{
+    FAudioStateData PreviousState = CurrentAudioState;
+    CurrentAudioState = NewState;
+
+    // Check for significant state changes that require audio transitions
+    if (PreviousState.TensionLevel != NewState.TensionLevel)
     {
-        float TensionVolume = FMath::Clamp(1.0f - (DistanceToNearestThreat / 2000.0f), 0.0f, 0.8f);
-        TensionComponent->SetVolumeMultiplier(TensionVolume);
+        TriggerMusicTransition(NewState.TensionLevel);
+    }
+
+    if (PreviousState.Environment != NewState.Environment)
+    {
+        TransitionToEnvironment(NewState.Environment);
+    }
+
+    // Update MetaSound parameters
+    UpdateMusicParameters();
+    UpdateAmbienceParameters();
+
+    // Check if we should trigger unnatural silence
+    CalculateOptimalSilenceMoments();
+}
+
+void UAudioSystemManager::SetTensionLevel(EAudioTensionLevel NewTension)
+{
+    if (CurrentAudioState.TensionLevel != NewTension)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Audio System: Tension level changed from %d to %d"), 
+               (int32)CurrentAudioState.TensionLevel, (int32)NewTension);
+        
+        CurrentAudioState.TensionLevel = NewTension;
+        TriggerMusicTransition(NewTension);
     }
 }
 
-void UAudioSystemManager::TriggerSuspiciousSilence(float Duration)
+void UAudioSystemManager::TransitionToEnvironment(EEnvironmentalState NewEnvironment, float TransitionTime)
 {
-    UE_LOG(LogTemp, Warning, TEXT("Audio System: Triggering suspicious silence for %.2f seconds"), Duration);
+    UE_LOG(LogTemp, Warning, TEXT("Audio System: Transitioning to environment %d"), (int32)NewEnvironment);
     
-    bInSuspiciousSilence = true;
-    SilenceTimer = Duration;
-
-    // Fade out all ambient sounds
-    if (EnvironmentComponent && EnvironmentComponent->IsPlaying())
+    CurrentAudioState.Environment = NewEnvironment;
+    
+    // Update ambience MetaSound parameters based on new environment
+    if (AmbienceAudioComponent && EnvironmentalAmbienceMetaSound)
     {
-        EnvironmentComponent->FadeOut(2.0f, 0.0f);
+        // Create parameter pack for environmental transition
+        UMetasoundParameterPack* ParamPack = NewObject<UMetasoundParameterPack>();
+        
+        // Set environment-specific parameters
+        switch (NewEnvironment)
+        {
+            case EEnvironmentalState::Forest_Dense:
+                ParamPack->SetFloat("TreeDensity", 0.9f);
+                ParamPack->SetFloat("BirdActivity", 0.7f);
+                ParamPack->SetFloat("WindIntensity", 0.3f);
+                break;
+                
+            case EEnvironmentalState::Forest_Clearing:
+                ParamPack->SetFloat("TreeDensity", 0.3f);
+                ParamPack->SetFloat("BirdActivity", 0.9f);
+                ParamPack->SetFloat("WindIntensity", 0.6f);
+                break;
+                
+            case EEnvironmentalState::Riverside:
+                ParamPack->SetFloat("WaterFlow", 0.8f);
+                ParamPack->SetFloat("BirdActivity", 0.5f);
+                ParamPack->SetFloat("InsectActivity", 0.7f);
+                break;
+                
+            case EEnvironmentalState::Caves:
+                ParamPack->SetFloat("Reverb", 0.9f);
+                ParamPack->SetFloat("Dripping", 0.6f);
+                ParamPack->SetFloat("EchoDelay", 0.8f);
+                break;
+        }
+        
+        ParamPack->SetFloat("TransitionTime", TransitionTime);
+        AmbienceAudioComponent->SetParameterPack(ParamPack);
     }
-
-    if (MasterMusicComponent && MasterMusicComponent->IsPlaying())
-    {
-        MasterMusicComponent->FadeOut(3.0f, 0.1f); // Keep very quiet music
-    }
-
-    // Set timer for silence break
-    GetWorld()->GetTimerManager().SetTimer(SilenceTimerHandle, 
-        this, &UAudioSystemManager::HandleSilenceTimeout, Duration, false);
 }
 
-void UAudioSystemManager::BreakSilence(bool bWithThreat)
+void UAudioSystemManager::RegisterCreaturePresence(class ADinosaurBase* Creature, float Distance)
 {
-    if (!bInSuspiciousSilence)
+    if (Creature)
     {
-        return;
+        NearbyCreatures.AddUnique(Creature);
+        
+        // Update creature density parameter
+        CurrentAudioState.NearbyCreatureDensity = FMath::Clamp(
+            static_cast<float>(NearbyCreatures.Num()) / 10.0f, 0.0f, 1.0f
+        );
+        
+        UE_LOG(LogTemp, Log, TEXT("Audio System: Creature registered at distance %.2f. Density: %.2f"), 
+               Distance, CurrentAudioState.NearbyCreatureDensity);
     }
+}
 
-    UE_LOG(LogTemp, Warning, TEXT("Audio System: Breaking silence (threat: %s)"), 
-           bWithThreat ? TEXT("true") : TEXT("false"));
-
-    bInSuspiciousSilence = false;
-    GetWorld()->GetTimerManager().ClearTimer(SilenceTimerHandle);
-
-    if (bWithThreat)
+void UAudioSystemManager::UnregisterCreaturePresence(class ADinosaurBase* Creature)
+{
+    if (Creature)
     {
-        // Sudden audio burst - something dangerous revealed
-        SetEmotionalState(EEmotionalState::Danger, 0.1f);
+        NearbyCreatures.RemoveAll([Creature](const TWeakObjectPtr<ADinosaurBase>& WeakPtr) {
+            return !WeakPtr.IsValid() || WeakPtr.Get() == Creature;
+        });
+        
+        // Update creature density
+        CurrentAudioState.NearbyCreatureDensity = FMath::Clamp(
+            static_cast<float>(NearbyCreatures.Num()) / 10.0f, 0.0f, 1.0f
+        );
+    }
+}
+
+void UAudioSystemManager::TriggerMusicTransition(EAudioTensionLevel TargetTension, float TransitionTime)
+{
+    if (MusicAudioComponent && AdaptiveMusicMetaSound)
+    {
+        UMetasoundParameterPack* ParamPack = NewObject<UMetasoundParameterPack>();
+        
+        // Map tension levels to musical parameters
+        switch (TargetTension)
+        {
+            case EAudioTensionLevel::Safe:
+                ParamPack->SetFloat("TensionLevel", 0.0f);
+                ParamPack->SetFloat("HeartRate", 60.0f);
+                ParamPack->SetFloat("DissonanceAmount", 0.1f);
+                ParamPack->SetBool("EnableMelody", true);
+                break;
+                
+            case EAudioTensionLevel::Cautious:
+                ParamPack->SetFloat("TensionLevel", 0.3f);
+                ParamPack->SetFloat("HeartRate", 80.0f);
+                ParamPack->SetFloat("DissonanceAmount", 0.3f);
+                ParamPack->SetBool("EnableMelody", true);
+                break;
+                
+            case EAudioTensionLevel::Alert:
+                ParamPack->SetFloat("TensionLevel", 0.7f);
+                ParamPack->SetFloat("HeartRate", 120.0f);
+                ParamPack->SetFloat("DissonanceAmount", 0.6f);
+                ParamPack->SetBool("EnableMelody", false);
+                break;
+                
+            case EAudioTensionLevel::Panic:
+                ParamPack->SetFloat("TensionLevel", 1.0f);
+                ParamPack->SetFloat("HeartRate", 160.0f);
+                ParamPack->SetFloat("DissonanceAmount", 0.9f);
+                ParamPack->SetBool("EnableMelody", false);
+                break;
+                
+            case EAudioTensionLevel::Silent:
+                // Fade everything to silence
+                ParamPack->SetFloat("MasterVolume", 0.0f);
+                ParamPack->SetFloat("SilenceDuration", 5.0f);
+                break;
+        }
+        
+        ParamPack->SetFloat("TransitionTime", TransitionTime);
+        MusicAudioComponent->SetParameterPack(ParamPack);
+        
+        UE_LOG(LogTemp, Warning, TEXT("Audio System: Music transition triggered to tension level %d"), 
+               (int32)TargetTension);
+    }
+}
+
+void UAudioSystemManager::TriggerUnnaturalSilence(float Duration)
+{
+    UE_LOG(LogTemp, Warning, TEXT("Audio System: Triggering unnatural silence for %.2f seconds"), Duration);
+    
+    bInSilentMode = true;
+    SilenceStartTime = GetWorld()->GetTimeSeconds();
+    SilenceDuration = Duration;
+    
+    // Fade all audio layers to silence
+    if (MusicAudioComponent)
+    {
+        MusicAudioComponent->FadeOut(1.0f, 0.0f);
+    }
+    
+    if (AmbienceAudioComponent)
+    {
+        AmbienceAudioComponent->FadeOut(1.5f, 0.0f);
+    }
+    
+    if (CreatureAudioComponent)
+    {
+        CreatureAudioComponent->FadeOut(0.5f, 0.0f);
+    }
+    
+    // Set timer to break silence
+    if (UWorld* World = GetWorld())
+    {
+        FTimerHandle SilenceTimer;
+        World->GetTimerManager().SetTimer(SilenceTimer, [this]()
+        {
+            BreakSilence(true); // Break with potential jump scare
+        }, Duration, false);
+    }
+}
+
+void UAudioSystemManager::BreakSilence(bool bWithJumpScare)
+{
+    if (!bInSilentMode) return;
+    
+    UE_LOG(LogTemp, Warning, TEXT("Audio System: Breaking silence %s"), 
+           bWithJumpScare ? TEXT("with jump scare") : TEXT("naturally"));
+    
+    bInSilentMode = false;
+    
+    if (bWithJumpScare)
+    {
+        // Sudden audio spike before returning to normal
+        SetTensionLevel(EAudioTensionLevel::Panic);
+        
+        // Return to appropriate tension level after jump scare
+        if (UWorld* World = GetWorld())
+        {
+            FTimerHandle ReturnTimer;
+            World->GetTimerManager().SetTimer(ReturnTimer, [this]()
+            {
+                SetTensionLevel(EAudioTensionLevel::Alert);
+            }, 2.0f, false);
+        }
     }
     else
     {
-        // Gentle return to ambient
-        SetEmotionalState(EEmotionalState::Calm, 2.0f);
-    }
-}
-
-void UAudioSystemManager::RegisterDinosaurAudio(class ADinosaurCharacter* Dinosaur)
-{
-    if (!Dinosaur)
-    {
-        return;
-    }
-
-    // Create dedicated audio component for this dinosaur
-    SpawnDinosaurAudioComponent(Dinosaur);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Audio System: Registered dinosaur audio"));
-}
-
-void UAudioSystemManager::UpdateDinosaurBehaviorAudio(class ADinosaurCharacter* Dinosaur, EDinosaurBehaviorState BehaviorState)
-{
-    if (!Dinosaur)
-    {
-        return;
-    }
-
-    // Find the audio component for this dinosaur and update its behavior
-    // This would integrate with the dinosaur's AI system to play appropriate sounds
-    
-    UE_LOG(LogTemp, Warning, TEXT("Audio System: Updated dinosaur behavior audio to state %d"), (int32)BehaviorState);
-}
-
-void UAudioSystemManager::TransitionToEmotionalState(EEmotionalState TargetState, float TransitionTime)
-{
-    // This is where the MetaSound parameters would be updated
-    // Each emotional state has different parameter values for:
-    // - Music intensity
-    // - Harmonic tension
-    // - Rhythm complexity
-    // - Filter cutoffs
-    // - Reverb settings
-
-    UpdateMusicLayers();
-}
-
-void UAudioSystemManager::UpdateMusicLayers()
-{
-    // Update MetaSound parameters based on current state
-    // This would involve setting parameters on the MetaSound assets
-    
-    if (MasterMusicComponent)
-    {
-        // Example parameter updates (would be actual MetaSound parameters)
-        switch (CurrentEmotionalState)
+        // Gradual return to ambient audio
+        if (MusicAudioComponent)
         {
-            case EEmotionalState::Calm:
-                MasterMusicComponent->SetFloatParameter(FName("Tension"), 0.2f);
-                MasterMusicComponent->SetFloatParameter(FName("Intensity"), 0.3f);
-                break;
-                
-            case EEmotionalState::Tension:
-                MasterMusicComponent->SetFloatParameter(FName("Tension"), 0.6f);
-                MasterMusicComponent->SetFloatParameter(FName("Intensity"), 0.5f);
-                break;
-                
-            case EEmotionalState::Danger:
-                MasterMusicComponent->SetFloatParameter(FName("Tension"), 0.8f);
-                MasterMusicComponent->SetFloatParameter(FName("Intensity"), 0.8f);
-                break;
-                
-            case EEmotionalState::Terror:
-                MasterMusicComponent->SetFloatParameter(FName("Tension"), 1.0f);
-                MasterMusicComponent->SetFloatParameter(FName("Intensity"), 1.0f);
-                break;
-                
-            case EEmotionalState::Wonder:
-                MasterMusicComponent->SetFloatParameter(FName("Tension"), 0.1f);
-                MasterMusicComponent->SetFloatParameter(FName("Intensity"), 0.7f);
-                break;
-                
-            case EEmotionalState::Isolation:
-                MasterMusicComponent->SetFloatParameter(FName("Tension"), 0.4f);
-                MasterMusicComponent->SetFloatParameter(FName("Intensity"), 0.1f);
-                break;
+            MusicAudioComponent->FadeIn(3.0f, 0.7f);
+        }
+        
+        if (AmbienceAudioComponent)
+        {
+            AmbienceAudioComponent->FadeIn(4.0f, 0.8f);
         }
     }
 }
 
-void UAudioSystemManager::HandleSilenceTimeout()
+void UAudioSystemManager::UpdateMusicParameters()
 {
-    // Silence has lasted too long - something should happen
-    UE_LOG(LogTemp, Warning, TEXT("Audio System: Silence timeout - breaking with potential threat"));
-    
-    // 70% chance of threat, 30% chance of false alarm
-    bool bThreatRevealed = FMath::RandRange(0.0f, 1.0f) < 0.7f;
-    BreakSilence(bThreatRevealed);
+    if (MusicAudioComponent && AdaptiveMusicMetaSound)
+    {
+        UMetasoundParameterPack* ParamPack = NewObject<UMetasoundParameterPack>();
+        
+        // Update continuous parameters
+        ParamPack->SetFloat("PlayerStealthLevel", CurrentAudioState.PlayerStealthLevel);
+        ParamPack->SetFloat("CreatureDensity", CurrentAudioState.NearbyCreatureDensity);
+        ParamPack->SetFloat("TimeOfDay", static_cast<float>(CurrentAudioState.TimeOfDay) / 6.0f);
+        ParamPack->SetBool("PlayerHidden", CurrentAudioState.bIsPlayerHidden);
+        ParamPack->SetBool("RecentCombat", CurrentAudioState.bRecentCombat);
+        
+        MusicAudioComponent->SetParameterPack(ParamPack);
+    }
 }
 
-void UAudioSystemManager::SpawnDinosaurAudioComponent(class ADinosaurCharacter* Dinosaur)
+void UAudioSystemManager::UpdateAmbienceParameters()
 {
-    if (UWorld* World = GetWorld())
+    if (AmbienceAudioComponent && EnvironmentalAmbienceMetaSound)
     {
-        UAudioComponent* DinosaurAudio = UGameplayStatics::SpawnSoundAttached(
-            nullptr, // Will be set based on dinosaur type
-            Dinosaur->GetRootComponent(),
-            NAME_None,
-            FVector::ZeroVector,
-            EAttachLocation::KeepRelativeOffset,
-            true, // Stop when owner is destroyed
-            1.0f,
-            1.0f,
-            0.0f,
-            nullptr,
-            nullptr,
-            true // Auto destroy
-        );
+        UMetasoundParameterPack* ParamPack = NewObject<UMetasoundParameterPack>();
+        
+        // Environmental parameters
+        ParamPack->SetFloat("EnvironmentType", static_cast<float>(CurrentAudioState.Environment));
+        ParamPack->SetFloat("TimeOfDay", static_cast<float>(CurrentAudioState.TimeOfDay) / 6.0f);
+        ParamPack->SetFloat("CreatureActivity", CurrentAudioState.NearbyCreatureDensity);
+        
+        AmbienceAudioComponent->SetParameterPack(ParamPack);
+    }
+}
 
-        if (DinosaurAudio)
+void UAudioSystemManager::CalculateOptimalSilenceMoments()
+{
+    // Logic to determine when unnatural silence would be most effective
+    // Based on current tension, recent activity, and player behavior
+    
+    if (bInSilentMode) return; // Already in silence
+    
+    bool bShouldTriggerSilence = false;
+    
+    // Trigger silence when transitioning from high activity to calm
+    static EAudioTensionLevel LastTensionLevel = EAudioTensionLevel::Safe;
+    if (LastTensionLevel >= EAudioTensionLevel::Alert && 
+        CurrentAudioState.TensionLevel <= EAudioTensionLevel::Cautious)
+    {
+        // Player might think they're safe - perfect time for silence
+        if (FMath::RandRange(0.0f, 1.0f) < 0.3f) // 30% chance
         {
-            DinosaurAudioComponents.Add(DinosaurAudio);
+            bShouldTriggerSilence = true;
         }
     }
+    
+    // Trigger silence in dense forest when player is moving slowly
+    if (CurrentAudioState.Environment == EEnvironmentalState::Forest_Dense &&
+        CurrentAudioState.PlayerStealthLevel > 0.7f &&
+        CurrentAudioState.NearbyCreatureDensity < 0.2f)
+    {
+        if (FMath::RandRange(0.0f, 1.0f) < 0.15f) // 15% chance
+        {
+            bShouldTriggerSilence = true;
+        }
+    }
+    
+    if (bShouldTriggerSilence)
+    {
+        float SilenceDuration = FMath::RandRange(3.0f, 8.0f);
+        TriggerUnnaturalSilence(SilenceDuration);
+    }
+    
+    LastTensionLevel = CurrentAudioState.TensionLevel;
 }
