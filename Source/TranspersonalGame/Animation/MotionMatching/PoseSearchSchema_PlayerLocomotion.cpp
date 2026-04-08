@@ -1,103 +1,129 @@
 #include "PoseSearchSchema_PlayerLocomotion.h"
-#include "Engine/Engine.h"
-#include "Animation/AnimSequence.h"
-#include "PoseSearch/PoseSearchDatabase.h"
+#include "PoseSearch/PoseSearchFeatureChannel_Trajectory.h"
+#include "PoseSearch/PoseSearchFeatureChannel_Pose.h"
+#include "PoseSearch/PoseSearchFeatureChannel_Velocity.h"
+#include "PoseSearch/PoseSearchFeatureChannel_Position.h"
 
 UPoseSearchSchema_PlayerLocomotion::UPoseSearchSchema_PlayerLocomotion()
 {
-    // Configuração base para locomoção do paleontologista
-    SampleRate = 30.0f; // 30fps para performance otimizada
+    // Base configuration for survival gameplay
+    SampleRate = 30.0f; // Higher precision for fear-based movements
     DataPreprocessor = EPoseSearchDataPreprocessor::Normalize;
     
-    // Configurar canais para Motion Matching
-    SetupTrajectoryChannel();
-    SetupPoseChannel();
-    SetupVelocityChannel();
+    SetupLocomotionChannels();
+    SetupFearChannels();
+    SetupTerrainChannels();
 }
 
-void UPoseSearchSchema_PlayerLocomotion::SetupTrajectoryChannel()
+void UPoseSearchSchema_PlayerLocomotion::PostLoad()
 {
-    // Canal de trajetória para movimento do jogador
-    FPoseSearchTrajectoryChannel TrajectoryChannel;
-    TrajectoryChannel.Weight = 1.0f;
+    Super::PostLoad();
     
-    // Amostras de trajetória: passado, presente e futuro
-    // Passado: -0.5s, -0.25s
-    // Presente: 0.0s
-    // Futuro: +0.25s, +0.5s, +1.0s
+    // Ensure fear and terrain systems are properly configured
+    if (FearInfluenceWeight < 0.1f)
+    {
+        FearInfluenceWeight = 0.3f;
+    }
     
-    FPoseSearchTrajectorySample Sample;
-    
-    // Passado
-    Sample.Offset = -0.5f;
-    Sample.Flags = EPoseSearchTrajectoryFlags::Position | EPoseSearchTrajectoryFlags::Velocity;
-    Sample.Weight = 0.8f;
-    TrajectoryChannel.Samples.Add(Sample);
-    
-    Sample.Offset = -0.25f;
-    Sample.Weight = 0.9f;
-    TrajectoryChannel.Samples.Add(Sample);
-    
-    // Presente
-    Sample.Offset = 0.0f;
-    Sample.Weight = 1.0f;
-    TrajectoryChannel.Samples.Add(Sample);
-    
-    // Futuro
-    Sample.Offset = 0.25f;
-    Sample.Weight = 1.0f;
-    TrajectoryChannel.Samples.Add(Sample);
-    
-    Sample.Offset = 0.5f;
-    Sample.Weight = 0.9f;
-    TrajectoryChannel.Samples.Add(Sample);
-    
-    Sample.Offset = 1.0f;
-    Sample.Weight = 0.7f;
-    TrajectoryChannel.Samples.Add(Sample);
-    
-    // Adicionar canal ao schema
-    Channels.Add(MakeShared<FPoseSearchTrajectoryChannel>(TrajectoryChannel));
+    if (TerrainAdaptationWeight < 0.1f)
+    {
+        TerrainAdaptationWeight = 0.4f;
+    }
 }
 
-void UPoseSearchSchema_PlayerLocomotion::SetupPoseChannel()
+void UPoseSearchSchema_PlayerLocomotion::PostInitProperties()
 {
-    // Canal de pose para pés e quadril
-    FPoseSearchPoseChannel PoseChannel;
-    PoseChannel.Weight = 1.2f; // Peso maior para pose dos pés
+    Super::PostInitProperties();
     
-    // Pé esquerdo
+    // Configure for paleontologist character movement
+    // Emphasize cautious, observational movement patterns
+}
+
+void UPoseSearchSchema_PlayerLocomotion::SetupLocomotionChannels()
+{
+    // Trajectory Channel - Primary movement prediction
+    UPoseSearchFeatureChannel_Trajectory* TrajectoryChannel = NewObject<UPoseSearchFeatureChannel_Trajectory>(this);
+    TrajectoryChannel->Weight = 1.0f;
+    
+    // Add trajectory samples for cautious movement prediction
+    FPoseSearchTrajectorySample ForwardSample;
+    ForwardSample.Offset = 0.5f; // Look ahead for danger
+    ForwardSample.Flags = EPoseSearchTrajectoryFlags::Position | EPoseSearchTrajectoryFlags::VelocityDirection;
+    ForwardSample.Weight = 1.0f;
+    TrajectoryChannel->Samples.Add(ForwardSample);
+    
+    FPoseSearchTrajectorySample NearFutureSample;
+    NearFutureSample.Offset = 1.0f; // Extended prediction for survival
+    NearFutureSample.Flags = EPoseSearchTrajectoryFlags::Position | EPoseSearchTrajectoryFlags::VelocityDirection;
+    NearFutureSample.Weight = 0.8f;
+    TrajectoryChannel->Samples.Add(NearFutureSample);
+    
+    Channels.Add(TrajectoryChannel);
+    
+    // Pose Channel - Foot and body positioning
+    UPoseSearchFeatureChannel_Pose* PoseChannel = NewObject<UPoseSearchFeatureChannel_Pose>(this);
+    PoseChannel->Weight = 0.8f;
+    
+    // Left foot for terrain adaptation
     FPoseSearchBone LeftFoot;
-    LeftFoot.Reference = FBoneReference("foot_l");
+    LeftFoot.Reference = FBoneReference(TEXT("foot_l"));
     LeftFoot.Flags = EPoseSearchBoneFlags::Position | EPoseSearchBoneFlags::Velocity;
     LeftFoot.Weight = 1.0f;
-    PoseChannel.SampledBones.Add(LeftFoot);
+    PoseChannel->SampledBones.Add(LeftFoot);
     
-    // Pé direito
+    // Right foot for terrain adaptation
     FPoseSearchBone RightFoot;
-    RightFoot.Reference = FBoneReference("foot_r");
+    RightFoot.Reference = FBoneReference(TEXT("foot_r"));
     RightFoot.Flags = EPoseSearchBoneFlags::Position | EPoseSearchBoneFlags::Velocity;
     RightFoot.Weight = 1.0f;
-    PoseChannel.SampledBones.Add(RightFoot);
+    PoseChannel->SampledBones.Add(RightFoot);
     
-    // Quadril para estabilidade
-    FPoseSearchBone Pelvis;
-    Pelvis.Reference = FBoneReference("pelvis");
-    Pelvis.Flags = EPoseSearchBoneFlags::Position | EPoseSearchBoneFlags::Rotation;
-    Pelvis.Weight = 0.8f;
-    PoseChannel.SampledBones.Add(Pelvis);
+    // Spine for posture and fear response
+    FPoseSearchBone Spine;
+    Spine.Reference = FBoneReference(TEXT("spine_02"));
+    Spine.Flags = EPoseSearchBoneFlags::Rotation | EPoseSearchBoneFlags::Velocity;
+    Spine.Weight = 0.6f;
+    PoseChannel->SampledBones.Add(Spine);
     
-    Channels.Add(MakeShared<FPoseSearchPoseChannel>(PoseChannel));
+    Channels.Add(PoseChannel);
 }
 
-void UPoseSearchSchema_PlayerLocomotion::SetupVelocityChannel()
+void UPoseSearchSchema_PlayerLocomotion::SetupFearChannels()
 {
-    // Canal de velocidade para movimento do root bone
-    FPoseSearchVelocityChannel VelocityChannel;
-    VelocityChannel.Bone = FBoneReference("root");
-    VelocityChannel.Weight = 0.9f;
-    VelocityChannel.bUseCharacterSpaceVelocities = true;
-    VelocityChannel.bNormalize = false;
+    // Velocity Channel for fear-influenced speed changes
+    UPoseSearchFeatureChannel_Velocity* VelocityChannel = NewObject<UPoseSearchFeatureChannel_Velocity>(this);
+    VelocityChannel->Weight = FearInfluenceWeight;
+    VelocityChannel->Bone = FBoneReference(TEXT("pelvis"));
+    VelocityChannel->bUseCharacterSpaceVelocities = true;
     
-    Channels.Add(MakeShared<FPoseSearchVelocityChannel>(VelocityChannel));
+    Channels.Add(VelocityChannel);
+    
+    // Position Channel for head movement (looking around nervously)
+    UPoseSearchFeatureChannel_Position* HeadPositionChannel = NewObject<UPoseSearchFeatureChannel_Position>(this);
+    HeadPositionChannel->Weight = FearInfluenceWeight * 0.7f;
+    HeadPositionChannel->Bone = FBoneReference(TEXT("head"));
+    HeadPositionChannel->OriginBone = FBoneReference(TEXT("spine_03"));
+    HeadPositionChannel->ComponentStripping = EPoseSearchComponentStripping::None;
+    
+    Channels.Add(HeadPositionChannel);
+}
+
+void UPoseSearchSchema_PlayerLocomotion::SetupTerrainChannels()
+{
+    // Additional position channels for terrain adaptation
+    UPoseSearchFeatureChannel_Position* LeftFootPosition = NewObject<UPoseSearchFeatureChannel_Position>(this);
+    LeftFootPosition->Weight = TerrainAdaptationWeight;
+    LeftFootPosition->Bone = FBoneReference(TEXT("foot_l"));
+    LeftFootPosition->OriginBone = FBoneReference(TEXT("pelvis"));
+    LeftFootPosition->ComponentStripping = EPoseSearchComponentStripping::None;
+    
+    Channels.Add(LeftFootPosition);
+    
+    UPoseSearchFeatureChannel_Position* RightFootPosition = NewObject<UPoseSearchFeatureChannel_Position>(this);
+    RightFootPosition->Weight = TerrainAdaptationWeight;
+    RightFootPosition->Bone = FBoneReference(TEXT("foot_r"));
+    RightFootPosition->OriginBone = FBoneReference(TEXT("pelvis"));
+    RightFootPosition->ComponentStripping = EPoseSearchComponentStripping::None;
+    
+    Channels.Add(RightFootPosition);
 }
