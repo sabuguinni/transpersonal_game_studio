@@ -2,93 +2,20 @@
 
 #include "CoreMinimal.h"
 #include "Engine/Engine.h"
-#include "Animation/AnimInstance.h"
 #include "Components/ActorComponent.h"
+#include "Animation/AnimInstance.h"
+#include "PoseSearch/PoseSearchDatabase.h"
+#include "PoseSearch/PoseSearchSchema.h"
 #include "AnimationSystemManager.generated.h"
 
-UENUM(BlueprintType)
-enum class ECharacterMovementState : uint8
-{
-    Idle,
-    Walking,
-    Running,
-    Crouching,
-    Crawling,
-    Climbing,
-    Swimming,
-    Falling,
-    Landing,
-    Hiding,
-    Injured,
-    Dying
-};
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnAnimationStateChanged, FName, NewState, FName, PreviousState);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnMotionMatchingQueryComplete, float, MatchQuality);
 
-UENUM(BlueprintType)
-enum class EDinosaurBehaviorState : uint8
-{
-    Idle,
-    Grazing,
-    Drinking,
-    Hunting,
-    Stalking,
-    Charging,
-    Feeding,
-    Sleeping,
-    Patrolling,
-    Fleeing,
-    Fighting,
-    Mating,
-    Nesting
-};
-
-UENUM(BlueprintType)
-enum class EAnimationPriority : uint8
-{
-    Low = 0,
-    Normal = 1,
-    High = 2,
-    Critical = 3
-};
-
-USTRUCT(BlueprintType)
-struct FCharacterAnimationProfile
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Profile")
-    FString CharacterName;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Profile")
-    float MovementSpeed;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Profile")
-    float StepLength;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Profile")
-    float BodyWeight;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Profile")
-    bool bIsInjured;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Profile")
-    float FearLevel;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Profile")
-    float ExhaustionLevel;
-
-    FCharacterAnimationProfile()
-    {
-        CharacterName = TEXT("Default");
-        MovementSpeed = 1.0f;
-        StepLength = 1.0f;
-        BodyWeight = 1.0f;
-        bIsInjured = false;
-        FearLevel = 0.0f;
-        ExhaustionLevel = 0.0f;
-    }
-};
-
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+/**
+ * Sistema central de gestão de animação
+ * Coordena Motion Matching, IK adaptativo e linguagem corporal procedural
+ */
+UCLASS(ClassGroup=(Animation), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UAnimationSystemManager : public UActorComponent
 {
     GENERATED_BODY()
@@ -98,62 +25,108 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-
-public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // Character Animation Management
-    UFUNCTION(BlueprintCallable, Category = "Animation System")
-    void SetCharacterMovementState(ECharacterMovementState NewState);
-
-    UFUNCTION(BlueprintCallable, Category = "Animation System")
-    ECharacterMovementState GetCharacterMovementState() const { return CurrentMovementState; }
-
-    UFUNCTION(BlueprintCallable, Category = "Animation System")
-    void UpdateCharacterProfile(const FCharacterAnimationProfile& NewProfile);
-
-    // Dinosaur Animation Management
-    UFUNCTION(BlueprintCallable, Category = "Animation System")
-    void SetDinosaurBehaviorState(EDinosaurBehaviorState NewState);
-
-    UFUNCTION(BlueprintCallable, Category = "Animation System")
-    EDinosaurBehaviorState GetDinosaurBehaviorState() const { return CurrentBehaviorState; }
-
-    // Motion Matching Integration
-    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    void InitializeMotionMatching();
-
-    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    void UpdateMotionMatchingQuery(FVector Velocity, FVector Acceleration, float TurnRate);
-
-    // IK System Integration
-    UFUNCTION(BlueprintCallable, Category = "IK System")
-    void EnableFootIK(bool bEnable);
-
-    UFUNCTION(BlueprintCallable, Category = "IK System")
-    void UpdateFootIKTargets(FVector LeftFootTarget, FVector RightFootTarget);
-
-protected:
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Animation State")
-    ECharacterMovementState CurrentMovementState;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Animation State")
-    EDinosaurBehaviorState CurrentBehaviorState;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Profile")
-    FCharacterAnimationProfile CharacterProfile;
-
+public:
+    // === MOTION MATCHING CORE ===
+    
+    /** Base Pose Search Schema para locomotion */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    bool bUseMotionMatching;
+    TObjectPtr<UPoseSearchSchema> LocomotionSchema;
+    
+    /** Database principal de animações de movimento */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    TObjectPtr<UPoseSearchDatabase> PrimaryLocomotionDatabase;
+    
+    /** Database de animações de interação com ambiente */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    TObjectPtr<UPoseSearchDatabase> EnvironmentInteractionDatabase;
+    
+    /** Database de animações de stress/medo */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    TObjectPtr<UPoseSearchDatabase> StressStateDatabase;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK System")
-    bool bUseFootIK;
+    // === ADAPTIVE IK SYSTEM ===
+    
+    /** Intensidade do IK de pés para adaptação ao terreno */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Adaptive IK", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float FootIKIntensity = 1.0f;
+    
+    /** Distância máxima de rastreamento do solo */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Adaptive IK")
+    float GroundTraceDistance = 50.0f;
+    
+    /** Velocidade de interpolação do IK */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Adaptive IK")
+    float IKInterpolationSpeed = 10.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK System")
-    float FootIKInterpSpeed;
+    // === BODY LANGUAGE SYSTEM ===
+    
+    /** Nível atual de stress do personagem (0.0 = calmo, 1.0 = pânico) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Body Language", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float StressLevel = 0.0f;
+    
+    /** Nível de fadiga (afeta postura e velocidade) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Body Language", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float FatigueLevel = 0.0f;
+    
+    /** Personalidade do personagem (afeta animações idle e reações) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Body Language")
+    FName PersonalityArchetype = "Cautious";
+
+    // === DINOSSAURO UNIQUE VARIATIONS ===
+    
+    /** Seed para variações procedurais de movimento */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Variations")
+    int32 MovementVariationSeed = 0;
+    
+    /** Multiplicador de escala para ajustar animações baseado no tamanho */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Variations")
+    float SizeScaleMultiplier = 1.0f;
+    
+    /** Tipo de personalidade do dinossauro (Aggressive, Passive, Curious, etc.) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Variations")
+    FName DinosaurPersonality = "Neutral";
+
+    // === EVENTOS ===
+    
+    UPROPERTY(BlueprintAssignable, Category = "Animation Events")
+    FOnAnimationStateChanged OnAnimationStateChanged;
+    
+    UPROPERTY(BlueprintAssignable, Category = "Animation Events")
+    FOnMotionMatchingQueryComplete OnMotionMatchingQueryComplete;
+
+    // === FUNÇÕES PÚBLICAS ===
+    
+    /** Actualiza o estado de stress baseado em factores externos */
+    UFUNCTION(BlueprintCallable, Category = "Body Language")
+    void UpdateStressLevel(float NewStressLevel, float TransitionSpeed = 2.0f);
+    
+    /** Aplica variação procedural baseada no seed */
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur Variations")
+    void ApplyMovementVariation(int32 NewSeed);
+    
+    /** Obtém a database apropriada baseada no estado atual */
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    UPoseSearchDatabase* GetCurrentDatabase() const;
+    
+    /** Força transição para estado específico */
+    UFUNCTION(BlueprintCallable, Category = "Animation States")
+    void ForceTransitionToState(FName StateName);
 
 private:
-    void InitializeAnimationSystems();
-    void UpdateAnimationBlending(float DeltaTime);
-    void ProcessMovementStateTransitions();
+    // Estado interno
+    FName CurrentAnimationState = "Idle";
+    FName PreviousAnimationState = "None";
+    float CurrentStressTransition = 0.0f;
+    float TargetStressLevel = 0.0f;
+    
+    // Timers internos
+    float LastMotionMatchingQuery = 0.0f;
+    float MotionMatchingQueryInterval = 0.1f; // 10 queries por segundo
+    
+    // Funções internas
+    void UpdateStressTransition(float DeltaTime);
+    void ProcessMotionMatchingQuery();
+    UPoseSearchDatabase* SelectDatabaseByState() const;
 };
