@@ -4,293 +4,360 @@
 
 #include "CoreMinimal.h"
 #include "Engine/World.h"
-#include "Components/ActorComponent.h"
+#include "Subsystems/WorldSubsystem.h"
 #include "Engine/Engine.h"
-#include "Subsystems/GameInstanceSubsystem.h"
-#include "HAL/IConsoleManager.h"
 #include "Stats/Stats.h"
+#include "HAL/IConsoleManager.h"
+#include "Misc/App.h"
 #include "PerformanceOptimizer.generated.h"
 
+DECLARE_LOG_CATEGORY_EXTERN(LogPerformanceOptimizer, Log, All);
+
+DECLARE_STATS_GROUP(TEXT("TranspersonalGame Performance"), STATGROUP_TranspersonalPerformance, STATCAT_Advanced);
+DECLARE_CYCLE_STAT(TEXT("Physics Tick Time"), STAT_PhysicsTickTime, STATGROUP_TranspersonalPerformance);
+DECLARE_CYCLE_STAT(TEXT("AI Tick Time"), STAT_AITickTime, STATGROUP_TranspersonalPerformance);
+DECLARE_CYCLE_STAT(TEXT("Rendering Time"), STAT_RenderingTime, STATGROUP_TranspersonalPerformance);
+DECLARE_DWORD_COUNTER_STAT(TEXT("Active Physics Bodies"), STAT_ActivePhysicsBodies, STATGROUP_TranspersonalPerformance);
+DECLARE_DWORD_COUNTER_STAT(TEXT("Active AI Agents"), STAT_ActiveAIAgents, STATGROUP_TranspersonalPerformance);
+DECLARE_DWORD_COUNTER_STAT(TEXT("Visible Dinosaurs"), STAT_VisibleDinosaurs, STATGROUP_TranspersonalPerformance);
+
 /**
- * @brief Performance Optimizer for Transpersonal Game Studio
- * 
- * Ensures 60fps on high-end PC and 30fps on console for the prehistoric survival game.
- * Implements dynamic performance scaling, LOD management, and frame budget optimization.
- * 
- * Core Responsibilities:
- * - Monitor frame time and GPU/CPU performance
- * - Dynamic quality scaling based on performance targets
- * - Physics optimization and collision culling
- * - Memory management and streaming optimization
- * - Platform-specific performance tuning
- * 
- * Performance Targets:
- * - PC High-End: 60fps (16.67ms frame budget)
- * - Console (PS5/Xbox Series X): 30fps (33.33ms frame budget)
- * - Console (Xbox Series S): 30fps with reduced quality
- * 
- * @author Performance Optimizer — Agent #4
- * @version 1.0 — March 2026
+ * Performance Quality Level
  */
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UPerformanceOptimizer : public UGameInstanceSubsystem
+UENUM(BlueprintType)
+enum class EPerformanceQualityLevel : uint8
+{
+    Low         UMETA(DisplayName = "Low"),
+    Medium      UMETA(DisplayName = "Medium"), 
+    High        UMETA(DisplayName = "High"),
+    Epic        UMETA(DisplayName = "Epic"),
+    Custom      UMETA(DisplayName = "Custom")
+};
+
+/**
+ * Platform Performance Profile
+ */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FPlatformPerformanceProfile
+{
+    GENERATED_BODY()
+
+    /** Target FPS for this platform */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 TargetFPS = 60;
+
+    /** Physics tick time budget in milliseconds */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float PhysicsTickBudget = 4.17f;
+
+    /** Maximum active physics bodies */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 MaxActivePhysicsBodies = 500;
+
+    /** Maximum collision checks per frame */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 MaxCollisionChecksPerFrame = 10000;
+
+    /** Maximum AI agents to simulate */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 MaxAIAgents = 100;
+
+    /** Maximum visible dinosaurs */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 MaxVisibleDinosaurs = 50;
+
+    /** LOD distance multiplier */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float LODDistanceMultiplier = 1.0f;
+
+    /** Memory budget in MB */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 MemoryBudgetMB = 8192;
+
+    FPlatformPerformanceProfile()
+    {
+        TargetFPS = 60;
+        PhysicsTickBudget = 4.17f;
+        MaxActivePhysicsBodies = 500;
+        MaxCollisionChecksPerFrame = 10000;
+        MaxAIAgents = 100;
+        MaxVisibleDinosaurs = 50;
+        LODDistanceMultiplier = 1.0f;
+        MemoryBudgetMB = 8192;
+    }
+};
+
+/**
+ * Performance Metrics
+ */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FPerformanceMetrics
+{
+    GENERATED_BODY()
+
+    /** Current FPS */
+    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
+    float CurrentFPS = 0.0f;
+
+    /** Frame time in milliseconds */
+    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
+    float FrameTimeMS = 0.0f;
+
+    /** Game thread time in milliseconds */
+    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
+    float GameThreadTimeMS = 0.0f;
+
+    /** Render thread time in milliseconds */
+    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
+    float RenderThreadTimeMS = 0.0f;
+
+    /** GPU time in milliseconds */
+    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
+    float GPUTimeMS = 0.0f;
+
+    /** Physics time in milliseconds */
+    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
+    float PhysicsTimeMS = 0.0f;
+
+    /** AI time in milliseconds */
+    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
+    float AITimeMS = 0.0f;
+
+    /** Memory usage in MB */
+    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
+    float MemoryUsageMB = 0.0f;
+
+    /** Active physics bodies count */
+    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
+    int32 ActivePhysicsBodies = 0;
+
+    /** Active AI agents count */
+    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
+    int32 ActiveAIAgents = 0;
+
+    /** Visible dinosaurs count */
+    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
+    int32 VisibleDinosaurs = 0;
+
+    /** Draw calls count */
+    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
+    int32 DrawCalls = 0;
+
+    /** Triangles rendered */
+    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
+    int32 TrianglesRendered = 0;
+};
+
+/**
+ * Performance Optimizer
+ * Manages performance optimization for the Transpersonal Game
+ * Targets: 60fps on PC, 30fps on Console with large-scale dinosaur simulation
+ */
+UCLASS()
+class TRANSPERSONALGAME_API UPerformanceOptimizer : public UWorldSubsystem
 {
     GENERATED_BODY()
 
 public:
-    UPerformanceOptimizer();
-
     // USubsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
+    virtual void OnWorldBeginPlay(UWorld& InWorld) override;
 
-    /** Performance monitoring and optimization */
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void StartPerformanceMonitoring();
+    /** Get the performance optimizer instance */
+    UFUNCTION(BlueprintPure, Category = "Performance")
+    static UPerformanceOptimizer* Get(const UObject* WorldContext);
 
+    /** Initialize performance optimization */
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void StopPerformanceMonitoring();
+    void InitializePerformanceOptimization();
+
+    /** Set performance quality level */
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void SetPerformanceQualityLevel(EPerformanceQualityLevel QualityLevel);
+
+    /** Get current performance quality level */
+    UFUNCTION(BlueprintPure, Category = "Performance")
+    EPerformanceQualityLevel GetPerformanceQualityLevel() const { return CurrentQualityLevel; }
+
+    /** Set platform performance profile */
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void SetPlatformPerformanceProfile(const FPlatformPerformanceProfile& Profile);
+
+    /** Get platform performance profile */
+    UFUNCTION(BlueprintPure, Category = "Performance")
+    FPlatformPerformanceProfile GetPlatformPerformanceProfile() const { return PlatformProfile; }
 
     /** Get current performance metrics */
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    FPerformanceMetrics GetCurrentPerformanceMetrics() const;
+    UFUNCTION(BlueprintPure, Category = "Performance")
+    FPerformanceMetrics GetPerformanceMetrics() const { return CurrentMetrics; }
 
-    /** Apply performance optimizations based on current metrics */
+    /** Enable/disable automatic performance scaling */
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void ApplyDynamicOptimizations();
+    void SetAutoPerformanceScaling(bool bEnabled);
 
-    /** Set target frame rate for the platform */
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void SetTargetFrameRate(float TargetFPS);
+    /** Check if performance target is being met */
+    UFUNCTION(BlueprintPure, Category = "Performance")
+    bool IsPerformanceTargetMet() const;
 
-    /** Enable/disable specific optimization categories */
+    /** Get performance bottleneck information */
+    UFUNCTION(BlueprintPure, Category = "Performance")
+    FString GetPerformanceBottleneck() const;
+
+    /** Force performance optimization pass */
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void SetOptimizationCategory(EOptimizationCategory Category, bool bEnabled);
+    void ForcePerformanceOptimization();
+
+    /** Set LOD bias for performance */
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void SetLODBias(float Bias);
+
+    /** Set physics quality level */
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void SetPhysicsQuality(int32 QualityLevel);
+
+    /** Set AI quality level */
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void SetAIQuality(int32 QualityLevel);
+
+    /** Set rendering quality level */
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void SetRenderingQuality(int32 QualityLevel);
+
+    /** Enable performance profiling */
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void EnablePerformanceProfiling(bool bEnabled);
+
+    /** Start performance capture */
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void StartPerformanceCapture(const FString& CaptureName);
+
+    /** Stop performance capture */
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void StopPerformanceCapture();
 
 protected:
-    /** Performance metrics structure */
-    USTRUCT(BlueprintType)
-    struct FPerformanceMetrics
-    {
-        GENERATED_BODY()
+    /** Current performance quality level */
+    UPROPERTY()
+    EPerformanceQualityLevel CurrentQualityLevel = EPerformanceQualityLevel::High;
 
-        /** Current frame rate */
-        UPROPERTY(BlueprintReadOnly)
-        float CurrentFPS = 0.0f;
-
-        /** Frame time in milliseconds */
-        UPROPERTY(BlueprintReadOnly)
-        float FrameTimeMS = 0.0f;
-
-        /** Game thread time */
-        UPROPERTY(BlueprintReadOnly)
-        float GameThreadTimeMS = 0.0f;
-
-        /** Render thread time */
-        UPROPERTY(BlueprintReadOnly)
-        float RenderThreadTimeMS = 0.0f;
-
-        /** GPU time */
-        UPROPERTY(BlueprintReadOnly)
-        float GPUTimeMS = 0.0f;
-
-        /** Memory usage in MB */
-        UPROPERTY(BlueprintReadOnly)
-        float MemoryUsageMB = 0.0f;
-
-        /** Draw calls per frame */
-        UPROPERTY(BlueprintReadOnly)
-        int32 DrawCalls = 0;
-
-        /** Triangles rendered per frame */
-        UPROPERTY(BlueprintReadOnly)
-        int32 TrianglesRendered = 0;
-
-        /** Physics objects simulated */
-        UPROPERTY(BlueprintReadOnly)
-        int32 PhysicsObjects = 0;
-
-        /** Collision tests per frame */
-        UPROPERTY(BlueprintReadOnly)
-        int32 CollisionTests = 0;
-
-        /** Performance bottleneck type */
-        UPROPERTY(BlueprintReadOnly)
-        EPerformanceBottleneck Bottleneck = EPerformanceBottleneck::None;
-    };
-
-    /** Performance bottleneck types */
-    UENUM(BlueprintType)
-    enum class EPerformanceBottleneck : uint8
-    {
-        None            UMETA(DisplayName = "No Bottleneck"),
-        CPU_GameThread  UMETA(DisplayName = "CPU Game Thread"),
-        CPU_RenderThread UMETA(DisplayName = "CPU Render Thread"),
-        GPU             UMETA(DisplayName = "GPU Bound"),
-        Memory          UMETA(DisplayName = "Memory Bound"),
-        Physics         UMETA(DisplayName = "Physics Bound"),
-        Collision       UMETA(DisplayName = "Collision Bound")
-    };
-
-    /** Optimization categories */
-    UENUM(BlueprintType)
-    enum class EOptimizationCategory : uint8
-    {
-        Rendering       UMETA(DisplayName = "Rendering Quality"),
-        Physics         UMETA(DisplayName = "Physics Simulation"),
-        Collision       UMETA(DisplayName = "Collision Detection"),
-        LOD             UMETA(DisplayName = "Level of Detail"),
-        Shadows         UMETA(DisplayName = "Shadow Quality"),
-        PostProcessing  UMETA(DisplayName = "Post Processing"),
-        Particles       UMETA(DisplayName = "Particle Systems"),
-        Audio           UMETA(DisplayName = "Audio Processing"),
-        Streaming       UMETA(DisplayName = "Asset Streaming"),
-        Memory          UMETA(DisplayName = "Memory Management")
-    };
-
-    /** Performance quality levels */
-    UENUM(BlueprintType)
-    enum class EPerformanceQuality : uint8
-    {
-        Low         UMETA(DisplayName = "Low Quality"),
-        Medium      UMETA(DisplayName = "Medium Quality"),
-        High        UMETA(DisplayName = "High Quality"),
-        Epic        UMETA(DisplayName = "Epic Quality"),
-        Cinematic   UMETA(DisplayName = "Cinematic Quality")
-    };
-
-    /** Platform-specific performance targets */
-    USTRUCT(BlueprintType)
-    struct FPlatformPerformanceTarget
-    {
-        GENERATED_BODY()
-
-        /** Target frame rate */
-        UPROPERTY(EditAnywhere, BlueprintReadOnly)
-        float TargetFPS = 60.0f;
-
-        /** Maximum frame time budget in milliseconds */
-        UPROPERTY(EditAnywhere, BlueprintReadOnly)
-        float MaxFrameTimeMS = 16.67f;
-
-        /** Target quality level */
-        UPROPERTY(EditAnywhere, BlueprintReadOnly)
-        EPerformanceQuality TargetQuality = EPerformanceQuality::High;
-
-        /** Memory budget in MB */
-        UPROPERTY(EditAnywhere, BlueprintReadOnly)
-        float MemoryBudgetMB = 8192.0f;
-
-        /** Maximum draw calls per frame */
-        UPROPERTY(EditAnywhere, BlueprintReadOnly)
-        int32 MaxDrawCalls = 5000;
-
-        /** Maximum physics objects */
-        UPROPERTY(EditAnywhere, BlueprintReadOnly)
-        int32 MaxPhysicsObjects = 1000;
-    };
-
-private:
-    /** Performance monitoring */
-    void UpdatePerformanceMetrics();
-    void AnalyzePerformanceBottlenecks();
-    void ApplyFrameRateOptimizations();
-
-    /** Rendering optimizations */
-    void OptimizeRenderingQuality();
-    void OptimizeLODSystem();
-    void OptimizeShadowQuality();
-    void OptimizePostProcessing();
-
-    /** Physics optimizations */
-    void OptimizePhysicsSimulation();
-    void OptimizeCollisionDetection();
-    void OptimizeRagdollPhysics();
-
-    /** Memory optimizations */
-    void OptimizeMemoryUsage();
-    void OptimizeAssetStreaming();
-    void OptimizeTextureStreaming();
-
-    /** Platform-specific optimizations */
-    void ApplyPlatformOptimizations();
-    void ConfigureConsoleOptimizations();
-    void ConfigurePCOptimizations();
-
-    /** Console variable management */
-    void SetConsoleVariable(const FString& VariableName, float Value);
-    void SetConsoleVariable(const FString& VariableName, int32 Value);
-    float GetConsoleVariableFloat(const FString& VariableName);
-    int32 GetConsoleVariableInt(const FString& VariableName);
-
-    /** Performance targets for different platforms */
-    UPROPERTY(EditAnywhere, Category = "Performance Targets")
-    TMap<FString, FPlatformPerformanceTarget> PlatformTargets;
+    /** Platform performance profile */
+    UPROPERTY()
+    FPlatformPerformanceProfile PlatformProfile;
 
     /** Current performance metrics */
     UPROPERTY()
     FPerformanceMetrics CurrentMetrics;
 
-    /** Enabled optimization categories */
-    UPROPERTY(EditAnywhere, Category = "Optimization")
-    TMap<EOptimizationCategory, bool> EnabledOptimizations;
-
-    /** Performance monitoring settings */
-    UPROPERTY(EditAnywhere, Category = "Monitoring")
-    bool bEnablePerformanceMonitoring = true;
-
-    UPROPERTY(EditAnywhere, Category = "Monitoring")
-    float MonitoringUpdateInterval = 0.1f; // Update every 100ms
-
-    UPROPERTY(EditAnywhere, Category = "Monitoring")
-    int32 MetricsHistorySize = 300; // 30 seconds at 10fps monitoring
-
-    /** Performance history for trend analysis */
+    /** Auto performance scaling enabled */
     UPROPERTY()
-    TArray<FPerformanceMetrics> MetricsHistory;
+    bool bAutoPerformanceScaling = true;
 
-    /** Optimization thresholds */
-    UPROPERTY(EditAnywhere, Category = "Thresholds")
-    float FrameTimeWarningThreshold = 20.0f; // ms
+    /** Performance profiling enabled */
+    UPROPERTY()
+    bool bPerformanceProfilingEnabled = false;
 
-    UPROPERTY(EditAnywhere, Category = "Thresholds")
-    float FrameTimeCriticalThreshold = 40.0f; // ms
+    /** Performance capture active */
+    UPROPERTY()
+    bool bPerformanceCaptureActive = false;
 
-    UPROPERTY(EditAnywhere, Category = "Thresholds")
-    float MemoryWarningThreshold = 7000.0f; // MB
+    /** Current capture name */
+    UPROPERTY()
+    FString CurrentCaptureName;
 
-    UPROPERTY(EditAnywhere, Category = "Thresholds")
-    float MemoryCriticalThreshold = 8000.0f; // MB
+    /** Performance update frequency */
+    UPROPERTY()
+    float PerformanceUpdateFrequency = 1.0f;
 
-    /** Timer handle for performance monitoring */
-    FTimerHandle PerformanceMonitoringTimer;
+    /** Last performance update time */
+    UPROPERTY()
+    float LastPerformanceUpdateTime = 0.0f;
 
-    /** Console variables for optimization */
-    TMap<FString, IConsoleVariable*> OptimizationCVars;
+    /** Performance history for averaging */
+    UPROPERTY()
+    TArray<float> FPSHistory;
 
-    /** Current platform name */
-    FString CurrentPlatform;
+    /** Maximum history samples */
+    UPROPERTY()
+    int32 MaxHistorySamples = 60;
 
-    /** Performance optimization state */
-    bool bOptimizationsActive = false;
-    EPerformanceQuality CurrentQualityLevel = EPerformanceQuality::High;
-    float CurrentTargetFPS = 60.0f;
+private:
+    void UpdatePerformanceMetrics();
+    void ApplyPerformanceOptimizations();
+    void DetectPerformanceBottlenecks();
+    void ApplyQualitySettings();
+    void ConfigurePlatformSettings();
+    void UpdateLODSettings();
+    void UpdatePhysicsSettings();
+    void UpdateAISettings();
+    void UpdateRenderingSettings();
+    void LogPerformanceMetrics();
 
-    /** Statistics tracking */
-    int32 OptimizationApplicationCount = 0;
-    float TotalOptimizationTime = 0.0f;
-    float LastOptimizationTime = 0.0f;
+    FTimerHandle PerformanceUpdateTimer;
+    FTimerHandle OptimizationTimer;
+};
+
+/**
+ * Performance Monitor Component
+ * Monitors performance for individual actors and systems
+ */
+UCLASS(ClassGroup=(Performance), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UPerformanceMonitorComponent : public UActorComponent
+{
+    GENERATED_BODY()
 
 public:
-    /** Delegate for performance events */
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnPerformanceEvent, EPerformanceBottleneck, Bottleneck, const FPerformanceMetrics&, Metrics);
+    UPerformanceMonitorComponent();
 
-    UPROPERTY(BlueprintAssignable, Category = "Performance Events")
-    FOnPerformanceEvent OnPerformanceWarning;
+protected:
+    virtual void BeginPlay() override;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    UPROPERTY(BlueprintAssignable, Category = "Performance Events")
-    FOnPerformanceEvent OnPerformanceCritical;
+public:
+    /** Enable/disable performance monitoring */
+    UFUNCTION(BlueprintCallable, Category = "Performance Monitor")
+    void SetMonitoringEnabled(bool bEnabled);
 
-    UPROPERTY(BlueprintAssignable, Category = "Performance Events")
-    FOnPerformanceEvent OnPerformanceImproved;
+    /** Get performance cost of this actor */
+    UFUNCTION(BlueprintPure, Category = "Performance Monitor")
+    float GetPerformanceCost() const { return CurrentPerformanceCost; }
+
+    /** Get performance impact category */
+    UFUNCTION(BlueprintPure, Category = "Performance Monitor")
+    FString GetPerformanceImpactCategory() const;
+
+    /** Set performance budget for this actor */
+    UFUNCTION(BlueprintCallable, Category = "Performance Monitor")
+    void SetPerformanceBudget(float Budget) { PerformanceBudget = Budget; }
+
+    /** Check if actor is within performance budget */
+    UFUNCTION(BlueprintPure, Category = "Performance Monitor")
+    bool IsWithinPerformanceBudget() const;
+
+protected:
+    /** Performance monitoring enabled */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance Monitor")
+    bool bMonitoringEnabled = true;
+
+    /** Performance budget for this actor */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance Monitor")
+    float PerformanceBudget = 1.0f;
+
+    /** Current performance cost */
+    UPROPERTY(BlueprintReadOnly, Category = "Performance Monitor")
+    float CurrentPerformanceCost = 0.0f;
+
+    /** Performance monitoring frequency */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance Monitor")
+    float MonitoringFrequency = 0.5f;
+
+private:
+    void MeasurePerformanceCost();
+    void RegisterWithOptimizer();
+    void UnregisterFromOptimizer();
+
+    float LastMonitoringTime = 0.0f;
+    float AccumulatedCost = 0.0f;
+    int32 SampleCount = 0;
 };
