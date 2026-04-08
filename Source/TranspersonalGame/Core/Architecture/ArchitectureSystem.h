@@ -7,62 +7,70 @@
 #include "Engine/DataAsset.h"
 #include "Materials/MaterialInterface.h"
 #include "Components/StaticMeshComponent.h"
-#include "Components/InstancedStaticMeshComponent.h"
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
-#include "Engine/StaticMesh.h"
+#include "Components/BoxComponent.h"
+#include "Components/SphereComponent.h"
+#include "Engine/TriggerVolume.h"
 #include "../WorldGeneration/BiomeSystem.h"
-#include "../Environment/EnvironmentArtSystem.h"
 #include "ArchitectureSystem.generated.h"
 
 /**
- * @brief Architecture & Interior System for Transpersonal Game Studio
+ * @brief Architecture System for Transpersonal Game Studio
  * 
- * Creates every structure built by human hands in the prehistoric world — each building
- * is a document of the civilization that created it. This system is guided by the conviction
- * that architecture is time made visible, and every interior tells the story of who lived there.
+ * Every structure is a document of human civilization. Every interior tells the story
+ * of who lived there, what they feared, what they needed. This system creates
+ * architectural archaeology — buildings that feel lived-in, abandoned with purpose,
+ * weathered by time and elements.
  * 
  * Core Philosophy (Stewart Brand + Gaston Bachelard):
- * - Buildings learn and adapt over time — they show layers of use and modification
- * - Every interior has memory — objects placed reveal the habits and fears of inhabitants
- * - No space is ever truly empty — even abandonment tells a story
- * - Architecture follows function, but function follows survival needs
+ * - Buildings learn over time — they show their history in layers
+ * - Space has memory — every room remembers its inhabitants
+ * - No empty interiors — every space shows signs of use and abandonment
+ * - Architecture as environmental storytelling
  * 
- * Features:
- * - Procedural building generation with cultural authenticity
- * - Interior furnishing system that tells stories through object placement
- * - Architectural aging and weathering over time
- * - Cultural building styles based on environmental pressures
- * - Ruins and abandoned structures with narrative purpose
- * - Interactive elements that reveal past inhabitants
+ * Structure Types:
+ * - Primitive Shelters: Basic survival structures (lean-tos, windbreaks)
+ * - Cave Dwellings: Natural caves modified for habitation
+ * - Elevated Platforms: Tree houses and raised structures for safety
+ * - Stone Circles: Ritual/gathering spaces
+ * - Burial Mounds: Memorial structures
+ * - Tool Caches: Hidden storage areas
+ * - Observation Posts: Elevated lookout points
+ * - Defensive Structures: Barriers and traps
  * 
- * Technical Implementation:
- * - PCG-based building placement and generation
- * - Modular construction system for flexible architecture
- * - Interior decoration system with narrative logic
- * - Material aging and weathering shaders
- * - Nanite support for detailed architectural elements
- * - Blueprint-based interaction systems for storytelling
+ * Technical Features:
+ * - Procedural structure generation using PCG Framework
+ * - Modular building components for variety
+ * - Interior furnishing system with narrative props
+ * - Weathering and aging materials
+ * - Structural integrity simulation
+ * - Integration with biome-specific materials
+ * - Nanite support for detailed architecture
+ * - Performance optimization through LOD and culling
  * 
  * @author Architecture & Interior Agent — Agent #7
  * @version 1.0 — March 2026
  */
 
-/** Building types found in the prehistoric world */
+/** Primitive structure types found in prehistoric world */
 UENUM(BlueprintType)
-enum class EBuildingType : uint8
+enum class EStructureType : uint8
 {
-    ShelterHut          UMETA(DisplayName = "Basic Shelter Hut"),
-    LargeDwelling       UMETA(DisplayName = "Large Family Dwelling"),
-    StorageStructure    UMETA(DisplayName = "Storage Structure"),
-    CommunalHall        UMETA(DisplayName = "Communal Hall"),
-    Watchtower          UMETA(DisplayName = "Watchtower"),
-    Workshop            UMETA(DisplayName = "Crafting Workshop"),
-    SacredSite          UMETA(DisplayName = "Sacred Site"),
-    DefensiveWall       UMETA(DisplayName = "Defensive Wall"),
-    Bridge              UMETA(DisplayName = "Bridge"),
-    AbandonedRuin       UMETA(DisplayName = "Abandoned Ruin"),
-    TemporaryOutpost    UMETA(DisplayName = "Temporary Outpost"),
-    UndergroundShelter  UMETA(DisplayName = "Underground Shelter")
+    PrimitiveShelter    UMETA(DisplayName = "Primitive Shelter"),
+    CaveDwelling        UMETA(DisplayName = "Cave Dwelling"),
+    ElevatedPlatform    UMETA(DisplayName = "Elevated Platform"),
+    StoneCircle         UMETA(DisplayName = "Stone Circle"),
+    BurialMound         UMETA(DisplayName = "Burial Mound"),
+    ToolCache           UMETA(DisplayName = "Tool Cache"),
+    ObservationPost     UMETA(DisplayName = "Observation Post"),
+    DefensiveBarrier    UMETA(DisplayName = "Defensive Barrier"),
+    FoodStorage         UMETA(DisplayName = "Food Storage"),
+    WaterCollection     UMETA(DisplayName = "Water Collection"),
+    FirePit             UMETA(DisplayName = "Fire Pit"),
+    WorkArea            UMETA(DisplayName = "Work Area"),
+    SleepingArea        UMETA(DisplayName = "Sleeping Area"),
+    RitualSite          UMETA(DisplayName = "Ritual Site"),
+    TrapSystem          UMETA(DisplayName = "Trap System")
 };
 
 /** Construction materials available in prehistoric times */
@@ -71,83 +79,51 @@ enum class EConstructionMaterial : uint8
 {
     Wood                UMETA(DisplayName = "Wood"),
     Stone               UMETA(DisplayName = "Stone"),
-    Mud                 UMETA(DisplayName = "Mud/Clay"),
     Bone                UMETA(DisplayName = "Bone"),
     Hide                UMETA(DisplayName = "Animal Hide"),
+    Plant               UMETA(DisplayName = "Plant Fiber"),
+    Mud                 UMETA(DisplayName = "Mud/Clay"),
     Thatch              UMETA(DisplayName = "Thatch"),
-    Bark                UMETA(DisplayName = "Tree Bark"),
     Bamboo              UMETA(DisplayName = "Bamboo"),
+    Vine                UMETA(DisplayName = "Vine"),
+    Bark                UMETA(DisplayName = "Tree Bark"),
     Reed                UMETA(DisplayName = "Reed"),
-    MixedMaterials      UMETA(DisplayName = "Mixed Materials")
+    Moss                UMETA(DisplayName = "Moss")
 };
 
-/** Architectural styles based on environmental adaptation */
+/** Structural condition states */
 UENUM(BlueprintType)
-enum class EArchitecturalStyle : uint8
+enum class EStructuralCondition : uint8
 {
-    ForestAdapted       UMETA(DisplayName = "Forest Adapted"),
-    PlainsDwelling      UMETA(DisplayName = "Plains Dwelling"),
-    RiversideStructure  UMETA(DisplayName = "Riverside Structure"),
-    HillsideBuilding    UMETA(DisplayName = "Hillside Building"),
-    SwamplandHut        UMETA(DisplayName = "Swampland Hut"),
-    DesertShelter       UMETA(DisplayName = "Desert Shelter"),
-    MountainRefuge      UMETA(DisplayName = "Mountain Refuge"),
-    CoastalStructure    UMETA(DisplayName = "Coastal Structure"),
-    CaveExtension       UMETA(DisplayName = "Cave Extension"),
-    NomadTemporary      UMETA(DisplayName = "Nomad Temporary")
-};
-
-/** Interior room types and their functions */
-UENUM(BlueprintType)
-enum class ERoomType : uint8
-{
-    MainLiving          UMETA(DisplayName = "Main Living Area"),
-    Sleeping            UMETA(DisplayName = "Sleeping Area"),
-    Storage             UMETA(DisplayName = "Storage Room"),
-    Cooking             UMETA(DisplayName = "Cooking Area"),
-    Crafting            UMETA(DisplayName = "Crafting Workshop"),
-    Gathering           UMETA(DisplayName = "Gathering Space"),
-    Sacred              UMETA(DisplayName = "Sacred/Ritual Space"),
-    Defense             UMETA(DisplayName = "Defense Position"),
-    AnimalShelter       UMETA(DisplayName = "Animal Shelter"),
-    FoodPreparation     UMETA(DisplayName = "Food Preparation"),
-    ToolMaking          UMETA(DisplayName = "Tool Making"),
-    Entrance            UMETA(DisplayName = "Entrance/Foyer")
-};
-
-/** Weathering and aging states */
-UENUM(BlueprintType)
-enum class EWeatheringState : uint8
-{
-    New                 UMETA(DisplayName = "Recently Built"),
-    Lived               UMETA(DisplayName = "Well Lived-In"),
-    Worn                UMETA(DisplayName = "Showing Wear"),
-    Weathered           UMETA(DisplayName = "Weather Damaged"),
+    Perfect             UMETA(DisplayName = "Perfect Condition"),
+    WellMaintained      UMETA(DisplayName = "Well Maintained"),
+    SlightlyWorn        UMETA(DisplayName = "Slightly Worn"),
+    Weathered           UMETA(DisplayName = "Weathered"),
+    Damaged             UMETA(DisplayName = "Damaged"),
     Deteriorating       UMETA(DisplayName = "Deteriorating"),
-    Abandoned           UMETA(DisplayName = "Recently Abandoned"),
     Ruined              UMETA(DisplayName = "Ruined"),
-    Ancient             UMETA(DisplayName = "Ancient Ruin")
+    Collapsed           UMETA(DisplayName = "Collapsed")
 };
 
-/** Interior furnishing object types */
+/** Interior prop types that tell stories */
 UENUM(BlueprintType)
-enum class EFurnitureType : uint8
+enum class EInteriorPropType : uint8
 {
     SleepingFur         UMETA(DisplayName = "Sleeping Fur"),
-    FirePit             UMETA(DisplayName = "Fire Pit"),
-    CookingStone        UMETA(DisplayName = "Cooking Stone"),
-    ToolRack            UMETA(DisplayName = "Tool Rack"),
-    StorageBasket       UMETA(DisplayName = "Storage Basket"),
+    StoneTools          UMETA(DisplayName = "Stone Tools"),
+    FoodRemains         UMETA(DisplayName = "Food Remains"),
     WaterContainer      UMETA(DisplayName = "Water Container"),
+    FireAsh             UMETA(DisplayName = "Fire Ash"),
+    BoneNeedles         UMETA(DisplayName = "Bone Needles"),
+    PlantMedicine       UMETA(DisplayName = "Plant Medicine"),
+    HuntingGear         UMETA(DisplayName = "Hunting Gear"),
+    CookingStones       UMETA(DisplayName = "Cooking Stones"),
+    PersonalOrnaments   UMETA(DisplayName = "Personal Ornaments"),
+    ChildToys           UMETA(DisplayName = "Child Toys"),
+    RitualObjects       UMETA(DisplayName = "Ritual Objects"),
+    WeaponCache         UMETA(DisplayName = "Weapon Cache"),
     FoodStorage         UMETA(DisplayName = "Food Storage"),
-    WorkSurface         UMETA(DisplayName = "Work Surface"),
-    Seating             UMETA(DisplayName = "Seating"),
-    Decoration          UMETA(DisplayName = "Decoration"),
-    RitualObject        UMETA(DisplayName = "Ritual Object"),
-    PersonalBelonging   UMETA(DisplayName = "Personal Belonging"),
-    Weapon              UMETA(DisplayName = "Weapon"),
-    ClothingStorage     UMETA(DisplayName = "Clothing Storage"),
-    CraftingTool        UMETA(DisplayName = "Crafting Tool")
+    ClothingRemnants    UMETA(DisplayName = "Clothing Remnants")
 };
 
 /** Building component for modular construction */
@@ -164,321 +140,350 @@ struct FBuildingComponent
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Component")
     TSoftObjectPtr<UStaticMesh> ComponentMesh;
 
-    /** Material variations for different weathering states */
+    /** Material for this component */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Component")
-    TMap<EWeatheringState, TSoftObjectPtr<UMaterialInterface>> WeatheringMaterials;
+    TSoftObjectPtr<UMaterialInterface> ComponentMaterial;
 
-    /** Attachment points for connecting to other components */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Component")
-    TArray<FVector> AttachmentPoints;
+    /** Relative transform from structure origin */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Placement")
+    FTransform RelativeTransform;
 
-    /** Component type (wall, roof, floor, door, window, etc.) */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Component")
-    FString ComponentType;
+    /** Required construction material */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Construction")
+    EConstructionMaterial RequiredMaterial = EConstructionMaterial::Wood;
 
-    /** Construction material */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Component")
-    EConstructionMaterial Material = EConstructionMaterial::Wood;
+    /** Material quantity needed */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Construction", meta = (ClampMin = "1", ClampMax = "100"))
+    int32 MaterialQuantity = 5;
 
-    /** Structural integrity (affects weathering) */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Component", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float StructuralIntegrity = 1.0f;
+    /** Structural importance (affects collapse behavior) */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Structure", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float StructuralImportance = 0.5f;
 
-    /** Can this component be damaged/destroyed? */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Component")
-    bool bCanBeDamaged = true;
+    /** Durability against weather */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Durability", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float WeatherResistance = 0.5f;
 
-    /** Collision settings */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Component")
-    bool bHasCollision = true;
+    /** Durability against dinosaur damage */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Durability", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float DinosaurResistance = 0.3f;
+
+    /** Can this component be repaired? */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Maintenance")
+    bool bCanBeRepaired = true;
+
+    /** Time to repair this component (seconds) */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Maintenance", meta = (ClampMin = "1.0"))
+    float RepairTime = 30.0f;
 };
 
-/** Complete building configuration */
+/** Interior prop configuration */
 USTRUCT(BlueprintType)
-struct FBuildingConfig
+struct FInteriorPropConfig
 {
     GENERATED_BODY()
 
-    /** Building type */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Building")
-    EBuildingType BuildingType = EBuildingType::ShelterHut;
+    /** Prop type */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Prop")
+    EInteriorPropType PropType = EInteriorPropType::SleepingFur;
 
-    /** Architectural style */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Building")
-    EArchitecturalStyle ArchitecturalStyle = EArchitecturalStyle::ForestAdapted;
+    /** Prop mesh */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Prop")
+    TSoftObjectPtr<UStaticMesh> PropMesh;
 
-    /** Primary construction material */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Building")
-    EConstructionMaterial PrimaryMaterial = EConstructionMaterial::Wood;
+    /** Prop material variations */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Prop")
+    TArray<TSoftObjectPtr<UMaterialInterface>> MaterialVariations;
 
-    /** Secondary construction material */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Building")
-    EConstructionMaterial SecondaryMaterial = EConstructionMaterial::Thatch;
+    /** Narrative story this prop tells */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Storytelling", meta = (MultiLine = true))
+    FString NarrativeStory;
+
+    /** Spawn probability in appropriate structures */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Placement", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float SpawnProbability = 0.5f;
+
+    /** Preferred placement areas within structure */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Placement")
+    TArray<FString> PreferredAreas;
+
+    /** Scale variation range */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Variation")
+    FVector2D ScaleRange = FVector2D(0.8f, 1.2f);
+
+    /** Rotation variation (degrees) */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Variation", meta = (ClampMin = "0.0", ClampMax = "360.0"))
+    float RotationVariation = 45.0f;
+
+    /** Age/weathering level */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Condition", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float WeatheringLevel = 0.5f;
+
+    /** Can player interact with this prop? */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Interaction")
+    bool bIsInteractable = false;
+
+    /** Resources obtained from interaction */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Interaction")
+    TMap<FString, int32> InteractionRewards;
+
+    /** Interaction description for UI */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Interaction")
+    FText InteractionDescription;
+};
+
+/** Structure configuration data */
+USTRUCT(BlueprintType)
+struct FStructureConfig
+{
+    GENERATED_BODY()
+
+    /** Structure type */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Structure")
+    EStructureType StructureType = EStructureType::PrimitiveShelter;
+
+    /** Human-readable structure name */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Structure")
+    FText StructureName;
+
+    /** Historical/narrative description */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Storytelling", meta = (MultiLine = true))
+    FString HistoricalDescription;
 
     /** Building components that make up this structure */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Building")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Construction")
     TArray<FBuildingComponent> BuildingComponents;
 
-    /** Room layout for interior generation */
+    /** Interior props for this structure type */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Interior")
-    TArray<ERoomType> RoomLayout;
+    TArray<FInteriorPropConfig> InteriorProps;
 
-    /** Current weathering state */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Building")
-    EWeatheringState WeatheringState = EWeatheringState::Lived;
-
-    /** Building size category */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Building")
-    FVector BuildingSize = FVector(400.0f, 400.0f, 300.0f);
-
-    /** Preferred biomes for this building type */
+    /** Preferred biomes for this structure */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Placement")
     TArray<EBiomeType> PreferredBiomes;
 
-    /** Minimum distance from water sources */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Placement", meta = (ClampMin = "0.0"))
-    float MinWaterDistance = 100.0f;
+    /** Minimum distance from other structures */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Placement", meta = (ClampMin = "100.0"))
+    float MinDistanceFromOthers = 500.0f;
 
-    /** Maximum distance from water sources */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Placement", meta = (ClampMin = "0.0"))
-    float MaxWaterDistance = 1000.0f;
-
-    /** Slope tolerance for building placement */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Placement")
-    FVector2D SlopeTolerance = FVector2D(0.0f, 15.0f);
-
-    /** Narrative description of this building's purpose and history */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Storytelling", meta = (MultiLine = true))
-    FString BuildingNarrative;
-
-    /** Number of inhabitants this building was designed for */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Storytelling", meta = (ClampMin = "1", ClampMax = "50"))
-    int32 DesignedInhabitants = 1;
-
-    /** Age of the building (affects weathering) */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Storytelling", meta = (ClampMin = "0.0"))
-    float BuildingAge = 1.0f; // Years
-
-    /** Has this building been abandoned? */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Storytelling")
-    bool bIsAbandoned = false;
-
-    /** Time since abandonment (if abandoned) */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Storytelling", meta = (ClampMin = "0.0"))
-    float TimeSinceAbandonment = 0.0f; // Years
-};
-
-/** Interior furnishing configuration */
-USTRUCT(BlueprintType)
-struct FFurnitureConfig
-{
-    GENERATED_BODY()
-
-    /** Furniture type */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Furniture")
-    EFurnitureType FurnitureType = EFurnitureType::SleepingFur;
-
-    /** Static mesh for this furniture */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Furniture")
-    TSoftObjectPtr<UStaticMesh> FurnitureMesh;
-
-    /** Material variations for different conditions */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Furniture")
-    TArray<TSoftObjectPtr<UMaterialInterface>> MaterialVariations;
-
-    /** Room types where this furniture is appropriate */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Placement")
-    TArray<ERoomType> AppropriateRooms;
-
-    /** Placement priority (higher = more likely to be placed) */
+    /** Spawn probability per km² */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Placement", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float PlacementPriority = 0.5f;
+    float SpawnProbability = 0.05f;
 
-    /** Size requirements for placement */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Placement")
-    FVector RequiredSpace = FVector(100.0f, 100.0f, 100.0f);
+    /** Preferred elevation range */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Terrain")
+    FVector2D ElevationRange = FVector2D(0.0f, 1000.0f);
 
-    /** Must be placed against walls? */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Placement")
-    bool bRequiresWallPlacement = false;
+    /** Slope tolerance for placement */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Terrain")
+    FVector2D SlopeRange = FVector2D(0.0f, 30.0f);
 
-    /** Must be placed near other specific furniture? */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Placement")
-    TArray<EFurnitureType> RequiredNearbyFurniture;
+    /** Proximity to water preference */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Environment", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float WaterProximityPreference = 0.5f;
 
-    /** Cannot be placed near these furniture types */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Placement")
-    TArray<EFurnitureType> ConflictingFurniture;
+    /** Shelter value (protection from weather) */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Gameplay", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float ShelterValue = 0.7f;
 
-    /** Narrative purpose of this furniture */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Storytelling", meta = (MultiLine = true))
-    FString NarrativePurpose;
+    /** Security value (protection from predators) */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Gameplay", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float SecurityValue = 0.5f;
 
-    /** Signs of use/wear this furniture shows */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Storytelling")
-    TArray<FString> WearSigns;
+    /** Storage capacity (number of items) */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Gameplay", meta = (ClampMin = "0", ClampMax = "100"))
+    int32 StorageCapacity = 10;
 
-    /** Can the player interact with this furniture? */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Gameplay")
-    bool bIsInteractable = false;
+    /** Construction time required (seconds) */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Construction", meta = (ClampMin = "60.0"))
+    float ConstructionTime = 300.0f;
 
-    /** Interaction type (examine, use, move, etc.) */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Gameplay")
-    FString InteractionType;
+    /** Maintenance interval (game days) */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Maintenance", meta = (ClampMin = "1.0"))
+    float MaintenanceInterval = 7.0f;
 
-    /** Resources provided when interacted with */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Gameplay")
-    TMap<FString, int32> InteractionRewards;
+    /** Structural integrity (affects collapse) */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Structure", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float StructuralIntegrity = 1.0f;
+
+    /** Degradation rate per day */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Maintenance", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float DegradationRate = 0.01f;
 };
 
-/** Room configuration for interior generation */
+/** Weathering effect configuration */
 USTRUCT(BlueprintType)
-struct FRoomConfig
+struct FWeatheringEffect
 {
     GENERATED_BODY()
 
-    /** Room type */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Room")
-    ERoomType RoomType = ERoomType::MainLiving;
+    /** Effect name */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Weathering")
+    FString EffectName;
 
-    /** Room dimensions */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Room")
-    FVector RoomSize = FVector(300.0f, 300.0f, 250.0f);
+    /** Material parameter to modify */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Weathering")
+    FString MaterialParameter;
 
-    /** Required furniture for this room type */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Room")
-    TArray<EFurnitureType> RequiredFurniture;
+    /** Weathering intensity (0-1) */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Weathering", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float WeatheringIntensity = 0.5f;
 
-    /** Optional furniture for this room type */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Room")
-    TArray<EFurnitureType> OptionalFurniture;
+    /** Affected construction materials */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Weathering")
+    TArray<EConstructionMaterial> AffectedMaterials;
 
-    /** Floor material for this room */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Room")
-    TSoftObjectPtr<UMaterialInterface> FloorMaterial;
+    /** Weather conditions that cause this effect */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Environment")
+    TArray<FString> CausingWeatherConditions;
 
-    /** Wall material for this room */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Room")
-    TSoftObjectPtr<UMaterialInterface> WallMaterial;
-
-    /** Lighting configuration */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Room")
-    bool bHasFirePit = false;
-
-    /** Natural light sources (windows, openings) */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Room")
-    int32 NaturalLightSources = 1;
-
-    /** Privacy level (affects door placement) */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Room", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float PrivacyLevel = 0.5f;
-
-    /** Activity level (affects wear and furniture placement) */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Room", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float ActivityLevel = 0.5f;
-
-    /** Narrative description of this room's purpose and history */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Storytelling", meta = (MultiLine = true))
-    FString RoomNarrative;
+    /** Rate of effect application */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Weathering", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float EffectRate = 0.1f;
 };
 
-/** Data asset containing all building configurations */
-UCLASS(BlueprintType)
-class TRANSPERSONALGAME_API UBuildingDatabase : public UDataAsset
+/**
+ * @brief Architecture Data Asset
+ * 
+ * Defines architectural styles and construction methods for prehistoric structures.
+ * Each asset represents a complete building system with components, materials,
+ * and narrative elements.
+ */
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UArchitectureData : public UPrimaryDataAsset
 {
     GENERATED_BODY()
 
 public:
-    /** All available building configurations */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Buildings")
-    TArray<FBuildingConfig> BuildingConfigurations;
+    UArchitectureData();
 
-    /** All available furniture configurations */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Furniture")
-    TArray<FFurnitureConfig> FurnitureConfigurations;
+    /** Architecture style name */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Architecture Info")
+    FText ArchitectureName;
 
-    /** All available room configurations */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Rooms")
-    TArray<FRoomConfig> RoomConfigurations;
+    /** Cultural/historical description */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Architecture Info", meta = (MultiLine = true))
+    FString CulturalDescription;
 
-    /** Building components library */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Components")
-    TArray<FBuildingComponent> ComponentLibrary;
+    /** Time period this architecture represents */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Architecture Info")
+    FString TimePeriod;
 
-    /** Get building configurations for a specific biome */
-    UFUNCTION(BlueprintCallable, Category = "Buildings")
-    TArray<FBuildingConfig> GetBuildingsForBiome(EBiomeType BiomeType) const;
+    /** Available structure types in this architectural style */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Structures")
+    TArray<FStructureConfig> AvailableStructures;
 
-    /** Get furniture configurations for a specific room type */
-    UFUNCTION(BlueprintCallable, Category = "Furniture")
-    TArray<FFurnitureConfig> GetFurnitureForRoom(ERoomType RoomType) const;
+    /** Common construction materials for this style */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Materials")
+    TArray<EConstructionMaterial> CommonMaterials;
 
-    /** Get appropriate architectural style for biome and location */
-    UFUNCTION(BlueprintCallable, Category = "Buildings")
-    EArchitecturalStyle GetStyleForLocation(EBiomeType BiomeType, float DistanceToWater, float Elevation) const;
+    /** Weathering effects for this architectural style */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Weathering")
+    TArray<FWeatheringEffect> WeatheringEffects;
+
+    /** Biomes where this architecture is commonly found */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Distribution")
+    TArray<EBiomeType> NativeBiomes;
+
+    /** Overall condition range for structures of this style */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Condition")
+    FVector2D ConditionRange = FVector2D(0.3f, 0.8f);
+
+    /** Abandonment probability (structures found empty) */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Narrative", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float AbandonmentProbability = 0.7f;
+
+    /** Signs of struggle probability (damaged/destroyed structures) */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Narrative", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float StruggleProbability = 0.3f;
 };
 
-/** Main architecture system subsystem */
+/**
+ * @brief Architecture System Subsystem
+ * 
+ * Manages the procedural placement and generation of prehistoric structures
+ * throughout the world. Integrates with the biome system and environment art
+ * to create cohesive architectural storytelling.
+ */
 UCLASS()
 class TRANSPERSONALGAME_API UArchitectureSystem : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
+    UArchitectureSystem();
+
     // USubsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    /** Initialize the architecture system with building database */
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void InitializeSystem(UBuildingDatabase* InBuildingDatabase);
+    /** Generate structures for a specific biome area */
+    UFUNCTION(BlueprintCallable, Category = "Architecture System")
+    void GenerateStructuresForBiome(EBiomeType BiomeType, const FVector& AreaCenter, float AreaRadius);
 
-    /** Generate buildings for a specific area */
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void GenerateBuildingsInArea(const FVector& AreaCenter, float AreaRadius, EBiomeType BiomeType);
+    /** Place a specific structure at a location */
+    UFUNCTION(BlueprintCallable, Category = "Architecture System")
+    class AStructureActor* PlaceStructure(const FStructureConfig& StructureConfig, const FVector& Location, float Rotation = 0.0f);
 
-    /** Generate a specific building at a location */
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    class ABuilding* GenerateBuilding(const FVector& Location, const FBuildingConfig& BuildingConfig);
+    /** Weather a structure over time */
+    UFUNCTION(BlueprintCallable, Category = "Architecture System")
+    void ApplyWeathering(class AStructureActor* Structure, float WeatheringAmount);
 
-    /** Generate interior for an existing building */
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void GenerateInterior(class ABuilding* Building, const TArray<FRoomConfig>& RoomConfigs);
+    /** Repair a damaged structure */
+    UFUNCTION(BlueprintCallable, Category = "Architecture System")
+    bool RepairStructure(class AStructureActor* Structure, const TArray<EConstructionMaterial>& AvailableMaterials);
 
-    /** Update weathering for all buildings in the world */
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void UpdateBuildingWeathering(float DeltaTime);
+    /** Get suitable structure types for a biome */
+    UFUNCTION(BlueprintPure, Category = "Architecture System")
+    TArray<FStructureConfig> GetStructureTypesForBiome(EBiomeType BiomeType) const;
 
-    /** Find suitable building locations in an area */
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    TArray<FVector> FindBuildingLocations(const FVector& AreaCenter, float AreaRadius, const FBuildingConfig& BuildingConfig);
-
-    /** Get building database */
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    UBuildingDatabase* GetBuildingDatabase() const { return BuildingDatabase; }
+    /** Check if location is suitable for structure placement */
+    UFUNCTION(BlueprintPure, Category = "Architecture System")
+    bool IsLocationSuitableForStructure(const FVector& Location, const FStructureConfig& StructureConfig) const;
 
 protected:
-    /** Building database containing all configurations */
+    /** Available architecture data assets */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Configuration")
+    TArray<TSoftObjectPtr<UArchitectureData>> ArchitectureDataAssets;
+
+    /** Maximum structures per km² */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Generation", meta = (ClampMin = "0.0", ClampMax = "100.0"))
+    float MaxStructuresPerKm2 = 5.0f;
+
+    /** Minimum distance between structures */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Generation", meta = (ClampMin = "100.0"))
+    float MinStructureDistance = 1000.0f;
+
+    /** Enable structure weathering over time */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Simulation")
+    bool bEnableWeathering = true;
+
+    /** Weathering update interval (seconds) */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Simulation", meta = (ClampMin = "60.0"))
+    float WeatheringUpdateInterval = 3600.0f;
+
+    /** Enable structural integrity simulation */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Simulation")
+    bool bEnableStructuralIntegrity = true;
+
+private:
+    /** Timer for weathering updates */
+    FTimerHandle WeatheringTimer;
+
+    /** Currently spawned structures */
     UPROPERTY()
-    UBuildingDatabase* BuildingDatabase;
+    TArray<TWeakObjectPtr<class AStructureActor>> SpawnedStructures;
 
-    /** All buildings currently in the world */
+    /** Cached architecture data */
     UPROPERTY()
-    TArray<class ABuilding*> WorldBuildings;
+    TArray<UArchitectureData*> LoadedArchitectureData;
 
-    /** Performance settings */
-    UPROPERTY()
-    float MaxBuildingsPerArea = 10.0f;
+    /** Update weathering for all structures */
+    void UpdateWeathering();
 
-    UPROPERTY()
-    float BuildingUpdateInterval = 60.0f; // Seconds between weathering updates
+    /** Load architecture data assets */
+    void LoadArchitectureData();
 
-    /** Timer for building updates */
-    FTimerHandle BuildingUpdateTimer;
-
-    /** Internal methods */
-    void UpdateBuildingWeatheringInternal();
-    bool IsLocationSuitableForBuilding(const FVector& Location, const FBuildingConfig& BuildingConfig) const;
-    EArchitecturalStyle DetermineArchitecturalStyle(EBiomeType BiomeType, const FVector& Location) const;
-    void PlaceFurnitureInRoom(class ABuilding* Building, const FRoomConfig& RoomConfig, const FVector& RoomCenter, const FVector& RoomSize);
+    /** Calculate structure placement score */
+    float CalculatePlacementScore(const FVector& Location, const FStructureConfig& StructureConfig) const;
 };
