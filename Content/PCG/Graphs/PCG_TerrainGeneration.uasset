@@ -1,0 +1,35 @@
+# PCG Terrain Generation Graph
+# This is a blueprint representation - actual implementation would be done in UE5 Editor
+
+# Graph Structure:
+# Input: Landscape Bounds
+# -> Surface Sampler (Landscape)
+# -> Density Filter (Height-based)
+# -> Transform Points (Add geological variation)
+# -> Attribute Set (Biome classification)
+# -> Output: Point data for Environment Artist
+
+# Key Nodes Configuration:
+# 1. Surface Sampler
+#    - Sample Mode: Landscape
+#    - Points per Square Meter: 0.1
+#    - Bounds Source: Actor Bounds
+#
+# 2. Density Filter
+#    - Filter Mode: Height Range
+#    - Min Height: 50cm (above sea level)
+#    - Max Height: 2000cm (max elevation)
+#
+# 3. Transform Points
+#    - Add geological noise
+#    - Scale: 0.1 to 0.3 random
+#    - Rotation: Natural variation
+#
+# 4. Attribute Set
+#    - BiomeType: Calculated from elevation/humidity
+#    - Slope: Terrain steepness
+#    - WaterDistance: Distance to nearest river
+#    - Elevation: Height above sea level
+
+# This graph generates the base point distribution that will be used by
+# the Environment Artist to place vegetation, rocks, and other props
