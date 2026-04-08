@@ -1,0 +1,29 @@
+# Blackboard Base para Dinossauros
+# Este é um template - o ficheiro real será criado no Editor
+
+# KEYS DEFINIDAS:
+# - CurrentGoalLocation (Vector) - Localização atual do objetivo
+# - EmotionalState (Enum) - Estado emocional atual
+# - PlayerActor (Object:Actor) - Referência ao jogador
+# - LastKnownPlayerLocation (Vector) - Última posição conhecida do jogador
+# - IsPlayerVisible (Bool) - Se o jogador está visível
+# - TerritoryCenter (Vector) - Centro do território
+# - PreferredFeedingArea (Vector) - Área preferida para alimentação
+# - PreferredRestingArea (Vector) - Área preferida para descanso
+# - ThreatLevel (Float) - Nível de ameaça percebida (0.0-1.0)
+# - TrustLevel (Float) - Nível de confiança no jogador (0.0-1.0)
+# - IsHungry (Bool) - Se está com fome
+# - IsTired (Bool) - Se está cansado
+# - IsInTerritory (Bool) - Se está dentro do território
+# - NearbyAllies (Object:Actor Array) - Aliados próximos
+# - NearbyThreats (Object:Actor Array) - Ameaças próximas
+# - CurrentActivity (Enum) - Atividade atual (Feeding, Resting, Patrolling, etc.)
+# - TimeOfDay (Float) - Hora atual do dia (0.0-1.0)
+# - CanBeDomesticated (Bool) - Se pode ser domesticado
+# - DomesticationProgress (Float) - Progresso da domesticação (0.0-1.0)
+
+# INSTRUÇÕES PARA IMPLEMENTAÇÃO NO EDITOR:
+# 1. Criar Blackboard Asset chamado "BB_DinosaurBase"
+# 2. Adicionar todas as keys listadas acima
+# 3. Configurar tipos apropriados para cada key
+# 4. Este blackboard será usado como base para todos os dinossauros
