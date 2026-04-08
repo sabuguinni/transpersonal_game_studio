@@ -1,0 +1,59 @@
+# Niagara System: Ambient Fog
+# Template configuration for atmospheric fog effects
+
+System Properties:
+- Emitter Count: 1
+- Auto Activate: true
+- Warm Up Time: 2.0
+- Warm Up Delta Time: 0.1
+
+Emitter: "Fog_Volume"
+  Spawn Rate: 50
+  Particle Lifetime: 15.0 - 25.0
+  
+  Modules:
+    Emitter Spawn:
+      - Initialize Particle
+      - Spawn Rate
+      
+    Emitter Update:
+      - Spawn Rate Scale
+      
+    Particle Spawn:
+      - Initialize Particle
+      - Shape Location (Sphere)
+        * Sphere Radius: {Radius Parameter, Default: 1000.0}
+      - Add Velocity (Random)
+        * Minimum: (-50, -50, 10)
+        * Maximum: (50, 50, 30)
+      - Set Variables
+        * Particles.Alpha: 0.0
+        * Particles.Size: 200.0 - 400.0
+        
+    Particle Update:
+      - Add Velocity
+        * Velocity: (0, 0, 5) # Slow upward drift
+      - Alpha Fade In/Out
+        * Fade In Time: 3.0
+        * Fade Out Time: 5.0
+      - Size Scale Over Life
+        * Scale Curve: 0.5 -> 1.0 -> 0.8
+      - Drag
+        * Drag Coefficient: 0.1
+        
+    Render:
+      - Sprite Renderer
+        * Material: M_Fog_Translucent
+        * Blend Mode: Alpha Blend
+        * Sort Mode: View Distance
+        * Facing Mode: Face Camera
+
+Parameters:
+  - Radius (Float): 1000.0
+  - Density (Float): 1.0
+  - LODScale (Float): 1.0
+
+Performance Notes:
+- GPU particles for large counts
+- Distance culling at 10km
+- LOD scaling reduces particle count by LODScale parameter
