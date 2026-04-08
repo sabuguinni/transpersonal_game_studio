@@ -1,172 +1,127 @@
 #include "TerrainAdaptationIK.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/World.h"
-#include "Kismet/KismetMathLibrary.h"
 #include "DrawDebugHelpers.h"
+#include "Kismet/KismetMathLibrary.h"
 
 UTerrainAdaptationIK::UTerrainAdaptationIK()
 {
-    TraceDistance = 100.0f;
-    InterpSpeed = 15.0f;
+    // Configurações padrão para IK de terreno
     MaxFootOffset = 50.0f;
-    HipAdjustmentSpeed = 10.0f;
-    TraceChannel = ECC_WorldStatic;
-    bIKEnabled = true;
+    FootTraceDistance = 100.0f;
+    IKInterpSpeed = 15.0f;
+    HipAdjustmentRatio = 0.5f;
     
-    HipOffset = 0.0f;
-    CurrentHipOffset = 0.0f;
-    LastUpdateTime = 0.0f;
-    LastOwnerLocation = FVector::ZeroVector;
+    // Configurar nomes dos bones
+    LeftFootBoneName = "foot_l";
+    RightFootBoneName = "foot_r";
+    LeftIKBoneName = "ik_foot_l";
+    RightIKBoneName = "ik_foot_r";
+    HipBoneName = "pelvis";
+    
+    bEnableDebugDrawing = false;
 }
 
-void UTerrainAdaptationIK::UpdateTerrainIK(USkeletalMeshComponent* SkeletalMesh, float DeltaTime)
+void UTerrainAdaptationIK::UpdateFootIK(USkeletalMeshComponent* SkeletalMesh, float DeltaTime)
 {
-    if (!bIKEnabled || !SkeletalMesh || !SkeletalMesh->GetWorld())
+    if (!SkeletalMesh || !SkeletalMesh->GetWorld())
     {
         return;
     }
+
+    // Atualizar IK para cada pé
+    UpdateSingleFootIK(SkeletalMesh, LeftFootBoneName, LeftIKBoneName, LeftFootIKOffset, DeltaTime);
+    UpdateSingleFootIK(SkeletalMesh, RightFootBoneName, RightIKBoneName, RightFootIKOffset, DeltaTime);
     
-    // Otimização: só atualizar se o personagem se moveu significativamente
-    FVector CurrentLocation = SkeletalMesh->GetComponentLocation();
-    float DistanceMoved = FVector::Dist(CurrentLocation, LastOwnerLocation);
-    
-    if (DistanceMoved < 5.0f && (GetWorld()->GetTimeSeconds() - LastUpdateTime) < 0.1f)
-    {
-        return; // Skip update para performance
-    }
-    
-    LastOwnerLocation = CurrentLocation;
-    LastUpdateTime = GetWorld()->GetTimeSeconds();
-    
-    // Calcular IK para ambos os pés
-    LeftFootIK = CalculateFootIK(SkeletalMesh, TEXT("foot_l"), TEXT("thigh_l"), DeltaTime);
-    RightFootIK = CalculateFootIK(SkeletalMesh, TEXT("foot_r"), TEXT("thigh_r"), DeltaTime);
-    
-    // Ajustar hip offset baseado nos pés
-    UpdateHipOffset(LeftFootIK.DistanceFromGround, RightFootIK.DistanceFromGround, DeltaTime);
+    // Ajustar quadril baseado na diferença entre os pés
+    UpdateHipAdjustment(SkeletalMesh, DeltaTime);
 }
 
-FFootIKData UTerrainAdaptationIK::CalculateFootIK(USkeletalMeshComponent* SkeletalMesh, 
-                                                  const FName& FootBoneName, 
-                                                  const FName& ThighBoneName,
-                                                  float DeltaTime)
+void UTerrainAdaptationIK::UpdateSingleFootIK(USkeletalMeshComponent* SkeletalMesh, 
+    const FName& FootBoneName, const FName& IKBoneName, 
+    float& FootOffset, float DeltaTime)
 {
-    FFootIKData FootData;
-    
-    if (!SkeletalMesh)
-    {
-        return FootData;
-    }
-    
-    UWorld* World = SkeletalMesh->GetWorld();
-    if (!World)
-    {
-        return FootData;
-    }
-    
     // Obter posição do pé no mundo
-    FVector FootWorldLocation = SkeletalMesh->GetBoneLocation(FootBoneName, EBoneSpaceTransform::WorldSpace);
-    FVector ThighWorldLocation = SkeletalMesh->GetBoneLocation(ThighBoneName, EBoneSpaceTransform::WorldSpace);
+    FVector FootWorldLocation = SkeletalMesh->GetBoneLocation(FootBoneName, EBoneSpaces::WorldSpace);
     
-    // Trace para encontrar o chão
+    // Configurar trace para o chão
     FVector TraceStart = FootWorldLocation + FVector(0, 0, 50.0f);
-    FHitResult HitResult = PerformFootTrace(TraceStart, World);
+    FVector TraceEnd = FootWorldLocation - FVector(0, 0, FootTraceDistance);
     
-    if (HitResult.bBlockingHit)
-    {
-        // Calcular distância e offset
-        float DistanceToGround = FootWorldLocation.Z - HitResult.Location.Z;
-        FootData.DistanceFromGround = DistanceToGround;
-        
-        // Determinar se o pé deve ser ajustado
-        if (FMath::Abs(DistanceToGround) < MaxFootOffset)
-        {
-            FootData.IKAlpha = CalculateFootAlpha(DistanceToGround);
-            FootData.FootLocation = FMath::VInterpTo(FootData.FootLocation, 
-                                                    HitResult.Location, 
-                                                    DeltaTime, 
-                                                    InterpSpeed);
-            FootData.FootRotation = CalculateFootRotation(HitResult.Normal);
-            FootData.bIsPlanted = true;
-        }
-        else
-        {
-            // Pé muito longe do chão - não aplicar IK
-            FootData.IKAlpha = FMath::FInterpTo(FootData.IKAlpha, 0.0f, DeltaTime, InterpSpeed);
-            FootData.bIsPlanted = false;
-        }
-    }
-    else
-    {
-        // Não encontrou chão - desabilitar IK
-        FootData.IKAlpha = FMath::FInterpTo(FootData.IKAlpha, 0.0f, DeltaTime, InterpSpeed);
-        FootData.bIsPlanted = false;
-    }
-    
-    return FootData;
-}
-
-FHitResult UTerrainAdaptationIK::PerformFootTrace(const FVector& StartLocation, UWorld* World) const
-{
     FHitResult HitResult;
-    FVector EndLocation = StartLocation - FVector(0, 0, TraceDistance);
-    
     FCollisionQueryParams QueryParams;
     QueryParams.bTraceComplex = false;
-    QueryParams.bReturnPhysicalMaterial = true;
+    QueryParams.AddIgnoredActor(SkeletalMesh->GetOwner());
     
-    World->LineTraceSingleByChannel(
-        HitResult,
-        StartLocation,
-        EndLocation,
-        TraceChannel,
+    // Executar trace
+    bool bHit = SkeletalMesh->GetWorld()->LineTraceSingleByChannel(
+        HitResult, 
+        TraceStart, 
+        TraceEnd, 
+        ECC_WorldStatic, 
         QueryParams
     );
     
-    // Debug drawing (apenas em desenvolvimento)
-    #if WITH_EDITOR
-    if (CVarShowDebugIK.GetValueOnGameThread())
+    float TargetOffset = 0.0f;
+    
+    if (bHit)
     {
-        DrawDebugLine(World, StartLocation, EndLocation, 
-                     HitResult.bBlockingHit ? FColor::Green : FColor::Red, 
-                     false, 0.1f, 0, 1.0f);
+        // Calcular offset necessário
+        float GroundHeight = HitResult.Location.Z;
+        float FootHeight = FootWorldLocation.Z;
+        TargetOffset = FMath::Clamp(GroundHeight - FootHeight, -MaxFootOffset, MaxFootOffset);
         
-        if (HitResult.bBlockingHit)
+        // Aplicar rotação baseada na normal do terreno
+        FRotator TargetRotation = UKismetMathLibrary::MakeRotFromZX(HitResult.Normal, SkeletalMesh->GetForwardVector());
+        // Aqui aplicaríamos a rotação ao IK bone se necessário
+    }
+    
+    // Interpolar suavemente para o offset target
+    FootOffset = FMath::FInterpTo(FootOffset, TargetOffset, DeltaTime, IKInterpSpeed);
+    
+    // Debug drawing
+    if (bEnableDebugDrawing)
+    {
+        DrawDebugLine(SkeletalMesh->GetWorld(), TraceStart, TraceEnd, 
+            bHit ? FColor::Green : FColor::Red, false, 0.1f);
+        
+        if (bHit)
         {
-            DrawDebugSphere(World, HitResult.Location, 5.0f, 8, FColor::Yellow, false, 0.1f);
+            DrawDebugSphere(SkeletalMesh->GetWorld(), HitResult.Location, 5.0f, 8, FColor::Yellow, false, 0.1f);
         }
     }
-    #endif
-    
-    return HitResult;
 }
 
-float UTerrainAdaptationIK::CalculateFootAlpha(float DistanceFromGround) const
+void UTerrainAdaptationIK::UpdateHipAdjustment(USkeletalMeshComponent* SkeletalMesh, float DeltaTime)
 {
-    // Curva suave para transição do IK
-    float NormalizedDistance = FMath::Abs(DistanceFromGround) / MaxFootOffset;
-    return FMath::Clamp(1.0f - NormalizedDistance, 0.0f, 1.0f);
+    // Calcular ajuste do quadril baseado na diferença entre os pés
+    float FootDifference = LeftFootIKOffset - RightFootIKOffset;
+    float TargetHipOffset = FootDifference * HipAdjustmentRatio;
+    
+    // Interpolar suavemente
+    HipIKOffset = FMath::FInterpTo(HipIKOffset, TargetHipOffset, DeltaTime, IKInterpSpeed * 0.7f);
 }
 
-FRotator UTerrainAdaptationIK::CalculateFootRotation(const FVector& SurfaceNormal) const
+FVector UTerrainAdaptationIK::GetFootIKLocation(const FName& FootBoneName, USkeletalMeshComponent* SkeletalMesh)
 {
-    // Calcular rotação do pé baseada na normal da superfície
-    FVector ForwardVector = FVector::ForwardVector;
-    FVector RightVector = FVector::CrossProduct(SurfaceNormal, ForwardVector).GetSafeNormal();
-    ForwardVector = FVector::CrossProduct(RightVector, SurfaceNormal).GetSafeNormal();
+    if (FootBoneName == LeftIKBoneName)
+    {
+        return FVector(0, 0, LeftFootIKOffset);
+    }
+    else if (FootBoneName == RightIKBoneName)
+    {
+        return FVector(0, 0, RightFootIKOffset);
+    }
     
-    return UKismetMathLibrary::MakeRotationFromAxes(ForwardVector, RightVector, SurfaceNormal);
+    return FVector::ZeroVector;
 }
 
-void UTerrainAdaptationIK::UpdateHipOffset(float LeftFootDistance, float RightFootDistance, float DeltaTime)
+float UTerrainAdaptationIK::GetHipOffset() const
 {
-    // Calcular offset do hip baseado no pé mais baixo
-    float TargetHipOffset = FMath::Min(LeftFootDistance, RightFootDistance);
-    
-    // Limitar o offset para evitar poses estranhas
-    TargetHipOffset = FMath::Clamp(TargetHipOffset, -MaxFootOffset * 0.5f, MaxFootOffset * 0.5f);
-    
-    // Suavizar a transição
-    HipOffset = FMath::FInterpTo(HipOffset, TargetHipOffset, DeltaTime, HipAdjustmentSpeed);
-    CurrentHipOffset = HipOffset;
+    return HipIKOffset;
+}
+
+void UTerrainAdaptationIK::SetDebugDrawing(bool bEnabled)
+{
+    bEnableDebugDrawing = bEnabled;
 }
