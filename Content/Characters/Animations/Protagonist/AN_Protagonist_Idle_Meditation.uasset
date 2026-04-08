@@ -1,0 +1,64 @@
+# Protagonist Meditation Idle Animation
+# Animation Blueprint for transpersonal consciousness states
+
+import unreal
+
+# Animation sequence for meditative idle state
+# Duration: 4 seconds, looping
+# Key poses representing breathing and energy flow
+
+class ProtagonistMeditationIdle:
+    def __init__(self):
+        self.duration = 4.0
+        self.loop = True
+        self.bone_transforms = {
+            'spine_01': {'rotation': (0, 0, 0), 'translation': (0, 0, 0)},
+            'spine_02': {'rotation': (0, 0, 0), 'translation': (0, 0, 0)},
+            'spine_03': {'rotation': (0, 0, 0), 'translation': (0, 0, 0)},
+            'head': {'rotation': (0, 0, 0), 'translation': (0, 0, 0)},
+            'clavicle_l': {'rotation': (0, 0, 0), 'translation': (0, 0, 0)},
+            'clavicle_r': {'rotation': (0, 0, 0), 'translation': (0, 0, 0)},
+            'upperarm_l': {'rotation': (0, 0, 0), 'translation': (0, 0, 0)},
+            'upperarm_r': {'rotation': (0, 0, 0), 'translation': (0, 0, 0)},
+            'lowerarm_l': {'rotation': (0, 0, 0), 'translation': (0, 0, 0)},
+            'lowerarm_r': {'rotation': (0, 0, 0), 'translation': (0, 0, 0)},
+            'hand_l': {'rotation': (0, 0, 0), 'translation': (0, 0, 0)},
+            'hand_r': {'rotation': (0, 0, 0), 'translation': (0, 0, 0)}
+        }
+        
+    def create_keyframes(self):
+        # Frame 0: Initial pose - centered, grounded
+        keyframe_0 = {
+            'time': 0.0,
+            'spine_01': {'rotation': (0, 0, 0)},
+            'spine_02': {'rotation': (2, 0, 0)},
+            'spine_03': {'rotation': (3, 0, 0)},
+            'head': {'rotation': (5, 0, 0)},
+            'upperarm_l': {'rotation': (-15, 0, -10)},
+            'upperarm_r': {'rotation': (-15, 0, 10)},
+            'lowerarm_l': {'rotation': (0, 0, -45)},
+            'lowerarm_r': {'rotation': (0, 0, 45)},
+            'hand_l': {'rotation': (0, 0, -20)},
+            'hand_r': {'rotation': (0, 0, 20)}
+        }
+        
+        # Frame 60: Inhale - slight expansion
+        keyframe_60 = {
+            'time': 2.0,
+            'spine_01': {'rotation': (0, 0, 0)},
+            'spine_02': {'rotation': (4, 0, 0)},
+            'spine_03': {'rotation': (5, 0, 0)},
+            'head': {'rotation': (7, 0, 0)},
+            'upperarm_l': {'rotation': (-12, 0, -12)},
+            'upperarm_r': {'rotation': (-12, 0, 12)},
+            'lowerarm_l': {'rotation': (0, 0, -40)},
+            'lowerarm_r': {'rotation': (0, 0, 40)},
+            'hand_l': {'rotation': (0, 0, -15)},
+            'hand_r': {'rotation': (0, 0, 15)}
+        }
+        
+        # Frame 120: Return to center
+        keyframe_120 = keyframe_0.copy()
+        keyframe_120['time'] = 4.0
+        
+        return [keyframe_0, keyframe_60, keyframe_120]
