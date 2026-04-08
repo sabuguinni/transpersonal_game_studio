@@ -2,37 +2,55 @@
 
 #include "CoreMinimal.h"
 #include "Animation/AnimInstance.h"
-#include "PoseSearch/PoseSearch.h"
-#include "Engine/Engine.h"
-#include "../Core/AnimationSystemManager.h"
+#include "PoseSearch/PoseSearchDatabase.h"
+#include "Engine/DataTable.h"
 #include "PlayerAnimInstance.generated.h"
 
-class UCharacterMovementComponent;
-class UPoseSearchDatabase;
-class UPoseSearchSchema;
+USTRUCT(BlueprintType)
+struct FMotionMatchingState
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    float Speed = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    float Direction = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    bool bIsMoving = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    bool bIsCrouching = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    bool bIsInAir = false;
+};
 
 USTRUCT(BlueprintType)
 struct FFootIKData
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly)
-    FVector FootLocation = FVector::ZeroVector;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Foot IK")
+    FVector LeftFootOffset = FVector::ZeroVector;
 
-    UPROPERTY(BlueprintReadOnly)
-    FRotator FootRotation = FRotator::ZeroRotator;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Foot IK")
+    FVector RightFootOffset = FVector::ZeroVector;
 
-    UPROPERTY(BlueprintReadOnly)
-    float IKAlpha = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Foot IK")
+    FRotator LeftFootRotation = FRotator::ZeroRotator;
 
-    UPROPERTY(BlueprintReadOnly)
-    bool bIsGrounded = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Foot IK")
+    FRotator RightFootRotation = FRotator::ZeroRotator;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Foot IK")
+    float PelvisOffset = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Foot IK")
+    float IKAlpha = 1.0f;
 };
 
-/**
- * Animation Instance para o jogador - implementa Motion Matching e IK de pés
- * Baseado no sistema do Game Animation Sample mas adaptado para o contexto pré-histórico
- */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UPlayerAnimInstance : public UAnimInstance
 {
@@ -45,79 +63,45 @@ protected:
     virtual void NativeInitializeAnimation() override;
     virtual void NativeUpdateAnimation(float DeltaTimeX) override;
 
-    // Character References
-    UPROPERTY(BlueprintReadOnly, Category = "References")
+    // Character Reference
+    UPROPERTY(BlueprintReadOnly, Category = "Character")
     class ACharacter* OwningCharacter;
 
-    UPROPERTY(BlueprintReadOnly, Category = "References")
-    UCharacterMovementComponent* CharacterMovement;
+    UPROPERTY(BlueprintReadOnly, Category = "Character")
+    class UCharacterMovementComponent* CharacterMovement;
 
-    UPROPERTY(BlueprintReadOnly, Category = "References")
-    UAnimationSystemManager* AnimationManager;
+    // Motion Matching Variables
+    UPROPERTY(BlueprintReadOnly, Category = "Motion Matching")
+    FMotionMatchingState MotionState;
 
-    // Motion Matching
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    UPoseSearchDatabase* CurrentDatabase;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
     UPoseSearchDatabase* LocomotionDatabase;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    UPoseSearchDatabase* CrouchingDatabase;
+    UPoseSearchDatabase* CautiousDatabase;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    UPoseSearchDatabase* InjuredDatabase;
+    UPoseSearchDatabase* PanicDatabase;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    UPoseSearchSchema* DefaultSchema;
+    // Fear System Variables
+    UPROPERTY(BlueprintReadOnly, Category = "Fear System")
+    float CurrentFearLevel = 0.0f;
 
-    // Movement Data
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    FVector Velocity = FVector::ZeroVector;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fear System")
+    float FearDecayRate = 0.5f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    float Speed = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fear System")
+    float CautiousThreshold = 0.3f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    float Direction = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fear System")
+    float PanicThreshold = 0.8f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    bool bIsMoving = false;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    bool bIsFalling = false;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    bool bIsJumping = false;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    bool bIsCrouching = false;
-
-    // Emotional State Data
-    UPROPERTY(BlueprintReadOnly, Category = "Emotional State")
-    float FearLevel = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Emotional State")
-    float ConfidenceLevel = 0.5f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Emotional State")
-    float InjuryLevel = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Emotional State")
-    float ExhaustionLevel = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Emotional State")
-    bool bIsAfraid = false;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Emotional State")
-    bool bIsInjured = false;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Emotional State")
-    bool bIsExhausted = false;
-
-    // Foot IK System
+    // Foot IK Variables
     UPROPERTY(BlueprintReadOnly, Category = "Foot IK")
-    FFootIKData LeftFootIK;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Foot IK")
-    FFootIKData RightFootIK;
+    FFootIKData FootIK;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Foot IK")
     float FootIKTraceDistance = 50.0f;
@@ -128,55 +112,49 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Foot IK")
     bool bEnableFootIK = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Foot IK")
-    FName LeftFootBoneName = "foot_l";
+    // Paleontologist-specific animations
+    UPROPERTY(BlueprintReadOnly, Category = "Character Traits")
+    bool bIsExaminingGround = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Foot IK")
-    FName RightFootBoneName = "foot_r";
+    UPROPERTY(BlueprintReadOnly, Category = "Character Traits")
+    bool bIsLookingAround = false;
 
-    // Animation Blending
-    UPROPERTY(BlueprintReadOnly, Category = "Animation Blending")
-    float MotionMatchingBlendTime = 0.2f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Animation Blending")
-    float EmotionalBlendWeight = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Animation Blending")
-    float InjuryBlendWeight = 0.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Character Traits")
+    float CautiousLookFrequency = 2.0f;
 
 private:
     // Internal update functions
-    void UpdateMovementData();
-    void UpdateEmotionalData();
+    void UpdateMotionMatchingState(float DeltaTime);
+    void UpdateFearSystem(float DeltaTime);
     void UpdateFootIK(float DeltaTime);
-    void UpdateMotionMatchingDatabase();
+    void UpdateCharacterTraits(float DeltaTime);
 
-    // Foot IK helpers
-    FFootIKData CalculateFootIK(const FName& FootBoneName, float DeltaTime);
-    bool PerformFootTrace(const FVector& FootLocation, FVector& OutHitLocation, FVector& OutHitNormal);
+    // Foot IK helper functions
+    FVector PerformFootTrace(const FVector& FootLocation, const FName& SocketName);
+    void CalculateFootIKOffset(const FVector& FootLocation, const FName& SocketName, 
+                              FVector& OutOffset, FRotator& OutRotation);
 
-    // Previous frame data for interpolation
-    FVector PreviousVelocity = FVector::ZeroVector;
-    float PreviousFearLevel = 0.0f;
-    float PreviousInjuryLevel = 0.0f;
+    // Fear detection
+    void DetectNearbyThreats();
+
+    // Timers
+    float LastLookAroundTime = 0.0f;
+    float TimeSinceLastMovement = 0.0f;
 
 public:
     // Blueprint callable functions
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void TriggerFearAnimation(float Intensity, float Duration = 2.0f);
+    UFUNCTION(BlueprintCallable, Category = "Fear System")
+    void AddFear(float FearAmount);
 
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void TriggerInjuryAnimation(float Severity);
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    void SetMotionMatchingDatabase(UPoseSearchDatabase* NewDatabase);
 
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void UpdateExhaustionLevel(float NewLevel);
+    UFUNCTION(BlueprintCallable, Category = "Character Traits")
+    void TriggerExamineGround();
 
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    UPoseSearchDatabase* GetCurrentMotionMatchingDatabase() const;
+    UFUNCTION(BlueprintPure, Category = "Animation State")
+    bool ShouldUseCautiousAnimations() const;
 
-    UFUNCTION(BlueprintPure, Category = "Animation")
-    bool ShouldUseCrouchingDatabase() const;
-
-    UFUNCTION(BlueprintPure, Category = "Animation")
-    bool ShouldUseInjuredDatabase() const;
+    UFUNCTION(BlueprintPure, Category = "Animation State")
+    bool ShouldUsePanicAnimations() const;
 };
