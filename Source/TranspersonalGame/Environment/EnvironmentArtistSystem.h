@@ -1,0 +1,689 @@
+// Copyright Transpersonal Game Studio. All Rights Reserved.
+// Environment Artist System - Core environment art generation and management
+// Agent #6 - Environment Artist
+// Version 2.0 - March 2026
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Subsystems/WorldSubsystem.h"
+#include "Engine/World.h"
+#include "Landscape/Landscape.h"
+#include "Materials/MaterialInterface.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "Components/HierarchicalInstancedStaticMeshComponent.h"
+#include "ProceduralFoliageSpawner.h"
+#include "PCGComponent.h"
+#include "PCGGraph.h"
+#include "../WorldGeneration/WorldGenerationSubsystem.h"
+#include "../Performance/PerformanceTargets.h"
+#include "EnvironmentArtistSystem.generated.h"
+
+class ALandscape;
+class UMaterialInterface;
+class UStaticMesh;
+class UProceduralFoliageSpawner;
+class UPCGComponent;
+class UWorldGenerationSubsystem;
+
+/**
+ * @brief Environment Artist System for Transpersonal Game Studio
+ * 
+ * Transforms the procedurally generated world into a living, breathing environment.
+ * Adds vegetation, rocks, props, materials and environmental storytelling to create
+ * a believable Jurassic/Cretaceous world that feels inhabited and authentic.
+ * 
+ * Core Philosophy:
+ * - Every detail tells a story
+ * - Nothing exists without purpose
+ * - The world existed before the player arrived
+ * - Composition and lighting guide the narrative
+ * 
+ * Technical Features:
+ * - Advanced material blending system
+ * - Procedural vegetation with ecological rules
+ * - Environmental storytelling through props
+ * - Performance-optimized LOD chains
+ * - Integration with PCG Framework
+ * - Nanite-ready asset pipeline
+ * - Dynamic weather response
+ * 
+ * @author Environment Artist — Agent #6
+ * @version 2.0 — March 2026
+ */
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UEnvironmentArtistSystem : public UWorldSubsystem
+{
+    GENERATED_BODY()
+
+public:
+    UEnvironmentArtistSystem();
+
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+    virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
+
+    /** Main environment art generation functions */
+    UFUNCTION(BlueprintCallable, Category = "Environment Art")
+    void PopulateWorld(const FEnvironmentArtSettings& Settings);
+
+    UFUNCTION(BlueprintCallable, Category = "Environment Art")
+    void PopulateRegion(const FBox& WorldBounds, const FEnvironmentArtSettings& Settings);
+
+    UFUNCTION(BlueprintCallable, Category = "Environment Art")
+    void RefreshEnvironmentArt(const FBox& WorldBounds);
+
+    /** Material system */
+    UFUNCTION(BlueprintCallable, Category = "Materials")
+    void ApplyLandscapeMaterials(ALandscape* Landscape, const FLandscapeMaterialSettings& Settings);
+
+    UFUNCTION(BlueprintCallable, Category = "Materials")
+    UMaterialInstanceDynamic* CreateDynamicEnvironmentMaterial(const FEnvironmentMaterialConfig& Config);
+
+    /** Vegetation system */
+    UFUNCTION(BlueprintCallable, Category = "Vegetation")
+    void GenerateVegetationClusters(const FVegetationGenerationSettings& Settings);
+
+    UFUNCTION(BlueprintCallable, Category = "Vegetation")
+    void PlaceHeroVegetation(const TArray<FVector>& Locations, const FHeroVegetationSettings& Settings);
+
+    /** Environmental props and storytelling */
+    UFUNCTION(BlueprintCallable, Category = "Props")
+    void PlaceEnvironmentalProps(const FPropPlacementSettings& Settings);
+
+    UFUNCTION(BlueprintCallable, Category = "Storytelling")
+    void CreateNarrativeScenes(const TArray<FNarrativeSceneDefinition>& Scenes);
+
+    /** Rock formations and geological features */
+    UFUNCTION(BlueprintCallable, Category = "Geology")
+    void GenerateRockFormations(const FRockFormationSettings& Settings);
+
+    /** Performance and optimization */
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void OptimizeEnvironmentArt(const FEnvironmentOptimizationSettings& Settings);
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    FEnvironmentArtPerformanceStats GetPerformanceStats() const;
+
+protected:
+    /** Environment art quality levels */
+    UENUM(BlueprintType)
+    enum class EEnvironmentQuality : uint8
+    {
+        Performance     UMETA(DisplayName = "Performance - 30fps Console"),
+        Balanced        UMETA(DisplayName = "Balanced - 60fps PC"),
+        Quality         UMETA(DisplayName = "Quality - High-end PC"),
+        Cinematic       UMETA(DisplayName = "Cinematic - No limits")
+    };
+
+    /** Biome types for environment art */
+    UENUM(BlueprintType)
+    enum class EJurassicBiome : uint8
+    {
+        TropicalRainforest      UMETA(DisplayName = "Tropical Rainforest"),
+        TemperateForest         UMETA(DisplayName = "Temperate Forest"),
+        ConiferousForest        UMETA(DisplayName = "Coniferous Forest"),
+        FernPrairie             UMETA(DisplayName = "Fern Prairie"),
+        CycadGrove              UMETA(DisplayName = "Cycad Grove"),
+        SwamplandMarsh          UMETA(DisplayName = "Swampland Marsh"),
+        RiverDelta              UMETA(DisplayName = "River Delta"),
+        CoastalPlain            UMETA(DisplayName = "Coastal Plain"),
+        VolcanicSlopes          UMETA(DisplayName = "Volcanic Slopes"),
+        LimestoneKarst          UMETA(DisplayName = "Limestone Karst"),
+        SandstoneCliffs         UMETA(DisplayName = "Sandstone Cliffs"),
+        MudFlats                UMETA(DisplayName = "Mud Flats")
+    };
+
+    /** Vegetation layer types */
+    UENUM(BlueprintType)
+    enum class EVegetationLayer : uint8
+    {
+        Canopy          UMETA(DisplayName = "Canopy - Large Trees"),
+        Subcanopy       UMETA(DisplayName = "Subcanopy - Medium Trees"),
+        Understory      UMETA(DisplayName = "Understory - Shrubs"),
+        Herbaceous      UMETA(DisplayName = "Herbaceous - Ferns/Grass"),
+        Ground          UMETA(DisplayName = "Ground - Moss/Lichens"),
+        Emergent        UMETA(DisplayName = "Emergent - Giant Trees"),
+        Aquatic         UMETA(DisplayName = "Aquatic - Water Plants"),
+        Epiphytic       UMETA(DisplayName = "Epiphytic - Tree Parasites")
+    };
+
+    /** Environmental storytelling themes */
+    UENUM(BlueprintType)
+    enum class ENarrativeTheme : uint8
+    {
+        PristineNature          UMETA(DisplayName = "Pristine Nature"),
+        DinosaurActivity        UMETA(DisplayName = "Dinosaur Activity"),
+        AncientRuins            UMETA(DisplayName = "Ancient Geological"),
+        PlayerClues             UMETA(DisplayName = "Player Story Clues"),
+        GemaMytery              UMETA(DisplayName = "Gema Mystery"),
+        DangerZone              UMETA(DisplayName = "Environmental Danger"),
+        SafeHaven               UMETA(DisplayName = "Safe Haven"),
+        FossilSite              UMETA(DisplayName = "Fossil Discovery"),
+        WeatherEvent            UMETA(DisplayName = "Weather Aftermath"),
+        EcologicalTransition    UMETA(DisplayName = "Ecological Transition")
+    };
+
+    /** Main environment art settings */
+    USTRUCT(BlueprintType)
+    struct FEnvironmentArtSettings
+    {
+        GENERATED_BODY()
+
+        /** Quality level for environment art */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        EEnvironmentQuality Quality = EEnvironmentQuality::Balanced;
+
+        /** Random seed for consistent generation */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        int32 Seed = 42;
+
+        /** Enable runtime generation and updates */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        bool bEnableRuntimeGeneration = true;
+
+        /** Use Nanite for vegetation where possible */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        bool bUseNaniteVegetation = true;
+
+        /** Enable environmental storytelling */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        bool bEnableStorytellingElements = true;
+
+        /** Vegetation density multiplier */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = 0.1f, ClampMax = 5.0f))
+        float VegetationDensity = 1.0f;
+
+        /** Prop density multiplier */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = 0.1f, ClampMax = 3.0f))
+        float PropDensity = 1.0f;
+
+        /** Rock formation frequency */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = 0.1f, ClampMax = 2.0f))
+        float RockFormationFrequency = 1.0f;
+
+        /** Material complexity level */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        int32 MaterialComplexity = 3; // 1-5 scale
+
+        /** Enable dynamic weather response */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        bool bEnableWeatherResponse = true;
+
+        /** Performance budget settings */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        FEnvironmentPerformanceBudget PerformanceBudget;
+    };
+
+    /** Performance budget for environment art */
+    USTRUCT(BlueprintType)
+    struct FEnvironmentPerformanceBudget
+    {
+        GENERATED_BODY()
+
+        /** Maximum draw calls per frame */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        int32 MaxDrawCalls = 500;
+
+        /** Maximum triangle budget */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        int32 MaxTriangles = 2000000;
+
+        /** Maximum texture memory (MB) */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        int32 MaxTextureMemoryMB = 512;
+
+        /** Maximum instance count */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        int32 MaxInstances = 50000;
+
+        /** LOD distance multiplier */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        float LODDistanceMultiplier = 1.0f;
+
+        /** Culling distance multiplier */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        float CullingDistanceMultiplier = 1.0f;
+    };
+
+    /** Landscape material settings */
+    USTRUCT(BlueprintType)
+    struct FLandscapeMaterialSettings
+    {
+        GENERATED_BODY()
+
+        /** Base landscape material */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        UMaterialInterface* BaseLandscapeMaterial = nullptr;
+
+        /** Material layers for blending */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        TMap<FString, UMaterialInterface*> MaterialLayers;
+
+        /** Texture resolution for landscape */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        int32 TextureResolution = 2048;
+
+        /** Enable triplanar projection */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        bool bUseTriplanarProjection = true;
+
+        /** Enable distance-based blending */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        bool bUseDistanceBlending = true;
+
+        /** Moisture influence on materials */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        float MoistureInfluence = 0.7f;
+
+        /** Slope influence on materials */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        float SlopeInfluence = 0.5f;
+
+        /** Altitude influence on materials */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        float AltitudeInfluence = 0.3f;
+    };
+
+    /** Environment material configuration */
+    USTRUCT(BlueprintType)
+    struct FEnvironmentMaterialConfig
+    {
+        GENERATED_BODY()
+
+        /** Base material to modify */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        UMaterialInterface* BaseMaterial = nullptr;
+
+        /** Material parameters to set */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        TMap<FName, float> ScalarParameters;
+
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        TMap<FName, FLinearColor> VectorParameters;
+
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        TMap<FName, UTexture*> TextureParameters;
+
+        /** Weather state influence */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        float WetnessFactor = 0.0f;
+
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        float MossCoverage = 0.0f;
+
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        float WeatheringAmount = 0.5f;
+    };
+
+    /** Vegetation generation settings */
+    USTRUCT(BlueprintType)
+    struct FVegetationGenerationSettings
+    {
+        GENERATED_BODY()
+
+        /** Biome to generate vegetation for */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        EJurassicBiome TargetBiome = EJurassicBiome::TropicalRainforest;
+
+        /** Vegetation layers to generate */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        TArray<EVegetationLayer> LayersToGenerate;
+
+        /** Density per square meter */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        float VegetationDensity = 1.5f;
+
+        /** Cluster size variation */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        FVector2D ClusterSizeRange = FVector2D(5.0f, 25.0f);
+
+        /** Species diversity (0-1) */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        float SpeciesDiversity = 0.7f;
+
+        /** Age variation (0-1) */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        float AgeVariation = 0.8f;
+
+        /** Health variation (0-1) */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        float HealthVariation = 0.6f;
+
+        /** Enable seasonal variation */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        bool bEnableSeasonalVariation = true;
+
+        /** Use ecological succession rules */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        bool bUseEcologicalRules = true;
+
+        /** Respect dinosaur paths */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        bool bRespectDinosaurPaths = true;
+
+        /** Maximum slope for vegetation */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        float MaxSlope = 45.0f;
+
+        /** Water distance preferences */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        FVector2D WaterDistanceRange = FVector2D(-100.0f, 500.0f);
+    };
+
+    /** Hero vegetation settings for key areas */
+    USTRUCT(BlueprintType)
+    struct FHeroVegetationSettings
+    {
+        GENERATED_BODY()
+
+        /** Hero vegetation meshes */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        TArray<UStaticMesh*> HeroMeshes;
+
+        /** Scale range for hero vegetation */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        FVector2D ScaleRange = FVector2D(1.5f, 3.0f);
+
+        /** Use custom materials */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        bool bUseCustomMaterials = true;
+
+        /** Custom materials for hero vegetation */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        TArray<UMaterialInterface*> CustomMaterials;
+
+        /** Enable wind animation */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        bool bEnableWindAnimation = true;
+
+        /** Wind strength multiplier */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        float WindStrength = 1.5f;
+
+        /** Enable particle effects */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        bool bEnableParticleEffects = true;
+
+        /** Particle systems for effects */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        TArray<class UNiagaraSystem*> ParticleEffects;
+    };
+
+    /** Prop placement settings */
+    USTRUCT(BlueprintType)
+    struct FPropPlacementSettings
+    {
+        GENERATED_BODY()
+
+        /** Props to place by category */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        TMap<FString, TArray<UStaticMesh*>> PropsByCategory;
+
+        /** Placement density per category */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        TMap<FString, float> CategoryDensity;
+
+        /** Clustering settings */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        bool bEnableClustering = true;
+
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        FVector2D ClusterSizeRange = FVector2D(3.0f, 12.0f);
+
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        float ClusterRadius = 200.0f;
+
+        /** Environmental constraints */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        float MaxSlope = 30.0f;
+
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        float MinDistanceFromWater = 50.0f;
+
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        float MaxDistanceFromWater = 1000.0f;
+
+        /** Scale variation */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        FVector2D ScaleRange = FVector2D(0.7f, 1.4f);
+
+        /** Rotation settings */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        bool bRandomRotation = true;
+
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        bool bAlignToSurface = true;
+
+        /** Material weathering */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        bool bApplyWeathering = true;
+
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        FVector2D WeatheringRange = FVector2D(0.2f, 0.8f);
+    };
+
+    /** Narrative scene definition */
+    USTRUCT(BlueprintType)
+    struct FNarrativeSceneDefinition
+    {
+        GENERATED_BODY()
+
+        /** Scene name and description */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        FString SceneName;
+
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        FString SceneDescription;
+
+        /** Scene location */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        FVector SceneLocation;
+
+        /** Scene radius */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        float SceneRadius = 500.0f;
+
+        /** Narrative theme */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        ENarrativeTheme Theme = ENarrativeTheme::PristineNature;
+
+        /** Props for this scene */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        TArray<UStaticMesh*> SceneProps;
+
+        /** Vegetation modifications */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        bool bModifyVegetation = false;
+
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        float VegetationDensityMultiplier = 1.0f;
+
+        /** Lighting modifications */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        bool bCustomLighting = false;
+
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        FLinearColor LightingTint = FLinearColor::White;
+
+        /** Audio elements */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        class USoundCue* AmbientSound = nullptr;
+
+        /** Particle effects */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        TArray<class UNiagaraSystem*> ParticleEffects;
+    };
+
+    /** Rock formation settings */
+    USTRUCT(BlueprintType)
+    struct FRockFormationSettings
+    {
+        GENERATED_BODY()
+
+        /** Rock mesh library */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        TArray<UStaticMesh*> RockMeshes;
+
+        /** Formation types */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        TArray<FString> FormationTypes;
+
+        /** Formation density */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        float FormationDensity = 0.3f;
+
+        /** Size variation */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        FVector2D SizeRange = FVector2D(0.5f, 3.0f);
+
+        /** Geological age influence */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        bool bShowGeologicalAge = true;
+
+        /** Weathering patterns */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        bool bApplyWeathering = true;
+
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        float WeatheringIntensity = 0.6f;
+
+        /** Vegetation growth on rocks */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        bool bAllowVegetationGrowth = true;
+
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        float VegetationCoverage = 0.4f;
+
+        /** Moss and lichen materials */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        TArray<UMaterialInterface*> MossLichenMaterials;
+    };
+
+    /** Environment optimization settings */
+    USTRUCT(BlueprintType)
+    struct FEnvironmentOptimizationSettings
+    {
+        GENERATED_BODY()
+
+        /** Enable LOD optimization */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        bool bEnableLODOptimization = true;
+
+        /** Enable culling optimization */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        bool bEnableCullingOptimization = true;
+
+        /** Enable instancing optimization */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        bool bEnableInstancingOptimization = true;
+
+        /** Enable texture streaming */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        bool bEnableTextureStreaming = true;
+
+        /** Target frame rate */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        float TargetFrameRate = 60.0f;
+
+        /** Performance budget */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        FEnvironmentPerformanceBudget PerformanceBudget;
+    };
+
+    /** Performance statistics */
+    USTRUCT(BlueprintType)
+    struct FEnvironmentArtPerformanceStats
+    {
+        GENERATED_BODY()
+
+        /** Current draw calls */
+        UPROPERTY(BlueprintReadOnly)
+        int32 CurrentDrawCalls = 0;
+
+        /** Current triangle count */
+        UPROPERTY(BlueprintReadOnly)
+        int32 CurrentTriangles = 0;
+
+        /** Current texture memory usage (MB) */
+        UPROPERTY(BlueprintReadOnly)
+        int32 CurrentTextureMemoryMB = 0;
+
+        /** Current instance count */
+        UPROPERTY(BlueprintReadOnly)
+        int32 CurrentInstances = 0;
+
+        /** Frame time contribution (ms) */
+        UPROPERTY(BlueprintReadOnly)
+        float FrameTimeContribution = 0.0f;
+
+        /** Memory usage (MB) */
+        UPROPERTY(BlueprintReadOnly)
+        float MemoryUsageMB = 0.0f;
+    };
+
+protected:
+    /** Reference to world generation subsystem */
+    UPROPERTY()
+    UWorldGenerationSubsystem* WorldGenSubsystem = nullptr;
+
+    /** Current environment art settings */
+    UPROPERTY()
+    FEnvironmentArtSettings CurrentSettings;
+
+    /** Performance statistics */
+    UPROPERTY()
+    FEnvironmentArtPerformanceStats PerformanceStats;
+
+    /** Generated landscape materials */
+    UPROPERTY()
+    TMap<FString, UMaterialInstanceDynamic*> LandscapeMaterials;
+
+    /** Vegetation component instances */
+    UPROPERTY()
+    TArray<UHierarchicalInstancedStaticMeshComponent*> VegetationComponents;
+
+    /** Prop component instances */
+    UPROPERTY()
+    TArray<UHierarchicalInstancedStaticMeshComponent*> PropComponents;
+
+    /** Rock formation components */
+    UPROPERTY()
+    TArray<UHierarchicalInstancedStaticMeshComponent*> RockComponents;
+
+    /** PCG components for procedural generation */
+    UPROPERTY()
+    TArray<UPCGComponent*> PCGComponents;
+
+    /** Internal generation functions */
+    void GenerateVegetationForBiome(EJurassicBiome Biome, const FBox& Bounds, const FVegetationGenerationSettings& Settings);
+    void PlaceVegetationCluster(const FVector& Center, EVegetationLayer Layer, const FVegetationGenerationSettings& Settings);
+    void ApplyEnvironmentalConstraints(TArray<FVector>& Locations, const FVegetationGenerationSettings& Settings);
+    
+    void GeneratePropsForRegion(const FBox& Bounds, const FPropPlacementSettings& Settings);
+    void PlacePropCluster(const FVector& Center, const FString& Category, const FPropPlacementSettings& Settings);
+    
+    void CreateRockFormation(const FVector& Center, const FString& FormationType, const FRockFormationSettings& Settings);
+    void ApplyRockWeathering(UStaticMeshComponent* RockComponent, const FRockFormationSettings& Settings);
+    
+    void CreateNarrativeScene(const FNarrativeSceneDefinition& SceneDefinition);
+    void ApplyNarrativeModifications(const FVector& Center, float Radius, ENarrativeTheme Theme);
+    
+    void OptimizePerformance(const FEnvironmentOptimizationSettings& Settings);
+    void UpdateLODSettings(const FEnvironmentOptimizationSettings& Settings);
+    void UpdateCullingSettings(const FEnvironmentOptimizationSettings& Settings);
+    
+    // Utility functions
+    bool IsLocationSuitableForVegetation(const FVector& Location, EVegetationLayer Layer);
+    float GetTerrainSlope(const FVector& Location);
+    float GetDistanceToWater(const FVector& Location);
+    EJurassicBiome GetBiomeAtLocation(const FVector& Location);
+    float GetMoistureLevel(const FVector& Location);
+    float GetSunlightExposure(const FVector& Location);
+    
+    // Material utility functions
+    void ApplyMaterialWeathering(UMaterialInstanceDynamic* Material, float WeatheringAmount);
+    void ApplyMoistureMaterial(UMaterialInstanceDynamic* Material, float MoistureLevel);
+    void ApplySeasonalMaterial(UMaterialInstanceDynamic* Material, float SeasonalFactor);
+};
