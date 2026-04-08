@@ -1,236 +1,243 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/Engine.h"
+#include "GameFramework/Actor.h"
 #include "Components/ActorComponent.h"
-#include "Engine/DataTable.h"
-#include "GameplayTagContainer.h"
+#include "BehaviorTree/BehaviorTree.h"
+#include "BehaviorTree/BlackboardComponent.h"
+#include "AIController.h"
 #include "NPCBehaviorSystem.generated.h"
 
+// Forward Declarations
+class UBehaviorTreeComponent;
+class UBlackboardComponent;
+class ANPCCreature;
+class UNPCMemoryComponent;
+class UNPCPersonalityComponent;
+
+/**
+ * Enum para definir os estados comportamentais base de qualquer NPC
+ */
 UENUM(BlueprintType)
-enum class EDinosaurArchetype : uint8
+enum class ENPCBehaviorState : uint8
 {
-    None                UMETA(DisplayName = "None"),
-    SolitaryPredator    UMETA(DisplayName = "Solitary Predator"),
-    PackHunter          UMETA(DisplayName = "Pack Hunter"),
-    HerdHerbivore       UMETA(DisplayName = "Herd Herbivore"),
-    SolitaryHerbivore   UMETA(DisplayName = "Solitary Herbivore"),
-    Scavenger           UMETA(DisplayName = "Scavenger"),
-    TerritorialPredator UMETA(DisplayName = "Territorial Predator"),
-    MigratoryHerbivore  UMETA(DisplayName = "Migratory Herbivore"),
-    AmbushPredator      UMETA(DisplayName = "Ambush Predator")
+    Idle           UMETA(DisplayName = "Idle - Sem actividade específica"),
+    Foraging       UMETA(DisplayName = "Foraging - Procura de comida"),
+    Drinking       UMETA(DisplayName = "Drinking - Beber água"),
+    Resting        UMETA(DisplayName = "Resting - Descanso/Sono"),
+    Socializing    UMETA(DisplayName = "Socializing - Interação social"),
+    Patrolling     UMETA(DisplayName = "Patrolling - Patrulhamento territorial"),
+    Hunting        UMETA(DisplayName = "Hunting - Caça (predadores)"),
+    Fleeing        UMETA(DisplayName = "Fleeing - Fuga de perigo"),
+    Investigating  UMETA(DisplayName = "Investigating - Investigação de estímulo"),
+    Mating         UMETA(DisplayName = "Mating - Comportamento reprodutivo"),
+    Nesting        UMETA(DisplayName = "Nesting - Construção/manutenção de ninho"),
+    Migrating      UMETA(DisplayName = "Migrating - Migração sazonal"),
+    Domesticated   UMETA(DisplayName = "Domesticated - Comportamento domesticado")
 };
 
+/**
+ * Enum para tipos de personalidade que afectam decisões comportamentais
+ */
 UENUM(BlueprintType)
-enum class EBehaviorState : uint8
+enum class ENPCPersonalityType : uint8
 {
-    Idle            UMETA(DisplayName = "Idle"),
-    Foraging        UMETA(DisplayName = "Foraging"),
-    Hunting         UMETA(DisplayName = "Hunting"),
-    Fleeing         UMETA(DisplayName = "Fleeing"),
-    Socializing     UMETA(DisplayName = "Socializing"),
-    Resting         UMETA(DisplayName = "Resting"),
-    Drinking        UMETA(DisplayName = "Drinking"),
-    Territorial     UMETA(DisplayName = "Territorial"),
-    Mating          UMETA(DisplayName = "Mating"),
-    Nesting         UMETA(DisplayName = "Nesting"),
-    Migrating       UMETA(DisplayName = "Migrating"),
-    Investigating   UMETA(DisplayName = "Investigating")
+    Aggressive     UMETA(DisplayName = "Aggressive - Mais propenso a confronto"),
+    Cautious       UMETA(DisplayName = "Cautious - Evita riscos, foge facilmente"),
+    Curious        UMETA(DisplayName = "Curious - Investiga estímulos novos"),
+    Territorial    UMETA(DisplayName = "Territorial - Defende área específica"),
+    Social         UMETA(DisplayName = "Social - Prefere grupos, evita solidão"),
+    Solitary       UMETA(DisplayName = "Solitary - Prefere isolamento"),
+    Adaptive       UMETA(DisplayName = "Adaptive - Muda comportamento facilmente"),
+    Stubborn       UMETA(DisplayName = "Stubborn - Mantém padrões estabelecidos")
 };
 
-UENUM(BlueprintType)
-enum class EEmotionalState : uint8
-{
-    Calm        UMETA(DisplayName = "Calm"),
-    Alert       UMETA(DisplayName = "Alert"),
-    Aggressive  UMETA(DisplayName = "Aggressive"),
-    Fearful     UMETA(DisplayName = "Fearful"),
-    Curious     UMETA(DisplayName = "Curious"),
-    Hungry      UMETA(DisplayName = "Hungry"),
-    Tired       UMETA(DisplayName = "Tired"),
-    Territorial UMETA(DisplayName = "Territorial"),
-    Protective  UMETA(DisplayName = "Protective"),
-    Playful     UMETA(DisplayName = "Playful")
-};
-
+/**
+ * Struct para armazenar memórias específicas de eventos
+ */
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FMemoryEntry
+struct FNPCMemory
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    AActor* Actor;
+    FVector Location;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FVector LastKnownLocation;
+    AActor* RelatedActor;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float Timestamp;
+    float EmotionalWeight; // -1.0 (muito negativo) a 1.0 (muito positivo)
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float Importance;
+    float TimeStamp;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FGameplayTagContainer AssociatedTags;
+    FString EventDescription;
 
-    FMemoryEntry()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsImportant; // Memórias importantes não se degradam
+
+    FNPCMemory()
     {
-        Actor = nullptr;
-        LastKnownLocation = FVector::ZeroVector;
-        Timestamp = 0.0f;
-        Importance = 0.0f;
+        Location = FVector::ZeroVector;
+        RelatedActor = nullptr;
+        EmotionalWeight = 0.0f;
+        TimeStamp = 0.0f;
+        EventDescription = TEXT("");
+        bIsImportant = false;
     }
 };
 
+/**
+ * Struct para rotinas diárias
+ */
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FDailyRoutine
+struct FNPCDailyRoutine
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float StartTime; // 0.0 = Dawn, 0.5 = Noon, 1.0 = Dusk
+    float StartTime; // Hora do dia (0.0 = meia-noite, 12.0 = meio-dia)
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float EndTime;
+    float Duration; // Duração em horas
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EBehaviorState RoutineBehavior;
+    ENPCBehaviorState BehaviorState;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FVector PreferredLocation;
+    FVector PreferredLocation; // Localização preferida para esta actividade
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float LocationRadius;
+    float LocationTolerance; // Quão flexível é sobre a localização
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 Priority;
+    int32 Priority; // 1-10, prioridade desta rotina
 
-    FDailyRoutine()
+    FNPCDailyRoutine()
     {
         StartTime = 0.0f;
-        EndTime = 0.0f;
-        RoutineBehavior = EBehaviorState::Idle;
+        Duration = 1.0f;
+        BehaviorState = ENPCBehaviorState::Idle;
         PreferredLocation = FVector::ZeroVector;
-        LocationRadius = 500.0f;
-        Priority = 1;
+        LocationTolerance = 500.0f;
+        Priority = 5;
     }
 };
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FDinosaurPersonality
-{
-    GENERATED_BODY()
-
-    // Core personality traits (0.0 to 1.0)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float Aggression;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float Curiosity;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float Sociability;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float Fearfulness;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float Territoriality;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float Intelligence;
-
-    FDinosaurPersonality()
-    {
-        Aggression = 0.5f;
-        Curiosity = 0.5f;
-        Sociability = 0.5f;
-        Fearfulness = 0.5f;
-        Territoriality = 0.5f;
-        Intelligence = 0.5f;
-    }
-};
-
+/**
+ * Componente principal que gere todo o comportamento de um NPC
+ * Este componente é o cérebro que coordena memória, personalidade e rotinas
+ */
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UNPCBehaviorComponent : public UActorComponent
+class TRANSPERSONALGAME_API UNPCBehaviorSystem : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    UNPCBehaviorComponent();
+    UNPCBehaviorSystem();
 
 protected:
     virtual void BeginPlay() override;
-
-public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // Core Properties
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    EDinosaurArchetype Archetype;
+public:
+    // === CONFIGURAÇÃO BASE ===
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Behavior")
+    ENPCPersonalityType PersonalityType;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    FDinosaurPersonality Personality;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Behavior")
+    TArray<FNPCDailyRoutine> DailyRoutines;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    TArray<FDailyRoutine> DailyRoutines;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Behavior")
+    UBehaviorTree* BehaviorTreeAsset;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    float MemoryDuration;
+    // === ESTADO ACTUAL ===
+    
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "NPC State")
+    ENPCBehaviorState CurrentBehaviorState;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    int32 MaxMemoryEntries;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "NPC State")
+    float CurrentStateTime; // Há quanto tempo está neste estado
 
-    // Current State
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    EBehaviorState CurrentBehavior;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "NPC State")
+    AActor* CurrentTarget; // Actor que está a focar (comida, predador, etc.)
 
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    EEmotionalState CurrentEmotion;
+    // === MEMÓRIA ===
+    
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "NPC Memory")
+    TArray<FNPCMemory> Memories;
 
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    float CurrentStress;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Memory")
+    int32 MaxMemories; // Limite de memórias armazenadas
 
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    float CurrentHunger;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Memory")
+    float MemoryDecayRate; // Velocidade de degradação das memórias
 
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    float CurrentEnergy;
+    // === DOMESTICAÇÃO ===
+    
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "NPC Domestication")
+    float DomesticationLevel; // 0.0 = selvagem, 1.0 = completamente domesticado
 
-    // Memory System
-    UPROPERTY(BlueprintReadOnly, Category = "Memory")
-    TArray<FMemoryEntry> ShortTermMemory;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Domestication")
+    bool bCanBeDomesticated;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Memory")
-    TArray<FMemoryEntry> LongTermMemory;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Domestication")
+    float DomesticationRate; // Velocidade de ganho de domesticação
 
-    // Functions
-    UFUNCTION(BlueprintCallable, Category = "Behavior")
-    void AddMemoryEntry(AActor* Actor, float Importance, const FGameplayTagContainer& Tags);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Domestication")
+    float DomesticationDecayRate; // Velocidade de perda se não houver interação
 
-    UFUNCTION(BlueprintCallable, Category = "Behavior")
-    FMemoryEntry* GetMemoryOfActor(AActor* Actor);
+    // === MÉTODOS PÚBLICOS ===
 
-    UFUNCTION(BlueprintCallable, Category = "Behavior")
-    void SetBehaviorState(EBehaviorState NewState);
+    UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
+    void SetBehaviorState(ENPCBehaviorState NewState);
 
-    UFUNCTION(BlueprintCallable, Category = "Behavior")
-    void SetEmotionalState(EEmotionalState NewEmotion);
+    UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
+    ENPCBehaviorState GetCurrentBehaviorState() const { return CurrentBehaviorState; }
 
-    UFUNCTION(BlueprintCallable, Category = "Behavior")
-    FDailyRoutine GetCurrentRoutine();
+    UFUNCTION(BlueprintCallable, Category = "NPC Memory")
+    void AddMemory(FVector Location, AActor* Actor, float EmotionalWeight, const FString& Description, bool bImportant = false);
 
-    UFUNCTION(BlueprintCallable, Category = "Behavior")
-    bool ShouldReactToPlayer(AActor* Player);
+    UFUNCTION(BlueprintCallable, Category = "NPC Memory")
+    TArray<FNPCMemory> GetMemoriesOfActor(AActor* Actor) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Behavior")
-    float CalculateStressLevel();
+    UFUNCTION(BlueprintCallable, Category = "NPC Memory")
+    FNPCMemory GetStrongestMemoryOfActor(AActor* Actor) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Behavior")
-    void UpdateNeeds(float DeltaTime);
+    UFUNCTION(BlueprintCallable, Category = "NPC Domestication")
+    void InteractWithPlayer(float PositiveInteractionStrength);
+
+    UFUNCTION(BlueprintCallable, Category = "NPC Domestication")
+    bool IsDomesticated() const { return DomesticationLevel > 0.7f; }
+
+    UFUNCTION(BlueprintCallable, Category = "NPC Domestication")
+    bool IsFriendly() const { return DomesticationLevel > 0.3f; }
+
+    UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
+    FNPCDailyRoutine GetCurrentRoutine() const;
+
+    UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
+    bool ShouldChangeRoutine() const;
 
 private:
-    void UpdateMemory(float DeltaTime);
-    void ProcessDailyRoutines();
-    void UpdateEmotionalState();
-    float GetTimeOfDay();
+    // === MÉTODOS PRIVADOS ===
+    
+    void UpdateDailyRoutine();
+    void UpdateMemories(float DeltaTime);
+    void UpdateDomestication(float DeltaTime);
+    void ProcessPersonalityInfluence();
+    
+    float GetCurrentTimeOfDay() const;
+    void CleanOldMemories();
+    
+    // Referências para componentes relacionados
+    UPROPERTY()
+    UBehaviorTreeComponent* BehaviorTreeComponent;
+    
+    UPROPERTY()
+    UBlackboardComponent* BlackboardComponent;
 };
