@@ -10,87 +10,112 @@
 class UMassEntitySubsystem;
 class UMassSpawnerSubsystem;
 
-UENUM(BlueprintType)
-enum class EDinosaurHerdType : uint8
-{
-    SmallHerbivores,    // Compsognathus, Dryosaurus - 50-200 individuals
-    MediumHerbivores,   // Triceratops, Parasaurolophus - 20-80 individuals
-    LargeHerbivores,    // Brontosaurus, Diplodocus - 5-20 individuals
-    Carnivores,         // Velociraptors, Allosaurus - 3-12 individuals
-    Scavengers,         // Pteranodons, small theropods - 10-50 individuals
-    Aquatic             // Plesiosaurs, marine reptiles - 5-30 individuals
-};
-
-UENUM(BlueprintType)
-enum class EHerdBehaviorState : uint8
-{
-    Grazing,            // Peaceful feeding
-    Migrating,          // Moving to new area
-    Fleeing,            // Running from predator
-    Drinking,           // At water source
-    Resting,            // Sleeping/resting
-    Alerting,           // Suspicious, looking around
-    Panicking           // Chaos state
-};
-
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FHerdConfiguration
+struct FPERSONALGAME_API FDinosaurHerdData
 {
     GENERATED_BODY()
 
+    // Espécie da manada
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EDinosaurHerdType HerdType = EDinosaurHerdType::SmallHerbivores;
+    FString SpeciesName;
 
+    // Tamanho da manada (min/max)
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 MinHerdSize = 10;
+    int32 MinHerdSize = 5;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     int32 MaxHerdSize = 50;
 
+    // Densidade por km²
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float MovementSpeed = 300.0f;
+    float PopulationDensityPerKm2 = 10.0f;
+
+    // Comportamento da manada
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float MovementSpeed = 300.0f; // cm/s
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float FleeSpeed = 800.0f;
+    float FlockingRadius = 2000.0f; // cm
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float AlertRadius = 2000.0f;
+    float SeparationRadius = 500.0f; // cm
+
+    // Padrões de migração
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bMigratory = false;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float CohesionRadius = 500.0f;
+    float MigrationDistance = 50000.0f; // cm
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float SeparationRadius = 100.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float AlignmentRadius = 300.0f;
+    float MigrationSeasonDuration = 3600.0f; // segundos
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FMigrationRoute
+struct FPERSONALGAME_API FPredatorPackData
+{
+    GENERATED_BODY()
+
+    // Espécie do grupo
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FString SpeciesName;
+
+    // Tamanho do grupo
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    int32 MinPackSize = 2;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    int32 MaxPackSize = 8;
+
+    // Território
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float TerritoryRadius = 10000.0f; // cm
+
+    // Comportamento de caça
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float HuntingSpeed = 800.0f; // cm/s
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float DetectionRange = 5000.0f; // cm
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float CoordinationRadius = 1500.0f; // cm
+};
+
+USTRUCT(BlueprintType)
+struct FPERSONALGAME_API FBiomePopulationConfig
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TArray<FVector> Waypoints;
+    FString BiomeName;
+
+    // Configurações de manadas herbívoras
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TArray<FDinosaurHerdData> HerbivoreHerds;
+
+    // Configurações de grupos predadores
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TArray<FPredatorPackData> PredatorPacks;
+
+    // Densidade máxima de entidades por área
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    int32 MaxEntitiesPerSquareKm = 200;
+
+    // Distância de spawn do jogador
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float MinSpawnDistanceFromPlayer = 5000.0f; // cm
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float SeasonalTrigger = 0.0f; // 0-1 seasonal cycle
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EDinosaurHerdType TargetHerdType = EDinosaurHerdType::SmallHerbivores;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float MigrationDuration = 3600.0f; // seconds
+    float MaxSpawnDistanceFromPlayer = 20000.0f; // cm
 };
 
 /**
- * Crowd Simulation Subsystem
- * Manages large-scale dinosaur herd behavior using Mass Entity framework
- * Handles up to 50,000 simultaneous agents with emergent group behaviors
+ * Subsistema responsável pela simulação de multidões de dinossauros
+ * Gere manadas de herbívoros, grupos de predadores e comportamentos emergentes
  */
 UCLASS()
-class TRANSPERSONALGAME_API UCrowdSimulationSubsystem : public UWorldSubsystem
+class FPERSONALGAME_API UCrowdSimulationSubsystem : public UWorldSubsystem
 {
     GENERATED_BODY()
 
@@ -100,79 +125,81 @@ public:
     virtual void Deinitialize() override;
     virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
 
-    // Core crowd simulation functions
+    // Configuração do sistema
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void SpawnHerd(const FHerdConfiguration& Config, const FVector& SpawnLocation);
+    void InitializeCrowdSimulation();
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void TriggerPanicInRadius(const FVector& Location, float Radius, float Duration = 30.0f);
+    void SetBiomeConfiguration(const FString& BiomeName, const FBiomePopulationConfig& Config);
+
+    // Spawning dinâmico
+    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
+    void SpawnHerdInArea(const FVector& Location, float Radius, const FDinosaurHerdData& HerdData);
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void StartMigration(EDinosaurHerdType HerdType, const FMigrationRoute& Route);
+    void SpawnPredatorPackInArea(const FVector& Location, float Radius, const FPredatorPackData& PackData);
+
+    // Gestão populacional
+    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
+    void UpdatePopulationDensity(const FVector& PlayerLocation);
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void SetGlobalHerdBehavior(EHerdBehaviorState NewState);
-
-    // Query functions
-    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    int32 GetTotalActiveAgents() const;
+    int32 GetActiveEntityCount() const;
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    TArray<FVector> GetHerdLocations(EDinosaurHerdType HerdType) const;
+    float GetCurrentPopulationDensity(const FVector& Location, float Radius) const;
+
+    // Comportamentos emergentes
+    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
+    void TriggerPredatorHuntBehavior(const FVector& Location, float Radius);
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    bool IsAreaCrowded(const FVector& Location, float Radius, int32 Threshold = 100) const;
+    void TriggerHerdMigrationBehavior(const FString& SpeciesName);
 
-    // Environmental response
+    // Debug e visualização
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void OnPredatorDetected(const FVector& PredatorLocation, float ThreatRadius);
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void OnPlayerDetected(const FVector& PlayerLocation);
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void OnEnvironmentalChange(const FVector& Location, float Radius, bool bIsPositive);
+    void ToggleCrowdDebugVisualization(bool bEnabled);
 
 protected:
-    // Mass Entity integration
+    // Referências aos sistemas Mass
     UPROPERTY()
     TObjectPtr<UMassEntitySubsystem> MassEntitySubsystem;
 
     UPROPERTY()
     TObjectPtr<UMassSpawnerSubsystem> MassSpawnerSubsystem;
 
-    // Herd tracking
+    // Configurações por bioma
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
+    TMap<FString, FBiomePopulationConfig> BiomeConfigurations;
+
+    // Configurações globais
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
+    int32 MaxTotalEntities = 50000;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
+    float UpdateFrequency = 1.0f; // segundos
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
+    float CullingDistance = 30000.0f; // cm
+
+    // Estado interno
     UPROPERTY()
-    TMap<EDinosaurHerdType, TArray<FEntityHandle>> ActiveHerds;
+    TMap<FString, int32> ActiveHerdCounts;
 
     UPROPERTY()
-    TArray<FMigrationRoute> ActiveMigrations;
+    TMap<FString, int32> ActivePackCounts;
 
-    // Configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    TMap<EDinosaurHerdType, FHerdConfiguration> DefaultHerdConfigs;
+    UPROPERTY()
+    FVector LastPlayerLocation;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    int32 MaxSimultaneousAgents = 50000;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    float PerformanceUpdateInterval = 0.1f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    float LODDistanceNear = 1000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    float LODDistanceFar = 5000.0f;
+    // Timers
+    FTimerHandle PopulationUpdateTimer;
+    FTimerHandle MigrationUpdateTimer;
 
 private:
-    // Internal state management
-    EHerdBehaviorState GlobalBehaviorState = EHerdBehaviorState::Grazing;
-    float LastPerformanceCheck = 0.0f;
-    int32 CurrentActiveAgents = 0;
-
-    // Internal functions
-    void UpdatePerformanceMetrics();
-    void ProcessHerdBehaviors(float DeltaTime);
-    void HandleLODSystem();
-    void CleanupInactiveHerds();
+    void UpdatePopulationTick();
+    void UpdateMigrationTick();
+    void CullDistantEntities(const FVector& PlayerLocation);
+    bool CanSpawnInArea(const FVector& Location, float Radius, int32 RequestedCount) const;
+    FVector FindSuitableSpawnLocation(const FVector& Center, float Radius) const;
 };
