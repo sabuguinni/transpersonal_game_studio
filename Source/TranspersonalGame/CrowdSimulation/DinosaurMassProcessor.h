@@ -5,12 +5,18 @@
 #include "MassEntityTypes.h"
 #include "MassCommonFragments.h"
 #include "MassMovementFragments.h"
-#include "DinosaurMassFragments.h"
 #include "DinosaurMassProcessor.generated.h"
 
+// Forward declarations
+struct FMassVelocityFragment;
+struct FTransformFragment;
+struct FDinosaurBehaviorFragment;
+struct FDinosaurSpeciesFragment;
+struct FDinosaurHerdFragment;
+
 /**
- * Main processor for dinosaur crowd simulation using Mass Entity framework
- * Handles up to 50,000 simultaneous dinosaur agents with emergent behaviors
+ * Mass processor for dinosaur crowd simulation
+ * Handles movement, flocking, and basic behaviors for large numbers of dinosaurs
  */
 UCLASS()
 class TRANSPERSONALGAME_API UDinosaurMassProcessor : public UMassProcessor
@@ -25,46 +31,51 @@ protected:
     virtual void Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context) override;
 
 private:
-    // Query for herbivore behavior
+    // Query for herbivore herd behavior
     FMassEntityQuery HerbivoreQuery;
     
-    // Query for carnivore behavior  
+    // Query for carnivore pack behavior  
     FMassEntityQuery CarnivoreQuery;
     
-    // Query for pack behavior (raptors, etc)
-    FMassEntityQuery PackQuery;
-    
-    // Query for territorial behavior (T-Rex, etc)
-    FMassEntityQuery TerritorialQuery;
+    // Query for solitary dinosaurs
+    FMassEntityQuery SolitaryQuery;
 
-    // Behavior execution functions
-    void ProcessHerbivores(FMassEntityManager& EntityManager, FMassExecutionContext& Context);
+    // Flocking parameters
+    UPROPERTY(EditAnywhere, Category = "Flocking")
+    float SeparationRadius = 500.0f;
+    
+    UPROPERTY(EditAnywhere, Category = "Flocking")
+    float AlignmentRadius = 800.0f;
+    
+    UPROPERTY(EditAnywhere, Category = "Flocking")
+    float CohesionRadius = 1000.0f;
+    
+    UPROPERTY(EditAnywhere, Category = "Flocking")
+    float MaxSpeed = 600.0f;
+    
+    UPROPERTY(EditAnywhere, Category = "Flocking")
+    float MaxForce = 100.0f;
+
+    // Behavior weights
+    UPROPERTY(EditAnywhere, Category = "Behavior")
+    float SeparationWeight = 2.0f;
+    
+    UPROPERTY(EditAnywhere, Category = "Behavior")
+    float AlignmentWeight = 1.0f;
+    
+    UPROPERTY(EditAnywhere, Category = "Behavior")
+    float CohesionWeight = 1.0f;
+    
+    UPROPERTY(EditAnywhere, Category = "Behavior")
+    float WanderWeight = 0.5f;
+
+    // Helper functions
+    FVector CalculateSeparation(const FVector& Position, const TArray<FVector>& NeighborPositions);
+    FVector CalculateAlignment(const FVector& Velocity, const TArray<FVector>& NeighborVelocities);
+    FVector CalculateCohesion(const FVector& Position, const TArray<FVector>& NeighborPositions);
+    FVector CalculateWander(const FVector& CurrentVelocity, float DeltaTime);
+    
+    void ProcessHerbivoreHerds(FMassEntityManager& EntityManager, FMassExecutionContext& Context);
     void ProcessCarnivores(FMassEntityManager& EntityManager, FMassExecutionContext& Context);
-    void ProcessPackBehavior(FMassEntityManager& EntityManager, FMassExecutionContext& Context);
-    void ProcessTerritorialBehavior(FMassEntityManager& EntityManager, FMassExecutionContext& Context);
-
-    // Ecosystem interaction functions
-    void HandlePredatorPreyInteractions(FMassEntityManager& EntityManager, FMassExecutionContext& Context);
-    void UpdateTerritorialBoundaries(FMassEntityManager& EntityManager, FMassExecutionContext& Context);
-    void ProcessMigrationPatterns(FMassEntityManager& EntityManager, FMassExecutionContext& Context);
-
-public:
-    // Configuration parameters
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Simulation")
-    float MaxSimulationDistance = 5000.0f;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Simulation")
-    int32 MaxActiveAgents = 50000;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Simulation")
-    float UpdateFrequency = 0.1f; // 10 times per second
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ecosystem")
-    float PredatorDetectionRange = 1000.0f;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ecosystem")
-    float TerritoryRadius = 2000.0f;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    bool bUseLODSystem = true;
+    void ProcessSolitaryDinosaurs(FMassEntityManager& EntityManager, FMassExecutionContext& Context);
 };
