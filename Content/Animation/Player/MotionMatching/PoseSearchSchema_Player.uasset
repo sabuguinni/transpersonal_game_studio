@@ -1,0 +1,72 @@
+{
+    "Type": "PoseSearchSchema",
+    "Name": "PoseSearchSchema_Player",
+    "Description": "Motion Matching schema for the paleontologist player character",
+    "Skeleton": "/Game/Characters/Player/SK_Player_Skeleton",
+    "SampleRate": 30,
+    "DataPreprocessor": "Normalize",
+    "Channels": [
+        {
+            "Type": "Trajectory",
+            "Weight": 1.0,
+            "Samples": [
+                {
+                    "Offset": -0.5,
+                    "Flags": ["Position", "Velocity", "FacingDirection"],
+                    "Weight": 0.8
+                },
+                {
+                    "Offset": 0.0,
+                    "Flags": ["Position", "Velocity", "FacingDirection"],
+                    "Weight": 1.0
+                },
+                {
+                    "Offset": 0.5,
+                    "Flags": ["Position", "Velocity", "FacingDirection"],
+                    "Weight": 0.8
+                }
+            ]
+        },
+        {
+            "Type": "Pose",
+            "Weight": 0.7,
+            "SampledBones": [
+                {
+                    "Reference": "foot_l",
+                    "Flags": ["Position", "Velocity"],
+                    "Weight": 1.0
+                },
+                {
+                    "Reference": "foot_r", 
+                    "Flags": ["Position", "Velocity"],
+                    "Weight": 1.0
+                },
+                {
+                    "Reference": "hand_l",
+                    "Flags": ["Position", "Velocity"],
+                    "Weight": 0.6
+                },
+                {
+                    "Reference": "hand_r",
+                    "Flags": ["Position", "Velocity"], 
+                    "Weight": 0.6
+                },
+                {
+                    "Reference": "head",
+                    "Flags": ["Position", "Rotation"],
+                    "Weight": 0.8
+                }
+            ],
+            "UseCharacterSpaceVelocities": true
+        },
+        {
+            "Type": "Heading",
+            "Weight": 0.5,
+            "Bone": "pelvis",
+            "HeadingAxis": "Y",
+            "ComponentStripping": "StripZ"
+        }
+    ],
+    "NumberOfPermutations": 3,
+    "PermutationTimeOffset": 0.1
+}
