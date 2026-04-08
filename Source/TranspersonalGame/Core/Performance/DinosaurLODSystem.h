@@ -1,0 +1,162 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Components/ActorComponent.h"
+#include "Engine/World.h"
+#include "DinosaurLODSystem.generated.h"
+
+DECLARE_LOG_CATEGORY_EXTERN(LogDinosaurLOD, Log, All);
+
+UENUM(BlueprintType)
+enum class EDinosaurLODLevel : uint8
+{
+    LOD0_HighDetail    UMETA(DisplayName = "High Detail (0-50m)"),
+    LOD1_MediumDetail  UMETA(DisplayName = "Medium Detail (50-150m)"),
+    LOD2_LowDetail     UMETA(DisplayName = "Low Detail (150-300m)"),
+    LOD3_Impostor      UMETA(DisplayName = "Impostor (300m+)")
+};
+
+USTRUCT(BlueprintType)
+struct FDinosaurLODSettings
+{
+    GENERATED_BODY()
+
+    // Distance thresholds for each LOD level (in Unreal Units)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0", ClampMax = "10000"))
+    float LOD0_Distance = 5000.0f; // 50m
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0", ClampMax = "20000"))
+    float LOD1_Distance = 15000.0f; // 150m
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0", ClampMax = "40000"))
+    float LOD2_Distance = 30000.0f; // 300m
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0", ClampMax = "80000"))
+    float LOD3_Distance = 60000.0f; // 600m
+
+    // Performance scaling factors
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.1", ClampMax = "2.0"))
+    float DistanceScaleMultiplier = 1.0f;
+
+    // AI complexity per LOD
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bEnableFullAI_LOD0 = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bEnableSimplifiedAI_LOD1 = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bEnableBasicAI_LOD2 = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bDisableAI_LOD3 = true;
+
+    // Animation complexity per LOD
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "5", ClampMax = "60"))
+    int32 AnimationFPS_LOD0 = 60;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "5", ClampMax = "60"))
+    int32 AnimationFPS_LOD1 = 30;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "5", ClampMax = "60"))
+    int32 AnimationFPS_LOD2 = 15;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "1", ClampMax = "15"))
+    int32 AnimationFPS_LOD3 = 5;
+
+    FDinosaurLODSettings()
+    {
+        LOD0_Distance = 5000.0f;
+        LOD1_Distance = 15000.0f;
+        LOD2_Distance = 30000.0f;
+        LOD3_Distance = 60000.0f;
+        DistanceScaleMultiplier = 1.0f;
+        bEnableFullAI_LOD0 = true;
+        bEnableSimplifiedAI_LOD1 = true;
+        bEnableBasicAI_LOD2 = false;
+        bDisableAI_LOD3 = true;
+        AnimationFPS_LOD0 = 60;
+        AnimationFPS_LOD1 = 30;
+        AnimationFPS_LOD2 = 15;
+        AnimationFPS_LOD3 = 5;
+    }
+};
+
+/**
+ * Component responsible for managing LOD levels of dinosaur actors
+ * Handles mesh detail, AI complexity, animation quality, and physics simulation based on distance and performance
+ */
+UCLASS(ClassGroup=(Performance), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UDinosaurLODSystem : public UActorComponent
+{
+    GENERATED_BODY()
+
+public:
+    UDinosaurLODSystem();
+
+protected:
+    virtual void BeginPlay() override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD Settings")
+    FDinosaurLODSettings LODSettings;
+
+    UPROPERTY(BlueprintReadOnly, Category = "LOD State")
+    EDinosaurLODLevel CurrentLODLevel;
+
+    UPROPERTY(BlueprintReadOnly, Category = "LOD State")
+    float DistanceToPlayer;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD Settings")
+    float LODUpdateInterval = 0.1f; // Update LOD every 100ms
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD Settings")
+    bool bEnableAdaptiveLOD = true;
+
+private:
+    float LastLODUpdate;
+    EDinosaurLODLevel PreviousLODLevel;
+    
+    // Component references
+    UPROPERTY()
+    class USkeletalMeshComponent* DinosaurMesh;
+    
+    UPROPERTY()
+    class UAnimationBlueprint* AnimationBlueprint;
+    
+    // LOD management
+    void UpdateLODLevel();
+    EDinosaurLODLevel CalculateLODLevel(float Distance) const;
+    void ApplyLODLevel(EDinosaurLODLevel NewLODLevel);
+    
+    // Individual system adjustments
+    void AdjustMeshLOD(EDinosaurLODLevel LODLevel);
+    void AdjustAnimationQuality(EDinosaurLODLevel LODLevel);
+    void AdjustAIComplexity(EDinosaurLODLevel LODLevel);
+    void AdjustPhysicsSimulation(EDinosaurLODLevel LODLevel);
+    
+    // Distance calculation
+    float GetDistanceToNearestPlayer() const;
+
+public:
+    UFUNCTION(BlueprintCallable, Category = "LOD")
+    void SetLODSettings(const FDinosaurLODSettings& NewSettings);
+
+    UFUNCTION(BlueprintCallable, Category = "LOD")
+    EDinosaurLODLevel GetCurrentLODLevel() const { return CurrentLODLevel; }
+
+    UFUNCTION(BlueprintCallable, Category = "LOD")
+    float GetDistanceToPlayer() const { return DistanceToPlayer; }
+
+    UFUNCTION(BlueprintCallable, Category = "LOD")
+    void ForceUpdateLOD();
+
+    UFUNCTION(BlueprintCallable, Category = "LOD")
+    void SetAdaptiveLODEnabled(bool bEnabled);
+
+    UFUNCTION(BlueprintImplementableEvent, Category = "LOD")
+    void OnLODLevelChanged(EDinosaurLODLevel OldLevel, EDinosaurLODLevel NewLevel);
+
+    UFUNCTION(BlueprintImplementableEvent, Category = "LOD")
+    void OnAIComplexityChanged(EDinosaurLODLevel LODLevel, bool bAIEnabled);
+};
