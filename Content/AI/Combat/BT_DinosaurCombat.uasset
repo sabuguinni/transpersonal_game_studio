@@ -1,49 +1,150 @@
-# Behavior Tree Asset for Dinosaur Combat AI
-# This is a placeholder for the actual UE5 asset file
-# The real asset would be created in the UE5 editor
-
-# Behavior Tree Structure:
-# Root
-# ├── Selector (Combat Decision)
-#     ├── Sequence (Retreat Behavior)
-#     │   ├── Decorator: Check Fear > 0.7 OR Health < 25%
-#     │   ├── Task: Find Safe Location (EQS)
-#     │   └── Task: Move To Safe Location
-#     ├── Selector (Active Combat)
-#     │   ├── Sequence (Pack Attack)
-#     │   │   ├── Decorator: Has Pack Members
-#     │   │   ├── Task: Coordinate Pack Formation
-#     │   │   └── Task: Execute Pack Attack
-#     │   ├── Sequence (Ambush Attack)
-#     │   │   ├── Decorator: Should Ambush AND Can Ambush
-#     │   │   ├── Task: Move To Ambush Position (EQS)
-#     │   │   ├── Task: Wait For Target
-#     │   │   └── Task: Execute Ambush
-#     │   ├── Sequence (Direct Attack)
-#     │   │   ├── Decorator: Target In Attack Range
-#     │   │   ├── Task: Face Target
-#     │   │   └── Task: Attack Target
-#     │   └── Sequence (Hunt Target)
-#     │       ├── Decorator: Has Target
-#     │       ├── Task: Find Optimal Attack Position (EQS)
-#     │       └── Task: Move To Attack Position
-#     ├── Sequence (Investigate)
-#     │   ├── Decorator: Time Since Last Seen < 30s
-#     │   ├── Task: Move To Last Known Location
-#     │   └── Task: Search Area (EQS)
-#     └── Sequence (Patrol)
-#         ├── Task: Find Patrol Point (EQS)
-#         ├── Task: Move To Patrol Point
-#         └── Task: Wait At Patrol Point
-
-# Key Blackboard Keys:
-# - Target (Object): Current target actor
-# - LastKnownTargetLocation (Vector): Last seen target position
-# - Aggression (Float): Current aggression level (0-1)
-# - Fear (Float): Current fear level (0-1)
-# - IsInCombat (Bool): Whether currently in combat
-# - CombatState (Enum): Current combat behavior state
-# - PackMembers (Object Array): Current pack members
-# - OptimalAttackPosition (Vector): Best position for attack
-# - AmbushPosition (Vector): Position for ambush
-# - SafeLocation (Vector): Retreat position
+{
+    "Type": "BehaviorTree",
+    "Name": "BT_DinosaurCombat",
+    "Description": "Main behavior tree for dinosaur combat AI",
+    "BlackboardAsset": "/Game/AI/Combat/BB_DinosaurCombat",
+    "RootNode": {
+        "Type": "Selector",
+        "Children": [
+            {
+                "Type": "Sequence",
+                "Name": "Emergency Flee",
+                "Decorators": [
+                    {
+                        "Type": "Blackboard",
+                        "KeyName": "ShouldFlee",
+                        "KeyType": "Bool",
+                        "Operation": "EqualTo",
+                        "Value": true
+                    }
+                ],
+                "Children": [
+                    {
+                        "Type": "Task",
+                        "TaskType": "RunEQSQuery",
+                        "QueryTemplate": "/Game/AI/Combat/EQS_FleePosition",
+                        "BlackboardKey": "FleeLocation",
+                        "RunMode": "SingleBestItem"
+                    },
+                    {
+                        "Type": "Task",
+                        "TaskType": "MoveTo",
+                        "BlackboardKey": "FleeLocation",
+                        "AcceptableRadius": 100.0,
+                        "AllowStrafe": true
+                    }
+                ]
+            },
+            {
+                "Type": "Sequence",
+                "Name": "Combat Sequence",
+                "Decorators": [
+                    {
+                        "Type": "Blackboard",
+                        "KeyName": "TargetActor",
+                        "KeyType": "Object",
+                        "Operation": "IsSet"
+                    }
+                ],
+                "Children": [
+                    {
+                        "Type": "Selector",
+                        "Name": "Combat Actions",
+                        "Children": [
+                            {
+                                "Type": "Sequence",
+                                "Name": "Attack Sequence",
+                                "Decorators": [
+                                    {
+                                        "Type": "Distance",
+                                        "DistanceType": "Distance3D",
+                                        "BlackboardKeyA": "SelfActor",
+                                        "BlackboardKeyB": "TargetActor",
+                                        "ComparisonType": "LessOrEqual",
+                                        "FloatValue": 300.0
+                                    }
+                                ],
+                                "Children": [
+                                    {
+                                        "Type": "Task",
+                                        "TaskType": "RotateToFaceBBEntry",
+                                        "BlackboardKey": "TargetActor",
+                                        "Precision": 10.0
+                                    },
+                                    {
+                                        "Type": "Task",
+                                        "TaskType": "Wait",
+                                        "WaitTime": 0.5,
+                                        "RandomDeviation": 0.2
+                                    },
+                                    {
+                                        "Type": "Task",
+                                        "TaskType": "PlayAnimation",
+                                        "AnimationAsset": "/Game/Dinosaurs/Animations/Attack_Bite",
+                                        "Looping": false,
+                                        "NonBlocking": false
+                                    }
+                                ]
+                            },
+                            {
+                                "Type": "Sequence",
+                                "Name": "Hunt Sequence",
+                                "Children": [
+                                    {
+                                        "Type": "Task",
+                                        "TaskType": "RunEQSQuery",
+                                        "QueryTemplate": "/Game/AI/Combat/EQS_OptimalAttackPosition",
+                                        "BlackboardKey": "OptimalPosition",
+                                        "RunMode": "SingleBestItem"
+                                    },
+                                    {
+                                        "Type": "Task",
+                                        "TaskType": "MoveTo",
+                                        "BlackboardKey": "OptimalPosition",
+                                        "AcceptableRadius": 150.0,
+                                        "AllowStrafe": true,
+                                        "TrackMovingGoal": true
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            },
+            {
+                "Type": "Sequence",
+                "Name": "Patrol Sequence",
+                "Children": [
+                    {
+                        "Type": "Task",
+                        "TaskType": "RunEQSQuery",
+                        "QueryTemplate": "/Game/AI/Combat/EQS_PatrolPoint",
+                        "BlackboardKey": "PatrolLocation",
+                        "RunMode": "SingleRandomItemFromBest25Pct"
+                    },
+                    {
+                        "Type": "Task",
+                        "TaskType": "MoveTo",
+                        "BlackboardKey": "PatrolLocation",
+                        "AcceptableRadius": 200.0,
+                        "AllowStrafe": false
+                    },
+                    {
+                        "Type": "Task",
+                        "TaskType": "Wait",
+                        "WaitTime": 3.0,
+                        "RandomDeviation": 2.0
+                    }
+                ]
+            }
+        ]
+    },
+    "Services": [
+        {
+            "Type": "Service",
+            "ServiceType": "ThreatAssessment",
+            "Interval": 0.5,
+            "AttachedTo": "RootNode"
+        }
+    ]
+}
