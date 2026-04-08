@@ -1,0 +1,47 @@
+# Behavior Tree para Herbívoros Passivos (Domesticáveis)
+# Este é um template - o ficheiro real será criado no Editor
+
+# ESTRUTURA DA ÁRVORE:
+# Root
+# └── Selector: Main Behavior
+#     ├── Sequence: Emergency Response
+#     │   ├── Decorator: Blackboard (ThreatLevel > 0.7)
+#     │   └── Task: Flee to Safety
+#     ├── Sequence: Domestication Interaction
+#     │   ├── Decorator: Blackboard (CanBeDomesticated = true)
+#     │   ├── Decorator: Blackboard (IsPlayerVisible = true)
+#     │   ├── Decorator: Distance (Player < 500cm)
+#     │   └── Task: Approach Player Cautiously
+#     ├── Sequence: Daily Routine
+#     │   ├── Selector: Routine Activities
+#     │   │   ├── Sequence: Feeding Time
+#     │   │   │   ├── Decorator: Blackboard (IsHungry = true)
+#     │   │   │   ├── Task: Move to Feeding Area
+#     │   │   │   └── Task: Feed
+#     │   │   ├── Sequence: Resting Time
+#     │   │   │   ├── Decorator: Blackboard (IsTired = true)
+#     │   │   │   ├── Task: Move to Resting Area
+#     │   │   │   └── Task: Rest
+#     │   │   └── Sequence: Territory Patrol
+#     │   │       ├── Task: Generate Random Point in Territory
+#     │   │       ├── Task: Move to Point
+#     │   │       └── Task: Wait (2-5 seconds)
+#     └── Task: Idle Behavior
+
+# SERVICES ATTACHADOS:
+# - Service: Update Emotional State (no Main Behavior)
+# - Service: Scan for Player (no Main Behavior)
+# - Service: Update Daily Routine (no Daily Routine)
+# - Service: Memory Update (no Main Behavior)
+
+# DECORATORS ESPECIAIS:
+# - Time of Day Check (para rotinas)
+# - Trust Level Check (para domesticação)
+# - Territory Boundary Check
+
+# TASKS CUSTOMIZADAS:
+# - Approach Player Cautiously: Movimento lento e cauteloso
+# - Feed: Animação de alimentação + atualizar fome
+# - Rest: Animação de descanso + atualizar energia
+# - Flee to Safety: Movimento rápido para área segura
+# - Generate Random Point in Territory: EQS para pontos válidos
