@@ -3,56 +3,67 @@
 #include "CoreMinimal.h"
 #include "Engine/Engine.h"
 #include "Animation/AnimInstance.h"
+#include "PoseSearch/PoseSearchDatabase.h"
+#include "PoseSearch/PoseSearchSchema.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "AnimationSystemCore.generated.h"
 
 /**
  * Core Animation System for Transpersonal Game
- * Handles Motion Matching, procedural animations, and character-specific behaviors
- * 
- * Design Philosophy:
- * - Every movement tells a story about the character
- * - Motion Matching for natural human locomotion
- * - Procedural systems for dinosaur uniqueness
- * - IK for terrain adaptation
+ * Handles Motion Matching, IK systems, and character-specific animations
+ * Based on RDR2 principles: every movement tells a story
  */
 
 UENUM(BlueprintType)
-enum class ECharacterAnimationState : uint8
+enum class ECharacterArchetype : uint8
 {
-    // Human States
-    Idle_Calm           UMETA(DisplayName = "Idle - Calm"),
-    Idle_Alert          UMETA(DisplayName = "Idle - Alert"), 
-    Idle_Exhausted      UMETA(DisplayName = "Idle - Exhausted"),
-    Walk_Cautious       UMETA(DisplayName = "Walk - Cautious"),
-    Walk_Confident      UMETA(DisplayName = "Walk - Confident"),
-    Run_Panicked        UMETA(DisplayName = "Run - Panicked"),
-    Run_Determined      UMETA(DisplayName = "Run - Determined"),
-    Crouch_Hide         UMETA(DisplayName = "Crouch - Hide"),
-    Crouch_Observe      UMETA(DisplayName = "Crouch - Observe"),
-    
-    // Dinosaur States
-    Dino_Idle_Grazing   UMETA(DisplayName = "Dinosaur - Grazing"),
-    Dino_Idle_Resting   UMETA(DisplayName = "Dinosaur - Resting"),
-    Dino_Walk_Patrol    UMETA(DisplayName = "Dinosaur - Patrol Walk"),
-    Dino_Run_Hunt       UMETA(DisplayName = "Dinosaur - Hunting Run"),
-    Dino_Run_Flee       UMETA(DisplayName = "Dinosaur - Fleeing"),
-    Dino_Alert_Scanning UMETA(DisplayName = "Dinosaur - Alert Scan"),
-    Dino_Aggressive     UMETA(DisplayName = "Dinosaur - Aggressive"),
-    Dino_Curious        UMETA(DisplayName = "Dinosaur - Curious")
+    PlayerPaleontologist    UMETA(DisplayName = "Player - Paleontologist"),
+    DinosaurHerbivore      UMETA(DisplayName = "Dinosaur - Herbivore"),
+    DinosaurCarnivore      UMETA(DisplayName = "Dinosaur - Carnivore"),
+    DinosaurFlying         UMETA(DisplayName = "Dinosaur - Flying"),
+    DinosaurAquatic        UMETA(DisplayName = "Dinosaur - Aquatic")
+};
+
+UENUM(BlueprintType)
+enum class EMovementState : uint8
+{
+    Idle                   UMETA(DisplayName = "Idle"),
+    Walking                UMETA(DisplayName = "Walking"),
+    Running                UMETA(DisplayName = "Running"),
+    Sprinting              UMETA(DisplayName = "Sprinting"),
+    Crouching              UMETA(DisplayName = "Crouching"),
+    Crawling               UMETA(DisplayName = "Crawling"),
+    Climbing               UMETA(DisplayName = "Climbing"),
+    Swimming               UMETA(DisplayName = "Swimming"),
+    Falling                UMETA(DisplayName = "Falling"),
+    Landing                UMETA(DisplayName = "Landing"),
+    Jumping                UMETA(DisplayName = "Jumping"),
+    Dodging                UMETA(DisplayName = "Dodging"),
+    Hiding                 UMETA(DisplayName = "Hiding"),
+    Interacting            UMETA(DisplayName = "Interacting"),
+    Crafting               UMETA(DisplayName = "Crafting"),
+    Gathering              UMETA(DisplayName = "Gathering"),
+    Combat                 UMETA(DisplayName = "Combat"),
+    Injured                UMETA(DisplayName = "Injured"),
+    Dying                  UMETA(DisplayName = "Dying"),
+    Dead                   UMETA(DisplayName = "Dead")
 };
 
 UENUM(BlueprintType)
 enum class EEmotionalState : uint8
 {
-    Calm        UMETA(DisplayName = "Calm"),
-    Anxious     UMETA(DisplayName = "Anxious"),
-    Terrified   UMETA(DisplayName = "Terrified"),
-    Confident   UMETA(DisplayName = "Confident"),
-    Exhausted   UMETA(DisplayName = "Exhausted"),
-    Curious     UMETA(DisplayName = "Curious"),
-    Aggressive  UMETA(DisplayName = "Aggressive"),
-    Submissive  UMETA(DisplayName = "Submissive")
+    Neutral                UMETA(DisplayName = "Neutral"),
+    Fearful                UMETA(DisplayName = "Fearful"),
+    Terrified              UMETA(DisplayName = "Terrified"),
+    Cautious               UMETA(DisplayName = "Cautious"),
+    Alert                  UMETA(DisplayName = "Alert"),
+    Curious                UMETA(DisplayName = "Curious"),
+    Confident              UMETA(DisplayName = "Confident"),
+    Exhausted              UMETA(DisplayName = "Exhausted"),
+    Injured                UMETA(DisplayName = "Injured"),
+    Aggressive             UMETA(DisplayName = "Aggressive"),
+    Peaceful               UMETA(DisplayName = "Peaceful"),
+    Domesticated           UMETA(DisplayName = "Domesticated")
 };
 
 USTRUCT(BlueprintType)
@@ -60,38 +71,72 @@ struct FCharacterAnimationProfile
 {
     GENERATED_BODY()
 
-    // Motion Matching Database for this character type
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    class UPoseSearchDatabase* MotionDatabase;
-    
-    // Emotional state influences animation selection
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EEmotionalState CurrentEmotionalState;
-    
-    // Fatigue affects movement speed and posture
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float FatigueLevel;
-    
-    // Fear level affects animation choices
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float FearLevel;
-    
-    // Confidence affects posture and movement boldness
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float ConfidenceLevel;
-    
-    // Unique movement characteristics for this individual
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FVector MovementPersonality; // X=Boldness, Y=Precision, Z=Energy
-    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Identity")
+    ECharacterArchetype Archetype;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Identity")
+    FString CharacterName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Identity")
+    int32 UniqueID;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
+    float BaseMovementSpeed;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
+    float SprintMultiplier;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
+    float CrouchSpeedMultiplier;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical Traits")
+    float Height;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical Traits")
+    float Weight;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical Traits")
+    float LegLength;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality")
+    float Nervousness; // 0.0 = Calm, 1.0 = Extremely nervous
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality")
+    float Confidence; // 0.0 = No confidence, 1.0 = Very confident
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality")
+    float Aggression; // 0.0 = Peaceful, 1.0 = Highly aggressive
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Databases")
+    TObjectPtr<UPoseSearchDatabase> LocomotionDatabase;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Databases")
+    TObjectPtr<UPoseSearchDatabase> InteractionDatabase;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Databases")
+    TObjectPtr<UPoseSearchDatabase> CombatDatabase;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Databases")
+    TObjectPtr<UPoseSearchDatabase> EmotionalDatabase;
+
     FCharacterAnimationProfile()
     {
-        MotionDatabase = nullptr;
-        CurrentEmotionalState = EEmotionalState::Calm;
-        FatigueLevel = 0.0f;
-        FearLevel = 0.0f;
-        ConfidenceLevel = 0.5f;
-        MovementPersonality = FVector(0.5f, 0.5f, 0.5f);
+        Archetype = ECharacterArchetype::PlayerPaleontologist;
+        CharacterName = TEXT("Unknown");
+        UniqueID = 0;
+        BaseMovementSpeed = 400.0f;
+        SprintMultiplier = 2.0f;
+        CrouchSpeedMultiplier = 0.5f;
+        Height = 180.0f;
+        Weight = 75.0f;
+        LegLength = 90.0f;
+        Nervousness = 0.5f;
+        Confidence = 0.5f;
+        Aggression = 0.1f;
+        LocomotionDatabase = nullptr;
+        InteractionDatabase = nullptr;
+        CombatDatabase = nullptr;
+        EmotionalDatabase = nullptr;
     }
 };
 
@@ -103,40 +148,51 @@ class TRANSPERSONALGAME_API UAnimationSystemCore : public UObject
 public:
     UAnimationSystemCore();
 
-    // Initialize the animation system for a character
+    // Core system functions
     UFUNCTION(BlueprintCallable, Category = "Animation System")
-    void InitializeForCharacter(USkeletalMeshComponent* SkeletalMesh, const FCharacterAnimationProfile& Profile);
-    
-    // Update animation state based on gameplay context
+    void InitializeCharacterAnimation(AActor* Character, const FCharacterAnimationProfile& Profile);
+
     UFUNCTION(BlueprintCallable, Category = "Animation System")
-    void UpdateAnimationState(ECharacterAnimationState NewState, float DeltaTime);
-    
-    // Update emotional state (affects animation choices)
+    void UpdateMotionMatchingQuery(AActor* Character, FVector Velocity, EMovementState State, EEmotionalState Emotion);
+
     UFUNCTION(BlueprintCallable, Category = "Animation System")
-    void UpdateEmotionalState(EEmotionalState NewState, float TransitionTime = 1.0f);
-    
-    // Get current animation database for Motion Matching
-    UFUNCTION(BlueprintPure, Category = "Animation System")
-    class UPoseSearchDatabase* GetCurrentMotionDatabase() const;
-    
-    // Calculate blend weights for emotional animations
-    UFUNCTION(BlueprintPure, Category = "Animation System")
-    float CalculateEmotionalBlendWeight(EEmotionalState TargetState) const;
+    void ApplyFootIK(USkeletalMeshComponent* SkeletalMesh, float DeltaTime);
+
+    UFUNCTION(BlueprintCallable, Category = "Animation System")
+    FCharacterAnimationProfile GetCharacterProfile(int32 UniqueID);
+
+    UFUNCTION(BlueprintCallable, Category = "Animation System")
+    void RegisterCharacterProfile(const FCharacterAnimationProfile& Profile);
+
+    // Motion Matching utilities
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    UPoseSearchDatabase* SelectOptimalDatabase(ECharacterArchetype Archetype, EMovementState State, EEmotionalState Emotion);
+
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    float CalculateBlendTime(EMovementState FromState, EMovementState ToState, EEmotionalState Emotion);
 
 protected:
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
-    FCharacterAnimationProfile CurrentProfile;
-    
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
-    ECharacterAnimationState CurrentAnimationState;
-    
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
-    float StateTransitionTime;
-    
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
-    float EmotionalTransitionProgress;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Profiles")
+    TMap<int32, FCharacterAnimationProfile> RegisteredProfiles;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    TObjectPtr<UPoseSearchSchema> DefaultLocomotionSchema;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    TObjectPtr<UPoseSearchSchema> DefaultInteractionSchema;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK System")
+    float FootIKTraceDistance;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK System")
+    float FootIKInterpSpeed;
 
 private:
-    void UpdateEmotionalTransition(float DeltaTime);
-    ECharacterAnimationState SelectOptimalAnimationState() const;
+    // Internal animation logic
+    void SetupMotionMatchingForCharacter(AActor* Character, const FCharacterAnimationProfile& Profile);
+    void ConfigureIKRigForCharacter(USkeletalMeshComponent* SkeletalMesh, ECharacterArchetype Archetype);
+    
+    // Foot IK implementation
+    FVector PerformFootTrace(USkeletalMeshComponent* SkeletalMesh, FName FootBoneName, FVector FootLocation);
+    void ApplyFootIKToLimb(USkeletalMeshComponent* SkeletalMesh, FName FootBone, FName KneeBone, FVector TargetLocation, float Alpha);
 };
