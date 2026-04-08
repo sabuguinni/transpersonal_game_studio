@@ -1,0 +1,597 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Engine/World.h"
+#include "Subsystems/WorldSubsystem.h"
+#include "BehaviorTree/BehaviorTree.h"
+#include "BehaviorTree/BlackboardComponent.h"
+#include "AIController.h"
+#include "Perception/AIPerceptionComponent.h"
+#include "Components/ActorComponent.h"
+#include "Engine/DataAsset.h"
+#include "../NPCBehaviorSystem.h"
+#include "AdvancedNPCBehaviorAgent.generated.h"
+
+class UBehaviorTree;
+class UBlackboardAsset;
+class AAIController;
+class APawn;
+class UNPCBehaviorComponent;
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnNPCBehaviorChanged, AActor*, NPC, EDinosaurBehaviorState, OldState, EDinosaurBehaviorState, NewState);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnNPCRelationshipChanged, AActor*, NPC, AActor*, Target);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnNPCMemoryUpdated, AActor*, NPC, FString, MemoryType);
+
+UENUM(BlueprintType)
+enum class ENPCLifeStage : uint8
+{
+    Juvenile            UMETA(DisplayName = "Juvenile"),
+    Young               UMETA(DisplayName = "Young"),
+    Adult               UMETA(DisplayName = "Adult"),
+    Mature              UMETA(DisplayName = "Mature"),
+    Elder               UMETA(DisplayName = "Elder")
+};
+
+UENUM(BlueprintType)
+enum class ENPCMoodState : uint8
+{
+    Neutral             UMETA(DisplayName = "Neutral"),
+    Happy               UMETA(DisplayName = "Happy"),
+    Sad                 UMETA(DisplayName = "Sad"),
+    Angry               UMETA(DisplayName = "Angry"),
+    Fearful             UMETA(DisplayName = "Fearful"),
+    Excited             UMETA(DisplayName = "Excited"),
+    Stressed            UMETA(DisplayName = "Stressed"),
+    Relaxed             UMETA(DisplayName = "Relaxed"),
+    Curious             UMETA(DisplayName = "Curious"),
+    Aggressive          UMETA(DisplayName = "Aggressive")
+};
+
+UENUM(BlueprintType)
+enum class ENPCInteractionType : uint8
+{
+    Visual              UMETA(DisplayName = "Visual Contact"),
+    Physical            UMETA(DisplayName = "Physical Contact"),
+    Vocal               UMETA(DisplayName = "Vocal Communication"),
+    Feeding             UMETA(DisplayName = "Feeding"),
+    Grooming            UMETA(DisplayName = "Grooming"),
+    Playing             UMETA(DisplayName = "Playing"),
+    Fighting            UMETA(DisplayName = "Fighting"),
+    Mating              UMETA(DisplayName = "Mating"),
+    Protecting          UMETA(DisplayName = "Protecting"),
+    Teaching            UMETA(DisplayName = "Teaching")
+};
+
+USTRUCT(BlueprintType)
+struct FNPCPersonalityTrait
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FString TraitName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float TraitValue = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float TraitStability = 0.8f; // Quão estável é este traço (0.0 = muito volátil, 1.0 = imutável)
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TArray<FString> InfluencingFactors; // Fatores que podem alterar este traço
+
+    FNPCPersonalityTrait()
+    {
+        TraitName = TEXT("Unknown");
+    }
+
+    FNPCPersonalityTrait(const FString& Name, float Value, float Stability = 0.8f)
+    {
+        TraitName = Name;
+        TraitValue = FMath::Clamp(Value, 0.0f, 1.0f);
+        TraitStability = FMath::Clamp(Stability, 0.0f, 1.0f);
+    }
+};
+
+USTRUCT(BlueprintType)
+struct FNPCAdvancedPersonality
+{
+    GENERATED_BODY()
+
+    // Traços de personalidade dinâmicos
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TMap<FString, FNPCPersonalityTrait> PersonalityTraits;
+
+    // Estado emocional atual
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    ENPCMoodState CurrentMood = ENPCMoodState::Neutral;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MoodIntensity = 0.5f;
+
+    // Histórico de humor (últimas 24 horas de jogo)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TArray<ENPCMoodState> MoodHistory;
+
+    // Estágio de vida
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    ENPCLifeStage LifeStage = ENPCLifeStage::Adult;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float Age = 1.0f; // Em anos
+
+    // Experiências que moldaram a personalidade
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TArray<FString> FormativeExperiences;
+
+    FNPCAdvancedPersonality()
+    {
+        InitializeDefaultTraits();
+    }
+
+    void InitializeDefaultTraits()
+    {
+        PersonalityTraits.Add("Bravery", FNPCPersonalityTrait("Bravery", 0.5f, 0.7f));
+        PersonalityTraits.Add("Curiosity", FNPCPersonalityTrait("Curiosity", 0.5f, 0.6f));
+        PersonalityTraits.Add("Sociability", FNPCPersonalityTrait("Sociability", 0.5f, 0.8f));
+        PersonalityTraits.Add("Aggression", FNPCPersonalityTrait("Aggression", 0.5f, 0.7f));
+        PersonalityTraits.Add("Intelligence", FNPCPersonalityTrait("Intelligence", 0.5f, 0.9f));
+        PersonalityTraits.Add("Loyalty", FNPCPersonalityTrait("Loyalty", 0.5f, 0.8f));
+        PersonalityTraits.Add("Playfulness", FNPCPersonalityTrait("Playfulness", 0.5f, 0.5f));
+        PersonalityTraits.Add("Stubbornness", FNPCPersonalityTrait("Stubbornness", 0.5f, 0.8f));
+    }
+};
+
+USTRUCT(BlueprintType)
+struct FNPCAdvancedRelationship
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TWeakObjectPtr<AActor> RelatedActor;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    ENPCRelationshipType RelationshipType = ENPCRelationshipType::Unknown;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "-1.0", ClampMax = "1.0"))
+    float RelationshipStrength = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FDateTime LastInteraction;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TMap<ENPCInteractionType, int32> InteractionHistory;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TArray<FString> SharedMemories;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Trust = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Familiarity = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsRival = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsPackMember = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float EmotionalBond = 0.0f; // Ligação emocional específica
+
+    FNPCAdvancedRelationship()
+    {
+        LastInteraction = FDateTime::Now();
+        InitializeInteractionHistory();
+    }
+
+    void InitializeInteractionHistory()
+    {
+        InteractionHistory.Add(ENPCInteractionType::Visual, 0);
+        InteractionHistory.Add(ENPCInteractionType::Physical, 0);
+        InteractionHistory.Add(ENPCInteractionType::Vocal, 0);
+        InteractionHistory.Add(ENPCInteractionType::Feeding, 0);
+        InteractionHistory.Add(ENPCInteractionType::Grooming, 0);
+        InteractionHistory.Add(ENPCInteractionType::Playing, 0);
+        InteractionHistory.Add(ENPCInteractionType::Fighting, 0);
+        InteractionHistory.Add(ENPCInteractionType::Mating, 0);
+        InteractionHistory.Add(ENPCInteractionType::Protecting, 0);
+        InteractionHistory.Add(ENPCInteractionType::Teaching, 0);
+    }
+};
+
+USTRUCT(BlueprintType)
+struct FNPCAdvancedMemory
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FString MemoryID; // ID único da memória
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FString MemoryType; // "Location", "Actor", "Event", "Threat", "Food", etc.
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FVector Location = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TWeakObjectPtr<AActor> RelatedActor;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FString DetailedDescription;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "-1.0", ClampMax = "1.0"))
+    float EmotionalWeight = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FDateTime Timestamp;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MemoryStrength = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    int32 ReinforcementCount = 1;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsTraumatic = false; // Memórias traumáticas decaem mais lentamente
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsJoyful = false; // Memórias alegres podem ser relembradas mais facilmente
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TArray<FString> AssociatedTags; // Tags para facilitar busca
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    ENPCMoodState MoodWhenFormed = ENPCMoodState::Neutral;
+
+    FNPCAdvancedMemory()
+    {
+        Timestamp = FDateTime::Now();
+        MemoryID = FGuid::NewGuid().ToString();
+    }
+};
+
+USTRUCT(BlueprintType)
+struct FNPCAdvancedRoutine
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FString RoutineID;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FString RoutineName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float StartTimeOfDay = 0.0f; // 0.0-1.0
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float Duration = 0.1f; // Em fracção do dia
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    EDinosaurBehaviorState BehaviorState = EDinosaurBehaviorState::Idle;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FVector PreferredLocation = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float LocationTolerance = 500.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    int32 Priority = 1; // 1-10
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bCanBeInterrupted = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TArray<FString> RequiredConditions;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TArray<FString> PreferredCompanions; // IDs de outros NPCs que gosta de fazer esta atividade junto
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float RoutineFlexibility = 0.3f; // Quão flexível é com horários (0.0 = rígido, 1.0 = muito flexível)
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    int32 DaysPerWeek = 7; // Quantos dias por semana faz esta rotina
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsSeasonalRoutine = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float SeasonalModifier = 1.0f; // Modificador baseado na estação do ano
+
+    FNPCAdvancedRoutine()
+    {
+        RoutineID = FGuid::NewGuid().ToString();
+    }
+};
+
+/**
+ * Advanced NPC Behavior Agent - Sistema completo de comportamento NPC
+ * 
+ * Este sistema vai além das Behavior Trees tradicionais, criando NPCs que:
+ * - Têm personalidades únicas e dinâmicas
+ * - Formam memórias detalhadas e persistentes
+ * - Desenvolvem relações complexas com outros NPCs e o jogador
+ * - Seguem rotinas diárias flexíveis e realistas
+ * - Reagem emocionalmente a eventos do mundo
+ * - Evoluem ao longo do tempo baseado em experiências
+ * 
+ * A filosofia é que cada NPC é um indivíduo com vida própria,
+ * não apenas um conjunto de scripts para servir o jogador.
+ */
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UAdvancedNPCBehaviorAgent : public UActorComponent
+{
+    GENERATED_BODY()
+
+public:
+    UAdvancedNPCBehaviorAgent();
+
+protected:
+    virtual void BeginPlay() override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
+public:
+    // === EVENTOS PÚBLICOS ===
+    UPROPERTY(BlueprintAssignable)
+    FOnNPCBehaviorChanged OnBehaviorChanged;
+
+    UPROPERTY(BlueprintAssignable)
+    FOnNPCRelationshipChanged OnRelationshipChanged;
+
+    UPROPERTY(BlueprintAssignable)
+    FOnNPCMemoryUpdated OnMemoryUpdated;
+
+    // === CONFIGURAÇÃO BÁSICA ===
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Identity")
+    FString NPCName; // Nome único do NPC
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Identity")
+    FString NPCID; // ID único gerado automaticamente
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Identity")
+    EDinosaurSpecies Species = EDinosaurSpecies::Compsognathus;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Identity")
+    ENPCLifeStage LifeStage = ENPCLifeStage::Adult;
+
+    // === PERSONALIDADE AVANÇADA ===
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Advanced Personality")
+    FNPCAdvancedPersonality AdvancedPersonality;
+
+    // === SISTEMA DE MEMÓRIA AVANÇADO ===
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Advanced Memory")
+    TArray<FNPCAdvancedMemory> MemoryBank;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Advanced Memory")
+    int32 MaxMemories = 100;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Advanced Memory")
+    float MemoryDecayRate = 0.001f; // Por segundo
+
+    // === SISTEMA DE RELAÇÕES AVANÇADO ===
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Advanced Relationships")
+    TMap<FString, FNPCAdvancedRelationship> Relationships; // Key = Actor ID
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Advanced Relationships")
+    int32 MaxRelationships = 50;
+
+    // === ROTINAS DIÁRIAS AVANÇADAS ===
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Advanced Routines")
+    TArray<FNPCAdvancedRoutine> DailyRoutines;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Advanced Routines")
+    FNPCAdvancedRoutine* CurrentRoutine = nullptr;
+
+    // === ESTADO COMPORTAMENTAL ===
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Behavior State")
+    EDinosaurBehaviorState CurrentBehaviorState = EDinosaurBehaviorState::Idle;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Behavior State")
+    EDinosaurBehaviorState PreviousBehaviorState = EDinosaurBehaviorState::Idle;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Behavior State")
+    FDateTime LastBehaviorChange;
+
+    // === NECESSIDADES E MOTIVAÇÕES ===
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Needs")
+    FDinosaurNeeds CurrentNeeds;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Needs")
+    TMap<FString, float> CustomMotivations; // Motivações específicas do indivíduo
+
+    // === INTEGRAÇÃO COM BEHAVIOR TREES ===
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI Integration")
+    UBehaviorTree* BehaviorTreeAsset;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI Integration")
+    UBlackboardAsset* BlackboardAsset;
+
+    // === CONFIGURAÇÕES DE PERFORMANCE ===
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float UpdateFrequency = 0.1f; // Segundos entre updates
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float MemoryUpdateFrequency = 1.0f; // Segundos entre updates de memória
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float RelationshipUpdateFrequency = 0.5f; // Segundos entre updates de relações
+
+private:
+    // Timers internos
+    float LastUpdate = 0.0f;
+    float LastMemoryUpdate = 0.0f;
+    float LastRelationshipUpdate = 0.0f;
+
+    // Cache de referências
+    UPROPERTY()
+    AAIController* CachedAIController = nullptr;
+
+    UPROPERTY()
+    UBlackboardComponent* CachedBlackboard = nullptr;
+
+public:
+    // === FUNÇÕES PRINCIPAIS DE PERSONALIDADE ===
+    
+    UFUNCTION(BlueprintCallable, Category = "Advanced Personality")
+    void InitializePersonality(EDinosaurSpecies InSpecies, ENPCLifeStage InLifeStage);
+
+    UFUNCTION(BlueprintCallable, Category = "Advanced Personality")
+    float GetPersonalityTrait(const FString& TraitName) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Advanced Personality")
+    void ModifyPersonalityTrait(const FString& TraitName, float Delta, const FString& Reason);
+
+    UFUNCTION(BlueprintCallable, Category = "Advanced Personality")
+    void SetMood(ENPCMoodState NewMood, float Intensity, const FString& Reason);
+
+    UFUNCTION(BlueprintCallable, Category = "Advanced Personality")
+    ENPCMoodState GetCurrentMood() const { return AdvancedPersonality.CurrentMood; }
+
+    // === FUNÇÕES DE MEMÓRIA AVANÇADA ===
+    
+    UFUNCTION(BlueprintCallable, Category = "Advanced Memory")
+    void CreateMemory(const FString& Type, const FString& Description, FVector Location, 
+                     AActor* RelatedActor = nullptr, float EmotionalWeight = 0.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Advanced Memory")
+    TArray<FNPCAdvancedMemory> GetMemoriesByType(const FString& Type) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Advanced Memory")
+    TArray<FNPCAdvancedMemory> GetMemoriesOfActor(AActor* Actor) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Advanced Memory")
+    FNPCAdvancedMemory* GetStrongestMemory(const FString& Type);
+
+    UFUNCTION(BlueprintCallable, Category = "Advanced Memory")
+    void ReinforceMemory(const FString& MemoryID, float Reinforcement = 0.1f);
+
+    UFUNCTION(BlueprintCallable, Category = "Advanced Memory")
+    bool HasMemoryOf(AActor* Actor, const FString& Type = TEXT("")) const;
+
+    // === FUNÇÕES DE RELAÇÕES AVANÇADAS ===
+    
+    UFUNCTION(BlueprintCallable, Category = "Advanced Relationships")
+    void UpdateRelationship(AActor* Actor, ENPCInteractionType InteractionType, 
+                           float StrengthDelta, const FString& Context);
+
+    UFUNCTION(BlueprintCallable, Category = "Advanced Relationships")
+    FNPCAdvancedRelationship* GetRelationship(AActor* Actor);
+
+    UFUNCTION(BlueprintCallable, Category = "Advanced Relationships")
+    TArray<AActor*> GetActorsWithRelationship(ENPCRelationshipType RelationType) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Advanced Relationships")
+    float GetRelationshipStrength(AActor* Actor) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Advanced Relationships")
+    bool IsPackMember(AActor* Actor) const;
+
+    // === FUNÇÕES DE ROTINAS AVANÇADAS ===
+    
+    UFUNCTION(BlueprintCallable, Category = "Advanced Routines")
+    void AddDailyRoutine(const FNPCAdvancedRoutine& NewRoutine);
+
+    UFUNCTION(BlueprintCallable, Category = "Advanced Routines")
+    void RemoveDailyRoutine(const FString& RoutineID);
+
+    UFUNCTION(BlueprintCallable, Category = "Advanced Routines")
+    FNPCAdvancedRoutine* GetCurrentRoutine() const { return CurrentRoutine; }
+
+    UFUNCTION(BlueprintCallable, Category = "Advanced Routines")
+    void InterruptCurrentRoutine(const FString& Reason);
+
+    // === FUNÇÕES DE COMPORTAMENTO ===
+    
+    UFUNCTION(BlueprintCallable, Category = "Behavior")
+    void SetBehaviorState(EDinosaurBehaviorState NewState, const FString& Reason);
+
+    UFUNCTION(BlueprintCallable, Category = "Behavior")
+    bool CanPerformBehavior(EDinosaurBehaviorState Behavior) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Behavior")
+    void ReactToEvent(const FString& EventType, AActor* Instigator, FVector Location, 
+                     float Intensity = 1.0f);
+
+    // === FUNÇÕES DE INTEGRAÇÃO COM BLACKBOARD ===
+    
+    UFUNCTION(BlueprintCallable, Category = "AI Integration")
+    void UpdateBlackboard();
+
+    UFUNCTION(BlueprintCallable, Category = "AI Integration")
+    void SyncPersonalityToBlackboard();
+
+    UFUNCTION(BlueprintCallable, Category = "AI Integration")
+    void SyncMemoryToBlackboard();
+
+    UFUNCTION(BlueprintCallable, Category = "AI Integration")
+    void SyncRelationshipsToBlackboard();
+
+private:
+    // Funções internas de processamento
+    void ProcessPersonalityEvolution(float DeltaTime);
+    void ProcessMemoryDecay(float DeltaTime);
+    void ProcessRelationshipDecay(float DeltaTime);
+    void ProcessDailyRoutines();
+    void ProcessEmotionalStates(float DeltaTime);
+    
+    // Funções auxiliares
+    FString GenerateUniqueID() const;
+    FString GetActorID(AActor* Actor) const;
+    void CleanupOldMemories();
+    void CleanupOldRelationships();
+    
+    // Funções de inicialização
+    void SetupDefaultRoutines();
+    void SetupSpeciesPersonality(EDinosaurSpecies InSpecies);
+    void SetupLifeStageModifiers(ENPCLifeStage InLifeStage);
+};
+
+/**
+ * NPC Behavior Manager - Subsistema mundial para coordenar todos os NPCs
+ */
+UCLASS()
+class TRANSPERSONALGAME_API UNPCBehaviorWorldSubsystem : public UWorldSubsystem
+{
+    GENERATED_BODY()
+
+public:
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+
+    // Registro de NPCs
+    UFUNCTION(BlueprintCallable, Category = "NPC Management")
+    void RegisterNPC(UAdvancedNPCBehaviorAgent* NPCAgent);
+
+    UFUNCTION(BlueprintCallable, Category = "NPC Management")
+    void UnregisterNPC(UAdvancedNPCBehaviorAgent* NPCAgent);
+
+    // Consultas globais
+    UFUNCTION(BlueprintCallable, Category = "NPC Management")
+    TArray<UAdvancedNPCBehaviorAgent*> GetNPCsInRadius(FVector Location, float Radius) const;
+
+    UFUNCTION(BlueprintCallable, Category = "NPC Management")
+    TArray<UAdvancedNPCBehaviorAgent*> GetNPCsBySpecies(EDinosaurSpecies Species) const;
+
+    // Eventos globais
+    UFUNCTION(BlueprintCallable, Category = "NPC Management")
+    void BroadcastGlobalEvent(const FString& EventType, FVector Location, float Radius, 
+                             AActor* Instigator = nullptr, float Intensity = 1.0f);
+
+    // Estatísticas
+    UFUNCTION(BlueprintCallable, Category = "NPC Management")
+    int32 GetTotalNPCCount() const { return RegisteredNPCs.Num(); }
+
+    UFUNCTION(BlueprintCallable, Category = "NPC Management")
+    TMap<EDinosaurSpecies, int32> GetSpeciesDistribution() const;
+
+private:
+    UPROPERTY()
+    TArray<UAdvancedNPCBehaviorAgent*> RegisteredNPCs;
+
+    // Timer para limpeza periódica
+    FTimerHandle CleanupTimerHandle;
+    void PerformCleanup();
+};
