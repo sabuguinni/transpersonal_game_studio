@@ -3,84 +3,92 @@
 #include "CoreMinimal.h"
 #include "Engine/Engine.h"
 #include "Animation/AnimInstance.h"
-#include "PoseSearch/PoseSearch.h"
 #include "Components/ActorComponent.h"
 #include "AnimationSystemManager.generated.h"
 
 UENUM(BlueprintType)
-enum class ECharacterType : uint8
+enum class ECharacterMovementState : uint8
 {
-    Player          UMETA(DisplayName = "Player Character"),
-    DinosaurSmall   UMETA(DisplayName = "Small Dinosaur"),
-    DinosaurMedium  UMETA(DisplayName = "Medium Dinosaur"),
-    DinosaurLarge   UMETA(DisplayName = "Large Dinosaur"),
-    DinosaurFlying  UMETA(DisplayName = "Flying Dinosaur")
+    Idle,
+    Walking,
+    Running,
+    Crouching,
+    Crawling,
+    Climbing,
+    Swimming,
+    Falling,
+    Landing,
+    Hiding,
+    Injured,
+    Dying
 };
 
 UENUM(BlueprintType)
-enum class EMovementState : uint8
+enum class EDinosaurBehaviorState : uint8
 {
-    Idle            UMETA(DisplayName = "Idle"),
-    Walking         UMETA(DisplayName = "Walking"),
-    Running         UMETA(DisplayName = "Running"),
-    Sneaking        UMETA(DisplayName = "Sneaking"),
-    Climbing        UMETA(DisplayName = "Climbing"),
-    Swimming        UMETA(DisplayName = "Swimming"),
-    Falling         UMETA(DisplayName = "Falling"),
-    Landing         UMETA(DisplayName = "Landing"),
-    Jumping         UMETA(DisplayName = "Jumping"),
-    Crouching       UMETA(DisplayName = "Crouching"),
-    Injured         UMETA(DisplayName = "Injured"),
-    Exhausted       UMETA(DisplayName = "Exhausted"),
-    Afraid          UMETA(DisplayName = "Afraid"),
-    Alert           UMETA(DisplayName = "Alert")
+    Idle,
+    Grazing,
+    Drinking,
+    Hunting,
+    Stalking,
+    Charging,
+    Feeding,
+    Sleeping,
+    Patrolling,
+    Fleeing,
+    Fighting,
+    Mating,
+    Nesting
 };
 
 UENUM(BlueprintType)
-enum class EEmotionalState : uint8
+enum class EAnimationPriority : uint8
 {
-    Neutral         UMETA(DisplayName = "Neutral"),
-    Fearful         UMETA(DisplayName = "Fearful"),
-    Cautious        UMETA(DisplayName = "Cautious"),
-    Confident       UMETA(DisplayName = "Confident"),
-    Exhausted       UMETA(DisplayName = "Exhausted"),
-    Injured         UMETA(DisplayName = "Injured"),
-    Curious         UMETA(DisplayName = "Curious"),
-    Aggressive      UMETA(DisplayName = "Aggressive")
+    Low = 0,
+    Normal = 1,
+    High = 2,
+    Critical = 3
 };
 
 USTRUCT(BlueprintType)
-struct FAnimationProfile
+struct FCharacterAnimationProfile
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    ECharacterType CharacterType = ECharacterType::Player;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Profile")
+    FString CharacterName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float MovementSpeed = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Profile")
+    float MovementSpeed;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float AnimationIntensity = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Profile")
+    float StepLength;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float FearLevel = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Profile")
+    float BodyWeight;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float ConfidenceLevel = 0.5f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Profile")
+    bool bIsInjured;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float InjuryLevel = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Profile")
+    float FearLevel;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float ExhaustionLevel = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Profile")
+    float ExhaustionLevel;
+
+    FCharacterAnimationProfile()
+    {
+        CharacterName = TEXT("Default");
+        MovementSpeed = 1.0f;
+        StepLength = 1.0f;
+        BodyWeight = 1.0f;
+        bIsInjured = false;
+        FearLevel = 0.0f;
+        ExhaustionLevel = 0.0f;
+    }
 };
 
-/**
- * Sistema central de gestão de animações para o jogo pré-histórico
- * Implementa Motion Matching, IK de pés e estados emocionais
- */
-UCLASS(ClassGroup=(Animation), meta=(BlueprintSpawnableComponent))
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UAnimationSystemManager : public UActorComponent
 {
     GENERATED_BODY()
@@ -92,68 +100,60 @@ protected:
     virtual void BeginPlay() override;
 
 public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, 
-                              FActorComponentTickFunction* ThisTickFunction) override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // Motion Matching Configuration
+    // Character Animation Management
+    UFUNCTION(BlueprintCallable, Category = "Animation System")
+    void SetCharacterMovementState(ECharacterMovementState NewState);
+
+    UFUNCTION(BlueprintCallable, Category = "Animation System")
+    ECharacterMovementState GetCharacterMovementState() const { return CurrentMovementState; }
+
+    UFUNCTION(BlueprintCallable, Category = "Animation System")
+    void UpdateCharacterProfile(const FCharacterAnimationProfile& NewProfile);
+
+    // Dinosaur Animation Management
+    UFUNCTION(BlueprintCallable, Category = "Animation System")
+    void SetDinosaurBehaviorState(EDinosaurBehaviorState NewState);
+
+    UFUNCTION(BlueprintCallable, Category = "Animation System")
+    EDinosaurBehaviorState GetDinosaurBehaviorState() const { return CurrentBehaviorState; }
+
+    // Motion Matching Integration
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    void InitializeMotionMatching();
+
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    void UpdateMotionMatchingQuery(FVector Velocity, FVector Acceleration, float TurnRate);
+
+    // IK System Integration
+    UFUNCTION(BlueprintCallable, Category = "IK System")
+    void EnableFootIK(bool bEnable);
+
+    UFUNCTION(BlueprintCallable, Category = "IK System")
+    void UpdateFootIKTargets(FVector LeftFootTarget, FVector RightFootTarget);
+
+protected:
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Animation State")
+    ECharacterMovementState CurrentMovementState;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Animation State")
+    EDinosaurBehaviorState CurrentBehaviorState;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Profile")
+    FCharacterAnimationProfile CharacterProfile;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    class UPoseSearchDatabase* PlayerLocomotionDatabase;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    class UPoseSearchDatabase* DinosaurLocomotionDatabase;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    class UPoseSearchSchema* DefaultSchema;
-
-    // IK Configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK System")
-    float FootIKRange = 50.0f;
+    bool bUseMotionMatching;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK System")
-    float FootIKInterpSpeed = 15.0f;
+    bool bUseFootIK;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK System")
-    bool bEnableFootIK = true;
-
-    // Animation Profiles
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Profiles")
-    TMap<ECharacterType, FAnimationProfile> CharacterProfiles;
-
-    // Current State
-    UPROPERTY(BlueprintReadOnly, Category = "Current State")
-    EMovementState CurrentMovementState = EMovementState::Idle;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Current State")
-    EEmotionalState CurrentEmotionalState = EEmotionalState::Neutral;
-
-    // Animation Functions
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void SetMovementState(EMovementState NewState);
-
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void SetEmotionalState(EEmotionalState NewState);
-
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void UpdateAnimationProfile(const FAnimationProfile& NewProfile);
-
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    FAnimationProfile GetCurrentAnimationProfile() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void TriggerFearResponse(float FearIntensity, float Duration);
-
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void TriggerInjuryAnimation(float InjurySeverity);
-
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void UpdateExhaustion(float ExhaustionLevel);
+    float FootIKInterpSpeed;
 
 private:
-    FAnimationProfile CurrentProfile;
-    float FearResponseTimer = 0.0f;
-    float FearResponseDuration = 0.0f;
-    float OriginalFearLevel = 0.0f;
-
-    void UpdateFearResponse(float DeltaTime);
-    void ApplyEmotionalStateToProfile();
+    void InitializeAnimationSystems();
+    void UpdateAnimationBlending(float DeltaTime);
+    void ProcessMovementStateTransitions();
 };
