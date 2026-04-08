@@ -1,115 +1,123 @@
 #include "AnimationSystemCore.h"
-#include "Animation/PoseSearch/PoseSearchDatabase.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "Components/SkeletalMeshComponent.h"
-#include "Engine/Engine.h"
+#include "Animation/AnimInstance.h"
+#include "PoseSearch/PoseSearchDatabase.h"
+
+DEFINE_LOG_CATEGORY(LogAnimationSystem);
 
 UAnimationSystemCore::UAnimationSystemCore()
 {
-    CurrentAnimationState = ECharacterAnimationState::Idle_Calm;
-    StateTransitionTime = 0.0f;
-    EmotionalTransitionProgress = 0.0f;
+    CurrentContext = EMovementContext::Exploration;
+    CurrentEmotionalState = ECharacterEmotionalState::Calm;
+    CurrentFearLevel = 0.0f;
+    CurrentExhaustion = 0.0f;
+
+    // Initialize default character profile for paleontologist
+    FCharacterAnimationProfile PaleontologistProfile;
+    PaleontologistProfile.CharacterName = TEXT("Dr_Paleontologist");
+    PaleontologistProfile.FearThreshold = 0.6f; // Lower threshold - gets scared easier
+    PaleontologistProfile.ExhaustionRate = 0.15f; // Gets tired faster
+    PaleontologistProfile.RecoveryRate = 0.03f; // Recovers slower
+    
+    // Contextual speed modifiers for a scientist, not an athlete
+    PaleontologistProfile.ContextualSpeedModifiers[EMovementContext::Exploration] = 0.9f;
+    PaleontologistProfile.ContextualSpeedModifiers[EMovementContext::Stealth] = 0.4f;
+    PaleontologistProfile.ContextualSpeedModifiers[EMovementContext::Escape] = 1.3f; // Adrenaline helps
+    PaleontologistProfile.ContextualSpeedModifiers[EMovementContext::Interaction] = 0.7f;
+    PaleontologistProfile.ContextualSpeedModifiers[EMovementContext::Combat] = 0.8f; // Not a fighter
+    PaleontologistProfile.ContextualSpeedModifiers[EMovementContext::Observation] = 0.05f; // Very slow, careful observation
+    
+    CharacterProfiles.Add(TEXT("Dr_Paleontologist"), PaleontologistProfile);
 }
 
-void UAnimationSystemCore::InitializeForCharacter(USkeletalMeshComponent* SkeletalMesh, const FCharacterAnimationProfile& Profile)
+void UAnimationSystemCore::InitializeForCharacter(ACharacter* Character)
 {
-    if (!SkeletalMesh)
+    if (!Character)
     {
-        UE_LOG(LogAnimation, Warning, TEXT("AnimationSystemCore: Cannot initialize with null SkeletalMesh"));
+        UE_LOG(LogAnimationSystem, Error, TEXT("Cannot initialize animation system: Character is null"));
         return;
     }
-    
-    CurrentProfile = Profile;
-    CurrentAnimationState = ECharacterAnimationState::Idle_Calm;
-    StateTransitionTime = 0.0f;
-    EmotionalTransitionProgress = 0.0f;
-    
-    UE_LOG(LogAnimation, Log, TEXT("AnimationSystemCore: Initialized for character with emotional state: %d"), 
-           (int32)CurrentProfile.CurrentEmotionalState);
+
+    UE_LOG(LogAnimationSystem, Log, TEXT("Initializing animation system for character: %s"), *Character->GetName());
+
+    // Set default animation profile
+    if (CharacterProfiles.Contains(TEXT("Dr_Paleontologist")))
+    {
+        UE_LOG(LogAnimationSystem, Log, TEXT("Applied paleontologist animation profile"));
+    }
 }
 
-void UAnimationSystemCore::UpdateAnimationState(ECharacterAnimationState NewState, float DeltaTime)
+void UAnimationSystemCore::UpdateAnimationContext(EMovementContext NewContext, ECharacterEmotionalState EmotionalState)
 {
-    if (CurrentAnimationState != NewState)
+    EMovementContext PreviousContext = CurrentContext;
+    CurrentContext = NewContext;
+    CurrentEmotionalState = EmotionalState;
+
+    // Update fear level based on context
+    switch (NewContext)
     {
-        // Start transition to new state
-        CurrentAnimationState = NewState;
-        StateTransitionTime = 0.0f;
+        case EMovementContext::Escape:
+            CurrentFearLevel = FMath::Clamp(CurrentFearLevel + 0.3f, 0.0f, 1.0f);
+            break;
+        case EMovementContext::Stealth:
+            CurrentFearLevel = FMath::Clamp(CurrentFearLevel + 0.1f, 0.0f, 1.0f);
+            break;
+        case EMovementContext::Observation:
+            CurrentFearLevel = FMath::Clamp(CurrentFearLevel - 0.05f, 0.0f, 1.0f);
+            break;
+        case EMovementContext::Exploration:
+            CurrentFearLevel = FMath::Clamp(CurrentFearLevel - 0.02f, 0.0f, 1.0f);
+            break;
+    }
+
+    UE_LOG(LogAnimationSystem, Log, TEXT("Animation context changed from %d to %d. Fear level: %f"), 
+           (int32)PreviousContext, (int32)NewContext, CurrentFearLevel);
+}
+
+float UAnimationSystemCore::CalculateBlendTime(EMovementContext FromContext, EMovementContext ToContext)
+{
+    // Quick transitions for fear responses
+    if (ToContext == EMovementContext::Escape)
+    {
+        return 0.1f; // Immediate fear response
+    }
+
+    // Slower transitions when calming down
+    if (FromContext == EMovementContext::Escape && ToContext == EMovementContext::Exploration)
+    {
+        return 0.8f; // Takes time to calm down
+    }
+
+    // Stealth requires careful transitions
+    if (ToContext == EMovementContext::Stealth || FromContext == EMovementContext::Stealth)
+    {
+        return 0.4f;
+    }
+
+    // Default blend time
+    return 0.25f;
+}
+
+FVector UAnimationSystemCore::CalculateFootPlantingOffset(const FVector& GroundNormal, const FVector& FootLocation)
+{
+    // Calculate IK offset for foot placement on uneven terrain
+    FVector UpVector = FVector::UpVector;
+    FVector Offset = FVector::ZeroVector;
+
+    // Project foot location onto ground plane
+    float DotProduct = FVector::DotProduct(GroundNormal, UpVector);
+    
+    if (DotProduct > 0.1f) // Valid ground normal
+    {
+        // Calculate offset to align foot with ground
+        FVector GroundPoint = FootLocation - FVector::DotProduct(FootLocation - FVector::ZeroVector, GroundNormal) * GroundNormal;
+        Offset = GroundPoint - FootLocation;
         
-        UE_LOG(LogAnimation, Verbose, TEXT("AnimationSystemCore: Transitioning to state: %d"), (int32)NewState);
+        // Limit offset to reasonable values
+        Offset = Offset.GetClampedToMaxSize(20.0f); // Max 20cm offset
     }
-    
-    StateTransitionTime += DeltaTime;
-    UpdateEmotionalTransition(DeltaTime);
-}
 
-void UAnimationSystemCore::UpdateEmotionalState(EEmotionalState NewState, float TransitionTime)
-{
-    if (CurrentProfile.CurrentEmotionalState != NewState)
-    {
-        CurrentProfile.CurrentEmotionalState = NewState;
-        EmotionalTransitionProgress = 0.0f;
-        
-        UE_LOG(LogAnimation, Log, TEXT("AnimationSystemCore: Emotional state changed to: %d"), (int32)NewState);
-    }
-}
-
-UPoseSearchDatabase* UAnimationSystemCore::GetCurrentMotionDatabase() const
-{
-    return CurrentProfile.MotionDatabase;
-}
-
-float UAnimationSystemCore::CalculateEmotionalBlendWeight(EEmotionalState TargetState) const
-{
-    if (CurrentProfile.CurrentEmotionalState == TargetState)
-    {
-        return FMath::Clamp(EmotionalTransitionProgress, 0.0f, 1.0f);
-    }
-    
-    // Calculate cross-emotional influences
-    switch (CurrentProfile.CurrentEmotionalState)
-    {
-        case EEmotionalState::Terrified:
-            if (TargetState == EEmotionalState::Anxious) return 0.7f;
-            break;
-            
-        case EEmotionalState::Anxious:
-            if (TargetState == EEmotionalState::Calm) return 0.3f;
-            if (TargetState == EEmotionalState::Terrified) return 0.4f;
-            break;
-            
-        case EEmotionalState::Exhausted:
-            // Exhaustion affects all movements
-            return FMath::Lerp(0.2f, 0.8f, CurrentProfile.FatigueLevel);
-            
-        default:
-            break;
-    }
-    
-    return 0.0f;
-}
-
-void UAnimationSystemCore::UpdateEmotionalTransition(float DeltaTime)
-{
-    // Emotional transitions are influenced by fear and fatigue levels
-    float TransitionSpeed = 1.0f;
-    
-    // High fear makes emotional changes faster
-    TransitionSpeed *= (1.0f + CurrentProfile.FearLevel * 2.0f);
-    
-    // High fatigue makes emotional changes slower
-    TransitionSpeed *= (1.0f - CurrentProfile.FatigueLevel * 0.5f);
-    
-    EmotionalTransitionProgress = FMath::Clamp(
-        EmotionalTransitionProgress + (DeltaTime * TransitionSpeed), 
-        0.0f, 
-        1.0f
-    );
-}
-
-ECharacterAnimationState UAnimationSystemCore::SelectOptimalAnimationState() const
-{
-    // This would contain logic to select the best animation state
-    // based on current emotional state, fatigue, fear, etc.
-    // For now, return current state
-    return CurrentAnimationState;
+    return Offset;
 }
