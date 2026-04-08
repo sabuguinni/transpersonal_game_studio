@@ -1,166 +1,244 @@
 #include "AnimationSystemManager.h"
-#include "GameFramework/Character.h"
-#include "GameFramework/CharacterMovementComponent.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Animation/AnimInstance.h"
+#include "Engine/World.h"
+#include "Kismet/GameplayStatics.h"
+#include "DrawDebugHelpers.h"
 
-UAnimationSystemManager::UAnimationSystemManager()
+AAnimationSystemManager::AAnimationSystemManager()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickGroup = TG_PrePhysics;
+    PrimaryActorTick.bCanEverTick = true;
+    
+    // Initialize default personality traits
+    PersonalityTraits.Add(TEXT("Alertness"), 0.8f);
+    PersonalityTraits.Add(TEXT("Aggression"), 0.3f);
+    PersonalityTraits.Add(TEXT("Curiosity"), 0.6f);
+    PersonalityTraits.Add(TEXT("Fearfulness"), 0.7f);
+    PersonalityTraits.Add(TEXT("Playfulness"), 0.2f);
 }
 
-void UAnimationSystemManager::BeginPlay()
+void AAnimationSystemManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Initialize personality traits based on archetype
-    switch (AnimationProfile.Archetype)
+    InitializeDefaultDatabases();
+    
+    UE_LOG(LogTemp, Warning, TEXT("Animation System Manager initialized for Transpersonal Game"));
+}
+
+void AAnimationSystemManager::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+    
+    UpdateAnimationLOD();
+    OptimizeAnimationPerformance();
+}
+
+void AAnimationSystemManager::RegisterCharacter(AActor* Character, const FString& CharacterType)
+{
+    if (!Character)
     {
-        case ECharacterArchetype::Protagonist:
-            AnimationProfile.PersonalityTraits.Add(TEXT("Caution"), 0.8f);
-            AnimationProfile.PersonalityTraits.Add(TEXT("Curiosity"), 0.7f);
-            AnimationProfile.PersonalityTraits.Add(TEXT("Determination"), 0.6f);
-            AnimationProfile.PersonalityTraits.Add(TEXT("Nervousness"), 0.5f);
-            break;
-            
-        case ECharacterArchetype::DinosaurHerbivore:
-            AnimationProfile.PersonalityTraits.Add(TEXT("Alertness"), 0.9f);
-            AnimationProfile.PersonalityTraits.Add(TEXT("Gentleness"), 0.8f);
-            AnimationProfile.PersonalityTraits.Add(TEXT("Skittishness"), 0.7f);
-            break;
-            
-        case ECharacterArchetype::DinosaurCarnivore:
-            AnimationProfile.PersonalityTraits.Add(TEXT("Confidence"), 0.8f);
-            AnimationProfile.PersonalityTraits.Add(TEXT("Predatory_Focus"), 0.9f);
-            AnimationProfile.PersonalityTraits.Add(TEXT("Territorial"), 0.7f);
-            break;
-            
-        case ECharacterArchetype::DinosaurPredator:
-            AnimationProfile.PersonalityTraits.Add(TEXT("Stealth"), 0.9f);
-            AnimationProfile.PersonalityTraits.Add(TEXT("Patience"), 0.8f);
-            AnimationProfile.PersonalityTraits.Add(TEXT("Explosive_Power"), 0.9f);
-            break;
-            
-        case ECharacterArchetype::DinosaurAmbush:
-            AnimationProfile.PersonalityTraits.Add(TEXT("Stillness"), 0.95f);
-            AnimationProfile.PersonalityTraits.Add(TEXT("Sudden_Movement"), 0.9f);
-            AnimationProfile.PersonalityTraits.Add(TEXT("Camouflage_Behavior"), 0.8f);
-            break;
+        UE_LOG(LogTemp, Error, TEXT("Attempted to register null character"));
+        return;
+    }
+
+    RegisteredCharacters.Add(Character, CharacterType);
+    
+    // Apply default personality traits based on character type
+    if (CharacterType == TEXT("Player"))
+    {
+        TMap<FString, float> PlayerTraits;
+        PlayerTraits.Add(TEXT("Alertness"), 0.9f);
+        PlayerTraits.Add(TEXT("Fearfulness"), 0.8f);
+        PlayerTraits.Add(TEXT("Curiosity"), 0.7f);
+        ApplyPersonalityToAnimation(Character, PlayerTraits);
+    }
+    else if (CharacterType.Contains(TEXT("Dinosaur")))
+    {
+        // Each dinosaur gets unique personality traits
+        TMap<FString, float> DinosaurTraits;
+        DinosaurTraits.Add(TEXT("Aggression"), FMath::RandRange(0.2f, 0.9f));
+        DinosaurTraits.Add(TEXT("Alertness"), FMath::RandRange(0.5f, 1.0f));
+        DinosaurTraits.Add(TEXT("Territoriality"), FMath::RandRange(0.3f, 0.8f));
+        ApplyPersonalityToAnimation(Character, DinosaurTraits);
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("Registered character %s as type %s"), 
+           *Character->GetName(), *CharacterType);
+}
+
+void AAnimationSystemManager::UnregisterCharacter(AActor* Character)
+{
+    if (RegisteredCharacters.Contains(Character))
+    {
+        RegisteredCharacters.Remove(Character);
+        UE_LOG(LogTemp, Log, TEXT("Unregistered character %s"), *Character->GetName());
     }
 }
 
-void UAnimationSystemManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void AAnimationSystemManager::SetCharacterAnimationState(AActor* Character, const FString& NewState)
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    if (!RegisteredCharacters.Contains(Character))
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Character %s not registered with Animation System"), 
+               *Character->GetName());
+        return;
+    }
+
+    // Broadcast state change
+    OnAnimationStateChanged.Broadcast(Character, NewState);
     
-    ProcessEmotionalTransitions(DeltaTime);
-    UpdateAnimationParameters();
+    UE_LOG(LogTemp, Log, TEXT("Character %s animation state changed to %s"), 
+           *Character->GetName(), *NewState);
 }
 
-void UAnimationSystemManager::UpdateEmotionalState(EEmotionalState NewState, float Intensity)
+UPoseSearchDatabase* AAnimationSystemManager::GetAnimationDatabase(const FString& CharacterType, const FString& AnimationType)
 {
-    if (AnimationProfile.CurrentEmotionalState != NewState)
+    if (CharacterType == TEXT("Player"))
     {
-        AnimationProfile.CurrentEmotionalState = NewState;
-        EmotionalStateIntensity = FMath::Clamp(Intensity, 0.0f, 1.0f);
-        StateTransitionTimer = 0.0f;
-        
-        // Log state change for debugging
-        UE_LOG(LogTemp, Log, TEXT("Animation State Changed: %d with intensity %f"), 
-               (int32)NewState, EmotionalStateIntensity);
+        if (AnimationType == TEXT("Locomotion"))
+            return PlayerLocomotionDatabase;
+        else if (AnimationType == TEXT("Combat"))
+            return PlayerCombatDatabase;
+        else if (AnimationType == TEXT("Interaction"))
+            return PlayerInteractionDatabase;
     }
-}
-
-void UAnimationSystemManager::ApplyPersonalityModifier(const FString& TraitName, float Value)
-{
-    AnimationProfile.PersonalityTraits.Add(TraitName, FMath::Clamp(Value, 0.0f, 1.0f));
-}
-
-float UAnimationSystemManager::GetMovementStyleMultiplier() const
-{
-    float BaseMultiplier = 1.0f;
-    
-    // Apply emotional state modifiers
-    switch (AnimationProfile.CurrentEmotionalState)
+    else if (CharacterType.Contains(TEXT("Dinosaur")))
     {
-        case EEmotionalState::Fearful:
-            BaseMultiplier *= 0.7f; // Slower, more careful movement
-            break;
-        case EEmotionalState::Panicked:
-            BaseMultiplier *= 1.3f; // Faster but less controlled
-            break;
-        case EEmotionalState::Alert:
-            BaseMultiplier *= 0.9f; // Slightly slower, more deliberate
-            break;
-        case EEmotionalState::Aggressive:
-            BaseMultiplier *= 1.1f; // More forceful movement
-            break;
-    }
-    
-    // Apply personality trait modifiers
-    if (const float* CautionValue = AnimationProfile.PersonalityTraits.Find(TEXT("Caution")))
-    {
-        BaseMultiplier *= FMath::Lerp(1.2f, 0.8f, *CautionValue);
-    }
-    
-    if (const float* ConfidenceValue = AnimationProfile.PersonalityTraits.Find(TEXT("Confidence")))
-    {
-        BaseMultiplier *= FMath::Lerp(0.9f, 1.1f, *ConfidenceValue);
-    }
-    
-    return BaseMultiplier;
-}
-
-bool UAnimationSystemManager::ShouldUseCautiousMovement() const
-{
-    // High caution characters always use cautious movement
-    if (const float* CautionValue = AnimationProfile.PersonalityTraits.Find(TEXT("Caution")))
-    {
-        if (*CautionValue > 0.7f) return true;
-    }
-    
-    // Fearful or alert states trigger cautious movement
-    return AnimationProfile.CurrentEmotionalState == EEmotionalState::Fearful ||
-           AnimationProfile.CurrentEmotionalState == EEmotionalState::Alert;
-}
-
-void UAnimationSystemManager::UpdateAnimationParameters()
-{
-    if (ACharacter* Character = Cast<ACharacter>(GetOwner()))
-    {
-        if (USkeletalMeshComponent* MeshComp = Character->GetMesh())
+        if (AnimationType == TEXT("Locomotion"))
         {
-            if (UAnimInstance* AnimInstance = MeshComp->GetAnimInstance())
+            if (DinosaurLocomotionDatabases.Contains(CharacterType))
+                return DinosaurLocomotionDatabases[CharacterType];
+        }
+        else if (AnimationType == TEXT("Behavior"))
+        {
+            if (DinosaurBehaviorDatabases.Contains(CharacterType))
+                return DinosaurBehaviorDatabases[CharacterType];
+        }
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("No animation database found for %s - %s"), 
+           *CharacterType, *AnimationType);
+    return nullptr;
+}
+
+void AAnimationSystemManager::ApplyPersonalityToAnimation(AActor* Character, const TMap<FString, float>& Traits)
+{
+    if (!Character)
+        return;
+
+    USkeletalMeshComponent* MeshComp = Character->FindComponentByClass<USkeletalMeshComponent>();
+    if (!MeshComp || !MeshComp->GetAnimInstance())
+        return;
+
+    // Store traits for this character (simplified - in real implementation would use character-specific storage)
+    for (const auto& Trait : Traits)
+    {
+        PersonalityTraits.Add(Trait.Key, Trait.Value);
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("Applied personality traits to character %s"), *Character->GetName());
+}
+
+float AAnimationSystemManager::GetPersonalityInfluence(const FString& TraitName, float BaseValue)
+{
+    if (PersonalityTraits.Contains(TraitName))
+    {
+        float TraitValue = PersonalityTraits[TraitName];
+        return BaseValue * TraitValue;
+    }
+    
+    return BaseValue;
+}
+
+void AAnimationSystemManager::UpdateAnimationLOD()
+{
+    // Get player location for distance calculations
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    if (!PlayerPawn)
+        return;
+
+    FVector PlayerLocation = PlayerPawn->GetActorLocation();
+
+    // Update LOD for all registered characters
+    for (const auto& CharacterPair : RegisteredCharacters)
+    {
+        AActor* Character = CharacterPair.Key;
+        if (!Character)
+            continue;
+
+        float Distance = FVector::Dist(PlayerLocation, Character->GetActorLocation());
+        
+        USkeletalMeshComponent* MeshComp = Character->FindComponentByClass<USkeletalMeshComponent>();
+        if (MeshComp)
+        {
+            // Adjust animation quality based on distance
+            if (Distance > AnimationLODDistance * 2.0f)
             {
-                // Set animation parameters that can be read by Animation Blueprints
-                AnimInstance->SetRootMotionMode(ERootMotionMode::RootMotionFromEverything);
-                
-                // Update custom animation variables
-                float MovementMultiplier = GetMovementStyleMultiplier();
-                bool bCautiousMovement = ShouldUseCautiousMovement();
-                
-                // These would be exposed in the Animation Blueprint
-                // AnimInstance->SetFloatValue(TEXT("MovementStyleMultiplier"), MovementMultiplier);
-                // AnimInstance->SetBoolValue(TEXT("bUseCautiousMovement"), bCautiousMovement);
+                // Lowest quality - minimal updates
+                MeshComp->SetUpdateAnimationInEditor(false);
+            }
+            else if (Distance > AnimationLODDistance)
+            {
+                // Medium quality
+                MeshComp->SetUpdateAnimationInEditor(true);
+            }
+            else
+            {
+                // High quality - full updates
+                MeshComp->SetUpdateAnimationInEditor(true);
             }
         }
     }
 }
 
-void UAnimationSystemManager::ProcessEmotionalTransitions(float DeltaTime)
+void AAnimationSystemManager::OptimizeAnimationPerformance()
 {
-    StateTransitionTimer += DeltaTime;
+    // Count active animations
+    int32 ActiveAnimations = 0;
     
-    // Gradually reduce emotional intensity over time
-    if (StateTransitionTimer > 2.0f) // 2 seconds before starting to calm down
+    for (const auto& CharacterPair : RegisteredCharacters)
     {
-        EmotionalStateIntensity = FMath::FInterpTo(EmotionalStateIntensity, 0.3f, DeltaTime, 0.5f);
-        
-        // Return to calm state if intensity is low enough
-        if (EmotionalStateIntensity < 0.4f && AnimationProfile.CurrentEmotionalState != EEmotionalState::Calm)
+        AActor* Character = CharacterPair.Key;
+        if (!Character)
+            continue;
+
+        USkeletalMeshComponent* MeshComp = Character->FindComponentByClass<USkeletalMeshComponent>();
+        if (MeshComp && MeshComp->IsPlaying())
         {
-            AnimationProfile.CurrentEmotionalState = EEmotionalState::Calm;
-            UE_LOG(LogTemp, Log, TEXT("Character returned to calm state"));
+            ActiveAnimations++;
         }
     }
+
+    // If we exceed max simultaneous animations, start culling distant ones
+    if (ActiveAnimations > MaxSimultaneousAnimations)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Animation performance optimization triggered: %d active animations"), 
+               ActiveAnimations);
+        // Implementation would prioritize closer characters
+    }
+}
+
+bool AAnimationSystemManager::IsCharacterInRange(AActor* Character, float Range)
+{
+    if (!Character)
+        return false;
+
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    if (!PlayerPawn)
+        return false;
+
+    float Distance = FVector::Dist(PlayerPawn->GetActorLocation(), Character->GetActorLocation());
+    return Distance <= Range;
+}
+
+void AAnimationSystemManager::InitializeDefaultDatabases()
+{
+    // Initialize default database mappings
+    // These would be set up in Blueprint or loaded from data assets
+    
+    UE_LOG(LogTemp, Log, TEXT("Initializing default animation databases"));
+    
+    // Note: Actual database assets would be assigned in Blueprint
+    // This is the C++ foundation for the system
 }
