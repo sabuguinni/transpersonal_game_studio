@@ -1,138 +1,88 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
+#include "Engine/World.h"
 #include "NiagaraSystem.h"
 #include "NiagaraComponent.h"
-#include "Engine/World.h"
+#include "Components/ActorComponent.h"
 #include "VFXSystemManager.generated.h"
 
-UENUM(BlueprintType)
-enum class EVFXCategory : uint8
-{
-    Environment     UMETA(DisplayName = "Environment"),
-    Survival        UMETA(DisplayName = "Survival"),
-    Creatures       UMETA(DisplayName = "Creatures"),
-    Atmosphere      UMETA(DisplayName = "Atmosphere"),
-    Interaction     UMETA(DisplayName = "Interaction"),
-    Temporal        UMETA(DisplayName = "Temporal")
-};
-
-UENUM(BlueprintType)
-enum class EVFXPriority : uint8
-{
-    Critical        UMETA(DisplayName = "Critical"),
-    High           UMETA(DisplayName = "High"),
-    Medium         UMETA(DisplayName = "Medium"),
-    Low            UMETA(DisplayName = "Low"),
-    Background     UMETA(DisplayName = "Background")
-};
-
-USTRUCT(BlueprintType)
-struct FVFXDefinition
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString EffectName;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TSoftObjectPtr<UNiagaraSystem> NiagaraSystem;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EVFXCategory Category;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EVFXPriority Priority;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float MaxDistance = 5000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bAutoDestroy = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float LifeTime = 10.0f;
-
-    FVFXDefinition()
-    {
-        EffectName = TEXT("");
-        Category = EVFXCategory::Environment;
-        Priority = EVFXPriority::Medium;
-    }
-};
-
 /**
- * VFX System Manager
- * Centralizes all visual effects management with LOD system and performance optimization
+ * VFX System Manager - Centralized control for all visual effects
+ * Handles LOD chains, performance scaling, and contextual VFX triggers
  */
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AVFXSystemManager : public AActor
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UVFXSystemManager : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    AVFXSystemManager();
+    UVFXSystemManager();
 
 protected:
     virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // VFX Registry
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Registry")
-    TMap<FString, FVFXDefinition> VFXRegistry;
+public:
+    // Core VFX Categories
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environmental VFX")
+    TMap<FString, TSoftObjectPtr<UNiagaraSystem>> EnvironmentalEffects;
 
-    // Performance Settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Creature VFX")
+    TMap<FString, TSoftObjectPtr<UNiagaraSystem>> CreatureEffects;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival VFX")
+    TMap<FString, TSoftObjectPtr<UNiagaraSystem>> SurvivalEffects;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmospheric VFX")
+    TMap<FString, TSoftObjectPtr<UNiagaraSystem>> AtmosphericEffects;
+
+    // LOD System
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float HighQualityDistance = 2000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float MediumQualityDistance = 5000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float LowQualityDistance = 10000.0f;
+
+    // Performance Scaling
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
     int32 MaxActiveEffects = 50;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float LODDistance1 = 1000.0f; // High quality
+    float EffectCullingDistance = 15000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float LODDistance2 = 2500.0f; // Medium quality
+    // VFX Control Functions
+    UFUNCTION(BlueprintCallable, Category = "VFX Control")
+    void SpawnEnvironmentalEffect(const FString& EffectName, FVector Location, FRotator Rotation = FRotator::ZeroRotator);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float LODDistance3 = 5000.0f; // Low quality
+    UFUNCTION(BlueprintCallable, Category = "VFX Control")
+    void SpawnCreatureEffect(const FString& EffectName, AActor* TargetActor, FName SocketName = NAME_None);
 
-    // Active Effects Tracking
-    UPROPERTY()
-    TArray<UNiagaraComponent*> ActiveEffects;
+    UFUNCTION(BlueprintCallable, Category = "VFX Control")
+    void SpawnSurvivalEffect(const FString& EffectName, FVector Location, float Duration = 5.0f);
 
-    UPROPERTY()
-    TMap<EVFXPriority, int32> PriorityLimits;
+    UFUNCTION(BlueprintCallable, Category = "VFX Control")
+    void SetAtmosphericIntensity(float Intensity);
 
-public:
-    // Core VFX Functions
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    UNiagaraComponent* SpawnVFX(const FString& EffectName, const FVector& Location, const FRotator& Rotation = FRotator::ZeroRotator, AActor* AttachToActor = nullptr);
-
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void StopVFX(UNiagaraComponent* EffectComponent);
-
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void StopAllVFXByCategory(EVFXCategory Category);
-
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void RegisterVFX(const FString& EffectName, const FVFXDefinition& Definition);
-
-    // LOD Management
+    // Performance Management
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void UpdateVFXLOD();
+    void UpdateVFXLOD(FVector PlayerLocation);
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    int32 GetLODLevel(float Distance) const;
-
-    // Performance Monitoring
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    int32 GetActiveEffectsCount() const { return ActiveEffects.Num(); }
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    float GetVFXBudgetUsage() const;
+    void CullDistantEffects(FVector PlayerLocation);
 
 private:
-    void InitializePriorityLimits();
+    // Active effect tracking
+    TArray<UNiagaraComponent*> ActiveEffects;
+    
+    // Performance monitoring
+    float LastLODUpdateTime = 0.0f;
+    float LODUpdateInterval = 0.5f; // Update LOD twice per second
+
+    // Helper functions
+    ENiagaraQualityLevel GetQualityLevelForDistance(float Distance);
     void CleanupFinishedEffects();
-    bool CanSpawnEffect(EVFXPriority Priority) const;
-    void ForceCleanupLowPriorityEffects();
 };
