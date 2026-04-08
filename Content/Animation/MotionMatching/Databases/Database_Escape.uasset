@@ -1,0 +1,52 @@
+{
+    "Type": "PoseSearchDatabase",
+    "Schema": "/Game/Animation/MotionMatching/Schemas/PoseSearchSchema_Paleontologist",
+    "AnimationSequences": [
+        {
+            "Animation": "/Game/Animation/Locomotion/Escape/Run_Panicked_Forward",
+            "Tags": ["Escape", "Forward", "Panicked"],
+            "SamplingRange": {"Start": 0.1, "End": 0.9}
+        },
+        {
+            "Animation": "/Game/Animation/Locomotion/Escape/Run_Panicked_Left",
+            "Tags": ["Escape", "Left", "Panicked"],
+            "SamplingRange": {"Start": 0.1, "End": 0.9}
+        },
+        {
+            "Animation": "/Game/Animation/Locomotion/Escape/Run_Panicked_Right",
+            "Tags": ["Escape", "Right", "Panicked"],
+            "SamplingRange": {"Start": 0.1, "End": 0.9}
+        },
+        {
+            "Animation": "/Game/Animation/Locomotion/Escape/Sprint_Desperate_Forward",
+            "Tags": ["Escape", "Forward", "Desperate"],
+            "SamplingRange": {"Start": 0.1, "End": 0.9}
+        },
+        {
+            "Animation": "/Game/Animation/Locomotion/Escape/Stumble_Recovery_Forward",
+            "Tags": ["Escape", "Stumble", "Recovery"],
+            "SamplingRange": {"Start": 0.0, "End": 1.0}
+        },
+        {
+            "Animation": "/Game/Animation/Locomotion/Escape/Quick_Turn_Left_180",
+            "Tags": ["Escape", "Turn", "Quick"],
+            "SamplingRange": {"Start": 0.0, "End": 1.0}
+        },
+        {
+            "Animation": "/Game/Animation/Locomotion/Escape/Quick_Turn_Right_180",
+            "Tags": ["Escape", "Turn", "Quick"],
+            "SamplingRange": {"Start": 0.0, "End": 1.0}
+        },
+        {
+            "Animation": "/Game/Animation/Locomotion/Escape/Slide_Under_Obstacle",
+            "Tags": ["Escape", "Slide", "Obstacle"],
+            "SamplingRange": {"Start": 0.0, "End": 1.0}
+        },
+        {
+            "Animation": "/Game/Animation/Locomotion/Escape/Vault_Over_Log",
+            "Tags": ["Escape", "Vault", "Obstacle"],
+            "SamplingRange": {"Start": 0.0, "End": 1.0}
+        }
+    ],
+    "Description": "Escape database - panicked, desperate movement with stumbles and environmental navigation"
+}
