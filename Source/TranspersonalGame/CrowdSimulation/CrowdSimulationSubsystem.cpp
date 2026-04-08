@@ -1,414 +1,309 @@
 #include "CrowdSimulationSubsystem.h"
 #include "MassEntitySubsystem.h"
 #include "MassSpawnerSubsystem.h"
-#include "MassEntityConfigAsset.h"
-#include "MassSpawner.h"
 #include "Engine/World.h"
-#include "Engine/DataTable.h"
-#include "DrawDebugHelpers.h"
 #include "Kismet/GameplayStatics.h"
 
 void UCrowdSimulationSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationSubsystem: Initializing..."));
+    // Get Mass Entity subsystem reference
+    MassEntitySubsystem = GetWorld()->GetSubsystem<UMassEntitySubsystem>();
+    MassSpawnerSubsystem = GetWorld()->GetSubsystem<UMassSpawnerSubsystem>();
     
-    InitializeMassFramework();
-    
-    // Initialize default migration routes if none are set
-    if (MigrationRoutes.IsEmpty())
+    if (!MassEntitySubsystem)
     {
-        // Create a basic circular migration route for herbivore herds
-        FMigrationRoute HerbivoreRoute;
-        HerbivoreRoute.RouteName = TEXT("HerbivoreCircuit");
-        HerbivoreRoute.Waypoints = {
-            FVector(0, 0, 0),
-            FVector(5000, 0, 0),
-            FVector(5000, 5000, 0),
-            FVector(0, 5000, 0)
-        };
-        HerbivoreRoute.SeasonalTrigger = 0.2f;
-        HerbivoreRoute.ParticipatingGroups = {TEXT("Triceratops"), TEXT("Parasaurolophus")};
-        HerbivoreRoute.MigrationSpeed = 150.0f;
-        
-        MigrationRoutes.Add(HerbivoreRoute);
+        UE_LOG(LogTemp, Error, TEXT("CrowdSimulationSubsystem: Failed to get MassEntitySubsystem"));
+        return;
     }
+
+    if (!MassSpawnerSubsystem)
+    {
+        UE_LOG(LogTemp, Error, TEXT("CrowdSimulationSubsystem: Failed to get MassSpawnerSubsystem"));
+        return;
+    }
+
+    // Initialize default simulation parameters
+    CurrentLODLevel = 1;
+    MaxSimultaneousEntities = 50000;
     
-    UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationSubsystem: Initialized successfully"));
+    bIsInitialized = true;
+    
+    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationSubsystem: Initialized successfully"));
 }
 
 void UCrowdSimulationSubsystem::Deinitialize()
 {
-    UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationSubsystem: Deinitializing..."));
+    // Clean up active simulations
+    ActiveHerds.Empty();
+    ActivePacks.Empty();
+    ActiveFlocks.Empty();
     
-    // Clean up all active groups
-    for (auto& GroupPair : ActiveGroups)
-    {
-        for (const FMassEntityHandle& Entity : GroupPair.Value)
-        {
-            if (MassEntitySubsystem && Entity.IsValid())
-            {
-                MassEntitySubsystem->DestroyEntity(Entity);
-            }
-        }
-    }
-    ActiveGroups.Empty();
+    bIsInitialized = false;
     
     Super::Deinitialize();
 }
 
 void UCrowdSimulationSubsystem::Tick(float DeltaTime)
 {
-    if (!MassEntitySubsystem)
+    if (!bIsInitialized || !MassEntitySubsystem)
     {
         return;
     }
-    
-    UpdateMigrations(DeltaTime);
-    UpdatePopulationLOD(DeltaTime);
-    ProcessEmergencyResponses(DeltaTime);
-}
 
-void UCrowdSimulationSubsystem::InitializeMassFramework()
-{
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        UE_LOG(LogTemp, Error, TEXT("CrowdSimulationSubsystem: No valid world found"));
-        return;
-    }
+    AccumulatedDeltaTime += DeltaTime;
+    LastFrameTime = DeltaTime;
+
+    // Update behaviors at different frequencies based on LOD
+    float UpdateFrequency = 1.0f / (CurrentLODLevel + 1); // LOD 0 = 1.0s, LOD 1 = 0.5s, etc.
     
-    MassEntitySubsystem = World->GetSubsystem<UMassEntitySubsystem>();
-    MassSpawnerSubsystem = World->GetSubsystem<UMassSpawnerSubsystem>();
-    
-    if (!MassEntitySubsystem)
+    if (AccumulatedDeltaTime >= UpdateFrequency)
     {
-        UE_LOG(LogTemp, Error, TEXT("CrowdSimulationSubsystem: Failed to get MassEntitySubsystem"));
-    }
-    
-    if (!MassSpawnerSubsystem)
-    {
-        UE_LOG(LogTemp, Error, TEXT("CrowdSimulationSubsystem: Failed to get MassSpawnerSubsystem"));
+        UpdateHerdBehaviors(AccumulatedDeltaTime);
+        UpdatePackBehaviors(AccumulatedDeltaTime);
+        UpdateFlockBehaviors(AccumulatedDeltaTime);
+        UpdatePerformanceLOD(AccumulatedDeltaTime);
+        
+        AccumulatedDeltaTime = 0.0f;
     }
 }
 
-void UCrowdSimulationSubsystem::SpawnCrowdGroup(const FName& GroupType, const FVector& Location, int32 GroupSize)
+void UCrowdSimulationSubsystem::SpawnDinosaurHerd(const FDinosaurHerdData& HerdData, const FVector& SpawnLocation)
 {
-    if (!MassEntitySubsystem)
+    if (!bIsInitialized)
     {
-        UE_LOG(LogTemp, Error, TEXT("CrowdSimulationSubsystem: Cannot spawn group - MassEntitySubsystem not available"));
+        UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationSubsystem: Cannot spawn herd - system not initialized"));
         return;
     }
-    
-    FCrowdGroupConfig* GroupConfig = GetGroupConfig(GroupType);
-    if (!GroupConfig)
+
+    // Add to active herds
+    FDinosaurHerdData NewHerd = HerdData;
+    NewHerd.HerdCenter = SpawnLocation;
+    ActiveHerds.Add(NewHerd);
+
+    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationSubsystem: Spawned %s herd of %d at %s"), 
+           *HerdData.SpeciesType, HerdData.HerdSize, *SpawnLocation.ToString());
+
+    // TODO: Implement actual Mass Entity spawning logic
+    // This will be connected to MassSpawnerSubsystem in next iteration
+}
+
+void UCrowdSimulationSubsystem::SpawnPredatorPack(const FPredatorPackData& PackData, const FVector& SpawnLocation)
+{
+    if (!bIsInitialized)
     {
-        UE_LOG(LogTemp, Error, TEXT("CrowdSimulationSubsystem: No configuration found for group type: %s"), *GroupType.ToString());
+        UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationSubsystem: Cannot spawn pack - system not initialized"));
         return;
     }
-    
-    // Determine actual group size
-    int32 ActualGroupSize = GroupSize > 0 ? GroupSize : FMath::RandRange(GroupConfig->MinGroupSize, GroupConfig->MaxGroupSize);
-    
-    // Find optimal spawn location
-    FVector SpawnLocation = FindOptimalSpawnLocation(*GroupConfig, Location);
-    
-    // Create group entities
-    TArray<FMassEntityHandle> GroupEntities;
-    
-    for (int32 i = 0; i < ActualGroupSize; ++i)
+
+    FPredatorPackData NewPack = PackData;
+    NewPack.TerritoryCenter = SpawnLocation;
+    ActivePacks.Add(NewPack);
+
+    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationSubsystem: Spawned %s pack of %d at %s"), 
+           *PackData.SpeciesType, PackData.PackSize, *SpawnLocation.ToString());
+}
+
+void UCrowdSimulationSubsystem::SpawnAerialFlock(const FAerialFlockData& FlockData, const FVector& SpawnLocation)
+{
+    if (!bIsInitialized)
     {
-        // Calculate spawn position within group formation
-        float Angle = (2.0f * PI * i) / ActualGroupSize;
-        float Radius = FMath::Sqrt(i) * 50.0f; // Spiral formation
-        
-        FVector EntityLocation = SpawnLocation + FVector(
-            FMath::Cos(Angle) * Radius,
-            FMath::Sin(Angle) * Radius,
-            0.0f
-        );
-        
-        // Create entity (this would normally use the Mass spawning system)
-        FMassEntityHandle NewEntity = MassEntitySubsystem->CreateEntity();
-        if (NewEntity.IsValid())
+        UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationSubsystem: Cannot spawn flock - system not initialized"));
+        return;
+    }
+
+    FAerialFlockData NewFlock = FlockData;
+    NewFlock.FlightPath = SpawnLocation;
+    ActiveFlocks.Add(NewFlock);
+
+    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationSubsystem: Spawned %s flock of %d at %s"), 
+           *FlockData.SpeciesType, FlockData.FlockSize, *SpawnLocation.ToString());
+}
+
+void UCrowdSimulationSubsystem::TriggerPredatorAlert(const FVector& AlertLocation, float AlertRadius)
+{
+    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationSubsystem: Predator alert triggered at %s (radius: %.1f)"), 
+           *AlertLocation.ToString(), AlertRadius);
+
+    // Increase alert level for all herds within radius
+    for (FDinosaurHerdData& Herd : ActiveHerds)
+    {
+        float Distance = FVector::Dist(Herd.HerdCenter, AlertLocation);
+        if (Distance <= AlertRadius)
         {
-            GroupEntities.Add(NewEntity);
+            Herd.AlertLevel = FMath::Clamp(Herd.AlertLevel + 0.7f, 0.0f, 1.0f);
+            Herd.MovementSpeed *= 2.0f; // Panic speed increase
             
-            // Here we would add components like Transform, Movement, GroupBehavior, etc.
-            // This is simplified for the example
-        }
-    }
-    
-    // Register the group
-    if (!ActiveGroups.Contains(GroupType))
-    {
-        ActiveGroups.Add(GroupType, TArray<FMassEntityHandle>());
-    }
-    ActiveGroups[GroupType].Append(GroupEntities);
-    
-    UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationSubsystem: Spawned group %s with %d entities at %s"), 
-           *GroupType.ToString(), ActualGroupSize, *SpawnLocation.ToString());
-}
-
-void UCrowdSimulationSubsystem::DespawnCrowdGroup(const FMassEntityHandle& GroupLeader)
-{
-    if (!MassEntitySubsystem || !GroupLeader.IsValid())
-    {
-        return;
-    }
-    
-    // Find and remove the group
-    for (auto& GroupPair : ActiveGroups)
-    {
-        TArray<FMassEntityHandle>& Entities = GroupPair.Value;
-        
-        int32 LeaderIndex = Entities.Find(GroupLeader);
-        if (LeaderIndex != INDEX_NONE)
-        {
-            // Remove all entities in this group
-            for (const FMassEntityHandle& Entity : Entities)
-            {
-                if (Entity.IsValid())
-                {
-                    MassEntitySubsystem->DestroyEntity(Entity);
-                }
-            }
-            
-            Entities.Empty();
-            break;
+            UE_LOG(LogTemp, Log, TEXT("Herd %s entering panic state (Alert Level: %.2f)"), 
+                   *Herd.SpeciesType, Herd.AlertLevel);
         }
     }
 }
 
-void UCrowdSimulationSubsystem::UpdateGroupDensity(const FName& BiomeName, float DensityMultiplier)
+void UCrowdSimulationSubsystem::TriggerStampede(const FVector& StampedeOrigin, const FVector& StampedeDirection)
 {
-    // This would adjust spawning rates for specific biomes
-    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationSubsystem: Updated density for biome %s to %f"), 
-           *BiomeName.ToString(), DensityMultiplier);
-}
-
-void UCrowdSimulationSubsystem::StartMigration(const FName& RouteName)
-{
-    for (FMigrationRoute& Route : MigrationRoutes)
-    {
-        if (Route.RouteName == RouteName)
-        {
-            Route.bIsActive = true;
-            UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationSubsystem: Started migration route: %s"), *RouteName.ToString());
-            break;
-        }
-    }
-}
-
-void UCrowdSimulationSubsystem::StopMigration(const FName& RouteName)
-{
-    for (FMigrationRoute& Route : MigrationRoutes)
-    {
-        if (Route.RouteName == RouteName)
-        {
-            Route.bIsActive = false;
-            UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationSubsystem: Stopped migration route: %s"), *RouteName.ToString());
-            break;
-        }
-    }
-}
-
-void UCrowdSimulationSubsystem::UpdateSeasonalCycle(float SeasonProgress)
-{
-    CurrentSeasonProgress = FMath::Clamp(SeasonProgress, 0.0f, 1.0f);
-    
-    // Check if any migrations should be triggered
-    for (FMigrationRoute& Route : MigrationRoutes)
-    {
-        bool ShouldBeActive = CurrentSeasonProgress >= Route.SeasonalTrigger && 
-                             CurrentSeasonProgress <= (Route.SeasonalTrigger + 0.3f); // Migration lasts 30% of season cycle
-        
-        if (ShouldBeActive && !Route.bIsActive)
-        {
-            StartMigration(Route.RouteName);
-        }
-        else if (!ShouldBeActive && Route.bIsActive)
-        {
-            StopMigration(Route.RouteName);
-        }
-    }
-}
-
-void UCrowdSimulationSubsystem::TriggerPanicResponse(const FVector& ThreatLocation, float ThreatRadius, float ThreatIntensity)
-{
-    FEmergencyResponse NewResponse;
-    NewResponse.Location = ThreatLocation;
-    NewResponse.Radius = ThreatRadius;
-    NewResponse.Intensity = FMath::Clamp(ThreatIntensity, 0.0f, 1.0f);
-    NewResponse.TimeRemaining = 10.0f * ThreatIntensity; // Panic lasts longer for more intense threats
-    NewResponse.bIsStampede = false;
-    
-    ActiveEmergencyResponses.Add(NewResponse);
-    
-    UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationSubsystem: Panic response triggered at %s with radius %f"), 
-           *ThreatLocation.ToString(), ThreatRadius);
-}
-
-void UCrowdSimulationSubsystem::TriggerStampedeResponse(const FVector& StampedeOrigin, const FVector& StampedeDirection)
-{
-    FEmergencyResponse NewResponse;
-    NewResponse.Location = StampedeOrigin;
-    NewResponse.Radius = 2000.0f; // Large radius for stampede
-    NewResponse.Intensity = 1.0f; // Maximum intensity
-    NewResponse.TimeRemaining = 30.0f; // Stampedes last longer
-    NewResponse.bIsStampede = true;
-    NewResponse.StampedeDirection = StampedeDirection.GetSafeNormal();
-    
-    ActiveEmergencyResponses.Add(NewResponse);
-    
-    UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationSubsystem: Stampede triggered at %s in direction %s"), 
+    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationSubsystem: Stampede triggered from %s towards %s"), 
            *StampedeOrigin.ToString(), *StampedeDirection.ToString());
+
+    // All herds within 5km start stampeding
+    float StampedeRadius = 500000.0f; // 5km
+    
+    for (FDinosaurHerdData& Herd : ActiveHerds)
+    {
+        float Distance = FVector::Dist(Herd.HerdCenter, StampedeOrigin);
+        if (Distance <= StampedeRadius)
+        {
+            Herd.AlertLevel = 1.0f; // Maximum panic
+            Herd.MovementSpeed *= 3.0f; // Stampede speed
+            
+            // TODO: Set herd movement direction towards StampedeDirection
+        }
+    }
 }
 
-void UCrowdSimulationSubsystem::SetGlobalPopulationScale(float Scale)
+void UCrowdSimulationSubsystem::SetGlobalWeatherState(bool bIsStormy)
 {
-    GlobalPopulationScale = FMath::Max(0.0f, Scale);
-    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationSubsystem: Global population scale set to %f"), GlobalPopulationScale);
+    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationSubsystem: Weather state changed - Stormy: %s"), 
+           bIsStormy ? TEXT("True") : TEXT("False"));
+
+    if (bIsStormy)
+    {
+        // Aerial flocks seek shelter
+        for (FAerialFlockData& Flock : ActiveFlocks)
+        {
+            Flock.FlightAltitude *= 0.3f; // Fly lower
+            Flock.FlightSpeed *= 0.7f; // Slower in storm
+        }
+
+        // Herds become more alert
+        for (FDinosaurHerdData& Herd : ActiveHerds)
+        {
+            Herd.AlertLevel = FMath::Clamp(Herd.AlertLevel + 0.3f, 0.0f, 1.0f);
+        }
+    }
+    else
+    {
+        // Return to normal behavior
+        for (FAerialFlockData& Flock : ActiveFlocks)
+        {
+            Flock.FlightAltitude = 1500.0f; // Default altitude
+            Flock.FlightSpeed = 1200.0f; // Default speed
+        }
+    }
+}
+
+void UCrowdSimulationSubsystem::SetSimulationLOD(int32 LODLevel)
+{
+    CurrentLODLevel = FMath::Clamp(LODLevel, 0, 3);
+    
+    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationSubsystem: LOD Level set to %d"), CurrentLODLevel);
+
+    // Adjust entity limits based on LOD
+    switch (CurrentLODLevel)
+    {
+        case 0: MaxSimultaneousEntities = 50000; break; // Ultra
+        case 1: MaxSimultaneousEntities = 25000; break; // High
+        case 2: MaxSimultaneousEntities = 10000; break; // Medium
+        case 3: MaxSimultaneousEntities = 5000; break;  // Low
+    }
 }
 
 int32 UCrowdSimulationSubsystem::GetActiveEntityCount() const
 {
-    int32 TotalCount = 0;
-    for (const auto& GroupPair : ActiveGroups)
+    int32 TotalEntities = 0;
+    
+    for (const FDinosaurHerdData& Herd : ActiveHerds)
     {
-        TotalCount += GroupPair.Value.Num();
+        TotalEntities += Herd.HerdSize;
     }
-    return TotalCount;
+    
+    for (const FPredatorPackData& Pack : ActivePacks)
+    {
+        TotalEntities += Pack.PackSize;
+    }
+    
+    for (const FAerialFlockData& Flock : ActiveFlocks)
+    {
+        TotalEntities += Flock.FlockSize;
+    }
+    
+    return TotalEntities;
 }
 
-TArray<FMassEntityHandle> UCrowdSimulationSubsystem::GetEntitiesInRadius(const FVector& Center, float Radius) const
+float UCrowdSimulationSubsystem::GetCurrentPerformanceMetric() const
 {
-    TArray<FMassEntityHandle> EntitiesInRadius;
+    // Simple performance metric based on frame time and entity count
+    float EntityDensity = static_cast<float>(GetActiveEntityCount()) / MaxSimultaneousEntities;
+    float FrameTimeMetric = LastFrameTime * 60.0f; // Convert to frame budget (60fps = 1.0)
     
-    // This is a simplified implementation
-    // In practice, this would use spatial partitioning for efficiency
-    for (const auto& GroupPair : ActiveGroups)
-    {
-        for (const FMassEntityHandle& Entity : GroupPair.Value)
-        {
-            // Would check actual entity position here
-            EntitiesInRadius.Add(Entity);
-        }
-    }
-    
-    return EntitiesInRadius;
+    return EntityDensity * FrameTimeMetric;
 }
 
-void UCrowdSimulationSubsystem::UpdateMigrations(float DeltaTime)
+void UCrowdSimulationSubsystem::UpdateHerdBehaviors(float DeltaTime)
 {
-    for (const FMigrationRoute& Route : MigrationRoutes)
+    for (FDinosaurHerdData& Herd : ActiveHerds)
     {
-        if (!Route.bIsActive)
+        // Gradually reduce alert level over time
+        if (Herd.AlertLevel > 0.0f)
         {
-            continue;
-        }
-        
-        // Update entities participating in this migration
-        for (const FName& GroupName : Route.ParticipatingGroups)
-        {
-            if (ActiveGroups.Contains(GroupName))
-            {
-                // Move entities along migration route
-                // This would involve updating their movement targets
-            }
-        }
-    }
-}
-
-void UCrowdSimulationSubsystem::UpdatePopulationLOD(float DeltaTime)
-{
-    LastLODUpdateTime += DeltaTime;
-    if (LastLODUpdateTime < LODUpdateInterval)
-    {
-        return;
-    }
-    
-    LastLODUpdateTime = 0.0f;
-    
-    // Get player location for distance-based LOD
-    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
-    if (!PlayerPawn)
-    {
-        return;
-    }
-    
-    FVector PlayerLocation = PlayerPawn->GetActorLocation();
-    
-    // Update LOD for all active groups based on distance from player
-    for (auto& GroupPair : ActiveGroups)
-    {
-        TArray<FMassEntityHandle>& Entities = GroupPair.Value;
-        
-        for (const FMassEntityHandle& Entity : Entities)
-        {
-            if (!Entity.IsValid())
-            {
-                continue;
-            }
+            Herd.AlertLevel = FMath::Clamp(Herd.AlertLevel - (DeltaTime * 0.1f), 0.0f, 1.0f);
             
-            // Calculate distance and set appropriate LOD
-            // This would involve updating Mass LOD components
-        }
-    }
-}
-
-void UCrowdSimulationSubsystem::ProcessEmergencyResponses(float DeltaTime)
-{
-    for (int32 i = ActiveEmergencyResponses.Num() - 1; i >= 0; --i)
-    {
-        FEmergencyResponse& Response = ActiveEmergencyResponses[i];
-        Response.TimeRemaining -= DeltaTime;
-        
-        if (Response.TimeRemaining <= 0.0f)
-        {
-            ActiveEmergencyResponses.RemoveAt(i);
-            continue;
-        }
-        
-        // Apply emergency response to entities in range
-        TArray<FMassEntityHandle> AffectedEntities = GetEntitiesInRadius(Response.Location, Response.Radius);
-        
-        for (const FMassEntityHandle& Entity : AffectedEntities)
-        {
-            if (!Entity.IsValid())
+            // Reduce speed as alert level decreases
+            if (Herd.AlertLevel < 0.5f)
             {
-                continue;
+                Herd.MovementSpeed = FMath::Lerp(300.0f, Herd.MovementSpeed, Herd.AlertLevel * 2.0f);
             }
-            
-            // Apply panic or stampede behavior
-            // This would modify entity movement and behavior components
         }
+
+        // TODO: Implement actual herd movement logic
+        // This will integrate with Mass Entity movement processors
     }
 }
 
-FCrowdGroupConfig* UCrowdSimulationSubsystem::GetGroupConfig(const FName& GroupType)
+void UCrowdSimulationSubsystem::UpdatePackBehaviors(float DeltaTime)
 {
-    if (!CrowdGroupsDataTable)
+    for (FPredatorPackData& Pack : ActivePacks)
     {
-        UE_LOG(LogTemp, Error, TEXT("CrowdSimulationSubsystem: CrowdGroupsDataTable is not set"));
-        return nullptr;
+        // Increase hunger over time
+        Pack.HungerLevel = FMath::Clamp(Pack.HungerLevel + (DeltaTime * 0.05f), 0.0f, 1.0f);
+        
+        // Start hunting when hungry enough
+        if (Pack.HungerLevel > 0.7f && !Pack.bIsHunting)
+        {
+            Pack.bIsHunting = true;
+            UE_LOG(LogTemp, Log, TEXT("Pack %s started hunting (Hunger: %.2f)"), 
+                   *Pack.SpeciesType, Pack.HungerLevel);
+        }
+
+        // TODO: Implement pack hunting AI
+        // This will integrate with Combat AI Agent's systems
     }
-    
-    return CrowdGroupsDataTable->FindRow<FCrowdGroupConfig>(GroupType, TEXT("GetGroupConfig"));
 }
 
-FVector UCrowdSimulationSubsystem::FindOptimalSpawnLocation(const FCrowdGroupConfig& Config, const FVector& PreferredLocation)
+void UCrowdSimulationSubsystem::UpdateFlockBehaviors(float DeltaTime)
 {
-    // Simple implementation - in practice this would check terrain, biomes, obstacles, etc.
-    FVector OptimalLocation = PreferredLocation;
+    for (FAerialFlockData& Flock : ActiveFlocks)
+    {
+        // TODO: Implement flocking behavior (boids algorithm)
+        // Separation, Alignment, Cohesion rules
+        // Migration patterns based on time of day/season
+    }
+}
+
+void UCrowdSimulationSubsystem::UpdatePerformanceLOD(float DeltaTime)
+{
+    float CurrentPerformance = GetCurrentPerformanceMetric();
     
-    // Add some random offset to avoid overlapping spawns
-    OptimalLocation += FVector(
-        FMath::RandRange(-500.0f, 500.0f),
-        FMath::RandRange(-500.0f, 500.0f),
-        0.0f
-    );
-    
-    return OptimalLocation;
+    // Auto-adjust LOD based on performance
+    if (CurrentPerformance > 1.5f && CurrentLODLevel < 3)
+    {
+        SetSimulationLOD(CurrentLODLevel + 1);
+        UE_LOG(LogTemp, Warning, TEXT("Performance degraded - increasing LOD to %d"), CurrentLODLevel);
+    }
+    else if (CurrentPerformance < 0.8f && CurrentLODLevel > 0)
+    {
+        SetSimulationLOD(CurrentLODLevel - 1);
+        UE_LOG(LogTemp, Log, TEXT("Performance improved - decreasing LOD to %d"), CurrentLODLevel);
+    }
 }
