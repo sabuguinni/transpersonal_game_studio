@@ -1,0 +1,149 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Components/ActorComponent.h"
+#include "Materials/MaterialParameterCollection.h"
+#include "Materials/MaterialInterface.h"
+#include "JurassicMaterialSystem.generated.h"
+
+UENUM(BlueprintType)
+enum class ETerrainMaterialType : uint8
+{
+    RichSoil           UMETA(DisplayName = "Rich Soil"),
+    MuddyGround        UMETA(DisplayName = "Muddy Ground"),
+    RockyOutcrop       UMETA(DisplayName = "Rocky Outcrop"),
+    SandyRiverbed      UMETA(DisplayName = "Sandy Riverbed"),
+    FallenLeaves       UMETA(DisplayName = "Fallen Leaves"),
+    DinosaurTracks     UMETA(DisplayName = "Dinosaur Tracks"),
+    BurntEarth         UMETA(DisplayName = "Burnt Earth"),
+    CrystalFormations  UMETA(DisplayName = "Crystal Formations")
+};
+
+USTRUCT(BlueprintType)
+struct FTerrainMaterialProperties
+{
+    GENERATED_BODY()
+
+    // Material instance to use
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    class UMaterialInterface* MaterialInstance;
+
+    // Tiling scale
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float TilingScale = 1.0f;
+
+    // Blend weight (0-1)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = 0.0f, ClampMax = 1.0f))
+    float BlendWeight = 1.0f;
+
+    // Environmental conditions for this material
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float PreferredMoisture = 0.5f; // 0 = dry, 1 = wet
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float PreferredSlope = 0.0f; // 0 = flat, 1 = steep
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float PreferredExposure = 0.5f; // 0 = sheltered, 1 = exposed
+
+    FTerrainMaterialProperties()
+    {
+        MaterialInstance = nullptr;
+    }
+};
+
+USTRUCT(BlueprintType)
+struct FStorytellingDecal
+{
+    GENERATED_BODY()
+
+    // Decal material
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    class UMaterialInterface* DecalMaterial;
+
+    // Size of the decal
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FVector DecalSize = FVector(100.0f, 100.0f, 100.0f);
+
+    // Spawn probability (0-1)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = 0.0f, ClampMax = 1.0f))
+    float SpawnProbability = 0.1f;
+
+    // Minimum distance between instances
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float MinSpacing = 500.0f;
+
+    // Story context
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FString StoryContext;
+
+    FStorytellingDecal()
+    {
+        DecalMaterial = nullptr;
+    }
+};
+
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UJurassicMaterialSystem : public UActorComponent
+{
+    GENERATED_BODY()
+
+public:
+    UJurassicMaterialSystem();
+
+protected:
+    virtual void BeginPlay() override;
+
+public:
+    // Apply terrain materials to landscape based on environmental conditions
+    UFUNCTION(BlueprintCallable, Category = "Materials")
+    void ApplyTerrainMaterials(class ALandscape* TargetLandscape);
+
+    // Paint material in specific area
+    UFUNCTION(BlueprintCallable, Category = "Materials")
+    void PaintMaterialInArea(FVector Center, float Radius, ETerrainMaterialType MaterialType, float Intensity = 1.0f);
+
+    // Place storytelling decals
+    UFUNCTION(BlueprintCallable, Category = "Storytelling")
+    void PlaceStorytellingDecals(FVector Center, float Radius, int32 MaxDecals = 5);
+
+    // Update material parameters based on time of day/weather
+    UFUNCTION(BlueprintCallable, Category = "Materials")
+    void UpdateEnvironmentalParameters(float TimeOfDay, float WeatherIntensity, float Moisture);
+
+    // Get material properties for terrain type
+    UFUNCTION(BlueprintCallable, Category = "Materials")
+    FTerrainMaterialProperties GetMaterialProperties(ETerrainMaterialType MaterialType);
+
+protected:
+    // Material parameter collection for global environment settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
+    class UMaterialParameterCollection* EnvironmentParameters;
+
+    // Terrain material definitions
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
+    TMap<ETerrainMaterialType, FTerrainMaterialProperties> TerrainMaterials;
+
+    // Storytelling decal definitions
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Storytelling")
+    TArray<FStorytellingDecal> StorytellingDecals;
+
+    // Noise settings for procedural material distribution
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation")
+    float MaterialNoiseScale = 0.005f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation")
+    float MaterialBlendSoftness = 0.3f;
+
+private:
+    // Calculate environmental factors for material blending
+    float CalculateMoistureLevel(FVector Location);
+    float CalculateSlopeLevel(FVector Location);
+    float CalculateExposureLevel(FVector Location);
+    
+    // Place individual storytelling decal
+    void PlaceStorytellingDecal(const FStorytellingDecal& DecalData, FVector Location);
+    
+    // Check if location is suitable for decal placement
+    bool IsLocationSuitableForDecal(FVector Location, const FStorytellingDecal& DecalData);
+};
