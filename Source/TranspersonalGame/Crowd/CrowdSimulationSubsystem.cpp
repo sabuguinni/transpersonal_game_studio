@@ -1,48 +1,72 @@
 #include "CrowdSimulationSubsystem.h"
 #include "MassEntitySubsystem.h"
 #include "MassSpawnerSubsystem.h"
+#include "MassCommonFragments.h"
+#include "MassMovementFragments.h"
+#include "MassNavigationFragments.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
-#include "Kismet/GameplayStatics.h"
-#include "DrawDebugHelpers.h"
+#include "Kismet/KismetMathLibrary.h"
+
+DEFINE_LOG_CATEGORY(LogCrowdSimulation);
 
 void UCrowdSimulationSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
-    
-    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationSubsystem: Initializing..."));
-    
-    // Obter referências aos subsistemas Mass
+
+    UE_LOG(LogCrowdSimulation, Log, TEXT("Initializing Crowd Simulation Subsystem"));
+
+    // Get Mass Entity subsystem references
     MassEntitySubsystem = GetWorld()->GetSubsystem<UMassEntitySubsystem>();
     MassSpawnerSubsystem = GetWorld()->GetSubsystem<UMassSpawnerSubsystem>();
-    
-    if (!MassEntitySubsystem || !MassSpawnerSubsystem)
+
+    if (!MassEntitySubsystem)
     {
-        UE_LOG(LogTemp, Error, TEXT("CrowdSimulationSubsystem: Failed to get Mass subsystems!"));
+        UE_LOG(LogCrowdSimulation, Error, TEXT("Failed to get MassEntitySubsystem"));
         return;
     }
-    
-    // Configurar configurações padrão para biomas
-    SetupDefaultBiomeConfigurations();
-    
-    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationSubsystem: Initialized successfully"));
+
+    if (!MassSpawnerSubsystem)
+    {
+        UE_LOG(LogCrowdSimulation, Error, TEXT("Failed to get MassSpawnerSubsystem"));
+        return;
+    }
+
+    // Initialize default migration routes
+    InitializeDefaultMigrationRoutes();
+
+    // Start crowd update timer
+    GetWorld()->GetTimerManager().SetTimer(
+        CrowdUpdateTimer,
+        [this]() { UpdateCrowdBehaviors(CrowdUpdateFrequency); },
+        CrowdUpdateFrequency,
+        true
+    );
+
+    UE_LOG(LogCrowdSimulation, Log, TEXT("Crowd Simulation Subsystem initialized successfully"));
 }
 
 void UCrowdSimulationSubsystem::Deinitialize()
 {
-    // Limpar timers
+    UE_LOG(LogCrowdSimulation, Log, TEXT("Deinitializing Crowd Simulation Subsystem"));
+
+    // Clear timer
     if (GetWorld())
     {
-        GetWorld()->GetTimerManager().ClearTimer(PopulationUpdateTimer);
-        GetWorld()->GetTimerManager().ClearTimer(MigrationUpdateTimer);
+        GetWorld()->GetTimerManager().ClearTimer(CrowdUpdateTimer);
     }
-    
+
+    // Clean up all active crowds
+    ActiveCrowds.Empty();
+    CrowdParameters.Empty();
+    ActiveMigrations.Empty();
+
     Super::Deinitialize();
 }
 
 bool UCrowdSimulationSubsystem::ShouldCreateSubsystem(UObject* Outer) const
 {
-    // Só criar em mundos de jogo
+    // Only create in game worlds, not in editor preview worlds
     if (UWorld* World = Cast<UWorld>(Outer))
     {
         return World->IsGameWorld();
@@ -50,418 +74,450 @@ bool UCrowdSimulationSubsystem::ShouldCreateSubsystem(UObject* Outer) const
     return false;
 }
 
-void UCrowdSimulationSubsystem::InitializeCrowdSimulation()
+void UCrowdSimulationSubsystem::SpawnDinosaurCrowd(const FVector& Location, const FDinosaurCrowdParams& Params, int32 GroupSize)
 {
-    if (!GetWorld())
+    if (!MassEntitySubsystem || !MassSpawnerSubsystem)
     {
-        UE_LOG(LogTemp, Error, TEXT("CrowdSimulationSubsystem: No valid world!"));
+        UE_LOG(LogCrowdSimulation, Error, TEXT("Mass subsystems not available for crowd spawning"));
         return;
     }
-    
-    // Iniciar timers de atualização
-    GetWorld()->GetTimerManager().SetTimer(
-        PopulationUpdateTimer,
-        this,
-        &UCrowdSimulationSubsystem::UpdatePopulationTick,
-        UpdateFrequency,
-        true
-    );
-    
-    GetWorld()->GetTimerManager().SetTimer(
-        MigrationUpdateTimer,
-        this,
-        &UCrowdSimulationSubsystem::UpdateMigrationTick,
-        60.0f, // Atualizar migrações a cada minuto
-        true
-    );
-    
-    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationSubsystem: Crowd simulation initialized"));
-}
 
-void UCrowdSimulationSubsystem::SetBiomeConfiguration(const FString& BiomeName, const FBiomePopulationConfig& Config)
-{
-    BiomeConfigurations.Add(BiomeName, Config);
-    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationSubsystem: Set configuration for biome %s"), *BiomeName);
-}
-
-void UCrowdSimulationSubsystem::SpawnHerdInArea(const FVector& Location, float Radius, const FDinosaurHerdData& HerdData)
-{
-    if (!CanSpawnInArea(Location, Radius, HerdData.MaxHerdSize))
+    if (ActiveCrowds.Num() >= MaxSimultaneousCrowds)
     {
+        UE_LOG(LogCrowdSimulation, Warning, TEXT("Maximum crowd limit reached (%d), cannot spawn new crowd"), MaxSimultaneousCrowds);
         return;
     }
-    
-    // Determinar tamanho da manada
-    int32 HerdSize = FMath::RandRange(HerdData.MinHerdSize, HerdData.MaxHerdSize);
-    
-    // Encontrar localização adequada
-    FVector SpawnLocation = FindSuitableSpawnLocation(Location, Radius);
-    
-    // Spawnar entidades usando Mass Entity
-    for (int32 i = 0; i < HerdSize; ++i)
-    {
-        // Calcular posição individual dentro da manada
-        FVector IndividualOffset = FVector(
-            FMath::RandRange(-HerdData.FlockingRadius, HerdData.FlockingRadius),
-            FMath::RandRange(-HerdData.FlockingRadius, HerdData.FlockingRadius),
-            0.0f
-        );
-        
-        FVector IndividualLocation = SpawnLocation + IndividualOffset;
-        
-        // TODO: Integrar com Mass Entity spawning
-        // Esta parte será completada quando o sistema Mass estiver totalmente configurado
-    }
-    
-    // Atualizar contadores
-    int32* CurrentCount = ActiveHerdCounts.Find(HerdData.SpeciesName);
-    if (CurrentCount)
-    {
-        *CurrentCount += HerdSize;
-    }
-    else
-    {
-        ActiveHerdCounts.Add(HerdData.SpeciesName, HerdSize);
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationSubsystem: Spawned herd of %d %s at %s"), 
-           HerdSize, *HerdData.SpeciesName, *SpawnLocation.ToString());
-}
 
-void UCrowdSimulationSubsystem::SpawnPredatorPackInArea(const FVector& Location, float Radius, const FPredatorPackData& PackData)
-{
-    if (!CanSpawnInArea(Location, Radius, PackData.MaxPackSize))
-    {
-        return;
-    }
-    
-    // Determinar tamanho do grupo
-    int32 PackSize = FMath::RandRange(PackData.MinPackSize, PackData.MaxPackSize);
-    
-    // Encontrar localização adequada
-    FVector SpawnLocation = FindSuitableSpawnLocation(Location, Radius);
-    
-    // Spawnar entidades usando Mass Entity
-    for (int32 i = 0; i < PackSize; ++i)
-    {
-        // Calcular posição individual dentro do grupo
-        FVector IndividualOffset = FVector(
-            FMath::RandRange(-PackData.CoordinationRadius, PackData.CoordinationRadius),
-            FMath::RandRange(-PackData.CoordinationRadius, PackData.CoordinationRadius),
-            0.0f
-        );
-        
-        FVector IndividualLocation = SpawnLocation + IndividualOffset;
-        
-        // TODO: Integrar com Mass Entity spawning
-        // Esta parte será completada quando o sistema Mass estiver totalmente configurado
-    }
-    
-    // Atualizar contadores
-    int32* CurrentCount = ActivePackCounts.Find(PackData.SpeciesName);
-    if (CurrentCount)
-    {
-        *CurrentCount += PackSize;
-    }
-    else
-    {
-        ActivePackCounts.Add(PackData.SpeciesName, PackSize);
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationSubsystem: Spawned pack of %d %s at %s"), 
-           PackSize, *PackData.SpeciesName, *SpawnLocation.ToString());
-}
+    // Determine actual group size
+    int32 ActualGroupSize = GroupSize > 0 ? GroupSize : FMath::RandRange(Params.MinGroupSize, Params.MaxGroupSize);
+    ActualGroupSize = FMath::Clamp(ActualGroupSize, 1, 500);
 
-void UCrowdSimulationSubsystem::UpdatePopulationDensity(const FVector& PlayerLocation)
-{
-    LastPlayerLocation = PlayerLocation;
-    
-    // Determinar bioma atual baseado na localização do jogador
-    FString CurrentBiome = DetermineBiomeAtLocation(PlayerLocation);
-    
-    const FBiomePopulationConfig* BiomeConfig = BiomeConfigurations.Find(CurrentBiome);
-    if (!BiomeConfig)
+    UE_LOG(LogCrowdSimulation, Log, TEXT("Spawning dinosaur crowd of %d individuals at location %s"), 
+           ActualGroupSize, *Location.ToString());
+
+    // Create crowd formation around the spawn location
+    TArray<FVector> SpawnPositions;
+    GenerateCrowdFormation(Location, ActualGroupSize, Params, SpawnPositions);
+
+    // Spawn entities using Mass Entity system
+    for (int32 i = 0; i < SpawnPositions.Num(); i++)
     {
-        return;
-    }
-    
-    // Verificar densidade atual
-    float CurrentDensity = GetCurrentPopulationDensity(PlayerLocation, 10000.0f); // 10km radius
-    
-    // Spawnar manadas se densidade estiver baixa
-    for (const FDinosaurHerdData& HerdData : BiomeConfig->HerbivoreHerds)
-    {
-        int32* CurrentHerdCount = ActiveHerdCounts.Find(HerdData.SpeciesName);
-        int32 ActualCount = CurrentHerdCount ? *CurrentHerdCount : 0;
-        
-        float DesiredDensity = HerdData.PopulationDensityPerKm2;
-        float AreaKm2 = (10000.0f * 10000.0f) / (100.0f * 100.0f * 100.0f); // Converter cm² para km²
-        int32 DesiredCount = FMath::RoundToInt(DesiredDensity * AreaKm2);
-        
-        if (ActualCount < DesiredCount)
+        FMassEntityHandle NewEntity = SpawnDinosaurEntity(SpawnPositions[i], Params);
+        if (NewEntity.IsValid())
         {
-            // Spawnar nova manada
-            FVector SpawnArea = PlayerLocation + FVector(
-                FMath::RandRange(-BiomeConfig->MaxSpawnDistanceFromPlayer, BiomeConfig->MaxSpawnDistanceFromPlayer),
-                FMath::RandRange(-BiomeConfig->MaxSpawnDistanceFromPlayer, BiomeConfig->MaxSpawnDistanceFromPlayer),
-                0.0f
-            );
+            ActiveCrowds.Add(NewEntity);
+            CrowdParameters.Add(NewEntity, Params);
+        }
+    }
+
+    UE_LOG(LogCrowdSimulation, Log, TEXT("Successfully spawned crowd with %d entities"), SpawnPositions.Num());
+}
+
+void UCrowdSimulationSubsystem::TriggerPanicBehavior(const FVector& ThreatLocation, float PanicRadius)
+{
+    UE_LOG(LogCrowdSimulation, Log, TEXT("Triggering panic behavior at %s with radius %f"), 
+           *ThreatLocation.ToString(), PanicRadius);
+
+    int32 AffectedEntities = 0;
+
+    for (const FMassEntityHandle& Entity : ActiveCrowds)
+    {
+        if (!Entity.IsValid()) continue;
+
+        FVector EntityLocation = GetEntityLocation(Entity);
+        float Distance = FVector::Dist(EntityLocation, ThreatLocation);
+
+        if (Distance <= PanicRadius)
+        {
+            ApplyPanicBehavior(Entity, ThreatLocation);
+            AffectedEntities++;
+        }
+    }
+
+    UE_LOG(LogCrowdSimulation, Log, TEXT("Panic behavior applied to %d entities"), AffectedEntities);
+}
+
+void UCrowdSimulationSubsystem::StartMigrationEvent(int32 RouteIndex)
+{
+    if (!MigrationRoutes.IsValidIndex(RouteIndex))
+    {
+        UE_LOG(LogCrowdSimulation, Error, TEXT("Invalid migration route index: %d"), RouteIndex);
+        return;
+    }
+
+    if (ActiveMigrations.Contains(RouteIndex))
+    {
+        UE_LOG(LogCrowdSimulation, Warning, TEXT("Migration route %d is already active"), RouteIndex);
+        return;
+    }
+
+    MigrationRoutes[RouteIndex].bIsActive = true;
+    ActiveMigrations.Add(RouteIndex);
+
+    UE_LOG(LogCrowdSimulation, Log, TEXT("Started migration event on route %d"), RouteIndex);
+
+    // Spawn migration herds along the route
+    SpawnMigrationHerds(RouteIndex);
+}
+
+void UCrowdSimulationSubsystem::StopMigrationEvent(int32 RouteIndex)
+{
+    if (!MigrationRoutes.IsValidIndex(RouteIndex))
+    {
+        UE_LOG(LogCrowdSimulation, Error, TEXT("Invalid migration route index: %d"), RouteIndex);
+        return;
+    }
+
+    MigrationRoutes[RouteIndex].bIsActive = false;
+    ActiveMigrations.Remove(RouteIndex);
+
+    UE_LOG(LogCrowdSimulation, Log, TEXT("Stopped migration event on route %d"), RouteIndex);
+}
+
+void UCrowdSimulationSubsystem::SetGlobalCrowdDensity(float DensityMultiplier)
+{
+    GlobalDensityMultiplier = FMath::Clamp(DensityMultiplier, 0.1f, 5.0f);
+    UE_LOG(LogCrowdSimulation, Log, TEXT("Global crowd density set to %f"), GlobalDensityMultiplier);
+}
+
+void UCrowdSimulationSubsystem::RegisterMigrationRoute(const FMigrationRoute& Route)
+{
+    MigrationRoutes.Add(Route);
+    UE_LOG(LogCrowdSimulation, Log, TEXT("Registered new migration route with %d waypoints"), Route.Waypoints.Num());
+}
+
+int32 UCrowdSimulationSubsystem::GetActiveCrowdCount() const
+{
+    return ActiveCrowds.Num();
+}
+
+TArray<FVector> UCrowdSimulationSubsystem::GetNearbyGroupCenters(const FVector& Location, float Radius) const
+{
+    TArray<FVector> GroupCenters;
+    
+    // Calculate group centers from active crowds
+    TMap<int32, TArray<FVector>> GroupPositions;
+    
+    for (const FMassEntityHandle& Entity : ActiveCrowds)
+    {
+        if (!Entity.IsValid()) continue;
+        
+        FVector EntityLocation = GetEntityLocation(Entity);
+        if (FVector::Dist(EntityLocation, Location) <= Radius)
+        {
+            // Group entities by proximity to find group centers
+            bool bFoundGroup = false;
+            for (auto& Group : GroupPositions)
+            {
+                if (Group.Value.Num() > 0)
+                {
+                    FVector GroupCenter = CalculateGroupCenter(Group.Value);
+                    if (FVector::Dist(EntityLocation, GroupCenter) <= 1000.0f)
+                    {
+                        Group.Value.Add(EntityLocation);
+                        bFoundGroup = true;
+                        break;
+                    }
+                }
+            }
             
-            SpawnHerdInArea(SpawnArea, 5000.0f, HerdData);
+            if (!bFoundGroup)
+            {
+                int32 NewGroupIndex = GroupPositions.Num();
+                GroupPositions.Add(NewGroupIndex, {EntityLocation});
+            }
         }
     }
     
-    // Spawnar grupos de predadores se necessário
-    for (const FPredatorPackData& PackData : BiomeConfig->PredatorPacks)
+    // Calculate final group centers
+    for (const auto& Group : GroupPositions)
     {
-        int32* CurrentPackCount = ActivePackCounts.Find(PackData.SpeciesName);
-        int32 ActualCount = CurrentPackCount ? *CurrentPackCount : 0;
-        
-        // Predadores têm densidade muito menor
-        if (ActualCount < 2) // Máximo 2 grupos por espécie na área
+        if (Group.Value.Num() >= 3) // Only consider groups with 3+ members
         {
-            FVector SpawnArea = PlayerLocation + FVector(
-                FMath::RandRange(-BiomeConfig->MaxSpawnDistanceFromPlayer, BiomeConfig->MaxSpawnDistanceFromPlayer),
-                FMath::RandRange(-BiomeConfig->MaxSpawnDistanceFromPlayer, BiomeConfig->MaxSpawnDistanceFromPlayer),
-                0.0f
-            );
-            
-            SpawnPredatorPackInArea(SpawnArea, 5000.0f, PackData);
+            GroupCenters.Add(CalculateGroupCenter(Group.Value));
         }
     }
+    
+    return GroupCenters;
 }
 
-int32 UCrowdSimulationSubsystem::GetActiveEntityCount() const
+bool UCrowdSimulationSubsystem::IsLocationInMigrationPath(const FVector& Location) const
 {
-    int32 TotalCount = 0;
-    
-    for (const auto& HerdPair : ActiveHerdCounts)
+    for (int32 RouteIndex : ActiveMigrations)
     {
-        TotalCount += HerdPair.Value;
+        if (!MigrationRoutes.IsValidIndex(RouteIndex)) continue;
+        
+        const FMigrationRoute& Route = MigrationRoutes[RouteIndex];
+        
+        for (int32 i = 0; i < Route.Waypoints.Num() - 1; i++)
+        {
+            FVector SegmentStart = Route.Waypoints[i];
+            FVector SegmentEnd = Route.Waypoints[i + 1];
+            
+            float DistanceToSegment = FMath::PointDistToSegment(Location, SegmentStart, SegmentEnd);
+            
+            if (DistanceToSegment <= Route.RouteWidth)
+            {
+                return true;
+            }
+        }
     }
     
-    for (const auto& PackPair : ActivePackCounts)
+    return false;
+}
+
+void UCrowdSimulationSubsystem::UpdateCrowdBehaviors(float DeltaTime)
+{
+    if (!MassEntitySubsystem) return;
+
+    LastUpdateTime += DeltaTime;
+
+    // Clean up invalid entities
+    CleanupInactiveCrowds();
+
+    // Update flocking behaviors for all active crowds
+    for (const FMassEntityHandle& Entity : ActiveCrowds)
     {
-        TotalCount += PackPair.Value;
+        if (!Entity.IsValid()) continue;
+
+        const FDinosaurCrowdParams* Params = CrowdParameters.Find(Entity);
+        if (!Params) continue;
+
+        // Calculate and apply flocking forces
+        FVector FlockingForce = CalculateFlockingForce(Entity, *Params);
+        ApplyMovementForce(Entity, FlockingForce);
     }
-    
-    return TotalCount;
+
+    // Process active migrations
+    ProcessMigrations(DeltaTime);
 }
 
-float UCrowdSimulationSubsystem::GetCurrentPopulationDensity(const FVector& Location, float Radius) const
+void UCrowdSimulationSubsystem::ProcessMigrations(float DeltaTime)
 {
-    // TODO: Implementar cálculo real baseado em entidades Mass na área
-    // Por agora, retornar estimativa baseada nos contadores
-    
-    int32 TotalInArea = 0;
-    float AreaKm2 = (Radius * Radius * PI) / (100.0f * 100.0f * 100.0f); // Converter cm² para km²
-    
-    // Estimativa simples baseada nos contadores ativos
-    TotalInArea = GetActiveEntityCount() / 4; // Assumir que 1/4 das entidades estão na área
-    
-    return TotalInArea / AreaKm2;
-}
-
-void UCrowdSimulationSubsystem::TriggerPredatorHuntBehavior(const FVector& Location, float Radius)
-{
-    // TODO: Implementar comportamento de caça coordenada
-    // Enviar sinal para todos os predadores na área para iniciar comportamento de caça
-    
-    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationSubsystem: Triggered predator hunt behavior at %s"), *Location.ToString());
-}
-
-void UCrowdSimulationSubsystem::TriggerHerdMigrationBehavior(const FString& SpeciesName)
-{
-    // TODO: Implementar comportamento de migração
-    // Enviar sinal para todas as manadas da espécie para iniciar migração
-    
-    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationSubsystem: Triggered migration for species %s"), *SpeciesName);
-}
-
-void UCrowdSimulationSubsystem::ToggleCrowdDebugVisualization(bool bEnabled)
-{
-    // TODO: Implementar visualização de debug
-    // Mostrar densidade populacional, rotas de migração, territórios de predadores, etc.
-    
-    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationSubsystem: Debug visualization %s"), 
-           bEnabled ? TEXT("enabled") : TEXT("disabled"));
-}
-
-void UCrowdSimulationSubsystem::UpdatePopulationTick()
-{
-    if (LastPlayerLocation.IsZero())
+    for (int32 RouteIndex : ActiveMigrations)
     {
-        return;
-    }
-    
-    // Atualizar densidade populacional
-    UpdatePopulationDensity(LastPlayerLocation);
-    
-    // Remover entidades distantes
-    CullDistantEntities(LastPlayerLocation);
-    
-    // Verificar limite máximo de entidades
-    int32 CurrentTotal = GetActiveEntityCount();
-    if (CurrentTotal > MaxTotalEntities)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationSubsystem: Entity count (%d) exceeds maximum (%d)"), 
-               CurrentTotal, MaxTotalEntities);
-        // TODO: Implementar culling inteligente
+        if (!MigrationRoutes.IsValidIndex(RouteIndex)) continue;
+        
+        FMigrationRoute& Route = MigrationRoutes[RouteIndex];
+        
+        // Update migration progress and move herds along routes
+        UpdateMigrationProgress(RouteIndex, DeltaTime);
     }
 }
 
-void UCrowdSimulationSubsystem::UpdateMigrationTick()
+void UCrowdSimulationSubsystem::CleanupInactiveCrowds()
 {
-    // TODO: Implementar lógica de migração sazonal
-    // Verificar se é época de migração para cada espécie
-    // Iniciar comportamentos de migração conforme necessário
-    
-    UE_LOG(LogTemp, Verbose, TEXT("CrowdSimulationSubsystem: Migration update tick"));
-}
-
-void UCrowdSimulationSubsystem::CullDistantEntities(const FVector& PlayerLocation)
-{
-    // TODO: Implementar culling de entidades distantes
-    // Remover entidades que estão além da distância de culling
-    // Atualizar contadores apropriadamente
-    
-    UE_LOG(LogTemp, Verbose, TEXT("CrowdSimulationSubsystem: Culling distant entities from %s"), 
-           *PlayerLocation.ToString());
-}
-
-bool UCrowdSimulationSubsystem::CanSpawnInArea(const FVector& Location, float Radius, int32 RequestedCount) const
-{
-    // Verificar se não excederemos o limite máximo
-    if (GetActiveEntityCount() + RequestedCount > MaxTotalEntities)
+    ActiveCrowds.RemoveAll([this](const FMassEntityHandle& Entity)
     {
+        if (!Entity.IsValid() || !MassEntitySubsystem->IsEntityValid(Entity))
+        {
+            CrowdParameters.Remove(Entity);
+            return true;
+        }
         return false;
+    });
+}
+
+FVector UCrowdSimulationSubsystem::CalculateFlockingForce(const FMassEntityHandle& Entity, const FDinosaurCrowdParams& Params)
+{
+    if (!Entity.IsValid()) return FVector::ZeroVector;
+
+    FVector EntityLocation = GetEntityLocation(Entity);
+    TArray<FMassEntityHandle> Neighbors = GetNearbyEntities(Entity, Params.AlignmentRadius);
+
+    FVector CohesionForce = CalculateCohesion(Entity, Neighbors) * Params.CohesionWeight;
+    FVector SeparationForce = CalculateSeparation(Entity, Neighbors, Params.SeparationRadius) * Params.SeparationWeight;
+    FVector AlignmentForce = CalculateAlignment(Entity, Neighbors) * Params.AlignmentWeight;
+
+    FVector TotalForce = CohesionForce + SeparationForce + AlignmentForce;
+    
+    // Clamp force magnitude
+    if (TotalForce.SizeSquared() > FMath::Square(Params.MovementSpeed))
+    {
+        TotalForce = TotalForce.GetSafeNormal() * Params.MovementSpeed;
     }
-    
-    // Verificar densidade local
-    float CurrentDensity = GetCurrentPopulationDensity(Location, Radius);
-    float MaxDensity = 100.0f; // entidades por km²
-    
-    return CurrentDensity < MaxDensity;
+
+    return TotalForce;
 }
 
-FVector UCrowdSimulationSubsystem::FindSuitableSpawnLocation(const FVector& Center, float Radius) const
+FVector UCrowdSimulationSubsystem::CalculateCohesion(const FMassEntityHandle& Entity, const TArray<FMassEntityHandle>& Neighbors)
 {
-    // TODO: Implementar verificação de terreno adequado
-    // Por agora, retornar localização aleatória dentro do raio
-    
-    FVector RandomOffset = FVector(
-        FMath::RandRange(-Radius, Radius),
-        FMath::RandRange(-Radius, Radius),
-        0.0f
-    );
-    
-    return Center + RandomOffset;
+    if (Neighbors.Num() == 0) return FVector::ZeroVector;
+
+    FVector EntityLocation = GetEntityLocation(Entity);
+    FVector CenterOfMass = FVector::ZeroVector;
+
+    for (const FMassEntityHandle& Neighbor : Neighbors)
+    {
+        if (Neighbor != Entity && Neighbor.IsValid())
+        {
+            CenterOfMass += GetEntityLocation(Neighbor);
+        }
+    }
+
+    if (Neighbors.Num() > 1)
+    {
+        CenterOfMass /= (Neighbors.Num() - 1);
+        return (CenterOfMass - EntityLocation).GetSafeNormal();
+    }
+
+    return FVector::ZeroVector;
 }
 
-FString UCrowdSimulationSubsystem::DetermineBiomeAtLocation(const FVector& Location) const
+FVector UCrowdSimulationSubsystem::CalculateSeparation(const FMassEntityHandle& Entity, const TArray<FMassEntityHandle>& Neighbors, float SeparationRadius)
 {
-    // TODO: Implementar detecção real de bioma baseada no sistema de mundo
-    // Por agora, retornar bioma padrão
-    return TEXT("Forest");
+    FVector EntityLocation = GetEntityLocation(Entity);
+    FVector SeparationForce = FVector::ZeroVector;
+
+    for (const FMassEntityHandle& Neighbor : Neighbors)
+    {
+        if (Neighbor != Entity && Neighbor.IsValid())
+        {
+            FVector NeighborLocation = GetEntityLocation(Neighbor);
+            FVector Difference = EntityLocation - NeighborLocation;
+            float Distance = Difference.Size();
+
+            if (Distance < SeparationRadius && Distance > 0.0f)
+            {
+                SeparationForce += Difference.GetSafeNormal() / Distance;
+            }
+        }
+    }
+
+    return SeparationForce.GetSafeNormal();
 }
 
-void UCrowdSimulationSubsystem::SetupDefaultBiomeConfigurations()
+FVector UCrowdSimulationSubsystem::CalculateAlignment(const FMassEntityHandle& Entity, const TArray<FMassEntityHandle>& Neighbors)
 {
-    // Configuração para Floresta
-    FBiomePopulationConfig ForestConfig;
-    ForestConfig.BiomeName = TEXT("Forest");
-    ForestConfig.MaxEntitiesPerSquareKm = 150;
-    ForestConfig.MinSpawnDistanceFromPlayer = 3000.0f;
-    ForestConfig.MaxSpawnDistanceFromPlayer = 15000.0f;
+    if (Neighbors.Num() == 0) return FVector::ZeroVector;
+
+    FVector AverageVelocity = FVector::ZeroVector;
+    int32 ValidNeighbors = 0;
+
+    for (const FMassEntityHandle& Neighbor : Neighbors)
+    {
+        if (Neighbor != Entity && Neighbor.IsValid())
+        {
+            FVector NeighborVelocity = GetEntityVelocity(Neighbor);
+            AverageVelocity += NeighborVelocity;
+            ValidNeighbors++;
+        }
+    }
+
+    if (ValidNeighbors > 0)
+    {
+        AverageVelocity /= ValidNeighbors;
+        return AverageVelocity.GetSafeNormal();
+    }
+
+    return FVector::ZeroVector;
+}
+
+// Helper functions implementation
+void UCrowdSimulationSubsystem::InitializeDefaultMigrationRoutes()
+{
+    // Create default migration routes across the map
+    FMigrationRoute NorthSouthRoute;
+    NorthSouthRoute.Waypoints = {
+        FVector(0, -50000, 0),
+        FVector(0, -25000, 0),
+        FVector(0, 0, 0),
+        FVector(0, 25000, 0),
+        FVector(0, 50000, 0)
+    };
+    NorthSouthRoute.RouteWidth = 3000.0f;
+    NorthSouthRoute.SeasonStartDay = 0.0f;
+    NorthSouthRoute.SeasonEndDay = 90.0f;
+    MigrationRoutes.Add(NorthSouthRoute);
+
+    FMigrationRoute EastWestRoute;
+    EastWestRoute.Waypoints = {
+        FVector(-50000, 0, 0),
+        FVector(-25000, 0, 0),
+        FVector(0, 0, 0),
+        FVector(25000, 0, 0),
+        FVector(50000, 0, 0)
+    };
+    EastWestRoute.RouteWidth = 2500.0f;
+    EastWestRoute.SeasonStartDay = 45.0f;
+    EastWestRoute.SeasonEndDay = 135.0f;
+    MigrationRoutes.Add(EastWestRoute);
+}
+
+void UCrowdSimulationSubsystem::GenerateCrowdFormation(const FVector& CenterLocation, int32 GroupSize, const FDinosaurCrowdParams& Params, TArray<FVector>& OutPositions)
+{
+    OutPositions.Empty();
+    OutPositions.Reserve(GroupSize);
+
+    // Generate positions in a natural cluster formation
+    for (int32 i = 0; i < GroupSize; i++)
+    {
+        float Angle = (2.0f * PI * i) / GroupSize + FMath::RandRange(-0.5f, 0.5f);
+        float Distance = FMath::RandRange(Params.SeparationRadius * 0.5f, Params.CohesionRadius * 0.8f);
+        
+        FVector Offset = FVector(
+            FMath::Cos(Angle) * Distance,
+            FMath::Sin(Angle) * Distance,
+            FMath::RandRange(-50.0f, 50.0f)
+        );
+        
+        OutPositions.Add(CenterLocation + Offset);
+    }
+}
+
+FMassEntityHandle UCrowdSimulationSubsystem::SpawnDinosaurEntity(const FVector& Location, const FDinosaurCrowdParams& Params)
+{
+    // This would integrate with the Mass Entity spawning system
+    // For now, return an invalid handle as placeholder
+    return FMassEntityHandle();
+}
+
+FVector UCrowdSimulationSubsystem::GetEntityLocation(const FMassEntityHandle& Entity) const
+{
+    // This would query the Mass Entity system for the entity's transform
+    return FVector::ZeroVector;
+}
+
+FVector UCrowdSimulationSubsystem::GetEntityVelocity(const FMassEntityHandle& Entity) const
+{
+    // This would query the Mass Entity system for the entity's velocity
+    return FVector::ZeroVector;
+}
+
+TArray<FMassEntityHandle> UCrowdSimulationSubsystem::GetNearbyEntities(const FMassEntityHandle& Entity, float Radius) const
+{
+    // This would query the Mass Entity system for nearby entities
+    return TArray<FMassEntityHandle>();
+}
+
+void UCrowdSimulationSubsystem::ApplyMovementForce(const FMassEntityHandle& Entity, const FVector& Force)
+{
+    // This would apply the force to the Mass Entity's movement component
+}
+
+void UCrowdSimulationSubsystem::ApplyPanicBehavior(const FMassEntityHandle& Entity, const FVector& ThreatLocation)
+{
+    // This would modify the entity's behavior to flee from the threat
+}
+
+void UCrowdSimulationSubsystem::SpawnMigrationHerds(int32 RouteIndex)
+{
+    // This would spawn large herds along the migration route
+}
+
+void UCrowdSimulationSubsystem::UpdateMigrationProgress(int32 RouteIndex, float DeltaTime)
+{
+    // This would update the progress of migrating herds along their routes
+}
+
+FVector UCrowdSimulationSubsystem::CalculateGroupCenter(const TArray<FVector>& Positions) const
+{
+    if (Positions.Num() == 0) return FVector::ZeroVector;
     
-    // Herbívoros da floresta
-    FDinosaurHerdData Triceratops;
-    Triceratops.SpeciesName = TEXT("Triceratops");
-    Triceratops.MinHerdSize = 8;
-    Triceratops.MaxHerdSize = 25;
-    Triceratops.PopulationDensityPerKm2 = 15.0f;
-    Triceratops.MovementSpeed = 400.0f;
-    Triceratops.FlockingRadius = 3000.0f;
-    Triceratops.SeparationRadius = 800.0f;
-    Triceratops.bMigratory = true;
-    ForestConfig.HerbivoreHerds.Add(Triceratops);
-    
-    FDinosaurHerdData Parasaurolophus;
-    Parasaurolophus.SpeciesName = TEXT("Parasaurolophus");
-    Parasaurolophus.MinHerdSize = 12;
-    Parasaurolophus.MaxHerdSize = 40;
-    Parasaurolophus.PopulationDensityPerKm2 = 25.0f;
-    Parasaurolophus.MovementSpeed = 600.0f;
-    Parasaurolophus.FlockingRadius = 2500.0f;
-    Parasaurolophus.SeparationRadius = 600.0f;
-    Parasaurolophus.bMigratory = true;
-    ForestConfig.HerbivoreHerds.Add(Parasaurolophus);
-    
-    // Predadores da floresta
-    FPredatorPackData Allosaurus;
-    Allosaurus.SpeciesName = TEXT("Allosaurus");
-    Allosaurus.MinPackSize = 2;
-    Allosaurus.MaxPackSize = 5;
-    Allosaurus.TerritoryRadius = 8000.0f;
-    Allosaurus.HuntingSpeed = 1200.0f;
-    Allosaurus.DetectionRange = 4000.0f;
-    Allosaurus.CoordinationRadius = 2000.0f;
-    ForestConfig.PredatorPacks.Add(Allosaurus);
-    
-    FPredatorPackData Compsognathus;
-    Compsognathus.SpeciesName = TEXT("Compsognathus");
-    Compsognathus.MinPackSize = 8;
-    Compsognathus.MaxPackSize = 20;
-    Compsognathus.TerritoryRadius = 3000.0f;
-    Compsognathus.HuntingSpeed = 800.0f;
-    Compsognathus.DetectionRange = 2000.0f;
-    Compsognathus.CoordinationRadius = 1000.0f;
-    ForestConfig.PredatorPacks.Add(Compsognathus);
-    
-    BiomeConfigurations.Add(TEXT("Forest"), ForestConfig);
-    
-    // Configuração para Planícies
-    FBiomePopulationConfig PlainsConfig;
-    PlainsConfig.BiomeName = TEXT("Plains");
-    PlainsConfig.MaxEntitiesPerSquareKm = 200;
-    PlainsConfig.MinSpawnDistanceFromPlayer = 5000.0f;
-    PlainsConfig.MaxSpawnDistanceFromPlayer = 25000.0f;
-    
-    // Herbívoros das planícies (manadas maiores)
-    FDinosaurHerdData Brachiosaurus;
-    Brachiosaurus.SpeciesName = TEXT("Brachiosaurus");
-    Brachiosaurus.MinHerdSize = 5;
-    Brachiosaurus.MaxHerdSize = 15;
-    Brachiosaurus.PopulationDensityPerKm2 = 8.0f;
-    Brachiosaurus.MovementSpeed = 300.0f;
-    Brachiosaurus.FlockingRadius = 5000.0f;
-    Brachiosaurus.SeparationRadius = 1500.0f;
-    Brachiosaurus.bMigratory = true;
-    PlainsConfig.HerbivoreHerds.Add(Brachiosaurus);
-    
-    FDinosaurHerdData Edmontosaurus;
-    Edmontosaurus.SpeciesName = TEXT("Edmontosaurus");
-    Edmontosaurus.MinHerdSize = 20;
-    Edmontosaurus.MaxHerdSize = 80;
-    Edmontosaurus.PopulationDensityPerKm2 = 35.0f;
-    Edmontosaurus.MovementSpeed = 700.0f;
-    Edmontosaurus.FlockingRadius = 4000.0f;
-    Edmontosaurus.SeparationRadius = 700.0f;
-    Edmontosaurus.bMigratory = true;
-    PlainsConfig.HerbivoreHerds.Add(Edmontosaurus);
-    
-    // Predadores das planícies
-    FPredatorPackData TyrannosaurusRex;
-    TyrannosaurusRex.SpeciesName = TEXT("TyrannosaurusRex");
-    TyrannosaurusRex.MinPackSize = 1;
-    TyrannosaurusRex.MaxPackSize = 3;
-    TyrannosaurusRex.TerritoryRadius = 15000.0f;
-    TyrannosaurusRex.HuntingSpeed = 1000.0f;
-    TyrannosaurusRex.DetectionRange = 6000.0f;
-    TyrannosaurusRex.CoordinationRadius = 3000.0f;
-    PlainsConfig.PredatorPacks.Add(TyrannosaurusRex);
-    
-    BiomeConfigurations.Add(TEXT("Plains"), PlainsConfig);
-    
-    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationSubsystem: Default biome configurations set up"));
+    FVector Center = FVector::ZeroVector;
+    for (const FVector& Position : Positions)
+    {
+        Center += Position;
+    }
+    return Center / Positions.Num();
 }
