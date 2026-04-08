@@ -11,33 +11,54 @@ public class TranspersonalGameTarget : TargetRules
         
         ExtraModuleNames.AddRange(new string[] { "TranspersonalGame" });
 
-        // Performance optimizations for shipping builds
-        if (Configuration == UnrealTargetConfiguration.Shipping)
+        // Performance optimizations
+        bUseUnityBuild = true;
+        bUsePCHFiles = true;
+        bUseSharedPCHs = true;
+        
+        // Enable modern C++ features
+        CppStandard = CppStandardVersion.Cpp20;
+        
+        // Disable legacy features
+        bLegacyPublicIncludePaths = false;
+        
+        // Enable faster iteration
+        bWithLiveCoding = true;
+        
+        // Platform-specific settings
+        if (Target.Platform == UnrealTargetPlatform.Win64)
+        {
+            WindowsPlatform.bStrictConformanceMode = true;
+        }
+
+        // Build configuration specific settings
+        if (Target.Configuration == UnrealTargetConfiguration.Shipping)
         {
             bUseLoggingInShipping = false;
             bUseChecksInShipping = false;
             bCompileWithStatsWithoutEngine = false;
             bCompileWithPluginSupport = true;
         }
-
-        // Development optimizations
-        if (Configuration == UnrealTargetConfiguration.Development)
+        else
         {
             bUseLoggingInShipping = true;
             bUseChecksInShipping = true;
             bCompileWithStatsWithoutEngine = true;
         }
 
-        // Platform-specific settings
-        if (Platform == UnrealTargetPlatform.Win64)
-        {
-            WindowsPlatform.PCHMemoryAllocationFactor = 2000;
-        }
-
-        // Enable modern C++ features
-        CppStandard = CppStandardVersion.Cpp17;
+        // Enable Mass Entity for crowd simulation
+        bCompileAgainstEngine = true;
+        bBuildDeveloperTools = Target.Configuration != UnrealTargetConfiguration.Shipping;
         
-        // Build optimization
-        bBuildInSolutionByDefault = true;
+        // Memory and performance
+        bOverrideBuildEnvironment = true;
+        
+        // Enable chaos physics
+        bUseChaos = true;
+        bCompileChaos = true;
+        bUseChaosChecked = Target.Configuration != UnrealTargetConfiguration.Shipping;
+        
+        // Audio settings for MetaSounds
+        bCompileWithPluginSupport = true;
     }
 }
