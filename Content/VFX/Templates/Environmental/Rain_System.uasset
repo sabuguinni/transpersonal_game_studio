@@ -1,0 +1,84 @@
+{
+  "AssetType": "NiagaraSystem",
+  "Name": "Rain_System",
+  "Description": "Sistema de chuva atmosférica com 3 níveis de LOD",
+  "Emitters": [
+    {
+      "Name": "RainDrops_Main",
+      "Type": "GPU",
+      "SpawnRate": "LODLevel < 1 ? 2000 : (LODLevel < 2 ? 800 : 200)",
+      "Lifetime": "2.5 + Random(-0.5, 0.5)",
+      "InitialVelocity": {
+        "X": "Wind.X * 0.3",
+        "Y": "Wind.Y * 0.3", 
+        "Z": "-1200 + Random(-200, 200)"
+      },
+      "Modules": [
+        "Initialize Particle",
+        "Update Age",
+        "Gravity Force",
+        "Wind Force",
+        "Collision (World)",
+        "Kill Particles in Volume",
+        "Sprite Renderer"
+      ],
+      "Renderer": {
+        "Material": "/Game/Materials/VFX/M_RainDrop",
+        "Size": "0.02 * ScaleVariation",
+        "Alignment": "Velocity"
+      }
+    },
+    {
+      "Name": "RainSplash_Impact",
+      "Type": "CPU",
+      "SpawnRate": "Event Driven",
+      "EventSource": "RainDrops_Main.Collision",
+      "Lifetime": "0.3",
+      "Modules": [
+        "Initialize Particle",
+        "Burst Instantaneous",
+        "Point Attractor",
+        "Scale by Speed",
+        "Sprite Renderer"
+      ]
+    },
+    {
+      "Name": "RainMist_Atmosphere",
+      "Type": "GPU",
+      "SpawnRate": "LODLevel < 2 ? 50 : 0",
+      "Lifetime": "8.0",
+      "Modules": [
+        "Initialize Particle",
+        "Noise Force",
+        "Drag",
+        "Volume Renderer"
+      ]
+    }
+  ],
+  "Parameters": [
+    {
+      "Name": "LODLevel",
+      "Type": "Float",
+      "Default": 0.0,
+      "Description": "0=High, 1=Medium, 2=Low quality"
+    },
+    {
+      "Name": "Wind",
+      "Type": "Vector3",
+      "Default": "(0, 0, 0)",
+      "Description": "Wind direction and strength"
+    },
+    {
+      "Name": "Intensity",
+      "Type": "Float", 
+      "Default": 1.0,
+      "Description": "Rain intensity multiplier"
+    },
+    {
+      "Name": "ScaleVariation",
+      "Type": "Float",
+      "Default": 1.0,
+      "Description": "Size variation for uniqueness"
+    }
+  ]
+}
