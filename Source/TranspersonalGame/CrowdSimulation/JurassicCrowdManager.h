@@ -1,183 +1,231 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
-#include "MassEntityTypes.h"
 #include "MassEntitySubsystem.h"
-#include "MassSpawnerTypes.h"
+#include "MassProcessor.h"
+#include "MassCommonFragments.h"
+#include "MassMovementFragments.h"
 #include "Engine/World.h"
 #include "JurassicCrowdManager.generated.h"
 
-UENUM(BlueprintType)
-enum class EDinosaurHerdType : uint8
-{
-    SmallHerbivore,     // Compsognathus, Gallimimus - grupos de 20-50
-    LargeHerbivore,     // Triceratops, Brachiosaurus - grupos de 5-15
-    PackHunter,         // Velociraptors, Deinonychus - grupos de 3-8
-    SolitaryPredator,   // T-Rex, Allosaurus - individuais ou pares
-    MixedHerd          // Herbívoros de diferentes espécies juntos
-};
+// Forward declarations
+class UMassEntitySubsystem;
+struct FMassEntityHandle;
 
+/**
+ * Fragment que define características únicas de cada dinossauro
+ */
 USTRUCT(BlueprintType)
-struct FHerdConfiguration
+struct TRANSPERSONALGAME_API FJurassicDinosaurFragment : public FMassFragment
 {
     GENERATED_BODY()
 
+    // Identificação única do dinossauro
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EDinosaurHerdType HerdType;
+    FGuid DinosaurID;
+
+    // Espécie do dinossauro
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FName Species;
+
+    // Variações genéticas visuais
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float HornSize = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 MinHerdSize = 5;
+    float EyeSize = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 MaxHerdSize = 20;
+    FLinearColor SkinTone = FLinearColor::White;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float BodyScale = 1.0f;
+
+    // Estado comportamental
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsHerbivore = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsDomesticated = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float AggressionLevel = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float FearLevel = 0.3f;
+
+    // Memória social
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TArray<FGuid> KnownDinosaurs;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FGuid PlayerMemory;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float PlayerTrustLevel = 0.0f;
+};
+
+/**
+ * Fragment para comportamento de manada
+ */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FJurassicHerdFragment : public FMassFragment
+{
+    GENERATED_BODY()
+
+    // ID da manada
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FGuid HerdID;
+
+    // Papel na manada
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsHerdLeader = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsScout = false;
+
+    // Coesão da manada
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     float CohesionRadius = 1000.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float SeparationRadius = 300.0f;
+    float SeparationRadius = 200.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float AlignmentRadius = 800.0f;
+    float AlignmentRadius = 500.0f;
+
+    // Estado da manada
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bHerdInDanger = false;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float FleeRadius = 2000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float MaxSpeed = 800.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float TurnSpeed = 180.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bCanMigrateSeasonally = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TArray<FVector> PreferredTerritories;
-};
-
-USTRUCT(BlueprintType)
-struct FMigrationRoute
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TArray<FVector> Waypoints;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float SeasonalTriggerTime = 300.0f; // segundos de jogo
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EDinosaurHerdType ApplicableHerdType;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bIsActiveRoute = false;
+    FVector DangerSource = FVector::ZeroVector;
 };
 
 /**
- * Gestor principal da simulação de multidões de dinossauros
- * Baseado no Mass AI do UE5 mas adaptado para comportamentos pré-históricos
+ * Fragment para rotinas diárias dos dinossauros
+ */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FJurassicDailyRoutineFragment : public FMassFragment
+{
+    GENERATED_BODY()
+
+    // Horário atual da rotina
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float CurrentTimeOfDay = 0.0f;
+
+    // Estados da rotina
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsFeeding = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsResting = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsHunting = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsMigrating = false;
+
+    // Localizações preferidas
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FVector FeedingLocation = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FVector RestingLocation = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FVector WaterSource = FVector::ZeroVector;
+
+    // Necessidades básicas
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float HungerLevel = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float ThirstLevel = 0.3f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float EnergyLevel = 0.8f;
+};
+
+/**
+ * Manager principal para simulação de crowds de dinossauros
  */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AJurassicCrowdManager : public AActor
+class TRANSPERSONALGAME_API UJurassicCrowdManager : public UObject
 {
     GENERATED_BODY()
 
 public:
-    AJurassicCrowdManager();
+    UJurassicCrowdManager();
+
+    // Inicialização do sistema
+    UFUNCTION(BlueprintCallable, Category = "Jurassic Crowd")
+    void InitializeCrowdSystem(UWorld* World);
+
+    // Spawning de manadas
+    UFUNCTION(BlueprintCallable, Category = "Jurassic Crowd")
+    void SpawnHerd(FName Species, int32 HerdSize, FVector SpawnLocation, float SpawnRadius = 1000.0f);
+
+    // Spawning de predadores solitários
+    UFUNCTION(BlueprintCallable, Category = "Jurassic Crowd")
+    void SpawnPredator(FName Species, FVector SpawnLocation, FVector TerritoryCenter, float TerritoryRadius = 5000.0f);
+
+    // Sistema de domesticação
+    UFUNCTION(BlueprintCallable, Category = "Jurassic Crowd")
+    bool AttemptDomestication(FGuid DinosaurID, float PlayerTrustGain);
+
+    // Queries de informação
+    UFUNCTION(BlueprintCallable, Category = "Jurassic Crowd")
+    TArray<FGuid> GetNearbyDinosaurs(FVector Location, float Radius);
+
+    UFUNCTION(BlueprintCallable, Category = "Jurassic Crowd")
+    FJurassicDinosaurFragment GetDinosaurInfo(FGuid DinosaurID);
+
+    // Sistema de memória e reconhecimento
+    UFUNCTION(BlueprintCallable, Category = "Jurassic Crowd")
+    void UpdatePlayerMemory(FGuid DinosaurID, FVector PlayerLocation, bool bPositiveInteraction);
 
 protected:
-    virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
+    // Referência ao subsistema Mass Entity
+    UPROPERTY()
+    UMassEntitySubsystem* MassEntitySubsystem;
 
-    // === CONFIGURAÇÃO DE MANADAS ===
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Herd Configuration")
-    TArray<FHerdConfiguration> HerdConfigurations;
+    // Configurações de spawning
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawning")
+    int32 MaxDinosaursPerSpecies = 1000;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Migration")
-    TArray<FMigrationRoute> MigrationRoutes;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawning")
+    float MinDistanceBetweenHerds = 2000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Simulation")
-    int32 MaxSimultaneousEntities = 10000;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Simulation")
-    float SimulationRadius = 50000.0f; // Raio em torno do jogador
+    // Configurações de performance
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 MaxSimultaneousAgents = 50000;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float LODDistance1 = 5000.0f;  // Distância para LOD completo
-    
+    float LODDistance1 = 1000.0f; // Simulação completa
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float LODDistance2 = 15000.0f; // Distância para LOD médio
-    
+    float LODDistance2 = 5000.0f; // Simulação simplificada
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float LODDistance3 = 30000.0f; // Distância para LOD mínimo
+    float LODDistance3 = 15000.0f; // Apenas posição
 
-    // === SISTEMA MASS AI ===
+    // Tracking de manadas ativas
     UPROPERTY()
-    class UMassEntitySubsystem* MassEntitySubsystem;
+    TMap<FGuid, TArray<FMassEntityHandle>> ActiveHerds;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mass AI")
-    TSubclassOf<class UMassEntityConfigAsset> HerbivoreEntityConfig;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mass AI")
-    TSubclassOf<class UMassEntityConfigAsset> CarnivoreEntityConfig;
-
-    // === ESTADO INTERNO ===
+    // Tracking de predadores ativos
     UPROPERTY()
-    TArray<FMassEntityHandle> ActiveHerds;
-
-    UPROPERTY()
-    float CurrentGameTime = 0.0f;
-
-    UPROPERTY()
-    bool bMigrationInProgress = false;
-
-public:
-    // === INTERFACE PÚBLICA ===
-    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void SpawnHerd(EDinosaurHerdType HerdType, FVector Location, int32 HerdSize = -1);
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void TriggerMigration(EDinosaurHerdType HerdType);
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void CauseStampede(FVector EpicenterLocation, float Radius, float Intensity);
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void SetPlayerLocation(FVector PlayerLocation);
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    int32 GetActiveEntityCount() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    TArray<FVector> GetNearbyHerdLocations(FVector Location, float Radius) const;
-
-    // === EVENTOS PARA OUTROS SISTEMAS ===
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnHerdSpawned, EDinosaurHerdType, HerdType, FVector, Location);
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnMigrationStarted, EDinosaurHerdType, HerdType, FVector, Destination);
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnStampedeTriggered, FVector, Location, float, Radius, int32, AffectedEntities);
-
-    UPROPERTY(BlueprintAssignable)
-    FOnHerdSpawned OnHerdSpawned;
-
-    UPROPERTY(BlueprintAssignable)
-    FOnMigrationStarted OnMigrationStarted;
-
-    UPROPERTY(BlueprintAssignable)
-    FOnStampedeTriggered OnStampedeTriggered;
+    TMap<FGuid, FMassEntityHandle> ActivePredators;
 
 private:
-    // === MÉTODOS INTERNOS ===
-    void UpdateSimulation(float DeltaTime);
-    void CheckMigrationTriggers();
-    void UpdateLODSystem();
-    void CleanupDistantEntities();
-    
-    FHerdConfiguration* GetHerdConfiguration(EDinosaurHerdType HerdType);
-    FVector GetOptimalSpawnLocation(EDinosaurHerdType HerdType, FVector PreferredLocation);
-    
-    // === INTEGRAÇÃO COM OUTROS SISTEMAS ===
-    void NotifyNPCBehaviorSystem();
-    void NotifyCombatAISystem();
+    // Geração procedural de características únicas
+    FJurassicDinosaurFragment GenerateUniqueTraits(FName Species);
+
+    // Criação de manadas com hierarquia social
+    void CreateHerdHierarchy(TArray<FMassEntityHandle>& HerdMembers, FGuid HerdID);
+
+    // Sistema de variação genética
+    void ApplyGeneticVariation(FJurassicDinosaurFragment& DinosaurTraits, FName Species);
 };
