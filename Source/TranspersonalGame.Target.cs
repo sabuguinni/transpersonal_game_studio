@@ -1,3 +1,5 @@
+// Copyright Transpersonal Game Studio. All Rights Reserved.
+
 using UnrealBuildTool;
 using System.Collections.Generic;
 
@@ -9,37 +11,33 @@ public class TranspersonalGameTarget : TargetRules
         DefaultBuildSettings = BuildSettingsVersion.V4;
         IncludeOrderVersion = EngineIncludeOrderVersion.Unreal5_3;
         
-        ExtraModuleNames.AddRange(new string[] 
-        { 
-            "TranspersonalGame",
-            "TranspersonalCore",
-            "TranspersonalAI",
-            "TranspersonalWorld",
-            "TranspersonalPlayer"
-        });
-
+        ExtraModuleNames.AddRange(new string[] { "TranspersonalGame" });
+        
         // Performance optimizations
         bUseUnityBuild = true;
         bUsePCHFiles = true;
+        bUseSharedPCHs = true;
         
-        // Enable for shipping builds
+        // Enable hot reload for development
+        if (Configuration == UnrealTargetConfiguration.Development ||
+            Configuration == UnrealTargetConfiguration.DebugGame)
+        {
+            bUseIncrementalLinking = true;
+            bUseFastMonoCalls = true;
+        }
+        
+        // Shipping optimizations
         if (Configuration == UnrealTargetConfiguration.Shipping)
         {
             bUseLoggingInShipping = false;
             bUseChecksInShipping = false;
-            bCompileWithStatsWithoutEngine = false;
+            bCompileICU = false;
+            bBuildDeveloperTools = false;
+            bBuildWithEditorOnlyData = false;
         }
-
-        // Development settings
-        if (Configuration == UnrealTargetConfiguration.Development || 
-            Configuration == UnrealTargetConfiguration.DebugGame)
-        {
-            bUseLoggingInShipping = true;
-            bCompileWithStatsWithoutEngine = true;
-        }
-
+        
         // Platform-specific settings
-        if (Target.Platform == UnrealTargetPlatform.Win64)
+        if (Platform == UnrealTargetPlatform.Win64)
         {
             WindowsPlatform.PCHMemoryAllocationFactor = 2000;
         }
