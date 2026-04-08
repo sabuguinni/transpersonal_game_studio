@@ -1,0 +1,69 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Engine/World.h"
+#include "GameFramework/GameModeBase.h"
+#include "Components/ActorComponent.h"
+#include "CharacterSystemManager.generated.h"
+
+class UMetaHumanCharacterAsset;
+class ATranspersonalCharacterBase;
+
+/**
+ * Manages the character system for the Transpersonal Game
+ * Handles MetaHuman creation, variation generation, and character spawning
+ */
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UCharacterSystemManager : public UActorComponent
+{
+    GENERATED_BODY()
+
+public:
+    UCharacterSystemManager();
+
+    // Initialize the character system
+    UFUNCTION(BlueprintCallable, Category = "Character System")
+    void InitializeCharacterSystem();
+
+    // Create the main protagonist character
+    UFUNCTION(BlueprintCallable, Category = "Character System")
+    ATranspersonalCharacterBase* CreateProtagonist(const FVector& SpawnLocation);
+
+    // Generate a random NPC with variation
+    UFUNCTION(BlueprintCallable, Category = "Character System")
+    ATranspersonalCharacterBase* GenerateRandomNPC(const FVector& SpawnLocation, const FString& ArchetypeID);
+
+protected:
+    virtual void BeginPlay() override;
+
+    // Character archetypes and presets
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Presets")
+    TMap<FString, TSoftObjectPtr<UMetaHumanCharacterAsset>> CharacterPresets;
+
+    // Protagonist configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Protagonist")
+    TSoftObjectPtr<UMetaHumanCharacterAsset> ProtagonistPreset;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Protagonist")
+    FString ProtagonistName;
+
+    // Character variation system
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Variation")
+    float FacialVariationRange = 0.3f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Variation")
+    float BodyVariationRange = 0.2f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Variation")
+    int32 MaxUniqueCharacters = 100;
+
+private:
+    // Track generated characters to ensure uniqueness
+    TArray<FString> GeneratedCharacterHashes;
+
+    // Generate unique variation parameters
+    FString GenerateCharacterVariation(const FString& BaseArchetype);
+
+    // Ensure character uniqueness
+    bool IsCharacterUnique(const FString& CharacterHash);
+};
