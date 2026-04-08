@@ -1,120 +1,139 @@
 #include "AnimationSystemCore.h"
 #include "Engine/World.h"
-#include "GameFramework/Character.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Animation/PoseSearch/PoseSearchLibrary.h"
+#include "DrawDebugHelpers.h"
 
 UAnimationSystemCore::UAnimationSystemCore()
 {
-    // Initialize default animation state
-    CurrentAnimationState = FAnimationStateData();
-    StateTransitionTimer = 0.0f;
-    PreviousState = ECharacterAnimationState::Idle;
+    // Initialize default character profile
+    CurrentProfile.Confidence = 0.5f;
+    CurrentProfile.Nervousness = 0.3f;
+    CurrentProfile.Fatigue = 0.0f;
+    CurrentProfile.InjuryLevel = 0.0f;
+    CurrentProfile.BaseMovementSpeed = 1.0f;
+    CurrentProfile.StepVariation = 0.1f;
+    CurrentProfile.PosturalTension = 0.2f;
+
+    CurrentTerrainType = ETerrainAdaptation::Flat;
+    FootIKTargets.SetNum(2); // Left and right foot
 }
 
-void UAnimationSystemCore::UpdateAnimationState(const FAnimationStateData& NewState)
+void UAnimationSystemCore::InitializeMotionMatchingDatabases()
 {
-    // Store previous state for blend calculations
-    PreviousState = CurrentAnimationState.CurrentState;
+    // This will be populated with actual database assets
+    // For now, we establish the structure
     
-    // Update current state
-    CurrentAnimationState = NewState;
+    UE_LOG(LogTemp, Warning, TEXT("AnimationSystemCore: Initializing Motion Matching databases"));
     
-    // Reset transition timer
-    StateTransitionTimer = 0.0f;
-    
-    // Log state change for debugging
-    UE_LOG(LogTemp, Log, TEXT("Animation State Changed: %s -> %s"), 
-           *UEnum::GetValueAsString(PreviousState),
-           *UEnum::GetValueAsString(CurrentAnimationState.CurrentState));
+    // Movement state databases would be loaded here
+    // Each database contains animations specific to that movement state
+    // organized by character archetype and emotional state
 }
 
-UPoseSearchDatabase* UAnimationSystemCore::GetActiveDatabase() const
+UPoseSearchDatabase* UAnimationSystemCore::GetDatabaseForState(ECharacterMovementState State, ETerrainAdaptation Terrain)
 {
-    // Select database based on current state and fear level
-    switch (CurrentAnimationState.CurrentState)
+    // Primary database selection based on movement state
+    UPoseSearchDatabase** PrimaryDatabase = MovementDatabases.Find(State);
+    if (PrimaryDatabase && *PrimaryDatabase)
     {
-        case ECharacterAnimationState::Idle:
-        case ECharacterAnimationState::Walking:
-        case ECharacterAnimationState::Jogging:
-            if (CurrentAnimationState.FearLevel > 0.7f)
-            {
-                return PanicMovementDatabase;
-            }
-            else if (CurrentAnimationState.CautionLevel > 0.6f)
-            {
-                return CautiousMovementDatabase;
-            }
-            return LocomotionDatabase;
+        return *PrimaryDatabase;
+    }
+
+    // Fallback to terrain-specific database
+    UPoseSearchDatabase** TerrainDatabase = TerrainDatabases.Find(Terrain);
+    if (TerrainDatabase && *TerrainDatabase)
+    {
+        return *TerrainDatabase;
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("AnimationSystemCore: No database found for state %d, terrain %d"), 
+           (int32)State, (int32)Terrain);
+    
+    return nullptr;
+}
+
+void UAnimationSystemCore::SetCharacterAnimationProfile(const FCharacterAnimationProfile& Profile)
+{
+    CurrentProfile = Profile;
+    
+    // Recalculate movement parameters based on new profile
+    // This affects how Motion Matching selects animations
+    
+    UE_LOG(LogTemp, Log, TEXT("AnimationSystemCore: Updated character profile - Confidence: %f, Nervousness: %f"), 
+           Profile.Confidence, Profile.Nervousness);
+}
+
+void UAnimationSystemCore::UpdateTerrainAdaptation(const FVector& FootLocation, float TerrainHeight)
+{
+    // Analyze terrain at foot location
+    AnalyzeTerrainType(FootLocation);
+    
+    // Update IK targets based on terrain
+    // This ensures feet properly contact uneven surfaces
+    for (int32 i = 0; i < FootIKTargets.Num(); i++)
+    {
+        FootIKTargets[i].Z = TerrainHeight;
+    }
+}
+
+void UAnimationSystemCore::SetIKTargets(const TArray<FVector>& FootTargets)
+{
+    FootIKTargets = FootTargets;
+    
+    // Validate IK targets are within reasonable range
+    for (const FVector& Target : FootIKTargets)
+    {
+        float Distance = FVector::Dist(Target, FVector::ZeroVector);
+        if (Distance > MaxIKReach)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("AnimationSystemCore: IK target exceeds max reach: %f"), Distance);
+        }
+    }
+}
+
+void UAnimationSystemCore::AnalyzeTerrainType(const FVector& Location)
+{
+    // This would integrate with the Procedural World Generator's terrain data
+    // For now, we establish the interface
+    
+    // Terrain analysis would consider:
+    // - Surface angle (flat, uphill, downhill)
+    // - Material type (rock, mud, vegetation)
+    // - Stability (solid, loose, slippery)
+    
+    CurrentTerrainType = ETerrainAdaptation::Flat; // Placeholder
+}
+
+float UAnimationSystemCore::CalculateMovementWeight(ECharacterMovementState State) const
+{
+    float BaseWeight = 1.0f;
+    
+    // Modify weight based on character profile
+    switch (State)
+    {
+        case ECharacterMovementState::Walking:
+            BaseWeight *= (1.0f - CurrentProfile.Nervousness * 0.3f);
+            BaseWeight *= (1.0f - CurrentProfile.Fatigue * 0.5f);
+            break;
             
-        case ECharacterAnimationState::Cautious:
-        case ECharacterAnimationState::Sneaking:
-        case ECharacterAnimationState::Hiding:
-        case ECharacterAnimationState::Observing:
-            return CautiousMovementDatabase;
+        case ECharacterMovementState::Running:
+            BaseWeight *= CurrentProfile.Confidence;
+            BaseWeight *= (1.0f - CurrentProfile.InjuryLevel * 0.8f);
+            break;
             
-        case ECharacterAnimationState::Running:
-            return PanicMovementDatabase;
+        case ECharacterMovementState::Crouching:
+            BaseWeight *= (1.0f + CurrentProfile.Nervousness * 0.5f);
+            break;
             
-        case ECharacterAnimationState::Gathering:
-        case ECharacterAnimationState::Crafting:
-        case ECharacterAnimationState::Climbing:
-            return InteractionDatabase;
+        case ECharacterMovementState::Fearful:
+            BaseWeight *= CurrentProfile.Nervousness;
+            BaseWeight *= (1.0f + CurrentProfile.PosturalTension);
+            break;
             
         default:
-            return LocomotionDatabase;
-    }
-}
-
-float UAnimationSystemCore::CalculateBlendTime(ECharacterAnimationState FromState, ECharacterAnimationState ToState) const
-{
-    // Fast transitions for panic states
-    if (ToState == ECharacterAnimationState::Running || 
-        FromState == ECharacterAnimationState::Running)
-    {
-        return FAST_BLEND_TIME;
-    }
-    
-    // Slow transitions for careful movements
-    if (ToState == ECharacterAnimationState::Cautious ||
-        ToState == ECharacterAnimationState::Sneaking ||
-        ToState == ECharacterAnimationState::Hiding)
-    {
-        return SLOW_BLEND_TIME;
-    }
-    
-    // Normal transitions for most cases
-    return NORMAL_BLEND_TIME;
-}
-
-void UAnimationSystemCore::SetFearLevel(float NewFearLevel)
-{
-    CurrentAnimationState.FearLevel = FMath::Clamp(NewFearLevel, 0.0f, 1.0f);
-    
-    // Automatically adjust caution level based on fear
-    CurrentAnimationState.CautionLevel = FMath::Max(CurrentAnimationState.CautionLevel, 
-                                                   CurrentAnimationState.FearLevel * 0.8f);
-}
-
-void UAnimationSystemCore::SetTerrainType(ETerrainType NewTerrain)
-{
-    CurrentAnimationState.CurrentTerrain = NewTerrain;
-    
-    // Adjust caution level based on terrain difficulty
-    switch (NewTerrain)
-    {
-        case ETerrainType::Rocky:
-        case ETerrainType::Muddy:
-            CurrentAnimationState.CautionLevel = FMath::Max(CurrentAnimationState.CautionLevel, 0.7f);
-            break;
-        case ETerrainType::Uphill:
-        case ETerrainType::Downhill:
-            CurrentAnimationState.CautionLevel = FMath::Max(CurrentAnimationState.CautionLevel, 0.6f);
-            break;
-        case ETerrainType::Vegetation:
-        case ETerrainType::Water:
-            CurrentAnimationState.CautionLevel = FMath::Max(CurrentAnimationState.CautionLevel, 0.5f);
-            break;
-        default:
-            // Flat terrain - no additional caution
             break;
     }
+    
+    return FMath::Clamp(BaseWeight, 0.1f, 2.0f);
 }
