@@ -1,614 +1,493 @@
 // Copyright Transpersonal Game Studio. All Rights Reserved.
-// Architectural Storytelling System - Every structure tells a story
+// Architectural Storytelling System Implementation
 // Agent #07 - Architecture & Interior Agent
 
 #include "ArchitecturalStorytellingSystem.h"
-#include "Engine/World.h"
-#include "Engine/Engine.h"
-#include "GameFramework/Actor.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Components/AudioComponent.h"
 #include "Components/DecalComponent.h"
-#include "Materials/MaterialInterface.h"
-#include "Sound/SoundCue.h"
-#include "Particles/ParticleSystem.h"
+#include "Engine/World.h"
+#include "Engine/Engine.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "Kismet/GameplayStatics.h"
+#include "Kismet/KismetMathLibrary.h"
 #include "PCGComponent.h"
 #include "PCGGraph.h"
-#include "Kismet/KismetMathLibrary.h"
-#include "Kismet/GameplayStatics.h"
-#include "Engine/StaticMesh.h"
-#include "UObject/ConstructorHelpers.h"
+#include "Sound/SoundCue.h"
+#include "Particles/ParticleSystemComponent.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogArchitecturalStorytelling, Log, All);
 
-// Sets default values
 AArchitecturalStorytellingSystem::AArchitecturalStorytellingSystem()
 {
     PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 0.1f; // Update 10 times per second
+    PrimaryActorTick.TickInterval = 1.0f; // Update every second
     
     // Create root component
     RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
     
-    // Create PCG component for procedural generation
+    // Create main structure mesh
+    MainStructureMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("MainStructureMesh"));
+    MainStructureMesh->SetupAttachment(RootComponent);
+    MainStructureMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+    MainStructureMesh->SetCollisionResponseToAllChannels(ECR_Block);
+    
+    // Create PCG component for interior generation
     PCGComponent = CreateDefaultSubobject<UPCGComponent>(TEXT("PCGComponent"));
-    PCGComponent->SetupAttachment(RootComponent);
     
     // Create instanced mesh component for props
-    PropInstancedMeshComponent = CreateDefaultSubobject<UInstancedStaticMeshComponent>(TEXT("PropInstancedMesh"));
-    PropInstancedMeshComponent->SetupAttachment(RootComponent);
+    PropInstancedMesh = CreateDefaultSubobject<UInstancedStaticMeshComponent>(TEXT("PropInstancedMesh"));
+    PropInstancedMesh->SetupAttachment(RootComponent);
     
-    // Create audio component for ambient sounds
-    AmbientAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AmbientAudio"));
-    AmbientAudioComponent->SetupAttachment(RootComponent);
-    AmbientAudioComponent->bAutoActivate = false;
+    // Create ambient audio component
+    AmbientAudio = CreateDefaultSubobject<UAudioComponent>(TEXT("AmbientAudio"));
+    AmbientAudio->SetupAttachment(RootComponent);
+    AmbientAudio->bAutoActivate = false;
     
     // Initialize default values
-    CurrentDecayStage = EDecayStage::Early;
+    StructureType = EArchitectureType::BasicShelter;
     InhabitationStory = EInhabitationStory::PeacefulFamily;
+    DecayStage = EDecayStage::Fresh;
     StorytellingIntensity = 0.7f;
-    DecayRate = 0.1f;
-    bIsActivelyGenerating = false;
-    bHasBeenInitialized = false;
+    bHasActiveNarrative = true;
+    bIsPlayerDiscovered = false;
     
-    // Initialize prop spawn probabilities
-    InitializeDefaultPropProbabilities();
-    
-    // Initialize zone configurations
-    InitializeDefaultZoneConfigs();
+    // Initialize interior zones
+    InitializeDefaultInteriorZones();
 }
 
 void AArchitecturalStorytellingSystem::BeginPlay()
 {
     Super::BeginPlay();
     
-    UE_LOG(LogArchitecturalStorytelling, Log, TEXT("ArchitecturalStorytellingSystem: BeginPlay started"));
+    UE_LOG(LogArchitecturalStorytelling, Log, TEXT("Initializing Architectural Storytelling System"));
     
-    // Initialize the system
-    InitializeStorytellingSystem();
+    // Generate the structure and its story
+    GenerateStructureStory();
+    PopulateInteriorWithProps();
+    ApplyDecayEffects();
+    SetupAmbientEffects();
     
-    // Start generation if auto-generate is enabled
-    if (bAutoGenerateOnBeginPlay)
-    {
-        GenerateArchitecturalStory();
-    }
-    
-    UE_LOG(LogArchitecturalStorytelling, Log, TEXT("ArchitecturalStorytellingSystem: BeginPlay completed"));
+    UE_LOG(LogArchitecturalStorytelling, Log, TEXT("Architectural storytelling system initialized successfully"));
 }
 
 void AArchitecturalStorytellingSystem::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
     
-    if (bIsActivelyGenerating)
-    {
-        UpdateStorytellingGeneration(DeltaTime);
-    }
+    // Update atmospheric effects based on player proximity
+    UpdateAtmosphericEffects();
     
-    // Update decay progression
-    UpdateDecayProgression(DeltaTime);
-    
-    // Update atmospheric effects
-    UpdateAtmosphericEffects(DeltaTime);
+    // Check for player discovery
+    CheckPlayerDiscovery();
 }
 
-void AArchitecturalStorytellingSystem::InitializeStorytellingSystem()
+void AArchitecturalStorytellingSystem::GenerateStructureStory()
 {
-    UE_LOG(LogArchitecturalStorytelling, Log, TEXT("Initializing Architectural Storytelling System"));
+    UE_LOG(LogArchitecturalStorytelling, Log, TEXT("Generating structure story for type: %s"), 
+           *UEnum::GetValueAsString(StructureType));
     
-    // Find biome manager reference
-    if (!BiomeManagerRef)
+    // Clear existing story elements
+    StorytellingProps.Empty();
+    InteriorZones.Empty();
+    
+    // Generate story based on structure type and inhabitation story
+    switch (InhabitationStory)
     {
-        BiomeManagerRef = Cast<AJurassicBiomeManager>(
-            UGameplayStatics::GetActorOfClass(GetWorld(), AJurassicBiomeManager::StaticClass())
-        );
+        case EInhabitationStory::PeacefulFamily:
+            GeneratePeacefulFamilyStory();
+            break;
+        case EInhabitationStory::LoneHunter:
+            GenerateLoneHunterStory();
+            break;
+        case EInhabitationStory::TradingPost:
+            GenerateTradingPostStory();
+            break;
+        case EInhabitationStory::DefensiveOutpost:
+            GenerateDefensiveOutpostStory();
+            break;
+        case EInhabitationStory::HastyFlight:
+            GenerateHastyFlightStory();
+            break;
+        case EInhabitationStory::TragedyStruck:
+            GenerateTragedyStruckStory();
+            break;
+        default:
+            GenerateGenericStory();
+            break;
     }
     
-    // Find environment art manager reference
-    if (!EnvironmentArtManagerRef)
-    {
-        EnvironmentArtManagerRef = Cast<AEnvironmentArtManager>(
-            UGameplayStatics::GetActorOfClass(GetWorld(), AEnvironmentArtManager::StaticClass())
-        );
-    }
-    
-    // Initialize PCG component if graph is assigned
-    if (PCGComponent && StorytellingPCGGraph)
-    {
-        PCGComponent->SetGraph(StorytellingPCGGraph);
-        UE_LOG(LogArchitecturalStorytelling, Log, TEXT("PCG Graph assigned to storytelling system"));
-    }
-    
-    // Load default storytelling props
-    LoadStorytellingAssets();
-    
-    bHasBeenInitialized = true;
-    UE_LOG(LogArchitecturalStorytelling, Log, TEXT("Architectural Storytelling System initialized successfully"));
+    UE_LOG(LogArchitecturalStorytelling, Log, TEXT("Generated %d story props for structure"), 
+           StorytellingProps.Num());
 }
 
-void AArchitecturalStorytellingSystem::GenerateArchitecturalStory()
+void AArchitecturalStorytellingSystem::PopulateInteriorWithProps()
 {
-    if (!bHasBeenInitialized)
+    if (!PropInstancedMesh)
     {
-        UE_LOG(LogArchitecturalStorytelling, Warning, TEXT("Cannot generate story - system not initialized"));
+        UE_LOG(LogArchitecturalStorytelling, Warning, TEXT("PropInstancedMesh is null, cannot populate interior"));
         return;
     }
     
-    UE_LOG(LogArchitecturalStorytelling, Log, TEXT("Generating architectural story for: %s"), 
-           *UEnum::GetValueAsString(InhabitationStory));
+    // Clear existing instances
+    PropInstancedMesh->ClearInstances();
     
-    bIsActivelyGenerating = true;
-    
-    // Clear existing generated content
-    ClearGeneratedContent();
-    
-    // Generate interior zones based on structure type
-    GenerateInteriorZones();
-    
-    // Place storytelling props in each zone
-    PlaceStorytellingProps();
-    
-    // Apply decay effects based on current decay stage
-    ApplyDecayEffects();
-    
-    // Generate atmospheric effects
-    GenerateAtmosphericEffects();
-    
-    // Trigger PCG generation if component is available
-    if (PCGComponent)
+    // Place props in each interior zone
+    for (const FInteriorZoneConfig& Zone : InteriorZones)
     {
-        PCGComponent->Generate();
+        PlacePropsInZone(Zone);
     }
     
-    bIsActivelyGenerating = false;
-    
-    UE_LOG(LogArchitecturalStorytelling, Log, TEXT("Architectural story generation completed"));
-    
-    // Broadcast completion event
-    OnStoryGenerationComplete.Broadcast(InhabitationStory, CurrentDecayStage);
-}
-
-void AArchitecturalStorytellingSystem::GenerateInteriorZones()
-{
-    UE_LOG(LogArchitecturalStorytelling, Log, TEXT("Generating interior zones"));
-    
-    // Clear existing zones
-    InteriorZones.Empty();
-    
-    // Generate zones based on inhabitation story
-    TArray<EInteriorZone> RequiredZones = GetRequiredZonesForStory(InhabitationStory);
-    
-    for (EInteriorZone ZoneType : RequiredZones)
-    {
-        FInteriorZoneConfig ZoneConfig = GenerateZoneConfiguration(ZoneType);
-        InteriorZones.Add(ZoneType, ZoneConfig);
-        
-        UE_LOG(LogArchitecturalStorytelling, Verbose, TEXT("Generated zone: %s"), 
-               *UEnum::GetValueAsString(ZoneType));
-    }
-    
-    // Add optional zones based on story complexity
-    AddOptionalZones();
-}
-
-void AArchitecturalStorytellingSystem::PlaceStorytellingProps()
-{
-    UE_LOG(LogArchitecturalStorytelling, Log, TEXT("Placing storytelling props"));
-    
-    PlacedProps.Empty();
-    
-    for (auto& ZonePair : InteriorZones)
-    {
-        EInteriorZone ZoneType = ZonePair.Key;
-        FInteriorZoneConfig& ZoneConfig = ZonePair.Value;
-        
-        // Get props appropriate for this zone and story
-        TArray<FStorytellingProp> ZoneProps = GetPropsForZone(ZoneType, InhabitationStory);
-        
-        // Place props within zone bounds
-        for (const FStorytellingProp& Prop : ZoneProps)
-        {
-            if (ShouldPlaceProp(Prop, ZoneType))
-            {
-                FVector PropLocation = CalculatePropPlacement(Prop, ZoneConfig);
-                FRotator PropRotation = CalculatePropRotation(Prop, ZoneConfig);
-                float PropScale = CalculatePropScale(Prop);
-                
-                PlacePropInWorld(Prop, PropLocation, PropRotation, PropScale);
-            }
-        }
-    }
-    
-    UE_LOG(LogArchitecturalStorytelling, Log, TEXT("Placed %d storytelling props"), PlacedProps.Num());
+    UE_LOG(LogArchitecturalStorytelling, Log, TEXT("Populated interior with %d prop instances"), 
+           PropInstancedMesh->GetInstanceCount());
 }
 
 void AArchitecturalStorytellingSystem::ApplyDecayEffects()
 {
-    UE_LOG(LogArchitecturalStorytelling, Log, TEXT("Applying decay effects for stage: %s"), 
-           *UEnum::GetValueAsString(CurrentDecayStage));
-    
-    // Apply decay to placed props
-    for (FPlacedProp& PlacedProp : PlacedProps)
+    if (!MainStructureMesh)
     {
-        ApplyDecayToProp(PlacedProp);
+        return;
     }
     
-    // Apply environmental decay effects
-    ApplyEnvironmentalDecay();
-    
-    // Update material parameters for decay
-    UpdateDecayMaterials();
-}
-
-void AArchitecturalStorytellingSystem::GenerateAtmosphericEffects()
-{
-    UE_LOG(LogArchitecturalStorytelling, Log, TEXT("Generating atmospheric effects"));
-    
-    // Generate ambient sounds based on story and decay
-    GenerateAmbientSounds();
-    
-    // Generate particle effects for atmosphere
-    GenerateAtmosphericParticles();
-    
-    // Set lighting hints for the lighting agent
-    GenerateLightingHints();
-}
-
-TArray<EInteriorZone> AArchitecturalStorytellingSystem::GetRequiredZonesForStory(EInhabitationStory Story)
-{
-    TArray<EInteriorZone> RequiredZones;
-    
-    // All stories require basic zones
-    RequiredZones.Add(EInteriorZone::Entrance);
-    RequiredZones.Add(EInteriorZone::Living);
-    RequiredZones.Add(EInteriorZone::Sleeping);
-    
-    switch (Story)
+    // Create dynamic material for decay effects
+    UMaterialInterface* BaseMaterial = MainStructureMesh->GetMaterial(0);
+    if (BaseMaterial)
     {
-        case EInhabitationStory::PeacefulFamily:
-            RequiredZones.Add(EInteriorZone::Cooking);
-            RequiredZones.Add(EInteriorZone::Storage);
-            break;
-            
-        case EInhabitationStory::SkillfulCrafter:
-            RequiredZones.Add(EInteriorZone::Work);
-            RequiredZones.Add(EInteriorZone::Storage);
-            break;
-            
-        case EInhabitationStory::SpiritualLeader:
-            RequiredZones.Add(EInteriorZone::Ritual);
-            RequiredZones.Add(EInteriorZone::Storage);
-            break;
-            
-        case EInhabitationStory::FearfulSurvivor:
-            RequiredZones.Add(EInteriorZone::Emergency);
-            RequiredZones.Add(EInteriorZone::Storage);
-            break;
-            
-        case EInhabitationStory::TragedyStruck:
-            RequiredZones.Add(EInteriorZone::Storage);
-            break;
-            
-        default:
-            RequiredZones.Add(EInteriorZone::Storage);
-            break;
-    }
-    
-    return RequiredZones;
-}
-
-FInteriorZoneConfig AArchitecturalStorytellingSystem::GenerateZoneConfiguration(EInteriorZone ZoneType)
-{
-    FInteriorZoneConfig Config;
-    Config.ZoneType = ZoneType;
-    Config.ZoneName = UEnum::GetValueAsString(ZoneType);
-    
-    // Set zone-specific parameters
-    switch (ZoneType)
-    {
-        case EInteriorZone::Entrance:
-            Config.ZoneRadius = 150.0f;
-            Config.ZoneExtents = FVector(300.0f, 200.0f, 250.0f);
-            Config.MinProps = 1;
-            Config.MaxProps = 3;
-            break;
-            
-        case EInteriorZone::Living:
-            Config.ZoneRadius = 250.0f;
-            Config.ZoneExtents = FVector(400.0f, 400.0f, 250.0f);
-            Config.MinProps = 3;
-            Config.MaxProps = 8;
-            break;
-            
-        case EInteriorZone::Sleeping:
-            Config.ZoneRadius = 200.0f;
-            Config.ZoneExtents = FVector(300.0f, 300.0f, 200.0f);
-            Config.MinProps = 2;
-            Config.MaxProps = 5;
-            break;
-            
-        case EInteriorZone::Cooking:
-            Config.ZoneRadius = 180.0f;
-            Config.ZoneExtents = FVector(250.0f, 250.0f, 200.0f);
-            Config.MinProps = 2;
-            Config.MaxProps = 6;
-            break;
-            
-        case EInteriorZone::Storage:
-            Config.ZoneRadius = 120.0f;
-            Config.ZoneExtents = FVector(200.0f, 200.0f, 180.0f);
-            Config.MinProps = 1;
-            Config.MaxProps = 4;
-            break;
-            
-        case EInteriorZone::Work:
-            Config.ZoneRadius = 200.0f;
-            Config.ZoneExtents = FVector(300.0f, 250.0f, 200.0f);
-            Config.MinProps = 3;
-            Config.MaxProps = 7;
-            break;
-            
-        case EInteriorZone::Ritual:
-            Config.ZoneRadius = 180.0f;
-            Config.ZoneExtents = FVector(250.0f, 250.0f, 220.0f);
-            Config.MinProps = 2;
-            Config.MaxProps = 5;
-            break;
-            
-        case EInteriorZone::Emergency:
-            Config.ZoneRadius = 100.0f;
-            Config.ZoneExtents = FVector(150.0f, 150.0f, 150.0f);
-            Config.MinProps = 1;
-            Config.MaxProps = 3;
-            break;
-    }
-    
-    // Calculate zone center based on structure layout
-    Config.ZoneCenter = CalculateZoneCenter(ZoneType);
-    
-    return Config;
-}
-
-void AArchitecturalStorytellingSystem::InitializeDefaultPropProbabilities()
-{
-    // Initialize default spawn probabilities for different stories
-    // This would be expanded with actual prop data
-    UE_LOG(LogArchitecturalStorytelling, Log, TEXT("Initializing default prop probabilities"));
-}
-
-void AArchitecturalStorytellingSystem::InitializeDefaultZoneConfigs()
-{
-    // Initialize default zone configurations
-    // This would be expanded with actual zone data
-    UE_LOG(LogArchitecturalStorytelling, Log, TEXT("Initializing default zone configurations"));
-}
-
-void AArchitecturalStorytellingSystem::LoadStorytellingAssets()
-{
-    UE_LOG(LogArchitecturalStorytelling, Log, TEXT("Loading storytelling assets"));
-    
-    // Load default meshes, materials, sounds, and particles
-    // This would be expanded to load actual asset references
-}
-
-void AArchitecturalStorytellingSystem::ClearGeneratedContent()
-{
-    UE_LOG(LogArchitecturalStorytelling, Log, TEXT("Clearing existing generated content"));
-    
-    // Clear placed props
-    PlacedProps.Empty();
-    
-    // Clear instanced meshes
-    if (PropInstancedMeshComponent)
-    {
-        PropInstancedMeshComponent->ClearInstances();
-    }
-    
-    // Stop ambient audio
-    if (AmbientAudioComponent && AmbientAudioComponent->IsPlaying())
-    {
-        AmbientAudioComponent->Stop();
-    }
-}
-
-void AArchitecturalStorytellingSystem::UpdateStorytellingGeneration(float DeltaTime)
-{
-    // Update any ongoing generation processes
-    // This could include animated prop placement, gradual decay application, etc.
-}
-
-void AArchitecturalStorytellingSystem::UpdateDecayProgression(float DeltaTime)
-{
-    if (bEnableDecayProgression && DecayRate > 0.0f)
-    {
-        // Gradually advance decay stage over time
-        DecayTimer += DeltaTime * DecayRate;
+        UMaterialInstanceDynamic* DecayMaterial = UMaterialInstanceDynamic::Create(BaseMaterial, this);
         
-        if (DecayTimer >= DecayStageTransitionTime)
+        // Apply decay parameters based on decay stage
+        float DecayAmount = GetDecayAmountForStage(DecayStage);
+        float VegetationOvergrowth = GetVegetationOvergrowthForStage(DecayStage);
+        float WeatheringIntensity = GetWeatheringIntensityForStage(DecayStage);
+        
+        DecayMaterial->SetScalarParameterValue(TEXT("DecayAmount"), DecayAmount);
+        DecayMaterial->SetScalarParameterValue(TEXT("VegetationOvergrowth"), VegetationOvergrowth);
+        DecayMaterial->SetScalarParameterValue(TEXT("WeatheringIntensity"), WeatheringIntensity);
+        
+        MainStructureMesh->SetMaterial(0, DecayMaterial);
+        
+        UE_LOG(LogArchitecturalStorytelling, Log, TEXT("Applied decay effects: Decay=%.2f, Vegetation=%.2f, Weathering=%.2f"), 
+               DecayAmount, VegetationOvergrowth, WeatheringIntensity);
+    }
+}
+
+void AArchitecturalStorytellingSystem::SetupAmbientEffects()
+{
+    // Setup ambient audio based on story and decay
+    if (AmbientAudio && GetAmbientSoundForStory())
+    {
+        AmbientAudio->SetSound(GetAmbientSoundForStory());
+        AmbientAudio->SetVolumeMultiplier(GetAmbientVolumeForDecay());
+        AmbientAudio->Play();
+        
+        UE_LOG(LogArchitecturalStorytelling, Log, TEXT("Setup ambient audio for story"));
+    }
+    
+    // Setup particle effects for atmosphere
+    SetupAtmosphericParticles();
+}
+
+void AArchitecturalStorytellingSystem::UpdateAtmosphericEffects()
+{
+    // Get player distance for atmospheric intensity
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    if (!PlayerPawn)
+    {
+        return;
+    }
+    
+    float DistanceToPlayer = FVector::Dist(GetActorLocation(), PlayerPawn->GetActorLocation());
+    float AtmosphericIntensity = FMath::Clamp(1.0f - (DistanceToPlayer / 2000.0f), 0.0f, 1.0f);
+    
+    // Update ambient audio volume
+    if (AmbientAudio)
+    {
+        float BaseVolume = GetAmbientVolumeForDecay();
+        AmbientAudio->SetVolumeMultiplier(BaseVolume * AtmosphericIntensity);
+    }
+    
+    // Update particle intensity
+    UpdateParticleIntensity(AtmosphericIntensity);
+}
+
+void AArchitecturalStorytellingSystem::CheckPlayerDiscovery()
+{
+    if (bIsPlayerDiscovered)
+    {
+        return;
+    }
+    
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    if (!PlayerPawn)
+    {
+        return;
+    }
+    
+    float DistanceToPlayer = FVector::Dist(GetActorLocation(), PlayerPawn->GetActorLocation());
+    if (DistanceToPlayer <= DiscoveryRadius)
+    {
+        OnPlayerDiscovered();
+    }
+}
+
+void AArchitecturalStorytellingSystem::OnPlayerDiscovered()
+{
+    bIsPlayerDiscovered = true;
+    
+    UE_LOG(LogArchitecturalStorytelling, Log, TEXT("Player discovered structure with story: %s"), 
+           *UEnum::GetValueAsString(InhabitationStory));
+    
+    // Trigger discovery events
+    OnStructureDiscovered.Broadcast(this, InhabitationStory);
+    
+    // Blueprint implementable event
+    K2_OnPlayerDiscovered();
+}
+
+void AArchitecturalStorytellingSystem::GeneratePeacefulFamilyStory()
+{
+    // Create family-oriented props
+    FStorytellingProp SleepingArea;
+    SleepingArea.PropName = TEXT("Family Sleeping Area");
+    SleepingArea.EvidenceType = EHabitationEvidence::SleepingArea;
+    SleepingArea.PreferredZone = EInteriorZone::Sleeping;
+    SleepingArea.StoryDescription = TEXT("Multiple sleeping mats arranged together, showing a family unit");
+    SleepingArea.StoryImportance = 8;
+    StorytellingProps.Add(SleepingArea);
+    
+    FStorytellingProp ChildrenToys;
+    ChildrenToys.PropName = TEXT("Children's Toys");
+    ChildrenToys.EvidenceType = EHabitationEvidence::ChildrenToys;
+    ChildrenToys.PreferredZone = EInteriorZone::Living;
+    ChildrenToys.StoryDescription = TEXT("Small carved wooden animals and simple toys");
+    ChildrenToys.StoryImportance = 6;
+    StorytellingProps.Add(ChildrenToys);
+    
+    FStorytellingProp CookingHearth;
+    CookingHearth.PropName = TEXT("Family Cooking Hearth");
+    CookingHearth.EvidenceType = EHabitationEvidence::CookingHearth;
+    CookingHearth.PreferredZone = EInteriorZone::Cooking;
+    CookingHearth.StoryDescription = TEXT("Large hearth with evidence of regular family meals");
+    CookingHearth.StoryImportance = 7;
+    StorytellingProps.Add(CookingHearth);
+}
+
+void AArchitecturalStorytellingSystem::GenerateLoneHunterStory()
+{
+    // Create hunter-oriented props
+    FStorytellingProp WeaponRack;
+    WeaponRack.PropName = TEXT("Hunter's Weapon Rack");
+    WeaponRack.EvidenceType = EHabitationEvidence::WeaponRack;
+    WeaponRack.PreferredZone = EInteriorZone::Work;
+    WeaponRack.StoryDescription = TEXT("Well-maintained spears and hunting tools");
+    WeaponRack.StoryImportance = 9;
+    StorytellingProps.Add(WeaponRack);
+    
+    FStorytellingProp TrophyCollection;
+    TrophyCollection.PropName = TEXT("Trophy Collection");
+    TrophyCollection.EvidenceType = EHabitationEvidence::ComfortItems;
+    TrophyCollection.PreferredZone = EInteriorZone::Living;
+    TrophyCollection.StoryDescription = TEXT("Dinosaur teeth and claws displayed as trophies");
+    TrophyCollection.StoryImportance = 7;
+    StorytellingProps.Add(TrophyCollection);
+}
+
+void AArchitecturalStorytellingSystem::GenerateHastyFlightStory()
+{
+    // Create abandonment evidence
+    FStorytellingProp AbandonedItems;
+    AbandonedItems.PropName = TEXT("Hastily Abandoned Belongings");
+    AbandonedItems.EvidenceType = EHabitationEvidence::AbandonedItems;
+    AbandonedItems.PreferredZone = EInteriorZone::Living;
+    AbandonedItems.StoryDescription = TEXT("Personal items scattered as if dropped in panic");
+    AbandonedItems.StoryImportance = 9;
+    StorytellingProps.Add(AbandonedItems);
+    
+    FStorytellingProp BarricadeMarks;
+    BarricadeMarks.PropName = TEXT("Barricade Remains");
+    BarricadeMarks.EvidenceType = EHabitationEvidence::BarricadeMarks;
+    BarricadeMarks.PreferredZone = EInteriorZone::Entrance;
+    BarricadeMarks.StoryDescription = TEXT("Evidence of desperate attempt to block the entrance");
+    BarricadeMarks.StoryImportance = 8;
+    StorytellingProps.Add(BarricadeMarks);
+}
+
+void AArchitecturalStorytellingSystem::GenerateGenericStory()
+{
+    // Create basic habitation evidence
+    FStorytellingProp BasicSleeping;
+    BasicSleeping.PropName = TEXT("Basic Sleeping Area");
+    BasicSleeping.EvidenceType = EHabitationEvidence::SleepingArea;
+    BasicSleeping.PreferredZone = EInteriorZone::Sleeping;
+    BasicSleeping.StoryDescription = TEXT("Simple sleeping arrangement");
+    BasicSleeping.StoryImportance = 5;
+    StorytellingProps.Add(BasicSleeping);
+    
+    FStorytellingProp BasicCooking;
+    BasicCooking.PropName = TEXT("Basic Fire Pit");
+    BasicCooking.EvidenceType = EHabitationEvidence::CookingHearth;
+    BasicCooking.PreferredZone = EInteriorZone::Cooking;
+    BasicCooking.StoryDescription = TEXT("Simple cooking fire");
+    BasicCooking.StoryImportance = 5;
+    StorytellingProps.Add(BasicCooking);
+}
+
+void AArchitecturalStorytellingSystem::PlacePropsInZone(const FInteriorZoneConfig& Zone)
+{
+    // Find props that belong to this zone
+    TArray<FStorytellingProp> ZoneProps;
+    for (const FStorytellingProp& Prop : StorytellingProps)
+    {
+        if (Prop.PreferredZone == Zone.ZoneType)
         {
-            AdvanceDecayStage();
-            DecayTimer = 0.0f;
+            ZoneProps.Add(Prop);
         }
     }
-}
-
-void AArchitecturalStorytellingSystem::UpdateAtmosphericEffects(float DeltaTime)
-{
-    // Update atmospheric effects based on time of day, weather, etc.
-    // This would integrate with lighting and weather systems
-}
-
-void AArchitecturalStorytellingSystem::AdvanceDecayStage()
-{
-    int32 CurrentStageInt = static_cast<int32>(CurrentDecayStage);
-    int32 MaxStageInt = static_cast<int32>(EDecayStage::Archaeological);
     
-    if (CurrentStageInt < MaxStageInt)
+    // Place props within zone bounds
+    for (const FStorytellingProp& Prop : ZoneProps)
     {
-        CurrentDecayStage = static_cast<EDecayStage>(CurrentStageInt + 1);
+        FVector PropLocation = Zone.ZoneCenter + FMath::VRand() * Zone.ZoneRadius * 0.5f;
+        FRotator PropRotation = FRotator(0, FMath::RandRange(0.0f, 360.0f), 0);
+        FVector PropScale = FVector(FMath::RandRange(Prop.ScaleRange.X, Prop.ScaleRange.Y));
         
-        UE_LOG(LogArchitecturalStorytelling, Log, TEXT("Advanced to decay stage: %s"), 
-               *UEnum::GetValueAsString(CurrentDecayStage));
-        
-        // Reapply decay effects with new stage
-        ApplyDecayEffects();
-        
-        // Broadcast decay stage change
-        OnDecayStageChanged.Broadcast(CurrentDecayStage);
+        FTransform PropTransform(PropRotation, PropLocation, PropScale);
+        PropInstancedMesh->AddInstance(PropTransform);
     }
 }
 
-// Additional implementation methods would continue here...
-// This is a substantial implementation that provides the core functionality
-// while maintaining the philosophical approach of architectural storytelling
-
-FVector AArchitecturalStorytellingSystem::CalculateZoneCenter(EInteriorZone ZoneType)
+float AArchitecturalStorytellingSystem::GetDecayAmountForStage(EDecayStage Stage) const
 {
-    // Calculate appropriate zone center based on structure layout
-    // This is a simplified implementation - would be more sophisticated in practice
-    FVector BaseLocation = GetActorLocation();
-    
-    switch (ZoneType)
+    switch (Stage)
     {
-        case EInteriorZone::Entrance:
-            return BaseLocation + FVector(0.0f, -200.0f, 0.0f);
-        case EInteriorZone::Living:
-            return BaseLocation + FVector(0.0f, 0.0f, 0.0f);
-        case EInteriorZone::Sleeping:
-            return BaseLocation + FVector(200.0f, 100.0f, 0.0f);
-        case EInteriorZone::Cooking:
-            return BaseLocation + FVector(-150.0f, 50.0f, 0.0f);
-        case EInteriorZone::Storage:
-            return BaseLocation + FVector(150.0f, -100.0f, 0.0f);
-        case EInteriorZone::Work:
-            return BaseLocation + FVector(-200.0f, -50.0f, 0.0f);
-        case EInteriorZone::Ritual:
-            return BaseLocation + FVector(0.0f, 200.0f, 0.0f);
-        case EInteriorZone::Emergency:
-            return BaseLocation + FVector(100.0f, -150.0f, 0.0f);
-        default:
-            return BaseLocation;
+        case EDecayStage::Fresh: return 0.0f;
+        case EDecayStage::Early: return 0.2f;
+        case EDecayStage::Moderate: return 0.5f;
+        case EDecayStage::Advanced: return 0.8f;
+        case EDecayStage::Ruins: return 0.95f;
+        case EDecayStage::Archaeological: return 1.0f;
+        default: return 0.0f;
     }
 }
 
-TArray<FStorytellingProp> AArchitecturalStorytellingSystem::GetPropsForZone(EInteriorZone ZoneType, EInhabitationStory Story)
+float AArchitecturalStorytellingSystem::GetVegetationOvergrowthForStage(EDecayStage Stage) const
 {
-    TArray<FStorytellingProp> ZoneProps;
-    
-    // This would be expanded with actual prop database
-    // For now, return empty array as placeholder
-    
-    return ZoneProps;
-}
-
-bool AArchitecturalStorytellingSystem::ShouldPlaceProp(const FStorytellingProp& Prop, EInteriorZone ZoneType)
-{
-    // Check if prop should be placed based on various factors
-    if (Prop.PreferredZone != ZoneType)
-        return false;
-        
-    if (Prop.MinDecayStage > CurrentDecayStage || Prop.MaxDecayStage < CurrentDecayStage)
-        return false;
-        
-    // Check story-specific spawn probability
-    if (Prop.SpawnProbabilityByStory.Contains(InhabitationStory))
+    switch (Stage)
     {
-        float SpawnChance = Prop.SpawnProbabilityByStory[InhabitationStory];
-        return FMath::RandRange(0.0f, 1.0f) <= SpawnChance;
-    }
-    
-    return true;
-}
-
-FVector AArchitecturalStorytellingSystem::CalculatePropPlacement(const FStorytellingProp& Prop, const FInteriorZoneConfig& ZoneConfig)
-{
-    // Calculate prop placement within zone bounds
-    FVector ZoneCenter = ZoneConfig.ZoneCenter;
-    FVector RandomOffset = FMath::RandPointInBox(FBox(-ZoneConfig.ZoneExtents * 0.5f, ZoneConfig.ZoneExtents * 0.5f));
-    
-    return ZoneCenter + RandomOffset + Prop.RelativePosition;
-}
-
-FRotator AArchitecturalStorytellingSystem::CalculatePropRotation(const FStorytellingProp& Prop, const FInteriorZoneConfig& ZoneConfig)
-{
-    // Calculate prop rotation with some randomization
-    FRotator BaseRotation = Prop.RelativeRotation;
-    FRotator RandomRotation = FRotator(0.0f, FMath::RandRange(-45.0f, 45.0f), 0.0f);
-    
-    return BaseRotation + RandomRotation;
-}
-
-float AArchitecturalStorytellingSystem::CalculatePropScale(const FStorytellingProp& Prop)
-{
-    // Calculate prop scale within specified range
-    return FMath::RandRange(Prop.ScaleRange.X, Prop.ScaleRange.Y);
-}
-
-void AArchitecturalStorytellingSystem::PlacePropInWorld(const FStorytellingProp& Prop, FVector Location, FRotator Rotation, float Scale)
-{
-    // Create and place prop in world
-    FPlacedProp PlacedProp;
-    PlacedProp.PropData = Prop;
-    PlacedProp.WorldLocation = Location;
-    PlacedProp.WorldRotation = Rotation;
-    PlacedProp.WorldScale = Scale;
-    PlacedProp.bIsActive = true;
-    
-    PlacedProps.Add(PlacedProp);
-    
-    // Add to instanced mesh component if mesh is available
-    if (Prop.PropMesh.IsValid() && PropInstancedMeshComponent)
-    {
-        FTransform PropTransform(Rotation, Location, FVector(Scale));
-        int32 InstanceIndex = PropInstancedMeshComponent->AddInstance(PropTransform);
-        PlacedProp.InstanceIndex = InstanceIndex;
+        case EDecayStage::Fresh: return 0.0f;
+        case EDecayStage::Early: return 0.1f;
+        case EDecayStage::Moderate: return 0.3f;
+        case EDecayStage::Advanced: return 0.6f;
+        case EDecayStage::Ruins: return 0.9f;
+        case EDecayStage::Archaeological: return 1.0f;
+        default: return 0.0f;
     }
 }
 
-void AArchitecturalStorytellingSystem::ApplyDecayToProp(FPlacedProp& PlacedProp)
+float AArchitecturalStorytellingSystem::GetWeatheringIntensityForStage(EDecayStage Stage) const
 {
-    // Apply decay effects to individual prop based on current decay stage
-    // This would modify materials, add weathering, etc.
-}
-
-void AArchitecturalStorytellingSystem::ApplyEnvironmentalDecay()
-{
-    // Apply broader environmental decay effects
-    // This would add moss, cracks, vegetation overgrowth, etc.
-}
-
-void AArchitecturalStorytellingSystem::UpdateDecayMaterials()
-{
-    // Update material parameters to reflect current decay stage
-    // This would modify material instances with decay parameters
-}
-
-void AArchitecturalStorytellingSystem::GenerateAmbientSounds()
-{
-    // Generate ambient sounds based on story and decay stage
-    if (AmbientAudioComponent)
+    switch (Stage)
     {
-        // This would select appropriate ambient sounds
-        // AmbientAudioComponent->SetSound(SelectedAmbientSound);
-        // AmbientAudioComponent->Play();
+        case EDecayStage::Fresh: return 0.0f;
+        case EDecayStage::Early: return 0.3f;
+        case EDecayStage::Moderate: return 0.6f;
+        case EDecayStage::Advanced: return 0.8f;
+        case EDecayStage::Ruins: return 0.95f;
+        case EDecayStage::Archaeological: return 1.0f;
+        default: return 0.0f;
     }
 }
 
-void AArchitecturalStorytellingSystem::GenerateAtmosphericParticles()
+USoundCue* AArchitecturalStorytellingSystem::GetAmbientSoundForStory() const
 {
-    // Generate particle effects for atmosphere
-    // This would create dust, smoke, light rays, etc.
+    // Return appropriate ambient sound based on story and decay
+    // This would be implemented with actual sound assets
+    return nullptr;
 }
 
-void AArchitecturalStorytellingSystem::GenerateLightingHints()
+float AArchitecturalStorytellingSystem::GetAmbientVolumeForDecay() const
 {
-    // Generate lighting hints for the lighting agent
-    // This would create light anchor points and atmospheric lighting data
+    // Fresher structures have more ambient activity sounds
+    switch (DecayStage)
+    {
+        case EDecayStage::Fresh: return 0.8f;
+        case EDecayStage::Early: return 0.6f;
+        case EDecayStage::Moderate: return 0.4f;
+        case EDecayStage::Advanced: return 0.2f;
+        case EDecayStage::Ruins: return 0.1f;
+        case EDecayStage::Archaeological: return 0.05f;
+        default: return 0.0f;
+    }
 }
 
-void AArchitecturalStorytellingSystem::AddOptionalZones()
+void AArchitecturalStorytellingSystem::SetupAtmosphericParticles()
 {
-    // Add optional zones based on story complexity and available space
-    // This would analyze the story and add appropriate additional zones
+    // Setup particle systems for dust, smoke remnants, etc.
+    // Implementation would create and configure particle components
+}
+
+void AArchitecturalStorytellingSystem::UpdateParticleIntensity(float Intensity)
+{
+    // Update particle system intensity based on player proximity
+    // Implementation would modify particle parameters
+}
+
+void AArchitecturalStorytellingSystem::InitializeDefaultInteriorZones()
+{
+    // Create default interior zone layout
+    FInteriorZoneConfig LivingZone;
+    LivingZone.ZoneType = EInteriorZone::Living;
+    LivingZone.ZoneName = TEXT("Living Area");
+    LivingZone.ZoneCenter = FVector(0, 0, 0);
+    LivingZone.ZoneRadius = 200.0f;
+    InteriorZones.Add(LivingZone);
+    
+    FInteriorZoneConfig SleepingZone;
+    SleepingZone.ZoneType = EInteriorZone::Sleeping;
+    SleepingZone.ZoneName = TEXT("Sleeping Area");
+    SleepingZone.ZoneCenter = FVector(150, 0, 0);
+    SleepingZone.ZoneRadius = 150.0f;
+    InteriorZones.Add(SleepingZone);
+    
+    FInteriorZoneConfig CookingZone;
+    CookingZone.ZoneType = EInteriorZone::Cooking;
+    CookingZone.ZoneName = TEXT("Cooking Area");
+    CookingZone.ZoneCenter = FVector(-150, 0, 0);
+    CookingZone.ZoneRadius = 100.0f;
+    InteriorZones.Add(CookingZone);
+}
+
+// Additional story generation methods
+void AArchitecturalStorytellingSystem::GenerateTradingPostStory()
+{
+    FStorytellingProp TradingGoods;
+    TradingGoods.PropName = TEXT("Trading Goods Cache");
+    TradingGoods.EvidenceType = EHabitationEvidence::StorageCache;
+    TradingGoods.PreferredZone = EInteriorZone::Storage;
+    TradingGoods.StoryDescription = TEXT("Organized storage of various trade goods");
+    TradingGoods.StoryImportance = 8;
+    StorytellingProps.Add(TradingGoods);
+}
+
+void AArchitecturalStorytellingSystem::GenerateDefensiveOutpostStory()
+{
+    FStorytellingProp WeaponCache;
+    WeaponCache.PropName = TEXT("Weapon Cache");
+    WeaponCache.EvidenceType = EHabitationEvidence::WeaponRack;
+    WeaponCache.PreferredZone = EInteriorZone::Work;
+    WeaponCache.StoryDescription = TEXT("Military-style weapon storage");
+    WeaponCache.StoryImportance = 9;
+    StorytellingProps.Add(WeaponCache);
+}
+
+void AArchitecturalStorytellingSystem::GenerateTragedyStruckStory()
+{
+    FStorytellingProp Memorial;
+    Memorial.PropName = TEXT("Memorial Corner");
+    Memorial.EvidenceType = EHabitationEvidence::MemorialCorner;
+    Memorial.PreferredZone = EInteriorZone::Living;
+    Memorial.StoryDescription = TEXT("A corner dedicated to remembering the lost");
+    Memorial.StoryImportance = 10;
+    StorytellingProps.Add(Memorial);
 }
