@@ -5,10 +5,11 @@
 #include "PoseSearchSchema_PlayerLocomotion.generated.h"
 
 /**
- * Motion Matching Schema for Player Locomotion
- * Optimized for survival gameplay with fear-based movement patterns
+ * Schema de Motion Matching especializado para locomoção do paleontologista
+ * Configurado para capturar movimentos naturais e responsivos
+ * com foco em transmitir vulnerabilidade e tensão
  */
-UCLASS(BlueprintType)
+UCLASS(BlueprintType, Category = "Transpersonal Game|Animation")
 class TRANSPERSONALGAME_API UPoseSearchSchema_PlayerLocomotion : public UPoseSearchSchema
 {
     GENERATED_BODY()
@@ -16,26 +17,26 @@ class TRANSPERSONALGAME_API UPoseSearchSchema_PlayerLocomotion : public UPoseSea
 public:
     UPoseSearchSchema_PlayerLocomotion();
 
-    // Fear state influences on movement quality
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fear System")
-    float FearInfluenceWeight = 0.3f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fear System")
-    float TensionMultiplier = 1.5f;
-
-    // Terrain adaptation settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
-    float TerrainAdaptationWeight = 0.4f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
-    float SlopeThreshold = 25.0f;
-
 protected:
-    virtual void PostLoad() override;
-    virtual void PostInitProperties() override;
+    /** Configura o canal de trajetória para movimento do jogador */
+    void SetupTrajectoryChannel();
+    
+    /** Configura o canal de pose para pés e quadril */
+    void SetupPoseChannel();
+    
+    /** Configura o canal de velocidade para movimento do root bone */
+    void SetupVelocityChannel();
 
-private:
-    void SetupLocomotionChannels();
-    void SetupFearChannels();
-    void SetupTerrainChannels();
+public:
+    /** Peso específico para movimentos de furtividade */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stealth Movement")
+    float StealthMovementWeight = 1.5f;
+    
+    /** Peso específico para movimentos de pânico/fuga */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Panic Movement")
+    float PanicMovementWeight = 1.3f;
+    
+    /** Peso específico para movimentos cautelosos */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cautious Movement")
+    float CautiousMovementWeight = 1.2f;
 };
