@@ -1,0 +1,227 @@
+[
+  {
+    "Name": "Protagonist",
+    "CharacterName": "Dr. Marcus Stone",
+    "Archetype": "Protagonist",
+    "AgeGroup": "Adult",
+    "bIsMale": true,
+    "PhysicalTraits": {
+      "Height": 1.0,
+      "Weight": 0.85,
+      "MuscleDefinition": 0.3,
+      "SkinTone": {
+        "R": 0.85,
+        "G": 0.7,
+        "B": 0.6,
+        "A": 1.0
+      },
+      "HairColor": {
+        "R": 0.4,
+        "G": 0.3,
+        "B": 0.2,
+        "A": 1.0
+      },
+      "EyeColor": {
+        "R": 0.3,
+        "G": 0.5,
+        "B": 0.7,
+        "A": 1.0
+      }
+    },
+    "SurvivalMarks": {
+      "ScarIntensity": 0.0,
+      "WeatheringLevel": 0.1,
+      "DirtLevel": 0.2,
+      "bHasTribalMarkings": false,
+      "bHasBattleScars": false
+    },
+    "MetaHumanAssetPath": "/Game/MetaHumans/Protagonist_Marcus",
+    "ClothingAssets": [
+      "/Game/Characters/Clothing/ModernClothes/Khaki_Pants",
+      "/Game/Characters/Clothing/ModernClothes/Field_Shirt",
+      "/Game/Characters/Clothing/ModernClothes/Hiking_Boots"
+    ],
+    "BackgroundStory": "Dr. Marcus Stone was a respected paleontologist from the University of Cambridge. While excavating in a remote forest, he discovered an unusual crystalline artifact. Upon touching it, he was instantly transported millions of years into the past, into a world dominated by dinosaurs.",
+    "PersonalityTraits": "Intelligent, curious, initially naive about survival but quick to learn. Maintains scientific objectivity even in extreme situations."
+  },
+  {
+    "Name": "TribalLeader_Kael",
+    "CharacterName": "Kael the Wise",
+    "Archetype": "TribalLeader",
+    "AgeGroup": "MiddleAged",
+    "bIsMale": true,
+    "PhysicalTraits": {
+      "Height": 1.1,
+      "Weight": 1.0,
+      "MuscleDefinition": 0.7,
+      "SkinTone": {
+        "R": 0.6,
+        "G": 0.45,
+        "B": 0.35,
+        "A": 1.0
+      },
+      "HairColor": {
+        "R": 0.3,
+        "G": 0.2,
+        "B": 0.15,
+        "A": 1.0
+      },
+      "EyeColor": {
+        "R": 0.4,
+        "G": 0.3,
+        "B": 0.2,
+        "A": 1.0
+      }
+    },
+    "SurvivalMarks": {
+      "ScarIntensity": 0.6,
+      "WeatheringLevel": 0.8,
+      "DirtLevel": 0.4,
+      "bHasTribalMarkings": true,
+      "bHasBattleScars": true
+    },
+    "MetaHumanAssetPath": "/Game/MetaHumans/Tribal_Leader_Male_01",
+    "ClothingAssets": [
+      "/Game/Characters/Clothing/Tribal/Leader_Robes",
+      "/Game/Characters/Clothing/Tribal/Bone_Necklace",
+      "/Game/Characters/Clothing/Tribal/Leather_Bracers"
+    ],
+    "BackgroundStory": "Kael has led his tribe through countless dangers in this prehistoric world. His wisdom comes from decades of survival and the loss of many friends to the great beasts.",
+    "PersonalityTraits": "Cautious but decisive, protective of his people, suspicious of outsiders but fair in judgment."
+  },
+  {
+    "Name": "TribalShaman_Lyra",
+    "CharacterName": "Lyra Spiritwalker",
+    "Archetype": "TribalShaman",
+    "AgeGroup": "Adult",
+    "bIsMale": false,
+    "PhysicalTraits": {
+      "Height": 0.95,
+      "Weight": 0.8,
+      "MuscleDefinition": 0.3,
+      "SkinTone": {
+        "R": 0.7,
+        "G": 0.55,
+        "B": 0.4,
+        "A": 1.0
+      },
+      "HairColor": {
+        "R": 0.1,
+        "G": 0.1,
+        "B": 0.1,
+        "A": 1.0
+      },
+      "EyeColor": {
+        "R": 0.2,
+        "G": 0.6,
+        "B": 0.4,
+        "A": 1.0
+      }
+    },
+    "SurvivalMarks": {
+      "ScarIntensity": 0.2,
+      "WeatheringLevel": 0.5,
+      "DirtLevel": 0.3,
+      "bHasTribalMarkings": true,
+      "bHasBattleScars": false
+    },
+    "MetaHumanAssetPath": "/Game/MetaHumans/Tribal_Shaman_Female_01",
+    "ClothingAssets": [
+      "/Game/Characters/Clothing/Tribal/Shaman_Robes",
+      "/Game/Characters/Clothing/Tribal/Feather_Headdress",
+      "/Game/Characters/Clothing/Tribal/Ritual_Paint"
+    ],
+    "BackgroundStory": "Lyra communes with the spirits of the ancient world. She understands the rhythms of nature and the behavior of the great beasts better than anyone.",
+    "PersonalityTraits": "Mystical, intuitive, speaks in riddles but possesses deep wisdom about the natural world."
+  },
+  {
+    "Name": "TribalWarrior_Thane",
+    "CharacterName": "Thane Beastslayer",
+    "Archetype": "TribalWarrior",
+    "AgeGroup": "YoungAdult",
+    "bIsMale": true,
+    "PhysicalTraits": {
+      "Height": 1.15,
+      "Weight": 1.1,
+      "MuscleDefinition": 0.9,
+      "SkinTone": {
+        "R": 0.5,
+        "G": 0.35,
+        "B": 0.25,
+        "A": 1.0
+      },
+      "HairColor": {
+        "R": 0.2,
+        "G": 0.15,
+        "B": 0.1,
+        "A": 1.0
+      },
+      "EyeColor": {
+        "R": 0.3,
+        "G": 0.4,
+        "B": 0.6,
+        "A": 1.0
+      }
+    },
+    "SurvivalMarks": {
+      "ScarIntensity": 0.8,
+      "WeatheringLevel": 0.6,
+      "DirtLevel": 0.7,
+      "bHasTribalMarkings": true,
+      "bHasBattleScars": true
+    },
+    "MetaHumanAssetPath": "/Game/MetaHumans/Tribal_Warrior_Male_01",
+    "ClothingAssets": [
+      "/Game/Characters/Clothing/Tribal/Warrior_Armor",
+      "/Game/Characters/Clothing/Tribal/Beast_Tooth_Necklace",
+      "/Game/Characters/Clothing/Tribal/War_Paint"
+    ],
+    "BackgroundStory": "Thane has faced down raptors, survived a T-Rex encounter, and bears the scars to prove it. He is the tribe's primary defender against the great predators.",
+    "PersonalityTraits": "Brave to the point of recklessness, fiercely loyal, competitive, quick to anger but quick to forgive."
+  },
+  {
+    "Name": "TribalCrafter_Vera",
+    "CharacterName": "Vera the Maker",
+    "Archetype": "TribalCrafter",
+    "AgeGroup": "Adult",
+    "bIsMale": false,
+    "PhysicalTraits": {
+      "Height": 1.0,
+      "Weight": 0.9,
+      "MuscleDefinition": 0.5,
+      "SkinTone": {
+        "R": 0.8,
+        "G": 0.65,
+        "B": 0.5,
+        "A": 1.0
+      },
+      "HairColor": {
+        "R": 0.6,
+        "G": 0.4,
+        "B": 0.2,
+        "A": 1.0
+      },
+      "EyeColor": {
+        "R": 0.4,
+        "G": 0.3,
+        "B": 0.2,
+        "A": 1.0
+      }
+    },
+    "SurvivalMarks": {
+      "ScarIntensity": 0.3,
+      "WeatheringLevel": 0.4,
+      "DirtLevel": 0.6,
+      "bHasTribalMarkings": true,
+      "bHasBattleScars": false
+    },
+    "MetaHumanAssetPath": "/Game/MetaHumans/Tribal_Crafter_Female_01",
+    "ClothingAssets": [
+      "/Game/Characters/Clothing/Tribal/Crafter_Apron",
+      "/Game/Characters/Clothing/Tribal/Tool_Belt",
+      "/Game/Characters/Clothing/Tribal/Work_Gloves"
+    ],
+    "BackgroundStory": "Vera creates the tools, weapons, and shelter that keep the tribe alive. Her hands are stained with the work of survival, but her creations are works of art.",
+    "PersonalityTraits": "Patient, methodical, takes pride in her work, practical but with an artistic soul."
+  }
+]
