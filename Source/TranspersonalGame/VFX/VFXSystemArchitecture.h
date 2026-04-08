@@ -9,106 +9,88 @@
 
 /**
  * VFX System Architecture for Transpersonal Game Studio
- * Jurassic Survival Game — Production Cycle PROD_JURASSIC_001
+ * Jurassic Survival Game - VFX Agent #17
  * 
- * Core principle: VFX serves narrative and mechanics, never itself.
- * Every effect must enhance the feeling of being prey, not predator.
+ * Core philosophy: VFX serves narrative and mechanics, never itself
+ * Performance target: 3-level LOD chain for all effects
+ * 
+ * EFFECT CATEGORIES:
+ * - Environmental: Weather, atmosphere, ambient life
+ * - Creature: Breathing, movement, interaction effects  
+ * - Survival: Crafting, fire, tool usage
+ * - Emotional: Trust building, fear responses, discovery
+ * - Combat: Impact, damage, defensive behaviors
  */
 
 UENUM(BlueprintType)
 enum class EVFXCategory : uint8
 {
-    // Environmental effects that create atmosphere
-    Atmospheric         UMETA(DisplayName = "Atmospheric"),
-    
-    // Effects that hint at dinosaur presence off-screen
-    DinosaurPresence   UMETA(DisplayName = "Dinosaur Presence"),
-    
-    // Combat and impact effects
-    Combat             UMETA(DisplayName = "Combat"),
-    
-    // Domestication and relationship building effects
-    Domestication      UMETA(DisplayName = "Domestication"),
-    
-    // Survival mechanics (fire, tools, construction)
-    Survival           UMETA(DisplayName = "Survival"),
-    
-    // Environmental destruction and physics
-    Destruction        UMETA(DisplayName = "Destruction"),
-    
-    // Weather and time-of-day transitions
-    Weather            UMETA(DisplayName = "Weather")
+    Environmental   UMETA(DisplayName = "Environmental"),
+    Creature        UMETA(DisplayName = "Creature"),
+    Survival        UMETA(DisplayName = "Survival"), 
+    Emotional       UMETA(DisplayName = "Emotional"),
+    Combat          UMETA(DisplayName = "Combat"),
+    Discovery       UMETA(DisplayName = "Discovery")
 };
 
 UENUM(BlueprintType)
 enum class EVFXIntensity : uint8
 {
     Subtle      UMETA(DisplayName = "Subtle"),      // Background atmosphere
-    Moderate    UMETA(DisplayName = "Moderate"),    // Noticeable but not distracting
-    Dramatic    UMETA(DisplayName = "Dramatic"),    // Key narrative moments
-    Cinematic   UMETA(DisplayName = "Cinematic")    // Major story beats
+    Noticeable  UMETA(DisplayName = "Noticeable"), // Clear but not distracting
+    Prominent   UMETA(DisplayName = "Prominent"),  // Key gameplay moments
+    Dramatic    UMETA(DisplayName = "Dramatic")    // Critical story beats
 };
 
 UENUM(BlueprintType)
-enum class EVFXPerformanceTier : uint8
+enum class EVFXLODLevel : uint8
 {
-    Low         UMETA(DisplayName = "Low Quality"),     // Mobile/Low-end PC
-    Medium      UMETA(DisplayName = "Medium Quality"),  // Console baseline
-    High        UMETA(DisplayName = "High Quality"),    // High-end PC
-    Cinematic   UMETA(DisplayName = "Cinematic")        // Cutscenes only
+    High        UMETA(DisplayName = "High Quality"),    // Close range, full detail
+    Medium      UMETA(DisplayName = "Medium Quality"),  // Mid range, optimized
+    Low         UMETA(DisplayName = "Low Quality")      // Far range, minimal
 };
 
 USTRUCT(BlueprintType)
-struct FVFXEffectDefinition
+struct FVFXEffectData
 {
     GENERATED_BODY()
 
-    // Effect identification
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Definition")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
     FString EffectName;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Definition")
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
     EVFXCategory Category;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Definition")
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
     EVFXIntensity Intensity;
-    
-    // Niagara system reference
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System")
-    TSoftObjectPtr<UNiagaraSystem> NiagaraSystem;
-    
-    // Performance scaling
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    TMap<EVFXPerformanceTier, float> QualityScaling;
-    
-    // Emotional intent
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Intent")
-    FString EmotionalIntent;
-    
-    // Usage context
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Context")
-    TArray<FString> UsageContexts;
-    
-    FVFXEffectDefinition()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TSoftObjectPtr<UNiagaraSystem> NiagaraSystem_High;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TSoftObjectPtr<UNiagaraSystem> NiagaraSystem_Medium;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TSoftObjectPtr<UNiagaraSystem> NiagaraSystem_Low;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float MaxDistance = 5000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bRequiresLineOfSight = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bAffectsGameplay = false;
+
+    FVFXEffectData()
     {
-        EffectName = TEXT("Unnamed Effect");
-        Category = EVFXCategory::Atmospheric;
+        EffectName = TEXT("DefaultEffect");
+        Category = EVFXCategory::Environmental;
         Intensity = EVFXIntensity::Subtle;
-        EmotionalIntent = TEXT("Enhance atmosphere");
-        
-        // Default performance scaling
-        QualityScaling.Add(EVFXPerformanceTier::Low, 0.3f);
-        QualityScaling.Add(EVFXPerformanceTier::Medium, 0.6f);
-        QualityScaling.Add(EVFXPerformanceTier::High, 1.0f);
-        QualityScaling.Add(EVFXPerformanceTier::Cinematic, 1.5f);
     }
 };
 
-/**
- * Master VFX Manager Component
- * Handles all VFX spawning, management, and performance optimization
- */
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+UCLASS(ClassGroup=(VFX), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UVFXManagerComponent : public UActorComponent
 {
     GENERATED_BODY()
@@ -122,47 +104,58 @@ protected:
 public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // Effect registry
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Registry")
-    TMap<FString, FVFXEffectDefinition> EffectRegistry;
-    
-    // Performance settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    EVFXPerformanceTier CurrentPerformanceTier;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxActiveEffects;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float EffectCullingDistance;
-    
-    // Active effects tracking
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Runtime")
-    TArray<UNiagaraComponent*> ActiveEffects;
-    
-    // Core VFX functions
+    // Core VFX Management
     UFUNCTION(BlueprintCallable, Category = "VFX")
-    UNiagaraComponent* SpawnEffect(const FString& EffectName, const FVector& Location, const FRotator& Rotation = FRotator::ZeroRotator, AActor* AttachToActor = nullptr);
-    
+    void PlayEffect(const FString& EffectName, const FVector& Location, const FRotator& Rotation = FRotator::ZeroRotator);
+
     UFUNCTION(BlueprintCallable, Category = "VFX")
-    void StopEffect(UNiagaraComponent* EffectComponent);
-    
+    void StopEffect(const FString& EffectName);
+
     UFUNCTION(BlueprintCallable, Category = "VFX")
-    void StopAllEffectsOfCategory(EVFXCategory Category);
-    
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void SetPerformanceTier(EVFXPerformanceTier NewTier);
-    
-    // Atmospheric effects
-    UFUNCTION(BlueprintCallable, Category = "Atmospheric VFX")
-    void SpawnAtmosphericEffect(const FString& EffectName, const FVector& Location, float Duration = -1.0f);
-    
-    // Dinosaur presence hints
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur VFX")
-    void TriggerDinosaurPresenceHint(const FVector& Location, float Intensity = 1.0f);
-    
+    void SetVFXQuality(EVFXLODLevel NewLODLevel);
+
+    // Creature-specific VFX
+    UFUNCTION(BlueprintCallable, Category = "VFX|Creature")
+    void PlayCreatureBreathing(AActor* Creature, float IntensityMultiplier = 1.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX|Creature")
+    void PlayFootstepEffect(const FVector& Location, float CreatureSize = 1.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX|Creature")
+    void PlayTrustBuildingEffect(AActor* Player, AActor* Creature, float TrustLevel);
+
+    // Environmental VFX
+    UFUNCTION(BlueprintCallable, Category = "VFX|Environment")
+    void SetAtmosphericTension(float TensionLevel); // 0.0 = calm, 1.0 = maximum danger
+
+    UFUNCTION(BlueprintCallable, Category = "VFX|Environment")
+    void PlayAmbientLifeEffect(const FVector& Location, const FString& BiomeType);
+
+    // Performance Management
+    UFUNCTION(BlueprintCallable, Category = "VFX|Performance")
+    int32 GetActiveEffectCount() const { return ActiveEffects.Num(); }
+
+    UFUNCTION(BlueprintCallable, Category = "VFX|Performance")
+    void CullDistantEffects(const FVector& ViewerLocation, float MaxDistance = 10000.0f);
+
+protected:
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VFX")
+    TMap<FString, FVFXEffectData> EffectDatabase;
+
+    UPROPERTY()
+    TMap<FString, UNiagaraComponent*> ActiveEffects;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VFX")
+    EVFXLODLevel CurrentLODLevel = EVFXLODLevel::High;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VFX|Performance")
+    int32 MaxActiveEffects = 50;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VFX|Performance")
+    float EffectCullDistance = 15000.0f;
+
 private:
-    void UpdatePerformanceScaling();
-    void CullDistantEffects();
-    bool ShouldSpawnEffect(const FVFXEffectDefinition& EffectDef, const FVector& Location);
+    void InitializeEffectDatabase();
+    UNiagaraSystem* GetEffectForLOD(const FVFXEffectData& EffectData) const;
+    void CleanupFinishedEffects();
 };
