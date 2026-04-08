@@ -1,242 +1,272 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "MassEntitySubsystem.h"
+#include "MassEntityTypes.h"
+#include "MassProcessor.h"
 #include "MassCommonFragments.h"
 #include "MassMovementFragments.h"
-#include "MassNavigationFragments.h"
-#include "MassActorSubsystem.h"
 #include "DinosaurCrowdSystem.generated.h"
 
 // Forward declarations
 class UMassEntitySubsystem;
-struct FMassEntityHandle;
 
 /**
- * Fragment que define o tipo de dinossauro e suas características básicas
+ * Fragment que define o tipo de dinossauro e suas características comportamentais
  */
-USTRUCT(BlueprintType)
+USTRUCT()
 struct TRANSPERSONALGAME_API FDinosaurTypeFragment : public FMassFragment
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    uint8 SpeciesID = 0;
+    // Tipo de dinossauro (Herbívoro, Carnívoro, Omnívoro)
+    UPROPERTY()
+    uint8 DinosaurType = 0;
     
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float Size = 1.0f; // Multiplicador de tamanho (0.5 = metade, 2.0 = dobro)
+    // Tamanho relativo (0=muito pequeno, 255=gigante)
+    UPROPERTY()
+    uint8 SizeCategory = 128;
     
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bIsHerbivore = true;
+    // Agressividade (0=pacífico, 255=extremamente agressivo)
+    UPROPERTY()
+    uint8 AggressionLevel = 64;
     
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bIsPackAnimal = false; // Se forma grupos
+    // Velocidade base de movimento
+    UPROPERTY()
+    float BaseSpeed = 300.0f;
     
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float AggressionLevel = 0.1f; // 0.0 = pacífico, 1.0 = muito agressivo
+    // Raio de detecção de outros dinossauros
+    UPROPERTY()
+    float DetectionRadius = 1000.0f;
     
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float MaxSpeed = 500.0f; // Unidades UE por segundo
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float ViewDistance = 2000.0f; // Distância de visão
+    // Distância mínima que mantém de predadores
+    UPROPERTY()
+    float FleeDistance = 1500.0f;
 };
 
 /**
- * Fragment que controla o comportamento atual do dinossauro
+ * Fragment que define o estado comportamental atual do dinossauro
  */
-USTRUCT(BlueprintType)
+USTRUCT()
 struct TRANSPERSONALGAME_API FDinosaurBehaviorFragment : public FMassFragment
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    uint8 CurrentBehavior = 0; // 0=Idle, 1=Grazing, 2=Moving, 3=Fleeing, 4=Hunting, 5=Sleeping
+    // Estado atual (0=Idle, 1=Foraging, 2=Hunting, 3=Fleeing, 4=Drinking, 5=Resting)
+    UPROPERTY()
+    uint8 CurrentState = 0;
     
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float BehaviorTimer = 0.0f;
+    // Tempo no estado atual
+    UPROPERTY()
+    float StateTime = 0.0f;
     
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float BehaviorDuration = 10.0f;
+    // Duração mínima do estado atual
+    UPROPERTY()
+    float MinStateDuration = 5.0f;
     
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    // Energia atual (0-100)
+    UPROPERTY()
+    float Energy = 100.0f;
+    
+    // Fome atual (0-100, onde 100 = muito faminto)
+    UPROPERTY()
+    float Hunger = 0.0f;
+    
+    // Sede atual (0-100, onde 100 = muito sedento)
+    UPROPERTY()
+    float Thirst = 0.0f;
+    
+    // Target entity (para caça ou fuga)
+    UPROPERTY()
+    FMassEntityHandle TargetEntity;
+    
+    // Posição de destino atual
+    UPROPERTY()
     FVector TargetLocation = FVector::ZeroVector;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    uint32 GroupID = 0; // ID do grupo ao qual pertence (0 = solitário)
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bIsGroupLeader = false;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float StressLevel = 0.0f; // 0.0 = calmo, 1.0 = pânico total
 };
 
 /**
- * Fragment que define necessidades básicas do dinossauro
+ * Fragment que define variações físicas únicas de cada dinossauro
  */
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FDinosaurNeedsFragment : public FMassFragment
+USTRUCT()
+struct TRANSPERSONALGAME_API FDinosaurVariationFragment : public FMassFragment
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float Hunger = 0.5f; // 0.0 = saciado, 1.0 = faminto
+    // Escala geral do modelo (0.8 a 1.2)
+    UPROPERTY()
+    float OverallScale = 1.0f;
     
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float Thirst = 0.5f; // 0.0 = hidratado, 1.0 = sedento
+    // Variação de cor primária (0-255)
+    UPROPERTY()
+    uint8 ColorVariation = 128;
     
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float Energy = 1.0f; // 0.0 = exausto, 1.0 = energético
+    // Padrão de manchas/listras (0-15)
+    UPROPERTY()
+    uint8 PatternType = 0;
     
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float LastFeedTime = 0.0f;
+    // Características físicas únicas (bitmask)
+    // Bit 0: Corno maior, Bit 1: Cauda mais longa, Bit 2: Postura diferente, etc.
+    UPROPERTY()
+    uint16 PhysicalTraits = 0;
     
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float LastDrinkTime = 0.0f;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float LastRestTime = 0.0f;
+    // ID único para reconhecimento pelo jogador
+    UPROPERTY()
+    uint32 UniqueID = 0;
 };
 
 /**
- * Fragment para detecção de ameaças e outros dinossauros
+ * Fragment para controlo de grupos/manadas
  */
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FDinosaurPerceptionFragment : public FMassFragment
+USTRUCT()
+struct TRANSPERSONALGAME_API FDinosaurHerdFragment : public FMassFragment
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TArray<FMassEntityHandle> NearbyDinosaurs;
+    // ID do grupo/manada (0 = solitário)
+    UPROPERTY()
+    uint32 HerdID = 0;
     
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FMassEntityHandle NearestThreat;
+    // Posição dentro da hierarquia da manada (0=líder, 255=seguidor)
+    UPROPERTY()
+    uint8 HerdRank = 128;
     
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FMassEntityHandle NearestPrey;
+    // Distância preferida do centro da manada
+    UPROPERTY()
+    float PreferredHerdDistance = 500.0f;
     
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FVector PlayerLocation = FVector::ZeroVector;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float PlayerDistance = 999999.0f;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bCanSeePlayer = false;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float LastPlayerSightTime = 0.0f;
+    // Força de coesão com a manada
+    UPROPERTY()
+    float HerdCohesion = 1.0f;
 };
 
 /**
- * Sistema principal de gestão de multidões de dinossauros
+ * Processor principal para simulação de comportamento de dinossauros
  */
 UCLASS()
-class TRANSPERSONALGAME_API UDinosaurCrowdSystem : public UMassEntitySubsystem
+class TRANSPERSONALGAME_API UDinosaurBehaviorProcessor : public UMassProcessor
 {
     GENERATED_BODY()
 
 public:
-    UDinosaurCrowdSystem();
-
-    // Spawning de dinossauros
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur Crowd")
-    void SpawnDinosaurHerd(uint8 SpeciesID, int32 Count, FVector Location, float SpreadRadius = 1000.0f);
-    
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur Crowd")
-    void SpawnSolitaryDinosaur(uint8 SpeciesID, FVector Location);
-    
-    // Gestão de grupos
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur Crowd")
-    uint32 CreateDinosaurGroup(const TArray<FMassEntityHandle>& Members);
-    
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur Crowd")
-    void DisbandGroup(uint32 GroupID);
-    
-    // Configuração de espécies
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur Crowd")
-    void RegisterDinosaurSpecies(uint8 SpeciesID, const FDinosaurTypeFragment& SpeciesData);
-    
-    // Eventos de mundo
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur Crowd")
-    void TriggerPanicEvent(FVector Location, float Radius, float Intensity = 1.0f);
-    
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur Crowd")
-    void SetTimeOfDay(float TimeHours); // 0-24 horas
-    
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur Crowd")
-    void SetWeatherCondition(uint8 WeatherType); // 0=Clear, 1=Rain, 2=Storm
+    UDinosaurBehaviorProcessor();
 
 protected:
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
+    virtual void ConfigureQueries() override;
+    virtual void Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context) override;
 
 private:
-    // Dados de espécies registadas
-    UPROPERTY()
-    TMap<uint8, FDinosaurTypeFragment> RegisteredSpecies;
+    FMassEntityQuery EntityQuery;
     
-    // Grupos activos
-    UPROPERTY()
-    TMap<uint32, TArray<FMassEntityHandle>> ActiveGroups;
+    // Funções de comportamento
+    void ProcessIdleBehavior(FMassExecutionContext& Context, FDinosaurBehaviorFragment& Behavior, 
+                           const FDinosaurTypeFragment& Type, const FTransformFragment& Transform);
     
-    // Contador para IDs únicos de grupos
-    uint32 NextGroupID = 1;
+    void ProcessForagingBehavior(FMassExecutionContext& Context, FDinosaurBehaviorFragment& Behavior,
+                               const FDinosaurTypeFragment& Type, FMassVelocityFragment& Velocity);
     
-    // Configurações ambientais
-    float CurrentTimeOfDay = 12.0f; // Meio-dia por defeito
-    uint8 CurrentWeather = 0; // Tempo limpo por defeito
+    void ProcessHuntingBehavior(FMassExecutionContext& Context, FDinosaurBehaviorFragment& Behavior,
+                              const FDinosaurTypeFragment& Type, FMassVelocityFragment& Velocity);
     
-    // Áreas de recursos (água, comida)
-    TArray<FVector> WaterSources;
-    TArray<FVector> FoodSources;
+    void ProcessFleeingBehavior(FMassExecutionContext& Context, FDinosaurBehaviorFragment& Behavior,
+                              const FDinosaurTypeFragment& Type, FMassVelocityFragment& Velocity);
     
-    // Métodos internos
-    void InitializeSpeciesDatabase();
-    void SetupResourceAreas();
-    FVector FindNearestWaterSource(FVector Location) const;
-    FVector FindNearestFoodSource(FVector Location) const;
+    void UpdateNeeds(FDinosaurBehaviorFragment& Behavior, float DeltaTime);
+    void FindNearbyTargets(FMassExecutionContext& Context, const FTransformFragment& Transform,
+                          const FDinosaurTypeFragment& Type, FDinosaurBehaviorFragment& Behavior);
 };
 
 /**
- * Enums para comportamentos e estados
+ * Processor para movimento e navegação de dinossauros
  */
-UENUM(BlueprintType)
-enum class EDinosaurBehavior : uint8
+UCLASS()
+class TRANSPERSONALGAME_API UDinosaurMovementProcessor : public UMassProcessor
 {
-    Idle = 0,
-    Grazing = 1,
-    Moving = 2,
-    Fleeing = 3,
-    Hunting = 4,
-    Sleeping = 5,
-    Drinking = 6,
-    Socializing = 7,
-    Territorial = 8
+    GENERATED_BODY()
+
+public:
+    UDinosaurMovementProcessor();
+
+protected:
+    virtual void ConfigureQueries() override;
+    virtual void Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context) override;
+
+private:
+    FMassEntityQuery EntityQuery;
+    
+    void ApplyMovement(FMassExecutionContext& Context, FTransformFragment& Transform,
+                      FMassVelocityFragment& Velocity, const FDinosaurBehaviorFragment& Behavior,
+                      const FDinosaurTypeFragment& Type, float DeltaTime);
+    
+    void ApplyAvoidance(FMassVelocityFragment& Velocity, const FTransformFragment& Transform,
+                       const FDinosaurTypeFragment& Type, FMassExecutionContext& Context);
 };
 
-UENUM(BlueprintType)
-enum class EDinosaurSpecies : uint8
+/**
+ * Processor para comportamento de manadas
+ */
+UCLASS()
+class TRANSPERSONALGAME_API UDinosaurHerdProcessor : public UMassProcessor
 {
-    Triceratops = 0,
-    Parasaurolophus = 1,
-    Stegosaurus = 2,
-    Brachiosaurus = 3,
-    Velociraptor = 4,
-    TyrannosaurusRex = 5,
-    Allosaurus = 6,
-    Compsognathus = 7,
-    Ankylosaurus = 8,
-    Diplodocus = 9
+    GENERATED_BODY()
+
+public:
+    UDinosaurHerdProcessor();
+
+protected:
+    virtual void ConfigureQueries() override;
+    virtual void Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context) override;
+
+private:
+    FMassEntityQuery EntityQuery;
+    
+    void ProcessHerdBehavior(FMassExecutionContext& Context, const FDinosaurHerdFragment& Herd,
+                           FMassVelocityFragment& Velocity, const FTransformFragment& Transform);
+    
+    void CalculateHerdCenter(FMassExecutionContext& Context, uint32 HerdID, FVector& OutCenter, int32& OutCount);
 };
 
-UENUM(BlueprintType)
-enum class EWeatherCondition : uint8
+/**
+ * Subsystem principal para gestão da simulação de dinossauros
+ */
+UCLASS()
+class TRANSPERSONALGAME_API UDinosaurCrowdSubsystem : public UWorldSubsystem
 {
-    Clear = 0,
-    LightRain = 1,
-    HeavyRain = 2,
-    Storm = 3,
-    Fog = 4
+    GENERATED_BODY()
+
+public:
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+
+    // Spawning de dinossauros
+    UFUNCTION(BlueprintCallable)
+    void SpawnDinosaurGroup(const FVector& Location, int32 Count, uint8 DinosaurType, 
+                           float SpawnRadius = 1000.0f);
+    
+    UFUNCTION(BlueprintCallable)
+    void SpawnSolitaryDinosaur(const FVector& Location, uint8 DinosaurType);
+    
+    // Gestão de população
+    UFUNCTION(BlueprintCallable)
+    int32 GetDinosaurCount() const;
+    
+    UFUNCTION(BlueprintCallable)
+    int32 GetDinosaurCountInRadius(const FVector& Location, float Radius) const;
+    
+    // Configuração de densidade por zona
+    UFUNCTION(BlueprintCallable)
+    void SetZoneDensity(const FString& ZoneName, float DensityMultiplier);
+
+private:
+    UPROPERTY()
+    TObjectPtr<UMassEntitySubsystem> MassEntitySubsystem;
+    
+    // Configurações de spawn
+    TMap<FString, float> ZoneDensityMap;
+    uint32 NextUniqueID = 1;
+    uint32 NextHerdID = 1;
+    
+    // Funções auxiliares
+    FDinosaurVariationFragment GenerateUniqueVariation();
+    void InitializeDinosaurEntity(FMassEntityHandle Entity, uint8 DinosaurType, 
+                                const FVector& Location, uint32 HerdID = 0);
 };
