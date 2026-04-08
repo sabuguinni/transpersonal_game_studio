@@ -1,130 +1,158 @@
 {
   "MetaSoundSource": {
-    "Name": "AdaptiveMusicSystem",
-    "Description": "Sistema de música adaptativa que responde ao estado emocional do jogo",
+    "AssetType": "MetaSoundSource",
+    "Version": "5.3",
+    "Description": "Adaptive music system that responds to emotional states and threat levels",
     "Inputs": [
       {
-        "Name": "TensionLevel",
+        "Name": "EmotionalState",
         "Type": "Float",
         "DefaultValue": 0.0,
-        "Description": "Nível de tensão de 0.0 (calmo) a 1.0 (perigo máximo)"
+        "Description": "0=Calm, 1=Tension, 2=Danger, 3=Terror, 4=Relief, 5=Discovery, 6=Domestication"
       },
       {
-        "Name": "AudioState",
-        "Type": "Int32",
-        "DefaultValue": 0,
-        "Description": "Estado atual do áudio (Exploration=0, Tension=1, Danger=2, Combat=3, Safety=4)"
-      },
-      {
-        "Name": "Environment",
-        "Type": "Int32",
-        "DefaultValue": 0,
-        "Description": "Tipo de ambiente (Forest=0, River=1, Cave=2, Clearing=3, DinosaurTerritory=4, PlayerBase=5)"
+        "Name": "ThreatLevel",
+        "Type": "Float",
+        "DefaultValue": 0.0,
+        "Description": "0-1 threat intensity"
       },
       {
         "Name": "TimeOfDay",
         "Type": "Float",
-        "DefaultValue": 0.5,
-        "Description": "Hora do dia normalizada (0.0=meia-noite, 0.5=meio-dia, 1.0=meia-noite)"
+        "DefaultValue": 2.0,
+        "Description": "0=Dawn, 1=Morning, 2=Midday, 3=Afternoon, 4=Dusk, 5=Night, 6=DeepNight"
+      },
+      {
+        "Name": "EnvironmentType",
+        "Type": "Float",
+        "DefaultValue": 0.0,
+        "Description": "0=DenseForest, 1=OpenPlains, 2=RiverBanks, 3=Caves, 4=PlayerBase, 5=DinosaurTerritory"
+      },
+      {
+        "Name": "StealthLevel",
+        "Type": "Float",
+        "DefaultValue": 1.0,
+        "Description": "0-1 player stealth effectiveness"
+      },
+      {
+        "Name": "DinosaurProximity",
+        "Type": "Float",
+        "DefaultValue": 0.0,
+        "Description": "0-1 proximity to dangerous dinosaurs"
+      }
+    ],
+    "Outputs": [
+      {
+        "Name": "OutLeft",
+        "Type": "Audio"
+      },
+      {
+        "Name": "OutRight",
+        "Type": "Audio"
       }
     ],
     "Nodes": [
       {
         "Type": "WavePlayer",
-        "Name": "BaseAmbientLayer",
-        "WaveAsset": "/Content/Audio/Music/Layers/Ambient_Forest_Base.wav",
+        "Name": "BaseLayer_Calm",
+        "WaveAsset": "/Content/Audio/Music/Stems/Base_Calm_Loop.wav",
         "Loop": true,
-        "Volume": 0.6
+        "Volume": 0.7
       },
       {
         "Type": "WavePlayer", 
-        "Name": "TensionLayer",
-        "WaveAsset": "/Content/Audio/Music/Layers/Tension_Strings.wav",
+        "Name": "BaseLayer_Tension",
+        "WaveAsset": "/Content/Audio/Music/Stems/Base_Tension_Loop.wav",
         "Loop": true,
         "Volume": 0.0
       },
       {
         "Type": "WavePlayer",
-        "Name": "DangerLayer",
-        "WaveAsset": "/Content/Audio/Music/Layers/Danger_Percussion.wav",
+        "Name": "BaseLayer_Danger",
+        "WaveAsset": "/Content/Audio/Music/Stems/Base_Danger_Loop.wav", 
         "Loop": true,
         "Volume": 0.0
       },
       {
         "Type": "WavePlayer",
-        "Name": "CombatLayer",
-        "WaveAsset": "/Content/Audio/Music/Layers/Combat_Brass.wav",
+        "Name": "PercussionLayer",
+        "WaveAsset": "/Content/Audio/Music/Stems/Percussion_Adaptive.wav",
         "Loop": true,
         "Volume": 0.0
       },
       {
-        "Type": "MapRange",
-        "Name": "TensionToVolume",
-        "InputRange": [0.0, 1.0],
-        "OutputRange": [0.0, 0.8],
-        "Clamped": true
+        "Type": "WavePlayer",
+        "Name": "StringsLayer",
+        "WaveAsset": "/Content/Audio/Music/Stems/Strings_Tension.wav",
+        "Loop": true,
+        "Volume": 0.0
       },
       {
-        "Type": "LowPassFilter",
-        "Name": "AtmosphericFilter",
-        "CutoffFrequency": 8000.0,
-        "Q": 0.7
+        "Type": "LFO",
+        "Name": "ThreatModulation",
+        "Frequency": 0.1,
+        "Shape": "Sine",
+        "MinValue": 0.8,
+        "MaxValue": 1.2
       },
       {
-        "Type": "Reverb",
-        "Name": "EnvironmentalReverb",
-        "WetLevel": 0.2,
-        "RoomSize": 0.5
+        "Type": "Crossfade",
+        "Name": "EmotionalStateMixer",
+        "Inputs": 3
       },
       {
-        "Type": "Compressor",
-        "Name": "MasterCompressor",
-        "Threshold": -12.0,
-        "Ratio": 3.0,
-        "AttackTime": 0.01,
-        "ReleaseTime": 0.1
+        "Type": "Multiply",
+        "Name": "ThreatLevelMod"
+      },
+      {
+        "Type": "StereoMixer",
+        "Name": "FinalMix"
       }
     ],
     "Connections": [
       {
-        "From": "TensionLevel",
-        "To": "TensionToVolume.In"
+        "From": "BaseLayer_Calm.Out",
+        "To": "EmotionalStateMixer.In0"
       },
       {
-        "From": "TensionToVolume.Out",
-        "To": "TensionLayer.Volume"
+        "From": "BaseLayer_Tension.Out", 
+        "To": "EmotionalStateMixer.In1"
       },
       {
-        "From": "BaseAmbientLayer.Out",
-        "To": "AtmosphericFilter.In"
+        "From": "BaseLayer_Danger.Out",
+        "To": "EmotionalStateMixer.In2"
       },
       {
-        "From": "TensionLayer.Out",
-        "To": "AtmosphericFilter.In"
+        "From": "EmotionalState",
+        "To": "EmotionalStateMixer.CrossfadeValue"
       },
       {
-        "From": "DangerLayer.Out",
-        "To": "AtmosphericFilter.In"
+        "From": "EmotionalStateMixer.Out",
+        "To": "FinalMix.In0"
       },
       {
-        "From": "CombatLayer.Out",
-        "To": "AtmosphericFilter.In"
+        "From": "PercussionLayer.Out",
+        "To": "ThreatLevelMod.In0"
       },
       {
-        "From": "AtmosphericFilter.Out",
-        "To": "EnvironmentalReverb.In"
+        "From": "ThreatLevel",
+        "To": "ThreatLevelMod.In1"
       },
       {
-        "From": "EnvironmentalReverb.Out",
-        "To": "MasterCompressor.In"
+        "From": "ThreatLevelMod.Out",
+        "To": "FinalMix.In1"
       },
       {
-        "From": "MasterCompressor.Out",
-        "To": "Output.Left"
+        "From": "StringsLayer.Out",
+        "To": "FinalMix.In2"
       },
       {
-        "From": "MasterCompressor.Out",
-        "To": "Output.Right"
+        "From": "FinalMix.OutLeft",
+        "To": "OutLeft"
+      },
+      {
+        "From": "FinalMix.OutRight",
+        "To": "OutRight"
       }
     ]
   }
