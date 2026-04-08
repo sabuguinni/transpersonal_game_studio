@@ -4,82 +4,11 @@
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "GameFramework/GameModeBase.h"
+#include "PerformanceTargets.h"
 #include "PerformanceManager.generated.h"
 
-UENUM(BlueprintType)
-enum class EPerformanceTarget : uint8
-{
-    PC_HighEnd_60FPS    UMETA(DisplayName = "PC High-End 60fps"),
-    Console_30FPS       UMETA(DisplayName = "Console 30fps"),
-    PC_MidRange_30FPS   UMETA(DisplayName = "PC Mid-Range 30fps"),
-    Mobile_30FPS        UMETA(DisplayName = "Mobile 30fps")
-};
-
-UENUM(BlueprintType)
-enum class EPerformanceLevel : uint8
-{
-    Low         UMETA(DisplayName = "Low"),
-    Medium      UMETA(DisplayName = "Medium"),
-    High        UMETA(DisplayName = "High"),
-    Epic        UMETA(DisplayName = "Epic"),
-    Custom      UMETA(DisplayName = "Custom")
-};
-
 USTRUCT(BlueprintType)
-struct FPerformanceBudget
-{
-    GENERATED_BODY()
-
-    // Frame time budgets in milliseconds
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Frame Budget")
-    float TargetFrameTime = 16.67f; // 60fps default
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Frame Budget")
-    float GameThreadBudget = 8.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Frame Budget")
-    float RenderThreadBudget = 12.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Frame Budget")
-    float GPUBudget = 14.0f;
-
-    // Draw call limits
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering Budget")
-    int32 MaxDrawCalls = 2000;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering Budget")
-    int32 MaxTriangles = 2000000; // 2M triangles
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering Budget")
-    int32 MaxInstances = 10000;
-
-    // Memory budgets in MB
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory Budget")
-    float TextureMemoryBudget = 2048.0f; // 2GB
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory Budget")
-    float MeshMemoryBudget = 1024.0f; // 1GB
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory Budget")
-    float AudioMemoryBudget = 512.0f; // 512MB
-
-    FPerformanceBudget()
-    {
-        TargetFrameTime = 16.67f;
-        GameThreadBudget = 8.0f;
-        RenderThreadBudget = 12.0f;
-        GPUBudget = 14.0f;
-        MaxDrawCalls = 2000;
-        MaxTriangles = 2000000;
-        MaxInstances = 10000;
-        TextureMemoryBudget = 2048.0f;
-        MeshMemoryBudget = 1024.0f;
-        AudioMemoryBudget = 512.0f;
-    }
-};
-
-USTRUCT(BlueprintType)
-struct FPerformanceMetrics
+struct TRANSPERSONALGAME_API FPerformanceMetrics
 {
     GENERATED_BODY()
 
@@ -121,12 +50,30 @@ struct FPerformanceMetrics
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance Status")
     TArray<FString> PerformanceWarnings;
+
+    FPerformanceMetrics()
+    {
+        CurrentFPS = 0.0f;
+        CurrentFrameTime = 0.0f;
+        GameThreadTime = 0.0f;
+        RenderThreadTime = 0.0f;
+        GPUTime = 0.0f;
+        CurrentDrawCalls = 0;
+        CurrentTriangles = 0;
+        CurrentInstances = 0;
+        UsedTextureMemory = 0.0f;
+        UsedMeshMemory = 0.0f;
+        UsedAudioMemory = 0.0f;
+        bIsWithinBudget = true;
+    }
 };
 
 /**
  * Central performance management system for Transpersonal Game Studio
  * Ensures 60fps on PC high-end and 30fps on console
  * Monitors and enforces performance budgets across all systems
+ * 
+ * This is the legacy performance manager - use DynamicPerformanceManager for new features
  */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UPerformanceManager : public UObject
@@ -139,9 +86,6 @@ public:
     // Core performance management
     UFUNCTION(BlueprintCallable, Category = "Performance")
     void Initialize(EPerformanceTarget Target);
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void SetPerformanceLevel(EPerformanceLevel Level);
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
     void UpdatePerformanceMetrics();
@@ -184,10 +128,7 @@ public:
 
 protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    EPerformanceTarget CurrentTarget;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    EPerformanceLevel CurrentLevel;
+    EPerformanceTarget CurrentTarget = EPerformanceTarget::PC_HighEnd;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
     FPerformanceBudget CurrentBudget;
