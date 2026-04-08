@@ -4,235 +4,172 @@
 
 #include "CoreMinimal.h"
 #include "Engine/World.h"
-#include "Components/ActorComponent.h"
+#include "Subsystems/GameInstanceSubsystem.h"
 #include "Engine/Engine.h"
 #include "HAL/IConsoleManager.h"
-#include "Stats/Stats.h"
 #include "PerformanceManager.generated.h"
 
 /**
- * @brief Performance Manager for Jurassic Survival Game
+ * @brief Core Performance Management System for Jurassic Survival Game
  * 
- * Manages performance targets and optimization for:
- * - 60fps on high-end PC (RTX 3070+, 16GB RAM)
- * - 30fps on console (PS5/Xbox Series X)
- * - Dynamic quality scaling based on performance
- * - Memory management for large open world
- * - Physics optimization for massive dinosaur herds
+ * Manages all performance-related systems to maintain stable framerates:
+ * - Target: 60fps on High-end PC (RTX 3070+, 16GB RAM)
+ * - Target: 30fps on Console (PS5/Xbox Series X)
+ * - Dynamic LOD scaling based on performance budget
+ * - Memory management for streaming world
+ * - GPU profiling and bottleneck detection
  * 
  * @author Performance Optimizer — Agent #4
  * @version 1.0 — March 2026
  */
-UCLASS(ClassGroup=(Performance), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UPerformanceManager : public UActorComponent
+UCLASS(BlueprintType)
+class TRANSPERSONALGAME_API UPerformanceManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
     UPerformanceManager();
 
-protected:
-    virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
-    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+
+    /** Performance targets for different platforms */
+    UENUM(BlueprintType)
+    enum class EPerformanceTarget : uint8
+    {
+        HighEndPC_60fps,    // RTX 3070+, 16GB RAM, SSD
+        MidRangePC_60fps,   // GTX 1660, 8GB RAM
+        Console_30fps,      // PS5/Xbox Series X
+        Console_60fps,      // PS5/Xbox Series X (Performance Mode)
+        Potato_30fps        // Minimum spec fallback
+    };
+
+    /** Performance budget categories */
+    UENUM(BlueprintType)
+    enum class EPerformanceBudget : uint8
+    {
+        GameThread,         // CPU gameplay logic
+        RenderThread,       // CPU rendering commands
+        GPU,               // GPU rendering
+        Memory,            // RAM usage
+        VRAM,             // Video memory
+        Streaming         // Asset streaming bandwidth
+    };
 
 public:
     /**
      * @brief Initialize performance monitoring and targets
-     * 
-     * Sets up frame time tracking, memory monitoring, and quality scaling
-     * based on detected hardware capabilities
      */
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void InitializePerformanceSystem();
+    void InitializePerformanceTargets();
 
     /**
-     * @brief Get current performance metrics
-     * 
-     * @return Struct containing FPS, frame time, memory usage, and quality level
-     */
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Performance")
-    struct FPerformanceMetrics GetCurrentMetrics() const;
-
-    /**
-     * @brief Force performance level adjustment
-     * 
-     * @param NewQualityLevel 0=Low, 1=Medium, 2=High, 3=Epic
+     * @brief Set performance target based on detected hardware
      */
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void SetQualityLevel(int32 NewQualityLevel);
+    void SetPerformanceTarget(EPerformanceTarget Target);
 
     /**
-     * @brief Enable/disable dynamic quality scaling
-     * 
-     * @param bEnable Whether to automatically adjust quality based on performance
+     * @brief Get current frame time in milliseconds
      */
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void SetDynamicQualityEnabled(bool bEnable);
+    float GetCurrentFrameTime() const;
 
     /**
-     * @brief Get recommended quality level for current hardware
-     * 
-     * @return Quality level (0-3) based on GPU benchmark and available memory
-     */
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Performance")
-    int32 GetRecommendedQualityLevel() const;
-
-    /**
-     * @brief Apply Jurassic-specific performance optimizations
-     * 
-     * Optimizes settings for:
-     * - Large dinosaur herds (Mass AI culling)
-     * - Dense vegetation (foliage LOD)
-     * - Physics simulation (Chaos optimization)
-     * - Memory streaming (texture and mesh LOD)
+     * @brief Get current FPS
      */
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void ApplyJurassicOptimizations();
+    float GetCurrentFPS() const;
+
+    /**
+     * @brief Check if we're meeting performance targets
+     */
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    bool IsMeetingPerformanceTargets() const;
+
+    /**
+     * @brief Get performance budget usage for specific category
+     */
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    float GetBudgetUsage(EPerformanceBudget Budget) const;
+
+    /**
+     * @brief Force LOD adjustment based on performance
+     */
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void AdjustLODForPerformance(float PerformanceScale);
+
+    /**
+     * @brief Enable/disable expensive visual features based on performance
+     */
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void ScaleVisualQuality(float QualityScale);
+
+    /**
+     * @brief Get recommended scalability settings for current hardware
+     */
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void ApplyRecommendedScalabilitySettings();
 
 protected:
-    /** Target frame rates for different platforms */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance Targets")
-    float TargetFPS_PC = 60.0f;
+    /** Current performance target */
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    EPerformanceTarget CurrentTarget = EPerformanceTarget::HighEndPC_60fps;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance Targets")
-    float TargetFPS_Console = 30.0f;
+    /** Target frame time in milliseconds */
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float TargetFrameTime = 16.67f; // 60fps
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance Targets")
-    float TargetFPS_Mobile = 30.0f;
+    /** Performance budgets in milliseconds */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance Budgets")
+    TMap<EPerformanceBudget, float> PerformanceBudgets;
 
-    /** Frame time budgets in milliseconds */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance Targets")
-    float FrameTimeBudget_PC = 16.67f; // 60fps
+    /** Moving average frame times for smoothing */
+    UPROPERTY()
+    TArray<float> FrameTimeHistory;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance Targets")
-    float FrameTimeBudget_Console = 33.33f; // 30fps
+    /** Maximum history samples for averaging */
+    UPROPERTY(EditAnywhere, Category = "Performance")
+    int32 MaxFrameHistorySamples = 60;
 
-    /** Memory usage targets in MB */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance Targets")
-    float MaxMemoryUsage_PC = 12000.0f; // 12GB
+    /** Performance monitoring enabled */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance")
+    bool bEnablePerformanceMonitoring = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance Targets")
-    float MaxMemoryUsage_Console = 8000.0f; // 8GB
+    /** Auto-adjust quality based on performance */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance")
+    bool bAutoAdjustQuality = true;
 
-    /** Dynamic quality scaling settings */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Quality Scaling")
-    bool bDynamicQualityEnabled = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Quality Scaling")
-    float QualityAdjustmentThreshold = 5.0f; // ms over budget
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Quality Scaling")
-    float QualityCheckInterval = 2.0f; // seconds
-
-    /** Dinosaur-specific performance settings */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Jurassic Optimization")
-    int32 MaxVisibleDinosaurs = 50;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Jurassic Optimization")
-    float DinosaurCullDistance = 2000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Jurassic Optimization")
-    int32 MaxPhysicsSubsteps = 4;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Jurassic Optimization")
-    float VegetationDensityScale = 1.0f;
+    /** Minimum acceptable frame rate before quality reduction */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance")
+    float MinAcceptableFPS = 50.0f;
 
 private:
-    /** Performance monitoring */
-    void UpdatePerformanceMetrics();
-    void CheckFrameTimeTarget();
-    void CheckMemoryUsage();
-    void AdjustQualityIfNeeded();
+    /** Initialize performance budgets based on target */
+    void InitializeBudgets();
 
-    /** Platform detection */
-    void DetectPlatformCapabilities();
-    bool IsHighEndPC() const;
-    bool IsConsole() const;
+    /** Update frame time tracking */
+    void UpdateFrameTimeTracking();
 
-    /** Quality level management */
-    void ApplyQualityLevel(int32 QualityLevel);
-    void SetRenderingQuality(int32 Level);
-    void SetPhysicsQuality(int32 Level);
-    void SetAudioQuality(int32 Level);
+    /** Detect hardware capabilities */
+    void DetectHardwareCapabilities();
 
-    /** Jurassic-specific optimizations */
-    void OptimizeDinosaurRendering();
-    void OptimizeVegetationSystem();
-    void OptimizePhysicsSimulation();
-    void OptimizeMemoryStreaming();
+    /** Apply performance optimizations */
+    void ApplyPerformanceOptimizations();
 
-    /** Performance tracking variables */
-    float CurrentFPS;
-    float CurrentFrameTime;
-    float CurrentMemoryUsage;
-    int32 CurrentQualityLevel;
-    
-    /** Timing for quality adjustments */
-    float LastQualityCheckTime;
-    TArray<float> RecentFrameTimes;
-    
-    /** Platform capabilities */
-    bool bIsHighEndPC;
-    bool bIsConsole;
-    bool bSupportsDLSS;
-    bool bSupportsRayTracing;
-    
-    /** Console variables for runtime adjustment */
-    TAutoConsoleVariable<int32> CVarQualityLevel;
-    TAutoConsoleVariable<bool> CVarDynamicQuality;
-    TAutoConsoleVariable<float> CVarTargetFPS;
-};
+    /** Console commands for performance debugging */
+    void RegisterConsoleCommands();
 
-/**
- * @brief Performance metrics structure
- */
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FPerformanceMetrics
-{
-    GENERATED_BODY()
+    /** Timer handle for performance monitoring */
+    FTimerHandle PerformanceMonitoringTimer;
 
-    /** Current frames per second */
-    UPROPERTY(BlueprintReadOnly)
-    float FPS = 0.0f;
+    /** Cached engine reference */
+    UPROPERTY()
+    UEngine* CachedEngine;
 
-    /** Current frame time in milliseconds */
-    UPROPERTY(BlueprintReadOnly)
-    float FrameTime = 0.0f;
-
-    /** Current memory usage in MB */
-    UPROPERTY(BlueprintReadOnly)
-    float MemoryUsage = 0.0f;
-
-    /** Current quality level (0-3) */
-    UPROPERTY(BlueprintReadOnly)
-    int32 QualityLevel = 2;
-
-    /** Whether target FPS is being met */
-    UPROPERTY(BlueprintReadOnly)
-    bool bMeetingTargetFPS = true;
-
-    /** Number of visible dinosaurs */
-    UPROPERTY(BlueprintReadOnly)
-    int32 VisibleDinosaurs = 0;
-
-    /** Current physics simulation load */
-    UPROPERTY(BlueprintReadOnly)
-    float PhysicsLoad = 0.0f;
-
-    /** GPU utilization percentage */
-    UPROPERTY(BlueprintReadOnly)
-    float GPUUtilization = 0.0f;
-
-    FPerformanceMetrics()
-    {
-        FPS = 0.0f;
-        FrameTime = 0.0f;
-        MemoryUsage = 0.0f;
-        QualityLevel = 2;
-        bMeetingTargetFPS = true;
-        VisibleDinosaurs = 0;
-        PhysicsLoad = 0.0f;
-        GPUUtilization = 0.0f;
-    }
+    /** Performance statistics */
+    mutable float CachedFrameTime = 0.0f;
+    mutable float CachedFPS = 0.0f;
+    mutable float LastUpdateTime = 0.0f;
 };
