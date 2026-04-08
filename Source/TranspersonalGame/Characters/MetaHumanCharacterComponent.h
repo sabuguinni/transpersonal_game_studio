@@ -5,10 +5,9 @@
 #include "CharacterArchetypeSystem.h"
 #include "MetaHumanCharacterComponent.generated.h"
 
+class UMetaHumanIdentity;
 class USkeletalMeshComponent;
-class UAnimBlueprint;
-
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnCharacterAppearanceChanged, const FCharacterVisualTraits&, NewTraits);
+class UGroomComponent;
 
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UMetaHumanCharacterComponent : public UActorComponent
@@ -22,97 +21,115 @@ protected:
     virtual void BeginPlay() override;
 
 public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, 
-        FActorComponentTickFunction* ThisTickFunction) override;
+    // Character data
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    FCharacterArchetypeData CharacterData;
 
-    // Character archetype and visual data
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Setup")
-    TSoftObjectPtr<UCharacterArchetype> CharacterArchetype;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    FString CharacterName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Setup")
-    FCharacterVisualTraits CurrentVisualTraits;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    FString CharacterID; // Unique identifier for this character instance
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Setup")
-    FCharacterClothing CurrentClothing;
+    // MetaHuman assets
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
+    TSoftObjectPtr<UMetaHumanIdentity> MetaHumanIdentity;
 
-    // MetaHuman mesh references
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman Setup")
-    TSoftObjectPtr<USkeletalMesh> BaseMaleMesh;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
+    USkeletalMeshComponent* BodyMeshComponent;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman Setup")
-    TSoftObjectPtr<USkeletalMesh> BaseFemaleMesh;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
+    USkeletalMeshComponent* FaceMeshComponent;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman Setup")
-    TSoftObjectPtr<UAnimBlueprint> CharacterAnimBlueprint;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
+    UGroomComponent* HairGroomComponent;
 
-    // Survival state tracking
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival Tracking")
-    ESurvivalCondition CurrentSurvivalState;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
+    UGroomComponent* FacialHairGroomComponent;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival Tracking")
-    int32 DaysSurvived = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
+    UGroomComponent* EyebrowGroomComponent;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival Tracking")
-    float HealthCondition = 1.0f; // 0 = dying, 1 = perfect health
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
+    UGroomComponent* EyelashGroomComponent;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival Tracking")
-    float MentalState = 1.0f; // 0 = broken, 1 = strong
+    // Clothing components
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clothing")
+    TArray<USkeletalMeshComponent*> ClothingComponents;
 
-    // Events
-    UPROPERTY(BlueprintAssignable, Category = "Character Events")
-    FOnCharacterAppearanceChanged OnAppearanceChanged;
+    // Material instances for customization
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
+    UMaterialInstanceDynamic* SkinMaterialInstance;
 
-    // Core functions
-    UFUNCTION(BlueprintCallable, Category = "Character Management")
-    void ApplyArchetype(UCharacterArchetype* NewArchetype);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
+    UMaterialInstanceDynamic* EyeMaterialInstance;
 
-    UFUNCTION(BlueprintCallable, Category = "Character Management")
-    void UpdateVisualTraits(const FCharacterVisualTraits& NewTraits);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
+    TArray<UMaterialInstanceDynamic*> ClothingMaterialInstances;
 
-    UFUNCTION(BlueprintCallable, Category = "Character Management")
-    void UpdateClothing(const FCharacterClothing& NewClothing);
+    // Generation functions
+    UFUNCTION(BlueprintCallable, Category = "Character Generation")
+    void GenerateCharacterFromArchetype(ECharacterArchetype Archetype, bool bRandomizeTraits = true);
 
-    UFUNCTION(BlueprintCallable, Category = "Survival System")
-    void AdvanceSurvivalState(int32 DaysElapsed);
+    UFUNCTION(BlueprintCallable, Category = "Character Generation")
+    void ApplyCharacterData(const FCharacterArchetypeData& InCharacterData);
 
-    UFUNCTION(BlueprintCallable, Category = "Survival System")
-    void ApplyInjury(float InjurySeverity);
+    UFUNCTION(BlueprintCallable, Category = "Character Customization")
+    void UpdateSkinTone(ESkinTone SkinTone);
 
-    UFUNCTION(BlueprintCallable, Category = "Survival System")
-    void ApplyPsychologicalStress(float StressLevel);
+    UFUNCTION(BlueprintCallable, Category = "Character Customization")
+    void UpdateHairColor(const FLinearColor& HairColor);
 
-    // Visual update functions
-    UFUNCTION(BlueprintCallable, Category = "Visual Updates")
-    void RefreshCharacterMesh();
+    UFUNCTION(BlueprintCallable, Category = "Character Customization")
+    void UpdateEyeColor(const FLinearColor& EyeColor);
 
-    UFUNCTION(BlueprintCallable, Category = "Visual Updates")
-    void ApplySurvivalWear();
+    UFUNCTION(BlueprintCallable, Category = "Character Customization")
+    void UpdateClothingColor(int32 ClothingIndex, const FLinearColor& PrimaryColor, const FLinearColor& SecondaryColor);
 
-    UFUNCTION(BlueprintCallable, Category = "Visual Updates")
-    void UpdateClothingCondition();
+    UFUNCTION(BlueprintCallable, Category = "Character Customization")
+    void UpdateClothingWear(int32 ClothingIndex, float WearLevel);
 
-    // Utility functions
-    UFUNCTION(BlueprintPure, Category = "Character Info")
-    FString GetCharacterDisplayName() const;
+    UFUNCTION(BlueprintCallable, Category = "Character Customization")
+    void ApplyScarsAndTattoos();
 
-    UFUNCTION(BlueprintPure, Category = "Character Info")
-    FText GetCharacterDescription() const;
+    UFUNCTION(BlueprintCallable, Category = "Character Info")
+    FString GetCharacterDescription() const;
 
-    UFUNCTION(BlueprintPure, Category = "Character Info")
-    float GetOverallCondition() const;
+    UFUNCTION(BlueprintCallable, Category = "Character Info")
+    bool IsHostile() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Character Info")
+    bool CanBeTamed() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Character Info")
+    float GetTrustLevel() const;
+
+protected:
+    UFUNCTION()
+    void InitializeMetaHumanComponents();
+
+    UFUNCTION()
+    void LoadMetaHumanPreset(ECharacterGender Gender);
+
+    UFUNCTION()
+    void SetupClothingComponents();
+
+    UFUNCTION()
+    void CreateMaterialInstances();
+
+    UFUNCTION()
+    FLinearColor GetSkinToneColor(ESkinTone SkinTone) const;
+
+    UPROPERTY()
+    class UCharacterArchetypeDataAsset* ArchetypeDataAsset;
 
 private:
-    // Internal mesh management
-    UPROPERTY()
-    TObjectPtr<USkeletalMeshComponent> CachedMeshComponent;
-
-    // Survival state calculations
-    void CalculateSurvivalEffects();
-    void UpdateMaterialParameters();
+    bool bIsInitialized = false;
     
-    // MetaHuman integration
-    void SetupMetaHumanMesh();
-    void ApplyBodyMorphs();
-    void ApplyFacialMorphs();
-    void ApplyClothingMeshes();
+    // LOD settings for performance
+    UPROPERTY(EditAnywhere, Category = "Performance")
+    int32 MaxLODLevel = 3;
+
+    UPROPERTY(EditAnywhere, Category = "Performance")
+    float LODDistanceMultiplier = 1.0f;
 };
