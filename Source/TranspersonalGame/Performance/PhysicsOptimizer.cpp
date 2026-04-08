@@ -1,275 +1,287 @@
 /**
  * @file PhysicsOptimizer.cpp
- * @brief Implementation of consciousness physics performance optimization
+ * @brief Implementation of physics performance optimization system
  */
 
 #include "PhysicsOptimizer.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "GameFramework/PlayerController.h"
-#include "Kismet/GameplayStatics.h"
-#include "HAL/PlatformFilemanager.h"
+#include "GameFramework/Actor.h"
+#include "Components/PrimitiveComponent.h"
+#include "HAL/PlatformMemory.h"
 #include "Stats/Stats.h"
+#include "Misc/DateTime.h"
 
-DECLARE_STATS_GROUP(TEXT("Consciousness Physics"), STATGROUP_ConsciousnessPhysics, STATCAT_Advanced);
-DECLARE_CYCLE_STAT(TEXT("Consciousness Field Update"), STAT_ConsciousnessFieldUpdate, STATGROUP_ConsciousnessPhysics);
-DECLARE_CYCLE_STAT(TEXT("Consciousness LOD Update"), STAT_ConsciousnessLODUpdate, STATGROUP_ConsciousnessPhysics);
-DECLARE_DWORD_COUNTER_STAT(TEXT("Active Consciousness Actors"), STAT_ActiveConsciousnessActors, STATGROUP_ConsciousnessPhysics);
+DECLARE_CYCLE_STAT(TEXT("Physics LOD Update"), STAT_PhysicsLODUpdate, STATGROUP_TranspersonalPhysics);
+DECLARE_CYCLE_STAT(TEXT("Spatial Grid Update"), STAT_SpatialGridUpdate, STATGROUP_TranspersonalPhysics);
+DECLARE_CYCLE_STAT(TEXT("Consciousness Optimization"), STAT_ConsciousnessOptimization, STATGROUP_TranspersonalPhysics);
 
 UPhysicsOptimizer::UPhysicsOptimizer()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = PerformanceCheckInterval;
+    PrimaryComponentTick.TickInterval = 0.1f; // 10Hz optimization updates
     
-    // Initialize frame time history
-    FrameTimeHistory.Reserve(FrameHistorySize);
-    for (int32 i = 0; i < FrameHistorySize; ++i)
-    {
-        FrameTimeHistory.Add(1.0f / 60.0f); // Start with 60 FPS assumption
-    }
+    InitializeLODSettings();
 }
 
 void UPhysicsOptimizer::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Set initial LOD based on platform
-    if (GEngine && GEngine->GetGameUserSettings())
-    {
-        int32 QualityLevel = GEngine->GetGameUserSettings()->GetOverallScalabilityLevel();
-        switch (QualityLevel)
-        {
-            case 0: SetConsciousnessLOD(EConsciousnessLOD::Minimal); break;
-            case 1: SetConsciousnessLOD(EConsciousnessLOD::Low); break;
-            case 2: SetConsciousnessLOD(EConsciousnessLOD::Medium); break;
-            default: SetConsciousnessLOD(EConsciousnessLOD::High); break;
-        }
-    }
+    // Initialize spatial partitioning for 50km² world
+    InitializeSpatialPartitioning(50000.0f, 50);
     
-    UE_LOG(LogTemp, Log, TEXT("PhysicsOptimizer initialized with LOD: %d"), (int32)CurrentLOD);
+    // Set initial performance targets
+    SetTargetFrameRate(60.0f);
+    
+    UE_LOG(LogTemp, Log, TEXT("PhysicsOptimizer initialized for 50km² world"));
 }
 
-void UPhysicsOptimizer::TickComponent(float DeltaTime, ELevelTick TickType, 
-                                    FActorComponentTickFunction* ThisTickFunction)
+void UPhysicsOptimizer::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    UpdatePerformanceMetrics(DeltaTime);
+    // Update performance metrics
+    UpdatePerformanceMetrics();
     
-    PerformanceTimer += DeltaTime;
-    if (PerformanceTimer >= PerformanceCheckInterval)
+    // Adaptive optimization based on current performance
+    if (bAdaptiveOptimization && 
+        FPlatformTime::Seconds() - LastOptimizationTime > OptimizationInterval)
     {
-        if (bAdaptiveQualityEnabled)
+        AdaptLODBasedOnPerformance();
+        LastOptimizationTime = FPlatformTime::Seconds();
+    }
+    
+    // Optimize physics substep timing
+    OptimizePhysicsSubstep(DeltaTime);
+}
+
+void UPhysicsOptimizer::UpdatePhysicsLOD(const FVector& PlayerLocation)
+{
+    SCOPE_CYCLE_COUNTER(STAT_PhysicsLODUpdate);
+    
+    if (!GetWorld()) return;
+    
+    // Get all physics objects in world
+    for (TActorIterator<AActor> ActorItr(GetWorld()); ActorItr; ++ActorItr)
+    {
+        AActor* Actor = *ActorItr;
+        if (!Actor || !Actor->GetRootComponent()) continue;
+        
+        UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(Actor->GetRootComponent());
+        if (!PrimComp || !PrimComp->IsSimulatingPhysics()) continue;
+        
+        float Distance = FVector::Dist(PlayerLocation, Actor->GetActorLocation());
+        int32 Complexity = PrimComp->GetCollisionShape().GetShapeType(); // Simplified complexity metric
+        
+        EPhysicsLOD LODLevel = CalculateLODLevel(Distance, Complexity);
+        
+        // Apply LOD settings
+        const FPhysicsLODSettings& Settings = LODSettings[LODLevel];
+        
+        // Adjust physics simulation frequency
+        if (Distance > Settings.MaxDistance)
         {
-            CheckAdaptiveQuality();
+            PrimComp->SetSimulatePhysics(false);
+        }
+        else
+        {
+            PrimComp->SetSimulatePhysics(true);
+            
+            // Adjust update frequency based on LOD
+            float UpdateRate = Settings.UpdateFrequency / 60.0f; // Normalize to 60fps base
+            PrimComp->SetComponentTickInterval(1.0f / UpdateRate);
+        }
+    }
+}
+
+EPhysicsLOD UPhysicsOptimizer::CalculateLODLevel(float Distance, int32 ObjectComplexity)
+{
+    // Distance-based LOD with complexity weighting
+    float AdjustedDistance = Distance * (1.0f + ObjectComplexity * 0.1f);
+    
+    if (AdjustedDistance < 500.0f)
+        return EPhysicsLOD::Highest;
+    else if (AdjustedDistance < 1500.0f)
+        return EPhysicsLOD::High;
+    else if (AdjustedDistance < 5000.0f)
+        return EPhysicsLOD::Medium;
+    else if (AdjustedDistance < 15000.0f)
+        return EPhysicsLOD::Low;
+    else
+        return EPhysicsLOD::Minimal;
+}
+
+void UPhysicsOptimizer::SetGlobalLODSettings(const FPhysicsLODSettings& Settings)
+{
+    // Apply settings to all LOD levels with scaling
+    for (auto& LODPair : LODSettings)
+    {
+        EPhysicsLOD Level = LODPair.Key;
+        FPhysicsLODSettings& LevelSettings = LODPair.Value;
+        
+        float LODScale = 1.0f;
+        switch (Level)
+        {
+            case EPhysicsLOD::Highest: LODScale = 1.0f; break;
+            case EPhysicsLOD::High: LODScale = 0.8f; break;
+            case EPhysicsLOD::Medium: LODScale = 0.6f; break;
+            case EPhysicsLOD::Low: LODScale = 0.4f; break;
+            case EPhysicsLOD::Minimal: LODScale = 0.2f; break;
         }
         
-        UpdateConsciousnessActorCulling();
-        PerformanceTimer = 0.0f;
+        LevelSettings.MaxSimulatedObjects = FMath::RoundToInt(Settings.MaxSimulatedObjects * LODScale);
+        LevelSettings.UpdateFrequency = Settings.UpdateFrequency * LODScale;
+        LevelSettings.ConsciousnessFieldResolution = Settings.ConsciousnessFieldResolution * LODScale;
     }
 }
 
-void UPhysicsOptimizer::UpdatePerformanceMetrics(float DeltaTime)
+void UPhysicsOptimizer::InitializeSpatialPartitioning(float WorldSize, int32 GridResolution)
 {
-    SCOPE_CYCLE_COUNTER(STAT_ConsciousnessFieldUpdate);
+    this->GridResolution = GridResolution;
+    this->GridCellSize = WorldSize / GridResolution;
     
-    // Update frame time history
-    FrameTimeHistory.RemoveAt(0);
-    FrameTimeHistory.Add(DeltaTime);
+    // Initialize 2D grid
+    SpatialGrid.Empty();
+    SpatialGrid.SetNum(GridResolution * GridResolution);
     
-    // Calculate average frame time
-    float TotalFrameTime = 0.0f;
-    for (float FrameTime : FrameTimeHistory)
+    UE_LOG(LogTemp, Log, TEXT("Spatial partitioning initialized: %dx%d grid, cell size: %.2f"), 
+           GridResolution, GridResolution, GridCellSize);
+}
+
+TArray<AActor*> UPhysicsOptimizer::GetNearbyPhysicsObjects(const FVector& Location, float Radius)
+{
+    SCOPE_CYCLE_COUNTER(STAT_SpatialGridUpdate);
+    
+    TArray<AActor*> NearbyActors;
+    
+    // Calculate grid cells to check
+    int32 CellsToCheck = FMath::CeilToInt(Radius / GridCellSize);
+    int32 CenterX = FMath::FloorToInt(Location.X / GridCellSize) + GridResolution / 2;
+    int32 CenterY = FMath::FloorToInt(Location.Y / GridCellSize) + GridResolution / 2;
+    
+    for (int32 X = CenterX - CellsToCheck; X <= CenterX + CellsToCheck; X++)
     {
-        TotalFrameTime += FrameTime;
-    }
-    CurrentMetrics.FrameTime = TotalFrameTime / FrameHistorySize;
-    
-    // Count active consciousness actors
-    CurrentMetrics.ActiveConsciousnessActors = 0;
-    if (UWorld* World = GetWorld())
-    {
-        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+        for (int32 Y = CenterY - CellsToCheck; Y <= CenterY + CellsToCheck; Y++)
         {
-            AActor* Actor = *ActorItr;
-            if (Actor && Actor->GetClass()->GetName().Contains(TEXT("Consciousness")))
+            if (X >= 0 && X < GridResolution && Y >= 0 && Y < GridResolution)
             {
-                CurrentMetrics.ActiveConsciousnessActors++;
-            }
-        }
-    }
-    
-    SET_DWORD_STAT(STAT_ActiveConsciousnessActors, CurrentMetrics.ActiveConsciousnessActors);
-    
-    // Estimate physics calculations per frame
-    CurrentMetrics.PhysicsCalculationsPerFrame = CurrentMetrics.ActiveConsciousnessActors * 
-                                               (CurrentLOD == EConsciousnessLOD::High ? 100 : 
-                                                CurrentLOD == EConsciousnessLOD::Medium ? 50 : 
-                                                CurrentLOD == EConsciousnessLOD::Low ? 25 : 10);
-    
-    // Calculate consciousness field complexity
-    CurrentMetrics.ConsciousnessFieldComplexity = FMath::Clamp(
-        CurrentMetrics.ActiveConsciousnessActors / 100.0f, 0.0f, 1.0f);
-    
-    // Estimate memory usage (simplified)
-    CurrentMetrics.MemoryUsageMB = CurrentMetrics.ActiveConsciousnessActors * 0.5f + 
-                                  CurrentMetrics.PhysicsCalculationsPerFrame * 0.001f;
-}
-
-void UPhysicsOptimizer::CheckAdaptiveQuality()
-{
-    float CurrentFPS = 1.0f / CurrentMetrics.FrameTime;
-    EConsciousnessLOD OptimalLOD = CalculateOptimalLOD();
-    
-    if (OptimalLOD != CurrentLOD)
-    {
-        UE_LOG(LogTemp, Log, TEXT("Adaptive quality changing LOD from %d to %d (FPS: %.1f)"), 
-               (int32)CurrentLOD, (int32)OptimalLOD, CurrentFPS);
-        SetConsciousnessLOD(OptimalLOD);
-    }
-}
-
-EConsciousnessLOD UPhysicsOptimizer::CalculateOptimalLOD() const
-{
-    float CurrentFPS = 1.0f / CurrentMetrics.FrameTime;
-    float TargetFrameTime = 1.0f / TargetFrameRate;
-    
-    // Performance-based LOD selection
-    if (CurrentMetrics.FrameTime > TargetFrameTime * 1.5f) // Significantly below target
-    {
-        return EConsciousnessLOD::Minimal;
-    }
-    else if (CurrentMetrics.FrameTime > TargetFrameTime * 1.2f) // Below target
-    {
-        return EConsciousnessLOD::Low;
-    }
-    else if (CurrentMetrics.FrameTime > TargetFrameTime * 1.1f) // Slightly below target
-    {
-        return EConsciousnessLOD::Medium;
-    }
-    else // Meeting or exceeding target
-    {
-        return EConsciousnessLOD::High;
-    }
-}
-
-void UPhysicsOptimizer::SetConsciousnessLOD(EConsciousnessLOD NewLOD)
-{
-    if (CurrentLOD == NewLOD) return;
-    
-    CurrentLOD = NewLOD;
-    ApplyLODSettings(NewLOD);
-    
-    // Broadcast LOD change to consciousness systems
-    if (UWorld* World = GetWorld())
-    {
-        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-        {
-            AActor* Actor = *ActorItr;
-            if (Actor && Actor->GetClass()->GetName().Contains(TEXT("Consciousness")))
-            {
-                // Call LOD update method if available
-                if (UFunction* LODFunction = Actor->FindFunction(TEXT("OnConsciousnessLODChanged")))
+                int32 GridIndex = Y * GridResolution + X;
+                if (SpatialGrid.IsValidIndex(GridIndex))
                 {
-                    struct { EConsciousnessLOD NewLOD; } Params;
-                    Params.NewLOD = NewLOD;
-                    Actor->ProcessEvent(LODFunction, &Params);
+                    for (AActor* Actor : SpatialGrid[GridIndex])
+                    {
+                        if (Actor && FVector::Dist(Location, Actor->GetActorLocation()) <= Radius)
+                        {
+                            NearbyActors.AddUnique(Actor);
+                        }
+                    }
                 }
             }
         }
     }
+    
+    return NearbyActors;
 }
 
-void UPhysicsOptimizer::ApplyLODSettings(EConsciousnessLOD LOD)
+void UPhysicsOptimizer::UpdateSpatialGrid(AActor* Actor, const FVector& OldLocation, const FVector& NewLocation)
 {
-    SCOPE_CYCLE_COUNTER(STAT_ConsciousnessLODUpdate);
+    if (!Actor) return;
     
-    // Adjust tick intervals based on LOD
-    float TickInterval = 0.0f;
-    switch (LOD)
+    int32 OldIndex = GetGridIndex(OldLocation);
+    int32 NewIndex = GetGridIndex(NewLocation);
+    
+    if (OldIndex != NewIndex)
     {
-        case EConsciousnessLOD::High:
-            TickInterval = 0.0f; // Every frame
-            break;
-        case EConsciousnessLOD::Medium:
-            TickInterval = 1.0f / 30.0f; // 30 FPS
-            break;
-        case EConsciousnessLOD::Low:
-            TickInterval = 1.0f / 15.0f; // 15 FPS
-            break;
-        case EConsciousnessLOD::Minimal:
-            TickInterval = 1.0f / 10.0f; // 10 FPS
-            break;
-    }
-    
-    // Update our own tick interval
-    PrimaryComponentTick.TickInterval = FMath::Max(TickInterval, PerformanceCheckInterval);
-}
-
-void UPhysicsOptimizer::UpdateConsciousnessActorCulling()
-{
-    if (!GetWorld()) return;
-    
-    APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
-    if (!PC || !PC->GetPawn()) return;
-    
-    FVector PlayerLocation = PC->GetPawn()->GetActorLocation();
-    
-    for (TActorIterator<AActor> ActorItr(GetWorld()); ActorItr; ++ActorItr)
-    {
-        AActor* Actor = *ActorItr;
-        if (Actor && Actor->GetClass()->GetName().Contains(TEXT("Consciousness")))
+        // Remove from old cell
+        if (SpatialGrid.IsValidIndex(OldIndex))
         {
-            float Distance = FVector::Dist(PlayerLocation, Actor->GetActorLocation());
-            
-            // Cull actors beyond maximum distance
-            bool bShouldBeVisible = Distance <= ConsciousnessCullingDistance;
-            if (Actor->GetRootComponent())
+            SpatialGrid[OldIndex].Remove(Actor);
+        }
+        
+        // Add to new cell
+        if (SpatialGrid.IsValidIndex(NewIndex))
+        {
+            SpatialGrid[NewIndex].AddUnique(Actor);
+        }
+    }
+}
+
+void UPhysicsOptimizer::OptimizeConsciousnessField(const FVector& FocusPoint, float Intensity)
+{
+    SCOPE_CYCLE_COUNTER(STAT_ConsciousnessOptimization);
+    
+    // Get nearby objects that could be affected by consciousness field
+    TArray<AActor*> NearbyObjects = GetNearbyPhysicsObjects(FocusPoint, 2000.0f * Intensity);
+    
+    for (AActor* Actor : NearbyObjects)
+    {
+        if (!Actor) continue;
+        
+        float Distance = FVector::Dist(FocusPoint, Actor->GetActorLocation());
+        float FieldStrength = FMath::Clamp(Intensity / (Distance * 0.001f + 1.0f), 0.0f, 1.0f);
+        
+        // Adjust physics properties based on consciousness field strength
+        if (UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(Actor->GetRootComponent()))
+        {
+            if (PrimComp->IsSimulatingPhysics())
             {
-                Actor->GetRootComponent()->SetVisibility(bShouldBeVisible, true);
-            }
-            
-            // Update LOD based on distance
-            if (bShouldBeVisible)
-            {
-                UpdateConsciousnessActorLOD(Cast<class AConsciousnessActor>(Actor), Distance);
+                // Increase simulation quality for objects in strong consciousness fields
+                float QualityMultiplier = 1.0f + FieldStrength * 2.0f;
+                PrimComp->SetComponentTickInterval(1.0f / (60.0f * QualityMultiplier));
             }
         }
     }
 }
 
-void UPhysicsOptimizer::UpdateConsciousnessActorLOD(class AConsciousnessActor* Actor, float Distance)
+void UPhysicsOptimizer::AdaptiveConsciousnessResolution(float TargetFrameTime)
 {
-    if (!Actor) return;
+    float CurrentFrameTime = CurrentMetrics.PhysicsFrameTime;
     
-    EConsciousnessLOD DistanceLOD = EConsciousnessLOD::High;
-    
-    if (Distance > ConsciousnessLODDistance3)
+    if (CurrentFrameTime > TargetFrameTime * 1.2f)
     {
-        DistanceLOD = EConsciousnessLOD::Minimal;
+        // Reduce consciousness field resolution
+        for (auto& LODPair : LODSettings)
+        {
+            LODPair.Value.ConsciousnessFieldResolution *= 0.9f;
+            LODPair.Value.ConsciousnessFieldResolution = FMath::Max(LODPair.Value.ConsciousnessFieldResolution, 0.1f);
+        }
     }
-    else if (Distance > ConsciousnessLODDistance2)
+    else if (CurrentFrameTime < TargetFrameTime * 0.8f)
     {
-        DistanceLOD = EConsciousnessLOD::Low;
-    }
-    else if (Distance > ConsciousnessLODDistance1)
-    {
-        DistanceLOD = EConsciousnessLOD::Medium;
-    }
-    
-    // Use the more restrictive LOD between global and distance-based
-    EConsciousnessLOD FinalLOD = (CurrentLOD > DistanceLOD) ? CurrentLOD : DistanceLOD;
-    
-    // Apply LOD to actor if it has the appropriate method
-    if (UFunction* SetLODFunction = Actor->FindFunction(TEXT("SetConsciousnessLOD")))
-    {
-        struct { EConsciousnessLOD LOD; } Params;
-        Params.LOD = FinalLOD;
-        Actor->ProcessEvent(SetLODFunction, &Params);
+        // Increase consciousness field resolution
+        for (auto& LODPair : LODSettings)
+        {
+            LODPair.Value.ConsciousnessFieldResolution *= 1.1f;
+            LODPair.Value.ConsciousnessFieldResolution = FMath::Min(LODPair.Value.ConsciousnessFieldResolution, 2.0f);
+        }
     }
 }
 
-FPhysicsPerformanceMetrics UPhysicsOptimizer::GetCurrentMetrics() const
+void UPhysicsOptimizer::CullDistantConsciousnessEffects(const FVector& PlayerLocation)
+{
+    // Disable consciousness physics for very distant objects
+    float CullDistance = 10000.0f; // 10km
+    
+    if (!GetWorld()) return;
+    
+    for (TActorIterator<AActor> ActorItr(GetWorld()); ActorItr; ++ActorItr)
+    {
+        AActor* Actor = *ActorItr;
+        if (!Actor) continue;
+        
+        float Distance = FVector::Dist(PlayerLocation, Actor->GetActorLocation());
+        
+        // Disable consciousness effects for distant objects
+        if (Distance > CullDistance)
+        {
+            // TODO: Disable consciousness component on this actor
+            // This would connect to the ConsciousnessPhysics system
+        }
+    }
+}
+
+FPerformanceMetrics UPhysicsOptimizer::GetCurrentMetrics() const
 {
     return CurrentMetrics;
 }
@@ -277,38 +289,205 @@ FPhysicsPerformanceMetrics UPhysicsOptimizer::GetCurrentMetrics() const
 void UPhysicsOptimizer::SetTargetFrameRate(float TargetFPS)
 {
     TargetFrameRate = FMath::Clamp(TargetFPS, 30.0f, 120.0f);
+    MaxPhysicsFrameTime = 1000.0f / TargetFPS; // Convert to milliseconds
 }
 
-void UPhysicsOptimizer::EnableAdaptiveQuality(bool bEnable)
+bool UPhysicsOptimizer::IsPerformanceAcceptable() const
 {
-    bAdaptiveQualityEnabled = bEnable;
-    UE_LOG(LogTemp, Log, TEXT("Adaptive quality %s"), bEnable ? TEXT("enabled") : TEXT("disabled"));
+    return CurrentMetrics.PhysicsFrameTime <= MaxPhysicsFrameTime &&
+           CurrentMetrics.CPUUsagePercent < 80.0f &&
+           CurrentMetrics.MemoryUsageMB < 4096.0f; // 4GB limit
 }
 
-void UPhysicsOptimizer::SetConsciousnessCullingDistance(float Distance)
+void UPhysicsOptimizer::CleanupUnusedPhysicsData()
 {
-    ConsciousnessCullingDistance = FMath::Max(Distance, 100.0f);
-}
-
-void UPhysicsOptimizer::OptimizeConsciousnessMemory()
-{
-    // Force garbage collection for consciousness-related objects
+    // Force garbage collection of unused physics assets
     if (GEngine)
     {
         GEngine->ForceGarbageCollection(true);
     }
     
-    // Clear unused consciousness field data
-    FlushUnusedConsciousnessData();
-    
-    UE_LOG(LogTemp, Log, TEXT("Consciousness memory optimization completed"));
+    // Clear empty spatial grid cells
+    for (auto& GridCell : SpatialGrid)
+    {
+        GridCell.RemoveAll([](AActor* Actor) { return !IsValid(Actor); });
+    }
 }
 
-void UPhysicsOptimizer::FlushUnusedConsciousnessData()
+void UPhysicsOptimizer::PreloadCriticalPhysicsAssets(const TArray<FString>& AssetPaths)
 {
-    // Implementation would clear cached consciousness field calculations,
-    // unused spiritual energy pools, and other consciousness-specific data
-    // This is a placeholder for the actual implementation
+    // Preload physics assets that are likely to be needed soon
+    for (const FString& AssetPath : AssetPaths)
+    {
+        // TODO: Implement asset preloading
+        UE_LOG(LogTemp, Log, TEXT("Preloading physics asset: %s"), *AssetPath);
+    }
+}
+
+void UPhysicsOptimizer::UnloadDistantPhysicsAssets(const FVector& PlayerLocation, float UnloadDistance)
+{
+    // Unload physics assets that are too far from player
+    if (!GetWorld()) return;
     
-    UE_LOG(LogTemp, Log, TEXT("Flushed unused consciousness data"));
+    for (TActorIterator<AActor> ActorItr(GetWorld()); ActorItr; ++ActorItr)
+    {
+        AActor* Actor = *ActorItr;
+        if (!Actor) continue;
+        
+        float Distance = FVector::Dist(PlayerLocation, Actor->GetActorLocation());
+        
+        if (Distance > UnloadDistance)
+        {
+            if (UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(Actor->GetRootComponent()))
+            {
+                // Reduce physics complexity for distant objects
+                PrimComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+                PrimComp->SetSimulatePhysics(false);
+            }
+        }
+    }
+}
+
+void UPhysicsOptimizer::UpdatePerformanceMetrics()
+{
+    // Update physics frame time
+    CurrentMetrics.PhysicsFrameTime = FPlatformTime::ToMilliseconds(GFrameTime);
+    
+    // Count active physics objects
+    CurrentMetrics.ActivePhysicsObjects = 0;
+    if (GetWorld())
+    {
+        for (TActorIterator<AActor> ActorItr(GetWorld()); ActorItr; ++ActorItr)
+        {
+            AActor* Actor = *ActorItr;
+            if (Actor && Actor->GetRootComponent())
+            {
+                if (UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(Actor->GetRootComponent()))
+                {
+                    if (PrimComp->IsSimulatingPhysics())
+                    {
+                        CurrentMetrics.ActivePhysicsObjects++;
+                    }
+                }
+            }
+        }
+    }
+    
+    // Update memory usage
+    FPlatformMemoryStats MemStats = FPlatformMemory::GetStats();
+    CurrentMetrics.MemoryUsageMB = MemStats.UsedPhysical / (1024.0f * 1024.0f);
+    
+    // Estimate CPU usage (simplified)
+    CurrentMetrics.CPUUsagePercent = FMath::Clamp(CurrentMetrics.PhysicsFrameTime / 16.67f * 100.0f, 0.0f, 100.0f);
+}
+
+void UPhysicsOptimizer::AdaptLODBasedOnPerformance()
+{
+    if (!IsPerformanceAcceptable())
+    {
+        // Reduce quality across all LOD levels
+        for (auto& LODPair : LODSettings)
+        {
+            FPhysicsLODSettings& Settings = LODPair.Value;
+            Settings.MaxSimulatedObjects = FMath::Max(Settings.MaxSimulatedObjects - 10, 10);
+            Settings.UpdateFrequency *= 0.9f;
+            Settings.ConsciousnessFieldResolution *= 0.9f;
+        }
+        
+        UE_LOG(LogTemp, Warning, TEXT("Performance below target, reducing physics quality"));
+    }
+    else if (CurrentMetrics.PhysicsFrameTime < MaxPhysicsFrameTime * 0.7f)
+    {
+        // Increase quality if we have performance headroom
+        for (auto& LODPair : LODSettings)
+        {
+            FPhysicsLODSettings& Settings = LODPair.Value;
+            Settings.MaxSimulatedObjects = FMath::Min(Settings.MaxSimulatedObjects + 5, 500);
+            Settings.UpdateFrequency *= 1.05f;
+            Settings.ConsciousnessFieldResolution *= 1.05f;
+        }
+    }
+}
+
+int32 UPhysicsOptimizer::GetGridIndex(const FVector& Location) const
+{
+    // Convert world coordinates to grid coordinates
+    int32 GridX = FMath::FloorToInt(Location.X / GridCellSize) + GridResolution / 2;
+    int32 GridY = FMath::FloorToInt(Location.Y / GridCellSize) + GridResolution / 2;
+    
+    // Clamp to grid bounds
+    GridX = FMath::Clamp(GridX, 0, GridResolution - 1);
+    GridY = FMath::Clamp(GridY, 0, GridResolution - 1);
+    
+    return GridY * GridResolution + GridX;
+}
+
+void UPhysicsOptimizer::InitializeLODSettings()
+{
+    // Initialize default LOD settings
+    FPhysicsLODSettings HighestSettings;
+    HighestSettings.MaxDistance = 500.0f;
+    HighestSettings.MaxSimulatedObjects = 200;
+    HighestSettings.UpdateFrequency = 120.0f;
+    HighestSettings.bEnableConsciousnessPhysics = true;
+    HighestSettings.ConsciousnessFieldResolution = 2.0f;
+    LODSettings.Add(EPhysicsLOD::Highest, HighestSettings);
+    
+    FPhysicsLODSettings HighSettings;
+    HighSettings.MaxDistance = 1500.0f;
+    HighSettings.MaxSimulatedObjects = 150;
+    HighSettings.UpdateFrequency = 90.0f;
+    HighSettings.bEnableConsciousnessPhysics = true;
+    HighSettings.ConsciousnessFieldResolution = 1.5f;
+    LODSettings.Add(EPhysicsLOD::High, HighSettings);
+    
+    FPhysicsLODSettings MediumSettings;
+    MediumSettings.MaxDistance = 5000.0f;
+    MediumSettings.MaxSimulatedObjects = 100;
+    MediumSettings.UpdateFrequency = 60.0f;
+    MediumSettings.bEnableConsciousnessPhysics = true;
+    MediumSettings.ConsciousnessFieldResolution = 1.0f;
+    LODSettings.Add(EPhysicsLOD::Medium, MediumSettings);
+    
+    FPhysicsLODSettings LowSettings;
+    LowSettings.MaxDistance = 15000.0f;
+    LowSettings.MaxSimulatedObjects = 50;
+    LowSettings.UpdateFrequency = 30.0f;
+    LowSettings.bEnableConsciousnessPhysics = false;
+    LowSettings.ConsciousnessFieldResolution = 0.5f;
+    LODSettings.Add(EPhysicsLOD::Low, LowSettings);
+    
+    FPhysicsLODSettings MinimalSettings;
+    MinimalSettings.MaxDistance = 25000.0f;
+    MinimalSettings.MaxSimulatedObjects = 20;
+    MinimalSettings.UpdateFrequency = 15.0f;
+    MinimalSettings.bEnableConsciousnessPhysics = false;
+    MinimalSettings.ConsciousnessFieldResolution = 0.2f;
+    LODSettings.Add(EPhysicsLOD::Minimal, MinimalSettings);
+}
+
+void UPhysicsOptimizer::OptimizePhysicsSubstep(float DeltaTime)
+{
+    // Adaptive physics substep based on current performance
+    if (GetWorld() && GetWorld()->GetPhysicsScene())
+    {
+        float TargetSubstepSize = 1.0f / 60.0f; // 60Hz base
+        
+        if (CurrentMetrics.PhysicsFrameTime > MaxPhysicsFrameTime)
+        {
+            // Increase substep size to reduce computational load
+            TargetSubstepSize *= 1.5f;
+        }
+        else if (CurrentMetrics.PhysicsFrameTime < MaxPhysicsFrameTime * 0.5f)
+        {
+            // Decrease substep size for better accuracy
+            TargetSubstepSize *= 0.8f;
+        }
+        
+        // Apply substep optimization
+        TargetSubstepSize = FMath::Clamp(TargetSubstepSize, 1.0f / 120.0f, 1.0f / 30.0f);
+        
+        // TODO: Apply to physics scene
+        // GetWorld()->GetPhysicsScene()->SetSubstepSize(TargetSubstepSize);
+    }
 }
