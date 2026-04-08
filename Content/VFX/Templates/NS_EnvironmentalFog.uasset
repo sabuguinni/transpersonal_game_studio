@@ -1,0 +1,54 @@
+# Niagara System: Environmental Fog Template
+# This file represents a Niagara system configuration for atmospheric fog effects
+
+[System Properties]
+Name=NS_EnvironmentalFog
+Category=Environmental
+Description=Subtle atmospheric fog that enhances tension and depth
+
+[Emitter_MainFog]
+Type=GPU
+MaxParticles=2000
+SpawnRate=50
+Lifetime=20.0
+
+[Modules_MainFog]
+# Spawn Modules
+- Initialize Particle
+  - Position: Box (1000x1000x200)
+  - Velocity: Random Vector (0.5, 0.5, 0.1)
+  - Mass: 1.0
+  - Size: Random Range (50, 150)
+  - Color: RGB(0.8, 0.85, 0.9) Alpha(0.1)
+
+# Update Modules
+- Update Age
+- Add Velocity
+  - Acceleration: Wind Vector Parameter
+- Solve Forces and Velocity
+- Update Position
+- Color Over Life
+  - Curve: Fade in 0->0.1 over 2s, hold, fade out 0.1->0 over 3s
+- Size Over Life
+  - Curve: Grow 1.0->1.5 over lifetime
+
+# Render Module
+- Sprite Renderer
+  - Material: M_FogParticle
+  - Alignment: Velocity
+  - Sort Mode: View Distance
+
+[Parameters]
+WindDirection=Vector3(1,0,0)
+WindStrength=Float(2.0)
+FogDensity=Float(1.0)
+AtmosphericIntensity=Float(1.0)
+LODMultiplier=Float(1.0)
+ParticleCountMultiplier=Float(1.0)
+
+[LOD Settings]
+LOD0_Distance=1000
+LOD1_Distance=3000
+LOD2_Distance=5000
+ParticleReduction_LOD1=0.6
+ParticleReduction_LOD2=0.3
