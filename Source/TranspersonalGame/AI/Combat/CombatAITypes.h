@@ -2,184 +2,133 @@
 
 #include "CoreMinimal.h"
 #include "Engine/DataTable.h"
-#include "GameplayTagContainer.h"
+#include "GameplayTags.h"
 #include "CombatAITypes.generated.h"
 
-// Enum para tipos de comportamento de combate
 UENUM(BlueprintType)
-enum class ECombatBehaviorType : uint8
+enum class ECombatAIState : uint8
 {
-    Passive         UMETA(DisplayName = "Passive"),
-    Territorial     UMETA(DisplayName = "Territorial"),
-    Aggressive      UMETA(DisplayName = "Aggressive"),
-    Predator        UMETA(DisplayName = "Predator"),
-    PackHunter      UMETA(DisplayName = "Pack Hunter"),
-    Ambush          UMETA(DisplayName = "Ambush"),
-    Scavenger       UMETA(DisplayName = "Scavenger")
+    Idle,
+    Patrolling,
+    Investigating,
+    Hunting,
+    Attacking,
+    Fleeing,
+    Feeding,
+    Resting,
+    Territorial,
+    PackHunting
 };
 
-// Enum para estados de combate
 UENUM(BlueprintType)
-enum class ECombatState : uint8
+enum class ECombatThreatLevel : uint8
 {
-    Idle            UMETA(DisplayName = "Idle"),
-    Patrolling      UMETA(DisplayName = "Patrolling"),
-    Investigating   UMETA(DisplayName = "Investigating"),
-    Stalking        UMETA(DisplayName = "Stalking"),
-    Engaging        UMETA(DisplayName = "Engaging"),
-    Attacking       UMETA(DisplayName = "Attacking"),
-    Retreating      UMETA(DisplayName = "Retreating"),
-    Fleeing         UMETA(DisplayName = "Fleeing"),
-    Feeding         UMETA(DisplayName = "Feeding"),
-    Resting         UMETA(DisplayName = "Resting")
+    None,
+    Low,
+    Medium,
+    High,
+    Extreme
 };
 
-// Enum para tipos de ataque
 UENUM(BlueprintType)
-enum class EAttackType : uint8
+enum class EDinosaurArchetype : uint8
 {
-    Bite            UMETA(DisplayName = "Bite"),
-    Claw            UMETA(DisplayName = "Claw"),
-    Tail            UMETA(DisplayName = "Tail Whip"),
-    Charge          UMETA(DisplayName = "Charge"),
-    Stomp           UMETA(DisplayName = "Stomp"),
-    Spit            UMETA(DisplayName = "Spit"),
-    Roar            UMETA(DisplayName = "Intimidating Roar"),
-    Grapple         UMETA(DisplayName = "Grapple")
+    ApexPredator,      // T-Rex, Giganotosaurus
+    PackHunter,        // Velociraptors, Deinonychus
+    AmbushPredator,    // Carnotaurus, Baryonyx
+    Herbivore_Large,   // Triceratops, Brontosaurus
+    Herbivore_Small,   // Parasaurolophus, Gallimimus
+    Scavenger,         // Compsognathus swarms
+    Aquatic,           // Mosasaurus, Plesiosaur
+    Flying             // Pteranodon, Quetzalcoatlus
 };
 
-// Struct para configuração de ataque
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCombatAttackConfig
+struct TRANSPERSONALGAME_API FCombatAIStats
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EAttackType AttackType = EAttackType::Bite;
+    float Health = 100.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float Damage = 50.0f;
+    float AttackDamage = 25.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float Range = 200.0f;
+    float MovementSpeed = 600.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float Cooldown = 2.0f;
+    float DetectionRange = 1500.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float WindupTime = 0.5f;
+    float AttackRange = 300.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float RecoveryTime = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bRequiresLineOfSight = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FGameplayTagContainer AttackTags;
-};
-
-// Struct para configuração de percepção
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCombatPerceptionConfig
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float SightRadius = 1500.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float SightAngle = 90.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float HearingRadius = 800.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float SmellRadius = 600.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float LoseTargetTime = 5.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bCanSenseWhenDamaged = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float DamageAlertRadius = 1000.0f;
-};
-
-// Struct para configuração de combate
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCombatAIConfig : public FTableRowBase
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    ECombatBehaviorType BehaviorType = ECombatBehaviorType::Passive;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FCombatPerceptionConfig PerceptionConfig;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TArray<FCombatAttackConfig> AvailableAttacks;
+    float StaminaMax = 100.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     float AggressionLevel = 0.5f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     float FearThreshold = 0.3f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float TerritoryRadius = 1000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float PreferredCombatDistance = 300.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float RetreatHealthThreshold = 0.25f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bCanCallForHelp = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float HelpCallRadius = 2000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FGameplayTagContainer CombatTags;
 };
 
-// Struct para dados de combate em runtime
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCombatRuntimeData
+struct TRANSPERSONALGAME_API FCombatBehaviorData : public FTableRowBase
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    EDinosaurArchetype Archetype;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FCombatAIStats BaseStats;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TArray<FGameplayTag> BehaviorTags;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float PackCoordinationRadius = 800.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    int32 PreferredPackSize = 1;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bCanBeIntimidated = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bTerritorial = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float TerritoryRadius = 2000.0f;
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FCombatMemory
 {
     GENERATED_BODY()
 
     UPROPERTY(BlueprintReadWrite)
-    ECombatState CurrentState = ECombatState::Idle;
+    TWeakObjectPtr<AActor> LastKnownPlayerLocation;
 
     UPROPERTY(BlueprintReadWrite)
-    AActor* CurrentTarget = nullptr;
+    FVector LastSeenPlayerPosition;
 
     UPROPERTY(BlueprintReadWrite)
-    FVector LastKnownTargetLocation = FVector::ZeroVector;
+    float TimeSinceLastSighting = 0.0f;
 
     UPROPERTY(BlueprintReadWrite)
-    float TimeSinceLastTargetSeen = 0.0f;
+    ECombatThreatLevel PerceivedThreatLevel = ECombatThreatLevel::None;
 
     UPROPERTY(BlueprintReadWrite)
-    float CurrentAggression = 0.0f;
+    TArray<TWeakObjectPtr<AActor>> KnownAllies;
 
     UPROPERTY(BlueprintReadWrite)
-    float CurrentFear = 0.0f;
+    TArray<TWeakObjectPtr<AActor>> KnownThreats;
 
     UPROPERTY(BlueprintReadWrite)
-    bool bInCombat = false;
+    bool bPlayerHasWeapon = false;
 
     UPROPERTY(BlueprintReadWrite)
-    float LastAttackTime = 0.0f;
-
-    UPROPERTY(BlueprintReadWrite)
-    TArray<AActor*> AlliesInRange;
-
-    UPROPERTY(BlueprintReadWrite)
-    TArray<AActor*> EnemiesInRange;
+    bool bPlayerNearFire = false;
 };
