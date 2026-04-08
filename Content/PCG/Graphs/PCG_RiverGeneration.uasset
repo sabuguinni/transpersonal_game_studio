@@ -1,0 +1,43 @@
+# PCG River Generation Graph
+# Generates river systems with tributaries and water flow patterns
+
+# Graph Structure:
+# Input: World Bounds + Source Points
+# -> Spline Sampler (River path)
+# -> Copy Points (Create river width)
+# -> Transform Points (Depth variation)
+# -> Attribute Set (Flow data)
+# -> Static Mesh Spawner (River bed rocks)
+# -> Output: River geometry and flow data
+
+# Key Nodes Configuration:
+# 1. Spline Sampler
+#    - Mode: Distance
+#    - Distance Between Points: 100cm
+#    - Interior Sample: True
+#
+# 2. Copy Points (River Width)
+#    - Copy Mode: Offset
+#    - Offset Distance: 400cm (river width)
+#    - Number of Copies: 8
+#
+# 3. Transform Points (Depth)
+#    - Z Offset: -100cm to -300cm (river depth)
+#    - Add noise for natural variation
+#
+# 4. Attribute Set
+#    - FlowRate: 0.5 to 2.0 based on position
+#    - Depth: Calculated from transform
+#    - Width: Distance from center
+#    - Turbulence: Noise-based water movement
+#
+# 5. Static Mesh Spawner
+#    - Mesh: River rocks and pebbles
+#    - Density: 0.3 (sparse placement)
+#    - Scale: 0.5 to 1.5 random
+
+# Output provides:
+# - River bed geometry
+# - Water flow parameters
+# - Rock placement data
+# - Erosion influence zones
