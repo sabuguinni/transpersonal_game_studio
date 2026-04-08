@@ -4,172 +4,306 @@
 
 #include "CoreMinimal.h"
 #include "Engine/World.h"
-#include "Subsystems/GameInstanceSubsystem.h"
+#include "Components/ActorComponent.h"
 #include "Engine/Engine.h"
-#include "HAL/IConsoleManager.h"
+#include "HAL/PlatformFilemanager.h"
+#include "Misc/DateTime.h"
+#include "Stats/Stats.h"
 #include "PerformanceManager.generated.h"
 
 /**
- * @brief Core Performance Management System for Jurassic Survival Game
+ * @brief Core Performance Management System for Transpersonal Game
  * 
- * Manages all performance-related systems to maintain stable framerates:
- * - Target: 60fps on High-end PC (RTX 3070+, 16GB RAM)
- * - Target: 30fps on Console (PS5/Xbox Series X)
- * - Dynamic LOD scaling based on performance budget
- * - Memory management for streaming world
- * - GPU profiling and bottleneck detection
+ * Ensures consistent frame rates across platforms:
+ * - 60fps on high-end PC
+ * - 30fps on next-gen consoles
+ * - Adaptive quality scaling based on performance metrics
+ * - Real-time optimization of physics, rendering, and AI systems
+ * 
+ * Performance Philosophy:
+ * "Performance is not the enemy of quality visual — it's the condition 
+ * for quality visual to be experienced. An effect that no one can see 
+ * because the game is stuttering doesn't exist."
  * 
  * @author Performance Optimizer — Agent #4
  * @version 1.0 — March 2026
  */
-UCLASS(BlueprintType)
-class TRANSPERSONALGAME_API UPerformanceManager : public UGameInstanceSubsystem
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UPerformanceManager : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
     UPerformanceManager();
 
-    // USubsystem interface
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
-
-    /** Performance targets for different platforms */
-    UENUM(BlueprintType)
-    enum class EPerformanceTarget : uint8
-    {
-        HighEndPC_60fps,    // RTX 3070+, 16GB RAM, SSD
-        MidRangePC_60fps,   // GTX 1660, 8GB RAM
-        Console_30fps,      // PS5/Xbox Series X
-        Console_60fps,      // PS5/Xbox Series X (Performance Mode)
-        Potato_30fps        // Minimum spec fallback
-    };
-
-    /** Performance budget categories */
-    UENUM(BlueprintType)
-    enum class EPerformanceBudget : uint8
-    {
-        GameThread,         // CPU gameplay logic
-        RenderThread,       // CPU rendering commands
-        GPU,               // GPU rendering
-        Memory,            // RAM usage
-        VRAM,             // Video memory
-        Streaming         // Asset streaming bandwidth
-    };
+protected:
+    virtual void BeginPlay() override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 public:
     /**
-     * @brief Initialize performance monitoring and targets
+     * @brief Initialize performance monitoring and optimization systems
+     * 
+     * Sets up frame rate targets, performance budgets, and adaptive scaling
+     * based on detected hardware platform
      */
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void InitializePerformanceTargets();
+    UFUNCTION(BlueprintCallable, Category = "Performance Management")
+    void InitializePerformanceSystem();
 
     /**
-     * @brief Set performance target based on detected hardware
+     * @brief Get current performance metrics
+     * 
+     * @return Current frame rate, frame time, and performance budget usage
      */
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void SetPerformanceTarget(EPerformanceTarget Target);
+    UFUNCTION(BlueprintCallable, Category = "Performance Management")
+    FPerformanceMetrics GetCurrentPerformanceMetrics() const;
 
     /**
-     * @brief Get current frame time in milliseconds
+     * @brief Set target frame rate for platform
+     * 
+     * @param TargetFPS Target frames per second (60 for PC, 30 for console)
+     * @param bEnableAdaptiveScaling Whether to enable automatic quality scaling
      */
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    float GetCurrentFrameTime() const;
+    UFUNCTION(BlueprintCallable, Category = "Performance Management")
+    void SetTargetFrameRate(int32 TargetFPS, bool bEnableAdaptiveScaling = true);
 
     /**
-     * @brief Get current FPS
+     * @brief Force performance optimization pass
+     * 
+     * Immediately applies optimizations to maintain target frame rate
      */
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    float GetCurrentFPS() const;
+    UFUNCTION(BlueprintCallable, Category = "Performance Management")
+    void ForceOptimizationPass();
 
     /**
-     * @brief Check if we're meeting performance targets
+     * @brief Register performance-critical system for monitoring
+     * 
+     * @param SystemName Name of the system to monitor
+     * @param BudgetMs Time budget in milliseconds for this system
      */
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    bool IsMeetingPerformanceTargets() const;
+    UFUNCTION(BlueprintCallable, Category = "Performance Management")
+    void RegisterCriticalSystem(const FString& SystemName, float BudgetMs);
 
     /**
-     * @brief Get performance budget usage for specific category
+     * @brief Report system performance for frame budget tracking
+     * 
+     * @param SystemName Name of the reporting system
+     * @param ExecutionTimeMs Time spent this frame in milliseconds
      */
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    float GetBudgetUsage(EPerformanceBudget Budget) const;
+    UFUNCTION(BlueprintCallable, Category = "Performance Management")
+    void ReportSystemPerformance(const FString& SystemName, float ExecutionTimeMs);
 
     /**
-     * @brief Force LOD adjustment based on performance
+     * @brief Get recommended quality settings for current performance
+     * 
+     * @return Quality settings optimized for current hardware performance
      */
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void AdjustLODForPerformance(float PerformanceScale);
-
-    /**
-     * @brief Enable/disable expensive visual features based on performance
-     */
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void ScaleVisualQuality(float QualityScale);
-
-    /**
-     * @brief Get recommended scalability settings for current hardware
-     */
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void ApplyRecommendedScalabilitySettings();
+    UFUNCTION(BlueprintCallable, Category = "Performance Management")
+    FQualitySettings GetRecommendedQualitySettings() const;
 
 protected:
-    /** Current performance target */
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    EPerformanceTarget CurrentTarget = EPerformanceTarget::HighEndPC_60fps;
+    /** Performance metrics structure */
+    USTRUCT(BlueprintType)
+    struct FPerformanceMetrics
+    {
+        GENERATED_BODY()
+
+        /** Current frames per second */
+        UPROPERTY(BlueprintReadOnly)
+        float CurrentFPS = 0.0f;
+
+        /** Current frame time in milliseconds */
+        UPROPERTY(BlueprintReadOnly)
+        float FrameTimeMs = 0.0f;
+
+        /** Game thread time in milliseconds */
+        UPROPERTY(BlueprintReadOnly)
+        float GameThreadMs = 0.0f;
+
+        /** Render thread time in milliseconds */
+        UPROPERTY(BlueprintReadOnly)
+        float RenderThreadMs = 0.0f;
+
+        /** GPU time in milliseconds */
+        UPROPERTY(BlueprintReadOnly)
+        float GPUTimeMs = 0.0f;
+
+        /** Physics time in milliseconds */
+        UPROPERTY(BlueprintReadOnly)
+        float PhysicsTimeMs = 0.0f;
+
+        /** AI time in milliseconds */
+        UPROPERTY(BlueprintReadOnly)
+        float AITimeMs = 0.0f;
+
+        /** Memory usage in MB */
+        UPROPERTY(BlueprintReadOnly)
+        float MemoryUsageMB = 0.0f;
+
+        /** Draw calls count */
+        UPROPERTY(BlueprintReadOnly)
+        int32 DrawCalls = 0;
+
+        /** Triangle count */
+        UPROPERTY(BlueprintReadOnly)
+        int32 TriangleCount = 0;
+
+        /** Performance health (0-100) */
+        UPROPERTY(BlueprintReadOnly)
+        float PerformanceHealth = 100.0f;
+    };
+
+    /** Quality settings structure */
+    USTRUCT(BlueprintType)
+    struct FQualitySettings
+    {
+        GENERATED_BODY()
+
+        /** Screen percentage (50-100) */
+        UPROPERTY(BlueprintReadOnly)
+        float ScreenPercentage = 100.0f;
+
+        /** Shadow quality (0-3) */
+        UPROPERTY(BlueprintReadOnly)
+        int32 ShadowQuality = 3;
+
+        /** Post-process quality (0-3) */
+        UPROPERTY(BlueprintReadOnly)
+        int32 PostProcessQuality = 3;
+
+        /** Texture quality (0-3) */
+        UPROPERTY(BlueprintReadOnly)
+        int32 TextureQuality = 3;
+
+        /** Effects quality (0-3) */
+        UPROPERTY(BlueprintReadOnly)
+        int32 EffectsQuality = 3;
+
+        /** View distance scale (0.1-1.0) */
+        UPROPERTY(BlueprintReadOnly)
+        float ViewDistanceScale = 1.0f;
+
+        /** Physics LOD bias */
+        UPROPERTY(BlueprintReadOnly)
+        int32 PhysicsLODBias = 0;
+
+        /** AI update frequency scale */
+        UPROPERTY(BlueprintReadOnly)
+        float AIUpdateScale = 1.0f;
+    };
+
+    /** Platform performance profiles */
+    UENUM(BlueprintType)
+    enum class EPlatformProfile : uint8
+    {
+        HighEndPC       UMETA(DisplayName = "High-End PC"),
+        MidRangePC      UMETA(DisplayName = "Mid-Range PC"),
+        LowEndPC        UMETA(DisplayName = "Low-End PC"),
+        NextGenConsole  UMETA(DisplayName = "Next-Gen Console"),
+        Mobile          UMETA(DisplayName = "Mobile Device")
+    };
+
+    /** Target frame rate for current platform */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance Targets")
+    int32 TargetFrameRate = 60;
 
     /** Target frame time in milliseconds */
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float TargetFrameTime = 16.67f; // 60fps
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance Targets")
+    float TargetFrameTimeMs = 16.67f; // 60fps = 16.67ms
 
-    /** Performance budgets in milliseconds */
+    /** Frame time budget for game thread */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance Budgets")
-    TMap<EPerformanceBudget, float> PerformanceBudgets;
+    float GameThreadBudgetMs = 10.0f;
 
-    /** Moving average frame times for smoothing */
-    UPROPERTY()
-    TArray<float> FrameTimeHistory;
+    /** Frame time budget for render thread */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance Budgets")
+    float RenderThreadBudgetMs = 12.0f;
 
-    /** Maximum history samples for averaging */
-    UPROPERTY(EditAnywhere, Category = "Performance")
-    int32 MaxFrameHistorySamples = 60;
+    /** Frame time budget for GPU */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance Budgets")
+    float GPUBudgetMs = 14.0f;
 
-    /** Performance monitoring enabled */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance")
-    bool bEnablePerformanceMonitoring = true;
+    /** Frame time budget for physics */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance Budgets")
+    float PhysicsBudgetMs = 3.0f;
 
-    /** Auto-adjust quality based on performance */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance")
-    bool bAutoAdjustQuality = true;
+    /** Frame time budget for AI */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance Budgets")
+    float AIBudgetMs = 2.0f;
 
-    /** Minimum acceptable frame rate before quality reduction */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance")
-    float MinAcceptableFPS = 50.0f;
+    /** Enable adaptive quality scaling */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Adaptive Scaling")
+    bool bEnableAdaptiveScaling = true;
+
+    /** Frames below target before scaling down */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Adaptive Scaling")
+    int32 FramesToleranceBeforeScaling = 10;
+
+    /** Minimum screen percentage when scaling */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Adaptive Scaling")
+    float MinScreenPercentage = 50.0f;
+
+    /** Performance monitoring frequency in seconds */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Monitoring")
+    float MonitoringFrequency = 1.0f;
+
+    /** Enable performance logging */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Monitoring")
+    bool bEnablePerformanceLogging = true;
 
 private:
-    /** Initialize performance budgets based on target */
-    void InitializeBudgets();
-
-    /** Update frame time tracking */
-    void UpdateFrameTimeTracking();
-
-    /** Detect hardware capabilities */
-    void DetectHardwareCapabilities();
-
+    /** Detect current platform and set appropriate profile */
+    void DetectPlatformProfile();
+    
+    /** Update performance metrics */
+    void UpdatePerformanceMetrics();
+    
+    /** Check if performance optimization is needed */
+    bool ShouldOptimizePerformance() const;
+    
     /** Apply performance optimizations */
     void ApplyPerformanceOptimizations();
+    
+    /** Scale quality settings based on performance */
+    void ScaleQualitySettings(float ScaleFactor);
+    
+    /** Log performance data to file */
+    void LogPerformanceData();
+    
+    /** Get engine performance stats */
+    void GatherEngineStats();
 
-    /** Console commands for performance debugging */
-    void RegisterConsoleCommands();
+    /** Current platform profile */
+    EPlatformProfile CurrentPlatformProfile = EPlatformProfile::HighEndPC;
 
-    /** Timer handle for performance monitoring */
-    FTimerHandle PerformanceMonitoringTimer;
+    /** Current performance metrics */
+    FPerformanceMetrics CurrentMetrics;
 
-    /** Cached engine reference */
-    UPROPERTY()
-    UEngine* CachedEngine;
+    /** Current quality settings */
+    FQualitySettings CurrentQualitySettings;
 
-    /** Performance statistics */
-    mutable float CachedFrameTime = 0.0f;
-    mutable float CachedFPS = 0.0f;
-    mutable float LastUpdateTime = 0.0f;
+    /** Registered systems and their budgets */
+    TMap<FString, float> SystemBudgets;
+
+    /** System performance tracking */
+    TMap<FString, float> SystemPerformance;
+
+    /** Frame rate history for averaging */
+    TArray<float> FrameRateHistory;
+
+    /** Performance monitoring timer */
+    float MonitoringTimer = 0.0f;
+
+    /** Consecutive frames below target */
+    int32 FramesBelowTarget = 0;
+
+    /** Consecutive frames above target */
+    int32 FramesAboveTarget = 0;
+
+    /** Last optimization time */
+    float LastOptimizationTime = 0.0f;
+
+    /** Performance log file handle */
+    TSharedPtr<class FArchive> PerformanceLogFile;
 };
