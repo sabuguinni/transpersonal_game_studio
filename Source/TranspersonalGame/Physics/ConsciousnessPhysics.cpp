@@ -1,8 +1,8 @@
 /**
  * @file ConsciousnessPhysics.cpp
- * @brief Implementation of consciousness-based physics system
+ * @brief Implementation of consciousness physics system
  * @author Core Systems Programmer
- * @version 1.0
+ * @date 2024
  */
 
 #include "ConsciousnessPhysics.h"
@@ -10,422 +10,379 @@
 #include "Components/PrimitiveComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/SkeletalMeshComponent.h"
-#include "GameFramework/Actor.h"
-#include "GameFramework/WorldSettings.h"
+#include "PhysicsEngine/PhysicsSettings.h"
 #include "Engine/Engine.h"
-#include "PhysicsEngine/BodyInstance.h"
-#include "Kismet/GameplayStatics.h"
-#include "DrawDebugHelpers.h"
+#include "HAL/PlatformFilemanager.h"
+#include "Misc/DateTime.h"
 
 // Performance profiling macros
-#define CONSCIOUSNESS_PHYSICS_SCOPE() SCOPE_CYCLE_COUNTER(STAT_ConsciousnessPhysics)
-DECLARE_CYCLE_STAT(TEXT("Consciousness Physics"), STAT_ConsciousnessPhysics, STATGROUP_Game);
+#define CONSCIOUSNESS_PHYSICS_SCOPE_CYCLE_COUNTER(Name) SCOPE_CYCLE_COUNTER(STAT_##Name)
+DECLARE_CYCLE_STAT(TEXT("Consciousness Physics Update"), STAT_ConsciousnessPhysicsUpdate, STATGROUP_Game);
+DECLARE_CYCLE_STAT(TEXT("Layer Transition"), STAT_LayerTransition, STATGROUP_Game);
+DECLARE_CYCLE_STAT(TEXT("Reality Distortion"), STAT_RealityDistortion, STATGROUP_Game);
 
 UConsciousnessPhysicsComponent::UConsciousnessPhysicsComponent()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickGroup = TG_PrePhysics; // Tick before physics update
+    PrimaryComponentTick.TickGroup = TG_PrePhysics; // Update before physics simulation
     
-    // Initialize default layer parameters
-    InitializeLayerDefaults();
+    // Initialize default settings
+    PhysicsSettings = FConsciousnessPhysicsSettings();
 }
 
 void UConsciousnessPhysicsComponent::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Cache the primitive component for physics manipulation
-    CachedPrimitiveComponent = GetOwner()->FindComponentByClass<UPrimitiveComponent>();
+    // Cache primitive component reference
+    PrimitiveComponent = GetOwner()->FindComponentByClass<UPrimitiveComponent>();
     
-    if (CachedPrimitiveComponent)
+    if (!PrimitiveComponent)
     {
-        // Store original physics settings
-        if (CachedPrimitiveComponent->GetBodyInstance())
+        UE_LOG(LogTemp, Warning, TEXT("ConsciousnessPhysicsComponent: No PrimitiveComponent found on %s"), 
+               *GetOwner()->GetName());
+        return;
+    }
+
+    // Register with world manager if it exists
+    if (UWorld* World = GetWorld())
+    {
+        if (AConsciousnessPhysicsManager* Manager = World->GetSubsystem<AConsciousnessPhysicsManager>())
         {
-            OriginalGravityScale = CachedPrimitiveComponent->GetBodyInstance()->GetGravityScale();
+            Manager->RegisterComponent(this);
         }
-        OriginalCollisionResponse = CachedPrimitiveComponent->GetCollisionResponseToChannel(ECC_WorldStatic);
-        
-        // Apply initial layer settings
-        UpdatePhysicsForCurrentLayer();
     }
-    
-    // Register with global manager
-    if (AConsciousnessPhysicsManager* Manager = Cast<AConsciousnessPhysicsManager>(
-        UGameplayStatics::GetActorOfClass(GetWorld(), AConsciousnessPhysicsManager::StaticClass())))
-    {
-        Manager->RegisterComponent(this);
-    }
+
+    // Apply initial physics properties
+    UpdatePhysicsProperties();
 }
 
-void UConsciousnessPhysicsComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UConsciousnessPhysicsComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
+                                                  FActorComponentTickFunction* ThisTickFunction)
 {
-    CONSCIOUSNESS_PHYSICS_SCOPE();
-    
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    // Process layer transitions
+    CONSCIOUSNESS_PHYSICS_SCOPE_CYCLE_COUNTER(ConsciousnessPhysicsUpdate);
+
+    // Process layer transition if active
     if (bIsTransitioning)
     {
         ProcessLayerTransition(DeltaTime);
     }
-    
-    // Debug visualization in development builds
-    #if WITH_EDITOR
-    if (CVarShowConsciousnessDebug.GetValueOnGameThread())
+
+    // Process reality distortion effects
+    if (DistortionTimeRemaining > 0.0f)
     {
-        FVector ActorLocation = GetOwner()->GetActorLocation();
-        FColor LayerColor = GetLayerDebugColor(CurrentLayer);
-        DrawDebugSphere(GetWorld(), ActorLocation, 50.0f, 12, LayerColor, false, 0.0f, 0, 2.0f);
+        ProcessDistortionEffect(DeltaTime);
     }
-    #endif
 }
 
-bool UConsciousnessPhysicsComponent::TransitionToLayer(EConsciousnessLayer TargetLayer, bool bInstant)
+void UConsciousnessPhysicsComponent::TransitionToLayer(EConsciousnessLayer NewLayer, float TransitionDuration)
 {
-    // Validate transition
-    if (!bCanTransitionLayers || TargetLayer == CurrentLayer)
+    if (NewLayer == CurrentLayer)
     {
-        return false;
+        return; // Already in target layer
     }
-    
-    // Check if we can transition to target layer
-    if (!CanInteractWithLayer(TargetLayer))
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Cannot transition to layer %d - interaction not allowed"), (int32)TargetLayer);
-        return false;
-    }
-    
-    EConsciousnessLayer PreviousLayer = CurrentLayer;
-    
-    if (bInstant)
-    {
-        // Instant transition
-        CurrentLayer = TargetLayer;
-        UpdatePhysicsForCurrentLayer();
-        OnLayerTransition.Broadcast(PreviousLayer, CurrentLayer);
-    }
-    else
-    {
-        // Gradual transition
-        bIsTransitioning = true;
-        TransitionTarget = TargetLayer;
-        TransitionProgress = 0.0f;
-    }
-    
-    return true;
+
+    // Set up transition
+    PreviousLayer = CurrentLayer;
+    TargetLayer = NewLayer;
+    TransitionProgress = 0.0f;
+    this->TransitionDuration = (TransitionDuration > 0.0f) ? TransitionDuration : PhysicsSettings.LayerTransitionTime;
+    bIsTransitioning = true;
+
+    UE_LOG(LogTemp, Log, TEXT("ConsciousnessPhysics: Transitioning from %d to %d over %.2f seconds"), 
+           static_cast<int32>(PreviousLayer), static_cast<int32>(TargetLayer), this->TransitionDuration);
 }
 
-FVector UConsciousnessPhysicsComponent::GetEffectiveGravity() const
+void UConsciousnessPhysicsComponent::ApplyRealityDistortion(float DistortionStrength, float Duration)
 {
-    if (LayerParams.Contains(CurrentLayer))
+    CONSCIOUSNESS_PHYSICS_SCOPE_CYCLE_COUNTER(RealityDistortion);
+
+    // Clamp distortion strength to valid range
+    TargetDistortionStrength = FMath::Clamp(DistortionStrength, 0.0f, PhysicsSettings.MaxDistortionStrength);
+    DistortionTimeRemaining = FMath::Max(Duration, 0.1f);
+
+    OnDistortionApplied.Broadcast(TargetDistortionStrength);
+
+    UE_LOG(LogTemp, Log, TEXT("ConsciousnessPhysics: Applying distortion %.2f for %.2f seconds"), 
+           TargetDistortionStrength, Duration);
+}
+
+float UConsciousnessPhysicsComponent::GetCurrentGravityMultiplier() const
+{
+    if (const float* Multiplier = PhysicsSettings.GravityMultipliers.Find(CurrentLayer))
     {
-        const FConsciousnessPhysicsParams& Params = LayerParams[CurrentLayer];
-        FVector WorldGravity = GetWorld()->GetGravityZ() * FVector::UpVector;
-        return WorldGravity * Params.GravityMultiplier;
+        return *Multiplier;
     }
-    
-    return GetWorld()->GetGravityZ() * FVector::UpVector;
+    return 1.0f; // Default to normal gravity
 }
 
 float UConsciousnessPhysicsComponent::GetCurrentTimeDilation() const
 {
-    if (LayerParams.Contains(CurrentLayer))
+    if (const float* Dilation = PhysicsSettings.TimeDilationFactors.Find(CurrentLayer))
     {
-        return LayerParams[CurrentLayer].TimeDilation;
+        return *Dilation;
     }
-    return 1.0f;
+    return 1.0f; // Default to normal time
 }
 
-bool UConsciousnessPhysicsComponent::CanInteractWithLayer(EConsciousnessLayer TargetLayer) const
+bool UConsciousnessPhysicsComponent::CanPhaseThrough() const
 {
-    // Physical layer can interact with all layers
-    if (CurrentLayer == EConsciousnessLayer::Physical)
-    {
-        return true;
-    }
-    
-    // Adjacent layers can interact
-    int32 CurrentLayerIndex = (int32)CurrentLayer;
-    int32 TargetLayerIndex = (int32)TargetLayer;
-    
-    return FMath::Abs(CurrentLayerIndex - TargetLayerIndex) <= 1;
+    // Spiritual and Mental layers allow phasing
+    return CurrentLayer == EConsciousnessLayer::Spiritual || CurrentLayer == EConsciousnessLayer::Mental;
 }
 
-void UConsciousnessPhysicsComponent::ApplyConsciousnessForce(const FVector& Force, bool bAccelChange)
+UPhysicalMaterial* UConsciousnessPhysicsComponent::GetCurrentLayerMaterial() const
 {
-    if (!CachedPrimitiveComponent || !CachedPrimitiveComponent->GetBodyInstance())
+    if (UPhysicalMaterial* const* Material = PhysicsSettings.LayerMaterials.Find(CurrentLayer))
+    {
+        return *Material;
+    }
+    return nullptr;
+}
+
+void UConsciousnessPhysicsComponent::UpdatePhysicsProperties()
+{
+    if (!PrimitiveComponent)
     {
         return;
     }
-    
-    // Modify force based on current consciousness layer
-    FVector ModifiedForce = Force;
-    if (LayerParams.Contains(CurrentLayer))
-    {
-        const FConsciousnessPhysicsParams& Params = LayerParams[CurrentLayer];
-        ModifiedForce *= Params.GravityMultiplier; // Use gravity multiplier as force modifier
-    }
-    
-    // Apply the force
-    CachedPrimitiveComponent->AddForce(ModifiedForce, NAME_None, bAccelChange);
+
+    UpdateGravity();
+    UpdateTimeDilation();
+    UpdateMaterialProperties();
 }
 
-void UConsciousnessPhysicsComponent::UpdatePhysicsForCurrentLayer()
+void UConsciousnessPhysicsComponent::UpdateGravity()
 {
-    if (!CachedPrimitiveComponent)
+    if (!PrimitiveComponent)
     {
         return;
     }
+
+    float GravityMultiplier = GetCurrentGravityMultiplier();
     
-    if (LayerParams.Contains(CurrentLayer))
+    // Apply distortion effect to gravity
+    if (CurrentDistortionStrength > 0.0f)
     {
-        ApplyLayerPhysicsSettings(LayerParams[CurrentLayer]);
+        float DistortionFactor = 1.0f + (CurrentDistortionStrength * 0.5f);
+        GravityMultiplier *= DistortionFactor;
+    }
+
+    // Set gravity scale on physics body
+    if (UBodyInstance* BodyInstance = PrimitiveComponent->GetBodyInstance())
+    {
+        BodyInstance->SetGravityScale(GravityMultiplier);
+    }
+}
+
+void UConsciousnessPhysicsComponent::UpdateTimeDilation()
+{
+    if (UWorld* World = GetWorld())
+    {
+        float TimeDilation = GetCurrentTimeDilation();
+        
+        // Apply distortion effect to time dilation
+        if (CurrentDistortionStrength > 0.0f)
+        {
+            float DistortionFactor = 1.0f - (CurrentDistortionStrength * 0.3f);
+            TimeDilation *= FMath::Max(DistortionFactor, 0.1f);
+        }
+
+        // Apply time dilation to actor (affects all components)
+        GetOwner()->CustomTimeDilation = TimeDilation;
+    }
+}
+
+void UConsciousnessPhysicsComponent::UpdateMaterialProperties()
+{
+    if (!PrimitiveComponent)
+    {
+        return;
+    }
+
+    // Apply layer-specific physics material
+    if (UPhysicalMaterial* LayerMaterial = GetCurrentLayerMaterial())
+    {
+        PrimitiveComponent->SetPhysMaterialOverride(LayerMaterial);
+    }
+
+    // Handle phasing for spiritual/mental layers
+    if (CanPhaseThrough())
+    {
+        // Enable collision response modification for phasing
+        PrimitiveComponent->SetCollisionResponseToAllChannels(ECR_Overlap);
+        PrimitiveComponent->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Ignore);
+    }
+    else
+    {
+        // Restore normal collision
+        PrimitiveComponent->SetCollisionResponseToAllChannels(ECR_Block);
     }
 }
 
 void UConsciousnessPhysicsComponent::ProcessLayerTransition(float DeltaTime)
 {
+    CONSCIOUSNESS_PHYSICS_SCOPE_CYCLE_COUNTER(LayerTransition);
+
     TransitionProgress += DeltaTime / TransitionDuration;
     
     if (TransitionProgress >= 1.0f)
     {
         // Transition complete
-        EConsciousnessLayer PreviousLayer = CurrentLayer;
-        CurrentLayer = TransitionTarget;
+        TransitionProgress = 1.0f;
+        CurrentLayer = TargetLayer;
         bIsTransitioning = false;
-        TransitionProgress = 0.0f;
         
-        UpdatePhysicsForCurrentLayer();
-        OnLayerTransition.Broadcast(PreviousLayer, CurrentLayer);
+        OnLayerChanged.Broadcast(static_cast<int32>(CurrentLayer), TransitionDuration);
+        
+        UE_LOG(LogTemp, Log, TEXT("ConsciousnessPhysics: Transition to layer %d complete"), 
+               static_cast<int32>(CurrentLayer));
+    }
+
+    // Update physics properties with interpolated values during transition
+    UpdatePhysicsProperties();
+}
+
+void UConsciousnessPhysicsComponent::ProcessDistortionEffect(float DeltaTime)
+{
+    DistortionTimeRemaining -= DeltaTime;
+    
+    if (DistortionTimeRemaining <= 0.0f)
+    {
+        // Effect ended
+        CurrentDistortionStrength = 0.0f;
+        DistortionTimeRemaining = 0.0f;
     }
     else
     {
-        // Interpolate physics properties during transition
-        if (LayerParams.Contains(CurrentLayer) && LayerParams.Contains(TransitionTarget))
-        {
-            const FConsciousnessPhysicsParams& FromParams = LayerParams[CurrentLayer];
-            const FConsciousnessPhysicsParams& ToParams = LayerParams[TransitionTarget];
-            
-            FConsciousnessPhysicsParams InterpolatedParams;
-            InterpolatedParams.GravityMultiplier = FMath::Lerp(FromParams.GravityMultiplier, ToParams.GravityMultiplier, TransitionProgress);
-            InterpolatedParams.TimeDilation = FMath::Lerp(FromParams.TimeDilation, ToParams.TimeDilation, TransitionProgress);
-            
-            ApplyLayerPhysicsSettings(InterpolatedParams);
-        }
+        // Interpolate distortion strength (fade in/out)
+        float EffectProgress = 1.0f - (DistortionTimeRemaining / 3.0f); // Assuming 3s duration
+        CurrentDistortionStrength = TargetDistortionStrength * FMath::Sin(EffectProgress * PI);
     }
+
+    // Update physics with current distortion
+    UpdatePhysicsProperties();
 }
 
-void UConsciousnessPhysicsComponent::ApplyLayerPhysicsSettings(const FConsciousnessPhysicsParams& Params)
+float UConsciousnessPhysicsComponent::InterpolateLayerValues(float PhysicalValue, float TargetValue, float Progress) const
 {
-    if (!CachedPrimitiveComponent)
-    {
-        return;
-    }
-    
-    // Apply gravity scaling
-    if (CachedPrimitiveComponent->GetBodyInstance())
-    {
-        CachedPrimitiveComponent->GetBodyInstance()->SetGravityScale(OriginalGravityScale * Params.GravityMultiplier);
-    }
-    
-    // Apply collision response
-    CachedPrimitiveComponent->SetCollisionResponseToChannel(ECC_WorldStatic, Params.CollisionResponse);
-    
-    // Apply physics material if specified
-    if (Params.LayerPhysicsMaterial)
-    {
-        CachedPrimitiveComponent->SetPhysMaterialOverride(Params.LayerPhysicsMaterial);
-    }
-    
-    // Broadcast time dilation change
-    OnTemporalShift.Broadcast(Params.TimeDilation);
-}
-
-void UConsciousnessPhysicsComponent::InitializeLayerDefaults()
-{
-    // Physical layer - normal physics
-    FConsciousnessPhysicsParams PhysicalParams;
-    PhysicalParams.GravityMultiplier = 1.0f;
-    PhysicalParams.TimeDilation = 1.0f;
-    PhysicalParams.CollisionResponse = ECR_Block;
-    LayerParams.Add(EConsciousnessLayer::Physical, PhysicalParams);
-    
-    // Etheric layer - reduced gravity, slight time dilation
-    FConsciousnessPhysicsParams EthericParams;
-    EthericParams.GravityMultiplier = 0.7f;
-    EthericParams.TimeDilation = 0.9f;
-    EthericParams.CollisionResponse = ECR_Block;
-    LayerParams.Add(EConsciousnessLayer::Etheric, EthericParams);
-    
-    // Astral layer - very low gravity, significant time dilation
-    FConsciousnessPhysicsParams AstralParams;
-    AstralParams.GravityMultiplier = 0.3f;
-    AstralParams.TimeDilation = 0.5f;
-    AstralParams.CollisionResponse = ECR_Overlap;
-    LayerParams.Add(EConsciousnessLayer::Astral, AstralParams);
-    
-    // Mental layer - no gravity, extreme time dilation
-    FConsciousnessPhysicsParams MentalParams;
-    MentalParams.GravityMultiplier = 0.0f;
-    MentalParams.TimeDilation = 0.2f;
-    MentalParams.CollisionResponse = ECR_Ignore;
-    LayerParams.Add(EConsciousnessLayer::Mental, MentalParams);
-    
-    // Causal layer - inverted gravity, time acceleration
-    FConsciousnessPhysicsParams CausalParams;
-    CausalParams.GravityMultiplier = -0.5f;
-    CausalParams.TimeDilation = 2.0f;
-    CausalParams.CollisionResponse = ECR_Ignore;
-    LayerParams.Add(EConsciousnessLayer::Causal, CausalParams);
+    return FMath::Lerp(PhysicalValue, TargetValue, Progress);
 }
 
 // Manager Implementation
 AConsciousnessPhysicsManager::AConsciousnessPhysicsManager()
 {
     PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 0.1f; // Update every 100ms for performance
+    PrimaryActorTick.TickGroup = TG_PrePhysics;
     
-    // Initialize layer visibility
-    LayerVisibility.Add(EConsciousnessLayer::Physical, true);
-    LayerVisibility.Add(EConsciousnessLayer::Etheric, true);
-    LayerVisibility.Add(EConsciousnessLayer::Astral, true);
-    LayerVisibility.Add(EConsciousnessLayer::Mental, false); // Hidden by default
-    LayerVisibility.Add(EConsciousnessLayer::Causal, false); // Hidden by default
+    // Initialize default settings
+    GlobalSettings = FConsciousnessPhysicsSettings();
 }
 
 void AConsciousnessPhysicsManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    UE_LOG(LogTemp, Log, TEXT("Consciousness Physics Manager initialized"));
+    UE_LOG(LogTemp, Log, TEXT("ConsciousnessPhysicsManager: Initialized with budget %.2fms"), PerformanceBudgetMS);
 }
 
 void AConsciousnessPhysicsManager::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
     
-    // Update performance tracking
-    LastFrameTime = DeltaTime * 1000.0f; // Convert to milliseconds
-    
-    // Update tracked components list
-    UpdateTrackedComponents();
-    
-    // Optimize performance if needed
-    if (LastFrameTime > PerformanceBudgetMS)
-    {
-        OptimizePerformance();
-    }
-}
-
-TArray<AActor*> AConsciousnessPhysicsManager::GetActorsInLayer(EConsciousnessLayer Layer) const
-{
-    TArray<AActor*> ActorsInLayer;
-    
-    for (const UConsciousnessPhysicsComponent* Component : TrackedComponents)
-    {
-        if (Component && Component->CurrentLayer == Layer)
-        {
-            ActorsInLayer.Add(Component->GetOwner());
-        }
-    }
-    
-    return ActorsInLayer;
-}
-
-void AConsciousnessPhysicsManager::ForceAllToPhysicalLayer()
-{
-    UE_LOG(LogTemp, Warning, TEXT("Emergency: Forcing all actors to physical layer"));
-    
-    for (UConsciousnessPhysicsComponent* Component : TrackedComponents)
-    {
-        if (Component && Component->CurrentLayer != EConsciousnessLayer::Physical)
-        {
-            Component->TransitionToLayer(EConsciousnessLayer::Physical, true);
-        }
-    }
-}
-
-void AConsciousnessPhysicsManager::GetPerformanceMetrics(float& OutFrameTimeMS, int32& OutActorCount, int32& OutTransitionCount) const
-{
-    OutFrameTimeMS = LastFrameTime;
-    OutActorCount = TrackedComponents.Num();
-    
-    // Count active transitions
-    OutTransitionCount = 0;
-    for (const UConsciousnessPhysicsComponent* Component : TrackedComponents)
-    {
-        if (Component && Component->bIsTransitioning)
-        {
-            OutTransitionCount++;
-        }
-    }
-}
-
-void AConsciousnessPhysicsManager::SetLayerVisibility(EConsciousnessLayer Layer, bool bVisible)
-{
-    LayerVisibility.FindOrAdd(Layer) = bVisible;
-    
-    // Apply visibility to all actors in layer
-    TArray<AActor*> ActorsInLayer = GetActorsInLayer(Layer);
-    for (AActor* Actor : ActorsInLayer)
-    {
-        if (Actor)
-        {
-            Actor->SetActorHiddenInGame(!bVisible);
-        }
-    }
-}
-
-void AConsciousnessPhysicsManager::UpdateTrackedComponents()
-{
-    // Remove invalid components
-    TrackedComponents.RemoveAll([](const UConsciousnessPhysicsComponent* Component)
-    {
-        return !IsValid(Component) || !IsValid(Component->GetOwner());
-    });
-}
-
-void AConsciousnessPhysicsManager::OptimizePerformance()
-{
-    // Count non-physical actors
-    int32 NonPhysicalCount = 0;
-    for (const UConsciousnessPhysicsComponent* Component : TrackedComponents)
-    {
-        if (Component && Component->CurrentLayer != EConsciousnessLayer::Physical)
-        {
-            NonPhysicalCount++;
-        }
-    }
-    
-    // If we exceed the limit, force some actors back to physical layer
-    if (NonPhysicalCount > MaxNonPhysicalActors)
-    {
-        int32 ToForceBack = NonPhysicalCount - MaxNonPhysicalActors;
-        
-        for (UConsciousnessPhysicsComponent* Component : TrackedComponents)
-        {
-            if (Component && Component->CurrentLayer != EConsciousnessLayer::Physical && ToForceBack > 0)
-            {
-                Component->TransitionToLayer(EConsciousnessLayer::Physical, true);
-                ToForceBack--;
-            }
-        }
-        
-        UE_LOG(LogTemp, Warning, TEXT("Performance optimization: Forced %d actors back to physical layer"), 
-               NonPhysicalCount - MaxNonPhysicalActors);
-    }
+    // Update components in batches for performance
+    UpdateComponentsBatched(DeltaTime);
 }
 
 void AConsciousnessPhysicsManager::RegisterComponent(UConsciousnessPhysicsComponent* Component)
 {
-    if (Component && !TrackedComponents.Contains(Component))
+    if (Component && !RegisteredComponents.Contains(Component))
     {
-        TrackedComponents.Add(Component);
+        RegisteredComponents.Add(Component);
+        UE_LOG(LogTemp, Log, TEXT("ConsciousnessPhysicsManager: Registered component %s (Total: %d)"), 
+               *Component->GetOwner()->GetName(), RegisteredComponents.Num());
     }
 }
 
 void AConsciousnessPhysicsManager::UnregisterComponent(UConsciousnessPhysicsComponent* Component)
 {
-    TrackedComponents.Remove(Component);
+    if (Component)
+    {
+        RegisteredComponents.Remove(Component);
+        UE_LOG(LogTemp, Log, TEXT("ConsciousnessPhysicsManager: Unregistered component %s (Total: %d)"), 
+               *Component->GetOwner()->GetName(), RegisteredComponents.Num());
+    }
+}
+
+void AConsciousnessPhysicsManager::ApplyGlobalDistortion(float DistortionStrength, float Duration)
+{
+    for (UConsciousnessPhysicsComponent* Component : RegisteredComponents)
+    {
+        if (IsValid(Component))
+        {
+            Component->ApplyRealityDistortion(DistortionStrength, Duration);
+        }
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("ConsciousnessPhysicsManager: Applied global distortion %.2f to %d components"), 
+           DistortionStrength, RegisteredComponents.Num());
+}
+
+void AConsciousnessPhysicsManager::GetPerformanceMetrics(float& OutUpdateTimeMS, int32& OutRegisteredComponents) const
+{
+    OutUpdateTimeMS = LastUpdateTimeMS;
+    OutRegisteredComponents = RegisteredComponents.Num();
+}
+
+void AConsciousnessPhysicsManager::UpdateComponentsBatched(float DeltaTime)
+{
+    if (RegisteredComponents.Num() == 0)
+    {
+        return;
+    }
+
+    double StartTime = FPlatformTime::Seconds();
+    int32 ComponentsProcessed = 0;
+    int32 MaxComponents = FMath::Min(MaxComponentsPerFrame, RegisteredComponents.Num());
+
+    // Process components in round-robin fashion
+    for (int32 i = 0; i < MaxComponents; ++i)
+    {
+        int32 Index = (CurrentUpdateIndex + i) % RegisteredComponents.Num();
+        
+        if (UConsciousnessPhysicsComponent* Component = RegisteredComponents[Index])
+        {
+            if (IsValid(Component))
+            {
+                // Component updates are handled in their own TickComponent
+                ComponentsProcessed++;
+            }
+            else
+            {
+                // Remove invalid components
+                RegisteredComponents.RemoveAt(Index);
+                if (Index <= CurrentUpdateIndex)
+                {
+                    CurrentUpdateIndex--;
+                }
+            }
+        }
+
+        // Check performance budget
+        double CurrentTime = FPlatformTime::Seconds();
+        float ElapsedMS = (CurrentTime - StartTime) * 1000.0f;
+        if (ElapsedMS >= PerformanceBudgetMS)
+        {
+            break;
+        }
+    }
+
+    // Update index for next frame
+    CurrentUpdateIndex = (CurrentUpdateIndex + ComponentsProcessed) % FMath::Max(RegisteredComponents.Num(), 1);
+    
+    // Track performance
+    double EndTime = FPlatformTime::Seconds();
+    LastUpdateTimeMS = (EndTime - StartTime) * 1000.0f;
 }
