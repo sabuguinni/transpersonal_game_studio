@@ -1,0 +1,47 @@
+// Rotten Wood with Moss Material
+// For fallen logs, dead trees, and decaying wood structures
+// Conveys age, humidity, and natural decay processes
+
+Material Domain: Surface
+Blend Mode: Opaque
+Shading Model: Default Lit
+
+// Base Textures
+TextureSample T_RottenWood_BC (Texture: T_RottenWood_BaseColor_2K)
+TextureSample T_RottenWood_N (Texture: T_RottenWood_Normal_2K)
+TextureSample T_RottenWood_ORM (Texture: T_RottenWood_ORM_2K)
+
+TextureSample T_Moss_BC (Texture: T_Moss_BaseColor_2K)
+TextureSample T_Moss_N (Texture: T_Moss_Normal_2K)
+TextureSample T_Moss_ORM (Texture: T_Moss_ORM_2K)
+
+// UV Coordinates
+TextureCoordinate UV_Main (Tiling: 1.0, 1.0)
+TextureCoordinate UV_Detail (Tiling: 4.0, 4.0)
+
+// Moss Growth Mask
+// Based on world normal (moss grows on top and sides, not bottom)
+WorldNormal -> DotProduct(0,0,1) -> Saturate -> Power(2.0) -> MossGrowthMask
+
+// Humidity Mask  
+// Areas with more moss indicate higher humidity
+VertexColor.G -> Multiply(MossGrowthMask) -> MossBlendFactor
+
+// Material Blending
+Lerp(T_RottenWood_BC, T_Moss_BC, MossBlendFactor) -> BaseColor
+
+// Normal Blending
+BlendAngleCorrectedNormals(T_RottenWood_N, T_Moss_N, MossBlendFactor) -> Normal
+
+// Surface Properties
+Lerp(T_RottenWood_ORM.R, T_Moss_ORM.R, MossBlendFactor) -> AmbientOcclusion
+Lerp(0.8, 0.9, MossBlendFactor) -> Roughness (moss is rougher)
+Constant(0.0) -> Metallic (organic materials are non-metallic)
+
+// Wetness Response
+Parameter WetnessAmount (Default: 0.0, Range: 0.0-1.0)
+Lerp(BaseColor, BaseColor * 0.6, WetnessAmount) -> DarkenedBaseColor
+Lerp(Roughness, 0.2, WetnessAmount) -> WetRoughness
+
+// Subsurface Scattering (subtle)
+Lerp(0.0, 0.1, MossBlendFactor) -> SubsurfaceColor (green tint for moss)
