@@ -1,0 +1,51 @@
+// Cycad Foliage Type
+// Cycas revoluta-style plants for open areas and forest edges
+// Medium-height vegetation that creates natural barriers
+
+FoliageType: StaticMesh  
+StaticMesh: SM_Cycad_01
+
+// Placement Settings
+Density: 2.5 (instances per 1000x1000 units)
+Radius: 300.0 (minimum distance between instances)
+
+// Scaling
+ScaleX: (Min: 0.7, Max: 1.3)
+ScaleY: (Min: 0.7, Max: 1.3)
+ScaleZ: (Min: 0.8, Max: 1.2)
+LockScaling: false
+
+// Rotation
+AlignToNormal: true
+RandomYaw: true
+RandomPitchAngle: 12.0
+
+// Culling
+StartCullDistance: 6000.0
+EndCullDistance: 10000.0
+PerInstanceFadeAmount: true
+
+// Collision
+CollisionWithWorld: true
+CollisionWithOtherFoliage: true
+CollisionRadius: 150.0
+
+// Ground Slope  
+GroundSlopeAngle: (Min: 0.0, Max: 35.0)
+Height: (Min: -150.0, Max: 300.0)
+
+// LOD Settings
+LODDistanceScale: 1.0
+EnableStaticLighting: false
+
+// Wind Settings
+EnableWind: true
+WindMagnitude: 0.4
+
+// Variation
+MaterialOverrides: 
+[
+    M_Cycad_Green,
+    M_Cycad_YellowGreen, 
+    M_Cycad_DarkGreen
+]
