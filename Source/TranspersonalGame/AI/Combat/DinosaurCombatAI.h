@@ -2,19 +2,105 @@
 
 #include "CoreMinimal.h"
 #include "AIController.h"
-#include "Perception/AIPerceptionComponent.h"
 #include "BehaviorTree/BehaviorTreeComponent.h"
 #include "BehaviorTree/BlackboardComponent.h"
-#include "CombatAITypes.h"
+#include "Perception/AIPerceptionComponent.h"
+#include "Perception/AISightConfig.h"
+#include "Perception/AIHearingConfig.h"
+#include "GameplayTags.h"
 #include "DinosaurCombatAI.generated.h"
 
-class UBehaviorTree;
-class UBlackboardAsset;
-class UAISenseConfig_Sight;
-class UAISenseConfig_Hearing;
-class UAISenseConfig_Damage;
+UENUM(BlueprintType)
+enum class EDinosaurCombatState : uint8
+{
+    Idle,
+    Hunting,
+    Stalking,
+    Attacking,
+    Retreating,
+    Feeding,
+    Territorial,
+    Fleeing
+};
 
-UCLASS(BlueprintType, Blueprintable)
+UENUM(BlueprintType)
+enum class EDinosaurAggressionLevel : uint8
+{
+    Passive,
+    Defensive,
+    Territorial,
+    Aggressive,
+    Enraged
+};
+
+USTRUCT(BlueprintType)
+struct FCombatPersonality
+{
+    GENERATED_BODY()
+
+    // Base aggression multiplier (0.5 = passive, 2.0 = very aggressive)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.1", ClampMax = "3.0"))
+    float AggressionMultiplier = 1.0f;
+
+    // How quickly the dinosaur escalates combat (0.1 = slow, 2.0 = instant)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.1", ClampMax = "2.0"))
+    float EscalationRate = 1.0f;
+
+    // Preferred engagement distance
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "100", ClampMax = "2000"))
+    float PreferredCombatRange = 500.0f;
+
+    // How long the dinosaur remembers threats
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "5.0", ClampMax = "300.0"))
+    float ThreatMemoryDuration = 60.0f;
+
+    // Chance to use special attacks (0.0 = never, 1.0 = always when available)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float SpecialAttackChance = 0.3f;
+
+    // How much the dinosaur values its own safety (0.0 = fearless, 1.0 = very cautious)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float SelfPreservation = 0.5f;
+};
+
+USTRUCT(BlueprintType)
+struct FCombatMetrics
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly)
+    float CurrentHealth = 100.0f;
+
+    UPROPERTY(BlueprintReadOnly)
+    float MaxHealth = 100.0f;
+
+    UPROPERTY(BlueprintReadOnly)
+    float CurrentStamina = 100.0f;
+
+    UPROPERTY(BlueprintReadOnly)
+    float MaxStamina = 100.0f;
+
+    UPROPERTY(BlueprintReadOnly)
+    float ThreatLevel = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly)
+    float LastDamageTime = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly)
+    int32 ConsecutiveHits = 0;
+
+    UPROPERTY(BlueprintReadOnly)
+    bool bIsWounded = false;
+
+    UPROPERTY(BlueprintReadOnly)
+    bool bIsExhausted = false;
+};
+
+/**
+ * Advanced Combat AI Controller for Dinosaurs
+ * Implements tactical combat behavior with personality-driven decision making
+ */
+UCLASS(BlueprintType)
 class TRANSPERSONALGAME_API ADinosaurCombatAI : public AAIController
 {
     GENERATED_BODY()
@@ -27,151 +113,107 @@ protected:
     virtual void Tick(float DeltaTime) override;
     virtual void OnPossess(APawn* InPawn) override;
 
-    // Perception System
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI|Perception")
-    UAIPerceptionComponent* AIPerceptionComponent;
+    // Core AI Components
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI")
+    class UBehaviorTreeComponent* BehaviorTreeComponent;
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Perception")
-    UAISenseConfig_Sight* SightConfig;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI")
+    class UBlackboardComponent* BlackboardComponent;
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Perception")
-    UAISenseConfig_Hearing* HearingConfig;
-
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Perception")
-    UAISenseConfig_Damage* DamageConfig;
-
-    // Behavior Tree
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Behavior")
-    UBehaviorTree* BehaviorTree;
-
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Behavior")
-    UBlackboardAsset* BlackboardAsset;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI")
+    class UAIPerceptionComponent* PerceptionComponent;
 
     // Combat Configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Combat")
-    EDinosaurArchetype DinosaurArchetype = EDinosaurArchetype::None;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    class UBehaviorTree* CombatBehaviorTree;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Combat")
-    FCombatStats CombatStats;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    FCombatPersonality CombatPersonality;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Combat")
-    FDinosaurVariation DinosaurVariation;
+    UPROPERTY(BlueprintReadOnly, Category = "Combat")
+    FCombatMetrics CombatMetrics;
 
-    // Current State
-    UPROPERTY(BlueprintReadOnly, Category = "AI|State")
-    ECombatState CurrentCombatState = ECombatState::Passive;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    EDinosaurCombatState CurrentCombatState;
 
-    UPROPERTY(BlueprintReadOnly, Category = "AI|State")
-    EThreatLevel CurrentThreatLevel = EThreatLevel::None;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    EDinosaurAggressionLevel CurrentAggressionLevel;
 
-    UPROPERTY(BlueprintReadOnly, Category = "AI|State")
-    AActor* CurrentTarget = nullptr;
+    // Perception Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Perception")
+    float SightRadius = 1500.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "AI|State")
-    AActor* LastKnownTargetLocation = nullptr;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Perception")
+    float LoseSightRadius = 1800.0f;
 
-    // Pack Behavior
-    UPROPERTY(BlueprintReadOnly, Category = "AI|Pack")
-    TArray<ADinosaurCombatAI*> PackMembers;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Perception")
+    float FieldOfView = 90.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "AI|Pack")
-    ADinosaurCombatAI* PackLeader = nullptr;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Perception")
+    float HearingRadius = 1200.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "AI|Pack")
-    bool bIsPackLeader = false;
+    // Combat Timing
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Timing")
+    float AttackCooldown = 2.0f;
 
-    // Territory
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Territory")
-    FVector TerritoryCenter;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Timing")
+    float SpecialAttackCooldown = 8.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Territory")
-    float TerritoryRadius = 1000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Timing")
+    float StateChangeDelay = 0.5f;
 
-    // Timers and Cooldowns
-    UPROPERTY(BlueprintReadOnly, Category = "AI|Timing")
-    float LastAttackTime = 0.0f;
+    // Blackboard Keys
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blackboard")
+    FName TargetActorKey = TEXT("TargetActor");
 
-    UPROPERTY(BlueprintReadOnly, Category = "AI|Timing")
-    float LastTargetSeenTime = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blackboard")
+    FName CombatStateKey = TEXT("CombatState");
 
-    UPROPERTY(BlueprintReadOnly, Category = "AI|Timing")
-    float StateChangeTime = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blackboard")
+    FName AggressionLevelKey = TEXT("AggressionLevel");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blackboard")
+    FName LastKnownLocationKey = TEXT("LastKnownLocation");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blackboard")
+    FName OptimalAttackPositionKey = TEXT("OptimalAttackPosition");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blackboard")
+    FName CanAttackKey = TEXT("CanAttack");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blackboard")
+    FName IsWoundedKey = TEXT("IsWounded");
 
 public:
-    // Events
-    UPROPERTY(BlueprintAssignable, Category = "AI|Events")
-    FOnCombatStateChanged OnCombatStateChanged;
+    // Combat State Management
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    void SetCombatState(EDinosaurCombatState NewState);
 
-    UPROPERTY(BlueprintAssignable, Category = "AI|Events")
-    FOnThreatLevelChanged OnThreatLevelChanged;
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    void SetAggressionLevel(EDinosaurAggressionLevel NewLevel);
 
-    UPROPERTY(BlueprintAssignable, Category = "AI|Events")
-    FOnTargetAcquired OnTargetAcquired;
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    void OnTakeDamage(float DamageAmount, AActor* DamageSource);
 
-    UPROPERTY(BlueprintAssignable, Category = "AI|Events")
-    FOnTargetLost OnTargetLost;
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    void OnAttackHit(AActor* HitTarget);
 
-    // Public Interface
-    UFUNCTION(BlueprintCallable, Category = "AI|Combat")
-    void SetCombatState(ECombatState NewState);
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    void OnAttackMissed();
 
-    UFUNCTION(BlueprintCallable, Category = "AI|Combat")
-    void SetThreatLevel(EThreatLevel NewLevel);
+    // Tactical Decision Making
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    FVector CalculateOptimalAttackPosition(AActor* Target);
 
-    UFUNCTION(BlueprintCallable, Category = "AI|Combat")
-    void SetTarget(AActor* NewTarget);
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    bool ShouldRetreat();
 
-    UFUNCTION(BlueprintCallable, Category = "AI|Combat")
-    void ClearTarget();
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    bool ShouldUseSpecialAttack();
 
-    UFUNCTION(BlueprintPure, Category = "AI|Combat")
-    bool IsInCombat() const;
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    float CalculateThreatLevel(AActor* Target);
 
-    UFUNCTION(BlueprintPure, Category = "AI|Combat")
-    bool CanSeeTarget() const;
-
-    UFUNCTION(BlueprintPure, Category = "AI|Combat")
-    float GetDistanceToTarget() const;
-
-    UFUNCTION(BlueprintPure, Category = "AI|Combat")
-    bool IsInAttackRange() const;
-
-    UFUNCTION(BlueprintPure, Category = "AI|Combat")
-    bool IsInTerritory(const FVector& Location) const;
-
-    UFUNCTION(BlueprintCallable, Category = "AI|Combat")
-    void PerformAttack();
-
-    UFUNCTION(BlueprintCallable, Category = "AI|Combat")
-    void InitializeFromArchetype(const FDinosaurArchetypeData& ArchetypeData);
-
-    // Pack Behavior
-    UFUNCTION(BlueprintCallable, Category = "AI|Pack")
-    void JoinPack(ADinosaurCombatAI* Leader);
-
-    UFUNCTION(BlueprintCallable, Category = "AI|Pack")
-    void LeavePack();
-
-    UFUNCTION(BlueprintCallable, Category = "AI|Pack")
-    void BecomePackLeader();
-
-    UFUNCTION(BlueprintCallable, Category = "AI|Pack")
-    void AddPackMember(ADinosaurCombatAI* Member);
-
-    UFUNCTION(BlueprintCallable, Category = "AI|Pack")
-    void RemovePackMember(ADinosaurCombatAI* Member);
-
-    UFUNCTION(BlueprintPure, Category = "AI|Pack")
-    bool IsInPack() const { return PackLeader != nullptr || bIsPackLeader; }
-
-    // Strategy Selection
-    UFUNCTION(BlueprintCallable, Category = "AI|Strategy")
-    EHuntingStrategy SelectBestStrategy();
-
-    UFUNCTION(BlueprintCallable, Category = "AI|Strategy")
-    void ExecuteStrategy(EHuntingStrategy Strategy);
-
-protected:
     // Perception Callbacks
     UFUNCTION()
     void OnPerceptionUpdated(const TArray<AActor*>& UpdatedActors);
@@ -179,30 +221,27 @@ protected:
     UFUNCTION()
     void OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus);
 
-    // Internal Methods
-    void UpdateCombatLogic(float DeltaTime);
-    void UpdateThreatAssessment();
-    void UpdatePackBehavior();
-    void UpdateTerritorialBehavior();
+protected:
+    // Internal Combat Logic
+    void UpdateCombatMetrics(float DeltaTime);
+    void EvaluateTacticalSituation();
+    void UpdateBlackboardValues();
+    void ProcessCombatStateTransitions();
     
-    bool ShouldEngageTarget(AActor* Target) const;
-    bool ShouldFleeFromTarget(AActor* Target) const;
-    EThreatLevel CalculateThreatLevel(AActor* Target) const;
+    // Timers
+    float LastAttackTime = 0.0f;
+    float LastSpecialAttackTime = 0.0f;
+    float LastStateChangeTime = 0.0f;
     
-    void InitializePerception();
-    void InitializeBehaviorTree();
-    void SetupBlackboardKeys();
-
-    // Strategy Implementations
-    void ExecuteDirectAssault();
-    void ExecuteAmbushStrategy();
-    void ExecutePackHuntStrategy();
-    void ExecuteStalkingStrategy();
-    void ExecuteTerritorialDefense();
-
-    // Utility Functions
-    FVector GetRandomPointInTerritory() const;
-    FVector GetFlankingPosition(AActor* Target) const;
-    FVector GetAmbushPosition(AActor* Target) const;
-    bool HasClearLineOfSight(AActor* Target) const;
+    // Current Target Tracking
+    UPROPERTY()
+    AActor* CurrentTarget = nullptr;
+    
+    FVector LastKnownTargetLocation = FVector::ZeroVector;
+    float LastTargetSightTime = 0.0f;
+    
+    // Combat Analytics
+    int32 TotalAttacksMade = 0;
+    int32 SuccessfulHits = 0;
+    float CombatStartTime = 0.0f;
 };
