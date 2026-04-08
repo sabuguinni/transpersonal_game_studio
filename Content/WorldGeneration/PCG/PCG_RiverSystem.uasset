@@ -1,0 +1,111 @@
+{
+    "AssetType": "PCGGraph",
+    "Description": "Procedural river system generation with realistic flow patterns",
+    "GraphSettings": {
+        "UseHierarchicalGeneration": true,
+        "HiGenDefaultGridSize": "25600",
+        "EnableRuntimeGeneration": false
+    },
+    "Nodes": [
+        {
+            "NodeType": "LandscapeData",
+            "NodeName": "Landscape Input",
+            "Settings": {
+                "UseMetadata": true,
+                "SampleVirtualTextures": true
+            }
+        },
+        {
+            "NodeType": "CreateSpline",
+            "NodeName": "Main River Spline",
+            "Settings": {
+                "SplineMode": "Linear",
+                "ClosedLoop": false,
+                "NumberOfSegments": 20
+            }
+        },
+        {
+            "NodeType": "SplineSampler",
+            "NodeName": "River Path Sampler",
+            "Settings": {
+                "Dimension": "OnSpline",
+                "DistanceBetweenPoints": 100.0,
+                "SubdivisionsPerSegment": 4
+            }
+        },
+        {
+            "NodeType": "ProjectionFilter",
+            "NodeName": "Height Flow Filter",
+            "Settings": {
+                "ProjectionMode": "Planar",
+                "ProjectionAxis": "Z"
+            }
+        },
+        {
+            "NodeType": "DensityNoise",
+            "NodeName": "River Width Variation",
+            "Settings": {
+                "DensityMode": "Set",
+                "NoiseMode": "Perlin",
+                "Frequency": 0.02,
+                "Amplitude": 0.5,
+                "Offset": 0.5
+            }
+        },
+        {
+            "NodeType": "AttributeNoise",
+            "NodeName": "Flow Speed",
+            "Settings": {
+                "AttributeName": "FlowSpeed",
+                "NoiseMode": "Simplex",
+                "Frequency": 0.01,
+                "Amplitude": 2.0,
+                "Offset": 3.0
+            }
+        },
+        {
+            "NodeType": "StaticMeshSpawner",
+            "NodeName": "River Rocks Spawner",
+            "Settings": {
+                "MeshSelectorType": "ByAttribute",
+                "MeshAttribute": "RockMesh",
+                "InstanceDataPackerType": "ByAttribute"
+            }
+        },
+        {
+            "NodeType": "CreateSpline",
+            "NodeName": "Tributary Splines",
+            "Settings": {
+                "SplineMode": "Branching",
+                "ClosedLoop": false,
+                "NumberOfBranches": 5
+            }
+        }
+    ],
+    "RiverFeatures": {
+        "MainRiver": {
+            "Length": "6000m",
+            "AverageWidth": "15m",
+            "FlowDirection": "North to South",
+            "Purpose": "Primary water source and predator highway"
+        },
+        "Tributaries": {
+            "Count": 5,
+            "AverageLength": "1500m",
+            "AverageWidth": "5m",
+            "Purpose": "Secondary water sources and escape routes"
+        },
+        "WaterFeatures": {
+            "Rapids": "High flow areas - dangerous but rich fishing",
+            "Pools": "Calm areas - safe water access but ambush points",
+            "Crossings": "Shallow areas - strategic movement but exposed"
+        }
+    },
+    "EcologicalImpact": {
+        "WaterSource": "Essential for player survival",
+        "PredatorPaths": "Large predators follow rivers for hunting",
+        "PreyGathering": "Herbivores gather at water - hunting opportunity",
+        "NavigationAid": "Rivers provide natural landmarks",
+        "ResourceNodes": "Fish, plants, and minerals near water"
+    }
+}
