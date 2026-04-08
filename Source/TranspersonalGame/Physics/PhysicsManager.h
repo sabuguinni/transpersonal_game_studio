@@ -1,25 +1,37 @@
+// Copyright Transpersonal Game Studio. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/World.h"
-#include "Components/ActorComponent.h"
 #include "Engine/Engine.h"
+#include "Components/ActorComponent.h"
 #include "PhysicsEngine/PhysicsSettings.h"
+#include "Chaos/ChaosEngineInterface.h"
 #include "PhysicsManager.generated.h"
 
-class UConsciousnessSystem;
-class URealitySystem;
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnPhysicsImpact, AActor*, ActorA, AActor*, ActorB);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnPhysicsDestruction, AActor*, DestroyedActor);
 
 /**
- * @brief Core physics manager that bridges consciousness states with physical reality
+ * @brief Core physics manager for the Transpersonal Game
  * 
- * This system manages the fundamental physics parameters that respond to consciousness
- * levels, creating emergent gameplay where the player's mental state directly affects
- * the physical world's behavior.
+ * Manages all physics simulation, collision detection, and destruction systems.
+ * Optimized for 60fps on console, 120fps on PC with dynamic quality scaling.
  * 
- * Performance Budget: 0.8ms per frame (max 1.2ms)
+ * Key Features:
+ * - Chaos Physics integration with custom collision channels
+ * - Dynamic LOD system for physics simulation
+ * - Performance budgeting with automatic quality adjustment
+ * - Destruction system with debris management
+ * - Vehicle physics with realistic handling
+ * 
+ * Performance Budget: 2.5ms per frame maximum
+ * Memory Budget: 128MB for physics simulation data
+ * 
+ * @author Core Systems Programmer
+ * @version 1.0
  */
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+UCLASS(BlueprintType, Blueprintable, ClassGroup=(Physics), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UPhysicsManager : public UActorComponent
 {
     GENERATED_BODY()
@@ -33,148 +45,165 @@ protected:
 
 public:
     /**
-     * @brief Updates global physics parameters based on consciousness state
-     * @param ConsciousnessLevel Current consciousness level (0.0 to 1.0)
-     * @param RealityStability Current reality stability (0.0 to 1.0)
+     * @brief Initialize physics world with custom settings
+     * @param WorldGravity Gravity vector for the world
+     * @param SimulationQuality Quality level (0-3, 3 being highest)
      */
-    UFUNCTION(BlueprintCallable, Category = "Transpersonal Physics")
-    void UpdatePhysicsFromConsciousness(float ConsciousnessLevel, float RealityStability);
+    UFUNCTION(BlueprintCallable, Category = "Physics|Core")
+    void InitializePhysicsWorld(FVector WorldGravity = FVector(0, 0, -980.0f), int32 SimulationQuality = 2);
 
     /**
-     * @brief Applies consciousness-influenced forces to an actor
-     * @param Actor Target actor to influence
-     * @param ConsciousnessIntensity Intensity of consciousness effect (0.0 to 2.0)
+     * @brief Apply impulse to actor with physics validation
+     * @param TargetActor Actor to apply impulse to
+     * @param ImpulseVector Impulse direction and magnitude
+     * @param bVelChange Whether to treat as velocity change
+     * @return True if impulse was successfully applied
      */
-    UFUNCTION(BlueprintCallable, Category = "Transpersonal Physics")
-    void ApplyConsciousnessForce(AActor* Actor, float ConsciousnessIntensity);
+    UFUNCTION(BlueprintCallable, Category = "Physics|Forces")
+    bool ApplyPhysicsImpulse(AActor* TargetActor, FVector ImpulseVector, bool bVelChange = false);
 
     /**
-     * @brief Creates reality distortion field around a location
-     * @param Location Center of distortion
-     * @param Radius Effect radius in Unreal units
-     * @param Intensity Distortion intensity (0.0 to 1.0)
-     * @param Duration Effect duration in seconds
+     * @brief Create physics-based explosion at location
+     * @param ExplosionLocation World location of explosion
+     * @param ExplosionRadius Radius of effect
+     * @param ExplosionForce Force magnitude
+     * @param bCauseDamage Whether explosion should damage actors
      */
-    UFUNCTION(BlueprintCallable, Category = "Transpersonal Physics")
-    void CreateRealityDistortion(FVector Location, float Radius, float Intensity, float Duration);
+    UFUNCTION(BlueprintCallable, Category = "Physics|Destruction")
+    void CreatePhysicsExplosion(FVector ExplosionLocation, float ExplosionRadius, float ExplosionForce, bool bCauseDamage = true);
 
     /**
-     * @brief Gets current gravity multiplier based on consciousness state
-     * @return Gravity multiplier (0.1 to 2.0)
+     * @brief Enable/disable physics simulation for actor
+     * @param TargetActor Actor to modify
+     * @param bEnablePhysics Whether to enable physics
      */
-    UFUNCTION(BlueprintPure, Category = "Transpersonal Physics")
-    float GetConsciousnessGravityMultiplier() const;
+    UFUNCTION(BlueprintCallable, Category = "Physics|Control")
+    void SetActorPhysicsEnabled(AActor* TargetActor, bool bEnablePhysics);
 
     /**
-     * @brief Enables/disables transpersonal physics effects
-     * @param bEnabled Whether to enable effects
+     * @brief Get current physics performance metrics
+     * @param OutFrameTime Current physics frame time in ms
+     * @param OutActiveRigidBodies Number of active rigid bodies
+     * @param OutMemoryUsage Memory usage in MB
      */
-    UFUNCTION(BlueprintCallable, Category = "Transpersonal Physics")
-    void SetTranspersonalPhysicsEnabled(bool bEnabled);
+    UFUNCTION(BlueprintCallable, Category = "Physics|Debug")
+    void GetPhysicsPerformanceMetrics(float& OutFrameTime, int32& OutActiveRigidBodies, float& OutMemoryUsage);
+
+    /**
+     * @brief Adjust physics quality based on performance
+     * @param TargetFrameTime Desired frame time in ms
+     */
+    UFUNCTION(BlueprintCallable, Category = "Physics|Optimization")
+    void AdjustPhysicsQuality(float TargetFrameTime = 2.5f);
+
+    // Events
+    UPROPERTY(BlueprintAssignable, Category = "Physics|Events")
+    FOnPhysicsImpact OnPhysicsImpact;
+
+    UPROPERTY(BlueprintAssignable, Category = "Physics|Events")
+    FOnPhysicsDestruction OnPhysicsDestruction;
 
 protected:
-    /** Base gravity value (cm/s²) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Parameters")
-    float BaseGravity = -980.0f;
+    // Core physics settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Settings")
+    float MaxPhysicsFrameTime = 2.5f; // Maximum allowed physics frame time in ms
 
-    /** Minimum gravity multiplier during high consciousness states */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Parameters")
-    float MinGravityMultiplier = 0.1f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Settings")
+    int32 MaxActiveRigidBodies = 2048; // Maximum number of active rigid bodies
 
-    /** Maximum gravity multiplier during low consciousness states */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Parameters")
-    float MaxGravityMultiplier = 2.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Settings")
+    float PhysicsLODDistance = 5000.0f; // Distance for physics LOD switching
 
-    /** Time dilation factor based on consciousness (0.1 to 2.0) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Parameters")
-    float ConsciousnessTimeDilation = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Settings")
+    bool bEnableAsyncPhysics = true; // Enable asynchronous physics simulation
 
-    /** Air resistance multiplier for consciousness effects */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Parameters")
-    float ConsciousnessAirResistance = 1.0f;
+    // Performance tracking
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Physics Debug")
+    float CurrentPhysicsFrameTime = 0.0f;
 
-    /** Whether transpersonal physics are currently enabled */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Parameters")
-    bool bTranspersonalPhysicsEnabled = true;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Physics Debug")
+    int32 CurrentActiveRigidBodies = 0;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Physics Debug")
+    float CurrentMemoryUsage = 0.0f;
+
+    // Internal systems
+    UPROPERTY()
+    TArray<TWeakObjectPtr<AActor>> TrackedPhysicsActors;
+
+    UPROPERTY()
+    class UPhysicsLODSystem* PhysicsLODSystem;
 
 private:
-    /** Cached reference to consciousness system */
-    UPROPERTY()
-    UConsciousnessSystem* ConsciousnessSystem;
+    // Performance monitoring
+    void UpdatePerformanceMetrics();
+    void OptimizePhysicsSimulation();
+    
+    // Collision handling
+    UFUNCTION()
+    void OnActorHit(AActor* SelfActor, AActor* OtherActor, FVector NormalImpulse, const FHitResult& Hit);
 
-    /** Cached reference to reality system */
-    UPROPERTY()
-    URealitySystem* RealitySystem;
+    // Memory management
+    void CleanupInactivePhysicsObjects();
+    
+    // Quality scaling
+    void ScalePhysicsQuality(float QualityMultiplier);
 
-    /** Current gravity multiplier */
-    float CurrentGravityMultiplier = 1.0f;
-
-    /** Active reality distortions */
-    TArray<struct FRealityDistortion> ActiveDistortions;
-
-    /** Performance tracking */
-    float LastFrameTime = 0.0f;
-    float AverageFrameTime = 0.0f;
-
-    /**
-     * @brief Updates gravity based on consciousness level
-     * @param ConsciousnessLevel Current consciousness level
-     */
-    void UpdateGravity(float ConsciousnessLevel);
-
-    /**
-     * @brief Updates time dilation effects
-     * @param RealityStability Current reality stability
-     */
-    void UpdateTimeDilation(float RealityStability);
-
-    /**
-     * @brief Processes active reality distortions
-     * @param DeltaTime Frame delta time
-     */
-    void ProcessRealityDistortions(float DeltaTime);
-
-    /**
-     * @brief Validates performance budget
-     * @param DeltaTime Frame delta time
-     */
-    void ValidatePerformance(float DeltaTime);
+    // Internal state
+    float PerformanceTimer = 0.0f;
+    int32 CurrentQualityLevel = 2;
+    bool bPerformanceOptimizationEnabled = true;
 };
 
 /**
- * @brief Structure representing a reality distortion field
+ * @brief Physics LOD system for performance optimization
+ * 
+ * Manages level-of-detail for physics simulation based on distance from camera
+ * and performance requirements.
  */
-USTRUCT(BlueprintType)
-struct FRealityDistortion
+UCLASS()
+class TRANSPERSONALGAME_API UPhysicsLODSystem : public UObject
 {
     GENERATED_BODY()
 
-    /** Center location of distortion */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FVector Location = FVector::ZeroVector;
+public:
+    /**
+     * @brief Update LOD levels for all tracked physics objects
+     * @param ViewLocation Camera location for distance calculations
+     * @param DeltaTime Time since last update
+     */
+    void UpdatePhysicsLOD(FVector ViewLocation, float DeltaTime);
 
-    /** Effect radius */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float Radius = 500.0f;
+    /**
+     * @brief Register actor for LOD management
+     * @param Actor Actor to track
+     */
+    void RegisterActor(AActor* Actor);
 
-    /** Current intensity */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float Intensity = 1.0f;
+    /**
+     * @brief Unregister actor from LOD management
+     * @param Actor Actor to stop tracking
+     */
+    void UnregisterActor(AActor* Actor);
 
-    /** Remaining duration */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float RemainingDuration = 0.0f;
-
-    /** Distortion type */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 DistortionType = 0;
-
-    FRealityDistortion()
+protected:
+    struct FPhysicsLODData
     {
-        Location = FVector::ZeroVector;
-        Radius = 500.0f;
-        Intensity = 1.0f;
-        RemainingDuration = 0.0f;
-        DistortionType = 0;
-    }
+        TWeakObjectPtr<AActor> Actor;
+        float DistanceToCamera = 0.0f;
+        int32 CurrentLODLevel = 0;
+        float LastUpdateTime = 0.0f;
+    };
+
+    TArray<FPhysicsLODData> TrackedActors;
+    
+    // LOD distance thresholds
+    static constexpr float LOD_DISTANCE_HIGH = 1000.0f;
+    static constexpr float LOD_DISTANCE_MEDIUM = 3000.0f;
+    static constexpr float LOD_DISTANCE_LOW = 8000.0f;
+    static constexpr float LOD_DISTANCE_DISABLED = 15000.0f;
+
+private:
+    void ApplyLODLevel(AActor* Actor, int32 LODLevel);
+    int32 CalculateLODLevel(float Distance);
 };
