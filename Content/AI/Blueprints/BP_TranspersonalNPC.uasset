@@ -1,0 +1,59 @@
+# Transpersonal NPC Blueprint
+# Base blueprint class for all transpersonal NPCs with consciousness-based behavior
+
+Class: BP_TranspersonalNPC
+Parent: Character
+
+Components:
+- NPCBehaviorComponent (UNPCBehaviorComponent)
+- ConsciousnessVisualization (UStaticMeshComponent)
+- EmotionalAura (UParticleSystemComponent)
+- DialogueComponent (UDialogueComponent)
+
+Variables:
+- NPCArchetype (ENPCArchetype): ShadowSelf
+- InitialConsciousnessLevel (float): 0.5
+- bCanInteract (bool): true
+- InteractionRange (float): 150.0
+- AuraIntensity (float): 1.0
+
+Events:
+- BeginPlay:
+  - Initialize NPC Behavior Component
+  - Set up visual effects based on archetype
+  - Configure dialogue system
+
+- OnConsciousnessStateChanged:
+  - Update visual effects
+  - Change particle system parameters
+  - Trigger appropriate animations
+
+- OnTransformationTriggered:
+  - Play transformation VFX
+  - Update mesh materials
+  - Trigger consciousness transition animation
+
+- OnEmotionalResonance:
+  - Adjust aura intensity
+  - Update particle colors
+  - Influence nearby environmental elements
+
+Functions:
+- InitializeArchetype(ENPCArchetype Archetype):
+  - Set up archetype-specific properties
+  - Configure behavior data table reference
+  - Initialize visual representation
+
+- UpdateVisualState():
+  - Sync visuals with consciousness state
+  - Update material parameters
+  - Adjust lighting and effects
+
+- HandlePlayerInteraction():
+  - Check interaction conditions
+  - Trigger appropriate dialogue
+  - Respond based on player's consciousness level
+
+Animation Blueprint: ABP_TranspersonalCharacter
+Behavior Tree: BT_TranspersonalNPC
+Blackboard: BB_TranspersonalNPC
