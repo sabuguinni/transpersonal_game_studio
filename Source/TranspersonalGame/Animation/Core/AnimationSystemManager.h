@@ -1,155 +1,127 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/Engine.h"
+#include "GameFramework/Actor.h"
+#include "Engine/DataTable.h"
 #include "Animation/AnimInstance.h"
-#include "PoseSearch/PoseSearch.h"
-#include "Animation/MotionMatchingAnimInstance.h"
-#include "Components/ActorComponent.h"
 #include "AnimationSystemManager.generated.h"
 
-/**
- * Sistema central de animação para o jogo Transpersonal
- * Gerencia Motion Matching, IK adaptativo e variações procedurais
- * Baseado nos princípios de Richard Williams e na técnica do RDR2
- */
-UCLASS(ClassGroup=(Animation), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UAnimationSystemManager : public UActorComponent
+UENUM(BlueprintType)
+enum class ECreatureType : uint8
+{
+    Player,
+    SmallHerbivore,
+    LargeHerbivore,
+    SmallCarnivore,
+    LargeCarnivore,
+    Apex
+};
+
+UENUM(BlueprintType)
+enum class EEmotionalState : uint8
+{
+    Neutral,
+    Curious,
+    Afraid,
+    Aggressive,
+    Trusting,
+    Protective,
+    Hunting,
+    Feeding,
+    Resting
+};
+
+USTRUCT(BlueprintType)
+struct FCreatureAnimationProfile
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    ECreatureType CreatureType;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FString SpeciesName;
+
+    // Motion Matching Database para cada estado emocional
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TMap<EEmotionalState, class UPoseSearchDatabase*> EmotionalStateDatabases;
+
+    // Variações físicas únicas
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float WalkSpeedVariation = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float PostureVariation = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float GaitVariation = 1.0f;
+
+    // IK Settings para adaptação ao terreno
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bUseFootIK = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float FootIKRange = 50.0f;
+
+    FCreatureAnimationProfile()
+    {
+        CreatureType = ECreatureType::SmallHerbivore;
+        SpeciesName = TEXT("Unknown");
+        WalkSpeedVariation = 1.0f;
+        PostureVariation = 1.0f;
+        GaitVariation = 1.0f;
+        bUseFootIK = true;
+        FootIKRange = 50.0f;
+    }
+};
+
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API AAnimationSystemManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UAnimationSystemManager();
+    AAnimationSystemManager();
 
 protected:
     virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
+    // Database central de perfis de animação
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation System")
+    UDataTable* CreatureAnimationProfiles;
+
+    // Motion Matching Schema para diferentes tipos de criaturas
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    TMap<ECreatureType, class UPoseSearchSchema*> MotionMatchingSchemas;
+
+    // Configurações globais de IK
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK System")
+    bool bGlobalFootIKEnabled = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK System")
+    float GlobalIKIntensity = 1.0f;
 
 public:
-    // === MOTION MATCHING CORE ===
-    
-    /** Schema principal para Motion Matching do protagonista */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    class UPoseSearchSchema* ProtagonistMotionSchema;
-    
-    /** Database de animações do protagonista (cauteloso, científico) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    class UPoseSearchDatabase* ProtagonistAnimDatabase;
-    
-    /** Schema para dinossauros herbívoros pequenos */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    class UPoseSearchSchema* SmallHerbivoreSchema;
-    
-    /** Schema para dinossauros carnívoros */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    class UPoseSearchSchema* CarnivoreSchema;
-    
-    // === IK SYSTEM ===
-    
-    /** IK Rig para adaptação de terreno (pés) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK System")
-    class UIKRigDefinition* TerrainAdaptationRig;
-    
-    /** IK Rig para interações com objectos */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK System")
-    class UIKRigDefinition* InteractionRig;
-    
-    // === VARIATION SYSTEM ===
-    
-    /** Multiplicador de variação para dinossauros únicos */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Variation", meta = (ClampMin = "0.1", ClampMax = "2.0"))
-    float DinosaurVariationMultiplier = 1.0f;
-    
-    /** Seed para variações procedurais */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Variation")
-    int32 VariationSeed = 12345;
+    // Função para obter perfil de animação de uma criatura
+    UFUNCTION(BlueprintCallable, Category = "Animation System")
+    FCreatureAnimationProfile GetCreatureProfile(const FString& SpeciesName) const;
 
-public:
-    // === ANIMATION FUNCTIONS ===
-    
-    /** Inicializa Motion Matching para um personagem específico */
+    // Função para registrar nova criatura no sistema
     UFUNCTION(BlueprintCallable, Category = "Animation System")
-    bool InitializeMotionMatching(AActor* Character, ECharacterType CharacterType);
-    
-    /** Aplica variações únicas a um dinossauro */
-    UFUNCTION(BlueprintCallable, Category = "Animation System")
-    void ApplyDinosaurVariations(AActor* Dinosaur, FString DinosaurID);
-    
-    /** Actualiza IK para adaptação ao terreno */
-    UFUNCTION(BlueprintCallable, Category = "Animation System")
-    void UpdateTerrainAdaptation(AActor* Character, float DeltaTime);
-    
-    /** Calcula blend weight baseado no estado emocional */
-    UFUNCTION(BlueprintCallable, Category = "Animation System")
-    float CalculateEmotionalBlendWeight(float FearLevel, float CuriosityLevel);
+    void RegisterCreature(const FString& SpeciesName, const FCreatureAnimationProfile& Profile);
 
-protected:
-    // === INTERNAL FUNCTIONS ===
-    
-    /** Configura trajectory sampling para Motion Matching */
-    void SetupTrajectorySystem();
-    
-    /** Inicializa pose search databases */
-    void InitializePoseSearchDatabases();
-    
-    /** Aplica modificadores de personalidade às animações */
-    void ApplyPersonalityModifiers(AActor* Character, FString PersonalityProfile);
+    // Função para atualizar estado emocional de uma criatura
+    UFUNCTION(BlueprintCallable, Category = "Animation System")
+    void UpdateCreatureEmotionalState(const FString& CreatureID, EEmotionalState NewState);
+
+    // Sistema de variação procedimental
+    UFUNCTION(BlueprintCallable, Category = "Animation System")
+    FCreatureAnimationProfile GenerateUniqueVariation(const FCreatureAnimationProfile& BaseProfile, int32 Seed) const;
 
 private:
-    // === RUNTIME DATA ===
-    
-    /** Cache de Motion Matching instances activas */
-    UPROPERTY()
-    TMap<AActor*, class UMotionMatchingAnimInstance*> ActiveMotionMatchingInstances;
-    
-    /** Cache de IK Rig instances */
-    UPROPERTY()
-    TMap<AActor*, class UIKRigProcessor*> ActiveIKProcessors;
-    
-    /** Dados de variação por dinossauro */
-    UPROPERTY()
-    TMap<FString, FDinosaurAnimationVariation> DinosaurVariations;
-};
+    // Cache de perfis ativos
+    TMap<FString, FCreatureAnimationProfile> ActiveCreatureProfiles;
 
-/** Tipos de personagem suportados */
-UENUM(BlueprintType)
-enum class ECharacterType : uint8
-{
-    Protagonist     UMETA(DisplayName = "Protagonista Paleontologista"),
-    SmallHerbivore  UMETA(DisplayName = "Herbívoro Pequeno"),
-    LargeHerbivore  UMETA(DisplayName = "Herbívoro Grande"),
-    SmallCarnivore  UMETA(DisplayName = "Carnívoro Pequeno"),
-    LargeCarnivore  UMETA(DisplayName = "Carnívoro Grande"),
-    FlyingCreature  UMETA(DisplayName = "Criatura Voadora")
-};
-
-/** Estrutura de variação para dinossauros únicos */
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FDinosaurAnimationVariation
-{
-    GENERATED_BODY()
-
-    /** Modificador de velocidade de movimento */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float MovementSpeedModifier = 1.0f;
-    
-    /** Modificador de postura (mais erecto/curvado) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float PostureModifier = 0.0f;
-    
-    /** Modificador de agressividade */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float AggressionModifier = 0.0f;
-    
-    /** Modificador de nervosismo */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float NervousnessModifier = 0.0f;
-    
-    /** Padrão de respiração único */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float BreathingPattern = 1.0f;
-    
-    /** Frequência de movimentos de cabeça */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float HeadMovementFrequency = 1.0f;
+    // Sistema de tracking de criaturas únicas
+    TMap<FString, int32> CreatureUniqueSeeds;
 };
