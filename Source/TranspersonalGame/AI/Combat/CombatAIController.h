@@ -2,9 +2,9 @@
 
 #include "CoreMinimal.h"
 #include "AIController.h"
-#include "BehaviorTree/BlackboardComponent.h"
+#include "BehaviorTree/BehaviorTreeComponent.h"
 #include "Perception/AIPerceptionComponent.h"
-#include "GameplayTagContainer.h"
+#include "GameplayTags/GameplayTags.h"
 #include "CombatAIController.generated.h"
 
 class UBehaviorTreeComponent;
@@ -32,24 +32,46 @@ enum class EThreatLevel : uint8
     Low,
     Medium,
     High,
-    Critical
+    Extreme
 };
 
-UENUM(BlueprintType)
-enum class EDinosaurArchetype : uint8
+USTRUCT(BlueprintType)
+struct FCombatMemory
 {
-    ApexPredator,      // T-Rex, Giganotosaurus
-    PackHunter,        // Velociraptor, Deinonychus
-    AmbushPredator,    // Carnotaurus, Baryonyx
-    HerbivoreDefensive, // Triceratops, Ankylosaurus
-    HerbivoreFlighty,  // Parasaurolophus, Gallimimus
-    Scavenger          // Compsognathus, Coelophysis
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadWrite)
+    FVector LastKnownPlayerLocation;
+
+    UPROPERTY(BlueprintReadWrite)
+    float TimeSinceLastSeen;
+
+    UPROPERTY(BlueprintReadWrite)
+    EThreatLevel PlayerThreatLevel;
+
+    UPROPERTY(BlueprintReadWrite)
+    bool bPlayerIsHiding;
+
+    UPROPERTY(BlueprintReadWrite)
+    TArray<FVector> SearchLocations;
+
+    UPROPERTY(BlueprintReadWrite)
+    float LastDamageTime;
+
+    UPROPERTY(BlueprintReadWrite)
+    FVector LastDamageLocation;
+
+    FCombatMemory()
+    {
+        LastKnownPlayerLocation = FVector::ZeroVector;
+        TimeSinceLastSeen = 0.0f;
+        PlayerThreatLevel = EThreatLevel::None;
+        bPlayerIsHiding = false;
+        LastDamageTime = 0.0f;
+        LastDamageLocation = FVector::ZeroVector;
+    }
 };
 
-/**
- * Advanced AI Controller for dinosaur combat behavior
- * Implements tactical combat AI with emergent behaviors
- */
 UCLASS()
 class TRANSPERSONALGAME_API ACombatAIController : public AAIController
 {
@@ -61,132 +83,76 @@ public:
 protected:
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
-    virtual void OnPossess(APawn* InPawn) override;
 
-    // Core AI Components
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI")
-    UBehaviorTreeComponent* BehaviorTreeComponent;
+    // Behavior Tree
+    UPROPERTY(EditDefaultsOnly, Category = "AI")
+    class UBehaviorTree* BehaviorTree;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI")
+    // Perception Component
+    UPROPERTY(VisibleAnywhere, Category = "AI")
     UAIPerceptionComponent* AIPerceptionComponent;
 
-    // Combat State Management
-    UPROPERTY(BlueprintReadWrite, Category = "Combat")
+    // Combat State
+    UPROPERTY(BlueprintReadOnly, Category = "Combat")
     ECombatState CurrentCombatState;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Combat")
-    EThreatLevel CurrentThreatLevel;
+    // Combat Memory
+    UPROPERTY(BlueprintReadOnly, Category = "Combat")
+    FCombatMemory CombatMemory;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Combat")
-    EDinosaurArchetype DinosaurArchetype;
+    // Blackboard Keys
+    UPROPERTY(EditDefaultsOnly, Category = "AI")
+    FName PlayerActorKey;
 
-    // Behavior Trees for different archetypes
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI")
-    TMap<EDinosaurArchetype, UBehaviorTree*> ArchetypeBehaviorTrees;
+    UPROPERTY(EditDefaultsOnly, Category = "AI")
+    FName LastKnownLocationKey;
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI")
-    UBlackboard* CombatBlackboard;
+    UPROPERTY(EditDefaultsOnly, Category = "AI")
+    FName CombatStateKey;
 
-    // Combat Parameters
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-    float AggressionLevel = 0.5f;
+    UPROPERTY(EditDefaultsOnly, Category = "AI")
+    FName ThreatLevelKey;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-    float FearThreshold = 0.7f;
+    UPROPERTY(EditDefaultsOnly, Category = "AI")
+    FName PatrolLocationKey;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-    float TerritorialRadius = 1500.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-    float HuntingRange = 3000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-    float FleeDistance = 2000.0f;
-
-    // Individual Variation System
-    UPROPERTY(BlueprintReadWrite, Category = "Individual")
-    float IndividualAggression;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Individual")
-    float IndividualCourage;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Individual")
-    float IndividualIntelligence;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Individual")
-    float IndividualTerritoriality;
-
-    // Memory and Learning
-    UPROPERTY(BlueprintReadWrite, Category = "Memory")
-    TArray<FVector> KnownPlayerLocations;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Memory")
-    float LastPlayerSightingTime;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Memory")
-    int32 PlayerEncounterCount;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Memory")
-    bool bHasBeenHurtByPlayer;
-
-    // Gameplay Tags for combat states
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "GameplayTags")
-    FGameplayTagContainer CombatTags;
+    UPROPERTY(EditDefaultsOnly, Category = "AI")
+    FName IsPlayerVisibleKey;
 
 public:
-    // Combat State Functions
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    void SetCombatState(ECombatState NewState);
-
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    void UpdateThreatLevel(AActor* ThreatActor);
-
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    void InitializeIndividualTraits();
-
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    bool ShouldEngageTarget(AActor* Target);
-
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    bool ShouldFleeFromTarget(AActor* Target);
-
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    FVector GetOptimalAttackPosition(AActor* Target);
-
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    FVector GetFleeDirection(AActor* ThreatSource);
-
-    // Perception Callbacks
+    // Perception Events
     UFUNCTION()
     void OnPerceptionUpdated(const TArray<AActor*>& UpdatedActors);
 
     UFUNCTION()
     void OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus);
 
-    // Memory Functions
-    UFUNCTION(BlueprintCallable, Category = "Memory")
-    void RememberPlayerLocation(FVector Location);
+    // Combat State Management
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    void SetCombatState(ECombatState NewState);
 
-    UFUNCTION(BlueprintCallable, Category = "Memory")
-    FVector GetLastKnownPlayerLocation();
+    UFUNCTION(BlueprintPure, Category = "Combat")
+    ECombatState GetCombatState() const { return CurrentCombatState; }
 
-    UFUNCTION(BlueprintCallable, Category = "Memory")
-    bool HasRecentPlayerMemory(float TimeThreshold = 30.0f);
+    // Memory Management
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    void UpdatePlayerMemory(AActor* Player, bool bIsVisible);
 
-    // Tactical Functions
-    UFUNCTION(BlueprintCallable, Category = "Tactics")
-    void ExecuteAmbushBehavior();
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    void OnTakeDamage(float Damage, FVector DamageLocation);
 
-    UFUNCTION(BlueprintCallable, Category = "Tactics")
-    void ExecutePackHuntingBehavior();
+    // Tactical Decision Making
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    FVector GetBestAttackPosition();
 
-    UFUNCTION(BlueprintCallable, Category = "Tactics")
-    void ExecuteTerritoralBehavior();
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    bool ShouldFlee();
 
-protected:
-    void SetupPerception();
-    void SetupBlackboardKeys();
-    void UpdateCombatLogic(float DeltaTime);
-    float CalculateThreatScore(AActor* Actor);
-    void AdaptBehaviorBasedOnExperience();
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    EThreatLevel CalculateThreatLevel();
+
+private:
+    void InitializePerception();
+    void UpdateCombatMemory(float DeltaTime);
+    void ProcessTacticalDecisions();
 };
