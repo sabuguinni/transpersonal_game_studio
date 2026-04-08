@@ -1,0 +1,127 @@
+// Lighting Scenario for Meditation Space
+// Preset lighting configuration for contemplative environments
+
+Begin Object Class=/Script/Engine.DataAsset Name="LS_MeditationSpace"
+   
+   // Directional Light Settings
+   SunLightSettings=(
+      Intensity=1.5,
+      LightColor=(R=0.9,G=0.85,B=0.7,A=1.0),
+      Temperature=3200,
+      CastShadows=true,
+      ShadowBias=0.5
+   )
+   
+   // Sky Light Settings
+   SkyLightSettings=(
+      Intensity=0.8,
+      LightColor=(R=0.7,G=0.8,B=1.0,A=1.0),
+      SourceType="SLS_CapturedScene",
+      SkyDistanceThreshold=150000
+   )
+   
+   // Atmospheric Fog Settings
+   AtmosphericFogSettings=(
+      FogDensity=0.005,
+      FogHeightFalloff=0.2,
+      FogMaxOpacity=1.0,
+      StartDistance=500,
+      FogCutoffDistance=0,
+      SunMultiplier=1.0,
+      FogMultiplier=1.0,
+      DensityMultiplier=1.0,
+      DensityOffset=0,
+      GroundOffset=0,
+      DistanceScale=1.0,
+      AltitudeScale=1.0,
+      RHeight=8000,
+      StartR=6360,
+      StartG=7460,
+      StartB=8400
+   )
+   
+   // Post Process Settings
+   PostProcessSettings=(
+      // Color Grading
+      ColorSaturation=(X=1.0,Y=1.0,Z=1.0,W=1.0),
+      ColorContrast=(X=1.02,Y=1.02,Z=1.02,W=1.0),
+      ColorGamma=(X=1.0,Y=1.0,Z=1.0,W=1.0),
+      ColorGain=(X=1.0,Y=1.0,Z=1.0,W=1.0),
+      ColorOffset=(X=0.0,Y=0.0,Z=0.0,W=0.0),
+      
+      // Bloom
+      BloomIntensity=0.675,
+      BloomThreshold=1.0,
+      BloomSizeScale=4.0,
+      Bloom1Size=0.3,
+      Bloom2Size=1.0,
+      Bloom3Size=2.0,
+      Bloom4Size=10.0,
+      Bloom5Size=30.0,
+      Bloom6Size=64.0,
+      
+      // Ambient Occlusion
+      AmbientOcclusionIntensity=0.5,
+      AmbientOcclusionRadius=200.0,
+      AmbientOcclusionFadeDistance=8000.0,
+      AmbientOcclusionFadeRadius=5000.0,
+      
+      // Auto Exposure
+      AutoExposureMinBrightness=0.03,
+      AutoExposureMaxBrightness=2.0,
+      AutoExposureSpeedUp=3.0,
+      AutoExposureSpeedDown=1.0,
+      AutoExposureBias=0.0
+   )
+   
+   // Ambient Light Orbs Configuration
+   AmbientOrbs=(
+      // Central meditation orb
+      OrbConfig=(
+         Location=(X=0,Y=0,Z=150),
+         BaseIntensity=300,
+         Color=(R=0.8,G=0.9,B=1.0,A=1.0),
+         FloatHeight=30,
+         FloatSpeed=1.5,
+         PulseRate=0.8
+      ),
+      
+      // Surrounding harmony orbs
+      OrbConfig=(
+         Location=(X=200,Y=200,Z=100),
+         BaseIntensity=150,
+         Color=(R=1.0,G=0.8,B=0.6,A=1.0),
+         FloatHeight=20,
+         FloatSpeed=2.0,
+         PulseRate=1.2
+      ),
+      
+      OrbConfig=(
+         Location=(X=-200,Y=200,Z=100),
+         BaseIntensity=150,
+         Color=(R=0.6,G=1.0,B=0.8,A=1.0),
+         FloatHeight=25,
+         FloatSpeed=1.8,
+         PulseRate=1.0
+      ),
+      
+      OrbConfig=(
+         Location=(X=200,Y=-200,Z=100),
+         BaseIntensity=150,
+         Color=(R=0.8,G=0.6,B=1.0,A=1.0),
+         FloatHeight=35,
+         FloatSpeed=1.6,
+         PulseRate=0.9
+      ),
+      
+      OrbConfig=(
+         Location=(X=-200,Y=-200,Z=100),
+         BaseIntensity=150,
+         Color=(R=1.0,G=0.9,B=0.7,A=1.0),
+         FloatHeight=28,
+         FloatSpeed=2.2,
+         PulseRate=1.1
+      )
+   )
+   
+End Object
