@@ -1,0 +1,393 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Subsystems/WorldSubsystem.h"
+#include "Engine/World.h"
+#include "Animation/AnimInstance.h"
+#include "Characters/CharacterArchetypes.h"
+#include "MotionMatchingController.h"
+#include "IK/AdaptiveIKComponent.h"
+#include "AnimationAgent.generated.h"
+
+class UPoseSearchDatabase;
+class UAnimSequence;
+class UBlendSpace;
+class UIKRigDefinition;
+class UCharacterMovementComponent;
+
+/**
+ * ANIMATION AGENT - AGENTE #10
+ * 
+ * "Cada movimento é uma expressão de personalidade. Cada gesto é uma manifestação da alma."
+ * 
+ * Este sistema é inspirado pela filosofia de Richard Williams de que animação é ilusão de vida,
+ * e pela equipa do RDR2 que descobriu que a forma como um personagem anda diz mais sobre quem é
+ * do que qualquer diálogo.
+ * 
+ * Cada arquétipo de personagem tem uma linguagem corporal única:
+ * - O Paleontologista move-se com curiosidade científica
+ * - O Sobrevivente move-se com cautela constante
+ * - O Explorador move-se com confiança territorial
+ * - O Caçador move-se com predação controlada
+ * - O Comerciante move-se com diplomacia calculada
+ * - O Xamã move-se com sabedoria espiritual
+ * - O Guerreiro move-se com força disciplinada
+ * - O Artesão move-se com precisão meticulosa
+ * - O Líder move-se com autoridade natural
+ * - O Refugiado move-se com vulnerabilidade defensiva
+ */
+
+UENUM(BlueprintType)
+enum class EBodyLanguageStyle : uint8
+{
+    // Arquétipos principais
+    ScientificCuriosity     UMETA(DisplayName = "Scientific Curiosity"),      // Paleontologista
+    ConstantCaution         UMETA(DisplayName = "Constant Caution"),          // Sobrevivente
+    TerritorialConfidence   UMETA(DisplayName = "Territorial Confidence"),    // Explorador
+    ControlledPredation     UMETA(DisplayName = "Controlled Predation"),      // Caçador
+    CalculatedDiplomacy     UMETA(DisplayName = "Calculated Diplomacy"),      // Comerciante
+    SpiritualWisdom         UMETA(DisplayName = "Spiritual Wisdom"),          // Xamã
+    DisciplinedStrength     UMETA(DisplayName = "Disciplined Strength"),      // Guerreiro
+    MeticulousPrecision     UMETA(DisplayName = "Meticulous Precision"),      // Artesão
+    NaturalAuthority        UMETA(DisplayName = "Natural Authority"),         // Líder
+    DefensiveVulnerability  UMETA(DisplayName = "Defensive Vulnerability")    // Refugiado
+};
+
+UENUM(BlueprintType)
+enum class EAnimationLayer : uint8
+{
+    Base            UMETA(DisplayName = "Base Layer"),
+    Additive        UMETA(DisplayName = "Additive Layer"),
+    Override        UMETA(DisplayName = "Override Layer"),
+    Facial          UMETA(DisplayName = "Facial Layer"),
+    FullBody        UMETA(DisplayName = "Full Body Layer")
+};
+
+UENUM(BlueprintType)
+enum class EMovementPersonality : uint8
+{
+    Cautious        UMETA(DisplayName = "Cautious"),        // Movimentos hesitantes, olha ao redor
+    Confident       UMETA(DisplayName = "Confident"),       // Movimentos decididos, postura ereta
+    Nervous         UMETA(DisplayName = "Nervous"),         // Movimentos rápidos, inquietos
+    Relaxed         UMETA(DisplayName = "Relaxed"),         // Movimentos fluídos, sem pressa
+    Aggressive      UMETA(DisplayName = "Aggressive"),      // Movimentos bruscos, territoriais
+    Graceful        UMETA(DisplayName = "Graceful"),        // Movimentos suaves, controlados
+    Tired           UMETA(DisplayName = "Tired"),           // Movimentos lentos, postura curvada
+    Alert           UMETA(DisplayName = "Alert"),           // Movimentos precisos, sempre pronto
+    Scholarly       UMETA(DisplayName = "Scholarly"),       // Movimentos pensativos, observadores
+    Spiritual       UMETA(DisplayName = "Spiritual")        // Movimentos meditativos, centrados
+};
+
+/**
+ * Configuração de linguagem corporal por arquétipo
+ */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FBodyLanguageConfig
+{
+    GENERATED_BODY()
+
+    FBodyLanguageConfig()
+        : Style(EBodyLanguageStyle::ScientificCuriosity)
+        , MovementPersonality(EMovementPersonality::Cautious)
+        , PostureWeight(1.0f)
+        , GestureFrequency(0.5f)
+        , EyeContactLevel(0.7f)
+        , PersonalSpaceRadius(150.0f)
+        , MovementSpeed(1.0f)
+        , TensionLevel(0.3f)
+    {}
+
+    // Estilo base de linguagem corporal
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Body Language")
+    EBodyLanguageStyle Style;
+
+    // Personalidade de movimento
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
+    EMovementPersonality MovementPersonality;
+
+    // Parâmetros de postura (0-1)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Posture", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float PostureWeight;
+
+    // Frequência de gestos (0-1)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Gestures", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float GestureFrequency;
+
+    // Nível de contacto visual (0-1)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Social", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float EyeContactLevel;
+
+    // Raio de espaço pessoal (cm)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Social", meta = (ClampMin = "50.0", ClampMax = "500.0"))
+    float PersonalSpaceRadius;
+
+    // Multiplicador de velocidade de movimento
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement", meta = (ClampMin = "0.1", ClampMax = "2.0"))
+    float MovementSpeed;
+
+    // Nível de tensão corporal (0-1)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotion", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float TensionLevel;
+
+    // Animações específicas para este estilo
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animations")
+    TArray<TSoftObjectPtr<UAnimSequence>> IdleAnimations;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animations")
+    TArray<TSoftObjectPtr<UAnimSequence>> WalkAnimations;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animations")
+    TArray<TSoftObjectPtr<UAnimSequence>> GestureAnimations;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animations")
+    TSoftObjectPtr<UBlendSpace> MovementBlendSpace;
+};
+
+/**
+ * Dados de animação específicos para cada arquétipo
+ */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FArchetypeAnimationData
+{
+    GENERATED_BODY()
+
+    FArchetypeAnimationData()
+        : Archetype(ECharacterArchetype::Protagonist_Paleontologist)
+        , bUseMotionMatching(true)
+        , bUseAdaptiveIK(true)
+        , bUseProceduralGestures(true)
+        , BlendWeight(1.0f)
+    {}
+
+    // Arquétipo associado
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Identity")
+    ECharacterArchetype Archetype;
+
+    // Configuração de linguagem corporal
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Body Language")
+    FBodyLanguageConfig BodyLanguage;
+
+    // Databases de Motion Matching específicos
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    TMap<ECharacterMovementState, TSoftObjectPtr<UPoseSearchDatabase>> MotionMatchingDatabases;
+
+    // Configuração IK específica
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK")
+    TSoftObjectPtr<UIKRigDefinition> IKRigDefinition;
+
+    // Flags de comportamento
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
+    bool bUseMotionMatching;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
+    bool bUseAdaptiveIK;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
+    bool bUseProceduralGestures;
+
+    // Peso de blend para este arquétipo
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blending", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float BlendWeight;
+
+    // Overrides específicos de animação
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Overrides")
+    TMap<FString, TSoftObjectPtr<UAnimSequence>> AnimationOverrides;
+};
+
+/**
+ * Sistema principal de Animation Agent
+ * Coordena Motion Matching, IK e linguagem corporal para criar personagens únicos
+ */
+UCLASS()
+class TRANSPERSONALGAME_API UAnimationAgent : public UWorldSubsystem
+{
+    GENERATED_BODY()
+
+public:
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+
+    // Configuração principal de arquétipos
+    UFUNCTION(BlueprintCallable, Category = "Animation Agent")
+    void InitializeArchetypeAnimations();
+
+    UFUNCTION(BlueprintCallable, Category = "Animation Agent")
+    void SetupCharacterAnimation(ACharacter* Character, ECharacterArchetype Archetype);
+
+    UFUNCTION(BlueprintCallable, Category = "Animation Agent")
+    void UpdateCharacterBodyLanguage(ACharacter* Character, float DeltaTime);
+
+    // Motion Matching avançado
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    UPoseSearchDatabase* GetOptimalDatabaseForArchetype(ECharacterArchetype Archetype, ECharacterMovementState MovementState);
+
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    void UpdateMotionMatchingWeights(ACharacter* Character, const FBodyLanguageConfig& BodyLanguage);
+
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    float CalculateBlendTimeForPersonality(EMovementPersonality Personality, ECharacterMovementState FromState, ECharacterMovementState ToState);
+
+    // Sistema IK adaptativo
+    UFUNCTION(BlueprintCallable, Category = "Adaptive IK")
+    void SetupAdaptiveIKForArchetype(ACharacter* Character, ECharacterArchetype Archetype);
+
+    UFUNCTION(BlueprintCallable, Category = "Adaptive IK")
+    void UpdateTerrainAdaptation(ACharacter* Character, float DeltaTime);
+
+    UFUNCTION(BlueprintCallable, Category = "Adaptive IK")
+    void ApplyPosturalAdjustments(ACharacter* Character, const FBodyLanguageConfig& BodyLanguage);
+
+    // Linguagem corporal procedural
+    UFUNCTION(BlueprintCallable, Category = "Body Language")
+    void ApplyBodyLanguageStyle(ACharacter* Character, EBodyLanguageStyle Style);
+
+    UFUNCTION(BlueprintCallable, Category = "Body Language")
+    void TriggerContextualGesture(ACharacter* Character, const FString& Context);
+
+    UFUNCTION(BlueprintCallable, Category = "Body Language")
+    void UpdateEmotionalState(ACharacter* Character, const FString& EmotionalState, float Intensity);
+
+    // Performance e otimização
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void OptimizeAnimationsForDistance(ACharacter* Character, float DistanceToPlayer);
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void SetAnimationLOD(ACharacter* Character, int32 LODLevel);
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void BatchUpdateCharacterAnimations(const TArray<ACharacter*>& Characters, float DeltaTime);
+
+    // Análise e debugging
+    UFUNCTION(BlueprintCallable, Category = "Debug")
+    void DebugCharacterAnimation(ACharacter* Character, bool bShowMotionMatching, bool bShowIK, bool bShowBodyLanguage);
+
+    UFUNCTION(BlueprintCallable, Category = "Debug")
+    FString GetAnimationAnalysisReport(ACharacter* Character);
+
+    UFUNCTION(BlueprintCallable, Category = "Debug")
+    void ValidateArchetypeAnimationSetup(ECharacterArchetype Archetype);
+
+protected:
+    // Configuração de arquétipos
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Configuration")
+    TMap<ECharacterArchetype, FArchetypeAnimationData> ArchetypeAnimationConfig;
+
+    // Databases globais de Motion Matching
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Motion Matching")
+    TMap<EBodyLanguageStyle, TMap<ECharacterMovementState, TSoftObjectPtr<UPoseSearchDatabase>>> GlobalMotionDatabases;
+
+    // Configurações IK globais
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "IK")
+    TMap<ECharacterArchetype, TSoftObjectPtr<UIKRigDefinition>> ArchetypeIKRigs;
+
+    // Performance settings
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Performance")
+    float AnimationUpdateFrequency = 60.0f;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Performance")
+    float LODDistanceThresholds[4] = {500.0f, 1000.0f, 2000.0f, 4000.0f};
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Performance")
+    int32 MaxSimultaneousAnimationUpdates = 50;
+
+private:
+    // Tracking de personagens animados
+    UPROPERTY()
+    TMap<TWeakObjectPtr<ACharacter>, FArchetypeAnimationData> ActiveCharacterAnimations;
+
+    // Cache de componentes
+    UPROPERTY()
+    TMap<TWeakObjectPtr<ACharacter>, TWeakObjectPtr<UMotionMatchingController>> MotionMatchingControllers;
+
+    UPROPERTY()
+    TMap<TWeakObjectPtr<ACharacter>, TWeakObjectPtr<UAdaptiveIKComponent>> AdaptiveIKComponents;
+
+    // Performance tracking
+    float LastBatchUpdateTime = 0.0f;
+    int32 CurrentUpdateIndex = 0;
+
+    // Helper functions
+    void LoadArchetypeAnimationData();
+    void SetupMotionMatchingForCharacter(ACharacter* Character, const FArchetypeAnimationData& AnimData);
+    void SetupIKSystemForCharacter(ACharacter* Character, const FArchetypeAnimationData& AnimData);
+    void ApplyBodyLanguageToCharacter(ACharacter* Character, const FBodyLanguageConfig& BodyLanguage);
+    
+    // Body language implementation
+    void UpdatePosture(ACharacter* Character, const FBodyLanguageConfig& BodyLanguage, float DeltaTime);
+    void UpdateGestures(ACharacter* Character, const FBodyLanguageConfig& BodyLanguage, float DeltaTime);
+    void UpdateMovementStyle(ACharacter* Character, const FBodyLanguageConfig& BodyLanguage, float DeltaTime);
+    
+    // Performance optimization
+    bool ShouldUpdateCharacterAnimation(ACharacter* Character, float DeltaTime);
+    void OptimizeAnimationUpdate(ACharacter* Character, float DistanceToPlayer);
+    
+    // Validation and debugging
+    bool ValidateCharacterSetup(ACharacter* Character);
+    void LogAnimationError(const FString& ErrorMessage, ACharacter* Character = nullptr);
+};
+
+/**
+ * Component que aplica o sistema de Animation Agent a um personagem específico
+ */
+UCLASS(ClassGroup=(Animation), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UAnimationAgentComponent : public UActorComponent
+{
+    GENERATED_BODY()
+
+public:
+    UAnimationAgentComponent();
+
+protected:
+    virtual void BeginPlay() override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
+public:
+    // Configuração do arquétipo
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Agent")
+    ECharacterArchetype CharacterArchetype = ECharacterArchetype::Protagonist_Paleontologist;
+
+    // Override de configuração de linguagem corporal
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Agent")
+    FBodyLanguageConfig BodyLanguageOverride;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Agent")
+    bool bUseBodyLanguageOverride = false;
+
+    // Controlo de performance
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    bool bEnableAnimationAgent = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float UpdateFrequency = 60.0f;
+
+    // Debugging
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug")
+    bool bShowDebugInfo = false;
+
+    // Funções públicas
+    UFUNCTION(BlueprintCallable, Category = "Animation Agent")
+    void SetCharacterArchetype(ECharacterArchetype NewArchetype);
+
+    UFUNCTION(BlueprintCallable, Category = "Animation Agent")
+    void UpdateBodyLanguage(const FBodyLanguageConfig& NewBodyLanguage);
+
+    UFUNCTION(BlueprintCallable, Category = "Animation Agent")
+    void TriggerEmotionalResponse(const FString& Emotion, float Intensity = 1.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Animation Agent")
+    FBodyLanguageConfig GetCurrentBodyLanguage() const;
+
+private:
+    // Referência ao Animation Agent
+    UPROPERTY()
+    UAnimationAgent* AnimationAgent;
+
+    // Tracking de updates
+    float LastUpdateTime = 0.0f;
+    float UpdateInterval = 0.016f; // ~60fps
+
+    // Inicialização
+    void InitializeWithAnimationAgent();
+    void SetupCharacterForAnimationAgent();
+};
