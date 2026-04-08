@@ -1,0 +1,126 @@
+{
+  "Type": "BehaviorTree",
+  "Name": "BT_ApexPredator",
+  "Description": "Behavior Tree for Apex Predators like T-Rex and Giganotosaurus",
+  "Blackboard": "BB_DinosaurCombat",
+  "RootNode": {
+    "Type": "Selector",
+    "Children": [
+      {
+        "Type": "Sequence",
+        "Name": "Combat Sequence",
+        "Decorators": [
+          {
+            "Type": "Blackboard",
+            "Key": "Target",
+            "Condition": "IsSet"
+          }
+        ],
+        "Children": [
+          {
+            "Type": "Selector",
+            "Name": "Combat Decision",
+            "Children": [
+              {
+                "Type": "Sequence",
+                "Name": "Attack Sequence",
+                "Decorators": [
+                  {
+                    "Type": "Compare BBEntries",
+                    "KeyA": "CombatState",
+                    "KeyB": "Attacking",
+                    "Operator": "Equal"
+                  }
+                ],
+                "Children": [
+                  {
+                    "Type": "Move To",
+                    "Key": "Target",
+                    "AcceptableRadius": 300.0,
+                    "AllowStrafe": true
+                  },
+                  {
+                    "Type": "Custom Task",
+                    "TaskName": "ApexPredatorAttack",
+                    "Description": "Execute devastating attack with roar and charge"
+                  }
+                ]
+              },
+              {
+                "Type": "Sequence",
+                "Name": "Hunt Sequence",
+                "Decorators": [
+                  {
+                    "Type": "Compare BBEntries",
+                    "KeyA": "CombatState",
+                    "KeyB": "Hunting",
+                    "Operator": "Equal"
+                  }
+                ],
+                "Children": [
+                  {
+                    "Type": "Custom Task",
+                    "TaskName": "TerritorialRoar",
+                    "Description": "Intimidating roar to assert dominance"
+                  },
+                  {
+                    "Type": "Move To",
+                    "Key": "Target",
+                    "AcceptableRadius": 500.0,
+                    "AllowStrafe": false
+                  }
+                ]
+              },
+              {
+                "Type": "Sequence",
+                "Name": "Stalk Sequence",
+                "Decorators": [
+                  {
+                    "Type": "Compare BBEntries",
+                    "KeyA": "CombatState",
+                    "KeyB": "Stalking",
+                    "Operator": "Equal"
+                  }
+                ],
+                "Children": [
+                  {
+                    "Type": "Custom Task",
+                    "TaskName": "StealthyApproach",
+                    "Description": "Move slowly and deliberately toward target"
+                  },
+                  {
+                    "Type": "Wait",
+                    "WaitTime": 2.0,
+                    "RandomDeviation": 1.0
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "Type": "Sequence",
+        "Name": "Patrol Territory",
+        "Children": [
+          {
+            "Type": "Run EQS Query",
+            "QueryTemplate": "EQS_TerritorialPatrol",
+            "RunMode": "Single Best Item",
+            "BlackboardKey": "PatrolLocation"
+          },
+          {
+            "Type": "Move To",
+            "Key": "PatrolLocation",
+            "AcceptableRadius": 200.0
+          },
+          {
+            "Type": "Wait",
+            "WaitTime": 5.0,
+            "RandomDeviation": 3.0
+          }
+        ]
+      }
+    ]
+  }
+}
