@@ -1,408 +1,146 @@
 #include "CombatAIController.h"
-#include "CombatAIComponent.h"
-#include "BehaviorTree/BehaviorTree.h"
-#include "BehaviorTree/BlackboardComponent.h"
-#include "Perception/AIPerceptionComponent.h"
 #include "Perception/AISenseConfig_Sight.h"
 #include "Perception/AISenseConfig_Hearing.h"
 #include "Perception/AISenseConfig_Damage.h"
+#include "BehaviorTree/BehaviorTree.h"
+#include "BehaviorTree/BlackboardComponent.h"
+#include "GameFramework/Character.h"
 #include "GameFramework/Pawn.h"
 #include "Engine/World.h"
-#include "Kismet/GameplayStatics.h"
-
-// Definição das Blackboard Keys
-const FName ACombatAIController::BB_CurrentTarget(TEXT("CurrentTarget"));
-const FName ACombatAIController::BB_CombatState(TEXT("CombatState"));
-const FName ACombatAIController::BB_LastKnownTargetLocation(TEXT("LastKnownTargetLocation"));
-const FName ACombatAIController::BB_CurrentAggression(TEXT("CurrentAggression"));
-const FName ACombatAIController::BB_CurrentFear(TEXT("CurrentFear"));
-const FName ACombatAIController::BB_InCombat(TEXT("InCombat"));
-const FName ACombatAIController::BB_ShouldRetreat(TEXT("ShouldRetreat"));
-const FName ACombatAIController::BB_ShouldFlee(TEXT("ShouldFlee"));
-const FName ACombatAIController::BB_OptimalCombatPosition(TEXT("OptimalCombatPosition"));
-const FName ACombatAIController::BB_AlliesInRange(TEXT("AlliesInRange"));
-const FName ACombatAIController::BB_EnemiesInRange(TEXT("EnemiesInRange"));
+#include "TimerManager.h"
 
 ACombatAIController::ACombatAIController()
 {
     PrimaryActorTick.bCanEverTick = true;
-    
-    // Criar componentes
-    CombatAIComponent = CreateDefaultSubobject<UCombatAIComponent>(TEXT("CombatAIComponent"));
+
+    // Inicializar componentes
     AIPerceptionComponent = CreateDefaultSubobject<UAIPerceptionComponent>(TEXT("AIPerceptionComponent"));
-    
-    // Configurar Blackboard e Behavior Tree components
-    BlackboardComponent = CreateDefaultSubobject<UBlackboardComponent>(TEXT("BlackboardComponent"));
     BehaviorTreeComponent = CreateDefaultSubobject<UBehaviorTreeComponent>(TEXT("BehaviorTreeComponent"));
+    BlackboardComponent = CreateDefaultSubobject<UBlackboardComponent>(TEXT("BlackboardComponent"));
+
+    // Configurar percepção visual
+    UAISenseConfig_Sight* SightConfig = CreateDefaultSubobject<UAISenseConfig_Sight>(TEXT("SightConfig"));
+    SightConfig->SightRadius = 2000.0f;
+    SightConfig->LoseSightRadius = 2200.0f;
+    SightConfig->PeripheralVisionAngleDegrees = 120.0f;
+    SightConfig->SetMaxAge(5.0f);
+    SightConfig->DetectionByAffiliation.bDetectNeutrals = true;
+    SightConfig->DetectionByAffiliation.bDetectFriendlies = false;
+    SightConfig->DetectionByAffiliation.bDetectEnemies = true;
+    AIPerceptionComponent->ConfigureSense(*SightConfig);
+
+    // Configurar percepção auditiva
+    UAISenseConfig_Hearing* HearingConfig = CreateDefaultSubobject<UAISenseConfig_Hearing>(TEXT("HearingConfig"));
+    HearingConfig->HearingRange = 1500.0f;
+    HearingConfig->SetMaxAge(3.0f);
+    HearingConfig->DetectionByAffiliation.bDetectNeutrals = true;
+    HearingConfig->DetectionByAffiliation.bDetectFriendlies = false;
+    HearingConfig->DetectionByAffiliation.bDetectEnemies = true;
+    AIPerceptionComponent->ConfigureSense(*HearingConfig);
+
+    // Configurar percepção de dano
+    UAISenseConfig_Damage* DamageConfig = CreateDefaultSubobject<UAISenseConfig_Damage>(TEXT("DamageConfig"));
+    DamageConfig->SetMaxAge(10.0f);
+    AIPerceptionComponent->ConfigureSense(*DamageConfig);
+
+    // Definir sentido dominante
+    AIPerceptionComponent->SetDominantSense(SightConfig->GetSenseImplementation());
+
+    // Estados iniciais
+    CurrentCombatState = ECombatState::Passive;
+    CurrentTarget = nullptr;
+    CurrentThreat = nullptr;
 }
 
 void ACombatAIController::BeginPlay()
 {
     Super::BeginPlay();
-    
-    InitializePerception();
-    InitializeBehaviorTree();
+
+    // Conectar callbacks de percepção
+    if (AIPerceptionComponent)
+    {
+        AIPerceptionComponent->OnPerceptionUpdated.AddDynamic(this, &ACombatAIController::OnPerceptionUpdated);
+        AIPerceptionComponent->OnTargetPerceptionUpdated.AddDynamic(this, &ACombatAIController::OnTargetPerceptionUpdated);
+    }
+
+    // Iniciar behavior tree se definido
+    if (BehaviorTree && BlackboardComponent)
+    {
+        RunBehaviorTree(BehaviorTree);
+    }
+
+    // Configurar timer para atualização de lógica de combate
+    GetWorld()->GetTimerManager().SetTimer(StateUpdateTimer, this, &ACombatAIController::UpdateCombatLogic, 0.5f, true);
+
+    // Configurar stats baseado no tipo de dinossauro
+    switch (DinosaurType)
+    {
+        case EDinosaurType::SmallPredator:
+            CombatStats.AttackDamage = 25.0f;
+            CombatStats.AttackRange = 150.0f;
+            CombatStats.MovementSpeed = 600.0f;
+            CombatStats.DetectionRadius = 1200.0f;
+            break;
+        case EDinosaurType::MediumPredator:
+            CombatStats.AttackDamage = 50.0f;
+            CombatStats.AttackRange = 200.0f;
+            CombatStats.MovementSpeed = 450.0f;
+            CombatStats.DetectionRadius = 1500.0f;
+            break;
+        case EDinosaurType::LargePredator:
+            CombatStats.AttackDamage = 100.0f;
+            CombatStats.AttackRange = 300.0f;
+            CombatStats.MovementSpeed = 350.0f;
+            CombatStats.DetectionRadius = 2000.0f;
+            break;
+        case EDinosaurType::SmallHerbivore:
+            CombatStats.AttackDamage = 10.0f;
+            CombatStats.AttackRange = 100.0f;
+            CombatStats.MovementSpeed = 700.0f;
+            CombatStats.bCanBeDomesticated = true;
+            break;
+        case EDinosaurType::MediumHerbivore:
+            CombatStats.AttackDamage = 30.0f;
+            CombatStats.AttackRange = 200.0f;
+            CombatStats.MovementSpeed = 400.0f;
+            CombatStats.bCanBeDomesticated = true;
+            break;
+        case EDinosaurType::LargeHerbivore:
+            CombatStats.AttackDamage = 80.0f;
+            CombatStats.AttackRange = 400.0f;
+            CombatStats.MovementSpeed = 250.0f;
+            break;
+    }
 }
 
 void ACombatAIController::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
-    
-    UpdateCombatLogic(DeltaTime);
-    UpdateBlackboardValues();
-}
 
-void ACombatAIController::OnPossess(APawn* InPawn)
-{
-    Super::OnPossess(InPawn);
-    
-    if (CombatBehaviorTree && BlackboardComponent)
-    {
-        RunBehaviorTree(CombatBehaviorTree);
-    }
-}
-
-void ACombatAIController::InitializePerception()
-{
-    if (!AIPerceptionComponent)
-        return;
-
-    // Configurar Sight
-    UAISenseConfig_Sight* SightConfig = CreateDefaultSubobject<UAISenseConfig_Sight>(TEXT("SightConfig"));
-    SightConfig->SightRadius = CombatConfig.PerceptionConfig.SightRadius;
-    SightConfig->LoseSightRadius = CombatConfig.PerceptionConfig.SightRadius * 1.2f;
-    SightConfig->PeripheralVisionAngleDegrees = CombatConfig.PerceptionConfig.SightAngle;
-    SightConfig->SetMaxAge(CombatConfig.PerceptionConfig.LoseTargetTime);
-    SightConfig->DetectionByAffiliation.bDetectNeutrals = true;
-    SightConfig->DetectionByAffiliation.bDetectFriendlies = true;
-    SightConfig->DetectionByAffiliation.bDetectEnemies = true;
-
-    // Configurar Hearing
-    UAISenseConfig_Hearing* HearingConfig = CreateDefaultSubobject<UAISenseConfig_Hearing>(TEXT("HearingConfig"));
-    HearingConfig->HearingRange = CombatConfig.PerceptionConfig.HearingRadius;
-    HearingConfig->SetMaxAge(CombatConfig.PerceptionConfig.LoseTargetTime);
-    HearingConfig->DetectionByAffiliation.bDetectNeutrals = true;
-    HearingConfig->DetectionByAffiliation.bDetectFriendlies = true;
-    HearingConfig->DetectionByAffiliation.bDetectEnemies = true;
-
-    // Configurar Damage
-    UAISenseConfig_Damage* DamageConfig = CreateDefaultSubobject<UAISenseConfig_Damage>(TEXT("DamageConfig"));
-    DamageConfig->SetMaxAge(5.0f);
-
-    // Adicionar configurações ao componente
-    AIPerceptionComponent->ConfigureSense(*SightConfig);
-    AIPerceptionComponent->ConfigureSense(*HearingConfig);
-    AIPerceptionComponent->ConfigureSense(*DamageConfig);
-    AIPerceptionComponent->SetDominantSense(SightConfig->GetSenseImplementation());
-
-    // Bind eventos
-    AIPerceptionComponent->OnPerceptionUpdated.AddDynamic(this, &ACombatAIController::OnPerceptionUpdated);
-    AIPerceptionComponent->OnTargetPerceptionUpdated.AddDynamic(this, &ACombatAIController::OnTargetPerceptionUpdated);
-}
-
-void ACombatAIController::InitializeBehaviorTree()
-{
-    if (CombatBlackboard && BlackboardComponent)
-    {
-        UseBlackboard(CombatBlackboard);
-    }
-}
-
-void ACombatAIController::UpdateCombatLogic(float DeltaTime)
-{
-    UpdateAggression(DeltaTime);
-    UpdateFear(DeltaTime);
-    ProcessNearbyActors();
-    
-    // Atualizar tempo desde última vez que viu o target
-    if (RuntimeData.CurrentTarget)
-    {
-        RuntimeData.TimeSinceLastTargetSeen += DeltaTime;
-        
-        // Perder target se não visto há muito tempo
-        if (RuntimeData.TimeSinceLastTargetSeen > CombatConfig.PerceptionConfig.LoseTargetTime)
-        {
-            SetTarget(nullptr);
-        }
-    }
-    
-    // Atualizar cooldown de ataques
-    RuntimeData.LastAttackTime += DeltaTime;
-}
-
-void ACombatAIController::UpdateAggression(float DeltaTime)
-{
-    float TargetAggression = CombatConfig.AggressionLevel;
-    
-    // Aumentar agressão se em combate
-    if (RuntimeData.bInCombat)
-    {
-        TargetAggression += 0.3f;
-    }
-    
-    // Aumentar agressão se há inimigos próximos
-    if (RuntimeData.EnemiesInRange.Num() > 0)
-    {
-        TargetAggression += 0.2f * RuntimeData.EnemiesInRange.Num();
-    }
-    
-    // Diminuir agressão se com medo
-    TargetAggression -= RuntimeData.CurrentFear * 0.5f;
-    
-    // Interpolar suavemente
-    RuntimeData.CurrentAggression = FMath::FInterpTo(RuntimeData.CurrentAggression, 
-        FMath::Clamp(TargetAggression, 0.0f, 1.0f), DeltaTime, 2.0f);
-}
-
-void ACombatAIController::UpdateFear(float DeltaTime)
-{
-    float TargetFear = 0.0f;
-    
-    // Aumentar medo se há muitos inimigos
-    if (RuntimeData.EnemiesInRange.Num() > RuntimeData.AlliesInRange.Num() + 1)
-    {
-        TargetFear += 0.4f;
-    }
-    
-    // Aumentar medo se com pouca vida
-    if (APawn* ControlledPawn = GetPawn())
-    {
-        // Assumindo que o Pawn tem um sistema de saúde
-        // TargetFear += (1.0f - HealthPercentage) * 0.3f;
-    }
-    
-    // Diminuir medo se há aliados próximos
-    if (RuntimeData.AlliesInRange.Num() > 0)
-    {
-        TargetFear -= 0.2f * RuntimeData.AlliesInRange.Num();
-    }
-    
-    // Interpolar suavemente
-    RuntimeData.CurrentFear = FMath::FInterpTo(RuntimeData.CurrentFear, 
-        FMath::Clamp(TargetFear, 0.0f, 1.0f), DeltaTime, 3.0f);
-}
-
-void ACombatAIController::ProcessNearbyActors()
-{
-    RuntimeData.AlliesInRange = FindAlliesInRange();
-    RuntimeData.EnemiesInRange = FindEnemiesInRange();
-}
-
-void ACombatAIController::SetCombatState(ECombatState NewState)
-{
-    if (RuntimeData.CurrentState != NewState)
-    {
-        ECombatState OldState = RuntimeData.CurrentState;
-        RuntimeData.CurrentState = NewState;
-        
-        // Atualizar flag de combate
-        RuntimeData.bInCombat = (NewState == ECombatState::Engaging || 
-                                NewState == ECombatState::Attacking ||
-                                NewState == ECombatState::Stalking);
-        
-        OnCombatStateChanged.Broadcast(OldState, NewState);
-    }
-}
-
-void ACombatAIController::SetTarget(AActor* NewTarget)
-{
-    if (RuntimeData.CurrentTarget != NewTarget)
-    {
-        AActor* OldTarget = RuntimeData.CurrentTarget;
-        RuntimeData.CurrentTarget = NewTarget;
-        
-        if (NewTarget)
-        {
-            RuntimeData.LastKnownTargetLocation = NewTarget->GetActorLocation();
-            RuntimeData.TimeSinceLastTargetSeen = 0.0f;
-            OnTargetAcquired.Broadcast(NewTarget);
-        }
-        else if (OldTarget)
-        {
-            OnTargetLost.Broadcast(OldTarget);
-        }
-    }
-}
-
-bool ACombatAIController::CanAttackTarget(AActor* Target) const
-{
-    if (!Target || !GetPawn())
-        return false;
-    
-    float Distance = FVector::Dist(GetPawn()->GetActorLocation(), Target->GetActorLocation());
-    
-    // Verificar se algum ataque está no range
-    for (const FCombatAttackConfig& Attack : CombatConfig.AvailableAttacks)
-    {
-        if (Distance <= Attack.Range)
-        {
-            // Verificar cooldown
-            if (RuntimeData.LastAttackTime >= Attack.Cooldown)
-            {
-                // Verificar line of sight se necessário
-                if (!Attack.bRequiresLineOfSight || 
-                    GetWorld()->LineTraceSingleByChannel(FHitResult(), 
-                        GetPawn()->GetActorLocation(), Target->GetActorLocation(), 
-                        ECC_Visibility))
-                {
-                    return true;
-                }
-            }
-        }
-    }
-    
-    return false;
-}
-
-void ACombatAIController::ExecuteAttack(EAttackType AttackType)
-{
-    // Encontrar configuração do ataque
-    const FCombatAttackConfig* AttackConfig = nullptr;
-    for (const FCombatAttackConfig& Attack : CombatConfig.AvailableAttacks)
-    {
-        if (Attack.AttackType == AttackType)
-        {
-            AttackConfig = &Attack;
-            break;
-        }
-    }
-    
-    if (!AttackConfig || !RuntimeData.CurrentTarget)
-        return;
-    
-    // Verificar se pode atacar
-    if (!CanAttackTarget(RuntimeData.CurrentTarget))
-        return;
-    
-    // Executar ataque (implementação específica do jogo)
-    RuntimeData.LastAttackTime = 0.0f;
-    
-    // Aqui seria chamado o sistema de animação e dano
-    // Por exemplo: PlayAttackAnimation(AttackType);
-    // ApplyDamageToTarget(RuntimeData.CurrentTarget, AttackConfig->Damage);
-}
-
-void ACombatAIController::CallForHelp()
-{
-    if (!CombatConfig.bCanCallForHelp || !GetPawn())
-        return;
-    
-    // Encontrar aliados próximos e notificá-los
-    TArray<AActor*> Allies = FindAlliesInRange();
-    for (AActor* Ally : Allies)
-    {
-        if (ACombatAIController* AllyController = Cast<ACombatAIController>(Ally->GetInstigatorController()))
-        {
-            AllyController->RespondToHelpCall(GetPawn());
-        }
-    }
-}
-
-void ACombatAIController::RespondToHelpCall(AActor* Caller)
-{
-    // Lógica para responder a chamado de ajuda
-    if (RuntimeData.CurrentState == ECombatState::Idle || 
-        RuntimeData.CurrentState == ECombatState::Patrolling)
-    {
-        SetCombatState(ECombatState::Investigating);
-        // Mover em direção ao caller
-    }
-}
-
-float ACombatAIController::CalculateThreatLevel(AActor* Target) const
-{
-    if (!Target || !GetPawn())
-        return 0.0f;
-    
-    float ThreatLevel = 0.5f; // Base threat
-    
-    // Fator distância (mais próximo = mais ameaçador)
-    float Distance = FVector::Dist(GetPawn()->GetActorLocation(), Target->GetActorLocation());
-    ThreatLevel += FMath::Clamp(1.0f - (Distance / 1000.0f), 0.0f, 0.3f);
-    
-    // Fator de movimento (se movendo em direção = mais ameaçador)
-    FVector ToTarget = (Target->GetActorLocation() - GetPawn()->GetActorLocation()).GetSafeNormal();
-    FVector TargetVelocity = Target->GetVelocity().GetSafeNormal();
-    float MovementThreat = FVector::DotProduct(TargetVelocity, ToTarget);
-    ThreatLevel += FMath::Clamp(MovementThreat, 0.0f, 0.2f);
-    
-    return FMath::Clamp(ThreatLevel, 0.0f, 1.0f);
-}
-
-FVector ACombatAIController::FindOptimalCombatPosition(AActor* Target) const
-{
-    if (!Target || !GetPawn())
-        return GetPawn()->GetActorLocation();
-    
-    FVector CurrentLocation = GetPawn()->GetActorLocation();
-    FVector TargetLocation = Target->GetActorLocation();
-    FVector DirectionToTarget = (TargetLocation - CurrentLocation).GetSafeNormal();
-    
-    // Posição ideal: na distância preferida de combate
-    FVector OptimalPosition = TargetLocation - (DirectionToTarget * CombatConfig.PreferredCombatDistance);
-    
-    // Aqui poderia usar EQS para encontrar a melhor posição considerando:
-    // - Cobertura disponível
-    // - Terreno favorável
-    // - Posição de aliados
-    // - Rotas de escape
-    
-    return OptimalPosition;
-}
-
-bool ACombatAIController::ShouldRetreat() const
-{
-    // Recuar se com medo alto ou muitos inimigos
-    return RuntimeData.CurrentFear > CombatConfig.FearThreshold ||
-           RuntimeData.EnemiesInRange.Num() > RuntimeData.AlliesInRange.Num() + 2;
-}
-
-bool ACombatAIController::ShouldFlee() const
-{
-    // Fugir se com muito medo e poucos aliados
-    return RuntimeData.CurrentFear > 0.7f && RuntimeData.AlliesInRange.Num() == 0;
-}
-
-TArray<AActor*> ACombatAIController::FindAlliesInRange() const
-{
-    TArray<AActor*> Allies;
-    
-    if (!GetPawn())
-        return Allies;
-    
-    // Implementar lógica para encontrar aliados
-    // Por exemplo, usando overlap sphere ou perception
-    
-    return Allies;
-}
-
-TArray<AActor*> ACombatAIController::FindEnemiesInRange() const
-{
-    TArray<AActor*> Enemies;
-    
-    if (!GetPawn())
-        return Enemies;
-    
-    // Implementar lógica para encontrar inimigos
-    // Por exemplo, usando overlap sphere ou perception
-    
-    return Enemies;
+    // Atualizar valores do blackboard
+    SetBlackboardValues();
 }
 
 void ACombatAIController::OnPerceptionUpdated(const TArray<AActor*>& UpdatedActors)
 {
     for (AActor* Actor : UpdatedActors)
     {
-        if (Actor && Actor != GetPawn())
+        if (IsValidTarget(Actor))
         {
-            // Processar ator percebido
-            float ThreatLevel = CalculateThreatLevel(Actor);
-            
-            // Se é uma ameaça significativa e não temos target, definir como target
-            if (ThreatLevel > 0.6f && !RuntimeData.CurrentTarget)
+            // Novo alvo detectado
+            if (!CurrentTarget || GetDistanceToActor(Actor) < GetDistanceToActor(CurrentTarget))
             {
-                SetTarget(Actor);
-                SetCombatState(ECombatState::Investigating);
+                CurrentTarget = Actor;
+                SetCombatState(ECombatState::Hunting);
+            }
+        }
+        else if (IsValidThreat(Actor))
+        {
+            // Nova ameaça detectada
+            CurrentThreat = Actor;
+            if (ShouldFlee(Actor))
+            {
+                SetCombatState(ECombatState::Fleeing);
             }
         }
     }
@@ -410,34 +148,424 @@ void ACombatAIController::OnPerceptionUpdated(const TArray<AActor*>& UpdatedActo
 
 void ACombatAIController::OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus)
 {
-    if (Actor == RuntimeData.CurrentTarget)
+    if (!Stimulus.WasSuccessfullySensed())
     {
-        if (Stimulus.WasSuccessfullySensed())
+        // Perdeu de vista o alvo/ameaça
+        if (Actor == CurrentTarget)
         {
-            // Target visto novamente
-            RuntimeData.LastKnownTargetLocation = Stimulus.StimulusLocation;
-            RuntimeData.TimeSinceLastTargetSeen = 0.0f;
+            CurrentTarget = nullptr;
+            SetCombatState(ECombatState::Passive);
+        }
+        else if (Actor == CurrentThreat)
+        {
+            CurrentThreat = nullptr;
+            if (CurrentCombatState == ECombatState::Fleeing)
+            {
+                SetCombatState(ECombatState::Passive);
+            }
         }
     }
 }
 
-void ACombatAIController::UpdateBlackboardValues()
+void ACombatAIController::SetCombatState(ECombatState NewState)
+{
+    if (CurrentCombatState != NewState)
+    {
+        ECombatState PreviousState = CurrentCombatState;
+        CurrentCombatState = NewState;
+
+        // Lógica específica para mudança de estado
+        switch (NewState)
+        {
+            case ECombatState::Attacking:
+                if (CurrentTarget)
+                {
+                    SetFocus(CurrentTarget);
+                }
+                break;
+            case ECombatState::Fleeing:
+                if (CurrentThreat)
+                {
+                    SetFocus(nullptr);
+                }
+                break;
+            case ECombatState::Passive:
+                SetFocus(nullptr);
+                CurrentTarget = nullptr;
+                break;
+        }
+
+        // Atualizar blackboard
+        if (BlackboardComponent)
+        {
+            BlackboardComponent->SetValueAsEnum(TEXT("CombatState"), static_cast<uint8>(NewState));
+        }
+    }
+}
+
+void ACombatAIController::AttackTarget(AActor* Target)
+{
+    if (!CanAttackTarget(Target))
+        return;
+
+    // Verificar cooldown
+    if (GetWorld()->GetTimerManager().IsTimerActive(AttackCooldownTimer))
+        return;
+
+    // Executar ataque
+    if (APawn* ControlledPawn = GetPawn())
+    {
+        // Aqui seria implementado o sistema de ataque específico
+        // Por agora, apenas aplicar dano direto
+        if (ACharacter* TargetCharacter = Cast<ACharacter>(Target))
+        {
+            // Aplicar dano (implementação básica)
+            UE_LOG(LogTemp, Warning, TEXT("Dinosaur attacking target for %f damage"), CombatStats.AttackDamage);
+        }
+    }
+
+    // Iniciar cooldown
+    GetWorld()->GetTimerManager().SetTimer(AttackCooldownTimer, CombatStats.AttackCooldown, false);
+}
+
+bool ACombatAIController::CanAttackTarget(AActor* Target) const
+{
+    if (!Target || !GetPawn())
+        return false;
+
+    float Distance = GetDistanceToActor(Target);
+    return Distance <= CombatStats.AttackRange && HasLineOfSight(Target);
+}
+
+void ACombatAIController::FleeFromThreat(AActor* Threat)
+{
+    if (!Threat)
+        return;
+
+    SetCombatState(ECombatState::Fleeing);
+    CurrentThreat = Threat;
+    
+    // Calcular direção de fuga
+    if (APawn* ControlledPawn = GetPawn())
+    {
+        FVector FleeDirection = (ControlledPawn->GetActorLocation() - Threat->GetActorLocation()).GetSafeNormal();
+        FVector FleeLocation = ControlledPawn->GetActorLocation() + (FleeDirection * 2000.0f);
+        
+        // Mover para posição de fuga
+        MoveToLocation(FleeLocation, 50.0f);
+    }
+}
+
+void ACombatAIController::StartHunting()
+{
+    if (DinosaurType == EDinosaurType::SmallHerbivore || 
+        DinosaurType == EDinosaurType::MediumHerbivore || 
+        DinosaurType == EDinosaurType::LargeHerbivore)
+    {
+        // Herbívoros não caçam
+        return;
+    }
+
+    SetCombatState(ECombatState::Hunting);
+}
+
+void ACombatAIController::StopCombat()
+{
+    SetCombatState(ECombatState::Passive);
+    CurrentTarget = nullptr;
+    CurrentThreat = nullptr;
+    StopMovement();
+}
+
+void ACombatAIController::IncreaseDomesticationProgress(float Amount)
+{
+    if (!CombatStats.bCanBeDomesticated)
+        return;
+
+    CombatStats.DomesticationProgress = FMath::Clamp(CombatStats.DomesticationProgress + Amount, 0.0f, 100.0f);
+    
+    if (CombatStats.DomesticationProgress >= 100.0f)
+    {
+        SetCombatState(ECombatState::Domesticated);
+    }
+}
+
+bool ACombatAIController::IsDomesticated() const
+{
+    return CurrentCombatState == ECombatState::Domesticated;
+}
+
+void ACombatAIController::UpdateCombatLogic()
+{
+    if (!GetPawn())
+        return;
+
+    EvaluateThreats();
+    
+    switch (DinosaurType)
+    {
+        case EDinosaurType::SmallPredator:
+        case EDinosaurType::MediumPredator:
+        case EDinosaurType::LargePredator:
+            UpdatePredatorBehavior();
+            break;
+        case EDinosaurType::SmallHerbivore:
+        case EDinosaurType::MediumHerbivore:
+        case EDinosaurType::LargeHerbivore:
+            UpdateHerbivoreBehavior();
+            break;
+    }
+}
+
+void ACombatAIController::EvaluateThreats()
+{
+    TArray<AActor*> PerceivedActors;
+    AIPerceptionComponent->GetCurrentlyPerceivedActors(nullptr, PerceivedActors);
+
+    AActor* ClosestThreat = nullptr;
+    float ClosestDistance = FLT_MAX;
+
+    for (AActor* Actor : PerceivedActors)
+    {
+        if (IsValidThreat(Actor))
+        {
+            float Distance = GetDistanceToActor(Actor);
+            if (Distance < ClosestDistance)
+            {
+                ClosestDistance = Distance;
+                ClosestThreat = Actor;
+            }
+        }
+    }
+
+    if (ClosestThreat && ShouldFlee(ClosestThreat))
+    {
+        FleeFromThreat(ClosestThreat);
+    }
+}
+
+void ACombatAIController::SelectTarget()
+{
+    TArray<AActor*> PerceivedActors;
+    AIPerceptionComponent->GetCurrentlyPerceivedActors(nullptr, PerceivedActors);
+
+    AActor* BestTarget = nullptr;
+    float ClosestDistance = FLT_MAX;
+
+    for (AActor* Actor : PerceivedActors)
+    {
+        if (IsValidTarget(Actor))
+        {
+            float Distance = GetDistanceToActor(Actor);
+            if (Distance < ClosestDistance)
+            {
+                ClosestDistance = Distance;
+                BestTarget = Actor;
+            }
+        }
+    }
+
+    if (BestTarget)
+    {
+        CurrentTarget = BestTarget;
+        SetCombatState(ECombatState::Hunting);
+    }
+}
+
+bool ACombatAIController::ShouldFlee(AActor* Threat) const
+{
+    if (!Threat)
+        return false;
+
+    // Herbívoros sempre fogem de predadores
+    if (DinosaurType == EDinosaurType::SmallHerbivore || 
+        DinosaurType == EDinosaurType::MediumHerbivore)
+    {
+        return true;
+    }
+
+    // Predadores pequenos fogem de predadores maiores
+    if (DinosaurType == EDinosaurType::SmallPredator)
+    {
+        // Verificar se a ameaça é um predador maior
+        if (ACombatAIController* ThreatController = Cast<ACombatAIController>(Threat->GetInstigatorController()))
+        {
+            return ThreatController->GetDinosaurType() == EDinosaurType::MediumPredator ||
+                   ThreatController->GetDinosaurType() == EDinosaurType::LargePredator;
+        }
+    }
+
+    return false;
+}
+
+bool ACombatAIController::IsValidTarget(AActor* Actor) const
+{
+    if (!Actor || Actor == GetPawn())
+        return false;
+
+    // Predadores caçam jogador e herbívoros menores
+    if (DinosaurType == EDinosaurType::SmallPredator || 
+        DinosaurType == EDinosaurType::MediumPredator || 
+        DinosaurType == EDinosaurType::LargePredator)
+    {
+        // Verificar se é o jogador
+        if (Actor->IsA<ACharacter>() && Actor->Tags.Contains("Player"))
+        {
+            return true;
+        }
+
+        // Verificar se é herbívoro menor
+        if (ACombatAIController* OtherController = Cast<ACombatAIController>(Actor->GetInstigatorController()))
+        {
+            EDinosaurType OtherType = OtherController->GetDinosaurType();
+            return OtherType == EDinosaurType::SmallHerbivore || 
+                   (DinosaurType != EDinosaurType::SmallPredator && OtherType == EDinosaurType::MediumHerbivore);
+        }
+    }
+
+    return false;
+}
+
+bool ACombatAIController::IsValidThreat(AActor* Actor) const
+{
+    if (!Actor || Actor == GetPawn())
+        return false;
+
+    // Verificar se é um predador maior
+    if (ACombatAIController* OtherController = Cast<ACombatAIController>(Actor->GetInstigatorController()))
+    {
+        EDinosaurType OtherType = OtherController->GetDinosaurType();
+        
+        // Herbívoros vêem todos os predadores como ameaça
+        if (DinosaurType == EDinosaurType::SmallHerbivore || 
+            DinosaurType == EDinosaurType::MediumHerbivore || 
+            DinosaurType == EDinosaurType::LargeHerbivore)
+        {
+            return OtherType == EDinosaurType::SmallPredator ||
+                   OtherType == EDinosaurType::MediumPredator ||
+                   OtherType == EDinosaurType::LargePredator;
+        }
+
+        // Predadores pequenos vêem predadores maiores como ameaça
+        if (DinosaurType == EDinosaurType::SmallPredator)
+        {
+            return OtherType == EDinosaurType::MediumPredator ||
+                   OtherType == EDinosaurType::LargePredator;
+        }
+
+        // Predadores médios vêem predadores grandes como ameaça
+        if (DinosaurType == EDinosaurType::MediumPredator)
+        {
+            return OtherType == EDinosaurType::LargePredator;
+        }
+    }
+
+    return false;
+}
+
+void ACombatAIController::UpdatePredatorBehavior()
+{
+    switch (CurrentCombatState)
+    {
+        case ECombatState::Passive:
+            // Procurar por alvos
+            SelectTarget();
+            break;
+        case ECombatState::Hunting:
+            if (CurrentTarget)
+            {
+                float Distance = GetDistanceToActor(CurrentTarget);
+                if (Distance <= CombatStats.AttackRange)
+                {
+                    SetCombatState(ECombatState::Attacking);
+                }
+                else
+                {
+                    // Mover em direção ao alvo
+                    MoveToActor(CurrentTarget, CombatStats.AttackRange * 0.8f);
+                }
+            }
+            else
+            {
+                SetCombatState(ECombatState::Passive);
+            }
+            break;
+        case ECombatState::Attacking:
+            if (CurrentTarget)
+            {
+                AttackTarget(CurrentTarget);
+                
+                // Verificar se ainda está em range
+                if (GetDistanceToActor(CurrentTarget) > CombatStats.AttackRange)
+                {
+                    SetCombatState(ECombatState::Hunting);
+                }
+            }
+            else
+            {
+                SetCombatState(ECombatState::Passive);
+            }
+            break;
+    }
+}
+
+void ACombatAIController::UpdateHerbivoreBehavior()
+{
+    switch (CurrentCombatState)
+    {
+        case ECombatState::Passive:
+            // Comportamento de pastoreio/exploração
+            break;
+        case ECombatState::Fleeing:
+            // Continuar fugindo se a ameaça ainda estiver presente
+            if (!CurrentThreat || GetDistanceToActor(CurrentThreat) > CombatStats.DetectionRadius * 2.0f)
+            {
+                SetCombatState(ECombatState::Passive);
+            }
+            break;
+    }
+}
+
+void ACombatAIController::UpdatePackBehavior()
+{
+    // Implementação futura para comportamento de matilha
+    // Velociraptors, por exemplo, caçariam em grupo
+}
+
+float ACombatAIController::GetDistanceToActor(AActor* Actor) const
+{
+    if (!Actor || !GetPawn())
+        return FLT_MAX;
+
+    return FVector::Dist(GetPawn()->GetActorLocation(), Actor->GetActorLocation());
+}
+
+bool ACombatAIController::HasLineOfSight(AActor* Actor) const
+{
+    if (!Actor || !GetPawn())
+        return false;
+
+    FHitResult HitResult;
+    FVector Start = GetPawn()->GetActorLocation();
+    FVector End = Actor->GetActorLocation();
+    
+    FCollisionQueryParams QueryParams;
+    QueryParams.AddIgnoredActor(GetPawn());
+    QueryParams.AddIgnoredActor(Actor);
+
+    return !GetWorld()->LineTraceSingleByChannel(HitResult, Start, End, ECC_Visibility, QueryParams);
+}
+
+void ACombatAIController::SetBlackboardValues()
 {
     if (!BlackboardComponent)
         return;
-    
-    BlackboardComponent->SetValueAsObject(BB_CurrentTarget, RuntimeData.CurrentTarget);
-    BlackboardComponent->SetValueAsEnum(BB_CombatState, static_cast<uint8>(RuntimeData.CurrentState));
-    BlackboardComponent->SetValueAsVector(BB_LastKnownTargetLocation, RuntimeData.LastKnownTargetLocation);
-    BlackboardComponent->SetValueAsFloat(BB_CurrentAggression, RuntimeData.CurrentAggression);
-    BlackboardComponent->SetValueAsFloat(BB_CurrentFear, RuntimeData.CurrentFear);
-    BlackboardComponent->SetValueAsBool(BB_InCombat, RuntimeData.bInCombat);
-    BlackboardComponent->SetValueAsBool(BB_ShouldRetreat, ShouldRetreat());
-    BlackboardComponent->SetValueAsBool(BB_ShouldFlee, ShouldFlee());
-    
-    if (RuntimeData.CurrentTarget)
-    {
-        FVector OptimalPos = FindOptimalCombatPosition(RuntimeData.CurrentTarget);
-        BlackboardComponent->SetValueAsVector(BB_OptimalCombatPosition, OptimalPos);
-    }
+
+    BlackboardComponent->SetValueAsEnum(TEXT("CombatState"), static_cast<uint8>(CurrentCombatState));
+    BlackboardComponent->SetValueAsObject(TEXT("CurrentTarget"), CurrentTarget);
+    BlackboardComponent->SetValueAsObject(TEXT("CurrentThreat"), CurrentThreat);
+    BlackboardComponent->SetValueAsFloat(TEXT("AttackRange"), CombatStats.AttackRange);
+    BlackboardComponent->SetValueAsFloat(TEXT("DetectionRadius"), CombatStats.DetectionRadius);
+    BlackboardComponent->SetValueAsBool(TEXT("IsDomesticated"), IsDomesticated());
+    BlackboardComponent->SetValueAsFloat(TEXT("DomesticationProgress"), CombatStats.DomesticationProgress);
 }
