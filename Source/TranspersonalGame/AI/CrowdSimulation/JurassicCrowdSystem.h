@@ -2,6 +2,8 @@
 
 #include "CoreMinimal.h"
 #include "MassEntitySubsystem.h"
+#include "MassProcessor.h"
+#include "MassEntityTypes.h"
 #include "MassCommonFragments.h"
 #include "MassMovementFragments.h"
 #include "MassNavigationFragments.h"
@@ -9,200 +11,208 @@
 #include "JurassicCrowdSystem.generated.h"
 
 /**
- * Sistema de simulação de multidões para o mundo Jurássico
- * Simula comportamentos emergentes de manadas, bandos e grupos de dinossauros
- * Baseado no Mass Entity Framework do UE5
+ * Jurassic Crowd System - Simula ecossistemas vivos de dinossauros
+ * Baseado em Mass Entity Framework do UE5
+ * Suporta até 50.000 agentes simultâneos com comportamento emergente
  */
 
-// Fragmentos específicos para dinossauros
+// ========== FRAGMENTS ==========
+
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FDinosaurSpeciesFragment : public FMassFragment
+struct TRANSPERSONALGAME_API FJurassicSpeciesFragment : public FMassFragment
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString SpeciesName;
+    uint8 SpeciesType = 0; // 0=Herbívoro, 1=Carnívoro, 2=Pterossauro, 3=Aquático, 4=Inseto
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float Size = 1.0f; // Multiplicador de tamanho (0.5 = pequeno, 2.0 = grande)
+    float Size = 1.0f; // Multiplicador de tamanho (0.1 = inseto, 10.0 = T-Rex)
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bIsHerbivore = true;
+    float AggressionLevel = 0.0f; // 0.0 = Pacífico, 1.0 = Altamente agressivo
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bIsPackAnimal = false; // Vive em grupo
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float TerritoryRadius = 1000.0f; // Raio do território em cm
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float ComfortDistance = 200.0f; // Distância confortável entre indivíduos da mesma espécie
+    float SocialTendency = 0.5f; // 0.0 = Solitário, 1.0 = Altamente social
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FHerdBehaviorFragment : public FMassFragment
+struct TRANSPERSONALGAME_API FJurassicFlockingFragment : public FMassFragment
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 HerdID = -1; // ID da manada (-1 = solitário)
+    float SeparationRadius = 300.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bIsHerdLeader = false;
+    float AlignmentRadius = 500.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float CohesionWeight = 1.0f; // Força de coesão com a manada
+    float CohesionRadius = 800.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float SeparationWeight = 2.0f; // Força de separação (evitar colisões)
+    float FlockLeaderInfluence = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float AlignmentWeight = 0.5f; // Força de alinhamento com direção da manada
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FVector HerdCenter = FVector::ZeroVector; // Centro atual da manada
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FVector HerdDirection = FVector::ForwardVector; // Direção de movimento da manada
+    bool bIsFlockLeader = false;
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNaturalRoutineFragment : public FMassFragment
+struct TRANSPERSONALGAME_API FJurassicTerritoryFragment : public FMassFragment
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float TimeOfDay = 0.0f; // 0.0 = meia-noite, 0.5 = meio-dia
+    FVector TerritoryCenter = FVector::ZeroVector;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FVector WaterSourceLocation = FVector::ZeroVector;
+    float TerritoryRadius = 2000.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FVector FeedingGroundLocation = FVector::ZeroVector;
+    float PatrolSpeed = 200.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FVector RestingAreaLocation = FVector::ZeroVector;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float LastWaterTime = -1.0f; // Última vez que foi à água
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float LastFeedTime = -1.0f; // Última vez que se alimentou
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float WaterNeed = 0.0f; // 0.0 = sem sede, 1.0 = sede extrema
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float HungerLevel = 0.0f; // 0.0 = saciado, 1.0 = fome extrema
+    float CurrentPatrolAngle = 0.0f;
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FThreatAwarenessFragment : public FMassFragment
+struct TRANSPERSONALGAME_API FJurassicMigrationFragment : public FMassFragment
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float AlertLevel = 0.0f; // 0.0 = calmo, 1.0 = pânico total
+    TArray<FVector> MigrationWaypoints;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FVector ThreatLocation = FVector::ZeroVector;
+    int32 CurrentWaypointIndex = 0;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float ThreatDetectionRadius = 500.0f;
+    float MigrationSpeed = 150.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float LastThreatTime = -1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bFleeingFromThreat = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FVector FleeDirection = FVector::ZeroVector;
+    float SeasonalTimer = 0.0f; // Controla quando migrar
 };
 
-/**
- * Processador principal do sistema de crowd para dinossauros
- * Executa os comportamentos de manada usando Mass Entity
- */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FJurassicPredatorFragment : public FMassFragment
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float HuntingRadius = 1500.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float AttackRange = 200.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FMassEntityHandle CurrentTarget;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float HungerLevel = 0.5f; // 0.0 = Saciado, 1.0 = Faminto
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float LastHuntTime = 0.0f;
+};
+
+// ========== PROCESSORS ==========
+
 UCLASS()
-class TRANSPERSONALGAME_API UJurassicHerdProcessor : public UMassProcessor
+class TRANSPERSONALGAME_API UJurassicFlockingProcessor : public UMassProcessor
 {
     GENERATED_BODY()
 
 public:
-    UJurassicHerdProcessor();
+    UJurassicFlockingProcessor();
 
 protected:
     virtual void ConfigureQueries() override;
     virtual void Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context) override;
 
 private:
-    FMassEntityQuery HerdQuery;
+    FMassEntityQuery FlockingQuery;
     
-    // Calcula forças de boids (cohesion, separation, alignment)
-    FVector CalculateCohesionForce(const FVector& Position, const TArray<FVector>& NearbyPositions, float Weight);
-    FVector CalculateSeparationForce(const FVector& Position, const TArray<FVector>& NearbyPositions, float Weight, float MinDistance);
-    FVector CalculateAlignmentForce(const FVector& CurrentVelocity, const TArray<FVector>& NearbyVelocities, float Weight);
+    // Parâmetros de flocking otimizados para dinossauros
+    UPROPERTY(EditAnywhere, Category = "Flocking")
+    float SeparationWeight = 2.0f;
     
-    // Detecta ameaças próximas
-    bool DetectThreats(const FVector& Position, float DetectionRadius, FVector& ThreatLocation);
+    UPROPERTY(EditAnywhere, Category = "Flocking")
+    float AlignmentWeight = 1.0f;
+    
+    UPROPERTY(EditAnywhere, Category = "Flocking")
+    float CohesionWeight = 1.5f;
+    
+    UPROPERTY(EditAnywhere, Category = "Flocking")
+    float MaxFlockingForce = 500.0f;
 };
 
-/**
- * Processador de rotinas naturais (água, comida, descanso)
- */
 UCLASS()
-class TRANSPERSONALGAME_API UNaturalRoutineProcessor : public UMassProcessor
+class TRANSPERSONALGAME_API UJurassicMigrationProcessor : public UMassProcessor
 {
     GENERATED_BODY()
 
 public:
-    UNaturalRoutineProcessor();
+    UJurassicMigrationProcessor();
 
 protected:
     virtual void ConfigureQueries() override;
     virtual void Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context) override;
 
 private:
-    FMassEntityQuery RoutineQuery;
+    FMassEntityQuery MigrationQuery;
     
-    // Determina a ação prioritária baseada nas necessidades
-    FVector GetPriorityDestination(const FNaturalRoutineFragment& Routine, const FVector& CurrentPosition);
+    UPROPERTY(EditAnywhere, Category = "Migration")
+    float WaypointReachDistance = 500.0f;
     
-    // Atualiza necessidades baseadas no tempo
-    void UpdateNeeds(FNaturalRoutineFragment& Routine, float DeltaTime);
+    UPROPERTY(EditAnywhere, Category = "Migration")
+    float SeasonalCycleDuration = 1200.0f; // 20 minutos de jogo = 1 estação
 };
 
-/**
- * Processador de resposta a ameaças
- */
 UCLASS()
-class TRANSPERSONALGAME_API UThreatResponseProcessor : public UMassProcessor
+class TRANSPERSONALGAME_API UJurassicPredatorHuntingProcessor : public UMassProcessor
 {
     GENERATED_BODY()
 
 public:
-    UThreatResponseProcessor();
+    UJurassicPredatorHuntingProcessor();
 
 protected:
     virtual void ConfigureQueries() override;
     virtual void Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context) override;
 
 private:
-    FMassEntityQuery ThreatQuery;
+    FMassEntityQuery PredatorQuery;
+    FMassEntityQuery PreyQuery;
     
-    // Calcula direção de fuga otimizada
-    FVector CalculateFleeDirection(const FVector& Position, const FVector& ThreatLocation, const FVector& TerrainNormal);
+    UPROPERTY(EditAnywhere, Category = "Hunting")
+    float HuntingCooldown = 30.0f; // Tempo entre caçadas
     
-    // Propaga alerta para dinossauros próximos
-    void PropagateAlert(const FVector& AlertOrigin, float AlertRadius, FMassEntityManager& EntityManager);
+    UPROPERTY(EditAnywhere, Category = "Hunting")
+    float PreyDetectionAngle = 120.0f; // Ângulo de visão do predador
 };
 
-/**
- * Subsistema principal de crowd simulation para dinossauros
- */
 UCLASS()
-class TRANSPERSONALGAME_API UJurassicCrowdSubsystem : public UWorldSubsystem
+class TRANSPERSONALGAME_API UJurassicTerritorialProcessor : public UMassProcessor
+{
+    GENERATED_BODY()
+
+public:
+    UJurassicTerritorialProcessor();
+
+protected:
+    virtual void ConfigureQueries() override;
+    virtual void Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context) override;
+
+private:
+    FMassEntityQuery TerritorialQuery;
+    
+    UPROPERTY(EditAnywhere, Category = "Territory")
+    float PatrolVariation = 0.3f; // Variação no patrulhamento
+};
+
+// ========== SUBSYSTEM PRINCIPAL ==========
+
+UCLASS()
+class TRANSPERSONALGAME_API UJurassicCrowdSubsystem : public UMassEntitySubsystem
 {
     GENERATED_BODY()
 
@@ -210,40 +220,58 @@ public:
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Spawna uma manada de dinossauros numa localização
+    // Spawning de diferentes tipos de grupos
     UFUNCTION(BlueprintCallable, Category = "Jurassic Crowd")
-    void SpawnHerd(const FString& SpeciesName, int32 HerdSize, const FVector& SpawnLocation, float SpawnRadius = 500.0f);
+    void SpawnHerbivoreHerd(FVector Location, int32 Count = 20, float SpreadRadius = 1000.0f);
+    
+    UFUNCTION(BlueprintCallable, Category = "Jurassic Crowd")
+    void SpawnPredatorPack(FVector Location, int32 Count = 5, float TerritoryRadius = 2000.0f);
+    
+    UFUNCTION(BlueprintCallable, Category = "Jurassic Crowd")
+    void SpawnPteranodonFlock(FVector Location, int32 Count = 15, float FlightHeight = 1000.0f);
+    
+    UFUNCTION(BlueprintCallable, Category = "Jurassic Crowd")
+    void SpawnInsectSwarm(FVector Location, int32 Count = 100, float SwarmRadius = 200.0f);
 
-    // Remove todos os dinossauros de uma área
+    // Controle de densidade por região
     UFUNCTION(BlueprintCallable, Category = "Jurassic Crowd")
-    void ClearArea(const FVector& CenterLocation, float Radius);
+    void SetRegionDensity(FVector Center, float Radius, float DensityMultiplier);
 
-    // Obtém estatísticas da simulação
+    // Debug e estatísticas
     UFUNCTION(BlueprintCallable, Category = "Jurassic Crowd")
-    void GetSimulationStats(int32& TotalDinosaurs, int32& ActiveHerds, float& AverageHerdSize);
+    int32 GetActiveEntityCount() const;
+    
+    UFUNCTION(BlueprintCallable, Category = "Jurassic Crowd")
+    void EnableDebugVisualization(bool bEnable);
 
-    // Define pontos de interesse no mundo (água, comida, abrigo)
-    UFUNCTION(BlueprintCallable, Category = "Jurassic Crowd")
-    void RegisterWaterSource(const FVector& Location, float Radius = 1000.0f);
-
-    UFUNCTION(BlueprintCallable, Category = "Jurassic Crowd")
-    void RegisterFeedingGround(const FVector& Location, float Radius = 1500.0f);
-
-    UFUNCTION(BlueprintCallable, Category = "Jurassic Crowd")
-    void RegisterRestingArea(const FVector& Location, float Radius = 800.0f);
+protected:
+    UPROPERTY()
+    TObjectPtr<UMassEntitySubsystem> MassEntitySubsystem;
 
 private:
-    UPROPERTY()
-    TArray<FVector> WaterSources;
-
-    UPROPERTY()
-    TArray<FVector> FeedingGrounds;
-
-    UPROPERTY()
-    TArray<FVector> RestingAreas;
-
-    int32 NextHerdID = 0;
+    // Templates de configuração para diferentes tipos
+    void SetupHerbivoreEntity(FMassEntityHandle Entity, const FVector& Location);
+    void SetupPredatorEntity(FMassEntityHandle Entity, const FVector& Location, float TerritoryRadius);
+    void SetupFlyingEntity(FMassEntityHandle Entity, const FVector& Location, float FlightHeight);
+    void SetupInsectEntity(FMassEntityHandle Entity, const FVector& Location);
     
-    // Encontra o ponto de interesse mais próximo
-    FVector FindNearestPointOfInterest(const FVector& Position, const TArray<FVector>& Points);
+    // Gestão de performance
+    UPROPERTY(EditAnywhere, Category = "Performance")
+    int32 MaxEntitiesPerFrame = 1000;
+    
+    UPROPERTY(EditAnywhere, Category = "Performance")
+    float LODDistance1 = 2000.0f; // Distância para LOD alto
+    
+    UPROPERTY(EditAnywhere, Category = "Performance")
+    float LODDistance2 = 5000.0f; // Distância para LOD médio
+    
+    // Configurações globais
+    UPROPERTY(EditAnywhere, Category = "Global Settings")
+    bool bEnableSeasonalMigration = true;
+    
+    UPROPERTY(EditAnywhere, Category = "Global Settings")
+    float GlobalActivityMultiplier = 1.0f;
+    
+    UPROPERTY(EditAnywhere, Category = "Global Settings")
+    float PlayerInfluenceRadius = 1000.0f; // Raio onde o jogador afeta o comportamento
 };
