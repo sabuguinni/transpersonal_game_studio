@@ -1,277 +1,205 @@
 {
   "MetaSoundType": "Source",
   "Name": "MS_AdaptiveMusic_Master",
-  "Description": "Master adaptive music system for Jurassic survival game. Responds to emotional states, tension levels, and environmental conditions.",
+  "Description": "Sistema de música adaptativa principal que responde ao estado emocional do jogador e proximidade de dinossauros",
+  "Version": "1.0",
   "Inputs": [
     {
+      "Name": "Intensity",
+      "Type": "Float",
+      "DefaultValue": 0.3,
+      "Description": "Intensidade geral da música (0.0 = calma, 1.0 = máxima tensão)"
+    },
+    {
       "Name": "TensionLevel",
+      "Type": "Float", 
+      "DefaultValue": 0.0,
+      "Description": "Nível de tensão baseado na proximidade de dinossauros"
+    },
+    {
+      "Name": "ProximityThreat",
       "Type": "Float",
       "DefaultValue": 0.0,
-      "Description": "Current tension level (0.0 = calm, 1.0 = maximum tension)"
+      "Description": "Ameaça de proximidade de predadores"
     },
     {
-      "Name": "EmotionalState",
-      "Type": "Int32",
-      "DefaultValue": 0,
-      "Description": "Current emotional state (0=Calm, 1=Tension, 2=Danger, 3=Terror, 4=Relief, 5=Wonder)"
-    },
-    {
-      "Name": "ProximityToDanger",
-      "Type": "Float",
-      "DefaultValue": 0.0,
-      "Description": "How close the player is to danger (0.0 = safe, 1.0 = immediate danger)"
-    },
-    {
-      "Name": "IsNightTime",
+      "Name": "PlayerHidden",
       "Type": "Bool",
       "DefaultValue": false,
-      "Description": "Whether it's currently night time"
+      "Description": "Se o jogador está escondido/agachado"
+    },
+    {
+      "Name": "TimeOfDay",
+      "Type": "Float",
+      "DefaultValue": 0.5,
+      "Description": "Hora do dia (0.0 = meia-noite, 0.5 = meio-dia, 1.0 = meia-noite)"
     },
     {
       "Name": "EnvironmentType",
       "Type": "Int32",
       "DefaultValue": 0,
-      "Description": "Current environment type (0=Forest, 1=Plains, 2=River, 3=Cave, 4=Nest, 5=Base)"
-    },
-    {
-      "Name": "WeatherIntensity",
-      "Type": "Float",
-      "DefaultValue": 0.0,
-      "Description": "Current weather intensity (0.0 = clear, 1.0 = storm)"
-    },
-    {
-      "Name": "PlayerHeartRate",
-      "Type": "Float",
-      "DefaultValue": 60.0,
-      "Description": "Player's simulated heart rate (BPM)"
+      "Description": "Tipo de ambiente (0=Floresta, 1=Planícies, 2=Rios, etc.)"
     }
   ],
   "Outputs": [
     {
-      "Name": "OutLeft",
+      "Name": "Audio Out L",
       "Type": "Audio"
     },
     {
-      "Name": "OutRight",
+      "Name": "Audio Out R", 
       "Type": "Audio"
     }
   ],
-  "Nodes": [
-    {
-      "Type": "WavePlayer",
-      "Name": "BaseAmbientDrone",
-      "Settings": {
-        "WaveAsset": "/Game/Audio/Music/Layers/Base_Ambient_Drone",
-        "Loop": true,
-        "StartTime": 0.0
-      }
-    },
-    {
-      "Type": "WavePlayer",
-      "Name": "TensionLayer",
-      "Settings": {
-        "WaveAsset": "/Game/Audio/Music/Layers/Tension_Strings",
-        "Loop": true,
-        "StartTime": 0.0
-      }
-    },
-    {
-      "Type": "WavePlayer",
-      "Name": "DangerPercussion",
-      "Settings": {
-        "WaveAsset": "/Game/Audio/Music/Layers/Danger_Percussion",
-        "Loop": true,
-        "StartTime": 0.0
-      }
-    },
-    {
-      "Type": "WavePlayer",
-      "Name": "TerrorStingers",
-      "Settings": {
-        "WaveAsset": "/Game/Audio/Music/Layers/Terror_Stingers",
-        "Loop": false,
-        "StartTime": 0.0
-      }
-    },
-    {
-      "Type": "WavePlayer",
-      "Name": "NightAmbience",
-      "Settings": {
-        "WaveAsset": "/Game/Audio/Music/Layers/Night_Ambience",
-        "Loop": true,
-        "StartTime": 0.0
-      }
-    },
-    {
-      "Type": "Multiply",
-      "Name": "TensionVolumeControl",
-      "Inputs": {
-        "A": "TensionLayer.OutMono",
-        "B": "TensionLevel"
-      }
-    },
-    {
-      "Type": "Multiply",
-      "Name": "DangerVolumeControl",
-      "Inputs": {
-        "A": "DangerPercussion.OutMono",
-        "B": "ProximityToDanger"
-      }
-    },
-    {
-      "Type": "TriggerOnThreshold",
-      "Name": "TerrorTrigger",
-      "Settings": {
-        "Threshold": 0.8,
-        "Type": "RisingEdge"
+  "Graph": {
+    "Nodes": [
+      {
+        "Type": "WavePlayer",
+        "Name": "BaseLayer_Exploration",
+        "Position": {"X": 100, "Y": 100},
+        "Inputs": {
+          "WaveAsset": "/Content/Audio/Music/Layers/Base_Exploration_Loop.wav",
+          "Loop": true,
+          "Volume": 0.7
+        }
       },
-      "Inputs": {
-        "In": "TensionLevel"
-      }
-    },
-    {
-      "Type": "ADSR",
-      "Name": "TerrorEnvelope",
-      "Settings": {
-        "AttackTime": 0.1,
-        "DecayTime": 0.5,
-        "SustainLevel": 0.7,
-        "ReleaseTime": 2.0
+      {
+        "Type": "WavePlayer", 
+        "Name": "TensionLayer_Low",
+        "Position": {"X": 100, "Y": 200},
+        "Inputs": {
+          "WaveAsset": "/Content/Audio/Music/Layers/Tension_Low_Loop.wav",
+          "Loop": true,
+          "Volume": 0.0
+        }
       },
-      "Inputs": {
-        "TriggerAttack": "TerrorTrigger.Out"
-      }
-    },
-    {
-      "Type": "Multiply",
-      "Name": "TerrorVolumeControl",
-      "Inputs": {
-        "A": "TerrorStingers.OutMono",
-        "B": "TerrorEnvelope.OutEnvelope"
-      }
-    },
-    {
-      "Type": "OnePoleHighPassFilter",
-      "Name": "NightFilter",
-      "Settings": {
-        "CutoffFrequency": 200.0
+      {
+        "Type": "WavePlayer",
+        "Name": "TensionLayer_High", 
+        "Position": {"X": 100, "Y": 300},
+        "Inputs": {
+          "WaveAsset": "/Content/Audio/Music/Layers/Tension_High_Loop.wav",
+          "Loop": true,
+          "Volume": 0.0
+        }
       },
-      "Inputs": {
-        "In": "NightAmbience.OutMono"
-      }
-    },
-    {
-      "Type": "Multiply",
-      "Name": "NightVolumeControl",
-      "Inputs": {
-        "A": "NightFilter.Out",
-        "B": "IsNightTime"
-      }
-    },
-    {
-      "Type": "LFO",
-      "Name": "HeartbeatLFO",
-      "Settings": {
-        "Shape": "Sine",
-        "MinValue": 0.8,
-        "MaxValue": 1.2
+      {
+        "Type": "WavePlayer",
+        "Name": "DangerLayer_Stingers",
+        "Position": {"X": 100, "Y": 400},
+        "Inputs": {
+          "WaveAsset": "/Content/Audio/Music/Layers/Danger_Stingers.wav",
+          "Loop": false,
+          "Volume": 0.0
+        }
       },
-      "Inputs": {
-        "Frequency": "PlayerHeartRate"
-      }
-    },
-    {
-      "Type": "Multiply",
-      "Name": "HeartbeatModulation",
-      "Inputs": {
-        "A": "TensionVolumeControl.Value",
-        "B": "HeartbeatLFO.Out"
-      }
-    },
-    {
-      "Type": "Reverb",
-      "Name": "EnvironmentalReverb",
-      "Settings": {
-        "ReverbEffect": "/Game/Audio/Reverb/Forest_Reverb"
-      }
-    },
-    {
-      "Type": "Add",
-      "Name": "MixLayers",
-      "Inputs": {
-        "A": "BaseAmbientDrone.OutMono",
-        "B": "HeartbeatModulation.Value"
-      }
-    },
-    {
-      "Type": "Add",
-      "Name": "AddDanger",
-      "Inputs": {
-        "A": "MixLayers.Value",
-        "B": "DangerVolumeControl.Value"
-      }
-    },
-    {
-      "Type": "Add",
-      "Name": "AddTerror",
-      "Inputs": {
-        "A": "AddDanger.Value",
-        "B": "TerrorVolumeControl.Value"
-      }
-    },
-    {
-      "Type": "Add",
-      "Name": "AddNight",
-      "Inputs": {
-        "A": "AddTerror.Value",
-        "B": "NightVolumeControl.Value"
-      }
-    },
-    {
-      "Type": "Limiter",
-      "Name": "MasterLimiter",
-      "Settings": {
-        "ThresholdDb": -3.0,
-        "ReleaseTime": 0.1
+      {
+        "Type": "Crossfade",
+        "Name": "TensionCrossfade",
+        "Position": {"X": 400, "Y": 250},
+        "Inputs": {
+          "NumInputs": 3
+        }
       },
-      "Inputs": {
-        "Audio": "EnvironmentalReverb.Audio"
-      }
-    },
-    {
-      "Type": "StereoPanner",
-      "Name": "StereoOutput",
-      "Settings": {
-        "PanAmount": 0.0,
-        "PanningLaw": "EqualPower"
+      {
+        "Type": "Multiply",
+        "Name": "IntensityModulator",
+        "Position": {"X": 600, "Y": 200}
       },
-      "Inputs": {
-        "In": "MasterLimiter.Audio"
+      {
+        "Type": "LowPassFilter",
+        "Name": "HiddenFilter",
+        "Position": {"X": 800, "Y": 200},
+        "Inputs": {
+          "CutoffFrequency": 20000.0
+        }
+      },
+      {
+        "Type": "Reverb",
+        "Name": "EnvironmentReverb",
+        "Position": {"X": 1000, "Y": 200},
+        "Inputs": {
+          "WetLevel": 0.2,
+          "RoomSize": 0.5
+        }
+      },
+      {
+        "Type": "StereoMixer",
+        "Name": "FinalMix",
+        "Position": {"X": 1200, "Y": 200}
       }
-    }
-  ],
-  "Connections": [
-    {
-      "From": "AddNight.Value",
-      "To": "EnvironmentalReverb.Audio"
-    },
-    {
-      "From": "StereoOutput.OutLeft",
-      "To": "OutLeft"
-    },
-    {
-      "From": "StereoOutput.OutRight",
-      "To": "OutRight"
-    }
-  ],
-  "Notes": [
-    "This MetaSound creates an adaptive music system that responds to game state.",
-    "Base ambient drone provides constant foundation.",
-    "Tension layer increases with player stress.",
-    "Danger percussion triggered by proximity to threats.",
-    "Terror stingers for maximum fear moments.",
-    "Night ambience adds atmospheric depth during night time.",
-    "Heartbeat modulation creates physiological connection to player state.",
-    "Environmental reverb changes based on location type."
-  ]
+    ],
+    "Connections": [
+      {
+        "From": "BaseLayer_Exploration.Audio",
+        "To": "TensionCrossfade.In0"
+      },
+      {
+        "From": "TensionLayer_Low.Audio", 
+        "To": "TensionCrossfade.In1"
+      },
+      {
+        "From": "TensionLayer_High.Audio",
+        "To": "TensionCrossfade.In2"
+      },
+      {
+        "From": "TensionLevel",
+        "To": "TensionCrossfade.CrossfadeValue"
+      },
+      {
+        "From": "TensionCrossfade.Out",
+        "To": "IntensityModulator.In"
+      },
+      {
+        "From": "Intensity",
+        "To": "IntensityModulator.Multiplier"
+      },
+      {
+        "From": "IntensityModulator.Out",
+        "To": "HiddenFilter.In"
+      },
+      {
+        "From": "HiddenFilter.Out",
+        "To": "EnvironmentReverb.In"
+      },
+      {
+        "From": "EnvironmentReverb.Out",
+        "To": "FinalMix.In L"
+      },
+      {
+        "From": "EnvironmentReverb.Out",
+        "To": "FinalMix.In R"
+      },
+      {
+        "From": "FinalMix.Out L",
+        "To": "Audio Out L"
+      },
+      {
+        "From": "FinalMix.Out R", 
+        "To": "Audio Out R"
+      }
+    ],
+    "ParameterMappings": [
+      {
+        "Parameter": "PlayerHidden",
+        "Target": "HiddenFilter.CutoffFrequency",
+        "Mapping": "MapRange",
+        "InputRange": [false, true],
+        "OutputRange": [20000.0, 8000.0]
+      },
+      {
+        "Parameter": "EnvironmentType",
+        "Target": "EnvironmentReverb.RoomSize",
+        "Mapping": "Select",
+        "Values": [0.3, 0.8, 0.5, 0.9, 0.1, 0.4]
+      },
+      {
+        "Parameter": "ProximityThreat",
+        "Target": "DangerLayer_Stingers.TriggerProbability",
+        "Mapping": "MapRange",
+        "InputRange": [0.0, 1.0],
+        "OutputRange": [0.0, 0.8]
+      }
+    ]
+  }
 }
