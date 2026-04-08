@@ -1,0 +1,52 @@
+// Blueprint Class: BP_BaseHumanCharacter
+// Parent Class: Character
+// Description: Base class for all human characters in the prehistoric world
+
+/*
+BLUEPRINT CONFIGURATION:
+
+Components:
+- Mesh (SkeletalMeshComponent): MetaHuman base mesh
+- CharacterAppearance (UCharacterAppearanceComponent): Custom appearance system
+- CapsuleComponent: Collision (Height: 192, Radius: 42)
+
+Default Values:
+- Use Controller Rotation Yaw: false
+- Orient Rotation to Movement: true
+- Rotation Rate: (Yaw=540.0)
+- Max Walk Speed: 400.0
+- Jump Z Velocity: 600.0
+
+MetaHuman Setup:
+- Skeletal Mesh: /Game/MetaHumans/Common/Male/Medium/NormalWeight/Body/m_med_nrw_body
+- Animation Blueprint: ABP_Manny (retargeted for MetaHuman)
+- Physics Asset: MetaHuman default physics
+
+Material Slots:
+0. M_MetaHuman_Body (skin material)
+1. M_MetaHuman_Face (face material) 
+2. M_MetaHuman_Eye (eye material)
+3. M_MetaHuman_Hair (hair material)
+4. M_TribalClothing_Base (clothing material)
+
+Variables:
+- CharacterData (FCharacterData): Current character configuration
+- bIsProtagonist (bool): Whether this is the player character
+- TribalGroup (ETribalGroup): Which tribe this character belongs to
+- UniqueIdentifier (FString): Unique ID for save/load system
+
+Functions:
+- InitializeCharacter(CharacterData): Setup character from data
+- ApplyTribalClothing(TribalGroup): Apply appropriate clothing
+- GetCharacterBiography(): Return character's backstory
+- IsRecognizedBy(OtherCharacter): Check if characters know each other
+
+Events:
+- BeginPlay: Initialize appearance system
+- OnInteracted: Handle player interaction
+- OnSpoken: Handle dialogue initiation
+*/
+
+// This file represents the Blueprint configuration
+// Actual Blueprint creation requires Unreal Editor
+// The C++ components are implemented in CharacterSystem.h/.cpp
