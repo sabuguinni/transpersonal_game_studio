@@ -1,0 +1,35 @@
+// Blueprint Class: MetaHuman Character Base
+// This is a Blueprint representation - actual implementation would be done in UE5 Editor
+
+/*
+Blueprint Class Configuration:
+- Parent Class: Character
+- Components:
+  * SkeletalMeshComponent (MetaHuman mesh)
+  * CharacterMovementComponent
+  * CapsuleComponent
+  * CharacterArtistComponent (custom)
+
+Variables:
+- CharacterDefinition (FCharacterDefinition struct)
+- bIsProtagonist (bool)
+- CurrentWearLevel (float)
+- CurrentDirtLevel (float)
+- CurrentScarLevel (float)
+
+Functions:
+- ApplyCharacterDefinition()
+- UpdateAppearanceOverTime()
+- AddScar()
+- IncreaseDirtLevel()
+- RepairClothing()
+
+Event Graph:
+- BeginPlay: Apply character definition and setup MetaHuman
+- Tick: Update appearance based on gameplay events
+- OnTakeDamage: Potentially add scars or dirt
+- OnCleanSelf: Reduce dirt level
+*/
+
+// This file represents the Blueprint structure that would be created in UE5
+// The actual Blueprint would be created using the MetaHuman Creator integration
