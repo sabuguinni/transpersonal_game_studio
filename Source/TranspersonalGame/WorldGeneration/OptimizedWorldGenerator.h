@@ -1,0 +1,406 @@
+// Copyright Transpersonal Game Studio. All Rights Reserved.
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Engine/World.h"
+#include "Subsystems/WorldSubsystem.h"
+#include "PCGComponent.h"
+#include "PCGGraph.h"
+#include "PCGData.h"
+#include "Landscape/Classes/Landscape.h"
+#include "Engine/DataTable.h"
+#include "Math/UnrealMathUtility.h"
+#include "WorldPartition/WorldPartition.h"
+#include "WorldPartition/WorldPartitionSubsystem.h"
+#include "Core/Performance/PerformanceOptimizer.h"
+#include "OptimizedWorldGenerator.generated.h"
+
+/**
+ * @brief Optimized Procedural World Generation System
+ * 
+ * Creates the Jurassic survival world with performance optimization integration:
+ * - Regional scale: ~200km² of explorable terrain
+ * - 5 distinct biomes with natural transitions
+ * - Performance-aware LOD and streaming systems
+ * - Integration with Performance Optimizer for 60fps PC / 30fps console
+ * 
+ * Design Philosophy:
+ * "Um mundo não é um cenário pintado — é um sistema físico com razões para cada vale,
+ * para cada rio, para cada estrada. Quando o Miguel caminha no mundo que criaste,
+ * deve sentir que aquele mundo existia antes de ele chegar."
+ * 
+ * @author Procedural World Generator — Agent #5
+ * @version 2.0 — March 2026 (Performance Optimized)
+ */
+
+/** Enhanced biome types for the Jurassic world */
+UENUM(BlueprintType)
+enum class EJurassicBiomeType : uint8
+{
+    Forest          UMETA(DisplayName = "Tropical Forest (Starting Area)"),
+    Swamp           UMETA(DisplayName = "Swamplands"),
+    Savana          UMETA(DisplayName = "Savana Plains"),
+    Desert          UMETA(DisplayName = "Desert Badlands"),
+    SnowyRockside   UMETA(DisplayName = "Snowy Mountains"),
+    MountainBorder  UMETA(DisplayName = "Impassable Border"),
+    RiverSystem     UMETA(DisplayName = "River Corridors"),
+    TransitionZone  UMETA(DisplayName = "Biome Transition")
+};
+
+/** Performance tier for different world areas */
+UENUM(BlueprintType)
+enum class EWorldPerformanceTier : uint8
+{
+    HighDetail      UMETA(DisplayName = "High Detail (Player Area)"),
+    MediumDetail    UMETA(DisplayName = "Medium Detail (Nearby)"),
+    LowDetail       UMETA(DisplayName = "Low Detail (Distant)"),
+    BackgroundLOD   UMETA(DisplayName = "Background LOD (Far)")
+};
+
+/** Terrain generation strategy */
+UENUM(BlueprintType)
+enum class ETerrainStrategy : uint8
+{
+    HeightfieldNoise    UMETA(DisplayName = "Heightfield with Noise"),
+    SplineBasedRivers   UMETA(DisplayName = "Spline-Based Rivers"),
+    PlateauGeneration   UMETA(DisplayName = "Plateau Generation"),
+    MountainRanges      UMETA(DisplayName = "Mountain Range System"),
+    ValleyCarving       UMETA(DisplayName = "Valley Carving")
+};
+
+/** Biome configuration with performance settings */
+USTRUCT(BlueprintType)
+struct FOptimizedBiomeSettings
+{
+    GENERATED_BODY()
+
+    /** Biome identifier */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    EJurassicBiomeType BiomeType = EJurassicBiomeType::Forest;
+
+    /** Terrain generation strategy */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
+    ETerrainStrategy TerrainStrategy = ETerrainStrategy::HeightfieldNoise;
+
+    /** Elevation parameters */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
+    FVector2D ElevationRange = FVector2D(0.0f, 50000.0f); // cm
+
+    /** Slope constraints */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
+    FVector2D SlopeRange = FVector2D(0.0f, 30.0f); // degrees
+
+    /** Water proximity influence */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water")
+    FVector2D WaterDistanceRange = FVector2D(0.0f, 500000.0f); // cm
+
+    /** Noise generation parameters */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Noise")
+    float NoiseScale = 0.001f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Noise")
+    float NoiseAmplitude = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Noise")
+    int32 NoiseOctaves = 6;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Noise")
+    float NoisePersistence = 0.5f;
+
+    /** PCG Graph for content generation */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG")
+    TSoftObjectPtr<UPCGGraph> BiomePCGGraph;
+
+    /** Performance settings per biome */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    EWorldPerformanceTier PerformanceTier = EWorldPerformanceTier::MediumDetail;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 PCGGridSize = 12800; // cm
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float StreamingRadius = 500000.0f; // 5km
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 MaxInstancesPerCell = 10000;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float LODDistanceMultiplier = 1.0f;
+
+    /** Climate parameters affecting generation */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Climate")
+    float Temperature = 25.0f; // Celsius
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Climate")
+    float Humidity = 0.6f; // 0-1
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Climate")
+    float WindStrength = 0.3f; // 0-1
+
+    /** Transition settings */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transitions")
+    float TransitionWidth = 200000.0f; // 2km
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transitions")
+    float BlendSmoothness = 0.7f;
+};
+
+/** World generation configuration with performance optimization */
+USTRUCT(BlueprintType)
+struct FOptimizedWorldConfig
+{
+    GENERATED_BODY()
+
+    /** World dimensions */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Size")
+    int32 LandscapeResolution = 8129; // 8129x8129 vertices
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Size")
+    float WorldScale = 2500.0f; // 25m per unit = ~200km²
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Size")
+    float MaxElevation = 300000.0f; // 3km peaks
+
+    /** Mountain border (natural boundaries) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boundaries")
+    float BorderWidth = 1000000.0f; // 10km border
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boundaries")
+    float BorderHeight = 250000.0f; // 2.5km high
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boundaries")
+    float BorderSteepness = 0.9f; // Impassable
+
+    /** River system */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water System")
+    int32 MainRiverCount = 4;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water System")
+    int32 TributaryCount = 12;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water System")
+    float RiverWidth = 5000.0f; // 50m
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water System")
+    float RiverDepth = 500.0f; // 5m
+
+    /** Lake generation */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water System")
+    int32 LakeCount = 8;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water System")
+    FVector2D LakeSizeRange = FVector2D(50000.0f, 200000.0f);
+
+    /** Performance optimization */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    bool bUseWorldPartition = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    bool bUseHierarchicalGeneration = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 WorldPartitionCellSize = 128000; // 1.28km cells
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float StreamingRange = 640000.0f; // 6.4km
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 MaxConcurrentGenerations = 4;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float PerformanceTargetFPS = 60.0f; // PC target
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float ConsoleTargetFPS = 30.0f; // Console target
+
+    /** Biome distribution */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Layout")
+    float ForestCenterRadius = 2000000.0f; // 20km forest center
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Layout")
+    float BiomeTransitionSmoothness = 0.7f;
+
+    /** Player spawn (always in Forest) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player Spawn")
+    FVector PlayerSpawnLocation = FVector::ZeroVector;
+
+    /** Generation seed */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation")
+    int32 WorldSeed = 12345;
+
+    /** Debug settings */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug")
+    bool bShowBiomeDebugOverlay = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug")
+    bool bShowPerformanceDebugInfo = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug")
+    bool bShowRiverDebugSplines = false;
+};
+
+/** Generation statistics for performance monitoring */
+USTRUCT(BlueprintType)
+struct FWorldGenerationStats
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Stats")
+    float TotalGenerationTime = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Stats")
+    int32 TotalCellsGenerated = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Stats")
+    int32 TotalInstancesSpawned = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Stats")
+    float AverageFrameTime = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Stats")
+    float PeakMemoryUsage = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Stats")
+    TMap<EJurassicBiomeType, int32> BiomeInstanceCounts;
+};
+
+/**
+ * @brief Optimized World Generation Subsystem
+ * 
+ * Manages procedural world generation with performance optimization:
+ * - Integrates with Performance Optimizer for frame rate targets
+ * - Uses World Partition for streaming large worlds
+ * - Implements hierarchical PCG generation
+ * - Monitors performance and adjusts quality dynamically
+ */
+UCLASS()
+class TRANSPERSONALGAME_API UOptimizedWorldGenerator : public UWorldSubsystem
+{
+    GENERATED_BODY()
+
+public:
+    UOptimizedWorldGenerator();
+
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+
+    /** Generate the complete Jurassic world */
+    UFUNCTION(BlueprintCallable, Category = "World Generation")
+    void GenerateJurassicWorld(const FOptimizedWorldConfig& Config);
+
+    /** Generate a specific world region */
+    UFUNCTION(BlueprintCallable, Category = "World Generation")
+    void GenerateWorldRegion(const FVector& RegionCenter, float RegionSize, EWorldPerformanceTier PerformanceTier);
+
+    /** Update world generation based on player position */
+    UFUNCTION(BlueprintCallable, Category = "World Generation")
+    void UpdateWorldAroundPlayer(const FVector& PlayerLocation);
+
+    /** Get biome type at world location */
+    UFUNCTION(BlueprintCallable, Category = "World Generation")
+    EJurassicBiomeType GetBiomeAtLocation(const FVector& WorldLocation) const;
+
+    /** Get generation statistics */
+    UFUNCTION(BlueprintCallable, Category = "World Generation")
+    FWorldGenerationStats GetGenerationStats() const { return GenerationStats; }
+
+    /** Performance optimization controls */
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void SetPerformanceTarget(float TargetFPS);
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void OptimizeForPlatform(bool bIsConsole);
+
+    /** Debug functions */
+    UFUNCTION(BlueprintCallable, Category = "Debug")
+    void ToggleBiomeDebugOverlay();
+
+    UFUNCTION(BlueprintCallable, Category = "Debug")
+    void ShowPerformanceStats();
+
+protected:
+    /** Core generation functions */
+    void GenerateTerrainHeightfield();
+    void GenerateBiomeDistribution();
+    void GenerateRiverSystem();
+    void GenerateLakes();
+    void SetupWorldPartition();
+    void ExecuteBiomePCGGeneration();
+
+    /** Performance optimization functions */
+    void OptimizeGenerationForPerformance();
+    void UpdateLODSettings();
+    void MonitorPerformance();
+    void AdjustQualitySettings();
+
+    /** Biome-specific generation */
+    void GenerateForestBiome(const FVector& Center, float Radius);
+    void GenerateSwampBiome(const FVector& Center, float Radius);
+    void GenerateSavanaBiome(const FVector& Center, float Radius);
+    void GenerateDesertBiome(const FVector& Center, float Radius);
+    void GenerateSnowyBiome(const FVector& Center, float Radius);
+    void GenerateMountainBorder();
+
+    /** Utility functions */
+    float GetElevationAtLocation(const FVector& Location) const;
+    float GetSlopeAtLocation(const FVector& Location) const;
+    float GetDistanceToWater(const FVector& Location) const;
+    FVector GetNearestRiverPoint(const FVector& Location) const;
+
+    /** Noise generation utilities */
+    float GenerateHeightNoise(float X, float Y, const FOptimizedBiomeSettings& BiomeSettings) const;
+    float GenerateBiomeBlendNoise(float X, float Y) const;
+
+private:
+    /** Configuration */
+    UPROPERTY()
+    FOptimizedWorldConfig WorldConfig;
+
+    UPROPERTY()
+    TMap<EJurassicBiomeType, FOptimizedBiomeSettings> BiomeSettings;
+
+    /** Generated world data */
+    UPROPERTY()
+    TObjectPtr<ALandscape> GeneratedLandscape;
+
+    UPROPERTY()
+    TArray<FVector> RiverSplinePoints;
+
+    UPROPERTY()
+    TArray<FVector> LakeLocations;
+
+    /** Performance monitoring */
+    UPROPERTY()
+    TObjectPtr<UPerformanceOptimizer> PerformanceOptimizer;
+
+    UPROPERTY()
+    FWorldGenerationStats GenerationStats;
+
+    /** Runtime state */
+    UPROPERTY()
+    FVector LastPlayerLocation;
+
+    UPROPERTY()
+    float CurrentFrameRate;
+
+    UPROPERTY()
+    bool bIsGenerating;
+
+    UPROPERTY()
+    int32 CurrentGenerationSeed;
+
+    /** PCG Components for each biome */
+    UPROPERTY()
+    TMap<EJurassicBiomeType, TObjectPtr<UPCGComponent>> BiomePCGComponents;
+
+    /** World Partition integration */
+    UPROPERTY()
+    TObjectPtr<UWorldPartitionSubsystem> WorldPartitionSubsystem;
+
+    /** Performance timers */
+    double LastPerformanceCheck;
+    double GenerationStartTime;
+    TArray<float> FrameTimeHistory;
+};
