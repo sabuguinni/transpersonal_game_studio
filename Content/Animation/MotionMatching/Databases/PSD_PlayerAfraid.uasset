@@ -1,0 +1,67 @@
+{
+    "Type": "PoseSearchDatabase",
+    "Properties": {
+        "Schema": "/Game/Animation/MotionMatching/PoseSearchSchemas/PSS_PlayerLocomotion",
+        "AnimationAssets": [
+            {
+                "Animation": "/Game/Animation/Player/Locomotion/Afraid/Anim_Walk_Afraid_Fwd_Cautious",
+                "bEnabled": true,
+                "SamplingRange": {
+                    "Min": 0.1,
+                    "Max": 0.9
+                }
+            },
+            {
+                "Animation": "/Game/Animation/Player/Locomotion/Afraid/Anim_Walk_Afraid_Fwd_Hunched",
+                "bEnabled": true,
+                "SamplingRange": {
+                    "Min": 0.1,
+                    "Max": 0.9
+                }
+            },
+            {
+                "Animation": "/Game/Animation/Player/Locomotion/Afraid/Anim_Sneak_Afraid_Fwd",
+                "bEnabled": true,
+                "SamplingRange": {
+                    "Min": 0.1,
+                    "Max": 0.9
+                }
+            },
+            {
+                "Animation": "/Game/Animation/Player/Locomotion/Afraid/Anim_Run_Afraid_Panic",
+                "bEnabled": true,
+                "SamplingRange": {
+                    "Min": 0.1,
+                    "Max": 0.9
+                }
+            },
+            {
+                "Animation": "/Game/Animation/Player/Locomotion/Afraid/Anim_Idle_Afraid_LookAround",
+                "bEnabled": true,
+                "bLooping": true
+            },
+            {
+                "Animation": "/Game/Animation/Player/Locomotion/Afraid/Anim_Idle_Afraid_Trembling",
+                "bEnabled": true,
+                "bLooping": true
+            },
+            {
+                "Animation": "/Game/Animation/Player/Locomotion/Afraid/Anim_Turn_Afraid_Quick_90L",
+                "bEnabled": true
+            },
+            {
+                "Animation": "/Game/Animation/Player/Locomotion/Afraid/Anim_Turn_Afraid_Quick_90R",
+                "bEnabled": true
+            },
+            {
+                "Animation": "/Game/Animation/Player/Locomotion/Afraid/Anim_Dodge_Afraid_Left",
+                "bEnabled": true
+            },
+            {
+                "Animation": "/Game/Animation/Player/Locomotion/Afraid/Anim_Dodge_Afraid_Right",
+                "bEnabled": true
+            }
+        ],
+        "Tags": ["Afraid", "Cautious", "Reactive", "Hunted"]
+    }
+}
