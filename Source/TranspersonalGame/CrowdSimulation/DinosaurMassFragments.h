@@ -2,244 +2,260 @@
 
 #include "CoreMinimal.h"
 #include "MassEntityTypes.h"
-#include "MassCommonFragments.h"
-#include "DinosaurCrowdSubsystem.h"
 #include "DinosaurMassFragments.generated.h"
 
-/**
- * Mass Entity fragments specific to dinosaur crowd simulation
- * These fragments define the data components for individual dinosaur entities
- */
+// Dinosaur behavior states
+UENUM(BlueprintType)
+enum class EDinosaurBehaviorState : uint8
+{
+    Idle,
+    Wandering,
+    Grazing,
+    Moving,
+    Searching,
+    Drinking,
+    Resting,
+    Hunting,
+    Fleeing,
+    Fighting,
+    Mating,
+    Nesting
+};
 
-// Core dinosaur identity and behavior
+// Dinosaur species types
+UENUM(BlueprintType)
+enum class EDinosaurSpeciesType : uint8
+{
+    SmallHerbivore,     // Compsognathus, Hypsilophodon
+    MediumHerbivore,    // Parasaurolophus, Triceratops
+    LargeHerbivore,     // Brontosaurus, Diplodocus
+    SmallCarnivore,     // Velociraptor, Deinonychus
+    MediumCarnivore,    // Allosaurus, Carnotaurus
+    LargeCarnivore,     // T-Rex, Giganotosaurus
+    Flying,             // Pteranodon, Quetzalcoatlus
+    Aquatic             // Mosasaurus, Plesiosaur
+};
+
+/**
+ * Fragment containing species-specific data for dinosaurs
+ */
 USTRUCT()
 struct TRANSPERSONALGAME_API FDinosaurSpeciesFragment : public FMassFragment
 {
     GENERATED_BODY()
 
-    // Species identification
-    UPROPERTY(EditAnywhere)
-    EDinosaurSpecies Species = EDinosaurSpecies::Triceratops;
+    // Species type determines behavior patterns
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    EDinosaurSpeciesType SpeciesType = EDinosaurSpeciesType::SmallHerbivore;
 
-    // Individual variation within species
-    UPROPERTY(EditAnywhere)
-    float SizeVariation = 1.0f; // 0.8 to 1.2 multiplier
+    // Visual variation ID for this individual
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    int32 VariationID = 0;
 
-    UPROPERTY(EditAnywhere)
-    FLinearColor ColorVariation = FLinearColor::White;
+    // Size multiplier from base species size
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float SizeMultiplier = 1.0f;
 
-    // Unique physical traits for recognition
-    UPROPERTY(EditAnywhere)
-    int32 UniqueTraitSeed = 0; // Used for procedural trait generation
+    // Speed multiplier from base species speed
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float SpeedMultiplier = 1.0f;
 
-    UPROPERTY(EditAnywhere)
-    float AggressionLevel = 0.5f; // 0.0 = peaceful, 1.0 = highly aggressive
+    // Aggression level (0.0 = peaceful, 1.0 = highly aggressive)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float AggressionLevel = 0.3f;
 
-    UPROPERTY(EditAnywhere)
-    float FearLevel = 0.5f; // 0.0 = fearless, 1.0 = very skittish
+    // Fear threshold (how easily spooked)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float FearThreshold = 0.5f;
+
+    // Hunger level (affects behavior)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float HungerLevel = 0.0f;
+
+    // Age (affects behavior and appearance)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float Age = 1.0f; // 0.0 = juvenile, 1.0 = adult, 2.0 = elder
 };
 
-// Dinosaur behavioral state
+/**
+ * Fragment containing current behavior state and timers
+ */
 USTRUCT()
 struct TRANSPERSONALGAME_API FDinosaurBehaviorFragment : public FMassFragment
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere)
-    EDinosaurBehaviorState CurrentBehavior = EDinosaurBehaviorState::Grazing;
+    // Current behavior state
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    EDinosaurBehaviorState CurrentState = EDinosaurBehaviorState::Idle;
 
-    UPROPERTY(EditAnywhere)
-    float BehaviorTimer = 0.0f; // Time in current behavior
+    // Previous behavior state (for transitions)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    EDinosaurBehaviorState PreviousState = EDinosaurBehaviorState::Idle;
 
-    UPROPERTY(EditAnywhere)
+    // Time in current state
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float StateTime = 0.0f;
+
+    // Target location for current behavior
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
     FVector TargetLocation = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere)
-    float MovementSpeed = 200.0f; // cm/s
+    // Behavior-specific timer
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float BehaviorTimer = 0.0f;
 
-    UPROPERTY(EditAnywhere)
-    bool bInHerd = false;
+    // Alert level (0.0 = calm, 1.0 = maximum alert)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float AlertLevel = 0.0f;
 
-    UPROPERTY(EditAnywhere)
-    FMassEntityHandle HerdLeader; // Reference to herd leader entity
+    // Last known threat position
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FVector ThreatPosition = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere)
-    int32 HerdID = -1; // Unique identifier for the herd
+    // Time since last threat detected
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float TimeSinceThreat = 999.0f;
 };
 
-// Dinosaur needs and status
+/**
+ * Fragment for dinosaurs that belong to herds
+ */
 USTRUCT()
-struct TRANSPERSONALGAME_API FDinosaurNeedsFragment : public FMassFragment
+struct TRANSPERSONALGAME_API FDinosaurHerdFragment : public FMassFragment
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere)
-    float Hunger = 0.5f; // 0.0 = full, 1.0 = starving
+    // Unique ID for this herd
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    int32 HerdID = 0;
 
-    UPROPERTY(EditAnywhere)
-    float Thirst = 0.5f; // 0.0 = hydrated, 1.0 = dehydrated
+    // Role in herd (0 = follower, 1 = leader, 2 = scout)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    int32 HerdRole = 0;
 
-    UPROPERTY(EditAnywhere)
-    float Energy = 1.0f; // 0.0 = exhausted, 1.0 = full energy
+    // Preferred distance from herd center
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float PreferredDistance = 500.0f;
 
-    UPROPERTY(EditAnywhere)
-    float Health = 1.0f; // 0.0 = dead, 1.0 = full health
+    // Herd loyalty (how likely to stay with herd vs wander)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float HerdLoyalty = 0.8f;
 
-    UPROPERTY(EditAnywhere)
-    float Stress = 0.0f; // 0.0 = calm, 1.0 = panicked
+    // Last known herd center position
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FVector HerdCenter = FVector::ZeroVector;
 
-    // Time-based needs decay
-    UPROPERTY(EditAnywhere)
-    float HungerDecayRate = 0.1f; // Per minute
-
-    UPROPERTY(EditAnywhere)
-    float ThirstDecayRate = 0.15f; // Per minute
-
-    UPROPERTY(EditAnywhere)
-    float EnergyDecayRate = 0.05f; // Per minute
+    // Number of herd members last seen nearby
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    int32 NearbyHerdMembers = 0;
 };
 
-// Dinosaur memory and awareness
+/**
+ * Fragment for territory-based dinosaurs
+ */
 USTRUCT()
-struct TRANSPERSONALGAME_API FDinosaurMemoryFragment : public FMassFragment
+struct TRANSPERSONALGAME_API FDinosaurTerritoryFragment : public FMassFragment
 {
     GENERATED_BODY()
 
-    // Known locations
-    UPROPERTY(EditAnywhere)
-    TArray<FVector> KnownWaterSources;
-
-    UPROPERTY(EditAnywhere)
-    TArray<FVector> KnownFoodSources;
-
-    UPROPERTY(EditAnywhere)
-    TArray<FVector> KnownDangerZones;
-
-    // Recent experiences
-    UPROPERTY(EditAnywhere)
-    float LastThreatTime = -1.0f;
-
-    UPROPERTY(EditAnywhere)
-    FVector LastThreatLocation = FVector::ZeroVector;
-
-    UPROPERTY(EditAnywhere)
-    float LastFeedTime = -1.0f;
-
-    UPROPERTY(EditAnywhere)
-    float LastDrinkTime = -1.0f;
-
-    // Memory capacity (affects how many locations can be remembered)
-    UPROPERTY(EditAnywhere)
-    int32 MemoryCapacity = 10;
-};
-
-// Dinosaur social relationships
-USTRUCT()
-struct TRANSPERSONALGAME_API FDinosaurSocialFragment : public FMassFragment
-{
-    GENERATED_BODY()
-
-    // Social bonds with other dinosaurs
-    UPROPERTY(EditAnywhere)
-    TArray<FMassEntityHandle> KnownAllies;
-
-    UPROPERTY(EditAnywhere)
-    TArray<FMassEntityHandle> KnownEnemies;
-
-    // Social status within herd
-    UPROPERTY(EditAnywhere)
-    float DominanceRank = 0.5f; // 0.0 = submissive, 1.0 = alpha
-
-    UPROPERTY(EditAnywhere)
-    bool bIsHerdLeader = false;
-
-    UPROPERTY(EditAnywhere)
-    int32 FollowerCount = 0;
-
-    // Domestication progress (for herbivores only)
-    UPROPERTY(EditAnywhere)
-    float DomesticationLevel = 0.0f; // 0.0 = wild, 1.0 = fully domesticated
-
-    UPROPERTY(EditAnywhere)
-    bool bPlayerInteracted = false;
-
-    UPROPERTY(EditAnywhere)
-    float TrustLevel = 0.0f; // Trust towards player
-};
-
-// Zone occupation and territory
-USTRUCT()
-struct TRANSPERSONALGAME_API FDinosaurZoneFragment : public FMassFragment
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere)
-    int32 CurrentZoneID = -1;
-
-    UPROPERTY(EditAnywhere)
-    EDinosaurZoneType PreferredZoneType = EDinosaurZoneType::Grazing;
-
-    UPROPERTY(EditAnywhere)
+    // Center of territory
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
     FVector TerritoryCenter = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere)
-    float TerritoryRadius = 500.0f;
+    // Territory radius
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float TerritoryRadius = 2000.0f;
 
-    UPROPERTY(EditAnywhere)
-    bool bDefendingTerritory = false;
+    // How aggressively defends territory
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float TerritorialAggression = 0.5f;
 
-    UPROPERTY(EditAnywhere)
-    float ZoneOccupancyTime = 0.0f; // How long in current zone
+    // Patrol points within territory
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TArray<FVector> PatrolPoints;
+
+    // Current patrol target index
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    int32 CurrentPatrolIndex = 0;
 };
 
-// Supporting enums for dinosaur simulation
-UENUM(BlueprintType)
-enum class EDinosaurSpecies : uint8
+/**
+ * Fragment for dinosaur daily routines
+ */
+USTRUCT()
+struct TRANSPERSONALGAME_API FDinosaurRoutineFragment : public FMassFragment
 {
-    // Herbivores - Large
-    Triceratops     UMETA(DisplayName = "Triceratops"),
-    Brachiosaurus   UMETA(DisplayName = "Brachiosaurus"),
-    Stegosaurus     UMETA(DisplayName = "Stegosaurus"),
-    Ankylosaurus    UMETA(DisplayName = "Ankylosaurus"),
-    
-    // Herbivores - Medium
-    Parasaurolophus UMETA(DisplayName = "Parasaurolophus"),
-    Iguanodon       UMETA(DisplayName = "Iguanodon"),
-    
-    // Herbivores - Small
-    Pachycephalosaurus UMETA(DisplayName = "Pachycephalosaurus"),
-    Hypsilophodon   UMETA(DisplayName = "Hypsilophodon"),
-    
-    // Carnivores - Large
-    TyrannosaurusRex UMETA(DisplayName = "T-Rex"),
-    Allosaurus      UMETA(DisplayName = "Allosaurus"),
-    Spinosaurus     UMETA(DisplayName = "Spinosaurus"),
-    
-    // Carnivores - Medium
-    Carnotaurus     UMETA(DisplayName = "Carnotaurus"),
-    Ceratosaurus    UMETA(DisplayName = "Ceratosaurus"),
-    
-    // Carnivores - Small
-    Velociraptor    UMETA(DisplayName = "Velociraptor"),
-    Compsognathus   UMETA(DisplayName = "Compsognathus"),
-    Deinonychus     UMETA(DisplayName = "Deinonychus")
+    GENERATED_BODY()
+
+    // Preferred feeding time (0.0 = dawn, 0.5 = noon, 1.0 = midnight)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float PreferredFeedingTime = 0.3f;
+
+    // Preferred resting time
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float PreferredRestingTime = 0.9f;
+
+    // Water source location
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FVector WaterSource = FVector::ZeroVector;
+
+    // Feeding area location
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FVector FeedingArea = FVector::ZeroVector;
+
+    // Resting area location
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FVector RestingArea = FVector::ZeroVector;
+
+    // Last feeding time
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float LastFeedingTime = 0.0f;
+
+    // Last drinking time
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float LastDrinkingTime = 0.0f;
 };
 
-UENUM(BlueprintType)
-enum class EDinosaurBehaviorState : uint8
+// Tags for different dinosaur types
+USTRUCT()
+struct TRANSPERSONALGAME_API FDinosaurHerbivoreTag : public FMassTag
 {
-    Idle            UMETA(DisplayName = "Idle"),
-    Grazing         UMETA(DisplayName = "Grazing"),
-    Drinking        UMETA(DisplayName = "Drinking"),
-    Sleeping        UMETA(DisplayName = "Sleeping"),
-    Wandering       UMETA(DisplayName = "Wandering"),
-    Following       UMETA(DisplayName = "Following Herd"),
-    Fleeing         UMETA(DisplayName = "Fleeing"),
-    Hunting         UMETA(DisplayName = "Hunting"),
-    Stalking        UMETA(DisplayName = "Stalking"),
-    Fighting        UMETA(DisplayName = "Fighting"),
-    Mating          UMETA(DisplayName = "Mating"),
-    Nesting         UMETA(DisplayName = "Nesting"),
-    Investigating   UMETA(DisplayName = "Investigating"),
-    Territorial     UMETA(DisplayName = "Defending Territory")
+    GENERATED_BODY()
+};
+
+USTRUCT()
+struct TRANSPERSONALGAME_API FDinosaurCarnivoreTag : public FMassTag
+{
+    GENERATED_BODY()
+};
+
+USTRUCT()
+struct TRANSPERSONALGAME_API FDinosaurSolitaryTag : public FMassTag
+{
+    GENERATED_BODY()
+};
+
+USTRUCT()
+struct TRANSPERSONALGAME_API FDinosaurHerdTag : public FMassTag
+{
+    GENERATED_BODY()
+};
+
+USTRUCT()
+struct TRANSPERSONALGAME_API FDinosaurTerritorialTag : public FMassTag
+{
+    GENERATED_BODY()
+};
+
+USTRUCT()
+struct TRANSPERSONALGAME_API FDinosaurFlyingTag : public FMassTag
+{
+    GENERATED_BODY()
+};
+
+USTRUCT()
+struct TRANSPERSONALGAME_API FDinosaurAquaticTag : public FMassTag
+{
+    GENERATED_BODY()
 };
