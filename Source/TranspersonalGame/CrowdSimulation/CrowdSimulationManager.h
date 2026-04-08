@@ -3,81 +3,63 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "MassEntitySubsystem.h"
-#include "MassCommonFragments.h"
-#include "MassMovementFragments.h"
+#include "MassSpawnerSubsystem.h"
+#include "MassSimulationSubsystem.h"
 #include "Engine/World.h"
 #include "CrowdSimulationManager.generated.h"
 
+UENUM(BlueprintType)
+enum class ECrowdType : uint8
+{
+    HerbivoreHerd,      // Manadas de herbívoros (Triceratops, Parasaurolophus)
+    PredatorPack,       // Grupos de predadores (Velociraptors, Dilophosaurus)
+    ScavengerGroup,     // Grupos de carniceiros (Compsognathus)
+    FlyingFlock,        // Bandos voadores (Pteranodon)
+    AquaticSchool,      // Cardumes aquáticos (Plesiosaurs)
+    SolitaryGiant,      // Gigantes solitários (T-Rex, Brachiosaurus)
+    MixedEcosystem      // Ecossistemas mistos
+};
+
+UENUM(BlueprintType)
+enum class ECrowdBehaviorState : uint8
+{
+    Grazing,            // Pastando/alimentando
+    Migrating,          // Migrando entre zonas
+    Fleeing,            // Fugindo de predadores
+    Hunting,            // Caçando (predadores)
+    Resting,            // Descansando
+    Socializing,        // Interação social
+    AlertToPlayer,      // Alerta à presença do jogador
+    PanickedByPlayer    // Pânico causado pelo jogador
+};
+
 USTRUCT(BlueprintType)
-struct FHerdBehaviorData
+struct FCrowdSpawnParameters
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 MinHerdSize = 5;
-    
+    ECrowdType CrowdType = ECrowdType::HerbivoreHerd;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 MaxHerdSize = 25;
-    
+    int32 MinGroupSize = 5;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float CohesionRadius = 1000.0f;
-    
+    int32 MaxGroupSize = 25;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float SeparationRadius = 300.0f;
-    
+    float SpawnRadius = 2000.0f;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float AlignmentRadius = 800.0f;
-    
+    float GroupCohesionRadius = 500.0f;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float GrazingTime = 300.0f; // seconds
-    
+    float PlayerDetectionRange = 1500.0f;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float MigrationSpeed = 200.0f; // cm/s
+    float FleeDistance = 3000.0f;
 };
 
-USTRUCT(BlueprintType)
-struct FTerritoryData
-{
-    GENERATED_BODY()
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FVector CenterLocation;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float TerritoryRadius = 5000.0f;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 MaxOccupants = 50;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float ResourceDensity = 1.0f;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bIsWaterSource = false;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bIsShelter = false;
-};
-
-USTRUCT(BlueprintType)
-struct FMigrationRoute
-{
-    GENERATED_BODY()
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TArray<FVector> Waypoints;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float SeasonalTrigger = 0.0f; // 0-1 representing time of year
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 ExpectedHerdCount = 10;
-};
-
-/**
- * Manages crowd simulation for dinosaur herds using Mass Entity Framework
- * Handles up to 50,000 simultaneous agents with realistic herd behaviors
- */
 UCLASS()
 class TRANSPERSONALGAME_API ACrowdSimulationManager : public AActor
 {
@@ -90,116 +72,76 @@ protected:
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
 
-    // === CORE SYSTEMS ===
-    
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mass Entity")
+    // Mass Entity System Integration
+    UPROPERTY()
     class UMassEntitySubsystem* MassEntitySubsystem;
-    
-    // === HERD BEHAVIOR CONFIGURATION ===
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Herd Behavior")
-    TMap<FString, FHerdBehaviorData> SpeciesHerdBehaviors;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory Management")
-    TArray<FTerritoryData> AvailableTerritories;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Migration")
-    TArray<FMigrationRoute> MigrationRoutes;
-    
-    // === SIMULATION PARAMETERS ===
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Simulation", meta = (ClampMin = "1000", ClampMax = "50000"))
-    int32 MaxSimulatedEntities = 25000;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Simulation")
-    float SimulationRadius = 10000.0f; // Distance from player to simulate
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Simulation")
-    float LODDistance1 = 2000.0f; // Full behavior
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Simulation")
-    float LODDistance2 = 5000.0f; // Simplified behavior
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Simulation")
-    float LODDistance3 = 10000.0f; // Position-only updates
-    
-    // === ENVIRONMENTAL FACTORS ===
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
-    float CurrentSeasonalProgress = 0.0f; // 0-1 representing year progress
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
-    float WaterAvailability = 1.0f; // 0-1 representing drought conditions
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
-    float FoodAvailability = 1.0f; // 0-1 representing vegetation density
-    
-    // === PLAYER INTERACTION ===
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player Response")
-    float PlayerThreatRadius = 500.0f;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player Response")
-    float PlayerMemoryDuration = 600.0f; // seconds
-    
+
+    UPROPERTY()
+    class UMassSpawnerSubsystem* MassSpawnerSubsystem;
+
+    UPROPERTY()
+    class UMassSimulationSubsystem* MassSimulationSubsystem;
+
+    // Crowd Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Settings")
+    TArray<FCrowdSpawnParameters> CrowdConfigurations;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 MaxSimultaneousAgents = 50000;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float SimulationRadius = 10000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float LODDistance1 = 2000.0f; // Full simulation
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float LODDistance2 = 5000.0f; // Reduced simulation
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float LODDistance3 = 10000.0f; // Minimal simulation
+
+    // Player Interaction
+    UPROPERTY()
+    class APawn* PlayerPawn;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player Interaction")
+    float PlayerInfluenceRadius = 2000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player Interaction")
+    float PlayerThreatLevel = 1.0f;
+
 public:
-    // === PUBLIC INTERFACE ===
-    
+    // Public Interface
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void SpawnHerdAtLocation(const FString& SpeciesName, const FVector& Location, int32 HerdSize);
-    
+    void SpawnCrowdGroup(const FCrowdSpawnParameters& Parameters, const FVector& Location);
+
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void TriggerMigration(int32 RouteIndex);
-    
+    void DespawnCrowdGroup(int32 GroupID);
+
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void SetEnvironmentalConditions(float SeasonProgress, float Water, float Food);
-    
+    void SetPlayerThreatLevel(float NewThreatLevel);
+
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void RegisterPlayerDisturbance(const FVector& Location, float Intensity, float Radius);
-    
+    void TriggerMassFleeResponse(const FVector& ThreatLocation, float ThreatRadius);
+
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    TArray<FVector> GetActiveHerdLocations(const FString& SpeciesName) const;
-    
-    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    int32 GetTotalActiveEntities() const;
+    TArray<FVector> GetNearbyHerdLocations(const FVector& QueryLocation, float Radius);
 
 protected:
-    // === INTERNAL SYSTEMS ===
-    
-    UFUNCTION()
-    void InitializeMassEntity();
-    
-    UFUNCTION()
-    void UpdateHerdBehaviors(float DeltaTime);
-    
-    UFUNCTION()
-    void ProcessMigrationLogic(float DeltaTime);
-    
-    UFUNCTION()
-    void UpdateLODLevels();
-    
-    UFUNCTION()
-    void HandlePlayerProximity();
-    
-    UFUNCTION()
-    void ManageTerritoryOccupancy();
+    // Internal Methods
+    void InitializeMassEntitySystem();
+    void UpdateCrowdBehaviors(float DeltaTime);
+    void ProcessPlayerInteractions(float DeltaTime);
+    void ManageLODSystem(float DeltaTime);
+    void UpdateEcosystemDynamics(float DeltaTime);
 
 private:
-    // === INTERNAL DATA ===
+    // Tracking
+    TArray<int32> ActiveCrowdGroups;
+    TMap<int32, ECrowdBehaviorState> GroupBehaviorStates;
+    TMap<int32, FVector> GroupCenterLocations;
     
-    TArray<FMassEntityHandle> ActiveHerds;
-    TMap<FMassEntityHandle, FString> EntityToSpeciesMap;
-    TMap<FVector, float> PlayerDisturbanceMap; // Location -> Timestamp
-    
-    float LastMigrationCheck = 0.0f;
-    float LastLODUpdate = 0.0f;
-    float LastTerritoryUpdate = 0.0f;
-    
-    // === PERFORMANCE TRACKING ===
-    
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Debug", meta = (AllowPrivateAccess = "true"))
-    int32 CurrentEntityCount = 0;
-    
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Debug", meta = (AllowPrivateAccess = "true"))
-    float LastFrameProcessingTime = 0.0f;
+    float LastPlayerPositionUpdate = 0.0f;
+    FVector LastKnownPlayerPosition = FVector::ZeroVector;
 };
