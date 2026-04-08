@@ -1,0 +1,303 @@
+{
+  "database_info": {
+    "version": "1.0",
+    "created_by": "Character Artist Agent #09",
+    "cycle_id": "PROD_JURASSIC_002",
+    "description": "Complete character archetype database for Jurassic Survival game"
+  },
+  "protagonist": {
+    "archetype_id": "PROT_001",
+    "display_name": "Dr. Elena Vasquez",
+    "category": "Protagonist",
+    "age": 38,
+    "profession": "Paleontologist",
+    "physical_traits": {
+      "build": "Athletic but academic",
+      "height": "5'6\"",
+      "distinctive_features": [
+        "Intelligent brown eyes with laugh lines",
+        "Small scar above left eyebrow from fieldwork",
+        "Calloused hands from excavation work",
+        "Slightly weathered skin from outdoor research"
+      ]
+    },
+    "clothing_evolution": {
+      "arrival": {
+        "description": "Modern field gear - khaki cargo pants, hiking boots, research vest",
+        "condition": "Clean, professional"
+      },
+      "early_survival": {
+        "description": "Same gear but torn and dirty, improvised repairs",
+        "condition": "Worn, practical modifications"
+      },
+      "adapted_survivor": {
+        "description": "Mix of salvaged modern gear and primitive crafted items",
+        "condition": "Weathered but functional"
+      }
+    },
+    "personality_markers": {
+      "facial_expression": "Determined but curious",
+      "posture": "Upright, observant",
+      "mannerisms": "Touches necklace when thinking (fossil pendant)"
+    },
+    "metahuman_base": "Quinn",
+    "customizations": {
+      "face_shape": "Oval with strong jawline",
+      "skin_tone": "Medium olive",
+      "hair": "Dark brown, shoulder-length, often tied back",
+      "eyes": "Warm brown",
+      "facial_hair": "None"
+    }
+  },
+  "tribal_natives": [
+    {
+      "archetype_id": "TRIBE_001",
+      "display_name": "Kael - The Pathfinder",
+      "category": "Tribal Leader",
+      "age": 42,
+      "role": "Chief Scout and Guide",
+      "physical_traits": {
+        "build": "Lean and muscular",
+        "height": "5'10\"",
+        "distinctive_features": [
+          "Intricate tribal tattoos covering arms and chest",
+          "Weathered hands with rope burn scars",
+          "Keen gray eyes that miss nothing",
+          "Braided hair with bone ornaments"
+        ]
+      },
+      "clothing": {
+        "description": "Leather and hide garments, bone jewelry, feathered accessories",
+        "materials": "Dinosaur hide, carved bone, woven plant fibers",
+        "colors": "Earth tones - browns, tans, muted greens"
+      },
+      "personality_markers": {
+        "facial_expression": "Stoic but kind",
+        "posture": "Alert, ready to move",
+        "mannerisms": "Scans environment constantly"
+      },
+      "metahuman_base": "Maddox",
+      "tribal_markings": "Geometric patterns representing wind and paths"
+    },
+    {
+      "archetype_id": "TRIBE_002", 
+      "display_name": "Naia - The Healer",
+      "category": "Tribal Shaman",
+      "age": 35,
+      "role": "Medicine Woman and Spiritual Guide",
+      "physical_traits": {
+        "build": "Medium, graceful",
+        "height": "5'5\"",
+        "distinctive_features": [
+          "Gentle hands stained with plant dyes",
+          "Wise green eyes with gold flecks",
+          "Hair adorned with healing herbs",
+          "Small ritual scars on forearms"
+        ]
+      },
+      "clothing": {
+        "description": "Flowing robes made from woven fibers, herb pouches, crystal pendants",
+        "materials": "Plant fibers, carved wood, polished stones",
+        "colors": "Natural greens, earth browns, bone white"
+      },
+      "personality_markers": {
+        "facial_expression": "Serene and knowing",
+        "posture": "Centered, peaceful",
+        "mannerisms": "Touches herbs when speaking"
+      },
+      "metahuman_base": "Camille",
+      "tribal_markings": "Spiral patterns representing growth and healing"
+    },
+    {
+      "archetype_id": "TRIBE_003",
+      "display_name": "Thorne - The Hunter",
+      "category": "Tribal Warrior", 
+      "age": 28,
+      "role": "Master Hunter and Protector",
+      "physical_traits": {
+        "build": "Powerful and agile",
+        "height": "6'1\"",
+        "distinctive_features": [
+          "Battle scars from dinosaur encounters",
+          "Intense dark eyes",
+          "Strong hands skilled with weapons",
+          "Ritual scarification on shoulders"
+        ]
+      },
+      "clothing": {
+        "description": "Practical hunting gear, leather armor, bone weapons",
+        "materials": "Treated hide, sharpened bone, sinew",
+        "colors": "Dark browns, blacks, blood red accents"
+      },
+      "personality_markers": {
+        "facial_expression": "Focused and fierce",
+        "posture": "Coiled strength",
+        "mannerisms": "Checks weapons frequently"
+      },
+      "metahuman_base": "Gunner",
+      "tribal_markings": "Claw marks representing successful hunts"
+    }
+  ],
+  "time_travelers": [
+    {
+      "archetype_id": "TRAVEL_001",
+      "display_name": "Marcus Chen - The Engineer",
+      "category": "Modern Survivor",
+      "age": 31,
+      "profession": "Mechanical Engineer",
+      "arrival_story": "Touched the gem while exploring an abandoned mine",
+      "physical_traits": {
+        "build": "Average height, practical build",
+        "height": "5'8\"",
+        "distinctive_features": [
+          "Analytical brown eyes behind cracked glasses",
+          "Calloused hands from building/repair work",
+          "Nervous habit of adjusting glasses",
+          "Small burn scars from welding"
+        ]
+      },
+      "clothing_evolution": {
+        "arrival": "Work clothes - jeans, steel-toe boots, tool belt",
+        "survival": "Improvised armor from scavenged materials",
+        "adapted": "Hybrid tech-primitive gear"
+      },
+      "personality_markers": {
+        "facial_expression": "Thoughtful, problem-solving",
+        "posture": "Slightly hunched from detailed work",
+        "mannerisms": "Sketches designs in dirt when thinking"
+      },
+      "metahuman_base": "Kwame",
+      "survival_time": "6 months"
+    },
+    {
+      "archetype_id": "TRAVEL_002",
+      "display_name": "Sarah Mitchell - The Soldier",
+      "category": "Military Survivor",
+      "age": 29,
+      "profession": "Army Ranger",
+      "arrival_story": "Found the gem during a training exercise",
+      "physical_traits": {
+        "build": "Athletic and strong",
+        "height": "5'7\"",
+        "distinctive_features": [
+          "Sharp blue eyes, always alert",
+          "Military bearing even in survival",
+          "Faded tattoo of unit insignia",
+          "Scar across left palm from combat knife"
+        ]
+      },
+      "clothing_evolution": {
+        "arrival": "Military fatigues and combat gear",
+        "survival": "Adapted military gear with primitive additions",
+        "adapted": "Tactical survival hybrid outfit"
+      },
+      "personality_markers": {
+        "facial_expression": "Alert and determined",
+        "posture": "Military straight",
+        "mannerisms": "Scans for threats constantly"
+      },
+      "metahuman_base": "Siren",
+      "survival_time": "3 months"
+    }
+  ],
+  "background_npcs": [
+    {
+      "archetype_id": "BG_001",
+      "category": "Tribal Gatherer",
+      "age_range": "20-45",
+      "variations": 8,
+      "description": "Peaceful tribal members who gather resources",
+      "clothing_style": "Simple tribal wear, gathering tools",
+      "metahuman_bases": ["Ada", "Camille", "Belle", "Priya"]
+    },
+    {
+      "archetype_id": "BG_002", 
+      "category": "Tribal Crafter",
+      "age_range": "25-60",
+      "variations": 6,
+      "description": "Skilled artisans who create tools and art",
+      "clothing_style": "Work clothes with tool belts, stained hands",
+      "metahuman_bases": ["Kwame", "Maddox", "Gunner"]
+    },
+    {
+      "archetype_id": "BG_003",
+      "category": "Lost Explorer",
+      "age_range": "25-50", 
+      "variations": 10,
+      "description": "Recently arrived time travelers in various states of adaptation",
+      "clothing_style": "Modern clothes in various states of wear",
+      "metahuman_bases": ["Quinn", "Siren", "Kwame", "Maddox", "Ada"]
+    }
+  ],
+  "unique_characters": [
+    {
+      "archetype_id": "UNIQUE_001",
+      "display_name": "The Chronicler",
+      "category": "Mysterious Figure",
+      "age": "Unknown (appears 50s)",
+      "description": "Enigmatic figure who seems to know about the time gems",
+      "physical_traits": {
+        "build": "Tall and gaunt",
+        "distinctive_features": [
+          "Piercing silver eyes",
+          "Prematurely white hair",
+          "Hands marked with strange symbols",
+          "Wears clothes from multiple time periods"
+        ]
+      },
+      "role": "Quest giver and lore keeper",
+      "metahuman_base": "Custom build",
+      "appears_in": "Key story moments only"
+    }
+  ],
+  "clothing_systems": {
+    "material_types": {
+      "modern_synthetic": {
+        "durability": "High initially, degrades over time",
+        "appearance": "Clean to worn to tattered",
+        "colors": "Bright to faded"
+      },
+      "leather_hide": {
+        "durability": "Very high",
+        "appearance": "Weathered but functional",
+        "colors": "Natural browns and tans"
+      },
+      "plant_fiber": {
+        "durability": "Medium",
+        "appearance": "Rough but practical",
+        "colors": "Natural greens and browns"
+      },
+      "bone_ornaments": {
+        "durability": "High",
+        "appearance": "Polished or carved",
+        "colors": "Bone white to yellowed"
+      }
+    },
+    "weathering_stages": {
+      "pristine": "Just arrived or well-maintained",
+      "worn": "Shows use but still functional",
+      "weathered": "Clearly been through hardship",
+      "tattered": "Barely holding together",
+      "improvised": "Patched with available materials"
+    }
+  },
+  "diversity_guidelines": {
+    "ethnicity_distribution": {
+      "description": "Characters represent global diversity",
+      "tribal_natives": "Mix of ethnicities suggesting long-term settlement",
+      "time_travelers": "Random modern global population sample",
+      "protagonist": "Latina heritage"
+    },
+    "age_distribution": {
+      "young_adult": "20%",
+      "adult": "50%", 
+      "middle_aged": "25%",
+      "elder": "5%"
+    },
+    "physical_variation": {
+      "body_types": "Full range of realistic human builds",
+      "facial_features": "Unique combinations, no duplicates",
+      "scars_markings": "Each character has unique history markers"
+    }
+  }
+}
