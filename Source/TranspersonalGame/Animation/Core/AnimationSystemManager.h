@@ -1,77 +1,114 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/World.h"
-#include "Components/ActorComponent.h"
+#include "Engine/Engine.h"
 #include "Animation/AnimInstance.h"
-#include "PoseSearch/PoseSearchDatabase.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Engine/DataTable.h"
 #include "AnimationSystemManager.generated.h"
 
-DECLARE_LOG_CATEGORY_EXTERN(LogAnimationSystem, Log, All);
+class UMotionMatchingComponent;
+class UIKRigComponent;
+class UCharacterMovementComponent;
 
 /**
- * Sistema central de gestão de animação para o jogo Jurássico
- * Responsável por coordenar Motion Matching, IK, e variações procedurais
+ * Manages the core animation system for all characters and dinosaurs
+ * Implements Motion Matching with IK foot placement and procedural variations
  */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UAnimationSystemManager : public UActorComponent
+class TRANSPERSONALGAME_API UAnimationSystemManager : public UObject
 {
     GENERATED_BODY()
 
 public:
     UAnimationSystemManager();
 
+    // Initialize the animation system
+    UFUNCTION(BlueprintCallable, Category = "Animation System")
+    void InitializeAnimationSystem();
+
+    // Register a character with the animation system
+    UFUNCTION(BlueprintCallable, Category = "Animation System")
+    void RegisterCharacter(AActor* Character, ECharacterType CharacterType);
+
+    // Update animation system (called per frame)
+    UFUNCTION(BlueprintCallable, Category = "Animation System")
+    void UpdateAnimationSystem(float DeltaTime);
+
+    // Get motion matching database for character type
+    UFUNCTION(BlueprintCallable, Category = "Animation System")
+    class UPoseSearchDatabase* GetMotionMatchingDatabase(ECharacterType CharacterType);
+
 protected:
-    virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
-
-    // Motion Matching Database Management
+    // Motion Matching databases for different character types
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    TMap<FString, class UPoseSearchDatabase*> MotionMatchingDatabases;
+    TMap<ECharacterType, class UPoseSearchDatabase*> MotionMatchingDatabases;
 
-    // IK System Configuration
+    // IK Rig assets for different character types
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK System")
-    float FootIKTraceDistance = 50.0f;
+    TMap<ECharacterType, class UIKRigDefinition*> IKRigAssets;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK System")
-    float FootIKInterpSpeed = 15.0f;
+    // Animation Blueprint classes for different character types
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Blueprints")
+    TMap<ECharacterType, TSubclassOf<UAnimInstance>> AnimBPClasses;
 
-    // Procedural Animation Variation
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Procedural Variation")
-    float MovementVariationScale = 0.1f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Procedural Variation")
-    int32 MaxAnimationVariants = 5;
-
-public:
-    // Motion Matching Functions
-    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    class UPoseSearchDatabase* GetMotionMatchingDatabase(const FString& DatabaseName);
-
-    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    void RegisterMotionMatchingDatabase(const FString& DatabaseName, class UPoseSearchDatabase* Database);
-
-    // IK System Functions
-    UFUNCTION(BlueprintCallable, Category = "IK System")
-    FVector CalculateFootIKOffset(AActor* Character, const FName& FootBoneName, const FVector& FootLocation);
-
-    UFUNCTION(BlueprintCallable, Category = "IK System")
-    bool PerformFootIKTrace(const FVector& StartLocation, FVector& OutHitLocation, FVector& OutHitNormal);
-
-    // Procedural Variation Functions
-    UFUNCTION(BlueprintCallable, Category = "Procedural Variation")
-    float GenerateMovementVariation(int32 CharacterID, const FString& MovementType);
-
-    UFUNCTION(BlueprintCallable, Category = "Procedural Variation")
-    void ApplyCharacterSpecificAnimationTweaks(class UAnimInstance* AnimInstance, int32 CharacterID);
+    // Registered characters
+    UPROPERTY()
+    TArray<AActor*> RegisteredCharacters;
 
 private:
-    // Internal tracking
-    TMap<int32, FRandomStream> CharacterRandomStreams;
+    // Performance monitoring
+    float LastUpdateTime;
+    int32 ActiveAnimationCount;
     
-    void InitializeCharacterVariation(int32 CharacterID);
-    float GetCachedVariation(int32 CharacterID, const FString& VariationType);
+    // Update motion matching for character
+    void UpdateMotionMatching(AActor* Character, float DeltaTime);
     
-    // Cache para optimização
-    TMap<FString, float> VariationCache;
+    // Update IK system for character
+    void UpdateIKSystem(AActor* Character, float DeltaTime);
+    
+    // Apply procedural variations
+    void ApplyProceduralVariations(AActor* Character, float DeltaTime);
+};
+
+// Character types for animation system
+UENUM(BlueprintType)
+enum class ECharacterType : uint8
+{
+    Player          UMETA(DisplayName = "Player Character"),
+    SmallHerbivore  UMETA(DisplayName = "Small Herbivore"),
+    LargeHerbivore  UMETA(DisplayName = "Large Herbivore"),
+    SmallCarnivore  UMETA(DisplayName = "Small Carnivore"),
+    LargeCarnivore  UMETA(DisplayName = "Large Carnivore"),
+    FlyingCreature  UMETA(DisplayName = "Flying Creature"),
+    AquaticCreature UMETA(DisplayName = "Aquatic Creature")
+};
+
+// Animation state for motion matching
+UENUM(BlueprintType)
+enum class EAnimationState : uint8
+{
+    Idle            UMETA(DisplayName = "Idle"),
+    Walking         UMETA(DisplayName = "Walking"),
+    Running         UMETA(DisplayName = "Running"),
+    Sneaking        UMETA(DisplayName = "Sneaking"),
+    Climbing        UMETA(DisplayName = "Climbing"),
+    Swimming        UMETA(DisplayName = "Swimming"),
+    Flying          UMETA(DisplayName = "Flying"),
+    Feeding         UMETA(DisplayName = "Feeding"),
+    Sleeping        UMETA(DisplayName = "Sleeping"),
+    Alert           UMETA(DisplayName = "Alert"),
+    Aggressive      UMETA(DisplayName = "Aggressive"),
+    Fleeing         UMETA(DisplayName = "Fleeing"),
+    Interacting     UMETA(DisplayName = "Interacting")
+};
+
+// Animation quality settings
+UENUM(BlueprintType)
+enum class EAnimationQuality : uint8
+{
+    Low             UMETA(DisplayName = "Low Quality"),
+    Medium          UMETA(DisplayName = "Medium Quality"),
+    High            UMETA(DisplayName = "High Quality"),
+    Ultra           UMETA(DisplayName = "Ultra Quality")
 };
