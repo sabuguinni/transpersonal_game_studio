@@ -1,13 +1,13 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
-#include "Components/DirectionalLightComponent.h"
-#include "Components/SkyLightComponent.h"
+#include "Engine/World.h"
+#include "Components/ActorComponent.h"
+#include "Engine/DirectionalLight.h"
 #include "Components/SkyAtmosphereComponent.h"
 #include "Components/VolumetricCloudComponent.h"
+#include "Components/SkyLightComponent.h"
 #include "Components/ExponentialHeightFogComponent.h"
-#include "Engine/PostProcessVolume.h"
 #include "LightingSystemManager.generated.h"
 
 UENUM(BlueprintType)
@@ -26,7 +26,7 @@ UENUM(BlueprintType)
 enum class EWeatherState : uint8
 {
     Clear       UMETA(DisplayName = "Clear"),
-    Cloudy      UMETA(DisplayName = "Cloudy"),
+    PartlyCloudy UMETA(DisplayName = "Partly Cloudy"),
     Overcast    UMETA(DisplayName = "Overcast"),
     LightRain   UMETA(DisplayName = "Light Rain"),
     HeavyRain   UMETA(DisplayName = "Heavy Rain"),
@@ -39,189 +39,176 @@ enum class EEmotionalTone : uint8
 {
     Peaceful    UMETA(DisplayName = "Peaceful"),
     Tense       UMETA(DisplayName = "Tense"),
-    Threatening UMETA(DisplayName = "Threatening"),
+    Dangerous   UMETA(DisplayName = "Dangerous"),
+    Terrifying  UMETA(DisplayName = "Terrifying"),
     Mysterious  UMETA(DisplayName = "Mysterious"),
-    Hostile     UMETA(DisplayName = "Hostile"),
-    Serene      UMETA(DisplayName = "Serene")
+    Hopeful     UMETA(DisplayName = "Hopeful")
 };
 
 USTRUCT(BlueprintType)
-struct FLightingPreset
+struct FLightingState
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sun")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float SunAngle = 45.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
     FLinearColor SunColor = FLinearColor::White;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sun")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
     float SunIntensity = 10.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sun")
-    FRotator SunRotation = FRotator::ZeroRotator;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FLinearColor SkyColor = FLinearColor(0.5f, 0.7f, 1.0f);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sky")
-    FLinearColor SkyLightColor = FLinearColor::White;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float CloudDensity = 0.3f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sky")
-    float SkyLightIntensity = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
-    float AtmosphereHaziness = 0.5f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog")
-    FLinearColor FogColor = FLinearColor::White;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
     float FogDensity = 0.02f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog")
-    float FogHeightFalloff = 0.2f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FLinearColor FogColor = FLinearColor(0.8f, 0.9f, 1.0f);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clouds")
-    float CloudCoverage = 0.5f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PostProcess")
-    float ColorTemperature = 6500.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PostProcess")
-    float Exposure = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float AtmosphericPerspective = 1.0f;
 };
 
-UCLASS()
-class TRANSPERSONALGAME_API ALightingSystemManager : public AActor
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API ULightingSystemManager : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    ALightingSystemManager();
+    ULightingSystemManager();
 
 protected:
     virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
-
-    // Core Components
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Lighting")
-    class UDirectionalLightComponent* SunLight;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Lighting")
-    class USkyLightComponent* SkyLight;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Atmosphere")
-    class USkyAtmosphereComponent* SkyAtmosphere;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Clouds")
-    class UVolumetricCloudComponent* VolumetricClouds;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Fog")
-    class UExponentialHeightFogComponent* HeightFog;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PostProcess")
-    class UPostProcessComponent* PostProcessComponent;
-
-    // Time System
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time", meta = (ClampMin = 0.0, ClampMax = 24.0))
-    float CurrentTimeOfDay = 12.0f; // 0-24 hours
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time")
-    float DayDurationInMinutes = 20.0f; // Real minutes for full day cycle
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time")
-    bool bAutoTimeProgression = true;
-
-    // Weather System
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
-    EWeatherState CurrentWeatherState = EWeatherState::Clear;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
-    float WeatherTransitionSpeed = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
-    bool bAutoWeatherProgression = true;
-
-    // Emotional Tone System
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotion")
-    EEmotionalTone CurrentEmotionalTone = EEmotionalTone::Peaceful;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotion")
-    float EmotionalIntensity = 0.5f; // 0-1 range
-
-    // Lighting Presets
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Presets")
-    TMap<ETimeOfDay, FLightingPreset> TimeOfDayPresets;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Presets")
-    TMap<EWeatherState, FLightingPreset> WeatherPresets;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Presets")
-    TMap<EEmotionalTone, FLightingPreset> EmotionalPresets;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 public:
-    // Time Control Functions
-    UFUNCTION(BlueprintCallable, Category = "Time")
-    void SetTimeOfDay(float NewTime);
+    // === CORE SYSTEM ===
+    UFUNCTION(BlueprintCallable, Category = "Lighting System")
+    void InitializeLightingSystem();
 
-    UFUNCTION(BlueprintCallable, Category = "Time")
-    ETimeOfDay GetCurrentTimeOfDayEnum() const;
+    UFUNCTION(BlueprintCallable, Category = "Lighting System")
+    void SetTimeOfDay(ETimeOfDay NewTimeOfDay, float TransitionDuration = 2.0f);
 
-    UFUNCTION(BlueprintCallable, Category = "Time")
-    void SetDayDuration(float NewDurationInMinutes);
+    UFUNCTION(BlueprintCallable, Category = "Lighting System")
+    void SetWeatherState(EWeatherState NewWeather, float TransitionDuration = 5.0f);
 
-    // Weather Control Functions
-    UFUNCTION(BlueprintCallable, Category = "Weather")
-    void SetWeatherState(EWeatherState NewWeatherState);
+    UFUNCTION(BlueprintCallable, Category = "Lighting System")
+    void SetEmotionalTone(EEmotionalTone NewTone, float TransitionDuration = 3.0f);
 
-    UFUNCTION(BlueprintCallable, Category = "Weather")
-    void TransitionToWeather(EWeatherState NewWeatherState, float TransitionDuration = 5.0f);
+    // === TIME PROGRESSION ===
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time System")
+    bool bAutoProgressTime = true;
 
-    // Emotional Tone Functions
-    UFUNCTION(BlueprintCallable, Category = "Emotion")
-    void SetEmotionalTone(EEmotionalTone NewTone, float Intensity = 0.5f);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time System", meta = (ClampMin = "0.1", ClampMax = "10.0"))
+    float TimeProgressionSpeed = 1.0f;
 
-    UFUNCTION(BlueprintCallable, Category = "Emotion")
-    void BlendToEmotionalTone(EEmotionalTone NewTone, float Intensity, float BlendDuration = 3.0f);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time System")
+    float DayLengthInMinutes = 20.0f;
 
-    // Zone-based Lighting
-    UFUNCTION(BlueprintCallable, Category = "Zones")
-    void ApplyZoneLighting(const FString& ZoneName, float BlendDuration = 2.0f);
+    // === EMOTIONAL LIGHTING ===
+    UFUNCTION(BlueprintCallable, Category = "Emotional Lighting")
+    void TriggerTensionLighting(float Intensity = 1.0f, float Duration = 10.0f);
 
-    // Threat Response System
-    UFUNCTION(BlueprintCallable, Category = "Threat")
-    void TriggerThreatLighting(float ThreatLevel = 1.0f, float Duration = 10.0f);
+    UFUNCTION(BlueprintCallable, Category = "Emotional Lighting")
+    void TriggerDangerLighting(float Intensity = 1.0f, float Duration = 15.0f);
 
-    UFUNCTION(BlueprintCallable, Category = "Threat")
-    void RestoreNormalLighting(float RestoreDuration = 5.0f);
+    UFUNCTION(BlueprintCallable, Category = "Emotional Lighting")
+    void RestoreNormalLighting(float TransitionDuration = 5.0f);
 
-private:
-    // Internal update functions
+    // === WEATHER EFFECTS ===
+    UFUNCTION(BlueprintCallable, Category = "Weather System")
+    void StartRainEffect(float Intensity = 0.5f);
+
+    UFUNCTION(BlueprintCallable, Category = "Weather System")
+    void StopRainEffect(float TransitionDuration = 3.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Weather System")
+    void StartStormEffect();
+
+    UFUNCTION(BlueprintCallable, Category = "Weather System")
+    void StopStormEffect();
+
+    // === GETTERS ===
+    UFUNCTION(BlueprintPure, Category = "Lighting System")
+    ETimeOfDay GetCurrentTimeOfDay() const { return CurrentTimeOfDay; }
+
+    UFUNCTION(BlueprintPure, Category = "Lighting System")
+    EWeatherState GetCurrentWeather() const { return CurrentWeather; }
+
+    UFUNCTION(BlueprintPure, Category = "Lighting System")
+    EEmotionalTone GetCurrentEmotionalTone() const { return CurrentEmotionalTone; }
+
+    UFUNCTION(BlueprintPure, Category = "Lighting System")
+    float GetCurrentTimeOfDayFloat() const { return CurrentTimeFloat; }
+
+protected:
+    // === LIGHTING COMPONENTS ===
+    UPROPERTY()
+    class ADirectionalLight* SunLight;
+
+    UPROPERTY()
+    class ASkyLight* SkyLightActor;
+
+    UPROPERTY()
+    class AExponentialHeightFog* FogActor;
+
+    UPROPERTY()
+    class AVolumetricCloud* CloudActor;
+
+    UPROPERTY()
+    class ASkyAtmosphere* AtmosphereActor;
+
+    // === STATE MANAGEMENT ===
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Current State")
+    ETimeOfDay CurrentTimeOfDay = ETimeOfDay::Morning;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Current State")
+    EWeatherState CurrentWeather = EWeatherState::Clear;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Current State")
+    EEmotionalTone CurrentEmotionalTone = EEmotionalTone::Peaceful;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Current State")
+    float CurrentTimeFloat = 0.5f; // 0.0 = midnight, 0.5 = noon, 1.0 = midnight
+
+    // === LIGHTING PRESETS ===
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting Presets")
+    TMap<ETimeOfDay, FLightingState> TimeOfDayPresets;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting Presets")
+    TMap<EWeatherState, FLightingState> WeatherPresets;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting Presets")
+    TMap<EEmotionalTone, FLightingState> EmotionalPresets;
+
+    // === TRANSITION SYSTEM ===
+    UPROPERTY()
+    bool bIsTransitioning = false;
+
+    UPROPERTY()
+    float TransitionProgress = 0.0f;
+
+    UPROPERTY()
+    float TransitionDuration = 2.0f;
+
+    UPROPERTY()
+    FLightingState TransitionStartState;
+
+    UPROPERTY()
+    FLightingState TransitionTargetState;
+
+    // === INTERNAL FUNCTIONS ===
+    void UpdateLightingTransition(float DeltaTime);
+    void ApplyLightingState(const FLightingState& State);
+    void FindLightingActors();
+    void SetupDefaultPresets();
+    FLightingState BlendLightingStates(const FLightingState& StateA, const FLightingState& StateB, float Alpha);
     void UpdateTimeProgression(float DeltaTime);
-    void UpdateWeatherProgression(float DeltaTime);
-    void UpdateLightingComponents();
-    void ApplyLightingPreset(const FLightingPreset& Preset, float BlendWeight = 1.0f);
-    void BlendLightingPresets(const FLightingPreset& PresetA, const FLightingPreset& PresetB, float BlendFactor);
-    
-    // Utility functions
-    FLightingPreset GetCurrentTimePreset() const;
-    FLightingPreset GetCurrentWeatherPreset() const;
-    FLightingPreset GetCurrentEmotionalPreset() const;
-    float CalculateSunAngle(float TimeOfDay) const;
-    
-    // Weather transition variables
-    bool bIsTransitioningWeather = false;
-    EWeatherState TargetWeatherState;
-    float WeatherTransitionTimer = 0.0f;
-    float WeatherTransitionDuration = 5.0f;
-    
-    // Emotional tone transition variables
-    bool bIsTransitioningEmotion = false;
-    EEmotionalTone TargetEmotionalTone;
-    float EmotionalTransitionTimer = 0.0f;
-    float EmotionalTransitionDuration = 3.0f;
-    float TargetEmotionalIntensity = 0.5f;
-    
-    // Threat system variables
-    bool bThreatActive = false;
-    float ThreatTimer = 0.0f;
-    float ThreatDuration = 10.0f;
-    float ThreatLevel = 1.0f;
-    FLightingPreset PreThreatPreset;
+    FRotator CalculateSunRotation(float TimeOfDay);
 };
