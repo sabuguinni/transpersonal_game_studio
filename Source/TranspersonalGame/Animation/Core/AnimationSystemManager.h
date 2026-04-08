@@ -3,79 +3,53 @@
 #include "CoreMinimal.h"
 #include "Engine/Engine.h"
 #include "Animation/AnimInstance.h"
-#include "Components/ActorComponent.h"
 #include "PoseSearch/PoseSearchDatabase.h"
+#include "PoseSearch/PoseSearchSchema.h"
+#include "Components/ActorComponent.h"
 #include "AnimationSystemManager.generated.h"
 
 UENUM(BlueprintType)
-enum class ECharacterType : uint8
-{
-    Player,
-    SmallHerbivore,
-    LargeHerbivore,
-    SmallCarnivore,
-    LargeCarnivore,
-    AerialDinosaur
-};
-
-UENUM(BlueprintType)
-enum class EMovementState : uint8
+enum class ECharacterMovementState : uint8
 {
     Idle,
     Walking,
     Running,
-    Sprinting,
     Crouching,
+    Sneaking,
     Climbing,
     Swimming,
-    Feeding,
-    Sleeping,
-    Alert,
-    Aggressive,
-    Fleeing,
-    Hunting,
-    Domesticated
+    Falling,
+    Landing,
+    Dying,
+    Interacting
 };
 
-USTRUCT(BlueprintType)
-struct FCharacterAnimationProfile
+UENUM(BlueprintType)
+enum class ETerrainAdaptationLevel : uint8
 {
-    GENERATED_BODY()
+    None,
+    Light,      // Small rocks, slight inclines
+    Medium,     // Uneven ground, roots
+    Heavy,      // Steep terrain, large obstacles
+    Extreme     // Cliff faces, very irregular surfaces
+};
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    ECharacterType CharacterType;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TObjectPtr<UPoseSearchDatabase> LocomotionDatabase;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TObjectPtr<UPoseSearchDatabase> CombatDatabase;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TObjectPtr<UPoseSearchDatabase> InteractionDatabase;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float MovementSpeed = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float TurnRate = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float IKIntensity = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bUseMotionMatching = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bUseLegIK = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bUseSpineIK = false;
+UENUM(BlueprintType)
+enum class EEmotionalState : uint8
+{
+    Calm,
+    Alert,
+    Fearful,
+    Panicked,
+    Exhausted,
+    Injured,
+    Confident,
+    Aggressive
 };
 
 /**
- * Sistema central de gestão de animação para o jogo Jurássico
- * Coordena Motion Matching, IK e sistemas especializados por tipo de personagem
+ * Central manager for all animation systems in the Jurassic survival game
+ * Coordinates Motion Matching, IK systems, and emotional state animations
  */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UAnimationSystemManager : public UActorComponent
@@ -85,52 +59,96 @@ class TRANSPERSONALGAME_API UAnimationSystemManager : public UActorComponent
 public:
     UAnimationSystemManager();
 
-    UFUNCTION(BlueprintCallable, Category = "Animation System")
-    void InitializeForCharacter(ECharacterType InCharacterType, class USkeletalMeshComponent* SkeletalMesh);
-
-    UFUNCTION(BlueprintCallable, Category = "Animation System")
-    void UpdateMovementState(EMovementState NewState);
-
-    UFUNCTION(BlueprintCallable, Category = "Animation System")
-    void SetDomesticationLevel(float Level); // 0.0 = selvagem, 1.0 = totalmente domesticado
-
-    UFUNCTION(BlueprintCallable, Category = "Animation System")
-    FCharacterAnimationProfile GetAnimationProfile() const { return CurrentProfile; }
-
-    UFUNCTION(BlueprintCallable, Category = "Animation System")
-    void EnableTerrainAdaptation(bool bEnable);
-
-    UFUNCTION(BlueprintCallable, Category = "Animation System")
-    void SetIndividualVariation(float VariationSeed); // Para criar variações únicas
-
 protected:
     virtual void BeginPlay() override;
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Profiles")
-    TMap<ECharacterType, FCharacterAnimationProfile> AnimationProfiles;
+public:
+    // Motion Matching Database Management
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    TMap<ECharacterMovementState, TObjectPtr<UPoseSearchDatabase>> MovementDatabases;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Current State")
-    FCharacterAnimationProfile CurrentProfile;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    TObjectPtr<UPoseSearchSchema> PlayerLocomotionSchema;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Current State")
-    EMovementState CurrentMovementState;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    TObjectPtr<UPoseSearchSchema> DinosaurLocomotionSchema;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Current State")
-    float DomesticationLevel = 0.0f;
+    // IK System Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK System")
+    float FootIKRange = 50.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Current State")
-    float IndividualVariationSeed = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK System")
+    float FootIKInterpSpeed = 15.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK System")
+    bool bEnableFootIK = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK System")
+    bool bEnableHandIK = false; // For climbing
+
+    // Emotional Animation System
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotional States")
+    TMap<EEmotionalState, float> EmotionalBlendWeights;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotional States")
+    float EmotionalTransitionSpeed = 2.0f;
+
+    // Terrain Adaptation
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Adaptation")
+    ETerrainAdaptationLevel CurrentTerrainLevel;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Adaptation")
+    float TerrainAdaptationStrength = 1.0f;
+
+    // Animation Quality Settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 MaxSimultaneousAnimations = 50;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float LODDistanceThreshold = 1000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    bool bUseAnimationLOD = true;
+
+public:
+    // Blueprint callable functions
+    UFUNCTION(BlueprintCallable, Category = "Animation System")
+    void SetCharacterMovementState(ECharacterMovementState NewState);
+
+    UFUNCTION(BlueprintCallable, Category = "Animation System")
+    void SetEmotionalState(EEmotionalState NewState, float BlendTime = 1.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Animation System")
+    void UpdateTerrainAdaptation(ETerrainAdaptationLevel NewLevel);
+
+    UFUNCTION(BlueprintCallable, Category = "Animation System")
+    UPoseSearchDatabase* GetCurrentMovementDatabase() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Animation System")
+    float GetEmotionalStateWeight(EEmotionalState State) const;
+
+    UFUNCTION(BlueprintPure, Category = "Animation System")
+    bool IsInFearState() const;
+
+    UFUNCTION(BlueprintPure, Category = "Animation System")
+    float GetMovementIntensity() const;
 
 private:
-    void LoadDefaultProfiles();
-    void ApplyIndividualVariations();
-    void UpdateIKSettings();
+    // Internal state tracking
+    ECharacterMovementState CurrentMovementState;
+    EEmotionalState CurrentEmotionalState;
+    EEmotionalState TargetEmotionalState;
+    
+    float EmotionalBlendTimer;
+    float MovementIntensity;
+    
+    // Performance tracking
+    int32 ActiveAnimationCount;
+    TArray<AActor*> NearbyAnimatedActors;
 
-    UPROPERTY()
-    TObjectPtr<USkeletalMeshComponent> OwnerSkeletalMesh;
-
-    // Cache para performance
-    float LastTerrainCheckTime = 0.0f;
-    static constexpr float TerrainCheckInterval = 0.1f;
+    // Internal functions
+    void UpdateEmotionalBlending(float DeltaTime);
+    void UpdatePerformanceMetrics();
+    void OptimizeAnimationLOD();
 };
