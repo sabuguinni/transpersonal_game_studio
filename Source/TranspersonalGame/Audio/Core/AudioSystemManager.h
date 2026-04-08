@@ -1,101 +1,121 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/Engine.h"
-#include "Components/AudioComponent.h"
-#include "Sound/SoundBase.h"
+#include "Engine/World.h"
+#include "Subsystems/WorldSubsystem.h"
 #include "MetasoundSource.h"
+#include "AudioModulation.h"
+#include "Components/AudioComponent.h"
 #include "AudioSystemManager.generated.h"
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnAudioStateChanged, FString, NewState);
+
 UENUM(BlueprintType)
-enum class EAudioState : uint8
+enum class EAudioEnvironmentState : uint8
 {
-    Calm,
-    Tense,
-    Danger,
-    Combat,
-    Discovery,
-    Domestication,
-    Exploration
+    Forest_Day_Calm,
+    Forest_Day_Tense,
+    Forest_Night_Calm,
+    Forest_Night_Danger,
+    Cave_Exploration,
+    Cave_Danger,
+    Water_Shallow,
+    Water_Deep,
+    Open_Plains_Day,
+    Open_Plains_Night,
+    Storm_Approaching,
+    Storm_Active
 };
 
 UENUM(BlueprintType)
-enum class EEnvironmentType : uint8
+enum class EThreatLevel : uint8
 {
-    DenseForest,
-    OpenPlains,
-    RiverBanks,
-    Caves,
-    Cliffs,
-    Swamplands
+    Safe,
+    Cautious,
+    Alert,
+    Danger,
+    Combat
 };
 
 UCLASS(BlueprintType)
-class TRANSPERSONALGAME_API UAudioSystemManager : public UObject
+class TRANSPERSONALGAME_API UAudioSystemManager : public UWorldSubsystem
 {
     GENERATED_BODY()
 
 public:
-    UAudioSystemManager();
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
 
-    // Core MetaSound Management
+    // Core Audio State Management
     UFUNCTION(BlueprintCallable, Category = "Audio System")
-    void InitializeAudioSystem();
-
-    UFUNCTION(BlueprintCallable, Category = "Audio System")
-    void UpdateAudioState(EAudioState NewState, float TransitionTime = 2.0f);
+    void SetEnvironmentState(EAudioEnvironmentState NewState);
 
     UFUNCTION(BlueprintCallable, Category = "Audio System")
-    void SetEnvironmentType(EEnvironmentType Environment);
+    void SetThreatLevel(EThreatLevel NewThreatLevel);
 
-    // Dynamic Music System
-    UFUNCTION(BlueprintCallable, Category = "Music")
-    void TriggerMusicTransition(EAudioState TargetState, bool bForceImmediate = false);
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void SetTimeOfDay(float TimeOfDay); // 0.0 = midnight, 0.5 = noon
 
-    UFUNCTION(BlueprintCallable, Category = "Music")
-    void SetMusicIntensity(float Intensity); // 0.0 = minimal, 1.0 = maximum
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void SetWeatherIntensity(float Intensity); // 0.0 = clear, 1.0 = storm
 
-    // Ambient Audio
-    UFUNCTION(BlueprintCallable, Category = "Ambient")
-    void UpdateAmbientLayers(EEnvironmentType Environment, float TimeOfDay, float WeatherIntensity);
+    // Adaptive Music System
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void TriggerMusicTransition(const FString& TargetState, float TransitionTime = 2.0f);
 
-    // Dinosaur Audio
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur Audio")
-    void PlayDinosaurCall(class ADinosaurCharacter* Dinosaur, FString CallType);
+    // Dinosaur Audio Events
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void PlayDinosaurCall(const FString& DinosaurSpecies, const FVector& Location, float Intensity = 1.0f);
 
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur Audio")
-    void UpdateDinosaurProximityAudio(TArray<class ADinosaurCharacter*> NearbyDinosaurs);
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void PlayFootstepSequence(const FString& SurfaceType, const FVector& Location, float Weight = 1.0f);
+
+    // Environmental Audio
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void UpdateAmbientLayers();
+
+    UPROPERTY(BlueprintAssignable)
+    FOnAudioStateChanged OnAudioStateChanged;
 
 protected:
-    // MetaSound Sources
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MetaSounds")
-    TObjectPtr<UMetaSoundSource> MasterMusicMetaSound;
+    // Core MetaSound Assets
+    UPROPERTY(EditDefaultsOnly, Category = "Audio Assets")
+    TObjectPtr<UMetaSoundSource> AdaptiveMusicMetaSound;
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MetaSounds")
+    UPROPERTY(EditDefaultsOnly, Category = "Audio Assets")
     TObjectPtr<UMetaSoundSource> AmbientLayersMetaSound;
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MetaSounds")
-    TObjectPtr<UMetaSoundSource> DinosaurAudioMetaSound;
+    UPROPERTY(EditDefaultsOnly, Category = "Audio Assets")
+    TObjectPtr<UMetaSoundSource> DinosaurCallsMetaSound;
 
     // Audio Components
-    UPROPERTY(BlueprintReadOnly, Category = "Audio Components")
+    UPROPERTY()
     TObjectPtr<UAudioComponent> MusicAudioComponent;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Audio Components")
+    UPROPERTY()
     TObjectPtr<UAudioComponent> AmbientAudioComponent;
 
     // Current State
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    EAudioState CurrentAudioState;
+    UPROPERTY(BlueprintReadOnly, Category = "Audio State")
+    EAudioEnvironmentState CurrentEnvironmentState;
 
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    EEnvironmentType CurrentEnvironment;
+    UPROPERTY(BlueprintReadOnly, Category = "Audio State")
+    EThreatLevel CurrentThreatLevel;
 
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    float CurrentMusicIntensity;
+    UPROPERTY(BlueprintReadOnly, Category = "Audio State")
+    float CurrentTimeOfDay;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Audio State")
+    float CurrentWeatherIntensity;
 
 private:
-    void InitializeMetaSounds();
-    void SetupAudioComponents();
-    void UpdateMetaSoundParameters();
+    void InitializeAudioComponents();
+    void UpdateMusicParameters();
+    void UpdateAmbientParameters();
+    
+    // Parameter names for MetaSounds
+    static const FName PARAM_ThreatLevel;
+    static const FName PARAM_TimeOfDay;
+    static const FName PARAM_WeatherIntensity;
+    static const FName PARAM_EnvironmentType;
 };
