@@ -1,326 +1,550 @@
 #include "NPCBehaviorSystem.h"
+#include "Engine/World.h"
 #include "GameFramework/Pawn.h"
 #include "Kismet/GameplayStatics.h"
-#include "Engine/World.h"
 #include "TimerManager.h"
-#include "Math/UnrealMathUtility.h"
 
-UNPCBehaviorComponent::UNPCBehaviorComponent()
+UNPCBehaviorSystem::UNPCBehaviorSystem()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f; // Tick a cada 100ms para performance
-
-    // Valores padrão para características individuais
-    Aggressiveness = FMath::RandRange(0.1f, 0.9f);
-    Curiosity = FMath::RandRange(0.2f, 0.8f);
-    Sociability = FMath::RandRange(0.3f, 0.7f);
-    Intelligence = FMath::RandRange(0.4f, 0.9f);
-    Territoriality = FMath::RandRange(0.2f, 0.8f);
-
-    CurrentEmotionalState = EDinosaurEmotionalState::Calm;
-    CurrentTimeOfDay = 0.0f;
-    DomesticationProgress = 0.0f;
-    bIsBeingDomesticated = false;
+    PrimaryComponentTick.TickInterval = 0.1f; // Update 10 times per second for performance
     
-    LastRoutineUpdate = 0.0f;
-    LastEmotionalUpdate = 0.0f;
-    LastMemoryUpdate = 0.0f;
+    // Valores padrão
+    Species = EDinosaurSpecies::Triceratops;
+    ThreatLevel = EDinosaurThreatLevel::LowThreat;
+    bCanBeDomesticated = true;
+    CurrentDomesticationStage = EDomesticationStage::Wild;
+    
+    // Sistema de memória
+    MemoryDuration = 300.0f; // 5 minutos
+    MaxMemoryEntries = 20;
+    
+    // Sistema de domesticação
+    DomesticationProgress = 0.0f;
+    PlayerFamiliarity = 0.0f;
+    DomesticationRate = 0.1f;
+    
+    // Estado inicial
+    CurrentBehaviorState = EDinosaurBehaviorState::Idle;
+    
+    // Timers
+    MemoryUpdateTimer = 0.0f;
+    RoutineUpdateTimer = 0.0f;
+    DomesticationUpdateTimer = 0.0f;
+    
+    CachedTimeOfDay = 0.0f;
+    bRoutineNeedsUpdate = true;
 }
 
-void UNPCBehaviorComponent::BeginPlay()
+void UNPCBehaviorSystem::BeginPlay()
 {
     Super::BeginPlay();
-
-    // Gerar rotina diária única para este dinossauro
-    DailyRoutine.WakeUpTime = FMath::RandRange(0.2f, 0.3f); // Entre 4:48 e 7:12
-    DailyRoutine.FeedingTime1 = DailyRoutine.WakeUpTime + FMath::RandRange(0.05f, 0.1f);
-    DailyRoutine.FeedingTime2 = FMath::RandRange(0.6f, 0.75f); // Entre 14:24 e 18:00
-    DailyRoutine.RestTime = FMath::RandRange(0.45f, 0.55f); // Entre 10:48 e 13:12
-    DailyRoutine.SleepTime = FMath::RandRange(0.8f, 0.9f); // Entre 19:12 e 21:36
-
-    // Definir território inicial
-    if (AActor* Owner = GetOwner())
+    
+    // Inicializar rotina padrão se não estiver definida
+    if (DailyRoutine.Num() == 0)
     {
-        DailyRoutine.TerritoryCenter = Owner->GetActorLocation();
-        DailyRoutine.TerritoryRadius = FMath::RandRange(500.0f, 2000.0f) * Territoriality;
-        
-        // Áreas preferenciais dentro do território
-        FVector RandomOffset1 = FMath::VRand() * DailyRoutine.TerritoryRadius * 0.6f;
-        FVector RandomOffset2 = FMath::VRand() * DailyRoutine.TerritoryRadius * 0.4f;
-        
-        DailyRoutine.PreferredFeedingArea = DailyRoutine.TerritoryCenter + RandomOffset1;
-        DailyRoutine.PreferredRestingArea = DailyRoutine.TerritoryCenter + RandomOffset2;
+        SetupDefaultRoutine();
+    }
+    
+    // Gerar características individuais se não estiverem definidas
+    if (IndividualTraits.IndividualName == TEXT("Unnamed"))
+    {
+        GenerateIndividualTraits();
     }
 }
 
-void UNPCBehaviorComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UNPCBehaviorSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-
-    // Atualizar tempo do dia (ciclo de 24 minutos = 1 dia no jogo)
-    CurrentTimeOfDay = FMath::Fmod(CurrentTime / 1440.0f, 1.0f); // 1440 segundos = 24 minutos
-
-    // Atualizar rotina diária a cada 5 segundos
-    if (CurrentTime - LastRoutineUpdate > 5.0f)
-    {
-        ProcessDailyRoutine();
-        LastRoutineUpdate = CurrentTime;
-    }
-
-    // Atualizar estado emocional a cada 2 segundos
-    if (CurrentTime - LastEmotionalUpdate > 2.0f)
-    {
-        UpdateEmotionalState();
-        LastEmotionalUpdate = CurrentTime;
-    }
-
-    // Processar domesticação se aplicável
-    if (bIsBeingDomesticated)
-    {
-        ProcessDomestication(DeltaTime);
-    }
-
-    // Verificar proximidade do jogador
-    if (APawn* Player = UGameplayStatics::GetPlayerPawn(GetWorld(), 0))
-    {
-        float DistanceToPlayer = FVector::Dist(GetOwner()->GetActorLocation(), Player->GetActorLocation());
-        if (DistanceToPlayer < 3000.0f) // Dentro de 30 metros
-        {
-            ReactToPlayer(Player, DistanceToPlayer);
-        }
-    }
-}
-
-void UNPCBehaviorComponent::UpdateEmotionalState()
-{
-    // Lógica para mudança de estado emocional baseada em fatores externos
     
-    // Verificar se está na hora de comer
-    float TimeSinceLastMeal = FMath::Abs(CurrentTimeOfDay - DailyRoutine.FeedingTime1);
-    float TimeSinceSecondMeal = FMath::Abs(CurrentTimeOfDay - DailyRoutine.FeedingTime2);
+    UpdateMemory(DeltaTime);
+    UpdateDailyRoutine(DeltaTime);
+    UpdateDomestication(DeltaTime);
+}
+
+void UNPCBehaviorSystem::AddMemoryEntry(AActor* Actor, float ThreatLevel, bool bIsPlayerRelated)
+{
+    if (!Actor)
+        return;
+        
+    // Verificar se já temos memória deste actor
+    for (int32 i = 0; i < MemoryEntries.Num(); i++)
+    {
+        if (MemoryEntries[i].Actor == Actor)
+        {
+            // Atualizar entrada existente
+            MemoryEntries[i].LastKnownLocation = Actor->GetActorLocation();
+            MemoryEntries[i].Timestamp = GetWorld()->GetTimeSeconds();
+            MemoryEntries[i].ThreatLevel = ThreatLevel;
+            MemoryEntries[i].bIsPlayerRelated = bIsPlayerRelated;
+            
+            // Aumentar familiaridade se for relacionado ao jogador
+            if (bIsPlayerRelated)
+            {
+                MemoryEntries[i].FamiliarityLevel = FMath::Clamp(MemoryEntries[i].FamiliarityLevel + 0.1f, 0.0f, 1.0f);
+            }
+            return;
+        }
+    }
     
-    if (FMath::Min(TimeSinceLastMeal, TimeSinceSecondMeal) < 0.02f) // Dentro de ~30 minutos do jogo
-    {
-        if (CurrentEmotionalState == EDinosaurEmotionalState::Calm)
-        {
-            CurrentEmotionalState = EDinosaurEmotionalState::Hungry;
-        }
-    }
-
-    // Verificar se está na hora de dormir
-    if (FMath::Abs(CurrentTimeOfDay - DailyRoutine.SleepTime) < 0.05f)
-    {
-        if (CurrentEmotionalState != EDinosaurEmotionalState::Fearful && 
-            CurrentEmotionalState != EDinosaurEmotionalState::Aggressive)
-        {
-            CurrentEmotionalState = EDinosaurEmotionalState::Tired;
-        }
-    }
-
-    // Retornar ao estado calmo gradualmente
-    if (CurrentEmotionalState == EDinosaurEmotionalState::Alert)
-    {
-        if (FMath::RandRange(0.0f, 1.0f) < 0.1f) // 10% de chance por update
-        {
-            CurrentEmotionalState = EDinosaurEmotionalState::Calm;
-        }
-    }
-}
-
-void UNPCBehaviorComponent::ProcessDailyRoutine()
-{
-    // Determinar ação atual baseada na hora do dia e personalidade
+    // Criar nova entrada
+    FNPCMemoryEntry NewEntry;
+    NewEntry.Actor = Actor;
+    NewEntry.LastKnownLocation = Actor->GetActorLocation();
+    NewEntry.Timestamp = GetWorld()->GetTimeSeconds();
+    NewEntry.ThreatLevel = ThreatLevel;
+    NewEntry.bIsPlayerRelated = bIsPlayerRelated;
+    NewEntry.FamiliarityLevel = bIsPlayerRelated ? 0.1f : 0.0f;
     
-    if (CurrentTimeOfDay < DailyRoutine.WakeUpTime || CurrentTimeOfDay > DailyRoutine.SleepTime)
+    MemoryEntries.Add(NewEntry);
+    
+    // Limpar memórias antigas se excedermos o limite
+    if (MemoryEntries.Num() > MaxMemoryEntries)
     {
-        // Período de sono - comportamento mínimo
-        if (CurrentEmotionalState == EDinosaurEmotionalState::Calm)
+        CleanupOldMemories();
+    }
+}
+
+FNPCMemoryEntry UNPCBehaviorSystem::GetMemoryOfActor(AActor* Actor)
+{
+    for (const FNPCMemoryEntry& Entry : MemoryEntries)
+    {
+        if (Entry.Actor == Actor)
         {
-            CurrentEmotionalState = EDinosaurEmotionalState::Tired;
+            return Entry;
         }
     }
-    else if (FMath::Abs(CurrentTimeOfDay - DailyRoutine.FeedingTime1) < 0.05f ||
-             FMath::Abs(CurrentTimeOfDay - DailyRoutine.FeedingTime2) < 0.05f)
+    
+    // Retornar entrada vazia se não encontrar
+    return FNPCMemoryEntry();
+}
+
+bool UNPCBehaviorSystem::HasMemoryOfActor(AActor* Actor)
+{
+    for (const FNPCMemoryEntry& Entry : MemoryEntries)
     {
-        // Hora de comer
-        CurrentEmotionalState = EDinosaurEmotionalState::Hungry;
-    }
-    else if (FMath::Abs(CurrentTimeOfDay - DailyRoutine.RestTime) < 0.05f)
-    {
-        // Hora de descansar
-        if (CurrentEmotionalState == EDinosaurEmotionalState::Calm)
+        if (Entry.Actor == Actor)
         {
-            CurrentEmotionalState = EDinosaurEmotionalState::Tired;
+            return true;
         }
     }
-}
-
-void UNPCBehaviorComponent::ReactToPlayer(AActor* Player, float Distance)
-{
-    if (!Player) return;
-
-    // Atualizar memória sobre o jogador
-    Memory.LastSeenPlayerLocation = Player->GetActorLocation();
-    Memory.LastPlayerEncounterTime = GetWorld()->GetTimeSeconds();
-    Memory.HasSeenPlayer = true;
-
-    // Reação baseada no tipo de comportamento e distância
-    switch (BehaviorType)
-    {
-        case EDinosaurBehaviorType::Herbivore_Passive:
-            if (Distance < 500.0f) // 5 metros
-            {
-                if (Memory.TrustLevelTowardsPlayer < 0.3f)
-                {
-                    CurrentEmotionalState = EDinosaurEmotionalState::Fearful;
-                }
-                else if (Memory.TrustLevelTowardsPlayer > 0.7f)
-                {
-                    CurrentEmotionalState = EDinosaurEmotionalState::Curious;
-                }
-                else
-                {
-                    CurrentEmotionalState = EDinosaurEmotionalState::Alert;
-                }
-            }
-            break;
-
-        case EDinosaurBehaviorType::Carnivore_Ambush:
-            if (Distance < 1000.0f && Distance > 300.0f) // Zona de emboscada
-            {
-                CurrentEmotionalState = EDinosaurEmotionalState::Alert;
-                if (Aggressiveness > 0.6f)
-                {
-                    CurrentEmotionalState = EDinosaurEmotionalState::Aggressive;
-                }
-            }
-            break;
-
-        case EDinosaurBehaviorType::Carnivore_Apex:
-            if (Distance < 1500.0f)
-            {
-                CurrentEmotionalState = EDinosaurEmotionalState::Territorial;
-                if (Distance < 800.0f)
-                {
-                    CurrentEmotionalState = EDinosaurEmotionalState::Aggressive;
-                }
-            }
-            break;
-
-        default:
-            if (Distance < 800.0f)
-            {
-                CurrentEmotionalState = EDinosaurEmotionalState::Alert;
-            }
-            break;
-    }
-}
-
-void UNPCBehaviorComponent::UpdateMemory(AActor* Actor, bool IsThreat)
-{
-    if (!Actor) return;
-
-    if (IsThreat)
-    {
-        Memory.KnownThreats.AddUnique(Actor);
-        Memory.KnownDangerZones.AddUnique(Actor->GetActorLocation());
-    }
-    else
-    {
-        Memory.KnownAllies.AddUnique(Actor);
-    }
-}
-
-bool UNPCBehaviorComponent::ShouldEnterDomesticationProcess()
-{
-    // Apenas herbívoros passivos podem ser domesticados
-    if (BehaviorType != EDinosaurBehaviorType::Herbivore_Passive)
-    {
-        return false;
-    }
-
-    // Deve ter visto o jogador múltiplas vezes
-    if (!Memory.HasSeenPlayer)
-    {
-        return false;
-    }
-
-    // Jogador deve estar próximo por tempo suficiente
-    float TimeSinceLastSeen = GetWorld()->GetTimeSeconds() - Memory.LastPlayerEncounterTime;
-    if (TimeSinceLastSeen < 30.0f && Memory.TrustLevelTowardsPlayer < 0.9f)
-    {
-        return true;
-    }
-
     return false;
 }
 
-void UNPCBehaviorComponent::ProcessDomestication(float DeltaTime)
+void UNPCBehaviorSystem::SetBehaviorState(EDinosaurBehaviorState NewState)
 {
-    if (!ShouldEnterDomesticationProcess())
+    if (CurrentBehaviorState != NewState)
     {
-        bIsBeingDomesticated = false;
-        return;
+        CurrentBehaviorState = NewState;
+        
+        // Notificar mudança de estado para o Behavior Tree
+        if (APawn* OwnerPawn = Cast<APawn>(GetOwner()))
+        {
+            if (UBlackboardComponent* BlackboardComp = OwnerPawn->GetController() ? 
+                Cast<UBlackboardComponent>(OwnerPawn->GetController()->GetComponentByClass(UBlackboardComponent::StaticClass())) : nullptr)
+            {
+                BlackboardComp->SetValueAsEnum(TEXT("BehaviorState"), static_cast<uint8>(NewState));
+            }
+        }
     }
+}
 
-    // Processo muito lento de domesticação
-    float DomesticationRate = 0.001f; // Base rate
+FDailyRoutineEntry UNPCBehaviorSystem::GetCurrentRoutineForTime(float TimeOfDay)
+{
+    if (DailyRoutine.Num() == 0)
+    {
+        return FDailyRoutineEntry();
+    }
     
-    // Fatores que influenciam a velocidade
-    if (CurrentEmotionalState == EDinosaurEmotionalState::Calm)
+    // Encontrar a rotina mais apropriada para o horário atual
+    FDailyRoutineEntry BestMatch = DailyRoutine[0];
+    float BestTimeDifference = FMath::Abs(TimeOfDay - DailyRoutine[0].TimeOfDay);
+    
+    for (const FDailyRoutineEntry& Entry : DailyRoutine)
     {
-        DomesticationRate *= 2.0f;
+        float TimeDifference = FMath::Abs(TimeOfDay - Entry.TimeOfDay);
+        
+        // Considerar o wrap-around do dia (0.0 e 1.0 são o mesmo momento)
+        float WrapDifference = FMath::Min(
+            FMath::Abs(TimeOfDay - (Entry.TimeOfDay + 1.0f)),
+            FMath::Abs((TimeOfDay + 1.0f) - Entry.TimeOfDay)
+        );
+        
+        TimeDifference = FMath::Min(TimeDifference, WrapDifference);
+        
+        if (TimeDifference < BestTimeDifference)
+        {
+            BestTimeDifference = TimeDifference;
+            BestMatch = Entry;
+        }
     }
-    else if (CurrentEmotionalState == EDinosaurEmotionalState::Fearful)
-    {
-        DomesticationRate *= 0.1f; // Muito mais lento se com medo
-    }
-
-    // Personalidade influencia
-    DomesticationRate *= (1.0f - Aggressiveness); // Menos agressivo = mais fácil
-    DomesticationRate *= (Curiosity + 0.5f); // Mais curioso = mais fácil
-    DomesticationRate *= (Intelligence + 0.5f); // Mais inteligente = mais fácil
-
-    Memory.TrustLevelTowardsPlayer += DomesticationRate * DeltaTime;
-    Memory.TrustLevelTowardsPlayer = FMath::Clamp(Memory.TrustLevelTowardsPlayer, 0.0f, 1.0f);
-
-    // Domesticação completa
-    if (Memory.TrustLevelTowardsPlayer >= 0.95f)
-    {
-        bIsBeingDomesticated = false;
-        // Aqui poderia disparar evento de domesticação completa
-    }
+    
+    return BestMatch;
 }
 
-FVector UNPCBehaviorComponent::GetCurrentGoalLocation()
+void UNPCBehaviorSystem::ProcessPlayerInteraction(float InteractionQuality, float DeltaTime)
 {
-    switch (CurrentEmotionalState)
+    if (!bCanBeDomesticated)
+        return;
+        
+    // Processar interação baseada na qualidade (-1.0 = negativa, 1.0 = positiva)
+    float FamiliarityGain = InteractionQuality * DomesticationRate * DeltaTime;
+    
+    // Modificar ganho baseado na personalidade
+    switch (IndividualTraits.PrimaryPersonality)
     {
-        case EDinosaurEmotionalState::Hungry:
-            return DailyRoutine.PreferredFeedingArea;
-            
-        case EDinosaurEmotionalState::Tired:
-            return DailyRoutine.PreferredRestingArea;
-            
-        case EDinosaurEmotionalState::Fearful:
-            // Fugir para área segura conhecida ou borda do território
-            return DailyRoutine.TerritoryCenter + (FMath::VRand() * DailyRoutine.TerritoryRadius);
-            
-        case EDinosaurEmotionalState::Territorial:
-            return DailyRoutine.TerritoryCenter;
-            
+        case EDinosaurPersonality::Cautious:
+            FamiliarityGain *= 0.5f; // Mais lento para ganhar confiança
+            break;
+        case EDinosaurPersonality::Curious:
+            FamiliarityGain *= 1.5f; // Mais rápido para interagir
+            break;
+        case EDinosaurPersonality::Aggressive:
+            FamiliarityGain *= 0.3f; // Muito difícil de domesticar
+            break;
+        case EDinosaurPersonality::Docile:
+            FamiliarityGain *= 2.0f; // Mais fácil de domesticar
+            break;
         default:
-            // Patrulhar território aleatoriamente
-            FVector RandomPoint = DailyRoutine.TerritoryCenter + 
-                                (FMath::VRand() * DailyRoutine.TerritoryRadius * 0.7f);
-            return RandomPoint;
+            break;
+    }
+    
+    PlayerFamiliarity = FMath::Clamp(PlayerFamiliarity + FamiliarityGain, 0.0f, 1.0f);
+    
+    // Atualizar estágio de domesticação baseado na familiaridade
+    UpdateDomesticationStage();
+}
+
+bool UNPCBehaviorSystem::CanAdvanceDomestication()
+{
+    // Verificar se pode avançar para o próximo estágio
+    float RequiredFamiliarity = GetRequiredFamiliarityForNextStage();
+    return PlayerFamiliarity >= RequiredFamiliarity;
+}
+
+float UNPCBehaviorSystem::GetReactionToActor(AActor* Actor)
+{
+    if (!Actor)
+        return 0.0f;
+        
+    float Reaction = 0.0f;
+    
+    // Verificar memória do actor
+    if (HasMemoryOfActor(Actor))
+    {
+        FNPCMemoryEntry Memory = GetMemoryOfActor(Actor);
+        
+        // Reação baseada na memória
+        Reaction = Memory.FamiliarityLevel - Memory.ThreatLevel;
+        
+        // Se for relacionado ao jogador e estamos domesticados, reação mais positiva
+        if (Memory.bIsPlayerRelated && CurrentDomesticationStage >= EDomesticationStage::Accepting)
+        {
+            Reaction += 0.5f;
+        }
+    }
+    else
+    {
+        // Primeira impressão baseada na personalidade
+        float BaseThreat = CalculateActorThreatLevel(Actor);
+        
+        switch (IndividualTraits.PrimaryPersonality)
+        {
+            case EDinosaurPersonality::Cautious:
+                Reaction = -BaseThreat * 1.5f;
+                break;
+            case EDinosaurPersonality::Curious:
+                Reaction = BaseThreat > 0.7f ? -BaseThreat : 0.3f;
+                break;
+            case EDinosaurPersonality::Aggressive:
+                Reaction = BaseThreat > 0.5f ? -BaseThreat * 2.0f : 0.2f;
+                break;
+            case EDinosaurPersonality::Social:
+                Reaction = 0.2f - BaseThreat;
+                break;
+            default:
+                Reaction = -BaseThreat;
+                break;
+        }
+    }
+    
+    return FMath::Clamp(Reaction, -1.0f, 1.0f);
+}
+
+bool UNPCBehaviorSystem::ShouldFleeFromActor(AActor* Actor)
+{
+    float Reaction = GetReactionToActor(Actor);
+    float FleeThreshold = -IndividualTraits.FearThreshold;
+    
+    return Reaction < FleeThreshold;
+}
+
+bool UNPCBehaviorSystem::ShouldInvestigateActor(AActor* Actor)
+{
+    float Reaction = GetReactionToActor(Actor);
+    float InvestigateThreshold = IndividualTraits.CuriosityLevel * 0.5f;
+    
+    // Só investigar se não for uma ameaça e tivermos curiosidade
+    return Reaction > -0.3f && IndividualTraits.CuriosityLevel > InvestigateThreshold;
+}
+
+void UNPCBehaviorSystem::UpdateMemory(float DeltaTime)
+{
+    MemoryUpdateTimer += DeltaTime;
+    
+    if (MemoryUpdateTimer >= 1.0f) // Atualizar memória a cada segundo
+    {
+        MemoryUpdateTimer = 0.0f;
+        CleanupOldMemories();
     }
 }
 
-bool UNPCBehaviorComponent::IsInTerritory(FVector Location)
+void UNPCBehaviorSystem::UpdateDailyRoutine(float DeltaTime)
 {
-    float DistanceFromCenter = FVector::Dist(Location, DailyRoutine.TerritoryCenter);
-    return DistanceFromCenter <= DailyRoutine.TerritoryRadius;
+    RoutineUpdateTimer += DeltaTime;
+    
+    if (RoutineUpdateTimer >= 5.0f) // Verificar rotina a cada 5 segundos
+    {
+        RoutineUpdateTimer = 0.0f;
+        
+        // Obter horário atual do dia (implementação simplificada)
+        float CurrentTime = GetWorld()->GetTimeSeconds();
+        CachedTimeOfDay = FMath::Fmod(CurrentTime / 3600.0f, 24.0f) / 24.0f; // Converter para 0.0-1.0
+        
+        // Verificar se precisamos mudar de rotina
+        FDailyRoutineEntry NewRoutine = GetCurrentRoutineForTime(CachedTimeOfDay);
+        
+        if (NewRoutine.BehaviorState != CurrentBehaviorState)
+        {
+            CurrentRoutineEntry = NewRoutine;
+            SetBehaviorState(NewRoutine.BehaviorState);
+        }
+    }
+}
+
+void UNPCBehaviorSystem::UpdateDomestication(float DeltaTime)
+{
+    DomesticationUpdateTimer += DeltaTime;
+    
+    if (DomesticationUpdateTimer >= 2.0f) // Verificar domesticação a cada 2 segundos
+    {
+        DomesticationUpdateTimer = 0.0f;
+        
+        // Decaimento natural da familiaridade se não houver interação
+        if (PlayerFamiliarity > 0.0f)
+        {
+            float DecayRate = 0.01f; // 1% por verificação
+            PlayerFamiliarity = FMath::Max(0.0f, PlayerFamiliarity - DecayRate);
+            
+            UpdateDomesticationStage();
+        }
+    }
+}
+
+float UNPCBehaviorSystem::CalculateActorThreatLevel(AActor* Actor)
+{
+    if (!Actor)
+        return 0.0f;
+        
+    // Implementação básica - pode ser expandida
+    float ThreatLevel = 0.0f;
+    
+    // Verificar se é o jogador
+    if (Actor == UGameplayStatics::GetPlayerPawn(GetWorld(), 0))
+    {
+        // Threat level do jogador baseado no estágio de domesticação
+        switch (CurrentDomesticationStage)
+        {
+            case EDomesticationStage::Wild:
+                ThreatLevel = 0.7f;
+                break;
+            case EDomesticationStage::Aware:
+                ThreatLevel = 0.5f;
+                break;
+            case EDomesticationStage::Curious:
+                ThreatLevel = 0.3f;
+                break;
+            case EDomesticationStage::Accepting:
+                ThreatLevel = 0.1f;
+                break;
+            default:
+                ThreatLevel = 0.0f;
+                break;
+        }
+    }
+    else
+    {
+        // Verificar se é outro dinossauro
+        if (UNPCBehaviorSystem* OtherNPC = Actor->FindComponentByClass<UNPCBehaviorSystem>())
+        {
+            // Calcular ameaça baseada na espécie e características
+            bool bIsNaturalEnemy = IndividualTraits.NaturalEnemies.Contains(OtherNPC->Species);
+            
+            if (bIsNaturalEnemy)
+            {
+                ThreatLevel = 0.8f;
+            }
+            else if (OtherNPC->ThreatLevel > ThreatLevel)
+            {
+                ThreatLevel = static_cast<float>(OtherNPC->ThreatLevel) / 4.0f; // Normalizar enum
+            }
+        }
+    }
+    
+    return FMath::Clamp(ThreatLevel, 0.0f, 1.0f);
+}
+
+void UNPCBehaviorSystem::CleanupOldMemories()
+{
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    
+    // Remover memórias expiradas
+    MemoryEntries.RemoveAll([CurrentTime, this](const FNPCMemoryEntry& Entry)
+    {
+        return (CurrentTime - Entry.Timestamp) > MemoryDuration;
+    });
+    
+    // Se ainda temos muitas memórias, remover as mais antigas
+    if (MemoryEntries.Num() > MaxMemoryEntries)
+    {
+        MemoryEntries.Sort([](const FNPCMemoryEntry& A, const FNPCMemoryEntry& B)
+        {
+            return A.Timestamp < B.Timestamp;
+        });
+        
+        int32 ToRemove = MemoryEntries.Num() - MaxMemoryEntries;
+        MemoryEntries.RemoveAt(0, ToRemove);
+    }
+}
+
+void UNPCBehaviorSystem::SetupDefaultRoutine()
+{
+    // Rotina padrão para herbívoros
+    DailyRoutine.Empty();
+    
+    // Madrugada - Descanso
+    FDailyRoutineEntry Rest;
+    Rest.TimeOfDay = 0.0f; // Meia-noite
+    Rest.BehaviorState = EDinosaurBehaviorState::Resting;
+    Rest.Duration = 6.0f;
+    Rest.Priority = 0.9f;
+    DailyRoutine.Add(Rest);
+    
+    // Manhã - Forrageamento
+    FDailyRoutineEntry MorningForage;
+    MorningForage.TimeOfDay = 0.25f; // 6h
+    MorningForage.BehaviorState = EDinosaurBehaviorState::Foraging;
+    MorningForage.Duration = 3.0f;
+    MorningForage.Priority = 0.8f;
+    DailyRoutine.Add(MorningForage);
+    
+    // Meio-dia - Socialização
+    FDailyRoutineEntry Midday;
+    Midday.TimeOfDay = 0.5f; // 12h
+    Midday.BehaviorState = EDinosaurBehaviorState::Socializing;
+    Midday.Duration = 2.0f;
+    Midday.Priority = 0.6f;
+    DailyRoutine.Add(Midday);
+    
+    // Tarde - Beber água
+    FDailyRoutineEntry Afternoon;
+    Afternoon.TimeOfDay = 0.75f; // 18h
+    Afternoon.BehaviorState = EDinosaurBehaviorState::Drinking;
+    Afternoon.Duration = 1.0f;
+    Afternoon.Priority = 0.8f;
+    DailyRoutine.Add(Afternoon);
+}
+
+void UNPCBehaviorSystem::GenerateIndividualTraits()
+{
+    // Gerar características únicas para este indivíduo
+    TArray<FString> NamePool = {
+        TEXT("Alpha"), TEXT("Beta"), TEXT("Gamma"), TEXT("Delta"),
+        TEXT("Spike"), TEXT("Crest"), TEXT("Horn"), TEXT("Scale"),
+        TEXT("Thunder"), TEXT("Storm"), TEXT("River"), TEXT("Stone")
+    };
+    
+    IndividualTraits.IndividualName = NamePool[FMath::RandRange(0, NamePool.Num() - 1)];
+    
+    // Personalidades baseadas na espécie
+    switch (Species)
+    {
+        case EDinosaurSpecies::Triceratops:
+            IndividualTraits.PrimaryPersonality = EDinosaurPersonality::Cautious;
+            IndividualTraits.SecondaryPersonality = EDinosaurPersonality::Social;
+            break;
+        case EDinosaurSpecies::Compsognathus:
+            IndividualTraits.PrimaryPersonality = EDinosaurPersonality::Curious;
+            IndividualTraits.SecondaryPersonality = EDinosaurPersonality::Skittish;
+            break;
+        case EDinosaurSpecies::TyrannosaurusRex:
+            IndividualTraits.PrimaryPersonality = EDinosaurPersonality::Aggressive;
+            IndividualTraits.SecondaryPersonality = EDinosaurPersonality::Territorial;
+            break;
+        default:
+            IndividualTraits.PrimaryPersonality = EDinosaurPersonality::Cautious;
+            IndividualTraits.SecondaryPersonality = EDinosaurPersonality::Curious;
+            break;
+    }
+    
+    // Valores aleatórios com variação baseada na personalidade
+    IndividualTraits.AggressionLevel = FMath::RandRange(0.2f, 0.8f);
+    IndividualTraits.CuriosityLevel = FMath::RandRange(0.3f, 0.9f);
+    IndividualTraits.SocialLevel = FMath::RandRange(0.1f, 0.7f);
+    IndividualTraits.IntelligenceLevel = FMath::RandRange(0.4f, 0.8f);
+    IndividualTraits.FearThreshold = FMath::RandRange(0.3f, 0.7f);
+    IndividualTraits.TerritorialRadius = FMath::RandRange(500.0f, 2000.0f);
+}
+
+float UNPCBehaviorSystem::GetRequiredFamiliarityForNextStage()
+{
+    switch (CurrentDomesticationStage)
+    {
+        case EDomesticationStage::Wild: return 0.1f;
+        case EDomesticationStage::Aware: return 0.25f;
+        case EDomesticationStage::Curious: return 0.4f;
+        case EDomesticationStage::Cautious: return 0.6f;
+        case EDomesticationStage::Accepting: return 0.75f;
+        case EDomesticationStage::Trusting: return 0.9f;
+        case EDomesticationStage::Bonded: return 1.0f;
+        default: return 1.0f;
+    }
+}
+
+void UNPCBehaviorSystem::UpdateDomesticationStage()
+{
+    EDomesticationStage NewStage = CurrentDomesticationStage;
+    
+    if (PlayerFamiliarity >= 1.0f)
+        NewStage = EDomesticationStage::Domesticated;
+    else if (PlayerFamiliarity >= 0.9f)
+        NewStage = EDomesticationStage::Bonded;
+    else if (PlayerFamiliarity >= 0.75f)
+        NewStage = EDomesticationStage::Trusting;
+    else if (PlayerFamiliarity >= 0.6f)
+        NewStage = EDomesticationStage::Accepting;
+    else if (PlayerFamiliarity >= 0.4f)
+        NewStage = EDomesticationStage::Cautious;
+    else if (PlayerFamiliarity >= 0.25f)
+        NewStage = EDomesticationStage::Curious;
+    else if (PlayerFamiliarity >= 0.1f)
+        NewStage = EDomesticationStage::Aware;
+    else
+        NewStage = EDomesticationStage::Wild;
+        
+    if (NewStage != CurrentDomesticationStage)
+    {
+        CurrentDomesticationStage = NewStage;
+        
+        // Notificar mudança para o Blackboard
+        if (APawn* OwnerPawn = Cast<APawn>(GetOwner()))
+        {
+            if (UBlackboardComponent* BlackboardComp = OwnerPawn->GetController() ? 
+                Cast<UBlackboardComponent>(OwnerPawn->GetController()->GetComponentByClass(UBlackboardComponent::StaticClass())) : nullptr)
+            {
+                BlackboardComp->SetValueAsEnum(TEXT("DomesticationStage"), static_cast<uint8>(NewStage));
+                BlackboardComp->SetValueAsFloat(TEXT("PlayerFamiliarity"), PlayerFamiliarity);
+            }
+        }
+    }
 }
