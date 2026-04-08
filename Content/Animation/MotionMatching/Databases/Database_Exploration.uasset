@@ -1,0 +1,47 @@
+{
+    "Type": "PoseSearchDatabase",
+    "Schema": "/Game/Animation/MotionMatching/Schemas/PoseSearchSchema_Paleontologist",
+    "AnimationSequences": [
+        {
+            "Animation": "/Game/Animation/Locomotion/Exploration/Walk_Cautious_Forward",
+            "Tags": ["Exploration", "Forward", "Cautious"],
+            "SamplingRange": {"Start": 0.1, "End": 0.9}
+        },
+        {
+            "Animation": "/Game/Animation/Locomotion/Exploration/Walk_Cautious_Backward",
+            "Tags": ["Exploration", "Backward", "Cautious"],
+            "SamplingRange": {"Start": 0.1, "End": 0.9}
+        },
+        {
+            "Animation": "/Game/Animation/Locomotion/Exploration/Walk_Cautious_Left",
+            "Tags": ["Exploration", "Left", "Cautious"],
+            "SamplingRange": {"Start": 0.1, "End": 0.9}
+        },
+        {
+            "Animation": "/Game/Animation/Locomotion/Exploration/Walk_Cautious_Right",
+            "Tags": ["Exploration", "Right", "Cautious"],
+            "SamplingRange": {"Start": 0.1, "End": 0.9}
+        },
+        {
+            "Animation": "/Game/Animation/Locomotion/Exploration/Idle_Alert_LookAround",
+            "Tags": ["Exploration", "Idle", "Alert"],
+            "SamplingRange": {"Start": 0.0, "End": 1.0}
+        },
+        {
+            "Animation": "/Game/Animation/Locomotion/Exploration/Turn_Cautious_Left_90",
+            "Tags": ["Exploration", "Turn", "Left"],
+            "SamplingRange": {"Start": 0.0, "End": 1.0}
+        },
+        {
+            "Animation": "/Game/Animation/Locomotion/Exploration/Turn_Cautious_Right_90",
+            "Tags": ["Exploration", "Turn", "Right"],
+            "SamplingRange": {"Start": 0.0, "End": 1.0}
+        },
+        {
+            "Animation": "/Game/Animation/Locomotion/Exploration/Walk_Tired_Forward",
+            "Tags": ["Exploration", "Forward", "Tired"],
+            "SamplingRange": {"Start": 0.1, "End": 0.9}
+        }
+    ],
+    "Description": "Exploration database - careful, scientific observation movements with constant environmental awareness"
+}
