@@ -1,0 +1,536 @@
+// Copyright Transpersonal Game Studio. All Rights Reserved.
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Subsystems/WorldSubsystem.h"
+#include "Engine/World.h"
+#include "Components/StaticMeshComponent.h"
+#include "Components/InstancedStaticMeshComponent.h"
+#include "Components/HierarchicalInstancedStaticMeshComponent.h"
+#include "Engine/DataTable.h"
+#include "Materials/MaterialInterface.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "GameFramework/Actor.h"
+#include "PCGComponent.h"
+#include "PCGGraph.h"
+#include "PCGData.h"
+#include "ArchitectureTypes.h"
+#include "ArchitectureImplementationSystem.generated.h"
+
+class UStaticMesh;
+class UMaterialInterface;
+class ALandscape;
+class APCGWorldActor;
+class UEnvironmentArtSubsystem;
+
+/**
+ * @brief Architecture Implementation System for Transpersonal Game Studio
+ * 
+ * Implements the actual construction and placement of prehistoric human structures
+ * in the world. Works closely with the Environment Art Subsystem to integrate
+ * buildings seamlessly into the natural environment.
+ * 
+ * Core Principles:
+ * - Every structure tells a story through its construction, condition, and contents
+ * - Buildings are documents of human survival and adaptation
+ * - Interiors are never empty - they reflect the lives of their inhabitants
+ * - Weathering and decay patterns reveal the passage of time
+ * - Placement considers both narrative and environmental factors
+ * 
+ * Implementation Features:
+ * - Procedural structure generation with narrative variation
+ * - Intelligent terrain adaptation and foundation systems
+ * - Dynamic weathering and decay simulation
+ * - Interior furnishing system with storytelling props
+ * - Performance-optimized LOD and culling systems
+ * - Integration with PCG for large-scale placement
+ * 
+ * @author Architecture & Interior Agent — Agent #7
+ * @version 1.0 — March 2026
+ */
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UArchitectureImplementationSystem : public UWorldSubsystem
+{
+    GENERATED_BODY()
+
+public:
+    UArchitectureImplementationSystem();
+
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+    virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
+
+    /** Main implementation functions */
+    UFUNCTION(BlueprintCallable, Category = "Architecture Implementation")
+    void ImplementArchitecture(const FArchitectureImplementationSettings& Settings);
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture Implementation")
+    void RefreshArchitectureInRegion(const FBox& WorldBounds);
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture Implementation")
+    void ClearAllImplementedStructures();
+
+    /** Structure construction */
+    UFUNCTION(BlueprintCallable, Category = "Structure Construction")
+    AActor* ConstructStructure(const FStructureConstructionData& ConstructionData);
+
+    UFUNCTION(BlueprintCallable, Category = "Structure Construction")
+    void AdaptStructureToTerrain(AActor* Structure, const FTerrainAdaptationSettings& Settings);
+
+    /** Interior implementation */
+    UFUNCTION(BlueprintCallable, Category = "Interior Implementation")
+    void ImplementInterior(AActor* Structure, const FInteriorImplementationData& InteriorData);
+
+    UFUNCTION(BlueprintCallable, Category = "Interior Implementation")
+    void PopulateInteriorWithStorytellingProps(AActor* Structure, const FStorytellingPropsData& PropsData);
+
+    /** Weathering and decay */
+    UFUNCTION(BlueprintCallable, Category = "Weathering")
+    void ApplyWeatheringToStructure(AActor* Structure, const FWeatheringSettings& WeatheringSettings);
+
+    UFUNCTION(BlueprintCallable, Category = "Weathering")
+    void SimulateDecayOverTime(AActor* Structure, float TimeInDays);
+
+    /** Settlement implementation */
+    UFUNCTION(BlueprintCallable, Category = "Settlement")
+    void ImplementSettlement(const FSettlementImplementationData& SettlementData);
+
+    /** Performance optimization */
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void OptimizeArchitecturePerformance(const FArchitecturePerformanceSettings& Settings);
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    FArchitectureImplementationStats GetImplementationStats() const;
+
+protected:
+    /** Settlement types based on survival needs */
+    UENUM(BlueprintType)
+    enum class ESettlementType : uint8
+    {
+        EmergencyCamp           UMETA(DisplayName = "Emergency Camp - Immediate Survival"),
+        TemporaryCamp           UMETA(DisplayName = "Temporary Camp - Short Term"),
+        SeasonalCamp            UMETA(DisplayName = "Seasonal Camp - Recurring Use"),
+        PermanentBase           UMETA(DisplayName = "Permanent Base - Long Term"),
+        AbandonedSettlement     UMETA(DisplayName = "Abandoned Settlement"),
+        RuinedSettlement        UMETA(DisplayName = "Ruined Settlement")
+    };
+
+    /** Abandonment reasons that affect interior state */
+    UENUM(BlueprintType)
+    enum class EAbandonmentReason : uint8
+    {
+        PlannedEvacuation       UMETA(DisplayName = "Planned Evacuation - Organized"),
+        PredatorAttack          UMETA(DisplayName = "Predator Attack - Sudden"),
+        ResourceDepletion       UMETA(DisplayName = "Resource Depletion - Gradual"),
+        NaturalDisaster         UMETA(DisplayName = "Natural Disaster - Catastrophic"),
+        Disease                 UMETA(DisplayName = "Disease - Health Crisis"),
+        TribalConflict          UMETA(DisplayName = "Tribal Conflict - Violence"),
+        SeasonalMigration       UMETA(DisplayName = "Seasonal Migration - Cyclical"),
+        Unknown                 UMETA(DisplayName = "Unknown - Mystery")
+    };
+
+    /** Structural integrity levels */
+    UENUM(BlueprintType)
+    enum class EStructuralIntegrity : uint8
+    {
+        Perfect                 UMETA(DisplayName = "Perfect - Just Built"),
+        Excellent               UMETA(DisplayName = "Excellent - Well Maintained"),
+        Good                    UMETA(DisplayName = "Good - Minor Wear"),
+        Fair                    UMETA(DisplayName = "Fair - Noticeable Damage"),
+        Poor                    UMETA(DisplayName = "Poor - Significant Issues"),
+        Critical                UMETA(DisplayName = "Critical - Barely Standing"),
+        Collapsed               UMETA(DisplayName = "Collapsed - Destroyed")
+    };
+
+    /** Interior storytelling categories */
+    UENUM(BlueprintType)
+    enum class EInteriorStoryCategory : uint8
+    {
+        // Daily life evidence
+        SleepingArrangements    UMETA(DisplayName = "Sleeping Arrangements"),
+        FoodPreparation         UMETA(DisplayName = "Food Preparation"),
+        ToolMaking              UMETA(DisplayName = "Tool Making"),
+        PersonalBelongings      UMETA(DisplayName = "Personal Belongings"),
+        
+        // Survival activities
+        WeaponMaintenance       UMETA(DisplayName = "Weapon Maintenance"),
+        MedicalTreatment        UMETA(DisplayName = "Medical Treatment"),
+        FoodStorage             UMETA(DisplayName = "Food Storage"),
+        WaterCollection         UMETA(DisplayName = "Water Collection"),
+        
+        // Social activities
+        CommunalGathering       UMETA(DisplayName = "Communal Gathering"),
+        RitualActivity          UMETA(DisplayName = "Ritual Activity"),
+        ChildCare               UMETA(DisplayName = "Child Care"),
+        Education               UMETA(DisplayName = "Education"),
+        
+        // Abandonment evidence
+        HurriedException        UMETA(DisplayName = "Hurried Departure"),
+        ViolentAbandonement     UMETA(DisplayName = "Violent Abandonment"),
+        GradualAbandonement     UMETA(DisplayName = "Gradual Abandonment"),
+        NatureReclamation       UMETA(DisplayName = "Nature Reclamation")
+    };
+
+    /** Structure construction data */
+    USTRUCT(BlueprintType)
+    struct FStructureConstructionData
+    {
+        GENERATED_BODY()
+
+        /** Type of structure to construct */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        EArchitectureType StructureType = EArchitectureType::BasicShelter;
+
+        /** Location for construction */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        FVector Location = FVector::ZeroVector;
+
+        /** Rotation of the structure */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        FRotator Rotation = FRotator::ZeroRotator;
+
+        /** Scale variation (0.8 to 1.2 for natural variation) */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        FVector Scale = FVector::OneVector;
+
+        /** Current structural integrity */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        EStructuralIntegrity Integrity = EStructuralIntegrity::Good;
+
+        /** Age of structure in days (affects weathering) */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        float AgeInDays = 30.0f;
+
+        /** Whether to adapt to terrain */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        bool bAdaptToTerrain = true;
+
+        /** Whether to generate interior */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        bool bGenerateInterior = true;
+
+        /** Whether structure is abandoned */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        bool bIsAbandoned = false;
+
+        /** Reason for abandonment (affects interior state) */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        EAbandonmentReason AbandonmentReason = EAbandonmentReason::Unknown;
+
+        /** Primary construction material */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        EConstructionMaterial PrimaryMaterial = EConstructionMaterial::Wood;
+
+        /** Secondary construction material */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        EConstructionMaterial SecondaryMaterial = EConstructionMaterial::Leaves;
+
+        /** Custom mesh override */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        TSoftObjectPtr<UStaticMesh> CustomMesh = nullptr;
+
+        /** Custom materials override */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        TArray<TSoftObjectPtr<UMaterialInterface>> CustomMaterials;
+    };
+
+    /** Interior implementation data */
+    USTRUCT(BlueprintType)
+    struct FInteriorImplementationData
+    {
+        GENERATED_BODY()
+
+        /** Types of interior spaces to implement */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        TArray<EInteriorType> InteriorSpaces;
+
+        /** Storytelling categories to include */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        TArray<EInteriorStoryCategory> StoryCategories;
+
+        /** Density of props (0.0 to 1.0) */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        float PropDensity = 0.7f;
+
+        /** Whether inhabitants left in a hurry */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        bool bHurriedDeparture = false;
+
+        /** Whether there are signs of violence */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        bool bSignsOfViolence = false;
+
+        /** Whether nature is reclaiming the space */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        bool bNatureReclamation = false;
+
+        /** Number of inhabitants (affects prop placement) */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        int32 NumberOfInhabitants = 2;
+
+        /** How long they lived here (affects wear patterns) */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        float OccupationTimeInDays = 90.0f;
+    };
+
+    /** Storytelling props data */
+    USTRUCT(BlueprintType)
+    struct FStorytellingPropsData
+    {
+        GENERATED_BODY()
+
+        /** Personal items that reveal character */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        TArray<FString> PersonalItems;
+
+        /** Tools that show daily activities */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        TArray<FString> DailyTools;
+
+        /** Evidence of specific events */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        TArray<FString> EventEvidence;
+
+        /** Wear patterns on surfaces */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        TArray<FString> WearPatterns;
+
+        /** Damage patterns that tell a story */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        TArray<FString> DamagePatterns;
+    };
+
+    /** Settlement implementation data */
+    USTRUCT(BlueprintType)
+    struct FSettlementImplementationData
+    {
+        GENERATED_BODY()
+
+        /** Type of settlement */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        ESettlementType SettlementType = ESettlementType::TemporaryCamp;
+
+        /** Central location of settlement */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        FVector CenterLocation = FVector::ZeroVector;
+
+        /** Radius of settlement */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        float SettlementRadius = 1000.0f;
+
+        /** Number of structures to place */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        int32 NumberOfStructures = 5;
+
+        /** Population size (affects structure types) */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        int32 Population = 10;
+
+        /** How long settlement was active */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        float ActiveTimeInDays = 180.0f;
+
+        /** Whether settlement is currently abandoned */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        bool bIsAbandoned = false;
+
+        /** Reason for abandonment */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        EAbandonmentReason AbandonmentReason = EAbandonmentReason::Unknown;
+
+        /** Terrain adaptation settings */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        bool bAdaptToTerrain = true;
+
+        /** Defensive arrangements */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        bool bHasDefensiveStructures = false;
+    };
+
+    /** Terrain adaptation settings */
+    USTRUCT(BlueprintType)
+    struct FTerrainAdaptationSettings
+    {
+        GENERATED_BODY()
+
+        /** Whether to level the ground */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        bool bLevelGround = true;
+
+        /** Whether to create foundations */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        bool bCreateFoundations = true;
+
+        /** Whether to add drainage */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        bool bAddDrainage = true;
+
+        /** Maximum slope for placement */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        float MaxSlope = 15.0f;
+
+        /** Foundation depth */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        float FoundationDepth = 50.0f;
+    };
+
+    /** Weathering settings */
+    USTRUCT(BlueprintType)
+    struct FWeatheringSettings
+    {
+        GENERATED_BODY()
+
+        /** Rain exposure (0.0 to 1.0) */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        float RainExposure = 0.5f;
+
+        /** Wind exposure (0.0 to 1.0) */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        float WindExposure = 0.5f;
+
+        /** Sun exposure (0.0 to 1.0) */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        float SunExposure = 0.7f;
+
+        /** Humidity level (0.0 to 1.0) */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        float HumidityLevel = 0.6f;
+
+        /** Temperature variation (affects material degradation) */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        float TemperatureVariation = 0.5f;
+    };
+
+    /** Architecture implementation settings */
+    USTRUCT(BlueprintType)
+    struct FArchitectureImplementationSettings
+    {
+        GENERATED_BODY()
+
+        /** Overall density of structures */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        float StructureDensity = 0.3f;
+
+        /** Quality level for implementation */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        int32 QualityLevel = 3; // 1-5 scale
+
+        /** Whether to enable procedural variation */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        bool bEnableProceduralVariation = true;
+
+        /** Whether to enable storytelling props */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        bool bEnableStorytellingProps = true;
+
+        /** Whether to enable weathering simulation */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        bool bEnableWeatheringSimulation = true;
+
+        /** Performance optimization level */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        int32 PerformanceLevel = 3; // 1-5 scale
+
+        /** Maximum number of structures per region */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        int32 MaxStructuresPerRegion = 20;
+    };
+
+    /** Performance settings */
+    USTRUCT(BlueprintType)
+    struct FArchitecturePerformanceSettings
+    {
+        GENERATED_BODY()
+
+        /** Enable LOD system */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        bool bEnableLODSystem = true;
+
+        /** Enable occlusion culling */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        bool bEnableOcclusionCulling = true;
+
+        /** Enable distance culling */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        bool bEnableDistanceCulling = true;
+
+        /** Maximum draw distance */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        float MaxDrawDistance = 5000.0f;
+
+        /** LOD transition distances */
+        UPROPERTY(EditAnywhere, BlueprintReadWrite)
+        TArray<float> LODDistances = {500.0f, 1000.0f, 2000.0f};
+    };
+
+    /** Implementation statistics */
+    USTRUCT(BlueprintType)
+    struct FArchitectureImplementationStats
+    {
+        GENERATED_BODY()
+
+        /** Total number of implemented structures */
+        UPROPERTY(BlueprintReadOnly)
+        int32 TotalStructures = 0;
+
+        /** Number of active structures */
+        UPROPERTY(BlueprintReadOnly)
+        int32 ActiveStructures = 0;
+
+        /** Number of abandoned structures */
+        UPROPERTY(BlueprintReadOnly)
+        int32 AbandonedStructures = 0;
+
+        /** Number of ruined structures */
+        UPROPERTY(BlueprintReadOnly)
+        int32 RuinedStructures = 0;
+
+        /** Total number of interior props */
+        UPROPERTY(BlueprintReadOnly)
+        int32 TotalInteriorProps = 0;
+
+        /** Current performance impact */
+        UPROPERTY(BlueprintReadOnly)
+        float PerformanceImpact = 0.0f;
+
+        /** Memory usage in MB */
+        UPROPERTY(BlueprintReadOnly)
+        float MemoryUsageMB = 0.0f;
+    };
+
+private:
+    /** Reference to Environment Art Subsystem */
+    UPROPERTY()
+    TObjectPtr<UEnvironmentArtSubsystem> EnvironmentArtSubsystem;
+
+    /** Cached PCG components for structure placement */
+    UPROPERTY()
+    TArray<TObjectPtr<UPCGComponent>> StructurePCGComponents;
+
+    /** Currently implemented structures */
+    UPROPERTY()
+    TArray<TObjectPtr<AActor>> ImplementedStructures;
+
+    /** Performance monitoring data */
+    UPROPERTY()
+    FArchitectureImplementationStats CurrentStats;
+
+    /** Material instances for weathering */
+    UPROPERTY()
+    TMap<EConstructionMaterial, TObjectPtr<UMaterialInstanceDynamic>> WeatheringMaterials;
+
+    /** Prop mesh libraries for storytelling */
+    UPROPERTY()
+    TMap<EInteriorStoryCategory, TArray<TSoftObjectPtr<UStaticMesh>>> StorytellingPropLibraries;
+
+    /** Helper functions */
+    void InitializePropLibraries();
+    void SetupWeatheringMaterials();
+    FVector FindOptimalPlacementLocation(const FVector& DesiredLocation, const FTerrainAdaptationSettings& Settings);
+    void ApplyProceduralVariation(AActor* Structure, const FStructureConstructionData& ConstructionData);
+    void CreateFoundations(AActor* Structure, const FTerrainAdaptationSettings& Settings);
+    void PlaceStorytellingProp(AActor* Structure, EInteriorStoryCategory Category, const FVector& Location);
+    void UpdatePerformanceStats();
+};
