@@ -19,7 +19,7 @@ public class TranspersonalGame : ModuleRules
             "SlateCore"
         });
 
-        // Gameplay dependencies
+        // Private dependencies for game systems
         PrivateDependencyModuleNames.AddRange(new string[] 
         { 
             "GameplayTags",
@@ -28,32 +28,23 @@ public class TranspersonalGame : ModuleRules
             "NavigationSystem",
             "Niagara",
             "AudioMixer",
-            "MetasoundEngine"
+            "MetasoundEngine",
+            "Landscape",
+            "Foliage",
+            "ProceduralMeshComponent",
+            "GeometryCollectionEngine",
+            "ChaosVehicles",
+            "PhysicsCore"
         });
-
-        // UE5 specific systems
-        if (Target.Version.MajorVersion >= 5)
-        {
-            PublicDependencyModuleNames.AddRange(new string[]
-            {
-                "MassEntity",
-                "MassMovement", 
-                "MassSpawner",
-                "MassAI",
-                "PCG",
-                "WorldPartition",
-                "Chaos"
-            });
-        }
 
         // Editor-only dependencies
         if (Target.bBuildEditor)
         {
             PrivateDependencyModuleNames.AddRange(new string[]
             {
+                "UnrealEd",
                 "EditorStyle",
                 "EditorWidgets",
-                "UnrealEd",
                 "ToolMenus"
             });
         }
@@ -69,13 +60,10 @@ public class TranspersonalGame : ModuleRules
         MinFilesUsingPrecompiledHeaderOverride = 1;
         bFasterWithoutUnity = false;
 
-        // Optimization flags
-        OptimizeCode = CodeOptimization.InShippingBuildsOnly;
-        
-        // Enable IWYU for better compile times
+        // Enable IWYU for cleaner includes
         bEnforceIWYU = true;
         
-        // Disable legacy features for better performance
-        bLegacyPublicIncludePaths = false;
+        // Optimization flags
+        OptimizeCode = CodeOptimization.InShippingBuildsOnly;
     }
 }
