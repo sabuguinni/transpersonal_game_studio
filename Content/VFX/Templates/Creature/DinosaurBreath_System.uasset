@@ -1,0 +1,86 @@
+{
+  "AssetType": "NiagaraSystem",
+  "Name": "DinosaurBreath_System", 
+  "Description": "Sistema de respiração para dinossauros com variações procedurais",
+  "Emitters": [
+    {
+      "Name": "BreathVapor_Main",
+      "Type": "GPU",
+      "SpawnRate": "BreathRate * IntensityVariation",
+      "Lifetime": "3.0 + Random(-0.5, 0.5)",
+      "InitialVelocity": {
+        "X": "BreathDirection.X * (50 + Random(-10, 10))",
+        "Y": "BreathDirection.Y * (50 + Random(-10, 10))",
+        "Z": "BreathDirection.Z * (50 + Random(-10, 10)) + 20"
+      },
+      "Modules": [
+        "Initialize Particle",
+        "Update Age",
+        "Noise Force 3D",
+        "Drag",
+        "Scale by Age",
+        "Color by Age",
+        "Volume Renderer"
+      ],
+      "Renderer": {
+        "Material": "/Game/Materials/VFX/M_BreathVapor",
+        "VolumeTexture": "/Game/Textures/VFX/T_CloudNoise_3D"
+      }
+    },
+    {
+      "Name": "BreathCondensation_Particles",
+      "Type": "CPU",
+      "SpawnRate": "LODLevel < 1 ? BreathRate * 0.3 : 0",
+      "Lifetime": "1.5",
+      "Modules": [
+        "Initialize Particle",
+        "Inherit Velocity",
+        "Gravity Force",
+        "Sprite Renderer"
+      ]
+    }
+  ],
+  "Parameters": [
+    {
+      "Name": "BreathRate",
+      "Type": "Float",
+      "Default": 15.0,
+      "Description": "Particles per second based on creature breathing"
+    },
+    {
+      "Name": "BreathDirection",
+      "Type": "Vector3", 
+      "Default": "(1, 0, 0)",
+      "Description": "Direction of breath from creature mouth"
+    },
+    {
+      "Name": "CreatureSize",
+      "Type": "Float",
+      "Default": 1.0,
+      "Description": "Size multiplier based on creature scale"
+    },
+    {
+      "Name": "Temperature",
+      "Type": "Float",
+      "Default": 0.5,
+      "Description": "0=Cold (more visible), 1=Hot (less visible)"
+    },
+    {
+      "Name": "HueShift",
+      "Type": "Float",
+      "Default": 0.0,
+      "Description": "Color variation per creature (-0.2 to 0.2)"
+    },
+    {
+      "Name": "IntensityVariation",
+      "Type": "Float",
+      "Default": 1.0,
+      "Description": "Intensity variation per creature"
+    },
+    {
+      "Name": "LODLevel",
+      "Type": "Float",
+      "Default": 0.0
+    }
+  ]
+}
