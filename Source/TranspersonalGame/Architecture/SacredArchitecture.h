@@ -1,66 +1,50 @@
+// SacredArchitecture.h
+// Sistema de arquitetura sagrada para estruturas transpessoais
+
 #pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Components/StaticMeshComponent.h"
-#include "Components/SceneComponent.h"
-#include "Engine/Engine.h"
+#include "Engine/StaticMesh.h"
+#include "Materials/MaterialInterface.h"
 #include "SacredArchitecture.generated.h"
 
 UENUM(BlueprintType)
-enum class EArchitecturalStyle : uint8
+enum class ESacredArchitectureType : uint8
 {
-    Temple         UMETA(DisplayName = "Sacred Temple"),
+    Temple         UMETA(DisplayName = "Temple"),
+    Pyramid        UMETA(DisplayName = "Pyramid"),
     Mandala        UMETA(DisplayName = "Mandala Structure"),
     Spiral         UMETA(DisplayName = "Spiral Tower"),
     Crystal        UMETA(DisplayName = "Crystal Formation"),
-    Organic        UMETA(DisplayName = "Organic Flow"),
-    Geometric      UMETA(DisplayName = "Sacred Geometry")
-};
-
-UENUM(BlueprintType)
-enum class EConsciousnessLevel : uint8
-{
-    Ego            UMETA(DisplayName = "Ego Level"),
-    Personal       UMETA(DisplayName = "Personal Unconscious"),
-    Collective     UMETA(DisplayName = "Collective Unconscious"),
-    Archetypal     UMETA(DisplayName = "Archetypal"),
-    Cosmic         UMETA(DisplayName = "Cosmic Consciousness"),
-    Unity          UMETA(DisplayName = "Unity Consciousness")
+    Labyrinth      UMETA(DisplayName = "Labyrinth"),
+    Portal         UMETA(DisplayName = "Portal Gateway"),
+    Sanctuary      UMETA(DisplayName = "Sanctuary")
 };
 
 USTRUCT(BlueprintType)
-struct FArchitecturalTransformation
+struct FArchitecturalParameters
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EConsciousnessLevel TriggerLevel;
+    float Scale = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FVector ScaleMultiplier;
+    float Height = 10.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FRotator RotationOffset;
+    int32 Segments = 8;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FLinearColor EmissiveColor;
+    float GoldenRatio = 1.618f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float MaterialOpacity;
+    bool bUsePhiProportions = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float TransformationDuration;
-
-    FArchitecturalTransformation()
-    {
-        TriggerLevel = EConsciousnessLevel::Ego;
-        ScaleMultiplier = FVector(1.0f);
-        RotationOffset = FRotator::ZeroRotator;
-        EmissiveColor = FLinearColor::White;
-        MaterialOpacity = 1.0f;
-        TransformationDuration = 3.0f;
-    }
+    float EnergyIntensity = 1.0f;
 };
 
 UCLASS(BlueprintType, Blueprintable)
@@ -80,69 +64,63 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     UStaticMeshComponent* MainStructure;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UStaticMeshComponent* DetailElements;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    ESacredArchitectureType ArchitectureType;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    EArchitecturalStyle ArchitecturalStyle;
+    FArchitecturalParameters Parameters;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    TArray<FArchitecturalTransformation> ConsciousnessTransformations;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
+    UMaterialInterface* SacredMaterial;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    bool bRespondsToConsciousness;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
+    UMaterialInterface* EnergyMaterial;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    float BaseResonanceFrequency;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    class USoundBase* AmbientResonance;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    FVector SacredProportions;
-
-    // Current state
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    EConsciousnessLevel CurrentConsciousnessLevel;
-
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    bool bIsTransforming;
-
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    float TransformationProgress;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Effects")
+    class UParticleSystem* EnergyField;
 
 public:
     virtual void Tick(float DeltaTime) override;
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void SetConsciousnessLevel(EConsciousnessLevel NewLevel);
+    void GenerateStructure();
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void TriggerSacredResonance();
+    void SetArchitectureType(ESacredArchitectureType NewType);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void ApplyGoldenRatioProportions();
+    void UpdateParameters(const FArchitecturalParameters& NewParams);
 
-    UFUNCTION(BlueprintImplementableEvent, Category = "Architecture")
-    void OnConsciousnessLevelChanged(EConsciousnessLevel OldLevel, EConsciousnessLevel NewLevel);
+    UFUNCTION(BlueprintCallable, Category = "Effects")
+    void ActivateEnergyField();
 
+    UFUNCTION(BlueprintCallable, Category = "Effects")
+    void DeactivateEnergyField();
+
+protected:
     UFUNCTION(BlueprintImplementableEvent, Category = "Architecture")
-    void OnTransformationComplete();
+    void OnStructureGenerated();
+
+    UFUNCTION(BlueprintImplementableEvent, Category = "Effects")
+    void OnEnergyFieldActivated();
 
 private:
-    void UpdateArchitecturalTransformation(float DeltaTime);
-    void CalculateSacredGeometry();
-    
-    FArchitecturalTransformation* GetTransformationForLevel(EConsciousnessLevel Level);
-    
-    // Transformation interpolation
-    FVector InitialScale;
-    FRotator InitialRotation;
-    FLinearColor InitialEmissiveColor;
-    float InitialOpacity;
-    
-    FVector TargetScale;
-    FRotator TargetRotation;
-    FLinearColor TargetEmissiveColor;
-    float TargetOpacity;
-    
-    float CurrentTransformationTime;
-    float TotalTransformationTime;
+    void GenerateTemple();
+    void GeneratePyramid();
+    void GenerateMandalaStructure();
+    void GenerateSpiralTower();
+    void GenerateCrystalFormation();
+    void GenerateLabyrinth();
+    void GeneratePortalGateway();
+    void GenerateSanctuary();
+
+    void ApplyGoldenRatioProportions();
+    void SetupEnergyResonance();
+
+    float CurrentEnergyLevel;
+    float TimeAccumulator;
+    bool bEnergyFieldActive;
 };
