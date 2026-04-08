@@ -2,82 +2,84 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "Engine/Engine.h"
-#include "BehaviorTree/BehaviorTree.h"
-#include "BehaviorTree/BlackboardComponent.h"
-#include "AIController.h"
-#include "GameplayTagContainer.h"
+#include "GameplayTags.h"
+#include "CombatAIController.h"
 #include "CombatBehaviorComponent.generated.h"
 
-class ACombatAIManager;
-class ADinosaurCharacter;
-
 UENUM(BlueprintType)
-enum class ECombatState : uint8
+enum class EAttackType : uint8
 {
-    Passive         UMETA(DisplayName = "Passive"),
-    Alert           UMETA(DisplayName = "Alert"),
-    Investigating   UMETA(DisplayName = "Investigating"),
-    Stalking        UMETA(DisplayName = "Stalking"),
-    Attacking       UMETA(DisplayName = "Attacking"),
-    Fleeing         UMETA(DisplayName = "Fleeing"),
-    PackHunting     UMETA(DisplayName = "Pack Hunting"),
-    Territorial     UMETA(DisplayName = "Territorial")
-};
-
-UENUM(BlueprintType)
-enum class EDinosaurArchetype : uint8
-{
-    ApexPredator    UMETA(DisplayName = "Apex Predator"),     // T-Rex, Giganotosaurus
-    PackHunter      UMETA(DisplayName = "Pack Hunter"),       // Velociraptor, Utahraptor
-    Ambusher        UMETA(DisplayName = "Ambusher"),          // Carnotaurus, Baryonyx
-    Herbivore       UMETA(DisplayName = "Herbivore"),         // Triceratops, Stegosaurus
-    SmallHerbivore  UMETA(DisplayName = "Small Herbivore"),   // Parasaurolophus, Gallimimus
-    Flying          UMETA(DisplayName = "Flying"),            // Pteranodon, Quetzalcoatlus
-    Aquatic         UMETA(DisplayName = "Aquatic")            // Mosasaurus, Plesiosaur
+    Bite,
+    Claw,
+    Tail,
+    Charge,
+    Stomp,
+    Roar // Intimidação
 };
 
 USTRUCT(BlueprintType)
-struct FCombatParameters
+struct FAttackPattern
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-    float AttackRange = 200.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    EAttackType AttackType;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-    float DetectionRange = 1000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float Damage = 50.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-    float FleeThreshold = 30.0f; // Percentual de vida para fugir
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float Range = 200.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-    float Aggression = 50.0f; // 0-100
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float Cooldown = 3.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-    float TerritorialRadius = 500.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float WindupTime = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-    bool bCanFormPacks = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float RecoveryTime = 0.5f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-    int32 MaxPackSize = 6;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bRequiresLineOfSight = true;
 
-    FCombatParameters()
-    {
-        AttackRange = 200.0f;
-        DetectionRange = 1000.0f;
-        FleeThreshold = 30.0f;
-        Aggression = 50.0f;
-        TerritorialRadius = 500.0f;
-        bCanFormPacks = false;
-        MaxPackSize = 6;
-    }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FGameplayTag AnimationTag;
+};
+
+USTRUCT(BlueprintType)
+struct FCombatStats
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float MaxHealth = 100.0f;
+
+    UPROPERTY(BlueprintReadOnly)
+    float CurrentHealth = 100.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float MovementSpeed = 600.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float AttackSpeed = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float DefenseRating = 0.1f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float StaminaMax = 100.0f;
+
+    UPROPERTY(BlueprintReadOnly)
+    float CurrentStamina = 100.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float StaminaRegenRate = 10.0f;
 };
 
 /**
- * Componente de comportamento de combate para dinossauros
- * Gerencia estados de combate, coordenação tática e comportamentos emergentes
+ * Componente que gerencia comportamentos de combate específicos dos dinossauros
+ * Implementa padrões de ataque, stamina, e lógica de combate tático
  */
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UCombatBehaviorComponent : public UActorComponent
@@ -91,167 +93,115 @@ protected:
     virtual void BeginPlay() override;
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // Estado de Combate
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat State")
-    ECombatState CurrentCombatState;
+    // === COMBAT STATS ===
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Stats")
+    FCombatStats CombatStats;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Configuration")
-    EDinosaurArchetype DinosaurArchetype;
+    // === ATTACK PATTERNS ===
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Patterns")
+    TArray<FAttackPattern> AttackPatterns;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Configuration")
-    FCombatParameters CombatParams;
+    UPROPERTY(BlueprintReadOnly, Category = "Combat State")
+    int32 CurrentAttackIndex = 0;
 
-    // Referências
-    UPROPERTY()
-    ACombatAIManager* CombatManager;
+    UPROPERTY(BlueprintReadOnly, Category = "Combat State")
+    float LastAttackTime = 0.0f;
 
-    UPROPERTY()
-    AAIController* OwnerAIController;
+    UPROPERTY(BlueprintReadOnly, Category = "Combat State")
+    bool bIsAttacking = false;
 
-    UPROPERTY()
-    UBlackboardComponent* BlackboardComponent;
+    UPROPERTY(BlueprintReadOnly, Category = "Combat State")
+    bool bIsInCombat = false;
 
-    // Alvos e Ameaças
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat Targets")
-    AActor* CurrentTarget;
+    // === TACTICAL BEHAVIOR ===
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tactical Behavior")
+    float CircleDistance = 400.0f; // Distância para circular o alvo
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat Targets")
-    TArray<AActor*> KnownThreats;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tactical Behavior")
+    float FlankingAngle = 45.0f; // Ângulo preferido para flanquear
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat Targets")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tactical Behavior")
+    float AmbushWaitTime = 5.0f; // Tempo de espera em emboscada
+
+    UPROPERTY(BlueprintReadOnly, Category = "Tactical State")
     FVector LastKnownTargetLocation;
 
-    // Sistema de Matilha
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Pack Behavior")
-    ADinosaurCharacter* PackLeader;
+    UPROPERTY(BlueprintReadOnly, Category = "Tactical State")
+    float AmbushStartTime = 0.0f;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Pack Behavior")
-    TArray<ADinosaurCharacter*> PackMembers;
+    // === FEAR AND INTIMIDATION ===
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Intimidation")
+    float IntimidationRadius = 800.0f;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Pack Behavior")
-    bool bIsPackLeader;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Intimidation")
+    float RoarCooldown = 15.0f;
 
-    // Timers e Cooldowns
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat Timing")
-    float LastAttackTime;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Timing")
-    float AttackCooldown = 2.0f;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat Timing")
-    float StateChangeTime;
-
-    // Gameplay Tags para comportamentos
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Tags")
-    FGameplayTagContainer CombatTags;
+    UPROPERTY(BlueprintReadOnly, Category = "Intimidation")
+    float LastRoarTime = 0.0f;
 
 public:
-    // Interface Principal
+    // === PUBLIC INTERFACE ===
     UFUNCTION(BlueprintCallable, Category = "Combat Behavior")
-    void SetCombatManager(ACombatAIManager* Manager);
-
-    UFUNCTION(BlueprintCallable, Category = "Combat Behavior")
-    void SetCombatState(ECombatState NewState);
+    void UpdateBehavior(float DeltaTime, ECombatState CombatState, AActor* Target);
 
     UFUNCTION(BlueprintCallable, Category = "Combat Behavior")
-    ECombatState GetCombatState() const { return CurrentCombatState; }
+    bool TryExecuteAttack(AActor* Target);
 
-    // Sistema de Alvos
-    UFUNCTION(BlueprintCallable, Category = "Combat Targets")
-    void SetTarget(AActor* NewTarget);
+    UFUNCTION(BlueprintCallable, Category = "Combat Behavior")
+    FVector GetTacticalPosition(AActor* Target, ECombatState CombatState);
 
-    UFUNCTION(BlueprintCallable, Category = "Combat Targets")
-    AActor* GetCurrentTarget() const { return CurrentTarget; }
+    UFUNCTION(BlueprintCallable, Category = "Combat Behavior")
+    void TakeDamage(float Damage, AActor* DamageSource);
 
-    UFUNCTION(BlueprintCallable, Category = "Combat Targets")
-    void AddThreat(AActor* ThreatActor);
+    UFUNCTION(BlueprintCallable, Category = "Combat Behavior")
+    void OnStateChanged(ECombatState PreviousState, ECombatState NewState);
 
-    UFUNCTION(BlueprintCallable, Category = "Combat Targets")
-    void RemoveThreat(AActor* ThreatActor);
+    // === GETTERS ===
+    UFUNCTION(BlueprintPure, Category = "Combat Behavior")
+    float GetHealthPercentage() const { return CombatStats.CurrentHealth / CombatStats.MaxHealth; }
 
-    UFUNCTION(BlueprintCallable, Category = "Combat Targets")
-    AActor* GetHighestPriorityThreat();
+    UFUNCTION(BlueprintPure, Category = "Combat Behavior")
+    float GetStaminaPercentage() const { return CombatStats.CurrentStamina / CombatStats.StaminaMax; }
 
-    // Sistema de Alertas
-    UFUNCTION(BlueprintCallable, Category = "Combat Communication")
-    void ReceiveAlert(AActor* ThreatActor, FVector AlertLocation, float Distance);
-
-    UFUNCTION(BlueprintCallable, Category = "Combat Communication")
-    void BroadcastAlert(AActor* ThreatActor);
-
-    // Sistema de Matilha
-    UFUNCTION(BlueprintCallable, Category = "Pack Behavior")
-    void JoinPackHunt(ADinosaurCharacter* Leader, AActor* Target);
-
-    UFUNCTION(BlueprintCallable, Category = "Pack Behavior")
-    void LeavePackHunt();
-
-    UFUNCTION(BlueprintCallable, Category = "Pack Behavior")
-    void BecomePackLeader();
-
-    UFUNCTION(BlueprintCallable, Category = "Pack Behavior")
-    bool CanFormPack() const;
-
-    // Ações de Combate
-    UFUNCTION(BlueprintCallable, Category = "Combat Actions")
+    UFUNCTION(BlueprintPure, Category = "Combat Behavior")
     bool CanAttack() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Combat Actions")
-    void ExecuteAttack();
+    UFUNCTION(BlueprintPure, Category = "Combat Behavior")
+    bool IsInCombat() const { return bIsInCombat; }
 
-    UFUNCTION(BlueprintCallable, Category = "Combat Actions")
-    void RequestRepositioning();
+    UFUNCTION(BlueprintPure, Category = "Combat Behavior")
+    FAttackPattern GetCurrentAttackPattern() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Combat Actions")
-    FVector GetOptimalAttackPosition(AActor* Target);
+    // === INTIMIDATION ===
+    UFUNCTION(BlueprintCallable, Category = "Combat Behavior")
+    void ExecuteRoar();
 
-    // Comportamentos Específicos por Arquétipo
-    UFUNCTION(BlueprintCallable, Category = "Archetype Behaviors")
-    void ExecuteApexPredatorBehavior();
-
-    UFUNCTION(BlueprintCallable, Category = "Archetype Behaviors")
-    void ExecutePackHunterBehavior();
-
-    UFUNCTION(BlueprintCallable, Category = "Archetype Behaviors")
-    void ExecuteAmbusherBehavior();
-
-    UFUNCTION(BlueprintCallable, Category = "Archetype Behaviors")
-    void ExecuteHerbivoreBehavior();
-
-    // Sistema de Avaliação de Ameaças
-    UFUNCTION(BlueprintCallable, Category = "Threat Assessment")
-    float EvaluateThreatLevel(AActor* ThreatActor);
-
-    UFUNCTION(BlueprintCallable, Category = "Threat Assessment")
-    bool ShouldFlee(AActor* ThreatActor);
-
-    UFUNCTION(BlueprintCallable, Category = "Threat Assessment")
-    bool ShouldEngage(AActor* ThreatActor);
+    UFUNCTION(BlueprintCallable, Category = "Combat Behavior")
+    void IntimidateNearbyActors();
 
 protected:
-    // Métodos internos de processamento
+    // === INTERNAL METHODS ===
+    void UpdateStamina(float DeltaTime);
     void UpdateCombatState(float DeltaTime);
-    void ProcessThreatAssessment();
-    void UpdatePackCoordination();
-    void HandleStateTransitions();
+    void SelectOptimalAttack(AActor* Target);
+    FVector CalculateFlankingPosition(AActor* Target);
+    FVector CalculateAmbushPosition(AActor* Target);
+    FVector CalculateCirclingPosition(AActor* Target);
+    bool HasLineOfSight(AActor* Target) const;
+    void BroadcastIntimidation(float Radius);
 
-    // Métodos de comportamento por estado
-    void ProcessPassiveState();
-    void ProcessAlertState();
-    void ProcessInvestigatingState();
-    void ProcessStalkingState();
-    void ProcessAttackingState();
-    void ProcessFleeingState();
-    void ProcessPackHuntingState();
-    void ProcessTerritorialState();
+    // === DELEGATES ===
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnAttackExecuted, EAttackType, AttackType, AActor*, Target, float, Damage);
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnHealthChanged, float, NewHealth, float, MaxHealth);
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnCombatStateChanged, bool, bInCombat);
 
-    // Utilitários
-    float CalculateDistanceToTarget() const;
-    bool IsTargetInAttackRange() const;
-    bool HasLineOfSightToTarget() const;
-    void UpdateBlackboardValues();
+public:
+    UPROPERTY(BlueprintAssignable, Category = "Combat Events")
+    FOnAttackExecuted OnAttackExecuted;
 
-    // Cache para otimização
-    float LastThreatAssessmentTime;
-    float ThreatAssessmentInterval = 0.5f;
+    UPROPERTY(BlueprintAssignable, Category = "Combat Events")
+    FOnHealthChanged OnHealthChanged;
+
+    UPROPERTY(BlueprintAssignable, Category = "Combat Events")
+    FOnCombatStateChanged OnCombatStateChanged;
 };
