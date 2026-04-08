@@ -1,5 +1,3 @@
-// Copyright Transpersonal Game Studio. All Rights Reserved.
-
 using UnrealBuildTool;
 using System.Collections.Generic;
 
@@ -12,29 +10,27 @@ public class TranspersonalGameEditorTarget : TargetRules
         IncludeOrderVersion = EngineIncludeOrderVersion.Unreal5_3;
         
         ExtraModuleNames.AddRange(new string[] { "TranspersonalGame" });
-        
+
         // Editor-specific optimizations
-        bUseUnityBuild = true;
-        bUsePCHFiles = true;
-        bUseSharedPCHs = true;
-        bUseIncrementalLinking = true;
-        bUseFastMonoCalls = true;
-        
-        // Enable all editor features
         bBuildDeveloperTools = true;
         bBuildWithEditorOnlyData = true;
-        bCompileAgainstEngine = true;
-        bCompileAgainstCoreUObject = true;
-        
-        // Development aids
+        bCompileWithPluginSupport = true;
+        bIncludePluginsForTargetPlatforms = true;
+
+        // Enable all debugging features in editor
         bUseLoggingInShipping = true;
         bUseChecksInShipping = true;
+        bCompileWithStatsWithoutEngine = true;
+
+        // Editor performance
+        bUsePCHFiles = true;
+        bUseUnityBuild = true;
+        bForceUnityBuild = false;
+
+        // Enable modern C++ features
+        CppStandard = CppStandardVersion.Cpp17;
         
-        // Platform-specific editor settings
-        if (Platform == UnrealTargetPlatform.Win64)
-        {
-            WindowsPlatform.PCHMemoryAllocationFactor = 3000;
-            WindowsPlatform.bStrictConformanceMode = true;
-        }
+        // Build optimization for editor
+        bBuildInSolutionByDefault = true;
     }
 }
