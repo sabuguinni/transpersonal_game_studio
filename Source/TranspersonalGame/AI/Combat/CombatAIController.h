@@ -2,25 +2,95 @@
 
 #include "CoreMinimal.h"
 #include "AIController.h"
-#include "BehaviorTree/BehaviorTreeComponent.h"
 #include "BehaviorTree/BlackboardComponent.h"
 #include "Perception/AIPerceptionComponent.h"
-#include "CombatAITypes.h"
+#include "GameplayTagContainer.h"
 #include "CombatAIController.generated.h"
 
+class UBehaviorTreeComponent;
+class UBlackboardComponent;
+class UAIPerceptionComponent;
 class UBehaviorTree;
-class UBlackboardAsset;
-class UCombatAIComponent;
+class UBlackboard;
+class ACombatAICharacter;
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnCombatStateChanged, ECombatState, OldState, ECombatState, NewState);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnTargetAcquired, AActor*, Target);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnTargetLost, AActor*, Target);
+UENUM(BlueprintType)
+enum class ECombatState : uint8
+{
+    Idle,
+    Hunting,
+    Stalking,
+    Attacking,
+    Retreating,
+    Circling,
+    Ambushing,
+    Fleeing
+};
 
-/**
- * AI Controller especializado para combate de dinossauros
- * Integra Behavior Trees, AI Perception e sistema de combate tático
- */
-UCLASS(BlueprintType, Blueprintable)
+UENUM(BlueprintType)
+enum class ECombatRole : uint8
+{
+    SoloPredator,
+    PackLeader,
+    PackMember,
+    Ambusher,
+    Charger,
+    Defender
+};
+
+UENUM(BlueprintType)
+enum class EThreatLevel : uint8
+{
+    None,
+    Low,
+    Medium,
+    High,
+    Critical
+};
+
+USTRUCT(BlueprintType)
+struct FCombatMemory
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadWrite)
+    AActor* LastKnownTarget;
+
+    UPROPERTY(BlueprintReadWrite)
+    FVector LastKnownLocation;
+
+    UPROPERTY(BlueprintReadWrite)
+    float LastSeenTime;
+
+    UPROPERTY(BlueprintReadWrite)
+    EThreatLevel ThreatLevel;
+
+    UPROPERTY(BlueprintReadWrite)
+    bool bHasBeenDamaged;
+
+    UPROPERTY(BlueprintReadWrite)
+    float DamageReceived;
+
+    UPROPERTY(BlueprintReadWrite)
+    int32 AttackAttempts;
+
+    UPROPERTY(BlueprintReadWrite)
+    float LastAttackTime;
+
+    FCombatMemory()
+    {
+        LastKnownTarget = nullptr;
+        LastKnownLocation = FVector::ZeroVector;
+        LastSeenTime = 0.0f;
+        ThreatLevel = EThreatLevel::None;
+        bHasBeenDamaged = false;
+        DamageReceived = 0.0f;
+        AttackAttempts = 0;
+        LastAttackTime = 0.0f;
+    }
+};
+
+UCLASS()
 class TRANSPERSONALGAME_API ACombatAIController : public AAIController
 {
     GENERATED_BODY()
@@ -31,114 +101,142 @@ public:
 protected:
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
-    virtual void OnPossess(APawn* InPawn) override;
 
-    // Componentes principais
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat AI")
-    UCombatAIComponent* CombatAIComponent;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat AI")
-    UAIPerceptionComponent* AIPerceptionComponent;
-
-    // Configuração de Behavior Tree
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat AI")
+    // Combat Behavior Tree
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI")
     UBehaviorTree* CombatBehaviorTree;
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat AI")
-    UBlackboardAsset* CombatBlackboard;
+    // Combat Blackboard
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI")
+    UBlackboard* CombatBlackboard;
 
-    // Configuração de combate
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
-    FCombatAIConfig CombatConfig;
+    // Combat State
+    UPROPERTY(BlueprintReadWrite, Category = "Combat")
+    ECombatState CurrentCombatState;
 
-    // Dados de runtime
-    UPROPERTY(BlueprintReadOnly, Category = "Combat AI")
-    FCombatRuntimeData RuntimeData;
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat")
+    ECombatRole CombatRole;
 
-    // Eventos
-    UPROPERTY(BlueprintAssignable)
-    FOnCombatStateChanged OnCombatStateChanged;
+    // Combat Memory
+    UPROPERTY(BlueprintReadWrite, Category = "Combat")
+    FCombatMemory CombatMemory;
 
-    UPROPERTY(BlueprintAssignable)
-    FOnTargetAcquired OnTargetAcquired;
+    // Combat Parameters
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Detection")
+    float SightRange;
 
-    UPROPERTY(BlueprintAssignable)
-    FOnTargetLost OnTargetLost;
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Detection")
+    float HearingRange;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Detection")
+    float PeripheralVisionAngle;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Attack")
+    float AttackRange;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Attack")
+    float AttackCooldown;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Movement")
+    float PreferredCombatDistance;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Movement")
+    float CirclingRadius;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Movement")
+    float FleeDistance;
+
+    // Gameplay Tags for Combat States
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Tags")
+    FGameplayTagContainer CombatTags;
 
 public:
-    // Funções públicas de combate
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    // Combat State Management
+    UFUNCTION(BlueprintCallable, Category = "Combat")
     void SetCombatState(ECombatState NewState);
 
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    ECombatState GetCombatState() const { return RuntimeData.CurrentState; }
+    UFUNCTION(BlueprintPure, Category = "Combat")
+    ECombatState GetCombatState() const { return CurrentCombatState; }
 
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    UFUNCTION(BlueprintPure, Category = "Combat")
+    ECombatRole GetCombatRole() const { return CombatRole; }
+
+    // Target Management
+    UFUNCTION(BlueprintCallable, Category = "Combat")
     void SetTarget(AActor* NewTarget);
 
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    AActor* GetCurrentTarget() const { return RuntimeData.CurrentTarget; }
+    UFUNCTION(BlueprintPure, Category = "Combat")
+    AActor* GetCurrentTarget() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    bool CanAttackTarget(AActor* Target) const;
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    void UpdateTargetMemory(AActor* Target, const FVector& Location);
 
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void ExecuteAttack(EAttackType AttackType);
+    // Combat Decision Making
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    bool ShouldAttack() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void CallForHelp();
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    bool ShouldRetreat() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void RespondToHelpCall(AActor* Caller);
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    bool ShouldCircle() const;
 
-    // Funções de percepção
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    bool ShouldAmbush() const;
+
+    // Combat Actions
+    UFUNCTION(BlueprintImplementableEvent, Category = "Combat")
+    void ExecuteAttack();
+
+    UFUNCTION(BlueprintImplementableEvent, Category = "Combat")
+    void ExecuteRetreat();
+
+    UFUNCTION(BlueprintImplementableEvent, Category = "Combat")
+    void ExecuteCircling();
+
+    UFUNCTION(BlueprintImplementableEvent, Category = "Combat")
+    void ExecuteAmbush();
+
+    // Damage Handling
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    void OnDamageReceived(float DamageAmount, AActor* DamageSource);
+
+    // Pack Coordination (for pack hunters)
+    UFUNCTION(BlueprintCallable, Category = "Combat|Pack")
+    void CoordinateWithPack();
+
+    UFUNCTION(BlueprintCallable, Category = "Combat|Pack")
+    void RequestPackSupport();
+
+    // Threat Assessment
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    EThreatLevel AssessThreatLevel(AActor* Target) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    void UpdateThreatLevel();
+
+protected:
+    // AI Perception Events
     UFUNCTION()
     void OnPerceptionUpdated(const TArray<AActor*>& UpdatedActors);
 
     UFUNCTION()
     void OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus);
 
-    // Funções de análise tática
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    float CalculateThreatLevel(AActor* Target) const;
+    // Internal Combat Logic
+    void UpdateCombatState();
+    void ProcessCombatMemory();
+    FVector CalculateCirclingPosition() const;
+    FVector CalculateAmbushPosition() const;
+    FVector CalculateRetreatPosition() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    FVector FindOptimalCombatPosition(AActor* Target) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    bool ShouldRetreat() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    bool ShouldFlee() const;
-
-    // Funções de Blackboard
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void UpdateBlackboardValues();
-
-protected:
-    // Funções internas
-    void InitializePerception();
-    void InitializeBehaviorTree();
-    void UpdateCombatLogic(float DeltaTime);
-    void UpdateAggression(float DeltaTime);
-    void UpdateFear(float DeltaTime);
-    void ProcessNearbyActors();
-    
-    // Análise tática
-    TArray<AActor*> FindAlliesInRange() const;
-    TArray<AActor*> FindEnemiesInRange() const;
-    float CalculatePositionalAdvantage(const FVector& Position, AActor* Target) const;
-    
-    // Blackboard keys (definidas como FName para performance)
-    static const FName BB_CurrentTarget;
-    static const FName BB_CombatState;
-    static const FName BB_LastKnownTargetLocation;
-    static const FName BB_CurrentAggression;
-    static const FName BB_CurrentFear;
-    static const FName BB_InCombat;
-    static const FName BB_ShouldRetreat;
-    static const FName BB_ShouldFlee;
-    static const FName BB_OptimalCombatPosition;
-    static const FName BB_AlliesInRange;
-    static const FName BB_EnemiesInRange;
+    // Blackboard Keys
+    static const FName TargetActorKey;
+    static const FName TargetLocationKey;
+    static const FName CombatStateKey;
+    static const FName ThreatLevelKey;
+    static const FName LastKnownLocationKey;
+    static const FName CanAttackKey;
+    static const FName ShouldRetreatKey;
+    static const FName PreferredDistanceKey;
 };
