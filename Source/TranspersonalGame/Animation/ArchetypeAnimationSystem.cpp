@@ -1,668 +1,584 @@
 #include "ArchetypeAnimationSystem.h"
 #include "Engine/World.h"
-#include "Engine/Engine.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
 #include "Animation/BlendSpace.h"
-#include "Animation/ControlRig.h"
 #include "PoseSearch/PoseSearchDatabase.h"
 #include "IKRig/IKRigDefinition.h"
-#include "GameFramework/Character.h"
-#include "GameFramework/CharacterMovementComponent.h"
-#include "Characters/CharacterArchetypes.h"
-#include "Logging/LogMacros.h"
+#include "ControlRig/Public/ControlRig.h"
+#include "Kismet/KismetMathLibrary.h"
+#include "Engine/Engine.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogArchetypeAnimation, Log, All);
 
 UArchetypeAnimationSystem::UArchetypeAnimationSystem()
 {
-    // Configurar tick
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickGroup = TG_PrePhysics;
+    PrimaryServiceType = ETickableTickType::Always;
+    bTickInEditor = false;
     
-    // Valores padrão
-    CurrentAnimationState = FCharacterAnimationState();
-    BlendTimeMultiplier = 1.0f;
-    EmotionalTransitionSpeed = 2.0f;
-    GestureBlendWeight = 0.8f;
-    IKBlendWeight = 1.0f;
-    bDebugAnimationStates = false;
-    
-    // Inicializar timers
-    LastGestureTime = 0.0f;
-    LastEmotionalUpdate = 0.0f;
-    LastSurvivalUpdate = 0.0f;
+    // Initialize default archetype configs
+    InitializeDefaultArchetypes();
 }
 
-void UArchetypeAnimationSystem::BeginPlay()
+void UArchetypeAnimationSystem::Initialize(FSubsystemCollectionBase& Collection)
 {
-    Super::BeginPlay();
+    Super::Initialize(Collection);
     
-    // Encontrar componentes necessários
-    OwnerCharacter = Cast<ACharacter>(GetOwner());
-    if (OwnerCharacter)
+    UE_LOG(LogArchetypeAnimation, Log, TEXT("ArchetypeAnimationSystem initialized"));
+    
+    // Load archetype configurations
+    LoadArchetypeConfigurations();
+    
+    // Initialize gesture system
+    InitializeGestureSystem();
+    
+    // Setup emotional state transitions
+    SetupEmotionalTransitions();
+}
+
+void UArchetypeAnimationSystem::Deinitialize()
+{
+    // Cleanup active character states
+    ActiveCharacterStates.Empty();
+    ArchetypeConfigs.Empty();
+    EmotionalTransitionRules.Empty();
+    
+    Super::Deinitialize();
+    
+    UE_LOG(LogArchetypeAnimation, Log, TEXT("ArchetypeAnimationSystem deinitialized"));
+}
+
+void UArchetypeAnimationSystem::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+    
+    // Update all active character animation states
+    UpdateActiveCharacters(DeltaTime);
+    
+    // Process emotional state transitions
+    ProcessEmotionalTransitions(DeltaTime);
+    
+    // Update gesture system
+    UpdateGestureSystem(DeltaTime);
+    
+    // Apply adaptive IK
+    UpdateAdaptiveIK(DeltaTime);
+}
+
+TStatId UArchetypeAnimationSystem::GetStatId() const
+{
+    RETURN_QUICK_DECLARE_CYCLE_STAT(UArchetypeAnimationSystem, STATGROUP_Tickables);
+}
+
+void UArchetypeAnimationSystem::RegisterCharacter(ACharacter* Character, ECharacterArchetype Archetype)
+{
+    if (!Character)
     {
-        SkeletalMeshComponent = OwnerCharacter->GetMesh();
-        MovementComponent = OwnerCharacter->GetCharacterMovement();
+        UE_LOG(LogArchetypeAnimation, Warning, TEXT("Attempted to register null character"));
+        return;
+    }
+    
+    // Create animation state for character
+    FCharacterAnimationState NewState;
+    NewState.CurrentEmotionalState = EEmotionalState::Neutral;
+    NewState.CurrentSurvivalState = ESurvivalState::Fresh;
+    NewState.CurrentStressLevel = EStressLevel::Calm;
+    
+    ActiveCharacterStates.Add(Character, NewState);
+    CharacterArchetypes.Add(Character, Archetype);
+    
+    // Apply archetype configuration
+    ApplyArchetypeToCharacter(Character, Archetype);
+    
+    UE_LOG(LogArchetypeAnimation, Log, TEXT("Registered character %s with archetype %d"), 
+           *Character->GetName(), (int32)Archetype);
+}
+
+void UArchetypeAnimationSystem::UnregisterCharacter(ACharacter* Character)
+{
+    if (Character)
+    {
+        ActiveCharacterStates.Remove(Character);
+        CharacterArchetypes.Remove(Character);
         
-        // Configurar sistema baseado no arquétipo
-        InitializeArchetypeSystem();
+        UE_LOG(LogArchetypeAnimation, Log, TEXT("Unregistered character %s"), *Character->GetName());
+    }
+}
+
+void UArchetypeAnimationSystem::UpdateCharacterEmotionalState(ACharacter* Character, EEmotionalState NewState, float Intensity)
+{
+    if (!Character || !ActiveCharacterStates.Contains(Character))
+    {
+        return;
+    }
+    
+    FCharacterAnimationState& State = ActiveCharacterStates[Character];
+    EEmotionalState PreviousState = State.CurrentEmotionalState;
+    
+    // Apply emotional state change
+    State.CurrentEmotionalState = NewState;
+    State.EmotionalIntensity = FMath::Clamp(Intensity, 0.0f, 1.0f);
+    State.LastEmotionalChangeTime = GetWorld()->GetTimeSeconds();
+    
+    // Trigger emotional animation transition
+    TriggerEmotionalTransition(Character, PreviousState, NewState, Intensity);
+    
+    UE_LOG(LogArchetypeAnimation, Log, TEXT("Character %s emotional state changed from %d to %d (intensity: %.2f)"), 
+           *Character->GetName(), (int32)PreviousState, (int32)NewState, Intensity);
+}
+
+void UArchetypeAnimationSystem::UpdateCharacterSurvivalState(ACharacter* Character, ESurvivalState NewState)
+{
+    if (!Character || !ActiveCharacterStates.Contains(Character))
+    {
+        return;
+    }
+    
+    FCharacterAnimationState& State = ActiveCharacterStates[Character];
+    State.CurrentSurvivalState = NewState;
+    
+    // Update motion matching database based on survival state
+    UpdateMotionMatchingDatabase(Character, NewState);
+    
+    UE_LOG(LogArchetypeAnimation, Log, TEXT("Character %s survival state changed to %d"), 
+           *Character->GetName(), (int32)NewState);
+}
+
+void UArchetypeAnimationSystem::TriggerGesture(ACharacter* Character, EGestureType GestureType, float Duration)
+{
+    if (!Character || !ActiveCharacterStates.Contains(Character))
+    {
+        return;
+    }
+    
+    ECharacterArchetype Archetype = CharacterArchetypes[Character];
+    const FArchetypeAnimationConfig* Config = GetArchetypeConfig(Archetype);
+    
+    if (!Config)
+    {
+        return;
+    }
+    
+    // Find gesture animation
+    if (Config->GestureAnimations.Contains(GestureType))
+    {
+        TSoftObjectPtr<UAnimMontage> GestureMontage = Config->GestureAnimations[GestureType];
         
-        // Registrar no subsistema global
-        if (UWorld* World = GetWorld())
+        if (UAnimMontage* Montage = GestureMontage.LoadSynchronous())
         {
-            if (UArchetypeAnimationSubsystem* AnimSubsystem = World->GetSubsystem<UArchetypeAnimationSubsystem>())
+            // Play gesture montage
+            if (USkeletalMeshComponent* MeshComp = Character->GetMesh())
             {
-                AnimSubsystem->RegisterCharacterAnimationSystem(this);
+                if (UAnimInstance* AnimInstance = MeshComp->GetAnimInstance())
+                {
+                    float PlayRate = Duration > 0.0f ? Montage->GetPlayLength() / Duration : 1.0f;
+                    AnimInstance->Montage_Play(Montage, PlayRate);
+                    
+                    UE_LOG(LogArchetypeAnimation, Log, TEXT("Triggered gesture %d for character %s"), 
+                           (int32)GestureType, *Character->GetName());
+                }
             }
         }
     }
-    
-    UE_LOG(LogArchetypeAnimation, Log, TEXT("ArchetypeAnimationSystem initialized for character: %s"), 
-           OwnerCharacter ? *OwnerCharacter->GetName() : TEXT("Unknown"));
 }
 
-void UArchetypeAnimationSystem::EndPlay(const EEndPlayReason::Type EndPlayReason)
+void UArchetypeAnimationSystem::SetCharacterFatigueLevel(ACharacter* Character, float FatigueLevel)
 {
-    // Desregistrar do subsistema
-    if (UWorld* World = GetWorld())
+    if (!Character || !ActiveCharacterStates.Contains(Character))
     {
-        if (UArchetypeAnimationSubsystem* AnimSubsystem = World->GetSubsystem<UArchetypeAnimationSubsystem>())
+        return;
+    }
+    
+    FCharacterAnimationState& State = ActiveCharacterStates[Character];
+    State.FatigueLevel = FMath::Clamp(FatigueLevel, 0.0f, 1.0f);
+    
+    // Update movement characteristics based on fatigue
+    UpdateMovementCharacteristics(Character, State);
+}
+
+void UArchetypeAnimationSystem::SetCharacterInjuryLevel(ACharacter* Character, float InjuryLevel)
+{
+    if (!Character || !ActiveCharacterStates.Contains(Character))
+    {
+        return;
+    }
+    
+    FCharacterAnimationState& State = ActiveCharacterStates[Character];
+    State.InjuryLevel = FMath::Clamp(InjuryLevel, 0.0f, 1.0f);
+    
+    // Update movement characteristics based on injury
+    UpdateMovementCharacteristics(Character, State);
+}
+
+FCharacterAnimationState UArchetypeAnimationSystem::GetCharacterAnimationState(ACharacter* Character) const
+{
+    if (Character && ActiveCharacterStates.Contains(Character))
+    {
+        return ActiveCharacterStates[Character];
+    }
+    
+    return FCharacterAnimationState();
+}
+
+const FArchetypeAnimationConfig* UArchetypeAnimationSystem::GetArchetypeConfig(ECharacterArchetype Archetype) const
+{
+    return ArchetypeConfigs.Find(Archetype);
+}
+
+void UArchetypeAnimationSystem::InitializeDefaultArchetypes()
+{
+    // Protagonist Paleontologist
+    FArchetypeAnimationConfig PaleontologistConfig;
+    PaleontologistConfig.Archetype = ECharacterArchetype::Protagonist_Paleontologist;
+    PaleontologistConfig.bUseMotionMatching = true;
+    PaleontologistConfig.bUseAdaptiveIK = true;
+    PaleontologistConfig.bUseProceduralGestures = true;
+    PaleontologistConfig.bUseEmotionalOverrides = true;
+    PaleontologistConfig.BlendTime = 0.2f;
+    PaleontologistConfig.MotionMatchingWeight = 1.0f;
+    PaleontologistConfig.IKWeight = 0.8f;
+    PaleontologistConfig.GestureFrequency = 0.7f;
+    PaleontologistConfig.EmotionalIntensity = 0.8f;
+    
+    ArchetypeConfigs.Add(ECharacterArchetype::Protagonist_Paleontologist, PaleontologistConfig);
+    
+    // Survivor Archetype
+    FArchetypeAnimationConfig SurvivorConfig;
+    SurvivorConfig.Archetype = ECharacterArchetype::Survivor_Cautious;
+    SurvivorConfig.bUseMotionMatching = true;
+    SurvivorConfig.bUseAdaptiveIK = true;
+    SurvivorConfig.bUseProceduralGestures = false;
+    SurvivorConfig.bUseEmotionalOverrides = true;
+    SurvivorConfig.BlendTime = 0.15f;
+    SurvivorConfig.MotionMatchingWeight = 1.0f;
+    SurvivorConfig.IKWeight = 1.0f;
+    SurvivorConfig.GestureFrequency = 0.3f;
+    SurvivorConfig.EmotionalIntensity = 1.0f;
+    
+    ArchetypeConfigs.Add(ECharacterArchetype::Survivor_Cautious, SurvivorConfig);
+}
+
+void UArchetypeAnimationSystem::LoadArchetypeConfigurations()
+{
+    // In a full implementation, this would load from data assets or config files
+    UE_LOG(LogArchetypeAnimation, Log, TEXT("Loaded %d archetype configurations"), ArchetypeConfigs.Num());
+}
+
+void UArchetypeAnimationSystem::InitializeGestureSystem()
+{
+    // Initialize gesture timing and frequency systems
+    GestureRandomStream.Initialize(FMath::Rand());
+    
+    UE_LOG(LogArchetypeAnimation, Log, TEXT("Gesture system initialized"));
+}
+
+void UArchetypeAnimationSystem::SetupEmotionalTransitions()
+{
+    // Define emotional state transition rules
+    // Fear -> Cautious (natural progression)
+    FEmotionalTransitionRule FearToCautious;
+    FearToCautious.FromState = EEmotionalState::Fearful;
+    FearToCautious.ToState = EEmotionalState::Cautious;
+    FearToCautious.TransitionTime = 3.0f;
+    FearToCautious.RequiredIntensityThreshold = 0.3f;
+    
+    EmotionalTransitionRules.Add(FearToCautious);
+    
+    // Exhausted -> Neutral (recovery)
+    FEmotionalTransitionRule ExhaustedToNeutral;
+    ExhaustedToNeutral.FromState = EEmotionalState::Exhausted;
+    ExhaustedToNeutral.ToState = EEmotionalState::Neutral;
+    ExhaustedToNeutral.TransitionTime = 10.0f;
+    ExhaustedToNeutral.RequiredIntensityThreshold = 0.5f;
+    
+    EmotionalTransitionRules.Add(ExhaustedToNeutral);
+}
+
+void UArchetypeAnimationSystem::UpdateActiveCharacters(float DeltaTime)
+{
+    for (auto& CharacterPair : ActiveCharacterStates)
+    {
+        ACharacter* Character = CharacterPair.Key;
+        FCharacterAnimationState& State = CharacterPair.Value;
+        
+        if (!Character)
         {
-            AnimSubsystem->UnregisterCharacterAnimationSystem(this);
+            continue;
+        }
+        
+        // Update movement timing
+        if (UCharacterMovementComponent* MovementComp = Character->GetCharacterMovement())
+        {
+            float CurrentSpeed = MovementComp->Velocity.Size();
+            
+            if (CurrentSpeed < 10.0f) // Essentially stationary
+            {
+                State.TimeSinceLastMovement += DeltaTime;
+            }
+            else
+            {
+                State.TimeSinceLastMovement = 0.0f;
+            }
+        }
+        
+        // Update stress level based on environmental factors
+        UpdateStressLevel(Character, State, DeltaTime);
+        
+        // Update procedural gestures
+        UpdateProceduralGestures(Character, State, DeltaTime);
+    }
+}
+
+void UArchetypeAnimationSystem::ProcessEmotionalTransitions(float DeltaTime)
+{
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    
+    for (auto& CharacterPair : ActiveCharacterStates)
+    {
+        ACharacter* Character = CharacterPair.Key;
+        FCharacterAnimationState& State = CharacterPair.Value;
+        
+        if (!Character)
+        {
+            continue;
+        }
+        
+        // Check for automatic emotional transitions
+        for (const FEmotionalTransitionRule& Rule : EmotionalTransitionRules)
+        {
+            if (State.CurrentEmotionalState == Rule.FromState)
+            {
+                float TimeSinceChange = CurrentTime - State.LastEmotionalChangeTime;
+                
+                if (TimeSinceChange >= Rule.TransitionTime && 
+                    State.EmotionalIntensity <= Rule.RequiredIntensityThreshold)
+                {
+                    UpdateCharacterEmotionalState(Character, Rule.ToState, 0.5f);
+                    break;
+                }
+            }
         }
     }
-    
-    Super::EndPlay(EndPlayReason);
 }
 
-void UArchetypeAnimationSystem::TickComponent(float DeltaTime, ELevelTick TickType, 
-                                             FActorComponentTickFunction* ThisTickFunction)
+void UArchetypeAnimationSystem::UpdateGestureSystem(float DeltaTime)
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    
-    if (!OwnerCharacter || !SkeletalMeshComponent)
-        return;
-    
-    // Atualizar estado de animação
-    UpdateAnimationState(DeltaTime);
-    
-    // Processar Motion Matching contextual
-    UpdateMotionMatching(DeltaTime);
-    
-    // Atualizar IK adaptativo
-    UpdateAdaptiveIK(DeltaTime);
-    
-    // Processar gestos procedurais
-    UpdateProceduralGestures(DeltaTime);
-    
-    // Atualizar expressões emocionais
-    UpdateEmotionalExpressions(DeltaTime);
-    
-    // Debug visual se ativado
-    if (bDebugAnimationStates)
+    for (auto& CharacterPair : ActiveCharacterStates)
     {
-        DebugDrawAnimationState();
-    }
-}
-
-void UArchetypeAnimationSystem::InitializeArchetypeSystem()
-{
-    if (!ArchetypeConfig)
-    {
-        UE_LOG(LogArchetypeAnimation, Warning, TEXT("No ArchetypeConfig set for character: %s"), 
-               OwnerCharacter ? *OwnerCharacter->GetName() : TEXT("Unknown"));
-        return;
-    }
-    
-    // Configurar Motion Matching baseado no arquétipo
-    SetupMotionMatchingForArchetype();
-    
-    // Configurar IK específico
-    SetupArchetypeIK();
-    
-    // Carregar animações específicas do arquétipo
-    LoadArchetypeAnimations();
-    
-    // Configurar linguagem corporal inicial
-    ApplyArchetypeBodyLanguage();
-    
-    UE_LOG(LogArchetypeAnimation, Log, TEXT("Archetype system initialized for: %s"), 
-           *UEnum::GetValueAsString(ArchetypeConfig->Archetype));
-}
-
-void UArchetypeAnimationSystem::UpdateAnimationState(float DeltaTime)
-{
-    if (!MovementComponent)
-        return;
-    
-    // Atualizar níveis de condição baseados no gameplay
-    UpdateConditionLevels(DeltaTime);
-    
-    // Determinar estado emocional baseado nas condições
-    EEmotionalState NewEmotionalState = DetermineEmotionalState();
-    
-    // Transição suave entre estados emocionais
-    if (NewEmotionalState != CurrentAnimationState.CurrentEmotionalState)
-    {
-        TransitionToEmotionalState(NewEmotionalState, DeltaTime);
-    }
-    
-    // Atualizar estado de sobrevivência
-    UpdateSurvivalState(DeltaTime);
-    
-    // Atualizar timers
-    CurrentAnimationState.TimeSinceLastMovement += DeltaTime;
-    if (MovementComponent->Velocity.Size() > 10.0f)
-    {
-        CurrentAnimationState.TimeSinceLastMovement = 0.0f;
-    }
-}
-
-void UArchetypeAnimationSystem::UpdateConditionLevels(float DeltaTime)
-{
-    // Simular fadiga baseada em movimento
-    if (MovementComponent && MovementComponent->Velocity.Size() > 100.0f)
-    {
-        CurrentAnimationState.FatigueLevel = FMath::Clamp(
-            CurrentAnimationState.FatigueLevel + DeltaTime * 0.1f, 0.0f, 1.0f);
-    }
-    else
-    {
-        // Recuperação gradual quando parado
-        CurrentAnimationState.FatigueLevel = FMath::Clamp(
-            CurrentAnimationState.FatigueLevel - DeltaTime * 0.05f, 0.0f, 1.0f);
-    }
-    
-    // Simular medo baseado em proximidade de perigos (placeholder)
-    // TODO: Integrar com sistema de detecção de dinossauros
-    if (CurrentAnimationState.bIsInDanger)
-    {
-        CurrentAnimationState.FearLevel = FMath::Clamp(
-            CurrentAnimationState.FearLevel + DeltaTime * 0.5f, 0.0f, 1.0f);
-    }
-    else
-    {
-        CurrentAnimationState.FearLevel = FMath::Clamp(
-            CurrentAnimationState.FearLevel - DeltaTime * 0.2f, 0.0f, 1.0f);
-    }
-    
-    // Confiança inversamente proporcional ao medo e fadiga
-    float ConfidenceTarget = 1.0f - (CurrentAnimationState.FearLevel * 0.6f + 
-                                   CurrentAnimationState.FatigueLevel * 0.4f);
-    CurrentAnimationState.ConfidenceLevel = FMath::FInterpTo(
-        CurrentAnimationState.ConfidenceLevel, ConfidenceTarget, DeltaTime, 2.0f);
-}
-
-EEmotionalState UArchetypeAnimationSystem::DetermineEmotionalState()
-{
-    // Lógica para determinar estado emocional baseado nas condições
-    if (CurrentAnimationState.FearLevel > 0.7f)
-    {
-        return EEmotionalState::Fearful;
-    }
-    else if (CurrentAnimationState.FatigueLevel > 0.8f)
-    {
-        return EEmotionalState::Exhausted;
-    }
-    else if (CurrentAnimationState.bIsObserving)
-    {
-        return EEmotionalState::Curious;
-    }
-    else if (CurrentAnimationState.ConfidenceLevel > 0.8f)
-    {
-        return EEmotionalState::Confident;
-    }
-    else if (CurrentAnimationState.FearLevel > 0.3f)
-    {
-        return EEmotionalState::Cautious;
-    }
-    
-    return EEmotionalState::Neutral;
-}
-
-void UArchetypeAnimationSystem::TransitionToEmotionalState(EEmotionalState NewState, float DeltaTime)
-{
-    // Verificar se tempo suficiente passou desde a última transição
-    if (GetWorld()->GetTimeSeconds() - LastEmotionalUpdate < 0.5f)
-        return;
-    
-    UE_LOG(LogArchetypeAnimation, Log, TEXT("Transitioning from %s to %s"), 
-           *UEnum::GetValueAsString(CurrentAnimationState.CurrentEmotionalState),
-           *UEnum::GetValueAsString(NewState));
-    
-    CurrentAnimationState.CurrentEmotionalState = NewState;
-    LastEmotionalUpdate = GetWorld()->GetTimeSeconds();
-    
-    // Notificar sistemas dependentes
-    OnEmotionalStateChanged.ExecuteIfBound(NewState);
-    
-    // Atualizar Motion Matching database se necessário
-    UpdateMotionMatchingDatabase();
-}
-
-void UArchetypeAnimationSystem::UpdateSurvivalState(float DeltaTime)
-{
-    // Lógica simplificada para estado de sobrevivência
-    // TODO: Integrar com sistema de sobrevivência do jogo
-    
-    ESurvivalState NewSurvivalState = CurrentAnimationState.CurrentSurvivalState;
-    
-    if (CurrentAnimationState.FatigueLevel > 0.9f || CurrentAnimationState.InjuryLevel > 0.7f)
-    {
-        NewSurvivalState = ESurvivalState::Desperate;
-    }
-    else if (CurrentAnimationState.FatigueLevel > 0.6f || CurrentAnimationState.InjuryLevel > 0.4f)
-    {
-        NewSurvivalState = ESurvivalState::Struggling;
-    }
-    else if (CurrentAnimationState.FatigueLevel > 0.3f)
-    {
-        NewSurvivalState = ESurvivalState::Tired;
-    }
-    else
-    {
-        NewSurvivalState = ESurvivalState::Fresh;
-    }
-    
-    if (NewSurvivalState != CurrentAnimationState.CurrentSurvivalState)
-    {
-        CurrentAnimationState.CurrentSurvivalState = NewSurvivalState;
-        LastSurvivalUpdate = GetWorld()->GetTimeSeconds();
+        ACharacter* Character = CharacterPair.Key;
+        FCharacterAnimationState& State = CharacterPair.Value;
         
-        // Atualizar configurações de animação
-        UpdateMotionMatchingDatabase();
+        if (!Character)
+        {
+            continue;
+        }
+        
+        ECharacterArchetype Archetype = CharacterArchetypes[Character];
+        const FArchetypeAnimationConfig* Config = GetArchetypeConfig(Archetype);
+        
+        if (!Config || !Config->bUseProceduralGestures)
+        {
+            continue;
+        }
+        
+        // Check if it's time for a procedural gesture
+        float TimeSinceLastGesture = GetWorld()->GetTimeSeconds() - State.LastGestureTime;
+        float GestureInterval = 1.0f / Config->GestureFrequency;
+        
+        if (TimeSinceLastGesture >= GestureInterval)
+        {
+            // Randomly trigger appropriate gesture based on current state
+            EGestureType GestureToTrigger = SelectAppropriateGesture(Character, State, Archetype);
+            
+            if (GestureToTrigger != EGestureType::MAX)
+            {
+                TriggerGesture(Character, GestureToTrigger);
+                State.LastGestureTime = GetWorld()->GetTimeSeconds();
+            }
+        }
     }
-}
-
-void UArchetypeAnimationSystem::UpdateMotionMatching(float DeltaTime)
-{
-    if (!ArchetypeConfig || !ArchetypeConfig->bUseMotionMatching)
-        return;
-    
-    // Atualizar peso do Motion Matching baseado no estado
-    float TargetWeight = ArchetypeConfig->MotionMatchingWeight;
-    
-    // Reduzir peso quando ferido ou muito cansado
-    if (CurrentAnimationState.InjuryLevel > 0.5f)
-    {
-        TargetWeight *= (1.0f - CurrentAnimationState.InjuryLevel * 0.5f);
-    }
-    
-    if (CurrentAnimationState.FatigueLevel > 0.7f)
-    {
-        TargetWeight *= (1.0f - CurrentAnimationState.FatigueLevel * 0.3f);
-    }
-    
-    // Aplicar peso através do Animation Blueprint
-    // TODO: Implementar comunicação com ABP através de variáveis
 }
 
 void UArchetypeAnimationSystem::UpdateAdaptiveIK(float DeltaTime)
 {
-    if (!ArchetypeConfig || !ArchetypeConfig->bUseAdaptiveIK)
-        return;
+    // This would integrate with the AdaptiveIKComponent
+    // For now, we'll update IK weights based on character states
     
-    // Atualizar peso do IK baseado no movimento e terreno
-    float TargetIKWeight = ArchetypeConfig->IKWeight;
-    
-    // Reduzir IK quando correndo muito rápido
-    if (MovementComponent && MovementComponent->Velocity.Size() > 600.0f)
+    for (auto& CharacterPair : ActiveCharacterStates)
     {
-        TargetIKWeight *= 0.5f;
-    }
-    
-    // Aumentar IK quando em terreno irregular
-    // TODO: Implementar detecção de terreno irregular
-    
-    // Aplicar através do componente IK
-    // TODO: Comunicar com AdaptiveIKComponent
-}
-
-void UArchetypeAnimationSystem::UpdateProceduralGestures(float DeltaTime)
-{
-    if (!ArchetypeConfig || !ArchetypeConfig->bUseProceduralGestures)
-        return;
-    
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-    
-    // Verificar se é hora de um novo gesto
-    float TimeSinceLastGesture = CurrentTime - LastGestureTime;
-    float GestureInterval = 1.0f / ArchetypeConfig->GestureFrequency;
-    
-    if (TimeSinceLastGesture > GestureInterval)
-    {
-        // Determinar tipo de gesto baseado no contexto
-        EGestureType GestureToPlay = DetermineContextualGesture();
+        ACharacter* Character = CharacterPair.Key;
+        FCharacterAnimationState& State = CharacterPair.Value;
         
-        if (GestureToPlay != EGestureType::MAX)
+        if (!Character)
         {
-            PlayGesture(GestureToPlay);
-            LastGestureTime = CurrentTime;
+            continue;
         }
+        
+        // Adjust IK intensity based on fatigue and injury
+        float IKIntensity = 1.0f - (State.FatigueLevel * 0.3f) - (State.InjuryLevel * 0.5f);
+        IKIntensity = FMath::Clamp(IKIntensity, 0.2f, 1.0f);
+        
+        // Apply IK intensity to character (this would interface with IK components)
+        ApplyIKIntensity(Character, IKIntensity);
     }
 }
 
-EGestureType UArchetypeAnimationSystem::DetermineContextualGesture()
+void UArchetypeAnimationSystem::ApplyArchetypeToCharacter(ACharacter* Character, ECharacterArchetype Archetype)
 {
-    // Lógica baseada no arquétipo e estado atual
-    if (!ArchetypeConfig)
-        return EGestureType::MAX;
+    const FArchetypeAnimationConfig* Config = GetArchetypeConfig(Archetype);
     
-    // Gestos baseados no estado emocional
-    switch (CurrentAnimationState.CurrentEmotionalState)
+    if (!Config || !Character)
     {
-        case EEmotionalState::Curious:
-            if (ArchetypeConfig->Archetype == ECharacterArchetype::Protagonist_Paleontologist)
+        return;
+    }
+    
+    // Apply motion matching configuration
+    if (Config->bUseMotionMatching)
+    {
+        SetupMotionMatching(Character, *Config);
+    }
+    
+    // Apply IK configuration
+    if (Config->bUseAdaptiveIK)
+    {
+        SetupAdaptiveIK(Character, *Config);
+    }
+    
+    UE_LOG(LogArchetypeAnimation, Log, TEXT("Applied archetype configuration to character %s"), 
+           *Character->GetName());
+}
+
+void UArchetypeAnimationSystem::TriggerEmotionalTransition(ACharacter* Character, EEmotionalState FromState, 
+                                                          EEmotionalState ToState, float Intensity)
+{
+    // This would trigger specific animation transitions based on emotional state changes
+    UE_LOG(LogArchetypeAnimation, Log, TEXT("Emotional transition for %s: %d -> %d"), 
+           *Character->GetName(), (int32)FromState, (int32)ToState);
+}
+
+void UArchetypeAnimationSystem::UpdateMotionMatchingDatabase(ACharacter* Character, ESurvivalState SurvivalState)
+{
+    // This would update the motion matching database based on survival state
+    UE_LOG(LogArchetypeAnimation, Log, TEXT("Updated motion matching database for %s (survival state: %d)"), 
+           *Character->GetName(), (int32)SurvivalState);
+}
+
+void UArchetypeAnimationSystem::UpdateMovementCharacteristics(ACharacter* Character, const FCharacterAnimationState& State)
+{
+    if (!Character)
+    {
+        return;
+    }
+    
+    // Calculate movement speed modifier based on fatigue and injury
+    float SpeedModifier = 1.0f - (State.FatigueLevel * 0.4f) - (State.InjuryLevel * 0.6f);
+    SpeedModifier = FMath::Clamp(SpeedModifier, 0.3f, 1.0f);
+    
+    // Apply to character movement
+    if (UCharacterMovementComponent* MovementComp = Character->GetCharacterMovement())
+    {
+        MovementComp->MaxWalkSpeed = MovementComp->GetClass()->GetDefaultObject<UCharacterMovementComponent>()->MaxWalkSpeed * SpeedModifier;
+    }
+}
+
+void UArchetypeAnimationSystem::UpdateStressLevel(ACharacter* Character, FCharacterAnimationState& State, float DeltaTime)
+{
+    // Simple stress calculation based on environmental factors
+    // In a full implementation, this would consider nearby threats, health, etc.
+    
+    float StressIncrease = 0.0f;
+    
+    // Increase stress when injured or fatigued
+    if (State.InjuryLevel > 0.5f)
+    {
+        StressIncrease += 0.1f * DeltaTime;
+    }
+    
+    if (State.FatigueLevel > 0.7f)
+    {
+        StressIncrease += 0.05f * DeltaTime;
+    }
+    
+    // Decrease stress over time when safe
+    if (StressIncrease == 0.0f)
+    {
+        State.FearLevel = FMath::Max(0.0f, State.FearLevel - 0.02f * DeltaTime);
+    }
+    else
+    {
+        State.FearLevel = FMath::Min(1.0f, State.FearLevel + StressIncrease);
+    }
+    
+    // Update stress level enum based on fear level
+    if (State.FearLevel < 0.2f)
+    {
+        State.CurrentStressLevel = EStressLevel::Calm;
+    }
+    else if (State.FearLevel < 0.5f)
+    {
+        State.CurrentStressLevel = EStressLevel::Nervous;
+    }
+    else if (State.FearLevel < 0.8f)
+    {
+        State.CurrentStressLevel = EStressLevel::Stressed;
+    }
+    else
+    {
+        State.CurrentStressLevel = EStressLevel::Panicked;
+    }
+}
+
+void UArchetypeAnimationSystem::UpdateProceduralGestures(ACharacter* Character, FCharacterAnimationState& State, float DeltaTime)
+{
+    // Update procedural gesture timing and selection
+    // This is handled in UpdateGestureSystem
+}
+
+EGestureType UArchetypeAnimationSystem::SelectAppropriateGesture(ACharacter* Character, const FCharacterAnimationState& State, ECharacterArchetype Archetype)
+{
+    // Select gesture based on character archetype and current state
+    switch (Archetype)
+    {
+        case ECharacterArchetype::Protagonist_Paleontologist:
+            if (State.bIsObserving)
             {
                 return EGestureType::ObservationPoint;
             }
+            else if (State.CurrentEmotionalState == EEmotionalState::Curious)
+            {
+                return EGestureType::ExamineObject;
+            }
             break;
             
-        case EEmotionalState::Fearful:
-            return EGestureType::CheckSurroundings;
-            
-        case EEmotionalState::Cautious:
-            return EGestureType::ListenCarefully;
-            
-        case EEmotionalState::Exhausted:
-            return EGestureType::DisplayExhaustion;
-            
-        default:
-            break;
-    }
-    
-    // Gestos baseados na atividade atual
-    if (CurrentAnimationState.bIsObserving)
-    {
-        return EGestureType::ExamineObject;
-    }
-    
-    if (CurrentAnimationState.TimeSinceLastMovement > 5.0f)
-    {
-        return EGestureType::CheckSurroundings;
-    }
-    
-    return EGestureType::MAX;
-}
-
-void UArchetypeAnimationSystem::PlayGesture(EGestureType GestureType)
-{
-    if (!ArchetypeConfig || !SkeletalMeshComponent)
-        return;
-    
-    // Encontrar animação do gesto
-    if (TSoftObjectPtr<UAnimMontage>* GestureAnim = ArchetypeConfig->GestureAnimations.Find(GestureType))
-    {
-        if (UAnimMontage* Montage = GestureAnim->LoadSynchronous())
-        {
-            // Reproduzir montage com peso apropriado
-            SkeletalMeshComponent->GetAnimInstance()->Montage_Play(Montage, 1.0f);
-            
-            UE_LOG(LogArchetypeAnimation, Log, TEXT("Playing gesture: %s"), 
-                   *UEnum::GetValueAsString(GestureType));
-        }
-    }
-}
-
-void UArchetypeAnimationSystem::UpdateEmotionalExpressions(float DeltaTime)
-{
-    if (!ArchetypeConfig || !ArchetypeConfig->bUseEmotionalOverrides)
-        return;
-    
-    // Atualizar expressões faciais através do Control Rig
-    if (ArchetypeConfig->FacialControlRig.IsValid())
-    {
-        // TODO: Implementar controle de expressões faciais
-        // Mapear estados emocionais para parâmetros do Control Rig
-    }
-    
-    // Atualizar postura corporal baseada no estado emocional
-    UpdateBodyPosture(DeltaTime);
-}
-
-void UArchetypeAnimationSystem::UpdateBodyPosture(float DeltaTime)
-{
-    // Ajustar postura baseada no estado emocional e físico
-    float PostureBlend = 0.0f;
-    
-    switch (CurrentAnimationState.CurrentEmotionalState)
-    {
-        case EEmotionalState::Fearful:
-            PostureBlend = -0.8f; // Postura mais fechada/defensiva
-            break;
-            
-        case EEmotionalState::Confident:
-            PostureBlend = 0.6f; // Postura mais ereta/aberta
-            break;
-            
-        case EEmotionalState::Exhausted:
-            PostureBlend = -0.5f; // Postura curvada/cansada
-            break;
-            
-        case EEmotionalState::Curious:
-            PostureBlend = 0.3f; // Postura ligeiramente inclinada para frente
-            break;
-            
-        default:
-            PostureBlend = 0.0f;
+        case ECharacterArchetype::Survivor_Cautious:
+            if (State.CurrentStressLevel >= EStressLevel::Nervous)
+            {
+                return EGestureType::CheckSurroundings;
+            }
             break;
     }
     
-    // Aplicar modificações de postura através do Animation Blueprint
-    // TODO: Implementar variáveis de postura no ABP
+    return EGestureType::MAX; // No gesture
 }
 
-void UArchetypeAnimationSystem::SetupMotionMatchingForArchetype()
+void UArchetypeAnimationSystem::SetupMotionMatching(ACharacter* Character, const FArchetypeAnimationConfig& Config)
 {
-    if (!ArchetypeConfig)
-        return;
-    
-    // Configurar databases específicos do arquétipo
-    // TODO: Implementar carregamento dinâmico de databases
-    
-    UE_LOG(LogArchetypeAnimation, Log, TEXT("Motion Matching setup for archetype: %s"), 
-           *UEnum::GetValueAsString(ArchetypeConfig->Archetype));
+    // Setup motion matching system for character
+    UE_LOG(LogArchetypeAnimation, Log, TEXT("Setup motion matching for character %s"), *Character->GetName());
 }
 
-void UArchetypeAnimationSystem::SetupArchetypeIK()
+void UArchetypeAnimationSystem::SetupAdaptiveIK(ACharacter* Character, const FArchetypeAnimationConfig& Config)
 {
-    if (!ArchetypeConfig || !ArchetypeConfig->IKRigDefinition.IsValid())
-        return;
-    
-    // Configurar IK Rig específico do arquétipo
-    // TODO: Implementar configuração do IK Rig
-    
-    UE_LOG(LogArchetypeAnimation, Log, TEXT("IK setup for archetype: %s"), 
-           *UEnum::GetValueAsString(ArchetypeConfig->Archetype));
+    // Setup adaptive IK system for character
+    UE_LOG(LogArchetypeAnimation, Log, TEXT("Setup adaptive IK for character %s"), *Character->GetName());
 }
 
-void UArchetypeAnimationSystem::LoadArchetypeAnimations()
+void UArchetypeAnimationSystem::ApplyIKIntensity(ACharacter* Character, float Intensity)
 {
-    if (!ArchetypeConfig)
-        return;
-    
-    // Pré-carregar animações críticas
-    for (auto& GesturePair : ArchetypeConfig->GestureAnimations)
-    {
-        if (GesturePair.Value.IsValid())
-        {
-            GesturePair.Value.LoadSynchronous();
-        }
-    }
-    
-    // Carregar variações de locomotion
-    for (auto& IdleAnim : ArchetypeConfig->IdleVariations)
-    {
-        if (IdleAnim.IsValid())
-        {
-            IdleAnim.LoadSynchronous();
-        }
-    }
-    
-    UE_LOG(LogArchetypeAnimation, Log, TEXT("Archetype animations loaded"));
-}
-
-void UArchetypeAnimationSystem::ApplyArchetypeBodyLanguage()
-{
-    if (!ArchetypeConfig)
-        return;
-    
-    // Aplicar configurações de linguagem corporal específicas
-    const FArchetypeBodyLanguage& BodyLang = ArchetypeConfig->BodyLanguage;
-    
-    // TODO: Aplicar modificadores de postura, velocidade, etc.
-    
-    UE_LOG(LogArchetypeAnimation, Log, TEXT("Body language applied for archetype"));
-}
-
-void UArchetypeAnimationSystem::UpdateMotionMatchingDatabase()
-{
-    if (!ArchetypeConfig)
-        return;
-    
-    // Selecionar database apropriado baseado no estado atual
-    TSoftObjectPtr<UPoseSearchDatabase> TargetDatabase;
-    
-    // Priorizar database emocional se disponível
-    if (TSoftObjectPtr<UPoseSearchDatabase>* EmotionalDB = 
-        ArchetypeConfig->EmotionalDatabases.Find(CurrentAnimationState.CurrentEmotionalState))
-    {
-        TargetDatabase = *EmotionalDB;
-    }
-    // Fallback para database de sobrevivência
-    else if (TSoftObjectPtr<UPoseSearchDatabase>* SurvivalDB = 
-             ArchetypeConfig->SurvivalDatabases.Find(CurrentAnimationState.CurrentSurvivalState))
-    {
-        TargetDatabase = *SurvivalDB;
-    }
-    
-    if (TargetDatabase.IsValid())
-    {
-        // TODO: Comunicar mudança de database para o Motion Matching Component
-        UE_LOG(LogArchetypeAnimation, Log, TEXT("Motion Matching database updated"));
-    }
-}
-
-void UArchetypeAnimationSystem::DebugDrawAnimationState()
-{
-    if (!GetWorld() || !OwnerCharacter)
-        return;
-    
-    FVector CharacterLocation = OwnerCharacter->GetActorLocation();
-    FVector DebugLocation = CharacterLocation + FVector(0, 0, 250);
-    
-    // Debug info sobre estado atual
-    FString DebugString = FString::Printf(TEXT(
-        "Emotional: %s\\n"
-        "Survival: %s\\n"
-        "Fear: %.2f\\n"
-        "Fatigue: %.2f\\n"
-        "Confidence: %.2f"
-    ),
-        *UEnum::GetValueAsString(CurrentAnimationState.CurrentEmotionalState),
-        *UEnum::GetValueAsString(CurrentAnimationState.CurrentSurvivalState),
-        CurrentAnimationState.FearLevel,
-        CurrentAnimationState.FatigueLevel,
-        CurrentAnimationState.ConfidenceLevel
-    );
-    
-    DrawDebugString(GetWorld(), DebugLocation, DebugString, nullptr, 
-                   FColor::Yellow, 0.0f, true);
-}
-
-// Funções Blueprint
-void UArchetypeAnimationSystem::SetEmotionalState(EEmotionalState NewState)
-{
-    if (NewState != CurrentAnimationState.CurrentEmotionalState)
-    {
-        TransitionToEmotionalState(NewState, 0.0f);
-    }
-}
-
-void UArchetypeAnimationSystem::SetSurvivalCondition(float Fear, float Fatigue, float Injury)
-{
-    CurrentAnimationState.FearLevel = FMath::Clamp(Fear, 0.0f, 1.0f);
-    CurrentAnimationState.FatigueLevel = FMath::Clamp(Fatigue, 0.0f, 1.0f);
-    CurrentAnimationState.InjuryLevel = FMath::Clamp(Injury, 0.0f, 1.0f);
-}
-
-void UArchetypeAnimationSystem::TriggerGesture(EGestureType GestureType)
-{
-    PlayGesture(GestureType);
-}
-
-void UArchetypeAnimationSystem::SetObservationMode(bool bObserving)
-{
-    CurrentAnimationState.bIsObserving = bObserving;
-}
-
-void UArchetypeAnimationSystem::SetDangerState(bool bInDanger)
-{
-    CurrentAnimationState.bIsInDanger = bInDanger;
-}
-
-// Subsistema Global
-void UArchetypeAnimationSubsystem::Initialize(FSubsystemCollectionBase& Collection)
-{
-    Super::Initialize(Collection);
-    
-    UE_LOG(LogArchetypeAnimation, Log, TEXT("ArchetypeAnimationSubsystem initialized"));
-}
-
-void UArchetypeAnimationSubsystem::Deinitialize()
-{
-    RegisteredSystems.Empty();
-    
-    Super::Deinitialize();
-}
-
-void UArchetypeAnimationSubsystem::RegisterCharacterAnimationSystem(UArchetypeAnimationSystem* System)
-{
-    if (System && !RegisteredSystems.Contains(System))
-    {
-        RegisteredSystems.Add(System);
-        UE_LOG(LogArchetypeAnimation, Log, TEXT("Animation system registered: %s"), 
-               System->GetOwner() ? *System->GetOwner()->GetName() : TEXT("Unknown"));
-    }
-}
-
-void UArchetypeAnimationSubsystem::UnregisterCharacterAnimationSystem(UArchetypeAnimationSystem* System)
-{
-    if (System)
-    {
-        RegisteredSystems.Remove(System);
-        UE_LOG(LogArchetypeAnimation, Log, TEXT("Animation system unregistered"));
-    }
-}
-
-void UArchetypeAnimationSubsystem::UpdateGlobalAnimationState(float DeltaTime)
-{
-    // Atualizar sistemas globais que afetam todas as animações
-    // Por exemplo: clima, hora do dia, eventos globais
-    
-    for (UArchetypeAnimationSystem* System : RegisteredSystems)
-    {
-        if (IsValid(System))
-        {
-            // Aplicar modificadores globais
-            // TODO: Implementar efeitos globais
-        }
-    }
-}
-
-TArray<UArchetypeAnimationSystem*> UArchetypeAnimationSubsystem::GetAllAnimationSystems() const
-{
-    TArray<UArchetypeAnimationSystem*> ValidSystems;
-    
-    for (UArchetypeAnimationSystem* System : RegisteredSystems)
-    {
-        if (IsValid(System))
-        {
-            ValidSystems.Add(System);
-        }
-    }
-    
-    return ValidSystems;
+    // Apply IK intensity to character's IK components
+    UE_LOG(LogArchetypeAnimation, Verbose, TEXT("Applied IK intensity %.2f to character %s"), 
+           Intensity, *Character->GetName());
 }
