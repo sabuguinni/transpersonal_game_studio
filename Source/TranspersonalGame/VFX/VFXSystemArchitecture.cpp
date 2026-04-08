@@ -1,444 +1,302 @@
 #include "VFXSystemArchitecture.h"
 #include "NiagaraFunctionLibrary.h"
-#include "NiagaraComponent.h"
 #include "Engine/World.h"
-#include "GameFramework/Actor.h"
-#include "Components/SceneComponent.h"
-#include "Engine/Engine.h"
+#include "Kismet/GameplayStatics.h"
 
-UVFXSystemManager::UVFXSystemManager()
+UVFXManagerComponent::UVFXManagerComponent()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f; // Tick 10 times per second for performance
+    PrimaryComponentTick.TickInterval = 0.1f; // Update every 100ms for performance
+    
+    // Default performance settings
+    CurrentPerformanceTier = EVFXPerformanceTier::Medium;
+    MaxActiveEffects = 50;
+    EffectCullingDistance = 5000.0f; // 50 meters
 }
 
-void UVFXSystemManager::BeginPlay()
+void UVFXManagerComponent::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Initialize performance settings based on platform
-    if (GEngine)
-    {
-        // Adjust settings based on platform capabilities
-        FString PlatformName = FPlatformProperties::PlatformName();
-        
-        if (PlatformName.Contains(TEXT("Windows")) || PlatformName.Contains(TEXT("Mac")))
-        {
-            // Desktop - High quality settings
-            PerformanceSettings.MaxParticlesPerSystem = 2000;
-            PerformanceSettings.bEnableGPUSimulation = true;
-            PerformanceSettings.bEnableAsyncCompute = true;
-            CurrentLODLevel = EVFXLODLevel::LOD1_High;
-        }
-        else
-        {
-            // Console/Mobile - Conservative settings
-            PerformanceSettings.MaxParticlesPerSystem = 1000;
-            PerformanceSettings.bEnableGPUSimulation = false;
-            PerformanceSettings.bEnableAsyncCompute = false;
-            CurrentLODLevel = EVFXLODLevel::LOD2_Medium;
-        }
-    }
+    // Initialize effect registry with core atmospheric effects
+    InitializeDefaultEffects();
+    
+    // Set initial performance tier based on platform
+    DetermineOptimalPerformanceTier();
 }
 
-void UVFXSystemManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UVFXManagerComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    LastPerformanceCheck += DeltaTime;
-    if (LastPerformanceCheck >= PerformanceCheckInterval)
-    {
-        PerformanceOptimizationTick();
-        LastPerformanceCheck = 0.0f;
-    }
-}
-
-UNiagaraComponent* UVFXSystemManager::SpawnVFXAtLocation(
-    UNiagaraSystem* VFXSystem,
-    FVector Location,
-    FRotator Rotation,
-    FVector Scale,
-    EVFXPriority Priority)
-{
-    if (!VFXSystem || !GetWorld())
-    {
-        return nullptr;
-    }
-
-    // Check if we should spawn based on priority and performance
-    if (ActiveVFXComponents.Num() > PerformanceSettings.MaxParticlesPerSystem && Priority > EVFXPriority::High)
-    {
-        return nullptr; // Skip low priority effects when at capacity
-    }
-
-    UNiagaraComponent* VFXComponent = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
-        GetWorld(),
-        VFXSystem,
-        Location,
-        Rotation,
-        Scale,
-        true, // Auto destroy
-        true, // Auto activate
-        ENCPoolMethod::None,
-        true  // Pre cull check
-    );
-
-    if (VFXComponent)
-    {
-        ActiveVFXComponents.Add(VFXComponent);
-        
-        // Apply LOD settings
-        ApplyLODToComponent(VFXComponent, Priority);
-    }
-
-    return VFXComponent;
-}
-
-UNiagaraComponent* UVFXSystemManager::SpawnVFXAttached(
-    UNiagaraSystem* VFXSystem,
-    USceneComponent* AttachToComponent,
-    FName AttachPointName,
-    FVector Location,
-    FRotator Rotation,
-    FVector Scale,
-    EVFXPriority Priority)
-{
-    if (!VFXSystem || !AttachToComponent || !GetWorld())
-    {
-        return nullptr;
-    }
-
-    // Check performance constraints
-    if (ActiveVFXComponents.Num() > PerformanceSettings.MaxParticlesPerSystem && Priority > EVFXPriority::High)
-    {
-        return nullptr;
-    }
-
-    UNiagaraComponent* VFXComponent = UNiagaraFunctionLibrary::SpawnSystemAttached(
-        VFXSystem,
-        AttachToComponent,
-        AttachPointName,
-        Location,
-        Rotation,
-        Scale,
-        EAttachLocation::KeepRelativeOffset,
-        true, // Auto destroy
-        ENCPoolMethod::None,
-        true  // Pre cull check
-    );
-
-    if (VFXComponent)
-    {
-        ActiveVFXComponents.Add(VFXComponent);
-        ApplyLODToComponent(VFXComponent, Priority);
-    }
-
-    return VFXComponent;
-}
-
-void UVFXSystemManager::SetVFXQualityLevel(EVFXLODLevel QualityLevel)
-{
-    CurrentLODLevel = QualityLevel;
+    // Performance management
+    CullDistantEffects();
     
-    // Apply new quality settings to all active VFX
-    for (UNiagaraComponent* VFXComp : ActiveVFXComponents)
-    {
-        if (IsValid(VFXComp))
-        {
-            ApplyLODToComponent(VFXComp, EVFXPriority::Medium);
-        }
-    }
+    // Update effect scaling based on current performance tier
+    UpdatePerformanceScaling();
 }
 
-void UVFXSystemManager::OptimizeVFXForDistance(float ViewerDistance)
+UNiagaraComponent* UVFXManagerComponent::SpawnEffect(const FString& EffectName, const FVector& Location, const FRotator& Rotation, AActor* AttachToActor)
 {
-    EVFXLODLevel NewLODLevel = CurrentLODLevel;
+    // Check if effect exists in registry
+    if (!EffectRegistry.Contains(EffectName))
+    {
+        UE_LOG(LogTemp, Warning, TEXT("VFX Effect '%s' not found in registry"), *EffectName);
+        return nullptr;
+    }
     
-    if (ViewerDistance > PerformanceSettings.LODDistanceThreshold_Low)
+    const FVFXEffectDefinition& EffectDef = EffectRegistry[EffectName];
+    
+    // Performance check
+    if (!ShouldSpawnEffect(EffectDef, Location))
     {
-        NewLODLevel = EVFXLODLevel::LOD3_Low;
+        return nullptr;
     }
-    else if (ViewerDistance > PerformanceSettings.LODDistanceThreshold_Medium)
+    
+    // Load Niagara system
+    UNiagaraSystem* NiagaraSystem = EffectDef.NiagaraSystem.LoadSynchronous();
+    if (!NiagaraSystem)
     {
-        NewLODLevel = EVFXLODLevel::LOD2_Medium;
+        UE_LOG(LogTemp, Warning, TEXT("Failed to load Niagara system for effect '%s'"), *EffectName);
+        return nullptr;
     }
-    else if (ViewerDistance > PerformanceSettings.LODDistanceThreshold_High)
+    
+    // Spawn the effect
+    UNiagaraComponent* EffectComponent = nullptr;
+    
+    if (AttachToActor)
     {
-        NewLODLevel = EVFXLODLevel::LOD1_High;
+        EffectComponent = UNiagaraFunctionLibrary::SpawnSystemAttached(
+            NiagaraSystem,
+            AttachToActor->GetRootComponent(),
+            NAME_None,
+            Location,
+            Rotation,
+            EAttachLocation::KeepWorldPosition,
+            true
+        );
     }
     else
     {
-        NewLODLevel = EVFXLODLevel::LOD0_Ultra;
+        EffectComponent = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+            GetWorld(),
+            NiagaraSystem,
+            Location,
+            Rotation
+        );
     }
     
-    if (NewLODLevel != CurrentLODLevel)
+    if (EffectComponent)
     {
-        SetVFXQualityLevel(NewLODLevel);
-    }
-}
-
-void UVFXSystemManager::PlayCreatureBreathEffect(AActor* Creature, float IntensityMultiplier)
-{
-    if (!Creature || !CreatureBreathSystem)
-    {
-        return;
-    }
-
-    // Find breath attachment point (usually head or mouth)
-    USceneComponent* AttachPoint = Creature->GetRootComponent();
-    
-    // Try to find a more specific attachment point
-    if (USceneComponent* MeshComp = Creature->FindComponentByClass<USceneComponent>())
-    {
-        AttachPoint = MeshComp;
-    }
-
-    UNiagaraComponent* BreathVFX = SpawnVFXAttached(
-        CreatureBreathSystem,
-        AttachPoint,
-        FName("head"), // Assuming creatures have a head socket
-        FVector::ZeroVector,
-        FRotator::ZeroRotator,
-        FVector::OneVector,
-        EVFXPriority::Medium
-    );
-
-    if (BreathVFX)
-    {
-        // Set intensity parameter
-        BreathVFX->SetFloatParameter(FName("Intensity"), IntensityMultiplier);
+        // Apply performance scaling
+        float QualityScale = EffectDef.QualityScaling.Contains(CurrentPerformanceTier) 
+            ? EffectDef.QualityScaling[CurrentPerformanceTier] 
+            : 1.0f;
+            
+        EffectComponent->SetFloatParameter(TEXT("QualityScale"), QualityScale);
         
-        // Set creature size parameter for scaling
-        FVector CreatureScale = Creature->GetActorScale3D();
-        float ScaleFactor = FMath::Max3(CreatureScale.X, CreatureScale.Y, CreatureScale.Z);
-        BreathVFX->SetFloatParameter(FName("CreatureScale"), ScaleFactor);
-    }
-}
-
-void UVFXSystemManager::PlayCreatureFootstepEffect(AActor* Creature, FVector ImpactLocation, float CreatureWeight)
-{
-    if (!Creature || !CreatureFootstepSystem)
-    {
-        return;
-    }
-
-    UNiagaraComponent* FootstepVFX = SpawnVFXAtLocation(
-        CreatureFootstepSystem,
-        ImpactLocation,
-        FRotator::ZeroRotator,
-        FVector::OneVector,
-        EVFXPriority::High // Footsteps are important for player awareness
-    );
-
-    if (FootstepVFX)
-    {
-        // Set weight parameter for dust/debris amount
-        FootstepVFX->SetFloatParameter(FName("CreatureWeight"), CreatureWeight);
+        // Track active effect
+        ActiveEffects.Add(EffectComponent);
         
-        // Set surface type parameter (would be determined by ground material)
-        FootstepVFX->SetIntParameter(FName("SurfaceType"), 0); // Default to dirt/ground
+        UE_LOG(LogTemp, Log, TEXT("Spawned VFX effect '%s' at location %s"), *EffectName, *Location.ToString());
+    }
+    
+    return EffectComponent;
+}
+
+void UVFXManagerComponent::StopEffect(UNiagaraComponent* EffectComponent)
+{
+    if (EffectComponent && IsValid(EffectComponent))
+    {
+        EffectComponent->DestroyComponent();
+        ActiveEffects.Remove(EffectComponent);
     }
 }
 
-void UVFXSystemManager::PlayCreatureImpactEffect(AActor* Creature, FVector ImpactLocation, FVector ImpactNormal, float ImpactForce)
+void UVFXManagerComponent::StopAllEffectsOfCategory(EVFXCategory Category)
 {
-    if (!Creature)
-    {
-        return;
-    }
-
-    // Use appropriate system based on impact force
-    UNiagaraSystem* ImpactSystem = (ImpactForce > 10.0f) ? CriticalHitSystem : HitEffectSystem;
+    TArray<UNiagaraComponent*> EffectsToRemove;
     
-    if (!ImpactSystem)
+    for (UNiagaraComponent* Effect : ActiveEffects)
     {
-        return;
-    }
-
-    FRotator ImpactRotation = FRotationMatrix::MakeFromZ(ImpactNormal).Rotator();
-    
-    UNiagaraComponent* ImpactVFX = SpawnVFXAtLocation(
-        ImpactSystem,
-        ImpactLocation,
-        ImpactRotation,
-        FVector::OneVector,
-        EVFXPriority::Critical // Combat effects are always critical
-    );
-
-    if (ImpactVFX)
-    {
-        ImpactVFX->SetFloatParameter(FName("ImpactForce"), ImpactForce);
-        ImpactVFX->SetVectorParameter(FName("ImpactNormal"), ImpactNormal);
-    }
-}
-
-void UVFXSystemManager::PlayHitEffect(FVector HitLocation, FVector HitNormal, AActor* HitActor, float Damage)
-{
-    if (!HitEffectSystem)
-    {
-        return;
-    }
-
-    FRotator HitRotation = FRotationMatrix::MakeFromZ(HitNormal).Rotator();
-    
-    UNiagaraComponent* HitVFX = SpawnVFXAtLocation(
-        HitEffectSystem,
-        HitLocation,
-        HitRotation,
-        FVector::OneVector,
-        EVFXPriority::Critical
-    );
-
-    if (HitVFX)
-    {
-        HitVFX->SetFloatParameter(FName("Damage"), Damage);
-        HitVFX->SetVectorParameter(FName("HitNormal"), HitNormal);
-        
-        // Set color based on damage type or actor type
-        if (HitActor)
+        if (IsValid(Effect))
         {
-            // Could determine blood color, spark color, etc. based on actor type
-            FLinearColor EffectColor = FLinearColor::Red; // Default to blood
-            HitVFX->SetColorParameter(FName("EffectColor"), EffectColor);
+            // Get effect category from component tags or custom data
+            // This would need to be set when spawning the effect
+            FString CategoryTag = FString::Printf(TEXT("VFXCategory_%d"), (int32)Category);
+            if (Effect->ComponentHasTag(FName(*CategoryTag)))
+            {
+                Effect->DestroyComponent();
+                EffectsToRemove.Add(Effect);
+            }
+        }
+    }
+    
+    for (UNiagaraComponent* Effect : EffectsToRemove)
+    {
+        ActiveEffects.Remove(Effect);
+    }
+}
+
+void UVFXManagerComponent::SetPerformanceTier(EVFXPerformanceTier NewTier)
+{
+    if (CurrentPerformanceTier != NewTier)
+    {
+        CurrentPerformanceTier = NewTier;
+        UpdatePerformanceScaling();
+        
+        UE_LOG(LogTemp, Log, TEXT("VFX Performance tier changed to: %d"), (int32)NewTier);
+    }
+}
+
+void UVFXManagerComponent::SpawnAtmosphericEffect(const FString& EffectName, const FVector& Location, float Duration)
+{
+    UNiagaraComponent* Effect = SpawnEffect(EffectName, Location);
+    
+    if (Effect && Duration > 0.0f)
+    {
+        // Set auto-destroy timer
+        FTimerHandle TimerHandle;
+        GetWorld()->GetTimerManager().SetTimer(TimerHandle, [this, Effect]()
+        {
+            StopEffect(Effect);
+        }, Duration, false);
+    }
+}
+
+void UVFXManagerComponent::TriggerDinosaurPresenceHint(const FVector& Location, float Intensity)
+{
+    // Spawn subtle effects that suggest dinosaur presence
+    // Examples: rustling leaves, disturbed dust, broken branches
+    
+    FString EffectName = TEXT("DinosaurPresence_Subtle");
+    if (Intensity > 0.7f)
+    {
+        EffectName = TEXT("DinosaurPresence_Strong");
+    }
+    else if (Intensity > 0.4f)
+    {
+        EffectName = TEXT("DinosaurPresence_Moderate");
+    }
+    
+    SpawnAtmosphericEffect(EffectName, Location, 3.0f);
+}
+
+void UVFXManagerComponent::UpdatePerformanceScaling()
+{
+    for (UNiagaraComponent* Effect : ActiveEffects)
+    {
+        if (IsValid(Effect))
+        {
+            // Apply current performance tier scaling to all active effects
+            float QualityScale = 1.0f;
+            
+            switch (CurrentPerformanceTier)
+            {
+                case EVFXPerformanceTier::Low:
+                    QualityScale = 0.3f;
+                    break;
+                case EVFXPerformanceTier::Medium:
+                    QualityScale = 0.6f;
+                    break;
+                case EVFXPerformanceTier::High:
+                    QualityScale = 1.0f;
+                    break;
+                case EVFXPerformanceTier::Cinematic:
+                    QualityScale = 1.5f;
+                    break;
+            }
+            
+            Effect->SetFloatParameter(TEXT("QualityScale"), QualityScale);
         }
     }
 }
 
-void UVFXSystemManager::PlayCriticalHitEffect(FVector HitLocation, FVector HitNormal, AActor* HitActor)
-{
-    PlayHitEffect(HitLocation, HitNormal, HitActor, 100.0f); // High damage value for critical
-}
-
-void UVFXSystemManager::PlayDestructionEffect(FVector Location, UStaticMesh* DestroyedMesh, float DestructionScale)
-{
-    if (!DestructionSystem)
-    {
-        return;
-    }
-
-    UNiagaraComponent* DestructionVFX = SpawnVFXAtLocation(
-        DestructionSystem,
-        Location,
-        FRotator::ZeroRotator,
-        FVector(DestructionScale),
-        EVFXPriority::High
-    );
-
-    if (DestructionVFX)
-    {
-        DestructionVFX->SetFloatParameter(FName("DestructionScale"), DestructionScale);
-        
-        // Set debris parameters based on destroyed mesh
-        if (DestroyedMesh)
-        {
-            FBox MeshBounds = DestroyedMesh->GetBounds().GetBox();
-            float MeshSize = MeshBounds.GetSize().GetMax();
-            DestructionVFX->SetFloatParameter(FName("MeshSize"), MeshSize);
-        }
-    }
-}
-
-void UVFXSystemManager::PerformanceOptimizationTick()
-{
-    // Clean up destroyed components
-    ActiveVFXComponents.RemoveAll([](UNiagaraComponent* Comp)
-    {
-        return !IsValid(Comp) || !Comp->IsActive();
-    });
-
-    // Cull distant VFX
-    CullDistantVFX();
-    
-    // Adjust quality based on performance
-    AdjustVFXQualityBasedOnPerformance();
-}
-
-void UVFXSystemManager::CullDistantVFX()
+void UVFXManagerComponent::CullDistantEffects()
 {
     if (!GetWorld() || !GetWorld()->GetFirstPlayerController())
-    {
         return;
-    }
-
+        
     APawn* PlayerPawn = GetWorld()->GetFirstPlayerController()->GetPawn();
     if (!PlayerPawn)
-    {
         return;
-    }
-
-    FVector PlayerLocation = PlayerPawn->GetActorLocation();
-    
-    for (int32 i = ActiveVFXComponents.Num() - 1; i >= 0; i--)
-    {
-        UNiagaraComponent* VFXComp = ActiveVFXComponents[i];
-        if (!IsValid(VFXComp))
-        {
-            ActiveVFXComponents.RemoveAt(i);
-            continue;
-        }
-
-        float Distance = FVector::Dist(VFXComp->GetComponentLocation(), PlayerLocation);
         
-        // Cull very distant low-priority effects
-        if (Distance > PerformanceSettings.LODDistanceThreshold_Low * 2.0f)
-        {
-            VFXComp->DestroyComponent();
-            ActiveVFXComponents.RemoveAt(i);
-        }
-    }
-}
-
-void UVFXSystemManager::AdjustVFXQualityBasedOnPerformance()
-{
-    // Simple performance heuristic - if we have too many active VFX, reduce quality
-    if (ActiveVFXComponents.Num() > PerformanceSettings.MaxParticlesPerSystem * 0.8f)
-    {
-        if (CurrentLODLevel < EVFXLODLevel::LOD3_Low)
-        {
-            SetVFXQualityLevel(static_cast<EVFXLODLevel>(static_cast<int32>(CurrentLODLevel) + 1));
-        }
-    }
-    else if (ActiveVFXComponents.Num() < PerformanceSettings.MaxParticlesPerSystem * 0.5f)
-    {
-        if (CurrentLODLevel > EVFXLODLevel::LOD0_Ultra)
-        {
-            SetVFXQualityLevel(static_cast<EVFXLODLevel>(static_cast<int32>(CurrentLODLevel) - 1));
-        }
-    }
-}
-
-void UVFXSystemManager::ApplyLODToComponent(UNiagaraComponent* VFXComponent, EVFXPriority Priority)
-{
-    if (!VFXComponent)
-    {
-        return;
-    }
-
-    // Apply LOD settings based on current LOD level and priority
-    float QualityMultiplier = 1.0f;
+    FVector PlayerLocation = PlayerPawn->GetActorLocation();
+    TArray<UNiagaraComponent*> EffectsToRemove;
     
-    switch (CurrentLODLevel)
+    for (UNiagaraComponent* Effect : ActiveEffects)
     {
-        case EVFXLODLevel::LOD0_Ultra:
-            QualityMultiplier = 1.0f;
-            break;
-        case EVFXLODLevel::LOD1_High:
-            QualityMultiplier = 0.8f;
-            break;
-        case EVFXLODLevel::LOD2_Medium:
-            QualityMultiplier = 0.6f;
-            break;
-        case EVFXLODLevel::LOD3_Low:
-            QualityMultiplier = 0.4f;
-            break;
+        if (IsValid(Effect))
+        {
+            float Distance = FVector::Dist(Effect->GetComponentLocation(), PlayerLocation);
+            if (Distance > EffectCullingDistance)
+            {
+                Effect->DestroyComponent();
+                EffectsToRemove.Add(Effect);
+            }
+        }
+        else
+        {
+            EffectsToRemove.Add(Effect);
+        }
     }
-
-    // Critical effects maintain higher quality
-    if (Priority == EVFXPriority::Critical)
+    
+    for (UNiagaraComponent* Effect : EffectsToRemove)
     {
-        QualityMultiplier = FMath::Max(QualityMultiplier, 0.7f);
+        ActiveEffects.Remove(Effect);
     }
+}
 
-    // Apply quality settings to the VFX component
-    VFXComponent->SetFloatParameter(FName("QualityMultiplier"), QualityMultiplier);
+bool UVFXManagerComponent::ShouldSpawnEffect(const FVFXEffectDefinition& EffectDef, const FVector& Location)
+{
+    // Check maximum active effects limit
+    if (ActiveEffects.Num() >= MaxActiveEffects)
+    {
+        return false;
+    }
+    
+    // Check distance from player
+    if (GetWorld() && GetWorld()->GetFirstPlayerController())
+    {
+        APawn* PlayerPawn = GetWorld()->GetFirstPlayerController()->GetPawn();
+        if (PlayerPawn)
+        {
+            float Distance = FVector::Dist(Location, PlayerPawn->GetActorLocation());
+            if (Distance > EffectCullingDistance)
+            {
+                return false;
+            }
+        }
+    }
+    
+    return true;
+}
+
+void UVFXManagerComponent::InitializeDefaultEffects()
+{
+    // This would typically load from a data table or configuration file
+    // For now, we'll define some core effects programmatically
+    
+    FVFXEffectDefinition AtmosphericDust;
+    AtmosphericDust.EffectName = TEXT("Atmospheric_Dust");
+    AtmosphericDust.Category = EVFXCategory::Atmospheric;
+    AtmosphericDust.Intensity = EVFXIntensity::Subtle;
+    AtmosphericDust.EmotionalIntent = TEXT("Create sense of age and abandonment");
+    AtmosphericDust.UsageContexts.Add(TEXT("Ambient environment"));
+    EffectRegistry.Add(AtmosphericDust.EffectName, AtmosphericDust);
+    
+    FVFXEffectDefinition DinosaurFootstep;
+    DinosaurFootstep.EffectName = TEXT("DinosaurPresence_Footstep");
+    DinosaurFootstep.Category = EVFXCategory::DinosaurPresence;
+    DinosaurFootstep.Intensity = EVFXIntensity::Moderate;
+    DinosaurFootstep.EmotionalIntent = TEXT("Suggest nearby dinosaur without showing it");
+    DinosaurFootstep.UsageContexts.Add(TEXT("Off-screen dinosaur movement"));
+    EffectRegistry.Add(DinosaurFootstep.EffectName, DinosaurFootstep);
+}
+
+void UVFXManagerComponent::DetermineOptimalPerformanceTier()
+{
+    // This would analyze system specs and set appropriate tier
+    // For now, default to Medium
+    CurrentPerformanceTier = EVFXPerformanceTier::Medium;
 }
