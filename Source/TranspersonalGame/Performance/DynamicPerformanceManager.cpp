@@ -1,55 +1,67 @@
 #include "DynamicPerformanceManager.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Engine/GameViewportClient.h"
-#include "HAL/IConsoleManager.h"
-#include "Stats/Stats.h"
-#include "RHI.h"
-#include "RenderingThread.h"
-#include "ProfilingDebugging/CpuProfilerTrace.h"
+#include "GameFramework/GameUserSettings.h"
+#include "Misc/ConfigCacheIni.h"
+#include "HAL/PlatformFilemanager.h"
 #include "Misc/DateTime.h"
 #include "Misc/FileHelper.h"
-#include "HAL/PlatformFilemanager.h"
-#include "MassEntitySubsystem.h"
-#include "Landscape.h"
+#include "Engine/GameViewportClient.h"
+#include "RenderingThread.h"
+#include "RHI.h"
+#include "Stats/Stats.h"
+#include "ProfilingDebugging/CpuProfilerTrace.h"
+
+// UE5 specific includes for performance monitoring
+#include "Engine/GameInstance.h"
+#include "Subsystems/SubsystemCollection.h"
+#include "HAL/IConsoleManager.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogDynamicPerformance, Log, All);
 
-// Console variables for runtime adjustment
-static TAutoConsoleVariable<bool> CVarDynamicPerformanceEnabled(
-    TEXT("tp.DynamicPerformance.Enabled"),
+// Console variables for runtime configuration
+static TAutoConsoleVariable<bool> CVarDynamicPerfEnabled(
+    TEXT("r.DynamicPerformance.Enabled"),
     true,
     TEXT("Enable dynamic performance management"),
-    ECVF_Default
+    ECVF_Scalability
 );
 
-static TAutoConsoleVariable<float> CVarPerformanceAdjustmentSensitivity(
-    TEXT("tp.DynamicPerformance.Sensitivity"),
+static TAutoConsoleVariable<float> CVarDynamicPerfSensitivity(
+    TEXT("r.DynamicPerformance.Sensitivity"),
     1.0f,
     TEXT("Sensitivity of dynamic performance adjustments (0.1 - 2.0)"),
-    ECVF_Default
+    ECVF_Scalability
 );
 
-static TAutoConsoleVariable<bool> CVarPerformanceDebugOutput(
-    TEXT("tp.DynamicPerformance.Debug"),
-    false,
-    TEXT("Enable debug output for performance management"),
-    ECVF_Default
+static TAutoConsoleVariable<int32> CVarDynamicPerfMaxAgents(
+    TEXT("r.DynamicPerformance.MaxMassAgents"),
+    50000,
+    TEXT("Maximum number of Mass AI agents"),
+    ECVF_Scalability
 );
 
 UDynamicPerformanceManager::UDynamicPerformanceManager()
 {
+    // Initialize default settings
     CurrentTarget = EPerformanceTarget::PC_HighEnd;
     CurrentPerformanceLevel = EPerformanceLevel::High;
     CurrentBottleneck = EPerformanceBottleneck::None;
-    CurrentBudget = FPerformanceBudget::GetBudgetForTarget(CurrentTarget);
-    CurrentSettings = FPerformanceSettings::GetSettingsForLevel(CurrentPerformanceLevel);
     
     bDynamicAdjustmentEnabled = true;
     AdjustmentSensitivity = 1.0f;
     PerformanceHistoryWindow = 3.0f;
     AdjustmentCooldown = 2.0f;
     LastAdjustmentTime = 0.0f;
+    
+    // Initialize performance budget based on target
+    CurrentBudget = FPerformanceBudget::GetBudgetForTarget(CurrentTarget);
+    
+    // Initialize performance settings
+    CurrentSettings = FPerformanceSettings::GetSettingsForLevel(CurrentPerformanceLevel);
+    
+    // Initialize metrics
+    CurrentMetrics = FPerformanceMetrics();
     
     // Reserve space for performance history
     FrameTimeHistory.Reserve(180); // 3 seconds at 60fps
@@ -64,30 +76,43 @@ void UDynamicPerformanceManager::Initialize(FSubsystemCollectionBase& Collection
     
     UE_LOG(LogDynamicPerformance, Log, TEXT("Dynamic Performance Manager initialized"));
     
-    // Start performance monitoring
-    GetWorld()->GetTimerManager().SetTimer(
-        MetricsUpdateTimer,
-        this,
-        &UDynamicPerformanceManager::UpdatePerformanceMetrics,
-        0.1f, // Update every 100ms
-        true
-    );
+    // Detect platform and set appropriate target
+    DetectPlatformTarget();
+    
+    // Start performance monitoring timer
+    if (UWorld* World = GetWorld())
+    {
+        World->GetTimerManager().SetTimer(
+            MetricsUpdateTimer,
+            this,
+            &UDynamicPerformanceManager::UpdatePerformanceMetrics,
+            0.1f, // Update every 100ms
+            true
+        );
+    }
     
     // Apply initial settings
     ApplyPerformanceSettings(CurrentSettings);
+    
+    UE_LOG(LogDynamicPerformance, Log, TEXT("Performance target set to: %d"), (int32)CurrentTarget);
+    UE_LOG(LogDynamicPerformance, Log, TEXT("Initial performance level: %d"), (int32)CurrentPerformanceLevel);
 }
 
 void UDynamicPerformanceManager::Deinitialize()
 {
-    if (GetWorld())
+    // Clean up timers
+    if (UWorld* World = GetWorld())
     {
-        GetWorld()->GetTimerManager().ClearTimer(MetricsUpdateTimer);
+        World->GetTimerManager().ClearTimer(MetricsUpdateTimer);
     }
     
+    // Stop any active performance capture
     if (bCapturingPerformance)
     {
         StopPerformanceCapture();
     }
+    
+    UE_LOG(LogDynamicPerformance, Log, TEXT("Dynamic Performance Manager deinitialized"));
     
     Super::Deinitialize();
 }
@@ -99,10 +124,10 @@ void UDynamicPerformanceManager::SetPerformanceTarget(EPerformanceTarget Target)
         CurrentTarget = Target;
         CurrentBudget = FPerformanceBudget::GetBudgetForTarget(Target);
         
-        UE_LOG(LogDynamicPerformance, Log, TEXT("Performance target changed to: %d"), (int32)Target);
+        // Recalculate appropriate performance level for new target
+        DetermineOptimalPerformanceLevel();
         
-        // Reset performance level to allow re-evaluation
-        SetPerformanceLevel(EPerformanceLevel::High);
+        UE_LOG(LogDynamicPerformance, Log, TEXT("Performance target changed to: %d"), (int32)Target);
     }
 }
 
@@ -112,14 +137,19 @@ void UDynamicPerformanceManager::SetPerformanceLevel(EPerformanceLevel Level)
     {
         EPerformanceLevel OldLevel = CurrentPerformanceLevel;
         CurrentPerformanceLevel = Level;
-        CurrentSettings = FPerformanceSettings::GetSettingsForLevel(Level);
         
+        // Get new settings for this level
+        CurrentSettings = FPerformanceSettings::GetSettingsForLevel(Level);
+        ValidateSettings(CurrentSettings);
+        
+        // Apply the new settings
         ApplyPerformanceSettings(CurrentSettings);
+        
+        // Broadcast change event
+        OnPerformanceLevelChanged.Broadcast(Level);
         
         UE_LOG(LogDynamicPerformance, Log, TEXT("Performance level changed from %d to %d"), 
                (int32)OldLevel, (int32)Level);
-        
-        OnPerformanceLevelChanged.Broadcast(Level);
     }
 }
 
@@ -128,27 +158,28 @@ void UDynamicPerformanceManager::UpdatePerformanceMetrics()
     TRACE_CPUPROFILER_EVENT_SCOPE(UDynamicPerformanceManager::UpdatePerformanceMetrics);
     
     // Get current frame timing
-    const FGameThreadHitchHeartBeat& HeartBeat = FGameThreadHitchHeartBeat::Get();
-    CurrentMetrics.FrameTime = HeartBeat.GetCurrentFrameTime() * 1000.0f; // Convert to ms
-    CurrentMetrics.GameThreadTime = FPlatformTime::ToMilliseconds(GGameThreadTime);
-    CurrentMetrics.RenderThreadTime = FPlatformTime::ToMilliseconds(GRenderThreadTime);
-    CurrentMetrics.GPUTime = FPlatformTime::ToMilliseconds(GGPUFrameTime);
+    float CurrentFrameTime = FApp::GetDeltaTime() * 1000.0f; // Convert to ms
     
-    // Get memory stats
-    FPlatformMemoryStats MemStats = FPlatformMemory::GetStats();
-    CurrentMetrics.UsedMemory = MemStats.UsedPhysical / (1024.0f * 1024.0f); // Convert to MB
-    
-    // Get rendering stats
-    CurrentMetrics.DrawCalls = GNumDrawCallsRHI[GRHICommandList.GetGPUMask().ToIndex()];
-    CurrentMetrics.Triangles = GNumPrimitivesDrawnRHI[GRHICommandList.GetGPUMask().ToIndex()];
-    
-    // Get Mass AI stats if available
-    if (UMassEntitySubsystem* MassSubsystem = GetWorld()->GetSubsystem<UMassEntitySubsystem>())
+    // Get engine stats
+    if (GEngine && GEngine->GetGameViewport())
     {
-        // These would need to be exposed by Mass AI system
-        CurrentMetrics.ActiveAgents = 0; // Placeholder
-        CurrentMetrics.ProcessedAgents = 0; // Placeholder
-        CurrentMetrics.CulledAgents = 0; // Placeholder
+        // Frame timing
+        CurrentMetrics.FrameTime = CurrentFrameTime;
+        CurrentMetrics.GameThreadTime = FPlatformTime::ToMilliseconds(GGameThreadTime);
+        CurrentMetrics.RenderThreadTime = FPlatformTime::ToMilliseconds(GRenderThreadTime);
+        CurrentMetrics.GPUTime = FPlatformTime::ToMilliseconds(GGPUFrameTime);
+        
+        // Memory usage
+        FPlatformMemoryStats MemStats = FPlatformMemory::GetStats();
+        CurrentMetrics.UsedMemory = MemStats.UsedPhysical / (1024 * 1024); // Convert to MB
+        
+        // Rendering stats
+        if (GEngine->GetGameViewport()->Viewport)
+        {
+            // Get render stats from RHI
+            CurrentMetrics.DrawCalls = GNumDrawCallsRHI[GRHIThreadId];
+            CurrentMetrics.Triangles = GNumPrimitivesDrawnRHI[GRHIThreadId];
+        }
     }
     
     // Update performance history
@@ -158,7 +189,7 @@ void UDynamicPerformanceManager::UpdatePerformanceMetrics()
     AnalyzeBottlenecks();
     
     // Apply dynamic adjustments if enabled
-    if (bDynamicAdjustmentEnabled && CVarDynamicPerformanceEnabled.GetValueOnGameThread())
+    if (bDynamicAdjustmentEnabled && CVarDynamicPerfEnabled.GetValueOnGameThread())
     {
         ApplyDynamicAdjustments();
     }
@@ -167,15 +198,6 @@ void UDynamicPerformanceManager::UpdatePerformanceMetrics()
     if (bCapturingPerformance)
     {
         CapturePerformanceData();
-    }
-    
-    // Debug output
-    if (CVarPerformanceDebugOutput.GetValueOnGameThread())
-    {
-        UE_LOG(LogDynamicPerformance, VeryVerbose, 
-               TEXT("Frame: %.2fms, Game: %.2fms, Render: %.2fms, GPU: %.2fms, Bottleneck: %d"),
-               CurrentMetrics.FrameTime, CurrentMetrics.GameThreadTime, 
-               CurrentMetrics.RenderThreadTime, CurrentMetrics.GPUTime, (int32)CurrentBottleneck);
     }
 }
 
@@ -188,7 +210,7 @@ void UDynamicPerformanceManager::UpdatePerformanceHistory()
     GPUTimeHistory.Add(CurrentMetrics.GPUTime);
     
     // Maintain history window size
-    const int32 MaxHistorySize = FMath::CeilToInt(PerformanceHistoryWindow * 10.0f); // 10 updates per second
+    int32 MaxHistorySize = FMath::CeilToInt(PerformanceHistoryWindow * 10.0f); // 10 samples per second
     
     if (FrameTimeHistory.Num() > MaxHistorySize)
     {
@@ -203,35 +225,47 @@ void UDynamicPerformanceManager::AnalyzeBottlenecks()
 {
     EPerformanceBottleneck NewBottleneck = EPerformanceBottleneck::None;
     
-    // Calculate average times over recent history
-    float AvgFrameTime = CalculateAverage(FrameTimeHistory);
-    float AvgGameThreadTime = CalculateAverage(GameThreadHistory);
-    float AvgRenderThreadTime = CalculateAverage(RenderThreadHistory);
-    float AvgGPUTime = CalculateAverage(GPUTimeHistory);
+    // Determine primary bottleneck based on budget usage
+    float FrameBudget = CurrentBudget.TotalFrameTime;
+    float GameBudget = CurrentBudget.GameThreadBudget;
+    float RenderBudget = CurrentBudget.RenderThreadBudget;
+    float GPUBudget = CurrentBudget.GPUBudget;
     
-    // Check if we're over budget
-    if (AvgFrameTime > CurrentBudget.TotalFrameTime * 1.1f) // 10% tolerance
+    float FrameUsage = CurrentMetrics.FrameTime / FrameBudget;
+    float GameUsage = CurrentMetrics.GameThreadTime / GameBudget;
+    float RenderUsage = CurrentMetrics.RenderThreadTime / RenderBudget;
+    float GPUUsage = CurrentMetrics.GPUTime / GPUBudget;
+    
+    // Find the highest budget usage
+    float MaxUsage = FMath::Max({FrameUsage, GameUsage, RenderUsage, GPUUsage});
+    
+    if (MaxUsage > 1.1f) // 10% over budget
     {
-        // Determine primary bottleneck
-        if (AvgGameThreadTime > CurrentBudget.GameThreadBudget)
+        if (GameUsage == MaxUsage)
         {
             NewBottleneck = EPerformanceBottleneck::GameThread;
         }
-        else if (AvgRenderThreadTime > CurrentBudget.RenderThreadBudget)
+        else if (RenderUsage == MaxUsage)
         {
             NewBottleneck = EPerformanceBottleneck::RenderThread;
         }
-        else if (AvgGPUTime > CurrentBudget.GPUBudget)
+        else if (GPUUsage == MaxUsage)
         {
             NewBottleneck = EPerformanceBottleneck::GPU;
         }
-        else if (CurrentMetrics.UsedMemory > CurrentBudget.TotalMemoryBudget * 0.9f)
+        
+        // Check for specific system bottlenecks
+        if (CurrentMetrics.MassAITime > CurrentBudget.MassAIBudget * 1.2f)
         {
-            NewBottleneck = EPerformanceBottleneck::Memory;
+            NewBottleneck = EPerformanceBottleneck::MassAI;
+        }
+        else if (CurrentMetrics.PhysicsTime > CurrentBudget.PhysicsBudget * 1.2f)
+        {
+            NewBottleneck = EPerformanceBottleneck::Physics;
         }
     }
     
-    // Update bottleneck state
+    // Update bottleneck if changed
     if (CurrentBottleneck != NewBottleneck)
     {
         CurrentBottleneck = NewBottleneck;
@@ -241,315 +275,216 @@ void UDynamicPerformanceManager::AnalyzeBottlenecks()
     }
 }
 
-float UDynamicPerformanceManager::CalculateAverage(const TArray<float>& Values)
-{
-    if (Values.Num() == 0) return 0.0f;
-    
-    float Sum = 0.0f;
-    for (float Value : Values)
-    {
-        Sum += Value;
-    }
-    return Sum / Values.Num();
-}
-
 void UDynamicPerformanceManager::ApplyDynamicAdjustments()
 {
-    const float CurrentTime = GetWorld()->GetTimeSeconds();
+    float CurrentTime = GetWorld()->GetTimeSeconds();
     
-    // Check cooldown
+    // Check cooldown period
     if (CurrentTime - LastAdjustmentTime < AdjustmentCooldown)
     {
         return;
     }
     
-    // Only adjust if we have a consistent bottleneck
-    if (CurrentBottleneck == EPerformanceBottleneck::None)
+    // Calculate average performance over history window
+    float AvgFrameTime = CalculateAverageFromHistory(FrameTimeHistory);
+    float TargetFrameTime = CurrentBudget.TotalFrameTime;
+    
+    // Determine if adjustment is needed
+    bool bNeedsUpgrade = AvgFrameTime < TargetFrameTime * 0.8f; // Running well under budget
+    bool bNeedsDowngrade = AvgFrameTime > TargetFrameTime * 1.1f; // Over budget
+    
+    if (bNeedsDowngrade && CurrentPerformanceLevel > EPerformanceLevel::Potato)
     {
-        return;
+        // Reduce performance level
+        EPerformanceLevel NewLevel = (EPerformanceLevel)((int32)CurrentPerformanceLevel + 1);
+        SetPerformanceLevel(NewLevel);
+        LastAdjustmentTime = CurrentTime;
     }
-    
-    float AdjustmentFactor = CVarPerformanceAdjustmentSensitivity.GetValueOnGameThread() * AdjustmentSensitivity;
-    
-    switch (CurrentBottleneck)
+    else if (bNeedsUpgrade && CurrentPerformanceLevel < EPerformanceLevel::Ultra)
     {
-    case EPerformanceBottleneck::GameThread:
-        AdjustMassAIPerformance(CurrentBudget.MassAIBudget, CurrentMetrics.MassAITime);
-        break;
-        
-    case EPerformanceBottleneck::RenderThread:
-    case EPerformanceBottleneck::GPU:
-        AdjustRenderingPerformance(CurrentBudget.RenderingBudget, CurrentMetrics.RenderingTime);
-        break;
-        
-    case EPerformanceBottleneck::Memory:
-        AdjustStreamingPerformance();
-        break;
-        
-    case EPerformanceBottleneck::Physics:
-        AdjustPhysicsPerformance(CurrentBudget.PhysicsBudget, CurrentMetrics.PhysicsTime);
-        break;
+        // Increase performance level
+        EPerformanceLevel NewLevel = (EPerformanceLevel)((int32)CurrentPerformanceLevel - 1);
+        SetPerformanceLevel(NewLevel);
+        LastAdjustmentTime = CurrentTime;
     }
-    
-    LastAdjustmentTime = CurrentTime;
 }
 
-void UDynamicPerformanceManager::AdjustMassAIPerformance(float TargetTime, float CurrentTime)
+float UDynamicPerformanceManager::CalculateAverageFromHistory(const TArray<float>& History) const
 {
-    if (CurrentTime <= TargetTime) return;
+    if (History.Num() == 0)
+    {
+        return 0.0f;
+    }
     
-    // Reduce Mass AI complexity
-    FPerformanceSettings NewSettings = CurrentSettings;
+    float Sum = 0.0f;
+    for (float Value : History)
+    {
+        Sum += Value;
+    }
     
-    // Reduce active agents
-    NewSettings.MaxActiveAgents = FMath::Max(1000, FMath::FloorToInt(NewSettings.MaxActiveAgents * 0.9f));
-    
-    // Reduce tick rate
-    NewSettings.AITickRate = FMath::Max(10.0f, NewSettings.AITickRate * 0.95f);
-    
-    // Increase cull distance
-    NewSettings.DinosaurCullDistance = FMath::Min(50000.0f, NewSettings.DinosaurCullDistance * 1.1f);
-    
-    ApplyPerformanceSettings(NewSettings);
-    CurrentSettings = NewSettings;
-    
-    UE_LOG(LogDynamicPerformance, Log, TEXT("Adjusted Mass AI: MaxAgents=%d, TickRate=%.1f, CullDist=%.0f"),
-           NewSettings.MaxActiveAgents, NewSettings.AITickRate, NewSettings.DinosaurCullDistance);
+    return Sum / History.Num();
 }
 
-void UDynamicPerformanceManager::AdjustRenderingPerformance(float TargetTime, float CurrentTime)
+void UDynamicPerformanceManager::DetectPlatformTarget()
 {
-    if (CurrentTime <= TargetTime) return;
+    // Detect platform and set appropriate target
+    FString PlatformName = FPlatformProperties::PlatformName();
     
-    FPerformanceSettings NewSettings = CurrentSettings;
-    
-    // Reduce screen percentage first
-    if (NewSettings.ScreenPercentage > 50.0f)
+    if (PlatformName == TEXT("Windows") || PlatformName == TEXT("Mac") || PlatformName == TEXT("Linux"))
     {
-        NewSettings.ScreenPercentage = FMath::Max(50.0f, NewSettings.ScreenPercentage - 5.0f);
+        CurrentTarget = EPerformanceTarget::PC_HighEnd;
     }
-    // Then reduce view distance
-    else if (NewSettings.ViewDistanceScale > 25)
+    else if (PlatformName == TEXT("PS5") || PlatformName == TEXT("XSX"))
     {
-        NewSettings.ViewDistanceScale = FMath::Max(25, NewSettings.ViewDistanceScale - 10);
+        CurrentTarget = EPerformanceTarget::Console_NextGen;
     }
-    // Then reduce quality settings
     else
     {
-        NewSettings.ShadowQuality = FMath::Max(0, NewSettings.ShadowQuality - 1);
-        NewSettings.EffectsQuality = FMath::Max(0, NewSettings.EffectsQuality - 1);
-        NewSettings.PostProcessQuality = FMath::Max(0, NewSettings.PostProcessQuality - 1);
+        CurrentTarget = EPerformanceTarget::Console_Current;
     }
-    
-    ApplyPerformanceSettings(NewSettings);
-    CurrentSettings = NewSettings;
-    
-    UE_LOG(LogDynamicPerformance, Log, TEXT("Adjusted Rendering: ScreenPct=%.1f, ViewDist=%d, ShadowQ=%d"),
-           NewSettings.ScreenPercentage, NewSettings.ViewDistanceScale, NewSettings.ShadowQuality);
 }
 
-void UDynamicPerformanceManager::AdjustPhysicsPerformance(float TargetTime, float CurrentTime)
+void UDynamicPerformanceManager::DetermineOptimalPerformanceLevel()
 {
-    if (CurrentTime <= TargetTime) return;
+    // Start with high performance and adjust based on initial frame timing
+    CurrentPerformanceLevel = EPerformanceLevel::High;
     
-    FPerformanceSettings NewSettings = CurrentSettings;
-    
-    // Reduce physics complexity
-    NewSettings.MaxPhysicsBodies = FMath::Max(1000, FMath::FloorToInt(NewSettings.MaxPhysicsBodies * 0.9f));
-    
-    // Reduce physics tick rate slightly
-    NewSettings.PhysicsTickRate = FMath::Max(30.0f, NewSettings.PhysicsTickRate * 0.95f);
-    
-    // Disable destruction if necessary
-    if (NewSettings.MaxPhysicsBodies < 2000)
-    {
-        NewSettings.bDestructionEnabled = false;
-    }
-    
-    ApplyPerformanceSettings(NewSettings);
-    CurrentSettings = NewSettings;
-    
-    UE_LOG(LogDynamicPerformance, Log, TEXT("Adjusted Physics: MaxBodies=%d, TickRate=%.1f, Destruction=%d"),
-           NewSettings.MaxPhysicsBodies, NewSettings.PhysicsTickRate, NewSettings.bDestructionEnabled);
-}
-
-void UDynamicPerformanceManager::AdjustStreamingPerformance()
-{
-    FPerformanceSettings NewSettings = CurrentSettings;
-    
-    // Reduce streaming pool size
-    NewSettings.TextureStreamingPoolSize = FMath::Max(1024.0f, NewSettings.TextureStreamingPoolSize * 0.9f);
-    
-    // Reduce max streaming cells
-    NewSettings.MaxStreamingCells = FMath::Max(9, NewSettings.MaxStreamingCells - 2);
-    
-    ApplyPerformanceSettings(NewSettings);
-    CurrentSettings = NewSettings;
-    
-    UE_LOG(LogDynamicPerformance, Log, TEXT("Adjusted Streaming: PoolSize=%.0fMB, MaxCells=%d"),
-           NewSettings.TextureStreamingPoolSize, NewSettings.MaxStreamingCells);
+    // This will be refined by the dynamic adjustment system
 }
 
 void UDynamicPerformanceManager::ApplyPerformanceSettings(const FPerformanceSettings& Settings)
 {
-    // Apply rendering settings via console variables
-    IConsoleManager::Get().FindConsoleVariable(TEXT("r.ScreenPercentage"))->Set(Settings.ScreenPercentage);
-    IConsoleManager::Get().FindConsoleVariable(TEXT("r.ViewDistanceScale"))->Set(Settings.ViewDistanceScale / 100.0f);
-    IConsoleManager::Get().FindConsoleVariable(TEXT("sg.ShadowQuality"))->Set(Settings.ShadowQuality);
-    IConsoleManager::Get().FindConsoleVariable(TEXT("sg.TextureQuality"))->Set(Settings.TextureQuality);
-    IConsoleManager::Get().FindConsoleVariable(TEXT("sg.EffectsQuality"))->Set(Settings.EffectsQuality);
-    IConsoleManager::Get().FindConsoleVariable(TEXT("sg.PostProcessQuality"))->Set(Settings.PostProcessQuality);
+    // Apply rendering settings
+    if (auto* ScreenPercentageCVar = IConsoleManager::Get().FindConsoleVariable(TEXT("r.ScreenPercentage")))
+    {
+        ScreenPercentageCVar->Set(Settings.ScreenPercentage);
+    }
     
-    // Apply Nanite and Lumen settings
-    IConsoleManager::Get().FindConsoleVariable(TEXT("r.Nanite"))->Set(Settings.bNaniteEnabled ? 1 : 0);
-    IConsoleManager::Get().FindConsoleVariable(TEXT("r.Lumen.GlobalIllumination"))->Set(Settings.bLumenEnabled ? 1 : 0);
-    IConsoleManager::Get().FindConsoleVariable(TEXT("r.Shadow.Virtual.Enable"))->Set(Settings.bVirtualShadowMapsEnabled ? 1 : 0);
+    if (auto* ViewDistanceCVar = IConsoleManager::Get().FindConsoleVariable(TEXT("r.ViewDistanceScale")))
+    {
+        ViewDistanceCVar->Set(Settings.ViewDistanceScale / 100.0f);
+    }
     
-    // Apply streaming settings
-    IConsoleManager::Get().FindConsoleVariable(TEXT("r.Streaming.PoolSize"))->Set(Settings.TextureStreamingPoolSize);
+    if (auto* ShadowQualityCVar = IConsoleManager::Get().FindConsoleVariable(TEXT("sg.ShadowQuality")))
+    {
+        ShadowQualityCVar->Set(Settings.ShadowQuality);
+    }
     
-    // Mass AI settings would be applied through the Mass AI subsystem
-    // Physics settings would be applied through the Physics subsystem
+    if (auto* TextureQualityCVar = IConsoleManager::Get().FindConsoleVariable(TEXT("sg.TextureQuality")))
+    {
+        TextureQualityCVar->Set(Settings.TextureQuality);
+    }
     
-    UE_LOG(LogDynamicPerformance, Verbose, TEXT("Applied performance settings"));
+    if (auto* EffectsQualityCVar = IConsoleManager::Get().FindConsoleVariable(TEXT("sg.EffectsQuality")))
+    {
+        EffectsQualityCVar->Set(Settings.EffectsQuality);
+    }
+    
+    if (auto* PostProcessQualityCVar = IConsoleManager::Get().FindConsoleVariable(TEXT("sg.PostProcessQuality")))
+    {
+        PostProcessQualityCVar->Set(Settings.PostProcessQuality);
+    }
+    
+    // Apply Nanite settings
+    if (auto* NaniteCVar = IConsoleManager::Get().FindConsoleVariable(TEXT("r.Nanite")))
+    {
+        NaniteCVar->Set(Settings.bNaniteEnabled ? 1 : 0);
+    }
+    
+    // Apply Lumen settings
+    if (auto* LumenCVar = IConsoleManager::Get().FindConsoleVariable(TEXT("r.DynamicGlobalIlluminationMethod")))
+    {
+        LumenCVar->Set(Settings.bLumenEnabled ? 1 : 0);
+    }
+    
+    // Apply Virtual Shadow Maps
+    if (auto* VSMCVar = IConsoleManager::Get().FindConsoleVariable(TEXT("r.Shadow.Virtual.Enable")))
+    {
+        VSMCVar->Set(Settings.bVirtualShadowMapsEnabled ? 1 : 0);
+    }
+    
+    UE_LOG(LogDynamicPerformance, Log, TEXT("Applied performance settings - Screen%%: %.1f, Shadows: %d, Effects: %d"), 
+           Settings.ScreenPercentage, Settings.ShadowQuality, Settings.EffectsQuality);
 }
 
 void UDynamicPerformanceManager::ValidateSettings(FPerformanceSettings& Settings)
 {
     // Clamp values to valid ranges
-    Settings.ScreenPercentage = FMath::Clamp(Settings.ScreenPercentage, 25.0f, 100.0f);
-    Settings.ViewDistanceScale = FMath::Clamp(Settings.ViewDistanceScale, 10, 100);
+    Settings.ScreenPercentage = FMath::Clamp(Settings.ScreenPercentage, 50.0f, 200.0f);
+    Settings.ViewDistanceScale = FMath::Clamp(Settings.ViewDistanceScale, 25, 200);
     Settings.ShadowQuality = FMath::Clamp(Settings.ShadowQuality, 0, 3);
     Settings.TextureQuality = FMath::Clamp(Settings.TextureQuality, 0, 3);
     Settings.EffectsQuality = FMath::Clamp(Settings.EffectsQuality, 0, 3);
     Settings.PostProcessQuality = FMath::Clamp(Settings.PostProcessQuality, 0, 3);
     
-    Settings.MaxActiveAgents = FMath::Clamp(Settings.MaxActiveAgents, 100, 50000);
-    Settings.AITickRate = FMath::Clamp(Settings.AITickRate, 5.0f, 60.0f);
-    Settings.DinosaurCullDistance = FMath::Clamp(Settings.DinosaurCullDistance, 5000.0f, 50000.0f);
-    
-    Settings.PhysicsTickRate = FMath::Clamp(Settings.PhysicsTickRate, 20.0f, 120.0f);
-    Settings.MaxPhysicsBodies = FMath::Clamp(Settings.MaxPhysicsBodies, 100, 20000);
-    
-    Settings.MaxStreamingCells = FMath::Clamp(Settings.MaxStreamingCells, 4, 50);
-    Settings.TextureStreamingPoolSize = FMath::Clamp(Settings.TextureStreamingPoolSize, 512.0f, 8192.0f);
-}
-
-void UDynamicPerformanceManager::OverrideMassAISettings(int32 MaxAgents, float TickRate, float CullDistance)
-{
-    FPerformanceSettings NewSettings = CurrentSettings;
-    NewSettings.MaxActiveAgents = MaxAgents;
-    NewSettings.AITickRate = TickRate;
-    NewSettings.DinosaurCullDistance = CullDistance;
-    
-    ValidateSettings(NewSettings);
-    ApplyPerformanceSettings(NewSettings);
-    CurrentSettings = NewSettings;
-    
-    UE_LOG(LogDynamicPerformance, Log, TEXT("Mass AI settings overridden: MaxAgents=%d, TickRate=%.1f, CullDist=%.0f"),
-           MaxAgents, TickRate, CullDistance);
-}
-
-void UDynamicPerformanceManager::OverrideRenderingSettings(float ScreenPercentage, int32 ViewDistance, int32 ShadowQuality)
-{
-    FPerformanceSettings NewSettings = CurrentSettings;
-    NewSettings.ScreenPercentage = ScreenPercentage;
-    NewSettings.ViewDistanceScale = ViewDistance;
-    NewSettings.ShadowQuality = ShadowQuality;
-    
-    ValidateSettings(NewSettings);
-    ApplyPerformanceSettings(NewSettings);
-    CurrentSettings = NewSettings;
-    
-    UE_LOG(LogDynamicPerformance, Log, TEXT("Rendering settings overridden: ScreenPct=%.1f, ViewDist=%d, ShadowQ=%d"),
-           ScreenPercentage, ViewDistance, ShadowQuality);
+    Settings.MaxActiveAgents = FMath::Clamp(Settings.MaxActiveAgents, 1000, 100000);
+    Settings.AITickRate = FMath::Clamp(Settings.AITickRate, 10.0f, 120.0f);
+    Settings.DinosaurCullDistance = FMath::Clamp(Settings.DinosaurCullDistance, 5000.0f, 100000.0f);
 }
 
 void UDynamicPerformanceManager::StartPerformanceCapture(const FString& SessionName)
 {
-    if (bCapturingPerformance)
+    if (!bCapturingPerformance)
     {
-        StopPerformanceCapture();
+        bCapturingPerformance = true;
+        CurrentSessionName = SessionName;
+        
+        UE_LOG(LogDynamicPerformance, Log, TEXT("Started performance capture session: %s"), *SessionName);
     }
-    
-    CurrentSessionName = SessionName.IsEmpty() ? 
-        FString::Printf(TEXT("PerfCapture_%s"), *FDateTime::Now().ToString()) : SessionName;
-    
-    bCapturingPerformance = true;
-    
-    UE_LOG(LogDynamicPerformance, Log, TEXT("Started performance capture: %s"), *CurrentSessionName);
 }
 
 void UDynamicPerformanceManager::StopPerformanceCapture()
 {
-    if (!bCapturingPerformance) return;
-    
-    bCapturingPerformance = false;
-    WritePerformanceLog();
-    
-    UE_LOG(LogDynamicPerformance, Log, TEXT("Stopped performance capture: %s"), *CurrentSessionName);
-    CurrentSessionName.Empty();
+    if (bCapturingPerformance)
+    {
+        bCapturingPerformance = false;
+        WritePerformanceLog();
+        
+        UE_LOG(LogDynamicPerformance, Log, TEXT("Stopped performance capture session: %s"), *CurrentSessionName);
+        CurrentSessionName.Empty();
+    }
 }
 
 void UDynamicPerformanceManager::CapturePerformanceData()
 {
-    // This would capture detailed performance data to arrays for later analysis
+    // This would capture detailed performance data for analysis
     // Implementation would depend on specific telemetry requirements
 }
 
 void UDynamicPerformanceManager::WritePerformanceLog()
 {
-    // Write performance data to file
-    FString LogPath = FPaths::ProjectLogDir() / TEXT("Performance") / (CurrentSessionName + TEXT(".csv"));
-    
-    // Create directory if it doesn't exist
-    FString LogDir = FPaths::GetPath(LogPath);
-    IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
-    if (!PlatformFile.DirectoryExists(*LogDir))
-    {
-        PlatformFile.CreateDirectoryTree(*LogDir);
-    }
-    
-    // Write CSV header and data
-    FString LogContent = TEXT("Timestamp,FrameTime,GameThread,RenderThread,GPU,Memory,DrawCalls,Triangles,ActiveAgents\n");
-    
-    // This would contain the actual captured data
-    // For now, just write current state
-    LogContent += FString::Printf(TEXT("%s,%.2f,%.2f,%.2f,%.2f,%.2f,%d,%d,%d\n"),
-        *FDateTime::Now().ToString(),
-        CurrentMetrics.FrameTime,
-        CurrentMetrics.GameThreadTime,
-        CurrentMetrics.RenderThreadTime,
-        CurrentMetrics.GPUTime,
-        CurrentMetrics.UsedMemory,
-        CurrentMetrics.DrawCalls,
-        CurrentMetrics.Triangles,
-        CurrentMetrics.ActiveAgents
+    // Write performance data to log file
+    FString LogData = FString::Printf(
+        TEXT("Performance Session: %s\n")
+        TEXT("Target: %d, Level: %d\n")
+        TEXT("Avg Frame Time: %.2fms\n")
+        TEXT("Avg Game Thread: %.2fms\n")
+        TEXT("Avg Render Thread: %.2fms\n")
+        TEXT("Avg GPU Time: %.2fms\n"),
+        *CurrentSessionName,
+        (int32)CurrentTarget,
+        (int32)CurrentPerformanceLevel,
+        CalculateAverageFromHistory(FrameTimeHistory),
+        CalculateAverageFromHistory(GameThreadHistory),
+        CalculateAverageFromHistory(RenderThreadHistory),
+        CalculateAverageFromHistory(GPUTimeHistory)
     );
     
-    FFileHelper::SaveStringToFile(LogContent, *LogPath);
+    FString LogPath = FPaths::ProjectLogDir() / FString::Printf(TEXT("Performance_%s.log"), *CurrentSessionName);
+    FFileHelper::SaveStringToFile(LogData, *LogPath);
 }
 
 void UDynamicPerformanceManager::DumpPerformanceReport()
 {
     UE_LOG(LogDynamicPerformance, Warning, TEXT("=== PERFORMANCE REPORT ==="));
-    UE_LOG(LogDynamicPerformance, Warning, TEXT("Target: %d, Level: %d, Bottleneck: %d"), 
-           (int32)CurrentTarget, (int32)CurrentPerformanceLevel, (int32)CurrentBottleneck);
-    UE_LOG(LogDynamicPerformance, Warning, TEXT("Frame: %.2fms (Budget: %.2fms)"), 
-           CurrentMetrics.FrameTime, CurrentBudget.TotalFrameTime);
-    UE_LOG(LogDynamicPerformance, Warning, TEXT("Game Thread: %.2fms (Budget: %.2fms)"), 
-           CurrentMetrics.GameThreadTime, CurrentBudget.GameThreadBudget);
-    UE_LOG(LogDynamicPerformance, Warning, TEXT("Render Thread: %.2fms (Budget: %.2fms)"), 
-           CurrentMetrics.RenderThreadTime, CurrentBudget.RenderThreadBudget);
-    UE_LOG(LogDynamicPerformance, Warning, TEXT("GPU: %.2fms (Budget: %.2fms)"), 
-           CurrentMetrics.GPUTime, CurrentBudget.GPUBudget);
-    UE_LOG(LogDynamicPerformance, Warning, TEXT("Memory: %.0fMB (Budget: %dMB)"), 
-           CurrentMetrics.UsedMemory, CurrentBudget.TotalMemoryBudget);
-    UE_LOG(LogDynamicPerformance, Warning, TEXT("Draw Calls: %d, Triangles: %d"), 
-           CurrentMetrics.DrawCalls, CurrentMetrics.Triangles);
-    UE_LOG(LogDynamicPerformance, Warning, TEXT("Mass AI Agents: %d (Max: %d)"), 
-           CurrentMetrics.ActiveAgents, CurrentSettings.MaxActiveAgents);
-    UE_LOG(LogDynamicPerformance, Warning, TEXT("========================"));
+    UE_LOG(LogDynamicPerformance, Warning, TEXT("Target: %d, Level: %d"), (int32)CurrentTarget, (int32)CurrentPerformanceLevel);
+    UE_LOG(LogDynamicPerformance, Warning, TEXT("Frame Time: %.2fms (Budget: %.2fms)"), CurrentMetrics.FrameTime, CurrentBudget.TotalFrameTime);
+    UE_LOG(LogDynamicPerformance, Warning, TEXT("Game Thread: %.2fms (Budget: %.2fms)"), CurrentMetrics.GameThreadTime, CurrentBudget.GameThreadBudget);
+    UE_LOG(LogDynamicPerformance, Warning, TEXT("Render Thread: %.2fms (Budget: %.2fms)"), CurrentMetrics.RenderThreadTime, CurrentBudget.RenderThreadBudget);
+    UE_LOG(LogDynamicPerformance, Warning, TEXT("GPU Time: %.2fms (Budget: %.2fms)"), CurrentMetrics.GPUTime, CurrentBudget.GPUBudget);
+    UE_LOG(LogDynamicPerformance, Warning, TEXT("Bottleneck: %d"), (int32)CurrentBottleneck);
+    UE_LOG(LogDynamicPerformance, Warning, TEXT("Draw Calls: %d, Triangles: %d"), CurrentMetrics.DrawCalls, CurrentMetrics.Triangles);
+    UE_LOG(LogDynamicPerformance, Warning, TEXT("Memory Usage: %.1fMB"), CurrentMetrics.UsedMemory);
 }
 
 // Static function implementations
@@ -566,12 +501,11 @@ FPerformanceSettings FPerformanceSettings::GetSettingsForLevel(EPerformanceLevel
         Settings.TextureQuality = 3;
         Settings.EffectsQuality = 3;
         Settings.PostProcessQuality = 3;
-        Settings.MaxActiveAgents = 50000;
-        Settings.AITickRate = 30.0f;
-        Settings.DinosaurCullDistance = 30000.0f;
         Settings.bNaniteEnabled = true;
         Settings.bLumenEnabled = true;
         Settings.bVirtualShadowMapsEnabled = true;
+        Settings.MaxActiveAgents = 50000;
+        Settings.AITickRate = 60.0f;
         break;
         
     case EPerformanceLevel::High:
@@ -580,50 +514,46 @@ FPerformanceSettings FPerformanceSettings::GetSettingsForLevel(EPerformanceLevel
         Settings.ShadowQuality = 3;
         Settings.TextureQuality = 3;
         Settings.EffectsQuality = 2;
-        Settings.PostProcessQuality = 2;
-        Settings.MaxActiveAgents = 35000;
-        Settings.AITickRate = 25.0f;
-        Settings.DinosaurCullDistance = 25000.0f;
+        Settings.PostProcessQuality = 3;
+        Settings.MaxActiveAgents = 40000;
+        Settings.AITickRate = 45.0f;
         break;
         
     case EPerformanceLevel::Medium:
         Settings.ScreenPercentage = 80.0f;
-        Settings.ViewDistanceScale = 75;
+        Settings.ViewDistanceScale = 80;
         Settings.ShadowQuality = 2;
         Settings.TextureQuality = 2;
         Settings.EffectsQuality = 2;
         Settings.PostProcessQuality = 2;
-        Settings.MaxActiveAgents = 20000;
-        Settings.AITickRate = 20.0f;
-        Settings.DinosaurCullDistance = 20000.0f;
+        Settings.MaxActiveAgents = 30000;
+        Settings.AITickRate = 30.0f;
         break;
         
     case EPerformanceLevel::Low:
         Settings.ScreenPercentage = 70.0f;
-        Settings.ViewDistanceScale = 60;
+        Settings.ViewDistanceScale = 70;
         Settings.ShadowQuality = 1;
         Settings.TextureQuality = 1;
         Settings.EffectsQuality = 1;
         Settings.PostProcessQuality = 1;
-        Settings.MaxActiveAgents = 10000;
-        Settings.AITickRate = 15.0f;
-        Settings.DinosaurCullDistance = 15000.0f;
         Settings.bLumenEnabled = false;
+        Settings.MaxActiveAgents = 20000;
+        Settings.AITickRate = 20.0f;
         break;
         
     case EPerformanceLevel::Potato:
-        Settings.ScreenPercentage = 50.0f;
-        Settings.ViewDistanceScale = 40;
+        Settings.ScreenPercentage = 60.0f;
+        Settings.ViewDistanceScale = 50;
         Settings.ShadowQuality = 0;
         Settings.TextureQuality = 0;
         Settings.EffectsQuality = 0;
         Settings.PostProcessQuality = 0;
-        Settings.MaxActiveAgents = 5000;
-        Settings.AITickRate = 10.0f;
-        Settings.DinosaurCullDistance = 10000.0f;
         Settings.bNaniteEnabled = false;
         Settings.bLumenEnabled = false;
         Settings.bVirtualShadowMapsEnabled = false;
+        Settings.MaxActiveAgents = 10000;
+        Settings.AITickRate = 15.0f;
         break;
     }
     
