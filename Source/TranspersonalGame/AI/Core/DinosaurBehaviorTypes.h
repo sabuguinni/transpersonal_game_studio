@@ -1,193 +1,251 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/DataAsset.h"
+#include "Engine/DataTable.h"
 #include "GameplayTagContainer.h"
 #include "DinosaurBehaviorTypes.generated.h"
 
 /**
- * Enumeração dos tipos comportamentais base dos dinossauros
- * Cada tipo define padrões fundamentais de comportamento
+ * Enum defining the basic behavioral archetypes for dinosaurs
  */
 UENUM(BlueprintType)
-enum class EDinosaurBehaviorType : uint8
+enum class EDinosaurArchetype : uint8
 {
-    // Herbívoros passivos - potencialmente domesticáveis
-    PassiveHerbivore     UMETA(DisplayName = "Herbívoro Passivo"),
+    // Apex predators - T-Rex, Allosaurus
+    ApexPredator     UMETA(DisplayName = "Apex Predator"),
     
-    // Herbívoros defensivos - fogem mas podem atacar se encurralados
-    DefensiveHerbivore   UMETA(DisplayName = "Herbívoro Defensivo"),
+    // Pack hunters - Velociraptors, Deinonychus  
+    PackHunter       UMETA(DisplayName = "Pack Hunter"),
     
-    // Carnívoros pequenos - caçam em grupos, evitam grandes predadores
-    SmallCarnivore       UMETA(DisplayName = "Carnívoro Pequeno"),
+    // Solitary hunters - Carnotaurus, Ceratosaurus
+    SolitaryHunter   UMETA(DisplayName = "Solitary Hunter"),
     
-    // Carnívoros médios - caçadores oportunistas
-    MediumCarnivore      UMETA(DisplayName = "Carnívoro Médio"),
+    // Large herbivores - Triceratops, Brontosaurus
+    LargeHerbivore   UMETA(DisplayName = "Large Herbivore"),
     
-    // Grandes predadores - apex predators, territorialistas
-    ApexPredator         UMETA(DisplayName = "Predador Apex"),
+    // Herd herbivores - Parasaurolophus, Edmontosaurus
+    HerdHerbivore    UMETA(DisplayName = "Herd Herbivore"),
     
-    // Carniceiros - seguem predadores, limpam restos
-    Scavenger           UMETA(DisplayName = "Carniceiro"),
+    // Small herbivores (domesticable) - Compsognathus, Hypsilophodon
+    SmallHerbivore   UMETA(DisplayName = "Small Herbivore"),
     
-    // Aquáticos - comportamento específico para água
-    Aquatic             UMETA(DisplayName = "Aquático"),
+    // Scavengers - Ornithomimus, small theropods
+    Scavenger        UMETA(DisplayName = "Scavenger"),
     
-    // Voadores - patrulham do ar, diferentes padrões de movimento
-    Flying              UMETA(DisplayName = "Voador")
+    // Ambush predators - Baryonyx, Suchomimus
+    AmbushPredator   UMETA(DisplayName = "Ambush Predator")
 };
 
 /**
- * Estados emocionais que afetam o comportamento
+ * Current behavioral state of a dinosaur
  */
 UENUM(BlueprintType)
-enum class EDinosaurEmotionalState : uint8
+enum class EDinosaurBehaviorState : uint8
 {
-    Calm        UMETA(DisplayName = "Calmo"),
-    Alert       UMETA(DisplayName = "Alerta"),
-    Aggressive  UMETA(DisplayName = "Agressivo"),
-    Fearful     UMETA(DisplayName = "Amedrontado"),
-    Hungry      UMETA(DisplayName = "Faminto"),
-    Territorial UMETA(DisplayName = "Territorial"),
-    Protective  UMETA(DisplayName = "Protetor"),
-    Curious     UMETA(DisplayName = "Curioso"),
-    Tired       UMETA(DisplayName = "Cansado"),
-    Injured     UMETA(DisplayName = "Ferido")
+    Idle            UMETA(DisplayName = "Idle"),
+    Foraging        UMETA(DisplayName = "Foraging"),
+    Hunting         UMETA(DisplayName = "Hunting"),
+    Fleeing         UMETA(DisplayName = "Fleeing"),
+    Sleeping        UMETA(DisplayName = "Sleeping"),
+    Drinking        UMETA(DisplayName = "Drinking"),
+    Socializing     UMETA(DisplayName = "Socializing"),
+    Territorial     UMETA(DisplayName = "Territorial"),
+    Mating          UMETA(DisplayName = "Mating"),
+    Nesting         UMETA(DisplayName = "Nesting"),
+    Migrating       UMETA(DisplayName = "Migrating"),
+    Investigating   UMETA(DisplayName = "Investigating"),
+    Stalking        UMETA(DisplayName = "Stalking"),
+    Ambushing       UMETA(DisplayName = "Ambushing")
 };
 
 /**
- * Atividades que os dinossauros podem estar executando
- */
-UENUM(BlueprintType)
-enum class EDinosaurActivity : uint8
-{
-    // Atividades básicas de sobrevivência
-    Foraging    UMETA(DisplayName = "Procurando Comida"),
-    Drinking    UMETA(DisplayName = "Bebendo Água"),
-    Resting     UMETA(DisplayName = "Descansando"),
-    Sleeping    UMETA(DisplayName = "Dormindo"),
-    
-    // Atividades sociais
-    Socializing UMETA(DisplayName = "Socializando"),
-    Mating      UMETA(DisplayName = "Acasalando"),
-    Protecting  UMETA(DisplayName = "Protegendo"),
-    
-    // Atividades de movimento
-    Patrolling  UMETA(DisplayName = "Patrulhando"),
-    Migrating   UMETA(DisplayName = "Migrando"),
-    Fleeing     UMETA(DisplayName = "Fugindo"),
-    Hunting     UMETA(DisplayName = "Caçando"),
-    
-    // Atividades de manutenção
-    Grooming    UMETA(DisplayName = "Limpando-se"),
-    Sunbathing  UMETA(DisplayName = "Tomando Sol"),
-    Marking     UMETA(DisplayName = "Marcando Território"),
-    
-    // Interação com jogador
-    Investigating UMETA(DisplayName = "Investigando"),
-    Bonding     UMETA(DisplayName = "Criando Vínculo"),
-    Following   UMETA(DisplayName = "Seguindo")
-};
-
-/**
- * Níveis de domesticação para herbívoros pequenos
+ * Domestication levels for small herbivores
  */
 UENUM(BlueprintType)
 enum class EDomesticationLevel : uint8
 {
-    Wild            UMETA(DisplayName = "Selvagem"),
-    Wary            UMETA(DisplayName = "Desconfiado"),
-    Curious         UMETA(DisplayName = "Curioso"),
-    Tolerant        UMETA(DisplayName = "Tolerante"),
-    Friendly        UMETA(DisplayName = "Amigável"),
-    Bonded          UMETA(DisplayName = "Vinculado"),
-    Domesticated    UMETA(DisplayName = "Domesticado")
+    Wild            UMETA(DisplayName = "Wild"),
+    Wary            UMETA(DisplayName = "Wary"),
+    Curious         UMETA(DisplayName = "Curious"),
+    Tolerant        UMETA(DisplayName = "Tolerant"),
+    Friendly        UMETA(DisplayName = "Friendly"),
+    Bonded          UMETA(DisplayName = "Bonded"),
+    Domesticated    UMETA(DisplayName = "Domesticated")
 };
 
 /**
- * Estrutura para definir rotinas diárias
+ * Individual personality traits that affect behavior
  */
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FDailyRoutine
+struct FDinosaurPersonality
 {
     GENERATED_BODY()
 
-    // Hora do dia (0.0 = meia-noite, 0.5 = meio-dia, 1.0 = meia-noite)
+    // Core personality traits (0.0 to 1.0)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Aggression = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Curiosity = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Fearfulness = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Sociability = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Territoriality = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Intelligence = 0.5f;
+
+    // Behavioral modifiers
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.5", ClampMax = "2.0"))
+    float ActivityLevel = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.5", ClampMax = "2.0"))
+    float ReactionSpeed = 1.0f;
+
+    FDinosaurPersonality()
+    {
+        // Generate random personality on construction
+        Aggression = FMath::RandRange(0.0f, 1.0f);
+        Curiosity = FMath::RandRange(0.0f, 1.0f);
+        Fearfulness = FMath::RandRange(0.0f, 1.0f);
+        Sociability = FMath::RandRange(0.0f, 1.0f);
+        Territoriality = FMath::RandRange(0.0f, 1.0f);
+        Intelligence = FMath::RandRange(0.3f, 1.0f);
+        ActivityLevel = FMath::RandRange(0.7f, 1.5f);
+        ReactionSpeed = FMath::RandRange(0.8f, 1.3f);
+    }
+};
+
+/**
+ * Memory entry for dinosaur interactions and observations
+ */
+USTRUCT(BlueprintType)
+struct FDinosaurMemoryEntry
+{
+    GENERATED_BODY()
+
+    // What was remembered
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FGameplayTag MemoryType;
+
+    // Actor involved (if any)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TWeakObjectPtr<AActor> RelatedActor;
+
+    // Location of the memory
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FVector Location = FVector::ZeroVector;
+
+    // Emotional weight of the memory (-1.0 = very negative, 1.0 = very positive)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "-1.0", ClampMax = "1.0"))
+    float EmotionalWeight = 0.0f;
+
+    // When this memory was created
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float Timestamp = 0.0f;
+
+    // How long this memory should persist
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float Duration = 300.0f; // 5 minutes default
+
+    // How important this memory is (affects retention)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Importance = 0.5f;
+
+    FDinosaurMemoryEntry()
+    {
+        Timestamp = FPlatformTime::Seconds();
+    }
+};
+
+/**
+ * Daily routine schedule for dinosaurs
+ */
+USTRUCT(BlueprintType)
+struct FDailyRoutineEntry
+{
+    GENERATED_BODY()
+
+    // Time of day (0.0 = midnight, 0.5 = noon, 1.0 = midnight)
     UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float TimeOfDay = 0.0f;
 
-    // Atividade principal neste período
+    // Preferred behavior at this time
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EDinosaurActivity PrimaryActivity = EDinosaurActivity::Resting;
+    EDinosaurBehaviorState PreferredBehavior = EDinosaurBehaviorState::Idle;
 
-    // Localização preferida para esta atividade (relativa ao território)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FVector PreferredLocation = FVector::ZeroVector;
+    // Priority of this routine (higher = more important)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Priority = 0.5f;
 
-    // Duração da atividade em horas de jogo
+    // Duration of this behavior in hours
     UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.1", ClampMax = "12.0"))
     float Duration = 1.0f;
 
-    // Prioridade desta rotina (maior = mais importante)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0", ClampMax = "10"))
-    int32 Priority = 5;
+    // Preferred location type for this behavior
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FGameplayTag PreferredLocationTag;
 };
 
 /**
- * Configuração comportamental específica por espécie
+ * Data table row for dinosaur species behavior configuration
  */
-UCLASS(BlueprintType)
-class TRANSPERSONALGAME_API UDinosaurBehaviorConfig : public UDataAsset
+USTRUCT(BlueprintType)
+struct FDinosaurSpeciesData : public FTableRowBase
 {
     GENERATED_BODY()
 
-public:
-    // Tipo comportamental base
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Behavior")
-    EDinosaurBehaviorType BehaviorType = EDinosaurBehaviorType::PassiveHerbivore;
+    // Species identification
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FString SpeciesName;
 
-    // Nome da espécie
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Species")
-    FString SpeciesName = TEXT("Unknown Species");
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    EDinosaurArchetype Archetype = EDinosaurArchetype::LargeHerbivore;
 
-    // Pode ser domesticado?
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Domestication")
+    // Behavioral parameters
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TArray<FDailyRoutineEntry> DailyRoutine;
+
+    // Detection ranges
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "100.0", ClampMax = "5000.0"))
+    float SightRange = 1500.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "50.0", ClampMax = "2000.0"))
+    float HearingRange = 800.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "10.0", ClampMax = "500.0"))
+    float SmellRange = 200.0f;
+
+    // Social behavior
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "1", ClampMax = "50"))
+    int32 PreferredGroupSize = 1;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "100.0", ClampMax = "10000.0"))
+    float TerritoryRadius = 1000.0f;
+
+    // Domestication (only for small herbivores)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
     bool bCanBeDomesticated = false;
 
-    // Tempo necessário para domesticação completa (em horas de jogo)
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Domestication", 
-              meta = (EditCondition = "bCanBeDomesticated", ClampMin = "1.0", ClampMax = "100.0"))
-    float DomesticationTimeRequired = 24.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "1.0", ClampMax = "100.0"))
+    float DomesticationRate = 10.0f; // Points per positive interaction
 
-    // Rotinas diárias desta espécie
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Daily Routine")
-    TArray<FDailyRoutine> DailyRoutines;
+    // Diet preferences
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TArray<FGameplayTag> PreferredFoodTags;
 
-    // Raio do território em metros
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory", meta = (ClampMin = "50.0", ClampMax = "5000.0"))
-    float TerritoryRadius = 500.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TArray<FGameplayTag> PreferredHabitatTags;
 
-    // Distância de detecção do jogador
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Perception", meta = (ClampMin = "100.0", ClampMax = "2000.0"))
-    float PlayerDetectionRange = 300.0f;
+    // Threat assessment
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TArray<FGameplayTag> NaturalEnemyTags;
 
-    // Distância de fuga (quando começa a fugir do jogador)
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Perception", meta = (ClampMin = "50.0", ClampMax = "1000.0"))
-    float FleeDistance = 150.0f;
-
-    // Velocidade de movimento normal (cm/s)
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement", meta = (ClampMin = "50.0", ClampMax = "2000.0"))
-    float NormalSpeed = 200.0f;
-
-    // Velocidade de fuga (cm/s)
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement", meta = (ClampMin = "200.0", ClampMax = "4000.0"))
-    float FleeSpeed = 600.0f;
-
-    // Tags de gameplay para este comportamento
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Gameplay")
-    FGameplayTagContainer BehaviorTags;
-
-    // Sons específicos desta espécie
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Audio")
-    TMap<FString, class USoundBase*> SpeciesSounds;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TArray<FGameplayTag> PreyTags;
 };
