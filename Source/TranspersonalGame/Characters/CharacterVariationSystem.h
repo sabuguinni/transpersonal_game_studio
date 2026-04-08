@@ -1,0 +1,47 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Components/ActorComponent.h"
+#include "CharacterArchetypes.h"
+#include "Math/RandomStream.h"
+#include "CharacterVariationSystem.generated.h"
+
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UCharacterVariationSystem : public UActorComponent
+{
+    GENERATED_BODY()
+
+public:
+    UCharacterVariationSystem();
+
+protected:
+    virtual void BeginPlay() override;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Random Generation")
+    FRandomStream RandomStream;
+
+public:
+    /**
+     * Generates a random character variation based on archetype, gender, and age
+     */
+    UFUNCTION(BlueprintCallable, Category = "Character Generation")
+    FCharacterVariationData GenerateRandomVariation(ECharacterArchetype ArchetypeType, ECharacterGender Gender, ECharacterAge Age);
+
+    /**
+     * Applies variation data to a MetaHuman skeletal mesh component
+     */
+    UFUNCTION(BlueprintCallable, Category = "Character Generation")
+    void ApplyVariationToMetaHuman(USkeletalMeshComponent* MetaHumanMesh, const FCharacterVariationData& Variation);
+
+    /**
+     * Generates a unique character ID for tracking individual characters
+     */
+    UFUNCTION(BlueprintCallable, Category = "Character Generation")
+    FString GenerateCharacterID(ECharacterArchetype ArchetypeType, const FCharacterVariationData& Variation);
+
+    /**
+     * Sets the random seed for consistent generation
+     */
+    UFUNCTION(BlueprintCallable, Category = "Character Generation")
+    void SetRandomSeed(int32 Seed) { RandomStream.Initialize(Seed); }
+};
