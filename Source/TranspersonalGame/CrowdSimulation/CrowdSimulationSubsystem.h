@@ -4,55 +4,93 @@
 #include "Subsystems/WorldSubsystem.h"
 #include "MassEntitySubsystem.h"
 #include "MassSpawnerSubsystem.h"
-#include "MassSimulationSubsystem.h"
 #include "Engine/World.h"
 #include "CrowdSimulationSubsystem.generated.h"
 
-DECLARE_LOG_CATEGORY_EXTERN(LogCrowdSimulation, Log, All);
+class UMassEntitySubsystem;
+class UMassSpawnerSubsystem;
 
-/**
- * Ecosystem Types for different crowd behaviors
- */
-UENUM(BlueprintType)
-enum class EEcosystemType : uint8
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FDinosaurHerdData
 {
-    Herbivore_Grazing,      // Peaceful grazing herds
-    Herbivore_Migrating,    // Large migration groups
-    Carnivore_Hunting,      // Predator packs
-    Carnivore_Scavenging,   // Opportunistic feeders
-    Mixed_WateringHole,     // Mixed species at water sources
-    Territorial_Nesting     // Defensive territorial behavior
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    int32 HerdSize = 15;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float HerdRadius = 2000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FVector HerdCenter = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float MovementSpeed = 300.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FString SpeciesType = TEXT("Triceratops");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsGrazing = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float AlertLevel = 0.0f; // 0.0 = calm, 1.0 = panicked
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FPredatorPackData
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    int32 PackSize = 6;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float HuntingRadius = 5000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FVector TerritoryCenter = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float MovementSpeed = 800.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FString SpeciesType = TEXT("Velociraptor");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsHunting = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float HungerLevel = 0.5f; // 0.0 = fed, 1.0 = starving
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FAerialFlockData
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    int32 FlockSize = 25;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float FlightAltitude = 1500.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FVector FlightPath = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float FlightSpeed = 1200.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FString SpeciesType = TEXT("Pteranodon");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsMigrating = false;
 };
 
 /**
- * Crowd Density Levels
- */
-UENUM(BlueprintType)
-enum class ECrowdDensity : uint8
-{
-    Sparse,     // 1-5 individuals
-    Small,      // 5-15 individuals  
-    Medium,     // 15-50 individuals
-    Large,      // 50-200 individuals
-    Massive     // 200+ individuals (migrations)
-};
-
-/**
- * Time of Day Behavior Modifiers
- */
-UENUM(BlueprintType)
-enum class ETimeOfDayBehavior : uint8
-{
-    Dawn_Active,        // Most active at dawn
-    Day_Active,         // Active during day
-    Dusk_Active,        // Most active at dusk
-    Night_Active,       // Nocturnal
-    Continuous_Active   // Active throughout day/night cycle
-};
-
-/**
- * Main subsystem for managing prehistoric ecosystem crowd simulation
- * Handles up to 50,000 simultaneous agents using UE5 Mass Entity Framework
+ * Subsystem responsible for managing large-scale dinosaur crowd simulation
+ * Handles herds, packs, flocks and ecosystem interactions using Mass Entity framework
  */
 UCLASS()
 class TRANSPERSONALGAME_API UCrowdSimulationSubsystem : public UWorldSubsystem
@@ -60,187 +98,74 @@ class TRANSPERSONALGAME_API UCrowdSimulationSubsystem : public UWorldSubsystem
     GENERATED_BODY()
 
 public:
-    // USubsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
-    virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
+    virtual void Tick(float DeltaTime) override;
+    virtual bool ShouldCreateSubsystem(UObject* Outer) const override { return true; }
 
-    // Core crowd management
+    // Herd Management
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void SpawnEcosystemGroup(EEcosystemType EcosystemType, FVector Location, ECrowdDensity Density, float Radius = 1000.0f);
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void DespawnEcosystemGroup(int32 GroupID);
+    void SpawnDinosaurHerd(const FDinosaurHerdData& HerdData, const FVector& SpawnLocation);
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void UpdateEcosystemBehavior(ETimeOfDayBehavior TimeOfDay, float Temperature, float Humidity);
-
-    // Player interaction effects
-    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void TriggerPlayerDisturbance(FVector PlayerLocation, float DisturbanceRadius, float IntensityLevel);
+    void SpawnPredatorPack(const FPredatorPackData& PackData, const FVector& SpawnLocation);
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void SetPlayerAsHuntTarget(FVector PlayerLocation, bool bIsBeingHunted);
+    void SpawnAerialFlock(const FAerialFlockData& FlockData, const FVector& SpawnLocation);
 
-    // Environmental triggers
+    // Ecosystem Events
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void TriggerMigrationEvent(FVector StartLocation, FVector EndLocation, EEcosystemType MigratingSpecies);
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void CreateWateringHoleActivity(FVector WaterLocation, float ActivityRadius);
-
-    // Performance and LOD management
-    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void SetCrowdLODDistance(float NearDistance, float MidDistance, float FarDistance);
+    void TriggerPredatorAlert(const FVector& AlertLocation, float AlertRadius = 3000.0f);
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void SetMaxActiveAgents(int32 MaxAgents);
-
-    // Debug and monitoring
-    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    int32 GetActiveAgentCount() const;
+    void TriggerStampede(const FVector& StampedeOrigin, const FVector& StampedeDirection);
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    TArray<FVector> GetActiveGroupLocations() const;
+    void SetGlobalWeatherState(bool bIsStormy);
+
+    // Performance Management
+    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
+    void SetSimulationLOD(int32 LODLevel); // 0 = Full detail, 3 = Minimal
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void EnableDebugVisualization(bool bEnable);
+    int32 GetActiveEntityCount() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
+    float GetCurrentPerformanceMetric() const;
 
 protected:
-    // Mass Entity references
     UPROPERTY()
-    class UMassEntitySubsystem* MassEntitySubsystem;
-
-    UPROPERTY()
-    class UMassSpawnerSubsystem* MassSpawnerSubsystem;
+    TObjectPtr<UMassEntitySubsystem> MassEntitySubsystem;
 
     UPROPERTY()
-    class UMassSimulationSubsystem* MassSimulationSubsystem;
+    TObjectPtr<UMassSpawnerSubsystem> MassSpawnerSubsystem;
 
-    // Active ecosystem groups
+    // Active simulation data
     UPROPERTY()
-    TMap<int32, struct FEcosystemGroupData> ActiveGroups;
-
-    // Performance settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxActiveAgents = 50000;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float LODNearDistance = 2000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float LODMidDistance = 5000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float LODFarDistance = 10000.0f;
-
-    // Environmental state
-    UPROPERTY()
-    ETimeOfDayBehavior CurrentTimeOfDay;
+    TArray<FDinosaurHerdData> ActiveHerds;
 
     UPROPERTY()
-    float CurrentTemperature = 25.0f;
+    TArray<FPredatorPackData> ActivePacks;
 
     UPROPERTY()
-    float CurrentHumidity = 0.6f;
+    TArray<FAerialFlockData> ActiveFlocks;
 
-    // Player tracking
+    // Performance tracking
     UPROPERTY()
-    FVector LastPlayerLocation;
-
-    UPROPERTY()
-    bool bPlayerIsBeingHunted = false;
+    int32 CurrentLODLevel = 1;
 
     UPROPERTY()
-    float PlayerDisturbanceRadius = 500.0f;
+    float LastFrameTime = 0.0f;
+
+    UPROPERTY()
+    int32 MaxSimultaneousEntities = 50000;
 
 private:
-    // Internal group management
-    int32 NextGroupID = 1;
-    bool bDebugVisualizationEnabled = false;
-
-    // Helper functions
-    void InitializeMassEntitySystem();
-    void CreateEcosystemBehaviorProfile(EEcosystemType Type, struct FEcosystemBehaviorProfile& OutProfile);
-    void UpdateGroupBehaviorBasedOnEnvironment(struct FEcosystemGroupData& GroupData);
-    void HandlePlayerProximityEffects();
-    void ProcessLODUpdates();
-};
-
-/**
- * Data structure for tracking ecosystem groups
- */
-USTRUCT(BlueprintType)
-struct FEcosystemGroupData
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly)
-    int32 GroupID = 0;
-
-    UPROPERTY(BlueprintReadOnly)
-    EEcosystemType EcosystemType = EEcosystemType::Herbivore_Grazing;
-
-    UPROPERTY(BlueprintReadOnly)
-    ECrowdDensity Density = ECrowdDensity::Small;
-
-    UPROPERTY(BlueprintReadOnly)
-    FVector CenterLocation = FVector::ZeroVector;
-
-    UPROPERTY(BlueprintReadOnly)
-    float ActivityRadius = 1000.0f;
-
-    UPROPERTY(BlueprintReadOnly)
-    int32 AgentCount = 0;
-
-    UPROPERTY(BlueprintReadOnly)
-    TArray<FMassEntityHandle> EntityHandles;
-
-    UPROPERTY(BlueprintReadOnly)
-    float LastPlayerDisturbanceTime = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly)
-    bool bIsActive = true;
-
-    UPROPERTY(BlueprintReadOnly)
-    bool bIsMigrating = false;
-
-    UPROPERTY(BlueprintReadOnly)
-    FVector MigrationTarget = FVector::ZeroVector;
-};
-
-/**
- * Behavior profile for different ecosystem types
- */
-USTRUCT(BlueprintType)
-struct FEcosystemBehaviorProfile
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float MovementSpeed = 100.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float GroupCohesion = 0.8f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float SeparationDistance = 200.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float PlayerAvoidanceDistance = 1000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float PredatorAvoidanceDistance = 1500.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    ETimeOfDayBehavior PreferredTimeOfDay = ETimeOfDayBehavior::Day_Active;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bCanBeDomesticated = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float AggressionLevel = 0.1f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float CuriosityLevel = 0.3f;
+    void UpdateHerdBehaviors(float DeltaTime);
+    void UpdatePackBehaviors(float DeltaTime);
+    void UpdateFlockBehaviors(float DeltaTime);
+    void UpdatePerformanceLOD(float DeltaTime);
+    
+    bool bIsInitialized = false;
+    float AccumulatedDeltaTime = 0.0f;
 };
