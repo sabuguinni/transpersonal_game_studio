@@ -1,0 +1,57 @@
+# Blackboard Asset for Dinosaur Combat AI
+# This is a blueprint asset configuration file
+
+[Blackboard Keys]
+# Target Information
+TargetActor=Object:Actor
+TargetLocation=Vector
+LastKnownLocation=Vector
+HasTarget=Bool:false
+
+# Combat State
+CombatState=Enum:ECombatState:Idle
+ThreatLevel=Enum:EThreatLevel:None
+AttackCooldown=Float:0.0
+LastAttackTime=Float:0.0
+
+# Tactical Positioning
+TacticalPosition=Vector
+FlankingPosition=Vector
+AmbushPosition=Vector
+RetreatPosition=Vector
+HasValidPosition=Bool:false
+
+# Pack Behavior
+PackLeader=Object:Actor
+PackMembers=Object:Actor
+PackFormation=Enum:EPackFormation:None
+PackRole=Enum:EPackRole:Individual
+
+# Patrol and Territory
+PatrolPoint=Vector
+TerritoryCenter=Vector
+TerritoryRadius=Float:1000.0
+HomeLocation=Vector
+
+# Environmental Awareness
+NearbyThreats=Object:Actor
+EscapeRoute=Vector
+CoverLocation=Vector
+HighGround=Vector
+
+# Behavior Modifiers
+Aggression=Float:0.5
+Caution=Float:0.5
+Curiosity=Float:0.3
+Hunger=Float:0.0
+Energy=Float:1.0
+
+# Animation States
+CurrentAnimation=String
+NextAnimation=String
+IsPlayingAnimation=Bool:false
+
+# Sound and Communication
+LastHeardSound=Vector
+SoundSource=Object:Actor
+AlarmLevel=Enum:EAlarmLevel:None
