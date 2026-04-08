@@ -1,0 +1,325 @@
+{
+  "MetaSound": {
+    "Name": "MS_MasterMusic",
+    "Description": "Sistema de música adaptativa principal para o jogo de dinossauros. Controla transições emocionais baseadas no contexto de jogo.",
+    "Version": "1.0",
+    "Inputs": [
+      {
+        "Name": "TensionLevel",
+        "Type": "Float",
+        "DefaultValue": 0.0,
+        "Range": [0.0, 1.0],
+        "Description": "Nível de tensão geral (0 = calmo, 1 = perigo máximo)"
+      },
+      {
+        "Name": "ThreatLevel",
+        "Type": "Float",
+        "DefaultValue": 0.0,
+        "Range": [0.0, 1.0],
+        "Description": "Nível de ameaça imediata"
+      },
+      {
+        "Name": "StealthLevel",
+        "Type": "Float",
+        "DefaultValue": 0.0,
+        "Range": [0.0, 1.0],
+        "Description": "Nível de furtividade do jogador"
+      },
+      {
+        "Name": "IsNearWater",
+        "Type": "Bool",
+        "DefaultValue": false,
+        "Description": "Jogador próximo à água"
+      },
+      {
+        "Name": "IsInShelter",
+        "Type": "Bool",
+        "DefaultValue": false,
+        "Description": "Jogador em abrigo seguro"
+      },
+      {
+        "Name": "DinosaurCount",
+        "Type": "Int32",
+        "DefaultValue": 0,
+        "Description": "Número de dinossauros próximos"
+      },
+      {
+        "Name": "CrossfadeDuration",
+        "Type": "Float",
+        "DefaultValue": 2.0,
+        "Description": "Duração das transições entre estados"
+      },
+      {
+        "Name": "FromState",
+        "Type": "Float",
+        "DefaultValue": 0.0,
+        "Description": "Estado emocional anterior"
+      },
+      {
+        "Name": "ToState",
+        "Type": "Float",
+        "DefaultValue": 0.0,
+        "Description": "Novo estado emocional"
+      },
+      {
+        "Name": "ProximityTension",
+        "Type": "Float",
+        "DefaultValue": 0.0,
+        "Range": [0.0, 1.0],
+        "Description": "Tensão baseada na proximidade de ameaças"
+      },
+      {
+        "Name": "FilterCutoff",
+        "Type": "Float",
+        "DefaultValue": 20000.0,
+        "Range": [200.0, 20000.0],
+        "Description": "Frequência de corte do filtro passa-baixa"
+      }
+    ],
+    "Triggers": [
+      {
+        "Name": "TriggerCrossfade",
+        "Description": "Inicia transição entre estados musicais"
+      },
+      {
+        "Name": "Trigger_Footstep",
+        "Description": "Som de passo do jogador"
+      },
+      {
+        "Name": "Trigger_Construction",
+        "Description": "Som de construção"
+      },
+      {
+        "Name": "Trigger_Discovery",
+        "Description": "Som de descoberta"
+      },
+      {
+        "Name": "Trigger_Escape",
+        "Description": "Som de escape bem-sucedido"
+      }
+    ],
+    "Outputs": [
+      {
+        "Name": "Left",
+        "Type": "Audio",
+        "Description": "Canal esquerdo da música"
+      },
+      {
+        "Name": "Right",
+        "Type": "Audio",
+        "Description": "Canal direito da música"
+      }
+    ],
+    "Graph": {
+      "Nodes": [
+        {
+          "Type": "WavePlayer",
+          "Name": "CalmBaseLayer",
+          "WaveAsset": "/Game/Audio/Music/Base_Calm_Loop.wav",
+          "Loop": true,
+          "Position": [100, 100]
+        },
+        {
+          "Type": "WavePlayer",
+          "Name": "TensionLayer",
+          "WaveAsset": "/Game/Audio/Music/Layer_Tension.wav",
+          "Loop": true,
+          "Position": [100, 200]
+        },
+        {
+          "Type": "WavePlayer",
+          "Name": "DangerLayer",
+          "WaveAsset": "/Game/Audio/Music/Layer_Danger.wav",
+          "Loop": true,
+          "Position": [100, 300]
+        },
+        {
+          "Type": "WavePlayer",
+          "Name": "ChaseLayer",
+          "WaveAsset": "/Game/Audio/Music/Layer_Chase.wav",
+          "Loop": true,
+          "Position": [100, 400]
+        },
+        {
+          "Type": "WavePlayer",
+          "Name": "StealthLayer",
+          "WaveAsset": "/Game/Audio/Music/Layer_Stealth.wav",
+          "Loop": true,
+          "Position": [100, 500]
+        },
+        {
+          "Type": "Crossfade",
+          "Name": "EmotionalCrossfade",
+          "InputCount": 5,
+          "Position": [400, 250]
+        },
+        {
+          "Type": "Multiply",
+          "Name": "TensionMixer",
+          "Position": [300, 200]
+        },
+        {
+          "Type": "Multiply",
+          "Name": "DangerMixer",
+          "Position": [300, 300]
+        },
+        {
+          "Type": "Multiply",
+          "Name": "ChaseMixer",
+          "Position": [300, 400]
+        },
+        {
+          "Type": "Multiply",
+          "Name": "StealthMixer",
+          "Position": [300, 500]
+        },
+        {
+          "Type": "BiquadFilter",
+          "Name": "TensionFilter",
+          "FilterType": "LowPass",
+          "Position": [550, 250]
+        },
+        {
+          "Type": "Envelope",
+          "Name": "ProximityEnvelope",
+          "AttackTime": 0.1,
+          "ReleaseTime": 2.0,
+          "Position": [200, 600]
+        },
+        {
+          "Type": "LFO",
+          "Name": "HeartbeatLFO",
+          "Frequency": 1.2,
+          "Shape": "Sine",
+          "Position": [200, 700]
+        },
+        {
+          "Type": "Multiply",
+          "Name": "HeartbeatMod",
+          "Position": [350, 700]
+        },
+        {
+          "Type": "Add",
+          "Name": "FinalMix",
+          "Position": [700, 250]
+        },
+        {
+          "Type": "Compressor",
+          "Name": "MasterCompressor",
+          "Ratio": 3.0,
+          "Threshold": -12.0,
+          "AttackTime": 0.003,
+          "ReleaseTime": 0.1,
+          "Position": [800, 250]
+        },
+        {
+          "Type": "StereoPanner",
+          "Name": "StereoOutput",
+          "Position": [900, 250]
+        }
+      ],
+      "Connections": [
+        {
+          "From": "CalmBaseLayer.Audio",
+          "To": "EmotionalCrossfade.In0"
+        },
+        {
+          "From": "TensionLayer.Audio",
+          "To": "TensionMixer.In"
+        },
+        {
+          "From": "TensionLevel",
+          "To": "TensionMixer.Multiplier"
+        },
+        {
+          "From": "TensionMixer.Out",
+          "To": "EmotionalCrossfade.In1"
+        },
+        {
+          "From": "DangerLayer.Audio",
+          "To": "DangerMixer.In"
+        },
+        {
+          "From": "ThreatLevel",
+          "To": "DangerMixer.Multiplier"
+        },
+        {
+          "From": "DangerMixer.Out",
+          "To": "EmotionalCrossfade.In2"
+        },
+        {
+          "From": "ChaseLayer.Audio",
+          "To": "ChaseMixer.In"
+        },
+        {
+          "From": "ProximityTension",
+          "To": "ChaseMixer.Multiplier"
+        },
+        {
+          "From": "ChaseMixer.Out",
+          "To": "EmotionalCrossfade.In3"
+        },
+        {
+          "From": "StealthLayer.Audio",
+          "To": "StealthMixer.In"
+        },
+        {
+          "From": "StealthLevel",
+          "To": "StealthMixer.Multiplier"
+        },
+        {
+          "From": "StealthMixer.Out",
+          "To": "EmotionalCrossfade.In4"
+        },
+        {
+          "From": "EmotionalCrossfade.Out",
+          "To": "TensionFilter.In"
+        },
+        {
+          "From": "FilterCutoff",
+          "To": "TensionFilter.CutoffFrequency"
+        },
+        {
+          "From": "ProximityTension",
+          "To": "ProximityEnvelope.Trigger"
+        },
+        {
+          "From": "ThreatLevel",
+          "To": "HeartbeatLFO.Frequency"
+        },
+        {
+          "From": "HeartbeatLFO.Out",
+          "To": "HeartbeatMod.In"
+        },
+        {
+          "From": "ProximityEnvelope.Out",
+          "To": "HeartbeatMod.Multiplier"
+        },
+        {
+          "From": "TensionFilter.Out",
+          "To": "FinalMix.In1"
+        },
+        {
+          "From": "HeartbeatMod.Out",
+          "To": "FinalMix.In2"
+        },
+        {
+          "From": "FinalMix.Out",
+          "To": "MasterCompressor.Audio"
+        },
+        {
+          "From": "MasterCompressor.Audio",
+          "To": "StereoOutput.In"
+        },
+        {
+          "From": "StereoOutput.OutLeft",
+          "To": "Left"
+        },
+        {
+          "From": "StereoOutput.OutRight",
+          "To": "Right"
+        }
+      ]
+    }
+  }
+}
