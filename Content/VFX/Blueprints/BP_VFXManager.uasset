@@ -1,0 +1,93 @@
+{
+  "Type": "Blueprint",
+  "ParentClass": "/Script/Engine.Actor",
+  "Description": "Main VFX Manager Blueprint for coordinating all visual effects",
+  "Components": [
+    {
+      "Name": "VFXSystemCore",
+      "Type": "VFXSystemCore",
+      "Settings": {
+        "MaxActiveVFXCount": 150,
+        "PerformanceCheckInterval": 0.5,
+        "AutoQualityAdjustment": true
+      }
+    }
+  ],
+  "Variables": [
+    {
+      "Name": "AtmosphereIntensity",
+      "Type": "Float",
+      "DefaultValue": 1.0,
+      "Description": "Global intensity multiplier for atmospheric effects"
+    },
+    {
+      "Name": "DinosaurPresenceMultiplier",
+      "Type": "Float", 
+      "DefaultValue": 1.0,
+      "Description": "Multiplier for dinosaur presence effects based on proximity"
+    },
+    {
+      "Name": "WeatherCondition",
+      "Type": "Enum",
+      "EnumType": "EWeatherType",
+      "DefaultValue": "Clear",
+      "Description": "Current weather affecting VFX intensity"
+    },
+    {
+      "Name": "TimeOfDay",
+      "Type": "Float",
+      "DefaultValue": 12.0,
+      "Description": "Hour of day (0-24) affecting lighting-dependent VFX"
+    }
+  ],
+  "Functions": [
+    {
+      "Name": "InitializeVFXSystems",
+      "Description": "Initialize all VFX systems on game start",
+      "Implementation": "Call VFXSystemCore->SetVFXQuality based on platform and settings"
+    },
+    {
+      "Name": "UpdateAtmosphericConditions",
+      "Parameters": [
+        {"Name": "Weather", "Type": "EWeatherType"},
+        {"Name": "TimeOfDay", "Type": "Float"},
+        {"Name": "WindStrength", "Type": "Float"}
+      ],
+      "Description": "Update all atmospheric VFX based on current conditions"
+    },
+    {
+      "Name": "TriggerDinosaurPresence",
+      "Parameters": [
+        {"Name": "Location", "Type": "Vector"},
+        {"Name": "DinosaurType", "Type": "EDinosaurType"},
+        {"Name": "Size", "Type": "Float"},
+        {"Name": "MovementSpeed", "Type": "Float"}
+      ],
+      "Description": "Trigger appropriate VFX for dinosaur presence"
+    },
+    {
+      "Name": "HandleCombatImpact",
+      "Parameters": [
+        {"Name": "ImpactLocation", "Type": "Vector"},
+        {"Name": "ImpactNormal", "Type": "Vector"},
+        {"Name": "ImpactForce", "Type": "Float"},
+        {"Name": "SurfaceMaterial", "Type": "PhysicalMaterial"}
+      ],
+      "Description": "Handle all VFX for combat impacts"
+    }
+  ],
+  "Events": [
+    {
+      "Name": "OnPlayerEnterDangerZone",
+      "Description": "Triggered when player enters area with predator presence"
+    },
+    {
+      "Name": "OnWeatherChange", 
+      "Description": "Triggered when weather conditions change"
+    },
+    {
+      "Name": "OnDayNightTransition",
+      "Description": "Triggered during dawn/dusk transitions"
+    }
+  ]
+}
