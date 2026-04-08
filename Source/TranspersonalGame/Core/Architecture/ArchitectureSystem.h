@@ -126,6 +126,24 @@ enum class EInteriorPropType : uint8
     ClothingRemnants    UMETA(DisplayName = "Clothing Remnants")
 };
 
+/** Inhabitant types that lived in structures */
+UENUM(BlueprintType)
+enum class EInhabitantType : uint8
+{
+    SolitaryHunter      UMETA(DisplayName = "Solitary Hunter"),
+    SmallFamily         UMETA(DisplayName = "Small Family"),
+    HunterGroup         UMETA(DisplayName = "Hunter Group"),
+    Shaman              UMETA(DisplayName = "Shaman"),
+    Craftsperson        UMETA(DisplayName = "Craftsperson"),
+    Elder               UMETA(DisplayName = "Elder"),
+    ChildGroup          UMETA(DisplayName = "Child Group"),
+    WarriorBand         UMETA(DisplayName = "Warrior Band"),
+    Gatherers           UMETA(DisplayName = "Gatherers"),
+    Refugees            UMETA(DisplayName = "Refugees"),
+    Outcasts            UMETA(DisplayName = "Outcasts"),
+    Traders             UMETA(DisplayName = "Traders")
+};
+
 /** Building component for modular construction */
 USTRUCT(BlueprintType)
 struct FBuildingComponent
@@ -175,6 +193,18 @@ struct FBuildingComponent
     /** Time to repair this component (seconds) */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Maintenance", meta = (ClampMin = "1.0"))
     float RepairTime = 30.0f;
+
+    /** Collision component for interaction */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Collision")
+    bool bHasCollision = true;
+
+    /** Component can be destroyed */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Destruction")
+    bool bCanBeDestroyed = true;
+
+    /** Health points for destruction */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Destruction", meta = (ClampMin = "1.0"))
+    float HealthPoints = 100.0f;
 };
 
 /** Interior prop configuration */
@@ -225,16 +255,24 @@ struct FInteriorPropConfig
 
     /** Resources obtained from interaction */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Interaction")
-    TMap<FString, int32> InteractionRewards;
+    TMap<FString, int32> InteractionResources;
 
-    /** Interaction description for UI */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Interaction")
-    FText InteractionDescription;
+    /** Interaction text displayed to player */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Interaction", meta = (MultiLine = true))
+    FString InteractionText;
+
+    /** Sound played when interacting */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Audio")
+    TSoftObjectPtr<USoundBase> InteractionSound;
+
+    /** Particle effect when interacting */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VFX")
+    TSoftObjectPtr<UParticleSystem> InteractionVFX;
 };
 
-/** Structure configuration data */
+/** Structure blueprint defining complete building */
 USTRUCT(BlueprintType)
-struct FStructureConfig
+struct FStructureBlueprint
 {
     GENERATED_BODY()
 
@@ -242,248 +280,302 @@ struct FStructureConfig
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Structure")
     EStructureType StructureType = EStructureType::PrimitiveShelter;
 
-    /** Human-readable structure name */
+    /** Structure name */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Structure")
-    FText StructureName;
+    FString StructureName;
 
-    /** Historical/narrative description */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Storytelling", meta = (MultiLine = true))
-    FString HistoricalDescription;
+    /** Description of the structure */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Structure", meta = (MultiLine = true))
+    FString StructureDescription;
 
     /** Building components that make up this structure */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Construction")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Components")
     TArray<FBuildingComponent> BuildingComponents;
 
-    /** Interior props for this structure type */
+    /** Interior props for this structure */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Interior")
     TArray<FInteriorPropConfig> InteriorProps;
+
+    /** Who lived here? */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Narrative")
+    EInhabitantType FormerInhabitant = EInhabitantType::SmallFamily;
+
+    /** Story of what happened here */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Narrative", meta = (MultiLine = true))
+    FString StructureStory;
+
+    /** How long was it inhabited? */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Narrative", meta = (ClampMin = "1", ClampMax = "365"))
+    int32 InhabitationDays = 30;
+
+    /** How long has it been abandoned? */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Narrative", meta = (ClampMin = "0", ClampMax = "3650"))
+    int32 AbandonedDays = 90;
+
+    /** Reason for abandonment */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Narrative")
+    FString AbandonmentReason;
 
     /** Preferred biomes for this structure */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Placement")
     TArray<EBiomeType> PreferredBiomes;
 
-    /** Minimum distance from other structures */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Placement", meta = (ClampMin = "100.0"))
-    float MinDistanceFromOthers = 500.0f;
+    /** Minimum distance from water (cm) */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Placement")
+    float MinWaterDistance = 500.0f;
 
-    /** Spawn probability per km² */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Placement", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float SpawnProbability = 0.05f;
+    /** Maximum distance from water (cm) */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Placement")
+    float MaxWaterDistance = 5000.0f;
 
-    /** Preferred elevation range */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Terrain")
-    FVector2D ElevationRange = FVector2D(0.0f, 1000.0f);
+    /** Elevation preference (cm) */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Placement")
+    FVector2D ElevationRange = FVector2D(0.0f, 2000.0f);
 
-    /** Slope tolerance for placement */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Terrain")
+    /** Slope tolerance (degrees) */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Placement")
     FVector2D SlopeRange = FVector2D(0.0f, 30.0f);
 
-    /** Proximity to water preference */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Environment", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float WaterProximityPreference = 0.5f;
+    /** Structure footprint size (cm) */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dimensions")
+    FVector2D FootprintSize = FVector2D(400.0f, 400.0f);
 
-    /** Shelter value (protection from weather) */
+    /** Structure height (cm) */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dimensions")
+    float StructureHeight = 250.0f;
+
+    /** Interior space definition */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Interior")
+    TArray<FString> InteriorAreas;
+
+    /** Current structural condition */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Condition")
+    EStructuralCondition CurrentCondition = EStructuralCondition::Weathered;
+
+    /** Fire damage level */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Condition", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float FireDamage = 0.0f;
+
+    /** Water damage level */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Condition", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float WaterDamage = 0.2f;
+
+    /** Animal damage level */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Condition", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float AnimalDamage = 0.1f;
+
+    /** Wind damage level */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Condition", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float WindDamage = 0.3f;
+
+    /** Can player use this structure for shelter? */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Gameplay")
+    bool bProvidesShel ter = true;
+
+    /** Protection from weather (0-1) */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Gameplay", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float ShelterValue = 0.7f;
+    float WeatherProtection = 0.7f;
 
-    /** Security value (protection from predators) */
+    /** Protection from dinosaurs (0-1) */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Gameplay", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float SecurityValue = 0.5f;
+    float DinosaurProtection = 0.4f;
 
-    /** Storage capacity (number of items) */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Gameplay", meta = (ClampMin = "0", ClampMax = "100"))
-    int32 StorageCapacity = 10;
+    /** Can player repair this structure? */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Gameplay")
+    bool bCanBeRepaired = true;
 
-    /** Construction time required (seconds) */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Construction", meta = (ClampMin = "60.0"))
-    float ConstructionTime = 300.0f;
+    /** Resources required for full repair */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Gameplay")
+    TMap<EConstructionMaterial, int32> RepairResources;
 
-    /** Maintenance interval (game days) */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Maintenance", meta = (ClampMin = "1.0"))
-    float MaintenanceInterval = 7.0f;
+    /** Time to fully repair (seconds) */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Gameplay", meta = (ClampMin = "60.0"))
+    float RepairTime = 300.0f;
 
-    /** Structural integrity (affects collapse) */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Structure", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float StructuralIntegrity = 1.0f;
+    /** Spawn probability in world */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Generation", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float SpawnProbability = 0.1f;
 
-    /** Degradation rate per day */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Maintenance", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float DegradationRate = 0.01f;
+    /** Minimum distance between structures of same type */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Generation")
+    float MinSpacing = 2000.0f;
+
+    /** Can form clusters with other structures */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Generation")
+    bool bCanFormClusters = false;
+
+    /** Cluster size range */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Generation")
+    FVector2D ClusterSize = FVector2D(1.0f, 3.0f);
 };
 
-/** Weathering effect configuration */
-USTRUCT(BlueprintType)
-struct FWeatheringEffect
-{
-    GENERATED_BODY()
-
-    /** Effect name */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Weathering")
-    FString EffectName;
-
-    /** Material parameter to modify */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Weathering")
-    FString MaterialParameter;
-
-    /** Weathering intensity (0-1) */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Weathering", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float WeatheringIntensity = 0.5f;
-
-    /** Affected construction materials */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Weathering")
-    TArray<EConstructionMaterial> AffectedMaterials;
-
-    /** Weather conditions that cause this effect */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Environment")
-    TArray<FString> CausingWeatherConditions;
-
-    /** Rate of effect application */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Weathering", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float EffectRate = 0.1f;
-};
-
-/**
- * @brief Architecture Data Asset
- * 
- * Defines architectural styles and construction methods for prehistoric structures.
- * Each asset represents a complete building system with components, materials,
- * and narrative elements.
- */
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UArchitectureData : public UPrimaryDataAsset
+/** Data asset containing structure blueprints */
+UCLASS(BlueprintType)
+class TRANSPERSONALGAME_API UStructureBlueprintLibrary : public UDataAsset
 {
     GENERATED_BODY()
 
 public:
-    UArchitectureData();
-
-    /** Architecture style name */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Architecture Info")
-    FText ArchitectureName;
-
-    /** Cultural/historical description */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Architecture Info", meta = (MultiLine = true))
-    FString CulturalDescription;
-
-    /** Time period this architecture represents */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Architecture Info")
-    FString TimePeriod;
-
-    /** Available structure types in this architectural style */
+    /** All available structure blueprints */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Structures")
-    TArray<FStructureConfig> AvailableStructures;
+    TArray<FStructureBlueprint> StructureBlueprints;
 
-    /** Common construction materials for this style */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Materials")
-    TArray<EConstructionMaterial> CommonMaterials;
+    /** Get structures by type */
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    TArray<FStructureBlueprint> GetStructuresByType(EStructureType StructureType) const;
 
-    /** Weathering effects for this architectural style */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Weathering")
-    TArray<FWeatheringEffect> WeatheringEffects;
+    /** Get structures suitable for biome */
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    TArray<FStructureBlueprint> GetStructuresForBiome(EBiomeType BiomeType) const;
 
-    /** Biomes where this architecture is commonly found */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Distribution")
-    TArray<EBiomeType> NativeBiomes;
-
-    /** Overall condition range for structures of this style */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Condition")
-    FVector2D ConditionRange = FVector2D(0.3f, 0.8f);
-
-    /** Abandonment probability (structures found empty) */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Narrative", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float AbandonmentProbability = 0.7f;
-
-    /** Signs of struggle probability (damaged/destroyed structures) */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Narrative", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float StruggleProbability = 0.3f;
+    /** Get structures by inhabitant type */
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    TArray<FStructureBlueprint> GetStructuresByInhabitant(EInhabitantType InhabitantType) const;
 };
 
-/**
- * @brief Architecture System Subsystem
- * 
- * Manages the procedural placement and generation of prehistoric structures
- * throughout the world. Integrates with the biome system and environment art
- * to create cohesive architectural storytelling.
- */
+/** Architecture System Subsystem */
 UCLASS()
 class TRANSPERSONALGAME_API UArchitectureSystem : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
-    UArchitectureSystem();
-
     // USubsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    /** Generate structures for a specific biome area */
-    UFUNCTION(BlueprintCallable, Category = "Architecture System")
-    void GenerateStructuresForBiome(EBiomeType BiomeType, const FVector& AreaCenter, float AreaRadius);
+    /** Initialize architecture system */
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    void InitializeArchitectureSystem();
 
-    /** Place a specific structure at a location */
-    UFUNCTION(BlueprintCallable, Category = "Architecture System")
-    class AStructureActor* PlaceStructure(const FStructureConfig& StructureConfig, const FVector& Location, float Rotation = 0.0f);
+    /** Generate structures for a region */
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    void GenerateStructuresForRegion(const FVector& RegionCenter, float RegionRadius, EBiomeType BiomeType);
 
-    /** Weather a structure over time */
-    UFUNCTION(BlueprintCallable, Category = "Architecture System")
-    void ApplyWeathering(class AStructureActor* Structure, float WeatheringAmount);
+    /** Spawn a specific structure at location */
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    class AStructureActor* SpawnStructure(const FStructureBlueprint& Blueprint, const FVector& Location, const FRotator& Rotation);
 
-    /** Repair a damaged structure */
-    UFUNCTION(BlueprintCallable, Category = "Architecture System")
-    bool RepairStructure(class AStructureActor* Structure, const TArray<EConstructionMaterial>& AvailableMaterials);
+    /** Get structure blueprint by name */
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    bool GetStructureBlueprintByName(const FString& StructureName, FStructureBlueprint& OutBlueprint) const;
 
-    /** Get suitable structure types for a biome */
-    UFUNCTION(BlueprintPure, Category = "Architecture System")
-    TArray<FStructureConfig> GetStructureTypesForBiome(EBiomeType BiomeType) const;
+    /** Update structure condition over time */
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    void UpdateStructureConditions(float DeltaTime);
 
-    /** Check if location is suitable for structure placement */
-    UFUNCTION(BlueprintPure, Category = "Architecture System")
-    bool IsLocationSuitableForStructure(const FVector& Location, const FStructureConfig& StructureConfig) const;
+    /** Repair structure */
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    bool RepairStructure(class AStructureActor* Structure, const TMap<EConstructionMaterial, int32>& AvailableResources);
+
+    /** Get all structures in radius */
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    TArray<class AStructureActor*> GetStructuresInRadius(const FVector& Center, float Radius) const;
+
+    /** Check if location is suitable for structure type */
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    bool IsLocationSuitableForStructure(const FVector& Location, const FStructureBlueprint& Blueprint) const;
+
+    /** Get narrative information about structure */
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    FString GetStructureNarrative(const class AStructureActor* Structure) const;
 
 protected:
-    /** Available architecture data assets */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Configuration")
-    TArray<TSoftObjectPtr<UArchitectureData>> ArchitectureDataAssets;
+    /** Structure blueprint library */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Architecture")
+    TSoftObjectPtr<UStructureBlueprintLibrary> StructureLibrary;
 
-    /** Maximum structures per km² */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Generation", meta = (ClampMin = "0.0", ClampMax = "100.0"))
-    float MaxStructuresPerKm2 = 5.0f;
+    /** Active structures in world */
+    UPROPERTY()
+    TArray<class AStructureActor*> ActiveStructures;
 
-    /** Minimum distance between structures */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Generation", meta = (ClampMin = "100.0"))
-    float MinStructureDistance = 1000.0f;
+    /** Structure generation settings */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Generation")
+    float StructureDensity = 0.1f;
 
-    /** Enable structure weathering over time */
+    /** Maximum structures per region */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Generation")
+    int32 MaxStructuresPerRegion = 10;
+
+    /** Minimum structure spacing */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Generation")
+    float MinStructureSpacing = 1000.0f;
+
+    /** Structure decay rate per day */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Simulation")
-    bool bEnableWeathering = true;
+    float StructureDecayRate = 0.01f;
 
-    /** Weathering update interval (seconds) */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Simulation", meta = (ClampMin = "60.0"))
-    float WeatheringUpdateInterval = 3600.0f;
-
-    /** Enable structural integrity simulation */
+    /** Weather damage multiplier */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Simulation")
-    bool bEnableStructuralIntegrity = true;
+    float WeatherDamageMultiplier = 1.0f;
 
 private:
-    /** Timer for weathering updates */
-    FTimerHandle WeatheringTimer;
+    /** Generate interior props for structure */
+    void GenerateInteriorProps(class AStructureActor* Structure, const FStructureBlueprint& Blueprint);
 
-    /** Currently spawned structures */
+    /** Apply weathering to structure */
+    void ApplyWeathering(class AStructureActor* Structure, float WeatheringAmount);
+
+    /** Calculate structure stability */
+    float CalculateStructureStability(const class AStructureActor* Structure) const;
+
+    /** Find suitable spawn locations */
+    TArray<FVector> FindSuitableSpawnLocations(const FVector& RegionCenter, float RegionRadius, const FStructureBlueprint& Blueprint, int32 MaxLocations) const;
+
+    /** Validate structure placement */
+    bool ValidateStructurePlacement(const FVector& Location, const FStructureBlueprint& Blueprint) const;
+};
+
+/** Delegate for structure events */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnStructureEvent, class AStructureActor*, Structure, const FString&, EventType);
+
+/** Architecture Manager Component */
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UArchitectureManagerComponent : public UActorComponent
+{
+    GENERATED_BODY()
+
+public:
+    UArchitectureManagerComponent();
+
+protected:
+    virtual void BeginPlay() override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
+public:
+    /** Structure event delegate */
+    UPROPERTY(BlueprintAssignable, Category = "Architecture")
+    FOnStructureEvent OnStructureEvent;
+
+    /** Register structure with manager */
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    void RegisterStructure(class AStructureActor* Structure);
+
+    /** Unregister structure from manager */
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    void UnregisterStructure(class AStructureActor* Structure);
+
+    /** Update all managed structures */
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    void UpdateManagedStructures(float DeltaTime);
+
+    /** Get nearest structure to location */
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    class AStructureActor* GetNearestStructure(const FVector& Location) const;
+
+    /** Get structures by type */
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    TArray<class AStructureActor*> GetStructuresByType(EStructureType StructureType) const;
+
+protected:
+    /** Managed structures */
     UPROPERTY()
-    TArray<TWeakObjectPtr<class AStructureActor>> SpawnedStructures;
+    TArray<class AStructureActor*> ManagedStructures;
 
-    /** Cached architecture data */
-    UPROPERTY()
-    TArray<UArchitectureData*> LoadedArchitectureData;
+    /** Update frequency for structure conditions */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance")
+    float UpdateFrequency = 5.0f;
 
-    /** Update weathering for all structures */
-    void UpdateWeathering();
-
-    /** Load architecture data assets */
-    void LoadArchitectureData();
-
-    /** Calculate structure placement score */
-    float CalculatePlacementScore(const FVector& Location, const FStructureConfig& StructureConfig) const;
+    /** Time since last update */
+    float TimeSinceLastUpdate = 0.0f;
 };
