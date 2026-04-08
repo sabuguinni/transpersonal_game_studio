@@ -1,223 +1,192 @@
 #include "CrowdSimulationManager.h"
 #include "MassEntitySubsystem.h"
 #include "MassSpawnerSubsystem.h"
-#include "MassCommonFragments.h"
-#include "MassMovementFragments.h"
 #include "Engine/World.h"
+#include "TimerManager.h"
 #include "Kismet/GameplayStatics.h"
+#include "GameFramework/PlayerController.h"
 
-ACrowdSimulationManager::ACrowdSimulationManager()
+void UCrowdSimulationManager::Initialize(FSubsystemCollectionBase& Collection)
 {
-    PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 0.1f; // 10 FPS for crowd management
-}
-
-void ACrowdSimulationManager::BeginPlay()
-{
-    Super::BeginPlay();
+    Super::Initialize(Collection);
     
-    InitializeMassEntitySystem();
-    
-    // Start with some initial herds
-    if (CrowdSpawnConfigs.Num() > 0)
-    {
-        for (const FCrowdSpawnParameters& Config : CrowdSpawnConfigs)
-        {
-            // Spawn initial herds at random locations around the map
-            FVector SpawnLocation = GetActorLocation() + FMath::VRand() * Config.SpawnRadius;
-            SpawnCrowd(Config, SpawnLocation);
-        }
-    }
-}
-
-void ACrowdSimulationManager::Tick(float DeltaTime)
-{
-    Super::Tick(DeltaTime);
-    
-    UpdateCrowdBehaviors(DeltaTime);
-    ProcessEnvironmentalInfluences();
-    ManageLODSystem();
-}
-
-void ACrowdSimulationManager::InitializeMassEntitySystem()
-{
     MassEntitySubsystem = GetWorld()->GetSubsystem<UMassEntitySubsystem>();
+    MassSpawnerSubsystem = GetWorld()->GetSubsystem<UMassSpawnerSubsystem>();
     
-    if (!MassEntitySubsystem)
+    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: Initialized with Mass Entity Framework"));
+}
+
+void UCrowdSimulationManager::Deinitialize()
+{
+    if (GetWorld())
     {
-        UE_LOG(LogTemp, Error, TEXT("CrowdSimulationManager: Failed to get MassEntitySubsystem"));
+        GetWorld()->GetTimerManager().ClearTimer(UpdateTimer);
+    }
+    
+    Super::Deinitialize();
+}
+
+void UCrowdSimulationManager::InitializeCrowdSystem()
+{
+    if (!GetWorld())
+    {
+        UE_LOG(LogTemp, Error, TEXT("CrowdSimulationManager: No valid world found"));
         return;
     }
-    
-    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: Mass Entity System initialized"));
+
+    // Setup update timer
+    GetWorld()->GetTimerManager().SetTimer(
+        UpdateTimer,
+        this,
+        &UCrowdSimulationManager::UpdateCrowdDensity,
+        UpdateFrequency,
+        true
+    );
+
+    // Initialize default density zones
+    FCrowdDensityZone ForestZone;
+    ForestZone.Center = FVector(0, 0, 0);
+    ForestZone.Radius = 10000.0f;
+    ForestZone.MaxEntities = 500;
+    ForestZone.AllowedSpecies = {"Parasaurolophus", "Triceratops", "Compsognathus"};
+    ForestZone.SpawnProbability = 0.8f;
+    RegisterDensityZone(ForestZone);
+
+    FCrowdDensityZone RiverZone;
+    RiverZone.Center = FVector(5000, 0, 0);
+    RiverZone.Radius = 3000.0f;
+    RiverZone.MaxEntities = 200;
+    RiverZone.AllowedSpecies = {"Parasaurolophus", "Brachiosaurus"};
+    RiverZone.SpawnProbability = 0.6f;
+    RegisterDensityZone(RiverZone);
+
+    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: System initialized with %d density zones"), DensityZones.Num());
 }
 
-void ACrowdSimulationManager::SpawnCrowd(const FCrowdSpawnParameters& SpawnParams, const FVector& Location)
+void UCrowdSimulationManager::SpawnDinosaurHerd(const FString& SpeciesName, const FVector& Location, int32 Count)
 {
-    if (!MassEntitySubsystem)
+    if (!MassSpawnerSubsystem || !DinosaurSpeciesTable)
     {
-        UE_LOG(LogTemp, Error, TEXT("CrowdSimulationManager: MassEntitySubsystem not available"));
+        UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationManager: Missing required subsystems or data"));
         return;
     }
-    
-    // Calculate actual group size
-    int32 GroupSize = FMath::RandRange(SpawnParams.MinGroupSize, SpawnParams.MaxGroupSize);
-    
-    // Check if we would exceed max agents
-    if (ActiveCrowdEntities.Num() + GroupSize > MaxSimultaneousAgents)
+
+    // Get species data
+    FDinosaurSpeciesData* SpeciesData = DinosaurSpeciesTable->FindRow<FDinosaurSpeciesData>(*SpeciesName, TEXT(""));
+    if (!SpeciesData)
     {
-        UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationManager: Cannot spawn crowd - would exceed max agents limit"));
+        UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationManager: Species %s not found in data table"), *SpeciesName);
         return;
     }
-    
-    // Spawn entities in formation based on crowd type
-    for (int32 i = 0; i < GroupSize; i++)
+
+    // Check entity limits
+    if (CurrentEntityCount + Count > MaxGlobalEntities)
     {
-        FVector SpawnOffset;
+        int32 AllowedCount = FMath::Max(0, MaxGlobalEntities - CurrentEntityCount);
+        Count = AllowedCount;
+        UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationManager: Entity limit reached, spawning only %d entities"), Count);
+    }
+
+    // Spawn entities in formation
+    for (int32 i = 0; i < Count; i++)
+    {
+        FVector SpawnLocation = Location + FVector(
+            FMath::RandRange(-500.0f, 500.0f),
+            FMath::RandRange(-500.0f, 500.0f),
+            0.0f
+        );
+
+        // TODO: Integrate with Mass Entity spawning system
+        // This would use MassSpawnerSubsystem to create entities with proper fragments
         
-        switch (SpawnParams.CrowdType)
+        CurrentEntityCount++;
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: Spawned %d %s at %s"), Count, *SpeciesName, *Location.ToString());
+}
+
+void UCrowdSimulationManager::RegisterDensityZone(const FCrowdDensityZone& Zone)
+{
+    DensityZones.Add(Zone);
+    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: Registered density zone at %s with radius %f"), 
+           *Zone.Center.ToString(), Zone.Radius);
+}
+
+void UCrowdSimulationManager::UpdateCrowdDensity(float DeltaTime)
+{
+    if (!GetWorld())
+    {
+        return;
+    }
+
+    UpdatePlayerProximity();
+    ManageEntityLOD();
+    ProcessEmergentBehaviors();
+
+    // Manage density zones
+    for (const FCrowdDensityZone& Zone : DensityZones)
+    {
+        int32 EntitiesInZone = GetEntityCountInRadius(Zone.Center, Zone.Radius);
+        
+        if (EntitiesInZone < Zone.MaxEntities * 0.7f) // Spawn when below 70% capacity
         {
-            case ECrowdType::HerbivoreHerd:
-                // Clustered formation for protection
-                SpawnOffset = FMath::VRand() * SpawnParams.CohesionRadius * 0.5f;
-                break;
+            // Randomly select species and spawn
+            if (Zone.AllowedSpecies.Num() > 0 && FMath::RandRange(0.0f, 1.0f) < Zone.SpawnProbability * DeltaTime)
+            {
+                FString RandomSpecies = Zone.AllowedSpecies[FMath::RandRange(0, Zone.AllowedSpecies.Num() - 1)];
+                FVector RandomLocation = Zone.Center + FVector(
+                    FMath::RandRange(-Zone.Radius * 0.8f, Zone.Radius * 0.8f),
+                    FMath::RandRange(-Zone.Radius * 0.8f, Zone.Radius * 0.8f),
+                    0.0f
+                );
                 
-            case ECrowdType::PredatorPack:
-                // Loose formation for hunting
-                SpawnOffset = FMath::VRand() * SpawnParams.CohesionRadius * 0.8f;
-                break;
-                
-            case ECrowdType::FlyingSwarm:
-                // 3D formation with vertical spread
-                SpawnOffset = FMath::VRand() * SpawnParams.CohesionRadius;
-                SpawnOffset.Z = FMath::RandRange(-200.0f, 500.0f);
-                break;
-                
-            default:
-                SpawnOffset = FMath::VRand() * SpawnParams.CohesionRadius;
-                break;
-        }
-        
-        FVector FinalSpawnLocation = Location + SpawnOffset;
-        
-        // Create Mass Entity (placeholder - actual implementation would use Mass spawning system)
-        FMassEntityHandle EntityHandle; // This would be properly created via Mass system
-        ActiveCrowdEntities.Add(EntityHandle);
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: Spawned %d agents of type %d at location %s"), 
-           GroupSize, (int32)SpawnParams.CrowdType, *Location.ToString());
-}
-
-void ACrowdSimulationManager::TriggerMassFleeResponse(const FVector& ThreatLocation, float ThreatRadius)
-{
-    // This would trigger a mass flee behavior in all crowds within the threat radius
-    // Implementation would use Mass Entity queries to find affected entities
-    
-    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: Mass flee response triggered at %s with radius %f"), 
-           *ThreatLocation.ToString(), ThreatRadius);
-    
-    // Pseudo-code for Mass Entity implementation:
-    // 1. Query all entities within ThreatRadius of ThreatLocation
-    // 2. Set their behavior state to Fleeing
-    // 3. Calculate flee direction away from ThreatLocation
-    // 4. Increase movement speed and cohesion for panic behavior
-}
-
-void ACrowdSimulationManager::StartSeasonalMigration(ECrowdType CrowdType, const FVector& TargetLocation)
-{
-    // Trigger migration behavior for all crowds of the specified type
-    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: Starting seasonal migration for type %d to %s"), 
-           (int32)CrowdType, *TargetLocation.ToString());
-    
-    // Implementation would:
-    // 1. Find all entities of the specified CrowdType
-    // 2. Set their behavior state to Migrating
-    // 3. Set TargetLocation as their long-term movement goal
-    // 4. Adjust movement parameters for long-distance travel
-}
-
-void ACrowdSimulationManager::UpdateCrowdBehaviors(float DeltaTime)
-{
-    LastBehaviorUpdateTime += DeltaTime;
-    
-    if (LastBehaviorUpdateTime >= BehaviorUpdateInterval)
-    {
-        LastBehaviorUpdateTime = 0.0f;
-        
-        // Update crowd behaviors at reduced frequency for performance
-        // This is where the main crowd logic would run:
-        // 1. Boids algorithm (cohesion, separation, alignment)
-        // 2. Environmental response (water seeking, food seeking)
-        // 3. Predator-prey interactions
-        // 4. State transitions (grazing -> fleeing -> grazing)
-    }
-}
-
-void ACrowdSimulationManager::ProcessEnvironmentalInfluences()
-{
-    // Process environmental factors that influence crowd behavior
-    
-    // Water sources - attract thirsty herds
-    for (AActor* WaterSource : WaterSources)
-    {
-        if (WaterSource)
-        {
-            // Attract nearby crowds to water source during certain times
-            // Implementation would check time of day and crowd thirst levels
-        }
-    }
-    
-    // Feeding areas - attract herbivores
-    for (AActor* FeedingArea : FeedingAreas)
-    {
-        if (FeedingArea)
-        {
-            // Attract herbivore crowds to feeding areas
-            // Consider food availability and competition
-        }
-    }
-    
-    // Resting areas - attract tired crowds
-    for (AActor* RestingArea : RestingAreas)
-    {
-        if (RestingArea)
-        {
-            // Attract crowds during rest periods (night, midday heat)
+                SpawnDinosaurHerd(RandomSpecies, RandomLocation, FMath::RandRange(1, 5));
+            }
         }
     }
 }
 
-void ACrowdSimulationManager::ManageLODSystem()
+int32 UCrowdSimulationManager::GetEntityCountInRadius(const FVector& Location, float Radius) const
 {
-    // Implement 3-tier LOD system for performance
-    // This would be integrated with the Mass Entity LOD system
-    
-    if (APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0))
+    // TODO: Implement actual entity counting using Mass Entity queries
+    // This would query the MassEntitySubsystem for entities within the radius
+    return FMath::RandRange(50, 150); // Placeholder
+}
+
+void UCrowdSimulationManager::UpdatePlayerProximity()
+{
+    if (!GetWorld())
     {
-        FVector PlayerLocation = PlayerPawn->GetActorLocation();
-        
-        // Categorize crowds by distance from player
-        // LOD 0 (0-1000m): Full simulation with all behaviors
-        // LOD 1 (1000-3000m): Simplified simulation, reduced update frequency
-        // LOD 2 (3000-8000m): Visual representation only, minimal logic
-        // LOD 3 (8000m+): Culled completely
-        
-        // Implementation would update Mass Entity LOD levels based on distance
+        return;
     }
+
+    APlayerController* PC = GetWorld()->GetFirstPlayerController();
+    if (!PC || !PC->GetPawn())
+    {
+        return;
+    }
+
+    FVector PlayerLocation = PC->GetPawn()->GetActorLocation();
+    
+    // TODO: Implement player proximity effects
+    // - Increase entity detail within PlayerInfluenceRadius
+    // - Trigger flee/alert behaviors for nearby entities
+    // - Adjust spawning rates based on player presence
 }
 
-int32 ACrowdSimulationManager::GetActiveCrowdCount() const
+void UCrowdSimulationManager::ManageEntityLOD()
 {
-    return ActiveCrowdEntities.Num();
+    // TODO: Implement LOD management
+    // - Reduce update frequency for distant entities
+    // - Switch to simplified behaviors for far entities
+    // - Cull entities beyond maximum distance
 }
 
-TArray<FVector> ACrowdSimulationManager::GetNearestCrowdPositions(const FVector& QueryLocation, float Radius) const
+void UCrowdSimulationManager::ProcessEmergentBehaviors()
 {
-    TArray<FVector> NearbyPositions;
-    
-    // Implementation would query Mass Entity system for entities within radius
-    // and return their positions
-    
-    return NearbyPositions;
+    // TODO: Implement emergent behavior processing
+    // - Predator-prey interactions
+    // - Herd formation and movement
+    // - Territory establishment
+    // - Feeding and resting cycles
 }
