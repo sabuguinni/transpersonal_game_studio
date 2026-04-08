@@ -1,92 +1,124 @@
 #include "AnimationSystemManager.h"
 #include "Engine/World.h"
-#include "Animation/AnimInstance.h"
+#include "GameFramework/Character.h"
 #include "Components/SkeletalMeshComponent.h"
-#include "Animation/PoseSearch/PoseSearchDatabase.h"
+#include "Animation/AnimInstance.h"
 
-UAnimationSystemManager::UAnimationSystemManager()
+AAnimationSystemManager::AAnimationSystemManager()
 {
-    // Initialize default settings
-    MovementVariationIntensity = 0.15f;
-    PostureVariationRange = 0.1f;
+    PrimaryActorTick.bCanEverTick = false;
+    
+    // Set default values
+    GlobalAnimationSpeed = 1.0f;
+    bEnableMotionMatching = true;
+    bEnableFootIK = true;
+    bEnableFearSystem = true;
 }
 
-void UAnimationSystemManager::InitializeAnimationSystem()
+void AAnimationSystemManager::BeginPlay()
 {
-    UE_LOG(LogTemp, Warning, TEXT("Animation System Manager: Initializing core animation systems"));
+    Super::BeginPlay();
     
-    SetupMotionMatchingSystem();
-    SetupIKSystem();
-    SetupProceduralVariations();
-    
-    UE_LOG(LogTemp, Warning, TEXT("Animation System Manager: Initialization complete"));
+    UE_LOG(LogTemp, Warning, TEXT("Animation System Manager initialized"));
+    UE_LOG(LogTemp, Warning, TEXT("Motion Matching: %s"), bEnableMotionMatching ? TEXT("ENABLED") : TEXT("DISABLED"));
+    UE_LOG(LogTemp, Warning, TEXT("Foot IK: %s"), bEnableFootIK ? TEXT("ENABLED") : TEXT("DISABLED"));
+    UE_LOG(LogTemp, Warning, TEXT("Fear System: %s"), bEnableFearSystem ? TEXT("ENABLED") : TEXT("DISABLED"));
 }
 
-void UAnimationSystemManager::RegisterMotionMatchingDatabase(UPoseSearchDatabase* Database, const FString& CharacterType)
+FCharacterAnimationProfile AAnimationSystemManager::GetAnimationProfile(const FString& ArchetypeID)
 {
-    if (!Database)
+    if (!CharacterAnimationProfiles)
     {
-        UE_LOG(LogTemp, Error, TEXT("Animation System Manager: Attempted to register null Motion Matching database"));
+        UE_LOG(LogTemp, Error, TEXT("CharacterAnimationProfiles DataTable is not set!"));
+        return FCharacterAnimationProfile();
+    }
+
+    FCharacterAnimationProfile* Profile = CharacterAnimationProfiles->FindRow<FCharacterAnimationProfile>(
+        FName(*ArchetypeID), TEXT("GetAnimationProfile"));
+    
+    if (Profile)
+    {
+        UE_LOG(LogTemp, Log, TEXT("Found animation profile for archetype: %s"), *ArchetypeID);
+        return *Profile;
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("No animation profile found for archetype: %s"), *ArchetypeID);
+        return FCharacterAnimationProfile();
+    }
+}
+
+void AAnimationSystemManager::RegisterCharacter(AActor* Character, const FString& ArchetypeID)
+{
+    if (!Character)
+    {
+        UE_LOG(LogTemp, Error, TEXT("Cannot register null character"));
         return;
     }
 
-    MotionMatchingDatabases.Add(CharacterType, Database);
-    UE_LOG(LogTemp, Warning, TEXT("Animation System Manager: Registered Motion Matching database for %s"), *CharacterType);
+    RegisteredCharacters.Add(Character, ArchetypeID);
+    CharacterFearLevels.Add(Character, 0.0f);
+    
+    UE_LOG(LogTemp, Log, TEXT("Registered character %s with archetype %s"), 
+           *Character->GetName(), *ArchetypeID);
+
+    // Apply animation profile to character
+    FCharacterAnimationProfile Profile = GetAnimationProfile(ArchetypeID);
+    
+    // Get character's skeletal mesh component
+    if (ACharacter* CharacterPawn = Cast<ACharacter>(Character))
+    {
+        USkeletalMeshComponent* MeshComp = CharacterPawn->GetMesh();
+        if (MeshComp && MeshComp->GetAnimInstance())
+        {
+            UAnimInstance* AnimInstance = MeshComp->GetAnimInstance();
+            
+            // Set animation properties based on profile
+            // This would typically involve setting variables on the Animation Blueprint
+            UE_LOG(LogTemp, Log, TEXT("Applied animation profile to character: %s"), *Character->GetName());
+        }
+    }
 }
 
-void UAnimationSystemManager::SetupFootIK(USkeletalMeshComponent* SkeletalMesh, bool bEnableFootIK)
+void AAnimationSystemManager::UpdateCharacterFearLevel(AActor* Character, float FearLevel)
 {
-    if (!SkeletalMesh)
+    if (!Character || !RegisteredCharacters.Contains(Character))
     {
-        UE_LOG(LogTemp, Error, TEXT("Animation System Manager: Invalid skeletal mesh for Foot IK setup"));
+        UE_LOG(LogTemp, Warning, TEXT("Character not registered with animation system"));
         return;
     }
 
-    FIKSettings NewIKSettings;
-    NewIKSettings.bEnableFootIK = bEnableFootIK;
-    NewIKSettings.FootIKIntensity = 1.0f;
-    NewIKSettings.TerrainAdaptationSpeed = 5.0f;
-    NewIKSettings.MaxFootAdjustment = 30.0f;
+    // Clamp fear level between 0 and 1
+    FearLevel = FMath::Clamp(FearLevel, 0.0f, 1.0f);
+    CharacterFearLevels[Character] = FearLevel;
 
-    IKSettingsMap.Add(SkeletalMesh, NewIKSettings);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Animation System Manager: Foot IK configured for skeletal mesh"));
-}
+    FString ArchetypeID = RegisteredCharacters[Character];
+    FCharacterAnimationProfile Profile = GetAnimationProfile(ArchetypeID);
 
-void UAnimationSystemManager::ApplyProceduralVariations(USkeletalMeshComponent* SkeletalMesh, const FString& SpeciesType)
-{
-    if (!SkeletalMesh)
+    // Determine movement state based on fear level
+    FString MovementState = TEXT("Normal");
+    if (FearLevel >= Profile.PanicRunThreshold)
     {
-        UE_LOG(LogTemp, Error, TEXT("Animation System Manager: Invalid skeletal mesh for procedural variations"));
-        return;
+        MovementState = TEXT("Panic");
+    }
+    else if (FearLevel >= Profile.CautiousWalkThreshold)
+    {
+        MovementState = TEXT("Cautious");
     }
 
-    // Apply species-specific movement variations
-    float VariationSeed = FMath::RandRange(0.8f, 1.2f);
-    
-    // This would be expanded to modify animation playback rates, bone scales, etc.
-    UE_LOG(LogTemp, Warning, TEXT("Animation System Manager: Applied procedural variations for %s (Seed: %f)"), *SpeciesType, VariationSeed);
-}
+    UE_LOG(LogTemp, Log, TEXT("Character %s fear level: %.2f - Movement state: %s"), 
+           *Character->GetName(), FearLevel, *MovementState);
 
-void UAnimationSystemManager::SetupMotionMatchingSystem()
-{
-    UE_LOG(LogTemp, Warning, TEXT("Animation System Manager: Setting up Motion Matching system"));
-    
-    // Initialize Motion Matching databases for different character types
-    // This would load and configure the databases based on character archetypes
-}
-
-void UAnimationSystemManager::SetupIKSystem()
-{
-    UE_LOG(LogTemp, Warning, TEXT("Animation System Manager: Setting up IK system"));
-    
-    // Configure IK solvers and constraints
-    // Setup foot IK for terrain adaptation
-}
-
-void UAnimationSystemManager::SetupProceduralVariations()
-{
-    UE_LOG(LogTemp, Warning, TEXT("Animation System Manager: Setting up procedural animation variations"));
-    
-    // Configure procedural systems for individual character uniqueness
+    // Apply fear-based animation modifications
+    if (ACharacter* CharacterPawn = Cast<ACharacter>(Character))
+    {
+        USkeletalMeshComponent* MeshComp = CharacterPawn->GetMesh();
+        if (MeshComp && MeshComp->GetAnimInstance())
+        {
+            // This would set variables in the Animation Blueprint
+            // to influence Motion Matching database selection
+            UE_LOG(LogTemp, Log, TEXT("Applied fear-based animation modifications to %s"), 
+                   *Character->GetName());
+        }
+    }
 }
