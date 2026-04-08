@@ -5,169 +5,157 @@
 #include "Components/AudioComponent.h"
 #include "Sound/SoundCue.h"
 #include "MetasoundSource.h"
-#include "Subsystems/GameInstanceSubsystem.h"
+#include "AudioMixerBlueprintLibrary.h"
+#include "GameFramework/GameModeBase.h"
 #include "AudioSystemManager.generated.h"
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnTensionStateChanged, float, NewTensionLevel);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnDinosaurVocalization, class ADinosaur*, Dinosaur, ESoundType, SoundType);
-
 UENUM(BlueprintType)
-enum class ETensionState : uint8
+enum class EEmotionalState : uint8
 {
-    Calm = 0,
-    Unease = 1,
-    Tension = 2,
-    Danger = 3,
-    Terror = 4
+    Calm,           // Exploração pacífica
+    Tension,        // Dinossauros próximos mas não hostis
+    Danger,         // Predadores detectados
+    Chase,          // Sendo perseguido
+    Hide,           // Escondido/stealth
+    Wonder,         // Descoberta de algo novo
+    Domestication,  // Interagindo com dinossauros domesticáveis
+    Survival        // Construção/crafting
 };
 
 UENUM(BlueprintType)
-enum class ESoundType : uint8
+enum class EEnvironmentType : uint8
 {
-    Breathing = 0,
-    Footsteps = 1,
-    Vocalization = 2,
-    Movement = 3,
-    Feeding = 4,
-    Territorial = 5,
-    Mating = 6,
-    Distress = 7
+    DenseForest,
+    OpenPlains,
+    RiverBank,
+    Cave,
+    Cliff,
+    Swamp,
+    ClearingSmall,
+    ClearingLarge
 };
 
 UENUM(BlueprintType)
-enum class EEnvironmentState : uint8
+enum class ETimeOfDay : uint8
 {
-    DayCalm = 0,
-    DayActive = 1,
-    DuskTension = 2,
-    NightDanger = 3,
-    DawnRelief = 4,
-    Storm = 5,
-    Silence = 6
+    Dawn,
+    Morning,
+    Midday,
+    Afternoon,
+    Dusk,
+    Night,
+    DeepNight
+};
+
+USTRUCT(BlueprintType)
+struct FAudioStateData
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    EEmotionalState EmotionalState = EEmotionalState::Calm;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    EEnvironmentType EnvironmentType = EEnvironmentType::DenseForest;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    ETimeOfDay TimeOfDay = ETimeOfDay::Morning;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float ThreatLevel = 0.0f; // 0.0 = seguro, 1.0 = perigo máximo
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float ExplorationProgress = 0.0f; // 0.0 = início, 1.0 = próximo do fim
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bPlayerHidden = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    int32 NearbyDinosaurCount = 0;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float DistanceToClosestPredator = 10000.0f;
 };
 
 /**
- * Central audio system manager for the Jurassic survival game
- * Handles adaptive music, environmental audio, and creature sound systems
+ * Sistema central de áudio que gere música adaptativa, efeitos sonoros e ambientes
+ * Baseado na convicção de que o áudio perfeito é invisível ao jogador
  */
-UCLASS()
-class TRANSPERSONALGAME_API UAudioSystemManager : public UGameInstanceSubsystem
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UAudioSystemManager : public UObject
 {
     GENERATED_BODY()
 
 public:
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
+    UAudioSystemManager();
 
-    // Tension System
-    UFUNCTION(BlueprintCallable, Category = "Audio|Tension")
-    void UpdateTensionLevel(float NewTensionLevel);
-    
-    UFUNCTION(BlueprintCallable, Category = "Audio|Tension")
-    float GetCurrentTensionLevel() const { return CurrentTensionLevel; }
-    
-    UFUNCTION(BlueprintCallable, Category = "Audio|Tension")
-    ETensionState GetCurrentTensionState() const { return CurrentTensionState; }
+    // Inicialização do sistema
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void InitializeAudioSystem();
 
-    // Environmental Audio
-    UFUNCTION(BlueprintCallable, Category = "Audio|Environment")
-    void SetEnvironmentState(EEnvironmentState NewState);
-    
-    UFUNCTION(BlueprintCallable, Category = "Audio|Environment")
-    void UpdateTimeOfDay(float TimeOfDayNormalized);
-    
-    UFUNCTION(BlueprintCallable, Category = "Audio|Environment")
-    void SetWeatherIntensity(float WeatherIntensity);
+    // Actualização do estado emocional
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void UpdateAudioState(const FAudioStateData& NewState);
 
-    // Creature Audio
-    UFUNCTION(BlueprintCallable, Category = "Audio|Creatures")
-    void RegisterDinosaur(class ADinosaur* Dinosaur);
-    
-    UFUNCTION(BlueprintCallable, Category = "Audio|Creatures")
-    void UnregisterDinosaur(class ADinosaur* Dinosaur);
-    
-    UFUNCTION(BlueprintCallable, Category = "Audio|Creatures")
-    void PlayDinosaurSound(class ADinosaur* Dinosaur, ESoundType SoundType, float Volume = 1.0f);
+    // Controlo de música adaptativa
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void TransitionToEmotionalState(EEmotionalState NewState, float TransitionTime = 2.0f);
 
-    // Adaptive Music System
-    UFUNCTION(BlueprintCallable, Category = "Audio|Music")
-    void TransitionToMusicState(const FString& StateName, float TransitionTime = 2.0f);
-    
-    UFUNCTION(BlueprintCallable, Category = "Audio|Music")
-    void SetMusicParameter(const FString& ParameterName, float Value);
+    // Efeitos sonoros contextuais
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void PlayContextualSFX(const FString& EventName, FVector Location = FVector::ZeroVector);
 
-    // Silence System (Walter Murch inspired)
-    UFUNCTION(BlueprintCallable, Category = "Audio|Silence")
-    void TriggerSilenceMoment(float Duration, float FadeTime = 1.0f);
-    
-    UFUNCTION(BlueprintCallable, Category = "Audio|Silence")
-    bool IsInSilenceMoment() const { return bIsInSilenceMoment; }
+    // Sistema de ambientes
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void UpdateEnvironmentalAudio(EEnvironmentType Environment, ETimeOfDay TimeOfDay);
 
-    // Events
-    UPROPERTY(BlueprintAssignable, Category = "Audio|Events")
-    FOnTensionStateChanged OnTensionStateChanged;
-    
-    UPROPERTY(BlueprintAssignable, Category = "Audio|Events")
-    FOnDinosaurVocalization OnDinosaurVocalization;
+    // Dinossauros - sons únicos por indivíduo
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void RegisterDinosaurAudio(int32 DinosaurID, const FString& Species, FVector Location);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void PlayDinosaurSound(int32 DinosaurID, const FString& SoundType, float EmotionalIntensity = 0.5f);
+
+    // Controlo de volume master por categoria
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void SetCategoryVolume(const FString& Category, float Volume);
 
 protected:
-    // Core Audio Components
-    UPROPERTY()
-    class UAudioComponent* MusicAudioComponent;
-    
-    UPROPERTY()
-    class UAudioComponent* AmbienceAudioComponent;
-    
-    UPROPERTY()
-    class UAudioComponent* WeatherAudioComponent;
+    // Estado actual do sistema
+    UPROPERTY(BlueprintReadOnly, Category = "Audio State")
+    FAudioStateData CurrentAudioState;
 
-    // MetaSound Sources
-    UPROPERTY(EditDefaultsOnly, Category = "Audio|MetaSounds")
-    class UMetaSoundSource* AdaptiveMusicMetaSound;
-    
-    UPROPERTY(EditDefaultsOnly, Category = "Audio|MetaSounds")
-    class UMetaSoundSource* EnvironmentAmbienceMetaSound;
-    
-    UPROPERTY(EditDefaultsOnly, Category = "Audio|MetaSounds")
-    class UMetaSoundSource* TensionSystemMetaSound;
+    // MetaSounds para música adaptativa
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Music")
+    TObjectPtr<UMetaSoundSource> AdaptiveMusicMetaSound;
 
-    // Tension System
-    UPROPERTY()
-    float CurrentTensionLevel = 0.0f;
-    
-    UPROPERTY()
-    ETensionState CurrentTensionState = ETensionState::Calm;
-    
-    UPROPERTY()
-    float TensionDecayRate = 0.1f;
+    // Componente de áudio principal
+    UPROPERTY(BlueprintReadOnly, Category = "Audio Components")
+    TObjectPtr<UAudioComponent> MusicAudioComponent;
 
-    // Environment State
-    UPROPERTY()
-    EEnvironmentState CurrentEnvironmentState = EEnvironmentState::DayCalm;
-    
-    UPROPERTY()
-    float CurrentTimeOfDay = 0.5f; // 0 = midnight, 0.5 = noon
-    
-    UPROPERTY()
-    float CurrentWeatherIntensity = 0.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Audio Components")
+    TObjectPtr<UAudioComponent> AmbienceAudioComponent;
 
-    // Registered Creatures
-    UPROPERTY()
-    TArray<class ADinosaur*> RegisteredDinosaurs;
+    // Mapeamento de sons por espécie de dinossauro
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dinosaur Audio")
+    TMap<FString, TObjectPtr<UMetaSoundSource>> DinosaurSoundsBySpecies;
 
-    // Silence System
-    UPROPERTY()
-    bool bIsInSilenceMoment = false;
-    
-    UPROPERTY()
-    FTimerHandle SilenceTimerHandle;
+    // Tracking de dinossauros individuais
+    UPROPERTY(BlueprintReadOnly, Category = "Dinosaur Audio")
+    TMap<int32, FAudioStateData> DinosaurAudioStates;
 
 private:
-    void UpdateTensionState();
-    void UpdateAdaptiveMusic();
-    void UpdateEnvironmentalAudio();
-    void TickTensionDecay();
-    void EndSilenceMoment();
+    // Transições suaves entre estados
+    void BlendToNewMusicState(EEmotionalState NewState, float BlendTime);
     
-    FTimerHandle TensionDecayTimerHandle;
+    // Cálculo de parâmetros procedurais
+    float CalculateTensionLevel() const;
+    float CalculateEnvironmentalDensity() const;
+    
+    // Gestão de memória de áudio
+    void OptimizeAudioMemory();
+    
+    // Timer para actualizações automáticas
+    FTimerHandle AudioUpdateTimer;
+    void PerformPeriodicAudioUpdate();
 };
