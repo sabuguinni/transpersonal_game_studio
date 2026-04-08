@@ -1,118 +1,117 @@
-// Copyright Transpersonal Game Studio. All Rights Reserved.
+// Copyright Epic Games, Inc. All Rights Reserved.
 
 using UnrealBuildTool;
 
 public class TranspersonalGame : ModuleRules
 {
-    public TranspersonalGame(ReadOnlyTargetRules Target) : base(Target)
-    {
-        PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
-        
-        // Core dependencies for Jurassic survival game
-        PublicDependencyModuleNames.AddRange(new string[] 
-        { 
-            "Core", 
-            "CoreUObject", 
-            "Engine", 
-            "InputCore",
-            "EnhancedInput",
-            "UMG",
-            "Slate",
-            "SlateCore"
-        });
+	public TranspersonalGame(ReadOnlyTargetRules Target) : base(Target)
+	{
+		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 
-        // Private dependencies for advanced systems
-        PrivateDependencyModuleNames.AddRange(new string[] 
-        { 
-            "RenderCore",
-            "RHI",
-            "NavigationSystem",
-            "AIModule",
-            "GameplayTasks",
-            "GameplayTags",
-            "GameplayAbilities",
-            "Niagara",
-            "AudioMixer",
-            "MetasoundEngine",
-            "Chaos",
-            "ChaosVehicles",
-            "PhysicsCore",
-            "GeometryCollectionEngine",
-            "FieldSystemEngine",
-            "Landscape",
-            "Foliage",
-            "ProceduralMeshComponent",
-            "MassEntity",
-            "MassMovement",
-            "MassSpawner",
-            "MassActors",
-            "MassCommon",
-            "MassSimulation",
-            "MassGameplay",
-            "StateTree",
-            "StructUtils"
-        });
+		PublicDependencyModuleNames.AddRange(new string[] 
+		{ 
+			"Core", 
+			"CoreUObject", 
+			"Engine", 
+			"InputCore",
+			"EnhancedInput",
+			"UMG",
+			"Slate",
+			"SlateCore",
+			"Niagara",
+			"AIModule",
+			"GameplayTasks",
+			"NavigationSystem",
+			"MassEntity",
+			"MassCommon",
+			"MassMovement",
+			"MassSpawner",
+			"MassAI",
+			"MassGameplay",
+			"MassReplication",
+			"MassLOD",
+			"MassRepresentation",
+			"StructUtils",
+			"StateTree",
+			"SmartObjects",
+			"WorldPartition",
+			"PCG",
+			"GeometryCollectionEngine",
+			"ChaosVehicles",
+			"PhysicsCore",
+			"Chaos"
+		});
 
-        // Editor-only dependencies
-        if (Target.bBuildEditor)
-        {
-            PrivateDependencyModuleNames.AddRange(new string[]
-            {
-                "UnrealEd",
-                "EditorStyle",
-                "EditorWidgets",
-                "ToolMenus",
-                "PropertyEditor",
-                "BlueprintGraph",
-                "KismetCompiler",
-                "ToolWidgets",
-                "EditorSubsystem"
-            });
-        }
+		PrivateDependencyModuleNames.AddRange(new string[] 
+		{
+			"RenderCore",
+			"RHI",
+			"ApplicationCore",
+			"Json",
+			"JsonObjectConverter",
+			"HTTP",
+			"NetCore",
+			"OnlineSubsystem",
+			"OnlineSubsystemUtils",
+			"Sockets",
+			"AssetRegistry",
+			"DeveloperSettings",
+			"ToolMenus",
+			"EditorStyle",
+			"EditorWidgets",
+			"UnrealEd",
+			"PropertyEditor",
+			"Kismet",
+			"KismetCompiler",
+			"BlueprintGraph",
+			"AnimGraph",
+			"AnimationCore",
+			"AnimGraphRuntime",
+			"MovieScene",
+			"LevelSequence",
+			"TimeManagement"
+		});
 
-        // Platform-specific optimizations
-        if (Target.Platform == UnrealTargetPlatform.Win64)
-        {
-            PublicDefinitions.Add("PLATFORM_WINDOWS=1");
-            bEnableExceptions = false;
-            bUseRTTI = false;
-        }
+		// Conditional dependencies for editor builds
+		if (Target.bBuildEditor)
+		{
+			PrivateDependencyModuleNames.AddRange(new string[]
+			{
+				"EditorSubsystem",
+				"UnrealEd",
+				"ToolMenus",
+				"EditorWidgets",
+				"Slate",
+				"SlateCore",
+				"PropertyEditor",
+				"DetailCustomizations"
+			});
+		}
 
-        // Performance defines for Jurassic game
-        PublicDefinitions.AddRange(new string[]
-        {
-            "JURASSIC_GAME=1",
-            "ENABLE_MASS_AI=1",
-            "ENABLE_PROCEDURAL_WORLD=1",
-            "ENABLE_ADVANCED_PHYSICS=1"
-        });
+		// Platform-specific optimizations
+		if (Target.Platform == UnrealTargetPlatform.Win64)
+		{
+			PublicDefinitions.Add("PLATFORM_SUPPORTS_HARDWARE_RT=1");
+		}
 
-        // Optimization settings
-        OptimizeCode = CodeOptimization.InShippingBuildsOnly;
-        
-        // Include paths
-        PublicIncludePaths.AddRange(new string[]
-        {
-            "TranspersonalGame/Public",
-            "TranspersonalGame/Public/Core",
-            "TranspersonalGame/Public/Gameplay",
-            "TranspersonalGame/Public/AI",
-            "TranspersonalGame/Public/World",
-            "TranspersonalGame/Public/Physics",
-            "TranspersonalGame/Public/Audio",
-            "TranspersonalGame/Public/UI"
-        });
+		// Performance optimization flags
+		PublicDefinitions.AddRange(new string[]
+		{
+			"UE_BUILD_SHIPPING_WITH_EDITOR=0",
+			"TRANSPERSONAL_PERFORMANCE_TRACKING=1",
+			"TRANSPERSONAL_MASS_AI_ENABLED=1"
+		});
 
-        PrivateIncludePaths.AddRange(new string[]
-        {
-            "TranspersonalGame/Private",
-            "TranspersonalGame/Private/Core",
-            "TranspersonalGame/Private/Gameplay", 
-            "TranspersonalGame/Private/AI",
-            "TranspersonalGame/Private/World",
-            "TranspersonalGame/Private/Physics",
-            "TranspersonalGame/Private/Audio",
-            "TranspersonalGame/Private/UI"
-        });
-    }
+		// Enable modern C++ features
+		CppStandard = CppStandardVersion.Cpp20;
+		bUseRTTI = false;
+		bUseUnity = true;
+		
+		// Optimization settings
+		OptimizeCode = CodeOptimization.InShippingBuildsOnly;
+		
+		// Memory management
+		bEnableBufferSecurityChecks = true;
+		bEnableUndefinedIdentifierWarnings = true;
+	}
 }
