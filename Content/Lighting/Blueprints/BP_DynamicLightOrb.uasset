@@ -1,0 +1,97 @@
+// Dynamic Light Orb Blueprint - Consciousness-responsive floating lights
+// Creates mystical orbs that react to player's consciousness state
+
+Begin Object Class=/Script/Engine.Blueprint Name="BP_DynamicLightOrb"
+   ParentClass=/Script/Engine.Actor
+   
+   // Components
+   Components=(
+      // Root Scene Component
+      ComponentName="DefaultSceneRoot",
+      ComponentClass=/Script/Engine.SceneComponent,
+      
+      // Static Mesh for Orb
+      ComponentName="OrbMesh",
+      ComponentClass=/Script/Engine.StaticMeshComponent,
+      StaticMesh="/Engine/BasicShapes/Sphere",
+      Material="/Game/Lighting/Materials/M_ConsciousnessGlow",
+      RelativeScale3D=(X=0.2,Y=0.2,Z=0.2),
+      
+      // Point Light
+      ComponentName="OrbLight",
+      ComponentClass=/Script/Engine.PointLightComponent,
+      Intensity=500.0,
+      LightColor=(R=0.2,G=0.6,B=1.0,A=1.0),
+      AttenuationRadius=300.0,
+      CastShadows=false,
+      
+      // Particle System for Glow Effect
+      ComponentName="GlowParticles",
+      ComponentClass=/Script/Engine.ParticleSystemComponent,
+      Template="/Game/Effects/P_OrbGlow"
+   )
+   
+   // Blueprint Variables
+   Variables=(
+      VariableName="ConsciousnessLevel",
+      VariableType="float",
+      DefaultValue=0.5,
+      
+      VariableName="FloatHeight",
+      VariableType="float",
+      DefaultValue=50.0,
+      
+      VariableName="FloatSpeed",
+      VariableType="float",
+      DefaultValue=2.0,
+      
+      VariableName="PulseIntensity",
+      VariableType="float",
+      DefaultValue=1.0,
+      
+      VariableName="BaseIntensity",
+      VariableType="float",
+      DefaultValue=500.0,
+      
+      VariableName="HighConsciousnessColor",
+      VariableType="LinearColor",
+      DefaultValue=(R=1.0,G=0.8,B=0.2,A=1.0),
+      
+      VariableName="LowConsciousnessColor",
+      VariableType="LinearColor",
+      DefaultValue=(R=0.8,G=0.2,B=0.2,A=1.0),
+      
+      VariableName="NormalConsciousnessColor",
+      VariableType="LinearColor",
+      DefaultValue=(R=0.2,G=0.6,B=1.0,A=1.0)
+   )
+   
+   // Blueprint Functions
+   Functions=(
+      // Update Consciousness Response
+      FunctionName="UpdateConsciousnessResponse",
+      Parameters=(
+         ParameterName="NewLevel",
+         ParameterType="float"
+      ),
+      
+      // Animate Float Movement
+      FunctionName="AnimateFloating",
+      Parameters=(
+         ParameterName="DeltaTime",
+         ParameterType="float"
+      ),
+      
+      // Update Light Properties
+      FunctionName="UpdateLightProperties"
+   )
+   
+   // Event Graph Logic:
+   // - Tick: Call AnimateFloating and UpdateLightProperties
+   // - BeginPlay: Find and bind to consciousness system
+   // - OnConsciousnessChanged: Call UpdateConsciousnessResponse
+   // - Floating animation using sine wave
+   // - Light intensity and color interpolation based on consciousness
+   // - Particle system intensity scaling
+   
+End Object
