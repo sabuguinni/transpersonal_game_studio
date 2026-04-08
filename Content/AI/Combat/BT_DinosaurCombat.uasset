@@ -1,0 +1,307 @@
+{
+  "BehaviorTree": {
+    "Name": "BT_DinosaurCombat",
+    "Description": "Master Behavior Tree for Dinosaur Combat AI",
+    "BlackboardAsset": "/Game/AI/Combat/BB_DinosaurCombat",
+    "RootNode": {
+      "Type": "Selector",
+      "Name": "Root Combat Selector",
+      "Children": [
+        {
+          "Type": "Sequence",
+          "Name": "Emergency Response",
+          "Decorators": [
+            {
+              "Type": "Blackboard",
+              "BlackboardKey": "ThreatLevel",
+              "KeyQuery": "GreaterThan",
+              "FloatValue": 0.8
+            }
+          ],
+          "Children": [
+            {
+              "Type": "Custom_Task",
+              "Name": "Assess Immediate Threat",
+              "TaskClass": "BTTask_AssessThreat"
+            },
+            {
+              "Type": "Selector",
+              "Name": "Emergency Action Selector",
+              "Children": [
+                {
+                  "Type": "Sequence",
+                  "Name": "Retreat Sequence",
+                  "Decorators": [
+                    {
+                      "Type": "Compare_BBEntries",
+                      "BlackboardKeyA": "HealthPercentage",
+                      "BlackboardKeyB": "RetreatThreshold",
+                      "Operator": "LessThan"
+                    }
+                  ],
+                  "Children": [
+                    {
+                      "Type": "Custom_Task",
+                      "Name": "Find Retreat Location",
+                      "TaskClass": "BTTask_FindRetreatLocation"
+                    },
+                    {
+                      "Type": "MoveTo",
+                      "BlackboardKey": "RetreatLocation",
+                      "AcceptableRadius": 200.0
+                    }
+                  ]
+                },
+                {
+                  "Type": "Sequence",
+                  "Name": "Aggressive Response",
+                  "Children": [
+                    {
+                      "Type": "Custom_Task",
+                      "Name": "Execute Combat Roar",
+                      "TaskClass": "BTTask_CombatRoar"
+                    },
+                    {
+                      "Type": "Custom_Task",
+                      "Name": "Charge Attack",
+                      "TaskClass": "BTTask_ChargeAttack"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "Type": "Sequence",
+          "Name": "Active Combat",
+          "Decorators": [
+            {
+              "Type": "Blackboard",
+              "BlackboardKey": "CombatState",
+              "KeyQuery": "EqualTo",
+              "EnumValue": "Attacking"
+            }
+          ],
+          "Children": [
+            {
+              "Type": "Custom_Task",
+              "Name": "Select Attack Pattern",
+              "TaskClass": "BTTask_SelectAttackPattern"
+            },
+            {
+              "Type": "Selector",
+              "Name": "Attack Pattern Selector",
+              "Children": [
+                {
+                  "Type": "Sequence",
+                  "Name": "Apex Predator Pattern",
+                  "Decorators": [
+                    {
+                      "Type": "Custom_Decorator",
+                      "Name": "Check Archetype",
+                      "DecoratorClass": "BTDecorator_CheckArchetype",
+                      "ArchetypeToCheck": "ApexPredator"
+                    }
+                  ],
+                  "Children": [
+                    {
+                      "Type": "Custom_Task",
+                      "Name": "Intimidation Display",
+                      "TaskClass": "BTTask_IntimidationDisplay"
+                    },
+                    {
+                      "Type": "Custom_Task",
+                      "Name": "Power Attack",
+                      "TaskClass": "BTTask_PowerAttack"
+                    }
+                  ]
+                },
+                {
+                  "Type": "Sequence",
+                  "Name": "Pack Hunter Pattern",
+                  "Decorators": [
+                    {
+                      "Type": "Custom_Decorator",
+                      "Name": "Check Archetype",
+                      "DecoratorClass": "BTDecorator_CheckArchetype",
+                      "ArchetypeToCheck": "PackHunter"
+                    }
+                  ],
+                  "Children": [
+                    {
+                      "Type": "Custom_Task",
+                      "Name": "Coordinate With Pack",
+                      "TaskClass": "BTTask_CoordinateWithPack"
+                    },
+                    {
+                      "Type": "Custom_Task",
+                      "Name": "Flanking Attack",
+                      "TaskClass": "BTTask_FlankingAttack"
+                    }
+                  ]
+                },
+                {
+                  "Type": "Sequence",
+                  "Name": "Ambusher Pattern",
+                  "Decorators": [
+                    {
+                      "Type": "Custom_Decorator",
+                      "Name": "Check Archetype",
+                      "DecoratorClass": "BTDecorator_CheckArchetype",
+                      "ArchetypeToCheck": "Ambusher"
+                    }
+                  ],
+                  "Children": [
+                    {
+                      "Type": "Custom_Task",
+                      "Name": "Hit and Run",
+                      "TaskClass": "BTTask_HitAndRun"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "Type": "Sequence",
+          "Name": "Hunting Behavior",
+          "Decorators": [
+            {
+              "Type": "Blackboard",
+              "BlackboardKey": "CombatState",
+              "KeyQuery": "EqualTo",
+              "EnumValue": "Hunting"
+            }
+          ],
+          "Children": [
+            {
+              "Type": "Custom_Task",
+              "Name": "Track Target",
+              "TaskClass": "BTTask_TrackTarget"
+            },
+            {
+              "Type": "Selector",
+              "Name": "Hunting Strategy",
+              "Children": [
+                {
+                  "Type": "Sequence",
+                  "Name": "Direct Pursuit",
+                  "Decorators": [
+                    {
+                      "Type": "Distance",
+                      "BlackboardKeyA": "SelfActor",
+                      "BlackboardKeyB": "PlayerActor",
+                      "DistanceType": "Distance3D",
+                      "FloatValue": 1000.0,
+                      "Operator": "LessThan"
+                    }
+                  ],
+                  "Children": [
+                    {
+                      "Type": "MoveTo",
+                      "BlackboardKey": "PlayerActor",
+                      "AcceptableRadius": 300.0,
+                      "AllowStrafe": true
+                    }
+                  ]
+                },
+                {
+                  "Type": "Sequence",
+                  "Name": "Stalking Approach",
+                  "Children": [
+                    {
+                      "Type": "RunEQSQuery",
+                      "QueryTemplate": "/Game/AI/Combat/EQS_StalkingPosition",
+                      "BlackboardKey": "StalkingPosition"
+                    },
+                    {
+                      "Type": "MoveTo",
+                      "BlackboardKey": "StalkingPosition",
+                      "AcceptableRadius": 150.0
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "Type": "Sequence",
+          "Name": "Investigation",
+          "Decorators": [
+            {
+              "Type": "Blackboard",
+              "BlackboardKey": "CombatState",
+              "KeyQuery": "EqualTo",
+              "EnumValue": "Investigating"
+            }
+          ],
+          "Children": [
+            {
+              "Type": "Custom_Task",
+              "Name": "Investigate Disturbance",
+              "TaskClass": "BTTask_InvestigateDisturbance"
+            },
+            {
+              "Type": "MoveTo",
+              "BlackboardKey": "LastKnownPlayerLocation",
+              "AcceptableRadius": 200.0
+            },
+            {
+              "Type": "Wait",
+              "WaitTime": 3.0,
+              "RandomDeviation": 1.0
+            }
+          ]
+        },
+        {
+          "Type": "Sequence",
+          "Name": "Territorial Patrol",
+          "Decorators": [
+            {
+              "Type": "Blackboard",
+              "BlackboardKey": "CombatState",
+              "KeyQuery": "EqualTo",
+              "EnumValue": "Territorial"
+            }
+          ],
+          "Children": [
+            {
+              "Type": "Custom_Task",
+              "Name": "Select Patrol Point",
+              "TaskClass": "BTTask_SelectPatrolPoint"
+            },
+            {
+              "Type": "MoveTo",
+              "BlackboardKey": "PatrolPoint",
+              "AcceptableRadius": 100.0
+            },
+            {
+              "Type": "Wait",
+              "WaitTime": 5.0,
+              "RandomDeviation": 3.0
+            }
+          ]
+        },
+        {
+          "Type": "Sequence",
+          "Name": "Passive Behavior",
+          "Children": [
+            {
+              "Type": "Custom_Task",
+              "Name": "Idle Animation",
+              "TaskClass": "BTTask_IdleAnimation"
+            },
+            {
+              "Type": "Wait",
+              "WaitTime": 2.0,
+              "RandomDeviation": 1.0
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
