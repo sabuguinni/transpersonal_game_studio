@@ -1,0 +1,46 @@
+// Araucaria Tree Foliage Type  
+// Monkey Puzzle tree - dominant canopy species in Jurassic period
+// Creates dense, ominous forest canopy
+
+FoliageType: StaticMesh
+StaticMesh: SM_Araucaria_01
+
+// Placement Settings
+Density: 0.8 (instances per 1000x1000 units)
+Radius: 800.0 (minimum distance between instances)
+
+// Scaling
+ScaleX: (Min: 0.9, Max: 1.2)
+ScaleY: (Min: 0.9, Max: 1.2)
+ScaleZ: (Min: 0.8, Max: 1.3)
+LockScaling: false
+
+// Rotation
+AlignToNormal: true
+RandomYaw: true
+RandomPitchAngle: 8.0
+
+// Culling  
+StartCullDistance: 15000.0
+EndCullDistance: 25000.0
+PerInstanceFadeAmount: true
+
+// Collision
+CollisionWithWorld: true
+CollisionWithOtherFoliage: true
+CollisionRadius: 400.0
+
+// Ground Slope
+GroundSlopeAngle: (Min: 0.0, Max: 30.0)
+Height: (Min: -100.0, Max: 500.0)
+
+// LOD Settings
+LODDistanceScale: 1.2
+EnableStaticLighting: false
+
+// Wind Settings
+EnableWind: true  
+WindMagnitude: 0.1 (large trees move less)
+
+// Nanite Support
+EnableNanite: true (for high-detail bark and foliage)
