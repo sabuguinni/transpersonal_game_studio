@@ -1,0 +1,60 @@
+# Dinosaur Base Behavior Tree Blueprint
+# This is a blueprint asset file that would be created in the Unreal Editor
+# The actual implementation would be done through the visual node editor
+
+# ROOT STRUCTURE:
+# Root
+# └── Selector (Main Behavior Selector)
+#     ├── Sequence (Emergency Behaviors) [Priority 1]
+#     │   ├── Decorator: Blackboard (Safety < 30)
+#     │   └── Task: Flee to Safety
+#     ├── Sequence (Critical Needs) [Priority 2]
+#     │   ├── Decorator: Blackboard (Thirst < 20)
+#     │   └── Task: Find Water Source
+#     ├── Sequence (Basic Needs) [Priority 3]
+#     │   ├── Decorator: Blackboard (Hunger < 30)
+#     │   └── Task: Forage for Food
+#     ├── Sequence (Social Behaviors) [Priority 4]
+#     │   ├── Decorator: Blackboard (IsSocialSpecies = true AND Social < 40)
+#     │   └── Task: Seek Social Interaction
+#     ├── Sequence (Domesticated Behaviors) [Priority 5]
+#     │   ├── Decorator: Blackboard (DomesticationLevel > 50)
+#     │   └── Selector (Domesticated Actions)
+#     │       ├── Task: Follow Bonded Player
+#     │       ├── Task: Stay Near Base
+#     │       └── Task: Perform Trained Behavior
+#     └── Selector (Default Behaviors) [Priority 6]
+#         ├── Sequence (Personality-Based)
+#         │   ├── Decorator: Blackboard (Personality = Curious)
+#         │   └── Task: Investigate Surroundings
+#         ├── Sequence (Territorial)
+#         │   ├── Decorator: Blackboard (Personality = Territorial)
+#         │   └── Task: Patrol Territory
+#         └── Task: Idle Behavior
+
+# SERVICES (attached to main selector):
+# - Update Needs Service (every 5 seconds)
+# - Memory Management Service (every 30 seconds)
+# - Player Detection Service (every 2 seconds)
+# - Threat Assessment Service (every 3 seconds)
+
+# BLACKBOARD KEYS USED:
+# - CurrentBehaviorState (Enum)
+# - Hunger (Float 0-100)
+# - Thirst (Float 0-100)
+# - Energy (Float 0-100)
+# - Social (Float 0-100)
+# - Safety (Float 0-100)
+# - DomesticationLevel (Float 0-100)
+# - IsSocialSpecies (Bool)
+# - Personality (Enum)
+# - TargetLocation (Vector)
+# - TargetActor (Object)
+# - PlayerActor (Object)
+# - LastKnownPlayerLocation (Vector)
+# - ThreatLevel (Float)
+# - IsNocturnal (Bool)
+# - CurrentTimeOfDay (Float 0-24)
+
+# This file represents the structure that would be created in the UE5 Behavior Tree Editor
+# The actual visual nodes and connections would be configured through the editor interface
