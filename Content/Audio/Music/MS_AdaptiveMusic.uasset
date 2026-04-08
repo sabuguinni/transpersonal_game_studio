@@ -1,0 +1,177 @@
+{
+  "MetaSoundSource": {
+    "Name": "MS_AdaptiveMusic",
+    "Description": "Adaptive music system that responds to gameplay states and emotional context",
+    "Category": "Music",
+    "Inputs": [
+      {
+        "Name": "Intensity",
+        "Type": "Float",
+        "DefaultValue": 0.5,
+        "Description": "Overall music intensity (0=calm, 1=maximum tension)"
+      },
+      {
+        "Name": "ThreatLevel",
+        "Type": "Float", 
+        "DefaultValue": 0.0,
+        "Description": "Current threat level from nearby dinosaurs"
+      },
+      {
+        "Name": "TimeOfDay",
+        "Type": "Float",
+        "DefaultValue": 0.5,
+        "Description": "Time of day (0=midnight, 0.5=noon, 1=midnight)"
+      },
+      {
+        "Name": "EnvironmentType",
+        "Type": "Int32",
+        "DefaultValue": 0,
+        "Description": "Environment type enum value"
+      },
+      {
+        "Name": "IsPlayerHidden",
+        "Type": "Bool",
+        "DefaultValue": false,
+        "Description": "Whether player is hidden from dinosaurs"
+      }
+    ],
+    "Outputs": [
+      {
+        "Name": "Audio Out Left",
+        "Type": "Audio"
+      },
+      {
+        "Name": "Audio Out Right", 
+        "Type": "Audio"
+      }
+    ],
+    "Graph": {
+      "Nodes": [
+        {
+          "Type": "WavePlayer",
+          "Name": "BaseLayer_Calm",
+          "WaveAsset": "/Game/Audio/Music/Layers/Calm_Base_Loop.wav",
+          "Loop": true
+        },
+        {
+          "Type": "WavePlayer", 
+          "Name": "BaseLayer_Tense",
+          "WaveAsset": "/Game/Audio/Music/Layers/Tense_Base_Loop.wav",
+          "Loop": true
+        },
+        {
+          "Type": "WavePlayer",
+          "Name": "PercussionLayer",
+          "WaveAsset": "/Game/Audio/Music/Layers/Tension_Percussion_Loop.wav", 
+          "Loop": true
+        },
+        {
+          "Type": "WavePlayer",
+          "Name": "StringsLayer",
+          "WaveAsset": "/Game/Audio/Music/Layers/Danger_Strings_Loop.wav",
+          "Loop": true
+        },
+        {
+          "Type": "WavePlayer",
+          "Name": "BrassLayer", 
+          "WaveAsset": "/Game/Audio/Music/Layers/Terror_Brass_Loop.wav",
+          "Loop": true
+        },
+        {
+          "Type": "Crossfade",
+          "Name": "BaseCrossfade",
+          "InputCount": 2
+        },
+        {
+          "Type": "Multiply",
+          "Name": "PercussionGain"
+        },
+        {
+          "Type": "Multiply", 
+          "Name": "StringsGain"
+        },
+        {
+          "Type": "Multiply",
+          "Name": "BrassGain"
+        },
+        {
+          "Type": "Add",
+          "Name": "LayerMixer"
+        },
+        {
+          "Type": "LowPassFilter",
+          "Name": "NightFilter"
+        },
+        {
+          "Type": "Delay",
+          "Name": "CaveReverb"
+        },
+        {
+          "Type": "MapRange",
+          "Name": "IntensityMapper",
+          "InRangeA": 0.0,
+          "InRangeB": 1.0,
+          "OutRangeA": 0.0,
+          "OutRangeB": 1.0,
+          "Clamped": true
+        },
+        {
+          "Type": "MapRange", 
+          "Name": "ThreatMapper",
+          "InRangeA": 0.0,
+          "InRangeB": 1.0,
+          "OutRangeA": 0.0,
+          "OutRangeB": 0.8,
+          "Clamped": true
+        },
+        {
+          "Type": "Sine",
+          "Name": "HeartbeatLFO",
+          "Frequency": 1.2
+        },
+        {
+          "Type": "Multiply",
+          "Name": "HeartbeatMod"
+        }
+      ],
+      "Connections": [
+        {
+          "From": "BaseLayer_Calm.Audio",
+          "To": "BaseCrossfade.In0"
+        },
+        {
+          "From": "BaseLayer_Tense.Audio", 
+          "To": "BaseCrossfade.In1"
+        },
+        {
+          "From": "Intensity",
+          "To": "IntensityMapper.In"
+        },
+        {
+          "From": "IntensityMapper.OutValue",
+          "To": "BaseCrossfade.CrossfadeValue"
+        },
+        {
+          "From": "ThreatLevel",
+          "To": "ThreatMapper.In"
+        },
+        {
+          "From": "ThreatMapper.OutValue",
+          "To": "PercussionGain.B"
+        },
+        {
+          "From": "PercussionLayer.Audio",
+          "To": "PercussionGain.A"
+        },
+        {
+          "From": "BaseCrossfade.Out",
+          "To": "LayerMixer.A"
+        },
+        {
+          "From": "PercussionGain.Out",
+          "To": "LayerMixer.B"
+        }
+      ]
+    }
+  }
+}
