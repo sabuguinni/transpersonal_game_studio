@@ -1,170 +1,240 @@
 #include "AnimationSystemManager.h"
-#include "Engine/World.h"
+#include "GameFramework/Character.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Animation/AnimInstance.h"
-#include "Kismet/KismetMathLibrary.h"
+#include "Engine/World.h"
+#include "Kismet/GameplayStatics.h"
 #include "DrawDebugHelpers.h"
 
-UAnimationSystemManager::UAnimationSystemManager()
+AAnimationSystemManager::AAnimationSystemManager()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickGroup = TG_PrePhysics;
-    
-    // Configuração inicial
-    SetComponentTickEnabled(true);
+    PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.TickInterval = 0.016f; // 60 FPS para responsividade máxima
+
+    // Inicializar estados emocionais base
+    EmotionalStateWeights.Add(TEXT("Fear"), 0.0f);
+    EmotionalStateWeights.Add(TEXT("Curiosity"), 0.3f);
+    EmotionalStateWeights.Add(TEXT("Determination"), 0.5f);
+    EmotionalStateWeights.Add(TEXT("Exhaustion"), 0.0f);
+    EmotionalStateWeights.Add(TEXT("Alertness"), 0.7f);
 }
 
-void UAnimationSystemManager::BeginPlay()
+void AAnimationSystemManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Inicialização do sistema
-    CurrentAnimationState = "Idle";
-    TargetStressLevel = StressLevel;
-    CurrentStressTransition = StressLevel;
+    UE_LOG(LogTemp, Warning, TEXT("Animation System Manager: Sistema de animação iniciado"));
     
-    // Log de inicialização
-    UE_LOG(LogTemp, Log, TEXT("Animation System Manager initialized for %s"), *GetOwner()->GetName());
-    
-    // Aplicar variação inicial se temos um seed
-    if (MovementVariationSeed != 0)
+    // Configurar sistema de Motion Matching
+    if (PlayerLocomotionDatabase)
     {
-        ApplyMovementVariation(MovementVariationSeed);
+        UE_LOG(LogTemp, Warning, TEXT("Animation System: Player Locomotion Database carregada"));
+    }
+    
+    if (DinosaurBehaviorDatabase)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Animation System: Dinosaur Behavior Database carregada"));
     }
 }
 
-void UAnimationSystemManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void AAnimationSystemManager::Tick(float DeltaTime)
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    Super::Tick(DeltaTime);
     
-    // Actualizar transição de stress
-    UpdateStressTransition(DeltaTime);
-    
-    // Processar Motion Matching query se necessário
-    LastMotionMatchingQuery += DeltaTime;
-    if (LastMotionMatchingQuery >= MotionMatchingQueryInterval)
+    // Actualizar sistemas de animação em tempo real
+    UpdateMotionMatchingQueries(DeltaTime);
+    ProcessTerrainAdaptation(DeltaTime);
+    UpdateEmotionalStates(DeltaTime);
+}
+
+void AAnimationSystemManager::RegisterCharacterForAnimation(ACharacter* Character)
+{
+    if (!Character)
     {
-        ProcessMotionMatchingQuery();
-        LastMotionMatchingQuery = 0.0f;
+        UE_LOG(LogTemp, Error, TEXT("Animation System: Tentativa de registar personagem nulo"));
+        return;
+    }
+
+    if (!RegisteredCharacters.Contains(Character))
+    {
+        RegisteredCharacters.Add(Character);
+        
+        // Inicializar dados de animação para o personagem
+        FCharacterAnimationData NewAnimData;
+        NewAnimData.CurrentFearLevel = 0.3f; // Nível base de tensão
+        NewAnimData.MovementIntensity = 1.0f;
+        NewAnimData.bIsInDanger = false;
+        
+        AnimationDataCache.Add(Character, NewAnimData);
+        
+        UE_LOG(LogTemp, Warning, TEXT("Animation System: Personagem %s registado no sistema de animação"), 
+               *Character->GetName());
     }
 }
 
-void UAnimationSystemManager::UpdateStressLevel(float NewStressLevel, float TransitionSpeed)
+void AAnimationSystemManager::UpdateCharacterFearLevel(ACharacter* Character, float NewFearLevel)
 {
-    // Clamp do valor
-    NewStressLevel = FMath::Clamp(NewStressLevel, 0.0f, 1.0f);
-    
-    // Se mudança significativa, triggerar evento
-    if (FMath::Abs(TargetStressLevel - NewStressLevel) > 0.1f)
+    if (!Character || !AnimationDataCache.Contains(Character))
     {
-        FName NewState = "Calm";
-        if (NewStressLevel > 0.7f)
+        return;
+    }
+
+    FCharacterAnimationData& AnimData = AnimationDataCache[Character];
+    float PreviousFear = AnimData.CurrentFearLevel;
+    
+    // Suavizar transições de medo para evitar mudanças bruscas
+    AnimData.CurrentFearLevel = FMath::FInterpTo(AnimData.CurrentFearLevel, 
+                                                 FMath::Clamp(NewFearLevel, 0.0f, 1.0f), 
+                                                 GetWorld()->GetDeltaSeconds(), 2.0f);
+    
+    // Actualizar intensidade de movimento baseada no medo
+    AnimData.MovementIntensity = 1.0f + (AnimData.CurrentFearLevel * 0.5f);
+    
+    // Broadcast mudança de estado emocional
+    OnCharacterEmotionalStateChanged.Broadcast(Character, AnimData.CurrentFearLevel);
+    
+    // Log apenas mudanças significativas
+    if (FMath::Abs(PreviousFear - AnimData.CurrentFearLevel) > 0.1f)
+    {
+        UE_LOG(LogTemp, Log, TEXT("Animation System: %s fear level: %.2f -> %.2f"), 
+               *Character->GetName(), PreviousFear, AnimData.CurrentFearLevel);
+    }
+}
+
+void AAnimationSystemManager::TriggerEmergencyAnimation(ACharacter* Character, const FString& TriggerType)
+{
+    if (!Character || !AnimationDataCache.Contains(Character))
+    {
+        return;
+    }
+
+    FCharacterAnimationData& AnimData = AnimationDataCache[Character];
+    
+    // Marcar como em perigo
+    AnimData.bIsInDanger = true;
+    AnimData.TimeSinceLastThreat = 0.0f;
+    
+    // Aumentar drasticamente o nível de medo
+    UpdateCharacterFearLevel(Character, 1.0f);
+    
+    // Adicionar tag emocional específica
+    if (!AnimData.ActiveEmotionalTags.Contains(TriggerType))
+    {
+        AnimData.ActiveEmotionalTags.Add(TriggerType);
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Animation System: Emergency animation triggered for %s - Type: %s"), 
+           *Character->GetName(), *TriggerType);
+}
+
+void AAnimationSystemManager::GenerateUniqueMovementVariation(ACharacter* Character)
+{
+    if (!Character || !AnimationDataCache.Contains(Character))
+    {
+        return;
+    }
+
+    // Gerar variação procedural baseada em características únicas do personagem
+    FCharacterAnimationData& AnimData = AnimationDataCache[Character];
+    
+    // Criar seed único baseado no nome do personagem
+    int32 CharacterSeed = GetTypeHash(Character->GetName());
+    FRandomStream RandomStream(CharacterSeed);
+    
+    // Gerar variações subtis na intensidade de movimento
+    float BaseVariation = RandomStream.FRandRange(0.9f, 1.1f);
+    AnimData.MovementIntensity *= BaseVariation;
+    
+    UE_LOG(LogTemp, Log, TEXT("Animation System: Generated unique movement variation for %s (Intensity: %.2f)"), 
+           *Character->GetName(), AnimData.MovementIntensity);
+}
+
+void AAnimationSystemManager::UpdateMotionMatchingQueries(float DeltaTime)
+{
+    // Actualizar queries do Motion Matching para todos os personagens registados
+    for (ACharacter* Character : RegisteredCharacters)
+    {
+        if (!Character || !AnimationDataCache.Contains(Character))
         {
-            NewState = "Panic";
+            continue;
         }
-        else if (NewStressLevel > 0.4f)
+
+        const FCharacterAnimationData& AnimData = AnimationDataCache[Character];
+        
+        // Aqui integramos com o sistema de Motion Matching do UE5
+        // Os dados emocionais influenciam a selecção de poses
+        
+        if (USkeletalMeshComponent* MeshComp = Character->GetMesh())
         {
-            NewState = "Alert";
+            if (UAnimInstance* AnimInstance = MeshComp->GetAnimInstance())
+            {
+                // Passar dados emocionais para o Animation Blueprint
+                // Isto será expandido quando tivermos os Animation Blueprints criados
+            }
         }
-        else if (NewStressLevel > 0.1f)
+    }
+}
+
+void AAnimationSystemManager::ProcessTerrainAdaptation(float DeltaTime)
+{
+    // Sistema de IK para adaptação ao terreno
+    for (ACharacter* Character : RegisteredCharacters)
+    {
+        if (!Character)
         {
-            NewState = "Cautious";
+            continue;
+        }
+
+        FVector CharacterLocation = Character->GetActorLocation();
+        
+        // Raycast para detectar terreno irregular
+        FHitResult HitResult;
+        FVector StartTrace = CharacterLocation + FVector(0, 0, 50);
+        FVector EndTrace = CharacterLocation - FVector(0, 0, TerrainAdaptationRadius);
+        
+        FCollisionQueryParams QueryParams;
+        QueryParams.AddIgnoredActor(Character);
+        
+        if (GetWorld()->LineTraceSingleByChannel(HitResult, StartTrace, EndTrace, 
+                                                ECC_WorldStatic, QueryParams))
+        {
+            // Calcular adaptação IK baseada na inclinação do terreno
+            FVector SurfaceNormal = HitResult.Normal;
+            float SlopeAngle = FMath::Acos(FVector::DotProduct(SurfaceNormal, FVector::UpVector));
+            
+            // Debug visual (apenas em desenvolvimento)
+            #if WITH_EDITOR
+            DrawDebugLine(GetWorld(), StartTrace, HitResult.Location, FColor::Green, false, 0.1f);
+            #endif
+        }
+    }
+}
+
+void AAnimationSystemManager::UpdateEmotionalStates(float DeltaTime)
+{
+    // Actualizar estados emocionais globais
+    for (auto& CharacterData : AnimationDataCache)
+    {
+        FCharacterAnimationData& AnimData = CharacterData.Value;
+        
+        // Decrementar medo gradualmente se não há ameaças
+        if (!AnimData.bIsInDanger)
+        {
+            AnimData.TimeSinceLastThreat += DeltaTime;
+            
+            // Após 30 segundos sem ameaças, começar a reduzir o medo
+            if (AnimData.TimeSinceLastThreat > 30.0f)
+            {
+                float FearReduction = DeltaTime * 0.1f; // Redução gradual
+                AnimData.CurrentFearLevel = FMath::Max(0.2f, AnimData.CurrentFearLevel - FearReduction);
+            }
         }
         
-        // Triggerar evento se estado mudou
-        if (NewState != CurrentAnimationState)
+        // Limpar tags emocionais antigas
+        if (AnimData.TimeSinceLastThreat > 10.0f)
         {
-            PreviousAnimationState = CurrentAnimationState;
-            CurrentAnimationState = NewState;
-            OnAnimationStateChanged.Broadcast(CurrentAnimationState, PreviousAnimationState);
+            AnimData.bIsInDanger = false;
+            AnimData.ActiveEmotionalTags.Empty();
         }
-    }
-    
-    TargetStressLevel = NewStressLevel;
-}
-
-void UAnimationSystemManager::UpdateStressTransition(float DeltaTime)
-{
-    if (FMath::Abs(CurrentStressTransition - TargetStressLevel) > 0.01f)
-    {
-        CurrentStressTransition = FMath::FInterpTo(CurrentStressTransition, TargetStressLevel, DeltaTime, 2.0f);
-        StressLevel = CurrentStressTransition;
-    }
-}
-
-void UAnimationSystemManager::ProcessMotionMatchingQuery()
-{
-    // Simular qualidade do match baseado no estado atual
-    float MatchQuality = 0.8f; // Base quality
-    
-    // Ajustar qualidade baseado em stress
-    if (StressLevel > 0.5f)
-    {
-        MatchQuality *= (1.0f - (StressLevel - 0.5f) * 0.3f); // Reduz qualidade com stress alto
-    }
-    
-    // Ajustar por fadiga
-    if (FatigueLevel > 0.3f)
-    {
-        MatchQuality *= (1.0f - FatigueLevel * 0.2f);
-    }
-    
-    // Broadcast do resultado
-    OnMotionMatchingQueryComplete.Broadcast(MatchQuality);
-}
-
-void UAnimationSystemManager::ApplyMovementVariation(int32 NewSeed)
-{
-    MovementVariationSeed = NewSeed;
-    
-    // Usar seed para gerar variações consistentes
-    FRandomStream RandomStream(NewSeed);
-    
-    // Variação na velocidade de interpolação do IK (±20%)
-    float IKVariation = RandomStream.FRandRange(0.8f, 1.2f);
-    IKInterpolationSpeed *= IKVariation;
-    
-    // Variação no intervalo de query do Motion Matching (±15%)
-    float QueryVariation = RandomStream.FRandRange(0.85f, 1.15f);
-    MotionMatchingQueryInterval *= QueryVariation;
-    
-    // Log da variação aplicada
-    UE_LOG(LogTemp, Log, TEXT("Applied movement variation with seed %d: IK Speed %.2f, Query Interval %.3f"), 
-           NewSeed, IKInterpolationSpeed, MotionMatchingQueryInterval);
-}
-
-UPoseSearchDatabase* UAnimationSystemManager::GetCurrentDatabase() const
-{
-    return SelectDatabaseByState();
-}
-
-UPoseSearchDatabase* UAnimationSystemManager::SelectDatabaseByState() const
-{
-    // Seleccionar database baseado no estado de stress
-    if (StressLevel > 0.6f && StressStateDatabase)
-    {
-        return StressStateDatabase;
-    }
-    
-    // Se temos interações ambientais activas, usar essa database
-    if (EnvironmentInteractionDatabase)
-    {
-        // TODO: Adicionar lógica para detectar interações ambientais
-    }
-    
-    // Default para locomotion
-    return PrimaryLocomotionDatabase;
-}
-
-void UAnimationSystemManager::ForceTransitionToState(FName StateName)
-{
-    if (StateName != CurrentAnimationState)
-    {
-        PreviousAnimationState = CurrentAnimationState;
-        CurrentAnimationState = StateName;
-        OnAnimationStateChanged.Broadcast(CurrentAnimationState, PreviousAnimationState);
-        
-        UE_LOG(LogTemp, Log, TEXT("Forced transition from %s to %s"), 
-               *PreviousAnimationState.ToString(), *CurrentAnimationState.ToString());
     }
 }
