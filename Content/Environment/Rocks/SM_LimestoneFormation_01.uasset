@@ -1,0 +1,68 @@
+// Limestone Formation Static Mesh
+// Large sedimentary rock formation typical of Jurassic period
+// Provides major landmarks and natural shelter
+
+StaticMesh: SM_LimestoneFormation_01
+Material: M_Limestone_Weathered
+
+// Mesh Properties
+Vertices: 8947
+Triangles: 12634
+LODs: 4
+
+// LOD 0 (0-1000 units)
+Triangles: 12634
+ScreenSize: 1.0
+
+// LOD 1 (1000-3000 units)
+Triangles: 6317
+ScreenSize: 0.6
+
+// LOD 2 (3000-8000 units)  
+Triangles: 3158
+ScreenSize: 0.3
+
+// LOD 3 (8000+ units)
+Triangles: 1579
+ScreenSize: 0.1
+
+// Collision
+CollisionComplexity: UseComplexAsSimple
+EnableCollision: true
+CollisionResponse: Block
+
+// Nanite
+EnableNanite: true
+FallbackRelativeError: 0.5
+
+// Scale Range
+MinScale: 0.8
+MaxScale: 1.4
+
+// Materials
+MaterialSlots:
+[
+    {
+        MaterialSlotName: "Limestone"
+        Material: M_Limestone_Weathered
+        UVChannel: 0
+    },
+    {
+        MaterialSlotName: "Moss"
+        Material: M_RockMoss
+        UVChannel: 1
+    }
+]
+
+// Placement Guidelines:
+// - Use as major navigation landmarks
+// - Create natural caves and overhangs for shelter
+// - Place near water sources (limestone forms in marine environments)
+// - Cluster in groups to create canyon-like passages
+// - Weather patterns: more moss on north-facing sides
+
+// Geological Accuracy:
+// - Layered sedimentary structure visible
+// - Fossil inclusions in texture
+// - Erosion patterns from water flow
+// - Lichen and moss growth in crevices
