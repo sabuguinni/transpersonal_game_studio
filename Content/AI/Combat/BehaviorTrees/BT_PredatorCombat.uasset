@@ -1,0 +1,212 @@
+# Behavior Tree for Predator Dinosaur Combat
+# Root -> Selector (Combat Decision Tree)
+
+[Root Node]
+Type=Root
+Child=CombatSelector
+
+[CombatSelector]
+Type=Selector
+Description="Main combat decision tree"
+Children=[EmergencyBehavior, CombatBehavior, PatrolBehavior, IdleBehavior]
+
+# Emergency Behaviors (Highest Priority)
+[EmergencyBehavior]
+Type=Sequence
+Description="Handle critical situations"
+Decorators=[HealthCheck, ThreatCheck]
+Children=[AssessEmergency, ExecuteEmergencyResponse]
+
+[HealthCheck]
+Type=Blackboard
+Key=Health
+Operator=LessEqual
+Value=0.3
+
+[ThreatCheck]
+Type=Blackboard
+Key=ThreatLevel
+Operator=Equal
+Value=Critical
+
+[AssessEmergency]
+Type=Task
+Class=BTTask_AssessEmergency
+Description="Evaluate emergency situation and determine response"
+
+[ExecuteEmergencyResponse]
+Type=Selector
+Children=[FleeFromThreat, CallForHelp, DefensiveStance]
+
+# Combat Behaviors
+[CombatBehavior]
+Type=Sequence
+Description="Active combat with target"
+Decorators=[HasTargetDecorator]
+Children=[UpdateCombatState, ExecuteCombatTactic]
+
+[HasTargetDecorator]
+Type=Blackboard
+Key=HasTarget
+Operator=Equal
+Value=true
+
+[UpdateCombatState]
+Type=Task
+Class=BTTask_UpdateCombatState
+Description="Update combat state based on target distance and conditions"
+
+[ExecuteCombatTactic]
+Type=Selector
+Description="Choose combat tactic based on situation"
+Children=[PackHuntBehavior, SoloHuntBehavior, AmbushBehavior, DirectAttack]
+
+# Pack Hunting
+[PackHuntBehavior]
+Type=Sequence
+Description="Coordinate with pack members"
+Decorators=[IsPackHunter, HasPackMembers]
+Children=[CoordinateWithPack, ExecutePackRole]
+
+[IsPackHunter]
+Type=Blackboard
+Key=UsePackTactics
+Operator=Equal
+Value=true
+
+[HasPackMembers]
+Type=Task
+Class=BTTask_CheckPackMembers
+
+[CoordinateWithPack]
+Type=Task
+Class=BTTask_CoordinatePackAttack
+Description="Communicate with pack and assign roles"
+
+[ExecutePackRole]
+Type=Selector
+Children=[PackLeaderBehavior, PackFlankBehavior, PackSupportBehavior]
+
+# Solo Hunting
+[SoloHuntBehavior]
+Type=Sequence
+Description="Individual hunting behavior"
+Children=[AnalyzeTarget, ChooseTactic, ExecuteSoloTactic]
+
+[AnalyzeTarget]
+Type=Task
+Class=BTTask_AnalyzeTarget
+Description="Assess target strength, position, and escape routes"
+
+[ChooseTactic]
+Type=Task
+Class=BTTask_ChooseTactic
+Description="Select best tactic based on analysis"
+
+[ExecuteSoloTactic]
+Type=Selector
+Children=[StalkAndPounce, CircleAndAttack, FrontalAssault]
+
+# Ambush Behavior
+[AmbushBehavior]
+Type=Sequence
+Description="Ambush tactics for stealth predators"
+Decorators=[CanAmbush, TargetUnaware]
+Children=[FindAmbushPosition, MoveToAmbush, WaitForOpportunity, ExecuteAmbush]
+
+[CanAmbush]
+Type=Blackboard
+Key=CanAmbush
+Operator=Equal
+Value=true
+
+[TargetUnaware]
+Type=Task
+Class=BTTask_CheckTargetAwareness
+
+[FindAmbushPosition]
+Type=Task
+Class=BTTask_FindAmbushPosition
+Description="Calculate optimal ambush position"
+
+[MoveToAmbush]
+Type=Task
+Class=BTTask_MoveToPosition
+Key=AmbushPosition
+AcceptableRadius=50.0
+
+[WaitForOpportunity]
+Type=Wait
+Time=3.0
+RandomDeviation=1.0
+
+[ExecuteAmbush]
+Type=Task
+Class=BTTask_ExecuteAmbush
+Description="Perform surprise attack"
+
+# Direct Attack
+[DirectAttack]
+Type=Sequence
+Description="Direct confrontation"
+Children=[MoveToAttackRange, PerformAttack, ManageDistance]
+
+[MoveToAttackRange]
+Type=MoveTo
+Key=TargetActor
+AcceptableRadius=300.0
+AllowStrafe=true
+
+[PerformAttack]
+Type=Task
+Class=BTTask_PerformAttack
+Description="Execute attack animation and damage"
+
+[ManageDistance]
+Type=Task
+Class=BTTask_ManageDistance
+Description="Maintain optimal distance from target"
+
+# Patrol Behavior
+[PatrolBehavior]
+Type=Sequence
+Description="Territory patrol when no target"
+Decorators=[NoTargetDecorator]
+Children=[SelectPatrolPoint, MoveToPatrol, PatrolWait]
+
+[NoTargetDecorator]
+Type=Blackboard
+Key=HasTarget
+Operator=Equal
+Value=false
+
+[SelectPatrolPoint]
+Type=Task
+Class=BTTask_SelectPatrolPoint
+Description="Choose next patrol location within territory"
+
+[MoveToPatrol]
+Type=MoveTo
+Key=PatrolPoint
+AcceptableRadius=100.0
+
+[PatrolWait]
+Type=Wait
+Time=5.0
+RandomDeviation=3.0
+
+# Idle Behavior
+[IdleBehavior]
+Type=Sequence
+Description="Default idle behavior"
+Children=[IdleAnimation, RandomLook]
+
+[IdleAnimation]
+Type=Task
+Class=BTTask_PlayIdleAnimation
+Description="Play random idle animation"
+
+[RandomLook]
+Type=Task
+Class=BTTask_RandomLook
+Description="Look around randomly for threats or prey"
