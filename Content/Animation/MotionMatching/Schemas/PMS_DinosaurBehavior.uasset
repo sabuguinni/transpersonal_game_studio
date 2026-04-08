@@ -1,0 +1,95 @@
+{
+  "Type": "PoseSearchSchema",
+  "Version": "5.4",
+  "Properties": {
+    "Skeleton": "/Game/Characters/Dinosaurs/SK_GenericDinosaur.SK_GenericDinosaur",
+    "SampleRate": 20.0,
+    "DataPreprocessor": "Normalize",
+    "Channels": [
+      {
+        "Type": "Trajectory",
+        "Weight": 1.2,
+        "Samples": [
+          {
+            "Offset": -2.0,
+            "Flags": ["Position", "Velocity", "FacingDirection"],
+            "Weight": 0.6
+          },
+          {
+            "Offset": -1.0,
+            "Flags": ["Position", "Velocity", "FacingDirection"],
+            "Weight": 0.9
+          },
+          {
+            "Offset": 0.0,
+            "Flags": ["Position", "Velocity", "FacingDirection"],
+            "Weight": 1.0
+          },
+          {
+            "Offset": 1.0,
+            "Flags": ["Position", "Velocity", "FacingDirection"],
+            "Weight": 0.9
+          },
+          {
+            "Offset": 2.0,
+            "Flags": ["Position", "Velocity", "FacingDirection"],
+            "Weight": 0.6
+          }
+        ]
+      },
+      {
+        "Type": "Pose",
+        "Weight": 1.0,
+        "SampledBones": [
+          {
+            "Reference": "foot_front_l",
+            "Flags": ["Position", "Velocity"],
+            "Weight": 1.0,
+            "DebugColor": [1.0, 0.0, 0.0, 1.0]
+          },
+          {
+            "Reference": "foot_front_r",
+            "Flags": ["Position", "Velocity"],
+            "Weight": 1.0,
+            "DebugColor": [0.0, 1.0, 0.0, 1.0]
+          },
+          {
+            "Reference": "foot_back_l",
+            "Flags": ["Position", "Velocity"],
+            "Weight": 1.0,
+            "DebugColor": [0.0, 0.0, 1.0, 1.0]
+          },
+          {
+            "Reference": "foot_back_r",
+            "Flags": ["Position", "Velocity"],
+            "Weight": 1.0,
+            "DebugColor": [1.0, 1.0, 0.0, 1.0]
+          },
+          {
+            "Reference": "head",
+            "Flags": ["Position", "Rotation"],
+            "Weight": 0.8,
+            "DebugColor": [1.0, 0.0, 1.0, 1.0]
+          },
+          {
+            "Reference": "tail_mid",
+            "Flags": ["Position", "Velocity"],
+            "Weight": 0.6,
+            "DebugColor": [0.0, 1.0, 1.0, 1.0]
+          }
+        ],
+        "UseCharacterSpaceVelocities": true
+      },
+      {
+        "Type": "Heading",
+        "Weight": 0.7,
+        "Bone": "head",
+        "HeadingAxis": "X",
+        "ComponentStripping": "None"
+      }
+    ],
+    "NumberOfPermutations": 2,
+    "PermutationTimeOffset": 0.15,
+    "AddDataPadding": true
+  }
+}
