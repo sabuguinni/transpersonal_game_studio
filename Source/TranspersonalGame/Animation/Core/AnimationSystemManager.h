@@ -1,132 +1,95 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/Engine.h"
-#include "Components/ActorComponent.h"
+#include "GameFramework/Actor.h"
+#include "Engine/DataTable.h"
 #include "Animation/AnimInstance.h"
 #include "PoseSearch/PoseSearchDatabase.h"
-#include "PoseSearch/PoseSearchSchema.h"
 #include "AnimationSystemManager.generated.h"
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnAnimationStateChanged, FName, NewState, FName, PreviousState);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnMotionMatchingQueryComplete, float, MatchQuality);
+USTRUCT(BlueprintType)
+struct FCharacterAnimationProfile : public FTableRowBase
+{
+    GENERATED_BODY()
 
-/**
- * Sistema central de gestão de animação
- * Coordena Motion Matching, IK adaptativo e linguagem corporal procedural
- */
-UCLASS(ClassGroup=(Animation), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UAnimationSystemManager : public UActorComponent
+    // Character archetype for animation selection
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    FString ArchetypeID;
+
+    // Motion Matching Database for this character type
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    TSoftObjectPtr<UPoseSearchDatabase> LocomotionDatabase;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    TSoftObjectPtr<UPoseSearchDatabase> CombatDatabase;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    TSoftObjectPtr<UPoseSearchDatabase> InteractionDatabase;
+
+    // IK Settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK")
+    float FootIKIntensity = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK")
+    float HandIKIntensity = 0.8f;
+
+    // Fear Response Settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fear System")
+    float FearMovementModifier = 1.2f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fear System")
+    float CautiousWalkThreshold = 0.3f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fear System")
+    float PanicRunThreshold = 0.8f;
+};
+
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API AAnimationSystemManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UAnimationSystemManager();
+    AAnimationSystemManager();
 
 protected:
     virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
+    // Character Animation Profiles Data Table
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation System")
+    UDataTable* CharacterAnimationProfiles;
+
+    // Global Animation Settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Global Settings")
+    float GlobalAnimationSpeed = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Global Settings")
+    bool bEnableMotionMatching = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Global Settings")
+    bool bEnableFootIK = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Global Settings")
+    bool bEnableFearSystem = true;
 
 public:
-    // === MOTION MATCHING CORE ===
-    
-    /** Base Pose Search Schema para locomotion */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    TObjectPtr<UPoseSearchSchema> LocomotionSchema;
-    
-    /** Database principal de animações de movimento */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    TObjectPtr<UPoseSearchDatabase> PrimaryLocomotionDatabase;
-    
-    /** Database de animações de interação com ambiente */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    TObjectPtr<UPoseSearchDatabase> EnvironmentInteractionDatabase;
-    
-    /** Database de animações de stress/medo */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    TObjectPtr<UPoseSearchDatabase> StressStateDatabase;
+    // Get animation profile for character archetype
+    UFUNCTION(BlueprintCallable, Category = "Animation System")
+    FCharacterAnimationProfile GetAnimationProfile(const FString& ArchetypeID);
 
-    // === ADAPTIVE IK SYSTEM ===
-    
-    /** Intensidade do IK de pés para adaptação ao terreno */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Adaptive IK", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float FootIKIntensity = 1.0f;
-    
-    /** Distância máxima de rastreamento do solo */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Adaptive IK")
-    float GroundTraceDistance = 50.0f;
-    
-    /** Velocidade de interpolação do IK */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Adaptive IK")
-    float IKInterpolationSpeed = 10.0f;
+    // Register character with animation system
+    UFUNCTION(BlueprintCallable, Category = "Animation System")
+    void RegisterCharacter(AActor* Character, const FString& ArchetypeID);
 
-    // === BODY LANGUAGE SYSTEM ===
-    
-    /** Nível atual de stress do personagem (0.0 = calmo, 1.0 = pânico) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Body Language", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float StressLevel = 0.0f;
-    
-    /** Nível de fadiga (afeta postura e velocidade) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Body Language", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float FatigueLevel = 0.0f;
-    
-    /** Personalidade do personagem (afeta animações idle e reações) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Body Language")
-    FName PersonalityArchetype = "Cautious";
-
-    // === DINOSSAURO UNIQUE VARIATIONS ===
-    
-    /** Seed para variações procedurais de movimento */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Variations")
-    int32 MovementVariationSeed = 0;
-    
-    /** Multiplicador de escala para ajustar animações baseado no tamanho */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Variations")
-    float SizeScaleMultiplier = 1.0f;
-    
-    /** Tipo de personalidade do dinossauro (Aggressive, Passive, Curious, etc.) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Variations")
-    FName DinosaurPersonality = "Neutral";
-
-    // === EVENTOS ===
-    
-    UPROPERTY(BlueprintAssignable, Category = "Animation Events")
-    FOnAnimationStateChanged OnAnimationStateChanged;
-    
-    UPROPERTY(BlueprintAssignable, Category = "Animation Events")
-    FOnMotionMatchingQueryComplete OnMotionMatchingQueryComplete;
-
-    // === FUNÇÕES PÚBLICAS ===
-    
-    /** Actualiza o estado de stress baseado em factores externos */
-    UFUNCTION(BlueprintCallable, Category = "Body Language")
-    void UpdateStressLevel(float NewStressLevel, float TransitionSpeed = 2.0f);
-    
-    /** Aplica variação procedural baseada no seed */
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur Variations")
-    void ApplyMovementVariation(int32 NewSeed);
-    
-    /** Obtém a database apropriada baseada no estado atual */
-    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    UPoseSearchDatabase* GetCurrentDatabase() const;
-    
-    /** Força transição para estado específico */
-    UFUNCTION(BlueprintCallable, Category = "Animation States")
-    void ForceTransitionToState(FName StateName);
+    // Update fear level for character (affects animation selection)
+    UFUNCTION(BlueprintCallable, Category = "Fear System")
+    void UpdateCharacterFearLevel(AActor* Character, float FearLevel);
 
 private:
-    // Estado interno
-    FName CurrentAnimationState = "Idle";
-    FName PreviousAnimationState = "None";
-    float CurrentStressTransition = 0.0f;
-    float TargetStressLevel = 0.0f;
-    
-    // Timers internos
-    float LastMotionMatchingQuery = 0.0f;
-    float MotionMatchingQueryInterval = 0.1f; // 10 queries por segundo
-    
-    // Funções internas
-    void UpdateStressTransition(float DeltaTime);
-    void ProcessMotionMatchingQuery();
-    UPoseSearchDatabase* SelectDatabaseByState() const;
+    // Registered characters and their profiles
+    UPROPERTY()
+    TMap<AActor*, FString> RegisteredCharacters;
+
+    UPROPERTY()
+    TMap<AActor*, float> CharacterFearLevels;
 };
