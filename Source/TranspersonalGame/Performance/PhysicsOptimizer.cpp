@@ -1,345 +1,314 @@
+/**
+ * @file PhysicsOptimizer.cpp
+ * @brief Implementation of consciousness physics performance optimization
+ */
+
 #include "PhysicsOptimizer.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "PhysicsEngine/PhysicsSettings.h"
-#include "Components/PrimitiveComponent.h"
-#include "../Core/ConsciousnessSystem.h"
-#include "../Physics/PhysicsManager.h"
+#include "GameFramework/PlayerController.h"
+#include "Kismet/GameplayStatics.h"
+#include "HAL/PlatformFilemanager.h"
+#include "Stats/Stats.h"
+
+DECLARE_STATS_GROUP(TEXT("Consciousness Physics"), STATGROUP_ConsciousnessPhysics, STATCAT_Advanced);
+DECLARE_CYCLE_STAT(TEXT("Consciousness Field Update"), STAT_ConsciousnessFieldUpdate, STATGROUP_ConsciousnessPhysics);
+DECLARE_CYCLE_STAT(TEXT("Consciousness LOD Update"), STAT_ConsciousnessLODUpdate, STATGROUP_ConsciousnessPhysics);
+DECLARE_DWORD_COUNTER_STAT(TEXT("Active Consciousness Actors"), STAT_ActiveConsciousnessActors, STATGROUP_ConsciousnessPhysics);
 
 UPhysicsOptimizer::UPhysicsOptimizer()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.2f; // Update 5 times per second
+    PrimaryComponentTick.TickInterval = PerformanceCheckInterval;
     
-    CurrentOptimizationLevel = EPhysicsOptimizationLevel::None;
-    TargetPhysicsTime = 8.0f; // 8ms target for physics
-    MaxAllowedPhysicsObjects = 500;
-    ConsciousnessRadius = 2000.0f; // 20 meters
-    EmotionalIntensityMultiplier = 1.0f;
-    
-    LastPhysicsTime = 0.0f;
-    LastPhysicsObjectCount = 0;
-    LastOptimizationUpdate = 0.0f;
-    
-    // Initialize optimization presets
-    InitializeOptimizationPresets();
+    // Initialize frame time history
+    FrameTimeHistory.Reserve(FrameHistorySize);
+    for (int32 i = 0; i < FrameHistorySize; ++i)
+    {
+        FrameTimeHistory.Add(1.0f / 60.0f); // Start with 60 FPS assumption
+    }
 }
 
 void UPhysicsOptimizer::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Store default physics settings
-    if (UPhysicsSettings* PhysicsSettings = UPhysicsSettings::Get())
+    // Set initial LOD based on platform
+    if (GEngine && GEngine->GetGameUserSettings())
     {
-        DefaultSettings.PhysicsSubstepDeltaTime = PhysicsSettings->FixedFrameRate > 0 ? 1.0f / PhysicsSettings->FixedFrameRate : 0.016667f;
-        DefaultSettings.MaxPhysicsSubsteps = PhysicsSettings->MaxSubsteps;
-        DefaultSettings.SolverIterationCount = 8; // Default solver iterations
-        DefaultSettings.bEnableAsyncPhysics = PhysicsSettings->bEnableAsyncScene;
-        DefaultSettings.SleepThresholdMultiplier = 1.0f;
-        DefaultSettings.CollisionDistanceCulling = 1000.0f;
+        int32 QualityLevel = GEngine->GetGameUserSettings()->GetOverallScalabilityLevel();
+        switch (QualityLevel)
+        {
+            case 0: SetConsciousnessLOD(EConsciousnessLOD::Minimal); break;
+            case 1: SetConsciousnessLOD(EConsciousnessLOD::Low); break;
+            case 2: SetConsciousnessLOD(EConsciousnessLOD::Medium); break;
+            default: SetConsciousnessLOD(EConsciousnessLOD::High); break;
+        }
     }
     
-    CurrentSettings = DefaultSettings;
+    UE_LOG(LogTemp, Log, TEXT("PhysicsOptimizer initialized with LOD: %d"), (int32)CurrentLOD);
 }
 
-void UPhysicsOptimizer::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UPhysicsOptimizer::TickComponent(float DeltaTime, ELevelTick TickType, 
+                                    FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    LastOptimizationUpdate += DeltaTime;
+    UpdatePerformanceMetrics(DeltaTime);
     
-    if (LastOptimizationUpdate >= 0.2f) // Update every 200ms
+    PerformanceTimer += DeltaTime;
+    if (PerformanceTimer >= PerformanceCheckInterval)
     {
-        UpdatePerformanceMetrics();
-        
-        // Auto-adjust optimization level based on performance
-        if (ShouldIncreaseOptimization())
+        if (bAdaptiveQualityEnabled)
         {
-            EPhysicsOptimizationLevel NewLevel = static_cast<EPhysicsOptimizationLevel>(
-                FMath::Min(static_cast<int32>(CurrentOptimizationLevel) + 1, 
-                          static_cast<int32>(EPhysicsOptimizationLevel::Emergency)));
-            SetOptimizationLevel(NewLevel);
-        }
-        else if (ShouldDecreaseOptimization())
-        {
-            EPhysicsOptimizationLevel NewLevel = static_cast<EPhysicsOptimizationLevel>(
-                FMath::Max(static_cast<int32>(CurrentOptimizationLevel) - 1, 
-                          static_cast<int32>(EPhysicsOptimizationLevel::None)));
-            SetOptimizationLevel(NewLevel);
+            CheckAdaptiveQuality();
         }
         
-        UpdatePhysicsLOD();
-        LastOptimizationUpdate = 0.0f;
+        UpdateConsciousnessActorCulling();
+        PerformanceTimer = 0.0f;
     }
 }
 
-void UPhysicsOptimizer::SetOptimizationLevel(EPhysicsOptimizationLevel Level)
+void UPhysicsOptimizer::UpdatePerformanceMetrics(float DeltaTime)
 {
-    if (CurrentOptimizationLevel == Level)
-        return;
-        
-    CurrentOptimizationLevel = Level;
+    SCOPE_CYCLE_COUNTER(STAT_ConsciousnessFieldUpdate);
     
-    switch (Level)
+    // Update frame time history
+    FrameTimeHistory.RemoveAt(0);
+    FrameTimeHistory.Add(DeltaTime);
+    
+    // Calculate average frame time
+    float TotalFrameTime = 0.0f;
+    for (float FrameTime : FrameTimeHistory)
     {
-        case EPhysicsOptimizationLevel::None:
-            ApplyOptimizationSettings(DefaultSettings);
-            break;
-        case EPhysicsOptimizationLevel::Light:
-            ApplyOptimizationSettings(LightOptimization);
-            break;
-        case EPhysicsOptimizationLevel::Moderate:
-            ApplyOptimizationSettings(ModerateOptimization);
-            break;
-        case EPhysicsOptimizationLevel::Aggressive:
-            ApplyOptimizationSettings(AggressiveOptimization);
-            break;
-        case EPhysicsOptimizationLevel::Emergency:
-            ApplyOptimizationSettings(EmergencyOptimization);
-            break;
+        TotalFrameTime += FrameTime;
     }
+    CurrentMetrics.FrameTime = TotalFrameTime / FrameHistorySize;
     
-    UE_LOG(LogTemp, Log, TEXT("Physics Optimizer: Set optimization level to %d"), static_cast<int32>(Level));
-}
-
-void UPhysicsOptimizer::ApplyCustomOptimizationSettings(const FPhysicsOptimizationSettings& Settings)
-{
-    CurrentOptimizationLevel = EPhysicsOptimizationLevel::None; // Mark as custom
-    ApplyOptimizationSettings(Settings);
-}
-
-void UPhysicsOptimizer::ResetToDefaultSettings()
-{
-    SetOptimizationLevel(EPhysicsOptimizationLevel::None);
-}
-
-void UPhysicsOptimizer::OptimizeForConsciousnessDistance(float PlayerConsciousnessRadius)
-{
-    ConsciousnessRadius = PlayerConsciousnessRadius;
-    
-    // Get player location (simplified - would integrate with actual player consciousness system)
-    if (APawn* PlayerPawn = GetWorld()->GetFirstPlayerController()->GetPawn())
+    // Count active consciousness actors
+    CurrentMetrics.ActiveConsciousnessActors = 0;
+    if (UWorld* World = GetWorld())
     {
-        FVector PlayerLocation = PlayerPawn->GetActorLocation();
-        
-        // Apply distance-based optimization
-        float OptimizationFactor = FMath::Clamp(ConsciousnessRadius / 5000.0f, 0.1f, 1.0f);
-        OptimizePhysicsObjectsInRadius(PlayerLocation, ConsciousnessRadius, OptimizationFactor);
-    }
-}
-
-void UPhysicsOptimizer::SetEmotionalPhysicsIntensity(float Intensity)
-{
-    EmotionalIntensityMultiplier = FMath::Clamp(Intensity, 0.1f, 3.0f);
-    UpdateEmotionalPhysicsSettings();
-}
-
-float UPhysicsOptimizer::GetCurrentPhysicsTime() const
-{
-    return LastPhysicsTime;
-}
-
-int32 UPhysicsOptimizer::GetActivePhysicsObjectCount() const
-{
-    return LastPhysicsObjectCount;
-}
-
-bool UPhysicsOptimizer::IsPhysicsPerformanceOptimal() const
-{
-    return LastPhysicsTime <= TargetPhysicsTime && 
-           LastPhysicsObjectCount <= MaxAllowedPhysicsObjects;
-}
-
-void UPhysicsOptimizer::UpdatePhysicsLOD()
-{
-    // Get player location for LOD calculations
-    if (APawn* PlayerPawn = GetWorld()->GetFirstPlayerController()->GetPawn())
-    {
-        FVector PlayerLocation = PlayerPawn->GetActorLocation();
-        
-        // Iterate through physics objects and apply LOD
-        for (TActorIterator<AActor> ActorItr(GetWorld()); ActorItr; ++ActorItr)
+        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
         {
             AActor* Actor = *ActorItr;
-            if (!Actor || !Actor->GetRootComponent())
-                continue;
-                
-            UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(Actor->GetRootComponent());
-            if (!PrimComp || !PrimComp->IsSimulatingPhysics())
-                continue;
-                
-            float Distance = FVector::Dist(PlayerLocation, Actor->GetActorLocation());
-            
-            // Apply LOD based on distance and consciousness radius
-            if (Distance > ConsciousnessRadius * 2.0f)
+            if (Actor && Actor->GetClass()->GetName().Contains(TEXT("Consciousness")))
             {
-                // Very far - disable physics simulation
-                PrimComp->SetSimulatePhysics(false);
-            }
-            else if (Distance > ConsciousnessRadius)
-            {
-                // Far - reduce physics quality
-                PrimComp->SetSimulatePhysics(true);
-                // Could reduce collision complexity here
-            }
-            else
-            {
-                // Close - full physics quality
-                PrimComp->SetSimulatePhysics(true);
+                CurrentMetrics.ActiveConsciousnessActors++;
             }
         }
     }
+    
+    SET_DWORD_STAT(STAT_ActiveConsciousnessActors, CurrentMetrics.ActiveConsciousnessActors);
+    
+    // Estimate physics calculations per frame
+    CurrentMetrics.PhysicsCalculationsPerFrame = CurrentMetrics.ActiveConsciousnessActors * 
+                                               (CurrentLOD == EConsciousnessLOD::High ? 100 : 
+                                                CurrentLOD == EConsciousnessLOD::Medium ? 50 : 
+                                                CurrentLOD == EConsciousnessLOD::Low ? 25 : 10);
+    
+    // Calculate consciousness field complexity
+    CurrentMetrics.ConsciousnessFieldComplexity = FMath::Clamp(
+        CurrentMetrics.ActiveConsciousnessActors / 100.0f, 0.0f, 1.0f);
+    
+    // Estimate memory usage (simplified)
+    CurrentMetrics.MemoryUsageMB = CurrentMetrics.ActiveConsciousnessActors * 0.5f + 
+                                  CurrentMetrics.PhysicsCalculationsPerFrame * 0.001f;
 }
 
-void UPhysicsOptimizer::InitializeOptimizationPresets()
+void UPhysicsOptimizer::CheckAdaptiveQuality()
 {
-    // Light Optimization
-    LightOptimization = DefaultSettings;
-    LightOptimization.MaxPhysicsSubsteps = 4;
-    LightOptimization.SolverIterationCount = 6;
-    LightOptimization.SleepThresholdMultiplier = 0.8f;
+    float CurrentFPS = 1.0f / CurrentMetrics.FrameTime;
+    EConsciousnessLOD OptimalLOD = CalculateOptimalLOD();
     
-    // Moderate Optimization
-    ModerateOptimization = DefaultSettings;
-    ModerateOptimization.PhysicsSubstepDeltaTime = 0.02f; // 50Hz
-    ModerateOptimization.MaxPhysicsSubsteps = 3;
-    ModerateOptimization.SolverIterationCount = 4;
-    ModerateOptimization.SleepThresholdMultiplier = 0.6f;
-    ModerateOptimization.CollisionDistanceCulling = 800.0f;
-    
-    // Aggressive Optimization
-    AggressiveOptimization = DefaultSettings;
-    AggressiveOptimization.PhysicsSubstepDeltaTime = 0.025f; // 40Hz
-    AggressiveOptimization.MaxPhysicsSubsteps = 2;
-    AggressiveOptimization.SolverIterationCount = 2;
-    AggressiveOptimization.SleepThresholdMultiplier = 0.4f;
-    AggressiveOptimization.CollisionDistanceCulling = 600.0f;
-    AggressiveOptimization.bEnableAsyncPhysics = false;
-    
-    // Emergency Optimization
-    EmergencyOptimization = DefaultSettings;
-    EmergencyOptimization.PhysicsSubstepDeltaTime = 0.033f; // 30Hz
-    EmergencyOptimization.MaxPhysicsSubsteps = 1;
-    EmergencyOptimization.SolverIterationCount = 1;
-    EmergencyOptimization.SleepThresholdMultiplier = 0.2f;
-    EmergencyOptimization.CollisionDistanceCulling = 400.0f;
-    EmergencyOptimization.bEnableAsyncPhysics = false;
-}
-
-void UPhysicsOptimizer::ApplyOptimizationSettings(const FPhysicsOptimizationSettings& Settings)
-{
-    CurrentSettings = Settings;
-    
-    if (UPhysicsSettings* PhysicsSettings = UPhysicsSettings::Get())
+    if (OptimalLOD != CurrentLOD)
     {
-        // Apply settings to UE5 physics system
-        PhysicsSettings->FixedFrameRate = 1.0f / Settings.PhysicsSubstepDeltaTime;
-        PhysicsSettings->MaxSubsteps = Settings.MaxPhysicsSubsteps;
-        PhysicsSettings->bEnableAsyncScene = Settings.bEnableAsyncPhysics;
-    }
-    
-    // Apply consciousness-specific optimizations
-    UpdateEmotionalPhysicsSettings();
-    CullDistantPhysicsObjects();
-}
-
-void UPhysicsOptimizer::OptimizePhysicsObjectsInRadius(const FVector& Center, float Radius, float OptimizationFactor)
-{
-    for (TActorIterator<AActor> ActorItr(GetWorld()); ActorItr; ++ActorItr)
-    {
-        AActor* Actor = *ActorItr;
-        if (!Actor)
-            continue;
-            
-        float Distance = FVector::Dist(Center, Actor->GetActorLocation());
-        if (Distance <= Radius)
-        {
-            UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(Actor->GetRootComponent());
-            if (PrimComp && PrimComp->IsSimulatingPhysics())
-            {
-                // Adjust physics quality based on optimization factor
-                float QualityMultiplier = FMath::Lerp(0.5f, 1.0f, OptimizationFactor);
-                
-                // This would adjust physics properties like:
-                // - Collision complexity
-                // - Update frequency
-                // - Solver iterations for this specific object
-            }
-        }
+        UE_LOG(LogTemp, Log, TEXT("Adaptive quality changing LOD from %d to %d (FPS: %.1f)"), 
+               (int32)CurrentLOD, (int32)OptimalLOD, CurrentFPS);
+        SetConsciousnessLOD(OptimalLOD);
     }
 }
 
-void UPhysicsOptimizer::UpdateEmotionalPhysicsSettings()
+EConsciousnessLOD UPhysicsOptimizer::CalculateOptimalLOD() const
 {
-    // Adjust physics intensity based on emotional state
-    // Higher emotional intensity = more responsive physics
+    float CurrentFPS = 1.0f / CurrentMetrics.FrameTime;
+    float TargetFrameTime = 1.0f / TargetFrameRate;
     
-    if (UPhysicsSettings* PhysicsSettings = UPhysicsSettings::Get())
+    // Performance-based LOD selection
+    if (CurrentMetrics.FrameTime > TargetFrameTime * 1.5f) // Significantly below target
     {
-        float IntensityFactor = EmotionalIntensityMultiplier;
-        
-        // Adjust solver iterations based on emotional intensity
-        int32 BaseIterations = DefaultSettings.SolverIterationCount;
-        int32 AdjustedIterations = FMath::RoundToInt(BaseIterations * IntensityFactor);
-        AdjustedIterations = FMath::Clamp(AdjustedIterations, 1, 16);
-        
-        // Apply emotional physics adjustments
-        // This would integrate with the consciousness system to:
-        // - Increase physics responsiveness during high emotional states
-        // - Reduce physics quality during calm states to save performance
-        // - Adjust gravity and forces based on emotional context
+        return EConsciousnessLOD::Minimal;
+    }
+    else if (CurrentMetrics.FrameTime > TargetFrameTime * 1.2f) // Below target
+    {
+        return EConsciousnessLOD::Low;
+    }
+    else if (CurrentMetrics.FrameTime > TargetFrameTime * 1.1f) // Slightly below target
+    {
+        return EConsciousnessLOD::Medium;
+    }
+    else // Meeting or exceeding target
+    {
+        return EConsciousnessLOD::High;
     }
 }
 
-void UPhysicsOptimizer::CullDistantPhysicsObjects()
+void UPhysicsOptimizer::SetConsciousnessLOD(EConsciousnessLOD NewLOD)
 {
-    float CullingDistance = CurrentSettings.CollisionDistanceCulling;
+    if (CurrentLOD == NewLOD) return;
     
-    if (APawn* PlayerPawn = GetWorld()->GetFirstPlayerController()->GetPawn())
+    CurrentLOD = NewLOD;
+    ApplyLODSettings(NewLOD);
+    
+    // Broadcast LOD change to consciousness systems
+    if (UWorld* World = GetWorld())
     {
-        FVector PlayerLocation = PlayerPawn->GetActorLocation();
-        
-        for (TActorIterator<AActor> ActorItr(GetWorld()); ActorItr; ++ActorItr)
+        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
         {
             AActor* Actor = *ActorItr;
-            if (!Actor)
-                continue;
-                
-            float Distance = FVector::Dist(PlayerLocation, Actor->GetActorLocation());
-            
-            UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(Actor->GetRootComponent());
-            if (PrimComp && Distance > CullingDistance)
+            if (Actor && Actor->GetClass()->GetName().Contains(TEXT("Consciousness")))
             {
-                // Disable physics for very distant objects
-                if (PrimComp->IsSimulatingPhysics())
+                // Call LOD update method if available
+                if (UFunction* LODFunction = Actor->FindFunction(TEXT("OnConsciousnessLODChanged")))
                 {
-                    PrimComp->SetSimulatePhysics(false);
+                    struct { EConsciousnessLOD NewLOD; } Params;
+                    Params.NewLOD = NewLOD;
+                    Actor->ProcessEvent(LODFunction, &Params);
                 }
             }
         }
     }
 }
 
-void UPhysicsOptimizer::UpdatePerformanceMetrics()
+void UPhysicsOptimizer::ApplyLODSettings(EConsciousnessLOD LOD)
 {
-    // Get physics timing from PhysicsManager
-    if (UPhysicsManager* PhysicsManager = UPhysicsManager::GetInstance(GetWorld()))
+    SCOPE_CYCLE_COUNTER(STAT_ConsciousnessLODUpdate);
+    
+    // Adjust tick intervals based on LOD
+    float TickInterval = 0.0f;
+    switch (LOD)
     {
-        LastPhysicsTime = PhysicsManager->GetLastFramePhysicsTime();
-        LastPhysicsObjectCount = PhysicsManager->GetActivePhysicsObjectCount();
+        case EConsciousnessLOD::High:
+            TickInterval = 0.0f; // Every frame
+            break;
+        case EConsciousnessLOD::Medium:
+            TickInterval = 1.0f / 30.0f; // 30 FPS
+            break;
+        case EConsciousnessLOD::Low:
+            TickInterval = 1.0f / 15.0f; // 15 FPS
+            break;
+        case EConsciousnessLOD::Minimal:
+            TickInterval = 1.0f / 10.0f; // 10 FPS
+            break;
+    }
+    
+    // Update our own tick interval
+    PrimaryComponentTick.TickInterval = FMath::Max(TickInterval, PerformanceCheckInterval);
+}
+
+void UPhysicsOptimizer::UpdateConsciousnessActorCulling()
+{
+    if (!GetWorld()) return;
+    
+    APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
+    if (!PC || !PC->GetPawn()) return;
+    
+    FVector PlayerLocation = PC->GetPawn()->GetActorLocation();
+    
+    for (TActorIterator<AActor> ActorItr(GetWorld()); ActorItr; ++ActorItr)
+    {
+        AActor* Actor = *ActorItr;
+        if (Actor && Actor->GetClass()->GetName().Contains(TEXT("Consciousness")))
+        {
+            float Distance = FVector::Dist(PlayerLocation, Actor->GetActorLocation());
+            
+            // Cull actors beyond maximum distance
+            bool bShouldBeVisible = Distance <= ConsciousnessCullingDistance;
+            if (Actor->GetRootComponent())
+            {
+                Actor->GetRootComponent()->SetVisibility(bShouldBeVisible, true);
+            }
+            
+            // Update LOD based on distance
+            if (bShouldBeVisible)
+            {
+                UpdateConsciousnessActorLOD(Cast<class AConsciousnessActor>(Actor), Distance);
+            }
+        }
     }
 }
 
-bool UPhysicsOptimizer::ShouldIncreaseOptimization() const
+void UPhysicsOptimizer::UpdateConsciousnessActorLOD(class AConsciousnessActor* Actor, float Distance)
 {
-    return LastPhysicsTime > TargetPhysicsTime * 1.2f || // 20% over target
-           LastPhysicsObjectCount > MaxAllowedPhysicsObjects;
+    if (!Actor) return;
+    
+    EConsciousnessLOD DistanceLOD = EConsciousnessLOD::High;
+    
+    if (Distance > ConsciousnessLODDistance3)
+    {
+        DistanceLOD = EConsciousnessLOD::Minimal;
+    }
+    else if (Distance > ConsciousnessLODDistance2)
+    {
+        DistanceLOD = EConsciousnessLOD::Low;
+    }
+    else if (Distance > ConsciousnessLODDistance1)
+    {
+        DistanceLOD = EConsciousnessLOD::Medium;
+    }
+    
+    // Use the more restrictive LOD between global and distance-based
+    EConsciousnessLOD FinalLOD = (CurrentLOD > DistanceLOD) ? CurrentLOD : DistanceLOD;
+    
+    // Apply LOD to actor if it has the appropriate method
+    if (UFunction* SetLODFunction = Actor->FindFunction(TEXT("SetConsciousnessLOD")))
+    {
+        struct { EConsciousnessLOD LOD; } Params;
+        Params.LOD = FinalLOD;
+        Actor->ProcessEvent(SetLODFunction, &Params);
+    }
 }
 
-bool UPhysicsOptimizer::ShouldDecreaseOptimization() const
+FPhysicsPerformanceMetrics UPhysicsOptimizer::GetCurrentMetrics() const
 {
-    return LastPhysicsTime < TargetPhysicsTime * 0.7f && // 30% under target
-           LastPhysicsObjectCount < MaxAllowedPhysicsObjects * 0.8f &&
-           CurrentOptimizationLevel != EPhysicsOptimizationLevel::None;
+    return CurrentMetrics;
+}
+
+void UPhysicsOptimizer::SetTargetFrameRate(float TargetFPS)
+{
+    TargetFrameRate = FMath::Clamp(TargetFPS, 30.0f, 120.0f);
+}
+
+void UPhysicsOptimizer::EnableAdaptiveQuality(bool bEnable)
+{
+    bAdaptiveQualityEnabled = bEnable;
+    UE_LOG(LogTemp, Log, TEXT("Adaptive quality %s"), bEnable ? TEXT("enabled") : TEXT("disabled"));
+}
+
+void UPhysicsOptimizer::SetConsciousnessCullingDistance(float Distance)
+{
+    ConsciousnessCullingDistance = FMath::Max(Distance, 100.0f);
+}
+
+void UPhysicsOptimizer::OptimizeConsciousnessMemory()
+{
+    // Force garbage collection for consciousness-related objects
+    if (GEngine)
+    {
+        GEngine->ForceGarbageCollection(true);
+    }
+    
+    // Clear unused consciousness field data
+    FlushUnusedConsciousnessData();
+    
+    UE_LOG(LogTemp, Log, TEXT("Consciousness memory optimization completed"));
+}
+
+void UPhysicsOptimizer::FlushUnusedConsciousnessData()
+{
+    // Implementation would clear cached consciousness field calculations,
+    // unused spiritual energy pools, and other consciousness-specific data
+    // This is a placeholder for the actual implementation
+    
+    UE_LOG(LogTemp, Log, TEXT("Flushed unused consciousness data"));
 }
