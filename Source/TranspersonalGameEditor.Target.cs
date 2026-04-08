@@ -10,48 +10,55 @@ public class TranspersonalGameEditorTarget : TargetRules
         Type = TargetType.Editor;
         DefaultBuildSettings = BuildSettingsVersion.V4;
         IncludeOrderVersion = EngineIncludeOrderVersion.Unreal5_3;
-        
+
         ExtraModuleNames.AddRange(new string[] { "TranspersonalGame" });
-        
+
         // Editor optimizations
         bUseUnityBuild = true;
         bUsePCHFiles = true;
         bUseSharedPCHs = true;
-        bIWYU = true;
         
-        // Editor-specific settings
+        // Enable live coding for faster iteration
+        bWithLiveCoding = true;
+        bUseIncrementalLinking = true;
+        
+        // Editor features
         bBuildDeveloperTools = true;
         bBuildWithEditorOnlyData = true;
+        bCompileWithStatsWithoutEngine = true;
+        bCompileWithPluginSupport = true;
+        
+        // Debug features for development
+        bUseLoggingInShipping = true;
+        bUseChecksInShipping = true;
+        
+        // Platform specific editor settings
+        if (Target.Platform == UnrealTargetPlatform.Win64)
+        {
+            WindowsPlatform.PCHMemoryAllocationFactor = 2000;
+            WindowsPlatform.bStrictConformanceMode = true;
+        }
+
+        // Enable Chaos Physics in editor
+        bUseChaos = true;
+        bCompileChaos = true;
+        bUseChaosChecked = true;
+        bCustomSceneQueryStructure = true;
+
+        // Editor-specific performance settings
+        bForceEnableExceptions = true; // Needed for some editor tools
+        bForceEnableRTTI = true; // Needed for reflection in editor
+        
+        // Enable all editor subsystems
         bCompileAgainstEngine = true;
         bCompileAgainstCoreUObject = true;
-        bCompileWithPluginSupport = true;
+        bCompileAgainstApplicationCore = true;
+        
+        // Development tools
         bIncludePluginsForTargetPlatforms = true;
+        bCompileWithAccessibilitySupport = true;
         
-        // Enable all editor features for development
-        bWithServerCode = true;
-        bCompileWithStatsWithoutEngine = true;
-        bCompileWithAvailabilityConditioning = false;
-        
-        // Fast iteration settings
-        bUseIncrementalLinking = true;
-        bUseFastMonoCalls = true;
-        bUseAdaptiveUnityBuild = true;
-        
-        // Platform-specific editor settings
-        if (Platform == UnrealTargetPlatform.Win64)
-        {
-            WindowsPlatform.PCHMemoryAllocationFactor = 3000;
-            bBuildAdditionalConsoleApp = false;
-        }
-        
-        // Editor-specific definitions for development
-        GlobalDefinitions.Add("TRANSPERSONAL_EDITOR=1");
-        GlobalDefinitions.Add("MASS_ENTITY_DEBUG=1");
-        GlobalDefinitions.Add("DINOSAUR_AI_DEBUG=1");
-        GlobalDefinitions.Add("WORLD_PARTITION_DEBUG=1");
-        
-        // Enable detailed logging in editor
-        GlobalDefinitions.Add("DETAILED_LOGGING=1");
-        GlobalDefinitions.Add("PERFORMANCE_PROFILING=1");
+        // Faster editor compilation
+        bUsePrecompiled = false; // Use source builds for better debugging
     }
 }
