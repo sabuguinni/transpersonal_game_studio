@@ -4,138 +4,176 @@
 #include "Subsystems/WorldSubsystem.h"
 #include "MassEntitySubsystem.h"
 #include "MassSpawnerSubsystem.h"
-#include "Engine/World.h"
+#include "Engine/DataTable.h"
 #include "CrowdSimulationSubsystem.generated.h"
 
 class UMassEntityConfigAsset;
 class AMassSpawner;
 
-UENUM(BlueprintType)
-enum class ECrowdType : uint8
-{
-    DinosaurHerd,
-    PterosaurFlock,
-    FishSchool,
-    InsectSwarm,
-    MAX UMETA(Hidden)
-};
-
 USTRUCT(BlueprintType)
-struct FPREHISTORICCROWDCONFIG
+struct TRANSPERSONALGAME_API FCrowdGroupConfig : public FTableRowBase
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    ECrowdType CrowdType = ECrowdType::DinosaurHerd;
+    // Group identification
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Group")
+    FName GroupName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 MaxAgents = 1000;
+    // Group composition
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Group")
+    int32 MinGroupSize = 3;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float SpawnRadius = 5000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Group")
+    int32 MaxGroupSize = 12;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float MovementSpeed = 300.0f;
+    // Movement behavior
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
+    float MovementSpeed = 150.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float AvoidanceRadius = 200.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
+    float GroupCohesionRadius = 500.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float CohesionRadius = 500.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
+    float SeparationRadius = 100.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float SeparationRadius = 150.0f;
+    // Spawning parameters
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawning")
+    float SpawnDensityPerKm2 = 0.5f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bUseLODSystem = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawning")
+    TArray<FName> PreferredBiomes;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float LODDistance1 = 2000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float LODDistance2 = 5000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float LODDistance3 = 10000.0f;
+    // Entity config reference
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mass")
+    TSoftObjectPtr<UMassEntityConfigAsset> EntityConfig;
 };
 
-/**
- * Subsystem responsável pela simulação de multidões de criaturas pré-históricas
- * Usa Mass AI para simular até 50.000 agentes simultâneos
- */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FMigrationRoute
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Migration")
+    FName RouteName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Migration")
+    TArray<FVector> Waypoints;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Migration")
+    float SeasonalTrigger = 0.25f; // 0-1 representing season cycle
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Migration")
+    TArray<FName> ParticipatingGroups;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Migration")
+    float MigrationSpeed = 200.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Migration")
+    bool bIsActive = false;
+};
+
 UCLASS()
 class TRANSPERSONALGAME_API UCrowdSimulationSubsystem : public UWorldSubsystem
 {
     GENERATED_BODY()
 
 public:
-    // USubsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
-    virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
+    virtual void Tick(float DeltaTime) override;
+    virtual bool ShouldCreateSubsystem(UObject* Outer) const override { return true; }
 
-    // Crowd Management
+    // Group management
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void SpawnCrowd(const FPREHISTORICCROWDCONFIG& Config, const FVector& Location);
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void DespawnAllCrowds();
+    void SpawnCrowdGroup(const FName& GroupType, const FVector& Location, int32 GroupSize = -1);
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void SetGlobalCrowdDensity(float DensityMultiplier);
+    void DespawnCrowdGroup(const FMassEntityHandle& GroupLeader);
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    int32 GetActiveCrowdCount() const;
+    void UpdateGroupDensity(const FName& BiomeName, float DensityMultiplier);
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    int32 GetTotalAgentCount() const;
+    // Migration system
+    UFUNCTION(BlueprintCallable, Category = "Migration")
+    void StartMigration(const FName& RouteName);
 
-    // Performance Management
-    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void SetPerformanceMode(bool bHighPerformance);
+    UFUNCTION(BlueprintCallable, Category = "Migration")
+    void StopMigration(const FName& RouteName);
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void UpdateLODDistances(float Distance1, float Distance2, float Distance3);
+    UFUNCTION(BlueprintCallable, Category = "Migration")
+    void UpdateSeasonalCycle(float SeasonProgress); // 0-1
 
-    // Behavior Control
-    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void TriggerPanicBehavior(const FVector& ThreatLocation, float Radius);
+    // Emergency responses
+    UFUNCTION(BlueprintCallable, Category = "Emergency")
+    void TriggerPanicResponse(const FVector& ThreatLocation, float ThreatRadius, float ThreatIntensity);
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void TriggerFeedingBehavior(const FVector& FoodLocation, float Radius);
+    UFUNCTION(BlueprintCallable, Category = "Emergency")
+    void TriggerStampedeResponse(const FVector& StampedeOrigin, const FVector& StampedeDirection);
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void SetWeatherInfluence(float WindStrength, const FVector& WindDirection);
+    // Population management
+    UFUNCTION(BlueprintCallable, Category = "Population")
+    void SetGlobalPopulationScale(float Scale);
+
+    UFUNCTION(BlueprintCallable, Category = "Population")
+    int32 GetActiveEntityCount() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Population")
+    TArray<FMassEntityHandle> GetEntitiesInRadius(const FVector& Center, float Radius) const;
 
 protected:
+    // Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Config")
+    UDataTable* CrowdGroupsDataTable;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Config")
+    TArray<FMigrationRoute> MigrationRoutes;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Config")
+    float MaxSimulationDistance = 5000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Config")
+    int32 MaxActiveEntities = 50000;
+
+    // Runtime data
     UPROPERTY()
-    TObjectPtr<UMassEntitySubsystem> MassEntitySubsystem;
+    TMap<FName, TArray<FMassEntityHandle>> ActiveGroups;
 
     UPROPERTY()
-    TObjectPtr<UMassSpawnerSubsystem> MassSpawnerSubsystem;
+    float CurrentSeasonProgress = 0.0f;
 
     UPROPERTY()
-    TArray<TObjectPtr<AMassSpawner>> ActiveSpawners;
+    float GlobalPopulationScale = 1.0f;
+
+    // Subsystem references
+    UPROPERTY()
+    UMassEntitySubsystem* MassEntitySubsystem;
 
     UPROPERTY()
-    TMap<ECrowdType, TObjectPtr<UMassEntityConfigAsset>> CrowdConfigs;
-
-    UPROPERTY()
-    float GlobalDensityMultiplier = 1.0f;
-
-    UPROPERTY()
-    bool bHighPerformanceMode = false;
-
-    UPROPERTY()
-    int32 MaxTotalAgents = 50000;
-
-    UPROPERTY()
-    int32 CurrentAgentCount = 0;
+    UMassSpawnerSubsystem* MassSpawnerSubsystem;
 
 private:
-    void InitializeCrowdConfigs();
-    void SetupMassProcessors();
-    AMassSpawner* CreateSpawnerForCrowdType(ECrowdType CrowdType, const FVector& Location);
-    void OptimizePerformance();
-    void UpdateAgentCounts();
+    void InitializeMassFramework();
+    void UpdateMigrations(float DeltaTime);
+    void UpdatePopulationLOD(float DeltaTime);
+    void ProcessEmergencyResponses(float DeltaTime);
+    
+    FCrowdGroupConfig* GetGroupConfig(const FName& GroupType);
+    FVector FindOptimalSpawnLocation(const FCrowdGroupConfig& Config, const FVector& PreferredLocation);
+    
+    // Emergency response tracking
+    struct FEmergencyResponse
+    {
+        FVector Location;
+        float Radius;
+        float Intensity;
+        float TimeRemaining;
+        bool bIsStampede;
+        FVector StampedeDirection;
+    };
+    
+    TArray<FEmergencyResponse> ActiveEmergencyResponses;
+    
+    // Performance tracking
+    float LastLODUpdateTime = 0.0f;
+    const float LODUpdateInterval = 0.5f; // Update LOD twice per second
 };
