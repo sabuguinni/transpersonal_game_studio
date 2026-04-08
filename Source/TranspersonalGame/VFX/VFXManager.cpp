@@ -1,328 +1,575 @@
 #include "VFXManager.h"
 #include "NiagaraFunctionLibrary.h"
-#include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
 #include "Engine/Engine.h"
+#include "TimerManager.h"
 
 AVFXManager::AVFXManager()
 {
     PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.TickInterval = 0.1f; // Update VFX LOD 10 times per second
     
-    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
-    RootComponent = RootSceneComponent;
+    // Initialize VFX pool
+    VFXPool.Reserve(MaxActiveVFXSystems);
+    ActiveVFXSystems.Reserve(MaxActiveVFXSystems);
     
-    // Initialize VFX Definitions with default values
-    VFXDefinitions.SetNum(static_cast<int32>(EVFXType::MAX));
-    
-    // Atmospheric Effects
-    VFXDefinitions[static_cast<int32>(EVFXType::DustMotes)].Type = EVFXType::DustMotes;
-    VFXDefinitions[static_cast<int32>(EVFXType::DustMotes)].DefaultLifetime = -1.0f; // Infinite
-    VFXDefinitions[static_cast<int32>(EVFXType::DustMotes)].MaxSimultaneousInstances = 5;
-    
-    VFXDefinitions[static_cast<int32>(EVFXType::Fog)].Type = EVFXType::Fog;
-    VFXDefinitions[static_cast<int32>(EVFXType::Fog)].DefaultLifetime = -1.0f; // Infinite
-    VFXDefinitions[static_cast<int32>(EVFXType::Fog)].MaxSimultaneousInstances = 3;
-    
-    // Danger Indicators
-    VFXDefinitions[static_cast<int32>(EVFXType::DinosaurFootprint)].Type = EVFXType::DinosaurFootprint;
-    VFXDefinitions[static_cast<int32>(EVFXType::DinosaurFootprint)].DefaultLifetime = 2.0f;
-    VFXDefinitions[static_cast<int32>(EVFXType::DinosaurFootprint)].MaxSimultaneousInstances = 20;
-    
-    VFXDefinitions[static_cast<int32>(EVFXType::BrokenVegetation)].Type = EVFXType::BrokenVegetation;
-    VFXDefinitions[static_cast<int32>(EVFXType::BrokenVegetation)].DefaultLifetime = 3.0f;
-    VFXDefinitions[static_cast<int32>(EVFXType::BrokenVegetation)].MaxSimultaneousInstances = 15;
-    
-    VFXDefinitions[static_cast<int32>(EVFXType::BloodSplatter)].Type = EVFXType::BloodSplatter;
-    VFXDefinitions[static_cast<int32>(EVFXType::BloodSplatter)].DefaultLifetime = 1.5f;
-    VFXDefinitions[static_cast<int32>(EVFXType::BloodSplatter)].MaxSimultaneousInstances = 10;
+    ActiveVFXCount = 0;
+    PooledVFXCount = 0;
 }
 
 void AVFXManager::BeginPlay()
 {
     Super::BeginPlay();
+    
+    // Get player reference for LOD calculations
+    PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    
+    // Setup cleanup timer - run every 5 seconds
+    GetWorld()->GetTimerManager().SetTimer(
+        CleanupTimer,
+        this,
+        &AVFXManager::CleanupExpiredVFX,
+        5.0f,
+        true
+    );
+    
+    // Pre-populate VFX pool
+    for (int32 i = 0; i < 20; ++i)
+    {
+        UNiagaraComponent* PooledComponent = CreateDefaultSubobject<UNiagaraComponent>(
+            *FString::Printf(TEXT("PooledVFX_%d"), i)
+        );
+        PooledComponent->SetAutoDestroy(false);
+        PooledComponent->SetActive(false);
+        VFXPool.Add(PooledComponent);
+        PooledVFXCount++;
+    }
 }
 
 void AVFXManager::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
     
-    // Cleanup finished VFX every frame
-    CleanupFinishedVFX();
-    
-    // Performance management - cull distant VFX
-    if (APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(this, 0))
-    {
-        CullDistantVFX(PlayerPawn->GetActorLocation());
-    }
+    // Update LOD for all active VFX systems
+    UpdateVFXLOD();
 }
 
-UNiagaraComponent* AVFXManager::SpawnVFX(EVFXType Type, FVector Location, FRotator Rotation, FVector Scale)
+UNiagaraComponent* AVFXManager::SpawnVFXAtLocation(
+    UNiagaraSystem* VFXSystem,
+    FVector Location,
+    FRotator Rotation,
+    FVector Scale,
+    bool bAutoDestroy,
+    float LifeTime)
 {
-    FVFXDefinition* VFXDef = GetVFXDefinition(Type);
-    if (!VFXDef || !VFXDef->NiagaraSystem.LoadSynchronous())
+    if (!VFXSystem)
     {
-        UE_LOG(LogTemp, Warning, TEXT("VFXManager: Invalid VFX type or missing Niagara system"));
+        UE_LOG(LogTemp, Warning, TEXT("VFXManager: Attempted to spawn null VFX system"));
         return nullptr;
     }
     
-    // Check if we've reached the maximum number of instances for this type
-    int32 CurrentInstances = 0;
-    for (UNiagaraComponent* Component : ActiveVFXComponents)
+    // Check if we're at the limit
+    if (ActiveVFXSystems.Num() >= MaxActiveVFXSystems)
     {
-        if (Component && Component->GetAsset() == VFXDef->NiagaraSystem.Get())
-        {
-            CurrentInstances++;
-        }
+        UE_LOG(LogTemp, Warning, TEXT("VFXManager: Maximum VFX systems reached, skipping spawn"));
+        return nullptr;
     }
     
-    if (CurrentInstances >= VFXDef->MaxSimultaneousInstances)
+    // Get component from pool or create new
+    UNiagaraComponent* VFXComponent = GetPooledVFXComponent();
+    if (!VFXComponent)
     {
-        // Remove oldest instance of this type
-        for (int32 i = 0; i < ActiveVFXComponents.Num(); i++)
-        {
-            if (ActiveVFXComponents[i] && ActiveVFXComponents[i]->GetAsset() == VFXDef->NiagaraSystem.Get())
+        return nullptr;
+    }
+    
+    // Configure the component
+    VFXComponent->SetAsset(VFXSystem);
+    VFXComponent->SetWorldLocationAndRotation(Location, Rotation);
+    VFXComponent->SetWorldScale3D(Scale);
+    VFXComponent->SetActive(true);
+    VFXComponent->Activate();
+    
+    // Set initial LOD based on distance
+    int32 LODLevel = CalculateVFXLOD(Location);
+    VFXComponent->SetIntParameter(TEXT("LOD_Level"), LODLevel);
+    
+    // Add to active systems
+    ActiveVFXSystems.Add(VFXComponent);
+    ActiveVFXCount++;
+    
+    // Setup auto-destroy if requested
+    if (bAutoDestroy && LifeTime > 0.0f)
+    {
+        FTimerHandle DestroyTimer;
+        GetWorld()->GetTimerManager().SetTimer(
+            DestroyTimer,
+            [this, VFXComponent]()
             {
-                ActiveVFXComponents[i]->DestroyComponent();
-                ActiveVFXComponents.RemoveAt(i);
-                break;
-            }
-        }
-    }
-    
-    // Spawn the VFX
-    UNiagaraComponent* VFXComponent = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
-        GetWorld(),
-        VFXDef->NiagaraSystem.Get(),
-        Location,
-        Rotation,
-        Scale,
-        VFXDef->bAutoDestroy
-    );
-    
-    if (VFXComponent)
-    {
-        ActiveVFXComponents.Add(VFXComponent);
-        
-        // Apply LOD settings based on distance to player
-        if (APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(this, 0))
-        {
-            float Distance = FVector::Dist(Location, PlayerPawn->GetActorLocation());
-            float LODLevel = CalculateLODLevel(Location, PlayerPawn->GetActorLocation());
-            ApplyLODSettings(VFXComponent, LODLevel);
-        }
-        
-        // Set lifetime if specified
-        if (VFXDef->DefaultLifetime > 0.0f)
-        {
-            VFXComponent->SetFloatParameter(TEXT("Lifetime"), VFXDef->DefaultLifetime);
-        }
+                if (VFXComponent && IsValid(VFXComponent))
+                {
+                    ReturnToPool(VFXComponent);
+                }
+            },
+            LifeTime,
+            false
+        );
     }
     
     return VFXComponent;
 }
 
-void AVFXManager::SpawnVFXAtLocation(EVFXType Type, FVector Location)
+UNiagaraComponent* AVFXManager::SpawnVFXAttached(
+    UNiagaraSystem* VFXSystem,
+    USceneComponent* AttachToComponent,
+    FName AttachPointName,
+    FVector Location,
+    FRotator Rotation,
+    FVector Scale,
+    bool bAutoDestroy,
+    float LifeTime)
 {
-    SpawnVFX(Type, Location);
-}
-
-void AVFXManager::SpawnVFXAttached(EVFXType Type, USceneComponent* AttachToComponent, FName SocketName)
-{
-    if (!AttachToComponent)
+    if (!VFXSystem || !AttachToComponent)
     {
-        return;
+        return nullptr;
     }
     
-    FVFXDefinition* VFXDef = GetVFXDefinition(Type);
-    if (!VFXDef || !VFXDef->NiagaraSystem.LoadSynchronous())
-    {
-        return;
-    }
-    
-    UNiagaraComponent* VFXComponent = UNiagaraFunctionLibrary::SpawnSystemAttached(
-        VFXDef->NiagaraSystem.Get(),
-        AttachToComponent,
-        SocketName,
-        FVector::ZeroVector,
-        FRotator::ZeroRotator,
-        EAttachLocation::KeepRelativeOffset,
-        VFXDef->bAutoDestroy
+    UNiagaraComponent* VFXComponent = SpawnVFXAtLocation(
+        VFXSystem, Location, Rotation, Scale, bAutoDestroy, LifeTime
     );
     
     if (VFXComponent)
     {
-        ActiveVFXComponents.Add(VFXComponent);
+        VFXComponent->AttachToComponent(
+            AttachToComponent,
+            FAttachmentTransformRules::KeepRelativeTransform,
+            AttachPointName
+        );
     }
-}
-
-void AVFXManager::CreateDinosaurFootprint(FVector Location, float DinosaurSize, bool bIsRunning)
-{
-    UNiagaraComponent* FootprintVFX = SpawnVFX(EVFXType::DinosaurFootprint, Location);
-    if (FootprintVFX)
-    {
-        FootprintVFX->SetFloatParameter(TEXT("DinosaurSize"), DinosaurSize);
-        FootprintVFX->SetFloatParameter(TEXT("Intensity"), bIsRunning ? 1.5f : 1.0f);
-        FootprintVFX->SetVectorParameter(TEXT("ImpactLocation"), Location);
-    }
-}
-
-void AVFXManager::CreateVegetationDisturbance(FVector Location, FVector Direction, float Intensity)
-{
-    UNiagaraComponent* VegetationVFX = SpawnVFX(EVFXType::BrokenVegetation, Location);
-    if (VegetationVFX)
-    {
-        VegetationVFX->SetVectorParameter(TEXT("Direction"), Direction.GetSafeNormal());
-        VegetationVFX->SetFloatParameter(TEXT("Intensity"), Intensity);
-        VegetationVFX->SetVectorParameter(TEXT("DisturbanceLocation"), Location);
-    }
-}
-
-void AVFXManager::CreateBloodEffect(FVector Location, FVector Direction, bool bIsLarge)
-{
-    UNiagaraComponent* BloodVFX = SpawnVFX(EVFXType::BloodSplatter, Location);
-    if (BloodVFX)
-    {
-        BloodVFX->SetVectorParameter(TEXT("ImpactDirection"), Direction.GetSafeNormal());
-        BloodVFX->SetFloatParameter(TEXT("Scale"), bIsLarge ? 2.0f : 1.0f);
-        BloodVFX->SetFloatParameter(TEXT("Intensity"), bIsLarge ? 1.5f : 1.0f);
-    }
-}
-
-void AVFXManager::CreateWaterSplash(FVector Location, float Intensity)
-{
-    UNiagaraComponent* WaterVFX = SpawnVFX(EVFXType::WaterSplash, Location);
-    if (WaterVFX)
-    {
-        WaterVFX->SetFloatParameter(TEXT("Intensity"), Intensity);
-        WaterVFX->SetVectorParameter(TEXT("SplashLocation"), Location);
-    }
-}
-
-void AVFXManager::CreateRockImpact(FVector Location, FVector ImpactDirection)
-{
-    UNiagaraComponent* RockVFX = SpawnVFX(EVFXType::RockDebris, Location);
-    if (RockVFX)
-    {
-        RockVFX->SetVectorParameter(TEXT("ImpactDirection"), ImpactDirection.GetSafeNormal());
-        RockVFX->SetVectorParameter(TEXT("ImpactLocation"), Location);
-    }
-}
-
-void AVFXManager::CreateCraftingEffect(FVector Location)
-{
-    UNiagaraComponent* CraftingVFX = SpawnVFX(EVFXType::CraftingSparkles, Location);
-    if (CraftingVFX)
-    {
-        CraftingVFX->SetVectorParameter(TEXT("CraftingLocation"), Location);
-    }
-}
-
-void AVFXManager::CreateToolImpact(FVector Location, FVector Direction)
-{
-    UNiagaraComponent* ToolVFX = SpawnVFX(EVFXType::ToolImpact, Location);
-    if (ToolVFX)
-    {
-        ToolVFX->SetVectorParameter(TEXT("ImpactDirection"), Direction.GetSafeNormal());
-        ToolVFX->SetVectorParameter(TEXT("ImpactLocation"), Location);
-    }
-}
-
-void AVFXManager::CreateFireEffect(FVector Location, float Intensity)
-{
-    UNiagaraComponent* FireVFX = SpawnVFX(EVFXType::FireEmbers, Location);
-    if (FireVFX)
-    {
-        FireVFX->SetFloatParameter(TEXT("Intensity"), Intensity);
-        FireVFX->SetVectorParameter(TEXT("FireLocation"), Location);
-    }
-}
-
-void AVFXManager::SetVFXQualityLevel(int32 QualityLevel)
-{
-    CurrentQualityLevel = FMath::Clamp(QualityLevel, 0, 3);
     
-    // Apply quality settings to all active VFX
-    for (UNiagaraComponent* Component : ActiveVFXComponents)
+    return VFXComponent;
+}
+
+void AVFXManager::SetRainIntensity(float Intensity)
+{
+    // Broadcast rain intensity to all environmental VFX
+    for (UNiagaraComponent* VFXComp : ActiveVFXSystems)
     {
-        if (Component)
+        if (VFXComp && VFXComp->GetAsset())
         {
-            Component->SetFloatParameter(TEXT("QualityLevel"), static_cast<float>(CurrentQualityLevel));
+            FString AssetName = VFXComp->GetAsset()->GetName();
+            if (AssetName.Contains(TEXT("Rain")) || AssetName.Contains(TEXT("Weather")))
+            {
+                VFXComp->SetFloatParameter(TEXT("Rain_Intensity"), Intensity);
+            }
         }
     }
 }
 
-void AVFXManager::CullDistantVFX(FVector ViewerLocation)
+void AVFXManager::SetWindStrength(float WindStrength, FVector WindDirection)
 {
-    for (int32 i = ActiveVFXComponents.Num() - 1; i >= 0; i--)
+    // Update wind parameters for vegetation and atmospheric effects
+    for (UNiagaraComponent* VFXComp : ActiveVFXSystems)
     {
-        if (!ActiveVFXComponents[i] || !IsValid(ActiveVFXComponents[i]))
+        if (VFXComp && VFXComp->GetAsset())
         {
-            ActiveVFXComponents.RemoveAt(i);
+            FString AssetName = VFXComp->GetAsset()->GetName();
+            if (AssetName.Contains(TEXT("Wind")) || AssetName.Contains(TEXT("Leaves")))
+            {
+                VFXComp->SetFloatParameter(TEXT("Wind_Strength"), WindStrength);
+                VFXComp->SetVectorParameter(TEXT("Wind_Direction"), WindDirection);
+            }
+        }
+    }
+}
+
+void AVFXManager::SetAtmosphericDust(float Density, FLinearColor Color)
+{
+    // Update atmospheric dust for depth and mood
+    for (UNiagaraComponent* VFXComp : ActiveVFXSystems)
+    {
+        if (VFXComp && VFXComp->GetAsset())
+        {
+            FString AssetName = VFXComp->GetAsset()->GetName();
+            if (AssetName.Contains(TEXT("Dust")) || AssetName.Contains(TEXT("Atmosphere")))
+            {
+                VFXComp->SetFloatParameter(TEXT("Dust_Density"), Density);
+                VFXComp->SetColorParameter(TEXT("Dust_Color"), Color);
+            }
+        }
+    }
+}
+
+UNiagaraComponent* AVFXManager::SpawnDinosaurBreath(
+    AActor* DinosaurActor,
+    float BreathIntensity,
+    FLinearColor BreathColor)
+{
+    if (!DinosaurActor)
+    {
+        return nullptr;
+    }
+    
+    // Find mouth/nose attachment point
+    USceneComponent* AttachPoint = DinosaurActor->GetRootComponent();
+    
+    // Load breath VFX system (this would be a real asset reference)
+    UNiagaraSystem* BreathSystem = nullptr; // LoadObject<UNiagaraSystem>(nullptr, TEXT("/Game/VFX/Dinosaurs/NS_DinosaurBreath"));
+    
+    if (!BreathSystem)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("VFXManager: Dinosaur breath VFX system not found"));
+        return nullptr;
+    }
+    
+    UNiagaraComponent* BreathVFX = SpawnVFXAttached(
+        BreathSystem,
+        AttachPoint,
+        TEXT("MouthSocket"),
+        FVector::ZeroVector,
+        FRotator::ZeroRotator,
+        FVector::OneVector,
+        false, // Don't auto-destroy, managed by dinosaur
+        0.0f
+    );
+    
+    if (BreathVFX)
+    {
+        BreathVFX->SetFloatParameter(TEXT("Breath_Intensity"), BreathIntensity);
+        BreathVFX->SetColorParameter(TEXT("Breath_Color"), BreathColor);
+    }
+    
+    return BreathVFX;
+}
+
+void AVFXManager::SpawnFootstepVFX(
+    FVector FootLocation,
+    float DinosaurWeight,
+    int32 SurfaceType)
+{
+    // Different VFX based on surface type
+    UNiagaraSystem* FootstepSystem = nullptr;
+    
+    switch (SurfaceType)
+    {
+        case 0: // Mud
+            // FootstepSystem = LoadObject<UNiagaraSystem>(nullptr, TEXT("/Game/VFX/Environment/NS_FootstepMud"));
+            break;
+        case 1: // Grass
+            // FootstepSystem = LoadObject<UNiagaraSystem>(nullptr, TEXT("/Game/VFX/Environment/NS_FootstepGrass"));
+            break;
+        case 2: // Stone
+            // FootstepSystem = LoadObject<UNiagaraSystem>(nullptr, TEXT("/Game/VFX/Environment/NS_FootstepStone"));
+            break;
+        default:
+            // FootstepSystem = LoadObject<UNiagaraSystem>(nullptr, TEXT("/Game/VFX/Environment/NS_FootstepGeneric"));
+            break;
+    }
+    
+    if (FootstepSystem)
+    {
+        UNiagaraComponent* FootstepVFX = SpawnVFXAtLocation(
+            FootstepSystem,
+            FootLocation,
+            FRotator::ZeroRotator,
+            FVector::OneVector,
+            true,
+            3.0f // Short-lived effect
+        );
+        
+        if (FootstepVFX)
+        {
+            FootstepVFX->SetFloatParameter(TEXT("Weight_Scale"), DinosaurWeight);
+            FootstepVFX->SetIntParameter(TEXT("Surface_Type"), SurfaceType);
+        }
+    }
+}
+
+UNiagaraComponent* AVFXManager::SpawnTamingVFX(AActor* DinosaurActor, float TamingProgress)
+{
+    if (!DinosaurActor)
+    {
+        return nullptr;
+    }
+    
+    // Load taming VFX system
+    UNiagaraSystem* TamingSystem = nullptr; // LoadObject<UNiagaraSystem>(nullptr, TEXT("/Game/VFX/Gameplay/NS_TamingEffect"));
+    
+    if (!TamingSystem)
+    {
+        return nullptr;
+    }
+    
+    UNiagaraComponent* TamingVFX = SpawnVFXAttached(
+        TamingSystem,
+        DinosaurActor->GetRootComponent(),
+        NAME_None,
+        FVector(0, 0, 100), // Above the dinosaur
+        FRotator::ZeroRotator,
+        FVector::OneVector,
+        false,
+        0.0f
+    );
+    
+    if (TamingVFX)
+    {
+        TamingVFX->SetFloatParameter(TEXT("Taming_Progress"), TamingProgress);
+        
+        // Color changes based on progress: red -> yellow -> green
+        FLinearColor TamingColor = FLinearColor::LerpUsingHSV(
+            FLinearColor::Red,
+            FLinearColor::Green,
+            TamingProgress
+        );
+        TamingVFX->SetColorParameter(TEXT("Taming_Color"), TamingColor);
+    }
+    
+    return TamingVFX;
+}
+
+UNiagaraComponent* AVFXManager::SpawnFireVFX(
+    FVector Location,
+    float FireIntensity,
+    bool bIsTorch)
+{
+    // Different fire systems for different uses
+    UNiagaraSystem* FireSystem = nullptr;
+    
+    if (bIsTorch)
+    {
+        // FireSystem = LoadObject<UNiagaraSystem>(nullptr, TEXT("/Game/VFX/Survival/NS_TorchFire"));
+    }
+    else
+    {
+        // FireSystem = LoadObject<UNiagaraSystem>(nullptr, TEXT("/Game/VFX/Survival/NS_CampfireFire"));
+    }
+    
+    if (!FireSystem)
+    {
+        return nullptr;
+    }
+    
+    UNiagaraComponent* FireVFX = SpawnVFXAtLocation(
+        FireSystem,
+        Location,
+        FRotator::ZeroRotator,
+        FVector::OneVector,
+        false, // Fire persists until manually destroyed
+        0.0f
+    );
+    
+    if (FireVFX)
+    {
+        FireVFX->SetFloatParameter(TEXT("Fire_Intensity"), FireIntensity);
+        FireVFX->SetFloatParameter(TEXT("Heat_Distortion"), FireIntensity * 0.5f);
+    }
+    
+    return FireVFX;
+}
+
+void AVFXManager::SpawnToolImpactVFX(
+    FVector ImpactLocation,
+    FVector ImpactNormal,
+    int32 MaterialType,
+    float ImpactForce)
+{
+    UNiagaraSystem* ImpactSystem = nullptr;
+    
+    switch (MaterialType)
+    {
+        case 0: // Wood
+            // ImpactSystem = LoadObject<UNiagaraSystem>(nullptr, TEXT("/Game/VFX/Tools/NS_WoodImpact"));
+            break;
+        case 1: // Stone
+            // ImpactSystem = LoadObject<UNiagaraSystem>(nullptr, TEXT("/Game/VFX/Tools/NS_StoneImpact"));
+            break;
+        case 2: // Metal
+            // ImpactSystem = LoadObject<UNiagaraSystem>(nullptr, TEXT("/Game/VFX/Tools/NS_MetalImpact"));
+            break;
+        default:
+            // ImpactSystem = LoadObject<UNiagaraSystem>(nullptr, TEXT("/Game/VFX/Tools/NS_GenericImpact"));
+            break;
+    }
+    
+    if (ImpactSystem)
+    {
+        FRotator ImpactRotation = FRotationMatrix::MakeFromZ(ImpactNormal).Rotator();
+        
+        UNiagaraComponent* ImpactVFX = SpawnVFXAtLocation(
+            ImpactSystem,
+            ImpactLocation,
+            ImpactRotation,
+            FVector::OneVector,
+            true,
+            2.0f
+        );
+        
+        if (ImpactVFX)
+        {
+            ImpactVFX->SetFloatParameter(TEXT("Impact_Force"), ImpactForce);
+            ImpactVFX->SetVectorParameter(TEXT("Impact_Normal"), ImpactNormal);
+        }
+    }
+}
+
+void AVFXManager::SpawnWaterVFX(FVector Location, int32 WaterType, float Intensity)
+{
+    UNiagaraSystem* WaterSystem = nullptr;
+    
+    switch (WaterType)
+    {
+        case 0: // Dripping
+            // WaterSystem = LoadObject<UNiagaraSystem>(nullptr, TEXT("/Game/VFX/Environment/NS_WaterDrip"));
+            break;
+        case 1: // Splash
+            // WaterSystem = LoadObject<UNiagaraSystem>(nullptr, TEXT("/Game/VFX/Environment/NS_WaterSplash"));
+            break;
+        case 2: // Stream
+            // WaterSystem = LoadObject<UNiagaraSystem>(nullptr, TEXT("/Game/VFX/Environment/NS_WaterStream"));
+            break;
+    }
+    
+    if (WaterSystem)
+    {
+        UNiagaraComponent* WaterVFX = SpawnVFXAtLocation(
+            WaterSystem,
+            Location,
+            FRotator::ZeroRotator,
+            FVector::OneVector,
+            WaterType != 2, // Streams don't auto-destroy
+            WaterType == 1 ? 3.0f : 0.0f // Splashes last 3 seconds
+        );
+        
+        if (WaterVFX)
+        {
+            WaterVFX->SetFloatParameter(TEXT("Water_Intensity"), Intensity);
+        }
+    }
+}
+
+void AVFXManager::UpdateVFXLOD()
+{
+    if (!PlayerPawn)
+    {
+        PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+        return;
+    }
+    
+    FVector PlayerLocation = PlayerPawn->GetActorLocation();
+    
+    for (UNiagaraComponent* VFXComp : ActiveVFXSystems)
+    {
+        if (!VFXComp || !VFXComp->IsActive())
+        {
             continue;
         }
         
-        float Distance = FVector::Dist(ActiveVFXComponents[i]->GetComponentLocation(), ViewerLocation);
-        if (Distance > MaxVFXDistance)
-        {
-            ActiveVFXComponents[i]->DestroyComponent();
-            ActiveVFXComponents.RemoveAt(i);
-        }
-    }
-}
-
-FVFXDefinition* AVFXManager::GetVFXDefinition(EVFXType Type)
-{
-    int32 TypeIndex = static_cast<int32>(Type);
-    if (VFXDefinitions.IsValidIndex(TypeIndex))
-    {
-        return &VFXDefinitions[TypeIndex];
-    }
-    return nullptr;
-}
-
-void AVFXManager::CleanupFinishedVFX()
-{
-    for (int32 i = ActiveVFXComponents.Num() - 1; i >= 0; i--)
-    {
-        if (!ActiveVFXComponents[i] || !IsValid(ActiveVFXComponents[i]) || 
-            !ActiveVFXComponents[i]->IsActive())
-        {
-            ActiveVFXComponents.RemoveAt(i);
-        }
-    }
-}
-
-float AVFXManager::CalculateLODLevel(FVector VFXLocation, FVector ViewerLocation)
-{
-    float Distance = FVector::Dist(VFXLocation, ViewerLocation);
-    
-    // Return LOD level based on distance (0 = highest quality, 3 = lowest quality)
-    if (Distance < 1000.0f)
-        return 0.0f; // High quality
-    else if (Distance < 2500.0f)
-        return 1.0f; // Medium quality
-    else if (Distance < 5000.0f)
-        return 2.0f; // Low quality
-    else
-        return 3.0f; // Very low quality or cull
-}
-
-void AVFXManager::ApplyLODSettings(UNiagaraComponent* VFXComponent, float LODLevel)
-{
-    if (!VFXComponent)
-        return;
+        FVector VFXLocation = VFXComp->GetComponentLocation();
+        float Distance = FVector::Dist(PlayerLocation, VFXLocation);
         
-    VFXComponent->SetFloatParameter(TEXT("LODLevel"), LODLevel);
-    
-    // Adjust particle count based on LOD
-    float ParticleMultiplier = 1.0f;
-    switch (static_cast<int32>(LODLevel))
+        int32 NewLOD = CalculateVFXLOD(VFXLocation);
+        VFXComp->SetIntParameter(TEXT("LOD_Level"), NewLOD);
+        
+        // Disable very distant VFX to save performance
+        if (Distance > VFXLODDistance_Low * 1.5f)
+        {
+            VFXComp->SetActive(false);
+        }
+        else if (!VFXComp->IsActive() && Distance <= VFXLODDistance_Low)
+        {
+            VFXComp->SetActive(true);
+        }
+    }
+}
+
+void AVFXManager::CleanupExpiredVFX()
+{
+    ActiveVFXSystems.RemoveAll([this](UNiagaraComponent* VFXComp)
     {
-        case 0: ParticleMultiplier = 1.0f; break;   // High
-        case 1: ParticleMultiplier = 0.7f; break;  // Medium
-        case 2: ParticleMultiplier = 0.4f; break;  // Low
-        case 3: ParticleMultiplier = 0.1f; break;  // Very Low
+        if (!VFXComp || !IsValid(VFXComp) || (!VFXComp->IsActive() && VFXComp->HasCompleted()))
+        {
+            if (VFXComp)
+            {
+                ReturnToPool(VFXComp);
+            }
+            return true;
+        }
+        return false;
+    });
+    
+    ActiveVFXCount = ActiveVFXSystems.Num();
+}
+
+int32 AVFXManager::CalculateVFXLOD(FVector VFXLocation)
+{
+    if (!PlayerPawn)
+    {
+        return 2; // Default to low LOD if no player
     }
     
-    VFXComponent->SetFloatParameter(TEXT("ParticleMultiplier"), ParticleMultiplier);
+    float Distance = FVector::Dist(PlayerPawn->GetActorLocation(), VFXLocation);
+    
+    if (Distance <= VFXLODDistance_High)
+    {
+        return 0; // High LOD
+    }
+    else if (Distance <= VFXLODDistance_Medium)
+    {
+        return 1; // Medium LOD
+    }
+    else
+    {
+        return 2; // Low LOD
+    }
+}
+
+UNiagaraComponent* AVFXManager::GetPooledVFXComponent()
+{
+    // Try to get from pool first
+    for (int32 i = VFXPool.Num() - 1; i >= 0; --i)
+    {
+        UNiagaraComponent* PooledComp = VFXPool[i];
+        if (PooledComp && !PooledComp->IsActive())
+        {
+            VFXPool.RemoveAt(i);
+            PooledVFXCount--;
+            return PooledComp;
+        }
+    }
+    
+    // Create new component if pool is empty
+    UNiagaraComponent* NewComponent = CreateDefaultSubobject<UNiagaraComponent>(
+        *FString::Printf(TEXT("DynamicVFX_%d"), FMath::Rand())
+    );
+    NewComponent->SetAutoDestroy(false);
+    
+    return NewComponent;
+}
+
+void AVFXManager::ReturnToPool(UNiagaraComponent* Component)
+{
+    if (!Component)
+    {
+        return;
+    }
+    
+    // Remove from active systems
+    ActiveVFXSystems.Remove(Component);
+    ActiveVFXCount--;
+    
+    // Reset component state
+    Component->SetActive(false);
+    Component->SetAsset(nullptr);
+    Component->DetachFromComponent(FDetachmentTransformRules::KeepWorldTransform);
+    
+    // Return to pool if there's space
+    if (VFXPool.Num() < MaxActiveVFXSystems / 2)
+    {
+        VFXPool.Add(Component);
+        PooledVFXCount++;
+    }
+    else
+    {
+        // Destroy if pool is full
+        Component->DestroyComponent();
+    }
 }
