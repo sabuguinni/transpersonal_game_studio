@@ -1,500 +1,440 @@
 #include "ProceduralWorldManager.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Kismet/GameplayStatics.h"
-#include "Math/UnrealMathUtility.h"
+#include "Engine/Engine.h"
+#include "Landscape.h"
+#include "LandscapeProxy.h"
+#include "LandscapeInfo.h"
+#include "LandscapeComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "PCGComponent.h"
+#include "PCGGraph.h"
 #include "PCGSubsystem.h"
 #include "WorldPartition/WorldPartition.h"
-#include "WorldPartition/WorldPartitionSubsystem.h"
-#include "Landscape/Classes/LandscapeProxy.h"
-#include "Components/BrushComponent.h"
+#include "Kismet/GameplayStatics.h"
+#include "Math/UnrealMathUtility.h"
 
 AProceduralWorldManager::AProceduralWorldManager()
 {
-    PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.bStartWithTickEnabled = true;
+    PrimaryActorTick.bCanEverTick = false;
+    bReplicates = false;
 
-    // Create root component
-    RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
+    // Create main PCG component
+    MainPCGComponent = CreateDefaultSubobject<UPCGComponent>(TEXT("MainPCGComponent"));
+    RootComponent = MainPCGComponent;
 
-    // Create PCG component
-    MasterPCGComponent = CreateDefaultSubobject<UPCGComponent>(TEXT("MasterPCGComponent"));
-    MasterPCGComponent->SetupAttachment(RootComponent);
-
-    // Create debug visualization component
-    DebugVisualizationComponent = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("DebugVisualizationComponent"));
-    DebugVisualizationComponent->SetupAttachment(RootComponent);
-    DebugVisualizationComponent->SetVisibility(false);
-
-    // Initialize default world settings
-    WorldSettings.CellSize = 25600; // 256m cells
-    WorldSettings.LoadingRange = 76800; // 768m range
-    WorldSettings.bUseHierarchicalGeneration = true;
-    WorldSettings.bUseRuntimeGeneration = true;
-    WorldSettings.bUseGPUProcessing = true;
-    WorldSettings.LandscapeSize = FIntPoint(2017, 2017);
-    WorldSettings.QuadsPerSection = 63;
-    WorldSettings.SectionsPerComponent = 4;
-    WorldSettings.ZScale = 100.0f;
-    WorldSettings.MaxConcurrentGenerations = 4;
-    WorldSettings.FrameTimeAllocation = 16.667f;
-
-    // Initialize default biome configurations
-    InitializeBiomeDistribution();
+    // Set default world configuration
+    WorldConfig = nullptr;
+    GeneratedLandscape = nullptr;
 }
 
 void AProceduralWorldManager::BeginPlay()
 {
     Super::BeginPlay();
-    
-    UE_LOG(LogTemp, Warning, TEXT("ProceduralWorldManager: BeginPlay - Initializing world generation"));
-    
-    // Delay initialization to ensure all systems are ready
-    GetWorld()->GetTimerManager().SetTimer(
-        FTimerHandle(),
-        this,
-        &AProceduralWorldManager::InitializeWorldGeneration,
-        1.0f,
-        false
-    );
+
+    // Cache biome definitions for performance
+    if (WorldConfig.LoadSynchronous())
+    {
+        UWorldGenerationConfig* Config = WorldConfig.Get();
+        if (Config)
+        {
+            for (const TSoftObjectPtr<UBiomeDefinition>& BiomePtr : Config->BiomeDefinitions)
+            {
+                if (UBiomeDefinition* BiomeDef = BiomePtr.LoadSynchronous())
+                {
+                    CachedBiomeDefinitions.Add(BiomeDef->BiomeType, BiomeDef);
+                }
+            }
+        }
+    }
 }
 
-void AProceduralWorldManager::EndPlay(const EEndPlayReason::Type EndPlayReason)
+void AProceduralWorldManager::OnConstruction(const FTransform& Transform)
 {
-    // Cleanup any ongoing generations
-    if (MasterPCGComponent)
+    Super::OnConstruction(Transform);
+
+    // Setup World Partition if we're in a partitioned world
+    if (GetWorld() && GetWorld()->GetWorldPartition())
     {
-        MasterPCGComponent->CleanupLocalImmediate(true);
+        SetupWorldPartition();
+    }
+}
+
+void AProceduralWorldManager::GenerateWorld()
+{
+    UE_LOG(LogTemp, Warning, TEXT("ProceduralWorldManager: Starting complete world generation..."));
+
+    if (!WorldConfig.LoadSynchronous())
+    {
+        UE_LOG(LogTemp, Error, TEXT("ProceduralWorldManager: No world configuration assigned!"));
+        return;
     }
 
-    Super::EndPlay(EndPlayReason);
+    // Clear any existing content first
+    ClearGeneratedContent();
+
+    // Generate in sequence for dependencies
+    GenerateTerrain();
+    GenerateBiomes();
+    GenerateWaterSystems();
+    GenerateVegetation();
+
+    UE_LOG(LogTemp, Warning, TEXT("ProceduralWorldManager: World generation completed!"));
 }
 
-void AProceduralWorldManager::Tick(float DeltaTime)
+void AProceduralWorldManager::GenerateTerrain()
 {
-    Super::Tick(DeltaTime);
+    UE_LOG(LogTemp, Warning, TEXT("ProceduralWorldManager: Generating base terrain..."));
 
-    // Performance monitoring
-    if (bIsInitialized && ActiveGenerations > 0)
+    UWorldGenerationConfig* Config = WorldConfig.LoadSynchronous();
+    if (!Config)
     {
-        LastGenerationTime += DeltaTime;
+        UE_LOG(LogTemp, Error, TEXT("ProceduralWorldManager: Cannot load world configuration"));
+        return;
+    }
+
+    // Calculate landscape parameters
+    const float WorldSizeCm = Config->WorldSizeKm * 100000.0f; // Convert km to cm
+    const int32 ComponentCountPerSide = FMath::CeilToInt(FMath::Sqrt(static_cast<float>(Config->LandscapeResolution - 1) / (Config->ComponentSize - 1)));
+    
+    UE_LOG(LogTemp, Warning, TEXT("ProceduralWorldManager: Landscape will be %dx%d components, each %dx%d quads"), 
+           ComponentCountPerSide, ComponentCountPerSide, Config->ComponentSize - 1, Config->ComponentSize - 1);
+
+    // TODO: Create landscape programmatically
+    // For now, we'll use PCG to generate heightmap data that can be imported
+    
+    // Generate heightmap using Perlin noise
+    TArray<uint16> HeightData;
+    const int32 HeightmapSize = Config->LandscapeResolution;
+    HeightData.SetNum(HeightmapSize * HeightmapSize);
+
+    for (int32 Y = 0; Y < HeightmapSize; Y++)
+    {
+        for (int32 X = 0; X < HeightmapSize; X++)
+        {
+            const float NormalizedX = static_cast<float>(X) / HeightmapSize;
+            const float NormalizedY = static_cast<float>(Y) / HeightmapSize;
+            
+            // Multi-octave noise for realistic terrain
+            float Height = 0.0f;
+            float Amplitude = 1.0f;
+            float Frequency = 0.01f;
+            
+            // Base terrain shape
+            for (int32 Octave = 0; Octave < 6; Octave++)
+            {
+                Height += FMath::PerlinNoise2D(FVector2D(NormalizedX * Frequency, NormalizedY * Frequency)) * Amplitude;
+                Amplitude *= 0.5f;
+                Frequency *= 2.0f;
+            }
+            
+            // Add volcanic features
+            const FVector2D Center1(0.3f, 0.7f);
+            const FVector2D Center2(0.8f, 0.2f);
+            const float Dist1 = FVector2D::Distance(FVector2D(NormalizedX, NormalizedY), Center1);
+            const float Dist2 = FVector2D::Distance(FVector2D(NormalizedX, NormalizedY), Center2);
+            
+            if (Dist1 < 0.15f)
+            {
+                Height += (0.15f - Dist1) * 3.0f; // Volcanic peak
+            }
+            if (Dist2 < 0.1f)
+            {
+                Height += (0.1f - Dist2) * 2.0f; // Smaller volcanic feature
+            }
+            
+            // River valleys (lower terrain along specific paths)
+            const float RiverNoise = FMath::PerlinNoise2D(FVector2D(NormalizedX * 0.02f, NormalizedY * 0.02f));
+            if (FMath::Abs(RiverNoise) < 0.1f)
+            {
+                Height -= 0.3f; // Create river valleys
+            }
+            
+            // Normalize and convert to heightmap range
+            Height = FMath::Clamp(Height, -1.0f, 1.0f);
+            const uint16 HeightValue = static_cast<uint16>((Height + 1.0f) * 0.5f * 65535.0f);
+            HeightData[Y * HeightmapSize + X] = HeightValue;
+        }
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("ProceduralWorldManager: Generated heightmap data with %d samples"), HeightData.Num());
+}
+
+void AProceduralWorldManager::GenerateBiomes()
+{
+    UE_LOG(LogTemp, Warning, TEXT("ProceduralWorldManager: Generating biome distribution..."));
+
+    // Biome generation will be handled by PCG graphs
+    // This sets up the biome noise patterns and transition zones
+    
+    if (MainPCGComponent)
+    {
+        // Trigger PCG generation for biomes
+        if (UPCGSubsystem* PCGSubsystem = UPCGSubsystem::GetInstance(GetWorld()))
+        {
+            PCGSubsystem->ScheduleComponent(MainPCGComponent, /*bSave=*/true);
+        }
+    }
+}
+
+void AProceduralWorldManager::GenerateWaterSystems()
+{
+    UE_LOG(LogTemp, Warning, TEXT("ProceduralWorldManager: Generating water systems..."));
+
+    UWorldGenerationConfig* Config = WorldConfig.LoadSynchronous();
+    if (!Config || !Config->bGenerateRivers)
+    {
+        return;
+    }
+
+    // Generate river splines based on terrain flow
+    // This will create AWaterBody actors for rivers and lakes
+    
+    const float WorldSize = Config->WorldSizeKm * 100000.0f;
+    
+    for (int32 RiverIndex = 0; RiverIndex < Config->MajorRiverCount; RiverIndex++)
+    {
+        // Find high elevation starting points
+        FVector StartLocation;
+        StartLocation.X = FMath::RandRange(-WorldSize * 0.4f, WorldSize * 0.4f);
+        StartLocation.Y = FMath::RandRange(-WorldSize * 0.4f, WorldSize * 0.4f);
+        StartLocation.Z = 5000.0f; // Start at elevated position
         
-        // Log performance warnings if generation takes too long
-        if (LastGenerationTime > 5.0f)
-        {
-            UE_LOG(LogTemp, Warning, TEXT("ProceduralWorldManager: Long generation detected - %d active generations taking %.2f seconds"), 
-                ActiveGenerations, LastGenerationTime);
-        }
+        // TODO: Trace down to find actual terrain height
+        // TODO: Create spline following terrain gradient
+        // TODO: Spawn AWaterBody actor with the spline
+        
+        UE_LOG(LogTemp, Warning, TEXT("ProceduralWorldManager: Generated river %d starting at %s"), 
+               RiverIndex, *StartLocation.ToString());
     }
 }
 
-void AProceduralWorldManager::InitializeWorldGeneration()
+void AProceduralWorldManager::GenerateVegetation()
 {
-    UE_LOG(LogTemp, Warning, TEXT("ProceduralWorldManager: Starting world generation initialization"));
+    UE_LOG(LogTemp, Warning, TEXT("ProceduralWorldManager: Generating vegetation for all biomes..."));
 
-    if (bIsInitialized)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("ProceduralWorldManager: Already initialized"));
-        return;
-    }
-
-    // Setup World Partition
-    SetupWorldPartition();
-
-    // Configure PCG System
-    ConfigurePCGSystem();
-
-    // Create or find landscape
-    CreateLandscapeIfNeeded();
-
-    // Initialize biome distribution
-    InitializeBiomeDistribution();
-
-    bIsInitialized = true;
-    UE_LOG(LogTemp, Warning, TEXT("ProceduralWorldManager: World generation initialization complete"));
-}
-
-void AProceduralWorldManager::SetupWorldPartition()
-{
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        UE_LOG(LogTemp, Error, TEXT("ProceduralWorldManager: No valid world found"));
-        return;
-    }
-
-    UWorldPartition* WorldPartition = World->GetWorldPartition();
-    if (!WorldPartition)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("ProceduralWorldManager: World Partition not enabled for this world"));
-        return;
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("ProceduralWorldManager: World Partition detected - Cell Size: %d, Loading Range: %d"), 
-        WorldSettings.CellSize, WorldSettings.LoadingRange);
-
-    // World Partition settings are configured in World Settings
-    // This function validates the setup
-}
-
-void AProceduralWorldManager::ConfigurePCGSystem()
-{
-    if (!MasterPCGComponent)
-    {
-        UE_LOG(LogTemp, Error, TEXT("ProceduralWorldManager: MasterPCGComponent is null"));
-        return;
-    }
-
-    // Configure PCG component for hierarchical generation
-    MasterPCGComponent->bIsPartitioned = WorldSettings.bUseHierarchicalGeneration;
+    // Vegetation generation will use PCG with biome-specific rules
+    // Each biome will have its own vegetation density and species distribution
     
-    // Set generation trigger based on runtime settings
-    if (WorldSettings.bUseRuntimeGeneration)
+    for (const auto& BiomePair : CachedBiomeDefinitions)
     {
-        MasterPCGComponent->GenerationTrigger = EPCGComponentGenerationTrigger::GenerateAtRuntime;
-    }
-    else
-    {
-        MasterPCGComponent->GenerationTrigger = EPCGComponentGenerationTrigger::GenerateOnDemand;
-    }
-
-    // Load master world graph if specified
-    if (MasterWorldGraph.IsValid())
-    {
-        UPCGGraph* LoadedGraph = MasterWorldGraph.LoadSynchronous();
-        if (LoadedGraph)
+        const EBiomeType BiomeType = BiomePair.Key;
+        const UBiomeDefinition* BiomeDef = BiomePair.Value;
+        
+        if (BiomeDef && BiomeDef->VegetationGraph.LoadSynchronous())
         {
-            MasterPCGComponent->SetGraph(LoadedGraph);
-            UE_LOG(LogTemp, Log, TEXT("ProceduralWorldManager: Master world graph loaded successfully"));
-        }
-        else
-        {
-            UE_LOG(LogTemp, Warning, TEXT("ProceduralWorldManager: Failed to load master world graph"));
+            UE_LOG(LogTemp, Warning, TEXT("ProceduralWorldManager: Generating vegetation for biome %d"), 
+                   static_cast<int32>(BiomeType));
+            
+            // TODO: Create PCG component for this biome's vegetation
+            // TODO: Set biome-specific parameters
+            // TODO: Schedule generation
         }
     }
-
-    UE_LOG(LogTemp, Log, TEXT("ProceduralWorldManager: PCG system configured - Partitioned: %s, Runtime: %s"), 
-        WorldSettings.bUseHierarchicalGeneration ? TEXT("true") : TEXT("false"),
-        WorldSettings.bUseRuntimeGeneration ? TEXT("true") : TEXT("false"));
 }
 
-void AProceduralWorldManager::CreateLandscapeIfNeeded()
+void AProceduralWorldManager::ClearGeneratedContent()
 {
-    // Check if target landscape is already set
-    if (TargetLandscape.IsValid())
+    UE_LOG(LogTemp, Warning, TEXT("ProceduralWorldManager: Clearing all generated content..."));
+
+    // Clear water bodies
+    for (AWaterBody* WaterBody : GeneratedWaterBodies)
     {
-        ALandscape* LoadedLandscape = TargetLandscape.LoadSynchronous();
-        if (LoadedLandscape)
+        if (IsValid(WaterBody))
         {
-            UE_LOG(LogTemp, Log, TEXT("ProceduralWorldManager: Using existing landscape"));
-            return;
+            WaterBody->Destroy();
         }
     }
+    GeneratedWaterBodies.Empty();
 
-    // Find existing landscape in the world
-    TArray<AActor*> FoundLandscapes;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), ALandscape::StaticClass(), FoundLandscapes);
+    // Clear landscape reference
+    GeneratedLandscape = nullptr;
 
-    if (FoundLandscapes.Num() > 0)
+    // Clear PCG generated content
+    if (MainPCGComponent)
     {
-        ALandscape* ExistingLandscape = Cast<ALandscape>(FoundLandscapes[0]);
-        if (ExistingLandscape)
-        {
-            TargetLandscape = ExistingLandscape;
-            UE_LOG(LogTemp, Log, TEXT("ProceduralWorldManager: Found existing landscape in world"));
-            return;
-        }
-    }
-
-    UE_LOG(LogTemp, Warning, TEXT("ProceduralWorldManager: No landscape found - landscape should be created manually or via Open World template"));
-}
-
-void AProceduralWorldManager::InitializeBiomeDistribution()
-{
-    WorldSettings.BiomeConfigurations.Empty();
-
-    // Dense Jungle - High vegetation, moderate danger
-    FBiomeConfiguration DenseJungle;
-    DenseJungle.BiomeType = EBiomeType::DenseJungle;
-    DenseJungle.DangerLevel = EDangerLevel::Moderate;
-    DenseJungle.VegetationDensity = 0.9f;
-    DenseJungle.WaterPresence = 0.4f;
-    DenseJungle.TerrainRoughness = 0.6f;
-    DenseJungle.HeightRange = FVector2D(-200.0f, 1500.0f);
-    WorldSettings.BiomeConfigurations.Add(DenseJungle);
-
-    // Open Plains - Low vegetation, high danger (exposed to predators)
-    FBiomeConfiguration OpenPlains;
-    OpenPlains.BiomeType = EBiomeType::OpenPlains;
-    OpenPlains.DangerLevel = EDangerLevel::High;
-    OpenPlains.VegetationDensity = 0.3f;
-    OpenPlains.WaterPresence = 0.1f;
-    OpenPlains.TerrainRoughness = 0.2f;
-    OpenPlains.HeightRange = FVector2D(-100.0f, 500.0f);
-    WorldSettings.BiomeConfigurations.Add(OpenPlains);
-
-    // River Valley - High water, moderate vegetation, safe zones
-    FBiomeConfiguration RiverValley;
-    RiverValley.BiomeType = EBiomeType::RiverValley;
-    RiverValley.DangerLevel = EDangerLevel::Safe;
-    RiverValley.VegetationDensity = 0.6f;
-    RiverValley.WaterPresence = 0.8f;
-    RiverValley.TerrainRoughness = 0.3f;
-    RiverValley.HeightRange = FVector2D(-500.0f, 200.0f);
-    WorldSettings.BiomeConfigurations.Add(RiverValley);
-
-    // Rocky Outcrops - Low vegetation, extreme danger (predator lairs)
-    FBiomeConfiguration RockyOutcrops;
-    RockyOutcrops.BiomeType = EBiomeType::RockyOutcrops;
-    RockyOutcrops.DangerLevel = EDangerLevel::Extreme;
-    RockyOutcrops.VegetationDensity = 0.2f;
-    RockyOutcrops.WaterPresence = 0.1f;
-    RockyOutcrops.TerrainRoughness = 0.9f;
-    RockyOutcrops.HeightRange = FVector2D(500.0f, 2500.0f);
-    WorldSettings.BiomeConfigurations.Add(RockyOutcrops);
-
-    // Swampland - High water, dense vegetation, moderate danger
-    FBiomeConfiguration Swampland;
-    Swampland.BiomeType = EBiomeType::Swampland;
-    Swampland.DangerLevel = EDangerLevel::Moderate;
-    Swampland.VegetationDensity = 0.8f;
-    Swampland.WaterPresence = 0.9f;
-    Swampland.TerrainRoughness = 0.4f;
-    Swampland.HeightRange = FVector2D(-300.0f, 100.0f);
-    WorldSettings.BiomeConfigurations.Add(Swampland);
-
-    // Coastal Area - Moderate vegetation, high danger (marine predators)
-    FBiomeConfiguration CoastalArea;
-    CoastalArea.BiomeType = EBiomeType::CoastalArea;
-    CoastalArea.DangerLevel = EDangerLevel::High;
-    CoastalArea.VegetationDensity = 0.5f;
-    CoastalArea.WaterPresence = 0.7f;
-    CoastalArea.TerrainRoughness = 0.3f;
-    CoastalArea.HeightRange = FVector2D(-100.0f, 300.0f);
-    WorldSettings.BiomeConfigurations.Add(CoastalArea);
-
-    UE_LOG(LogTemp, Log, TEXT("ProceduralWorldManager: Initialized %d biome configurations"), 
-        WorldSettings.BiomeConfigurations.Num());
-}
-
-void AProceduralWorldManager::GenerateRegion(const FVector& Center, float Radius)
-{
-    if (!bIsInitialized)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("ProceduralWorldManager: Cannot generate region - not initialized"));
-        return;
-    }
-
-    if (ActiveGenerations >= WorldSettings.MaxConcurrentGenerations)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("ProceduralWorldManager: Cannot generate region - max concurrent generations reached"));
-        return;
-    }
-
-    ActiveGenerations++;
-    LastGenerationTime = 0.0f;
-
-    UE_LOG(LogTemp, Log, TEXT("ProceduralWorldManager: Generating region at %s with radius %.2f"), 
-        *Center.ToString(), Radius);
-
-    // Trigger PCG generation for the region
-    if (MasterPCGComponent)
-    {
-        MasterPCGComponent->Generate();
-    }
-
-    // Note: In a full implementation, this would trigger specific region generation
-    // For now, we trigger the master component which handles the overall generation
-}
-
-void AProceduralWorldManager::CleanupRegion(const FVector& Center, float Radius)
-{
-    if (!bIsInitialized)
-    {
-        return;
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("ProceduralWorldManager: Cleaning up region at %s with radius %.2f"), 
-        *Center.ToString(), Radius);
-
-    if (MasterPCGComponent)
-    {
-        MasterPCGComponent->CleanupLocalImmediate(false);
-    }
-
-    if (ActiveGenerations > 0)
-    {
-        ActiveGenerations--;
-    }
-}
-
-void AProceduralWorldManager::RegenerateAllBiomes()
-{
-    if (!bIsInitialized)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("ProceduralWorldManager: Cannot regenerate - not initialized"));
-        return;
-    }
-
-    UE_LOG(LogTemp, Warning, TEXT("ProceduralWorldManager: Regenerating all biomes"));
-
-    // Clear caches
-    BiomeCache.Empty();
-    DangerCache.Empty();
-
-    // Trigger full regeneration
-    if (MasterPCGComponent)
-    {
-        MasterPCGComponent->CleanupLocalImmediate(true);
-        MasterPCGComponent->Generate();
+        MainPCGComponent->CleanupLocalImmediate(/*bRemoveComponents=*/true);
     }
 }
 
 EBiomeType AProceduralWorldManager::GetBiomeAtLocation(const FVector& WorldLocation) const
 {
-    // Convert world location to grid coordinates for caching
-    FIntPoint GridCoord = FIntPoint(
-        FMath::FloorToInt(WorldLocation.X / 1000.0f),
-        FMath::FloorToInt(WorldLocation.Y / 1000.0f)
-    );
-
-    // Check cache first
-    if (const EBiomeType* CachedBiome = BiomeCache.Find(GridCoord))
-    {
-        return *CachedBiome;
-    }
-
-    // Calculate biome based on noise functions
-    FVector2D NormalizedCoords = WorldToNormalizedCoordinates(WorldLocation);
+    // Use noise-based biome distribution
+    const float NoiseValue = GenerateBiomeNoise(FVector2D(WorldLocation.X, WorldLocation.Y));
     
-    // Multiple noise layers for complex biome distribution
-    float HeightNoise = CalculateNoiseValue(NormalizedCoords, 0.5f, 4);
-    float MoistureNoise = CalculateNoiseValue(NormalizedCoords + FVector2D(1000.0f, 0.0f), 0.3f, 3);
-    float TemperatureNoise = CalculateNoiseValue(NormalizedCoords + FVector2D(0.0f, 1000.0f), 0.2f, 2);
-
-    EBiomeType ResultBiome = EBiomeType::DenseJungle; // Default
-
-    // Biome selection based on noise values
-    if (HeightNoise > 0.7f)
+    // Map noise value to biome types based on elevation and moisture
+    const float Elevation = WorldLocation.Z;
+    
+    if (Elevation < 1000.0f) // Low elevation
     {
-        ResultBiome = EBiomeType::RockyOutcrops;
+        if (NoiseValue < -0.3f) return EBiomeType::Swampland;
+        if (NoiseValue < 0.0f) return EBiomeType::RiverDelta;
+        if (NoiseValue < 0.3f) return EBiomeType::CoastalPlains;
+        return EBiomeType::DenseForest;
     }
-    else if (HeightNoise < -0.3f && MoistureNoise > 0.5f)
+    else if (Elevation < 3000.0f) // Medium elevation
     {
-        ResultBiome = EBiomeType::RiverValley;
+        if (NoiseValue < -0.2f) return EBiomeType::OpenWoodland;
+        if (NoiseValue < 0.2f) return EBiomeType::DenseForest;
+        return EBiomeType::Highlands;
     }
-    else if (MoistureNoise > 0.8f && HeightNoise < 0.2f)
+    else // High elevation
     {
-        ResultBiome = EBiomeType::Swampland;
+        if (NoiseValue < 0.0f) return EBiomeType::VolcanicRegion;
+        return EBiomeType::CanyonLands;
     }
-    else if (MoistureNoise < 0.3f && HeightNoise > 0.0f && HeightNoise < 0.4f)
-    {
-        ResultBiome = EBiomeType::OpenPlains;
-    }
-    else if (FMath::Abs(WorldLocation.X) > 8000.0f || FMath::Abs(WorldLocation.Y) > 8000.0f)
-    {
-        ResultBiome = EBiomeType::CoastalArea;
-    }
-    else
-    {
-        ResultBiome = EBiomeType::DenseJungle;
-    }
-
-    // Cache the result
-    const_cast<AProceduralWorldManager*>(this)->BiomeCache.Add(GridCoord, ResultBiome);
-
-    return ResultBiome;
 }
 
-EDangerLevel AProceduralWorldManager::GetDangerLevelAtLocation(const FVector& WorldLocation) const
+UBiomeDefinition* AProceduralWorldManager::GetBiomeDefinition(EBiomeType BiomeType) const
 {
-    EBiomeType BiomeType = GetBiomeAtLocation(WorldLocation);
-    FBiomeConfiguration BiomeConfig = GetBiomeConfiguration(BiomeType);
-    
-    // Add some variation to danger level based on location
-    FVector2D NormalizedCoords = WorldToNormalizedCoordinates(WorldLocation);
-    float DangerNoise = CalculateNoiseValue(NormalizedCoords + FVector2D(500.0f, 500.0f), 0.1f, 2);
-    
-    EDangerLevel BaseDanger = BiomeConfig.DangerLevel;
-    
-    // Modify danger based on noise (±1 level)
-    if (DangerNoise > 0.3f && BaseDanger != EDangerLevel::Extreme)
+    if (const TObjectPtr<UBiomeDefinition>* BiomeDef = CachedBiomeDefinitions.Find(BiomeType))
     {
-        return static_cast<EDangerLevel>(static_cast<uint8>(BaseDanger) + 1);
+        return BiomeDef->Get();
     }
-    else if (DangerNoise < -0.3f && BaseDanger != EDangerLevel::Safe)
-    {
-        return static_cast<EDangerLevel>(static_cast<uint8>(BaseDanger) - 1);
-    }
-    
-    return BaseDanger;
+    return nullptr;
 }
 
-FBiomeConfiguration AProceduralWorldManager::GetBiomeConfiguration(EBiomeType BiomeType) const
+bool AProceduralWorldManager::IsLocationSuitableForDinosaurs(const FVector& WorldLocation, float RequiredClearance) const
 {
-    for (const FBiomeConfiguration& Config : WorldSettings.BiomeConfigurations)
+    // Check biome suitability
+    const EBiomeType Biome = GetBiomeAtLocation(WorldLocation);
+    
+    // Exclude unsuitable biomes
+    if (Biome == EBiomeType::VolcanicRegion || Biome == EBiomeType::CanyonLands)
     {
-        if (Config.BiomeType == BiomeType)
+        return false;
+    }
+    
+    // Check slope (dinosaurs need relatively flat ground)
+    // TODO: Implement terrain slope calculation
+    
+    // Check vegetation density (some clearance needed)
+    // TODO: Query vegetation density from PCG
+    
+    return true;
+}
+
+TArray<FVector> AProceduralWorldManager::FindBaseBuildingLocations(int32 MaxLocations, float MinDistanceBetween) const
+{
+    TArray<FVector> SuitableLocations;
+    
+    UWorldGenerationConfig* Config = WorldConfig.LoadSynchronous();
+    if (!Config)
+    {
+        return SuitableLocations;
+    }
+    
+    const float WorldSize = Config->WorldSizeKm * 100000.0f;
+    const int32 MaxAttempts = MaxLocations * 10;
+    
+    for (int32 Attempt = 0; Attempt < MaxAttempts && SuitableLocations.Num() < MaxLocations; Attempt++)
+    {
+        FVector CandidateLocation;
+        CandidateLocation.X = FMath::RandRange(-WorldSize * 0.3f, WorldSize * 0.3f);
+        CandidateLocation.Y = FMath::RandRange(-WorldSize * 0.3f, WorldSize * 0.3f);
+        CandidateLocation.Z = 1000.0f; // TODO: Get actual terrain height
+        
+        // Check biome suitability
+        const EBiomeType Biome = GetBiomeAtLocation(CandidateLocation);
+        if (Biome == EBiomeType::VolcanicRegion || Biome == EBiomeType::Swampland)
         {
-            return Config;
+            continue; // Skip unsuitable biomes
+        }
+        
+        // Check distance from existing locations
+        bool bTooClose = false;
+        for (const FVector& ExistingLocation : SuitableLocations)
+        {
+            if (FVector::Distance(CandidateLocation, ExistingLocation) < MinDistanceBetween)
+            {
+                bTooClose = true;
+                break;
+            }
+        }
+        
+        if (!bTooClose)
+        {
+            SuitableLocations.Add(CandidateLocation);
         }
     }
-
-    // Return default if not found
-    FBiomeConfiguration DefaultConfig;
-    DefaultConfig.BiomeType = BiomeType;
-    return DefaultConfig;
-}
-
-void AProceduralWorldManager::ToggleDebugVisualization()
-{
-    bDebugVisualizationEnabled = !bDebugVisualizationEnabled;
     
-    if (DebugVisualizationComponent)
+    UE_LOG(LogTemp, Warning, TEXT("ProceduralWorldManager: Found %d suitable base building locations"), SuitableLocations.Num());
+    return SuitableLocations;
+}
+
+float AProceduralWorldManager::GenerateBiomeNoise(const FVector2D& Location) const
+{
+    UWorldGenerationConfig* Config = WorldConfig.LoadSynchronous();
+    if (!Config)
     {
-        DebugVisualizationComponent->SetVisibility(bDebugVisualizationEnabled);
+        return 0.0f;
     }
-
-    UE_LOG(LogTemp, Log, TEXT("ProceduralWorldManager: Debug visualization %s"), 
-        bDebugVisualizationEnabled ? TEXT("enabled") : TEXT("disabled"));
-}
-
-void AProceduralWorldManager::ShowBiomeMap()
-{
-    UE_LOG(LogTemp, Warning, TEXT("ProceduralWorldManager: Biome Map Debug - Feature not yet implemented"));
-    // TODO: Implement biome visualization overlay
-}
-
-void AProceduralWorldManager::ShowDangerZones()
-{
-    UE_LOG(LogTemp, Warning, TEXT("ProceduralWorldManager: Danger Zones Debug - Feature not yet implemented"));
-    // TODO: Implement danger zone visualization overlay
-}
-
-FVector2D AProceduralWorldManager::WorldToNormalizedCoordinates(const FVector& WorldLocation) const
-{
-    // Normalize world coordinates to 0-1 range for noise functions
-    const float WorldSize = 20000.0f; // 20km world
-    return FVector2D(
-        (WorldLocation.X + WorldSize * 0.5f) / WorldSize,
-        (WorldLocation.Y + WorldSize * 0.5f) / WorldSize
-    );
-}
-
-float AProceduralWorldManager::CalculateNoiseValue(const FVector2D& Coordinates, float Scale, int32 Octaves) const
-{
+    
+    // Multi-octave Perlin noise for biome distribution
     float NoiseValue = 0.0f;
     float Amplitude = 1.0f;
-    float Frequency = Scale;
-    float MaxValue = 0.0f;
-
-    for (int32 i = 0; i < Octaves; i++)
+    float Frequency = Config->BiomeNoiseScale;
+    
+    for (int32 Octave = 0; Octave < 4; Octave++)
     {
-        NoiseValue += FMath::PerlinNoise2D(Coordinates * Frequency) * Amplitude;
-        MaxValue += Amplitude;
+        NoiseValue += FMath::PerlinNoise2D(Location * Frequency) * Amplitude;
         Amplitude *= 0.5f;
         Frequency *= 2.0f;
     }
+    
+    return FMath::Clamp(NoiseValue, -1.0f, 1.0f);
+}
 
-    return NoiseValue / MaxValue;
+TMap<EBiomeType, float> AProceduralWorldManager::CalculateBiomeWeights(const FVector& WorldLocation) const
+{
+    TMap<EBiomeType, float> BiomeWeights;
+    
+    UWorldGenerationConfig* Config = WorldConfig.LoadSynchronous();
+    if (!Config)
+    {
+        return BiomeWeights;
+    }
+    
+    const EBiomeType PrimaryBiome = GetBiomeAtLocation(WorldLocation);
+    BiomeWeights.Add(PrimaryBiome, 1.0f);
+    
+    // Calculate blend weights for neighboring biomes
+    const float BlendDistance = Config->BiomeBlendDistance;
+    const TArray<FVector2D> SampleOffsets = {
+        FVector2D(BlendDistance, 0.0f),
+        FVector2D(-BlendDistance, 0.0f),
+        FVector2D(0.0f, BlendDistance),
+        FVector2D(0.0f, -BlendDistance)
+    };
+    
+    for (const FVector2D& Offset : SampleOffsets)
+    {
+        const FVector SampleLocation = WorldLocation + FVector(Offset.X, Offset.Y, 0.0f);
+        const EBiomeType SampleBiome = GetBiomeAtLocation(SampleLocation);
+        
+        if (SampleBiome != PrimaryBiome)
+        {
+            const float BlendWeight = 0.2f; // 20% influence from neighboring biomes
+            BiomeWeights.FindOrAdd(SampleBiome) += BlendWeight;
+        }
+    }
+    
+    return BiomeWeights;
+}
+
+void AProceduralWorldManager::SetupWorldPartition()
+{
+    UWorld* World = GetWorld();
+    if (!World || !World->GetWorldPartition())
+    {
+        return;
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("ProceduralWorldManager: Setting up World Partition integration..."));
+    
+    // Configure this actor for World Partition
+    SetIsSpatiallyLoaded(false); // Always loaded manager
+    
+    // TODO: Configure runtime grid settings
+    // TODO: Set up data layers for different biomes
+    // TODO: Configure HLOD generation
 }
