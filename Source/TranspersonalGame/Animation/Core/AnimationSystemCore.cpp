@@ -1,146 +1,120 @@
 #include "AnimationSystemCore.h"
 #include "Engine/World.h"
 #include "GameFramework/Character.h"
-#include "Components/CapsuleComponent.h"
 
 UAnimationSystemCore::UAnimationSystemCore()
 {
-    // Initialize with default values
+    // Initialize default animation state
+    CurrentAnimationState = FAnimationStateData();
+    StateTransitionTimer = 0.0f;
+    PreviousState = ECharacterAnimationState::Idle;
 }
 
-UPoseSearchDatabase* UAnimationSystemCore::GetMotionMatchingDatabase(ECreatureArchetype Archetype, EEmotionalState State)
+void UAnimationSystemCore::UpdateAnimationState(const FAnimationStateData& NewState)
 {
-    // Select appropriate database based on creature type and emotional state
-    switch (State)
+    // Store previous state for blend calculations
+    PreviousState = CurrentAnimationState.CurrentState;
+    
+    // Update current state
+    CurrentAnimationState = NewState;
+    
+    // Reset transition timer
+    StateTransitionTimer = 0.0f;
+    
+    // Log state change for debugging
+    UE_LOG(LogTemp, Log, TEXT("Animation State Changed: %s -> %s"), 
+           *UEnum::GetValueAsString(PreviousState),
+           *UEnum::GetValueAsString(CurrentAnimationState.CurrentState));
+}
+
+UPoseSearchDatabase* UAnimationSystemCore::GetActiveDatabase() const
+{
+    // Select database based on current state and fear level
+    switch (CurrentAnimationState.CurrentState)
     {
-        case EEmotionalState::Calm:
-        case EEmotionalState::Curious:
-        case EEmotionalState::Resting:
-            if (BaseLocomotionDatabases.Contains(Archetype))
+        case ECharacterAnimationState::Idle:
+        case ECharacterAnimationState::Walking:
+        case ECharacterAnimationState::Jogging:
+            if (CurrentAnimationState.FearLevel > 0.7f)
             {
-                return BaseLocomotionDatabases[Archetype];
+                return PanicMovementDatabase;
             }
-            break;
+            else if (CurrentAnimationState.CautionLevel > 0.6f)
+            {
+                return CautiousMovementDatabase;
+            }
+            return LocomotionDatabase;
             
-        case EEmotionalState::Aggressive:
-        case EEmotionalState::Hunting:
-        case EEmotionalState::Territorial:
-            if (CombatDatabases.Contains(Archetype))
-            {
-                return CombatDatabases[Archetype];
-            }
-            break;
+        case ECharacterAnimationState::Cautious:
+        case ECharacterAnimationState::Sneaking:
+        case ECharacterAnimationState::Hiding:
+        case ECharacterAnimationState::Observing:
+            return CautiousMovementDatabase;
             
-        case EEmotionalState::Feeding:
-            if (FeedingDatabases.Contains(Archetype))
-            {
-                return FeedingDatabases[Archetype];
-            }
-            break;
+        case ECharacterAnimationState::Running:
+            return PanicMovementDatabase;
+            
+        case ECharacterAnimationState::Gathering:
+        case ECharacterAnimationState::Crafting:
+        case ECharacterAnimationState::Climbing:
+            return InteractionDatabase;
             
         default:
-            break;
+            return LocomotionDatabase;
     }
-    
-    // Fallback to base locomotion
-    if (BaseLocomotionDatabases.Contains(Archetype))
-    {
-        return BaseLocomotionDatabases[Archetype];
-    }
-    
-    return nullptr;
 }
 
-FCreaturePersonality UAnimationSystemCore::GenerateUniquePersonality(ECreatureArchetype Archetype)
+float UAnimationSystemCore::CalculateBlendTime(ECharacterAnimationState FromState, ECharacterAnimationState ToState) const
 {
-    FCreaturePersonality Personality;
-    
-    // Archetype-specific personality tendencies
-    switch (Archetype)
+    // Fast transitions for panic states
+    if (ToState == ECharacterAnimationState::Running || 
+        FromState == ECharacterAnimationState::Running)
     {
-        case ECreatureArchetype::Paleontologist:
-            // Human character - more controlled, analytical movements
-            Personality.Nervousness = FMath::RandRange(0.4f, 0.7f);
-            Personality.Aggression = FMath::RandRange(0.1f, 0.3f);
-            Personality.Curiosity = FMath::RandRange(0.7f, 0.9f);
+        return FAST_BLEND_TIME;
+    }
+    
+    // Slow transitions for careful movements
+    if (ToState == ECharacterAnimationState::Cautious ||
+        ToState == ECharacterAnimationState::Sneaking ||
+        ToState == ECharacterAnimationState::Hiding)
+    {
+        return SLOW_BLEND_TIME;
+    }
+    
+    // Normal transitions for most cases
+    return NORMAL_BLEND_TIME;
+}
+
+void UAnimationSystemCore::SetFearLevel(float NewFearLevel)
+{
+    CurrentAnimationState.FearLevel = FMath::Clamp(NewFearLevel, 0.0f, 1.0f);
+    
+    // Automatically adjust caution level based on fear
+    CurrentAnimationState.CautionLevel = FMath::Max(CurrentAnimationState.CautionLevel, 
+                                                   CurrentAnimationState.FearLevel * 0.8f);
+}
+
+void UAnimationSystemCore::SetTerrainType(ETerrainType NewTerrain)
+{
+    CurrentAnimationState.CurrentTerrain = NewTerrain;
+    
+    // Adjust caution level based on terrain difficulty
+    switch (NewTerrain)
+    {
+        case ETerrainType::Rocky:
+        case ETerrainType::Muddy:
+            CurrentAnimationState.CautionLevel = FMath::Max(CurrentAnimationState.CautionLevel, 0.7f);
             break;
-            
-        case ECreatureArchetype::SmallHerbivore:
-            // High nervousness, low aggression, moderate curiosity
-            Personality.Nervousness = FMath::RandRange(0.7f, 0.9f);
-            Personality.Aggression = FMath::RandRange(0.1f, 0.3f);
-            Personality.Curiosity = FMath::RandRange(0.5f, 0.8f);
+        case ETerrainType::Uphill:
+        case ETerrainType::Downhill:
+            CurrentAnimationState.CautionLevel = FMath::Max(CurrentAnimationState.CautionLevel, 0.6f);
             break;
-            
-        case ECreatureArchetype::ApexPredator:
-            // Low nervousness, high aggression, moderate curiosity
-            Personality.Nervousness = FMath::RandRange(0.1f, 0.3f);
-            Personality.Aggression = FMath::RandRange(0.7f, 0.9f);
-            Personality.Curiosity = FMath::RandRange(0.4f, 0.6f);
+        case ETerrainType::Vegetation:
+        case ETerrainType::Water:
+            CurrentAnimationState.CautionLevel = FMath::Max(CurrentAnimationState.CautionLevel, 0.5f);
             break;
-            
-        case ECreatureArchetype::SmallCarnivore:
-            // Pack hunters - moderate nervousness, high aggression when in groups
-            Personality.Nervousness = FMath::RandRange(0.4f, 0.6f);
-            Personality.Aggression = FMath::RandRange(0.6f, 0.8f);
-            Personality.Curiosity = FMath::RandRange(0.6f, 0.8f);
-            break;
-            
         default:
-            // Use default random values
+            // Flat terrain - no additional caution
             break;
     }
-    
-    return Personality;
-}
-
-bool UAnimationSystemCore::ShouldUseStealthMovement(const AActor* Character, const AActor* NearbyThreat)
-{
-    if (!Character || !NearbyThreat)
-    {
-        return false;
-    }
-    
-    // Calculate distance and threat level
-    float Distance = FVector::Dist(Character->GetActorLocation(), NearbyThreat->GetActorLocation());
-    
-    // If within 1000 units and threat is larger, use stealth movement
-    const float StealthDistance = 1000.0f;
-    
-    if (Distance < StealthDistance)
-    {
-        // Additional logic could check threat size, aggression level, etc.
-        return true;
-    }
-    
-    return false;
-}
-
-float UAnimationSystemCore::CalculateFearIntensity(const AActor* Character, TArray<AActor*> NearbyThreats)
-{
-    if (!Character || NearbyThreats.Num() == 0)
-    {
-        return 0.0f;
-    }
-    
-    float FearIntensity = 0.0f;
-    FVector CharacterLocation = Character->GetActorLocation();
-    
-    for (const AActor* Threat : NearbyThreats)
-    {
-        if (!Threat)
-        {
-            continue;
-        }
-        
-        float Distance = FVector::Dist(CharacterLocation, Threat->GetActorLocation());
-        
-        // Fear decreases with distance, increases with proximity
-        float DistanceFactor = FMath::Clamp(1.0f - (Distance / 2000.0f), 0.0f, 1.0f);
-        
-        // Multiple threats compound fear
-        FearIntensity += DistanceFactor * 0.3f;
-    }
-    
-    return FMath::Clamp(FearIntensity, 0.0f, 1.0f);
 }
