@@ -2,48 +2,17 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Engine/DataTable.h"
+#include "Engine/World.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Animation/AnimInstance.h"
-#include "PoseSearch/PoseSearchDatabase.h"
 #include "AnimationSystemManager.generated.h"
 
-USTRUCT(BlueprintType)
-struct FCharacterAnimationProfile : public FTableRowBase
-{
-    GENERATED_BODY()
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnCharacterEmotionalStateChanged, class ACharacter*, Character, float, FearLevel);
 
-    // Character archetype for animation selection
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
-    FString ArchetypeID;
-
-    // Motion Matching Database for this character type
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    TSoftObjectPtr<UPoseSearchDatabase> LocomotionDatabase;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    TSoftObjectPtr<UPoseSearchDatabase> CombatDatabase;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    TSoftObjectPtr<UPoseSearchDatabase> InteractionDatabase;
-
-    // IK Settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK")
-    float FootIKIntensity = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK")
-    float HandIKIntensity = 0.8f;
-
-    // Fear Response Settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fear System")
-    float FearMovementModifier = 1.2f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fear System")
-    float CautiousWalkThreshold = 0.3f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fear System")
-    float PanicRunThreshold = 0.8f;
-};
-
+/**
+ * Sistema central de gerenciamento de animações
+ * Responsável por coordenar Motion Matching, IK, e estados emocionais
+ */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API AAnimationSystemManager : public AActor
 {
@@ -54,42 +23,79 @@ public:
 
 protected:
     virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
 
-    // Character Animation Profiles Data Table
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation System")
-    UDataTable* CharacterAnimationProfiles;
+    // Sistema de Motion Matching
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    class UPoseSearchDatabase* PlayerLocomotionDatabase;
 
-    // Global Animation Settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Global Settings")
-    float GlobalAnimationSpeed = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    class UPoseSearchDatabase* DinosaurBehaviorDatabase;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Global Settings")
-    bool bEnableMotionMatching = true;
+    // Sistema de IK Adaptativo
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK System")
+    float TerrainAdaptationRadius = 100.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Global Settings")
-    bool bEnableFootIK = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK System")
+    float FootPlantingThreshold = 0.1f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Global Settings")
-    bool bEnableFearSystem = true;
+    // Estados Emocionais Dinâmicos
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotional States")
+    TMap<FString, float> EmotionalStateWeights;
+
+    UPROPERTY(BlueprintAssignable, Category = "Events")
+    FOnCharacterEmotionalStateChanged OnCharacterEmotionalStateChanged;
 
 public:
-    // Get animation profile for character archetype
+    // Interface pública para outros sistemas
     UFUNCTION(BlueprintCallable, Category = "Animation System")
-    FCharacterAnimationProfile GetAnimationProfile(const FString& ArchetypeID);
+    void RegisterCharacterForAnimation(class ACharacter* Character);
 
-    // Register character with animation system
     UFUNCTION(BlueprintCallable, Category = "Animation System")
-    void RegisterCharacter(AActor* Character, const FString& ArchetypeID);
+    void UpdateCharacterFearLevel(class ACharacter* Character, float NewFearLevel);
 
-    // Update fear level for character (affects animation selection)
-    UFUNCTION(BlueprintCallable, Category = "Fear System")
-    void UpdateCharacterFearLevel(AActor* Character, float FearLevel);
+    UFUNCTION(BlueprintCallable, Category = "Animation System")
+    void TriggerEmergencyAnimation(class ACharacter* Character, const FString& TriggerType);
+
+    // Sistema de Variações Procedurais
+    UFUNCTION(BlueprintCallable, Category = "Procedural Animation")
+    void GenerateUniqueMovementVariation(class ACharacter* Character);
 
 private:
-    // Registered characters and their profiles
+    // Personagens registados no sistema
     UPROPERTY()
-    TMap<AActor*, FString> RegisteredCharacters;
+    TArray<class ACharacter*> RegisteredCharacters;
 
+    // Cache de dados de animação
     UPROPERTY()
-    TMap<AActor*, float> CharacterFearLevels;
+    TMap<class ACharacter*, struct FCharacterAnimationData> AnimationDataCache;
+
+    void UpdateMotionMatchingQueries(float DeltaTime);
+    void ProcessTerrainAdaptation(float DeltaTime);
+    void UpdateEmotionalStates(float DeltaTime);
+};
+
+// Estrutura para dados de animação por personagem
+USTRUCT(BlueprintType)
+struct FCharacterAnimationData
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float CurrentFearLevel = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float MovementIntensity = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FVector LastKnownThreatDirection = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float TimeSinceLastThreat = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsInDanger = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TArray<FString> ActiveEmotionalTags;
 };
