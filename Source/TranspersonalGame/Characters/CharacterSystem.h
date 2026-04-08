@@ -1,189 +1,184 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/Engine.h"
-#include "Components/SkeletalMeshComponent.h"
-#include "Animation/AnimBlueprint.h"
-#include "GameFramework/Character.h"
+#include "Engine/DataAsset.h"
+#include "Engine/DataTable.h"
+#include "MetaHumanCreatorTypes.h"
 #include "CharacterSystem.generated.h"
 
-/**
- * Base Character System for Transpersonal Game
- * Handles MetaHuman integration, character variation, and survival mechanics
- */
-
+// Enum para tipos de personagens
 UENUM(BlueprintType)
 enum class ECharacterArchetype : uint8
 {
-    Protagonist     UMETA(DisplayName = "Protagonist - Paleontologist"),
-    Survivor        UMETA(DisplayName = "Survivor - Other Human"),
-    Memory          UMETA(DisplayName = "Memory - Flashback Character"),
-    Corpse          UMETA(DisplayName = "Corpse - Found Remains")
+    Protagonist     UMETA(DisplayName = "Protagonist"),
+    Survivor        UMETA(DisplayName = "Survivor"),
+    Researcher      UMETA(DisplayName = "Researcher"), 
+    Tribal          UMETA(DisplayName = "Tribal"),
+    Wanderer        UMETA(DisplayName = "Wanderer"),
+    Elder           UMETA(DisplayName = "Elder"),
+    Child           UMETA(DisplayName = "Child")
 };
 
+// Enum para etnias/origens
 UENUM(BlueprintType)
-enum class EClothingCondition : uint8
+enum class ECharacterEthnicity : uint8
 {
-    Fresh           UMETA(DisplayName = "Fresh - Just Arrived"),
-    Worn            UMETA(DisplayName = "Worn - Days Survived"),
-    Damaged         UMETA(DisplayName = "Damaged - Weeks Survived"),
-    Tattered        UMETA(DisplayName = "Tattered - Months Survived"),
-    Primitive       UMETA(DisplayName = "Primitive - Makeshift Clothing")
+    European        UMETA(DisplayName = "European"),
+    African         UMETA(DisplayName = "African"),
+    Asian           UMETA(DisplayName = "Asian"),
+    Indigenous      UMETA(DisplayName = "Indigenous"),
+    MiddleEastern   UMETA(DisplayName = "Middle Eastern"),
+    Mixed           UMETA(DisplayName = "Mixed Heritage")
 };
 
+// Enum para idades
 UENUM(BlueprintType)
-enum class EPhysicalCondition : uint8
+enum class ECharacterAgeGroup : uint8
 {
-    Healthy         UMETA(DisplayName = "Healthy"),
-    Tired           UMETA(DisplayName = "Tired"),
-    Injured         UMETA(DisplayName = "Injured"),
-    Starving        UMETA(DisplayName = "Starving"),
-    Sick            UMETA(DisplayName = "Sick"),
-    Dying           UMETA(DisplayName = "Dying")
+    Child           UMETA(DisplayName = "Child (8-12)"),
+    Teenager        UMETA(DisplayName = "Teenager (13-17)"),
+    YoungAdult      UMETA(DisplayName = "Young Adult (18-30)"),
+    MiddleAged      UMETA(DisplayName = "Middle Aged (31-50)"),
+    Mature          UMETA(DisplayName = "Mature (51-65)"),
+    Elder           UMETA(DisplayName = "Elder (65+)")
 };
 
+// Struct para dados de aparência
 USTRUCT(BlueprintType)
-struct FCharacterVariation
+struct FCharacterAppearanceData : public FTableRowBase
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    FString MetaHumanPresetID;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Basic Info")
+    FString CharacterName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    float SkinTone;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Basic Info")
+    ECharacterArchetype Archetype;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    float BodyWeight;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Demographics")
+    ECharacterEthnicity Ethnicity;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    float Muscle;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Demographics")
+    ECharacterAgeGroup AgeGroup;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    int32 HairStyleID;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Demographics")
+    bool bIsMale;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    FLinearColor HairColor;
+    // MetaHuman specific data
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
+    TSoftObjectPtr<class USkeletalMesh> MetaHumanMesh;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    FLinearColor EyeColor;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
+    TSoftObjectPtr<class UAnimBlueprint> AnimationBlueprint;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
-    EClothingCondition ClothingState;
+    // Physical characteristics
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance", meta = (ClampMin = "0.8", ClampMax = "1.2"))
+    float HeightScale;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
-    EPhysicalCondition PhysicalState;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance", meta = (ClampMin = "0.8", ClampMax = "1.2"))
+    float BuildScale;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
-    float DirtLevel; // 0.0 = Clean, 1.0 = Filthy
+    // Clothing and accessories
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clothing")
+    TArray<TSoftObjectPtr<class USkeletalMesh>> ClothingMeshes;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
-    float ScarLevel; // 0.0 = No scars, 1.0 = Heavily scarred
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clothing")
+    TArray<TSoftObjectPtr<class UMaterialInterface>> ClothingMaterials;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
-    int32 DaysSurvived;
+    // Survival state indicators
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival State")
+    float DirtinessLevel; // 0.0 = clean, 1.0 = very dirty
 
-    FCharacterVariation()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival State")
+    float WearLevel; // 0.0 = new clothes, 1.0 = very worn
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival State")
+    float InjuryLevel; // 0.0 = healthy, 1.0 = heavily injured
+
+    // Personality visual cues
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality")
+    FString PersonalityNotes;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality")
+    float ConfidenceLevel; // Affects posture and animations
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality")
+    float FearLevel; // Affects facial expressions and body language
+
+    FCharacterAppearanceData()
     {
-        MetaHumanPresetID = TEXT("Default");
-        SkinTone = 0.5f;
-        BodyWeight = 0.5f;
-        Muscle = 0.5f;
-        HairStyleID = 0;
-        HairColor = FLinearColor::Black;
-        EyeColor = FLinearColor::Blue;
-        ClothingState = EClothingCondition::Fresh;
-        PhysicalState = EPhysicalCondition::Healthy;
-        DirtLevel = 0.0f;
-        ScarLevel = 0.0f;
-        DaysSurvived = 0;
+        CharacterName = TEXT("");
+        Archetype = ECharacterArchetype::Survivor;
+        Ethnicity = ECharacterEthnicity::Mixed;
+        AgeGroup = ECharacterAgeGroup::YoungAdult;
+        bIsMale = true;
+        HeightScale = 1.0f;
+        BuildScale = 1.0f;
+        DirtinessLevel = 0.3f;
+        WearLevel = 0.4f;
+        InjuryLevel = 0.1f;
+        ConfidenceLevel = 0.5f;
+        FearLevel = 0.6f;
     }
 };
 
-UCLASS(Blueprintable, BlueprintType)
-class TRANSPERSONALGAME_API ABaseCharacter : public ACharacter
+// Data Asset para configuração do sistema de personagens
+UCLASS(BlueprintType)
+class TRANSPERSONALGAME_API UCharacterSystemConfig : public UDataAsset
 {
     GENERATED_BODY()
 
 public:
-    ABaseCharacter();
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Character Database")
+    TSoftObjectPtr<class UDataTable> CharacterDataTable;
 
-protected:
-    virtual void BeginPlay() override;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MetaHuman Presets")
+    TArray<TSoftObjectPtr<class USkeletalMesh>> MaleMetaHumanPresets;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character System")
-    ECharacterArchetype CharacterType;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MetaHuman Presets")
+    TArray<TSoftObjectPtr<class USkeletalMesh>> FemaleMetaHumanPresets;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character System")
-    FCharacterVariation CharacterVariation;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Clothing Sets")
+    TMap<ECharacterArchetype, TArray<TSoftObjectPtr<class USkeletalMesh>>> ArchetypeClothingSets;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character System")
-    FString CharacterName;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Materials")
+    TSoftObjectPtr<class UMaterialInterface> BaseSkinMaterial;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character System")
-    FText CharacterBiography;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Materials")
+    TSoftObjectPtr<class UMaterialInterface> DirtyClothingMaterial;
 
-    // MetaHuman Components
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MetaHuman")
-    class USkeletalMeshComponent* MetaHumanBody;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MetaHuman")
-    class USkeletalMeshComponent* MetaHumanHead;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MetaHuman")
-    class USkeletalMeshComponent* MetaHumanHair;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MetaHuman")
-    class USkeletalMeshComponent* MetaHumanClothing;
-
-public:
-    UFUNCTION(BlueprintCallable, Category = "Character System")
-    void ApplyCharacterVariation(const FCharacterVariation& NewVariation);
-
-    UFUNCTION(BlueprintCallable, Category = "Character System")
-    void UpdateSurvivalCondition(int32 NewDaysSurvived);
-
-    UFUNCTION(BlueprintCallable, Category = "Character System")
-    void SetClothingCondition(EClothingCondition NewCondition);
-
-    UFUNCTION(BlueprintCallable, Category = "Character System")
-    void SetPhysicalCondition(EPhysicalCondition NewCondition);
-
-    UFUNCTION(BlueprintPure, Category = "Character System")
-    FCharacterVariation GetCharacterVariation() const { return CharacterVariation; }
-
-    UFUNCTION(BlueprintPure, Category = "Character System")
-    ECharacterArchetype GetCharacterType() const { return CharacterType; }
-
-private:
-    void SetupMetaHumanComponents();
-    void ApplyMaterialParameters();
-    void UpdateClothingMaterials();
-    void UpdateSkinMaterials();
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Materials")
+    TSoftObjectPtr<class UMaterialInterface> WornClothingMaterial;
 };
 
-/**
- * Character Factory for procedural character generation
- */
-UCLASS(BlueprintType)
-class TRANSPERSONALGAME_API UCharacterFactory : public UObject
+// Subsystem para gerenciar personagens
+UCLASS()
+class TRANSPERSONALGAME_API UCharacterManagementSubsystem : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
-    UFUNCTION(BlueprintCallable, Category = "Character Factory")
-    static FCharacterVariation GenerateRandomVariation(ECharacterArchetype ArchetypeHint);
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 
-    UFUNCTION(BlueprintCallable, Category = "Character Factory")
-    static FCharacterVariation GenerateProtagonistVariation();
+    UFUNCTION(BlueprintCallable, Category = "Character Management")
+    FCharacterAppearanceData GetCharacterData(const FString& CharacterName);
 
-    UFUNCTION(BlueprintCallable, Category = "Character Factory")
-    static FCharacterVariation GenerateSurvivorVariation(int32 DaysSurvived);
+    UFUNCTION(BlueprintCallable, Category = "Character Management")
+    TArray<FCharacterAppearanceData> GetCharactersByArchetype(ECharacterArchetype Archetype);
 
-    UFUNCTION(BlueprintCallable, Category = "Character Factory")
-    static TArray<FString> GetAvailableMetaHumanPresets();
+    UFUNCTION(BlueprintCallable, Category = "Character Management")
+    FCharacterAppearanceData GenerateRandomCharacter(ECharacterArchetype Archetype);
+
+    UFUNCTION(BlueprintCallable, Category = "Character Management")
+    void ApplyCharacterAppearance(class ACharacter* Character, const FCharacterAppearanceData& AppearanceData);
 
 private:
-    static TArray<FString> MetaHumanPresetDatabase;
-    static void InitializePresetDatabase();
+    UPROPERTY()
+    TSoftObjectPtr<UCharacterSystemConfig> CharacterConfig;
+
+    UPROPERTY()
+    TMap<FString, FCharacterAppearanceData> LoadedCharacters;
+
+    void LoadCharacterDatabase();
+    FCharacterAppearanceData CreateRandomAppearanceData(ECharacterArchetype Archetype);
 };
