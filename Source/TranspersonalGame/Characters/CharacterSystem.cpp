@@ -1,362 +1,247 @@
 #include "CharacterSystem.h"
+#include "Engine/DataTable.h"
+#include "GameFramework/Character.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Engine/Engine.h"
-#include "Kismet/KismetMathLibrary.h"
 
-// Initialize static member
-TArray<FString> UCharacterFactory::MetaHumanPresetDatabase;
-
-ABaseCharacter::ABaseCharacter()
+void UCharacterManagementSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
-    PrimaryActorTick.bCanEverTick = false;
-
-    // Set default character type
-    CharacterType = ECharacterArchetype::Protagonist;
-    CharacterName = TEXT("Dr. Unknown");
-    
-    // Setup MetaHuman components
-    SetupMetaHumanComponents();
+    Super::Initialize(Collection);
+    LoadCharacterDatabase();
 }
 
-void ABaseCharacter::BeginPlay()
+void UCharacterManagementSubsystem::LoadCharacterDatabase()
 {
-    Super::BeginPlay();
+    // Load character configuration from data asset
+    CharacterConfig = LoadObject<UCharacterSystemConfig>(nullptr, TEXT("/Game/Characters/Data/DA_CharacterSystemConfig"));
     
-    // Apply initial character variation
-    ApplyCharacterVariation(CharacterVariation);
-}
-
-void ABaseCharacter::SetupMetaHumanComponents()
-{
-    // Get the default mesh component (this will be the main body)
-    MetaHumanBody = GetMesh();
-    
-    // Create additional MetaHuman components
-    MetaHumanHead = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("MetaHumanHead"));
-    MetaHumanHead->SetupAttachment(MetaHumanBody);
-    MetaHumanHead->SetLeaderPoseComponent(MetaHumanBody);
-    
-    MetaHumanHair = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("MetaHumanHair"));
-    MetaHumanHair->SetupAttachment(MetaHumanHead);
-    MetaHumanHair->SetLeaderPoseComponent(MetaHumanBody);
-    
-    MetaHumanClothing = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("MetaHumanClothing"));
-    MetaHumanClothing->SetupAttachment(MetaHumanBody);
-    MetaHumanClothing->SetLeaderPoseComponent(MetaHumanBody);
-}
-
-void ABaseCharacter::ApplyCharacterVariation(const FCharacterVariation& NewVariation)
-{
-    CharacterVariation = NewVariation;
-    
-    // Apply material parameters
-    ApplyMaterialParameters();
-    
-    // Update clothing based on survival state
-    UpdateClothingMaterials();
-    
-    // Update skin based on condition
-    UpdateSkinMaterials();
-    
-    UE_LOG(LogTemp, Log, TEXT("Applied character variation for %s"), *CharacterName);
-}
-
-void ABaseCharacter::UpdateSurvivalCondition(int32 NewDaysSurvived)
-{
-    CharacterVariation.DaysSurvived = NewDaysSurvived;
-    
-    // Auto-update clothing condition based on days survived
-    if (NewDaysSurvived > 90)
+    if (!CharacterConfig.IsValid())
     {
-        CharacterVariation.ClothingState = EClothingCondition::Primitive;
+        UE_LOG(LogTemp, Warning, TEXT("CharacterSystemConfig not found. Creating default configuration."));
+        return;
     }
-    else if (NewDaysSurvived > 30)
-    {
-        CharacterVariation.ClothingState = EClothingCondition::Tattered;
-    }
-    else if (NewDaysSurvived > 7)
-    {
-        CharacterVariation.ClothingState = EClothingCondition::Damaged;
-    }
-    else if (NewDaysSurvived > 1)
-    {
-        CharacterVariation.ClothingState = EClothingCondition::Worn;
-    }
-    
-    // Increase dirt and scars over time
-    CharacterVariation.DirtLevel = FMath::Clamp(NewDaysSurvived / 30.0f, 0.0f, 1.0f);
-    CharacterVariation.ScarLevel = FMath::Clamp(NewDaysSurvived / 60.0f, 0.0f, 1.0f);
-    
-    ApplyCharacterVariation(CharacterVariation);
-}
 
-void ABaseCharacter::SetClothingCondition(EClothingCondition NewCondition)
-{
-    CharacterVariation.ClothingState = NewCondition;
-    UpdateClothingMaterials();
-}
-
-void ABaseCharacter::SetPhysicalCondition(EPhysicalCondition NewCondition)
-{
-    CharacterVariation.PhysicalState = NewCondition;
-    UpdateSkinMaterials();
-}
-
-void ABaseCharacter::ApplyMaterialParameters()
-{
-    if (!MetaHumanBody) return;
-    
-    // Create dynamic material instances for body
-    for (int32 i = 0; i < MetaHumanBody->GetNumMaterials(); i++)
+    // Load character data table
+    if (CharacterConfig->CharacterDataTable.IsValid())
     {
-        UMaterialInterface* BaseMaterial = MetaHumanBody->GetMaterial(i);
-        if (BaseMaterial)
+        UDataTable* DataTable = CharacterConfig->CharacterDataTable.LoadSynchronous();
+        if (DataTable)
         {
-            UMaterialInstanceDynamic* DynamicMaterial = UMaterialInstanceDynamic::Create(BaseMaterial, this);
+            TArray<FCharacterAppearanceData*> AllRows;
+            DataTable->GetAllRows<FCharacterAppearanceData>(TEXT("LoadCharacterDatabase"), AllRows);
             
-            // Apply skin tone
-            DynamicMaterial->SetScalarParameterValue(TEXT("SkinTone"), CharacterVariation.SkinTone);
-            
-            // Apply body weight
-            DynamicMaterial->SetScalarParameterValue(TEXT("BodyWeight"), CharacterVariation.BodyWeight);
-            
-            // Apply muscle definition
-            DynamicMaterial->SetScalarParameterValue(TEXT("Muscle"), CharacterVariation.Muscle);
-            
-            MetaHumanBody->SetMaterial(i, DynamicMaterial);
-        }
-    }
-    
-    // Apply hair color if hair component exists
-    if (MetaHumanHair)
-    {
-        for (int32 i = 0; i < MetaHumanHair->GetNumMaterials(); i++)
-        {
-            UMaterialInterface* BaseMaterial = MetaHumanHair->GetMaterial(i);
-            if (BaseMaterial)
+            for (FCharacterAppearanceData* Row : AllRows)
             {
-                UMaterialInstanceDynamic* DynamicMaterial = UMaterialInstanceDynamic::Create(BaseMaterial, this);
-                DynamicMaterial->SetVectorParameterValue(TEXT("HairColor"), CharacterVariation.HairColor);
-                MetaHumanHair->SetMaterial(i, DynamicMaterial);
-            }
-        }
-    }
-}
-
-void ABaseCharacter::UpdateClothingMaterials()
-{
-    if (!MetaHumanClothing) return;
-    
-    for (int32 i = 0; i < MetaHumanClothing->GetNumMaterials(); i++)
-    {
-        UMaterialInterface* BaseMaterial = MetaHumanClothing->GetMaterial(i);
-        if (BaseMaterial)
-        {
-            UMaterialInstanceDynamic* DynamicMaterial = UMaterialInstanceDynamic::Create(BaseMaterial, this);
-            
-            // Apply clothing wear based on condition
-            float WearLevel = 0.0f;
-            switch (CharacterVariation.ClothingState)
-            {
-                case EClothingCondition::Fresh:
-                    WearLevel = 0.0f;
-                    break;
-                case EClothingCondition::Worn:
-                    WearLevel = 0.2f;
-                    break;
-                case EClothingCondition::Damaged:
-                    WearLevel = 0.5f;
-                    break;
-                case EClothingCondition::Tattered:
-                    WearLevel = 0.8f;
-                    break;
-                case EClothingCondition::Primitive:
-                    WearLevel = 1.0f;
-                    break;
+                if (Row)
+                {
+                    LoadedCharacters.Add(Row->CharacterName, *Row);
+                }
             }
             
-            DynamicMaterial->SetScalarParameterValue(TEXT("WearLevel"), WearLevel);
-            DynamicMaterial->SetScalarParameterValue(TEXT("DirtLevel"), CharacterVariation.DirtLevel);
-            
-            MetaHumanClothing->SetMaterial(i, DynamicMaterial);
+            UE_LOG(LogTemp, Log, TEXT("Loaded %d characters from database"), LoadedCharacters.Num());
         }
     }
 }
 
-void ABaseCharacter::UpdateSkinMaterials()
+FCharacterAppearanceData UCharacterManagementSubsystem::GetCharacterData(const FString& CharacterName)
 {
-    if (!MetaHumanBody) return;
-    
-    for (int32 i = 0; i < MetaHumanBody->GetNumMaterials(); i++)
+    if (LoadedCharacters.Contains(CharacterName))
     {
-        UMaterialInterface* BaseMaterial = MetaHumanBody->GetMaterial(i);
-        if (BaseMaterial)
+        return LoadedCharacters[CharacterName];
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Character %s not found in database"), *CharacterName);
+    return FCharacterAppearanceData();
+}
+
+TArray<FCharacterAppearanceData> UCharacterManagementSubsystem::GetCharactersByArchetype(ECharacterArchetype Archetype)
+{
+    TArray<FCharacterAppearanceData> Results;
+    
+    for (const auto& CharacterPair : LoadedCharacters)
+    {
+        if (CharacterPair.Value.Archetype == Archetype)
         {
-            UMaterialInstanceDynamic* DynamicMaterial = UMaterialInstanceDynamic::Create(BaseMaterial, this);
-            
-            // Apply physical condition effects
-            float HealthLevel = 1.0f;
-            switch (CharacterVariation.PhysicalState)
-            {
-                case EPhysicalCondition::Healthy:
-                    HealthLevel = 1.0f;
-                    break;
-                case EPhysicalCondition::Tired:
-                    HealthLevel = 0.8f;
-                    break;
-                case EPhysicalCondition::Injured:
-                    HealthLevel = 0.6f;
-                    break;
-                case EPhysicalCondition::Starving:
-                    HealthLevel = 0.4f;
-                    break;
-                case EPhysicalCondition::Sick:
-                    HealthLevel = 0.3f;
-                    break;
-                case EPhysicalCondition::Dying:
-                    HealthLevel = 0.1f;
-                    break;
-            }
-            
-            DynamicMaterial->SetScalarParameterValue(TEXT("HealthLevel"), HealthLevel);
-            DynamicMaterial->SetScalarParameterValue(TEXT("DirtLevel"), CharacterVariation.DirtLevel);
-            DynamicMaterial->SetScalarParameterValue(TEXT("ScarLevel"), CharacterVariation.ScarLevel);
-            
-            MetaHumanBody->SetMaterial(i, DynamicMaterial);
+            Results.Add(CharacterPair.Value);
         }
     }
+    
+    return Results;
 }
 
-// Character Factory Implementation
-FCharacterVariation UCharacterFactory::GenerateRandomVariation(ECharacterArchetype ArchetypeHint)
+FCharacterAppearanceData UCharacterManagementSubsystem::GenerateRandomCharacter(ECharacterArchetype Archetype)
 {
-    InitializePresetDatabase();
+    return CreateRandomAppearanceData(Archetype);
+}
+
+FCharacterAppearanceData UCharacterManagementSubsystem::CreateRandomAppearanceData(ECharacterArchetype Archetype)
+{
+    FCharacterAppearanceData NewCharacter;
+    NewCharacter.Archetype = Archetype;
     
-    FCharacterVariation NewVariation;
+    // Random gender
+    NewCharacter.bIsMale = FMath::RandBool();
     
-    // Select random MetaHuman preset
-    if (MetaHumanPresetDatabase.Num() > 0)
+    // Random ethnicity with weighted distribution for diversity
+    int32 EthnicityRoll = FMath::RandRange(1, 100);
+    if (EthnicityRoll <= 20) NewCharacter.Ethnicity = ECharacterEthnicity::African;
+    else if (EthnicityRoll <= 35) NewCharacter.Ethnicity = ECharacterEthnicity::Asian;
+    else if (EthnicityRoll <= 45) NewCharacter.Ethnicity = ECharacterEthnicity::Indigenous;
+    else if (EthnicityRoll <= 55) NewCharacter.Ethnicity = ECharacterEthnicity::MiddleEastern;
+    else if (EthnicityRoll <= 70) NewCharacter.Ethnicity = ECharacterEthnicity::Mixed;
+    else NewCharacter.Ethnicity = ECharacterEthnicity::European;
+    
+    // Age distribution based on archetype
+    switch (Archetype)
     {
-        int32 RandomIndex = FMath::RandRange(0, MetaHumanPresetDatabase.Num() - 1);
-        NewVariation.MetaHumanPresetID = MetaHumanPresetDatabase[RandomIndex];
+        case ECharacterArchetype::Child:
+            NewCharacter.AgeGroup = ECharacterAgeGroup::Child;
+            break;
+        case ECharacterArchetype::Elder:
+            NewCharacter.AgeGroup = ECharacterAgeGroup::Elder;
+            break;
+        case ECharacterArchetype::Researcher:
+            // Researchers tend to be older
+            NewCharacter.AgeGroup = FMath::RandBool() ? ECharacterAgeGroup::MiddleAged : ECharacterAgeGroup::Mature;
+            break;
+        default:
+            // Random age for other archetypes
+            int32 AgeRoll = FMath::RandRange(1, 100);
+            if (AgeRoll <= 5) NewCharacter.AgeGroup = ECharacterAgeGroup::Teenager;
+            else if (AgeRoll <= 35) NewCharacter.AgeGroup = ECharacterAgeGroup::YoungAdult;
+            else if (AgeRoll <= 65) NewCharacter.AgeGroup = ECharacterAgeGroup::MiddleAged;
+            else if (AgeRoll <= 85) NewCharacter.AgeGroup = ECharacterAgeGroup::Mature;
+            else NewCharacter.AgeGroup = ECharacterAgeGroup::Elder;
+            break;
     }
     
-    // Generate random appearance values
-    NewVariation.SkinTone = FMath::FRandRange(0.1f, 0.9f);
-    NewVariation.BodyWeight = FMath::FRandRange(0.3f, 0.8f);
-    NewVariation.Muscle = FMath::FRandRange(0.2f, 0.7f);
-    NewVariation.HairStyleID = FMath::RandRange(0, 15);
+    // Physical variations
+    NewCharacter.HeightScale = FMath::RandRange(0.85f, 1.15f);
+    NewCharacter.BuildScale = FMath::RandRange(0.9f, 1.1f);
     
-    // Generate hair color
-    TArray<FLinearColor> HairColors = {
-        FLinearColor::Black,
-        FLinearColor(0.2f, 0.1f, 0.05f, 1.0f), // Brown
-        FLinearColor(0.8f, 0.6f, 0.2f, 1.0f),  // Blonde
-        FLinearColor(0.6f, 0.3f, 0.1f, 1.0f),  // Auburn
-        FLinearColor(0.5f, 0.5f, 0.5f, 1.0f)   // Gray
+    // Survival state based on archetype
+    switch (Archetype)
+    {
+        case ECharacterArchetype::Protagonist:
+            NewCharacter.DirtinessLevel = FMath::RandRange(0.2f, 0.4f);
+            NewCharacter.WearLevel = FMath::RandRange(0.1f, 0.3f);
+            NewCharacter.InjuryLevel = FMath::RandRange(0.0f, 0.2f);
+            NewCharacter.ConfidenceLevel = FMath::RandRange(0.6f, 0.8f);
+            NewCharacter.FearLevel = FMath::RandRange(0.4f, 0.7f);
+            break;
+        case ECharacterArchetype::Survivor:
+            NewCharacter.DirtinessLevel = FMath::RandRange(0.4f, 0.8f);
+            NewCharacter.WearLevel = FMath::RandRange(0.5f, 0.9f);
+            NewCharacter.InjuryLevel = FMath::RandRange(0.1f, 0.4f);
+            NewCharacter.ConfidenceLevel = FMath::RandRange(0.3f, 0.6f);
+            NewCharacter.FearLevel = FMath::RandRange(0.6f, 0.9f);
+            break;
+        case ECharacterArchetype::Elder:
+            NewCharacter.DirtinessLevel = FMath::RandRange(0.2f, 0.5f);
+            NewCharacter.WearLevel = FMath::RandRange(0.3f, 0.7f);
+            NewCharacter.InjuryLevel = FMath::RandRange(0.0f, 0.3f);
+            NewCharacter.ConfidenceLevel = FMath::RandRange(0.7f, 0.9f);
+            NewCharacter.FearLevel = FMath::RandRange(0.2f, 0.5f);
+            break;
+        default:
+            NewCharacter.DirtinessLevel = FMath::RandRange(0.3f, 0.6f);
+            NewCharacter.WearLevel = FMath::RandRange(0.4f, 0.7f);
+            NewCharacter.InjuryLevel = FMath::RandRange(0.0f, 0.3f);
+            NewCharacter.ConfidenceLevel = FMath::RandRange(0.4f, 0.7f);
+            NewCharacter.FearLevel = FMath::RandRange(0.5f, 0.8f);
+            break;
+    }
+    
+    // Generate unique name
+    TArray<FString> FirstNames = {
+        TEXT("Alex"), TEXT("Jordan"), TEXT("Casey"), TEXT("Riley"), TEXT("Morgan"),
+        TEXT("Avery"), TEXT("Quinn"), TEXT("Sage"), TEXT("River"), TEXT("Phoenix"),
+        TEXT("Kai"), TEXT("Rowan"), TEXT("Ember"), TEXT("Storm"), TEXT("Vale")
     };
-    NewVariation.HairColor = HairColors[FMath::RandRange(0, HairColors.Num() - 1)];
     
-    // Generate eye color
-    TArray<FLinearColor> EyeColors = {
-        FLinearColor::Blue,
-        FLinearColor::Green,
-        FLinearColor(0.4f, 0.2f, 0.1f, 1.0f), // Brown
-        FLinearColor(0.3f, 0.3f, 0.3f, 1.0f), // Gray
-        FLinearColor(0.2f, 0.4f, 0.2f, 1.0f)  // Hazel
-    };
-    NewVariation.EyeColor = EyeColors[FMath::RandRange(0, EyeColors.Num() - 1)];
+    NewCharacter.CharacterName = FirstNames[FMath::RandRange(0, FirstNames.Num() - 1)] + 
+                                FString::Printf(TEXT("_%d"), FMath::RandRange(1000, 9999));
     
-    return NewVariation;
+    return NewCharacter;
 }
 
-FCharacterVariation UCharacterFactory::GenerateProtagonistVariation()
+void UCharacterManagementSubsystem::ApplyCharacterAppearance(ACharacter* Character, const FCharacterAppearanceData& AppearanceData)
 {
-    FCharacterVariation ProtagonistVariation;
-    
-    // Protagonist should look like a scientist, not a warrior
-    ProtagonistVariation.MetaHumanPresetID = TEXT("Scientist_Male_01");
-    ProtagonistVariation.SkinTone = 0.4f; // Slightly pale (indoor work)
-    ProtagonistVariation.BodyWeight = 0.6f; // Slightly overweight (desk job)
-    ProtagonistVariation.Muscle = 0.3f; // Low muscle (not physical job)
-    ProtagonistVariation.HairStyleID = 3; // Professional haircut
-    ProtagonistVariation.HairColor = FLinearColor(0.2f, 0.1f, 0.05f, 1.0f); // Brown
-    ProtagonistVariation.EyeColor = FLinearColor::Blue;
-    
-    // Starts fresh but will deteriorate
-    ProtagonistVariation.ClothingState = EClothingCondition::Fresh;
-    ProtagonistVariation.PhysicalState = EPhysicalCondition::Healthy;
-    ProtagonistVariation.DirtLevel = 0.0f;
-    ProtagonistVariation.ScarLevel = 0.0f;
-    ProtagonistVariation.DaysSurvived = 0;
-    
-    return ProtagonistVariation;
-}
-
-FCharacterVariation UCharacterFactory::GenerateSurvivorVariation(int32 DaysSurvived)
-{
-    FCharacterVariation SurvivorVariation = GenerateRandomVariation(ECharacterArchetype::Survivor);
-    
-    // Apply survival effects
-    SurvivorVariation.DaysSurvived = DaysSurvived;
-    SurvivorVariation.DirtLevel = FMath::Clamp(DaysSurvived / 20.0f, 0.2f, 1.0f);
-    SurvivorVariation.ScarLevel = FMath::Clamp(DaysSurvived / 40.0f, 0.0f, 0.8f);
-    
-    // Determine clothing condition based on days survived
-    if (DaysSurvived > 60)
+    if (!Character)
     {
-        SurvivorVariation.ClothingState = EClothingCondition::Tattered;
-    }
-    else if (DaysSurvived > 20)
-    {
-        SurvivorVariation.ClothingState = EClothingCondition::Damaged;
-    }
-    else if (DaysSurvived > 5)
-    {
-        SurvivorVariation.ClothingState = EClothingCondition::Worn;
+        UE_LOG(LogTemp, Warning, TEXT("Cannot apply appearance to null character"));
+        return;
     }
     
-    // Physical condition based on survival time
-    if (DaysSurvived > 45)
+    USkeletalMeshComponent* MeshComponent = Character->GetMesh();
+    if (!MeshComponent)
     {
-        SurvivorVariation.PhysicalState = EPhysicalCondition::Starving;
-    }
-    else if (DaysSurvived > 20)
-    {
-        SurvivorVariation.PhysicalState = EPhysicalCondition::Tired;
+        UE_LOG(LogTemp, Warning, TEXT("Character has no mesh component"));
+        return;
     }
     
-    return SurvivorVariation;
-}
-
-TArray<FString> UCharacterFactory::GetAvailableMetaHumanPresets()
-{
-    InitializePresetDatabase();
-    return MetaHumanPresetDatabase;
-}
-
-void UCharacterFactory::InitializePresetDatabase()
-{
-    if (MetaHumanPresetDatabase.Num() == 0)
+    // Apply MetaHuman mesh if available
+    if (AppearanceData.MetaHumanMesh.IsValid())
     {
-        // Initialize with basic MetaHuman preset names
-        // These would be replaced with actual MetaHuman preset IDs in production
-        MetaHumanPresetDatabase.Add(TEXT("Scientist_Male_01"));
-        MetaHumanPresetDatabase.Add(TEXT("Scientist_Female_01"));
-        MetaHumanPresetDatabase.Add(TEXT("Explorer_Male_01"));
-        MetaHumanPresetDatabase.Add(TEXT("Explorer_Female_01"));
-        MetaHumanPresetDatabase.Add(TEXT("Academic_Male_01"));
-        MetaHumanPresetDatabase.Add(TEXT("Academic_Female_01"));
-        MetaHumanPresetDatabase.Add(TEXT("Researcher_Male_01"));
-        MetaHumanPresetDatabase.Add(TEXT("Researcher_Female_01"));
-        MetaHumanPresetDatabase.Add(TEXT("Student_Male_01"));
-        MetaHumanPresetDatabase.Add(TEXT("Student_Female_01"));
-        MetaHumanPresetDatabase.Add(TEXT("Survivor_Male_01"));
-        MetaHumanPresetDatabase.Add(TEXT("Survivor_Female_01"));
-        MetaHumanPresetDatabase.Add(TEXT("Elderly_Male_01"));
-        MetaHumanPresetDatabase.Add(TEXT("Elderly_Female_01"));
-        MetaHumanPresetDatabase.Add(TEXT("Young_Male_01"));
-        MetaHumanPresetDatabase.Add(TEXT("Young_Female_01"));
+        USkeletalMesh* MetaHumanMesh = AppearanceData.MetaHumanMesh.LoadSynchronous();
+        if (MetaHumanMesh)
+        {
+            MeshComponent->SetSkeletalMesh(MetaHumanMesh);
+        }
     }
+    
+    // Apply animation blueprint
+    if (AppearanceData.AnimationBlueprint.IsValid())
+    {
+        UClass* AnimBP = AppearanceData.AnimationBlueprint.LoadSynchronous();
+        if (AnimBP)
+        {
+            MeshComponent->SetAnimInstanceClass(AnimBP);
+        }
+    }
+    
+    // Apply scale transformations
+    FVector CurrentScale = Character->GetActorScale3D();
+    FVector NewScale = FVector(
+        CurrentScale.X * AppearanceData.BuildScale,
+        CurrentScale.Y * AppearanceData.BuildScale,
+        CurrentScale.Z * AppearanceData.HeightScale
+    );
+    Character->SetActorScale3D(NewScale);
+    
+    // Apply clothing meshes
+    for (int32 i = 0; i < AppearanceData.ClothingMeshes.Num(); ++i)
+    {
+        if (AppearanceData.ClothingMeshes[i].IsValid())
+        {
+            USkeletalMesh* ClothingMesh = AppearanceData.ClothingMeshes[i].LoadSynchronous();
+            if (ClothingMesh)
+            {
+                // Create clothing component and attach
+                USkeletalMeshComponent* ClothingComponent = NewObject<USkeletalMeshComponent>(Character);
+                ClothingComponent->SetSkeletalMesh(ClothingMesh);
+                ClothingComponent->SetLeaderPoseComponent(MeshComponent);
+                ClothingComponent->AttachToComponent(MeshComponent, FAttachmentTransformRules::KeepRelativeTransform);
+                
+                // Apply clothing material if available
+                if (i < AppearanceData.ClothingMaterials.Num() && AppearanceData.ClothingMaterials[i].IsValid())
+                {
+                    UMaterialInterface* ClothingMaterial = AppearanceData.ClothingMaterials[i].LoadSynchronous();
+                    if (ClothingMaterial)
+                    {
+                        UMaterialInstanceDynamic* DynamicMaterial = UMaterialInstanceDynamic::Create(ClothingMaterial, ClothingComponent);
+                        
+                        // Apply wear and dirt parameters
+                        DynamicMaterial->SetScalarParameterValue(TEXT("DirtLevel"), AppearanceData.DirtinessLevel);
+                        DynamicMaterial->SetScalarParameterValue(TEXT("WearLevel"), AppearanceData.WearLevel);
+                        
+                        ClothingComponent->SetMaterial(0, DynamicMaterial);
+                    }
+                }
+            }
+        }
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Applied appearance for character: %s"), *AppearanceData.CharacterName);
 }
