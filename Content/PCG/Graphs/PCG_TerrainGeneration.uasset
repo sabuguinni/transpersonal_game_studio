@@ -1,35 +1,107 @@
-# PCG Terrain Generation Graph
-# This is a blueprint representation - actual implementation would be done in UE5 Editor
-
-# Graph Structure:
-# Input: Landscape Bounds
-# -> Surface Sampler (Landscape)
-# -> Density Filter (Height-based)
-# -> Transform Points (Add geological variation)
-# -> Attribute Set (Biome classification)
-# -> Output: Point data for Environment Artist
-
-# Key Nodes Configuration:
-# 1. Surface Sampler
-#    - Sample Mode: Landscape
-#    - Points per Square Meter: 0.1
-#    - Bounds Source: Actor Bounds
-#
-# 2. Density Filter
-#    - Filter Mode: Height Range
-#    - Min Height: 50cm (above sea level)
-#    - Max Height: 2000cm (max elevation)
-#
-# 3. Transform Points
-#    - Add geological noise
-#    - Scale: 0.1 to 0.3 random
-#    - Rotation: Natural variation
-#
-# 4. Attribute Set
-#    - BiomeType: Calculated from elevation/humidity
-#    - Slope: Terrain steepness
-#    - WaterDistance: Distance to nearest river
-#    - Elevation: Height above sea level
-
-# This graph generates the base point distribution that will be used by
-# the Environment Artist to place vegetation, rocks, and other props
+{
+    "AssetType": "PCGGraph",
+    "Version": "5.5",
+    "Description": "Main terrain generation graph for prehistoric world",
+    "Nodes": [
+        {
+            "NodeType": "PCGSurfaceSampler",
+            "NodeName": "BaseTerrain",
+            "Settings": {
+                "PointsPerSquaredMeter": 0.1,
+                "Bounds": {
+                    "Min": [-40645, -40645, -1000],
+                    "Max": [40645, 40645, 1000]
+                }
+            },
+            "Position": [0, 0]
+        },
+        {
+            "NodeType": "PCGNoise",
+            "NodeName": "ElevationNoise",
+            "Settings": {
+                "NoiseType": "Perlin",
+                "Frequency": 0.001,
+                "Amplitude": 500.0,
+                "Octaves": 4,
+                "Lacunarity": 2.0,
+                "Persistence": 0.5
+            },
+            "Position": [300, 0]
+        },
+        {
+            "NodeType": "PCGNoise", 
+            "NodeName": "RoughnessNoise",
+            "Settings": {
+                "NoiseType": "Simplex",
+                "Frequency": 0.005,
+                "Amplitude": 100.0,
+                "Octaves": 2
+            },
+            "Position": [300, 200]
+        },
+        {
+            "NodeType": "PCGTransformPoints",
+            "NodeName": "ApplyElevation",
+            "Settings": {
+                "OffsetMode": "Absolute",
+                "RotationMode": "None",
+                "ScaleMode": "Multiply"
+            },
+            "Position": [600, 0]
+        },
+        {
+            "NodeType": "PCGDensityFilter",
+            "NodeName": "TerrainDensityFilter",
+            "Settings": {
+                "LowerBound": 0.3,
+                "UpperBound": 1.0
+            },
+            "Position": [900, 0]
+        },
+        {
+            "NodeType": "PCGStaticMeshSpawner",
+            "NodeName": "TerrainMeshSpawner",
+            "Settings": {
+                "MeshDescriptor": "/Game/Environment/Meshes/SM_TerrainBase.SM_TerrainBase",
+                "MaterialOverrides": [
+                    "/Game/Environment/Materials/M_TerrainMaster.M_TerrainMaster"
+                ]
+            },
+            "Position": [1200, 0]
+        }
+    ],
+    "Connections": [
+        {
+            "From": "BaseTerrain.Out",
+            "To": "ElevationNoise.In"
+        },
+        {
+            "From": "BaseTerrain.Out", 
+            "To": "RoughnessNoise.In"
+        },
+        {
+            "From": "ElevationNoise.Out",
+            "To": "ApplyElevation.In"
+        },
+        {
+            "From": "ApplyElevation.Out",
+            "To": "TerrainDensityFilter.In"
+        },
+        {
+            "From": "TerrainDensityFilter.Out",
+            "To": "TerrainMeshSpawner.In"
+        }
+    ],
+    "GraphSettings": {
+        "UseHierarchicalGeneration": true,
+        "HiGenDefaultGridSize": 25600,
+        "RuntimeGeneration": {
+            "GenerationRadii": {
+                "25600": 2560.0,
+                "12800": 1280.0,
+                "6400": 640.0,
+                "3200": 320.0
+            }
+        }
+    }
+}
