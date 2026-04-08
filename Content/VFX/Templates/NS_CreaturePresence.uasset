@@ -1,0 +1,73 @@
+# Niagara System: Creature Presence Template
+# Subtle VFX to indicate dinosaur presence without breaking immersion
+
+[System Properties]
+Name=NS_CreaturePresence
+Category=Creature
+Description=Breath, heat shimmer, and subtle presence indicators
+
+[Emitter_Breath]
+Type=GPU
+MaxParticles=100
+SpawnRate=20
+Lifetime=3.0
+
+[Modules_Breath]
+# Spawn Modules
+- Initialize Particle
+  - Position: Cone (30 degree spread from mouth)
+  - Velocity: Forward Vector (2.0)
+  - Size: Random Range (20, 40)
+  - Color: RGB(0.9, 0.95, 1.0) Alpha(0.05)
+
+# Update Modules
+- Update Age
+- Add Velocity
+  - Acceleration: Up Vector (0.5) + Random Turbulence
+- Solve Forces and Velocity
+- Update Position
+- Size Over Life
+  - Curve: Grow 1.0->2.0 over lifetime
+- Color Over Life
+  - Alpha: Fade 0.05->0 over lifetime
+
+# Render Module
+- Sprite Renderer
+  - Material: M_BreathMist
+  - Alignment: Velocity
+
+[Emitter_HeatShimmer]
+Type=GPU
+MaxParticles=50
+SpawnRate=10
+Lifetime=5.0
+
+[Modules_HeatShimmer]
+# Spawn Modules
+- Initialize Particle
+  - Position: Box around creature (200x200x100)
+  - Velocity: Up Vector (0.2)
+  - Size: Random Range (100, 200)
+  - Color: RGB(1,1,1) Alpha(0.02)
+
+# Update Modules
+- Update Age
+- Add Velocity
+  - Turbulence: Curl Noise
+- Update Position
+- Size Over Life
+  - Curve: Oscillate 1.0->1.2->1.0
+- Color Over Life
+  - Alpha: Pulse 0.02->0.05->0.02
+
+# Render Module
+- Sprite Renderer
+  - Material: M_HeatDistortion
+  - Blend Mode: Distortion
+
+[Parameters]
+CreatureSize=Float(1.0)
+BreathIntensity=Float(1.0)
+HeatIntensity=Float(0.5)
+LODMultiplier=Float(1.0)
+ParticleCountMultiplier=Float(1.0)
