@@ -1,0 +1,162 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Components/ActorComponent.h"
+#include "Engine/DataAsset.h"
+#include "ProceduralFoliageSpawner.h"
+#include "JurassicVegetationSystem.generated.h"
+
+UENUM(BlueprintType)
+enum class EJurassicBiomeType : uint8
+{
+    DenseForest      UMETA(DisplayName = "Dense Forest"),
+    OpenWoodland     UMETA(DisplayName = "Open Woodland"),
+    RiverBank        UMETA(DisplayName = "River Bank"),
+    Clearing         UMETA(DisplayName = "Forest Clearing"),
+    Swampland        UMETA(DisplayName = "Swampland"),
+    RockyOutcrop     UMETA(DisplayName = "Rocky Outcrop")
+};
+
+USTRUCT(BlueprintType)
+struct FVegetationLayer
+{
+    GENERATED_BODY()
+
+    // Static Mesh for this vegetation type
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    class UStaticMesh* VegetationMesh;
+
+    // Density per square meter
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = 0.0f, ClampMax = 10.0f))
+    float Density = 1.0f;
+
+    // Size variation range
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FVector2D ScaleRange = FVector2D(0.8f, 1.2f);
+
+    // Slope tolerance (0-90 degrees)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = 0.0f, ClampMax = 90.0f))
+    float MaxSlope = 45.0f;
+
+    // Distance from water (negative = must be near water, positive = avoid water)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float WaterDistance = 0.0f;
+
+    // Altitude preference
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FVector2D AltitudeRange = FVector2D(-1000.0f, 1000.0f);
+
+    FVegetationLayer()
+    {
+        VegetationMesh = nullptr;
+    }
+};
+
+USTRUCT(BlueprintType)
+struct FBiomeVegetationProfile
+{
+    GENERATED_BODY()
+
+    // Canopy layer (large trees)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TArray<FVegetationLayer> CanopyLayer;
+
+    // Understory layer (medium trees, large bushes)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TArray<FVegetationLayer> UnderstoryLayer;
+
+    // Ground layer (ferns, small bushes, grass)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TArray<FVegetationLayer> GroundLayer;
+
+    // Aquatic plants (near water)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TArray<FVegetationLayer> AquaticLayer;
+
+    // Dead/fallen vegetation for storytelling
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TArray<FVegetationLayer> DeadVegetationLayer;
+};
+
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UJurassicBiomeData : public UDataAsset
+{
+    GENERATED_BODY()
+
+public:
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    EJurassicBiomeType BiomeType;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FBiomeVegetationProfile VegetationProfile;
+
+    // Environmental storytelling props
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TArray<class UStaticMesh*> StorytellingProps;
+
+    // Ambient sound for this biome
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    class USoundCue* AmbientSound;
+
+    // Particle effects (pollen, mist, etc.)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TArray<class UParticleSystem*> AmbientParticles;
+};
+
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UJurassicVegetationSystem : public UActorComponent
+{
+    GENERATED_BODY()
+
+public:
+    UJurassicVegetationSystem();
+
+protected:
+    virtual void BeginPlay() override;
+
+public:
+    // Generate vegetation for a specific area
+    UFUNCTION(BlueprintCallable, Category = "Vegetation")
+    void GenerateVegetationInArea(FVector Center, float Radius, EJurassicBiomeType BiomeType);
+
+    // Clear vegetation in area (for dinosaur paths, clearings)
+    UFUNCTION(BlueprintCallable, Category = "Vegetation")
+    void ClearVegetationInArea(FVector Center, float Radius, float ClearancePercentage = 1.0f);
+
+    // Add storytelling props
+    UFUNCTION(BlueprintCallable, Category = "Storytelling")
+    void PlaceStorytellingProps(FVector Location, EJurassicBiomeType BiomeType, int32 PropCount = 3);
+
+    // Get biome data for specific type
+    UFUNCTION(BlueprintCallable, Category = "Vegetation")
+    UJurassicBiomeData* GetBiomeData(EJurassicBiomeType BiomeType);
+
+protected:
+    // Biome data assets
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biomes")
+    TMap<EJurassicBiomeType, UJurassicBiomeData*> BiomeDataMap;
+
+    // Procedural foliage spawner
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vegetation")
+    class UProceduralFoliageSpawner* FoliageSpawner;
+
+    // Noise settings for natural distribution
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation")
+    float NoiseScale = 0.01f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation")
+    float NoiseThreshold = 0.3f;
+
+private:
+    // Internal vegetation generation
+    void SpawnVegetationLayer(const TArray<FVegetationLayer>& Layer, FVector Center, float Radius, float LayerHeight);
+    
+    // Check if location is suitable for vegetation type
+    bool IsLocationSuitableForVegetation(FVector Location, const FVegetationLayer& VegData);
+    
+    // Get terrain slope at location
+    float GetTerrainSlope(FVector Location);
+    
+    // Get distance to nearest water
+    float GetDistanceToWater(FVector Location);
+};
