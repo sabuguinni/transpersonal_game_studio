@@ -3,87 +3,17 @@
 #include "CoreMinimal.h"
 #include "Engine/Engine.h"
 #include "Animation/AnimInstance.h"
+#include "Animation/PoseSearchDatabase.h"
+#include "Animation/MotionMatchingAnimNodeLibrary.h"
 #include "Components/ActorComponent.h"
 #include "AnimationSystemManager.generated.h"
 
-UENUM(BlueprintType)
-enum class ECharacterArchetype : uint8
-{
-    Protagonist_Scientist   UMETA(DisplayName = "Scientist Protagonist"),
-    Herbivore_Small        UMETA(DisplayName = "Small Herbivore"),
-    Herbivore_Large        UMETA(DisplayName = "Large Herbivore"),
-    Carnivore_Small        UMETA(DisplayName = "Small Carnivore"),
-    Carnivore_Medium       UMETA(DisplayName = "Medium Carnivore"),
-    Carnivore_Large        UMETA(DisplayName = "Large Carnivore"),
-    Carnivore_Apex         UMETA(DisplayName = "Apex Predator")
-};
-
-UENUM(BlueprintType)
-enum class EEmotionalState : uint8
-{
-    Calm           UMETA(DisplayName = "Calm"),
-    Alert          UMETA(DisplayName = "Alert"),
-    Nervous        UMETA(DisplayName = "Nervous"),
-    Fearful        UMETA(DisplayName = "Fearful"),
-    Panicked       UMETA(DisplayName = "Panicked"),
-    Aggressive     UMETA(DisplayName = "Aggressive"),
-    Hunting        UMETA(DisplayName = "Hunting"),
-    Feeding        UMETA(DisplayName = "Feeding"),
-    Resting        UMETA(DisplayName = "Resting"),
-    Curious        UMETA(DisplayName = "Curious")
-};
-
-USTRUCT(BlueprintType)
-struct FCharacterAnimationProfile
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Identity")
-    ECharacterArchetype Archetype;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Identity")
-    FString IndividualID;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement Traits")
-    float MovementSpeed = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement Traits")
-    float StepLength = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement Traits")
-    float HeadBobIntensity = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement Traits")
-    float ShoulderSwayAmount = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality")
-    float Confidence = 0.5f; // 0.0 = Very Timid, 1.0 = Very Bold
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality")
-    float Alertness = 0.5f; // 0.0 = Oblivious, 1.0 = Hyper-Alert
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical Traits")
-    float Weight = 1.0f; // Affects how heavy movements feel
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical Traits")
-    float Agility = 1.0f; // Affects reaction speed and fluidity
-
-    FCharacterAnimationProfile()
-    {
-        Archetype = ECharacterArchetype::Protagonist_Scientist;
-        IndividualID = TEXT("Default");
-        MovementSpeed = 1.0f;
-        StepLength = 1.0f;
-        HeadBobIntensity = 1.0f;
-        ShoulderSwayAmount = 1.0f;
-        Confidence = 0.5f;
-        Alertness = 0.5f;
-        Weight = 1.0f;
-        Agility = 1.0f;
-    }
-};
-
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+/**
+ * Core Animation System Manager
+ * Manages Motion Matching databases and IK systems for all characters
+ * Implements the vulnerability-focused animation philosophy
+ */
+UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UAnimationSystemManager : public UActorComponent
 {
     GENERATED_BODY()
@@ -97,46 +27,55 @@ protected:
 public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Profile")
-    FCharacterAnimationProfile AnimationProfile;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Current State")
-    EEmotionalState CurrentEmotionalState;
+    // Motion Matching Database Management
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    class UPoseSearchDatabase* PlayerLocomotionDatabase;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    class UPoseSearchDatabase* LocomotionDatabase;
+    class UPoseSearchDatabase* PlayerCautionDatabase;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    class UPoseSearchDatabase* IdleDatabase;
+    class UPoseSearchDatabase* PlayerFearDatabase;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    class UPoseSearchDatabase* AlertDatabase;
+    TMap<FString, class UPoseSearchDatabase*> DinosaurDatabases;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    class UPoseSearchDatabase* FearDatabase;
+    // IK System References
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK System")
+    class UIKRigDefinition* PlayerIKRig;
 
-    // Core animation functions
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK System")
+    TMap<FString, class UIKRigDefinition*> DinosaurIKRigs;
+
+    // Animation State Management
+    UPROPERTY(BlueprintReadOnly, Category = "Animation State")
+    float CurrentTensionLevel;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Animation State")
+    float CurrentFearLevel;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Animation State")
+    bool bIsBeingHunted;
+
+    // Core Functions
     UFUNCTION(BlueprintCallable, Category = "Animation System")
-    void SetEmotionalState(EEmotionalState NewState);
+    void UpdateTensionLevel(float NewTension);
 
     UFUNCTION(BlueprintCallable, Category = "Animation System")
-    void UpdateMovementParameters(float Speed, FVector Direction, float DeltaTime);
+    void UpdateFearLevel(float NewFear);
 
     UFUNCTION(BlueprintCallable, Category = "Animation System")
-    void ApplyIndividualVariation();
+    void SetHuntedState(bool bHunted);
 
     UFUNCTION(BlueprintCallable, Category = "Animation System")
-    float GetWeightedAnimationSpeed() const;
+    UPoseSearchDatabase* GetActivePlayerDatabase() const;
 
     UFUNCTION(BlueprintCallable, Category = "Animation System")
-    FVector GetModifiedStepVector(FVector BaseStep) const;
+    void RegisterDinosaurAnimationSet(const FString& SpeciesName, UPoseSearchDatabase* Database, UIKRigDefinition* IKRig);
 
 private:
-    float CurrentSpeed;
-    FVector CurrentDirection;
-    float StateTransitionTime;
-    float TimeSinceLastStateChange;
-
-    void ProcessEmotionalStateTransition(float DeltaTime);
-    void CalculateMovementModifiers();
+    void InitializeAnimationDatabases();
+    void UpdateAnimationState(float DeltaTime);
+    float CalculateMovementTension() const;
+    float CalculateEnvironmentalFear() const;
 };
