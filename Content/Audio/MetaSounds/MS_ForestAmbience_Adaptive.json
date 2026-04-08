@@ -1,0 +1,183 @@
+{
+  "MetaSoundName": "MS_ForestAmbience_Adaptive",
+  "Description": "Adaptive forest ambience that responds to environment, time of day, and threat presence",
+  "Version": "1.0",
+  "Inputs": [
+    {
+      "Name": "ForestDensity",
+      "Type": "Float",
+      "DefaultValue": 1.0,
+      "Description": "Density of forest (0-1)"
+    },
+    {
+      "Name": "WaterPresence", 
+      "Type": "Float",
+      "DefaultValue": 0.0,
+      "Description": "Presence of water sources (0-1)"
+    },
+    {
+      "Name": "TimeOfDay",
+      "Type": "Float",
+      "DefaultValue": 0.5,
+      "Description": "Time of day (0-1, 0=midnight, 0.5=noon)"
+    },
+    {
+      "Name": "ThreatPresence",
+      "Type": "Float", 
+      "DefaultValue": 0.0,
+      "Description": "Presence of threatening dinosaurs (0-1)"
+    },
+    {
+      "Name": "WeatherIntensity",
+      "Type": "Float",
+      "DefaultValue": 0.0,
+      "Description": "Weather intensity (0-1)"
+    },
+    {
+      "Name": "EchoAmount",
+      "Type": "Float",
+      "DefaultValue": 0.2,
+      "Description": "Environmental echo/reverb (0-1)"
+    }
+  ],
+  "Outputs": [
+    {
+      "Name": "AudioLeft",
+      "Type": "Audio"
+    },
+    {
+      "Name": "AudioRight",
+      "Type": "Audio"
+    }
+  ],
+  "NodeGraph": {
+    "Description": "Layered forest ambience with adaptive elements",
+    "Layers": [
+      {
+        "Name": "BaseForestLayer",
+        "Description": "Core forest sounds - wind, leaves, distant calls",
+        "Nodes": [
+          {
+            "Type": "WavePlayer",
+            "WaveAsset": "Forest_Wind_Base_Loop",
+            "Volume": "ForestDensity * 0.8",
+            "Loop": true
+          },
+          {
+            "Type": "WavePlayer", 
+            "WaveAsset": "Leaves_Rustle_Loop",
+            "Volume": "ForestDensity * 0.6",
+            "PitchShift": "WeatherIntensity * 0.5"
+          },
+          {
+            "Type": "RandomGet",
+            "Array": ["Bird_Distant_01", "Bird_Distant_02", "Bird_Distant_03"],
+            "TriggerRate": "ForestDensity * (1.0 - ThreatPresence) * 0.3",
+            "Volume": "0.4"
+          }
+        ]
+      },
+      {
+        "Name": "WaterLayer",
+        "Description": "Water-related sounds",
+        "Nodes": [
+          {
+            "Type": "WavePlayer",
+            "WaveAsset": "River_Flow_Loop", 
+            "Volume": "WaterPresence * 0.7",
+            "Loop": true
+          },
+          {
+            "Type": "WavePlayer",
+            "WaveAsset": "Water_Drips_Loop",
+            "Volume": "WaterPresence * 0.3",
+            "Loop": true
+          }
+        ]
+      },
+      {
+        "Name": "TimeOfDayLayer",
+        "Description": "Day/night specific sounds",
+        "Nodes": [
+          {
+            "Type": "Crossfade",
+            "InputA": "DaytimeBirds_Loop",
+            "InputB": "NightInsects_Loop", 
+            "CrossfadeValue": "TimeOfDay",
+            "Volume": "(1.0 - ThreatPresence) * 0.5"
+          },
+          {
+            "Type": "WavePlayer",
+            "WaveAsset": "OwlCall_Distant",
+            "TriggerRate": "(1.0 - TimeOfDay) * 0.1",
+            "Volume": "0.3"
+          }
+        ]
+      },
+      {
+        "Name": "ThreatResponseLayer",
+        "Description": "Ambience changes based on threat presence",
+        "Nodes": [
+          {
+            "Type": "OnePoleHighPassFilter",
+            "Input": "BaseForestLayer",
+            "CutoffFrequency": "20.0 + (ThreatPresence * 300.0)",
+            "Description": "Filter out low frequencies when threatened"
+          },
+          {
+            "Type": "WavePlayer",
+            "WaveAsset": "Silence_Ominous_Loop",
+            "Volume": "ThreatPresence * 0.4",
+            "Description": "Ominous silence when predators near"
+          }
+        ]
+      },
+      {
+        "Name": "WeatherLayer",
+        "Description": "Weather-based audio modifications",
+        "Nodes": [
+          {
+            "Type": "WavePlayer",
+            "WaveAsset": "Rain_Light_Loop",
+            "Volume": "WeatherIntensity * 0.6"
+          },
+          {
+            "Type": "WavePlayer",
+            "WaveAsset": "Thunder_Distant",
+            "TriggerRate": "WeatherIntensity * 0.05",
+            "Volume": "0.8"
+          }
+        ]
+      }
+    ],
+    "Processing": [
+      {
+        "Type": "StereoDelay",
+        "DelayTime": "EchoAmount * 0.3",
+        "Feedback": "EchoAmount * 0.4",
+        "WetLevel": "EchoAmount * 0.6"
+      },
+      {
+        "Type": "Reverb",
+        "RoomSize": "0.7 + (EchoAmount * 0.3)",
+        "WetLevel": "EchoAmount * 0.4"
+      },
+      {
+        "Type": "Compressor",
+        "Ratio": "1.5",
+        "Threshold": "-18.0",
+        "AttackTime": "0.05",
+        "ReleaseTime": "0.2"
+      }
+    ]
+  },
+  "SpatialAudio": {
+    "Description": "3D positioning for environmental elements",
+    "BirdPositions": [
+      {"X": "RandomFloat(-500, 500)", "Y": "RandomFloat(-500, 500)", "Z": "RandomFloat(100, 300)"},
+      {"X": "RandomFloat(-300, 300)", "Y": "RandomFloat(-300, 300)", "Z": "RandomFloat(50, 200)"}
+    ],
+    "WaterPosition": {"X": 0, "Y": "RandomFloat(-100, 100)", "Z": -50},
+    "Attenuation": "EnvironmentalSoundAttenuation"
+  }
+}
