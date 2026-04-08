@@ -1,0 +1,205 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Components/ActorComponent.h"
+#include "Engine/World.h"
+#include "DinosaurBehaviorTypes.h"
+#include "DinosaurMemorySystem.generated.h"
+
+/**
+ * Tipos de memórias que os dinossauros podem formar
+ */
+UENUM(BlueprintType)
+enum class EMemoryType : uint8
+{
+    // Memórias sobre o jogador
+    PlayerSighting      UMETA(DisplayName = "Avistamento do Jogador"),
+    PlayerThreat        UMETA(DisplayName = "Ameaça do Jogador"),
+    PlayerKindness      UMETA(DisplayName = "Bondade do Jogador"),
+    PlayerFeeding       UMETA(DisplayName = "Alimentação pelo Jogador"),
+    
+    // Memórias sobre localizações
+    FoodLocation        UMETA(DisplayName = "Local de Comida"),
+    WaterLocation       UMETA(DisplayName = "Local de Água"),
+    SafeLocation        UMETA(DisplayName = "Local Seguro"),
+    DangerLocation      UMETA(DisplayName = "Local Perigoso"),
+    RestLocation        UMETA(DisplayName = "Local de Descanso"),
+    
+    // Memórias sobre outros dinossauros
+    AllyDinosaur        UMETA(DisplayName = "Dinossauro Aliado"),
+    EnemyDinosaur       UMETA(DisplayName = "Dinossauro Inimigo"),
+    MateDinosaur        UMETA(DisplayName = "Parceiro"),
+    
+    // Memórias sobre eventos
+    PredatorAttack      UMETA(DisplayName = "Ataque de Predador"),
+    SuccessfulHunt      UMETA(DisplayName = "Caça Bem-sucedida"),
+    TerritoryInvasion   UMETA(DisplayName = "Invasão de Território"),
+    WeatherEvent        UMETA(DisplayName = "Evento Climático")
+};
+
+/**
+ * Estrutura individual de memória
+ */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FDinosaurMemory
+{
+    GENERATED_BODY()
+
+    // Tipo da memória
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    EMemoryType MemoryType = EMemoryType::PlayerSighting;
+
+    // Localização onde ocorreu
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FVector Location = FVector::ZeroVector;
+
+    // Quando ocorreu (timestamp do jogo)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float Timestamp = 0.0f;
+
+    // Intensidade da memória (0.0 = fraca, 1.0 = muito forte)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Intensity = 0.5f;
+
+    // Valência emocional (-1.0 = muito negativa, 1.0 = muito positiva)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "-1.0", ClampMax = "1.0"))
+    float EmotionalValence = 0.0f;
+
+    // Ator associado à memória (pode ser nulo)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TWeakObjectPtr<AActor> AssociatedActor;
+
+    // Dados adicionais específicos da memória
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FString AdditionalData;
+
+    // Construtor padrão
+    FDinosaurMemory()
+    {
+        MemoryType = EMemoryType::PlayerSighting;
+        Location = FVector::ZeroVector;
+        Timestamp = 0.0f;
+        Intensity = 0.5f;
+        EmotionalValence = 0.0f;
+        AssociatedActor = nullptr;
+        AdditionalData = TEXT("");
+    }
+
+    // Construtor com parâmetros
+    FDinosaurMemory(EMemoryType InMemoryType, FVector InLocation, float InIntensity, float InValence)
+        : MemoryType(InMemoryType)
+        , Location(InLocation)
+        , Intensity(InIntensity)
+        , EmotionalValence(InValence)
+    {
+        Timestamp = 0.0f; // Será definido quando adicionado ao sistema
+        AssociatedActor = nullptr;
+        AdditionalData = TEXT("");
+    }
+
+    // Verifica se a memória ainda é válida (não expirou)
+    bool IsValid(float CurrentTime, float MaxAge = 3600.0f) const
+    {
+        return (CurrentTime - Timestamp) <= MaxAge;
+    }
+
+    // Calcula o decay da intensidade baseado no tempo
+    float GetCurrentIntensity(float CurrentTime, float DecayRate = 0.1f) const
+    {
+        float TimePassed = CurrentTime - Timestamp;
+        float DecayedIntensity = Intensity * FMath::Exp(-DecayRate * TimePassed);
+        return FMath::Max(0.0f, DecayedIntensity);
+    }
+};
+
+/**
+ * Sistema de memória para dinossauros
+ * Permite que NPCs lembrem de eventos, localizações e interações
+ */
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UDinosaurMemorySystem : public UActorComponent
+{
+    GENERATED_BODY()
+
+public:
+    UDinosaurMemorySystem();
+
+protected:
+    virtual void BeginPlay() override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
+public:
+    // Adiciona uma nova memória
+    UFUNCTION(BlueprintCallable, Category = "Memory")
+    void AddMemory(const FDinosaurMemory& NewMemory);
+
+    // Adiciona memória com parâmetros simplificados
+    UFUNCTION(BlueprintCallable, Category = "Memory")
+    void AddSimpleMemory(EMemoryType MemoryType, FVector Location, float Intensity = 0.5f, float EmotionalValence = 0.0f);
+
+    // Recupera memórias de um tipo específico
+    UFUNCTION(BlueprintCallable, Category = "Memory")
+    TArray<FDinosaurMemory> GetMemoriesOfType(EMemoryType MemoryType, bool bOnlyValid = true) const;
+
+    // Recupera memórias próximas a uma localização
+    UFUNCTION(BlueprintCallable, Category = "Memory")
+    TArray<FDinosaurMemory> GetMemoriesNearLocation(FVector Location, float Radius = 500.0f, bool bOnlyValid = true) const;
+
+    // Recupera memórias sobre um ator específico
+    UFUNCTION(BlueprintCallable, Category = "Memory")
+    TArray<FDinosaurMemory> GetMemoriesAboutActor(AActor* Actor, bool bOnlyValid = true) const;
+
+    // Calcula a impressão geral sobre o jogador
+    UFUNCTION(BlueprintCallable, Category = "Memory")
+    float GetPlayerImpression() const;
+
+    // Calcula o nível de familiaridade com uma localização
+    UFUNCTION(BlueprintCallable, Category = "Memory")
+    float GetLocationFamiliarity(FVector Location, float Radius = 200.0f) const;
+
+    // Verifica se tem memórias negativas sobre uma localização
+    UFUNCTION(BlueprintCallable, Category = "Memory")
+    bool HasNegativeMemoriesAtLocation(FVector Location, float Radius = 300.0f) const;
+
+    // Encontra a melhor localização conhecida para uma atividade
+    UFUNCTION(BlueprintCallable, Category = "Memory")
+    FVector GetBestKnownLocationForActivity(EMemoryType ActivityType) const;
+
+    // Remove memórias antigas
+    UFUNCTION(BlueprintCallable, Category = "Memory")
+    void CleanupOldMemories();
+
+    // Limpa todas as memórias
+    UFUNCTION(BlueprintCallable, Category = "Memory")
+    void ClearAllMemories();
+
+    // Configurações do sistema de memória
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory Settings")
+    int32 MaxMemories = 50;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory Settings")
+    float MemoryDecayRate = 0.1f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory Settings")
+    float MaxMemoryAge = 3600.0f; // 1 hora de jogo
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory Settings")
+    float CleanupInterval = 60.0f; // Limpa memórias antigas a cada 60 segundos
+
+protected:
+    // Array de todas as memórias
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Memory")
+    TArray<FDinosaurMemory> Memories;
+
+    // Tempo da última limpeza
+    float LastCleanupTime = 0.0f;
+
+    // Obtém o timestamp atual do jogo
+    float GetCurrentGameTime() const;
+
+    // Remove memórias expiradas
+    void RemoveExpiredMemories();
+
+    // Ordena memórias por relevância (mais recentes e intensas primeiro)
+    void SortMemoriesByRelevance();
+};
