@@ -1,0 +1,66 @@
+# Blackboard Asset: BB_DinosaurBase
+# Base blackboard for all dinosaur NPCs with essential keys
+
+# Core Navigation
+SelfActor: Object (Actor) - Reference to this dinosaur
+PlayerActor: Object (Actor) - Reference to the player character
+TargetLocation: Vector - Current movement destination
+PatrolLocation: Vector - Current patrol point
+HomeLocation: Vector - Home base location
+FleeLocation: Vector - Emergency escape destination
+
+# Behavior State
+CurrentBehaviorState: Enum (EDinosaurBehaviorState) - Current behavior mode
+PreviousBehaviorState: Enum (EDinosaurBehaviorState) - Previous behavior for transitions
+BehaviorTimer: Float - Time in current behavior state
+CanChangeBehavior: Bool - Whether behavior transitions are allowed
+
+# Perception & Memory
+HasLineOfSight: Bool - Can see current target
+LastKnownPlayerLocation: Vector - Last seen player position
+ThreatLevel: Float - Current perceived threat (0.0 to 1.0)
+IsPlayerThreatening: Bool - Is player acting aggressively
+NearbyDinosaurs: Object (Actor) - Array of nearby dinosaurs
+CurrentTarget: Object (Actor) - Current focus target
+
+# Daily Routine
+TimeOfDay: Float - Current time (0.0 to 24.0)
+IsHungry: Bool - Needs to forage/hunt
+IsThirsty: Bool - Needs to drink
+IsTired: Bool - Needs to rest
+PreferredActivity: String - Current preferred activity
+
+# Social Dynamics
+PackLeader: Object (Actor) - Pack leader reference
+PackMembers: Object (Actor) - Array of pack members
+SocialMood: Float - Current social disposition
+TerritoryCenter: Vector - Territory center point
+TerritoryRadius: Float - Territory boundary radius
+
+# Domestication
+PlayerTrustLevel: Float - Trust level with player (0.0 to 1.0)
+PlayerFearLevel: Float - Fear level of player (0.0 to 1.0)
+IsDomesticated: Bool - Is this dinosaur domesticated
+LastPlayerInteraction: Float - Time since last player interaction
+DomesticationProgress: Float - Overall domestication progress
+
+# Environmental Awareness
+NearestWater: Vector - Closest water source
+NearestFood: Vector - Closest food source
+NearestShelter: Vector - Closest shelter location
+WeatherCondition: String - Current weather state
+DangerZones: Vector - Array of dangerous locations
+
+# Combat & Survival
+HealthPercentage: Float - Current health percentage
+StaminaPercentage: Float - Current stamina percentage
+IsInjured: Bool - Has significant injuries
+FleeThreshold: Float - Health level to trigger fleeing
+AggressionLevel: Float - Current aggression modifier
+
+# Memory System
+MemoryEntries: String - Serialized memory data
+ImportantLocations: Vector - Array of memorable locations
+KnownThreats: Object (Actor) - Array of known dangerous actors
+KnownAllies: Object (Actor) - Array of trusted actors
+MemoryDecayTimer: Float - Timer for memory degradation
