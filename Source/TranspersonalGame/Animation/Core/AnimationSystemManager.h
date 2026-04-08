@@ -1,31 +1,32 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Components/ActorComponent.h"
 #include "Engine/Engine.h"
 #include "Animation/AnimInstance.h"
-#include "Components/ActorComponent.h"
+#include "PoseSearch/PoseSearchDatabase.h"
 #include "AnimationSystemManager.generated.h"
 
 UENUM(BlueprintType)
-enum class ECharacterArchetype : uint8
+enum class ECharacterEmotionalState : uint8
 {
-    Protagonist,
-    DinosaurHerbivore,
-    DinosaurCarnivore,
-    DinosaurPredator,
-    DinosaurAmbush
+    Calm = 0,
+    Cautious,
+    Fearful,
+    Panicked,
+    Confident,
+    Aggressive
 };
 
 UENUM(BlueprintType)
-enum class EEmotionalState : uint8
+enum class ECreaturePersonality : uint8
 {
-    Calm,
-    Alert,
-    Fearful,
-    Panicked,
+    Timid = 0,
     Curious,
     Aggressive,
-    Protective
+    Protective,
+    Playful,
+    Territorial
 };
 
 USTRUCT(BlueprintType)
@@ -33,25 +34,67 @@ struct FCharacterAnimationProfile
 {
     GENERATED_BODY()
 
+    // Base locomotion parameters
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    ECharacterArchetype Archetype;
-
+    float WalkSpeed = 150.0f;
+    
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float MovementSpeed = 1.0f;
-
+    float RunSpeed = 400.0f;
+    
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float CautionLevel = 0.5f;
-
+    float CrouchSpeed = 80.0f;
+    
+    // Emotional modifiers
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float ConfidenceLevel = 0.5f;
-
+    float FearSpeedMultiplier = 1.3f;
+    
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EEmotionalState CurrentEmotionalState = EEmotionalState::Calm;
-
+    float ConfidencePostureOffset = 0.1f;
+    
+    // Individual variation parameters
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TMap<FString, float> PersonalityTraits;
+    float GaitVariation = 0.15f; // 15% variation in step timing
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float PosturalTension = 0.5f; // How tense the character naturally is
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float ReactionSpeed = 1.0f; // How quickly they respond to stimuli
 };
 
+USTRUCT(BlueprintType)
+struct FDinosaurAnimationProfile
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    ECreaturePersonality Personality = ECreaturePersonality::Curious;
+    
+    // Physical variation parameters
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float SizeVariation = 1.0f; // 0.8 to 1.2 typical range
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float LimbLengthVariation = 1.0f;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float MovementAsymmetry = 0.02f; // Slight limp or favoring
+    
+    // Behavioral parameters
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float TrustLevel = 0.0f; // 0 = wild, 1 = fully domesticated
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float AlertnessLevel = 0.7f;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float SocialComfort = 0.3f; // Comfort around other creatures
+};
+
+/**
+ * Central manager for all animation systems in the game
+ * Handles Motion Matching databases, IK systems, and procedural variations
+ */
 UCLASS(ClassGroup=(Animation), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UAnimationSystemManager : public UActorComponent
 {
@@ -66,37 +109,52 @@ protected:
 public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Profile")
-    FCharacterAnimationProfile AnimationProfile;
-
+    // Motion Matching Database Management
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    class UPoseSearchDatabase* LocomotionDatabase;
-
+    TMap<FString, TSoftObjectPtr<UPoseSearchDatabase>> MotionDatabases;
+    
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    class UPoseSearchDatabase* InteractionDatabase;
-
+    TSoftObjectPtr<UPoseSearchDatabase> HumanLocomotionDatabase;
+    
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    class UPoseSearchDatabase* CombatDatabase;
+    TSoftObjectPtr<UPoseSearchDatabase> HumanEmotionalDatabase;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    TMap<FString, TSoftObjectPtr<UPoseSearchDatabase>> DinosaurDatabases;
 
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void UpdateEmotionalState(EEmotionalState NewState, float Intensity = 1.0f);
+    // Character Animation Profiles
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Profiles")
+    FCharacterAnimationProfile PlayerProfile;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Profiles")
+    TMap<FString, FDinosaurAnimationProfile> DinosaurProfiles;
 
+    // Animation State Management
     UFUNCTION(BlueprintCallable, Category = "Animation")
-    void ApplyPersonalityModifier(const FString& TraitName, float Value);
-
+    void SetCharacterEmotionalState(AActor* Character, ECharacterEmotionalState NewState);
+    
     UFUNCTION(BlueprintCallable, Category = "Animation")
-    float GetMovementStyleMultiplier() const;
-
+    void UpdateDinosaurTrustLevel(AActor* Dinosaur, float NewTrustLevel);
+    
     UFUNCTION(BlueprintCallable, Category = "Animation")
-    bool ShouldUseCautiousMovement() const;
+    FDinosaurAnimationProfile GenerateUniqueProfile(const FString& Species, int32 IndividualSeed);
+    
+    // IK System Integration
+    UFUNCTION(BlueprintCallable, Category = "IK")
+    void EnableFootIK(AActor* Character, bool bEnable);
+    
+    UFUNCTION(BlueprintCallable, Category = "IK")
+    void SetIKTargets(AActor* Character, const TArray<FVector>& FootTargets);
 
 private:
-    UPROPERTY()
-    float EmotionalStateIntensity = 1.0f;
-
-    UPROPERTY()
-    float StateTransitionTimer = 0.0f;
-
-    void UpdateAnimationParameters();
-    void ProcessEmotionalTransitions(float DeltaTime);
+    // Internal state tracking
+    TMap<AActor*, ECharacterEmotionalState> CharacterStates;
+    TMap<AActor*, FDinosaurAnimationProfile> RuntimeProfiles;
+    
+    // Performance optimization
+    float LastUpdateTime = 0.0f;
+    static constexpr float UPDATE_FREQUENCY = 0.1f; // 10Hz updates
+    
+    void UpdateCharacterAnimationState(AActor* Character, float DeltaTime);
+    void ApplyProceduralVariations(AActor* Character, const FDinosaurAnimationProfile& Profile);
 };
