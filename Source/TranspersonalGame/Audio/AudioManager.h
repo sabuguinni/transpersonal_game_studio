@@ -1,127 +1,120 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
+#include "GameFramework/GameModeBase.h"
+#include "Engine/Engine.h"
 #include "Components/AudioComponent.h"
-#include "Engine/DataTable.h"
 #include "Sound/SoundCue.h"
+#include "MetasoundSource.h"
 #include "AudioManager.generated.h"
 
 UENUM(BlueprintType)
-enum class EAudioState : uint8
+enum class EEmotionalState : uint8
 {
-    Exploration,
-    Tension,
-    Danger,
-    Combat,
-    Safe,
-    Discovery,
-    Domestication
+    Calm        UMETA(DisplayName = "Calm"),
+    Tension     UMETA(DisplayName = "Tension"),
+    Danger      UMETA(DisplayName = "Danger"),
+    Terror      UMETA(DisplayName = "Terror"),
+    Relief      UMETA(DisplayName = "Relief")
 };
 
 UENUM(BlueprintType)
 enum class EEnvironmentType : uint8
 {
-    Forest,
-    Plains,
-    Swamp,
-    Cave,
-    River,
-    Cliff
+    Forest      UMETA(DisplayName = "Dense Forest"),
+    Clearing    UMETA(DisplayName = "Open Clearing"),
+    Water       UMETA(DisplayName = "Near Water"),
+    Cave        UMETA(DisplayName = "Cave System"),
+    Cliff       UMETA(DisplayName = "Cliff Area")
 };
 
 USTRUCT(BlueprintType)
-struct FDynamicMusicLayer
+struct FTensionParameters
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    USoundCue* MusicCue;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tension")
+    float ThreatProximity = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float BaseVolume = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tension")
+    float ThreatLevel = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float FadeTime = 2.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tension")
+    float PlayerHeartRate = 60.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bLooping = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tension")
+    bool bIsHiding = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tension")
+    bool bIsBeingHunted = false;
 };
 
-USTRUCT(BlueprintType)
-struct FAudioStateConfig
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TMap<EEnvironmentType, FDynamicMusicLayer> MusicLayers;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float TensionThreshold = 0.5f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float DangerThreshold = 0.8f;
-};
-
-UCLASS()
-class TRANSPERSONALGAME_API AAudioManager : public AActor
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UAudioManager : public UObject
 {
     GENERATED_BODY()
 
 public:
-    AAudioManager();
+    UAudioManager();
+
+    UFUNCTION(BlueprintCallable, Category = "Audio Manager")
+    void Initialize(UWorld* World);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio Manager")
+    void UpdateEmotionalState(EEmotionalState NewState, float TransitionTime = 2.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio Manager")
+    void UpdateEnvironmentType(EEnvironmentType NewEnvironment);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio Manager")
+    void UpdateTensionParameters(const FTensionParameters& NewParameters);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio Manager")
+    void PlayDinosaurSound(FVector Location, FString DinosaurSpecies, FString SoundType);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio Manager")
+    void SetTimeOfDay(float TimeOfDay); // 0.0 = midnight, 0.5 = noon
+
+    UFUNCTION(BlueprintCallable, Category = "Audio Manager")
+    void SetWeatherIntensity(float Intensity); // 0.0 = clear, 1.0 = storm
 
 protected:
-    virtual void BeginPlay() override;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Configuration")
-    TMap<EAudioState, FAudioStateConfig> AudioStates;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Components")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Audio Components")
     UAudioComponent* MusicComponent;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Components")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Audio Components")
     UAudioComponent* AmbienceComponent;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Components")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Audio Components")
     UAudioComponent* TensionComponent;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Audio State")
-    EAudioState CurrentAudioState;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MetaSounds")
+    UMetaSoundSource* AdaptiveMusicMetaSound;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Audio State")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MetaSounds")
+    UMetaSoundSource* EnvironmentAmbienceMetaSound;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MetaSounds")
+    UMetaSoundSource* TensionSystemMetaSound;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "State")
+    EEmotionalState CurrentEmotionalState;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "State")
     EEnvironmentType CurrentEnvironment;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Audio State")
-    float CurrentTensionLevel;
-
-public:
-    virtual void Tick(float DeltaTime) override;
-
-    UFUNCTION(BlueprintCallable, Category = "Audio Management")
-    void SetAudioState(EAudioState NewState, float TransitionTime = 2.0f);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio Management")
-    void SetEnvironmentType(EEnvironmentType NewEnvironment);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio Management")
-    void UpdateTensionLevel(float NewTensionLevel);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio Management")
-    void PlayDinosaurSound(class ADinosaur* Dinosaur, const FString& SoundType);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio Management")
-    void PlayEnvironmentalSound(FVector Location, USoundCue* SoundCue, float VolumeMultiplier = 1.0f);
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "State")
+    FTensionParameters CurrentTensionParams;
 
 private:
-    void TransitionToState(EAudioState NewState, float TransitionTime);
-    void UpdateMusicLayers();
-    void ProcessAmbientSounds();
+    void UpdateMusicParameters();
+    void UpdateAmbienceParameters();
+    void UpdateTensionParameters();
     
-    UPROPERTY()
-    TArray<UAudioComponent*> ActiveAudioComponents;
+    float CalculateTensionLevel();
+    float CalculateMusicalIntensity();
     
-    float StateTransitionTimer;
-    EAudioState TargetAudioState;
-    bool bIsTransitioning;
+    UWorld* GameWorld;
+    float CurrentTimeOfDay;
+    float CurrentWeatherIntensity;
 };
