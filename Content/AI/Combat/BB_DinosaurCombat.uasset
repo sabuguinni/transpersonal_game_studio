@@ -1,0 +1,113 @@
+{
+  "Blackboard": {
+    "Name": "BB_DinosaurCombat",
+    "Description": "Blackboard for Dinosaur Combat AI System",
+    "Keys": [
+      {
+        "EntryName": "PlayerActor",
+        "KeyType": "Object",
+        "BaseClass": "Actor",
+        "EntryDescription": "Reference to the player character"
+      },
+      {
+        "EntryName": "LastKnownPlayerLocation",
+        "KeyType": "Vector",
+        "EntryDescription": "Last known position of the player"
+      },
+      {
+        "EntryName": "CombatState",
+        "KeyType": "Enum",
+        "EnumType": "EDinosaurCombatState",
+        "EntryDescription": "Current combat state of the dinosaur"
+      },
+      {
+        "EntryName": "AttackTarget",
+        "KeyType": "Object",
+        "BaseClass": "Actor",
+        "EntryDescription": "Current target for attacks"
+      },
+      {
+        "EntryName": "PatrolPoint",
+        "KeyType": "Vector",
+        "EntryDescription": "Current patrol destination"
+      },
+      {
+        "EntryName": "ThreatLevel",
+        "KeyType": "Float",
+        "EntryDescription": "Current threat assessment level (0.0 to 1.0)"
+      },
+      {
+        "EntryName": "HealthPercentage",
+        "KeyType": "Float",
+        "EntryDescription": "Current health as percentage (0.0 to 1.0)"
+      },
+      {
+        "EntryName": "RetreatThreshold",
+        "KeyType": "Float",
+        "EntryDescription": "Health threshold for retreat behavior"
+      },
+      {
+        "EntryName": "RetreatLocation",
+        "KeyType": "Vector",
+        "EntryDescription": "Safe location for retreat"
+      },
+      {
+        "EntryName": "StalkingPosition",
+        "KeyType": "Vector",
+        "EntryDescription": "Position for stalking behavior"
+      },
+      {
+        "EntryName": "AttackCooldown",
+        "KeyType": "Float",
+        "EntryDescription": "Time remaining until next attack is possible"
+      },
+      {
+        "EntryName": "PackMembers",
+        "KeyType": "Object",
+        "BaseClass": "Actor",
+        "EntryDescription": "Other pack members for coordination"
+      },
+      {
+        "EntryName": "TerritoryCenter",
+        "KeyType": "Vector",
+        "EntryDescription": "Center of this dinosaur's territory"
+      },
+      {
+        "EntryName": "TerritoryRadius",
+        "KeyType": "Float",
+        "EntryDescription": "Radius of territorial area"
+      },
+      {
+        "EntryName": "AlertLevel",
+        "KeyType": "Enum",
+        "EnumType": "EAlertLevel",
+        "EntryDescription": "Current alertness level"
+      },
+      {
+        "EntryName": "LastAttackTime",
+        "KeyType": "Float",
+        "EntryDescription": "Game time of last attack"
+      },
+      {
+        "EntryName": "PreferredAttackRange",
+        "KeyType": "Float",
+        "EntryDescription": "Optimal distance for attacks"
+      },
+      {
+        "EntryName": "FlankingPosition",
+        "KeyType": "Vector",
+        "EntryDescription": "Position for flanking maneuvers"
+      },
+      {
+        "EntryName": "AmbushPosition",
+        "KeyType": "Vector",
+        "EntryDescription": "Position for ambush attacks"
+      },
+      {
+        "EntryName": "EscapeRoute",
+        "KeyType": "Vector",
+        "EntryDescription": "Emergency escape direction"
+      }
+    ]
+  }
+}
