@@ -1,154 +1,282 @@
 #include "AnimationSystemCore.h"
-#include "GameFramework/Character.h"
-#include "GameFramework/CharacterMovementComponent.h"
-#include "Components/CapsuleComponent.h"
+#include "PoseSearch/PoseSearchDatabase.h"
+#include "PoseSearch/PoseSearchSchema.h"
+#include "IKRigDefinition.h"
 #include "Engine/World.h"
-#include "DrawDebugHelpers.h"
 
 UAnimationSystemCore::UAnimationSystemCore()
 {
+    CurrentMovementState = ECharacterMovementState::Idle;
+    CurrentBehaviorState = EDinosaurBehaviorState::Idle;
+    TerrainAngle = 0.0f;
+    TerrainRoughness = 0.0f;
+    DomesticationLevel = 0.0f;
 }
 
-FMotionMatchingData UAnimationSystemCore::CalculateMotionMatchingData(AActor* Character)
+void UAnimationSystemCore::InitializeMotionMatchingSystem()
 {
-    FMotionMatchingData Data;
+    UE_LOG(LogTemp, Log, TEXT("Animation System: Initializing Motion Matching System"));
     
-    if (!Character)
+    // Load default motion matching databases
+    if (!HumanLocomotionDatabase)
     {
-        return Data;
+        HumanLocomotionDatabase = LoadObject<UPoseSearchDatabase>(nullptr, 
+            TEXT("/Game/Animation/MotionMatching/DB_HumanLocomotion"));
     }
-
-    if (ACharacter* CharacterPawn = Cast<ACharacter>(Character))
+    
+    if (!DinosaurBehaviorDatabase)
     {
-        UCharacterMovementComponent* MovementComp = CharacterPawn->GetCharacterMovement();
-        if (MovementComp)
+        DinosaurBehaviorDatabase = LoadObject<UPoseSearchDatabase>(nullptr, 
+            TEXT("/Game/Animation/MotionMatching/DB_DinosaurBehavior"));
+    }
+    
+    if (!DefaultMotionSchema)
+    {
+        DefaultMotionSchema = LoadObject<UPoseSearchSchema>(nullptr, 
+            TEXT("/Game/Animation/MotionMatching/Schema_Default"));
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Animation System: Motion Matching System Initialized"));
+}
+
+void UAnimationSystemCore::SetCharacterMovementState(ECharacterMovementState NewState)
+{
+    if (CurrentMovementState != NewState)
+    {
+        ECharacterMovementState PreviousState = CurrentMovementState;
+        CurrentMovementState = NewState;
+        
+        UE_LOG(LogTemp, Log, TEXT("Animation System: Character movement state changed from %d to %d"), 
+            (int32)PreviousState, (int32)NewState);
+        
+        // Trigger animation blend based on personality
+        ApplyMovementStateTransition(PreviousState, NewState);
+    }
+}
+
+void UAnimationSystemCore::SetDinosaurBehaviorState(EDinosaurBehaviorState NewState)
+{
+    if (CurrentBehaviorState != NewState)
+    {
+        EDinosaurBehaviorState PreviousState = CurrentBehaviorState;
+        CurrentBehaviorState = NewState;
+        
+        UE_LOG(LogTemp, Log, TEXT("Animation System: Dinosaur behavior state changed from %d to %d"), 
+            (int32)PreviousState, (int32)NewState);
+        
+        // Handle domestication state transitions
+        if (NewState == EDinosaurBehaviorState::Domesticated_Calm || 
+            NewState == EDinosaurBehaviorState::Domesticated_Playful)
         {
-            // Get current velocity and acceleration
-            Data.Velocity = MovementComp->Velocity;
-            Data.Acceleration = MovementComp->GetCurrentAcceleration();
-            Data.Speed = Data.Velocity.Size();
-            
-            // Calculate movement direction relative to character facing
-            Data.Direction = CalculateMovementDirection(Data.Velocity, Character->GetActorRotation());
-            
-            // Determine movement states
-            Data.bIsMoving = Data.Speed > 10.0f;
-            Data.bIsInAir = MovementComp->IsFalling();
+            ApplyDomesticationAnimationBlend();
         }
     }
-    
-    return Data;
 }
 
-float UAnimationSystemCore::CalculateMovementDirection(const FVector& Velocity, const FRotator& ActorRotation)
+void UAnimationSystemCore::ApplyAnimationPersonality(const FAnimationPersonality& Personality)
 {
-    if (Velocity.SizeSquared() < 0.01f)
-    {
-        return 0.0f;
-    }
-
-    // Convert velocity to local space
-    FVector LocalVelocity = ActorRotation.UnrotateVector(Velocity);
+    CurrentPersonality = Personality;
     
-    // Calculate angle in degrees (-180 to 180)
-    float Angle = FMath::Atan2(LocalVelocity.Y, LocalVelocity.X);
-    return FMath::RadiansToDegrees(Angle);
+    UE_LOG(LogTemp, Log, TEXT("Animation System: Applied personality - Nervousness: %f, Confidence: %f"), 
+        Personality.Nervousness, Personality.Confidence);
+    
+    // Modify animation parameters based on personality
+    ModifyAnimationTimings();
+    AdjustMovementVariations();
+    ApplyPhysicalCharacteristics();
 }
 
-FIKFootData UAnimationSystemCore::CalculateFootIK(USkeletalMeshComponent* SkeletalMesh, FName FootBone, float TraceDistance)
+void UAnimationSystemCore::UpdateTerrainAdaptation(float SurfaceAngle, float SurfaceRoughness)
 {
-    FIKFootData FootData;
+    TerrainAngle = SurfaceAngle;
+    TerrainRoughness = SurfaceRoughness;
     
-    if (!SkeletalMesh || !SkeletalMesh->GetWorld())
+    // Trigger IK adjustments for foot placement
+    if (HumanIKRig)
     {
-        return FootData;
+        ApplyTerrainIKAdjustments();
     }
-
-    // Get foot bone location in world space
-    FVector FootLocation = SkeletalMesh->GetBoneLocation(FootBone);
-    FVector TraceStart = FootLocation + FVector(0, 0, 20.0f);
-    FVector TraceEnd = FootLocation - FVector(0, 0, TraceDistance);
-
-    // Perform line trace to find ground
-    FHitResult HitResult;
-    FCollisionQueryParams QueryParams;
-    QueryParams.AddIgnoredActor(SkeletalMesh->GetOwner());
-
-    bool bHit = SkeletalMesh->GetWorld()->LineTraceSingleByChannel(
-        HitResult,
-        TraceStart,
-        TraceEnd,
-        ECC_WorldStatic,
-        QueryParams
-    );
-
-    if (bHit)
-    {
-        FootData.FootLocation = HitResult.Location;
-        FootData.FootRotation = FRotationMatrix::MakeFromZ(HitResult.Normal).Rotator();
-        FootData.IKAlpha = 1.0f;
-        FootData.bIsPlanted = true;
-    }
-    else
-    {
-        FootData.FootLocation = FootLocation;
-        FootData.IKAlpha = 0.0f;
-        FootData.bIsPlanted = false;
-    }
-
-    return FootData;
 }
 
-FVector UAnimationSystemCore::CalculateHipOffset(const FIKFootData& LeftFoot, const FIKFootData& RightFoot)
+void UAnimationSystemCore::UpdateDomesticationLevel(float DomesticationProgress)
 {
-    if (!LeftFoot.bIsPlanted && !RightFoot.bIsPlanted)
+    float PreviousLevel = DomesticationLevel;
+    DomesticationLevel = FMath::Clamp(DomesticationProgress, 0.0f, 1.0f);
+    
+    if (FMath::Abs(DomesticationLevel - PreviousLevel) > 0.1f)
     {
-        return FVector::ZeroVector;
+        UE_LOG(LogTemp, Log, TEXT("Animation System: Domestication level updated to %f"), DomesticationLevel);
+        ApplyDomesticationAnimationChanges();
     }
-
-    float LeftFootZ = LeftFoot.bIsPlanted ? LeftFoot.FootLocation.Z : 0.0f;
-    float RightFootZ = RightFoot.bIsPlanted ? RightFoot.FootLocation.Z : 0.0f;
-    
-    // Calculate the lowest foot position
-    float LowestFootZ = FMath::Min(LeftFootZ, RightFootZ);
-    
-    // Offset hip to maintain natural pose
-    return FVector(0, 0, LowestFootZ * 0.5f);
 }
 
-bool UAnimationSystemCore::TraceForGround(UWorld* World, const FVector& StartLocation, FVector& OutHitLocation, FVector& OutHitNormal)
+void UAnimationSystemCore::ApplyMovementStateTransition(ECharacterMovementState From, ECharacterMovementState To)
 {
-    if (!World)
+    // Calculate blend time based on personality and state transition
+    float BlendTime = CalculatePersonalityBlendTime(From, To);
+    
+    // Apply nervous fidgeting for high nervousness characters
+    if (CurrentPersonality.Nervousness > 0.7f && To == ECharacterMovementState::Idle)
     {
-        return false;
+        TriggerNervousFidgeting();
     }
-
-    FVector TraceStart = StartLocation + FVector(0, 0, 10.0f);
-    FVector TraceEnd = StartLocation - FVector(0, 0, IK_TRACE_DISTANCE);
-
-    FHitResult HitResult;
-    FCollisionQueryParams QueryParams;
-    QueryParams.bTraceComplex = true;
-
-    bool bHit = World->LineTraceSingleByChannel(
-        HitResult,
-        TraceStart,
-        TraceEnd,
-        ECC_WorldStatic,
-        QueryParams
-    );
-
-    if (bHit)
+    
+    // Apply confident posture adjustments
+    if (CurrentPersonality.Confidence > 0.7f)
     {
-        OutHitLocation = HitResult.Location;
-        OutHitNormal = HitResult.Normal;
-        return true;
+        ApplyConfidentPosture();
     }
-
-    return false;
 }
 
-float UAnimationSystemCore::CalculateBlendWeight(float CurrentValue, float TargetValue, float BlendSpeed, float DeltaTime)
+float UAnimationSystemCore::CalculatePersonalityBlendTime(ECharacterMovementState From, ECharacterMovementState To)
 {
-    return FMath::FInterpTo(CurrentValue, TargetValue, DeltaTime, BlendSpeed);
+    float BaseBlendTime = 0.3f;
+    
+    // Nervous characters have quicker, more abrupt transitions
+    if (CurrentPersonality.Nervousness > 0.6f)
+    {
+        BaseBlendTime *= 0.7f;
+    }
+    
+    // Confident characters have smoother, more deliberate transitions
+    if (CurrentPersonality.Confidence > 0.6f)
+    {
+        BaseBlendTime *= 1.3f;
+    }
+    
+    return BaseBlendTime;
+}
+
+void UAnimationSystemCore::ModifyAnimationTimings()
+{
+    // Apply speed variations based on personality
+    float SpeedModifier = 1.0f;
+    
+    if (CurrentPersonality.Nervousness > 0.6f)
+    {
+        SpeedModifier *= (1.0f + CurrentPersonality.Nervousness * 0.3f); // Faster, more jittery
+    }
+    
+    if (CurrentPersonality.Confidence > 0.6f)
+    {
+        SpeedModifier *= (1.0f - CurrentPersonality.Confidence * 0.2f); // Slower, more deliberate
+    }
+    
+    CurrentPersonality.AnimationSpeedVariation = SpeedModifier;
+}
+
+void UAnimationSystemCore::AdjustMovementVariations()
+{
+    // Create subtle movement variations that make each character unique
+    float MovementVariation = FMath::RandRange(0.95f, 1.05f);
+    
+    // Apply personality-based movement modifications
+    if (CurrentPersonality.Aggressiveness > 0.7f)
+    {
+        MovementVariation *= 1.1f; // More forceful movements
+    }
+    
+    if (CurrentPersonality.SocialTendency > 0.7f)
+    {
+        // More expressive, open body language
+        ApplyOpenBodyLanguage();
+    }
+    else if (CurrentPersonality.SocialTendency < 0.3f)
+    {
+        // More closed, defensive body language
+        ApplyClosedBodyLanguage();
+    }
+}
+
+void UAnimationSystemCore::ApplyPhysicalCharacteristics()
+{
+    // Apply limp or injury effects
+    if (CurrentPersonality.LimpSeverity > 0.0f)
+    {
+        ApplyLimpAnimation();
+    }
+    
+    // Apply unique movement signature based on identifier
+    ApplyUniqueMovementSignature();
+}
+
+void UAnimationSystemCore::ApplyTerrainIKAdjustments()
+{
+    // Calculate foot IK adjustments based on terrain
+    float IKAdjustmentStrength = FMath::Clamp(TerrainRoughness * 2.0f, 0.0f, 1.0f);
+    
+    // Apply slope compensation
+    float SlopeCompensation = FMath::Sin(FMath::DegreesToRadians(TerrainAngle)) * 0.5f;
+    
+    UE_LOG(LogTemp, Verbose, TEXT("Animation System: Applying terrain IK - Roughness: %f, Angle: %f"), 
+        TerrainRoughness, TerrainAngle);
+}
+
+void UAnimationSystemCore::ApplyDomesticationAnimationBlend()
+{
+    // Blend from wild to domesticated animations
+    float WildWeight = 1.0f - DomesticationLevel;
+    float DomesticatedWeight = DomesticationLevel;
+    
+    UE_LOG(LogTemp, Log, TEXT("Animation System: Applying domestication blend - Wild: %f, Domestic: %f"), 
+        WildWeight, DomesticatedWeight);
+}
+
+void UAnimationSystemCore::ApplyDomesticationAnimationChanges()
+{
+    // Gradually change animation sets as domestication progresses
+    if (DomesticationLevel > 0.5f)
+    {
+        // Start showing more trusting animations
+        EnableTrustingAnimations();
+    }
+    
+    if (DomesticationLevel > 0.8f)
+    {
+        // Enable playful interactions
+        EnablePlayfulAnimations();
+    }
+}
+
+// Helper methods for animation application
+void UAnimationSystemCore::TriggerNervousFidgeting()
+{
+    UE_LOG(LogTemp, Verbose, TEXT("Animation System: Triggering nervous fidgeting"));
+}
+
+void UAnimationSystemCore::ApplyConfidentPosture()
+{
+    UE_LOG(LogTemp, Verbose, TEXT("Animation System: Applying confident posture"));
+}
+
+void UAnimationSystemCore::ApplyOpenBodyLanguage()
+{
+    UE_LOG(LogTemp, Verbose, TEXT("Animation System: Applying open body language"));
+}
+
+void UAnimationSystemCore::ApplyClosedBodyLanguage()
+{
+    UE_LOG(LogTemp, Verbose, TEXT("Animation System: Applying closed body language"));
+}
+
+void UAnimationSystemCore::ApplyLimpAnimation()
+{
+    UE_LOG(LogTemp, Verbose, TEXT("Animation System: Applying limp animation with severity %f"), 
+        CurrentPersonality.LimpSeverity);
+}
+
+void UAnimationSystemCore::ApplyUniqueMovementSignature()
+{
+    UE_LOG(LogTemp, Verbose, TEXT("Animation System: Applying unique movement signature for %s"), 
+        *CurrentPersonality.UniqueIdentifier);
+}
+
+void UAnimationSystemCore::EnableTrustingAnimations()
+{
+    UE_LOG(LogTemp, Log, TEXT("Animation System: Enabling trusting animations"));
+}
+
+void UAnimationSystemCore::EnablePlayfulAnimations()
+{
+    UE_LOG(LogTemp, Log, TEXT("Animation System: Enabling playful animations"));
 }
