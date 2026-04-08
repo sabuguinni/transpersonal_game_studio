@@ -11,6 +11,70 @@
 #include "Engine/StaticMeshActor.h"
 #include "PhysicsPerformanceOptimizer.generated.h"
 
+/** Physics object types for performance management */
+UENUM(BlueprintType)
+enum class EPhysicsObjectType : uint8
+{
+    CreatureRagdolls    UMETA(DisplayName = "Creature Ragdolls"),
+    DestructionDebris   UMETA(DisplayName = "Destruction Debris"),
+    EnvironmentalProps  UMETA(DisplayName = "Environmental Props"),
+    ProjectilePhysics   UMETA(DisplayName = "Projectile Physics"),
+    VehiclePhysics      UMETA(DisplayName = "Vehicle Physics")
+};
+
+/** Physics LOD levels */
+UENUM(BlueprintType)
+enum class EPhysicsLODLevel : uint8
+{
+    LOD0_Full       UMETA(DisplayName = "LOD0 - Full Physics"),
+    LOD1_Reduced    UMETA(DisplayName = "LOD1 - Reduced Physics"),
+    LOD2_Basic      UMETA(DisplayName = "LOD2 - Basic Physics"),
+    LOD3_Kinematic  UMETA(DisplayName = "LOD3 - Kinematic Only")
+};
+
+/** Physics performance metrics structure */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FPhysicsPerformanceMetrics
+{
+    GENERATED_BODY()
+
+    /** Physics simulation time in milliseconds */
+    UPROPERTY(BlueprintReadOnly)
+    float PhysicsSimulationTimeMS = 0.0f;
+
+    /** Number of active physics bodies */
+    UPROPERTY(BlueprintReadOnly)
+    int32 ActivePhysicsBodies = 0;
+
+    /** Number of active ragdolls */
+    UPROPERTY(BlueprintReadOnly)
+    int32 ActiveRagdolls = 0;
+
+    /** Number of destruction debris pieces */
+    UPROPERTY(BlueprintReadOnly)
+    int32 DestructionDebrisCount = 0;
+
+    /** Current physics substep count */
+    UPROPERTY(BlueprintReadOnly)
+    int32 CurrentSubsteps = 6;
+
+    /** Number of collision checks per frame */
+    UPROPERTY(BlueprintReadOnly)
+    int32 CollisionChecksPerFrame = 0;
+
+    /** Physics memory usage in MB */
+    UPROPERTY(BlueprintReadOnly)
+    float PhysicsMemoryUsageMB = 0.0f;
+
+    /** Physics CPU usage percentage */
+    UPROPERTY(BlueprintReadOnly)
+    float PhysicsCPUUsagePercent = 0.0f;
+
+    /** Whether physics is within performance budget */
+    UPROPERTY(BlueprintReadOnly)
+    bool bWithinPerformanceBudget = true;
+};
+
 /**
  * @brief Physics Performance Optimizer for Jurassic Survival Game
  * 
@@ -149,70 +213,6 @@ public:
     void TogglePhysicsObjectType(EPhysicsObjectType ObjectType, bool bEnabled);
 
 protected:
-    /** Physics object types for performance management */
-    UENUM(BlueprintType)
-    enum class EPhysicsObjectType : uint8
-    {
-        CreatureRagdolls    UMETA(DisplayName = "Creature Ragdolls"),
-        DestructionDebris   UMETA(DisplayName = "Destruction Debris"),
-        EnvironmentalProps  UMETA(DisplayName = "Environmental Props"),
-        ProjectilePhysics   UMETA(DisplayName = "Projectile Physics"),
-        VehiclePhysics      UMETA(DisplayName = "Vehicle Physics")
-    };
-
-    /** Physics LOD levels */
-    UENUM(BlueprintType)
-    enum class EPhysicsLODLevel : uint8
-    {
-        LOD0_Full       UMETA(DisplayName = "LOD0 - Full Physics"),
-        LOD1_Reduced    UMETA(DisplayName = "LOD1 - Reduced Physics"),
-        LOD2_Basic      UMETA(DisplayName = "LOD2 - Basic Physics"),
-        LOD3_Kinematic  UMETA(DisplayName = "LOD3 - Kinematic Only")
-    };
-
-    /** Physics performance metrics structure */
-    USTRUCT(BlueprintType)
-    struct FPhysicsPerformanceMetrics
-    {
-        GENERATED_BODY()
-
-        /** Physics simulation time in milliseconds */
-        UPROPERTY(BlueprintReadOnly)
-        float PhysicsSimulationTimeMS = 0.0f;
-
-        /** Number of active physics bodies */
-        UPROPERTY(BlueprintReadOnly)
-        int32 ActivePhysicsBodies = 0;
-
-        /** Number of active ragdolls */
-        UPROPERTY(BlueprintReadOnly)
-        int32 ActiveRagdolls = 0;
-
-        /** Number of destruction debris pieces */
-        UPROPERTY(BlueprintReadOnly)
-        int32 DestructionDebrisCount = 0;
-
-        /** Current physics substep count */
-        UPROPERTY(BlueprintReadOnly)
-        int32 CurrentSubsteps = 6;
-
-        /** Number of collision checks per frame */
-        UPROPERTY(BlueprintReadOnly)
-        int32 CollisionChecksPerFrame = 0;
-
-        /** Physics memory usage in MB */
-        UPROPERTY(BlueprintReadOnly)
-        float PhysicsMemoryUsageMB = 0.0f;
-
-        /** Physics CPU usage percentage */
-        UPROPERTY(BlueprintReadOnly)
-        float PhysicsCPUUsagePercent = 0.0f;
-
-        /** Whether physics is within performance budget */
-        UPROPERTY(BlueprintReadOnly)
-        bool bWithinPerformanceBudget = true;
-    };
-
     /** Physics LOD distance thresholds */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Physics LOD")
     TMap<EPhysicsLODLevel, float> PhysicsLODDistances = {
@@ -259,54 +259,32 @@ protected:
         {EPhysicsObjectType::VehiclePhysics, true}
     };
 
+    /** Current performance metrics */
+    UPROPERTY(BlueprintReadOnly, Category = "Performance Metrics")
+    FPhysicsPerformanceMetrics CurrentMetrics;
+
+    /** Physics object tracking arrays */
+    UPROPERTY()
+    TArray<TWeakObjectPtr<USkeletalMeshComponent>> TrackedRagdolls;
+
+    UPROPERTY()
+    TArray<TWeakObjectPtr<UGeometryCollectionComponent>> TrackedDestructionComponents;
+
+    UPROPERTY()
+    TArray<TWeakObjectPtr<UPrimitiveComponent>> TrackedPhysicsObjects;
+
+    /** Performance monitoring */
+    float LastPerformanceCheckTime = 0.0f;
+    float PerformanceCheckInterval = 0.1f; // Check every 100ms
+
 private:
-    /** Update physics performance metrics */
-    void UpdatePhysicsMetrics();
-
-    /** Apply physics LOD to specific actor */
-    void ApplyPhysicsLOD(AActor* Actor, EPhysicsLODLevel LODLevel);
-
-    /** Cleanup old ragdolls */
-    void CleanupOldRagdolls();
-
-    /** Cleanup old destruction debris */
-    void CleanupOldDebris();
-
-    /** Get distance from player camera */
-    float GetDistanceFromCamera(const FVector& WorldLocation) const;
-
-    /** Check if physics is within performance budget */
-    bool IsPhysicsWithinBudget() const;
-
-    /** Scale physics substeps based on performance */
-    void ScalePhysicsSubsteps();
-
-    /** Get physics object LOD level based on distance */
+    /** Helper functions */
+    void SetDefaultPerformanceSettings();
+    void SetPlatformSpecificSettings();
+    void InitializePhysicsObjectTracking();
+    void SetupPerformanceMonitoring();
+    void UpdatePerformanceMetrics();
+    void CleanupOldDebris(float MaxLifetime);
     EPhysicsLODLevel GetPhysicsLODForDistance(float Distance) const;
-
-    /** Cached performance metrics */
-    FPhysicsPerformanceMetrics CachedMetrics;
-
-    /** Active ragdoll tracking */
-    UPROPERTY()
-    TArray<TWeakObjectPtr<USkeletalMeshComponent>> ActiveRagdolls;
-
-    /** Active debris tracking */
-    UPROPERTY()
-    TArray<TWeakObjectPtr<UGeometryCollectionComponent>> ActiveDebris;
-
-    /** Performance monitoring timer */
-    float PerformanceUpdateTimer = 0.0f;
-
-    /** Performance update interval */
-    float PerformanceUpdateInterval = 0.1f; // Update every 100ms
-
-    /** Last frame time for adaptive scaling */
-    float LastFrameTime = 0.0f;
-
-    /** Frame time history for smoothing */
-    TArray<float> FrameTimeHistory;
-
-    /** Maximum frame time history samples */
-    int32 MaxFrameTimeHistorySamples = 30; // 30 samples for smoothing
+    void ApplyPhysicsLOD(UPrimitiveComponent* Component, EPhysicsLODLevel LODLevel);
 };
