@@ -3,77 +3,69 @@
 #include "CoreMinimal.h"
 #include "Engine/Engine.h"
 #include "Animation/AnimInstance.h"
-#include "Animation/PoseSearch/PoseSearchDatabase.h"
-#include "Animation/PoseSearch/PoseSearchSchema.h"
-#include "IKRig.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "AnimationSystemCore.generated.h"
 
 /**
- * Core Animation System for Transpersonal Game Studio
- * Handles Motion Matching, IK, and character-specific animation logic
- * 
- * Design Philosophy:
- * - Every movement tells a story about the character
- * - Weight and intention in every gesture
- * - Seamless adaptation to procedural terrain
+ * Core Animation System for Transpersonal Game
+ * Handles Motion Matching, IK, and character expression systems
  */
 
 UENUM(BlueprintType)
-enum class ECharacterMovementState : uint8
+enum class ECharacterEmotionalState : uint8
 {
-    Idle,
-    Walking,
-    Running,
-    Crouching,
-    Climbing,
-    Swimming,
-    Falling,
-    Landing,
-    Injured,
-    Fearful,
-    Cautious,
-    Confident
+    Calm        UMETA(DisplayName = "Calm"),
+    Cautious    UMETA(DisplayName = "Cautious"),
+    Fearful     UMETA(DisplayName = "Fearful"),
+    Terrified   UMETA(DisplayName = "Terrified"),
+    Curious     UMETA(DisplayName = "Curious"),
+    Focused     UMETA(DisplayName = "Focused")
 };
 
 UENUM(BlueprintType)
-enum class ETerrainAdaptation : uint8
+enum class EMovementIntention : uint8
 {
-    Flat,
-    Uphill,
-    Downhill,
-    Rocky,
-    Muddy,
-    Water,
-    Vegetation
+    Idle        UMETA(DisplayName = "Idle"),
+    Walking     UMETA(DisplayName = "Walking"),
+    Sneaking    UMETA(DisplayName = "Sneaking"),
+    Running     UMETA(DisplayName = "Running"),
+    Crouching   UMETA(DisplayName = "Crouching"),
+    Climbing    UMETA(DisplayName = "Climbing"),
+    Gathering   UMETA(DisplayName = "Gathering"),
+    Crafting    UMETA(DisplayName = "Crafting")
 };
 
 USTRUCT(BlueprintType)
-struct FCharacterAnimationProfile
+struct FCharacterAnimationState
 {
     GENERATED_BODY()
 
-    // Core personality traits affecting movement
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float Confidence = 0.5f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    ECharacterEmotionalState EmotionalState = ECharacterEmotionalState::Calm;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float Nervousness = 0.3f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    EMovementIntention MovementIntention = EMovementIntention::Idle;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float Fatigue = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float FearLevel = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float InjuryLevel = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float StaminaLevel = 1.0f;
 
-    // Movement characteristics
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.5", ClampMax = "2.0"))
-    float BaseMovementSpeed = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float GroundSlope = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.1", ClampMax = "2.0"))
-    float StepVariation = 0.1f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FVector MovementDirection = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float PosturalTension = 0.2f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float MovementSpeed = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsCarryingObject = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float ObjectWeight = 0.0f;
 };
 
 UCLASS(BlueprintType, Blueprintable)
@@ -84,57 +76,53 @@ class TRANSPERSONALGAME_API UAnimationSystemCore : public UObject
 public:
     UAnimationSystemCore();
 
-    // Motion Matching Database Management
-    UFUNCTION(BlueprintCallable, Category = "Animation System")
-    void InitializeMotionMatchingDatabases();
+    // Motion Matching Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    class UPoseSearchDatabase* LocomotionDatabase;
 
-    UFUNCTION(BlueprintCallable, Category = "Animation System")
-    UPoseSearchDatabase* GetDatabaseForState(ECharacterMovementState State, ETerrainAdaptation Terrain);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    class UPoseSearchDatabase* InteractionDatabase;
 
-    // Character Animation Profile Management
-    UFUNCTION(BlueprintCallable, Category = "Animation System")
-    void SetCharacterAnimationProfile(const FCharacterAnimationProfile& Profile);
-
-    UFUNCTION(BlueprintCallable, Category = "Animation System")
-    FCharacterAnimationProfile GetCharacterAnimationProfile() const { return CurrentProfile; }
-
-    // IK System Management
-    UFUNCTION(BlueprintCallable, Category = "Animation System")
-    void UpdateTerrainAdaptation(const FVector& FootLocation, float TerrainHeight);
-
-    UFUNCTION(BlueprintCallable, Category = "Animation System")
-    void SetIKTargets(const TArray<FVector>& FootTargets);
-
-protected:
-    // Motion Matching Databases
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Motion Matching")
-    TMap<ECharacterMovementState, UPoseSearchDatabase*> MovementDatabases;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Motion Matching")
-    TMap<ETerrainAdaptation, UPoseSearchDatabase*> TerrainDatabases;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    class UPoseSearchDatabase* EmotionalDatabase;
 
     // IK Configuration
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "IK System")
-    UIKRigDefinition* PlayerIKRig;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK")
+    bool bEnableFootIK = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "IK System")
-    float MaxIKReach = 50.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK")
+    float FootIKRange = 50.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "IK System")
-    float IKBlendSpeed = 5.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK")
+    float FootIKInterpSpeed = 15.0f;
 
-    // Character Profile
-    UPROPERTY(BlueprintReadOnly, Category = "Character")
-    FCharacterAnimationProfile CurrentProfile;
+    // Animation Blending
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blending")
+    float EmotionalBlendSpeed = 2.0f;
 
-    // Terrain Analysis
-    UPROPERTY(BlueprintReadOnly, Category = "Terrain")
-    TArray<FVector> FootIKTargets;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blending")
+    float MovementBlendSpeed = 5.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Terrain")
-    ETerrainAdaptation CurrentTerrainType;
+    // Character Expression
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void UpdateCharacterState(const FCharacterAnimationState& NewState);
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    FCharacterAnimationState GetCurrentAnimationState() const { return CurrentAnimationState; }
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void SetFearLevel(float NewFearLevel);
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void TriggerEmotionalResponse(ECharacterEmotionalState NewEmotion, float Duration = 2.0f);
 
 private:
-    void AnalyzeTerrainType(const FVector& Location);
-    float CalculateMovementWeight(ECharacterMovementState State) const;
+    UPROPERTY()
+    FCharacterAnimationState CurrentAnimationState;
+
+    UPROPERTY()
+    FCharacterAnimationState TargetAnimationState;
+
+    float EmotionalTransitionTimer = 0.0f;
+    float EmotionalTransitionDuration = 0.0f;
 };
