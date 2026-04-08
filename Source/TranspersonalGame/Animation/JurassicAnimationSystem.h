@@ -1,0 +1,386 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Subsystems/WorldSubsystem.h"
+#include "Engine/DataAsset.h"
+#include "Animation/AnimInstance.h"
+#include "Characters/CharacterArchetypes.h"
+#include "JurassicAnimationAgent.h"
+#include "MotionMatching/MotionMatchingController.h"
+#include "IK/AdaptiveIKComponent.h"
+#include "JurassicAnimationSystem.generated.h"
+
+class UPoseSearchDatabase;
+class UAnimSequence;
+class UBlendSpace;
+class UIKRigDefinition;
+class UCharacterMovementComponent;
+class UAnimMontage;
+class UControlRig;
+
+/**
+ * JURASSIC ANIMATION SYSTEM - SISTEMA CENTRAL DE ANIMAÇÃO
+ * 
+ * "Cada movimento conta uma história. Cada gesto revela uma alma."
+ * 
+ * Este é o sistema central que orquestra toda a animação no mundo Jurássico.
+ * Combina Motion Matching com IK adaptativo e linguagem corporal procedural
+ * para criar personagens que se movem como seres vivos reais.
+ * 
+ * FILOSOFIA CENTRAL:
+ * - Movimento é expressão de personalidade
+ * - Cada arquétipo tem linguagem corporal única
+ * - Terreno irregular exige adaptação constante
+ * - Stress e sobrevivência afetam cada gesto
+ * - Micro-expressões revelam estado emocional
+ */
+
+UENUM(BlueprintType)
+enum class EAnimationQuality : uint8
+{
+    Performance     UMETA(DisplayName = "Performance"),     // 30fps, menos databases
+    Balanced        UMETA(DisplayName = "Balanced"),        // 60fps, databases médios
+    Cinematic       UMETA(DisplayName = "Cinematic"),       // 120fps, databases completos
+    
+    MAX             UMETA(Hidden)
+};
+
+UENUM(BlueprintType)
+enum class EBodyLanguageIntensity : uint8
+{
+    Subtle          UMETA(DisplayName = "Subtle"),          // Gestos mínimos
+    Natural         UMETA(DisplayName = "Natural"),         // Gestos normais
+    Expressive      UMETA(DisplayName = "Expressive"),      // Gestos amplificados
+    Theatrical      UMETA(DisplayName = "Theatrical"),      // Gestos dramáticos
+    
+    MAX             UMETA(Hidden)
+};
+
+/**
+ * Configuração global do sistema de animação
+ */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FJurassicAnimationConfig
+{
+    GENERATED_BODY()
+
+    FJurassicAnimationConfig()
+        : AnimationQuality(EAnimationQuality::Balanced)
+        , BodyLanguageIntensity(EBodyLanguageIntensity::Natural)
+        , bUseMotionMatching(true)
+        , bUseAdaptiveIK(true)
+        , bUseProceduralGestures(true)
+        , bUseEmotionalAnimations(true)
+        , bUseSurvivalAnimations(true)
+        , GlobalAnimationSpeed(1.0f)
+        , IKIntensity(1.0f)
+        , GestureFrequency(1.0f)
+        , EmotionalResponsiveness(0.7f)
+        , TerrainAdaptationSpeed(1.0f)
+        , MaxSimultaneousAnimations(10)
+        , AnimationLODDistance(2000.0f)
+        , bEnableDebugMode(false)
+    {}
+
+    // Qualidade geral do sistema
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quality")
+    EAnimationQuality AnimationQuality;
+
+    // Intensidade da linguagem corporal
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Body Language")
+    EBodyLanguageIntensity BodyLanguageIntensity;
+
+    // Sistemas habilitados
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Systems")
+    bool bUseMotionMatching;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Systems")
+    bool bUseAdaptiveIK;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Systems")
+    bool bUseProceduralGestures;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Systems")
+    bool bUseEmotionalAnimations;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Systems")
+    bool bUseSurvivalAnimations;
+
+    // Parâmetros globais
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Global Parameters", meta = (ClampMin = "0.1", ClampMax = "3.0"))
+    float GlobalAnimationSpeed;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Global Parameters", meta = (ClampMin = "0.0", ClampMax = "2.0"))
+    float IKIntensity;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Global Parameters", meta = (ClampMin = "0.0", ClampMax = "3.0"))
+    float GestureFrequency;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Global Parameters", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float EmotionalResponsiveness;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Global Parameters", meta = (ClampMin = "0.1", ClampMax = "5.0"))
+    float TerrainAdaptationSpeed;
+
+    // Performance
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance", meta = (ClampMin = "1", ClampMax = "50"))
+    int32 MaxSimultaneousAnimations;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance", meta = (ClampMin = "500.0", ClampMax = "10000.0"))
+    float AnimationLODDistance;
+
+    // Debug
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug")
+    bool bEnableDebugMode;
+};
+
+/**
+ * Estado emocional que afeta as animações
+ */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FEmotionalState
+{
+    GENERATED_BODY()
+
+    FEmotionalState()
+        : StressLevel(ESurvivalState::Fresh)
+        , Fear(0.0f)
+        , Confidence(0.5f)
+        , Exhaustion(0.0f)
+        , Curiosity(0.7f)
+        , Alertness(0.3f)
+        , SocialComfort(0.5f)
+        , PhysicalPain(0.0f)
+        , Hunger(0.0f)
+        , Thirst(0.0f)
+        , Temperature(0.5f)
+    {}
+
+    // Estado de sobrevivência base
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
+    ESurvivalState StressLevel;
+
+    // Emoções primárias (0-1)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotions", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Fear;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotions", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Confidence;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotions", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Exhaustion;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotions", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Curiosity;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotions", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Alertness;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotions", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float SocialComfort;
+
+    // Necessidades físicas (0-1)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float PhysicalPain;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Hunger;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Thirst;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Temperature; // 0 = muito frio, 0.5 = confortável, 1 = muito quente
+};
+
+/**
+ * Data Asset que contém todas as configurações de animação para um arquétipo
+ */
+UCLASS(BlueprintType)
+class TRANSPERSONALGAME_API UArchetypeAnimationData : public UDataAsset
+{
+    GENERATED_BODY()
+
+public:
+    // Configuração de linguagem corporal
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Body Language")
+    FArchetypeBodyLanguage BodyLanguageConfig;
+
+    // Dados de Motion Matching
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    FArchetypeMotionData MotionData;
+
+    // Configurações de IK específicas
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK Configuration")
+    TMap<FName, FTerrainAdaptationSettings> TerrainAdaptations;
+
+    // Animações emocionais específicas
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotional Animations")
+    TMap<ESurvivalState, TArray<TSoftObjectPtr<UAnimMontage>>> EmotionalAnimations;
+
+    // Gestos procedurais
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Procedural Gestures")
+    TArray<TSoftObjectPtr<UAnimMontage>> IdleGestures;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Procedural Gestures")
+    TArray<TSoftObjectPtr<UAnimMontage>> ThinkingGestures;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Procedural Gestures")
+    TArray<TSoftObjectPtr<UAnimMontage>> NervousGestures;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Procedural Gestures")
+    TArray<TSoftObjectPtr<UAnimMontage>> ConfidentGestures;
+
+    // Micro-expressões faciais
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Facial Animation")
+    TMap<FString, TSoftObjectPtr<UAnimSequence>> FacialExpressions;
+
+    // Configurações de respiração
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Breathing")
+    TSoftObjectPtr<UAnimSequence> IdleBreathing;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Breathing")
+    TSoftObjectPtr<UAnimSequence> StressedBreathing;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Breathing")
+    TSoftObjectPtr<UAnimSequence> ExhaustedBreathing;
+};
+
+/**
+ * Sistema central de animação para o mundo Jurássico
+ */
+UCLASS()
+class TRANSPERSONALGAME_API UJurassicAnimationSystem : public UWorldSubsystem
+{
+    GENERATED_BODY()
+
+public:
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+    virtual void Tick(float DeltaTime) override;
+    virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
+
+    // === CONFIGURAÇÃO DO SISTEMA ===
+
+    UFUNCTION(BlueprintCallable, Category = "Animation System")
+    void InitializeAnimationSystem(const FJurassicAnimationConfig& Config);
+
+    UFUNCTION(BlueprintCallable, Category = "Animation System")
+    void SetAnimationQuality(EAnimationQuality Quality);
+
+    UFUNCTION(BlueprintCallable, Category = "Animation System")
+    void SetBodyLanguageIntensity(EBodyLanguageIntensity Intensity);
+
+    // === GESTÃO DE PERSONAGENS ===
+
+    UFUNCTION(BlueprintCallable, Category = "Character Animation")
+    void RegisterCharacterForAnimation(AActor* Character, ECharacterArchetype Archetype);
+
+    UFUNCTION(BlueprintCallable, Category = "Character Animation")
+    void UnregisterCharacterFromAnimation(AActor* Character);
+
+    UFUNCTION(BlueprintCallable, Category = "Character Animation")
+    void UpdateCharacterEmotionalState(AActor* Character, const FEmotionalState& NewState);
+
+    UFUNCTION(BlueprintCallable, Category = "Character Animation")
+    void UpdateCharacterSurvivalState(AActor* Character, ESurvivalState NewState);
+
+    // === MOTION MATCHING ===
+
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    UPoseSearchDatabase* GetMotionMatchingDatabase(ECharacterArchetype Archetype, EMotionMatchingContext Context) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    void SetMotionMatchingContext(AActor* Character, EMotionMatchingContext Context);
+
+    // === IK ADAPTATIVO ===
+
+    UFUNCTION(BlueprintCallable, Category = "Adaptive IK")
+    void UpdateTerrainAdaptation(AActor* Character, FName TerrainType);
+
+    UFUNCTION(BlueprintCallable, Category = "Adaptive IK")
+    void SetIKIntensity(AActor* Character, float Intensity);
+
+    // === LINGUAGEM CORPORAL ===
+
+    UFUNCTION(BlueprintCallable, Category = "Body Language")
+    void TriggerEmotionalGesture(AActor* Character, const FString& EmotionName);
+
+    UFUNCTION(BlueprintCallable, Category = "Body Language")
+    void SetBodyLanguageParameters(AActor* Character, const FArchetypeBodyLanguage& Parameters);
+
+    // === ANIMAÇÕES PROCEDURAIS ===
+
+    UFUNCTION(BlueprintCallable, Category = "Procedural Animation")
+    void TriggerProceduralGesture(AActor* Character, const FString& GestureType);
+
+    UFUNCTION(BlueprintCallable, Category = "Procedural Animation")
+    void UpdateBreathingPattern(AActor* Character, ESurvivalState SurvivalState);
+
+    // === PERFORMANCE E DEBUG ===
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void SetAnimationLOD(AActor* Character, int32 LODLevel);
+
+    UFUNCTION(BlueprintCallable, Category = "Debug")
+    void EnableDebugMode(bool bEnable);
+
+    UFUNCTION(BlueprintCallable, Category = "Debug")
+    void ShowAnimationDebugInfo(AActor* Character, bool bShow);
+
+    // === GETTERS ===
+
+    UFUNCTION(BlueprintPure, Category = "Animation System")
+    FJurassicAnimationConfig GetCurrentConfig() const { return CurrentConfig; }
+
+    UFUNCTION(BlueprintPure, Category = "Animation System")
+    int32 GetActiveAnimationCount() const { return ActiveAnimations.Num(); }
+
+    UFUNCTION(BlueprintPure, Category = "Animation System")
+    bool IsCharacterRegistered(AActor* Character) const;
+
+    UFUNCTION(BlueprintPure, Category = "Animation System")
+    FEmotionalState GetCharacterEmotionalState(AActor* Character) const;
+
+protected:
+    // Configuração atual do sistema
+    UPROPERTY()
+    FJurassicAnimationConfig CurrentConfig;
+
+    // Data Assets por arquétipo
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Data")
+    TMap<ECharacterArchetype, TSoftObjectPtr<UArchetypeAnimationData>> ArchetypeAnimationData;
+
+    // Personagens registrados
+    UPROPERTY()
+    TMap<TWeakObjectPtr<AActor>, ECharacterArchetype> RegisteredCharacters;
+
+    // Estados emocionais dos personagens
+    UPROPERTY()
+    TMap<TWeakObjectPtr<AActor>, FEmotionalState> CharacterEmotionalStates;
+
+    // Animações ativas
+    UPROPERTY()
+    TArray<TWeakObjectPtr<UAnimMontage>> ActiveAnimations;
+
+    // Timers para gestos procedurais
+    UPROPERTY()
+    TMap<TWeakObjectPtr<AActor>, float> ProceduralGestureTimers;
+
+private:
+    // Funções internas
+    void UpdateProceduralGestures(float DeltaTime);
+    void UpdateEmotionalAnimations(float DeltaTime);
+    void UpdatePerformanceOptimizations(float DeltaTime);
+    void CleanupInvalidReferences();
+
+    UArchetypeAnimationData* GetArchetypeData(ECharacterArchetype Archetype) const;
+    UMotionMatchingController* GetMotionMatchingController(AActor* Character) const;
+    UAdaptiveIKComponent* GetAdaptiveIKComponent(AActor* Character) const;
+
+    // Performance tracking
+    float LastPerformanceUpdate = 0.0f;
+    int32 FrameCounter = 0;
+    float AverageFrameTime = 0.0f;
+};
