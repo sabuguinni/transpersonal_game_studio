@@ -1,405 +1,276 @@
+// CombatSystem.cpp
+// Implementação do sistema de combate consciente
 #include "CombatSystem.h"
+#include "Components/ActorComponent.h"
 #include "Engine/World.h"
-#include "GameFramework/Actor.h"
-#include "GameFramework/Pawn.h"
-#include "Kismet/GameplayStatics.h"
-#include "Components/SphereComponent.h"
+#include "TimerManager.h"
 
 UCombatSystem::UCombatSystem()
 {
     PrimaryComponentTick.bCanEverTick = true;
+    CurrentCombatState = ECombatState::Peaceful;
+    CombatIntensity = 0.0f;
     
-    // Initialize default attacks
-    FAttackData BasicAttack;
-    BasicAttack.Damage = 15.0f;
-    BasicAttack.AttackType = EAttackType::Physical;
-    BasicAttack.Range = 150.0f;
-    BasicAttack.Cooldown = 1.5f;
-    BasicAttack.ConsciousnessImpact = 2.0f;
-    
-    FAttackData PsychicAttack;
-    PsychicAttack.Damage = 25.0f;
-    PsychicAttack.AttackType = EAttackType::Psychic;
-    PsychicAttack.Range = 300.0f;
-    PsychicAttack.Cooldown = 3.0f;
-    PsychicAttack.ConsciousnessImpact = 10.0f;
-    
-    AvailableAttacks.Add(BasicAttack);
-    AvailableAttacks.Add(PsychicAttack);
+    InitializeConsciousnessModifiers();
 }
 
 void UCombatSystem::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Find consciousness component
-    ConsciousnessComponent = GetOwner()->FindComponentByClass<UConsciousnessComponent>();
-    
-    if (!ConsciousnessComponent)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("CombatSystem: No ConsciousnessComponent found on %s"), *GetOwner()->GetName());
-    }
+    // Initialize combat stats based on consciousness level
+    CombatStats.ConsciousnessLevel = 1.0f;
+    CombatStats.KarmicBalance = 0.0f;
 }
 
 void UCombatSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    UpdateCombatBehavior(DeltaTime);
-    HandleConsciousnessIntegration();
-}
-
-void UCombatSystem::UpdateCombatBehavior(float DeltaTime)
-{
-    if (!GetOwner())
-        return;
-
-    switch (CurrentCombatState)
-    {
-        case ECombatState::Peaceful:
-        {
-            // Look for targets
-            FindNearestTarget();
-            if (CurrentTarget && IsTargetInRange(DetectionRange))
-            {
-                SetCombatState(ECombatState::Alert);
-            }
-            break;
-        }
-        
-        case ECombatState::Alert:
-        {
-            if (!CurrentTarget || !IsTargetInRange(DetectionRange * 1.2f))
-            {
-                SetCombatState(ECombatState::Peaceful);
-                CurrentTarget = nullptr;
-            }
-            else if (IsTargetInRange(AttackRange))
-            {
-                SetCombatState(ECombatState::Combat);
-            }
-            break;
-        }
-        
-        case ECombatState::Combat:
-        {
-            if (!CurrentTarget || !IsTargetInRange(DetectionRange * 1.5f))
-            {
-                SetCombatState(ECombatState::Alert);
-            }
-            else if (CanAttack() && IsTargetInRange(AttackRange))
-            {
-                // Select best attack based on consciousness state
-                FAttackData BestAttack = SelectBestAttack();
-                for (int32 i = 0; i < AvailableAttacks.Num(); i++)
-                {
-                    if (AvailableAttacks[i].AttackType == BestAttack.AttackType &&
-                        AvailableAttacks[i].Damage == BestAttack.Damage)
-                    {
-                        PerformAttack(i);
-                        break;
-                    }
-                }
-            }
-            
-            // Check if should enter meditative state
-            if (ShouldEnterMeditativeState())
-            {
-                SetCombatState(ECombatState::Meditating);
-            }
-            break;
-        }
-        
-        case ECombatState::Retreating:
-        {
-            // Move away from target (implementation depends on movement system)
-            if (!CurrentTarget || !IsTargetInRange(DetectionRange * 2.0f))
-            {
-                SetCombatState(ECombatState::Peaceful);
-                CurrentTarget = nullptr;
-            }
-            break;
-        }
-        
-        case ECombatState::Meditating:
-        {
-            // Restore consciousness and health slowly
-            if (ConsciousnessComponent)
-            {
-                float CurrentConsciousness = ConsciousnessComponent->GetConsciousnessLevel();
-                ConsciousnessComponent->ModifyConsciousness(DeltaTime * 5.0f);
-            }
-            
-            Health = FMath::Min(Health + DeltaTime * 10.0f, MaxHealth);
-            
-            // Exit meditation if attacked or consciousness restored
-            if (CurrentTarget && IsTargetInRange(AttackRange))
-            {
-                SetCombatState(ECombatState::Combat);
-            }
-            else if (ConsciousnessComponent && ConsciousnessComponent->GetConsciousnessLevel() > 80.0f)
-            {
-                SetCombatState(ECombatState::Peaceful);
-            }
-            break;
-        }
-    }
-}
-
-void UCombatSystem::HandleConsciousnessIntegration()
-{
-    if (!ConsciousnessComponent)
-        return;
-        
-    float ConsciousnessLevel = ConsciousnessComponent->GetConsciousnessLevel();
+    ProcessKarmicBalance(DeltaTime);
     
-    // Adjust behavior based on consciousness level
-    if (ConsciousnessLevel < 20.0f)
+    // Gradually reduce combat intensity when not in active combat
+    if (CurrentCombatState != ECombatState::Aggressive && CombatIntensity > 0.0f)
     {
-        // Low consciousness - more aggressive, less strategic
-        DetectionRange = 600.0f;
-        AttackRange = 200.0f;
-    }
-    else if (ConsciousnessLevel > 80.0f)
-    {
-        // High consciousness - more peaceful, strategic
-        DetectionRange = 300.0f;
-        AttackRange = 100.0f;
+        CombatIntensity = FMath::FInterpTo(CombatIntensity, 0.0f, DeltaTime, 2.0f);
         
-        // Chance to avoid combat entirely
-        if (CurrentCombatState == ECombatState::Alert && FMath::RandRange(0.0f, 1.0f) < 0.3f)
+        if (CombatIntensity < 0.1f)
         {
-            SetCombatState(ECombatState::Peaceful);
-            CurrentTarget = nullptr;
+            CombatIntensity = 0.0f;
+            if (CurrentCombatState != ECombatState::Peaceful)
+            {
+                SetCombatState(ECombatState::Peaceful, 0.0f);
+            }
         }
     }
 }
 
-void UCombatSystem::SetCombatState(ECombatState NewState)
+void UCombatSystem::SetCombatState(ECombatState NewState, float Intensity)
 {
     if (CurrentCombatState != NewState)
     {
-        ECombatState OldState = CurrentCombatState;
+        ECombatState PreviousState = CurrentCombatState;
         CurrentCombatState = NewState;
-        OnCombatStateChanged(OldState, NewState);
+        CombatIntensity = FMath::Clamp(Intensity, 0.0f, 10.0f);
         
-        UE_LOG(LogTemp, Log, TEXT("Combat state changed from %d to %d"), (int32)OldState, (int32)NewState);
-    }
-}
-
-bool UCombatSystem::CanAttack() const
-{
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-    return (CurrentTime - LastAttackTime) >= 1.0f; // Minimum cooldown
-}
-
-void UCombatSystem::PerformAttack(int32 AttackIndex)
-{
-    if (!AvailableAttacks.IsValidIndex(AttackIndex) || !CurrentTarget)
-        return;
+        FString StateChangeReason = FString::Printf(TEXT("Combat state changed from %d to %d"), 
+            (int32)PreviousState, (int32)NewState);
         
-    const FAttackData& Attack = AvailableAttacks[AttackIndex];
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-    
-    if ((CurrentTime - LastAttackTime) < Attack.Cooldown)
-        return;
+        OnCombatStateChanged.Broadcast(NewState, CombatIntensity, StateChangeReason);
         
-    // Apply consciousness modifiers
-    float ModifiedDamage = Attack.Damage * GetConsciousnessAttackModifier();
-    
-    // Deal damage to target
-    if (UCombatSystem* TargetCombat = CurrentTarget->FindComponentByClass<UCombatSystem>())
-    {
-        TargetCombat->TakeDamage(ModifiedDamage, Attack.AttackType, GetOwner());
-    }
-    
-    // Affect own consciousness
-    if (ConsciousnessComponent)
-    {
-        ConsciousnessComponent->ModifyConsciousness(-Attack.ConsciousnessImpact);
-    }
-    
-    LastAttackTime = CurrentTime;
-    OnAttackPerformed(Attack);
-    
-    UE_LOG(LogTemp, Log, TEXT("Attack performed: %f damage, type %d"), ModifiedDamage, (int32)Attack.AttackType);
-}
-
-void UCombatSystem::TakeDamage(float DamageAmount, EAttackType AttackType, AActor* Attacker)
-{
-    float ModifiedDamage = DamageAmount * (1.0f - GetConsciousnessDefenseModifier());
-    Health = FMath::Max(0.0f, Health - ModifiedDamage);
-    
-    // Set attacker as target if we don't have one
-    if (!CurrentTarget && Attacker)
-    {
-        CurrentTarget = Attacker;
-    }
-    
-    // Change to combat state if not already
-    if (CurrentCombatState == ECombatState::Peaceful || CurrentCombatState == ECombatState::Meditating)
-    {
-        SetCombatState(ECombatState::Alert);
-    }
-    
-    // Affect consciousness based on attack type
-    if (ConsciousnessComponent)
-    {
-        float ConsciousnessImpact = 0.0f;
-        switch (AttackType)
-        {
-            case EAttackType::Physical:
-                ConsciousnessImpact = -2.0f;
-                break;
-            case EAttackType::Psychic:
-                ConsciousnessImpact = -8.0f;
-                break;
-            case EAttackType::Spiritual:
-                ConsciousnessImpact = -5.0f;
-                break;
-            case EAttackType::Elemental:
-                ConsciousnessImpact = -3.0f;
-                break;
-        }
-        
-        ConsciousnessComponent->ModifyConsciousness(ConsciousnessImpact);
-    }
-    
-    OnDamageTaken(ModifiedDamage, AttackType);
-    
-    // Check if should retreat
-    if (Health < MaxHealth * 0.25f)
-    {
-        SetCombatState(ECombatState::Retreating);
+        UE_LOG(LogTemp, Log, TEXT("Combat State Changed: %s"), *StateChangeReason);
     }
 }
 
-void UCombatSystem::FindNearestTarget()
+bool UCombatSystem::ExecuteSpiritualAttack(EAttackType AttackType, AActor* Target, float Power)
 {
-    if (!GetOwner())
-        return;
-        
-    TArray<AActor*> FoundActors;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), APawn::StaticClass(), FoundActors);
-    
-    float NearestDistance = DetectionRange;
-    AActor* NearestTarget = nullptr;
-    
-    FVector OwnerLocation = GetOwner()->GetActorLocation();
-    
-    for (AActor* Actor : FoundActors)
+    if (!Target || !CanEngageInCombat(Target))
     {
-        if (Actor == GetOwner())
-            continue;
-            
-        // Only target actors with combat systems (potential enemies)
-        if (!Actor->FindComponentByClass<UCombatSystem>())
-            continue;
-            
-        float Distance = FVector::Dist(OwnerLocation, Actor->GetActorLocation());
-        if (Distance < NearestDistance)
-        {
-            NearestDistance = Distance;
-            NearestTarget = Actor;
-        }
-    }
-    
-    if (NearestTarget != CurrentTarget)
-    {
-        CurrentTarget = NearestTarget;
-        if (CurrentTarget)
-        {
-            OnTargetFound(CurrentTarget);
-        }
-    }
-}
-
-float UCombatSystem::GetDistanceToTarget() const
-{
-    if (!CurrentTarget || !GetOwner())
-        return -1.0f;
-        
-    return FVector::Dist(GetOwner()->GetActorLocation(), CurrentTarget->GetActorLocation());
-}
-
-bool UCombatSystem::IsTargetInRange(float Range) const
-{
-    float Distance = GetDistanceToTarget();
-    return Distance >= 0.0f && Distance <= Range;
-}
-
-float UCombatSystem::GetConsciousnessAttackModifier() const
-{
-    if (!ConsciousnessComponent)
-        return 1.0f;
-        
-    float ConsciousnessLevel = ConsciousnessComponent->GetConsciousnessLevel();
-    
-    // Lower consciousness = more aggressive but less precise
-    // Higher consciousness = more controlled and effective
-    if (ConsciousnessLevel < 30.0f)
-    {
-        return 1.2f; // 20% more damage but less strategic
-    }
-    else if (ConsciousnessLevel > 70.0f)
-    {
-        return 1.1f; // 10% more damage with better strategy
-    }
-    
-    return 1.0f;
-}
-
-float UCombatSystem::GetConsciousnessDefenseModifier() const
-{
-    if (!ConsciousnessComponent)
-        return 0.0f;
-        
-    float ConsciousnessLevel = ConsciousnessComponent->GetConsciousnessLevel();
-    
-    // Higher consciousness provides better damage resistance
-    return FMath::Clamp(ConsciousnessLevel / 200.0f, 0.0f, 0.5f); // Max 50% damage reduction
-}
-
-bool UCombatSystem::ShouldEnterMeditativeState() const
-{
-    if (!ConsciousnessComponent)
         return false;
-        
-    float ConsciousnessLevel = ConsciousnessComponent->GetConsciousnessLevel();
-    float HealthPercentage = Health / MaxHealth;
+    }
     
-    // Enter meditation if consciousness is low and health is not critical
-    return ConsciousnessLevel < 30.0f && HealthPercentage > 0.4f;
+    // Get target's combat system
+    UCombatSystem* TargetCombat = Target->FindComponentByClass<UCombatSystem>();
+    if (!TargetCombat)
+    {
+        return false;
+    }
+    
+    // Calculate spiritual damage based on consciousness states
+    EConsciousnessState AttackerState = EConsciousnessState::Ordinary; // Would get from consciousness system
+    EConsciousnessState DefenderState = EConsciousnessState::Ordinary; // Would get from target's consciousness
+    
+    float Damage = CalculateSpiritualDamage(AttackType, Power, AttackerState, DefenderState);
+    
+    // Apply karmic consequences
+    bool bHarmedInnocent = (TargetCombat->GetCombatState() == ECombatState::Peaceful);
+    ApplyKarmicConsequences(AttackType, bHarmedInnocent, Damage);
+    
+    // Determine if attack is transformative (helps target grow spiritually)
+    bool bTransformative = (AttackType == EAttackType::Transformative) || 
+                          (CombatStats.ConsciousnessLevel > 5.0f && FMath::RandRange(0.0f, 1.0f) < 0.3f);
+    
+    float SpiritualImpact = Damage * CombatStats.SpiritualResonance * 0.01f;
+    
+    OnSpiritualCombat.Broadcast(AttackType, Damage, SpiritualImpact, bTransformative);
+    
+    // Set combat state to aggressive
+    SetCombatState(ECombatState::Aggressive, Power);
+    
+    UE_LOG(LogTemp, Log, TEXT("Spiritual Attack: Type=%d, Damage=%.2f, Transformative=%s"), 
+        (int32)AttackType, Damage, bTransformative ? TEXT("True") : TEXT("False"));
+    
+    return true;
 }
 
-FAttackData UCombatSystem::SelectBestAttack() const
+float UCombatSystem::CalculateSpiritualDamage(EAttackType AttackType, float BasePower, 
+    EConsciousnessState AttackerState, EConsciousnessState DefenderState)
 {
-    if (AvailableAttacks.Num() == 0)
-        return FAttackData();
-        
-    if (!ConsciousnessComponent)
-        return AvailableAttacks[0];
-        
-    float ConsciousnessLevel = ConsciousnessComponent->GetConsciousnessLevel();
+    float Damage = BasePower * CombatStats.PhysicalPower * 0.01f;
     
-    // Low consciousness prefers physical attacks
-    if (ConsciousnessLevel < 40.0f)
+    // Modify damage based on attack type
+    switch (AttackType)
     {
-        for (const FAttackData& Attack : AvailableAttacks)
-        {
-            if (Attack.AttackType == EAttackType::Physical)
-                return Attack;
-        }
-    }
-    // High consciousness can use psychic attacks effectively
-    else if (ConsciousnessLevel > 60.0f)
-    {
-        for (const FAttackData& Attack : AvailableAttacks)
-        {
-            if (Attack.AttackType == EAttackType::Psychic)
-                return Attack;
-        }
+        case EAttackType::Physical:
+            Damage *= 1.0f;
+            break;
+        case EAttackType::Energetic:
+            Damage *= (CombatStats.SpiritualResonance * 0.02f);
+            break;
+        case EAttackType::Spiritual:
+            Damage *= (CombatStats.ConsciousnessLevel * 0.5f);
+            break;
+        case EAttackType::Transformative:
+            Damage *= 0.5f; // Lower damage but higher spiritual impact
+            break;
     }
     
-    return AvailableAttacks[0];
+    // Apply consciousness modifiers
+    float AttackerBonus = CalculateConsciousnessBonus(AttackerState);
+    float DefenderReduction = CalculateConsciousnessBonus(DefenderState) * 0.5f;
+    
+    Damage *= (1.0f + AttackerBonus - DefenderReduction);
+    
+    // Karmic influence
+    if (CombatStats.KarmicBalance < 0.0f)
+    {
+        Damage *= (1.0f + FMath::Abs(CombatStats.KarmicBalance) * 0.1f); // Negative karma increases damage
+    }
+    else
+    {
+        Damage *= (1.0f - CombatStats.KarmicBalance * 0.05f); // Positive karma reduces damage
+    }
+    
+    return FMath::Max(Damage, 1.0f);
+}
+
+bool UCombatSystem::CanEngageInCombat(AActor* Target) const
+{
+    if (!Target)
+    {
+        return false;
+    }
+    
+    // Check if target has combat system
+    UCombatSystem* TargetCombat = Target->FindComponentByClass<UCombatSystem>();
+    if (!TargetCombat)
+    {
+        return false;
+    }
+    
+    // High consciousness beings may refuse to fight peaceful targets
+    if (CombatStats.ConsciousnessLevel > 7.0f && 
+        TargetCombat->GetCombatState() == ECombatState::Peaceful)
+    {
+        return false;
+    }
+    
+    // Check distance and other conditions
+    float Distance = FVector::Dist(GetOwner()->GetActorLocation(), Target->GetActorLocation());
+    return Distance < 1000.0f; // Combat range
+}
+
+void UCombatSystem::UpdateCombatFromConsciousness(EConsciousnessState ConsciousnessState, float Level)
+{
+    CombatStats.ConsciousnessLevel = Level;
+    
+    // Higher consciousness reduces aggressive tendencies
+    if (Level > 5.0f && CurrentCombatState == ECombatState::Aggressive)
+    {
+        SetCombatState(ECombatState::Defensive, CombatIntensity * 0.5f);
+    }
+    
+    // Transcendent consciousness enters transcendent combat state
+    if (ConsciousnessState == EConsciousnessState::Unity && Level > 8.0f)
+    {
+        SetCombatState(ECombatState::Transcendent, 1.0f);
+    }
+    
+    // Update spiritual resonance based on consciousness
+    CombatStats.SpiritualResonance = 50.0f + (Level * 10.0f);
+}
+
+void UCombatSystem::ApplyKarmicConsequences(EAttackType AttackType, bool bHarmedInnocent, float Damage)
+{
+    float KarmicImpact = 0.0f;
+    
+    if (bHarmedInnocent)
+    {
+        // Negative karma for harming peaceful beings
+        KarmicImpact = -(Damage * 0.1f);
+        
+        if (AttackType == EAttackType::Transformative)
+        {
+            KarmicImpact *= 0.3f; // Reduced penalty for transformative attacks
+        }
+    }
+    else
+    {
+        // Slight positive karma for defensive actions
+        if (CurrentCombatState == ECombatState::Defensive)
+        {
+            KarmicImpact = Damage * 0.02f;
+        }
+    }
+    
+    // Transformative attacks generate positive karma
+    if (AttackType == EAttackType::Transformative)
+    {
+        KarmicImpact += Damage * 0.05f;
+    }
+    
+    CombatStats.KarmicBalance += KarmicImpact;
+    CombatStats.KarmicBalance = FMath::Clamp(CombatStats.KarmicBalance, -100.0f, 100.0f);
+    
+    UE_LOG(LogTemp, Log, TEXT("Karmic Impact: %.2f, New Balance: %.2f"), 
+        KarmicImpact, CombatStats.KarmicBalance);
+}
+
+void UCombatSystem::ModifyCombatStats(const FCombatStats& StatModifiers)
+{
+    CombatStats.PhysicalPower += StatModifiers.PhysicalPower;
+    CombatStats.SpiritualResonance += StatModifiers.SpiritualResonance;
+    CombatStats.ConsciousnessLevel += StatModifiers.ConsciousnessLevel;
+    CombatStats.KarmicBalance += StatModifiers.KarmicBalance;
+    
+    // Clamp values
+    CombatStats.PhysicalPower = FMath::Max(CombatStats.PhysicalPower, 1.0f);
+    CombatStats.SpiritualResonance = FMath::Max(CombatStats.SpiritualResonance, 1.0f);
+    CombatStats.ConsciousnessLevel = FMath::Max(CombatStats.ConsciousnessLevel, 1.0f);
+    CombatStats.KarmicBalance = FMath::Clamp(CombatStats.KarmicBalance, -100.0f, 100.0f);
+}
+
+void UCombatSystem::InitializeConsciousnessModifiers()
+{
+    ConsciousnessCombatModifiers.Add(EConsciousnessState::Ordinary, 0.0f);
+    ConsciousnessCombatModifiers.Add(EConsciousnessState::Expanded, 0.2f);
+    ConsciousnessCombatModifiers.Add(EConsciousnessState::Transcendent, 0.5f);
+    ConsciousnessCombatModifiers.Add(EConsciousnessState::Unity, 1.0f);
+    ConsciousnessCombatModifiers.Add(EConsciousnessState::Cosmic, 2.0f);
+}
+
+float UCombatSystem::CalculateConsciousnessBonus(EConsciousnessState State) const
+{
+    if (const float* Modifier = ConsciousnessCombatModifiers.Find(State))
+    {
+        return *Modifier;
+    }
+    return 0.0f;
+}
+
+void UCombatSystem::ProcessKarmicBalance(float DeltaTime)
+{
+    // Gradually decay karmic balance towards neutral
+    if (FMath::Abs(CombatStats.KarmicBalance) > 0.1f)
+    {
+        float DecayAmount = KarmicDecayRate * DeltaTime;
+        if (CombatStats.KarmicBalance > 0.0f)
+        {
+            CombatStats.KarmicBalance = FMath::Max(0.0f, CombatStats.KarmicBalance - DecayAmount);
+        }
+        else
+        {
+            CombatStats.KarmicBalance = FMath::Min(0.0f, CombatStats.KarmicBalance + DecayAmount);
+        }
+    }
 }
