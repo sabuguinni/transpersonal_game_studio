@@ -1,0 +1,82 @@
+{
+  "characterName": "Dr. Marcus Chen",
+  "profession": "Paleontologist",
+  "age": 42,
+  "background": {
+    "education": "PhD in Paleontology from University of Cambridge",
+    "specialization": "Mesozoic Era vertebrate fossils",
+    "experience": "18 years of field research across 6 continents",
+    "currentPosition": "Senior Research Fellow at Natural History Museum"
+  },
+  "physicalDescription": {
+    "height": "5'10\" (178cm)",
+    "build": "Lean but athletic from years of fieldwork",
+    "ethnicity": "Chinese-American",
+    "distinctiveFeatures": [
+      "Weathered hands from excavation work",
+      "Small scar above left eyebrow from field accident",
+      "Calloused fingers from precise fossil handling",
+      "Sun-weathered skin from outdoor work"
+    ]
+  },
+  "personality": {
+    "coreTraits": [
+      "Methodical and analytical",
+      "Deeply curious about natural history",
+      "Calm under pressure",
+      "Respectful of indigenous knowledge",
+      "Adaptable problem-solver"
+    ],
+    "fears": [
+      "Being permanently trapped in the past",
+      "Disrupting the timeline",
+      "Large predators (rational fear given circumstances)"
+    ],
+    "motivations": [
+      "Return to his own time",
+      "Document this incredible opportunity for science",
+      "Survive without harming the ecosystem"
+    ]
+  },
+  "skills": {
+    "scientific": [
+      "Fossil identification and dating",
+      "Geological survey techniques",
+      "Basic first aid",
+      "Field documentation methods"
+    ],
+    "survival": [
+      "Basic camping and outdoor skills",
+      "Rock climbing (from field expeditions)",
+      "Swimming",
+      "Basic tool crafting"
+    ],
+    "social": [
+      "Multilingual (English, Mandarin, Spanish, basic indigenous languages)",
+      "Cross-cultural communication",
+      "Teaching and explanation skills"
+    ]
+  },
+  "startingCondition": {
+    "clothing": "Field expedition gear - khaki pants, work shirt, sturdy boots",
+    "equipment": "None (lost during temporal transport)",
+    "physicalState": "Disoriented but uninjured",
+    "mentalState": "Shocked but scientifically fascinated"
+  },
+  "characterArc": {
+    "phase1": "Denial and scientific rationalization",
+    "phase2": "Acceptance and adaptation",
+    "phase3": "Integration with prehistoric environment",
+    "phase4": "Mastery and preparation for return"
+  },
+  "metaHumanSettings": {
+    "baseMesh": "MetaHuman_Male_Asian_02",
+    "ageModifier": 0.65,
+    "bodyType": "Athletic_Lean",
+    "facialHair": "Light_Stubble",
+    "hairStyle": "Short_Professional",
+    "eyeColor": "Dark_Brown",
+    "skinTone": "Asian_Medium",
+    "clothingSet": "Modern_Field_Researcher"
+  }
+}
