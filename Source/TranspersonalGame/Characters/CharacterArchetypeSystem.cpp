@@ -1,97 +1,128 @@
 #include "CharacterArchetypeSystem.h"
-#include "Engine/Engine.h"
+#include "Engine/DataTable.h"
 
-UCharacterArchetype* UCharacterArchetypeDatabase::GetRandomArchetype(ECharacterArchetype ArchetypeFilter)
+FCharacterArchetypeData UCharacterArchetypeDataAsset::GetArchetypeData(ECharacterArchetype Archetype) const
 {
-    TArray<UCharacterArchetype*> FilteredArchetypes;
-    
-    for (const TSoftObjectPtr<UCharacterArchetype>& ArchetypePtr : AllArchetypes)
+    if (!ArchetypeDataTable)
     {
-        if (UCharacterArchetype* Archetype = ArchetypePtr.LoadSynchronous())
-        {
-            if (Archetype->ArchetypeType == ArchetypeFilter)
-            {
-                FilteredArchetypes.Add(Archetype);
-            }
-        }
+        UE_LOG(LogTemp, Warning, TEXT("ArchetypeDataTable is null in UCharacterArchetypeDataAsset"));
+        return FCharacterArchetypeData();
+    }
+
+    FString ArchetypeName = UEnum::GetValueAsString(Archetype);
+    FCharacterArchetypeData* FoundData = ArchetypeDataTable->FindRow<FCharacterArchetypeData>(FName(*ArchetypeName), TEXT(""));
+    
+    if (FoundData)
+    {
+        return *FoundData;
     }
     
-    if (FilteredArchetypes.Num() > 0)
-    {
-        int32 RandomIndex = FMath::RandRange(0, FilteredArchetypes.Num() - 1);
-        return FilteredArchetypes[RandomIndex];
-    }
-    
-    return nullptr;
+    UE_LOG(LogTemp, Warning, TEXT("Could not find archetype data for %s"), *ArchetypeName);
+    return FCharacterArchetypeData();
 }
 
-TArray<UCharacterArchetype*> UCharacterArchetypeDatabase::GenerateBalancedCast(int32 NumberOfCharacters)
+FCharacterArchetypeData UCharacterArchetypeDataAsset::GenerateRandomCharacter(ECharacterArchetype Archetype) const
 {
-    TArray<UCharacterArchetype*> GeneratedCast;
-    TArray<ECharacterEthnicity> UsedEthnicities;
-    TArray<ECharacterAge> UsedAges;
+    FCharacterArchetypeData BaseData = GetArchetypeData(Archetype);
     
-    // Ensure diversity in the generated cast
-    for (int32 i = 0; i < NumberOfCharacters; i++)
+    // Randomize physical traits
+    if (BaseData.PhysicalTraits.Gender == ECharacterGender::Random)
     {
-        UCharacterArchetype* SelectedArchetype = nullptr;
-        int32 Attempts = 0;
-        const int32 MaxAttempts = 20;
-        
-        while (!SelectedArchetype && Attempts < MaxAttempts)
+        BaseData.PhysicalTraits.Gender = FMath::RandBool() ? ECharacterGender::Male : ECharacterGender::Female;
+    }
+    
+    // Randomize skin tone within reasonable range
+    int32 SkinToneVariation = FMath::RandRange(0, 4);
+    BaseData.PhysicalTraits.SkinTone = static_cast<ESkinTone>(SkinToneVariation);
+    
+    // Randomize height within archetype-appropriate range
+    float HeightVariation = FMath::RandRange(-0.1f, 0.1f);
+    BaseData.PhysicalTraits.HeightScale = FMath::Clamp(BaseData.PhysicalTraits.HeightScale + HeightVariation, 0.8f, 1.2f);
+    
+    // Randomize hair color
+    TArray<FLinearColor> HairColors = {
+        FLinearColor::Black,
+        FLinearColor(0.2f, 0.1f, 0.05f, 1.0f), // Dark Brown
+        FLinearColor(0.4f, 0.2f, 0.1f, 1.0f),  // Brown
+        FLinearColor(0.6f, 0.4f, 0.2f, 1.0f),  // Light Brown
+        FLinearColor(0.8f, 0.6f, 0.2f, 1.0f),  // Blonde
+        FLinearColor(0.5f, 0.5f, 0.5f, 1.0f),  // Gray
+        FLinearColor(0.8f, 0.2f, 0.1f, 1.0f)   // Red
+    };
+    
+    if (HairColors.Num() > 0)
+    {
+        BaseData.PhysicalTraits.HairColor = HairColors[FMath::RandRange(0, HairColors.Num() - 1)];
+    }
+    
+    // Randomize eye color
+    TArray<FLinearColor> EyeColors = {
+        FLinearColor(0.2f, 0.1f, 0.05f, 1.0f), // Brown
+        FLinearColor(0.1f, 0.3f, 0.6f, 1.0f),  // Blue
+        FLinearColor(0.2f, 0.4f, 0.2f, 1.0f),  // Green
+        FLinearColor(0.3f, 0.3f, 0.3f, 1.0f),  // Gray
+        FLinearColor(0.1f, 0.1f, 0.1f, 1.0f)   // Black
+    };
+    
+    if (EyeColors.Num() > 0)
+    {
+        BaseData.PhysicalTraits.EyeColor = EyeColors[FMath::RandRange(0, EyeColors.Num() - 1)];
+    }
+    
+    // Add random scars based on archetype (survivors should have more)
+    TArray<FString> PossibleScars = {
+        TEXT("Facial Scar"),
+        TEXT("Arm Scar"),
+        TEXT("Leg Scar"),
+        TEXT("Hand Scar"),
+        TEXT("Claw Marks"),
+        TEXT("Burn Mark")
+    };
+    
+    float ScarChance = 0.3f; // Base 30% chance
+    if (Archetype == ECharacterArchetype::TribalWarrior || 
+        Archetype == ECharacterArchetype::HostileRaider ||
+        Archetype == ECharacterArchetype::WildHermit)
+    {
+        ScarChance = 0.7f; // 70% chance for combat archetypes
+    }
+    
+    BaseData.PhysicalTraits.Scars.Empty();
+    for (const FString& Scar : PossibleScars)
+    {
+        if (FMath::RandRange(0.0f, 1.0f) < ScarChance)
         {
-            // Get random archetype from available pool
-            if (AllArchetypes.Num() > 0)
-            {
-                int32 RandomIndex = FMath::RandRange(0, AllArchetypes.Num() - 1);
-                UCharacterArchetype* CandidateArchetype = AllArchetypes[RandomIndex].LoadSynchronous();
-                
-                if (CandidateArchetype)
-                {
-                    // Check diversity constraints
-                    bool bEthnicityOK = true;
-                    bool bAgeOK = true;
-                    
-                    if (EthnicDiversityWeight > 0.5f)
-                    {
-                        float EthnicityCount = UsedEthnicities.Contains(CandidateArchetype->Ethnicity) ? 
-                            UsedEthnicities.Num() : 0;
-                        float EthnicityRatio = EthnicityCount / FMath::Max(1.0f, (float)i);
-                        bEthnicityOK = EthnicityRatio < (1.0f - EthnicDiversityWeight);
-                    }
-                    
-                    if (AgeDistributionWeight > 0.5f)
-                    {
-                        float AgeCount = UsedAges.Contains(CandidateArchetype->AgeGroup) ? 
-                            UsedAges.Num() : 0;
-                        float AgeRatio = AgeCount / FMath::Max(1.0f, (float)i);
-                        bAgeOK = AgeRatio < (1.0f - AgeDistributionWeight);
-                    }
-                    
-                    if (bEthnicityOK && bAgeOK)
-                    {
-                        SelectedArchetype = CandidateArchetype;
-                        UsedEthnicities.AddUnique(CandidateArchetype->Ethnicity);
-                        UsedAges.AddUnique(CandidateArchetype->AgeGroup);
-                    }
-                }
-            }
-            
-            Attempts++;
-        }
-        
-        // If we couldn't find a diverse option, just pick any available
-        if (!SelectedArchetype && AllArchetypes.Num() > 0)
-        {
-            int32 RandomIndex = FMath::RandRange(0, AllArchetypes.Num() - 1);
-            SelectedArchetype = AllArchetypes[RandomIndex].LoadSynchronous();
-        }
-        
-        if (SelectedArchetype)
-        {
-            GeneratedCast.Add(SelectedArchetype);
+            BaseData.PhysicalTraits.Scars.Add(Scar);
         }
     }
     
-    return GeneratedCast;
+    // Randomize clothing wear based on archetype
+    if (Archetype == ECharacterArchetype::WildHermit || 
+        Archetype == ECharacterArchetype::LostSurvivor)
+    {
+        BaseData.Clothing.WearLevel = FMath::RandRange(0.6f, 1.0f); // Very worn
+    }
+    else if (Archetype == ECharacterArchetype::TribalLeader || 
+             Archetype == ECharacterArchetype::TribalShaman)
+    {
+        BaseData.Clothing.WearLevel = FMath::RandRange(0.0f, 0.3f); // Well maintained
+    }
+    else
+    {
+        BaseData.Clothing.WearLevel = FMath::RandRange(0.2f, 0.7f); // Normal wear
+    }
+    
+    // Randomize personality traits slightly
+    BaseData.Personality.Aggressiveness += FMath::RandRange(-0.2f, 0.2f);
+    BaseData.Personality.Trustworthiness += FMath::RandRange(-0.2f, 0.2f);
+    BaseData.Personality.Intelligence += FMath::RandRange(-0.2f, 0.2f);
+    BaseData.Personality.Sociability += FMath::RandRange(-0.2f, 0.2f);
+    
+    // Clamp personality values
+    BaseData.Personality.Aggressiveness = FMath::Clamp(BaseData.Personality.Aggressiveness, 0.0f, 1.0f);
+    BaseData.Personality.Trustworthiness = FMath::Clamp(BaseData.Personality.Trustworthiness, 0.0f, 1.0f);
+    BaseData.Personality.Intelligence = FMath::Clamp(BaseData.Personality.Intelligence, 0.0f, 1.0f);
+    BaseData.Personality.Sociability = FMath::Clamp(BaseData.Personality.Sociability, 0.0f, 1.0f);
+    
+    return BaseData;
 }
