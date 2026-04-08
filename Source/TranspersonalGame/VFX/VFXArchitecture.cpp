@@ -1,217 +1,364 @@
 #include "VFXArchitecture.h"
-#include "NiagaraFunctionLibrary.h"
 #include "Engine/World.h"
-#include "GameFramework/PlayerController.h"
+#include "GameFramework/Pawn.h"
+#include "Kismet/GameplayStatics.h"
+#include "NiagaraFunctionLibrary.h"
 
 UVFXManagerComponent::UVFXManagerComponent()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f; // Update every 100ms for performance
-    
+    PrimaryComponentTick.TickInterval = 0.1f; // Update 10 times per second for performance
+
+    MaxActiveEffects = 50;
+    LODUpdateInterval = 0.5f; // Update LOD twice per second
     CurrentLODLevel = EVFXLODLevel::High;
-    InitializeLODSettings();
+    CurrentEnvironmentalTension = 0.0f;
+    LastLODUpdateTime = 0.0f;
 }
 
 void UVFXManagerComponent::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Initialize VFX systems paths
-    VFXSystems.Add(EVFXCategory::DinosaurBreathing, TSoftObjectPtr<UNiagaraSystem>(FSoftObjectPath(TEXT("/Game/VFX/Dinosaurs/NS_DinosaurBreath"))));
-    VFXSystems.Add(EVFXCategory::DinosaurFootsteps, TSoftObjectPtr<UNiagaraSystem>(FSoftObjectPath(TEXT("/Game/VFX/Dinosaurs/NS_DinosaurFootsteps"))));
-    VFXSystems.Add(EVFXCategory::AmbientDust, TSoftObjectPtr<UNiagaraSystem>(FSoftObjectPath(TEXT("/Game/VFX/Environment/NS_AmbientDust"))));
-    VFXSystems.Add(EVFXCategory::TensionParticles, TSoftObjectPtr<UNiagaraSystem>(FSoftObjectPath(TEXT("/Game/VFX/Emotional/NS_TensionAtmosphere"))));
+    // Initialize VFX database with default effects
+    InitializeDefaultVFXDatabase();
 }
 
 void UVFXManagerComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    
-    // Calculate distance to player for LOD management
-    if (UWorld* World = GetWorld())
+
+    // Update LOD levels based on performance and distance
+    if (GetWorld()->GetTimeSeconds() - LastLODUpdateTime > LODUpdateInterval)
     {
-        if (APlayerController* PC = World->GetFirstPlayerController())
+        if (APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0))
         {
-            if (APawn* PlayerPawn = PC->GetPawn())
+            UpdateVFXLODBasedOnDistance(PlayerPawn);
+        }
+        LastLODUpdateTime = GetWorld()->GetTimeSeconds();
+    }
+
+    // Cleanup inactive effects
+    CleanupInactiveEffects();
+}
+
+void UVFXManagerComponent::PlayVFXEffect(const FString& EffectName, FVector Location, FRotator Rotation)
+{
+    // Find effect definition
+    FVFXDefinition* EffectDef = VFXDatabase.FindByPredicate([&EffectName](const FVFXDefinition& Def)
+    {
+        return Def.EffectName == EffectName;
+    });
+
+    if (!EffectDef)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("VFX Effect not found: %s"), *EffectName);
+        return;
+    }
+
+    // Check if we're at max active effects
+    if (ActiveEffects.Num() >= MaxActiveEffects)
+    {
+        // Remove oldest effect to make room
+        auto OldestEffect = ActiveEffects.begin();
+        if (OldestEffect->Value && IsValid(OldestEffect->Value))
+        {
+            OldestEffect->Value->DestroyComponent();
+        }
+        ActiveEffects.Remove(OldestEffect->Key);
+    }
+
+    // Get appropriate Niagara system for current LOD
+    UNiagaraSystem* NiagaraSystem = GetNiagaraSystemForLOD(*EffectDef, CurrentLODLevel);
+    
+    if (!NiagaraSystem)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("No Niagara System found for effect: %s at LOD: %d"), 
+               *EffectName, (int32)CurrentLODLevel);
+        return;
+    }
+
+    // Check distance requirements
+    if (EffectDef->bRequiresPlayerProximity)
+    {
+        if (APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0))
+        {
+            float DistanceToPlayer = FVector::Dist(Location, PlayerPawn->GetActorLocation());
+            if (DistanceToPlayer > EffectDef->PlayerProximityRadius)
             {
-                float DistanceToPlayer = FVector::Dist(GetOwner()->GetActorLocation(), PlayerPawn->GetActorLocation());
-                UpdateVFXBasedOnDistance(DistanceToPlayer);
+                return; // Too far from player, don't spawn
             }
         }
     }
-    
-    CleanupInactiveVFX();
+
+    // Spawn the effect
+    UNiagaraComponent* SpawnedEffect = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+        GetWorld(),
+        NiagaraSystem,
+        Location,
+        Rotation
+    );
+
+    if (SpawnedEffect)
+    {
+        // Apply environmental tension modifications
+        ModifyEffectForTension(SpawnedEffect, *EffectDef);
+        
+        // Store reference
+        ActiveEffects.Add(EffectName + FString::Printf(TEXT("_%d"), FMath::RandRange(1000, 9999)), SpawnedEffect);
+        
+        UE_LOG(LogTemp, Log, TEXT("VFX Effect spawned: %s at %s"), *EffectName, *Location.ToString());
+    }
 }
 
-void UVFXManagerComponent::SpawnVFX(EVFXCategory Category, FVector Location, FRotator Rotation)
+void UVFXManagerComponent::StopVFXEffect(const FString& EffectName)
 {
-    if (TSoftObjectPtr<UNiagaraSystem>* SystemPtr = VFXSystems.Find(Category))
+    for (auto It = ActiveEffects.CreateIterator(); It; ++It)
     {
-        if (UNiagaraSystem* System = SystemPtr->LoadSynchronous())
+        if (It->Key.Contains(EffectName))
         {
-            UNiagaraComponent* NewVFXComponent = CreateVFXComponent(System, Location, Rotation);
-            if (NewVFXComponent)
+            if (It->Value && IsValid(It->Value))
             {
-                ActiveVFXComponents.Add(NewVFXComponent);
-                
-                // Apply current LOD settings
-                const FVFXLODSettings& CurrentSettings = LODSettings[CurrentLODLevel];
-                
-                // Set particle count limit
-                NewVFXComponent->SetIntParameter(TEXT("MaxParticles"), CurrentSettings.MaxParticles);
-                
-                // Set update frequency
-                NewVFXComponent->SetFloatParameter(TEXT("UpdateFrequency"), CurrentSettings.UpdateFrequency);
-                
-                // Enable/disable collision
-                NewVFXComponent->SetBoolParameter(TEXT("EnableCollision"), CurrentSettings.bEnableCollision);
-                
-                // Shadow casting
-                NewVFXComponent->SetCastShadow(CurrentSettings.bCastShadows);
+                It->Value->DestroyComponent();
             }
+            It.RemoveCurrent();
         }
     }
 }
 
-void UVFXManagerComponent::SetVFXLOD(EVFXLODLevel NewLODLevel)
+void UVFXManagerComponent::SetVFXLODLevel(EVFXLODLevel NewLODLevel)
 {
-    if (CurrentLODLevel == NewLODLevel) return;
-    
-    CurrentLODLevel = NewLODLevel;
-    
-    // Update all active VFX components
-    const FVFXLODSettings& NewSettings = LODSettings[CurrentLODLevel];
-    
-    for (UNiagaraComponent* VFXComp : ActiveVFXComponents)
+    if (CurrentLODLevel != NewLODLevel)
     {
-        if (IsValid(VFXComp))
+        CurrentLODLevel = NewLODLevel;
+        
+        // Update all active effects to new LOD level
+        for (auto& EffectPair : ActiveEffects)
         {
-            VFXComp->SetIntParameter(TEXT("MaxParticles"), NewSettings.MaxParticles);
-            VFXComp->SetFloatParameter(TEXT("UpdateFrequency"), NewSettings.UpdateFrequency);
-            VFXComp->SetBoolParameter(TEXT("EnableCollision"), NewSettings.bEnableCollision);
-            VFXComp->SetCastShadow(NewSettings.bCastShadows);
+            if (EffectPair.Value && IsValid(EffectPair.Value))
+            {
+                // Find the effect definition and update the system
+                FString BaseEffectName = EffectPair.Key.Left(EffectPair.Key.Find(TEXT("_")));
+                FVFXDefinition* EffectDef = VFXDatabase.FindByPredicate([&BaseEffectName](const FVFXDefinition& Def)
+                {
+                    return Def.EffectName == BaseEffectName;
+                });
+
+                if (EffectDef)
+                {
+                    UNiagaraSystem* NewSystem = GetNiagaraSystemForLOD(*EffectDef, NewLODLevel);
+                    if (NewSystem)
+                    {
+                        EffectPair.Value->SetAsset(NewSystem);
+                    }
+                }
+            }
+        }
+        
+        UE_LOG(LogTemp, Log, TEXT("VFX LOD Level changed to: %d"), (int32)NewLODLevel);
+    }
+}
+
+void UVFXManagerComponent::UpdateVFXLODBasedOnDistance(APawn* PlayerPawn)
+{
+    if (!PlayerPawn) return;
+
+    // Calculate average distance to active effects
+    float TotalDistance = 0.0f;
+    int32 ValidEffects = 0;
+
+    for (const auto& EffectPair : ActiveEffects)
+    {
+        if (EffectPair.Value && IsValid(EffectPair.Value))
+        {
+            float Distance = FVector::Dist(PlayerPawn->GetActorLocation(), EffectPair.Value->GetComponentLocation());
+            TotalDistance += Distance;
+            ValidEffects++;
+        }
+    }
+
+    if (ValidEffects > 0)
+    {
+        float AverageDistance = TotalDistance / ValidEffects;
+        EVFXLODLevel NewLODLevel = CalculateLODLevel(AverageDistance);
+        SetVFXLODLevel(NewLODLevel);
+    }
+}
+
+void UVFXManagerComponent::SetMaxActiveEffects(int32 MaxEffects)
+{
+    MaxActiveEffects = FMath::Max(1, MaxEffects);
+    
+    // If we're over the new limit, remove excess effects
+    while (ActiveEffects.Num() > MaxActiveEffects)
+    {
+        auto OldestEffect = ActiveEffects.begin();
+        if (OldestEffect->Value && IsValid(OldestEffect->Value))
+        {
+            OldestEffect->Value->DestroyComponent();
+        }
+        ActiveEffects.Remove(OldestEffect->Key);
+    }
+}
+
+void UVFXManagerComponent::TriggerTensionEffect(EVFXCategory TensionType, float Intensity)
+{
+    // Find effects of the specified tension category
+    for (const FVFXDefinition& EffectDef : VFXDatabase)
+    {
+        if (EffectDef.Category == TensionType)
+        {
+            // Modify intensity based on environmental tension
+            float ModifiedIntensity = Intensity * (1.0f + CurrentEnvironmentalTension);
             
-            if (CurrentLODLevel == EVFXLODLevel::Disabled)
+            // Trigger the effect at the player's location with some randomization
+            if (APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0))
             {
-                VFXComp->SetVisibility(false);
-            }
-            else
-            {
-                VFXComp->SetVisibility(true);
+                FVector EffectLocation = PlayerPawn->GetActorLocation() + 
+                    FVector(FMath::RandRange(-500.0f, 500.0f), FMath::RandRange(-500.0f, 500.0f), 0.0f);
+                
+                PlayVFXEffect(EffectDef.EffectName, EffectLocation);
             }
         }
     }
 }
 
-void UVFXManagerComponent::UpdateVFXBasedOnDistance(float DistanceToPlayer)
+void UVFXManagerComponent::SetEnvironmentalTension(float TensionLevel)
 {
-    EVFXLODLevel NewLODLevel;
+    CurrentEnvironmentalTension = FMath::Clamp(TensionLevel, 0.0f, 1.0f);
     
-    if (DistanceToPlayer <= 5000.0f) // 50m
+    // Modify all active effects based on new tension level
+    for (auto& EffectPair : ActiveEffects)
     {
-        NewLODLevel = EVFXLODLevel::High;
+        if (EffectPair.Value && IsValid(EffectPair.Value))
+        {
+            FString BaseEffectName = EffectPair.Key.Left(EffectPair.Key.Find(TEXT("_")));
+            FVFXDefinition* EffectDef = VFXDatabase.FindByPredicate([&BaseEffectName](const FVFXDefinition& Def)
+            {
+                return Def.EffectName == BaseEffectName;
+            });
+
+            if (EffectDef)
+            {
+                ModifyEffectForTension(EffectPair.Value, *EffectDef);
+            }
+        }
     }
-    else if (DistanceToPlayer <= 20000.0f) // 200m
+}
+
+EVFXLODLevel UVFXManagerComponent::CalculateLODLevel(float DistanceToPlayer)
+{
+    if (DistanceToPlayer <= 1000.0f)
     {
-        NewLODLevel = EVFXLODLevel::Medium;
+        return EVFXLODLevel::High;
+    }
+    else if (DistanceToPlayer <= 3000.0f)
+    {
+        return EVFXLODLevel::Medium;
     }
     else
     {
-        NewLODLevel = EVFXLODLevel::Low;
+        return EVFXLODLevel::Low;
     }
-    
-    SetVFXLOD(NewLODLevel);
 }
 
-int32 UVFXManagerComponent::GetActiveParticleCount() const
+UNiagaraSystem* UVFXManagerComponent::GetNiagaraSystemForLOD(const FVFXDefinition& VFXDef, EVFXLODLevel LODLevel)
 {
-    int32 TotalParticles = 0;
-    
-    for (const UNiagaraComponent* VFXComp : ActiveVFXComponents)
+    switch (LODLevel)
     {
-        if (IsValid(VFXComp) && VFXComp->IsActive())
+        case EVFXLODLevel::High:
+            return VFXDef.NiagaraSystem_High.LoadSynchronous();
+        case EVFXLODLevel::Medium:
+            return VFXDef.NiagaraSystem_Medium.LoadSynchronous();
+        case EVFXLODLevel::Low:
+            return VFXDef.NiagaraSystem_Low.LoadSynchronous();
+        default:
+            return VFXDef.NiagaraSystem_Medium.LoadSynchronous();
+    }
+}
+
+void UVFXManagerComponent::CleanupInactiveEffects()
+{
+    for (auto It = ActiveEffects.CreateIterator(); It; ++It)
+    {
+        if (!It->Value || !IsValid(It->Value) || !It->Value->IsActive())
         {
-            // This is an approximation - Niagara doesn't expose exact particle count easily
-            TotalParticles += LODSettings[CurrentLODLevel].MaxParticles;
+            It.RemoveCurrent();
         }
     }
-    
-    return TotalParticles;
 }
 
-float UVFXManagerComponent::GetVFXPerformanceMetric() const
+void UVFXManagerComponent::ModifyEffectForTension(UNiagaraComponent* Effect, const FVFXDefinition& EffectDef)
 {
-    // Simple performance metric: active components * particles per component
-    int32 ActiveComponents = 0;
-    for (const UNiagaraComponent* VFXComp : ActiveVFXComponents)
+    if (!Effect) return;
+
+    // Modify effect parameters based on environmental tension
+    float TensionMultiplier = 1.0f + (CurrentEnvironmentalTension * 0.5f);
+    
+    // Common tension modifications
+    Effect->SetFloatParameter(TEXT("TensionMultiplier"), TensionMultiplier);
+    Effect->SetFloatParameter(TEXT("EnvironmentalTension"), CurrentEnvironmentalTension);
+    
+    // Category-specific modifications
+    switch (EffectDef.Category)
     {
-        if (IsValid(VFXComp) && VFXComp->IsActive())
-        {
-            ActiveComponents++;
-        }
+        case EVFXCategory::DangerIndicators:
+            Effect->SetFloatParameter(TEXT("IntensityScale"), TensionMultiplier * 2.0f);
+            break;
+            
+        case EVFXCategory::EnvironmentalAmbient:
+            Effect->SetFloatParameter(TEXT("OpacityScale"), 0.5f + (CurrentEnvironmentalTension * 0.5f));
+            break;
+            
+        case EVFXCategory::DinosaurBreathing:
+            Effect->SetFloatParameter(TEXT("BreathingRate"), 1.0f + CurrentEnvironmentalTension);
+            break;
+            
+        default:
+            break;
     }
-    
-    return ActiveComponents * LODSettings[CurrentLODLevel].MaxParticles;
 }
 
-void UVFXManagerComponent::InitializeLODSettings()
+void UVFXManagerComponent::InitializeDefaultVFXDatabase()
 {
-    // High LOD (0-50m) - Full detail
-    FVFXLODSettings HighLOD;
-    HighLOD.MaxParticles = 1000;
-    HighLOD.UpdateFrequency = 60.0f;
-    HighLOD.bEnableCollision = true;
-    HighLOD.bCastShadows = true;
-    LODSettings.Add(EVFXLODLevel::High, HighLOD);
+    VFXDatabase.Empty();
     
-    // Medium LOD (50-200m) - Reduced detail
-    FVFXLODSettings MediumLOD;
-    MediumLOD.MaxParticles = 500;
-    MediumLOD.UpdateFrequency = 30.0f;
-    MediumLOD.bEnableCollision = false;
-    MediumLOD.bCastShadows = false;
-    LODSettings.Add(EVFXLODLevel::Medium, MediumLOD);
+    // Environmental ambient effects
+    FVFXDefinition ForestMist;
+    ForestMist.EffectName = TEXT("ForestMist");
+    ForestMist.Category = EVFXCategory::EnvironmentalAmbient;
+    ForestMist.Intensity = EVFXIntensity::Subtle;
+    ForestMist.MaxDrawDistance = 8000.0f;
+    ForestMist.EmotionalIntent = TEXT("Mysterious, ancient atmosphere");
+    VFXDatabase.Add(ForestMist);
     
-    // Low LOD (200m+) - Minimal detail
-    FVFXLODSettings LowLOD;
-    LowLOD.MaxParticles = 100;
-    LowLOD.UpdateFrequency = 15.0f;
-    LowLOD.bEnableCollision = false;
-    LowLOD.bCastShadows = false;
-    LODSettings.Add(EVFXLODLevel::Low, LowLOD);
+    // Danger indicators
+    FVFXDefinition ThreatPulse;
+    ThreatPulse.EffectName = TEXT("ThreatPulse");
+    ThreatPulse.Category = EVFXCategory::DangerIndicators;
+    ThreatPulse.Intensity = EVFXIntensity::Prominent;
+    ThreatPulse.bRequiresPlayerProximity = true;
+    ThreatPulse.PlayerProximityRadius = 2000.0f;
+    ThreatPulse.EmotionalIntent = TEXT("Imminent danger, heightened alertness");
+    VFXDatabase.Add(ThreatPulse);
     
-    // Disabled LOD
-    FVFXLODSettings DisabledLOD;
-    DisabledLOD.MaxParticles = 0;
-    DisabledLOD.UpdateFrequency = 0.0f;
-    DisabledLOD.bEnableCollision = false;
-    DisabledLOD.bCastShadows = false;
-    LODSettings.Add(EVFXLODLevel::Disabled, DisabledLOD);
-}
-
-void UVFXManagerComponent::CleanupInactiveVFX()
-{
-    ActiveVFXComponents.RemoveAll([](UNiagaraComponent* VFXComp)
-    {
-        return !IsValid(VFXComp) || !VFXComp->IsActive();
-    });
-}
-
-UNiagaraComponent* UVFXManagerComponent::CreateVFXComponent(UNiagaraSystem* System, FVector Location, FRotator Rotation)
-{
-    if (!System || !GetOwner()) return nullptr;
+    // Dinosaur breathing
+    FVFXDefinition DinoBreath;
+    DinoBreath.EffectName = TEXT("DinosaurBreath");
+    DinoBreath.Category = EVFXCategory::DinosaurBreathing;
+    DinoBreath.Intensity = EVFXIntensity::Moderate;
+    DinoBreath.MaxDrawDistance = 5000.0f;
+    DinoBreath.EmotionalIntent = TEXT("Living, breathing presence");
+    VFXDatabase.Add(DinoBreath);
     
-    UNiagaraComponent* NewComponent = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
-        GetWorld(),
-        System,
-        Location,
-        Rotation,
-        FVector::OneVector,
-        true,
-        true,
-        ENCPoolMethod::None,
-        true
-    );
+    // Gem effects
+    FVFXDefinition GemGlow;
+    GemGlow.EffectName = TEXT("TimeGemGlow");
+    GemGlow.Category = EVFXCategory::GemEffects;
+    GemGlow.Intensity = EVFXIntensity::Dramatic;
+    GemGlow.MaxDrawDistance = 10000.0f;
+    GemGlow.EmotionalIntent = TEXT("Hope, mystery, temporal power");
+    VFXDatabase.Add(GemGlow);
     
-    return NewComponent;
+    UE_LOG(LogTemp, Log, TEXT("VFX Database initialized with %d default effects"), VFXDatabase.Num());
 }
