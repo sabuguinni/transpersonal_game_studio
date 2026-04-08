@@ -1,0 +1,46 @@
+# Blueprint Configuration: BP_Protagonist_Paleontologist
+# Main character setup for Transpersonal Game
+
+[Character_Identity]
+Name="Dr. Marcus Chen"
+Profession="Paleontologist"
+Age=42
+CharacterType=Protagonist
+
+[Physical_Appearance]
+MetaHumanPreset="Scientist_Male_01"
+SkinTone=0.4
+BodyWeight=0.6
+Muscle=0.3
+HairStyleID=3
+HairColor=(R=0.2,G=0.1,B=0.05,A=1.0)
+EyeColor=(R=0.0,G=0.3,B=0.8,A=1.0)
+
+[Initial_Condition]
+ClothingState=Fresh
+PhysicalState=Healthy
+DirtLevel=0.0
+ScarLevel=0.0
+DaysSurvived=0
+
+[Clothing_Progression]
+Day_0="Khaki field shirt, cargo pants, hiking boots, field hat, glasses"
+Day_7="Minor dirt stains, small tears from branches"
+Day_20="Significant wear, makeshift patches, lost accessories"
+Day_40="Tattered clothing, visible repairs, weathered appearance"
+Day_60="Primitive clothing from available materials, animal hide patches"
+
+[Character_Biography]
+Background="Dr. Marcus Chen is a respected paleontologist from UC Berkeley. He specializes in Mesozoic era fossils and was conducting a routine expedition when he discovered the mysterious gem. His academic background makes him observant and methodical, but physically unprepared for survival in a hostile prehistoric environment."
+
+[Personality_Traits]
+Primary="Analytical, Cautious, Observant"
+Secondary="Determined, Resourceful, Academic"
+Fears="Large predators, Being hunted, Losing his scientific objectivity"
+Strengths="Knowledge of prehistoric life, Problem-solving, Patience"
+
+[Voice_Direction]
+Type="Educated Male Baritone"
+Accent="Slight Academic"
+Emotional_Range="Calm analysis to desperate survival"
+Key_Phrases="Fascinating..., This changes everything, I need to observe this behavior"
