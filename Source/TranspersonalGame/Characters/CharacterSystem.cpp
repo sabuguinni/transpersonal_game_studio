@@ -1,130 +1,149 @@
 #include "CharacterSystem.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Components/CapsuleComponent.h"
 #include "Engine/Engine.h"
-#include "Math/UnrealMathUtility.h"
 
-FCharacterProfile UCharacterDatabase::GenerateRandomCharacter(ECharacterArchetype Archetype, ETribalCulture Culture)
+ACharacterBase::ACharacterBase()
 {
-    FCharacterProfile NewProfile;
-    NewProfile.Archetype = Archetype;
-    NewProfile.Culture = Culture;
+    PrimaryActorTick.bCanEverTick = false;
+
+    // Create capsule component for collision
+    CapsuleComponent = CreateDefaultSubobject<UCapsuleComponent>(TEXT("CapsuleComponent"));
+    RootComponent = CapsuleComponent;
+    CapsuleComponent->SetCapsuleHalfHeight(88.0f);
+    CapsuleComponent->SetCapsuleRadius(34.0f);
+
+    // Create MetaHuman skeletal mesh component
+    MetaHumanMesh = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("MetaHumanMesh"));
+    MetaHumanMesh->SetupAttachment(RootComponent);
     
-    // Generate unique visual variations
-    NewProfile.VisualVariation.SkinTone = FMath::RandRange(0.0f, 1.0f);
-    NewProfile.VisualVariation.BodyBuild = FMath::RandRange(0.0f, 1.0f);
-    NewProfile.VisualVariation.FacialStructure = FMath::RandRange(0.0f, 1.0f);
-    NewProfile.VisualVariation.HairVariation = FMath::RandRange(0.0f, 1.0f);
+    // Set default transform for MetaHuman mesh
+    MetaHumanMesh->SetRelativeLocation(FVector(0.0f, 0.0f, -88.0f));
+    MetaHumanMesh->SetRelativeRotation(FRotator(0.0f, -90.0f, 0.0f));
+}
+
+void ACharacterBase::BeginPlay()
+{
+    Super::BeginPlay();
     
-    // Scars and tattoos based on archetype
+    // Apply initial character data if set
+    if (!CharacterData.CharacterName.IsEmpty())
+    {
+        ApplyCharacterDefinition(CharacterData);
+    }
+}
+
+void ACharacterBase::ApplyCharacterDefinition(const FCharacterDefinition& NewCharacterData)
+{
+    CharacterData = NewCharacterData;
+    
+    // Load and apply MetaHuman mesh
+    if (CharacterData.MetaHumanMesh.IsValid())
+    {
+        USkeletalMesh* LoadedMesh = CharacterData.MetaHumanMesh.LoadSynchronous();
+        if (LoadedMesh)
+        {
+            MetaHumanMesh->SetSkeletalMesh(LoadedMesh);
+        }
+    }
+    
+    // Apply physical variations through material parameters
+    ApplyPhysicalVariations();
+    
+    UE_LOG(LogTemp, Log, TEXT("Applied character definition for: %s"), *CharacterData.CharacterName);
+}
+
+void ACharacterBase::ApplyPhysicalVariations()
+{
+    if (!MetaHumanMesh || !MetaHumanMesh->GetSkeletalMeshAsset())
+    {
+        return;
+    }
+    
+    // Create dynamic material instances for customization
+    TArray<UMaterialInterface*> Materials = MetaHumanMesh->GetMaterials();
+    
+    for (int32 i = 0; i < Materials.Num(); i++)
+    {
+        if (Materials[i])
+        {
+            UMaterialInstanceDynamic* DynamicMaterial = UMaterialInstanceDynamic::Create(Materials[i], this);
+            if (DynamicMaterial)
+            {
+                // Apply skin tone variation
+                DynamicMaterial->SetScalarParameterValue(TEXT("SkinTone"), CharacterData.PhysicalTraits.SkinTone);
+                
+                // Apply hair color
+                DynamicMaterial->SetVectorParameterValue(TEXT("HairColor"), CharacterData.PhysicalTraits.HairColor);
+                
+                // Apply eye color
+                DynamicMaterial->SetVectorParameterValue(TEXT("EyeColor"), CharacterData.PhysicalTraits.EyeColor);
+                
+                MetaHumanMesh->SetMaterial(i, DynamicMaterial);
+            }
+        }
+    }
+}
+
+void ACharacterBase::GenerateRandomVariation(ECharacterArchetype Archetype, ECharacterEthnicity Ethnicity)
+{
+    FCharacterVariation NewVariation;
+    
+    // Generate random physical traits based on ethnicity
+    switch (Ethnicity)
+    {
+        case ECharacterEthnicity::African:
+            NewVariation.SkinTone = FMath::RandRange(0.1f, 0.4f);
+            NewVariation.HairColor = FLinearColor::Black;
+            NewVariation.EyeColor = FLinearColor(0.2f, 0.1f, 0.05f, 1.0f); // Dark brown
+            break;
+            
+        case ECharacterEthnicity::Asian:
+            NewVariation.SkinTone = FMath::RandRange(0.3f, 0.6f);
+            NewVariation.HairColor = FLinearColor::Black;
+            NewVariation.EyeColor = FLinearColor(0.2f, 0.1f, 0.05f, 1.0f);
+            NewVariation.EyeSize = FMath::RandRange(0.3f, 0.6f);
+            break;
+            
+        case ECharacterEthnicity::European:
+            NewVariation.SkinTone = FMath::RandRange(0.6f, 0.9f);
+            NewVariation.HairColor = FLinearColor(FMath::RandRange(0.2f, 0.8f), FMath::RandRange(0.1f, 0.6f), FMath::RandRange(0.0f, 0.3f), 1.0f);
+            NewVariation.EyeColor = FLinearColor(FMath::RandRange(0.2f, 0.8f), FMath::RandRange(0.3f, 0.7f), FMath::RandRange(0.4f, 0.9f), 1.0f);
+            break;
+            
+        default:
+            NewVariation.SkinTone = FMath::RandRange(0.2f, 0.8f);
+            NewVariation.HairColor = FLinearColor(FMath::RandRange(0.1f, 0.9f), FMath::RandRange(0.1f, 0.7f), FMath::RandRange(0.0f, 0.4f), 1.0f);
+            NewVariation.EyeColor = FLinearColor(FMath::RandRange(0.2f, 0.8f), FMath::RandRange(0.2f, 0.7f), FMath::RandRange(0.2f, 0.9f), 1.0f);
+            break;
+    }
+    
+    // Random facial features
+    NewVariation.EyeSize = FMath::RandRange(0.3f, 0.7f);
+    NewVariation.NoseSize = FMath::RandRange(0.3f, 0.7f);
+    NewVariation.LipFullness = FMath::RandRange(0.3f, 0.7f);
+    NewVariation.CheekboneHeight = FMath::RandRange(0.3f, 0.7f);
+    NewVariation.JawWidth = FMath::RandRange(0.3f, 0.7f);
+    NewVariation.BrowRidge = FMath::RandRange(0.2f, 0.8f);
+    
+    // Apply archetype-specific variations
     switch (Archetype)
     {
-        case ECharacterArchetype::TribalWarrior:
-            NewProfile.VisualVariation.ScarPattern = FMath::RandRange(0.3f, 0.8f);
-            NewProfile.VisualVariation.TattooPattern = FMath::RandRange(0.2f, 0.7f);
+        case ECharacterArchetype::Hunter:
+            NewVariation.BrowRidge += 0.2f; // More pronounced features
+            NewVariation.JawWidth += 0.1f;
             break;
-        case ECharacterArchetype::TribalShaman:
-            NewProfile.VisualVariation.ScarPattern = FMath::RandRange(0.0f, 0.3f);
-            NewProfile.VisualVariation.TattooPattern = FMath::RandRange(0.5f, 1.0f);
+            
+        case ECharacterArchetype::Mystic:
+            NewVariation.EyeSize += 0.1f; // Larger, more expressive eyes
+            NewVariation.CheekboneHeight += 0.1f;
             break;
-        case ECharacterArchetype::TribalChild:
-            NewProfile.VisualVariation.ScarPattern = FMath::RandRange(0.0f, 0.1f);
-            NewProfile.VisualVariation.TattooPattern = 0.0f;
-            break;
-        default:
-            NewProfile.VisualVariation.ScarPattern = FMath::RandRange(0.0f, 0.4f);
-            NewProfile.VisualVariation.TattooPattern = FMath::RandRange(0.0f, 0.5f);
+            
+        case ECharacterArchetype::Elder:
+            // Add aging effects through material parameters
             break;
     }
     
-    // Clothing sets based on culture
-    switch (Culture)
-    {
-        case ETribalCulture::RiverPeople:
-            NewProfile.VisualVariation.ClothingSet = FMath::RandRange(0, 4);
-            break;
-        case ETribalCulture::MountainClans:
-            NewProfile.VisualVariation.ClothingSet = FMath::RandRange(5, 9);
-            break;
-        case ETribalCulture::ForestDwellers:
-            NewProfile.VisualVariation.ClothingSet = FMath::RandRange(10, 14);
-            break;
-        case ETribalCulture::PlainHunters:
-            NewProfile.VisualVariation.ClothingSet = FMath::RandRange(15, 19);
-            break;
-        case ETribalCulture::CaveClans:
-            NewProfile.VisualVariation.ClothingSet = FMath::RandRange(20, 24);
-            break;
-    }
-    
-    NewProfile.VisualVariation.AccessorySet = FMath::RandRange(0, 10);
-    
-    // Generate basic name based on culture
-    GenerateCharacterName(NewProfile);
-    
-    return NewProfile;
-}
-
-TArray<FCharacterProfile> UCharacterDatabase::GetCharactersByArchetype(ECharacterArchetype Archetype)
-{
-    TArray<FCharacterProfile> FilteredProfiles;
-    
-    for (const FCharacterProfile& Profile : CharacterProfiles)
-    {
-        if (Profile.Archetype == Archetype)
-        {
-            FilteredProfiles.Add(Profile);
-        }
-    }
-    
-    return FilteredProfiles;
-}
-
-TArray<FCharacterProfile> UCharacterDatabase::GetCharactersByCulture(ETribalCulture Culture)
-{
-    TArray<FCharacterProfile> FilteredProfiles;
-    
-    for (const FCharacterProfile& Profile : CharacterProfiles)
-    {
-        if (Profile.Culture == Culture)
-        {
-            FilteredProfiles.Add(Profile);
-        }
-    }
-    
-    return FilteredProfiles;
-}
-
-void UCharacterDatabase::GenerateCharacterName(FCharacterProfile& Profile)
-{
-    TArray<FString> NamePrefixes;
-    TArray<FString> NameSuffixes;
-    
-    // Names based on culture
-    switch (Profile.Culture)
-    {
-        case ETribalCulture::RiverPeople:
-            NamePrefixes = {TEXT("Aqua"), TEXT("Riv"), TEXT("Flow"), TEXT("Cur"), TEXT("Tide")};
-            NameSuffixes = {TEXT("ara"), TEXT("esh"), TEXT("ina"), TEXT("oro"), TEXT("uma")};
-            break;
-        case ETribalCulture::MountainClans:
-            NamePrefixes = {TEXT("Rok"), TEXT("Ston"), TEXT("Peak"), TEXT("Crag"), TEXT("Cliff")};
-            NameSuffixes = {TEXT("gar"), TEXT("dun"), TEXT("thor"), TEXT("grim"), TEXT("bold")};
-            break;
-        case ETribalCulture::ForestDwellers:
-            NamePrefixes = {TEXT("Leaf"), TEXT("Root"), TEXT("Bark"), TEXT("Moss"), TEXT("Fern")};
-            NameSuffixes = {TEXT("wyn"), TEXT("ara"), TEXT("eth"), TEXT("iel"), TEXT("orn")};
-            break;
-        case ETribalCulture::PlainHunters:
-            NamePrefixes = {TEXT("Swift"), TEXT("Hunt"), TEXT("Track"), TEXT("Wind"), TEXT("Grass")};
-            NameSuffixes = {TEXT("runner"), TEXT("eye"), TEXT("foot"), TEXT("hawk"), TEXT("wolf")};
-            break;
-        case ETribalCulture::CaveClans:
-            NamePrefixes = {TEXT("Deep"), TEXT("Dark"), TEXT("Echo"), TEXT("Shade"), TEXT("Ember")};
-            NameSuffixes = {TEXT("dweller"), TEXT("walker"), TEXT("keeper"), TEXT("watcher"), TEXT("guard")};
-            break;
-    }
-    
-    FString RandomPrefix = NamePrefixes[FMath::RandRange(0, NamePrefixes.Num() - 1)];
-    FString RandomSuffix = NameSuffixes[FMath::RandRange(0, NameSuffixes.Num() - 1)];
-    
-    Profile.CharacterName = RandomPrefix + RandomSuffix;
+    CharacterData.PhysicalTraits = NewVariation;
+    ApplyPhysicalVariations();
 }
