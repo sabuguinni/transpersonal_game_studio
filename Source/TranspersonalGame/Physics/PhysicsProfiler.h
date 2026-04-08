@@ -1,128 +1,67 @@
-/**
- * @file PhysicsProfiler.h
- * @brief Advanced profiling system for consciousness physics performance
- * @author Performance Optimizer Agent
- * @version 1.0
- */
+// Copyright Transpersonal Game Studio. All Rights Reserved.
 
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/Engine.h"
-#include "HAL/ThreadSafeCounter.h"
+#include "Engine/World.h"
+#include "HAL/ThreadSafeBool.h"
 #include "Containers/CircularBuffer.h"
-#include "Stats/Stats.h"
 #include "PhysicsProfiler.generated.h"
 
-DECLARE_LOG_CATEGORY_EXTERN(LogPhysicsProfiler, Log, All);
-
-/**
- * Performance bottleneck types
- */
-UENUM(BlueprintType)
-enum class EBottleneckType : uint8
-{
-    None            UMETA(DisplayName = "No Bottleneck"),
-    CPU             UMETA(DisplayName = "CPU Bound"),
-    Memory          UMETA(DisplayName = "Memory Bound"),
-    Physics         UMETA(DisplayName = "Physics Bound"),
-    Rendering       UMETA(DisplayName = "Rendering Bound"),
-    Threading       UMETA(DisplayName = "Threading Bound")
-};
-
-/**
- * Detailed profiling data for a single frame
- */
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FFrameProfileData
+struct FPhysicsProfileData
 {
     GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly)
-    float FrameTime = 0.0f;
 
     UPROPERTY(BlueprintReadOnly)
     float PhysicsTime = 0.0f;
 
     UPROPERTY(BlueprintReadOnly)
-    float ConsciousnessCalculationTime = 0.0f;
+    float CollisionTime = 0.0f;
 
     UPROPERTY(BlueprintReadOnly)
-    float RenderTime = 0.0f;
+    float SimulationTime = 0.0f;
 
     UPROPERTY(BlueprintReadOnly)
-    float MemoryAllocTime = 0.0f;
+    int32 ActiveRigidBodies = 0;
 
     UPROPERTY(BlueprintReadOnly)
-    int32 PhysicsCalculations = 0;
+    int32 ActiveConstraints = 0;
 
     UPROPERTY(BlueprintReadOnly)
-    int32 ActiveEntities = 0;
+    int32 CollisionPairs = 0;
 
     UPROPERTY(BlueprintReadOnly)
     float MemoryUsageMB = 0.0f;
 
     UPROPERTY(BlueprintReadOnly)
-    EBottleneckType PrimaryBottleneck = EBottleneckType::None;
-
-    UPROPERTY(BlueprintReadOnly)
-    FDateTime Timestamp;
+    float Timestamp = 0.0f;
 };
 
-/**
- * Performance trend analysis
- */
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FPerformanceTrend
+struct FPhysicsBottleneck
 {
     GENERATED_BODY()
 
     UPROPERTY(BlueprintReadOnly)
-    float AverageFrameTime = 0.0f;
+    FString ComponentName;
 
     UPROPERTY(BlueprintReadOnly)
-    float MinFrameTime = 0.0f;
+    FString ActorName;
 
     UPROPERTY(BlueprintReadOnly)
-    float MaxFrameTime = 0.0f;
+    float ProcessingTime = 0.0f;
 
     UPROPERTY(BlueprintReadOnly)
-    float FrameTimeVariance = 0.0f;
+    int32 CollisionCount = 0;
 
     UPROPERTY(BlueprintReadOnly)
-    float TrendSlope = 0.0f; // Positive = getting worse, Negative = getting better
+    FVector Location = FVector::ZeroVector;
 
     UPROPERTY(BlueprintReadOnly)
-    EBottleneckType MostCommonBottleneck = EBottleneckType::None;
+    FString BottleneckType;
 };
 
-/**
- * Profiling recommendations
- */
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FProfilerRecommendation
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly)
-    FString Title;
-
-    UPROPERTY(BlueprintReadOnly)
-    FString Description;
-
-    UPROPERTY(BlueprintReadOnly)
-    int32 Priority = 0; // 1 = Critical, 2 = High, 3 = Medium, 4 = Low
-
-    UPROPERTY(BlueprintReadOnly)
-    float EstimatedImpact = 0.0f; // Percentage improvement expected
-
-    UPROPERTY(BlueprintReadOnly)
-    EBottleneckType TargetBottleneck = EBottleneckType::None;
-};
-
-/**
- * Advanced physics profiling system
- */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UPhysicsProfiler : public UObject
 {
@@ -131,125 +70,97 @@ class TRANSPERSONALGAME_API UPhysicsProfiler : public UObject
 public:
     UPhysicsProfiler();
 
-    // Core profiling functions
-    UFUNCTION(BlueprintCallable, Category = "Profiling")
-    void StartProfiling();
+    // Profiling control
+    UFUNCTION(BlueprintCallable, Category = "Physics Profiling")
+    void StartProfiling(UWorld* World);
 
-    UFUNCTION(BlueprintCallable, Category = "Profiling")
+    UFUNCTION(BlueprintCallable, Category = "Physics Profiling")
     void StopProfiling();
 
-    UFUNCTION(BlueprintCallable, Category = "Profiling")
-    void BeginFrame();
-
-    UFUNCTION(BlueprintCallable, Category = "Profiling")
-    void EndFrame();
-
-    UFUNCTION(BlueprintCallable, Category = "Profiling")
-    void ProfilePhysicsCalculation(const FString& CalculationName, float ExecutionTime);
-
-    // Analysis functions
-    UFUNCTION(BlueprintCallable, Category = "Profiling|Analysis")
-    FPerformanceTrend AnalyzeTrends(int32 FrameCount = 300) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Profiling|Analysis")
-    TArray<FProfilerRecommendation> GenerateRecommendations() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Profiling|Analysis")
-    EBottleneckType IdentifyBottleneck(const FFrameProfileData& FrameData) const;
+    UFUNCTION(BlueprintCallable, Category = "Physics Profiling")
+    void UpdateProfiling(float DeltaTime);
 
     // Data access
-    UFUNCTION(BlueprintPure, Category = "Profiling")
-    FFrameProfileData GetCurrentFrameData() const { return CurrentFrameData; }
+    UFUNCTION(BlueprintCallable, Category = "Physics Profiling")
+    FPhysicsProfileData GetCurrentProfileData() const { return CurrentProfileData; }
 
-    UFUNCTION(BlueprintPure, Category = "Profiling")
-    TArray<FFrameProfileData> GetRecentFrameData(int32 FrameCount = 60) const;
+    UFUNCTION(BlueprintCallable, Category = "Physics Profiling")
+    TArray<FPhysicsProfileData> GetProfileHistory() const;
 
-    UFUNCTION(BlueprintPure, Category = "Profiling")
-    bool IsProfilingActive() const { return bIsProfilingActive; }
+    UFUNCTION(BlueprintCallable, Category = "Physics Profiling")
+    TArray<FPhysicsBottleneck> GetCurrentBottlenecks() const { return CurrentBottlenecks; }
 
-    // Export functions
-    UFUNCTION(BlueprintCallable, Category = "Profiling|Export")
-    void ExportProfilingData(const FString& FilePath) const;
+    // Analysis
+    UFUNCTION(BlueprintCallable, Category = "Physics Profiling")
+    float GetAveragePhysicsTime(int32 SampleCount = 60) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Profiling|Export")
+    UFUNCTION(BlueprintCallable, Category = "Physics Profiling")
+    float GetPeakPhysicsTime(int32 SampleCount = 60) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Physics Profiling")
+    bool IsPhysicsBottlenecked(float ThresholdMs = 5.0f) const;
+
+    // Reporting
+    UFUNCTION(BlueprintCallable, Category = "Physics Profiling")
     FString GeneratePerformanceReport() const;
 
+    UFUNCTION(BlueprintCallable, Category = "Physics Profiling")
+    void ExportProfileDataToCSV(const FString& FilePath) const;
+
+    // Settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
+    bool bEnableDetailedProfiling = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
+    float ProfilingFrequency = 0.016667f; // 60 FPS
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
+    int32 MaxHistorySize = 300; // 5 seconds at 60 FPS
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
+    bool bTrackBottlenecks = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
+    float BottleneckThresholdMs = 2.0f;
+
 protected:
-    // Profiling state
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    bool bIsProfilingActive = false;
-
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    FFrameProfileData CurrentFrameData;
-
-    // Configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    int32 MaxFrameHistory = 1800; // 30 seconds at 60 FPS
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    bool bAutoGenerateRecommendations = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    float BottleneckThreshold = 16.67f; // 60 FPS threshold in milliseconds
-
-    // Frame history
+    // Internal state
     UPROPERTY()
-    TArray<FFrameProfileData> FrameHistory;
-
-    // Timing data
-    UPROPERTY()
-    double FrameStartTime = 0.0;
+    TWeakObjectPtr<UWorld> WorldContext;
 
     UPROPERTY()
-    double PhysicsStartTime = 0.0;
+    FPhysicsProfileData CurrentProfileData;
 
     UPROPERTY()
-    TMap<FString, float> CalculationTimes;
-
-    // Counters
-    UPROPERTY()
-    FThreadSafeCounter PhysicsCalculationCounter;
+    TArray<FPhysicsBottleneck> CurrentBottlenecks;
 
     UPROPERTY()
-    FThreadSafeCounter ActiveEntityCounter;
+    bool bIsProfiling = false;
+
+    UPROPERTY()
+    float LastProfilingTime = 0.0f;
+
+    // Performance history
+    TCircularBuffer<FPhysicsProfileData> ProfileHistory;
+
+    // Threading
+    FThreadSafeBool bProfilingActive;
 
 private:
     // Internal profiling methods
-    void UpdateFrameData();
+    void CollectPhysicsStats();
     void AnalyzeBottlenecks();
-    void UpdateTrendData();
-    
-    // Recommendation generation
-    TArray<FProfilerRecommendation> GenerateCPURecommendations() const;
-    TArray<FProfilerRecommendation> GenerateMemoryRecommendations() const;
-    TArray<FProfilerRecommendation> GeneratePhysicsRecommendations() const;
-    
-    // Analysis helpers
-    float CalculateFrameTimeVariance(const TArray<FFrameProfileData>& Frames) const;
-    float CalculateTrendSlope(const TArray<FFrameProfileData>& Frames) const;
-    EBottleneckType GetMostCommonBottleneck(const TArray<FFrameProfileData>& Frames) const;
-    
-    // Utility functions
-    FString FormatTime(float TimeMs) const;
-    FString FormatMemory(float MemoryMB) const;
-    FString GetBottleneckDescription(EBottleneckType Bottleneck) const;
+    void UpdateMemoryUsage();
+    float MeasurePhysicsTime();
+    float MeasureCollisionTime();
+    float MeasureSimulationTime();
+    void IdentifyExpensiveComponents();
+    void TrackRigidBodyPerformance();
+    void TrackConstraintPerformance();
+    void CleanupOldData();
+
+    // Timing helpers
+    double PhysicsStartTime = 0.0;
+    double CollisionStartTime = 0.0;
+    double SimulationStartTime = 0.0;
 };
-
-/**
- * Scoped profiler for automatic timing
- */
-class TRANSPERSONALGAME_API FScopedPhysicsProfiler
-{
-public:
-    FScopedPhysicsProfiler(UPhysicsProfiler* InProfiler, const FString& InName);
-    ~FScopedPhysicsProfiler();
-
-private:
-    UPhysicsProfiler* Profiler;
-    FString Name;
-    double StartTime;
-};
-
-// Convenience macro for scoped profiling
-#define SCOPE_PHYSICS_PROFILER(Profiler, Name) \
-    FScopedPhysicsProfiler ScopedProfiler##__LINE__(Profiler, Name)
