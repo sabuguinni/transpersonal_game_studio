@@ -1,132 +1,96 @@
-# VFX Master Library - Transpersonal Game Studio
-# Biblioteca central de todos os efeitos visuais do jogo
+# VFX Master Library - Jurassic Survival Game
+# Transpersonal Game Studio - VFX Agent #17
+# CYCLE_ID: PROD_JURASSIC_001
 
-## ESTRUTURA DE ORGANIZAÇÃO
+## ARCHITECTURE OVERVIEW
 
-### /Core - Sistemas Base
-- VFX_MasterLibrary.uasset (este arquivo)
-- NS_GlobalParticleSettings.uasset
-- M_VFX_Master.uasset (Material master para VFX)
+This document defines the complete VFX architecture for our Jurassic survival game, following the principle that "VFX serves narrative and mechanics — never itself."
 
-### /Environment - Efeitos Ambientais
-- /Atmosphere
-  - NS_DustParticles.uasset
-  - NS_PollenFloat.uasset
-  - NS_LightRays.uasset
-- /Foliage
-  - NS_LeafFall.uasset
-  - NS_GrassRustle.uasset
-  - NS_BranchSway.uasset
-- /Weather
-  - NS_Rain.uasset
-  - NS_WindGusts.uasset
-  - NS_MistFog.uasset
+### PERFORMANCE TARGETS
+- 60fps PC / 30fps Console maintained at all times
+- 3-tier LOD system for all effects
+- Maximum 50 simultaneous particle systems in view
+- Memory budget: 128MB for all VFX assets
 
-### /Creatures - Efeitos de Dinossauros
-- /Footsteps
-  - NS_DinoFootstep_Large.uasset
-  - NS_DinoFootstep_Medium.uasset
-  - NS_DinoFootstep_Small.uasset
-- /Breathing
-  - NS_DinoBreath_Cold.uasset
-  - NS_DinoBreath_Hot.uasset
-- /Interaction
-  - NS_DomesticationTrust.uasset
-  - NS_DomesticationFear.uasset
+### CORE VFX CATEGORIES
 
-### /Player - Efeitos do Jogador
-- /Movement
-  - NS_PlayerFootstep.uasset
-  - NS_PlayerRunDust.uasset
-- /Interaction
-  - NS_CraftingSparkles.uasset
-  - NS_GatheringEffect.uasset
+#### 1. ENVIRONMENTAL EFFECTS
+**Purpose:** Create living, breathing world atmosphere
+**Examples:** Rain, fog, dust particles, ambient insects
+**Performance:** Tier 1 priority - always visible
 
-### /Combat - Efeitos de Combate
-- /Impact
-  - NS_BloodSplatter.uasset
-  - NS_ClawStrike.uasset
-  - NS_TeethBite.uasset
-- /Wounds
-  - NS_BleedingWound.uasset
-  - NS_HealingEffect.uasset
+#### 2. CREATURE INTERACTION EFFECTS
+**Purpose:** Enhance dinosaur behaviors and player interactions
+**Examples:** Footstep dust, breathing steam, territorial markings
+**Performance:** Tier 2 priority - distance-based LOD
 
-### /Narrative - Efeitos Narrativos
-- /TimeGem
-  - NS_GemDiscovery.uasset
-  - NS_GemActivation.uasset
-  - NS_TimePortal.uasset
+#### 3. SURVIVAL MECHANICS EFFECTS
+**Purpose:** Visual feedback for gameplay systems
+**Examples:** Fire, smoke, blood, tool impacts
+**Performance:** Tier 1 priority - gameplay critical
 
-## PADRÕES DE NOMENCLATURA
+#### 4. TEMPORAL/MAGICAL EFFECTS
+**Purpose:** Support the time-travel narrative element
+**Examples:** Gem energy, temporal distortion, discovery moments
+**Performance:** Tier 3 priority - story moments only
 
-NS_ = Niagara System
-M_ = Material
-T_ = Texture
-MF_ = Material Function
+#### 5. DESTRUCTION & IMPACT EFFECTS
+**Purpose:** Visceral feedback for dangerous encounters
+**Examples:** Wood splinters, rock debris, ground impacts
+**Performance:** Tier 2 priority - combat situations
 
-## CONFIGURAÇÕES GLOBAIS DE PERFORMANCE
+### TECHNICAL SPECIFICATIONS
 
-### LOD Chain (3 níveis obrigatórios)
-- LOD0: Distância 0-500 unidades (qualidade máxima)
-- LOD1: Distância 500-1500 unidades (qualidade média)
-- LOD2: Distância 1500+ unidades (qualidade mínima)
+#### Niagara System Standards
+- All effects use Niagara (no legacy Cascade)
+- GPU simulation preferred for performance
+- Modular design - reusable emitters
+- Data-driven parameters for easy iteration
 
-### Limites de Partículas
-- Máximo 10.000 partículas simultâneas no viewport
-- Máximo 50 sistemas Niagara ativos simultaneamente
-- Culling automático fora do frustum da câmera
+#### LOD Chain Implementation
+**LOD 0 (0-20m):** Full quality, all features enabled
+**LOD 1 (20-50m):** Reduced particle count, simplified shaders
+**LOD 2 (50m+):** Billboard imposters, minimal particles
 
-### Otimização GPU
-- Usar GPU Sprites sempre que possível
-- Evitar Mesh Renderers para partículas pequenas
-- Implementar Distance Culling em todos os sistemas
+#### Material Standards
+- Maximum 3 texture samples per VFX material
+- Use vertex colors for variation when possible
+- Translucent materials use Alpha Composite blend mode
+- All materials support distance-based opacity fade
 
-## GUIDELINES DE DESIGN
+### NAMING CONVENTIONS
 
-### Filosofia Visual
-"Efeitos que servem a narrativa, não a si próprios"
+#### Systems
+NS_[Category]_[Effect]_[Variation]
+Example: NS_Env_Rain_Heavy
 
-### Paleta de Cores Base
-- Terra: #8B4513, #A0522D, #CD853F
-- Vegetação: #228B22, #32CD32, #90EE90
-- Sangue: #8B0000, #DC143C
-- Poeira: #D2B48C, #F5DEB3
-- Água: #4682B4, #87CEEB
+#### Emitters
+NE_[Category]_[Effect]_[Component]
+Example: NE_Env_Rain_Droplets
 
-### Timing e Ritmo
-- Efeitos de impacto: 0.1-0.3 segundos
-- Efeitos ambientais: loops contínuos
-- Efeitos de interação: 0.5-1.5 segundos
-- Efeitos narrativos: 2-5 segundos
+#### Materials
+M_VFX_[Category]_[Effect]
+Example: M_VFX_Env_RainDroplet
 
-## INTEGRAÇÃO COM OUTROS SISTEMAS
+#### Textures
+T_VFX_[Type]_[Effect]_[Channel]
+Example: T_VFX_Noise_Rain_RGB
 
-### Audio Integration
-- Todos os VFX devem ter hooks para audio cues
-- Usar Niagara Events para triggerar sons
-- Sincronização com MetaSounds do Audio Agent
+### INTEGRATION REQUIREMENTS
 
-### Animation Integration
-- VFX devem responder a Animation Notifies
-- Usar sockets de ossos para positioning
-- Integração com Motion Matching do Animation Agent
+#### Audio Integration
+- All impact effects trigger audio events
+- Particle count drives audio intensity
+- Distance-based audio occlusion support
 
-### AI Integration
-- VFX de comportamento animal ligados ao Behavior Tree
-- Efeitos de domesticação controlados por AI states
-- Partículas de emoção baseadas em NPC mood
+#### Lighting Integration
+- Fire effects cast dynamic light
+- Lightning effects use temporary light sources
+- Particle systems respect global lighting conditions
 
-## VERSIONING E CONTROLE
+#### Physics Integration
+- Debris effects use Chaos physics
+- Particle collisions with world geometry
+- Wind effects respond to weather system
 
-Versão: 1.0
-Criado por: VFX Agent #17
-Data: Março 2026
-Última atualização: [AUTO-UPDATE]
-
-## PRÓXIMOS PASSOS
-
-1. Criar Material Master base
-2. Implementar sistema de pegadas
-3. Desenvolver efeitos ambientais básicos
-4. Integrar com sistema de LOD
-5. Testes de performance inicial
+This master library will be expanded as production progresses, but establishes the foundation for all VFX work.
