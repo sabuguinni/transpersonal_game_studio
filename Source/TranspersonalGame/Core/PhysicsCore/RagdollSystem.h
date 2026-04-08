@@ -4,6 +4,7 @@
 #include "Components/ActorComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/Engine.h"
+#include "Engine/CollisionProfile.h"
 #include "RagdollSystem.generated.h"
 
 /**
@@ -46,7 +47,7 @@ protected:
 
     /** Ragdoll mass multiplier */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ragdoll")
-    float RagdollMass = 1.0f;
+    float RagdollMass = 75.0f;
 
     /** Linear damping for ragdoll */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ragdoll")
@@ -67,4 +68,8 @@ private:
 
     FTimerHandle AutoDeactivateTimer;
     TObjectPtr<USkeletalMeshComponent> SkeletalMeshComponent;
+    
+    // Store original collision settings for restoration
+    TEnumAsByte<ECollisionEnabled::Type> OriginalCollisionEnabled;
+    TEnumAsByte<ECollisionChannel> OriginalCollisionObjectType;
 };
