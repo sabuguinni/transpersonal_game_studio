@@ -1,0 +1,42 @@
+# VFX Master System Configuration
+# Transpersonal Game Studio — Jurassic Survival Game
+# VFX Agent — Production Cycle PROD_JURASSIC_001
+
+## CORE VFX ARCHITECTURE
+
+### Performance Budget (60fps PC / 30fps Console)
+- Max Concurrent Particles: 15,000 (High) / 8,000 (Medium) / 4,000 (Low)
+- Max Active Emitters: 50 (High) / 30 (Medium) / 20 (Low)
+- LOD Distance Thresholds: 25m / 50m / 100m
+
+### VFX Categories & Priority System
+
+#### PRIORITY 1 — ATMOSPHERIC (Always Active)
+- Forest_Ambience_System
+- Light_Shafts_Dynamic
+- Fog_Layers_Procedural
+- Dust_Motes_Ambient
+
+#### PRIORITY 2 — CREATURE PRESENCE (Distance-Based LOD)
+- Dinosaur_Breathing_Steam
+- Footstep_Dust_Clouds
+- Eye_Reflection_Glints
+- Saliva_Drips_Predators
+
+#### PRIORITY 3 — SURVIVAL MECHANICS (Context-Triggered)
+- Fire_Campfire_System
+- Tool_Crafting_Sparks
+- Food_Cooking_Steam
+- Shelter_Construction_Debris
+
+#### PRIORITY 4 — ENVIRONMENTAL INTERACTION (Event-Driven)
+- Branch_Breaking_Leaves
+- Water_Ripples_Movement
+- Grass_Displacement_Footsteps
+- Rock_Impact_Sparks
+
+### Niagara System Templates Created:
+1. NS_AtmosphericBase — Core atmosphere controller
+2. NS_CreaturePresence — Dinosaur-specific effects
+3. NS_SurvivalTools — Player interaction effects
+4. NS_EnvironmentalResponse — World reaction system
