@@ -1,144 +1,268 @@
 #include "DinosaurBehaviorComponent.h"
+#include "BehaviorTree/BlackboardComponent.h"
 #include "Engine/World.h"
-#include "TimerManager.h"
+#include "GameFramework/Pawn.h"
 #include "Kismet/GameplayStatics.h"
 
 UDinosaurBehaviorComponent::UDinosaurBehaviorComponent()
 {
     PrimaryComponentTick.bCanEverTick = true;
     PrimaryComponentTick.TickInterval = 0.1f; // Update 10 times per second
+
+    // Default values
+    DinosaurName = TEXT("Unnamed Dinosaur");
+    PrimaryPersonality = EDinosaurPersonality::Cautious;
+    SecondaryPersonality = EDinosaurPersonality::Curious;
+    PersonalityStrength = 0.7f;
+    
+    CurrentState = EDinosaurState::Idle;
+    DomesticationLevel = EDomesticationLevel::Wild;
+    
+    MemoryDuration = 300.0f; // 5 minutes
+    MaxMemoryEntries = 20;
+    
+    bCanBeDomesticated = false;
+    DomesticationProgress = 0.0f;
+    DomesticationDecayRate = 1.0f; // 1% per minute
+    BondedPlayer = nullptr;
+    
+    LastNeedsUpdate = 0.0f;
+    LastMemoryUpdate = 0.0f;
+    LastRoutineUpdate = 0.0f;
 }
 
 void UDinosaurBehaviorComponent::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Initialize personality if not already set
-    if (Personality.IndividualName.IsEmpty())
-    {
-        GeneratePersonalityName();
-    }
+    InitializePersonality();
+    InitializeDailyRoutines();
     
-    // Initialize daily schedule
-    InitializeDailySchedule();
-    
-    // Set initial mood based on personality
-    EDinosaurMood InitialMood = EDinosaurMood::Calm;
-    if (Personality.Fearfulness > 0.7f)
+    // Find blackboard component
+    if (APawn* OwnerPawn = Cast<APawn>(GetOwner()))
     {
-        InitialMood = EDinosaurMood::Nervous;
+        if (AController* Controller = OwnerPawn->GetController())
+        {
+            BlackboardComponent = Controller->FindComponentByClass<UBlackboardComponent>();
+        }
     }
-    else if (Personality.Aggression > 0.7f)
-    {
-        InitialMood = EDinosaurMood::Alert;
-    }
-    
-    SetMood(InitialMood);
-    SetActivity(GetScheduledActivity());
 }
 
 void UDinosaurBehaviorComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    // Update game time (simplified - 1 real second = 1 game minute)
-    CurrentTime += DeltaTime / 60.0f;
-    if (CurrentTime >= 24.0f)
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    
+    // Update needs every 5 seconds
+    if (CurrentTime - LastNeedsUpdate >= 5.0f)
     {
-        CurrentTime = 0.0f;
+        UpdateNeeds(CurrentTime - LastNeedsUpdate);
+        LastNeedsUpdate = CurrentTime;
     }
     
-    // Update systems
-    UpdateMemory(DeltaTime);
-    UpdateDomestication(DeltaTime);
-    UpdateDailyRoutine();
-}
-
-void UDinosaurBehaviorComponent::SetMood(EDinosaurMood NewMood)
-{
-    if (CurrentMood != NewMood)
+    // Update memory every 2 seconds
+    if (CurrentTime - LastMemoryUpdate >= 2.0f)
     {
-        EDinosaurMood OldMood = CurrentMood;
-        CurrentMood = NewMood;
-        OnMoodChanged.Broadcast(OldMood, NewMood);
+        UpdateMemory(CurrentTime - LastMemoryUpdate);
+        LastMemoryUpdate = CurrentTime;
     }
-}
-
-void UDinosaurBehaviorComponent::SetActivity(EDinosaurActivity NewActivity)
-{
-    if (CurrentActivity != NewActivity)
-    {
-        EDinosaurActivity OldActivity = CurrentActivity;
-        CurrentActivity = NewActivity;
-        OnActivityChanged.Broadcast(OldActivity, NewActivity);
-    }
-}
-
-void UDinosaurBehaviorComponent::RememberActor(AActor* Actor, float EmotionalValue)
-{
-    if (!Actor) return;
     
-    // Find existing memory entry
-    FDinosaurMemoryEntry* ExistingEntry = nullptr;
-    for (FDinosaurMemoryEntry& Entry : MemoryEntries)
+    // Update routine every 30 seconds
+    if (CurrentTime - LastRoutineUpdate >= 30.0f)
     {
-        if (Entry.RememberedActor == Actor)
+        UpdateDailyRoutine();
+        LastRoutineUpdate = CurrentTime;
+    }
+    
+    // Decay domestication
+    if (bCanBeDomesticated && DomesticationProgress > 0.0f)
+    {
+        DecayDomestication(DeltaTime);
+    }
+    
+    // Update blackboard
+    UpdateBlackboard();
+}
+
+void UDinosaurBehaviorComponent::UpdateNeeds(float DeltaTime)
+{
+    float TimeMultiplier = DeltaTime / 60.0f; // Per minute
+    
+    // Hunger increases over time
+    CurrentNeeds.Hunger = FMath::Clamp(CurrentNeeds.Hunger + (2.0f * TimeMultiplier), 0.0f, 100.0f);
+    
+    // Thirst increases faster than hunger
+    CurrentNeeds.Thirst = FMath::Clamp(CurrentNeeds.Thirst + (3.0f * TimeMultiplier), 0.0f, 100.0f);
+    
+    // Energy decreases during day, increases during rest
+    float TimeOfDay = GetCurrentTimeOfDay();
+    bool bIsNight = (TimeOfDay < 6.0f || TimeOfDay > 20.0f);
+    
+    if (CurrentState == EDinosaurState::Sleeping || CurrentState == EDinosaurState::Resting)
+    {
+        CurrentNeeds.Energy = FMath::Clamp(CurrentNeeds.Energy + (10.0f * TimeMultiplier), 0.0f, 100.0f);
+    }
+    else
+    {
+        float EnergyDecay = bIsNight ? 1.0f : 2.0f;
+        CurrentNeeds.Energy = FMath::Clamp(CurrentNeeds.Energy - (EnergyDecay * TimeMultiplier), 0.0f, 100.0f);
+    }
+    
+    // Social needs depend on personality
+    if (PrimaryPersonality == EDinosaurPersonality::Social)
+    {
+        if (CurrentState != EDinosaurState::Socializing)
         {
-            ExistingEntry = &Entry;
+            CurrentNeeds.Social = FMath::Clamp(CurrentNeeds.Social + (1.5f * TimeMultiplier), 0.0f, 100.0f);
+        }
+    }
+    else if (PrimaryPersonality == EDinosaurPersonality::Solitary)
+    {
+        if (CurrentState == EDinosaurState::Socializing)
+        {
+            CurrentNeeds.Social = FMath::Clamp(CurrentNeeds.Social + (1.0f * TimeMultiplier), 0.0f, 100.0f);
+        }
+        else
+        {
+            CurrentNeeds.Social = FMath::Clamp(CurrentNeeds.Social - (0.5f * TimeMultiplier), 0.0f, 100.0f);
+        }
+    }
+    
+    // Safety decreases when threats are nearby
+    bool bThreatsNearby = false;
+    for (const FDinosaurMemoryEntry& Memory : MemoryEntries)
+    {
+        if (Memory.ThreatLevel > 0.5f && GetWorld()->GetTimeSeconds() - Memory.LastSeenTime < 60.0f)
+        {
+            bThreatsNearby = true;
             break;
         }
     }
+    
+    if (bThreatsNearby)
+    {
+        CurrentNeeds.Safety = FMath::Clamp(CurrentNeeds.Safety + (5.0f * TimeMultiplier), 0.0f, 100.0f);
+    }
+    else
+    {
+        CurrentNeeds.Safety = FMath::Clamp(CurrentNeeds.Safety - (1.0f * TimeMultiplier), 0.0f, 100.0f);
+    }
+}
+
+void UDinosaurBehaviorComponent::UpdateMemory(float DeltaTime)
+{
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    
+    // Remove expired memories
+    MemoryEntries.RemoveAll([this, CurrentTime](const FDinosaurMemoryEntry& Entry)
+    {
+        return CurrentTime - Entry.LastSeenTime > MemoryDuration;
+    });
+    
+    // Limit memory entries
+    if (MemoryEntries.Num() > MaxMemoryEntries)
+    {
+        // Remove oldest entries
+        MemoryEntries.Sort([](const FDinosaurMemoryEntry& A, const FDinosaurMemoryEntry& B)
+        {
+            return A.LastSeenTime > B.LastSeenTime;
+        });
+        
+        MemoryEntries.SetNum(MaxMemoryEntries);
+    }
+}
+
+void UDinosaurBehaviorComponent::UpdateDailyRoutine()
+{
+    float CurrentTime = GetCurrentTimeOfDay();
+    
+    // Find the best routine for current time
+    FDailyRoutine* BestRoutine = nullptr;
+    float BestPriority = 0.0f;
+    
+    for (FDailyRoutine& Routine : DailyRoutines)
+    {
+        bool bInTimeRange = false;
+        
+        if (Routine.StartTime <= Routine.EndTime)
+        {
+            // Normal time range (e.g., 8:00 to 18:00)
+            bInTimeRange = (CurrentTime >= Routine.StartTime && CurrentTime <= Routine.EndTime);
+        }
+        else
+        {
+            // Overnight range (e.g., 22:00 to 6:00)
+            bInTimeRange = (CurrentTime >= Routine.StartTime || CurrentTime <= Routine.EndTime);
+        }
+        
+        if (bInTimeRange && Routine.Priority > BestPriority)
+        {
+            BestRoutine = &Routine;
+            BestPriority = Routine.Priority;
+        }
+    }
+    
+    if (BestRoutine)
+    {
+        CurrentRoutine = *BestRoutine;
+        
+        // Adjust routine based on needs
+        if (CurrentNeeds.Hunger > 70.0f && CurrentRoutine.Activity != EDinosaurState::Foraging)
+        {
+            CurrentRoutine.Activity = EDinosaurState::Foraging;
+            CurrentRoutine.Priority += 2.0f;
+        }
+        else if (CurrentNeeds.Thirst > 70.0f && CurrentRoutine.Activity != EDinosaurState::Drinking)
+        {
+            CurrentRoutine.Activity = EDinosaurState::Drinking;
+            CurrentRoutine.Priority += 2.0f;
+        }
+        else if (CurrentNeeds.Energy < 20.0f && CurrentRoutine.Activity != EDinosaurState::Resting)
+        {
+            CurrentRoutine.Activity = EDinosaurState::Resting;
+            CurrentRoutine.Priority += 1.5f;
+        }
+    }
+}
+
+void UDinosaurBehaviorComponent::AddMemoryEntry(AActor* Actor, float ThreatLevel, float FamiliarityLevel)
+{
+    if (!Actor) return;
+    
+    // Check if we already have a memory of this actor
+    FDinosaurMemoryEntry* ExistingEntry = GetMemoryEntry(Actor);
     
     if (ExistingEntry)
     {
         // Update existing memory
         ExistingEntry->LastKnownLocation = Actor->GetActorLocation();
-        ExistingEntry->LastSeenTime = CurrentTime;
-        ExistingEntry->EncounterCount++;
-        
-        // Adjust emotional value based on personality and previous encounters
-        float PersonalityModifier = 1.0f;
-        if (EmotionalValue > 0.0f)
-        {
-            PersonalityModifier = Personality.Sociability;
-        }
-        else if (EmotionalValue < 0.0f)
-        {
-            PersonalityModifier = Personality.Fearfulness;
-        }
-        
-        ExistingEntry->EmotionalValue = FMath::Lerp(ExistingEntry->EmotionalValue, EmotionalValue, 0.1f * PersonalityModifier);
-        ExistingEntry->EmotionalValue = FMath::Clamp(ExistingEntry->EmotionalValue, -1.0f, 1.0f);
+        ExistingEntry->ThreatLevel = FMath::Lerp(ExistingEntry->ThreatLevel, ThreatLevel, 0.3f);
+        ExistingEntry->FamiliaryLevel = FMath::Lerp(ExistingEntry->FamiliaryLevel, FamiliarityLevel, 0.2f);
+        ExistingEntry->LastSeenTime = GetWorld()->GetTimeSeconds();
     }
     else
     {
-        // Create new memory entry
+        // Create new memory
         FDinosaurMemoryEntry NewEntry;
-        NewEntry.RememberedActor = Actor;
+        NewEntry.Actor = Actor;
         NewEntry.LastKnownLocation = Actor->GetActorLocation();
-        NewEntry.EmotionalValue = EmotionalValue * Personality.Intelligence; // Intelligence affects memory formation
-        NewEntry.LastSeenTime = CurrentTime;
-        NewEntry.EncounterCount = 1;
+        NewEntry.ThreatLevel = ThreatLevel;
+        NewEntry.FamiliaryLevel = FamiliarityLevel;
+        NewEntry.LastSeenTime = GetWorld()->GetTimeSeconds();
+        NewEntry.bIsPlayer = Actor->IsA<APawn>() && Cast<APawn>(Actor)->IsPlayerControlled();
         
         MemoryEntries.Add(NewEntry);
-        
-        // Remove oldest memories if we exceed the limit
-        if (MemoryEntries.Num() > MaxMemoryEntries)
-        {
-            MemoryEntries.RemoveAt(0);
-        }
     }
-    
-    OnMemoryUpdated.Broadcast(Actor, EmotionalValue, ExistingEntry ? ExistingEntry->EncounterCount : 1);
 }
 
-FDinosaurMemoryEntry* UDinosaurBehaviorComponent::GetMemoryOfActor(AActor* Actor)
+FDinosaurMemoryEntry* UDinosaurBehaviorComponent::GetMemoryEntry(AActor* Actor)
 {
     if (!Actor) return nullptr;
     
     for (FDinosaurMemoryEntry& Entry : MemoryEntries)
     {
-        if (Entry.RememberedActor == Actor)
+        if (Entry.Actor == Actor)
         {
             return &Entry;
         }
@@ -147,313 +271,290 @@ FDinosaurMemoryEntry* UDinosaurBehaviorComponent::GetMemoryOfActor(AActor* Actor
     return nullptr;
 }
 
-void UDinosaurBehaviorComponent::ForgetActor(AActor* Actor)
+void UDinosaurBehaviorComponent::InteractWithPlayer(AActor* Player, float InteractionStrength)
 {
-    if (!Actor) return;
+    if (!Player || !bCanBeDomesticated) return;
     
-    for (int32 i = MemoryEntries.Num() - 1; i >= 0; i--)
+    FDinosaurMemoryEntry* PlayerMemory = GetMemoryEntry(Player);
+    
+    if (PlayerMemory)
     {
-        if (MemoryEntries[i].RememberedActor == Actor)
+        // Positive interaction increases familiarity and decreases threat
+        PlayerMemory->FamiliaryLevel = FMath::Clamp(PlayerMemory->FamiliaryLevel + InteractionStrength, 0.0f, 100.0f);
+        PlayerMemory->ThreatLevel = FMath::Clamp(PlayerMemory->ThreatLevel - (InteractionStrength * 0.5f), 0.0f, 100.0f);
+        
+        // Increase domestication progress based on familiarity
+        if (PlayerMemory->FamiliaryLevel > 50.0f)
         {
-            MemoryEntries.RemoveAt(i);
-            break;
-        }
-    }
-}
-
-void UDinosaurBehaviorComponent::ModifyDomestication(float Amount)
-{
-    if (!CanBeDomesticated()) return;
-    
-    float OldLevel = DomesticationLevel;
-    DomesticationLevel = FMath::Clamp(DomesticationLevel + Amount, 0.0f, 1.0f);
-    
-    // Personality affects domestication rate
-    if (Amount > 0.0f)
-    {
-        DomesticationLevel *= (1.0f + Personality.Sociability * 0.5f);
-        DomesticationLevel *= (1.0f - Personality.Fearfulness * 0.3f);
-    }
-    
-    DomesticationLevel = FMath::Clamp(DomesticationLevel, 0.0f, 1.0f);
-}
-
-bool UDinosaurBehaviorComponent::CanBeDomesticated() const
-{
-    FDinosaurSpeciesData* SpeciesData = GetSpeciesData();
-    if (!SpeciesData) return false;
-    
-    return SpeciesData->DomesticationPotential > 0.0f && 
-           SpeciesData->ThreatLevel <= EDinosaurThreatLevel::Defensive &&
-           SpeciesData->Size <= EDinosaurSize::Small;
-}
-
-FDinosaurSpeciesData* UDinosaurBehaviorComponent::GetSpeciesData() const
-{
-    if (!SpeciesDataHandle.IsValid()) return nullptr;
-    
-    return SpeciesDataHandle.GetRow<FDinosaurSpeciesData>(TEXT("Getting Species Data"));
-}
-
-EDinosaurActivity UDinosaurBehaviorComponent::GetScheduledActivity() const
-{
-    // Find the closest scheduled activity for current time
-    float ClosestTime = 24.0f;
-    EDinosaurActivity ClosestActivity = EDinosaurActivity::Resting;
-    
-    for (const auto& SchedulePair : DailySchedule.ScheduledActivities)
-    {
-        float TimeDiff = FMath::Abs(SchedulePair.Key - CurrentTime);
-        if (TimeDiff < ClosestTime)
-        {
-            ClosestTime = TimeDiff;
-            ClosestActivity = SchedulePair.Value;
-        }
-    }
-    
-    return ClosestActivity;
-}
-
-bool UDinosaurBehaviorComponent::ShouldBeActive() const
-{
-    FDinosaurSpeciesData* SpeciesData = GetSpeciesData();
-    if (!SpeciesData) return true;
-    
-    // Check if current time is in active hours
-    for (float ActiveHour : SpeciesData->ActiveHours)
-    {
-        if (FMath::Abs(CurrentTime - ActiveHour) < 1.0f) // Within 1 hour
-        {
-            return true;
-        }
-    }
-    
-    return false;
-}
-
-FVector UDinosaurBehaviorComponent::GetPreferredLocation() const
-{
-    switch (CurrentActivity)
-    {
-        case EDinosaurActivity::Foraging:
-            if (DailySchedule.FeedingSpots.Num() > 0)
-            {
-                return DailySchedule.FeedingSpots[FMath::RandRange(0, DailySchedule.FeedingSpots.Num() - 1)];
-            }
-            break;
+            float DomesticationGain = InteractionStrength * (PlayerMemory->FamiliaryLevel / 100.0f);
+            DomesticationProgress = FMath::Clamp(DomesticationProgress + DomesticationGain, 0.0f, 100.0f);
             
-        case EDinosaurActivity::Drinking:
-            if (DailySchedule.WaterSources.Num() > 0)
+            // Update domestication level
+            if (DomesticationProgress >= 90.0f)
             {
-                return DailySchedule.WaterSources[FMath::RandRange(0, DailySchedule.WaterSources.Num() - 1)];
+                DomesticationLevel = EDomesticationLevel::Domesticated;
+                BondedPlayer = Player;
             }
-            break;
-            
-        case EDinosaurActivity::Patrolling:
-            if (DailySchedule.PatrolPoints.Num() > 0)
+            else if (DomesticationProgress >= 75.0f)
             {
-                return DailySchedule.PatrolPoints[FMath::RandRange(0, DailySchedule.PatrolPoints.Num() - 1)];
+                DomesticationLevel = EDomesticationLevel::Bonded;
             }
-            break;
-            
-        case EDinosaurActivity::Resting:
-        case EDinosaurActivity::Sleeping:
-            return DailySchedule.HomeLocation;
-    }
-    
-    return DailySchedule.HomeLocation;
-}
-
-float UDinosaurBehaviorComponent::GetPersonalityModifier(const FString& TraitName) const
-{
-    if (TraitName == "Aggression") return Personality.Aggression;
-    if (TraitName == "Curiosity") return Personality.Curiosity;
-    if (TraitName == "Fearfulness") return Personality.Fearfulness;
-    if (TraitName == "Sociability") return Personality.Sociability;
-    if (TraitName == "Intelligence") return Personality.Intelligence;
-    
-    return 0.5f; // Default neutral value
-}
-
-void UDinosaurBehaviorComponent::ReactToPlayer(AActor* Player, float Distance)
-{
-    if (!Player) return;
-    
-    FDinosaurSpeciesData* SpeciesData = GetSpeciesData();
-    if (!SpeciesData) return;
-    
-    // Calculate reaction based on species, personality, and domestication
-    float ReactionIntensity = 1.0f - (Distance / SpeciesData->DetectionRange);
-    ReactionIntensity = FMath::Clamp(ReactionIntensity, 0.0f, 1.0f);
-    
-    // Domesticated dinosaurs react more positively
-    float EmotionalValue = -0.3f; // Default: player is a threat
-    if (IsDomesticated())
-    {
-        EmotionalValue = 0.5f + (DomesticationLevel * 0.5f);
-    }
-    else if (SpeciesData->ThreatLevel == EDinosaurThreatLevel::Passive)
-    {
-        EmotionalValue = -0.1f; // Less threatening
-    }
-    
-    // Personality modifies reaction
-    EmotionalValue *= (1.0f - Personality.Fearfulness * 0.5f);
-    EmotionalValue += (Personality.Curiosity * 0.2f);
-    
-    RememberActor(Player, EmotionalValue);
-    
-    // Set mood based on reaction
-    if (EmotionalValue < -0.5f)
-    {
-        SetMood(EDinosaurMood::Fearful);
-        SetActivity(EDinosaurActivity::Fleeing);
-    }
-    else if (EmotionalValue < 0.0f)
-    {
-        SetMood(EDinosaurMood::Alert);
-    }
-    else if (EmotionalValue > 0.3f)
-    {
-        SetMood(EDinosaurMood::Curious);
-    }
-}
-
-void UDinosaurBehaviorComponent::ReactToThreat(AActor* Threat)
-{
-    if (!Threat) return;
-    
-    RememberActor(Threat, -0.8f);
-    SetMood(EDinosaurMood::Fearful);
-    SetActivity(EDinosaurActivity::Fleeing);
-}
-
-void UDinosaurBehaviorComponent::ReactToFood(AActor* Food)
-{
-    if (!Food) return;
-    
-    if (CurrentMood == EDinosaurMood::Hungry)
-    {
-        RememberActor(Food, 0.6f);
-        SetActivity(EDinosaurActivity::Foraging);
-    }
-}
-
-void UDinosaurBehaviorComponent::UpdateMemory(float DeltaTime)
-{
-    LastMemoryUpdate += DeltaTime;
-    if (LastMemoryUpdate < 3600.0f) return; // Update every hour
-    
-    LastMemoryUpdate = 0.0f;
-    
-    // Decay memories over time
-    for (int32 i = MemoryEntries.Num() - 1; i >= 0; i--)
-    {
-        FDinosaurMemoryEntry& Entry = MemoryEntries[i];
-        
-        float TimeSinceLastSeen = CurrentTime - Entry.LastSeenTime;
-        if (TimeSinceLastSeen > 24.0f) TimeSinceLastSeen -= 24.0f; // Handle day wrap
-        
-        // Decay emotional value towards neutral
-        float DecayAmount = MemoryDecayRate * TimeSinceLastSeen * (1.0f - Personality.Intelligence);
-        Entry.EmotionalValue = FMath::Lerp(Entry.EmotionalValue, 0.0f, DecayAmount);
-        
-        // Remove very old or neutral memories
-        if (TimeSinceLastSeen > 72.0f || FMath::Abs(Entry.EmotionalValue) < 0.1f)
-        {
-            MemoryEntries.RemoveAt(i);
+            else if (DomesticationProgress >= 60.0f)
+            {
+                DomesticationLevel = EDomesticationLevel::Friendly;
+            }
+            else if (DomesticationProgress >= 40.0f)
+            {
+                DomesticationLevel = EDomesticationLevel::Curious;
+            }
+            else if (DomesticationProgress >= 20.0f)
+            {
+                DomesticationLevel = EDomesticationLevel::Neutral;
+            }
+            else
+            {
+                DomesticationLevel = EDomesticationLevel::Wary;
+            }
         }
     }
 }
 
-void UDinosaurBehaviorComponent::UpdateDomestication(float DeltaTime)
+bool UDinosaurBehaviorComponent::ShouldFleeFrom(AActor* Threat)
 {
-    if (!CanBeDomesticated()) return;
+    if (!Threat) return false;
     
-    LastDomesticationUpdate += DeltaTime;
-    if (LastDomesticationUpdate < 60.0f) return; // Update every minute
+    FDinosaurMemoryEntry* ThreatMemory = GetMemoryEntry(Threat);
     
-    LastDomesticationUpdate = 0.0f;
+    if (!ThreatMemory) return false;
     
-    // Natural decay of domestication without positive interaction
-    ModifyDomestication(-DomesticationLossRate);
+    // Base flee threshold depends on personality
+    float FleeThreshold = 50.0f;
+    
+    if (PrimaryPersonality == EDinosaurPersonality::Aggressive)
+    {
+        FleeThreshold = 80.0f;
+    }
+    else if (PrimaryPersonality == EDinosaurPersonality::Cautious)
+    {
+        FleeThreshold = 30.0f;
+    }
+    
+    // Adjust for safety needs
+    FleeThreshold -= (CurrentNeeds.Safety * 0.3f);
+    
+    // Adjust for familiarity (familiar threats are less scary)
+    FleeThreshold += (ThreatMemory->FamiliaryLevel * 0.2f);
+    
+    return ThreatMemory->ThreatLevel > FleeThreshold;
 }
 
-void UDinosaurBehaviorComponent::UpdateDailyRoutine()
+bool UDinosaurBehaviorComponent::ShouldInvestigate(AActor* Target)
 {
-    EDinosaurActivity ScheduledActivity = GetScheduledActivity();
+    if (!Target) return false;
     
-    // Only change activity if significantly different or if current activity is completed
-    if (ScheduledActivity != CurrentActivity)
+    // Curious dinosaurs investigate more
+    if (PrimaryPersonality == EDinosaurPersonality::Curious || SecondaryPersonality == EDinosaurPersonality::Curious)
     {
-        // Check if we should switch based on personality and current mood
-        bool ShouldSwitch = true;
+        return FMath::RandRange(0.0f, 1.0f) < 0.7f;
+    }
+    
+    // Others investigate based on safety
+    return CurrentNeeds.Safety < 30.0f && FMath::RandRange(0.0f, 1.0f) < 0.3f;
+}
+
+FVector UDinosaurBehaviorComponent::GetPreferredLocation()
+{
+    if (CurrentRoutine.PreferredLocation != FVector::ZeroVector)
+    {
+        return CurrentRoutine.PreferredLocation;
+    }
+    
+    // Default to current location if no preferred location set
+    return GetOwner()->GetActorLocation();
+}
+
+void UDinosaurBehaviorComponent::SetCurrentState(EDinosaurState NewState)
+{
+    if (CurrentState != NewState)
+    {
+        CurrentState = NewState;
         
-        if (CurrentMood == EDinosaurMood::Fearful || CurrentMood == EDinosaurMood::Aggressive)
+        // Update needs based on state change
+        switch (NewState)
         {
-            ShouldSwitch = false; // Don't interrupt fear or aggression
+            case EDinosaurState::Foraging:
+                CurrentNeeds.Hunger = FMath::Clamp(CurrentNeeds.Hunger - 20.0f, 0.0f, 100.0f);
+                break;
+            case EDinosaurState::Drinking:
+                CurrentNeeds.Thirst = FMath::Clamp(CurrentNeeds.Thirst - 25.0f, 0.0f, 100.0f);
+                break;
+            case EDinosaurState::Socializing:
+                if (PrimaryPersonality == EDinosaurPersonality::Social)
+                {
+                    CurrentNeeds.Social = FMath::Clamp(CurrentNeeds.Social - 15.0f, 0.0f, 100.0f);
+                }
+                break;
+            case EDinosaurState::Resting:
+            case EDinosaurState::Sleeping:
+                CurrentNeeds.Energy = FMath::Clamp(CurrentNeeds.Energy + 10.0f, 0.0f, 100.0f);
+                break;
         }
+    }
+}
+
+void UDinosaurBehaviorComponent::UpdateBlackboard()
+{
+    if (!BlackboardComponent) return;
+    
+    // Update blackboard keys for behavior tree
+    BlackboardComponent->SetValueAsEnum(TEXT("CurrentState"), static_cast<uint8>(CurrentState));
+    BlackboardComponent->SetValueAsEnum(TEXT("DomesticationLevel"), static_cast<uint8>(DomesticationLevel));
+    BlackboardComponent->SetValueAsFloat(TEXT("HungerLevel"), CurrentNeeds.Hunger);
+    BlackboardComponent->SetValueAsFloat(TEXT("ThirstLevel"), CurrentNeeds.Thirst);
+    BlackboardComponent->SetValueAsFloat(TEXT("EnergyLevel"), CurrentNeeds.Energy);
+    BlackboardComponent->SetValueAsFloat(TEXT("SafetyLevel"), CurrentNeeds.Safety);
+    BlackboardComponent->SetValueAsVector(TEXT("PreferredLocation"), GetPreferredLocation());
+    
+    // Find most threatening actor
+    AActor* MostThreatening = nullptr;
+    float HighestThreat = 0.0f;
+    
+    for (const FDinosaurMemoryEntry& Memory : MemoryEntries)
+    {
+        if (Memory.ThreatLevel > HighestThreat && GetWorld()->GetTimeSeconds() - Memory.LastSeenTime < 30.0f)
+        {
+            MostThreatening = Memory.Actor;
+            HighestThreat = Memory.ThreatLevel;
+        }
+    }
+    
+    BlackboardComponent->SetValueAsObject(TEXT("ThreatTarget"), MostThreatening);
+    BlackboardComponent->SetValueAsFloat(TEXT("ThreatLevel"), HighestThreat);
+    
+    // Set player reference if bonded
+    if (BondedPlayer)
+    {
+        BlackboardComponent->SetValueAsObject(TEXT("BondedPlayer"), BondedPlayer);
+    }
+}
+
+void UDinosaurBehaviorComponent::InitializePersonality()
+{
+    // Generate random personality traits if not set
+    if (PrimaryPersonality == EDinosaurPersonality::Cautious && SecondaryPersonality == EDinosaurPersonality::Curious)
+    {
+        // Random primary personality
+        int32 PersonalityIndex = FMath::RandRange(0, 7);
+        PrimaryPersonality = static_cast<EDinosaurPersonality>(PersonalityIndex);
         
-        if (ShouldSwitch)
+        // Random secondary personality (different from primary)
+        do {
+            PersonalityIndex = FMath::RandRange(0, 7);
+            SecondaryPersonality = static_cast<EDinosaurPersonality>(PersonalityIndex);
+        } while (SecondaryPersonality == PrimaryPersonality);
+        
+        PersonalityStrength = FMath::RandRange(0.3f, 0.9f);
+    }
+    
+    // Adjust base needs based on personality
+    if (PrimaryPersonality == EDinosaurPersonality::Aggressive)
+    {
+        CurrentNeeds.Safety = 20.0f; // Less concerned about safety
+    }
+    else if (PrimaryPersonality == EDinosaurPersonality::Cautious)
+    {
+        CurrentNeeds.Safety = 80.0f; // Very concerned about safety
+    }
+    
+    if (PrimaryPersonality == EDinosaurPersonality::Social)
+    {
+        CurrentNeeds.Social = 70.0f; // High social needs
+    }
+    else if (PrimaryPersonality == EDinosaurPersonality::Solitary)
+    {
+        CurrentNeeds.Social = 10.0f; // Low social needs
+    }
+}
+
+void UDinosaurBehaviorComponent::InitializeDailyRoutines()
+{
+    if (DailyRoutines.Num() == 0)
+    {
+        // Create default routines based on personality
+        FDailyRoutine MorningForage;
+        MorningForage.StartTime = 6.0f;
+        MorningForage.EndTime = 10.0f;
+        MorningForage.Activity = EDinosaurState::Foraging;
+        MorningForage.Priority = 2.0f;
+        DailyRoutines.Add(MorningForage);
+        
+        FDailyRoutine MidDayRest;
+        MidDayRest.StartTime = 12.0f;
+        MidDayRest.EndTime = 15.0f;
+        MidDayRest.Activity = EDinosaurState::Resting;
+        MidDayRest.Priority = 1.5f;
+        DailyRoutines.Add(MidDayRest);
+        
+        FDailyRoutine EveningDrink;
+        EveningDrink.StartTime = 17.0f;
+        EveningDrink.EndTime = 19.0f;
+        EveningDrink.Activity = EDinosaurState::Drinking;
+        EveningDrink.Priority = 2.0f;
+        DailyRoutines.Add(EveningDrink);
+        
+        FDailyRoutine NightSleep;
+        NightSleep.StartTime = 22.0f;
+        NightSleep.EndTime = 5.0f;
+        NightSleep.Activity = EDinosaurState::Sleeping;
+        NightSleep.Priority = 3.0f;
+        DailyRoutines.Add(NightSleep);
+    }
+}
+
+float UDinosaurBehaviorComponent::GetCurrentTimeOfDay()
+{
+    // Get time from world (this would need to be connected to day/night cycle)
+    // For now, use a simple calculation based on world time
+    float WorldTime = GetWorld()->GetTimeSeconds();
+    float DayLength = 1200.0f; // 20 minutes per day
+    float TimeOfDay = FMath::Fmod(WorldTime, DayLength) / DayLength * 24.0f;
+    
+    return TimeOfDay;
+}
+
+void UDinosaurBehaviorComponent::DecayDomestication(float DeltaTime)
+{
+    if (BondedPlayer)
+    {
+        // Check if bonded player is nearby
+        float DistanceToPlayer = FVector::Dist(GetOwner()->GetActorLocation(), BondedPlayer->GetActorLocation());
+        
+        if (DistanceToPlayer > 5000.0f) // 50 meters
         {
-            SetActivity(ScheduledActivity);
+            // Player is far away, decay domestication slowly
+            float DecayAmount = DomesticationDecayRate * (DeltaTime / 60.0f) * 0.1f;
+            DomesticationProgress = FMath::Clamp(DomesticationProgress - DecayAmount, 0.0f, 100.0f);
         }
     }
-}
-
-void UDinosaurBehaviorComponent::GeneratePersonalityName()
-{
-    // Simple name generation based on personality traits
-    TArray<FString> Prefixes = {
-        TEXT("Bold"), TEXT("Shy"), TEXT("Wise"), TEXT("Quick"), TEXT("Gentle"),
-        TEXT("Fierce"), TEXT("Calm"), TEXT("Wild"), TEXT("Noble"), TEXT("Swift")
-    };
-    
-    TArray<FString> Suffixes = {
-        TEXT("claw"), TEXT("horn"), TEXT("tail"), TEXT("eye"), TEXT("scale"),
-        TEXT("tooth"), TEXT("wing"), TEXT("foot"), TEXT("back"), TEXT("neck")
-    };
-    
-    FString Prefix = Prefixes[FMath::RandRange(0, Prefixes.Num() - 1)];
-    FString Suffix = Suffixes[FMath::RandRange(0, Suffixes.Num() - 1)];
-    
-    Personality.IndividualName = FString::Printf(TEXT("%s%s"), *Prefix, *Suffix);
-}
-
-void UDinosaurBehaviorComponent::InitializeDailySchedule()
-{
-    FDinosaurSpeciesData* SpeciesData = GetSpeciesData();
-    if (!SpeciesData) return;
-    
-    // Set home location to current location
-    if (AActor* Owner = GetOwner())
+    else
     {
-        DailySchedule.HomeLocation = Owner->GetActorLocation();
+        // No bonded player, decay faster
+        float DecayAmount = DomesticationDecayRate * (DeltaTime / 60.0f);
+        DomesticationProgress = FMath::Clamp(DomesticationProgress - DecayAmount, 0.0f, 100.0f);
     }
     
-    // Generate basic schedule based on species data
-    DailySchedule.ScheduledActivities.Empty();
-    
-    // Add feeding times
-    for (float FeedingHour : SpeciesData->FeedingHours)
+    // Update domestication level based on progress
+    if (DomesticationProgress < 20.0f)
     {
-        DailySchedule.ScheduledActivities.Add(FeedingHour, EDinosaurActivity::Foraging);
+        DomesticationLevel = EDomesticationLevel::Wild;
+        BondedPlayer = nullptr;
     }
-    
-    // Add resting times
-    for (float RestingHour : SpeciesData->RestingHours)
+    else if (DomesticationProgress < 40.0f)
     {
-        DailySchedule.ScheduledActivities.Add(RestingHour, EDinosaurActivity::Resting);
+        DomesticationLevel = EDomesticationLevel::Wary;
     }
-    
-    // Add some variety based on personality
-    if (Personality.Curiosity > 0.6f)
+    else if (DomesticationProgress < 60.0f)
     {
-        DailySchedule.ScheduledActivities.Add(12.0f, EDinosaurActivity::Patrolling); // Midday exploration
-    }
-    
-    if (Personality.Sociability > 0.7f)
-    {
-        DailySchedule.ScheduledActivities.Add(18.0f, EDinosaurActivity::Socializing); // Evening social time
+        DomesticationLevel = EDomesticationLevel::Neutral;
     }
 }
