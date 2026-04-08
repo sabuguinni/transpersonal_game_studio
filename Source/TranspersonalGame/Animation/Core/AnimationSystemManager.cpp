@@ -1,147 +1,220 @@
 #include "AnimationSystemManager.h"
-#include "Components/SkeletalMeshComponent.h"
-#include "Animation/AnimInstance.h"
 #include "Engine/World.h"
-#include "DrawDebugHelpers.h"
+#include "TimerManager.h"
 
 UAnimationSystemManager::UAnimationSystemManager()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.bStartWithTickEnabled = true;
+    PrimaryComponentTick.TickGroup = TG_PrePhysics;
+    
+    // Valores padrão
+    CharacterType = ECharacterAnimationType::Player;
+    CurrentEmotionalState = EEmotionalState::Calm;
+    PreviousEmotionalState = EEmotionalState::Calm;
+    
+    StateTransitionTime = 0.0f;
+    PersonalityUpdateTimer = 0.0f;
+    NaturalVariationTimer = 0.0f;
 }
 
 void UAnimationSystemManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    UpdateMotionMatchingSetup();
+    // Inicializar personalidade com variações aleatórias subtis
+    if (Personality.Nervousness == 0.5f) // Se ainda está no valor padrão
+    {
+        // Gerar personalidade única baseada no tipo de personagem
+        switch (CharacterType)
+        {
+            case ECharacterAnimationType::Player:
+                Personality.Nervousness = FMath::RandRange(0.6f, 0.8f); // Jogador sempre nervoso
+                Personality.Confidence = FMath::RandRange(0.3f, 0.5f);
+                Personality.Aggression = FMath::RandRange(0.2f, 0.4f);
+                Personality.Curiosity = FMath::RandRange(0.7f, 0.9f);
+                break;
+                
+            case ECharacterAnimationType::SmallHerbivore:
+                Personality.Nervousness = FMath::RandRange(0.7f, 0.9f);
+                Personality.Confidence = FMath::RandRange(0.2f, 0.4f);
+                Personality.Aggression = FMath::RandRange(0.1f, 0.3f);
+                Personality.Curiosity = FMath::RandRange(0.5f, 0.8f);
+                break;
+                
+            case ECharacterAnimationType::LargeHerbivore:
+                Personality.Nervousness = FMath::RandRange(0.4f, 0.6f);
+                Personality.Confidence = FMath::RandRange(0.6f, 0.8f);
+                Personality.Aggression = FMath::RandRange(0.3f, 0.5f);
+                Personality.Curiosity = FMath::RandRange(0.3f, 0.6f);
+                break;
+                
+            case ECharacterAnimationType::SmallCarnivore:
+                Personality.Nervousness = FMath::RandRange(0.3f, 0.5f);
+                Personality.Confidence = FMath::RandRange(0.6f, 0.8f);
+                Personality.Aggression = FMath::RandRange(0.7f, 0.9f);
+                Personality.Curiosity = FMath::RandRange(0.8f, 1.0f);
+                break;
+                
+            case ECharacterAnimationType::LargeCarnivore:
+                Personality.Nervousness = FMath::RandRange(0.1f, 0.3f);
+                Personality.Confidence = FMath::RandRange(0.8f, 1.0f);
+                Personality.Aggression = FMath::RandRange(0.6f, 0.8f);
+                Personality.Curiosity = FMath::RandRange(0.4f, 0.7f);
+                break;
+                
+            case ECharacterAnimationType::Apex:
+                Personality.Nervousness = FMath::RandRange(0.0f, 0.2f);
+                Personality.Confidence = FMath::RandRange(0.9f, 1.0f);
+                Personality.Aggression = FMath::RandRange(0.8f, 1.0f);
+                Personality.Curiosity = FMath::RandRange(0.2f, 0.5f);
+                break;
+        }
+        
+        // Variações físicas únicas
+        Personality.MovementSpeed = FMath::RandRange(0.85f, 1.15f);
+        Personality.StepLength = FMath::RandRange(0.9f, 1.1f);
+        Personality.BodySway = FMath::RandRange(0.95f, 1.05f);
+        Personality.HeadMovement = FMath::RandRange(0.8f, 1.2f);
+    }
 }
 
 void UAnimationSystemManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    UpdateEmotionalBlending(DeltaTime);
+    ProcessEmotionalTransition(DeltaTime);
+    UpdatePersonalityInfluence(DeltaTime);
+    ApplyNaturalVariations(DeltaTime);
 }
 
 void UAnimationSystemManager::SetEmotionalState(EEmotionalState NewState)
 {
     if (CurrentEmotionalState != NewState)
     {
+        PreviousEmotionalState = CurrentEmotionalState;
         CurrentEmotionalState = NewState;
+        StateTransitionTime = 0.0f;
         
-        // Trigger animation state change in Animation Blueprint
-        if (AActor* Owner = GetOwner())
-        {
-            if (USkeletalMeshComponent* MeshComp = Owner->FindComponentByClass<USkeletalMeshComponent>())
-            {
-                if (UAnimInstance* AnimInstance = MeshComp->GetAnimInstance())
-                {
-                    // Set emotional state variable in Animation Blueprint
-                    AnimInstance->SetRootMotionMode(ERootMotionMode::RootMotionFromEverything);
-                }
-            }
-        }
+        OnEmotionalStateChanged.Broadcast(PreviousEmotionalState, CurrentEmotionalState);
     }
 }
 
-void UAnimationSystemManager::SetPersonality(const FCharacterPersonality& NewPersonality)
+void UAnimationSystemManager::UpdatePersonalityInfluence(float DeltaTime)
 {
-    Personality = NewPersonality;
+    PersonalityUpdateTimer += DeltaTime;
     
-    // Update target blend values for smooth personality transitions
-    TargetBoldnessBlend = Personality.Boldness;
-    TargetAggressionBlend = Personality.Aggression;
-    TargetCuriosityBlend = Personality.Curiosity;
-}
-
-UPoseSearchDatabase* UAnimationSystemManager::GetCurrentMotionDatabase() const
-{
-    if (!CurrentSetup)
+    // Atualizar influência da personalidade a cada 0.1 segundos
+    if (PersonalityUpdateTimer >= 0.1f)
     {
-        return nullptr;
-    }
-    
-    switch (CurrentEmotionalState)
-    {
-        case EEmotionalState::Aggressive:
-        case EEmotionalState::Hunting:
-        case EEmotionalState::Territorial:
-            return CurrentSetup->CombatDatabase.LoadSynchronous();
-            
-        case EEmotionalState::Curious:
-        case EEmotionalState::Feeding:
-            return CurrentSetup->InteractionDatabase.LoadSynchronous();
-            
-        default:
-            return CurrentSetup->LocomotionDatabase.LoadSynchronous();
-    }
-}
-
-TArray<FAnimationVariant> UAnimationSystemManager::GetPersonalityMatchedAnimations(const TArray<FAnimationVariant>& Variants) const
-{
-    TArray<FAnimationVariant> MatchedVariants;
-    
-    for (const FAnimationVariant& Variant : Variants)
-    {
-        float MatchScore = CalculatePersonalityMatch(Variant.RequiredPersonality, Variant.PersonalityTolerance);
+        PersonalityUpdateTimer = 0.0f;
         
-        if (MatchScore > 0.0f)
+        // A personalidade influencia como as transições emocionais acontecem
+        // Personagens mais nervosos mudam de estado mais rapidamente
+        float nervousnessMultiplier = 1.0f + (Personality.Nervousness * 0.5f);
+        StateTransitionTime *= nervousnessMultiplier;
+    }
+}
+
+float UAnimationSystemManager::GetPersonalityModifier(const FString& ModifierName) const
+{
+    if (ModifierName == "MovementSpeed")
+    {
+        float baseSpeed = Personality.MovementSpeed;
+        
+        // Ajustar velocidade baseado no estado emocional
+        switch (CurrentEmotionalState)
         {
-            FAnimationVariant MatchedVariant = Variant;
-            MatchedVariant.Weight *= MatchScore;
-            MatchedVariants.Add(MatchedVariant);
+            case EEmotionalState::Fearful:
+                return baseSpeed * 1.3f; // Mais rápido quando com medo
+            case EEmotionalState::Nervous:
+                return baseSpeed * 1.1f;
+            case EEmotionalState::Resting:
+                return baseSpeed * 0.6f; // Mais lento quando descansando
+            case EEmotionalState::Hunting:
+                return baseSpeed * 1.2f;
+            default:
+                return baseSpeed;
+        }
+    }
+    else if (ModifierName == "HeadMovement")
+    {
+        float baseMovement = Personality.HeadMovement;
+        
+        // Mais movimento de cabeça quando alerta ou nervoso
+        switch (CurrentEmotionalState)
+        {
+            case EEmotionalState::Alert:
+                return baseMovement * 1.4f;
+            case EEmotionalState::Nervous:
+                return baseMovement * 1.6f;
+            case EEmotionalState::Fearful:
+                return baseMovement * 2.0f;
+            case EEmotionalState::Resting:
+                return baseMovement * 0.3f;
+            default:
+                return baseMovement;
+        }
+    }
+    else if (ModifierName == "BodySway")
+    {
+        float baseSway = Personality.BodySway;
+        
+        // Mais balanço corporal quando nervoso
+        switch (CurrentEmotionalState)
+        {
+            case EEmotionalState::Nervous:
+                return baseSway * 1.3f;
+            case EEmotionalState::Fearful:
+                return baseSway * 1.5f;
+            case EEmotionalState::Confident:
+                return baseSway * 0.8f;
+            default:
+                return baseSway;
         }
     }
     
-    return MatchedVariants;
+    return 1.0f; // Valor padrão
 }
 
-float UAnimationSystemManager::CalculatePersonalityMatch(const FCharacterPersonality& RequiredPersonality, float Tolerance) const
+void UAnimationSystemManager::ProcessEmotionalTransition(float DeltaTime)
 {
-    float BoldnessDiff = FMath::Abs(Personality.Boldness - RequiredPersonality.Boldness);
-    float AggressionDiff = FMath::Abs(Personality.Aggression - RequiredPersonality.Aggression);
-    float CuriosityDiff = FMath::Abs(Personality.Curiosity - RequiredPersonality.Curiosity);
-    float SocialDiff = FMath::Abs(Personality.SocialTendency - RequiredPersonality.SocialTendency);
-    float EnergyDiff = FMath::Abs(Personality.EnergyLevel - RequiredPersonality.EnergyLevel);
+    StateTransitionTime += DeltaTime;
     
-    float AverageDiff = (BoldnessDiff + AggressionDiff + CuriosityDiff + SocialDiff + EnergyDiff) / 5.0f;
+    // Transições emocionais levam tempo baseado na personalidade
+    float transitionDuration = 2.0f; // Base de 2 segundos
     
-    if (AverageDiff <= Tolerance)
-    {
-        return 1.0f - (AverageDiff / Tolerance);
-    }
+    // Personagens mais nervosos fazem transições mais rápidas
+    transitionDuration *= (1.0f - (Personality.Nervousness * 0.5f));
     
-    return 0.0f;
+    // Personagens mais confiantes fazem transições mais lentas
+    transitionDuration *= (1.0f + (Personality.Confidence * 0.3f));
 }
 
-void UAnimationSystemManager::UpdateMotionMatchingSetup()
+void UAnimationSystemManager::ApplyNaturalVariations(float DeltaTime)
 {
-    if (!MotionMatchingSetupTable)
-    {
-        return;
-    }
+    NaturalVariationTimer += DeltaTime;
     
-    FString ContextString;
-    TArray<FName> RowNames = MotionMatchingSetupTable->GetRowNames();
+    // Aplicar micro-variações naturais a cada 2-5 segundos
+    float variationInterval = FMath::RandRange(2.0f, 5.0f);
     
-    for (const FName& RowName : RowNames)
+    if (NaturalVariationTimer >= variationInterval)
     {
-        if (const FMotionMatchingSetup* Setup = MotionMatchingSetupTable->FindRow<FMotionMatchingSetup>(RowName, ContextString))
+        NaturalVariationTimer = 0.0f;
+        
+        // Pequenas variações baseadas na personalidade
+        // Estas serão usadas pelos Animation Blueprints para criar movimento orgânico
+        
+        // Personagens mais nervosos têm mais variações
+        if (Personality.Nervousness > 0.6f)
         {
-            if (Setup->Archetype == CharacterArchetype)
-            {
-                CurrentSetup = Setup;
-                break;
-            }
+            // Trigger para pequenos movimentos nervosos
+            // Será captado pelo Animation Blueprint
+        }
+        
+        // Personagens curiosos ocasionalmente olham em volta
+        if (Personality.Curiosity > 0.7f && FMath::RandRange(0.0f, 1.0f) < 0.3f)
+        {
+            // Trigger para movimento de curiosidade
         }
     }
-}
-
-void UAnimationSystemManager::UpdateEmotionalBlending(float DeltaTime)
-{
-    // Smooth blend personality values for natural transitions
-    CurrentBoldnessBlend = FMath::FInterpTo(CurrentBoldnessBlend, TargetBoldnessBlend, DeltaTime, PersonalityBlendSpeed);
-    CurrentAggressionBlend = FMath::FInterpTo(CurrentAggressionBlend, TargetAggressionBlend, DeltaTime, PersonalityBlendSpeed);
-    CurrentCuriosityBlend = FMath::FInterpTo(CurrentCuriosityBlend, TargetCuriosityBlend, DeltaTime, PersonalityBlendSpeed);
 }
