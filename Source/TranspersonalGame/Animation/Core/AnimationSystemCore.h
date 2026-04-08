@@ -3,95 +3,91 @@
 #include "CoreMinimal.h"
 #include "Engine/Engine.h"
 #include "Animation/AnimInstance.h"
-#include "PoseSearch/PoseSearch.h"
-#include "Animation/AnimNode_PoseSearchHistoryCollector.h"
-#include "Animation/AnimNode_MotionMatching.h"
-#include "IKRig.h"
+#include "PoseSearch/PoseSearchDatabase.h"
+#include "PoseSearch/PoseSearchSchema.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "AnimationSystemCore.generated.h"
 
 /**
- * Core Animation System for Transpersonal Game Studio's Jurassic Survival Game
+ * Core Animation System for Transpersonal Game
+ * Handles Motion Matching, IK, and character-specific animation logic
  * 
- * Architecture Philosophy:
- * - Every movement tells a story about the character's internal state
- * - Motion Matching for fluid, contextual animation selection
- * - IK systems for environmental adaptation
- * - Individual variation system for unique creature personalities
+ * Design Philosophy:
+ * - Every movement tells a story about the character
+ * - Fear and vulnerability are communicated through body language
+ * - Responsive, weight-based animations using Motion Matching
+ * - Terrain adaptation through IK systems
  */
 
 UENUM(BlueprintType)
-enum class ECreatureArchetype : uint8
+enum class ECharacterAnimationState : uint8
 {
-    // Human Character
-    Paleontologist      UMETA(DisplayName = "Paleontologist"),
-    
-    // Herbivore Archetypes
-    SmallHerbivore      UMETA(DisplayName = "Small Herbivore"),     // Compsognathus-like
-    MediumHerbivore     UMETA(DisplayName = "Medium Herbivore"),    // Parasaurolophus-like
-    LargeHerbivore      UMETA(DisplayName = "Large Herbivore"),     // Triceratops-like
-    
-    // Carnivore Archetypes
-    SmallCarnivore      UMETA(DisplayName = "Small Carnivore"),     // Velociraptor-like
-    MediumCarnivore     UMETA(DisplayName = "Medium Carnivore"),    // Allosaurus-like
-    ApexPredator        UMETA(DisplayName = "Apex Predator"),       // T-Rex-like
-    
-    // Flying Creatures
-    SmallFlyer          UMETA(DisplayName = "Small Flyer"),         // Pteranodon-like
-    LargeFlyer          UMETA(DisplayName = "Large Flyer")          // Quetzalcoatlus-like
+    Idle,
+    Cautious,          // Slow, careful movement
+    Sneaking,          // Crouched, silent movement
+    Walking,           // Normal walking pace
+    Jogging,           // Faster movement, still controlled
+    Running,           // Panic running
+    Climbing,          // Terrain navigation
+    Hiding,            // Stationary fear state
+    Observing,         // Watching dinosaurs from distance
+    Gathering,         // Resource collection animations
+    Crafting,          // Tool/weapon creation
+    MAX UMETA(Hidden)
 };
 
 UENUM(BlueprintType)
-enum class EEmotionalState : uint8
+enum class ETerrainType : uint8
 {
-    Calm                UMETA(DisplayName = "Calm"),
-    Alert               UMETA(DisplayName = "Alert"),
-    Fearful             UMETA(DisplayName = "Fearful"),
-    Aggressive          UMETA(DisplayName = "Aggressive"),
-    Hunting             UMETA(DisplayName = "Hunting"),
-    Feeding             UMETA(DisplayName = "Feeding"),
-    Resting             UMETA(DisplayName = "Resting"),
-    Curious             UMETA(DisplayName = "Curious"),
-    Territorial         UMETA(DisplayName = "Territorial"),
-    Domesticated        UMETA(DisplayName = "Domesticated")
+    Flat,
+    Uphill,
+    Downhill,
+    Rocky,
+    Muddy,
+    Vegetation,
+    Water,
+    MAX UMETA(Hidden)
 };
 
 USTRUCT(BlueprintType)
-struct FCreaturePersonality
+struct FAnimationStateData
 {
     GENERATED_BODY()
 
-    // Physical Variations (affect animation subtly)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.8", ClampMax = "1.2"))
-    float MovementSpeedMultiplier = 1.0f;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.9", ClampMax = "1.1"))
-    float PostureVariation = 1.0f;  // Affects spine curve, head position
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.8", ClampMax = "1.2"))
-    float StepLengthVariation = 1.0f;
-    
-    // Behavioral Tendencies
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float Nervousness = 0.5f;  // How easily startled
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float Aggression = 0.5f;   // Tendency toward aggressive postures
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float Curiosity = 0.5f;    // Head movements, investigation behaviors
-    
-    // Domestication Progress
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float DomesticationLevel = 0.0f;  // 0 = wild, 1 = fully domesticated
-    
-    FCreaturePersonality()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    ECharacterAnimationState CurrentState = ECharacterAnimationState::Idle;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float MovementSpeed = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float FearLevel = 0.0f; // 0.0 = calm, 1.0 = terrified
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float CautionLevel = 0.5f; // Base caution in prehistoric world
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    ETerrainType CurrentTerrain = ETerrainType::Flat;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FVector MovementDirection = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsHidden = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsObservingDinosaur = false;
+
+    FAnimationStateData()
     {
-        MovementSpeedMultiplier = FMath::RandRange(0.9f, 1.1f);
-        PostureVariation = FMath::RandRange(0.95f, 1.05f);
-        StepLengthVariation = FMath::RandRange(0.9f, 1.1f);
-        Nervousness = FMath::RandRange(0.3f, 0.8f);
-        Aggression = FMath::RandRange(0.2f, 0.7f);
-        Curiosity = FMath::RandRange(0.3f, 0.8f);
+        CurrentState = ECharacterAnimationState::Idle;
+        MovementSpeed = 0.0f;
+        FearLevel = 0.0f;
+        CautionLevel = 0.5f;
+        CurrentTerrain = ETerrainType::Flat;
+        MovementDirection = FVector::ZeroVector;
+        bIsHidden = false;
+        bIsObservingDinosaur = false;
     }
 };
 
@@ -104,35 +100,49 @@ public:
     UAnimationSystemCore();
 
     // Motion Matching Database Management
-    UFUNCTION(BlueprintCallable, Category = "Animation System")
-    class UPoseSearchDatabase* GetMotionMatchingDatabase(ECreatureArchetype Archetype, EEmotionalState State);
-    
-    // Individual Variation System
-    UFUNCTION(BlueprintCallable, Category = "Animation System")
-    FCreaturePersonality GenerateUniquePersonality(ECreatureArchetype Archetype);
-    
-    // Animation State Queries
-    UFUNCTION(BlueprintCallable, Category = "Animation System")
-    bool ShouldUseStealthMovement(const AActor* Character, const AActor* NearbyThreat);
-    
-    UFUNCTION(BlueprintCallable, Category = "Animation System")
-    float CalculateFearIntensity(const AActor* Character, TArray<AActor*> NearbyThreats);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    TObjectPtr<UPoseSearchDatabase> LocomotionDatabase;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    TObjectPtr<UPoseSearchDatabase> CautiousMovementDatabase;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    TObjectPtr<UPoseSearchDatabase> PanicMovementDatabase;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    TObjectPtr<UPoseSearchDatabase> InteractionDatabase;
+
+    // Animation State Management
+    UPROPERTY(BlueprintReadWrite, Category = "Animation State")
+    FAnimationStateData CurrentAnimationState;
+
+    // Core Animation Functions
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void UpdateAnimationState(const FAnimationStateData& NewState);
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    UPoseSearchDatabase* GetActiveDatabase() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    float CalculateBlendTime(ECharacterAnimationState FromState, ECharacterAnimationState ToState) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void SetFearLevel(float NewFearLevel);
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void SetTerrainType(ETerrainType NewTerrain);
 
 protected:
-    // Motion Matching Databases per Archetype and State
-    UPROPERTY(EditDefaultsOnly, Category = "Motion Matching")
-    TMap<ECreatureArchetype, TObjectPtr<UPoseSearchDatabase>> BaseLocomotionDatabases;
-    
-    UPROPERTY(EditDefaultsOnly, Category = "Motion Matching")
-    TMap<ECreatureArchetype, TObjectPtr<UPoseSearchDatabase>> CombatDatabases;
-    
-    UPROPERTY(EditDefaultsOnly, Category = "Motion Matching")
-    TMap<ECreatureArchetype, TObjectPtr<UPoseSearchDatabase>> FeedingDatabases;
-    
-    UPROPERTY(EditDefaultsOnly, Category = "Motion Matching")
-    TMap<ECreatureArchetype, TObjectPtr<UPoseSearchDatabase>> RestingDatabases;
+    // Internal state management
+    UPROPERTY()
+    float StateTransitionTimer = 0.0f;
+
+    UPROPERTY()
+    ECharacterAnimationState PreviousState = ECharacterAnimationState::Idle;
 
 private:
-    // Personality variation seeds for consistent individual differences
-    TMap<FString, FCreaturePersonality> PersonalityCache;
+    // Animation blending parameters
+    static constexpr float FAST_BLEND_TIME = 0.2f;
+    static constexpr float NORMAL_BLEND_TIME = 0.5f;
+    static constexpr float SLOW_BLEND_TIME = 1.0f;
 };
