@@ -1,113 +1,120 @@
 {
-  "Blackboard": {
+    "Type": "Blackboard",
     "Name": "BB_DinosaurCombat",
-    "Description": "Blackboard for Dinosaur Combat AI System",
+    "Description": "Blackboard for dinosaur combat AI containing all necessary keys for tactical behavior",
     "Keys": [
-      {
-        "EntryName": "PlayerActor",
-        "KeyType": "Object",
-        "BaseClass": "Actor",
-        "EntryDescription": "Reference to the player character"
-      },
-      {
-        "EntryName": "LastKnownPlayerLocation",
-        "KeyType": "Vector",
-        "EntryDescription": "Last known position of the player"
-      },
-      {
-        "EntryName": "CombatState",
-        "KeyType": "Enum",
-        "EnumType": "EDinosaurCombatState",
-        "EntryDescription": "Current combat state of the dinosaur"
-      },
-      {
-        "EntryName": "AttackTarget",
-        "KeyType": "Object",
-        "BaseClass": "Actor",
-        "EntryDescription": "Current target for attacks"
-      },
-      {
-        "EntryName": "PatrolPoint",
-        "KeyType": "Vector",
-        "EntryDescription": "Current patrol destination"
-      },
-      {
-        "EntryName": "ThreatLevel",
-        "KeyType": "Float",
-        "EntryDescription": "Current threat assessment level (0.0 to 1.0)"
-      },
-      {
-        "EntryName": "HealthPercentage",
-        "KeyType": "Float",
-        "EntryDescription": "Current health as percentage (0.0 to 1.0)"
-      },
-      {
-        "EntryName": "RetreatThreshold",
-        "KeyType": "Float",
-        "EntryDescription": "Health threshold for retreat behavior"
-      },
-      {
-        "EntryName": "RetreatLocation",
-        "KeyType": "Vector",
-        "EntryDescription": "Safe location for retreat"
-      },
-      {
-        "EntryName": "StalkingPosition",
-        "KeyType": "Vector",
-        "EntryDescription": "Position for stalking behavior"
-      },
-      {
-        "EntryName": "AttackCooldown",
-        "KeyType": "Float",
-        "EntryDescription": "Time remaining until next attack is possible"
-      },
-      {
-        "EntryName": "PackMembers",
-        "KeyType": "Object",
-        "BaseClass": "Actor",
-        "EntryDescription": "Other pack members for coordination"
-      },
-      {
-        "EntryName": "TerritoryCenter",
-        "KeyType": "Vector",
-        "EntryDescription": "Center of this dinosaur's territory"
-      },
-      {
-        "EntryName": "TerritoryRadius",
-        "KeyType": "Float",
-        "EntryDescription": "Radius of territorial area"
-      },
-      {
-        "EntryName": "AlertLevel",
-        "KeyType": "Enum",
-        "EnumType": "EAlertLevel",
-        "EntryDescription": "Current alertness level"
-      },
-      {
-        "EntryName": "LastAttackTime",
-        "KeyType": "Float",
-        "EntryDescription": "Game time of last attack"
-      },
-      {
-        "EntryName": "PreferredAttackRange",
-        "KeyType": "Float",
-        "EntryDescription": "Optimal distance for attacks"
-      },
-      {
-        "EntryName": "FlankingPosition",
-        "KeyType": "Vector",
-        "EntryDescription": "Position for flanking maneuvers"
-      },
-      {
-        "EntryName": "AmbushPosition",
-        "KeyType": "Vector",
-        "EntryDescription": "Position for ambush attacks"
-      },
-      {
-        "EntryName": "EscapeRoute",
-        "KeyType": "Vector",
-        "EntryDescription": "Emergency escape direction"
-      }
+        {
+            "EntryName": "SelfActor",
+            "EntryDescription": "Reference to the AI pawn itself",
+            "KeyType": "Object",
+            "BaseClass": "Actor",
+            "InstanceSynced": false
+        },
+        {
+            "EntryName": "TargetActor",
+            "EntryDescription": "Current combat target (usually the player)",
+            "KeyType": "Object",
+            "BaseClass": "Actor",
+            "InstanceSynced": false
+        },
+        {
+            "EntryName": "TargetLocation",
+            "EntryDescription": "Last known location of the target",
+            "KeyType": "Vector",
+            "InstanceSynced": false
+        },
+        {
+            "EntryName": "OptimalPosition",
+            "EntryDescription": "Calculated optimal attack position from EQS",
+            "KeyType": "Vector",
+            "InstanceSynced": false
+        },
+        {
+            "EntryName": "FleeLocation",
+            "EntryDescription": "Safe location to flee to when threatened",
+            "KeyType": "Vector",
+            "InstanceSynced": false
+        },
+        {
+            "EntryName": "PatrolLocation",
+            "EntryDescription": "Random patrol point for idle behavior",
+            "KeyType": "Vector",
+            "InstanceSynced": false
+        },
+        {
+            "EntryName": "CombatState",
+            "EntryDescription": "Current combat state: 0=Idle, 1=Hunting, 2=Attacking, 3=Fleeing, 4=Patrolling",
+            "KeyType": "Enum",
+            "EnumType": "ECombatState",
+            "InstanceSynced": false
+        },
+        {
+            "EntryName": "ThreatLevel",
+            "EntryDescription": "Current threat assessment level (0.0 to 1.0)",
+            "KeyType": "Float",
+            "InstanceSynced": false
+        },
+        {
+            "EntryName": "AggressionLevel",
+            "EntryDescription": "Base aggression level of this dinosaur (0.0 to 1.0)",
+            "KeyType": "Float",
+            "InstanceSynced": false
+        },
+        {
+            "EntryName": "HealthPercentage",
+            "EntryDescription": "Current health as percentage (0.0 to 1.0)",
+            "KeyType": "Float",
+            "InstanceSynced": false
+        },
+        {
+            "EntryName": "ShouldFlee",
+            "EntryDescription": "Whether the dinosaur should flee from combat",
+            "KeyType": "Bool",
+            "InstanceSynced": false
+        },
+        {
+            "EntryName": "CanAttack",
+            "EntryDescription": "Whether the dinosaur can currently attack",
+            "KeyType": "Bool",
+            "InstanceSynced": false
+        },
+        {
+            "EntryName": "IsInCombat",
+            "EntryDescription": "Whether the dinosaur is currently in combat",
+            "KeyType": "Bool",
+            "InstanceSynced": false
+        },
+        {
+            "EntryName": "AttackRange",
+            "EntryDescription": "Maximum range for attacks",
+            "KeyType": "Float",
+            "InstanceSynced": false
+        },
+        {
+            "EntryName": "DetectionRange",
+            "EntryDescription": "Maximum range for detecting threats",
+            "KeyType": "Float",
+            "InstanceSynced": false
+        },
+        {
+            "EntryName": "LastAttackTime",
+            "EntryDescription": "Timestamp of last attack for cooldown calculation",
+            "KeyType": "Float",
+            "InstanceSynced": false
+        },
+        {
+            "EntryName": "PackLeader",
+            "EntryDescription": "Reference to pack leader for group behavior",
+            "KeyType": "Object",
+            "BaseClass": "Actor",
+            "InstanceSynced": false
+        },
+        {
+            "EntryName": "PackMembers",
+            "EntryDescription": "Array of pack members for coordination",
+            "KeyType": "Object",
+            "BaseClass": "Actor",
+            "InstanceSynced": false
+        }
     ]
-  }
 }
