@@ -1,38 +1,26 @@
+// CrowdManager.h
+// Sistema de gestão de multidões conscientes que respondem ao estado espiritual do jogador
+
 #pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Components/InstancedStaticMeshComponent.h"
-#include "Engine/DataTable.h"
+#include "Components/ActorComponent.h"
+#include "../Core/ConsciousnessSystem.h"
 #include "CrowdManager.generated.h"
 
-USTRUCT(BlueprintType)
-struct FCrowdPersonData : public FTableRowBase
+UENUM(BlueprintType)
+enum class ECrowdBehaviorState : uint8
 {
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    UStaticMesh* Mesh;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float WalkSpeed;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float ConsciousnessLevel;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TArray<FString> Behaviors;
-
-    FCrowdPersonData()
-    {
-        Mesh = nullptr;
-        WalkSpeed = 150.0f;
-        ConsciousnessLevel = 0.5f;
-    }
+    Peaceful,      // Estado pacífico - multidão calma
+    Agitated,      // Estado agitado - multidão inquieta
+    Hostile,       // Estado hostil - multidão agressiva
+    Transcendent,  // Estado transcendente - multidão em harmonia
+    Fearful        // Estado de medo - multidão em pânico
 };
 
 USTRUCT(BlueprintType)
-struct FCrowdAgent
+struct FCrowdUnit
 {
     GENERATED_BODY()
 
@@ -43,37 +31,25 @@ struct FCrowdAgent
     FVector Velocity;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FVector Destination;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float Speed;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
     float ConsciousnessLevel;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 BehaviorState;
+    ECrowdBehaviorState BehaviorState;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float StressLevel;
+    float InfluenceRadius;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bIsInCombat;
-
-    FCrowdAgent()
+    FCrowdUnit()
     {
         Position = FVector::ZeroVector;
         Velocity = FVector::ZeroVector;
-        Destination = FVector::ZeroVector;
-        Speed = 150.0f;
         ConsciousnessLevel = 0.5f;
-        BehaviorState = 0;
-        StressLevel = 0.0f;
-        bIsInCombat = false;
+        BehaviorState = ECrowdBehaviorState::Peaceful;
+        InfluenceRadius = 200.0f;
     }
 };
 
-UCLASS()
+UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API ACrowdManager : public AActor
 {
     GENERATED_BODY()
@@ -87,7 +63,7 @@ protected:
 public:
     virtual void Tick(float DeltaTime) override;
 
-    // Crowd Configuration
+    // Configurações da multidão
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Settings")
     int32 MaxCrowdSize;
 
@@ -95,79 +71,67 @@ public:
     float SpawnRadius;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Settings")
-    float DespawnRadius;
+    float MovementSpeed;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Settings")
-    UDataTable* CrowdDataTable;
+    float ConsciousnessInfluenceRange;
 
-    // Behavior Parameters
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    float SeparationRadius;
+    // Array de unidades da multidão
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Crowd State")
+    TArray<FCrowdUnit> CrowdUnits;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    float AlignmentRadius;
+    // Estado atual da multidão
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Crowd State")
+    ECrowdBehaviorState CurrentCrowdState;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    float CohesionRadius;
+    // Referência ao sistema de consciência
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Systems")
+    class UConsciousnessComponent* ConsciousnessSystem;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    float AvoidanceRadius;
-
-    // Consciousness Integration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Consciousness")
-    float ConsciousnessInfluenceRadius;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Consciousness")
-    float StressDecayRate;
-
-    // Components
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UInstancedStaticMeshComponent* CrowdMeshComponent;
-
-    // Crowd Data
-    UPROPERTY(BlueprintReadOnly, Category = "Crowd Data")
-    TArray<FCrowdAgent> CrowdAgents;
-
-    // Public Functions
+    // Funções públicas
     UFUNCTION(BlueprintCallable, Category = "Crowd Management")
-    void SpawnCrowdAgent(FVector Location);
+    void SpawnCrowdUnits(int32 Count, FVector CenterLocation);
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Management")
-    void RemoveCrowdAgent(int32 AgentIndex);
+    void UpdateCrowdBehavior(float PlayerConsciousnessLevel);
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Management")
-    void SetCrowdDestination(FVector NewDestination);
+    void SetCrowdState(ECrowdBehaviorState NewState);
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Management")
-    void TriggerCombatResponse(FVector CombatLocation, float Radius);
+    void ClearCrowd();
 
-    UFUNCTION(BlueprintCallable, Category = "Consciousness")
-    void UpdateConsciousnessInfluence(FVector Location, float Influence, float Radius);
+    // Eventos Blueprint
+    UFUNCTION(BlueprintImplementableEvent, Category = "Crowd Events")
+    void OnCrowdStateChanged(ECrowdBehaviorState NewState);
+
+    UFUNCTION(BlueprintImplementableEvent, Category = "Crowd Events")
+    void OnCrowdUnitSpawned(const FCrowdUnit& NewUnit);
 
 private:
-    // Internal Functions
-    void UpdateCrowdBehavior(float DeltaTime);
-    void UpdateCrowdPositions(float DeltaTime);
-    void UpdateInstancedMeshes();
-    
-    FVector CalculateSeparation(const FCrowdAgent& Agent, int32 AgentIndex);
-    FVector CalculateAlignment(const FCrowdAgent& Agent, int32 AgentIndex);
-    FVector CalculateCohesion(const FCrowdAgent& Agent, int32 AgentIndex);
-    FVector CalculateAvoidance(const FCrowdAgent& Agent);
-    FVector CalculateSeek(const FCrowdAgent& Agent, FVector Target);
-    
-    void HandleCombatBehavior(FCrowdAgent& Agent, float DeltaTime);
-    void HandleNormalBehavior(FCrowdAgent& Agent, float DeltaTime);
-    
-    // Spatial partitioning for performance
-    TMap<FIntPoint, TArray<int32>> SpatialGrid;
-    float GridCellSize;
-    
-    void UpdateSpatialGrid();
-    TArray<int32> GetNearbyAgents(const FVector& Position, float Radius);
-    
-    // Performance tracking
+    // Funções internas
+    void UpdateCrowdMovement(float DeltaTime);
+    void ApplyConsciousnessInfluence();
+    void CalculateFlocking(FCrowdUnit& Unit, const TArray<FCrowdUnit>& NearbyUnits);
+    FVector CalculateSeparation(const FCrowdUnit& Unit, const TArray<FCrowdUnit>& NearbyUnits);
+    FVector CalculateAlignment(const FCrowdUnit& Unit, const TArray<FCrowdUnit>& NearbyUnits);
+    FVector CalculateCohesion(const FCrowdUnit& Unit, const TArray<FCrowdUnit>& NearbyUnits);
+    TArray<FCrowdUnit> GetNearbyUnits(const FCrowdUnit& Unit, float Radius);
+
+    // Configurações de flocking
+    UPROPERTY(EditAnywhere, Category = "Flocking")
+    float SeparationWeight;
+
+    UPROPERTY(EditAnywhere, Category = "Flocking")
+    float AlignmentWeight;
+
+    UPROPERTY(EditAnywhere, Category = "Flocking")
+    float CohesionWeight;
+
+    UPROPERTY(EditAnywhere, Category = "Flocking")
+    float FlockingRadius;
+
+    // Timer para otimização
     float LastUpdateTime;
-    int32 UpdateBatchSize;
-    int32 CurrentUpdateIndex;
+    float UpdateInterval;
 };
