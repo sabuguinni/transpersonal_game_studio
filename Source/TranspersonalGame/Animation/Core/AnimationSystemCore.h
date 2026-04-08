@@ -3,92 +3,77 @@
 #include "CoreMinimal.h"
 #include "Engine/Engine.h"
 #include "Animation/AnimInstance.h"
-#include "PoseSearch/PoseSearchDatabase.h"
-#include "PoseSearch/PoseSearchSchema.h"
-#include "Components/SkeletalMeshComponent.h"
+#include "Animation/PoseSearch/PoseSearchDatabase.h"
+#include "Animation/PoseSearch/PoseSearchSchema.h"
+#include "IKRig.h"
 #include "AnimationSystemCore.generated.h"
 
 /**
- * Core Animation System for Transpersonal Game
+ * Core Animation System for Transpersonal Game Studio
  * Handles Motion Matching, IK, and character-specific animation logic
  * 
  * Design Philosophy:
  * - Every movement tells a story about the character
- * - Fear and vulnerability are communicated through body language
- * - Responsive, weight-based animations using Motion Matching
- * - Terrain adaptation through IK systems
+ * - Weight and intention in every gesture
+ * - Seamless adaptation to procedural terrain
  */
 
 UENUM(BlueprintType)
-enum class ECharacterAnimationState : uint8
+enum class ECharacterMovementState : uint8
 {
     Idle,
-    Cautious,          // Slow, careful movement
-    Sneaking,          // Crouched, silent movement
-    Walking,           // Normal walking pace
-    Jogging,           // Faster movement, still controlled
-    Running,           // Panic running
-    Climbing,          // Terrain navigation
-    Hiding,            // Stationary fear state
-    Observing,         // Watching dinosaurs from distance
-    Gathering,         // Resource collection animations
-    Crafting,          // Tool/weapon creation
-    MAX UMETA(Hidden)
+    Walking,
+    Running,
+    Crouching,
+    Climbing,
+    Swimming,
+    Falling,
+    Landing,
+    Injured,
+    Fearful,
+    Cautious,
+    Confident
 };
 
 UENUM(BlueprintType)
-enum class ETerrainType : uint8
+enum class ETerrainAdaptation : uint8
 {
     Flat,
     Uphill,
     Downhill,
     Rocky,
     Muddy,
-    Vegetation,
     Water,
-    MAX UMETA(Hidden)
+    Vegetation
 };
 
 USTRUCT(BlueprintType)
-struct FAnimationStateData
+struct FCharacterAnimationProfile
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    ECharacterAnimationState CurrentState = ECharacterAnimationState::Idle;
+    // Core personality traits affecting movement
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Confidence = 0.5f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float MovementSpeed = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Nervousness = 0.3f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float FearLevel = 0.0f; // 0.0 = calm, 1.0 = terrified
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Fatigue = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float CautionLevel = 0.5f; // Base caution in prehistoric world
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float InjuryLevel = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    ETerrainType CurrentTerrain = ETerrainType::Flat;
+    // Movement characteristics
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.5", ClampMax = "2.0"))
+    float BaseMovementSpeed = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FVector MovementDirection = FVector::ZeroVector;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.1", ClampMax = "2.0"))
+    float StepVariation = 0.1f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bIsHidden = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bIsObservingDinosaur = false;
-
-    FAnimationStateData()
-    {
-        CurrentState = ECharacterAnimationState::Idle;
-        MovementSpeed = 0.0f;
-        FearLevel = 0.0f;
-        CautionLevel = 0.5f;
-        CurrentTerrain = ETerrainType::Flat;
-        MovementDirection = FVector::ZeroVector;
-        bIsHidden = false;
-        bIsObservingDinosaur = false;
-    }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float PosturalTension = 0.2f;
 };
 
 UCLASS(BlueprintType, Blueprintable)
@@ -100,49 +85,56 @@ public:
     UAnimationSystemCore();
 
     // Motion Matching Database Management
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    TObjectPtr<UPoseSearchDatabase> LocomotionDatabase;
+    UFUNCTION(BlueprintCallable, Category = "Animation System")
+    void InitializeMotionMatchingDatabases();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    TObjectPtr<UPoseSearchDatabase> CautiousMovementDatabase;
+    UFUNCTION(BlueprintCallable, Category = "Animation System")
+    UPoseSearchDatabase* GetDatabaseForState(ECharacterMovementState State, ETerrainAdaptation Terrain);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    TObjectPtr<UPoseSearchDatabase> PanicMovementDatabase;
+    // Character Animation Profile Management
+    UFUNCTION(BlueprintCallable, Category = "Animation System")
+    void SetCharacterAnimationProfile(const FCharacterAnimationProfile& Profile);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    TObjectPtr<UPoseSearchDatabase> InteractionDatabase;
+    UFUNCTION(BlueprintCallable, Category = "Animation System")
+    FCharacterAnimationProfile GetCharacterAnimationProfile() const { return CurrentProfile; }
 
-    // Animation State Management
-    UPROPERTY(BlueprintReadWrite, Category = "Animation State")
-    FAnimationStateData CurrentAnimationState;
+    // IK System Management
+    UFUNCTION(BlueprintCallable, Category = "Animation System")
+    void UpdateTerrainAdaptation(const FVector& FootLocation, float TerrainHeight);
 
-    // Core Animation Functions
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void UpdateAnimationState(const FAnimationStateData& NewState);
-
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    UPoseSearchDatabase* GetActiveDatabase() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    float CalculateBlendTime(ECharacterAnimationState FromState, ECharacterAnimationState ToState) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void SetFearLevel(float NewFearLevel);
-
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void SetTerrainType(ETerrainType NewTerrain);
+    UFUNCTION(BlueprintCallable, Category = "Animation System")
+    void SetIKTargets(const TArray<FVector>& FootTargets);
 
 protected:
-    // Internal state management
-    UPROPERTY()
-    float StateTransitionTimer = 0.0f;
+    // Motion Matching Databases
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Motion Matching")
+    TMap<ECharacterMovementState, UPoseSearchDatabase*> MovementDatabases;
 
-    UPROPERTY()
-    ECharacterAnimationState PreviousState = ECharacterAnimationState::Idle;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Motion Matching")
+    TMap<ETerrainAdaptation, UPoseSearchDatabase*> TerrainDatabases;
+
+    // IK Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "IK System")
+    UIKRigDefinition* PlayerIKRig;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "IK System")
+    float MaxIKReach = 50.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "IK System")
+    float IKBlendSpeed = 5.0f;
+
+    // Character Profile
+    UPROPERTY(BlueprintReadOnly, Category = "Character")
+    FCharacterAnimationProfile CurrentProfile;
+
+    // Terrain Analysis
+    UPROPERTY(BlueprintReadOnly, Category = "Terrain")
+    TArray<FVector> FootIKTargets;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Terrain")
+    ETerrainAdaptation CurrentTerrainType;
 
 private:
-    // Animation blending parameters
-    static constexpr float FAST_BLEND_TIME = 0.2f;
-    static constexpr float NORMAL_BLEND_TIME = 0.5f;
-    static constexpr float SLOW_BLEND_TIME = 1.0f;
+    void AnalyzeTerrainType(const FVector& Location);
+    float CalculateMovementWeight(ECharacterMovementState State) const;
 };
