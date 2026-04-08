@@ -14,21 +14,11 @@ public class TranspersonalGameTarget : TargetRules
         // Performance optimizations
         bUseUnityBuild = true;
         bUsePCHFiles = true;
-        bUseSharedPCHs = true;
-        
-        // Enable modern C++ features
-        CppStandard = CppStandardVersion.Cpp20;
-        
-        // Disable legacy features
-        bLegacyPublicIncludePaths = false;
-        
-        // Enable faster iteration
-        bWithLiveCoding = true;
         
         // Platform-specific settings
         if (Target.Platform == UnrealTargetPlatform.Win64)
         {
-            WindowsPlatform.bStrictConformanceMode = true;
+            WindowsPlatform.PCHMemoryAllocationFactor = 2000;
         }
 
         // Build configuration specific settings
@@ -36,29 +26,33 @@ public class TranspersonalGameTarget : TargetRules
         {
             bUseLoggingInShipping = false;
             bUseChecksInShipping = false;
-            bCompileWithStatsWithoutEngine = false;
-            bCompileWithPluginSupport = true;
+            bCompileICU = false;
+            bBuildDeveloperTools = false;
+            bBuildWithEditorOnlyData = false;
+            
+            // Maximum optimization for shipping
+            bAllowLTCG = true;
+            bPGOOptimize = true;
         }
-        else
+        else if (Target.Configuration == UnrealTargetConfiguration.Test)
         {
             bUseLoggingInShipping = true;
             bUseChecksInShipping = true;
-            bCompileWithStatsWithoutEngine = true;
+            bBuildDeveloperTools = true;
+        }
+        
+        // Enable stats and profiling in non-shipping builds
+        if (Target.Configuration != UnrealTargetConfiguration.Shipping)
+        {
+            bUseStatsWithoutEngine = true;
+            bCompileRecast = true;
         }
 
-        // Enable Mass Entity for crowd simulation
-        bCompileAgainstEngine = true;
-        bBuildDeveloperTools = Target.Configuration != UnrealTargetConfiguration.Shipping;
+        // Memory and performance settings
+        bUseMallocProfiler = (Target.Configuration == UnrealTargetConfiguration.Debug);
+        bUseSharedPCHs = true;
         
-        // Memory and performance
-        bOverrideBuildEnvironment = true;
-        
-        // Enable chaos physics
-        bUseChaos = true;
-        bCompileChaos = true;
-        bUseChaosChecked = Target.Configuration != UnrealTargetConfiguration.Shipping;
-        
-        // Audio settings for MetaSounds
-        bCompileWithPluginSupport = true;
+        // Enable crash reporting
+        bIncludeCrashReporter = true;
     }
 }
