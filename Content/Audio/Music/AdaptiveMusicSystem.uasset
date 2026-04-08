@@ -1,0 +1,131 @@
+{
+  "MetaSoundSource": {
+    "Name": "AdaptiveMusicSystem",
+    "Description": "Sistema de música adaptativa que responde ao estado emocional do jogo",
+    "Inputs": [
+      {
+        "Name": "TensionLevel",
+        "Type": "Float",
+        "DefaultValue": 0.0,
+        "Description": "Nível de tensão de 0.0 (calmo) a 1.0 (perigo máximo)"
+      },
+      {
+        "Name": "AudioState",
+        "Type": "Int32",
+        "DefaultValue": 0,
+        "Description": "Estado atual do áudio (Exploration=0, Tension=1, Danger=2, Combat=3, Safety=4)"
+      },
+      {
+        "Name": "Environment",
+        "Type": "Int32",
+        "DefaultValue": 0,
+        "Description": "Tipo de ambiente (Forest=0, River=1, Cave=2, Clearing=3, DinosaurTerritory=4, PlayerBase=5)"
+      },
+      {
+        "Name": "TimeOfDay",
+        "Type": "Float",
+        "DefaultValue": 0.5,
+        "Description": "Hora do dia normalizada (0.0=meia-noite, 0.5=meio-dia, 1.0=meia-noite)"
+      }
+    ],
+    "Nodes": [
+      {
+        "Type": "WavePlayer",
+        "Name": "BaseAmbientLayer",
+        "WaveAsset": "/Content/Audio/Music/Layers/Ambient_Forest_Base.wav",
+        "Loop": true,
+        "Volume": 0.6
+      },
+      {
+        "Type": "WavePlayer", 
+        "Name": "TensionLayer",
+        "WaveAsset": "/Content/Audio/Music/Layers/Tension_Strings.wav",
+        "Loop": true,
+        "Volume": 0.0
+      },
+      {
+        "Type": "WavePlayer",
+        "Name": "DangerLayer",
+        "WaveAsset": "/Content/Audio/Music/Layers/Danger_Percussion.wav",
+        "Loop": true,
+        "Volume": 0.0
+      },
+      {
+        "Type": "WavePlayer",
+        "Name": "CombatLayer",
+        "WaveAsset": "/Content/Audio/Music/Layers/Combat_Brass.wav",
+        "Loop": true,
+        "Volume": 0.0
+      },
+      {
+        "Type": "MapRange",
+        "Name": "TensionToVolume",
+        "InputRange": [0.0, 1.0],
+        "OutputRange": [0.0, 0.8],
+        "Clamped": true
+      },
+      {
+        "Type": "LowPassFilter",
+        "Name": "AtmosphericFilter",
+        "CutoffFrequency": 8000.0,
+        "Q": 0.7
+      },
+      {
+        "Type": "Reverb",
+        "Name": "EnvironmentalReverb",
+        "WetLevel": 0.2,
+        "RoomSize": 0.5
+      },
+      {
+        "Type": "Compressor",
+        "Name": "MasterCompressor",
+        "Threshold": -12.0,
+        "Ratio": 3.0,
+        "AttackTime": 0.01,
+        "ReleaseTime": 0.1
+      }
+    ],
+    "Connections": [
+      {
+        "From": "TensionLevel",
+        "To": "TensionToVolume.In"
+      },
+      {
+        "From": "TensionToVolume.Out",
+        "To": "TensionLayer.Volume"
+      },
+      {
+        "From": "BaseAmbientLayer.Out",
+        "To": "AtmosphericFilter.In"
+      },
+      {
+        "From": "TensionLayer.Out",
+        "To": "AtmosphericFilter.In"
+      },
+      {
+        "From": "DangerLayer.Out",
+        "To": "AtmosphericFilter.In"
+      },
+      {
+        "From": "CombatLayer.Out",
+        "To": "AtmosphericFilter.In"
+      },
+      {
+        "From": "AtmosphericFilter.Out",
+        "To": "EnvironmentalReverb.In"
+      },
+      {
+        "From": "EnvironmentalReverb.Out",
+        "To": "MasterCompressor.In"
+      },
+      {
+        "From": "MasterCompressor.Out",
+        "To": "Output.Left"
+      },
+      {
+        "From": "MasterCompressor.Out",
+        "To": "Output.Right"
+      }
+    ]
+  }
+}
