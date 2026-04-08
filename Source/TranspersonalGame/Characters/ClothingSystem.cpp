@@ -1,1 +1,403 @@
-#include \"ClothingSystem.h\"\n#include \"GameFramework/Character.h\"\n#include \"Components/SkeletalMeshComponent.h\"\n#include \"Materials/MaterialInstanceDynamic.h\"\n#include \"Engine/Engine.h\"\n#include \"UObject/ConstructorHelpers.h\"\n#include \"Logging/LogMacros.h\"\n\nDEFINE_LOG_CATEGORY_STATIC(LogClothingSystem, Log, All);\n\nUClothingSystemComponent::UClothingSystemComponent()\n{\n    PrimaryComponentTick.bCanEverTick = false;\n    bWantsInitializeComponent = true;\n    \n    OwnerCharacter = nullptr;\n}\n\nvoid UClothingSystemComponent::BeginPlay()\n{\n    Super::BeginPlay();\n    \n    OwnerCharacter = Cast<ACharacter>(GetOwner());\n    if (!OwnerCharacter)\n    {\n        UE_LOG(LogClothingSystem, Warning, TEXT(\"ClothingSystemComponent: Owner is not a Character!\"));\n        return;\n    }\n    \n    // Initialize with default outfit if available\n    if (AvailableClothingSets.Num() > 0 && AvailableClothingSets[0])\n    {\n        EquipClothingSet(AvailableClothingSets[0]);\n    }\n    \n    UE_LOG(LogClothingSystem, Log, TEXT(\"ClothingSystemComponent initialized for character: %s\"), \n           *OwnerCharacter->GetName());\n}\n\nbool UClothingSystemComponent::EquipClothingPiece(const FClothingPiece& ClothingPiece)\n{\n    if (!OwnerCharacter)\n    {\n        UE_LOG(LogClothingSystem, Warning, TEXT(\"Cannot equip clothing: No valid owner character\"));\n        return false;\n    }\n    \n    // Store the clothing piece\n    CurrentOutfit.Add(ClothingPiece.Slot, ClothingPiece);\n    \n    // Update visual representation\n    UpdateMeshComponent(ClothingPiece.Slot, ClothingPiece);\n    UpdateMaterialParameters(ClothingPiece.Slot, ClothingPiece);\n    \n    UE_LOG(LogClothingSystem, Log, TEXT(\"Equipped clothing piece: %s in slot: %s\"), \n           *ClothingPiece.ClothingName, \n           *UEnum::GetValueAsString(ClothingPiece.Slot));\n    \n    return true;\n}\n\nbool UClothingSystemComponent::UnequipClothingSlot(EClothingSlot Slot)\n{\n    if (!CurrentOutfit.Contains(Slot))\n    {\n        UE_LOG(LogClothingSystem, Warning, TEXT(\"Cannot unequip: No clothing in slot %s\"), \n               *UEnum::GetValueAsString(Slot));\n        return false;\n    }\n    \n    CurrentOutfit.Remove(Slot);\n    \n    // Update visual representation to remove the piece\n    FClothingPiece EmptyPiece;\n    UpdateMeshComponent(Slot, EmptyPiece);\n    \n    UE_LOG(LogClothingSystem, Log, TEXT(\"Unequipped clothing from slot: %s\"), \n           *UEnum::GetValueAsString(Slot));\n    \n    return true;\n}\n\nvoid UClothingSystemComponent::EquipClothingSet(const UClothingSet* ClothingSet)\n{\n    if (!ClothingSet)\n    {\n        UE_LOG(LogClothingSystem, Warning, TEXT(\"Cannot equip clothing set: Invalid clothing set\"));\n        return;\n    }\n    \n    // Clear current outfit\n    CurrentOutfit.Empty();\n    \n    // Equip all pieces from the set\n    for (const FClothingPiece& Piece : ClothingSet->ClothingPieces)\n    {\n        EquipClothingPiece(Piece);\n    }\n    \n    UE_LOG(LogClothingSystem, Log, TEXT(\"Equipped clothing set: %s\"), *ClothingSet->SetName);\n}\n\nFClothingPiece UClothingSystemComponent::GetClothingInSlot(EClothingSlot Slot) const\n{\n    if (const FClothingPiece* FoundPiece = CurrentOutfit.Find(Slot))\n    {\n        return *FoundPiece;\n    }\n    \n    return FClothingPiece(); // Return empty piece if not found\n}\n\nvoid UClothingSystemComponent::DamageClothing(EClothingSlot Slot, float DamageAmount)\n{\n    if (FClothingPiece* Piece = CurrentOutfit.Find(Slot))\n    {\n        Piece->DamageLevel = FMath::Clamp(Piece->DamageLevel + DamageAmount, 0.0f, 1.0f);\n        \n        // Update condition based on damage\n        if (Piece->DamageLevel > 0.8f)\n        {\n            Piece->Condition = EClothingCondition::Torn;\n        }\n        else if (Piece->DamageLevel > 0.6f)\n        {\n            Piece->Condition = EClothingCondition::Damaged;\n        }\n        else if (Piece->DamageLevel > 0.3f)\n        {\n            Piece->Condition = EClothingCondition::Worn;\n        }\n        \n        UpdateMaterialParameters(Slot, *Piece);\n        \n        UE_LOG(LogClothingSystem, Log, TEXT(\"Damaged clothing in slot %s, damage level: %.2f\"), \n               *UEnum::GetValueAsString(Slot), Piece->DamageLevel);\n    }\n}\n\nvoid UClothingSystemComponent::MakeClothingDirty(EClothingSlot Slot, float DirtAmount)\n{\n    if (FClothingPiece* Piece = CurrentOutfit.Find(Slot))\n    {\n        Piece->DirtLevel = FMath::Clamp(Piece->DirtLevel + DirtAmount, 0.0f, 1.0f);\n        UpdateMaterialParameters(Slot, *Piece);\n        \n        UE_LOG(LogClothingSystem, Log, TEXT(\"Added dirt to clothing in slot %s, dirt level: %.2f\"), \n               *UEnum::GetValueAsString(Slot), Piece->DirtLevel);\n    }\n}\n\nvoid UClothingSystemComponent::CleanClothing(EClothingSlot Slot, float CleanAmount)\n{\n    if (FClothingPiece* Piece = CurrentOutfit.Find(Slot))\n    {\n        Piece->DirtLevel = FMath::Clamp(Piece->DirtLevel - CleanAmount, 0.0f, 1.0f);\n        UpdateMaterialParameters(Slot, *Piece);\n        \n        UE_LOG(LogClothingSystem, Log, TEXT(\"Cleaned clothing in slot %s, dirt level: %.2f\"), \n               *UEnum::GetValueAsString(Slot), Piece->DirtLevel);\n    }\n}\n\nvoid UClothingSystemComponent::RepairClothing(EClothingSlot Slot, float RepairAmount)\n{\n    if (FClothingPiece* Piece = CurrentOutfit.Find(Slot))\n    {\n        Piece->DamageLevel = FMath::Clamp(Piece->DamageLevel - RepairAmount, 0.0f, 1.0f);\n        \n        // Update condition based on new damage level\n        if (Piece->DamageLevel < 0.1f)\n        {\n            Piece->Condition = EClothingCondition::Good;\n        }\n        else if (Piece->DamageLevel < 0.3f)\n        {\n            Piece->Condition = EClothingCondition::Worn;\n        }\n        else if (Piece->DamageLevel < 0.6f)\n        {\n            Piece->Condition = EClothingCondition::Damaged;\n        }\n        \n        UpdateMaterialParameters(Slot, *Piece);\n        \n        UE_LOG(LogClothingSystem, Log, TEXT(\"Repaired clothing in slot %s, damage level: %.2f\"), \n               *UEnum::GetValueAsString(Slot), Piece->DamageLevel);\n    }\n}\n\nfloat UClothingSystemComponent::GetTotalColdProtection() const\n{\n    float TotalProtection = 0.0f;\n    int32 PieceCount = 0;\n    \n    for (const auto& OutfitPair : CurrentOutfit)\n    {\n        TotalProtection += OutfitPair.Value.ColdProtection;\n        PieceCount++;\n    }\n    \n    return PieceCount > 0 ? TotalProtection / PieceCount : 0.0f;\n}\n\nfloat UClothingSystemComponent::GetTotalHeatProtection() const\n{\n    float TotalProtection = 0.0f;\n    int32 PieceCount = 0;\n    \n    for (const auto& OutfitPair : CurrentOutfit)\n    {\n        TotalProtection += OutfitPair.Value.HeatProtection;\n        PieceCount++;\n    }\n    \n    return PieceCount > 0 ? TotalProtection / PieceCount : 0.0f;\n}\n\nfloat UClothingSystemComponent::GetTotalWaterResistance() const\n{\n    float TotalResistance = 0.0f;\n    int32 PieceCount = 0;\n    \n    for (const auto& OutfitPair : CurrentOutfit)\n    {\n        TotalResistance += OutfitPair.Value.WaterResistance;\n        PieceCount++;\n    }\n    \n    return PieceCount > 0 ? TotalResistance / PieceCount : 0.0f;\n}\n\nfloat UClothingSystemComponent::GetTotalPhysicalProtection() const\n{\n    float TotalProtection = 0.0f;\n    int32 PieceCount = 0;\n    \n    for (const auto& OutfitPair : CurrentOutfit)\n    {\n        TotalProtection += OutfitPair.Value.PhysicalProtection;\n        PieceCount++;\n    }\n    \n    return PieceCount > 0 ? TotalProtection / PieceCount : 0.0f;\n}\n\nvoid UClothingSystemComponent::UpdateClothingVisuals()\n{\n    if (!OwnerCharacter)\n    {\n        return;\n    }\n    \n    for (const auto& OutfitPair : CurrentOutfit)\n    {\n        UpdateMeshComponent(OutfitPair.Key, OutfitPair.Value);\n        UpdateMaterialParameters(OutfitPair.Key, OutfitPair.Value);\n    }\n    \n    UE_LOG(LogClothingSystem, Log, TEXT(\"Updated clothing visuals for character: %s\"), \n           *OwnerCharacter->GetName());\n}\n\nvoid UClothingSystemComponent::ApplyWeatherEffects(float RainIntensity, float Temperature)\n{\n    if (!OwnerCharacter)\n    {\n        return;\n    }\n    \n    // Apply weather-based wear and dirt\n    for (auto& OutfitPair : CurrentOutfit)\n    {\n        FClothingPiece& Piece = OutfitPair.Value;\n        \n        // Rain makes clothes dirty and wet\n        if (RainIntensity > 0.1f)\n        {\n            float DirtIncrease = RainIntensity * 0.01f; // Small incremental dirt\n            Piece.DirtLevel = FMath::Clamp(Piece.DirtLevel + DirtIncrease, 0.0f, 1.0f);\n        }\n        \n        // Extreme temperatures cause wear\n        if (Temperature < 5.0f || Temperature > 35.0f)\n        {\n            float WearIncrease = 0.001f; // Very small wear from temperature\n            Piece.WearLevel = FMath::Clamp(Piece.WearLevel + WearIncrease, 0.0f, 1.0f);\n        }\n        \n        UpdateMaterialParameters(OutfitPair.Key, Piece);\n    }\n}\n\nvoid UClothingSystemComponent::UpdateMeshComponent(EClothingSlot Slot, const FClothingPiece& ClothingPiece)\n{\n    if (!OwnerCharacter)\n    {\n        return;\n    }\n    \n    USkeletalMeshComponent* MeshComp = OwnerCharacter->GetMesh();\n    if (!MeshComp)\n    {\n        return;\n    }\n    \n    // This would typically involve swapping skeletal mesh components or materials\n    // For now, we'll focus on material updates\n    UE_LOG(LogClothingSystem, VeryVerbose, TEXT(\"Updated mesh component for slot: %s\"), \n           *UEnum::GetValueAsString(Slot));\n}\n\nvoid UClothingSystemComponent::UpdateMaterialParameters(EClothingSlot Slot, const FClothingPiece& ClothingPiece)\n{\n    if (!OwnerCharacter)\n    {\n        return;\n    }\n    \n    USkeletalMeshComponent* MeshComp = OwnerCharacter->GetMesh();\n    if (!MeshComp)\n    {\n        return;\n    }\n    \n    // Find the appropriate material index for this clothing slot\n    int32 MaterialIndex = static_cast<int32>(Slot);\n    \n    if (MaterialIndex < MeshComp->GetNumMaterials())\n    {\n        UMaterialInstanceDynamic* DynMaterial = MeshComp->CreateAndSetMaterialInstanceDynamic(MaterialIndex);\n        if (DynMaterial)\n        {\n            // Update material parameters based on clothing piece properties\n            DynMaterial->SetVectorParameterValue(TEXT(\"PrimaryColor\"), ClothingPiece.PrimaryColor);\n            DynMaterial->SetVectorParameterValue(TEXT(\"SecondaryColor\"), ClothingPiece.SecondaryColor);\n            DynMaterial->SetScalarParameterValue(TEXT(\"DirtLevel\"), ClothingPiece.DirtLevel);\n            DynMaterial->SetScalarParameterValue(TEXT(\"WearLevel\"), ClothingPiece.WearLevel);\n            DynMaterial->SetScalarParameterValue(TEXT(\"DamageLevel\"), ClothingPiece.DamageLevel);\n            \n            UE_LOG(LogClothingSystem, VeryVerbose, \n                   TEXT(\"Updated material parameters for slot %s: Dirt=%.2f, Wear=%.2f, Damage=%.2f\"), \n                   *UEnum::GetValueAsString(Slot), \n                   ClothingPiece.DirtLevel, \n                   ClothingPiece.WearLevel, \n                   ClothingPiece.DamageLevel);\n        }\n    }\n}"
+// Copyright Transpersonal Game Studio - ClothingSystem.cpp
+// Modular Clothing System Implementation for Character Customization
+
+#include "ClothingSystem.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "GameFramework/Character.h"
+#include "Engine/World.h"
+#include "TimerManager.h"
+#include "Kismet/GameplayStatics.h"
+
+DEFINE_LOG_CATEGORY_STATIC(LogClothingSystem, Log, All);
+
+UClothingSystemComponent::UClothingSystemComponent()
+{
+    PrimaryComponentTick.bCanEverTick = false;
+    bWantsInitializeComponent = true;
+    
+    OwnerCharacter = nullptr;
+}
+
+void UClothingSystemComponent::BeginPlay()
+{
+    Super::BeginPlay();
+    
+    OwnerCharacter = Cast<ACharacter>(GetOwner());
+    if (!OwnerCharacter)
+    {
+        UE_LOG(LogClothingSystem, Error, TEXT("ClothingSystemComponent requires a Character owner"));
+        return;
+    }
+    
+    // Initialize with default clothing if available
+    if (AvailableClothingSets.Num() > 0 && AvailableClothingSets[0])
+    {
+        EquipClothingSet(AvailableClothingSets[0]);
+    }
+    
+    UE_LOG(LogClothingSystem, Log, TEXT("ClothingSystemComponent initialized for %s"), 
+           *OwnerCharacter->GetName());
+}
+
+bool UClothingSystemComponent::EquipClothingPiece(const FClothingPiece& ClothingPiece)
+{
+    if (!OwnerCharacter)
+    {
+        UE_LOG(LogClothingSystem, Warning, TEXT("No owner character for clothing system"));
+        return false;
+    }
+    
+    // Add or replace clothing piece in current outfit
+    CurrentOutfit.Add(ClothingPiece.Slot, ClothingPiece);
+    
+    // Update visual representation
+    UpdateMeshComponent(ClothingPiece.Slot, ClothingPiece);
+    UpdateMaterialParameters(ClothingPiece.Slot, ClothingPiece);
+    
+    UE_LOG(LogClothingSystem, Log, TEXT("Equipped %s to slot %d"), 
+           *ClothingPiece.ClothingName, (int32)ClothingPiece.Slot);
+    
+    return true;
+}
+
+bool UClothingSystemComponent::UnequipClothingSlot(EClothingSlot Slot)
+{
+    if (!OwnerCharacter)
+    {
+        return false;
+    }
+    
+    if (CurrentOutfit.Contains(Slot))
+    {
+        CurrentOutfit.Remove(Slot);
+        
+        // Hide or remove mesh component for this slot
+        // This would typically involve hiding specific mesh sections
+        // or swapping to a "naked" version for that slot
+        
+        UE_LOG(LogClothingSystem, Log, TEXT("Unequipped clothing from slot %d"), (int32)Slot);
+        return true;
+    }
+    
+    return false;
+}
+
+void UClothingSystemComponent::EquipClothingSet(const UClothingSet* ClothingSet)
+{
+    if (!ClothingSet || !OwnerCharacter)
+    {
+        UE_LOG(LogClothingSystem, Warning, TEXT("Invalid clothing set or no owner character"));
+        return;
+    }
+    
+    // Clear current outfit
+    CurrentOutfit.Empty();
+    
+    // Equip all pieces from the set
+    for (const FClothingPiece& Piece : ClothingSet->ClothingPieces)
+    {
+        EquipClothingPiece(Piece);
+    }
+    
+    UE_LOG(LogClothingSystem, Log, TEXT("Equipped clothing set: %s"), *ClothingSet->SetName);
+}
+
+FClothingPiece UClothingSystemComponent::GetClothingInSlot(EClothingSlot Slot) const
+{
+    if (CurrentOutfit.Contains(Slot))
+    {
+        return CurrentOutfit[Slot];
+    }
+    
+    // Return empty clothing piece if slot is empty
+    return FClothingPiece();
+}
+
+void UClothingSystemComponent::DamageClothing(EClothingSlot Slot, float DamageAmount)
+{
+    if (!CurrentOutfit.Contains(Slot))
+    {
+        return;
+    }
+    
+    FClothingPiece& ClothingPiece = CurrentOutfit[Slot];
+    ClothingPiece.DamageLevel = FMath::Clamp(ClothingPiece.DamageLevel + DamageAmount, 0.0f, 1.0f);
+    
+    // Update condition based on damage
+    if (ClothingPiece.DamageLevel > 0.8f)
+    {
+        ClothingPiece.Condition = EClothingCondition::Torn;
+    }
+    else if (ClothingPiece.DamageLevel > 0.6f)
+    {
+        ClothingPiece.Condition = EClothingCondition::Damaged;
+    }
+    else if (ClothingPiece.DamageLevel > 0.3f)
+    {
+        ClothingPiece.Condition = EClothingCondition::Worn;
+    }
+    
+    // Update visual representation
+    UpdateMaterialParameters(Slot, ClothingPiece);
+    
+    UE_LOG(LogClothingSystem, Log, TEXT("Damaged %s - damage level now %.2f"), 
+           *ClothingPiece.ClothingName, ClothingPiece.DamageLevel);
+}
+
+void UClothingSystemComponent::MakeClothingDirty(EClothingSlot Slot, float DirtAmount)
+{
+    if (!CurrentOutfit.Contains(Slot))
+    {
+        return;
+    }
+    
+    FClothingPiece& ClothingPiece = CurrentOutfit[Slot];
+    ClothingPiece.DirtLevel = FMath::Clamp(ClothingPiece.DirtLevel + DirtAmount, 0.0f, 1.0f);
+    
+    // Update visual representation
+    UpdateMaterialParameters(Slot, ClothingPiece);
+    
+    UE_LOG(LogClothingSystem, Log, TEXT("Made %s dirtier - dirt level now %.2f"), 
+           *ClothingPiece.ClothingName, ClothingPiece.DirtLevel);
+}
+
+void UClothingSystemComponent::CleanClothing(EClothingSlot Slot, float CleanAmount)
+{
+    if (!CurrentOutfit.Contains(Slot))
+    {
+        return;
+    }
+    
+    FClothingPiece& ClothingPiece = CurrentOutfit[Slot];
+    ClothingPiece.DirtLevel = FMath::Clamp(ClothingPiece.DirtLevel - CleanAmount, 0.0f, 1.0f);
+    
+    // Update visual representation
+    UpdateMaterialParameters(Slot, ClothingPiece);
+    
+    UE_LOG(LogClothingSystem, Log, TEXT("Cleaned %s - dirt level now %.2f"), 
+           *ClothingPiece.ClothingName, ClothingPiece.DirtLevel);
+}
+
+void UClothingSystemComponent::RepairClothing(EClothingSlot Slot, float RepairAmount)
+{
+    if (!CurrentOutfit.Contains(Slot))
+    {
+        return;
+    }
+    
+    FClothingPiece& ClothingPiece = CurrentOutfit[Slot];
+    ClothingPiece.DamageLevel = FMath::Clamp(ClothingPiece.DamageLevel - RepairAmount, 0.0f, 1.0f);
+    ClothingPiece.WearLevel = FMath::Clamp(ClothingPiece.WearLevel - (RepairAmount * 0.5f), 0.0f, 1.0f);
+    
+    // Update condition based on new damage level
+    if (ClothingPiece.DamageLevel < 0.1f)
+    {
+        ClothingPiece.Condition = EClothingCondition::Good;
+    }
+    else if (ClothingPiece.DamageLevel < 0.3f)
+    {
+        ClothingPiece.Condition = EClothingCondition::Worn;
+    }
+    else if (ClothingPiece.DamageLevel < 0.6f)
+    {
+        ClothingPiece.Condition = EClothingCondition::Damaged;
+    }
+    
+    // Update visual representation
+    UpdateMaterialParameters(Slot, ClothingPiece);
+    
+    UE_LOG(LogClothingSystem, Log, TEXT("Repaired %s - damage level now %.2f"), 
+           *ClothingPiece.ClothingName, ClothingPiece.DamageLevel);
+}
+
+float UClothingSystemComponent::GetTotalColdProtection() const
+{
+    float TotalProtection = 0.0f;
+    int32 PieceCount = 0;
+    
+    for (const auto& OutfitPair : CurrentOutfit)
+    {
+        const FClothingPiece& Piece = OutfitPair.Value;
+        TotalProtection += Piece.ColdProtection;
+        PieceCount++;
+    }
+    
+    return PieceCount > 0 ? TotalProtection / PieceCount : 0.0f;
+}
+
+float UClothingSystemComponent::GetTotalHeatProtection() const
+{
+    float TotalProtection = 0.0f;
+    int32 PieceCount = 0;
+    
+    for (const auto& OutfitPair : CurrentOutfit)
+    {
+        const FClothingPiece& Piece = OutfitPair.Value;
+        TotalProtection += Piece.HeatProtection;
+        PieceCount++;
+    }
+    
+    return PieceCount > 0 ? TotalProtection / PieceCount : 0.0f;
+}
+
+float UClothingSystemComponent::GetTotalWaterResistance() const
+{
+    float TotalResistance = 0.0f;
+    int32 PieceCount = 0;
+    
+    for (const auto& OutfitPair : CurrentOutfit)
+    {
+        const FClothingPiece& Piece = OutfitPair.Value;
+        TotalResistance += Piece.WaterResistance;
+        PieceCount++;
+    }
+    
+    return PieceCount > 0 ? TotalResistance / PieceCount : 0.0f;
+}
+
+float UClothingSystemComponent::GetTotalPhysicalProtection() const
+{
+    float TotalProtection = 0.0f;
+    int32 PieceCount = 0;
+    
+    for (const auto& OutfitPair : CurrentOutfit)
+    {
+        const FClothingPiece& Piece = OutfitPair.Value;
+        TotalProtection += Piece.PhysicalProtection;
+        PieceCount++;
+    }
+    
+    return PieceCount > 0 ? TotalProtection / PieceCount : 0.0f;
+}
+
+void UClothingSystemComponent::UpdateClothingVisuals()
+{
+    if (!OwnerCharacter)
+    {
+        return;
+    }
+    
+    // Update all equipped clothing pieces
+    for (const auto& OutfitPair : CurrentOutfit)
+    {
+        UpdateMeshComponent(OutfitPair.Key, OutfitPair.Value);
+        UpdateMaterialParameters(OutfitPair.Key, OutfitPair.Value);
+    }
+    
+    UE_LOG(LogClothingSystem, Log, TEXT("Updated clothing visuals for %s"), 
+           *OwnerCharacter->GetName());
+}
+
+void UClothingSystemComponent::ApplyWeatherEffects(float RainIntensity, float Temperature)
+{
+    if (!OwnerCharacter)
+    {
+        return;
+    }
+    
+    // Apply weather-based wear and dirt accumulation
+    float WeatherDamage = 0.0f;
+    float WeatherDirt = 0.0f;
+    
+    // Rain effects
+    if (RainIntensity > 0.1f)
+    {
+        WeatherDirt += RainIntensity * 0.02f; // Rain makes things muddy
+        
+        // Check water resistance
+        float WaterResistance = GetTotalWaterResistance();
+        if (WaterResistance < 0.5f)
+        {
+            WeatherDamage += (RainIntensity * (1.0f - WaterResistance)) * 0.01f;
+        }
+    }
+    
+    // Temperature effects
+    if (Temperature > 35.0f) // Hot weather
+    {
+        WeatherDirt += (Temperature - 35.0f) * 0.001f; // Sweat and dust
+    }
+    else if (Temperature < 0.0f) // Cold weather
+    {
+        WeatherDamage += FMath::Abs(Temperature) * 0.0005f; // Cold damage
+    }
+    
+    // Apply effects to all clothing
+    for (auto& OutfitPair : CurrentOutfit)
+    {
+        if (WeatherDamage > 0.0f)
+        {
+            DamageClothing(OutfitPair.Key, WeatherDamage);
+        }
+        if (WeatherDirt > 0.0f)
+        {
+            MakeClothingDirty(OutfitPair.Key, WeatherDirt);
+        }
+    }
+}
+
+void UClothingSystemComponent::UpdateMeshComponent(EClothingSlot Slot, const FClothingPiece& ClothingPiece)
+{
+    if (!OwnerCharacter)
+    {
+        return;
+    }
+    
+    USkeletalMeshComponent* MeshComp = OwnerCharacter->GetMesh();
+    if (!MeshComp)
+    {
+        return;
+    }
+    
+    // Load the clothing mesh if specified
+    if (ClothingPiece.ClothingMesh.IsValid())
+    {
+        // In a real implementation, this would involve:
+        // 1. Loading the skeletal mesh asset
+        // 2. Applying it to the appropriate mesh section or component
+        // 3. Handling mesh merging or layering
+        
+        UE_LOG(LogClothingSystem, Log, TEXT("Updating mesh for slot %d with %s"), 
+               (int32)Slot, *ClothingPiece.ClothingName);
+    }
+}
+
+void UClothingSystemComponent::UpdateMaterialParameters(EClothingSlot Slot, const FClothingPiece& ClothingPiece)
+{
+    if (!OwnerCharacter)
+    {
+        return;
+    }
+    
+    USkeletalMeshComponent* MeshComp = OwnerCharacter->GetMesh();
+    if (!MeshComp)
+    {
+        return;
+    }
+    
+    // Create or get dynamic material instance for this clothing piece
+    for (int32 MaterialIndex = 0; MaterialIndex < ClothingPiece.Materials.Num(); MaterialIndex++)
+    {
+        if (ClothingPiece.Materials[MaterialIndex].IsValid())
+        {
+            UMaterialInstanceDynamic* DynamicMat = MeshComp->CreateDynamicMaterialInstance(
+                MaterialIndex, ClothingPiece.Materials[MaterialIndex].LoadSynchronous());
+            
+            if (DynamicMat)
+            {
+                // Apply clothing condition parameters
+                DynamicMat->SetScalarParameterValue(TEXT("DirtLevel"), ClothingPiece.DirtLevel);
+                DynamicMat->SetScalarParameterValue(TEXT("WearLevel"), ClothingPiece.WearLevel);
+                DynamicMat->SetScalarParameterValue(TEXT("DamageLevel"), ClothingPiece.DamageLevel);
+                
+                // Apply colors
+                DynamicMat->SetVectorParameterValue(TEXT("PrimaryColor"), ClothingPiece.PrimaryColor);
+                DynamicMat->SetVectorParameterValue(TEXT("SecondaryColor"), ClothingPiece.SecondaryColor);
+                
+                UE_LOG(LogClothingSystem, Log, TEXT("Updated material parameters for %s"), 
+                       *ClothingPiece.ClothingName);
+            }
+        }
+    }
+}
