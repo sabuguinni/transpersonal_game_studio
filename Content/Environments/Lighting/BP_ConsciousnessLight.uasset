@@ -1,0 +1,41 @@
+// Dynamic Lighting Blueprint for Consciousness-Responsive Environments
+// Blueprint Class: BP_ConsciousnessLight
+// Parent Class: AActor
+
+/*
+Components:
+- Point Light Component (Primary)
+- Spot Light Component (Directional)
+- Static Mesh Component (Light Source Geometry)
+- Audio Component (Light Humming)
+
+Variables:
+- Base Intensity (Float, Default: 1000.0)
+- Consciousness Multiplier (Float, Range 0.1-5.0)
+- Color Shift Speed (Float, Default: 1.5)
+- Pulse Frequency (Float, Default: 0.8)
+- Current State (Enum: Dormant, Active, Transcendent, Chaotic)
+
+Functions:
+- Update Light Properties: Adjust intensity, color, and radius
+- Pulse Effect: Create breathing light effect
+- Color Transition: Smooth color changes based on consciousness
+- Audio Sync: Synchronize light with ambient audio
+
+Light States:
+1. Dormant: Warm white, low intensity, steady
+2. Active: Cool blue-white, medium intensity, gentle pulse
+3. Transcendent: Golden-purple gradient, high intensity, slow pulse
+4. Chaotic: Rapid color shifts, variable intensity, erratic pulse
+
+Material Parameters:
+- EmissiveColor: Linked to light color
+- EmissiveIntensity: Linked to consciousness level
+- PulseSpeed: Synchronized with consciousness frequency
+*/
+
+// This would be implemented as a Blueprint with:
+// - Timeline components for smooth transitions
+// - Material parameter collection bindings
+// - Event dispatchers for consciousness state changes
+// - Curve assets for natural light behavior
