@@ -1,0 +1,120 @@
+// Master Landscape Material for Jurassic Terrain
+// This is a blueprint representation - in UE5 this would be created in the Material Editor
+
+{
+    "MaterialDomain": "Surface",
+    "BlendMode": "Opaque",
+    "ShadingModel": "DefaultLit",
+    
+    "MaterialLayers": [
+        {
+            "LayerName": "RichSoil",
+            "BlendType": "LB_WeightBlend",
+            "BaseColorTexture": "/Game/Textures/Terrain/T_RichSoil_BC",
+            "NormalTexture": "/Game/Textures/Terrain/T_RichSoil_N",
+            "RoughnessTexture": "/Game/Textures/Terrain/T_RichSoil_R",
+            "TilingScale": 4.0,
+            "Description": "Dark, nutrient-rich soil for forest floors"
+        },
+        {
+            "LayerName": "MuddyGround",
+            "BlendType": "LB_WeightBlend", 
+            "BaseColorTexture": "/Game/Textures/Terrain/T_MuddyGround_BC",
+            "NormalTexture": "/Game/Textures/Terrain/T_MuddyGround_N",
+            "RoughnessTexture": "/Game/Textures/Terrain/T_MuddyGround_R",
+            "TilingScale": 6.0,
+            "Description": "Wet, muddy terrain near water sources"
+        },
+        {
+            "LayerName": "RockyOutcrop",
+            "BlendType": "LB_HeightBlend",
+            "BaseColorTexture": "/Game/Textures/Terrain/T_RockyOutcrop_BC",
+            "NormalTexture": "/Game/Textures/Terrain/T_RockyOutcrop_N",
+            "RoughnessTexture": "/Game/Textures/Terrain/T_RockyOutcrop_R",
+            "HeightTexture": "/Game/Textures/Terrain/T_RockyOutcrop_H",
+            "TilingScale": 2.0,
+            "Description": "Ancient rock formations and cliff faces"
+        },
+        {
+            "LayerName": "SandyRiverbed",
+            "BlendType": "LB_WeightBlend",
+            "BaseColorTexture": "/Game/Textures/Terrain/T_SandyRiverbed_BC",
+            "NormalTexture": "/Game/Textures/Terrain/T_SandyRiverbed_N", 
+            "RoughnessTexture": "/Game/Textures/Terrain/T_SandyRiverbed_R",
+            "TilingScale": 8.0,
+            "Description": "Sandy deposits along riverbeds and shores"
+        },
+        {
+            "LayerName": "FallenLeaves",
+            "BlendType": "LB_AlphaBlend",
+            "BaseColorTexture": "/Game/Textures/Terrain/T_FallenLeaves_BC",
+            "NormalTexture": "/Game/Textures/Terrain/T_FallenLeaves_N",
+            "RoughnessTexture": "/Game/Textures/Terrain/T_FallenLeaves_R",
+            "TilingScale": 3.0,
+            "Description": "Layer of decomposing leaves and organic matter"
+        },
+        {
+            "LayerName": "DinosaurTracks",
+            "BlendType": "LB_AlphaBlend",
+            "BaseColorTexture": "/Game/Textures/Terrain/T_DinosaurTracks_BC",
+            "NormalTexture": "/Game/Textures/Terrain/T_DinosaurTracks_N",
+            "RoughnessTexture": "/Game/Textures/Terrain/T_DinosaurTracks_R",
+            "TilingScale": 1.0,
+            "Description": "Fossilized and fresh dinosaur footprints"
+        }
+    ],
+    
+    "MaterialFunctions": [
+        {
+            "Name": "WeatheringMask",
+            "Description": "Procedural weathering based on slope and exposure",
+            "Parameters": {
+                "WeatheringIntensity": 0.7,
+                "SlopeThreshold": 0.3,
+                "ExposureScale": 1.0
+            }
+        },
+        {
+            "Name": "MoistureGradient", 
+            "Description": "Moisture distribution from water sources",
+            "Parameters": {
+                "WaterInfluenceRadius": 2000.0,
+                "MoistureIntensity": 0.8,
+                "EvaporationRate": 0.3
+            }
+        },
+        {
+            "Name": "AgeVariation",
+            "Description": "Temporal variation for ancient world feel",
+            "Parameters": {
+                "AgeNoiseScale": 0.01,
+                "AgeContrast": 1.2,
+                "HistoryLayering": 0.6
+            }
+        }
+    ],
+    
+    "EnvironmentalStorytellingElements": [
+        {
+            "Element": "BoneFragments",
+            "BlendMode": "Decal",
+            "Frequency": "Rare",
+            "Biomes": ["OpenWoodland", "RockyOutcrop"],
+            "Description": "Scattered bone fragments telling stories of past struggles"
+        },
+        {
+            "Element": "CrystalFormations",
+            "BlendMode": "Additive",
+            "Frequency": "VeryRare", 
+            "Biomes": ["RockyOutcrop"],
+            "Description": "Mysterious crystal formations - hints of the time travel gem"
+        },
+        {
+            "Element": "BurntAreas",
+            "BlendMode": "Multiply",
+            "Frequency": "Uncommon",
+            "Biomes": ["DenseForest", "OpenWoodland"],
+            "Description": "Charred earth from lightning strikes or volcanic activity"
+        }
+    ]
+}
