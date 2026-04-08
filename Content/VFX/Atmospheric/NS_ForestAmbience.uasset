@@ -1,0 +1,51 @@
+# Niagara System: Forest Ambience
+# Creates the base atmospheric tension through subtle environmental VFX
+
+## EMITTER 1: Dust Motes (Sunlight Shafts)
+- Spawn Rate: 50-80 particles/second
+- Lifetime: 8-12 seconds
+- Size: 0.1-0.3 world units
+- Velocity: Gentle upward drift (0.5-1.5 m/s)
+- Color: Warm amber (255,220,180) with 30% alpha
+- Material: M_DustMote_Translucent
+
+### Behavior Modules:
+- Initial Location: Box spawn within light shaft volumes
+- Velocity Inheritance: Wind system integration
+- Size Over Life: Slight growth then fade
+- Color Over Life: Fade to transparency
+- Collision: Simple world collision with bounce
+
+## EMITTER 2: Floating Spores
+- Spawn Rate: 20-30 particles/second  
+- Lifetime: 15-25 seconds
+- Size: 0.2-0.8 world units
+- Velocity: Slow random drift with wind influence
+- Color: Subtle green-yellow (200,255,180) with 20% alpha
+- Material: M_Spore_Organic
+
+### Behavior Modules:
+- Initial Location: Random distribution in forest canopy
+- Curl Noise Force: Organic floating movement
+- Gravity Scale: -0.1 (slight upward tendency)
+- Rotation: Slow random tumble
+
+## EMITTER 3: Micro Leaf Particles
+- Spawn Rate: 10-15 particles/second
+- Lifetime: 20-30 seconds  
+- Size: 0.5-1.2 world units
+- Velocity: Gentle falling with wind gusts
+- Color: Forest green variations (120,180,100)
+- Material: M_LeafFragment_Opaque
+
+### Behavior Modules:
+- Initial Location: Tree branch positions
+- Wind Force: Strong influence from weather system
+- Collision: Ground collision with settle behavior
+- Mesh Renderer: Small leaf geometry variations
+
+## SYSTEM PARAMETERS (Exposed for Level Design):
+- Density_Multiplier: 0.5-2.0 (adjusts all spawn rates)
+- Wind_Strength: 0.0-3.0 (affects all particle movement)
+- Sunlight_Intensity: 0.0-1.0 (controls dust mote visibility)
+- Atmosphere_Tint: Color picker (overall color influence)
