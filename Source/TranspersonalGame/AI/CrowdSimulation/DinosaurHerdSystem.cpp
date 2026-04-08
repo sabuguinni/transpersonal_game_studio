@@ -1,391 +1,403 @@
 #include "DinosaurHerdSystem.h"
+#include "MassEntitySubsystem.h"
+#include "MassExecutionContext.h"
 #include "MassCommonFragments.h"
 #include "MassMovementFragments.h"
 #include "MassNavigationFragments.h"
-#include "MassSimulationLOD.h"
 #include "Engine/World.h"
+#include "Kismet/GameplayStatics.h"
+
+// ===== UDinosaurHerdProcessor =====
 
 UDinosaurHerdProcessor::UDinosaurHerdProcessor()
 {
-    bAutoRegisterWithProcessingPhases = true;
-    ExecutionFlags = (int32)EProcessorExecutionFlags::All;
-    ExecutionOrder.ExecuteInGroup = UE::Mass::ProcessorGroupNames::Movement;
-    ExecutionOrder.ExecuteAfter.Add(UE::Mass::ProcessorGroupNames::Avoidance);
+    ProcessingPhase = EMassProcessingPhase::PrePhysics;
+    ExecutionFlags = (int32)(EProcessorExecutionFlags::All);
 }
 
 void UDinosaurHerdProcessor::ConfigureQueries()
 {
-    // Query para membros de manada
-    HerdMemberQuery.AddRequirement<FTransformFragment>(EMassFragmentAccess::ReadWrite);
-    HerdMemberQuery.AddRequirement<FMassVelocityFragment>(EMassFragmentAccess::ReadWrite);
-    HerdMemberQuery.AddRequirement<FDinosaurHerdFragment>(EMassFragmentAccess::ReadWrite);
-    HerdMemberQuery.AddRequirement<FMassForceFragment>(EMassFragmentAccess::ReadWrite);
-    HerdMemberQuery.AddChunkRequirement<FMassSimulationLODFragment>(EMassFragmentAccess::ReadOnly);
-    
-    // Query para dados compartilhados de manada
-    HerdDataQuery.AddRequirement<FHerdDataFragment>(EMassFragmentAccess::ReadWrite);
+    HerdQuery.AddRequirement<FTransformFragment>(EMassFragmentAccess::ReadOnly);
+    HerdQuery.AddRequirement<FMassVelocityFragment>(EMassFragmentAccess::ReadWrite);
+    HerdQuery.AddRequirement<FDinosaurHerdFragment>(EMassFragmentAccess::ReadWrite);
+    HerdQuery.AddRequirement<FDinosaurSpeciesFragment>(EMassFragmentAccess::ReadOnly);
+    HerdQuery.AddRequirement<FMassForceFragment>(EMassFragmentAccess::ReadWrite);
 }
 
 void UDinosaurHerdProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
-    // Primeiro, coletamos dados de todas as manadas
-    TMap<int32, TArray<FVector>> HerdPositions;
-    TMap<int32, TArray<FVector>> HerdVelocities;
-    TMap<int32, FHerdDataFragment*> HerdDataMap;
-    
-    // Coleta posições e velocidades por manada
-    HerdMemberQuery.ForEachEntityChunk(EntityManager, Context, [&](FMassExecutionContext& Context)
+    HerdQuery.ForEachEntityChunk(EntityManager, Context, [this](FMassExecutionContext& Context)
     {
         const auto& TransformList = Context.GetFragmentView<FTransformFragment>();
-        const auto& VelocityList = Context.GetFragmentView<FMassVelocityFragment>();
-        const auto& HerdList = Context.GetFragmentView<FDinosaurHerdFragment>();
-        
-        for (int32 i = 0; i < Context.GetNumEntities(); ++i)
-        {
-            const int32 HerdID = HerdList[i].HerdID;
-            if (HerdID >= 0)
-            {
-                HerdPositions.FindOrAdd(HerdID).Add(TransformList[i].GetTransform().GetLocation());
-                HerdVelocities.FindOrAdd(HerdID).Add(VelocityList[i].Value);
-            }
-        }
-    });
-    
-    // Atualiza dados globais de cada manada
-    HerdDataQuery.ForEachEntityChunk(EntityManager, Context, [&](FMassExecutionContext& Context)
-    {
-        auto& HerdDataList = Context.GetMutableFragmentView<FHerdDataFragment>();
-        
-        for (int32 i = 0; i < Context.GetNumEntities(); ++i)
-        {
-            FHerdDataFragment& HerdData = HerdDataList[i];
-            // Assumindo que o HerdID está implícito na ordem dos dados
-            const int32 HerdID = i;
-            
-            if (HerdPositions.Contains(HerdID))
-            {
-                UpdateHerdData(HerdData, HerdPositions[HerdID], HerdVelocities[HerdID]);
-                HerdDataMap.Add(HerdID, &HerdData);
-            }
-        }
-    });
-    
-    // Agora aplica comportamento de manada a cada membro
-    HerdMemberQuery.ForEachEntityChunk(EntityManager, Context, [&](FMassExecutionContext& Context)
-    {
-        const auto& TransformList = Context.GetFragmentView<FTransformFragment>();
-        const auto& VelocityList = Context.GetFragmentView<FMassVelocityFragment>();
+        auto& VelocityList = Context.GetMutableFragmentView<FMassVelocityFragment>();
         auto& HerdList = Context.GetMutableFragmentView<FDinosaurHerdFragment>();
+        const auto& SpeciesList = Context.GetFragmentView<FDinosaurSpeciesFragment>();
         auto& ForceList = Context.GetMutableFragmentView<FMassForceFragment>();
-        const auto& LODList = Context.GetChunkFragmentView<FMassSimulationLODFragment>();
-        
+
         const float DeltaTime = Context.GetDeltaTimeSeconds();
-        const EMassLOD::Type LOD = LODList.Get().LOD;
-        
-        // Skip se LOD muito baixo
-        if (LOD < EMassLOD::Medium)
+
+        for (int32 EntityIndex = 0; EntityIndex < Context.GetNumEntities(); ++EntityIndex)
         {
-            return;
-        }
-        
-        for (int32 i = 0; i < Context.GetNumEntities(); ++i)
-        {
-            FDinosaurHerdFragment& HerdFragment = HerdList[i];
-            const FVector CurrentPosition = TransformList[i].GetTransform().GetLocation();
-            const FVector CurrentVelocity = VelocityList[i].Value;
-            
-            // Atualiza estado do membro
-            UpdateHerdMemberState(HerdFragment, CurrentPosition, DeltaTime);
-            
-            // Calcula forças de manada apenas se parte de uma manada válida
-            if (HerdFragment.HerdID >= 0 && HerdDataMap.Contains(HerdFragment.HerdID))
+            const FTransformFragment& Transform = TransformList[EntityIndex];
+            FMassVelocityFragment& Velocity = VelocityList[EntityIndex];
+            FDinosaurHerdFragment& HerdData = HerdList[EntityIndex];
+            const FDinosaurSpeciesFragment& Species = SpeciesList[EntityIndex];
+            FMassForceFragment& Force = ForceList[EntityIndex];
+
+            // Update panic state
+            if (HerdData.bInPanic)
             {
-                const FHerdDataFragment* HerdData = HerdDataMap[HerdFragment.HerdID];
-                FVector TotalForce = FVector::ZeroVector;
-                
-                // Força de coesão - aproximar do centro da manada
-                if (HerdFragment.CurrentState != EHerdState::Fleeing)
+                HerdData.CurrentPanicTime += DeltaTime;
+                if (HerdData.CurrentPanicTime >= HerdData.PanicDuration)
                 {
-                    TotalForce += CalculateCohesionForce(CurrentPosition, HerdData->HerdCenter, HerdFragment.CohesionStrength);
+                    HerdData.bInPanic = false;
+                    HerdData.CurrentPanicTime = 0.0f;
                 }
-                
-                // Força de alinhamento - seguir direção da manada
-                TotalForce += CalculateAlignmentForce(CurrentVelocity, HerdData->AverageDirection, HerdFragment.AlignmentStrength);
-                
-                // Força de separação - evitar colisões com outros membros
-                if (HerdPositions.Contains(HerdFragment.HerdID))
-                {
-                    TotalForce += CalculateSeparationForce(CurrentPosition, HerdPositions[HerdFragment.HerdID], HerdFragment.SeparationStrength);
-                }
-                
-                // Força de fuga se há ameaça
-                if (HerdData->AlertLevel > 0.1f && HerdData->TimeSinceLastThreat < 10.0f)
-                {
-                    TotalForce += CalculateFleeForce(CurrentPosition, HerdData->LastThreatPosition, FleeRadius);
-                }
-                
-                // Limita força máxima
-                if (TotalForce.SizeSquared() > MaxForce * MaxForce)
-                {
-                    TotalForce = TotalForce.GetSafeNormal() * MaxForce;
-                }
-                
-                // Aplica força
-                ForceList[i].Value += TotalForce;
             }
+
+            // Check for predators if not already in panic
+            if (!HerdData.bInPanic)
+            {
+                if (DetectPredatorNearby(Context, Transform, HerdData.PanicRadius))
+                {
+                    HerdData.bInPanic = true;
+                    HerdData.CurrentPanicTime = 0.0f;
+                }
+            }
+
+            // Calculate herd forces
+            FVector HerdForce = FVector::ZeroVector;
+
+            if (HerdData.bInPanic)
+            {
+                // Panic behavior - flee from threat
+                ProcessPanicBehavior(Context, HerdData, Velocity);
+            }
+            else
+            {
+                // Normal herd behavior
+                FVector Cohesion = CalculateCohesion(Context, Transform, HerdData);
+                FVector Separation = CalculateSeparation(Context, Transform, HerdData);
+                FVector Alignment = CalculateAlignment(Context, Transform, HerdData);
+
+                // Weight the forces
+                HerdForce = Cohesion * 0.3f + Separation * 0.5f + Alignment * 0.2f;
+
+                // Leaders have reduced cohesion
+                if (HerdData.bIsHerdLeader)
+                {
+                    HerdForce = Cohesion * 0.1f + Separation * 0.6f + Alignment * 0.3f;
+                }
+            }
+
+            // Apply speed limits
+            float CurrentSpeed = Velocity.Value.Size();
+            float MaxSpeed = HerdData.bInPanic ? Species.MaxSpeed : Species.PreferredSpeed;
+
+            if (CurrentSpeed > MaxSpeed)
+            {
+                Velocity.Value = Velocity.Value.GetSafeNormal() * MaxSpeed;
+            }
+
+            // Add herd force to total force
+            Force.Value += HerdForce;
         }
     });
 }
 
-FVector UDinosaurHerdProcessor::CalculateCohesionForce(const FVector& Position, const FVector& HerdCenter, float Strength) const
+FVector UDinosaurHerdProcessor::CalculateCohesion(const FMassExecutionContext& Context, const FTransformFragment& Transform, const FDinosaurHerdFragment& HerdData)
 {
-    FVector ToCenter = HerdCenter - Position;
-    float Distance = ToCenter.Size();
+    FVector CenterOfMass = FVector::ZeroVector;
+    int32 NeighborCount = 0;
+
+    // This is a simplified version - in a full implementation, we'd use spatial queries
+    // to find nearby herd members more efficiently
     
-    if (Distance > 0.1f)
-    {
-        // Força mais fraca quando já próximo do centro
-        float ForceMultiplier = FMath::Clamp(Distance / 1000.0f, 0.1f, 1.0f);
-        return ToCenter.GetSafeNormal() * Strength * ForceMultiplier * 100.0f;
-    }
-    
-    return FVector::ZeroVector;
+    // For now, return a small force towards a general herd center
+    // In practice, this would query nearby entities with the same HerdID
+    return FVector(FMath::RandRange(-1.0f, 1.0f), FMath::RandRange(-1.0f, 1.0f), 0.0f).GetSafeNormal() * 100.0f;
 }
 
-FVector UDinosaurHerdProcessor::CalculateSeparationForce(const FVector& Position, const TArray<FVector>& NearbyPositions, float Strength) const
+FVector UDinosaurHerdProcessor::CalculateSeparation(const FMassExecutionContext& Context, const FTransformFragment& Transform, const FDinosaurHerdFragment& HerdData)
 {
     FVector SeparationForce = FVector::ZeroVector;
-    int32 Count = 0;
     
-    for (const FVector& OtherPosition : NearbyPositions)
-    {
-        float Distance = FVector::Dist(Position, OtherPosition);
-        
-        if (Distance > 0.1f && Distance < NeighborRadius)
-        {
-            FVector Away = Position - OtherPosition;
-            // Força inversamente proporcional à distância
-            float ForceMultiplier = (NeighborRadius - Distance) / NeighborRadius;
-            SeparationForce += Away.GetSafeNormal() * ForceMultiplier;
-            Count++;
-        }
-    }
-    
-    if (Count > 0)
-    {
-        SeparationForce /= Count;
-        return SeparationForce * Strength * 200.0f;
-    }
-    
-    return FVector::ZeroVector;
+    // Simplified separation - push away from overcrowded areas
+    // In practice, this would query nearby entities and calculate repulsion forces
+    return FVector(FMath::RandRange(-1.0f, 1.0f), FMath::RandRange(-1.0f, 1.0f), 0.0f).GetSafeNormal() * 200.0f;
 }
 
-FVector UDinosaurHerdProcessor::CalculateAlignmentForce(const FVector& CurrentVelocity, const FVector& HerdDirection, float Strength) const
+FVector UDinosaurHerdProcessor::CalculateAlignment(const FMassExecutionContext& Context, const FTransformFragment& Transform, const FDinosaurHerdFragment& HerdData)
 {
-    FVector DesiredVelocity = HerdDirection.GetSafeNormal() * MaxSpeed * 0.7f; // 70% da velocidade máxima
-    FVector SteeringForce = DesiredVelocity - CurrentVelocity;
+    FVector AverageVelocity = FVector::ZeroVector;
     
-    return SteeringForce * Strength;
+    // Simplified alignment - align with general movement direction
+    // In practice, this would average the velocities of nearby herd members
+    return FVector(1.0f, 0.0f, 0.0f) * 50.0f;
 }
 
-FVector UDinosaurHerdProcessor::CalculateFleeForce(const FVector& Position, const FVector& ThreatPosition, float FleeRadius) const
+void UDinosaurHerdProcessor::ProcessPanicBehavior(FMassExecutionContext& Context, FDinosaurHerdFragment& HerdData, FMassVelocityFragment& Velocity)
 {
-    FVector ToThreat = ThreatPosition - Position;
-    float Distance = ToThreat.Size();
-    
-    if (Distance < FleeRadius && Distance > 0.1f)
+    // In panic, dinosaurs flee in random directions at maximum speed
+    if (Velocity.Value.SizeSquared() < 100.0f) // If nearly stationary
     {
-        // Força de fuga inversamente proporcional à distância
-        float ForceMultiplier = (FleeRadius - Distance) / FleeRadius;
-        FVector FleeDirection = -ToThreat.GetSafeNormal();
-        return FleeDirection * ForceMultiplier * MaxForce * 2.0f; // Força de fuga é dobrada
-    }
-    
-    return FVector::ZeroVector;
-}
-
-void UDinosaurHerdProcessor::UpdateHerdMemberState(FDinosaurHerdFragment& HerdFragment, const FVector& Position, float DeltaTime) const
-{
-    HerdFragment.StateTimer += DeltaTime;
-    
-    // Decai stress ao longo do tempo
-    HerdFragment.StressLevel = FMath::Max(0.0f, HerdFragment.StressLevel - StressDecayRate * DeltaTime);
-    
-    // Lógica de transição de estados baseada em stress e tempo
-    switch (HerdFragment.CurrentState)
-    {
-        case EHerdState::Grazing:
-            if (HerdFragment.StressLevel > 0.3f)
-            {
-                HerdFragment.CurrentState = EHerdState::Alert;
-                HerdFragment.StateTimer = 0.0f;
-            }
-            else if (HerdFragment.StateTimer > 30.0f) // 30 segundos pastando
-            {
-                HerdFragment.CurrentState = EHerdState::Moving;
-                HerdFragment.StateTimer = 0.0f;
-            }
-            break;
-            
-        case EHerdState::Alert:
-            if (HerdFragment.StressLevel > 0.7f)
-            {
-                HerdFragment.CurrentState = EHerdState::Fleeing;
-                HerdFragment.StateTimer = 0.0f;
-            }
-            else if (HerdFragment.StressLevel < 0.1f && HerdFragment.StateTimer > 5.0f)
-            {
-                HerdFragment.CurrentState = EHerdState::Grazing;
-                HerdFragment.StateTimer = 0.0f;
-            }
-            break;
-            
-        case EHerdState::Fleeing:
-            if (HerdFragment.StressLevel < 0.2f && HerdFragment.StateTimer > 10.0f)
-            {
-                HerdFragment.CurrentState = EHerdState::Moving;
-                HerdFragment.StateTimer = 0.0f;
-            }
-            break;
-            
-        case EHerdState::Moving:
-            if (HerdFragment.StressLevel > 0.3f)
-            {
-                HerdFragment.CurrentState = EHerdState::Alert;
-                HerdFragment.StateTimer = 0.0f;
-            }
-            else if (HerdFragment.StateTimer > 20.0f) // 20 segundos movendo
-            {
-                HerdFragment.CurrentState = EHerdState::Grazing;
-                HerdFragment.StateTimer = 0.0f;
-            }
-            break;
+        // Pick a random flee direction
+        FVector FleeDirection = FVector(FMath::RandRange(-1.0f, 1.0f), FMath::RandRange(-1.0f, 1.0f), 0.0f).GetSafeNormal();
+        Velocity.Value = FleeDirection * 800.0f; // High panic speed
     }
 }
 
-void UDinosaurHerdProcessor::UpdateHerdData(FHerdDataFragment& HerdData, const TArray<FVector>& MemberPositions, const TArray<FVector>& MemberVelocities) const
+bool UDinosaurHerdProcessor::DetectPredatorNearby(const FMassExecutionContext& Context, const FTransformFragment& Transform, float DetectionRadius)
 {
-    if (MemberPositions.Num() == 0)
-    {
-        return;
-    }
-    
-    // Calcula centro da manada
-    FVector CenterSum = FVector::ZeroVector;
-    for (const FVector& Position : MemberPositions)
-    {
-        CenterSum += Position;
-    }
-    HerdData.HerdCenter = CenterSum / MemberPositions.Num();
-    
-    // Calcula direção média
-    FVector DirectionSum = FVector::ZeroVector;
-    for (const FVector& Velocity : MemberVelocities)
-    {
-        if (Velocity.SizeSquared() > 1.0f)
-        {
-            DirectionSum += Velocity.GetSafeNormal();
-        }
-    }
-    
-    if (DirectionSum.SizeSquared() > 0.1f)
-    {
-        HerdData.AverageDirection = DirectionSum.GetSafeNormal();
-    }
-    
-    // Calcula velocidade média
-    float SpeedSum = 0.0f;
-    for (const FVector& Velocity : MemberVelocities)
-    {
-        SpeedSum += Velocity.Size();
-    }
-    HerdData.AverageSpeed = SpeedSum / MemberVelocities.Num();
-    
-    // Atualiza contagem de membros
-    HerdData.MemberCount = MemberPositions.Num();
-    
-    // Decai nível de alerta
-    HerdData.AlertLevel = FMath::Max(0.0f, HerdData.AlertLevel - AlertDecayRate * 0.016f); // Assumindo ~60fps
-    HerdData.TimeSinceLastThreat += 0.016f;
+    // Simplified predator detection
+    // In practice, this would query for nearby carnivorous dinosaurs
+    // For now, randomly trigger panic occasionally to simulate predator encounters
+    return FMath::RandRange(0.0f, 1.0f) < 0.001f; // 0.1% chance per frame
 }
 
-// ============================================================================
-// PREDATOR DETECTION PROCESSOR
-// ============================================================================
+// ===== UDinosaurRoutineProcessor =====
 
-UPredatorDetectionProcessor::UPredatorDetectionProcessor()
+UDinosaurRoutineProcessor::UDinosaurRoutineProcessor()
 {
-    bAutoRegisterWithProcessingPhases = true;
-    ExecutionFlags = (int32)EProcessorExecutionFlags::All;
-    ExecutionOrder.ExecuteInGroup = UE::Mass::ProcessorGroupNames::Behavior;
-    ExecutionOrder.ExecuteBefore.Add(UE::Mass::ProcessorGroupNames::Movement);
+    ProcessingPhase = EMassProcessingPhase::PrePhysics;
+    ExecutionFlags = (int32)(EProcessorExecutionFlags::All);
 }
 
-void UPredatorDetectionProcessor::ConfigureQueries()
+void UDinosaurRoutineProcessor::ConfigureQueries()
 {
-    // Query para presas (herbívoros)
-    PreyQuery.AddRequirement<FTransformFragment>(EMassFragmentAccess::ReadOnly);
-    PreyQuery.AddRequirement<FDinosaurHerdFragment>(EMassFragmentAccess::ReadWrite);
-    PreyQuery.AddTagRequirement<FDinosaurPreyTag>(EMassFragmentPresence::All);
-    
-    // Query para predadores
-    PredatorQuery.AddRequirement<FTransformFragment>(EMassFragmentAccess::ReadOnly);
-    PredatorQuery.AddTagRequirement<FDinosaurPredatorTag>(EMassFragmentPresence::All);
+    RoutineQuery.AddRequirement<FTransformFragment>(EMassFragmentAccess::ReadOnly);
+    RoutineQuery.AddRequirement<FDinosaurRoutineFragment>(EMassFragmentAccess::ReadWrite);
+    RoutineQuery.AddRequirement<FDinosaurSpeciesFragment>(EMassFragmentAccess::ReadOnly);
+    RoutineQuery.AddRequirement<FMassMoveTargetFragment>(EMassFragmentAccess::ReadWrite);
 }
 
-void UPredatorDetectionProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
+void UDinosaurRoutineProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
-    // Coleta posições de todos os predadores
-    TArray<FVector> PredatorPositions;
-    PredatorQuery.ForEachEntityChunk(EntityManager, Context, [&](FMassExecutionContext& Context)
+    RoutineQuery.ForEachEntityChunk(EntityManager, Context, [this](FMassExecutionContext& Context)
     {
         const auto& TransformList = Context.GetFragmentView<FTransformFragment>();
-        
-        for (int32 i = 0; i < Context.GetNumEntities(); ++i)
+        auto& RoutineList = Context.GetMutableFragmentView<FDinosaurRoutineFragment>();
+        const auto& SpeciesList = Context.GetFragmentView<FDinosaurSpeciesFragment>();
+        auto& MoveTargetList = Context.GetMutableFragmentView<FMassMoveTargetFragment>();
+
+        const float CurrentTime = Context.GetWorld()->GetTimeSeconds();
+
+        for (int32 EntityIndex = 0; EntityIndex < Context.GetNumEntities(); ++EntityIndex)
         {
-            PredatorPositions.Add(TransformList[i].GetTransform().GetLocation());
-        }
-    });
-    
-    // Verifica detecção de predadores para cada presa
-    PreyQuery.ForEachEntityChunk(EntityManager, Context, [&](FMassExecutionContext& Context)
-    {
-        const auto& TransformList = Context.GetFragmentView<FTransformFragment>();
-        auto& HerdList = Context.GetMutableFragmentView<FDinosaurHerdFragment>();
-        
-        for (int32 i = 0; i < Context.GetNumEntities(); ++i)
-        {
-            const FVector PreyPosition = TransformList[i].GetTransform().GetLocation();
-            DetectNearbyPredators(HerdList[i], PreyPosition, PredatorPositions);
+            const FTransformFragment& Transform = TransformList[EntityIndex];
+            FDinosaurRoutineFragment& Routine = RoutineList[EntityIndex];
+            const FDinosaurSpeciesFragment& Species = SpeciesList[EntityIndex];
+            FMassMoveTargetFragment& MoveTarget = MoveTargetList[EntityIndex];
+
+            // Update current activity based on time and needs
+            UpdateCurrentActivity(Routine, Species, CurrentTime);
+
+            // Set movement target based on current activity
+            switch (Routine.CurrentActivity)
+            {
+                case 1: // Grazing
+                    if (Species.bIsHerbivore)
+                    {
+                        MoveTarget.Center = FindGrazingLocation(Transform, Species);
+                        MoveTarget.SlackRadius = Species.GrazingRadius;
+                    }
+                    break;
+
+                case 2: // Drinking
+                    MoveTarget.Center = FindWaterSource(Transform);
+                    MoveTarget.SlackRadius = 200.0f;
+                    break;
+
+                case 3: // Resting
+                    MoveTarget.Center = FindRestingSpot(Transform);
+                    MoveTarget.SlackRadius = 100.0f;
+                    break;
+
+                default: // Wandering
+                    // Wander within home range
+                    FVector WanderTarget = Routine.HomeLocation + FVector(
+                        FMath::RandRange(-Routine.HomeRadius, Routine.HomeRadius),
+                        FMath::RandRange(-Routine.HomeRadius, Routine.HomeRadius),
+                        0.0f
+                    );
+                    MoveTarget.Center = WanderTarget;
+                    MoveTarget.SlackRadius = 500.0f;
+                    break;
+            }
         }
     });
 }
 
-void UPredatorDetectionProcessor::DetectNearbyPredators(FDinosaurHerdFragment& HerdFragment, const FVector& Position, const TArray<FVector>& PredatorPositions) const
+void UDinosaurRoutineProcessor::UpdateCurrentActivity(FDinosaurRoutineFragment& Routine, const FDinosaurSpeciesFragment& Species, float CurrentTime)
 {
-    float ClosestDistance = DetectionRadius;
-    FVector ClosestThreat = FVector::ZeroVector;
-    bool ThreatDetected = false;
-    
-    for (const FVector& PredatorPos : PredatorPositions)
+    const float TimeSinceActivityStart = CurrentTime - Routine.ActivityStartTime;
+
+    // Check if current activity should end
+    switch (Routine.CurrentActivity)
     {
-        float Distance = FVector::Dist(Position, PredatorPos);
-        
-        if (Distance < DetectionRadius && Distance < ClosestDistance)
-        {
-            ClosestDistance = Distance;
-            ClosestThreat = PredatorPos;
-            ThreatDetected = true;
-        }
+        case 1: // Grazing
+            if (TimeSinceActivityStart >= Species.GrazingDuration)
+            {
+                Routine.CurrentActivity = 0; // Back to wandering
+                Routine.ActivityStartTime = CurrentTime;
+                Routine.LastGrazingTime = CurrentTime;
+            }
+            break;
+
+        case 2: // Drinking
+            if (TimeSinceActivityStart >= 10.0f) // 10 seconds to drink
+            {
+                Routine.CurrentActivity = 0;
+                Routine.ActivityStartTime = CurrentTime;
+                Routine.LastDrinkingTime = CurrentTime;
+            }
+            break;
+
+        case 3: // Resting
+            if (TimeSinceActivityStart >= 60.0f) // 1 minute rest
+            {
+                Routine.CurrentActivity = 0;
+                Routine.ActivityStartTime = CurrentTime;
+                Routine.LastRestTime = CurrentTime;
+            }
+            break;
+
+        default: // Wandering - check if needs require activity change
+            if (Species.bIsHerbivore && (CurrentTime - Routine.LastGrazingTime) >= Species.TimeBetweenGrazing)
+            {
+                Routine.CurrentActivity = 1; // Start grazing
+                Routine.ActivityStartTime = CurrentTime;
+            }
+            else if ((CurrentTime - Routine.LastDrinkingTime) >= 300.0f) // Drink every 5 minutes
+            {
+                Routine.CurrentActivity = 2; // Go drink
+                Routine.ActivityStartTime = CurrentTime;
+            }
+            else if ((CurrentTime - Routine.LastRestTime) >= 600.0f) // Rest every 10 minutes
+            {
+                Routine.CurrentActivity = 3; // Go rest
+                Routine.ActivityStartTime = CurrentTime;
+            }
+            break;
     }
+}
+
+FVector UDinosaurRoutineProcessor::FindGrazingLocation(const FTransformFragment& Transform, const FDinosaurSpeciesFragment& Species)
+{
+    // Find nearby vegetation-rich area
+    // For now, return a location within grazing radius
+    return Transform.GetTransform().GetLocation() + FVector(
+        FMath::RandRange(-Species.GrazingRadius, Species.GrazingRadius),
+        FMath::RandRange(-Species.GrazingRadius, Species.GrazingRadius),
+        0.0f
+    );
+}
+
+FVector UDinosaurRoutineProcessor::FindWaterSource(const FTransformFragment& Transform)
+{
+    // Find nearest water source
+    // For now, return a location that represents a water source
+    // In practice, this would query for actual water bodies in the world
+    return Transform.GetTransform().GetLocation() + FVector(
+        FMath::RandRange(-2000.0f, 2000.0f),
+        FMath::RandRange(-2000.0f, 2000.0f),
+        0.0f
+    );
+}
+
+FVector UDinosaurRoutineProcessor::FindRestingSpot(const FTransformFragment& Transform)
+{
+    // Find a safe resting spot
+    // For now, return a nearby location
+    return Transform.GetTransform().GetLocation() + FVector(
+        FMath::RandRange(-500.0f, 500.0f),
+        FMath::RandRange(-500.0f, 500.0f),
+        0.0f
+    );
+}
+
+// ===== UDinosaurHerdSubsystem =====
+
+void UDinosaurHerdSubsystem::Initialize(FSubsystemCollectionBase& Collection)
+{
+    Super::Initialize(Collection);
     
-    if (ThreatDetected)
+    // Initialize default species population targets
+    SpeciesPopulationTargets.Add(TEXT("Triceratops"), 500);
+    SpeciesPopulationTargets.Add(TEXT("Parasaurolophus"), 800);
+    SpeciesPopulationTargets.Add(TEXT("Stegosaurus"), 300);
+    SpeciesPopulationTargets.Add(TEXT("TRex"), 20);
+    SpeciesPopulationTargets.Add(TEXT("Velociraptor"), 100);
+    SpeciesPopulationTargets.Add(TEXT("Compsognathus"), 1000);
+}
+
+void UDinosaurHerdSubsystem::Deinitialize()
+{
+    HerdEntities.Empty();
+    Super::Deinitialize();
+}
+
+int32 UDinosaurHerdSubsystem::CreateHerd(FName SpeciesName, const FVector& Location, int32 HerdSize)
+{
+    int32 HerdID = NextHerdID++;
+    
+    TArray<FMassEntityHandle> NewHerd;
+    NewHerd.Reserve(HerdSize);
+
+    // Spawn herd leader first
+    SpawnDinosaurEntity(SpeciesName, Location, HerdID, true);
+    
+    // Spawn herd members in formation around leader
+    for (int32 i = 1; i < HerdSize; ++i)
     {
-        // Aumenta stress baseado na proximidade
-        float StressIncrease = (DetectionRadius - ClosestDistance) / DetectionRadius;
-        HerdFragment.StressLevel = FMath::Min(1.0f, HerdFragment.StressLevel + StressIncrease * 0.5f);
-        
-        // TODO: Propagar alerta para outros membros da manada
-        // PropagateAlert(EntityManager, HerdFragment.HerdID, ClosestThreat, StressIncrease);
+        FVector MemberLocation = Location + FVector(
+            FMath::RandRange(-500.0f, 500.0f),
+            FMath::RandRange(-500.0f, 500.0f),
+            0.0f
+        );
+        SpawnDinosaurEntity(SpeciesName, MemberLocation, HerdID, false);
     }
+
+    return HerdID;
+}
+
+void UDinosaurHerdSubsystem::SpawnHerdAtLocation(int32 HerdID, const FVector& Location)
+{
+    // Implementation for spawning existing herd at new location
+    // This would move all entities in the herd to the new location
+}
+
+void UDinosaurHerdSubsystem::TriggerHerdPanic(int32 HerdID, const FVector& ThreatLocation)
+{
+    // Implementation for triggering panic in a specific herd
+    // This would set panic state on all herd members
+}
+
+void UDinosaurHerdSubsystem::SetSpeciesPopulationTarget(FName SpeciesName, int32 TargetPopulation)
+{
+    SpeciesPopulationTargets.Add(SpeciesName, TargetPopulation);
+}
+
+int32 UDinosaurHerdSubsystem::GetCurrentSpeciesPopulation(FName SpeciesName) const
+{
+    const int32* Population = CurrentSpeciesPopulations.Find(SpeciesName);
+    return Population ? *Population : 0;
+}
+
+void UDinosaurHerdSubsystem::SpawnDinosaurEntity(FName SpeciesName, const FVector& Location, int32 HerdID, bool bIsLeader)
+{
+    // This would interface with the Mass Entity system to spawn a new dinosaur
+    // For now, this is a placeholder that would be implemented with the actual Mass spawning system
+    
+    UE_LOG(LogTemp, Log, TEXT("Spawning %s at location %s for herd %d (Leader: %s)"), 
+        *SpeciesName.ToString(), 
+        *Location.ToString(), 
+        HerdID, 
+        bIsLeader ? TEXT("Yes") : TEXT("No"));
+}
+
+void UDinosaurHerdSubsystem::UpdatePopulationCounts()
+{
+    // Update current population counts for each species
+    // This would query the Mass Entity system for current entity counts by species
 }
