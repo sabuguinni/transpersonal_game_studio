@@ -1,487 +1,466 @@
 #include "LightingSystemCore.h"
-#include "Engine/DirectionalLight.h"
 #include "Components/DirectionalLightComponent.h"
-#include "Engine/SkyLight.h"
 #include "Components/SkyLightComponent.h"
-#include "Engine/SkyAtmosphere.h"
 #include "Components/SkyAtmosphereComponent.h"
-#include "Engine/VolumetricCloud.h"
 #include "Components/VolumetricCloudComponent.h"
-#include "Engine/ExponentialHeightFog.h"
 #include "Components/ExponentialHeightFogComponent.h"
-#include "Kismet/GameplayStatics.h"
-#include "Engine/World.h"
+#include "Components/PostProcessComponent.h"
+#include "Engine/DirectionalLight.h"
+#include "Engine/SkyLight.h"
+#include "Kismet/KismetMathLibrary.h"
 
-ULightingSystemCore::ULightingSystemCore()
+ALightingSystemCore::ALightingSystemCore()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f; // Update 10 times per second for smooth transitions
-    
-    SetupDefaultConfigurations();
+    PrimaryActorTick.bCanEverTick = true;
+
+    // Create root component
+    RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
+
+    // Create lighting components
+    SunLight = CreateDefaultSubobject<UDirectionalLightComponent>(TEXT("SunLight"));
+    SunLight->SetupAttachment(RootComponent);
+    SunLight->SetMobility(EComponentMobility::Movable);
+    SunLight->SetAtmosphereSunLight(true);
+    SunLight->SetAtmosphereSunLightIndex(0);
+
+    SkyLight = CreateDefaultSubobject<USkyLightComponent>(TEXT("SkyLight"));
+    SkyLight->SetupAttachment(RootComponent);
+    SkyLight->SetMobility(EComponentMobility::Movable);
+    SkyLight->bRealTimeCapture = true;
+
+    // Create atmosphere components
+    SkyAtmosphere = CreateDefaultSubobject<USkyAtmosphereComponent>(TEXT("SkyAtmosphere"));
+    SkyAtmosphere->SetupAttachment(RootComponent);
+
+    VolumetricClouds = CreateDefaultSubobject<UVolumetricCloudComponent>(TEXT("VolumetricClouds"));
+    VolumetricClouds->SetupAttachment(RootComponent);
+
+    HeightFog = CreateDefaultSubobject<UExponentialHeightFogComponent>(TEXT("HeightFog"));
+    HeightFog->SetupAttachment(RootComponent);
+
+    PostProcessComponent = CreateDefaultSubobject<UPostProcessComponent>(TEXT("PostProcess"));
+    PostProcessComponent->SetupAttachment(RootComponent);
+    PostProcessComponent->bUnbound = true;
+
+    // Initialize default presets
+    InitializeDefaultPresets();
 }
 
-void ULightingSystemCore::BeginPlay()
+void ALightingSystemCore::BeginPlay()
 {
     Super::BeginPlay();
     
-    InitializeLightingComponents();
-    UpdateLightingConfiguration();
+    // Set initial lighting state
+    UpdateLighting();
 }
 
-void ULightingSystemCore::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void ALightingSystemCore::Tick(float DeltaTime)
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    Super::Tick(DeltaTime);
 
-    // Update dynamic time progression
-    if (bDynamicTimeProgression)
+    // Update time progression
+    if (bEnableTimeProgression)
     {
-        CurrentTimeInHours += (DeltaTime * TimeProgressionScale) / 3600.0f; // Convert seconds to hours
+        float TimeIncrement = (24.0f / (DayDurationInMinutes * 60.0f)) * DeltaTime;
+        CurrentTimeOfDay += TimeIncrement;
         
-        // Wrap around 24-hour cycle
-        if (CurrentTimeInHours >= 24.0f)
+        if (CurrentTimeOfDay >= 24.0f)
         {
-            CurrentTimeInHours -= 24.0f;
+            CurrentTimeOfDay -= 24.0f;
         }
+    }
+
+    // Handle transitions
+    if (bIsTransitioning)
+    {
+        TransitionTimer += DeltaTime;
+        float Alpha = FMath::Clamp(TransitionTimer / TransitionDuration, 0.0f, 1.0f);
         
-        UpdateTimeOfDay();
+        CurrentPreset = BlendPresets(CurrentPreset, TargetPreset, Alpha);
+        
+        if (Alpha >= 1.0f)
+        {
+            bIsTransitioning = false;
+            CurrentPreset = TargetPreset;
+        }
     }
 
-    // Update lighting transitions
-    UpdateTransition(DeltaTime);
-    
-    // Apply current lighting configuration
-    UpdateLightingConfiguration();
+    UpdateLighting();
 }
 
-void ULightingSystemCore::SetTimeOfDay(float TimeInHours)
+void ALightingSystemCore::SetTimeOfDay(float NewTime)
 {
-    CurrentTimeInHours = FMath::Fmod(TimeInHours, 24.0f);
-    if (CurrentTimeInHours < 0.0f)
-    {
-        CurrentTimeInHours += 24.0f;
-    }
-    
-    UpdateTimeOfDay();
-    UpdateLightingConfiguration();
+    CurrentTimeOfDay = FMath::Clamp(NewTime, 0.0f, 24.0f);
+    UpdateLighting();
 }
 
-void ULightingSystemCore::UpdateTimeOfDay()
+void ALightingSystemCore::SetWeatherState(EWeatherState NewWeather)
 {
-    ETimeOfDay NewTimeOfDay;
-    
-    if (CurrentTimeInHours >= 5.0f && CurrentTimeInHours < 7.0f)
+    if (CurrentWeather != NewWeather)
     {
-        NewTimeOfDay = ETimeOfDay::Dawn;
+        CurrentWeather = NewWeather;
+        
+        if (WeatherPresets.Contains(NewWeather))
+        {
+            TransitionToPreset(WeatherPresets[NewWeather], 3.0f);
+        }
     }
-    else if (CurrentTimeInHours >= 7.0f && CurrentTimeInHours < 11.0f)
+}
+
+void ALightingSystemCore::SetEmotionalTone(EEmotionalTone NewTone)
+{
+    if (CurrentEmotionalTone != NewTone)
     {
-        NewTimeOfDay = ETimeOfDay::Morning;
+        CurrentEmotionalTone = NewTone;
+        ApplyEmotionalTone();
     }
-    else if (CurrentTimeInHours >= 11.0f && CurrentTimeInHours < 15.0f)
+}
+
+void ALightingSystemCore::TransitionToPreset(const FLightingPreset& TargetPreset, float TransitionTime)
+{
+    this->TargetPreset = TargetPreset;
+    TransitionDuration = TransitionTime;
+    TransitionTimer = 0.0f;
+    bIsTransitioning = true;
+}
+
+ETimeOfDay ALightingSystemCore::GetCurrentTimeOfDayEnum() const
+{
+    if (CurrentTimeOfDay >= 5.0f && CurrentTimeOfDay < 7.0f)
+        return ETimeOfDay::Dawn;
+    else if (CurrentTimeOfDay >= 7.0f && CurrentTimeOfDay < 11.0f)
+        return ETimeOfDay::Morning;
+    else if (CurrentTimeOfDay >= 11.0f && CurrentTimeOfDay < 14.0f)
+        return ETimeOfDay::Midday;
+    else if (CurrentTimeOfDay >= 14.0f && CurrentTimeOfDay < 17.0f)
+        return ETimeOfDay::Afternoon;
+    else if (CurrentTimeOfDay >= 17.0f && CurrentTimeOfDay < 19.0f)
+        return ETimeOfDay::Dusk;
+    else
+        return ETimeOfDay::Night;
+}
+
+void ALightingSystemCore::SetDangerLighting(bool bIsDangerous)
+{
+    if (bIsDangerous)
     {
-        NewTimeOfDay = ETimeOfDay::Midday;
-    }
-    else if (CurrentTimeInHours >= 15.0f && CurrentTimeInHours < 18.0f)
-    {
-        NewTimeOfDay = ETimeOfDay::Afternoon;
-    }
-    else if (CurrentTimeInHours >= 18.0f && CurrentTimeInHours < 20.0f)
-    {
-        NewTimeOfDay = ETimeOfDay::Dusk;
+        SetEmotionalTone(EEmotionalTone::Terrifying);
     }
     else
     {
-        NewTimeOfDay = ETimeOfDay::Night;
-    }
-    
-    CurrentTimeOfDay = NewTimeOfDay;
-}
-
-void ULightingSystemCore::SetWeatherState(EWeatherState NewWeatherState, float TransitionTime)
-{
-    if (NewWeatherState != CurrentWeatherState)
-    {
-        // Start transition
-        CurrentTransition.StartConfig = BlendConfigurations(
-            TimeOfDayConfigurations[CurrentTimeOfDay],
-            WeatherConfigurations[CurrentWeatherState],
-            0.5f
-        );
-        
-        CurrentWeatherState = NewWeatherState;
-        
-        CurrentTransition.TargetConfig = BlendConfigurations(
-            TimeOfDayConfigurations[CurrentTimeOfDay],
-            WeatherConfigurations[CurrentWeatherState],
-            0.5f
-        );
-        
-        CurrentTransition.TransitionTime = TransitionTime;
-        CurrentTransition.CurrentTime = 0.0f;
-        CurrentTransition.bActive = true;
+        SetEmotionalTone(EEmotionalTone::Tense);
     }
 }
 
-void ULightingSystemCore::SetThreatLevel(EThreatLevel NewThreatLevel, float TransitionTime)
+void ALightingSystemCore::SetSafeLighting()
 {
-    if (NewThreatLevel != CurrentThreatLevel)
+    SetEmotionalTone(EEmotionalTone::Peaceful);
+}
+
+void ALightingSystemCore::UpdateLighting()
+{
+    UpdateSunPosition();
+    UpdateAtmosphere();
+    UpdateFog();
+    UpdatePostProcess();
+}
+
+void ALightingSystemCore::UpdateSunPosition()
+{
+    if (!SunLight) return;
+
+    // Calculate sun angle based on time of day
+    float SunAngle = (CurrentTimeOfDay - 6.0f) * 15.0f; // 15 degrees per hour, sunrise at 6 AM
+    float SunElevation = FMath::Sin(FMath::DegreesToRadians(SunAngle)) * 90.0f;
+    float SunAzimuth = (CurrentTimeOfDay / 24.0f) * 360.0f;
+
+    // Set sun rotation
+    FRotator SunRotation = FRotator(-SunElevation, SunAzimuth, 0.0f);
+    SunLight->SetWorldRotation(SunRotation);
+
+    // Adjust intensity based on sun elevation
+    float IntensityMultiplier = FMath::Max(0.1f, FMath::Sin(FMath::DegreesToRadians(SunElevation + 10.0f)));
+    SunLight->SetIntensity(CurrentPreset.SunIntensity * IntensityMultiplier);
+
+    // Adjust color temperature based on time
+    FLinearColor SunColor = CurrentPreset.SunColor;
+    if (SunElevation < 10.0f) // Dawn/Dusk
     {
-        CurrentThreatLevel = NewThreatLevel;
-        
-        // Threat level changes are immediate but can have smooth transitions
-        CurrentTransition.TransitionTime = TransitionTime;
-        CurrentTransition.CurrentTime = 0.0f;
-        CurrentTransition.bActive = true;
+        SunColor = FLinearColor(1.0f, 0.6f, 0.3f, 1.0f); // Warm orange
+    }
+    else if (SunElevation < 30.0f) // Early morning/Late afternoon
+    {
+        SunColor = FLinearColor(1.0f, 0.8f, 0.6f, 1.0f); // Warm yellow
+    }
+    
+    SunLight->SetLightColor(SunColor);
+}
+
+void ALightingSystemCore::UpdateAtmosphere()
+{
+    if (!SkyAtmosphere) return;
+
+    // Update atmosphere based on current preset
+    SkyAtmosphere->SetRayleighScatteringScale(CurrentPreset.AtmosphereHaziness);
+    
+    // Adjust atmosphere based on weather
+    switch (CurrentWeather)
+    {
+        case EWeatherState::Clear:
+            SkyAtmosphere->SetMieScatteringScale(0.003f);
+            break;
+        case EWeatherState::Overcast:
+            SkyAtmosphere->SetMieScatteringScale(0.008f);
+            break;
+        case EWeatherState::Storm:
+            SkyAtmosphere->SetMieScatteringScale(0.015f);
+            break;
+        default:
+            SkyAtmosphere->SetMieScatteringScale(0.005f);
+            break;
     }
 }
 
-void ULightingSystemCore::EnableDynamicTimeProgression(bool bEnable, float TimeScale)
+void ALightingSystemCore::UpdateFog()
 {
-    bDynamicTimeProgression = bEnable;
-    TimeProgressionScale = TimeScale;
-}
+    if (!HeightFog) return;
 
-void ULightingSystemCore::UpdateLightingConfiguration()
-{
-    if (!SunLight || !SkyLight || !SkyAtmosphere || !VolumetricClouds || !HeightFog)
+    HeightFog->SetFogInscatteringColor(CurrentPreset.FogColor);
+    HeightFog->SetFogDensity(CurrentPreset.FogDensity);
+    HeightFog->SetFogHeightFalloff(CurrentPreset.FogHeightFalloff);
+
+    // Emotional fog adjustments
+    switch (CurrentEmotionalTone)
     {
-        return;
-    }
-
-    // Get base configuration from time of day
-    FLightingConfiguration BaseConfig = TimeOfDayConfigurations[CurrentTimeOfDay];
-    
-    // Blend with weather configuration
-    FLightingConfiguration WeatherBlended = BlendConfigurations(
-        BaseConfig,
-        WeatherConfigurations[CurrentWeatherState],
-        0.6f // Weather has moderate influence
-    );
-    
-    // Blend with threat level configuration
-    FLightingConfiguration FinalConfig = BlendConfigurations(
-        WeatherBlended,
-        ThreatLevelConfigurations[CurrentThreatLevel],
-        0.4f // Threat level has strong influence on mood
-    );
-    
-    // Apply transition if active
-    if (CurrentTransition.bActive)
-    {
-        float Alpha = CurrentTransition.CurrentTime / CurrentTransition.TransitionTime;
-        FinalConfig = BlendConfigurations(CurrentTransition.StartConfig, CurrentTransition.TargetConfig, Alpha);
-    }
-    
-    ApplyLightingConfiguration(FinalConfig);
-}
-
-void ULightingSystemCore::ApplyLightingConfiguration(const FLightingConfiguration& Config, float BlendWeight)
-{
-    if (!SunLight || !SkyLight || !HeightFog) return;
-
-    // === SUN LIGHT CONFIGURATION ===
-    UDirectionalLightComponent* SunComponent = SunLight->GetComponent();
-    if (SunComponent)
-    {
-        SunComponent->SetLightColor(Config.SunColor);
-        SunComponent->SetIntensity(Config.SunIntensity);
-        
-        // Calculate sun rotation based on time and angle
-        float SunRotationPitch = -90.0f + Config.SunAngle; // -90 is straight down, 0 is horizontal
-        FRotator SunRotation = FRotator(SunRotationPitch, 0.0f, 0.0f);
-        SunLight->SetActorRotation(SunRotation);
-        
-        // Enable atmosphere sun light
-        SunComponent->SetAtmosphereSunLight(true);
-        SunComponent->SetAtmosphereSunLightIndex(0);
-    }
-
-    // === SKY LIGHT CONFIGURATION ===
-    USkyLightComponent* SkyComponent = SkyLight->GetComponent();
-    if (SkyComponent)
-    {
-        SkyComponent->SetIntensity(Config.SkyIntensity);
-        SkyComponent->SetLightColor(Config.SkyColor);
-        
-        // Enable real-time capture for dynamic time of day
-        SkyComponent->SetSourceType(ESkyLightSourceType::SLS_CapturedScene);
-        SkyComponent->SetRealTimeCapture(true);
-    }
-
-    // === HEIGHT FOG CONFIGURATION ===
-    UExponentialHeightFogComponent* FogComponent = HeightFog->GetComponent();
-    if (FogComponent)
-    {
-        FogComponent->SetFogInscatteringColor(Config.FogColor);
-        FogComponent->SetFogDensity(Config.FogDensity * Config.ThreatMultiplier);
-        FogComponent->SetFogHeightFalloff(Config.FogHeightFalloff);
-        
-        // Adjust fog based on threat level
-        float ThreatFogMultiplier = 1.0f;
-        switch (CurrentThreatLevel)
-        {
-            case EThreatLevel::Safe:
-                ThreatFogMultiplier = 0.7f;
-                break;
-            case EThreatLevel::Cautious:
-                ThreatFogMultiplier = 1.0f;
-                break;
-            case EThreatLevel::Dangerous:
-                ThreatFogMultiplier = 1.3f;
-                break;
-            case EThreatLevel::Predator:
-                ThreatFogMultiplier = 1.8f;
-                break;
-        }
-        
-        FogComponent->SetFogDensity(Config.FogDensity * ThreatFogMultiplier);
-    }
-
-    // === VOLUMETRIC CLOUDS CONFIGURATION ===
-    if (VolumetricClouds)
-    {
-        UVolumetricCloudComponent* CloudComponent = VolumetricClouds->GetComponent();
-        if (CloudComponent)
-        {
-            // Cloud coverage varies with weather
-            float CloudCoverage = Config.CloudCoverage;
-            switch (CurrentWeatherState)
-            {
-                case EWeatherState::Clear:
-                    CloudCoverage *= 0.2f;
-                    break;
-                case EWeatherState::PartlyCloudy:
-                    CloudCoverage *= 0.6f;
-                    break;
-                case EWeatherState::Overcast:
-                    CloudCoverage *= 1.2f;
-                    break;
-                case EWeatherState::LightRain:
-                case EWeatherState::HeavyRain:
-                case EWeatherState::Storm:
-                    CloudCoverage *= 1.5f;
-                    break;
-            }
-            
-            // Apply cloud settings through material parameters if available
-            // This would require a material instance with exposed parameters
-        }
+        case EEmotionalTone::Terrifying:
+            HeightFog->SetFogDensity(CurrentPreset.FogDensity * 2.0f);
+            HeightFog->SetFogInscatteringColor(FLinearColor(0.3f, 0.3f, 0.4f, 1.0f));
+            break;
+        case EEmotionalTone::Mysterious:
+            HeightFog->SetFogDensity(CurrentPreset.FogDensity * 1.5f);
+            HeightFog->SetFogInscatteringColor(FLinearColor(0.4f, 0.4f, 0.6f, 1.0f));
+            break;
+        case EEmotionalTone::Peaceful:
+            HeightFog->SetFogDensity(CurrentPreset.FogDensity * 0.7f);
+            break;
     }
 }
 
-void ULightingSystemCore::InitializeLightingComponents()
+void ALightingSystemCore::UpdatePostProcess()
 {
-    UWorld* World = GetWorld();
-    if (!World) return;
+    if (!PostProcessComponent) return;
 
-    // Find lighting components in the world
-    if (!SunLight)
-    {
-        TArray<AActor*> DirectionalLights;
-        UGameplayStatics::GetAllActorsOfClass(World, ADirectionalLight::StaticClass(), DirectionalLights);
-        
-        for (AActor* Actor : DirectionalLights)
-        {
-            ADirectionalLight* DirLight = Cast<ADirectionalLight>(Actor);
-            if (DirLight && DirLight->GetComponent()->GetAtmosphereSunLight())
-            {
-                SunLight = DirLight;
-                break;
-            }
-        }
-    }
+    // Update post-process settings based on current preset
+    PostProcessComponent->Settings.bOverride_ColorContrast = true;
+    PostProcessComponent->Settings.ColorContrast = FVector4(CurrentPreset.Contrast, CurrentPreset.Contrast, CurrentPreset.Contrast, 1.0f);
 
-    if (!SkyLight)
-    {
-        TArray<AActor*> SkyLights;
-        UGameplayStatics::GetAllActorsOfClass(World, ASkyLight::StaticClass(), SkyLights);
-        if (SkyLights.Num() > 0)
-        {
-            SkyLight = Cast<ASkyLight>(SkyLights[0]);
-        }
-    }
+    PostProcessComponent->Settings.bOverride_ColorSaturation = true;
+    PostProcessComponent->Settings.ColorSaturation = FVector4(CurrentPreset.Saturation, CurrentPreset.Saturation, CurrentPreset.Saturation, 1.0f);
 
-    if (!SkyAtmosphere)
-    {
-        TArray<AActor*> SkyAtmospheres;
-        UGameplayStatics::GetAllActorsOfClass(World, ASkyAtmosphere::StaticClass(), SkyAtmospheres);
-        if (SkyAtmospheres.Num() > 0)
-        {
-            SkyAtmosphere = Cast<ASkyAtmosphere>(SkyAtmospheres[0]);
-        }
-    }
-
-    if (!VolumetricClouds)
-    {
-        TArray<AActor*> Clouds;
-        UGameplayStatics::GetAllActorsOfClass(World, AVolumetricCloud::StaticClass(), Clouds);
-        if (Clouds.Num() > 0)
-        {
-            VolumetricClouds = Cast<AVolumetricCloud>(Clouds[0]);
-        }
-    }
-
-    if (!HeightFog)
-    {
-        TArray<AActor*> Fogs;
-        UGameplayStatics::GetAllActorsOfClass(World, AExponentialHeightFog::StaticClass(), Fogs);
-        if (Fogs.Num() > 0)
-        {
-            HeightFog = Cast<AExponentialHeightFog>(Fogs[0]);
-        }
-    }
+    PostProcessComponent->Settings.bOverride_ColorGamma = true;
+    PostProcessComponent->Settings.ColorGamma = FVector4(CurrentPreset.ColorGrading.R, CurrentPreset.ColorGrading.G, CurrentPreset.ColorGrading.B, 1.0f);
 }
 
-void ULightingSystemCore::SetupDefaultConfigurations()
+void ALightingSystemCore::ApplyEmotionalTone()
 {
-    // === TIME OF DAY CONFIGURATIONS ===
+    if (!EmotionalPresets.Contains(CurrentEmotionalTone)) return;
+
+    FLightingPreset EmotionalPreset = EmotionalPresets[CurrentEmotionalTone];
     
-    // Dawn (5:00-7:00) - Soft, warm, mysterious
-    FLightingConfiguration DawnConfig;
-    DawnConfig.SunColor = FLinearColor(1.0f, 0.6f, 0.3f, 1.0f); // Warm orange
-    DawnConfig.SunIntensity = 3.0f;
-    DawnConfig.SunAngle = 15.0f; // Low angle
-    DawnConfig.SkyColor = FLinearColor(0.8f, 0.4f, 0.6f, 1.0f); // Pink sky
-    DawnConfig.SkyIntensity = 0.5f;
-    DawnConfig.FogColor = FLinearColor(0.9f, 0.7f, 0.5f, 1.0f);
-    DawnConfig.FogDensity = 0.03f;
-    DawnConfig.CloudCoverage = 0.3f;
-    TimeOfDayConfigurations.Add(ETimeOfDay::Dawn, DawnConfig);
-
-    // Morning (7:00-11:00) - Clear, hopeful
-    FLightingConfiguration MorningConfig;
-    MorningConfig.SunColor = FLinearColor(1.0f, 0.95f, 0.8f, 1.0f);
-    MorningConfig.SunIntensity = 8.0f;
-    MorningConfig.SunAngle = 35.0f;
-    MorningConfig.SkyColor = FLinearColor(0.4f, 0.7f, 1.0f, 1.0f);
-    MorningConfig.SkyIntensity = 1.0f;
-    MorningConfig.FogColor = FLinearColor(0.8f, 0.9f, 1.0f, 1.0f);
-    MorningConfig.FogDensity = 0.015f;
-    MorningConfig.CloudCoverage = 0.4f;
-    TimeOfDayConfigurations.Add(ETimeOfDay::Morning, MorningConfig);
-
-    // Midday (11:00-15:00) - Bright, harsh, exposed
-    FLightingConfiguration MiddayConfig;
-    MiddayConfig.SunColor = FLinearColor(1.0f, 1.0f, 0.9f, 1.0f);
-    MiddayConfig.SunIntensity = 12.0f;
-    MiddayConfig.SunAngle = 60.0f; // High angle
-    MiddayConfig.SkyColor = FLinearColor(0.3f, 0.6f, 1.0f, 1.0f);
-    MiddayConfig.SkyIntensity = 1.2f;
-    MiddayConfig.FogColor = FLinearColor(0.7f, 0.8f, 0.9f, 1.0f);
-    MiddayConfig.FogDensity = 0.01f;
-    MiddayConfig.CloudCoverage = 0.5f;
-    TimeOfDayConfigurations.Add(ETimeOfDay::Midday, MiddayConfig);
-
-    // Afternoon (15:00-18:00) - Warm, golden hour approaching
-    FLightingConfiguration AfternoonConfig;
-    AfternoonConfig.SunColor = FLinearColor(1.0f, 0.9f, 0.7f, 1.0f);
-    AfternoonConfig.SunIntensity = 9.0f;
-    AfternoonConfig.SunAngle = 40.0f;
-    AfternoonConfig.SkyColor = FLinearColor(0.5f, 0.7f, 1.0f, 1.0f);
-    AfternoonConfig.SkyIntensity = 1.0f;
-    AfternoonConfig.FogColor = FLinearColor(0.8f, 0.8f, 0.7f, 1.0f);
-    AfternoonConfig.FogDensity = 0.02f;
-    AfternoonConfig.CloudCoverage = 0.6f;
-    TimeOfDayConfigurations.Add(ETimeOfDay::Afternoon, AfternoonConfig);
-
-    // Dusk (18:00-20:00) - Golden hour, dramatic, beautiful but ominous
-    FLightingConfiguration DuskConfig;
-    DuskConfig.SunColor = FLinearColor(1.0f, 0.5f, 0.2f, 1.0f); // Deep orange
-    DuskConfig.SunIntensity = 4.0f;
-    DuskConfig.SunAngle = 10.0f; // Very low
-    DuskConfig.SkyColor = FLinearColor(1.0f, 0.3f, 0.4f, 1.0f); // Red sky
-    DuskConfig.SkyIntensity = 0.7f;
-    DuskConfig.FogColor = FLinearColor(1.0f, 0.6f, 0.4f, 1.0f);
-    DuskConfig.FogDensity = 0.025f;
-    DuskConfig.CloudCoverage = 0.4f;
-    TimeOfDayConfigurations.Add(ETimeOfDay::Dusk, DuskConfig);
-
-    // Night (20:00-5:00) - Dark, mysterious, dangerous
-    FLightingConfiguration NightConfig;
-    NightConfig.SunColor = FLinearColor(0.1f, 0.2f, 0.4f, 1.0f); // Moonlight
-    NightConfig.SunIntensity = 0.5f;
-    NightConfig.SunAngle = -30.0f; // Below horizon
-    NightConfig.SkyColor = FLinearColor(0.05f, 0.1f, 0.2f, 1.0f);
-    NightConfig.SkyIntensity = 0.2f;
-    NightConfig.FogColor = FLinearColor(0.1f, 0.15f, 0.3f, 1.0f);
-    NightConfig.FogDensity = 0.04f;
-    NightConfig.CloudCoverage = 0.7f;
-    TimeOfDayConfigurations.Add(ETimeOfDay::Night, NightConfig);
-
-    // === WEATHER STATE CONFIGURATIONS ===
-    
-    // Clear Sky - Enhances base lighting
-    FLightingConfiguration ClearConfig;
-    ClearConfig.SunIntensity = 1.2f; // Multiplier
-    ClearConfig.SkyIntensity = 1.1f;
-    ClearConfig.FogDensity = 0.8f; // Multiplier - less fog
-    ClearConfig.CloudCoverage = 0.2f;
-    WeatherConfigurations.Add(EWeatherState::Clear, ClearConfig);
-
-    // Overcast - Diffused, muted lighting
-    FLightingConfiguration OvercastConfig;
-    OvercastConfig.SunIntensity = 0.6f;
-    OvercastConfig.SkyIntensity = 1.3f; // More sky light
-    OvercastConfig.FogDensity = 1.2f;
-    OvercastConfig.CloudCoverage = 0.9f;
-    WeatherConfigurations.Add(EWeatherState::Overcast, OvercastConfig);
-
-    // Storm - Dark, dramatic
-    FLightingConfiguration StormConfig;
-    StormConfig.SunIntensity = 0.3f;
-    StormConfig.SkyIntensity = 0.7f;
-    StormConfig.FogDensity = 1.5f;
-    StormConfig.CloudCoverage = 1.0f;
-    WeatherConfigurations.Add(EWeatherState::Storm, StormConfig);
-
-    // === THREAT LEVEL CONFIGURATIONS ===
-    
-    // Safe - Bright, warm
-    FLightingConfiguration SafeConfig;
-    SafeConfig.WarmthFactor = 1.2f;
-    SafeConfig.ThreatMultiplier = 0.8f;
-    ThreatLevelConfigurations.Add(EThreatLevel::Safe, SafeConfig);
-
-    // Predator - Cold, dark, high contrast
-    FLightingConfiguration PredatorConfig;
-    PredatorConfig.SunIntensity = 0.7f;
-    PredatorConfig.SkyIntensity = 0.6f;
-    PredatorConfig.FogDensity = 1.4f;
-    PredatorConfig.WarmthFactor = 0.6f;
-    PredatorConfig.ThreatMultiplier = 1.5f;
-    ThreatLevelConfigurations.Add(EThreatLevel::Predator, PredatorConfig);
+    // Blend current preset with emotional adjustments
+    CurrentPreset.Contrast = FMath::Lerp(CurrentPreset.Contrast, EmotionalPreset.Contrast, 0.5f);
+    CurrentPreset.Saturation = FMath::Lerp(CurrentPreset.Saturation, EmotionalPreset.Saturation, 0.5f);
+    CurrentPreset.ShadowIntensity = FMath::Lerp(CurrentPreset.ShadowIntensity, EmotionalPreset.ShadowIntensity, 0.7f);
 }
 
-FLightingConfiguration ULightingSystemCore::BlendConfigurations(const FLightingConfiguration& A, const FLightingConfiguration& B, float Alpha)
+FLightingPreset ALightingSystemCore::GetCurrentPreset() const
 {
-    FLightingConfiguration Result;
+    ETimeOfDay CurrentTimeEnum = GetCurrentTimeOfDayEnum();
+    
+    if (TimeOfDayPresets.Contains(CurrentTimeEnum))
+    {
+        return TimeOfDayPresets[CurrentTimeEnum];
+    }
+    
+    return FLightingPreset();
+}
+
+FLightingPreset ALightingSystemCore::BlendPresets(const FLightingPreset& A, const FLightingPreset& B, float Alpha) const
+{
+    FLightingPreset Result;
     
     Result.SunColor = FMath::Lerp(A.SunColor, B.SunColor, Alpha);
     Result.SunIntensity = FMath::Lerp(A.SunIntensity, B.SunIntensity, Alpha);
-    Result.SunAngle = FMath::Lerp(A.SunAngle, B.SunAngle, Alpha);
     Result.SkyColor = FMath::Lerp(A.SkyColor, B.SkyColor, Alpha);
     Result.SkyIntensity = FMath::Lerp(A.SkyIntensity, B.SkyIntensity, Alpha);
     Result.FogColor = FMath::Lerp(A.FogColor, B.FogColor, Alpha);
     Result.FogDensity = FMath::Lerp(A.FogDensity, B.FogDensity, Alpha);
     Result.FogHeightFalloff = FMath::Lerp(A.FogHeightFalloff, B.FogHeightFalloff, Alpha);
+    Result.AtmosphereHaziness = FMath::Lerp(A.AtmosphereHaziness, B.AtmosphereHaziness, Alpha);
     Result.CloudCoverage = FMath::Lerp(A.CloudCoverage, B.CloudCoverage, Alpha);
-    Result.CloudOpacity = FMath::Lerp(A.CloudOpacity, B.CloudOpacity, Alpha);
-    Result.ThreatMultiplier = FMath::Lerp(A.ThreatMultiplier, B.ThreatMultiplier, Alpha);
-    Result.WarmthFactor = FMath::Lerp(A.WarmthFactor, B.WarmthFactor, Alpha);
+    Result.ShadowIntensity = FMath::Lerp(A.ShadowIntensity, B.ShadowIntensity, Alpha);
+    Result.Contrast = FMath::Lerp(A.Contrast, B.Contrast, Alpha);
+    Result.Saturation = FMath::Lerp(A.Saturation, B.Saturation, Alpha);
+    Result.ColorGrading = FMath::Lerp(A.ColorGrading, B.ColorGrading, Alpha);
     
     return Result;
 }
 
-void ULightingSystemCore::UpdateTransition(float DeltaTime)
+void ALightingSystemCore::InitializeDefaultPresets()
 {
-    if (CurrentTransition.bActive)
-    {
-        CurrentTransition.CurrentTime += DeltaTime;
-        
-        if (CurrentTransition.CurrentTime >= CurrentTransition.TransitionTime)
-        {
-            CurrentTransition.bActive = false;
-            CurrentTransition.CurrentTime = 0.0f;
-        }
-    }
+    // Dawn Preset (5:00-7:00) - Mysterious, low visibility
+    FLightingPreset DawnPreset;
+    DawnPreset.SunColor = FLinearColor(1.0f, 0.6f, 0.3f, 1.0f);
+    DawnPreset.SunIntensity = 1.5f;
+    DawnPreset.SkyColor = FLinearColor(0.8f, 0.5f, 0.3f, 1.0f);
+    DawnPreset.SkyIntensity = 0.3f;
+    DawnPreset.FogColor = FLinearColor(0.6f, 0.5f, 0.4f, 1.0f);
+    DawnPreset.FogDensity = 0.08f;
+    DawnPreset.FogHeightFalloff = 0.1f;
+    DawnPreset.AtmosphereHaziness = 0.8f;
+    DawnPreset.CloudCoverage = 0.6f;
+    DawnPreset.ShadowIntensity = 0.9f;
+    DawnPreset.Contrast = 1.4f;
+    DawnPreset.Saturation = 0.7f;
+    DawnPreset.ColorGrading = FLinearColor(1.0f, 0.9f, 0.8f, 1.0f);
+    TimeOfDayPresets.Add(ETimeOfDay::Dawn, DawnPreset);
+
+    // Morning Preset (7:00-11:00) - Tense but clearer
+    FLightingPreset MorningPreset;
+    MorningPreset.SunColor = FLinearColor(1.0f, 0.9f, 0.7f, 1.0f);
+    MorningPreset.SunIntensity = 2.5f;
+    MorningPreset.SkyColor = FLinearColor(0.4f, 0.7f, 1.0f, 1.0f);
+    MorningPreset.SkyIntensity = 0.6f;
+    MorningPreset.FogColor = FLinearColor(0.7f, 0.7f, 0.8f, 1.0f);
+    MorningPreset.FogDensity = 0.04f;
+    MorningPreset.FogHeightFalloff = 0.2f;
+    MorningPreset.AtmosphereHaziness = 0.5f;
+    MorningPreset.CloudCoverage = 0.4f;
+    MorningPreset.ShadowIntensity = 0.8f;
+    MorningPreset.Contrast = 1.2f;
+    MorningPreset.Saturation = 0.9f;
+    MorningPreset.ColorGrading = FLinearColor(1.0f, 0.98f, 0.95f, 1.0f);
+    TimeOfDayPresets.Add(ETimeOfDay::Morning, MorningPreset);
+
+    // Midday Preset (11:00-14:00) - Harsh, high contrast
+    FLightingPreset MiddayPreset;
+    MiddayPreset.SunColor = FLinearColor(1.0f, 1.0f, 0.9f, 1.0f);
+    MiddayPreset.SunIntensity = 4.0f;
+    MiddayPreset.SkyColor = FLinearColor(0.3f, 0.6f, 1.0f, 1.0f);
+    MiddayPreset.SkyIntensity = 1.0f;
+    MiddayPreset.FogColor = FLinearColor(0.8f, 0.8f, 0.9f, 1.0f);
+    MiddayPreset.FogDensity = 0.02f;
+    MiddayPreset.FogHeightFalloff = 0.3f;
+    MiddayPreset.AtmosphereHaziness = 0.3f;
+    MiddayPreset.CloudCoverage = 0.3f;
+    MiddayPreset.ShadowIntensity = 0.7f;
+    MiddayPreset.Contrast = 1.5f;
+    MiddayPreset.Saturation = 1.1f;
+    MiddayPreset.ColorGrading = FLinearColor(1.0f, 1.0f, 0.98f, 1.0f);
+    TimeOfDayPresets.Add(ETimeOfDay::Midday, MiddayPreset);
+
+    // Afternoon Preset (14:00-17:00) - Golden but ominous
+    FLightingPreset AfternoonPreset;
+    AfternoonPreset.SunColor = FLinearColor(1.0f, 0.8f, 0.6f, 1.0f);
+    AfternoonPreset.SunIntensity = 3.0f;
+    AfternoonPreset.SkyColor = FLinearColor(0.5f, 0.7f, 1.0f, 1.0f);
+    AfternoonPreset.SkyIntensity = 0.8f;
+    AfternoonPreset.FogColor = FLinearColor(0.8f, 0.7f, 0.6f, 1.0f);
+    AfternoonPreset.FogDensity = 0.03f;
+    AfternoonPreset.FogHeightFalloff = 0.25f;
+    AfternoonPreset.AtmosphereHaziness = 0.4f;
+    AfternoonPreset.CloudCoverage = 0.5f;
+    AfternoonPreset.ShadowIntensity = 0.8f;
+    AfternoonPreset.Contrast = 1.3f;
+    AfternoonPreset.Saturation = 1.0f;
+    AfternoonPreset.ColorGrading = FLinearColor(1.0f, 0.95f, 0.9f, 1.0f);
+    TimeOfDayPresets.Add(ETimeOfDay::Afternoon, AfternoonPreset);
+
+    // Dusk Preset (17:00-19:00) - Most dangerous time
+    FLightingPreset DuskPreset;
+    DuskPreset.SunColor = FLinearColor(1.0f, 0.4f, 0.2f, 1.0f);
+    DuskPreset.SunIntensity = 1.0f;
+    DuskPreset.SkyColor = FLinearColor(0.8f, 0.3f, 0.2f, 1.0f);
+    DuskPreset.SkyIntensity = 0.4f;
+    DuskPreset.FogColor = FLinearColor(0.5f, 0.3f, 0.3f, 1.0f);
+    DuskPreset.FogDensity = 0.06f;
+    DuskPreset.FogHeightFalloff = 0.15f;
+    DuskPreset.AtmosphereHaziness = 0.7f;
+    DuskPreset.CloudCoverage = 0.7f;
+    DuskPreset.ShadowIntensity = 0.95f;
+    DuskPreset.Contrast = 1.6f;
+    DuskPreset.Saturation = 0.8f;
+    DuskPreset.ColorGrading = FLinearColor(1.0f, 0.8f, 0.7f, 1.0f);
+    TimeOfDayPresets.Add(ETimeOfDay::Dusk, DuskPreset);
+
+    // Night Preset (19:00-5:00) - Maximum fear
+    FLightingPreset NightPreset;
+    NightPreset.SunColor = FLinearColor(0.3f, 0.4f, 0.8f, 1.0f);
+    NightPreset.SunIntensity = 0.1f;
+    NightPreset.SkyColor = FLinearColor(0.1f, 0.2f, 0.4f, 1.0f);
+    NightPreset.SkyIntensity = 0.1f;
+    NightPreset.FogColor = FLinearColor(0.2f, 0.3f, 0.4f, 1.0f);
+    NightPreset.FogDensity = 0.1f;
+    NightPreset.FogHeightFalloff = 0.1f;
+    NightPreset.AtmosphereHaziness = 0.9f;
+    NightPreset.CloudCoverage = 0.8f;
+    NightPreset.ShadowIntensity = 1.0f;
+    NightPreset.Contrast = 2.0f;
+    NightPreset.Saturation = 0.6f;
+    NightPreset.ColorGrading = FLinearColor(0.9f, 0.9f, 1.0f, 1.0f);
+    TimeOfDayPresets.Add(ETimeOfDay::Night, NightPreset);
+
+    // Initialize emotional presets
+    InitializeEmotionalPresets();
+}
+
+void ALightingSystemCore::InitializeEmotionalPresets()
+{
+    // Peaceful - Rare safe moments
+    FLightingPreset PeacefulPreset;
+    PeacefulPreset.Contrast = 1.0f;
+    PeacefulPreset.Saturation = 1.2f;
+    PeacefulPreset.ShadowIntensity = 0.6f;
+    PeacefulPreset.ColorGrading = FLinearColor(1.0f, 1.0f, 0.95f, 1.0f);
+    EmotionalPresets.Add(EEmotionalTone::Peaceful, PeacefulPreset);
+
+    // Tense - Default state
+    FLightingPreset TensePreset;
+    TensePreset.Contrast = 1.3f;
+    TensePreset.Saturation = 0.9f;
+    TensePreset.ShadowIntensity = 0.8f;
+    TensePreset.ColorGrading = FLinearColor(0.98f, 0.95f, 0.92f, 1.0f);
+    EmotionalPresets.Add(EEmotionalTone::Tense, TensePreset);
+
+    // Terrifying - Immediate danger
+    FLightingPreset TerrifyingPreset;
+    TerrifyingPreset.Contrast = 2.0f;
+    TerrifyingPreset.Saturation = 0.7f;
+    TerrifyingPreset.ShadowIntensity = 1.0f;
+    TerrifyingPreset.ColorGrading = FLinearColor(0.9f, 0.85f, 0.8f, 1.0f);
+    EmotionalPresets.Add(EEmotionalTone::Terrifying, TerrifyingPreset);
+
+    // Mysterious - Unknown presence
+    FLightingPreset MysteriousPreset;
+    MysteriousPreset.Contrast = 1.5f;
+    MysteriousPreset.Saturation = 0.8f;
+    MysteriousPreset.ShadowIntensity = 0.9f;
+    MysteriousPreset.ColorGrading = FLinearColor(0.95f, 0.9f, 1.0f, 1.0f);
+    EmotionalPresets.Add(EEmotionalTone::Mysterious, MysteriousPreset);
+
+    // Melancholy - Loss/sadness
+    FLightingPreset MelancholyPreset;
+    MelancholyPreset.Contrast = 1.1f;
+    MelancholyPreset.Saturation = 0.6f;
+    MelancholyPreset.ShadowIntensity = 0.7f;
+    MelancholyPreset.ColorGrading = FLinearColor(0.9f, 0.9f, 0.95f, 1.0f);
+    EmotionalPresets.Add(EEmotionalTone::Melancholy, MelancholyPreset);
+
+    // Wonder - Discovery moments
+    FLightingPreset WonderPreset;
+    WonderPreset.Contrast = 1.2f;
+    WonderPreset.Saturation = 1.3f;
+    WonderPreset.ShadowIntensity = 0.5f;
+    WonderPreset.ColorGrading = FLinearColor(1.0f, 0.98f, 0.9f, 1.0f);
+    EmotionalPresets.Add(EEmotionalTone::Wonder, WonderPreset);
 }
