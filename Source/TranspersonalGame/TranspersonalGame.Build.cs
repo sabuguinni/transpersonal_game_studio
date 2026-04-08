@@ -8,6 +8,7 @@ public class TranspersonalGame : ModuleRules
     {
         PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 
+        // Core dependencies
         PublicDependencyModuleNames.AddRange(new string[] 
         { 
             "Core", 
@@ -17,86 +18,70 @@ public class TranspersonalGame : ModuleRules
             "EnhancedInput",
             "UMG",
             "Slate",
-            "SlateCore",
-            "NavigationSystem",
-            "AIModule",
-            "GameplayTasks",
-            "MassEntity",
-            "MassCommon",
-            "MassMovement",
-            "MassActors",
-            "MassSpawner",
-            "MassSimulation",
-            "MassGameplay",
-            "MassLOD",
-            "MassReplication",
-            "StateTree",
-            "GameplayStateTree",
-            "StructUtils",
-            "Niagara",
-            "MetasoundEngine",
-            "AudioMixer",
-            "Landscape",
-            "Foliage",
-            "ProceduralMeshComponent",
-            "GeometryCollectionEngine",
-            "ChaosSolverEngine",
-            "ChaosVehicles",
-            "PhysicsCore"
+            "SlateCore"
         });
 
+        // Gameplay dependencies
         PrivateDependencyModuleNames.AddRange(new string[] 
-        {
-            "RenderCore",
-            "RHI",
-            "ApplicationCore",
-            "Json",
-            "JsonObjectConverter",
-            "HTTP",
-            "OnlineSubsystem",
-            "OnlineSubsystemUtils",
-            "DeveloperSettings",
-            "ToolMenus",
-            "EditorStyle",
-            "EditorWidgets",
-            "UnrealEd",
-            "BlueprintGraph",
-            "KismetCompiler",
-            "PropertyEditor",
-            "Sequencer",
-            "MovieScene",
+        { 
+            "GameplayTags",
+            "GameplayTasks",
+            "AIModule",
+            "NavigationSystem",
+            "Niagara",
+            "AudioMixer",
+            "MetasoundEngine",
+            "CinematicCamera",
             "LevelSequence",
-            "CinematicCamera"
+            "MovieScene"
         });
 
-        // Optimization settings
-        OptimizeCode = CodeOptimization.InShippingBuildsOnly;
-        
-        // Enable IWYU
-        bEnforceIWYU = true;
-        
-        // Performance settings for large worlds
-        bUseUnity = true;
-        MinFilesUsingPrecompiledHeaderOverride = 1;
-        
-        if (Target.Configuration == UnrealTargetConfiguration.Shipping)
+        // UE5 specific features
+        if (Target.Version.MajorVersion >= 5)
         {
-            PublicDefinitions.Add("UE_BUILD_SHIPPING_WITH_EDITOR=0");
-            bUseLoggingInShipping = false;
+            PrivateDependencyModuleNames.AddRange(new string[]
+            {
+                "MassEntity",
+                "MassMovement",
+                "MassSpawner",
+                "MassAI",
+                "WorldPartition",
+                "Chaos",
+                "ChaosVehicles"
+            });
         }
-        
-        // Platform-specific optimizations
+
+        // Development tools (Editor only)
+        if (Target.bBuildEditor)
+        {
+            PrivateDependencyModuleNames.AddRange(new string[]
+            {
+                "UnrealEd",
+                "EditorStyle",
+                "EditorWidgets",
+                "ToolMenus",
+                "PropertyEditor"
+            });
+        }
+
+        // Platform specific
         if (Target.Platform == UnrealTargetPlatform.Win64)
         {
             PublicDefinitions.Add("PLATFORM_WINDOWS=1");
         }
-        else if (Target.Platform == UnrealTargetPlatform.PS5)
-        {
-            PublicDefinitions.Add("PLATFORM_PS5=1");
-        }
-        else if (Target.Platform == UnrealTargetPlatform.XSX)
-        {
-            PublicDefinitions.Add("PLATFORM_XBOX_SERIES_X=1");
-        }
+
+        // Performance settings
+        bUseUnity = true;
+        MinFilesUsingPrecompiledHeaderOverride = 1;
+        bFasterWithoutUnity = false;
+
+        // Optimization flags
+        OptimizeCode = CodeOptimization.InShippingBuildsOnly;
+        
+        // Enable IWYU for better compile times
+        bEnforceIWYU = true;
+        
+        // Disable legacy features for better performance
+        bLegacyPublicIncludePaths = false;
     }
 }
