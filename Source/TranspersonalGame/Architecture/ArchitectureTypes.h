@@ -1,3 +1,7 @@
+// Architecture & Interior Agent — Transpersonal Game Studio
+// PROD_JURASSIC_001 — Architecture Types Definition
+// Agent #07 — Architecture & Interior Agent
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -5,162 +9,131 @@
 #include "Components/StaticMeshComponent.h"
 #include "ArchitectureTypes.generated.h"
 
-/**
- * Enumeration of prehistoric structure types
- */
 UENUM(BlueprintType)
-enum class EPrehistoricStructureType : uint8
+enum class EArchitectureType : uint8
 {
-    None            UMETA(DisplayName = "None"),
-    Cave            UMETA(DisplayName = "Cave Dwelling"),
-    Hut             UMETA(DisplayName = "Primitive Hut"),
-    Shelter         UMETA(DisplayName = "Rock Shelter"),
-    Ceremonial      UMETA(DisplayName = "Ceremonial Site"),
-    Storage         UMETA(DisplayName = "Storage Cache"),
-    Workshop        UMETA(DisplayName = "Tool Workshop"),
-    Burial          UMETA(DisplayName = "Burial Site"),
-    Watchtower      UMETA(DisplayName = "Observation Post"),
-    Bridge          UMETA(DisplayName = "Primitive Bridge"),
-    Ruins           UMETA(DisplayName = "Ancient Ruins")
+    // SURVIVAL STRUCTURES
+    BasicShelter         UMETA(DisplayName = "Basic Shelter"),
+    ReinforcedHut        UMETA(DisplayName = "Reinforced Hut"),
+    WatchTower          UMETA(DisplayName = "Watch Tower"),
+    StoragePit          UMETA(DisplayName = "Storage Pit"),
+    
+    // DEFENSIVE STRUCTURES
+    Palisade            UMETA(DisplayName = "Palisade"),
+    Barricade           UMETA(DisplayName = "Barricade"),
+    TrapPit             UMETA(DisplayName = "Trap Pit"),
+    SpikeTrap           UMETA(DisplayName = "Spike Trap"),
+    
+    // UTILITY STRUCTURES
+    FirePit             UMETA(DisplayName = "Fire Pit"),
+    WorkBench           UMETA(DisplayName = "Work Bench"),
+    DryingRack          UMETA(DisplayName = "Drying Rack"),
+    WaterCollector      UMETA(DisplayName = "Water Collector"),
+    
+    // RUINS & ABANDONED
+    AbandonedCamp       UMETA(DisplayName = "Abandoned Camp"),
+    CollapsedShelter    UMETA(DisplayName = "Collapsed Shelter"),
+    BuriedStructure     UMETA(DisplayName = "Buried Structure"),
+    AncientRuins        UMETA(DisplayName = "Ancient Ruins")
 };
 
-/**
- * Enumeration of construction materials used by prehistoric humans
- */
 UENUM(BlueprintType)
-enum class EPrehistoricMaterial : uint8
+enum class EInteriorType : uint8
 {
-    Stone           UMETA(DisplayName = "Stone"),
-    Wood            UMETA(DisplayName = "Wood"),
-    Bone            UMETA(DisplayName = "Bone"),
-    Hide            UMETA(DisplayName = "Animal Hide"),
-    Clay            UMETA(DisplayName = "Clay"),
-    Thatch          UMETA(DisplayName = "Thatch"),
-    Mud             UMETA(DisplayName = "Mud Brick"),
-    Organic         UMETA(DisplayName = "Organic Matter")
+    // LIVING SPACES
+    SleepingArea        UMETA(DisplayName = "Sleeping Area"),
+    CookingArea         UMETA(DisplayName = "Cooking Area"),
+    StorageArea         UMETA(DisplayName = "Storage Area"),
+    WorkArea            UMETA(DisplayName = "Work Area"),
+    
+    // DEFENSIVE INTERIORS
+    HidingSpot          UMETA(DisplayName = "Hiding Spot"),
+    LookoutPost         UMETA(DisplayName = "Lookout Post"),
+    SafeRoom            UMETA(DisplayName = "Safe Room"),
+    
+    // ABANDONED INTERIORS
+    EmptyDwelling       UMETA(DisplayName = "Empty Dwelling"),
+    RansackedShelter    UMETA(DisplayName = "Ransacked Shelter"),
+    OvergrownInterior   UMETA(DisplayName = "Overgrown Interior")
 };
 
-/**
- * Enumeration of preservation states for structures
- */
 UENUM(BlueprintType)
-enum class EStructureCondition : uint8
+enum class EConstructionMaterial : uint8
 {
-    Pristine        UMETA(DisplayName = "Recently Abandoned"),
-    Weathered       UMETA(DisplayName = "Weathered"),
-    Damaged         UMETA(DisplayName = "Partially Damaged"),
-    Ruined          UMETA(DisplayName = "Heavily Ruined"),
-    Collapsed       UMETA(DisplayName = "Collapsed"),
-    Overgrown       UMETA(DisplayName = "Overgrown by Nature")
+    // NATURAL MATERIALS
+    Wood                UMETA(DisplayName = "Wood"),
+    Stone               UMETA(DisplayName = "Stone"),
+    Mud                 UMETA(DisplayName = "Mud"),
+    Leaves              UMETA(DisplayName = "Leaves"),
+    Bone                UMETA(DisplayName = "Bone"),
+    Hide                UMETA(DisplayName = "Hide"),
+    
+    // COMPOSITE MATERIALS
+    WoodAndMud          UMETA(DisplayName = "Wood and Mud"),
+    StoneAndWood        UMETA(DisplayName = "Stone and Wood"),
+    BoneAndHide         UMETA(DisplayName = "Bone and Hide")
 };
 
-/**
- * Structure that defines an interior space and its story
- */
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FInteriorNarrative
+struct FArchitectureSpec
 {
     GENERATED_BODY()
 
-    // Who lived here
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FString FormerInhabitant;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    EArchitectureType Type;
 
-    // What happened to them
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FString FateOfInhabitant;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    EConstructionMaterial PrimaryMaterial;
 
-    // Objects left behind that tell the story
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    TArray<FString> StoryObjects;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    EConstructionMaterial SecondaryMaterial;
 
-    // Signs of struggle or peaceful departure
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    bool bShowsSignsOfStruggle;
-
-    // Time since abandonment (affects decay)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    float YearsSinceAbandonment;
-
-    FInteriorNarrative()
-    {
-        FormerInhabitant = TEXT("Unknown");
-        FateOfInhabitant = TEXT("Disappeared");
-        bShowsSignsOfStruggle = false;
-        YearsSinceAbandonment = 10.0f;
-    }
-};
-
-/**
- * Data asset that defines a prehistoric structure template
- */
-UCLASS(BlueprintType)
-class TRANSPERSONALGAME_API UPrehistoricStructureData : public UDataAsset
-{
-    GENERATED_BODY()
-
-public:
-    // Basic structure information
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    EPrehistoricStructureType StructureType;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    FString StructureName;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    FString Description;
-
-    // Physical properties
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical")
-    EPrehistoricMaterial PrimaryMaterial;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical")
-    EStructureCondition Condition;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
     FVector Dimensions;
 
-    // Mesh references
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Meshes")
-    TSoftObjectPtr<UStaticMesh> ExteriorMesh;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    float StructuralIntegrity;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Meshes")
-    TArray<TSoftObjectPtr<UStaticMesh>> InteriorMeshes;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    float WeatherResistance;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Meshes")
-    TArray<TSoftObjectPtr<UStaticMesh>> PropMeshes;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    bool bIsDefensive;
 
-    // Narrative content
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FInteriorNarrative InteriorStory;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    bool bIsAbandoned;
 
-    // Gameplay properties
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Gameplay")
-    bool bCanProvideShel
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    TArray<EInteriorType> InteriorSpaces;
 
-;
+    FArchitectureSpec()
+    {
+        Type = EArchitectureType::BasicShelter;
+        PrimaryMaterial = EConstructionMaterial::Wood;
+        SecondaryMaterial = EConstructionMaterial::Leaves;
+        Dimensions = FVector(300.0f, 300.0f, 200.0f);
+        StructuralIntegrity = 1.0f;
+        WeatherResistance = 0.5f;
+        bIsDefensive = false;
+        bIsAbandoned = false;
+    }
+};
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Gameplay")
-    bool bContainsResources;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Gameplay")
-    bool bIsDangerous;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Gameplay")
-    float SafetyRating; // 0.0 = death trap, 1.0 = completely safe
+/**
+ * Data Asset that defines architectural presets for the game
+ */
+UCLASS(BlueprintType)
+class TRANSPERSONALGAME_API UArchitectureDataAsset : public UDataAsset
+{
+    GENERATED_BODY()
 
 public:
-    UPrehistoricStructureData()
-    {
-        StructureType = EPrehistoricStructureType::None;
-        StructureName = TEXT("Unnamed Structure");
-        Description = TEXT("A structure from the past");
-        PrimaryMaterial = EPrehistoricMaterial::Stone;
-        Condition = EStructureCondition::Weathered;
-        Dimensions = FVector(500.0f, 500.0f, 300.0f);
-        bCanProvideShel = true;
-        bContainsResources = false;
-        bIsDangerous = false;
-        SafetyRating = 0.7f;
-    }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture Presets")
+    TArray<FArchitectureSpec> ArchitecturePresets;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Material Mapping")
+    TMap<EConstructionMaterial, TSoftObjectPtr<UMaterialInterface>> MaterialMap;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mesh Mapping")
+    TMap<EArchitectureType, TSoftObjectPtr<UStaticMesh>> MeshMap;
 };
