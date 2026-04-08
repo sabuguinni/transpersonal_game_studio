@@ -1,0 +1,40 @@
+// Material: Character Skin Variation Master Material
+// This represents the master material for character skin variations
+
+/*
+Material Configuration:
+- Shading Model: Default Lit
+- Blend Mode: Opaque
+- Material Domain: Surface
+
+Parameters:
+- SkinTone (Scalar): Controls skin color from light to dark
+- DirtLevel (Scalar): Controls dirt/grime overlay intensity
+- ScarLevel (Scalar): Controls scar visibility and intensity
+- WearLevel (Scalar): Controls clothing wear and tear
+- SubsurfaceScattering (Vector3): Skin SSS color
+- Roughness (Scalar): Skin surface roughness
+- Normal Intensity (Scalar): Normal map strength
+
+Texture Inputs:
+- BaseColor_Texture (Texture2D): Base skin color map
+- Normal_Texture (Texture2D): Skin normal map
+- Roughness_Texture (Texture2D): Skin roughness map
+- Dirt_Overlay_Texture (Texture2D): Dirt and grime overlay
+- Scar_Mask_Texture (Texture2D): Scar placement mask
+- Subsurface_Texture (Texture2D): Subsurface scattering map
+
+Material Graph:
+1. Base skin color modified by SkinTone parameter
+2. Dirt overlay blended based on DirtLevel
+3. Scar details added based on ScarLevel
+4. Normal maps combined for skin detail
+5. Roughness adjusted for realistic skin properties
+6. Subsurface scattering for realistic skin translucency
+
+This material works with MetaHuman meshes to create diverse, realistic character appearances
+that reflect the harsh survival conditions of the prehistoric world.
+*/
+
+// This file represents the material structure that would be created in UE5 Material Editor
+// The actual material would be built using the node-based material editor
