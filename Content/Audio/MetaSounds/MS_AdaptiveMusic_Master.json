@@ -1,151 +1,277 @@
 {
-  "MetaSoundName": "MS_AdaptiveMusic_Master",
-  "Description": "Master adaptive music MetaSound for Jurassic Survival - responds to emotional states and threat levels",
-  "Version": "1.0",
+  "MetaSoundType": "Source",
+  "Name": "MS_AdaptiveMusic_Master",
+  "Description": "Master adaptive music system for Jurassic survival game. Responds to emotional states, tension levels, and environmental conditions.",
   "Inputs": [
     {
-      "Name": "Intensity",
-      "Type": "Float",
-      "DefaultValue": 0.2,
-      "Description": "Overall music intensity (0-1)"
-    },
-    {
-      "Name": "Tension",
-      "Type": "Float", 
-      "DefaultValue": 0.1,
-      "Description": "Musical tension level (0-1)"
-    },
-    {
-      "Name": "ThreatLevel",
+      "Name": "TensionLevel",
       "Type": "Float",
       "DefaultValue": 0.0,
-      "Description": "Dinosaur threat presence (0-1)"
+      "Description": "Current tension level (0.0 = calm, 1.0 = maximum tension)"
     },
     {
-      "Name": "PlayerHeartRate",
+      "Name": "EmotionalState",
+      "Type": "Int32",
+      "DefaultValue": 0,
+      "Description": "Current emotional state (0=Calm, 1=Tension, 2=Danger, 3=Terror, 4=Relief, 5=Wonder)"
+    },
+    {
+      "Name": "ProximityToDanger",
       "Type": "Float",
-      "DefaultValue": 60.0,
-      "Description": "Simulated player heart rate (BPM)"
+      "DefaultValue": 0.0,
+      "Description": "How close the player is to danger (0.0 = safe, 1.0 = immediate danger)"
     },
     {
-      "Name": "IsPlayerHidden",
+      "Name": "IsNightTime",
       "Type": "Bool",
       "DefaultValue": false,
-      "Description": "Whether player is hiding"
+      "Description": "Whether it's currently night time"
     },
     {
-      "Name": "TransitionTime",
-      "Type": "Float",
-      "DefaultValue": 3.0,
-      "Description": "Time to transition between states"
+      "Name": "EnvironmentType",
+      "Type": "Int32",
+      "DefaultValue": 0,
+      "Description": "Current environment type (0=Forest, 1=Plains, 2=River, 3=Cave, 4=Nest, 5=Base)"
     },
     {
       "Name": "WeatherIntensity",
       "Type": "Float",
       "DefaultValue": 0.0,
-      "Description": "Weather intensity affecting music"
+      "Description": "Current weather intensity (0.0 = clear, 1.0 = storm)"
+    },
+    {
+      "Name": "PlayerHeartRate",
+      "Type": "Float",
+      "DefaultValue": 60.0,
+      "Description": "Player's simulated heart rate (BPM)"
     }
   ],
   "Outputs": [
     {
-      "Name": "AudioLeft",
+      "Name": "OutLeft",
       "Type": "Audio"
     },
     {
-      "Name": "AudioRight", 
+      "Name": "OutRight",
       "Type": "Audio"
     }
   ],
-  "NodeGraph": {
-    "Description": "Adaptive music system with layered approach",
-    "Layers": [
-      {
-        "Name": "BaseLayer",
-        "Description": "Ambient drone and pad sounds",
-        "Nodes": [
-          {
-            "Type": "WavePlayer",
-            "WaveAsset": "Drone_Forest_Base_Loop",
-            "Volume": "Intensity * 0.6"
-          },
-          {
-            "Type": "LowFrequencyOscillator",
-            "Frequency": "PlayerHeartRate / 60.0",
-            "Shape": "Sine",
-            "Amplitude": "Tension * 0.3"
-          }
-        ]
-      },
-      {
-        "Name": "TensionLayer", 
-        "Description": "Dissonant elements and stingers",
-        "Nodes": [
-          {
-            "Type": "WavePlayer",
-            "WaveAsset": "Tension_Strings_Loop",
-            "Volume": "Tension * 0.8",
-            "PitchShift": "ThreatLevel * 2.0"
-          },
-          {
-            "Type": "RandomGet",
-            "Array": ["Stinger_01", "Stinger_02", "Stinger_03"],
-            "TriggerRate": "ThreatLevel * 0.5"
-          }
-        ]
-      },
-      {
-        "Name": "PercussionLayer",
-        "Description": "Rhythmic elements based on heart rate",
-        "Nodes": [
-          {
-            "Type": "TriggerRepeat",
-            "Period": "60.0 / PlayerHeartRate",
-            "Volume": "Intensity * 0.4"
-          },
-          {
-            "Type": "WavePlayer",
-            "WaveAsset": "Heartbeat_Thump",
-            "Volume": "ThreatLevel * 0.6"
-          }
-        ]
-      },
-      {
-        "Name": "HiddenLayer",
-        "Description": "Muffled sounds when player is hiding",
-        "Nodes": [
-          {
-            "Type": "OnePoleHighPassFilter",
-            "CutoffFrequency": "IsPlayerHidden ? 200.0 : 20.0"
-          },
-          {
-            "Type": "OnePoleHighPassFilter", 
-            "CutoffFrequency": "IsPlayerHidden ? 800.0 : 20000.0"
-          }
-        ]
+  "Nodes": [
+    {
+      "Type": "WavePlayer",
+      "Name": "BaseAmbientDrone",
+      "Settings": {
+        "WaveAsset": "/Game/Audio/Music/Layers/Base_Ambient_Drone",
+        "Loop": true,
+        "StartTime": 0.0
       }
-    ],
-    "Mixing": {
-      "MasterVolume": "0.7",
-      "Compression": {
-        "Ratio": "2.0",
-        "Threshold": "-12.0",
-        "AttackTime": "0.01",
-        "ReleaseTime": "0.1"
-      },
-      "Reverb": {
-        "WetLevel": "WeatherIntensity * 0.3",
-        "RoomSize": "0.6"
-      }
-    }
-  },
-  "ParameterModulation": {
-    "IntensitySmoothing": {
-      "AttackTime": "TransitionTime * 0.3",
-      "ReleaseTime": "TransitionTime * 0.7"
     },
-    "TensionSmoothing": {
-      "AttackTime": "TransitionTime * 0.2", 
-      "ReleaseTime": "TransitionTime * 0.8"
+    {
+      "Type": "WavePlayer",
+      "Name": "TensionLayer",
+      "Settings": {
+        "WaveAsset": "/Game/Audio/Music/Layers/Tension_Strings",
+        "Loop": true,
+        "StartTime": 0.0
+      }
+    },
+    {
+      "Type": "WavePlayer",
+      "Name": "DangerPercussion",
+      "Settings": {
+        "WaveAsset": "/Game/Audio/Music/Layers/Danger_Percussion",
+        "Loop": true,
+        "StartTime": 0.0
+      }
+    },
+    {
+      "Type": "WavePlayer",
+      "Name": "TerrorStingers",
+      "Settings": {
+        "WaveAsset": "/Game/Audio/Music/Layers/Terror_Stingers",
+        "Loop": false,
+        "StartTime": 0.0
+      }
+    },
+    {
+      "Type": "WavePlayer",
+      "Name": "NightAmbience",
+      "Settings": {
+        "WaveAsset": "/Game/Audio/Music/Layers/Night_Ambience",
+        "Loop": true,
+        "StartTime": 0.0
+      }
+    },
+    {
+      "Type": "Multiply",
+      "Name": "TensionVolumeControl",
+      "Inputs": {
+        "A": "TensionLayer.OutMono",
+        "B": "TensionLevel"
+      }
+    },
+    {
+      "Type": "Multiply",
+      "Name": "DangerVolumeControl",
+      "Inputs": {
+        "A": "DangerPercussion.OutMono",
+        "B": "ProximityToDanger"
+      }
+    },
+    {
+      "Type": "TriggerOnThreshold",
+      "Name": "TerrorTrigger",
+      "Settings": {
+        "Threshold": 0.8,
+        "Type": "RisingEdge"
+      },
+      "Inputs": {
+        "In": "TensionLevel"
+      }
+    },
+    {
+      "Type": "ADSR",
+      "Name": "TerrorEnvelope",
+      "Settings": {
+        "AttackTime": 0.1,
+        "DecayTime": 0.5,
+        "SustainLevel": 0.7,
+        "ReleaseTime": 2.0
+      },
+      "Inputs": {
+        "TriggerAttack": "TerrorTrigger.Out"
+      }
+    },
+    {
+      "Type": "Multiply",
+      "Name": "TerrorVolumeControl",
+      "Inputs": {
+        "A": "TerrorStingers.OutMono",
+        "B": "TerrorEnvelope.OutEnvelope"
+      }
+    },
+    {
+      "Type": "OnePoleHighPassFilter",
+      "Name": "NightFilter",
+      "Settings": {
+        "CutoffFrequency": 200.0
+      },
+      "Inputs": {
+        "In": "NightAmbience.OutMono"
+      }
+    },
+    {
+      "Type": "Multiply",
+      "Name": "NightVolumeControl",
+      "Inputs": {
+        "A": "NightFilter.Out",
+        "B": "IsNightTime"
+      }
+    },
+    {
+      "Type": "LFO",
+      "Name": "HeartbeatLFO",
+      "Settings": {
+        "Shape": "Sine",
+        "MinValue": 0.8,
+        "MaxValue": 1.2
+      },
+      "Inputs": {
+        "Frequency": "PlayerHeartRate"
+      }
+    },
+    {
+      "Type": "Multiply",
+      "Name": "HeartbeatModulation",
+      "Inputs": {
+        "A": "TensionVolumeControl.Value",
+        "B": "HeartbeatLFO.Out"
+      }
+    },
+    {
+      "Type": "Reverb",
+      "Name": "EnvironmentalReverb",
+      "Settings": {
+        "ReverbEffect": "/Game/Audio/Reverb/Forest_Reverb"
+      }
+    },
+    {
+      "Type": "Add",
+      "Name": "MixLayers",
+      "Inputs": {
+        "A": "BaseAmbientDrone.OutMono",
+        "B": "HeartbeatModulation.Value"
+      }
+    },
+    {
+      "Type": "Add",
+      "Name": "AddDanger",
+      "Inputs": {
+        "A": "MixLayers.Value",
+        "B": "DangerVolumeControl.Value"
+      }
+    },
+    {
+      "Type": "Add",
+      "Name": "AddTerror",
+      "Inputs": {
+        "A": "AddDanger.Value",
+        "B": "TerrorVolumeControl.Value"
+      }
+    },
+    {
+      "Type": "Add",
+      "Name": "AddNight",
+      "Inputs": {
+        "A": "AddTerror.Value",
+        "B": "NightVolumeControl.Value"
+      }
+    },
+    {
+      "Type": "Limiter",
+      "Name": "MasterLimiter",
+      "Settings": {
+        "ThresholdDb": -3.0,
+        "ReleaseTime": 0.1
+      },
+      "Inputs": {
+        "Audio": "EnvironmentalReverb.Audio"
+      }
+    },
+    {
+      "Type": "StereoPanner",
+      "Name": "StereoOutput",
+      "Settings": {
+        "PanAmount": 0.0,
+        "PanningLaw": "EqualPower"
+      },
+      "Inputs": {
+        "In": "MasterLimiter.Audio"
+      }
     }
-  }
+  ],
+  "Connections": [
+    {
+      "From": "AddNight.Value",
+      "To": "EnvironmentalReverb.Audio"
+    },
+    {
+      "From": "StereoOutput.OutLeft",
+      "To": "OutLeft"
+    },
+    {
+      "From": "StereoOutput.OutRight",
+      "To": "OutRight"
+    }
+  ],
+  "Notes": [
+    "This MetaSound creates an adaptive music system that responds to game state.",
+    "Base ambient drone provides constant foundation.",
+    "Tension layer increases with player stress.",
+    "Danger percussion triggered by proximity to threats.",
+    "Terror stingers for maximum fear moments.",
+    "Night ambience adds atmospheric depth during night time.",
+    "Heartbeat modulation creates physiological connection to player state.",
+    "Environmental reverb changes based on location type."
+  ]
 }
