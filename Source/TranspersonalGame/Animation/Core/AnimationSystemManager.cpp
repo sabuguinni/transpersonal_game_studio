@@ -3,211 +3,168 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "Animation/AnimInstance.h"
 #include "Kismet/KismetMathLibrary.h"
+#include "DrawDebugHelpers.h"
 
 UAnimationSystemManager::UAnimationSystemManager()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.bStartWithTickEnabled = true;
-
-    // Initialize default character profiles
-    FAnimationProfile PlayerProfile;
-    PlayerProfile.CharacterType = ECharacterType::Player;
-    PlayerProfile.MovementSpeed = 1.0f;
-    PlayerProfile.AnimationIntensity = 1.0f;
-    PlayerProfile.FearLevel = 0.3f; // Player starts with some fear
-    PlayerProfile.ConfidenceLevel = 0.4f; // Low confidence initially
-    PlayerProfile.InjuryLevel = 0.0f;
-    PlayerProfile.ExhaustionLevel = 0.0f;
-    CharacterProfiles.Add(ECharacterType::Player, PlayerProfile);
-
-    FAnimationProfile SmallDinosaurProfile;
-    SmallDinosaurProfile.CharacterType = ECharacterType::DinosaurSmall;
-    SmallDinosaurProfile.MovementSpeed = 1.2f;
-    SmallDinosaurProfile.AnimationIntensity = 1.1f;
-    SmallDinosaurProfile.FearLevel = 0.6f; // Small dinosaurs are more fearful
-    SmallDinosaurProfile.ConfidenceLevel = 0.3f;
-    CharacterProfiles.Add(ECharacterType::DinosaurSmall, SmallDinosaurProfile);
-
-    FAnimationProfile MediumDinosaurProfile;
-    MediumDinosaurProfile.CharacterType = ECharacterType::DinosaurMedium;
-    MediumDinosaurProfile.MovementSpeed = 0.9f;
-    MediumDinosaurProfile.AnimationIntensity = 1.0f;
-    MediumDinosaurProfile.FearLevel = 0.2f;
-    MediumDinosaurProfile.ConfidenceLevel = 0.7f;
-    CharacterProfiles.Add(ECharacterType::DinosaurMedium, MediumDinosaurProfile);
-
-    FAnimationProfile LargeDinosaurProfile;
-    LargeDinosaurProfile.CharacterType = ECharacterType::DinosaurLarge;
-    LargeDinosaurProfile.MovementSpeed = 0.7f;
-    LargeDinosaurProfile.AnimationIntensity = 0.8f;
-    LargeDinosaurProfile.FearLevel = 0.1f; // Large dinosaurs fear little
-    LargeDinosaurProfile.ConfidenceLevel = 0.9f;
-    CharacterProfiles.Add(ECharacterType::DinosaurLarge, LargeDinosaurProfile);
-
-    CurrentProfile = PlayerProfile;
+    PrimaryComponentTick.TickGroup = TG_PrePhysics;
+    
+    // Configuração inicial
+    SetComponentTickEnabled(true);
 }
 
 void UAnimationSystemManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Initialize animation system
-    SetMovementState(EMovementState::Idle);
-    SetEmotionalState(EEmotionalState::Cautious);
+    // Inicialização do sistema
+    CurrentAnimationState = "Idle";
+    TargetStressLevel = StressLevel;
+    CurrentStressTransition = StressLevel;
+    
+    // Log de inicialização
+    UE_LOG(LogTemp, Log, TEXT("Animation System Manager initialized for %s"), *GetOwner()->GetName());
+    
+    // Aplicar variação inicial se temos um seed
+    if (MovementVariationSeed != 0)
+    {
+        ApplyMovementVariation(MovementVariationSeed);
+    }
 }
 
-void UAnimationSystemManager::TickComponent(float DeltaTime, ELevelTick TickType, 
-                                           FActorComponentTickFunction* ThisTickFunction)
+void UAnimationSystemManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
-    // Update fear response timer
-    UpdateFearResponse(DeltaTime);
     
-    // Apply current emotional state to animation profile
-    ApplyEmotionalStateToProfile();
+    // Actualizar transição de stress
+    UpdateStressTransition(DeltaTime);
+    
+    // Processar Motion Matching query se necessário
+    LastMotionMatchingQuery += DeltaTime;
+    if (LastMotionMatchingQuery >= MotionMatchingQueryInterval)
+    {
+        ProcessMotionMatchingQuery();
+        LastMotionMatchingQuery = 0.0f;
+    }
 }
 
-void UAnimationSystemManager::SetMovementState(EMovementState NewState)
+void UAnimationSystemManager::UpdateStressLevel(float NewStressLevel, float TransitionSpeed)
 {
-    if (CurrentMovementState != NewState)
+    // Clamp do valor
+    NewStressLevel = FMath::Clamp(NewStressLevel, 0.0f, 1.0f);
+    
+    // Se mudança significativa, triggerar evento
+    if (FMath::Abs(TargetStressLevel - NewStressLevel) > 0.1f)
     {
-        CurrentMovementState = NewState;
-        
-        // Adjust animation intensity based on movement state
-        switch (NewState)
+        FName NewState = "Calm";
+        if (NewStressLevel > 0.7f)
         {
-            case EMovementState::Sneaking:
-                CurrentProfile.AnimationIntensity = 0.6f;
-                CurrentProfile.MovementSpeed = 0.3f;
-                break;
-            case EMovementState::Running:
-                CurrentProfile.AnimationIntensity = 1.4f;
-                CurrentProfile.MovementSpeed = 1.8f;
-                break;
-            case EMovementState::Afraid:
-                CurrentProfile.AnimationIntensity = 1.6f;
-                CurrentProfile.FearLevel = FMath::Clamp(CurrentProfile.FearLevel + 0.3f, 0.0f, 1.0f);
-                break;
-            case EMovementState::Injured:
-                CurrentProfile.AnimationIntensity = 0.7f;
-                CurrentProfile.MovementSpeed = 0.5f;
-                break;
-            case EMovementState::Exhausted:
-                CurrentProfile.AnimationIntensity = 0.5f;
-                CurrentProfile.MovementSpeed = 0.4f;
-                break;
-            default:
-                CurrentProfile.AnimationIntensity = 1.0f;
-                CurrentProfile.MovementSpeed = 1.0f;
-                break;
+            NewState = "Panic";
+        }
+        else if (NewStressLevel > 0.4f)
+        {
+            NewState = "Alert";
+        }
+        else if (NewStressLevel > 0.1f)
+        {
+            NewState = "Cautious";
+        }
+        
+        // Triggerar evento se estado mudou
+        if (NewState != CurrentAnimationState)
+        {
+            PreviousAnimationState = CurrentAnimationState;
+            CurrentAnimationState = NewState;
+            OnAnimationStateChanged.Broadcast(CurrentAnimationState, PreviousAnimationState);
         }
     }
+    
+    TargetStressLevel = NewStressLevel;
 }
 
-void UAnimationSystemManager::SetEmotionalState(EEmotionalState NewState)
+void UAnimationSystemManager::UpdateStressTransition(float DeltaTime)
 {
-    if (CurrentEmotionalState != NewState)
+    if (FMath::Abs(CurrentStressTransition - TargetStressLevel) > 0.01f)
     {
-        CurrentEmotionalState = NewState;
-        ApplyEmotionalStateToProfile();
+        CurrentStressTransition = FMath::FInterpTo(CurrentStressTransition, TargetStressLevel, DeltaTime, 2.0f);
+        StressLevel = CurrentStressTransition;
     }
 }
 
-void UAnimationSystemManager::UpdateAnimationProfile(const FAnimationProfile& NewProfile)
+void UAnimationSystemManager::ProcessMotionMatchingQuery()
 {
-    CurrentProfile = NewProfile;
-}
-
-FAnimationProfile UAnimationSystemManager::GetCurrentAnimationProfile() const
-{
-    return CurrentProfile;
-}
-
-void UAnimationSystemManager::TriggerFearResponse(float FearIntensity, float Duration)
-{
-    OriginalFearLevel = CurrentProfile.FearLevel;
-    CurrentProfile.FearLevel = FMath::Clamp(FearIntensity, 0.0f, 1.0f);
-    FearResponseTimer = 0.0f;
-    FearResponseDuration = Duration;
+    // Simular qualidade do match baseado no estado atual
+    float MatchQuality = 0.8f; // Base quality
     
-    // Trigger immediate fear animation state
-    SetEmotionalState(EEmotionalState::Fearful);
-    SetMovementState(EMovementState::Afraid);
-}
-
-void UAnimationSystemManager::TriggerInjuryAnimation(float InjurySeverity)
-{
-    CurrentProfile.InjuryLevel = FMath::Clamp(InjurySeverity, 0.0f, 1.0f);
-    
-    if (InjurySeverity > 0.5f)
+    // Ajustar qualidade baseado em stress
+    if (StressLevel > 0.5f)
     {
-        SetMovementState(EMovementState::Injured);
-        SetEmotionalState(EEmotionalState::Injured);
+        MatchQuality *= (1.0f - (StressLevel - 0.5f) * 0.3f); // Reduz qualidade com stress alto
     }
-}
-
-void UAnimationSystemManager::UpdateExhaustion(float ExhaustionLevel)
-{
-    CurrentProfile.ExhaustionLevel = FMath::Clamp(ExhaustionLevel, 0.0f, 1.0f);
     
-    if (ExhaustionLevel > 0.7f)
+    // Ajustar por fadiga
+    if (FatigueLevel > 0.3f)
     {
-        SetMovementState(EMovementState::Exhausted);
-        SetEmotionalState(EEmotionalState::Exhausted);
+        MatchQuality *= (1.0f - FatigueLevel * 0.2f);
     }
+    
+    // Broadcast do resultado
+    OnMotionMatchingQueryComplete.Broadcast(MatchQuality);
 }
 
-void UAnimationSystemManager::UpdateFearResponse(float DeltaTime)
+void UAnimationSystemManager::ApplyMovementVariation(int32 NewSeed)
 {
-    if (FearResponseTimer < FearResponseDuration)
+    MovementVariationSeed = NewSeed;
+    
+    // Usar seed para gerar variações consistentes
+    FRandomStream RandomStream(NewSeed);
+    
+    // Variação na velocidade de interpolação do IK (±20%)
+    float IKVariation = RandomStream.FRandRange(0.8f, 1.2f);
+    IKInterpolationSpeed *= IKVariation;
+    
+    // Variação no intervalo de query do Motion Matching (±15%)
+    float QueryVariation = RandomStream.FRandRange(0.85f, 1.15f);
+    MotionMatchingQueryInterval *= QueryVariation;
+    
+    // Log da variação aplicada
+    UE_LOG(LogTemp, Log, TEXT("Applied movement variation with seed %d: IK Speed %.2f, Query Interval %.3f"), 
+           NewSeed, IKInterpolationSpeed, MotionMatchingQueryInterval);
+}
+
+UPoseSearchDatabase* UAnimationSystemManager::GetCurrentDatabase() const
+{
+    return SelectDatabaseByState();
+}
+
+UPoseSearchDatabase* UAnimationSystemManager::SelectDatabaseByState() const
+{
+    // Seleccionar database baseado no estado de stress
+    if (StressLevel > 0.6f && StressStateDatabase)
     {
-        FearResponseTimer += DeltaTime;
+        return StressStateDatabase;
+    }
+    
+    // Se temos interações ambientais activas, usar essa database
+    if (EnvironmentInteractionDatabase)
+    {
+        // TODO: Adicionar lógica para detectar interações ambientais
+    }
+    
+    // Default para locomotion
+    return PrimaryLocomotionDatabase;
+}
+
+void UAnimationSystemManager::ForceTransitionToState(FName StateName)
+{
+    if (StateName != CurrentAnimationState)
+    {
+        PreviousAnimationState = CurrentAnimationState;
+        CurrentAnimationState = StateName;
+        OnAnimationStateChanged.Broadcast(CurrentAnimationState, PreviousAnimationState);
         
-        // Gradually return fear level to original
-        float Alpha = FearResponseTimer / FearResponseDuration;
-        CurrentProfile.FearLevel = FMath::Lerp(CurrentProfile.FearLevel, OriginalFearLevel, Alpha);
-        
-        if (FearResponseTimer >= FearResponseDuration)
-        {
-            // Fear response complete, return to appropriate emotional state
-            if (CurrentProfile.FearLevel < 0.3f)
-            {
-                SetEmotionalState(EEmotionalState::Cautious);
-            }
-            else
-            {
-                SetEmotionalState(EEmotionalState::Fearful);
-            }
-        }
-    }
-}
-
-void UAnimationSystemManager::ApplyEmotionalStateToProfile()
-{
-    switch (CurrentEmotionalState)
-    {
-        case EEmotionalState::Fearful:
-            CurrentProfile.AnimationIntensity = FMath::Clamp(CurrentProfile.AnimationIntensity * 1.3f, 0.5f, 2.0f);
-            CurrentProfile.ConfidenceLevel = FMath::Max(CurrentProfile.ConfidenceLevel - 0.2f, 0.0f);
-            break;
-        case EEmotionalState::Cautious:
-            CurrentProfile.AnimationIntensity = FMath::Clamp(CurrentProfile.AnimationIntensity * 1.1f, 0.7f, 1.5f);
-            break;
-        case EEmotionalState::Confident:
-            CurrentProfile.AnimationIntensity = FMath::Clamp(CurrentProfile.AnimationIntensity * 0.9f, 0.8f, 1.2f);
-            CurrentProfile.ConfidenceLevel = FMath::Min(CurrentProfile.ConfidenceLevel + 0.1f, 1.0f);
-            break;
-        case EEmotionalState::Exhausted:
-            CurrentProfile.AnimationIntensity = FMath::Max(CurrentProfile.AnimationIntensity * 0.6f, 0.3f);
-            CurrentProfile.MovementSpeed = FMath::Max(CurrentProfile.MovementSpeed * 0.5f, 0.2f);
-            break;
-        case EEmotionalState::Injured:
-            CurrentProfile.AnimationIntensity = FMath::Max(CurrentProfile.AnimationIntensity * 0.7f, 0.4f);
-            CurrentProfile.MovementSpeed = FMath::Max(CurrentProfile.MovementSpeed * 0.6f, 0.3f);
-            break;
-        default:
-            // Neutral state - no modifications
-            break;
+        UE_LOG(LogTemp, Log, TEXT("Forced transition from %s to %s"), 
+               *PreviousAnimationState.ToString(), *CurrentAnimationState.ToString());
     }
 }
