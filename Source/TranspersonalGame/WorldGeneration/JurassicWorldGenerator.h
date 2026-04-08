@@ -6,95 +6,194 @@
 #include "PCGGraph.h"
 #include "Landscape/Classes/Landscape.h"
 #include "Components/SceneComponent.h"
+#include "Engine/DataTable.h"
 #include "JurassicWorldGenerator.generated.h"
 
+/**
+ * Biome types matching the Geographic Guide exactly
+ * Forest (starting point), Swamp, Savana, Desert, Snowy Rockside
+ */
 UENUM(BlueprintType)
 enum class EJurassicBiomeType : uint8
 {
-    DenseForest     UMETA(DisplayName = "Dense Forest"),
-    RiverValley     UMETA(DisplayName = "River Valley"),
-    OpenPlains      UMETA(DisplayName = "Open Plains"),
-    RockyOutcrops   UMETA(DisplayName = "Rocky Outcrops"),
-    SwampLands      UMETA(DisplayName = "Swamp Lands"),
-    Coastline       UMETA(DisplayName = "Coastline")
+    Forest          UMETA(DisplayName = "Forest (Tropical Forest)"),
+    Swamp           UMETA(DisplayName = "Swamp"),
+    Savana          UMETA(DisplayName = "Savana"),
+    Desert          UMETA(DisplayName = "Desert"),
+    SnowyRockside   UMETA(DisplayName = "Snowy Rockside"),
+    Transition      UMETA(DisplayName = "Transition Zone")
 };
 
+/**
+ * River flow states based on biome characteristics
+ */
+UENUM(BlueprintType)
+enum class ERiverFlowState : uint8
+{
+    FullAndFast     UMETA(DisplayName = "Full and Fast (Forest)"),
+    FullAndSlow     UMETA(DisplayName = "Full and Slow (Swamp)"),
+    Reduced         UMETA(DisplayName = "Reduced Flow (Savana)"),
+    VeryDry         UMETA(DisplayName = "Very Dry (Desert)"),
+    Frozen          UMETA(DisplayName = "Mostly Frozen (Snowy Rockside)")
+};
+
+/**
+ * Climate settings for each biome
+ */
+USTRUCT(BlueprintType)
+struct FJurassicClimateSettings
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Climate")
+    float Temperature = 25.0f; // Celsius
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Climate")
+    float Humidity = 0.5f; // 0-1 range
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Climate")
+    float WindStrength = 0.3f; // 0-1 range
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Climate")
+    bool bHasFrequentStorms = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Climate")
+    bool bHasPermanentFog = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Climate")
+    bool bHasSandstorms = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Climate")
+    bool bHasSnow = false;
+};
+
+/**
+ * Biome configuration matching the Geographic Guide specifications
+ */
 USTRUCT(BlueprintType)
 struct FJurassicBiomeSettings
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    EJurassicBiomeType BiomeType = EJurassicBiomeType::DenseForest;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float DensityWeight = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome", meta = (ClampMin = "0.0", ClampMax = "2000.0"))
-    float ElevationMin = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome", meta = (ClampMin = "0.0", ClampMax = "2000.0"))
-    float ElevationMax = 500.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome", meta = (ClampMin = "0.0", ClampMax = "90.0"))
-    float SlopeMin = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome", meta = (ClampMin = "0.0", ClampMax = "90.0"))
-    float SlopeMax = 30.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome", meta = (ClampMin = "0.0", ClampMax = "1000.0"))
-    float WaterDistance = 100.0f;
+    EJurassicBiomeType BiomeType = EJurassicBiomeType::Forest;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    bool bNearWater = false;
+    FJurassicClimateSettings ClimateSettings;
+
+    // Elevation ranges for biome placement
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain", meta = (ClampMin = "0.0", ClampMax = "3000.0"))
+    float ElevationMin = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain", meta = (ClampMin = "0.0", ClampMax = "3000.0"))
+    float ElevationMax = 500.0f;
+
+    // Slope preferences
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain", meta = (ClampMin = "0.0", ClampMax = "90.0"))
+    float SlopeMin = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain", meta = (ClampMin = "0.0", ClampMax = "90.0"))
+    float SlopeMax = 30.0f;
+
+    // Water relationship
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water")
+    ERiverFlowState RiverFlowState = ERiverFlowState::FullAndFast;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water")
+    bool bRequiresWaterProximity = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water")
+    float OptimalWaterDistance = 1000.0f;
+
+    // Transition settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transitions")
+    float TransitionZoneWidth = 2000.0f; // Minimum transition zone between biomes
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transitions")
+    TArray<EJurassicBiomeType> AdjacentBiomes;
+
+    // PCG Graph for this biome
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation")
+    class UPCGGraph* BiomePCGGraph;
+
+    // Visibility settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Visibility")
+    float VisibilityRange = 10000.0f; // Full visibility by default
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Visibility")
+    bool bHasReducedVisibility = false;
 };
 
+/**
+ * World dimensions and terrain settings
+ * Following UE5 Landscape technical requirements for optimal performance
+ */
 USTRUCT(BlueprintType)
-struct FJurassicTerrainSettings
+struct FJurassicWorldSettings
 {
     GENERATED_BODY()
 
-    // Landscape dimensions (must follow UE5 valid heightmap sizes)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
-    int32 LandscapeSize = 2017; // 2017x2017 vertices (recommended size)
+    // World size: ~200 km² as specified in Geographic Guide
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Size")
+    int32 LandscapeSize = 8129; // 8129x8129 vertices for large world (recommended for 200km²)
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Size")
     float WorldScale = 100.0f; // cm per unit
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
-    float HeightScale = 256.0f; // Maximum height variation
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Size")
+    float HeightScale = 512.0f; // Maximum height variation for mountain borders
 
-    // Noise settings for base terrain
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Noise")
-    float BaseFrequency = 0.001f;
+    // Mountain border settings (impassable boundaries)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mountain Borders")
+    float MountainBorderWidth = 5000.0f; // Width of impassable mountain border
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Noise")
-    float BaseAmplitude = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mountain Borders")
+    float MountainHeight = 2500.0f; // Height of border mountains
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Noise")
-    int32 NoiseOctaves = 6;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mountain Borders")
+    float MountainSteepness = 0.8f; // How steep the mountains are (0-1)
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Noise")
+    // Noise settings for base terrain generation
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Generation")
+    float BaseNoiseFrequency = 0.0005f; // Lower frequency for large-scale features
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Generation")
+    float BaseNoiseAmplitude = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Generation")
+    int32 NoiseOctaves = 8; // More octaves for detail
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Generation")
     float NoisePersistence = 0.5f;
 
-    // River generation
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Rivers")
-    int32 MainRiverCount = 2;
+    // River system settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River System")
+    int32 MainRiverCount = 4; // Rivers flowing from mountains inward
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Rivers")
-    int32 TributaryCount = 8;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River System")
+    int32 TributaryCount = 12; // Secondary rivers
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Rivers")
-    float RiverWidth = 500.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River System")
+    float BaseRiverWidth = 800.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Rivers")
-    float RiverDepth = 200.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River System")
+    float BaseRiverDepth = 300.0f;
+
+    // Lake generation in transition zones
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lakes")
+    int32 TransitionLakeCount = 6;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lakes")
+    float LakeMinSize = 2000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lakes")
+    float LakeMaxSize = 8000.0f;
 };
 
 /**
  * Main World Generator for the Jurassic survival game
- * Generates terrain, biomes, rivers, and basic geographic structure
- * Uses PCG Framework with World Partition for optimal performance
+ * Generates the 200km² world with 5 biomes as specified in the Geographic Guide
+ * Uses PCG Framework with World Partition and Hierarchical Generation
  */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API AJurassicWorldGenerator : public AActor
@@ -111,57 +210,131 @@ protected:
     class USceneComponent* RootSceneComponent;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class UPCGComponent* PCGComponent;
+    class UPCGComponent* MasterPCGComponent;
 
-    // World generation settings
+    // World configuration
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Generation")
-    FJurassicTerrainSettings TerrainSettings;
+    FJurassicWorldSettings WorldSettings;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Generation")
-    TArray<FJurassicBiomeSettings> BiomeSettings;
+    // Biome configurations (5 biomes as per Geographic Guide)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biomes")
+    TArray<FJurassicBiomeSettings> BiomeConfigurations;
 
-    // PCG Graph for world generation
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Generation")
-    class UPCGGraph* WorldGenerationGraph;
+    // Master PCG Graph for world generation
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG")
+    class UPCGGraph* MasterWorldGraph;
 
-    // Generated landscape reference
-    UPROPERTY(BlueprintReadOnly, Category = "Generated")
+    // Individual biome graphs
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG")
+    class UPCGGraph* ForestBiomeGraph;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG")
+    class UPCGGraph* SwampBiomeGraph;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG")
+    class UPCGGraph* SavanaBiomeGraph;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG")
+    class UPCGGraph* DesertBiomeGraph;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG")
+    class UPCGGraph* SnowyRocksideBiomeGraph;
+
+    // Terrain and water generation graphs
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG")
+    class UPCGGraph* TerrainGenerationGraph;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG")
+    class UPCGGraph* RiverSystemGraph;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG")
+    class UPCGGraph* LakeGenerationGraph;
+
+    // Generated world references
+    UPROPERTY(BlueprintReadOnly, Category = "Generated World")
     class ALandscape* GeneratedLandscape;
 
+    UPROPERTY(BlueprintReadOnly, Category = "Generated World")
+    TArray<class AWaterBody*> GeneratedRivers;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Generated World")
+    TArray<class AWaterBody*> GeneratedLakes;
+
+    // Player starting location (always in Forest biome)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player Start")
+    FVector PlayerStartLocation = FVector::ZeroVector;
+
 public:
-    // Generation functions
+    // Main generation functions
     UFUNCTION(BlueprintCallable, Category = "World Generation")
-    void GenerateWorld();
+    void GenerateCompleteWorld();
 
     UFUNCTION(BlueprintCallable, Category = "World Generation")
     void ClearGeneratedWorld();
 
+    // Individual generation steps
     UFUNCTION(BlueprintCallable, Category = "World Generation")
-    ALandscape* CreateBaseLandscape();
+    ALandscape* GenerateBaseTerrain();
 
     UFUNCTION(BlueprintCallable, Category = "World Generation")
-    void GenerateBiomes();
+    void GenerateMountainBorders();
+
+    UFUNCTION(BlueprintCallable, Category = "World Generation")
+    void GenerateBiomeDistribution();
 
     UFUNCTION(BlueprintCallable, Category = "World Generation")
     void GenerateRiverSystem();
 
-    // Utility functions
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "World Generation")
+    UFUNCTION(BlueprintCallable, Category = "World Generation")
+    void GenerateTransitionLakes();
+
+    UFUNCTION(BlueprintCallable, Category = "World Generation")
+    void SetupWorldPartition();
+
+    // Query functions
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "World Queries")
     EJurassicBiomeType GetBiomeAtLocation(FVector WorldLocation) const;
 
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "World Generation")
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "World Queries")
     float GetElevationAtLocation(FVector WorldLocation) const;
 
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "World Generation")
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "World Queries")
     float GetSlopeAtLocation(FVector WorldLocation) const;
 
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "World Generation")
-    bool IsNearWater(FVector WorldLocation, float MaxDistance = 1000.0f) const;
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "World Queries")
+    ERiverFlowState GetRiverFlowAtLocation(FVector WorldLocation) const;
+
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "World Queries")
+    bool IsInTransitionZone(FVector WorldLocation) const;
+
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "World Queries")
+    float GetDistanceToWater(FVector WorldLocation) const;
+
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "World Queries")
+    bool IsWithinMountainBorder(FVector WorldLocation) const;
+
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "World Queries")
+    FVector GetPlayerStartLocation() const { return PlayerStartLocation; }
+
+    // Climate and environmental queries
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Climate")
+    FJurassicClimateSettings GetClimateAtLocation(FVector WorldLocation) const;
+
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Climate")
+    float GetVisibilityAtLocation(FVector WorldLocation) const;
+
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Climate")
+    bool HasPermanentFogAtLocation(FVector WorldLocation) const;
 
 private:
     // Internal generation helpers
-    void SetupPCGComponent();
-    void ConfigureWorldPartition();
-    TArray<FVector> GenerateRiverSplinePoints(FVector StartPoint, FVector EndPoint, int32 SegmentCount);
-    float CalculatePerlinNoise(float X, float Y, int32 Octaves, float Persistence, float Frequency) const;
+    void InitializeDefaultBiomeSettings();
+    void SetupPCGComponents();
+    void ConfigureHierarchicalGeneration();
+    FVector FindOptimalPlayerStartInForest();
+    TArray<FVector> GenerateRiverSplineFromMountains(FVector MountainStart, FVector InteriorEnd);
+    float CalculateTerrainNoise(float X, float Y) const;
+    float CalculateBiomeInfluence(FVector Location, EJurassicBiomeType BiomeType) const;
+    void ApplyRiverFlowEffects(FVector RiverLocation, ERiverFlowState FlowState);
+    bool ValidateWorldGeneration() const;
 };
