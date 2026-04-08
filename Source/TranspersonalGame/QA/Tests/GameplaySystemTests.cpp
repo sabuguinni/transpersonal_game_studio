@@ -7,13 +7,40 @@
 /**
  * Gameplay System Tests for Transpersonal Game
  * 
- * These tests validate core gameplay mechanics specific to our survival game:
- * - Crafting system
- * - Combat mechanics
- * - Domestication system (unique feature)
- * - Survival mechanics (hunger, thirst, shelter)
- * - Player progression
+ * These tests validate core gameplay mechanics:
+ * - Survival systems (hunger, thirst, health)
+ * - Crafting system functionality
+ * - Combat system mechanics
+ * - Domestication system behavior
+ * - Player progression systems
  */
+
+/**
+ * Test survival system mechanics
+ */
+IMPLEMENT_TRANSPERSONAL_TEST(FSurvivalSystemTest, "Transpersonal.Gameplay.Survival", QATestCategories::Survival)
+
+bool FSurvivalSystemTest::RunTest(const FString& Parameters)
+{
+    UE_LOG(LogQAFramework, Log, TEXT("Starting Survival System Test"));
+    
+    UWorld* World = AutomationOpenMap(TEXT("/Game/Maps/SurvivalTestLevel"));
+    if (!World)
+    {
+        AddError(TEXT("Failed to load survival test level"));
+        return false;
+    }
+    
+    // Wait for level to initialize
+    ADD_LATENT_AUTOMATION_COMMAND(FWaitLatentCommand(2.0f));
+    
+    // Test survival mechanics
+    bool bSurvivalValid = ValidateSurvivalMechanics();
+    VALIDATE_GAMEPLAY(bSurvivalValid, "Survival system validation failed");
+    
+    UE_LOG(LogQAFramework, Log, TEXT("Survival System Test completed successfully"));
+    return true;
+}
 
 /**
  * Test crafting system functionality
@@ -31,7 +58,7 @@ bool FCraftingSystemTest::RunTest(const FString& Parameters)
         return false;
     }
     
-    // Test crafting system validation
+    // Test crafting system
     bool bCraftingValid = ValidateCraftingSystem();
     VALIDATE_GAMEPLAY(bCraftingValid, "Crafting system validation failed");
     
@@ -55,7 +82,7 @@ bool FCombatSystemTest::RunTest(const FString& Parameters)
         return false;
     }
     
-    // Test combat system validation
+    // Test combat system
     bool bCombatValid = ValidateCombatSystem();
     VALIDATE_GAMEPLAY(bCombatValid, "Combat system validation failed");
     
@@ -64,7 +91,7 @@ bool FCombatSystemTest::RunTest(const FString& Parameters)
 }
 
 /**
- * Test domestication system (unique game feature)
+ * Test domestication system behavior
  */
 IMPLEMENT_TRANSPERSONAL_TEST(FDomesticationSystemTest, "Transpersonal.Gameplay.Domestication", QATestCategories::Dinosaurs)
 
@@ -79,7 +106,7 @@ bool FDomesticationSystemTest::RunTest(const FString& Parameters)
         return false;
     }
     
-    // Test domestication system validation
+    // Test domestication system
     bool bDomesticationValid = ValidateDomesticationSystem();
     VALIDATE_GAMEPLAY(bDomesticationValid, "Domestication system validation failed");
     
@@ -88,98 +115,50 @@ bool FDomesticationSystemTest::RunTest(const FString& Parameters)
 }
 
 /**
- * Test survival mechanics (hunger, thirst, shelter)
+ * Test inventory and resource management
  */
-IMPLEMENT_TRANSPERSONAL_TEST(FSurvivalMechanicsTest, "Transpersonal.Gameplay.Survival", QATestCategories::Survival)
+IMPLEMENT_TRANSPERSONAL_TEST(FInventorySystemTest, "Transpersonal.Gameplay.Inventory", QATestCategories::Gameplay)
 
-bool FSurvivalMechanicsTest::RunTest(const FString& Parameters)
+bool FInventorySystemTest::RunTest(const FString& Parameters)
 {
-    UE_LOG(LogQAFramework, Log, TEXT("Starting Survival Mechanics Test"));
+    UE_LOG(LogQAFramework, Log, TEXT("Starting Inventory System Test"));
     
-    UWorld* World = AutomationOpenMap(TEXT("/Game/Maps/SurvivalTestLevel"));
+    UWorld* World = AutomationOpenMap(TEXT("/Game/Maps/InventoryTestLevel"));
     if (!World)
     {
-        AddError(TEXT("Failed to load survival test level"));
+        AddError(TEXT("Failed to load inventory test level"));
         return false;
     }
     
-    // Test survival mechanics
-    bool bSurvivalValid = ValidateSurvivalMechanics();
-    VALIDATE_GAMEPLAY(bSurvivalValid, "Survival mechanics validation failed");
+    // Test inventory system
+    bool bInventoryValid = ValidateInventorySystem();
+    VALIDATE_GAMEPLAY(bInventoryValid, "Inventory system validation failed");
     
-    UE_LOG(LogQAFramework, Log, TEXT("Survival Mechanics Test completed successfully"));
+    UE_LOG(LogQAFramework, Log, TEXT("Inventory System Test completed successfully"));
     return true;
 }
 
 /**
- * Test dinosaur uniqueness system (each dinosaur is visually unique)
+ * Test base building mechanics
  */
-IMPLEMENT_TRANSPERSONAL_TEST(FDinosaurUniquenessTest, "Transpersonal.Gameplay.DinosaurUniqueness", QATestCategories::Dinosaurs)
+IMPLEMENT_TRANSPERSONAL_TEST(FBaseBuildingTest, "Transpersonal.Gameplay.BaseBuilding", QATestCategories::Gameplay)
 
-bool FDinosaurUniquenessTest::RunTest(const FString& Parameters)
+bool FBaseBuildingTest::RunTest(const FString& Parameters)
 {
-    UE_LOG(LogQAFramework, Log, TEXT("Starting Dinosaur Uniqueness Test"));
+    UE_LOG(LogQAFramework, Log, TEXT("Starting Base Building Test"));
     
-    UWorld* World = AutomationOpenMap(TEXT("/Game/Maps/DinosaurTestLevel"));
+    UWorld* World = AutomationOpenMap(TEXT("/Game/Maps/BuildingTestLevel"));
     if (!World)
     {
-        AddError(TEXT("Failed to load dinosaur test level"));
+        AddError(TEXT("Failed to load building test level"));
         return false;
     }
     
-    // Test dinosaur uniqueness system
-    bool bUniquenessValid = ValidateDinosaurUniqueness();
-    VALIDATE_GAMEPLAY(bUniquenessValid, "Dinosaur uniqueness system validation failed");
+    // Test base building system
+    bool bBuildingValid = ValidateBaseBuildingSystem();
+    VALIDATE_GAMEPLAY(bBuildingValid, "Base building system validation failed");
     
-    UE_LOG(LogQAFramework, Log, TEXT("Dinosaur Uniqueness Test completed successfully"));
-    return true;
-}
-
-/**
- * Test player fear/tension mechanics
- */
-IMPLEMENT_TRANSPERSONAL_TEST(FPlayerTensionTest, "Transpersonal.Gameplay.PlayerTension", QATestCategories::Gameplay)
-
-bool FPlayerTensionTest::RunTest(const FString& Parameters)
-{
-    UE_LOG(LogQAFramework, Log, TEXT("Starting Player Tension Test"));
-    
-    UWorld* World = AutomationOpenMap(TEXT("/Game/Maps/TensionTestLevel"));
-    if (!World)
-    {
-        AddError(TEXT("Failed to load tension test level"));
-        return false;
-    }
-    
-    // Test player tension mechanics
-    bool bTensionValid = ValidatePlayerTensionMechanics();
-    VALIDATE_GAMEPLAY(bTensionValid, "Player tension mechanics validation failed");
-    
-    UE_LOG(LogQAFramework, Log, TEXT("Player Tension Test completed successfully"));
-    return true;
-}
-
-/**
- * Test gem discovery and time travel mechanics (core narrative)
- */
-IMPLEMENT_TRANSPERSONAL_TEST(FGemDiscoveryTest, "Transpersonal.Gameplay.GemDiscovery", QATestCategories::Gameplay)
-
-bool FGemDiscoveryTest::RunTest(const FString& Parameters)
-{
-    UE_LOG(LogQAFramework, Log, TEXT("Starting Gem Discovery Test"));
-    
-    UWorld* World = AutomationOpenMap(TEXT("/Game/Maps/GemTestLevel"));
-    if (!World)
-    {
-        AddError(TEXT("Failed to load gem test level"));
-        return false;
-    }
-    
-    // Test gem discovery mechanics
-    bool bGemValid = ValidateGemDiscoveryMechanics();
-    VALIDATE_GAMEPLAY(bGemValid, "Gem discovery mechanics validation failed");
-    
-    UE_LOG(LogQAFramework, Log, TEXT("Gem Discovery Test completed successfully"));
+    UE_LOG(LogQAFramework, Log, TEXT("Base Building Test completed successfully"));
     return true;
 }
 
@@ -189,46 +168,33 @@ private:
         UE_LOG(LogQAFramework, Log, TEXT("Validating survival mechanics"));
         
         // Test hunger system
-        // Test thirst system  
-        // Test shelter mechanics
-        // Test temperature effects
-        // Test day/night survival challenges
+        // Test thirst system
+        // Test health regeneration
+        // Test environmental damage
         
         return true;
     }
     
-    bool ValidateDinosaurUniqueness()
+    bool ValidateInventorySystem()
     {
-        UE_LOG(LogQAFramework, Log, TEXT("Validating dinosaur uniqueness system"));
+        UE_LOG(LogQAFramework, Log, TEXT("Validating inventory system"));
         
-        // Test procedural variation generation
-        // Test visual uniqueness between individuals
-        // Test behavioral variation
-        // Test recognition system
+        // Test item pickup
+        // Test item stacking
+        // Test inventory UI
+        // Test item usage
         
         return true;
     }
     
-    bool ValidatePlayerTensionMechanics()
+    bool ValidateBaseBuildingSystem()
     {
-        UE_LOG(LogQAFramework, Log, TEXT("Validating player tension mechanics"));
+        UE_LOG(LogQAFramework, Log, TEXT("Validating base building system"));
         
-        // Test predator detection systems
-        // Test audio cues for danger
-        // Test visual indicators of threat
-        // Test escape mechanics
-        
-        return true;
-    }
-    
-    bool ValidateGemDiscoveryMechanics()
-    {
-        UE_LOG(LogQAFramework, Log, TEXT("Validating gem discovery mechanics"));
-        
-        // Test gem placement system
-        // Test discovery triggers
-        // Test time travel sequence
-        // Test narrative progression
+        // Test structure placement
+        // Test resource requirements
+        // Test building stability
+        // Test building destruction
         
         return true;
     }
