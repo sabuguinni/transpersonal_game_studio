@@ -1,0 +1,68 @@
+// Material: M_MetaHuman_Variation_Master
+// Description: Master material for MetaHuman character variations
+
+/*
+This master material provides the foundation for all character variations in the game.
+It integrates with the MetaHuman framework while adding prehistoric-specific customizations.
+
+Material Properties:
+- Shading Model: Default Lit
+- Blend Mode: Opaque
+- Two Sided: False
+
+Key Parameters:
+
+FACE VARIATION:
+- FaceVariation01 (Scalar): Controls facial structure blend (0-1)
+- FaceVariation02 (Scalar): Controls facial features blend (0-1)
+- FaceVariation03 (Scalar): Controls facial proportions (0-1)
+
+SKIN PROPERTIES:
+- SkinTone (Scalar): Controls skin color variation (0-1)
+  * 0.0 = Pale/Light
+  * 0.5 = Medium
+  * 1.0 = Dark
+- SkinRoughness (Scalar): Surface roughness for weathered appearance
+- SubsurfaceScattering (Scalar): Skin translucency
+
+EYE CUSTOMIZATION:
+- EyeColor (Scalar): Eye color variation (0-1)
+  * 0.0-0.2 = Brown variants
+  * 0.3-0.6 = Hazel/Green variants
+  * 0.7-1.0 = Blue/Gray variants
+- EyeWetness (Scalar): Eye surface moisture
+
+HAIR PROPERTIES:
+- HairVariation (Scalar): Hair color and style variation
+- HairDirtiness (Scalar): Adds grime and weathering to hair
+
+WEATHERING & AGING:
+- AgeSpots (Scalar): Age-related skin variations
+- DirtOverlay (Scalar): Environmental dirt and grime
+- ScarVisibility (Scalar): Controls scar prominence
+- TattooVisibility (Scalar): Controls tattoo opacity
+
+CLOTHING INTEGRATION:
+- ClothingMask (Texture): Defines clothing coverage areas
+- ClothingColor (Vector3): Base clothing color
+- ClothingWear (Scalar): Wear and tear on clothing
+
+ENVIRONMENTAL ADAPTATION:
+- WeatherExposure (Scalar): Sun damage and exposure effects
+- MudStains (Texture): Procedural mud and dirt stains
+- BloodStains (Scalar): Combat-related blood effects
+
+Material Graph Structure:
+
+BaseColor Output:
+SkinTone → ColorLerp → DirtOverlay → AgeSpots → FinalBaseColor
+
+Normal Output:
+MetaHumanNormal → ScarNormal → WeatheringNormal → FinalNormal
+
+Roughness Output:
+BaseSkinRoughness → AgeRoughness → DirtRoughness → FinalRoughness
+
+This material system ensures visual consistency while providing extensive
+customization options for the procedural character variation system.
+*/
