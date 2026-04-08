@@ -1,0 +1,135 @@
+{
+    "Type": "Blackboard",
+    "Keys": [
+        {
+            "EntryName": "TargetActor",
+            "KeyType": "Object",
+            "BaseClass": "Actor"
+        },
+        {
+            "EntryName": "LastKnownPlayerLocation",
+            "KeyType": "Vector"
+        },
+        {
+            "EntryName": "InvestigateLocation",
+            "KeyType": "Vector"
+        },
+        {
+            "EntryName": "PatrolLocation",
+            "KeyType": "Vector"
+        },
+        {
+            "EntryName": "FleeLocation",
+            "KeyType": "Vector"
+        },
+        {
+            "EntryName": "AmbushLocation",
+            "KeyType": "Vector"
+        },
+        {
+            "EntryName": "CombatState",
+            "KeyType": "Enum",
+            "EnumType": "ECombatState"
+        },
+        {
+            "EntryName": "ThreatLevel",
+            "KeyType": "Enum",
+            "EnumType": "EThreatLevel"
+        },
+        {
+            "EntryName": "DinosaurArchetype",
+            "KeyType": "Enum",
+            "EnumType": "EDinosaurArchetype"
+        },
+        {
+            "EntryName": "AggressionLevel",
+            "KeyType": "Float"
+        },
+        {
+            "EntryName": "CourageLevel",
+            "KeyType": "Float"
+        },
+        {
+            "EntryName": "IntelligenceLevel",
+            "KeyType": "Float"
+        },
+        {
+            "EntryName": "TerritorialLevel",
+            "KeyType": "Float"
+        },
+        {
+            "EntryName": "TerritorialRadius",
+            "KeyType": "Float"
+        },
+        {
+            "EntryName": "HuntingRange",
+            "KeyType": "Float"
+        },
+        {
+            "EntryName": "FleeDistance",
+            "KeyType": "Float"
+        },
+        {
+            "EntryName": "CanSeeTarget",
+            "KeyType": "Bool"
+        },
+        {
+            "EntryName": "IsInCombat",
+            "KeyType": "Bool"
+        },
+        {
+            "EntryName": "ShouldAmbush",
+            "KeyType": "Bool"
+        },
+        {
+            "EntryName": "UsePackTactics",
+            "KeyType": "Bool"
+        },
+        {
+            "EntryName": "DefendTerritory",
+            "KeyType": "Bool"
+        },
+        {
+            "EntryName": "IsPlayerNearby",
+            "KeyType": "Bool"
+        },
+        {
+            "EntryName": "HasRecentPlayerMemory",
+            "KeyType": "Bool"
+        },
+        {
+            "EntryName": "AmbushRange",
+            "KeyType": "Float"
+        },
+        {
+            "EntryName": "FlankDistance",
+            "KeyType": "Float"
+        },
+        {
+            "EntryName": "TerritoryRadius",
+            "KeyType": "Float"
+        },
+        {
+            "EntryName": "AttackCooldown",
+            "KeyType": "Float"
+        },
+        {
+            "EntryName": "LastAttackTime",
+            "KeyType": "Float"
+        },
+        {
+            "EntryName": "PreferredAttackRange",
+            "KeyType": "Float"
+        },
+        {
+            "EntryName": "PackLeader",
+            "KeyType": "Object",
+            "BaseClass": "Actor"
+        },
+        {
+            "EntryName": "PackMembers",
+            "KeyType": "Object",
+            "BaseClass": "Actor"
+        }
+    ]
+}
