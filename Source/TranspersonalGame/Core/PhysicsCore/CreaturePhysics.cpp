@@ -10,6 +10,14 @@
 #include "DrawDebugHelpers.h"
 #include "TimerManager.h"
 
+// Console variable for debug visualization
+static TAutoConsoleVariable<bool> CVarShowPhysicsDebug(
+    TEXT("tp.ShowPhysicsDebug"),
+    false,
+    TEXT("Show creature physics debug information"),
+    ECVF_Default
+);
+
 UCreaturePhysics::UCreaturePhysics()
 {
     PrimaryComponentTick.bCanEverTick = true;
@@ -128,4 +136,330 @@ void UCreaturePhysics::ApplyGroundAdaptation(FVector GroundNormal, const TArray<
                 {
                     DrawDebugLine(GetWorld(), TraceStart, HitResult.Location, FColor::Green, false, 0.1f);
                     DrawDebugSphere(GetWorld(), HitResult.Location, 5.0f, 8, FColor::Yellow, false, 0.1f);
-                }\n            }\n        }\n    }\n    \n    UE_LOG(LogTemp, VeryVerbose, TEXT(\"CreaturePhysics: Ground adaptation - Slope: %f°, Stable: %s\"), \n           SlopeAngle, bIsGroundStable ? TEXT(\"Yes\") : TEXT(\"No\"));\n}\n\nvoid UCreaturePhysics::TransitionToDeathState(FVector DeathImpulse, FVector DeathLocation)\n{\n    if (CurrentPhysicsState == ECreaturePhysicsState::Dead)\n    {\n        return; // Already dead\n    }\n    \n    // Transition to dying state first\n    HandleStateTransition(ECreaturePhysicsState::Dying);\n    \n    if (!CreatureMesh)\n    {\n        UE_LOG(LogTemp, Error, TEXT(\"CreaturePhysics: Cannot transition to death state without skeletal mesh\"));\n        return;\n    }\n    \n    // Start ragdoll transition timer\n    GetWorld()->GetTimerManager().SetTimer(\n        RagdollTransitionTimer,\n        [this, DeathImpulse, DeathLocation]()\n        {\n            // Enable full ragdoll physics\n            CreatureMesh->SetSimulatePhysics(true);\n            CreatureMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);\n            CreatureMesh->SetCollisionResponseToAllChannels(ECR_Block);\n            CreatureMesh->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);\n            \n            // Apply death impulse with size-appropriate scaling\n            const FCreaturePhysicsScaling& Scaling = PhysicsScalingData[CreatureSize];\n            FVector ScaledImpulse = DeathImpulse * Scaling.ForceMultiplier;\n            \n            CreatureMesh->AddImpulseAtLocation(ScaledImpulse, DeathLocation);\n            \n            // Transition to final dead state\n            HandleStateTransition(ECreaturePhysicsState::Dead);\n            \n            UE_LOG(LogTemp, Log, TEXT(\"CreaturePhysics: %s transitioned to ragdoll death state with impulse %s\"), \n                   *GetOwner()->GetName(), *ScaledImpulse.ToString());\n        },\n        RagdollTransitionTime,\n        false\n    );\n    \n    UE_LOG(LogTemp, Log, TEXT(\"CreaturePhysics: %s beginning death transition\"), *GetOwner()->GetName());\n}\n\nvoid UCreaturePhysics::HandleCreatureCollision(AActor* OtherCreature, float CollisionImpulse, FVector CollisionLocation)\n{\n    if (!OtherCreature || CurrentPhysicsState == ECreaturePhysicsState::Dead)\n    {\n        return;\n    }\n    \n    // Get size scaling for damage calculation\n    const FCreaturePhysicsScaling& MyScaling = PhysicsScalingData[CreatureSize];\n    \n    // Calculate collision damage based on impulse and size\n    float CollisionDamage = CollisionImpulse / MyScaling.DamageResistance;\n    \n    if (CollisionDamage > CollisionDamageThreshold)\n    {\n        // Significant collision - apply stun effect\n        if (CurrentPhysicsState == ECreaturePhysicsState::Alive)\n        {\n            HandleStateTransition(ECreaturePhysicsState::Stunned);\n            \n            // Auto-recover from stun after a delay\n            GetWorld()->GetTimerManager().SetTimer(\n                FTimerHandle(),\n                [this]()\n                {\n                    if (CurrentPhysicsState == ECreaturePhysicsState::Stunned)\n                    {\n                        HandleStateTransition(ECreaturePhysicsState::Alive);\n                    }\n                },\n                2.0f, // 2 second stun duration\n                false\n            );\n        }\n        \n        // Apply collision response force\n        if (CreatureMesh)\n        {\n            FVector CollisionForce = (GetOwner()->GetActorLocation() - CollisionLocation).GetSafeNormal();\n            CollisionForce *= CollisionImpulse * 0.5f; // Reduce force for realism\n            \n            CreatureMesh->AddImpulseAtLocation(CollisionForce, CollisionLocation);\n        }\n    }\n    \n    UE_LOG(LogTemp, Log, TEXT(\"CreaturePhysics: %s collision with %s - Impulse: %f, Damage: %f\"), \n           *GetOwner()->GetName(), *OtherCreature->GetName(), CollisionImpulse, CollisionDamage);\n}\n\nvoid UCreaturePhysics::InitializePhysicsForSize()\n{\n    if (!CreatureMesh)\n    {\n        return;\n    }\n    \n    const FCreaturePhysicsScaling& Scaling = PhysicsScalingData[CreatureSize];\n    \n    // Set mass based on creature size\n    float ScaledMass = CreatureMass * Scaling.MassMultiplier;\n    \n    // Apply mass to all physics bodies\n    if (UPhysicsAsset* PhysicsAsset = CreatureMesh->GetPhysicsAsset())\n    {\n        for (int32 i = 0; i < PhysicsAsset->SkeletalBodySetups.Num(); i++)\n        {\n            if (UBodySetup* BodySetup = PhysicsAsset->SkeletalBodySetups[i])\n            {\n                // Set mass properties\n                BodySetup->PhysicsType = EPhysicsType::PhysType_Simulated;\n                \n                // Configure collision\n                BodySetup->CollisionTraceFlag = CTF_UseComplexAsSimple;\n                BodySetup->bGenerateNonMirroredCollision = true;\n                BodySetup->bGenerateMirroredCollision = true;\n            }\n        }\n    }\n    \n    // Configure collision capsule size\n    if (UCapsuleComponent* CapsuleComp = GetOwner()->FindComponentByClass<UCapsuleComponent>())\n    {\n        float CapsuleRadius = Scaling.CollisionRadius;\n        float CapsuleHeight = CreatureHeight * 0.5f;\n        \n        CapsuleComp->SetCapsuleSize(CapsuleRadius, CapsuleHeight);\n        CapsuleComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);\n        CapsuleComp->SetCollisionObjectType(ECC_Pawn);\n    }\n    \n    UE_LOG(LogTemp, Log, TEXT(\"CreaturePhysics: Initialized physics for size %d - Mass multiplier: %f, Collision radius: %f\"), \n           static_cast<int32>(CreatureSize), Scaling.MassMultiplier, Scaling.CollisionRadius);\n}\n\nvoid UCreaturePhysics::UpdateGroundStability()\n{\n    if (!CreatureMesh)\n    {\n        return;\n    }\n    \n    // Trace down to check ground surface\n    FVector TraceStart = GetOwner()->GetActorLocation();\n    FVector TraceEnd = TraceStart - FVector::UpVector * GroundTraceDistance;\n    \n    FHitResult HitResult;\n    FCollisionQueryParams QueryParams;\n    QueryParams.AddIgnoredActor(GetOwner());\n    \n    bool bHit = GetWorld()->LineTraceSingleByChannel(\n        HitResult, TraceStart, TraceEnd, ECC_WorldStatic, QueryParams);\n    \n    if (bHit)\n    {\n        // Calculate ground slope\n        float SlopeAngle = FMath::RadiansToDegrees(\n            FMath::Acos(FVector::DotProduct(HitResult.Normal, FVector::UpVector)));\n        \n        bIsGroundStable = SlopeAngle <= MaxStableSlope;\n        \n        // Apply ground adaptation if needed\n        if (!bIsGroundStable && CurrentPhysicsState == ECreaturePhysicsState::Alive)\n        {\n            // Creature is on unstable ground - apply sliding physics\n            FVector SlideDirection = FVector::VectorPlaneProject(FVector::DownVector, HitResult.Normal).GetSafeNormal();\n            FVector SlideForce = SlideDirection * CreatureMass * 100.0f; // Gravity-based sliding\n            \n            if (CreatureMesh->IsSimulatingPhysics())\n            {\n                CreatureMesh->AddForce(SlideForce);\n            }\n        }\n    }\n    else\n    {\n        // No ground detected - creature is falling\n        bIsGroundStable = false;\n    }\n}\n\nvoid UCreaturePhysics::ApplyPhysicsConstraints()\n{\n    if (!CreatureMesh)\n    {\n        return;\n    }\n    \n    const FCreaturePhysicsScaling& Scaling = PhysicsScalingData[CreatureSize];\n    \n    // Configure physics constraints based on creature size\n    CreatureMesh->SetLinearDamping(0.1f * Scaling.MassMultiplier);\n    CreatureMesh->SetAngularDamping(0.1f * Scaling.MassMultiplier);\n    \n    // Set collision responses\n    CreatureMesh->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Block);\n    CreatureMesh->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Block);\n    CreatureMesh->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);\n    \n    // Configure mass properties\n    if (CreatureMesh->GetBodyInstance())\n    {\n        CreatureMesh->GetBodyInstance()->SetMassOverride(CreatureMass * Scaling.MassMultiplier, true);\n        CreatureMesh->GetBodyInstance()->bLockXRotation = false;\n        CreatureMesh->GetBodyInstance()->bLockYRotation = false;\n        CreatureMesh->GetBodyInstance()->bLockZRotation = false;\n    }\n    \n    UE_LOG(LogTemp, Log, TEXT(\"CreaturePhysics: Applied physics constraints for %s\"), \n           *GetOwner()->GetName());\n}\n\nvoid UCreaturePhysics::HandleStateTransition(ECreaturePhysicsState NewState)\n{\n    if (CurrentPhysicsState == NewState)\n    {\n        return;\n    }\n    \n    ECreaturePhysicsState PreviousState = CurrentPhysicsState;\n    CurrentPhysicsState = NewState;\n    \n    // Handle state-specific physics changes\n    switch (NewState)\n    {\n        case ECreaturePhysicsState::Alive:\n            if (CreatureMesh)\n            {\n                CreatureMesh->SetSimulatePhysics(false);\n                CreatureMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);\n            }\n            break;\n            \n        case ECreaturePhysicsState::Stunned:\n            // Reduce movement capability but keep collision\n            if (CreatureMesh)\n            {\n                CreatureMesh->SetLinearDamping(5.0f); // Increase damping for sluggish movement\n            }\n            break;\n            \n        case ECreaturePhysicsState::Dying:\n            // Prepare for ragdoll transition\n            if (CreatureMesh)\n            {\n                CreatureMesh->SetLinearDamping(0.5f);\n                CreatureMesh->SetAngularDamping(0.5f);\n            }\n            break;\n            \n        case ECreaturePhysicsState::Dead:\n            // Full ragdoll physics enabled\n            if (CreatureMesh)\n            {\n                CreatureMesh->SetSimulatePhysics(true);\n                CreatureMesh->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);\n            }\n            break;\n    }\n    \n    UE_LOG(LogTemp, Log, TEXT(\"CreaturePhysics: %s state transition from %d to %d\"), \n           *GetOwner()->GetName(), static_cast<int32>(PreviousState), static_cast<int32>(NewState));\n}\n\n// Console variable for debug visualization\nstatic TAutoConsoleVariable<bool> CVarShowPhysicsDebug(\n    TEXT(\"tp.ShowPhysicsDebug\"),\n    false,\n    TEXT(\"Show physics debug information for creatures\"),\n    ECVF_Default\n);
+                }
+            }
+        }
+    }
+    
+    UE_LOG(LogTemp, VeryVerbose, TEXT("CreaturePhysics: Ground adaptation - Slope: %f°, Stable: %s"), 
+           SlopeAngle, bIsGroundStable ? TEXT("Yes") : TEXT("No"));
+}
+
+void UCreaturePhysics::TransitionToDeathState(FVector DeathImpulse, FVector DeathLocation)
+{
+    if (CurrentPhysicsState == ECreaturePhysicsState::Dead)
+    {
+        return; // Already dead
+    }
+    
+    // Transition to dying state first
+    HandleStateTransition(ECreaturePhysicsState::Dying);
+    
+    if (!CreatureMesh)
+    {
+        UE_LOG(LogTemp, Error, TEXT("CreaturePhysics: Cannot transition to death state without skeletal mesh"));
+        return;
+    }
+    
+    // Start ragdoll transition timer
+    GetWorld()->GetTimerManager().SetTimer(
+        RagdollTransitionTimer,
+        [this, DeathImpulse, DeathLocation]()
+        {
+            // Enable full ragdoll physics
+            CreatureMesh->SetSimulatePhysics(true);
+            CreatureMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+            CreatureMesh->SetCollisionResponseToAllChannels(ECR_Block);
+            CreatureMesh->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
+            
+            // Apply death impulse with size-appropriate scaling
+            const FCreaturePhysicsScaling& Scaling = PhysicsScalingData[CreatureSize];
+            FVector ScaledImpulse = DeathImpulse * Scaling.ForceMultiplier;
+            
+            CreatureMesh->AddImpulseAtLocation(ScaledImpulse, DeathLocation);
+            
+            // Transition to final dead state
+            HandleStateTransition(ECreaturePhysicsState::Dead);
+            
+            UE_LOG(LogTemp, Log, TEXT("CreaturePhysics: %s transitioned to ragdoll death state with impulse %s"), 
+                   *GetOwner()->GetName(), *ScaledImpulse.ToString());
+        },
+        RagdollTransitionTime,
+        false
+    );
+    
+    UE_LOG(LogTemp, Log, TEXT("CreaturePhysics: %s beginning death transition"), *GetOwner()->GetName());
+}
+
+void UCreaturePhysics::HandleCreatureCollision(AActor* OtherCreature, float CollisionImpulse, FVector CollisionLocation)
+{
+    if (!OtherCreature || CurrentPhysicsState == ECreaturePhysicsState::Dead)
+    {
+        return;
+    }
+    
+    // Get size scaling for damage calculation
+    const FCreaturePhysicsScaling& MyScaling = PhysicsScalingData[CreatureSize];
+    
+    // Calculate collision damage based on impulse and size
+    float CollisionDamage = CollisionImpulse / MyScaling.DamageResistance;
+    
+    if (CollisionDamage > CollisionDamageThreshold)
+    {
+        // Significant collision - apply stun effect
+        if (CurrentPhysicsState == ECreaturePhysicsState::Alive)
+        {
+            HandleStateTransition(ECreaturePhysicsState::Stunned);
+            
+            // Auto-recover from stun after a delay
+            GetWorld()->GetTimerManager().SetTimer(
+                FTimerHandle(),
+                [this]()
+                {
+                    if (CurrentPhysicsState == ECreaturePhysicsState::Stunned)
+                    {
+                        HandleStateTransition(ECreaturePhysicsState::Alive);
+                    }
+                },
+                2.0f, // 2 second stun duration
+                false
+            );
+        }
+        
+        // Apply collision response force
+        if (CreatureMesh)
+        {
+            FVector CollisionForce = (GetOwner()->GetActorLocation() - CollisionLocation).GetSafeNormal();
+            CollisionForce *= CollisionImpulse * 0.5f; // Reduce force for realism
+            
+            CreatureMesh->AddImpulseAtLocation(CollisionForce, CollisionLocation);
+        }
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("CreaturePhysics: %s collision with %s - Impulse: %f, Damage: %f"), 
+           *GetOwner()->GetName(), *OtherCreature->GetName(), CollisionImpulse, CollisionDamage);
+}
+
+void UCreaturePhysics::InitializePhysicsForSize()
+{
+    if (!CreatureMesh)
+    {
+        return;
+    }
+    
+    const FCreaturePhysicsScaling& Scaling = PhysicsScalingData[CreatureSize];
+    
+    // Set mass based on creature size
+    float ScaledMass = CreatureMass * Scaling.MassMultiplier;
+    
+    // Apply mass to all physics bodies
+    if (UPhysicsAsset* PhysicsAsset = CreatureMesh->GetPhysicsAsset())
+    {
+        for (int32 i = 0; i < PhysicsAsset->SkeletalBodySetups.Num(); i++)
+        {
+            if (UBodySetup* BodySetup = PhysicsAsset->SkeletalBodySetups[i])
+            {
+                // Set mass properties based on creature size
+                BodySetup->PhysicsType = EPhysicsType::PhysType_Simulated;
+                
+                // Calculate mass distribution - more mass in torso, less in extremities
+                float BodyMassRatio = 1.0f;
+                FString BoneName = BodySetup->BoneName.ToString().ToLower();
+                
+                if (BoneName.Contains(TEXT("spine")) || BoneName.Contains(TEXT("pelvis")) || BoneName.Contains(TEXT("chest")))
+                {
+                    BodyMassRatio = 3.0f; // Torso gets more mass
+                }
+                else if (BoneName.Contains(TEXT("head")))
+                {
+                    BodyMassRatio = 1.5f; // Head gets moderate mass
+                }
+                else if (BoneName.Contains(TEXT("thigh")) || BoneName.Contains(TEXT("upperarm")))
+                {
+                    BodyMassRatio = 2.0f; // Upper limbs get more mass
+                }
+                else
+                {
+                    BodyMassRatio = 0.5f; // Extremities get less mass
+                }
+                
+                // Apply calculated mass
+                float FinalMass = (ScaledMass / PhysicsAsset->SkeletalBodySetups.Num()) * BodyMassRatio;
+                
+                // Set physics properties
+                BodySetup->DefaultInstance.SetMassOverride(FinalMass, true);
+                BodySetup->DefaultInstance.SetLinearDamping(0.1f);
+                BodySetup->DefaultInstance.SetAngularDamping(0.1f);
+            }
+        }
+    }
+    
+    // Set collision properties
+    CreatureMesh->SetCollisionObjectType(ECC_Pawn);
+    CreatureMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+    CreatureMesh->SetCollisionResponseToAllChannels(ECR_Block);
+    CreatureMesh->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
+    
+    UE_LOG(LogTemp, Log, TEXT("CreaturePhysics: Initialized physics for %s creature with scaled mass %f kg"), 
+           *UEnum::GetValueAsString(CreatureSize), ScaledMass);
+}
+
+void UCreaturePhysics::UpdateGroundStability()
+{
+    if (!CreatureMesh)
+    {
+        return;
+    }
+    
+    // Trace downward to check ground stability
+    FVector TraceStart = GetOwner()->GetActorLocation();
+    FVector TraceEnd = TraceStart - FVector::UpVector * GroundTraceDistance;
+    
+    FHitResult HitResult;
+    FCollisionQueryParams QueryParams;
+    QueryParams.AddIgnoredActor(GetOwner());
+    QueryParams.bTraceComplex = false;
+    
+    bool bHit = GetWorld()->LineTraceSingleByChannel(
+        HitResult, TraceStart, TraceEnd, ECC_WorldStatic, QueryParams);
+    
+    if (bHit)
+    {
+        // Calculate ground slope
+        float SlopeAngle = FMath::RadiansToDegrees(
+            FMath::Acos(FVector::DotProduct(HitResult.Normal, FVector::UpVector)));
+        
+        bIsGroundStable = SlopeAngle <= MaxStableSlope;
+        
+        // Debug visualization
+        if (CVarShowPhysicsDebug.GetValueOnGameThread())
+        {
+            FColor DebugColor = bIsGroundStable ? FColor::Green : FColor::Red;
+            DrawDebugLine(GetWorld(), TraceStart, HitResult.Location, DebugColor, false, 0.1f);
+            DrawDebugString(GetWorld(), HitResult.Location, 
+                           FString::Printf(TEXT("Slope: %.1f°"), SlopeAngle), 
+                           nullptr, DebugColor, 0.1f);
+        }
+    }
+    else
+    {
+        // No ground detected - creature is falling or in air
+        bIsGroundStable = false;
+        
+        if (CVarShowPhysicsDebug.GetValueOnGameThread())
+        {
+            DrawDebugLine(GetWorld(), TraceStart, TraceEnd, FColor::Yellow, false, 0.1f);
+        }
+    }
+}
+
+void UCreaturePhysics::ApplyPhysicsConstraints()
+{
+    if (!CreatureMesh)
+    {
+        return;
+    }
+    
+    const FCreaturePhysicsScaling& Scaling = PhysicsScalingData[CreatureSize];
+    
+    // Apply size-appropriate physics constraints
+    if (UPhysicsAsset* PhysicsAsset = CreatureMesh->GetPhysicsAsset())
+    {
+        // Configure joint constraints based on creature size
+        for (int32 i = 0; i < PhysicsAsset->ConstraintSetup.Num(); i++)
+        {
+            if (UPhysicsConstraintTemplate* Constraint = PhysicsAsset->ConstraintSetup[i])
+            {
+                // Adjust constraint strength based on creature size
+                float ConstraintStrength = 1000.0f * Scaling.ForceMultiplier;
+                
+                // Set linear limits
+                Constraint->DefaultInstance.SetLinearXLimit(ELinearConstraintMotion::LCM_Limited, 10.0f);
+                Constraint->DefaultInstance.SetLinearYLimit(ELinearConstraintMotion::LCM_Limited, 10.0f);
+                Constraint->DefaultInstance.SetLinearZLimit(ELinearConstraintMotion::LCM_Limited, 10.0f);
+                
+                // Set angular limits based on joint type
+                FString ConstraintName = Constraint->DefaultInstance.JointName.ToString().ToLower();
+                
+                if (ConstraintName.Contains(TEXT("spine")) || ConstraintName.Contains(TEXT("neck")))
+                {
+                    // Spine joints - limited flexibility
+                    Constraint->DefaultInstance.SetAngularSwing1Limit(EAngularConstraintMotion::ACM_Limited, 30.0f);
+                    Constraint->DefaultInstance.SetAngularSwing2Limit(EAngularConstraintMotion::ACM_Limited, 30.0f);
+                    Constraint->DefaultInstance.SetAngularTwistLimit(EAngularConstraintMotion::ACM_Limited, 45.0f);
+                }
+                else if (ConstraintName.Contains(TEXT("shoulder")) || ConstraintName.Contains(TEXT("hip")))
+                {
+                    // Ball joints - high flexibility
+                    Constraint->DefaultInstance.SetAngularSwing1Limit(EAngularConstraintMotion::ACM_Limited, 90.0f);
+                    Constraint->DefaultInstance.SetAngularSwing2Limit(EAngularConstraintMotion::ACM_Limited, 90.0f);
+                    Constraint->DefaultInstance.SetAngularTwistLimit(EAngularConstraintMotion::ACM_Limited, 60.0f);
+                }
+                else
+                {
+                    // Default joint limits
+                    Constraint->DefaultInstance.SetAngularSwing1Limit(EAngularConstraintMotion::ACM_Limited, 60.0f);
+                    Constraint->DefaultInstance.SetAngularSwing2Limit(EAngularConstraintMotion::ACM_Limited, 60.0f);
+                    Constraint->DefaultInstance.SetAngularTwistLimit(EAngularConstraintMotion::ACM_Limited, 30.0f);
+                }
+                
+                // Set constraint strength
+                Constraint->DefaultInstance.SetLinearBreakable(true, ConstraintStrength);
+                Constraint->DefaultInstance.SetAngularBreakable(true, ConstraintStrength);
+            }
+        }
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("CreaturePhysics: Applied physics constraints for %s creature"), 
+           *UEnum::GetValueAsString(CreatureSize));
+}
+
+void UCreaturePhysics::HandleStateTransition(ECreaturePhysicsState NewState)
+{
+    if (CurrentPhysicsState == NewState)
+    {
+        return;
+    }
+    
+    ECreaturePhysicsState PreviousState = CurrentPhysicsState;
+    CurrentPhysicsState = NewState;
+    
+    // Handle state-specific logic
+    switch (NewState)
+    {
+        case ECreaturePhysicsState::Alive:
+            // Restore normal physics simulation
+            if (CreatureMesh)
+            {
+                CreatureMesh->SetSimulatePhysics(false);
+                CreatureMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+            }
+            break;
+            
+        case ECreaturePhysicsState::Stunned:
+            // Reduce movement capability but maintain collision
+            if (CreatureMesh)
+            {
+                CreatureMesh->SetSimulatePhysics(false);
+                CreatureMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+            }
+            break;
+            
+        case ECreaturePhysicsState::Dying:
+            // Prepare for ragdoll transition
+            if (CreatureMesh)
+            {
+                CreatureMesh->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
+            }
+            break;
+            
+        case ECreaturePhysicsState::Dead:
+            // Full ragdoll physics enabled (handled in TransitionToDeathState)
+            break;
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("CreaturePhysics: %s transitioned from %s to %s"), 
+           *GetOwner()->GetName(), 
+           *UEnum::GetValueAsString(PreviousState),
+           *UEnum::GetValueAsString(NewState));
+}
