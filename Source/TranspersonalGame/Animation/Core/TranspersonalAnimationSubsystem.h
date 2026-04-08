@@ -1,0 +1,134 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Subsystems/GameInstanceSubsystem.h"
+#include "Engine/DataTable.h"
+#include "Animation/AnimInstance.h"
+#include "TranspersonalAnimationSubsystem.generated.h"
+
+UENUM(BlueprintType)
+enum class ECharacterMovementState : uint8
+{
+    Idle,
+    Walking,
+    Running,
+    Crouching,
+    Prone,
+    Climbing,
+    Swimming,
+    Falling,
+    Landing,
+    Dying
+};
+
+UENUM(BlueprintType)
+enum class ECharacterStance : uint8
+{
+    Relaxed,
+    Alert,
+    Terrified,
+    Injured,
+    Exhausted,
+    Focused
+};
+
+UENUM(BlueprintType)
+enum class ETerrainType : uint8
+{
+    Flat,
+    Uneven,
+    Rocky,
+    Muddy,
+    Sandy,
+    Grass,
+    Water,
+    Steep
+};
+
+USTRUCT(BlueprintType)
+struct FCharacterAnimationProfile : public FTableRowBase
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+    FString CharacterName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+    class UPoseSearchDatabase* LocomotionDatabase;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+    class UPoseSearchDatabase* CombatDatabase;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+    class UPoseSearchDatabase* InteractionDatabase;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+    class UAnimMontage* DeathMontage;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+    float MovementSpeed;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+    float TurnRate;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+    bool bCanCrouch;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+    bool bCanClimb;
+
+    FCharacterAnimationProfile()
+    {
+        CharacterName = TEXT("Default");
+        LocomotionDatabase = nullptr;
+        CombatDatabase = nullptr;
+        InteractionDatabase = nullptr;
+        DeathMontage = nullptr;
+        MovementSpeed = 400.0f;
+        TurnRate = 45.0f;
+        bCanCrouch = true;
+        bCanClimb = false;
+    }
+};
+
+UCLASS()
+class TRANSPERSONALGAME_API UTranspersonalAnimationSubsystem : public UGameInstanceSubsystem
+{
+    GENERATED_BODY()
+
+public:
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    FCharacterAnimationProfile GetAnimationProfile(const FString& CharacterName);
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void RegisterAnimationProfile(const FString& CharacterName, const FCharacterAnimationProfile& Profile);
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    ETerrainType AnalyzeTerrainAtLocation(const FVector& Location, AActor* Character);
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    float CalculateTerrainAdaptationWeight(ETerrainType TerrainType);
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void UpdateGlobalAnimationSettings(float DeltaTime);
+
+protected:
+    UPROPERTY()
+    TMap<FString, FCharacterAnimationProfile> AnimationProfiles;
+
+    UPROPERTY(EditDefaultsOnly, Category = "Animation")
+    class UDataTable* AnimationProfilesTable;
+
+    UPROPERTY(EditDefaultsOnly, Category = "Animation")
+    float GlobalAnimationSpeed;
+
+    UPROPERTY(EditDefaultsOnly, Category = "Animation")
+    bool bDebugAnimationSystem;
+
+private:
+    void LoadDefaultProfiles();
+    void InitializeMotionMatchingSystem();
+    void InitializeIKSystem();
+};
