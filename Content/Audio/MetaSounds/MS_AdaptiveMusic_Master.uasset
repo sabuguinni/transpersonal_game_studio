@@ -1,0 +1,172 @@
+# MetaSound Master Adaptive Music Graph
+# This is a blueprint representation of the MetaSound graph structure
+# The actual MetaSound asset would be created in the UE5 editor
+
+[MetaSound_Graph]
+{
+    "GraphName": "MS_AdaptiveMusic_Master",
+    "Description": "Master adaptive music system that responds to game state",
+    
+    "Inputs": [
+        {
+            "Name": "Tension",
+            "Type": "Float",
+            "DefaultValue": 0.0,
+            "Description": "Current tension level (0.0 = calm, 1.0 = maximum tension)"
+        },
+        {
+            "Name": "ThreatLevel",
+            "Type": "Int32",
+            "DefaultValue": 0,
+            "Description": "Current threat level enum value"
+        },
+        {
+            "Name": "Environment",
+            "Type": "Int32", 
+            "DefaultValue": 0,
+            "Description": "Current environment type enum value"
+        },
+        {
+            "Name": "TimeOfDay",
+            "Type": "Int32",
+            "DefaultValue": 1,
+            "Description": "Current time of day enum value"
+        },
+        {
+            "Name": "PlayerHidden",
+            "Type": "Bool",
+            "DefaultValue": false,
+            "Description": "Whether player is currently hidden"
+        },
+        {
+            "Name": "DinosaurNearby",
+            "Type": "Bool",
+            "DefaultValue": false,
+            "Description": "Whether dinosaurs are nearby"
+        },
+        {
+            "Name": "DinosaurCount",
+            "Type": "Int32",
+            "DefaultValue": 0,
+            "Description": "Number of nearby dinosaurs"
+        }
+    ],
+    
+    "Layers": [
+        {
+            "Name": "Ambient_Base",
+            "Description": "Base ambient layer - always playing",
+            "WaveAssets": [
+                "/Game/Audio/Music/Ambient/Forest_Base_Loop",
+                "/Game/Audio/Music/Ambient/Plains_Base_Loop",
+                "/Game/Audio/Music/Ambient/Cave_Base_Loop"
+            ],
+            "VolumeControl": "EnvironmentMixer",
+            "FilterControl": "EnvironmentFilter"
+        },
+        {
+            "Name": "Tension_Low",
+            "Description": "Low tension musical elements",
+            "WaveAssets": [
+                "/Game/Audio/Music/Tension/Subtle_Strings_Loop",
+                "/Game/Audio/Music/Tension/Distant_Percussion_Loop"
+            ],
+            "VolumeControl": "TensionMixer_Low",
+            "ActivationThreshold": 0.1
+        },
+        {
+            "Name": "Tension_Medium", 
+            "Description": "Medium tension musical elements",
+            "WaveAssets": [
+                "/Game/Audio/Music/Tension/Building_Strings_Loop",
+                "/Game/Audio/Music/Tension/Rhythmic_Pulse_Loop"
+            ],
+            "VolumeControl": "TensionMixer_Medium",
+            "ActivationThreshold": 0.4
+        },
+        {
+            "Name": "Tension_High",
+            "Description": "High tension musical elements", 
+            "WaveAssets": [
+                "/Game/Audio/Music/Tension/Intense_Strings_Loop",
+                "/Game/Audio/Music/Tension/Dramatic_Percussion_Loop"
+            ],
+            "VolumeControl": "TensionMixer_High",
+            "ActivationThreshold": 0.7
+        },
+        {
+            "Name": "Danger_Stingers",
+            "Description": "Sudden danger musical stingers",
+            "WaveAssets": [
+                "/Game/Audio/Music/Stingers/Danger_Sting_01",
+                "/Game/Audio/Music/Stingers/Danger_Sting_02",
+                "/Game/Audio/Music/Stingers/Threat_Reveal_Sting"
+            ],
+            "TriggerType": "OneShotRandom",
+            "TriggerCondition": "ThreatLevelIncrease"
+        }
+    ],
+    
+    "Mixers": [
+        {
+            "Name": "EnvironmentMixer",
+            "InputMapping": "Environment",
+            "Crossfade": true,
+            "FadeTime": 3.0
+        },
+        {
+            "Name": "TensionMixer_Low",
+            "VolumeFormula": "Clamp((Tension - 0.1) * 2.5, 0.0, 1.0)",
+            "FadeTime": 1.0
+        },
+        {
+            "Name": "TensionMixer_Medium", 
+            "VolumeFormula": "Clamp((Tension - 0.4) * 1.67, 0.0, 1.0)",
+            "FadeTime": 1.5
+        },
+        {
+            "Name": "TensionMixer_High",
+            "VolumeFormula": "Clamp((Tension - 0.7) * 3.33, 0.0, 1.0)",
+            "FadeTime": 0.5
+        }
+    ],
+    
+    "Effects": [
+        {
+            "Name": "EnvironmentFilter",
+            "Type": "BiquadFilter",
+            "Parameters": {
+                "CutoffFrequency": "MapRange(Environment, 0, 5, 8000, 20000)",
+                "Resonance": 0.7,
+                "Type": "LowPass"
+            }
+        },
+        {
+            "Name": "TensionReverb",
+            "Type": "Reverb",
+            "Parameters": {
+                "WetLevel": "Tension * 0.3",
+                "RoomSize": "MapRange(Environment, 0, 5, 0.2, 0.8)",
+                "DecayTime": "2.0 + (Tension * 3.0)"
+            }
+        }
+    ],
+    
+    "Logic": [
+        {
+            "Name": "StingerTrigger",
+            "Condition": "ThreatLevelChanged AND NewThreatLevel > OldThreatLevel",
+            "Action": "TriggerRandomStinger(Danger_Stingers)"
+        },
+        {
+            "Name": "HiddenStateModifier",
+            "Condition": "PlayerHidden == true",
+            "Action": "MultiplyVolume(AllLayers, 0.7)"
+        },
+        {
+            "Name": "DinosaurProximityEffect",
+            "Condition": "DinosaurNearby == true",
+            "Action": "AddTension(DinosaurCount * 0.1)"
+        }
+    ]
+}
