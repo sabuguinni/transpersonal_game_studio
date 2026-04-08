@@ -1,162 +1,238 @@
+// Copyright Transpersonal Game Studio. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/World.h"
+#include "Components/ActorComponent.h"
 #include "Engine/Engine.h"
-#include "GameFramework/Actor.h"
+#include "HAL/IConsoleManager.h"
+#include "Stats/Stats.h"
 #include "PerformanceManager.generated.h"
 
-DECLARE_LOG_CATEGORY_EXTERN(LogPerformance, Log, All);
-
-UENUM(BlueprintType)
-enum class EPerformanceTarget : uint8
-{
-    PC_60FPS        UMETA(DisplayName = "PC 60 FPS"),
-    Console_30FPS   UMETA(DisplayName = "Console 30 FPS"),
-    Mobile_30FPS    UMETA(DisplayName = "Mobile 30 FPS")
-};
-
-USTRUCT(BlueprintType)
-struct FPerformanceMetrics
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly)
-    float FrameTime;
-
-    UPROPERTY(BlueprintReadOnly)
-    float GameThreadTime;
-
-    UPROPERTY(BlueprintReadOnly)
-    float RenderThreadTime;
-
-    UPROPERTY(BlueprintReadOnly)
-    float GPUTime;
-
-    UPROPERTY(BlueprintReadOnly)
-    int32 DrawCalls;
-
-    UPROPERTY(BlueprintReadOnly)
-    int32 VisiblePrimitives;
-
-    UPROPERTY(BlueprintReadOnly)
-    float MemoryUsageMB;
-
-    UPROPERTY(BlueprintReadOnly)
-    int32 ActiveAIAgents;
-
-    UPROPERTY(BlueprintReadOnly)
-    int32 StreamingTextures;
-
-    FPerformanceMetrics()
-    {
-        FrameTime = 0.0f;
-        GameThreadTime = 0.0f;
-        RenderThreadTime = 0.0f;
-        GPUTime = 0.0f;
-        DrawCalls = 0;
-        VisiblePrimitives = 0;
-        MemoryUsageMB = 0.0f;
-        ActiveAIAgents = 0;
-        StreamingTextures = 0;
-    }
-};
-
-USTRUCT(BlueprintType)
-struct FPerformanceBudget
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "8.0", ClampMax = "33.33"))
-    float TargetFrameTime = 16.67f; // 60fps default
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "2.0", ClampMax = "15.0"))
-    float MaxGameThreadTime = 8.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "2.0", ClampMax = "15.0"))
-    float MaxRenderThreadTime = 12.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "2.0", ClampMax = "15.0"))
-    float MaxGPUTime = 14.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "100", ClampMax = "5000"))
-    int32 MaxDrawCalls = 2000;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "1000", ClampMax = "50000"))
-    int32 MaxVisiblePrimitives = 15000;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "500", ClampMax = "8000"))
-    float MaxMemoryUsageMB = 3000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "10", ClampMax = "1000"))
-    int32 MaxActiveAIAgents = 200;
-};
-
 /**
- * Central Performance Management System
- * Monitors frame budgets, implements dynamic LOD scaling, and manages performance-critical systems
+ * @brief Performance Manager for Jurassic Survival Game
+ * 
+ * Manages performance targets and optimization for:
+ * - 60fps on high-end PC (RTX 3070+, 16GB RAM)
+ * - 30fps on console (PS5/Xbox Series X)
+ * - Dynamic quality scaling based on performance
+ * - Memory management for large open world
+ * - Physics optimization for massive dinosaur herds
+ * 
+ * @author Performance Optimizer — Agent #4
+ * @version 1.0 — March 2026
  */
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API APerformanceManager : public AActor
+UCLASS(ClassGroup=(Performance), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UPerformanceManager : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    APerformanceManager();
+    UPerformanceManager();
 
 protected:
     virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    EPerformanceTarget CurrentTarget;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    FPerformanceBudget PerformanceBudget;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    FPerformanceMetrics CurrentMetrics;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Monitoring")
-    float MetricsUpdateInterval = 0.1f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Adaptive")
-    bool bEnableAdaptiveQuality = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance|Adaptive")
-    float AdaptiveResponseTime = 2.0f;
-
-private:
-    float LastMetricsUpdate;
-    TArray<float> FrameTimeHistory;
-    int32 FrameHistorySize = 60;
-    
-    // Performance monitoring
-    void UpdatePerformanceMetrics();
-    void CheckPerformanceBudgets();
-    void ApplyAdaptiveQuality();
-    
-    // Scalability management
-    void SetScalabilityLevel(int32 Level);
-    void AdjustDinosaurLOD(float PerformanceRatio);
-    void AdjustVegetationDensity(float PerformanceRatio);
-    void AdjustShadowQuality(float PerformanceRatio);
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 public:
+    /**
+     * @brief Initialize performance monitoring and targets
+     * 
+     * Sets up frame time tracking, memory monitoring, and quality scaling
+     * based on detected hardware capabilities
+     */
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void SetPerformanceTarget(EPerformanceTarget NewTarget);
+    void InitializePerformanceSystem();
 
+    /**
+     * @brief Get current performance metrics
+     * 
+     * @return Struct containing FPS, frame time, memory usage, and quality level
+     */
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Performance")
+    struct FPerformanceMetrics GetCurrentMetrics() const;
+
+    /**
+     * @brief Force performance level adjustment
+     * 
+     * @param NewQualityLevel 0=Low, 1=Medium, 2=High, 3=Epic
+     */
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    FPerformanceMetrics GetCurrentMetrics() const { return CurrentMetrics; }
+    void SetQualityLevel(int32 NewQualityLevel);
 
+    /**
+     * @brief Enable/disable dynamic quality scaling
+     * 
+     * @param bEnable Whether to automatically adjust quality based on performance
+     */
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    bool IsWithinBudget() const;
+    void SetDynamicQualityEnabled(bool bEnable);
 
+    /**
+     * @brief Get recommended quality level for current hardware
+     * 
+     * @return Quality level (0-3) based on GPU benchmark and available memory
+     */
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Performance")
+    int32 GetRecommendedQualityLevel() const;
+
+    /**
+     * @brief Apply Jurassic-specific performance optimizations
+     * 
+     * Optimizes settings for:
+     * - Large dinosaur herds (Mass AI culling)
+     * - Dense vegetation (foliage LOD)
+     * - Physics simulation (Chaos optimization)
+     * - Memory streaming (texture and mesh LOD)
+     */
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    float GetPerformanceRatio() const;
+    void ApplyJurassicOptimizations();
 
-    UFUNCTION(BlueprintImplementableEvent, Category = "Performance")
-    void OnPerformanceTargetChanged(EPerformanceTarget NewTarget);
+protected:
+    /** Target frame rates for different platforms */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance Targets")
+    float TargetFPS_PC = 60.0f;
 
-    UFUNCTION(BlueprintImplementableEvent, Category = "Performance")
-    void OnBudgetExceeded(const FPerformanceMetrics& Metrics);
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance Targets")
+    float TargetFPS_Console = 30.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance Targets")
+    float TargetFPS_Mobile = 30.0f;
+
+    /** Frame time budgets in milliseconds */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance Targets")
+    float FrameTimeBudget_PC = 16.67f; // 60fps
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance Targets")
+    float FrameTimeBudget_Console = 33.33f; // 30fps
+
+    /** Memory usage targets in MB */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance Targets")
+    float MaxMemoryUsage_PC = 12000.0f; // 12GB
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance Targets")
+    float MaxMemoryUsage_Console = 8000.0f; // 8GB
+
+    /** Dynamic quality scaling settings */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Quality Scaling")
+    bool bDynamicQualityEnabled = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Quality Scaling")
+    float QualityAdjustmentThreshold = 5.0f; // ms over budget
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Quality Scaling")
+    float QualityCheckInterval = 2.0f; // seconds
+
+    /** Dinosaur-specific performance settings */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Jurassic Optimization")
+    int32 MaxVisibleDinosaurs = 50;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Jurassic Optimization")
+    float DinosaurCullDistance = 2000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Jurassic Optimization")
+    int32 MaxPhysicsSubsteps = 4;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Jurassic Optimization")
+    float VegetationDensityScale = 1.0f;
+
+private:
+    /** Performance monitoring */
+    void UpdatePerformanceMetrics();
+    void CheckFrameTimeTarget();
+    void CheckMemoryUsage();
+    void AdjustQualityIfNeeded();
+
+    /** Platform detection */
+    void DetectPlatformCapabilities();
+    bool IsHighEndPC() const;
+    bool IsConsole() const;
+
+    /** Quality level management */
+    void ApplyQualityLevel(int32 QualityLevel);
+    void SetRenderingQuality(int32 Level);
+    void SetPhysicsQuality(int32 Level);
+    void SetAudioQuality(int32 Level);
+
+    /** Jurassic-specific optimizations */
+    void OptimizeDinosaurRendering();
+    void OptimizeVegetationSystem();
+    void OptimizePhysicsSimulation();
+    void OptimizeMemoryStreaming();
+
+    /** Performance tracking variables */
+    float CurrentFPS;
+    float CurrentFrameTime;
+    float CurrentMemoryUsage;
+    int32 CurrentQualityLevel;
+    
+    /** Timing for quality adjustments */
+    float LastQualityCheckTime;
+    TArray<float> RecentFrameTimes;
+    
+    /** Platform capabilities */
+    bool bIsHighEndPC;
+    bool bIsConsole;
+    bool bSupportsDLSS;
+    bool bSupportsRayTracing;
+    
+    /** Console variables for runtime adjustment */
+    TAutoConsoleVariable<int32> CVarQualityLevel;
+    TAutoConsoleVariable<bool> CVarDynamicQuality;
+    TAutoConsoleVariable<float> CVarTargetFPS;
+};
+
+/**
+ * @brief Performance metrics structure
+ */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FPerformanceMetrics
+{
+    GENERATED_BODY()
+
+    /** Current frames per second */
+    UPROPERTY(BlueprintReadOnly)
+    float FPS = 0.0f;
+
+    /** Current frame time in milliseconds */
+    UPROPERTY(BlueprintReadOnly)
+    float FrameTime = 0.0f;
+
+    /** Current memory usage in MB */
+    UPROPERTY(BlueprintReadOnly)
+    float MemoryUsage = 0.0f;
+
+    /** Current quality level (0-3) */
+    UPROPERTY(BlueprintReadOnly)
+    int32 QualityLevel = 2;
+
+    /** Whether target FPS is being met */
+    UPROPERTY(BlueprintReadOnly)
+    bool bMeetingTargetFPS = true;
+
+    /** Number of visible dinosaurs */
+    UPROPERTY(BlueprintReadOnly)
+    int32 VisibleDinosaurs = 0;
+
+    /** Current physics simulation load */
+    UPROPERTY(BlueprintReadOnly)
+    float PhysicsLoad = 0.0f;
+
+    /** GPU utilization percentage */
+    UPROPERTY(BlueprintReadOnly)
+    float GPUUtilization = 0.0f;
+
+    FPerformanceMetrics()
+    {
+        FPS = 0.0f;
+        FrameTime = 0.0f;
+        MemoryUsage = 0.0f;
+        QualityLevel = 2;
+        bMeetingTargetFPS = true;
+        VisibleDinosaurs = 0;
+        PhysicsLoad = 0.0f;
+        GPUUtilization = 0.0f;
+    }
 };
