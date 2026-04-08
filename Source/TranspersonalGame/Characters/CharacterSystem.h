@@ -1,141 +1,135 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/DataAsset.h"
-#include "Engine/DataTable.h"
-#include "MetaHumanCreator/Public/MetaHumanCharacter.h"
+#include "Engine/Engine.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Animation/AnimInstance.h"
 #include "CharacterSystem.generated.h"
+
+/**
+ * Core Character System for Transpersonal Game
+ * Handles MetaHuman integration, character variation, and visual diversity
+ */
 
 UENUM(BlueprintType)
 enum class ECharacterArchetype : uint8
 {
-    Protagonist     UMETA(DisplayName = "Protagonist"),
-    TribalElder     UMETA(DisplayName = "Tribal Elder"),
-    TribalWarrior   UMETA(DisplayName = "Tribal Warrior"),
-    TribalHunter    UMETA(DisplayName = "Tribal Hunter"),
-    TribalShaman    UMETA(DisplayName = "Tribal Shaman"),
-    TribalCrafter   UMETA(DisplayName = "Tribal Crafter"),
-    TribalChild     UMETA(DisplayName = "Tribal Child"),
-    TribalNomad     UMETA(DisplayName = "Tribal Nomad")
+    Protagonist         UMETA(DisplayName = "Dr. Protagonist"),
+    TribalElder        UMETA(DisplayName = "Tribal Elder"),
+    TribalWarrior      UMETA(DisplayName = "Tribal Warrior"),
+    TribalHealer       UMETA(DisplayName = "Tribal Healer"),
+    TribalChild        UMETA(DisplayName = "Tribal Child"),
+    TribalCrafter      UMETA(DisplayName = "Tribal Crafter"),
+    Survivor           UMETA(DisplayName = "Lost Survivor"),
+    Hermit             UMETA(DisplayName = "Wilderness Hermit")
 };
 
 UENUM(BlueprintType)
-enum class ETribalCulture : uint8
+enum class ECharacterEthnicity : uint8
 {
-    RiverPeople     UMETA(DisplayName = "River People"),
-    MountainClans   UMETA(DisplayName = "Mountain Clans"),
-    ForestDwellers  UMETA(DisplayName = "Forest Dwellers"),
-    PlainHunters    UMETA(DisplayName = "Plain Hunters"),
-    CaveClans       UMETA(DisplayName = "Cave Clans")
+    African            UMETA(DisplayName = "African"),
+    Asian              UMETA(DisplayName = "Asian"),
+    Caucasian          UMETA(DisplayName = "Caucasian"),
+    Hispanic           UMETA(DisplayName = "Hispanic"),
+    Indigenous         UMETA(DisplayName = "Indigenous"),
+    MiddleEastern      UMETA(DisplayName = "Middle Eastern"),
+    Mixed              UMETA(DisplayName = "Mixed Heritage")
+};
+
+UENUM(BlueprintType)
+enum class ECharacterAge : uint8
+{
+    Child              UMETA(DisplayName = "Child (8-12)"),
+    Teenager           UMETA(DisplayName = "Teenager (13-17)"),
+    YoungAdult         UMETA(DisplayName = "Young Adult (18-30)"),
+    MiddleAged         UMETA(DisplayName = "Middle Aged (31-50)"),
+    Elder              UMETA(DisplayName = "Elder (51+)")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCharacterVariationData
+struct FCharacterVariationData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float SkinTone;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    ECharacterArchetype Archetype;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float BodyBuild;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    ECharacterEthnicity Ethnicity;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float FacialStructure;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    ECharacterAge Age;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float HairVariation;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    bool bIsMale;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float ScarPattern;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    FString CharacterName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float TattooPattern;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    FString BackstoryNotes;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 ClothingSet;
+    // Physical variation parameters
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float HeightVariation;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 AccessorySet;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float BodyWeightVariation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MuscleDefinition;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float SkinWear;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float ScarLevel;
 
     FCharacterVariationData()
     {
-        SkinTone = 0.5f;
-        BodyBuild = 0.5f;
-        FacialStructure = 0.5f;
-        HairVariation = 0.5f;
-        ScarPattern = 0.0f;
-        TattooPattern = 0.0f;
-        ClothingSet = 0;
-        AccessorySet = 0;
+        Archetype = ECharacterArchetype::Protagonist;
+        Ethnicity = ECharacterEthnicity::Caucasian;
+        Age = ECharacterAge::YoungAdult;
+        bIsMale = true;
+        CharacterName = TEXT("Unnamed");
+        BackstoryNotes = TEXT("");
+        HeightVariation = 0.5f;
+        BodyWeightVariation = 0.5f;
+        MuscleDefinition = 0.5f;
+        SkinWear = 0.3f;
+        ScarLevel = 0.2f;
     }
 };
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCharacterProfile
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString CharacterName;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    ECharacterArchetype Archetype;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    ETribalCulture Culture;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FCharacterVariationData VisualVariation;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString BackgroundStory;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TArray<FString> PersonalityTraits;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TSoftObjectPtr<USkeletalMesh> MetaHumanMesh;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TSoftObjectPtr<UAnimBlueprint> AnimationBlueprint;
-
-    FCharacterProfile()
-    {
-        CharacterName = TEXT("Unnamed Character");
-        Archetype = ECharacterArchetype::TribalHunter;
-        Culture = ETribalCulture::ForestDwellers;
-        BackgroundStory = TEXT("");
-    }
-};
-
-UCLASS(BlueprintType)
-class TRANSPERSONALGAME_API UCharacterDatabase : public UDataAsset
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UCharacterSystem : public UObject
 {
     GENERATED_BODY()
 
 public:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Database")
-    TArray<FCharacterProfile> CharacterProfiles;
+    UCharacterSystem();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Variation Settings")
-    int32 MaxVariationsPerArchetype;
+    // Generate a random character variation based on archetype
+    UFUNCTION(BlueprintCallable, Category = "Character System")
+    static FCharacterVariationData GenerateRandomCharacter(ECharacterArchetype Archetype);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Variation Settings")
-    float MinimumVariationDistance;
+    // Validate character data for consistency
+    UFUNCTION(BlueprintCallable, Category = "Character System")
+    static bool ValidateCharacterData(const FCharacterVariationData& CharacterData);
 
-    UCharacterDatabase()
-    {
-        MaxVariationsPerArchetype = 50;
-        MinimumVariationDistance = 0.3f;
-    }
+    // Get appropriate clothing/equipment for archetype
+    UFUNCTION(BlueprintCallable, Category = "Character System")
+    static TArray<FString> GetArchetypeClothing(ECharacterArchetype Archetype);
 
-    UFUNCTION(BlueprintCallable, Category = "Character Generation")
-    FCharacterProfile GenerateRandomCharacter(ECharacterArchetype Archetype, ETribalCulture Culture);
+    // Get survival wear level based on environment exposure
+    UFUNCTION(BlueprintCallable, Category = "Character System")
+    static float CalculateSurvivalWear(float DaysInWilderness, ECharacterArchetype Archetype);
 
-    UFUNCTION(BlueprintCallable, Category = "Character Generation")
-    TArray<FCharacterProfile> GetCharactersByArchetype(ECharacterArchetype Archetype);
+protected:
+    // Character generation tables
+    UPROPERTY(EditDefaultsOnly, Category = "Generation")
+    TMap<ECharacterArchetype, TArray<FString>> ArchetypeNames;
 
-    UFUNCTION(BlueprintCallable, Category = "Character Generation")
-    TArray<FCharacterProfile> GetCharactersByCulture(ETribalCulture Culture);
+    UPROPERTY(EditDefaultsOnly, Category = "Generation")
+    TMap<ECharacterEthnicity, TArray<FString>> EthnicityFeatures;
 };
