@@ -1,0 +1,144 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Engine/World.h"
+#include "Components/ActorComponent.h"
+#include "PCGComponent.h"
+#include "PCGGraph.h"
+#include "LandscapeProxy.h"
+#include "WorldGeneratorCore.generated.h"
+
+UENUM(BlueprintType)
+enum class EBiomeType : uint8
+{
+    DenseForest      UMETA(DisplayName = "Dense Forest"),
+    OpenPlains       UMETA(DisplayName = "Open Plains"),
+    RiverValley      UMETA(DisplayName = "River Valley"),
+    RockyOutcrops    UMETA(DisplayName = "Rocky Outcrops"),
+    SwampLands       UMETA(DisplayName = "Swamp Lands"),
+    CoastalArea      UMETA(DisplayName = "Coastal Area")
+};
+
+UENUM(BlueprintType)
+enum class EDangerLevel : uint8
+{
+    Safe             UMETA(DisplayName = "Safe Zone"),
+    Low              UMETA(DisplayName = "Low Danger"),
+    Medium           UMETA(DisplayName = "Medium Danger"),
+    High             UMETA(DisplayName = "High Danger"),
+    Extreme          UMETA(DisplayName = "Extreme Danger")
+};
+
+USTRUCT(BlueprintType)
+struct FBiomeDefinition
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    EBiomeType BiomeType = EBiomeType::DenseForest;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    EDangerLevel DangerLevel = EDangerLevel::Medium;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float VegetationDensity = 0.7f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float WaterProximity = 0.3f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float ElevationVariance = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TArray<TSoftObjectPtr<UStaticMesh>> VegetationAssets;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TArray<TSoftObjectPtr<UMaterialInterface>> TerrainMaterials;
+};
+
+/**
+ * Core World Generator for the Jurassic Survival Game
+ * Generates regional terrain with biomes, rivers, and ecosystem zones
+ */
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UWorldGeneratorCore : public UActorComponent
+{
+    GENERATED_BODY()
+
+public:
+    UWorldGeneratorCore();
+
+    // World Generation Parameters
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Generation")
+    int32 WorldSizeKm = 8; // 8x8 km region
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Generation")
+    int32 HeightmapResolution = 4033; // Recommended UE5 size
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Generation")
+    float MaxElevation = 500.0f; // 500 meters max height
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Generation")
+    int32 RandomSeed = 12345;
+
+    // Biome Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biomes")
+    TMap<EBiomeType, FBiomeDefinition> BiomeDefinitions;
+
+    // PCG References
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG")
+    TSoftObjectPtr<UPCGGraph> TerrainGenerationGraph;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG")
+    TSoftObjectPtr<UPCGGraph> BiomeDistributionGraph;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG")
+    TSoftObjectPtr<UPCGGraph> RiverSystemGraph;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG")
+    TSoftObjectPtr<UPCGGraph> VegetationScatterGraph;
+
+    // Generation Functions
+    UFUNCTION(BlueprintCallable, Category = "World Generation")
+    void GenerateWorld();
+
+    UFUNCTION(BlueprintCallable, Category = "World Generation")
+    void GenerateTerrain();
+
+    UFUNCTION(BlueprintCallable, Category = "World Generation")
+    void GenerateBiomes();
+
+    UFUNCTION(BlueprintCallable, Category = "World Generation")
+    void GenerateRiverSystem();
+
+    UFUNCTION(BlueprintCallable, Category = "World Generation")
+    void GenerateVegetation();
+
+    // Utility Functions
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "World Generation")
+    EBiomeType GetBiomeAtLocation(FVector WorldLocation) const;
+
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "World Generation")
+    EDangerLevel GetDangerLevelAtLocation(FVector WorldLocation) const;
+
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "World Generation")
+    float GetElevationAtLocation(FVector WorldLocation) const;
+
+protected:
+    virtual void BeginPlay() override;
+
+private:
+    // Internal generation helpers
+    void SetupBiomeDefinitions();
+    void CreateLandscapeActor();
+    void SetupPCGComponents();
+    void ConfigureWorldPartition();
+
+    // Generated landscape reference
+    UPROPERTY()
+    ALandscapeProxy* GeneratedLandscape;
+
+    // PCG Component references
+    UPROPERTY()
+    TArray<UPCGComponent*> PCGComponents;
+};
