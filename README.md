@@ -1,1 +1,62 @@
-# transpersonal_game_studio
+# Transpersonal Game Studio — Jurassic Survival Project
+
+## Visão Geral
+Jogo de sobrevivência em mundo aberto ambientado no período Jurássico/Cretáceo. O jogador é um paleontologista transportado no tempo que deve sobreviver num mundo dominado por dinossauros.
+
+## Conceito Central
+- **Medo constante** — o jogador é sempre a presa, nunca o predador
+- **Dinossauros com vidas próprias** — rotinas independentes do jogador
+- **Domesticação gradual** — alguns herbívoros podem ser domesticados
+- **Cada dinossauro é único** — variações físicas identificáveis
+
+## Estrutura do Projeto
+
+```
+Source/
+├── TranspersonalGame/           # Código principal do jogo
+│   ├── Core/                    # Sistemas fundamentais
+│   ├── Dinosaurs/              # Sistema de dinossauros e IA
+│   ├── Player/                 # Sistema do jogador
+│   ├── World/                  # Geração procedural de mundo
+│   ├── Survival/               # Mecânicas de sobrevivência
+│   └── Audio/                  # Sistema de áudio
+├── TranspersonalGameEditor/     # Ferramentas de editor
+└── Plugins/                    # Plugins customizados
+
+Content/
+├── Blueprints/                 # Blueprints do jogo
+├── Maps/                       # Níveis e mapas
+├── Art/                        # Assets visuais
+├── Audio/                      # Assets de áudio
+├── Materials/                  # Materiais e texturas
+└── VFX/                        # Efeitos visuais
+
+Config/                         # Configurações do projeto
+Binaries/                       # Executáveis compilados
+Intermediate/                   # Arquivos temporários de build
+Saved/                          # Dados salvos e logs
+```
+
+## Tecnologias Core
+- **Engine:** Unreal Engine 5.4+
+- **Rendering:** Lumen (iluminação global)
+- **World:** World Partition + PCG (Procedural Content Generation)
+- **Animation:** Motion Matching + IK
+- **AI:** Mass AI (até 50.000 agentes simultâneos)
+- **Audio:** MetaSounds + ElevenLabs
+- **VFX:** Niagara com LOD chain
+
+## Build Status
+- **Última Build:** Em desenvolvimento
+- **Target Platforms:** Windows (primário), Console (futuro)
+- **Performance Target:** 60fps PC / 30fps Console
+
+## Agentes da Cadeia de Produção
+Este projeto é desenvolvido por uma cadeia de 19 agentes especializados:
+1. Studio Director → 2. Engine Architect → 3. Core Systems → ... → 19. Integration & Build
+
+## Como Contribuir
+Cada agente segue a ordem estabelecida na cadeia de produção. Consulte a documentação específica do seu agente antes de fazer alterações.
+
+---
+*Transpersonal Game Studio — Março 2026*
