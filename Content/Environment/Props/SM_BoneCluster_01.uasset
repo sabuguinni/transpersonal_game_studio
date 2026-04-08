@@ -1,0 +1,62 @@
+// Bone Cluster Static Mesh
+// Scattered dinosaur bones - environmental storytelling
+// Suggests predation, death, territorial marking
+
+StaticMesh: SM_BoneCluster_01
+Material: M_AgedBone
+
+// Mesh Properties  
+Vertices: 1247
+Triangles: 1893
+LODs: 3
+
+// LOD 0 (0-300 units)
+Triangles: 1893
+ScreenSize: 1.0
+
+// LOD 1 (300-1000 units)
+Triangles: 946
+ScreenSize: 0.4
+
+// LOD 2 (1000+ units)  
+Triangles: 473
+ScreenSize: 0.15
+
+// Collision
+CollisionComplexity: UseSimpleAsComplex
+EnableCollision: true
+CollisionResponse: Block
+
+// Nanite
+EnableNanite: true
+FallbackRelativeError: 0.8
+
+// Materials
+MaterialSlots:
+[
+    {
+        MaterialSlotName: "Bone"
+        Material: M_AgedBone
+        UVChannel: 0
+    },
+    {
+        MaterialSlotName: "Dirt"
+        Material: M_DirtStained
+        UVChannel: 0
+    }
+]
+
+// Variations
+Variants:
+[
+    SM_BoneCluster_01, // Ribcage cluster
+    SM_BoneCluster_02, // Skull and vertebrae
+    SM_BoneCluster_03, // Scattered limb bones
+    SM_BoneCluster_04  // Single large femur
+]
+
+// Usage Notes:
+// - Place near water sources (predation sites)
+// - Avoid overuse - should feel discovered, not planted
+// - Combine with disturbed ground materials
+// - Can indicate dangerous areas or predator territories
