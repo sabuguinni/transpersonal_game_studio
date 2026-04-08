@@ -1,0 +1,98 @@
+{
+  "temple_architectures": {
+    "meditation_sanctuaries": {
+      "base_structure": {
+        "foundation_type": "sacred_geometry_circle",
+        "radius_meters": 25,
+        "height_meters": 12,
+        "materials": ["crystalline_stone", "consciousness_infused_wood", "energy_glass"],
+        "sacred_proportions": "golden_ratio_spiral"
+      },
+      "interior_layout": {
+        "central_meditation_chamber": {
+          "diameter": 15,
+          "ceiling_type": "dome_with_consciousness_aperture",
+          "floor_pattern": "mandala_inlay",
+          "seating_arrangement": "concentric_circles",
+          "capacity": 12
+        },
+        "preparation_alcoves": {
+          "count": 6,
+          "size": "3x3_meters",
+          "purpose": "individual_consciousness_preparation",
+          "privacy_level": "semi_enclosed"
+        },
+        "energy_circulation_channels": {
+          "primary_flow": "spiral_inward_pattern",
+          "secondary_nodes": "chakra_alignment_points",
+          "ventilation": "consciousness_responsive_airflow"
+        }
+      },
+      "consciousness_integration": {
+        "awareness_amplification_zones": ["center", "cardinal_points"],
+        "meditation_depth_indicators": "crystalline_resonance_panels",
+        "collective_consciousness_interface": "central_energy_pool"
+      }
+    },
+    "wisdom_libraries": {
+      "structure_type": "tree_of_knowledge_spiral",
+      "height_levels": 7,
+      "access_method": "consciousness_elevator_platforms",
+      "interior_features": {
+        "knowledge_storage": {
+          "physical_scrolls": "lower_3_levels",
+          "consciousness_crystals": "middle_2_levels",
+          "pure_energy_wisdom": "upper_2_levels"
+        },
+        "reading_spaces": {
+          "individual_study_pods": 21,
+          "group_discussion_circles": 7,
+          "deep_contemplation_chambers": 3
+        },
+        "navigation_system": {
+          "intention_based_pathfinding": true,
+          "knowledge_seeking_guidance": "luminous_thread_system",
+          "consciousness_level_access_control": true
+        }
+      }
+    },
+    "transformation_chambers": {
+      "purpose": "consciousness_evolution_rituals",
+      "chamber_types": {
+        "ego_dissolution_room": {
+          "shape": "perfect_sphere",
+          "diameter": 8,
+          "surface_material": "mirror_consciousness_crystal",
+          "lighting": "internal_bioluminescence",
+          "sound_system": "frequency_healing_resonators"
+        },
+        "integration_space": {
+          "shape": "infinity_symbol_layout",
+          "dual_chambers": "shadow_and_light_work",
+          "connection_bridge": "consciousness_integration_pathway",
+          "support_systems": "emotional_stabilization_fields"
+        },
+        "rebirth_sanctuary": {
+          "design": "cosmic_egg_architecture",
+          "materials": "living_consciousness_membrane",
+          "emergence_portal": "dimensional_threshold_gateway",
+          "nurturing_environment": "universal_mother_energy"
+        }
+      }
+    }
+  },
+  "procedural_generation_rules": {
+    "temple_placement": {
+      "consciousness_node_proximity": "within_500_meters",
+      "sacred_geometry_alignment": "ley_line_intersections",
+      "natural_feature_integration": "mountain_peaks_water_sources",
+      "minimum_distance_between_temples": 2000
+    },
+    "architectural_variation": {
+      "cultural_influences": ["ancient_wisdom_traditions", "future_consciousness_evolution"],
+      "material_adaptation": "local_biome_integration",
+      "size_scaling": "community_consciousness_level",
+      "complexity_progression": "player_spiritual_development"
+    }
+  }
+}
