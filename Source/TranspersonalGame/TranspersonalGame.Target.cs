@@ -10,24 +10,26 @@ public class TranspersonalGameTarget : TargetRules
         Type = TargetType.Game;
         DefaultBuildSettings = BuildSettingsVersion.V4;
         IncludeOrderVersion = EngineIncludeOrderVersion.Unreal5_3;
+        ExtraModuleNames.Add("TranspersonalGame");
         
-        ExtraModuleNames.AddRange(new string[] { 
-            "TranspersonalGame",
-            "CoreSystems",
-            "WorldGeneration", 
-            "DinosaurAI",
-            "SurvivalSystems"
-        });
-
-        // Performance optimizations for prehistoric world simulation
+        // Performance optimizations for Jurassic survival game
         bUseUnityBuild = true;
         bUsePCHFiles = true;
-        bUseSharedPCHs = true;
+        MinFilesUsingPrecompiledHeaderOverride = 1;
+        bForceEnableExceptions = false;
         
-        // Enable for large world support (Jurassic landscape)
-        bWithLiveCoding = false; // Disabled for shipping builds
+        // Platform-specific settings
+        if (Target.Platform == UnrealTargetPlatform.Win64)
+        {
+            WindowsPlatform.PCHMemoryAllocationFactor = 2000;
+        }
         
-        // Memory optimization for massive dinosaur crowds
-        WindowsPlatform.PCHMemoryAllocationFactor = 2000;
+        // Build configuration optimizations
+        if (Target.Configuration == UnrealTargetConfiguration.Shipping)
+        {
+            bUseLoggingInShipping = false;
+            bUseChecksInShipping = false;
+            bCompileWithStatsWithoutEngine = false;
+        }
     }
 }
