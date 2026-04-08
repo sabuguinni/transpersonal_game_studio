@@ -1,94 +1,115 @@
 #include "AnimationSystemCore.h"
+#include "Animation/PoseSearch/PoseSearchDatabase.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Engine/Engine.h"
-#include "TimerManager.h"
 
 UAnimationSystemCore::UAnimationSystemCore()
 {
-    // Initialize default animation state
-    CurrentAnimationState.EmotionalState = ECharacterEmotionalState::Calm;
-    CurrentAnimationState.MovementIntention = EMovementIntention::Idle;
-    CurrentAnimationState.FearLevel = 0.0f;
-    CurrentAnimationState.StaminaLevel = 1.0f;
-    CurrentAnimationState.GroundSlope = 0.0f;
-    CurrentAnimationState.MovementDirection = FVector::ZeroVector;
-    CurrentAnimationState.MovementSpeed = 0.0f;
-    CurrentAnimationState.bIsCarryingObject = false;
-    CurrentAnimationState.ObjectWeight = 0.0f;
-
-    TargetAnimationState = CurrentAnimationState;
+    CurrentAnimationState = ECharacterAnimationState::Idle_Calm;
+    StateTransitionTime = 0.0f;
+    EmotionalTransitionProgress = 0.0f;
 }
 
-void UAnimationSystemCore::UpdateCharacterState(const FCharacterAnimationState& NewState)
+void UAnimationSystemCore::InitializeForCharacter(USkeletalMeshComponent* SkeletalMesh, const FCharacterAnimationProfile& Profile)
 {
-    TargetAnimationState = NewState;
-    
-    // Immediate updates for critical states
-    if (NewState.FearLevel > CurrentAnimationState.FearLevel + 0.3f)
+    if (!SkeletalMesh)
     {
-        CurrentAnimationState.FearLevel = NewState.FearLevel;
-        CurrentAnimationState.EmotionalState = NewState.EmotionalState;
+        UE_LOG(LogAnimation, Warning, TEXT("AnimationSystemCore: Cannot initialize with null SkeletalMesh"));
+        return;
     }
     
-    // Gradual blending for other properties
-    CurrentAnimationState.MovementIntention = NewState.MovementIntention;
-    CurrentAnimationState.MovementDirection = NewState.MovementDirection;
-    CurrentAnimationState.MovementSpeed = NewState.MovementSpeed;
-    CurrentAnimationState.bIsCarryingObject = NewState.bIsCarryingObject;
-    CurrentAnimationState.ObjectWeight = NewState.ObjectWeight;
+    CurrentProfile = Profile;
+    CurrentAnimationState = ECharacterAnimationState::Idle_Calm;
+    StateTransitionTime = 0.0f;
+    EmotionalTransitionProgress = 0.0f;
+    
+    UE_LOG(LogAnimation, Log, TEXT("AnimationSystemCore: Initialized for character with emotional state: %d"), 
+           (int32)CurrentProfile.CurrentEmotionalState);
 }
 
-void UAnimationSystemCore::SetFearLevel(float NewFearLevel)
+void UAnimationSystemCore::UpdateAnimationState(ECharacterAnimationState NewState, float DeltaTime)
 {
-    NewFearLevel = FMath::Clamp(NewFearLevel, 0.0f, 1.0f);
-    
-    // Update emotional state based on fear level
-    ECharacterEmotionalState NewEmotionalState = ECharacterEmotionalState::Calm;
-    
-    if (NewFearLevel > 0.8f)
+    if (CurrentAnimationState != NewState)
     {
-        NewEmotionalState = ECharacterEmotionalState::Terrified;
-    }
-    else if (NewFearLevel > 0.5f)
-    {
-        NewEmotionalState = ECharacterEmotionalState::Fearful;
-    }
-    else if (NewFearLevel > 0.2f)
-    {
-        NewEmotionalState = ECharacterEmotionalState::Cautious;
+        // Start transition to new state
+        CurrentAnimationState = NewState;
+        StateTransitionTime = 0.0f;
+        
+        UE_LOG(LogAnimation, Verbose, TEXT("AnimationSystemCore: Transitioning to state: %d"), (int32)NewState);
     }
     
-    CurrentAnimationState.FearLevel = NewFearLevel;
-    CurrentAnimationState.EmotionalState = NewEmotionalState;
-    TargetAnimationState.FearLevel = NewFearLevel;
-    TargetAnimationState.EmotionalState = NewEmotionalState;
+    StateTransitionTime += DeltaTime;
+    UpdateEmotionalTransition(DeltaTime);
 }
 
-void UAnimationSystemCore::TriggerEmotionalResponse(ECharacterEmotionalState NewEmotion, float Duration)
+void UAnimationSystemCore::UpdateEmotionalState(EEmotionalState NewState, float TransitionTime)
 {
-    CurrentAnimationState.EmotionalState = NewEmotion;
-    EmotionalTransitionTimer = 0.0f;
-    EmotionalTransitionDuration = Duration;
-    
-    // Set appropriate fear level for the emotion
-    switch (NewEmotion)
+    if (CurrentProfile.CurrentEmotionalState != NewState)
     {
-        case ECharacterEmotionalState::Terrified:
-            CurrentAnimationState.FearLevel = 1.0f;
+        CurrentProfile.CurrentEmotionalState = NewState;
+        EmotionalTransitionProgress = 0.0f;
+        
+        UE_LOG(LogAnimation, Log, TEXT("AnimationSystemCore: Emotional state changed to: %d"), (int32)NewState);
+    }
+}
+
+UPoseSearchDatabase* UAnimationSystemCore::GetCurrentMotionDatabase() const
+{
+    return CurrentProfile.MotionDatabase;
+}
+
+float UAnimationSystemCore::CalculateEmotionalBlendWeight(EEmotionalState TargetState) const
+{
+    if (CurrentProfile.CurrentEmotionalState == TargetState)
+    {
+        return FMath::Clamp(EmotionalTransitionProgress, 0.0f, 1.0f);
+    }
+    
+    // Calculate cross-emotional influences
+    switch (CurrentProfile.CurrentEmotionalState)
+    {
+        case EEmotionalState::Terrified:
+            if (TargetState == EEmotionalState::Anxious) return 0.7f;
             break;
-        case ECharacterEmotionalState::Fearful:
-            CurrentAnimationState.FearLevel = 0.7f;
+            
+        case EEmotionalState::Anxious:
+            if (TargetState == EEmotionalState::Calm) return 0.3f;
+            if (TargetState == EEmotionalState::Terrified) return 0.4f;
             break;
-        case ECharacterEmotionalState::Cautious:
-            CurrentAnimationState.FearLevel = 0.4f;
-            break;
-        case ECharacterEmotionalState::Curious:
-            CurrentAnimationState.FearLevel = 0.1f;
-            break;
-        case ECharacterEmotionalState::Focused:
-            CurrentAnimationState.FearLevel = 0.2f;
-            break;
+            
+        case EEmotionalState::Exhausted:
+            // Exhaustion affects all movements
+            return FMath::Lerp(0.2f, 0.8f, CurrentProfile.FatigueLevel);
+            
         default:
-            CurrentAnimationState.FearLevel = 0.0f;
             break;
     }
+    
+    return 0.0f;
+}
+
+void UAnimationSystemCore::UpdateEmotionalTransition(float DeltaTime)
+{
+    // Emotional transitions are influenced by fear and fatigue levels
+    float TransitionSpeed = 1.0f;
+    
+    // High fear makes emotional changes faster
+    TransitionSpeed *= (1.0f + CurrentProfile.FearLevel * 2.0f);
+    
+    // High fatigue makes emotional changes slower
+    TransitionSpeed *= (1.0f - CurrentProfile.FatigueLevel * 0.5f);
+    
+    EmotionalTransitionProgress = FMath::Clamp(
+        EmotionalTransitionProgress + (DeltaTime * TransitionSpeed), 
+        0.0f, 
+        1.0f
+    );
+}
+
+ECharacterAnimationState UAnimationSystemCore::SelectOptimalAnimationState() const
+{
+    // This would contain logic to select the best animation state
+    // based on current emotional state, fatigue, fear, etc.
+    // For now, return current state
+    return CurrentAnimationState;
 }
