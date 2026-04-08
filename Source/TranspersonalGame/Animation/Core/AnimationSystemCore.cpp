@@ -1,123 +1,150 @@
 #include "AnimationSystemCore.h"
-#include "GameFramework/Character.h"
-#include "GameFramework/CharacterMovementComponent.h"
+#include "Engine/World.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Animation/AnimInstance.h"
-#include "PoseSearch/PoseSearchDatabase.h"
-
-DEFINE_LOG_CATEGORY(LogAnimationSystem);
+#include "DrawDebugHelpers.h"
 
 UAnimationSystemCore::UAnimationSystemCore()
 {
-    CurrentContext = EMovementContext::Exploration;
-    CurrentEmotionalState = ECharacterEmotionalState::Calm;
-    CurrentFearLevel = 0.0f;
-    CurrentExhaustion = 0.0f;
+    // Initialize default animation state
+    CurrentAnimationState.EmotionalState = ECharacterEmotionalState::Cautious;
+    CurrentAnimationState.MovementContext = EMovementContext::OpenArea;
+    CurrentAnimationState.ThreatLevel = EThreatLevel::None;
+    CurrentAnimationState.FatigueLevel = 0.0f;
+    CurrentAnimationState.ExperienceLevel = 0.0f;
+    CurrentAnimationState.TimeInCurrentArea = 0.0f;
+    CurrentAnimationState.bIsCarryingWeight = false;
+    CurrentAnimationState.bIsInjured = false;
+    CurrentAnimationState.InjurySeverity = 0.0f;
 
-    // Initialize default character profile for paleontologist
-    FCharacterAnimationProfile PaleontologistProfile;
-    PaleontologistProfile.CharacterName = TEXT("Dr_Paleontologist");
-    PaleontologistProfile.FearThreshold = 0.6f; // Lower threshold - gets scared easier
-    PaleontologistProfile.ExhaustionRate = 0.15f; // Gets tired faster
-    PaleontologistProfile.RecoveryRate = 0.03f; // Recovers slower
+    PreviousAnimationState = CurrentAnimationState;
+}
+
+void UAnimationSystemCore::UpdateAnimationState(const FCharacterAnimationState& NewState)
+{
+    PreviousAnimationState = CurrentAnimationState;
+    CurrentAnimationState = NewState;
+    StateTransitionTime = 0.0f;
     
-    // Contextual speed modifiers for a scientist, not an athlete
-    PaleontologistProfile.ContextualSpeedModifiers[EMovementContext::Exploration] = 0.9f;
-    PaleontologistProfile.ContextualSpeedModifiers[EMovementContext::Stealth] = 0.4f;
-    PaleontologistProfile.ContextualSpeedModifiers[EMovementContext::Escape] = 1.3f; // Adrenaline helps
-    PaleontologistProfile.ContextualSpeedModifiers[EMovementContext::Interaction] = 0.7f;
-    PaleontologistProfile.ContextualSpeedModifiers[EMovementContext::Combat] = 0.8f; // Not a fighter
-    PaleontologistProfile.ContextualSpeedModifiers[EMovementContext::Observation] = 0.05f; // Very slow, careful observation
+    // Log significant state changes for debugging
+    if (PreviousAnimationState.EmotionalState != CurrentAnimationState.EmotionalState)
+    {
+        UE_LOG(LogTemp, Log, TEXT("Emotional State Changed: %d -> %d"), 
+            (int32)PreviousAnimationState.EmotionalState, 
+            (int32)CurrentAnimationState.EmotionalState);
+    }
     
-    CharacterProfiles.Add(TEXT("Dr_Paleontologist"), PaleontologistProfile);
-}
-
-void UAnimationSystemCore::InitializeForCharacter(ACharacter* Character)
-{
-    if (!Character)
+    if (PreviousAnimationState.ThreatLevel != CurrentAnimationState.ThreatLevel)
     {
-        UE_LOG(LogAnimationSystem, Error, TEXT("Cannot initialize animation system: Character is null"));
-        return;
-    }
-
-    UE_LOG(LogAnimationSystem, Log, TEXT("Initializing animation system for character: %s"), *Character->GetName());
-
-    // Set default animation profile
-    if (CharacterProfiles.Contains(TEXT("Dr_Paleontologist")))
-    {
-        UE_LOG(LogAnimationSystem, Log, TEXT("Applied paleontologist animation profile"));
+        UE_LOG(LogTemp, Log, TEXT("Threat Level Changed: %d -> %d"), 
+            (int32)PreviousAnimationState.ThreatLevel, 
+            (int32)CurrentAnimationState.ThreatLevel);
     }
 }
 
-void UAnimationSystemCore::UpdateAnimationContext(EMovementContext NewContext, ECharacterEmotionalState EmotionalState)
+void UAnimationSystemCore::SetMotionMatchingDatabase(UPoseSearchDatabase* Database)
 {
-    EMovementContext PreviousContext = CurrentContext;
-    CurrentContext = NewContext;
-    CurrentEmotionalState = EmotionalState;
-
-    // Update fear level based on context
-    switch (NewContext)
-    {
-        case EMovementContext::Escape:
-            CurrentFearLevel = FMath::Clamp(CurrentFearLevel + 0.3f, 0.0f, 1.0f);
-            break;
-        case EMovementContext::Stealth:
-            CurrentFearLevel = FMath::Clamp(CurrentFearLevel + 0.1f, 0.0f, 1.0f);
-            break;
-        case EMovementContext::Observation:
-            CurrentFearLevel = FMath::Clamp(CurrentFearLevel - 0.05f, 0.0f, 1.0f);
-            break;
-        case EMovementContext::Exploration:
-            CurrentFearLevel = FMath::Clamp(CurrentFearLevel - 0.02f, 0.0f, 1.0f);
-            break;
-    }
-
-    UE_LOG(LogAnimationSystem, Log, TEXT("Animation context changed from %d to %d. Fear level: %f"), 
-           (int32)PreviousContext, (int32)NewContext, CurrentFearLevel);
+    CurrentMotionDatabase = Database;
+    UE_LOG(LogTemp, Log, TEXT("Motion Matching Database Updated"));
 }
 
-float UAnimationSystemCore::CalculateBlendTime(EMovementContext FromContext, EMovementContext ToContext)
+void UAnimationSystemCore::UpdateFootIK(float DeltaTime)
 {
-    // Quick transitions for fear responses
-    if (ToContext == EMovementContext::Escape)
-    {
-        return 0.1f; // Immediate fear response
-    }
-
-    // Slower transitions when calming down
-    if (FromContext == EMovementContext::Escape && ToContext == EMovementContext::Exploration)
-    {
-        return 0.8f; // Takes time to calm down
-    }
-
-    // Stealth requires careful transitions
-    if (ToContext == EMovementContext::Stealth || FromContext == EMovementContext::Stealth)
-    {
-        return 0.4f;
-    }
-
-    // Default blend time
-    return 0.25f;
+    // This will be called from the Animation Blueprint
+    // Foot IK logic will be implemented in the Animation Blueprint nodes
+    StateTransitionTime += DeltaTime;
+    LastUpdateTime = DeltaTime;
 }
 
-FVector UAnimationSystemCore::CalculateFootPlantingOffset(const FVector& GroundNormal, const FVector& FootLocation)
+void UAnimationSystemCore::SetIKFootTarget(bool bLeftFoot, FVector TargetLocation, FRotator TargetRotation)
 {
-    // Calculate IK offset for foot placement on uneven terrain
-    FVector UpVector = FVector::UpVector;
-    FVector Offset = FVector::ZeroVector;
+    if (bLeftFoot)
+    {
+        LeftFootIKLocation = TargetLocation;
+        LeftFootIKRotation = TargetRotation;
+    }
+    else
+    {
+        RightFootIKLocation = TargetLocation;
+        RightFootIKRotation = TargetRotation;
+    }
+}
 
-    // Project foot location onto ground plane
-    float DotProduct = FVector::DotProduct(GroundNormal, UpVector);
+float UAnimationSystemCore::CalculateMovementBlendWeight(ECharacterEmotionalState State, EThreatLevel Threat) const
+{
+    float BaseWeight = 1.0f;
     
-    if (DotProduct > 0.1f) // Valid ground normal
+    // Emotional state modifiers
+    switch (State)
     {
-        // Calculate offset to align foot with ground
-        FVector GroundPoint = FootLocation - FVector::DotProduct(FootLocation - FVector::ZeroVector, GroundNormal) * GroundNormal;
-        Offset = GroundPoint - FootLocation;
-        
-        // Limit offset to reasonable values
-        Offset = Offset.GetClampedToMaxSize(20.0f); // Max 20cm offset
+        case ECharacterEmotionalState::Terrified:
+            BaseWeight *= 1.5f; // More erratic, faster movements
+            break;
+        case ECharacterEmotionalState::Anxious:
+            BaseWeight *= 1.2f; // Slightly heightened movements
+            break;
+        case ECharacterEmotionalState::Cautious:
+            BaseWeight *= 1.0f; // Normal baseline
+            break;
+        case ECharacterEmotionalState::Focused:
+            BaseWeight *= 0.9f; // More controlled movements
+            break;
+        case ECharacterEmotionalState::Confident:
+            BaseWeight *= 0.8f; // Smoother, more efficient
+            break;
+        case ECharacterEmotionalState::Exhausted:
+            BaseWeight *= 0.6f; // Slower, more labored
+            break;
     }
+    
+    // Threat level modifiers
+    switch (Threat)
+    {
+        case EThreatLevel::None:
+            BaseWeight *= 1.0f;
+            break;
+        case EThreatLevel::Distant:
+            BaseWeight *= 1.1f; // Slight tension
+            break;
+        case EThreatLevel::Nearby:
+            BaseWeight *= 1.3f; // Heightened alertness
+            break;
+        case EThreatLevel::Immediate:
+            BaseWeight *= 1.6f; // High stress movements
+            break;
+        case EThreatLevel::Combat:
+            BaseWeight *= 2.0f; // Maximum intensity
+            break;
+    }
+    
+    // Factor in fatigue - tired characters move differently
+    float FatigueModifier = FMath::Lerp(1.0f, 0.7f, CurrentAnimationState.FatigueLevel);
+    BaseWeight *= FatigueModifier;
+    
+    // Factor in experience - experienced characters are more efficient
+    float ExperienceModifier = FMath::Lerp(1.0f, 0.85f, CurrentAnimationState.ExperienceLevel);
+    BaseWeight *= ExperienceModifier;
+    
+    return FMath::Clamp(BaseWeight, 0.1f, 3.0f);
+}
 
-    return Offset;
+float UAnimationSystemCore::GetContextualSpeedModifier(EMovementContext Context) const
+{
+    switch (Context)
+    {
+        case EMovementContext::OpenArea:
+            return 1.0f; // Normal speed
+        case EMovementContext::DenseVegetation:
+            return 0.7f; // Slower, more careful
+        case EMovementContext::NearWater:
+            return 0.8f; // Cautious near water
+        case EMovementContext::HighGround:
+            return 1.1f; // Confident on high ground
+        case EMovementContext::Hiding:
+            return 0.3f; // Very slow, stealthy
+        case EMovementContext::Stalking:
+            return 0.5f; // Slow, deliberate
+        default:
+            return 1.0f;
+    }
 }
