@@ -8,8 +8,6 @@
 #include "Chaos/ChaosEngineInterface.h"
 #include "PhysicsEngine/PhysicsSettings.h"
 #include "PerformanceTargets.h"
-#include "../Core/PhysicsCore/PhysicsSystemManager.h"
-#include "../Core/PhysicsCore/CollisionSystem.h"
 #include "PhysicsPerformanceOptimizer.generated.h"
 
 /**
@@ -38,6 +36,68 @@
  * @author Performance Optimizer — Agent #4
  * @version 1.0 — March 2026
  */
+
+UENUM(BlueprintType)
+enum class EPhysicsLODLevel : uint8
+{
+    Disabled    UMETA(DisplayName = "Disabled"),        // No physics simulation
+    Minimal     UMETA(DisplayName = "Minimal"),         // Basic collision only
+    Reduced     UMETA(DisplayName = "Reduced"),         // Simplified physics
+    Standard    UMETA(DisplayName = "Standard"),        // Normal physics
+    High        UMETA(DisplayName = "High"),            // Full physics detail
+    Maximum     UMETA(DisplayName = "Maximum")          // Highest quality
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FPhysicsPerformanceMetrics
+{
+    GENERATED_BODY()
+
+    /** Current physics frame time in milliseconds */
+    UPROPERTY(BlueprintReadOnly, Category = "Physics Performance")
+    float PhysicsFrameTime = 0.0f;
+
+    /** Number of active physics bodies */
+    UPROPERTY(BlueprintReadOnly, Category = "Physics Performance")
+    int32 ActivePhysicsBodies = 0;
+
+    /** Number of active destruction chunks */
+    UPROPERTY(BlueprintReadOnly, Category = "Physics Performance")
+    int32 ActiveDestructionChunks = 0;
+
+    /** Number of active ragdolls */
+    UPROPERTY(BlueprintReadOnly, Category = "Physics Performance")
+    int32 ActiveRagdolls = 0;
+
+    /** Number of collision tests this frame */
+    UPROPERTY(BlueprintReadOnly, Category = "Physics Performance")
+    int32 CollisionTestsThisFrame = 0;
+
+    /** Physics memory usage in MB */
+    UPROPERTY(BlueprintReadOnly, Category = "Physics Performance")
+    float PhysicsMemoryUsageMB = 0.0f;
+
+    /** Whether physics is within performance budget */
+    UPROPERTY(BlueprintReadOnly, Category = "Physics Performance")
+    bool bWithinBudget = true;
+
+    /** Performance efficiency (0.0 = worst, 1.0 = perfect) */
+    UPROPERTY(BlueprintReadOnly, Category = "Physics Performance")
+    float PerformanceEfficiency = 1.0f;
+
+    FPhysicsPerformanceMetrics()
+    {
+        PhysicsFrameTime = 0.0f;
+        ActivePhysicsBodies = 0;
+        ActiveDestructionChunks = 0;
+        ActiveRagdolls = 0;
+        CollisionTestsThisFrame = 0;
+        PhysicsMemoryUsageMB = 0.0f;
+        bWithinBudget = true;
+        PerformanceEfficiency = 1.0f;
+    }
+};
+
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UPhysicsPerformanceOptimizer : public UActorComponent
 {
@@ -126,57 +186,6 @@ public:
     void ForceEmergencyOptimization();
 
 protected:
-    /** Physics LOD levels */
-    UENUM(BlueprintType)
-    enum class EPhysicsLODLevel : uint8
-    {
-        Disabled    UMETA(DisplayName = "Disabled"),        // No physics simulation
-        Minimal     UMETA(DisplayName = "Minimal"),         // Basic collision only
-        Reduced     UMETA(DisplayName = "Reduced"),         // Simplified physics
-        Standard    UMETA(DisplayName = "Standard"),        // Normal physics
-        High        UMETA(DisplayName = "High"),            // Full physics detail
-        Maximum     UMETA(DisplayName = "Maximum")          // Highest quality
-    };
-
-    /** Physics performance metrics structure */
-    USTRUCT(BlueprintType)
-    struct FPhysicsPerformanceMetrics
-    {
-        GENERATED_BODY()
-
-        /** Current physics frame time in milliseconds */
-        UPROPERTY(BlueprintReadOnly)
-        float PhysicsFrameTime = 0.0f;
-
-        /** Number of active physics bodies */
-        UPROPERTY(BlueprintReadOnly)
-        int32 ActivePhysicsBodies = 0;
-
-        /** Number of active destruction chunks */
-        UPROPERTY(BlueprintReadOnly)
-        int32 ActiveDestructionChunks = 0;
-
-        /** Number of active ragdolls */
-        UPROPERTY(BlueprintReadOnly)
-        int32 ActiveRagdolls = 0;
-
-        /** Number of collision tests this frame */
-        UPROPERTY(BlueprintReadOnly)
-        int32 CollisionTestsThisFrame = 0;
-
-        /** Physics memory usage in MB */
-        UPROPERTY(BlueprintReadOnly)
-        float PhysicsMemoryUsageMB = 0.0f;
-
-        /** Whether physics is within performance budget */
-        UPROPERTY(BlueprintReadOnly)
-        bool bWithinBudget = true;
-
-        /** Performance efficiency (0.0 = worst, 1.0 = perfect) */
-        UPROPERTY(BlueprintReadOnly)
-        float PerformanceEfficiency = 1.0f;
-    };
-
     /** Current performance target */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance Settings")
     EPerformanceTarget CurrentPerformanceTarget = EPerformanceTarget::PC_HighEnd;
@@ -221,6 +230,10 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Optimization Settings", meta = (ClampMin = "1.1", ClampMax = "3.0"))
     float EmergencyOptimizationThreshold = 1.5f;
 
+    /** Current physics performance metrics */
+    UPROPERTY()
+    FPhysicsPerformanceMetrics CurrentMetrics;
+
 private:
     /** Initialize performance monitoring */
     void InitializePerformanceMonitoring();
@@ -249,42 +262,18 @@ private:
     /** Calculate physics importance for an actor */
     float CalculatePhysicsImportance(AActor* Actor, FVector ViewerLocation) const;
 
-    /** Cached references */
-    UPROPERTY()
-    UPhysicsSystemManager* PhysicsSystemManager;
-
-    UPROPERTY()
-    UCollisionSystem* CollisionSystem;
-
-    UPROPERTY()
-    UWorld* CachedWorld;
-
-    /** Performance tracking */
-    FPhysicsPerformanceMetrics CurrentMetrics;
-    float FrameTimeHistory[60]; // 1 second history at 60fps
-    int32 FrameHistoryIndex = 0;
-
-    /** Tracked physics objects for optimization */
-    UPROPERTY()
-    TArray<AActor*> TrackedPhysicsActors;
-
-    /** Active destruction chunks */
-    UPROPERTY()
-    TArray<UPrimitiveComponent*> ActiveDestructionChunks;
-
-    /** Active ragdolls with timestamps */
-    UPROPERTY()
-    TMap<USkeletalMeshComponent*, float> ActiveRagdolls;
-
-    /** Physics LOD cache to avoid recalculation */
-    TMap<AActor*, EPhysicsLODLevel> PhysicsLODCache;
-
-    /** Performance optimization flags */
-    bool bEmergencyOptimizationActive = false;
+    // Performance tracking
+    float LastFramePhysicsTime = 0.0f;
+    float AccumulatedPhysicsTime = 0.0f;
+    int32 FrameCounter = 0;
+    
+    // Object tracking
+    TArray<TWeakObjectPtr<AActor>> TrackedPhysicsActors;
+    TArray<TWeakObjectPtr<AActor>> ActiveRagdollActors;
+    TArray<TWeakObjectPtr<AActor>> ActiveDestructionActors;
+    
+    // Optimization state
+    bool bIsInitialized = false;
     float LastOptimizationTime = 0.0f;
-    float OptimizationInterval = 0.1f; // Optimize every 100ms
-
-    /** Physics budget tracking */
-    float PhysicsBudgetUsed = 0.0f;
-    float PhysicsBudgetAvailable = 2.0f; // 2ms default
+    float OptimizationInterval = 0.1f; // 100ms between optimizations
 };
