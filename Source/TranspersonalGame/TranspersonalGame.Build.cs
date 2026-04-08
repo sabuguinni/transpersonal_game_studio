@@ -21,37 +21,45 @@ public class TranspersonalGame : ModuleRules
             "SlateCore"
         });
 
-        // Gameplay dependencies
+        // Private dependencies for advanced systems
         PrivateDependencyModuleNames.AddRange(new string[] 
         { 
-            "GameplayTags",
-            "GameplayTasks",
-            "AIModule",
+            "RenderCore",
+            "RHI",
             "NavigationSystem",
+            "AIModule",
+            "GameplayTasks",
+            "GameplayTags",
+            "PhysicsCore",
+            "Chaos",
+            "ChaosVehicles",
             "Niagara",
             "AudioMixer",
             "MetasoundEngine",
-            "CinematicCamera",
             "LevelSequence",
-            "MovieScene"
+            "MovieScene",
+            "CinematicCamera"
         });
 
-        // UE5 specific features
+        // UE5 specific modules
         if (Target.Version.MajorVersion >= 5)
         {
             PrivateDependencyModuleNames.AddRange(new string[]
             {
                 "MassEntity",
-                "MassMovement",
+                "MassMovement", 
                 "MassSpawner",
-                "MassAI",
+                "MassActors",
+                "MassCommon",
+                "MassSimulation",
+                "MassGameplay",
                 "WorldPartition",
-                "Chaos",
-                "ChaosVehicles"
+                "Lumen",
+                "Nanite"
             });
         }
 
-        // Development tools (Editor only)
+        // Development and editor dependencies
         if (Target.bBuildEditor)
         {
             PrivateDependencyModuleNames.AddRange(new string[]
@@ -64,24 +72,30 @@ public class TranspersonalGame : ModuleRules
             });
         }
 
-        // Platform specific
+        // Platform specific optimizations
         if (Target.Platform == UnrealTargetPlatform.Win64)
         {
             PublicDefinitions.Add("PLATFORM_WINDOWS=1");
+        }
+        else if (Target.Platform == UnrealTargetPlatform.Mac)
+        {
+            PublicDefinitions.Add("PLATFORM_MAC=1");
+        }
+
+        // Build configuration specific settings
+        if (Target.Configuration == UnrealTargetConfiguration.Shipping)
+        {
+            PublicDefinitions.Add("UE_BUILD_SHIPPING=1");
+            bUseLoggingInShipping = false;
+        }
+        else
+        {
+            PublicDefinitions.Add("UE_BUILD_DEVELOPMENT=1");
         }
 
         // Performance settings
         bUseUnity = true;
         MinFilesUsingPrecompiledHeaderOverride = 1;
         bFasterWithoutUnity = false;
-
-        // Optimization flags
-        OptimizeCode = CodeOptimization.InShippingBuildsOnly;
-        
-        // Enable IWYU for better compile times
-        bEnforceIWYU = true;
-        
-        // Disable legacy features for better performance
-        bLegacyPublicIncludePaths = false;
     }
 }
