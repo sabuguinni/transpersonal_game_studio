@@ -1,153 +1,92 @@
 #include "AnimationSystemManager.h"
 #include "Engine/World.h"
-#include "GameFramework/Character.h"
-#include "Components/SkeletalMeshComponent.h"
 #include "Animation/AnimInstance.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Animation/PoseSearch/PoseSearchDatabase.h"
 
 UAnimationSystemManager::UAnimationSystemManager()
 {
-    PrimaryComponentTick.bCanEverTick = true;
+    // Initialize default settings
+    MovementVariationIntensity = 0.15f;
+    PostureVariationRange = 0.1f;
+}
+
+void UAnimationSystemManager::InitializeAnimationSystem()
+{
+    UE_LOG(LogTemp, Warning, TEXT("Animation System Manager: Initializing core animation systems"));
     
-    CurrentMovementState = ECharacterMovementState::Idle;
-    CurrentBehaviorState = EDinosaurBehaviorState::Idle;
-    bUseMotionMatching = true;
-    bUseFootIK = true;
-    FootIKInterpSpeed = 5.0f;
-}
-
-void UAnimationSystemManager::BeginPlay()
-{
-    Super::BeginPlay();
-    InitializeAnimationSystems();
-}
-
-void UAnimationSystemManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
-{
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    SetupMotionMatchingSystem();
+    SetupIKSystem();
+    SetupProceduralVariations();
     
-    UpdateAnimationBlending(DeltaTime);
-    ProcessMovementStateTransitions();
+    UE_LOG(LogTemp, Warning, TEXT("Animation System Manager: Initialization complete"));
 }
 
-void UAnimationSystemManager::SetCharacterMovementState(ECharacterMovementState NewState)
+void UAnimationSystemManager::RegisterMotionMatchingDatabase(UPoseSearchDatabase* Database, const FString& CharacterType)
 {
-    if (CurrentMovementState != NewState)
+    if (!Database)
     {
-        ECharacterMovementState PreviousState = CurrentMovementState;
-        CurrentMovementState = NewState;
-        
-        // Log state transition for debugging
-        UE_LOG(LogTemp, Log, TEXT("Character movement state changed from %d to %d"), 
-               (int32)PreviousState, (int32)NewState);
+        UE_LOG(LogTemp, Error, TEXT("Animation System Manager: Attempted to register null Motion Matching database"));
+        return;
     }
+
+    MotionMatchingDatabases.Add(CharacterType, Database);
+    UE_LOG(LogTemp, Warning, TEXT("Animation System Manager: Registered Motion Matching database for %s"), *CharacterType);
 }
 
-void UAnimationSystemManager::UpdateCharacterProfile(const FCharacterAnimationProfile& NewProfile)
+void UAnimationSystemManager::SetupFootIK(USkeletalMeshComponent* SkeletalMesh, bool bEnableFootIK)
 {
-    CharacterProfile = NewProfile;
-    
-    // Update animation parameters based on profile
-    if (AActor* Owner = GetOwner())
+    if (!SkeletalMesh)
     {
-        if (USkeletalMeshComponent* MeshComp = Owner->FindComponentByClass<USkeletalMeshComponent>())
-        {
-            if (UAnimInstance* AnimInstance = MeshComp->GetAnimInstance())
-            {
-                // Set animation variables based on character profile
-                // This would be expanded with specific animation blueprint variables
-            }
-        }
+        UE_LOG(LogTemp, Error, TEXT("Animation System Manager: Invalid skeletal mesh for Foot IK setup"));
+        return;
     }
+
+    FIKSettings NewIKSettings;
+    NewIKSettings.bEnableFootIK = bEnableFootIK;
+    NewIKSettings.FootIKIntensity = 1.0f;
+    NewIKSettings.TerrainAdaptationSpeed = 5.0f;
+    NewIKSettings.MaxFootAdjustment = 30.0f;
+
+    IKSettingsMap.Add(SkeletalMesh, NewIKSettings);
+    
+    UE_LOG(LogTemp, Warning, TEXT("Animation System Manager: Foot IK configured for skeletal mesh"));
 }
 
-void UAnimationSystemManager::SetDinosaurBehaviorState(EDinosaurBehaviorState NewState)
+void UAnimationSystemManager::ApplyProceduralVariations(USkeletalMeshComponent* SkeletalMesh, const FString& SpeciesType)
 {
-    if (CurrentBehaviorState != NewState)
+    if (!SkeletalMesh)
     {
-        EDinosaurBehaviorState PreviousState = CurrentBehaviorState;
-        CurrentBehaviorState = NewState;
-        
-        UE_LOG(LogTemp, Log, TEXT("Dinosaur behavior state changed from %d to %d"), 
-               (int32)PreviousState, (int32)NewState);
+        UE_LOG(LogTemp, Error, TEXT("Animation System Manager: Invalid skeletal mesh for procedural variations"));
+        return;
     }
+
+    // Apply species-specific movement variations
+    float VariationSeed = FMath::RandRange(0.8f, 1.2f);
+    
+    // This would be expanded to modify animation playback rates, bone scales, etc.
+    UE_LOG(LogTemp, Warning, TEXT("Animation System Manager: Applied procedural variations for %s (Seed: %f)"), *SpeciesType, VariationSeed);
 }
 
-void UAnimationSystemManager::InitializeMotionMatching()
+void UAnimationSystemManager::SetupMotionMatchingSystem()
 {
-    if (bUseMotionMatching)
-    {
-        // Initialize Motion Matching system
-        // This would connect to the Pose Search plugin
-        UE_LOG(LogTemp, Log, TEXT("Motion Matching system initialized"));
-    }
+    UE_LOG(LogTemp, Warning, TEXT("Animation System Manager: Setting up Motion Matching system"));
+    
+    // Initialize Motion Matching databases for different character types
+    // This would load and configure the databases based on character archetypes
 }
 
-void UAnimationSystemManager::UpdateMotionMatchingQuery(FVector Velocity, FVector Acceleration, float TurnRate)
+void UAnimationSystemManager::SetupIKSystem()
 {
-    if (!bUseMotionMatching) return;
+    UE_LOG(LogTemp, Warning, TEXT("Animation System Manager: Setting up IK system"));
     
-    // Update motion matching query parameters
-    // This would feed data to the Motion Matching node in the Animation Blueprint
-    
-    // Calculate movement characteristics for query
-    float Speed = Velocity.Size();
-    FVector Direction = Velocity.GetSafeNormal();
-    
-    // Apply character profile modifiers
-    Speed *= CharacterProfile.MovementSpeed;
-    
-    // Modify based on fear and exhaustion
-    if (CharacterProfile.FearLevel > 0.5f)
-    {
-        // Fear makes movements more erratic and faster
-        Speed *= (1.0f + CharacterProfile.FearLevel * 0.3f);
-    }
-    
-    if (CharacterProfile.ExhaustionLevel > 0.5f)
-    {
-        // Exhaustion slows down movements
-        Speed *= (1.0f - CharacterProfile.ExhaustionLevel * 0.4f);
-    }
+    // Configure IK solvers and constraints
+    // Setup foot IK for terrain adaptation
 }
 
-void UAnimationSystemManager::EnableFootIK(bool bEnable)
+void UAnimationSystemManager::SetupProceduralVariations()
 {
-    bUseFootIK = bEnable;
-    UE_LOG(LogTemp, Log, TEXT("Foot IK %s"), bEnable ? TEXT("enabled") : TEXT("disabled"));
-}
-
-void UAnimationSystemManager::UpdateFootIKTargets(FVector LeftFootTarget, FVector RightFootTarget)
-{
-    if (!bUseFootIK) return;
+    UE_LOG(LogTemp, Warning, TEXT("Animation System Manager: Setting up procedural animation variations"));
     
-    // Update IK targets for foot placement
-    // This would be used by the IK Rig system
-}
-
-void UAnimationSystemManager::InitializeAnimationSystems()
-{
-    InitializeMotionMatching();
-    EnableFootIK(bUseFootIK);
-    
-    UE_LOG(LogTemp, Log, TEXT("Animation System Manager initialized for %s"), 
-           GetOwner() ? *GetOwner()->GetName() : TEXT("Unknown"));
-}
-
-void UAnimationSystemManager::UpdateAnimationBlending(float DeltaTime)
-{
-    // Update animation blending based on current states and profile
-    // This is where we would implement the Richard Williams principles
-    // of weight, timing, and follow-through
-}
-
-void UAnimationSystemManager::ProcessMovementStateTransitions()
-{
-    // Handle automatic state transitions based on gameplay conditions
-    // For example, transitioning from walking to running based on speed
-    
-    if (AActor* Owner = GetOwner())
-    {
-        // Get movement data from owner
-        // Process state transitions based on gameplay logic
-    }
+    // Configure procedural systems for individual character uniqueness
 }
