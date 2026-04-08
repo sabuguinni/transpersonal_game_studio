@@ -1,0 +1,184 @@
+{
+  "MetaSound": {
+    "Name": "MS_TensionBuilding", 
+    "Description": "Música para tensão crescente - algo está errado",
+    "Category": "Adaptive Music",
+    "Inputs": [
+      {
+        "Name": "TensionLevel",
+        "Type": "Float",
+        "DefaultValue": 0.3,
+        "Description": "Nível de tensão (0.0 = suspeita leve, 1.0 = perigo iminente)"
+      },
+      {
+        "Name": "HeartbeatTrigger",
+        "Type": "Trigger",
+        "Description": "Trigger para efeito de batimento cardíaco"
+      },
+      {
+        "Name": "PredatorNearby",
+        "Type": "Bool",
+        "DefaultValue": false,
+        "Description": "Predador detectado nas proximidades"
+      }
+    ],
+    "Graph": {
+      "Nodes": [
+        {
+          "Type": "WavePlayer",
+          "Name": "LowDrone_Base",
+          "Properties": {
+            "WaveAsset": "/Content/Audio/Music/Tension_LowDrone.wav",
+            "Loop": true,
+            "Volume": 0.6
+          }
+        },
+        {
+          "Type": "WavePlayer",
+          "Name": "DissonantStrings",
+          "Properties": {
+            "WaveAsset": "/Content/Audio/Music/Tension_Strings.wav", 
+            "Loop": true,
+            "Volume": 0.4
+          }
+        },
+        {
+          "Type": "WavePlayer",
+          "Name": "Heartbeat_Sample",
+          "Properties": {
+            "WaveAsset": "/Content/Audio/SFX/Heartbeat_Single.wav",
+            "Loop": false,
+            "Volume": 0.7
+          }
+        },
+        {
+          "Type": "WavePlayer",
+          "Name": "Stinger_Danger",
+          "Properties": {
+            "WaveAsset": "/Content/Audio/Music/Danger_Stinger.wav",
+            "Loop": false,
+            "Volume": 0.9
+          }
+        },
+        {
+          "Type": "LowFrequencyOscillator",
+          "Name": "Tension_LFO",
+          "Properties": {
+            "Frequency": 0.05,
+            "Shape": "Triangle", 
+            "MinValue": 0.7,
+            "MaxValue": 1.3
+          }
+        },
+        {
+          "Type": "MapRange",
+          "Name": "TensionToVolume",
+          "Properties": {
+            "InRangeA": 0.0,
+            "InRangeB": 1.0,
+            "OutRangeA": 0.2,
+            "OutRangeB": 1.0
+          }
+        },
+        {
+          "Type": "MapRange", 
+          "Name": "TensionToFilter",
+          "Properties": {
+            "InRangeA": 0.0,
+            "InRangeB": 1.0,
+            "OutRangeA": 2000,
+            "OutRangeB": 8000
+          }
+        },
+        {
+          "Type": "BiquadFilter",
+          "Name": "Tension_HighPass",
+          "Properties": {
+            "Type": "HighPass",
+            "CutoffFrequency": 2000,
+            "Resonance": 1.2
+          }
+        },
+        {
+          "Type": "Compressor",
+          "Name": "Dynamic_Compressor",
+          "Properties": {
+            "Ratio": 3.0,
+            "ThresholdDB": -12.0,
+            "AttackTime": 0.01,
+            "ReleaseTime": 0.1
+          }
+        },
+        {
+          "Type": "TriggerRepeat",
+          "Name": "Heartbeat_Trigger",
+          "Properties": {
+            "Period": 1.2
+          }
+        },
+        {
+          "Type": "Multiply",
+          "Name": "Volume_Control"
+        },
+        {
+          "Type": "Add",
+          "Name": "Layer_Mix"
+        }
+      ],
+      "Connections": [
+        {
+          "From": "TensionLevel",
+          "To": "TensionToVolume.In"
+        },
+        {
+          "From": "TensionLevel", 
+          "To": "TensionToFilter.In"
+        },
+        {
+          "From": "TensionToFilter.OutValue",
+          "To": "Tension_HighPass.CutoffFrequency"
+        },
+        {
+          "From": "LowDrone_Base.Audio",
+          "To": "Layer_Mix.A"
+        },
+        {
+          "From": "DissonantStrings.Audio",
+          "To": "Tension_HighPass.In"
+        },
+        {
+          "From": "Tension_HighPass.Out",
+          "To": "Layer_Mix.B"
+        },
+        {
+          "From": "Layer_Mix.Out",
+          "To": "Volume_Control.A"
+        },
+        {
+          "From": "TensionToVolume.OutValue",
+          "To": "Volume_Control.B"
+        },
+        {
+          "From": "Tension_LFO.Out",
+          "To": "Volume_Control.B"
+        },
+        {
+          "From": "Volume_Control.Out",
+          "To": "Dynamic_Compressor.Audio"
+        },
+        {
+          "From": "HeartbeatTrigger",
+          "To": "Heartbeat_Sample.Play"
+        },
+        {
+          "From": "PredatorNearby",
+          "To": "Stinger_Danger.Play"
+        },
+        {
+          "From": "Dynamic_Compressor.Audio",
+          "To": "Output.Audio"
+        }
+      ]
+    }
+  }
+}
