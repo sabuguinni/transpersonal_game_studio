@@ -1,407 +1,554 @@
 #include "NPCBehaviorSystem.h"
-#include "DinosaurNPC.h"
 #include "Engine/World.h"
-#include "TimerManager.h"
-#include "GameplayTagsManager.h"
-#include "BehaviorTree/BlackboardComponent.h"
+#include "GameFramework/GameStateBase.h"
+#include "Kismet/GameplayStatics.h"
 #include "BehaviorTree/BehaviorTreeComponent.h"
+#include "BehaviorTree/BlackboardComponent.h"
+#include "AIController.h"
 
-void UNPCBehaviorSystem::Initialize(FSubsystemCollectionBase& Collection)
+UNPCBehaviorSystem::UNPCBehaviorSystem()
 {
-    Super::Initialize(Collection);
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 1.0f; // Tick a cada segundo para otimização
+}
+
+void UNPCBehaviorSystem::BeginPlay()
+{
+    Super::BeginPlay();
     
-    UE_LOG(LogTemp, Warning, TEXT("NPC Behavior System initialized"));
-    
-    // Carregar data table de espécies se configurado
-    if (SpeciesDataTable.IsValid())
+    // Inicializar componentes de IA
+    if (AActor* Owner = GetOwner())
     {
-        UDataTable* LoadedTable = SpeciesDataTable.LoadSynchronous();
-        if (LoadedTable)
+        if (APawn* OwnerPawn = Cast<APawn>(Owner))
         {
-            UE_LOG(LogTemp, Warning, TEXT("Species data table loaded successfully"));
+            if (AAIController* AIController = Cast<AAIController>(OwnerPawn->GetController()))
+            {
+                BehaviorTreeComponent = AIController->GetBehaviorTreeComponent();
+                BlackboardComponent = AIController->GetBlackboardComponent();
+            }
         }
     }
-}
-
-void UNPCBehaviorSystem::Deinitialize()
-{
-    // Limpar timer
-    if (UWorld* World = GetWorld())
+    
+    // Gerar personalidade única se não foi definida
+    if (PersonalityTraits.Aggression == 0.5f && PersonalityTraits.Curiosity == 0.5f) // Valores padrão
     {
-        World->GetTimerManager().ClearTimer(RoutineUpdateTimer);
+        GenerateRandomPersonality();
     }
     
-    RegisteredNPCs.Empty();
+    // Configurar rotina diária padrão se vazia
+    if (DailyRoutine.Num() == 0)
+    {
+        GenerateDefaultDailyRoutine();
+    }
     
-    Super::Deinitialize();
+    // Atualizar blackboard inicial
+    UpdateBlackboardValues();
 }
 
-void UNPCBehaviorSystem::RegisterNPC(ADinosaurNPC* NPC)
+void UNPCBehaviorSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    if (!NPC)
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    
+    // Atualizar rotina diária (a cada 30 segundos)
+    if (CurrentTime - LastRoutineUpdate > 30.0f)
+    {
+        UpdateDailyRoutine();
+        LastRoutineUpdate = CurrentTime;
+    }
+    
+    // Atualizar domesticação (a cada 5 segundos)
+    if (CurrentTime - LastDomesticationUpdate > 5.0f)
+    {
+        UpdateDomestication(DeltaTime);
+        LastDomesticationUpdate = CurrentTime;
+    }
+    
+    // Atualizar memória (a cada 60 segundos)
+    if (CurrentTime - LastMemoryUpdate > 60.0f)
+    {
+        UpdateMemoryDecay(DeltaTime);
+        LastMemoryUpdate = CurrentTime;
+    }
+    
+    // Processar comportamento social
+    ProcessSocialBehavior();
+    
+    // Atualizar blackboard
+    UpdateBlackboardValues();
+}
+
+void UNPCBehaviorSystem::SetBehaviorState(EDinosaurBehaviorState NewState)
+{
+    if (CurrentBehaviorState != NewState)
+    {
+        EDinosaurBehaviorState PreviousState = CurrentBehaviorState;
+        CurrentBehaviorState = NewState;
+        
+        // Log da mudança de estado para debug
+        UE_LOG(LogTemp, Log, TEXT("Dinosaur %s changed behavior from %d to %d"), 
+               *GetOwner()->GetName(), (int32)PreviousState, (int32)NewState);
+        
+        // Atualizar blackboard
+        if (BlackboardComponent)
+        {
+            BlackboardComponent->SetValueAsEnum(TEXT("BehaviorState"), (uint8)NewState);
+        }
+        
+        // Trigger eventos específicos por estado
+        OnBehaviorStateChanged(PreviousState, NewState);
+    }
+}
+
+void UNPCBehaviorSystem::InteractWithPlayer(AActor* Player, float PositiveInteraction)
+{
+    if (!Player || !CanBeDomesticated())
     {
         return;
     }
     
-    // Adicionar à lista se não estiver já registado
-    TWeakObjectPtr<ADinosaurNPC> WeakNPC(NPC);
-    if (!RegisteredNPCs.Contains(WeakNPC))
+    // Atualizar memória do jogador
+    UpdateActorMemory(Player, PositiveInteraction * 0.1f);
+    
+    // Calcular progresso de domesticação baseado na personalidade
+    float PersonalityModifier = (PersonalityTraits.Curiosity + (1.0f - PersonalityTraits.Fearfulness)) * 0.5f;
+    float DomesticationGain = PositiveInteraction * PersonalityModifier * 0.05f;
+    
+    DomesticationProgress += DomesticationGain;
+    
+    // Verificar se avançou de nível
+    if (DomesticationProgress >= 1.0f)
     {
-        RegisteredNPCs.Add(WeakNPC);
-        UE_LOG(LogTemp, Log, TEXT("NPC %s registered with behavior system"), *NPC->GetName());
-        
-        // Se é o primeiro NPC, iniciar o timer de updates
-        if (RegisteredNPCs.Num() == 1)
+        if (DomesticationLevel < EDomesticationLevel::Domesticated)
         {
-            if (UWorld* World = GetWorld())
+            DomesticationLevel = (EDomesticationLevel)((int32)DomesticationLevel + 1);
+            DomesticationProgress = 0.0f;
+            
+            UE_LOG(LogTemp, Log, TEXT("Dinosaur %s advanced to domestication level %d"), 
+                   *GetOwner()->GetName(), (int32)DomesticationLevel);
+        }
+        else
+        {
+            DomesticationProgress = 1.0f; // Cap no máximo
+        }
+    }
+}
+
+float UNPCBehaviorSystem::GetFamiliarityWithActor(AActor* Actor) const
+{
+    if (const float* Familiarity = ActorMemory.Find(Actor))
+    {
+        return *Familiarity;
+    }
+    return 0.0f;
+}
+
+void UNPCBehaviorSystem::UpdateActorMemory(AActor* Actor, float FamiliarityChange)
+{
+    if (!Actor)
+    {
+        return;
+    }
+    
+    float CurrentFamiliarity = GetFamiliarityWithActor(Actor);
+    float NewFamiliarity = FMath::Clamp(CurrentFamiliarity + FamiliarityChange, -1.0f, 1.0f);
+    
+    ActorMemory.Add(Actor, NewFamiliarity);
+    
+    // Limitar tamanho da memória (manter apenas os 20 atores mais relevantes)
+    if (ActorMemory.Num() > 20)
+    {
+        // Encontrar o ator com menor familiaridade absoluta
+        AActor* LeastRelevantActor = nullptr;
+        float LowestRelevance = FLT_MAX;
+        
+        for (const auto& MemoryEntry : ActorMemory)
+        {
+            float Relevance = FMath::Abs(MemoryEntry.Value);
+            if (Relevance < LowestRelevance)
             {
-                World->GetTimerManager().SetTimer(
-                    RoutineUpdateTimer,
-                    this,
-                    &UNPCBehaviorSystem::UpdateNPCRoutines,
-                    RoutineUpdateInterval,
-                    true
-                );
+                LowestRelevance = Relevance;
+                LeastRelevantActor = MemoryEntry.Key;
+            }
+        }
+        
+        if (LeastRelevantActor)
+        {
+            ActorMemory.Remove(LeastRelevantActor);
+        }
+    }
+}
+
+EDinosaurBehaviorState UNPCBehaviorSystem::GetCurrentScheduledBehavior() const
+{
+    FDailyRoutineSchedule ActiveSchedule = GetActiveRoutineSchedule();
+    return ActiveSchedule.ScheduledBehavior;
+}
+
+FVector UNPCBehaviorSystem::GetCurrentScheduledLocation() const
+{
+    FDailyRoutineSchedule ActiveSchedule = GetActiveRoutineSchedule();
+    return ActiveSchedule.PreferredLocation;
+}
+
+bool UNPCBehaviorSystem::CanBeDomesticated() const
+{
+    // Apenas herbívoros pequenos podem ser domesticados
+    return Species == EDinosaurSpecies::Compsognathus ||
+           Species == EDinosaurSpecies::Parasaurolophus_Juvenile ||
+           Species == EDinosaurSpecies::Triceratops_Juvenile;
+}
+
+bool UNPCBehaviorSystem::IsHerbivore() const
+{
+    return Species == EDinosaurSpecies::Compsognathus ||
+           Species == EDinosaurSpecies::Parasaurolophus_Juvenile ||
+           Species == EDinosaurSpecies::Triceratops_Juvenile ||
+           Species == EDinosaurSpecies::Triceratops_Adult ||
+           Species == EDinosaurSpecies::Brachiosaurus ||
+           Species == EDinosaurSpecies::Stegosaurus;
+}
+
+bool UNPCBehaviorSystem::IsCarnivore() const
+{
+    return Species == EDinosaurSpecies::Velociraptor ||
+           Species == EDinosaurSpecies::Dilophosaurus ||
+           Species == EDinosaurSpecies::Tyrannosaurus ||
+           Species == EDinosaurSpecies::Allosaurus ||
+           Species == EDinosaurSpecies::Carnotaurus ||
+           Species == EDinosaurSpecies::Plesiosaur;
+}
+
+bool UNPCBehaviorSystem::IsApexPredator() const
+{
+    return Species == EDinosaurSpecies::Tyrannosaurus ||
+           Species == EDinosaurSpecies::Allosaurus ||
+           Species == EDinosaurSpecies::Carnotaurus;
+}
+
+void UNPCBehaviorSystem::UpdateDailyRoutine()
+{
+    EDinosaurBehaviorState ScheduledBehavior = GetCurrentScheduledBehavior();
+    
+    // Aplicar flexibilidade da rotina
+    bool ShouldFollowSchedule = FMath::RandRange(0.0f, 1.0f) > RoutineFlexibility;
+    
+    if (ShouldFollowSchedule)
+    {
+        // Verificar se o estado atual é muito diferente do programado
+        if (CurrentBehaviorState != ScheduledBehavior)
+        {
+            // Considerar fatores externos antes de mudar
+            if (!IsInDanger() && !IsInteractingWithPlayer())
+            {
+                SetBehaviorState(ScheduledBehavior);
             }
         }
     }
 }
 
-void UNPCBehaviorSystem::UnregisterNPC(ADinosaurNPC* NPC)
+void UNPCBehaviorSystem::UpdateDomestication(float DeltaTime)
 {
-    if (!NPC)
+    if (DomesticationLevel == EDomesticationLevel::Wild)
     {
-        return;
+        return; // Não há domesticação para decair
     }
     
-    TWeakObjectPtr<ADinosaurNPC> WeakNPC(NPC);
-    RegisteredNPCs.Remove(WeakNPC);
+    // Decair domesticação se não houver interação recente com o jogador
+    float DecayAmount = DomesticationDecayRate * (DeltaTime / 86400.0f); // Por dia
     
-    UE_LOG(LogTemp, Log, TEXT("NPC %s unregistered from behavior system"), *NPC->GetName());
+    DomesticationProgress -= DecayAmount;
     
-    // Se não há mais NPCs, parar o timer
-    if (RegisteredNPCs.Num() == 0)
+    if (DomesticationProgress < 0.0f)
     {
-        if (UWorld* World = GetWorld())
+        if (DomesticationLevel > EDomesticationLevel::Wild)
         {
-            World->GetTimerManager().ClearTimer(RoutineUpdateTimer);
+            DomesticationLevel = (EDomesticationLevel)((int32)DomesticationLevel - 1);
+            DomesticationProgress = 1.0f;
+        }
+        else
+        {
+            DomesticationProgress = 0.0f;
         }
     }
 }
 
-void UNPCBehaviorSystem::UpdateNPCRoutines(float DeltaTime)
+void UNPCBehaviorSystem::UpdateMemoryDecay(float DeltaTime)
 {
-    // Limpar NPCs inválidos
-    for (int32 i = RegisteredNPCs.Num() - 1; i >= 0; i--)
+    float DecayAmount = MemoryDecayRate * (DeltaTime / 86400.0f); // Por dia
+    
+    TArray<AActor*> ActorsToRemove;
+    
+    for (auto& MemoryEntry : ActorMemory)
     {
-        if (!RegisteredNPCs[i].IsValid())
+        // Decair memórias em direção ao neutro (0.0)
+        if (MemoryEntry.Value > 0.0f)
         {
-            RegisteredNPCs.RemoveAt(i);
+            MemoryEntry.Value = FMath::Max(0.0f, MemoryEntry.Value - DecayAmount);
+        }
+        else if (MemoryEntry.Value < 0.0f)
+        {
+            MemoryEntry.Value = FMath::Min(0.0f, MemoryEntry.Value + DecayAmount);
+        }
+        
+        // Remover memórias muito fracas
+        if (FMath::Abs(MemoryEntry.Value) < 0.01f)
+        {
+            ActorsToRemove.Add(MemoryEntry.Key);
         }
     }
     
-    // Processar cada NPC válido
-    for (const TWeakObjectPtr<ADinosaurNPC>& WeakNPC : RegisteredNPCs)
+    // Limpar memórias fracas
+    for (AActor* Actor : ActorsToRemove)
     {
-        if (ADinosaurNPC* NPC = WeakNPC.Get())
-        {
-            ProcessNPCRoutine(NPC);
-            UpdateNPCNeeds(NPC, DeltaTime);
-        }
+        ActorMemory.Remove(Actor);
     }
 }
 
-void UNPCBehaviorSystem::UpdateNPCNeeds(ADinosaurNPC* NPC, float DeltaTime)
+void UNPCBehaviorSystem::ProcessSocialBehavior()
 {
-    if (!NPC)
+    // Implementar comportamento social básico
+    // Esta função será expandida com lógica de matilha, hierarquia, etc.
+    
+    if (IsHerbivore() && PackMembers.Num() > 0)
+    {
+        // Herbívoros tendem a ficar próximos do grupo
+        ProcessHerdBehavior();
+    }
+    else if (IsCarnivore() && Species == EDinosaurSpecies::Velociraptor)
+    {
+        // Velociraptors caçam em grupo
+        ProcessPackHuntingBehavior();
+    }
+}
+
+float UNPCBehaviorSystem::GetCurrentTimeOfDay() const
+{
+    // Implementação simplificada - assumindo ciclo de 24 minutos = 24 horas
+    float WorldTime = GetWorld()->GetTimeSeconds();
+    float DayLength = 1440.0f; // 24 minutos em segundos
+    return FMath::Fmod(WorldTime, DayLength) / DayLength;
+}
+
+FDailyRoutineSchedule UNPCBehaviorSystem::GetActiveRoutineSchedule() const
+{
+    float CurrentTime = GetCurrentTimeOfDay();
+    
+    for (const FDailyRoutineSchedule& Schedule : DailyRoutine)
+    {
+        if (CurrentTime >= Schedule.StartTime && CurrentTime <= Schedule.EndTime)
+        {
+            return Schedule;
+        }
+    }
+    
+    // Retornar rotina padrão se nenhuma for encontrada
+    FDailyRoutineSchedule DefaultSchedule;
+    DefaultSchedule.ScheduledBehavior = EDinosaurBehaviorState::Idle;
+    return DefaultSchedule;
+}
+
+void UNPCBehaviorSystem::UpdateBlackboardValues()
+{
+    if (!BlackboardComponent)
     {
         return;
     }
     
-    // Obter necessidades actuais do NPC
-    FDinosaurNeeds CurrentNeeds = NPC->GetCurrentNeeds();
+    // Atualizar valores do blackboard para uso nas Behavior Trees
+    BlackboardComponent->SetValueAsEnum(TEXT("BehaviorState"), (uint8)CurrentBehaviorState);
+    BlackboardComponent->SetValueAsEnum(TEXT("DomesticationLevel"), (uint8)DomesticationLevel);
+    BlackboardComponent->SetValueAsFloat(TEXT("DomesticationProgress"), DomesticationProgress);
+    BlackboardComponent->SetValueAsVector(TEXT("ScheduledLocation"), GetCurrentScheduledLocation());
+    BlackboardComponent->SetValueAsFloat(TEXT("Aggression"), PersonalityTraits.Aggression);
+    BlackboardComponent->SetValueAsFloat(TEXT("Curiosity"), PersonalityTraits.Curiosity);
+    BlackboardComponent->SetValueAsFloat(TEXT("Fearfulness"), PersonalityTraits.Fearfulness);
+}
+
+void UNPCBehaviorSystem::GenerateRandomPersonality()
+{
+    // Gerar traços de personalidade únicos com base na espécie
+    float SpeciesModifier = GetSpeciesPersonalityModifier();
     
-    // Calcular decay baseado no tempo e actividade
-    float DecayMultiplier = NeedsDecayRate * DeltaTime;
+    PersonalityTraits.Aggression = FMath::Clamp(FMath::RandRange(0.0f, 1.0f) * SpeciesModifier.X, 0.0f, 1.0f);
+    PersonalityTraits.Curiosity = FMath::Clamp(FMath::RandRange(0.0f, 1.0f), 0.0f, 1.0f);
+    PersonalityTraits.Sociability = FMath::Clamp(FMath::RandRange(0.0f, 1.0f), 0.0f, 1.0f);
+    PersonalityTraits.Fearfulness = FMath::Clamp(FMath::RandRange(0.0f, 1.0f) * SpeciesModifier.Y, 0.0f, 1.0f);
+    PersonalityTraits.Intelligence = FMath::Clamp(FMath::RandRange(0.0f, 1.0f) * SpeciesModifier.Z, 0.0f, 1.0f);
     
-    // Diferentes estados afectam diferentes necessidades
-    EDinosaurBehaviorState CurrentState = NPC->GetCurrentBehaviorState();
+    // Gerar variações físicas
+    PersonalityTraits.SizeVariation = FVector(
+        FMath::RandRange(0.8f, 1.2f),
+        FMath::RandRange(0.8f, 1.2f),
+        FMath::RandRange(0.8f, 1.2f)
+    );
     
-    switch (CurrentState)
+    PersonalityTraits.ColorVariation = FLinearColor(
+        FMath::RandRange(0.7f, 1.3f),
+        FMath::RandRange(0.7f, 1.3f),
+        FMath::RandRange(0.7f, 1.3f),
+        1.0f
+    );
+}
+
+FVector UNPCBehaviorSystem::GetSpeciesPersonalityModifier() const
+{
+    // Retorna modificadores para (Agressão, Medo, Inteligência) baseados na espécie
+    switch (Species)
     {
-        case EDinosaurBehaviorState::Foraging:
-            CurrentNeeds.Hunger = FMath::Min(100.0f, CurrentNeeds.Hunger + 10.0f * DeltaTime);
-            CurrentNeeds.Energy -= 5.0f * DecayMultiplier;
-            break;
-            
-        case EDinosaurBehaviorState::Drinking:
-            CurrentNeeds.Thirst = FMath::Min(100.0f, CurrentNeeds.Thirst + 15.0f * DeltaTime);
-            break;
-            
-        case EDinosaurBehaviorState::Resting:
-            CurrentNeeds.Energy = FMath::Min(100.0f, CurrentNeeds.Energy + 8.0f * DeltaTime);
-            CurrentNeeds.Comfort = FMath::Min(100.0f, CurrentNeeds.Comfort + 5.0f * DeltaTime);
-            break;
-            
-        case EDinosaurBehaviorState::Socializing:
-            CurrentNeeds.Social = FMath::Min(100.0f, CurrentNeeds.Social + 12.0f * DeltaTime);
-            CurrentNeeds.Energy -= 2.0f * DecayMultiplier;
-            break;
-            
-        case EDinosaurBehaviorState::Fleeing:
-            CurrentNeeds.Energy -= 15.0f * DecayMultiplier;
-            CurrentNeeds.Safety = FMath::Max(0.0f, CurrentNeeds.Safety - 20.0f * DeltaTime);
-            break;
-            
+        case EDinosaurSpecies::Tyrannosaurus:
+            return FVector(1.5f, 0.3f, 0.8f); // Muito agressivo, pouco medroso, inteligência média
+        case EDinosaurSpecies::Velociraptor:
+            return FVector(1.2f, 0.5f, 1.4f); // Agressivo, moderadamente medroso, muito inteligente
+        case EDinosaurSpecies::Compsognathus:
+            return FVector(0.4f, 1.3f, 1.0f); // Pouco agressivo, muito medroso, inteligência normal
+        case EDinosaurSpecies::Triceratops_Adult:
+            return FVector(0.8f, 0.6f, 0.7f); // Moderadamente agressivo, moderadamente medroso, menos inteligente
         default:
-            // Decay normal para estados neutros
-            CurrentNeeds.Hunger = FMath::Max(0.0f, CurrentNeeds.Hunger - 3.0f * DecayMultiplier);
-            CurrentNeeds.Thirst = FMath::Max(0.0f, CurrentNeeds.Thirst - 4.0f * DecayMultiplier);
-            CurrentNeeds.Energy = FMath::Max(0.0f, CurrentNeeds.Energy - 2.0f * DecayMultiplier);
-            CurrentNeeds.Social = FMath::Max(0.0f, CurrentNeeds.Social - 1.0f * DecayMultiplier);
-            break;
-    }
-    
-    // Aplicar as necessidades actualizadas ao NPC
-    NPC->SetCurrentNeeds(CurrentNeeds);
-    
-    // Actualizar blackboard se disponível
-    if (UBlackboardComponent* Blackboard = NPC->GetBlackboardComponent())
-    {
-        Blackboard->SetValueAsFloat(FName("Hunger"), CurrentNeeds.Hunger);
-        Blackboard->SetValueAsFloat(FName("Thirst"), CurrentNeeds.Thirst);
-        Blackboard->SetValueAsFloat(FName("Energy"), CurrentNeeds.Energy);
-        Blackboard->SetValueAsFloat(FName("Social"), CurrentNeeds.Social);
-        Blackboard->SetValueAsFloat(FName("Safety"), CurrentNeeds.Safety);
-        Blackboard->SetValueAsFloat(FName("Comfort"), CurrentNeeds.Comfort);
+            return FVector(1.0f, 1.0f, 1.0f); // Sem modificação
     }
 }
 
-void UNPCBehaviorSystem::AddMemoryEvent(ADinosaurNPC* NPC, const FGameplayTag& EventType, const FVector& Location, AActor* RelatedActor)
+void UNPCBehaviorSystem::GenerateDefaultDailyRoutine()
 {
-    if (!NPC)
+    DailyRoutine.Empty();
+    
+    if (IsHerbivore())
     {
-        return;
+        // Rotina herbívora: forragear, beber, descansar
+        FDailyRoutineSchedule MorningForaging;
+        MorningForaging.StartTime = 0.25f; // 6h da manhã
+        MorningForaging.EndTime = 0.45f;   // 11h da manhã
+        MorningForaging.ScheduledBehavior = EDinosaurBehaviorState::Foraging;
+        MorningForaging.Priority = 0.8f;
+        DailyRoutine.Add(MorningForaging);
+        
+        FDailyRoutineSchedule MiddayRest;
+        MiddayRest.StartTime = 0.45f; // 11h da manhã
+        MiddayRest.EndTime = 0.65f;   // 3h da tarde
+        MiddayRest.ScheduledBehavior = EDinosaurBehaviorState::Resting;
+        MiddayRest.Priority = 0.6f;
+        DailyRoutine.Add(MiddayRest);
+        
+        FDailyRoutineSchedule EveningDrinking;
+        EveningDrinking.StartTime = 0.65f; // 3h da tarde
+        EveningDrinking.EndTime = 0.75f;   // 6h da tarde
+        EveningDrinking.ScheduledBehavior = EDinosaurBehaviorState::Drinking;
+        EveningDrinking.Priority = 0.9f;
+        DailyRoutine.Add(EveningDrinking);
     }
-    
-    // Implementar sistema de memória
-    // Por agora, apenas log para debug
-    FString ActorName = RelatedActor ? RelatedActor->GetName() : TEXT("None");
-    UE_LOG(LogTemp, Log, TEXT("Memory event for %s: %s at %s (Actor: %s)"), 
-           *NPC->GetName(), 
-           *EventType.ToString(), 
-           *Location.ToString(), 
-           *ActorName);
-    
-    // TODO: Implementar armazenamento persistente de memórias
-    // TODO: Implementar sistema de esquecimento baseado em tempo
-    // TODO: Implementar influência das memórias no comportamento
+    else if (IsCarnivore())
+    {
+        // Rotina carnívora: caçar, descansar
+        FDailyRoutineSchedule DawnHunt;
+        DawnHunt.StartTime = 0.2f;  // 5h da manhã
+        DawnHunt.EndTime = 0.35f;   // 8h da manhã
+        DawnHunt.ScheduledBehavior = EDinosaurBehaviorState::Hunting;
+        DawnHunt.Priority = 0.9f;
+        DailyRoutine.Add(DawnHunt);
+        
+        FDailyRoutineSchedule DayRest;
+        DayRest.StartTime = 0.35f; // 8h da manhã
+        DayRest.EndTime = 0.7f;    // 5h da tarde
+        DayRest.ScheduledBehavior = EDinosaurBehaviorState::Resting;
+        DayRest.Priority = 0.5f;
+        DailyRoutine.Add(DayRest);
+        
+        FDailyRoutineSchedule DuskHunt;
+        DuskHunt.StartTime = 0.7f;  // 5h da tarde
+        DuskHunt.EndTime = 0.85f;   // 8h da noite
+        DuskHunt.ScheduledBehavior = EDinosaurBehaviorState::Hunting;
+        DuskHunt.Priority = 0.9f;
+        DailyRoutine.Add(DuskHunt);
+    }
 }
 
-void UNPCBehaviorSystem::ProcessDomesticationInteraction(ADinosaurNPC* NPC, AActor* Player, float InteractionStrength)
+bool UNPCBehaviorSystem::IsInDanger() const
 {
-    if (!NPC || !Player)
-    {
-        return;
-    }
-    
-    // Verificar se a espécie pode ser domesticada
-    FDinosaurSpeciesData SpeciesData = GetSpeciesData(NPC->GetSpeciesName());
-    if (!SpeciesData.bCanBeDomesticated)
-    {
-        return;
-    }
-    
-    // Calcular progresso de domesticação baseado na personalidade e interação
-    FDinosaurPersonality Personality = NPC->GetPersonality();
-    
-    float DomesticationProgress = InteractionStrength;
-    
-    // Modificadores baseados na personalidade
-    DomesticationProgress *= (100.0f - Personality.Fearfulness) / 100.0f; // Menos medo = mais fácil
-    DomesticationProgress *= (Personality.Curiosity + 50.0f) / 150.0f;    // Mais curiosidade = mais fácil
-    DomesticationProgress *= (100.0f - Personality.Aggressiveness) / 100.0f; // Menos agressão = mais fácil
-    
-    // Aplicar dificuldade da espécie
-    DomesticationProgress *= (100.0f - SpeciesData.DomesticationDifficulty) / 100.0f;
-    
-    // Actualizar progresso no NPC
-    float CurrentProgress = NPC->GetDomesticationProgress();
-    float NewProgress = FMath::Clamp(CurrentProgress + DomesticationProgress, 0.0f, 100.0f);
-    NPC->SetDomesticationProgress(NewProgress);
-    
-    UE_LOG(LogTemp, Log, TEXT("Domestication interaction: %s progress %.2f -> %.2f"), 
-           *NPC->GetName(), CurrentProgress, NewProgress);
-    
-    // Adicionar evento de memória
-    FGameplayTag DomesticationTag = FGameplayTag::RequestGameplayTag(FName("Event.Domestication.Interaction"));
-    AddMemoryEvent(NPC, DomesticationTag, Player->GetActorLocation(), Player);
+    // Implementação básica - verificar se há predadores próximos
+    // Esta função será expandida com lógica mais complexa
+    return false;
 }
 
-FDinosaurSpeciesData UNPCBehaviorSystem::GetSpeciesData(const FString& SpeciesName) const
+bool UNPCBehaviorSystem::IsInteractingWithPlayer() const
 {
-    FDinosaurSpeciesData DefaultData;
-    
-    if (!SpeciesDataTable.IsValid())
+    // Verificar se o jogador está próximo e há interação ativa
+    if (APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0))
     {
-        return DefaultData;
+        float Distance = FVector::Dist(GetOwner()->GetActorLocation(), PlayerPawn->GetActorLocation());
+        return Distance < 500.0f; // 5 metros
     }
-    
-    UDataTable* LoadedTable = SpeciesDataTable.LoadSynchronous();
-    if (!LoadedTable)
-    {
-        return DefaultData;
-    }
-    
-    FDinosaurSpeciesData* FoundData = LoadedTable->FindRow<FDinosaurSpeciesData>(FName(*SpeciesName), TEXT(""));
-    return FoundData ? *FoundData : DefaultData;
+    return false;
 }
 
-EDinosaurBehaviorState UNPCBehaviorSystem::GetOptimalBehaviorState(ADinosaurNPC* NPC) const
+void UNPCBehaviorSystem::ProcessHerdBehavior()
 {
-    if (!NPC)
+    // Lógica básica de comportamento de rebanho
+    // Manter-se próximo aos membros do grupo
+    if (PackMembers.Num() > 0)
     {
-        return EDinosaurBehaviorState::Idle;
-    }
-    
-    FDinosaurNeeds Needs = NPC->GetCurrentNeeds();
-    FDinosaurPersonality Personality = NPC->GetPersonality();
-    
-    // Prioridades críticas (sobrevivência)
-    if (Needs.Safety < 20.0f)
-    {
-        return EDinosaurBehaviorState::Fleeing;
-    }
-    
-    if (Needs.Thirst < 30.0f)
-    {
-        return EDinosaurBehaviorState::Drinking;
-    }
-    
-    if (Needs.Hunger < 25.0f)
-    {
-        return EDinosaurBehaviorState::Foraging;
-    }
-    
-    if (Needs.Energy < 20.0f)
-    {
-        return EDinosaurBehaviorState::Resting;
-    }
-    
-    // Prioridades sociais e comportamentais
-    if (Needs.Social < 40.0f && Personality.Sociability > 60.0f)
-    {
-        return EDinosaurBehaviorState::Socializing;
-    }
-    
-    // Comportamentos baseados na personalidade
-    if (Personality.Territoriality > 70.0f && FMath::RandRange(0.0f, 100.0f) < 30.0f)
-    {
-        return EDinosaurBehaviorState::Territorial;
-    }
-    
-    if (Personality.Curiosity > 70.0f && FMath::RandRange(0.0f, 100.0f) < 20.0f)
-    {
-        return EDinosaurBehaviorState::Foraging; // Exploração como forrageamento
-    }
-    
-    return EDinosaurBehaviorState::Idle;
-}
-
-void UNPCBehaviorSystem::ProcessNPCRoutine(ADinosaurNPC* NPC)
-{
-    if (!NPC)
-    {
-        return;
-    }
-    
-    // Obter hora actual do dia (assumindo sistema de dia/noite)
-    float CurrentTimeOfDay = 12.0f; // TODO: Obter do sistema de tempo do jogo
-    
-    // Obter rotina da espécie
-    FDinosaurSpeciesData SpeciesData = GetSpeciesData(NPC->GetSpeciesName());
-    
-    // Encontrar a actividade mais apropriada para a hora actual
-    FDailyRoutineEntry BestActivity;
-    float BestScore = -1.0f;
-    
-    for (const FDailyRoutineEntry& Activity : SpeciesData.DefaultRoutine)
-    {
-        float TimeDifference = FMath::Abs(Activity.TimeOfDay - CurrentTimeOfDay);
-        if (TimeDifference > 12.0f)
+        FVector AveragePosition = FVector::ZeroVector;
+        int32 ValidMembers = 0;
+        
+        for (AActor* Member : PackMembers)
         {
-            TimeDifference = 24.0f - TimeDifference; // Considerar wrap-around
+            if (IsValid(Member))
+            {
+                AveragePosition += Member->GetActorLocation();
+                ValidMembers++;
+            }
         }
         
-        // Score baseado na proximidade temporal e prioridade
-        float Score = Activity.Priority * (1.0f - (TimeDifference / 12.0f));
-        
-        if (Score > BestScore)
+        if (ValidMembers > 0)
         {
-            BestScore = Score;
-            BestActivity = Activity;
-        }
-    }
-    
-    // Verificar se deve mudar de estado
-    EDinosaurBehaviorState OptimalState = GetOptimalBehaviorState(NPC);
-    EDinosaurBehaviorState RoutineState = BestActivity.PreferredState;
-    
-    // Priorizar necessidades sobre rotina
-    EDinosaurBehaviorState TargetState = (BestScore > 50.0f) ? RoutineState : OptimalState;
-    
-    if (ShouldSwitchBehaviorState(NPC, TargetState))
-    {
-        NPC->SetCurrentBehaviorState(TargetState);
-        
-        // Actualizar blackboard
-        if (UBlackboardComponent* Blackboard = NPC->GetBlackboardComponent())
-        {
-            Blackboard->SetValueAsEnum(FName("BehaviorState"), static_cast<uint8>(TargetState));
+            AveragePosition /= ValidMembers;
+            
+            // Se estiver muito longe do grupo, mudar comportamento para se aproximar
+            float DistanceToHerd = FVector::Dist(GetOwner()->GetActorLocation(), AveragePosition);
+            if (DistanceToHerd > 1000.0f) // 10 metros
+            {
+                if (BlackboardComponent)
+                {
+                    BlackboardComponent->SetValueAsVector(TEXT("HerdCenter"), AveragePosition);
+                    BlackboardComponent->SetValueAsBool(TEXT("ShouldReturnToHerd"), true);
+                }
+            }
         }
     }
 }
 
-float UNPCBehaviorSystem::CalculateNeedPriority(const FDinosaurNeeds& Needs, EDinosaurBehaviorState State) const
+void UNPCBehaviorSystem::ProcessPackHuntingBehavior()
 {
-    switch (State)
+    // Lógica básica de caça em grupo para Velociraptors
+    if (Species == EDinosaurSpecies::Velociraptor && PackMembers.Num() > 0)
     {
-        case EDinosaurBehaviorState::Drinking:
-            return 100.0f - Needs.Thirst;
-        case EDinosaurBehaviorState::Foraging:
-            return 100.0f - Needs.Hunger;
-        case EDinosaurBehaviorState::Resting:
-            return 100.0f - Needs.Energy;
-        case EDinosaurBehaviorState::Socializing:
-            return 100.0f - Needs.Social;
-        case EDinosaurBehaviorState::Fleeing:
-            return 100.0f - Needs.Safety;
-        default:
-            return 0.0f;
+        // Coordenar com outros membros do grupo para caça
+        if (CurrentBehaviorState == EDinosaurBehaviorState::Hunting)
+        {
+            // Implementar lógica de coordenação de caça
+            // Esta função será expandida com comportamento mais sofisticado
+        }
     }
 }
 
-bool UNPCBehaviorSystem::ShouldSwitchBehaviorState(ADinosaurNPC* NPC, EDinosaurBehaviorState NewState) const
+void UNPCBehaviorSystem::OnBehaviorStateChanged(EDinosaurBehaviorState PreviousState, EDinosaurBehaviorState NewState)
 {
-    if (!NPC)
-    {
-        return false;
-    }
+    // Callback para mudanças de estado - pode ser usado para animações, efeitos, etc.
     
-    EDinosaurBehaviorState CurrentState = NPC->GetCurrentBehaviorState();
-    
-    // Sempre permitir mudança se o estado é diferente e crítico
+    // Exemplo: Se mudou para estado de fuga, aumentar velocidade
     if (NewState == EDinosaurBehaviorState::Fleeing)
     {
-        return true;
+        if (BlackboardComponent)
+        {
+            BlackboardComponent->SetValueAsFloat(TEXT("MovementSpeed"), 1.5f); // 50% mais rápido
+        }
     }
-    
-    // Evitar mudanças muito frequentes
-    float TimeSinceLastChange = NPC->GetTimeSinceLastBehaviorChange();
-    if (TimeSinceLastChange < 30.0f && CurrentState != EDinosaurBehaviorState::Idle)
+    else
     {
-        return false;
+        if (BlackboardComponent)
+        {
+            BlackboardComponent->SetValueAsFloat(TEXT("MovementSpeed"), 1.0f); // Velocidade normal
+        }
     }
-    
-    return CurrentState != NewState;
 }
