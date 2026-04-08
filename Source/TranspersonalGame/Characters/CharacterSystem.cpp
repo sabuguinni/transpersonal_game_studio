@@ -1,364 +1,347 @@
 #include "CharacterSystem.h"
-#include "Engine/Engine.h"
-#include "Kismet/KismetMathLibrary.h"
-#include "Math/UnrealMathUtility.h"
+#include "Engine/DataTable.h"
+#include "Materials/MaterialParameterCollection.h"
+#include "Materials/MaterialParameterCollectionInstance.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Engine/SkeletalMesh.h"
+#include "Materials/MaterialInterface.h"
 
-UCharacterGenerationSystem::UCharacterGenerationSystem()
+UCharacterAppearanceComponent::UCharacterAppearanceComponent()
 {
-    // Inicializar sistema
+    PrimaryComponentTick.bCanEverTick = false;
+    MetaHumanMesh = nullptr;
 }
 
-FCharacterDefinition UCharacterGenerationSystem::GenerateCharacter(ECharacterArchetype Archetype, int32 Seed)
+void UCharacterAppearanceComponent::BeginPlay()
 {
-    // Se seed não foi fornecido, gerar um aleatório
-    if (Seed == -1)
-    {
-        Seed = FMath::Rand();
-    }
-
-    FCharacterDefinition NewCharacter;
-    NewCharacter.Archetype = Archetype;
-    NewCharacter.GeneticSeed = Seed;
-
-    // Usar seed local para geração consistente
-    int32 LocalSeed = Seed;
-
-    // Gerar características básicas
-    NewCharacter.bIsMale = GenerateRandomFloat(LocalSeed) > 0.5f;
+    Super::BeginPlay();
     
-    // Idade baseada no arquétipo
-    switch (Archetype)
+    // Encontrar o componente MetaHuman no actor
+    if (AActor* Owner = GetOwner())
     {
-        case ECharacterArchetype::Protagonist:
-            NewCharacter.Age = FMath::RandRange(30, 45);
+        MetaHumanMesh = Owner->FindComponentByClass<USkeletalMeshComponent>();
+    }
+    
+    SetupMetaHumanParameters();
+}
+
+void UCharacterAppearanceComponent::ApplyCharacterData(const FCharacterData& NewCharacterData)
+{
+    CharacterData = NewCharacterData;
+    
+    // Aplicar mesh MetaHuman se especificado
+    if (NewCharacterData.MetaHumanMesh.IsValid() && MetaHumanMesh)
+    {
+        if (USkeletalMesh* LoadedMesh = NewCharacterData.MetaHumanMesh.LoadSynchronous())
+        {
+            MetaHumanMesh->SetSkeletalMesh(LoadedMesh);
+        }
+    }
+    
+    ApplyPhysicalVariations();
+    ApplyClothing();
+}
+
+void UCharacterAppearanceComponent::GenerateRandomAppearance(ETribalGroup Tribe, ECharacterType Type)
+{
+    if (UCharacterGenerationSubsystem* GenSubsystem = GetWorld()->GetGameInstance()->GetSubsystem<UCharacterGenerationSubsystem>())
+    {
+        FCharacterData GeneratedData = GenSubsystem->GenerateRandomCharacter(Tribe, Type);
+        ApplyCharacterData(GeneratedData);
+    }
+}
+
+void UCharacterAppearanceComponent::ApplyPhysicalVariations()
+{
+    if (!MetaHumanMesh) return;
+    
+    const FPhysicalVariation& Traits = CharacterData.PhysicalTraits;
+    
+    // Aplicar cores
+    ApplySkinTone(Traits.SkinTone);
+    ApplyHairColor(Traits.HairColor);
+    ApplyEyeColor(Traits.EyeColor);
+    
+    // Aplicar forma corporal
+    ApplyBodyShape(Traits.Height, Traits.Weight, Traits.MuscleDefinition);
+}
+
+void UCharacterAppearanceComponent::ApplyClothing()
+{
+    if (!MetaHumanMesh) return;
+    
+    // Aplicar materiais de roupa baseados no grupo tribal
+    for (int32 i = 0; i < CharacterData.ClothingMaterials.Num(); i++)
+    {
+        if (CharacterData.ClothingMaterials[i].IsValid())
+        {
+            if (UMaterialInterface* Material = CharacterData.ClothingMaterials[i].LoadSynchronous())
+            {
+                MetaHumanMesh->SetMaterial(i, Material);
+            }
+        }
+    }
+}
+
+void UCharacterAppearanceComponent::SetupMetaHumanParameters()
+{
+    // Configurar parâmetros base do MetaHuman
+    if (MetaHumanMesh)
+    {
+        // Ativar LOD dinâmico
+        MetaHumanMesh->SetForcedLOD(0);
+        MetaHumanMesh->bUseBoundsFromMasterPoseComponent = false;
+        
+        // Configurar qualidade de renderização
+        MetaHumanMesh->SetCastShadow(true);
+        MetaHumanMesh->SetReceivesDecals(true);
+    }
+}
+
+void UCharacterAppearanceComponent::ApplySkinTone(FLinearColor SkinColor)
+{
+    if (!MetaHumanMesh) return;
+    
+    // Aplicar cor da pele através de parâmetros do material
+    for (int32 i = 0; i < MetaHumanMesh->GetNumMaterials(); i++)
+    {
+        if (UMaterialInstanceDynamic* DynMaterial = MetaHumanMesh->CreateAndSetMaterialInstanceDynamic(i))
+        {
+            DynMaterial->SetVectorParameterValue(TEXT("Skin_Tone"), SkinColor);
+        }
+    }
+}
+
+void UCharacterAppearanceComponent::ApplyHairColor(FLinearColor HairColor)
+{
+    if (!MetaHumanMesh) return;
+    
+    for (int32 i = 0; i < MetaHumanMesh->GetNumMaterials(); i++)
+    {
+        if (UMaterialInstanceDynamic* DynMaterial = MetaHumanMesh->CreateAndSetMaterialInstanceDynamic(i))
+        {
+            DynMaterial->SetVectorParameterValue(TEXT("Hair_Color"), HairColor);
+        }
+    }
+}
+
+void UCharacterAppearanceComponent::ApplyEyeColor(FLinearColor EyeColor)
+{
+    if (!MetaHumanMesh) return;
+    
+    for (int32 i = 0; i < MetaHumanMesh->GetNumMaterials(); i++)
+    {
+        if (UMaterialInstanceDynamic* DynMaterial = MetaHumanMesh->CreateAndSetMaterialInstanceDynamic(i))
+        {
+            DynMaterial->SetVectorParameterValue(TEXT("Eye_Color"), EyeColor);
+        }
+    }
+}
+
+void UCharacterAppearanceComponent::ApplyBodyShape(float Height, float Weight, float Muscle)
+{
+    if (!MetaHumanMesh) return;
+    
+    // Aplicar morfologia corporal através de morph targets
+    FVector3f Scale = FVector3f(1.0f + (Weight - 1.0f) * 0.2f, 1.0f + (Weight - 1.0f) * 0.2f, Height);
+    MetaHumanMesh->SetRelativeScale3D(FVector(Scale));
+    
+    // Aplicar definição muscular através de parâmetros
+    for (int32 i = 0; i < MetaHumanMesh->GetNumMaterials(); i++)
+    {
+        if (UMaterialInstanceDynamic* DynMaterial = MetaHumanMesh->CreateAndSetMaterialInstanceDynamic(i))
+        {
+            DynMaterial->SetScalarParameterValue(TEXT("Muscle_Definition"), Muscle);
+        }
+    }
+}
+
+// Character Generation Subsystem Implementation
+void UCharacterGenerationSubsystem::Initialize(FSubsystemCollectionBase& Collection)
+{
+    Super::Initialize(Collection);
+    InitializeTribalGenePools();
+}
+
+FCharacterData UCharacterGenerationSubsystem::GenerateRandomCharacter(ETribalGroup Tribe, ECharacterType Type)
+{
+    FCharacterData NewCharacter;
+    NewCharacter.CharacterType = Type;
+    NewCharacter.TribalGroup = Tribe;
+    
+    // Gerar nome baseado no tipo e tribo
+    switch (Tribe)
+    {
+        case ETribalGroup::RiverTribe:
+            NewCharacter.CharacterName = FString::Printf(TEXT("River_%s_%d"), 
+                Type == ECharacterType::Protagonist ? TEXT("Hero") : TEXT("Member"), 
+                FMath::RandRange(1, 999));
             break;
-        case ECharacterArchetype::TribalElder:
-            NewCharacter.Age = FMath::RandRange(50, 70);
+        case ETribalGroup::MountainTribe:
+            NewCharacter.CharacterName = FString::Printf(TEXT("Mountain_%s_%d"), 
+                Type == ECharacterType::Protagonist ? TEXT("Hero") : TEXT("Member"), 
+                FMath::RandRange(1, 999));
             break;
-        case ECharacterArchetype::TribalChild:
+        default:
+            NewCharacter.CharacterName = FString::Printf(TEXT("Tribal_%s_%d"), 
+                Type == ECharacterType::Protagonist ? TEXT("Hero") : TEXT("Member"), 
+                FMath::RandRange(1, 999));
+            break;
+    }
+    
+    // Gerar idade baseada no tipo
+    switch (Type)
+    {
+        case ECharacterType::Child:
             NewCharacter.Age = FMath::RandRange(8, 16);
             break;
-        case ECharacterArchetype::TribalWarrior:
-            NewCharacter.Age = FMath::RandRange(20, 40);
+        case ECharacterType::Elder:
+            NewCharacter.Age = FMath::RandRange(50, 70);
             break;
-        case ECharacterArchetype::TribalShaman:
-            NewCharacter.Age = FMath::RandRange(35, 60);
+        case ECharacterType::Protagonist:
+            NewCharacter.Age = FMath::RandRange(30, 45); // Paleontologista experiente
             break;
         default:
             NewCharacter.Age = FMath::RandRange(18, 50);
             break;
     }
-
-    // Gerar características genéticas
-    NewCharacter.GeneticTraits = GenerateGeneticVariation(FCharacterGeneticTraits(), 0.3f, LocalSeed);
-
-    // Ajustar características baseadas na idade e arquétipo
-    if (Archetype == ECharacterArchetype::TribalElder)
-    {
-        NewCharacter.GeneticTraits.AgeWear = GenerateRandomFloat(LocalSeed, 0.6f, 0.9f);
-        NewCharacter.GeneticTraits.WeatherExposure = GenerateRandomFloat(LocalSeed, 0.7f, 1.0f);
-    }
-    else if (Archetype == ECharacterArchetype::TribalWarrior)
-    {
-        NewCharacter.GeneticTraits.MuscleDefinition = GenerateRandomFloat(LocalSeed, 0.7f, 1.0f);
-        NewCharacter.GeneticTraits.BattleScars = GenerateRandomFloat(LocalSeed, 0.3f, 0.8f);
-    }
-    else if (Archetype == ECharacterArchetype::Protagonist)
-    {
-        // Paleontologista moderno - menos desgaste, mais definição acadêmica
-        NewCharacter.GeneticTraits.AgeWear = GenerateRandomFloat(LocalSeed, 0.1f, 0.3f);
-        NewCharacter.GeneticTraits.MuscleDefinition = GenerateRandomFloat(LocalSeed, 0.3f, 0.6f);
-        NewCharacter.GeneticTraits.WeatherExposure = 0.0f; // Recém chegado
-    }
-
-    // Gerar aparência cultural
-    NewCharacter.CulturalAppearance.SkinTone = GenerateNaturalSkinTone(LocalSeed);
-    NewCharacter.CulturalAppearance.EyeColor = GenerateNaturalEyeColor(LocalSeed);
-    NewCharacter.CulturalAppearance.HairColor = GenerateNaturalHairColor(LocalSeed);
-    NewCharacter.CulturalAppearance.HairStyle = SelectRandomHairStyle(LocalSeed, NewCharacter.bIsMale);
     
-    // Marcas tribais baseadas no arquétipo
-    if (Archetype != ECharacterArchetype::Protagonist && Archetype != ECharacterArchetype::TimeTraveler)
+    // Gerar características físicas baseadas na tribo
+    NewCharacter.PhysicalTraits.SkinTone = GenerateTribalSkinTone(Tribe);
+    NewCharacter.PhysicalTraits.HairColor = GenerateTribalHairColor(Tribe);
+    NewCharacter.PhysicalTraits.EyeColor = GenerateTribalEyeColor(Tribe);
+    
+    // Gerar variações físicas
+    NewCharacter.PhysicalTraits.Height = FMath::FRandRange(0.85f, 1.15f);
+    NewCharacter.PhysicalTraits.Weight = FMath::FRandRange(0.8f, 1.2f);
+    
+    // Definição muscular baseada no tipo
+    switch (Type)
     {
-        NewCharacter.CulturalAppearance.BodyMarkings = GenerateTribalMarkings(LocalSeed, Archetype);
+        case ECharacterType::Hunter:
+            NewCharacter.PhysicalTraits.MuscleDefinition = FMath::FRandRange(0.7f, 1.0f);
+            break;
+        case ECharacterType::Child:
+            NewCharacter.PhysicalTraits.MuscleDefinition = FMath::FRandRange(0.1f, 0.3f);
+            break;
+        case ECharacterType::Elder:
+            NewCharacter.PhysicalTraits.MuscleDefinition = FMath::FRandRange(0.2f, 0.5f);
+            break;
+        default:
+            NewCharacter.PhysicalTraits.MuscleDefinition = FMath::FRandRange(0.4f, 0.8f);
+            break;
     }
-
-    // Gerar vestuário
-    GenerateClothing(NewCharacter, LocalSeed);
-
-    // Gerar nome baseado no arquétipo
-    NewCharacter.CharacterName = GenerateCharacterName(Archetype, NewCharacter.bIsMale, LocalSeed);
-
-    // Verificar unicidade
-    int32 UniqueAttempts = 0;
-    while (!IsCharacterUnique(NewCharacter) && UniqueAttempts < 10)
-    {
-        LocalSeed = FMath::Rand();
-        NewCharacter = GenerateCharacter(Archetype, LocalSeed);
-        UniqueAttempts++;
-    }
-
-    // Adicionar à lista de personagens gerados
-    GeneratedCharacters.Add(NewCharacter);
-
+    
     return NewCharacter;
 }
 
-FCharacterGeneticTraits UCharacterGenerationSystem::GenerateGeneticVariation(const FCharacterGeneticTraits& BaseTraits, float VariationStrength, int32 Seed)
+TArray<FCharacterData> UCharacterGenerationSubsystem::GenerateTribalPopulation(ETribalGroup Tribe, int32 PopulationSize)
 {
-    FCharacterGeneticTraits VariedTraits = BaseTraits;
-    int32 LocalSeed = Seed;
-
-    // Aplicar variação a cada característica
-    VariedTraits.FaceWidth = FMath::Clamp(BaseTraits.FaceWidth + GenerateRandomFloat(LocalSeed, -VariationStrength, VariationStrength), 0.0f, 1.0f);
-    VariedTraits.EyeSize = FMath::Clamp(BaseTraits.EyeSize + GenerateRandomFloat(LocalSeed, -VariationStrength, VariationStrength), 0.0f, 1.0f);
-    VariedTraits.NoseSize = FMath::Clamp(BaseTraits.NoseSize + GenerateRandomFloat(LocalSeed, -VariationStrength, VariationStrength), 0.0f, 1.0f);
-    VariedTraits.MouthSize = FMath::Clamp(BaseTraits.MouthSize + GenerateRandomFloat(LocalSeed, -VariationStrength, VariationStrength), 0.0f, 1.0f);
-    VariedTraits.CheekboneHeight = FMath::Clamp(BaseTraits.CheekboneHeight + GenerateRandomFloat(LocalSeed, -VariationStrength, VariationStrength), 0.0f, 1.0f);
-    VariedTraits.JawWidth = FMath::Clamp(BaseTraits.JawWidth + GenerateRandomFloat(LocalSeed, -VariationStrength, VariationStrength), 0.0f, 1.0f);
-    VariedTraits.BodyHeight = FMath::Clamp(BaseTraits.BodyHeight + GenerateRandomFloat(LocalSeed, -VariationStrength, VariationStrength), 0.0f, 1.0f);
-    VariedTraits.BodyWeight = FMath::Clamp(BaseTraits.BodyWeight + GenerateRandomFloat(LocalSeed, -VariationStrength, VariationStrength), 0.0f, 1.0f);
-
-    return VariedTraits;
+    TArray<FCharacterData> Population;
+    
+    // Distribuição de tipos na população
+    int32 Leaders = FMath::Max(1, PopulationSize / 20);      // 5% líderes
+    int32 Shamans = FMath::Max(1, PopulationSize / 25);      // 4% xamãs
+    int32 Hunters = PopulationSize / 4;                      // 25% caçadores
+    int32 Gatherers = PopulationSize / 3;                    // 33% coletores
+    int32 Children = PopulationSize / 5;                     // 20% crianças
+    int32 Elders = PopulationSize / 10;                      // 10% anciãos
+    int32 Members = PopulationSize - (Leaders + Shamans + Hunters + Gatherers + Children + Elders);
+    
+    // Gerar cada tipo
+    for (int32 i = 0; i < Leaders; i++)
+        Population.Add(GenerateRandomCharacter(Tribe, ECharacterType::TribalLeader));
+    
+    for (int32 i = 0; i < Shamans; i++)
+        Population.Add(GenerateRandomCharacter(Tribe, ECharacterType::Shaman));
+    
+    for (int32 i = 0; i < Hunters; i++)
+        Population.Add(GenerateRandomCharacter(Tribe, ECharacterType::Hunter));
+    
+    for (int32 i = 0; i < Gatherers; i++)
+        Population.Add(GenerateRandomCharacter(Tribe, ECharacterType::Gatherer));
+    
+    for (int32 i = 0; i < Children; i++)
+        Population.Add(GenerateRandomCharacter(Tribe, ECharacterType::Child));
+    
+    for (int32 i = 0; i < Elders; i++)
+        Population.Add(GenerateRandomCharacter(Tribe, ECharacterType::Elder));
+    
+    for (int32 i = 0; i < Members; i++)
+        Population.Add(GenerateRandomCharacter(Tribe, ECharacterType::TribalMember));
+    
+    return Population;
 }
 
-bool UCharacterGenerationSystem::IsCharacterUnique(const FCharacterDefinition& Character, float SimilarityThreshold)
+void UCharacterGenerationSubsystem::InitializeTribalGenePools()
 {
-    for (const FCharacterDefinition& ExistingChar : GeneratedCharacters)
+    // Inicializar pools genéticos para cada tribo
+    // Cada tribo tem características físicas distintas baseadas no ambiente
+    
+    // River Tribe - tons mais claros, adaptados à vida aquática
+    TArray<FPhysicalVariation> RiverPool;
+    for (int32 i = 0; i < 10; i++)
     {
-        // Calcular similaridade facial
-        float FacialSimilarity = 0.0f;
-        FacialSimilarity += FMath::Abs(Character.GeneticTraits.FaceWidth - ExistingChar.GeneticTraits.FaceWidth);
-        FacialSimilarity += FMath::Abs(Character.GeneticTraits.EyeSize - ExistingChar.GeneticTraits.EyeSize);
-        FacialSimilarity += FMath::Abs(Character.GeneticTraits.NoseSize - ExistingChar.GeneticTraits.NoseSize);
-        FacialSimilarity += FMath::Abs(Character.GeneticTraits.MouthSize - ExistingChar.GeneticTraits.MouthSize);
-        FacialSimilarity += FMath::Abs(Character.GeneticTraits.CheekboneHeight - ExistingChar.GeneticTraits.CheekboneHeight);
-        FacialSimilarity += FMath::Abs(Character.GeneticTraits.JawWidth - ExistingChar.GeneticTraits.JawWidth);
-        
-        FacialSimilarity /= 6.0f; // Média das diferenças
-        
-        // Se a similaridade for muito alta, não é único
-        if (FacialSimilarity < (1.0f - SimilarityThreshold))
-        {
-            return false;
-        }
+        FPhysicalVariation Variant;
+        Variant.SkinTone = FLinearColor(FMath::FRandRange(0.6f, 0.8f), FMath::FRandRange(0.5f, 0.7f), FMath::FRandRange(0.4f, 0.6f), 1.0f);
+        Variant.HairColor = FLinearColor(FMath::FRandRange(0.3f, 0.6f), FMath::FRandRange(0.2f, 0.4f), FMath::FRandRange(0.1f, 0.2f), 1.0f);
+        RiverPool.Add(Variant);
     }
+    TribalGenePool.Add(ETribalGroup::RiverTribe, RiverPool);
     
-    return true;
+    // Mountain Tribe - tons médios, estrutura robusta
+    TArray<FPhysicalVariation> MountainPool;
+    for (int32 i = 0; i < 10; i++)
+    {
+        FPhysicalVariation Variant;
+        Variant.SkinTone = FLinearColor(FMath::FRandRange(0.5f, 0.7f), FMath::FRandRange(0.4f, 0.6f), FMath::FRandRange(0.3f, 0.5f), 1.0f);
+        Variant.HairColor = FLinearColor(FMath::FRandRange(0.1f, 0.3f), FMath::FRandRange(0.05f, 0.2f), FMath::FRandRange(0.02f, 0.1f), 1.0f);
+        MountainPool.Add(Variant);
+    }
+    TribalGenePool.Add(ETribalGroup::MountainTribe, MountainPool);
+    
+    // Continuar para outras tribos...
 }
 
-float UCharacterGenerationSystem::GenerateRandomFloat(int32& Seed, float Min, float Max)
+FLinearColor UCharacterGenerationSubsystem::GenerateTribalSkinTone(ETribalGroup Tribe)
 {
-    // Implementação simples de gerador pseudo-aleatório baseado em seed
-    Seed = (Seed * 1103515245 + 12345) & 0x7fffffff;
-    float NormalizedValue = (float)Seed / (float)0x7fffffff;
-    return Min + (Max - Min) * NormalizedValue;
+    switch (Tribe)
+    {
+        case ETribalGroup::RiverTribe:
+            return FLinearColor(FMath::FRandRange(0.6f, 0.8f), FMath::FRandRange(0.5f, 0.7f), FMath::FRandRange(0.4f, 0.6f), 1.0f);
+        case ETribalGroup::MountainTribe:
+            return FLinearColor(FMath::FRandRange(0.5f, 0.7f), FMath::FRandRange(0.4f, 0.6f), FMath::FRandRange(0.3f, 0.5f), 1.0f);
+        case ETribalGroup::ForestTribe:
+            return FLinearColor(FMath::FRandRange(0.4f, 0.6f), FMath::FRandRange(0.3f, 0.5f), FMath::FRandRange(0.25f, 0.45f), 1.0f);
+        case ETribalGroup::PlainsTribe:
+            return FLinearColor(FMath::FRandRange(0.7f, 0.9f), FMath::FRandRange(0.6f, 0.8f), FMath::FRandRange(0.5f, 0.7f), 1.0f);
+        case ETribalGroup::CoastalTribe:
+            return FLinearColor(FMath::FRandRange(0.55f, 0.75f), FMath::FRandRange(0.45f, 0.65f), FMath::FRandRange(0.35f, 0.55f), 1.0f);
+        default:
+            return FLinearColor(0.7f, 0.6f, 0.5f, 1.0f);
+    }
 }
 
-FLinearColor UCharacterGenerationSystem::GenerateNaturalSkinTone(int32& Seed)
+FLinearColor UCharacterGenerationSubsystem::GenerateTribalHairColor(ETribalGroup Tribe)
 {
-    // Tons de pele naturais baseados em diversidade humana realista
-    TArray<FLinearColor> SkinTones = {
-        FLinearColor(0.95f, 0.87f, 0.73f, 1.0f), // Pele clara
-        FLinearColor(0.89f, 0.78f, 0.62f, 1.0f), // Pele média-clara
-        FLinearColor(0.76f, 0.65f, 0.48f, 1.0f), // Pele média
-        FLinearColor(0.65f, 0.52f, 0.37f, 1.0f), // Pele média-escura
-        FLinearColor(0.52f, 0.39f, 0.28f, 1.0f), // Pele escura
-        FLinearColor(0.41f, 0.28f, 0.19f, 1.0f)  // Pele muito escura
-    };
+    // Variações de cor de cabelo baseadas na tribo
+    float BaseR = FMath::FRandRange(0.1f, 0.4f);
+    float BaseG = FMath::FRandRange(0.05f, 0.3f);
+    float BaseB = FMath::FRandRange(0.02f, 0.15f);
     
-    int32 ToneIndex = (int32)(GenerateRandomFloat(Seed) * SkinTones.Num());
-    ToneIndex = FMath::Clamp(ToneIndex, 0, SkinTones.Num() - 1);
-    
-    // Adicionar ligeira variação
-    FLinearColor BaseTone = SkinTones[ToneIndex];
-    float Variation = 0.05f;
-    BaseTone.R = FMath::Clamp(BaseTone.R + GenerateRandomFloat(Seed, -Variation, Variation), 0.0f, 1.0f);
-    BaseTone.G = FMath::Clamp(BaseTone.G + GenerateRandomFloat(Seed, -Variation, Variation), 0.0f, 1.0f);
-    BaseTone.B = FMath::Clamp(BaseTone.B + GenerateRandomFloat(Seed, -Variation, Variation), 0.0f, 1.0f);
-    
-    return BaseTone;
+    return FLinearColor(BaseR, BaseG, BaseB, 1.0f);
 }
 
-FLinearColor UCharacterGenerationSystem::GenerateNaturalEyeColor(int32& Seed)
+FLinearColor UCharacterGenerationSubsystem::GenerateTribalEyeColor(ETribalGroup Tribe)
 {
+    // Cores de olho variadas mas realistas
     TArray<FLinearColor> EyeColors = {
-        FLinearColor(0.2f, 0.1f, 0.05f, 1.0f), // Castanho escuro
-        FLinearColor(0.4f, 0.25f, 0.1f, 1.0f),  // Castanho
-        FLinearColor(0.6f, 0.4f, 0.2f, 1.0f),   // Castanho claro
-        FLinearColor(0.3f, 0.5f, 0.2f, 1.0f),   // Verde
-        FLinearColor(0.2f, 0.4f, 0.7f, 1.0f),   // Azul
-        FLinearColor(0.5f, 0.5f, 0.5f, 1.0f),   // Cinzento
-        FLinearColor(0.15f, 0.08f, 0.03f, 1.0f) // Quase preto
+        FLinearColor(0.2f, 0.1f, 0.05f, 1.0f),  // Marrom escuro
+        FLinearColor(0.4f, 0.3f, 0.1f, 1.0f),   // Marrom
+        FLinearColor(0.6f, 0.5f, 0.2f, 1.0f),   // Avelã
+        FLinearColor(0.3f, 0.4f, 0.6f, 1.0f),   // Azul acinzentado
+        FLinearColor(0.2f, 0.5f, 0.3f, 1.0f)    // Verde
     };
     
-    int32 ColorIndex = (int32)(GenerateRandomFloat(Seed) * EyeColors.Num());
-    ColorIndex = FMath::Clamp(ColorIndex, 0, EyeColors.Num() - 1);
-    
-    return EyeColors[ColorIndex];
-}
-
-FLinearColor UCharacterGenerationSystem::GenerateNaturalHairColor(int32& Seed)
-{
-    TArray<FLinearColor> HairColors = {
-        FLinearColor(0.05f, 0.02f, 0.01f, 1.0f), // Preto
-        FLinearColor(0.2f, 0.1f, 0.05f, 1.0f),   // Castanho escuro
-        FLinearColor(0.4f, 0.25f, 0.15f, 1.0f),  // Castanho
-        FLinearColor(0.6f, 0.4f, 0.2f, 1.0f),    // Castanho claro
-        FLinearColor(0.8f, 0.6f, 0.3f, 1.0f),    // Louro escuro
-        FLinearColor(0.9f, 0.8f, 0.5f, 1.0f),    // Louro
-        FLinearColor(0.7f, 0.3f, 0.1f, 1.0f),    // Ruivo
-        FLinearColor(0.6f, 0.6f, 0.6f, 1.0f)     // Grisalho (para mais velhos)
-    };
-    
-    int32 ColorIndex = (int32)(GenerateRandomFloat(Seed) * HairColors.Num());
-    ColorIndex = FMath::Clamp(ColorIndex, 0, HairColors.Num() - 1);
-    
-    return HairColors[ColorIndex];
-}
-
-FString UCharacterGenerationSystem::SelectRandomHairStyle(int32& Seed, bool bIsMale)
-{
-    TArray<FString> MaleStyles = {
-        "Tribal_Short_Messy",
-        "Tribal_Medium_Wild",
-        "Tribal_Long_Braided",
-        "Tribal_Mohawk",
-        "Tribal_Shaved_Sides",
-        "Modern_Academic" // Para o protagonista
-    };
-    
-    TArray<FString> FemaleStyles = {
-        "Tribal_Long_Loose",
-        "Tribal_Braided_Crown",
-        "Tribal_Side_Braid",
-        "Tribal_Twisted_Bun",
-        "Tribal_Half_Up",
-        "Modern_Professional" // Para protagonista feminina
-    };
-    
-    TArray<FString>& Styles = bIsMale ? MaleStyles : FemaleStyles;
-    int32 StyleIndex = (int32)(GenerateRandomFloat(Seed) * Styles.Num());
-    StyleIndex = FMath::Clamp(StyleIndex, 0, Styles.Num() - 1);
-    
-    return Styles[StyleIndex];
-}
-
-TArray<FString> UCharacterGenerationSystem::GenerateTribalMarkings(int32& Seed, ECharacterArchetype Archetype)
-{
-    TArray<FString> Markings;
-    
-    // Markings baseadas no arquétipo
-    switch (Archetype)
-    {
-        case ECharacterArchetype::TribalShaman:
-            Markings.Add("Spiritual_Face_Paint");
-            Markings.Add("Sacred_Symbols_Arms");
-            if (GenerateRandomFloat(Seed) > 0.5f) Markings.Add("Third_Eye_Marking");
-            break;
-            
-        case ECharacterArchetype::TribalWarrior:
-            Markings.Add("War_Paint_Face");
-            Markings.Add("Victory_Marks_Chest");
-            if (GenerateRandomFloat(Seed) > 0.7f) Markings.Add("Battle_Scars_Arms");
-            break;
-            
-        case ECharacterArchetype::TribalElder:
-            Markings.Add("Wisdom_Lines_Face");
-            Markings.Add("Life_Story_Arms");
-            Markings.Add("Elder_Status_Forehead");
-            break;
-            
-        case ECharacterArchetype::TribalCrafter:
-            Markings.Add("Craft_Symbols_Hands");
-            if (GenerateRandomFloat(Seed) > 0.6f) Markings.Add("Tool_Marks_Arms");
-            break;
-            
-        default:
-            // Markings básicas para outros tipos tribais
-            if (GenerateRandomFloat(Seed) > 0.5f) Markings.Add("Basic_Tribal_Face");
-            if (GenerateRandomFloat(Seed) > 0.7f) Markings.Add("Simple_Arm_Bands");
-            break;
-    }
-    
-    return Markings;
-}
-
-void UCharacterGenerationSystem::GenerateClothing(FCharacterDefinition& Character, int32& Seed)
-{
-    // Materiais baseados no arquétipo
-    switch (Character.Archetype)
-    {
-        case ECharacterArchetype::Protagonist:
-            Character.Clothing.ClothingMaterials = {"Modern_Fabric", "Leather_Boots", "Metal_Buckles"};
-            Character.Clothing.WearLevel = GenerateRandomFloat(Seed, 0.6f, 0.9f); // Desgastado pela viagem temporal
-            Character.Clothing.PrimaryColor = FLinearColor(0.3f, 0.4f, 0.5f, 1.0f); // Tons académicos
-            break;
-            
-        case ECharacterArchetype::TribalWarrior:
-            Character.Clothing.ClothingMaterials = {"Animal_Hide", "Bone_Armor", "Sinew_Bindings"};
-            Character.Clothing.Ornaments = {"Predator_Teeth", "Claw_Necklace", "Bone_Bracers"};
-            Character.Clothing.WearLevel = GenerateRandomFloat(Seed, 0.4f, 0.7f);
-            Character.Clothing.PrimaryColor = FLinearColor(0.4f, 0.3f, 0.2f, 1.0f); // Terra/sangue
-            break;
-            
-        case ECharacterArchetype::TribalShaman:
-            Character.Clothing.ClothingMaterials = {"Soft_Pelts", "Feathers", "Plant_Fibers"};
-            Character.Clothing.Ornaments = {"Crystal_Pendant", "Feather_Headdress", "Bone_Charms"};
-            Character.Clothing.WearLevel = GenerateRandomFloat(Seed, 0.2f, 0.5f);
-            Character.Clothing.PrimaryColor = FLinearColor(0.5f, 0.4f, 0.6f, 1.0f); // Tons místicos
-            break;
-            
-        case ECharacterArchetype::TribalElder:
-            Character.Clothing.ClothingMaterials = {"Fine_Pelts", "Woven_Fibers", "Polished_Bone"};
-            Character.Clothing.Ornaments = {"Status_Medallion", "Wisdom_Staff", "Honor_Beads"};
-            Character.Clothing.WearLevel = GenerateRandomFloat(Seed, 0.3f, 0.6f);
-            Character.Clothing.PrimaryColor = FLinearColor(0.6f, 0.5f, 0.3f, 1.0f); // Tons ricos
-            break;
-            
-        default:
-            Character.Clothing.ClothingMaterials = {"Basic_Hide", "Plant_Fibers"};
-            Character.Clothing.WearLevel = GenerateRandomFloat(Seed, 0.5f, 0.8f);
-            Character.Clothing.PrimaryColor = FLinearColor(0.4f, 0.3f, 0.2f, 1.0f);
-            break;
-    }
-    
-    // Cor secundária sempre mais escura que a primária
-    Character.Clothing.SecondaryColor = Character.Clothing.PrimaryColor * 0.7f;
-    Character.Clothing.SecondaryColor.A = 1.0f;
-}
-
-FString UCharacterGenerationSystem::GenerateCharacterName(ECharacterArchetype Archetype, bool bIsMale, int32& Seed)
-{
-    TArray<FString> TribalMaleNames = {
-        "Kael", "Theron", "Drak", "Vex", "Zahn", "Brix", "Tor", "Jax", "Kron", "Rex"
-    };
-    
-    TArray<FString> TribalFemaleNames = {
-        "Lyra", "Nyx", "Vera", "Zara", "Kira", "Tess", "Mira", "Lux", "Dara", "Ava"
-    };
-    
-    TArray<FString> ModernMaleNames = {
-        "Dr. Marcus", "Dr. James", "Dr. Robert", "Dr. David", "Dr. Michael"
-    };
-    
-    TArray<FString> ModernFemaleNames = {
-        "Dr. Sarah", "Dr. Emma", "Dr. Lisa", "Dr. Anna", "Dr. Claire"
-    };
-    
-    TArray<FString>* NameList;
-    
-    if (Archetype == ECharacterArchetype::Protagonist || Archetype == ECharacterArchetype::TimeTraveler)
-    {
-        NameList = bIsMale ? &ModernMaleNames : &ModernFemaleNames;
-    }
-    else
-    {
-        NameList = bIsMale ? &TribalMaleNames : &TribalFemaleNames;
-    }
-    
-    int32 NameIndex = (int32)(GenerateRandomFloat(Seed) * NameList->Num());
-    NameIndex = FMath::Clamp(NameIndex, 0, NameList->Num() - 1);
-    
-    return (*NameList)[NameIndex];
+    return EyeColors[FMath::RandRange(0, EyeColors.Num() - 1)];
 }
