@@ -2,385 +2,475 @@
 #include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
 #include "TimerManager.h"
+#include "Math/UnrealMathUtility.h"
+#include "DinosaurMemoryComponent.h"
+#include "BehaviorTree/BehaviorTreeComponent.h"
+#include "BehaviorTree/BlackboardComponent.h"
 
 UDinosaurBehaviorSystem::UDinosaurBehaviorSystem()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f; // Update 10 times per second
+    PrimaryComponentTick.TickInterval = 0.5f; // Tick a cada 0.5 segundos para performance
 }
 
 void UDinosaurBehaviorSystem::BeginPlay()
 {
     Super::BeginPlay();
     
-    InitializeSpeciesTraits();
+    // Inicializar componentes
+    MemoryComponent = GetOwner()->FindComponentByClass<UDinosaurMemoryComponent>();
+    BehaviorTreeComponent = GetOwner()->FindComponentByClass<UBehaviorTreeComponent>();
+    BlackboardComponent = GetOwner()->FindComponentByClass<UBlackboardComponent>();
     
-    // Gerar nome único se não foi definido
-    if (IndividualName.IsEmpty())
+    // Gerar personalidade única se não foi definida
+    if (!bPersonalityGenerated)
     {
-        IndividualName = FString::Printf(TEXT("%s_%d"), 
-            *UEnum::GetValueAsString(Species), 
-            FMath::RandRange(1000, 9999));
+        GenerateUniquePersonality();
     }
     
-    // Inicializar necessidades baseadas na espécie
-    UpdateNeeds(0.0f);
+    // Configurar rotinas padrão baseadas na espécie
+    if (DailyRoutines.Num() == 0)
+    {
+        SetupDefaultRoutines();
+    }
+    
+    // Configurar domesticação baseada na espécie
+    SetupDomesticationSettings();
+    
+    UE_LOG(LogTemp, Log, TEXT("DinosaurBehaviorSystem: %s (%s) initialized with personality"), 
+           *IndividualName, *UEnum::GetValueAsString(Species));
 }
 
 void UDinosaurBehaviorSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-    
-    // Atualizar necessidades a cada 5 segundos
-    if (CurrentTime - LastNeedsUpdate > 5.0f)
-    {
-        UpdateNeeds(CurrentTime - LastNeedsUpdate);
-        LastNeedsUpdate = CurrentTime;
-    }
-    
-    // Verificar rotina diária a cada 30 segundos
-    if (CurrentTime - LastRoutineCheck > 30.0f)
-    {
-        ProcessDailyRoutine();
-        LastRoutineCheck = CurrentTime;
-    }
-    
-    // Processar decay de memória a cada minuto
-    if (CurrentTime - LastMemoryUpdate > 60.0f)
-    {
-        ProcessMemoryDecay(CurrentTime - LastMemoryUpdate);
-        LastMemoryUpdate = CurrentTime;
-    }
-    
-    // Atualizar comportamento baseado nas necessidades
-    UpdateBehaviorBasedOnNeeds();
+    UpdateNeeds(DeltaTime);
+    UpdateRoutines(DeltaTime);
+    UpdateDomestication(DeltaTime);
+    EvaluateBehaviorChange();
 }
 
-void UDinosaurBehaviorSystem::InitializeSpeciesTraits()
+void UDinosaurBehaviorSystem::GenerateUniquePersonality()
 {
-    // Definir características baseadas na espécie
-    switch (Species)
-    {
-        case EDinosaurSpecies::Compsognathus:
-            CanBeDomesticated = true;
-            PhysicalTraits.SizeVariation = FMath::RandRange(0.8f, 1.1f);
-            PhysicalTraits.SpeedMultiplier = FMath::RandRange(1.1f, 1.3f);
-            break;
-            
-        case EDinosaurSpecies::TyrannosaurusRex:
-            CanBeDomesticated = false;
-            PhysicalTraits.SizeVariation = FMath::RandRange(0.9f, 1.2f);
-            PhysicalTraits.StrengthMultiplier = FMath::RandRange(1.2f, 1.3f);
-            break;
-            
-        case EDinosaurSpecies::Triceratops:
-            CanBeDomesticated = false;
-            PhysicalTraits.HornSizeMultiplier = FMath::RandRange(0.7f, 1.4f);
-            PhysicalTraits.StrengthMultiplier = FMath::RandRange(1.0f, 1.2f);
-            break;
-            
-        // Adicionar mais espécies conforme necessário
-        default:
-            break;
-    }
+    // Gerar traços de personalidade baseados na espécie com variação individual
+    FDinosaurPersonalityTraits BaseTraits = GetSpeciesBaseTraits(Species);
     
-    // Gerar cores únicas
-    PhysicalTraits.PrimaryColor = FLinearColor(
-        FMath::RandRange(0.2f, 0.8f),
-        FMath::RandRange(0.2f, 0.8f),
-        FMath::RandRange(0.2f, 0.8f),
+    // Adicionar variação aleatória (±20%)
+    PersonalityTraits.Aggression = FMath::Clamp(BaseTraits.Aggression + FMath::RandRange(-0.2f, 0.2f), 0.0f, 1.0f);
+    PersonalityTraits.Curiosity = FMath::Clamp(BaseTraits.Curiosity + FMath::RandRange(-0.2f, 0.2f), 0.0f, 1.0f);
+    PersonalityTraits.Sociability = FMath::Clamp(BaseTraits.Sociability + FMath::RandRange(-0.2f, 0.2f), 0.0f, 1.0f);
+    PersonalityTraits.Territoriality = FMath::Clamp(BaseTraits.Territoriality + FMath::RandRange(-0.2f, 0.2f), 0.0f, 1.0f);
+    PersonalityTraits.Fearfulness = FMath::Clamp(BaseTraits.Fearfulness + FMath::RandRange(-0.2f, 0.2f), 0.0f, 1.0f);
+    PersonalityTraits.Intelligence = FMath::Clamp(BaseTraits.Intelligence + FMath::RandRange(-0.2f, 0.2f), 0.0f, 1.0f);
+    
+    // Gerar variações físicas únicas
+    PersonalityTraits.SizeModifier = FVector(
+        FMath::RandRange(0.85f, 1.15f),
+        FMath::RandRange(0.85f, 1.15f),
+        FMath::RandRange(0.85f, 1.15f)
+    );
+    
+    // Gerar variação de cor
+    PersonalityTraits.ColorVariation = FLinearColor(
+        FMath::RandRange(0.8f, 1.2f),
+        FMath::RandRange(0.8f, 1.2f),
+        FMath::RandRange(0.8f, 1.2f),
         1.0f
     );
     
-    // Características distintivas aleatórias
-    PhysicalTraits.HasScar = FMath::RandBool() && FMath::RandRange(0.0f, 1.0f) < 0.15f;
-    PhysicalTraits.HasLimp = FMath::RandBool() && FMath::RandRange(0.0f, 1.0f) < 0.05f;
-}
-
-void UDinosaurBehaviorSystem::SetBehaviorState(EDinosaurBehaviorState NewState)
-{
-    if (CurrentState != NewState)
-    {
-        EDinosaurBehaviorState PreviousState = CurrentState;
-        CurrentState = NewState;
-        
-        // Log da mudança de estado para debugging
-        UE_LOG(LogTemp, Log, TEXT("%s: State changed from %s to %s"), 
-            *IndividualName,
-            *UEnum::GetValueAsString(PreviousState),
-            *UEnum::GetValueAsString(NewState));
-    }
-}
-
-void UDinosaurBehaviorSystem::UpdateNeeds(float DeltaTime)
-{
-    float TimeMultiplier = DeltaTime / 3600.0f; // Converter para horas
+    PersonalityTraits.VoicePitch = FMath::RandRange(0.7f, 1.3f);
     
-    // Degradação natural das necessidades
-    Needs.Hunger = FMath::Clamp(Needs.Hunger - (10.0f * TimeMultiplier), 0.0f, 100.0f);
-    Needs.Thirst = FMath::Clamp(Needs.Thirst - (15.0f * TimeMultiplier), 0.0f, 100.0f);
-    Needs.Energy = FMath::Clamp(Needs.Energy - (8.0f * TimeMultiplier), 0.0f, 100.0f);
-    
-    // Necessidades sociais variam por espécie
-    if (IsSocialSpecies())
+    // Gerar nome único se não foi definido
+    if (IndividualName.IsEmpty())
     {
-        Needs.Social = FMath::Clamp(Needs.Social - (5.0f * TimeMultiplier), 0.0f, 100.0f);
+        IndividualName = GenerateUniqueName();
     }
     
-    // Segurança diminui se há ameaças recentes
-    if (Memory.LastThreatTime > 0 && (GetWorld()->GetTimeSeconds() - Memory.LastThreatTime) < 300.0f)
-    {
-        Needs.Safety = FMath::Clamp(Needs.Safety - (20.0f * TimeMultiplier), 0.0f, 100.0f);
-    }
-    else
-    {
-        Needs.Safety = FMath::Clamp(Needs.Safety + (5.0f * TimeMultiplier), 0.0f, 100.0f);
-    }
-}
-
-void UDinosaurBehaviorSystem::AddMemoryLocation(FVector Location, bool bIsSafe)
-{
-    if (bIsSafe)
-    {
-        Memory.SafeAreas.AddUnique(Location);
-        // Limitar a 10 localizações seguras
-        if (Memory.SafeAreas.Num() > 10)
-        {
-            Memory.SafeAreas.RemoveAt(0);
-        }
-    }
-    else
-    {
-        Memory.DangerousAreas.AddUnique(Location);
-        Memory.LastThreatTime = GetWorld()->GetTimeSeconds();
-        // Limitar a 15 áreas perigosas
-        if (Memory.DangerousAreas.Num() > 15)
-        {
-            Memory.DangerousAreas.RemoveAt(0);
-        }
-    }
-}
-
-void UDinosaurBehaviorSystem::UpdateActorRelationship(AActor* Actor, float RelationshipDelta)
-{
-    if (!Actor) return;
+    bPersonalityGenerated = true;
     
-    float* CurrentRelationship = Memory.KnownActors.Find(Actor);
-    if (CurrentRelationship)
-    {
-        *CurrentRelationship = FMath::Clamp(*CurrentRelationship + RelationshipDelta, -100.0f, 100.0f);
-    }
-    else
-    {
-        Memory.KnownActors.Add(Actor, FMath::Clamp(RelationshipDelta, -100.0f, 100.0f));
-    }
+    UE_LOG(LogTemp, Log, TEXT("Generated personality for %s: Aggr=%.2f, Cur=%.2f, Soc=%.2f, Terr=%.2f, Fear=%.2f, Int=%.2f"),
+           *IndividualName, PersonalityTraits.Aggression, PersonalityTraits.Curiosity, 
+           PersonalityTraits.Sociability, PersonalityTraits.Territoriality, 
+           PersonalityTraits.Fearfulness, PersonalityTraits.Intelligence);
 }
 
-void UDinosaurBehaviorSystem::ProcessDomesticationInteraction(AActor* Player, float InteractionQuality)
+FDinosaurPersonalityTraits UDinosaurBehaviorSystem::GetSpeciesBaseTraits(EDinosaurSpecies InSpecies)
 {
-    if (!CanBeDomesticated || !Player) return;
+    FDinosaurPersonalityTraits BaseTraits;
     
-    // Apenas espécies pequenas e herbívoras podem ser domesticadas
-    if (!IsApexPredator() && InteractionQuality > 0)
-    {
-        float DomesticationGain = InteractionQuality * 0.5f;
-        
-        // Personalidade afeta a domesticação
-        switch (Personality)
-        {
-            case EDinosaurPersonality::Timid:
-                DomesticationGain *= 1.5f;
-                break;
-            case EDinosaurPersonality::Aggressive:
-                DomesticationGain *= 0.3f;
-                break;
-            case EDinosaurPersonality::Curious:
-                DomesticationGain *= 1.2f;
-                break;
-            default:
-                break;
-        }
-        
-        DomesticationLevel = FMath::Clamp(DomesticationLevel + DomesticationGain, 0.0f, 100.0f);
-        
-        // Criar vínculo quando domesticação atinge 50%
-        if (DomesticationLevel >= 50.0f && !BondedPlayer)
-        {
-            BondedPlayer = Player;
-            SetBehaviorState(EDinosaurBehaviorState::Domesticated);
-        }
-        
-        // Atualizar relacionamento com o jogador
-        UpdateActorRelationship(Player, InteractionQuality * 2.0f);
-    }
-}
-
-bool UDinosaurBehaviorSystem::IsNocturnal() const
-{
-    // Algumas espécies são mais ativas à noite
-    switch (Species)
+    switch (InSpecies)
     {
         case EDinosaurSpecies::Compsognathus:
-        case EDinosaurSpecies::Coelophysis:
-            return true;
+            BaseTraits.Aggression = 0.3f;
+            BaseTraits.Curiosity = 0.8f;
+            BaseTraits.Sociability = 0.7f;
+            BaseTraits.Territoriality = 0.2f;
+            BaseTraits.Fearfulness = 0.8f;
+            BaseTraits.Intelligence = 0.6f;
+            break;
+            
+        case EDinosaurSpecies::Tyrannosaurus:
+            BaseTraits.Aggression = 0.9f;
+            BaseTraits.Curiosity = 0.4f;
+            BaseTraits.Sociability = 0.1f;
+            BaseTraits.Territoriality = 0.9f;
+            BaseTraits.Fearfulness = 0.1f;
+            BaseTraits.Intelligence = 0.7f;
+            break;
+            
+        case EDinosaurSpecies::Triceratops_Adult:
+            BaseTraits.Aggression = 0.4f;
+            BaseTraits.Curiosity = 0.3f;
+            BaseTraits.Sociability = 0.6f;
+            BaseTraits.Territoriality = 0.5f;
+            BaseTraits.Fearfulness = 0.4f;
+            BaseTraits.Intelligence = 0.5f;
+            break;
+            
+        // Adicionar outros casos conforme necessário
         default:
-            return false;
+            BaseTraits.Aggression = 0.5f;
+            BaseTraits.Curiosity = 0.5f;
+            BaseTraits.Sociability = 0.5f;
+            BaseTraits.Territoriality = 0.5f;
+            BaseTraits.Fearfulness = 0.5f;
+            BaseTraits.Intelligence = 0.5f;
+            break;
+    }
+    
+    return BaseTraits;
+}
+
+void UDinosaurBehaviorSystem::SetupDefaultRoutines()
+{
+    // Rotinas baseadas na espécie e tipo de dinossauro
+    switch (ThreatLevel)
+    {
+        case EDinosaurThreatLevel::Passive:
+            SetupHerbivoreRoutines();
+            break;
+        case EDinosaurThreatLevel::Cautious:
+            SetupLargeHerbivoreRoutines();
+            break;
+        case EDinosaurThreatLevel::Opportunist:
+        case EDinosaurThreatLevel::Aggressive:
+        case EDinosaurThreatLevel::Apex:
+            SetupCarnivoreRoutines();
+            break;
     }
 }
 
-bool UDinosaurBehaviorSystem::IsSocialSpecies() const
+void UDinosaurBehaviorSystem::SetupHerbivoreRoutines()
 {
-    // Espécies que vivem em grupos
+    // Manhã: Forragear
+    FDinosaurRoutine MorningForage;
+    MorningForage.PrimaryActivity = EDinosaurBehaviorState::Foraging;
+    MorningForage.StartTime = 6.0f;
+    MorningForage.Duration = 3.0f;
+    MorningForage.Priority = 0.8f;
+    DailyRoutines.Add(MorningForage);
+    
+    // Meio-dia: Descansar
+    FDinosaurRoutine MiddayRest;
+    MiddayRest.PrimaryActivity = EDinosaurBehaviorState::Resting;
+    MiddayRest.StartTime = 12.0f;
+    MiddayRest.Duration = 2.0f;
+    MiddayRest.Priority = 0.6f;
+    DailyRoutines.Add(MiddayRest);
+    
+    // Tarde: Socializar
+    FDinosaurRoutine AfternoonSocial;
+    AfternoonSocial.PrimaryActivity = EDinosaurBehaviorState::Socializing;
+    AfternoonSocial.StartTime = 15.0f;
+    AfternoonSocial.Duration = 2.0f;
+    AfternoonSocial.Priority = 0.5f;
+    DailyRoutines.Add(AfternoonSocial);
+    
+    // Entardecer: Beber água
+    FDinosaurRoutine EveningDrink;
+    EveningDrink.PrimaryActivity = EDinosaurBehaviorState::Drinking;
+    EveningDrink.StartTime = 18.0f;
+    EveningDrink.Duration = 1.0f;
+    EveningDrink.Priority = 0.9f;
+    DailyRoutines.Add(EveningDrink);
+}
+
+void UDinosaurBehaviorSystem::SetupCarnivoreRoutines()
+{
+    // Madrugada: Caçar
+    FDinosaurRoutine DawnHunt;
+    DawnHunt.PrimaryActivity = EDinosaurBehaviorState::Hunting;
+    DawnHunt.StartTime = 5.0f;
+    DawnHunt.Duration = 2.0f;
+    DawnHunt.Priority = 0.9f;
+    DailyRoutines.Add(DawnHunt);
+    
+    // Manhã: Patrulhar território
+    FDinosaurRoutine MorningPatrol;
+    MorningPatrol.PrimaryActivity = EDinosaurBehaviorState::Territorial;
+    MorningPatrol.StartTime = 8.0f;
+    MorningPatrol.Duration = 2.0f;
+    MorningPatrol.Priority = 0.7f;
+    DailyRoutines.Add(MorningPatrol);
+    
+    // Tarde: Descansar
+    FDinosaurRoutine AfternoonRest;
+    AfternoonRest.PrimaryActivity = EDinosaurBehaviorState::Resting;
+    AfternoonRest.StartTime = 14.0f;
+    AfternoonRest.Duration = 4.0f;
+    AfternoonRest.Priority = 0.6f;
+    DailyRoutines.Add(AfternoonRest);
+    
+    // Entardecer: Caçar novamente
+    FDinosaurRoutine EveningHunt;
+    EveningHunt.PrimaryActivity = EDinosaurBehaviorState::Hunting;
+    EveningHunt.StartTime = 19.0f;
+    EveningHunt.Duration = 2.0f;
+    EveningHunt.Priority = 0.8f;
+    DailyRoutines.Add(EveningHunt);
+}
+
+void UDinosaurBehaviorSystem::SetupDomesticationSettings()
+{
     switch (Species)
     {
         case EDinosaurSpecies::Compsognathus:
         case EDinosaurSpecies::Parasaurolophus:
-        case EDinosaurSpecies::Dryosaurus:
-        case EDinosaurSpecies::Hypsilophodon:
-            return true;
-        default:
-            return false;
-    }
-}
-
-bool UDinosaurBehaviorSystem::IsApexPredator() const
-{
-    switch (Species)
-    {
-        case EDinosaurSpecies::TyrannosaurusRex:
-        case EDinosaurSpecies::Giganotosaurus:
-        case EDinosaurSpecies::Spinosaurus:
-            return true;
-        default:
-            return false;
-    }
-}
-
-float UDinosaurBehaviorSystem::GetThreatLevel() const
-{
-    float BaseThreat = 1.0f;
-    
-    // Threat baseado na espécie
-    if (IsApexPredator())
-    {
-        BaseThreat = 10.0f;
-    }
-    else
-    {
-        switch (Species)
-        {
-            case EDinosaurSpecies::Allosaurus:
-            case EDinosaurSpecies::Carnotaurus:
-                BaseThreat = 7.0f;
-                break;
-            case EDinosaurSpecies::Dilophosaurus:
-                BaseThreat = 4.0f;
-                break;
-            case EDinosaurSpecies::Triceratops:
-            case EDinosaurSpecies::Stegosaurus:
-                BaseThreat = 3.0f;
-                break;
-            default:
-                BaseThreat = 1.0f;
-                break;
-        }
-    }
-    
-    // Modificar por personalidade
-    switch (Personality)
-    {
-        case EDinosaurPersonality::Aggressive:
-            BaseThreat *= 1.5f;
-            break;
-        case EDinosaurPersonality::Territorial:
-            BaseThreat *= 1.3f;
-            break;
-        case EDinosaurPersonality::Timid:
-            BaseThreat *= 0.5f;
+        case EDinosaurSpecies::Triceratops_Juvenile:
+            bCanBeDomesticated = true;
+            TrustDecayRate = 0.5f; // Decay lento
             break;
         default:
+            bCanBeDomesticated = false;
+            TrustDecayRate = 2.0f; // Decay rápido
             break;
     }
+}
+
+FString UDinosaurBehaviorSystem::GenerateUniqueName()
+{
+    TArray<FString> NamePrefixes = {TEXT("Alpha"), TEXT("Beta"), TEXT("Gamma"), TEXT("Delta"), TEXT("Epsilon"), 
+                                   TEXT("Zeta"), TEXT("Theta"), TEXT("Kappa"), TEXT("Lambda"), TEXT("Sigma")};
     
-    return BaseThreat;
+    FString SpeciesName = UEnum::GetValueAsString(Species).Replace(TEXT("EDinosaurSpecies::"), TEXT(""));
+    FString Prefix = NamePrefixes[FMath::RandRange(0, NamePrefixes.Num() - 1)];
+    int32 Number = FMath::RandRange(1, 999);
+    
+    return FString::Printf(TEXT("%s-%s-%03d"), *Prefix, *SpeciesName, Number);
 }
 
-void UDinosaurBehaviorSystem::ProcessDailyRoutine()
-{
-    // Implementar rotinas baseadas na hora do dia
-    UGameplayStatics* GameplayStatics = UGameplayStatics::StaticClass()->GetDefaultObject<UGameplayStatics>();
-    // Aqui seria implementada a lógica de rotina diária baseada no tempo do jogo
-}
-
-void UDinosaurBehaviorSystem::UpdateBehaviorBasedOnNeeds()
-{
-    // Determinar prioridade de comportamento baseado nas necessidades
-    if (Needs.Thirst < 30.0f)
-    {
-        SetBehaviorState(EDinosaurBehaviorState::Drinking);
-    }
-    else if (Needs.Hunger < 25.0f)
-    {
-        SetBehaviorState(EDinosaurBehaviorState::Foraging);
-    }
-    else if (Needs.Energy < 20.0f)
-    {
-        SetBehaviorState(EDinosaurBehaviorState::Resting);
-    }
-    else if (Needs.Safety < 40.0f)
-    {
-        SetBehaviorState(EDinosaurBehaviorState::Fleeing);
-    }
-    else if (IsSocialSpecies() && Needs.Social < 30.0f)
-    {
-        SetBehaviorState(EDinosaurBehaviorState::Socializing);
-    }
-    else if (CurrentState == EDinosaurBehaviorState::Domesticated)
-    {
-        // Manter estado domesticado
-        return;
-    }
-    else
-    {
-        // Comportamento padrão baseado na personalidade
-        switch (Personality)
-        {
-            case EDinosaurPersonality::Curious:
-                SetBehaviorState(EDinosaurBehaviorState::Investigating);
-                break;
-            case EDinosaurPersonality::Territorial:
-                SetBehaviorState(EDinosaurBehaviorState::Territorial);
-                break;
-            default:
-                SetBehaviorState(EDinosaurBehaviorState::Idle);
-                break;
-        }
-    }
-}
-
-void UDinosaurBehaviorSystem::ProcessMemoryDecay(float DeltaTime)
+void UDinosaurBehaviorSystem::UpdateNeeds(float DeltaTime)
 {
     float CurrentTime = GetWorld()->GetTimeSeconds();
+    if (CurrentTime - LastNeedsUpdate < 1.0f) return; // Update a cada segundo
     
-    // Decay de relacionamentos ao longo do tempo
-    for (auto& ActorRelationship : Memory.KnownActors)
+    LastNeedsUpdate = CurrentTime;
+    
+    // Decaimento natural das necessidades
+    Hunger = FMath::Clamp(Hunger - (DeltaTime * 0.5f), 0.0f, 100.0f);
+    Thirst = FMath::Clamp(Thirst - (DeltaTime * 0.8f), 0.0f, 100.0f);
+    Energy = FMath::Clamp(Energy - (DeltaTime * 0.3f), 0.0f, 100.0f);
+    
+    // Decaimento social baseado na sociabilidade
+    float SocialDecay = (1.0f - PersonalityTraits.Sociability) * DeltaTime * 0.2f;
+    Social = FMath::Clamp(Social - SocialDecay, 0.0f, 100.0f);
+    
+    // Atualizar Blackboard se disponível
+    if (BlackboardComponent)
     {
-        float& Relationship = ActorRelationship.Value;
-        if (Relationship > 0)
+        BlackboardComponent->SetValueAsFloat(TEXT("Hunger"), Hunger);
+        BlackboardComponent->SetValueAsFloat(TEXT("Thirst"), Thirst);
+        BlackboardComponent->SetValueAsFloat(TEXT("Energy"), Energy);
+        BlackboardComponent->SetValueAsFloat(TEXT("Social"), Social);
+    }
+}
+
+void UDinosaurBehaviorSystem::UpdateRoutines(float DeltaTime)
+{
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    if (CurrentTime - LastRoutineCheck < 5.0f) return; // Check a cada 5 segundos
+    
+    LastRoutineCheck = CurrentTime;
+    
+    FDinosaurRoutine* ActiveRoutine = FindActiveRoutine();
+    if (ActiveRoutine)
+    {
+        // Se há uma rotina ativa e não estamos seguindo ela, mudar comportamento
+        if (CurrentBehaviorState != ActiveRoutine->PrimaryActivity)
         {
-            Relationship = FMath::Max(0.0f, Relationship - (DeltaTime * 0.1f));
+            SetBehaviorState(ActiveRoutine->PrimaryActivity);
+            UE_LOG(LogTemp, Log, TEXT("%s: Switching to routine activity: %s"), 
+                   *IndividualName, *UEnum::GetValueAsString(ActiveRoutine->PrimaryActivity));
         }
-        else if (Relationship < 0)
+    }
+}
+
+void UDinosaurBehaviorSystem::UpdateDomestication(float DeltaTime)
+{
+    if (!bCanBeDomesticated) return;
+    
+    // Decaimento natural da confiança
+    if (TrustedHuman && DomesticationLevel > 0.0f)
+    {
+        float DecayAmount = TrustDecayRate * DeltaTime / 86400.0f; // Por dia
+        DomesticationLevel = FMath::Clamp(DomesticationLevel - DecayAmount, 0.0f, 100.0f);
+        
+        // Se a confiança cai muito, remover humano confiável
+        if (DomesticationLevel < 10.0f)
         {
-            Relationship = FMath::Min(0.0f, Relationship + (DeltaTime * 0.05f));
+            TrustedHuman = nullptr;
         }
     }
     
-    // Remover relacionamentos neutros
-    Memory.KnownActors = Memory.KnownActors.FilterByPredicate([](const TPair<AActor*, float>& Pair)
+    // Atualizar Blackboard
+    if (BlackboardComponent)
     {
-        return FMath::Abs(Pair.Value) > 5.0f;
-    });
+        BlackboardComponent->SetValueAsFloat(TEXT("DomesticationLevel"), DomesticationLevel);
+        BlackboardComponent->SetValueAsObject(TEXT("TrustedHuman"), TrustedHuman);
+    }
+}
+
+void UDinosaurBehaviorSystem::EvaluateBehaviorChange()
+{
+    // Avaliar se deve mudar comportamento baseado em necessidades urgentes
+    if (Thirst < 20.0f && CurrentBehaviorState != EDinosaurBehaviorState::Drinking)
+    {
+        SetBehaviorState(EDinosaurBehaviorState::Drinking);
+        return;
+    }
+    
+    if (Hunger < 15.0f && CurrentBehaviorState != EDinosaurBehaviorState::Foraging && 
+        CurrentBehaviorState != EDinosaurBehaviorState::Hunting)
+    {
+        EDinosaurBehaviorState FoodBehavior = (ThreatLevel >= EDinosaurThreatLevel::Opportunist) ? 
+                                             EDinosaurBehaviorState::Hunting : EDinosaurBehaviorState::Foraging;
+        SetBehaviorState(FoodBehavior);
+        return;
+    }
+    
+    if (Energy < 10.0f && CurrentBehaviorState != EDinosaurBehaviorState::Resting)
+    {
+        SetBehaviorState(EDinosaurBehaviorState::Resting);
+        return;
+    }
+}
+
+FDinosaurRoutine* UDinosaurBehaviorSystem::FindActiveRoutine()
+{
+    float CurrentTimeOfDay = GetCurrentTimeOfDay();
+    
+    for (FDinosaurRoutine& Routine : DailyRoutines)
+    {
+        float EndTime = Routine.StartTime + Routine.Duration;
+        
+        // Handle routines that cross midnight
+        if (EndTime > 24.0f)
+        {
+            if (CurrentTimeOfDay >= Routine.StartTime || CurrentTimeOfDay <= (EndTime - 24.0f))
+            {
+                return &Routine;
+            }
+        }
+        else
+        {
+            if (CurrentTimeOfDay >= Routine.StartTime && CurrentTimeOfDay <= EndTime)
+            {
+                return &Routine;
+            }
+        }
+    }
+    
+    return nullptr;
+}
+
+float UDinosaurBehaviorSystem::GetCurrentTimeOfDay() const
+{
+    // Assumindo um ciclo de 24 horas baseado no tempo do mundo
+    // Isso deve ser integrado com o sistema de dia/noite do jogo
+    float WorldTime = GetWorld()->GetTimeSeconds();
+    float DayLength = 1200.0f; // 20 minutos = 1 dia no jogo
+    float TimeInDay = FMath::Fmod(WorldTime, DayLength);
+    return (TimeInDay / DayLength) * 24.0f;
+}
+
+void UDinosaurBehaviorSystem::SetBehaviorState(EDinosaurBehaviorState NewState, AActor* Target)
+{
+    if (CurrentBehaviorState != NewState)
+    {
+        EDinosaurBehaviorState PreviousState = CurrentBehaviorState;
+        CurrentBehaviorState = NewState;
+        CurrentTarget = Target;
+        CurrentStateTime = 0.0f;
+        
+        // Atualizar Blackboard
+        if (BlackboardComponent)
+        {
+            BlackboardComponent->SetValueAsEnum(TEXT("BehaviorState"), (uint8)NewState);
+            BlackboardComponent->SetValueAsObject(TEXT("CurrentTarget"), Target);
+        }
+        
+        UE_LOG(LogTemp, Log, TEXT("%s: Behavior changed from %s to %s"), 
+               *IndividualName, 
+               *UEnum::GetValueAsString(PreviousState), 
+               *UEnum::GetValueAsString(NewState));
+    }
+}
+
+void UDinosaurBehaviorSystem::AddTrust(float Amount, AActor* Human)
+{
+    if (!bCanBeDomesticated || !Human) return;
+    
+    // Modificar baseado na personalidade
+    float PersonalityModifier = (PersonalityTraits.Fearfulness * -0.5f) + (PersonalityTraits.Intelligence * 0.3f) + 0.5f;
+    float AdjustedAmount = Amount * PersonalityModifier;
+    
+    DomesticationLevel = FMath::Clamp(DomesticationLevel + AdjustedAmount, 0.0f, 100.0f);
+    
+    // Definir humano confiável se confiança é alta o suficiente
+    if (DomesticationLevel > 30.0f)
+    {
+        TrustedHuman = Human;
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("%s: Trust increased by %.2f (total: %.2f) towards %s"), 
+           *IndividualName, AdjustedAmount, DomesticationLevel, 
+           Human ? *Human->GetName() : TEXT("Unknown"));
+}
+
+void UDinosaurBehaviorSystem::RemoveTrust(float Amount)
+{
+    DomesticationLevel = FMath::Clamp(DomesticationLevel - Amount, 0.0f, 100.0f);
+    
+    if (DomesticationLevel < 10.0f)
+    {
+        TrustedHuman = nullptr;
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("%s: Trust decreased by %.2f (total: %.2f)"), 
+           *IndividualName, Amount, DomesticationLevel);
+}
+
+bool UDinosaurBehaviorSystem::CanBeApproached(AActor* Human) const
+{
+    if (!bCanBeDomesticated) return false;
+    
+    // Se é o humano confiável, sempre pode aproximar
+    if (TrustedHuman == Human) return true;
+    
+    // Baseado na personalidade e nível de domesticação
+    float ApproachThreshold = PersonalityTraits.Fearfulness * 50.0f; // 0-50
+    return DomesticationLevel > ApproachThreshold;
+}
+
+float UDinosaurBehaviorSystem::GetPersonalityTrait(const FString& TraitName) const
+{
+    if (TraitName == TEXT("Aggression")) return PersonalityTraits.Aggression;
+    if (TraitName == TEXT("Curiosity")) return PersonalityTraits.Curiosity;
+    if (TraitName == TEXT("Sociability")) return PersonalityTraits.Sociability;
+    if (TraitName == TEXT("Territoriality")) return PersonalityTraits.Territoriality;
+    if (TraitName == TEXT("Fearfulness")) return PersonalityTraits.Fearfulness;
+    if (TraitName == TEXT("Intelligence")) return PersonalityTraits.Intelligence;
+    
+    return 0.5f; // Valor padrão
 }
