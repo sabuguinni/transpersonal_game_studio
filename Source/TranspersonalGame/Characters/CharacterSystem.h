@@ -3,224 +3,284 @@
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
 #include "Engine/DataTable.h"
-#include "MetaHumanCreator/Public/MetaHumanCharacter.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "CharacterSystem.generated.h"
 
-// Enum para tipos de personagens
 UENUM(BlueprintType)
 enum class ECharacterArchetype : uint8
 {
-    Protagonist         UMETA(DisplayName = "Protagonista"),
-    TribalElder        UMETA(DisplayName = "Ancião Tribal"),
-    TribalWarrior      UMETA(DisplayName = "Guerreiro Tribal"),
-    TribalShaman       UMETA(DisplayName = "Xamã Tribal"),
-    TribalCrafter      UMETA(DisplayName = "Artesão Tribal"),
-    TribalChild        UMETA(DisplayName = "Criança Tribal"),
-    TimeTraveler       UMETA(DisplayName = "Viajante Temporal"),
-    Survivor           UMETA(DisplayName = "Sobrevivente"),
-    Hermit             UMETA(DisplayName = "Eremita"),
-    Trader             UMETA(DisplayName = "Comerciante")
+    Protagonist         UMETA(DisplayName = "Protagonist - Paleontologist"),
+    Survivor_Veteran    UMETA(DisplayName = "Veteran Survivor"),
+    Survivor_Newcomer   UMETA(DisplayName = "Newcomer Survivor"),
+    Tribal_Elder        UMETA(DisplayName = "Tribal Elder"),
+    Tribal_Hunter       UMETA(DisplayName = "Tribal Hunter"),
+    Tribal_Gatherer     UMETA(DisplayName = "Tribal Gatherer"),
+    Tribal_Shaman       UMETA(DisplayName = "Tribal Shaman"),
+    Mysterious_Wanderer UMETA(DisplayName = "Mysterious Wanderer"),
+    Child_Survivor      UMETA(DisplayName = "Child Survivor"),
+    Injured_Refugee     UMETA(DisplayName = "Injured Refugee")
 };
 
-// Estrutura para características físicas procedurais
+UENUM(BlueprintType)
+enum class ECharacterEthnicity : uint8
+{
+    European        UMETA(DisplayName = "European"),
+    African         UMETA(DisplayName = "African"),
+    Asian           UMETA(DisplayName = "Asian"),
+    LatinAmerican   UMETA(DisplayName = "Latin American"),
+    MiddleEastern   UMETA(DisplayName = "Middle Eastern"),
+    NativeAmerican  UMETA(DisplayName = "Native American"),
+    Oceanic         UMETA(DisplayName = "Oceanic"),
+    Mixed           UMETA(DisplayName = "Mixed Heritage")
+};
+
+UENUM(BlueprintType)
+enum class ECharacterAge : uint8
+{
+    Child       UMETA(DisplayName = "Child (8-12)"),
+    Teen        UMETA(DisplayName = "Teen (13-17)"),
+    YoungAdult  UMETA(DisplayName = "Young Adult (18-30)"),
+    Adult       UMETA(DisplayName = "Adult (31-50)"),
+    MiddleAge   UMETA(DisplayName = "Middle Age (51-65)"),
+    Elder       UMETA(DisplayName = "Elder (66+)")
+};
+
+UENUM(BlueprintType)
+enum class ECharacterBodyType : uint8
+{
+    Slim        UMETA(DisplayName = "Slim"),
+    Athletic    UMETA(DisplayName = "Athletic"),
+    Average     UMETA(DisplayName = "Average"),
+    Stocky      UMETA(DisplayName = "Stocky"),
+    Heavy       UMETA(DisplayName = "Heavy"),
+    Muscular    UMETA(DisplayName = "Muscular")
+};
+
 USTRUCT(BlueprintType)
-struct FCharacterGeneticTraits
+struct FCharacterVisualTraits
 {
     GENERATED_BODY()
 
-    // Características faciais (0.0 - 1.0)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = 0.0, ClampMax = 1.0))
+    // MetaHuman Base Parameters
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
+    FString MetaHumanPresetID;
+
+    // Physical Characteristics
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float FaceWidth = 0.5f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = 0.0, ClampMax = 1.0))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float FaceLength = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float EyeSize = 0.5f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = 0.0, ClampMax = 1.0))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float NoseSize = 0.5f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = 0.0, ClampMax = 1.0))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float MouthSize = 0.5f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = 0.0, ClampMax = 1.0))
-    float CheekboneHeight = 0.5f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = 0.0, ClampMax = 1.0))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float JawWidth = 0.5f;
 
-    // Características corporais
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = 0.0, ClampMax = 1.0))
-    float BodyHeight = 0.5f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float CheekboneHeight = 0.5f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = 0.0, ClampMax = 1.0))
-    float BodyWeight = 0.5f;
+    // Survival Marks and Weathering
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float SkinWeathering = 0.3f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = 0.0, ClampMax = 1.0))
-    float MuscleDefinition = 0.5f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float ScarIntensity = 0.2f;
 
-    // Características de idade/desgaste
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = 0.0, ClampMax = 1.0))
-    float AgeWear = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float SunDamage = 0.4f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = 0.0, ClampMax = 1.0))
-    float BattleScars = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Fatigue = 0.3f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = 0.0, ClampMax = 1.0))
-    float WeatherExposure = 0.0f;
+    // Hair and Grooming
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grooming")
+    FString HairStyleID;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grooming")
+    FLinearColor HairColor;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grooming", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float HairLength = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grooming", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float HairMessiness = 0.6f;
+
+    // Eyes
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Eyes")
+    FLinearColor EyeColor;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Eyes", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float EyeBagIntensity = 0.3f;
+
+    // Clothing System Reference
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clothing")
+    FString ClothingSetID;
 };
 
-// Estrutura para aparência cultural
 USTRUCT(BlueprintType)
-struct FCharacterCulturalAppearance
+struct FCharacterPersonality
 {
     GENERATED_BODY()
 
-    // Cor da pele (tons naturais)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FLinearColor SkinTone = FLinearColor(0.8f, 0.6f, 0.4f, 1.0f);
+    // Core Personality Traits (affect animations and idle behaviors)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Confidence = 0.5f;
 
-    // Cor dos olhos
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FLinearColor EyeColor = FLinearColor(0.3f, 0.2f, 0.1f, 1.0f);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Nervousness = 0.3f;
 
-    // Cor do cabelo
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FLinearColor HairColor = FLinearColor(0.2f, 0.1f, 0.05f, 1.0f);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Alertness = 0.7f;
 
-    // Estilo de cabelo (referência para MetaHuman)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString HairStyle = "Tribal_Long";
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Aggression = 0.2f;
 
-    // Tatuagens/pinturas corporais
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TArray<FString> BodyMarkings;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Friendliness = 0.5f;
 
-    // Cicatrizes rituais
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TArray<FString> RitualScars;
+    // Posture and Movement
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float PostureConfidence = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MovementSpeed = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float HeadMovementFrequency = 0.6f; // How often they look around (survival instinct)
 };
 
-// Estrutura para vestuário
 USTRUCT(BlueprintType)
-struct FCharacterClothing
+struct FCharacterBackstory
 {
     GENERATED_BODY()
 
-    // Materiais base
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TArray<FString> ClothingMaterials; // Pele, fibras vegetais, osso, etc.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Background")
+    FText CharacterName;
 
-    // Nível de desgaste (0 = novo, 1 = muito desgastado)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = 0.0, ClampMax = 1.0))
-    float WearLevel = 0.3f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Background")
+    FText BackgroundStory;
 
-    // Ornamentos
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TArray<FString> Ornaments; // Dentes, garras, pedras, etc.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Background")
+    FText SurvivalSkills;
 
-    // Cor dominante
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FLinearColor PrimaryColor = FLinearColor(0.4f, 0.3f, 0.2f, 1.0f);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Background")
+    int32 DaysInJurassic = 0;
 
-    // Cor secundária
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FLinearColor SecondaryColor = FLinearColor(0.2f, 0.15f, 0.1f, 1.0f);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Background")
+    TArray<FText> NotableExperiences;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Background")
+    FText CurrentGoal;
 };
 
-// Estrutura principal do personagem
 USTRUCT(BlueprintType)
-struct FCharacterDefinition
+struct FCharacterDefinition : public FTableRowBase
 {
     GENERATED_BODY()
 
-    // Identificação
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString CharacterName = "Unnamed";
+    // Core Identity
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Identity")
+    ECharacterArchetype Archetype;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    ECharacterArchetype Archetype = ECharacterArchetype::Survivor;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Identity")
+    ECharacterEthnicity Ethnicity;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 Age = 25;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Identity")
+    ECharacterAge AgeGroup;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Identity")
+    ECharacterBodyType BodyType;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Identity")
     bool bIsMale = true;
 
-    // Características físicas
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FCharacterGeneticTraits GeneticTraits;
+    // Visual Definition
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Visuals")
+    FCharacterVisualTraits VisualTraits;
 
-    // Aparência cultural
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FCharacterCulturalAppearance CulturalAppearance;
+    // Personality and Behavior
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality")
+    FCharacterPersonality Personality;
 
-    // Vestuário
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FCharacterClothing Clothing;
+    // Narrative Background
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    FCharacterBackstory Backstory;
 
-    // História pessoal (para expressão facial)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString PersonalHistory = "A vida deixou marcas subtis no rosto.";
+    // Technical References
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Technical")
+    TSoftObjectPtr<class USkeletalMesh> MetaHumanMesh;
 
-    // Seed para geração procedural
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 GeneticSeed = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Technical")
+    TSoftObjectPtr<class UAnimBlueprint> AnimationBlueprint;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Technical")
+    TArray<TSoftObjectPtr<class UMaterialInterface>> ClothingMaterials;
 };
 
-// Data Asset para configuração de arquétipos
 UCLASS(BlueprintType)
 class TRANSPERSONALGAME_API UCharacterArchetypeData : public UDataAsset
 {
     GENERATED_BODY()
 
 public:
-    // Mapeamento de arquétipos para configurações base
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TMap<ECharacterArchetype, FCharacterDefinition> ArchetypeDefaults;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Archetype")
+    ECharacterArchetype ArchetypeType;
 
-    // Variações permitidas por arquétipo
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TMap<ECharacterArchetype, float> VariationRanges;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Archetype")
+    FText ArchetypeName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Archetype")
+    FText ArchetypeDescription;
+
+    // Default trait ranges for this archetype
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Defaults")
+    FCharacterPersonality DefaultPersonality;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Defaults")
+    float DefaultSurvivalExperience = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clothing")
+    TArray<FString> PreferredClothingSets;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
+    TArray<FText> TypicalBehaviors;
 };
 
-// Sistema principal de geração de personagens
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UCharacterGenerationSystem : public UObject
+UCLASS(BlueprintType)
+class TRANSPERSONALGAME_API UCharacterGenerationSettings : public UDataAsset
 {
     GENERATED_BODY()
 
 public:
-    UCharacterGenerationSystem();
+    // MetaHuman Presets Library
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
+    TArray<FString> AvailableMetaHumanPresets;
 
-    // Gerar personagem procedural
-    UFUNCTION(BlueprintCallable, Category = "Character Generation")
-    FCharacterDefinition GenerateCharacter(ECharacterArchetype Archetype, int32 Seed = -1);
+    // Diversity Requirements
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Diversity")
+    TMap<ECharacterEthnicity, float> EthnicityDistribution;
 
-    // Aplicar definição a MetaHuman
-    UFUNCTION(BlueprintCallable, Category = "Character Generation")
-    bool ApplyDefinitionToMetaHuman(class AMetaHumanCharacter* MetaHuman, const FCharacterDefinition& Definition);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Diversity")
+    TMap<ECharacterAge, float> AgeDistribution;
 
-    // Gerar variação genética
-    UFUNCTION(BlueprintCallable, Category = "Character Generation")
-    FCharacterGeneticTraits GenerateGeneticVariation(const FCharacterGeneticTraits& BaseTraits, float VariationStrength, int32 Seed);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Diversity")
+    float GenderBalance = 0.5f; // 0.0 = all female, 1.0 = all male
 
-    // Validar unicidade do personagem
-    UFUNCTION(BlueprintCallable, Category = "Character Generation")
-    bool IsCharacterUnique(const FCharacterDefinition& Character, float SimilarityThreshold = 0.8f);
+    // Visual Variation Ranges
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Variation")
+    FVector2D SurvivalWearRange = FVector2D(0.3f, 0.8f);
 
-protected:
-    // Data Asset com configurações de arquétipos
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    UCharacterArchetypeData* ArchetypeData;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Variation")
+    FVector2D ScarIntensityRange = FVector2D(0.0f, 0.6f);
 
-    // Lista de personagens já gerados (para evitar duplicatas)
-    UPROPERTY()
-    TArray<FCharacterDefinition> GeneratedCharacters;
-
-    // Funções auxiliares
-    float GenerateRandomFloat(int32& Seed, float Min = 0.0f, float Max = 1.0f);
-    FLinearColor GenerateNaturalSkinTone(int32& Seed);
-    FLinearColor GenerateNaturalEyeColor(int32& Seed);
-    FLinearColor GenerateNaturalHairColor(int32& Seed);
-    FString SelectRandomHairStyle(int32& Seed, bool bIsMale);
-    TArray<FString> GenerateTribalMarkings(int32& Seed, ECharacterArchetype Archetype);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Variation")
+    FVector2D FatigueRange = FVector2D(0.2f, 0.7f);
 };
