@@ -4,15 +4,75 @@
 #include "GameFramework/Actor.h"
 #include "NiagaraSystem.h"
 #include "NiagaraComponent.h"
-#include "Engine/World.h"
+#include "Components/AudioComponent.h"
 #include "VFXManager.generated.h"
 
-/**
- * VFX Manager - Sistema central de controlo de efeitos visuais
- * Gere performance, LOD chain e activação contextual de efeitos
- * Baseado na filosofia: "O melhor VFX é aquele que o jogador nem sabe que viu"
- */
-UCLASS()
+UENUM(BlueprintType)
+enum class EVFXCategory : uint8
+{
+    Environment     UMETA(DisplayName = "Environment"),
+    Combat          UMETA(DisplayName = "Combat"),
+    Atmosphere      UMETA(DisplayName = "Atmosphere"),
+    Interaction     UMETA(DisplayName = "Interaction"),
+    Weather         UMETA(DisplayName = "Weather"),
+    Destruction     UMETA(DisplayName = "Destruction"),
+    Magic           UMETA(DisplayName = "Magic")
+};
+
+UENUM(BlueprintType)
+enum class EVFXPriority : uint8
+{
+    Critical    UMETA(DisplayName = "Critical"),
+    High        UMETA(DisplayName = "High"),
+    Medium      UMETA(DisplayName = "Medium"),
+    Low         UMETA(DisplayName = "Low"),
+    Background  UMETA(DisplayName = "Background")
+};
+
+USTRUCT(BlueprintType)
+struct FVFXDefinition
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FName EffectName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TSoftObjectPtr<UNiagaraSystem> NiagaraSystem;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    EVFXCategory Category;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    EVFXPriority Priority;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float MaxDistance = 5000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    int32 MaxInstances = 10;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bAutoDestroy = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float Duration = 5.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bAttachToActor = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FName AttachSocket = NAME_None;
+
+    FVFXDefinition()
+    {
+        EffectName = NAME_None;
+        Category = EVFXCategory::Environment;
+        Priority = EVFXPriority::Medium;
+    }
+};
+
+UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API AVFXManager : public AActor
 {
     GENERATED_BODY()
@@ -24,151 +84,66 @@ protected:
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
 
-    // === CORE VFX SYSTEMS ===
-    
-    /** Sistema de LOD automático para VFX baseado em distância e performance */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Performance")
-    float VFXLODDistance_High = 500.0f;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Performance")
-    float VFXLODDistance_Medium = 1500.0f;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Performance")
-    float VFXLODDistance_Low = 3000.0f;
+    // VFX Registry
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Registry")
+    TMap<FName, FVFXDefinition> VFXRegistry;
 
-    /** Limite máximo de sistemas VFX activos simultaneamente */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Performance")
-    int32 MaxActiveVFXSystems = 50;
+    // Performance Settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 MaxActiveEffects = 100;
 
-    /** Pool de componentes Niagara reutilizáveis para performance */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float LODDistance1 = 1000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float LODDistance2 = 2500.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float LODDistance3 = 5000.0f;
+
+    // Active Effects Tracking
     UPROPERTY()
-    TArray<UNiagaraComponent*> VFXPool;
+    TArray<UNiagaraComponent*> ActiveEffects;
 
-    /** Sistemas VFX activos no mundo */
     UPROPERTY()
-    TArray<UNiagaraComponent*> ActiveVFXSystems;
+    TMap<FName, int32> EffectInstanceCounts;
 
 public:
-    // === VFX SPAWNING FUNCTIONS ===
-    
-    /** Spawn VFX com LOD automático e gestão de performance */
+    // Core VFX Functions
     UFUNCTION(BlueprintCallable, Category = "VFX")
-    UNiagaraComponent* SpawnVFXAtLocation(
-        UNiagaraSystem* VFXSystem,
-        FVector Location,
-        FRotator Rotation = FRotator::ZeroRotator,
-        FVector Scale = FVector::OneVector,
-        bool bAutoDestroy = true,
-        float LifeTime = 5.0f
-    );
+    UNiagaraComponent* SpawnVFX(FName EffectName, FVector Location, FRotator Rotation = FRotator::ZeroRotator, AActor* AttachActor = nullptr);
 
-    /** Spawn VFX attachado a um actor */
     UFUNCTION(BlueprintCallable, Category = "VFX")
-    UNiagaraComponent* SpawnVFXAttached(
-        UNiagaraSystem* VFXSystem,
-        USceneComponent* AttachToComponent,
-        FName AttachPointName = NAME_None,
-        FVector Location = FVector::ZeroVector,
-        FRotator Rotation = FRotator::ZeroRotator,
-        FVector Scale = FVector::OneVector,
-        bool bAutoDestroy = true,
-        float LifeTime = 5.0f
-    );
+    void StopVFX(UNiagaraComponent* Effect);
 
-    // === ENVIRONMENTAL VFX ===
-    
-    /** Sistema de chuva adaptativo baseado no clima */
-    UFUNCTION(BlueprintCallable, Category = "Environmental VFX")
-    void SetRainIntensity(float Intensity);
-    
-    /** Efeitos de vento nas folhas e vegetação */
-    UFUNCTION(BlueprintCallable, Category = "Environmental VFX")
-    void SetWindStrength(float WindStrength, FVector WindDirection);
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void StopAllVFXByCategory(EVFXCategory Category);
 
-    /** Partículas de poeira atmosférica para profundidade */
-    UFUNCTION(BlueprintCallable, Category = "Environmental VFX")
-    void SetAtmosphericDust(float Density, FLinearColor Color);
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void RegisterVFX(FName EffectName, FVFXDefinition Definition);
 
-    // === DINOSAUR SPECIFIC VFX ===
-    
-    /** Efeitos de respiração para dinossauros */
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur VFX")
-    UNiagaraComponent* SpawnDinosaurBreath(
-        AActor* DinosaurActor,
-        float BreathIntensity,
-        FLinearColor BreathColor
-    );
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    bool IsVFXRegistered(FName EffectName);
 
-    /** Efeitos de pegadas no solo */
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur VFX")
-    void SpawnFootstepVFX(
-        FVector FootLocation,
-        float DinosaurWeight,
-        int32 SurfaceType
-    );
+    // Performance Management
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void UpdateVFXLOD();
 
-    /** Efeitos de domesticação (partículas calmantes) */
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur VFX")
-    UNiagaraComponent* SpawnTamingVFX(AActor* DinosaurActor, float TamingProgress);
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void CleanupFinishedEffects();
 
-    // === SURVIVAL VFX ===
-    
-    /** Sistema de fogo para fogueiras e tochas */
-    UFUNCTION(BlueprintCallable, Category = "Survival VFX")
-    UNiagaraComponent* SpawnFireVFX(
-        FVector Location,
-        float FireIntensity,
-        bool bIsTorch = false
-    );
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    int32 GetActiveEffectCount() const { return ActiveEffects.Num(); }
 
-    /** Efeitos de impacto de ferramentas */
-    UFUNCTION(BlueprintCallable, Category = "Survival VFX")
-    void SpawnToolImpactVFX(
-        FVector ImpactLocation,
-        FVector ImpactNormal,
-        int32 MaterialType,
-        float ImpactForce
-    );
+    // Utility Functions
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    float GetDistanceToPlayer(FVector Location);
 
-    /** Efeitos de água (gotejamento, respingos) */
-    UFUNCTION(BlueprintCallable, Category = "Environmental VFX")
-    void SpawnWaterVFX(
-        FVector Location,
-        int32 WaterType, // 0=gotejamento, 1=respingo, 2=corrente
-        float Intensity
-    );
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    int32 GetLODLevel(float Distance);
 
 private:
-    // === PERFORMANCE MANAGEMENT ===
-    
-    /** Actualiza LOD de todos os VFX activos */
-    void UpdateVFXLOD();
-    
-    /** Remove VFX expirados da pool */
-    void CleanupExpiredVFX();
-    
-    /** Calcula LOD baseado na distância ao jogador */
-    int32 CalculateVFXLOD(FVector VFXLocation);
-    
-    /** Obtém componente da pool ou cria novo */
-    UNiagaraComponent* GetPooledVFXComponent();
-    
-    /** Retorna componente à pool */
-    void ReturnToPool(UNiagaraComponent* Component);
-
-    // === INTERNAL SYSTEMS ===
-    
-    /** Referência ao jogador para cálculos de LOD */
-    UPROPERTY()
-    APawn* PlayerPawn;
-    
-    /** Timer para limpeza periódica */
-    FTimerHandle CleanupTimer;
-    
-    /** Contador de performance para debug */
-    UPROPERTY(VisibleAnywhere, Category = "Debug")
-    int32 ActiveVFXCount;
-    
-    UPROPERTY(VisibleAnywhere, Category = "Debug")
-    int32 PooledVFXCount;
+    void InitializeVFXRegistry();
+    bool CanSpawnEffect(FName EffectName, FVector Location);
+    void UpdateEffectLOD(UNiagaraComponent* Effect, int32 LODLevel);
 };
