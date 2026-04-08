@@ -2,97 +2,73 @@
 
 #include "CoreMinimal.h"
 #include "Engine/Engine.h"
-#include "Components/ActorComponent.h"
+#include "GameFramework/Actor.h"
 #include "BehaviorTree/BehaviorTreeComponent.h"
 #include "BehaviorTree/BlackboardComponent.h"
+#include "AIController.h"
 #include "Perception/AIPerceptionComponent.h"
+#include "Components/ActorComponent.h"
 #include "NPCBehaviorSystem.generated.h"
 
+// Forward declarations
+class UBlackboardComponent;
+class UBehaviorTreeComponent;
+class AAIController;
+
 UENUM(BlueprintType)
-enum class EDinosaurSpecies : uint8
+enum class EDinosaurPersonality : uint8
 {
-    // Herbívoros Pequenos (Domesticáveis)
-    Compsognathus       UMETA(DisplayName = "Compsognathus"),
-    Parasaurolophus     UMETA(DisplayName = "Parasaurolophus"),
-    Pachycephalosaurus  UMETA(DisplayName = "Pachycephalosaurus"),
-    
-    // Herbívoros Grandes (Não-Agressivos)
-    Triceratops         UMETA(DisplayName = "Triceratops"),
-    Brachiosaurus       UMETA(DisplayName = "Brachiosaurus"),
-    Ankylosaurus        UMETA(DisplayName = "Ankylosaurus"),
-    
-    // Carnívoros Pequenos (Oportunistas)
-    Velociraptor        UMETA(DisplayName = "Velociraptor"),
-    Dilophosaurus       UMETA(DisplayName = "Dilophosaurus"),
-    
-    // Carnívoros Grandes (Predadores Apex)
-    TyrannosaurusRex    UMETA(DisplayName = "T-Rex"),
-    Allosaurus          UMETA(DisplayName = "Allosaurus"),
-    Spinosaurus         UMETA(DisplayName = "Spinosaurus"),
-    
-    // Voadores
-    Pteranodon          UMETA(DisplayName = "Pteranodon"),
-    
-    // Aquáticos
-    Mosasaurus          UMETA(DisplayName = "Mosasaurus")
+    Aggressive      UMETA(DisplayName = "Aggressive"),
+    Cautious        UMETA(DisplayName = "Cautious"),
+    Curious         UMETA(DisplayName = "Curious"),
+    Territorial     UMETA(DisplayName = "Territorial"),
+    Social          UMETA(DisplayName = "Social"),
+    Solitary        UMETA(DisplayName = "Solitary"),
+    Protective      UMETA(DisplayName = "Protective"),
+    Skittish        UMETA(DisplayName = "Skittish")
 };
 
 UENUM(BlueprintType)
-enum class EDinosaurBehaviorState : uint8
+enum class EDinosaurMood : uint8
 {
-    Idle                UMETA(DisplayName = "Idle"),
-    Foraging            UMETA(DisplayName = "Foraging"),
-    Drinking            UMETA(DisplayName = "Drinking"),
-    Resting             UMETA(DisplayName = "Resting"),
-    Socializing         UMETA(DisplayName = "Socializing"),
-    Hunting             UMETA(DisplayName = "Hunting"),
-    Fleeing             UMETA(DisplayName = "Fleeing"),
-    Territorial         UMETA(DisplayName = "Territorial"),
-    Mating              UMETA(DisplayName = "Mating"),
-    Nesting             UMETA(DisplayName = "Nesting"),
-    Migrating           UMETA(DisplayName = "Migrating"),
-    Investigating       UMETA(DisplayName = "Investigating"),
-    Domesticated        UMETA(DisplayName = "Domesticated")
+    Calm            UMETA(DisplayName = "Calm"),
+    Alert           UMETA(DisplayName = "Alert"),
+    Hungry          UMETA(DisplayName = "Hungry"),
+    Thirsty         UMETA(DisplayName = "Thirsty"),
+    Tired           UMETA(DisplayName = "Tired"),
+    Aggressive      UMETA(DisplayName = "Aggressive"),
+    Fearful         UMETA(DisplayName = "Fearful"),
+    Curious         UMETA(DisplayName = "Curious"),
+    Territorial     UMETA(DisplayName = "Territorial"),
+    Protective      UMETA(DisplayName = "Protective")
 };
 
 UENUM(BlueprintType)
-enum class EDomesticationLevel : uint8
+enum class EDinosaurActivity : uint8
 {
-    Wild                UMETA(DisplayName = "Wild"),
-    Wary                UMETA(DisplayName = "Wary"),
-    Curious             UMETA(DisplayName = "Curious"),
-    Tolerant            UMETA(DisplayName = "Tolerant"),
-    Friendly            UMETA(DisplayName = "Friendly"),
-    Bonded              UMETA(DisplayName = "Bonded"),
-    Loyal               UMETA(DisplayName = "Loyal")
+    Idle            UMETA(DisplayName = "Idle"),
+    Foraging        UMETA(DisplayName = "Foraging"),
+    Hunting         UMETA(DisplayName = "Hunting"),
+    Drinking        UMETA(DisplayName = "Drinking"),
+    Resting         UMETA(DisplayName = "Resting"),
+    Patrolling      UMETA(DisplayName = "Patrolling"),
+    Socializing     UMETA(DisplayName = "Socializing"),
+    Fleeing         UMETA(DisplayName = "Fleeing"),
+    Investigating   UMETA(DisplayName = "Investigating"),
+    Nesting         UMETA(DisplayName = "Nesting"),
+    Migrating       UMETA(DisplayName = "Migrating")
 };
 
-USTRUCT(BlueprintType)
-struct FDinosaurPersonality
+UENUM(BlueprintType)
+enum class ETrustLevel : uint8
 {
-    GENERATED_BODY()
-
-    // Traços de personalidade (0.0 a 1.0)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float Aggressiveness = 0.5f;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float Curiosity = 0.5f;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float Fearfulness = 0.5f;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float Sociability = 0.5f;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float Territoriality = 0.5f;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float Intelligence = 0.5f;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float Loyalty = 0.0f; // Apenas para domesticados
+    Hostile         UMETA(DisplayName = "Hostile"),
+    Wary            UMETA(DisplayName = "Wary"),
+    Neutral         UMETA(DisplayName = "Neutral"),
+    Curious         UMETA(DisplayName = "Curious"),
+    Accepting       UMETA(DisplayName = "Accepting"),
+    Trusting        UMETA(DisplayName = "Trusting"),
+    Bonded          UMETA(DisplayName = "Bonded")
 };
 
 USTRUCT(BlueprintType)
@@ -100,32 +76,71 @@ struct FDinosaurMemory
 {
     GENERATED_BODY()
 
-    // Localizações conhecidas
-    UPROPERTY(BlueprintReadWrite)
-    TArray<FVector> KnownFoodSources;
-    
-    UPROPERTY(BlueprintReadWrite)
-    TArray<FVector> KnownWaterSources;
-    
-    UPROPERTY(BlueprintReadWrite)
-    TArray<FVector> KnownSafePlaces;
-    
-    UPROPERTY(BlueprintReadWrite)
-    TArray<FVector> KnownDangerZones;
-    
-    // Relacionamentos com outros NPCs
-    UPROPERTY(BlueprintReadWrite)
-    TMap<AActor*, float> NPCRelationships; // -1.0 (inimigo) a 1.0 (aliado)
-    
-    // Memória do jogador
-    UPROPERTY(BlueprintReadWrite)
-    FVector LastPlayerLocation;
-    
-    UPROPERTY(BlueprintReadWrite)
-    float PlayerTrustLevel = 0.0f; // -1.0 (hostil) a 1.0 (confiança total)
-    
-    UPROPERTY(BlueprintReadWrite)
-    float TimeSincePlayerSeen = 999.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    AActor* RememberedActor;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FVector LastKnownLocation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float ThreatLevel;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float LastSeenTime;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    ETrustLevel TrustLevel;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    int32 PositiveInteractions;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    int32 NegativeInteractions;
+
+    FDinosaurMemory()
+    {
+        RememberedActor = nullptr;
+        LastKnownLocation = FVector::ZeroVector;
+        ThreatLevel = 0.0f;
+        LastSeenTime = 0.0f;
+        TrustLevel = ETrustLevel::Neutral;
+        PositiveInteractions = 0;
+        NegativeInteractions = 0;
+    }
+};
+
+USTRUCT(BlueprintType)
+struct FDinosaurNeeds
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "100.0"))
+    float Hunger;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "100.0"))
+    float Thirst;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "100.0"))
+    float Energy;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "100.0"))
+    float Safety;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "100.0"))
+    float Social;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "100.0"))
+    float Territory;
+
+    FDinosaurNeeds()
+    {
+        Hunger = 50.0f;
+        Thirst = 50.0f;
+        Energy = 100.0f;
+        Safety = 50.0f;
+        Social = 50.0f;
+        Territory = 50.0f;
+    }
 };
 
 USTRUCT(BlueprintType)
@@ -134,136 +149,149 @@ struct FDailyRoutine
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float StartTime = 6.0f; // Hora do dia (0-24)
-    
+    float StartTime; // 0-24 hours
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float EndTime = 8.0f;
-    
+    float Duration; // In hours
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EDinosaurBehaviorState Activity = EDinosaurBehaviorState::Foraging;
-    
+    EDinosaurActivity Activity;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FVector PreferredLocation = FVector::ZeroVector;
-    
+    FVector PreferredLocation;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float Priority = 1.0f; // Prioridade da actividade
+    float Priority; // 0-1, higher = more important
+
+    FDailyRoutine()
+    {
+        StartTime = 0.0f;
+        Duration = 1.0f;
+        Activity = EDinosaurActivity::Idle;
+        PreferredLocation = FVector::ZeroVector;
+        Priority = 0.5f;
+    }
 };
 
 /**
- * Componente principal do sistema de comportamento de NPCs
- * Gere a IA, personalidade, memória e rotinas diárias dos dinossauros
+ * Core NPC Behavior System Component
+ * Handles individual dinosaur personality, memory, needs, and daily routines
  */
-UCLASS(ClassGroup=(AI), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UNPCBehaviorComponent : public UActorComponent
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UNPCBehaviorSystem : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    UNPCBehaviorComponent();
+    UNPCBehaviorSystem();
 
 protected:
     virtual void BeginPlay() override;
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 public:
-    // Configuração da espécie
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Species")
-    EDinosaurSpecies Species = EDinosaurSpecies::Compsognathus;
-    
-    // Personalidade única
+    // Core personality and identity
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality")
-    FDinosaurPersonality Personality;
-    
-    // Sistema de memória
-    UPROPERTY(BlueprintReadWrite, Category = "Memory")
-    FDinosaurMemory Memory;
-    
-    // Estado comportamental atual
-    UPROPERTY(BlueprintReadWrite, Category = "Behavior")
-    EDinosaurBehaviorState CurrentBehaviorState = EDinosaurBehaviorState::Idle;
-    
-    // Nível de domesticação (apenas para espécies domesticáveis)
-    UPROPERTY(BlueprintReadWrite, Category = "Domestication")
-    EDomesticationLevel DomesticationLevel = EDomesticationLevel::Wild;
-    
-    // Rotina diária
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Daily Routine")
-    TArray<FDailyRoutine> DailyRoutines;
-    
-    // Necessidades básicas (0.0 a 1.0)
-    UPROPERTY(BlueprintReadWrite, Category = "Needs")
-    float Hunger = 0.5f;
-    
-    UPROPERTY(BlueprintReadWrite, Category = "Needs")
-    float Thirst = 0.5f;
-    
-    UPROPERTY(BlueprintReadWrite, Category = "Needs")
-    float Energy = 1.0f;
-    
-    UPROPERTY(BlueprintReadWrite, Category = "Needs")
-    float Health = 1.0f;
-    
-    // Estado social
-    UPROPERTY(BlueprintReadWrite, Category = "Social")
-    TArray<AActor*> PackMembers;
-    
-    UPROPERTY(BlueprintReadWrite, Category = "Social")
-    AActor* PackLeader = nullptr;
-    
-    UPROPERTY(BlueprintReadWrite, Category = "Social")
-    AActor* Mate = nullptr;
-    
-    // Território
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory")
-    FVector TerritoryCenter = FVector::ZeroVector;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory")
-    float TerritoryRadius = 2000.0f;
+    EDinosaurPersonality PrimaryPersonality;
 
-    // Funções principais
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality")
+    EDinosaurPersonality SecondaryPersonality;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float PersonalityIntensity;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "State")
+    EDinosaurMood CurrentMood;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "State")
+    EDinosaurActivity CurrentActivity;
+
+    // Needs system
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Needs")
+    FDinosaurNeeds CurrentNeeds;
+
+    // Memory system
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
+    TArray<FDinosaurMemory> MemoryBank;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
+    int32 MaxMemoryEntries;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
+    float MemoryDecayRate;
+
+    // Daily routine system
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Routine")
+    TArray<FDailyRoutine> DailyRoutines;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Routine")
+    float CurrentGameHour;
+
+    // Domestication system
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Domestication")
+    bool bCanBeDomesticated;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Domestication")
+    ETrustLevel PlayerTrustLevel;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Domestication")
+    float DomesticationProgress;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Domestication")
+    float TrustDecayRate;
+
+    // Unique physical traits
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical Traits")
+    FString UniqueIdentifier;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical Traits")
+    TMap<FString, float> PhysicalVariations;
+
+    // Behavior functions
     UFUNCTION(BlueprintCallable, Category = "Behavior")
-    void SetBehaviorState(EDinosaurBehaviorState NewState);
-    
-    UFUNCTION(BlueprintCallable, Category = "Behavior")
-    EDinosaurBehaviorState GetCurrentBehaviorState() const { return CurrentBehaviorState; }
-    
-    UFUNCTION(BlueprintCallable, Category = "Memory")
-    void AddMemoryLocation(FVector Location, const FString& LocationType);
-    
-    UFUNCTION(BlueprintCallable, Category = "Memory")
-    void UpdatePlayerRelationship(float DeltaRelationship);
-    
-    UFUNCTION(BlueprintCallable, Category = "Domestication")
-    bool CanBeDomesticated() const;
-    
-    UFUNCTION(BlueprintCallable, Category = "Domestication")
-    void ProcessDomesticationInteraction(float PositiveInteraction);
-    
-    UFUNCTION(BlueprintCallable, Category = "Routine")
-    FDailyRoutine GetCurrentRoutineActivity() const;
-    
-    UFUNCTION(BlueprintCallable, Category = "Needs")
     void UpdateNeeds(float DeltaTime);
-    
-    UFUNCTION(BlueprintCallable, Category = "Social")
-    void JoinPack(AActor* Leader, const TArray<AActor*>& Members);
-    
-    UFUNCTION(BlueprintCallable, Category = "Social")
-    void LeavePack();
+
+    UFUNCTION(BlueprintCallable, Category = "Behavior")
+    void UpdateMood();
+
+    UFUNCTION(BlueprintCallable, Category = "Behavior")
+    EDinosaurActivity DetermineNextActivity();
+
+    UFUNCTION(BlueprintCallable, Category = "Memory")
+    void RememberActor(AActor* Actor, float ThreatLevel = 0.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Memory")
+    FDinosaurMemory* GetMemoryOfActor(AActor* Actor);
+
+    UFUNCTION(BlueprintCallable, Category = "Memory")
+    void UpdateActorMemory(AActor* Actor, float ThreatModifier, bool bPositiveInteraction);
+
+    UFUNCTION(BlueprintCallable, Category = "Domestication")
+    void ProcessPlayerInteraction(bool bPositive, float Intensity = 1.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Domestication")
+    bool CanAcceptFood() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Domestication")
+    bool WillFleeFromPlayer() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Routine")
+    FDailyRoutine GetCurrentRoutineActivity();
+
+    UFUNCTION(BlueprintCallable, Category = "Routine")
+    void SetCustomActivity(EDinosaurActivity NewActivity, float Duration = -1.0f);
+
+    // Personality influence functions
+    UFUNCTION(BlueprintCallable, Category = "Personality")
+    float GetPersonalityModifier(const FString& BehaviorType) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Personality")
+    bool ShouldReactToStimulus(AActor* Stimulus, float Distance) const;
 
 private:
-    // Funções internas
-    void InitializePersonality();
-    void ProcessDailyRoutine();
-    void UpdateBehaviorBasedOnNeeds();
-    void ProcessSocialInteractions();
-    void UpdateMemory(float DeltaTime);
-    
-    // Timers
-    float LastRoutineCheck = 0.0f;
-    float LastNeedsUpdate = 0.0f;
-    float LastMemoryUpdate = 0.0f;
-    
-    // Cache do sistema de tempo
-    class ATimeOfDayManager* TimeManager = nullptr;
+    void InitializeUniqueTraits();
+    void DecayMemories(float DeltaTime);
+    void UpdateTrustLevel(float DeltaTime);
+    float CalculateNeedUrgency(const FString& NeedType) const;
+    void GenerateDailyRoutine();
 };
