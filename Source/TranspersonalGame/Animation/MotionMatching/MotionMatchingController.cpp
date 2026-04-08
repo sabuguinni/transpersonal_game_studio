@@ -1,38 +1,26 @@
 #include "MotionMatchingController.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
+#include "Components/CapsuleComponent.h"
 #include "Engine/World.h"
-#include "PoseSearch/PoseSearchDatabase.h"
-#include "PoseSearch/PoseSearchSchema.h"
 
 UMotionMatchingController::UMotionMatchingController()
 {
     PrimaryComponentTick.bCanEverTick = true;
     PrimaryComponentTick.TickGroup = TG_PrePhysics;
-    
-    DatabaseUpdateTimer = 0.0f;
-    ModifierUpdateTimer = 0.0f;
-    CurrentDatabase = nullptr;
-    PreviousDatabase = nullptr;
 }
 
 void UMotionMatchingController::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Encontrar o Animation System Manager no mesmo actor
+    // Find the Animation System Manager component
     AnimationManager = GetOwner()->FindComponentByClass<UAnimationSystemManager>();
     
-    if (AnimationManager)
+    if (!AnimationManager)
     {
-        // Conectar ao evento de mudança de estado emocional
-        AnimationManager->OnEmotionalStateChanged.AddDynamic(this, &UMotionMatchingController::UpdateDatabaseSelection);
-        
-        // Configuração inicial
-        UpdateDatabaseSelection();
-        ApplyPersonalityModifiers();
-    }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("MotionMatchingController: Animation System Manager not found!"));
+        UE_LOG(LogTemp, Warning, TEXT("MotionMatchingController: No AnimationSystemManager found on %s"), 
+               *GetOwner()->GetName());
     }
 }
 
@@ -40,202 +28,267 @@ void UMotionMatchingController::TickComponent(float DeltaTime, ELevelTick TickTy
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    DatabaseUpdateTimer += DeltaTime;
-    ModifierUpdateTimer += DeltaTime;
+    UpdateContextBasedOnGameplay();
+    ProcessTerrainAdaptation();
     
-    // Atualizar seleção de database a cada 0.2 segundos
-    if (DatabaseUpdateTimer >= 0.2f)
-    {
-        DatabaseUpdateTimer = 0.0f;
-        UpdateDatabaseSelection();
-    }
-    
-    // Atualizar modificadores a cada 0.1 segundos
-    if (ModifierUpdateTimer >= 0.1f)
-    {
-        ModifierUpdateTimer = 0.0f;
-        ApplyPersonalityModifiers();
-    }
-    
-    SmoothDatabaseTransition();
+    ContextTransitionTimer += DeltaTime;
 }
 
-void UMotionMatchingController::UpdateDatabaseSelection()
+void UMotionMatchingController::SetMotionMatchingContext(EMotionMatchingContext NewContext)
 {
-    if (!AnimationManager)
-        return;
+    if (CurrentContext != NewContext)
+    {
+        PreviousContext = CurrentContext;
+        CurrentContext = NewContext;
+        ContextTransitionTimer = 0.0f;
         
-    PreviousDatabase = CurrentDatabase;
-    CurrentDatabase = GetOptimalDatabase();
-    
-    if (CurrentDatabase != PreviousDatabase && CurrentDatabase != nullptr)
-    {
-        OnDatabaseChanged.Broadcast(CurrentDatabase);
+        UE_LOG(LogTemp, Log, TEXT("Motion Matching Context Changed: %d -> %d"), 
+               (int32)PreviousContext, (int32)CurrentContext);
     }
 }
 
-void UMotionMatchingController::ApplyPersonalityModifiers()
+UPoseSearchDatabase* UMotionMatchingController::GetCurrentDatabase() const
 {
     if (!AnimationManager)
-        return;
-        
-    CalculatePersonalityModifiers();
-}
-
-UPoseSearchDatabase* UMotionMatchingController::GetOptimalDatabase() const
-{
-    if (!AnimationManager)
+    {
         return nullptr;
-        
-    FMotionMatchingDatabase* DatabaseSet = GetDatabaseSetForCharacterType(AnimationManager->CharacterType);
+    }
+
+    FMotionMatchingDatabaseSet* DatabaseSet = GetCurrentDatabaseSet();
     if (!DatabaseSet)
+    {
         return nullptr;
-        
-    return SelectDatabaseForEmotionalState(*DatabaseSet, AnimationManager->CurrentEmotionalState);
-}
+    }
 
-float UMotionMatchingController::GetBlendTime() const
-{
-    if (!AnimationManager)
-        return 0.2f; // Tempo padrão
-        
-    // Tempo de blend baseado na personalidade
-    float baseBlendTime = 0.2f;
-    
-    // Personagens mais nervosos fazem transições mais rápidas
-    float nervousnessModifier = 1.0f - (AnimationManager->Personality.Nervousness * 0.3f);
-    
-    // Personagens mais confiantes fazem transições mais suaves
-    float confidenceModifier = 1.0f + (AnimationManager->Personality.Confidence * 0.2f);
-    
-    return baseBlendTime * nervousnessModifier * confidenceModifier;
-}
-
-FMotionMatchingDatabase* UMotionMatchingController::GetDatabaseSetForCharacterType(ECharacterAnimationType CharacterType)
-{
-    switch (CharacterType)
+    switch (CurrentContext)
     {
-        case ECharacterAnimationType::Player:
-            return &DatabasesPlayer;
-        case ECharacterAnimationType::SmallHerbivore:
-            return &DatabasesSmallHerbivore;
-        case ECharacterAnimationType::LargeHerbivore:
-            return &DatabasesLargeHerbivore;
-        case ECharacterAnimationType::SmallCarnivore:
-            return &DatabasesSmallCarnivore;
-        case ECharacterAnimationType::LargeCarnivore:
-            return &DatabasesLargeCarnivore;
-        case ECharacterAnimationType::Apex:
-            return &DatabasesApex;
+        case EMotionMatchingContext::Locomotion:
+            return DatabaseSet->LocomotionDB;
+        case EMotionMatchingContext::Interaction:
+            return DatabaseSet->InteractionDB;
+        case EMotionMatchingContext::Combat:
+            return DatabaseSet->CombatDB;
+        case EMotionMatchingContext::Stealth:
+            return DatabaseSet->StealthDB;
+        case EMotionMatchingContext::Exploration:
+            return DatabaseSet->ExplorationDB;
+        case EMotionMatchingContext::Social:
+            return DatabaseSet->SocialDB;
         default:
-            return nullptr;
+            return DatabaseSet->LocomotionDB;
     }
 }
 
-UPoseSearchDatabase* UMotionMatchingController::SelectDatabaseForEmotionalState(const FMotionMatchingDatabase& DatabaseSet, EEmotionalState EmotionalState) const
+void UMotionMatchingController::UpdateTerrainAdaptation(const FTerrainAdaptationData& NewTerrainData)
 {
-    switch (EmotionalState)
+    TerrainData = NewTerrainData;
+    
+    // Log significant terrain changes
+    if (FMath::Abs(TerrainData.SlopeAngle) > 15.0f)
     {
-        case EEmotionalState::Calm:
-            return DatabaseSet.IdleDatabase;
-        case EEmotionalState::Alert:
-            return DatabaseSet.AlertDatabase;
-        case EEmotionalState::Nervous:
-            return DatabaseSet.AlertDatabase; // Usar alert como fallback
-        case EEmotionalState::Fearful:
-            return DatabaseSet.FearDatabase;
-        case EEmotionalState::Aggressive:
-            return DatabaseSet.AggressiveDatabase;
-        case EEmotionalState::Hunting:
-            return DatabaseSet.AggressiveDatabase; // Usar aggressive como fallback
-        case EEmotionalState::Feeding:
-            return DatabaseSet.FeedingDatabase;
-        case EEmotionalState::Resting:
-            return DatabaseSet.RestingDatabase;
-        default:
-            return DatabaseSet.LocomotionDatabase; // Fallback padrão
+        UE_LOG(LogTemp, Log, TEXT("Steep terrain detected: %f degrees"), TerrainData.SlopeAngle);
+    }
+    
+    if (TerrainData.bIsUnstableGround)
+    {
+        UE_LOG(LogTemp, Log, TEXT("Unstable ground detected"));
     }
 }
 
-void UMotionMatchingController::CalculatePersonalityModifiers()
+float UMotionMatchingController::GetContextualBlendTime() const
+{
+    float BaseBlendTime = 0.2f;
+    
+    // Adjust blend time based on context
+    switch (CurrentContext)
+    {
+        case EMotionMatchingContext::Combat:
+            BaseBlendTime = 0.1f; // Faster transitions for combat responsiveness
+            break;
+        case EMotionMatchingContext::Stealth:
+            BaseBlendTime = 0.4f; // Slower, more deliberate transitions
+            break;
+        case EMotionMatchingContext::Social:
+            BaseBlendTime = 0.3f; // Smooth, natural transitions
+            break;
+    }
+    
+    // Adjust for emotional state
+    if (AnimationManager)
+    {
+        switch (AnimationManager->AnimationProfile.CurrentEmotionalState)
+        {
+            case EEmotionalState::Panicked:
+                BaseBlendTime *= 0.7f; // Faster, more erratic transitions
+                break;
+            case EEmotionalState::Fearful:
+                BaseBlendTime *= 1.2f; // More hesitant transitions
+                break;
+            case EEmotionalState::Calm:
+                BaseBlendTime *= 1.1f; // Slightly smoother transitions
+                break;
+        }
+    }
+    
+    // Adjust for terrain
+    if (TerrainData.bIsUnstableGround)
+    {
+        BaseBlendTime *= 1.3f; // More careful transitions on unstable ground
+    }
+    
+    return FMath::Clamp(BaseBlendTime, 0.05f, 1.0f);
+}
+
+bool UMotionMatchingController::ShouldUseIKFootPlacement() const
+{
+    // Always use IK for foot placement except in specific contexts
+    if (CurrentContext == EMotionMatchingContext::Combat)
+    {
+        return false; // Disable IK during combat for performance
+    }
+    
+    // Use IK more aggressively on uneven terrain
+    return TerrainData.TerrainRoughness > 0.1f || FMath::Abs(TerrainData.SlopeAngle) > 5.0f;
+}
+
+FVector UMotionMatchingController::GetTrajectoryPrediction(float TimeAhead) const
+{
+    if (ACharacter* Character = Cast<ACharacter>(GetOwner()))
+    {
+        if (UCharacterMovementComponent* MovementComp = Character->GetCharacterMovement())
+        {
+            FVector CurrentVelocity = MovementComp->Velocity;
+            FVector CurrentLocation = Character->GetActorLocation();
+            
+            // Simple linear prediction - could be enhanced with acceleration
+            FVector PredictedLocation = CurrentLocation + (CurrentVelocity * TimeAhead);
+            
+            // Adjust prediction based on emotional state
+            if (AnimationManager)
+            {
+                float PredictionModifier = 1.0f;
+                
+                switch (AnimationManager->AnimationProfile.CurrentEmotionalState)
+                {
+                    case EEmotionalState::Fearful:
+                        PredictionModifier = 0.8f; // Less predictable movement
+                        break;
+                    case EEmotionalState::Panicked:
+                        PredictionModifier = 0.6f; // Erratic movement
+                        break;
+                    case EEmotionalState::Alert:
+                        PredictionModifier = 1.2f; // More deliberate movement
+                        break;
+                }
+                
+                PredictedLocation = FMath::Lerp(CurrentLocation, PredictedLocation, PredictionModifier);
+            }
+            
+            return PredictedLocation;
+        }
+    }
+    
+    return FVector::ZeroVector;
+}
+
+void UMotionMatchingController::UpdateContextBasedOnGameplay()
 {
     if (!AnimationManager)
+    {
         return;
-        
-    const FCharacterPersonality& Personality = AnimationManager->Personality;
-    EEmotionalState CurrentState = AnimationManager->CurrentEmotionalState;
-    
-    // Calcular modificadores baseados na personalidade e estado emocional
-    CurrentModifiers.SpeedMultiplier = Personality.MovementSpeed;
-    
-    // Ajustar velocidade baseado no estado emocional
-    switch (CurrentState)
-    {
-        case EEmotionalState::Fearful:
-            CurrentModifiers.SpeedMultiplier *= 1.4f;
-            break;
-        case EEmotionalState::Nervous:
-            CurrentModifiers.SpeedMultiplier *= 1.1f;
-            break;
-        case EEmotionalState::Resting:
-            CurrentModifiers.SpeedMultiplier *= 0.5f;
-            break;
-        case EEmotionalState::Hunting:
-            CurrentModifiers.SpeedMultiplier *= 1.2f;
-            break;
     }
     
-    // Frequência de passos baseada na personalidade
-    CurrentModifiers.StepFrequency = Personality.StepLength;
-    
-    // Chance de movimentos nervosos
-    CurrentModifiers.NervousTwitchChance = Personality.Nervousness;
-    if (CurrentState == EEmotionalState::Nervous || CurrentState == EEmotionalState::Fearful)
+    // Auto-detect context based on gameplay state
+    ACharacter* Character = Cast<ACharacter>(GetOwner());
+    if (!Character)
     {
-        CurrentModifiers.NervousTwitchChance *= 2.0f;
+        return;
     }
     
-    // Chance de olhar em volta (curiosidade)
-    CurrentModifiers.HeadLookAroundChance = Personality.Curiosity;
-    if (CurrentState == EEmotionalState::Alert)
+    UCharacterMovementComponent* MovementComp = Character->GetCharacterMovement();
+    if (!MovementComp)
     {
-        CurrentModifiers.HeadLookAroundChance *= 1.5f;
+        return;
     }
     
-    // Nível de tensão corporal
-    CurrentModifiers.BodyTensionLevel = 1.0f;
-    switch (CurrentState)
+    float CurrentSpeed = MovementComp->Velocity.Size();
+    EMotionMatchingContext NewContext = CurrentContext;
+    
+    // Context switching logic
+    if (CurrentSpeed < 50.0f)
     {
-        case EEmotionalState::Alert:
-            CurrentModifiers.BodyTensionLevel = 1.2f;
-            break;
-        case EEmotionalState::Nervous:
-            CurrentModifiers.BodyTensionLevel = 1.3f;
-            break;
-        case EEmotionalState::Fearful:
-            CurrentModifiers.BodyTensionLevel = 1.5f;
-            break;
-        case EEmotionalState::Resting:
-            CurrentModifiers.BodyTensionLevel = 0.6f;
-            break;
-        case EEmotionalState::Aggressive:
-            CurrentModifiers.BodyTensionLevel = 1.4f;
-            break;
+        // Standing still or moving very slowly
+        if (AnimationManager->AnimationProfile.CurrentEmotionalState == EEmotionalState::Fearful ||
+            AnimationManager->AnimationProfile.CurrentEmotionalState == EEmotionalState::Alert)
+        {
+            NewContext = EMotionMatchingContext::Stealth;
+        }
+        else
+        {
+            NewContext = EMotionMatchingContext::Exploration;
+        }
+    }
+    else if (CurrentSpeed > 300.0f)
+    {
+        // Fast movement - likely fleeing or urgent
+        NewContext = EMotionMatchingContext::Locomotion;
+    }
+    else
+    {
+        // Normal movement speed
+        NewContext = EMotionMatchingContext::Locomotion;
     }
     
-    // Aplicar modificadores da personalidade
-    CurrentModifiers.BodyTensionLevel *= (1.0f + (Personality.Nervousness * 0.3f));
-    CurrentModifiers.BodyTensionLevel *= (1.0f + (Personality.Aggression * 0.2f));
+    // Apply context change with some hysteresis to prevent rapid switching
+    if (NewContext != CurrentContext && ContextTransitionTimer > 1.0f)
+    {
+        SetMotionMatchingContext(NewContext);
+    }
 }
 
-void UMotionMatchingController::SmoothDatabaseTransition()
+void UMotionMatchingController::ProcessTerrainAdaptation()
 {
-    // Esta função seria expandida para implementar transições suaves entre databases
-    // Por agora, apenas registra mudanças para debug
-    
-    if (CurrentDatabase != PreviousDatabase && CurrentDatabase != nullptr)
+    ACharacter* Character = Cast<ACharacter>(GetOwner());
+    if (!Character)
     {
-        UE_LOG(LogTemp, Log, TEXT("Motion Matching: Database changed to %s"), 
-               CurrentDatabase ? *CurrentDatabase->GetName() : TEXT("None"));
+        return;
     }
+    
+    // Perform ground trace to get terrain information
+    FVector StartLocation = Character->GetActorLocation();
+    FVector EndLocation = StartLocation - FVector(0, 0, 200.0f);
+    
+    FHitResult HitResult;
+    FCollisionQueryParams QueryParams;
+    QueryParams.AddIgnoredActor(Character);
+    
+    if (GetWorld()->LineTraceSingleByChannel(HitResult, StartLocation, EndLocation, ECC_WorldStatic, QueryParams))
+    {
+        FTerrainAdaptationData NewTerrainData;
+        NewTerrainData.SurfaceNormal = HitResult.Normal;
+        
+        // Calculate slope angle
+        float DotProduct = FVector::DotProduct(HitResult.Normal, FVector::UpVector);
+        NewTerrainData.SlopeAngle = FMath::RadiansToDegrees(FMath::Acos(DotProduct));
+        
+        // Estimate terrain roughness based on normal variation
+        // This is simplified - in a real implementation you might sample multiple points
+        NewTerrainData.TerrainRoughness = FMath::Clamp(1.0f - DotProduct, 0.0f, 1.0f);
+        
+        // Check for unstable ground (could be based on material type, physics, etc.)
+        NewTerrainData.bIsUnstableGround = NewTerrainData.SlopeAngle > 30.0f;
+        
+        UpdateTerrainAdaptation(NewTerrainData);
+    }
+}
+
+FMotionMatchingDatabaseSet* UMotionMatchingController::GetCurrentDatabaseSet() const
+{
+    if (!AnimationManager)
+    {
+        return nullptr;
+    }
+    
+    ECharacterArchetype CurrentArchetype = AnimationManager->AnimationProfile.Archetype;
+    return const_cast<FMotionMatchingDatabaseSet*>(DatabasesByArchetype.Find(CurrentArchetype));
 }
