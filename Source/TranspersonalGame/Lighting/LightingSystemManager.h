@@ -1,181 +1,214 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/World.h"
-#include "Components/ActorComponent.h"
-#include "Engine/DirectionalLight.h"
+#include "GameFramework/Actor.h"
+#include "Components/DirectionalLightComponent.h"
 #include "Components/SkyLightComponent.h"
 #include "Components/SkyAtmosphereComponent.h"
 #include "Components/VolumetricCloudComponent.h"
 #include "Components/ExponentialHeightFogComponent.h"
+#include "Engine/PostProcessVolume.h"
 #include "LightingSystemManager.generated.h"
 
 UENUM(BlueprintType)
 enum class ETimeOfDay : uint8
 {
-    Dawn        UMETA(DisplayName = "Dawn (05:00-07:00)"),
-    Morning     UMETA(DisplayName = "Morning (07:00-11:00)"),
-    Midday      UMETA(DisplayName = "Midday (11:00-14:00)"),
-    Afternoon   UMETA(DisplayName = "Afternoon (14:00-17:00)"),
-    Dusk        UMETA(DisplayName = "Dusk (17:00-19:00)"),
-    Night       UMETA(DisplayName = "Night (19:00-05:00)")
+    Dawn        UMETA(DisplayName = "Dawn"),
+    Morning     UMETA(DisplayName = "Morning"), 
+    Midday      UMETA(DisplayName = "Midday"),
+    Afternoon   UMETA(DisplayName = "Afternoon"),
+    Dusk        UMETA(DisplayName = "Dusk"),
+    Night       UMETA(DisplayName = "Night")
 };
 
 UENUM(BlueprintType)
 enum class EWeatherState : uint8
 {
-    Clear       UMETA(DisplayName = "Clear Sky"),
+    Clear       UMETA(DisplayName = "Clear"),
     PartlyCloudy UMETA(DisplayName = "Partly Cloudy"),
     Overcast    UMETA(DisplayName = "Overcast"),
     LightRain   UMETA(DisplayName = "Light Rain"),
     HeavyRain   UMETA(DisplayName = "Heavy Rain"),
-    Storm       UMETA(DisplayName = "Storm")
+    Storm       UMETA(DisplayName = "Storm"),
+    Fog         UMETA(DisplayName = "Fog")
 };
 
 UENUM(BlueprintType)
-enum class EThreatLevel : uint8
+enum class EMoodState : uint8
 {
-    Safe        UMETA(DisplayName = "Safe - Bright, welcoming"),
-    Cautious    UMETA(DisplayName = "Cautious - Subtle tension"),
-    Dangerous   UMETA(DisplayName = "Dangerous - Clear threat"),
-    Hunted      UMETA(DisplayName = "Hunted - Maximum fear")
+    Peaceful    UMETA(DisplayName = "Peaceful"),
+    Tense       UMETA(DisplayName = "Tense"),
+    Threatening UMETA(DisplayName = "Threatening"),
+    Dangerous   UMETA(DisplayName = "Dangerous"),
+    Terror      UMETA(DisplayName = "Terror")
 };
 
 USTRUCT(BlueprintType)
-struct FLightingMood
+struct FLightingPreset
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting Mood")
+    // Sun/Moon Properties
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
     FLinearColor SunColor = FLinearColor::White;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting Mood")
-    float SunIntensity = 10.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting Mood")
-    FLinearColor SkyColor = FLinearColor(0.2f, 0.4f, 0.8f);
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting Mood")
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float SunIntensity = 3.0f;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float SunAngle = 45.0f;
+    
+    // Sky Properties
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FLinearColor SkyColor = FLinearColor(0.3f, 0.6f, 1.0f);
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float SkyIntensity = 1.0f;
+    
+    // Fog Properties
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FLinearColor FogColor = FLinearColor(0.5f, 0.6f, 0.7f);
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
     float FogDensity = 0.02f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting Mood")
-    FLinearColor FogColor = FLinearColor(0.8f, 0.9f, 1.0f);
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting Mood")
-    float ShadowIntensity = 0.8f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting Mood")
-    float ContrastBoost = 1.0f;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float FogHeightFalloff = 0.2f;
+    
+    // Cloud Properties
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float CloudCoverage = 0.3f;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float CloudOpacity = 0.8f;
+    
+    // Post Process
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float Exposure = 1.0f;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FLinearColor ColorGrading = FLinearColor::White;
 };
 
 /**
- * Sistema central de iluminação dinâmica para o jogo jurássico
- * Controla ciclo dia/noite, clima, e atmosfera emocional
+ * Central manager for all lighting and atmospheric systems
+ * Handles day/night cycle, weather, mood-based lighting transitions
  */
-UCLASS(ClassGroup=(TranspersonalGame), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API ULightingSystemManager : public UActorComponent
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API ALightingSystemManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    ULightingSystemManager();
+    ALightingSystemManager();
 
 protected:
     virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
+
+    // Core Components
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Lighting Core")
+    class UDirectionalLightComponent* SunLight;
+    
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Lighting Core")
+    class UDirectionalLightComponent* MoonLight;
+    
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Lighting Core")
+    class USkyLightComponent* SkyLight;
+    
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Lighting Core")
+    class USkyAtmosphereComponent* SkyAtmosphere;
+    
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Lighting Core")
+    class UVolumetricCloudComponent* VolumetricClouds;
+    
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Lighting Core")
+    class UExponentialHeightFogComponent* HeightFog;
 
 public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
-
-    // ===== SISTEMA DE TEMPO =====
+    // Time System
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time System")
-    float TimeScale = 1.0f; // 1.0 = tempo real, 60.0 = 1 minuto real = 1 hora jogo
-
+    float TimeOfDayHours = 12.0f; // 0-24 hours
+    
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time System")
-    float CurrentTimeOfDay = 12.0f; // 0-24 horas
-
+    float DayDurationMinutes = 20.0f; // Real minutes for full day cycle
+    
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time System")
     bool bAutoAdvanceTime = true;
-
-    // ===== SISTEMA CLIMÁTICO =====
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather System")
+    
+    // Weather System
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
     EWeatherState CurrentWeather = EWeatherState::Clear;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather System")
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
     float WeatherTransitionSpeed = 1.0f;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
+    bool bDynamicWeather = true;
+    
+    // Mood System
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mood")
+    EMoodState CurrentMood = EMoodState::Peaceful;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mood")
+    float MoodTransitionSpeed = 2.0f;
+    
+    // Lighting Presets
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Presets")
+    TMap<ETimeOfDay, FLightingPreset> TimePresets;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Presets")
+    TMap<EWeatherState, FLightingPreset> WeatherPresets;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Presets")
+    TMap<EMoodState, FLightingPreset> MoodPresets;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather System")
-    float WeatherChangeInterval = 300.0f; // segundos
-
-    // ===== SISTEMA DE AMEAÇA =====
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Threat System")
-    EThreatLevel CurrentThreatLevel = EThreatLevel::Safe;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Threat System")
-    float ThreatTransitionSpeed = 2.0f;
-
-    // ===== REFERÊNCIAS DOS COMPONENTES =====
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting Components")
-    class ADirectionalLight* SunLight;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting Components")
-    class ASkyLight* SkyLightActor;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting Components")
-    class ASkyAtmosphere* SkyAtmosphereActor;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting Components")
-    class AVolumetricCloud* CloudActor;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting Components")
-    class AExponentialHeightFog* FogActor;
-
-    // ===== CONFIGURAÇÕES DE MOOD =====
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting Moods")
-    TMap<ETimeOfDay, FLightingMood> TimeOfDayMoods;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting Moods")
-    TMap<EThreatLevel, FLightingMood> ThreatMoods;
-
-    // ===== FUNÇÕES PÚBLICAS =====
-    UFUNCTION(BlueprintCallable, Category = "Lighting System")
-    void SetTimeOfDay(float NewTime);
-
-    UFUNCTION(BlueprintCallable, Category = "Lighting System")
+    // Public Interface
+    UFUNCTION(BlueprintCallable, Category = "Lighting Control")
+    void SetTimeOfDay(float Hours);
+    
+    UFUNCTION(BlueprintCallable, Category = "Lighting Control")
     void SetWeatherState(EWeatherState NewWeather);
-
-    UFUNCTION(BlueprintCallable, Category = "Lighting System")
-    void SetThreatLevel(EThreatLevel NewThreat);
-
-    UFUNCTION(BlueprintCallable, Category = "Lighting System")
-    ETimeOfDay GetCurrentTimeOfDayEnum() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Lighting System")
-    FLightingMood GetCurrentMood() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Lighting System")
-    void ForceUpdateLighting();
+    
+    UFUNCTION(BlueprintCallable, Category = "Lighting Control")
+    void SetMoodState(EMoodState NewMood);
+    
+    UFUNCTION(BlueprintCallable, Category = "Lighting Control")
+    void TransitionToPreset(const FLightingPreset& TargetPreset, float TransitionTime = 2.0f);
+    
+    UFUNCTION(BlueprintPure, Category = "Lighting Info")
+    ETimeOfDay GetCurrentTimeOfDay() const;
+    
+    UFUNCTION(BlueprintPure, Category = "Lighting Info")
+    float GetSunAngle() const;
+    
+    UFUNCTION(BlueprintPure, Category = "Lighting Info")
+    bool IsNightTime() const;
 
 private:
-    // ===== FUNÇÕES INTERNAS =====
+    void UpdateLighting(float DeltaTime);
     void UpdateTimeOfDay(float DeltaTime);
-    void UpdateWeatherSystem(float DeltaTime);
-    void UpdateLightingMood();
-    void ApplyLightingMood(const FLightingMood& Mood);
-    void UpdateSunPosition();
-    void UpdateSkyLight();
-    void UpdateAtmosphere();
-    void UpdateFog();
-    void UpdateClouds();
+    void UpdateWeather(float DeltaTime);
+    void UpdateMood(float DeltaTime);
     
-    FLightingMood BlendMoods(const FLightingMood& MoodA, const FLightingMood& MoodB, float Alpha);
+    void ApplyLightingPreset(const FLightingPreset& Preset);
+    FLightingPreset BlendPresets(const FLightingPreset& A, const FLightingPreset& B, float Alpha);
     
-    // ===== VARIÁVEIS INTERNAS =====
-    float WeatherTimer = 0.0f;
-    FLightingMood CurrentMood;
-    FLightingMood TargetMood;
-    bool bMoodTransitioning = false;
-    float MoodTransitionAlpha = 0.0f;
+    void InitializeDefaultPresets();
+    void SetupLumenSettings();
+    void SetupVirtualShadowMaps();
     
-    void InitializeDefaultMoods();
-    void FindLightingComponents();
+    // Current blend states
+    FLightingPreset CurrentPreset;
+    FLightingPreset TargetPreset;
+    float BlendAlpha = 0.0f;
+    float BlendSpeed = 1.0f;
+    
+    // Weather transition
+    EWeatherState TargetWeather;
+    float WeatherBlendAlpha = 0.0f;
+    
+    // Mood transition
+    EMoodState TargetMood;
+    float MoodBlendAlpha = 0.0f;
 };
