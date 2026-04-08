@@ -1,333 +1,423 @@
+// Copyright Transpersonal Game Studio. All Rights Reserved.
+// Atmospheric Lighting System Implementation
+// Agent #8 - Lighting & Atmosphere Agent
+
 #include "AtmosphericLightingSystem.h"
 #include "Engine/World.h"
 #include "Engine/DirectionalLight.h"
-#include "Components/DirectionalLightComponent.h"
-#include "Components/SkyAtmosphereComponent.h"
-#include "Components/VolumetricCloudComponent.h"
-#include "Components/SkyLightComponent.h"
 #include "Engine/SkyLight.h"
-#include "Kismet/KismetMathLibrary.h"
+#include "Components/SkyAtmosphereComponent.h"
+#include "Components/SkyLightComponent.h"
+#include "Components/DirectionalLightComponent.h"
+#include "Components/VolumetricCloudComponent.h"
+#include "Kismet/GameplayStatics.h"
 #include "Engine/Engine.h"
-
-DEFINE_LOG_CATEGORY_STATIC(LogAtmosphericLighting, Log, All);
 
 UAtmosphericLightingSystem::UAtmosphericLightingSystem()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.bStartWithTickEnabled = true;
+    PrimaryComponentTick.TickGroup = TG_PostPhysics;
     
-    // Initialize default values
-    CurrentTimeOfDay = 12.0f; // Noon
-    TimeSpeed = 1.0f;
-    bAutoAdvanceTime = true;
+    // Initialize default parameters
+    AtmosphereParameters = FAtmosphereParameters();
+    SunLightParameters = FSunLightParameters();
+    SkyLightParameters = FSkyLightParameters();
     
-    // Atmosphere defaults
-    AtmosphereHeight = 60.0f;
-    RayleighScatteringScale = 0.0331f;
-    MieScatteringScale = 0.004f;
+    // Component references
+    SkyAtmosphereComponent = nullptr;
+    SunDirectionalLight = nullptr;
+    SkyLightActor = nullptr;
     
-    // Cloud defaults
-    CloudCoverage = 0.4f;
-    CloudDensity = 0.5f;
-    CloudSpeed = 0.1f;
-    
-    // Sun defaults
-    SunIntensity = 10.0f;
-    SunColor = FLinearColor(1.0f, 0.95f, 0.8f, 1.0f);
-    SunTemperature = 5500.0f;
-    
-    // Sky defaults
-    SkyLightIntensity = 1.0f;
-    SkyTint = FLinearColor(0.3f, 0.6f, 1.0f, 1.0f);
+    bIsInitialized = false;
+    LastUpdateTime = 0.0f;
 }
 
 void UAtmosphericLightingSystem::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Find or create atmospheric components
-    InitializeAtmosphericComponents();
+    // Initialize the atmospheric system
+    InitializeAtmosphericSystem();
     
-    // Apply initial lighting state
-    UpdateAtmosphericLighting();
-    
-    UE_LOG(LogAtmosphericLighting, Log, TEXT("Atmospheric Lighting System initialized"));
+    UE_LOG(LogTemp, Log, TEXT("AtmosphericLightingSystem: Initialized successfully"));
 }
 
 void UAtmosphericLightingSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    if (bAutoAdvanceTime)
-    {
-        // Advance time of day
-        CurrentTimeOfDay += (DeltaTime * TimeSpeed) / 3600.0f; // Convert seconds to hours
+    if (!bIsInitialized)
+        return;
         
-        if (CurrentTimeOfDay >= 24.0f)
-        {
-            CurrentTimeOfDay = 0.0f;
-        }
+    LastUpdateTime += DeltaTime;
+    
+    // Update atmospheric parameters periodically for performance
+    if (LastUpdateTime >= 0.1f) // Update 10 times per second
+    {
+        UpdateAtmosphericParameters();
+        LastUpdateTime = 0.0f;
     }
-    
-    // Update atmospheric lighting
-    UpdateAtmosphericLighting();
-    
-    // Update clouds
-    UpdateVolumetricClouds(DeltaTime);
 }
 
-void UAtmosphericLightingSystem::InitializeAtmosphericComponents()
+void UAtmosphericLightingSystem::InitializeAtmosphericSystem()
 {
+    if (bIsInitialized)
+        return;
+        
     UWorld* World = GetWorld();
     if (!World)
     {
+        UE_LOG(LogTemp, Error, TEXT("AtmosphericLightingSystem: No valid world found"));
         return;
     }
     
-    // Find existing directional light (sun)
-    for (TActorIterator<ADirectionalLight> ActorItr(World); ActorItr; ++ActorItr)
-    {
-        ADirectionalLight* DirectionalLight = *ActorItr;
-        if (DirectionalLight && DirectionalLight->GetLightComponent())
-        {
-            SunLight = DirectionalLight;
-            break;
-        }
-    }
+    // Create or find atmospheric components
+    CreateAtmosphericComponents();
     
-    // Find existing sky light
-    for (TActorIterator<ASkyLight> ActorItr(World); ActorItr; ++ActorItr)
-    {
-        ASkyLight* SkyLight = *ActorItr;
-        if (SkyLight && SkyLight->GetLightComponent())
-        {
-            SkyLightComponent = SkyLight;
-            break;
-        }
-    }
+    // Configure all components
+    ConfigureAtmosphereComponent();
+    ConfigureSunLight();
+    ConfigureSkyLight();
     
-    // Find sky atmosphere component
-    AActor* Owner = GetOwner();
-    if (Owner)
-    {
-        SkyAtmosphere = Owner->FindComponentByClass<USkyAtmosphereComponent>();
-        VolumetricClouds = Owner->FindComponentByClass<UVolumetricCloudComponent>();
-    }
+    // Apply quality settings
+    ApplyQualitySettings();
     
-    // Log what we found
-    UE_LOG(LogAtmosphericLighting, Log, TEXT("Found components - Sun: %s, Sky: %s, Atmosphere: %s, Clouds: %s"),
-        SunLight ? TEXT("Yes") : TEXT("No"),
-        SkyLightComponent ? TEXT("Yes") : TEXT("No"),
-        SkyAtmosphere ? TEXT("Yes") : TEXT("No"),
-        VolumetricClouds ? TEXT("Yes") : TEXT("No"));
+    bIsInitialized = true;
+    
+    UE_LOG(LogTemp, Log, TEXT("AtmosphericLightingSystem: Atmospheric system initialized"));
 }
 
-void UAtmosphericLightingSystem::UpdateAtmosphericLighting()
+void UAtmosphericLightingSystem::CreateAtmosphericComponents()
 {
-    // Calculate sun position based on time of day
-    float SunAngle = CalculateSunAngle(CurrentTimeOfDay);
-    FRotator SunRotation = FRotator(SunAngle, 180.0f, 0.0f);
-    
-    // Update sun light
-    if (SunLight && SunLight->GetLightComponent())
-    {
-        UDirectionalLightComponent* SunComponent = SunLight->GetLightComponent();
-        
-        // Set sun rotation
-        SunLight->SetActorRotation(SunRotation);
-        
-        // Calculate sun intensity based on angle
-        float SunIntensityMultiplier = FMath::Clamp(FMath::Cos(FMath::DegreesToRadians(SunAngle + 90.0f)), 0.0f, 1.0f);
-        SunComponent->SetIntensity(SunIntensity * SunIntensityMultiplier);
-        
-        // Calculate sun color based on angle
-        FLinearColor CurrentSunColor = CalculateSunColor(SunAngle);
-        SunComponent->SetLightColor(CurrentSunColor);
-        
-        // Set atmosphere sun light properties
-        SunComponent->SetAtmosphereSunLight(true);
-        SunComponent->SetAtmosphereSunLightIndex(0);
-        
-        // Enable cloud shadows
-        SunComponent->SetCastCloudShadows(true);
-        SunComponent->SetCloudShadowStrength(0.7f);
-    }
-    
-    // Update sky light
-    if (SkyLightComponent && SkyLightComponent->GetLightComponent())
-    {
-        USkyLightComponent* SkyComponent = SkyLightComponent->GetLightComponent();
-        
-        // Calculate sky intensity based on sun angle
-        float SkyIntensityMultiplier = FMath::Clamp(0.3f + (1.0f - FMath::Abs(SunAngle) / 90.0f) * 0.7f, 0.1f, 1.0f);
-        SkyComponent->SetIntensity(SkyLightIntensity * SkyIntensityMultiplier);
-        
-        // Set sky color
-        FLinearColor CurrentSkyColor = CalculateSkyColor(SunAngle);
-        SkyComponent->SetLightColor(CurrentSkyColor);
-        
-        // Enable real-time capture for dynamic lighting
-        SkyComponent->SetSourceType(ESkyLightSourceType::SLS_CapturedScene);
-        SkyComponent->SetRealTimeCaptureEnabled(true);
-    }
-    
-    // Update sky atmosphere
-    if (SkyAtmosphere)
-    {
-        // Set atmosphere properties
-        SkyAtmosphere->SetAtmosphereHeight(AtmosphereHeight);
-        SkyAtmosphere->SetRayleighScatteringScale(RayleighScatteringScale);
-        SkyAtmosphere->SetMieScatteringScale(MieScatteringScale);
-        
-        // Adjust sky luminance based on time of day
-        float LuminanceFactor = FMath::Clamp(0.5f + (1.0f - FMath::Abs(SunAngle) / 90.0f) * 0.5f, 0.2f, 1.0f);
-        SkyAtmosphere->SetSkyLuminanceFactor(LuminanceFactor);
-    }
-}
-
-void UAtmosphericLightingSystem::UpdateVolumetricClouds(float DeltaTime)
-{
-    if (!VolumetricClouds)
-    {
+    UWorld* World = GetWorld();
+    if (!World)
         return;
-    }
-    
-    // Update cloud coverage and density
-    VolumetricClouds->SetLayerBottomAltitude(1.5f); // 1.5km altitude
-    VolumetricClouds->SetLayerHeight(4.0f); // 4km thick
-    
-    // Animate clouds based on wind
-    CloudOffset += FVector2D(CloudSpeed * DeltaTime, CloudSpeed * 0.5f * DeltaTime);
-    
-    // Apply cloud parameters through material parameters if available
-    // This would typically be done through a material parameter collection
-}
-
-float UAtmosphericLightingSystem::CalculateSunAngle(float TimeHours) const
-{
-    // Convert 24-hour time to angle
-    // 6 AM = -90 degrees (sunrise)
-    // 12 PM = 0 degrees (noon)
-    // 6 PM = 90 degrees (sunset)
-    // 12 AM = 180 degrees (midnight)
-    
-    float NormalizedTime = (TimeHours - 6.0f) / 12.0f; // Normalize around noon
-    return NormalizedTime * 180.0f - 90.0f;
-}
-
-FLinearColor UAtmosphericLightingSystem::CalculateSunColor(float SunAngle) const
-{
-    // Calculate color based on sun angle
-    float AbsAngle = FMath::Abs(SunAngle);
-    
-    if (AbsAngle > 90.0f)
+        
+    // Find or create Sky Atmosphere Component
+    if (!SkyAtmosphereComponent)
     {
-        // Night time - no sun
-        return FLinearColor::Black;
+        // Look for existing sky atmosphere in the world
+        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+        {
+            AActor* Actor = *ActorItr;
+            if (USkyAtmosphereComponent* ExistingComp = Actor->FindComponentByClass<USkyAtmosphereComponent>())
+            {
+                SkyAtmosphereComponent = ExistingComp;
+                break;
+            }
+        }
+        
+        // Create new sky atmosphere if none found
+        if (!SkyAtmosphereComponent)
+        {
+            AActor* AtmosphereActor = World->SpawnActor<AActor>();
+            AtmosphereActor->SetActorLabel(TEXT("SkyAtmosphere"));
+            SkyAtmosphereComponent = NewObject<USkyAtmosphereComponent>(AtmosphereActor);
+            AtmosphereActor->AddInstanceComponent(SkyAtmosphereComponent);
+            SkyAtmosphereComponent->RegisterComponent();
+        }
     }
     
-    // Interpolate between noon color and sunset color
-    float SunsetFactor = FMath::Clamp(AbsAngle / 90.0f, 0.0f, 1.0f);
-    
-    FLinearColor NoonColor = FLinearColor(1.0f, 0.95f, 0.8f, 1.0f);
-    FLinearColor SunsetColor = FLinearColor(1.0f, 0.6f, 0.3f, 1.0f);
-    
-    return FMath::Lerp(NoonColor, SunsetColor, SunsetFactor);
-}
-
-FLinearColor UAtmosphericLightingSystem::CalculateSkyColor(float SunAngle) const
-{
-    float AbsAngle = FMath::Abs(SunAngle);
-    
-    if (AbsAngle > 90.0f)
+    // Find or create Sun Directional Light
+    if (!SunDirectionalLight)
     {
-        // Night time - dark blue
-        return FLinearColor(0.1f, 0.15f, 0.3f, 1.0f);
+        // Look for existing directional light marked as sun
+        for (TActorIterator<ADirectionalLight> LightItr(World); LightItr; ++LightItr)
+        {
+            ADirectionalLight* Light = *LightItr;
+            if (Light->GetLightComponent()->bAtmosphereSunLight)
+            {
+                SunDirectionalLight = Light;
+                break;
+            }
+        }
+        
+        // Create new sun light if none found
+        if (!SunDirectionalLight)
+        {
+            FActorSpawnParameters SpawnParams;
+            SpawnParams.Name = TEXT("SunLight");
+            SunDirectionalLight = World->SpawnActor<ADirectionalLight>(SpawnParams);
+            SunDirectionalLight->SetActorLabel(TEXT("SunLight"));
+        }
     }
     
-    // Interpolate between day and sunset sky colors
-    float SunsetFactor = FMath::Clamp(AbsAngle / 90.0f, 0.0f, 1.0f);
-    
-    FLinearColor DayColor = FLinearColor(0.3f, 0.6f, 1.0f, 1.0f);
-    FLinearColor SunsetColor = FLinearColor(0.8f, 0.4f, 0.2f, 1.0f);
-    
-    return FMath::Lerp(DayColor, SunsetColor, SunsetFactor);
-}
-
-void UAtmosphericLightingSystem::SetTimeOfDay(float NewTime)
-{
-    CurrentTimeOfDay = FMath::Clamp(NewTime, 0.0f, 24.0f);
-    UpdateAtmosphericLighting();
-}
-
-void UAtmosphericLightingSystem::SetCloudCoverage(float Coverage)
-{
-    CloudCoverage = FMath::Clamp(Coverage, 0.0f, 1.0f);
-    
-    if (VolumetricClouds)
+    // Find or create Sky Light
+    if (!SkyLightActor)
     {
-        // Update cloud material parameters
-        // This would typically update a material parameter collection
+        // Look for existing sky light
+        SkyLightActor = Cast<ASkyLight>(UGameplayStatics::GetActorOfClass(World, ASkyLight::StaticClass()));
+        
+        // Create new sky light if none found
+        if (!SkyLightActor)
+        {
+            FActorSpawnParameters SpawnParams;
+            SpawnParams.Name = TEXT("SkyLight");
+            SkyLightActor = World->SpawnActor<ASkyLight>(SpawnParams);
+            SkyLightActor->SetActorLabel(TEXT("SkyLight"));
+        }
     }
 }
 
-void UAtmosphericLightingSystem::SetAtmosphereParameters(float Height, float RayleighScale, float MieScale)
+void UAtmosphericLightingSystem::ConfigureAtmosphereComponent()
 {
-    AtmosphereHeight = Height;
-    RayleighScatteringScale = RayleighScale;
-    MieScatteringScale = MieScale;
+    if (!SkyAtmosphereComponent)
+        return;
+        
+    // Configure planet properties
+    SkyAtmosphereComponent->GroundRadius = AtmosphereParameters.GroundRadius;
+    SkyAtmosphereComponent->AtmosphereHeight = AtmosphereParameters.AtmosphereHeight;
+    SkyAtmosphereComponent->GroundAlbedo = AtmosphereParameters.GroundAlbedo;
     
-    UpdateAtmosphericLighting();
-}
-
-void UAtmosphericLightingSystem::SetSunParameters(float Intensity, FLinearColor Color, float Temperature)
-{
-    SunIntensity = Intensity;
-    SunColor = Color;
-    SunTemperature = Temperature;
+    // Configure Rayleigh scattering
+    SkyAtmosphereComponent->RayleighScatteringScale = AtmosphereParameters.RayleighScatteringScale;
+    SkyAtmosphereComponent->RayleighScattering = AtmosphereParameters.RayleighScattering;
+    SkyAtmosphereComponent->RayleighExponentialDistribution = AtmosphereParameters.RayleighExponentialDistribution;
     
-    UpdateAtmosphericLighting();
-}
-
-void UAtmosphericLightingSystem::SetSkyLightParameters(float Intensity, FLinearColor Tint)
-{
-    SkyLightIntensity = Intensity;
-    SkyTint = Tint;
+    // Configure Mie scattering
+    SkyAtmosphereComponent->MieScatteringScale = AtmosphereParameters.MieScatteringScale;
+    SkyAtmosphereComponent->MieScattering = AtmosphereParameters.MieScattering;
+    SkyAtmosphereComponent->MieAnisotropy = AtmosphereParameters.MieAnisotropy;
+    SkyAtmosphereComponent->MieExponentialDistribution = AtmosphereParameters.MieExponentialDistribution;
     
-    UpdateAtmosphericLighting();
+    // Configure absorption
+    SkyAtmosphereComponent->AbsorptionScale = AtmosphereParameters.AbsorptionScale;
+    SkyAtmosphereComponent->OtherAbsorption = AtmosphereParameters.Absorption;
+    
+    // Configure multi-scattering and sky luminance
+    SkyAtmosphereComponent->MultiScatteringFactor = AtmosphereParameters.MultiScattering;
+    SkyAtmosphereComponent->SkyLuminanceFactor = AtmosphereParameters.SkyLuminanceFactor;
+    SkyAtmosphereComponent->AerialPespectiveViewDistanceScale = AtmosphereParameters.AerialPerspectiveDistanceScale;
+    
+    UE_LOG(LogTemp, Log, TEXT("AtmosphericLightingSystem: Sky atmosphere configured"));
 }
 
-EJurassicTimeOfDay UAtmosphericLightingSystem::GetCurrentTimeOfDayEnum() const
+void UAtmosphericLightingSystem::ConfigureSunLight()
 {
-    if (CurrentTimeOfDay >= 4.0f && CurrentTimeOfDay < 5.5f)
-        return EJurassicTimeOfDay::PreDawn;
-    else if (CurrentTimeOfDay >= 5.5f && CurrentTimeOfDay < 7.0f)
-        return EJurassicTimeOfDay::Dawn;
-    else if (CurrentTimeOfDay >= 7.0f && CurrentTimeOfDay < 10.0f)
-        return EJurassicTimeOfDay::Morning;
-    else if (CurrentTimeOfDay >= 10.0f && CurrentTimeOfDay < 14.0f)
-        return EJurassicTimeOfDay::Midday;
-    else if (CurrentTimeOfDay >= 14.0f && CurrentTimeOfDay < 17.0f)
-        return EJurassicTimeOfDay::Afternoon;
-    else if (CurrentTimeOfDay >= 17.0f && CurrentTimeOfDay < 19.0f)
-        return EJurassicTimeOfDay::Dusk;
-    else if (CurrentTimeOfDay >= 19.0f && CurrentTimeOfDay < 20.5f)
-        return EJurassicTimeOfDay::Twilight;
-    else
-        return EJurassicTimeOfDay::Night;
+    if (!SunDirectionalLight || !SunDirectionalLight->GetLightComponent())
+        return;
+        
+    UDirectionalLightComponent* SunComponent = SunDirectionalLight->GetLightComponent();
+    
+    // Mark as atmospheric sun light
+    SunComponent->bAtmosphereSunLight = true;
+    SunComponent->AtmosphereSunLightIndex = 0; // Primary sun
+    
+    // Configure light properties
+    SunComponent->SetLightColor(SunLightParameters.SunColor);
+    SunComponent->SetIntensity(SunLightParameters.SunIntensity);
+    SunComponent->SourceAngle = SunLightParameters.SunSourceAngle;
+    SunComponent->Temperature = SunLightParameters.SunTemperature;
+    SunComponent->bUseTemperature = true;
+    
+    // Configure shadows
+    SunComponent->bCastShadows = true;
+    SunComponent->bCastCloudShadows = SunLightParameters.bCastCloudShadows;
+    SunComponent->CloudShadowStrength = SunLightParameters.CloudShadowStrength;
+    SunComponent->CloudShadowExtent = SunLightParameters.CloudShadowExtent;
+    
+    // Set mobility to movable for dynamic lighting
+    SunComponent->SetMobility(EComponentMobility::Movable);
+    
+    // Set initial sun position
+    SetSunPosition(SunLightParameters.SunElevationAngle, SunLightParameters.SunAzimuthAngle);
+    
+    UE_LOG(LogTemp, Log, TEXT("AtmosphericLightingSystem: Sun light configured"));
 }
 
-float UAtmosphericLightingSystem::GetCurrentTimeOfDay() const
+void UAtmosphericLightingSystem::ConfigureSkyLight()
 {
-    return CurrentTimeOfDay;
+    if (!SkyLightActor || !SkyLightActor->GetLightComponent())
+        return;
+        
+    USkyLightComponent* SkyComponent = SkyLightActor->GetLightComponent();
+    
+    // Configure sky light properties
+    SkyComponent->SetIntensity(SkyLightParameters.SkyLightIntensity);
+    SkyComponent->SetLightColor(SkyLightParameters.SkyLightColor);
+    
+    // Enable real-time capture for dynamic lighting
+    SkyComponent->bRealTimeCapture = SkyLightParameters.bRealTimeCapture;
+    SkyComponent->SkyDistanceThreshold = SkyLightParameters.CaptureDistance;
+    
+    // Configure cloud ambient occlusion
+    SkyComponent->CloudAmbientOcclusionStrength = SkyLightParameters.CloudAmbientOcclusionStrength;
+    SkyComponent->CloudAmbientOcclusionExtent = SkyLightParameters.CloudAmbientOcclusionExtent;
+    SkyComponent->CloudAmbientOcclusionMapResolutionScale = SkyLightParameters.CloudAmbientOcclusionMapResolutionScale;
+    
+    // Set mobility to stationary for performance
+    SkyComponent->SetMobility(EComponentMobility::Stationary);
+    
+    // Force initial capture
+    SkyComponent->RecaptureSky();
+    
+    UE_LOG(LogTemp, Log, TEXT("AtmosphericLightingSystem: Sky light configured"));
 }
 
-void UAtmosphericLightingSystem::SetTimeSpeed(float Speed)
+void UAtmosphericLightingSystem::UpdateAtmosphericParameters()
 {
-    TimeSpeed = FMath::Max(0.0f, Speed);
+    if (!bIsInitialized)
+        return;
+        
+    // Update atmosphere component if parameters changed
+    ConfigureAtmosphereComponent();
+    
+    // Update performance settings
+    UpdatePerformanceSettings();
 }
 
-void UAtmosphericLightingSystem::SetAutoAdvanceTime(bool bEnabled)
+void UAtmosphericLightingSystem::SetAtmosphericQuality(EAtmosphericQuality Quality)
 {
-    bAutoAdvanceTime = bEnabled;
+    AtmosphericQuality = Quality;
+    ApplyQualitySettings();
+}
+
+void UAtmosphericLightingSystem::ApplyQualitySettings()
+{
+    // Configure console variables based on quality level
+    switch (AtmosphericQuality)
+    {
+        case EAtmosphericQuality::Mobile:
+            // Mobile optimized settings
+            TraceSampleCountScale = 0.5f;
+            bEnableFastSkyLUT = true;
+            bEnableAerialPerspective = false;
+            bEnableTemporalUpsampling = false;
+            break;
+            
+        case EAtmosphericQuality::Console:
+            // Console balanced settings
+            TraceSampleCountScale = 0.75f;
+            bEnableFastSkyLUT = true;
+            bEnableAerialPerspective = true;
+            bEnableTemporalUpsampling = true;
+            break;
+            
+        case EAtmosphericQuality::PC_High:
+            // High-end PC settings
+            TraceSampleCountScale = 1.0f;
+            bEnableFastSkyLUT = false;
+            bEnableAerialPerspective = true;
+            bEnableTemporalUpsampling = true;
+            break;
+            
+        case EAtmosphericQuality::Cinematic:
+            // Maximum quality settings
+            TraceSampleCountScale = 1.5f;
+            bEnableFastSkyLUT = false;
+            bEnableAerialPerspective = true;
+            bEnableTemporalUpsampling = true;
+            break;
+    }
+    
+    UpdatePerformanceSettings();
+}
+
+void UAtmosphericLightingSystem::UpdatePerformanceSettings()
+{
+    if (!SkyAtmosphereComponent)
+        return;
+        
+    // Apply trace sample count scale
+    SkyAtmosphereComponent->TraceSampleCountScale = TraceSampleCountScale;
+    
+    // Note: Console variables would be set here in a real implementation
+    // For now, we configure component properties directly
+}
+
+void UAtmosphericLightingSystem::SetSunPosition(float ElevationDegrees, float AzimuthDegrees)
+{
+    if (!SunDirectionalLight)
+        return;
+        
+    // Update parameters
+    SunLightParameters.SunElevationAngle = ElevationDegrees;
+    SunLightParameters.SunAzimuthAngle = AzimuthDegrees;
+    
+    // Calculate and apply rotation
+    FRotator SunRotation = CalculateSunRotation(ElevationDegrees, AzimuthDegrees);
+    SunDirectionalLight->SetActorRotation(SunRotation);
+    
+    UE_LOG(LogTemp, VeryVerbose, TEXT("AtmosphericLightingSystem: Sun position updated - Elevation: %.1f, Azimuth: %.1f"), 
+           ElevationDegrees, AzimuthDegrees);
+}
+
+void UAtmosphericLightingSystem::UpdateSunLight(const FSunLightParameters& SunParams)
+{
+    SunLightParameters = SunParams;
+    ConfigureSunLight();
+}
+
+FVector UAtmosphericLightingSystem::GetSunDirection() const
+{
+    if (!SunDirectionalLight)
+        return FVector::ForwardVector;
+        
+    return SunDirectionalLight->GetActorForwardVector();
+}
+
+void UAtmosphericLightingSystem::UpdateAtmosphereScattering(const FAtmosphereParameters& AtmosphereParams)
+{
+    AtmosphereParameters = AtmosphereParams;
+    ConfigureAtmosphereComponent();
+}
+
+void UAtmosphericLightingSystem::SetAtmosphereHaziness(float Haziness)
+{
+    // Adjust Mie scattering for haziness effect
+    AtmosphereParameters.MieScatteringScale = FMath::Lerp(0.5f, 2.0f, Haziness);
+    ConfigureAtmosphereComponent();
+}
+
+void UAtmosphericLightingSystem::UpdateSkyLight(const FSkyLightParameters& SkyParams)
+{
+    SkyLightParameters = SkyParams;
+    ConfigureSkyLight();
+}
+
+void UAtmosphericLightingSystem::RecaptureSkyLight()
+{
+    if (SkyLightActor && SkyLightActor->GetLightComponent())
+    {
+        SkyLightActor->GetLightComponent()->RecaptureSky();
+    }
+}
+
+USkyAtmosphereComponent* UAtmosphericLightingSystem::GetSkyAtmosphereComponent()
+{
+    if (!SkyAtmosphereComponent)
+    {
+        CreateAtmosphericComponents();
+    }
+    return SkyAtmosphereComponent;
+}
+
+ADirectionalLight* UAtmosphericLightingSystem::GetSunLight()
+{
+    if (!SunDirectionalLight)
+    {
+        CreateAtmosphericComponents();
+    }
+    return SunDirectionalLight;
+}
+
+ASkyLight* UAtmosphericLightingSystem::GetSkyLight()
+{
+    if (!SkyLightActor)
+    {
+        CreateAtmosphericComponents();
+    }
+    return SkyLightActor;
+}
+
+FRotator UAtmosphericLightingSystem::CalculateSunRotation(float ElevationDegrees, float AzimuthDegrees) const
+{
+    // Convert elevation and azimuth to UE4 rotation
+    // Elevation: 0 = horizon, 90 = zenith
+    // Azimuth: 0 = north, 90 = east, 180 = south, 270 = west
+    
+    float Pitch = -ElevationDegrees; // Negative because UE4 pitch is inverted
+    float Yaw = AzimuthDegrees - 90.0f; // Adjust for UE4 coordinate system
+    
+    return FRotator(Pitch, Yaw, 0.0f);
 }
