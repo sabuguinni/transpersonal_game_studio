@@ -10,44 +10,31 @@ public class TranspersonalGameEditorTarget : TargetRules
         Type = TargetType.Editor;
         DefaultBuildSettings = BuildSettingsVersion.V4;
         IncludeOrderVersion = EngineIncludeOrderVersion.Unreal5_3;
-
+        
         ExtraModuleNames.AddRange(new string[] { "TranspersonalGame" });
-
-        // Editor specific optimizations
+        
+        // Editor-specific optimizations
         bUseUnityBuild = true;
         bUsePCHFiles = true;
         bUseSharedPCHs = true;
-        bWithLiveCoding = true;
+        bUseIncrementalLinking = true;
+        bUseFastMonoCalls = true;
         
-        // Enable modern C++ features
-        CppStandard = CppStandardVersion.Cpp20;
+        // Enable all editor features
+        bBuildDeveloperTools = true;
+        bBuildWithEditorOnlyData = true;
+        bCompileAgainstEngine = true;
+        bCompileAgainstCoreUObject = true;
         
-        // Editor performance settings
-        if (Target.Platform == UnrealTargetPlatform.Win64)
-        {
-            WindowsPlatform.PCHMemoryAllocationFactor = 2000;
-        }
-
-        // Development features
+        // Development aids
         bUseLoggingInShipping = true;
-        bCompileWithStatsWithoutEngine = true;
-        bCompileWithPluginSupport = true;
-
-        // Enable editor plugins
-        EnablePlugins.AddRange(new string[]
+        bUseChecksInShipping = true;
+        
+        // Platform-specific editor settings
+        if (Platform == UnrealTargetPlatform.Win64)
         {
-            "MassEntity",
-            "MassGameplay",
-            "Niagara", 
-            "MetaSounds",
-            "WorldPartition",
-            "Lumen",
-            "Nanite",
-            "ChaosPhysics",
-            "EnhancedInput",
-            "EditorScriptingUtilities",
-            "PythonScriptPlugin",
-            "SequencerScripting"
-        });
+            WindowsPlatform.PCHMemoryAllocationFactor = 3000;
+            WindowsPlatform.bStrictConformanceMode = true;
+        }
     }
 }
