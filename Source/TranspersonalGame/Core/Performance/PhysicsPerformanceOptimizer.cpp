@@ -3,501 +3,448 @@
 #include "PhysicsPerformanceOptimizer.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "GameFramework/Pawn.h"
-#include "Components/PrimitiveComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/SkeletalMeshComponent.h"
-#include "GeometryCollection/GeometryCollectionComponent.h"
-#include "PhysicsEngine/PhysicsSettings.h"
-#include "Chaos/ChaosEngineInterface.h"
+#include "PhysicsEngine/BodyInstance.h"
+#include "Engine/StaticMesh.h"
 #include "HAL/IConsoleManager.h"
-#include "Stats/Stats.h"
-#include "ProfilingDebugging/CpuProfilerTrace.h"
 
-DECLARE_STATS_GROUP(TEXT("Physics Performance"), STATGROUP_PhysicsPerformance, STATCAT_Advanced);
-DECLARE_CYCLE_STAT(TEXT("Physics Optimization"), STAT_PhysicsOptimization, STATGROUP_PhysicsPerformance);
-DECLARE_CYCLE_STAT(TEXT("Ragdoll Management"), STAT_RagdollManagement, STATGROUP_PhysicsPerformance);
-DECLARE_CYCLE_STAT(TEXT("Destruction Optimization"), STAT_DestructionOptimization, STATGROUP_PhysicsPerformance);
-DECLARE_CYCLE_STAT(TEXT("Physics LOD Update"), STAT_PhysicsLODUpdate, STATGROUP_PhysicsPerformance);
+DEFINE_LOG_CATEGORY(LogPhysicsPerformance);
 
-DECLARE_DWORD_COUNTER_STAT(TEXT("Active Physics Bodies"), STAT_ActivePhysicsBodies, STATGROUP_PhysicsPerformance);
-DECLARE_DWORD_COUNTER_STAT(TEXT("Active Ragdolls"), STAT_ActiveRagdolls, STATGROUP_PhysicsPerformance);
-DECLARE_DWORD_COUNTER_STAT(TEXT("Destruction Debris"), STAT_DestructionDebris, STATGROUP_PhysicsPerformance);
-DECLARE_FLOAT_COUNTER_STAT(TEXT("Physics Time MS"), STAT_PhysicsTimeMS, STATGROUP_PhysicsPerformance);
+// Console variables for performance tuning
+static TAutoConsoleVariable<int32> CVarMaxPhysicsBodies(
+    TEXT("tp.Physics.MaxBodies"),
+    5000,
+    TEXT("Maximum number of physics bodies allowed in simulation"),
+    ECVF_Default
+);
+
+static TAutoConsoleVariable<float> CVarPhysicsTickRate(
+    TEXT("tp.Physics.TickRate"),
+    60.0f,
+    TEXT("Physics simulation tick rate"),
+    ECVF_Default
+);
+
+static TAutoConsoleVariable<int32> CVarMaxCollisionQueries(
+    TEXT("tp.Physics.MaxCollisionQueries"),
+    1000,
+    TEXT("Maximum collision queries per frame"),
+    ECVF_Default
+);
 
 UPhysicsPerformanceOptimizer::UPhysicsPerformanceOptimizer()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickGroup = TG_PostPhysics;
-    PrimaryComponentTick.TickInterval = 0.1f; // Optimize every 100ms
+    PrimaryComponentTick.TickInterval = 0.1f; // Update every 100ms
     
-    // Initialize default values based on platform
-    SetDefaultPerformanceSettings();
+    // Performance targets
+    TargetFrameTime = 16.67f; // 60 FPS target
+    MaxPhysicsBodies = 5000;
+    MaxCollisionQueries = 1000;
+    PhysicsTickRate = 60.0f;
+    
+    // LOD settings
+    LODDistanceThresholds.Add(500.0f);   // LOD 0 -> LOD 1
+    LODDistanceThresholds.Add(1000.0f);  // LOD 1 -> LOD 2
+    LODDistanceThresholds.Add(2000.0f);  // LOD 2 -> LOD 3
+    
+    // Performance monitoring
+    FrameTimeHistory.Reserve(60); // Store 1 second of frame times at 60fps
+    PhysicsBodyCount = 0;
+    CollisionQueryCount = 0;
+    CurrentLODLevel = 0;
 }
 
 void UPhysicsPerformanceOptimizer::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Initialize physics optimization systems
-    InitializePhysicsOptimization();
+    UE_LOG(LogPhysicsPerformance, Log, TEXT("Physics Performance Optimizer initialized"));
     
-    UE_LOG(LogTemp, Log, TEXT("Physics Performance Optimizer initialized for %s"), 
-           *GetOwner()->GetName());
-}
-
-void UPhysicsPerformanceOptimizer::TickComponent(float DeltaTime, ELevelTick TickType, 
-                                               FActorComponentTickFunction* ThisTickFunction)
-{
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    
-    SCOPE_CYCLE_COUNTER(STAT_PhysicsOptimization);
-    
-    // Update physics LOD based on camera position
-    UpdatePhysicsLOD();
-    
-    // Manage ragdoll performance
-    ManageRagdollPerformance(MaxConcurrentRagdolls);
-    
-    // Optimize destruction system
-    OptimizeDestructionSystem(MaxDestructionDebris, DestructionDebrisLifetime);
-    
-    // Adaptive substep scaling based on performance
-    AdaptiveSubstepScaling(16.67f); // Target 60 FPS
-    
-    // Cleanup distant physics objects
-    CleanupDistantPhysicsObjects(1000.0f);
-    
-    // Update performance metrics
-    UpdatePerformanceMetrics();
-}
-
-void UPhysicsPerformanceOptimizer::InitializePhysicsOptimization()
-{
-    UWorld* World = GetWorld();
+    // Cache world reference
+    World = GetWorld();
     if (!World)
     {
-        UE_LOG(LogTemp, Error, TEXT("PhysicsPerformanceOptimizer: No valid world found"));
+        UE_LOG(LogPhysicsPerformance, Error, TEXT("Failed to get world reference"));
         return;
     }
     
-    // Set platform-specific performance settings
-    SetPlatformSpecificSettings();
+    // Initialize performance monitoring
+    LastFrameTime = FPlatformTime::Seconds();
     
-    // Initialize physics object tracking
-    InitializePhysicsObjectTracking();
-    
-    // Set up performance monitoring
-    SetupPerformanceMonitoring();
-    
-    UE_LOG(LogTemp, Log, TEXT("Physics Performance Optimization initialized successfully"));
+    // Set up performance targets based on platform
+    SetupPlatformSpecificSettings();
 }
 
-void UPhysicsPerformanceOptimizer::OptimizeCollisionDetection()
+void UPhysicsPerformanceOptimizer::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    UWorld* World = GetWorld();
-    if (!World) return;
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    APawn* PlayerPawn = World->GetFirstPlayerController()->GetPawn();
-    if (!PlayerPawn) return;
-    
-    FVector PlayerLocation = PlayerPawn->GetActorLocation();
-    
-    // Iterate through all physics objects and optimize collision based on distance
-    for (TActorIterator<AActor> ActorIterator(World); ActorIterator; ++ActorIterator)
+    if (!World)
     {
-        AActor* Actor = *ActorIterator;
-        if (!Actor || !Actor->GetRootComponent()) continue;
-        
-        UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(Actor->GetRootComponent());
-        if (!PrimComp) continue;
-        
-        float Distance = FVector::Dist(PlayerLocation, Actor->GetActorLocation());
-        
-        // Apply distance-based collision optimization
-        if (Distance <= 50.0f)
-        {
-            // Full collision for close objects
-            PrimComp->SetCollisionResponseToAllChannels(ECR_Block);
-            PrimComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-        }
-        else if (Distance <= 200.0f)
-        {
-            // Simplified collision for medium distance
-            PrimComp->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-        }
-        else if (Distance <= 500.0f)
-        {
-            // Basic bounds collision for far objects
-            PrimComp->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-            PrimComp->SetCollisionResponseToAllChannels(ECR_Ignore);
-            PrimComp->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Block);
-        }
-        else
-        {
-            // No collision for very distant objects
-            PrimComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-        }
+        return;
+    }
+    
+    // Update performance metrics
+    UpdatePerformanceMetrics(DeltaTime);
+    
+    // Check if optimization is needed
+    if (ShouldOptimize())
+    {
+        OptimizePhysicsPerformance();
+    }
+    
+    // Update LOD based on performance
+    UpdatePhysicsLOD();
+    
+    // Log performance stats periodically
+    static float LogTimer = 0.0f;
+    LogTimer += DeltaTime;
+    if (LogTimer >= 5.0f) // Log every 5 seconds
+    {
+        LogPerformanceStats();
+        LogTimer = 0.0f;
     }
 }
 
-void UPhysicsPerformanceOptimizer::ManageRagdollPerformance(int32 MaxConcurrentRagdolls)
+void UPhysicsPerformanceOptimizer::UpdatePerformanceMetrics(float DeltaTime)
 {
-    SCOPE_CYCLE_COUNTER(STAT_RagdollManagement);
+    // Update frame time history
+    double CurrentTime = FPlatformTime::Seconds();
+    float CurrentFrameTime = (CurrentTime - LastFrameTime) * 1000.0f; // Convert to milliseconds
+    LastFrameTime = CurrentTime;
     
-    UWorld* World = GetWorld();
-    if (!World) return;
-    
-    TArray<USkeletalMeshComponent*> ActiveRagdolls;
-    
-    // Find all active ragdolls
-    for (TActorIterator<AActor> ActorIterator(World); ActorIterator; ++ActorIterator)
+    FrameTimeHistory.Add(CurrentFrameTime);
+    if (FrameTimeHistory.Num() > 60)
     {
-        AActor* Actor = *ActorIterator;
-        if (!Actor) continue;
-        
-        USkeletalMeshComponent* SkeletalMesh = Actor->FindComponentByClass<USkeletalMeshComponent>();
-        if (SkeletalMesh && SkeletalMesh->IsSimulatingPhysics())
-        {
-            ActiveRagdolls.Add(SkeletalMesh);
-        }
+        FrameTimeHistory.RemoveAt(0);
     }
     
-    SET_DWORD_STAT(STAT_ActiveRagdolls, ActiveRagdolls.Num());
-    
-    // If we have too many ragdolls, disable the furthest ones
-    if (ActiveRagdolls.Num() > MaxConcurrentRagdolls)
+    // Calculate average frame time
+    float TotalFrameTime = 0.0f;
+    for (float FrameTime : FrameTimeHistory)
     {
-        APawn* PlayerPawn = World->GetFirstPlayerController()->GetPawn();
-        if (PlayerPawn)
+        TotalFrameTime += FrameTime;
+    }
+    AverageFrameTime = TotalFrameTime / FMath::Max(FrameTimeHistory.Num(), 1);
+    
+    // Update physics body count
+    PhysicsBodyCount = CountActivePhysicsBodies();
+    
+    // Reset collision query counter (should be updated by collision system)
+    CollisionQueryCount = 0;
+}
+
+bool UPhysicsPerformanceOptimizer::ShouldOptimize() const
+{
+    // Check if frame time exceeds target
+    if (AverageFrameTime > TargetFrameTime * 1.1f) // 10% tolerance
+    {
+        return true;
+    }
+    
+    // Check if physics body count exceeds limit
+    if (PhysicsBodyCount > MaxPhysicsBodies)
+    {
+        return true;
+    }
+    
+    // Check if collision queries exceed limit
+    if (CollisionQueryCount > MaxCollisionQueries)
+    {
+        return true;
+    }
+    
+    return false;
+}
+
+void UPhysicsPerformanceOptimizer::OptimizePhysicsPerformance()
+{
+    UE_LOG(LogPhysicsPerformance, Warning, TEXT("Performance optimization triggered - Frame: %.2fms, Bodies: %d, Queries: %d"),
+        AverageFrameTime, PhysicsBodyCount, CollisionQueryCount);
+    
+    // Reduce physics tick rate if performance is poor
+    if (AverageFrameTime > TargetFrameTime * 1.2f)
+    {
+        PhysicsTickRate = FMath::Max(PhysicsTickRate * 0.9f, 30.0f);
+        UE_LOG(LogPhysicsPerformance, Log, TEXT("Reduced physics tick rate to %.1f Hz"), PhysicsTickRate);
+    }
+    
+    // Increase LOD level if too many physics bodies
+    if (PhysicsBodyCount > MaxPhysicsBodies)
+    {
+        CurrentLODLevel = FMath::Min(CurrentLODLevel + 1, LODDistanceThresholds.Num());
+        UE_LOG(LogPhysicsPerformance, Log, TEXT("Increased physics LOD level to %d"), CurrentLODLevel);
+    }
+    
+    // Cull distant physics objects
+    CullDistantPhysicsObjects();
+    
+    // Optimize collision detection
+    OptimizeCollisionDetection();
+}
+
+void UPhysicsPerformanceOptimizer::UpdatePhysicsLOD()
+{
+    if (!World || !World->GetFirstPlayerController())
+    {
+        return;
+    }
+    
+    // Get player camera location
+    FVector CameraLocation = World->GetFirstPlayerController()->PlayerCameraManager->GetCameraLocation();
+    
+    // Update LOD for all physics objects based on distance
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    {
+        AActor* Actor = *ActorItr;
+        if (!Actor || !Actor->GetRootComponent())
         {
-            FVector PlayerLocation = PlayerPawn->GetActorLocation();
-            
-            // Sort ragdolls by distance from player
-            ActiveRagdolls.Sort([PlayerLocation](const USkeletalMeshComponent& A, const USkeletalMeshComponent& B)
+            continue;
+        }
+        
+        float Distance = FVector::Dist(Actor->GetActorLocation(), CameraLocation);
+        int32 RequiredLOD = CalculateLODLevel(Distance);
+        
+        // Apply LOD to static mesh components
+        TArray<UStaticMeshComponent*> StaticMeshComponents;
+        Actor->GetComponents<UStaticMeshComponent>(StaticMeshComponents);
+        
+        for (UStaticMeshComponent* MeshComp : StaticMeshComponents)
+        {
+            if (MeshComp && MeshComp->GetBodyInstance())
             {
-                float DistA = FVector::DistSquared(PlayerLocation, A.GetComponentLocation());
-                float DistB = FVector::DistSquared(PlayerLocation, B.GetComponentLocation());
-                return DistA < DistB;
-            });
-            
-            // Disable ragdolls beyond the limit
-            for (int32 i = MaxConcurrentRagdolls; i < ActiveRagdolls.Num(); ++i)
+                ApplyPhysicsLOD(MeshComp, RequiredLOD);
+            }
+        }
+        
+        // Apply LOD to skeletal mesh components
+        TArray<USkeletalMeshComponent*> SkeletalMeshComponents;
+        Actor->GetComponents<USkeletalMeshComponent>(SkeletalMeshComponents);
+        
+        for (USkeletalMeshComponent* MeshComp : SkeletalMeshComponents)
+        {
+            if (MeshComp && MeshComp->GetBodyInstance())
             {
-                ActiveRagdolls[i]->SetSimulatePhysics(false);
-                ActiveRagdolls[i]->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-                
-                UE_LOG(LogTemp, VeryVerbose, TEXT("Disabled ragdoll for performance: %s"), 
-                       *ActiveRagdolls[i]->GetOwner()->GetName());
+                ApplyPhysicsLOD(MeshComp, RequiredLOD);
             }
         }
     }
 }
 
-void UPhysicsPerformanceOptimizer::OptimizeDestructionSystem(int32 MaxDebrisCount, float DebrisLifetime)
+int32 UPhysicsPerformanceOptimizer::CalculateLODLevel(float Distance) const
 {
-    SCOPE_CYCLE_COUNTER(STAT_DestructionOptimization);
-    
-    UWorld* World = GetWorld();
-    if (!World) return;
-    
-    TArray<UGeometryCollectionComponent*> DestructionComponents;
-    
-    // Find all geometry collection components (destruction debris)
-    for (TActorIterator<AActor> ActorIterator(World); ActorIterator; ++ActorIterator)
+    for (int32 i = 0; i < LODDistanceThresholds.Num(); ++i)
     {
-        AActor* Actor = *ActorIterator;
-        if (!Actor) continue;
-        
-        UGeometryCollectionComponent* GeomComp = Actor->FindComponentByClass<UGeometryCollectionComponent>();
-        if (GeomComp && GeomComp->IsSimulatingPhysics())
+        if (Distance < LODDistanceThresholds[i])
         {
-            DestructionComponents.Add(GeomComp);
+            return i;
         }
     }
-    
-    SET_DWORD_STAT(STAT_DestructionDebris, DestructionComponents.Num());
-    
-    // If we have too much debris, clean up the oldest/furthest
-    if (DestructionComponents.Num() > MaxDebrisCount)
+    return LODDistanceThresholds.Num(); // Highest LOD level
+}
+
+void UPhysicsPerformanceOptimizer::ApplyPhysicsLOD(UPrimitiveComponent* Component, int32 LODLevel)
+{
+    if (!Component || !Component->GetBodyInstance())
     {
-        APawn* PlayerPawn = World->GetFirstPlayerController()->GetPawn();
-        if (PlayerPawn)
+        return;
+    }
+    
+    FBodyInstance* BodyInstance = Component->GetBodyInstance();
+    
+    switch (LODLevel)
+    {
+    case 0: // High detail
+        BodyInstance->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+        Component->SetNotifyRigidBodyCollision(true);
+        break;
+        
+    case 1: // Medium detail
+        BodyInstance->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+        Component->SetNotifyRigidBodyCollision(false);
+        break;
+        
+    case 2: // Low detail
+        BodyInstance->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+        Component->SetNotifyRigidBodyCollision(false);
+        break;
+        
+    case 3: // Very low detail
+        BodyInstance->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+        Component->SetNotifyRigidBodyCollision(false);
+        break;
+        
+    default:
+        // Disable physics completely for highest LOD
+        BodyInstance->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+        Component->SetNotifyRigidBodyCollision(false);
+        break;
+    }
+}
+
+void UPhysicsPerformanceOptimizer::CullDistantPhysicsObjects()
+{
+    if (!World || !World->GetFirstPlayerController())
+    {
+        return;
+    }
+    
+    FVector CameraLocation = World->GetFirstPlayerController()->PlayerCameraManager->GetCameraLocation();
+    float CullDistance = LODDistanceThresholds.Num() > 0 ? LODDistanceThresholds.Last() * 1.5f : 3000.0f;
+    
+    int32 CulledCount = 0;
+    
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    {
+        AActor* Actor = *ActorItr;
+        if (!Actor || !Actor->GetRootComponent())
         {
-            FVector PlayerLocation = PlayerPawn->GetActorLocation();
+            continue;
+        }
+        
+        float Distance = FVector::Dist(Actor->GetActorLocation(), CameraLocation);
+        
+        if (Distance > CullDistance)
+        {
+            // Disable physics for very distant objects
+            TArray<UPrimitiveComponent*> PrimitiveComponents;
+            Actor->GetComponents<UPrimitiveComponent>(PrimitiveComponents);
             
-            // Sort by distance and age
-            DestructionComponents.Sort([PlayerLocation](const UGeometryCollectionComponent& A, const UGeometryCollectionComponent& B)
+            for (UPrimitiveComponent* PrimComp : PrimitiveComponents)
             {
-                float DistA = FVector::DistSquared(PlayerLocation, A.GetComponentLocation());
-                float DistB = FVector::DistSquared(PlayerLocation, B.GetComponentLocation());
-                return DistA > DistB; // Furthest first
-            });
-            
-            // Remove excess debris
-            for (int32 i = MaxDebrisCount; i < DestructionComponents.Num(); ++i)
-            {
-                if (DestructionComponents[i]->GetOwner())
+                if (PrimComp && PrimComp->GetBodyInstance() && 
+                    PrimComp->GetCollisionEnabled() != ECollisionEnabled::NoCollision)
                 {
-                    DestructionComponents[i]->GetOwner()->Destroy();
+                    PrimComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+                    CulledCount++;
                 }
             }
         }
     }
     
-    // Clean up debris based on lifetime
-    CleanupOldDebris(DebrisLifetime);
-}
-
-void UPhysicsPerformanceOptimizer::UpdatePhysicsLOD()
-{
-    SCOPE_CYCLE_COUNTER(STAT_PhysicsLODUpdate);
-    
-    UWorld* World = GetWorld();
-    if (!World) return;
-    
-    APawn* PlayerPawn = World->GetFirstPlayerController()->GetPawn();
-    if (!PlayerPawn) return;
-    
-    FVector PlayerLocation = PlayerPawn->GetActorLocation();
-    
-    // Update physics LOD for all physics objects
-    for (TActorIterator<AActor> ActorIterator(World); ActorIterator; ++ActorIterator)
+    if (CulledCount > 0)
     {
-        AActor* Actor = *ActorIterator;
-        if (!Actor) continue;
-        
-        UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(Actor->GetRootComponent());
-        if (!PrimComp || !PrimComp->IsSimulatingPhysics()) continue;
-        
-        float Distance = FVector::Dist(PlayerLocation, Actor->GetActorLocation());
-        EPhysicsLODLevel LODLevel = DeterminePhysicsLODLevel(Distance);
-        
-        ApplyPhysicsLOD(PrimComp, LODLevel);
+        UE_LOG(LogPhysicsPerformance, Log, TEXT("Culled %d distant physics objects"), CulledCount);
     }
 }
 
-void UPhysicsPerformanceOptimizer::AdaptiveSubstepScaling(float TargetFrameTimeMS)
+void UPhysicsPerformanceOptimizer::OptimizeCollisionDetection()
 {
-    UWorld* World = GetWorld();
-    if (!World) return;
+    // Reduce collision complexity for distant objects
+    // This would typically involve switching to simpler collision shapes
+    // or reducing the number of collision channels checked
     
-    // Get current frame time
-    float CurrentFrameTime = FApp::GetDeltaTime() * 1000.0f; // Convert to milliseconds
+    UE_LOG(LogPhysicsPerformance, Log, TEXT("Optimizing collision detection"));
     
-    // Adjust substeps based on performance
-    if (CurrentFrameTime > TargetFrameTimeMS * 1.2f) // 20% over target
-    {
-        // Reduce substeps to improve performance
-        CurrentPhysicsSubsteps = FMath::Max(MinPhysicsSubsteps, CurrentPhysicsSubsteps - 1);
-    }
-    else if (CurrentFrameTime < TargetFrameTimeMS * 0.8f) // 20% under target
-    {
-        // Increase substeps for better quality
-        CurrentPhysicsSubsteps = FMath::Min(MaxPhysicsSubsteps, CurrentPhysicsSubsteps + 1);
-    }
-    
-    // Apply new substep count
-    if (UPhysicsSettings* PhysicsSettings = UPhysicsSettings::Get())
-    {
-        PhysicsSettings->MaxSubsteps = CurrentPhysicsSubsteps;
-    }
+    // Example: Reduce collision query complexity
+    // In a real implementation, this would modify collision settings
+    // based on performance requirements
 }
 
-UPhysicsPerformanceOptimizer::FPhysicsPerformanceMetrics UPhysicsPerformanceOptimizer::GetPhysicsPerformanceMetrics() const
+int32 UPhysicsPerformanceOptimizer::CountActivePhysicsBodies() const
 {
-    FPhysicsPerformanceMetrics Metrics;
-    
-    // Get current performance data
-    Metrics.PhysicsSimulationTimeMS = GET_FLOAT_STAT(STAT_PhysicsTimeMS);
-    Metrics.ActivePhysicsBodies = GET_DWORD_STAT(STAT_ActivePhysicsBodies);
-    Metrics.ActiveRagdolls = GET_DWORD_STAT(STAT_ActiveRagdolls);
-    Metrics.DestructionDebrisCount = GET_DWORD_STAT(STAT_DestructionDebris);
-    Metrics.CurrentSubsteps = CurrentPhysicsSubsteps;
-    Metrics.bWithinPerformanceBudget = Metrics.PhysicsSimulationTimeMS <= PhysicsPerformanceBudgetMS;
-    
-    // Calculate physics CPU usage percentage
-    float FrameTime = FApp::GetDeltaTime() * 1000.0f;
-    Metrics.PhysicsCPUUsagePercent = (Metrics.PhysicsSimulationTimeMS / FrameTime) * 100.0f;
-    
-    return Metrics;
-}
-
-void UPhysicsPerformanceOptimizer::CleanupDistantPhysicsObjects(float DistanceThreshold)
-{
-    UWorld* World = GetWorld();
-    if (!World) return;
-    
-    APawn* PlayerPawn = World->GetFirstPlayerController()->GetPawn();
-    if (!PlayerPawn) return;
-    
-    FVector PlayerLocation = PlayerPawn->GetActorLocation();
-    
-    for (TActorIterator<AActor> ActorIterator(World); ActorIterator; ++ActorIterator)
+    if (!World)
     {
-        AActor* Actor = *ActorIterator;
-        if (!Actor) continue;
-        
-        float Distance = FVector::Dist(PlayerLocation, Actor->GetActorLocation());
-        
-        if (Distance > DistanceThreshold)
+        return 0;
+    }
+    
+    int32 Count = 0;
+    
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    {
+        AActor* Actor = *ActorItr;
+        if (!Actor)
         {
-            UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(Actor->GetRootComponent());
-            if (PrimComp && PrimComp->IsSimulatingPhysics())
+            continue;
+        }
+        
+        TArray<UPrimitiveComponent*> PrimitiveComponents;
+        Actor->GetComponents<UPrimitiveComponent>(PrimitiveComponents);
+        
+        for (UPrimitiveComponent* PrimComp : PrimitiveComponents)
+        {
+            if (PrimComp && PrimComp->GetBodyInstance() && 
+                PrimComp->GetCollisionEnabled() != ECollisionEnabled::NoCollision)
             {
-                // Disable physics for very distant objects
-                PrimComp->SetSimulatePhysics(false);
-                PrimComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+                Count++;
             }
         }
     }
-}
-
-void UPhysicsPerformanceOptimizer::TogglePhysicsObjectType(EPhysicsObjectType ObjectType, bool bEnabled)
-{
-    PhysicsObjectTypeEnabled[ObjectType] = bEnabled;
     
-    UE_LOG(LogTemp, Log, TEXT("Physics object type %s %s"), 
-           *UEnum::GetValueAsString(ObjectType),
-           bEnabled ? TEXT("enabled") : TEXT("disabled"));
+    return Count;
 }
 
-void UPhysicsPerformanceOptimizer::SetDefaultPerformanceSettings()
+void UPhysicsPerformanceOptimizer::SetupPlatformSpecificSettings()
 {
-    // Set platform-specific defaults
-    #if PLATFORM_DESKTOP
-        MaxConcurrentRagdolls = 16;
-        MaxDestructionDebris = 1000;
-        PhysicsPerformanceBudgetMS = 8.0f;
-    #else
-        MaxConcurrentRagdolls = 8;
-        MaxDestructionDebris = 500;
-        PhysicsPerformanceBudgetMS = 5.0f;
-    #endif
-}
-
-void UPhysicsPerformanceOptimizer::SetPlatformSpecificSettings()
-{
-    // Console-specific optimizations
-    #if PLATFORM_CONSOLE
-        // More aggressive optimization for consoles
-        PhysicsLODDistances[EPhysicsLODLevel::LOD0_Full] = 30.0f;
-        PhysicsLODDistances[EPhysicsLODLevel::LOD1_Reduced] = 100.0f;
-        PhysicsLODDistances[EPhysicsLODLevel::LOD2_Basic] = 200.0f;
-        PhysicsLODDistances[EPhysicsLODLevel::LOD3_Kinematic] = 300.0f;
-    #endif
-}
-
-void UPhysicsPerformanceOptimizer::InitializePhysicsObjectTracking()
-{
-    // Initialize tracking arrays and maps for physics objects
-    // This will be used to efficiently manage physics objects by type
-}
-
-void UPhysicsPerformanceOptimizer::SetupPerformanceMonitoring()
-{
-    // Set up performance monitoring hooks
-    // This will track physics performance metrics in real-time
-}
-
-UPhysicsPerformanceOptimizer::EPhysicsLODLevel UPhysicsPerformanceOptimizer::DeterminePhysicsLODLevel(float Distance) const
-{
-    if (Distance <= PhysicsLODDistances[EPhysicsLODLevel::LOD0_Full])
+    // Adjust settings based on platform capabilities
+    FString PlatformName = FPlatformProperties::PlatformName();
+    
+    if (PlatformName == TEXT("Windows") || PlatformName == TEXT("Mac") || PlatformName == TEXT("Linux"))
     {
-        return EPhysicsLODLevel::LOD0_Full;
+        // PC settings - higher performance target
+        TargetFrameTime = 16.67f; // 60 FPS
+        MaxPhysicsBodies = 5000;
+        MaxCollisionQueries = 1000;
     }
-    else if (Distance <= PhysicsLODDistances[EPhysicsLODLevel::LOD1_Reduced])
+    else if (PlatformName == TEXT("XboxOne") || PlatformName == TEXT("PS4"))
     {
-        return EPhysicsLODLevel::LOD1_Reduced;
-    }
-    else if (Distance <= PhysicsLODDistances[EPhysicsLODLevel::LOD2_Basic])
-    {
-        return EPhysicsLODLevel::LOD2_Basic;
+        // Console settings - moderate performance target
+        TargetFrameTime = 33.33f; // 30 FPS
+        MaxPhysicsBodies = 3000;
+        MaxCollisionQueries = 500;
     }
     else
     {
-        return EPhysicsLODLevel::LOD3_Kinematic;
+        // Mobile/other platforms - conservative settings
+        TargetFrameTime = 33.33f; // 30 FPS
+        MaxPhysicsBodies = 1000;
+        MaxCollisionQueries = 200;
     }
+    
+    UE_LOG(LogPhysicsPerformance, Log, TEXT("Platform: %s, Target Frame Time: %.2fms, Max Bodies: %d"),
+        *PlatformName, TargetFrameTime, MaxPhysicsBodies);
 }
 
-void UPhysicsPerformanceOptimizer::ApplyPhysicsLOD(UPrimitiveComponent* Component, EPhysicsLODLevel LODLevel)
+void UPhysicsPerformanceOptimizer::LogPerformanceStats() const
 {
-    if (!Component) return;
-    
-    switch (LODLevel)
-    {
-        case EPhysicsLODLevel::LOD0_Full:
-            // Full physics simulation
-            Component->SetSimulatePhysics(true);
-            Component->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-            break;
-            
-        case EPhysicsLODLevel::LOD1_Reduced:
-            // Reduced physics simulation
-            Component->SetSimulatePhysics(true);
-            Component->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-            break;
-            
-        case EPhysicsLODLevel::LOD2_Basic:
-            // Basic physics simulation
-            Component->SetSimulatePhysics(false);
-            Component->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-            break;
-            
-        case EPhysicsLODLevel::LOD3_Kinematic:
-            // Kinematic only
-            Component->SetSimulatePhysics(false);
-            Component->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-            break;
-    }
+    UE_LOG(LogPhysicsPerformance, Log, 
+        TEXT("Performance Stats - Frame: %.2fms (Target: %.2fms), Bodies: %d (Max: %d), Queries: %d (Max: %d), LOD: %d"),
+        AverageFrameTime, TargetFrameTime, PhysicsBodyCount, MaxPhysicsBodies, 
+        CollisionQueryCount, MaxCollisionQueries, CurrentLODLevel);
 }
 
-void UPhysicsPerformanceOptimizer::CleanupOldDebris(float MaxLifetime)
+// Blueprint callable functions
+float UPhysicsPerformanceOptimizer::GetCurrentFrameTime() const
 {
-    UWorld* World = GetWorld();
-    if (!World) return;
-    
-    float CurrentTime = World->GetTimeSeconds();
-    
-    for (TActorIterator<AActor> ActorIterator(World); ActorIterator; ++ActorIterator)
-    {
-        AActor* Actor = *ActorIterator;
-        if (!Actor) continue;
-        
-        UGeometryCollectionComponent* GeomComp = Actor->FindComponentByClass<UGeometryCollectionComponent>();
-        if (GeomComp && GeomComp->IsSimulatingPhysics())
-        {
-            float ActorAge = CurrentTime - Actor->GetGameTimeSinceCreation();
-            if (ActorAge > MaxLifetime)
-            {
-                Actor->Destroy();
-            }
-        }
-    }
+    return AverageFrameTime;
 }
 
-void UPhysicsPerformanceOptimizer::UpdatePerformanceMetrics()
+int32 UPhysicsPerformanceOptimizer::GetPhysicsBodyCount() const
 {
-    UWorld* World = GetWorld();
-    if (!World) return;
-    
-    // Count active physics bodies
-    int32 ActiveBodies = 0;
-    for (TActorIterator<AActor> ActorIterator(World); ActorIterator; ++ActorIterator)
-    {
-        AActor* Actor = *ActorIterator;
-        if (!Actor) continue;
-        
-        UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(Actor->GetRootComponent());
-        if (PrimComp && PrimComp->IsSimulatingPhysics())
-        {
-            ActiveBodies++;
-        }
-    }
-    
-    SET_DWORD_STAT(STAT_ActivePhysicsBodies, ActiveBodies);
-    
-    // Update physics time
-    float PhysicsTime = FApp::GetDeltaTime() * 1000.0f * 0.3f; // Estimate 30% of frame time for physics
-    SET_FLOAT_STAT(STAT_PhysicsTimeMS, PhysicsTime);
+    return PhysicsBodyCount;
+}
+
+int32 UPhysicsPerformanceOptimizer::GetCurrentLODLevel() const
+{
+    return CurrentLODLevel;
+}
+
+void UPhysicsPerformanceOptimizer::SetTargetFrameTime(float NewTargetFrameTime)
+{
+    TargetFrameTime = FMath::Max(NewTargetFrameTime, 8.33f); // Minimum 120 FPS
+    UE_LOG(LogPhysicsPerformance, Log, TEXT("Target frame time set to %.2fms"), TargetFrameTime);
+}
+
+void UPhysicsPerformanceOptimizer::SetMaxPhysicsBodies(int32 NewMaxBodies)
+{
+    MaxPhysicsBodies = FMath::Max(NewMaxBodies, 100);
+    UE_LOG(LogPhysicsPerformance, Log, TEXT("Max physics bodies set to %d"), MaxPhysicsBodies);
+}
+
+void UPhysicsPerformanceOptimizer::ForceOptimization()
+{
+    UE_LOG(LogPhysicsPerformance, Log, TEXT("Forcing physics performance optimization"));
+    OptimizePhysicsPerformance();
 }
