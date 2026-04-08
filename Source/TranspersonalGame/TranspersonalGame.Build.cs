@@ -7,7 +7,7 @@ public class TranspersonalGame : ModuleRules
     public TranspersonalGame(ReadOnlyTargetRules Target) : base(Target)
     {
         PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
-
+        
         // Core dependencies
         PublicDependencyModuleNames.AddRange(new string[] 
         { 
@@ -21,7 +21,7 @@ public class TranspersonalGame : ModuleRules
             "SlateCore"
         });
 
-        // Private dependencies for advanced systems
+        // Private dependencies for game systems
         PrivateDependencyModuleNames.AddRange(new string[] 
         { 
             "RenderCore",
@@ -35,31 +35,10 @@ public class TranspersonalGame : ModuleRules
             "ChaosVehicles",
             "Niagara",
             "AudioMixer",
-            "MetasoundEngine",
-            "LevelSequence",
-            "MovieScene",
-            "CinematicCamera"
+            "MetasoundEngine"
         });
 
-        // UE5 specific modules
-        if (Target.Version.MajorVersion >= 5)
-        {
-            PrivateDependencyModuleNames.AddRange(new string[]
-            {
-                "MassEntity",
-                "MassMovement", 
-                "MassSpawner",
-                "MassActors",
-                "MassCommon",
-                "MassSimulation",
-                "MassGameplay",
-                "WorldPartition",
-                "Lumen",
-                "Nanite"
-            });
-        }
-
-        // Development and editor dependencies
+        // Editor-only dependencies
         if (Target.bBuildEditor)
         {
             PrivateDependencyModuleNames.AddRange(new string[]
@@ -67,12 +46,11 @@ public class TranspersonalGame : ModuleRules
                 "UnrealEd",
                 "EditorStyle",
                 "EditorWidgets",
-                "ToolMenus",
-                "PropertyEditor"
+                "ToolMenus"
             });
         }
 
-        // Platform specific optimizations
+        // Platform-specific optimizations
         if (Target.Platform == UnrealTargetPlatform.Win64)
         {
             PublicDefinitions.Add("PLATFORM_WINDOWS=1");
@@ -82,20 +60,15 @@ public class TranspersonalGame : ModuleRules
             PublicDefinitions.Add("PLATFORM_MAC=1");
         }
 
-        // Build configuration specific settings
-        if (Target.Configuration == UnrealTargetConfiguration.Shipping)
-        {
-            PublicDefinitions.Add("UE_BUILD_SHIPPING=1");
-            bUseLoggingInShipping = false;
-        }
-        else
-        {
-            PublicDefinitions.Add("UE_BUILD_DEVELOPMENT=1");
-        }
-
         // Performance settings
         bUseUnity = true;
         MinFilesUsingPrecompiledHeaderOverride = 1;
         bFasterWithoutUnity = false;
+        
+        // Enable IWYU for cleaner includes
+        bEnforceIWYU = true;
+        
+        // Optimization flags
+        OptimizeCode = CodeOptimization.InShippingBuildsOnly;
     }
 }
