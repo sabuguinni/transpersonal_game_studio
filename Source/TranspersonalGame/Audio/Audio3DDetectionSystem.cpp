@@ -1,17 +1,17 @@
 #include "Audio3DDetectionSystem.h"
 #include "Engine/World.h"
-#include "GameFramework/Actor.h"
-#include "Components/AudioComponent.h"
-#include "Kismet/GameplayStatics.h"
 #include "Engine/Engine.h"
+#include "Kismet/GameplayStatics.h"
 #include "DrawDebugHelpers.h"
+#include "TimerManager.h"
+#include "../Characters/DinosaurCharacter.h"
 
 UAudio3DDetectionSystem::UAudio3DDetectionSystem()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f; // 10 updates per second by default
+    PrimaryComponentTick.TickInterval = 0.1f; // 10 FPS for performance
     
-    // Initialize default values
+    // Default settings
     MaxDetectionRange = 5000.0f;
     MinAudibleIntensity = 0.1f;
     DetectionUpdateRate = 10.0f;
@@ -20,7 +20,6 @@ UAudio3DDetectionSystem::UAudio3DDetectionSystem()
     bDetectAllDinosaurs = true;
     
     DetectionSensitivity = 1.0f;
-    LastDetectionUpdate = 0.0f;
     DetectionUpdateInterval = 1.0f / DetectionUpdateRate;
 }
 
@@ -28,20 +27,25 @@ void UAudio3DDetectionSystem::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Update detection interval based on rate
-    DetectionUpdateInterval = 1.0f / FMath::Max(DetectionUpdateRate, 1.0f);
-    
-    // Initialize detection arrays
+    // Initialize detection data
     CurrentDetections.Empty();
     LastDetectionTimes.Empty();
+    
+    // Start detection updates
+    LastDetectionUpdate = 0.0f;
 }
 
 void UAudio3DDetectionSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    LastDetectionUpdate += DeltaTime;
+    if (!GetOwner() || !GetWorld())
+    {
+        return;
+    }
     
+    // Update detection at specified rate
+    LastDetectionUpdate += DeltaTime;
     if (LastDetectionUpdate >= DetectionUpdateInterval)
     {
         UpdateDetections();
@@ -56,23 +60,18 @@ void UAudio3DDetectionSystem::UpdateDetections()
         return;
     }
     
-    // Clear previous detections
-    TArray<FAudioDetectionData> PreviousDetections = CurrentDetections;
-    CurrentDetections.Empty();
+    // Clear old detections
+    TArray<FAudioDetectionData> NewDetections;
     
-    // Find all dinosaurs in the world
+    // Find all dinosaurs in range
     TArray<AActor*> FoundDinosaurs;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), ADinosaur::StaticClass(), FoundDinosaurs);
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), ADinosaurCharacter::StaticClass(), FoundDinosaurs);
     
-    // Process each dinosaur
     for (AActor* Actor : FoundDinosaurs)
     {
-        if (ADinosaur* Dinosaur = Cast<ADinosaur>(Actor))
+        if (ADinosaurCharacter* Dinosaur = Cast<ADinosaurCharacter>(Actor))
         {
-            if (ShouldDetectDinosaur(Dinosaur))
-            {
-                ProcessDinosaur(Dinosaur);
-            }
+            ProcessDinosaur(Dinosaur);
         }
     }
     
@@ -82,50 +81,18 @@ void UAudio3DDetectionSystem::UpdateDetections()
     
     // Clean up old detections
     CleanupOldDetections();
-    
-    // Fire events for new/updated/lost detections
-    for (const FAudioDetectionData& Detection : CurrentDetections)
-    {
-        bool bWasDetected = PreviousDetections.ContainsByPredicate([&](const FAudioDetectionData& Prev)
-        {
-            return Prev.Source == Detection.Source;
-        });
-        
-        if (bWasDetected)
-        {
-            OnDetectionUpdated.Broadcast(Detection);
-        }
-        else
-        {
-            OnNewDetection.Broadcast(Detection);
-        }
-    }
-    
-    // Check for lost detections
-    for (const FAudioDetectionData& PrevDetection : PreviousDetections)
-    {
-        bool bStillDetected = CurrentDetections.ContainsByPredicate([&](const FAudioDetectionData& Current)
-        {
-            return Current.Source == PrevDetection.Source;
-        });
-        
-        if (!bStillDetected)
-        {
-            OnDetectionLost.Broadcast(PrevDetection.Source);
-        }
-    }
 }
 
-void UAudio3DDetectionSystem::ProcessDinosaur(ADinosaur* Dinosaur)
+void UAudio3DDetectionSystem::ProcessDinosaur(ADinosaurCharacter* Dinosaur)
 {
-    if (!Dinosaur || !GetOwner())
+    if (!Dinosaur || !ShouldDetectDinosaur(Dinosaur))
     {
         return;
     }
     
-    FVector OwnerLocation = GetOwner()->GetActorLocation();
-    FVector DinosaurLocation = Dinosaur->GetActorLocation();
-    float Distance = FVector::Dist(OwnerLocation, DinosaurLocation);
+    const FVector OwnerLocation = GetOwner()->GetActorLocation();
+    const FVector DinosaurLocation = Dinosaur->GetActorLocation();
+    const float Distance = FVector::Dist(OwnerLocation, DinosaurLocation);
     
     // Check if within detection range
     if (Distance > MaxDetectionRange)
@@ -134,71 +101,66 @@ void UAudio3DDetectionSystem::ProcessDinosaur(ADinosaur* Dinosaur)
     }
     
     // Calculate audio intensity
-    float AudioIntensity = CalculateAudioIntensity(Dinosaur, Distance);
+    const float AudioIntensity = CalculateAudioIntensity(Dinosaur, Distance);
     
-    // Check if audible
     if (AudioIntensity < MinAudibleIntensity)
     {
         return;
     }
     
     // Check occlusion if enabled
-    if (bUseOcclusion && IsOccluded(OwnerLocation, DinosaurLocation))
+    bool bIsOccluded = false;
+    if (bUseOcclusion)
     {
-        AudioIntensity *= 0.3f; // Reduce intensity for occluded sounds
-        if (AudioIntensity < MinAudibleIntensity)
-        {
-            return;
-        }
+        bIsOccluded = IsOccluded(OwnerLocation, DinosaurLocation);
     }
     
     // Create detection data
     FAudioDetectionData DetectionData = CreateDetectionData(Dinosaur);
     DetectionData.Distance = Distance;
-    DetectionData.Intensity = AudioIntensity;
+    DetectionData.Intensity = AudioIntensity * (bIsOccluded ? 0.3f : 1.0f); // Reduce intensity if occluded
+    DetectionData.Direction = (DinosaurLocation - OwnerLocation).GetSafeNormal();
+    DetectionData.bIsVisible = !bIsOccluded;
+    DetectionData.TimeSinceDetected = GetWorld()->GetTimeSeconds() - LastDetectionTimes.FindOrAdd(Dinosaur, GetWorld()->GetTimeSeconds());
     
-    // Add to current detections
-    CurrentDetections.Add(DetectionData);
+    // Check if this is a new detection or update
+    bool bIsNewDetection = true;
+    for (int32 i = 0; i < CurrentDetections.Num(); i++)
+    {
+        if (CurrentDetections[i].Source == Dinosaur)
+        {
+            // Update existing detection
+            CurrentDetections[i] = DetectionData;
+            OnDetectionUpdated.Broadcast(DetectionData);
+            bIsNewDetection = false;
+            break;
+        }
+    }
+    
+    if (bIsNewDetection)
+    {
+        CurrentDetections.Add(DetectionData);
+        OnNewDetection.Broadcast(DetectionData);
+    }
     
     // Update last detection time
     LastDetectionTimes.Add(Dinosaur, GetWorld()->GetTimeSeconds());
 }
 
-FAudioDetectionData UAudio3DDetectionSystem::CreateDetectionData(ADinosaur* Dinosaur)
+FAudioDetectionData UAudio3DDetectionSystem::CreateDetectionData(ADinosaurCharacter* Dinosaur)
 {
     FAudioDetectionData DetectionData;
     DetectionData.Source = Dinosaur;
-    
-    if (GetOwner())
-    {
-        FVector OwnerLocation = GetOwner()->GetActorLocation();
-        FVector DinosaurLocation = Dinosaur->GetActorLocation();
-        
-        DetectionData.Direction = (DinosaurLocation - OwnerLocation).GetSafeNormal();
-        DetectionData.Distance = FVector::Dist(OwnerLocation, DinosaurLocation);
-    }
-    
-    // Check visibility with line trace
-    if (GetWorld() && GetOwner())
-    {
-        FHitResult HitResult;
-        FVector Start = GetOwner()->GetActorLocation();
-        FVector End = Dinosaur->GetActorLocation();
-        
-        FCollisionQueryParams QueryParams;
-        QueryParams.AddIgnoredActor(GetOwner());
-        QueryParams.AddIgnoredActor(Dinosaur);
-        
-        DetectionData.bIsVisible = !GetWorld()->LineTraceSingleByChannel(
-            HitResult, Start, End, ECC_Visibility, QueryParams);
-    }
-    
+    DetectionData.Direction = FVector::ZeroVector;
+    DetectionData.Distance = 0.0f;
+    DetectionData.Intensity = 0.0f;
+    DetectionData.bIsVisible = false;
     DetectionData.TimeSinceDetected = 0.0f;
     
     return DetectionData;
 }
 
-float UAudio3DDetectionSystem::CalculateAudioIntensity(ADinosaur* Dinosaur, float Distance) const
+float UAudio3DDetectionSystem::CalculateAudioIntensity(ADinosaurCharacter* Dinosaur, float Distance) const
 {
     if (!Dinosaur)
     {
@@ -209,12 +171,12 @@ float UAudio3DDetectionSystem::CalculateAudioIntensity(ADinosaur* Dinosaur, floa
     float BaseIntensity = GetDinosaurThreatLevel(Dinosaur);
     
     // Apply distance attenuation
-    float DistanceAttenuation = GetDistanceAttenuation(Distance);
+    float AttenuatedIntensity = BaseIntensity * GetDistanceAttenuation(Distance);
     
     // Apply sensitivity modifier
-    float FinalIntensity = BaseIntensity * DistanceAttenuation * DetectionSensitivity;
+    AttenuatedIntensity *= DetectionSensitivity;
     
-    return FMath::Clamp(FinalIntensity, 0.0f, 1.0f);
+    return FMath::Clamp(AttenuatedIntensity, 0.0f, 1.0f);
 }
 
 bool UAudio3DDetectionSystem::IsOccluded(const FVector& Start, const FVector& End) const
@@ -228,11 +190,19 @@ bool UAudio3DDetectionSystem::IsOccluded(const FVector& Start, const FVector& En
     FCollisionQueryParams QueryParams;
     QueryParams.AddIgnoredActor(GetOwner());
     
-    return GetWorld()->LineTraceSingleByChannel(
-        HitResult, Start, End, ECC_WorldStatic, QueryParams);
+    // Perform line trace
+    bool bHit = GetWorld()->LineTraceSingleByChannel(
+        HitResult,
+        Start,
+        End,
+        ECC_Visibility,
+        QueryParams
+    );
+    
+    return bHit;
 }
 
-bool UAudio3DDetectionSystem::ShouldDetectDinosaur(ADinosaur* Dinosaur) const
+bool UAudio3DDetectionSystem::ShouldDetectDinosaur(ADinosaurCharacter* Dinosaur) const
 {
     if (!Dinosaur)
     {
@@ -245,8 +215,8 @@ bool UAudio3DDetectionSystem::ShouldDetectDinosaur(ADinosaur* Dinosaur) const
         return true;
     }
     
-    // Check if dinosaur type is in detectable types
-    for (const TSubclassOf<ADinosaur>& DetectableType : DetectableDinosaurTypes)
+    // Check if dinosaur type is in detectable list
+    for (const TSubclassOf<ADinosaurCharacter>& DetectableType : DetectableDinosaurTypes)
     {
         if (Dinosaur->IsA(DetectableType))
         {
@@ -275,13 +245,13 @@ void UAudio3DDetectionSystem::UpdateClosestThreat()
 void UAudio3DDetectionSystem::UpdateLoudestSound()
 {
     LoudestSound = FAudioDetectionData();
-    float LoudestIntensity = 0.0f;
+    float HighestIntensity = 0.0f;
     
     for (const FAudioDetectionData& Detection : CurrentDetections)
     {
-        if (Detection.Intensity > LoudestIntensity)
+        if (Detection.Intensity > HighestIntensity)
         {
-            LoudestIntensity = Detection.Intensity;
+            HighestIntensity = Detection.Intensity;
             LoudestSound = Detection;
         }
     }
@@ -289,31 +259,29 @@ void UAudio3DDetectionSystem::UpdateLoudestSound()
 
 void UAudio3DDetectionSystem::CleanupOldDetections()
 {
-    if (!GetWorld())
+    const float CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+    const float MaxDetectionAge = 5.0f; // Remove detections older than 5 seconds
+    
+    for (int32 i = CurrentDetections.Num() - 1; i >= 0; i--)
     {
-        return;
-    }
-    
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-    const float MaxAge = 5.0f; // Remove detections older than 5 seconds
-    
-    TArray<ADinosaur*> KeysToRemove;
-    
-    for (auto& Pair : LastDetectionTimes)
-    {
-        if (CurrentTime - Pair.Value > MaxAge)
+        const FAudioDetectionData& Detection = CurrentDetections[i];
+        const float* LastDetectionTime = LastDetectionTimes.Find(Detection.Source);
+        
+        if (!LastDetectionTime || (CurrentTime - *LastDetectionTime) > MaxDetectionAge)
         {
-            KeysToRemove.Add(Pair.Key);
+            // Remove old detection
+            OnDetectionLost.Broadcast(Detection.Source);
+            CurrentDetections.RemoveAt(i);
+            
+            if (Detection.Source)
+            {
+                LastDetectionTimes.Remove(Detection.Source);
+            }
         }
-    }
-    
-    for (ADinosaur* Key : KeysToRemove)
-    {
-        LastDetectionTimes.Remove(Key);
     }
 }
 
-float UAudio3DDetectionSystem::GetDinosaurThreatLevel(ADinosaur* Dinosaur) const
+float UAudio3DDetectionSystem::GetDinosaurThreatLevel(ADinosaurCharacter* Dinosaur) const
 {
     if (!Dinosaur)
     {
@@ -322,7 +290,7 @@ float UAudio3DDetectionSystem::GetDinosaurThreatLevel(ADinosaur* Dinosaur) const
     
     // This would be implemented based on dinosaur properties
     // For now, return a default threat level
-    return 0.7f;
+    return 0.7f; // Medium threat
 }
 
 float UAudio3DDetectionSystem::GetDistanceAttenuation(float Distance) const
@@ -332,9 +300,9 @@ float UAudio3DDetectionSystem::GetDistanceAttenuation(float Distance) const
         return 1.0f;
     }
     
-    // Logarithmic attenuation
-    float NormalizedDistance = Distance / MaxDetectionRange;
-    return FMath::Clamp(1.0f - (NormalizedDistance * NormalizedDistance), 0.0f, 1.0f);
+    // Linear attenuation over max detection range
+    const float AttenuationFactor = 1.0f - (Distance / MaxDetectionRange);
+    return FMath::Max(0.0f, AttenuationFactor);
 }
 
 // Public interface functions
@@ -378,7 +346,7 @@ FVector UAudio3DDetectionSystem::GetDirectionToClosestThreat() const
 
 void UAudio3DDetectionSystem::SetDetectionSensitivity(float Sensitivity)
 {
-    DetectionSensitivity = FMath::Clamp(Sensitivity, 0.0f, 2.0f);
+    DetectionSensitivity = FMath::Clamp(Sensitivity, 0.0f, 1.0f);
 }
 
 float UAudio3DDetectionSystem::GetTotalThreatLevel() const
@@ -387,8 +355,8 @@ float UAudio3DDetectionSystem::GetTotalThreatLevel() const
     
     for (const FAudioDetectionData& Detection : CurrentDetections)
     {
-        float ThreatLevel = GetDinosaurThreatLevel(Detection.Source);
-        float DistanceModifier = 1.0f - (Detection.Distance / MaxDetectionRange);
+        const float ThreatLevel = GetDinosaurThreatLevel(Detection.Source);
+        const float DistanceModifier = 1.0f - (Detection.Distance / MaxDetectionRange);
         TotalThreat += ThreatLevel * DistanceModifier * Detection.Intensity;
     }
     
