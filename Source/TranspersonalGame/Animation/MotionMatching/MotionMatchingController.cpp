@@ -1,36 +1,38 @@
 #include "MotionMatchingController.h"
-#include "../Core/AnimationSystemManager.h"
-#include "GameFramework/Character.h"
-#include "GameFramework/CharacterMovementComponent.h"
-#include "Components/SkeletalMeshComponent.h"
 #include "Engine/World.h"
+#include "PoseSearch/PoseSearchDatabase.h"
+#include "PoseSearch/PoseSearchSchema.h"
 
 UMotionMatchingController::UMotionMatchingController()
 {
     PrimaryComponentTick.bCanEverTick = true;
     PrimaryComponentTick.TickGroup = TG_PrePhysics;
     
-    ActiveDatabase = EMotionMatchingDatabase::Locomotion;
-    LastQueryUpdateTime = 0.0f;
-    PreviousVelocity = FVector::ZeroVector;
-    AnimationManager = nullptr;
+    DatabaseUpdateTimer = 0.0f;
+    ModifierUpdateTimer = 0.0f;
+    CurrentDatabase = nullptr;
+    PreviousDatabase = nullptr;
 }
 
 void UMotionMatchingController::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Find animation manager component
+    // Encontrar o Animation System Manager no mesmo actor
     AnimationManager = GetOwner()->FindComponentByClass<UAnimationSystemManager>();
-    if (!AnimationManager)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("MotionMatchingController: No AnimationSystemManager found"));
-    }
     
-    // Initialize databases if not set
-    if (AnimationDatabases.Num() == 0)
+    if (AnimationManager)
     {
-        UE_LOG(LogTemp, Warning, TEXT("MotionMatchingController: No animation databases configured"));
+        // Conectar ao evento de mudança de estado emocional
+        AnimationManager->OnEmotionalStateChanged.AddDynamic(this, &UMotionMatchingController::UpdateDatabaseSelection);
+        
+        // Configuração inicial
+        UpdateDatabaseSelection();
+        ApplyPersonalityModifiers();
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("MotionMatchingController: Animation System Manager not found!"));
     }
 }
 
@@ -38,188 +40,202 @@ void UMotionMatchingController::TickComponent(float DeltaTime, ELevelTick TickTy
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    float CurrentTime = GetWorld()->GetTimeSeconds();
+    DatabaseUpdateTimer += DeltaTime;
+    ModifierUpdateTimer += DeltaTime;
     
-    // Update query at specified rate
-    if (CurrentTime - LastQueryUpdateTime >= (1.0f / QueryUpdateRate))
+    // Atualizar seleção de database a cada 0.2 segundos
+    if (DatabaseUpdateTimer >= 0.2f)
     {
-        UpdateQueryFromMovement();
-        SelectOptimalDatabase();
-        LastQueryUpdateTime = CurrentTime;
+        DatabaseUpdateTimer = 0.0f;
+        UpdateDatabaseSelection();
     }
+    
+    // Atualizar modificadores a cada 0.1 segundos
+    if (ModifierUpdateTimer >= 0.1f)
+    {
+        ModifierUpdateTimer = 0.0f;
+        ApplyPersonalityModifiers();
+    }
+    
+    SmoothDatabaseTransition();
 }
 
-void UMotionMatchingController::SetActiveDatabase(EMotionMatchingDatabase Database)
-{
-    if (AnimationDatabases.Contains(Database))
-    {
-        ActiveDatabase = Database;
-        UE_LOG(LogTemp, Log, TEXT("Motion Matching: Switched to database %d"), (int32)Database);
-    }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Motion Matching: Database %d not found"), (int32)Database);
-    }
-}
-
-void UMotionMatchingController::UpdateQuery(const FMotionMatchingQuery& NewQuery)
-{
-    CurrentQuery = NewQuery;
-    
-    // Apply emotional modulation if animation manager is available
-    if (AnimationManager)
-    {
-        float FearLevel = AnimationManager->CurrentAnimationData.FearLevel;
-        float ExhaustionLevel = AnimationManager->CurrentAnimationData.Exhaustion;
-        ModulateQueryWithEmotion(FearLevel, ExhaustionLevel);
-    }
-}
-
-float UMotionMatchingController::CalculateDynamicBlendTime(float FearLevel, float MovementIntensity)
-{
-    // Base blend time
-    float BlendTime = FMath::Lerp(BlendTimeMin, BlendTimeMax, 0.5f);
-    
-    // Fear makes blending faster (more reactive)
-    BlendTime *= (1.0f - (FearLevel * FearInfluenceOnBlending));
-    
-    // High movement intensity requires faster blending
-    BlendTime *= (1.0f - (MovementIntensity * 0.2f));
-    
-    return FMath::Clamp(BlendTime, BlendTimeMin, BlendTimeMax);
-}
-
-UPoseSearchDatabase* UMotionMatchingController::GetCurrentDatabase() const
-{
-    if (AnimationDatabases.Contains(ActiveDatabase))
-    {
-        return AnimationDatabases[ActiveDatabase];
-    }
-    return nullptr;
-}
-
-void UMotionMatchingController::ModulateQueryWithEmotion(float FearLevel, float ExhaustionLevel)
-{
-    // Fear affects movement characteristics
-    if (FearLevel > 0.5f)
-    {
-        // High fear: more erratic, faster movements
-        CurrentQuery.DesiredSpeed *= (1.0f + FearLevel * 0.3f);
-        CurrentQuery.EmotionalState = FearLevel;
-    }
-    
-    // Exhaustion affects movement efficiency
-    if (ExhaustionLevel > 0.3f)
-    {
-        // Exhaustion: slower, less precise movements
-        CurrentQuery.DesiredSpeed *= (1.0f - ExhaustionLevel * ExhaustionInfluenceOnSpeed);
-        CurrentQuery.DesiredAcceleration *= (1.0f - ExhaustionLevel * 0.4f);
-    }
-}
-
-void UMotionMatchingController::UpdateQueryFromMovement()
-{
-    ACharacter* Character = Cast<ACharacter>(GetOwner());
-    if (!Character || !Character->GetCharacterMovement())
-    {
-        return;
-    }
-    
-    UCharacterMovementComponent* MovementComp = Character->GetCharacterMovement();
-    FVector CurrentVelocity = MovementComp->Velocity;
-    
-    // Update query with current movement data
-    CurrentQuery.DesiredVelocity = CurrentVelocity;
-    CurrentQuery.DesiredSpeed = CurrentVelocity.Size();
-    
-    // Calculate acceleration
-    float DeltaTime = GetWorld()->GetDeltaSeconds();
-    if (DeltaTime > 0.0f)
-    {
-        CurrentQuery.DesiredAcceleration = (CurrentVelocity - PreviousVelocity) / DeltaTime;
-    }
-    
-    // Calculate direction relative to character forward
-    FVector Forward = Character->GetActorForwardVector();
-    FVector VelocityNorm = CurrentVelocity.GetSafeNormal();
-    CurrentQuery.DesiredDirection = FVector::DotProduct(Forward, VelocityNorm);
-    
-    // Update terrain complexity
-    CurrentQuery.TerrainComplexity = CalculateTerrainComplexity();
-    
-    PreviousVelocity = CurrentVelocity;
-}
-
-void UMotionMatchingController::SelectOptimalDatabase()
+void UMotionMatchingController::UpdateDatabaseSelection()
 {
     if (!AnimationManager)
-    {
         return;
-    }
+        
+    PreviousDatabase = CurrentDatabase;
+    CurrentDatabase = GetOptimalDatabase();
     
-    ECharacterMovementState MovementState = AnimationManager->CurrentAnimationData.MovementState;
-    float FearLevel = AnimationManager->CurrentAnimationData.FearLevel;
-    float Speed = CurrentQuery.DesiredSpeed;
-    
-    // Database selection logic based on context
-    EMotionMatchingDatabase NewDatabase = ActiveDatabase;
-    
-    // High fear or frightened state
-    if (FearLevel > 0.7f || MovementState == ECharacterMovementState::Frightened)
+    if (CurrentDatabase != PreviousDatabase && CurrentDatabase != nullptr)
     {
-        NewDatabase = EMotionMatchingDatabase::Emotional;
-    }
-    // Stealth movement
-    else if (MovementState == ECharacterMovementState::Sneaking || MovementState == ECharacterMovementState::Crouching)
-    {
-        NewDatabase = EMotionMatchingDatabase::Stealth;
-    }
-    // Climbing or complex terrain
-    else if (MovementState == ECharacterMovementState::Climbing || CurrentQuery.TerrainComplexity > 0.6f)
-    {
-        NewDatabase = EMotionMatchingDatabase::Climbing;
-    }
-    // Interaction states
-    else if (MovementState == ECharacterMovementState::Interacting)
-    {
-        NewDatabase = EMotionMatchingDatabase::Interaction;
-    }
-    // Default locomotion
-    else
-    {
-        NewDatabase = EMotionMatchingDatabase::Locomotion;
-    }
-    
-    // Switch database if needed
-    if (NewDatabase != ActiveDatabase)
-    {
-        SetActiveDatabase(NewDatabase);
+        OnDatabaseChanged.Broadcast(CurrentDatabase);
     }
 }
 
-float UMotionMatchingController::CalculateTerrainComplexity()
+void UMotionMatchingController::ApplyPersonalityModifiers()
 {
-    // This would integrate with terrain analysis system
-    // For now, return a base value that can be overridden
-    if (AnimationManager)
+    if (!AnimationManager)
+        return;
+        
+    CalculatePersonalityModifiers();
+}
+
+UPoseSearchDatabase* UMotionMatchingController::GetOptimalDatabase() const
+{
+    if (!AnimationManager)
+        return nullptr;
+        
+    FMotionMatchingDatabase* DatabaseSet = GetDatabaseSetForCharacterType(AnimationManager->CharacterType);
+    if (!DatabaseSet)
+        return nullptr;
+        
+    return SelectDatabaseForEmotionalState(*DatabaseSet, AnimationManager->CurrentEmotionalState);
+}
+
+float UMotionMatchingController::GetBlendTime() const
+{
+    if (!AnimationManager)
+        return 0.2f; // Tempo padrão
+        
+    // Tempo de blend baseado na personalidade
+    float baseBlendTime = 0.2f;
+    
+    // Personagens mais nervosos fazem transições mais rápidas
+    float nervousnessModifier = 1.0f - (AnimationManager->Personality.Nervousness * 0.3f);
+    
+    // Personagens mais confiantes fazem transições mais suaves
+    float confidenceModifier = 1.0f + (AnimationManager->Personality.Confidence * 0.2f);
+    
+    return baseBlendTime * nervousnessModifier * confidenceModifier;
+}
+
+FMotionMatchingDatabase* UMotionMatchingController::GetDatabaseSetForCharacterType(ECharacterAnimationType CharacterType)
+{
+    switch (CharacterType)
     {
-        switch (AnimationManager->CurrentAnimationData.CurrentTerrain)
-        {
-            case ETerrainType::Rocky:
-            case ETerrainType::Uneven:
-                return 0.8f;
-            case ETerrainType::Uphill:
-            case ETerrainType::Downhill:
-                return 0.6f;
-            case ETerrainType::Muddy:
-            case ETerrainType::Vegetation:
-                return 0.4f;
-            case ETerrainType::Water:
-                return 0.7f;
-            default:
-                return 0.2f;
-        }
+        case ECharacterAnimationType::Player:
+            return &DatabasesPlayer;
+        case ECharacterAnimationType::SmallHerbivore:
+            return &DatabasesSmallHerbivore;
+        case ECharacterAnimationType::LargeHerbivore:
+            return &DatabasesLargeHerbivore;
+        case ECharacterAnimationType::SmallCarnivore:
+            return &DatabasesSmallCarnivore;
+        case ECharacterAnimationType::LargeCarnivore:
+            return &DatabasesLargeCarnivore;
+        case ECharacterAnimationType::Apex:
+            return &DatabasesApex;
+        default:
+            return nullptr;
+    }
+}
+
+UPoseSearchDatabase* UMotionMatchingController::SelectDatabaseForEmotionalState(const FMotionMatchingDatabase& DatabaseSet, EEmotionalState EmotionalState) const
+{
+    switch (EmotionalState)
+    {
+        case EEmotionalState::Calm:
+            return DatabaseSet.IdleDatabase;
+        case EEmotionalState::Alert:
+            return DatabaseSet.AlertDatabase;
+        case EEmotionalState::Nervous:
+            return DatabaseSet.AlertDatabase; // Usar alert como fallback
+        case EEmotionalState::Fearful:
+            return DatabaseSet.FearDatabase;
+        case EEmotionalState::Aggressive:
+            return DatabaseSet.AggressiveDatabase;
+        case EEmotionalState::Hunting:
+            return DatabaseSet.AggressiveDatabase; // Usar aggressive como fallback
+        case EEmotionalState::Feeding:
+            return DatabaseSet.FeedingDatabase;
+        case EEmotionalState::Resting:
+            return DatabaseSet.RestingDatabase;
+        default:
+            return DatabaseSet.LocomotionDatabase; // Fallback padrão
+    }
+}
+
+void UMotionMatchingController::CalculatePersonalityModifiers()
+{
+    if (!AnimationManager)
+        return;
+        
+    const FCharacterPersonality& Personality = AnimationManager->Personality;
+    EEmotionalState CurrentState = AnimationManager->CurrentEmotionalState;
+    
+    // Calcular modificadores baseados na personalidade e estado emocional
+    CurrentModifiers.SpeedMultiplier = Personality.MovementSpeed;
+    
+    // Ajustar velocidade baseado no estado emocional
+    switch (CurrentState)
+    {
+        case EEmotionalState::Fearful:
+            CurrentModifiers.SpeedMultiplier *= 1.4f;
+            break;
+        case EEmotionalState::Nervous:
+            CurrentModifiers.SpeedMultiplier *= 1.1f;
+            break;
+        case EEmotionalState::Resting:
+            CurrentModifiers.SpeedMultiplier *= 0.5f;
+            break;
+        case EEmotionalState::Hunting:
+            CurrentModifiers.SpeedMultiplier *= 1.2f;
+            break;
     }
     
-    return 0.2f;
+    // Frequência de passos baseada na personalidade
+    CurrentModifiers.StepFrequency = Personality.StepLength;
+    
+    // Chance de movimentos nervosos
+    CurrentModifiers.NervousTwitchChance = Personality.Nervousness;
+    if (CurrentState == EEmotionalState::Nervous || CurrentState == EEmotionalState::Fearful)
+    {
+        CurrentModifiers.NervousTwitchChance *= 2.0f;
+    }
+    
+    // Chance de olhar em volta (curiosidade)
+    CurrentModifiers.HeadLookAroundChance = Personality.Curiosity;
+    if (CurrentState == EEmotionalState::Alert)
+    {
+        CurrentModifiers.HeadLookAroundChance *= 1.5f;
+    }
+    
+    // Nível de tensão corporal
+    CurrentModifiers.BodyTensionLevel = 1.0f;
+    switch (CurrentState)
+    {
+        case EEmotionalState::Alert:
+            CurrentModifiers.BodyTensionLevel = 1.2f;
+            break;
+        case EEmotionalState::Nervous:
+            CurrentModifiers.BodyTensionLevel = 1.3f;
+            break;
+        case EEmotionalState::Fearful:
+            CurrentModifiers.BodyTensionLevel = 1.5f;
+            break;
+        case EEmotionalState::Resting:
+            CurrentModifiers.BodyTensionLevel = 0.6f;
+            break;
+        case EEmotionalState::Aggressive:
+            CurrentModifiers.BodyTensionLevel = 1.4f;
+            break;
+    }
+    
+    // Aplicar modificadores da personalidade
+    CurrentModifiers.BodyTensionLevel *= (1.0f + (Personality.Nervousness * 0.3f));
+    CurrentModifiers.BodyTensionLevel *= (1.0f + (Personality.Aggression * 0.2f));
+}
+
+void UMotionMatchingController::SmoothDatabaseTransition()
+{
+    // Esta função seria expandida para implementar transições suaves entre databases
+    // Por agora, apenas registra mudanças para debug
+    
+    if (CurrentDatabase != PreviousDatabase && CurrentDatabase != nullptr)
+    {
+        UE_LOG(LogTemp, Log, TEXT("Motion Matching: Database changed to %s"), 
+               CurrentDatabase ? *CurrentDatabase->GetName() : TEXT("None"));
+    }
 }
