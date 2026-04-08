@@ -1,0 +1,329 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "GameFramework/Actor.h"
+#include "Components/DirectionalLightComponent.h"
+#include "Components/SkyLightComponent.h"
+#include "Components/SkyAtmosphereComponent.h"
+#include "Components/VolumetricCloudComponent.h"
+#include "Components/ExponentialHeightFogComponent.h"
+#include "Engine/PostProcessVolume.h"
+#include "Curves/CurveFloat.h"
+#include "AtmosphericSystem.generated.h"
+
+USTRUCT(BlueprintType)
+struct FAtmosphericParameters
+{
+    GENERATED_BODY()
+
+    // Rayleigh Scattering (molecules - blue sky)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rayleigh")
+    FLinearColor RayleighScattering = FLinearColor(0.005802f, 0.013558f, 0.033100f, 1.0f);
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rayleigh")
+    float RayleighScatteringScale = 1.0f;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rayleigh")
+    float RayleighExponentialDistribution = 8.0f;
+
+    // Mie Scattering (aerosols - haze, pollution)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mie")
+    FLinearColor MieScattering = FLinearColor(0.003996f, 0.003996f, 0.003996f, 1.0f);
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mie")
+    float MieScatteringScale = 1.0f;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mie")
+    FLinearColor MieAbsorption = FLinearColor(0.000444f, 0.000444f, 0.000444f, 1.0f);
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mie")
+    float MieAbsorptionScale = 1.0f;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mie")
+    float MieAnisotropy = 0.8f;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mie")
+    float MieExponentialDistribution = 1.2f;
+
+    // Ozone Absorption (atmospheric filtering)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Absorption")
+    FLinearColor AbsorptionExtinction = FLinearColor(0.000650f, 0.001881f, 0.000085f, 1.0f);
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Absorption")
+    float AbsorptionScale = 1.0f;
+
+    // Atmosphere Dimensions
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Planet")
+    float GroundRadius = 6360.0f; // Earth-like radius in km
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Planet")
+    float AtmosphereHeight = 60.0f; // Atmosphere thickness in km
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Planet")
+    FLinearColor GroundAlbedo = FLinearColor(0.3f, 0.3f, 0.3f, 1.0f);
+
+    // Quality Settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quality")
+    float TraceSampleCountScale = 1.0f;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quality")
+    bool bMultiScattering = true;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quality")
+    float AerialPerspectiveDistanceScale = 1.0f;
+
+    FAtmosphericParameters()
+    {
+        // Default Earth-like atmosphere
+    }
+};
+
+USTRUCT(BlueprintType)
+struct FCloudParameters
+{
+    GENERATED_BODY()
+
+    // Cloud Coverage and Density
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Coverage")
+    float CloudCoverage = 0.5f;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Coverage")
+    float CloudDensity = 0.8f;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Coverage")
+    float CloudOpacity = 1.0f;
+
+    // Cloud Layers
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Layers")
+    float LayerBottomAltitude = 1.5f; // km
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Layers")
+    float LayerHeight = 4.0f; // km
+
+    // Cloud Movement
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+    FVector2D CloudSpeed = FVector2D(10.0f, 5.0f); // km/h
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+    float CloudEvolution = 0.1f;
+
+    // Lighting
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
+    float MultiScatteringContribution = 0.6f;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
+    float MultiScatteringOcclusion = 0.3f;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
+    int32 MultiScatteringOctaves = 1;
+
+    // Quality
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quality")
+    float TraceSampleCountScale = 1.0f;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quality")
+    float ShadowSampleCountScale = 1.0f;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quality")
+    float ReflectionSampleCountScale = 0.5f;
+
+    FCloudParameters()
+    {
+        // Default cloud settings for prehistoric atmosphere
+    }
+};
+
+USTRUCT(BlueprintType)
+struct FFogParameters
+{
+    GENERATED_BODY()
+
+    // Primary Fog Layer
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Primary")
+    float FogDensity = 0.02f;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Primary")
+    float FogHeightFalloff = 0.2f;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Primary")
+    float FogMaxOpacity = 1.0f;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Primary")
+    FLinearColor FogInscatteringColor = FLinearColor(0.447f, 0.639f, 1.0f, 1.0f);
+
+    // Secondary Fog Layer (for depth and complexity)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Secondary")
+    float SecondFogDensity = 0.0f;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Secondary")
+    float SecondFogHeightFalloff = 0.05f;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Secondary")
+    float SecondFogHeightOffset = 0.0f;
+
+    // Directional Inscattering (sun shafts)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Directional")
+    FLinearColor DirectionalInscatteringColor = FLinearColor(1.0f, 0.9f, 0.7f, 1.0f);
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Directional")
+    float DirectionalInscatteringExponent = 4.0f;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Directional")
+    float DirectionalInscatteringStartDistance = 0.0f;
+
+    // Distance Controls
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Distance")
+    float StartDistance = 0.0f;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Distance")
+    float FogCutoffDistance = 100000.0f;
+
+    // Volumetric Fog
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volumetric")
+    bool bVolumetricFog = true;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volumetric")
+    float VolumetricFogScatteringDistribution = 0.2f;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volumetric")
+    FLinearColor VolumetricFogAlbedo = FLinearColor(1.0f, 1.0f, 1.0f, 1.0f);
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volumetric")
+    FLinearColor VolumetricFogEmissive = FLinearColor::Black;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volumetric")
+    float VolumetricFogExtinctionScale = 1.0f;
+
+    FFogParameters()
+    {
+        // Default prehistoric atmosphere fog
+    }
+};
+
+/**
+ * Advanced atmospheric system for prehistoric environments
+ * Handles physically-based sky atmosphere, volumetric clouds, and dynamic fog
+ */
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API AAtmosphericSystem : public AActor
+{
+    GENERATED_BODY()
+
+public:
+    AAtmosphericSystem();
+
+protected:
+    virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
+
+    // Core Atmospheric Components
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class USkyAtmosphereComponent* SkyAtmosphere;
+    
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class UVolumetricCloudComponent* VolumetricClouds;
+    
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class UExponentialHeightFogComponent* HeightFog;
+
+public:
+    // Atmospheric Parameters
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
+    FAtmosphericParameters AtmosphereSettings;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clouds")
+    FCloudParameters CloudSettings;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog")
+    FFogParameters FogSettings;
+
+    // Environmental Conditions
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Humidity = 0.6f; // Affects cloud formation and fog density
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float AirPurity = 0.9f; // Prehistoric air is cleaner - affects scattering
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment", meta = (ClampMin = "0.0", ClampMax = "2.0"))
+    float AtmosphericPressure = 1.2f; // Higher pressure in prehistoric times
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
+    float Temperature = 25.0f; // Celsius - affects atmospheric density
+
+    // Time-based Curves for automatic variation
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+    class UCurveFloat* HumidityCurve;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+    class UCurveFloat* CloudCoverageCurve;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+    class UCurveFloat* FogDensityCurve;
+
+    // Quality and Performance
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    bool bHighQualityAtmosphere = true;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    bool bEnableVolumetricClouds = true;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    bool bEnableVolumetricFog = true;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance", meta = (ClampMin = "0.1", ClampMax = "2.0"))
+    float PerformanceScale = 1.0f;
+
+    // Public Interface
+    UFUNCTION(BlueprintCallable, Category = "Atmosphere")
+    void UpdateAtmosphericParameters();
+    
+    UFUNCTION(BlueprintCallable, Category = "Atmosphere")
+    void SetEnvironmentalConditions(float NewHumidity, float NewAirPurity, float NewPressure, float NewTemperature);
+    
+    UFUNCTION(BlueprintCallable, Category = "Atmosphere")
+    void SetAtmospherePreset(const FAtmosphericParameters& NewSettings);
+    
+    UFUNCTION(BlueprintCallable, Category = "Atmosphere")
+    void SetCloudPreset(const FCloudParameters& NewSettings);
+    
+    UFUNCTION(BlueprintCallable, Category = "Atmosphere")
+    void SetFogPreset(const FFogParameters& NewSettings);
+    
+    UFUNCTION(BlueprintCallable, Category = "Atmosphere")
+    void AnimateToNewSettings(const FAtmosphericParameters& TargetAtmosphere, const FCloudParameters& TargetClouds, const FFogParameters& TargetFog, float TransitionTime = 5.0f);
+
+    // Weather Integration
+    UFUNCTION(BlueprintCallable, Category = "Weather")
+    void ApplyWeatherInfluence(float WeatherIntensity, bool bStormy = false);
+    
+    UFUNCTION(BlueprintCallable, Category = "Weather")
+    void SetStormConditions(bool bEnable, float Intensity = 1.0f);
+
+private:
+    // Animation state
+    bool bIsAnimating = false;
+    float AnimationProgress = 0.0f;
+    float AnimationDuration = 5.0f;
+    
+    FAtmosphericParameters StartAtmosphere;
+    FAtmosphericParameters TargetAtmosphere;
+    FCloudParameters StartClouds;
+    FCloudParameters TargetClouds;
+    FFogParameters StartFog;
+    FFogParameters TargetFog;
+
+    // Internal update functions
+    void UpdateSkyAtmosphere();
+    void UpdateVolumetricClouds();
+    void UpdateHeightFog();
+    void UpdateEnvironmentalInfluences(float DeltaTime);
+    void ProcessAnimation(float DeltaTime);
+    
+    // Helper functions
+    FAtmosphericParameters LerpAtmosphericParameters(const FAtmosphericParameters& A, const FAtmosphericParameters& B, float Alpha);
+    FCloudParameters LerpCloudParameters(const FCloudParameters& A, const FCloudParameters& B, float Alpha);
+    FFogParameters LerpFogParameters(const FFogParameters& A, const FFogParameters& B, float Alpha);
+    
+    void ApplyPerformanceScaling();
+    void ValidateParameters();
+};
