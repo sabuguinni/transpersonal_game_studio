@@ -2,78 +2,100 @@
 
 #include "CoreMinimal.h"
 #include "Engine/Engine.h"
-#include "Sound/SoundCue.h"
 #include "Components/AudioComponent.h"
-#include "AudioMixerBlueprintLibrary.h"
+#include "Sound/SoundCue.h"
 #include "MetasoundSource.h"
+#include "GameFramework/GameStateBase.h"
 #include "AudioSystemCore.generated.h"
 
 UENUM(BlueprintType)
-enum class EAudioEnvironmentType : uint8
+enum class EEmotionalState : uint8
 {
-    Forest_Dense,
-    Forest_Open, 
-    Swamp,
-    Plains,
-    Rocky_Canyon,
-    Cave_Shallow,
-    Cave_Deep,
-    Riverside,
-    Lake,
-    Clifftop
+    Calm           UMETA(DisplayName = "Calm"),
+    Tense          UMETA(DisplayName = "Tense"), 
+    Danger         UMETA(DisplayName = "Danger"),
+    Terror         UMETA(DisplayName = "Terror"),
+    Discovery      UMETA(DisplayName = "Discovery"),
+    Bonding        UMETA(DisplayName = "Bonding")
 };
 
 UENUM(BlueprintType)
-enum class EAudioThreatLevel : uint8
+enum class EDinosaurSize : uint8
 {
-    Safe,
-    Cautious,
-    Danger,
-    Panic
+    Tiny           UMETA(DisplayName = "Tiny (< 1m)"),
+    Small          UMETA(DisplayName = "Small (1-3m)"),
+    Medium         UMETA(DisplayName = "Medium (3-8m)"),
+    Large          UMETA(DisplayName = "Large (8-15m)"),
+    Massive        UMETA(DisplayName = "Massive (> 15m)")
 };
 
 UENUM(BlueprintType)
-enum class ETimeOfDay : uint8
+enum class EDinosaurBehavior : uint8
 {
-    Dawn,
-    Morning,
-    Midday,
-    Afternoon,
-    Dusk,
-    Night,
-    DeepNight
+    Sleeping       UMETA(DisplayName = "Sleeping"),
+    Grazing        UMETA(DisplayName = "Grazing"),
+    Hunting        UMETA(DisplayName = "Hunting"),
+    Territorial    UMETA(DisplayName = "Territorial"),
+    Fleeing        UMETA(DisplayName = "Fleeing"),
+    Socializing    UMETA(DisplayName = "Socializing"),
+    Domesticated   UMETA(DisplayName = "Domesticated")
 };
 
 USTRUCT(BlueprintType)
-struct FAudioEnvironmentState
+struct TRANSPERSONALGAME_API FAudioLayerConfig
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadWrite, EditAnywhere)
-    EAudioEnvironmentType EnvironmentType = EAudioEnvironmentType::Forest_Dense;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float Volume = 1.0f;
 
-    UPROPERTY(BlueprintReadWrite, EditAnywhere)
-    EAudioThreatLevel ThreatLevel = EAudioThreatLevel::Safe;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float FadeTime = 2.0f;
 
-    UPROPERTY(BlueprintReadWrite, EditAnywhere)
-    ETimeOfDay TimeOfDay = ETimeOfDay::Morning;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsActive = true;
 
-    UPROPERTY(BlueprintReadWrite, EditAnywhere)
-    float WeatherIntensity = 0.0f; // 0.0 = clear, 1.0 = storm
-
-    UPROPERTY(BlueprintReadWrite, EditAnywhere)
-    float PlayerStealthLevel = 0.0f; // 0.0 = loud, 1.0 = silent
-
-    UPROPERTY(BlueprintReadWrite, EditAnywhere)
-    bool bNearWater = false;
-
-    UPROPERTY(BlueprintReadWrite, EditAnywhere)
-    bool bInCave = false;
-
-    UPROPERTY(BlueprintReadWrite, EditAnywhere)
-    float DinosaurProximity = 0.0f; // 0.0 = none nearby, 1.0 = very close
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TObjectPtr<UMetaSoundSource> MetaSoundAsset;
 };
 
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FDinosaurAudioSignature
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    EDinosaurSize Size = EDinosaurSize::Medium;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float BasePitch = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float PitchVariation = 0.2f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float VolumeMultiplier = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float AttenuationRadius = 2000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TMap<EDinosaurBehavior, TObjectPtr<UMetaSoundSource>> BehaviorSounds;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TObjectPtr<UMetaSoundSource> HeartbeatSound;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TObjectPtr<UMetaSoundSource> BreathingSound;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TObjectPtr<UMetaSoundSource> FootstepSound;
+};
+
+/**
+ * Core Audio System for Jurassic Survival Game
+ * Manages adaptive music, environmental audio, and dinosaur soundscapes
+ */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UAudioSystemCore : public UObject
 {
@@ -82,40 +104,80 @@ class TRANSPERSONALGAME_API UAudioSystemCore : public UObject
 public:
     UAudioSystemCore();
 
+    // Core System Functions
     UFUNCTION(BlueprintCallable, Category = "Audio System")
     void InitializeAudioSystem();
 
     UFUNCTION(BlueprintCallable, Category = "Audio System")
-    void UpdateEnvironmentState(const FAudioEnvironmentState& NewState);
+    void UpdateEmotionalState(EEmotionalState NewState, float TransitionTime = 3.0f);
 
     UFUNCTION(BlueprintCallable, Category = "Audio System")
-    void PlayDinosaurSound(class ADinosaurBase* Dinosaur, const FString& SoundType);
+    void SetTimeOfDay(float TimeNormalized); // 0.0 = midnight, 0.5 = noon
 
     UFUNCTION(BlueprintCallable, Category = "Audio System")
-    void TriggerTensionMusic(EAudioThreatLevel ThreatLevel);
+    void SetWeatherIntensity(float Intensity); // 0.0 = clear, 1.0 = storm
 
-    UFUNCTION(BlueprintCallable, Category = "Audio System")
-    void SetMasterVolume(float Volume);
+    // Dinosaur Audio Management
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur Audio")
+    void RegisterDinosaur(AActor* DinosaurActor, const FDinosaurAudioSignature& AudioSignature);
+
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur Audio")
+    void UpdateDinosaurBehavior(AActor* DinosaurActor, EDinosaurBehavior NewBehavior);
+
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur Audio")
+    void SetDinosaurDomestication(AActor* DinosaurActor, float DomesticationLevel); // 0.0 = wild, 1.0 = fully tamed
+
+    // Environmental Audio
+    UFUNCTION(BlueprintCallable, Category = "Environment")
+    void TriggerEnvironmentalEvent(const FString& EventName, FVector Location);
+
+    UFUNCTION(BlueprintCallable, Category = "Environment")
+    void SetPlayerStealthLevel(float StealthLevel); // 0.0 = loud movement, 1.0 = silent
 
 protected:
-    UPROPERTY(BlueprintReadOnly, Category = "Audio System")
-    FAudioEnvironmentState CurrentEnvironmentState;
+    // Audio Layer Management
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Layers")
+    TMap<FString, FAudioLayerConfig> AudioLayers;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Audio Assets")
-    class UMetaSoundSource* AdaptiveMusicMetaSound;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotional States")
+    TMap<EEmotionalState, TObjectPtr<UMetaSoundSource>> EmotionalMusic;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Audio Assets")
-    class UMetaSoundSource* EnvironmentAmbienceMetaSound;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
+    TMap<FString, TObjectPtr<UMetaSoundSource>> EnvironmentalSounds;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Audio Assets")
-    TMap<EAudioEnvironmentType, class USoundAttenuation*> EnvironmentAttenuationSettings;
+    // Current State
+    UPROPERTY(BlueprintReadOnly, Category = "State")
+    EEmotionalState CurrentEmotionalState = EEmotionalState::Calm;
+
+    UPROPERTY(BlueprintReadOnly, Category = "State")
+    float CurrentTimeOfDay = 0.5f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "State")
+    float CurrentWeatherIntensity = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "State")
+    float PlayerStealthLevel = 0.5f;
+
+    // Audio Components
+    UPROPERTY(BlueprintReadOnly, Category = "Components")
+    TObjectPtr<UAudioComponent> MusicComponent;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Components")
+    TObjectPtr<UAudioComponent> AmbienceComponent;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Components")
+    TObjectPtr<UAudioComponent> WeatherComponent;
+
+    // Registered Dinosaurs
+    UPROPERTY()
+    TMap<TWeakObjectPtr<AActor>, FDinosaurAudioSignature> RegisteredDinosaurs;
 
 private:
-    void UpdateAdaptiveMusic();
-    void UpdateEnvironmentAmbience();
-    void CalculateAudioParameters();
-
-    float CurrentTensionLevel = 0.0f;
-    float TargetTensionLevel = 0.0f;
-    float TensionTransitionSpeed = 1.0f;
+    void UpdateMusicLayer();
+    void UpdateAmbienceLayer();
+    void UpdateWeatherLayer();
+    void ProcessDinosaurAudio();
+    
+    float CalculateTensionLevel() const;
+    void CrossfadeToNewMusic(UMetaSoundSource* NewMusic, float FadeTime);
 };
