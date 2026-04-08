@@ -1,0 +1,36 @@
+# Blueprint Asset - Lighting Manager
+# Este arquivo representa um Blueprint que herda de ULightingSystemManager
+# e fornece interface visual para designers ajustarem a iluminação
+
+[Blueprint Configuration]
+Parent Class: ULightingSystemManager
+Blueprint Type: Actor Component
+
+[Default Values]
+TimeScale: 60.0  # 1 minuto real = 1 hora no jogo
+CurrentTimeOfDay: 8.0  # Começar de manhã
+AutoAdvanceTime: true
+CurrentWeather: Clear
+CurrentThreatLevel: Safe
+
+[Exposed Parameters for Level Designers]
+- Time of Day Override (0-24 hours)
+- Weather State Selection
+- Threat Level Override
+- Manual Sun Position Control
+- Fog Density Multiplier
+- Shadow Intensity Override
+- Atmosphere Tint Override
+
+[Events]
+- OnTimeOfDayChanged
+- OnWeatherChanged
+- OnThreatLevelChanged
+- OnDayNightCycle (Dawn, Day, Dusk, Night transitions)
+
+[Debug Visualization]
+- Current Time Display
+- Sun Position Indicator
+- Weather State HUD
+- Threat Level Indicator
+- Mood Transition Progress
