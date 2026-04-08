@@ -6,6 +6,9 @@
 #include "Engine/Engine.h"
 #include "Components/ActorComponent.h"
 #include "Engine/DataTable.h"
+#include "GameFramework/Character.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "CharacterArtistSystem.generated.h"
 
 /**
@@ -83,6 +86,25 @@ enum class EClothingStyle : uint8
     MAX                 UMETA(Hidden)
 };
 
+UENUM(BlueprintType)
+enum class ECharacterQuality : uint8
+{
+    Low                 UMETA(DisplayName = "Low Quality"),
+    Medium              UMETA(DisplayName = "Medium Quality"),
+    High                UMETA(DisplayName = "High Quality"),
+    Ultra               UMETA(DisplayName = "Ultra Quality"),
+    MAX                 UMETA(Hidden)
+};
+
+UENUM(BlueprintType)
+enum class EDiversityLevel : uint8
+{
+    Low                 UMETA(DisplayName = "Low Diversity"),
+    Medium              UMETA(DisplayName = "Medium Diversity"),
+    High                UMETA(DisplayName = "High Diversity"),
+    MAX                 UMETA(Hidden)
+};
+
 /**
  * Character Visual Definition Structure
  */
@@ -148,6 +170,35 @@ struct TRANSPERSONALGAME_API FCharacterVisualProfile
         SecondaryClothing = EClothingStyle::SurvivalMade;
         MetaHumanPresetPath = TEXT("");
         PersonalityVisualCues = TEXT("Confident, observant posture");
+    }
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FCharacterCreationRequest
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Request")
+    FCharacterVisualProfile Profile;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Request")
+    FVector SpawnLocation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Request")
+    FRotator SpawnRotation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Request")
+    float Priority;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Request")
+    bool bIsAsyncRequest;
+
+    FCharacterCreationRequest()
+    {
+        SpawnLocation = FVector::ZeroVector;
+        SpawnRotation = FRotator::ZeroRotator;
+        Priority = 1.0f;
+        bIsAsyncRequest = true;
     }
 };
 
@@ -226,6 +277,16 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Diversity")
     float CalculateVisualSimilarity(const FCharacterVisualProfile& A, const FCharacterVisualProfile& B);
 
+    // Quality and Performance
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void SetCharacterQuality(ECharacterQuality NewQuality);
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void SetDiversityLevel(EDiversityLevel NewDiversityLevel);
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    int32 GetActiveCharacterCount() const;
+
 protected:
     // Character Database
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Database")
@@ -249,44 +310,50 @@ protected:
     TArray<FCharacterVisualProfile> ActiveCharacters;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Diversity")
-    float MinimumVisualDifference;
+    float MinimumDiversityThreshold;
 
-    // Protagonist Specific
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Protagonist")
-    FCharacterVisualProfile ProtagonistProfile;
+    // Performance Settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    ECharacterQuality CharacterQualityLevel;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Protagonist")
-    bool bProtagonistCreated;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    EDiversityLevel DiversityLevel;
 
-private:
-    // Internal character generation methods
-    FCharacterVisualProfile GenerateArchetypeVariation(ECharacterArchetype Archetype);
-    void ApplyAgeingEffects(FCharacterVisualProfile& Profile);
-    void ApplySurvivalWear(FCharacterVisualProfile& Profile, int32 Days);
-    TArray<FString> GenerateStoryMarkers(ECharacterArchetype Archetype, int32 Age);
-    
-    // MetaHuman parameter generation
-    TMap<FString, float> GenerateFacialParameters(EEthnicity Ethnicity, int32 Age, EBodyType Body);
-    TMap<FString, FLinearColor> GenerateColorParameters(EEthnicity Ethnicity);
-    
-    // Quality assurance
-    bool ValidateCharacterProfile(const FCharacterVisualProfile& Profile);
-    void LogCharacterCreation(const FCharacterVisualProfile& Profile);
-};
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 MaxCharactersPerFrame;
 
-/**
- * Data Table Row Structure for Character Profiles
- */
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCharacterProfileTableRow : public FTableRowBase
-{
-    GENERATED_BODY()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float CharacterLODDistance;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Profile")
-    FCharacterVisualProfile Profile;
+    // Request Processing
+    UPROPERTY()
+    TArray<FCharacterCreationRequest> ActiveCharacterRequests;
 
-    FCharacterProfileTableRow()
-    {
-        Profile = FCharacterVisualProfile();
-    }
+    UPROPERTY()
+    class UWorld* CachedWorld;
+
+    // Internal Methods
+    void InitializeCharacterTemplates();
+    void SetupMaterialVariations();
+    void ProcessCharacterRequests(float DeltaTime);
+    bool ProcessCharacterRequest(const FCharacterCreationRequest& Request);
+    void UpdateCharacterLOD();
+
+    // Character Generation Helpers
+    FCharacterVisualProfile GenerateProtagonistProfile();
+    FCharacterVisualProfile GenerateNPCProfile(ECharacterArchetype Archetype);
+    void ApplyAgeVariations(FCharacterVisualProfile& Profile);
+    void ApplyEthnicityVariations(FCharacterVisualProfile& Profile);
+    void ApplyBodyTypeVariations(FCharacterVisualProfile& Profile);
+
+    // Material and Clothing Helpers
+    UMaterialInstanceDynamic* CreateCharacterMaterial(class USkeletalMeshComponent* MeshComponent, const FCharacterVisualProfile& Profile);
+    void ApplyWeatheringEffects(UMaterialInstanceDynamic* Material, float WearLevel);
+    void ApplySurvivalWear(UMaterialInstanceDynamic* Material, int32 DaysSurvived);
+
+    // Diversity Calculation
+    float CalculateEthnicityDiversity(const TArray<FCharacterVisualProfile>& Characters);
+    float CalculateBodyTypeDiversity(const TArray<FCharacterVisualProfile>& Characters);
+    float CalculateAgeDiversity(const TArray<FCharacterVisualProfile>& Characters);
+    void AdjustForDiversity(FCharacterVisualProfile& Profile, const TArray<FCharacterVisualProfile>& ExistingCharacters);
 };
