@@ -1,36 +1,32 @@
 #include "AtmosphericVFXController.h"
-#include "VFXSystemManager.h"
-#include "NiagaraFunctionLibrary.h"
 #include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
-#include "Components/SceneComponent.h"
+#include "NiagaraSystem.h"
+#include "NiagaraFunctionLibrary.h"
 #include "GameFramework/PlayerController.h"
+#include "VFXSystemManager.h"
 
 AAtmosphericVFXController::AAtmosphericVFXController()
 {
     PrimaryActorTick.bCanEverTick = true;
-
-    // Create root component
+    
+    // Initialize root component
     RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
     RootComponent = RootSceneComponent;
-
-    // Create VFX components
+    
+    // Initialize Niagara components
     DustParticles = CreateDefaultSubobject<UNiagaraComponent>(TEXT("DustParticles"));
     DustParticles->SetupAttachment(RootComponent);
-    DustParticles->SetAutoDestroy(false);
-
+    
     MistParticles = CreateDefaultSubobject<UNiagaraComponent>(TEXT("MistParticles"));
     MistParticles->SetupAttachment(RootComponent);
-    MistParticles->SetAutoDestroy(false);
-
+    
     PollenParticles = CreateDefaultSubobject<UNiagaraComponent>(TEXT("PollenParticles"));
     PollenParticles->SetupAttachment(RootComponent);
-    PollenParticles->SetAutoDestroy(false);
-
+    
     LightShafts = CreateDefaultSubobject<UNiagaraComponent>(TEXT("LightShafts"));
     LightShafts->SetupAttachment(RootComponent);
-    LightShafts->SetAutoDestroy(false);
-
+    
     // Initialize default settings
     InitializeDefaultSettings();
 }
@@ -41,16 +37,16 @@ void AAtmosphericVFXController::BeginPlay()
     
     InitializeComponents();
     
-    // Find VFX Manager
-    VFXManager = Cast<AVFXSystemManager>(UGameplayStatics::GetActorOfClass(GetWorld(), AVFXSystemManager::StaticClass()));
+    // Cache VFX Manager reference
+    if (UWorld* World = GetWorld())
+    {
+        VFXManager = World->GetSubsystem<UVFXSystemManager>();
+    }
     
-    // Apply initial settings
+    // Set initial atmospheric state
     CurrentSettings = GetSettingsForMood(CurrentMood);
-    ModifySettingsForWeather(CurrentSettings);
     TargetSettings = CurrentSettings;
     ApplySettingsToComponents();
-    
-    UE_LOG(LogTemp, Log, TEXT("AtmosphericVFXController initialized with mood: %d"), (int32)CurrentMood);
 }
 
 void AAtmosphericVFXController::Tick(float DeltaTime)
@@ -65,164 +61,79 @@ void AAtmosphericVFXController::Tick(float DeltaTime)
     }
 }
 
-void AAtmosphericVFXController::InitializeDefaultSettings()
-{
-    // Calm settings
-    CalmSettings.DustIntensity = 0.2f;
-    CalmSettings.MistIntensity = 0.1f;
-    CalmSettings.PollenIntensity = 0.3f;
-    CalmSettings.WindStrength = 0.3f;
-    CalmSettings.LightShaftIntensity = 0.6f;
-    CalmSettings.AtmosphericTint = FLinearColor(1.0f, 0.95f, 0.8f, 1.0f);
-
-    // Tense settings
-    TenseSettings.DustIntensity = 0.4f;
-    TenseSettings.MistIntensity = 0.3f;
-    TenseSettings.PollenIntensity = 0.1f;
-    TenseSettings.WindStrength = 0.6f;
-    TenseSettings.LightShaftIntensity = 0.4f;
-    TenseSettings.AtmosphericTint = FLinearColor(0.9f, 0.85f, 0.7f, 1.0f);
-
-    // Threatening settings
-    ThreateningSettings.DustIntensity = 0.7f;
-    ThreateningSettings.MistIntensity = 0.5f;
-    ThreateningSettings.PollenIntensity = 0.05f;
-    ThreateningSettings.WindStrength = 0.8f;
-    ThreateningSettings.LightShaftIntensity = 0.2f;
-    ThreateningSettings.AtmosphericTint = FLinearColor(0.8f, 0.7f, 0.6f, 1.0f);
-
-    // Panic settings
-    PanicSettings.DustIntensity = 1.0f;
-    PanicSettings.MistIntensity = 0.8f;
-    PanicSettings.PollenIntensity = 0.0f;
-    PanicSettings.WindStrength = 1.2f;
-    PanicSettings.LightShaftIntensity = 0.1f;
-    PanicSettings.AtmosphericTint = FLinearColor(0.7f, 0.6f, 0.5f, 1.0f);
-}
-
 void AAtmosphericVFXController::InitializeComponents()
 {
+    // Set auto-activate to false initially
     if (DustParticles)
     {
-        DustParticles->SetVisibility(true);
-        DustParticles->Activate();
+        DustParticles->SetAutoActivate(false);
     }
     
     if (MistParticles)
     {
-        MistParticles->SetVisibility(true);
-        MistParticles->Activate();
+        MistParticles->SetAutoActivate(false);
     }
     
     if (PollenParticles)
     {
-        PollenParticles->SetVisibility(true);
-        PollenParticles->Activate();
+        PollenParticles->SetAutoActivate(false);
     }
     
     if (LightShafts)
     {
-        LightShafts->SetVisibility(true);
-        LightShafts->Activate();
+        LightShafts->SetAutoActivate(false);
     }
 }
 
-void AAtmosphericVFXController::UpdateAtmosphericEffects(float DeltaTime)
+void AAtmosphericVFXController::InitializeDefaultSettings()
 {
-    // Update transition between settings
-    BlendToTargetSettings(DeltaTime);
+    // Calm settings - peaceful forest atmosphere
+    CalmSettings.DustIntensity = 0.2f;
+    CalmSettings.MistIntensity = 0.3f;
+    CalmSettings.PollenIntensity = 0.4f;
+    CalmSettings.WindDirection = FVector(1, 0.2f, 0);
+    CalmSettings.WindStrength = 0.3f;
+    CalmSettings.WindVariation = 0.2f;
+    CalmSettings.LightShaftIntensity = 0.6f;
+    CalmSettings.AtmosphericTint = FLinearColor(1.0f, 0.95f, 0.8f, 1.0f);
     
-    // Update variations
-    UpdateWindVariation(DeltaTime);
-    UpdateDustVariation(DeltaTime);
+    // Tense settings - something is watching
+    TenseSettings.DustIntensity = 0.4f;
+    TenseSettings.MistIntensity = 0.5f;
+    TenseSettings.PollenIntensity = 0.1f;
+    TenseSettings.WindDirection = FVector(0.8f, 0.6f, 0);
+    TenseSettings.WindStrength = 0.6f;
+    TenseSettings.WindVariation = 0.4f;
+    TenseSettings.LightShaftIntensity = 0.3f;
+    TenseSettings.AtmosphericTint = FLinearColor(0.9f, 0.9f, 1.0f, 1.0f);
     
-    // Apply current settings to components
-    ApplySettingsToComponents();
-}
-
-void AAtmosphericVFXController::BlendToTargetSettings(float DeltaTime)
-{
-    if (TransitionProgress < 1.0f)
-    {
-        TransitionProgress = FMath::Clamp(TransitionProgress + (DeltaTime * TransitionSpeed), 0.0f, 1.0f);
-        
-        // Interpolate between current and target settings
-        FAtmosphericSettings StartSettings = CurrentSettings;
-        
-        CurrentSettings.DustIntensity = FMath::Lerp(StartSettings.DustIntensity, TargetSettings.DustIntensity, TransitionProgress);
-        CurrentSettings.MistIntensity = FMath::Lerp(StartSettings.MistIntensity, TargetSettings.MistIntensity, TransitionProgress);
-        CurrentSettings.PollenIntensity = FMath::Lerp(StartSettings.PollenIntensity, TargetSettings.PollenIntensity, TransitionProgress);
-        CurrentSettings.WindStrength = FMath::Lerp(StartSettings.WindStrength, TargetSettings.WindStrength, TransitionProgress);
-        CurrentSettings.LightShaftIntensity = FMath::Lerp(StartSettings.LightShaftIntensity, TargetSettings.LightShaftIntensity, TransitionProgress);
-        CurrentSettings.AtmosphericTint = FLinearColor::LerpUsingHSV(StartSettings.AtmosphericTint, TargetSettings.AtmosphericTint, TransitionProgress);
-    }
-}
-
-void AAtmosphericVFXController::ApplySettingsToComponents()
-{
-    if (DustParticles)
-    {
-        DustParticles->SetFloatParameter(TEXT("Intensity"), CurrentSettings.DustIntensity);
-        DustParticles->SetVectorParameter(TEXT("WindDirection"), CurrentSettings.WindDirection);
-        DustParticles->SetFloatParameter(TEXT("WindStrength"), CurrentSettings.WindStrength);
-    }
+    // Threatening settings - predator nearby
+    ThreateningSettings.DustIntensity = 0.7f;
+    ThreateningSettings.MistIntensity = 0.8f;
+    ThreateningSettings.PollenIntensity = 0.0f;
+    ThreateningSettings.WindDirection = FVector(0.5f, 0.8f, 0.2f);
+    ThreateningSettings.WindStrength = 0.8f;
+    ThreateningSettings.WindVariation = 0.6f;
+    ThreateningSettings.LightShaftIntensity = 0.1f;
+    ThreateningSettings.AtmosphericTint = FLinearColor(1.0f, 0.8f, 0.7f, 1.0f);
     
-    if (MistParticles)
-    {
-        MistParticles->SetFloatParameter(TEXT("Intensity"), CurrentSettings.MistIntensity);
-        MistParticles->SetColorParameter(TEXT("Tint"), CurrentSettings.AtmosphericTint);
-    }
-    
-    if (PollenParticles)
-    {
-        PollenParticles->SetFloatParameter(TEXT("Intensity"), CurrentSettings.PollenIntensity);
-        PollenParticles->SetVectorParameter(TEXT("WindDirection"), CurrentSettings.WindDirection);
-    }
-    
-    if (LightShafts)
-    {
-        LightShafts->SetFloatParameter(TEXT("Intensity"), CurrentSettings.LightShaftIntensity);
-        LightShafts->SetColorParameter(TEXT("LightColor"), CurrentSettings.AtmosphericTint);
-    }
-}
-
-void AAtmosphericVFXController::UpdateWindVariation(float DeltaTime)
-{
-    WindVariationTimer += DeltaTime;
-    
-    if (WindVariationTimer >= 2.0f) // Update wind every 2 seconds
-    {
-        WindVariationTimer = 0.0f;
-        
-        // Add variation to wind direction and strength
-        FVector BaseDirection = TargetSettings.WindDirection;
-        float VariationAngle = FMath::RandRange(-CurrentSettings.WindVariation * 45.0f, CurrentSettings.WindVariation * 45.0f);
-        FRotator VariationRotation(0, VariationAngle, 0);
-        
-        CurrentSettings.WindDirection = VariationRotation.RotateVector(BaseDirection);
-        
-        float StrengthVariation = FMath::RandRange(-CurrentSettings.WindVariation * 0.3f, CurrentSettings.WindVariation * 0.3f);
-        CurrentSettings.WindStrength = FMath::Clamp(TargetSettings.WindStrength + StrengthVariation, 0.0f, 2.0f);
-    }
-}
-
-void AAtmosphericVFXController::UpdateDustVariation(float DeltaTime)
-{
-    DustVariationTimer += DeltaTime;
-    
-    if (DustVariationTimer >= 3.0f) // Update dust every 3 seconds
-    {
-        DustVariationTimer = 0.0f;
-        
-        // Add subtle variation to dust intensity
-        float DustVariation = FMath::RandRange(-0.1f, 0.1f);
-        CurrentSettings.DustIntensity = FMath::Clamp(TargetSettings.DustIntensity + DustVariation, 0.0f, 2.0f);
-    }
+    // Panic settings - immediate danger
+    PanicSettings.DustIntensity = 1.0f;
+    PanicSettings.MistIntensity = 0.3f;
+    PanicSettings.PollenIntensity = 0.0f;
+    PanicSettings.WindDirection = FVector(0, 1, 0.3f);
+    PanicSettings.WindStrength = 1.0f;
+    PanicSettings.WindVariation = 0.8f;
+    PanicSettings.LightShaftIntensity = 0.0f;
+    PanicSettings.AtmosphericTint = FLinearColor(1.0f, 0.7f, 0.6f, 1.0f);
 }
 
 void AAtmosphericVFXController::SetAtmosphericMood(EAtmosphericMood NewMood, bool bInstant)
 {
-    if (CurrentMood == NewMood) return;
+    if (CurrentMood == NewMood)
+    {
+        return;
+    }
     
     CurrentMood = NewMood;
     TargetSettings = GetSettingsForMood(NewMood);
@@ -232,18 +143,20 @@ void AAtmosphericVFXController::SetAtmosphericMood(EAtmosphericMood NewMood, boo
     {
         CurrentSettings = TargetSettings;
         TransitionProgress = 1.0f;
+        ApplySettingsToComponents();
     }
     else
     {
         TransitionProgress = 0.0f;
     }
-    
-    UE_LOG(LogTemp, Log, TEXT("Atmospheric mood changed to: %d"), (int32)NewMood);
 }
 
 void AAtmosphericVFXController::SetWeatherState(EWeatherState NewWeather, bool bInstant)
 {
-    if (CurrentWeather == NewWeather) return;
+    if (CurrentWeather == NewWeather)
+    {
+        return;
+    }
     
     CurrentWeather = NewWeather;
     TargetSettings = GetSettingsForMood(CurrentMood);
@@ -253,43 +166,39 @@ void AAtmosphericVFXController::SetWeatherState(EWeatherState NewWeather, bool b
     {
         CurrentSettings = TargetSettings;
         TransitionProgress = 1.0f;
+        ApplySettingsToComponents();
     }
     else
     {
         TransitionProgress = 0.0f;
     }
-    
-    UE_LOG(LogTemp, Log, TEXT("Weather state changed to: %d"), (int32)NewWeather);
 }
 
 void AAtmosphericVFXController::TriggerThreatResponse(FVector ThreatLocation, float Intensity)
 {
-    // Temporarily intensify atmospheric effects
+    // Temporarily intensify atmospheric effects based on threat proximity
+    float Distance = FVector::Dist(GetActorLocation(), ThreatLocation);
+    float ThreatInfluence = FMath::Clamp(1.0f - (Distance / ThreatDetectionRadius), 0.0f, 1.0f);
+    ThreatInfluence *= Intensity * ThreatResponseIntensity;
+    
+    // Modify current settings temporarily
     FAtmosphericSettings ThreatSettings = CurrentSettings;
-    ThreatSettings.DustIntensity *= (1.0f + Intensity * ThreatResponseIntensity);
-    ThreatSettings.WindStrength *= (1.0f + Intensity * 0.5f);
-    ThreatSettings.LightShaftIntensity *= (1.0f - Intensity * 0.3f);
+    ThreatSettings.DustIntensity = FMath::Clamp(ThreatSettings.DustIntensity + ThreatInfluence, 0.0f, 2.0f);
+    ThreatSettings.WindStrength = FMath::Clamp(ThreatSettings.WindStrength + ThreatInfluence * 0.5f, 0.0f, 2.0f);
+    ThreatSettings.WindVariation = FMath::Clamp(ThreatSettings.WindVariation + ThreatInfluence * 0.3f, 0.0f, 1.0f);
     
-    // Apply threat direction to wind
-    FVector DirectionToThreat = (ThreatLocation - GetActorLocation()).GetSafeNormal();
-    ThreatSettings.WindDirection = DirectionToThreat;
-    
-    TargetSettings = ThreatSettings;
-    TransitionProgress = 0.0f;
-    TransitionSpeed = 4.0f; // Faster transition for threats
-    
-    UE_LOG(LogTemp, Warning, TEXT("Threat response triggered with intensity: %f"), Intensity);
+    // Apply threat-modified settings temporarily
+    CurrentSettings = ThreatSettings;
+    ApplySettingsToComponents();
 }
 
 void AAtmosphericVFXController::SetWindDirection(FVector NewDirection, float Strength)
 {
-    CurrentSettings.WindDirection = NewDirection.GetSafeNormal();
-    TargetSettings.WindDirection = CurrentSettings.WindDirection;
+    TargetSettings.WindDirection = NewDirection.GetSafeNormal();
     
     if (Strength >= 0.0f)
     {
-        CurrentSettings.WindStrength = Strength;
-        TargetSettings.WindStrength = Strength;
+        TargetSettings.WindStrength = FMath::Clamp(Strength, 0.0f, 2.0f);
     }
 }
 
@@ -303,51 +212,185 @@ void AAtmosphericVFXController::UpdateThreatDetection()
         
         // Determine appropriate mood based on threat level
         EAtmosphericMood NewMood = CurrentMood;
+        
         if (ThreatLevel > 0.8f)
         {
             NewMood = EAtmosphericMood::Panic;
         }
-        else if (ThreatLevel > 0.6f)
+        else if (ThreatLevel > 0.5f)
         {
             NewMood = EAtmosphericMood::Threatening;
         }
-        else if (ThreatLevel > 0.3f)
+        else if (ThreatLevel > 0.2f)
         {
             NewMood = EAtmosphericMood::Tense;
         }
         
-        if (NewMood != CurrentMood)
-        {
-            SetAtmosphericMood(NewMood, false);
-        }
+        SetAtmosphericMood(NewMood, false);
     }
-    else
+    else if (CurrentMood != EAtmosphericMood::Calm)
     {
-        // No threats detected, gradually return to calm
-        if (CurrentMood != EAtmosphericMood::Calm)
-        {
-            SetAtmosphericMood(EAtmosphericMood::Calm, false);
-        }
+        // Gradually return to calm if no threats detected
+        SetAtmosphericMood(EAtmosphericMood::Calm, false);
     }
 }
 
 bool AAtmosphericVFXController::IsPlayerInDanger() const
 {
-    TArray<AActor*> Threats = DetectNearbyThreats();
-    return Threats.Num() > 0 && CalculateThreatLevel(Threats) > 0.5f;
+    return CurrentMood == EAtmosphericMood::Threatening || CurrentMood == EAtmosphericMood::Panic;
+}
+
+void AAtmosphericVFXController::UpdateAtmosphericEffects(float DeltaTime)
+{
+    // Update transition progress
+    if (TransitionProgress < 1.0f)
+    {
+        TransitionProgress = FMath::Clamp(TransitionProgress + (DeltaTime * TransitionSpeed), 0.0f, 1.0f);
+        BlendToTargetSettings(DeltaTime);
+    }
+    
+    // Update variations
+    UpdateWindVariation(DeltaTime);
+    UpdateDustVariation(DeltaTime);
+    
+    // Apply current settings to components
+    ApplySettingsToComponents();
+}
+
+void AAtmosphericVFXController::BlendToTargetSettings(float DeltaTime)
+{
+    float Alpha = TransitionProgress;
+    
+    // Smooth transition curve
+    Alpha = FMath::SmoothStep(0.0f, 1.0f, Alpha);
+    
+    CurrentSettings.DustIntensity = FMath::Lerp(CurrentSettings.DustIntensity, TargetSettings.DustIntensity, Alpha);
+    CurrentSettings.MistIntensity = FMath::Lerp(CurrentSettings.MistIntensity, TargetSettings.MistIntensity, Alpha);
+    CurrentSettings.PollenIntensity = FMath::Lerp(CurrentSettings.PollenIntensity, TargetSettings.PollenIntensity, Alpha);
+    CurrentSettings.WindStrength = FMath::Lerp(CurrentSettings.WindStrength, TargetSettings.WindStrength, Alpha);
+    CurrentSettings.WindVariation = FMath::Lerp(CurrentSettings.WindVariation, TargetSettings.WindVariation, Alpha);
+    CurrentSettings.LightShaftIntensity = FMath::Lerp(CurrentSettings.LightShaftIntensity, TargetSettings.LightShaftIntensity, Alpha);
+    
+    CurrentSettings.WindDirection = FMath::Lerp(CurrentSettings.WindDirection, TargetSettings.WindDirection, Alpha);
+    CurrentSettings.AtmosphericTint = FMath::Lerp(CurrentSettings.AtmosphericTint, TargetSettings.AtmosphericTint, Alpha);
+}
+
+void AAtmosphericVFXController::ApplySettingsToComponents()
+{
+    // Apply dust settings
+    if (DustParticles && DustParticles->GetAsset())
+    {
+        DustParticles->SetFloatParameter(TEXT("Intensity"), CurrentSettings.DustIntensity);
+        DustParticles->SetVectorParameter(TEXT("WindDirection"), CurrentSettings.WindDirection);
+        DustParticles->SetFloatParameter(TEXT("WindStrength"), CurrentSettings.WindStrength);
+        DustParticles->SetColorParameter(TEXT("Tint"), CurrentSettings.AtmosphericTint);
+        
+        if (CurrentSettings.DustIntensity > 0.01f && !DustParticles->IsActive())
+        {
+            DustParticles->Activate();
+        }
+        else if (CurrentSettings.DustIntensity <= 0.01f && DustParticles->IsActive())
+        {
+            DustParticles->Deactivate();
+        }
+    }
+    
+    // Apply mist settings
+    if (MistParticles && MistParticles->GetAsset())
+    {
+        MistParticles->SetFloatParameter(TEXT("Intensity"), CurrentSettings.MistIntensity);
+        MistParticles->SetVectorParameter(TEXT("WindDirection"), CurrentSettings.WindDirection * 0.5f);
+        MistParticles->SetColorParameter(TEXT("Tint"), CurrentSettings.AtmosphericTint);
+        
+        if (CurrentSettings.MistIntensity > 0.01f && !MistParticles->IsActive())
+        {
+            MistParticles->Activate();
+        }
+        else if (CurrentSettings.MistIntensity <= 0.01f && MistParticles->IsActive())
+        {
+            MistParticles->Deactivate();
+        }
+    }
+    
+    // Apply pollen settings
+    if (PollenParticles && PollenParticles->GetAsset())
+    {
+        PollenParticles->SetFloatParameter(TEXT("Intensity"), CurrentSettings.PollenIntensity);
+        PollenParticles->SetVectorParameter(TEXT("WindDirection"), CurrentSettings.WindDirection * 0.3f);
+        
+        if (CurrentSettings.PollenIntensity > 0.01f && !PollenParticles->IsActive())
+        {
+            PollenParticles->Activate();
+        }
+        else if (CurrentSettings.PollenIntensity <= 0.01f && PollenParticles->IsActive())
+        {
+            PollenParticles->Deactivate();
+        }
+    }
+    
+    // Apply light shaft settings
+    if (LightShafts && LightShafts->GetAsset())
+    {
+        LightShafts->SetFloatParameter(TEXT("Intensity"), CurrentSettings.LightShaftIntensity);
+        LightShafts->SetColorParameter(TEXT("Tint"), CurrentSettings.AtmosphericTint);
+        
+        if (CurrentSettings.LightShaftIntensity > 0.01f && !LightShafts->IsActive())
+        {
+            LightShafts->Activate();
+        }
+        else if (CurrentSettings.LightShaftIntensity <= 0.01f && LightShafts->IsActive())
+        {
+            LightShafts->Deactivate();
+        }
+    }
+}
+
+void AAtmosphericVFXController::UpdateWindVariation(float DeltaTime)
+{
+    WindVariationTimer += DeltaTime;
+    
+    // Create subtle wind variation using sine waves
+    float WindVariationMultiplier = 1.0f + (FMath::Sin(WindVariationTimer * 0.5f) * CurrentSettings.WindVariation * 0.5f);
+    float WindDirectionVariation = FMath::Sin(WindVariationTimer * 0.3f) * CurrentSettings.WindVariation * 0.2f;
+    
+    FVector VariedWindDirection = CurrentSettings.WindDirection;
+    VariedWindDirection.Y += WindDirectionVariation;
+    VariedWindDirection = VariedWindDirection.GetSafeNormal();
+    
+    // Apply variations to active components
+    if (DustParticles && DustParticles->IsActive())
+    {
+        DustParticles->SetFloatParameter(TEXT("WindStrength"), CurrentSettings.WindStrength * WindVariationMultiplier);
+        DustParticles->SetVectorParameter(TEXT("WindDirection"), VariedWindDirection);
+    }
+}
+
+void AAtmosphericVFXController::UpdateDustVariation(float DeltaTime)
+{
+    DustVariationTimer += DeltaTime * 0.7f;
+    
+    // Create subtle dust intensity variation
+    float DustVariationMultiplier = 1.0f + (FMath::Sin(DustVariationTimer) * 0.2f);
+    
+    if (DustParticles && DustParticles->IsActive())
+    {
+        float VariedDustIntensity = CurrentSettings.DustIntensity * DustVariationMultiplier;
+        DustParticles->SetFloatParameter(TEXT("Intensity"), VariedDustIntensity);
+    }
 }
 
 FAtmosphericSettings AAtmosphericVFXController::GetSettingsForMood(EAtmosphericMood Mood) const
 {
     switch (Mood)
     {
+        case EAtmosphericMood::Calm:
+            return CalmSettings;
         case EAtmosphericMood::Tense:
             return TenseSettings;
         case EAtmosphericMood::Threatening:
             return ThreateningSettings;
         case EAtmosphericMood::Panic:
             return PanicSettings;
-        case EAtmosphericMood::Calm:
         default:
             return CalmSettings;
     }
@@ -357,23 +400,29 @@ void AAtmosphericVFXController::ModifySettingsForWeather(FAtmosphericSettings& S
 {
     switch (CurrentWeather)
     {
+        case EWeatherState::Clear:
+            // No modifications needed
+            break;
+            
         case EWeatherState::Misty:
             Settings.MistIntensity *= 2.0f;
-            Settings.LightShaftIntensity *= 0.7f;
+            Settings.LightShaftIntensity *= 0.5f;
+            Settings.AtmosphericTint = FMath::Lerp(Settings.AtmosphericTint, FLinearColor(0.8f, 0.9f, 1.0f, 1.0f), 0.5f);
             break;
+            
         case EWeatherState::Overcast:
-            Settings.LightShaftIntensity *= 0.3f;
-            Settings.AtmosphericTint = FLinearColor(0.7f, 0.7f, 0.8f, 1.0f);
+            Settings.LightShaftIntensity *= 0.2f;
+            Settings.DustIntensity *= 0.7f;
+            Settings.AtmosphericTint = FMath::Lerp(Settings.AtmosphericTint, FLinearColor(0.7f, 0.7f, 0.8f, 1.0f), 0.7f);
             break;
+            
         case EWeatherState::Storm:
             Settings.WindStrength *= 2.0f;
+            Settings.WindVariation *= 1.5f;
             Settings.DustIntensity *= 1.5f;
-            Settings.LightShaftIntensity *= 0.1f;
-            Settings.AtmosphericTint = FLinearColor(0.5f, 0.5f, 0.6f, 1.0f);
-            break;
-        case EWeatherState::Clear:
-        default:
-            // No modifications for clear weather
+            Settings.MistIntensity *= 0.3f;
+            Settings.LightShaftIntensity = 0.0f;
+            Settings.AtmosphericTint = FMath::Lerp(Settings.AtmosphericTint, FLinearColor(0.5f, 0.6f, 0.7f, 1.0f), 0.8f);
             break;
     }
 }
@@ -382,21 +431,14 @@ TArray<AActor*> AAtmosphericVFXController::DetectNearbyThreats() const
 {
     TArray<AActor*> Threats;
     
-    // Get all actors within detection radius
-    TArray<AActor*> NearbyActors;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), NearbyActors);
-    
-    for (AActor* Actor : NearbyActors)
+    if (UWorld* World = GetWorld())
     {
-        if (!Actor || Actor == this) continue;
+        TArray<AActor*> FoundActors;
+        UGameplayStatics::GetAllActorsWithTag(World, FName("Predator"), FoundActors);
         
-        float Distance = FVector::Dist(GetActorLocation(), Actor->GetActorLocation());
-        if (Distance <= ThreatDetectionRadius)
+        for (AActor* Actor : FoundActors)
         {
-            // Check if actor has threat tags or is a predator
-            if (Actor->Tags.Contains(TEXT("Predator")) || 
-                Actor->Tags.Contains(TEXT("Threat")) ||
-                Actor->Tags.Contains(TEXT("LargeDinosaur")))
+            if (Actor && FVector::Dist(GetActorLocation(), Actor->GetActorLocation()) <= ThreatDetectionRadius)
             {
                 Threats.Add(Actor);
             }
@@ -408,29 +450,29 @@ TArray<AActor*> AAtmosphericVFXController::DetectNearbyThreats() const
 
 float AAtmosphericVFXController::CalculateThreatLevel(const TArray<AActor*>& Threats) const
 {
-    if (Threats.Num() == 0) return 0.0f;
+    if (Threats.Num() == 0)
+    {
+        return 0.0f;
+    }
     
-    float TotalThreat = 0.0f;
+    float TotalThreatLevel = 0.0f;
+    FVector MyLocation = GetActorLocation();
     
     for (AActor* Threat : Threats)
     {
-        float Distance = FVector::Dist(GetActorLocation(), Threat->GetActorLocation());
-        float DistanceRatio = 1.0f - (Distance / ThreatDetectionRadius);
-        
-        float ThreatValue = 0.5f; // Base threat
-        
-        // Increase threat based on tags
-        if (Threat->Tags.Contains(TEXT("Apex")))
+        if (!Threat)
         {
-            ThreatValue = 1.0f;
-        }
-        else if (Threat->Tags.Contains(TEXT("LargePredator")))
-        {
-            ThreatValue = 0.8f;
+            continue;
         }
         
-        TotalThreat += ThreatValue * DistanceRatio;
+        float Distance = FVector::Dist(MyLocation, Threat->GetActorLocation());
+        float DistanceInfluence = 1.0f - FMath::Clamp(Distance / ThreatDetectionRadius, 0.0f, 1.0f);
+        
+        // Base threat level (could be modified by creature size, aggression, etc.)
+        float BaseThreatLevel = 1.0f;
+        
+        TotalThreatLevel += BaseThreatLevel * DistanceInfluence;
     }
     
-    return FMath::Clamp(TotalThreat, 0.0f, 1.0f);
+    return FMath::Clamp(TotalThreatLevel, 0.0f, 1.0f);
 }
