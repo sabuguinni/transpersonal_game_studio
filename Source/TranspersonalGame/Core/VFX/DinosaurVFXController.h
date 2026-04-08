@@ -1,0 +1,241 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Components/ActorComponent.h"
+#include "VFXSystemManager.h"
+#include "VFXComponent.h"
+#include "Engine/DataTable.h"
+#include "DinosaurVFXController.generated.h"
+
+UENUM(BlueprintType)
+enum class EDinosaurVFXState : uint8
+{
+    Idle = 0,
+    Walking,
+    Running,
+    Attacking,
+    Roaring,
+    Eating,
+    Sleeping,
+    Injured,
+    Dying,
+    Dead
+};
+
+UENUM(BlueprintType)
+enum class EDinosaurSize : uint8
+{
+    Small = 0,    // Compsognathus, small raptors
+    Medium = 1,   // Velociraptors, Dilophosaurus
+    Large = 2,    // Allosaurus, Carnotaurus
+    Massive = 3   // T-Rex, Brontosaurus, Triceratops
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FDinosaurVFXConfig : public FTableRowBase
+{
+    GENERATED_BODY()
+
+    // Basic Info
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Config")
+    FString DinosaurName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Config")
+    EDinosaurSize DinosaurSize = EDinosaurSize::Medium;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Config")
+    bool bIsCarnivore = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Config")
+    bool bIsAquatic = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Config")
+    bool bIsFlying = false;
+
+    // Movement VFX
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement VFX")
+    TMap<EDinosaurVFXState, EVFXType> MovementVFX;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement VFX")
+    float FootstepVFXInterval = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement VFX")
+    TArray<FName> FootstepSockets;
+
+    // Breathing VFX
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Breathing VFX")
+    EVFXType BreathingVFXType = EVFXType::DinosaurBreathing;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Breathing VFX")
+    float BreathingInterval = 3.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Breathing VFX")
+    FName BreathingSocket = "head";
+
+    // Combat VFX
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat VFX")
+    TMap<FString, EVFXType> AttackVFX; // Attack name -> VFX type
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat VFX")
+    EVFXType BloodVFXType = EVFXType::BloodSpray;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat VFX")
+    EVFXType RoarVFXType = EVFXType::DinosaurRoar;
+
+    // Environmental VFX
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environmental VFX")
+    bool bGenerateDust = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environmental VFX")
+    float DustGenerationThreshold = 100.0f; // Movement speed threshold
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environmental VFX")
+    bool bGenerateWaterRipples = true;
+
+    // Death VFX
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Death VFX")
+    TArray<EVFXType> DeathVFXSequence;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Death VFX")
+    float DeathVFXDelay = 0.5f;
+};
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnDinosaurVFXTriggered, EDinosaurVFXState, State, EVFXType, VFXType, FVector, Location);
+
+/**
+ * Dinosaur VFX Controller - Specialized VFX management for dinosaur characters
+ * Handles state-based VFX, footsteps, breathing, combat effects, and environmental interactions
+ */
+UCLASS(BlueprintType, Blueprintable, ClassGroup=(VFX), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UDinosaurVFXController : public UActorComponent
+{
+    GENERATED_BODY()
+
+public:
+    UDinosaurVFXController();
+
+    virtual void BeginPlay() override;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
+    // State Management
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur VFX")
+    void SetDinosaurState(EDinosaurVFXState NewState);
+
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur VFX")
+    EDinosaurVFXState GetDinosaurState() const { return CurrentState; }
+
+    // Movement VFX
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur VFX")
+    void OnMovementSpeedChanged(float NewSpeed);
+
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur VFX")
+    void TriggerFootstepVFX(FName FootSocket = NAME_None);
+
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur VFX")
+    void SetFootstepInterval(float NewInterval);
+
+    // Combat VFX
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur VFX")
+    void TriggerAttackVFX(const FString& AttackName, FVector AttackLocation = FVector::ZeroVector);
+
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur VFX")
+    void TriggerRoarVFX();
+
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur VFX")
+    void TriggerBloodVFX(FVector HitLocation, FVector HitNormal);
+
+    // Environmental VFX
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur VFX")
+    void OnEnterWater();
+
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur VFX")
+    void OnExitWater();
+
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur VFX")
+    void OnGroundImpact(float ImpactForce, FVector ImpactLocation);
+
+    // Death VFX
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur VFX")
+    void TriggerDeathSequence();
+
+    // Configuration
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur VFX")
+    void LoadDinosaurConfig(FName ConfigRowName);
+
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur VFX")
+    void SetDinosaurSize(EDinosaurSize NewSize);
+
+    // Events
+    UPROPERTY(BlueprintAssignable, Category = "Dinosaur VFX")
+    FOnDinosaurVFXTriggered OnVFXTriggered;
+
+    // Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Config")
+    UDataTable* DinosaurVFXConfigTable;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Config")
+    FName DefaultConfigRow = "DefaultDinosaur";
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Config")
+    bool bAutoDetectMovement = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Config")
+    bool bAutoDetectWater = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Config")
+    float VFXScaleMultiplier = 1.0f;
+
+protected:
+    // Runtime State
+    UPROPERTY()
+    EDinosaurVFXState CurrentState = EDinosaurVFXState::Idle;
+
+    UPROPERTY()
+    EDinosaurVFXState PreviousState = EDinosaurVFXState::Idle;
+
+    UPROPERTY()
+    FDinosaurVFXConfig CurrentConfig;
+
+    UPROPERTY()
+    UVFXComponent* VFXComponent;
+
+    UPROPERTY()
+    UVFXSystemManager* VFXManager;
+
+    // Timers
+    UPROPERTY()
+    float FootstepTimer = 0.0f;
+
+    UPROPERTY()
+    float BreathingTimer = 0.0f;
+
+    UPROPERTY()
+    float StateChangeTime = 0.0f;
+
+    UPROPERTY()
+    bool bInWater = false;
+
+    UPROPERTY()
+    float CurrentMovementSpeed = 0.0f;
+
+    UPROPERTY()
+    int32 CurrentFootstepIndex = 0;
+
+    // Active VFX tracking
+    UPROPERTY()
+    TArray<TWeakObjectPtr<UNiagaraComponent>> ActiveBreathingVFX;
+
+    UPROPERTY()
+    TArray<TWeakObjectPtr<UNiagaraComponent>> ActiveMovementVFX;
+
+    // Internal Methods
+    void UpdateMovementVFX(float DeltaTime);
+    void UpdateBreathingVFX(float DeltaTime);
+    void UpdateStateBasedVFX();
+    void CleanupStateVFX(EDinosaurVFXState State);
+    void ApplyVFXScale(UNiagaraComponent* VFXComponent);
+    FVector GetFootstepLocation(FName FootSocket) const;
+    EDinosaurVFXState DetermineStateFromMovement(float MovementSpeed) const;
+    void LoadDefaultConfig();
+};
