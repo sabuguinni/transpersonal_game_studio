@@ -1,0 +1,300 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Engine/GameInstanceSubsystem.h"
+#include "GameplayTagContainer.h"
+#include "../Narrative/GameBible.h"
+#include "QuestSystem.h"
+#include "DynamicQuestGenerator.h"
+#include "EmotionalQuestDesigner.generated.h"
+
+class UQuestSystem;
+class UDynamicQuestGenerator;
+class UGameBible;
+
+/**
+ * Emotional states that quests can evoke and respond to
+ */
+UENUM(BlueprintType)
+enum class EEmotionalState : uint8
+{
+    Wonder          UMETA(DisplayName = "Awe and Wonder"),
+    Fear            UMETA(DisplayName = "Primal Fear"),
+    Curiosity       UMETA(DisplayName = "Scientific Curiosity"),
+    Loneliness      UMETA(DisplayName = "Isolation and Loneliness"),
+    Achievement     UMETA(DisplayName = "Accomplishment"),
+    Connection      UMETA(DisplayName = "Connection with Nature"),
+    Tension         UMETA(DisplayName = "Survival Tension"),
+    Discovery       UMETA(DisplayName = "Joy of Discovery"),
+    Empathy         UMETA(DisplayName = "Empathy with Creatures"),
+    Determination   UMETA(DisplayName = "Will to Survive")
+};
+
+/**
+ * Quest emotional arc - how the quest should make the player feel over time
+ */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FQuestEmotionalArc
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotional Arc")
+    EEmotionalState OpeningEmotion = EEmotionalState::Curiosity;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotional Arc")
+    EEmotionalState MiddleEmotion = EEmotionalState::Tension;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotional Arc")
+    EEmotionalState ResolutionEmotion = EEmotionalState::Achievement;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotional Arc")
+    float IntensityCurve = 1.0f; // How dramatic the emotional journey is
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotional Arc")
+    bool bHasEmotionalTwist = false; // Unexpected emotional turn
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotional Arc")
+    FText EmotionalPayoff; // The emotional reward for completion
+};
+
+/**
+ * Narrative context that influences quest design
+ */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FNarrativeContext
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Context")
+    EStoryAct CurrentAct = EStoryAct::Act1_Arrival;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Context")
+    TArray<ENarrativeTheme> ActiveThemes;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Context")
+    FGameplayTagContainer PlayerProgressTags;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Context")
+    float PlayerEmotionalState = 0.5f; // 0 = low, 1 = high intensity
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Context")
+    TArray<FName> RecentlyCompletedQuests;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Context")
+    FVector PlayerLocation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Context")
+    float TimeSinceLastMajorEvent = 0.0f;
+};
+
+/**
+ * Quest design pattern - reusable emotional and mechanical structures
+ */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FQuestDesignPattern
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pattern")
+    FName PatternID;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pattern")
+    FText PatternName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pattern")
+    FText PatternDescription;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pattern")
+    FQuestEmotionalArc EmotionalArc;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pattern")
+    TArray<EObjectiveType> ObjectiveSequence;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pattern")
+    ENarrativeTheme PrimaryTheme;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pattern")
+    float MinimumDuration = 300.0f; // Minimum time to complete emotionally
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pattern")
+    float OptimalDuration = 600.0f; // Sweet spot for emotional impact
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pattern")
+    TArray<FString> VariationTemplates; // Different ways to express this pattern
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pattern")
+    FGameplayTagContainer RequiredWorldState; // What needs to be true in the world
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pattern")
+    float EmotionalWeight = 1.0f; // How impactful this pattern is
+};
+
+/**
+ * Player emotional profile - tracks how the player responds to different stimuli
+ */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FPlayerEmotionalProfile
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Profile")
+    TMap<EEmotionalState, float> EmotionalPreferences; // What emotions they respond to
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Profile")
+    TMap<EQuestType, float> QuestTypePreferences; // What quest types they enjoy
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Profile")
+    float AttentionSpan = 600.0f; // How long they typically engage with content
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Profile")
+    float ChallengePreference = 0.5f; // 0 = easy, 1 = hard
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Profile")
+    float ExplorationTendency = 0.5f; // How much they like to explore
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Profile")
+    float NarrativeFocus = 0.5f; // How much they care about story
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Profile")
+    TArray<FName> MemorableQuests; // Quests they found particularly engaging
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Profile")
+    float LastEmotionalPeak = 0.0f; // When they last had a strong emotional response
+};
+
+/**
+ * The Emotional Quest Designer - transforms narrative beats into emotionally resonant gameplay
+ * 
+ * This system thinks like a dramaturge, not a programmer. Every quest is designed to evoke
+ * specific emotions and create memorable moments that align with the game's core themes.
+ * It considers the player's emotional state, the narrative context, and the living world
+ * to create quests that feel meaningful rather than mechanical.
+ */
+UCLASS(BlueprintType)
+class TRANSPERSONALGAME_API UEmotionalQuestDesigner : public UGameInstanceSubsystem
+{
+    GENERATED_BODY()
+
+public:
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+
+    // Core Quest Design
+    UFUNCTION(BlueprintCallable, Category = "Emotional Quest Design")
+    FName DesignQuestFromNarrativeBeat(const FStoryBeat& NarrativeBeat, const FNarrativeContext& Context);
+
+    UFUNCTION(BlueprintCallable, Category = "Emotional Quest Design")
+    FName DesignEmergentQuest(const FEcosystemEvent& Event, const FNarrativeContext& Context);
+
+    UFUNCTION(BlueprintCallable, Category = "Emotional Quest Design")
+    FName DesignPersonalizedQuest(const FPlayerEmotionalProfile& PlayerProfile, const FNarrativeContext& Context);
+
+    // Emotional Arc Management
+    UFUNCTION(BlueprintCallable, Category = "Emotional Quest Design")
+    FQuestEmotionalArc DesignEmotionalArc(ENarrativeTheme Theme, EEmotionalState DesiredOutcome);
+
+    UFUNCTION(BlueprintCallable, Category = "Emotional Quest Design")
+    bool ValidateEmotionalFlow(const FQuestData& QuestData, const FQuestEmotionalArc& Arc);
+
+    UFUNCTION(BlueprintCallable, Category = "Emotional Quest Design")
+    void AdjustQuestPacing(FQuestData& QuestData, const FPlayerEmotionalProfile& PlayerProfile);
+
+    // Pattern System
+    UFUNCTION(BlueprintCallable, Category = "Emotional Quest Design")
+    FQuestDesignPattern SelectOptimalPattern(const FNarrativeContext& Context, ENarrativeTheme DesiredTheme);
+
+    UFUNCTION(BlueprintCallable, Category = "Emotional Quest Design")
+    FName InstantiatePattern(const FQuestDesignPattern& Pattern, const TMap<FString, FString>& ContextVariables);
+
+    UFUNCTION(BlueprintCallable, Category = "Emotional Quest Design")
+    void LoadDesignPatterns(class UDataTable* PatternTable);
+
+    // Player Profiling
+    UFUNCTION(BlueprintCallable, Category = "Emotional Quest Design")
+    void UpdatePlayerEmotionalProfile(FName CompletedQuestID, float EmotionalResponse, float EngagementTime);
+
+    UFUNCTION(BlueprintCallable, Category = "Emotional Quest Design")
+    FPlayerEmotionalProfile GetPlayerEmotionalProfile() const { return CurrentPlayerProfile; }
+
+    UFUNCTION(BlueprintCallable, Category = "Emotional Quest Design")
+    EEmotionalState PredictPlayerEmotionalNeed(const FNarrativeContext& Context);
+
+    // Contextual Design
+    UFUNCTION(BlueprintCallable, Category = "Emotional Quest Design")
+    void UpdateNarrativeContext(const FGameplayTagContainer& WorldState, FVector PlayerLocation);
+
+    UFUNCTION(BlueprintCallable, Category = "Emotional Quest Design")
+    float CalculateEmotionalResonance(const FQuestData& Quest, const FNarrativeContext& Context);
+
+    UFUNCTION(BlueprintCallable, Category = "Emotional Quest Design")
+    TArray<FName> GetEmotionallyRelevantQuests(EEmotionalState TargetEmotion, int32 MaxQuests = 3);
+
+    // Specialized Quest Designers
+    UFUNCTION(BlueprintCallable, Category = "Emotional Quest Design")
+    FName DesignObservationQuest(const FDinosaurBehaviorPattern& Pattern, ENarrativeTheme Theme);
+
+    UFUNCTION(BlueprintCallable, Category = "Emotional Quest Design")
+    FName DesignSurvivalQuest(const FEcosystemEvent& ThreatEvent, EEmotionalState DesiredEmotion);
+
+    UFUNCTION(BlueprintCallable, Category = "Emotional Quest Design")
+    FName DesignDiscoveryQuest(FVector DiscoveryLocation, FGameplayTag DiscoveryType, ENarrativeTheme Theme);
+
+    UFUNCTION(BlueprintCallable, Category = "Emotional Quest Design")
+    FName DesignConnectionQuest(FMassEntityHandle TargetCreature, EEmotionalState DesiredBond);
+
+protected:
+    UPROPERTY()
+    TObjectPtr<UQuestSystem> QuestSystem;
+
+    UPROPERTY()
+    TObjectPtr<UDynamicQuestGenerator> DynamicQuestGenerator;
+
+    UPROPERTY()
+    TObjectPtr<UGameBible> GameBible;
+
+    UPROPERTY()
+    FNarrativeContext CurrentNarrativeContext;
+
+    UPROPERTY()
+    FPlayerEmotionalProfile CurrentPlayerProfile;
+
+    UPROPERTY()
+    TMap<FName, FQuestDesignPattern> DesignPatterns;
+
+    UPROPERTY()
+    TMap<FName, FQuestEmotionalArc> ActiveEmotionalArcs;
+
+    // Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Config")
+    float EmotionalDecayRate = 0.1f; // How quickly emotional states fade
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Config")
+    float MinimumEmotionalGap = 300.0f; // Minimum time between intense emotions
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Config")
+    int32 MaxConcurrentEmotionalQuests = 2; // Limit emotional overload
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Config")
+    float ContextUpdateInterval = 60.0f; // How often to reassess context
+
+private:
+    FTimerHandle ContextUpdateTimer;
+    FTimerHandle EmotionalDecayTimer;
+
+    // Internal Design Methods
+    FQuestData CreateBaseQuestFromPattern(const FQuestDesignPattern& Pattern, const FNarrativeContext& Context);
+    void InjectEmotionalBeats(FQuestData& Quest, const FQuestEmotionalArc& Arc);
+    void OptimizeObjectiveSequence(FQuestData& Quest, const FPlayerEmotionalProfile& Profile);
+    
+    FText GenerateEmotionallyResonantText(const FString& Template, const FNarrativeContext& Context, EEmotionalState TargetEmotion);
+    FQuestReward DesignMeaningfulReward(const FQuestData& Quest, const FQuestEmotionalArc& Arc);
+    
+    void AnalyzeQuestCompletion(FName QuestID, float CompletionTime, const FGameplayTagContainer& CompletionContext);
+    void UpdateEmotionalState();
+    void DecayEmotionalIntensity();
+    
+    bool IsEmotionallyAppropriate(EEmotionalState Emotion, const FNarrativeContext& Context);
+    float CalculateEmotionalDistance(EEmotionalState From, EEmotionalState To);
+    
+    int32 EmotionalQuestCounter = 0;
+};
