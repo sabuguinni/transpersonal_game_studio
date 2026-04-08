@@ -1,0 +1,52 @@
+// Static Mesh Asset for Sacred Geometry Elements
+// Mesh: SM_SacredGeometry
+
+/*
+Mesh Description:
+A collection of sacred geometry shapes that appear and transform based on consciousness levels.
+Includes: Flower of Life, Metatron's Cube, Platonic Solids, Fibonacci Spirals
+
+LOD Levels:
+- LOD0: High detail for close viewing (2000-5000 triangles)
+- LOD1: Medium detail for mid-range (500-1000 triangles)
+- LOD2: Low detail for distance (100-300 triangles)
+
+Material Slots:
+1. Primary Geometry: Main sacred shapes
+2. Energy Lines: Connecting lines and patterns
+3. Core Glow: Central emanation point
+4. Particle Attachment: Points for particle spawning
+
+UV Mapping:
+- Channel 0: Diffuse and normal textures
+- Channel 1: Lightmap coordinates
+- Channel 2: Special effects mapping (energy flow)
+
+Collision:
+- Simple collision for physics interaction
+- Complex collision for precise consciousness detection
+- Trigger volumes for player proximity events
+
+Vertex Colors:
+- Red Channel: Consciousness sensitivity (0-1)
+- Green Channel: Animation intensity
+- Blue Channel: Particle spawn probability
+- Alpha Channel: Transparency control
+
+Animation Bones (for skeletal version):
+- Center_Bone: Main transformation point
+- Ring1_Bone: Inner geometry ring
+- Ring2_Bone: Middle geometry ring
+- Ring3_Bone: Outer geometry ring
+- Spiral_Bone: Fibonacci spiral elements
+
+Export Settings:
+- Scale: 100 units = 1 meter
+- Forward Axis: X
+- Up Axis: Z
+- Smoothing Groups: Auto-generated
+- Tangents: Mikk T-Space
+*/
+
+// This mesh would be created in a 3D modeling software like Blender or Maya
+// and imported into Unreal Engine with proper materials and collision setup
