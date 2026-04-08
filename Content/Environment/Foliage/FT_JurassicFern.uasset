@@ -1,0 +1,42 @@
+// Jurassic Fern Foliage Type
+// Based on Dicksonia antarctica and Cyathea species
+// Primary ground cover for forest biomes
+
+FoliageType: StaticMesh
+StaticMesh: SM_JurassicFern_01
+
+// Placement Settings
+Density: 8.0 (instances per 1000x1000 units)
+Radius: 150.0 (minimum distance between instances)
+
+// Scaling
+ScaleX: (Min: 0.8, Max: 1.4)
+ScaleY: (Min: 0.8, Max: 1.4) 
+ScaleZ: (Min: 0.7, Max: 1.3)
+LockScaling: false
+
+// Rotation
+AlignToNormal: true
+RandomYaw: true
+RandomPitchAngle: 15.0
+
+// Culling
+StartCullDistance: 8000.0
+EndCullDistance: 12000.0
+PerInstanceFadeAmount: true
+
+// Collision
+CollisionWithWorld: true
+CollisionWithOtherFoliage: true
+
+// Ground Slope
+GroundSlopeAngle: (Min: 0.0, Max: 45.0)
+Height: (Min: -200.0, Max: 200.0)
+
+// LOD Settings
+LODDistanceScale: 1.0
+EnableStaticLighting: false (using Lumen)
+
+// Wind Settings
+EnableWind: true
+WindMagnitude: 0.3
