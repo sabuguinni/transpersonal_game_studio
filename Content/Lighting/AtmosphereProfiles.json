@@ -1,0 +1,157 @@
+{
+  "atmosphere_profiles": {
+    "sacred_dawn": {
+      "name": "Sacred Dawn",
+      "description": "Soft golden light filtering through morning mist, evoking spiritual awakening",
+      "sun_angle": {
+        "pitch": -15,
+        "yaw": 45,
+        "roll": 0
+      },
+      "sun_color": [1.0, 0.9, 0.7],
+      "sun_intensity": 2.5,
+      "sky_color": [0.8, 0.9, 1.0],
+      "ambient_intensity": 0.8,
+      "fog_density": 0.03,
+      "fog_color": [0.9, 0.8, 0.7],
+      "volumetric_fog": 1.2,
+      "god_rays": true,
+      "consciousness_states": ["normal", "meditative"]
+    },
+    "mystical_twilight": {
+      "name": "Mystical Twilight",
+      "description": "Deep purple and blue hues creating an otherworldly atmosphere",
+      "sun_angle": {
+        "pitch": -75,
+        "yaw": 180,
+        "roll": 0
+      },
+      "sun_color": [0.6, 0.4, 0.8],
+      "sun_intensity": 1.5,
+      "sky_color": [0.3, 0.2, 0.6],
+      "ambient_intensity": 1.0,
+      "fog_density": 0.05,
+      "fog_color": [0.4, 0.3, 0.7],
+      "volumetric_fog": 2.0,
+      "god_rays": false,
+      "consciousness_states": ["transcendent", "meditative"]
+    },
+    "unity_radiance": {
+      "name": "Unity Radiance",
+      "description": "Brilliant white-gold light representing unity consciousness",
+      "sun_angle": {
+        "pitch": 0,
+        "yaw": 0,
+        "roll": 0
+      },
+      "sun_color": [1.0, 1.0, 0.9],
+      "sun_intensity": 5.0,
+      "sky_color": [1.0, 0.95, 0.8],
+      "ambient_intensity": 1.8,
+      "fog_density": 0.005,
+      "fog_color": [1.0, 0.95, 0.8],
+      "volumetric_fog": 3.5,
+      "god_rays": true,
+      "consciousness_states": ["unity"]
+    },
+    "void_stillness": {
+      "name": "Void Stillness",
+      "description": "Deep darkness with subtle blue undertones for void meditation",
+      "sun_angle": {
+        "pitch": -90,
+        "yaw": 0,
+        "roll": 0
+      },
+      "sun_color": [0.1, 0.1, 0.2],
+      "sun_intensity": 0.3,
+      "sky_color": [0.05, 0.05, 0.15],
+      "ambient_intensity": 0.2,
+      "fog_density": 0.08,
+      "fog_color": [0.1, 0.1, 0.3],
+      "volumetric_fog": 0.5,
+      "god_rays": false,
+      "consciousness_states": ["void"]
+    },
+    "cosmic_infinity": {
+      "name": "Cosmic Infinity",
+      "description": "Deep space blues with stellar radiance for cosmic consciousness",
+      "sun_angle": {
+        "pitch": 30,
+        "yaw": 180,
+        "roll": 0
+      },
+      "sun_color": [0.5, 0.7, 1.0],
+      "sun_intensity": 6.0,
+      "sky_color": [0.1, 0.2, 0.5],
+      "ambient_intensity": 2.2,
+      "fog_density": 0.001,
+      "fog_color": [0.2, 0.4, 0.8],
+      "volumetric_fog": 4.0,
+      "god_rays": true,
+      "consciousness_states": ["cosmic"]
+    }
+  },
+  "dynamic_effects": {
+    "breathing_light": {
+      "description": "Subtle pulsing of ambient light synchronized with breathing",
+      "pulse_rate": 0.25,
+      "intensity_variation": 0.15,
+      "color_shift": 0.05
+    },
+    "energy_waves": {
+      "description": "Waves of colored light moving through the environment",
+      "wave_speed": 2.0,
+      "wave_frequency": 0.5,
+      "color_spectrum": ["violet", "indigo", "blue", "green", "yellow", "orange", "red"]
+    },
+    "particle_aura": {
+      "description": "Floating light particles that respond to player presence",
+      "particle_count": 50,
+      "movement_speed": 1.0,
+      "interaction_radius": 5.0,
+      "colors": [[1.0, 0.8, 0.6], [0.8, 0.6, 1.0], [0.6, 1.0, 0.8]]
+    }
+  },
+  "sacred_geometry_lighting": {
+    "mandala_projections": {
+      "description": "Sacred geometric patterns projected as light",
+      "patterns": ["flower_of_life", "sri_yantra", "metatron_cube"],
+      "projection_intensity": 2.0,
+      "rotation_speed": 0.1,
+      "color_cycling": true
+    },
+    "fibonacci_spirals": {
+      "description": "Light following fibonacci spiral patterns",
+      "spiral_count": 3,
+      "spiral_speed": 0.5,
+      "golden_ratio": 1.618,
+      "colors": [[1.0, 0.8, 0.4], [0.8, 1.0, 0.6], [0.6, 0.8, 1.0]]
+    }
+  },
+  "biome_specific_lighting": {
+    "crystal_caves": {
+      "crystal_reflections": true,
+      "prismatic_effects": true,
+      "internal_glow": 1.5,
+      "refraction_intensity": 2.0
+    },
+    "sacred_groves": {
+      "dappled_sunlight": true,
+      "leaf_shadows": true,
+      "bio_luminescence": 0.8,
+      "seasonal_variation": true
+    },
+    "mountain_peaks": {
+      "alpine_glow": true,
+      "snow_reflection": 1.2,
+      "atmospheric_perspective": true,
+      "cloud_shadows": true
+    },
+    "desert_sanctuaries": {
+      "heat_shimmer": true,
+      "sand_reflection": 0.6,
+      "oasis_cooling": true,
+      "star_visibility": 2.0
+    }
+  }
+}
