@@ -1,343 +1,256 @@
 #include "VFXSystemManager.h"
 #include "NiagaraFunctionLibrary.h"
 #include "Engine/World.h"
+#include "TimerManager.h"
+#include "Engine/Engine.h"
 #include "GameFramework/PlayerController.h"
-#include "Kismet/GameplayStatics.h"
 
 AVFXSystemManager::AVFXSystemManager()
 {
-    PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 0.1f; // Update every 100ms for performance
+    PrimaryActorTick.bCanEverTick = false;
     
-    // Default performance settings
-    MaxActiveVFX = 50;
-    PerformanceUpdateInterval = 0.1f;
-    bEnableDistanceCulling = true;
-    bEnableLODSystem = true;
-    CurrentQualityLevel = 2; // Default to High quality
-    LastPerformanceUpdate = 0.0f;
+    // Configuração inicial de performance
+    MaxSimultaneousEffects = 50;
+    PerformanceBudget_GPU = 8.0f;
+    bEnableAdaptiveLOD = true;
 }
 
 void AVFXSystemManager::BeginPlay()
 {
     Super::BeginPlay();
-    InitializeVFXPool();
-}
-
-void AVFXSystemManager::Tick(float DeltaTime)
-{
-    Super::Tick(DeltaTime);
     
-    LastPerformanceUpdate += DeltaTime;
-    if (LastPerformanceUpdate >= PerformanceUpdateInterval)
+    // Inicializar timer de LOD update
+    if (bEnableAdaptiveLOD)
     {
-        UpdateVFXPerformance();
-        LastPerformanceUpdate = 0.0f;
+        GetWorld()->GetTimerManager().SetTimer(LODUpdateTimer, this, 
+            &AVFXSystemManager::UpdateLODSystem, 0.5f, true);
     }
 }
 
-void AVFXSystemManager::InitializeVFXPool()
+UNiagaraComponent* AVFXSystemManager::SpawnVFXAtLocation(const FString& EffectName, 
+                                                        const FVector& Location, 
+                                                        const FRotator& Rotation,
+                                                        const FVector& Scale)
 {
-    // Initialize core survival VFX
-    FVFXPoolEntry FireEntry;
-    FireEntry.Category = EVFXCategory::Survival;
-    FireEntry.Priority = EVFXPriority::Critical;
-    FireEntry.MaxInstances = 15;
-    FireEntry.CullDistance = 3000.0f;
-    RegisterVFXSystem("Fire_Campfire", FireEntry);
-    
-    FVFXPoolEntry SmokeEntry;
-    SmokeEntry.Category = EVFXCategory::Survival;
-    SmokeEntry.Priority = EVFXPriority::High;
-    SmokeEntry.MaxInstances = 20;
-    SmokeEntry.CullDistance = 4000.0f;
-    RegisterVFXSystem("Smoke_Campfire", SmokeEntry);
-    
-    // Initialize wildlife VFX
-    FVFXPoolEntry FootstepEntry;
-    FootstepEntry.Category = EVFXCategory::Wildlife;
-    FootstepEntry.Priority = EVFXPriority::Medium;
-    FootstepEntry.MaxInstances = 30;
-    FootstepEntry.CullDistance = 2000.0f;
-    RegisterVFXSystem("Footstep_Dust", FootstepEntry);
-    
-    // Initialize environmental VFX
-    FVFXPoolEntry RainEntry;
-    RainEntry.Category = EVFXCategory::Environmental;
-    RainEntry.Priority = EVFXPriority::High;
-    RainEntry.MaxInstances = 5;
-    RainEntry.CullDistance = 10000.0f;
-    RegisterVFXSystem("Rain_Heavy", RainEntry);
-}
-
-UNiagaraComponent* AVFXSystemManager::SpawnVFX(const FString& VFXName, const FVector& Location, const FRotator& Rotation, AActor* AttachToActor)
-{
-    if (!VFXPool.Contains(VFXName))
+    if (!VFXDatabase)
     {
-        UE_LOG(LogTemp, Warning, TEXT("VFX System '%s' not found in pool"), *VFXName);
+        UE_LOG(LogTemp, Warning, TEXT("VFXSystemManager: VFXDatabase not set"));
         return nullptr;
     }
-    
-    // Check if we've exceeded max active VFX
-    if (ActiveVFXComponents.Num() >= MaxActiveVFX)
+
+    // Buscar definição do efeito
+    FVFXDefinition* EffectDef = VFXDatabase->FindRow<FVFXDefinition>(FName(*EffectName), TEXT(""));
+    if (!EffectDef)
     {
-        // Try to cull distant VFX first
-        CullDistantVFX();
+        UE_LOG(LogTemp, Warning, TEXT("VFXSystemManager: Effect '%s' not found"), *EffectName);
+        return nullptr;
+    }
+
+    // Verificar budget de performance
+    if (ActiveEffects.Num() >= MaxSimultaneousEffects)
+    {
+        CleanupInactiveEffects();
         
-        // If still at limit, don't spawn low priority effects
-        const FVFXPoolEntry& PoolEntry = VFXPool[VFXName];
-        if (PoolEntry.Priority == EVFXPriority::Low && ActiveVFXComponents.Num() >= MaxActiveVFX)
+        if (ActiveEffects.Num() >= MaxSimultaneousEffects)
         {
+            UE_LOG(LogTemp, Warning, TEXT("VFXSystemManager: Max effects limit reached"));
             return nullptr;
         }
     }
+
+    // Calcular LOD baseado na distância
+    int32 LODLevel = CalculateEffectLOD(Location);
     
-    UNiagaraComponent* VFXComponent = GetPooledVFX(VFXName);
+    // Carregar sistema Niagara
+    UNiagaraSystem* NiagaraSystem = EffectDef->NiagaraSystem.LoadSynchronous();
+    if (!NiagaraSystem)
+    {
+        UE_LOG(LogTemp, Error, TEXT("VFXSystemManager: Failed to load Niagara system for '%s'"), *EffectName);
+        return nullptr;
+    }
+
+    // Spawn do efeito
+    UNiagaraComponent* SpawnedEffect = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+        GetWorld(), NiagaraSystem, Location, Rotation, Scale, true, true);
+
+    if (SpawnedEffect)
+    {
+        // Aplicar LOD
+        SpawnedEffect->SetVariableFloat(TEXT("LODLevel"), static_cast<float>(LODLevel));
+        
+        // Configurar parâmetros de performance baseados no LOD
+        switch (LODLevel)
+        {
+        case 0: // High quality
+            SpawnedEffect->SetVariableFloat(TEXT("ParticleCount"), 1.0f);
+            SpawnedEffect->SetVariableFloat(TEXT("UpdateRate"), 1.0f);
+            break;
+        case 1: // Medium quality
+            SpawnedEffect->SetVariableFloat(TEXT("ParticleCount"), 0.6f);
+            SpawnedEffect->SetVariableFloat(TEXT("UpdateRate"), 0.8f);
+            break;
+        case 2: // Low quality
+            SpawnedEffect->SetVariableFloat(TEXT("ParticleCount"), 0.3f);
+            SpawnedEffect->SetVariableFloat(TEXT("UpdateRate"), 0.5f);
+            break;
+        }
+
+        ActiveEffects.Add(SpawnedEffect);
+        
+        UE_LOG(LogTemp, Log, TEXT("VFXSystemManager: Spawned '%s' at LOD %d"), *EffectName, LODLevel);
+    }
+
+    return SpawnedEffect;
+}
+
+UNiagaraComponent* AVFXSystemManager::SpawnVFXAttached(const FString& EffectName,
+                                                      USceneComponent* AttachComponent,
+                                                      const FName& AttachPointName,
+                                                      const FVector& Location,
+                                                      const FRotator& Rotation,
+                                                      const FVector& Scale)
+{
+    if (!AttachComponent)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("VFXSystemManager: AttachComponent is null"));
+        return nullptr;
+    }
+
+    // Usar a localização do componente para calcular LOD
+    FVector WorldLocation = AttachComponent->GetComponentLocation() + Location;
+    
+    UNiagaraComponent* SpawnedEffect = SpawnVFXAtLocation(EffectName, WorldLocation, Rotation, Scale);
+    
+    if (SpawnedEffect)
+    {
+        // Anexar ao componente
+        SpawnedEffect->AttachToComponent(AttachComponent, 
+            FAttachmentTransformRules::KeepRelativeTransform, AttachPointName);
+        SpawnedEffect->SetRelativeLocation(Location);
+        SpawnedEffect->SetRelativeRotation(Rotation);
+        SpawnedEffect->SetRelativeScale3D(Scale);
+    }
+
+    return SpawnedEffect;
+}
+
+void AVFXSystemManager::ApplyCreatureVariation(UNiagaraComponent* VFXComponent, int32 CreatureID)
+{
     if (!VFXComponent)
+        return;
+
+    // Gerar variação baseada no ID da criatura
+    FRandomStream RandomStream(CreatureID);
+    
+    // Variações de cor (baseadas no ID para consistência)
+    float HueShift = RandomStream.FRandRange(-0.2f, 0.2f);
+    float SaturationMultiplier = RandomStream.FRandRange(0.8f, 1.2f);
+    float BrightnessMultiplier = RandomStream.FRandRange(0.9f, 1.1f);
+    
+    VFXComponent->SetVariableFloat(TEXT("HueShift"), HueShift);
+    VFXComponent->SetVariableFloat(TEXT("SaturationMult"), SaturationMultiplier);
+    VFXComponent->SetVariableFloat(TEXT("BrightnessMult"), BrightnessMultiplier);
+    
+    // Variações de escala e intensidade
+    float ScaleVariation = RandomStream.FRandRange(0.85f, 1.15f);
+    float IntensityVariation = RandomStream.FRandRange(0.9f, 1.1f);
+    
+    VFXComponent->SetVariableFloat(TEXT("ScaleVariation"), ScaleVariation);
+    VFXComponent->SetVariableFloat(TEXT("IntensityVariation"), IntensityVariation);
+    
+    UE_LOG(LogTemp, Log, TEXT("VFXSystemManager: Applied variation for creature ID %d"), CreatureID);
+}
+
+float AVFXSystemManager::GetCurrentGPUBudgetUsage() const
+{
+    // Estimativa baseada no número de efeitos ativos
+    // Em implementação real, isso seria conectado ao profiler de GPU
+    float EstimatedUsage = (static_cast<float>(ActiveEffects.Num()) / MaxSimultaneousEffects) * PerformanceBudget_GPU;
+    return FMath::Clamp(EstimatedUsage, 0.0f, PerformanceBudget_GPU);
+}
+
+void AVFXSystemManager::ForceUpdateLOD()
+{
+    UpdateLODSystem();
+}
+
+void AVFXSystemManager::UpdateLODSystem()
+{
+    if (!bEnableAdaptiveLOD)
+        return;
+
+    CleanupInactiveEffects();
+    
+    // Verificar se estamos excedendo o budget de performance
+    float CurrentUsage = GetCurrentGPUBudgetUsage();
+    bool bNeedsOptimization = CurrentUsage > (PerformanceBudget_GPU * 0.8f);
+    
+    for (UNiagaraComponent* Effect : ActiveEffects)
     {
-        // Create new component if pool is empty
-        const FVFXPoolEntry& PoolEntry = VFXPool[VFXName];
-        if (PoolEntry.NiagaraSystem.IsValid())
+        if (!Effect || !Effect->IsActive())
+            continue;
+            
+        FVector EffectLocation = Effect->GetComponentLocation();
+        int32 NewLOD = CalculateEffectLOD(EffectLocation);
+        
+        // Se precisamos otimizar, forçar LOD mais baixo
+        if (bNeedsOptimization)
         {
-            VFXComponent = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
-                GetWorld(),
-                PoolEntry.NiagaraSystem.LoadSynchronous(),
-                Location,
-                Rotation
-            );
+            NewLOD = FMath::Min(NewLOD + 1, 2);
         }
-    }
-    
-    if (VFXComponent)
-    {
-        VFXComponent->SetWorldLocation(Location);
-        VFXComponent->SetWorldRotation(Rotation);
         
-        if (AttachToActor)
+        // Aplicar novo LOD se mudou
+        float CurrentLOD = 0.0f;
+        if (Effect->GetVariableFloat(TEXT("LODLevel"), CurrentLOD))
         {
-            VFXComponent->AttachToComponent(
-                AttachToActor->GetRootComponent(),
-                FAttachmentTransformRules::KeepWorldTransform
-            );
-        }
-        
-        VFXComponent->Activate();
-        ActiveVFXComponents.Add(VFXComponent);
-    }
-    
-    return VFXComponent;
-}
-
-void AVFXSystemManager::ReturnVFXToPool(UNiagaraComponent* VFXComponent)
-{
-    if (!VFXComponent) return;
-    
-    VFXComponent->Deactivate();
-    VFXComponent->DetachFromComponent(FDetachmentTransformRules::KeepWorldTransform);
-    
-    ActiveVFXComponents.Remove(VFXComponent);
-    PooledVFXComponents.Add(VFXComponent);
-}
-
-void AVFXSystemManager::RegisterVFXSystem(const FString& Name, const FVFXPoolEntry& PoolEntry)
-{
-    VFXPool.Add(Name, PoolEntry);
-}
-
-UNiagaraComponent* AVFXSystemManager::GetPooledVFX(const FString& VFXName)
-{
-    // Simple pooling - return first available component
-    for (int32 i = PooledVFXComponents.Num() - 1; i >= 0; i--)
-    {
-        if (PooledVFXComponents[i] && !PooledVFXComponents[i]->IsActive())
-        {
-            UNiagaraComponent* Component = PooledVFXComponents[i];
-            PooledVFXComponents.RemoveAt(i);
-            return Component;
-        }
-    }
-    return nullptr;
-}
-
-void AVFXSystemManager::UpdateVFXPerformance()
-{
-    if (bEnableDistanceCulling)
-    {
-        CullDistantVFX();
-    }
-    
-    if (bEnableLODSystem)
-    {
-        UpdateVFXLOD();
-    }
-}
-
-void AVFXSystemManager::CullDistantVFX()
-{
-    APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
-    if (!PC || !PC->GetPawn()) return;
-    
-    FVector PlayerLocation = PC->GetPawn()->GetActorLocation();
-    
-    for (int32 i = ActiveVFXComponents.Num() - 1; i >= 0; i--)
-    {
-        UNiagaraComponent* VFXComp = ActiveVFXComponents[i];
-        if (!VFXComp || !VFXComp->IsActive()) continue;
-        
-        float Distance = FVector::Dist(PlayerLocation, VFXComp->GetComponentLocation());
-        
-        // Find the cull distance for this VFX
-        float CullDistance = 5000.0f; // Default
-        for (const auto& PoolPair : VFXPool)
-        {
-            if (PoolPair.Value.NiagaraSystem.IsValid() && 
-                VFXComp->GetAsset() == PoolPair.Value.NiagaraSystem.LoadSynchronous())
+            if (FMath::Abs(CurrentLOD - static_cast<float>(NewLOD)) > 0.1f)
             {
-                CullDistance = PoolPair.Value.CullDistance;
-                break;
+                Effect->SetVariableFloat(TEXT("LODLevel"), static_cast<float>(NewLOD));
+                
+                // Atualizar parâmetros de qualidade
+                switch (NewLOD)
+                {
+                case 0:
+                    Effect->SetVariableFloat(TEXT("ParticleCount"), 1.0f);
+                    Effect->SetVariableFloat(TEXT("UpdateRate"), 1.0f);
+                    break;
+                case 1:
+                    Effect->SetVariableFloat(TEXT("ParticleCount"), 0.6f);
+                    Effect->SetVariableFloat(TEXT("UpdateRate"), 0.8f);
+                    break;
+                case 2:
+                    Effect->SetVariableFloat(TEXT("ParticleCount"), 0.3f);
+                    Effect->SetVariableFloat(TEXT("UpdateRate"), 0.5f);
+                    break;
+                }
             }
         }
-        
-        if (Distance > CullDistance)
-        {
-            ReturnVFXToPool(VFXComp);
-        }
     }
 }
 
-void AVFXSystemManager::UpdateVFXLOD()
+int32 AVFXSystemManager::CalculateEffectLOD(const FVector& EffectLocation) const
 {
-    APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
-    if (!PC || !PC->GetPawn()) return;
+    // Obter posição do jogador
+    APlayerController* PC = GetWorld()->GetFirstPlayerController();
+    if (!PC || !PC->GetPawn())
+        return 2; // LOD mais baixo se não conseguir determinar posição do jogador
     
     FVector PlayerLocation = PC->GetPawn()->GetActorLocation();
+    float Distance = FVector::Dist(PlayerLocation, EffectLocation);
     
-    for (UNiagaraComponent* VFXComp : ActiveVFXComponents)
-    {
-        if (!VFXComp || !VFXComp->IsActive()) continue;
-        
-        float Distance = FVector::Dist(PlayerLocation, VFXComp->GetComponentLocation());
-        
-        // Simple 3-tier LOD system
-        if (Distance < 1000.0f)
-        {
-            // High detail
-            VFXComp->SetFloatParameter("LOD_Multiplier", 1.0f);
-        }
-        else if (Distance < 3000.0f)
-        {
-            // Medium detail
-            VFXComp->SetFloatParameter("LOD_Multiplier", 0.6f);
-        }
-        else
-        {
-            // Low detail
-            VFXComp->SetFloatParameter("LOD_Multiplier", 0.3f);
-        }
-    }
+    // Determinar LOD baseado na distância
+    if (Distance < 2000.0f)
+        return 0; // High quality
+    else if (Distance < 5000.0f)
+        return 1; // Medium quality
+    else
+        return 2; // Low quality
 }
 
-void AVFXSystemManager::SetVFXQuality(int32 QualityLevel)
+void AVFXSystemManager::CleanupInactiveEffects()
 {
-    CurrentQualityLevel = FMath::Clamp(QualityLevel, 0, 3);
-    
-    switch (CurrentQualityLevel)
+    ActiveEffects.RemoveAll([](UNiagaraComponent* Effect)
     {
-        case 0: // Low
-            MaxActiveVFX = 25;
-            PerformanceUpdateInterval = 0.2f;
-            break;
-        case 1: // Medium
-            MaxActiveVFX = 35;
-            PerformanceUpdateInterval = 0.15f;
-            break;
-        case 2: // High
-            MaxActiveVFX = 50;
-            PerformanceUpdateInterval = 0.1f;
-            break;
-        case 3: // Ultra
-            MaxActiveVFX = 75;
-            PerformanceUpdateInterval = 0.05f;
-            break;
-    }
-}
-
-// Survival VFX Functions
-UNiagaraComponent* AVFXSystemManager::SpawnFireEffect(const FVector& Location, float Intensity)
-{
-    UNiagaraComponent* FireVFX = SpawnVFX("Fire_Campfire", Location);
-    if (FireVFX)
-    {
-        FireVFX->SetFloatParameter("Intensity", Intensity);
-        FireVFX->SetFloatParameter("Scale", FMath::Clamp(Intensity, 0.5f, 2.0f));
-    }
-    return FireVFX;
-}
-
-UNiagaraComponent* AVFXSystemManager::SpawnSmokeEffect(const FVector& Location, float Density)
-{
-    UNiagaraComponent* SmokeVFX = SpawnVFX("Smoke_Campfire", Location);
-    if (SmokeVFX)
-    {
-        SmokeVFX->SetFloatParameter("Density", Density);
-        SmokeVFX->SetFloatParameter("WindInfluence", 0.8f);
-    }
-    return SmokeVFX;
-}
-
-UNiagaraComponent* AVFXSystemManager::SpawnSparkEffect(const FVector& Location, const FVector& Direction)
-{
-    UNiagaraComponent* SparkVFX = SpawnVFX("Sparks_Tool", Location);
-    if (SparkVFX)
-    {
-        SparkVFX->SetVectorParameter("SparkDirection", Direction);
-        SparkVFX->SetFloatParameter("SparkCount", 15.0f);
-    }
-    return SparkVFX;
-}
-
-// Wildlife VFX Functions
-UNiagaraComponent* AVFXSystemManager::SpawnFootstepEffect(const FVector& Location, float DinosaurSize)
-{
-    UNiagaraComponent* FootstepVFX = SpawnVFX("Footstep_Dust", Location);
-    if (FootstepVFX)
-    {
-        FootstepVFX->SetFloatParameter("Size", DinosaurSize);
-        FootstepVFX->SetFloatParameter("DustAmount", DinosaurSize * 10.0f);
-    }
-    return FootstepVFX;
-}
-
-UNiagaraComponent* AVFXSystemManager::SpawnBreathEffect(const FVector& Location, float Temperature)
-{
-    UNiagaraComponent* BreathVFX = SpawnVFX("Breath_Cold", Location);
-    if (BreathVFX)
-    {
-        float Visibility = FMath::Clamp((20.0f - Temperature) / 20.0f, 0.0f, 1.0f);
-        BreathVFX->SetFloatParameter("Visibility", Visibility);
-    }
-    return BreathVFX;
-}
-
-// Environmental VFX Functions
-UNiagaraComponent* AVFXSystemManager::SpawnRainEffect(const FVector& Location, float Intensity)
-{
-    UNiagaraComponent* RainVFX = SpawnVFX("Rain_Heavy", Location);
-    if (RainVFX)
-    {
-        RainVFX->SetFloatParameter("Intensity", Intensity);
-        RainVFX->SetFloatParameter("DropSize", FMath::Lerp(0.8f, 1.5f, Intensity));
-    }
-    return RainVFX;
-}
-
-UNiagaraComponent* AVFXSystemManager::SpawnWindEffect(const FVector& Location, const FVector& WindDirection)
-{
-    UNiagaraComponent* WindVFX = SpawnVFX("Wind_Leaves", Location);
-    if (WindVFX)
-    {
-        WindVFX->SetVectorParameter("WindDirection", WindDirection.GetSafeNormal());
-        WindVFX->SetFloatParameter("WindStrength", WindDirection.Size());
-    }
-    return WindVFX;
+        return !Effect || !IsValid(Effect) || !Effect->IsActive();
+    });
 }
