@@ -1,24 +1,16 @@
-/**
- * @file ProceduralWorldGenerator.h
- * @brief Procedural World Generator for 50km² consciousness-aware terrain
- * @author Transpersonal Game Studio - Procedural World Generator
- * @version 1.0
- */
-
+// ProceduralWorldGenerator.h
+// Sistema principal de geração procedural de mundo
 #pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Engine/World.h"
 #include "Components/StaticMeshComponent.h"
-#include "Landscape/Classes/Landscape.h"
 #include "ProceduralMeshComponent.h"
-#include "../Core/ConsciousnessSystem.h"
-#include "../Performance/PhysicsOptimizer.h"
 #include "ProceduralWorldGenerator.generated.h"
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBiomeData
+struct FBiomeData
 {
     GENERATED_BODY()
 
@@ -26,31 +18,23 @@ struct TRANSPERSONALGAME_API FBiomeData
     FString BiomeName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float ConsciousnessResonance;
+    float Temperature = 20.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float EnergyDensity;
+    float Humidity = 0.5f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TArray<UStaticMesh*> VegetationMeshes;
+    float Elevation = 0.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    UMaterialInterface* TerrainMaterial;
+    TArray<class UStaticMesh*> VegetationMeshes;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FLinearColor AuraColor;
-
-    FBiomeData()
-    {
-        BiomeName = TEXT("Default");
-        ConsciousnessResonance = 1.0f;
-        EnergyDensity = 0.5f;
-        AuraColor = FLinearColor::White;
-    }
+    class UMaterialInterface* TerrainMaterial;
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FChunkData
+struct FChunkData
 {
     GENERATED_BODY()
 
@@ -58,27 +42,19 @@ struct TRANSPERSONALGAME_API FChunkData
     FVector2D ChunkCoordinates;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bIsLoaded;
+    bool bIsLoaded = false;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bHasConsciousnessNodes;
+    bool bIsGenerated = false;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float ConsciousnessLevel;
+    TArray<FVector> HeightmapData;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TArray<AActor*> SpawnedActors;
-
-    FChunkData()
-    {
-        ChunkCoordinates = FVector2D::ZeroVector;
-        bIsLoaded = false;
-        bHasConsciousnessNodes = false;
-        ConsciousnessLevel = 0.0f;
-    }
+    FBiomeData BiomeData;
 };
 
-UCLASS()
+UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API AProceduralWorldGenerator : public AActor
 {
     GENERATED_BODY()
@@ -90,136 +66,84 @@ protected:
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
 
-    // World Generation Parameters
+    // Configurações de geração
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Generation")
-    int32 WorldSizeKm;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Generation")
-    int32 ChunkSize;
+    int32 ChunkSize = 1000;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Generation")
-    int32 LoadRadius;
+    int32 ViewDistance = 3;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Generation")
-    float NoiseScale;
+    float NoiseScale = 0.01f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Generation")
-    int32 Seed;
+    float HeightMultiplier = 500.0f;
 
-    // Consciousness Integration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Consciousness")
-    TObjectPtr<UConsciousnessSystem> ConsciousnessSystem;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Generation")
+    int32 Seed = 12345;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Consciousness")
-    float ConsciousnessInfluenceRadius;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Consciousness")
-    TArray<FBiomeData> ConsciousnessBiomes;
-
-    // Performance Optimization
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    TObjectPtr<UPhysicsOptimizer> PhysicsOptimizer;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    bool bUseAsyncGeneration;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxChunksPerFrame;
-
-    // Biome System
+    // Biomas disponíveis
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biomes")
     TArray<FBiomeData> AvailableBiomes;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biomes")
-    float BiomeTransitionDistance;
+    // Componentes
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class UProceduralMeshComponent* TerrainMesh;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class USceneComponent* RootSceneComponent;
 
 private:
-    // Chunk Management
+    // Gestão de chunks
     TMap<FVector2D, FChunkData> LoadedChunks;
-    TArray<FVector2D> ChunksToLoad;
+    TArray<FVector2D> ChunksToGenerate;
     TArray<FVector2D> ChunksToUnload;
-    
-    // Generation State
-    FVector LastPlayerPosition;
-    bool bIsGenerating;
-    int32 CurrentGenerationFrame;
 
-    // Consciousness Integration
-    TArray<FVector> ConsciousnessNodes;
-    TMap<FVector2D, float> ChunkConsciousnessLevels;
+    // Cache de player position
+    FVector LastPlayerPosition;
+    class APawn* CachedPlayer;
+
+    // Funções principais
+    void UpdateChunks();
+    void GenerateChunk(const FVector2D& ChunkCoord);
+    void UnloadChunk(const FVector2D& ChunkCoord);
+    bool ShouldLoadChunk(const FVector2D& ChunkCoord) const;
+
+    // Geração de terreno
+    void GenerateTerrain(FChunkData& ChunkData);
+    float GenerateHeight(float X, float Y) const;
+    FBiomeData DetermineBiome(float X, float Y, float Height) const;
+
+    // Geração de vegetação
+    void GenerateVegetation(const FChunkData& ChunkData);
+    bool ShouldPlaceVegetation(float X, float Y, float Height, const FBiomeData& Biome) const;
+
+    // Geração de estruturas
+    void GenerateStructures(const FChunkData& ChunkData);
+    bool ShouldPlaceStructure(float X, float Y, float Height) const;
+
+    // Utilitários de noise
+    float PerlinNoise(float X, float Y) const;
+    float FractalNoise(float X, float Y, int32 Octaves = 4) const;
+    float RidgedNoise(float X, float Y) const;
 
 public:
-    // Core Generation Functions
+    // Interface pública
     UFUNCTION(BlueprintCallable, Category = "World Generation")
-    void InitializeWorld();
-
-    UFUNCTION(BlueprintCallable, Category = "World Generation")
-    void UpdateWorldAroundPlayer(FVector PlayerPosition);
+    void RegenerateWorld();
 
     UFUNCTION(BlueprintCallable, Category = "World Generation")
-    void GenerateChunk(FVector2D ChunkCoord);
+    void SetSeed(int32 NewSeed);
 
     UFUNCTION(BlueprintCallable, Category = "World Generation")
-    void UnloadChunk(FVector2D ChunkCoord);
+    FBiomeData GetBiomeAtLocation(const FVector& WorldLocation) const;
 
-    // Terrain Generation
-    UFUNCTION(BlueprintCallable, Category = "Terrain")
-    float GenerateHeightAtPosition(FVector2D Position);
+    UFUNCTION(BlueprintCallable, Category = "World Generation")
+    float GetHeightAtLocation(const FVector& WorldLocation) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Terrain")
-    FBiomeData GetBiomeAtPosition(FVector2D Position, float ConsciousnessLevel);
+    UFUNCTION(BlueprintImplementableEvent, Category = "World Generation")
+    void OnChunkGenerated(const FVector2D& ChunkCoord);
 
-    UFUNCTION(BlueprintCallable, Category = "Terrain")
-    void GenerateTerrainMesh(FVector2D ChunkCoord, TArray<FVector>& Vertices, TArray<int32>& Triangles);
-
-    // Consciousness Integration
-    UFUNCTION(BlueprintCallable, Category = "Consciousness")
-    void PlaceConsciousnessNodes(FVector2D ChunkCoord);
-
-    UFUNCTION(BlueprintCallable, Category = "Consciousness")
-    float CalculateConsciousnessInfluence(FVector Position);
-
-    UFUNCTION(BlueprintCallable, Category = "Consciousness")
-    void UpdateConsciousnessField(float DeltaTime);
-
-    // Vegetation and Objects
-    UFUNCTION(BlueprintCallable, Category = "Objects")
-    void SpawnVegetation(FVector2D ChunkCoord, const FBiomeData& Biome);
-
-    UFUNCTION(BlueprintCallable, Category = "Objects")
-    void SpawnConsciousnessArtifacts(FVector2D ChunkCoord);
-
-    UFUNCTION(BlueprintCallable, Category = "Objects")
-    void SpawnMeditationSpots(FVector2D ChunkCoord);
-
-    // Utility Functions
-    UFUNCTION(BlueprintCallable, Category = "Utility")
-    FVector2D WorldToChunkCoord(FVector WorldPosition);
-
-    UFUNCTION(BlueprintCallable, Category = "Utility")
-    FVector ChunkToWorldPosition(FVector2D ChunkCoord);
-
-    UFUNCTION(BlueprintCallable, Category = "Utility")
-    bool IsChunkInRange(FVector2D ChunkCoord, FVector PlayerPosition);
-
-    // Performance Monitoring
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void OptimizeChunkLOD(FVector2D ChunkCoord, float DistanceToPlayer);
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void UpdatePhysicsOptimization();
-
-    // Events
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnChunkLoaded, FVector2D, ChunkCoord);
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnChunkUnloaded, FVector2D, ChunkCoord);
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnConsciousnessNodeActivated, FVector, NodePosition, float, Intensity);
-
-    UPROPERTY(BlueprintAssignable)
-    FOnChunkLoaded OnChunkLoaded;
-
-    UPROPERTY(BlueprintAssignable)
-    FOnChunkUnloaded OnChunkUnloaded;
-
-    UPROPERTY(BlueprintAssignable)
-    FOnConsciousnessNodeActivated OnConsciousnessNodeActivated;
+    UFUNCTION(BlueprintImplementableEvent, Category = "World Generation")
+    void OnChunkUnloaded(const FVector2D& ChunkCoord);
 };
