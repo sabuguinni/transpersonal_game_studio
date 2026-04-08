@@ -1,0 +1,107 @@
+{
+  "AssetType": "NiagaraSystem",
+  "Name": "BloodImpact_System",
+  "Description": "Sistema de impacto de sangue com física realista",
+  "Emitters": [
+    {
+      "Name": "BloodSplatter_Initial",
+      "Type": "CPU",
+      "SpawnRate": "Burst",
+      "BurstCount": "ImpactForce * 0.1",
+      "Lifetime": "2.0 + Random(-0.3, 0.3)",
+      "InitialVelocity": {
+        "X": "ImpactDirection.X * ImpactForce * Random(0.5, 1.5)",
+        "Y": "ImpactDirection.Y * ImpactForce * Random(0.5, 1.5)",
+        "Z": "ImpactDirection.Z * ImpactForce * Random(0.5, 1.5) + Random(50, 150)"
+      },
+      "Modules": [
+        "Initialize Particle",
+        "Sphere Location",
+        "Inherit Velocity",
+        "Gravity Force",
+        "Drag",
+        "Collision (World)",
+        "Kill Particles in Volume",
+        "Mesh Renderer"
+      ],
+      "Renderer": {
+        "Mesh": "/Game/Meshes/VFX/SM_BloodDrop",
+        "Material": "/Game/Materials/VFX/M_BloodDrop",
+        "Scale": "Random(0.8, 1.2) * ScaleVariation"
+      }
+    },
+    {
+      "Name": "BloodMist_Fine",
+      "Type": "GPU", 
+      "SpawnRate": "LODLevel < 1 ? Burst : 0",
+      "BurstCount": "ImpactForce * 0.05",
+      "Lifetime": "1.5",
+      "Modules": [
+        "Initialize Particle",
+        "Sphere Location",
+        "Noise Force 3D",
+        "Drag",
+        "Scale by Age",
+        "Color by Age",
+        "Sprite Renderer"
+      ]
+    },
+    {
+      "Name": "BloodDecal_Ground",
+      "Type": "CPU",
+      "SpawnRate": "Event Driven",
+      "EventSource": "BloodSplatter_Initial.Collision",
+      "Lifetime": "Permanent",
+      "Modules": [
+        "Initialize Particle",
+        "Decal Renderer"
+      ],
+      "Renderer": {
+        "Material": "/Game/Materials/VFX/M_BloodDecal",
+        "Size": "Random(0.1, 0.3) * ImpactForce * 0.01"
+      }
+    }
+  ],
+  "Parameters": [
+    {
+      "Name": "ImpactForce",
+      "Type": "Float",
+      "Default": 100.0,
+      "Description": "Force of the impact determining splatter intensity"
+    },
+    {
+      "Name": "ImpactDirection",
+      "Type": "Vector3",
+      "Default": "(1, 0, 0)",
+      "Description": "Direction of the impact"
+    },
+    {
+      "Name": "BloodColor",
+      "Type": "LinearColor",
+      "Default": "(0.8, 0.1, 0.1, 1.0)",
+      "Description": "Base blood color (can vary per creature)"
+    },
+    {
+      "Name": "Viscosity",
+      "Type": "Float",
+      "Default": 1.0,
+      "Description": "Blood thickness affecting flow behavior"
+    },
+    {
+      "Name": "HueShift",
+      "Type": "Float", 
+      "Default": 0.0,
+      "Description": "Color variation per creature type"
+    },
+    {
+      "Name": "ScaleVariation",
+      "Type": "Float",
+      "Default": 1.0
+    },
+    {
+      "Name": "LODLevel",
+      "Type": "Float",
+      "Default": 0.0
+    }
+  ]
+}
