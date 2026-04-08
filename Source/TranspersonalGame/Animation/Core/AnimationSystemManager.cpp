@@ -1,124 +1,213 @@
 #include "AnimationSystemManager.h"
 #include "Engine/World.h"
-#include "GameFramework/Character.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Animation/AnimInstance.h"
+#include "Kismet/KismetMathLibrary.h"
 
-AAnimationSystemManager::AAnimationSystemManager()
+UAnimationSystemManager::UAnimationSystemManager()
 {
-    PrimaryActorTick.bCanEverTick = false;
-    
-    // Set default values
-    GlobalAnimationSpeed = 1.0f;
-    bEnableMotionMatching = true;
-    bEnableFootIK = true;
-    bEnableFearSystem = true;
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.bStartWithTickEnabled = true;
+
+    // Initialize default character profiles
+    FAnimationProfile PlayerProfile;
+    PlayerProfile.CharacterType = ECharacterType::Player;
+    PlayerProfile.MovementSpeed = 1.0f;
+    PlayerProfile.AnimationIntensity = 1.0f;
+    PlayerProfile.FearLevel = 0.3f; // Player starts with some fear
+    PlayerProfile.ConfidenceLevel = 0.4f; // Low confidence initially
+    PlayerProfile.InjuryLevel = 0.0f;
+    PlayerProfile.ExhaustionLevel = 0.0f;
+    CharacterProfiles.Add(ECharacterType::Player, PlayerProfile);
+
+    FAnimationProfile SmallDinosaurProfile;
+    SmallDinosaurProfile.CharacterType = ECharacterType::DinosaurSmall;
+    SmallDinosaurProfile.MovementSpeed = 1.2f;
+    SmallDinosaurProfile.AnimationIntensity = 1.1f;
+    SmallDinosaurProfile.FearLevel = 0.6f; // Small dinosaurs are more fearful
+    SmallDinosaurProfile.ConfidenceLevel = 0.3f;
+    CharacterProfiles.Add(ECharacterType::DinosaurSmall, SmallDinosaurProfile);
+
+    FAnimationProfile MediumDinosaurProfile;
+    MediumDinosaurProfile.CharacterType = ECharacterType::DinosaurMedium;
+    MediumDinosaurProfile.MovementSpeed = 0.9f;
+    MediumDinosaurProfile.AnimationIntensity = 1.0f;
+    MediumDinosaurProfile.FearLevel = 0.2f;
+    MediumDinosaurProfile.ConfidenceLevel = 0.7f;
+    CharacterProfiles.Add(ECharacterType::DinosaurMedium, MediumDinosaurProfile);
+
+    FAnimationProfile LargeDinosaurProfile;
+    LargeDinosaurProfile.CharacterType = ECharacterType::DinosaurLarge;
+    LargeDinosaurProfile.MovementSpeed = 0.7f;
+    LargeDinosaurProfile.AnimationIntensity = 0.8f;
+    LargeDinosaurProfile.FearLevel = 0.1f; // Large dinosaurs fear little
+    LargeDinosaurProfile.ConfidenceLevel = 0.9f;
+    CharacterProfiles.Add(ECharacterType::DinosaurLarge, LargeDinosaurProfile);
+
+    CurrentProfile = PlayerProfile;
 }
 
-void AAnimationSystemManager::BeginPlay()
+void UAnimationSystemManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    UE_LOG(LogTemp, Warning, TEXT("Animation System Manager initialized"));
-    UE_LOG(LogTemp, Warning, TEXT("Motion Matching: %s"), bEnableMotionMatching ? TEXT("ENABLED") : TEXT("DISABLED"));
-    UE_LOG(LogTemp, Warning, TEXT("Foot IK: %s"), bEnableFootIK ? TEXT("ENABLED") : TEXT("DISABLED"));
-    UE_LOG(LogTemp, Warning, TEXT("Fear System: %s"), bEnableFearSystem ? TEXT("ENABLED") : TEXT("DISABLED"));
+    // Initialize animation system
+    SetMovementState(EMovementState::Idle);
+    SetEmotionalState(EEmotionalState::Cautious);
 }
 
-FCharacterAnimationProfile AAnimationSystemManager::GetAnimationProfile(const FString& ArchetypeID)
+void UAnimationSystemManager::TickComponent(float DeltaTime, ELevelTick TickType, 
+                                           FActorComponentTickFunction* ThisTickFunction)
 {
-    if (!CharacterAnimationProfiles)
-    {
-        UE_LOG(LogTemp, Error, TEXT("CharacterAnimationProfiles DataTable is not set!"));
-        return FCharacterAnimationProfile();
-    }
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-    FCharacterAnimationProfile* Profile = CharacterAnimationProfiles->FindRow<FCharacterAnimationProfile>(
-        FName(*ArchetypeID), TEXT("GetAnimationProfile"));
+    // Update fear response timer
+    UpdateFearResponse(DeltaTime);
     
-    if (Profile)
-    {
-        UE_LOG(LogTemp, Log, TEXT("Found animation profile for archetype: %s"), *ArchetypeID);
-        return *Profile;
-    }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("No animation profile found for archetype: %s"), *ArchetypeID);
-        return FCharacterAnimationProfile();
-    }
+    // Apply current emotional state to animation profile
+    ApplyEmotionalStateToProfile();
 }
 
-void AAnimationSystemManager::RegisterCharacter(AActor* Character, const FString& ArchetypeID)
+void UAnimationSystemManager::SetMovementState(EMovementState NewState)
 {
-    if (!Character)
+    if (CurrentMovementState != NewState)
     {
-        UE_LOG(LogTemp, Error, TEXT("Cannot register null character"));
-        return;
-    }
-
-    RegisteredCharacters.Add(Character, ArchetypeID);
-    CharacterFearLevels.Add(Character, 0.0f);
-    
-    UE_LOG(LogTemp, Log, TEXT("Registered character %s with archetype %s"), 
-           *Character->GetName(), *ArchetypeID);
-
-    // Apply animation profile to character
-    FCharacterAnimationProfile Profile = GetAnimationProfile(ArchetypeID);
-    
-    // Get character's skeletal mesh component
-    if (ACharacter* CharacterPawn = Cast<ACharacter>(Character))
-    {
-        USkeletalMeshComponent* MeshComp = CharacterPawn->GetMesh();
-        if (MeshComp && MeshComp->GetAnimInstance())
+        CurrentMovementState = NewState;
+        
+        // Adjust animation intensity based on movement state
+        switch (NewState)
         {
-            UAnimInstance* AnimInstance = MeshComp->GetAnimInstance();
-            
-            // Set animation properties based on profile
-            // This would typically involve setting variables on the Animation Blueprint
-            UE_LOG(LogTemp, Log, TEXT("Applied animation profile to character: %s"), *Character->GetName());
+            case EMovementState::Sneaking:
+                CurrentProfile.AnimationIntensity = 0.6f;
+                CurrentProfile.MovementSpeed = 0.3f;
+                break;
+            case EMovementState::Running:
+                CurrentProfile.AnimationIntensity = 1.4f;
+                CurrentProfile.MovementSpeed = 1.8f;
+                break;
+            case EMovementState::Afraid:
+                CurrentProfile.AnimationIntensity = 1.6f;
+                CurrentProfile.FearLevel = FMath::Clamp(CurrentProfile.FearLevel + 0.3f, 0.0f, 1.0f);
+                break;
+            case EMovementState::Injured:
+                CurrentProfile.AnimationIntensity = 0.7f;
+                CurrentProfile.MovementSpeed = 0.5f;
+                break;
+            case EMovementState::Exhausted:
+                CurrentProfile.AnimationIntensity = 0.5f;
+                CurrentProfile.MovementSpeed = 0.4f;
+                break;
+            default:
+                CurrentProfile.AnimationIntensity = 1.0f;
+                CurrentProfile.MovementSpeed = 1.0f;
+                break;
         }
     }
 }
 
-void AAnimationSystemManager::UpdateCharacterFearLevel(AActor* Character, float FearLevel)
+void UAnimationSystemManager::SetEmotionalState(EEmotionalState NewState)
 {
-    if (!Character || !RegisteredCharacters.Contains(Character))
+    if (CurrentEmotionalState != NewState)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Character not registered with animation system"));
-        return;
+        CurrentEmotionalState = NewState;
+        ApplyEmotionalStateToProfile();
     }
+}
 
-    // Clamp fear level between 0 and 1
-    FearLevel = FMath::Clamp(FearLevel, 0.0f, 1.0f);
-    CharacterFearLevels[Character] = FearLevel;
+void UAnimationSystemManager::UpdateAnimationProfile(const FAnimationProfile& NewProfile)
+{
+    CurrentProfile = NewProfile;
+}
 
-    FString ArchetypeID = RegisteredCharacters[Character];
-    FCharacterAnimationProfile Profile = GetAnimationProfile(ArchetypeID);
+FAnimationProfile UAnimationSystemManager::GetCurrentAnimationProfile() const
+{
+    return CurrentProfile;
+}
 
-    // Determine movement state based on fear level
-    FString MovementState = TEXT("Normal");
-    if (FearLevel >= Profile.PanicRunThreshold)
+void UAnimationSystemManager::TriggerFearResponse(float FearIntensity, float Duration)
+{
+    OriginalFearLevel = CurrentProfile.FearLevel;
+    CurrentProfile.FearLevel = FMath::Clamp(FearIntensity, 0.0f, 1.0f);
+    FearResponseTimer = 0.0f;
+    FearResponseDuration = Duration;
+    
+    // Trigger immediate fear animation state
+    SetEmotionalState(EEmotionalState::Fearful);
+    SetMovementState(EMovementState::Afraid);
+}
+
+void UAnimationSystemManager::TriggerInjuryAnimation(float InjurySeverity)
+{
+    CurrentProfile.InjuryLevel = FMath::Clamp(InjurySeverity, 0.0f, 1.0f);
+    
+    if (InjurySeverity > 0.5f)
     {
-        MovementState = TEXT("Panic");
+        SetMovementState(EMovementState::Injured);
+        SetEmotionalState(EEmotionalState::Injured);
     }
-    else if (FearLevel >= Profile.CautiousWalkThreshold)
+}
+
+void UAnimationSystemManager::UpdateExhaustion(float ExhaustionLevel)
+{
+    CurrentProfile.ExhaustionLevel = FMath::Clamp(ExhaustionLevel, 0.0f, 1.0f);
+    
+    if (ExhaustionLevel > 0.7f)
     {
-        MovementState = TEXT("Cautious");
+        SetMovementState(EMovementState::Exhausted);
+        SetEmotionalState(EEmotionalState::Exhausted);
     }
+}
 
-    UE_LOG(LogTemp, Log, TEXT("Character %s fear level: %.2f - Movement state: %s"), 
-           *Character->GetName(), FearLevel, *MovementState);
-
-    // Apply fear-based animation modifications
-    if (ACharacter* CharacterPawn = Cast<ACharacter>(Character))
+void UAnimationSystemManager::UpdateFearResponse(float DeltaTime)
+{
+    if (FearResponseTimer < FearResponseDuration)
     {
-        USkeletalMeshComponent* MeshComp = CharacterPawn->GetMesh();
-        if (MeshComp && MeshComp->GetAnimInstance())
+        FearResponseTimer += DeltaTime;
+        
+        // Gradually return fear level to original
+        float Alpha = FearResponseTimer / FearResponseDuration;
+        CurrentProfile.FearLevel = FMath::Lerp(CurrentProfile.FearLevel, OriginalFearLevel, Alpha);
+        
+        if (FearResponseTimer >= FearResponseDuration)
         {
-            // This would set variables in the Animation Blueprint
-            // to influence Motion Matching database selection
-            UE_LOG(LogTemp, Log, TEXT("Applied fear-based animation modifications to %s"), 
-                   *Character->GetName());
+            // Fear response complete, return to appropriate emotional state
+            if (CurrentProfile.FearLevel < 0.3f)
+            {
+                SetEmotionalState(EEmotionalState::Cautious);
+            }
+            else
+            {
+                SetEmotionalState(EEmotionalState::Fearful);
+            }
         }
+    }
+}
+
+void UAnimationSystemManager::ApplyEmotionalStateToProfile()
+{
+    switch (CurrentEmotionalState)
+    {
+        case EEmotionalState::Fearful:
+            CurrentProfile.AnimationIntensity = FMath::Clamp(CurrentProfile.AnimationIntensity * 1.3f, 0.5f, 2.0f);
+            CurrentProfile.ConfidenceLevel = FMath::Max(CurrentProfile.ConfidenceLevel - 0.2f, 0.0f);
+            break;
+        case EEmotionalState::Cautious:
+            CurrentProfile.AnimationIntensity = FMath::Clamp(CurrentProfile.AnimationIntensity * 1.1f, 0.7f, 1.5f);
+            break;
+        case EEmotionalState::Confident:
+            CurrentProfile.AnimationIntensity = FMath::Clamp(CurrentProfile.AnimationIntensity * 0.9f, 0.8f, 1.2f);
+            CurrentProfile.ConfidenceLevel = FMath::Min(CurrentProfile.ConfidenceLevel + 0.1f, 1.0f);
+            break;
+        case EEmotionalState::Exhausted:
+            CurrentProfile.AnimationIntensity = FMath::Max(CurrentProfile.AnimationIntensity * 0.6f, 0.3f);
+            CurrentProfile.MovementSpeed = FMath::Max(CurrentProfile.MovementSpeed * 0.5f, 0.2f);
+            break;
+        case EEmotionalState::Injured:
+            CurrentProfile.AnimationIntensity = FMath::Max(CurrentProfile.AnimationIntensity * 0.7f, 0.4f);
+            CurrentProfile.MovementSpeed = FMath::Max(CurrentProfile.MovementSpeed * 0.6f, 0.3f);
+            break;
+        default:
+            // Neutral state - no modifications
+            break;
     }
 }
