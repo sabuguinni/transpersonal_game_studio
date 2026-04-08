@@ -1,76 +1,105 @@
+// PerformanceProfiler.h
+// Sistema de profiling de performance em tempo real para o jogo transpessoal
+
 #pragma once
 
 #include "CoreMinimal.h"
 #include "Engine/Engine.h"
-#include "HAL/PlatformFilemanager.h"
-#include "Misc/DateTime.h"
-#include "Components/ActorComponent.h"
-#include "PerformanceProfiler.generated.h"
+#include "HAL/Platform.h"
+#include "Containers/Map.h"
+#include "Containers/Array.h"
 
+DECLARE_LOG_CATEGORY_EXTERN(LogTranspersonalPerformance, Log, All);
+
+// Estrutura para métricas de performance
 USTRUCT(BlueprintType)
-struct FPerformanceMetrics
+struct TRANSPERSONALGAME_API FPerformanceMetrics
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly)
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
     float FrameTime;
 
-    UPROPERTY(BlueprintReadOnly)
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float FPS;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
     float GameThreadTime;
 
-    UPROPERTY(BlueprintReadOnly)
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
     float RenderThreadTime;
 
-    UPROPERTY(BlueprintReadOnly)
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float GPUTime;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    int32 DrawCalls;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    int32 Triangles;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float MemoryUsage;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    int32 ActiveActors;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
     float PhysicsTime;
 
-    UPROPERTY(BlueprintReadOnly)
-    float ConsciousnessSystemTime;
-
-    UPROPERTY(BlueprintReadOnly)
-    int32 ActiveConsciousnessEntities;
-
-    UPROPERTY(BlueprintReadOnly)
-    int32 PhysicsObjects;
-
-    UPROPERTY(BlueprintReadOnly)
-    float MemoryUsageMB;
-
-    UPROPERTY(BlueprintReadOnly)
-    float GPUMemoryUsageMB;
-
     FPerformanceMetrics()
-    {
-        FrameTime = 0.0f;
-        GameThreadTime = 0.0f;
-        RenderThreadTime = 0.0f;
-        PhysicsTime = 0.0f;
-        ConsciousnessSystemTime = 0.0f;
-        ActiveConsciousnessEntities = 0;
-        PhysicsObjects = 0;
-        MemoryUsageMB = 0.0f;
-        GPUMemoryUsageMB = 0.0f;
-    }
+        : FrameTime(0.0f)
+        , FPS(0.0f)
+        , GameThreadTime(0.0f)
+        , RenderThreadTime(0.0f)
+        , GPUTime(0.0f)
+        , DrawCalls(0)
+        , Triangles(0)
+        , MemoryUsage(0.0f)
+        , ActiveActors(0)
+        , PhysicsTime(0.0f)
+    {}
 };
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnPerformanceAlert, const FString&, AlertMessage);
+// Enum para níveis de qualidade de performance
+UENUM(BlueprintType)
+enum class EPerformanceLevel : uint8
+{
+    Low         UMETA(DisplayName = "Low"),
+    Medium      UMETA(DisplayName = "Medium"),
+    High        UMETA(DisplayName = "High"),
+    Ultra       UMETA(DisplayName = "Ultra"),
+    Auto        UMETA(DisplayName = "Auto")
+};
 
-UCLASS(ClassGroup=(Performance), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UPerformanceProfiler : public UActorComponent
+// Delegate para notificações de mudança de performance
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnPerformanceLevelChanged, EPerformanceLevel, NewLevel);
+
+class TRANSPERSONALGAME_API UPerformanceProfiler : public UObject
 {
     GENERATED_BODY()
 
 public:
     UPerformanceProfiler();
 
-protected:
-    virtual void BeginPlay() override;
-    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+    // Inicialização e cleanup
+    void Initialize();
+    void Shutdown();
 
-public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    // Atualização por frame
+    void UpdateMetrics(float DeltaTime);
 
-    // Performance Monitoring
+    // Getters para métricas
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    FPerformanceMetrics GetCurrentMetrics() const { return CurrentMetrics; }
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    float GetAverageFrameTime() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    float GetAverageFPS() const;
+
+    // Sistema de profiling automático
     UFUNCTION(BlueprintCallable, Category = "Performance")
     void StartProfiling();
 
@@ -78,71 +107,64 @@ public:
     void StopProfiling();
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    FPerformanceMetrics GetCurrentMetrics() const;
+    bool IsProfilingActive() const { return bIsProfilingActive; }
+
+    // Detecção automática de nível de performance
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    EPerformanceLevel GetRecommendedPerformanceLevel() const;
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void LogPerformanceSnapshot(const FString& Label);
+    void SetAutoPerformanceAdjustment(bool bEnabled);
 
-    // Consciousness System Specific Profiling
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void BeginConsciousnessProfile(const FString& SystemName);
+    // Eventos
+    UPROPERTY(BlueprintAssignable, Category = "Performance")
+    FOnPerformanceLevelChanged OnPerformanceLevelChanged;
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void EndConsciousnessProfile(const FString& SystemName);
+    // Configurações de thresholds
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Thresholds")
+    float TargetFPS = 60.0f;
 
-    // Auto-optimization
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void EnableAutoOptimization(bool bEnable);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Thresholds")
+    float LowPerformanceThreshold = 30.0f;
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void SetPerformanceTargets(float TargetFPS, float MaxPhysicsTime, float MaxConsciousnessTime);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Thresholds")
+    float HighPerformanceThreshold = 90.0f;
 
-    // Events
-    UPROPERTY(BlueprintAssignable)
-    FOnPerformanceAlert OnPerformanceAlert;
-
-protected:
-    // Performance tracking
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance")
-    bool bIsProfilingEnabled;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance")
-    float ProfilingUpdateInterval;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance")
-    bool bAutoOptimizationEnabled;
-
-    // Performance targets
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance Targets")
-    float TargetFrameRate;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance Targets")
-    float MaxAllowedPhysicsTime;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance Targets")
-    float MaxAllowedConsciousnessTime;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance Targets")
-    float MemoryWarningThresholdMB;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Thresholds")
+    float MemoryWarningThreshold = 0.8f; // 80% da memória disponível
 
 private:
-    // Internal tracking
+    // Métricas atuais
     FPerformanceMetrics CurrentMetrics;
-    TMap<FString, double> ConsciousnessProfileTimes;
-    TMap<FString, double> ConsciousnessProfileStartTimes;
-    
-    float LastProfilingUpdate;
-    TArray<FPerformanceMetrics> MetricsHistory;
-    
-    // Performance optimization
-    void UpdatePerformanceMetrics();
-    void CheckPerformanceThresholds();
-    void ApplyAutoOptimizations();
-    void OptimizePhysicsSettings();
-    void OptimizeConsciousnessSystem();
-    void OptimizeRenderingSettings();
-    
-    // Logging and reporting
-    void WritePerformanceLog();
-    FString FormatMetricsForLog(const FPerformanceMetrics& Metrics) const;
+
+    // Histórico de métricas para médias
+    TArray<float> FrameTimeHistory;
+    TArray<float> FPSHistory;
+    static const int32 MaxHistorySize = 120; // 2 segundos a 60 FPS
+
+    // Estado do profiler
+    bool bIsProfilingActive;
+    bool bAutoPerformanceAdjustment;
+    float ProfilingStartTime;
+
+    // Nível de performance atual
+    EPerformanceLevel CurrentPerformanceLevel;
+    float LastPerformanceCheckTime;
+    float PerformanceCheckInterval = 2.0f;
+
+    // Métodos internos
+    void CollectFrameMetrics(float DeltaTime);
+    void CollectRenderMetrics();
+    void CollectMemoryMetrics();
+    void CollectPhysicsMetrics();
+    void UpdatePerformanceLevel();
+    void AddToHistory(TArray<float>& History, float Value);
+    float GetHistoryAverage(const TArray<float>& History) const;
+
+    // Detecção de hardware
+    void DetectHardwareCapabilities();
+    bool bHardwareDetected;
+    int32 EstimatedGPUPerformance; // 1-10 scale
+    int32 EstimatedCPUPerformance; // 1-10 scale
+    float AvailableMemoryGB;
 };
