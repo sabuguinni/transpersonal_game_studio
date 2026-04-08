@@ -1,10 +1,10 @@
 #include "AudioSystemManager.h"
 #include "Engine/World.h"
-#include "TimerManager.h"
 #include "Kismet/GameplayStatics.h"
-#include "MetasoundSource.h"
-#include "Sound/SoundAttenuation.h"
 #include "Components/AudioComponent.h"
+#include "Sound/SoundMix.h"
+#include "AudioDevice.h"
+#include "Engine/Engine.h"
 
 void UAudioSystemManager::Initialize(FSubsystemCollectionBase& Collection)
 {
@@ -12,28 +12,62 @@ void UAudioSystemManager::Initialize(FSubsystemCollectionBase& Collection)
     
     UE_LOG(LogTemp, Warning, TEXT("AudioSystemManager: Initializing adaptive audio system"));
     
-    // Configurar Sound Classes
-    MasterSoundClass = LoadObject<USoundClass>(nullptr, TEXT("/Game/Audio/SoundClasses/SC_Master"));
-    MusicSoundClass = LoadObject<USoundClass>(nullptr, TEXT("/Game/Audio/SoundClasses/SC_Music"));
-    EnvironmentSoundClass = LoadObject<USoundClass>(nullptr, TEXT("/Game/Audio/SoundClasses/SC_Environment"));
-    DinosaurSoundClass = LoadObject<USoundClass>(nullptr, TEXT("/Game/Audio/SoundClasses/SC_Dinosaur"));
-    
-    // Configurar Sound Mix dinâmico
-    DynamicSoundMix = LoadObject<USoundMix>(nullptr, TEXT("/Game/Audio/SoundMixes/SM_Dynamic"));
-    
-    // Inicializar timers para updates contínuos
+    // Criar componentes de áudio
     if (UWorld* World = GetWorld())
     {
-        World->GetTimerManager().SetTimer(TensionUpdateTimer, this, 
-            &UAudioSystemManager::ProcessTensionEvents, 0.1f, true);
-        
-        World->GetTimerManager().SetTimer(EnvironmentUpdateTimer, this, 
-            &UAudioSystemManager::UpdateEnvironmentAudio, 1.0f, true);
+        // Componente principal de música
+        MusicAudioComponent = NewObject<UAudioComponent>(this);
+        if (MusicAudioComponent)
+        {
+            MusicAudioComponent->bAutoActivate = false;
+            MusicAudioComponent->bIsUISound = false;
+            MusicAudioComponent->VolumeMultiplier = 0.7f;
+        }
+
+        // Componente de ambiente
+        AmbientAudioComponent = NewObject<UAudioComponent>(this);
+        if (AmbientAudioComponent)
+        {
+            AmbientAudioComponent->bAutoActivate = false;
+            AmbientAudioComponent->bIsUISound = false;
+            AmbientAudioComponent->VolumeMultiplier = 0.5f;
+        }
+
+        // Componente de tensão
+        TensionAudioComponent = NewObject<UAudioComponent>(this);
+        if (TensionAudioComponent)
+        {
+            TensionAudioComponent->bAutoActivate = false;
+            TensionAudioComponent->bIsUISound = false;
+            TensionAudioComponent->VolumeMultiplier = 0.3f;
+        }
     }
-    
-    // Estado inicial
-    SetEmotionalState(EEmotionalState::Calm, 0.0f);
-    SetEnvironmentType(EEnvironmentType::Forest, 0.0f);
+
+    // Inicializar estado padrão
+    CurrentAudioState = EAudioState::Exploration;
+    CurrentStateData.TensionLevel = 0.0f;
+    CurrentStateData.ProximityThreat = 0.0f;
+    CurrentStateData.CurrentEnvironment = EEnvironmentType::DenseForest;
+
+    // Configurar timers para updates contínuos
+    if (UWorld* World = GetWorld())
+    {
+        World->GetTimerManager().SetTimer(
+            MusicUpdateTimer,
+            this,
+            &UAudioSystemManager::UpdateMusicParameters,
+            0.1f, // Update a cada 100ms para responsividade
+            true
+        );
+
+        World->GetTimerManager().SetTimer(
+            StateUpdateTimer,
+            this,
+            &UAudioSystemManager::CalculateTensionLevel,
+            0.5f, // Cálculo de tensão a cada 500ms
+            true
+        );
+    }
 }
 
 void UAudioSystemManager::Deinitialize()
@@ -41,387 +75,276 @@ void UAudioSystemManager::Deinitialize()
     // Limpar timers
     if (UWorld* World = GetWorld())
     {
-        World->GetTimerManager().ClearTimer(TensionUpdateTimer);
-        World->GetTimerManager().ClearTimer(EnvironmentUpdateTimer);
+        World->GetTimerManager().ClearTimer(MusicUpdateTimer);
+        World->GetTimerManager().ClearTimer(StateUpdateTimer);
     }
-    
-    // Parar todos os áudios ativos
-    for (auto& Layer : EmotionalLayers)
-    {
-        if (Layer.Value.AudioComponent && IsValid(Layer.Value.AudioComponent))
-        {
-            Layer.Value.AudioComponent->Stop();
-        }
-    }
-    
-    for (auto& Layer : EnvironmentLayers)
-    {
-        if (Layer.Value.AudioComponent && IsValid(Layer.Value.AudioComponent))
-        {
-            Layer.Value.AudioComponent->Stop();
-        }
-    }
-    
-    for (auto& DinosaurAudio : ActiveDinosaurAudio)
-    {
-        if (DinosaurAudio.Value && IsValid(DinosaurAudio.Value))
-        {
-            DinosaurAudio.Value->Stop();
-        }
-    }
-    
+
+    // Parar todos os áudios
+    StopAdaptiveMusic();
+
     Super::Deinitialize();
 }
 
-void UAudioSystemManager::SetEmotionalState(EEmotionalState NewState, float TransitionTime)
+void UAudioSystemManager::UpdateAudioState(const FAudioStateData& StateData)
 {
-    if (NewState == CurrentEmotionalState)
-        return;
+    CurrentStateData = StateData;
     
+    // Determinar novo estado baseado nos dados
+    EAudioState NewState = CurrentAudioState;
+    
+    if (StateData.ProximityThreat > 0.8f)
+    {
+        NewState = EAudioState::Danger;
+    }
+    else if (StateData.TensionLevel > 0.6f)
+    {
+        NewState = EAudioState::Tension;
+    }
+    else if (StateData.CurrentEnvironment == EEnvironmentType::PlayerBase)
+    {
+        NewState = EAudioState::Safety;
+    }
+    else
+    {
+        NewState = EAudioState::Exploration;
+    }
+
+    if (NewState != CurrentAudioState)
+    {
+        SetAudioState(NewState);
+    }
+
+    // Atualizar ambiente baseado no tipo de ambiente
+    UpdateAmbientAudio(StateData.CurrentEnvironment);
+}
+
+void UAudioSystemManager::SetAudioState(EAudioState NewState)
+{
+    if (NewState == CurrentAudioState)
+        return;
+
     UE_LOG(LogTemp, Warning, TEXT("AudioSystemManager: Transitioning from %d to %d"), 
-        (int32)CurrentEmotionalState, (int32)NewState);
-    
-    // Fade out do estado anterior
-    if (EmotionalLayers.Contains(CurrentEmotionalState))
-    {
-        FAudioLayer& PreviousLayer = EmotionalLayers[CurrentEmotionalState];
-        if (PreviousLayer.AudioComponent && IsValid(PreviousLayer.AudioComponent))
-        {
-            PreviousLayer.AudioComponent->FadeOut(TransitionTime, 0.0f);
-            PreviousLayer.bIsActive = false;
-        }
-    }
-    
-    CurrentEmotionalState = NewState;
-    
-    // Fade in do novo estado
-    if (EmotionalLayers.Contains(NewState))
-    {
-        FAudioLayer& NewLayer = EmotionalLayers[NewState];
-        if (NewLayer.MetaSound)
-        {
-            if (!NewLayer.AudioComponent || !IsValid(NewLayer.AudioComponent))
-            {
-                NewLayer.AudioComponent = UGameplayStatics::SpawnSound2D(
-                    GetWorld(), NewLayer.MetaSound, 0.0f, 1.0f, 0.0f, nullptr, false, false);
-            }
-            
-            if (NewLayer.AudioComponent)
-            {
-                NewLayer.AudioComponent->SetSoundClass(MusicSoundClass);
-                NewLayer.AudioComponent->FadeIn(TransitionTime, NewLayer.Volume);
-                NewLayer.bIsActive = true;
-            }
-        }
-    }
-    
-    UpdateMusicLayers();
+           (int32)CurrentAudioState, (int32)NewState);
+
+    TransitionToState(NewState);
+    CurrentAudioState = NewState;
 }
 
-void UAudioSystemManager::SetEnvironmentType(EEnvironmentType NewEnvironment, float TransitionTime)
+void UAudioSystemManager::TransitionToState(EAudioState NewState)
 {
-    if (NewEnvironment == CurrentEnvironment)
-        return;
-    
-    UE_LOG(LogTemp, Warning, TEXT("AudioSystemManager: Environment transition to %d"), (int32)NewEnvironment);
-    
-    // Fade out ambiente anterior
-    if (EnvironmentLayers.Contains(CurrentEnvironment))
+    // Aplicar Sound Mix apropriado
+    if (UWorld* World = GetWorld())
     {
-        FAudioLayer& PreviousLayer = EnvironmentLayers[CurrentEnvironment];
-        if (PreviousLayer.AudioComponent && IsValid(PreviousLayer.AudioComponent))
-        {
-            PreviousLayer.AudioComponent->FadeOut(TransitionTime, 0.0f);
-            PreviousLayer.bIsActive = false;
-        }
-    }
-    
-    CurrentEnvironment = NewEnvironment;
-    
-    // Fade in novo ambiente
-    if (EnvironmentLayers.Contains(NewEnvironment))
-    {
-        FAudioLayer& NewLayer = EnvironmentLayers[NewEnvironment];
-        if (NewLayer.MetaSound)
-        {
-            if (!NewLayer.AudioComponent || !IsValid(NewLayer.AudioComponent))
-            {
-                NewLayer.AudioComponent = UGameplayStatics::SpawnSound2D(
-                    GetWorld(), NewLayer.MetaSound, 0.0f, 1.0f, 0.0f, nullptr, false, false);
-            }
-            
-            if (NewLayer.AudioComponent)
-            {
-                NewLayer.AudioComponent->SetSoundClass(EnvironmentSoundClass);
-                NewLayer.AudioComponent->FadeIn(TransitionTime, NewLayer.Volume);
-                NewLayer.bIsActive = true;
-            }
-        }
-    }
-}
+        // Limpar mix anterior
+        UGameplayStatics::ClearSoundMixModifiers(World);
 
-void UAudioSystemManager::RegisterDinosaur(const FString& DinosaurID, const FDinosaurAudioProfile& Profile)
-{
-    DinosaurProfiles.Add(DinosaurID, Profile);
-    UE_LOG(LogTemp, Warning, TEXT("AudioSystemManager: Registered dinosaur %s"), *DinosaurID);
-}
-
-void UAudioSystemManager::UpdateDinosaurBehavior(const FString& DinosaurID, EDinosaurBehaviorState NewBehavior, FVector Location)
-{
-    if (!DinosaurProfiles.Contains(DinosaurID))
-        return;
-    
-    FDinosaurAudioProfile& Profile = DinosaurProfiles[DinosaurID];
-    
-    // Parar áudio anterior se existir
-    if (ActiveDinosaurAudio.Contains(DinosaurID))
-    {
-        UAudioComponent* PreviousAudio = ActiveDinosaurAudio[DinosaurID];
-        if (PreviousAudio && IsValid(PreviousAudio))
+        // Aplicar novo mix
+        switch (NewState)
         {
-            PreviousAudio->FadeOut(0.5f, 0.0f);
-        }
-    }
-    
-    // Tocar novo áudio baseado no comportamento
-    if (Profile.BehaviorSounds.Contains(NewBehavior))
-    {
-        UMetaSoundSource* BehaviorSound = Profile.BehaviorSounds[NewBehavior];
-        if (BehaviorSound)
-        {
-            UAudioComponent* NewAudio = UGameplayStatics::SpawnSoundAtLocation(
-                GetWorld(), BehaviorSound, Location, FRotator::ZeroRotator, 1.0f, 1.0f, 0.0f,
-                Profile.AttenuationSettings, nullptr, false);
-            
-            if (NewAudio)
-            {
-                NewAudio->SetSoundClass(DinosaurSoundClass);
-                
-                // Aplicar variações únicas baseadas no ID do dinossauro
-                float PitchVariation = FMath::RandRange(-Profile.VoicePitchVariation, Profile.VoicePitchVariation);
-                float VolumeVariation = FMath::RandRange(-Profile.VolumeVariation, Profile.VolumeVariation);
-                
-                // Use hash do ID para variações consistentes
-                int32 DinosaurHash = GetTypeHash(DinosaurID);
-                FMath::RandInit(DinosaurHash);
-                PitchVariation = FMath::RandRange(-Profile.VoicePitchVariation, Profile.VoicePitchVariation);
-                VolumeVariation = FMath::RandRange(-Profile.VolumeVariation, Profile.VolumeVariation);
-                
-                NewAudio->SetPitchMultiplier(1.0f + PitchVariation);
-                NewAudio->SetVolumeMultiplier(1.0f + VolumeVariation);
-                
-                // Ajustar baseado no nível de domesticação
-                if (Profile.DomesticationProgressAudio > 0.0f)
+            case EAudioState::Exploration:
+                if (ExplorationSoundMix)
                 {
-                    float DomesticationPitchShift = Profile.DomesticationProgressAudio * 0.1f; // Mais agudo quando domesticado
-                    NewAudio->SetPitchMultiplier(NewAudio->PitchMultiplier + DomesticationPitchShift);
+                    UGameplayStatics::PushSoundMixModifier(World, ExplorationSoundMix);
                 }
-                
-                ActiveDinosaurAudio.Add(DinosaurID, NewAudio);
-            }
+                TargetMusicIntensity = 0.3f;
+                break;
+
+            case EAudioState::Tension:
+                TargetMusicIntensity = 0.6f;
+                break;
+
+            case EAudioState::Danger:
+                if (DangerSoundMix)
+                {
+                    UGameplayStatics::PushSoundMixModifier(World, DangerSoundMix);
+                }
+                TargetMusicIntensity = 0.9f;
+                break;
+
+            case EAudioState::Combat:
+                if (CombatSoundMix)
+                {
+                    UGameplayStatics::PushSoundMixModifier(World, CombatSoundMix);
+                }
+                TargetMusicIntensity = 1.0f;
+                break;
+
+            case EAudioState::Safety:
+                TargetMusicIntensity = 0.1f;
+                break;
+
+            case EAudioState::Discovery:
+                TargetMusicIntensity = 0.4f;
+                break;
+
+            case EAudioState::Domestication:
+                TargetMusicIntensity = 0.2f;
+                break;
         }
     }
 }
 
-void UAudioSystemManager::UpdateDinosaurDomestication(const FString& DinosaurID, float DomesticationLevel)
+void UAudioSystemManager::PlayAdaptiveMusic()
 {
-    if (DinosaurProfiles.Contains(DinosaurID))
+    if (MusicAudioComponent && AdaptiveMusicMetaSound)
     {
-        DinosaurProfiles[DinosaurID].DomesticationProgressAudio = FMath::Clamp(DomesticationLevel, 0.0f, 1.0f);
-        UpdateDinosaurAudioParameters(DinosaurID);
-    }
-}
-
-void UAudioSystemManager::SetTimeOfDay(float TimeNormalized)
-{
-    CurrentTimeOfDay = FMath::Clamp(TimeNormalized, 0.0f, 1.0f);
-    UpdateEnvironmentAudio();
-}
-
-void UAudioSystemManager::SetWeatherIntensity(float Intensity)
-{
-    CurrentWeatherIntensity = FMath::Clamp(Intensity, 0.0f, 1.0f);
-    
-    if (WeatherLayer.MetaSound && WeatherLayer.AudioComponent)
-    {
-        // Ajustar volume baseado na intensidade
-        float TargetVolume = CurrentWeatherIntensity * WeatherLayer.Volume;
-        WeatherLayer.AudioComponent->SetVolumeMultiplier(TargetVolume);
+        MusicAudioComponent->SetSound(AdaptiveMusicMetaSound);
+        MusicAudioComponent->Play();
         
-        // Ajustar parâmetros MetaSound se disponíveis
-        WeatherLayer.AudioComponent->SetFloatParameter(FName("Intensity"), CurrentWeatherIntensity);
+        UE_LOG(LogTemp, Warning, TEXT("AudioSystemManager: Started adaptive music"));
     }
 }
 
-void UAudioSystemManager::AddTensionEvent(FVector Location, float Intensity, float Duration)
+void UAudioSystemManager::StopAdaptiveMusic()
 {
-    // Sistema de tensão baseado em eventos pontuais
-    // Implementação futura: criar sistema de "ondas" de tensão que se propagam
-    UE_LOG(LogTemp, Warning, TEXT("AudioSystemManager: Tension event at intensity %.2f"), Intensity);
-    
-    // Por agora, ajustar estado emocional baseado na intensidade
-    if (Intensity > 0.8f)
+    if (MusicAudioComponent && MusicAudioComponent->IsPlaying())
     {
-        SetEmotionalState(EEmotionalState::Terror, 0.5f);
-    }
-    else if (Intensity > 0.5f)
-    {
-        SetEmotionalState(EEmotionalState::Danger, 1.0f);
-    }
-    else if (Intensity > 0.2f)
-    {
-        SetEmotionalState(EEmotionalState::Tension, 2.0f);
+        MusicAudioComponent->FadeOut(2.0f, 0.0f);
     }
 }
 
-void UAudioSystemManager::SetSilenceMode(bool bEnabled, float FadeTime)
+void UAudioSystemManager::SetMusicIntensity(float Intensity)
 {
-    bInSilenceMode = bEnabled;
+    TargetMusicIntensity = FMath::Clamp(Intensity, 0.0f, 1.0f);
+}
+
+void UAudioSystemManager::UpdateMusicParameters()
+{
+    if (!MusicAudioComponent || !MusicAudioComponent->IsPlaying())
+        return;
+
+    // Interpolar suavemente para a intensidade alvo
+    float InterpSpeed = 2.0f; // Velocidade de transição
+    CurrentMusicIntensity = FMath::FInterpTo(
+        CurrentMusicIntensity, 
+        TargetMusicIntensity, 
+        GetWorld()->GetDeltaSeconds(), 
+        InterpSpeed
+    );
+
+    // Aplicar parâmetros ao MetaSound
+    MusicAudioComponent->SetFloatParameter(FName("Intensity"), CurrentMusicIntensity);
+    MusicAudioComponent->SetFloatParameter(FName("TensionLevel"), CurrentStateData.TensionLevel);
+    MusicAudioComponent->SetFloatParameter(FName("ProximityThreat"), CurrentStateData.ProximityThreat);
+    MusicAudioComponent->SetBoolParameter(FName("PlayerHidden"), CurrentStateData.bPlayerHidden);
+}
+
+void UAudioSystemManager::UpdateAmbientAudio(EEnvironmentType Environment)
+{
+    if (!AmbientAudioComponent)
+        return;
+
+    // Selecionar MetaSound baseado no ambiente
+    UMetaSoundSource* TargetAmbient = nullptr;
     
-    if (bEnabled)
+    switch (Environment)
     {
-        // Fade out gradual de todos os layers
-        for (auto& Layer : EmotionalLayers)
+        case EEnvironmentType::DenseForest:
+            TargetAmbient = AmbientForestMetaSound;
+            break;
+        // Outros ambientes serão adicionados conforme necessário
+        default:
+            TargetAmbient = AmbientForestMetaSound;
+            break;
+    }
+
+    if (TargetAmbient && AmbientAudioComponent->GetSound() != TargetAmbient)
+    {
+        AmbientAudioComponent->SetSound(TargetAmbient);
+        if (!AmbientAudioComponent->IsPlaying())
         {
-            if (Layer.Value.AudioComponent && Layer.Value.bIsActive)
-            {
-                Layer.Value.AudioComponent->FadeOut(FadeTime, 0.0f);
-            }
+            AmbientAudioComponent->Play();
         }
+    }
+
+    // Atualizar parâmetros do ambiente
+    if (AmbientAudioComponent->IsPlaying())
+    {
+        AmbientAudioComponent->SetFloatParameter(FName("DinosaurActivity"), CurrentStateData.DinosaurCount * 0.1f);
+        AmbientAudioComponent->SetFloatParameter(FName("TensionLevel"), CurrentStateData.TensionLevel);
+    }
+}
+
+void UAudioSystemManager::RegisterDinosaurProximity(AActor* Dinosaur, float Distance, bool bIsPredator)
+{
+    if (!Dinosaur)
+        return;
+
+    DinosaurProximityMap.Add(Dinosaur, Distance);
+    DinosaurThreatMap.Add(Dinosaur, bIsPredator);
+
+    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Registered dinosaur proximity - Distance: %f, Predator: %s"), 
+           Distance, bIsPredator ? TEXT("Yes") : TEXT("No"));
+}
+
+void UAudioSystemManager::UnregisterDinosaurProximity(AActor* Dinosaur)
+{
+    if (!Dinosaur)
+        return;
+
+    DinosaurProximityMap.Remove(Dinosaur);
+    DinosaurThreatMap.Remove(Dinosaur);
+}
+
+void UAudioSystemManager::CalculateTensionLevel()
+{
+    float NewTensionLevel = 0.0f;
+    float NewProximityThreat = 0.0f;
+    int32 DinosaurCount = DinosaurProximityMap.Num();
+
+    // Calcular tensão baseada na proximidade de dinossauros
+    for (const auto& ProximityPair : DinosaurProximityMap)
+    {
+        AActor* Dinosaur = ProximityPair.Key;
+        float Distance = ProximityPair.Value;
+        bool bIsPredator = DinosaurThreatMap.FindRef(Dinosaur);
+
+        if (!Dinosaur || !IsValid(Dinosaur))
+            continue;
+
+        // Calcular contribuição para tensão (inverso da distância)
+        float TensionContribution = FMath::Clamp(1000.0f / (Distance + 100.0f), 0.0f, 1.0f);
         
-        for (auto& Layer : EnvironmentLayers)
+        if (bIsPredator)
         {
-            if (Layer.Value.AudioComponent && Layer.Value.bIsActive)
-            {
-                Layer.Value.AudioComponent->FadeOut(FadeTime, 0.0f);
-            }
+            TensionContribution *= 2.0f; // Predadores causam mais tensão
+            NewProximityThreat = FMath::Max(NewProximityThreat, TensionContribution);
         }
+
+        NewTensionLevel += TensionContribution;
     }
-    else
+
+    // Normalizar tensão
+    NewTensionLevel = FMath::Clamp(NewTensionLevel, 0.0f, 1.0f);
+    NewProximityThreat = FMath::Clamp(NewProximityThreat, 0.0f, 1.0f);
+
+    // Atualizar dados de estado
+    CurrentStateData.TensionLevel = NewTensionLevel;
+    CurrentStateData.ProximityThreat = NewProximityThreat;
+    CurrentStateData.DinosaurCount = DinosaurCount;
+
+    UE_LOG(LogTemp, VeryVerbose, TEXT("AudioSystemManager: Tension: %f, Threat: %f, Count: %d"), 
+           NewTensionLevel, NewProximityThreat, DinosaurCount);
+}
+
+void UAudioSystemManager::PlayDinosaurAmbient(FVector Location, float Intensity)
+{
+    if (UWorld* World = GetWorld())
     {
-        // Restaurar áudio baseado no estado atual
-        UpdateMusicLayers();
-        UpdateEnvironmentAudio();
+        // Implementar sistema de áudio posicional para dinossauros específicos
+        // Este método será expandido para suportar diferentes tipos de dinossauros
+        UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Playing dinosaur ambient at location %s with intensity %f"), 
+               *Location.ToString(), Intensity);
     }
 }
 
-void UAudioSystemManager::OnPlayerHidden(bool bIsHidden)
+void UAudioSystemManager::UpdateAmbientParameters()
 {
-    if (bIsHidden)
+    // Método para atualização contínua de parâmetros ambientes
+    if (AmbientAudioComponent && AmbientAudioComponent->IsPlaying())
     {
-        // Reduzir volume geral e aumentar tensão
-        if (DynamicSoundMix)
-        {
-            UGameplayStatics::SetSoundMixClassOverride(GetWorld(), DynamicSoundMix, 
-                MasterSoundClass, 0.7f, 1.0f, 2.0f, true);
-        }
+        // Atualizar parâmetros baseados no estado atual
+        AmbientAudioComponent->SetFloatParameter(FName("TimeOfDay"), 0.5f); // Placeholder - será conectado ao sistema de dia/noite
+        AmbientAudioComponent->SetFloatParameter(FName("WeatherIntensity"), 0.3f); // Placeholder - será conectado ao sistema de clima
     }
-    else
-    {
-        // Restaurar volume normal
-        if (DynamicSoundMix)
-        {
-            UGameplayStatics::ClearSoundMixClassOverride(GetWorld(), DynamicSoundMix, 
-                MasterSoundClass, 1.0f);
-        }
-    }
-}
-
-void UAudioSystemManager::OnPlayerDetected(float ThreatLevel)
-{
-    // Escalada imediata de tensão baseada no nível de ameaça
-    if (ThreatLevel > 0.9f)
-    {
-        SetEmotionalState(EEmotionalState::Terror, 0.2f);
-    }
-    else if (ThreatLevel > 0.6f)
-    {
-        SetEmotionalState(EEmotionalState::Danger, 0.5f);
-    }
-    else
-    {
-        SetEmotionalState(EEmotionalState::Tension, 1.0f);
-    }
-}
-
-void UAudioSystemManager::OnCraftingActivity(bool bStarted)
-{
-    if (bStarted)
-    {
-        // Durante crafting, reduzir música e focar em ambiente
-        if (EmotionalLayers.Contains(CurrentEmotionalState))
-        {
-            FAudioLayer& CurrentLayer = EmotionalLayers[CurrentEmotionalState];
-            if (CurrentLayer.AudioComponent)
-            {
-                CurrentLayer.AudioComponent->SetVolumeMultiplier(0.3f);
-            }
-        }
-    }
-    else
-    {
-        // Restaurar volume da música
-        UpdateMusicLayers();
-    }
-}
-
-void UAudioSystemManager::UpdateMusicLayers()
-{
-    if (bInSilenceMode)
-        return;
-    
-    // Lógica para ajustar layers musicais baseado no estado atual
-    // Implementação futura: crossfading inteligente entre layers
-}
-
-void UAudioSystemManager::UpdateEnvironmentAudio()
-{
-    if (bInSilenceMode)
-        return;
-    
-    // Ajustar ambiente baseado na hora do dia
-    float NightIntensity = 0.0f;
-    if (CurrentTimeOfDay < 0.25f || CurrentTimeOfDay > 0.75f)
-    {
-        // Noite: mais sons noturnos, menos atividade diurna
-        NightIntensity = 1.0f - FMath::Abs(CurrentTimeOfDay - 0.5f) * 2.0f;
-    }
-    
-    // Aplicar parâmetros aos MetaSounds ambientes
-    if (EnvironmentLayers.Contains(CurrentEnvironment))
-    {
-        FAudioLayer& CurrentLayer = EnvironmentLayers[CurrentEnvironment];
-        if (CurrentLayer.AudioComponent)
-        {
-            CurrentLayer.AudioComponent->SetFloatParameter(FName("TimeOfDay"), CurrentTimeOfDay);
-            CurrentLayer.AudioComponent->SetFloatParameter(FName("NightIntensity"), NightIntensity);
-            CurrentLayer.AudioComponent->SetFloatParameter(FName("WeatherIntensity"), CurrentWeatherIntensity);
-        }
-    }
-}
-
-void UAudioSystemManager::ProcessTensionEvents()
-{
-    // Processar eventos de tensão contínuos
-    // Implementação futura: sistema de propagação de tensão espacial
-}
-
-void UAudioSystemManager::UpdateDinosaurAudioParameters(const FString& DinosaurID)
-{
-    if (!ActiveDinosaurAudio.Contains(DinosaurID))
-        return;
-    
-    UAudioComponent* DinosaurAudio = ActiveDinosaurAudio[DinosaurID];
-    if (!DinosaurAudio || !IsValid(DinosaurAudio))
-        return;
-    
-    const FDinosaurAudioProfile& Profile = DinosaurProfiles[DinosaurID];
-    
-    // Ajustar parâmetros baseado na domesticação
-    float DomesticationLevel = Profile.DomesticationProgressAudio;
-    DinosaurAudio->SetFloatParameter(FName("DomesticationLevel"), DomesticationLevel);
-    
-    // Pitch mais agudo para criaturas domesticadas (sons mais "amigáveis")
-    float DomesticationPitchShift = DomesticationLevel * 0.15f;
-    DinosaurAudio->SetPitchMultiplier(1.0f + DomesticationPitchShift);
 }
