@@ -1,229 +1,310 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/World.h"
-#include "Components/ActorComponent.h"
+#include "Engine/Engine.h"
+#include "BehaviorTree/BehaviorTreeComponent.h"
 #include "BehaviorTree/BlackboardComponent.h"
-#include "AIController.h"
+#include "Components/ActorComponent.h"
 #include "NPCBehaviorSystem.generated.h"
 
-// Forward declarations
-class UBehaviorTreeComponent;
-class UBlackboardComponent;
-class ADinosaurNPC;
-
-/**
- * Core behavioral states for all NPCs
- */
+// Enums para estados comportamentais
 UENUM(BlueprintType)
-enum class ENPCBehaviorState : uint8
+enum class EDinosaurBehaviorState : uint8
 {
-    Idle            UMETA(DisplayName = "Idle"),
-    Foraging        UMETA(DisplayName = "Foraging"),
-    Hunting         UMETA(DisplayName = "Hunting"),
-    Fleeing         UMETA(DisplayName = "Fleeing"),
-    Socializing     UMETA(DisplayName = "Socializing"),
-    Resting         UMETA(DisplayName = "Resting"),
-    Patrolling      UMETA(DisplayName = "Patrolling"),
-    Investigating   UMETA(DisplayName = "Investigating"),
-    Drinking        UMETA(DisplayName = "Drinking"),
-    Nesting         UMETA(DisplayName = "Nesting")
+    Idle UMETA(DisplayName = "Idle"),
+    Foraging UMETA(DisplayName = "Foraging"),
+    Drinking UMETA(DisplayName = "Drinking"),
+    Socializing UMETA(DisplayName = "Socializing"),
+    Resting UMETA(DisplayName = "Resting"),
+    Hunting UMETA(DisplayName = "Hunting"),
+    Fleeing UMETA(DisplayName = "Fleeing"),
+    Territorial UMETA(DisplayName = "Territorial"),
+    Mating UMETA(DisplayName = "Mating"),
+    Parenting UMETA(DisplayName = "Parenting"),
+    Migrating UMETA(DisplayName = "Migrating"),
+    Investigating UMETA(DisplayName = "Investigating")
 };
 
-/**
- * Personality traits that affect behavior decisions
- */
-USTRUCT(BlueprintType)
-struct FNPCPersonality
+UENUM(BlueprintType)
+enum class EDinosaurPersonality : uint8
 {
-    GENERATED_BODY()
-
-    // Core personality traits (0.0 to 1.0)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float Aggression = 0.5f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float Curiosity = 0.5f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float Sociability = 0.5f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float Caution = 0.5f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float Territoriality = 0.5f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float Intelligence = 0.5f;
-
-    FNPCPersonality()
-    {
-        // Generate random personality on construction
-        Aggression = FMath::RandRange(0.0f, 1.0f);
-        Curiosity = FMath::RandRange(0.0f, 1.0f);
-        Sociability = FMath::RandRange(0.0f, 1.0f);
-        Caution = FMath::RandRange(0.0f, 1.0f);
-        Territoriality = FMath::RandRange(0.0f, 1.0f);
-        Intelligence = FMath::RandRange(0.0f, 1.0f);
-    }
+    Aggressive UMETA(DisplayName = "Aggressive"),
+    Cautious UMETA(DisplayName = "Cautious"),
+    Curious UMETA(DisplayName = "Curious"),
+    Social UMETA(DisplayName = "Social"),
+    Solitary UMETA(DisplayName = "Solitary"),
+    Territorial UMETA(DisplayName = "Territorial"),
+    Docile UMETA(DisplayName = "Docile"),
+    Skittish UMETA(DisplayName = "Skittish")
 };
 
-/**
- * Memory system for NPCs to remember events, locations, and other entities
- */
+UENUM(BlueprintType)
+enum class EDinosaurSpecies : uint8
+{
+    Triceratops UMETA(DisplayName = "Triceratops"),
+    Parasaurolophus UMETA(DisplayName = "Parasaurolophus"),
+    Stegosaurus UMETA(DisplayName = "Stegosaurus"),
+    Ankylosaurus UMETA(DisplayName = "Ankylosaurus"),
+    Compsognathus UMETA(DisplayName = "Compsognathus"),
+    Gallimimus UMETA(DisplayName = "Gallimimus"),
+    Velociraptor UMETA(DisplayName = "Velociraptor"),
+    Dilophosaurus UMETA(DisplayName = "Dilophosaurus"),
+    Allosaurus UMETA(DisplayName = "Allosaurus"),
+    TyrannosaurusRex UMETA(DisplayName = "Tyrannosaurus Rex"),
+    Spinosaurus UMETA(DisplayName = "Spinosaurus"),
+    Carnotaurus UMETA(DisplayName = "Carnotaurus")
+};
+
+UENUM(BlueprintType)
+enum class EDinosaurThreatLevel : uint8
+{
+    Harmless UMETA(DisplayName = "Harmless"),
+    LowThreat UMETA(DisplayName = "Low Threat"),
+    ModerateThreat UMETA(DisplayName = "Moderate Threat"),
+    HighThreat UMETA(DisplayName = "High Threat"),
+    ApexPredator UMETA(DisplayName = "Apex Predator")
+};
+
+UENUM(BlueprintType)
+enum class EDomesticationStage : uint8
+{
+    Wild UMETA(DisplayName = "Wild"),
+    Aware UMETA(DisplayName = "Aware"),
+    Curious UMETA(DisplayName = "Curious"),
+    Cautious UMETA(DisplayName = "Cautious"),
+    Accepting UMETA(DisplayName = "Accepting"),
+    Trusting UMETA(DisplayName = "Trusting"),
+    Bonded UMETA(DisplayName = "Bonded"),
+    Domesticated UMETA(DisplayName = "Domesticated")
+};
+
+// Estrutura para memória de NPCs
 USTRUCT(BlueprintType)
 struct FNPCMemoryEntry
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    AActor* RememberedActor = nullptr;
+    AActor* Actor;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FVector Location = FVector::ZeroVector;
+    FVector LastKnownLocation;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float EmotionalWeight = 0.0f; // Positive = good memory, negative = bad memory
+    float Timestamp;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float Timestamp = 0.0f;
+    float ThreatLevel;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString EventType = TEXT("");
+    float FamiliarityLevel;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsPlayerRelated;
 
     FNPCMemoryEntry()
     {
-        RememberedActor = nullptr;
-        Location = FVector::ZeroVector;
-        EmotionalWeight = 0.0f;
+        Actor = nullptr;
+        LastKnownLocation = FVector::ZeroVector;
         Timestamp = 0.0f;
-        EventType = TEXT("");
+        ThreatLevel = 0.0f;
+        FamiliarityLevel = 0.0f;
+        bIsPlayerRelated = false;
     }
 };
 
-/**
- * Daily routine schedule for NPCs
- */
+// Estrutura para rotinas diárias
 USTRUCT(BlueprintType)
 struct FDailyRoutineEntry
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float StartTime = 0.0f; // Time of day (0.0 = dawn, 0.5 = noon, 1.0 = midnight)
+    float TimeOfDay; // 0.0 = midnight, 0.5 = noon, 1.0 = midnight
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float Duration = 0.1f; // Duration as fraction of day
+    EDinosaurBehaviorState BehaviorState;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    ENPCBehaviorState Activity = ENPCBehaviorState::Idle;
+    FVector PreferredLocation;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FVector PreferredLocation = FVector::ZeroVector;
+    float Duration; // Em horas
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float Priority = 1.0f;
+    float Priority; // 0.0 - 1.0
 
     FDailyRoutineEntry()
     {
-        StartTime = 0.0f;
-        Duration = 0.1f;
-        Activity = ENPCBehaviorState::Idle;
+        TimeOfDay = 0.0f;
+        BehaviorState = EDinosaurBehaviorState::Idle;
         PreferredLocation = FVector::ZeroVector;
-        Priority = 1.0f;
+        Duration = 1.0f;
+        Priority = 0.5f;
+    }
+};
+
+// Estrutura para características individuais
+USTRUCT(BlueprintType)
+struct FDinosaurIndividualTraits
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FString IndividualName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    EDinosaurPersonality PrimaryPersonality;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    EDinosaurPersonality SecondaryPersonality;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float AggressionLevel; // 0.0 - 1.0
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float CuriosityLevel; // 0.0 - 1.0
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float SocialLevel; // 0.0 - 1.0
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float IntelligenceLevel; // 0.0 - 1.0
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float FearThreshold; // 0.0 - 1.0
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float TerritorialRadius; // Em unidades UE
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TArray<EDinosaurSpecies> PreferredCompanions;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TArray<EDinosaurSpecies> NaturalEnemies;
+
+    FDinosaurIndividualTraits()
+    {
+        IndividualName = TEXT("Unnamed");
+        PrimaryPersonality = EDinosaurPersonality::Cautious;
+        SecondaryPersonality = EDinosaurPersonality::Curious;
+        AggressionLevel = 0.5f;
+        CuriosityLevel = 0.5f;
+        SocialLevel = 0.5f;
+        IntelligenceLevel = 0.5f;
+        FearThreshold = 0.5f;
+        TerritorialRadius = 1000.0f;
     }
 };
 
 /**
- * Core NPC Behavior Component
- * Handles personality, memory, daily routines, and decision making
+ * Sistema principal de comportamento para NPCs
+ * Gerencia rotinas, memória, domesticação e personalidades individuais
  */
-UCLASS(ClassGroup=(AI), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UNPCBehaviorComponent : public UActorComponent
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UNPCBehaviorSystem : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    UNPCBehaviorComponent();
+    UNPCBehaviorSystem();
 
 protected:
     virtual void BeginPlay() override;
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 public:
-    // Core personality
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality")
-    FNPCPersonality Personality;
+    // Propriedades básicas do NPC
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Identity")
+    EDinosaurSpecies Species;
 
-    // Current behavioral state
-    UPROPERTY(BlueprintReadOnly, Category = "Behavior")
-    ENPCBehaviorState CurrentState = ENPCBehaviorState::Idle;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Identity")
+    EDinosaurThreatLevel ThreatLevel;
 
-    // Memory system
-    UPROPERTY(BlueprintReadOnly, Category = "Memory")
-    TArray<FNPCMemoryEntry> Memories;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Identity")
+    FDinosaurIndividualTraits IndividualTraits;
 
-    // Daily routine
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Routine")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Identity")
+    bool bCanBeDomesticated;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Identity")
+    EDomesticationStage CurrentDomesticationStage;
+
+    // Sistema de memória
+    UPROPERTY(BlueprintReadOnly, Category = "Memory System")
+    TArray<FNPCMemoryEntry> MemoryEntries;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory System")
+    float MemoryDuration; // Tempo em segundos que as memórias persistem
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory System")
+    int32 MaxMemoryEntries;
+
+    // Sistema de rotinas
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Daily Routines")
     TArray<FDailyRoutineEntry> DailyRoutine;
 
-    // Needs and drives
-    UPROPERTY(BlueprintReadWrite, Category = "Needs")
-    float Hunger = 0.0f; // 0.0 = not hungry, 1.0 = starving
+    UPROPERTY(BlueprintReadOnly, Category = "Daily Routines")
+    EDinosaurBehaviorState CurrentBehaviorState;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Needs")
-    float Thirst = 0.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Daily Routines")
+    FDailyRoutineEntry CurrentRoutineEntry;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Needs")
-    float Energy = 1.0f; // 1.0 = fully rested, 0.0 = exhausted
+    // Sistema de domesticação
+    UPROPERTY(BlueprintReadOnly, Category = "Domestication")
+    float DomesticationProgress; // 0.0 - 1.0
 
-    UPROPERTY(BlueprintReadWrite, Category = "Needs")
-    float Social = 0.5f; // Need for social interaction
+    UPROPERTY(BlueprintReadOnly, Category = "Domestication")
+    float PlayerFamiliarity; // 0.0 - 1.0
 
-    UPROPERTY(BlueprintReadWrite, Category = "Needs")
-    float Safety = 1.0f; // Feeling of safety
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Domestication")
+    float DomesticationRate; // Velocidade de domesticação
 
-    // Domestication system
-    UPROPERTY(BlueprintReadWrite, Category = "Domestication")
-    float TrustLevel = 0.0f; // 0.0 = wild, 1.0 = fully domesticated
+    // Funções públicas
+    UFUNCTION(BlueprintCallable, Category = "Memory System")
+    void AddMemoryEntry(AActor* Actor, float ThreatLevel, bool bIsPlayerRelated = false);
 
-    UPROPERTY(BlueprintReadWrite, Category = "Domestication")
-    bool bCanBeDomesticated = false;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Domestication")
-    AActor* TrustedHuman = nullptr;
-
-    // Behavior functions
-    UFUNCTION(BlueprintCallable, Category = "Behavior")
-    void SetBehaviorState(ENPCBehaviorState NewState);
-
-    UFUNCTION(BlueprintCallable, Category = "Memory")
-    void AddMemory(AActor* Actor, FVector Location, float EmotionalWeight, const FString& EventType);
-
-    UFUNCTION(BlueprintCallable, Category = "Memory")
+    UFUNCTION(BlueprintCallable, Category = "Memory System")
     FNPCMemoryEntry GetMemoryOfActor(AActor* Actor);
 
-    UFUNCTION(BlueprintCallable, Category = "Routine")
-    ENPCBehaviorState GetCurrentRoutineActivity();
+    UFUNCTION(BlueprintCallable, Category = "Memory System")
+    bool HasMemoryOfActor(AActor* Actor);
 
-    UFUNCTION(BlueprintCallable, Category = "Needs")
-    void UpdateNeeds(float DeltaTime);
+    UFUNCTION(BlueprintCallable, Category = "Daily Routines")
+    void SetBehaviorState(EDinosaurBehaviorState NewState);
+
+    UFUNCTION(BlueprintCallable, Category = "Daily Routines")
+    FDailyRoutineEntry GetCurrentRoutineForTime(float TimeOfDay);
 
     UFUNCTION(BlueprintCallable, Category = "Domestication")
-    void ProcessDomestication(AActor* Human, float InteractionQuality, float DeltaTime);
+    void ProcessPlayerInteraction(float InteractionQuality, float DeltaTime);
 
-    // Decision making
-    UFUNCTION(BlueprintCallable, Category = "AI")
-    ENPCBehaviorState DecideNextBehavior();
+    UFUNCTION(BlueprintCallable, Category = "Domestication")
+    bool CanAdvanceDomestication();
 
-    UFUNCTION(BlueprintCallable, Category = "AI")
-    float CalculateBehaviorPriority(ENPCBehaviorState Behavior);
+    UFUNCTION(BlueprintPure, Category = "Behavior")
+    float GetReactionToActor(AActor* Actor);
+
+    UFUNCTION(BlueprintPure, Category = "Behavior")
+    bool ShouldFleeFromActor(AActor* Actor);
+
+    UFUNCTION(BlueprintPure, Category = "Behavior")
+    bool ShouldInvestigateActor(AActor* Actor);
 
 private:
-    float LastNeedsUpdate = 0.0f;
-    float NeedsUpdateInterval = 5.0f; // Update needs every 5 seconds
-
-    void GenerateRandomRoutine();
-    float GetTimeOfDay();
+    // Funções internas
+    void UpdateMemory(float DeltaTime);
+    void UpdateDailyRoutine(float DeltaTime);
+    void UpdateDomestication(float DeltaTime);
+    float CalculateActorThreatLevel(AActor* Actor);
+    void CleanupOldMemories();
+    
+    // Timers internos
+    float MemoryUpdateTimer;
+    float RoutineUpdateTimer;
+    float DomesticationUpdateTimer;
+    
+    // Cache para performance
+    float CachedTimeOfDay;
+    bool bRoutineNeedsUpdate;
 };
