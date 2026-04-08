@@ -1,127 +1,159 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
-#include "Engine/DataTable.h"
+#include "Engine/Engine.h"
 #include "Animation/AnimInstance.h"
+#include "PoseSearch/PoseSearch.h"
+#include "Components/ActorComponent.h"
 #include "AnimationSystemManager.generated.h"
 
 UENUM(BlueprintType)
-enum class ECreatureType : uint8
+enum class ECharacterType : uint8
 {
-    Player,
-    SmallHerbivore,
-    LargeHerbivore,
-    SmallCarnivore,
-    LargeCarnivore,
-    Apex
+    Player          UMETA(DisplayName = "Player Character"),
+    DinosaurSmall   UMETA(DisplayName = "Small Dinosaur"),
+    DinosaurMedium  UMETA(DisplayName = "Medium Dinosaur"),
+    DinosaurLarge   UMETA(DisplayName = "Large Dinosaur"),
+    DinosaurFlying  UMETA(DisplayName = "Flying Dinosaur")
+};
+
+UENUM(BlueprintType)
+enum class EMovementState : uint8
+{
+    Idle            UMETA(DisplayName = "Idle"),
+    Walking         UMETA(DisplayName = "Walking"),
+    Running         UMETA(DisplayName = "Running"),
+    Sneaking        UMETA(DisplayName = "Sneaking"),
+    Climbing        UMETA(DisplayName = "Climbing"),
+    Swimming        UMETA(DisplayName = "Swimming"),
+    Falling         UMETA(DisplayName = "Falling"),
+    Landing         UMETA(DisplayName = "Landing"),
+    Jumping         UMETA(DisplayName = "Jumping"),
+    Crouching       UMETA(DisplayName = "Crouching"),
+    Injured         UMETA(DisplayName = "Injured"),
+    Exhausted       UMETA(DisplayName = "Exhausted"),
+    Afraid          UMETA(DisplayName = "Afraid"),
+    Alert           UMETA(DisplayName = "Alert")
 };
 
 UENUM(BlueprintType)
 enum class EEmotionalState : uint8
 {
-    Neutral,
-    Curious,
-    Afraid,
-    Aggressive,
-    Trusting,
-    Protective,
-    Hunting,
-    Feeding,
-    Resting
+    Neutral         UMETA(DisplayName = "Neutral"),
+    Fearful         UMETA(DisplayName = "Fearful"),
+    Cautious        UMETA(DisplayName = "Cautious"),
+    Confident       UMETA(DisplayName = "Confident"),
+    Exhausted       UMETA(DisplayName = "Exhausted"),
+    Injured         UMETA(DisplayName = "Injured"),
+    Curious         UMETA(DisplayName = "Curious"),
+    Aggressive      UMETA(DisplayName = "Aggressive")
 };
 
 USTRUCT(BlueprintType)
-struct FCreatureAnimationProfile
+struct FAnimationProfile
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    ECreatureType CreatureType;
+    ECharacterType CharacterType = ECharacterType::Player;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString SpeciesName;
-
-    // Motion Matching Database para cada estado emocional
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TMap<EEmotionalState, class UPoseSearchDatabase*> EmotionalStateDatabases;
-
-    // Variações físicas únicas
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float WalkSpeedVariation = 1.0f;
+    float MovementSpeed = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float PostureVariation = 1.0f;
+    float AnimationIntensity = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float GaitVariation = 1.0f;
-
-    // IK Settings para adaptação ao terreno
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bUseFootIK = true;
+    float FearLevel = 0.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float FootIKRange = 50.0f;
+    float ConfidenceLevel = 0.5f;
 
-    FCreatureAnimationProfile()
-    {
-        CreatureType = ECreatureType::SmallHerbivore;
-        SpeciesName = TEXT("Unknown");
-        WalkSpeedVariation = 1.0f;
-        PostureVariation = 1.0f;
-        GaitVariation = 1.0f;
-        bUseFootIK = true;
-        FootIKRange = 50.0f;
-    }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float InjuryLevel = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float ExhaustionLevel = 0.0f;
 };
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AAnimationSystemManager : public AActor
+/**
+ * Sistema central de gestão de animações para o jogo pré-histórico
+ * Implementa Motion Matching, IK de pés e estados emocionais
+ */
+UCLASS(ClassGroup=(Animation), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UAnimationSystemManager : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    AAnimationSystemManager();
+    UAnimationSystemManager();
 
 protected:
     virtual void BeginPlay() override;
 
-    // Database central de perfis de animação
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation System")
-    UDataTable* CreatureAnimationProfiles;
-
-    // Motion Matching Schema para diferentes tipos de criaturas
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    TMap<ECreatureType, class UPoseSearchSchema*> MotionMatchingSchemas;
-
-    // Configurações globais de IK
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK System")
-    bool bGlobalFootIKEnabled = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK System")
-    float GlobalIKIntensity = 1.0f;
-
 public:
-    // Função para obter perfil de animação de uma criatura
-    UFUNCTION(BlueprintCallable, Category = "Animation System")
-    FCreatureAnimationProfile GetCreatureProfile(const FString& SpeciesName) const;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, 
+                              FActorComponentTickFunction* ThisTickFunction) override;
 
-    // Função para registrar nova criatura no sistema
-    UFUNCTION(BlueprintCallable, Category = "Animation System")
-    void RegisterCreature(const FString& SpeciesName, const FCreatureAnimationProfile& Profile);
+    // Motion Matching Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    class UPoseSearchDatabase* PlayerLocomotionDatabase;
 
-    // Função para atualizar estado emocional de uma criatura
-    UFUNCTION(BlueprintCallable, Category = "Animation System")
-    void UpdateCreatureEmotionalState(const FString& CreatureID, EEmotionalState NewState);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    class UPoseSearchDatabase* DinosaurLocomotionDatabase;
 
-    // Sistema de variação procedimental
-    UFUNCTION(BlueprintCallable, Category = "Animation System")
-    FCreatureAnimationProfile GenerateUniqueVariation(const FCreatureAnimationProfile& BaseProfile, int32 Seed) const;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    class UPoseSearchSchema* DefaultSchema;
+
+    // IK Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK System")
+    float FootIKRange = 50.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK System")
+    float FootIKInterpSpeed = 15.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK System")
+    bool bEnableFootIK = true;
+
+    // Animation Profiles
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Profiles")
+    TMap<ECharacterType, FAnimationProfile> CharacterProfiles;
+
+    // Current State
+    UPROPERTY(BlueprintReadOnly, Category = "Current State")
+    EMovementState CurrentMovementState = EMovementState::Idle;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Current State")
+    EEmotionalState CurrentEmotionalState = EEmotionalState::Neutral;
+
+    // Animation Functions
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void SetMovementState(EMovementState NewState);
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void SetEmotionalState(EEmotionalState NewState);
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void UpdateAnimationProfile(const FAnimationProfile& NewProfile);
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    FAnimationProfile GetCurrentAnimationProfile() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void TriggerFearResponse(float FearIntensity, float Duration);
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void TriggerInjuryAnimation(float InjurySeverity);
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void UpdateExhaustion(float ExhaustionLevel);
 
 private:
-    // Cache de perfis ativos
-    TMap<FString, FCreatureAnimationProfile> ActiveCreatureProfiles;
+    FAnimationProfile CurrentProfile;
+    float FearResponseTimer = 0.0f;
+    float FearResponseDuration = 0.0f;
+    float OriginalFearLevel = 0.0f;
 
-    // Sistema de tracking de criaturas únicas
-    TMap<FString, int32> CreatureUniqueSeeds;
+    void UpdateFearResponse(float DeltaTime);
+    void ApplyEmotionalStateToProfile();
 };
