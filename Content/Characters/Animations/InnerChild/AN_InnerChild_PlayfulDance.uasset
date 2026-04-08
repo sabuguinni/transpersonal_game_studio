@@ -1,0 +1,109 @@
+# Inner Child Playful Dance Animation
+# Joyful, spontaneous movement expressing pure consciousness
+
+import unreal
+
+class InnerChildPlayfulDance:
+    def __init__(self):
+        self.duration = 6.0
+        self.loop = True
+        self.playful_energy = True
+        
+    def create_keyframes(self):
+        # Frame 0: Starting pose, ready to dance
+        keyframe_0 = {
+            'time': 0.0,
+            'root': {'translation': (0, 0, 0)},
+            'spine_01': {'rotation': (0, 0, 0)},
+            'spine_02': {'rotation': (-5, 0, 0)},
+            'spine_03': {'rotation': (-5, 0, 0)},
+            'head': {'rotation': (10, 0, 0)},
+            'upperarm_l': {'rotation': (-20, 0, -20)},
+            'upperarm_r': {'rotation': (-20, 0, 20)},
+            'lowerarm_l': {'rotation': (0, 0, -30)},
+            'lowerarm_r': {'rotation': (0, 0, 30)},
+            'hand_l': {'rotation': (0, 0, -15)},
+            'hand_r': {'rotation': (0, 0, 15)},
+            'thigh_l': {'rotation': (0, 0, 0)},
+            'thigh_r': {'rotation': (0, 0, 0)}
+        }
+        
+        # Frame 45: Spin to the left
+        keyframe_45 = {
+            'time': 1.5,
+            'root': {'translation': (0, 0, 5), 'rotation': (0, 0, -30)},
+            'spine_01': {'rotation': (0, 0, -15)},
+            'spine_02': {'rotation': (-10, 0, -10)},
+            'spine_03': {'rotation': (-10, 0, -10)},
+            'head': {'rotation': (5, 0, -20)},
+            'upperarm_l': {'rotation': (-45, 0, -60)},
+            'upperarm_r': {'rotation': (-10, 0, 45)},
+            'lowerarm_l': {'rotation': (0, 0, -90)},
+            'lowerarm_r': {'rotation': (0, 0, 60)},
+            'hand_l': {'rotation': (0, 0, -30)},
+            'hand_r': {'rotation': (0, 0, 30)},
+            'thigh_l': {'rotation': (10, 0, -15)},
+            'thigh_r': {'rotation': (-5, 0, 10)}
+        }
+        
+        # Frame 90: Jump peak
+        keyframe_90 = {
+            'time': 3.0,
+            'root': {'translation': (0, 0, 25), 'rotation': (0, 0, 0)},
+            'spine_01': {'rotation': (0, 0, 0)},
+            'spine_02': {'rotation': (-15, 0, 0)},
+            'spine_03': {'rotation': (-15, 0, 0)},
+            'head': {'rotation': (20, 0, 0)},
+            'upperarm_l': {'rotation': (-90, 0, -30)},
+            'upperarm_r': {'rotation': (-90, 0, 30)},
+            'lowerarm_l': {'rotation': (0, 0, -45)},
+            'lowerarm_r': {'rotation': (0, 0, 45)},
+            'hand_l': {'rotation': (0, 0, -20)},
+            'hand_r': {'rotation': (0, 0, 20)},
+            'thigh_l': {'rotation': (45, 0, 0)},
+            'thigh_r': {'rotation': (45, 0, 0)},
+            'calf_l': {'rotation': (-60, 0, 0)},
+            'calf_r': {'rotation': (-60, 0, 0)}
+        }
+        
+        # Frame 135: Spin to the right
+        keyframe_135 = {
+            'time': 4.5,
+            'root': {'translation': (0, 0, 5), 'rotation': (0, 0, 30)},
+            'spine_01': {'rotation': (0, 0, 15)},
+            'spine_02': {'rotation': (-10, 0, 10)},
+            'spine_03': {'rotation': (-10, 0, 10)},
+            'head': {'rotation': (5, 0, 20)},
+            'upperarm_l': {'rotation': (-10, 0, -45)},
+            'upperarm_r': {'rotation': (-45, 0, 60)},
+            'lowerarm_l': {'rotation': (0, 0, -60)},
+            'lowerarm_r': {'rotation': (0, 0, 90)},
+            'hand_l': {'rotation': (0, 0, -30)},
+            'hand_r': {'rotation': (0, 0, 30)},
+            'thigh_l': {'rotation': (-5, 0, -10)},
+            'thigh_r': {'rotation': (10, 0, 15)}
+        }
+        
+        # Frame 180: Return to start
+        keyframe_180 = keyframe_0.copy()
+        keyframe_180['time'] = 6.0
+        
+        return [keyframe_0, keyframe_45, keyframe_90, keyframe_135, keyframe_180]
+        
+    def create_joy_effects(self):
+        # Sparkle particles following movement
+        return {
+            'joy_sparkles': {
+                'spawn_rate': 25,
+                'lifetime': 1.5,
+                'velocity_random': (20, 20, 20),
+                'color': (1.0, 0.9, 0.3, 0.9),
+                'size': (1, 3),
+                'trail_effect': True
+            },
+            'laughter_ripples': {
+                'intensity': 0.8,
+                'frequency': 2.0,
+                'color': (0.9, 0.7, 1.0)
+            }
+        }
