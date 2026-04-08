@@ -1,77 +1,85 @@
 #include "VFXSystemManager.h"
-#include "NiagaraFunctionLibrary.h"
-#include "Engine/World.h"
-#include "TimerManager.h"
 #include "Engine/Engine.h"
+#include "Engine/World.h"
+#include "GameFramework/PlayerController.h"
+#include "Kismet/GameplayStatics.h"
+#include "NiagaraFunctionLibrary.h"
+#include "Components/StaticMeshComponent.h"
 
 AVFXSystemManager::AVFXSystemManager()
 {
     PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 0.1f; // 10 FPS tick for performance monitoring
+    PrimaryActorTick.TickInterval = 0.1f; // 10fps para performance
+
+    // Configuração inicial do pool
+    MaxActiveEffects = 100;
+    LODUpdateInterval = 0.5f;
+    MaxVFXBudgetMS = 2.0f;
 }
 
 void AVFXSystemManager::BeginPlay()
 {
     Super::BeginPlay();
 
-    // Initialize component pool
-    for (int32 i = 0; i < MaxActiveEffects; i++)
+    // Pre-populate o pool com componentes
+    for (int32 i = 0; i < 20; ++i)
     {
         UNiagaraComponent* Component = CreateDefaultSubobject<UNiagaraComponent>(FName(*FString::Printf(TEXT("PooledVFX_%d"), i)));
         Component->SetAutoDestroy(false);
-        Component->SetVisibility(false);
+        Component->SetActive(false);
         AvailableComponents.Add(Component);
     }
 
-    // Start performance monitoring
-    GetWorldTimerManager().SetTimer(PerformanceCheckTimer, this, &AVFXSystemManager::PerformanceCheck, PerformanceCheckInterval, true);
+    // Registar efeitos base do jogo
+    RegisterDefaultEffects();
 
-    UE_LOG(LogTemp, Log, TEXT("VFX System Manager initialized with %d pooled components"), MaxActiveEffects);
+    UE_LOG(LogTemp, Log, TEXT("VFX System Manager initialized with %d pooled components"), AvailableComponents.Num());
 }
 
 void AVFXSystemManager::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    // Clean up finished effects
-    for (int32 i = ActiveComponents.Num() - 1; i >= 0; i--)
+    // Update LOD system
+    LastLODUpdate += DeltaTime;
+    if (LastLODUpdate >= LODUpdateInterval)
     {
-        UNiagaraComponent* Component = ActiveComponents[i];
-        if (!Component || !Component->IsActive() || Component->IsComplete())
-        {
-            ReturnComponentToPool(Component);
-            ActiveComponents.RemoveAt(i);
-        }
+        UpdateVFXLOD();
+        LastLODUpdate = 0.0f;
     }
+
+    // Cleanup finished effects
+    CleanupFinishedEffects();
+
+    // Performance monitoring
+    CurrentFrameVFXTime = 0.0f; // Reset counter for next frame
 }
 
-UNiagaraComponent* AVFXSystemManager::SpawnVFXAtLocation(const FString& EffectName, const FVector& Location, const FRotator& Rotation)
+UNiagaraComponent* AVFXSystemManager::SpawnVFXEffect(FName EffectName, FVector Location, FRotator Rotation, AActor* AttachToActor)
 {
-    // Find effect definition
-    FVFXDefinition* EffectDef = nullptr;
-    for (FVFXDefinition& Def : VFXRegistry)
-    {
-        if (Def.EffectName == EffectName)
-        {
-            EffectDef = &Def;
-            break;
-        }
-    }
-
+    // Verificar se o efeito está registado
+    FVFXDefinition* EffectDef = RegisteredEffects.Find(EffectName);
     if (!EffectDef)
     {
-        UE_LOG(LogTemp, Warning, TEXT("VFX Effect not found: %s"), *EffectName);
+        UE_LOG(LogTemp, Warning, TEXT("VFX Effect '%s' not found in registered effects"), *EffectName.ToString());
         return nullptr;
     }
 
-    // Check performance limits
+    // Verificar limites de performance
     if (ActiveComponents.Num() >= MaxActiveEffects)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Maximum VFX limit reached, skipping effect: %s"), *EffectName);
+        UE_LOG(LogTemp, Warning, TEXT("Max VFX effects reached (%d), skipping spawn of '%s'"), MaxActiveEffects, *EffectName.ToString());
         return nullptr;
     }
 
-    // Get pooled component
+    // Verificar distância ao jogador para LOD
+    float DistanceToPlayer = CalculateDistanceToPlayer(Location);
+    if (DistanceToPlayer > EffectDef->MaxDistance)
+    {
+        return nullptr; // Muito longe para renderizar
+    }
+
+    // Obter componente do pool
     UNiagaraComponent* Component = GetPooledComponent();
     if (!Component)
     {
@@ -79,103 +87,111 @@ UNiagaraComponent* AVFXSystemManager::SpawnVFXAtLocation(const FString& EffectNa
         return nullptr;
     }
 
-    // Configure component
-    if (EffectDef->NiagaraSystem.LoadSynchronous())
-    {
-        Component->SetAsset(EffectDef->NiagaraSystem.Get());
-        Component->SetWorldLocationAndRotation(Location, Rotation);
-        Component->SetWorldScale3D(EffectDef->DefaultScale);
-        Component->SetVisibility(true);
-        Component->SetAutoDestroy(EffectDef->bAutoDestroy);
-        
-        // Performance settings
-        Component->SetMaxSimTime(EffectDef->DefaultLifetime);
-        
-        // LOD settings based on current performance level
-        float LODDistanceScale = 1.0f;
-        switch (CurrentPerformanceLevel)
-        {
-            case 0: LODDistanceScale = 1.0f; break;   // Ultra
-            case 1: LODDistanceScale = 0.8f; break;  // High
-            case 2: LODDistanceScale = 0.6f; break;  // Medium
-            case 3: LODDistanceScale = 0.4f; break;  // Low
-        }
-        
-        Component->SetMaxSimTime(EffectDef->DefaultLifetime * LODDistanceScale);
-        
-        // Activate
-        Component->Activate(true);
-        ActiveComponents.Add(Component);
+    // Configurar o efeito
+    Component->SetAsset(EffectDef->NiagaraSystem.LoadSynchronous());
+    Component->SetWorldLocation(Location);
+    Component->SetWorldRotation(Rotation);
 
-        UE_LOG(LogTemp, Log, TEXT("Spawned VFX: %s at location %s"), *EffectName, *Location.ToString());
-        return Component;
+    // Anexar a actor se especificado
+    if (AttachToActor)
+    {
+        Component->AttachToComponent(AttachToActor->GetRootComponent(), 
+            FAttachmentTransformRules::KeepWorldTransform);
     }
 
-    ReturnComponentToPool(Component);
-    return nullptr;
-}
+    // Configurar LOD baseado na distância
+    int32 LODLevel = GetLODLevelForDistance(DistanceToPlayer);
+    Component->SetUserVariableInt(FName("LOD_Level"), LODLevel);
 
-UNiagaraComponent* AVFXSystemManager::SpawnVFXAttached(const FString& EffectName, USceneComponent* AttachComponent, const FVector& LocationOffset)
-{
-    if (!AttachComponent)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Cannot attach VFX %s: AttachComponent is null"), *EffectName);
-        return nullptr;
-    }
+    // Activar o efeito
+    Component->SetActive(true);
+    Component->ResetSystem();
 
-    UNiagaraComponent* Component = SpawnVFXAtLocation(EffectName, AttachComponent->GetComponentLocation() + LocationOffset, AttachComponent->GetComponentRotation());
-    
-    if (Component)
-    {
-        Component->AttachToComponent(AttachComponent, FAttachmentTransformRules::KeepWorldTransform);
-    }
+    ActiveComponents.Add(Component);
+
+    UE_LOG(LogTemp, Log, TEXT("Spawned VFX '%s' at distance %.2f with LOD %d"), 
+        *EffectName.ToString(), DistanceToPlayer, LODLevel);
 
     return Component;
 }
 
-void AVFXSystemManager::StopVFX(UNiagaraComponent* VFXComponent)
+void AVFXSystemManager::StopVFXEffect(UNiagaraComponent* Effect)
 {
-    if (VFXComponent && ActiveComponents.Contains(VFXComponent))
-    {
-        VFXComponent->DeactivateImmediate();
-        ReturnComponentToPool(VFXComponent);
-        ActiveComponents.Remove(VFXComponent);
-    }
+    if (!Effect) return;
+
+    Effect->SetActive(false);
+    ReturnComponentToPool(Effect);
 }
 
-void AVFXSystemManager::StopAllVFXOfCategory(EVFXCategory Category)
+void AVFXSystemManager::RegisterEffect(const FVFXDefinition& EffectDefinition)
 {
-    for (int32 i = ActiveComponents.Num() - 1; i >= 0; i--)
+    RegisteredEffects.Add(EffectDefinition.EffectName, EffectDefinition);
+    UE_LOG(LogTemp, Log, TEXT("Registered VFX effect: %s"), *EffectDefinition.EffectName.ToString());
+}
+
+void AVFXSystemManager::UpdateVFXLOD()
+{
+    for (UNiagaraComponent* Component : ActiveComponents)
     {
-        UNiagaraComponent* Component = ActiveComponents[i];
-        if (Component)
+        if (!Component || !Component->IsActive()) continue;
+
+        float Distance = CalculateDistanceToPlayer(Component->GetComponentLocation());
+        int32 NewLODLevel = GetLODLevelForDistance(Distance);
+        
+        // Update LOD se mudou
+        int32 CurrentLOD = Component->GetUserVariableInt(FName("LOD_Level"));
+        if (CurrentLOD != NewLODLevel)
         {
-            // Find the effect definition to check category
-            for (const FVFXDefinition& Def : VFXRegistry)
+            Component->SetUserVariableInt(FName("LOD_Level"), NewLODLevel);
+        }
+
+        // Desactivar se muito longe
+        FVFXDefinition* EffectDef = nullptr;
+        for (auto& Pair : RegisteredEffects)
+        {
+            if (Pair.Value.NiagaraSystem.Get() == Component->GetAsset())
             {
-                if (Def.Category == Category && Component->GetAsset() == Def.NiagaraSystem.Get())
-                {
-                    StopVFX(Component);
-                    break;
-                }
+                EffectDef = &Pair.Value;
+                break;
             }
+        }
+
+        if (EffectDef && Distance > EffectDef->MaxDistance)
+        {
+            StopVFXEffect(Component);
         }
     }
 }
 
-void AVFXSystemManager::SetPerformanceLevel(int32 Level)
+void AVFXSystemManager::SetVFXQualityLevel(int32 QualityLevel)
 {
-    CurrentPerformanceLevel = FMath::Clamp(Level, 0, 3);
-    
-    // Adjust active effects based on performance level
-    OptimizeActiveEffects();
-    
-    UE_LOG(LogTemp, Log, TEXT("VFX Performance level set to: %d"), CurrentPerformanceLevel);
-}
+    // Ajustar limites baseados na qualidade
+    switch (QualityLevel)
+    {
+        case 0: // Low
+            MaxActiveEffects = 50;
+            MaxVFXBudgetMS = 1.0f;
+            LODUpdateInterval = 1.0f;
+            break;
+        case 1: // Medium
+            MaxActiveEffects = 75;
+            MaxVFXBudgetMS = 1.5f;
+            LODUpdateInterval = 0.75f;
+            break;
+        case 2: // High
+            MaxActiveEffects = 100;
+            MaxVFXBudgetMS = 2.0f;
+            LODUpdateInterval = 0.5f;
+            break;
+        case 3: // Ultra
+            MaxActiveEffects = 150;
+            MaxVFXBudgetMS = 3.0f;
+            LODUpdateInterval = 0.25f;
+            break;
+    }
 
-float AVFXSystemManager::GetCurrentGPUTime() const
-{
-    return LastGPUTime;
+    UE_LOG(LogTemp, Log, TEXT("VFX Quality set to level %d - Max Effects: %d, Budget: %.1fms"), 
+        QualityLevel, MaxActiveEffects, MaxVFXBudgetMS);
 }
 
 UNiagaraComponent* AVFXSystemManager::GetPooledComponent()
@@ -185,62 +201,107 @@ UNiagaraComponent* AVFXSystemManager::GetPooledComponent()
         UNiagaraComponent* Component = AvailableComponents.Pop();
         return Component;
     }
-    return nullptr;
+
+    // Se não há componentes disponíveis, criar um novo
+    UNiagaraComponent* NewComponent = NewObject<UNiagaraComponent>(this);
+    NewComponent->SetAutoDestroy(false);
+    return NewComponent;
 }
 
 void AVFXSystemManager::ReturnComponentToPool(UNiagaraComponent* Component)
 {
-    if (Component)
+    if (!Component) return;
+
+    // Limpar estado
+    Component->SetActive(false);
+    Component->SetAsset(nullptr);
+    Component->DetachFromComponent(FDetachmentTransformRules::KeepWorldTransform);
+
+    // Remover da lista activa
+    ActiveComponents.Remove(Component);
+
+    // Retornar ao pool se há espaço
+    if (AvailableComponents.Num() < 50) // Limite do pool
     {
-        Component->DeactivateImmediate();
-        Component->SetVisibility(false);
-        Component->DetachFromComponent(FDetachmentTransformRules::KeepWorldTransform);
-        Component->SetAsset(nullptr);
-        
-        if (!AvailableComponents.Contains(Component))
+        AvailableComponents.Add(Component);
+    }
+    else
+    {
+        // Destruir se o pool está cheio
+        Component->DestroyComponent();
+    }
+}
+
+void AVFXSystemManager::CleanupFinishedEffects()
+{
+    for (int32 i = ActiveComponents.Num() - 1; i >= 0; --i)
+    {
+        UNiagaraComponent* Component = ActiveComponents[i];
+        if (!Component || !Component->IsActive() || Component->IsComplete())
         {
-            AvailableComponents.Add(Component);
+            ReturnComponentToPool(Component);
         }
     }
 }
 
-void AVFXSystemManager::PerformanceCheck()
+float AVFXSystemManager::CalculateDistanceToPlayer(const FVector& EffectLocation) const
 {
-    // Simple GPU time estimation based on active effects
-    LastGPUTime = ActiveComponents.Num() * 0.1f; // Rough estimate: 0.1ms per effect
+    APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
+    if (!PC || !PC->GetPawn()) return 99999.0f;
 
-    // If we're over budget, reduce quality
-    if (LastGPUTime > MaxGPUTime && CurrentPerformanceLevel < 3)
-    {
-        SetPerformanceLevel(CurrentPerformanceLevel + 1);
-        UE_LOG(LogTemp, Warning, TEXT("VFX Performance degraded due to high GPU time: %.2fms"), LastGPUTime);
-    }
-    // If we have headroom, increase quality
-    else if (LastGPUTime < MaxGPUTime * 0.5f && CurrentPerformanceLevel > 0)
-    {
-        SetPerformanceLevel(CurrentPerformanceLevel - 1);
-        UE_LOG(LogTemp, Log, TEXT("VFX Performance improved, GPU time: %.2fms"), LastGPUTime);
-    }
+    FVector PlayerLocation = PC->GetPawn()->GetActorLocation();
+    return FVector::Dist(PlayerLocation, EffectLocation);
 }
 
-void AVFXSystemManager::OptimizeActiveEffects()
+int32 AVFXSystemManager::GetLODLevelForDistance(float Distance) const
 {
-    // Reduce particle counts and simulation complexity based on performance level
-    for (UNiagaraComponent* Component : ActiveComponents)
+    // Sistema LOD de 3 níveis
+    if (Distance < 1000.0f) return 0;      // High quality
+    else if (Distance < 3000.0f) return 1; // Medium quality  
+    else return 2;                          // Low quality
+}
+
+void AVFXSystemManager::RegisterDefaultEffects()
+{
+    // Efeitos atmosféricos base
+    FVFXDefinition AtmosphericDust;
+    AtmosphericDust.EffectName = FName("Atmospheric_Dust");
+    AtmosphericDust.Category = EVFXCategory::Atmospheric;
+    AtmosphericDust.Intensity = EVFXIntensity::Subtle;
+    AtmosphericDust.MaxDistance = 2000.0f;
+    AtmosphericDust.MaxInstances = 20;
+    RegisterEffect(AtmosphericDust);
+
+    // Efeitos de criaturas
+    FVFXDefinition CreatureBreath;
+    CreatureBreath.EffectName = FName("Creature_Breath");
+    CreatureBreath.Category = EVFXCategory::Creature;
+    CreatureBreath.Intensity = EVFXIntensity::Moderate;
+    CreatureBreath.MaxDistance = 1500.0f;
+    CreatureBreath.MaxInstances = 10;
+    RegisterEffect(CreatureBreath);
+
+    // Efeitos de sobrevivência
+    FVFXDefinition CampfireSmoke;
+    CampfireSmoke.EffectName = FName("Survival_CampfireSmoke");
+    CampfireSmoke.Category = EVFXCategory::Survival;
+    CampfireSmoke.Intensity = EVFXIntensity::Moderate;
+    CampfireSmoke.MaxDistance = 3000.0f;
+    CampfireSmoke.MaxInstances = 5;
+    CampfireSmoke.bAffectsGameplay = true; // Fumo pode atrair predadores
+    RegisterEffect(CampfireSmoke);
+
+    UE_LOG(LogTemp, Log, TEXT("Registered %d default VFX effects"), RegisteredEffects.Num());
+}
+
+void AVFXSystemManager::ShowVFXDebugInfo(bool bShow)
+{
+    if (bShow)
     {
-        if (Component && Component->GetAsset())
-        {
-            float QualityScale = 1.0f;
-            switch (CurrentPerformanceLevel)
-            {
-                case 0: QualityScale = 1.0f; break;   // Ultra
-                case 1: QualityScale = 0.8f; break;  // High
-                case 2: QualityScale = 0.6f; break;  // Medium
-                case 3: QualityScale = 0.4f; break;  // Low
-            }
-            
-            // Apply quality scaling to particle systems
-            Component->SetFloatParameter(TEXT("QualityScale"), QualityScale);
-        }
+        UE_LOG(LogTemp, Log, TEXT("=== VFX DEBUG INFO ==="));
+        UE_LOG(LogTemp, Log, TEXT("Active Effects: %d/%d"), ActiveComponents.Num(), MaxActiveEffects);
+        UE_LOG(LogTemp, Log, TEXT("Available Pool: %d"), AvailableComponents.Num());
+        UE_LOG(LogTemp, Log, TEXT("Registered Effects: %d"), RegisteredEffects.Num());
+        UE_LOG(LogTemp, Log, TEXT("Current Frame VFX Time: %.2fms"), CurrentFrameVFXTime);
     }
 }
