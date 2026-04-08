@@ -1,217 +1,341 @@
 #include "MetaHumanCharacterComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Animation/AnimBlueprint.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "Engine/Engine.h"
-#include "Engine/StreamableManager.h"
-#include "Engine/AssetManager.h"
 
 UMetaHumanCharacterComponent::UMetaHumanCharacterComponent()
 {
-    PrimaryComponentTick.bCanEverTick = false;
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.bStartWithTickEnabled = false;
+    
+    // Initialize default values
+    CurrentSurvivalState = ESurvivalCondition::Fresh;
+    DaysSurvived = 0;
+    HealthCondition = 1.0f;
+    MentalState = 1.0f;
+    
+    // Set default visual traits
+    CurrentVisualTraits.Height = 1.0f;
+    CurrentVisualTraits.Weight = 1.0f;
+    CurrentVisualTraits.Muscle = 0.5f;
+    CurrentVisualTraits.FaceWidth = 0.5f;
+    CurrentVisualTraits.JawWidth = 0.5f;
+    CurrentVisualTraits.EyeSize = 0.5f;
+    CurrentVisualTraits.NoseSize = 0.5f;
+    CurrentVisualTraits.SkinDamage = 0.0f;
+    CurrentVisualTraits.Fatigue = 0.0f;
+    CurrentVisualTraits.Weathering = 0.0f;
 }
 
 void UMetaHumanCharacterComponent::BeginPlay()
 {
     Super::BeginPlay();
     
-    SetupMetaHumanComponents();
+    // Find the skeletal mesh component on the owner
+    if (AActor* Owner = GetOwner())
+    {
+        CachedMeshComponent = Owner->FindComponentByClass<USkeletalMeshComponent>();
+    }
+    
+    // Apply the initial archetype if set
+    if (CharacterArchetype.IsValid())
+    {
+        if (UCharacterArchetype* LoadedArchetype = CharacterArchetype.LoadSynchronous())
+        {
+            ApplyArchetype(LoadedArchetype);
+        }
+    }
+    
+    SetupMetaHumanMesh();
 }
 
-void UMetaHumanCharacterComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UMetaHumanCharacterComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
+    FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    
+    // Update material parameters based on current state
+    UpdateMaterialParameters();
 }
 
-void UMetaHumanCharacterComponent::LoadCharacter(const FCharacterDefinition& NewCharacterDefinition)
+void UMetaHumanCharacterComponent::ApplyArchetype(UCharacterArchetype* NewArchetype)
 {
-    if (bIsLoading)
+    if (!NewArchetype)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Character is already loading, ignoring new load request"));
+        UE_LOG(LogTemp, Warning, TEXT("MetaHumanCharacterComponent: Attempted to apply null archetype"));
         return;
     }
-
-    CharacterDefinition = NewCharacterDefinition;
-    bIsLoading = true;
-    PendingMeshLoads = 0;
-
-    // Load MetaHuman mesh
-    if (CharacterDefinition.MetaHumanMesh.IsValid())
+    
+    CharacterArchetype = NewArchetype;
+    
+    // Copy archetype data to component
+    CurrentVisualTraits = NewArchetype->VisualTraits;
+    CurrentClothing = NewArchetype->ClothingSetup;
+    CurrentSurvivalState = NewArchetype->SurvivalState;
+    DaysSurvived = NewArchetype->DaysInJurassic;
+    
+    // Apply the MetaHuman mesh
+    if (NewArchetype->MetaHumanMesh.IsValid())
     {
-        IncrementPendingLoads();
-        
-        FStreamableManager& StreamableManager = UAssetManager::GetStreamableManager();
-        StreamableManager.RequestAsyncLoad(
-            CharacterDefinition.MetaHumanMesh.ToSoftObjectPath(),
-            FStreamableDelegate::CreateUObject(this, &UMetaHumanCharacterComponent::OnMetaHumanMeshLoaded)
-        );
-    }
-
-    // Load clothing meshes
-    if (CharacterDefinition.Clothing.HeadGear.IsValid())
-    {
-        IncrementPendingLoads();
-        FStreamableManager& StreamableManager = UAssetManager::GetStreamableManager();
-        StreamableManager.RequestAsyncLoad(
-            CharacterDefinition.Clothing.HeadGear.ToSoftObjectPath(),
-            FStreamableDelegate::CreateUObject(this, &UMetaHumanCharacterComponent::OnClothingMeshLoaded)
-        );
-    }
-
-    // If no meshes to load, complete immediately
-    if (PendingMeshLoads == 0)
-    {
-        CheckLoadingComplete();
-    }
-}
-
-void UMetaHumanCharacterComponent::LoadCharacterByName(const FString& CharacterName)
-{
-    if (!CharacterDatabase.IsValid())
-    {
-        UE_LOG(LogTemp, Error, TEXT("Character database not set"));
-        return;
-    }
-
-    UCharacterDatabase* Database = CharacterDatabase.LoadSynchronous();
-    if (!Database)
-    {
-        UE_LOG(LogTemp, Error, TEXT("Failed to load character database"));
-        return;
-    }
-
-    FCharacterDefinition Character = Database->GetCharacterByName(CharacterName);
-    if (Character.CharacterName.IsEmpty())
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Character not found: %s"), *CharacterName);
-        return;
-    }
-
-    LoadCharacter(Character);
-}
-
-void UMetaHumanCharacterComponent::LoadRandomCharacterByArchetype(ECharacterArchetype Archetype)
-{
-    if (!CharacterDatabase.IsValid())
-    {
-        UE_LOG(LogTemp, Error, TEXT("Character database not set"));
-        return;
-    }
-
-    UCharacterDatabase* Database = CharacterDatabase.LoadSynchronous();
-    if (!Database)
-    {
-        UE_LOG(LogTemp, Error, TEXT("Failed to load character database"));
-        return;
-    }
-
-    FCharacterDefinition Character = Database->GetRandomCharacterByArchetype(Archetype);
-    if (Character.CharacterName.IsEmpty())
-    {
-        UE_LOG(LogTemp, Warning, TEXT("No character found for archetype"));
-        return;
-    }
-
-    LoadCharacter(Character);
-}
-
-void UMetaHumanCharacterComponent::ApplyPhysicalTraits(const FCharacterPhysicalTraits& Traits)
-{
-    // Apply physical traits to MetaHuman components
-    if (BodyMeshComponent)
-    {
-        // Apply height and weight scaling
-        FVector Scale = FVector(Traits.Weight, Traits.Weight, Traits.Height);
-        BodyMeshComponent->SetWorldScale3D(Scale);
-
-        // Apply skin tone, muscle mass, and body fat through material parameters
-        UMaterialInstanceDynamic* BodyMaterial = BodyMeshComponent->CreateAndSetMaterialInstanceDynamic(0);
-        if (BodyMaterial)
+        if (CachedMeshComponent)
         {
-            BodyMaterial->SetVectorParameterValue(TEXT("SkinTone"), Traits.SkinTone);
-            BodyMaterial->SetScalarParameterValue(TEXT("MuscleMass"), Traits.MuscleMass);
-            BodyMaterial->SetScalarParameterValue(TEXT("BodyFat"), Traits.BodyFat);
+            USkeletalMesh* LoadedMesh = NewArchetype->MetaHumanMesh.LoadSynchronous();
+            CachedMeshComponent->SetSkeletalMesh(LoadedMesh);
+        }
+    }
+    
+    // Apply animation blueprint
+    if (NewArchetype->CharacterAnimBP.IsValid())
+    {
+        if (CachedMeshComponent)
+        {
+            UClass* AnimBPClass = NewArchetype->CharacterAnimBP.LoadSynchronous();
+            CachedMeshComponent->SetAnimInstanceClass(AnimBPClass);
+        }
+    }
+    
+    RefreshCharacterMesh();
+    
+    UE_LOG(LogTemp, Log, TEXT("Applied archetype: %s"), *NewArchetype->CharacterName);
+}
+
+void UMetaHumanCharacterComponent::UpdateVisualTraits(const FCharacterVisualTraits& NewTraits)
+{
+    CurrentVisualTraits = NewTraits;
+    ApplyBodyMorphs();
+    ApplyFacialMorphs();
+    
+    OnAppearanceChanged.Broadcast(CurrentVisualTraits);
+}
+
+void UMetaHumanCharacterComponent::UpdateClothing(const FCharacterClothing& NewClothing)
+{
+    CurrentClothing = NewClothing;
+    ApplyClothingMeshes();
+    UpdateClothingCondition();
+}
+
+void UMetaHumanCharacterComponent::AdvanceSurvivalState(int32 DaysElapsed)
+{
+    DaysSurvived += DaysElapsed;
+    
+    // Update survival state based on days survived
+    if (DaysSurvived < 30)
+    {
+        CurrentSurvivalState = ESurvivalCondition::Fresh;
+    }
+    else if (DaysSurvived < 180)
+    {
+        CurrentSurvivalState = ESurvivalCondition::Weathered;
+    }
+    else if (DaysSurvived < 365)
+    {
+        CurrentSurvivalState = ESurvivalCondition::Hardened;
+    }
+    else
+    {
+        CurrentSurvivalState = ESurvivalCondition::Broken;
+    }
+    
+    CalculateSurvivalEffects();
+    ApplySurvivalWear();
+}
+
+void UMetaHumanCharacterComponent::ApplyInjury(float InjurySeverity)
+{
+    HealthCondition = FMath::Clamp(HealthCondition - InjurySeverity, 0.0f, 1.0f);
+    
+    // Increase skin damage based on injury
+    CurrentVisualTraits.SkinDamage = FMath::Clamp(
+        CurrentVisualTraits.SkinDamage + InjurySeverity * 0.3f, 0.0f, 1.0f);
+    
+    UpdateVisualTraits(CurrentVisualTraits);
+}
+
+void UMetaHumanCharacterComponent::ApplyPsychologicalStress(float StressLevel)
+{
+    MentalState = FMath::Clamp(MentalState - StressLevel, 0.0f, 1.0f);
+    
+    // Increase fatigue based on stress
+    CurrentVisualTraits.Fatigue = FMath::Clamp(
+        CurrentVisualTraits.Fatigue + StressLevel * 0.5f, 0.0f, 1.0f);
+    
+    UpdateVisualTraits(CurrentVisualTraits);
+}
+
+void UMetaHumanCharacterComponent::RefreshCharacterMesh()
+{
+    if (!CachedMeshComponent)
+        return;
+    
+    ApplyBodyMorphs();
+    ApplyFacialMorphs();
+    ApplyClothingMeshes();
+    ApplySurvivalWear();
+    UpdateMaterialParameters();
+}
+
+void UMetaHumanCharacterComponent::ApplySurvivalWear()
+{
+    // Calculate weathering based on survival state
+    float WeatheringAmount = 0.0f;
+    
+    switch (CurrentSurvivalState)
+    {
+        case ESurvivalCondition::Fresh:
+            WeatheringAmount = 0.1f;
+            break;
+        case ESurvivalCondition::Weathered:
+            WeatheringAmount = 0.4f;
+            break;
+        case ESurvivalCondition::Hardened:
+            WeatheringAmount = 0.7f;
+            break;
+        case ESurvivalCondition::Broken:
+            WeatheringAmount = 1.0f;
+            break;
+    }
+    
+    CurrentVisualTraits.Weathering = WeatheringAmount;
+    CurrentClothing.ClothingWear = WeatheringAmount * 0.8f;
+    CurrentClothing.DirtLevel = WeatheringAmount * 0.9f;
+    
+    UpdateVisualTraits(CurrentVisualTraits);
+    UpdateClothing(CurrentClothing);
+}
+
+void UMetaHumanCharacterComponent::UpdateClothingCondition()
+{
+    // This will be expanded when clothing mesh system is implemented
+    // For now, just update material parameters
+    UpdateMaterialParameters();
+}
+
+FString UMetaHumanCharacterComponent::GetCharacterDisplayName() const
+{
+    if (CharacterArchetype.IsValid())
+    {
+        if (UCharacterArchetype* LoadedArchetype = CharacterArchetype.LoadSynchronous())
+        {
+            return LoadedArchetype->CharacterName;
+        }
+    }
+    
+    return TEXT("Unknown Survivor");
+}
+
+FText UMetaHumanCharacterComponent::GetCharacterDescription() const
+{
+    if (CharacterArchetype.IsValid())
+    {
+        if (UCharacterArchetype* LoadedArchetype = CharacterArchetype.LoadSynchronous())
+        {
+            return LoadedArchetype->CharacterDescription;
+        }
+    }
+    
+    return FText::FromString(TEXT("A survivor in the Jurassic world"));
+}
+
+float UMetaHumanCharacterComponent::GetOverallCondition() const
+{
+    return (HealthCondition + MentalState) * 0.5f;
+}
+
+void UMetaHumanCharacterComponent::CalculateSurvivalEffects()
+{
+    // Calculate effects based on survival time and conditions
+    float SurvivalRatio = FMath::Clamp(DaysSurvived / 365.0f, 0.0f, 1.0f);
+    
+    // Gradual deterioration over time
+    CurrentVisualTraits.Fatigue = FMath::Clamp(SurvivalRatio * 0.6f, 0.0f, 1.0f);
+    CurrentVisualTraits.Weathering = FMath::Clamp(SurvivalRatio * 0.8f, 0.0f, 1.0f);
+    
+    // Health affects appearance
+    CurrentVisualTraits.SkinDamage = FMath::Clamp((1.0f - HealthCondition) * 0.7f, 0.0f, 1.0f);
+}
+
+void UMetaHumanCharacterComponent::UpdateMaterialParameters()
+{
+    if (!CachedMeshComponent)
+        return;
+    
+    // Update material parameters for survival effects
+    for (int32 MaterialIndex = 0; MaterialIndex < CachedMeshComponent->GetNumMaterials(); MaterialIndex++)
+    {
+        if (UMaterialInstanceDynamic* DynMaterial = CachedMeshComponent->CreateDynamicMaterialInstance(MaterialIndex))
+        {
+            // Apply survival wear parameters
+            DynMaterial->SetScalarParameterValue(TEXT("SkinDamage"), CurrentVisualTraits.SkinDamage);
+            DynMaterial->SetScalarParameterValue(TEXT("Fatigue"), CurrentVisualTraits.Fatigue);
+            DynMaterial->SetScalarParameterValue(TEXT("Weathering"), CurrentVisualTraits.Weathering);
+            DynMaterial->SetScalarParameterValue(TEXT("HealthCondition"), HealthCondition);
+            DynMaterial->SetScalarParameterValue(TEXT("MentalState"), MentalState);
+            
+            // Clothing wear parameters
+            DynMaterial->SetScalarParameterValue(TEXT("ClothingWear"), CurrentClothing.ClothingWear);
+            DynMaterial->SetScalarParameterValue(TEXT("DirtLevel"), CurrentClothing.DirtLevel);
+            DynMaterial->SetScalarParameterValue(TEXT("BloodStains"), CurrentClothing.BloodStains);
         }
     }
 }
 
-void UMetaHumanCharacterComponent::ApplyClothing(const FCharacterClothing& Clothing)
+void UMetaHumanCharacterComponent::SetupMetaHumanMesh()
 {
-    // Apply clothing meshes to components
-    if (HeadGearComponent && Clothing.HeadGear.IsValid())
-    {
-        USkeletalMesh* HeadGearMesh = Clothing.HeadGear.LoadSynchronous();
-        HeadGearComponent->SetSkeletalMesh(HeadGearMesh);
-    }
-}
-
-void UMetaHumanCharacterComponent::SetupMetaHumanComponents()
-{
-    AActor* Owner = GetOwner();
-    if (!Owner)
-    {
+    if (!CachedMeshComponent)
         return;
-    }
-
-    // Find or create skeletal mesh components
-    BodyMeshComponent = Owner->FindComponentByClass<USkeletalMeshComponent>();
     
-    if (!BodyMeshComponent)
+    // Apply appropriate base mesh based on archetype gender
+    if (CharacterArchetype.IsValid())
     {
-        BodyMeshComponent = NewObject<USkeletalMeshComponent>(Owner, TEXT("BodyMesh"));
-        Owner->AddInstanceComponent(BodyMeshComponent);
-        BodyMeshComponent->AttachToComponent(Owner->GetRootComponent(), FAttachmentTransformRules::KeepRelativeTransform);
+        if (UCharacterArchetype* LoadedArchetype = CharacterArchetype.LoadSynchronous())
+        {
+            TSoftObjectPtr<USkeletalMesh> TargetMesh = LoadedArchetype->bIsMale ? BaseMaleMesh : BaseFemaleMesh;
+            
+            if (TargetMesh.IsValid())
+            {
+                USkeletalMesh* LoadedMesh = TargetMesh.LoadSynchronous();
+                CachedMeshComponent->SetSkeletalMesh(LoadedMesh);
+            }
+        }
+    }
+    
+    // Apply animation blueprint
+    if (CharacterAnimBlueprint.IsValid())
+    {
+        UClass* AnimBPClass = CharacterAnimBlueprint.LoadSynchronous();
+        CachedMeshComponent->SetAnimInstanceClass(AnimBPClass);
     }
 }
 
-void UMetaHumanCharacterComponent::SetMasterPoseComponent(USkeletalMeshComponent* MasterComponent)
+void UMetaHumanCharacterComponent::ApplyBodyMorphs()
 {
-    if (!MasterComponent)
-    {
+    if (!CachedMeshComponent)
         return;
-    }
-
-    // Set all clothing components to follow the master pose
-    if (HeadGearComponent) HeadGearComponent->SetLeaderPoseComponent(MasterComponent);
-}
-
-void UMetaHumanCharacterComponent::OnMetaHumanMeshLoaded()
-{
-    if (BodyMeshComponent && CharacterDefinition.MetaHumanMesh.IsValid())
-    {
-        USkeletalMesh* LoadedMesh = CharacterDefinition.MetaHumanMesh.LoadSynchronous();
-        BodyMeshComponent->SetSkeletalMesh(LoadedMesh);
-        
-        // Apply physical traits
-        ApplyPhysicalTraits(CharacterDefinition.PhysicalTraits);
-    }
-
-    DecrementPendingLoads();
-}
-
-void UMetaHumanCharacterComponent::OnClothingMeshLoaded()
-{
-    // Apply clothing
-    ApplyClothing(CharacterDefinition.Clothing);
     
-    DecrementPendingLoads();
+    // Apply body morphs based on visual traits
+    // These correspond to MetaHuman morph target names
+    CachedMeshComponent->SetMorphTarget(TEXT("Height"), CurrentVisualTraits.Height);
+    CachedMeshComponent->SetMorphTarget(TEXT("Weight"), CurrentVisualTraits.Weight);
+    CachedMeshComponent->SetMorphTarget(TEXT("Muscle"), CurrentVisualTraits.Muscle);
 }
 
-void UMetaHumanCharacterComponent::IncrementPendingLoads()
+void UMetaHumanCharacterComponent::ApplyFacialMorphs()
 {
-    PendingMeshLoads++;
+    if (!CachedMeshComponent)
+        return;
+    
+    // Apply facial morphs based on visual traits
+    CachedMeshComponent->SetMorphTarget(TEXT("FaceWidth"), CurrentVisualTraits.FaceWidth);
+    CachedMeshComponent->SetMorphTarget(TEXT("JawWidth"), CurrentVisualTraits.JawWidth);
+    CachedMeshComponent->SetMorphTarget(TEXT("EyeSize"), CurrentVisualTraits.EyeSize);
+    CachedMeshComponent->SetMorphTarget(TEXT("NoseSize"), CurrentVisualTraits.NoseSize);
 }
 
-void UMetaHumanCharacterComponent::DecrementPendingLoads()
+void UMetaHumanCharacterComponent::ApplyClothingMeshes()
 {
-    PendingMeshLoads--;
-    CheckLoadingComplete();
-}
-
-void UMetaHumanCharacterComponent::CheckLoadingComplete()
-{
-    if (PendingMeshLoads <= 0 && bIsLoading)
-    {
-        bIsLoading = false;
-        OnCharacterLoaded.Broadcast(CharacterDefinition);
-        
-        UE_LOG(LogTemp, Log, TEXT("Character loading complete: %s"), *CharacterDefinition.CharacterName);
-    }
+    // This will be expanded when modular clothing system is implemented
+    // For now, clothing is handled through material parameters
+    UpdateMaterialParameters();
 }
