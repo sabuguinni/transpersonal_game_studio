@@ -1,0 +1,85 @@
+{
+    "Type": "Blackboard",
+    "Keys": [
+        {
+            "Name": "CombatState",
+            "Type": "Enum",
+            "EnumType": "ECombatState",
+            "Description": "Estado atual de combate do dinossauro"
+        },
+        {
+            "Name": "CurrentTarget",
+            "Type": "Object",
+            "BaseClass": "Actor",
+            "Description": "Alvo atual para caça ou ataque"
+        },
+        {
+            "Name": "CurrentThreat",
+            "Type": "Object", 
+            "BaseClass": "Actor",
+            "Description": "Ameaça atual da qual fugir"
+        },
+        {
+            "Name": "PlayerLocation",
+            "Type": "Vector",
+            "Description": "Última localização conhecida do jogador"
+        },
+        {
+            "Name": "FleeLocation",
+            "Type": "Vector",
+            "Description": "Localização para onde fugir"
+        },
+        {
+            "Name": "PatrolLocation",
+            "Type": "Vector",
+            "Description": "Localização de patrulha quando passivo"
+        },
+        {
+            "Name": "AttackRange",
+            "Type": "Float",
+            "Description": "Alcance de ataque do dinossauro"
+        },
+        {
+            "Name": "DetectionRadius",
+            "Type": "Float",
+            "Description": "Raio de detecção de alvos"
+        },
+        {
+            "Name": "CanAttack",
+            "Type": "Bool",
+            "Description": "Se pode atacar (não em cooldown)"
+        },
+        {
+            "Name": "IsDomesticated",
+            "Type": "Bool",
+            "Description": "Se o dinossauro foi domesticado"
+        },
+        {
+            "Name": "DomesticationProgress",
+            "Type": "Float",
+            "Description": "Progresso de domesticação (0-100)"
+        },
+        {
+            "Name": "PackLeader",
+            "Type": "Object",
+            "BaseClass": "Actor",
+            "Description": "Líder da matilha (para comportamento de grupo)"
+        },
+        {
+            "Name": "PackMembers",
+            "Type": "Object",
+            "BaseClass": "Actor",
+            "Description": "Outros membros da matilha"
+        },
+        {
+            "Name": "TerritoryCenter",
+            "Type": "Vector",
+            "Description": "Centro do território do dinossauro"
+        },
+        {
+            "Name": "TerritoryRadius",
+            "Type": "Float",
+            "Description": "Raio do território"
+        }
+    ]
+}
