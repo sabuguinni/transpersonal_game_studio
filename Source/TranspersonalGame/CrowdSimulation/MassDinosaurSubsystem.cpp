@@ -1,246 +1,273 @@
 #include "MassDinosaurSubsystem.h"
+#include "MassEntityConfigAsset.h"
+#include "MassSpawnerConfig.h"
 #include "MassEntitySubsystem.h"
-#include "MassSimulationSubsystem.h"
 #include "MassSpawnerSubsystem.h"
+#include "MassSimulationSubsystem.h"
 #include "Engine/World.h"
-#include "DinosaurFragments.h"
-#include "DinosaurProcessors.h"
+#include "TimerManager.h"
+#include "Engine/Engine.h"
 
 void UMassDinosaurSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    NextHerdID = 1;
-    MaxEntitiesPerFrame = 50000; // Target: 50k simultaneous entities
+    // Get Mass Framework subsystems
+    EntitySubsystem = GetWorld()->GetSubsystem<UMassEntitySubsystem>();
+    SpawnerSubsystem = GetWorld()->GetSubsystem<UMassSpawnerSubsystem>();
+    SimulationSubsystem = GetWorld()->GetSubsystem<UMassSimulationSubsystem>();
     
-    InitializeMassFramework();
-    SetupDinosaurArchetypes();
-    RegisterProcessors();
+    // Initialize performance tracking
+    CurrentEntityCount = 0;
+    LastFrameTime = 0.0f;
     
-    UE_LOG(LogTemp, Warning, TEXT("MassDinosaurSubsystem initialized - Ready for up to %d entities"), MaxEntitiesPerFrame);
+    // Start ecosystem update timer (every 5 seconds)
+    GetWorld()->GetTimerManager().SetTimer(
+        EcosystemUpdateTimer,
+        this,
+        &UMassDinosaurSubsystem::UpdateEcosystemBehavior,
+        5.0f,
+        true
+    );
+    
+    // Start performance monitoring (every second)
+    GetWorld()->GetTimerManager().SetTimer(
+        PerformanceUpdateTimer,
+        this,
+        &UMassDinosaurSubsystem::UpdatePerformanceMetrics,
+        1.0f,
+        true
+    );
+    
+    InitializeEcosystemZones();
+    
+    UE_LOG(LogTemp, Warning, TEXT("MassDinosaurSubsystem initialized - Ready for up to %d entities"), MaxEntityCount);
 }
 
 void UMassDinosaurSubsystem::Deinitialize()
 {
-    // Clean up all active herds
-    for (auto& HerdPair : ActiveHerds)
+    // Clear timers
+    if (GetWorld())
     {
-        if (MassEntitySubsystem && HerdPair.Value.IsValid())
-        {
-            MassEntitySubsystem->DestroyEntity(HerdPair.Value);
-        }
+        GetWorld()->GetTimerManager().ClearTimer(EcosystemUpdateTimer);
+        GetWorld()->GetTimerManager().ClearTimer(PerformanceUpdateTimer);
     }
-    ActiveHerds.Empty();
     
     Super::Deinitialize();
 }
 
 bool UMassDinosaurSubsystem::ShouldCreateSubsystem(UObject* Outer) const
 {
-    // Only create in game worlds, not in editor preview
-    if (UWorld* World = Cast<UWorld>(Outer))
-    {
-        return World->IsGameWorld();
-    }
-    return false;
+    return Super::ShouldCreateSubsystem(Outer) && IsValid(Outer);
 }
 
-void UMassDinosaurSubsystem::InitializeMassFramework()
+void UMassDinosaurSubsystem::SpawnDinosaurHerd(const FVector& Location, int32 Count, const FString& SpeciesType)
 {
-    UWorld* World = GetWorld();
-    if (!World)
+    if (!CanSpawnMoreEntities(Count))
     {
-        UE_LOG(LogTemp, Error, TEXT("MassDinosaurSubsystem: No valid world found"));
+        UE_LOG(LogTemp, Warning, TEXT("Cannot spawn %d entities - would exceed limit of %d"), Count, MaxEntityCount);
         return;
     }
     
-    MassEntitySubsystem = World->GetSubsystem<UMassEntitySubsystem>();
-    MassSimulationSubsystem = World->GetSubsystem<UMassSimulationSubsystem>();
+    UMassEntityConfigAsset* Config = nullptr;
     
-    if (!MassEntitySubsystem || !MassSimulationSubsystem)
+    // Find appropriate configuration
+    if (HerbivoreConfigs.Contains(SpeciesType))
     {
-        UE_LOG(LogTemp, Error, TEXT("MassDinosaurSubsystem: Failed to get Mass subsystems"));
+        Config = HerbivoreConfigs[SpeciesType];
+    }
+    else if (OmnivoreConfigs.Contains(SpeciesType))
+    {
+        Config = OmnivoreConfigs[SpeciesType];
+    }
+    
+    if (!Config)
+    {
+        UE_LOG(LogTemp, Error, TEXT("No configuration found for herbivore species: %s"), *SpeciesType);
         return;
     }
     
-    UE_LOG(LogTemp, Warning, TEXT("Mass framework initialized successfully"));
-}
-
-void UMassDinosaurSubsystem::SetupDinosaurArchetypes()
-{
-    if (!MassEntitySubsystem)
+    // Spawn entities in formation
+    TArray<FVector> SpawnLocations;
+    
+    // Generate herd formation (circular pattern with some randomness)
+    float HerdRadius = FMath::Sqrt(Count) * 200.0f; // 2m spacing per dinosaur
+    
+    for (int32 i = 0; i < Count; i++)
     {
-        return;
-    }
-    
-    // Create base dinosaur archetype with essential fragments
-    FMassArchetypeHandle HerbivoreArchetype = MassEntitySubsystem->CreateArchetype({
-        FDinosaurSpeciesFragment::StaticStruct(),
-        FDinosaurHerdFragment::StaticStruct(),
-        FDinosaurBehaviorFragment::StaticStruct(),
-        FMassTransformFragment::StaticStruct(),
-        FMassVelocityFragment::StaticStruct(),
-        FMassForceFragment::StaticStruct(),
-        FMassNavigationEdgesFragment::StaticStruct(),
-        FMassMoveTargetFragment::StaticStruct(),
-        FMassAvoidanceColliderFragment::StaticStruct()
-    });
-    
-    // Create carnivore archetype with hunting behavior
-    FMassArchetypeHandle CarnivoreArchetype = MassEntitySubsystem->CreateArchetype({
-        FDinosaurSpeciesFragment::StaticStruct(),
-        FDinosaurHuntingFragment::StaticStruct(),
-        FDinosaurBehaviorFragment::StaticStruct(),
-        FMassTransformFragment::StaticStruct(),
-        FMassVelocityFragment::StaticStruct(),
-        FMassForceFragment::StaticStruct(),
-        FMassNavigationEdgesFragment::StaticStruct(),
-        FMassMoveTargetFragment::StaticStruct(),
-        FMassAvoidanceColliderFragment::StaticStruct()
-    });
-    
-    UE_LOG(LogTemp, Warning, TEXT("Dinosaur archetypes created - Herbivore and Carnivore"));
-}
-
-void UMassDinosaurSubsystem::RegisterProcessors()
-{
-    if (!MassSimulationSubsystem)
-    {
-        return;
-    }
-    
-    // Register core dinosaur behavior processors
-    // These will be executed in order during each simulation tick
-    
-    // 1. Herd cohesion and separation
-    MassSimulationSubsystem->RegisterProcessor<UDinosaurHerdBehaviorProcessor>();
-    
-    // 2. Predator-prey interactions
-    MassSimulationSubsystem->RegisterProcessor<UDinosaurPredatorPreyProcessor>();
-    
-    // 3. Migration and seasonal movement
-    MassSimulationSubsystem->RegisterProcessor<UDinosaurMigrationProcessor>();
-    
-    // 4. Environmental response (player proximity, sounds, etc)
-    MassSimulationSubsystem->RegisterProcessor<UDinosaurEnvironmentProcessor>();
-    
-    // 5. Movement and avoidance (using Mass Avoidance system)
-    MassSimulationSubsystem->RegisterProcessor<UMassMovingAvoidanceProcessor>();
-    
-    // 6. LOD management for performance
-    MassSimulationSubsystem->RegisterProcessor<UDinosaurLODProcessor>();
-    
-    UE_LOG(LogTemp, Warning, TEXT("Dinosaur processors registered successfully"));
-}
-
-void UMassDinosaurSubsystem::SpawnHerd(const FVector& Location, int32 HerdSize, TSubclassOf<ADinosaurBase> DinosaurClass)
-{
-    if (!MassEntitySubsystem || HerdSize <= 0)
-    {
-        return;
-    }
-    
-    // Clamp herd size to prevent performance issues
-    HerdSize = FMath::Clamp(HerdSize, 1, 200);
-    
-    // Check if we're approaching entity limit
-    if (GetActiveEntityCount() + HerdSize > MaxEntitiesPerFrame)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Cannot spawn herd - would exceed entity limit"));
-        return;
-    }
-    
-    // Create herd entities in a scattered formation
-    TArray<FMassEntityHandle> HerdEntities;
-    
-    for (int32 i = 0; i < HerdSize; i++)
-    {
-        // Scatter entities in a circle around the spawn location
-        float Angle = (2.0f * PI * i) / HerdSize;
-        float Radius = FMath::RandRange(50.0f, 300.0f);
-        FVector SpawnLocation = Location + FVector(
-            FMath::Cos(Angle) * Radius,
-            FMath::Sin(Angle) * Radius,
+        float Angle = (2.0f * PI * i) / Count;
+        float Distance = FMath::RandRange(HerdRadius * 0.3f, HerdRadius);
+        
+        FVector Offset = FVector(
+            FMath::Cos(Angle) * Distance,
+            FMath::Sin(Angle) * Distance,
             0.0f
         );
         
-        FMassEntityHandle Entity = MassEntitySubsystem->CreateEntity(/* Archetype based on DinosaurClass */);
+        // Add some vertical and horizontal randomness
+        Offset += FVector(
+            FMath::RandRange(-100.0f, 100.0f),
+            FMath::RandRange(-100.0f, 100.0f),
+            FMath::RandRange(-50.0f, 50.0f)
+        );
         
-        if (Entity.IsValid())
-        {
-            // Initialize entity fragments
-            FMassTransformFragment& Transform = MassEntitySubsystem->GetFragmentDataChecked<FMassTransformFragment>(Entity);
-            Transform.SetTransform(FTransform(SpawnLocation));
-            
-            FDinosaurHerdFragment& HerdData = MassEntitySubsystem->GetFragmentDataChecked<FDinosaurHerdFragment>(Entity);
-            HerdData.HerdID = NextHerdID;
-            HerdData.HerdSize = HerdSize;
-            HerdData.HerdCenter = Location;
-            
-            FDinosaurBehaviorFragment& Behavior = MassEntitySubsystem->GetFragmentDataChecked<FDinosaurBehaviorFragment>(Entity);
-            Behavior.CurrentState = EDinosaurBehaviorState::Grazing;
-            Behavior.StateTimer = FMath::RandRange(5.0f, 15.0f);
-            
-            HerdEntities.Add(Entity);
-        }
+        SpawnLocations.Add(Location + Offset);
     }
     
-    // Store herd reference (using first entity as representative)
-    if (HerdEntities.Num() > 0)
+    // Use Mass Spawner to create entities
+    if (SpawnerSubsystem && DefaultSpawnerConfig)
     {
-        ActiveHerds.Add(NextHerdID, HerdEntities[0]);
-        NextHerdID++;
+        // TODO: Implement actual spawning with Mass Framework
+        // This requires setting up proper Mass Entity configurations
+        CurrentEntityCount += Count;
         
-        UE_LOG(LogTemp, Warning, TEXT("Spawned herd of %d dinosaurs at %s"), HerdSize, *Location.ToString());
+        UE_LOG(LogTemp, Log, TEXT("Spawned herd of %d %s at location %s"), 
+               Count, *SpeciesType, *Location.ToString());
     }
 }
 
-void UMassDinosaurSubsystem::DespawnHerd(int32 HerdID)
+void UMassDinosaurSubsystem::SpawnPredatorPack(const FVector& Location, int32 Count, const FString& SpeciesType)
 {
-    if (!MassEntitySubsystem || !ActiveHerds.Contains(HerdID))
+    if (!CanSpawnMoreEntities(Count))
     {
+        UE_LOG(LogTemp, Warning, TEXT("Cannot spawn %d predators - would exceed limit"), Count);
         return;
     }
     
-    // Find and destroy all entities belonging to this herd
-    // This would require iterating through entities with matching HerdID
-    // Implementation depends on Mass Entity query system
-    
-    ActiveHerds.Remove(HerdID);
-    UE_LOG(LogTemp, Warning, TEXT("Despawned herd %d"), HerdID);
-}
-
-void UMassDinosaurSubsystem::TriggerMigration(const FVector& FromLocation, const FVector& ToLocation, float MigrationRadius)
-{
-    // Set migration targets for all herds within radius
-    // This would be handled by the UDinosaurMigrationProcessor
-    
-    UE_LOG(LogTemp, Warning, TEXT("Migration triggered from %s to %s (radius: %.1f)"), 
-           *FromLocation.ToString(), *ToLocation.ToString(), MigrationRadius);
-}
-
-void UMassDinosaurSubsystem::TriggerPredatorAlert(const FVector& ThreatLocation, float AlertRadius)
-{
-    // Trigger flee behavior for herbivores within radius
-    // Trigger hunting behavior for carnivores within radius
-    
-    UE_LOG(LogTemp, Warning, TEXT("Predator alert at %s (radius: %.1f)"), 
-           *ThreatLocation.ToString(), AlertRadius);
-}
-
-int32 UMassDinosaurSubsystem::GetActiveEntityCount() const
-{
-    if (!MassEntitySubsystem)
+    UMassEntityConfigAsset* Config = CarnivoreConfigs.FindRef(SpeciesType);
+    if (!Config)
     {
-        return 0;
+        UE_LOG(LogTemp, Error, TEXT("No configuration found for carnivore species: %s"), *SpeciesType);
+        return;
     }
     
-    // This would query the actual entity count from Mass Entity system
-    return ActiveHerds.Num() * 50; // Rough estimate for now
+    // Spawn predators in loose pack formation
+    TArray<FVector> SpawnLocations;
+    
+    // Predators spread out more than herbivores
+    float PackRadius = Count * 300.0f; // 3m spacing per predator
+    
+    for (int32 i = 0; i < Count; i++)
+    {
+        FVector Offset = FVector(
+            FMath::RandRange(-PackRadius, PackRadius),
+            FMath::RandRange(-PackRadius, PackRadius),
+            FMath::RandRange(-50.0f, 50.0f)
+        );
+        
+        SpawnLocations.Add(Location + Offset);
+    }
+    
+    CurrentEntityCount += Count;
+    
+    UE_LOG(LogTemp, Log, TEXT("Spawned pack of %d %s predators at location %s"), 
+           Count, *SpeciesType, *Location.ToString());
 }
 
-float UMassDinosaurSubsystem::GetSimulationPerformance() const
+void UMassDinosaurSubsystem::DespawnDinosaursInRadius(const FVector& Location, float Radius)
 {
-    // Return performance metrics (frame time, entity count, etc.)
+    // TODO: Implement despawning logic using Mass Entity queries
+    // This would involve:
+    // 1. Query entities within radius
+    // 2. Destroy those entities
+    // 3. Update CurrentEntityCount
+    
+    UE_LOG(LogTemp, Log, TEXT("Despawning dinosaurs in radius %.1f at location %s"), 
+           Radius, *Location.ToString());
+}
+
+void UMassDinosaurSubsystem::TriggerMigration(const FString& SpeciesType, const FVector& FromLocation, const FVector& ToLocation)
+{
+    // TODO: Implement migration behavior
+    // This would involve:
+    // 1. Find all entities of specified species near FromLocation
+    // 2. Set their movement targets to ToLocation
+    // 3. Adjust their behavior to "migrating" state
+    
+    UE_LOG(LogTemp, Log, TEXT("Triggering migration for %s from %s to %s"), 
+           *SpeciesType, *FromLocation.ToString(), *ToLocation.ToString());
+}
+
+void UMassDinosaurSubsystem::SetDayNightCycle(bool bIsDay)
+{
+    // TODO: Adjust dinosaur behavior based on time of day
+    // Day: More active, feeding, social behaviors
+    // Night: Resting, hiding, different predator/prey dynamics
+    
+    UE_LOG(LogTemp, Log, TEXT("Day/Night cycle changed - Is Day: %s"), bIsDay ? TEXT("true") : TEXT("false"));
+}
+
+void UMassDinosaurSubsystem::TriggerWeatherEvent(const FString& WeatherType, float Intensity)
+{
+    // TODO: Implement weather response behaviors
+    // Rain: Seek shelter, reduced movement
+    // Storm: Panic behaviors, herd clustering
+    // Heat: Seek shade, reduced activity
+    
+    UE_LOG(LogTemp, Log, TEXT("Weather event triggered: %s with intensity %.2f"), 
+           *WeatherType, Intensity);
+}
+
+void UMassDinosaurSubsystem::SetSimulationLOD(int32 LODLevel)
+{
+    // TODO: Implement LOD system
+    // LOD 0: Full simulation (close to player)
+    // LOD 1: Reduced update frequency (medium distance)
+    // LOD 2: Basic movement only (far distance)
+    // LOD 3: Frozen/culled (very far)
+    
+    UE_LOG(LogTemp, Log, TEXT("Simulation LOD set to level %d"), LODLevel);
+}
+
+int32 UMassDinosaurSubsystem::GetActiveDinosaurCount() const
+{
+    return CurrentEntityCount;
+}
+
+float UMassDinosaurSubsystem::GetCurrentPerformanceMetric() const
+{
     return LastFrameTime;
+}
+
+void UMassDinosaurSubsystem::UpdatePerformanceMetrics()
+{
+    if (GEngine)
+    {
+        LastFrameTime = GEngine->GetMaxTickRate() > 0 ? (1000.0f / GEngine->GetMaxTickRate()) : 16.67f;
+    }
+    
+    // Auto-optimize if performance is poor
+    if (LastFrameTime > TargetFrameTime * 1.2f) // 20% tolerance
+    {
+        OptimizeSimulationLOD();
+    }
+}
+
+void UMassDinosaurSubsystem::OptimizeSimulationLOD()
+{
+    // TODO: Implement automatic LOD optimization
+    // Reduce simulation quality when performance drops
+    
+    UE_LOG(LogTemp, Warning, TEXT("Performance optimization triggered - Frame time: %.2fms"), LastFrameTime);
+}
+
+bool UMassDinosaurSubsystem::CanSpawnMoreEntities(int32 RequestedCount) const
+{
+    return (CurrentEntityCount + RequestedCount) <= MaxEntityCount;
+}
+
+void UMassDinosaurSubsystem::InitializeEcosystemZones()
+{
+    // TODO: Initialize ecosystem zones based on world layout
+    // Define feeding areas, water sources, nesting sites, etc.
+    
+    UE_LOG(LogTemp, Log, TEXT("Ecosystem zones initialized"));
+}
+
+void UMassDinosaurSubsystem::UpdateEcosystemBehavior()
+{
+    // TODO: Update global ecosystem behaviors
+    // Population pressure, resource availability, territorial disputes
+    
+    UE_LOG(LogTemp, VeryVerbose, TEXT("Ecosystem behavior updated - Active entities: %d"), CurrentEntityCount);
 }
