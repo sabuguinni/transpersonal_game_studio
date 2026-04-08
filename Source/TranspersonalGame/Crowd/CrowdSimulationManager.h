@@ -1,114 +1,97 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Subsystems/WorldSubsystem.h"
+#include "GameFramework/Actor.h"
 #include "MassEntitySubsystem.h"
 #include "MassSpawnerSubsystem.h"
-#include "Engine/DataTable.h"
+#include "MassSimulationSubsystem.h"
 #include "CrowdSimulationManager.generated.h"
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FDinosaurSpeciesData : public FTableRowBase
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString SpeciesName;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float BaseSpeed = 300.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float GroupSize = 5.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float TerritoryRadius = 2000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bIsHerbivore = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bIsNocturnal = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float AggressionLevel = 0.1f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float FlockingStrength = 0.8f;
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCrowdDensityZone
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FVector Center;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float Radius = 5000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 MaxEntities = 200;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TArray<FString> AllowedSpecies;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float SpawnProbability = 0.7f;
-};
-
+/**
+ * Central manager for crowd simulation in the prehistoric world
+ * Handles herds, flocks, and pack behaviors using Mass AI
+ */
 UCLASS()
-class TRANSPERSONALGAME_API UCrowdSimulationManager : public UWorldSubsystem
+class TRANSPERSONALGAME_API ACrowdSimulationManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void InitializeCrowdSystem();
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void SpawnDinosaurHerd(const FString& SpeciesName, const FVector& Location, int32 Count);
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void RegisterDensityZone(const FCrowdDensityZone& Zone);
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void UpdateCrowdDensity(float DeltaTime);
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    int32 GetEntityCountInRadius(const FVector& Location, float Radius) const;
+    ACrowdSimulationManager();
 
 protected:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    class UDataTable* DinosaurSpeciesTable;
+    virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    int32 MaxGlobalEntities = 50000;
+    // Core simulation parameters
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Simulation")
+    int32 MaxSimultaneousEntities = 50000;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    float UpdateFrequency = 0.1f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Simulation")
+    float SimulationRadius = 10000.0f; // 10km radius around player
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    float PlayerInfluenceRadius = 1000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Simulation")
+    float LODUpdateFrequency = 0.5f; // Update LOD twice per second
 
-    UPROPERTY()
-    TArray<FCrowdDensityZone> DensityZones;
+    // Herd behavior settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Herd Behavior")
+    float HerdCohesionRadius = 500.0f;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Herd Behavior")
+    float HerdSeparationRadius = 100.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Herd Behavior")
+    float HerdAlignmentRadius = 300.0f;
+
+    // Migration patterns
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Migration")
+    TArray<FVector> MigrationWaypoints;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Migration")
+    float MigrationSpeed = 200.0f; // cm/s
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Migration")
+    float SeasonalCycleLength = 1800.0f; // 30 minutes = 1 season
+
+private:
+    // Mass Entity components
     UPROPERTY()
     class UMassEntitySubsystem* MassEntitySubsystem;
 
     UPROPERTY()
     class UMassSpawnerSubsystem* MassSpawnerSubsystem;
 
-private:
-    FTimerHandle UpdateTimer;
-    int32 CurrentEntityCount = 0;
+    UPROPERTY()
+    class UMassSimulationSubsystem* MassSimulationSubsystem;
 
-    void UpdatePlayerProximity();
-    void ManageEntityLOD();
-    void ProcessEmergentBehaviors();
+    // Current simulation state
+    float CurrentSeasonTime;
+    int32 ActiveEntityCount;
+    
+    // Performance monitoring
+    float LastPerformanceCheck;
+    float AverageFrameTime;
+
+public:
+    // Public interface for other systems
+    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
+    void SpawnHerd(FVector Location, int32 HerdSize, TSubclassOf<class ADinosaur> DinosaurClass);
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
+    void SpawnFlock(FVector Location, int32 FlockSize, TSubclassOf<class AFlyingDinosaur> FlyingDinosaurClass);
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
+    void SpawnPack(FVector Location, int32 PackSize, TSubclassOf<class APredatorDinosaur> PredatorClass);
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
+    void TriggerStampede(FVector ThreatLocation, float ThreatRadius);
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
+    void SetMigrationActive(bool bActive);
+
+    UFUNCTION(BlueprintPure, Category = "Crowd Simulation")
+    int32 GetActiveEntityCount() const { return ActiveEntityCount; }
+
+    UFUNCTION(BlueprintPure, Category = "Crowd Simulation")
+    float GetCurrentPerformanceMetric() const { return AverageFrameTime; }
 };
