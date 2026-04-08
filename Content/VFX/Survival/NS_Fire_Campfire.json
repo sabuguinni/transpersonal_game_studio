@@ -1,0 +1,208 @@
+{
+  "NiagaraSystemDefinition": {
+    "SystemName": "NS_Fire_Campfire",
+    "Description": "Realistic campfire effect for survival gameplay - critical for player warmth and cooking",
+    "Category": "Survival",
+    "Priority": "Critical",
+    "Performance": {
+      "MaxParticles": 500,
+      "LODLevels": 3,
+      "CullDistance": 3000.0,
+      "TargetFrameRate": 60
+    },
+    "Emitters": [
+      {
+        "Name": "Fire_Core",
+        "Type": "GPU",
+        "ParticleCount": 150,
+        "LifeSpan": {
+          "Min": 0.8,
+          "Max": 1.5
+        },
+        "SpawnRate": 80,
+        "Shape": "Cylinder",
+        "ShapeSettings": {
+          "Radius": 25.0,
+          "Height": 10.0
+        },
+        "Velocity": {
+          "InitialVelocity": {
+            "X": 0.0,
+            "Y": 0.0,
+            "Z": 120.0
+          },
+          "RandomVelocity": {
+            "X": 30.0,
+            "Y": 30.0,
+            "Z": 50.0
+          }
+        },
+        "Forces": [
+          {
+            "Type": "Buoyancy",
+            "Strength": 200.0
+          },
+          {
+            "Type": "Turbulence",
+            "Strength": 80.0,
+            "Frequency": 2.5
+          }
+        ],
+        "Material": {
+          "Type": "SubUV",
+          "Texture": "/Game/Textures/VFX/T_Fire_SubUV",
+          "SubImageCount": 64,
+          "BlendMode": "Additive"
+        },
+        "Color": {
+          "StartColor": {
+            "R": 1.0,
+            "G": 0.4,
+            "B": 0.1,
+            "A": 0.8
+          },
+          "EndColor": {
+            "R": 1.0,
+            "G": 0.1,
+            "B": 0.0,
+            "A": 0.0
+          }
+        },
+        "Size": {
+          "StartSize": 40.0,
+          "EndSize": 80.0,
+          "SizeVariation": 0.3
+        }
+      },
+      {
+        "Name": "Fire_Sparks",
+        "Type": "GPU",
+        "ParticleCount": 50,
+        "LifeSpan": {
+          "Min": 0.5,
+          "Max": 2.0
+        },
+        "SpawnRate": 25,
+        "Shape": "Point",
+        "Velocity": {
+          "InitialVelocity": {
+            "X": 0.0,
+            "Y": 0.0,
+            "Z": 200.0
+          },
+          "RandomVelocity": {
+            "X": 150.0,
+            "Y": 150.0,
+            "Z": 100.0
+          }
+        },
+        "Forces": [
+          {
+            "Type": "Gravity",
+            "Strength": -500.0
+          },
+          {
+            "Type": "Drag",
+            "Strength": 2.0
+          }
+        ],
+        "Material": {
+          "Type": "Billboard",
+          "Texture": "/Game/Textures/VFX/T_Spark",
+          "BlendMode": "Additive"
+        },
+        "Color": {
+          "StartColor": {
+            "R": 1.0,
+            "G": 0.8,
+            "B": 0.2,
+            "A": 1.0
+          },
+          "EndColor": {
+            "R": 0.5,
+            "G": 0.1,
+            "B": 0.0,
+            "A": 0.0
+          }
+        },
+        "Size": {
+          "StartSize": 3.0,
+          "EndSize": 1.0
+        }
+      },
+      {
+        "Name": "Heat_Distortion",
+        "Type": "GPU",
+        "ParticleCount": 30,
+        "LifeSpan": {
+          "Min": 2.0,
+          "Max": 4.0
+        },
+        "SpawnRate": 15,
+        "Shape": "Cylinder",
+        "ShapeSettings": {
+          "Radius": 60.0,
+          "Height": 200.0
+        },
+        "Material": {
+          "Type": "Distortion",
+          "NormalMap": "/Game/Textures/VFX/T_HeatDistortion_N",
+          "DistortionStrength": 0.1
+        },
+        "Velocity": {
+          "InitialVelocity": {
+            "X": 0.0,
+            "Y": 0.0,
+            "Z": 50.0
+          }
+        }
+      }
+    ],
+    "Parameters": [
+      {
+        "Name": "Intensity",
+        "Type": "Float",
+        "DefaultValue": 1.0,
+        "Description": "Controls overall fire intensity - affects size, particle count, and brightness"
+      },
+      {
+        "Name": "Scale",
+        "Type": "Float", 
+        "DefaultValue": 1.0,
+        "Description": "Uniform scale multiplier for the entire effect"
+      },
+      {
+        "Name": "WindInfluence",
+        "Type": "Float",
+        "DefaultValue": 0.5,
+        "Description": "How much wind affects the fire direction"
+      },
+      {
+        "Name": "LOD_Multiplier",
+        "Type": "Float",
+        "DefaultValue": 1.0,
+        "Description": "LOD system multiplier - reduces particle count at distance"
+      }
+    ],
+    "Audio": {
+      "SoundCue": "/Game/Audio/SFX/Fire_Campfire_Loop",
+      "VolumeMultiplier": "Intensity",
+      "AttenuationDistance": 1000.0
+    },
+    "Lighting": {
+      "EmitsLight": true,
+      "LightColor": {
+        "R": 1.0,
+        "G": 0.4,
+        "B": 0.1
+      },
+      "LightIntensity": 300.0,
+      "LightRadius": 500.0,
+      "Flickering": {
+        "Enabled": true,
+        "Frequency": 8.0,
+        "Amplitude": 0.3
+      }
+    }
+  }
+}
