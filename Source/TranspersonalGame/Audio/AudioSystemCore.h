@@ -1,210 +1,126 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/Engine.h"
-#include "Components/AudioComponent.h"
+#include "Components/ActorComponent.h"
+#include "Engine/World.h"
 #include "Sound/SoundCue.h"
 #include "MetasoundSource.h"
-#include "AudioMixerBlueprintLibrary.h"
+#include "AudioGameplayVolume.h"
 #include "AudioSystemCore.generated.h"
 
 UENUM(BlueprintType)
-enum class EAudioEnvironmentType : uint8
+enum class EAudioZoneType : uint8
 {
-    DenseForest     UMETA(DisplayName = "Dense Forest"),
-    OpenPlains      UMETA(DisplayName = "Open Plains"),
-    RiverBank       UMETA(DisplayName = "River Bank"),
-    Cave            UMETA(DisplayName = "Cave"),
-    Swamp           UMETA(DisplayName = "Swamp"),
-    Canyon          UMETA(DisplayName = "Canyon")
+    SafeZone,           // Base do jogador - música calma
+    ExplorationZone,    // Exploração normal - tensão baixa
+    DangerZone,         // Predadores próximos - tensão alta
+    HuntingZone,        // Sendo caçado - música de perseguição
+    AmbientZone         // Zonas específicas (rios, cavernas, etc)
 };
 
 UENUM(BlueprintType)
 enum class EThreatLevel : uint8
 {
-    Safe            UMETA(DisplayName = "Safe"),
-    Cautious        UMETA(DisplayName = "Cautious"),
-    Danger          UMETA(DisplayName = "Danger"),
-    Imminent        UMETA(DisplayName = "Imminent Threat"),
-    Combat          UMETA(DisplayName = "Combat")
-};
-
-UENUM(BlueprintType)
-enum class ETimeOfDay : uint8
-{
-    Dawn            UMETA(DisplayName = "Dawn"),
-    Morning         UMETA(DisplayName = "Morning"),
-    Midday          UMETA(DisplayName = "Midday"),
-    Afternoon       UMETA(DisplayName = "Afternoon"),
-    Dusk            UMETA(DisplayName = "Dusk"),
-    Night           UMETA(DisplayName = "Night"),
-    DeepNight       UMETA(DisplayName = "Deep Night")
+    None,               // Sem ameaças
+    Low,                // Herbívoros pacíficos
+    Medium,             // Predadores pequenos
+    High,               // Predadores grandes
+    Extreme             // T-Rex, Spinosaurus, etc
 };
 
 USTRUCT(BlueprintType)
-struct FAudioEnvironmentSettings
+struct FAudioStateData
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    class USoundSubmix* EnvironmentSubmix;
+    EAudioZoneType CurrentZone = EAudioZoneType::SafeZone;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    class UReverbEffect* ReverbEffect;
+    EThreatLevel ThreatLevel = EThreatLevel::None;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float AmbientVolume = 1.0f;
+    float StressLevel = 0.0f; // 0-1
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float EchoIntensity = 0.5f;
+    float TimeOfDay = 12.0f; // 0-24 hours
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float HighFrequencyAbsorption = 0.3f;
+    bool bIsRaining = false;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TArray<class USoundCue*> AmbientSounds;
-};
-
-USTRUCT(BlueprintType)
-struct FAdaptiveMusicState
-{
-    GENERATED_BODY()
+    bool bIsInCover = false;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EThreatLevel ThreatLevel = EThreatLevel::Safe;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    ETimeOfDay TimeOfDay = ETimeOfDay::Morning;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EAudioEnvironmentType Environment = EAudioEnvironmentType::DenseForest;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float Tension = 0.0f; // 0.0 = calm, 1.0 = maximum tension
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bPlayerHidden = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bDinosaurNearby = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 NearbyDinosaurCount = 0;
+    TArray<class ADinosaur*> NearbyDinosaurs;
 };
 
 /**
- * Core audio system that manages adaptive music, environmental audio, and dynamic soundscapes
- * Based on the principle that audio should be felt, not noticed
+ * Sistema central de áudio adaptativo
+ * Controla música, ambiente e efeitos baseado no estado do jogo
  */
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UAudioSystemCore : public UObject
+UCLASS(ClassGroup=(Audio), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UAudioSystemCore : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
     UAudioSystemCore();
 
-    // Core System Functions
-    UFUNCTION(BlueprintCallable, Category = "Audio System")
-    void InitializeAudioSystem();
-
-    UFUNCTION(BlueprintCallable, Category = "Audio System")
-    void UpdateAudioState(const FAdaptiveMusicState& NewState);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio System")
-    void SetEnvironmentType(EAudioEnvironmentType NewEnvironment);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio System")
-    void SetThreatLevel(EThreatLevel NewThreatLevel, float TransitionTime = 2.0f);
-
-    // Adaptive Music System
-    UFUNCTION(BlueprintCallable, Category = "Adaptive Music")
-    void StartAdaptiveMusic();
-
-    UFUNCTION(BlueprintCallable, Category = "Adaptive Music")
-    void StopAdaptiveMusic(float FadeOutTime = 3.0f);
-
-    UFUNCTION(BlueprintCallable, Category = "Adaptive Music")
-    void UpdateMusicTension(float NewTension, float TransitionTime = 1.0f);
-
-    // Environmental Audio
-    UFUNCTION(BlueprintCallable, Category = "Environmental Audio")
-    void PlayEnvironmentalSound(USoundCue* SoundCue, FVector Location, float VolumeMultiplier = 1.0f);
-
-    UFUNCTION(BlueprintCallable, Category = "Environmental Audio")
-    void StartAmbientLoop(EAudioEnvironmentType Environment);
-
-    UFUNCTION(BlueprintCallable, Category = "Environmental Audio")
-    void StopAmbientLoop(float FadeOutTime = 2.0f);
-
-    // Dinosaur Audio System
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur Audio")
-    void RegisterDinosaurPresence(FVector DinosaurLocation, float ThreatRadius);
-
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur Audio")
-    void UnregisterDinosaurPresence(FVector DinosaurLocation);
-
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur Audio")
-    void PlayDinosaurSound(USoundCue* DinosaurSound, FVector Location, float MaxDistance = 2000.0f);
-
 protected:
-    // Current audio state
+    virtual void BeginPlay() override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
+public:
+    // Estado atual do sistema de áudio
     UPROPERTY(BlueprintReadOnly, Category = "Audio State")
-    FAdaptiveMusicState CurrentAudioState;
+    FAudioStateData CurrentAudioState;
 
-    // Environment settings
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Environment Settings")
-    TMap<EAudioEnvironmentType, FAudioEnvironmentSettings> EnvironmentSettings;
+    // MetaSounds para música adaptativa
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Music")
+    class UMetaSoundSource* AdaptiveMusicSystem;
 
-    // Adaptive music components
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Adaptive Music")
-    class UMetaSoundSource* AdaptiveMusicMetaSound;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Music")
+    class UMetaSoundSource* AmbientSoundscape;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Adaptive Music")
-    class UAudioComponent* MusicAudioComponent;
+    // Componentes de áudio
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class UAudioComponent* MusicComponent;
 
-    // Ambient audio components
-    UPROPERTY(BlueprintReadOnly, Category = "Ambient Audio")
-    TArray<UAudioComponent*> AmbientAudioComponents;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class UAudioComponent* AmbientComponent;
 
-    // Audio submixes
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Audio Mixing")
-    class USoundSubmix* MasterSubmix;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class UAudioComponent* StingerComponent;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Audio Mixing")
-    class USoundSubmix* MusicSubmix;
+    // Funções públicas
+    UFUNCTION(BlueprintCallable, Category = "Audio Control")
+    void UpdateAudioZone(EAudioZoneType NewZone);
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Audio Mixing")
-    class USoundSubmix* AmbientSubmix;
+    UFUNCTION(BlueprintCallable, Category = "Audio Control")
+    void UpdateThreatLevel(EThreatLevel NewThreatLevel);
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Audio Mixing")
-    class USoundSubmix* SFXSubmix;
+    UFUNCTION(BlueprintCallable, Category = "Audio Control")
+    void UpdateStressLevel(float NewStressLevel);
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Audio Mixing")
-    class USoundSubmix* DinosaurSubmix;
+    UFUNCTION(BlueprintCallable, Category = "Audio Control")
+    void PlayStinger(class USoundCue* StingerSound);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio Control")
+    void OnDinosaurSpotted(class ADinosaur* Dinosaur);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio Control")
+    void OnDinosaurLost(class ADinosaur* Dinosaur);
 
 private:
-    // Internal functions
-    void UpdateEnvironmentalAudio();
-    void UpdateAdaptiveMusic();
-    void CalculateAudioParameters();
+    // Funções internas
+    void UpdateMusicParameters();
+    void UpdateAmbientParameters();
+    void CheckNearbyThreats();
     
-    // Transition management
-    void StartAudioTransition(float Duration);
-    bool IsTransitioning() const;
-
-    // Audio parameter calculation
-    float CalculateTensionFromThreats() const;
-    float CalculateEnvironmentalInfluence() const;
-    float CalculateTimeOfDayInfluence() const;
-
-    // Registered dinosaur threats
-    TArray<FVector> RegisteredDinosaurLocations;
+    // Timers e estado
+    float LastMusicUpdate = 0.0f;
+    float MusicUpdateInterval = 0.5f; // Update music twice per second
     
-    // Transition state
-    bool bIsTransitioning = false;
-    float TransitionStartTime = 0.0f;
-    float TransitionDuration = 0.0f;
-    FAdaptiveMusicState TransitionStartState;
-    FAdaptiveMusicState TransitionTargetState;
+    FTimerHandle ThreatCheckTimer;
 };
