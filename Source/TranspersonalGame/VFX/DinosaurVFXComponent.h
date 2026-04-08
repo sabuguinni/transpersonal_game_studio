@@ -2,59 +2,102 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
+#include "NiagaraSystem.h"
 #include "NiagaraComponent.h"
 #include "VFXManager.h"
 #include "DinosaurVFXComponent.generated.h"
 
 UENUM(BlueprintType)
-enum class EDinosaurVFXState : uint8
+enum class EDinosaurSize : uint8
 {
-    Idle            UMETA(DisplayName = "Idle"),
-    Alert           UMETA(DisplayName = "Alert"),
-    Aggressive      UMETA(DisplayName = "Aggressive"),
-    Feeding         UMETA(DisplayName = "Feeding"),
-    Sleeping        UMETA(DisplayName = "Sleeping"),
-    Domesticated    UMETA(DisplayName = "Domesticated"),
-    Injured         UMETA(DisplayName = "Injured"),
-    Dead            UMETA(DisplayName = "Dead")
+    Tiny,       // < 50cm (Compsognathus)
+    Small,      // 50cm - 2m (Velociraptor)
+    Medium,     // 2m - 5m (Allosaurus)
+    Large,      // 5m - 10m (T-Rex)
+    Massive     // > 10m (Brontosaurus)
+};
+
+UENUM(BlueprintType)
+enum class EDinosaurBehaviorState : uint8
+{
+    Idle,
+    Walking,
+    Running,
+    Hunting,
+    Feeding,
+    Sleeping,
+    Alert,
+    Aggressive,
+    Injured,
+    Dead
 };
 
 USTRUCT(BlueprintType)
-struct FDinosaurVFXProfile
+struct FDinosaurVFXSet
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FName DinosaurSpecies;
+    // Breathing effects
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Breathing")
+    UNiagaraSystem* IdleBreathing;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float Size = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Breathing")
+    UNiagaraSystem* HeavyBreathing;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FLinearColor PrimaryColor = FLinearColor::White;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Breathing")
+    UNiagaraSystem* ColdBreath; // Para clima frio
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FLinearColor SecondaryColor = FLinearColor::Gray;
+    // Footstep effects
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
+    UNiagaraSystem* FootstepDust;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float BreathingIntensity = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
+    UNiagaraSystem* FootstepSplash; // Para água/lama
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float FootstepIntensity = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
+    UNiagaraSystem* FootstepLeaves;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bCanBeDomesticated = false;
+    // Combat effects
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    UNiagaraSystem* BloodSplatter;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bIsPredator = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    UNiagaraSystem* ClawScratch;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float ThreatLevel = 0.5f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    UNiagaraSystem* BiteImpact;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TArray<FName> UniqueEffects;
+    // Behavioral effects
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
+    UNiagaraSystem* TerritorialRoar; // Partículas de intimidação
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
+    UNiagaraSystem* FeedingBlood;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
+    UNiagaraSystem* SleepingZzz; // Efeito sutil de sono
+
+    FDinosaurVFXSet()
+    {
+        IdleBreathing = nullptr;
+        HeavyBreathing = nullptr;
+        ColdBreath = nullptr;
+        FootstepDust = nullptr;
+        FootstepSplash = nullptr;
+        FootstepLeaves = nullptr;
+        BloodSplatter = nullptr;
+        ClawScratch = nullptr;
+        BiteImpact = nullptr;
+        TerritorialRoar = nullptr;
+        FeedingBlood = nullptr;
+        SleepingZzz = nullptr;
+    }
 };
 
+/**
+ * Componente especializado para efeitos visuais de dinossauros
+ * Gere breathing, footsteps, combat effects e variações procedurais
+ */
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UDinosaurVFXComponent : public UActorComponent
 {
@@ -67,119 +110,88 @@ protected:
     virtual void BeginPlay() override;
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-public:
-    // State Management
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur VFX")
-    void SetVFXState(EDinosaurVFXState NewState);
+    // Configuração do dinossauro
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Config")
+    EDinosaurSize DinosaurSize;
 
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur VFX")
-    EDinosaurVFXState GetCurrentVFXState() const { return CurrentVFXState; }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Config")
+    FDinosaurVFXSet VFXSet;
 
-    // Profile Management
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur VFX")
-    void SetDinosaurProfile(const FDinosaurVFXProfile& Profile);
+    // Estado atual
+    UPROPERTY(BlueprintReadOnly, Category = "State")
+    EDinosaurBehaviorState CurrentState;
 
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur VFX")
-    FDinosaurVFXProfile GetDinosaurProfile() const { return DinosaurProfile; }
+    UPROPERTY(BlueprintReadOnly, Category = "State")
+    float HealthPercentage;
 
-    // Breathing Effects
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur VFX")
-    void StartBreathingEffect();
+    UPROPERTY(BlueprintReadOnly, Category = "State")
+    float StaminaPercentage;
 
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur VFX")
-    void StopBreathingEffect();
+    // Variação procedural
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Variation")
+    int32 IndividualSeed; // Seed único para este dinossauro
 
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur VFX")
-    void UpdateBreathingIntensity(float NewIntensity);
+    UPROPERTY(BlueprintReadOnly, Category = "Variation")
+    FLinearColor BreathTint; // Cor da respiração (baseada em genética)
 
-    // Movement Effects
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur VFX")
-    void TriggerFootstepEffect(FVector FootLocation, bool bIsRightFoot = true);
+    UPROPERTY(BlueprintReadOnly, Category = "Variation")
+    float BreathIntensity; // Intensidade da respiração
 
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur VFX")
-    void StartMovementTrail();
+    UPROPERTY(BlueprintReadOnly, Category = "Variation")
+    float FootstepScale; // Escala das pegadas
 
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur VFX")
-    void StopMovementTrail();
-
-    // Emotional State Effects
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur VFX")
-    void ShowAlertEffect(float AlertLevel = 1.0f);
-
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur VFX")
-    void ShowAggressionEffect(float AggressionLevel = 1.0f);
-
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur VFX")
-    void ShowDomesticationEffect(float TrustLevel = 0.0f);
-
-    // Health Effects
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur VFX")
-    void ShowInjuryEffect(FVector InjuryLocation, float Severity = 1.0f);
-
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur VFX")
-    void StartBleedingEffect(FVector BleedLocation);
-
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur VFX")
-    void StopBleedingEffect();
-
-    // Unique Species Effects
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur VFX")
-    void TriggerSpeciesUniqueEffect(FName EffectName, float Intensity = 1.0f);
-
-    // Environmental Interaction
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur VFX")
-    void ShowEnvironmentInteraction(FName InteractionType, FVector Location);
-
-protected:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Profile")
-    FDinosaurVFXProfile DinosaurProfile;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VFX State")
-    EDinosaurVFXState CurrentVFXState;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VFX State")
-    EDinosaurVFXState PreviousVFXState;
-
-    // Active VFX Components
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Active VFX")
-    UNiagaraComponent* BreathingVFX;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Active VFX")
-    UNiagaraComponent* MovementTrailVFX;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Active VFX")
-    UNiagaraComponent* EmotionalStateVFX;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Active VFX")
-    UNiagaraComponent* HealthStatusVFX;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Active VFX")
-    TArray<UNiagaraComponent*> UniqueEffectsVFX;
-
-    // VFX Manager Reference
+    // Componentes ativos
     UPROPERTY()
-    UVFXManager* VFXManager;
-
-    // Timing and State
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
-    float BreathingRate = 2.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
-    float FootstepCooldown = 0.5f;
+    UNiagaraComponent* ActiveBreathingEffect;
 
     UPROPERTY()
-    float LastFootstepTime;
+    TArray<UNiagaraComponent*> ActiveFootstepEffects;
+
+    // Timers e controle
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Timing")
+    float BreathingInterval; // Segundos entre respirações
 
     UPROPERTY()
     float LastBreathTime;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
-    bool bAutoUpdateBreathing = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float MaxEffectDistance; // Distância máxima para spawnar efeitos
+
+public:
+    // Interface principal
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur VFX")
+    void SetBehaviorState(EDinosaurBehaviorState NewState);
+
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur VFX")
+    void UpdateHealthStatus(float HealthPercent);
+
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur VFX")
+    void TriggerFootstep(FVector Location, FName SurfaceType);
+
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur VFX")
+    void TriggerCombatEffect(FName EffectType, FVector Location, FRotator Rotation);
+
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur VFX")
+    void SetIndividualVariation(int32 Seed);
+
+    // Breathing system
+    UFUNCTION(BlueprintCallable, Category = "Breathing")
+    void StartBreathing();
+
+    UFUNCTION(BlueprintCallable, Category = "Breathing")
+    void StopBreathing();
+
+    UFUNCTION(BlueprintCallable, Category = "Breathing")
+    void UpdateBreathingIntensity(float Intensity);
 
 private:
-    void InitializeVFXManager();
-    void UpdateStateTransitionEffects();
-    void CleanupVFXComponents();
-    FVector GetBreathingLocation() const;
-    FName GetStateSpecificEffect(EDinosaurVFXState State) const;
+    void GenerateProceduralVariation();
+    void UpdateBreathingEffect();
+    bool ShouldSpawnEffect(FVector EffectLocation);
+    UNiagaraSystem* GetFootstepEffect(FName SurfaceType);
+    void CleanupFinishedEffects();
+    
+    // Performance optimization
+    float GetDistanceToPlayer();
+    EVFXPriority GetEffectPriority(FName EffectType);
 };
