@@ -1,0 +1,12 @@
+# NPC Behavior Data Table
+# This data table contains behavior configurations for different NPC archetypes
+
+Row,Archetype,PreferredState,ConsciousnessInfluenceRadius,TransformationSpeed,DialogueKeys,BehaviorAnimations,bCanInitiateTransformation,EmotionalResonance
+ShadowSelf,ShadowSelf,Shadow,300.0,0.5,"shadow_greeting;shadow_challenge;shadow_integration","AN_ShadowSelf_Emergence;AN_ShadowSelf_Lurking;AN_ConsciousnessTransition",true,0.8
+WiseGuide,WiseGuide,Wise,800.0,1.0,"wise_welcome;wise_guidance;wise_blessing","AN_WiseGuide_Blessing;AN_WiseGuide_Meditation;AN_ConsciousnessTransition",true,0.9
+InnerChild,InnerChild,Ego,200.0,1.5,"child_playful;child_curious;child_healing","AN_InnerChild_PlayfulDance;AN_InnerChild_Wonder;AN_ConsciousnessTransition",true,0.7
+Anima,Anima,Anima,400.0,0.8,"anima_inspiration;anima_creativity;anima_emotion","AN_Anima_Grace;AN_Anima_Flow;AN_ConsciousnessTransition",true,0.85
+Animus,Animus,Anima,400.0,0.8,"animus_logic;animus_structure;animus_focus","AN_Animus_Strength;AN_Animus_Direction;AN_ConsciousnessTransition",true,0.85
+Trickster,Trickster,Ego,350.0,2.0,"trickster_riddle;trickster_chaos;trickster_wisdom","AN_Trickster_Mischief;AN_Trickster_Transform;AN_ConsciousnessTransition",false,0.6
+GreatMother,GreatMother,Wise,600.0,0.7,"mother_nurture;mother_protection;mother_wisdom","AN_GreatMother_Embrace;AN_GreatMother_Healing;AN_ConsciousnessTransition",true,0.95
+Senex,Senex,Wise,500.0,0.6,"senex_knowledge;senex_tradition;senex_judgment","AN_Senex_Authority;AN_Senex_Teaching;AN_ConsciousnessTransition",false,0.75
