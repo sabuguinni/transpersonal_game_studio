@@ -1,0 +1,64 @@
+// Blueprint Data Asset for Environmental VFX Library
+// This would be created in UE5 Editor as a Data Asset
+
+{
+    "AssetType": "DataAsset",
+    "ParentClass": "PrimaryDataAsset",
+    "Properties": {
+        "WindEffects": [
+            {
+                "Name": "Gentle_Breeze_Leaves",
+                "NiagaraAsset": "/Game/VFX/Environmental/NS_GentleBreeze",
+                "Priority": "Low",
+                "MaxDistance": 500,
+                "Description": "Folhas caindo suavemente com vento leve"
+            },
+            {
+                "Name": "Strong_Wind_Debris",
+                "NiagaraAsset": "/Game/VFX/Environmental/NS_StrongWind",
+                "Priority": "Medium",
+                "MaxDistance": 1000,
+                "Description": "Detritos e folhas em vento forte"
+            }
+        ],
+        "WeatherEffects": [
+            {
+                "Name": "Light_Rain",
+                "NiagaraAsset": "/Game/VFX/Environmental/NS_LightRain",
+                "Priority": "High",
+                "MaxDistance": 2000,
+                "Description": "Chuva leve com gotas individuais visíveis"
+            },
+            {
+                "Name": "Heavy_Rain",
+                "NiagaraAsset": "/Game/VFX/Environmental/NS_HeavyRain",
+                "Priority": "High",
+                "MaxDistance": 1500,
+                "Description": "Chuva pesada com splash no chão"
+            },
+            {
+                "Name": "Mist_Fog",
+                "NiagaraAsset": "/Game/VFX/Environmental/NS_Mist",
+                "Priority": "Medium",
+                "MaxDistance": 3000,
+                "Description": "Neblina matinal que reduz visibilidade"
+            }
+        ],
+        "AtmosphericEffects": [
+            {
+                "Name": "Dust_Motes_Sunbeam",
+                "NiagaraAsset": "/Game/VFX/Environmental/NS_DustMotes",
+                "Priority": "Low",
+                "MaxDistance": 300,
+                "Description": "Partículas de poeira em raios de sol"
+            },
+            {
+                "Name": "Pollen_Drift",
+                "NiagaraAsset": "/Game/VFX/Environmental/NS_Pollen",
+                "Priority": "Low",
+                "MaxDistance": 400,
+                "Description": "Pólen flutuando no ar"
+            }
+        ]
+    }
+}
