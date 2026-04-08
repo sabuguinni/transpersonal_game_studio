@@ -1,0 +1,99 @@
+# Niagara System: Dynamic Weather Effects
+# Enhances atmospheric tension and affects gameplay mechanics
+
+## EMITTER 1: Rain System
+- Spawn Rate: 1000-5000 particles/second (intensity-based)
+- Lifetime: 2-4 seconds
+- Size: 0.1-0.2 world units (length: 1-3 units)
+- Velocity: Downward (10-25 m/s) with wind influence
+- Color: Blue-gray (180,200,220,200)
+- Material: M_Raindrops_Translucent
+
+### Behavior Modules:
+- Initial Location: Sky sphere spawn volume
+- Velocity: Gravity + wind vector
+- Collision: Ground splash effects
+- Player Interaction: Visibility reduction
+- Fire Interaction: Extinguishes campfires
+
+### Intensity Levels:
+- Light_Rain: 1000 particles/sec, minimal gameplay impact
+- Medium_Rain: 2500 particles/sec, reduced visibility
+- Heavy_Rain: 5000 particles/sec, significant survival challenge
+
+## EMITTER 2: Ground Splash Effects
+- Spawn Rate: Triggered by rain collision
+- Lifetime: 0.3-0.8 seconds
+- Size: 0.2-0.6 world units
+- Velocity: Radial burst from impact
+- Color: Surface-dependent (mud brown, rock gray)
+- Material: M_WaterSplash_Translucent
+
+### Behavior Modules:
+- Initial Location: Rain collision points
+- Surface Detection: Different effects per material type
+- Puddle Formation: Accumulation over time
+- Player Movement: Footstep splash enhancement
+
+## EMITTER 3: Fog Bank System
+- Spawn Rate: 50-200 particles/second
+- Lifetime: 20-60 seconds
+- Size: 5.0-15.0 world units
+- Velocity: Slow horizontal drift (0.5-2.0 m/s)
+- Color: Gray-white (200,200,200,100)
+- Material: M_Fog_Volumetric
+
+### Behavior Modules:
+- Initial Location: Ground level spawn areas
+- Density Variation: Procedural thickness changes
+- Temperature Response: Morning/evening enhancement
+- Visibility Impact: Reduces dinosaur detection range
+
+### Gameplay Integration:
+- Stealth_Bonus: Player harder to detect in fog
+- Predator_Ambush: Dinosaurs can use fog for surprise attacks
+- Navigation_Challenge: Landmarks obscured
+
+## EMITTER 4: Wind Particle Indicators
+- Spawn Rate: 30-80 particles/second
+- Lifetime: 5-10 seconds
+- Size: 0.1-0.4 world units
+- Velocity: Wind direction vector
+- Color: Nearly transparent (255,255,255,50)
+- Material: M_WindTrails_Additive
+
+### Behavior Modules:
+- Initial Location: Distributed air volume
+- Wind Strength Visualization: Speed affects particle behavior
+- Directional Indicators: Shows wind patterns
+- Environmental Response: Affects other VFX systems
+
+## EMITTER 5: Lightning Flash Effects
+- Spawn Rate: Event-triggered (storm conditions)
+- Lifetime: 0.1-0.3 seconds
+- Size: Screen-wide flash overlay
+- Velocity: Instantaneous
+- Color: Bright blue-white (255,255,255)
+- Material: M_Lightning_Additive
+
+### Behavior Modules:
+- Screen Flash: Full-screen brightness spike
+- Thunder Delay: Audio follows visual by distance
+- Dinosaur Reaction: AI responds to lightning events
+- Fire Ignition: Rare chance to start forest fires
+
+### Storm Progression:
+- Building_Clouds: Gradual darkening
+- Wind_Increase: Escalating particle movement
+- Rain_Onset: Precipitation begins
+- Lightning_Phase: Electrical activity
+- Storm_Peak: Maximum intensity
+- Clearing_Phase: Gradual reduction
+
+## SYSTEM PARAMETERS:
+- Weather_Intensity: 0.0-1.0 (master control)
+- Wind_Direction: Vector3 (affects all wind-influenced effects)
+- Temperature: -10.0 to 40.0 (affects fog and steam visibility)
+- Humidity: 0.0-1.0 (influences rain probability)
+- Storm_Probability: 0.0-1.0 (chance of severe weather)
+- Season_Modifier: Affects weather patterns and intensity
