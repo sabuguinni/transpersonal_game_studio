@@ -1,101 +1,77 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
 #include "Engine/World.h"
-#include "Components/SkeletalMeshComponent.h"
+#include "Components/ActorComponent.h"
 #include "Animation/AnimInstance.h"
+#include "PoseSearch/PoseSearchDatabase.h"
 #include "AnimationSystemManager.generated.h"
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnCharacterEmotionalStateChanged, class ACharacter*, Character, float, FearLevel);
+DECLARE_LOG_CATEGORY_EXTERN(LogAnimationSystem, Log, All);
 
 /**
- * Sistema central de gerenciamento de animações
- * Responsável por coordenar Motion Matching, IK, e estados emocionais
+ * Sistema central de gestão de animação para o jogo Jurássico
+ * Responsável por coordenar Motion Matching, IK, e variações procedurais
  */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AAnimationSystemManager : public AActor
+class TRANSPERSONALGAME_API UAnimationSystemManager : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    AAnimationSystemManager();
+    UAnimationSystemManager();
 
 protected:
     virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // Sistema de Motion Matching
+    // Motion Matching Database Management
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    class UPoseSearchDatabase* PlayerLocomotionDatabase;
+    TMap<FString, class UPoseSearchDatabase*> MotionMatchingDatabases;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    class UPoseSearchDatabase* DinosaurBehaviorDatabase;
-
-    // Sistema de IK Adaptativo
+    // IK System Configuration
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK System")
-    float TerrainAdaptationRadius = 100.0f;
+    float FootIKTraceDistance = 50.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK System")
-    float FootPlantingThreshold = 0.1f;
+    float FootIKInterpSpeed = 15.0f;
 
-    // Estados Emocionais Dinâmicos
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotional States")
-    TMap<FString, float> EmotionalStateWeights;
+    // Procedural Animation Variation
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Procedural Variation")
+    float MovementVariationScale = 0.1f;
 
-    UPROPERTY(BlueprintAssignable, Category = "Events")
-    FOnCharacterEmotionalStateChanged OnCharacterEmotionalStateChanged;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Procedural Variation")
+    int32 MaxAnimationVariants = 5;
 
 public:
-    // Interface pública para outros sistemas
-    UFUNCTION(BlueprintCallable, Category = "Animation System")
-    void RegisterCharacterForAnimation(class ACharacter* Character);
+    // Motion Matching Functions
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    class UPoseSearchDatabase* GetMotionMatchingDatabase(const FString& DatabaseName);
 
-    UFUNCTION(BlueprintCallable, Category = "Animation System")
-    void UpdateCharacterFearLevel(class ACharacter* Character, float NewFearLevel);
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    void RegisterMotionMatchingDatabase(const FString& DatabaseName, class UPoseSearchDatabase* Database);
 
-    UFUNCTION(BlueprintCallable, Category = "Animation System")
-    void TriggerEmergencyAnimation(class ACharacter* Character, const FString& TriggerType);
+    // IK System Functions
+    UFUNCTION(BlueprintCallable, Category = "IK System")
+    FVector CalculateFootIKOffset(AActor* Character, const FName& FootBoneName, const FVector& FootLocation);
 
-    // Sistema de Variações Procedurais
-    UFUNCTION(BlueprintCallable, Category = "Procedural Animation")
-    void GenerateUniqueMovementVariation(class ACharacter* Character);
+    UFUNCTION(BlueprintCallable, Category = "IK System")
+    bool PerformFootIKTrace(const FVector& StartLocation, FVector& OutHitLocation, FVector& OutHitNormal);
+
+    // Procedural Variation Functions
+    UFUNCTION(BlueprintCallable, Category = "Procedural Variation")
+    float GenerateMovementVariation(int32 CharacterID, const FString& MovementType);
+
+    UFUNCTION(BlueprintCallable, Category = "Procedural Variation")
+    void ApplyCharacterSpecificAnimationTweaks(class UAnimInstance* AnimInstance, int32 CharacterID);
 
 private:
-    // Personagens registados no sistema
-    UPROPERTY()
-    TArray<class ACharacter*> RegisteredCharacters;
-
-    // Cache de dados de animação
-    UPROPERTY()
-    TMap<class ACharacter*, struct FCharacterAnimationData> AnimationDataCache;
-
-    void UpdateMotionMatchingQueries(float DeltaTime);
-    void ProcessTerrainAdaptation(float DeltaTime);
-    void UpdateEmotionalStates(float DeltaTime);
-};
-
-// Estrutura para dados de animação por personagem
-USTRUCT(BlueprintType)
-struct FCharacterAnimationData
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float CurrentFearLevel = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float MovementIntensity = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FVector LastKnownThreatDirection = FVector::ZeroVector;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float TimeSinceLastThreat = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bIsInDanger = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TArray<FString> ActiveEmotionalTags;
+    // Internal tracking
+    TMap<int32, FRandomStream> CharacterRandomStreams;
+    
+    void InitializeCharacterVariation(int32 CharacterID);
+    float GetCachedVariation(int32 CharacterID, const FString& VariationType);
+    
+    // Cache para optimização
+    TMap<FString, float> VariationCache;
 };
