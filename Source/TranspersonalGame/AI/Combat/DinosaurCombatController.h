@@ -3,17 +3,21 @@
 #include "CoreMinimal.h"
 #include "AIController.h"
 #include "Perception/AIPerceptionComponent.h"
+#include "BehaviorTree/BehaviorTreeComponent.h"
 #include "BehaviorTree/BlackboardComponent.h"
 #include "CombatAITypes.h"
 #include "DinosaurCombatController.generated.h"
 
-class UBehaviorTreeComponent;
-class UBlackboardComponent;
-class UAIPerceptionComponent;
-class UEnvQueryInstanceBlueprintWrapper;
+// Forward Declarations
+class UBehaviorTree;
+class UAISenseConfig_Sight;
+class UAISenseConfig_Hearing;
+class UAISenseConfig_Damage;
+class UEnvironmentQueryComponent;
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnThreatDetected, AActor*, ThreatActor, float, ThreatLevel);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnCombatStateChanged, ECombatState, NewState);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnCombatStateChanged, ECombatState, OldState, ECombatState, NewState);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnTargetDetected, AActor*, Target);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnTargetLost, AActor*, Target);
 
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API ADinosaurCombatController : public AAIController
@@ -26,124 +30,208 @@ public:
 protected:
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
+    virtual void OnPossess(APawn* InPawn) override;
 
-    // Core Components
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI")
-    UBehaviorTreeComponent* BehaviorTreeComponent;
+    // AI Perception
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI Perception")
+    class UAIPerceptionComponent* AIPerceptionComponent;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI")
-    UBlackboardComponent* BlackboardComponent;
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI Perception")
+    class UAISenseConfig_Sight* SightConfig;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI")
-    UAIPerceptionComponent* PerceptionComponent;
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI Perception")
+    class UAISenseConfig_Hearing* HearingConfig;
 
-    // Combat AI Configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
-    FCombatAIProfile CombatProfile;
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI Perception")
+    class UAISenseConfig_Damage* DamageConfig;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
-    class UBehaviorTree* CombatBehaviorTree;
+    // Behavior Tree
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI Behavior")
+    class UBehaviorTree* DefaultBehaviorTree;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
-    class UBlackboard* CombatBlackboard;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI Behavior")
+    class UBehaviorTreeComponent* BehaviorTreeComponent;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI Behavior")
+    class UBlackboardComponent* BlackboardComponent;
+
+    // EQS Component
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI EQS")
+    class UEnvironmentQueryComponent* EQSComponent;
+
+    // Combat Profile
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Profile")
+    FDinosaurCombatProfile CombatProfile;
 
     // Current State
-    UPROPERTY(BlueprintReadOnly, Category = "Combat State")
-    ECombatState CurrentCombatState = ECombatState::Idle;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat State")
+    ECombatState CurrentCombatState;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Combat State")
-    TArray<FThreatMemory> ThreatMemories;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat State")
+    FCombatMemory CombatMemory;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Combat State")
-    FThreatMemory PrimaryThreat;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat State")
+    float CurrentStamina;
 
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat State")
+    float CurrentHealth;
+
+    // Timers
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat Timers")
+    float LastAttackTime;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat Timers")
+    float StateChangeTime;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat Timers")
+    float AlertnessDecayTimer;
+
+    // Target Tracking
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Target Tracking")
+    AActor* CurrentTarget;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Target Tracking")
+    TArray<AActor*> KnownThreats;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Target Tracking")
+    TArray<AActor*> NearbyAllies;
+
+public:
     // Events
-    UPROPERTY(BlueprintAssignable, Category = "Combat Events")
-    FOnThreatDetected OnThreatDetected;
-
     UPROPERTY(BlueprintAssignable, Category = "Combat Events")
     FOnCombatStateChanged OnCombatStateChanged;
 
-public:
-    // Combat State Management
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    UPROPERTY(BlueprintAssignable, Category = "Combat Events")
+    FOnTargetDetected OnTargetDetected;
+
+    UPROPERTY(BlueprintAssignable, Category = "Combat Events")
+    FOnTargetLost OnTargetLost;
+
+    // Public Functions
+    UFUNCTION(BlueprintCallable, Category = "Combat")
     void SetCombatState(ECombatState NewState);
 
-    UFUNCTION(BlueprintPure, Category = "Combat AI")
+    UFUNCTION(BlueprintCallable, Category = "Combat")
     ECombatState GetCombatState() const { return CurrentCombatState; }
 
-    // Threat Management
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void AddThreat(AActor* ThreatActor, float ThreatLevel);
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    void SetCombatProfile(const FDinosaurCombatProfile& NewProfile);
 
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void RemoveThreat(AActor* ThreatActor);
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    FDinosaurCombatProfile GetCombatProfile() const { return CombatProfile; }
 
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void UpdateThreatLocation(AActor* ThreatActor, FVector NewLocation);
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    bool CanPerformAttack(EAttackType AttackType) const;
 
-    UFUNCTION(BlueprintPure, Category = "Combat AI")
-    FThreatMemory GetPrimaryThreat() const { return PrimaryThreat; }
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    FAttackPattern GetBestAttackForTarget(AActor* Target) const;
 
-    UFUNCTION(BlueprintPure, Category = "Combat AI")
-    TArray<FThreatMemory> GetAllThreats() const { return ThreatMemories; }
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    void ExecuteAttack(const FAttackPattern& AttackPattern);
 
-    // Decision Making
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    FCombatDecision EvaluateCombatSituation();
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    void TakeDamage(float DamageAmount, AActor* DamageSource);
 
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    bool ShouldEngageTarget(AActor* Target);
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    bool IsInCombat() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    bool ShouldFleeFromThreat();
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    float GetDistanceToTarget() const;
 
-    // EQS Integration
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void FindOptimalCombatPosition();
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    bool HasLineOfSightToTarget() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void FindAmbushPosition();
+    UFUNCTION(BlueprintCallable, Category = "Target Management")
+    void SetCurrentTarget(AActor* NewTarget);
 
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void FindFleePosition();
+    UFUNCTION(BlueprintCallable, Category = "Target Management")
+    AActor* GetCurrentTarget() const { return CurrentTarget; }
 
-    // Personality-Based Behavior
-    UFUNCTION(BlueprintPure, Category = "Combat AI")
-    float GetPersonalityFactor(const FString& TraitName) const;
+    UFUNCTION(BlueprintCallable, Category = "Target Management")
+    void AddKnownThreat(AActor* Threat);
 
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void ModifyPersonalityTrait(const FString& TraitName, float Delta);
+    UFUNCTION(BlueprintCallable, Category = "Target Management")
+    void RemoveKnownThreat(AActor* Threat);
+
+    UFUNCTION(BlueprintCallable, Category = "Memory")
+    void UpdateLastKnownTargetLocation(const FVector& Location);
+
+    UFUNCTION(BlueprintCallable, Category = "Memory")
+    FVector GetLastKnownTargetLocation() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Stamina")
+    void ConsumeStamina(float Amount);
+
+    UFUNCTION(BlueprintCallable, Category = "Stamina")
+    bool HasEnoughStamina(float Required) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Stamina")
+    float GetStaminaPercentage() const;
 
 protected:
-    // Perception Callbacks
+    // AI Perception Callbacks
     UFUNCTION()
     void OnPerceptionUpdated(const TArray<AActor*>& UpdatedActors);
 
     UFUNCTION()
     void OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus);
 
-    // Internal Methods
-    void UpdateThreatMemories(float DeltaTime);
-    void EvaluatePrimaryThreat();
-    void UpdateBlackboardValues();
+    // Internal Functions
+    void InitializeAIPerception();
+    void InitializeBehaviorTree();
+    void InitializeBlackboard();
+    void UpdateCombatState(float DeltaTime);
+    void UpdateStamina(float DeltaTime);
+    void UpdateMemory(float DeltaTime);
+    void UpdateAlertness(float DeltaTime);
+    void EvaluateThreats();
+    void SelectBestTarget();
     
-    // EQS Callbacks
-    UFUNCTION()
-    void OnEQSQueryComplete(UEnvQueryInstanceBlueprintWrapper* QueryInstance, int32 ItemIndex);
-
-    // Utility Functions
-    float CalculateThreatLevel(AActor* Actor) const;
-    bool IsActorInSight(AActor* Actor) const;
-    bool IsActorInHearingRange(AActor* Actor) const;
-    float GetDistanceToActor(AActor* Actor) const;
-
-private:
-    // Internal state tracking
-    float LastThreatEvaluationTime = 0.0f;
-    float ThreatEvaluationInterval = 0.5f;
+    // Combat Logic
+    bool ShouldEngageTarget(AActor* Target) const;
+    bool ShouldFleeFromTarget(AActor* Target) const;
+    float CalculateThreatLevel(AActor* Target) const;
+    float CalculateTargetPriority(AActor* Target) const;
     
-    // Memory management
-    float ThreatMemoryDuration = 30.0f;
-    int32 MaxThreatMemories = 5;
+    // State Transitions
+    void TransitionToIdle();
+    void TransitionToPatrolling();
+    void TransitionToInvestigating();
+    void TransitionToStalking();
+    void TransitionToHunting();
+    void TransitionToAttacking();
+    void TransitionToFleeing();
+    void TransitionToFeeding();
+    void TransitionToResting();
+
+    // Blackboard Keys
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Blackboard Keys")
+    FName TargetActorKey = TEXT("TargetActor");
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Blackboard Keys")
+    FName TargetLocationKey = TEXT("TargetLocation");
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Blackboard Keys")
+    FName CombatStateKey = TEXT("CombatState");
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Blackboard Keys")
+    FName LastKnownLocationKey = TEXT("LastKnownLocation");
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Blackboard Keys")
+    FName CanAttackKey = TEXT("CanAttack");
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Blackboard Keys")
+    FName StaminaPercentageKey = TEXT("StaminaPercentage");
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Blackboard Keys")
+    FName HealthPercentageKey = TEXT("HealthPercentage");
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Blackboard Keys")
+    FName AlertnessLevelKey = TEXT("AlertnessLevel");
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Blackboard Keys")
+    FName PatrolPointKey = TEXT("PatrolPoint");
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Blackboard Keys")
+    FName HomeLocationKey = TEXT("HomeLocation");
 };
