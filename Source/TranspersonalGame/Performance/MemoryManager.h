@@ -1,179 +1,252 @@
-/**
- * @file MemoryManager.h
- * @brief Advanced memory management for consciousness-based game systems
- * 
- * Handles memory pooling, streaming, and optimization for spiritual experiences
- * that may involve large amounts of consciousness field data.
- */
+// MemoryManager.h
+// Sistema de gestão inteligente de memória para otimização de performance
 
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/GameInstanceSubsystem.h"
-#include "Templates/SharedPointer.h"
+#include "Engine/Engine.h"
+#include "HAL/PlatformMemory.h"
+#include "Containers/Map.h"
+#include "Containers/Queue.h"
+#include "UObject/WeakObjectPtr.h"
 #include "MemoryManager.generated.h"
 
+DECLARE_LOG_CATEGORY_EXTERN(LogTranspersonalMemory, Log, All);
+
+// Estrutura para tracking de objetos em memória
+USTRUCT()
+struct TRANSPERSONALGAME_API FMemoryObjectInfo
+{
+    GENERATED_BODY()
+
+    UPROPERTY()
+    TWeakObjectPtr<UObject> Object;
+
+    UPROPERTY()
+    FString ObjectName;
+
+    UPROPERTY()
+    FString ClassName;
+
+    UPROPERTY()
+    int64 EstimatedSize;
+
+    UPROPERTY()
+    float LastAccessTime;
+
+    UPROPERTY()
+    int32 AccessCount;
+
+    UPROPERTY()
+    bool bIsCritical;
+
+    FMemoryObjectInfo()
+        : EstimatedSize(0)
+        , LastAccessTime(0.0f)
+        , AccessCount(0)
+        , bIsCritical(false)
+    {}
+
+    FMemoryObjectInfo(UObject* InObject, int64 InSize, bool bInIsCritical = false)
+        : Object(InObject)
+        , EstimatedSize(InSize)
+        , LastAccessTime(FPlatformTime::Seconds())
+        , AccessCount(1)
+        , bIsCritical(bInIsCritical)
+    {
+        if (InObject)
+        {
+            ObjectName = InObject->GetName();
+            ClassName = InObject->GetClass()->GetName();
+        }
+    }
+};
+
+// Enum para estratégias de limpeza de memória
+UENUM(BlueprintType)
+enum class EMemoryCleanupStrategy : uint8
+{
+    Conservative    UMETA(DisplayName = "Conservative"),
+    Balanced        UMETA(DisplayName = "Balanced"),
+    Aggressive      UMETA(DisplayName = "Aggressive"),
+    Emergency       UMETA(DisplayName = "Emergency")
+};
+
+// Estrutura para estatísticas de memória
 USTRUCT(BlueprintType)
-struct FMemoryPoolConfig
+struct TRANSPERSONALGAME_API FMemoryStats
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString PoolName;
+    UPROPERTY(BlueprintReadOnly, Category = "Memory")
+    float TotalPhysicalGB;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 BlockSize = 1024;
+    UPROPERTY(BlueprintReadOnly, Category = "Memory")
+    float UsedPhysicalGB;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 InitialBlocks = 100;
+    UPROPERTY(BlueprintReadOnly, Category = "Memory")
+    float AvailablePhysicalGB;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 MaxBlocks = 1000;
+    UPROPERTY(BlueprintReadOnly, Category = "Memory")
+    float UsagePercentage;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bAutoGrow = true;
+    UPROPERTY(BlueprintReadOnly, Category = "Memory")
+    float GameMemoryGB;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Memory")
+    int32 TrackedObjects;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Memory")
+    float TextureMemoryGB;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Memory")
+    float AudioMemoryGB;
+
+    FMemoryStats()
+        : TotalPhysicalGB(0.0f)
+        , UsedPhysicalGB(0.0f)
+        , AvailablePhysicalGB(0.0f)
+        , UsagePercentage(0.0f)
+        , GameMemoryGB(0.0f)
+        , TrackedObjects(0)
+        , TextureMemoryGB(0.0f)
+        , AudioMemoryGB(0.0f)
+    {}
 };
 
-USTRUCT(BlueprintType)
-struct FMemoryUsageStats
-{
-    GENERATED_BODY()
+// Delegate para notificações de memória
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnMemoryWarning, float, UsagePercentage);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnMemoryCleanup, int32, ObjectsFreed);
 
-    UPROPERTY(BlueprintReadOnly)
-    float TotalAllocatedMB = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly)
-    float ConsciousnessDataMB = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly)
-    float SpiritualFieldsMB = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly)
-    float AudioMemoryMB = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly)
-    float TextureStreamingMB = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly)
-    int32 ActiveMemoryPools = 0;
-
-    UPROPERTY(BlueprintReadOnly)
-    float MemoryFragmentation = 0.0f;
-};
-
-/**
- * Memory pool for efficient allocation of consciousness-related data
- */
-class TRANSPERSONALGAME_API FConsciousnessMemoryPool
-{
-public:
-    FConsciousnessMemoryPool(const FMemoryPoolConfig& Config);
-    ~FConsciousnessMemoryPool();
-
-    void* Allocate(size_t Size);
-    void Deallocate(void* Ptr);
-    void Reset();
-    
-    int32 GetUsedBlocks() const { return UsedBlocks; }
-    int32 GetTotalBlocks() const { return TotalBlocks; }
-    float GetFragmentation() const;
-
-private:
-    FMemoryPoolConfig PoolConfig;
-    TArray<void*> FreeBlocks;
-    TArray<void*> UsedBlockList;
-    uint8* MemoryBase = nullptr;
-    int32 TotalBlocks = 0;
-    int32 UsedBlocks = 0;
-    
-    void GrowPool();
-};
-
-UCLASS()
-class TRANSPERSONALGAME_API UMemoryManager : public UGameInstanceSubsystem
+class TRANSPERSONALGAME_API UMemoryManager : public UObject
 {
     GENERATED_BODY()
 
 public:
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
+    UMemoryManager();
 
-    // Memory pool management
+    // Inicialização
+    void Initialize();
+    void Shutdown();
+
+    // Atualização por frame
+    void UpdateMemoryTracking(float DeltaTime);
+
+    // Registro de objetos
     UFUNCTION(BlueprintCallable, Category = "Memory Management")
-    bool CreateMemoryPool(const FMemoryPoolConfig& Config);
+    void RegisterObject(UObject* Object, int64 EstimatedSize, bool bIsCritical = false);
 
     UFUNCTION(BlueprintCallable, Category = "Memory Management")
-    void DestroyMemoryPool(const FString& PoolName);
+    void UnregisterObject(UObject* Object);
 
     UFUNCTION(BlueprintCallable, Category = "Memory Management")
-    void ResetMemoryPool(const FString& PoolName);
+    void UpdateObjectAccess(UObject* Object);
 
-    // Consciousness-specific memory allocation
-    UFUNCTION(BlueprintCallable, Category = "Consciousness Memory")
-    void* AllocateConsciousnessData(int32 Size);
+    // Limpeza de memória
+    UFUNCTION(BlueprintCallable, Category = "Memory Management")
+    int32 ForceGarbageCollection();
 
-    UFUNCTION(BlueprintCallable, Category = "Consciousness Memory")
-    void DeallocateConsciousnessData(void* Ptr);
+    UFUNCTION(BlueprintCallable, Category = "Memory Management")
+    int32 CleanupUnusedObjects(EMemoryCleanupStrategy Strategy = EMemoryCleanupStrategy::Balanced);
 
-    // Spiritual field memory management
-    UFUNCTION(BlueprintCallable, Category = "Spiritual Fields")
-    void PreallocateSpiritualFieldMemory(int32 SizeMB);
+    UFUNCTION(BlueprintCallable, Category = "Memory Management")
+    void SetAutoCleanupEnabled(bool bEnabled);
 
-    UFUNCTION(BlueprintCallable, Category = "Spiritual Fields")
-    void OptimizeSpiritualFieldMemory();
+    // Monitoramento
+    UFUNCTION(BlueprintCallable, Category = "Memory Management")
+    FMemoryStats GetMemoryStats() const;
 
-    // Memory monitoring and stats
-    UFUNCTION(BlueprintCallable, Category = "Memory Stats")
-    FMemoryUsageStats GetMemoryUsageStats() const;
+    UFUNCTION(BlueprintCallable, Category = "Memory Management")
+    float GetMemoryUsagePercentage() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Memory Stats")
-    void LogDetailedMemoryStats() const;
-
-    // Garbage collection optimization
-    UFUNCTION(BlueprintCallable, Category = "Optimization")
-    void OptimizeGarbageCollection();
-
-    UFUNCTION(BlueprintCallable, Category = "Optimization")
-    void SetGCFrequency(float Seconds);
-
-    // Streaming and loading optimization
-    UFUNCTION(BlueprintCallable, Category = "Streaming")
-    void PreloadConsciousnessAssets(const TArray<FString>& AssetPaths);
-
-    UFUNCTION(BlueprintCallable, Category = "Streaming")
-    void UnloadUnusedConsciousnessAssets();
-
-    // Memory pressure handling
-    UFUNCTION(BlueprintCallable, Category = "Memory Pressure")
-    void HandleMemoryPressure();
-
-    UFUNCTION(BlueprintCallable, Category = "Memory Pressure")
+    UFUNCTION(BlueprintCallable, Category = "Memory Management")
     bool IsMemoryPressureHigh() const;
 
-protected:
-    // Memory pools
-    UPROPERTY()
-    TMap<FString, TSharedPtr<FConsciousnessMemoryPool>> MemoryPools;
+    // Configurações
+    UFUNCTION(BlueprintCallable, Category = "Memory Management")
+    void SetMemoryWarningThreshold(float Threshold);
 
-    // Configuration
-    UPROPERTY(EditAnywhere, Category = "Configuration")
-    float GCFrequency = 30.0f;
+    UFUNCTION(BlueprintCallable, Category = "Memory Management")
+    void SetCleanupInterval(float IntervalSeconds);
 
-    UPROPERTY(EditAnywhere, Category = "Configuration")
-    float MemoryPressureThreshold = 0.85f; // 85% of available memory
+    // Texture streaming
+    UFUNCTION(BlueprintCallable, Category = "Memory Management")
+    void OptimizeTextureStreaming();
 
-    UPROPERTY(EditAnywhere, Category = "Configuration")
-    int32 MaxConsciousnessDataMB = 512;
+    UFUNCTION(BlueprintCallable, Category = "Memory Management")
+    void SetTextureStreamingPool(int32 PoolSizeMB);
 
-    UPROPERTY(EditAnywhere, Category = "Configuration")
-    int32 MaxSpiritualFieldsMB = 256;
+    // Audio memory
+    UFUNCTION(BlueprintCallable, Category = "Memory Management")
+    void CleanupAudioCache();
+
+    UFUNCTION(BlueprintCallable, Category = "Memory Management")
+    void SetAudioMemoryLimit(int32 LimitMB);
+
+    // Eventos
+    UPROPERTY(BlueprintAssignable, Category = "Memory Management")
+    FOnMemoryWarning OnMemoryWarning;
+
+    UPROPERTY(BlueprintAssignable, Category = "Memory Management")
+    FOnMemoryCleanup OnMemoryCleanup;
+
+    // Configurações
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory Settings")
+    float MemoryWarningThreshold = 0.8f; // 80%
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory Settings")
+    float MemoryCriticalThreshold = 0.9f; // 90%
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory Settings")
+    float CleanupInterval = 30.0f; // 30 segundos
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory Settings")
+    float ObjectTimeoutThreshold = 300.0f; // 5 minutos
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory Settings")
+    bool bAutoCleanupEnabled = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory Settings")
+    int32 MaxTrackedObjects = 10000;
 
 private:
-    FTimerHandle GCTimerHandle;
-    mutable FMemoryUsageStats CachedStats;
-    mutable float LastStatsUpdate = 0.0f;
+    // Tracking de objetos
+    TMap<TWeakObjectPtr<UObject>, FMemoryObjectInfo> TrackedObjects;
+    TQueue<TWeakObjectPtr<UObject>> CleanupQueue;
 
-    void PerformScheduledGC();
+    // Estado interno
+    bool bInitialized;
+    float LastCleanupTime;
+    float LastMemoryCheckTime;
+    float MemoryCheckInterval = 5.0f;
+    bool bMemoryWarningActive;
+
+    // Cache de estatísticas
+    mutable FMemoryStats CachedStats;
+    mutable float LastStatsUpdateTime;
+    float StatsUpdateInterval = 1.0f;
+
+    // Métodos internos
     void UpdateMemoryStats() const;
-    void InitializeDefaultPools();
+    void CheckMemoryPressure();
+    void PerformAutoCleanup();
+    int32 CleanupObjectsByStrategy(EMemoryCleanupStrategy Strategy);
+    bool ShouldCleanupObject(const FMemoryObjectInfo& ObjectInfo, EMemoryCleanupStrategy Strategy) const;
+    void RemoveInvalidObjects();
+    float GetObjectPriority(const FMemoryObjectInfo& ObjectInfo) const;
+    
+    // Texture streaming helpers
+    void UpdateTextureStreaming();
+    void ReduceTextureQuality();
+    void RestoreTextureQuality();
+    
+    // Audio memory helpers
+    void UpdateAudioMemory();
+    void UnloadUnusedAudio();
+    
+    // Platform-specific memory functions
+    void PlatformSpecificCleanup();
+    int64 GetGameMemoryUsage() const;
+    int64 GetTextureMemoryUsage() const;
+    int64 GetAudioMemoryUsage() const;
 };
