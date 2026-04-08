@@ -1,451 +1,382 @@
+// CrowdManager.cpp
+// Implementação do sistema de gestão de multidões conscientes
+
 #include "CrowdManager.h"
-#include "Engine/World.h"
 #include "Engine/Engine.h"
-#include "DrawDebugHelpers.h"
 #include "Kismet/GameplayStatics.h"
-#include "NavigationSystem.h"
-#include "../Core/ConsciousnessSystem.h"
-#include "../Combat/CombatSystem.h"
+#include "Math/UnrealMathUtility.h"
 
 ACrowdManager::ACrowdManager()
 {
     PrimaryActorTick.bCanEverTick = true;
-    
-    // Initialize default values
+
+    // Configurações padrão
     MaxCrowdSize = 100;
-    SpawnRadius = 2000.0f;
-    DespawnRadius = 3000.0f;
-    
-    SeparationRadius = 100.0f;
-    AlignmentRadius = 200.0f;
-    CohesionRadius = 300.0f;
-    AvoidanceRadius = 150.0f;
-    
-    ConsciousnessInfluenceRadius = 500.0f;
-    StressDecayRate = 0.5f;
-    
-    GridCellSize = 500.0f;
-    UpdateBatchSize = 10;
-    CurrentUpdateIndex = 0;
-    
-    // Create instanced mesh component
-    CrowdMeshComponent = CreateDefaultSubobject<UInstancedStaticMeshComponent>(TEXT("CrowdMeshComponent"));
-    RootComponent = CrowdMeshComponent;
+    SpawnRadius = 1000.0f;
+    MovementSpeed = 150.0f;
+    ConsciousnessInfluenceRange = 500.0f;
+
+    // Configurações de flocking
+    SeparationWeight = 2.0f;
+    AlignmentWeight = 1.0f;
+    CohesionWeight = 1.0f;
+    FlockingRadius = 100.0f;
+
+    // Estado inicial
+    CurrentCrowdState = ECrowdBehaviorState::Peaceful;
+
+    // Otimização
+    UpdateInterval = 0.1f; // Atualiza a cada 100ms
+    LastUpdateTime = 0.0f;
 }
 
 void ACrowdManager::BeginPlay()
 {
     Super::BeginPlay();
-    
-    // Initialize spatial grid
-    UpdateSpatialGrid();
-    
-    // Spawn initial crowd
-    for (int32 i = 0; i < MaxCrowdSize / 2; ++i)
+
+    // Encontra o sistema de consciência
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    if (PlayerPawn)
     {
-        FVector SpawnLocation = GetActorLocation() + FVector(
-            FMath::RandRange(-SpawnRadius, SpawnRadius),
-            FMath::RandRange(-SpawnRadius, SpawnRadius),
-            0.0f
-        );
-        
-        SpawnCrowdAgent(SpawnLocation);
+        ConsciousnessSystem = PlayerPawn->FindComponentByClass<UConsciousnessComponent>();
     }
+
+    // Spawn inicial da multidão
+    SpawnCrowdUnits(MaxCrowdSize / 2, GetActorLocation());
 }
 
 void ACrowdManager::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
-    
-    if (CrowdAgents.Num() == 0) return;
-    
-    // Update spatial grid periodically
+
     LastUpdateTime += DeltaTime;
-    if (LastUpdateTime >= 0.5f)
+    
+    if (LastUpdateTime >= UpdateInterval)
     {
-        UpdateSpatialGrid();
+        // Atualiza comportamento baseado na consciência do jogador
+        if (ConsciousnessSystem)
+        {
+            float PlayerConsciousness = ConsciousnessSystem->GetCurrentConsciousnessLevel();
+            UpdateCrowdBehavior(PlayerConsciousness);
+        }
+
+        // Atualiza movimento da multidão
+        UpdateCrowdMovement(DeltaTime);
+
+        // Aplica influência da consciência
+        ApplyConsciousnessInfluence();
+
         LastUpdateTime = 0.0f;
     }
-    
-    // Update crowd behavior in batches for performance
-    UpdateCrowdBehavior(DeltaTime);
-    UpdateCrowdPositions(DeltaTime);
-    UpdateInstancedMeshes();
 }
 
-void ACrowdManager::SpawnCrowdAgent(FVector Location)
+void ACrowdManager::SpawnCrowdUnits(int32 Count, FVector CenterLocation)
 {
-    if (CrowdAgents.Num() >= MaxCrowdSize) return;
-    
-    FCrowdAgent NewAgent;
-    NewAgent.Position = Location;
-    NewAgent.Destination = Location + FVector(
-        FMath::RandRange(-1000.0f, 1000.0f),
-        FMath::RandRange(-1000.0f, 1000.0f),
-        0.0f
-    );
-    NewAgent.Speed = FMath::RandRange(100.0f, 200.0f);
-    NewAgent.ConsciousnessLevel = FMath::RandRange(0.2f, 0.8f);
-    
-    CrowdAgents.Add(NewAgent);
-    
-    // Add instance to mesh component
-    FTransform InstanceTransform;
-    InstanceTransform.SetLocation(Location);
-    CrowdMeshComponent->AddInstance(InstanceTransform);
-}
-
-void ACrowdManager::RemoveCrowdAgent(int32 AgentIndex)
-{
-    if (AgentIndex >= 0 && AgentIndex < CrowdAgents.Num())
+    for (int32 i = 0; i < Count; i++)
     {
-        CrowdAgents.RemoveAt(AgentIndex);
-        CrowdMeshComponent->RemoveInstance(AgentIndex);
-    }
-}
-
-void ACrowdManager::SetCrowdDestination(FVector NewDestination)
-{
-    for (FCrowdAgent& Agent : CrowdAgents)
-    {
-        Agent.Destination = NewDestination + FVector(
-            FMath::RandRange(-200.0f, 200.0f),
-            FMath::RandRange(-200.0f, 200.0f),
+        FCrowdUnit NewUnit;
+        
+        // Posição aleatória dentro do raio de spawn
+        float Angle = FMath::RandRange(0.0f, 2.0f * PI);
+        float Distance = FMath::RandRange(0.0f, SpawnRadius);
+        
+        NewUnit.Position = CenterLocation + FVector(
+            FMath::Cos(Angle) * Distance,
+            FMath::Sin(Angle) * Distance,
             0.0f
         );
+
+        // Velocidade inicial aleatória
+        NewUnit.Velocity = FVector(
+            FMath::RandRange(-1.0f, 1.0f),
+            FMath::RandRange(-1.0f, 1.0f),
+            0.0f
+        ).GetSafeNormal() * MovementSpeed;
+
+        // Nível de consciência inicial aleatório
+        NewUnit.ConsciousnessLevel = FMath::RandRange(0.2f, 0.8f);
+        NewUnit.BehaviorState = CurrentCrowdState;
+
+        CrowdUnits.Add(NewUnit);
+
+        // Chama evento Blueprint
+        OnCrowdUnitSpawned(NewUnit);
     }
 }
 
-void ACrowdManager::TriggerCombatResponse(FVector CombatLocation, float Radius)
+void ACrowdManager::UpdateCrowdBehavior(float PlayerConsciousnessLevel)
 {
-    for (FCrowdAgent& Agent : CrowdAgents)
+    ECrowdBehaviorState NewState = CurrentCrowdState;
+
+    // Determina o estado da multidão baseado na consciência do jogador
+    if (PlayerConsciousnessLevel >= 0.8f)
     {
-        float Distance = FVector::Dist(Agent.Position, CombatLocation);
-        if (Distance <= Radius)
+        NewState = ECrowdBehaviorState::Transcendent;
+    }
+    else if (PlayerConsciousnessLevel >= 0.6f)
+    {
+        NewState = ECrowdBehaviorState::Peaceful;
+    }
+    else if (PlayerConsciousnessLevel >= 0.4f)
+    {
+        NewState = ECrowdBehaviorState::Agitated;
+    }
+    else if (PlayerConsciousnessLevel >= 0.2f)
+    {
+        NewState = ECrowdBehaviorState::Hostile;
+    }
+    else
+    {
+        NewState = ECrowdBehaviorState::Fearful;
+    }
+
+    if (NewState != CurrentCrowdState)
+    {
+        SetCrowdState(NewState);
+    }
+}
+
+void ACrowdManager::SetCrowdState(ECrowdBehaviorState NewState)
+{
+    CurrentCrowdState = NewState;
+
+    // Atualiza comportamento de todas as unidades
+    for (FCrowdUnit& Unit : CrowdUnits)
+    {
+        Unit.BehaviorState = NewState;
+        
+        // Ajusta propriedades baseado no estado
+        switch (NewState)
         {
-            Agent.bIsInCombat = true;
-            Agent.StressLevel = FMath::Min(1.0f, Agent.StressLevel + 0.5f);
+            case ECrowdBehaviorState::Peaceful:
+                Unit.InfluenceRadius = 200.0f;
+                break;
+            case ECrowdBehaviorState::Agitated:
+                Unit.InfluenceRadius = 150.0f;
+                break;
+            case ECrowdBehaviorState::Hostile:
+                Unit.InfluenceRadius = 100.0f;
+                break;
+            case ECrowdBehaviorState::Transcendent:
+                Unit.InfluenceRadius = 300.0f;
+                break;
+            case ECrowdBehaviorState::Fearful:
+                Unit.InfluenceRadius = 50.0f;
+                break;
+        }
+    }
+
+    // Chama evento Blueprint
+    OnCrowdStateChanged(NewState);
+}
+
+void ACrowdManager::UpdateCrowdMovement(float DeltaTime)
+{
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    FVector PlayerLocation = PlayerPawn ? PlayerPawn->GetActorLocation() : FVector::ZeroVector;
+
+    for (FCrowdUnit& Unit : CrowdUnits)
+    {
+        // Obtém unidades próximas para flocking
+        TArray<FCrowdUnit> NearbyUnits = GetNearbyUnits(Unit, FlockingRadius);
+        
+        // Calcula forças de flocking
+        FVector FlockingForce = FVector::ZeroVector;
+        if (NearbyUnits.Num() > 0)
+        {
+            CalculateFlocking(Unit, NearbyUnits);
+        }
+
+        // Força baseada no estado da multidão
+        FVector StateForce = FVector::ZeroVector;
+        float DistanceToPlayer = FVector::Dist(Unit.Position, PlayerLocation);
+
+        switch (Unit.BehaviorState)
+        {
+            case ECrowdBehaviorState::Peaceful:
+                // Movimento suave e orgânico
+                StateForce = FVector(
+                    FMath::Sin(GetWorld()->GetTimeSeconds() + Unit.Position.X * 0.01f),
+                    FMath::Cos(GetWorld()->GetTimeSeconds() + Unit.Position.Y * 0.01f),
+                    0.0f
+                ) * 50.0f;
+                break;
+
+            case ECrowdBehaviorState::Agitated:
+                // Movimento mais errático
+                StateForce = FVector(
+                    FMath::RandRange(-1.0f, 1.0f),
+                    FMath::RandRange(-1.0f, 1.0f),
+                    0.0f
+                ) * 100.0f;
+                break;
+
+            case ECrowdBehaviorState::Hostile:
+                // Move em direção ao jogador se próximo
+                if (DistanceToPlayer < ConsciousnessInfluenceRange)
+                {
+                    StateForce = (PlayerLocation - Unit.Position).GetSafeNormal() * 200.0f;
+                }
+                break;
+
+            case ECrowdBehaviorState::Transcendent:
+                // Movimento harmonioso em círculos
+                FVector CenterOffset = Unit.Position - GetActorLocation();
+                StateForce = FVector(-CenterOffset.Y, CenterOffset.X, 0.0f).GetSafeNormal() * 75.0f;
+                break;
+
+            case ECrowdBehaviorState::Fearful:
+                // Foge do jogador
+                if (DistanceToPlayer < ConsciousnessInfluenceRange)
+                {
+                    StateForce = (Unit.Position - PlayerLocation).GetSafeNormal() * 300.0f;
+                }
+                break;
+        }
+
+        // Aplica forças
+        Unit.Velocity += StateForce * DeltaTime;
+        Unit.Velocity = Unit.Velocity.GetClampedToMaxSize(MovementSpeed);
+
+        // Atualiza posição
+        Unit.Position += Unit.Velocity * DeltaTime;
+
+        // Mantém dentro dos limites do mundo
+        float WorldBounds = 2000.0f;
+        Unit.Position.X = FMath::Clamp(Unit.Position.X, -WorldBounds, WorldBounds);
+        Unit.Position.Y = FMath::Clamp(Unit.Position.Y, -WorldBounds, WorldBounds);
+    }
+}
+
+void ACrowdManager::ApplyConsciousnessInfluence()
+{
+    if (!ConsciousnessSystem) return;
+
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    if (!PlayerPawn) return;
+
+    FVector PlayerLocation = PlayerPawn->GetActorLocation();
+    float PlayerConsciousness = ConsciousnessSystem->GetCurrentConsciousnessLevel();
+
+    for (FCrowdUnit& Unit : CrowdUnits)
+    {
+        float DistanceToPlayer = FVector::Dist(Unit.Position, PlayerLocation);
+        
+        if (DistanceToPlayer <= ConsciousnessInfluenceRange)
+        {
+            // Calcula influência baseada na distância
+            float InfluenceFactor = 1.0f - (DistanceToPlayer / ConsciousnessInfluenceRange);
             
-            // Flee from combat location
-            FVector FleeDirection = (Agent.Position - CombatLocation).GetSafeNormal();
-            Agent.Destination = Agent.Position + FleeDirection * 1000.0f;
-            Agent.Speed *= 1.5f; // Panic speed boost
+            // Ajusta nível de consciência da unidade
+            float TargetConsciousness = FMath::Lerp(Unit.ConsciousnessLevel, PlayerConsciousness, InfluenceFactor * 0.1f);
+            Unit.ConsciousnessLevel = FMath::Clamp(TargetConsciousness, 0.0f, 1.0f);
         }
     }
 }
 
-void ACrowdManager::UpdateConsciousnessInfluence(FVector Location, float Influence, float Radius)
+void ACrowdManager::CalculateFlocking(FCrowdUnit& Unit, const TArray<FCrowdUnit>& NearbyUnits)
 {
-    for (FCrowdAgent& Agent : CrowdAgents)
-    {
-        float Distance = FVector::Dist(Agent.Position, Location);
-        if (Distance <= Radius)
-        {
-            float InfluenceStrength = 1.0f - (Distance / Radius);
-            Agent.ConsciousnessLevel = FMath::Clamp(
-                Agent.ConsciousnessLevel + Influence * InfluenceStrength * 0.1f,
-                0.0f, 1.0f
-            );
-        }
-    }
+    FVector Separation = CalculateSeparation(Unit, NearbyUnits);
+    FVector Alignment = CalculateAlignment(Unit, NearbyUnits);
+    FVector Cohesion = CalculateCohesion(Unit, NearbyUnits);
+
+    // Aplica pesos e adiciona à velocidade
+    FVector FlockingForce = (Separation * SeparationWeight) + 
+                           (Alignment * AlignmentWeight) + 
+                           (Cohesion * CohesionWeight);
+
+    Unit.Velocity += FlockingForce * 0.1f;
 }
 
-void ACrowdManager::UpdateCrowdBehavior(float DeltaTime)
-{
-    int32 BatchEnd = FMath::Min(CurrentUpdateIndex + UpdateBatchSize, CrowdAgents.Num());
-    
-    for (int32 i = CurrentUpdateIndex; i < BatchEnd; ++i)
-    {
-        FCrowdAgent& Agent = CrowdAgents[i];
-        
-        // Decay stress over time
-        Agent.StressLevel = FMath::Max(0.0f, Agent.StressLevel - StressDecayRate * DeltaTime);
-        
-        if (Agent.bIsInCombat && Agent.StressLevel < 0.2f)
-        {
-            Agent.bIsInCombat = false;
-            Agent.Speed /= 1.5f; // Return to normal speed
-        }
-        
-        if (Agent.bIsInCombat)
-        {
-            HandleCombatBehavior(Agent, DeltaTime);
-        }
-        else
-        {
-            HandleNormalBehavior(Agent, DeltaTime);
-        }
-    }
-    
-    CurrentUpdateIndex = BatchEnd;
-    if (CurrentUpdateIndex >= CrowdAgents.Num())
-    {
-        CurrentUpdateIndex = 0;
-    }
-}
-
-void ACrowdManager::HandleCombatBehavior(FCrowdAgent& Agent, float DeltaTime)
-{
-    // In combat: prioritize fleeing and avoiding others
-    FVector FleeForce = CalculateSeek(Agent, Agent.Destination) * 2.0f;
-    FVector SeparationForce = CalculateSeparation(Agent, CrowdAgents.IndexOfByKey(Agent)) * 3.0f;
-    FVector AvoidanceForce = CalculateAvoidance(Agent) * 4.0f;
-    
-    FVector TotalForce = FleeForce + SeparationForce + AvoidanceForce;
-    Agent.Velocity = (Agent.Velocity + TotalForce * DeltaTime).GetClampedToMaxSize(Agent.Speed);
-}
-
-void ACrowdManager::HandleNormalBehavior(FCrowdAgent& Agent, float DeltaTime)
-{
-    // Normal behavior: flocking with consciousness influence
-    FVector SeekForce = CalculateSeek(Agent, Agent.Destination);
-    FVector SeparationForce = CalculateSeparation(Agent, CrowdAgents.IndexOfByKey(Agent)) * 1.5f;
-    FVector AlignmentForce = CalculateAlignment(Agent, CrowdAgents.IndexOfByKey(Agent));
-    FVector CohesionForce = CalculateCohesion(Agent, CrowdAgents.IndexOfByKey(Agent)) * 0.5f;
-    FVector AvoidanceForce = CalculateAvoidance(Agent) * 2.0f;
-    
-    // Consciousness affects behavior weights
-    float ConsciousnessWeight = Agent.ConsciousnessLevel;
-    AlignmentForce *= ConsciousnessWeight;
-    CohesionForce *= ConsciousnessWeight;
-    
-    FVector TotalForce = SeekForce + SeparationForce + AlignmentForce + CohesionForce + AvoidanceForce;
-    Agent.Velocity = (Agent.Velocity + TotalForce * DeltaTime).GetClampedToMaxSize(Agent.Speed);
-    
-    // Update destination occasionally
-    if (FVector::Dist(Agent.Position, Agent.Destination) < 100.0f)
-    {
-        Agent.Destination = GetActorLocation() + FVector(
-            FMath::RandRange(-SpawnRadius, SpawnRadius),
-            FMath::RandRange(-SpawnRadius, SpawnRadius),
-            0.0f
-        );
-    }
-}
-
-void ACrowdManager::UpdateCrowdPositions(float DeltaTime)
-{
-    for (int32 i = CrowdAgents.Num() - 1; i >= 0; --i)
-    {
-        FCrowdAgent& Agent = CrowdAgents[i];
-        
-        // Update position
-        Agent.Position += Agent.Velocity * DeltaTime;
-        
-        // Remove agents that are too far away
-        float DistanceFromCenter = FVector::Dist(Agent.Position, GetActorLocation());
-        if (DistanceFromCenter > DespawnRadius)
-        {
-            RemoveCrowdAgent(i);
-            continue;
-        }
-        
-        // Spawn new agents if needed
-        if (CrowdAgents.Num() < MaxCrowdSize && FMath::RandRange(0.0f, 1.0f) < 0.01f)
-        {
-            FVector SpawnLocation = GetActorLocation() + FVector(
-                FMath::RandRange(-SpawnRadius, SpawnRadius),
-                FMath::RandRange(-SpawnRadius, SpawnRadius),
-                0.0f
-            );
-            SpawnCrowdAgent(SpawnLocation);
-        }
-    }
-}
-
-void ACrowdManager::UpdateInstancedMeshes()
-{
-    CrowdMeshComponent->ClearInstances();
-    
-    for (const FCrowdAgent& Agent : CrowdAgents)
-    {
-        FTransform InstanceTransform;
-        InstanceTransform.SetLocation(Agent.Position);
-        
-        // Rotate based on velocity
-        if (!Agent.Velocity.IsZero())
-        {
-            FRotator Rotation = Agent.Velocity.Rotation();
-            InstanceTransform.SetRotation(Rotation.Quaternion());
-        }
-        
-        // Scale based on consciousness level
-        float Scale = 0.8f + (Agent.ConsciousnessLevel * 0.4f);
-        InstanceTransform.SetScale3D(FVector(Scale));
-        
-        CrowdMeshComponent->AddInstance(InstanceTransform);
-    }
-}
-
-FVector ACrowdManager::CalculateSeparation(const FCrowdAgent& Agent, int32 AgentIndex)
+FVector ACrowdManager::CalculateSeparation(const FCrowdUnit& Unit, const TArray<FCrowdUnit>& NearbyUnits)
 {
     FVector SeparationForce = FVector::ZeroVector;
     int32 Count = 0;
-    
-    TArray<int32> NearbyAgents = GetNearbyAgents(Agent.Position, SeparationRadius);
-    
-    for (int32 OtherIndex : NearbyAgents)
+
+    for (const FCrowdUnit& Other : NearbyUnits)
     {
-        if (OtherIndex != AgentIndex && OtherIndex < CrowdAgents.Num())
+        float Distance = FVector::Dist(Unit.Position, Other.Position);
+        if (Distance > 0 && Distance < 50.0f) // Distância mínima de separação
         {
-            const FCrowdAgent& Other = CrowdAgents[OtherIndex];
-            float Distance = FVector::Dist(Agent.Position, Other.Position);
-            
-            if (Distance > 0.0f && Distance < SeparationRadius)
-            {
-                FVector Diff = (Agent.Position - Other.Position).GetSafeNormal();
-                Diff /= Distance; // Weight by distance
-                SeparationForce += Diff;
-                Count++;
-            }
+            FVector Diff = (Unit.Position - Other.Position).GetSafeNormal();
+            Diff /= Distance; // Peso inversamente proporcional à distância
+            SeparationForce += Diff;
+            Count++;
         }
     }
-    
+
     if (Count > 0)
     {
         SeparationForce /= Count;
-        SeparationForce = SeparationForce.GetSafeNormal() * Agent.Speed;
-        SeparationForce -= Agent.Velocity;
+        SeparationForce = SeparationForce.GetSafeNormal() * MovementSpeed;
+        SeparationForce -= Unit.Velocity;
     }
-    
+
     return SeparationForce;
 }
 
-FVector ACrowdManager::CalculateAlignment(const FCrowdAgent& Agent, int32 AgentIndex)
+FVector ACrowdManager::CalculateAlignment(const FCrowdUnit& Unit, const TArray<FCrowdUnit>& NearbyUnits)
 {
-    FVector AlignmentForce = FVector::ZeroVector;
+    FVector AverageVelocity = FVector::ZeroVector;
     int32 Count = 0;
-    
-    TArray<int32> NearbyAgents = GetNearbyAgents(Agent.Position, AlignmentRadius);
-    
-    for (int32 OtherIndex : NearbyAgents)
-    {
-        if (OtherIndex != AgentIndex && OtherIndex < CrowdAgents.Num())
-        {
-            const FCrowdAgent& Other = CrowdAgents[OtherIndex];
-            float Distance = FVector::Dist(Agent.Position, Other.Position);
-            
-            if (Distance > 0.0f && Distance < AlignmentRadius)
-            {
-                AlignmentForce += Other.Velocity;
-                Count++;
-            }
-        }
-    }
-    
-    if (Count > 0)
-    {
-        AlignmentForce /= Count;
-        AlignmentForce = AlignmentForce.GetSafeNormal() * Agent.Speed;
-        AlignmentForce -= Agent.Velocity;
-    }
-    
-    return AlignmentForce;
-}
 
-FVector ACrowdManager::CalculateCohesion(const FCrowdAgent& Agent, int32 AgentIndex)
-{
-    FVector CenterOfMass = FVector::ZeroVector;
-    int32 Count = 0;
-    
-    TArray<int32> NearbyAgents = GetNearbyAgents(Agent.Position, CohesionRadius);
-    
-    for (int32 OtherIndex : NearbyAgents)
+    for (const FCrowdUnit& Other : NearbyUnits)
     {
-        if (OtherIndex != AgentIndex && OtherIndex < CrowdAgents.Num())
-        {
-            const FCrowdAgent& Other = CrowdAgents[OtherIndex];
-            float Distance = FVector::Dist(Agent.Position, Other.Position);
-            
-            if (Distance > 0.0f && Distance < CohesionRadius)
-            {
-                CenterOfMass += Other.Position;
-                Count++;
-            }
-        }
+        AverageVelocity += Other.Velocity;
+        Count++;
     }
-    
+
     if (Count > 0)
     {
-        CenterOfMass /= Count;
-        return CalculateSeek(Agent, CenterOfMass);
+        AverageVelocity /= Count;
+        AverageVelocity = AverageVelocity.GetSafeNormal() * MovementSpeed;
+        return AverageVelocity - Unit.Velocity;
     }
-    
+
     return FVector::ZeroVector;
 }
 
-FVector ACrowdManager::CalculateAvoidance(const FCrowdAgent& Agent)
+FVector ACrowdManager::CalculateCohesion(const FCrowdUnit& Unit, const TArray<FCrowdUnit>& NearbyUnits)
 {
-    FVector AvoidanceForce = FVector::ZeroVector;
-    
-    // Simple obstacle avoidance using raycasting
-    UWorld* World = GetWorld();
-    if (!World) return AvoidanceForce;
-    
-    FVector ForwardDirection = Agent.Velocity.GetSafeNormal();
-    FVector StartLocation = Agent.Position;
-    FVector EndLocation = StartLocation + ForwardDirection * AvoidanceRadius;
-    
-    FHitResult HitResult;
-    FCollisionQueryParams QueryParams;
-    QueryParams.AddIgnoredActor(this);
-    
-    if (World->LineTraceSingleByChannel(HitResult, StartLocation, EndLocation, ECC_WorldStatic, QueryParams))
+    FVector CenterOfMass = FVector::ZeroVector;
+    int32 Count = 0;
+
+    for (const FCrowdUnit& Other : NearbyUnits)
     {
-        FVector AvoidDirection = FVector::CrossProduct(ForwardDirection, FVector::UpVector);
-        if (FMath::RandBool())
-        {
-            AvoidDirection *= -1.0f;
-        }
-        AvoidanceForce = AvoidDirection * Agent.Speed;
+        CenterOfMass += Other.Position;
+        Count++;
     }
-    
-    return AvoidanceForce;
-}
 
-FVector ACrowdManager::CalculateSeek(const FCrowdAgent& Agent, FVector Target)
-{
-    FVector Desired = (Target - Agent.Position).GetSafeNormal() * Agent.Speed;
-    return Desired - Agent.Velocity;
-}
-
-void ACrowdManager::UpdateSpatialGrid()
-{
-    SpatialGrid.Empty();
-    
-    for (int32 i = 0; i < CrowdAgents.Num(); ++i)
+    if (Count > 0)
     {
-        const FCrowdAgent& Agent = CrowdAgents[i];
-        FIntPoint GridCoord = FIntPoint(
-            FMath::FloorToInt(Agent.Position.X / GridCellSize),
-            FMath::FloorToInt(Agent.Position.Y / GridCellSize)
-        );
-        
-        SpatialGrid.FindOrAdd(GridCoord).Add(i);
+        CenterOfMass /= Count;
+        FVector Desired = (CenterOfMass - Unit.Position).GetSafeNormal() * MovementSpeed;
+        return Desired - Unit.Velocity;
     }
+
+    return FVector::ZeroVector;
 }
 
-TArray<int32> ACrowdManager::GetNearbyAgents(const FVector& Position, float Radius)
+TArray<FCrowdUnit> ACrowdManager::GetNearbyUnits(const FCrowdUnit& Unit, float Radius)
 {
-    TArray<int32> NearbyAgents;
-    
-    int32 GridRadius = FMath::CeilToInt(Radius / GridCellSize);
-    FIntPoint CenterGrid = FIntPoint(
-        FMath::FloorToInt(Position.X / GridCellSize),
-        FMath::FloorToInt(Position.Y / GridCellSize)
-    );
-    
-    for (int32 x = -GridRadius; x <= GridRadius; ++x)
+    TArray<FCrowdUnit> NearbyUnits;
+
+    for (const FCrowdUnit& Other : CrowdUnits)
     {
-        for (int32 y = -GridRadius; y <= GridRadius; ++y)
+        if (&Other != &Unit)
         {
-            FIntPoint GridCoord = CenterGrid + FIntPoint(x, y);
-            if (SpatialGrid.Contains(GridCoord))
+            float Distance = FVector::Dist(Unit.Position, Other.Position);
+            if (Distance <= Radius)
             {
-                NearbyAgents.Append(SpatialGrid[GridCoord]);
+                NearbyUnits.Add(Other);
             }
         }
     }
-    
-    return NearbyAgents;
+
+    return NearbyUnits;
+}
+
+void ACrowdManager::ClearCrowd()
+{
+    CrowdUnits.Empty();
 }
