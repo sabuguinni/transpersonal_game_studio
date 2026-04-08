@@ -1,0 +1,227 @@
+{
+    "AssetType": "PCGGraph",
+    "Version": "5.5",
+    "Description": "Biome distribution system for prehistoric environments",
+    "Nodes": [
+        {
+            "NodeType": "PCGLandscapeData",
+            "NodeName": "LandscapeInput",
+            "Settings": {
+                "bUseMetadata": true,
+                "bSampleVirtualTextures": true
+            },
+            "Position": [0, 0]
+        },
+        {
+            "NodeType": "PCGNoise",
+            "NodeName": "BiomeNoise",
+            "Settings": {
+                "NoiseType": "Voronoi",
+                "Frequency": 0.0005,
+                "Amplitude": 1.0,
+                "CellularJitter": 0.8,
+                "VoronoiFunction": "F1"
+            },
+            "Position": [300, 0]
+        },
+        {
+            "NodeType": "PCGAttributePartition",
+            "NodeName": "BiomePartition",
+            "Settings": {
+                "PartitionAttribute": "BiomeID",
+                "PartitionMode": "ByAttribute"
+            },
+            "Position": [600, 0]
+        },
+        {
+            "NodeType": "PCGBranch",
+            "NodeName": "DenseJungleBranch",
+            "Settings": {
+                "Condition": "BiomeID == 0"
+            },
+            "Position": [900, -200]
+        },
+        {
+            "NodeType": "PCGBranch",
+            "NodeName": "OpenPlainsBranch", 
+            "Settings": {
+                "Condition": "BiomeID == 1"
+            },
+            "Position": [900, -100]
+        },
+        {
+            "NodeType": "PCGBranch",
+            "NodeName": "RiverDeltaBranch",
+            "Settings": {
+                "Condition": "BiomeID == 2"
+            },
+            "Position": [900, 0]
+        },
+        {
+            "NodeType": "PCGBranch",
+            "NodeName": "RockyOutcropsBranch",
+            "Settings": {
+                "Condition": "BiomeID == 3"
+            },
+            "Position": [900, 100]
+        },
+        {
+            "NodeType": "PCGBranch",
+            "NodeName": "SwamplandsBranch",
+            "Settings": {
+                "Condition": "BiomeID == 4"
+            },
+            "Position": [900, 200]
+        },
+        {
+            "NodeType": "PCGAttributeModify",
+            "NodeName": "SetJungleProperties",
+            "Settings": {
+                "Attributes": {
+                    "VegetationDensity": 1.5,
+                    "TerrainRoughness": 0.8,
+                    "WaterCoverage": 0.1
+                }
+            },
+            "Position": [1200, -200]
+        },
+        {
+            "NodeType": "PCGAttributeModify",
+            "NodeName": "SetPlainsProperties",
+            "Settings": {
+                "Attributes": {
+                    "VegetationDensity": 0.6,
+                    "TerrainRoughness": 0.3,
+                    "WaterCoverage": 0.05
+                }
+            },
+            "Position": [1200, -100]
+        },
+        {
+            "NodeType": "PCGAttributeModify",
+            "NodeName": "SetDeltaProperties",
+            "Settings": {
+                "Attributes": {
+                    "VegetationDensity": 1.2,
+                    "TerrainRoughness": 0.4,
+                    "WaterCoverage": 0.4
+                }
+            },
+            "Position": [1200, 0]
+        },
+        {
+            "NodeType": "PCGAttributeModify",
+            "NodeName": "SetRockyProperties",
+            "Settings": {
+                "Attributes": {
+                    "VegetationDensity": 0.3,
+                    "TerrainRoughness": 0.9,
+                    "WaterCoverage": 0.0
+                }
+            },
+            "Position": [1200, 100]
+        },
+        {
+            "NodeType": "PCGAttributeModify",
+            "NodeName": "SetSwampProperties",
+            "Settings": {
+                "Attributes": {
+                    "VegetationDensity": 1.0,
+                    "TerrainRoughness": 0.2,
+                    "WaterCoverage": 0.6
+                }
+            },
+            "Position": [1200, 200]
+        },
+        {
+            "NodeType": "PCGUnion",
+            "NodeName": "CombineBiomes",
+            "Settings": {
+                "Type": "Inplace",
+                "DensityFunction": "Maximum"
+            },
+            "Position": [1500, 0]
+        }
+    ],
+    "Connections": [
+        {
+            "From": "LandscapeInput.Out",
+            "To": "BiomeNoise.In"
+        },
+        {
+            "From": "BiomeNoise.Out",
+            "To": "BiomePartition.In"
+        },
+        {
+            "From": "BiomePartition.Out",
+            "To": "DenseJungleBranch.In"
+        },
+        {
+            "From": "BiomePartition.Out",
+            "To": "OpenPlainsBranch.In"
+        },
+        {
+            "From": "BiomePartition.Out",
+            "To": "RiverDeltaBranch.In"
+        },
+        {
+            "From": "BiomePartition.Out",
+            "To": "RockyOutcropsBranch.In"
+        },
+        {
+            "From": "BiomePartition.Out",
+            "To": "SwamplandsBranch.In"
+        },
+        {
+            "From": "DenseJungleBranch.True",
+            "To": "SetJungleProperties.In"
+        },
+        {
+            "From": "OpenPlainsBranch.True",
+            "To": "SetPlainsProperties.In"
+        },
+        {
+            "From": "RiverDeltaBranch.True",
+            "To": "SetDeltaProperties.In"
+        },
+        {
+            "From": "RockyOutcropsBranch.True",
+            "To": "SetRockyProperties.In"
+        },
+        {
+            "From": "SwamplandsBranch.True",
+            "To": "SetSwampProperties.In"
+        },
+        {
+            "From": "SetJungleProperties.Out",
+            "To": "CombineBiomes.In"
+        },
+        {
+            "From": "SetPlainsProperties.Out",
+            "To": "CombineBiomes.In"
+        },
+        {
+            "From": "SetDeltaProperties.Out",
+            "To": "CombineBiomes.In"
+        },
+        {
+            "From": "SetRockyProperties.Out",
+            "To": "CombineBiomes.In"
+        },
+        {
+            "From": "SetSwampProperties.Out",
+            "To": "CombineBiomes.In"
+        }
+    ],
+    "GraphSettings": {
+        "UseHierarchicalGeneration": true,
+        "HiGenDefaultGridSize": 12800,
+        "RuntimeGeneration": {
+            "GenerationRadii": {
+                "12800": 1280.0,
+                "6400": 640.0,
+                "3200": 320.0
+            }
+        }
+    }
+}
