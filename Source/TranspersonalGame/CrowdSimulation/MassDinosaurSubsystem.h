@@ -1,18 +1,19 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Subsystems/WorldSubsystem.h"
 #include "MassEntitySubsystem.h"
+#include "MassSpawnerSubsystem.h"
 #include "MassSimulationSubsystem.h"
 #include "Engine/World.h"
 #include "MassDinosaurSubsystem.generated.h"
 
-class UMassEntitySubsystem;
-class UMassSimulationSubsystem;
+class UMassEntityConfigAsset;
+class UMassSpawnerConfig;
 
 /**
- * Subsystem responsible for managing dinosaur crowd simulation
- * Handles spawning, despawning, and lifecycle management of dinosaur herds
- * Supports up to 50,000 simultaneous agents using UE5 Mass Entity framework
+ * Subsystem responsible for managing large-scale dinosaur crowd simulation
+ * Handles spawning, lifecycle, and coordination of up to 50,000 dinosaur entities
  */
 UCLASS()
 class TRANSPERSONALGAME_API UMassDinosaurSubsystem : public UWorldSubsystem
@@ -25,49 +26,84 @@ public:
     virtual void Deinitialize() override;
     virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
 
-    // Dinosaur herd management
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur Simulation")
-    void SpawnHerd(const FVector& Location, int32 HerdSize, TSubclassOf<class ADinosaurBase> DinosaurClass);
-    
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur Simulation")
-    void DespawnHerd(int32 HerdID);
-    
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur Simulation")
-    void TriggerMigration(const FVector& FromLocation, const FVector& ToLocation, float MigrationRadius = 5000.0f);
-    
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur Simulation")
-    void TriggerPredatorAlert(const FVector& ThreatLocation, float AlertRadius = 2000.0f);
+    // Crowd Management
+    UFUNCTION(BlueprintCallable, Category = "Mass Dinosaur")
+    void SpawnDinosaurHerd(const FVector& Location, int32 Count, const FString& SpeciesType);
 
-    // Performance monitoring
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur Simulation")
-    int32 GetActiveEntityCount() const;
-    
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur Simulation")
-    float GetSimulationPerformance() const;
+    UFUNCTION(BlueprintCallable, Category = "Mass Dinosaur")
+    void SpawnPredatorPack(const FVector& Location, int32 Count, const FString& SpeciesType);
+
+    UFUNCTION(BlueprintCallable, Category = "Mass Dinosaur")
+    void DespawnDinosaursInRadius(const FVector& Location, float Radius);
+
+    // Ecosystem Management
+    UFUNCTION(BlueprintCallable, Category = "Mass Dinosaur")
+    void TriggerMigration(const FString& SpeciesType, const FVector& FromLocation, const FVector& ToLocation);
+
+    UFUNCTION(BlueprintCallable, Category = "Mass Dinosaur")
+    void SetDayNightCycle(bool bIsDay);
+
+    UFUNCTION(BlueprintCallable, Category = "Mass Dinosaur")
+    void TriggerWeatherEvent(const FString& WeatherType, float Intensity);
+
+    // Performance Management
+    UFUNCTION(BlueprintCallable, Category = "Mass Dinosaur")
+    void SetSimulationLOD(int32 LODLevel);
+
+    UFUNCTION(BlueprintCallable, Category = "Mass Dinosaur")
+    int32 GetActiveDinosaurCount() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Mass Dinosaur")
+    float GetCurrentPerformanceMetric() const;
 
 protected:
+    // Core Mass Framework References
     UPROPERTY()
-    UMassEntitySubsystem* MassEntitySubsystem;
-    
-    UPROPERTY()
-    UMassSimulationSubsystem* MassSimulationSubsystem;
+    TObjectPtr<UMassEntitySubsystem> EntitySubsystem;
 
-    // Herd tracking
     UPROPERTY()
-    TMap<int32, FMassEntityHandle> ActiveHerds;
-    
-    UPROPERTY()
-    int32 NextHerdID;
+    TObjectPtr<UMassSpawnerSubsystem> SpawnerSubsystem;
 
-    // Performance metrics
+    UPROPERTY()
+    TObjectPtr<UMassSimulationSubsystem> SimulationSubsystem;
+
+    // Dinosaur Species Configurations
+    UPROPERTY(EditDefaultsOnly, Category = "Dinosaur Species")
+    TMap<FString, TObjectPtr<UMassEntityConfigAsset>> HerbivoreConfigs;
+
+    UPROPERTY(EditDefaultsOnly, Category = "Dinosaur Species")
+    TMap<FString, TObjectPtr<UMassEntityConfigAsset>> CarnivoreConfigs;
+
+    UPROPERTY(EditDefaultsOnly, Category = "Dinosaur Species")
+    TMap<FString, TObjectPtr<UMassEntityConfigAsset>> OmnivoreConfigs;
+
+    // Spawning Configuration
+    UPROPERTY(EditDefaultsOnly, Category = "Spawning")
+    TObjectPtr<UMassSpawnerConfig> DefaultSpawnerConfig;
+
+    // Performance Tracking
+    UPROPERTY()
+    int32 CurrentEntityCount;
+
     UPROPERTY()
     float LastFrameTime;
-    
-    UPROPERTY()
-    int32 MaxEntitiesPerFrame;
+
+    UPROPERTY(EditDefaultsOnly, Category = "Performance")
+    int32 MaxEntityCount = 50000;
+
+    UPROPERTY(EditDefaultsOnly, Category = "Performance")
+    float TargetFrameTime = 16.67f; // 60 FPS
 
 private:
-    void InitializeMassFramework();
-    void SetupDinosaurArchetypes();
-    void RegisterProcessors();
+    // Internal Management
+    void UpdatePerformanceMetrics();
+    void OptimizeSimulationLOD();
+    bool CanSpawnMoreEntities(int32 RequestedCount) const;
+    
+    // Ecosystem Logic
+    void InitializeEcosystemZones();
+    void UpdateEcosystemBehavior();
+    
+    FTimerHandle EcosystemUpdateTimer;
+    FTimerHandle PerformanceUpdateTimer;
 };
