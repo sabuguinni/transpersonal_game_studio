@@ -2,51 +2,11 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/PlayerController.h"
-#include "InputActionValue.h"
 #include "Core/ConsciousnessSystem.h"
+#include "Core/RealitySystem.h"
+#include "Core/PerceptionSystem.h"
 #include "TranspersonalPlayerController.generated.h"
 
-class UInputMappingContext;
-class UInputAction;
-class UConsciousnessSystem;
-
-UENUM(BlueprintType)
-enum class EInteractionMode : uint8
-{
-    Exploration     UMETA(DisplayName = "Exploration Mode"),
-    Meditation      UMETA(DisplayName = "Meditation Mode"),
-    Observation     UMETA(DisplayName = "Observation Mode"),
-    Transformation  UMETA(DisplayName = "Transformation Mode")
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FMeditationSettings
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Meditation")
-    float BreathingCycleDuration = 8.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Meditation")
-    float AwarenessGainRate = 2.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Meditation")
-    float ClarityGainRate = 1.5f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Meditation")
-    bool bRequireStillness = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Meditation")
-    float MaxMovementThreshold = 10.0f;
-};
-
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnInteractionModeChanged, EInteractionMode, NewMode);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnMeditationStateChanged, bool, bIsMeditating, float, SessionDuration);
-
-/**
- * Enhanced player controller for transpersonal gameplay mechanics
- * Handles consciousness-based interactions, meditation systems, and reality shifting
- */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API ATranspersonalPlayerController : public APlayerController
 {
@@ -58,137 +18,115 @@ public:
 protected:
     virtual void BeginPlay() override;
     virtual void SetupInputComponent() override;
-
-public:
     virtual void Tick(float DeltaTime) override;
+
+    // System References
+    UPROPERTY(BlueprintReadOnly, Category = "Systems")
+    class UConsciousnessSystem* ConsciousnessSystem;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Systems")
+    class URealitySystem* RealitySystem;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Systems")
+    class UPerceptionSystem* PerceptionSystem;
 
     // Input Actions
     UFUNCTION(BlueprintCallable, Category = "Input")
-    void SetupEnhancedInput();
+    void OnMeditatePressed();
 
-    // Interaction Modes
-    UFUNCTION(BlueprintCallable, Category = "Interaction")
-    void SetInteractionMode(EInteractionMode NewMode);
+    UFUNCTION(BlueprintCallable, Category = "Input")
+    void OnMeditateReleased();
 
-    UFUNCTION(BlueprintPure, Category = "Interaction")
-    EInteractionMode GetCurrentInteractionMode() const { return CurrentInteractionMode; }
+    UFUNCTION(BlueprintCallable, Category = "Input")
+    void OnCyclePerceptionMode();
 
-    // Meditation System
-    UFUNCTION(BlueprintCallable, Category = "Meditation")
-    void StartMeditation();
+    UFUNCTION(BlueprintCallable, Category = "Input")
+    void OnToggleEnergyVision();
 
-    UFUNCTION(BlueprintCallable, Category = "Meditation")
-    void StopMeditation();
+    UFUNCTION(BlueprintCallable, Category = "Input")
+    void OnToggleSymbolicVision();
 
-    UFUNCTION(BlueprintPure, Category = "Meditation")
-    bool IsMeditating() const { return bIsMeditating; }
+    UFUNCTION(BlueprintCallable, Category = "Input")
+    void OnIncreaseAwareness();
 
-    UFUNCTION(BlueprintPure, Category = "Meditation")
-    float GetMeditationDuration() const { return MeditationDuration; }
+    UFUNCTION(BlueprintCallable, Category = "Input")
+    void OnDecreaseAwareness();
 
-    UFUNCTION(BlueprintCallable, Category = "Meditation")
-    void SetMeditationSettings(const FMeditationSettings& NewSettings);
-
-    // Consciousness Interaction
+    // Consciousness Control
     UFUNCTION(BlueprintCallable, Category = "Consciousness")
-    void AttemptConsciousnessStateTransition(EConsciousnessState TargetState);
+    void InitiateConsciousnessShift(EConsciousnessState TargetState);
 
     UFUNCTION(BlueprintCallable, Category = "Consciousness")
-    void AttemptRealityLayerShift(ERealityLayer TargetLayer);
+    void ModifyConsciousnessMetric(const FString& MetricName, float Delta);
 
-    // Observation System
-    UFUNCTION(BlueprintCallable, Category = "Observation")
-    void StartObservation(AActor* TargetActor);
+    UFUNCTION(BlueprintCallable, Category = "Consciousness")
+    void EnterMeditativeState();
 
-    UFUNCTION(BlueprintCallable, Category = "Observation")
-    void StopObservation();
+    UFUNCTION(BlueprintCallable, Category = "Consciousness")
+    void ExitMeditativeState();
 
-    UFUNCTION(BlueprintPure, Category = "Observation")
-    bool IsObserving() const { return bIsObserving; }
+    // Reality Manipulation
+    UFUNCTION(BlueprintCallable, Category = "Reality")
+    void CreateRealityRipple(FVector Location, float Intensity = 0.5f);
 
-    // Events
-    UPROPERTY(BlueprintAssignable, Category = "Events")
-    FOnInteractionModeChanged OnInteractionModeChanged;
+    UFUNCTION(BlueprintCallable, Category = "Reality")
+    void ShiftRealityLayer(ERealityLayer NewLayer);
 
-    UPROPERTY(BlueprintAssignable, Category = "Events")
-    FOnMeditationStateChanged OnMeditationStateChanged;
+    UFUNCTION(BlueprintCallable, Category = "Reality")
+    void StabilizeReality();
 
-protected:
-    // Input Mapping Context
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
-    TObjectPtr<UInputMappingContext> DefaultMappingContext;
+    // Perception Control
+    UFUNCTION(BlueprintCallable, Category = "Perception")
+    void CyclePerceptionMode();
 
-    // Input Actions
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
-    TObjectPtr<UInputAction> MoveAction;
+    UFUNCTION(BlueprintCallable, Category = "Perception")
+    void TogglePerceptionFilter(EPerceptionFilter Filter);
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
-    TObjectPtr<UInputAction> LookAction;
+    UFUNCTION(BlueprintCallable, Category = "Perception")
+    void FocusPerception(AActor* Target);
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
-    TObjectPtr<UInputAction> MeditateAction;
+    // Event Handlers
+    UFUNCTION()
+    void OnConsciousnessStateChanged(EConsciousnessState OldState, EConsciousnessState NewState);
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
-    TObjectPtr<UInputAction> ObserveAction;
+    UFUNCTION()
+    void OnRealityLayerChanged(ERealityLayer NewLayer);
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
-    TObjectPtr<UInputAction> InteractAction;
+    UFUNCTION()
+    void OnPerceptionModeChanged(EPerceptionMode NewMode);
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
-    TObjectPtr<UInputAction> TransformAction;
+    // UI Integration
+    UFUNCTION(BlueprintImplementableEvent, Category = "UI")
+    void UpdateConsciousnessUI(const FConsciousnessMetrics& Metrics);
 
-    // Meditation Configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Meditation")
-    FMeditationSettings MeditationSettings;
+    UFUNCTION(BlueprintImplementableEvent, Category = "UI")
+    void UpdateRealityUI(ERealityLayer Layer, ERealityStability Stability);
 
-    // State
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    EInteractionMode CurrentInteractionMode;
+    UFUNCTION(BlueprintImplementableEvent, Category = "UI")
+    void UpdatePerceptionUI(EPerceptionMode Mode, const TArray<EPerceptionFilter>& ActiveFilters);
 
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    bool bIsMeditating = false;
+    UFUNCTION(BlueprintImplementableEvent, Category = "UI")
+    void ShowTransitionEffect(EConsciousnessState FromState, EConsciousnessState ToState);
 
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    float MeditationDuration = 0.0f;
+    // Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
+    float MeditationRate = 0.1f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    bool bIsObserving = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
+    float AwarenessModificationRate = 0.05f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    TObjectPtr<AActor> ObservationTarget;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
+    float RealityRippleRadius = 200.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
+    float RealityRippleDuration = 5.0f;
 
 private:
-    // Input Handlers
-    void Move(const FInputActionValue& Value);
-    void Look(const FInputActionValue& Value);
-    void ToggleMeditation();
-    void ToggleObservation();
-    void Interact();
-    void Transform();
+    bool bIsMeditating;
+    float MeditationTimer;
+    int32 CurrentPerceptionModeIndex;
 
-    // Consciousness System Reference
-    UPROPERTY()
-    TObjectPtr<UConsciousnessSystem> ConsciousnessSystem;
-
-    // Meditation System
     void UpdateMeditation(float DeltaTime);
-    void ProcessMeditationGains(float DeltaTime);
-    bool CheckMeditationConditions() const;
-
-    // Observation System
-    void UpdateObservation(float DeltaTime);
-    void ProcessObservationGains(float DeltaTime);
-
-    // Movement Tracking for Meditation
-    FVector LastFrameLocation;
-    float AccumulatedMovement = 0.0f;
-    float MovementResetTime = 0.0f;
-
-    // Breathing Cycle for Meditation
-    float BreathingCycleTime = 0.0f;
-    bool bInhaling = true;
-
-    // Observation Data
-    float ObservationDuration = 0.0f;
-    float LastObservationGainTime = 0.0f;
+    void BindSystemEvents();
+    void UnbindSystemEvents();
 };
