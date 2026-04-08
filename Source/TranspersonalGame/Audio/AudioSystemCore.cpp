@@ -1,301 +1,391 @@
 #include "AudioSystemCore.h"
-#include "Components/AudioComponent.h"
+#include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
-#include "AudioDevice.h"
-#include "MetasoundParameterTransmitter.h"
+#include "Components/AudioComponent.h"
+#include "AudioMixerBlueprintLibrary.h"
+#include "MetasoundParameterPack.h"
 
 UAudioSystemCore::UAudioSystemCore()
 {
     // Initialize default audio state
-    CurrentAudioState.EmotionalState = EAudioEmotionalState::Calm;
-    CurrentAudioState.EnvironmentType = EEnvironmentType::DenseForest;
-    CurrentAudioState.TensionLevel = 0.0f;
-    CurrentAudioState.ProximityToDanger = 0.0f;
-    CurrentAudioState.bIsNightTime = false;
-    CurrentAudioState.WeatherIntensity = 0.0f;
+    CurrentAudioState.EmotionalState = EEmotionalState::Calm;
+    CurrentAudioState.TimeOfDay = ETimeOfDay::Morning;
+    CurrentAudioState.CurrentBiome = EBiomeType::DenseForest;
+    CurrentAudioState.ThreatLevel = 0.0f;
+    CurrentAudioState.ExplorationProgress = 0.0f;
+    CurrentAudioState.bNearDinosaurs = false;
+    CurrentAudioState.bInShelter = false;
+    CurrentAudioState.DistanceToNearestThreat = 1000.0f;
 
-    TargetEmotionalState = EAudioEmotionalState::Calm;
-}
-
-void UAudioSystemCore::InitializeAudioSystem()
-{
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        UE_LOG(LogAudio, Warning, TEXT("AudioSystemCore: No valid world found during initialization"));
-        return;
-    }
-
-    // Create audio components
-    MusicAudioComponent = NewObject<UAudioComponent>(this);
-    AmbienceAudioComponent = NewObject<UAudioComponent>(this);
-    PlayerAudioComponent = NewObject<UAudioComponent>(this);
-
-    if (MusicAudioComponent)
-    {
-        MusicAudioComponent->SetSound(AdaptiveMusicMetaSound);
-        MusicAudioComponent->SetVolumeMultiplier(0.7f);
-        MusicAudioComponent->bAutoActivate = false;
-    }
-
-    if (AmbienceAudioComponent)
-    {
-        AmbienceAudioComponent->SetSound(EnvironmentalAmbienceMetaSound);
-        AmbienceAudioComponent->SetVolumeMultiplier(0.8f);
-        AmbienceAudioComponent->bAutoActivate = true;
-        AmbienceAudioComponent->Play();
-    }
-
-    if (PlayerAudioComponent)
-    {
-        PlayerAudioComponent->SetVolumeMultiplier(0.6f);
-        PlayerAudioComponent->bAutoActivate = false;
-    }
-
-    UE_LOG(LogAudio, Log, TEXT("AudioSystemCore: Audio system initialized successfully"));
+    DefaultTransitionTime = 2.0f;
 }
 
 void UAudioSystemCore::UpdateAudioState(const FAudioStateData& NewState)
 {
-    FAudioStateData PreviousState = CurrentAudioState;
+    PreviousAudioState = CurrentAudioState;
     CurrentAudioState = NewState;
 
-    // Calculate tension level based on multiple factors
-    CalculateTensionLevel();
+    // Trigger necessary audio updates based on state changes
+    if (PreviousAudioState.EmotionalState != CurrentAudioState.EmotionalState)
+    {
+        TriggerMusicTransition(CurrentAudioState.EmotionalState);
+    }
+
+    if (PreviousAudioState.TimeOfDay != CurrentAudioState.TimeOfDay ||
+        PreviousAudioState.CurrentBiome != CurrentAudioState.CurrentBiome)
+    {
+        UpdateAmbientLayers();
+    }
 
     // Update MetaSound parameters
     UpdateMetaSoundParameters();
-
-    // Handle emotional state changes
-    if (PreviousState.EmotionalState != CurrentAudioState.EmotionalState)
-    {
-        TransitionToEmotionalState(CurrentAudioState.EmotionalState, 1.5f);
-    }
-
-    // Update environmental layers
-    ProcessEnvironmentalLayers();
-
-    UE_LOG(LogAudio, VeryVerbose, TEXT("AudioSystemCore: Audio state updated - Tension: %f, Emotional State: %d"), 
-           CurrentAudioState.TensionLevel, (int32)CurrentAudioState.EmotionalState);
 }
 
-void UAudioSystemCore::TransitionToEmotionalState(EAudioEmotionalState NewState, float TransitionTime)
+void UAudioSystemCore::SetEmotionalState(EEmotionalState NewState, float TransitionTime)
 {
-    if (TargetEmotionalState == NewState)
-    {
-        return; // Already transitioning to this state
-    }
+    if (CurrentAudioState.EmotionalState == NewState)
+        return;
 
-    TargetEmotionalState = NewState;
-    TransitionDuration = TransitionTime;
-    StateTransitionProgress = 0.0f;
+    EEmotionalState PrevState = CurrentAudioState.EmotionalState;
+    CurrentAudioState.EmotionalState = NewState;
 
-    UE_LOG(LogAudio, Log, TEXT("AudioSystemCore: Starting emotional state transition to %d over %f seconds"), 
-           (int32)NewState, TransitionTime);
+    ProcessEmotionalTransition(PrevState, NewState, TransitionTime);
 }
 
-void UAudioSystemCore::SetEnvironmentType(EEnvironmentType NewEnvironment)
+void UAudioSystemCore::SetTimeOfDay(ETimeOfDay NewTime, float TransitionTime)
 {
-    if (CurrentAudioState.EnvironmentType != NewEnvironment)
+    if (CurrentAudioState.TimeOfDay == NewTime)
+        return;
+
+    CurrentAudioState.TimeOfDay = NewTime;
+    UpdateAmbientLayers();
+}
+
+void UAudioSystemCore::SetBiome(EBiomeType NewBiome, float TransitionTime)
+{
+    if (CurrentAudioState.CurrentBiome == NewBiome)
+        return;
+
+    CurrentAudioState.CurrentBiome = NewBiome;
+    UpdateAmbientLayers();
+}
+
+void UAudioSystemCore::TriggerMusicTransition(EEmotionalState TargetState)
+{
+    if (!MusicAudioComponent || !AdaptiveMusicMetaSound)
+        return;
+
+    // Calculate transition parameters based on emotional states
+    float IntensityTarget = CalculateEmotionalIntensity();
+    
+    // Set MetaSound parameters for the transition
+    if (UMetasoundParameterPack* ParameterPack = UMetasoundParameterPack::CreateMetasoundParameterPack())
     {
-        CurrentAudioState.EnvironmentType = NewEnvironment;
-        ProcessEnvironmentalLayers();
+        // Emotional state as integer for MetaSound switching
+        ParameterPack->SetInt(FName("EmotionalState"), static_cast<int32>(TargetState));
+        ParameterPack->SetFloat(FName("Intensity"), IntensityTarget);
+        ParameterPack->SetFloat(FName("ThreatLevel"), CurrentAudioState.ThreatLevel);
+        ParameterPack->SetBool(FName("NearDinosaurs"), CurrentAudioState.bNearDinosaurs);
+        ParameterPack->SetFloat(FName("TransitionTime"), DefaultTransitionTime);
+
+        MusicAudioComponent->SetParameterPack(ParameterPack);
+    }
+}
+
+void UAudioSystemCore::SetMusicIntensity(float Intensity)
+{
+    Intensity = FMath::Clamp(Intensity, 0.0f, 1.0f);
+    
+    if (MusicAudioComponent && AdaptiveMusicMetaSound)
+    {
+        if (UMetasoundParameterPack* ParameterPack = UMetasoundParameterPack::CreateMetasoundParameterPack())
+        {
+            ParameterPack->SetFloat(FName("Intensity"), Intensity);
+            MusicAudioComponent->SetParameterPack(ParameterPack);
+        }
+    }
+}
+
+void UAudioSystemCore::UpdateAmbientLayers()
+{
+    if (!AmbientAudioComponent || !AmbientLayersMetaSound)
+        return;
+
+    if (UMetasoundParameterPack* ParameterPack = UMetasoundParameterPack::CreateMetasoundParameterPack())
+    {
+        // Biome parameters
+        ParameterPack->SetInt(FName("BiomeType"), static_cast<int32>(CurrentAudioState.CurrentBiome));
+        ParameterPack->SetInt(FName("TimeOfDay"), static_cast<int32>(CurrentAudioState.TimeOfDay));
         
-        UE_LOG(LogAudio, Log, TEXT("AudioSystemCore: Environment changed to %d"), (int32)NewEnvironment);
+        // Environmental parameters
+        ParameterPack->SetFloat(FName("WindIntensity"), FMath::RandRange(0.3f, 0.8f));
+        ParameterPack->SetFloat(FName("InsectActivity"), GetInsectActivityForTime());
+        ParameterPack->SetFloat(FName("BirdActivity"), GetBirdActivityForTime());
+        ParameterPack->SetBool(FName("InShelter"), CurrentAudioState.bInShelter);
+
+        AmbientAudioComponent->SetParameterPack(ParameterPack);
     }
 }
 
-void UAudioSystemCore::UpdateAmbientLayers(float DeltaTime)
-{
-    // Handle emotional state transitions
-    if (StateTransitionProgress < 1.0f)
-    {
-        HandleEmotionalStateTransition(DeltaTime);
-    }
-
-    // Update environmental processing
-    ProcessEnvironmentalLayers();
-}
-
-void UAudioSystemCore::PlayDinosaurCall(const FVector& Location, const FString& DinosaurType, float Intensity)
+void UAudioSystemCore::PlayDinosaurSound(FVector Location, FString DinosaurType, FString SoundType)
 {
     if (!DinosaurAudioMetaSound)
-    {
-        UE_LOG(LogAudio, Warning, TEXT("AudioSystemCore: DinosaurAudioMetaSound not set"));
         return;
-    }
 
-    // Create temporary audio component for dinosaur call
-    UAudioComponent* DinosaurCallComponent = UGameplayStatics::SpawnSoundAtLocation(
-        GetWorld(), 
-        DinosaurAudioMetaSound, 
-        Location,
-        FRotator::ZeroRotator,
-        Intensity
-    );
-
-    if (DinosaurCallComponent)
+    // Create a new audio component for this dinosaur sound
+    if (UWorld* World = GEngine->GetWorldFromContextObject(this, EGetWorldErrorMode::LogAndReturnNull))
     {
-        // Set MetaSound parameters for dinosaur type and intensity
-        // This would be implemented with specific MetaSound parameter names
-        UE_LOG(LogAudio, Log, TEXT("AudioSystemCore: Playing dinosaur call for %s at intensity %f"), 
-               *DinosaurType, Intensity);
-    }
-}
+        UAudioComponent* DinoAudioComp = UGameplayStatics::SpawnSoundAtLocation(
+            World, 
+            DinosaurAudioMetaSound, 
+            Location,
+            FRotator::ZeroRotator,
+            1.0f, // Volume
+            1.0f, // Pitch
+            0.0f, // Start time
+            nullptr, // Attenuation settings (will use MetaSound's built-in)
+            nullptr, // Concurrency settings
+            true    // Auto destroy
+        );
 
-void UAudioSystemCore::PlayDinosaurMovement(const FVector& Location, const FString& DinosaurType, float Speed)
-{
-    // Similar implementation to PlayDinosaurCall but for movement sounds
-    UE_LOG(LogAudio, VeryVerbose, TEXT("AudioSystemCore: Playing dinosaur movement for %s at speed %f"), 
-           *DinosaurType, Speed);
-}
-
-void UAudioSystemCore::PlayPlayerHeartbeat(float Intensity)
-{
-    if (PlayerAudioComponent && Intensity > 0.1f)
-    {
-        // Set heartbeat parameters and play
-        PlayerAudioComponent->SetVolumeMultiplier(FMath::Clamp(Intensity, 0.0f, 1.0f));
-        
-        if (!PlayerAudioComponent->IsPlaying())
+        if (DinoAudioComp)
         {
-            PlayerAudioComponent->Play();
+            if (UMetasoundParameterPack* ParameterPack = UMetasoundParameterPack::CreateMetasoundParameterPack())
+            {
+                // Convert dinosaur type and sound type to parameters
+                int32 DinoTypeIndex = GetDinosaurTypeIndex(DinosaurType);
+                int32 SoundTypeIndex = GetSoundTypeIndex(SoundType);
+                
+                ParameterPack->SetInt(FName("DinosaurType"), DinoTypeIndex);
+                ParameterPack->SetInt(FName("SoundType"), SoundTypeIndex);
+                ParameterPack->SetFloat(FName("Distance"), FVector::Dist(Location, GetListenerLocation()));
+                ParameterPack->SetFloat(FName("EmotionalIntensity"), CalculateEmotionalIntensity());
+
+                DinoAudioComp->SetParameterPack(ParameterPack);
+            }
+
+            DynamicAudioComponents.Add(DinoAudioComp);
         }
-        
-        UE_LOG(LogAudio, VeryVerbose, TEXT("AudioSystemCore: Player heartbeat intensity: %f"), Intensity);
     }
 }
 
-void UAudioSystemCore::PlayPlayerBreathing(float Intensity)
+void UAudioSystemCore::TriggerFootstepVariation(FVector Location, FString SurfaceType)
 {
-    // Similar to heartbeat but for breathing sounds
-    UE_LOG(LogAudio, VeryVerbose, TEXT("AudioSystemCore: Player breathing intensity: %f"), Intensity);
+    // Implementation for procedural footstep audio
+    // This would use a separate MetaSound for footstep generation
+    // Based on surface type, player weight, movement speed, etc.
 }
 
-void UAudioSystemCore::StartAdaptiveMusic()
+void UAudioSystemCore::PlayEnvironmentalEvent(FVector Location, FString EventType)
 {
-    if (MusicAudioComponent && !MusicAudioComponent->IsPlaying())
+    // Implementation for environmental audio events
+    // Tree falling, water splash, rock slide, etc.
+}
+
+void UAudioSystemCore::Update3DAudioPosition(FVector ListenerLocation, FRotator ListenerRotation)
+{
+    // Update all active audio components with new listener position
+    for (UAudioComponent* AudioComp : DynamicAudioComponents)
     {
-        MusicAudioComponent->FadeIn(2.0f);
-        UE_LOG(LogAudio, Log, TEXT("AudioSystemCore: Adaptive music started"));
+        if (IsValid(AudioComp))
+        {
+            // Update 3D positioning parameters if needed
+            float Distance = FVector::Dist(AudioComp->GetComponentLocation(), ListenerLocation);
+            
+            if (UMetasoundParameterPack* ParameterPack = UMetasoundParameterPack::CreateMetasoundParameterPack())
+            {
+                ParameterPack->SetFloat(FName("ListenerDistance"), Distance);
+                AudioComp->SetParameterPack(ParameterPack);
+            }
+        }
+    }
+
+    // Clean up finished components
+    CleanupFinishedAudioComponents();
+}
+
+void UAudioSystemCore::SetOcclusionLevel(float OcclusionAmount)
+{
+    OcclusionAmount = FMath::Clamp(OcclusionAmount, 0.0f, 1.0f);
+    
+    // Apply occlusion to all active audio components
+    for (UAudioComponent* AudioComp : DynamicAudioComponents)
+    {
+        if (IsValid(AudioComp))
+        {
+            if (UMetasoundParameterPack* ParameterPack = UMetasoundParameterPack::CreateMetasoundParameterPack())
+            {
+                ParameterPack->SetFloat(FName("OcclusionLevel"), OcclusionAmount);
+                AudioComp->SetParameterPack(ParameterPack);
+            }
+        }
     }
 }
 
-void UAudioSystemCore::StopAdaptiveMusic(float FadeTime)
+void UAudioSystemCore::ProcessEmotionalTransition(EEmotionalState FromState, EEmotionalState ToState, float TransitionTime)
 {
-    if (MusicAudioComponent && MusicAudioComponent->IsPlaying())
-    {
-        MusicAudioComponent->FadeOut(FadeTime, 0.0f);
-        UE_LOG(LogAudio, Log, TEXT("AudioSystemCore: Adaptive music stopping with fade time %f"), FadeTime);
-    }
+    // Log the emotional transition for debugging
+    UE_LOG(LogTemp, Log, TEXT("Audio: Emotional transition from %d to %d over %.2f seconds"), 
+           static_cast<int32>(FromState), static_cast<int32>(ToState), TransitionTime);
+
+    // Trigger the music transition
+    TriggerMusicTransition(ToState);
 }
 
 void UAudioSystemCore::UpdateMetaSoundParameters()
 {
-    // Update MetaSound parameters based on current audio state
-    // This would use the MetaSound parameter system to drive the adaptive audio
-
+    // Update all MetaSound parameters based on current state
+    float EmotionalIntensity = CalculateEmotionalIntensity();
+    
+    // Update music parameters
     if (MusicAudioComponent && AdaptiveMusicMetaSound)
     {
-        // Example parameter updates (would be implemented with actual MetaSound parameter names)
-        // MusicAudioComponent->SetFloatParameter(TEXT("TensionLevel"), CurrentAudioState.TensionLevel);
-        // MusicAudioComponent->SetFloatParameter(TEXT("ProximityToDanger"), CurrentAudioState.ProximityToDanger);
-        // MusicAudioComponent->SetBoolParameter(TEXT("IsNightTime"), CurrentAudioState.bIsNightTime);
-    }
-
-    if (AmbienceAudioComponent && EnvironmentalAmbienceMetaSound)
-    {
-        // Update environmental parameters
-        // AmbienceAudioComponent->SetFloatParameter(TEXT("WeatherIntensity"), CurrentAudioState.WeatherIntensity);
-        // AmbienceAudioComponent->SetIntParameter(TEXT("EnvironmentType"), (int32)CurrentAudioState.EnvironmentType);
+        if (UMetasoundParameterPack* ParameterPack = UMetasoundParameterPack::CreateMetasoundParameterPack())
+        {
+            ParameterPack->SetInt(FName("EmotionalState"), static_cast<int32>(CurrentAudioState.EmotionalState));
+            ParameterPack->SetFloat(FName("Intensity"), EmotionalIntensity);
+            ParameterPack->SetFloat(FName("ThreatLevel"), CurrentAudioState.ThreatLevel);
+            ParameterPack->SetBool(FName("InShelter"), CurrentAudioState.bInShelter);
+            
+            MusicAudioComponent->SetParameterPack(ParameterPack);
+        }
     }
 }
 
-void UAudioSystemCore::CalculateTensionLevel()
+float UAudioSystemCore::CalculateEmotionalIntensity() const
 {
-    float BaseTension = 0.0f;
+    float BaseIntensity = 0.0f;
 
-    // Base tension from emotional state
     switch (CurrentAudioState.EmotionalState)
     {
-        case EAudioEmotionalState::Calm:
-            BaseTension = 0.1f;
+        case EEmotionalState::Calm:
+            BaseIntensity = 0.1f;
             break;
-        case EAudioEmotionalState::Tension:
-            BaseTension = 0.4f;
+        case EEmotionalState::Tension:
+            BaseIntensity = 0.4f;
             break;
-        case EAudioEmotionalState::Danger:
-            BaseTension = 0.7f;
+        case EEmotionalState::Fear:
+            BaseIntensity = 0.8f;
             break;
-        case EAudioEmotionalState::Terror:
-            BaseTension = 1.0f;
+        case EEmotionalState::Wonder:
+            BaseIntensity = 0.3f;
             break;
-        case EAudioEmotionalState::Relief:
-            BaseTension = 0.2f;
+        case EEmotionalState::Danger:
+            BaseIntensity = 0.9f;
             break;
-        case EAudioEmotionalState::Wonder:
-            BaseTension = 0.3f;
+        case EEmotionalState::Discovery:
+            BaseIntensity = 0.5f;
+            break;
+        case EEmotionalState::Stalking:
+            BaseIntensity = 0.6f;
+            break;
+        case EEmotionalState::Chase:
+            BaseIntensity = 1.0f;
+            break;
+        case EEmotionalState::Safety:
+            BaseIntensity = 0.2f;
+            break;
+        case EEmotionalState::Loneliness:
+            BaseIntensity = 0.3f;
             break;
     }
 
-    // Modify based on proximity to danger
-    float ProximityMultiplier = 1.0f + (CurrentAudioState.ProximityToDanger * 0.5f);
+    // Modify based on threat level and other factors
+    float ThreatModifier = CurrentAudioState.ThreatLevel * 0.3f;
+    float ProximityModifier = CurrentAudioState.bNearDinosaurs ? 0.2f : 0.0f;
     
-    // Night time increases base tension
-    float NightMultiplier = CurrentAudioState.bIsNightTime ? 1.3f : 1.0f;
-    
-    // Weather can add tension
-    float WeatherAddition = CurrentAudioState.WeatherIntensity * 0.2f;
-
-    CurrentAudioState.TensionLevel = FMath::Clamp(
-        (BaseTension * ProximityMultiplier * NightMultiplier) + WeatherAddition, 
-        0.0f, 
-        1.0f
-    );
+    return FMath::Clamp(BaseIntensity + ThreatModifier + ProximityModifier, 0.0f, 1.0f);
 }
 
-void UAudioSystemCore::ProcessEnvironmentalLayers()
+void UAudioSystemCore::CleanupFinishedAudioComponents()
 {
-    // Process different environmental audio layers based on current environment type
-    // This would control various ambient sound layers, reverb settings, etc.
-    
-    switch (CurrentAudioState.EnvironmentType)
+    DynamicAudioComponents.RemoveAll([](UAudioComponent* AudioComp)
     {
-        case EEnvironmentType::DenseForest:
-            // Dense forest: muffled sounds, close reverb, bird calls, rustling
-            break;
-        case EEnvironmentType::OpenPlains:
-            // Open plains: wind, distant sounds, echo
-            break;
-        case EEnvironmentType::RiverArea:
-            // River: water sounds, different reverb characteristics
-            break;
-        case EEnvironmentType::CaveSystem:
-            // Caves: heavy reverb, dripping, echo
-            break;
-        case EEnvironmentType::DinosaurNest:
-            // Nest area: increased tension, specific dinosaur ambience
-            break;
-        case EEnvironmentType::PlayerBase:
-            // Player base: safer feeling, reduced tension
-            break;
+        return !IsValid(AudioComp) || !AudioComp->IsPlaying();
+    });
+}
+
+// Helper functions
+float UAudioSystemCore::GetInsectActivityForTime() const
+{
+    switch (CurrentAudioState.TimeOfDay)
+    {
+        case ETimeOfDay::Dawn:
+            return 0.7f;
+        case ETimeOfDay::Morning:
+            return 0.5f;
+        case ETimeOfDay::Midday:
+            return 0.3f;
+        case ETimeOfDay::Afternoon:
+            return 0.4f;
+        case ETimeOfDay::Dusk:
+            return 0.8f;
+        case ETimeOfDay::Night:
+            return 0.9f;
+        case ETimeOfDay::DeepNight:
+            return 0.6f;
+        default:
+            return 0.5f;
     }
 }
 
-void UAudioSystemCore::HandleEmotionalStateTransition(float DeltaTime)
+float UAudioSystemCore::GetBirdActivityForTime() const
 {
-    StateTransitionProgress += DeltaTime / TransitionDuration;
-    StateTransitionProgress = FMath::Clamp(StateTransitionProgress, 0.0f, 1.0f);
-
-    if (StateTransitionProgress >= 1.0f)
+    switch (CurrentAudioState.TimeOfDay)
     {
-        // Transition complete
-        CurrentAudioState.EmotionalState = TargetEmotionalState;
-        UE_LOG(LogAudio, Log, TEXT("AudioSystemCore: Emotional state transition completed to %d"), 
-               (int32)TargetEmotionalState);
+        case ETimeOfDay::Dawn:
+            return 0.9f;
+        case ETimeOfDay::Morning:
+            return 0.8f;
+        case ETimeOfDay::Midday:
+            return 0.4f;
+        case ETimeOfDay::Afternoon:
+            return 0.5f;
+        case ETimeOfDay::Dusk:
+            return 0.7f;
+        case ETimeOfDay::Night:
+            return 0.2f;
+        case ETimeOfDay::DeepNight:
+            return 0.1f;
+        default:
+            return 0.5f;
     }
+}
 
-    // Update transition parameters in MetaSounds
-    UpdateMetaSoundParameters();
+int32 UAudioSystemCore::GetDinosaurTypeIndex(const FString& DinosaurType) const
+{
+    // Map dinosaur type strings to indices for MetaSound
+    if (DinosaurType.Contains("Raptor")) return 0;
+    if (DinosaurType.Contains("TRex")) return 1;
+    if (DinosaurType.Contains("Triceratops")) return 2;
+    if (DinosaurType.Contains("Brontosaurus")) return 3;
+    if (DinosaurType.Contains("Pteranodon")) return 4;
+    return 0; // Default
+}
+
+int32 UAudioSystemCore::GetSoundTypeIndex(const FString& SoundType) const
+{
+    // Map sound type strings to indices for MetaSound
+    if (SoundType.Contains("Roar")) return 0;
+    if (SoundType.Contains("Growl")) return 1;
+    if (SoundType.Contains("Footstep")) return 2;
+    if (SoundType.Contains("Breathing")) return 3;
+    if (SoundType.Contains("Call")) return 4;
+    return 0; // Default
+}
+
+FVector UAudioSystemCore::GetListenerLocation() const
+{
+    if (UWorld* World = GEngine->GetWorldFromContextObject(this, EGetWorldErrorMode::LogAndReturnNull))
+    {
+        if (APlayerController* PC = World->GetFirstPlayerController())
+        {
+            if (APawn* PlayerPawn = PC->GetPawn())
+            {
+                return PlayerPawn->GetActorLocation();
+            }
+        }
+    }
+    return FVector::ZeroVector;
 }
