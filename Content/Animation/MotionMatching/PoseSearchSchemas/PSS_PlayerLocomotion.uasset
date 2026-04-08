@@ -1,0 +1,73 @@
+{
+    "Type": "PoseSearchSchema",
+    "Properties": {
+        "Skeleton": "/Game/Characters/Player/SK_PlayerSkeleton",
+        "SampleRate": 30.0,
+        "DataPreprocessor": "Normalize",
+        "Channels": [
+            {
+                "Type": "Trajectory",
+                "Weight": 1.0,
+                "Samples": [
+                    {
+                        "Offset": -0.5,
+                        "Flags": ["Position", "Velocity", "FacingDirection"],
+                        "Weight": 0.8
+                    },
+                    {
+                        "Offset": -0.25,
+                        "Flags": ["Position", "Velocity", "FacingDirection"],
+                        "Weight": 1.0
+                    },
+                    {
+                        "Offset": 0.0,
+                        "Flags": ["Position", "Velocity", "FacingDirection"],
+                        "Weight": 1.2
+                    },
+                    {
+                        "Offset": 0.25,
+                        "Flags": ["Position", "Velocity", "FacingDirection"],
+                        "Weight": 1.0
+                    },
+                    {
+                        "Offset": 0.5,
+                        "Flags": ["Position", "Velocity", "FacingDirection"],
+                        "Weight": 0.8
+                    }
+                ]
+            },
+            {
+                "Type": "Pose",
+                "Weight": 0.8,
+                "SampledBones": [
+                    {
+                        "Reference": "foot_l",
+                        "Flags": ["Position", "Velocity"],
+                        "Weight": 1.0
+                    },
+                    {
+                        "Reference": "foot_r", 
+                        "Flags": ["Position", "Velocity"],
+                        "Weight": 1.0
+                    },
+                    {
+                        "Reference": "hand_l",
+                        "Flags": ["Position", "Velocity"],
+                        "Weight": 0.6
+                    },
+                    {
+                        "Reference": "hand_r",
+                        "Flags": ["Position", "Velocity"], 
+                        "Weight": 0.6
+                    },
+                    {
+                        "Reference": "spine_03",
+                        "Flags": ["Position", "Rotation"],
+                        "Weight": 0.4
+                    }
+                ],
+                "UseCharacterSpaceVelocities": true
+            }
+        ]
+    }
+}
