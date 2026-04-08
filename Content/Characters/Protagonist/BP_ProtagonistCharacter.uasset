@@ -1,0 +1,43 @@
+# Blueprint: Protagonist Character
+# Este é um placeholder para o Blueprint que será criado no UE5
+
+# Configuração do Protagonista - Dr. Marcus Chen
+# Paleontologista de 35 anos, especialista em dinossauros do Cretáceo
+
+[Character Settings]
+Character Type: Protagonist
+Base MetaHuman: MH_Protagonist_Base
+Age: 35
+Profession: Paleontologist
+Specialization: Cretaceous Period Dinosaurs
+
+[Physical Characteristics]
+Height: 1.78m (Medium build)
+Build: Athletic but academic (not overly muscular)
+Hair: Dark brown, slightly unkempt from travel
+Eyes: Hazel, intelligent and observant
+Skin: Lightly tanned from outdoor work
+Distinguishing Features: Small scar on left hand from excavation accident
+
+[Starting Clothing]
+Torso: Khaki field shirt, partially torn
+Legs: Dark brown cargo pants with multiple pockets
+Feet: Sturdy hiking boots, well-worn
+Accessories: Leather satchel, broken wristwatch, field notebook
+
+[Personality Traits]
+- Curious and analytical
+- Calm under pressure
+- Respectful of nature
+- Slightly awkward in social situations
+- Passionate about paleontology
+
+[Starting Equipment]
+- Field notebook (waterlogged but readable)
+- Broken compass
+- Small hand trowel
+- Magnifying glass
+- Emergency whistle
+
+[Character Arc]
+Starts as academic observer, evolves into survivor and eventually bridge between modern knowledge and primitive world.
