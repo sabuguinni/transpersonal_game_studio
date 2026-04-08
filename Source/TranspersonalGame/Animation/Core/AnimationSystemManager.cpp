@@ -1,240 +1,116 @@
 #include "AnimationSystemManager.h"
-#include "GameFramework/Character.h"
-#include "Components/SkeletalMeshComponent.h"
-#include "Animation/AnimInstance.h"
-#include "Engine/World.h"
-#include "Kismet/GameplayStatics.h"
-#include "DrawDebugHelpers.h"
+#include "Engine/Engine.h"
 
 AAnimationSystemManager::AAnimationSystemManager()
 {
-    PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 0.016f; // 60 FPS para responsividade máxima
+    PrimaryActorTick.bCanEverTick = false;
 
-    // Inicializar estados emocionais base
-    EmotionalStateWeights.Add(TEXT("Fear"), 0.0f);
-    EmotionalStateWeights.Add(TEXT("Curiosity"), 0.3f);
-    EmotionalStateWeights.Add(TEXT("Determination"), 0.5f);
-    EmotionalStateWeights.Add(TEXT("Exhaustion"), 0.0f);
-    EmotionalStateWeights.Add(TEXT("Alertness"), 0.7f);
+    // Configuração padrão do protagonista
+    ProtagonistProfile.CharacterName = TEXT("Dr. Paleontologist");
+    ProtagonistProfile.CautiousnessFactor = 0.8f; // Muito cauteloso por padrão
+    ProtagonistProfile.FatigueLevel = 0.0f;
+    ProtagonistProfile.FearLevel = 0.3f; // Medo base constante
+
+    // Configuração de dinossauros comuns
+    FDinosaurAnimationProfile TriceratopsProfile;
+    TriceratopsProfile.SpeciesName = TEXT("Triceratops");
+    TriceratopsProfile.Size = 2.5f;
+    TriceratopsProfile.Aggressiveness = 0.3f;
+    TriceratopsProfile.bIsHerbivore = true;
+    DinosaurProfiles.Add(TriceratopsProfile);
+
+    FDinosaurAnimationProfile VelociraprorProfile;
+    VelociraprorProfile.SpeciesName = TEXT("Velociraptor");
+    VelociraprorProfile.Size = 0.8f;
+    VelociraprorProfile.Aggressiveness = 0.9f;
+    VelociraprorProfile.bIsHerbivore = false;
+    DinosaurProfiles.Add(VelociraprorProfile);
+
+    FDinosaurAnimationProfile TRexProfile;
+    TRexProfile.SpeciesName = TEXT("TyrannosaurusRex");
+    TRexProfile.Size = 4.0f;
+    TRexProfile.Aggressiveness = 1.0f;
+    TRexProfile.bIsHerbivore = false;
+    DinosaurProfiles.Add(TRexProfile);
+
+    FDinosaurAnimationProfile BrachiosaurusProfile;
+    BrachiosaurusProfile.SpeciesName = TEXT("Brachiosaurus");
+    BrachiosaurusProfile.Size = 5.0f;
+    BrachiosaurusProfile.Aggressiveness = 0.1f;
+    BrachiosaurusProfile.bIsHerbivore = true;
+    DinosaurProfiles.Add(BrachiosaurusProfile);
+
+    FDinosaurAnimationProfile ParasaurolophusProfile;
+    ParasaurolophusProfile.SpeciesName = TEXT("Parasaurolophus");
+    ParasaurolophusProfile.Size = 1.5f;
+    ParasaurolophusProfile.Aggressiveness = 0.2f;
+    ParasaurolophusProfile.bIsHerbivore = true;
+    DinosaurProfiles.Add(ParasaurolophusProfile);
 }
 
 void AAnimationSystemManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    UE_LOG(LogTemp, Warning, TEXT("Animation System Manager: Sistema de animação iniciado"));
-    
-    // Configurar sistema de Motion Matching
-    if (PlayerLocomotionDatabase)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Animation System: Player Locomotion Database carregada"));
-    }
-    
-    if (DinosaurBehaviorDatabase)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Animation System: Dinosaur Behavior Database carregada"));
-    }
+    UE_LOG(LogTemp, Warning, TEXT("Animation System Manager initialized with %d dinosaur profiles"), DinosaurProfiles.Num());
 }
 
-void AAnimationSystemManager::Tick(float DeltaTime)
+FDinosaurAnimationProfile AAnimationSystemManager::GetDinosaurProfile(const FString& SpeciesName) const
 {
-    Super::Tick(DeltaTime);
-    
-    // Actualizar sistemas de animação em tempo real
-    UpdateMotionMatchingQueries(DeltaTime);
-    ProcessTerrainAdaptation(DeltaTime);
-    UpdateEmotionalStates(DeltaTime);
-}
-
-void AAnimationSystemManager::RegisterCharacterForAnimation(ACharacter* Character)
-{
-    if (!Character)
+    for (const FDinosaurAnimationProfile& Profile : DinosaurProfiles)
     {
-        UE_LOG(LogTemp, Error, TEXT("Animation System: Tentativa de registar personagem nulo"));
-        return;
-    }
-
-    if (!RegisteredCharacters.Contains(Character))
-    {
-        RegisteredCharacters.Add(Character);
-        
-        // Inicializar dados de animação para o personagem
-        FCharacterAnimationData NewAnimData;
-        NewAnimData.CurrentFearLevel = 0.3f; // Nível base de tensão
-        NewAnimData.MovementIntensity = 1.0f;
-        NewAnimData.bIsInDanger = false;
-        
-        AnimationDataCache.Add(Character, NewAnimData);
-        
-        UE_LOG(LogTemp, Warning, TEXT("Animation System: Personagem %s registado no sistema de animação"), 
-               *Character->GetName());
-    }
-}
-
-void AAnimationSystemManager::UpdateCharacterFearLevel(ACharacter* Character, float NewFearLevel)
-{
-    if (!Character || !AnimationDataCache.Contains(Character))
-    {
-        return;
-    }
-
-    FCharacterAnimationData& AnimData = AnimationDataCache[Character];
-    float PreviousFear = AnimData.CurrentFearLevel;
-    
-    // Suavizar transições de medo para evitar mudanças bruscas
-    AnimData.CurrentFearLevel = FMath::FInterpTo(AnimData.CurrentFearLevel, 
-                                                 FMath::Clamp(NewFearLevel, 0.0f, 1.0f), 
-                                                 GetWorld()->GetDeltaSeconds(), 2.0f);
-    
-    // Actualizar intensidade de movimento baseada no medo
-    AnimData.MovementIntensity = 1.0f + (AnimData.CurrentFearLevel * 0.5f);
-    
-    // Broadcast mudança de estado emocional
-    OnCharacterEmotionalStateChanged.Broadcast(Character, AnimData.CurrentFearLevel);
-    
-    // Log apenas mudanças significativas
-    if (FMath::Abs(PreviousFear - AnimData.CurrentFearLevel) > 0.1f)
-    {
-        UE_LOG(LogTemp, Log, TEXT("Animation System: %s fear level: %.2f -> %.2f"), 
-               *Character->GetName(), PreviousFear, AnimData.CurrentFearLevel);
-    }
-}
-
-void AAnimationSystemManager::TriggerEmergencyAnimation(ACharacter* Character, const FString& TriggerType)
-{
-    if (!Character || !AnimationDataCache.Contains(Character))
-    {
-        return;
-    }
-
-    FCharacterAnimationData& AnimData = AnimationDataCache[Character];
-    
-    // Marcar como em perigo
-    AnimData.bIsInDanger = true;
-    AnimData.TimeSinceLastThreat = 0.0f;
-    
-    // Aumentar drasticamente o nível de medo
-    UpdateCharacterFearLevel(Character, 1.0f);
-    
-    // Adicionar tag emocional específica
-    if (!AnimData.ActiveEmotionalTags.Contains(TriggerType))
-    {
-        AnimData.ActiveEmotionalTags.Add(TriggerType);
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Animation System: Emergency animation triggered for %s - Type: %s"), 
-           *Character->GetName(), *TriggerType);
-}
-
-void AAnimationSystemManager::GenerateUniqueMovementVariation(ACharacter* Character)
-{
-    if (!Character || !AnimationDataCache.Contains(Character))
-    {
-        return;
-    }
-
-    // Gerar variação procedural baseada em características únicas do personagem
-    FCharacterAnimationData& AnimData = AnimationDataCache[Character];
-    
-    // Criar seed único baseado no nome do personagem
-    int32 CharacterSeed = GetTypeHash(Character->GetName());
-    FRandomStream RandomStream(CharacterSeed);
-    
-    // Gerar variações subtis na intensidade de movimento
-    float BaseVariation = RandomStream.FRandRange(0.9f, 1.1f);
-    AnimData.MovementIntensity *= BaseVariation;
-    
-    UE_LOG(LogTemp, Log, TEXT("Animation System: Generated unique movement variation for %s (Intensity: %.2f)"), 
-           *Character->GetName(), AnimData.MovementIntensity);
-}
-
-void AAnimationSystemManager::UpdateMotionMatchingQueries(float DeltaTime)
-{
-    // Actualizar queries do Motion Matching para todos os personagens registados
-    for (ACharacter* Character : RegisteredCharacters)
-    {
-        if (!Character || !AnimationDataCache.Contains(Character))
+        if (Profile.SpeciesName == SpeciesName)
         {
-            continue;
-        }
-
-        const FCharacterAnimationData& AnimData = AnimationDataCache[Character];
-        
-        // Aqui integramos com o sistema de Motion Matching do UE5
-        // Os dados emocionais influenciam a selecção de poses
-        
-        if (USkeletalMeshComponent* MeshComp = Character->GetMesh())
-        {
-            if (UAnimInstance* AnimInstance = MeshComp->GetAnimInstance())
-            {
-                // Passar dados emocionais para o Animation Blueprint
-                // Isto será expandido quando tivermos os Animation Blueprints criados
-            }
+            return Profile;
         }
     }
+    
+    // Retorna perfil padrão se não encontrar
+    FDinosaurAnimationProfile DefaultProfile;
+    DefaultProfile.SpeciesName = SpeciesName;
+    return DefaultProfile;
 }
 
-void AAnimationSystemManager::ProcessTerrainAdaptation(float DeltaTime)
+void AAnimationSystemManager::UpdateCharacterFearLevel(float NewFearLevel)
 {
-    // Sistema de IK para adaptação ao terreno
-    for (ACharacter* Character : RegisteredCharacters)
-    {
-        if (!Character)
-        {
-            continue;
-        }
-
-        FVector CharacterLocation = Character->GetActorLocation();
-        
-        // Raycast para detectar terreno irregular
-        FHitResult HitResult;
-        FVector StartTrace = CharacterLocation + FVector(0, 0, 50);
-        FVector EndTrace = CharacterLocation - FVector(0, 0, TerrainAdaptationRadius);
-        
-        FCollisionQueryParams QueryParams;
-        QueryParams.AddIgnoredActor(Character);
-        
-        if (GetWorld()->LineTraceSingleByChannel(HitResult, StartTrace, EndTrace, 
-                                                ECC_WorldStatic, QueryParams))
-        {
-            // Calcular adaptação IK baseada na inclinação do terreno
-            FVector SurfaceNormal = HitResult.Normal;
-            float SlopeAngle = FMath::Acos(FVector::DotProduct(SurfaceNormal, FVector::UpVector));
-            
-            // Debug visual (apenas em desenvolvimento)
-            #if WITH_EDITOR
-            DrawDebugLine(GetWorld(), StartTrace, HitResult.Location, FColor::Green, false, 0.1f);
-            #endif
-        }
-    }
+    ProtagonistProfile.FearLevel = FMath::Clamp(NewFearLevel, 0.0f, 1.0f);
+    
+    // Medo afeta a cautela
+    ProtagonistProfile.CautiousnessFactor = FMath::Lerp(0.5f, 1.0f, ProtagonistProfile.FearLevel);
 }
 
-void AAnimationSystemManager::UpdateEmotionalStates(float DeltaTime)
+void AAnimationSystemManager::UpdateCharacterFatigue(float NewFatigueLevel)
 {
-    // Actualizar estados emocionais globais
-    for (auto& CharacterData : AnimationDataCache)
+    ProtagonistProfile.FatigueLevel = FMath::Clamp(NewFatigueLevel, 0.0f, 1.0f);
+}
+
+UPoseSearchDatabase* AAnimationSystemManager::GetMotionMatchingDatabase(ECharacterMovementState MovementState) const
+{
+    // Por agora retorna a database principal, mas pode ser expandido para databases específicas por estado
+    return ProtagonistProfile.MotionMatchingDatabase;
+}
+
+UPoseSearchDatabase* AAnimationSystemManager::GetDinosaurDatabase(const FString& SpeciesName, EDinosaurBehaviorState BehaviorState) const
+{
+    FDinosaurAnimationProfile Profile = GetDinosaurProfile(SpeciesName);
+    
+    switch (BehaviorState)
     {
-        FCharacterAnimationData& AnimData = CharacterData.Value;
-        
-        // Decrementar medo gradualmente se não há ameaças
-        if (!AnimData.bIsInDanger)
-        {
-            AnimData.TimeSinceLastThreat += DeltaTime;
-            
-            // Após 30 segundos sem ameaças, começar a reduzir o medo
-            if (AnimData.TimeSinceLastThreat > 30.0f)
-            {
-                float FearReduction = DeltaTime * 0.1f; // Redução gradual
-                AnimData.CurrentFearLevel = FMath::Max(0.2f, AnimData.CurrentFearLevel - FearReduction);
-            }
-        }
-        
-        // Limpar tags emocionais antigas
-        if (AnimData.TimeSinceLastThreat > 10.0f)
-        {
-            AnimData.bIsInDanger = false;
-            AnimData.ActiveEmotionalTags.Empty();
-        }
+    case EDinosaurBehaviorState::Idle:
+    case EDinosaurBehaviorState::Grazing:
+    case EDinosaurBehaviorState::Drinking:
+    case EDinosaurBehaviorState::Sleeping:
+    case EDinosaurBehaviorState::Socializing:
+        return Profile.BehaviorDatabase;
+    
+    case EDinosaurBehaviorState::Hunting:
+    case EDinosaurBehaviorState::Alert:
+    case EDinosaurBehaviorState::Aggressive:
+    case EDinosaurBehaviorState::Fleeing:
+    case EDinosaurBehaviorState::Territorial:
+        return Profile.LocomotionDatabase;
+    
+    default:
+        return Profile.LocomotionDatabase;
     }
 }
