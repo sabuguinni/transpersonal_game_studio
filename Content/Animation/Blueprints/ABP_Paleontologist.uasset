@@ -1,0 +1,160 @@
+{
+    "Type": "AnimationBlueprint",
+    "TargetSkeleton": "/Game/Characters/Paleontologist/Skeleton_Paleontologist",
+    "AnimGraph": {
+        "Nodes": [
+            {
+                "Type": "MotionMatching",
+                "NodeName": "MotionMatching_Main",
+                "Position": {"X": 200, "Y": 100},
+                "Properties": {
+                    "Database": "Runtime_Selected_Database",
+                    "BlendTime": "Dynamic_Blend_Time",
+                    "UpdateFunction": "Update_MotionMatching_Context",
+                    "PostSelectionFunction": "Update_MotionMatching_PostSelection"
+                }
+            },
+            {
+                "Type": "PoseHistory",
+                "NodeName": "PoseHistory_Main", 
+                "Position": {"X": 50, "Y": 100},
+                "Properties": {
+                    "PoseCount": 120,
+                    "SampleRate": 30
+                }
+            },
+            {
+                "Type": "OrientationWarping",
+                "NodeName": "OrientationWarping",
+                "Position": {"X": 350, "Y": 100},
+                "Properties": {
+                    "OrientationAlpha": "Fear_Influenced_Orientation",
+                    "DebugDraw": false
+                }
+            },
+            {
+                "Type": "LegIK",
+                "NodeName": "LegIK_GroundAdaptation",
+                "Position": {"X": 500, "Y": 100},
+                "Properties": {
+                    "LeftFootBone": "foot_l",
+                    "RightFootBone": "foot_r",
+                    "PelvisBone": "pelvis",
+                    "TraceDistance": 50.0,
+                    "InterpSpeed": 15.0
+                }
+            },
+            {
+                "Type": "BlendSpace1D",
+                "NodeName": "AdditiveBreathing",
+                "Position": {"X": 650, "Y": 200},
+                "Properties": {
+                    "BlendSpace": "/Game/Animation/BlendSpaces/BS_Breathing_Fear",
+                    "XInput": "Current_Fear_Level",
+                    "BlendMode": "Additive"
+                }
+            },
+            {
+                "Type": "BlendSpace2D", 
+                "NodeName": "AdditiveLookAround",
+                "Position": {"X": 650, "Y": 300},
+                "Properties": {
+                    "BlendSpace": "/Game/Animation/BlendSpaces/BS_LookAround_Cautious",
+                    "XInput": "Look_Horizontal",
+                    "YInput": "Look_Vertical",
+                    "BlendMode": "Additive"
+                }
+            },
+            {
+                "Type": "ApplyAdditive",
+                "NodeName": "Apply_Breathing",
+                "Position": {"X": 800, "Y": 150},
+                "Properties": {
+                    "BasePose": "LegIK_GroundAdaptation",
+                    "AdditivePose": "AdditiveBreathing",
+                    "Alpha": 1.0
+                }
+            },
+            {
+                "Type": "ApplyAdditive",
+                "NodeName": "Apply_LookAround",
+                "Position": {"X": 950, "Y": 150},
+                "Properties": {
+                    "BasePose": "Apply_Breathing",
+                    "AdditivePose": "AdditiveLookAround",
+                    "Alpha": "Look_Around_Alpha"
+                }
+            },
+            {
+                "Type": "OutputPose",
+                "NodeName": "FinalPose",
+                "Position": {"X": 1100, "Y": 150},
+                "Input": "Apply_LookAround"
+            }
+        ],
+        "Connections": [
+            {"From": "PoseHistory_Main", "To": "MotionMatching_Main", "Pin": "PoseHistory"},
+            {"From": "MotionMatching_Main", "To": "OrientationWarping"},
+            {"From": "OrientationWarping", "To": "LegIK_GroundAdaptation"},
+            {"From": "LegIK_GroundAdaptation", "To": "Apply_Breathing", "Pin": "BasePose"},
+            {"From": "AdditiveBreathing", "To": "Apply_Breathing", "Pin": "AdditivePose"},
+            {"From": "Apply_Breathing", "To": "Apply_LookAround", "Pin": "BasePose"},
+            {"From": "AdditiveLookAround", "To": "Apply_LookAround", "Pin": "AdditivePose"},
+            {"From": "Apply_LookAround", "To": "FinalPose"}
+        ]
+    },
+    "EventGraph": {
+        "Functions": [
+            {
+                "Name": "Update_MotionMatching_Context",
+                "Description": "Selects appropriate database based on current context and fear level",
+                "Implementation": "Blueprint_Function"
+            },
+            {
+                "Name": "Calculate_Dynamic_Blend_Time",
+                "Description": "Calculates blend time based on emotional state transitions",
+                "Implementation": "Blueprint_Function"
+            },
+            {
+                "Name": "Update_Fear_Breathing",
+                "Description": "Updates breathing intensity based on current fear level",
+                "Implementation": "Blueprint_Function"
+            }
+        ]
+    },
+    "Variables": [
+        {
+            "Name": "Current_Movement_Context",
+            "Type": "EMovementContext",
+            "DefaultValue": "Exploration"
+        },
+        {
+            "Name": "Current_Fear_Level",
+            "Type": "Float",
+            "DefaultValue": 0.0,
+            "Range": {"Min": 0.0, "Max": 1.0}
+        },
+        {
+            "Name": "Current_Exhaustion",
+            "Type": "Float", 
+            "DefaultValue": 0.0,
+            "Range": {"Min": 0.0, "Max": 1.0}
+        },
+        {
+            "Name": "Look_Horizontal",
+            "Type": "Float",
+            "DefaultValue": 0.0
+        },
+        {
+            "Name": "Look_Vertical", 
+            "Type": "Float",
+            "DefaultValue": 0.0
+        },
+        {
+            "Name": "Look_Around_Alpha",
+            "Type": "Float",
+            "DefaultValue": 0.3
+        }
+    ],
+    "Description": "Main animation blueprint for paleontologist character - fear-driven motion matching with environmental adaptation"
+}
