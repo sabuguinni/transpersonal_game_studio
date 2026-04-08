@@ -5,14 +5,18 @@
 #include "Components/SceneComponent.h"
 #include "Kismet/GameplayStatics.h"
 
+// Static instance
+AVFXManager* AVFXManager::Instance = nullptr;
+
 AVFXManager::AVFXManager()
 {
     PrimaryActorTick.bCanEverTick = true;
     
     // Default performance settings
-    MaxActiveVFXCount = 50;
-    bUseLODSystem = true;
-    CurrentQualityLevel = 2; // Medium quality by default
+    MaxActiveEffects = 50;
+    PerformanceBudgetMS = 2.0f; // 2ms budget for VFX per frame
+    CurrentFrameTimeMS = 0.0f;
+    CurrentActiveCount = 0;
     
     // Create root component
     RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
@@ -22,442 +26,336 @@ void AVFXManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Initialize VFX system
-    UE_LOG(LogTemp, Log, TEXT("VFX Manager initialized with quality level: %d"), CurrentQualityLevel);
+    // Set singleton instance
+    Instance = this;
+    
+    // Initialize VFX pools
+    InitializePools();
+    
+    UE_LOG(LogTemp, Log, TEXT("VFX Manager initialized with %d max effects"), MaxActiveEffects);
 }
 
 void AVFXManager::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
     
-    // Clean up finished VFX every frame
-    CleanupFinishedVFX();
+    // Update performance metrics
+    UpdatePerformanceMetrics();
+    
+    // Cull distant effects
+    CullDistantEffects();
+    
+    // Adaptive quality adjustment
+    AdaptiveQualityAdjustment();
 }
 
-UNiagaraComponent* AVFXManager::PlayVFXAtLocation(UNiagaraSystem* VFXSystem, const FVector& Location, const FRotator& Rotation, const FVFXSettings& Settings)
+UNiagaraComponent* AVFXManager::SpawnVFX(UNiagaraSystem* Effect, FVector Location, FRotator Rotation, EVFXPriority Priority)
 {
-    if (!VFXSystem || !CanSpawnNewVFX())
+    if (!Effect || !CanSpawnNewEffect(Priority))
     {
         return nullptr;
     }
 
-    UNiagaraComponent* VFXComponent = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
-        GetWorld(),
-        VFXSystem,
-        Location,
-        Rotation,
-        FVector::OneVector,
-        true,
-        true,
-        ENCPoolMethod::None,
-        true
-    );
+    // Try to get pooled component first
+    UNiagaraComponent* VFXComponent = GetPooledComponent(Effect);
+    
+    if (!VFXComponent)
+    {
+        // Create new component if pool is empty
+        VFXComponent = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+            GetWorld(),
+            Effect,
+            Location,
+            Rotation,
+            FVector::OneVector,
+            true,
+            true,
+            ENCPoolMethod::None,
+            true
+        );
+    }
+    else
+    {
+        // Reuse pooled component
+        VFXComponent->SetWorldLocationAndRotation(Location, Rotation);
+        VFXComponent->Activate(true);
+    }
 
     if (VFXComponent)
     {
-        // Apply settings
-        if (Settings.Duration > 0.0f && !Settings.bLooping)
-        {
-            VFXComponent->SetAutoDestroy(true);
-        }
-
-        // Apply LOD if enabled
-        if (bUseLODSystem)
-        {
-            float Distance = FVector::Dist(Location, GetActorLocation());
-            ApplyLODSettings(VFXComponent, Distance);
-        }
-
-        ActiveVFXComponents.Add(VFXComponent);
+        ActiveEffects.Add(VFXComponent);
+        CurrentActiveCount = ActiveEffects.Num();
         
-        UE_LOG(LogTemp, Log, TEXT("VFX spawned at location: %s, Category: %d"), 
-               *Location.ToString(), (int32)Settings.Category);
+        UE_LOG(LogTemp, Log, TEXT("VFX spawned at location: %s, Priority: %d"), 
+               *Location.ToString(), (int32)Priority);
     }
 
     return VFXComponent;
 }
 
-UNiagaraComponent* AVFXManager::PlayVFXAttached(UNiagaraSystem* VFXSystem, USceneComponent* AttachComponent, const FName& AttachPointName, const FVector& Location, const FRotator& Rotation, const FVFXSettings& Settings)
+UNiagaraComponent* AVFXManager::SpawnVFXAttached(UNiagaraSystem* Effect, USceneComponent* AttachComponent, FName AttachPoint, EVFXPriority Priority)
 {
-    if (!VFXSystem || !AttachComponent || !CanSpawnNewVFX())
+    if (!Effect || !AttachComponent || !CanSpawnNewEffect(Priority))
     {
         return nullptr;
     }
 
     UNiagaraComponent* VFXComponent = UNiagaraFunctionLibrary::SpawnSystemAttached(
-        VFXSystem,
+        Effect,
         AttachComponent,
-        AttachPointName,
-        Location,
-        Rotation,
+        AttachPoint,
+        FVector::ZeroVector,
+        FRotator::ZeroRotator,
         EAttachLocation::KeepRelativeOffset,
         true
     );
 
     if (VFXComponent)
     {
-        // Apply settings
-        if (Settings.Duration > 0.0f && !Settings.bLooping)
-        {
-            VFXComponent->SetAutoDestroy(true);
-        }
-
-        ActiveVFXComponents.Add(VFXComponent);
+        ActiveEffects.Add(VFXComponent);
+        CurrentActiveCount = ActiveEffects.Num();
         
-        UE_LOG(LogTemp, Log, TEXT("VFX attached to component: %s, Category: %d"), 
-               *AttachComponent->GetName(), (int32)Settings.Category);
+        UE_LOG(LogTemp, Log, TEXT("VFX attached to component: %s, Priority: %d"), 
+               *AttachComponent->GetName(), (int32)Priority);
     }
 
     return VFXComponent;
 }
 
-void AVFXManager::SpawnAmbientFog(const FVector& Location, float Radius, float Density)
+void AVFXManager::SetPerformanceLevel(int32 Level)
 {
-    if (!NS_AmbientFog) return;
-
-    FVFXSettings Settings;
-    Settings.Category = EVFXCategory::Environmental;
-    Settings.Intensity = EVFXIntensity::Subtle;
-    Settings.bLooping = true;
-
-    UNiagaraComponent* FogComponent = PlayVFXAtLocation(NS_AmbientFog, Location, FRotator::ZeroRotator, Settings);
+    // 0=Ultra, 1=High, 2=Medium, 3=Low
+    Level = FMath::Clamp(Level, 0, 3);
     
-    if (FogComponent)
+    switch (Level)
     {
-        FogComponent->SetFloatParameter(TEXT("Radius"), Radius);
-        FogComponent->SetFloatParameter(TEXT("Density"), Density);
-    }
-}
-
-void AVFXManager::SpawnDustParticles(const FVector& Location, const FVector& WindDirection, float Intensity)
-{
-    if (!NS_DustParticles) return;
-
-    FVFXSettings Settings;
-    Settings.Category = EVFXCategory::Environmental;
-    Settings.Intensity = EVFXIntensity::Subtle;
-    Settings.Duration = 10.0f;
-
-    UNiagaraComponent* DustComponent = PlayVFXAtLocation(NS_DustParticles, Location, FRotator::ZeroRotator, Settings);
-    
-    if (DustComponent)
-    {
-        DustComponent->SetVectorParameter(TEXT("WindDirection"), WindDirection);
-        DustComponent->SetFloatParameter(TEXT("Intensity"), Intensity);
-    }
-}
-
-void AVFXManager::SpawnLeafFall(const FVector& Location, float Radius)
-{
-    if (!NS_LeafFall) return;
-
-    FVFXSettings Settings;
-    Settings.Category = EVFXCategory::Environmental;
-    Settings.Intensity = EVFXIntensity::Subtle;
-    Settings.bLooping = true;
-
-    UNiagaraComponent* LeafComponent = PlayVFXAtLocation(NS_LeafFall, Location, FRotator::ZeroRotator, Settings);
-    
-    if (LeafComponent)
-    {
-        LeafComponent->SetFloatParameter(TEXT("Radius"), Radius);
-    }
-}
-
-void AVFXManager::SpawnFootstepDust(const FVector& Location, float CreatureSize)
-{
-    if (!NS_FootstepDust) return;
-
-    FVFXSettings Settings;
-    Settings.Category = EVFXCategory::Creature;
-    Settings.Intensity = EVFXIntensity::Medium;
-    Settings.Duration = 2.0f;
-
-    UNiagaraComponent* FootstepComponent = PlayVFXAtLocation(NS_FootstepDust, Location, FRotator::ZeroRotator, Settings);
-    
-    if (FootstepComponent)
-    {
-        FootstepComponent->SetFloatParameter(TEXT("CreatureSize"), CreatureSize);
-    }
-}
-
-void AVFXManager::SpawnBreathSteam(USceneComponent* AttachPoint, float Temperature)
-{
-    if (!NS_BreathSteam || !AttachPoint) return;
-
-    FVFXSettings Settings;
-    Settings.Category = EVFXCategory::Creature;
-    Settings.Intensity = EVFXIntensity::Subtle;
-    Settings.bLooping = true;
-    Settings.bAttachToActor = true;
-
-    UNiagaraComponent* BreathComponent = PlayVFXAttached(NS_BreathSteam, AttachPoint, TEXT("mouth"), FVector::ZeroVector, FRotator::ZeroRotator, Settings);
-    
-    if (BreathComponent)
-    {
-        BreathComponent->SetFloatParameter(TEXT("Temperature"), Temperature);
-    }
-}
-
-void AVFXManager::SpawnTerritoryMarker(const FVector& Location, AActor* OwnerCreature)
-{
-    if (!NS_TerritoryMarker || !OwnerCreature) return;
-
-    FVFXSettings Settings;
-    Settings.Category = EVFXCategory::Creature;
-    Settings.Intensity = EVFXIntensity::Medium;
-    Settings.Duration = 30.0f; // Territory markers last longer
-
-    UNiagaraComponent* MarkerComponent = PlayVFXAtLocation(NS_TerritoryMarker, Location, FRotator::ZeroRotator, Settings);
-    
-    if (MarkerComponent)
-    {
-        // Set creature-specific parameters
-        MarkerComponent->SetObjectParameter(TEXT("OwnerCreature"), OwnerCreature);
-    }
-}
-
-void AVFXManager::SpawnImpactEffect(const FVector& Location, const FVector& Normal, float ImpactForce)
-{
-    if (!NS_ImpactEffect) return;
-
-    FVFXSettings Settings;
-    Settings.Category = EVFXCategory::Combat;
-    Settings.Intensity = EVFXIntensity::High;
-    Settings.Duration = 3.0f;
-
-    FRotator ImpactRotation = FRotationMatrix::MakeFromZ(Normal).Rotator();
-    UNiagaraComponent* ImpactComponent = PlayVFXAtLocation(NS_ImpactEffect, Location, ImpactRotation, Settings);
-    
-    if (ImpactComponent)
-    {
-        ImpactComponent->SetFloatParameter(TEXT("ImpactForce"), ImpactForce);
-        ImpactComponent->SetVectorParameter(TEXT("ImpactNormal"), Normal);
-    }
-}
-
-void AVFXManager::SpawnBloodSpray(const FVector& Location, const FVector& Direction, float Amount)
-{
-    if (!NS_BloodSpray) return;
-
-    FVFXSettings Settings;
-    Settings.Category = EVFXCategory::Combat;
-    Settings.Intensity = EVFXIntensity::High;
-    Settings.Duration = 5.0f;
-
-    FRotator SprayRotation = FRotationMatrix::MakeFromX(Direction).Rotator();
-    UNiagaraComponent* BloodComponent = PlayVFXAtLocation(NS_BloodSpray, Location, SprayRotation, Settings);
-    
-    if (BloodComponent)
-    {
-        BloodComponent->SetFloatParameter(TEXT("Amount"), Amount);
-        BloodComponent->SetVectorParameter(TEXT("Direction"), Direction);
-    }
-}
-
-void AVFXManager::SpawnClawScratch(const FVector& StartLocation, const FVector& EndLocation)
-{
-    if (!NS_ClawScratch) return;
-
-    FVFXSettings Settings;
-    Settings.Category = EVFXCategory::Combat;
-    Settings.Intensity = EVFXIntensity::Medium;
-    Settings.Duration = 4.0f;
-
-    FVector Direction = (EndLocation - StartLocation).GetSafeNormal();
-    FRotator ScratchRotation = FRotationMatrix::MakeFromX(Direction).Rotator();
-    
-    UNiagaraComponent* ScratchComponent = PlayVFXAtLocation(NS_ClawScratch, StartLocation, ScratchRotation, Settings);
-    
-    if (ScratchComponent)
-    {
-        ScratchComponent->SetVectorParameter(TEXT("StartLocation"), StartLocation);
-        ScratchComponent->SetVectorParameter(TEXT("EndLocation"), EndLocation);
-    }
-}
-
-void AVFXManager::SpawnCampfire(const FVector& Location, float Size)
-{
-    if (!NS_Campfire) return;
-
-    FVFXSettings Settings;
-    Settings.Category = EVFXCategory::Survival;
-    Settings.Intensity = EVFXIntensity::Medium;
-    Settings.bLooping = true;
-
-    UNiagaraComponent* FireComponent = PlayVFXAtLocation(NS_Campfire, Location, FRotator::ZeroRotator, Settings);
-    
-    if (FireComponent)
-    {
-        FireComponent->SetFloatParameter(TEXT("Size"), Size);
-    }
-}
-
-void AVFXManager::SpawnCraftingSparks(const FVector& Location, float Intensity)
-{
-    if (!NS_CraftingSparks) return;
-
-    FVFXSettings Settings;
-    Settings.Category = EVFXCategory::Survival;
-    Settings.Intensity = EVFXIntensity::Medium;
-    Settings.Duration = 3.0f;
-
-    UNiagaraComponent* SparksComponent = PlayVFXAtLocation(NS_CraftingSparks, Location, FRotator::ZeroRotator, Settings);
-    
-    if (SparksComponent)
-    {
-        SparksComponent->SetFloatParameter(TEXT("Intensity"), Intensity);
-    }
-}
-
-void AVFXManager::SpawnCookingSmoke(const FVector& Location)
-{
-    if (!NS_CookingSmoke) return;
-
-    FVFXSettings Settings;
-    Settings.Category = EVFXCategory::Survival;
-    Settings.Intensity = EVFXIntensity::Subtle;
-    Settings.bLooping = true;
-
-    PlayVFXAtLocation(NS_CookingSmoke, Location, FRotator::ZeroRotator, Settings);
-}
-
-void AVFXManager::SpawnDomesticationProgress(AActor* Creature, float TrustLevel)
-{
-    if (!NS_DomesticationProgress || !Creature) return;
-
-    FVFXSettings Settings;
-    Settings.Category = EVFXCategory::Interaction;
-    Settings.Intensity = EVFXIntensity::Subtle;
-    Settings.Duration = 5.0f;
-    Settings.bAttachToActor = true;
-
-    UNiagaraComponent* ProgressComponent = PlayVFXAttached(
-        NS_DomesticationProgress, 
-        Creature->GetRootComponent(), 
-        NAME_None, 
-        FVector(0, 0, 100), 
-        FRotator::ZeroRotator, 
-        Settings
-    );
-    
-    if (ProgressComponent)
-    {
-        ProgressComponent->SetFloatParameter(TEXT("TrustLevel"), TrustLevel);
-    }
-}
-
-void AVFXManager::SpawnFearIndicator(AActor* Creature, float FearLevel)
-{
-    if (!NS_FearIndicator || !Creature) return;
-
-    FVFXSettings Settings;
-    Settings.Category = EVFXCategory::Interaction;
-    Settings.Intensity = EVFXIntensity::Medium;
-    Settings.Duration = 3.0f;
-    Settings.bAttachToActor = true;
-
-    UNiagaraComponent* FearComponent = PlayVFXAttached(
-        NS_FearIndicator, 
-        Creature->GetRootComponent(), 
-        NAME_None, 
-        FVector(0, 0, 150), 
-        FRotator::ZeroRotator, 
-        Settings
-    );
-    
-    if (FearComponent)
-    {
-        FearComponent->SetFloatParameter(TEXT("FearLevel"), FearLevel);
-    }
-}
-
-void AVFXManager::SpawnCalmingAura(const FVector& Location, float Radius)
-{
-    if (!NS_CalmingAura) return;
-
-    FVFXSettings Settings;
-    Settings.Category = EVFXCategory::Interaction;
-    Settings.Intensity = EVFXIntensity::Subtle;
-    Settings.Duration = 10.0f;
-
-    UNiagaraComponent* AuraComponent = PlayVFXAtLocation(NS_CalmingAura, Location, FRotator::ZeroRotator, Settings);
-    
-    if (AuraComponent)
-    {
-        AuraComponent->SetFloatParameter(TEXT("Radius"), Radius);
-    }
-}
-
-void AVFXManager::SetVFXQualityLevel(int32 QualityLevel)
-{
-    CurrentQualityLevel = FMath::Clamp(QualityLevel, 0, 3);
-    
-    // Adjust max VFX count based on quality
-    switch (CurrentQualityLevel)
-    {
-        case 0: // Low
-            MaxActiveVFXCount = 20;
+        case 0: // Ultra
+            MaxActiveEffects = 100;
+            PerformanceBudgetMS = 4.0f;
             break;
-        case 1: // Medium
-            MaxActiveVFXCount = 35;
+        case 1: // High
+            MaxActiveEffects = 75;
+            PerformanceBudgetMS = 3.0f;
             break;
-        case 2: // High
-            MaxActiveVFXCount = 50;
+        case 2: // Medium
+            MaxActiveEffects = 50;
+            PerformanceBudgetMS = 2.0f;
             break;
-        case 3: // Ultra
-            MaxActiveVFXCount = 75;
+        case 3: // Low
+            MaxActiveEffects = 25;
+            PerformanceBudgetMS = 1.0f;
             break;
     }
     
-    UE_LOG(LogTemp, Log, TEXT("VFX Quality set to level: %d, Max VFX: %d"), CurrentQualityLevel, MaxActiveVFXCount);
+    UE_LOG(LogTemp, Log, TEXT("VFX Performance Level set to %d (Max Effects: %d)"), Level, MaxActiveEffects);
 }
 
-void AVFXManager::EnableLODSystem(bool bEnable)
+void AVFXManager::ForceCleanupLowPriorityEffects()
 {
-    bUseLODSystem = bEnable;
-    UE_LOG(LogTemp, Log, TEXT("VFX LOD System: %s"), bEnable ? TEXT("Enabled") : TEXT("Disabled"));
-}
-
-void AVFXManager::SetMaxActiveVFX(int32 MaxCount)
-{
-    MaxActiveVFXCount = FMath::Max(MaxCount, 10);
-    UE_LOG(LogTemp, Log, TEXT("Max Active VFX set to: %d"), MaxActiveVFXCount);
-}
-
-void AVFXManager::CleanupFinishedVFX()
-{
-    ActiveVFXComponents.RemoveAll([](UNiagaraComponent* Component)
-    {
-        return !IsValid(Component) || !Component->IsActive();
-    });
-}
-
-void AVFXManager::ApplyLODSettings(UNiagaraComponent* VFXComponent, float Distance)
-{
-    if (!VFXComponent) return;
-
-    // Distance-based LOD scaling
-    float LODScale = 1.0f;
+    int32 RemovedCount = 0;
     
-    if (Distance > 5000.0f) // Far distance
+    for (int32 i = ActiveEffects.Num() - 1; i >= 0; i--)
     {
-        LODScale = 0.3f;
-    }
-    else if (Distance > 2000.0f) // Medium distance
-    {
-        LODScale = 0.6f;
-    }
-    else if (Distance > 1000.0f) // Close distance
-    {
-        LODScale = 0.8f;
+        UNiagaraComponent* Component = ActiveEffects[i];
+        if (Component && IsValid(Component))
+        {
+            // Remove low priority effects first
+            // This is a simplified version - in practice you'd check the priority stored with each effect
+            if (RemovedCount < 10) // Remove up to 10 effects
+            {
+                ReturnToPool(Component);
+                ActiveEffects.RemoveAt(i);
+                RemovedCount++;
+            }
+        }
+        else
+        {
+            // Remove invalid components
+            ActiveEffects.RemoveAt(i);
+        }
     }
     
-    // Apply LOD scaling to particle count
-    VFXComponent->SetFloatParameter(TEXT("LODScale"), LODScale);
+    CurrentActiveCount = ActiveEffects.Num();
+    UE_LOG(LogTemp, Log, TEXT("Cleaned up %d low priority VFX effects"), RemovedCount);
 }
 
-bool AVFXManager::CanSpawnNewVFX() const
+void AVFXManager::ShowVFXDebugInfo(bool bShow)
 {
-    return ActiveVFXComponents.Num() < MaxActiveVFXCount;
+    if (bShow)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("=== VFX DEBUG INFO ==="));
+        UE_LOG(LogTemp, Warning, TEXT("Active Effects: %d / %d"), CurrentActiveCount, MaxActiveEffects);
+        UE_LOG(LogTemp, Warning, TEXT("Frame Time: %.2f ms (Budget: %.2f ms)"), CurrentFrameTimeMS, PerformanceBudgetMS);
+        UE_LOG(LogTemp, Warning, TEXT("Pool Status:"));
+        
+        for (auto& Pool : PooledEffects)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("  - %s: %d pooled"), 
+                   Pool.Key ? *Pool.Key->GetName() : TEXT("NULL"), 
+                   Pool.Value.Num());
+        }
+    }
+}
+
+void AVFXManager::InitializePools()
+{
+    // Initialize pools for common VFX categories
+    // This would typically be configured via data assets or config files
+    
+    UE_LOG(LogTemp, Log, TEXT("VFX Pools initialized"));
+}
+
+void AVFXManager::UpdatePerformanceMetrics()
+{
+    // Simple frame time tracking
+    static float LastFrameTime = 0.0f;
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    
+    if (LastFrameTime > 0.0f)
+    {
+        float DeltaTime = CurrentTime - LastFrameTime;
+        CurrentFrameTimeMS = DeltaTime * 1000.0f;
+    }
+    
+    LastFrameTime = CurrentTime;
+}
+
+void AVFXManager::CullDistantEffects()
+{
+    APawn* PlayerPawn = GetWorld()->GetFirstPlayerController()->GetPawn();
+    if (!PlayerPawn)
+        return;
+    
+    FVector PlayerLocation = PlayerPawn->GetActorLocation();
+    
+    for (int32 i = ActiveEffects.Num() - 1; i >= 0; i--)
+    {
+        UNiagaraComponent* Component = ActiveEffects[i];
+        if (!Component || !IsValid(Component))
+        {
+            ActiveEffects.RemoveAt(i);
+            continue;
+        }
+        
+        float Distance = FVector::Dist(Component->GetComponentLocation(), PlayerLocation);
+        
+        // Cull effects beyond 5000 units (50 meters)
+        if (Distance > 5000.0f)
+        {
+            ReturnToPool(Component);
+            ActiveEffects.RemoveAt(i);
+        }
+    }
+    
+    CurrentActiveCount = ActiveEffects.Num();
+}
+
+UNiagaraComponent* AVFXManager::GetPooledComponent(UNiagaraSystem* Effect)
+{
+    if (!Effect)
+        return nullptr;
+    
+    TArray<UNiagaraComponent*>* Pool = PooledEffects.Find(Effect);
+    if (Pool && Pool->Num() > 0)
+    {
+        UNiagaraComponent* Component = (*Pool)[0];
+        Pool->RemoveAt(0);
+        return Component;
+    }
+    
+    return nullptr;
+}
+
+void AVFXManager::ReturnToPool(UNiagaraComponent* Component)
+{
+    if (!Component || !IsValid(Component))
+        return;
+    
+    // Deactivate the component
+    Component->Deactivate();
+    
+    // Get the system asset
+    UNiagaraSystem* System = Component->GetAsset();
+    if (System)
+    {
+        // Add to appropriate pool
+        TArray<UNiagaraComponent*>& Pool = PooledEffects.FindOrAdd(System);
+        Pool.Add(Component);
+        
+        // Limit pool size to prevent memory bloat
+        if (Pool.Num() > 20)
+        {
+            UNiagaraComponent* OldComponent = Pool[0];
+            Pool.RemoveAt(0);
+            if (OldComponent && IsValid(OldComponent))
+            {
+                OldComponent->DestroyComponent();
+            }
+        }
+    }
+    else
+    {
+        // No system asset, just destroy
+        Component->DestroyComponent();
+    }
+}
+
+bool AVFXManager::CanSpawnNewEffect(EVFXPriority Priority)
+{
+    // Always allow critical effects
+    if (Priority == EVFXPriority::Critical)
+        return true;
+    
+    // Check active count limit
+    if (CurrentActiveCount >= MaxActiveEffects)
+        return false;
+    
+    // Check performance budget
+    if (CurrentFrameTimeMS > PerformanceBudgetMS * 1.5f)
+        return false;
+    
+    return true;
+}
+
+void AVFXManager::AdaptiveQualityAdjustment()
+{
+    // If we're over budget consistently, reduce quality
+    static int32 OverBudgetFrames = 0;
+    
+    if (CurrentFrameTimeMS > PerformanceBudgetMS)
+    {
+        OverBudgetFrames++;
+        
+        if (OverBudgetFrames > 60) // 1 second at 60fps
+        {
+            // Force cleanup of some effects
+            ForceCleanupLowPriorityEffects();
+            OverBudgetFrames = 0;
+        }
+    }
+    else
+    {
+        OverBudgetFrames = FMath::Max(0, OverBudgetFrames - 1);
+    }
+}
+
+AVFXManager* AVFXManager::GetInstance(UWorld* World)
+{
+    if (!Instance && World)
+    {
+        // Try to find existing instance
+        for (TActorIterator<AVFXManager> ActorItr(World); ActorItr; ++ActorItr)
+        {
+            Instance = *ActorItr;
+            break;
+        }
+        
+        // Create new instance if none found
+        if (!Instance)
+        {
+            Instance = World->SpawnActor<AVFXManager>();
+        }
+    }
+    
+    return Instance;
 }
