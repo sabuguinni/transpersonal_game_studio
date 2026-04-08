@@ -8,46 +8,78 @@
 #include "VFXSystemCore.generated.h"
 
 /**
- * Core VFX System for Transpersonal Game
- * Manages all visual effects with performance-aware LOD system
- * Designed for survival horror atmosphere with minimal UI intrusion
+ * Core VFX System for Transpersonal Jurassic Game
+ * Manages all visual effects with performance optimization and emotional impact focus
  */
 
 UENUM(BlueprintType)
 enum class EVFXCategory : uint8
 {
     // Environmental Effects
-    Weather         UMETA(DisplayName = "Weather & Atmosphere"),
-    Vegetation      UMETA(DisplayName = "Vegetation & Nature"),
-    Water          UMETA(DisplayName = "Water & Fluids"),
+    Weather         UMETA(DisplayName = "Weather"),
+    Atmosphere      UMETA(DisplayName = "Atmosphere"),
+    Vegetation      UMETA(DisplayName = "Vegetation"),
+    
+    // Survival Effects  
+    Fire            UMETA(DisplayName = "Fire"),
+    Smoke           UMETA(DisplayName = "Smoke"),
+    Sparks          UMETA(DisplayName = "Sparks"),
     
     // Creature Effects
-    DinosaurBreath  UMETA(DisplayName = "Dinosaur Breathing"),
-    DinosaurMovement UMETA(DisplayName = "Dinosaur Movement"),
-    BloodSplatter   UMETA(DisplayName = "Blood & Gore"),
+    DinosaurBreath  UMETA(DisplayName = "Dinosaur Breath"),
+    DinosaurImpact  UMETA(DisplayName = "Dinosaur Impact"),
+    BloodSplatter   UMETA(DisplayName = "Blood Splatter"),
     
     // Player Effects
-    Crafting        UMETA(DisplayName = "Crafting & Tools"),
-    Fire           UMETA(DisplayName = "Fire & Smoke"),
-    PlayerMovement  UMETA(DisplayName = "Player Movement"),
+    Exhaustion      UMETA(DisplayName = "Exhaustion"),
+    Fear            UMETA(DisplayName = "Fear"),
+    Discovery       UMETA(DisplayName = "Discovery"),
     
-    // Narrative Effects
-    GemEffect      UMETA(DisplayName = "Time Crystal Effects"),
-    Discovery      UMETA(DisplayName = "Discovery Moments"),
-    Danger         UMETA(DisplayName = "Danger Indicators")
+    // World Effects
+    GemGlow         UMETA(DisplayName = "Gem Glow"),
+    TimeDistortion  UMETA(DisplayName = "Time Distortion"),
+    
+    MAX             UMETA(Hidden)
+};
+
+UENUM(BlueprintType)
+enum class EVFXIntensity : uint8
+{
+    Subtle      UMETA(DisplayName = "Subtle"),
+    Moderate    UMETA(DisplayName = "Moderate"), 
+    Intense     UMETA(DisplayName = "Intense"),
+    Extreme     UMETA(DisplayName = "Extreme")
 };
 
 UENUM(BlueprintType)
 enum class EVFXLODLevel : uint8
 {
-    High    = 0     UMETA(DisplayName = "High Quality"),
-    Medium  = 1     UMETA(DisplayName = "Medium Quality"),
-    Low     = 2     UMETA(DisplayName = "Low Quality"),
-    Disabled = 3    UMETA(DisplayName = "Disabled")
+    High        UMETA(DisplayName = "High Quality"),
+    Medium      UMETA(DisplayName = "Medium Quality"),
+    Low         UMETA(DisplayName = "Low Quality")
 };
 
 USTRUCT(BlueprintType)
-struct FVFXLODSettings
+struct FVFXEmotionalProfile
+{
+    GENERATED_BODY()
+
+    // Emotional impact parameters
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float TensionLevel = 0.5f;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float FearFactor = 0.0f;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float BeautyFactor = 0.5f;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float UrgencyLevel = 0.0f;
+};
+
+USTRUCT(BlueprintType)
+struct FVFXPerformanceSettings
 {
     GENERATED_BODY()
 
@@ -55,19 +87,19 @@ struct FVFXLODSettings
     int32 MaxParticles = 1000;
     
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float ViewDistanceMultiplier = 1.0f;
+    float CullDistance = 5000.0f;
     
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float UpdateRate = 60.0f;
+    EVFXLODLevel LODLevel = EVFXLODLevel::High;
     
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bEnableCollision = true;
+    bool bUseGPUSimulation = true;
     
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bCastShadows = true;
+    bool bCastShadows = false;
 };
 
-UCLASS(ClassGroup=(VFX), meta=(BlueprintSpawnableComponent))
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UVFXSystemCore : public UActorComponent
 {
     GENERATED_BODY()
@@ -77,61 +109,73 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 public:
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
     // Core VFX Management
     UFUNCTION(BlueprintCallable, Category = "VFX")
-    void PlayEffect(EVFXCategory Category, FVector Location, FRotator Rotation = FRotator::ZeroRotator);
+    class UNiagaraComponent* SpawnVFX(EVFXCategory Category, FVector Location, FRotator Rotation = FRotator::ZeroRotator, float Scale = 1.0f);
     
     UFUNCTION(BlueprintCallable, Category = "VFX")
-    void StopEffect(EVFXCategory Category);
+    void StopVFX(class UNiagaraComponent* VFXComponent, bool bImmediate = false);
     
     UFUNCTION(BlueprintCallable, Category = "VFX")
-    void SetLODLevel(EVFXLODLevel NewLOD);
+    void SetVFXIntensity(class UNiagaraComponent* VFXComponent, EVFXIntensity Intensity);
+    
+    // Emotional Impact System
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void ApplyEmotionalProfile(class UNiagaraComponent* VFXComponent, const FVFXEmotionalProfile& Profile);
     
     // Performance Management
-    UFUNCTION(BlueprintCallable, Category = "VFX Performance")
-    void UpdatePerformanceLOD();
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void SetPerformanceSettings(const FVFXPerformanceSettings& Settings);
     
-    UFUNCTION(BlueprintCallable, Category = "VFX Performance")
-    float GetCurrentGPULoad() const;
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void UpdateLOD(float DistanceToPlayer);
+    
+    // Survival-Specific Effects
+    UFUNCTION(BlueprintCallable, Category = "VFX|Survival")
+    void TriggerFireEffect(FVector Location, float Intensity = 1.0f, float Duration = 10.0f);
+    
+    UFUNCTION(BlueprintCallable, Category = "VFX|Survival")
+    void TriggerSmokeEffect(FVector Location, FVector WindDirection, float Density = 1.0f);
+    
+    // Creature-Specific Effects
+    UFUNCTION(BlueprintCallable, Category = "VFX|Creatures")
+    void TriggerDinosaurBreath(FVector Location, FVector Direction, float Temperature = 37.0f);
+    
+    UFUNCTION(BlueprintCallable, Category = "VFX|Creatures")
+    void TriggerImpactEffect(FVector Location, float Force, bool bIsLargeCreature = false);
     
     // Atmospheric Effects
-    UFUNCTION(BlueprintCallable, Category = "VFX Atmosphere")
-    void SetWeatherIntensity(float Intensity);
+    UFUNCTION(BlueprintCallable, Category = "VFX|Atmosphere")
+    void SetAtmosphericTension(float TensionLevel);
     
-    UFUNCTION(BlueprintCallable, Category = "VFX Atmosphere")
-    void TriggerDangerAtmosphere(bool bEnable);
+    UFUNCTION(BlueprintCallable, Category = "VFX|Atmosphere")
+    void TriggerWeatherTransition(float TransitionSpeed = 1.0f);
 
 protected:
-    // VFX Assets Registry
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VFX Assets")
-    TMap<EVFXCategory, TSoftObjectPtr<UNiagaraSystem>> VFXAssets;
+    // VFX Asset Registry
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "VFX Assets")
+    TMap<EVFXCategory, class UNiagaraSystem*> VFXAssets;
     
-    // LOD Configuration
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VFX LOD")
-    TMap<EVFXLODLevel, FVFXLODSettings> LODSettings;
+    // Performance Settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    FVFXPerformanceSettings PerformanceSettings;
     
-    // Current State
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VFX State")
-    EVFXLODLevel CurrentLOD;
+    // Active VFX Tracking
+    UPROPERTY()
+    TArray<class UNiagaraComponent*> ActiveVFXComponents;
     
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VFX State")
-    TMap<EVFXCategory, UNiagaraComponent*> ActiveEffects;
+    // Emotional State
+    UPROPERTY(BlueprintReadOnly, Category = "Emotional")
+    float CurrentTensionLevel = 0.0f;
     
-    // Performance Monitoring
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VFX Performance")
-    float TargetFrameRate = 60.0f;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VFX Performance")
-    float LODDowngradeThreshold = 45.0f;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VFX Performance")
-    float LODUpgradeThreshold = 58.0f;
-
 private:
-    void InitializeLODSettings();
-    void ApplyLODToEffect(UNiagaraComponent* Effect, EVFXLODLevel LOD);
-    bool ShouldAdjustLOD() const;
+    // Internal management
+    void CleanupFinishedVFX();
+    void OptimizePerformance();
+    UNiagaraSystem* GetVFXAsset(EVFXCategory Category);
+    void ApplyLODSettings(class UNiagaraComponent* VFXComponent, EVFXLODLevel LODLevel);
 };
