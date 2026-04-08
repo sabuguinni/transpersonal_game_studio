@@ -10,6 +10,73 @@
 #include "Chaos/ChaosEngineInterface.h"
 #include "CollisionSystem.generated.h"
 
+// Forward declarations
+class UPhysicalMaterial;
+
+/** Collision test types for different gameplay scenarios */
+UENUM(BlueprintType)
+enum class ECollisionTestType : uint8
+{
+    Simple          UMETA(DisplayName = "Simple Overlap"),
+    Complex         UMETA(DisplayName = "Complex Mesh"),
+    Hierarchical    UMETA(DisplayName = "Hierarchical Multi-Part"),
+    Environmental   UMETA(DisplayName = "Environmental Destruction"),
+    Creature        UMETA(DisplayName = "Creature Interaction")
+};
+
+/** Creature collision size categories */
+UENUM(BlueprintType)
+enum class ECreatureCollisionSize : uint8
+{
+    Tiny        UMETA(DisplayName = "Tiny (< 10kg)"),        // Small birds, insects
+    Small       UMETA(DisplayName = "Small (10-50kg)"),     // Compsognathus, rabbits
+    Medium      UMETA(DisplayName = "Medium (50-500kg)"),   // Velociraptors, humans
+    Large       UMETA(DisplayName = "Large (500-5000kg)"),  // Triceratops, Stegosaurus
+    Massive     UMETA(DisplayName = "Massive (> 5000kg)")   // T-Rex, Sauropods
+};
+
+/** Detailed collision result structure */
+USTRUCT(BlueprintType)
+struct FAdvancedCollisionResult
+{
+    GENERATED_BODY()
+
+    /** Whether collision was detected */
+    UPROPERTY(BlueprintReadOnly)
+    bool bHasCollision = false;
+
+    /** Impact location in world space */
+    UPROPERTY(BlueprintReadOnly)
+    FVector ImpactLocation = FVector::ZeroVector;
+
+    /** Impact normal vector */
+    UPROPERTY(BlueprintReadOnly)
+    FVector ImpactNormal = FVector::ZeroVector;
+
+    /** Impact force magnitude */
+    UPROPERTY(BlueprintReadOnly)
+    float ImpactForce = 0.0f;
+
+    /** Penetration depth */
+    UPROPERTY(BlueprintReadOnly)
+    float PenetrationDepth = 0.0f;
+
+    /** Collision component that was hit */
+    UPROPERTY(BlueprintReadOnly)
+    UPrimitiveComponent* HitComponent = nullptr;
+
+    /** Bone name if skeletal mesh collision */
+    UPROPERTY(BlueprintReadOnly)
+    FName HitBoneName = NAME_None;
+
+    /** Material at collision point */
+    UPROPERTY(BlueprintReadOnly)
+    UPhysicalMaterial* HitMaterial = nullptr;
+};
+
+/** Collision event delegate */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FCollisionEventDelegate, AActor*, ActorA, AActor*, ActorB, const FAdvancedCollisionResult&, CollisionResult);
+
 /**
  * @brief Advanced collision detection system for prehistoric survival gameplay
  * 
@@ -100,70 +167,6 @@ public:
     void RegisterCollisionCallback(const FCollisionEventDelegate& Callback);
 
 protected:
-    /** Collision test types for different gameplay scenarios */
-    UENUM(BlueprintType)
-    enum class ECollisionTestType : uint8
-    {
-        Simple          UMETA(DisplayName = "Simple Overlap"),
-        Complex         UMETA(DisplayName = "Complex Mesh"),
-        Hierarchical    UMETA(DisplayName = "Hierarchical Multi-Part"),
-        Environmental   UMETA(DisplayName = "Environmental Destruction"),
-        Creature        UMETA(DisplayName = "Creature Interaction")
-    };
-
-    /** Creature collision size categories */
-    UENUM(BlueprintType)
-    enum class ECreatureCollisionSize : uint8
-    {
-        Tiny        UMETA(DisplayName = "Tiny (< 10kg)"),        // Small birds, insects
-        Small       UMETA(DisplayName = "Small (10-50kg)"),     // Compsognathus, rabbits
-        Medium      UMETA(DisplayName = "Medium (50-500kg)"),   // Velociraptors, humans
-        Large       UMETA(DisplayName = "Large (500-5000kg)"),  // Triceratops, Stegosaurus
-        Massive     UMETA(DisplayName = "Massive (> 5000kg)")   // T-Rex, Sauropods
-    };
-
-    /** Detailed collision result structure */
-    USTRUCT(BlueprintType)
-    struct FAdvancedCollisionResult
-    {
-        GENERATED_BODY()
-
-        /** Whether collision was detected */
-        UPROPERTY(BlueprintReadOnly)
-        bool bHasCollision = false;
-
-        /** Impact location in world space */
-        UPROPERTY(BlueprintReadOnly)
-        FVector ImpactLocation = FVector::ZeroVector;
-
-        /** Impact normal vector */
-        UPROPERTY(BlueprintReadOnly)
-        FVector ImpactNormal = FVector::ZeroVector;
-
-        /** Impact force magnitude */
-        UPROPERTY(BlueprintReadOnly)
-        float ImpactForce = 0.0f;
-
-        /** Penetration depth */
-        UPROPERTY(BlueprintReadOnly)
-        float PenetrationDepth = 0.0f;
-
-        /** Collision component that was hit */
-        UPROPERTY(BlueprintReadOnly)
-        UPrimitiveComponent* HitComponent = nullptr;
-
-        /** Bone name if skeletal mesh collision */
-        UPROPERTY(BlueprintReadOnly)
-        FName HitBoneName = NAME_None;
-
-        /** Material at collision point */
-        UPROPERTY(BlueprintReadOnly)
-        UPhysicalMaterial* HitMaterial = nullptr;
-    };
-
-    /** Collision event delegate */
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FCollisionEventDelegate, AActor*, ActorA, AActor*, ActorB, const FAdvancedCollisionResult&, CollisionResult);
-
     /** Maximum collision detection distance */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance", meta = (ClampMin = "100.0", ClampMax = "50000.0"))
     float MaxCollisionDistance = 10000.0f;
