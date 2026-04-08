@@ -1,21 +1,146 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/GameModeBase.h"
+#include "GameFramework/Actor.h"
 #include "Engine/World.h"
-#include "AIController.h"
-#include "BehaviorTree/BlackboardComponent.h"
-#include "Perception/AIPerceptionComponent.h"
+#include "Components/ActorComponent.h"
+#include "../DinosaurArchetypes.h"
 #include "CombatAIManager.generated.h"
 
-class ADinosaurCharacter;
+class ACombatAIController;
 class UCombatBehaviorComponent;
-class UThreatAssessmentComponent;
+class UBlackboardComponent;
 
 /**
- * Sistema central de gerenciamento de IA de combate
- * Coordena comportamentos táticos entre múltiplos dinossauros
- * Implementa sistema de ameaças dinâmico e comunicação entre IAs
+ * Combat engagement types
+ */
+UENUM(BlueprintType)
+enum class ECombatEngagementType : uint8
+{
+    Territorial     UMETA(DisplayName = "Territorial Defense"),
+    Predation       UMETA(DisplayName = "Predation"),
+    Scavenging      UMETA(DisplayName = "Scavenging"),
+    Defensive       UMETA(DisplayName = "Defensive"),
+    Competitive     UMETA(DisplayName = "Resource Competition"),
+    Dominance       UMETA(DisplayName = "Dominance Display")
+};
+
+/**
+ * Combat states for AI entities
+ */
+UENUM(BlueprintType)
+enum class ECombatState : uint8
+{
+    Peaceful        UMETA(DisplayName = "Peaceful"),
+    Alert           UMETA(DisplayName = "Alert"),
+    Stalking        UMETA(DisplayName = "Stalking"),
+    Engaging        UMETA(DisplayName = "Engaging"),
+    Fighting        UMETA(DisplayName = "Fighting"),
+    Retreating      UMETA(DisplayName = "Retreating"),
+    Victorious      UMETA(DisplayName = "Victorious"),
+    Defeated        UMETA(DisplayName = "Defeated")
+};
+
+/**
+ * Combat threat assessment data
+ */
+USTRUCT(BlueprintType)
+struct FCombatThreat
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    AActor* ThreatActor = nullptr;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float ThreatLevel = 0.0f; // 0.0 = No threat, 1.0 = Maximum threat
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float Distance = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    ECombatEngagementType EngagementType = ECombatEngagementType::Defensive;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float LastSeenTime = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FVector LastKnownPosition = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsActiveTarget = false;
+
+    FCombatThreat()
+    {
+        ThreatActor = nullptr;
+        ThreatLevel = 0.0f;
+        Distance = 0.0f;
+        EngagementType = ECombatEngagementType::Defensive;
+        LastSeenTime = 0.0f;
+        LastKnownPosition = FVector::ZeroVector;
+        bIsActiveTarget = false;
+    }
+};
+
+/**
+ * Combat tactical parameters
+ */
+USTRUCT(BlueprintType)
+struct FCombatTactics
+{
+    GENERATED_BODY()
+
+    // Engagement preferences
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float PreferredEngagementDistance = 200.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float MinimumEngagementDistance = 100.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float MaximumEngagementDistance = 500.0f;
+
+    // Tactical behaviors
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bUsesAmbushTactics = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bUsesPackCoordination = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bUsesTerrainAdvantage = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bUsesHitAndRunTactics = false;
+
+    // Aggression parameters
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float AggressionLevel = 0.5f; // 0.0 = Passive, 1.0 = Extremely aggressive
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float RetreatThreshold = 0.3f; // Health percentage that triggers retreat
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float StalkingDuration = 5.0f; // How long to stalk before engaging
+
+    FCombatTactics()
+    {
+        PreferredEngagementDistance = 200.0f;
+        MinimumEngagementDistance = 100.0f;
+        MaximumEngagementDistance = 500.0f;
+        bUsesAmbushTactics = false;
+        bUsesPackCoordination = false;
+        bUsesTerrainAdvantage = false;
+        bUsesHitAndRunTactics = false;
+        AggressionLevel = 0.5f;
+        RetreatThreshold = 0.3f;
+        StalkingDuration = 5.0f;
+    }
+};
+
+/**
+ * Combat AI Manager
+ * Central system for managing combat intelligence and tactical decisions
  */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API ACombatAIManager : public AActor
@@ -29,71 +154,89 @@ protected:
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
 
-    // Sistema de Registro de Dinossauros
+    // Core combat management
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat AI")
-    TArray<ADinosaurCharacter*> ActiveDinosaurs;
+    TArray<ACombatAIController*> ActiveCombatControllers;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat AI")
-    TArray<ADinosaurCharacter*> CombatActiveDinosaurs;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
+    float ThreatAssessmentInterval = 0.5f;
 
-    // Sistema de Ameaças Globais
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Threat System")
-    TMap<AActor*, float> GlobalThreatMap;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
+    float MaxCombatDistance = 2000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Threat System")
-    float ThreatDecayRate = 0.5f;
+    // Combat coordination
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack Coordination")
+    float PackCoordinationRadius = 1000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Threat System")
-    float MaxThreatDistance = 2000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack Coordination")
+    int32 MaxPackSize = 6;
 
 public:
-    // Registro e Gestão de Dinossauros
+    // Registration system
     UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void RegisterDinosaur(ADinosaurCharacter* Dinosaur);
-
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void UnregisterDinosaur(ADinosaurCharacter* Dinosaur);
+    void RegisterCombatController(ACombatAIController* Controller);
 
     UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void EnterCombatMode(ADinosaurCharacter* Dinosaur, AActor* Threat);
+    void UnregisterCombatController(ACombatAIController* Controller);
+
+    // Threat assessment
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    TArray<FCombatThreat> AssessThreats(AActor* ForActor, float AssessmentRadius = 1000.0f);
 
     UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void ExitCombatMode(ADinosaurCharacter* Dinosaur);
+    float CalculateThreatLevel(AActor* ThreatActor, AActor* AssessingActor);
 
-    // Sistema de Ameaças
-    UFUNCTION(BlueprintCallable, Category = "Threat System")
-    void UpdateThreatLevel(AActor* ThreatActor, float ThreatValue, FVector ThreatLocation);
+    // Pack coordination
+    UFUNCTION(BlueprintCallable, Category = "Pack Coordination")
+    TArray<ACombatAIController*> GetNearbyPackMembers(ACombatAIController* Controller, float Radius = 1000.0f);
 
-    UFUNCTION(BlueprintCallable, Category = "Threat System")
-    float GetThreatLevel(AActor* ThreatActor) const;
+    UFUNCTION(BlueprintCallable, Category = "Pack Coordination")
+    void CoordinatePackAttack(const TArray<ACombatAIController*>& PackMembers, AActor* Target);
 
-    UFUNCTION(BlueprintCallable, Category = "Threat System")
-    TArray<AActor*> GetNearbyThreats(FVector Location, float Radius) const;
+    // Tactical positioning
+    UFUNCTION(BlueprintCallable, Category = "Tactics")
+    FVector FindOptimalCombatPosition(AActor* Attacker, AActor* Target, const FCombatTactics& Tactics);
 
-    // Comunicação entre IAs
-    UFUNCTION(BlueprintCallable, Category = "AI Communication")
-    void BroadcastAlert(FVector AlertLocation, AActor* ThreatActor, float AlertRadius = 1000.0f);
+    UFUNCTION(BlueprintCallable, Category = "Tactics")
+    bool IsPositionTacticallyAdvantaged(const FVector& Position, AActor* ForActor, AActor* Target);
 
-    UFUNCTION(BlueprintCallable, Category = "AI Communication")
-    void BroadcastPackHunt(ADinosaurCharacter* PackLeader, AActor* Target);
+    // Combat state management
+    UFUNCTION(BlueprintCallable, Category = "Combat State")
+    void NotifyCombatStateChange(ACombatAIController* Controller, ECombatState NewState);
 
-    // Sistema de Coordenação Tática
-    UFUNCTION(BlueprintCallable, Category = "Tactical AI")
-    FVector GetFlankingPosition(ADinosaurCharacter* Attacker, AActor* Target, float PreferredDistance = 500.0f);
+    UFUNCTION(BlueprintCallable, Category = "Combat State")
+    void NotifyCombatEngagement(ACombatAIController* Attacker, AActor* Target, ECombatEngagementType EngagementType);
 
-    UFUNCTION(BlueprintCallable, Category = "Tactical AI")
-    bool ShouldRetreat(ADinosaurCharacter* Dinosaur, AActor* Threat);
+    // Utility functions
+    UFUNCTION(BlueprintCallable, Category = "Utilities")
+    bool CanEngageInCombat(AActor* Attacker, AActor* Target);
 
-    UFUNCTION(BlueprintCallable, Category = "Tactical AI")
-    ADinosaurCharacter* GetNearestAlly(ADinosaurCharacter* Dinosaur, float MaxDistance = 1500.0f);
+    UFUNCTION(BlueprintCallable, Category = "Utilities")
+    ECombatEngagementType DetermineEngagementType(AActor* Attacker, AActor* Target);
 
-protected:
-    // Métodos internos de gestão
-    void UpdateThreatDecay(float DeltaTime);
-    void ProcessCombatCoordination();
-    void UpdatePackBehaviors();
+    // Events
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnCombatEngagement, ACombatAIController*, Attacker, AActor*, Target, ECombatEngagementType, EngagementType);
+    UPROPERTY(BlueprintAssignable, Category = "Events")
+    FOnCombatEngagement OnCombatEngagement;
 
-    // Cache para otimização
-    float LastThreatUpdateTime;
-    float ThreatUpdateInterval = 0.5f;
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnCombatStateChanged, ACombatAIController*, Controller, ECombatState, NewState);
+    UPROPERTY(BlueprintAssignable, Category = "Events")
+    FOnCombatStateChanged OnCombatStateChanged;
+
+private:
+    float LastThreatAssessmentTime = 0.0f;
+
+    // Internal threat assessment logic
+    void UpdateThreatAssessments();
+    float CalculateSizeThreatModifier(EDinosaurSize AttackerSize, EDinosaurSize TargetSize);
+    float CalculateDietThreatModifier(EDinosaurDiet AttackerDiet, EDinosaurDiet TargetDiet);
+    bool IsNaturalPredator(EDinosaurDiet AttackerDiet, EDinosaurDiet TargetDiet);
+    
+    // Pack coordination logic
+    void UpdatePackCoordination();
+    bool AreCompatiblePackMembers(ACombatAIController* Controller1, ACombatAIController* Controller2);
+    
+    // Tactical analysis
+    bool HasTerrainAdvantage(const FVector& Position, AActor* ForActor);
+    float CalculatePositionScore(const FVector& Position, AActor* Attacker, AActor* Target, const FCombatTactics& Tactics);
 };
