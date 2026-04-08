@@ -1,0 +1,68 @@
+# Animation Blueprint Configuration for Player Character
+# This file represents the Animation Blueprint asset structure
+# Actual implementation would be done in UE5 editor
+
+Animation Blueprint: ABP_PlayerCharacter
+Target Skeleton: SK_PlayerCharacter
+Parent Class: UAnimInstance
+
+# State Machine: PlayerLocomotion
+States:
+  - Idle
+    - Entry State: true
+    - Animation: Motion Matching Node
+    - Database: DB_Player_Idle
+    - Blend Time: 0.2s
+    
+  - Walking
+    - Animation: Motion Matching Node
+    - Database: DB_Player_Walk
+    - Terrain Adaptation: IK Foot Placement
+    - Blend Time: 0.3s
+    
+  - Running
+    - Animation: Motion Matching Node
+    - Database: DB_Player_Run
+    - Speed Scaling: Based on character confidence
+    - Blend Time: 0.25s
+    
+  - Crouching
+    - Animation: Motion Matching Node
+    - Database: DB_Player_Crouch
+    - Stealth Modifier: Nervousness influence
+    - Blend Time: 0.4s
+    
+  - Climbing
+    - Animation: Motion Matching Node
+    - Database: DB_Player_Climb
+    - IK Hand Placement: Active
+    - Blend Time: 0.5s
+
+# Transitions
+Idle -> Walking: Speed > 0.1
+Walking -> Running: Speed > 3.0 AND Confidence > 0.6
+Running -> Walking: Speed < 2.5 OR Nervousness > 0.7
+Any -> Crouching: Crouch Input OR Fear Level > 0.8
+Crouching -> Idle: Stand Input AND Fear Level < 0.3
+
+# Motion Matching Configuration
+Pose Search Schema: PS_PlayerSchema
+Channels:
+  - Trajectory: 5 samples (past and future)
+  - Pose: Left/Right foot bones
+  - Velocity: Root bone
+  - Heading: Character forward direction
+
+# IK Configuration
+IK Rig: IKR_PlayerCharacter
+Goals:
+  - LeftFoot: Foot_L bone
+  - RightFoot: Foot_R bone
+  - LeftHand: Hand_L bone (climbing only)
+  - RightHand: Hand_R bone (climbing only)
+
+# Additive Layers
+- Breathing: Subtle chest movement based on fear/fatigue
+- Looking: Head tracking for environmental awareness
+- Micro Expressions: Facial animation based on emotional state
+- Injury Compensation: Limping, favoring limbs based on injury level
