@@ -1,0 +1,325 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Engine/Engine.h"
+#include "NiagaraSystem.h"
+#include "NiagaraComponent.h"
+#include "GameplayTagContainer.h"
+#include "VFXSystemManager.h"
+#include "../Narrative/GameBible.h"
+#include "../Audio/NarrativeAudioSystem.h"
+#include "NarrativeVFXSystem.generated.h"
+
+/**
+ * Narrative VFX System - Visual effects that serve the story
+ * 
+ * This system creates visual punctuation for narrative moments, ensuring that
+ * every important story beat has its visual signature that enhances emotional impact.
+ * 
+ * Core Philosophy: The best VFX is the one the player doesn't notice but makes the moment unforgettable.
+ */
+
+UENUM(BlueprintType)
+enum class ENarrativeVFXType : uint8
+{
+    Discovery           UMETA(DisplayName = "Scientific Discovery"),
+    TemporalShift       UMETA(DisplayName = "Temporal Displacement"),
+    MemoryEcho          UMETA(DisplayName = "Memory Echo"),
+    EmotionalResonance  UMETA(DisplayName = "Emotional Resonance"),
+    NatureConnection    UMETA(DisplayName = "Nature Connection"),
+    CharacterGrowth     UMETA(DisplayName = "Character Growth"),
+    TimeGemPulse        UMETA(DisplayName = "Time Gem Energy"),
+    Transcendence       UMETA(DisplayName = "Transcendent Moment")
+};
+
+UENUM(BlueprintType)
+enum class EEmotionalVFXIntensity : uint8
+{
+    Subtle      UMETA(DisplayName = "Subtle Suggestion"),
+    Gentle      UMETA(DisplayName = "Gentle Enhancement"),
+    Moderate    UMETA(DisplayName = "Clear Expression"),
+    Strong      UMETA(DisplayName = "Powerful Statement"),
+    Overwhelming UMETA(DisplayName = "Overwhelming Experience")
+};
+
+USTRUCT(BlueprintType)
+struct FNarrativeVFXContext
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative Context")
+    ENarrativeTheme CurrentTheme = ENarrativeTheme::Survival;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative Context")
+    EStoryAct CurrentAct = EStoryAct::Act1_Arrival;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative Context")
+    FGameplayTagContainer ActiveStoryTags;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Development", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float CharacterGrowthLevel = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Development", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float NatureConnectionLevel = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Development", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float ScientificUnderstandingLevel = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotional State", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float EmotionalIntensity = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Temporal", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float TemporalDisplacementStress = 1.0f;
+};
+
+USTRUCT(BlueprintType)
+struct FDiscoveryVFXData
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Discovery VFX")
+    TObjectPtr<UNiagaraSystem> IntellectualSparkEffect;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Discovery VFX")
+    TObjectPtr<UNiagaraSystem> ScientificRealizationEffect;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Discovery VFX")
+    TObjectPtr<UNiagaraSystem> KnowledgeConnectionEffect;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Discovery VFX")
+    TObjectPtr<UNiagaraSystem> EurekaEffect;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Discovery VFX", meta = (ClampMin = "0.1", ClampMax = "5.0"))
+    float DiscoveryDuration = 2.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Discovery VFX")
+    FLinearColor IntellectualColor = FLinearColor(0.2f, 0.6f, 1.0f, 1.0f);
+};
+
+USTRUCT(BlueprintType)
+struct FTemporalVFXData
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Temporal VFX")
+    TObjectPtr<UNiagaraSystem> TimeDistortionEffect;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Temporal VFX")
+    TObjectPtr<UNiagaraSystem> MemoryEchoEffect;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Temporal VFX")
+    TObjectPtr<UNiagaraSystem> ChronalDisplacementEffect;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Temporal VFX")
+    TObjectPtr<UNiagaraSystem> TimeGemResonanceEffect;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Temporal VFX")
+    FLinearColor TemporalColor = FLinearColor(0.8f, 0.3f, 1.0f, 1.0f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Temporal VFX", meta = (ClampMin = "0.1", ClampMax = "10.0"))
+    float DisplacementIntensity = 1.0f;
+};
+
+USTRUCT(BlueprintType)
+struct FEmotionalVFXData
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotional VFX")
+    TObjectPtr<UNiagaraSystem> WonderEffect;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotional VFX")
+    TObjectPtr<UNiagaraSystem> FearEffect;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotional VFX")
+    TObjectPtr<UNiagaraSystem> IsolationEffect;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotional VFX")
+    TObjectPtr<UNiagaraSystem> ConnectionEffect;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotional VFX")
+    TObjectPtr<UNiagaraSystem> GrowthEffect;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotional VFX")
+    TObjectPtr<UNiagaraSystem> TranscendenceEffect;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotional VFX")
+    TMap<ENarrativeTheme, FLinearColor> ThemeColors;
+};
+
+USTRUCT(BlueprintType)
+struct FCreatureInteractionVFX
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Creature VFX")
+    TObjectPtr<UNiagaraSystem> TrustBuildingEffect;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Creature VFX")
+    TObjectPtr<UNiagaraSystem> FearResponseEffect;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Creature VFX")
+    TObjectPtr<UNiagaraSystem> CommunicationAttemptEffect;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Creature VFX")
+    TObjectPtr<UNiagaraSystem> DomesticationProgressEffect;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Creature VFX")
+    TObjectPtr<UNiagaraSystem> BondFormationEffect;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Creature VFX")
+    FLinearColor TrustColor = FLinearColor(0.3f, 1.0f, 0.4f, 1.0f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Creature VFX")
+    FLinearColor FearColor = FLinearColor(1.0f, 0.2f, 0.2f, 1.0f);
+};
+
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UNarrativeVFXSystem : public UObject
+{
+    GENERATED_BODY()
+
+public:
+    UNarrativeVFXSystem();
+
+    // Core System Functions
+    UFUNCTION(BlueprintCallable, Category = "Narrative VFX")
+    void InitializeNarrativeVFX(UVFXSystemManager* VFXManager, UGameBible* GameBible, UNarrativeAudioSystem* AudioSystem);
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative VFX")
+    void UpdateNarrativeContext(const FNarrativeVFXContext& NewContext);
+
+    // Story Beat Visual Effects
+    UFUNCTION(BlueprintCallable, Category = "Story VFX")
+    void TriggerStoryBeatVFX(const FStoryBeat& StoryBeat, FVector Location = FVector::ZeroVector);
+
+    UFUNCTION(BlueprintCallable, Category = "Story VFX")
+    void TransitionToActVFX(EStoryAct NewAct, FVector PlayerLocation, float TransitionDuration = 5.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Story VFX")
+    void PlayCharacterGrowthVFX(float GrowthLevel, float ConnectionLevel, FVector PlayerLocation);
+
+    // Discovery System VFX
+    UFUNCTION(BlueprintCallable, Category = "Discovery VFX")
+    void TriggerDiscoveryVFX(const FGameplayTag& DiscoveryTag, FVector Location, float IntellectualExcitement = 1.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Discovery VFX")
+    void PlayScientificObservationVFX(FVector ObservationLocation, const FString& ObservationType, float Intensity);
+
+    UFUNCTION(BlueprintCallable, Category = "Discovery VFX")
+    void PlayKnowledgeConnectionVFX(FVector StartLocation, FVector EndLocation, float ConnectionStrength);
+
+    // Temporal Effects
+    UFUNCTION(BlueprintCallable, Category = "Temporal VFX")
+    void TriggerTemporalDisplacementVFX(FVector Location, float DisplacementIntensity, float Duration);
+
+    UFUNCTION(BlueprintCallable, Category = "Temporal VFX")
+    void PlayMemoryEchoVFX(FVector Location, const FString& MemoryType, float TemporalDistance);
+
+    UFUNCTION(BlueprintCallable, Category = "Temporal VFX")
+    void PlayTimeGemPulseVFX(FVector GemLocation, float PulseIntensity, bool bIsActivating = false);
+
+    // Emotional Visual Language
+    UFUNCTION(BlueprintCallable, Category = "Emotional VFX")
+    void SetEmotionalVFXLayer(ENarrativeTheme Theme, float Intensity, FVector PlayerLocation);
+
+    UFUNCTION(BlueprintCallable, Category = "Emotional VFX")
+    void BlendEmotionalThemes(const TArray<ENarrativeTheme>& Themes, const TArray<float>& Intensities, FVector Location);
+
+    UFUNCTION(BlueprintCallable, Category = "Emotional VFX")
+    void TriggerEmotionalResonanceVFX(ENarrativeTheme Theme, EEmotionalVFXIntensity Intensity, FVector Location);
+
+    // Creature Interaction VFX
+    UFUNCTION(BlueprintCallable, Category = "Creature VFX")
+    void PlayCreatureInteractionVFX(AActor* Creature, const FString& InteractionType, float TrustLevel);
+
+    UFUNCTION(BlueprintCallable, Category = "Creature VFX")
+    void PlayDomesticationProgressVFX(AActor* Creature, float ProgressLevel, float BondStrength);
+
+    UFUNCTION(BlueprintCallable, Category = "Creature VFX")
+    void PlayCreatureCommunicationVFX(FVector PlayerLocation, FVector CreatureLocation, bool bSuccessful);
+
+    // Environmental Narrative VFX
+    UFUNCTION(BlueprintCallable, Category = "Environment VFX")
+    void PlayEnvironmentalStoryVFX(FVector Location, const FString& StoryElement, float NarrativeWeight);
+
+    UFUNCTION(BlueprintCallable, Category = "Environment VFX")
+    void TriggerLocationMemoryVFX(FVector Location, const FNarrativeLocation& LocationData);
+
+    // Internal Monologue VFX
+    UFUNCTION(BlueprintCallable, Category = "Internal VFX")
+    void PlayInternalThoughtVFX(FVector PlayerLocation, EDialogueType ThoughtType, float EmotionalWeight);
+
+    UFUNCTION(BlueprintCallable, Category = "Internal VFX")
+    void PlayScientificAnalysisVFX(FVector AnalysisLocation, const FString& AnalysisType, float Complexity);
+
+    // Transcendence and Departure VFX
+    UFUNCTION(BlueprintCallable, Category = "Transcendence VFX")
+    void PlayTranscendenceVFX(FVector Location, float TranscendenceLevel, float Duration);
+
+    UFUNCTION(BlueprintCallable, Category = "Transcendence VFX")
+    void PlayDepartureChoiceVFX(FVector GemLocation, bool bChooseToStay, float ChoiceWeight);
+
+protected:
+    // Core System References
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "System References")
+    TObjectPtr<UVFXSystemManager> VFXSystemManager;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "System References")
+    TObjectPtr<UGameBible> GameBibleReference;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "System References")
+    TObjectPtr<UNarrativeAudioSystem> AudioSystemReference;
+
+    // Current Narrative State
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Narrative State")
+    FNarrativeVFXContext CurrentContext;
+
+    // VFX Data Libraries
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VFX Libraries")
+    FDiscoveryVFXData DiscoveryVFXLibrary;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VFX Libraries")
+    FTemporalVFXData TemporalVFXLibrary;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VFX Libraries")
+    FEmotionalVFXData EmotionalVFXLibrary;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VFX Libraries")
+    FCreatureInteractionVFX CreatureInteractionLibrary;
+
+    // Active Narrative VFX Tracking
+    UPROPERTY()
+    TArray<UNiagaraComponent*> ActiveNarrativeVFX;
+
+    UPROPERTY()
+    TMap<ENarrativeTheme, UNiagaraComponent*> ActiveThemeVFX;
+
+    // Performance and Quality Settings
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance")
+    float NarrativeVFXQualityMultiplier = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance")
+    int32 MaxActiveNarrativeVFX = 15;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance")
+    float EmotionalVFXFadeTime = 3.0f;
+
+private:
+    // Internal Helper Functions
+    void InitializeVFXLibraries();
+    void CleanupInactiveNarrativeVFX();
+    UNiagaraComponent* SpawnNarrativeVFX(UNiagaraSystem* VFXSystem, FVector Location, FRotator Rotation = FRotator::ZeroRotator);
+    void ApplyNarrativeContextToVFX(UNiagaraComponent* VFXComponent, const FNarrativeVFXContext& Context);
+    FLinearColor GetThemeColor(ENarrativeTheme Theme);
+    float CalculateEmotionalIntensity(ENarrativeTheme Theme, float BaseIntensity);
+    void SynchronizeWithAudio(ENarrativeVFXType VFXType, FVector Location);
+    
+    // Theme-specific VFX spawners
+    void SpawnWonderVFX(FVector Location, float Intensity);
+    void SpawnFearVFX(FVector Location, float Intensity);
+    void SpawnIsolationVFX(FVector Location, float Intensity);
+    void SpawnConnectionVFX(FVector Location, float Intensity);
+    void SpawnGrowthVFX(FVector Location, float Intensity);
+    void SpawnTranscendenceVFX(FVector Location, float Intensity);
+};
