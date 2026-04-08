@@ -1,150 +1,270 @@
 #include "AnimationSystemCore.h"
-#include "Engine/World.h"
-#include "Components/SkeletalMeshComponent.h"
 #include "Animation/AnimInstance.h"
-#include "DrawDebugHelpers.h"
+#include "Animation/PoseSearch/PoseSearchDatabase.h"
+#include "IKRigDefinition.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Engine/World.h"
+#include "Kismet/KismetMathLibrary.h"
 
 UAnimationSystemCore::UAnimationSystemCore()
 {
-    // Initialize default animation state
-    CurrentAnimationState.EmotionalState = ECharacterEmotionalState::Cautious;
-    CurrentAnimationState.MovementContext = EMovementContext::OpenArea;
-    CurrentAnimationState.ThreatLevel = EThreatLevel::None;
-    CurrentAnimationState.FatigueLevel = 0.0f;
-    CurrentAnimationState.ExperienceLevel = 0.0f;
-    CurrentAnimationState.TimeInCurrentArea = 0.0f;
-    CurrentAnimationState.bIsCarryingWeight = false;
-    CurrentAnimationState.bIsInjured = false;
-    CurrentAnimationState.InjurySeverity = 0.0f;
-
-    PreviousAnimationState = CurrentAnimationState;
+    // Initialize default settings
 }
 
-void UAnimationSystemCore::UpdateAnimationState(const FCharacterAnimationState& NewState)
+void UAnimationSystemCore::InitializeMotionMatchingDatabases()
 {
-    PreviousAnimationState = CurrentAnimationState;
-    CurrentAnimationState = NewState;
-    StateTransitionTime = 0.0f;
+    // Initialize Motion Matching databases for different creature types and behaviors
+    // This will be populated with actual database assets during content creation
     
-    // Log significant state changes for debugging
-    if (PreviousAnimationState.EmotionalState != CurrentAnimationState.EmotionalState)
-    {
-        UE_LOG(LogTemp, Log, TEXT("Emotional State Changed: %d -> %d"), 
-            (int32)PreviousAnimationState.EmotionalState, 
-            (int32)CurrentAnimationState.EmotionalState);
-    }
+    UE_LOG(LogTemp, Log, TEXT("Animation System: Initializing Motion Matching databases..."));
     
-    if (PreviousAnimationState.ThreatLevel != CurrentAnimationState.ThreatLevel)
+    // Player locomotion database
+    // CreatureLocomotionDatabase for various dinosaur species
+    // CombatDatabase for predator behaviors
+    // DomesticationDatabase for tamed creature behaviors
+    
+    SetupMotionMatchingSchemas();
+}
+
+void UAnimationSystemCore::SetActiveDatabase(const FString& DatabaseName)
+{
+    if (MotionMatchingDatabases.Contains(DatabaseName))
     {
-        UE_LOG(LogTemp, Log, TEXT("Threat Level Changed: %d -> %d"), 
-            (int32)PreviousAnimationState.ThreatLevel, 
-            (int32)CurrentAnimationState.ThreatLevel);
-    }
-}
-
-void UAnimationSystemCore::SetMotionMatchingDatabase(UPoseSearchDatabase* Database)
-{
-    CurrentMotionDatabase = Database;
-    UE_LOG(LogTemp, Log, TEXT("Motion Matching Database Updated"));
-}
-
-void UAnimationSystemCore::UpdateFootIK(float DeltaTime)
-{
-    // This will be called from the Animation Blueprint
-    // Foot IK logic will be implemented in the Animation Blueprint nodes
-    StateTransitionTime += DeltaTime;
-    LastUpdateTime = DeltaTime;
-}
-
-void UAnimationSystemCore::SetIKFootTarget(bool bLeftFoot, FVector TargetLocation, FRotator TargetRotation)
-{
-    if (bLeftFoot)
-    {
-        LeftFootIKLocation = TargetLocation;
-        LeftFootIKRotation = TargetRotation;
+        UE_LOG(LogTemp, Log, TEXT("Animation System: Switching to database: %s"), *DatabaseName);
+        // Implementation will connect to Motion Matching node in Animation Blueprint
     }
     else
     {
-        RightFootIKLocation = TargetLocation;
-        RightFootIKRotation = TargetRotation;
+        UE_LOG(LogTemp, Warning, TEXT("Animation System: Database not found: %s"), *DatabaseName);
     }
 }
 
-float UAnimationSystemCore::CalculateMovementBlendWeight(ECharacterEmotionalState State, EThreatLevel Threat) const
+void UAnimationSystemCore::ApplyCreaturePersonality(USkeletalMeshComponent* SkeletalMesh, const FCreaturePersonality& Personality)
 {
-    float BaseWeight = 1.0f;
-    
-    // Emotional state modifiers
-    switch (State)
+    if (!SkeletalMesh || !SkeletalMesh->GetAnimInstance())
     {
-        case ECharacterEmotionalState::Terrified:
-            BaseWeight *= 1.5f; // More erratic, faster movements
-            break;
-        case ECharacterEmotionalState::Anxious:
-            BaseWeight *= 1.2f; // Slightly heightened movements
-            break;
-        case ECharacterEmotionalState::Cautious:
-            BaseWeight *= 1.0f; // Normal baseline
-            break;
-        case ECharacterEmotionalState::Focused:
-            BaseWeight *= 0.9f; // More controlled movements
-            break;
-        case ECharacterEmotionalState::Confident:
-            BaseWeight *= 0.8f; // Smoother, more efficient
-            break;
-        case ECharacterEmotionalState::Exhausted:
-            BaseWeight *= 0.6f; // Slower, more labored
-            break;
+        return;
+    }
+
+    UAnimInstance* AnimInstance = SkeletalMesh->GetAnimInstance();
+    
+    // Apply size variation
+    FVector CurrentScale = SkeletalMesh->GetComponentScale();
+    FVector NewScale = CurrentScale * Personality.SizeVariation;
+    SkeletalMesh->SetWorldScale3D(NewScale);
+    
+    // Apply behavioral parameters to animation instance
+    // These will be read by the Animation Blueprint to modify behavior
+    
+    // Set animation variables through the Animation Instance
+    if (AnimInstance->GetClass()->FindPropertyByName(TEXT("Aggressiveness")))
+    {
+        AnimInstance->GetClass()->FindPropertyByName(TEXT("Aggressiveness"))->SetFloatPropertyValue(AnimInstance, Personality.Aggressiveness);
     }
     
-    // Threat level modifiers
-    switch (Threat)
+    if (AnimInstance->GetClass()->FindPropertyByName(TEXT("Nervousness")))
     {
-        case EThreatLevel::None:
-            BaseWeight *= 1.0f;
-            break;
-        case EThreatLevel::Distant:
-            BaseWeight *= 1.1f; // Slight tension
-            break;
-        case EThreatLevel::Nearby:
-            BaseWeight *= 1.3f; // Heightened alertness
-            break;
-        case EThreatLevel::Immediate:
-            BaseWeight *= 1.6f; // High stress movements
-            break;
-        case EThreatLevel::Combat:
-            BaseWeight *= 2.0f; // Maximum intensity
-            break;
+        AnimInstance->GetClass()->FindPropertyByName(TEXT("Nervousness"))->SetFloatPropertyValue(AnimInstance, Personality.Nervousness);
     }
     
-    // Factor in fatigue - tired characters move differently
-    float FatigueModifier = FMath::Lerp(1.0f, 0.7f, CurrentAnimationState.FatigueLevel);
-    BaseWeight *= FatigueModifier;
+    if (AnimInstance->GetClass()->FindPropertyByName(TEXT("MovementSpeedMultiplier")))
+    {
+        AnimInstance->GetClass()->FindPropertyByName(TEXT("MovementSpeedMultiplier"))->SetFloatPropertyValue(AnimInstance, Personality.MovementSpeedMultiplier);
+    }
     
-    // Factor in experience - experienced characters are more efficient
-    float ExperienceModifier = FMath::Lerp(1.0f, 0.85f, CurrentAnimationState.ExperienceLevel);
-    BaseWeight *= ExperienceModifier;
-    
-    return FMath::Clamp(BaseWeight, 0.1f, 3.0f);
+    UE_LOG(LogTemp, Log, TEXT("Animation System: Applied personality - Aggression: %f, Nervousness: %f"), 
+           Personality.Aggressiveness, Personality.Nervousness);
 }
 
-float UAnimationSystemCore::GetContextualSpeedModifier(EMovementContext Context) const
+void UAnimationSystemCore::UpdateCreatureAnimationState(USkeletalMeshComponent* SkeletalMesh, ECreatureAnimationState NewState)
 {
-    switch (Context)
+    if (!SkeletalMesh || !SkeletalMesh->GetAnimInstance())
     {
-        case EMovementContext::OpenArea:
-            return 1.0f; // Normal speed
-        case EMovementContext::DenseVegetation:
-            return 0.7f; // Slower, more careful
-        case EMovementContext::NearWater:
-            return 0.8f; // Cautious near water
-        case EMovementContext::HighGround:
-            return 1.1f; // Confident on high ground
-        case EMovementContext::Hiding:
-            return 0.3f; // Very slow, stealthy
-        case EMovementContext::Stalking:
-            return 0.5f; // Slow, deliberate
+        return;
+    }
+
+    UAnimInstance* AnimInstance = SkeletalMesh->GetAnimInstance();
+    
+    // Update animation state in the Animation Blueprint
+    if (AnimInstance->GetClass()->FindPropertyByName(TEXT("CreatureState")))
+    {
+        AnimInstance->GetClass()->FindPropertyByName(TEXT("CreatureState"))->SetBytePropertyValue(AnimInstance, (uint8)NewState);
+    }
+    
+    // Apply state-specific behaviors
+    switch (NewState)
+    {
+        case ECreatureAnimationState::Alert:
+            // Increase animation speed, add tension to posture
+            if (AnimInstance->GetClass()->FindPropertyByName(TEXT("AlertnessLevel")))
+            {
+                AnimInstance->GetClass()->FindPropertyByName(TEXT("AlertnessLevel"))->SetFloatPropertyValue(AnimInstance, 1.0f);
+            }
+            break;
+            
+        case ECreatureAnimationState::Hunting:
+            // Lower posture, stalking movements
+            if (AnimInstance->GetClass()->FindPropertyByName(TEXT("HuntingMode")))
+            {
+                AnimInstance->GetClass()->FindPropertyByName(TEXT("HuntingMode"))->SetBoolPropertyValue(AnimInstance, true);
+            }
+            break;
+            
+        case ECreatureAnimationState::Domesticated:
+            // Relaxed posture, friendly behaviors
+            if (AnimInstance->GetClass()->FindPropertyByName(TEXT("DomesticationLevel")))
+            {
+                AnimInstance->GetClass()->FindPropertyByName(TEXT("DomesticationLevel"))->SetFloatPropertyValue(AnimInstance, 1.0f);
+            }
+            break;
+            
         default:
-            return 1.0f;
+            break;
     }
+    
+    UE_LOG(LogTemp, Log, TEXT("Animation System: Creature state changed to: %d"), (int32)NewState);
+}
+
+void UAnimationSystemCore::UpdatePlayerAnimationState(USkeletalMeshComponent* PlayerMesh, EPlayerAnimationState NewState)
+{
+    if (!PlayerMesh || !PlayerMesh->GetAnimInstance())
+    {
+        return;
+    }
+
+    UAnimInstance* AnimInstance = PlayerMesh->GetAnimInstance();
+    
+    // Update player animation state
+    if (AnimInstance->GetClass()->FindPropertyByName(TEXT("PlayerState")))
+    {
+        AnimInstance->GetClass()->FindPropertyByName(TEXT("PlayerState"))->SetBytePropertyValue(AnimInstance, (uint8)NewState);
+    }
+    
+    // Apply state-specific modifiers
+    switch (NewState)
+    {
+        case EPlayerAnimationState::Fearful:
+            // Trembling, quick head movements, defensive posture
+            if (AnimInstance->GetClass()->FindPropertyByName(TEXT("FearLevel")))
+            {
+                AnimInstance->GetClass()->FindPropertyByName(TEXT("FearLevel"))->SetFloatPropertyValue(AnimInstance, 1.0f);
+            }
+            break;
+            
+        case EPlayerAnimationState::Hiding:
+            // Crouched, minimal movement, tense
+            if (AnimInstance->GetClass()->FindPropertyByName(TEXT("HidingIntensity")))
+            {
+                AnimInstance->GetClass()->FindPropertyByName(TEXT("HidingIntensity"))->SetFloatPropertyValue(AnimInstance, 1.0f);
+            }
+            break;
+            
+        case EPlayerAnimationState::Exhausted:
+            // Slower movements, heavy breathing, slumped posture
+            if (AnimInstance->GetClass()->FindPropertyByName(TEXT("ExhaustionLevel")))
+            {
+                AnimInstance->GetClass()->FindPropertyByName(TEXT("ExhaustionLevel"))->SetFloatPropertyValue(AnimInstance, 1.0f);
+            }
+            break;
+            
+        default:
+            break;
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Animation System: Player state changed to: %d"), (int32)NewState);
+}
+
+void UAnimationSystemCore::ApplyFearResponse(USkeletalMeshComponent* PlayerMesh, float FearIntensity)
+{
+    if (!PlayerMesh || !PlayerMesh->GetAnimInstance())
+    {
+        return;
+    }
+
+    UAnimInstance* AnimInstance = PlayerMesh->GetAnimInstance();
+    
+    // Clamp fear intensity
+    FearIntensity = FMath::Clamp(FearIntensity, 0.0f, 1.0f);
+    
+    // Apply fear-based animation modifiers
+    if (AnimInstance->GetClass()->FindPropertyByName(TEXT("FearIntensity")))
+    {
+        AnimInstance->GetClass()->FindPropertyByName(TEXT("FearIntensity"))->SetFloatPropertyValue(AnimInstance, FearIntensity);
+    }
+    
+    // Increase movement speed when fear is high (fight or flight)
+    float SpeedMultiplier = 1.0f + (FearIntensity * 0.5f);
+    if (AnimInstance->GetClass()->FindPropertyByName(TEXT("MovementSpeedMultiplier")))
+    {
+        AnimInstance->GetClass()->FindPropertyByName(TEXT("MovementSpeedMultiplier"))->SetFloatPropertyValue(AnimInstance, SpeedMultiplier);
+    }
+    
+    // Add trembling effect
+    if (AnimInstance->GetClass()->FindPropertyByName(TEXT("TremblingIntensity")))
+    {
+        AnimInstance->GetClass()->FindPropertyByName(TEXT("TremblingIntensity"))->SetFloatPropertyValue(AnimInstance, FearIntensity * 0.3f);
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Animation System: Applied fear response with intensity: %f"), FearIntensity);
+}
+
+void UAnimationSystemCore::EnableFootIK(USkeletalMeshComponent* SkeletalMesh, bool bEnable)
+{
+    if (!SkeletalMesh || !SkeletalMesh->GetAnimInstance())
+    {
+        return;
+    }
+
+    UAnimInstance* AnimInstance = SkeletalMesh->GetAnimInstance();
+    
+    // Enable/disable foot IK in the Animation Blueprint
+    if (AnimInstance->GetClass()->FindPropertyByName(TEXT("bEnableFootIK")))
+    {
+        AnimInstance->GetClass()->FindPropertyByName(TEXT("bEnableFootIK"))->SetBoolPropertyValue(AnimInstance, bEnable);
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Animation System: Foot IK %s"), bEnable ? TEXT("enabled") : TEXT("disabled"));
+}
+
+void UAnimationSystemCore::UpdateTerrainAdaptation(USkeletalMeshComponent* SkeletalMesh, const FVector& GroundNormal)
+{
+    if (!SkeletalMesh || !SkeletalMesh->GetAnimInstance())
+    {
+        return;
+    }
+
+    UAnimInstance* AnimInstance = SkeletalMesh->GetAnimInstance();
+    
+    // Calculate terrain slope and apply to animation
+    float SlopeAngle = FMath::Acos(FVector::DotProduct(GroundNormal, FVector::UpVector));
+    float SlopeIntensity = FMath::Clamp(SlopeAngle / (PI * 0.25f), 0.0f, 1.0f); // Normalize to 0-1 for 45 degree max slope
+    
+    // Apply terrain adaptation parameters
+    if (AnimInstance->GetClass()->FindPropertyByName(TEXT("TerrainSlopeIntensity")))
+    {
+        AnimInstance->GetClass()->FindPropertyByName(TEXT("TerrainSlopeIntensity"))->SetFloatPropertyValue(AnimInstance, SlopeIntensity);
+    }
+    
+    if (AnimInstance->GetClass()->FindPropertyByName(TEXT("GroundNormal")))
+    {
+        AnimInstance->GetClass()->FindPropertyByName(TEXT("GroundNormal"))->SetStructPropertyValue(AnimInstance, &GroundNormal);
+    }
+}
+
+void UAnimationSystemCore::SetupMotionMatchingSchemas()
+{
+    // This will be implemented when Motion Matching databases are created
+    UE_LOG(LogTemp, Log, TEXT("Animation System: Setting up Motion Matching schemas..."));
+}
+
+void UAnimationSystemCore::ConfigureIKSolvers()
+{
+    // Configure IK solvers for different character types
+    UE_LOG(LogTemp, Log, TEXT("Animation System: Configuring IK solvers..."));
+}
+
+void UAnimationSystemCore::InitializeDefaultPersonalities()
+{
+    // Initialize default personality presets for different creature types
+    UE_LOG(LogTemp, Log, TEXT("Animation System: Initializing default personalities..."));
 }
