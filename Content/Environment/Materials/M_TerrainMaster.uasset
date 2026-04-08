@@ -1,0 +1,89 @@
+// Master Terrain Material for Jurassic Environment
+// Supports 6 layers: Mud, Rock, Grass, Sand, Moss, Volcanic
+// Uses Landscape Layer Blend with Height Blending for realistic transitions
+
+Material Domain: Surface
+Blend Mode: Opaque
+Shading Model: Default Lit
+
+// Base Landscape Layer Blend Node
+LandscapeLayerBlend TerrainBlend
+{
+    Layers:
+    [
+        {
+            LayerName: "Mud"
+            BlendType: LB_WeightBlend
+            PreviewWeight: 0.3
+        },
+        {
+            LayerName: "Rock" 
+            BlendType: LB_HeightBlend
+            PreviewWeight: 0.2
+        },
+        {
+            LayerName: "Grass"
+            BlendType: LB_HeightBlend  
+            PreviewWeight: 0.2
+        },
+        {
+            LayerName: "Sand"
+            BlendType: LB_WeightBlend
+            PreviewWeight: 0.1
+        },
+        {
+            LayerName: "Moss"
+            BlendType: LB_AlphaBlend
+            PreviewWeight: 0.1
+        },
+        {
+            LayerName: "Volcanic"
+            BlendType: LB_HeightBlend
+            PreviewWeight: 0.1
+        }
+    ]
+}
+
+// Texture Samples with Landscape Coordinates
+LandscapeLayerCoords UV_Terrain
+{
+    MappingType: TCMT_Auto
+    MappingScale: 8.0
+    MappingRotation: 0.0
+}
+
+// Individual Layer Textures
+TextureSample T_Mud_BC (Texture: T_Mud_BaseColor)
+TextureSample T_Mud_N (Texture: T_Mud_Normal) 
+TextureSample T_Mud_ORM (Texture: T_Mud_OcclusionRoughnessMetallic)
+
+TextureSample T_Rock_BC (Texture: T_Rock_BaseColor)
+TextureSample T_Rock_N (Texture: T_Rock_Normal)
+TextureSample T_Rock_ORM (Texture: T_Rock_OcclusionRoughnessMetallic)
+
+TextureSample T_Grass_BC (Texture: T_Grass_BaseColor)
+TextureSample T_Grass_N (Texture: T_Grass_Normal)
+TextureSample T_Grass_ORM (Texture: T_Grass_OcclusionRoughnessMetallic)
+
+TextureSample T_Sand_BC (Texture: T_Sand_BaseColor)
+TextureSample T_Sand_N (Texture: T_Sand_Normal)
+TextureSample T_Sand_ORM (Texture: T_Sand_OcclusionRoughnessMetallic)
+
+TextureSample T_Moss_BC (Texture: T_Moss_BaseColor)
+TextureSample T_Moss_N (Texture: T_Moss_Normal)
+TextureSample T_Moss_ORM (Texture: T_Moss_OcclusionRoughnessMetallic)
+
+TextureSample T_Volcanic_BC (Texture: T_Volcanic_BaseColor)
+TextureSample T_Volcanic_N (Texture: T_Volcanic_Normal)
+TextureSample T_Volcanic_ORM (Texture: T_Volcanic_OcclusionRoughnessMetallic)
+
+// Connect to Material Output
+BaseColor: TerrainBlend.Output
+Normal: BlendedNormals
+Roughness: BlendedRoughness.R
+AmbientOcclusion: BlendedOcclusion.R
+Metallic: 0.0 (Constant - all terrain is non-metallic)
+
+// Wetness system for dynamic weather
+Parameter WetnessAmount (Default: 0.0, Range: 0.0-1.0)
+Lerp(BlendedRoughness, 0.1, WetnessAmount) -> Roughness
