@@ -2,113 +2,44 @@
 
 #include "CoreMinimal.h"
 #include "Animation/AnimInstance.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "GameFramework/Character.h"
-#include "Components/CapsuleComponent.h"
-#include "../Core/AnimationSystemManager.h"
 #include "PlayerAnimationController.generated.h"
 
 UENUM(BlueprintType)
 enum class EPlayerMovementState : uint8
 {
-    Idle,
-    Walking,
-    Running,
-    Crouching,
-    Crawling,
-    Climbing,
-    Jumping,
-    Falling,
-    Landing,
-    Hiding,
-    Interacting
+    Idle            UMETA(DisplayName = "Idle"),
+    Walking         UMETA(DisplayName = "Walking"),
+    Running         UMETA(DisplayName = "Running"), 
+    Crouching       UMETA(DisplayName = "Crouching"),
+    Sneaking        UMETA(DisplayName = "Sneaking"),
+    Climbing        UMETA(DisplayName = "Climbing"),
+    Falling         UMETA(DisplayName = "Falling"),
+    Landing         UMETA(DisplayName = "Landing"),
+    Interacting     UMETA(DisplayName = "Interacting"),
+    Hiding          UMETA(DisplayName = "Hiding"),
+    Observing       UMETA(DisplayName = "Observing"),
+    Startled        UMETA(DisplayName = "Startled")
 };
 
 UENUM(BlueprintType)
 enum class EPlayerEmotionalState : uint8
 {
-    Calm,
-    Nervous,
-    Afraid,
-    Panicked,
-    Focused,
-    Exhausted,
-    Alert
+    Calm            UMETA(DisplayName = "Calm"),
+    Cautious        UMETA(DisplayName = "Cautious"),
+    Afraid          UMETA(DisplayName = "Afraid"),
+    Terrified       UMETA(DisplayName = "Terrified"),
+    Curious         UMETA(DisplayName = "Curious"),
+    Focused         UMETA(DisplayName = "Focused"),
+    Exhausted       UMETA(DisplayName = "Exhausted"),
+    Injured         UMETA(DisplayName = "Injured")
 };
 
-USTRUCT(BlueprintType)
-struct FPlayerAnimationData
-{
-    GENERATED_BODY()
-
-    // Estados básicos
-    UPROPERTY(BlueprintReadOnly)
-    EPlayerMovementState MovementState;
-
-    UPROPERTY(BlueprintReadOnly)
-    EPlayerEmotionalState EmotionalState;
-
-    // Dados de movimento para Motion Matching
-    UPROPERTY(BlueprintReadOnly)
-    FVector Velocity;
-
-    UPROPERTY(BlueprintReadOnly)
-    float Speed;
-
-    UPROPERTY(BlueprintReadOnly)
-    float Direction;
-
-    UPROPERTY(BlueprintReadOnly)
-    bool bIsMoving;
-
-    UPROPERTY(BlueprintReadOnly)
-    bool bIsGrounded;
-
-    // Dados contextuais para animações procedurais
-    UPROPERTY(BlueprintReadOnly)
-    float StaminaLevel;
-
-    UPROPERTY(BlueprintReadOnly)
-    float FearLevel;
-
-    UPROPERTY(BlueprintReadOnly)
-    float HealthPercentage;
-
-    // IK Data
-    UPROPERTY(BlueprintReadOnly)
-    bool bEnableFootIK;
-
-    UPROPERTY(BlueprintReadOnly)
-    FVector LeftFootIKOffset;
-
-    UPROPERTY(BlueprintReadOnly)
-    FVector RightFootIKOffset;
-
-    UPROPERTY(BlueprintReadOnly)
-    FRotator LeftFootIKRotation;
-
-    UPROPERTY(BlueprintReadOnly)
-    FRotator RightFootIKRotation;
-
-    FPlayerAnimationData()
-    {
-        MovementState = EPlayerMovementState::Idle;
-        EmotionalState = EPlayerEmotionalState::Calm;
-        Velocity = FVector::ZeroVector;
-        Speed = 0.0f;
-        Direction = 0.0f;
-        bIsMoving = false;
-        bIsGrounded = true;
-        StaminaLevel = 1.0f;
-        FearLevel = 0.0f;
-        HealthPercentage = 1.0f;
-        bEnableFootIK = true;
-        LeftFootIKOffset = FVector::ZeroVector;
-        RightFootIKOffset = FVector::ZeroVector;
-        LeftFootIKRotation = FRotator::ZeroRotator;
-        RightFootIKRotation = FRotator::ZeroRotator;
-    }
-};
-
+/**
+ * Specialized Animation Instance for the Player Character
+ * Handles Motion Matching, IK, and paleontologist-specific behaviors
+ */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UPlayerAnimationController : public UAnimInstance
 {
@@ -121,70 +52,139 @@ protected:
     virtual void NativeInitializeAnimation() override;
     virtual void NativeUpdateAnimation(float DeltaTimeX) override;
 
-    // Referência ao personagem
-    UPROPERTY(BlueprintReadOnly, Category = "Character")
-    ACharacter* OwningCharacter;
-
-    // Dados de animação atuais
-    UPROPERTY(BlueprintReadOnly, Category = "Animation Data")
-    FPlayerAnimationData AnimationData;
-
-    // Motion Matching Database para diferentes estados
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    TMap<EPlayerMovementState, class UPoseSearchDatabase*> MovementDatabases;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    TMap<EPlayerEmotionalState, class UPoseSearchDatabase*> EmotionalDatabases;
-
-    // Configurações de IK
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK Settings")
-    float FootIKTraceDistance = 50.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK Settings")
-    float FootIKInterpSpeed = 15.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK Settings")
-    FName LeftFootBoneName = "foot_l";
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK Settings")
-    FName RightFootBoneName = "foot_r";
-
-    // Sistema de transições suaves
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transitions")
-    float StateTransitionSpeed = 5.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transitions")
-    float EmotionalTransitionSpeed = 2.0f;
-
-private:
-    // Funções de atualização
-    void UpdateMovementData(float DeltaTime);
-    void UpdateEmotionalState(float DeltaTime);
-    void UpdateFootIK(float DeltaTime);
-    
-    // Funções auxiliares de IK
-    FVector PerformFootTrace(const FName& FootBoneName, float TraceDistance) const;
-    void CalculateFootIKOffset(const FName& FootBoneName, FVector& OutOffset, FRotator& OutRotation) const;
-
-    // Cache para otimização
-    float LastUpdateTime;
-    EPlayerMovementState PreviousMovementState;
-    EPlayerEmotionalState PreviousEmotionalState;
-
 public:
-    // Funções Blueprint
+    // Movement State
+    UPROPERTY(BlueprintReadOnly, Category = "Player Animation")
+    EPlayerMovementState CurrentMovementState;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Player Animation")
+    EPlayerEmotionalState CurrentEmotionalState;
+
+    // Motion Matching Variables
+    UPROPERTY(BlueprintReadOnly, Category = "Motion Matching")
+    float Speed;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Motion Matching")
+    float Direction;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Motion Matching")
+    FVector Velocity;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Motion Matching")
+    bool bIsMoving;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Motion Matching")
+    bool bIsFalling;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Motion Matching")
+    bool bIsGrounded;
+
+    // IK Variables
+    UPROPERTY(BlueprintReadOnly, Category = "IK System")
+    float LeftFootIKOffset;
+
+    UPROPERTY(BlueprintReadOnly, Category = "IK System")
+    float RightFootIKOffset;
+
+    UPROPERTY(BlueprintReadOnly, Category = "IK System")
+    FRotator LeftFootIKRotation;
+
+    UPROPERTY(BlueprintReadOnly, Category = "IK System")
+    FRotator RightFootIKRotation;
+
+    UPROPERTY(BlueprintReadOnly, Category = "IK System")
+    float HipOffset;
+
+    // Paleontologist-Specific Behaviors
+    UPROPERTY(BlueprintReadOnly, Category = "Paleontologist Behavior")
+    bool bIsExaminingFossil;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Paleontologist Behavior")
+    bool bIsDigging;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Paleontologist Behavior")
+    bool bIsTakingNotes;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Paleontologist Behavior")
+    bool bIsUsingTool;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Paleontologist Behavior")
+    float ToolType; // 0=None, 1=Brush, 2=Pick, 3=Magnifying Glass
+
+    // Survival Behaviors
+    UPROPERTY(BlueprintReadOnly, Category = "Survival Behavior")
+    bool bIsHiding;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Survival Behavior")
+    bool bIsListening;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Survival Behavior")
+    bool bIsLookingAround;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Survival Behavior")
+    float AlertnessLevel; // 0.0 = Calm, 1.0 = Maximum Alert
+
+    UPROPERTY(BlueprintReadOnly, Category = "Survival Behavior")
+    float FearLevel; // 0.0 = No Fear, 1.0 = Terrified
+
+    // Environmental Adaptation
+    UPROPERTY(BlueprintReadOnly, Category = "Environment")
+    float GroundSlope;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Environment")
+    bool bIsOnUnstableGround;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Environment")
+    bool bIsInDenseVegetation;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Environment")
+    float VisibilityLevel; // How hidden the player is
+
+    // Animation Blending
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Blending")
+    float BlendSpaceX; // Forward/Backward movement
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Blending")
+    float BlendSpaceY; // Left/Right movement
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Blending")
+    float LeanAmount; // Body lean for turning
+
+    // Functions
+    UFUNCTION(BlueprintCallable, Category = "Player Animation")
+    void SetMovementState(EPlayerMovementState NewState);
+
     UFUNCTION(BlueprintCallable, Category = "Player Animation")
     void SetEmotionalState(EPlayerEmotionalState NewState);
 
     UFUNCTION(BlueprintCallable, Category = "Player Animation")
-    void SetFearLevel(float NewFearLevel);
+    void TriggerStartleReaction(float Intensity);
 
     UFUNCTION(BlueprintCallable, Category = "Player Animation")
-    void TriggerEmotionalResponse(EPlayerEmotionalState ResponseState, float Duration = 3.0f);
+    void SetAlertness(float NewAlertness);
 
-    UFUNCTION(BlueprintPure, Category = "Player Animation")
-    FPlayerAnimationData GetCurrentAnimationData() const { return AnimationData; }
+    UFUNCTION(BlueprintCallable, Category = "Player Animation")
+    void SetFearLevel(float NewFearLevel);
 
-    UFUNCTION(BlueprintPure, Category = "Player Animation")
-    bool ShouldUseEmotionalOverride() const;
+private:
+    // Character Reference
+    UPROPERTY()
+    ACharacter* OwningCharacter;
+
+    // IK Calculation Functions
+    void CalculateFootIK();
+    void PerformFootTrace(FName SocketName, float& OutOffset, FRotator& OutRotation);
+    
+    // State Update Functions
+    void UpdateMovementState();
+    void UpdateEmotionalState();
+    void UpdateEnvironmentalFactors();
+    
+    // Motion Matching Support
+    void UpdateMotionMatchingVariables();
+    
+    // Utility Functions
+    float CalculateGroundSlope();
+    bool CheckForDenseVegetation();
+    float CalculateVisibilityLevel();
 };
