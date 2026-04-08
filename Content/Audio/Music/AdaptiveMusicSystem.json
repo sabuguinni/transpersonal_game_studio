@@ -1,0 +1,157 @@
+{
+  "AdaptiveMusicSystem": {
+    "description": "MetaSound-based adaptive music system for Jurassic survival game",
+    "version": "1.0",
+    "states": {
+      "Calm": {
+        "description": "Peaceful exploration, no immediate threats",
+        "musical_characteristics": {
+          "tempo": "60-80 BPM",
+          "key": "Major keys, open harmonies",
+          "instrumentation": "Soft strings, ambient pads, nature sounds",
+          "dynamics": "pp to mp",
+          "texture": "Sparse, breathing room"
+        },
+        "transition_triggers": {
+          "to_tense": "Dinosaur spotted at distance",
+          "to_discovery": "New area or item found",
+          "to_exploration": "Player starts moving actively"
+        }
+      },
+      "Tense": {
+        "description": "Potential danger detected, heightened awareness",
+        "musical_characteristics": {
+          "tempo": "80-100 BPM",
+          "key": "Minor keys, suspended chords",
+          "instrumentation": "Low strings, subtle percussion, filtered ambience",
+          "dynamics": "mp to mf",
+          "texture": "Building layers, rhythmic pulse"
+        },
+        "transition_triggers": {
+          "to_calm": "Threat passes or moves away",
+          "to_danger": "Predator becomes aggressive or approaches",
+          "to_exploration": "Player moves to new area"
+        }
+      },
+      "Danger": {
+        "description": "Immediate threat, predator nearby and aware",
+        "musical_characteristics": {
+          "tempo": "100-140 BPM",
+          "key": "Dissonant, chromatic",
+          "instrumentation": "Aggressive strings, tribal percussion, brass stabs",
+          "dynamics": "mf to f",
+          "texture": "Dense, urgent, rhythmic"
+        },
+        "transition_triggers": {
+          "to_combat": "Direct confrontation begins",
+          "to_tense": "Threat level decreases",
+          "to_calm": "Player escapes or hides successfully"
+        }
+      },
+      "Combat": {
+        "description": "Active confrontation with predators",
+        "musical_characteristics": {
+          "tempo": "140+ BPM",
+          "key": "Atonal, aggressive dissonance",
+          "instrumentation": "Full orchestra, heavy percussion, electronic elements",
+          "dynamics": "f to ff",
+          "texture": "Maximum density, driving rhythm"
+        },
+        "transition_triggers": {
+          "to_calm": "Combat ends successfully",
+          "to_danger": "Combat de-escalates but threat remains"
+        }
+      },
+      "Discovery": {
+        "description": "Finding new areas, items, or making progress",
+        "musical_characteristics": {
+          "tempo": "70-90 BPM",
+          "key": "Major, bright harmonies",
+          "instrumentation": "Warm strings, woodwinds, gentle bells",
+          "dynamics": "mp to mf",
+          "texture": "Melodic, uplifting, spacious"
+        },
+        "transition_triggers": {
+          "to_exploration": "Player continues after discovery",
+          "to_calm": "Discovery moment passes"
+        }
+      },
+      "Domestication": {
+        "description": "Peaceful interaction with herbivorous dinosaurs",
+        "musical_characteristics": {
+          "tempo": "60-75 BPM",
+          "key": "Warm major keys",
+          "instrumentation": "Soft strings, flute, harp, organic textures",
+          "dynamics": "p to mp",
+          "texture": "Gentle, nurturing, organic"
+        },
+        "transition_triggers": {
+          "to_calm": "Domestication attempt ends",
+          "to_tense": "Predator interrupts interaction"
+        }
+      },
+      "Exploration": {
+        "description": "Active movement through the world",
+        "musical_characteristics": {
+          "tempo": "85-110 BPM",
+          "key": "Modal, adventurous",
+          "instrumentation": "Rhythmic strings, woodwinds, light percussion",
+          "dynamics": "mp",
+          "texture": "Forward-moving, purposeful"
+        },
+        "transition_triggers": {
+          "to_calm": "Player stops to rest or observe",
+          "to_tense": "Potential threat detected",
+          "to_discovery": "Something interesting found"
+        }
+      }
+    },
+    "layering_system": {
+      "base_layer": {
+        "description": "Always present ambient foundation",
+        "elements": ["Environmental drones", "Subtle nature sounds", "Harmonic foundation"]
+      },
+      "melodic_layer": {
+        "description": "Main melodic content, varies by state",
+        "elements": ["Primary melody", "Harmonic progression", "Rhythmic elements"]
+      },
+      "tension_layer": {
+        "description": "Added during tense/danger states",
+        "elements": ["Dissonant elements", "Rhythmic urgency", "Dynamic swells"]
+      },
+      "percussion_layer": {
+        "description": "Rhythmic drive, intensity varies by state",
+        "elements": ["Tribal drums", "Orchestral percussion", "Electronic beats"]
+      },
+      "stinger_layer": {
+        "description": "One-shot musical events",
+        "elements": ["Predator reveals", "Discovery chimes", "Transition sweeps"]
+      }
+    },
+    "transition_system": {
+      "crossfade_time": "2-4 seconds for normal transitions",
+      "immediate_time": "0.1-0.5 seconds for danger/combat",
+      "stinger_integration": "Musical stingers bridge transitions",
+      "parameter_smoothing": "All parameters use smooth interpolation"
+    },
+    "environmental_modulation": {
+      "time_of_day": {
+        "dawn": "Brighter timbres, rising melodic lines",
+        "day": "Full spectrum, confident harmonies",
+        "dusk": "Warmer tones, descending lines",
+        "night": "Darker timbres, sparse textures"
+      },
+      "weather": {
+        "clear": "Clean, open sounds",
+        "rain": "Filtered timbres, water-like textures",
+        "storm": "Dramatic dynamics, wind-like effects"
+      },
+      "environment": {
+        "forest": "Organic textures, natural reverb",
+        "plains": "Open spaces, distant echoes",
+        "caves": "Dark timbres, heavy reverb",
+        "water": "Fluid textures, reflection effects"
+      }
+    }
+  }
+}
