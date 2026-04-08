@@ -1,0 +1,76 @@
+{
+  "Type": "PoseSearchSchema",
+  "Version": "5.4",
+  "Properties": {
+    "Skeleton": "/Game/Characters/Player/SK_Player.SK_Player",
+    "SampleRate": 30.0,
+    "DataPreprocessor": "Normalize",
+    "Channels": [
+      {
+        "Type": "Trajectory",
+        "Weight": 1.0,
+        "Samples": [
+          {
+            "Offset": -1.0,
+            "Flags": ["Position", "Velocity", "FacingDirection"],
+            "Weight": 0.8
+          },
+          {
+            "Offset": -0.5,
+            "Flags": ["Position", "Velocity", "FacingDirection"],
+            "Weight": 1.0
+          },
+          {
+            "Offset": 0.0,
+            "Flags": ["Position", "Velocity", "FacingDirection"],
+            "Weight": 1.0
+          },
+          {
+            "Offset": 0.5,
+            "Flags": ["Position", "Velocity", "FacingDirection"],
+            "Weight": 1.0
+          },
+          {
+            "Offset": 1.0,
+            "Flags": ["Position", "Velocity", "FacingDirection"],
+            "Weight": 0.8
+          }
+        ]
+      },
+      {
+        "Type": "Pose",
+        "Weight": 0.8,
+        "SampledBones": [
+          {
+            "Reference": "foot_l",
+            "Flags": ["Position", "Velocity"],
+            "Weight": 1.0,
+            "DebugColor": [1.0, 0.0, 0.0, 1.0]
+          },
+          {
+            "Reference": "foot_r",
+            "Flags": ["Position", "Velocity"],
+            "Weight": 1.0,
+            "DebugColor": [0.0, 1.0, 0.0, 1.0]
+          },
+          {
+            "Reference": "hand_l",
+            "Flags": ["Position", "Velocity"],
+            "Weight": 0.6,
+            "DebugColor": [0.0, 0.0, 1.0, 1.0]
+          },
+          {
+            "Reference": "hand_r",
+            "Flags": ["Position", "Velocity"],
+            "Weight": 0.6,
+            "DebugColor": [1.0, 1.0, 0.0, 1.0]
+          }
+        ],
+        "UseCharacterSpaceVelocities": true
+      }
+    ],
+    "NumberOfPermutations": 3,
+    "PermutationTimeOffset": 0.1,
+    "AddDataPadding": true
+  }
+}
