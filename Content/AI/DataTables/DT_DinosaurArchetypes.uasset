@@ -1,0 +1,349 @@
+{
+    "Type": "DataTable",
+    "RowStruct": "/Script/TranspersonalGame.DinosaurArchetypeData",
+    "Rows": {
+        "SolitaryPredator": {
+            "ArchetypeName": "Solitary Predator",
+            "Description": "Large predators that hunt alone. Territorial and aggressive. Examples: T-Rex, Allosaurus",
+            "BasePersonality": {
+                "Aggression": 0.85,
+                "Curiosity": 0.3,
+                "Sociability": 0.1,
+                "Fearfulness": 0.2,
+                "Territoriality": 0.9,
+                "Intelligence": 0.6
+            },
+            "PreferredBehaviors": [
+                "Hunting",
+                "Territorial",
+                "Resting"
+            ],
+            "AvoidedBehaviors": [
+                "Socializing",
+                "Fleeing"
+            ],
+            "DefaultRoutines": [
+                {
+                    "StartTime": 0.0,
+                    "EndTime": 0.3,
+                    "RoutineBehavior": "Hunting",
+                    "Priority": 3
+                },
+                {
+                    "StartTime": 0.3,
+                    "EndTime": 0.7,
+                    "RoutineBehavior": "Resting",
+                    "Priority": 2
+                },
+                {
+                    "StartTime": 0.7,
+                    "EndTime": 1.0,
+                    "RoutineBehavior": "Territorial",
+                    "Priority": 2
+                }
+            ],
+            "ReactionDistance": 1500.0,
+            "ThreatLevel": 0.9
+        },
+        "PackHunter": {
+            "ArchetypeName": "Pack Hunter",
+            "Description": "Intelligent predators that coordinate in groups. Examples: Velociraptor, Deinonychus",
+            "BasePersonality": {
+                "Aggression": 0.7,
+                "Curiosity": 0.6,
+                "Sociability": 0.8,
+                "Fearfulness": 0.3,
+                "Territoriality": 0.6,
+                "Intelligence": 0.8
+            },
+            "PreferredBehaviors": [
+                "Hunting",
+                "Socializing",
+                "Investigating"
+            ],
+            "AvoidedBehaviors": [
+                "Resting"
+            ],
+            "DefaultRoutines": [
+                {
+                    "StartTime": 0.0,
+                    "EndTime": 0.4,
+                    "RoutineBehavior": "Hunting",
+                    "Priority": 3
+                },
+                {
+                    "StartTime": 0.4,
+                    "EndTime": 0.6,
+                    "RoutineBehavior": "Socializing",
+                    "Priority": 2
+                },
+                {
+                    "StartTime": 0.6,
+                    "EndTime": 1.0,
+                    "RoutineBehavior": "Investigating",
+                    "Priority": 2
+                }
+            ],
+            "ReactionDistance": 2000.0,
+            "ThreatLevel": 0.8
+        },
+        "HerdHerbivore": {
+            "ArchetypeName": "Herd Herbivore",
+            "Description": "Large herbivores that live in groups for protection. Examples: Triceratops, Parasaurolophus",
+            "BasePersonality": {
+                "Aggression": 0.2,
+                "Curiosity": 0.4,
+                "Sociability": 0.9,
+                "Fearfulness": 0.7,
+                "Territoriality": 0.3,
+                "Intelligence": 0.5
+            },
+            "PreferredBehaviors": [
+                "Foraging",
+                "Socializing",
+                "Drinking"
+            ],
+            "AvoidedBehaviors": [
+                "Hunting",
+                "Territorial"
+            ],
+            "DefaultRoutines": [
+                {
+                    "StartTime": 0.0,
+                    "EndTime": 0.4,
+                    "RoutineBehavior": "Foraging",
+                    "Priority": 3
+                },
+                {
+                    "StartTime": 0.4,
+                    "EndTime": 0.5,
+                    "RoutineBehavior": "Drinking",
+                    "Priority": 3
+                },
+                {
+                    "StartTime": 0.5,
+                    "EndTime": 0.8,
+                    "RoutineBehavior": "Socializing",
+                    "Priority": 2
+                },
+                {
+                    "StartTime": 0.8,
+                    "EndTime": 1.0,
+                    "RoutineBehavior": "Resting",
+                    "Priority": 2
+                }
+            ],
+            "ReactionDistance": 800.0,
+            "ThreatLevel": 0.3
+        },
+        "SolitaryHerbivore": {
+            "ArchetypeName": "Solitary Herbivore",
+            "Description": "Cautious herbivores that prefer to be alone. Examples: Stegosaurus, Ankylosaurus",
+            "BasePersonality": {
+                "Aggression": 0.3,
+                "Curiosity": 0.6,
+                "Sociability": 0.2,
+                "Fearfulness": 0.8,
+                "Territoriality": 0.4,
+                "Intelligence": 0.4
+            },
+            "PreferredBehaviors": [
+                "Foraging",
+                "Investigating",
+                "Fleeing"
+            ],
+            "AvoidedBehaviors": [
+                "Socializing",
+                "Hunting"
+            ],
+            "DefaultRoutines": [
+                {
+                    "StartTime": 0.0,
+                    "EndTime": 0.5,
+                    "RoutineBehavior": "Foraging",
+                    "Priority": 3
+                },
+                {
+                    "StartTime": 0.5,
+                    "EndTime": 0.6,
+                    "RoutineBehavior": "Drinking",
+                    "Priority": 3
+                },
+                {
+                    "StartTime": 0.6,
+                    "EndTime": 1.0,
+                    "RoutineBehavior": "Resting",
+                    "Priority": 2
+                }
+            ],
+            "ReactionDistance": 600.0,
+            "ThreatLevel": 0.2
+        },
+        "Scavenger": {
+            "ArchetypeName": "Scavenger",
+            "Description": "Opportunistic feeders that investigate everything. Examples: Compsognathus, Coelophysis",
+            "BasePersonality": {
+                "Aggression": 0.4,
+                "Curiosity": 0.9,
+                "Sociability": 0.5,
+                "Fearfulness": 0.6,
+                "Territoriality": 0.2,
+                "Intelligence": 0.7
+            },
+            "PreferredBehaviors": [
+                "Investigating",
+                "Foraging",
+                "Socializing"
+            ],
+            "AvoidedBehaviors": [
+                "Territorial",
+                "Resting"
+            ],
+            "DefaultRoutines": [
+                {
+                    "StartTime": 0.0,
+                    "EndTime": 0.6,
+                    "RoutineBehavior": "Investigating",
+                    "Priority": 3
+                },
+                {
+                    "StartTime": 0.6,
+                    "EndTime": 0.8,
+                    "RoutineBehavior": "Foraging",
+                    "Priority": 2
+                },
+                {
+                    "StartTime": 0.8,
+                    "EndTime": 1.0,
+                    "RoutineBehavior": "Socializing",
+                    "Priority": 1
+                }
+            ],
+            "ReactionDistance": 1200.0,
+            "ThreatLevel": 0.1
+        },
+        "TerritorialPredator": {
+            "ArchetypeName": "Territorial Predator",
+            "Description": "Extremely territorial predators that defend their area aggressively. Examples: Carnotaurus",
+            "BasePersonality": {
+                "Aggression": 0.95,
+                "Curiosity": 0.2,
+                "Sociability": 0.1,
+                "Fearfulness": 0.1,
+                "Territoriality": 1.0,
+                "Intelligence": 0.5
+            },
+            "PreferredBehaviors": [
+                "Territorial",
+                "Hunting",
+                "Investigating"
+            ],
+            "AvoidedBehaviors": [
+                "Socializing",
+                "Fleeing"
+            ],
+            "DefaultRoutines": [
+                {
+                    "StartTime": 0.0,
+                    "EndTime": 0.8,
+                    "RoutineBehavior": "Territorial",
+                    "Priority": 3
+                },
+                {
+                    "StartTime": 0.8,
+                    "EndTime": 1.0,
+                    "RoutineBehavior": "Hunting",
+                    "Priority": 2
+                }
+            ],
+            "ReactionDistance": 2500.0,
+            "ThreatLevel": 0.95
+        },
+        "MigratoryHerbivore": {
+            "ArchetypeName": "Migratory Herbivore",
+            "Description": "Herbivores that move in large groups across territories. Examples: Edmontosaurus, Maiasaura",
+            "BasePersonality": {
+                "Aggression": 0.2,
+                "Curiosity": 0.3,
+                "Sociability": 0.9,
+                "Fearfulness": 0.6,
+                "Territoriality": 0.1,
+                "Intelligence": 0.6
+            },
+            "PreferredBehaviors": [
+                "Migrating",
+                "Foraging",
+                "Socializing"
+            ],
+            "AvoidedBehaviors": [
+                "Territorial",
+                "Hunting"
+            ],
+            "DefaultRoutines": [
+                {
+                    "StartTime": 0.0,
+                    "EndTime": 0.3,
+                    "RoutineBehavior": "Migrating",
+                    "Priority": 3
+                },
+                {
+                    "StartTime": 0.3,
+                    "EndTime": 0.7,
+                    "RoutineBehavior": "Foraging",
+                    "Priority": 2
+                },
+                {
+                    "StartTime": 0.7,
+                    "EndTime": 1.0,
+                    "RoutineBehavior": "Socializing",
+                    "Priority": 2
+                }
+            ],
+            "ReactionDistance": 1000.0,
+            "ThreatLevel": 0.2
+        },
+        "AmbushPredator": {
+            "ArchetypeName": "Ambush Predator",
+            "Description": "Patient predators that wait for the perfect moment to strike. Examples: Baryonyx, Suchomimus",
+            "BasePersonality": {
+                "Aggression": 0.7,
+                "Curiosity": 0.3,
+                "Sociability": 0.2,
+                "Fearfulness": 0.3,
+                "Territoriality": 0.7,
+                "Intelligence": 0.8
+            },
+            "PreferredBehaviors": [
+                "Hunting",
+                "Resting",
+                "Investigating"
+            ],
+            "AvoidedBehaviors": [
+                "Socializing",
+                "Migrating"
+            ],
+            "DefaultRoutines": [
+                {
+                    "StartTime": 0.0,
+                    "EndTime": 0.2,
+                    "RoutineBehavior": "Hunting",
+                    "Priority": 3
+                },
+                {
+                    "StartTime": 0.2,
+                    "EndTime": 0.8,
+                    "RoutineBehavior": "Resting",
+                    "Priority": 2
+                },
+                {
+                    "StartTime": 0.8,
+                    "EndTime": 1.0,
+                    "RoutineBehavior": "Investigating",
+                    "Priority": 1
+                }
+            ],
+            "ReactionDistance": 1800.0,
+            "ThreatLevel": 0.8
+        }
+    }
+}
