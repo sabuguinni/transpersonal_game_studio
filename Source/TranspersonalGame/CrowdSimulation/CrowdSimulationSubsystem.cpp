@@ -1,309 +1,256 @@
 #include "CrowdSimulationSubsystem.h"
 #include "MassEntitySubsystem.h"
 #include "MassSpawnerSubsystem.h"
+#include "MassCommonFragments.h"
+#include "MassMovementFragments.h"
 #include "Engine/World.h"
+#include "Engine/Engine.h"
 #include "Kismet/GameplayStatics.h"
 
 void UCrowdSimulationSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    // Get Mass Entity subsystem reference
-    MassEntitySubsystem = GetWorld()->GetSubsystem<UMassEntitySubsystem>();
-    MassSpawnerSubsystem = GetWorld()->GetSubsystem<UMassSpawnerSubsystem>();
+    UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationSubsystem: Initializing..."));
     
-    if (!MassEntitySubsystem)
+    // Get Mass Entity subsystem reference
+    MassEntitySubsystem = Collection.InitializeDependency<UMassEntitySubsystem>();
+    MassSpawnerSubsystem = Collection.InitializeDependency<UMassSpawnerSubsystem>();
+    
+    if (!MassEntitySubsystem || !MassSpawnerSubsystem)
     {
-        UE_LOG(LogTemp, Error, TEXT("CrowdSimulationSubsystem: Failed to get MassEntitySubsystem"));
+        UE_LOG(LogTemp, Error, TEXT("CrowdSimulationSubsystem: Failed to get Mass subsystems"));
         return;
     }
-
-    if (!MassSpawnerSubsystem)
-    {
-        UE_LOG(LogTemp, Error, TEXT("CrowdSimulationSubsystem: Failed to get MassSpawnerSubsystem"));
-        return;
-    }
-
-    // Initialize default simulation parameters
-    CurrentLODLevel = 1;
-    MaxSimultaneousEntities = 50000;
+    
+    // Initialize default settings
+    CrowdSettings.MaxHerbivores = 200;
+    CrowdSettings.MaxCarnivores = 50;
+    CrowdSettings.MaxFlyers = 100;
+    CrowdSettings.SimulationRadius = 5000.0f;
+    CrowdSettings.FullDetailDistance = 1000.0f;
+    CrowdSettings.MediumDetailDistance = 2500.0f;
+    CrowdSettings.LowDetailDistance = 5000.0f;
     
     bIsInitialized = true;
-    
-    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationSubsystem: Initialized successfully"));
+    UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationSubsystem: Initialized successfully"));
 }
 
 void UCrowdSimulationSubsystem::Deinitialize()
 {
-    // Clean up active simulations
+    UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationSubsystem: Deinitializing..."));
+    
+    // Clean up active herds
     ActiveHerds.Empty();
-    ActivePacks.Empty();
-    ActiveFlocks.Empty();
+    HerdCenters.Empty();
+    HerdLastUpdateTime.Empty();
     
     bIsInitialized = false;
     
     Super::Deinitialize();
 }
 
-void UCrowdSimulationSubsystem::Tick(float DeltaTime)
+bool UCrowdSimulationSubsystem::ShouldCreateSubsystem(UObject* Outer) const
 {
-    if (!bIsInitialized || !MassEntitySubsystem)
+    // Only create in game worlds, not in editor
+    if (UWorld* World = Cast<UWorld>(Outer))
     {
-        return;
+        return World->IsGameWorld();
     }
-
-    AccumulatedDeltaTime += DeltaTime;
-    LastFrameTime = DeltaTime;
-
-    // Update behaviors at different frequencies based on LOD
-    float UpdateFrequency = 1.0f / (CurrentLODLevel + 1); // LOD 0 = 1.0s, LOD 1 = 0.5s, etc.
-    
-    if (AccumulatedDeltaTime >= UpdateFrequency)
-    {
-        UpdateHerdBehaviors(AccumulatedDeltaTime);
-        UpdatePackBehaviors(AccumulatedDeltaTime);
-        UpdateFlockBehaviors(AccumulatedDeltaTime);
-        UpdatePerformanceLOD(AccumulatedDeltaTime);
-        
-        AccumulatedDeltaTime = 0.0f;
-    }
+    return false;
 }
 
-void UCrowdSimulationSubsystem::SpawnDinosaurHerd(const FDinosaurHerdData& HerdData, const FVector& SpawnLocation)
+void UCrowdSimulationSubsystem::InitializeCrowdSimulation()
 {
     if (!bIsInitialized)
     {
-        UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationSubsystem: Cannot spawn herd - system not initialized"));
+        UE_LOG(LogTemp, Error, TEXT("CrowdSimulationSubsystem: Cannot initialize crowd simulation - subsystem not ready"));
         return;
     }
+    
+    UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationSubsystem: Initializing crowd simulation..."));
+    
+    SetupMassEntityProcessors();
+    CreateHerdBehaviorProcessors();
+    
+    // Spawn initial herds based on world zones
+    SpawnInitialHerds();
+    
+    UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationSubsystem: Crowd simulation initialized"));
+}
 
-    // Add to active herds
+void UCrowdSimulationSubsystem::SetPlayerLocation(const FVector& PlayerLocation)
+{
+    CurrentPlayerLocation = PlayerLocation;
+    
+    // Update simulation bounds around player
+    UpdateSimulationBounds();
+    
+    // Check if LOD update is needed
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    if (CurrentTime - LastLODUpdateTime > LODUpdateInterval)
+    {
+        UpdateCrowdLOD();
+        LastLODUpdateTime = CurrentTime;
+    }
+}
+
+void UCrowdSimulationSubsystem::SpawnHerd(const FDinosaurHerdData& HerdData, const FVector& SpawnLocation)
+{
+    if (!bIsInitialized || !MassSpawnerSubsystem)
+    {
+        UE_LOG(LogTemp, Error, TEXT("CrowdSimulationSubsystem: Cannot spawn herd - system not ready"));
+        return;
+    }
+    
+    // Create new herd with unique ID
     FDinosaurHerdData NewHerd = HerdData;
-    NewHerd.HerdCenter = SpawnLocation;
+    NewHerd.HerdID = NextHerdID++;
+    
+    // Add to active herds
     ActiveHerds.Add(NewHerd);
-
-    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationSubsystem: Spawned %s herd of %d at %s"), 
-           *HerdData.SpeciesType, HerdData.HerdSize, *SpawnLocation.ToString());
-
-    // TODO: Implement actual Mass Entity spawning logic
-    // This will be connected to MassSpawnerSubsystem in next iteration
-}
-
-void UCrowdSimulationSubsystem::SpawnPredatorPack(const FPredatorPackData& PackData, const FVector& SpawnLocation)
-{
-    if (!bIsInitialized)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationSubsystem: Cannot spawn pack - system not initialized"));
-        return;
-    }
-
-    FPredatorPackData NewPack = PackData;
-    NewPack.TerritoryCenter = SpawnLocation;
-    ActivePacks.Add(NewPack);
-
-    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationSubsystem: Spawned %s pack of %d at %s"), 
-           *PackData.SpeciesType, PackData.PackSize, *SpawnLocation.ToString());
-}
-
-void UCrowdSimulationSubsystem::SpawnAerialFlock(const FAerialFlockData& FlockData, const FVector& SpawnLocation)
-{
-    if (!bIsInitialized)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationSubsystem: Cannot spawn flock - system not initialized"));
-        return;
-    }
-
-    FAerialFlockData NewFlock = FlockData;
-    NewFlock.FlightPath = SpawnLocation;
-    ActiveFlocks.Add(NewFlock);
-
-    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationSubsystem: Spawned %s flock of %d at %s"), 
-           *FlockData.SpeciesType, FlockData.FlockSize, *SpawnLocation.ToString());
-}
-
-void UCrowdSimulationSubsystem::TriggerPredatorAlert(const FVector& AlertLocation, float AlertRadius)
-{
-    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationSubsystem: Predator alert triggered at %s (radius: %.1f)"), 
-           *AlertLocation.ToString(), AlertRadius);
-
-    // Increase alert level for all herds within radius
-    for (FDinosaurHerdData& Herd : ActiveHerds)
-    {
-        float Distance = FVector::Dist(Herd.HerdCenter, AlertLocation);
-        if (Distance <= AlertRadius)
-        {
-            Herd.AlertLevel = FMath::Clamp(Herd.AlertLevel + 0.7f, 0.0f, 1.0f);
-            Herd.MovementSpeed *= 2.0f; // Panic speed increase
-            
-            UE_LOG(LogTemp, Log, TEXT("Herd %s entering panic state (Alert Level: %.2f)"), 
-                   *Herd.SpeciesType, Herd.AlertLevel);
-        }
-    }
-}
-
-void UCrowdSimulationSubsystem::TriggerStampede(const FVector& StampedeOrigin, const FVector& StampedeDirection)
-{
-    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationSubsystem: Stampede triggered from %s towards %s"), 
-           *StampedeOrigin.ToString(), *StampedeDirection.ToString());
-
-    // All herds within 5km start stampeding
-    float StampedeRadius = 500000.0f; // 5km
+    HerdCenters.Add(NewHerd.HerdID, SpawnLocation);
+    HerdLastUpdateTime.Add(NewHerd.HerdID, GetWorld()->GetTimeSeconds());
     
-    for (FDinosaurHerdData& Herd : ActiveHerds)
-    {
-        float Distance = FVector::Dist(Herd.HerdCenter, StampedeOrigin);
-        if (Distance <= StampedeRadius)
-        {
-            Herd.AlertLevel = 1.0f; // Maximum panic
-            Herd.MovementSpeed *= 3.0f; // Stampede speed
-            
-            // TODO: Set herd movement direction towards StampedeDirection
-        }
-    }
-}
-
-void UCrowdSimulationSubsystem::SetGlobalWeatherState(bool bIsStormy)
-{
-    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationSubsystem: Weather state changed - Stormy: %s"), 
-           bIsStormy ? TEXT("True") : TEXT("False"));
-
-    if (bIsStormy)
-    {
-        // Aerial flocks seek shelter
-        for (FAerialFlockData& Flock : ActiveFlocks)
-        {
-            Flock.FlightAltitude *= 0.3f; // Fly lower
-            Flock.FlightSpeed *= 0.7f; // Slower in storm
-        }
-
-        // Herds become more alert
-        for (FDinosaurHerdData& Herd : ActiveHerds)
-        {
-            Herd.AlertLevel = FMath::Clamp(Herd.AlertLevel + 0.3f, 0.0f, 1.0f);
-        }
-    }
-    else
-    {
-        // Return to normal behavior
-        for (FAerialFlockData& Flock : ActiveFlocks)
-        {
-            Flock.FlightAltitude = 1500.0f; // Default altitude
-            Flock.FlightSpeed = 1200.0f; // Default speed
-        }
-    }
-}
-
-void UCrowdSimulationSubsystem::SetSimulationLOD(int32 LODLevel)
-{
-    CurrentLODLevel = FMath::Clamp(LODLevel, 0, 3);
+    UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationSubsystem: Spawned herd %d of species %s at location %s"), 
+           NewHerd.HerdID, *NewHerd.SpeciesName, *SpawnLocation.ToString());
     
-    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationSubsystem: LOD Level set to %d"), CurrentLODLevel);
-
-    // Adjust entity limits based on LOD
-    switch (CurrentLODLevel)
-    {
-        case 0: MaxSimultaneousEntities = 50000; break; // Ultra
-        case 1: MaxSimultaneousEntities = 25000; break; // High
-        case 2: MaxSimultaneousEntities = 10000; break; // Medium
-        case 3: MaxSimultaneousEntities = 5000; break;  // Low
-    }
+    // TODO: Actually spawn Mass entities for this herd
+    // This will be implemented when Mass Entity processors are set up
 }
 
-int32 UCrowdSimulationSubsystem::GetActiveEntityCount() const
+void UCrowdSimulationSubsystem::TriggerPredatorAlert(const FVector& PredatorLocation, float AlertRadius)
 {
-    int32 TotalEntities = 0;
+    UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationSubsystem: Predator alert at %s with radius %f"), 
+           *PredatorLocation.ToString(), AlertRadius);
     
+    // Find all herds within alert radius and trigger flee behavior
     for (const FDinosaurHerdData& Herd : ActiveHerds)
     {
-        TotalEntities += Herd.HerdSize;
-    }
-    
-    for (const FPredatorPackData& Pack : ActivePacks)
-    {
-        TotalEntities += Pack.PackSize;
-    }
-    
-    for (const FAerialFlockData& Flock : ActiveFlocks)
-    {
-        TotalEntities += Flock.FlockSize;
-    }
-    
-    return TotalEntities;
-}
-
-float UCrowdSimulationSubsystem::GetCurrentPerformanceMetric() const
-{
-    // Simple performance metric based on frame time and entity count
-    float EntityDensity = static_cast<float>(GetActiveEntityCount()) / MaxSimultaneousEntities;
-    float FrameTimeMetric = LastFrameTime * 60.0f; // Convert to frame budget (60fps = 1.0)
-    
-    return EntityDensity * FrameTimeMetric;
-}
-
-void UCrowdSimulationSubsystem::UpdateHerdBehaviors(float DeltaTime)
-{
-    for (FDinosaurHerdData& Herd : ActiveHerds)
-    {
-        // Gradually reduce alert level over time
-        if (Herd.AlertLevel > 0.0f)
+        if (FVector* HerdCenter = HerdCenters.Find(Herd.HerdID))
         {
-            Herd.AlertLevel = FMath::Clamp(Herd.AlertLevel - (DeltaTime * 0.1f), 0.0f, 1.0f);
+            float DistanceToHerd = FVector::Dist(*HerdCenter, PredatorLocation);
             
-            // Reduce speed as alert level decreases
-            if (Herd.AlertLevel < 0.5f)
+            if (DistanceToHerd <= AlertRadius)
             {
-                Herd.MovementSpeed = FMath::Lerp(300.0f, Herd.MovementSpeed, Herd.AlertLevel * 2.0f);
+                // Trigger flee behavior for this herd
+                TriggerHerdFlee(Herd.HerdID, PredatorLocation);
             }
         }
-
-        // TODO: Implement actual herd movement logic
-        // This will integrate with Mass Entity movement processors
     }
 }
 
-void UCrowdSimulationSubsystem::UpdatePackBehaviors(float DeltaTime)
+void UCrowdSimulationSubsystem::UpdateCrowdLOD()
 {
-    for (FPredatorPackData& Pack : ActivePacks)
+    if (!bIsInitialized)
     {
-        // Increase hunger over time
-        Pack.HungerLevel = FMath::Clamp(Pack.HungerLevel + (DeltaTime * 0.05f), 0.0f, 1.0f);
-        
-        // Start hunting when hungry enough
-        if (Pack.HungerLevel > 0.7f && !Pack.bIsHunting)
-        {
-            Pack.bIsHunting = true;
-            UE_LOG(LogTemp, Log, TEXT("Pack %s started hunting (Hunger: %.2f)"), 
-                   *Pack.SpeciesType, Pack.HungerLevel);
-        }
-
-        // TODO: Implement pack hunting AI
-        // This will integrate with Combat AI Agent's systems
+        return;
     }
-}
-
-void UCrowdSimulationSubsystem::UpdateFlockBehaviors(float DeltaTime)
-{
-    for (FAerialFlockData& Flock : ActiveFlocks)
-    {
-        // TODO: Implement flocking behavior (boids algorithm)
-        // Separation, Alignment, Cohesion rules
-        // Migration patterns based on time of day/season
-    }
-}
-
-void UCrowdSimulationSubsystem::UpdatePerformanceLOD(float DeltaTime)
-{
-    float CurrentPerformance = GetCurrentPerformanceMetric();
     
-    // Auto-adjust LOD based on performance
-    if (CurrentPerformance > 1.5f && CurrentLODLevel < 3)
+    // Update LOD for all active herds based on distance to player
+    for (const FDinosaurHerdData& Herd : ActiveHerds)
     {
-        SetSimulationLOD(CurrentLODLevel + 1);
-        UE_LOG(LogTemp, Warning, TEXT("Performance degraded - increasing LOD to %d"), CurrentLODLevel);
+        if (FVector* HerdCenter = HerdCenters.Find(Herd.HerdID))
+        {
+            float DistanceToPlayer = FVector::Dist(*HerdCenter, CurrentPlayerLocation);
+            
+            int32 LODLevel = 0; // Full detail
+            if (DistanceToPlayer > CrowdSettings.LowDetailDistance)
+            {
+                LODLevel = 3; // Minimal detail
+            }
+            else if (DistanceToPlayer > CrowdSettings.MediumDetailDistance)
+            {
+                LODLevel = 2; // Low detail
+            }
+            else if (DistanceToPlayer > CrowdSettings.FullDetailDistance)
+            {
+                LODLevel = 1; // Medium detail
+            }
+            
+            // Apply LOD to herd entities
+            ApplyLODToHerd(Herd.HerdID, LODLevel);
+        }
     }
-    else if (CurrentPerformance < 0.8f && CurrentLODLevel > 0)
+}
+
+void UCrowdSimulationSubsystem::SetupMassEntityProcessors()
+{
+    if (!MassEntitySubsystem)
     {
-        SetSimulationLOD(CurrentLODLevel - 1);
-        UE_LOG(LogTemp, Log, TEXT("Performance improved - decreasing LOD to %d"), CurrentLODLevel);
+        return;
     }
+    
+    UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationSubsystem: Setting up Mass Entity processors..."));
+    
+    // TODO: Set up custom processors for dinosaur behavior
+    // - Flocking behavior processor
+    // - Predator avoidance processor
+    // - Grazing behavior processor
+    // - Daily routine processor
+}
+
+void UCrowdSimulationSubsystem::CreateHerdBehaviorProcessors()
+{
+    UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationSubsystem: Creating herd behavior processors..."));
+    
+    // TODO: Implement herd-specific behavior processors
+    // - Cohesion: Keep herd members together
+    // - Separation: Avoid crowding
+    // - Alignment: Move in same direction as neighbors
+    // - Flee: Escape from predators
+}
+
+void UCrowdSimulationSubsystem::UpdateSimulationBounds()
+{
+    // Update the active simulation area around the player
+    // Entities outside this area will be culled or simplified
+    
+    // TODO: Implement spatial partitioning for efficient updates
+}
+
+void UCrowdSimulationSubsystem::SpawnInitialHerds()
+{
+    UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationSubsystem: Spawning initial herds..."));
+    
+    // Spawn some default herds for testing
+    FDinosaurHerdData TriceratopsHerd;
+    TriceratopsHerd.SpeciesName = TEXT("Triceratops");
+    TriceratopsHerd.MinHerdSize = 5;
+    TriceratopsHerd.MaxHerdSize = 12;
+    TriceratopsHerd.CohesionRadius = 600.0f;
+    TriceratopsHerd.SeparationRadius = 150.0f;
+    TriceratopsHerd.FleeRadius = 1000.0f;
+    
+    SpawnHerd(TriceratopsHerd, FVector(1000, 0, 0));
+    
+    FDinosaurHerdData ParasaurolophusHerd;
+    ParasaurolophusHerd.SpeciesName = TEXT("Parasaurolophus");
+    ParasaurolophusHerd.MinHerdSize = 8;
+    ParasaurolophusHerd.MaxHerdSize = 20;
+    ParasaurolophusHerd.CohesionRadius = 800.0f;
+    ParasaurolophusHerd.SeparationRadius = 120.0f;
+    ParasaurolophusHerd.FleeRadius = 1200.0f;
+    
+    SpawnHerd(ParasaurolophusHerd, FVector(-1500, 1000, 0));
+}
+
+void UCrowdSimulationSubsystem::TriggerHerdFlee(int32 HerdID, const FVector& ThreatLocation)
+{
+    UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationSubsystem: Triggering flee behavior for herd %d"), HerdID);
+    
+    // TODO: Implement actual flee behavior using Mass Entity system
+    // - Calculate flee direction (away from threat)
+    // - Increase movement speed
+    // - Override normal behavior temporarily
+    // - Spread panic to nearby herds
+}
+
+void UCrowdSimulationSubsystem::ApplyLODToHerd(int32 HerdID, int32 LODLevel)
+{
+    // TODO: Apply LOD settings to herd entities
+    // LOD 0: Full detail - individual behavior, full animations
+    // LOD 1: Medium detail - simplified behavior, reduced animation frequency
+    // LOD 2: Low detail - group behavior only, basic animations
+    // LOD 3: Minimal detail - statistical simulation, no individual entities
 }
