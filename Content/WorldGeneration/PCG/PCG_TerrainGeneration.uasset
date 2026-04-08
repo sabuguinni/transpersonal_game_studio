@@ -1,0 +1,60 @@
+{
+    "AssetType": "PCGGraph",
+    "Description": "Main terrain generation graph for Jurassic world",
+    "GraphSettings": {
+        "UseHierarchicalGeneration": true,
+        "HiGenDefaultGridSize": "12800",
+        "EnableRuntimeGeneration": false
+    },
+    "Nodes": [
+        {
+            "NodeType": "LandscapeData",
+            "NodeName": "Landscape Input",
+            "Settings": {
+                "UseMetadata": true,
+                "SampleVirtualTextures": true
+            }
+        },
+        {
+            "NodeType": "SurfaceSampler", 
+            "NodeName": "Base Terrain Sampler",
+            "Settings": {
+                "PointsPerSquaredMeter": 0.1,
+                "PointExtents": [50, 50, 50],
+                "Looseness": 1.0
+            }
+        },
+        {
+            "NodeType": "DensityNoise",
+            "NodeName": "Terrain Variation",
+            "Settings": {
+                "DensityMode": "Multiply",
+                "NoiseMode": "Perlin",
+                "Frequency": 0.01,
+                "Amplitude": 1.0
+            }
+        },
+        {
+            "NodeType": "AttributeSelectString",
+            "NodeName": "Biome Classification",
+            "Settings": {
+                "AttributeName": "BiomeType",
+                "StringValues": ["DenseForest", "OpenPlains", "RiverValley", "RockyOutcrops", "SwampLands", "CoastalArea"]
+            }
+        }
+    ],
+    "Connections": [
+        {
+            "From": "Landscape Input",
+            "To": "Base Terrain Sampler"
+        },
+        {
+            "From": "Base Terrain Sampler", 
+            "To": "Terrain Variation"
+        },
+        {
+            "From": "Terrain Variation",
+            "To": "Biome Classification"
+        }
+    ]
+}
