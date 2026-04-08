@@ -1,0 +1,76 @@
+{
+  "biomes": {
+    "consciousness_meadows": {
+      "name": "Consciousness Meadows",
+      "description": "Ethereal grasslands with bioluminescent flora that responds to player consciousness levels",
+      "terrain_height_range": [0, 200],
+      "vegetation_density": 0.8,
+      "consciousness_resonance": "high",
+      "primary_colors": ["#4A90E2", "#7ED321", "#BD10E0"],
+      "ambient_sounds": ["wind_chimes", "ethereal_hum", "nature_whispers"],
+      "particle_systems": ["floating_orbs", "consciousness_motes", "energy_streams"],
+      "weather_patterns": ["misty_dawn", "aurora_nights", "gentle_rain"],
+      "meditation_zones": {
+        "frequency": 0.3,
+        "types": ["stone_circles", "crystal_formations", "energy_vortex"]
+      }
+    },
+    "neural_forests": {
+      "name": "Neural Network Forests",
+      "description": "Dense forests with trees that form neural network patterns, branches glow with synaptic activity",
+      "terrain_height_range": [100, 500],
+      "vegetation_density": 0.9,
+      "consciousness_resonance": "medium",
+      "primary_colors": ["#2ECC71", "#3498DB", "#E74C3C"],
+      "ambient_sounds": ["neural_pulses", "forest_whispers", "synaptic_crackle"],
+      "particle_systems": ["neural_sparks", "data_streams", "thought_bubbles"],
+      "weather_patterns": ["digital_rain", "electromagnetic_storms", "clear_nights"],
+      "meditation_zones": {
+        "frequency": 0.4,
+        "types": ["tree_groves", "neural_nodes", "synaptic_clearings"]
+      }
+    },
+    "astral_peaks": {
+      "name": "Astral Mountain Peaks",
+      "description": "High altitude regions where the veil between dimensions is thin, floating islands and crystal formations",
+      "terrain_height_range": [800, 2000],
+      "vegetation_density": 0.3,
+      "consciousness_resonance": "very_high",
+      "primary_colors": ["#9B59B6", "#F39C12", "#ECF0F1"],
+      "ambient_sounds": ["cosmic_winds", "crystal_resonance", "dimensional_hum"],
+      "particle_systems": ["astral_energy", "dimensional_rifts", "crystal_light"],
+      "weather_patterns": ["aurora_storms", "crystal_snow", "dimensional_fog"],
+      "meditation_zones": {
+        "frequency": 0.6,
+        "types": ["floating_platforms", "crystal_caves", "dimensional_portals"]
+      }
+    },
+    "shadow_valleys": {
+      "name": "Shadow Integration Valleys",
+      "description": "Dark, introspective areas for shadow work and facing inner fears, twisted landscapes with redemptive light",
+      "terrain_height_range": [-100, 100],
+      "vegetation_density": 0.4,
+      "consciousness_resonance": "transformative",
+      "primary_colors": ["#34495E", "#8E44AD", "#F1C40F"],
+      "ambient_sounds": ["deep_echoes", "shadow_whispers", "redemption_bells"],
+      "particle_systems": ["shadow_tendrils", "light_breaks", "transformation_sparks"],
+      "weather_patterns": ["perpetual_twilight", "shadow_storms", "dawn_breaks"],
+      "meditation_zones": {
+        "frequency": 0.5,
+        "types": ["mirror_pools", "shadow_chambers", "light_sanctuaries"]
+      }
+    }
+  },
+  "transition_zones": {
+    "blending_distance": 500,
+    "gradient_smoothing": true,
+    "consciousness_bridges": true,
+    "energy_flow_visualization": true
+  },
+  "global_settings": {
+    "consciousness_particle_density": 0.7,
+    "energy_field_visibility": true,
+    "meditation_zone_glow": true,
+    "biome_resonance_feedback": true
+  }
+}
