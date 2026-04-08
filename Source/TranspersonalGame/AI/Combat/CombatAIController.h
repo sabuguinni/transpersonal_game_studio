@@ -2,30 +2,27 @@
 
 #include "CoreMinimal.h"
 #include "AIController.h"
-#include "BehaviorTree/BehaviorTreeComponent.h"
-#include "BehaviorTree/BlackboardComponent.h"
 #include "Perception/AIPerceptionComponent.h"
-#include "Perception/AISenseConfig_Sight.h"
-#include "Perception/AISenseConfig_Hearing.h"
-#include "Perception/AISenseConfig_Damage.h"
-#include "GameplayTagContainer.h"
+#include "BehaviorTree/BlackboardComponent.h"
+#include "GameplayTags.h"
 #include "CombatAIController.generated.h"
 
+class UBehaviorTreeComponent;
+class UBlackboardComponent;
 class UBehaviorTree;
-class UBlackboardData;
-class ADinosaurCharacter;
+class ACombatAICharacter;
+class UEnvQuery;
 
 UENUM(BlueprintType)
 enum class ECombatState : uint8
 {
-    Idle,
-    Hunting,
-    Stalking,
-    Attacking,
-    Fleeing,
-    Investigating,
-    Territorial,
-    Feeding
+    Passive,        // Peaceful behavior - grazing, resting
+    Alert,          // Noticed something suspicious
+    Hunting,        // Actively hunting prey
+    Territorial,    // Defending territory
+    Fleeing,        // Running from threat
+    Aggressive,     // Direct combat engagement
+    Stalking        // Following target stealthily
 };
 
 UENUM(BlueprintType)
@@ -35,43 +32,84 @@ enum class EThreatLevel : uint8
     Low,
     Medium,
     High,
-    Critical
+    Extreme
 };
 
 USTRUCT(BlueprintType)
-struct FCombatTarget
+struct FCombatPersonality
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadWrite)
-    AActor* Target = nullptr;
+    // Aggression level (0.0 = passive, 1.0 = extremely aggressive)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Aggression = 0.5f;
 
-    UPROPERTY(BlueprintReadWrite)
-    EThreatLevel ThreatLevel = EThreatLevel::None;
+    // Curiosity level (how likely to investigate disturbances)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Curiosity = 0.5f;
 
-    UPROPERTY(BlueprintReadWrite)
-    float LastSeenTime = 0.0f;
+    // Fear threshold (how easily spooked)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float FearThreshold = 0.5f;
 
-    UPROPERTY(BlueprintReadWrite)
-    FVector LastKnownLocation = FVector::ZeroVector;
+    // Territorial behavior strength
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Territoriality = 0.5f;
 
-    UPROPERTY(BlueprintReadWrite)
-    float DistanceToTarget = 0.0f;
+    // Pack behavior tendency
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float PackMentality = 0.5f;
 
-    UPROPERTY(BlueprintReadWrite)
-    bool bHasLineOfSight = false;
+    // Persistence in pursuit
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Persistence = 0.5f;
 
-    FCombatTarget()
+    FCombatPersonality()
     {
-        Target = nullptr;
-        ThreatLevel = EThreatLevel::None;
-        LastSeenTime = 0.0f;
-        LastKnownLocation = FVector::ZeroVector;
-        DistanceToTarget = 0.0f;
-        bHasLineOfSight = false;
+        // Generate random personality traits
+        Aggression = FMath::RandRange(0.1f, 0.9f);
+        Curiosity = FMath::RandRange(0.1f, 0.9f);
+        FearThreshold = FMath::RandRange(0.2f, 0.8f);
+        Territoriality = FMath::RandRange(0.1f, 0.9f);
+        PackMentality = FMath::RandRange(0.1f, 0.9f);
+        Persistence = FMath::RandRange(0.3f, 0.9f);
     }
 };
 
+USTRUCT(BlueprintType)
+struct FCombatMemory
+{
+    GENERATED_BODY()
+
+    // Last known player location
+    UPROPERTY(BlueprintReadWrite)
+    FVector LastKnownPlayerLocation = FVector::ZeroVector;
+
+    // Time since last player sighting
+    UPROPERTY(BlueprintReadWrite)
+    float TimeSinceLastPlayerSighting = 0.0f;
+
+    // Number of times player was spotted
+    UPROPERTY(BlueprintReadWrite)
+    int32 PlayerSpottingCount = 0;
+
+    // Threat level assessment of player
+    UPROPERTY(BlueprintReadWrite)
+    EThreatLevel PlayerThreatLevel = EThreatLevel::None;
+
+    // Locations where player was last seen
+    UPROPERTY(BlueprintReadWrite)
+    TArray<FVector> PlayerSightingHistory;
+
+    // Time stamps of sightings
+    UPROPERTY(BlueprintReadWrite)
+    TArray<float> SightingTimeStamps;
+};
+
+/**
+ * AI Controller for combat-focused dinosaur AI
+ * Implements tactical combat behavior with personality-driven decisions
+ */
 UCLASS()
 class TRANSPERSONALGAME_API ACombatAIController : public AAIController
 {
@@ -83,122 +121,111 @@ public:
 protected:
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
-
-    // Behavior Tree and Blackboard
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI")
-    UBehaviorTree* BehaviorTreeAsset;
-
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI")
-    UBlackboardData* BlackboardAsset;
+    virtual void OnPossess(APawn* InPawn) override;
 
     // AI Perception
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI")
-    UAIPerceptionComponent* AIPerceptionComponent;
+    class UAIPerceptionComponent* AIPerceptionComponent;
 
+    // Behavior Tree
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI")
-    UAISenseConfig_Sight* SightConfig;
+    UBehaviorTree* BehaviorTree;
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI")
-    UAISenseConfig_Hearing* HearingConfig;
+    // Combat personality traits
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
+    FCombatPersonality Personality;
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI")
-    UAISenseConfig_Damage* DamageConfig;
+    // Combat memory system
+    UPROPERTY(BlueprintReadWrite, Category = "Combat AI")
+    FCombatMemory CombatMemory;
 
-    // Combat State Management
-    UPROPERTY(BlueprintReadWrite, Category = "Combat")
-    ECombatState CurrentCombatState = ECombatState::Idle;
+    // Current combat state
+    UPROPERTY(BlueprintReadWrite, Category = "Combat AI")
+    ECombatState CurrentCombatState = ECombatState::Passive;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Combat")
-    TArray<FCombatTarget> KnownTargets;
+    // EQS Queries for tactical positioning
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "EQS")
+    UEnvQuery* FindCoverQuery;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Combat")
-    FCombatTarget PrimaryTarget;
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "EQS")
+    UEnvQuery* FindAmbushQuery;
 
-    // Combat Parameters
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat")
-    float AttackRange = 300.0f;
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "EQS")
+    UEnvQuery* FindFlankingQuery;
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat")
-    float OptimalCombatDistance = 500.0f;
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "EQS")
+    UEnvQuery* FindEscapeQuery;
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat")
-    float FleeDistance = 1500.0f;
+    // Gameplay Tags for combat states
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat Tags")
+    FGameplayTag CombatStateTag;
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat")
-    float TerritoryRadius = 2000.0f;
-
-    // Gameplay Tags for Combat Behaviors
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat")
-    FGameplayTagContainer CombatTags;
-
-    // Memory and Decision Making
-    UPROPERTY(BlueprintReadWrite, Category = "Memory")
-    float MemoryDuration = 30.0f;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Memory")
-    TMap<AActor*, float> ActorMemory;
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat Tags")
+    FGameplayTag ThreatLevelTag;
 
 public:
-    // Perception Events
+    // Perception callbacks
     UFUNCTION()
     void OnPerceptionUpdated(const TArray<AActor*>& UpdatedActors);
 
     UFUNCTION()
     void OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus);
 
-    // Combat State Management
-    UFUNCTION(BlueprintCallable, Category = "Combat")
+    // Combat state management
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
     void SetCombatState(ECombatState NewState);
 
-    UFUNCTION(BlueprintPure, Category = "Combat")
+    UFUNCTION(BlueprintPure, Category = "Combat AI")
     ECombatState GetCombatState() const { return CurrentCombatState; }
 
-    // Target Management
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    void AddTarget(AActor* Target, EThreatLevel ThreatLevel);
+    // Threat assessment
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    EThreatLevel AssessThreatLevel(AActor* Target);
 
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    void RemoveTarget(AActor* Target);
+    // Memory management
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void UpdatePlayerMemory(const FVector& PlayerLocation);
 
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    FCombatTarget GetPrimaryTarget() const { return PrimaryTarget; }
+    UFUNCTION(BlueprintPure, Category = "Combat AI")
+    FVector GetLastKnownPlayerLocation() const { return CombatMemory.LastKnownPlayerLocation; }
 
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    void UpdatePrimaryTarget();
+    // Tactical decision making
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    bool ShouldEngageTarget(AActor* Target);
 
-    // Combat Decision Making
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    bool ShouldAttack() const;
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    bool ShouldFleeFromTarget(AActor* Target);
 
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    bool ShouldFlee() const;
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    bool ShouldStalkTarget(AActor* Target);
 
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    bool ShouldInvestigate() const;
+    // EQS query execution
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void ExecuteTacticalQuery(UEnvQuery* Query, FName BlackboardKey);
 
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    FVector GetOptimalCombatPosition();
+    // Personality-driven behavior modifiers
+    UFUNCTION(BlueprintPure, Category = "Combat AI")
+    float GetPersonalityModifier(const FString& TraitName) const;
 
-    // Blackboard Helpers
-    UFUNCTION(BlueprintCallable, Category = "AI")
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void ModifyBehaviorByPersonality();
+
+private:
+    // Internal state tracking
+    float StateChangeTimer = 0.0f;
+    float LastPerceptionUpdate = 0.0f;
+    
+    // Combat effectiveness tracking
+    float CombatEffectiveness = 1.0f;
+    int32 SuccessfulAttacks = 0;
+    int32 FailedAttacks = 0;
+
+    // Helper functions
+    void InitializePersonality();
+    void UpdateCombatMemory(float DeltaTime);
+    void EvaluateCombatSituation();
+    void HandleStateTransition(ECombatState NewState);
+    float CalculateDistanceToPlayer() const;
+    bool IsPlayerInLineOfSight() const;
     void UpdateBlackboardValues();
-
-    UFUNCTION(BlueprintCallable, Category = "AI")
-    void SetBlackboardTarget(AActor* Target);
-
-    UFUNCTION(BlueprintCallable, Category = "AI")
-    void SetBlackboardLocation(const FVector& Location, const FName& KeyName);
-
-protected:
-    // Internal Combat Logic
-    void ProcessPerceptionUpdate(AActor* Actor, const FAIStimulus& Stimulus);
-    void UpdateTargetMemory(float DeltaTime);
-    void EvaluateThreatLevel(FCombatTarget& Target);
-    bool IsInTerritory(const FVector& Location) const;
-    void HandleCombatStateTransition();
-
-    // Utility Functions
-    float CalculateTargetPriority(const FCombatTarget& Target) const;
-    bool HasLineOfSight(AActor* Target) const;
-    FVector GetTerritoryCenter() const;
 };
