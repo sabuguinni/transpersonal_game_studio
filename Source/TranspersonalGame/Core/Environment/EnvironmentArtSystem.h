@@ -3,399 +3,418 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/World.h"
-#include "GameFramework/Actor.h"
+#include "Subsystems/GameInstanceSubsystem.h"
+#include "Engine/DataAsset.h"
+#include "Materials/MaterialInterface.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
-#include "Materials/MaterialInterface.h"
-#include "Materials/MaterialInstanceDynamic.h"
+#include "Foliage/Public/FoliageType.h"
 #include "Landscape/Classes/LandscapeProxy.h"
-#include "FoliageType_InstancedStaticMesh.h"
-#include "InstancedFoliageActor.h"
 #include "../WorldGeneration/BiomeSystem.h"
 #include "EnvironmentArtSystem.generated.h"
 
 /**
  * @brief Environment Art System for Transpersonal Game Studio
  * 
- * Transforms procedurally generated terrain into a living, breathing prehistoric world.
- * Inspired by Roger Deakins' philosophy: "Light and composition tell the story before any character speaks"
- * and RDR2's environmental design: "Every detail exists to create an illusion of history"
+ * Transforms the procedurally generated terrain into a living, breathing prehistoric world.
+ * This system is the silent author of environmental storytelling — every prop, every cluster
+ * of vegetation, every weathered rock tells a story that existed before the player arrived.
  * 
  * Core Philosophy:
- * - A player should never feel they're in a game environment
- * - Every prop tells a story of what happened before the player arrived
- * - Environmental narrative is written through placement, not dialogue
+ * - Every detail has a reason and tells a story
+ * - The world should feel lived-in, not artificially placed
+ * - Environmental narrative through subtle details
+ * - Composition and lighting guide the player's emotional journey
  * 
  * Features:
- * - Biome-specific vegetation distribution using UE5 Foliage system
- * - Procedural rock and prop placement with narrative context
- * - Dynamic material blending based on environmental conditions
- * - Atmospheric storytelling through strategic asset placement
- * - Performance-optimized instancing for massive vegetation density
+ * - Biome-specific vegetation distribution using UE5 Foliage System
+ * - Procedural rock and prop placement with narrative purpose
+ * - Material blending for realistic terrain surfaces
+ * - Environmental storytelling through prop clusters
+ * - Performance optimization through LOD and culling systems
+ * - Integration with PCG Framework for large-scale generation
+ * 
+ * Technical Implementation:
+ * - Uses Hierarchical Instanced Static Mesh Components for performance
+ * - Integrates with UE5 Foliage Mode and Procedural Foliage Tool
+ * - Landscape material layering for terrain diversity
+ * - Nanite support for high-detail vegetation and rocks
+ * - World Partition streaming for massive environments
  * 
  * @author Environment Artist — Agent #6
  * @version 1.0 — March 2026
  */
 
-/** Vegetation placement strategy */
+/** Vegetation placement patterns */
 UENUM(BlueprintType)
-enum class EVegetationPlacementType : uint8
+enum class EVegetationPattern : uint8
 {
     Random          UMETA(DisplayName = "Random Distribution"),
-    Clustered       UMETA(DisplayName = "Natural Clusters"),
-    Linear          UMETA(DisplayName = "Linear Patterns"),
-    Scattered       UMETA(DisplayName = "Scattered Placement"),
-    EdgeBased       UMETA(DisplayName = "Edge-Based Placement"),
-    HeightBased     UMETA(DisplayName = "Height-Based Placement")
+    Clustered       UMETA(DisplayName = "Clustered Groups"),
+    Linear          UMETA(DisplayName = "Linear Arrangement"),
+    Circular        UMETA(DisplayName = "Circular Pattern"),
+    EdgeFollowing   UMETA(DisplayName = "Edge Following"),
+    Organic         UMETA(DisplayName = "Organic Growth"),
+    Sparse          UMETA(DisplayName = "Sparse Scattered"),
+    Dense           UMETA(DisplayName = "Dense Coverage")
 };
 
 /** Environmental storytelling prop types */
 UENUM(BlueprintType)
 enum class EStorytellingPropType : uint8
 {
-    AbandonedCampfire   UMETA(DisplayName = "Abandoned Campfire"),
-    BrokenWeapons       UMETA(DisplayName = "Broken Weapons"),
-    AnimalBones         UMETA(DisplayName = "Animal Bones"),
-    DinosaurNests       UMETA(DisplayName = "Dinosaur Nests"),
-    AncientRuins        UMETA(DisplayName = "Ancient Ruins"),
-    FossilizedRemains   UMETA(DisplayName = "Fossilized Remains"),
-    CaveDrawings        UMETA(DisplayName = "Cave Drawings"),
-    MysteriousArtifacts UMETA(DisplayName = "Mysterious Artifacts"),
-    NaturalLandmarks    UMETA(DisplayName = "Natural Landmarks"),
-    WaterSources        UMETA(DisplayName = "Water Sources")
+    AbandonedCamp       UMETA(DisplayName = "Abandoned Camp"),
+    DinosaurRemains     UMETA(DisplayName = "Dinosaur Remains"),
+    FallenTree          UMETA(DisplayName = "Fallen Tree"),
+    RockFormation       UMETA(DisplayName = "Rock Formation"),
+    WaterSource         UMETA(DisplayName = "Water Source"),
+    AnimalTrail         UMETA(DisplayName = "Animal Trail"),
+    WeatheredStone      UMETA(DisplayName = "Weathered Stone"),
+    PlantGrowth         UMETA(DisplayName = "Unique Plant Growth"),
+    ErosionPattern      UMETA(DisplayName = "Erosion Pattern"),
+    NestingSite         UMETA(DisplayName = "Nesting Site")
 };
 
-/** Material blend layers for landscape */
-UENUM(BlueprintType)
-enum class ELandscapeMaterialLayer : uint8
-{
-    BaseRock        UMETA(DisplayName = "Base Rock"),
-    Soil            UMETA(DisplayName = "Fertile Soil"),
-    Sand            UMETA(DisplayName = "Sand"),
-    Mud             UMETA(DisplayName = "Mud"),
-    Grass           UMETA(DisplayName = "Grass"),
-    Moss            UMETA(DisplayName = "Moss"),
-    Snow            UMETA(DisplayName = "Snow"),
-    Lava            UMETA(DisplayName = "Volcanic Lava"),
-    Water           UMETA(DisplayName = "Water Surface"),
-    Vegetation      UMETA(DisplayName = "Dense Vegetation")
-};
-
-/** Vegetation instance data for performance optimization */
+/** Vegetation asset configuration */
 USTRUCT(BlueprintType)
-struct FVegetationInstanceData
+struct FVegetationConfig
 {
     GENERATED_BODY()
 
-    /** World location of this vegetation instance */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Instance")
-    FVector Location = FVector::ZeroVector;
+    /** Vegetation mesh */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Vegetation")
+    TSoftObjectPtr<UStaticMesh> VegetationMesh;
 
-    /** Rotation of this instance */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Instance")
-    FRotator Rotation = FRotator::ZeroRotator;
+    /** Foliage type asset for advanced settings */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Vegetation")
+    TSoftObjectPtr<UFoliageType> FoliageType;
 
-    /** Scale of this instance */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Instance")
-    FVector Scale = FVector::OneVector;
+    /** Material variations for this vegetation */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Vegetation")
+    TArray<TSoftObjectPtr<UMaterialInterface>> MaterialVariations;
 
-    /** Age of this vegetation (affects appearance) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Instance", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float Age = 0.5f;
+    /** Placement pattern */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Placement")
+    EVegetationPattern PlacementPattern = EVegetationPattern::Organic;
 
-    /** Health state (affects material properties) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Instance", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float Health = 1.0f;
+    /** Density per square meter */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Placement", meta = (ClampMin = "0.0", ClampMax = "10.0"))
+    float DensityPerSquareMeter = 0.5f;
 
-    /** Wind influence factor */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Instance", meta = (ClampMin = "0.0", ClampMax = "2.0"))
-    float WindInfluence = 1.0f;
-
-    /** Seasonal variation factor */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Instance", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float SeasonalVariation = 0.0f;
-};
-
-/** Environmental prop placement data */
-USTRUCT(BlueprintType)
-struct FEnvironmentalProp
-{
-    GENERATED_BODY()
-
-    /** Type of storytelling prop */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Prop")
-    EStorytellingPropType PropType = EStorytellingPropType::AnimalBones;
-
-    /** Static mesh for this prop */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Prop")
-    TSoftObjectPtr<UStaticMesh> PropMesh;
-
-    /** Material for this prop */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Prop")
-    TSoftObjectPtr<UMaterialInterface> PropMaterial;
-
-    /** Spawn probability in biome (0.0 - 1.0) */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Prop", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float SpawnProbability = 0.1f;
-
-    /** Minimum distance from player spawn points */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Prop", meta = (ClampMin = "0.0", ClampMax = "10000.0"))
-    float MinDistanceFromSpawn = 500.0f;
-
-    /** Preferred elevation range for spawning */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Prop")
-    FVector2D PreferredElevation = FVector2D(0.0f, 1000.0f);
+    /** Minimum distance between instances */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Placement", meta = (ClampMin = "10.0", ClampMax = "1000.0"))
+    float MinInstanceDistance = 100.0f;
 
     /** Scale variation range */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Prop")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Variation")
     FVector2D ScaleRange = FVector2D(0.8f, 1.2f);
 
-    /** Narrative context description */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Prop")
-    FText NarrativeContext;
+    /** Rotation variation (degrees) */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Variation", meta = (ClampMin = "0.0", ClampMax = "360.0"))
+    float RotationVariation = 360.0f;
 
-    /** Can this prop be interacted with? */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Prop")
-    bool bIsInteractable = false;
+    /** Slope tolerance (degrees) */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Terrain")
+    FVector2D SlopeRange = FVector2D(0.0f, 45.0f);
 
-    /** Does this prop provide gameplay functionality? */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Prop")
-    bool bProvidesGameplayFunction = false;
+    /** Altitude preference range (meters) */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Terrain")
+    FVector2D AltitudeRange = FVector2D(0.0f, 1000.0f);
+
+    /** Moisture preference (0-1, dry to wet) */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Environment", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    FVector2D MoistureRange = FVector2D(0.3f, 0.8f);
+
+    /** Temperature preference (Celsius) */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Environment")
+    FVector2D TemperatureRange = FVector2D(15.0f, 30.0f);
+
+    /** Provides food for herbivores */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Gameplay")
+    bool bProvidesFood = false;
+
+    /** Provides shelter/hiding spots */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Gameplay")
+    bool bProvidesShelter = false;
+
+    /** Can be destroyed by large dinosaurs */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Gameplay")
+    bool bCanBeDestroyed = true;
+
+    /** Regrowth time after destruction (seconds) */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Gameplay", meta = (ClampMin = "0.0"))
+    float RegrowthTime = 300.0f;
 };
 
-/** Atmospheric lighting configuration */
+/** Environmental storytelling prop configuration */
 USTRUCT(BlueprintType)
-struct FAtmosphericSettings
+struct FStorytellingPropConfig
 {
     GENERATED_BODY()
 
-    /** Base fog density */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float FogDensity = 0.3f;
+    /** Prop type */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Storytelling")
+    EStorytellingPropType PropType = EStorytellingPropType::RockFormation;
 
-    /** Fog color tint */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
-    FLinearColor FogColor = FLinearColor(0.8f, 0.9f, 1.0f, 1.0f);
+    /** Main prop mesh */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Storytelling")
+    TSoftObjectPtr<UStaticMesh> MainPropMesh;
 
-    /** Volumetric fog intensity */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere", meta = (ClampMin = "0.0", ClampMax = "2.0"))
-    float VolumetricFogIntensity = 0.5f;
+    /** Additional detail meshes */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Storytelling")
+    TArray<TSoftObjectPtr<UStaticMesh>> DetailMeshes;
 
-    /** God ray intensity */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere", meta = (ClampMin = "0.0", ClampMax = "2.0"))
-    float GodRayIntensity = 0.8f;
+    /** Narrative description (for designers) */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Storytelling", meta = (MultiLine = true))
+    FString NarrativeDescription;
 
-    /** Ambient sound attenuation */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float AmbientSoundAttenuation = 0.7f;
+    /** Spawn probability (0-1) */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Placement", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float SpawnProbability = 0.1f;
 
-    /** Wind strength affecting vegetation */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere", meta = (ClampMin = "0.0", ClampMax = "2.0"))
-    float WindStrength = 0.6f;
+    /** Minimum distance from player spawn */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Placement", meta = (ClampMin = "0.0"))
+    float MinDistanceFromSpawn = 500.0f;
 
-    /** Wind direction (normalized) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
-    FVector WindDirection = FVector(1.0f, 0.0f, 0.0f);
+    /** Preferred biomes for this prop */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Placement")
+    TArray<EBiomeType> PreferredBiomes;
+
+    /** Cluster size (number of related props) */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Clustering", meta = (ClampMin = "1", ClampMax = "20"))
+    int32 ClusterSize = 1;
+
+    /** Cluster spread radius */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Clustering", meta = (ClampMin = "100.0", ClampMax = "2000.0"))
+    float ClusterRadius = 500.0f;
+
+    /** Interaction type for gameplay */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Gameplay")
+    FString InteractionType;
+
+    /** Provides resources when interacted with */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Gameplay")
+    TMap<FString, int32> ResourceRewards;
 };
 
-/** Material parameter set for dynamic blending */
+/** Terrain material layer configuration */
 USTRUCT(BlueprintType)
-struct FMaterialParameterSet
+struct FTerrainMaterialLayer
 {
     GENERATED_BODY()
 
-    /** Base material to modify */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Material")
-    TSoftObjectPtr<UMaterialInterface> BaseMaterial;
+    /** Layer name */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Material")
+    FString LayerName;
 
-    /** Scalar parameters to set */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Material")
-    TMap<FName, float> ScalarParameters;
+    /** Material for this layer */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Material")
+    TSoftObjectPtr<UMaterialInterface> LayerMaterial;
 
-    /** Vector parameters to set */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Material")
-    TMap<FName, FLinearColor> VectorParameters;
+    /** Blend weight (0-1) */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Material", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float BlendWeight = 1.0f;
 
-    /** Texture parameters to set */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Material")
-    TMap<FName, TSoftObjectPtr<UTexture>> TextureParameters;
+    /** Slope preference for this layer */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Placement")
+    FVector2D SlopePreference = FVector2D(0.0f, 90.0f);
+
+    /** Altitude preference for this layer */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Placement")
+    FVector2D AltitudePreference = FVector2D(0.0f, 1000.0f);
+
+    /** Moisture preference for this layer */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Environment", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    FVector2D MoisturePreference = FVector2D(0.0f, 1.0f);
+
+    /** Tiling scale */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Material", meta = (ClampMin = "0.1", ClampMax = "10.0"))
+    float TilingScale = 1.0f;
+
+    /** Normal map intensity */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Material", meta = (ClampMin = "0.0", ClampMax = "2.0"))
+    float NormalIntensity = 1.0f;
+
+    /** Roughness multiplier */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Material", meta = (ClampMin = "0.0", ClampMax = "2.0"))
+    float RoughnessMultiplier = 1.0f;
+};
+
+/** Biome-specific environment art configuration */
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UEnvironmentArtData : public UPrimaryDataAsset
+{
+    GENERATED_BODY()
+
+public:
+    UEnvironmentArtData();
+
+    /** Associated biome type */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Biome")
+    EBiomeType BiomeType = EBiomeType::DenseJungle;
+
+    /** Biome display name */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Biome")
+    FText BiomeName;
+
+    /** Visual description for artists */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Biome", meta = (MultiLine = true))
+    FText ArtisticDescription;
+
+    /** Color palette for this biome */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Visual Style")
+    TArray<FLinearColor> ColorPalette;
+
+    /** Lighting mood (warm/cool bias) */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Visual Style", meta = (ClampMin = "-1.0", ClampMax = "1.0"))
+    float LightingMoodBias = 0.0f;
+
+    /** Terrain material layers */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Terrain Materials")
+    TArray<FTerrainMaterialLayer> TerrainLayers;
+
+    /** Tree configurations */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Vegetation")
+    TArray<FVegetationConfig> TreeConfigurations;
+
+    /** Undergrowth configurations */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Vegetation")
+    TArray<FVegetationConfig> UndergrowthConfigurations;
+
+    /** Ground cover configurations */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Vegetation")
+    TArray<FVegetationConfig> GroundCoverConfigurations;
+
+    /** Rock and geological feature configurations */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Geological Features")
+    TArray<FVegetationConfig> RockConfigurations;
+
+    /** Environmental storytelling props */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Storytelling")
+    TArray<FStorytellingPropConfig> StorytellingProps;
+
+    /** Overall vegetation density multiplier */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Density Control", meta = (ClampMin = "0.0", ClampMax = "5.0"))
+    float VegetationDensityMultiplier = 1.0f;
+
+    /** Rock density multiplier */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Density Control", meta = (ClampMin = "0.0", ClampMax = "5.0"))
+    float RockDensityMultiplier = 1.0f;
+
+    /** Storytelling prop density multiplier */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Density Control", meta = (ClampMin = "0.0", ClampMax = "5.0"))
+    float PropDensityMultiplier = 1.0f;
+
+    /** Performance LOD settings */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance")
+    TMap<FString, float> LODDistances;
+
+    /** Culling distances for different asset types */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance")
+    TMap<FString, float> CullingDistances;
 };
 
 /**
- * @brief Environment Art Manager
+ * @brief Main Environment Art System
  * 
- * Central system that coordinates all environmental art placement and management.
- * Works closely with the BiomeSystem to create visually stunning and narratively rich environments.
+ * Orchestrates the transformation of procedural terrain into artistic environments.
+ * This system thinks like Roger Deakins — every placement serves the narrative,
+ * every composition guides the player's emotional journey through the prehistoric world.
  */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AEnvironmentArtManager : public AActor
+class TRANSPERSONALGAME_API UEnvironmentArtSystem : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
-    AEnvironmentArtManager();
+    UEnvironmentArtSystem();
+
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+
+    /** Generate environment art for a specific biome area */
+    UFUNCTION(BlueprintCallable, Category = "Environment Art")
+    void GenerateEnvironmentArt(const FVector& WorldLocation, float Radius, EBiomeType BiomeType);
+
+    /** Populate vegetation in a specific area */
+    UFUNCTION(BlueprintCallable, Category = "Vegetation")
+    void PopulateVegetation(const FVector& Center, float Radius, const UEnvironmentArtData* ArtData);
+
+    /** Place storytelling props in an area */
+    UFUNCTION(BlueprintCallable, Category = "Storytelling")
+    void PlaceStorytellingProps(const FVector& Center, float Radius, const UEnvironmentArtData* ArtData);
+
+    /** Apply terrain materials to landscape */
+    UFUNCTION(BlueprintCallable, Category = "Materials")
+    void ApplyTerrainMaterials(ALandscapeProxy* Landscape, const UEnvironmentArtData* ArtData);
+
+    /** Create a narrative cluster of props */
+    UFUNCTION(BlueprintCallable, Category = "Storytelling")
+    void CreateNarrativeCluster(const FVector& Location, EStorytellingPropType PropType, const UEnvironmentArtData* ArtData);
+
+    /** Optimize environment art for performance */
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void OptimizeEnvironmentArt(const FVector& PlayerLocation, float OptimizationRadius);
+
+    /** Get environment art data for a biome */
+    UFUNCTION(BlueprintCallable, Category = "Data")
+    const UEnvironmentArtData* GetEnvironmentArtData(EBiomeType BiomeType) const;
+
+    /** Register environment art data asset */
+    UFUNCTION(BlueprintCallable, Category = "Data")
+    void RegisterEnvironmentArtData(UEnvironmentArtData* ArtData);
+
+    /** Event called when biome generation is complete */
+    UFUNCTION(BlueprintImplementableEvent, Category = "Events")
+    void OnBiomeArtGenerationComplete(EBiomeType BiomeType, const FVector& Location, float Radius);
 
 protected:
-    virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
+    /** Environment art data for each biome type */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Configuration")
+    TMap<EBiomeType, TSoftObjectPtr<UEnvironmentArtData>> BiomeArtData;
 
-public:
-    /** Initialize the environment art system */
-    UFUNCTION(BlueprintCallable, Category = "Environment Art")
-    void InitializeEnvironmentSystem();
+    /** Active vegetation instances */
+    UPROPERTY(Transient)
+    TMap<FString, UHierarchicalInstancedStaticMeshComponent*> VegetationInstances;
 
-    /** Generate vegetation for a specific biome area */
-    UFUNCTION(BlueprintCallable, Category = "Environment Art")
-    void GenerateVegetationForBiome(const UBiomeData* BiomeData, const FVector& CenterLocation, float Radius);
+    /** Active prop instances */
+    UPROPERTY(Transient)
+    TMap<FString, UHierarchicalInstancedStaticMeshComponent*> PropInstances;
 
-    /** Place environmental storytelling props */
-    UFUNCTION(BlueprintCallable, Category = "Environment Art")
-    void PlaceStorytellingProps(const UBiomeData* BiomeData, const FVector& CenterLocation, float Radius);
+    /** Performance monitoring */
+    UPROPERTY(Transient)
+    TMap<FString, float> PerformanceMetrics;
 
-    /** Update material parameters based on environmental conditions */
-    UFUNCTION(BlueprintCallable, Category = "Environment Art")
-    void UpdateEnvironmentalMaterials(const FVector& PlayerLocation);
-
-    /** Apply atmospheric settings to the world */
-    UFUNCTION(BlueprintCallable, Category = "Environment Art")
-    void ApplyAtmosphericSettings(const FAtmosphericSettings& Settings);
-
-    /** Get vegetation density at world location */
-    UFUNCTION(BlueprintCallable, Category = "Environment Art")
-    float GetVegetationDensityAtLocation(const FVector& WorldLocation) const;
-
-    /** Check if location is suitable for prop placement */
-    UFUNCTION(BlueprintCallable, Category = "Environment Art")
-    bool IsLocationSuitableForProp(const FVector& Location, const FEnvironmentalProp& PropData) const;
-
-    /** Create dynamic material instance for environmental blending */
-    UFUNCTION(BlueprintCallable, Category = "Environment Art")
-    UMaterialInstanceDynamic* CreateEnvironmentalMaterial(UMaterialInterface* BaseMaterial, const FMaterialParameterSet& Parameters);
-
-protected:
-    /** Reference to the world's biome system */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Environment Art")
-    TObjectPtr<class UBiomeSystem> BiomeSystem;
-
-    /** Foliage actor for managing vegetation instances */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Environment Art")
-    TObjectPtr<AInstancedFoliageActor> FoliageActor;
-
-    /** Hierarchical instanced static mesh components for different vegetation types */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Environment Art")
-    TMap<FString, UHierarchicalInstancedStaticMeshComponent*> VegetationComponents;
-
-    /** Environmental props placed in the world */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Environment Art")
-    TArray<AActor*> PlacedEnvironmentalProps;
-
-    /** Dynamic material instances for environmental blending */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Environment Art")
-    TArray<UMaterialInstanceDynamic*> DynamicMaterials;
-
-    /** Current atmospheric settings */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment Art")
-    FAtmosphericSettings CurrentAtmosphericSettings;
-
-    /** Performance settings */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxVegetationInstancesPerChunk = 10000;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float VegetationCullingDistance = 15000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxEnvironmentalPropsPerBiome = 500;
+    /** Random number generator for consistent results */
+    UPROPERTY(Transient)
+    FRandomStream RandomGenerator;
 
 private:
-    /** Generate vegetation cluster at specific location */
-    void GenerateVegetationCluster(const FVegetationAsset& VegetationAsset, const FVector& ClusterCenter, float ClusterRadius, int32 InstanceCount);
+    /** Place individual vegetation instance */
+    void PlaceVegetationInstance(const FVegetationConfig& Config, const FVector& Location, const FRotator& Rotation, float Scale);
 
-    /** Calculate optimal vegetation placement using Poisson disk sampling */
-    TArray<FVector> GeneratePoissonDiskSampling(const FVector& CenterLocation, float Radius, float MinDistance, int32 MaxAttempts = 30);
+    /** Calculate vegetation density based on environmental factors */
+    float CalculateVegetationDensity(const FVector& Location, const FVegetationConfig& Config, const UEnvironmentArtData* ArtData);
 
-    /** Apply environmental storytelling through prop placement */
-    void CreateNarrativeScene(const FVector& Location, EStorytellingPropType SceneType);
+    /** Generate organic placement pattern */
+    TArray<FVector> GenerateOrganicPattern(const FVector& Center, float Radius, int32 InstanceCount, float MinDistance);
 
-    /** Update vegetation materials based on seasonal and environmental factors */
-    void UpdateVegetationMaterials(float DeltaTime);
+    /** Generate clustered placement pattern */
+    TArray<FVector> GenerateClusteredPattern(const FVector& Center, float Radius, int32 ClusterCount, int32 InstancesPerCluster);
 
-    /** Performance optimization: cull distant vegetation instances */
-    void CullDistantVegetation(const FVector& ViewerLocation);
+    /** Check if location is suitable for vegetation */
+    bool IsLocationSuitableForVegetation(const FVector& Location, const FVegetationConfig& Config);
 
-    /** Blend landscape materials based on biome transitions */
-    void BlendLandscapeMaterials(ALandscapeProxy* Landscape, const TArray<UBiomeData*>& NearbyBiomes);
-};
+    /** Create material instance for terrain layer */
+    UMaterialInstanceDynamic* CreateTerrainMaterialInstance(const FTerrainMaterialLayer& Layer);
 
-/**
- * @brief Vegetation Asset Library
- * 
- * Data asset containing all vegetation meshes and materials for the prehistoric world.
- * Organized by biome type and vegetation category for efficient lookup and spawning.
- */
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UVegetationAssetLibrary : public UPrimaryDataAsset
-{
-    GENERATED_BODY()
+    /** Update LOD levels based on distance */
+    void UpdateLODLevels(const FVector& ViewerLocation);
 
-public:
-    UVegetationAssetLibrary();
+    /** Cull distant instances for performance */
+    void CullDistantInstances(const FVector& ViewerLocation);
 
-    /** Get vegetation assets for a specific biome */
-    UFUNCTION(BlueprintCallable, Category = "Vegetation Library")
-    TArray<FVegetationAsset> GetVegetationForBiome(EBiomeType BiomeType) const;
-
-    /** Get random vegetation asset from biome with weighted selection */
-    UFUNCTION(BlueprintCallable, Category = "Vegetation Library")
-    FVegetationAsset GetRandomVegetationAsset(EBiomeType BiomeType) const;
-
-    /** Check if vegetation asset exists for biome */
-    UFUNCTION(BlueprintCallable, Category = "Vegetation Library")
-    bool HasVegetationForBiome(EBiomeType BiomeType) const;
-
-protected:
-    /** Vegetation assets organized by biome type */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Vegetation Library")
-    TMap<EBiomeType, TArray<FVegetationAsset>> BiomeVegetationMap;
-
-    /** Default vegetation for fallback */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Vegetation Library")
-    TArray<FVegetationAsset> DefaultVegetation;
-};
-
-/**
- * @brief Environmental Prop Library
- * 
- * Data asset containing all environmental storytelling props for creating narrative scenes.
- * Each prop is designed to tell a story about the prehistoric world and its inhabitants.
- */
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UEnvironmentalPropLibrary : public UPrimaryDataAsset
-{
-    GENERATED_BODY()
-
-public:
-    UEnvironmentalPropLibrary();
-
-    /** Get props suitable for a specific biome */
-    UFUNCTION(BlueprintCallable, Category = "Prop Library")
-    TArray<FEnvironmentalProp> GetPropsForBiome(EBiomeType BiomeType) const;
-
-    /** Get props of a specific storytelling type */
-    UFUNCTION(BlueprintCallable, Category = "Prop Library")
-    TArray<FEnvironmentalProp> GetPropsByType(EStorytellingPropType PropType) const;
-
-    /** Get random prop for creating narrative scenes */
-    UFUNCTION(BlueprintCallable, Category = "Prop Library")
-    FEnvironmentalProp GetRandomProp(EBiomeType BiomeType, EStorytellingPropType PreferredType = EStorytellingPropType::AnimalBones) const;
-
-protected:
-    /** Environmental props organized by biome compatibility */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Prop Library")
-    TMap<EBiomeType, TArray<FEnvironmentalProp>> BiomePropMap;
-
-    /** Props organized by storytelling function */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Prop Library")
-    TMap<EStorytellingPropType, TArray<FEnvironmentalProp>> StorytellingPropMap;
+    /** Log environment art statistics */
+    void LogEnvironmentStats(const FString& BiomeName, int32 VegetationCount, int32 PropCount);
 };
