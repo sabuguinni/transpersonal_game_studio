@@ -1,0 +1,87 @@
+# Behavior Tree: BT_SmallHerbivore
+# Specialized behavior for small herbivorous dinosaurs
+# Focus: Cautious foraging, quick escape responses, herd behavior
+
+ROOT
+├── Selector: "Main Behavior Selector"
+    ├── Sequence: "Emergency Response" [Decorator: Blackboard - ThreatLevel > 0.7]
+    │   ├── Task: "Set Flee Location" (Custom EQS - Find safe location away from threat)
+    │   ├── Task: "Move To" (FleeLocation)
+    │   ├── Task: "Wait" (3.0s + Random 2.0s)
+    │   └── Task: "Clear Threat Memory"
+    │
+    ├── Sequence: "Player Interaction" [Decorator: Blackboard - PlayerActor is set AND Distance < 10.0]
+    │   ├── Task: "Evaluate Player Threat"
+    │   ├── Selector: "Player Response"
+    │       ├── Sequence: "Friendly Approach" [Decorator: PlayerTrustLevel > 0.5]
+    │       │   ├── Task: "Approach Slowly"
+    │       │   ├── Task: "Display Calm Behavior"
+    │       │   └── Task: "Accept Food/Interaction"
+    │       │
+    │       ├── Sequence: "Cautious Observation" [Decorator: PlayerTrustLevel 0.2-0.5]
+    │       │   ├── Task: "Maintain Safe Distance"
+    │       │   ├── Task: "Watch Player"
+    │       │   └── Task: "Update Trust Based on Player Actions"
+    │       │
+    │       └── Sequence: "Fear Response" [Decorator: PlayerTrustLevel < 0.2]
+    │           ├── Task: "Back Away Slowly"
+    │           ├── Task: "Ready to Flee"
+    │           └── Task: "Monitor for Sudden Movements"
+    │
+    ├── Sequence: "Daily Needs" [Service: Update Daily Needs]
+    │   ├── Selector: "Hunger Response"
+    │   │   ├── Sequence: "Foraging" [Decorator: IsHungry = true]
+    │   │   │   ├── Task: "Find Food Source" (EQS - Nearest vegetation)
+    │   │   │   ├── Task: "Move To" (NearestFood)
+    │   │   │   ├── Task: "Forage Animation"
+    │   │   │   ├── Task: "Wait" (5.0s + Random 3.0s)
+    │   │   │   └── Task: "Reduce Hunger"
+    │   │   │
+    │   │   └── Sequence: "Thirst Response" [Decorator: IsThirsty = true]
+    │   │       ├── Task: "Find Water Source" (EQS - Nearest water)
+    │   │       ├── Task: "Move To" (NearestWater)
+    │   │       ├── Task: "Drink Animation"
+    │   │       ├── Task: "Wait" (3.0s)
+    │   │       └── Task: "Reduce Thirst"
+    │
+    ├── Sequence: "Social Behavior" [Decorator: NearbyDinosaurs array size > 0]
+    │   ├── Task: "Find Herd Members"
+    │   ├── Selector: "Herd Dynamics"
+    │       ├── Sequence: "Join Herd" [Decorator: No pack leader assigned]
+    │       │   ├── Task: "Identify Alpha"
+    │       │   ├── Task: "Approach Herd"
+    │       │   └── Task: "Follow Herd Leader"
+    │       │
+    │       ├── Sequence: "Herd Following" [Decorator: Pack leader assigned]
+    │       │   ├── Task: "Maintain Herd Position"
+    │       │   ├── Task: "Mirror Leader Behavior"
+    │       │   └── Task: "Alert on Danger"
+    │       │
+    │       └── Sequence: "Lone Behavior" [Decorator: SocialTendency < 0.3]
+    │           ├── Task: "Maintain Distance from Others"
+    │           └── Task: "Independent Foraging"
+    │
+    └── Sequence: "Default Patrol" [Service: Update Patrol Location every 10s]
+        ├── Task: "Choose Random Patrol Point"
+        ├── Task: "Move To" (PatrolLocation)
+        ├── Task: "Look Around" (Perception check)
+        ├── Task: "Idle Animation"
+        └── Task: "Wait" (2.0s + Random 5.0s)
+
+# Custom Tasks Required:
+# - Evaluate Player Threat (checks player actions, movement speed, equipped items)
+# - Display Calm Behavior (specific animations for trust building)
+# - Accept Food/Interaction (domestication progress)
+# - Update Trust Based on Player Actions (real-time trust calculation)
+# - Find Food Source (EQS for vegetation patches)
+# - Find Water Source (EQS for water bodies)
+# - Identify Alpha (social hierarchy detection)
+# - Mirror Leader Behavior (copy leader's current behavior)
+# - Alert on Danger (warning calls to herd)
+
+# Services Required:
+# - Update Daily Needs (hunger, thirst, tiredness cycles)
+# - Update Patrol Location (procedural patrol point selection)
+# - Monitor Player Actions (continuous player behavior assessment)
+# - Update Memory (memory formation and decay)
+# - Update Social Dynamics (herd membership and hierarchy)
