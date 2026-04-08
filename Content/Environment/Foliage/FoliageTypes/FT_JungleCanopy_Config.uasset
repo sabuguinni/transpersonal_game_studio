@@ -1,0 +1,124 @@
+// JUNGLE CANOPY FOLIAGE TYPE CONFIGURATION
+// Transpersonal Game Studio - Jurassic Survival Game  
+// Agent #06 - Environment Artist
+// PROD_JURASSIC_001
+
+/*
+Foliage Type configuration for dense jungle canopy layer.
+Optimized for UE5 Foliage Mode and Procedural Foliage Tool.
+Creates layered, believable jungle environment with performance optimization.
+*/
+
+// === FOLIAGE TYPE SETTINGS ===
+FoliageType: "JungleCanopy"
+MeshAssets: [
+    "SM_EmergentPine_01",
+    "SM_EmergentPine_02", 
+    "SM_EmergentPine_03",
+    "SM_AncientOak_01",
+    "SM_AncientOak_02",
+    "SM_JungleGiant_01",
+    "SM_JungleGiant_02",
+    "SM_JungleGiant_03"
+]
+
+// === PLACEMENT SETTINGS ===
+Density: 0.15                    // Trees per square meter
+Radius: 800.0                    // Maximum placement radius
+AlignToNormal: true              // Align to surface normal
+RandomYaw: true                  // Random rotation
+UniformScale: false              // Allow non-uniform scaling
+
+// === SCALING VARIATION ===
+ScaleX: [0.8, 1.4]              // Width variation
+ScaleY: [0.8, 1.4]              // Depth variation  
+ScaleZ: [0.9, 1.2]              // Height variation (less dramatic)
+LockScaleXY: true               // Maintain proportions
+
+// === ROTATION VARIATION ===
+RotationX: [-5.0, 5.0]          // Slight tilt on slopes
+RotationY: [0.0, 360.0]         // Full rotation freedom
+RotationZ: [-3.0, 3.0]          // Minimal roll
+
+// === COLLISION SETTINGS ===
+CollisionWithWorld: true         // Prevent intersection with terrain
+CollisionWithOther: true         // Prevent tree overlap
+CollisionRadius: 400.0           // Minimum distance between trees
+ShadeRadius: 600.0               // Area of influence for undergrowth
+
+// === CULLING SETTINGS ===
+CullDistance: 15000.0            // Render distance
+StartCullDistance: 12000.0       // Begin fade out
+EndCullDistance: 15000.0         // Complete cull
+
+// === WIND SETTINGS ===
+EnableWind: true
+WindStrength: 0.3                // Subtle movement for large trees
+WindFrequency: 0.8               // Slow, majestic sway
+
+// === LIGHTING SETTINGS ===
+CastShadow: true                 // Important for canopy lighting
+ReceiveShadow: true
+ShadowCacheInvalidationBehavior: "Auto"
+
+// === PROCEDURAL GENERATION RULES ===
+BiomeAffinity: {
+    "DenseJungle": 1.0,          // Primary biome
+    "RiverValley": 0.6,          // Reduced near water
+    "RockyOutcrops": 0.3,        // Sparse on rocky terrain
+    "Swamplands": 0.4            // Some tolerance for wet areas
+}
+
+// === ECOLOGICAL RELATIONSHIPS ===
+RequiresWater: false             // Canopy trees are established
+WaterDistance: [50.0, 500.0]    // Optimal distance from water sources
+SoilQuality: [0.6, 1.0]         // Prefers good soil
+SlopeLimit: 35.0                // Maximum slope for placement
+
+// === STORYTELLING INTEGRATION ===
+TerritoryMarkers: {
+    ClawMarkChance: 0.15,        // 15% chance of claw marks
+    NestingChance: 0.05,         // 5% chance of nests in canopy
+    BoneScatterRadius: 800.0     // Bones found within this radius
+}
+
+// === PERFORMANCE OPTIMIZATION ===
+EnableNanite: true               // Use Nanite for detail
+LODDistances: [2000, 5000, 10000, 15000]
+InstanceCulling: true
+OcclusionCulling: true
+
+// === MATERIAL INSTANCES ===
+MaterialOverrides: {
+    "M_EmergentPine": "MI_Pine_Canopy",
+    "M_AncientOak": "MI_Oak_Ancient", 
+    "M_JungleGiant": "MI_Tropical_Canopy"
+}
+
+// === SEASONAL VARIATION ===
+SeasonalParams: {
+    Spring: { HealthLevel: 1.0, SeasonalTint: (0.9, 1.0, 0.8) },
+    Summer: { HealthLevel: 1.0, SeasonalTint: (1.0, 1.0, 1.0) },
+    Autumn: { HealthLevel: 0.9, SeasonalTint: (1.1, 0.9, 0.7) },
+    Winter: { HealthLevel: 0.8, SeasonalTint: (0.8, 0.9, 1.0) }
+}
+
+// === AUDIO INTEGRATION ===
+AudioCues: {
+    WindRustle: "A_Leaves_Rustle_Large",
+    CreakingWood: "A_Tree_Creak_Ancient",
+    BirdCalls: "A_Canopy_Birds_Ambient"
+}
+
+// === GAMEPLAY INTEGRATION ===
+ClimbableSpecies: ["SM_JungleGiant_01", "SM_AncientOak_01"]
+FruitBearing: ["SM_JungleGiant_02", "SM_JungleGiant_03"]
+NestingSites: ["SM_EmergentPine_02", "SM_AncientOak_02"]
+
+// === NOTES ===
+// - Canopy layer creates the primary lighting environment
+// - Large trees serve as landmarks for navigation  
+// - Spacing allows for understory development
+// - Claw marks suggest large predator territories
+// - Nesting sites for flying reptiles
+// - Fruit trees provide food sources for herbivores and player
