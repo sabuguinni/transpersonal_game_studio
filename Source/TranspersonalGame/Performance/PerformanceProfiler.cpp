@@ -1,312 +1,293 @@
+// PerformanceProfiler.cpp
+// Implementação do sistema de profiling de performance
+
 #include "PerformanceProfiler.h"
+#include "Engine/World.h"
 #include "Engine/Engine.h"
 #include "HAL/PlatformMemory.h"
-#include "RenderingThread.h"
 #include "Stats/Stats.h"
-#include "PhysicsEngine/PhysicsSettings.h"
-#include "../Core/ConsciousnessSystem.h"
-#include "../Physics/PhysicsManager.h"
+#include "RenderingThread.h"
+#include "HAL/PlatformFilemanager.h"
+#include "Misc/DateTime.h"
+
+DEFINE_LOG_CATEGORY(LogTranspersonalPerformance);
 
 UPerformanceProfiler::UPerformanceProfiler()
+    : bIsProfilingActive(false)
+    , bAutoPerformanceAdjustment(true)
+    , ProfilingStartTime(0.0f)
+    , CurrentPerformanceLevel(EPerformanceLevel::Auto)
+    , LastPerformanceCheckTime(0.0f)
+    , bHardwareDetected(false)
+    , EstimatedGPUPerformance(5)
+    , EstimatedCPUPerformance(5)
+    , AvailableMemoryGB(8.0f)
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f; // Update 10 times per second
-    
-    bIsProfilingEnabled = true;
-    ProfilingUpdateInterval = 0.1f;
-    bAutoOptimizationEnabled = false;
-    
-    // Default performance targets
-    TargetFrameRate = 60.0f;
-    MaxAllowedPhysicsTime = 8.0f; // 8ms for physics at 60fps
-    MaxAllowedConsciousnessTime = 5.0f; // 5ms for consciousness systems
-    MemoryWarningThresholdMB = 2048.0f; // 2GB warning threshold
-    
-    LastProfilingUpdate = 0.0f;
+    FrameTimeHistory.Reserve(MaxHistorySize);
+    FPSHistory.Reserve(MaxHistorySize);
 }
 
-void UPerformanceProfiler::BeginPlay()
+void UPerformanceProfiler::Initialize()
 {
-    Super::BeginPlay();
+    UE_LOG(LogTranspersonalPerformance, Log, TEXT("Initializing Performance Profiler"));
     
-    if (bIsProfilingEnabled)
+    DetectHardwareCapabilities();
+    StartProfiling();
+    
+    // Configurar callbacks de engine se necessário
+    if (GEngine)
     {
-        StartProfiling();
+        // Registrar para receber notificações de frame
     }
 }
 
-void UPerformanceProfiler::EndPlay(const EEndPlayReason::Type EndPlayReason)
+void UPerformanceProfiler::Shutdown()
 {
-    if (bIsProfilingEnabled)
-    {
-        StopProfiling();
-        WritePerformanceLog();
-    }
-    
-    Super::EndPlay(EndPlayReason);
+    UE_LOG(LogTranspersonalPerformance, Log, TEXT("Shutting down Performance Profiler"));
+    StopProfiling();
 }
 
-void UPerformanceProfiler::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UPerformanceProfiler::UpdateMetrics(float DeltaTime)
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    
-    if (!bIsProfilingEnabled)
+    if (!bIsProfilingActive)
         return;
-        
-    LastProfilingUpdate += DeltaTime;
-    
-    if (LastProfilingUpdate >= ProfilingUpdateInterval)
+
+    CollectFrameMetrics(DeltaTime);
+    CollectRenderMetrics();
+    CollectMemoryMetrics();
+    CollectPhysicsMetrics();
+
+    // Verificar se é hora de atualizar o nível de performance
+    float CurrentTime = FPlatformTime::Seconds();
+    if (CurrentTime - LastPerformanceCheckTime > PerformanceCheckInterval)
     {
-        UpdatePerformanceMetrics();
-        CheckPerformanceThresholds();
-        
-        if (bAutoOptimizationEnabled)
-        {
-            ApplyAutoOptimizations();
-        }
-        
-        LastProfilingUpdate = 0.0f;
+        UpdatePerformanceLevel();
+        LastPerformanceCheckTime = CurrentTime;
     }
+}
+
+void UPerformanceProfiler::CollectFrameMetrics(float DeltaTime)
+{
+    CurrentMetrics.FrameTime = DeltaTime * 1000.0f; // Converter para ms
+    CurrentMetrics.FPS = (DeltaTime > 0.0f) ? (1.0f / DeltaTime) : 0.0f;
+
+    // Adicionar ao histórico
+    AddToHistory(FrameTimeHistory, CurrentMetrics.FrameTime);
+    AddToHistory(FPSHistory, CurrentMetrics.FPS);
+
+    // Coletar tempos de thread se disponível
+#if STATS
+    if (FThreadStats::IsCollectingData())
+    {
+        // Tentar obter estatísticas de thread
+        CurrentMetrics.GameThreadTime = FPlatformTime::ToMilliseconds(GGameThreadTime);
+        CurrentMetrics.RenderThreadTime = FPlatformTime::ToMilliseconds(GRenderThreadTime);
+    }
+#endif
+}
+
+void UPerformanceProfiler::CollectRenderMetrics()
+{
+    if (GEngine && GEngine->GetWorld())
+    {
+        // Coletar estatísticas de rendering
+        UWorld* World = GEngine->GetWorld();
+        if (World)
+        {
+            // Contar atores ativos
+            CurrentMetrics.ActiveActors = World->GetActorCount();
+        }
+    }
+
+    // Tentar obter estatísticas de GPU
+#if STATS
+    if (FThreadStats::IsCollectingData())
+    {
+        // Estatísticas de draw calls e triângulos
+        // Nota: Estas são aproximações baseadas em estatísticas disponíveis
+        CurrentMetrics.DrawCalls = 0; // Seria obtido de RHI stats
+        CurrentMetrics.Triangles = 0; // Seria obtido de RHI stats
+        CurrentMetrics.GPUTime = 0.0f; // Seria obtido de GPU timing
+    }
+#endif
+}
+
+void UPerformanceProfiler::CollectMemoryMetrics()
+{
+    // Obter uso de memória do sistema
+    FPlatformMemoryStats MemStats = FPlatformMemory::GetStats();
+    
+    // Converter para MB
+    float UsedMemoryMB = static_cast<float>(MemStats.UsedPhysical) / (1024.0f * 1024.0f);
+    float TotalMemoryMB = static_cast<float>(MemStats.TotalPhysical) / (1024.0f * 1024.0f);
+    
+    CurrentMetrics.MemoryUsage = (TotalMemoryMB > 0.0f) ? (UsedMemoryMB / TotalMemoryMB) : 0.0f;
+    
+    // Log warning se memória estiver alta
+    if (CurrentMetrics.MemoryUsage > MemoryWarningThreshold)
+    {
+        UE_LOG(LogTranspersonalPerformance, Warning, 
+               TEXT("High memory usage detected: %.1f%% (%.1f MB / %.1f MB)"),
+               CurrentMetrics.MemoryUsage * 100.0f, UsedMemoryMB, TotalMemoryMB);
+    }
+}
+
+void UPerformanceProfiler::CollectPhysicsMetrics()
+{
+    // Coletar tempo de física se disponível
+    CurrentMetrics.PhysicsTime = 0.0f;
+    
+#if STATS
+    if (FThreadStats::IsCollectingData())
+    {
+        // Tentar obter tempo de simulação de física
+        // Isto seria implementado com acesso às estatísticas do Chaos Physics
+    }
+#endif
 }
 
 void UPerformanceProfiler::StartProfiling()
 {
-    bIsProfilingEnabled = true;
-    MetricsHistory.Empty();
-    ConsciousnessProfileTimes.Empty();
+    if (bIsProfilingActive)
+        return;
+
+    bIsProfilingActive = true;
+    ProfilingStartTime = FPlatformTime::Seconds();
+    LastPerformanceCheckTime = ProfilingStartTime;
     
-    UE_LOG(LogTemp, Log, TEXT("Performance Profiler: Started profiling transpersonal game systems"));
+    // Limpar histórico
+    FrameTimeHistory.Empty();
+    FPSHistory.Empty();
+    
+    UE_LOG(LogTranspersonalPerformance, Log, TEXT("Performance profiling started"));
 }
 
 void UPerformanceProfiler::StopProfiling()
 {
-    bIsProfilingEnabled = false;
-    UE_LOG(LogTemp, Log, TEXT("Performance Profiler: Stopped profiling"));
-}
-
-FPerformanceMetrics UPerformanceProfiler::GetCurrentMetrics() const
-{
-    return CurrentMetrics;
-}
-
-void UPerformanceProfiler::LogPerformanceSnapshot(const FString& Label)
-{
-    FString LogMessage = FString::Printf(TEXT("Performance Snapshot [%s]: %s"), 
-        *Label, *FormatMetricsForLog(CurrentMetrics));
-    
-    UE_LOG(LogTemp, Log, TEXT("%s"), *LogMessage);
-}
-
-void UPerformanceProfiler::BeginConsciousnessProfile(const FString& SystemName)
-{
-    ConsciousnessProfileStartTimes.Add(SystemName, FPlatformTime::Seconds());
-}
-
-void UPerformanceProfiler::EndConsciousnessProfile(const FString& SystemName)
-{
-    if (double* StartTime = ConsciousnessProfileStartTimes.Find(SystemName))
-    {
-        double ElapsedTime = (FPlatformTime::Seconds() - *StartTime) * 1000.0; // Convert to milliseconds
-        ConsciousnessProfileTimes.Add(SystemName, ElapsedTime);
-        ConsciousnessProfileStartTimes.Remove(SystemName);
-    }
-}
-
-void UPerformanceProfiler::EnableAutoOptimization(bool bEnable)
-{
-    bAutoOptimizationEnabled = bEnable;
-    UE_LOG(LogTemp, Log, TEXT("Performance Profiler: Auto-optimization %s"), 
-        bEnable ? TEXT("enabled") : TEXT("disabled"));
-}
-
-void UPerformanceProfiler::SetPerformanceTargets(float TargetFPS, float MaxPhysicsTime, float MaxConsciousnessTime)
-{
-    TargetFrameRate = TargetFPS;
-    MaxAllowedPhysicsTime = MaxPhysicsTime;
-    MaxAllowedConsciousnessTime = MaxConsciousnessTime;
-    
-    UE_LOG(LogTemp, Log, TEXT("Performance Profiler: Updated targets - FPS: %.1f, Physics: %.1fms, Consciousness: %.1fms"),
-        TargetFPS, MaxPhysicsTime, MaxConsciousnessTime);
-}
-
-void UPerformanceProfiler::UpdatePerformanceMetrics()
-{
-    // Get frame timing
-    CurrentMetrics.FrameTime = FApp::GetDeltaTime() * 1000.0f; // Convert to milliseconds
-    
-    // Get thread timings (simplified - in real implementation would use more detailed stats)
-    CurrentMetrics.GameThreadTime = FPlatformTime::ToMilliseconds(GGameThreadTime);
-    CurrentMetrics.RenderThreadTime = FPlatformTime::ToMilliseconds(GRenderThreadTime);
-    
-    // Physics timing (would integrate with PhysicsManager)
-    if (UPhysicsManager* PhysicsManager = UPhysicsManager::GetInstance(GetWorld()))
-    {
-        CurrentMetrics.PhysicsTime = PhysicsManager->GetLastFramePhysicsTime();
-        CurrentMetrics.PhysicsObjects = PhysicsManager->GetActivePhysicsObjectCount();
-    }
-    
-    // Consciousness system timing
-    float TotalConsciousnessTime = 0.0f;
-    for (const auto& ProfilePair : ConsciousnessProfileTimes)
-    {
-        TotalConsciousnessTime += ProfilePair.Value;
-    }
-    CurrentMetrics.ConsciousnessSystemTime = TotalConsciousnessTime;
-    
-    // Memory usage
-    FPlatformMemoryStats MemStats = FPlatformMemory::GetStats();
-    CurrentMetrics.MemoryUsageMB = MemStats.UsedPhysical / (1024.0f * 1024.0f);
-    
-    // GPU memory (simplified)
-    CurrentMetrics.GPUMemoryUsageMB = 0.0f; // Would need platform-specific implementation
-    
-    // Count consciousness entities (would integrate with ConsciousnessSystem)
-    CurrentMetrics.ActiveConsciousnessEntities = 0; // Placeholder
-    
-    // Store in history
-    MetricsHistory.Add(CurrentMetrics);
-    if (MetricsHistory.Num() > 600) // Keep 1 minute of history at 10Hz
-    {
-        MetricsHistory.RemoveAt(0);
-    }
-}
-
-void UPerformanceProfiler::CheckPerformanceThresholds()
-{
-    // Check frame rate
-    float CurrentFPS = 1000.0f / FMath::Max(CurrentMetrics.FrameTime, 0.001f);
-    if (CurrentFPS < TargetFrameRate * 0.8f) // 20% tolerance
-    {
-        FString AlertMessage = FString::Printf(TEXT("Low FPS detected: %.1f (target: %.1f)"), 
-            CurrentFPS, TargetFrameRate);
-        OnPerformanceAlert.Broadcast(AlertMessage);
-    }
-    
-    // Check physics time
-    if (CurrentMetrics.PhysicsTime > MaxAllowedPhysicsTime)
-    {
-        FString AlertMessage = FString::Printf(TEXT("High physics time: %.2fms (max: %.2fms)"), 
-            CurrentMetrics.PhysicsTime, MaxAllowedPhysicsTime);
-        OnPerformanceAlert.Broadcast(AlertMessage);
-    }
-    
-    // Check consciousness system time
-    if (CurrentMetrics.ConsciousnessSystemTime > MaxAllowedConsciousnessTime)
-    {
-        FString AlertMessage = FString::Printf(TEXT("High consciousness system time: %.2fms (max: %.2fms)"), 
-            CurrentMetrics.ConsciousnessSystemTime, MaxAllowedConsciousnessTime);
-        OnPerformanceAlert.Broadcast(AlertMessage);
-    }
-    
-    // Check memory usage
-    if (CurrentMetrics.MemoryUsageMB > MemoryWarningThresholdMB)
-    {
-        FString AlertMessage = FString::Printf(TEXT("High memory usage: %.1fMB (threshold: %.1fMB)"), 
-            CurrentMetrics.MemoryUsageMB, MemoryWarningThresholdMB);
-        OnPerformanceAlert.Broadcast(AlertMessage);
-    }
-}
-
-void UPerformanceProfiler::ApplyAutoOptimizations()
-{
-    float CurrentFPS = 1000.0f / FMath::Max(CurrentMetrics.FrameTime, 0.001f);
-    
-    // If performance is below target, apply optimizations
-    if (CurrentFPS < TargetFrameRate * 0.9f)
-    {
-        if (CurrentMetrics.PhysicsTime > MaxAllowedPhysicsTime * 0.8f)
-        {
-            OptimizePhysicsSettings();
-        }
-        
-        if (CurrentMetrics.ConsciousnessSystemTime > MaxAllowedConsciousnessTime * 0.8f)
-        {
-            OptimizeConsciousnessSystem();
-        }
-        
-        OptimizeRenderingSettings();
-    }
-}
-
-void UPerformanceProfiler::OptimizePhysicsSettings()
-{
-    // Reduce physics simulation frequency for non-critical objects
-    if (UPhysicsManager* PhysicsManager = UPhysicsManager::GetInstance(GetWorld()))
-    {
-        PhysicsManager->SetOptimizationLevel(1); // Moderate optimization
-        UE_LOG(LogTemp, Warning, TEXT("Performance Profiler: Applied physics optimizations"));
-    }
-}
-
-void UPerformanceProfiler::OptimizeConsciousnessSystem()
-{
-    // Reduce update frequency for distant consciousness entities
-    UE_LOG(LogTemp, Warning, TEXT("Performance Profiler: Applied consciousness system optimizations"));
-    
-    // This would integrate with the ConsciousnessSystem to:
-    // - Reduce update frequency for distant entities
-    // - Simplify consciousness calculations for background NPCs
-    // - Use LOD system for consciousness complexity
-}
-
-void UPerformanceProfiler::OptimizeRenderingSettings()
-{
-    // Dynamically adjust rendering quality
-    UE_LOG(LogTemp, Warning, TEXT("Performance Profiler: Applied rendering optimizations"));
-    
-    // This could adjust:
-    // - Shadow quality
-    // - Particle density
-    // - LOD bias
-    // - Post-processing effects
-}
-
-void UPerformanceProfiler::WritePerformanceLog()
-{
-    if (MetricsHistory.Num() == 0)
+    if (!bIsProfilingActive)
         return;
-        
-    FString LogContent = TEXT("=== Transpersonal Game Performance Report ===\n\n");
+
+    bIsProfilingActive = false;
     
-    // Calculate averages
-    FPerformanceMetrics AverageMetrics;
-    for (const FPerformanceMetrics& Metrics : MetricsHistory)
-    {
-        AverageMetrics.FrameTime += Metrics.FrameTime;
-        AverageMetrics.GameThreadTime += Metrics.GameThreadTime;
-        AverageMetrics.RenderThreadTime += Metrics.RenderThreadTime;
-        AverageMetrics.PhysicsTime += Metrics.PhysicsTime;
-        AverageMetrics.ConsciousnessSystemTime += Metrics.ConsciousnessSystemTime;
-        AverageMetrics.MemoryUsageMB += Metrics.MemoryUsageMB;
-    }
-    
-    float NumSamples = MetricsHistory.Num();
-    AverageMetrics.FrameTime /= NumSamples;
-    AverageMetrics.GameThreadTime /= NumSamples;
-    AverageMetrics.RenderThreadTime /= NumSamples;
-    AverageMetrics.PhysicsTime /= NumSamples;
-    AverageMetrics.ConsciousnessSystemTime /= NumSamples;
-    AverageMetrics.MemoryUsageMB /= NumSamples;
-    
-    LogContent += FString::Printf(TEXT("Average Performance Metrics:\n%s\n\n"), 
-        *FormatMetricsForLog(AverageMetrics));
-    
-    // Consciousness system breakdown
-    LogContent += TEXT("Consciousness System Breakdown:\n");
-    for (const auto& ProfilePair : ConsciousnessProfileTimes)
-    {
-        LogContent += FString::Printf(TEXT("  %s: %.2fms\n"), 
-            *ProfilePair.Key, ProfilePair.Value);
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("%s"), *LogContent);
+    float ProfilingDuration = FPlatformTime::Seconds() - ProfilingStartTime;
+    UE_LOG(LogTranspersonalPerformance, Log, 
+           TEXT("Performance profiling stopped. Duration: %.2f seconds"), ProfilingDuration);
 }
 
-FString UPerformanceProfiler::FormatMetricsForLog(const FPerformanceMetrics& Metrics) const
+float UPerformanceProfiler::GetAverageFrameTime() const
 {
-    float FPS = 1000.0f / FMath::Max(Metrics.FrameTime, 0.001f);
+    return GetHistoryAverage(FrameTimeHistory);
+}
+
+float UPerformanceProfiler::GetAverageFPS() const
+{
+    return GetHistoryAverage(FPSHistory);
+}
+
+EPerformanceLevel UPerformanceProfiler::GetRecommendedPerformanceLevel() const
+{
+    float AvgFPS = GetAverageFPS();
     
-    return FString::Printf(TEXT("FPS: %.1f | Frame: %.2fms | Game: %.2fms | Render: %.2fms | Physics: %.2fms | Consciousness: %.2fms | Memory: %.1fMB"),
-        FPS, Metrics.FrameTime, Metrics.GameThreadTime, Metrics.RenderThreadTime, 
-        Metrics.PhysicsTime, Metrics.ConsciousnessSystemTime, Metrics.MemoryUsageMB);
+    if (AvgFPS >= HighPerformanceThreshold)
+    {
+        return EPerformanceLevel::Ultra;
+    }
+    else if (AvgFPS >= TargetFPS)
+    {
+        return EPerformanceLevel::High;
+    }
+    else if (AvgFPS >= LowPerformanceThreshold)
+    {
+        return EPerformanceLevel::Medium;
+    }
+    else
+    {
+        return EPerformanceLevel::Low;
+    }
+}
+
+void UPerformanceProfiler::SetAutoPerformanceAdjustment(bool bEnabled)
+{
+    bAutoPerformanceAdjustment = bEnabled;
+    UE_LOG(LogTranspersonalPerformance, Log, 
+           TEXT("Auto performance adjustment %s"), bEnabled ? TEXT("enabled") : TEXT("disabled"));
+}
+
+void UPerformanceProfiler::UpdatePerformanceLevel()
+{
+    if (!bAutoPerformanceAdjustment)
+        return;
+
+    EPerformanceLevel RecommendedLevel = GetRecommendedPerformanceLevel();
+    
+    if (RecommendedLevel != CurrentPerformanceLevel)
+    {
+        EPerformanceLevel OldLevel = CurrentPerformanceLevel;
+        CurrentPerformanceLevel = RecommendedLevel;
+        
+        UE_LOG(LogTranspersonalPerformance, Log, 
+               TEXT("Performance level changed from %d to %d (Avg FPS: %.1f)"),
+               static_cast<int32>(OldLevel), static_cast<int32>(RecommendedLevel), GetAverageFPS());
+        
+        // Broadcast do evento
+        OnPerformanceLevelChanged.Broadcast(CurrentPerformanceLevel);
+    }
+}
+
+void UPerformanceProfiler::AddToHistory(TArray<float>& History, float Value)
+{
+    History.Add(Value);
+    
+    // Manter tamanho máximo do histórico
+    if (History.Num() > MaxHistorySize)
+    {
+        History.RemoveAt(0);
+    }
+}
+
+float UPerformanceProfiler::GetHistoryAverage(const TArray<float>& History) const
+{
+    if (History.Num() == 0)
+        return 0.0f;
+
+    float Sum = 0.0f;
+    for (float Value : History)
+    {
+        Sum += Value;
+    }
+    
+    return Sum / static_cast<float>(History.Num());
+}
+
+void UPerformanceProfiler::DetectHardwareCapabilities()
+{
+    if (bHardwareDetected)
+        return;
+
+    // Detectar capacidades básicas do hardware
+    FPlatformMemoryStats MemStats = FPlatformMemory::GetStats();
+    AvailableMemoryGB = static_cast<float>(MemStats.TotalPhysical) / (1024.0f * 1024.0f * 1024.0f);
+    
+    // Estimativa básica baseada na memória disponível
+    if (AvailableMemoryGB >= 16.0f)
+    {
+        EstimatedCPUPerformance = 8;
+        EstimatedGPUPerformance = 7;
+    }
+    else if (AvailableMemoryGB >= 8.0f)
+    {
+        EstimatedCPUPerformance = 6;
+        EstimatedGPUPerformance = 5;
+    }
+    else
+    {
+        EstimatedCPUPerformance = 4;
+        EstimatedGPUPerformance = 3;
+    }
+    
+    bHardwareDetected = true;
+    
+    UE_LOG(LogTranspersonalPerformance, Log, 
+           TEXT("Hardware detected - Memory: %.1f GB, Est. CPU: %d/10, Est. GPU: %d/10"),
+           AvailableMemoryGB, EstimatedCPUPerformance, EstimatedGPUPerformance);
 }
