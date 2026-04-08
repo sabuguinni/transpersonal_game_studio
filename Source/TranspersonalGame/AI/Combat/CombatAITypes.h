@@ -1,118 +1,181 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/Engine.h"
+#include "Engine/DataAsset.h"
 #include "GameplayTags.h"
 #include "CombatAITypes.generated.h"
 
-/**
- * Tipos de comportamento de combate para dinossauros
- */
 UENUM(BlueprintType)
-enum class EDinosaurCombatType : uint8
+enum class EThreatLevel : uint8
 {
-    Predator_Apex      UMETA(DisplayName = "Apex Predator"),     // T-Rex, Giganotosaurus
-    Predator_Pack      UMETA(DisplayName = "Pack Hunter"),      // Velociraptor, Deinonychus
-    Predator_Ambush    UMETA(DisplayName = "Ambush Predator"),  // Carnotaurus, Baryonyx
-    Herbivore_Defensive UMETA(DisplayName = "Defensive Herbivore"), // Triceratops, Ankylosaurus
-    Herbivore_Fleeing  UMETA(DisplayName = "Fleeing Herbivore"), // Parasaurolophus, Gallimimus
-    Scavenger         UMETA(DisplayName = "Scavenger")          // Compsognathus (grupos)
+    None = 0,
+    Passive,        // Herbívoros pacíficos
+    Defensive,      // Reagem quando ameaçados
+    Territorial,    // Defendem área específica
+    Aggressive,     // Caçam ativamente
+    Apex           // Predadores supremos
 };
 
-/**
- * Estados de alerta do dinossauro
- */
 UENUM(BlueprintType)
-enum class EDinosaurAlertState : uint8
+enum class ECombatState : uint8
 {
-    Calm        UMETA(DisplayName = "Calm"),
-    Curious     UMETA(DisplayName = "Curious"),
-    Suspicious  UMETA(DisplayName = "Suspicious"),
-    Alert       UMETA(DisplayName = "Alert"),
-    Aggressive  UMETA(DisplayName = "Aggressive"),
-    Hunting     UMETA(DisplayName = "Hunting"),
-    Fleeing     UMETA(DisplayName = "Fleeing")
+    Idle = 0,
+    Patrolling,
+    Investigating,
+    Stalking,
+    Engaging,
+    Retreating,
+    Feeding,
+    Resting
 };
 
-/**
- * Tipos de ataque disponíveis
- */
 UENUM(BlueprintType)
-enum class EDinosaurAttackType : uint8
+enum class EAttackPattern : uint8
 {
-    Bite        UMETA(DisplayName = "Bite"),
-    Claw        UMETA(DisplayName = "Claw"),
-    Tail        UMETA(DisplayName = "Tail Whip"),
-    Charge      UMETA(DisplayName = "Charge"),
-    Stomp       UMETA(DisplayName = "Stomp"),
-    Pounce      UMETA(DisplayName = "Pounce")
+    None = 0,
+    Ambush,         // Ataque surpresa
+    Charge,         // Investida direta
+    Circle,         // Cercar a presa
+    Pack,           // Coordenação de grupo
+    Territorial     // Defesa de área
 };
 
-/**
- * Estrutura de dados para ataques
- */
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FDinosaurAttack
+struct TRANSPERSONALGAME_API FCombatPersonality
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EDinosaurAttackType AttackType;
+    // Agressividade base (0.0 = pacífico, 1.0 = extremamente agressivo)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Aggressiveness = 0.5f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float Damage = 50.0f;
+    // Curiosidade (tendência a investigar)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Curiosity = 0.3f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float Range = 200.0f;
+    // Cautela (tendência a recuar)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Caution = 0.4f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float Cooldown = 2.0f;
+    // Territorialidade
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Territoriality = 0.5f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float WindupTime = 0.5f;
+    // Tendência a formar grupos
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Sociability = 0.2f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float RecoveryTime = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bRequiresLineOfSight = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FGameplayTag AttackTag;
+    // Inteligência tática
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Intelligence = 0.5f;
 };
 
-/**
- * Configuração de comportamento de combate
- */
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCombatBehaviorConfig
+struct TRANSPERSONALGAME_API FCombatCapabilities
 {
     GENERATED_BODY()
 
+    // Dano base de ataque
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EDinosaurCombatType CombatType;
+    float BaseDamage = 10.0f;
 
+    // Alcance de ataque
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float AggressionLevel = 0.5f;
+    float AttackRange = 200.0f;
 
+    // Velocidade de movimento
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float FearThreshold = 0.3f;
+    float MovementSpeed = 400.0f;
 
+    // Velocidade de rotação
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float TerritorialRadius = 1000.0f;
+    float TurnRate = 90.0f;
 
+    // Resistência a dano
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float DetectionRange = 1500.0f;
+    float DamageResistance = 1.0f;
 
+    // Alcance de detecção
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float OptimalCombatRange = 300.0f;
+    float DetectionRange = 1000.0f;
 
+    // Campo de visão (em graus)
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TArray<FDinosaurAttack> AvailableAttacks;
+    float FieldOfView = 120.0f;
+};
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bCanCallForHelp = false;
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FCombatMemory
+{
+    GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float HelpCallRadius = 2000.0f;
+    // Última posição conhecida do jogador
+    UPROPERTY(BlueprintReadWrite)
+    FVector LastKnownPlayerLocation = FVector::ZeroVector;
+
+    // Tempo desde a última detecção
+    UPROPERTY(BlueprintReadWrite)
+    float TimeSinceLastDetection = 0.0f;
+
+    // Nível de alerta atual
+    UPROPERTY(BlueprintReadWrite)
+    float AlertLevel = 0.0f;
+
+    // Locais de interesse investigados
+    UPROPERTY(BlueprintReadWrite)
+    TArray<FVector> InvestigatedLocations;
+
+    // Dano recebido recentemente
+    UPROPERTY(BlueprintReadWrite)
+    float RecentDamage = 0.0f;
+
+    // Tempo desde o último ataque
+    UPROPERTY(BlueprintReadWrite)
+    float TimeSinceLastAttack = 0.0f;
+};
+
+/**
+ * Data Asset que define as características de combate de uma espécie de dinossauro
+ */
+UCLASS(BlueprintType)
+class TRANSPERSONALGAME_API UCombatSpeciesData : public UDataAsset
+{
+    GENERATED_BODY()
+
+public:
+    // Nome da espécie
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Species")
+    FString SpeciesName;
+
+    // Nível de ameaça base
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Combat")
+    EThreatLevel ThreatLevel = EThreatLevel::Passive;
+
+    // Padrões de ataque preferidos
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Combat")
+    TArray<EAttackPattern> PreferredAttackPatterns;
+
+    // Personalidade base da espécie
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Personality")
+    FCombatPersonality BasePersonality;
+
+    // Capacidades de combate
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Capabilities")
+    FCombatCapabilities CombatCapabilities;
+
+    // Tags de gameplay associadas
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Gameplay")
+    FGameplayTagContainer SpeciesTags;
+
+    // Pode ser domesticado?
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Behavior")
+    bool bCanBeTamed = false;
+
+    // Tempo necessário para domesticação (em segundos)
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Behavior", meta = (EditCondition = "bCanBeTamed"))
+    float TamingTime = 300.0f;
+
+    // Requer comida específica para domesticação?
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Behavior", meta = (EditCondition = "bCanBeTamed"))
+    bool bRequiresSpecificFood = false;
 };
