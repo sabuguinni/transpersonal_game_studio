@@ -8,114 +8,138 @@
 UENUM(BlueprintType)
 enum class EDinosaurThreatLevel : uint8
 {
-    Passive,        // Herbívoros pacíficos
-    Defensive,      // Herbívoros que defendem território
-    Opportunist,    // Carnívoros pequenos em grupos
-    Apex,          // Predadores solitários grandes
-    Alpha          // Líderes de matilha
+    Passive         UMETA(DisplayName = "Passive - Herbivore"),
+    Defensive       UMETA(DisplayName = "Defensive - Will defend if threatened"),
+    Territorial     UMETA(DisplayName = "Territorial - Attacks if too close"),
+    Aggressive      UMETA(DisplayName = "Aggressive - Actively hunts"),
+    ApexPredator    UMETA(DisplayName = "Apex Predator - Dominates territory")
 };
 
 UENUM(BlueprintType)
-enum class ECombatBehaviorState : uint8
+enum class ECombatState : uint8
 {
-    Patrol,         // Patrulhamento normal
-    Investigate,    // Investigando distúrbio
-    Hunt,          // Caçando presa identificada
-    Stalk,         // Seguindo discretamente
-    Ambush,        // Preparando emboscada
-    Attack,        // Ataque direto
-    Retreat,       // Recuando ferido
-    Feeding,       // Alimentando-se
-    Territorial    // Defendendo território
+    Idle            UMETA(DisplayName = "Idle"),
+    Patrolling      UMETA(DisplayName = "Patrolling"),
+    Investigating   UMETA(DisplayName = "Investigating"),
+    Stalking        UMETA(DisplayName = "Stalking"),
+    Hunting         UMETA(DisplayName = "Hunting"),
+    Attacking       UMETA(DisplayName = "Attacking"),
+    Fleeing         UMETA(DisplayName = "Fleeing"),
+    Feeding         UMETA(DisplayName = "Feeding"),
+    Resting         UMETA(DisplayName = "Resting")
 };
 
 UENUM(BlueprintType)
-enum class ECombatFormation : uint8
+enum class EDinosaurSize : uint8
 {
-    Solo,          // Caçador solitário
-    Pack,          // Matilha coordenada
-    Ambush,        // Emboscada múltipla
-    Pincer,        // Movimento pinça
-    Distraction    // Um distrai, outros atacam
+    Tiny        UMETA(DisplayName = "Tiny (< 1m)"),
+    Small       UMETA(DisplayName = "Small (1-3m)"),
+    Medium      UMETA(DisplayName = "Medium (3-6m)"),
+    Large       UMETA(DisplayName = "Large (6-12m)"),
+    Massive     UMETA(DisplayName = "Massive (> 12m)")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FDinosaurCombatProfile : public FTableRowBase
+struct TRANSPERSONALGAME_API FCombatStats
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString SpeciesName;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EDinosaurThreatLevel ThreatLevel;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float DetectionRange = 1500.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float AttackRange = 300.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float MovementSpeed = 400.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float AttackDamage = 50.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
     float Health = 100.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bCanFormPacks = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    float AttackDamage = 25.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 PreferredPackSize = 1;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    float AttackRange = 200.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float TerritoryRadius = 2000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    float DetectionRange = 800.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FGameplayTagContainer CombatTags;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    float MovementSpeed = 400.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TArray<ECombatFormation> AvailableFormations;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    float StaminaMax = 100.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float AmbushProbability = 0.3f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    float StaminaRegenRate = 10.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float RetreatHealthThreshold = 0.25f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    float FearThreshold = 30.0f;
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCombatContext
+struct TRANSPERSONALGAME_API FDinosaurVariation
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadWrite)
-    AActor* Target = nullptr;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Variation")
+    float SizeMultiplier = 1.0f;
 
-    UPROPERTY(BlueprintReadWrite)
-    FVector LastKnownTargetLocation = FVector::ZeroVector;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Variation")
+    FLinearColor PrimaryColor = FLinearColor::White;
 
-    UPROPERTY(BlueprintReadWrite)
-    float TimeSinceLastSeen = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Variation")
+    FLinearColor SecondaryColor = FLinearColor::Gray;
 
-    UPROPERTY(BlueprintReadWrite)
-    ECombatBehaviorState CurrentState = ECombatBehaviorState::Patrol;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Variation")
+    float AggressionModifier = 1.0f;
 
-    UPROPERTY(BlueprintReadWrite)
-    TArray<AActor*> PackMembers;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Variation")
+    float SpeedModifier = 1.0f;
 
-    UPROPERTY(BlueprintReadWrite)
-    AActor* PackLeader = nullptr;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Variation")
+    int32 UniqueID = 0;
+};
 
-    UPROPERTY(BlueprintReadWrite)
-    ECombatFormation ActiveFormation = ECombatFormation::Solo;
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FDinosaurArchetype : public FTableRowBase
+{
+    GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadWrite)
-    bool bIsAmbushReady = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Basic Info")
+    FString SpeciesName;
 
-    UPROPERTY(BlueprintReadWrite)
-    float CurrentThreatLevel = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Basic Info")
+    EDinosaurThreatLevel ThreatLevel = EDinosaurThreatLevel::Passive;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Basic Info")
+    EDinosaurSize Size = EDinosaurSize::Medium;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Basic Info")
+    bool bCanBeDomesticated = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    FCombatStats BaseStats;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI")
+    FGameplayTagContainer BehaviorTags;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI")
+    TSoftObjectPtr<class UBehaviorTree> BehaviorTree;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI")
+    TSoftObjectPtr<class UBlackboardAsset> Blackboard;
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FCombatEncounter
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Encounter")
+    FString EncounterName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Encounter")
+    TArray<FName> ParticipatingSpecies;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Encounter")
+    float TensionLevel = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Encounter")
+    float DifficultyScaling = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Encounter")
+    bool bPlayerIsTarget = false;
 };
