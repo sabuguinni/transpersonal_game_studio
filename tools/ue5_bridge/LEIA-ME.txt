@@ -1,0 +1,76 @@
+╔══════════════════════════════════════════════════════════════╗
+║  UE5 BRIDGE — Instruções de Instalação                       ║
+║  Transpersonal Game Studio                                    ║
+╚══════════════════════════════════════════════════════════════╝
+
+O QUE É ISTO?
+=============
+Este script liga os agentes de IA ao teu Unreal Engine 5.
+Quando os agentes precisam de criar assets, compilar código, ou
+testar coisas no UE5, enviam comandos para o Supabase.
+Este script puxa esses comandos e executa-os no teu UE5.
+
+
+REQUISITOS
+==========
+1. Unreal Engine 5 aberto com o projecto TranspersonalStudio
+2. Plugin "Remote Control API" activo (já fizeste isto!)
+3. Plugin "Remote Control Web Interface" activo (já fizeste isto!)
+4. Python instalado no PC (já tens!)
+5. Ligação à internet
+
+
+COMO USAR (3 PASSOS)
+=====================
+
+PASSO 1: Abre o Unreal Engine
+   - Abre o projecto TranspersonalStudio normalmente
+
+PASSO 2: Faz duplo-clique em "start_bridge.bat"
+   - Uma janela preta (terminal) vai abrir
+   - Vai mostrar se conseguiu ligar ao UE5
+   - Se der erro, verifica que o UE5 está aberto
+
+PASSO 3: Deixa a correr
+   - O script fica a correr em segundo plano
+   - Quando os agentes enviarem comandos, ele executa-os
+   - Podes ver os comandos a serem executados no terminal
+   - Para parar: pressiona Ctrl+C
+
+
+RESOLUÇÃO DE PROBLEMAS
+=======================
+
+"NÃO CONSEGUI LIGAR AO UE5"
+   → O UE5 não está aberto, ou o plugin Remote Control API não está activo
+   → Abre o UE5, vai a Edit > Plugins, procura "Remote Control API" e activa
+   → Reinicia o UE5
+
+"O módulo 'requests' não está instalado"
+   → O script tenta instalar automaticamente
+   → Se falhar, abre o CMD e escreve: pip install requests
+
+"NÃO CONSEGUI LIGAR AO SUPABASE"
+   → Verifica a tua ligação à internet
+   → Se estiveres atrás de um firewall/VPN, pode bloquear
+
+O script não faz nada / não aparece nenhum comando
+   → Normal! Significa que os agentes ainda não enviaram comandos UE5
+   → Quando o ciclo de consolidação chegar ao Agent #19, ele vai enviar
+
+
+FICHEIROS INCLUÍDOS
+===================
+- start_bridge.bat    → Duplo-clique para arrancar (Windows)
+- ue5_bridge.py       → O script principal (não precisas de editar)
+- LEIA-ME.txt         → Este ficheiro
+
+
+NOTAS TÉCNICAS
+==============
+- O UE5 Remote Control API corre na porta 30010 (localhost)
+- O script verifica comandos novos a cada 5 segundos
+- Comandos suportados: python, console_command, compile_test,
+  blueprint_create, material_create, level_design, asset_import
+- Os resultados são enviados de volta ao Supabase automaticamente
+- O dashboard mostra o estado dos comandos em tempo real
