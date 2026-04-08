@@ -1,0 +1,165 @@
+{
+  "material_library": {
+    "consciousness_responsive_materials": {
+      "M_AncientBark": {
+        "base_texture": "/Game/Textures/Environment/T_AncientBark_D",
+        "normal_map": "/Game/Textures/Environment/T_AncientBark_N",
+        "consciousness_parameters": {
+          "energy_flow": {
+            "type": "scalar",
+            "default": 0.0,
+            "range": [0.0, 1.0],
+            "description": "Controls visible energy patterns in bark"
+          },
+          "sacred_geometry_intensity": {
+            "type": "scalar",
+            "default": 0.2,
+            "range": [0.0, 1.0],
+            "description": "Visibility of natural geometric patterns"
+          }
+        },
+        "shader_features": [
+          "consciousness_responsive",
+          "wind_animation",
+          "seasonal_variation"
+        ]
+      },
+      "M_BioluminescentFungi": {
+        "base_texture": "/Game/Textures/Environment/T_Fungi_D",
+        "emission_map": "/Game/Textures/Environment/T_Fungi_E",
+        "consciousness_parameters": {
+          "luminosity": {
+            "type": "scalar",
+            "default": 0.5,
+            "range": [0.0, 2.0],
+            "description": "Brightness responds to player consciousness level"
+          },
+          "pulse_frequency": {
+            "type": "scalar",
+            "default": 1.0,
+            "range": [0.1, 3.0],
+            "description": "Pulsing rate based on meditation state"
+          }
+        },
+        "shader_features": [
+          "consciousness_responsive",
+          "emission_animation",
+          "proximity_activation"
+        ]
+      },
+      "M_Amethyst": {
+        "base_texture": "/Game/Textures/Environment/T_Amethyst_D",
+        "normal_map": "/Game/Textures/Environment/T_Amethyst_N",
+        "roughness_map": "/Game/Textures/Environment/T_Amethyst_R",
+        "consciousness_parameters": {
+          "clarity_reflection": {
+            "type": "scalar",
+            "default": 0.8,
+            "range": [0.3, 1.0],
+            "description": "Reflection intensity based on mental clarity"
+          },
+          "inner_light": {
+            "type": "color",
+            "default": [0.6, 0.3, 0.9],
+            "description": "Internal glow color shifts with consciousness state"
+          }
+        },
+        "shader_features": [
+          "consciousness_responsive",
+          "subsurface_scattering",
+          "refraction",
+          "energy_resonance"
+        ]
+      },
+      "M_EnergyBridge": {
+        "base_texture": "/Game/Textures/Environment/T_Energy_D",
+        "flow_map": "/Game/Textures/Environment/T_EnergyFlow_F",
+        "consciousness_parameters": {
+          "bridge_stability": {
+            "type": "scalar",
+            "default": 0.7,
+            "range": [0.0, 1.0],
+            "description": "Visual stability based on consciousness coherence"
+          },
+          "energy_flow_speed": {
+            "type": "scalar",
+            "default": 1.0,
+            "range": [0.1, 5.0],
+            "description": "Animation speed responds to meditation depth"
+          }
+        },
+        "shader_features": [
+          "consciousness_responsive",
+          "animated_flow",
+          "transparency_animation",
+          "particle_interaction"
+        ]
+      }
+    },
+    "atmospheric_materials": {
+      "M_EtherealMist": {
+        "base_texture": "/Game/Textures/Environment/T_Mist_D",
+        "flow_map": "/Game/Textures/Environment/T_MistFlow_F",
+        "consciousness_parameters": {
+          "density": {
+            "type": "scalar",
+            "default": 0.4,
+            "range": [0.1, 0.8],
+            "description": "Mist density responds to emotional state"
+          },
+          "color_shift": {
+            "type": "color",
+            "default": [0.8, 0.9, 1.0],
+            "description": "Color tint based on consciousness frequency"
+          }
+        },
+        "shader_features": [
+          "consciousness_responsive",
+          "volumetric_rendering",
+          "wind_interaction",
+          "depth_fade"
+        ]
+      },
+      "M_AuroraSky": {
+        "base_texture": "/Game/Textures/Environment/T_Aurora_D",
+        "animation_map": "/Game/Textures/Environment/T_AuroraFlow_F",
+        "consciousness_parameters": {
+          "aurora_intensity": {
+            "type": "scalar",
+            "default": 0.6,
+            "range": [0.0, 1.5],
+            "description": "Aurora brightness based on transcendence level"
+          },
+          "color_spectrum": {
+            "type": "vector",
+            "default": [0.2, 0.8, 0.4],
+            "description": "Color spectrum shift with consciousness expansion"
+          }
+        },
+        "shader_features": [
+          "consciousness_responsive",
+          "animated_gradient",
+          "atmospheric_scattering",
+          "time_of_day_variation"
+        ]
+      }
+    }
+  },
+  "material_instances": {
+    "forest_variations": [
+      "MI_AncientBark_Grounded",
+      "MI_AncientBark_Awakened",
+      "MI_AncientBark_Transcendent"
+    ],
+    "crystal_variations": [
+      "MI_Amethyst_Dormant",
+      "MI_Amethyst_Resonant",
+      "MI_Amethyst_Harmonized"
+    ],
+    "peak_variations": [
+      "MI_EnergyBridge_Stable",
+      "MI_EnergyBridge_Flowing",
+      "MI_EnergyBridge_Transcendent"
+    ]
+  }
+}
