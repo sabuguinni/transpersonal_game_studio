@@ -307,39 +307,5 @@ private:
     // Telemetry
     bool bCapturingPerformance = false;
     FString CurrentSessionName;
-    TArray<FPerformanceMetrics> CapturedMetrics;
-
-    // Cached subsystem references
-    UPROPERTY()
-    UMassEntitySubsystem* MassEntitySubsystem = nullptr;
-
-    // Console variable caches for performance
-    TMap<FString, float> CVarCache;
+    TArray<FString> PerformanceLog;
 };
-
-// Global performance utilities
-namespace PerformanceUtils
-{
-    // Quick performance checks
-    TRANSPERSONALGAME_API bool IsFrameRateStable(float TargetFrameTime, float Tolerance = 0.1f);
-    TRANSPERSONALGAME_API float GetAverageFrameTime(int32 SampleCount = 60);
-    TRANSPERSONALGAME_API EPerformanceBottleneck DetectBottleneck(const FPerformanceMetrics& Metrics, const FPerformanceBudget& Budget);
-
-    // Mass AI utilities
-    TRANSPERSONALGAME_API int32 CalculateOptimalMassAgentCount(float AvailableBudget);
-    TRANSPERSONALGAME_API float CalculateOptimalAITickRate(int32 AgentCount, float AvailableBudget);
-
-    // Rendering utilities
-    TRANSPERSONALGAME_API float CalculateOptimalScreenPercentage(float GPUTime, float TargetTime);
-    TRANSPERSONALGAME_API int32 CalculateOptimalViewDistance(float RenderTime, float TargetTime);
-
-    // Memory utilities
-    TRANSPERSONALGAME_API float GetTextureMemoryUsage();
-    TRANSPERSONALGAME_API float GetMeshMemoryUsage();
-    TRANSPERSONALGAME_API void FlushUnusedAssets();
-
-    // Platform-specific optimizations
-    TRANSPERSONALGAME_API void ApplyPlatformOptimizations();
-    TRANSPERSONALGAME_API void SetupConsoleOptimizations();
-    TRANSPERSONALGAME_API void SetupPCOptimizations();
-}
