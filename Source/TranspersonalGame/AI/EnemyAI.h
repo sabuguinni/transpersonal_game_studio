@@ -1,3 +1,5 @@
+// EnemyAI.h
+// Sistema de IA inimiga que responde aos estados de consciência
 #pragma once
 
 #include "CoreMinimal.h"
@@ -5,68 +7,80 @@
 #include "BehaviorTree/BehaviorTreeComponent.h"
 #include "BehaviorTree/BlackboardComponent.h"
 #include "Perception/AIPerceptionComponent.h"
-#include "Perception/AISenseConfig_Sight.h"
-#include "Perception/AISenseConfig_Hearing.h"
+#include "../Consciousness/ConsciousnessTypes.h"
 #include "../Combat/CombatSystem.h"
-#include "../Core/ConsciousnessComponent.h"
 #include "EnemyAI.generated.h"
 
 UENUM(BlueprintType)
-enum class EEnemyPersonality : uint8
+enum class EEnemyType : uint8
 {
-    Aggressive     UMETA(DisplayName = "Aggressive"),
-    Defensive      UMETA(DisplayName = "Defensive"),
-    Tactical       UMETA(DisplayName = "Tactical"),
-    Spiritual      UMETA(DisplayName = "Spiritual"),
-    Chaotic        UMETA(DisplayName = "Chaotic")
+    Shadow          UMETA(DisplayName = "Shadow Entity"),
+    Guardian        UMETA(DisplayName = "Spiritual Guardian"),
+    Teacher         UMETA(DisplayName = "Wisdom Teacher"),
+    Challenger      UMETA(DisplayName = "Consciousness Challenger"),
+    Transformer     UMETA(DisplayName = "Transformative Being")
 };
 
 UENUM(BlueprintType)
-enum class EConsciousnessArchetype : uint8
+enum class EEnemyBehaviorState : uint8
 {
-    Shadow         UMETA(DisplayName = "Shadow - Low Consciousness"),
-    Ego            UMETA(DisplayName = "Ego - Medium Consciousness"),
-    Soul           UMETA(DisplayName = "Soul - High Consciousness"),
-    Spirit         UMETA(DisplayName = "Spirit - Transcendent")
+    Dormant         UMETA(DisplayName = "Dormant"),
+    Observing       UMETA(DisplayName = "Observing"),
+    Testing         UMETA(DisplayName = "Testing Player"),
+    Teaching        UMETA(DisplayName = "Teaching"),
+    Challenging     UMETA(DisplayName = "Challenging"),
+    Hostile         UMETA(DisplayName = "Hostile"),
+    Transcending    UMETA(DisplayName = "Transcending")
 };
 
 USTRUCT(BlueprintType)
-struct FEnemyProfile
+struct FEnemyConsciousnessProfile
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EEnemyPersonality Personality = EEnemyPersonality::Aggressive;
+    EConsciousnessState MinimumState = EConsciousnessState::Ordinary;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EConsciousnessArchetype Archetype = EConsciousnessArchetype::Shadow;
+    EConsciousnessState MaximumState = EConsciousnessState::Cosmic;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float BaseConsciousnessLevel = 25.0f;
+    float ConsciousnessLevel = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float AggressionLevel = 0.7f;
+    float SpiritualResonanceRange = 100.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float IntelligenceLevel = 0.5f;
+    bool bRespondsToPlayerConsciousness = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float SpiritualAwareness = 0.3f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float AdaptabilityRate = 1.0f;
-
-    FEnemyProfile()
-    {
-        Personality = EEnemyPersonality::Aggressive;
-        Archetype = EConsciousnessArchetype::Shadow;
-        BaseConsciousnessLevel = 25.0f;
-        AggressionLevel = 0.7f;
-        IntelligenceLevel = 0.5f;
-        SpiritualAwareness = 0.3f;
-        AdaptabilityRate = 1.0f;
-    }
+    bool bCanEvolveConsciousness = false;
 };
+
+USTRUCT(BlueprintType)
+struct FEnemyBehaviorConfig
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float AggressionLevel = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float TeachingProbability = 0.2f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float TransformativeProbability = 0.1f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float ConsciousnessInfluence = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TArray<EAttackType> PreferredAttackTypes;
+};
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnEnemyBehaviorChanged, EEnemyBehaviorState, NewState, FString, Reason, float, Intensity);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnEnemyConsciousnessEvolved, EConsciousnessState, NewState, float, NewLevel);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnEnemyTeaching, FString, TeachingMessage, EConsciousnessState, RequiredState, float, WisdomValue);
 
 UCLASS()
 class TRANSPERSONALGAME_API AEnemyAI : public AAIController
@@ -81,122 +95,124 @@ protected:
     virtual void Tick(float DeltaTime) override;
 
 public:
-    // AI Components
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI")
-    UBehaviorTreeComponent* BehaviorTreeComponent;
+    // Behavior Management
+    UFUNCTION(BlueprintCallable, Category = "Enemy AI")
+    void SetBehaviorState(EEnemyBehaviorState NewState, const FString& Reason = TEXT(""), float Intensity = 1.0f);
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI")
-    UBlackboardComponent* BlackboardComponent;
+    UFUNCTION(BlueprintPure, Category = "Enemy AI")
+    EEnemyBehaviorState GetBehaviorState() const { return CurrentBehaviorState; }
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI")
-    UAIPerceptionComponent* AIPerceptionComponent;
-
-    // Enemy Profile
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Enemy Profile")
-    FEnemyProfile EnemyProfile;
-
-    // Behavior Trees for different archetypes
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI")
-    UBehaviorTree* ShadowBehaviorTree;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI")
-    UBehaviorTree* EgoBehaviorTree;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI")
-    UBehaviorTree* SoulBehaviorTree;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI")
-    UBehaviorTree* SpiritBehaviorTree;
-
-    // Component References
-    UPROPERTY(BlueprintReadOnly, Category = "Components")
-    UCombatSystem* CombatSystem;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Components")
-    UConsciousnessComponent* ConsciousnessComponent;
-
-    // AI State
-    UPROPERTY(BlueprintReadOnly, Category = "AI State")
-    AActor* CurrentTarget;
-
-    UPROPERTY(BlueprintReadOnly, Category = "AI State")
-    FVector LastKnownTargetLocation;
-
-    UPROPERTY(BlueprintReadOnly, Category = "AI State")
-    float TimeSinceLastTargetSeen = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "AI State")
-    bool bIsInCombat = false;
+    UFUNCTION(BlueprintCallable, Category = "Enemy AI")
+    void UpdateBehaviorFromPlayerConsciousness(EConsciousnessState PlayerState, float PlayerLevel);
 
     // Consciousness Evolution
-    UPROPERTY(BlueprintReadOnly, Category = "Consciousness")
-    float ConsciousnessEvolutionRate = 1.0f;
+    UFUNCTION(BlueprintCallable, Category = "Enemy AI")
+    void EvolveConsciousness(float EvolutionAmount);
 
-    UPROPERTY(BlueprintReadOnly, Category = "Consciousness")
-    float LastConsciousnessLevel = 0.0f;
+    UFUNCTION(BlueprintCallable, Category = "Enemy AI")
+    bool CanEvolveToState(EConsciousnessState TargetState) const;
 
-    // AI Functions
-    UFUNCTION(BlueprintCallable, Category = "AI")
-    void SetEnemyProfile(const FEnemyProfile& NewProfile);
+    // Teaching and Transformation
+    UFUNCTION(BlueprintCallable, Category = "Enemy AI")
+    void AttemptTeaching(APawn* Player);
 
-    UFUNCTION(BlueprintCallable, Category = "AI")
-    void UpdateBehaviorTree();
+    UFUNCTION(BlueprintCallable, Category = "Enemy AI")
+    void OfferTransformation(APawn* Player);
 
-    UFUNCTION(BlueprintCallable, Category = "AI")
-    void OnTargetPerceived(AActor* Actor, FAIStimulus Stimulus);
+    UFUNCTION(BlueprintCallable, Category = "Enemy AI")
+    bool ShouldEngageInCombat(APawn* Player) const;
 
-    UFUNCTION(BlueprintCallable, Category = "AI")
-    void OnTargetLost();
+    // Combat Integration
+    UFUNCTION(BlueprintCallable, Category = "Enemy AI")
+    void ExecuteConsciousAttack(APawn* Target);
 
-    UFUNCTION(BlueprintCallable, Category = "AI")
-    void UpdateConsciousnessBasedBehavior(float DeltaTime);
+    UFUNCTION(BlueprintCallable, Category = "Enemy AI")
+    EAttackType SelectOptimalAttackType(EConsciousnessState PlayerState) const;
 
-    UFUNCTION(BlueprintCallable, Category = "AI")
-    void AdaptToPlayerBehavior();
+    // Spiritual Interaction
+    UFUNCTION(BlueprintCallable, Category = "Enemy AI")
+    float CalculateResonanceWithPlayer(APawn* Player) const;
 
-    // Consciousness-Based Decision Making
-    UFUNCTION(BlueprintCallable, Category = "AI")
-    bool ShouldEngage() const;
+    UFUNCTION(BlueprintCallable, Category = "Enemy AI")
+    bool IsPlayerReadyForChallenge(APawn* Player) const;
 
-    UFUNCTION(BlueprintCallable, Category = "AI")
-    bool ShouldRetreat() const;
+    // Configuration
+    UFUNCTION(BlueprintCallable, Category = "Enemy AI")
+    void SetEnemyType(EEnemyType NewType);
 
-    UFUNCTION(BlueprintCallable, Category = "AI")
-    bool ShouldSeekDialogue() const;
-
-    UFUNCTION(BlueprintCallable, Category = "AI")
-    float GetOptimalAttackDistance() const;
-
-    UFUNCTION(BlueprintCallable, Category = "AI")
-    EAttackType GetPreferredAttackType() const;
-
-    // Archetype-Specific Behaviors
-    UFUNCTION(BlueprintCallable, Category = "AI")
-    void ExecuteShadowBehavior();
-
-    UFUNCTION(BlueprintCallable, Category = "AI")
-    void ExecuteEgoBehavior();
-
-    UFUNCTION(BlueprintCallable, Category = "AI")
-    void ExecuteSoulBehavior();
-
-    UFUNCTION(BlueprintCallable, Category = "AI")
-    void ExecuteSpiritBehavior();
+    UFUNCTION(BlueprintPure, Category = "Enemy AI")
+    EEnemyType GetEnemyType() const { return EnemyType; }
 
     // Events
-    UFUNCTION(BlueprintImplementableEvent, Category = "AI")
-    void OnArchetypeChanged(EConsciousnessArchetype OldArchetype, EConsciousnessArchetype NewArchetype);
+    UPROPERTY(BlueprintAssignable, Category = "Enemy AI Events")
+    FOnEnemyBehaviorChanged OnBehaviorChanged;
 
-    UFUNCTION(BlueprintImplementableEvent, Category = "AI")
-    void OnConsciousnessEvolution(float NewLevel);
+    UPROPERTY(BlueprintAssignable, Category = "Enemy AI Events")
+    FOnEnemyConsciousnessEvolved OnConsciousnessEvolved;
 
-    UFUNCTION(BlueprintImplementableEvent, Category = "AI")
-    void OnBehaviorAdaptation();
+    UPROPERTY(BlueprintAssignable, Category = "Enemy AI Events")
+    FOnEnemyTeaching OnTeaching;
+
+protected:
+    // Core Components
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI Components")
+    class UBehaviorTreeComponent* BehaviorTreeComponent;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI Components")
+    class UBlackboardComponent* BlackboardComponent;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI Components")
+    class UAIPerceptionComponent* AIPerceptionComponent;
+
+    // Enemy Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Enemy Config")
+    EEnemyType EnemyType;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Enemy Config")
+    FEnemyConsciousnessProfile ConsciousnessProfile;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Enemy Config")
+    FEnemyBehaviorConfig BehaviorConfig;
+
+    // Current State
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Enemy State")
+    EEnemyBehaviorState CurrentBehaviorState;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Enemy State")
+    EConsciousnessState CurrentConsciousnessState;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Enemy State")
+    float BehaviorIntensity;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Enemy State")
+    float LastPlayerResonance;
+
+    // Behavior Trees
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI Behavior")
+    class UBehaviorTree* DefaultBehaviorTree;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI Behavior")
+    TMap<EEnemyBehaviorState, class UBehaviorTree*> BehaviorTrees;
+
+    // Teaching System
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Teaching")
+    TArray<FString> TeachingMessages;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Teaching")
+    TMap<EConsciousnessState, TArray<FString>> ConsciousnessTeachings;
 
 private:
-    void InitializePerception();
-    void UpdateArchetypeBasedOnConsciousness();
-    void SetBlackboardValues();
-    EConsciousnessArchetype DetermineArchetypeFromConsciousness(float ConsciousnessLevel) const;
-    UBehaviorTree* GetBehaviorTreeForArchetype(EConsciousnessArchetype Archetype) const;
+    void InitializeAIComponents();
+    void InitializeConsciousnessProfile();
+    void InitializeBehaviorConfig();
+    void UpdateBlackboardValues();
+    void ProcessConsciousnessEvolution(float DeltaTime);
+    void EvaluatePlayerInteraction(APawn* Player);
+    
+    FString GenerateTeachingMessage(EConsciousnessState RequiredState) const;
+    bool ValidateConsciousnessTransition(EConsciousnessState NewState) const;
+    
+    float ConsciousnessEvolutionTimer;
+    float PlayerEvaluationTimer;
+    bool bHasMetPlayer;
 };
