@@ -1,0 +1,122 @@
+{
+  "Type": "IKRig",
+  "Version": "5.4",
+  "Properties": {
+    "SkeletalMesh": "/Game/Characters/Player/SK_Player.SK_Player",
+    "Solvers": [
+      {
+        "Name": "FullBodyIK",
+        "Type": "FullBodyIK",
+        "Enabled": true,
+        "RootBone": "pelvis",
+        "Settings": {
+          "Iterations": 8,
+          "MassMultiplier": 1.0,
+          "AllowStretching": false,
+          "PinBoneSettings": [
+            {
+              "BoneName": "foot_l",
+              "Pin": "Translation",
+              "Alpha": 1.0
+            },
+            {
+              "BoneName": "foot_r",
+              "Pin": "Translation",
+              "Alpha": 1.0
+            }
+          ]
+        }
+      },
+      {
+        "Name": "LegIK_Left",
+        "Type": "LimbIK",
+        "Enabled": true,
+        "RootBone": "thigh_l",
+        "EndBone": "foot_l",
+        "Settings": {
+          "ReachPrecision": 0.01,
+          "HingeRotationAxis": "Y",
+          "MaxIterations": 10,
+          "bEnableLimit": true,
+          "MinRotationAngle": -160.0,
+          "MaxRotationAngle": 160.0
+        }
+      },
+      {
+        "Name": "LegIK_Right",
+        "Type": "LimbIK",
+        "Enabled": true,
+        "RootBone": "thigh_r",
+        "EndBone": "foot_r",
+        "Settings": {
+          "ReachPrecision": 0.01,
+          "HingeRotationAxis": "Y",
+          "MaxIterations": 10,
+          "bEnableLimit": true,
+          "MinRotationAngle": -160.0,
+          "MaxRotationAngle": 160.0
+        }
+      }
+    ],
+    "Goals": [
+      {
+        "Name": "LeftFoot_Goal",
+        "BoneName": "foot_l",
+        "PositionAlpha": 1.0,
+        "RotationAlpha": 0.8,
+        "ExposePosition": true,
+        "ExposeRotation": false,
+        "SizeMultiplier": 1.0,
+        "ThicknessMultiplier": 1.0
+      },
+      {
+        "Name": "RightFoot_Goal",
+        "BoneName": "foot_r",
+        "PositionAlpha": 1.0,
+        "RotationAlpha": 0.8,
+        "ExposePosition": true,
+        "ExposeRotation": false,
+        "SizeMultiplier": 1.0,
+        "ThicknessMultiplier": 1.0
+      }
+    ],
+    "RetargetChains": [
+      {
+        "ChainName": "Root",
+        "StartBone": "pelvis",
+        "EndBone": "pelvis",
+        "IKGoal": ""
+      },
+      {
+        "ChainName": "Spine",
+        "StartBone": "spine_01",
+        "EndBone": "head",
+        "IKGoal": ""
+      },
+      {
+        "ChainName": "LeftArm",
+        "StartBone": "upperarm_l",
+        "EndBone": "hand_l",
+        "IKGoal": ""
+      },
+      {
+        "ChainName": "RightArm",
+        "StartBone": "upperarm_r",
+        "EndBone": "hand_r",
+        "IKGoal": ""
+      },
+      {
+        "ChainName": "LeftLeg",
+        "StartBone": "thigh_l",
+        "EndBone": "foot_l",
+        "IKGoal": "LeftFoot_Goal"
+      },
+      {
+        "ChainName": "RightLeg",
+        "StartBone": "thigh_r",
+        "EndBone": "foot_r",
+        "IKGoal": "RightFoot_Goal"
+      }
+    ]
+  }
+}
