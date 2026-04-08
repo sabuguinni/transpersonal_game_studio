@@ -1,0 +1,66 @@
+{
+    "Type": "PoseSearchSchema",
+    "SkeletonReference": "/Game/Characters/Paleontologist/Skeleton_Paleontologist",
+    "SampleRate": 30,
+    "DataPreprocessor": "Normalize",
+    "Channels": [
+        {
+            "Type": "Trajectory",
+            "Weight": 1.0,
+            "Samples": [
+                {
+                    "Offset": -0.5,
+                    "Flags": ["Position", "Velocity", "FacingDirection"],
+                    "Weight": 0.8
+                },
+                {
+                    "Offset": 0.0,
+                    "Flags": ["Position", "Velocity", "FacingDirection"],
+                    "Weight": 1.0
+                },
+                {
+                    "Offset": 0.3,
+                    "Flags": ["Position", "Velocity", "FacingDirection"],
+                    "Weight": 0.9
+                },
+                {
+                    "Offset": 0.6,
+                    "Flags": ["Position", "Velocity", "FacingDirection"],
+                    "Weight": 0.7
+                }
+            ]
+        },
+        {
+            "Type": "Pose",
+            "Weight": 0.8,
+            "SampledBones": [
+                {
+                    "Reference": "foot_l",
+                    "Flags": ["Position", "Velocity"],
+                    "Weight": 1.0
+                },
+                {
+                    "Reference": "foot_r", 
+                    "Flags": ["Position", "Velocity"],
+                    "Weight": 1.0
+                },
+                {
+                    "Reference": "hand_l",
+                    "Flags": ["Position", "Velocity"],
+                    "Weight": 0.6
+                },
+                {
+                    "Reference": "hand_r",
+                    "Flags": ["Position", "Velocity"], 
+                    "Weight": 0.6
+                },
+                {
+                    "Reference": "head",
+                    "Flags": ["Position", "Rotation"],
+                    "Weight": 0.4
+                }
+            ]
+        }
+    ],
+    "Description": "Motion matching schema optimized for paleontologist character - emphasizes careful, fearful movement with strong foot contact"
+}
