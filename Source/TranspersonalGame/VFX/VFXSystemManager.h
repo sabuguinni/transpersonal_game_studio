@@ -2,158 +2,181 @@
 
 #include "CoreMinimal.h"
 #include "Engine/World.h"
+#include "Subsystems/WorldSubsystem.h"
 #include "NiagaraSystem.h"
 #include "NiagaraComponent.h"
-#include "Components/ActorComponent.h"
 #include "VFXSystemManager.generated.h"
-
-UENUM(BlueprintType)
-enum class EVFXPriority : uint8
-{
-    Critical = 0,    // Combat impacts, predator attacks
-    High = 1,        // Environmental dangers, large creature movements  
-    Medium = 2,      // Ambient effects, small creature interactions
-    Low = 3,         // Decorative effects, distant ambience
-    Background = 4   // Subtle atmospheric effects
-};
 
 UENUM(BlueprintType)
 enum class EVFXCategory : uint8
 {
-    Combat,          // Impacts, blood, damage effects
-    Creature,        // Dinosaur-specific effects (breathing, movement)
-    Environment,     // Weather, vegetation, geological
-    Interaction,     // Domestication, feeding, tool use
-    Atmospheric,     // Fog, particles, ambient lighting
-    Survival,        // Crafting, fire, shelter effects
-    Discovery        // Gem effects, exploration rewards
+    Combat          UMETA(DisplayName = "Combat"),
+    Creature        UMETA(DisplayName = "Creature"),
+    Environment     UMETA(DisplayName = "Environment"),
+    Interaction     UMETA(DisplayName = "Interaction"),
+    Atmospheric     UMETA(DisplayName = "Atmospheric"),
+    Survival        UMETA(DisplayName = "Survival"),
+    Discovery       UMETA(DisplayName = "Discovery")
+};
+
+UENUM(BlueprintType)
+enum class EVFXPriority : uint8
+{
+    Critical = 0    UMETA(DisplayName = "Critical"),
+    High = 1        UMETA(DisplayName = "High"),
+    Medium = 2      UMETA(DisplayName = "Medium"),
+    Low = 3         UMETA(DisplayName = "Low"),
+    Background = 4  UMETA(DisplayName = "Background")
 };
 
 USTRUCT(BlueprintType)
-struct FVFXEffectData
+struct FVFXPoolData
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    UNiagaraSystem* NiagaraSystem;
-    
+    TSoftObjectPtr<UNiagaraSystem> NiagaraSystem;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EVFXPriority Priority;
-    
+    int32 PoolSize = 10;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EVFXCategory Category;
-    
+    EVFXCategory Category = EVFXCategory::Environment;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    EVFXPriority Priority = EVFXPriority::Medium;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     float MaxDistance = 5000.0f;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 MaxInstances = 10;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bUseDistanceLOD = true;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bPooled = true;
 
-    FVFXEffectData()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bAutoRecycle = true;
+
+    FVFXPoolData()
     {
-        NiagaraSystem = nullptr;
-        Priority = EVFXPriority::Medium;
+        PoolSize = 10;
         Category = EVFXCategory::Environment;
+        Priority = EVFXPriority::Medium;
+        MaxDistance = 5000.0f;
+        bAutoRecycle = true;
     }
 };
 
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UVFXSystemManager : public UActorComponent
+/**
+ * VFX System Manager - Centralized VFX management with LOD chain and performance optimization
+ * Implements 3-tier LOD system: High (0-1000m), Medium (1000-3000m), Low (3000m+)
+ * 
+ * CONSOLIDATION NOTE: This is the canonical VFXSystemManager - replaces duplicate in Core/
+ */
+UCLASS()
+class TRANSPERSONALGAME_API UVFXSystemManager : public UWorldSubsystem
 {
     GENERATED_BODY()
 
 public:
-    UVFXSystemManager();
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+    virtual void Tick(float DeltaTime) override;
+    virtual bool ShouldCreateSubsystem(UObject* Outer) const override { return true; }
 
-protected:
-    virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    // VFX Spawning
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    class UNiagaraComponent* SpawnVFXAtLocation(
+        UNiagaraSystem* System,
+        const FVector& Location,
+        const FRotator& Rotation = FRotator::ZeroRotator,
+        const FVector& Scale = FVector::OneVector,
+        bool bAutoDestroy = true,
+        EVFXPriority Priority = EVFXPriority::Medium
+    );
 
-public:
-    // Core VFX Management
     UFUNCTION(BlueprintCallable, Category = "VFX")
-    UNiagaraComponent* SpawnVFX(const FString& EffectName, FVector Location, FRotator Rotation = FRotator::ZeroRotator, AActor* AttachToActor = nullptr);
-    
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void StopVFX(UNiagaraComponent* VFXComponent);
-    
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void StopAllVFXByCategory(EVFXCategory Category);
+    class UNiagaraComponent* SpawnVFXAttached(
+        UNiagaraSystem* System,
+        USceneComponent* AttachToComponent,
+        FName AttachPointName = NAME_None,
+        const FVector& Location = FVector::ZeroVector,
+        const FRotator& Rotation = FRotator::ZeroRotator,
+        const FVector& Scale = FVector::OneVector,
+        bool bAutoDestroy = true,
+        EVFXPriority Priority = EVFXPriority::Medium
+    );
 
     // Performance Management
-    UFUNCTION(BlueprintCallable, Category = "VFX Performance")
-    void SetGlobalVFXQuality(float QualityLevel); // 0.0 = lowest, 1.0 = highest
-    
-    UFUNCTION(BlueprintCallable, Category = "VFX Performance")
-    void UpdateLODSystem(FVector ViewerLocation);
-    
-    UFUNCTION(BlueprintCallable, Category = "VFX Performance")
-    int32 GetActiveVFXCount() const;
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void SetVFXQualityLevel(int32 QualityLevel);
 
-    // Creature-Specific VFX
-    UFUNCTION(BlueprintCallable, Category = "Creature VFX")
-    void PlayCreatureBreathingEffect(AActor* Creature, float IntensityMultiplier = 1.0f);
-    
-    UFUNCTION(BlueprintCallable, Category = "Creature VFX")
-    void PlayCreatureFootstepEffect(FVector Location, float CreatureSize);
-    
-    UFUNCTION(BlueprintCallable, Category = "Creature VFX")
-    void PlayDomesticationProgressEffect(AActor* Creature, float TrustLevel);
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void SetMaxActiveVFX(int32 MaxCount);
 
-    // Environmental VFX
-    UFUNCTION(BlueprintCallable, Category = "Environment VFX")
-    void PlayWeatherEffect(const FString& WeatherType, float Intensity);
-    
-    UFUNCTION(BlueprintCallable, Category = "Environment VFX")
-    void PlayVegetationDisturbance(FVector Location, float Radius);
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void PauseAllVFXOfCategory(EVFXCategory Category);
 
-    // Combat VFX
-    UFUNCTION(BlueprintCallable, Category = "Combat VFX")
-    void PlayImpactEffect(FVector Location, FVector Normal, const FString& SurfaceType);
-    
-    UFUNCTION(BlueprintCallable, Category = "Combat VFX")
-    void PlayBloodEffect(FVector Location, FVector Direction, float Intensity);
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void ResumeAllVFXOfCategory(EVFXCategory Category);
+
+    // LOD Management
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void UpdateVFXLOD(UNiagaraComponent* VFXComponent, float DistanceToPlayer);
+
+    // Pool Management
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void InitializeVFXPool(const FString& PoolName, const FVFXPoolData& PoolData);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    UNiagaraComponent* GetPooledVFX(const FString& PoolName);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void ReturnPooledVFX(const FString& PoolName, UNiagaraComponent* VFXComponent);
+
+    // Utility Functions
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    int32 GetActiveVFXCount() const { return ActiveVFXComponents.Num(); }
+
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    float GetVFXBudgetUsage() const;
 
 protected:
-    // VFX Library
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VFX Library")
-    TMap<FString, FVFXEffectData> VFXLibrary;
-    
-    // Active VFX Tracking
+    // VFX Tracking
     UPROPERTY()
-    TArray<UNiagaraComponent*> ActiveVFXComponents;
-    
+    TArray<TWeakObjectPtr<UNiagaraComponent>> ActiveVFXComponents;
+
+    UPROPERTY()
+    TMap<FString, TArray<UNiagaraComponent*>> VFXPools;
+
+    UPROPERTY()
+    TMap<FString, FVFXPoolData> PoolConfigurations;
+
     // Performance Settings
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance")
-    float GlobalQualityMultiplier = 1.0f;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance")
-    int32 MaxActiveVFX = 50;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 MaxActiveVFX = 100;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 CurrentVFXQuality = 2; // 0=Low, 1=Medium, 2=High
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
     float LODUpdateInterval = 0.5f;
-    
-    // LOD Distances
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "LOD")
-    float HighQualityDistance = 1000.0f;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "LOD")
-    float MediumQualityDistance = 2500.0f;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "LOD")
-    float LowQualityDistance = 5000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float HighLODDistance = 1000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float MediumLODDistance = 3000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float VFXBudgetMS = 2.0f; // Maximum 2ms per frame for VFX
+
+    // Internal Methods
+    void CleanupInactiveVFX();
+    void UpdateAllVFXLOD();
+    int32 GetVFXLODLevel(float Distance) const;
+    bool ShouldCullVFX(UNiagaraComponent* VFXComponent) const;
+    bool CanSpawnNewVFX(EVFXPriority Priority) const;
+    void AdaptiveQualityAdjustment();
 
 private:
-    void InitializeVFXLibrary();
-    void CleanupInactiveVFX();
-    void ApplyLODToVFX(UNiagaraComponent* VFXComponent, float Distance);
-    float CalculateQualityMultiplier(float Distance, EVFXPriority Priority);
-    
     float LastLODUpdateTime = 0.0f;
+    class APlayerController* CachedPlayerController = nullptr;
+    float CurrentFrameVFXTime = 0.0f;
 };
