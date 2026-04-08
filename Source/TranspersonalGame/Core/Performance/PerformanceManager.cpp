@@ -5,99 +5,137 @@
 #include "Engine/World.h"
 #include "HAL/PlatformApplicationMisc.h"
 #include "HAL/PlatformMemory.h"
-#include "Misc/App.h"
-#include "Stats/StatsData.h"
+#include "RHI.h"
 #include "RenderingThread.h"
-#include "Engine/GameViewportClient.h"
-#include "PhysicsEngine/PhysicsSettings.h"
-#include "Chaos/ChaosEngineInterface.h"
+#include "Stats/StatsData.h"
+#include "GameFramework/GameUserSettings.h"
+#include "Misc/ConfigCacheIni.h"
 
-DEFINE_LOG_CATEGORY_STATIC(LogPerformanceManager, Log, All);
+DECLARE_CYCLE_STAT(TEXT("Performance Manager Tick"), STAT_PerformanceManagerTick, STATGROUP_Game);
+DECLARE_DWORD_COUNTER_STAT(TEXT("Draw Calls"), STAT_DrawCalls, STATGROUP_Rendering);
+DECLARE_DWORD_COUNTER_STAT(TEXT("Triangle Count"), STAT_TriangleCount, STATGROUP_Rendering);
 
 UPerformanceManager::UPerformanceManager()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f; // Update 10 times per second
+    PrimaryComponentTick.TickInterval = 0.0f; // Tick every frame
+    PrimaryComponentTick.bTickEvenWhenPaused = false;
     
-    // Initialize frame time history
-    FrameTimeHistory.Reserve(FrameHistorySize);
+    // Initialize default quality settings
+    CurrentQualitySettings.ScreenPercentage = 100.0f;
+    CurrentQualitySettings.ShadowQuality = 3;
+    CurrentQualitySettings.PostProcessQuality = 3;
+    CurrentQualitySettings.TextureQuality = 3;
+    CurrentQualitySettings.EffectsQuality = 3;
+    CurrentQualitySettings.ViewDistanceScale = 1.0f;
+    CurrentQualitySettings.PhysicsLODBias = 0;
+    CurrentQualitySettings.AIUpdateScale = 1.0f;
+    
+    // Reserve space for frame rate history
+    FrameRateHistory.Reserve(120); // 2 seconds at 60fps
 }
 
 void UPerformanceManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    CachedWorld = GetWorld();
-    InitializePlatformSettings();
-    InitializePerformanceTargets();
+    UE_LOG(LogTemp, Warning, TEXT("PerformanceManager: Initializing performance optimization system"));
     
-    // Setup performance logging path
-    PerformanceLogPath = FPaths::ProjectSavedDir() / TEXT("Logs") / TEXT("Performance") / 
-                        FDateTime::Now().ToString(TEXT("%Y-%m-%d_%H-%M-%S")) + TEXT("_performance.csv");
+    DetectPlatformProfile();
+    InitializePerformanceSystem();
     
-    UE_LOG(LogPerformanceManager, Log, TEXT("Performance Manager initialized for platform: %s, Target: %.2f fps"), 
-           *GetCurrentPlatform(), 1000.0f / TargetFrameTimeMS);
+    // Register core systems with their budgets
+    RegisterCriticalSystem(TEXT("Physics"), PhysicsBudgetMs);
+    RegisterCriticalSystem(TEXT("AI"), AIBudgetMs);
+    RegisterCriticalSystem(TEXT("Rendering"), RenderThreadBudgetMs);
+    RegisterCriticalSystem(TEXT("GameLogic"), GameThreadBudgetMs);
+    
+    UE_LOG(LogTemp, Warning, TEXT("PerformanceManager: System initialized for %s profile, target %d fps"), 
+           *UEnum::GetValueAsString(CurrentPlatformProfile), TargetFrameRate);
 }
 
 void UPerformanceManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
+    SCOPE_CYCLE_COUNTER(STAT_PerformanceManagerTick);
+    
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
+    // Update performance metrics
     UpdatePerformanceMetrics();
     
-    if (bEnableDynamicScaling)
-    {
-        AdjustPhysicsQuality();
-    }
+    // Update monitoring timer
+    MonitoringTimer += DeltaTime;
     
-    // Log performance data if enabled
-    if (bLogPerformance)
+    // Check if we need to perform optimization
+    if (MonitoringTimer >= MonitoringFrequency)
     {
-        LogPerformanceMetrics();
+        MonitoringTimer = 0.0f;
+        
+        if (ShouldOptimizePerformance())
+        {
+            ApplyPerformanceOptimizations();
+        }
+        
+        if (bEnablePerformanceLogging)
+        {
+            LogPerformanceData();
+        }
     }
 }
 
 void UPerformanceManager::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-    Super::EndPlay(EndPlayReason);
+    // Close performance log file if open
+    if (PerformanceLogFile.IsValid())
+    {
+        PerformanceLogFile->Close();
+        PerformanceLogFile.Reset();
+    }
     
-    UE_LOG(LogPerformanceManager, Log, TEXT("Performance Manager shutdown. Final average FPS: %.2f"), 
-           CurrentMetrics.CurrentFPS);
+    Super::EndPlay(EndPlayReason);
 }
 
-void UPerformanceManager::InitializePerformanceTargets()
+void UPerformanceManager::InitializePerformanceSystem()
 {
-    InitializePlatformSettings();
+    // Set target frame rate based on platform
+    switch (CurrentPlatformProfile)
+    {
+        case EPlatformProfile::HighEndPC:
+        case EPlatformProfile::MidRangePC:
+            SetTargetFrameRate(60, true);
+            break;
+            
+        case EPlatformProfile::NextGenConsole:
+            SetTargetFrameRate(30, true);
+            break;
+            
+        case EPlatformProfile::LowEndPC:
+        case EPlatformProfile::Mobile:
+            SetTargetFrameRate(30, true);
+            // Start with reduced quality settings
+            CurrentQualitySettings.ScreenPercentage = 75.0f;
+            CurrentQualitySettings.ShadowQuality = 1;
+            CurrentQualitySettings.PostProcessQuality = 1;
+            CurrentQualitySettings.ViewDistanceScale = 0.7f;
+            break;
+    }
+    
+    // Apply initial quality settings
     ApplyQualitySettings();
     
-    UE_LOG(LogPerformanceManager, Log, TEXT("Performance targets initialized: %.2f ms frame time, Quality: %s"), 
-           TargetFrameTimeMS, 
-           *UEnum::GetValueAsString(CurrentQuality));
-}
-
-void UPerformanceManager::InitializePlatformSettings()
-{
-    FString Platform = GetCurrentPlatform();
-    
-    if (Platform.Contains(TEXT("Console")) || Platform.Contains(TEXT("PlayStation")) || Platform.Contains(TEXT("Xbox")))
+    // Initialize performance logging if enabled
+    if (bEnablePerformanceLogging)
     {
-        // Console settings - prioritize stability at 30fps
-        PerformanceTarget = EPerformanceTarget::Console_30fps;
-        TargetFrameTimeMS = 33.33f; // 30fps
-        CurrentQuality = EPerformanceQuality::Medium;
-        MemoryThresholdMB = 3000.0f; // Lower memory threshold for consoles
+        FString LogFileName = FString::Printf(TEXT("PerformanceLog_%s.csv"), 
+                                            *FDateTime::Now().ToString(TEXT("%Y%m%d_%H%M%S")));
+        FString LogFilePath = FPaths::ProjectLogDir() / LogFileName;
         
-        UE_LOG(LogPerformanceManager, Log, TEXT("Console platform detected - targeting 30fps"));
-    }
-    else
-    {
-        // PC settings - target 60fps
-        PerformanceTarget = EPerformanceTarget::PC_60fps;
-        TargetFrameTimeMS = 16.67f; // 60fps
-        CurrentQuality = EPerformanceQuality::High;
-        MemoryThresholdMB = 4000.0f;
-        
-        UE_LOG(LogPerformanceManager, Log, TEXT("PC platform detected - targeting 60fps"));
+        PerformanceLogFile = TSharedPtr<FArchive>(IFileManager::Get().CreateFileWriter(*LogFilePath));
+        if (PerformanceLogFile.IsValid())
+        {
+            FString Header = TEXT("Timestamp,FPS,FrameTime,GameThread,RenderThread,GPU,Physics,AI,Memory,DrawCalls,Triangles,PerformanceHealth\\n");
+            PerformanceLogFile->Serialize(TCHAR_TO_UTF8(*Header), Header.Len());
+        }
     }
 }
 
@@ -106,322 +144,344 @@ FPerformanceMetrics UPerformanceManager::GetCurrentPerformanceMetrics() const
     return CurrentMetrics;
 }
 
+void UPerformanceManager::SetTargetFrameRate(int32 TargetFPS, bool bEnableAdaptiveScaling)
+{
+    TargetFrameRate = TargetFPS;
+    TargetFrameTimeMs = 1000.0f / TargetFPS;
+    this->bEnableAdaptiveScaling = bEnableAdaptiveScaling;
+    
+    // Update engine frame rate settings
+    if (UGameUserSettings* UserSettings = UGameUserSettings::GetGameUserSettings())
+    {
+        UserSettings->SetFrameRateLimit(TargetFPS);
+        UserSettings->ApplySettings(false);
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("PerformanceManager: Target frame rate set to %d fps (%.2f ms)"), 
+           TargetFPS, TargetFrameTimeMs);
+}
+
+void UPerformanceManager::ForceOptimizationPass()
+{
+    UE_LOG(LogTemp, Warning, TEXT("PerformanceManager: Forcing optimization pass"));
+    ApplyPerformanceOptimizations();
+}
+
+void UPerformanceManager::RegisterCriticalSystem(const FString& SystemName, float BudgetMs)
+{
+    SystemBudgets.Add(SystemName, BudgetMs);
+    SystemPerformance.Add(SystemName, 0.0f);
+    
+    UE_LOG(LogTemp, Log, TEXT("PerformanceManager: Registered system '%s' with budget %.2f ms"), 
+           *SystemName, BudgetMs);
+}
+
+void UPerformanceManager::ReportSystemPerformance(const FString& SystemName, float ExecutionTimeMs)
+{
+    if (SystemPerformance.Contains(SystemName))
+    {
+        SystemPerformance[SystemName] = ExecutionTimeMs;
+        
+        // Check if system is over budget
+        if (SystemBudgets.Contains(SystemName))
+        {
+            float Budget = SystemBudgets[SystemName];
+            if (ExecutionTimeMs > Budget * 1.2f) // 20% tolerance
+            {
+                UE_LOG(LogTemp, Warning, TEXT("PerformanceManager: System '%s' over budget: %.2f ms (budget: %.2f ms)"), 
+                       *SystemName, ExecutionTimeMs, Budget);
+            }
+        }
+    }
+}
+
+FQualitySettings UPerformanceManager::GetRecommendedQualitySettings() const
+{
+    return CurrentQualitySettings;
+}
+
+void UPerformanceManager::DetectPlatformProfile()
+{
+    // Detect platform based on hardware capabilities
+    FString PlatformName = UGameplayStatics::GetPlatformName();
+    
+    if (PlatformName.Contains(TEXT("Windows")) || PlatformName.Contains(TEXT("Mac")) || PlatformName.Contains(TEXT("Linux")))
+    {
+        // PC platform - detect performance tier
+        uint32 TotalPhysicalMemory = FPlatformMemory::GetConstants().TotalPhysicalGB;
+        
+        if (TotalPhysicalMemory >= 16)
+        {
+            CurrentPlatformProfile = EPlatformProfile::HighEndPC;
+        }
+        else if (TotalPhysicalMemory >= 8)
+        {
+            CurrentPlatformProfile = EPlatformProfile::MidRangePC;
+        }
+        else
+        {
+            CurrentPlatformProfile = EPlatformProfile::LowEndPC;
+        }
+    }
+    else if (PlatformName.Contains(TEXT("XSX")) || PlatformName.Contains(TEXT("PS5")))
+    {
+        CurrentPlatformProfile = EPlatformProfile::NextGenConsole;
+    }
+    else
+    {
+        CurrentPlatformProfile = EPlatformProfile::Mobile;
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("PerformanceManager: Detected platform profile: %s"), 
+           *UEnum::GetValueAsString(CurrentPlatformProfile));
+}
+
 void UPerformanceManager::UpdatePerformanceMetrics()
 {
-    if (!CachedWorld)
+    // Get current frame rate
+    float DeltaTime = GetWorld()->GetDeltaSeconds();
+    if (DeltaTime > 0.0f)
     {
-        return;
-    }
-    
-    // Get frame time
-    float CurrentFrameTime = FApp::GetDeltaTime() * 1000.0f; // Convert to milliseconds
-    CurrentMetrics.FrameTimeMS = CurrentFrameTime;
-    CurrentMetrics.CurrentFPS = CurrentFrameTime > 0.0f ? 1000.0f / CurrentFrameTime : 0.0f;
-    
-    // Update frame time history
-    FrameTimeHistory.Add(CurrentFrameTime);
-    if (FrameTimeHistory.Num() > FrameHistorySize)
-    {
-        FrameTimeHistory.RemoveAt(0);
-    }
-    
-    // Get GPU time (approximate)
-    CurrentMetrics.GPUTimeMS = CurrentFrameTime * 0.6f; // Estimate GPU takes 60% of frame time
-    CurrentMetrics.GameThreadTimeMS = CurrentFrameTime * 0.3f; // Game thread ~30%
-    CurrentMetrics.RenderThreadTimeMS = CurrentFrameTime * 0.4f; // Render thread ~40%
-    
-    // Get memory usage
-    FPlatformMemoryStats MemStats = FPlatformMemory::GetStats();
-    CurrentMetrics.MemoryUsageMB = MemStats.UsedPhysical / (1024.0f * 1024.0f);
-    
-    // Get rendering stats (approximate)
-    CurrentMetrics.DrawCalls = 1000 + FMath::RandRange(-200, 500); // Simulated for now
-    CurrentMetrics.TriangleCount = 500000 + FMath::RandRange(-100000, 200000); // Simulated
-    
-    // Physics stats
-    CurrentMetrics.PhysicsTimeMS = CurrentFrameTime * 0.15f; // Physics typically 15% of frame
-    CurrentMetrics.ActivePhysicsBodies = 150 + FMath::RandRange(-50, 100); // Simulated
-    
-    // Check if meeting performance target
-    CurrentMetrics.bMeetingTarget = CurrentFrameTime <= (TargetFrameTimeMS + FrameTimeTolerance);
-}
-
-void UPerformanceManager::AdjustPhysicsQuality()
-{
-    if (!IsPerformanceTargetMet())
-    {
-        // Performance is below target - scale down
-        float CurrentTime = CachedWorld->GetTimeSeconds();
-        if (CurrentTime - LastQualityAdjustmentTime >= QualityAdjustmentCooldown)
+        float CurrentFPS = 1.0f / DeltaTime;
+        CurrentMetrics.CurrentFPS = CurrentFPS;
+        CurrentMetrics.FrameTimeMs = DeltaTime * 1000.0f;
+        
+        // Add to history for averaging
+        FrameRateHistory.Add(CurrentFPS);
+        if (FrameRateHistory.Num() > 120) // Keep last 2 seconds
         {
-            ScaleQualityDown();
-            LastQualityAdjustmentTime = CurrentTime;
-        }
-    }
-    else if (CalculatePerformanceScore() > 85.0f) // Good performance headroom
-    {
-        // Performance is good - try scaling up
-        float CurrentTime = CachedWorld->GetTimeSeconds();
-        if (CurrentTime - LastQualityAdjustmentTime >= QualityAdjustmentCooldown * 2.0f) // Longer cooldown for scaling up
-        {
-            ScaleQualityUp();
-            LastQualityAdjustmentTime = CurrentTime;
-        }
-    }
-}
-
-bool UPerformanceManager::IsPerformanceTargetMet() const
-{
-    if (FrameTimeHistory.Num() < 30) // Need at least half second of data
-    {
-        return true; // Assume good until we have data
-    }
-    
-    // Check if 90% of recent frames meet the target
-    int32 FramesMeetingTarget = 0;
-    for (float FrameTime : FrameTimeHistory)
-    {
-        if (FrameTime <= (TargetFrameTimeMS + FrameTimeTolerance))
-        {
-            FramesMeetingTarget++;
+            FrameRateHistory.RemoveAt(0);
         }
     }
     
-    float PercentageMeeting = static_cast<float>(FramesMeetingTarget) / FrameTimeHistory.Num();
-    return PercentageMeeting >= 0.9f; // 90% of frames must meet target
+    // Gather engine stats
+    GatherEngineStats();
+    
+    // Calculate performance health (0-100)
+    float TargetFPS = static_cast<float>(TargetFrameRate);
+    float HealthRatio = FMath::Clamp(CurrentMetrics.CurrentFPS / TargetFPS, 0.0f, 1.0f);
+    CurrentMetrics.PerformanceHealth = HealthRatio * 100.0f;
+    
+    // Track consecutive frames above/below target
+    if (CurrentMetrics.CurrentFPS < TargetFPS * 0.9f) // 10% tolerance
+    {
+        FramesBelowTarget++;
+        FramesAboveTarget = 0;
+    }
+    else if (CurrentMetrics.CurrentFPS > TargetFPS * 1.1f)
+    {
+        FramesAboveTarget++;
+        FramesBelowTarget = 0;
+    }
+    else
+    {
+        FramesBelowTarget = 0;
+        FramesAboveTarget = 0;
+    }
 }
 
-void UPerformanceManager::ScaleQualityDown()
+bool UPerformanceManager::ShouldOptimizePerformance() const
 {
-    EPerformanceQuality NewQuality = CurrentQuality;
-    
-    switch (CurrentQuality)
+    if (!bEnableAdaptiveScaling)
     {
-        case EPerformanceQuality::Epic:
-            NewQuality = EPerformanceQuality::High;
-            break;
-        case EPerformanceQuality::High:
-            NewQuality = EPerformanceQuality::Medium;
-            break;
-        case EPerformanceQuality::Medium:
-            NewQuality = EPerformanceQuality::Low;
-            break;
-        case EPerformanceQuality::Low:
-            // Already at lowest quality
-            return;
+        return false;
     }
     
-    SetPerformanceQuality(NewQuality);
-    UE_LOG(LogPerformanceManager, Warning, TEXT("Performance below target - scaling quality down to %s"), 
-           *UEnum::GetValueAsString(NewQuality));
+    // Optimize if we've had too many frames below target
+    if (FramesBelowTarget >= FramesToleranceBeforeScaling)
+    {
+        return true;
+    }
+    
+    // Also check if any critical system is over budget
+    for (const auto& SystemPair : SystemPerformance)
+    {
+        const FString& SystemName = SystemPair.Key;
+        float Performance = SystemPair.Value;
+        
+        if (SystemBudgets.Contains(SystemName))
+        {
+            float Budget = SystemBudgets[SystemName];
+            if (Performance > Budget * 1.5f) // 50% over budget
+            {
+                return true;
+            }
+        }
+    }
+    
+    return false;
 }
 
-void UPerformanceManager::ScaleQualityUp()
+void UPerformanceManager::ApplyPerformanceOptimizations()
 {
-    EPerformanceQuality NewQuality = CurrentQuality;
+    UE_LOG(LogTemp, Warning, TEXT("PerformanceManager: Applying performance optimizations"));
     
-    switch (CurrentQuality)
-    {
-        case EPerformanceQuality::Low:
-            NewQuality = EPerformanceQuality::Medium;
-            break;
-        case EPerformanceQuality::Medium:
-            NewQuality = EPerformanceQuality::High;
-            break;
-        case EPerformanceQuality::High:
-            NewQuality = EPerformanceQuality::Epic;
-            break;
-        case EPerformanceQuality::Epic:
-            // Already at highest quality
-            return;
-    }
+    float CurrentFPS = CurrentMetrics.CurrentFPS;
+    float TargetFPS = static_cast<float>(TargetFrameRate);
     
-    SetPerformanceQuality(NewQuality);
-    UE_LOG(LogPerformanceManager, Log, TEXT("Performance headroom available - scaling quality up to %s"), 
-           *UEnum::GetValueAsString(NewQuality));
+    // Calculate scaling factor based on performance deficit
+    float PerformanceRatio = CurrentFPS / TargetFPS;
+    float ScaleFactor = FMath::Clamp(PerformanceRatio, 0.5f, 1.0f);
+    
+    // Apply quality scaling
+    ScaleQualitySettings(ScaleFactor);
+    
+    // Apply engine-level optimizations
+    ApplyEngineOptimizations();
+    
+    LastOptimizationTime = GetWorld()->GetTimeSeconds();
+    FramesBelowTarget = 0; // Reset counter after optimization
 }
 
-void UPerformanceManager::SetPerformanceQuality(EPerformanceQuality QualityLevel)
+void UPerformanceManager::ScaleQualitySettings(float ScaleFactor)
 {
-    if (CurrentQuality == QualityLevel)
+    // Scale screen percentage
+    float NewScreenPercentage = FMath::Clamp(
+        CurrentQualitySettings.ScreenPercentage * ScaleFactor, 
+        MinScreenPercentage, 
+        100.0f
+    );
+    CurrentQualitySettings.ScreenPercentage = NewScreenPercentage;
+    
+    // Scale view distance
+    CurrentQualitySettings.ViewDistanceScale = FMath::Clamp(ScaleFactor, 0.3f, 1.0f);
+    
+    // Adjust quality levels based on performance
+    if (ScaleFactor < 0.7f)
     {
-        return;
+        CurrentQualitySettings.ShadowQuality = FMath::Max(0, CurrentQualitySettings.ShadowQuality - 1);
+        CurrentQualitySettings.PostProcessQuality = FMath::Max(0, CurrentQualitySettings.PostProcessQuality - 1);
+        CurrentQualitySettings.EffectsQuality = FMath::Max(0, CurrentQualitySettings.EffectsQuality - 1);
+    }
+    else if (ScaleFactor > 1.1f && FramesAboveTarget > 60) // 1 second of good performance
+    {
+        // Gradually increase quality if performance allows
+        CurrentQualitySettings.ShadowQuality = FMath::Min(3, CurrentQualitySettings.ShadowQuality + 1);
+        CurrentQualitySettings.PostProcessQuality = FMath::Min(3, CurrentQualitySettings.PostProcessQuality + 1);
     }
     
-    CurrentQuality = QualityLevel;
     ApplyQualitySettings();
     
-    // Broadcast quality change event
-    OnPerformanceQualityChanged.Broadcast(CurrentQuality);
+    UE_LOG(LogTemp, Warning, TEXT("PerformanceManager: Quality scaled - Screen: %.1f%%, ViewDist: %.2f, Shadow: %d"), 
+           NewScreenPercentage, CurrentQualitySettings.ViewDistanceScale, CurrentQualitySettings.ShadowQuality);
 }
 
 void UPerformanceManager::ApplyQualitySettings()
 {
-    // Apply physics settings
-    if (UPhysicsSettings* PhysicsSettings = GetMutableDefault<UPhysicsSettings>())
+    // Apply screen percentage
+    static IConsoleVariable* ScreenPercentageCVar = IConsoleManager::Get().FindConsoleVariable(TEXT("r.ScreenPercentage"));
+    if (ScreenPercentageCVar)
     {
-        if (PhysicsSubstepCounts.Contains(CurrentQuality))
+        ScreenPercentageCVar->Set(CurrentQualitySettings.ScreenPercentage);
+    }
+    
+    // Apply shadow quality
+    static IConsoleVariable* ShadowQualityCVar = IConsoleManager::Get().FindConsoleVariable(TEXT("sg.ShadowQuality"));
+    if (ShadowQualityCVar)
+    {
+        ShadowQualityCVar->Set(CurrentQualitySettings.ShadowQuality);
+    }
+    
+    // Apply post-process quality
+    static IConsoleVariable* PostProcessCVar = IConsoleManager::Get().FindConsoleVariable(TEXT("sg.PostProcessQuality"));
+    if (PostProcessCVar)
+    {
+        PostProcessCVar->Set(CurrentQualitySettings.PostProcessQuality);
+    }
+    
+    // Apply effects quality
+    static IConsoleVariable* EffectsCVar = IConsoleManager::Get().FindConsoleVariable(TEXT("sg.EffectsQuality"));
+    if (EffectsCVar)
+    {
+        EffectsCVar->Set(CurrentQualitySettings.EffectsQuality);
+    }
+    
+    // Apply view distance scale
+    static IConsoleVariable* ViewDistanceCVar = IConsoleManager::Get().FindConsoleVariable(TEXT("r.ViewDistanceScale"));
+    if (ViewDistanceCVar)
+    {
+        ViewDistanceCVar->Set(CurrentQualitySettings.ViewDistanceScale);
+    }
+}
+
+void UPerformanceManager::ApplyEngineOptimizations()
+{
+    // Apply physics optimizations if physics is over budget
+    if (SystemPerformance.Contains(TEXT("Physics")))
+    {
+        float PhysicsTime = SystemPerformance[TEXT("Physics")];
+        if (PhysicsTime > PhysicsBudgetMs * 1.2f)
         {
-            PhysicsSettings->MaxSubsteps = PhysicsSubstepCounts[CurrentQuality];
+            // Reduce physics simulation frequency
+            static IConsoleVariable* PhysicsSubstepsCVar = IConsoleManager::Get().FindConsoleVariable(TEXT("p.MaxSubsteps"));
+            if (PhysicsSubstepsCVar)
+            {
+                int32 CurrentSubsteps = PhysicsSubstepsCVar->GetInt();
+                PhysicsSubstepsCVar->Set(FMath::Max(1, CurrentSubsteps - 1));
+            }
         }
     }
     
-    // Apply console variables for quality
-    switch (CurrentQuality)
+    // Apply AI optimizations if AI is over budget
+    if (SystemPerformance.Contains(TEXT("AI")))
     {
-        case EPerformanceQuality::Low:
-            // Low quality settings for stable 30fps
-            GEngine->Exec(CachedWorld, TEXT("r.ViewDistanceScale 0.6"));
-            GEngine->Exec(CachedWorld, TEXT("r.SkeletalMeshLODBias 2"));
-            GEngine->Exec(CachedWorld, TEXT("r.ParticleLODBias 2"));
-            GEngine->Exec(CachedWorld, TEXT("r.ShadowQuality 1"));
-            GEngine->Exec(CachedWorld, TEXT("r.PostProcessAAQuality 1"));
-            break;
-            
-        case EPerformanceQuality::Medium:
-            // Medium quality settings
-            GEngine->Exec(CachedWorld, TEXT("r.ViewDistanceScale 0.8"));
-            GEngine->Exec(CachedWorld, TEXT("r.SkeletalMeshLODBias 1"));
-            GEngine->Exec(CachedWorld, TEXT("r.ParticleLODBias 1"));
-            GEngine->Exec(CachedWorld, TEXT("r.ShadowQuality 2"));
-            GEngine->Exec(CachedWorld, TEXT("r.PostProcessAAQuality 2"));
-            break;
-            
-        case EPerformanceQuality::High:
-            // High quality settings for 60fps
-            GEngine->Exec(CachedWorld, TEXT("r.ViewDistanceScale 1.0"));
-            GEngine->Exec(CachedWorld, TEXT("r.SkeletalMeshLODBias 0"));
-            GEngine->Exec(CachedWorld, TEXT("r.ParticleLODBias 0"));
-            GEngine->Exec(CachedWorld, TEXT("r.ShadowQuality 3"));
-            GEngine->Exec(CachedWorld, TEXT("r.PostProcessAAQuality 3"));
-            break;
-            
-        case EPerformanceQuality::Epic:
-            // Epic quality settings for high-end systems
-            GEngine->Exec(CachedWorld, TEXT("r.ViewDistanceScale 1.2"));
-            GEngine->Exec(CachedWorld, TEXT("r.SkeletalMeshLODBias 0"));
-            GEngine->Exec(CachedWorld, TEXT("r.ParticleLODBias 0"));
-            GEngine->Exec(CachedWorld, TEXT("r.ShadowQuality 4"));
-            GEngine->Exec(CachedWorld, TEXT("r.PostProcessAAQuality 4"));
-            break;
+        float AITime = SystemPerformance[TEXT("AI")];
+        if (AITime > AIBudgetMs * 1.2f)
+        {
+            // Reduce AI update frequency
+            CurrentQualitySettings.AIUpdateScale = FMath::Max(0.5f, CurrentQualitySettings.AIUpdateScale * 0.9f);
+        }
     }
-    
-    UE_LOG(LogPerformanceManager, Log, TEXT("Applied quality settings: %s"), 
-           *UEnum::GetValueAsString(CurrentQuality));
 }
 
-void UPerformanceManager::SetDynamicScaling(bool bEnabled)
+void UPerformanceManager::LogPerformanceData()
 {
-    bEnableDynamicScaling = bEnabled;
-    UE_LOG(LogPerformanceManager, Log, TEXT("Dynamic scaling %s"), 
-           bEnabled ? TEXT("enabled") : TEXT("disabled"));
-}
-
-void UPerformanceManager::ForceGarbageCollectionIfNeeded()
-{
-    if (CurrentMetrics.MemoryUsageMB > MemoryThresholdMB)
+    if (PerformanceLogFile.IsValid())
     {
-        UE_LOG(LogPerformanceManager, Warning, TEXT("Memory usage high (%.2f MB) - forcing garbage collection"), 
-               CurrentMetrics.MemoryUsageMB);
+        FString LogEntry = FString::Printf(
+            TEXT("%s,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%d,%d,%.2f\\n"),
+            *FDateTime::Now().ToString(),
+            CurrentMetrics.CurrentFPS,
+            CurrentMetrics.FrameTimeMs,
+            CurrentMetrics.GameThreadMs,
+            CurrentMetrics.RenderThreadMs,
+            CurrentMetrics.GPUTimeMs,
+            CurrentMetrics.PhysicsTimeMs,
+            CurrentMetrics.AITimeMs,
+            CurrentMetrics.MemoryUsageMB,
+            CurrentMetrics.DrawCalls,
+            CurrentMetrics.TriangleCount,
+            CurrentMetrics.PerformanceHealth
+        );
         
-        GEngine->ForceGarbageCollection(true);
+        PerformanceLogFile->Serialize(TCHAR_TO_UTF8(*LogEntry), LogEntry.Len());
+        PerformanceLogFile->Flush();
     }
 }
 
-FPerformanceBottleneckAnalysis UPerformanceManager::AnalyzePerformanceBottlenecks()
+void UPerformanceManager::GatherEngineStats()
 {
-    FPerformanceBottleneckAnalysis Analysis;
+    // Get memory usage
+    FPlatformMemoryStats MemStats = FPlatformMemory::GetStats();
+    CurrentMetrics.MemoryUsageMB = static_cast<float>(MemStats.UsedPhysical) / (1024.0f * 1024.0f);
     
-    // Determine primary bottleneck
-    if (CurrentMetrics.GPUTimeMS > CurrentMetrics.GameThreadTimeMS * 1.2f)
+    // Get rendering stats (simplified - in real implementation would use proper stat gathering)
+    CurrentMetrics.DrawCalls = 1000; // Placeholder - would get from actual rendering stats
+    CurrentMetrics.TriangleCount = 500000; // Placeholder
+    
+    // Thread times (simplified - would use actual profiling data)
+    CurrentMetrics.GameThreadMs = 8.0f; // Placeholder
+    CurrentMetrics.RenderThreadMs = 10.0f; // Placeholder
+    CurrentMetrics.GPUTimeMs = 12.0f; // Placeholder
+    
+    // Get system performance if available
+    if (SystemPerformance.Contains(TEXT("Physics")))
     {
-        Analysis.PrimaryBottleneck = TEXT("GPU Bound");
-        Analysis.GPUBoundPercentage = 70.0f;
-        Analysis.CPUBoundPercentage = 30.0f;
-        
-        Analysis.RecommendedActions.Add(TEXT("Reduce shadow quality"));
-        Analysis.RecommendedActions.Add(TEXT("Lower view distance"));
-        Analysis.RecommendedActions.Add(TEXT("Reduce particle effects"));
-    }
-    else if (CurrentMetrics.GameThreadTimeMS > TargetFrameTimeMS * 0.7f)
-    {
-        Analysis.PrimaryBottleneck = TEXT("CPU Bound");
-        Analysis.CPUBoundPercentage = 70.0f;
-        Analysis.GPUBoundPercentage = 30.0f;
-        
-        Analysis.RecommendedActions.Add(TEXT("Reduce physics complexity"));
-        Analysis.RecommendedActions.Add(TEXT("Optimize AI tick frequency"));
-        Analysis.RecommendedActions.Add(TEXT("Reduce collision checks"));
-    }
-    else
-    {
-        Analysis.PrimaryBottleneck = TEXT("Balanced");
-        Analysis.CPUBoundPercentage = 50.0f;
-        Analysis.GPUBoundPercentage = 50.0f;
+        CurrentMetrics.PhysicsTimeMs = SystemPerformance[TEXT("Physics")];
     }
     
-    // Memory pressure analysis
-    Analysis.MemoryPressure = FMath::Clamp((CurrentMetrics.MemoryUsageMB / MemoryThresholdMB) * 100.0f, 0.0f, 100.0f);
-    if (Analysis.MemoryPressure > 80.0f)
+    if (SystemPerformance.Contains(TEXT("AI")))
     {
-        Analysis.RecommendedActions.Add(TEXT("Force garbage collection"));
-        Analysis.RecommendedActions.Add(TEXT("Reduce texture quality"));
+        CurrentMetrics.AITimeMs = SystemPerformance[TEXT("AI")];
     }
-    
-    // Physics overhead analysis
-    Analysis.PhysicsOverhead = (CurrentMetrics.PhysicsTimeMS / CurrentMetrics.FrameTimeMS) * 100.0f;
-    if (Analysis.PhysicsOverhead > 20.0f)
-    {
-        Analysis.RecommendedActions.Add(TEXT("Reduce physics substeps"));
-        Analysis.RecommendedActions.Add(TEXT("Simplify collision meshes"));
-    }
-    
-    return Analysis;
-}
-
-void UPerformanceManager::LogPerformanceMetrics()
-{
-    // Simple CSV logging for performance analysis
-    FString LogLine = FString::Printf(TEXT("%.3f,%.2f,%.2f,%.2f,%.2f,%.2f,%d,%d,%.2f,%d,%s\n"),
-        CachedWorld->GetTimeSeconds(),
-        CurrentMetrics.FrameTimeMS,
-        CurrentMetrics.CurrentFPS,
-        CurrentMetrics.GPUTimeMS,
-        CurrentMetrics.GameThreadTimeMS,
-        CurrentMetrics.MemoryUsageMB,
-        CurrentMetrics.DrawCalls,
-        CurrentMetrics.TriangleCount,
-        CurrentMetrics.PhysicsTimeMS,
-        CurrentMetrics.ActivePhysicsBodies,
-        *UEnum::GetValueAsString(CurrentQuality)
-    );
-    
-    // Write to file (simplified for this implementation)
-    UE_LOG(LogPerformanceManager, VeryVerbose, TEXT("Performance: %s"), *LogLine);
-}
-
-FString UPerformanceManager::GetCurrentPlatform() const
-{
-    return FPlatformProperties::PlatformName();
-}
-
-float UPerformanceManager::CalculatePerformanceScore() const
-{
-    if (FrameTimeHistory.Num() == 0)
-    {
-        return 100.0f;
-    }
-    
-    // Calculate average frame time
-    float AverageFrameTime = 0.0f;
-    for (float FrameTime : FrameTimeHistory)
-    {
-        AverageFrameTime += FrameTime;
-    }
-    AverageFrameTime /= FrameTimeHistory.Num();
-    
-    // Score based on how well we meet the target (100 = perfect, 0 = terrible)
-    float Score = FMath::Clamp(100.0f - ((AverageFrameTime - TargetFrameTimeMS) / TargetFrameTimeMS) * 100.0f, 0.0f, 100.0f);
-    
-    return Score;
 }
