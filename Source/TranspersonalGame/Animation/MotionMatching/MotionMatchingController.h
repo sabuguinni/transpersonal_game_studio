@@ -2,58 +2,65 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "PoseSearch/PoseSearch.h"
 #include "Animation/AnimInstance.h"
+#include "PoseSearch/PoseSearchDatabase.h"
+#include "PoseSearch/PoseSearchSchema.h"
+#include "../Core/AnimationSystemManager.h"
 #include "MotionMatchingController.generated.h"
 
-UENUM(BlueprintType)
-enum class EMotionMatchingDatabase : uint8
-{
-    Locomotion,
-    Interaction,
-    Combat,
-    Stealth,
-    Climbing,
-    Emotional
-};
-
 USTRUCT(BlueprintType)
-struct FMotionMatchingQuery
+struct FMotionMatchingDatabase
 {
     GENERATED_BODY()
 
+    // Base de dados para diferentes estados
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FVector DesiredVelocity;
+    class UPoseSearchDatabase* LocomotionDatabase;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FVector DesiredAcceleration;
+    class UPoseSearchDatabase* IdleDatabase;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float DesiredSpeed;
+    class UPoseSearchDatabase* AlertDatabase;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float DesiredDirection;
+    class UPoseSearchDatabase* FearDatabase;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float EmotionalState;
+    class UPoseSearchDatabase* AggressiveDatabase;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float TerrainComplexity;
+    class UPoseSearchDatabase* FeedingDatabase;
 
-    FMotionMatchingQuery()
-    {
-        DesiredVelocity = FVector::ZeroVector;
-        DesiredAcceleration = FVector::ZeroVector;
-        DesiredSpeed = 0.0f;
-        DesiredDirection = 0.0f;
-        EmotionalState = 0.0f;
-        TerrainComplexity = 0.0f;
-    }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    class UPoseSearchDatabase* RestingDatabase;
+};
+
+USTRUCT(BlueprintType)
+struct FPersonalityAnimationModifiers
+{
+    GENERATED_BODY()
+
+    // Modificadores aplicados às animações baseados na personalidade
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.5", ClampMax = "2.0"))
+    float SpeedMultiplier = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.8", ClampMax = "1.2"))
+    float StepFrequency = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float NervousTwitchChance = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float HeadLookAroundChance = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.5", ClampMax = "1.5"))
+    float BodyTensionLevel = 1.0f;
 };
 
 /**
- * Controlador avançado para Motion Matching
- * Gerencia múltiplas databases e queries contextuais
+ * Controlador do sistema Motion Matching
+ * Seleciona animações baseadas no estado emocional e personalidade
  */
 UCLASS(ClassGroup=(Animation), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UMotionMatchingController : public UActorComponent
@@ -65,62 +72,71 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 public:
-    // Motion Matching Databases
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
+    // Configuração das bases de dados
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    TMap<EMotionMatchingDatabase, class UPoseSearchDatabase*> AnimationDatabases;
+    FMotionMatchingDatabase DatabasesPlayer;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    class UPoseSearchSchema* PrimarySchema;
+    FMotionMatchingDatabase DatabasesSmallHerbivore;
 
-    // Query Configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Query System")
-    float QueryUpdateRate = 30.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    FMotionMatchingDatabase DatabasesLargeHerbivore;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Query System")
-    float BlendTimeMin = 0.1f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    FMotionMatchingDatabase DatabasesSmallCarnivore;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Query System")
-    float BlendTimeMax = 0.5f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    FMotionMatchingDatabase DatabasesLargeCarnivore;
 
-    // Emotional Modulation
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotional System")
-    float FearInfluenceOnBlending = 0.3f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    FMotionMatchingDatabase DatabasesApex;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotional System")
-    float ExhaustionInfluenceOnSpeed = 0.5f;
+    // Schema de busca
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    class UPoseSearchSchema* SearchSchema;
 
-    // Current State
-    UPROPERTY(BlueprintReadOnly, Category = "Current State")
-    FMotionMatchingQuery CurrentQuery;
+    // Referência ao sistema de animação
+    UPROPERTY(BlueprintReadOnly, Category = "Animation System")
+    class UAnimationSystemManager* AnimationManager;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Current State")
-    EMotionMatchingDatabase ActiveDatabase;
+    // Estado atual
+    UPROPERTY(BlueprintReadOnly, Category = "Motion Matching")
+    class UPoseSearchDatabase* CurrentDatabase;
 
-    // Functions
+    UPROPERTY(BlueprintReadOnly, Category = "Motion Matching")
+    FPersonalityAnimationModifiers CurrentModifiers;
+
+    // Funções principais
     UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    void SetActiveDatabase(EMotionMatchingDatabase Database);
-
-    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    void UpdateQuery(const FMotionMatchingQuery& NewQuery);
-
-    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    float CalculateDynamicBlendTime(float FearLevel, float MovementIntensity);
+    void UpdateDatabaseSelection();
 
     UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    UPoseSearchDatabase* GetCurrentDatabase() const;
+    void ApplyPersonalityModifiers();
 
-    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    void ModulateQueryWithEmotion(float FearLevel, float ExhaustionLevel);
+    UFUNCTION(BlueprintPure, Category = "Motion Matching")
+    class UPoseSearchDatabase* GetOptimalDatabase() const;
+
+    UFUNCTION(BlueprintPure, Category = "Motion Matching")
+    float GetBlendTime() const;
+
+    // Eventos para Animation Blueprint
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDatabaseChanged, class UPoseSearchDatabase*, NewDatabase);
+    UPROPERTY(BlueprintAssignable)
+    FOnDatabaseChanged OnDatabaseChanged;
 
 private:
-    void UpdateQueryFromMovement();
-    void SelectOptimalDatabase();
-    float CalculateTerrainComplexity();
+    // Estado interno
+    float DatabaseUpdateTimer;
+    float ModifierUpdateTimer;
+    class UPoseSearchDatabase* PreviousDatabase;
 
-    float LastQueryUpdateTime;
-    FVector PreviousVelocity;
-    class UAnimationSystemManager* AnimationManager;
+    // Funções internas
+    FMotionMatchingDatabase* GetDatabaseSetForCharacterType(ECharacterAnimationType CharacterType);
+    class UPoseSearchDatabase* SelectDatabaseForEmotionalState(const FMotionMatchingDatabase& DatabaseSet, EEmotionalState EmotionalState) const;
+    void CalculatePersonalityModifiers();
+    void SmoothDatabaseTransition();
 };
