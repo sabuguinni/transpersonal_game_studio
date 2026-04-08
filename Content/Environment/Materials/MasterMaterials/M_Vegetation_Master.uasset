@@ -1,0 +1,82 @@
+// MASTER VEGETATION MATERIAL
+// Transpersonal Game Studio - Jurassic Survival Game
+// Agent #06 - Environment Artist
+// PROD_JURASSIC_001
+
+/*
+This is the master material for all vegetation in the game.
+Supports wind animation, wetness, seasonal variation, and damage states.
+Designed for UE5 Nanite and Lumen compatibility.
+*/
+
+// MATERIAL DOMAIN: Surface
+// BLEND MODE: Opaque  
+// SHADING MODEL: Default Lit
+
+// === BASE PARAMETERS ===
+[Parameter] BaseColorTexture : Texture2D
+[Parameter] NormalTexture : Texture2D  
+[Parameter] RoughnessTexture : Texture2D
+[Parameter] AOTexture : Texture2D
+
+// === VEGETATION SPECIFIC ===
+[Parameter] WindStrength : Scalar = 1.0
+[Parameter] WindFrequency : Scalar = 1.0
+[Parameter] WetnessLevel : Scalar = 0.0
+[Parameter] SeasonalTint : Vector3 = (1.0, 1.0, 1.0)
+[Parameter] HealthLevel : Scalar = 1.0
+[Parameter] DamageAmount : Scalar = 0.0
+
+// === SUBSURFACE SCATTERING ===
+[Parameter] SubsurfaceColor : Vector3 = (0.2, 0.8, 0.3)
+[Parameter] SubsurfaceStrength : Scalar = 0.5
+
+// === WIND ANIMATION ===
+// Uses World Position Offset for vertex animation
+// Procedural wind using sine waves and noise
+// Affects leaves more than trunk/branches
+// Responds to global wind direction and strength
+
+// === WETNESS SYSTEM ===
+// Darkens base color when wet
+// Increases specular reflection
+// Adds water droplet normal detail
+// Responds to weather system
+
+// === DAMAGE STATES ===
+// Claw mark overlays
+// Bite damage textures  
+// Burn/fire damage
+// Disease/blight effects
+
+// === SEASONAL VARIATION ===
+// Color temperature shifts
+// Leaf density changes
+// Fruit/flower appearance
+// Growth stage morphing
+
+// === PERFORMANCE FEATURES ===
+// Nanite compatible
+// LOD-aware detail scaling
+// Distance-based complexity reduction
+// Instancing-friendly parameters
+
+// === MATERIAL FUNCTIONS USED ===
+// MF_WindAnimation
+// MF_WetnessBlend  
+// MF_SubsurfaceVegetation
+// MF_SeasonalColor
+// MF_DamageOverlay
+
+// === USAGE NOTES ===
+// - Use Material Instances for specific plant types
+// - WindStrength should vary by plant size/flexibility
+// - WetnessLevel driven by weather system
+// - DamageAmount for environmental storytelling
+// - HealthLevel affects color saturation and detail
+
+// === OPTIMIZATION ===
+// - Expensive operations in vertex shader when possible
+// - Distance-based feature culling
+// - Shared texture atlases for similar plants
+// - Aggressive LOD for background vegetation
