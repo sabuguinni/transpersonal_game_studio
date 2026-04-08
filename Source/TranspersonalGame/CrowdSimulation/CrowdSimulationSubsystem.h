@@ -7,61 +7,80 @@
 #include "Engine/World.h"
 #include "CrowdSimulationSubsystem.generated.h"
 
-UENUM(BlueprintType)
-enum class EHerdType : uint8
-{
-    SmallHerbivore,     // Compsognathus, Dryosaurus - 50-200 indivíduos
-    MediumHerbivore,    // Triceratops, Stegosaurus - 10-30 indivíduos  
-    LargeHerbivore,     // Brontosaurus, Diplodocus - 3-8 indivíduos
-    PackCarnivore,      // Velociraptors, Deinonychus - 3-12 indivíduos
-    SolitaryCarnivore,  // T-Rex, Allosaurus - 1-2 indivíduos
-    FlyingCreatures,    // Pteranodons - 20-100 indivíduos
-    AquaticLife         // Plesiosaurs - 5-15 indivíduos
-};
+class UMassEntitySubsystem;
+class UMassSpawnerSubsystem;
 
 USTRUCT(BlueprintType)
-struct FHerdConfiguration
+struct TRANSPERSONALGAME_API FDinosaurCrowdSettings
 {
     GENERATED_BODY()
 
+    // Maximum number of dinosaurs per species in simulation
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Settings")
+    int32 MaxHerbivores = 200;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Settings")
+    int32 MaxCarnivores = 50;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Settings")
+    int32 MaxFlyers = 100;
+
+    // Simulation radius around player
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Settings")
+    float SimulationRadius = 5000.0f;
+
+    // LOD distances for crowd detail
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
+    float FullDetailDistance = 1000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
+    float MediumDetailDistance = 2500.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
+    float LowDetailDistance = 5000.0f;
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FDinosaurHerdData
+{
+    GENERATED_BODY()
+
+    // Herd identification
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EHerdType HerdType = EHerdType::SmallHerbivore;
+    int32 HerdID = 0;
+
+    // Species type
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FString SpeciesName;
+
+    // Herd size range
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    int32 MinHerdSize = 3;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 MinGroupSize = 10;
+    int32 MaxHerdSize = 15;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 MaxGroupSize = 50;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float MovementSpeed = 300.0f;
-
+    // Behavior parameters
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     float CohesionRadius = 500.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float SeparationRadius = 200.0f;
+    float SeparationRadius = 100.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     float AlignmentRadius = 300.0f;
 
+    // Danger response
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float FleeRadius = 1000.0f;
+    float FleeRadius = 800.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float WanderRadius = 2000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bIsNocturnal = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float ActivityLevel = 1.0f; // 0.0 = dormant, 1.0 = fully active
+    float FleeSpeed = 1200.0f;
 };
 
 /**
- * Sistema de simulação de multidões para ecossistemas pré-históricos
- * Usa Mass Entity Framework para simular até 50.000 agentes simultâneos
- * Foca em comportamento emergente de manadas e predador-presa
+ * Subsystem responsible for managing large-scale dinosaur crowd simulation
+ * Uses Mass Entity framework for performance with thousands of agents
  */
 UCLASS()
 class TRANSPERSONALGAME_API UCrowdSimulationSubsystem : public UWorldSubsystem
@@ -69,79 +88,58 @@ class TRANSPERSONALGAME_API UCrowdSimulationSubsystem : public UWorldSubsystem
     GENERATED_BODY()
 
 public:
+    // USubsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
+    virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
 
-    // Spawning de manadas
+    // Crowd management functions
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void SpawnHerd(EHerdType HerdType, FVector Location, int32 GroupSize = -1);
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void SpawnEcosystemInRegion(FVector Center, float Radius);
-
-    // Controle de densidade populacional
-    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void SetPopulationDensity(float DensityMultiplier);
+    void InitializeCrowdSimulation();
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    int32 GetActiveEntityCount() const;
-
-    // Eventos de emergência (fuga em massa)
-    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void TriggerMassFleeEvent(FVector ThreatLocation, float Radius, float Intensity = 1.0f);
+    void SetPlayerLocation(const FVector& PlayerLocation);
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void TriggerPredatorHuntEvent(FVector PreyLocation, EHerdType PredatorType);
-
-    // Configuração de comportamento
-    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void SetHerdConfiguration(EHerdType HerdType, const FHerdConfiguration& Config);
+    void SpawnHerd(const FDinosaurHerdData& HerdData, const FVector& SpawnLocation);
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    FHerdConfiguration GetHerdConfiguration(EHerdType HerdType) const;
-
-    // Ciclo dia/noite
-    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void SetTimeOfDay(float TimeNormalized); // 0.0 = midnight, 0.5 = noon
-
-    // Debug e visualização
-    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    void SetDebugVisualization(bool bEnabled);
+    void TriggerPredatorAlert(const FVector& PredatorLocation, float AlertRadius);
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
-    TArray<FVector> GetHerdCenters(EHerdType HerdType) const;
+    void UpdateCrowdLOD();
+
+    // Settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
+    FDinosaurCrowdSettings CrowdSettings;
+
+    // Active herds tracking
+    UPROPERTY(BlueprintReadOnly, Category = "Runtime Data")
+    TArray<FDinosaurHerdData> ActiveHerds;
 
 protected:
+    // Mass Entity references
     UPROPERTY()
-    TObjectPtr<UMassEntitySubsystem> MassEntitySubsystem;
+    UMassEntitySubsystem* MassEntitySubsystem;
 
     UPROPERTY()
-    TObjectPtr<UMassSpawnerSubsystem> MassSpawnerSubsystem;
+    UMassSpawnerSubsystem* MassSpawnerSubsystem;
 
-    // Configurações por tipo de manada
-    UPROPERTY(EditAnywhere, Category = "Configuration")
-    TMap<EHerdType, FHerdConfiguration> HerdConfigurations;
+    // Current player position for LOD calculations
+    FVector CurrentPlayerLocation;
 
-    // Estado do sistema
-    UPROPERTY()
-    float CurrentTimeOfDay = 0.5f; // Noon by default
+    // Internal functions
+    void SetupMassEntityProcessors();
+    void CreateHerdBehaviorProcessors();
+    void UpdateSimulationBounds();
 
-    UPROPERTY()
-    float PopulationDensityMultiplier = 1.0f;
-
-    UPROPERTY()
-    bool bDebugVisualizationEnabled = false;
-
-    // Tracking de manadas ativas
-    UPROPERTY()
-    TMap<EHerdType, TArray<FVector>> ActiveHerdCenters;
+    // Herd management
+    int32 NextHerdID = 1;
+    TMap<int32, FVector> HerdCenters;
+    TMap<int32, float> HerdLastUpdateTime;
 
 private:
-    void InitializeDefaultConfigurations();
-    void UpdateHerdBehaviors();
-    void ProcessTimeOfDayChanges();
-    
-    // Timers
-    FTimerHandle HerdUpdateTimer;
-    FTimerHandle EcosystemUpdateTimer;
+    bool bIsInitialized = false;
+    float LastLODUpdateTime = 0.0f;
+    const float LODUpdateInterval = 1.0f; // Update LOD every second
 };
