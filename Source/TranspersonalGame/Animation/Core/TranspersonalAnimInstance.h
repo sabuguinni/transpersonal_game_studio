@@ -2,20 +2,19 @@
 
 #include "CoreMinimal.h"
 #include "Animation/AnimInstance.h"
-#include "PoseSearch/PoseSearchDatabase.h"
-#include "TranspersonalAnimationTypes.h"
-#include "Components/ActorComponent.h"
+#include "PoseSearch/PoseSearch.h"
+#include "AnimationSystemArchitecture.h"
+#include "Engine/Engine.h"
 #include "TranspersonalAnimInstance.generated.h"
 
-class UCharacterMovementComponent;
-class UTranspersonalEmotionalStateComponent;
-
 /**
- * Animation Instance principal do jogo
- * Implementa Motion Matching com contexto emocional e IK de pés
+ * TRANSPERSONAL ANIMATION INSTANCE
  * 
- * Filosofia: Cada movimento conta uma história. O protagonista não é um herói —
- * é um cientista perdido no tempo, sempre em estado de alerta.
+ * Animation Blueprint base class que implementa Motion Matching
+ * com personalidade de movimento única para cada personagem.
+ * 
+ * Cada personagem tem uma "assinatura" de movimento que o define
+ * antes de qualquer diálogo ou ação.
  */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UTranspersonalAnimInstance : public UAnimInstance
@@ -30,171 +29,204 @@ protected:
     virtual void NativeUpdateAnimation(float DeltaTimeX) override;
     virtual void NativeThreadSafeUpdateAnimation(float DeltaTimeX) override;
 
-    // === MOTION MATCHING CORE ===
+public:
+    // REFERÊNCIAS DE COMPONENTES
+    UPROPERTY(BlueprintReadOnly, Category = "References")
+    class APawn* OwningPawn;
     
-    /** Database de poses para Motion Matching */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    class UPoseSearchDatabase* CurrentPoseDatabase;
+    UPROPERTY(BlueprintReadOnly, Category = "References")
+    class UCharacterMovementComponent* MovementComponent;
+    
+    UPROPERTY(BlueprintReadOnly, Category = "References")
+    UTranspersonalAnimationComponent* AnimationComponent;
 
-    /** Configuração atual de Motion Matching */
+    // MOTION MATCHING SETUP
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    FMotionMatchingConfig MotionMatchingConfig;
-
-    /** Peso do blend atual entre animações */
+    class UPoseSearchDatabase* ActiveDatabase;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    class UPoseSearchSchema* MotionMatchingSchema;
+    
     UPROPERTY(BlueprintReadOnly, Category = "Motion Matching")
-    float CurrentBlendWeight;
+    float BlendTime = 0.2f;
 
-    // === DADOS DE MOVIMENTO ===
+    // ESTADOS DE MOVIMENTO
+    UPROPERTY(BlueprintReadOnly, Category = "Movement State")
+    float Speed = 0.0f;
     
-    /** Velocidade atual do personagem */
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    FVector Velocity;
-
-    /** Velocidade 2D (sem Z) */
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    FVector2D Velocity2D;
-
-    /** Velocidade escalar */
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    float Speed;
-
-    /** Direção do movimento normalizada */
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    FVector MovementDirection;
-
-    /** Ângulo de rotação do movimento */
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    float MovementAngle;
-
-    /** Se o personagem está no chão */
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    bool bIsOnGround;
-
-    /** Se o personagem está a mover-se */
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    bool bIsMoving;
-
-    // === ESTADO EMOCIONAL ===
+    UPROPERTY(BlueprintReadOnly, Category = "Movement State")
+    float Direction = 0.0f;
     
-    /** Estado emocional atual */
-    UPROPERTY(BlueprintReadOnly, Category = "Emotional State")
-    EEmotionalState CurrentEmotionalState;
-
-    /** Intensidade do medo (0-1) */
-    UPROPERTY(BlueprintReadOnly, Category = "Emotional State")
-    float FearIntensity;
-
-    /** Nível de fadiga (0-1) */
-    UPROPERTY(BlueprintReadOnly, Category = "Emotional State")
-    float FatigueLevel;
-
-    /** Modificador de tremor por nervosismo */
-    UPROPERTY(BlueprintReadOnly, Category = "Emotional State")
-    float NervousnessTremor;
-
-    // === IK DE PÉS ===
+    UPROPERTY(BlueprintReadOnly, Category = "Movement State")
+    bool bIsMoving = false;
     
-    /** Configuração do pé esquerdo */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Foot IK")
-    FFootIKConfig LeftFootConfig;
-
-    /** Configuração do pé direito */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Foot IK")
-    FFootIKConfig RightFootConfig;
-
-    /** Offset atual do pé esquerdo */
-    UPROPERTY(BlueprintReadOnly, Category = "Foot IK")
-    float LeftFootOffset;
-
-    /** Offset atual do pé direito */
-    UPROPERTY(BlueprintReadOnly, Category = "Foot IK")
-    float RightFootOffset;
-
-    /** Rotação do pé esquerdo para alinhar com o terreno */
-    UPROPERTY(BlueprintReadOnly, Category = "Foot IK")
-    FRotator LeftFootRotation;
-
-    /** Rotação do pé direito para alinhar com o terreno */
-    UPROPERTY(BlueprintReadOnly, Category = "Foot IK")
-    FRotator RightFootRotation;
-
-    /** Offset da pelvis para manter equilíbrio */
-    UPROPERTY(BlueprintReadOnly, Category = "Foot IK")
-    float PelvisOffset;
-
-    // === PERFIL DE PERSONAGEM ===
+    UPROPERTY(BlueprintReadOnly, Category = "Movement State")
+    bool bIsFalling = false;
     
-    /** Perfil de animação único deste personagem */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Profile")
-    FCharacterAnimationProfile AnimationProfile;
-
-    // === COMPONENTES REFERENCIADOS ===
+    UPROPERTY(BlueprintReadOnly, Category = "Movement State")
+    bool bIsJumping = false;
     
-    /** Referência ao componente de movimento */
-    UPROPERTY(BlueprintReadOnly, Category = "References")
-    UCharacterMovementComponent* MovementComponent;
+    UPROPERTY(BlueprintReadOnly, Category = "Movement State")
+    bool bIsCrouching = false;
+    
+    UPROPERTY(BlueprintReadOnly, Category = "Movement State")
+    bool bIsSneaking = false;
 
-    /** Referência ao componente de estado emocional */
-    UPROPERTY(BlueprintReadOnly, Category = "References")
-    UTranspersonalEmotionalStateComponent* EmotionalStateComponent;
+    // PERSONALIDADE E EMOÇÕES
+    UPROPERTY(BlueprintReadOnly, Category = "Personality")
+    ECharacterArchetype CharacterType = ECharacterArchetype::Paleontologist;
+    
+    UPROPERTY(BlueprintReadOnly, Category = "Personality")
+    EMovementState MovementState = EMovementState::Idle;
+    
+    UPROPERTY(BlueprintReadOnly, Category = "Personality")
+    EEmotionalState EmotionalState = EEmotionalState::Confident;
+    
+    UPROPERTY(BlueprintReadOnly, Category = "Personality")
+    FMovementPersonality Personality;
+    
+    // MODIFICADORES DE PERSONALIDADE
+    UPROPERTY(BlueprintReadOnly, Category = "Personality Modifiers")
+    float ConfidenceModifier = 1.0f;
+    
+    UPROPERTY(BlueprintReadOnly, Category = "Personality Modifiers")
+    float NervousnessModifier = 1.0f;
+    
+    UPROPERTY(BlueprintReadOnly, Category = "Personality Modifiers")
+    float WeightModifier = 1.0f;
+    
+    UPROPERTY(BlueprintReadOnly, Category = "Personality Modifiers")
+    float SpeedModifier = 1.0f;
 
-    /** Referência ao pawn owner */
-    UPROPERTY(BlueprintReadOnly, Category = "References")
-    APawn* OwnerPawn;
+    // FOOT IK
+    UPROPERTY(BlueprintReadOnly, Category = "Foot IK")
+    FVector LeftFootEffectorLocation = FVector::ZeroVector;
+    
+    UPROPERTY(BlueprintReadOnly, Category = "Foot IK")
+    FVector RightFootEffectorLocation = FVector::ZeroVector;
+    
+    UPROPERTY(BlueprintReadOnly, Category = "Foot IK")
+    FRotator LeftFootEffectorRotation = FRotator::ZeroRotator;
+    
+    UPROPERTY(BlueprintReadOnly, Category = "Foot IK")
+    FRotator RightFootEffectorRotation = FRotator::ZeroRotator;
+    
+    UPROPERTY(BlueprintReadOnly, Category = "Foot IK")
+    float LeftFootIKAlpha = 0.0f;
+    
+    UPROPERTY(BlueprintReadOnly, Category = "Foot IK")
+    float RightFootIKAlpha = 0.0f;
+    
+    UPROPERTY(BlueprintReadOnly, Category = "Foot IK")
+    float HipOffset = 0.0f;
+
+    // SPINE IK (Para dinossauros)
+    UPROPERTY(BlueprintReadOnly, Category = "Spine IK")
+    FRotator SpineTwist = FRotator::ZeroRotator;
+    
+    UPROPERTY(BlueprintReadOnly, Category = "Spine IK")
+    float SpineFlexAlpha = 0.0f;
+
+    // LOOK AT (Para observação de ameaças)
+    UPROPERTY(BlueprintReadOnly, Category = "Look At")
+    FVector LookAtTarget = FVector::ZeroVector;
+    
+    UPROPERTY(BlueprintReadOnly, Category = "Look At")
+    float LookAtAlpha = 0.0f;
+    
+    UPROPERTY(BlueprintReadOnly, Category = "Look At")
+    bool bHasThreatTarget = false;
+
+    // DINOSSAURO ESPECÍFICO
+    UPROPERTY(BlueprintReadOnly, Category = "Dinosaur Behavior")
+    bool bIsHunting = false;
+    
+    UPROPERTY(BlueprintReadOnly, Category = "Dinosaur Behavior")
+    bool bIsFeeding = false;
+    
+    UPROPERTY(BlueprintReadOnly, Category = "Dinosaur Behavior")
+    bool bIsResting = false;
+    
+    UPROPERTY(BlueprintReadOnly, Category = "Dinosaur Behavior")
+    bool bIsAlert = false;
+    
+    UPROPERTY(BlueprintReadOnly, Category = "Dinosaur Behavior")
+    float AlertnessLevel = 0.0f;
+    
+    UPROPERTY(BlueprintReadOnly, Category = "Dinosaur Behavior")
+    float HungerLevel = 0.5f;
+    
+    UPROPERTY(BlueprintReadOnly, Category = "Dinosaur Behavior")
+    float EnergyLevel = 1.0f;
+
+    // VARIAÇÕES FÍSICAS ÚNICAS
+    UPROPERTY(BlueprintReadOnly, Category = "Physical Variations")
+    float LeftLegLengthRatio = 1.0f;
+    
+    UPROPERTY(BlueprintReadOnly, Category = "Physical Variations")
+    float RightLegLengthRatio = 1.0f;
+    
+    UPROPERTY(BlueprintReadOnly, Category = "Physical Variations")
+    float BackCurvature = 0.0f;
+    
+    UPROPERTY(BlueprintReadOnly, Category = "Physical Variations")
+    float HeadTiltBias = 0.0f;
+
+    // FUNÇÕES PÚBLICAS
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void UpdatePersonalityModifiers();
+    
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void SetEmotionalInfluence(EEmotionalState NewState, float Intensity = 1.0f);
+    
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    UPoseSearchDatabase* SelectMotionMatchingDatabase();
+    
+    UFUNCTION(BlueprintPure, Category = "Animation")
+    float GetBlendTimeForTransition() const;
+    
+    UFUNCTION(BlueprintPure, Category = "Animation")
+    bool ShouldUseFootIK() const;
+
+protected:
+    // MOTION MATCHING
+    void UpdateMotionMatching();
+    void SelectActiveDatabase();
+    float CalculateBlendTime();
+    
+    // FOOT IK
+    void UpdateFootIK();
+    FVector TraceForGround(FVector FootLocation, float& OutIKAlpha);
+    void CalculateFootPlacement();
+    
+    // PERSONALIDADE
+    void ApplyPersonalityToAnimation();
+    void UpdateEmotionalInfluence();
+    void ApplyPhysicalVariations();
+    
+    // DINOSSAURO BEHAVIOR
+    void UpdateDinosaurBehavior();
+    void UpdateAlertness();
+    void UpdateLookAt();
 
 private:
-    // === MÉTODOS INTERNOS ===
+    // CACHE DE DADOS
+    FVector LastVelocity = FVector::ZeroVector;
+    float LastSpeed = 0.0f;
+    float TimeSinceLastMovement = 0.0f;
     
-    /** Atualiza dados de movimento */
-    void UpdateMovementData(float DeltaTime);
+    // FOOT IK CACHE
+    FVector LastLeftFootTrace = FVector::ZeroVector;
+    FVector LastRightFootTrace = FVector::ZeroVector;
+    float FootIKUpdateTimer = 0.0f;
     
-    /** Atualiza estado emocional */
-    void UpdateEmotionalState(float DeltaTime);
+    // PERSONALIDADE CACHE
+    float PersonalityUpdateTimer = 0.0f;
+    float EmotionalInfluenceTimer = 0.0f;
     
-    /** Atualiza IK de pés */
-    void UpdateFootIK(float DeltaTime);
-    
-    /** Calcula offset de um pé específico */
-    float CalculateFootOffset(const FFootIKConfig& FootConfig, FRotator& OutFootRotation);
-    
-    /** Aplica modificadores do perfil de personagem */
-    void ApplyCharacterProfileModifiers();
-    
-    /** Seleciona database de poses baseado no contexto */
-    void SelectPoseDatabase();
-
-    // === DADOS INTERNOS ===
-    
-    /** Último estado emocional para detectar mudanças */
-    EEmotionalState LastEmotionalState;
-    
-    /** Timer para mudanças de estado */
-    float StateChangeTimer;
-    
-    /** Valores interpolados para suavizar transições */
-    float SmoothedFearIntensity;
-    float SmoothedFatigueLevel;
-
-public:
-    // === MÉTODOS PÚBLICOS BLUEPRINT ===
-    
-    /** Força mudança de estado emocional */
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void SetEmotionalState(EEmotionalState NewState, float Intensity = 1.0f);
-    
-    /** Obtém o modificador atual de velocidade baseado no estado */
-    UFUNCTION(BlueprintPure, Category = "Animation")
-    float GetCurrentSpeedModifier() const;
-    
-    /** Obtém o modificador atual de postura */
-    UFUNCTION(BlueprintPure, Category = "Animation")
-    float GetCurrentPostureModifier() const;
-    
-    /** Verifica se deve aplicar tremor de nervosismo */
-    UFUNCTION(BlueprintPure, Category = "Animation")
-    bool ShouldApplyNervousnessTremor() const;
-    
-    /** Obtém a intensidade do tremor atual */
-    UFUNCTION(BlueprintPure, Category = "Animation")
-    float GetTremorIntensity() const;
+    // CONSTANTS
+    static constexpr float FOOT_IK_UPDATE_FREQUENCY = 0.1f; // 10 updates per second
+    static constexpr float PERSONALITY_UPDATE_FREQUENCY = 0.2f; // 5 updates per second
+    static constexpr float FOOT_TRACE_DISTANCE = 50.0f;
+    static constexpr float MIN_MOVEMENT_THRESHOLD = 1.0f;
 };
