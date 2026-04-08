@@ -1,0 +1,134 @@
+{
+    "AssetType": "PCGGraph",
+    "Description": "Biome distribution system for ecological realism",
+    "GraphSettings": {
+        "UseHierarchicalGeneration": true,
+        "HiGenDefaultGridSize": "6400",
+        "EnableRuntimeGeneration": false
+    },
+    "Nodes": [
+        {
+            "NodeType": "LandscapeData",
+            "NodeName": "Landscape Input",
+            "Settings": {
+                "UseMetadata": true,
+                "SampleVirtualTextures": true
+            }
+        },
+        {
+            "NodeType": "SurfaceSampler",
+            "NodeName": "Biome Sample Points",
+            "Settings": {
+                "PointsPerSquaredMeter": 0.05,
+                "PointExtents": [100, 100, 100]
+            }
+        },
+        {
+            "NodeType": "DensityNoise",
+            "NodeName": "Elevation Influence",
+            "Settings": {
+                "DensityMode": "Set",
+                "NoiseMode": "Perlin",
+                "Frequency": 0.005,
+                "Amplitude": 1.0
+            }
+        },
+        {
+            "NodeType": "DensityNoise", 
+            "NodeName": "Moisture Influence",
+            "Settings": {
+                "DensityMode": "Multiply",
+                "NoiseMode": "Simplex",
+                "Frequency": 0.008,
+                "Amplitude": 0.8
+            }
+        },
+        {
+            "NodeType": "AttributeNoise",
+            "NodeName": "Temperature Variation",
+            "Settings": {
+                "AttributeName": "Temperature",
+                "NoiseMode": "Perlin",
+                "Frequency": 0.003,
+                "Amplitude": 30.0,
+                "Offset": 25.0
+            }
+        },
+        {
+            "NodeType": "Select",
+            "NodeName": "Dense Forest Zones",
+            "Settings": {
+                "Operation": "Greater",
+                "Threshold": 0.7,
+                "AttributeName": "Density"
+            }
+        },
+        {
+            "NodeType": "Select",
+            "NodeName": "Open Plains Zones", 
+            "Settings": {
+                "Operation": "Less",
+                "Threshold": 0.3,
+                "AttributeName": "Density"
+            }
+        },
+        {
+            "NodeType": "Select",
+            "NodeName": "River Valley Zones",
+            "Settings": {
+                "Operation": "Greater",
+                "Threshold": 0.8,
+                "AttributeName": "Moisture"
+            }
+        },
+        {
+            "NodeType": "Select",
+            "NodeName": "Rocky Outcrop Zones",
+            "Settings": {
+                "Operation": "Greater", 
+                "Threshold": 200.0,
+                "AttributeName": "Height"
+            }
+        },
+        {
+            "NodeType": "AttributeSelectString",
+            "NodeName": "Biome Assignment",
+            "Settings": {
+                "AttributeName": "BiomeType",
+                "StringValues": ["DenseForest", "OpenPlains", "RiverValley", "RockyOutcrops", "SwampLands", "CoastalArea"]
+            }
+        }
+    ],
+    "BiomeLogic": {
+        "DenseForest": {
+            "Conditions": ["High Moisture", "Medium Elevation", "Warm Temperature"],
+            "DangerLevel": "High",
+            "Description": "Dense vegetation provides cover for large predators"
+        },
+        "OpenPlains": {
+            "Conditions": ["Low Moisture", "Low Elevation", "Variable Temperature"],
+            "DangerLevel": "Medium", 
+            "Description": "Good visibility but exposed to pack hunters"
+        },
+        "RiverValley": {
+            "Conditions": ["Very High Moisture", "Low Elevation", "Moderate Temperature"],
+            "DangerLevel": "Low",
+            "Description": "Water source but predator migration routes"
+        },
+        "RockyOutcrops": {
+            "Conditions": ["Low Moisture", "High Elevation", "Cool Temperature"],
+            "DangerLevel": "Safe",
+            "Description": "Defensible positions, good for base building"
+        },
+        "SwampLands": {
+            "Conditions": ["Very High Moisture", "Very Low Elevation", "Warm Temperature"],
+            "DangerLevel": "Extreme",
+            "Description": "Rich resources but deadly aquatic predators"
+        },
+        "CoastalArea": {
+            "Conditions": ["High Moisture", "Low Elevation", "Moderate Temperature"],
+            "DangerLevel": "Medium",
+            "Description": "Escape routes but limited inland resources"
+        }
+    }
+}
