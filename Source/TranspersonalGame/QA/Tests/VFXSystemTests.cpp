@@ -16,6 +16,103 @@ DEFINE_LOG_CATEGORY_STATIC(LogVFXTests, Log, All);
  */
 
 /**
+ * VFX Test Helper Class
+ */
+class FVFXTestHelper
+{
+public:
+    static bool TestVFXPerformanceThresholds()
+    {
+        UE_LOG(LogVFXTests, Log, TEXT("Testing VFX Performance Thresholds"));
+
+        // Test particle count limits
+        const int32 MaxParticles = 50000; // Performance threshold
+        int32 CurrentParticleCount = GetEstimatedParticleCount();
+        
+        if (CurrentParticleCount > MaxParticles)
+        {
+            UE_LOG(LogVFXTests, Error, TEXT("Particle count (%d) exceeds maximum (%d)"), 
+                   CurrentParticleCount, MaxParticles);
+            return false;
+        }
+
+        // Test VFX memory usage estimate
+        const int32 MaxVFXMemoryMB = 512; // 512MB limit for VFX
+        int32 EstimatedVFXMemory = GetEstimatedVFXMemoryUsage();
+        
+        if (EstimatedVFXMemory > MaxVFXMemoryMB)
+        {
+            UE_LOG(LogVFXTests, Error, TEXT("Estimated VFX memory usage (%dMB) exceeds maximum (%dMB)"), 
+                   EstimatedVFXMemory, MaxVFXMemoryMB);
+            return false;
+        }
+
+        // Test VFX frame impact
+        const float MaxVFXFrameImpact = 2.0f; // 2ms maximum impact
+        float EstimatedFrameImpact = GetEstimatedVFXFrameImpact();
+        
+        if (EstimatedFrameImpact > MaxVFXFrameImpact)
+        {
+            UE_LOG(LogVFXTests, Error, TEXT("Estimated VFX frame impact (%.2fms) exceeds maximum (%.2fms)"), 
+                   EstimatedFrameImpact, MaxVFXFrameImpact);
+            return false;
+        }
+
+        UE_LOG(LogVFXTests, Log, TEXT("VFX Performance Thresholds Test Passed"));
+        return true;
+    }
+
+    static bool ValidateAtmosphericSystems(UWorld* World)
+    {
+        if (!World)
+        {
+            return false;
+        }
+
+        UE_LOG(LogVFXTests, Log, TEXT("Validating atmospheric systems setup"));
+        
+        // Check for basic atmospheric components that should exist
+        // This will be expanded when atmospheric systems are implemented
+        
+        return true;
+    }
+
+    static bool ValidateDinosaurVFXSetup(UWorld* World)
+    {
+        if (!World)
+        {
+            return false;
+        }
+
+        UE_LOG(LogVFXTests, Log, TEXT("Validating dinosaur VFX setup"));
+        
+        // Check for basic dinosaur VFX setup
+        // This will be expanded when dinosaur systems are implemented
+        
+        return true;
+    }
+
+private:
+    static int32 GetEstimatedParticleCount()
+    {
+        // Conservative estimate for current development stage
+        return 15000;
+    }
+
+    static int32 GetEstimatedVFXMemoryUsage()
+    {
+        // Conservative estimate in MB for current development stage
+        return 128;
+    }
+
+    static float GetEstimatedVFXFrameImpact()
+    {
+        // Conservative estimate in ms for current development stage
+        return 1.2f;
+    }
+};
+
+/**
  * Test basic VFX system initialization and performance
  */
 IMPLEMENT_TRANSPERSONAL_TEST(FVFXSystemBasicTest, "Transpersonal.VFX.Basic", QATestCategories::Performance)
@@ -35,8 +132,9 @@ bool FVFXSystemBasicTest::RunTest(const FString& Parameters)
     ADD_LATENT_AUTOMATION_COMMAND(FWaitLatentCommand(2.0f));
 
     // Test basic VFX performance thresholds
-    if (!TestVFXPerformanceThresholds())
+    if (!FVFXTestHelper::TestVFXPerformanceThresholds())
     {
+        AddError(TEXT("VFX performance thresholds validation failed"));
         return false;
     }
 
@@ -61,7 +159,7 @@ bool FVFXPerformanceTest::RunTest(const FString& Parameters)
     }
 
     // Test VFX performance impact
-    bool bPerformanceValid = TestVFXPerformanceThresholds();
+    bool bPerformanceValid = FVFXTestHelper::TestVFXPerformanceThresholds();
     VALIDATE_PERFORMANCE(bPerformanceValid, "VFX performance below acceptable levels");
 
     UE_LOG(LogVFXTests, Log, TEXT("VFX Performance Test Completed Successfully"));
@@ -86,7 +184,7 @@ bool FAtmosphericVFXTest::RunTest(const FString& Parameters)
 
     // Test atmospheric systems when they become available
     // For now, validate basic world atmospheric setup
-    bool bAtmosphericValid = ValidateAtmosphericSystems(TestWorld);
+    bool bAtmosphericValid = FVFXTestHelper::ValidateAtmosphericSystems(TestWorld);
     VALIDATE_GAMEPLAY(bAtmosphericValid, "Atmospheric systems validation failed");
 
     UE_LOG(LogVFXTests, Log, TEXT("Atmospheric VFX Test Completed Successfully"));
@@ -111,100 +209,9 @@ bool FDinosaurVFXTest::RunTest(const FString& Parameters)
 
     // Test dinosaur VFX systems when dinosaur classes become available
     // For now, validate basic setup for future dinosaur VFX
-    bool bDinosaurVFXValid = ValidateDinosaurVFXSetup(TestWorld);
+    bool bDinosaurVFXValid = FVFXTestHelper::ValidateDinosaurVFXSetup(TestWorld);
     VALIDATE_GAMEPLAY(bDinosaurVFXValid, "Dinosaur VFX setup validation failed");
 
     UE_LOG(LogVFXTests, Log, TEXT("Dinosaur VFX Test Completed Successfully"));
     return true;
 }
-
-private:
-    bool TestVFXPerformanceThresholds()
-    {
-        UE_LOG(LogVFXTests, Log, TEXT("Testing VFX Performance Thresholds"));
-
-        // Test particle count limits
-        const int32 MaxParticles = 50000; // Performance threshold
-        int32 CurrentParticleCount = GetEstimatedParticleCount();
-        
-        if (CurrentParticleCount > MaxParticles)
-        {
-            AddError(FString::Printf(TEXT("Particle count (%d) exceeds maximum (%d)"), 
-                                   CurrentParticleCount, MaxParticles));
-            return false;
-        }
-
-        // Test VFX memory usage estimate
-        const int32 MaxVFXMemoryMB = 512; // 512MB limit for VFX
-        int32 EstimatedVFXMemory = GetEstimatedVFXMemoryUsage();
-        
-        if (EstimatedVFXMemory > MaxVFXMemoryMB)
-        {
-            AddError(FString::Printf(TEXT("Estimated VFX memory usage (%dMB) exceeds maximum (%dMB)"), 
-                                   EstimatedVFXMemory, MaxVFXMemoryMB));
-            return false;
-        }
-
-        // Test VFX frame impact
-        const float MaxVFXFrameImpact = 2.0f; // 2ms maximum impact
-        float EstimatedFrameImpact = GetEstimatedVFXFrameImpact();
-        
-        if (EstimatedFrameImpact > MaxVFXFrameImpact)
-        {
-            AddError(FString::Printf(TEXT("Estimated VFX frame impact (%.2fms) exceeds maximum (%.2fms)"), 
-                                   EstimatedFrameImpact, MaxVFXFrameImpact));
-            return false;
-        }
-
-        UE_LOG(LogVFXTests, Log, TEXT("VFX Performance Thresholds Test Passed"));
-        return true;
-    }
-
-    bool ValidateAtmosphericSystems(UWorld* World)
-    {
-        if (!World)
-        {
-            return false;
-        }
-
-        UE_LOG(LogVFXTests, Log, TEXT("Validating atmospheric systems setup"));
-        
-        // Check for basic atmospheric components that should exist
-        // This will be expanded when atmospheric systems are implemented
-        
-        return true;
-    }
-
-    bool ValidateDinosaurVFXSetup(UWorld* World)
-    {
-        if (!World)
-        {
-            return false;
-        }
-
-        UE_LOG(LogVFXTests, Log, TEXT("Validating dinosaur VFX setup"));
-        
-        // Check for basic dinosaur VFX setup
-        // This will be expanded when dinosaur systems are implemented
-        
-        return true;
-    }
-
-    int32 GetEstimatedParticleCount()
-    {
-        // Conservative estimate for current development stage
-        return 15000;
-    }
-
-    int32 GetEstimatedVFXMemoryUsage()
-    {
-        // Conservative estimate in MB for current development stage
-        return 128;
-    }
-
-    float GetEstimatedVFXFrameImpact()
-    {
-        // Conservative estimate in ms for current development stage
-        return 1.2f;
-    }
-};
