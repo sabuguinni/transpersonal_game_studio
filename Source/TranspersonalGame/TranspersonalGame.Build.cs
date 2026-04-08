@@ -1,3 +1,5 @@
+// Copyright Transpersonal Game Studio. All Rights Reserved.
+
 using UnrealBuildTool;
 
 public class TranspersonalGame : ModuleRules
@@ -6,7 +8,6 @@ public class TranspersonalGame : ModuleRules
     {
         PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 
-        // Core dependencies
         PublicDependencyModuleNames.AddRange(new string[] 
         { 
             "Core", 
@@ -16,61 +17,86 @@ public class TranspersonalGame : ModuleRules
             "EnhancedInput",
             "UMG",
             "Slate",
-            "SlateCore"
-        });
-
-        // Gameplay dependencies
-        PrivateDependencyModuleNames.AddRange(new string[] 
-        { 
-            "GameplayAbilities",
-            "GameplayTags",
-            "GameplayTasks",
-            "AIModule",
+            "SlateCore",
             "NavigationSystem",
+            "AIModule",
+            "GameplayTasks",
+            "MassEntity",
+            "MassCommon",
+            "MassMovement",
+            "MassActors",
+            "MassSpawner",
+            "MassSimulation",
+            "MassGameplay",
+            "MassLOD",
+            "MassReplication",
+            "StateTree",
+            "GameplayStateTree",
+            "StructUtils",
             "Niagara",
+            "MetasoundEngine",
             "AudioMixer",
-            "MetasoundEngine"
+            "Landscape",
+            "Foliage",
+            "ProceduralMeshComponent",
+            "GeometryCollectionEngine",
+            "ChaosSolverEngine",
+            "ChaosVehicles",
+            "PhysicsCore"
         });
 
-        // UE5 specific systems
-        if (Target.Version.MajorVersion >= 5)
+        PrivateDependencyModuleNames.AddRange(new string[] 
         {
-            PublicDependencyModuleNames.AddRange(new string[]
-            {
-                "PCG",              // Procedural Content Generation
-                "MassEntity",       // Mass AI system
-                "MassMovement",
-                "MassSpawner",
-                "MassActors",
-                "WorldPartition"    // World streaming
-            });
-        }
+            "RenderCore",
+            "RHI",
+            "ApplicationCore",
+            "Json",
+            "JsonObjectConverter",
+            "HTTP",
+            "OnlineSubsystem",
+            "OnlineSubsystemUtils",
+            "DeveloperSettings",
+            "ToolMenus",
+            "EditorStyle",
+            "EditorWidgets",
+            "UnrealEd",
+            "BlueprintGraph",
+            "KismetCompiler",
+            "PropertyEditor",
+            "Sequencer",
+            "MovieScene",
+            "LevelSequence",
+            "CinematicCamera"
+        });
 
-        // Editor-only dependencies
-        if (Target.Type == TargetType.Editor)
+        // Optimization settings
+        OptimizeCode = CodeOptimization.InShippingBuildsOnly;
+        
+        // Enable IWYU
+        bEnforceIWYU = true;
+        
+        // Performance settings for large worlds
+        bUseUnity = true;
+        MinFilesUsingPrecompiledHeaderOverride = 1;
+        
+        if (Target.Configuration == UnrealTargetConfiguration.Shipping)
         {
-            PrivateDependencyModuleNames.AddRange(new string[]
-            {
-                "UnrealEd",
-                "EditorStyle",
-                "EditorWidgets",
-                "ToolMenus"
-            });
+            PublicDefinitions.Add("UE_BUILD_SHIPPING_WITH_EDITOR=0");
+            bUseLoggingInShipping = false;
         }
-
+        
         // Platform-specific optimizations
         if (Target.Platform == UnrealTargetPlatform.Win64)
         {
             PublicDefinitions.Add("PLATFORM_WINDOWS=1");
         }
-
-        // Performance settings
-        OptimizeCode = CodeOptimization.InShippingBuildsOnly;
-        
-        // Enable IWYU (Include What You Use)
-        bEnforceIWYU = true;
-        
-        // Disable unity builds for better incremental compilation during development
-        bUseUnity = false;
+        else if (Target.Platform == UnrealTargetPlatform.PS5)
+        {
+            PublicDefinitions.Add("PLATFORM_PS5=1");
+        }
+        else if (Target.Platform == UnrealTargetPlatform.XSX)
+        {
+            PublicDefinitions.Add("PLATFORM_XBOX_SERIES_X=1");
+        }
     }
 }
