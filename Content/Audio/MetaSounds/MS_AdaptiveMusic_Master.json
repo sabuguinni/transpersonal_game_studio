@@ -1,0 +1,185 @@
+{
+  "MetaSoundType": "Source",
+  "Version": "1.0",
+  "Description": "Master adaptive music system for Jurassic survival game. Responds to emotional states and environmental conditions.",
+  
+  "Inputs": [
+    {
+      "Name": "Play",
+      "Type": "Trigger",
+      "Description": "Trigger to start the adaptive music system"
+    },
+    {
+      "Name": "Stop", 
+      "Type": "Trigger",
+      "Description": "Trigger to stop the music system"
+    },
+    {
+      "Name": "EmotionalState",
+      "Type": "Float",
+      "DefaultValue": 0.0,
+      "Range": [0.0, 5.0],
+      "Description": "Current emotional state (0=Calm, 1=Tension, 2=Danger, 3=Terror, 4=Wonder, 5=Isolation)"
+    },
+    {
+      "Name": "TensionLevel",
+      "Type": "Float", 
+      "DefaultValue": 0.2,
+      "Range": [0.0, 1.0],
+      "Description": "Overall tension level from 0 (peaceful) to 1 (maximum threat)"
+    },
+    {
+      "Name": "EnvironmentType",
+      "Type": "Float",
+      "DefaultValue": 0.0,
+      "Range": [0.0, 5.0], 
+      "Description": "Environment type (0=Forest, 1=Plains, 2=River, 3=Cave, 4=Swamp, 5=Rocky)"
+    },
+    {
+      "Name": "ThreatProximity",
+      "Type": "Float",
+      "DefaultValue": 1.0,
+      "Range": [0.0, 1.0],
+      "Description": "Proximity to nearest threat (0=very close, 1=very far)"
+    },
+    {
+      "Name": "TimeOfDay",
+      "Type": "Float",
+      "DefaultValue": 0.5,
+      "Range": [0.0, 1.0],
+      "Description": "Time of day (0=midnight, 0.5=noon, 1=midnight)"
+    },
+    {
+      "Name": "PlayerHeartRate",
+      "Type": "Float",
+      "DefaultValue": 0.3,
+      "Range": [0.0, 1.0],
+      "Description": "Simulated player stress level affecting rhythm and tempo"
+    }
+  ],
+
+  "Outputs": [
+    {
+      "Name": "OnPlay",
+      "Type": "Trigger",
+      "Description": "Triggered when music starts playing"
+    },
+    {
+      "Name": "OnFinished", 
+      "Type": "Trigger",
+      "Description": "Triggered when music stops"
+    },
+    {
+      "Name": "OutLeft",
+      "Type": "Audio",
+      "Description": "Left channel audio output"
+    },
+    {
+      "Name": "OutRight",
+      "Type": "Audio", 
+      "Description": "Right channel audio output"
+    },
+    {
+      "Name": "CurrentIntensity",
+      "Type": "Float",
+      "Description": "Current music intensity for other systems to read"
+    }
+  ],
+
+  "NodeGraph": {
+    "Description": "Adaptive music system with multiple layers that respond to game state",
+    
+    "Layers": {
+      "BaseLayer": {
+        "Description": "Fundamental ambient drone that's always present",
+        "WaveAssets": [
+          "/Game/Audio/Music/Layers/Base_Forest_Drone.wav",
+          "/Game/Audio/Music/Layers/Base_Plains_Drone.wav", 
+          "/Game/Audio/Music/Layers/Base_Cave_Drone.wav"
+        ],
+        "VolumeControl": "Always active at low volume",
+        "FilterControl": "Low-pass filtered based on tension"
+      },
+      
+      "HarmonyLayer": {
+        "Description": "Harmonic content that adds emotional color",
+        "Generators": [
+          "Sine wave generators for pure tones",
+          "Filtered noise for texture",
+          "Granular synthesis for organic movement"
+        ],
+        "Parameters": {
+          "Dissonance": "Increases with tension level",
+          "Brightness": "Decreases with danger",
+          "Movement": "Increases with player stress"
+        }
+      },
+      
+      "RhythmLayer": {
+        "Description": "Subtle rhythmic elements that emerge with tension",
+        "Elements": [
+          "Heartbeat-like pulses",
+          "Environmental percussion (branches, rocks)",
+          "Breathing-rhythm patterns"
+        ],
+        "TriggerConditions": {
+          "HeartbeatPulse": "When PlayerHeartRate > 0.4",
+          "EnvironmentalHits": "Random based on TensionLevel",
+          "BreathingPattern": "When EmotionalState == Terror"
+        }
+      },
+      
+      "MelodyLayer": {
+        "Description": "Melodic content for wonder and discovery moments",
+        "Instruments": [
+          "Synthesized flute-like tones",
+          "Crystalline bell textures", 
+          "Organic string-like sustains"
+        ],
+        "ActivationConditions": {
+          "Wonder": "When EmotionalState == Wonder",
+          "Discovery": "Triggered by external events",
+          "Relief": "When transitioning from Terror to Calm"
+        }
+      }
+    },
+
+    "ProcessingChain": {
+      "SpatialProcessing": {
+        "ReverbAmount": "Increases in caves, decreases in open areas",
+        "StereoWidth": "Narrows with increasing tension", 
+        "DistanceFiltering": "Simulates audio traveling through environment"
+      },
+      
+      "DynamicProcessing": {
+        "Compressor": "Gentle compression for consistency",
+        "Limiter": "Prevents clipping during intense moments",
+        "GateEffect": "Creates silence gaps during Isolation state"
+      },
+      
+      "FrequencyProcessing": {
+        "LowPassFilter": "Cutoff decreases with danger",
+        "HighPassFilter": "Removes rumble except during Terror",
+        "EQ": "Emphasizes different frequency ranges per environment"
+      }
+    },
+
+    "TransitionLogic": {
+      "CrossfadeTime": "Variable based on emotional state change severity",
+      "ParameterSmoothing": "Prevents jarring parameter changes",
+      "StateMemory": "Remembers recent states to avoid rapid oscillation"
+    }
+  },
+
+  "PerformanceOptimizations": {
+    "LODSystem": "Reduces complexity when player is far from audio sources",
+    "ParameterCaching": "Caches expensive calculations",
+    "ConditionalProcessing": "Disables unused layers to save CPU"
+  },
+
+  "DebugOutputs": {
+    "LayerVolumes": "Individual layer volume levels for debugging",
+    "ParameterValues": "Current values of all input parameters", 
+    "StateTransitions": "Log of recent emotional state changes"
+  }
+}
