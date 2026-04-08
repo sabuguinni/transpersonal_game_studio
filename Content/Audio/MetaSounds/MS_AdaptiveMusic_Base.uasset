@@ -1,0 +1,150 @@
+// MetaSound Asset: Adaptive Music Base System
+// Este MetaSound serve como base para o sistema de música adaptativa
+// Utiliza layers emocionais que respondem a parâmetros de gameplay
+
+{
+    "AssetType": "MetaSound Source",
+    "Description": "Sistema base de música adaptativa que responde a estados emocionais e ambientais",
+    
+    "Inputs": [
+        {
+            "Name": "EmotionalIntensity",
+            "Type": "Float",
+            "DefaultValue": 0.5,
+            "Description": "Intensidade emocional atual (0.0 = calmo, 1.0 = terror máximo)"
+        },
+        {
+            "Name": "EnvironmentType",
+            "Type": "Int32",
+            "DefaultValue": 0,
+            "Description": "Tipo de ambiente (0=Floresta, 1=Planície, 2=Pântano, etc.)"
+        },
+        {
+            "Name": "TimeOfDay",
+            "Type": "Float",
+            "DefaultValue": 0.5,
+            "Description": "Hora do dia normalizada (0.0 = meia-noite, 0.5 = meio-dia)"
+        },
+        {
+            "Name": "TensionLevel",
+            "Type": "Float",
+            "DefaultValue": 0.0,
+            "Description": "Nível de tensão atual baseado em eventos de gameplay"
+        },
+        {
+            "Name": "SilenceMode",
+            "Type": "Bool",
+            "DefaultValue": false,
+            "Description": "Modo silêncio ativo - reduz drasticamente todos os elementos musicais"
+        }
+    ],
+    
+    "Outputs": [
+        {
+            "Name": "Out Left",
+            "Type": "Audio"
+        },
+        {
+            "Name": "Out Right", 
+            "Type": "Audio"
+        }
+    ],
+    
+    "Graph": {
+        "Nodes": [
+            {
+                "Type": "Wave Player",
+                "Name": "BaseAmbientLayer",
+                "WaveAsset": "/Game/Audio/Music/Layers/AMB_Forest_Base_Loop",
+                "Loop": true
+            },
+            {
+                "Type": "Wave Player",
+                "Name": "TensionLayer",
+                "WaveAsset": "/Game/Audio/Music/Layers/MUS_Tension_Strings_Loop",
+                "Loop": true
+            },
+            {
+                "Type": "Wave Player", 
+                "Name": "DangerLayer",
+                "WaveAsset": "/Game/Audio/Music/Layers/MUS_Danger_Percussion_Loop",
+                "Loop": true
+            },
+            {
+                "Type": "LFO",
+                "Name": "BreathingLFO",
+                "Frequency": 0.2,
+                "Shape": "Sine",
+                "MinValue": 0.8,
+                "MaxValue": 1.2
+            },
+            {
+                "Type": "Envelope Follower",
+                "Name": "TensionEnvelope",
+                "AttackTime": 2.0,
+                "ReleaseTime": 5.0
+            },
+            {
+                "Type": "Crossfade",
+                "Name": "EmotionalCrossfade"
+            },
+            {
+                "Type": "Multiply",
+                "Name": "SilenceMixer"
+            },
+            {
+                "Type": "Biquad Filter",
+                "Name": "TensionFilter",
+                "Type": "High Pass",
+                "CutoffFrequency": 200.0
+            }
+        ],
+        
+        "Connections": [
+            {
+                "From": "EmotionalIntensity",
+                "To": "EmotionalCrossfade.Crossfade Value"
+            },
+            {
+                "From": "TensionLevel", 
+                "To": "TensionEnvelope.In"
+            },
+            {
+                "From": "BreathingLFO.Out",
+                "To": "BaseAmbientLayer.Volume"
+            },
+            {
+                "From": "BaseAmbientLayer.Out Mono",
+                "To": "EmotionalCrossfade.In 0"
+            },
+            {
+                "From": "TensionLayer.Out Mono",
+                "To": "TensionFilter.In"
+            },
+            {
+                "From": "TensionFilter.Out",
+                "To": "EmotionalCrossfade.In 1"
+            },
+            {
+                "From": "DangerLayer.Out Mono",
+                "To": "EmotionalCrossfade.In 2"
+            },
+            {
+                "From": "EmotionalCrossfade.Out",
+                "To": "SilenceMixer.A"
+            },
+            {
+                "From": "SilenceMode",
+                "To": "SilenceMixer.B"
+            },
+            {
+                "From": "SilenceMixer.Out",
+                "To": "Out Left"
+            },
+            {
+                "From": "SilenceMixer.Out",
+                "To": "Out Right"
+            }
+        ]
+    }
+}
