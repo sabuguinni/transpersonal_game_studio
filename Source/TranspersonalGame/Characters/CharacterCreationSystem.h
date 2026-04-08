@@ -2,181 +2,179 @@
 
 #include "CoreMinimal.h"
 #include "Engine/Engine.h"
-#include "Components/SkeletalMeshComponent.h"
+#include "Components/ActorComponent.h"
 #include "Engine/DataTable.h"
 #include "CharacterCreationSystem.generated.h"
 
-// Estrutura para definir características físicas base
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCharacterPhysicalTraits
-{
-    GENERATED_BODY()
-
-    // Características faciais
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Facial Features")
-    float FaceWidth = 0.5f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Facial Features")
-    float FaceHeight = 0.5f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Facial Features")
-    float EyeSize = 0.5f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Facial Features")
-    float NoseSize = 0.5f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Facial Features")
-    float MouthSize = 0.5f;
-
-    // Características corporais
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Body Features")
-    float Height = 0.5f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Body Features")
-    float Weight = 0.5f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Body Features")
-    float MuscleDefinition = 0.5f;
-
-    // Características de pele
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Skin")
-    FLinearColor SkinTone = FLinearColor(0.8f, 0.6f, 0.4f, 1.0f);
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Skin")
-    float SkinRoughness = 0.3f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Skin")
-    float WeatheringLevel = 0.2f; // Marcas de exposição ao sol/elementos
-};
-
-// Estrutura para roupas e acessórios pré-históricos
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FPrehistoricClothing
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clothing")
-    TArray<FString> AvailableClothingPieces;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clothing")
-    FString PrimaryMaterial = "Animal Hide"; // Pele de animal, fibras vegetais, etc.
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clothing")
-    FLinearColor ClothingColor = FLinearColor(0.4f, 0.3f, 0.2f, 1.0f);
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clothing")
-    float WearLevel = 0.3f; // Desgaste das roupas
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Accessories")
-    TArray<FString> Accessories; // Colares de osso, penas, pinturas corporais
-};
-
-// Arquétipos sociais para NPCs
+// Enum para tipos de personagem
 UENUM(BlueprintType)
 enum class ECharacterArchetype : uint8
 {
-    None            UMETA(DisplayName = "None"),
-    TribalLeader    UMETA(DisplayName = "Tribal Leader"),
-    Hunter          UMETA(DisplayName = "Hunter"),
-    Gatherer        UMETA(DisplayName = "Gatherer"),
-    Shaman          UMETA(DisplayName = "Shaman"),
-    Craftsperson    UMETA(DisplayName = "Craftsperson"),
-    Elder           UMETA(DisplayName = "Elder"),
-    Child           UMETA(DisplayName = "Child"),
-    Warrior         UMETA(DisplayName = "Warrior"),
-    Storyteller     UMETA(DisplayName = "Storyteller")
+    Protagonist     UMETA(DisplayName = "Protagonista"),
+    Survivor        UMETA(DisplayName = "Sobrevivente"),
+    Researcher      UMETA(DisplayName = "Investigador"),
+    Explorer        UMETA(DisplayName = "Explorador"),
+    Tribal          UMETA(DisplayName = "Tribal"),
+    Wanderer        UMETA(DisplayName = "Andarilho")
 };
 
-// Estrutura principal do personagem
+// Enum para diversidade étnica
+UENUM(BlueprintType)
+enum class EEthnicity : uint8
+{
+    European        UMETA(DisplayName = "Europeu"),
+    African         UMETA(DisplayName = "Africano"),
+    Asian           UMETA(DisplayName = "Asiático"),
+    LatinAmerican   UMETA(DisplayName = "Latino-Americano"),
+    MiddleEastern   UMETA(DisplayName = "Oriente Médio"),
+    Indigenous      UMETA(DisplayName = "Indígena"),
+    Mixed           UMETA(DisplayName = "Misto")
+};
+
+// Enum para faixa etária
+UENUM(BlueprintType)
+enum class EAgeRange : uint8
+{
+    Young       UMETA(DisplayName = "Jovem (20-30)"),
+    Adult       UMETA(DisplayName = "Adulto (30-45)"),
+    Mature      UMETA(DisplayName = "Maduro (45-60)"),
+    Elder       UMETA(DisplayName = "Idoso (60+)")
+};
+
+// Struct para características físicas únicas
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCharacterDefinition
+struct FPhysicalTraits
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Identity")
-    FString CharacterName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical Traits")
+    float Height = 1.0f; // Multiplicador de altura base
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Identity")
-    ECharacterArchetype Archetype = ECharacterArchetype::None;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical Traits")
+    float Weight = 1.0f; // Multiplicador de peso base
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Identity")
-    int32 Age = 25;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical Traits")
+    FLinearColor SkinTone = FLinearColor::White;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Identity")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical Traits")
+    FLinearColor HairColor = FLinearColor::Black;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical Traits")
+    FLinearColor EyeColor = FLinearColor::Blue;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical Traits")
+    FString UniqueFeature = TEXT(""); // Cicatriz, marca de nascença, etc.
+};
+
+// Struct para roupas e equipamentos
+USTRUCT(BlueprintType)
+struct FCharacterOutfit
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Outfit")
+    FString OutfitName = TEXT("");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Outfit")
+    FString Description = TEXT("");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Outfit")
+    bool bIsWeatherAppropriate = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Outfit")
+    bool bShowsWearAndTear = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Outfit")
+    TArray<FString> ClothingPieces;
+};
+
+// Struct principal do personagem
+USTRUCT(BlueprintType)
+struct FCharacterDefinition : public FTableRowBase
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Basic Info")
+    FString CharacterName = TEXT("");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Basic Info")
+    ECharacterArchetype Archetype = ECharacterArchetype::Survivor;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Basic Info")
+    EEthnicity Ethnicity = EEthnicity::Mixed;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Basic Info")
+    EAgeRange AgeRange = EAgeRange::Adult;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Basic Info")
     bool bIsMale = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical")
-    FCharacterPhysicalTraits PhysicalTraits;
+    FPhysicalTraits PhysicalTraits;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clothing")
-    FPrehistoricClothing Clothing;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Outfit")
+    FCharacterOutfit CurrentOutfit;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Backstory")
+    FString BackgroundStory = TEXT("");
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
-    FString MetaHumanAssetPath;
+    FString MetaHumanAssetPath = TEXT("");
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Variation")
-    int32 UniqueID; // Para garantir que cada NPC seja único
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Identification")
+    FString UniqueID = TEXT("");
 };
 
 /**
- * Sistema de criação de personagens usando MetaHuman Creator
- * Gera NPCs únicos e autênticos para o período pré-histórico
+ * Sistema de criação e gestão de personagens únicos
  */
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UCharacterCreationSystem : public UObject
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UCharacterCreationSystem : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
     UCharacterCreationSystem();
 
-    // Gera um personagem aleatório baseado em parâmetros
-    UFUNCTION(BlueprintCallable, Category = "Character Creation")
-    FCharacterDefinition GenerateRandomCharacter(ECharacterArchetype DesiredArchetype = ECharacterArchetype::None);
-
-    // Cria o protagonista (paleontologista)
-    UFUNCTION(BlueprintCallable, Category = "Character Creation")
-    FCharacterDefinition CreateProtagonist();
-
-    // Aplica características físicas a um MetaHuman
-    UFUNCTION(BlueprintCallable, Category = "Character Creation")
-    bool ApplyPhysicalTraits(USkeletalMeshComponent* MetaHumanMesh, const FCharacterPhysicalTraits& Traits);
-
-    // Aplica roupas e acessórios pré-históricos
-    UFUNCTION(BlueprintCallable, Category = "Character Creation")
-    bool ApplyPrehistoricClothing(USkeletalMeshComponent* MetaHumanMesh, const FPrehistoricClothing& Clothing);
-
-    // Gera variações únicas para evitar clones
-    UFUNCTION(BlueprintCallable, Category = "Character Creation")
-    FCharacterPhysicalTraits GenerateUniqueVariation(int32 SeedValue);
-
 protected:
-    // Tabelas de dados para geração procedural
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Data Tables")
-    UDataTable* ArchetypeTraitsTable;
+    virtual void BeginPlay() override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Data Tables")
-    UDataTable* ClothingVariationsTable;
+    // DataTable com definições de personagens
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Character System")
+    class UDataTable* CharacterDefinitionsTable;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Data Tables")
-    UDataTable* NameGenerationTable;
+    // Array de personagens gerados
+    UPROPERTY(BlueprintReadOnly, Category = "Character System")
+    TArray<FCharacterDefinition> GeneratedCharacters;
 
-    // Configurações de diversidade
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Diversity Settings")
-    float PhysicalVariationRange = 0.3f;
+public:
+    // Gerar personagem único baseado em arquétipo
+    UFUNCTION(BlueprintCallable, Category = "Character Creation")
+    FCharacterDefinition GenerateUniqueCharacter(ECharacterArchetype Archetype, bool bEnsureUniqueness = true);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Diversity Settings")
-    TArray<FLinearColor> SkinToneVariations;
+    // Criar variação de personagem existente
+    UFUNCTION(BlueprintCallable, Category = "Character Creation")
+    FCharacterDefinition CreateCharacterVariation(const FCharacterDefinition& BaseCharacter);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Diversity Settings")
-    float WeatheringVariationRange = 0.4f;
+    // Validar unicidade do personagem
+    UFUNCTION(BlueprintCallable, Category = "Character Creation")
+    bool IsCharacterUnique(const FCharacterDefinition& Character);
+
+    // Obter personagem por ID
+    UFUNCTION(BlueprintCallable, Category = "Character Creation")
+    FCharacterDefinition GetCharacterByID(const FString& UniqueID);
+
+    // Registrar personagem no sistema
+    UFUNCTION(BlueprintCallable, Category = "Character Creation")
+    void RegisterCharacter(const FCharacterDefinition& Character);
 
 private:
-    // Funções auxiliares
-    FCharacterPhysicalTraits GenerateTraitsForArchetype(ECharacterArchetype Archetype);
-    FPrehistoricClothing GenerateClothingForArchetype(ECharacterArchetype Archetype);
-    FString GenerateNameForCharacter(bool bIsMale, ECharacterArchetype Archetype);
-    
-    // Contador para IDs únicos
-    static int32 NextUniqueID;
+    // Gerar ID único para personagem
+    FString GenerateUniqueCharacterID();
+
+    // Aplicar variações físicas aleatórias
+    FPhysicalTraits GenerateRandomPhysicalTraits(EEthnicity Ethnicity, EAgeRange AgeRange, bool bIsMale);
+
+    // Selecionar outfit apropriado
+    FCharacterOutfit SelectAppropriateOutfit(ECharacterArchetype Archetype, EAgeRange AgeRange);
 };
