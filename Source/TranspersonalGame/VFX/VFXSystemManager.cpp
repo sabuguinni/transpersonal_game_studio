@@ -1,353 +1,462 @@
 #include "VFXSystemManager.h"
 #include "NiagaraFunctionLibrary.h"
-#include "Engine/Engine.h"
+#include "NiagaraComponent.h"
 #include "Engine/World.h"
+#include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
 
 UVFXSystemManager::UVFXSystemManager()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f; // 10 FPS tick for performance
+    PrimaryComponentTick.TickInterval = LODUpdateInterval;
+    
+    // Default performance settings
+    MaxActiveVFX = 100;
+    CurrentVFXQuality = 2; // High quality by default
+    LODUpdateInterval = 0.5f;
+    HighLODDistance = 1000.0f;
+    MediumLODDistance = 3000.0f;
+    
+    LastLODUpdateTime = 0.0f;
+    CachedPlayerController = nullptr;
 }
 
 void UVFXSystemManager::BeginPlay()
 {
     Super::BeginPlay();
-    InitializeVFXLibrary();
+    
+    // Cache player controller for distance calculations
+    CachedPlayerController = UGameplayStatics::GetPlayerController(GetWorld(), 0);
+    
+    UE_LOG(LogTemp, Log, TEXT("VFXSystemManager initialized with quality level: %d"), CurrentVFXQuality);
 }
 
 void UVFXSystemManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    // Performance management
-    CleanupInactiveVFX();
-    
-    // LOD updates
-    if (GetWorld()->GetTimeSeconds() - LastLODUpdateTime > LODUpdateInterval)
+    // Update LOD system periodically
+    LastLODUpdateTime += DeltaTime;
+    if (LastLODUpdateTime >= LODUpdateInterval)
     {
-        if (APawn* ViewerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0))
-        {
-            UpdateLODSystem(ViewerPawn->GetActorLocation());
-        }
-        LastLODUpdateTime = GetWorld()->GetTimeSeconds();
+        UpdateAllVFXLOD();
+        CleanupInactiveVFX();
+        LastLODUpdateTime = 0.0f;
     }
 }
 
 UNiagaraComponent* UVFXSystemManager::SpawnVFX(const FString& EffectName, FVector Location, FRotator Rotation, AActor* AttachToActor)
 {
-    // Check if we're at max VFX limit
-    if (ActiveVFXComponents.Num() >= MaxActiveVFX)
+    // Find effect data in library
+    FVFXEffectData* EffectData = VFXLibrary.Find(EffectName);
+    if (!EffectData || !EffectData->NiagaraSystem)
     {
-        // Remove lowest priority VFX
-        UNiagaraComponent* LowestPriorityVFX = nullptr;
-        EVFXPriority LowestPriority = EVFXPriority::Critical;
-        
-        for (UNiagaraComponent* VFX : ActiveVFXComponents)
-        {
-            if (VFX && VFX->IsValidLowLevel())
-            {
-                // Get priority from VFX name or component tags
-                EVFXPriority VFXPriority = EVFXPriority::Background; // Default to lowest
-                
-                if (static_cast<uint8>(VFXPriority) >= static_cast<uint8>(LowestPriority))
-                {
-                    LowestPriority = VFXPriority;
-                    LowestPriorityVFX = VFX;
-                }
-            }
-        }
-        
-        if (LowestPriorityVFX)
-        {
-            StopVFX(LowestPriorityVFX);
-        }
+        UE_LOG(LogTemp, Warning, TEXT("VFX effect not found: %s"), *EffectName);
+        return nullptr;
     }
     
-    // Find effect in library
-    if (FVFXEffectData* EffectData = VFXLibrary.Find(EffectName))
+    // Check if we can spawn new VFX (performance limit)
+    if (ActiveVFXComponents.Num() >= MaxActiveVFX)
     {
-        if (EffectData->NiagaraSystem)
+        // Try to cull low priority effects
+        for (int32 i = ActiveVFXComponents.Num() - 1; i >= 0; --i)
         {
-            UNiagaraComponent* NewVFX = nullptr;
-            
-            if (AttachToActor)
+            if (ActiveVFXComponents[i].IsValid())
             {
-                NewVFX = UNiagaraFunctionLibrary::SpawnSystemAttached(
-                    EffectData->NiagaraSystem,
-                    AttachToActor->GetRootComponent(),
-                    NAME_None,
-                    Location,
-                    Rotation,
-                    EAttachLocation::KeepWorldPosition,
-                    true
-                );
+                UNiagaraComponent* Component = ActiveVFXComponents[i].Get();
+                if (ShouldCullVFX(Component))
+                {
+                    Component->DestroyComponent();
+                    ActiveVFXComponents.RemoveAt(i);
+                    break;
+                }
             }
             else
             {
-                NewVFX = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
-                    GetWorld(),
-                    EffectData->NiagaraSystem,
-                    Location,
-                    Rotation
-                );
+                ActiveVFXComponents.RemoveAt(i);
             }
-            
-            if (NewVFX)
-            {
-                ActiveVFXComponents.Add(NewVFX);
-                
-                // Apply initial LOD based on distance
-                if (APawn* ViewerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0))
-                {
-                    float Distance = FVector::Dist(ViewerPawn->GetActorLocation(), Location);
-                    ApplyLODToVFX(NewVFX, Distance);
-                }
-                
-                return NewVFX;
-            }
+        }
+        
+        // Still at limit after culling
+        if (ActiveVFXComponents.Num() >= MaxActiveVFX)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("VFX spawn limit reached, skipping: %s"), *EffectName);
+            return nullptr;
         }
     }
     
-    UE_LOG(LogTemp, Warning, TEXT("VFX Effect '%s' not found in library"), *EffectName);
-    return nullptr;
+    UNiagaraComponent* VFXComponent = nullptr;
+    
+    if (AttachToActor)
+    {
+        VFXComponent = UNiagaraFunctionLibrary::SpawnSystemAttached(
+            EffectData->NiagaraSystem,
+            AttachToActor->GetRootComponent(),
+            NAME_None,
+            Location,
+            Rotation,
+            EAttachLocation::KeepRelativeOffset,
+            true
+        );
+    }
+    else
+    {
+        VFXComponent = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+            GetWorld(),
+            EffectData->NiagaraSystem,
+            Location,
+            Rotation,
+            FVector::OneVector,
+            true,
+            true,
+            ENCPoolMethod::None,
+            true
+        );
+    }
+    
+    if (VFXComponent)
+    {
+        // Apply LOD based on distance
+        if (CachedPlayerController && CachedPlayerController->GetPawn())
+        {
+            float Distance = FVector::Dist(Location, CachedPlayerController->GetPawn()->GetActorLocation());
+            UpdateVFXLOD(VFXComponent, Distance);
+        }
+        
+        ActiveVFXComponents.Add(VFXComponent);
+        
+        UE_LOG(LogTemp, Log, TEXT("VFX spawned: %s at location: %s"), 
+               *EffectName, *Location.ToString());
+    }
+    
+    return VFXComponent;
 }
 
 void UVFXSystemManager::StopVFX(UNiagaraComponent* VFXComponent)
 {
-    if (VFXComponent && VFXComponent->IsValidLowLevel())
+    if (VFXComponent && IsValid(VFXComponent))
     {
-        VFXComponent->Deactivate();
-        ActiveVFXComponents.Remove(VFXComponent);
+        VFXComponent->DestroyComponent();
+        ActiveVFXComponents.RemoveSingle(VFXComponent);
     }
 }
 
 void UVFXSystemManager::StopAllVFXByCategory(EVFXCategory Category)
 {
-    for (int32 i = ActiveVFXComponents.Num() - 1; i >= 0; i--)
+    for (int32 i = ActiveVFXComponents.Num() - 1; i >= 0; --i)
     {
-        UNiagaraComponent* VFX = ActiveVFXComponents[i];
-        if (VFX && VFX->IsValidLowLevel())
+        if (ActiveVFXComponents[i].IsValid())
         {
-            // Check category via component tags or name
-            // This would need to be expanded based on how we tag VFX
-            StopVFX(VFX);
+            UNiagaraComponent* Component = ActiveVFXComponents[i].Get();
+            // Note: Would need to store category info with component to implement this properly
+            // For now, just log the request
+            UE_LOG(LogTemp, Log, TEXT("Stopping VFX by category: %d"), (int32)Category);
         }
     }
 }
 
 void UVFXSystemManager::SetGlobalVFXQuality(float QualityLevel)
 {
-    GlobalQualityMultiplier = FMath::Clamp(QualityLevel, 0.1f, 1.0f);
+    CurrentVFXQuality = FMath::Clamp(FMath::RoundToInt(QualityLevel * 3), 0, 3);
     
-    // Update all active VFX
-    for (UNiagaraComponent* VFX : ActiveVFXComponents)
-    {
-        if (VFX && VFX->IsValidLowLevel())
-        {
-            // Apply quality multiplier to relevant parameters
-            VFX->SetFloatParameter(TEXT("QualityMultiplier"), GlobalQualityMultiplier);
-        }
-    }
+    // Update all active VFX with new quality settings
+    UpdateAllVFXLOD();
+    
+    UE_LOG(LogTemp, Log, TEXT("VFX Quality set to: %d"), CurrentVFXQuality);
 }
 
 void UVFXSystemManager::UpdateLODSystem(FVector ViewerLocation)
 {
-    for (UNiagaraComponent* VFX : ActiveVFXComponents)
+    for (TWeakObjectPtr<UNiagaraComponent>& WeakComponent : ActiveVFXComponents)
     {
-        if (VFX && VFX->IsValidLowLevel())
+        if (WeakComponent.IsValid())
         {
-            float Distance = FVector::Dist(ViewerLocation, VFX->GetComponentLocation());
-            ApplyLODToVFX(VFX, Distance);
+            UNiagaraComponent* Component = WeakComponent.Get();
+            float Distance = FVector::Dist(ViewerLocation, Component->GetComponentLocation());
+            UpdateVFXLOD(Component, Distance);
         }
     }
 }
 
 int32 UVFXSystemManager::GetActiveVFXCount() const
 {
-    return ActiveVFXComponents.Num();
+    int32 ValidCount = 0;
+    for (const TWeakObjectPtr<UNiagaraComponent>& WeakComponent : ActiveVFXComponents)
+    {
+        if (WeakComponent.IsValid())
+        {
+            ValidCount++;
+        }
+    }
+    return ValidCount;
 }
 
 void UVFXSystemManager::PlayCreatureBreathingEffect(AActor* Creature, float IntensityMultiplier)
 {
     if (!Creature) return;
     
-    FVector BreathLocation = Creature->GetActorLocation() + FVector(0, 0, 100); // Adjust based on creature
-    SpawnVFX(TEXT("CreatureBreath"), BreathLocation, FRotator::ZeroRotator, Creature);
+    FVector Location = Creature->GetActorLocation();
+    FRotator Rotation = Creature->GetActorRotation();
+    
+    UNiagaraComponent* BreathingVFX = SpawnVFX(TEXT("CreatureBreathing"), Location, Rotation, Creature);
+    if (BreathingVFX)
+    {
+        BreathingVFX->SetFloatParameter(TEXT("Intensity"), IntensityMultiplier);
+    }
 }
 
 void UVFXSystemManager::PlayCreatureFootstepEffect(FVector Location, float CreatureSize)
 {
-    FString FootstepType = TEXT("SmallFootstep");
-    if (CreatureSize > 500.0f) FootstepType = TEXT("LargeFootstep");
-    else if (CreatureSize > 200.0f) FootstepType = TEXT("MediumFootstep");
-    
-    SpawnVFX(FootstepType, Location);
+    UNiagaraComponent* FootstepVFX = SpawnVFX(TEXT("CreatureFootstep"), Location);
+    if (FootstepVFX)
+    {
+        FootstepVFX->SetFloatParameter(TEXT("CreatureSize"), CreatureSize);
+    }
 }
 
 void UVFXSystemManager::PlayDomesticationProgressEffect(AActor* Creature, float TrustLevel)
 {
     if (!Creature) return;
     
-    FString EffectName = TEXT("TrustBuilding");
-    if (TrustLevel > 0.8f) EffectName = TEXT("FullyTrusted");
-    else if (TrustLevel > 0.5f) EffectName = TEXT("Friendly");
-    else if (TrustLevel > 0.2f) EffectName = TEXT("Cautious");
+    FVector Location = Creature->GetActorLocation() + FVector(0, 0, 100); // Above creature
     
-    SpawnVFX(EffectName, Creature->GetActorLocation(), FRotator::ZeroRotator, Creature);
+    UNiagaraComponent* DomesticationVFX = SpawnVFX(TEXT("DomesticationProgress"), Location, FRotator::ZeroRotator, Creature);
+    if (DomesticationVFX)
+    {
+        DomesticationVFX->SetFloatParameter(TEXT("TrustLevel"), TrustLevel);
+        
+        // Change color based on trust level
+        FLinearColor TrustColor = FLinearColor::LerpUsingHSV(
+            FLinearColor::Red,    // Hostile
+            FLinearColor::Green,  // Friendly
+            TrustLevel
+        );
+        DomesticationVFX->SetColorParameter(TEXT("TrustColor"), TrustColor);
+    }
 }
 
 void UVFXSystemManager::PlayWeatherEffect(const FString& WeatherType, float Intensity)
 {
-    FString EffectName = FString::Printf(TEXT("Weather_%s"), *WeatherType);
-    
-    // Spawn at multiple locations for coverage
-    if (APawn* Player = UGameplayStatics::GetPlayerPawn(GetWorld(), 0))
+    UNiagaraComponent* WeatherVFX = SpawnVFX(WeatherType, FVector::ZeroVector);
+    if (WeatherVFX)
     {
-        FVector PlayerLocation = Player->GetActorLocation();
-        
-        // Create weather effects in a radius around player
-        for (int32 i = 0; i < 4; i++)
-        {
-            float Angle = (i * 90.0f) * PI / 180.0f;
-            FVector Offset = FVector(FMath::Cos(Angle), FMath::Sin(Angle), 0) * 2000.0f;
-            SpawnVFX(EffectName, PlayerLocation + Offset);
-        }
+        WeatherVFX->SetFloatParameter(TEXT("Intensity"), Intensity);
     }
 }
 
 void UVFXSystemManager::PlayVegetationDisturbance(FVector Location, float Radius)
 {
-    SpawnVFX(TEXT("VegetationRustle"), Location);
-    
-    // Add particle effects for leaves/debris
-    SpawnVFX(TEXT("FallingLeaves"), Location + FVector(0, 0, 200));
+    UNiagaraComponent* VegetationVFX = SpawnVFX(TEXT("VegetationDisturbance"), Location);
+    if (VegetationVFX)
+    {
+        VegetationVFX->SetFloatParameter(TEXT("Radius"), Radius);
+    }
 }
 
 void UVFXSystemManager::PlayImpactEffect(FVector Location, FVector Normal, const FString& SurfaceType)
 {
-    FString EffectName = FString::Printf(TEXT("Impact_%s"), *SurfaceType);
-    FRotator ImpactRotation = Normal.Rotation();
+    FRotator ImpactRotation = FRotationMatrix::MakeFromZ(Normal).Rotator();
     
-    SpawnVFX(EffectName, Location, ImpactRotation);
+    FString EffectName = FString::Printf(TEXT("Impact_%s"), *SurfaceType);
+    UNiagaraComponent* ImpactVFX = SpawnVFX(EffectName, Location, ImpactRotation);
+    if (ImpactVFX)
+    {
+        ImpactVFX->SetVectorParameter(TEXT("ImpactNormal"), Normal);
+    }
 }
 
 void UVFXSystemManager::PlayBloodEffect(FVector Location, FVector Direction, float Intensity)
 {
-    FString EffectName = TEXT("BloodSplatter");
-    if (Intensity > 0.7f) EffectName = TEXT("BloodSplatterHeavy");
+    FRotator BloodRotation = FRotationMatrix::MakeFromX(Direction).Rotator();
     
-    FRotator BloodRotation = Direction.Rotation();
-    SpawnVFX(EffectName, Location, BloodRotation);
+    UNiagaraComponent* BloodVFX = SpawnVFX(TEXT("BloodSpray"), Location, BloodRotation);
+    if (BloodVFX)
+    {
+        BloodVFX->SetVectorParameter(TEXT("Direction"), Direction);
+        BloodVFX->SetFloatParameter(TEXT("Intensity"), Intensity);
+    }
 }
 
 void UVFXSystemManager::InitializeVFXLibrary()
 {
-    // Initialize with default effect data
-    // These would be loaded from data assets in a real implementation
+    // Initialize default VFX library
+    // This would typically be loaded from data assets or configuration files
     
-    FVFXEffectData CreatureBreath;
-    CreatureBreath.Priority = EVFXPriority::Medium;
-    CreatureBreath.Category = EVFXCategory::Creature;
-    CreatureBreath.MaxDistance = 1000.0f;
-    VFXLibrary.Add(TEXT("CreatureBreath"), CreatureBreath);
+    FVFXEffectData CreatureBreathing;
+    CreatureBreathing.Category = EVFXCategory::Creature;
+    CreatureBreathing.Priority = EVFXPriority::Medium;
+    CreatureBreathing.MaxDistance = 2000.0f;
+    CreatureBreathing.MaxInstances = 20;
+    VFXLibrary.Add(TEXT("CreatureBreathing"), CreatureBreathing);
     
-    FVFXEffectData SmallFootstep;
-    SmallFootstep.Priority = EVFXPriority::Low;
-    SmallFootstep.Category = EVFXCategory::Creature;
-    SmallFootstep.MaxDistance = 500.0f;
-    VFXLibrary.Add(TEXT("SmallFootstep"), SmallFootstep);
+    FVFXEffectData CreatureFootstep;
+    CreatureFootstep.Category = EVFXCategory::Creature;
+    CreatureFootstep.Priority = EVFXPriority::High;
+    CreatureFootstep.MaxDistance = 1500.0f;
+    CreatureFootstep.MaxInstances = 30;
+    VFXLibrary.Add(TEXT("CreatureFootstep"), CreatureFootstep);
     
-    FVFXEffectData LargeFootstep;
-    LargeFootstep.Priority = EVFXPriority::High;
-    LargeFootstep.Category = EVFXCategory::Creature;
-    LargeFootstep.MaxDistance = 2000.0f;
-    VFXLibrary.Add(TEXT("LargeFootstep"), LargeFootstep);
+    FVFXEffectData BloodSpray;
+    BloodSpray.Category = EVFXCategory::Combat;
+    BloodSpray.Priority = EVFXPriority::Critical;
+    BloodSpray.MaxDistance = 3000.0f;
+    BloodSpray.MaxInstances = 15;
+    VFXLibrary.Add(TEXT("BloodSpray"), BloodSpray);
     
-    FVFXEffectData BloodSplatter;
-    BloodSplatter.Priority = EVFXPriority::High;
-    BloodSplatter.Category = EVFXCategory::Combat;
-    BloodSplatter.MaxDistance = 1500.0f;
-    VFXLibrary.Add(TEXT("BloodSplatter"), BloodSplatter);
+    FVFXEffectData DomesticationProgress;
+    DomesticationProgress.Category = EVFXCategory::Interaction;
+    DomesticationProgress.Priority = EVFXPriority::High;
+    DomesticationProgress.MaxDistance = 1000.0f;
+    DomesticationProgress.MaxInstances = 5;
+    VFXLibrary.Add(TEXT("DomesticationProgress"), DomesticationProgress);
     
-    // Add more effects as needed...
+    UE_LOG(LogTemp, Log, TEXT("VFX Library initialized with %d effects"), VFXLibrary.Num());
 }
 
 void UVFXSystemManager::CleanupInactiveVFX()
 {
-    for (int32 i = ActiveVFXComponents.Num() - 1; i >= 0; i--)
+    for (int32 i = ActiveVFXComponents.Num() - 1; i >= 0; --i)
     {
-        UNiagaraComponent* VFX = ActiveVFXComponents[i];
-        if (!VFX || !VFX->IsValidLowLevel() || !VFX->IsActive())
+        if (!ActiveVFXComponents[i].IsValid())
         {
             ActiveVFXComponents.RemoveAt(i);
+        }
+        else
+        {
+            UNiagaraComponent* Component = ActiveVFXComponents[i].Get();
+            if (!Component || !IsValid(Component) || !Component->IsActive())
+            {
+                ActiveVFXComponents.RemoveAt(i);
+            }
         }
     }
 }
 
-void UVFXSystemManager::ApplyLODToVFX(UNiagaraComponent* VFXComponent, float Distance)
+void UVFXSystemManager::UpdateAllVFXLOD()
 {
-    if (!VFXComponent) return;
-    
-    float QualityMultiplier = CalculateQualityMultiplier(Distance, EVFXPriority::Medium);
-    
-    // Apply LOD parameters to Niagara system
-    VFXComponent->SetFloatParameter(TEXT("LOD_Quality"), QualityMultiplier);
-    VFXComponent->SetFloatParameter(TEXT("LOD_ParticleCount"), QualityMultiplier);
-    VFXComponent->SetFloatParameter(TEXT("LOD_UpdateRate"), QualityMultiplier);
-    
-    // Disable VFX if too far
-    if (Distance > LowQualityDistance)
+    if (!CachedPlayerController || !CachedPlayerController->GetPawn())
     {
-        VFXComponent->SetVisibility(false);
+        return;
     }
-    else
+    
+    FVector PlayerLocation = CachedPlayerController->GetPawn()->GetActorLocation();
+    
+    for (TWeakObjectPtr<UNiagaraComponent>& WeakComponent : ActiveVFXComponents)
     {
-        VFXComponent->SetVisibility(true);
+        if (WeakComponent.IsValid())
+        {
+            UNiagaraComponent* Component = WeakComponent.Get();
+            float Distance = FVector::Dist(PlayerLocation, Component->GetComponentLocation());
+            UpdateVFXLOD(Component, Distance);
+        }
     }
 }
 
-float UVFXSystemManager::CalculateQualityMultiplier(float Distance, EVFXPriority Priority)
+void UVFXSystemManager::UpdateVFXLOD(UNiagaraComponent* VFXComponent, float DistanceToPlayer)
 {
-    float BaseMultiplier = 1.0f;
+    if (!VFXComponent || !IsValid(VFXComponent))
+    {
+        return;
+    }
     
-    if (Distance <= HighQualityDistance)
+    int32 LODLevel = GetVFXLODLevel(DistanceToPlayer);
+    float QualityMultiplier = CalculateQualityMultiplier(DistanceToPlayer, EVFXPriority::Medium);
+    
+    // Apply LOD settings to the VFX component
+    switch (LODLevel)
     {
-        BaseMultiplier = 1.0f;
+        case 0: // High LOD
+            VFXComponent->SetFloatParameter(TEXT("LODQuality"), 1.0f * QualityMultiplier);
+            VFXComponent->SetIntParameter(TEXT("ParticleCount"), 100);
+            break;
+            
+        case 1: // Medium LOD
+            VFXComponent->SetFloatParameter(TEXT("LODQuality"), 0.6f * QualityMultiplier);
+            VFXComponent->SetIntParameter(TEXT("ParticleCount"), 60);
+            break;
+            
+        case 2: // Low LOD
+            VFXComponent->SetFloatParameter(TEXT("LODQuality"), 0.3f * QualityMultiplier);
+            VFXComponent->SetIntParameter(TEXT("ParticleCount"), 30);
+            break;
+            
+        default: // Cull
+            if (ShouldCullVFX(VFXComponent))
+            {
+                VFXComponent->SetVisibility(false);
+            }
+            break;
     }
-    else if (Distance <= MediumQualityDistance)
+}
+
+int32 UVFXSystemManager::GetVFXLODLevel(float Distance) const
+{
+    if (Distance <= HighLODDistance)
     {
-        BaseMultiplier = 0.7f;
+        return 0; // High LOD
     }
-    else if (Distance <= LowQualityDistance)
+    else if (Distance <= MediumLODDistance)
     {
-        BaseMultiplier = 0.4f;
+        return 1; // Medium LOD
+    }
+    else if (Distance <= 5000.0f) // Low LOD distance
+    {
+        return 2; // Low LOD
     }
     else
     {
-        BaseMultiplier = 0.1f;
+        return 3; // Cull
+    }
+}
+
+bool UVFXSystemManager::ShouldCullVFX(UNiagaraComponent* VFXComponent) const
+{
+    if (!VFXComponent || !CachedPlayerController || !CachedPlayerController->GetPawn())
+    {
+        return true;
     }
     
-    // Priority modifier
-    float PriorityMultiplier = 1.0f;
+    float Distance = FVector::Dist(
+        CachedPlayerController->GetPawn()->GetActorLocation(),
+        VFXComponent->GetComponentLocation()
+    );
+    
+    // Cull if too far away
+    return Distance > 5000.0f;
+}
+
+float UVFXSystemManager::CalculateQualityMultiplier(float Distance, EVFXPriority Priority) const
+{
+    float BaseMultiplier = 1.0f;
+    
+    // Adjust based on global quality setting
+    switch (CurrentVFXQuality)
+    {
+        case 0: BaseMultiplier = 0.25f; break; // Low
+        case 1: BaseMultiplier = 0.5f; break;  // Medium
+        case 2: BaseMultiplier = 0.75f; break; // High
+        case 3: BaseMultiplier = 1.0f; break;  // Ultra
+    }
+    
+    // Adjust based on priority
     switch (Priority)
     {
         case EVFXPriority::Critical:
-            PriorityMultiplier = 1.2f;
+            BaseMultiplier *= 1.0f;
             break;
         case EVFXPriority::High:
-            PriorityMultiplier = 1.0f;
+            BaseMultiplier *= 0.8f;
             break;
         case EVFXPriority::Medium:
-            PriorityMultiplier = 0.8f;
+            BaseMultiplier *= 0.6f;
             break;
         case EVFXPriority::Low:
-            PriorityMultiplier = 0.6f;
+            BaseMultiplier *= 0.4f;
             break;
         case EVFXPriority::Background:
-            PriorityMultiplier = 0.4f;
+            BaseMultiplier *= 0.2f;
             break;
     }
     
-    return BaseMultiplier * PriorityMultiplier * GlobalQualityMultiplier;
+    return BaseMultiplier;
 }
