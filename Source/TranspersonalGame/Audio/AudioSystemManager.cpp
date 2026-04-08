@@ -1,85 +1,119 @@
 #include "AudioSystemManager.h"
 #include "Components/AudioComponent.h"
+#include "MetasoundSource.h"
+#include "AudioParameterControllerInterface.h"
 #include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
-#include "MetasoundSource.h"
+#include "../Characters/DinosaurCharacter.h"
+#include "../Characters/PlayerCharacter.h"
 
-void UAudioSystemManager::Initialize(FSubsystemCollectionBase& Collection)
+// MetaSound parameter names
+const FName UAudioSystemManager::PARAM_ThreatLevel = "ThreatLevel";
+const FName UAudioSystemManager::PARAM_EnvironmentType = "EnvironmentType";
+const FName UAudioSystemManager::PARAM_TimeOfDay = "TimeOfDay";
+const FName UAudioSystemManager::PARAM_StealthLevel = "StealthLevel";
+const FName UAudioSystemManager::PARAM_WeatherIntensity = "WeatherIntensity";
+const FName UAudioSystemManager::PARAM_DinosaurProximity = "DinosaurProximity";
+
+UAudioSystemManager::UAudioSystemManager()
 {
-    Super::Initialize(Collection);
-    
-    UE_LOG(LogTemp, Log, TEXT("Audio System Manager: Initializing..."));
-    
-    // Inicializar estado padrão
-    CurrentAudioState.CurrentState = EAudioState::Calm;
-    CurrentAudioState.StateIntensity = 0.0f;
-    CurrentAudioState.Environment = EEnvironmentType::Forest;
-    CurrentAudioState.ThreatLevel = EThreatLevel::None;
-    
-    InitializeAudioComponents();
-    
-    UE_LOG(LogTemp, Log, TEXT("Audio System Manager: Initialized successfully"));
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 0.1f; // Update 10 times per second
+
+    // Create audio components
+    MusicAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("MusicAudioComponent"));
+    AmbientAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AmbientAudioComponent"));
+    ThreatAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("ThreatAudioComponent"));
+
+    // Set default audio state
+    CurrentAudioState.EnvironmentType = EAudioEnvironmentType::DenseForest;
+    CurrentAudioState.ThreatLevel = EThreatLevel::Safe;
+    CurrentAudioState.TimeOfDay = ETimeOfDay::Morning;
+    CurrentAudioState.PlayerStealthLevel = 0.0f;
+    CurrentAudioState.WeatherIntensity = 0.0f;
+    CurrentAudioState.bIsInPlayerBase = false;
+    CurrentAudioState.NearbyDinosaurCount = 0;
+    CurrentAudioState.DistanceToNearestPredator = 10000.0f;
 }
 
-void UAudioSystemManager::Deinitialize()
+void UAudioSystemManager::BeginPlay()
 {
-    if (MusicAudioComponent && MusicAudioComponent->IsValidLowLevel())
+    Super::BeginPlay();
+
+    // Initialize audio components
+    if (MusicAudioComponent && AdaptiveMusicMetaSound)
     {
-        MusicAudioComponent->Stop();
+        MusicAudioComponent->SetSound(AdaptiveMusicMetaSound);
+        MusicAudioComponent->bAutoActivate = true;
+        MusicAudioComponent->Play();
     }
-    
-    if (AmbienceAudioComponent && AmbienceAudioComponent->IsValidLowLevel())
+
+    if (AmbientAudioComponent && AmbientEnvironmentMetaSound)
     {
-        AmbienceAudioComponent->Stop();
+        AmbientAudioComponent->SetSound(AmbientEnvironmentMetaSound);
+        AmbientAudioComponent->bAutoActivate = true;
+        AmbientAudioComponent->Play();
     }
-    
-    Super::Deinitialize();
+
+    if (ThreatAudioComponent && ThreatMusicMetaSound)
+    {
+        ThreatAudioComponent->SetSound(ThreatMusicMetaSound);
+        ThreatAudioComponent->bAutoActivate = false; // Only play when threatened
+    }
+
+    // Initialize parameters
+    UpdateMusicParameters();
+    UpdateAmbientParameters();
+    UpdateThreatParameters();
 }
 
-void UAudioSystemManager::InitializeAudioComponents()
+void UAudioSystemManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    if (UWorld* World = GetWorld())
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+    // Detect nearby threats periodically
+    LastThreatUpdate += DeltaTime;
+    if (LastThreatUpdate >= ThreatUpdateInterval)
     {
-        // Criar componente de música
-        MusicAudioComponent = NewObject<UAudioComponent>(this);
-        if (MusicAudioComponent)
+        DetectNearbyThreats();
+        CalculateStealthLevel();
+        LastThreatUpdate = 0.0f;
+    }
+
+    // Handle state transitions
+    if (bIsTransitioning)
+    {
+        float TransitionProgress = (GetWorld()->GetTimeSeconds() - TransitionStartTime) / MusicTransitionTime;
+        if (TransitionProgress >= 1.0f)
         {
-            MusicAudioComponent->SetVolumeMultiplier(MusicVolume);
-            MusicAudioComponent->bAutoActivate = false;
-        }
-        
-        // Criar componente de ambiente
-        AmbienceAudioComponent = NewObject<UAudioComponent>(this);
-        if (AmbienceAudioComponent)
-        {
-            AmbienceAudioComponent->SetVolumeMultiplier(AmbienceVolume);
-            AmbienceAudioComponent->bAutoActivate = false;
+            bIsTransitioning = false;
+            PreviousAudioState = CurrentAudioState;
         }
     }
+
+    // Update audio parameters continuously
+    UpdateMusicParameters();
+    UpdateAmbientParameters();
+    UpdateThreatParameters();
 }
 
-void UAudioSystemManager::SetAudioState(EAudioState NewState, float Intensity)
+void UAudioSystemManager::UpdateAudioState(const FAudioStateData& NewState)
 {
-    if (CurrentAudioState.CurrentState != NewState)
+    if (CurrentAudioState.ThreatLevel != NewState.ThreatLevel ||
+        CurrentAudioState.EnvironmentType != NewState.EnvironmentType ||
+        CurrentAudioState.TimeOfDay != NewState.TimeOfDay)
     {
-        UE_LOG(LogTemp, Log, TEXT("Audio System: Transitioning from %d to %d with intensity %.2f"), 
-               (int32)CurrentAudioState.CurrentState, (int32)NewState, Intensity);
-        
-        CurrentAudioState.CurrentState = NewState;
-        CurrentAudioState.StateIntensity = FMath::Clamp(Intensity, 0.0f, 1.0f);
-        
-        UpdateMusicParameters();
+        PreviousAudioState = CurrentAudioState;
+        CurrentAudioState = NewState;
+        bIsTransitioning = true;
+        TransitionStartTime = GetWorld()->GetTimeSeconds();
+
+        UE_LOG(LogTemp, Log, TEXT("Audio state updated: Threat=%d, Environment=%d, Time=%d"), 
+               (int32)NewState.ThreatLevel, (int32)NewState.EnvironmentType, (int32)NewState.TimeOfDay);
     }
-}
-
-void UAudioSystemManager::SetEnvironmentType(EEnvironmentType NewEnvironment)
-{
-    if (CurrentAudioState.Environment != NewEnvironment)
+    else
     {
-        UE_LOG(LogTemp, Log, TEXT("Audio System: Environment changed to %d"), (int32)NewEnvironment);
-        
-        CurrentAudioState.Environment = NewEnvironment;
-        UpdateAmbienceParameters();
+        CurrentAudioState = NewState;
     }
 }
 
@@ -87,186 +121,201 @@ void UAudioSystemManager::SetThreatLevel(EThreatLevel NewThreatLevel)
 {
     if (CurrentAudioState.ThreatLevel != NewThreatLevel)
     {
-        UE_LOG(LogTemp, Log, TEXT("Audio System: Threat level changed to %d"), (int32)NewThreatLevel);
-        
         CurrentAudioState.ThreatLevel = NewThreatLevel;
         
-        // Ajustar estado baseado no nível de ameaça
-        switch (NewThreatLevel)
+        // Handle threat audio component activation
+        if (NewThreatLevel >= EThreatLevel::Danger && ThreatAudioComponent && !ThreatAudioComponent->IsPlaying())
         {
-            case EThreatLevel::None:
-                SetAudioState(EAudioState::Calm, 0.2f);
-                break;
-            case EThreatLevel::Low:
-                SetAudioState(EAudioState::Tension, 0.4f);
-                break;
-            case EThreatLevel::Medium:
-                SetAudioState(EAudioState::Danger, 0.6f);
-                break;
-            case EThreatLevel::High:
-                SetAudioState(EAudioState::Panic, 0.8f);
-                break;
-            case EThreatLevel::Extreme:
-                SetAudioState(EAudioState::Panic, 1.0f);
-                break;
+            ThreatAudioComponent->Play();
         }
+        else if (NewThreatLevel < EThreatLevel::Danger && ThreatAudioComponent && ThreatAudioComponent->IsPlaying())
+        {
+            ThreatAudioComponent->FadeOut(MusicTransitionTime, 0.0f);
+        }
+
+        UE_LOG(LogTemp, Log, TEXT("Threat level changed to: %d"), (int32)NewThreatLevel);
     }
 }
 
-void UAudioSystemManager::UpdateAudioSystem(float DeltaTime)
+void UAudioSystemManager::SetEnvironmentType(EAudioEnvironmentType NewEnvironment)
 {
-    // Atualizar transições suaves entre estados
-    UpdateMusicParameters();
-    UpdateAmbienceParameters();
+    if (CurrentAudioState.EnvironmentType != NewEnvironment)
+    {
+        CurrentAudioState.EnvironmentType = NewEnvironment;
+        UE_LOG(LogTemp, Log, TEXT("Environment changed to: %d"), (int32)NewEnvironment);
+    }
+}
+
+void UAudioSystemManager::OnDinosaurSpotted(ADinosaurCharacter* Dinosaur, float Distance)
+{
+    if (!Dinosaur) return;
+
+    // Increase threat level based on dinosaur type and distance
+    EThreatLevel NewThreatLevel = CurrentAudioState.ThreatLevel;
+
+    if (Distance < 500.0f) // Very close
+    {
+        if (Dinosaur->GetDinosaurType() == EDinosaurType::LargeCarnivore)
+        {
+            NewThreatLevel = EThreatLevel::Terror;
+        }
+        else if (Dinosaur->GetDinosaurType() == EDinosaurType::MediumCarnivore)
+        {
+            NewThreatLevel = EThreatLevel::Danger;
+        }
+        else
+        {
+            NewThreatLevel = EThreatLevel::Tense;
+        }
+    }
+    else if (Distance < 1500.0f) // Medium distance
+    {
+        if (Dinosaur->GetDinosaurType() == EDinosaurType::LargeCarnivore)
+        {
+            NewThreatLevel = EThreatLevel::Danger;
+        }
+        else if (Dinosaur->GetDinosaurType() == EDinosaurType::MediumCarnivore)
+        {
+            NewThreatLevel = EThreatLevel::Tense;
+        }
+        else
+        {
+            NewThreatLevel = EThreatLevel::Cautious;
+        }
+    }
+    else // Far distance
+    {
+        NewThreatLevel = EThreatLevel::Cautious;
+    }
+
+    SetThreatLevel(NewThreatLevel);
+    CurrentAudioState.DistanceToNearestPredator = FMath::Min(CurrentAudioState.DistanceToNearestPredator, Distance);
+}
+
+void UAudioSystemManager::OnPlayerEnterStealth()
+{
+    CurrentAudioState.PlayerStealthLevel = 1.0f;
+    UE_LOG(LogTemp, Log, TEXT("Player entered stealth - audio adjusted"));
+}
+
+void UAudioSystemManager::OnPlayerExitStealth()
+{
+    CurrentAudioState.PlayerStealthLevel = 0.0f;
+    UE_LOG(LogTemp, Log, TEXT("Player exited stealth - audio restored"));
+}
+
+void UAudioSystemManager::PlayDinosaurVocalization(ADinosaurCharacter* Dinosaur, const FString& VocalizationType)
+{
+    if (!Dinosaur) return;
+
+    // This will be implemented to trigger specific dinosaur sound effects
+    // For now, just log the event
+    UE_LOG(LogTemp, Log, TEXT("Dinosaur vocalization: %s - %s"), 
+           *Dinosaur->GetName(), *VocalizationType);
 }
 
 void UAudioSystemManager::UpdateMusicParameters()
 {
-    if (!MusicAudioComponent || !AdaptiveMusicMetaSound)
-        return;
+    if (!MusicAudioComponent) return;
+
+    // Set MetaSound parameters
+    MusicAudioComponent->SetFloatParameter(PARAM_ThreatLevel, (float)CurrentAudioState.ThreatLevel);
+    MusicAudioComponent->SetFloatParameter(PARAM_EnvironmentType, (float)CurrentAudioState.EnvironmentType);
+    MusicAudioComponent->SetFloatParameter(PARAM_TimeOfDay, (float)CurrentAudioState.TimeOfDay);
+    MusicAudioComponent->SetFloatParameter(PARAM_StealthLevel, CurrentAudioState.PlayerStealthLevel);
+    MusicAudioComponent->SetFloatParameter(PARAM_WeatherIntensity, CurrentAudioState.WeatherIntensity);
     
-    // Definir parâmetros do MetaSound baseados no estado atual
-    float TensionLevel = 0.0f;
-    float RhythmIntensity = 0.0f;
-    float HarmonyComplexity = 0.0f;
-    
-    switch (CurrentAudioState.CurrentState)
-    {
-        case EAudioState::Calm:
-            TensionLevel = 0.1f;
-            RhythmIntensity = 0.2f;
-            HarmonyComplexity = 0.3f;
-            break;
-        case EAudioState::Tension:
-            TensionLevel = 0.4f;
-            RhythmIntensity = 0.5f;
-            HarmonyComplexity = 0.6f;
-            break;
-        case EAudioState::Danger:
-            TensionLevel = 0.7f;
-            RhythmIntensity = 0.8f;
-            HarmonyComplexity = 0.4f;
-            break;
-        case EAudioState::Panic:
-            TensionLevel = 1.0f;
-            RhythmIntensity = 1.0f;
-            HarmonyComplexity = 0.2f;
-            break;
-        case EAudioState::Stealth:
-            TensionLevel = 0.6f;
-            RhythmIntensity = 0.1f;
-            HarmonyComplexity = 0.8f;
-            break;
-    }
-    
-    // Aplicar intensidade do estado
-    TensionLevel *= CurrentAudioState.StateIntensity;
-    RhythmIntensity *= CurrentAudioState.StateIntensity;
-    
-    // Enviar parâmetros para o MetaSound
-    MusicAudioComponent->SetFloatParameter(FName("TensionLevel"), TensionLevel);
-    MusicAudioComponent->SetFloatParameter(FName("RhythmIntensity"), RhythmIntensity);
-    MusicAudioComponent->SetFloatParameter(FName("HarmonyComplexity"), HarmonyComplexity);
+    // Calculate proximity factor (0.0 = far, 1.0 = very close)
+    float ProximityFactor = 1.0f - FMath::Clamp(CurrentAudioState.DistanceToNearestPredator / ThreatDetectionRadius, 0.0f, 1.0f);
+    MusicAudioComponent->SetFloatParameter(PARAM_DinosaurProximity, ProximityFactor);
 }
 
-void UAudioSystemManager::UpdateAmbienceParameters()
+void UAudioSystemManager::UpdateAmbientParameters()
 {
-    if (!AmbienceAudioComponent)
-        return;
+    if (!AmbientAudioComponent) return;
+
+    AmbientAudioComponent->SetFloatParameter(PARAM_EnvironmentType, (float)CurrentAudioState.EnvironmentType);
+    AmbientAudioComponent->SetFloatParameter(PARAM_TimeOfDay, (float)CurrentAudioState.TimeOfDay);
+    AmbientAudioComponent->SetFloatParameter(PARAM_WeatherIntensity, CurrentAudioState.WeatherIntensity);
     
-    // Parâmetros baseados no ambiente
-    float ForestDensity = 0.0f;
-    float WaterPresence = 0.0f;
-    float WindIntensity = 0.5f;
-    
-    switch (CurrentAudioState.Environment)
-    {
-        case EEnvironmentType::Forest:
-            ForestDensity = 1.0f;
-            WaterPresence = 0.1f;
-            WindIntensity = 0.3f;
-            break;
-        case EEnvironmentType::Plains:
-            ForestDensity = 0.2f;
-            WaterPresence = 0.0f;
-            WindIntensity = 0.8f;
-            break;
-        case EEnvironmentType::Swamp:
-            ForestDensity = 0.6f;
-            WaterPresence = 0.9f;
-            WindIntensity = 0.2f;
-            break;
-        case EEnvironmentType::Cave:
-            ForestDensity = 0.0f;
-            WaterPresence = 0.3f;
-            WindIntensity = 0.1f;
-            break;
-        case EEnvironmentType::River:
-            ForestDensity = 0.4f;
-            WaterPresence = 1.0f;
-            WindIntensity = 0.4f;
-            break;
-    }
-    
-    AmbienceAudioComponent->SetFloatParameter(FName("ForestDensity"), ForestDensity);
-    AmbienceAudioComponent->SetFloatParameter(FName("WaterPresence"), WaterPresence);
-    AmbienceAudioComponent->SetFloatParameter(FName("WindIntensity"), WindIntensity);
+    // Reduce ambient volume when in stealth
+    float AmbientVolume = 1.0f - (CurrentAudioState.PlayerStealthLevel * StealthAudioReduction);
+    AmbientAudioComponent->SetVolumeMultiplier(AmbientVolume);
 }
 
-void UAudioSystemManager::PlayAdaptiveMusic()
+void UAudioSystemManager::UpdateThreatParameters()
 {
-    if (MusicAudioComponent && AdaptiveMusicMetaSound)
+    if (!ThreatAudioComponent) return;
+
+    ThreatAudioComponent->SetFloatParameter(PARAM_ThreatLevel, (float)CurrentAudioState.ThreatLevel);
+    
+    float ProximityFactor = 1.0f - FMath::Clamp(CurrentAudioState.DistanceToNearestPredator / ThreatDetectionRadius, 0.0f, 1.0f);
+    ThreatAudioComponent->SetFloatParameter(PARAM_DinosaurProximity, ProximityFactor);
+    
+    // Set threat audio volume based on threat level
+    float ThreatVolume = FMath::Clamp((float)CurrentAudioState.ThreatLevel / (float)EThreatLevel::Terror, 0.0f, 1.0f);
+    ThreatAudioComponent->SetVolumeMultiplier(ThreatVolume);
+}
+
+void UAudioSystemManager::DetectNearbyThreats()
+{
+    if (!GetWorld()) return;
+
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    if (!PlayerPawn) return;
+
+    FVector PlayerLocation = PlayerPawn->GetActorLocation();
+    CurrentAudioState.NearbyDinosaurCount = 0;
+    CurrentAudioState.DistanceToNearestPredator = 10000.0f;
+
+    // Find all dinosaurs in the world
+    TArray<AActor*> FoundDinosaurs;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), ADinosaurCharacter::StaticClass(), FoundDinosaurs);
+
+    EThreatLevel HighestThreat = EThreatLevel::Safe;
+
+    for (AActor* Actor : FoundDinosaurs)
     {
-        MusicAudioComponent->SetSound(AdaptiveMusicMetaSound);
-        MusicAudioComponent->Play();
-        UE_LOG(LogTemp, Log, TEXT("Audio System: Adaptive music started"));
+        ADinosaurCharacter* Dinosaur = Cast<ADinosaurCharacter>(Actor);
+        if (!Dinosaur) continue;
+
+        float Distance = FVector::Dist(PlayerLocation, Dinosaur->GetActorLocation());
+        
+        if (Distance <= ThreatDetectionRadius)
+        {
+            CurrentAudioState.NearbyDinosaurCount++;
+            CurrentAudioState.DistanceToNearestPredator = FMath::Min(CurrentAudioState.DistanceToNearestPredator, Distance);
+
+            // Determine threat level based on dinosaur type and distance
+            if (Dinosaur->GetDinosaurType() == EDinosaurType::LargeCarnivore)
+            {
+                if (Distance < 500.0f) HighestThreat = FMath::Max(HighestThreat, EThreatLevel::Terror);
+                else if (Distance < 1000.0f) HighestThreat = FMath::Max(HighestThreat, EThreatLevel::Danger);
+                else HighestThreat = FMath::Max(HighestThreat, EThreatLevel::Tense);
+            }
+            else if (Dinosaur->GetDinosaurType() == EDinosaurType::MediumCarnivore)
+            {
+                if (Distance < 300.0f) HighestThreat = FMath::Max(HighestThreat, EThreatLevel::Danger);
+                else if (Distance < 800.0f) HighestThreat = FMath::Max(HighestThreat, EThreatLevel::Tense);
+                else HighestThreat = FMath::Max(HighestThreat, EThreatLevel::Cautious);
+            }
+        }
+    }
+
+    // Only increase threat level, don't decrease it immediately (let it decay naturally)
+    if (HighestThreat > CurrentAudioState.ThreatLevel)
+    {
+        SetThreatLevel(HighestThreat);
     }
 }
 
-void UAudioSystemManager::StopAdaptiveMusic()
+void UAudioSystemManager::CalculateStealthLevel()
 {
-    if (MusicAudioComponent && MusicAudioComponent->IsPlaying())
-    {
-        MusicAudioComponent->FadeOut(2.0f, 0.0f);
-        UE_LOG(LogTemp, Log, TEXT("Audio System: Adaptive music stopping"));
-    }
-}
-
-void UAudioSystemManager::PlayDinosaurSound(const FString& DinosaurType, const FVector& Location, float Distance)
-{
-    // Calcular volume baseado na distância
-    float VolumeMultiplier = FMath::Clamp(1.0f - (Distance / 5000.0f), 0.1f, 1.0f);
-    
-    // Determinar tipo de som baseado na distância e tipo de dinossauro
-    FString SoundVariation = "Distant";
-    if (Distance < 1000.0f)
-    {
-        SoundVariation = "Close";
-    }
-    else if (Distance < 2500.0f)
-    {
-        SoundVariation = "Medium";
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("Audio System: Playing %s dinosaur sound at distance %.2f"), 
-           *DinosaurType, Distance);
-    
-    // Aqui seria implementada a lógica para tocar o som específico
-    // usando UGameplayStatics::PlaySoundAtLocation com o som apropriado
-}
-
-void UAudioSystemManager::PlayEnvironmentSound(const FString& SoundType, const FVector& Location)
-{
-    UE_LOG(LogTemp, Log, TEXT("Audio System: Playing environment sound %s at location"), *SoundType);
-    
-    // Implementar reprodução de sons ambientais pontuais
-    // como galhos quebrando, folhas rustling, etc.
-}
-
-void UAudioSystemManager::PlayPlayerActionSound(const FString& ActionType)
-{
-    UE_LOG(LogTemp, Log, TEXT("Audio System: Playing player action sound %s"), *ActionType);
-    
-    // Implementar sons de ações do jogador
-    // como passos, respiração, heartbeat durante tensão, etc.
+    // This would integrate with the stealth system
+    // For now, maintain current stealth level
+    // In the full implementation, this would check:
+    // - Player movement speed
+    // - Player visibility to dinosaurs
+    // - Environmental cover
+    // - Time of day
 }
