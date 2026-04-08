@@ -1,0 +1,54 @@
+// Niagara System: Falling Leaves
+// Este é um placeholder para o sistema Niagara real que será criado no editor
+// 
+// CONFIGURAÇÃO DO SISTEMA:
+// - Emitter: Leaf Particles
+//   - Spawn Rate: 10-30 particles/second (baseado em parâmetro Intensity)
+//   - Lifetime: 3-8 seconds
+//   - Initial Velocity: Downward with slight random horizontal drift
+//   - Gravity: Enabled with wind influence
+//   - Collision: Simple collision with ground
+//   - Material: Translucent leaf texture with vertex animation
+//
+// PARÂMETROS EXPOSTOS:
+// - Intensity (0-1): Controla densidade de folhas
+// - WindStrength (0-1): Força do vento lateral
+// - ParticleCount (0-1): Multiplicador de contagem para LOD
+// - DetailLevel (0-1): Nível de detalhe para LOD
+// - GlobalQuality (0-1): Qualidade global para performance
+//
+// MÓDULOS PRINCIPAIS:
+// 1. Spawn Burst - Spawn inicial de folhas
+// 2. Add Velocity - Velocidade inicial descendente
+// 3. Gravity Force - Força gravitacional
+// 4. Drag - Resistência do ar
+// 5. Collision (Scene Depth) - Colisão com o chão
+// 6. Curl Noise Force - Movimento natural tipo vento
+// 7. Sprite Renderer - Renderização das folhas
+//
+// PERFORMANCE:
+// - LOD 0 (Close): 30 particles, full detail
+// - LOD 1 (Medium): 18 particles, reduced detail
+// - LOD 2 (Far): 9 particles, minimal detail
+
+{
+  "Type": "NiagaraSystem",
+  "Name": "NS_FallingLeaves",
+  "Description": "Sistema de folhas caindo para sugerir movimento de dinossauros",
+  "Emitters": [
+    {
+      "Name": "LeafParticles",
+      "SpawnRate": "10 * Intensity * ParticleCount",
+      "Lifetime": "Random(3.0, 8.0)",
+      "InitialVelocity": "Vector(Random(-50, 50), Random(-50, 50), Random(-200, -100))",
+      "Material": "/Game/Materials/Environment/M_Leaf_Translucent"
+    }
+  ],
+  "Parameters": {
+    "Intensity": 1.0,
+    "WindStrength": 0.5,
+    "ParticleCount": 1.0,
+    "DetailLevel": 1.0,
+    "GlobalQuality": 1.0
+  }
+}
