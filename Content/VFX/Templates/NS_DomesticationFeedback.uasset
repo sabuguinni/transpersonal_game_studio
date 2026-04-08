@@ -1,0 +1,74 @@
+# Niagara System: Domestication Feedback Template
+# Visual feedback for trust building between player and dinosaurs
+
+[System Properties]
+Name=NS_DomesticationFeedback
+Category=Interaction
+Description=Particle effects showing trust level and bonding progress
+
+[Emitter_TrustParticles]
+Type=GPU
+MaxParticles=200
+SpawnRate=Variable (based on trust level)
+Lifetime=4.0
+
+[Modules_TrustParticles]
+# Spawn Modules
+- Initialize Particle
+  - Position: Sphere around creature (radius 100)
+  - Velocity: Toward Player (slow drift)
+  - Size: Random Range (5, 15)
+  - Color: Interpolate by Trust Level
+    - Low Trust: RGB(0.8, 0.4, 0.2) - Orange/amber
+    - Medium Trust: RGB(0.4, 0.8, 0.4) - Green
+    - High Trust: RGB(0.2, 0.6, 1.0) - Blue
+
+# Update Modules
+- Update Age
+- Add Velocity
+  - Attraction to Player (weak force)
+  - Random Drift
+- Solve Forces and Velocity
+- Update Position
+- Size Over Life
+  - Curve: Grow 1.0->1.5 then fade to 0
+- Color Over Life
+  - Alpha: Fade in 0->0.8 over 1s, hold, fade out over 1s
+
+# Render Module
+- Sprite Renderer
+  - Material: M_TrustParticle
+  - Sort Mode: Distance
+
+[Emitter_ConnectionLines]
+Type=CPU
+MaxParticles=10
+SpawnRate=2
+Lifetime=2.0
+Condition=TrustLevel > 0.7
+
+[Modules_ConnectionLines]
+# Spawn Modules
+- Initialize Particle
+  - Position: Between Creature and Player
+  - Size: Length of connection
+  - Color: RGB(0.3, 0.7, 1.0) Alpha(0.3)
+
+# Update Modules
+- Update Age
+- Update Connection Position
+- Color Over Life
+  - Alpha: Pulse 0.1->0.5->0.1
+
+# Render Module
+- Beam Renderer
+  - Material: M_ConnectionBeam
+  - Start: Creature Position
+  - End: Player Position
+
+[Parameters]
+TrustLevel=Float(0.0)
+CreaturePosition=Vector3(0,0,0)
+PlayerPosition=Vector3(0,0,0)
+FeedbackIntensity=Float(1.0)
+LODMultiplier=Float(1.0)
