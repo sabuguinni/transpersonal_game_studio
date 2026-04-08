@@ -1,355 +1,259 @@
 #include "MassCrowdSubsystem.h"
 #include "MassEntitySubsystem.h"
-#include "MassSimulationSubsystem.h"
 #include "MassSpawnerSubsystem.h"
-#include "MassMovementFragments.h"
-#include "MassCommonFragments.h"
+#include "MassSimulationSubsystem.h"
 #include "Engine/World.h"
-#include "Engine/Engine.h"
+#include "Kismet/GameplayStatics.h"
 
 void UMassCrowdSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Warning, TEXT("MassCrowdSubsystem: Initializing..."));
+    MassEntitySubsystem = Collection.InitializeDependency<UMassEntitySubsystem>();
     
-    InitializeMassFramework();
-    SetupDefaultConfigurations();
+    InitializeBiomeConfigurations();
+    RegisterMassProcessors();
+    SetupDefaultDensities();
     
-    UE_LOG(LogTemp, Warning, TEXT("MassCrowdSubsystem: Initialization complete"));
+    UE_LOG(LogTemp, Warning, TEXT("MassCrowdSubsystem initialized - Ready for prehistoric crowd simulation"));
 }
 
 void UMassCrowdSubsystem::Deinitialize()
 {
-    UE_LOG(LogTemp, Warning, TEXT("MassCrowdSubsystem: Deinitializing..."));
-    
-    // Limpar todas as entidades ativas
-    if (MassEntitySubsystem)
-    {
-        for (const FMassEntityHandle& Entity : ActiveEntities)
-        {
-            if (MassEntitySubsystem->IsEntityValid(Entity))
-            {
-                MassEntitySubsystem->DestroyEntity(Entity);
-            }
-        }
-        ActiveEntities.Empty();
-    }
+    // Clean up all active herds and packs
+    BiomeHerds.Empty();
+    BiomePredatorPacks.Empty();
+    CurrentActiveAgents = 0;
     
     Super::Deinitialize();
 }
 
 bool UMassCrowdSubsystem::ShouldCreateSubsystem(UObject* Outer) const
 {
-    // Só criar em mundos de jogo, não no editor
-    if (UWorld* World = Cast<UWorld>(Outer))
-    {
-        return World->IsGameWorld();
-    }
-    return false;
+    return Super::ShouldCreateSubsystem(Outer);
 }
 
-void UMassCrowdSubsystem::InitializeMassFramework()
-{
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        UE_LOG(LogTemp, Error, TEXT("MassCrowdSubsystem: No valid world found"));
-        return;
-    }
-    
-    // Obter referências aos subsistemas Mass
-    MassEntitySubsystem = World->GetSubsystem<UMassEntitySubsystem>();
-    MassSimulationSubsystem = World->GetSubsystem<UMassSimulationSubsystem>();
-    
-    if (!MassEntitySubsystem)
-    {
-        UE_LOG(LogTemp, Error, TEXT("MassCrowdSubsystem: Failed to get MassEntitySubsystem"));
-        return;
-    }
-    
-    if (!MassSimulationSubsystem)
-    {
-        UE_LOG(LogTemp, Error, TEXT("MassCrowdSubsystem: Failed to get MassSimulationSubsystem"));
-        return;
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("MassCrowdSubsystem: Mass framework initialized successfully"));
-}
-
-void UMassCrowdSubsystem::SetupDefaultConfigurations()
-{
-    // Configuração padrão para manada de Triceratops
-    FDinosaurHerdConfig TriceratopsHerd;
-    TriceratopsHerd.SpeciesName = "Triceratops";
-    TriceratopsHerd.HerdSize = 15;
-    TriceratopsHerd.CohesionRadius = 1200.0f;
-    TriceratopsHerd.MovementSpeed = 250.0f;
-    TriceratopsHerd.GrazingRadius = 2500.0f;
-    TriceratopsHerd.ActiveHourStart = 6;
-    TriceratopsHerd.ActiveHourEnd = 18;
-    RegisterHerdConfig(TriceratopsHerd);
-    
-    // Configuração padrão para manada de Parasaurolophus
-    FDinosaurHerdConfig ParasaurolophusHerd;
-    ParasaurolophusHerd.SpeciesName = "Parasaurolophus";
-    ParasaurolophusHerd.HerdSize = 25;
-    ParasaurolophusHerd.CohesionRadius = 1000.0f;
-    ParasaurolophusHerd.MovementSpeed = 300.0f;
-    ParasaurolophusHerd.GrazingRadius = 2000.0f;
-    ParasaurolophusHerd.ActiveHourStart = 5;
-    ParasaurolophusHerd.ActiveHourEnd = 19;
-    RegisterHerdConfig(ParasaurolophusHerd);
-    
-    // Configuração padrão para território de T-Rex
-    FPredatorTerritoryConfig TRexTerritory;
-    TRexTerritory.SpeciesName = "TRex";
-    TRexTerritory.TerritoryRadius = 8000.0f;
-    TRexTerritory.PatrolSpeed = 400.0f;
-    TRexTerritory.HuntingRange = 2500.0f;
-    TRexTerritory.HuntingHourStart = 5;
-    TRexTerritory.HuntingHourEnd = 10;
-    RegisterPredatorTerritory(TRexTerritory);
-    
-    // Configuração padrão para território de Allosaurus
-    FPredatorTerritoryConfig AllosaurusTerritory;
-    AllosaurusTerritory.SpeciesName = "Allosaurus";
-    AllosaurusTerritory.TerritoryRadius = 6000.0f;
-    AllosaurusTerritory.PatrolSpeed = 450.0f;
-    AllosaurusTerritory.HuntingRange = 2000.0f;
-    AllosaurusTerritory.HuntingHourStart = 18;
-    AllosaurusTerritory.HuntingHourEnd = 22;
-    RegisterPredatorTerritory(AllosaurusTerritory);
-    
-    // Rota de migração sazonal
-    FMigrationRouteConfig SeasonalMigration;
-    SeasonalMigration.RouteName = "GreatMigration";
-    SeasonalMigration.WayPoints = {
-        FVector(0, 0, 0),
-        FVector(10000, 5000, 0),
-        FVector(15000, 15000, 0),
-        FVector(5000, 20000, 0),
-        FVector(-5000, 15000, 0),
-        FVector(-10000, 5000, 0)
-    };
-    SeasonalMigration.MigratingSpecies = {"Triceratops", "Parasaurolophus", "Stegosaurus"};
-    SeasonalMigration.MigrationDurationDays = 10;
-    SeasonalMigration.MigrationStartDay = 90;  // Primavera
-    SeasonalMigration.ReturnMigrationDay = 270; // Outono
-    RegisterMigrationRoute(SeasonalMigration);
-    
-    UE_LOG(LogTemp, Warning, TEXT("MassCrowdSubsystem: Default configurations loaded"));
-}
-
-void UMassCrowdSubsystem::RegisterHerdConfig(const FDinosaurHerdConfig& HerdConfig)
-{
-    // Verificar se já existe uma configuração para esta espécie
-    for (int32 i = 0; i < HerdConfigs.Num(); i++)
-    {
-        if (HerdConfigs[i].SpeciesName == HerdConfig.SpeciesName)
-        {
-            HerdConfigs[i] = HerdConfig;
-            UE_LOG(LogTemp, Warning, TEXT("MassCrowdSubsystem: Updated herd config for %s"), *HerdConfig.SpeciesName.ToString());
-            return;
-        }
-    }
-    
-    // Adicionar nova configuração
-    HerdConfigs.Add(HerdConfig);
-    UE_LOG(LogTemp, Warning, TEXT("MassCrowdSubsystem: Registered new herd config for %s"), *HerdConfig.SpeciesName.ToString());
-}
-
-void UMassCrowdSubsystem::RegisterPredatorTerritory(const FPredatorTerritoryConfig& TerritoryConfig)
-{
-    // Verificar se já existe uma configuração para esta espécie
-    for (int32 i = 0; i < PredatorConfigs.Num(); i++)
-    {
-        if (PredatorConfigs[i].SpeciesName == TerritoryConfig.SpeciesName)
-        {
-            PredatorConfigs[i] = TerritoryConfig;
-            UE_LOG(LogTemp, Warning, TEXT("MassCrowdSubsystem: Updated predator config for %s"), *TerritoryConfig.SpeciesName.ToString());
-            return;
-        }
-    }
-    
-    // Adicionar nova configuração
-    PredatorConfigs.Add(TerritoryConfig);
-    UE_LOG(LogTemp, Warning, TEXT("MassCrowdSubsystem: Registered new predator config for %s"), *TerritoryConfig.SpeciesName.ToString());
-}
-
-void UMassCrowdSubsystem::RegisterMigrationRoute(const FMigrationRouteConfig& RouteConfig)
-{
-    // Verificar se já existe uma rota com este nome
-    for (int32 i = 0; i < MigrationRoutes.Num(); i++)
-    {
-        if (MigrationRoutes[i].RouteName == RouteConfig.RouteName)
-        {
-            MigrationRoutes[i] = RouteConfig;
-            UE_LOG(LogTemp, Warning, TEXT("MassCrowdSubsystem: Updated migration route %s"), *RouteConfig.RouteName);
-            return;
-        }
-    }
-    
-    // Adicionar nova rota
-    MigrationRoutes.Add(RouteConfig);
-    UE_LOG(LogTemp, Warning, TEXT("MassCrowdSubsystem: Registered new migration route %s"), *RouteConfig.RouteName);
-}
-
-void UMassCrowdSubsystem::SpawnHerd(const FName& SpeciesName, const FVector& Location, int32 Count)
+void UMassCrowdSubsystem::SpawnHerdInBiome(const FString& BiomeName, const FVector& SpawnLocation, const FDinosaurHerdConfig& HerdConfig)
 {
     if (!MassEntitySubsystem)
     {
-        UE_LOG(LogTemp, Error, TEXT("MassCrowdSubsystem: Cannot spawn herd - MassEntitySubsystem not available"));
+        UE_LOG(LogTemp, Error, TEXT("MassEntitySubsystem not available for herd spawning"));
         return;
     }
+
+    // Calculate herd size within configured range
+    int32 HerdSize = FMath::RandRange(HerdConfig.MinHerdSize, HerdConfig.MaxHerdSize);
     
-    // Encontrar configuração da espécie
-    const FDinosaurHerdConfig* HerdConfig = nullptr;
-    for (const FDinosaurHerdConfig& Config : HerdConfigs)
+    // Check if we're within agent limits
+    if (CurrentActiveAgents + HerdSize > MaxActiveAgents)
     {
-        if (Config.SpeciesName == SpeciesName)
-        {
-            HerdConfig = &Config;
-            break;
-        }
-    }
-    
-    if (!HerdConfig)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("MassCrowdSubsystem: No herd config found for species %s"), *SpeciesName.ToString());
+        UE_LOG(LogTemp, Warning, TEXT("Cannot spawn herd - would exceed max agent limit (%d)"), MaxActiveAgents);
         return;
     }
+
+    TArray<FMassEntityHandle> HerdEntities;
     
-    // Spawnar entidades da manada
-    for (int32 i = 0; i < Count; i++)
+    // Spawn herd members in formation
+    for (int32 i = 0; i < HerdSize; i++)
     {
-        // Calcular posição aleatória dentro do raio de coesão
-        float Angle = FMath::RandRange(0.0f, 2.0f * PI);
-        float Distance = FMath::RandRange(0.0f, HerdConfig->CohesionRadius);
-        FVector SpawnLocation = Location + FVector(
+        // Create circular formation around spawn point
+        float Angle = (2.0f * PI * i) / HerdSize;
+        float Distance = FMath::RandRange(100.0f, HerdConfig.HerdCohesionRadius * 0.3f);
+        
+        FVector MemberLocation = SpawnLocation + FVector(
             FMath::Cos(Angle) * Distance,
             FMath::Sin(Angle) * Distance,
             0.0f
         );
+
+        // TODO: Create Mass Entity with appropriate fragments
+        // This will be implemented when Mass Entity fragments are defined
         
-        // Criar entidade Mass
-        FMassEntityHandle Entity = MassEntitySubsystem->CreateEntity();
-        if (MassEntitySubsystem->IsEntityValid(Entity))
-        {
-            ActiveEntities.Add(Entity);
-            
-            // Adicionar fragmentos básicos
-            // Nota: Aqui adicionaríamos os fragmentos específicos do Mass AI
-            // como FMassTransformFragment, FMassVelocityFragment, etc.
-            
-            UE_LOG(LogTemp, Log, TEXT("MassCrowdSubsystem: Spawned %s entity at %s"), 
-                *SpeciesName.ToString(), *SpawnLocation.ToString());
-        }
+        CurrentActiveAgents++;
     }
-    
-    UE_LOG(LogTemp, Warning, TEXT("MassCrowdSubsystem: Spawned herd of %d %s at %s"), 
-        Count, *SpeciesName.ToString(), *Location.ToString());
+
+    // Store herd reference
+    if (!BiomeHerds.Contains(BiomeName))
+    {
+        BiomeHerds.Add(BiomeName, TArray<FMassEntityHandle>());
+    }
+    BiomeHerds[BiomeName].Append(HerdEntities);
+
+    UE_LOG(LogTemp, Log, TEXT("Spawned herd of %d %s in biome %s at location %s"), 
+           HerdSize, 
+           HerdConfig.DinosaurClass ? *HerdConfig.DinosaurClass->GetName() : TEXT("Unknown"),
+           *BiomeName, 
+           *SpawnLocation.ToString());
 }
 
-void UMassCrowdSubsystem::SpawnPredator(const FName& SpeciesName, const FVector& Location)
+void UMassCrowdSubsystem::SpawnPredatorPackInBiome(const FString& BiomeName, const FVector& SpawnLocation, const FPredatorPackConfig& PackConfig)
 {
     if (!MassEntitySubsystem)
     {
-        UE_LOG(LogTemp, Error, TEXT("MassCrowdSubsystem: Cannot spawn predator - MassEntitySubsystem not available"));
+        UE_LOG(LogTemp, Error, TEXT("MassEntitySubsystem not available for pack spawning"));
         return;
     }
+
+    int32 PackSize = FMath::RandRange(PackConfig.MinPackSize, PackConfig.MaxPackSize);
     
-    // Encontrar configuração do predador
-    const FPredatorTerritoryConfig* PredatorConfig = nullptr;
-    for (const FPredatorTerritoryConfig& Config : PredatorConfigs)
+    if (CurrentActiveAgents + PackSize > MaxActiveAgents)
     {
-        if (Config.SpeciesName == SpeciesName)
-        {
-            PredatorConfig = &Config;
-            break;
-        }
-    }
-    
-    if (!PredatorConfig)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("MassCrowdSubsystem: No predator config found for species %s"), *SpeciesName.ToString());
+        UE_LOG(LogTemp, Warning, TEXT("Cannot spawn predator pack - would exceed max agent limit"));
         return;
     }
+
+    TArray<FMassEntityHandle> PackEntities;
     
-    // Criar entidade Mass para o predador
-    FMassEntityHandle Entity = MassEntitySubsystem->CreateEntity();
-    if (MassEntitySubsystem->IsEntityValid(Entity))
+    // Spawn pack members in loose formation
+    for (int32 i = 0; i < PackSize; i++)
     {
-        ActiveEntities.Add(Entity);
+        FVector MemberLocation = SpawnLocation + FVector(
+            FMath::RandRange(-PackConfig.PackCohesionRadius * 0.5f, PackConfig.PackCohesionRadius * 0.5f),
+            FMath::RandRange(-PackConfig.PackCohesionRadius * 0.5f, PackConfig.PackCohesionRadius * 0.5f),
+            0.0f
+        );
+
+        // TODO: Create Mass Entity with predator-specific fragments
         
-        // Adicionar fragmentos específicos do predador
-        // Nota: Aqui adicionaríamos fragmentos como território, estado de caça, etc.
-        
-        UE_LOG(LogTemp, Warning, TEXT("MassCrowdSubsystem: Spawned predator %s at %s"), 
-            *SpeciesName.ToString(), *Location.ToString());
+        CurrentActiveAgents++;
     }
+
+    // Store pack reference
+    if (!BiomePredatorPacks.Contains(BiomeName))
+    {
+        BiomePredatorPacks.Add(BiomeName, TArray<FMassEntityHandle>());
+    }
+    BiomePredatorPacks[BiomeName].Append(PackEntities);
+
+    UE_LOG(LogTemp, Log, TEXT("Spawned predator pack of %d %s in biome %s"), 
+           PackSize, 
+           PackConfig.PredatorClass ? *PackConfig.PredatorClass->GetName() : TEXT("Unknown"),
+           *BiomeName);
 }
 
-void UMassCrowdSubsystem::StartMigration(const FString& RouteName)
+void UMassCrowdSubsystem::TriggerMigrationEvent(const FString& BiomeName, const FVector& MigrationTarget)
 {
-    // Encontrar rota de migração
-    const FMigrationRouteConfig* Route = nullptr;
-    for (const FMigrationRouteConfig& Config : MigrationRoutes)
+    if (!BiomeHerds.Contains(BiomeName))
     {
-        if (Config.RouteName == RouteName)
-        {
-            Route = &Config;
-            break;
-        }
-    }
-    
-    if (!Route)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("MassCrowdSubsystem: Migration route %s not found"), *RouteName);
+        UE_LOG(LogTemp, Warning, TEXT("No herds found in biome %s for migration"), *BiomeName);
         return;
     }
-    
-    UE_LOG(LogTemp, Warning, TEXT("MassCrowdSubsystem: Starting migration %s with %d waypoints"), 
-        *RouteName, Route->WayPoints.Num());
-    
-    // Implementar lógica de migração
-    // Nota: Aqui implementaríamos o sistema de migração usando Mass AI
-}
 
-void UMassCrowdSubsystem::PauseSimulation()
-{
-    bSimulationPaused = true;
-    UE_LOG(LogTemp, Warning, TEXT("MassCrowdSubsystem: Simulation paused"));
-}
-
-void UMassCrowdSubsystem::ResumeSimulation()
-{
-    bSimulationPaused = false;
-    UE_LOG(LogTemp, Warning, TEXT("MassCrowdSubsystem: Simulation resumed"));
-}
-
-int32 UMassCrowdSubsystem::GetActiveEntityCount() const
-{
-    if (!MassEntitySubsystem)
+    // Set migration target for all herds in the biome
+    for (const FMassEntityHandle& HerdEntity : BiomeHerds[BiomeName])
     {
-        return 0;
+        // TODO: Update Mass Entity with migration target
+        // This will set the FMassMoveTargetFragment to the migration destination
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("Triggered migration event in biome %s towards %s"), 
+           *BiomeName, 
+           *MigrationTarget.ToString());
+}
+
+void UMassCrowdSubsystem::TriggerPanicResponse(const FVector& ThreatLocation, float PanicRadius, float PanicIntensity)
+{
+    // Find all entities within panic radius and trigger flee behavior
+    int32 AffectedAgents = 0;
+    
+    // TODO: Query Mass Entity system for all entities within radius
+    // Apply panic behavior modification to affected entities
+    
+    UE_LOG(LogTemp, Log, TEXT("Triggered panic response at %s - Radius: %.1f, Intensity: %.2f, Affected: %d agents"), 
+           *ThreatLocation.ToString(), 
+           PanicRadius, 
+           PanicIntensity, 
+           AffectedAgents);
+}
+
+void UMassCrowdSubsystem::SetBiomeDensityConfig(const FBiomeCrowdDensity& DensityConfig)
+{
+    BiomeDensityConfigs.Add(DensityConfig.BiomeName, DensityConfig);
+    
+    UE_LOG(LogTemp, Log, TEXT("Updated density configuration for biome: %s"), *DensityConfig.BiomeName);
+}
+
+FBiomeCrowdDensity UMassCrowdSubsystem::GetBiomeDensityConfig(const FString& BiomeName) const
+{
+    if (const FBiomeCrowdDensity* Config = BiomeDensityConfigs.Find(BiomeName))
+    {
+        return *Config;
     }
     
-    int32 ValidCount = 0;
-    for (const FMassEntityHandle& Entity : ActiveEntities)
-    {
-        if (MassEntitySubsystem->IsEntityValid(Entity))
-        {
-            ValidCount++;
-        }
-    }
-    
-    return ValidCount;
+    // Return default configuration
+    FBiomeCrowdDensity DefaultConfig;
+    DefaultConfig.BiomeName = BiomeName;
+    return DefaultConfig;
 }
 
-float UMassCrowdSubsystem::GetSimulationPerformance() const
+int32 UMassCrowdSubsystem::GetActiveAgentCount() const
 {
-    // Retornar métrica de performance simples
-    // Em implementação real, calcularia FPS médio, tempo de processamento, etc.
-    return bSimulationPaused ? 0.0f : 60.0f;
+    return CurrentActiveAgents;
+}
+
+int32 UMassCrowdSubsystem::GetAgentCountInRadius(const FVector& Center, float Radius) const
+{
+    // TODO: Query Mass Entity system for entities within radius
+    // For now, return estimated count
+    return 0;
+}
+
+TArray<FVector> UMassCrowdSubsystem::GetNearbyHerdCenters(const FVector& Location, float SearchRadius) const
+{
+    TArray<FVector> HerdCenters;
+    
+    // TODO: Calculate center positions of nearby herds
+    // This will be used by other systems to understand crowd distribution
+    
+    return HerdCenters;
+}
+
+void UMassCrowdSubsystem::InitializeBiomeConfigurations()
+{
+    // This will be populated with data from the Environment Artist and World Generator
+    UE_LOG(LogTemp, Log, TEXT("Initializing biome configurations for crowd simulation"));
+}
+
+void UMassCrowdSubsystem::RegisterMassProcessors()
+{
+    // Register custom Mass processors for dinosaur behavior
+    // This will include herd movement, predator hunting, and panic responses
+    UE_LOG(LogTemp, Log, TEXT("Registering Mass processors for dinosaur crowd simulation"));
+}
+
+void UMassCrowdSubsystem::SetupDefaultDensities()
+{
+    // Forest Biome Configuration
+    FBiomeCrowdDensity ForestDensity;
+    ForestDensity.BiomeName = TEXT("Forest");
+    ForestDensity.HerbivoreAgentsPerKm2 = 75.0f;
+    ForestDensity.CarnivoreAgentsPerKm2 = 8.0f;
+    ForestDensity.SmallCreaturesPerKm2 = 300.0f;
+    BiomeDensityConfigs.Add(ForestDensity.BiomeName, ForestDensity);
+
+    // Plains Biome Configuration
+    FBiomeCrowdDensity PlainsDensity;
+    PlainsDensity.BiomeName = TEXT("Plains");
+    PlainsDensity.HerbivoreAgentsPerKm2 = 120.0f;
+    PlainsDensity.CarnivoreAgentsPerKm2 = 12.0f;
+    PlainsDensity.SmallCreaturesPerKm2 = 150.0f;
+    BiomeDensityConfigs.Add(PlainsDensity.BiomeName, PlainsDensity);
+
+    // Swamp Biome Configuration
+    FBiomeCrowdDensity SwampDensity;
+    SwampDensity.BiomeName = TEXT("Swamp");
+    SwampDensity.HerbivoreAgentsPerKm2 = 40.0f;
+    SwampDensity.CarnivoreAgentsPerKm2 = 15.0f;
+    SwampDensity.SmallCreaturesPerKm2 = 400.0f;
+    BiomeDensityConfigs.Add(SwampDensity.BiomeName, SwampDensity);
+
+    // Mountain Biome Configuration
+    FBiomeCrowdDensity MountainDensity;
+    MountainDensity.BiomeName = TEXT("Mountain");
+    MountainDensity.HerbivoreAgentsPerKm2 = 25.0f;
+    MountainDensity.CarnivoreAgentsPerKm2 = 5.0f;
+    MountainDensity.SmallCreaturesPerKm2 = 100.0f;
+    BiomeDensityConfigs.Add(MountainDensity.BiomeName, MountainDensity);
+
+    UE_LOG(LogTemp, Log, TEXT("Setup default density configurations for %d biomes"), BiomeDensityConfigs.Num());
 }
