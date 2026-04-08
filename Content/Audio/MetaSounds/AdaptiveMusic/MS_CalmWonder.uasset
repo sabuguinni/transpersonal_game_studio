@@ -1,0 +1,139 @@
+{
+  "MetaSound": {
+    "Name": "MS_CalmWonder",
+    "Description": "Música para exploração pacífica - sensação de admiração e descoberta",
+    "Category": "Adaptive Music",
+    "Inputs": [
+      {
+        "Name": "Intensity",
+        "Type": "Float",
+        "DefaultValue": 0.5,
+        "Description": "Intensidade da exploração (0.0 = muito calmo, 1.0 = mais dinâmico)"
+      },
+      {
+        "Name": "TimeOfDay",
+        "Type": "Float", 
+        "DefaultValue": 0.5,
+        "Description": "Hora do dia (0.0 = noite, 1.0 = dia)"
+      },
+      {
+        "Name": "DiscoveryMoment",
+        "Type": "Trigger",
+        "Description": "Trigger para momentos de descoberta"
+      }
+    ],
+    "Graph": {
+      "Nodes": [
+        {
+          "Type": "WavePlayer",
+          "Name": "BaseLayer_Strings",
+          "Properties": {
+            "WaveAsset": "/Content/Audio/Music/Calm_Strings_Loop.wav",
+            "Loop": true,
+            "Volume": 0.7
+          }
+        },
+        {
+          "Type": "WavePlayer", 
+          "Name": "BaseLayer_Pads",
+          "Properties": {
+            "WaveAsset": "/Content/Audio/Music/Calm_Pads_Loop.wav",
+            "Loop": true,
+            "Volume": 0.5
+          }
+        },
+        {
+          "Type": "WavePlayer",
+          "Name": "Discovery_Harp",
+          "Properties": {
+            "WaveAsset": "/Content/Audio/Music/Discovery_Harp.wav",
+            "Loop": false,
+            "Volume": 0.8
+          }
+        },
+        {
+          "Type": "LowFrequencyOscillator",
+          "Name": "Breathing_LFO",
+          "Properties": {
+            "Frequency": 0.1,
+            "Shape": "Sine",
+            "MinValue": 0.8,
+            "MaxValue": 1.0
+          }
+        },
+        {
+          "Type": "Multiply",
+          "Name": "Volume_Modulation"
+        },
+        {
+          "Type": "MapRange",
+          "Name": "TimeOfDay_Brightness",
+          "Properties": {
+            "InRangeA": 0.0,
+            "InRangeB": 1.0,
+            "OutRangeA": 0.3,
+            "OutRangeB": 1.0
+          }
+        },
+        {
+          "Type": "Crossfade",
+          "Name": "Intensity_Mix",
+          "Properties": {
+            "InputCount": 2
+          }
+        },
+        {
+          "Type": "BiquadFilter",
+          "Name": "Warmth_Filter",
+          "Properties": {
+            "Type": "LowPass",
+            "CutoffFrequency": 8000,
+            "Resonance": 0.7
+          }
+        }
+      ],
+      "Connections": [
+        {
+          "From": "BaseLayer_Strings.Audio",
+          "To": "Intensity_Mix.In0"
+        },
+        {
+          "From": "BaseLayer_Pads.Audio", 
+          "To": "Intensity_Mix.In1"
+        },
+        {
+          "From": "Intensity",
+          "To": "Intensity_Mix.CrossfadeValue"
+        },
+        {
+          "From": "Breathing_LFO.Out",
+          "To": "Volume_Modulation.A"
+        },
+        {
+          "From": "Intensity_Mix.Out",
+          "To": "Volume_Modulation.B"
+        },
+        {
+          "From": "TimeOfDay",
+          "To": "TimeOfDay_Brightness.In"
+        },
+        {
+          "From": "TimeOfDay_Brightness.OutValue",
+          "To": "Warmth_Filter.CutoffFrequency"
+        },
+        {
+          "From": "Volume_Modulation.Out",
+          "To": "Warmth_Filter.In"
+        },
+        {
+          "From": "DiscoveryMoment",
+          "To": "Discovery_Harp.Play"
+        },
+        {
+          "From": "Warmth_Filter.Out",
+          "To": "Output.Audio"
+        }
+      ]
+    }
+  }
+}
