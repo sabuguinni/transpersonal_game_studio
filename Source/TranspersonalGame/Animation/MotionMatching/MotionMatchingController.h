@@ -1,173 +1,126 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Animation/AnimInstance.h"
+#include "Components/ActorComponent.h"
 #include "PoseSearch/PoseSearch.h"
-#include "Animation/AnimNode_MotionMatching.h"
-#include "Animation/AnimNode_PoseSearchHistoryCollector.h"
-#include "../Core/AnimationSystemCore.h"
+#include "Animation/AnimInstance.h"
 #include "MotionMatchingController.generated.h"
 
-/**
- * Motion Matching Controller for Jurassic Survival Game
- * 
- * Handles dynamic pose selection based on:
- * - Current movement state and velocity
- * - Emotional state (fear, aggression, curiosity)
- * - Environmental context (terrain, nearby threats)
- * - Individual personality variations
- * 
- * Based on RDR2's approach where every step tells a story about the character
- */
+UENUM(BlueprintType)
+enum class EMotionMatchingDatabase : uint8
+{
+    Locomotion,
+    Interaction,
+    Combat,
+    Stealth,
+    Climbing,
+    Emotional
+};
 
 USTRUCT(BlueprintType)
 struct FMotionMatchingQuery
 {
     GENERATED_BODY()
 
-    // Movement parameters
-    UPROPERTY(BlueprintReadWrite)
-    FVector Velocity = FVector::ZeroVector;
-    
-    UPROPERTY(BlueprintReadWrite)
-    FVector Acceleration = FVector::ZeroVector;
-    
-    UPROPERTY(BlueprintReadWrite)
-    float Speed = 0.0f;
-    
-    UPROPERTY(BlueprintReadWrite)
-    float Direction = 0.0f;
-    
-    // Emotional state influences
-    UPROPERTY(BlueprintReadWrite)
-    EEmotionalState CurrentEmotionalState = EEmotionalState::Calm;
-    
-    UPROPERTY(BlueprintReadWrite)
-    float FearLevel = 0.0f;
-    
-    UPROPERTY(BlueprintReadWrite)
-    float AlertnessLevel = 0.0f;
-    
-    // Environmental context
-    UPROPERTY(BlueprintReadWrite)
-    float TerrainSlope = 0.0f;
-    
-    UPROPERTY(BlueprintReadWrite)
-    bool bIsInDenseVegetation = false;
-    
-    UPROPERTY(BlueprintReadWrite)
-    bool bNearWater = false;
-    
-    UPROPERTY(BlueprintReadWrite)
-    bool bHasNearbyThreats = false;
-    
-    // Individual variations
-    UPROPERTY(BlueprintReadWrite)
-    FCreaturePersonality Personality;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FVector DesiredVelocity;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FVector DesiredAcceleration;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float DesiredSpeed;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float DesiredDirection;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float EmotionalState;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float TerrainComplexity;
+
+    FMotionMatchingQuery()
+    {
+        DesiredVelocity = FVector::ZeroVector;
+        DesiredAcceleration = FVector::ZeroVector;
+        DesiredSpeed = 0.0f;
+        DesiredDirection = 0.0f;
+        EmotionalState = 0.0f;
+        TerrainComplexity = 0.0f;
+    }
 };
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UMotionMatchingController : public UAnimInstance
+/**
+ * Controlador avançado para Motion Matching
+ * Gerencia múltiplas databases e queries contextuais
+ */
+UCLASS(ClassGroup=(Animation), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UMotionMatchingController : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
     UMotionMatchingController();
 
-    // Animation Blueprint Interface
-    virtual void NativeInitializeAnimation() override;
-    virtual void NativeUpdateAnimation(float DeltaTimeX) override;
-
-    // Motion Matching Core Functions
-    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    void UpdateMotionMatchingQuery();
-    
-    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    UPoseSearchDatabase* SelectOptimalDatabase();
-    
-    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    float CalculateBlendTime(const FAnimNode_MotionMatching& MotionMatchingNode);
-
-    // Personality-based animation modifiers
-    UFUNCTION(BlueprintCallable, Category = "Animation Modifiers")
-    float GetPersonalitySpeedModifier() const;
-    
-    UFUNCTION(BlueprintCallable, Category = "Animation Modifiers")
-    float GetPersonalityPostureOffset() const;
-    
-    UFUNCTION(BlueprintCallable, Category = "Animation Modifiers")
-    float GetStepLengthModifier() const;
-
 protected:
-    // Core References
-    UPROPERTY(BlueprintReadOnly, Category = "References")
-    TObjectPtr<UAnimationSystemCore> AnimationSystem;
-    
-    UPROPERTY(BlueprintReadOnly, Category = "References")
-    TObjectPtr<ACharacter> OwningCharacter;
-    
-    // Motion Matching State
-    UPROPERTY(BlueprintReadOnly, Category = "Motion Matching")
-    FMotionMatchingQuery CurrentQuery;
-    
-    UPROPERTY(BlueprintReadOnly, Category = "Motion Matching")
-    TObjectPtr<UPoseSearchDatabase> ActiveDatabase;
-    
-    // Creature Configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Creature Setup")
-    ECreatureArchetype CreatureType = ECreatureArchetype::Paleontologist;
-    
-    UPROPERTY(BlueprintReadOnly, Category = "Creature Setup")
-    FCreaturePersonality CreaturePersonality;
-    
-    // Animation State Variables
-    UPROPERTY(BlueprintReadOnly, Category = "Animation State")
-    float MovementSpeed = 0.0f;
-    
-    UPROPERTY(BlueprintReadOnly, Category = "Animation State")
-    float MovementDirection = 0.0f;
-    
-    UPROPERTY(BlueprintReadOnly, Category = "Animation State")
-    bool bIsMoving = false;
-    
-    UPROPERTY(BlueprintReadOnly, Category = "Animation State")
-    bool bIsCrouching = false;
-    
-    UPROPERTY(BlueprintReadOnly, Category = "Animation State")
-    bool bIsInCombat = false;
-    
-    // Environmental Awareness
-    UPROPERTY(BlueprintReadOnly, Category = "Environment")
-    TArray<AActor*> NearbyThreats;
-    
-    UPROPERTY(BlueprintReadOnly, Category = "Environment")
-    float CurrentFearLevel = 0.0f;
-    
+    virtual void BeginPlay() override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
+public:
     // Motion Matching Databases
-    UPROPERTY(EditDefaultsOnly, Category = "Motion Matching Databases")
-    TObjectPtr<UPoseSearchDatabase> IdleDatabase;
-    
-    UPROPERTY(EditDefaultsOnly, Category = "Motion Matching Databases")
-    TObjectPtr<UPoseSearchDatabase> LocomotionDatabase;
-    
-    UPROPERTY(EditDefaultsOnly, Category = "Motion Matching Databases")
-    TObjectPtr<UPoseSearchDatabase> StealthDatabase;
-    
-    UPROPERTY(EditDefaultsOnly, Category = "Motion Matching Databases")
-    TObjectPtr<UPoseSearchDatabase> AlertDatabase;
-    
-    UPROPERTY(EditDefaultsOnly, Category = "Motion Matching Databases")
-    TObjectPtr<UPoseSearchDatabase> FearDatabase;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    TMap<EMotionMatchingDatabase, class UPoseSearchDatabase*> AnimationDatabases;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    class UPoseSearchSchema* PrimarySchema;
+
+    // Query Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Query System")
+    float QueryUpdateRate = 30.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Query System")
+    float BlendTimeMin = 0.1f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Query System")
+    float BlendTimeMax = 0.5f;
+
+    // Emotional Modulation
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotional System")
+    float FearInfluenceOnBlending = 0.3f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotional System")
+    float ExhaustionInfluenceOnSpeed = 0.5f;
+
+    // Current State
+    UPROPERTY(BlueprintReadOnly, Category = "Current State")
+    FMotionMatchingQuery CurrentQuery;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Current State")
+    EMotionMatchingDatabase ActiveDatabase;
+
+    // Functions
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    void SetActiveDatabase(EMotionMatchingDatabase Database);
+
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    void UpdateQuery(const FMotionMatchingQuery& NewQuery);
+
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    float CalculateDynamicBlendTime(float FearLevel, float MovementIntensity);
+
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    UPoseSearchDatabase* GetCurrentDatabase() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    void ModulateQueryWithEmotion(float FearLevel, float ExhaustionLevel);
 
 private:
-    // Internal state tracking
-    FVector PreviousLocation = FVector::ZeroVector;
-    FVector CurrentVelocity = FVector::ZeroVector;
-    float DeltaTime = 0.0f;
-    
-    // Helper functions
-    void UpdateMovementState();
-    void UpdateEmotionalState();
-    void UpdateEnvironmentalAwareness();
-    void ApplyPersonalityVariations();
+    void UpdateQueryFromMovement();
+    void SelectOptimalDatabase();
+    float CalculateTerrainComplexity();
+
+    float LastQueryUpdateTime;
+    FVector PreviousVelocity;
+    class UAnimationSystemManager* AnimationManager;
 };
