@@ -184,4 +184,280 @@ UCollisionSystem::FAdvancedCollisionResult UCollisionSystem::PerformAdvancedColl
     // Perform collision test based on type
     switch (CollisionType)
     {
-        case ECollisionTestType::Simple:\n        {\n            // Simple overlap test\n            Result.bHasCollision = CompA->IsOverlappingComponent(CompB);\n            if (Result.bHasCollision)\n            {\n                Result.ImpactLocation = (ActorA->GetActorLocation() + ActorB->GetActorLocation()) * 0.5f;\n            }\n            break;\n        }\n        \n        case ECollisionTestType::Complex:\n        {\n            // Complex mesh collision with detailed hit result\n            FHitResult HitResult;\n            FVector Start = ActorA->GetActorLocation();\n            FVector End = ActorB->GetActorLocation();\n            \n            FCollisionQueryParams QueryParams;\n            QueryParams.AddIgnoredActor(ActorA);\n            QueryParams.bTraceComplex = true;\n            \n            if (CachedWorld->LineTraceSingleByChannel(HitResult, Start, End, ECC_WorldStatic, QueryParams))\n            {\n                if (HitResult.GetActor() == ActorB)\n                {\n                    Result.bHasCollision = true;\n                    Result.ImpactLocation = HitResult.ImpactPoint;\n                    Result.ImpactNormal = HitResult.ImpactNormal;\n                    Result.HitComponent = HitResult.GetComponent();\n                    Result.HitBoneName = HitResult.BoneName;\n                    Result.HitMaterial = HitResult.PhysMaterial.Get();\n                    Result.PenetrationDepth = (End - Start).Size() - HitResult.Distance;\n                }\n            }\n            break;\n        }\n        \n        case ECollisionTestType::Creature:\n        {\n            // Specialized creature collision with size-based calculations\n            USkeletalMeshComponent* SkeletalA = ActorA->FindComponentByClass<USkeletalMeshComponent>();\n            USkeletalMeshComponent* SkeletalB = ActorB->FindComponentByClass<USkeletalMeshComponent>();\n            \n            if (SkeletalA && SkeletalB)\n            {\n                // Check collision between skeletal meshes with bone-level precision\n                FVector LocationA = ActorA->GetActorLocation();\n                FVector LocationB = ActorB->GetActorLocation();\n                float Distance = FVector::Dist(LocationA, LocationB);\n                \n                // Calculate combined collision radius based on creature sizes\n                float RadiusA = SkeletalA->Bounds.SphereRadius;\n                float RadiusB = SkeletalB->Bounds.SphereRadius;\n                float CombinedRadius = RadiusA + RadiusB;\n                \n                if (Distance <= CombinedRadius)\n                {\n                    Result.bHasCollision = true;\n                    Result.ImpactLocation = LocationA + (LocationB - LocationA) * (RadiusA / CombinedRadius);\n                    Result.ImpactNormal = (LocationB - LocationA).GetSafeNormal();\n                    Result.PenetrationDepth = CombinedRadius - Distance;\n                    \n                    // Calculate impact force based on creature masses and velocities\n                    float MassA = SkeletalA->GetMass();\n                    float MassB = SkeletalB->GetMass();\n                    FVector VelocityA = SkeletalA->GetPhysicsLinearVelocity();\n                    FVector VelocityB = SkeletalB->GetPhysicsLinearVelocity();\n                    \n                    FVector RelativeVelocity = VelocityA - VelocityB;\n                    Result.ImpactForce = (MassA * MassB / (MassA + MassB)) * RelativeVelocity.Size();\n                }\n            }\n            break;\n        }\n        \n        case ECollisionTestType::Environmental:\n        {\n            // Environmental collision with destruction potential\n            UGeometryCollectionComponent* GeoCollection = ActorB->FindComponentByClass<UGeometryCollectionComponent>();\n            if (GeoCollection)\n            {\n                // Check if impact force exceeds destruction threshold\n                UPrimitiveComponent* ImpactComp = Cast<UPrimitiveComponent>(ActorA->GetRootComponent());\n                if (ImpactComp)\n                {\n                    FVector Velocity = ImpactComp->GetPhysicsLinearVelocity();\n                    float Mass = ImpactComp->GetMass();\n                    float KineticEnergy = 0.5f * Mass * Velocity.SizeSquared();\n                    \n                    if (KineticEnergy > DestructionForceThreshold)\n                    {\n                        Result.bHasCollision = true;\n                        Result.ImpactLocation = ActorB->GetActorLocation();\n                        Result.ImpactForce = KineticEnergy;\n                        Result.HitComponent = GeoCollection;\n                    }\n                }\n            }\n            break;\n        }\n    }\n    \n    // Broadcast collision event if collision detected\n    if (Result.bHasCollision && OnCollisionEvent.IsBound())\n    {\n        OnCollisionEvent.Broadcast(ActorA, ActorB, Result);\n    }\n    \n    return Result;\n}\n\nvoid UCollisionSystem::SetupCreatureCollision(AActor* CreatureActor, ECreatureCollisionSize CreatureSize, FName CollisionPreset)\n{\n    if (!CreatureActor)\n    {\n        UE_LOG(LogTemp, Warning, TEXT("CollisionSystem: Invalid creature actor for collision setup"));\n        return;\n    }\n    \n    UPrimitiveComponent* RootComp = Cast<UPrimitiveComponent>(CreatureActor->GetRootComponent());\n    if (!RootComp)\n    {\n        UE_LOG(LogTemp, Warning, TEXT("CollisionSystem: Creature actor has no primitive root component"));\n        return;\n    }\n    \n    // Apply collision preset based on creature size\n    FName* ProfileName = CreatureCollisionProfiles.Find(CreatureSize);\n    if (ProfileName)\n    {\n        RootComp->SetCollisionProfileName(*ProfileName);\n    }\n    else\n    {\n        RootComp->SetCollisionProfileName(CollisionPreset);\n    }\n    \n    // Setup size-specific collision properties\n    switch (CreatureSize)\n    {\n        case ECreatureCollisionSize::Tiny:\n            RootComp->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore); // Tiny creatures don't block movement\n            break;\n            \n        case ECreatureCollisionSize::Small:\n            RootComp->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);\n            break;\n            \n        case ECreatureCollisionSize::Medium:\n            RootComp->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);\n            RootComp->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Block);\n            break;\n            \n        case ECreatureCollisionSize::Large:\n            RootComp->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);\n            RootComp->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Block);\n            RootComp->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Block);\n            break;\n            \n        case ECreatureCollisionSize::Massive:\n            // Massive creatures can break through some environmental objects\n            RootComp->SetCollisionResponseToAllChannels(ECR_Block);\n            RootComp->SetCollisionResponseToChannel(ECC_Destructible, ECR_Overlap); // Can trigger destruction\n            break;\n    }\n    \n    // Add to tracked actors for LOD optimization\n    TrackedCollisionActors.AddUnique(CreatureActor);\n    \n    UE_LOG(LogTemp, Log, TEXT("CollisionSystem: Setup collision for %s creature: %s"), \n           *UEnum::GetValueAsString(CreatureSize), *CreatureActor->GetName());\n}\n\nvoid UCollisionSystem::HandleEnvironmentalImpact(AActor* ImpactActor, AActor* EnvironmentActor, float ImpactForce, FVector ImpactLocation)\n{\n    if (!ImpactActor || !EnvironmentActor)\n    {\n        return;\n    }\n    \n    // Check if impact force exceeds destruction threshold\n    if (ImpactForce < DestructionForceThreshold)\n    {\n        return;\n    }\n    \n    // Handle geometry collection destruction\n    UGeometryCollectionComponent* GeoCollection = EnvironmentActor->FindComponentByClass<UGeometryCollectionComponent>();\n    if (GeoCollection)\n    {\n        // Apply destruction impulse\n        FVector ImpulseDirection = (EnvironmentActor->GetActorLocation() - ImpactActor->GetActorLocation()).GetSafeNormal();\n        GeoCollection->ApplyPhysicsField(true, EFieldPhysicsType::Field_LinearForce, nullptr, nullptr);\n        \n        UE_LOG(LogTemp, Log, TEXT("CollisionSystem: Environmental destruction triggered - Force: %.2f at %s\"), \n               ImpactForce, *ImpactLocation.ToString());\n    }\n    \n    // Handle static mesh destruction (convert to geometry collection if needed)\n    UStaticMeshComponent* StaticMesh = EnvironmentActor->FindComponentByClass<UStaticMeshComponent>();\n    if (StaticMesh && !GeoCollection)\n    {\n        // Could implement runtime conversion to geometry collection here\n        UE_LOG(LogTemp, Log, TEXT("CollisionSystem: Static mesh impact - consider converting to destructible"));\n    }\n}\n\nvoid UCollisionSystem::OptimizeCollisionLOD(FVector ViewerLocation, float MaxDistance)\n{\n    if (!bEnableHierarchicalOptimization)\n    {\n        return;\n    }\n    \n    for (AActor* Actor : TrackedCollisionActors)\n    {\n        if (!IsValid(Actor))\n        {\n            continue;\n        }\n        \n        float Distance = FVector::Dist(ViewerLocation, Actor->GetActorLocation());\n        \n        // Skip actors beyond maximum distance\n        if (Distance > MaxDistance)\n        {\n            continue;\n        }\n        \n        UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(Actor->GetRootComponent());\n        if (!PrimComp)\n        {\n            continue;\n        }\n        \n        // Set collision complexity based on distance\n        ECollisionEnabled::Type CollisionType = GetCollisionComplexityForDistance(Distance);\n        PrimComp->SetCollisionEnabled(CollisionType);\n    }\n}\n\nvoid UCollisionSystem::UpdateCollisionLOD()\n{\n    // Get player location for LOD calculations\n    if (CachedWorld && CachedWorld->GetFirstPlayerController())\n    {\n        APawn* PlayerPawn = CachedWorld->GetFirstPlayerController()->GetPawn();\n        if (PlayerPawn)\n        {\n            OptimizeCollisionLOD(PlayerPawn->GetActorLocation(), MaxCollisionDistance);\n        }\n    }\n}\n\nECollisionEnabled::Type UCollisionSystem::GetCollisionComplexityForDistance(float Distance) const\n{\n    if (Distance <= CollisionLODDistances[0])\n    {\n        return ECollisionEnabled::QueryAndPhysics; // Full collision\n    }\n    else if (Distance <= CollisionLODDistances[1])\n    {\n        return ECollisionEnabled::QueryOnly; // Query only, no physics\n    }\n    else if (Distance <= CollisionLODDistances[2])\n    {\n        return ECollisionEnabled::QueryOnly; // Simplified collision\n    }\n    else\n    {\n        return ECollisionEnabled::NoCollision; // No collision at far distances\n    }\n}\n\nvoid UCollisionSystem::RegisterCollisionCallback(const FCollisionEventDelegate& Callback)\n{\n    OnCollisionEvent.AddDynamic(Callback.GetUObject(), Callback.GetFunctionName());\n    UE_LOG(LogTemp, Log, TEXT("CollisionSystem: Collision callback registered"));\n}"
+        case ECollisionTestType::Simple:
+        {
+            // Simple overlap test
+            Result.bHasCollision = CompA->IsOverlappingComponent(CompB);
+            if (Result.bHasCollision)
+            {
+                Result.ImpactLocation = (ActorA->GetActorLocation() + ActorB->GetActorLocation()) * 0.5f;
+            }
+            break;
+        }
+        
+        case ECollisionTestType::Complex:
+        {
+            // Complex mesh collision with detailed hit result
+            FHitResult HitResult;
+            FVector Start = ActorA->GetActorLocation();
+            FVector End = ActorB->GetActorLocation();
+            
+            FCollisionQueryParams QueryParams;
+            QueryParams.AddIgnoredActor(ActorA);
+            QueryParams.bTraceComplex = true;
+            
+            if (CachedWorld->LineTraceSingleByChannel(HitResult, Start, End, ECC_WorldStatic, QueryParams))
+            {
+                if (HitResult.GetActor() == ActorB)
+                {
+                    Result.bHasCollision = true;
+                    Result.ImpactLocation = HitResult.ImpactPoint;
+                    Result.ImpactNormal = HitResult.ImpactNormal;
+                    Result.HitComponent = HitResult.GetComponent();
+                    Result.HitBoneName = HitResult.BoneName;
+                    Result.HitMaterial = HitResult.PhysMaterial.Get();
+                    Result.PenetrationDepth = (End - Start).Size() - HitResult.Distance;
+                }
+            }
+            break;
+        }
+        
+        case ECollisionTestType::Creature:
+        {
+            // Specialized creature collision with size-based calculations
+            USkeletalMeshComponent* SkeletalA = ActorA->FindComponentByClass<USkeletalMeshComponent>();
+            USkeletalMeshComponent* SkeletalB = ActorB->FindComponentByClass<USkeletalMeshComponent>();
+            
+            if (SkeletalA && SkeletalB)
+            {
+                // Check collision between skeletal meshes with bone-level precision
+                FVector LocationA = ActorA->GetActorLocation();
+                FVector LocationB = ActorB->GetActorLocation();
+                float Distance = FVector::Dist(LocationA, LocationB);
+                
+                // Calculate combined collision radius based on creature sizes
+                float RadiusA = SkeletalA->Bounds.SphereRadius;
+                float RadiusB = SkeletalB->Bounds.SphereRadius;
+                float CombinedRadius = RadiusA + RadiusB;
+                
+                if (Distance <= CombinedRadius)
+                {
+                    Result.bHasCollision = true;
+                    Result.ImpactLocation = LocationA + (LocationB - LocationA) * (RadiusA / CombinedRadius);
+                    Result.ImpactNormal = (LocationB - LocationA).GetSafeNormal();
+                    Result.PenetrationDepth = CombinedRadius - Distance;
+                    Result.HitComponent = CompB;
+                    
+                    // Calculate impact force based on creature masses and velocities
+                    float MassA = CompA->GetMass();
+                    float MassB = CompB->GetMass();
+                    FVector VelocityA = CompA->GetPhysicsLinearVelocity();
+                    FVector VelocityB = CompB->GetPhysicsLinearVelocity();
+                    
+                    float RelativeSpeed = (VelocityA - VelocityB).Size();
+                    Result.ImpactForce = (MassA * MassB / (MassA + MassB)) * RelativeSpeed;
+                }
+            }
+            break;
+        }
+        
+        case ECollisionTestType::Environmental:
+        {
+            // Environmental destruction collision
+            UGeometryCollectionComponent* GeomCollection = ActorB->FindComponentByClass<UGeometryCollectionComponent>();
+            if (GeomCollection)
+            {
+                // Check if impact force exceeds destruction threshold
+                FVector VelocityA = CompA->GetPhysicsLinearVelocity();
+                float ImpactForce = CompA->GetMass() * VelocityA.Size();
+                
+                if (ImpactForce > DestructionForceThreshold)
+                {
+                    Result.bHasCollision = true;
+                    Result.ImpactLocation = ActorB->GetActorLocation();
+                    Result.ImpactForce = ImpactForce;
+                    Result.HitComponent = GeomCollection;
+                }
+            }
+            break;
+        }
+        
+        case ECollisionTestType::Hierarchical:
+        {
+            // Multi-level collision detection for complex objects
+            TArray<UPrimitiveComponent*> ComponentsA;
+            TArray<UPrimitiveComponent*> ComponentsB;
+            
+            ActorA->GetComponents<UPrimitiveComponent>(ComponentsA);
+            ActorB->GetComponents<UPrimitiveComponent>(ComponentsB);
+            
+            for (UPrimitiveComponent* CompA_Inner : ComponentsA)
+            {
+                for (UPrimitiveComponent* CompB_Inner : ComponentsB)
+                {
+                    if (CompA_Inner->IsOverlappingComponent(CompB_Inner))
+                    {
+                        Result.bHasCollision = true;
+                        Result.ImpactLocation = (CompA_Inner->GetComponentLocation() + CompB_Inner->GetComponentLocation()) * 0.5f;
+                        Result.HitComponent = CompB_Inner;
+                        break;
+                    }
+                }
+                if (Result.bHasCollision) break;
+            }
+            break;
+        }
+    }
+    
+    return Result;
+}
+
+void UCollisionSystem::SetupCreatureCollision(AActor* CreatureActor, ECreatureCollisionSize CreatureSize, FName CollisionPreset)
+{
+    if (!CreatureActor)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("CollisionSystem: Cannot setup collision for null creature"));
+        return;
+    }
+    
+    UPrimitiveComponent* RootComp = Cast<UPrimitiveComponent>(CreatureActor->GetRootComponent());
+    if (!RootComp)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("CollisionSystem: Creature has no primitive root component"));
+        return;
+    }
+    
+    // Apply collision preset based on creature size
+    RootComp->SetCollisionProfileName(CollisionPreset);
+    
+    // Adjust collision settings based on creature size
+    switch (CreatureSize)
+    {
+        case ECreatureCollisionSize::Tiny:
+            RootComp->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
+            break;
+        case ECreatureCollisionSize::Small:
+            RootComp->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
+            break;
+        case ECreatureCollisionSize::Medium:
+            RootComp->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
+            break;
+        case ECreatureCollisionSize::Large:
+            RootComp->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
+            RootComp->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Block);
+            break;
+        case ECreatureCollisionSize::Massive:
+            RootComp->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
+            RootComp->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Block);
+            RootComp->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Block);
+            break;
+    }
+    
+    // Add to tracked collision actors for LOD optimization
+    TrackedCollisionActors.AddUnique(CreatureActor);
+    
+    UE_LOG(LogTemp, Log, TEXT("CollisionSystem: Setup collision for %s creature with preset %s"), 
+           *UEnum::GetValueAsString(CreatureSize), *CollisionPreset.ToString());
+}
+
+void UCollisionSystem::HandleEnvironmentalImpact(AActor* ImpactActor, AActor* EnvironmentActor, float ImpactForce, FVector ImpactLocation)
+{
+    if (!ImpactActor || !EnvironmentActor)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("CollisionSystem: Invalid actors for environmental impact"));
+        return;
+    }
+    
+    // Check if impact force exceeds destruction threshold
+    if (ImpactForce < DestructionForceThreshold)
+    {
+        UE_LOG(LogTemp, Verbose, TEXT("CollisionSystem: Impact force %f below destruction threshold %f"), 
+               ImpactForce, DestructionForceThreshold);
+        return;
+    }
+    
+    // Handle destruction for geometry collections
+    UGeometryCollectionComponent* GeomCollection = EnvironmentActor->FindComponentByClass<UGeometryCollectionComponent>();
+    if (GeomCollection)
+    {
+        // Apply radial damage to trigger fracturing
+        float DamageRadius = FMath::Clamp(ImpactForce / 100.0f, 50.0f, 500.0f);
+        GeomCollection->ApplyExternalStrain(0, ImpactLocation, DamageRadius, 0, ImpactForce);
+        
+        UE_LOG(LogTemp, Log, TEXT("CollisionSystem: Applied environmental destruction with force %f at %s"), 
+               ImpactForce, *ImpactLocation.ToString());
+    }
+    
+    // Broadcast collision event
+    FAdvancedCollisionResult CollisionResult;
+    CollisionResult.bHasCollision = true;
+    CollisionResult.ImpactLocation = ImpactLocation;
+    CollisionResult.ImpactForce = ImpactForce;
+    
+    OnCollisionEvent.Broadcast(ImpactActor, EnvironmentActor, CollisionResult);
+}
+
+void UCollisionSystem::OptimizeCollisionLOD(FVector ViewerLocation, float MaxDistance)
+{
+    if (!CachedWorld)
+    {
+        return;
+    }
+    
+    // Update collision LOD for all tracked actors
+    for (AActor* TrackedActor : TrackedCollisionActors)
+    {
+        if (!IsValid(TrackedActor))
+        {
+            continue;
+        }
+        
+        float Distance = FVector::Dist(ViewerLocation, TrackedActor->GetActorLocation());
+        ECollisionEnabled::Type NewCollisionType = GetCollisionComplexityForDistance(Distance);
+        
+        UPrimitiveComponent* RootComp = Cast<UPrimitiveComponent>(TrackedActor->GetRootComponent());
+        if (RootComp && RootComp->GetCollisionEnabled() != NewCollisionType)
+        {
+            RootComp->SetCollisionEnabled(NewCollisionType);
+        }
+    }
+}
+
+void UCollisionSystem::RegisterCollisionCallback(const FCollisionEventDelegate& Callback)
+{
+    OnCollisionEvent.AddDynamic(Callback.GetUObject(), Callback.GetFunctionName());
+    UE_LOG(LogTemp, Log, TEXT("CollisionSystem: Registered collision event callback"));
+}
+
+void UCollisionSystem::UpdateCollisionLOD()
+{
+    // Get player location for LOD calculations
+    if (CachedWorld && CachedWorld->GetFirstPlayerController())
+    {
+        APawn* PlayerPawn = CachedWorld->GetFirstPlayerController()->GetPawn();
+        if (PlayerPawn)
+        {
+            OptimizeCollisionLOD(PlayerPawn->GetActorLocation(), MaxCollisionDistance);
+        }
+    }
+}
+
+ECollisionEnabled::Type UCollisionSystem::GetCollisionComplexityForDistance(float Distance) const
+{
+    if (Distance <= CollisionLODDistances[0])
+    {
+        return ECollisionEnabled::QueryAndPhysics; // Full collision
+    }
+    else if (Distance <= CollisionLODDistances[1])
+    {
+        return ECollisionEnabled::QueryOnly; // Query only
+    }
+    else if (Distance <= CollisionLODDistances[2])
+    {
+        return ECollisionEnabled::QueryOnly; // Simplified query
+    }
+    else
+    {
+        return ECollisionEnabled::NoCollision; // No collision
+    }
+}
