@@ -1,68 +1,157 @@
-# Animation Blueprint Configuration for Player Character
-# This file represents the Animation Blueprint asset structure
-# Actual implementation would be done in UE5 editor
+// Animation Blueprint para o personagem principal (paleontologista)
+// Este arquivo representa a estrutura do Animation Blueprint no formato de asset
 
-Animation Blueprint: ABP_PlayerCharacter
-Target Skeleton: SK_PlayerCharacter
-Parent Class: UAnimInstance
-
-# State Machine: PlayerLocomotion
-States:
-  - Idle
-    - Entry State: true
-    - Animation: Motion Matching Node
-    - Database: DB_Player_Idle
-    - Blend Time: 0.2s
+{
+    "AssetType": "AnimationBlueprint",
+    "TargetSkeleton": "/Game/Characters/Player/SK_PlayerCharacter",
+    "ParentClass": "AnimInstance",
     
-  - Walking
-    - Animation: Motion Matching Node
-    - Database: DB_Player_Walk
-    - Terrain Adaptation: IK Foot Placement
-    - Blend Time: 0.3s
+    "AnimGraph": {
+        "Nodes": [
+            {
+                "Type": "MotionMatchingNode",
+                "Name": "MotionMatching_Locomotion",
+                "Database": "/Game/Characters/Player/Animation/MotionMatching/DB_PlayerLocomotion",
+                "Schema": "/Game/Characters/Player/Animation/MotionMatching/Schema_PlayerLocomotion",
+                "BlendTime": 0.2,
+                "Position": {"X": 200, "Y": 100}
+            },
+            {
+                "Type": "TerrainIKNode", 
+                "Name": "TerrainIK",
+                "LeftFootIKBone": "ik_foot_l",
+                "RightFootIKBone": "ik_foot_r",
+                "HipBone": "pelvis",
+                "Position": {"X": 400, "Y": 100}
+            },
+            {
+                "Type": "OrientationWarpingNode",
+                "Name": "OrientationWarping",
+                "WarpingMode": "GroundSlope",
+                "Position": {"X": 600, "Y": 100}
+            },
+            {
+                "Type": "OutputPoseNode",
+                "Name": "OutputPose",
+                "Position": {"X": 800, "Y": 100}
+            }
+        ],
+        "Connections": [
+            {"From": "MotionMatching_Locomotion.Pose", "To": "TerrainIK.InputPose"},
+            {"From": "TerrainIK.OutputPose", "To": "OrientationWarping.InputPose"},
+            {"From": "OrientationWarping.OutputPose", "To": "OutputPose.Result"}
+        ]
+    },
     
-  - Running
-    - Animation: Motion Matching Node
-    - Database: DB_Player_Run
-    - Speed Scaling: Based on character confidence
-    - Blend Time: 0.25s
+    "EventGraph": {
+        "Variables": [
+            {
+                "Name": "MovementSpeed",
+                "Type": "float",
+                "DefaultValue": 0.0,
+                "Category": "Movement"
+            },
+            {
+                "Name": "MovementDirection",
+                "Type": "FVector2D", 
+                "DefaultValue": {"X": 0.0, "Y": 0.0},
+                "Category": "Movement"
+            },
+            {
+                "Name": "bIsInDanger",
+                "Type": "bool",
+                "DefaultValue": false,
+                "Category": "Emotional State"
+            },
+            {
+                "Name": "FearLevel",
+                "Type": "float",
+                "DefaultValue": 0.0,
+                "Category": "Emotional State",
+                "Range": {"Min": 0.0, "Max": 1.0}
+            },
+            {
+                "Name": "StealthLevel",
+                "Type": "float", 
+                "DefaultValue": 0.0,
+                "Category": "Movement State",
+                "Range": {"Min": 0.0, "Max": 1.0}
+            }
+        ],
+        
+        "Functions": [
+            {
+                "Name": "UpdateMovementData",
+                "Description": "Atualiza dados de movimento baseado no input do jogador",
+                "Parameters": [
+                    {"Name": "InputVector", "Type": "FVector2D"},
+                    {"Name": "CharacterVelocity", "Type": "FVector"}
+                ]
+            },
+            {
+                "Name": "UpdateEmotionalState", 
+                "Description": "Atualiza estado emocional baseado em ameaças próximas",
+                "Parameters": [
+                    {"Name": "NearbyThreats", "Type": "int32"},
+                    {"Name": "ThreatDistance", "Type": "float"}
+                ]
+            }
+        ]
+    },
     
-  - Crouching
-    - Animation: Motion Matching Node
-    - Database: DB_Player_Crouch
-    - Stealth Modifier: Nervousness influence
-    - Blend Time: 0.4s
-    
-  - Climbing
-    - Animation: Motion Matching Node
-    - Database: DB_Player_Climb
-    - IK Hand Placement: Active
-    - Blend Time: 0.5s
-
-# Transitions
-Idle -> Walking: Speed > 0.1
-Walking -> Running: Speed > 3.0 AND Confidence > 0.6
-Running -> Walking: Speed < 2.5 OR Nervousness > 0.7
-Any -> Crouching: Crouch Input OR Fear Level > 0.8
-Crouching -> Idle: Stand Input AND Fear Level < 0.3
-
-# Motion Matching Configuration
-Pose Search Schema: PS_PlayerSchema
-Channels:
-  - Trajectory: 5 samples (past and future)
-  - Pose: Left/Right foot bones
-  - Velocity: Root bone
-  - Heading: Character forward direction
-
-# IK Configuration
-IK Rig: IKR_PlayerCharacter
-Goals:
-  - LeftFoot: Foot_L bone
-  - RightFoot: Foot_R bone
-  - LeftHand: Hand_L bone (climbing only)
-  - RightHand: Hand_R bone (climbing only)
-
-# Additive Layers
-- Breathing: Subtle chest movement based on fear/fatigue
-- Looking: Head tracking for environmental awareness
-- Micro Expressions: Facial animation based on emotional state
-- Injury Compensation: Limping, favoring limbs based on injury level
+    "StateMachines": [
+        {
+            "Name": "Locomotion",
+            "States": [
+                {
+                    "Name": "Idle",
+                    "Animation": "Idle_Cautious",
+                    "Transitions": [
+                        {"To": "Walk", "Condition": "MovementSpeed > 0.1"},
+                        {"To": "Crouch", "Condition": "StealthLevel > 0.5"}
+                    ]
+                },
+                {
+                    "Name": "Walk", 
+                    "Animation": "Walk_Cautious",
+                    "Transitions": [
+                        {"To": "Idle", "Condition": "MovementSpeed < 0.1"},
+                        {"To": "Run", "Condition": "MovementSpeed > 300.0"},
+                        {"To": "Panic", "Condition": "bIsInDanger && FearLevel > 0.7"}
+                    ]
+                },
+                {
+                    "Name": "Run",
+                    "Animation": "Run_Determined", 
+                    "Transitions": [
+                        {"To": "Walk", "Condition": "MovementSpeed < 250.0"},
+                        {"To": "Panic", "Condition": "bIsInDanger && FearLevel > 0.8"}
+                    ]
+                },
+                {
+                    "Name": "Crouch",
+                    "Animation": "Crouch_Stealth",
+                    "Transitions": [
+                        {"To": "Idle", "Condition": "StealthLevel < 0.3"},
+                        {"To": "CrouchWalk", "Condition": "MovementSpeed > 0.1"}
+                    ]
+                },
+                {
+                    "Name": "CrouchWalk",
+                    "Animation": "CrouchWalk_Stealth",
+                    "Transitions": [
+                        {"To": "Crouch", "Condition": "MovementSpeed < 0.1"},
+                        {"To": "Walk", "Condition": "StealthLevel < 0.3"}
+                    ]
+                },
+                {
+                    "Name": "Panic",
+                    "Animation": "Run_Panicked",
+                    "Transitions": [
+                        {"To": "Run", "Condition": "!bIsInDanger || FearLevel < 0.5"}
+                    ]
+                }
+            ]
+        }
+    ]
+}
