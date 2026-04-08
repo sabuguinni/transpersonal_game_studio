@@ -1,84 +1,118 @@
-/**
- * @file RenderOptimizer.h
- * @brief Rendering optimization system for consciousness-based visual effects
- * 
- * Manages LOD, culling, and quality settings for spiritual visual effects,
- * consciousness fields, and transcendental experiences.
- */
+// RenderOptimizer.h
+// Sistema de otimização de rendering dinâmico
 
 #pragma once
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "Engine/TextureRenderTarget2D.h"
+#include "Engine/World.h"
 #include "Materials/MaterialParameterCollection.h"
 #include "RenderOptimizer.generated.h"
 
+class UPerformanceProfiler;
+
+// Estrutura para configurações de LOD dinâmico
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FDynamicLODSettings
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
+    float DistanceMultiplier = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
+    float PerformanceMultiplier = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
+    bool bEnableAggressiveCulling = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
+    float CullingDistanceScale = 1.0f;
+
+    FDynamicLODSettings()
+        : DistanceMultiplier(1.0f)
+        , PerformanceMultiplier(1.0f)
+        , bEnableAggressiveCulling(false)
+        , CullingDistanceScale(1.0f)
+    {}
+};
+
+// Configurações de qualidade de sombras
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FShadowQualitySettings
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shadows")
+    int32 ShadowMapResolution = 2048;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shadows")
+    float ShadowDistance = 5000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shadows")
+    int32 CascadeCount = 4;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shadows")
+    bool bEnableContactShadows = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shadows")
+    float ContactShadowLength = 0.1f;
+
+    FShadowQualitySettings()
+        : ShadowMapResolution(2048)
+        , ShadowDistance(5000.0f)
+        , CascadeCount(4)
+        , bEnableContactShadows(true)
+        , ContactShadowLength(0.1f)
+    {}
+};
+
+// Configurações de pós-processamento
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FPostProcessSettings
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PostProcess")
+    bool bEnableBloom = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PostProcess")
+    bool bEnableSSAO = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PostProcess")
+    bool bEnableSSR = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PostProcess")
+    float SSRQuality = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PostProcess")
+    bool bEnableMotionBlur = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PostProcess")
+    float MotionBlurAmount = 1.0f;
+
+    FPostProcessSettings()
+        : bEnableBloom(true)
+        , bEnableSSAO(true)
+        , bEnableSSR(true)
+        , SSRQuality(1.0f)
+        , bEnableMotionBlur(true)
+        , MotionBlurAmount(1.0f)
+    {}
+};
+
+// Enum para presets de qualidade
 UENUM(BlueprintType)
-enum class ESpiritualEffectQuality : uint8
+enum class ERenderQualityPreset : uint8
 {
-    Ultra       UMETA(DisplayName = "Ultra Quality"),
-    High        UMETA(DisplayName = "High Quality"),
-    Medium      UMETA(DisplayName = "Medium Quality"),
-    Low         UMETA(DisplayName = "Low Quality"),
-    Minimal     UMETA(DisplayName = "Minimal Quality")
+    Low         UMETA(DisplayName = "Low"),
+    Medium      UMETA(DisplayName = "Medium"),
+    High        UMETA(DisplayName = "High"),
+    Ultra       UMETA(DisplayName = "Ultra"),
+    Custom      UMETA(DisplayName = "Custom")
 };
 
-USTRUCT(BlueprintType)
-struct FRenderPerformanceSettings
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    ESpiritualEffectQuality EffectQuality = ESpiritualEffectQuality::High;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float ConsciousnessFieldResolution = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 MaxSpiritualParticles = 1000;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float AuraRenderDistance = 2000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bEnableConsciousnessBloom = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bEnableSpiritualSSR = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float SpiritualLightingComplexity = 1.0f;
-};
-
-USTRUCT(BlueprintType)
-struct FRenderStats
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly)
-    float RenderThreadTime = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly)
-    float GPUTime = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly)
-    int32 DrawCalls = 0;
-
-    UPROPERTY(BlueprintReadOnly)
-    int32 SpiritualEffectDrawCalls = 0;
-
-    UPROPERTY(BlueprintReadOnly)
-    int32 VisibleConsciousnessActors = 0;
-
-    UPROPERTY(BlueprintReadOnly)
-    float VRAMUsageMB = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly)
-    int32 ActiveSpiritualParticles = 0;
-};
-
-UCLASS(ClassGroup=(TranspersonalGame), meta=(BlueprintSpawnableComponent))
+UCLASS(ClassGroup=(Performance), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API URenderOptimizer : public UActorComponent
 {
     GENERATED_BODY()
@@ -88,103 +122,120 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, 
-                              FActorComponentTickFunction* ThisTickFunction) override;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 public:
-    // Quality management
-    UFUNCTION(BlueprintCallable, Category = "Render Quality")
-    void SetSpiritualEffectQuality(ESpiritualEffectQuality Quality);
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    UFUNCTION(BlueprintCallable, Category = "Render Quality")
-    ESpiritualEffectQuality GetCurrentQuality() const { return CurrentSettings.EffectQuality; }
+    // Configuração de qualidade
+    UFUNCTION(BlueprintCallable, Category = "Render Optimization")
+    void SetRenderQualityPreset(ERenderQualityPreset Preset);
 
-    UFUNCTION(BlueprintCallable, Category = "Render Quality")
-    void SetRenderSettings(const FRenderPerformanceSettings& Settings);
+    UFUNCTION(BlueprintCallable, Category = "Render Optimization")
+    ERenderQualityPreset GetCurrentQualityPreset() const { return CurrentQualityPreset; }
 
-    UFUNCTION(BlueprintCallable, Category = "Render Quality")
-    FRenderPerformanceSettings GetRenderSettings() const { return CurrentSettings; }
+    // Otimização dinâmica
+    UFUNCTION(BlueprintCallable, Category = "Render Optimization")
+    void EnableDynamicOptimization(bool bEnabled);
 
-    // Adaptive rendering
-    UFUNCTION(BlueprintCallable, Category = "Adaptive Rendering")
-    void EnableAdaptiveRendering(bool bEnable);
+    UFUNCTION(BlueprintCallable, Category = "Render Optimization")
+    bool IsDynamicOptimizationEnabled() const { return bDynamicOptimizationEnabled; }
 
-    UFUNCTION(BlueprintCallable, Category = "Adaptive Rendering")
-    void SetTargetGPUTime(float TargetMS);
+    // Configurações específicas
+    UFUNCTION(BlueprintCallable, Category = "Render Optimization")
+    void SetLODSettings(const FDynamicLODSettings& Settings);
 
-    // Consciousness field optimization
-    UFUNCTION(BlueprintCallable, Category = "Consciousness Fields")
-    void OptimizeConsciousnessFieldRendering();
+    UFUNCTION(BlueprintCallable, Category = "Render Optimization")
+    void SetShadowQuality(const FShadowQualitySettings& Settings);
 
-    UFUNCTION(BlueprintCallable, Category = "Consciousness Fields")
-    void SetConsciousnessFieldLOD(float LODLevel);
+    UFUNCTION(BlueprintCallable, Category = "Render Optimization")
+    void SetPostProcessSettings(const FPostProcessSettings& Settings);
 
-    // Spiritual particle optimization
-    UFUNCTION(BlueprintCallable, Category = "Spiritual Particles")
-    void OptimizeSpiritualParticles();
+    // Culling e oclusão
+    UFUNCTION(BlueprintCallable, Category = "Render Optimization")
+    void SetFrustumCullingDistance(float Distance);
 
-    UFUNCTION(BlueprintCallable, Category = "Spiritual Particles")
-    void SetMaxSpiritualParticles(int32 MaxParticles);
+    UFUNCTION(BlueprintCallable, Category = "Render Optimization")
+    void SetOcclusionCullingEnabled(bool bEnabled);
 
-    // Aura and energy rendering
-    UFUNCTION(BlueprintCallable, Category = "Aura Rendering")
-    void OptimizeAuraRendering();
+    // Texture streaming
+    UFUNCTION(BlueprintCallable, Category = "Render Optimization")
+    void SetTextureStreamingPool(int32 PoolSizeMB);
 
-    UFUNCTION(BlueprintCallable, Category = "Aura Rendering")
-    void SetAuraRenderDistance(float Distance);
+    UFUNCTION(BlueprintCallable, Category = "Render Optimization")
+    void ForceTextureStreaming();
 
-    // Performance monitoring
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    FRenderStats GetRenderStats() const;
+    // Monitoring
+    UFUNCTION(BlueprintCallable, Category = "Render Optimization")
+    int32 GetCurrentDrawCalls() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void LogRenderPerformance() const;
+    UFUNCTION(BlueprintCallable, Category = "Render Optimization")
+    int32 GetCurrentTriangles() const;
 
-    // Material optimization
-    UFUNCTION(BlueprintCallable, Category = "Materials")
-    void OptimizeSpiritualMaterials();
-
-    UFUNCTION(BlueprintCallable, Category = "Materials")
-    void UpdateMaterialParameterCollection();
+    UFUNCTION(BlueprintCallable, Category = "Render Optimization")
+    float GetCurrentGPUTime() const;
 
 protected:
-    // Current settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    FRenderPerformanceSettings CurrentSettings;
+    // Configurações atuais
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quality Settings")
+    ERenderQualityPreset CurrentQualityPreset;
 
-    // Adaptive rendering configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Adaptive")
-    bool bAdaptiveRenderingEnabled = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dynamic LOD")
+    FDynamicLODSettings LODSettings;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Adaptive")
-    float TargetGPUTimeMS = 16.67f; // 60 FPS
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shadows")
+    FShadowQualitySettings ShadowSettings;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Adaptive")
-    float AdaptiveCheckInterval = 0.5f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PostProcess")
+    FPostProcessSettings PostProcessSettings;
 
-    // Material parameter collection for global spiritual effects
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
-    TSoftObjectPtr<UMaterialParameterCollection> SpiritualParameterCollection;
+    // Otimização dinâmica
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dynamic Optimization")
+    bool bDynamicOptimizationEnabled;
 
-    // Render targets for consciousness effects
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Render Targets")
-    TSoftObjectPtr<UTextureRenderTarget2D> ConsciousnessFieldRT;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dynamic Optimization")
+    float OptimizationUpdateInterval;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Render Targets")
-    TSoftObjectPtr<UTextureRenderTarget2D> AuraCompositeRT;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dynamic Optimization")
+    float TargetFrameTime;
+
+    // Referências
+    UPROPERTY()
+    UPerformanceProfiler* PerformanceProfiler;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "References")
+    UMaterialParameterCollection* GlobalRenderParams;
 
 private:
-    FRenderStats CurrentStats;
-    float AdaptiveTimer = 0.0f;
-    TArray<float> GPUTimeHistory;
-    static constexpr int32 GPUTimeHistorySize = 30;
+    // Estado interno
+    float LastOptimizationTime;
+    bool bInitialized;
+    
+    // Cache de configurações
+    TMap<ERenderQualityPreset, FDynamicLODSettings> LODPresets;
+    TMap<ERenderQualityPreset, FShadowQualitySettings> ShadowPresets;
+    TMap<ERenderQualityPreset, FPostProcessSettings> PostProcessPresets;
 
-    // Internal optimization methods
-    void UpdateRenderStats();
-    void CheckAdaptiveRendering();
-    void ApplyQualitySettings(ESpiritualEffectQuality Quality);
-    void UpdateConsciousnessFieldParameters();
-    void CullDistantSpiritualEffects();
-    void OptimizeShaderComplexity();
-    ESpiritualEffectQuality CalculateOptimalQuality() const;
+    // Métodos internos
+    void InitializePresets();
+    void ApplyQualityPreset(ERenderQualityPreset Preset);
+    void UpdateDynamicOptimization(float DeltaTime);
+    void AdjustLODBasedOnPerformance();
+    void AdjustShadowsBasedOnPerformance();
+    void AdjustPostProcessBasedOnPerformance();
+    void UpdateGlobalRenderParameters();
+    
+    // Console variables cache
+    void CacheConsoleVariables();
+    void ApplyConsoleVariables();
+    
+    struct FConsoleVariableCache
+    {
+        int32 ShadowQuality;
+        int32 PostProcessQuality;
+        int32 EffectsQuality;
+        int32 TextureQuality;
+        float LODBias;
+        float ViewDistanceScale;
+    } CVarCache;
 };
