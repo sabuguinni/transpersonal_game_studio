@@ -4,73 +4,73 @@
 #include "Engine/Engine.h"
 #include "Components/AudioComponent.h"
 #include "Sound/SoundCue.h"
+#include "MetasoundSource.h"
 #include "AudioSystemCore.generated.h"
 
-/**
- * Core Audio System for Jurassic Survival Game
- * Handles adaptive music, environmental audio, and dinosaur sound management
- * Based on MetaSounds for procedural audio generation
- */
-
 UENUM(BlueprintType)
-enum class EEmotionalState : uint8
+enum class EAudioThreatLevel : uint8
 {
-    Calm           UMETA(DisplayName = "Calm"),
-    Tension        UMETA(DisplayName = "Tension"), 
-    Fear           UMETA(DisplayName = "Fear"),
-    Terror         UMETA(DisplayName = "Terror"),
-    Relief         UMETA(DisplayName = "Relief"),
-    Wonder         UMETA(DisplayName = "Wonder")
+    Safe = 0,
+    Cautious = 1,
+    Threatened = 2,
+    Hunted = 3,
+    Panic = 4
 };
 
 UENUM(BlueprintType)
-enum class EEnvironmentType : uint8
+enum class EAudioEnvironment : uint8
 {
-    DenseForest    UMETA(DisplayName = "Dense Forest"),
-    Clearing       UMETA(DisplayName = "Clearing"),
-    RiverBank      UMETA(DisplayName = "River Bank"),
-    Cave           UMETA(DisplayName = "Cave"),
-    Cliffs         UMETA(DisplayName = "Cliffs"),
-    Swamp          UMETA(DisplayName = "Swamp")
+    DenseForest = 0,
+    OpenPlains = 1,
+    RiverSide = 2,
+    CaveSystem = 3,
+    Cliffside = 4
 };
 
 UENUM(BlueprintType)
-enum class EDinosaurThreatLevel : uint8
+enum class EDinosaurProximity : uint8
 {
-    None           UMETA(DisplayName = "None"),
-    Herbivore      UMETA(DisplayName = "Herbivore Nearby"),
-    SmallPredator  UMETA(DisplayName = "Small Predator"),
-    LargePredator  UMETA(DisplayName = "Large Predator"),
-    ApexPredator   UMETA(DisplayName = "Apex Predator")
+    None = 0,
+    Distant = 1,
+    Nearby = 2,
+    Close = 3,
+    Immediate = 4
 };
 
 USTRUCT(BlueprintType)
-struct FAudioStateData
+struct TRANSPERSONALGAME_API FAudioStateData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EEmotionalState CurrentEmotion = EEmotionalState::Calm;
+    UPROPERTY(BlueprintReadWrite, Category = "Audio State")
+    EAudioThreatLevel ThreatLevel = EAudioThreatLevel::Safe;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EEnvironmentType Environment = EEnvironmentType::DenseForest;
+    UPROPERTY(BlueprintReadWrite, Category = "Audio State")
+    EAudioEnvironment Environment = EAudioEnvironment::DenseForest;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EDinosaurThreatLevel ThreatLevel = EDinosaurThreatLevel::None;
+    UPROPERTY(BlueprintReadWrite, Category = "Audio State")
+    EDinosaurProximity DinosaurProximity = EDinosaurProximity::None;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float TimeOfDay = 12.0f; // 0-24 hours
+    UPROPERTY(BlueprintReadWrite, Category = "Audio State")
+    float TimeOfDay = 0.5f; // 0.0 = midnight, 0.5 = noon
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float WeatherIntensity = 0.0f; // 0-1
+    UPROPERTY(BlueprintReadWrite, Category = "Audio State")
+    float WeatherIntensity = 0.0f; // 0.0 = clear, 1.0 = storm
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(BlueprintReadWrite, Category = "Audio State")
     bool bIsPlayerHidden = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float PlayerHeartRate = 60.0f; // BPM simulation
+    UPROPERTY(BlueprintReadWrite, Category = "Audio State")
+    bool bIsPlayerMoving = false;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Audio State")
+    float PlayerHeartRate = 60.0f; // BPM for stress indication
 };
 
+/**
+ * Core Audio System Manager
+ * Handles adaptive music, environmental audio, and threat-based sound design
+ */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UAudioSystemCore : public UObject
 {
@@ -79,7 +79,7 @@ class TRANSPERSONALGAME_API UAudioSystemCore : public UObject
 public:
     UAudioSystemCore();
 
-    // Core system functions
+    // Core System Functions
     UFUNCTION(BlueprintCallable, Category = "Audio System")
     void InitializeAudioSystem();
 
@@ -87,52 +87,60 @@ public:
     void UpdateAudioState(const FAudioStateData& NewState);
 
     UFUNCTION(BlueprintCallable, Category = "Audio System")
-    void TriggerDinosaurSound(FVector Location, FString DinosaurSpecies, float Distance);
+    void SetThreatLevel(EAudioThreatLevel NewThreatLevel);
 
     UFUNCTION(BlueprintCallable, Category = "Audio System")
-    void PlayEnvironmentalEvent(FString EventName, FVector Location);
+    void SetEnvironment(EAudioEnvironment NewEnvironment);
 
-    // Adaptive music control
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void OnDinosaurSpotted(EDinosaurProximity Proximity, FVector DinosaurLocation);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void OnPlayerHidden(bool bHidden);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void PlayDinosaurSound(FVector Location, float ThreatLevel, bool bIsAggressive);
+
+    // Adaptive Music System
     UFUNCTION(BlueprintCallable, Category = "Adaptive Music")
-    void TransitionToEmotionalState(EEmotionalState TargetState, float TransitionTime = 3.0f);
+    void TransitionToMusicState(const FString& StateName, float TransitionTime = 2.0f);
 
     UFUNCTION(BlueprintCallable, Category = "Adaptive Music")
-    void SetMusicIntensity(float Intensity); // 0-1
-
-    // Environmental audio
-    UFUNCTION(BlueprintCallable, Category = "Environment")
-    void UpdateEnvironmentAmbience(EEnvironmentType NewEnvironment);
-
-    UFUNCTION(BlueprintCallable, Category = "Environment")
-    void SetTimeOfDayAudio(float Hour, float TransitionSpeed = 1.0f);
+    void SetMusicParameter(const FString& ParameterName, float Value);
 
 protected:
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Audio State")
+    // Audio State
+    UPROPERTY(BlueprintReadOnly, Category = "Audio State")
     FAudioStateData CurrentAudioState;
 
-    // MetaSound assets for adaptive music
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Music")
-    class UMetaSoundSource* AdaptiveMusicMetaSound;
+    // MetaSound Assets
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MetaSounds")
+    TObjectPtr<UMetaSoundSource> AdaptiveMusicMetaSound;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Music")
-    class UMetaSoundSource* AmbientForestMetaSound;
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MetaSounds")
+    TObjectPtr<UMetaSoundSource> EnvironmentAmbientMetaSound;
 
-    // Audio components
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class UAudioComponent* MusicAudioComponent;
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MetaSounds")
+    TObjectPtr<UMetaSoundSource> ThreatSystemMetaSound;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class UAudioComponent* AmbienceAudioComponent;
+    // Audio Components
+    UPROPERTY(BlueprintReadOnly, Category = "Audio Components")
+    TObjectPtr<UAudioComponent> MusicAudioComponent;
 
-    // Sound attenuation settings
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Audio Settings")
-    class USoundAttenuation* DinosaurSoundAttenuation;
+    UPROPERTY(BlueprintReadOnly, Category = "Audio Components")
+    TObjectPtr<UAudioComponent> AmbientAudioComponent;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Audio Settings")
-    class USoundAttenuation* EnvironmentalSoundAttenuation;
+    UPROPERTY(BlueprintReadOnly, Category = "Audio Components")
+    TObjectPtr<UAudioComponent> ThreatAudioComponent;
 
-private:
-    void UpdateMusicParameters();
-    void UpdateAmbienceParameters();
-    void CalculateEmotionalTransition(EEmotionalState From, EEmotionalState To, float& IntensityTarget, float& TensionTarget);
+    // Internal Functions
+    void UpdateAdaptiveMusic();
+    void UpdateEnvironmentalAudio();
+    void UpdateThreatAudio();
+    void CalculateAudioParameters();
+
+    // Audio Parameter Calculation
+    float CalculateTensionLevel() const;
+    float CalculateIsolationLevel() const;
+    float CalculateVulnerabilityLevel() const;
 };
