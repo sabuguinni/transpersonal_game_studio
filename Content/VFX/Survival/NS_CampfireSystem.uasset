@@ -1,0 +1,99 @@
+# Niagara System: Campfire Survival Tool
+# Central survival mechanic — warmth, cooking, light, safety
+
+## EMITTER 1: Fire Core
+- Spawn Rate: 200-400 particles/second
+- Lifetime: 1.0-2.5 seconds
+- Size: 0.3-1.5 world units
+- Velocity: Strong upward (3-8 m/s) with random spread
+- Color: Fire gradient (255,100,0) to (255,255,100) to (100,100,100)
+- Material: M_Fire_Additive
+
+### Behavior Modules:
+- Initial Location: Fire pit center with radial spread
+- Velocity: Upward with turbulence noise
+- Color Over Life: Hot orange → bright yellow → smoke gray
+- Size Over Life: Growth then shrinkage
+- Curl Noise: Realistic fire movement
+- Wind Interaction: Directional influence from weather
+
+### Fuel System Integration:
+- Wood_Quality_Parameter: Affects burn intensity and color
+- Fuel_Level: Controls spawn rate and lifetime
+- Oxygen_Level: Wind affects combustion efficiency
+
+## EMITTER 2: Smoke Column
+- Spawn Rate: 50-100 particles/second
+- Lifetime: 8-15 seconds
+- Size: 1.0-4.0 world units (expanding over time)
+- Velocity: Upward with wind drift
+- Color: Dark gray (80,80,80) fading to transparent
+- Material: M_Smoke_Volumetric
+
+### Behavior Modules:
+- Initial Location: Above fire core
+- Velocity: Upward with strong wind influence
+- Size Over Life: Continuous expansion
+- Color Over Life: Dark to transparent fade
+- Collision: Disperses on contact with objects
+- Weather Response: Rain disperses smoke faster
+
+### Visibility Mechanics:
+- Smoke_Visibility_Range: 200-500 meters
+- Predator_Attraction: Smoke can attract curious dinosaurs
+- Wind_Dispersion: Strong wind reduces visibility range
+
+## EMITTER 3: Ember Sparks
+- Spawn Rate: 20-50 particles/second (bursts during wood cracking)
+- Lifetime: 0.5-2.0 seconds
+- Size: 0.1-0.3 world units
+- Velocity: Random upward arcs
+- Color: Bright orange-red (255,150,50)
+- Material: M_Ember_Additive
+
+### Behavior Modules:
+- Initial Location: Fire edges with random distribution
+- Velocity: Ballistic arcs with gravity
+- Color Over Life: Bright to dark fade
+- Collision: Bounce on ground, extinguish in water
+- Audio Trigger: Crackling sound events
+
+### Safety Mechanics:
+- Grass_Ignition_Risk: Embers can start small fires
+- Player_Burn_Damage: Contact causes damage
+- Rain_Extinguish: Water immediately kills embers
+
+## EMITTER 4: Heat Distortion
+- Spawn Rate: 100 particles/second
+- Lifetime: 1.0 seconds
+- Size: 2.0-5.0 world units
+- Velocity: Upward thermal column
+- Color: Invisible (used for distortion only)
+- Material: M_HeatDistortion_Refraction
+
+### Behavior Modules:
+- Initial Location: Above fire with cylindrical volume
+- Velocity: Thermal updraft simulation
+- Refraction Strength: Heat-based distortion intensity
+- Temperature Zones: Stronger effect closer to fire
+
+## EMITTER 5: Cooking Steam (When Food Present)
+- Spawn Rate: 30-60 particles/second
+- Lifetime: 3-5 seconds
+- Size: 0.5-1.5 world units
+- Velocity: Upward with slight spread
+- Color: White-gray (240,240,240)
+- Material: M_CookingSteam_Translucent
+
+### Behavior Modules:
+- Initial Location: Cooking surface positions
+- Food Type Response: Different effects for meat/vegetables
+- Cooking Progress: Intensity increases with cooking time
+- Aroma Simulation: Particle trails suggest food smells
+
+## SYSTEM PARAMETERS:
+- Fire_Intensity: 0.0-2.0 (controls all emission rates)
+- Wind_Strength: 0.0-3.0 (affects smoke and flame direction)
+- Fuel_Type: Enum (dry wood, green wood, special materials)
+- Weather_Condition: Rain/snow affects fire behavior
+- Cooking_Active: Boolean (enables cooking steam emitter)
