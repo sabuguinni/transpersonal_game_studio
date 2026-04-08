@@ -2,80 +2,61 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "Components/AudioComponent.h"
 #include "Sound/SoundCue.h"
+#include "Sound/SoundAttenuation.h"
+#include "MetasoundSource.h"
 #include "DinosaurAudioComponent.generated.h"
 
 UENUM(BlueprintType)
-enum class EDinosaurSoundType : uint8
+enum class EDinosaurAudioState : uint8
 {
-    Idle,
-    Movement,
-    Feeding,
-    Alert,
-    Aggressive,
-    Pain,
-    Death,
-    Territorial,
-    Mating,
-    Social
+    Idle,           // Respiração, movimentos casuais
+    Feeding,        // Sons de alimentação
+    Calling,        // Chamadas para outros dinossauros
+    Alert,          // Detectou algo suspeito
+    Aggressive,     // Pronto para atacar
+    Hunting,        // Perseguindo presa
+    Injured,        // Ferido
+    Dying           // Morrendo
 };
 
 UENUM(BlueprintType)
-enum class EDinosaurSpecies : uint8
+enum class EDinosaurSize : uint8
 {
-    TRex,
-    Triceratops,
-    Velociraptor,
-    Brachiosaurus,
-    Stegosaurus,
-    Parasaurolophus,
-    Compsognathus,
-    Pteranodon
+    Small,          // Compsognathus, Microraptor
+    Medium,         // Velociraptor, Dilophosaurus
+    Large,          // Allosaurus, Carnotaurus
+    Massive         // T-Rex, Spinosaurus, Brachiosaurus
 };
 
 USTRUCT(BlueprintType)
-struct FDinosaurSoundSet
+struct FDinosaurAudioData
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TMap<EDinosaurSoundType, USoundCue*> SoundCues;
+    EDinosaurSize Size = EDinosaurSize::Medium;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float BaseVolume = 1.0f;
+    bool bIsCarnivore = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float BasePitch = 1.0f;
+    bool bIsPackHunter = false;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float MaxAudibleDistance = 5000.0f;
+    float AggressionLevel = 0.5f; // 0-1
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float VocalFrequency = 0.3f; // How often they make sounds
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float FootstepVolume = 1.0f; // Multiplier for footstep volume
 };
 
-USTRUCT(BlueprintType)
-struct FDinosaurVocalBehavior
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float IdleCallFrequency = 30.0f; // seconds between idle calls
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float TerritorialCallRange = 2000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float SocialCallRange = 1000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bCanMakeDistantCalls = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float VolumeVariation = 0.2f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float PitchVariation = 0.15f;
-};
-
+/**
+ * Componente de áudio para dinossauros
+ * Gere sons procedurais baseados no comportamento e características
+ */
 UCLASS(ClassGroup=(Audio), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UDinosaurAudioComponent : public UActorComponent
 {
@@ -86,68 +67,93 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Audio")
-    EDinosaurSpecies Species;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Audio")
-    FDinosaurSoundSet SoundSet;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Audio")
-    FDinosaurVocalBehavior VocalBehavior;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Components")
-    UAudioComponent* PrimaryAudioComponent;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Components")
-    UAudioComponent* SecondaryAudioComponent;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Audio State")
-    EDinosaurSoundType LastPlayedSoundType;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Audio State")
-    float TimeSinceLastCall;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Audio State")
-    bool bIsVocalizing;
-
-public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
+public:
+    // Dados do dinossauro
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Audio")
+    FDinosaurAudioData AudioData;
+
+    // Estado atual
+    UPROPERTY(BlueprintReadOnly, Category = "Audio State")
+    EDinosaurAudioState CurrentState = EDinosaurAudioState::Idle;
+
+    // MetaSounds para sons procedurais
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Assets")
+    class UMetaSoundSource* BreathingMetaSound;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Assets")
+    class UMetaSoundSource* FootstepsMetaSound;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Assets")
+    class UMetaSoundSource* VocalizationMetaSound;
+
+    // Sound Cues para eventos específicos
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Assets")
+    TMap<EDinosaurAudioState, class USoundCue*> StateSounds;
+
+    // Atenuação de som
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
+    class USoundAttenuation* AudioAttenuation;
+
+    // Componentes de áudio
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class UAudioComponent* BreathingComponent;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class UAudioComponent* FootstepsComponent;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class UAudioComponent* VocalizationComponent;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class UAudioComponent* EventSoundComponent;
+
+    // Funções públicas
     UFUNCTION(BlueprintCallable, Category = "Dinosaur Audio")
-    void PlaySound(EDinosaurSoundType SoundType, float VolumeMultiplier = 1.0f, float PitchMultiplier = 1.0f);
+    void SetAudioState(EDinosaurAudioState NewState);
 
     UFUNCTION(BlueprintCallable, Category = "Dinosaur Audio")
-    void PlayIdleCall();
+    void PlayFootstep(float Intensity = 1.0f);
 
     UFUNCTION(BlueprintCallable, Category = "Dinosaur Audio")
-    void PlayTerritorialCall();
+    void PlayVocalization(float Intensity = 1.0f, float Pitch = 1.0f);
 
     UFUNCTION(BlueprintCallable, Category = "Dinosaur Audio")
-    void PlaySocialCall();
+    void SetMovementSpeed(float Speed); // 0-1, affects breathing and footsteps
 
     UFUNCTION(BlueprintCallable, Category = "Dinosaur Audio")
-    void StopAllSounds();
+    void SetHealthPercentage(float HealthPercent); // 0-1, affects breathing and vocalizations
 
     UFUNCTION(BlueprintCallable, Category = "Dinosaur Audio")
-    void SetSpecies(EDinosaurSpecies NewSpecies);
+    void OnTakeDamage(float DamageAmount);
 
     UFUNCTION(BlueprintCallable, Category = "Dinosaur Audio")
-    float GetMaxAudibleDistance() const { return SoundSet.MaxAudibleDistance; }
+    void OnSpotPlayer();
 
     UFUNCTION(BlueprintCallable, Category = "Dinosaur Audio")
-    bool IsAudibleToPlayer() const;
+    void OnLosePlayer();
 
 private:
-    void ProcessIdleBehavior(float DeltaTime);
-    void ProcessTerritorialBehavior();
-    void ProcessSocialBehavior();
+    // Estado interno
+    float CurrentMovementSpeed = 0.0f;
+    float CurrentHealthPercent = 1.0f;
+    float LastVocalizationTime = 0.0f;
+    float TimeSinceLastFootstep = 0.0f;
+
+    // Timers
+    FTimerHandle VocalizationTimer;
+    FTimerHandle BreathingUpdateTimer;
+
+    // Funções internas
+    void UpdateBreathingParameters();
+    void UpdateFootstepParameters();
+    void UpdateVocalizationParameters();
+    void ScheduleNextVocalization();
+    void PlayRandomVocalization();
     
-    float GetRandomizedVolume() const;
-    float GetRandomizedPitch() const;
-    
-    UPROPERTY()
-    class AAudioManager* AudioManager;
-    
-    FTimerHandle IdleCallTimer;
+    // Helpers
+    float GetSizeVolumeMultiplier() const;
+    float GetSizePitchMultiplier() const;
+    float GetAttenuationDistance() const;
 };
