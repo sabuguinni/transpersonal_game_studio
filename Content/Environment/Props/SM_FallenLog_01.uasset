@@ -1,0 +1,57 @@
+// Fallen Log Static Mesh
+// Environmental storytelling prop - suggests recent tree fall or decay
+// Provides natural cover and navigation landmarks
+
+StaticMesh: SM_FallenLog_01
+Material: M_RottenWood_Moss
+
+// Mesh Properties
+Vertices: 2847
+Triangles: 4521
+LODs: 4
+
+// LOD 0 (0-500 units)
+Triangles: 4521
+ScreenSize: 1.0
+
+// LOD 1 (500-1500 units)  
+Triangles: 2260
+ScreenSize: 0.5
+
+// LOD 2 (1500-4000 units)
+Triangles: 1130
+ScreenSize: 0.25
+
+// LOD 3 (4000+ units)
+Triangles: 565
+ScreenSize: 0.1
+
+// Collision
+CollisionComplexity: UseComplexAsSimple
+EnableCollision: true
+CollisionResponse: Block
+
+// Nanite
+EnableNanite: true
+FallbackRelativeError: 1.0
+
+// Physics
+Mass: 500.0 (kg)
+LinearDamping: 0.1
+AngularDamping: 0.1
+
+// Materials
+MaterialSlots:
+[
+    {
+        MaterialSlotName: "Wood"
+        Material: M_RottenWood_Moss
+        UVChannel: 0
+    }
+]
+
+// Usage Notes:
+// - Place manually for specific narrative moments
+// - Can be used as natural bridges over small streams
+// - Provides cover for both player and dinosaurs
+// - Moss growth indicates age and humidity
