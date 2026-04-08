@@ -1,56 +1,65 @@
-# Transpersonal Game Studio — Jurassic Survival Game
+# Transpersonal Game Studio — Jurassic Survival Project
 
 ## Visão Geral
 Jogo de sobrevivência em mundo aberto ambientado no período Jurássico/Cretáceo. O jogador é um paleontologista transportado no tempo que deve sobreviver num mundo dominado por dinossauros.
 
 ## Conceito Central
-- **Medo constante**: O jogador é sempre a presa, nunca o predador
-- **Dinossauros com vida própria**: Rotinas independentes, comportamento realista
-- **Domesticação gradual**: Alguns herbívoros podem ser domesticados com paciência
-- **Individualidade**: Cada dinossauro é único e reconhecível
+- **Medo constante** — o jogador é sempre a presa, nunca o predador
+- **Dinossauros com vidas próprias** — rotinas independentes do jogador
+- **Domesticação gradual** — alguns herbívoros podem ser domesticados
+- **Cada dinossauro é único** — variações físicas identificáveis
 
 ## Estrutura do Projeto
 
 ```
-TranspersonalGame/
-├── Source/                 # Código C++ do jogo
-│   ├── TranspersonalGame/  # Módulo principal
-│   ├── Core/              # Sistemas centrais
-│   ├── AI/                # Sistemas de IA
-│   ├── World/             # Geração procedural
-│   └── Player/            # Sistemas do jogador
-├── Content/               # Assets do jogo
-│   ├── Blueprints/        # Blueprints
-│   ├── Maps/              # Níveis/mapas
-│   ├── Materials/         # Materiais
-│   ├── Meshes/           # Modelos 3D
-│   ├── Textures/         # Texturas
-│   ├── Audio/            # Áudio
-│   └── VFX/              # Efeitos visuais
-├── Config/               # Configurações
-├── Plugins/              # Plugins customizados
-└── Build/                # Scripts de build
+Source/
+├── TranspersonalGame/          # Código principal do jogo
+│   ├── Core/                   # Sistemas fundamentais
+│   ├── Dinosaurs/              # Sistema de dinossauros e IA
+│   ├── Player/                 # Sistema do jogador
+│   ├── World/                  # Geração procedural e ambiente
+│   ├── Survival/               # Mecânicas de sobrevivência
+│   └── UI/                     # Interface do usuário
+├── TranspersonalGameEditor/    # Ferramentas de editor
+└── Plugins/                    # Plugins customizados
+
+Content/
+├── Blueprints/                 # Blueprints do jogo
+├── Maps/                       # Níveis e mapas
+├── Art/                        # Assets visuais
+├── Audio/                      # Assets de áudio
+├── Materials/                  # Materiais e texturas
+└── VFX/                        # Efeitos visuais
+
+Config/                         # Configurações do projeto
+Binaries/                       # Executáveis compilados
+Intermediate/                   # Arquivos temporários de build
+Saved/                          # Dados salvos e logs
 ```
 
 ## Tecnologias Core
-- **Engine**: Unreal Engine 5.4+
-- **Rendering**: Lumen (iluminação global)
-- **World**: World Partition + PCG
-- **AI**: Mass AI + Behavior Trees
-- **Animation**: Motion Matching + IK
-- **Audio**: MetaSounds
-- **VFX**: Niagara com LOD chain
-
-## Performance Targets
-- **PC**: 60 FPS (1080p/1440p)
-- **Console**: 30 FPS estável
-- **Crowd Simulation**: Até 50.000 agentes simultâneos
+- **Engine:** Unreal Engine 5.4+
+- **Rendering:** Lumen (iluminação global)
+- **World:** World Partition + PCG (Procedural Content Generation)
+- **Animation:** Motion Matching + IK
+- **AI:** Mass AI (até 50.000 agentes simultâneos)
+- **Audio:** MetaSounds + ElevenLabs
+- **VFX:** Niagara com LOD chain
 
 ## Build Status
-🔄 **Em Desenvolvimento** — Ciclo PROD_JURASSIC_001
+- **Última Build:** Em desenvolvimento
+- **Target Platforms:** Windows (primário), Console (futuro)
+- **Performance Target:** 60fps PC / 30fps Console
 
-## Agentes da Cadeia de Produção
-1. Studio Director → 2. Engine Architect → 3. Core Systems → 4. Performance Optimizer → 5. World Generator → 6. Environment Artist → 7. Architecture & Interior → 8. Lighting & Atmosphere → 9. Character Artist → 10. Animation → 11. NPC Behavior → 12. Combat & Enemy AI → 13. Crowd Simulation → 14. Quest & Mission Designer → 15. Narrative & Dialogue → 16. Audio → 17. VFX → 18. QA & Testing → **19. Integration & Build** ← VOCÊ ESTÁ AQUI
+## Cadeia de Produção
+Este projeto segue uma cadeia de 19 agentes especializados:
+1. Studio Director → 2. Engine Architect → ... → 19. Integration & Build Agent
+
+## Começar Desenvolvimento
+1. Clone o repositório
+2. Instale Unreal Engine 5.4+
+3. Abra `TranspersonalGame.uproject`
+4. Compile o projeto
 
 ---
 *Transpersonal Game Studio — Março 2026*
