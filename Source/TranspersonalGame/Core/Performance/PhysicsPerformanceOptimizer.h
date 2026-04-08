@@ -6,24 +6,27 @@
 #include "Components/ActorComponent.h"
 #include "Engine/World.h"
 #include "Chaos/ChaosEngineInterface.h"
-#include "PhysicsEngine/PhysicsSettings.h"
-#include "Performance/PerformanceTargets.h"
-#include "Core/PhysicsCore/PhysicsSystemManager.h"
+#include "GeometryCollection/GeometryCollectionComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Engine/StaticMeshActor.h"
 #include "PhysicsPerformanceOptimizer.generated.h"
 
 /**
  * @brief Physics Performance Optimizer for Jurassic Survival Game
  * 
- * Monitors and dynamically adjusts physics performance to maintain:
- * - 60fps on PC (16.67ms budget)
- * - 30fps on Console (33.33ms budget)
+ * Specialized optimizer for physics systems implemented by Core Systems Programmer.
+ * Ensures physics simulation runs at target framerates while maintaining visual quality.
  * 
- * Optimizes:
- * - Chaos Physics simulation quality
- * - Collision detection complexity
- * - Ragdoll physics LOD
- * - Destruction system detail
- * - Mass creature physics simulation
+ * Key Optimizations:
+ * - Dynamic LOD for physics collision meshes
+ * - Intelligent culling of distant physics objects
+ * - Adaptive physics substep scaling
+ * - Smart ragdoll management (max concurrent ragdolls)
+ * - Destruction debris cleanup and pooling
+ * - Distance-based physics complexity reduction
+ * 
+ * Performance Philosophy:
+ * "Performance is not about removing features — it's about delivering them intelligently"
  * 
  * @author Performance Optimizer — Agent #4
  * @version 1.0 — March 2026
@@ -42,190 +45,268 @@ protected:
 
 public:
     /**
-     * @brief Initialize physics performance monitoring
+     * @brief Initialize physics performance optimization
      * 
-     * Sets up performance tracking for:
-     * - Physics thread timing
-     * - Collision query counts
-     * - Active physics bodies
-     * - Destruction simulation load
+     * Sets up performance monitoring for all physics systems:
+     * - Collision detection optimization
+     * - Ragdoll management
+     * - Destruction system optimization
+     * - Dynamic physics LOD system
      */
     UFUNCTION(BlueprintCallable, Category = "Physics Performance")
-    void InitializePhysicsMonitoring();
+    void InitializePhysicsOptimization();
 
     /**
-     * @brief Set performance target for physics optimization
+     * @brief Optimize collision detection performance
      * 
-     * @param Target Performance target (PC 60fps / Console 30fps)
+     * Implements distance-based collision LOD:
+     * - Full collision for objects within 50m
+     * - Simplified collision for objects 50-200m
+     * - Basic bounds collision for objects >200m
+     * - No collision for objects >500m
      */
     UFUNCTION(BlueprintCallable, Category = "Physics Performance")
-    void SetPerformanceTarget(EPerformanceTarget Target);
+    void OptimizeCollisionDetection();
 
     /**
-     * @brief Dynamically adjust physics quality based on performance
+     * @brief Manage ragdoll physics performance
      * 
-     * Automatically reduces physics complexity when frame time exceeds budget:
-     * - Reduces physics substeps
-     * - Simplifies collision detection
-     * - Culls distant physics objects
-     * - Reduces destruction detail
+     * Intelligent ragdoll management:
+     * - Maximum 8 concurrent ragdolls (console) / 16 (PC)
+     * - Automatic cleanup of distant ragdolls
+     * - Simplified ragdoll physics for background creatures
+     * - Ragdoll pooling to avoid allocation overhead
+     * 
+     * @param MaxConcurrentRagdolls Maximum number of active ragdolls
      */
     UFUNCTION(BlueprintCallable, Category = "Physics Performance")
-    void OptimizePhysicsQuality();
-
-    /**
-     * @brief Optimize creature physics simulation
-     * 
-     * Manages physics LOD for dinosaurs and NPCs:
-     * - Full physics for nearby creatures
-     * - Simplified physics for medium distance
-     * - Kinematic simulation for distant creatures
-     * 
-     * @param MaxFullPhysicsCreatures Maximum creatures with full physics
-     * @param MaxSimplifiedPhysicsCreatures Maximum creatures with simplified physics
-     */
-    UFUNCTION(BlueprintCallable, Category = "Physics Performance")
-    void OptimizeCreaturePhysics(int32 MaxFullPhysicsCreatures = 50, int32 MaxSimplifiedPhysicsCreatures = 200);
+    void ManageRagdollPerformance(int32 MaxConcurrentRagdolls = 8);
 
     /**
      * @brief Optimize destruction system performance
      * 
-     * Manages destruction complexity based on performance:
-     * - Reduces fracture detail when needed
-     * - Limits active destruction chunks
-     * - Culls distant destruction effects
+     * Smart destruction management:
+     * - Limit destruction debris count
+     * - Automatic debris cleanup after time/distance
+     * - Simplified destruction for distant objects
+     * - Destruction effect pooling
      * 
-     * @param MaxActiveChunks Maximum destruction chunks active at once
+     * @param MaxDebrisCount Maximum destruction debris pieces
+     * @param DebrisLifetime How long debris stays active (seconds)
      */
     UFUNCTION(BlueprintCallable, Category = "Physics Performance")
-    void OptimizeDestructionSystem(int32 MaxActiveChunks = 1000);
+    void OptimizeDestructionSystem(int32 MaxDebrisCount = 500, float DebrisLifetime = 30.0f);
+
+    /**
+     * @brief Implement dynamic physics LOD system
+     * 
+     * Distance-based physics quality scaling:
+     * - LOD0 (0-50m): Full physics simulation
+     * - LOD1 (50-150m): Reduced substeps, simplified collision
+     * - LOD2 (150-300m): Basic physics, no destruction
+     * - LOD3 (300m+): Kinematic only, no physics simulation
+     */
+    UFUNCTION(BlueprintCallable, Category = "Physics Performance")
+    void UpdatePhysicsLOD();
+
+    /**
+     * @brief Optimize physics substep count based on performance
+     * 
+     * Adaptive substep scaling:
+     * - Monitor frame time
+     * - Reduce substeps if frame time > target
+     * - Increase substeps if performance allows
+     * - Maintain minimum quality threshold
+     * 
+     * @param TargetFrameTimeMS Target frame time in milliseconds
+     */
+    UFUNCTION(BlueprintCallable, Category = "Physics Performance")
+    void AdaptiveSubstepScaling(float TargetFrameTimeMS = 16.67f);
 
     /**
      * @brief Get current physics performance metrics
      * 
-     * @return Current physics timing and object counts
+     * @return Detailed physics performance data
      */
     UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Physics Performance")
-    FString GetPhysicsPerformanceReport() const;
+    FPhysicsPerformanceMetrics GetPhysicsPerformanceMetrics() const;
 
     /**
-     * @brief Force physics performance level
+     * @brief Force cleanup of physics objects beyond distance threshold
      * 
-     * @param Level 0=Minimum, 1=Low, 2=Medium, 3=High, 4=Ultra
+     * @param DistanceThreshold Distance beyond which to cleanup physics objects
      */
     UFUNCTION(BlueprintCallable, Category = "Physics Performance")
-    void SetPhysicsPerformanceLevel(int32 Level);
+    void CleanupDistantPhysicsObjects(float DistanceThreshold = 1000.0f);
+
+    /**
+     * @brief Enable/disable physics simulation for specific object types
+     * 
+     * @param ObjectType Type of physics object to toggle
+     * @param bEnabled Whether to enable physics for this object type
+     */
+    UFUNCTION(BlueprintCallable, Category = "Physics Performance")
+    void TogglePhysicsObjectType(EPhysicsObjectType ObjectType, bool bEnabled);
 
 protected:
-    /** Current performance target */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance Settings")
-    EPerformanceTarget CurrentTarget = EPerformanceTarget::PC_HighEnd;
+    /** Physics object types for performance management */
+    UENUM(BlueprintType)
+    enum class EPhysicsObjectType : uint8
+    {
+        CreatureRagdolls    UMETA(DisplayName = "Creature Ragdolls"),
+        DestructionDebris   UMETA(DisplayName = "Destruction Debris"),
+        EnvironmentalProps  UMETA(DisplayName = "Environmental Props"),
+        ProjectilePhysics   UMETA(DisplayName = "Projectile Physics"),
+        VehiclePhysics      UMETA(DisplayName = "Vehicle Physics")
+    };
 
-    /** Physics performance budget in milliseconds */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance Settings")
-    float PhysicsBudgetMs = 2.0f;
+    /** Physics LOD levels */
+    UENUM(BlueprintType)
+    enum class EPhysicsLODLevel : uint8
+    {
+        LOD0_Full       UMETA(DisplayName = "LOD0 - Full Physics"),
+        LOD1_Reduced    UMETA(DisplayName = "LOD1 - Reduced Physics"),
+        LOD2_Basic      UMETA(DisplayName = "LOD2 - Basic Physics"),
+        LOD3_Kinematic  UMETA(DisplayName = "LOD3 - Kinematic Only")
+    };
 
-    /** Enable automatic physics optimization */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance Settings")
-    bool bAutoOptimizePhysics = true;
-
-    /** Physics performance monitoring interval */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance Settings")
-    float MonitoringInterval = 0.1f; // 100ms
-
-    /** Maximum physics substeps per frame */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Physics Quality")
-    int32 MaxPhysicsSubsteps = 6;
-
-    /** Minimum physics substeps per frame */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Physics Quality")
-    int32 MinPhysicsSubsteps = 1;
-
-    /** Maximum active physics bodies */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Physics Quality")
-    int32 MaxActivePhysicsBodies = 5000;
-
-    /** Physics culling distance multiplier */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Physics Quality")
-    float PhysicsCullingMultiplier = 1.0f;
-
-    /** Enable physics LOD for distant objects */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Physics Quality")
-    bool bEnablePhysicsLOD = true;
-
-private:
-    /** Performance monitoring data */
-    USTRUCT()
-    struct FPhysicsPerformanceData
+    /** Physics performance metrics structure */
+    USTRUCT(BlueprintType)
+    struct FPhysicsPerformanceMetrics
     {
         GENERATED_BODY()
 
-        float PhysicsThreadTime = 0.0f;
-        float CollisionQueryTime = 0.0f;
+        /** Physics simulation time in milliseconds */
+        UPROPERTY(BlueprintReadOnly)
+        float PhysicsSimulationTimeMS = 0.0f;
+
+        /** Number of active physics bodies */
+        UPROPERTY(BlueprintReadOnly)
         int32 ActivePhysicsBodies = 0;
-        int32 ActiveDestructionChunks = 0;
-        int32 CollisionQueriesPerFrame = 0;
-        int32 PhysicsSubstepsUsed = 0;
-        float AverageFrameTime = 0.0f;
-        
-        FPhysicsPerformanceData()
-        {
-            PhysicsThreadTime = 0.0f;
-            CollisionQueryTime = 0.0f;
-            ActivePhysicsBodies = 0;
-            ActiveDestructionChunks = 0;
-            CollisionQueriesPerFrame = 0;
-            PhysicsSubstepsUsed = 0;
-            AverageFrameTime = 0.0f;
-        }
+
+        /** Number of active ragdolls */
+        UPROPERTY(BlueprintReadOnly)
+        int32 ActiveRagdolls = 0;
+
+        /** Number of destruction debris pieces */
+        UPROPERTY(BlueprintReadOnly)
+        int32 DestructionDebrisCount = 0;
+
+        /** Current physics substep count */
+        UPROPERTY(BlueprintReadOnly)
+        int32 CurrentSubsteps = 6;
+
+        /** Number of collision checks per frame */
+        UPROPERTY(BlueprintReadOnly)
+        int32 CollisionChecksPerFrame = 0;
+
+        /** Physics memory usage in MB */
+        UPROPERTY(BlueprintReadOnly)
+        float PhysicsMemoryUsageMB = 0.0f;
+
+        /** Physics CPU usage percentage */
+        UPROPERTY(BlueprintReadOnly)
+        float PhysicsCPUUsagePercent = 0.0f;
+
+        /** Whether physics is within performance budget */
+        UPROPERTY(BlueprintReadOnly)
+        bool bWithinPerformanceBudget = true;
     };
 
-    /** Current performance data */
-    FPhysicsPerformanceData CurrentPerformanceData;
+    /** Physics LOD distance thresholds */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Physics LOD")
+    TMap<EPhysicsLODLevel, float> PhysicsLODDistances = {
+        {EPhysicsLODLevel::LOD0_Full, 50.0f},
+        {EPhysicsLODLevel::LOD1_Reduced, 150.0f},
+        {EPhysicsLODLevel::LOD2_Basic, 300.0f},
+        {EPhysicsLODLevel::LOD3_Kinematic, 500.0f}
+    };
 
-    /** Performance history for averaging */
+    /** Maximum concurrent ragdolls per platform */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ragdoll Performance")
+    int32 MaxConcurrentRagdolls = 8;
+
+    /** Maximum destruction debris count */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Destruction Performance")
+    int32 MaxDestructionDebris = 500;
+
+    /** Destruction debris lifetime in seconds */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Destruction Performance")
+    float DestructionDebrisLifetime = 30.0f;
+
+    /** Physics substep range for adaptive scaling */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Adaptive Physics")
+    int32 MinPhysicsSubsteps = 2;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Adaptive Physics")
+    int32 MaxPhysicsSubsteps = 8;
+
+    /** Current physics substep count */
+    UPROPERTY(BlueprintReadOnly, Category = "Adaptive Physics")
+    int32 CurrentPhysicsSubsteps = 6;
+
+    /** Physics performance budget in milliseconds */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance Budget")
+    float PhysicsPerformanceBudgetMS = 5.0f; // 5ms of 16.67ms frame budget
+
+    /** Enable physics object type toggles */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Physics Object Management")
+    TMap<EPhysicsObjectType, bool> PhysicsObjectTypeEnabled = {
+        {EPhysicsObjectType::CreatureRagdolls, true},
+        {EPhysicsObjectType::DestructionDebris, true},
+        {EPhysicsObjectType::EnvironmentalProps, true},
+        {EPhysicsObjectType::ProjectilePhysics, true},
+        {EPhysicsObjectType::VehiclePhysics, true}
+    };
+
+private:
+    /** Update physics performance metrics */
+    void UpdatePhysicsMetrics();
+
+    /** Apply physics LOD to specific actor */
+    void ApplyPhysicsLOD(AActor* Actor, EPhysicsLODLevel LODLevel);
+
+    /** Cleanup old ragdolls */
+    void CleanupOldRagdolls();
+
+    /** Cleanup old destruction debris */
+    void CleanupOldDebris();
+
+    /** Get distance from player camera */
+    float GetDistanceFromCamera(const FVector& WorldLocation) const;
+
+    /** Check if physics is within performance budget */
+    bool IsPhysicsWithinBudget() const;
+
+    /** Scale physics substeps based on performance */
+    void ScalePhysicsSubsteps();
+
+    /** Get physics object LOD level based on distance */
+    EPhysicsLODLevel GetPhysicsLODForDistance(float Distance) const;
+
+    /** Cached performance metrics */
+    FPhysicsPerformanceMetrics CachedMetrics;
+
+    /** Active ragdoll tracking */
+    UPROPERTY()
+    TArray<TWeakObjectPtr<USkeletalMeshComponent>> ActiveRagdolls;
+
+    /** Active debris tracking */
+    UPROPERTY()
+    TArray<TWeakObjectPtr<UGeometryCollectionComponent>> ActiveDebris;
+
+    /** Performance monitoring timer */
+    float PerformanceUpdateTimer = 0.0f;
+
+    /** Performance update interval */
+    float PerformanceUpdateInterval = 0.1f; // Update every 100ms
+
+    /** Last frame time for adaptive scaling */
+    float LastFrameTime = 0.0f;
+
+    /** Frame time history for smoothing */
     TArray<float> FrameTimeHistory;
 
-    /** Maximum history samples */
-    static constexpr int32 MaxHistorySamples = 60;
-
-    /** Timer for monitoring interval */
-    float MonitoringTimer = 0.0f;
-
-    /** Current physics performance level (0-4) */
-    int32 CurrentPhysicsLevel = 3;
-
-    /** Reference to physics system manager */
-    UPROPERTY()
-    UPhysicsSystemManager* PhysicsSystemManager;
-
-    /** Cached world reference */
-    UPROPERTY()
-    UWorld* CachedWorld;
-
-    /** Physics performance optimization functions */
-    void UpdatePerformanceMetrics();
-    void AdjustPhysicsSubsteps(float TargetFrameTime);
-    void CullDistantPhysicsObjects();
-    void OptimizeCollisionComplexity();
-    void ManageDestructionChunks();
-    void ApplyPhysicsLOD();
-    
-    /** Get distance-based physics quality level */
-    int32 GetPhysicsLODLevel(float Distance) const;
-    
-    /** Calculate average frame time */
-    float CalculateAverageFrameTime() const;
-    
-    /** Check if physics budget is exceeded */
-    bool IsPhysicsBudgetExceeded() const;
-    
-    /** Apply physics settings for performance level */
-    void ApplyPhysicsPerformanceLevel(int32 Level);
-    
-    /** Get all physics bodies in world */
-    TArray<UPrimitiveComponent*> GetAllPhysicsBodies() const;
-    
-    /** Get all destruction components in world */
-    TArray<class UGeometryCollectionComponent*> GetAllDestructionComponents() const;
+    /** Maximum frame time history samples */
+    int32 MaxFrameTimeHistorySamples = 30; // 30 samples for smoothing
 };
