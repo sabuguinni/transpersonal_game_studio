@@ -1,365 +1,470 @@
 #include "CharacterSystem.h"
-#include "Engine/Engine.h"
+#include "Engine/World.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "Animation/AnimInstance.h"
 #include "Math/UnrealMathUtility.h"
+#include "Kismet/KismetMathLibrary.h"
 
-FCharacterData UCharacterGenerationSystem::GenerateRandomCharacter(ECharacterArchetype Archetype, bool bIsMale)
+UCharacterSystem::UCharacterSystem()
 {
-    FCharacterData NewCharacter;
+    // Initialize character archetypes with realistic variation ranges
+}
+
+FCharacterProfile UCharacterSystem::GenerateRandomCharacter(ECharacterArchetype ArchetypeHint)
+{
+    FCharacterProfile NewProfile;
     
-    // Basic setup
-    NewCharacter.Archetype = Archetype;
-    NewCharacter.bIsMale = bIsMale;
+    // Generate unique seed for this character
+    int32 CharacterSeed = FMath::RandRange(1000, 999999);
+    FRandomStream RandomStream(CharacterSeed);
     
-    // Generate age based on archetype
-    switch (Archetype)
+    // Set archetype
+    NewProfile.Archetype = ArchetypeHint;
+    
+    // Generate variation data based on archetype
+    NewProfile.PhysicalTraits = GenerateArchetypeSpecificVariation(ArchetypeHint, CharacterSeed);
+    
+    // Generate personality traits (Big Five model)
+    for (int32 i = 0; i < 5; i++)
     {
-        case ECharacterArchetype::TribalChild:
-            NewCharacter.AgeGroup = ECharacterAge::Child;
-            break;
-        case ECharacterArchetype::TribalElder:
-            NewCharacter.AgeGroup = ECharacterAge::Elder;
+        NewProfile.PersonalityTraits[i] = RandomStream.FRandRange(-1.0f, 1.0f);
+    }
+    
+    // Set default emotional state based on archetype
+    switch (ArchetypeHint)
+    {
+        case ECharacterArchetype::Protagonist:
+            NewProfile.DefaultEmotionalState = EEmotionalState::Determination;
             break;
         case ECharacterArchetype::TribalLeader:
-        case ECharacterArchetype::TribalShaman:
-            NewCharacter.AgeGroup = FMath::RandBool() ? ECharacterAge::Adult : ECharacterAge::MiddleAged;
+            NewProfile.DefaultEmotionalState = EEmotionalState::Vigilance;
+            break;
+        case ECharacterArchetype::Hunter:
+            NewProfile.DefaultEmotionalState = EEmotionalState::Vigilance;
+            break;
+        case ECharacterArchetype::Shaman:
+            NewProfile.DefaultEmotionalState = EEmotionalState::Wonder;
+            break;
+        case ECharacterArchetype::Child:
+            NewProfile.DefaultEmotionalState = EEmotionalState::Curiosity;
+            break;
+        case ECharacterArchetype::Elder:
+            NewProfile.DefaultEmotionalState = EEmotionalState::Neutral;
             break;
         default:
-            // Random age for other archetypes
-            int32 RandomAge = FMath::RandRange(0, 4);
-            NewCharacter.AgeGroup = static_cast<ECharacterAge>(RandomAge);
+            NewProfile.DefaultEmotionalState = EEmotionalState::Neutral;
             break;
     }
     
-    // Generate physical traits
-    NewCharacter.PhysicalTraits = GeneratePhysicalTraits(Archetype, NewCharacter.AgeGroup, bIsMale);
+    // Generate unique name
+    NewProfile.CharacterName = FString::Printf(TEXT("Character_%s_%d"), 
+        *UEnum::GetValueAsString(ArchetypeHint), CharacterSeed);
     
-    // Generate survival marks
-    NewCharacter.SurvivalMarks = GenerateSurvivalMarks(Archetype, NewCharacter.AgeGroup);
+    // Generate background story based on archetype and traits
+    NewProfile.BackgroundStory = GenerateBackgroundStory(ArchetypeHint, NewProfile.PhysicalTraits);
     
-    // Generate name
-    NewCharacter.CharacterName = GenerateName(Archetype, bIsMale);
+    // Set technical parameters
+    NewProfile.LODLevel = 0; // Start with highest quality
+    NewProfile.bUseNaniteGeometry = true;
     
-    // Set MetaHuman asset path (to be populated with actual assets)
-    NewCharacter.MetaHumanAssetPath = FString::Printf(TEXT("/Game/MetaHumans/%s_%s"), 
-        bIsMale ? TEXT("Male") : TEXT("Female"), 
-        *UEnum::GetValueAsString(Archetype));
+    return NewProfile;
+}
+
+USkeletalMeshComponent* UCharacterSystem::CreateMetaHumanFromProfile(const FCharacterProfile& Profile, AActor* OwnerActor)
+{
+    if (!OwnerActor)
+    {
+        UE_LOG(LogTemp, Error, TEXT("CharacterSystem: OwnerActor is null"));
+        return nullptr;
+    }
+    
+    // Create skeletal mesh component
+    USkeletalMeshComponent* NewCharacter = NewObject<USkeletalMeshComponent>(OwnerActor);
+    
+    if (!NewCharacter)
+    {
+        UE_LOG(LogTemp, Error, TEXT("CharacterSystem: Failed to create SkeletalMeshComponent"));
+        return nullptr;
+    }
+    
+    // Load base MetaHuman mesh based on archetype
+    USkeletalMesh* BaseMesh = LoadMetaHumanMeshForArchetype(Profile.Archetype);
+    if (BaseMesh)
+    {
+        NewCharacter->SetSkeletalMesh(BaseMesh);
+    }
+    
+    // Apply physical variations
+    ApplyVariationToMetaHuman(NewCharacter, Profile.PhysicalTraits);
+    
+    // Set animation blueprint
+    if (Profile.AnimationBlueprint.IsValid())
+    {
+        UClass* AnimBPClass = Profile.AnimationBlueprint.LoadSynchronous();
+        if (AnimBPClass)
+        {
+            NewCharacter->SetAnimInstanceClass(AnimBPClass);
+        }
+    }
+    
+    // Apply emotional state
+    ApplyEmotionalState(NewCharacter, Profile.DefaultEmotionalState, 1.0f);
+    
+    // Configure LOD and Nanite settings
+    SetCharacterLOD(NewCharacter, Profile.LODLevel);
+    EnableNaniteGeometry(NewCharacter, Profile.bUseNaniteGeometry);
+    
+    // Attach to owner
+    NewCharacter->AttachToComponent(OwnerActor->GetRootComponent(), 
+        FAttachmentTransformRules::KeepWorldTransform);
+    
+    UE_LOG(LogTemp, Log, TEXT("CharacterSystem: Created character %s"), *Profile.CharacterName);
     
     return NewCharacter;
 }
 
-FCharacterData UCharacterGenerationSystem::GenerateProtagonist()
+void UCharacterSystem::ApplyVariationToMetaHuman(USkeletalMeshComponent* MetaHuman, const FCharacterVariationData& VariationData)
 {
-    FCharacterData Protagonist;
-    
-    Protagonist.Archetype = ECharacterArchetype::Protagonist;
-    Protagonist.bIsMale = true; // Default, can be changed
-    Protagonist.AgeGroup = ECharacterAge::Adult;
-    Protagonist.CharacterName = TEXT("Dr. Marcus Stone"); // Placeholder
-    
-    // Protagonist traits - educated, not used to survival
-    Protagonist.PhysicalTraits.Height = 1.0f;
-    Protagonist.PhysicalTraits.Weight = 0.8f; // Slightly lean
-    Protagonist.PhysicalTraits.MuscleDefinition = 0.3f; // Not very muscular
-    Protagonist.PhysicalTraits.SkinTone = FLinearColor(0.85f, 0.7f, 0.6f, 1.0f);
-    Protagonist.PhysicalTraits.HairColor = FLinearColor(0.4f, 0.3f, 0.2f, 1.0f);
-    Protagonist.PhysicalTraits.EyeColor = FLinearColor(0.3f, 0.5f, 0.7f, 1.0f); // Blue eyes
-    
-    // Minimal survival marks initially
-    Protagonist.SurvivalMarks.ScarIntensity = 0.0f;
-    Protagonist.SurvivalMarks.WeatheringLevel = 0.1f;
-    Protagonist.SurvivalMarks.DirtLevel = 0.2f;
-    Protagonist.SurvivalMarks.bHasTribalMarkings = false;
-    Protagonist.SurvivalMarks.bHasBattleScars = false;
-    
-    Protagonist.MetaHumanAssetPath = TEXT("/Game/MetaHumans/Protagonist_Marcus");
-    
-    Protagonist.BackgroundStory = FText::FromString(
-        TEXT("Dr. Marcus Stone was a respected paleontologist from the University of Cambridge. "
-             "While excavating in a remote forest, he discovered an unusual crystalline artifact. "
-             "Upon touching it, he was instantly transported millions of years into the past, "
-             "into a world dominated by dinosaurs. Now he must use his scientific knowledge "
-             "and learn survival skills to find another crystal and return home."));
-    
-    Protagonist.PersonalityTraits = FText::FromString(
-        TEXT("Intelligent, curious, initially naive about survival but quick to learn. "
-             "Maintains scientific objectivity even in extreme situations. "
-             "Tends to overthink problems but has strong problem-solving abilities."));
-    
-    return Protagonist;
-}
-
-TArray<FCharacterData> UCharacterGenerationSystem::GenerateTribalGroup(int32 GroupSize)
-{
-    TArray<FCharacterData> TribalGroup;
-    
-    // Ensure we have at least one leader
-    TribalGroup.Add(GenerateRandomCharacter(ECharacterArchetype::TribalLeader, FMath::RandBool()));
-    
-    // Add other members
-    for (int32 i = 1; i < GroupSize; i++)
+    if (!MetaHuman)
     {
-        TArray<ECharacterArchetype> PossibleArchetypes = {
-            ECharacterArchetype::TribalWarrior,
-            ECharacterArchetype::TribalCrafter,
-            ECharacterArchetype::TribalShaman,
-            ECharacterArchetype::TribalChild,
-            ECharacterArchetype::TribalElder
-        };
+        return;
+    }
+    
+    // Create dynamic material instance for skin customization
+    UMaterialInterface* BaseSkinMaterial = MetaHuman->GetMaterial(0); // Assuming skin is material slot 0
+    if (BaseSkinMaterial)
+    {
+        UMaterialInstanceDynamic* DynamicSkinMaterial = UMaterialInstanceDynamic::Create(BaseSkinMaterial, MetaHuman);
         
-        ECharacterArchetype RandomArchetype = PossibleArchetypes[FMath::RandRange(0, PossibleArchetypes.Num() - 1)];
-        TribalGroup.Add(GenerateRandomCharacter(RandomArchetype, FMath::RandBool()));
+        if (DynamicSkinMaterial)
+        {
+            // Apply skin tone variation
+            FLinearColor SkinColor = GenerateRealisticSkinTone(FMath::RandRange(1, 10000));
+            DynamicSkinMaterial->SetVectorParameterValue(TEXT("SkinTone"), SkinColor);
+            
+            // Apply weathering/aging
+            DynamicSkinMaterial->SetScalarParameterValue(TEXT("SkinWeathering"), VariationData.SkinWeathering);
+            DynamicSkinMaterial->SetScalarParameterValue(TEXT("AgeValue"), VariationData.AgeVariation);
+            
+            // Apply scars if any
+            for (int32 i = 0; i < VariationData.ScarLocations.Num() && i < 3; i++) // Max 3 scars
+            {
+                FString ScarParamName = FString::Printf(TEXT("ScarLocation_%d"), i + 1);
+                DynamicSkinMaterial->SetVectorParameterValue(*ScarParamName, 
+                    FLinearColor(VariationData.ScarLocations[i].X, VariationData.ScarLocations[i].Y, 0.0f, 1.0f));
+            }
+            
+            MetaHuman->SetMaterial(0, DynamicSkinMaterial);
+        }
     }
     
-    return TribalGroup;
+    // Apply body shape variations through morph targets
+    if (USkeletalMesh* Mesh = MetaHuman->GetSkeletalMeshAsset())
+    {
+        // Height variation
+        if (FMath::Abs(VariationData.HeightVariation) > 0.01f)
+        {
+            FVector CurrentScale = MetaHuman->GetComponentScale();
+            float HeightMultiplier = 1.0f + (VariationData.HeightVariation * 0.2f); // ±20% height variation
+            MetaHuman->SetWorldScale3D(FVector(CurrentScale.X, CurrentScale.Y, CurrentScale.Z * HeightMultiplier));
+        }
+        
+        // Apply morph targets for facial features
+        MetaHuman->SetMorphTarget(TEXT("FaceWidth"), VariationData.FaceWidth);
+        MetaHuman->SetMorphTarget(TEXT("EyeSize"), VariationData.EyeSize);
+        MetaHuman->SetMorphTarget(TEXT("NoseShape"), VariationData.NoseShape);
+        MetaHuman->SetMorphTarget(TEXT("JawDefinition"), VariationData.JawDefinition);
+        MetaHuman->SetMorphTarget(TEXT("BodyBuild"), VariationData.BuildVariation);
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("CharacterSystem: Applied variations to MetaHuman"));
 }
 
-FCharacterPhysicalTraits UCharacterGenerationSystem::GeneratePhysicalTraits(ECharacterArchetype Archetype, ECharacterAge Age, bool bIsMale)
+void UCharacterSystem::ApplyEmotionalState(USkeletalMeshComponent* Character, EEmotionalState EmotionalState, float Intensity)
 {
-    FCharacterPhysicalTraits Traits;
-    
-    // Base height and weight variations
-    Traits.Height = FMath::RandRange(0.85f, 1.15f);
-    Traits.Weight = FMath::RandRange(0.8f, 1.2f);
-    
-    // Age adjustments
-    switch (Age)
+    if (!Character)
     {
-        case ECharacterAge::Child:
-            Traits.Height *= 0.6f;
-            Traits.Weight *= 0.7f;
-            Traits.MuscleDefinition = 0.1f;
+        return;
+    }
+    
+    // Map emotional states to facial expression morph targets
+    switch (EmotionalState)
+    {
+        case EEmotionalState::Fear:
+            Character->SetMorphTarget(TEXT("Fear_Brow"), Intensity * 0.8f);
+            Character->SetMorphTarget(TEXT("Fear_Eyes"), Intensity * 0.7f);
+            Character->SetMorphTarget(TEXT("Fear_Mouth"), Intensity * 0.6f);
             break;
-        case ECharacterAge::Elder:
-            Traits.Height *= 0.95f;
-            Traits.Weight *= 1.1f;
-            Traits.MuscleDefinition = FMath::RandRange(0.2f, 0.5f);
+            
+        case EEmotionalState::Determination:
+            Character->SetMorphTarget(TEXT("Determination_Brow"), Intensity * 0.9f);
+            Character->SetMorphTarget(TEXT("Determination_Jaw"), Intensity * 0.7f);
+            Character->SetMorphTarget(TEXT("Determination_Eyes"), Intensity * 0.8f);
             break;
+            
+        case EEmotionalState::Curiosity:
+            Character->SetMorphTarget(TEXT("Curiosity_Brow"), Intensity * 0.6f);
+            Character->SetMorphTarget(TEXT("Curiosity_Eyes"), Intensity * 0.8f);
+            Character->SetMorphTarget(TEXT("Curiosity_Head"), Intensity * 0.5f);
+            break;
+            
+        case EEmotionalState::Exhaustion:
+            Character->SetMorphTarget(TEXT("Exhaustion_Eyes"), Intensity * 0.9f);
+            Character->SetMorphTarget(TEXT("Exhaustion_Mouth"), Intensity * 0.7f);
+            Character->SetMorphTarget(TEXT("Exhaustion_Posture"), Intensity * 0.8f);
+            break;
+            
+        case EEmotionalState::Vigilance:
+            Character->SetMorphTarget(TEXT("Alert_Eyes"), Intensity * 0.9f);
+            Character->SetMorphTarget(TEXT("Alert_Brow"), Intensity * 0.7f);
+            Character->SetMorphTarget(TEXT("Alert_Posture"), Intensity * 0.8f);
+            break;
+            
+        case EEmotionalState::Wonder:
+            Character->SetMorphTarget(TEXT("Wonder_Eyes"), Intensity * 0.8f);
+            Character->SetMorphTarget(TEXT("Wonder_Mouth"), Intensity * 0.5f);
+            Character->SetMorphTarget(TEXT("Wonder_Brow"), Intensity * 0.6f);
+            break;
+            
         default:
-            Traits.MuscleDefinition = FMath::RandRange(0.3f, 0.8f);
+            // Neutral - reset all emotional morph targets
+            Character->SetMorphTarget(TEXT("Fear_Brow"), 0.0f);
+            Character->SetMorphTarget(TEXT("Fear_Eyes"), 0.0f);
+            Character->SetMorphTarget(TEXT("Determination_Brow"), 0.0f);
+            // ... reset all other emotional morphs
             break;
     }
     
-    // Archetype adjustments
+    UE_LOG(LogTemp, Log, TEXT("CharacterSystem: Applied emotional state %s with intensity %f"), 
+        *UEnum::GetValueAsString(EmotionalState), Intensity);
+}
+
+FCharacterVariationData UCharacterSystem::GenerateArchetypeSpecificVariation(ECharacterArchetype Archetype, int32 Seed)
+{
+    FRandomStream RandomStream(Seed);
+    FCharacterVariationData VariationData;
+    
+    // Base variations for all archetypes
+    VariationData.FaceWidth = RandomStream.FRandRange(-0.3f, 0.3f);
+    VariationData.EyeSize = RandomStream.FRandRange(-0.2f, 0.2f);
+    VariationData.NoseShape = RandomStream.FRandRange(-0.4f, 0.4f);
+    VariationData.JawDefinition = RandomStream.FRandRange(-0.3f, 0.3f);
+    
+    // Archetype-specific variations
     switch (Archetype)
     {
-        case ECharacterArchetype::TribalWarrior:
-            Traits.MuscleDefinition = FMath::RandRange(0.7f, 1.0f);
-            Traits.Height = FMath::Max(Traits.Height, 0.95f);
-            break;
-        case ECharacterArchetype::TribalShaman:
-            Traits.MuscleDefinition = FMath::RandRange(0.2f, 0.5f);
-            break;
         case ECharacterArchetype::Protagonist:
-            Traits.MuscleDefinition = 0.3f; // Academic, not physical
+            // Paleontologist - academic build, moderate weathering
+            VariationData.BuildVariation = RandomStream.FRandRange(-0.2f, 0.1f); // Lean to average
+            VariationData.HeightVariation = RandomStream.FRandRange(-0.1f, 0.2f); // Average to tall
+            VariationData.AgeVariation = RandomStream.FRandRange(0.3f, 0.5f); // Middle-aged
+            VariationData.SkinWeathering = RandomStream.FRandRange(0.1f, 0.3f); // Light weathering
+            break;
+            
+        case ECharacterArchetype::Hunter:
+            // Strong, weathered, athletic build
+            VariationData.BuildVariation = RandomStream.FRandRange(0.2f, 0.8f); // Athletic to robust
+            VariationData.HeightVariation = RandomStream.FRandRange(0.0f, 0.3f); // Average to tall
+            VariationData.AgeVariation = RandomStream.FRandRange(0.2f, 0.7f); // Young adult to mature
+            VariationData.SkinWeathering = RandomStream.FRandRange(0.4f, 0.8f); // Moderate to heavy weathering
+            VariationData.JawDefinition = FMath::Max(VariationData.JawDefinition, 0.2f); // Strong jaw
+            
+            // Add hunting scars
+            int32 NumScars = RandomStream.RandRange(1, 3);
+            for (int32 i = 0; i < NumScars; i++)
+            {
+                FVector2D ScarLocation(RandomStream.FRandRange(0.0f, 1.0f), RandomStream.FRandRange(0.0f, 1.0f));
+                VariationData.ScarLocations.Add(ScarLocation);
+            }
+            break;
+            
+        case ECharacterArchetype::Gatherer:
+            // Moderate build, practical appearance
+            VariationData.BuildVariation = RandomStream.FRandRange(-0.1f, 0.3f); // Lean to average
+            VariationData.HeightVariation = RandomStream.FRandRange(-0.2f, 0.1f); // Short to average
+            VariationData.AgeVariation = RandomStream.FRandRange(0.2f, 0.6f); // Young to mature
+            VariationData.SkinWeathering = RandomStream.FRandRange(0.2f, 0.5f); // Light to moderate weathering
+            break;
+            
+        case ECharacterArchetype::Elder:
+            // Aged, wise appearance
+            VariationData.BuildVariation = RandomStream.FRandRange(-0.3f, 0.1f); // Lean to average
+            VariationData.HeightVariation = RandomStream.FRandRange(-0.2f, 0.0f); // Shorter due to age
+            VariationData.AgeVariation = RandomStream.FRandRange(0.8f, 1.0f); // Very aged
+            VariationData.SkinWeathering = RandomStream.FRandRange(0.7f, 1.0f); // Heavy weathering
+            
+            // Apply aging effects
+            ApplyProceduralAging(VariationData, VariationData.AgeVariation);
+            break;
+            
+        case ECharacterArchetype::Child:
+            // Young, smaller build
+            VariationData.BuildVariation = RandomStream.FRandRange(-0.4f, -0.1f); // Lean
+            VariationData.HeightVariation = RandomStream.FRandRange(-0.5f, -0.2f); // Much shorter
+            VariationData.AgeVariation = RandomStream.FRandRange(0.0f, 0.2f); // Very young
+            VariationData.SkinWeathering = RandomStream.FRandRange(0.0f, 0.1f); // Minimal weathering
+            VariationData.EyeSize = FMath::Max(VariationData.EyeSize, 0.1f); // Larger eyes
+            break;
+            
+        case ECharacterArchetype::Shaman:
+            // Mystical, weathered appearance
+            VariationData.BuildVariation = RandomStream.FRandRange(-0.2f, 0.2f); // Variable
+            VariationData.HeightVariation = RandomStream.FRandRange(-0.1f, 0.1f); // Average
+            VariationData.AgeVariation = RandomStream.FRandRange(0.4f, 0.8f); // Mature to aged
+            VariationData.SkinWeathering = RandomStream.FRandRange(0.3f, 0.7f); // Moderate to heavy
+            
+            // Distinctive facial features
+            VariationData.EyeSize = RandomStream.FRandRange(0.1f, 0.3f); // Piercing eyes
+            break;
+            
+        default:
+            // Default variations for other archetypes
+            VariationData.BuildVariation = RandomStream.FRandRange(-0.2f, 0.2f);
+            VariationData.HeightVariation = RandomStream.FRandRange(-0.1f, 0.1f);
+            VariationData.AgeVariation = RandomStream.FRandRange(0.2f, 0.6f);
+            VariationData.SkinWeathering = RandomStream.FRandRange(0.2f, 0.5f);
             break;
     }
     
-    // Generate diverse skin tones
-    float SkinVariation = FMath::RandRange(0.0f, 1.0f);
-    if (SkinVariation < 0.3f)
-    {
-        // Lighter skin tones
-        Traits.SkinTone = FLinearColor(
-            FMath::RandRange(0.8f, 0.95f),
-            FMath::RandRange(0.6f, 0.8f),
-            FMath::RandRange(0.5f, 0.7f),
-            1.0f
-        );
-    }
-    else if (SkinVariation < 0.7f)
-    {
-        // Medium skin tones
-        Traits.SkinTone = FLinearColor(
-            FMath::RandRange(0.6f, 0.8f),
-            FMath::RandRange(0.4f, 0.6f),
-            FMath::RandRange(0.3f, 0.5f),
-            1.0f
-        );
-    }
-    else
-    {
-        // Darker skin tones
-        Traits.SkinTone = FLinearColor(
-            FMath::RandRange(0.3f, 0.6f),
-            FMath::RandRange(0.2f, 0.4f),
-            FMath::RandRange(0.15f, 0.3f),
-            1.0f
-        );
-    }
+    // Generate realistic skin tone and hair color
+    VariationData.SkinTone = RandomStream.FRandRange(0.0f, 1.0f);
+    VariationData.HairColor = GenerateRealisticHairColor(VariationData.AgeVariation, Seed);
     
-    // Hair color variations
-    float HairVariation = FMath::RandRange(0.0f, 1.0f);
-    if (HairVariation < 0.4f)
-    {
-        // Brown hair
-        Traits.HairColor = FLinearColor(
-            FMath::RandRange(0.2f, 0.5f),
-            FMath::RandRange(0.1f, 0.3f),
-            FMath::RandRange(0.05f, 0.2f),
-            1.0f
-        );
-    }
-    else if (HairVariation < 0.7f)
-    {
-        // Black hair
-        Traits.HairColor = FLinearColor(
-            FMath::RandRange(0.05f, 0.2f),
-            FMath::RandRange(0.05f, 0.2f),
-            FMath::RandRange(0.05f, 0.2f),
-            1.0f
-        );
-    }
-    else if (HairVariation < 0.9f)
-    {
-        // Blonde hair
-        Traits.HairColor = FLinearColor(
-            FMath::RandRange(0.6f, 0.9f),
-            FMath::RandRange(0.5f, 0.8f),
-            FMath::RandRange(0.3f, 0.6f),
-            1.0f
-        );
-    }
-    else
-    {
-        // Red hair
-        Traits.HairColor = FLinearColor(
-            FMath::RandRange(0.6f, 0.9f),
-            FMath::RandRange(0.2f, 0.4f),
-            FMath::RandRange(0.1f, 0.3f),
-            1.0f
-        );
-    }
+    // Select hair style based on archetype and gender
+    VariationData.HairStyleIndex = SelectHairStyleForArchetype(Archetype, RandomStream);
     
-    // Eye color variations
-    float EyeVariation = FMath::RandRange(0.0f, 1.0f);
-    if (EyeVariation < 0.5f)
-    {
-        // Brown eyes
-        Traits.EyeColor = FLinearColor(
-            FMath::RandRange(0.3f, 0.6f),
-            FMath::RandRange(0.2f, 0.4f),
-            FMath::RandRange(0.1f, 0.3f),
-            1.0f
-        );
-    }
-    else if (EyeVariation < 0.8f)
-    {
-        // Blue eyes
-        Traits.EyeColor = FLinearColor(
-            FMath::RandRange(0.2f, 0.4f),
-            FMath::RandRange(0.4f, 0.6f),
-            FMath::RandRange(0.6f, 0.9f),
-            1.0f
-        );
-    }
-    else
-    {
-        // Green eyes
-        Traits.EyeColor = FLinearColor(
-            FMath::RandRange(0.2f, 0.4f),
-            FMath::RandRange(0.5f, 0.8f),
-            FMath::RandRange(0.3f, 0.5f),
-            1.0f
-        );
-    }
+    // Select clothing based on archetype
+    VariationData.ClothingSetIndex = SelectClothingForArchetype(Archetype, RandomStream);
+    VariationData.ClothingWear = RandomStream.FRandRange(0.1f, 0.8f); // Clothing wear level
     
-    return Traits;
+    return VariationData;
 }
 
-FCharacterSurvivalMarks UCharacterGenerationSystem::GenerateSurvivalMarks(ECharacterArchetype Archetype, ECharacterAge Age)
+void UCharacterSystem::ApplyProceduralAging(FCharacterVariationData& VariationData, float AgeValue)
 {
-    FCharacterSurvivalMarks Marks;
+    // Increase weathering with age
+    VariationData.SkinWeathering = FMath::Max(VariationData.SkinWeathering, AgeValue * 0.7f);
     
-    // Base survival marks based on archetype
-    switch (Archetype)
-    {
-        case ECharacterArchetype::TribalWarrior:
-            Marks.ScarIntensity = FMath::RandRange(0.5f, 0.9f);
-            Marks.bHasBattleScars = true;
-            Marks.bHasTribalMarkings = true;
-            break;
-        case ECharacterArchetype::TribalLeader:
-            Marks.ScarIntensity = FMath::RandRange(0.3f, 0.7f);
-            Marks.bHasBattleScars = FMath::RandBool();
-            Marks.bHasTribalMarkings = true;
-            break;
-        case ECharacterArchetype::TribalShaman:
-            Marks.ScarIntensity = FMath::RandRange(0.1f, 0.4f);
-            Marks.bHasTribalMarkings = true;
-            break;
-        case ECharacterArchetype::TribalChild:
-            Marks.ScarIntensity = FMath::RandRange(0.0f, 0.2f);
-            Marks.bHasTribalMarkings = FMath::RandBool();
-            break;
-        case ECharacterArchetype::Protagonist:
-            Marks.ScarIntensity = 0.0f; // Starts clean
-            break;
-        default:
-            Marks.ScarIntensity = FMath::RandRange(0.2f, 0.6f);
-            break;
-    }
+    // Add age-related facial changes
+    VariationData.FaceWidth += AgeValue * 0.1f; // Slight face widening
+    VariationData.EyeSize -= AgeValue * 0.1f; // Eyes appear smaller
+    VariationData.JawDefinition += AgeValue * 0.2f; // More defined jaw with age
     
-    // Age adjustments
-    switch (Age)
+    // Adjust build for age
+    if (AgeValue > 0.7f) // Elderly
     {
-        case ECharacterAge::Elder:
-            Marks.WeatheringLevel = FMath::RandRange(0.6f, 1.0f);
-            Marks.ScarIntensity = FMath::Min(Marks.ScarIntensity + 0.3f, 1.0f);
-            break;
-        case ECharacterAge::Child:
-            Marks.WeatheringLevel = FMath::RandRange(0.0f, 0.3f);
-            break;
-        default:
-            Marks.WeatheringLevel = FMath::RandRange(0.3f, 0.7f);
-            break;
+        VariationData.BuildVariation -= 0.2f; // Tendency to be leaner
+        VariationData.HeightVariation -= 0.1f; // Slight height loss
     }
-    
-    // Dirt level based on lifestyle
-    if (Archetype == ECharacterArchetype::TribalShaman)
-    {
-        Marks.DirtLevel = FMath::RandRange(0.1f, 0.4f); // Cleaner
-    }
-    else if (Archetype == ECharacterArchetype::TribalCrafter)
-    {
-        Marks.DirtLevel = FMath::RandRange(0.4f, 0.8f); // Working hands
-    }
-    else
-    {
-        Marks.DirtLevel = FMath::RandRange(0.3f, 0.7f);
-    }
-    
-    return Marks;
 }
 
-FString UCharacterGenerationSystem::GenerateName(ECharacterArchetype Archetype, bool bIsMale)
+FLinearColor UCharacterSystem::GenerateRealisticSkinTone(int32 Seed)
 {
-    TArray<FString> MaleNames;
-    TArray<FString> FemaleNames;
+    FRandomStream RandomStream(Seed);
     
-    if (Archetype == ECharacterArchetype::Protagonist)
-    {
-        return bIsMale ? TEXT("Dr. Marcus Stone") : TEXT("Dr. Elena Stone");
-    }
+    // Generate realistic skin tone variations
+    // Based on real human skin tone distribution
+    float BaseTone = RandomStream.FRandRange(0.2f, 0.9f);
+    float RedVariation = RandomStream.FRandRange(-0.1f, 0.1f);
+    float YellowVariation = RandomStream.FRandRange(-0.05f, 0.15f);
     
-    // Tribal names with prehistoric/nature theme
-    MaleNames = {
-        TEXT("Kael"), TEXT("Thane"), TEXT("Brom"), TEXT("Drak"), TEXT("Grom"),
-        TEXT("Tor"), TEXT("Vex"), TEXT("Zane"), TEXT("Rok"), TEXT("Jax"),
-        TEXT("Flint"), TEXT("Stone"), TEXT("Bear"), TEXT("Wolf"), TEXT("Hawk")
+    FLinearColor SkinColor;
+    SkinColor.R = FMath::Clamp(BaseTone + RedVariation, 0.1f, 1.0f);
+    SkinColor.G = FMath::Clamp(BaseTone - 0.05f, 0.1f, 1.0f);
+    SkinColor.B = FMath::Clamp(BaseTone - 0.1f + YellowVariation, 0.1f, 1.0f);
+    SkinColor.A = 1.0f;
+    
+    return SkinColor;
+}
+
+FLinearColor UCharacterSystem::GenerateRealisticHairColor(float AgeValue, int32 Seed)
+{
+    FRandomStream RandomStream(Seed);
+    
+    // Base hair colors
+    TArray<FLinearColor> BaseHairColors = {
+        FLinearColor(0.1f, 0.05f, 0.02f, 1.0f), // Black
+        FLinearColor(0.3f, 0.2f, 0.1f, 1.0f),   // Dark Brown
+        FLinearColor(0.5f, 0.35f, 0.2f, 1.0f),  // Brown
+        FLinearColor(0.7f, 0.5f, 0.3f, 1.0f),   // Light Brown
+        FLinearColor(0.9f, 0.7f, 0.4f, 1.0f),   // Blonde
+        FLinearColor(0.8f, 0.4f, 0.2f, 1.0f)    // Red
     };
     
-    FemaleNames = {
-        TEXT("Lyra"), TEXT("Nyx"), TEXT("Vera"), TEXT("Zara"), TEXT("Kira"),
-        TEXT("Thea"), TEXT("Mira"), TEXT("Senna"), TEXT("Ava"), TEXT("Luna"),
-        TEXT("Sage"), TEXT("Ivy"), TEXT("Dawn"), TEXT("Raven"), TEXT("Willow")
-    };
+    FLinearColor BaseColor = BaseHairColors[RandomStream.RandRange(0, BaseHairColors.Num() - 1)];
     
-    if (bIsMale)
+    // Apply aging - add gray/white
+    if (AgeValue > 0.4f)
     {
-        return MaleNames[FMath::RandRange(0, MaleNames.Num() - 1)];
+        float GrayAmount = (AgeValue - 0.4f) * 1.67f; // 0.4-1.0 maps to 0.0-1.0
+        GrayAmount = FMath::Clamp(GrayAmount, 0.0f, 0.9f);
+        
+        FLinearColor GrayColor(0.7f, 0.7f, 0.7f, 1.0f);
+        BaseColor = FMath::Lerp(BaseColor, GrayColor, GrayAmount);
     }
-    else
+    
+    return BaseColor;
+}
+
+void UCharacterSystem::RegisterCharacterProfile(const FCharacterProfile& Profile)
+{
+    CharacterDatabase.Add(Profile.CharacterName, Profile);
+    UE_LOG(LogTemp, Log, TEXT("CharacterSystem: Registered character profile %s"), *Profile.CharacterName);
+}
+
+FCharacterProfile UCharacterSystem::GetCharacterProfile(const FString& CharacterName)
+{
+    if (CharacterDatabase.Contains(CharacterName))
     {
-        return FemaleNames[FMath::RandRange(0, FemaleNames.Num() - 1)];
+        return CharacterDatabase[CharacterName];
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("CharacterSystem: Character profile %s not found"), *CharacterName);
+    return FCharacterProfile(); // Return empty profile
+}
+
+TArray<FCharacterProfile> UCharacterSystem::GetCharactersByArchetype(ECharacterArchetype Archetype)
+{
+    TArray<FCharacterProfile> MatchingProfiles;
+    
+    for (const auto& ProfilePair : CharacterDatabase)
+    {
+        if (ProfilePair.Value.Archetype == Archetype)
+        {
+            MatchingProfiles.Add(ProfilePair.Value);
+        }
+    }
+    
+    return MatchingProfiles;
+}
+
+void UCharacterSystem::SetCharacterLOD(USkeletalMeshComponent* Character, int32 LODLevel)
+{
+    if (!Character)
+    {
+        return;
+    }
+    
+    // Force specific LOD level
+    Character->SetForcedLOD(LODLevel + 1); // UE5 LOD is 1-based for forced LOD
+    
+    UE_LOG(LogTemp, Log, TEXT("CharacterSystem: Set character LOD to %d"), LODLevel);
+}
+
+void UCharacterSystem::EnableNaniteGeometry(USkeletalMeshComponent* Character, bool bEnable)
+{
+    if (!Character)
+    {
+        return;
+    }
+    
+    // Enable/disable Nanite virtualized geometry
+    if (USkeletalMesh* Mesh = Character->GetSkeletalMeshAsset())
+    {
+        // This would require accessing Nanite settings on the mesh
+        // Implementation depends on UE5 Nanite API for skeletal meshes
+        UE_LOG(LogTemp, Log, TEXT("CharacterSystem: %s Nanite geometry"), 
+            bEnable ? TEXT("Enabled") : TEXT("Disabled"));
     }
 }
