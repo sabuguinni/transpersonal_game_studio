@@ -1,215 +1,736 @@
 // Copyright Transpersonal Game Studio. All Rights Reserved.
 
 #include "PhysicsSystemManager.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "Engine/Engine.h"
+#include "TimerManager.h"
+#include "Kismet/GameplayStatics.h"
 #include "PhysicsEngine/PhysicsSettings.h"
-#include "Chaos/ChaosGameplayEventDispatcher.h"
-#include "Components/SkeletalMeshComponent.h"
+#include "Chaos/ChaosEngineInterface.h"
+#include "Chaos/ChaosSolverActor.h"
 #include "GeometryCollection/GeometryCollectionComponent.h"
-#include "PhysicalMaterials/PhysicalMaterial.h"
-#include "Engine/CollisionProfile.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "PhysicsEngine/BodySetup.h"
+#include "Engine/StaticMesh.h"
 
-UPhysicsSystemManager::UPhysicsSystemManager()
+DEFINE_LOG_CATEGORY(LogTranspersonalPhysics);
+
+void UPhysicsSystemManager::Initialize(FSubsystemCollectionBase& Collection)
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.bStartWithTickEnabled = true;
+    Super::Initialize(Collection);
     
-    // Initialize default values optimized for survival gameplay
-    WorldGravityZ = -980.0f;
-    MaxSubsteps = 6;
-    FixedDeltaTime = 0.016667f;
-    bEnableDestruction = true;
-    DefaultDamageThreshold = 100.0f;
-    RagdollImpulseMultiplier = 1.5f;
+    UE_LOG(LogTranspersonalPhysics, Log, TEXT("Physics System Manager initializing..."));
+    
+    // Initialize physics actor tracking
+    PhysicsActorsByType.Empty();
+    PhysicsActorsByType.Add(TEXT("Dinosaur"), TArray<TObjectPtr<AActor>>());
+    PhysicsActorsByType.Add(TEXT("Environment"), TArray<TObjectPtr<AActor>>());
+    PhysicsActorsByType.Add(TEXT("Destructible"), TArray<TObjectPtr<AActor>>());
+    PhysicsActorsByType.Add(TEXT("Ragdoll"), TArray<TObjectPtr<AActor>>());
+    
+    // Setup physics LOD distances
+    PhysicsLODDistances.Add(TEXT("Dinosaur"), 2000.0f);
+    PhysicsLODDistances.Add(TEXT("Environment"), 5000.0f);
+    PhysicsLODDistances.Add(TEXT("Destructible"), 1500.0f);
+    PhysicsLODDistances.Add(TEXT("Ragdoll"), 1000.0f);
+    
+    bPhysicsSimulationEnabled = true;
 }
 
-void UPhysicsSystemManager::BeginPlay()
+void UPhysicsSystemManager::Deinitialize()
 {
-    Super::BeginPlay();
+    UE_LOG(LogTranspersonalPhysics, Log, TEXT("Physics System Manager deinitializing..."));
     
-    CachedWorld = GetWorld();
-    if (!CachedWorld)
+    // Clear timers
+    if (UWorld* World = GetWorld())
     {
-        UE_LOG(LogTemp, Error, TEXT("PhysicsSystemManager: Failed to get world reference"));
+        World->GetTimerManager().ClearTimer(PhysicsUpdateTimer);
+        World->GetTimerManager().ClearTimer(PhysicsLODTimer);
+    }
+    
+    // Clear tracked actors
+    PhysicsActorsByType.Empty();
+    PhysicsLODDistances.Empty();
+    
+    Super::Deinitialize();
+}
+
+void UPhysicsSystemManager::OnWorldBeginPlay(UWorld& InWorld)
+{
+    Super::OnWorldBeginPlay(InWorld);
+    
+    UE_LOG(LogTranspersonalPhysics, Log, TEXT("Physics System Manager starting world play..."));
+    
+    // Initialize Chaos Physics for the world
+    InitializeChaosPhysics();
+    
+    // Configure physics for dinosaur simulation
+    ConfigureDinosaurPhysics();
+    
+    // Setup performance monitoring
+    InWorld.GetTimerManager().SetTimer(PhysicsUpdateTimer, this, &UPhysicsSystemManager::UpdatePhysicsMetrics, 0.1f, true);
+    InWorld.GetTimerManager().SetTimer(PhysicsLODTimer, this, &UPhysicsSystemManager::ApplyPhysicsLOD, 0.5f, true);
+}
+
+UPhysicsSystemManager* UPhysicsSystemManager::Get(const UObject* WorldContext)
+{
+    if (const UWorld* World = GEngine->GetWorldFromContextObject(WorldContext, EGetWorldErrorMode::LogAndReturnNull))
+    {
+        return World->GetSubsystem<UPhysicsSystemManager>();
+    }
+    return nullptr;
+}
+
+void UPhysicsSystemManager::InitializeChaosPhysics()
+{
+    UE_LOG(LogTranspersonalPhysics, Log, TEXT("Initializing Chaos Physics for large-scale simulation..."));
+    
+    // Get physics settings
+    UPhysicsSettings* PhysicsSettings = UPhysicsSettings::Get();
+    if (!PhysicsSettings)
+    {
+        UE_LOG(LogTranspersonalPhysics, Error, TEXT("Failed to get Physics Settings!"));
         return;
     }
-
-    // Initialize all physics systems
-    InitializeJurassicPhysics();
-    ConfigureCollisionChannels();
     
-    UE_LOG(LogTemp, Log, TEXT("PhysicsSystemManager: Successfully initialized for Jurassic survival gameplay"));
+    // Configure Chaos for large world simulation
+    PhysicsSettings->bTickPhysicsAsync = true;
+    PhysicsSettings->bSubstepping = true;
+    PhysicsSettings->MaxSubstepDeltaTime = 0.016f; // 60 FPS substeps
+    PhysicsSettings->MaxSubsteps = 4;
+    
+    // Chaos-specific settings for performance
+    PhysicsSettings->ChaosSolverConfiguration.Iterations = 4;
+    PhysicsSettings->ChaosSolverConfiguration.CollisionPairIterations = 2;
+    PhysicsSettings->ChaosSolverConfiguration.PushOutIterations = 2;
+    PhysicsSettings->ChaosSolverConfiguration.CollisionPushOutPairIterations = 1;
+    
+    // Collision settings for large creatures
+    PhysicsSettings->ChaosSolverConfiguration.CollisionMarginFraction = 0.1f;
+    PhysicsSettings->ChaosSolverConfiguration.CollisionMarginMax = 50.0f;
+    PhysicsSettings->ChaosSolverConfiguration.CollisionCullDistance = 100.0f;
+    
+    UE_LOG(LogTranspersonalPhysics, Log, TEXT("Chaos Physics initialized successfully"));
 }
 
-void UPhysicsSystemManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UPhysicsSystemManager::ConfigureDinosaurPhysics()
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    UE_LOG(LogTranspersonalPhysics, Log, TEXT("Configuring physics for dinosaur simulation..."));
     
-    // Monitor physics performance and adjust if needed
-    if (CachedWorld && CachedWorld->GetPhysicsScene())
+    UPhysicsSettings* PhysicsSettings = UPhysicsSettings::Get();
+    if (!PhysicsSettings)
     {
-        // Check for physics performance issues and log warnings
-        const float CurrentPhysicsTime = CachedWorld->GetPhysicsScene()->GetLastDeltaTime();
-        if (CurrentPhysicsTime > FixedDeltaTime * 2.0f)
+        return;
+    }
+    
+    // Configure gravity for realistic dinosaur movement
+    PhysicsSettings->DefaultGravityZ = -980.0f; // Standard Earth gravity
+    
+    // Set bounce threshold for realistic collisions
+    PhysicsSettings->BounceThresholdVelocity = 200.0f;
+    
+    // Configure friction and restitution combining
+    PhysicsSettings->FrictionCombineMode = EFrictionCombineMode::Average;
+    PhysicsSettings->RestitutionCombineMode = ERestitutionCombineMode::Average;
+    
+    // Set maximum velocities for stability
+    PhysicsSettings->MaxAngularVelocity = 3600.0f; // Degrees per second
+    PhysicsSettings->MaxDepenetrationVelocity = 1000.0f;
+    
+    UE_LOG(LogTranspersonalPhysics, Log, TEXT("Dinosaur physics configuration complete"));
+}
+
+void UPhysicsSystemManager::EnableDestructionSystem()
+{
+    UE_LOG(LogTranspersonalPhysics, Log, TEXT("Enabling destruction system..."));
+    
+    // Enable geometry collection support
+    UPhysicsSettings* PhysicsSettings = UPhysicsSettings::Get();
+    if (PhysicsSettings)
+    {
+        PhysicsSettings->ChaosSolverConfiguration.bGenerateCollisionData = true;
+        PhysicsSettings->ChaosSolverConfiguration.bGenerateBreakData = true;
+        PhysicsSettings->ChaosSolverConfiguration.bGenerateTrailingData = true;
+        PhysicsSettings->ChaosSolverConfiguration.bGenerateContactGraph = true;
+        
+        // Set thresholds for break events
+        PhysicsSettings->ChaosSolverConfiguration.MinMassThreshold = 0.1f;
+        PhysicsSettings->ChaosSolverConfiguration.MinSpeedThreshold = 50.0f;
+        PhysicsSettings->ChaosSolverConfiguration.MinImpulseThreshold = 100.0f;
+    }
+    
+    UE_LOG(LogTranspersonalPhysics, Log, TEXT("Destruction system enabled"));
+}
+
+void UPhysicsSystemManager::SetupRagdollSystem()
+{
+    UE_LOG(LogTranspersonalPhysics, Log, TEXT("Setting up ragdoll system..."));
+    
+    // Configure physics settings for ragdoll simulation
+    UPhysicsSettings* PhysicsSettings = UPhysicsSettings::Get();
+    if (PhysicsSettings)
+    {
+        // Enable contact modification for better ragdoll stability
+        PhysicsSettings->bEnablePCM = true;
+        PhysicsSettings->bEnableStabilization = true;
+        
+        // Set appropriate simulation settings
+        PhysicsSettings->bSimulateSkeletalMeshOnDedicatedServer = true;
+    }
+    
+    UE_LOG(LogTranspersonalPhysics, Log, TEXT("Ragdoll system setup complete"));
+}
+
+void UPhysicsSystemManager::ConfigureCollisionSystem()
+{
+    UE_LOG(LogTranspersonalPhysics, Log, TEXT("Configuring collision system for large world..."));
+    
+    UPhysicsSettings* PhysicsSettings = UPhysicsSettings::Get();
+    if (PhysicsSettings)
+    {
+        // Optimize collision detection
+        PhysicsSettings->bDisableActiveActors = false;
+        PhysicsSettings->bDisableKinematicStaticPairs = true;
+        PhysicsSettings->bDisableKinematicKinematicPairs = true;
+        
+        // Enable shape sharing for performance
+        PhysicsSettings->bEnableShapeSharing = true;
+        
+        // Configure contact generation
+        PhysicsSettings->ContactOffsetMultiplier = 0.02f;
+        PhysicsSettings->MinContactOffset = 2.0f;
+        PhysicsSettings->MaxContactOffset = 8.0f;
+    }
+    
+    UE_LOG(LogTranspersonalPhysics, Log, TEXT("Collision system configuration complete"));
+}
+
+void UPhysicsSystemManager::RegisterPhysicsActor(AActor* Actor, const FString& PhysicsType)
+{
+    if (!Actor)
+    {
+        UE_LOG(LogTranspersonalPhysics, Warning, TEXT("Attempted to register null actor"));
+        return;
+    }
+    
+    if (TArray<TObjectPtr<AActor>>* ActorArray = PhysicsActorsByType.Find(PhysicsType))
+    {
+        ActorArray->AddUnique(Actor);
+        UE_LOG(LogTranspersonalPhysics, VeryVerbose, TEXT("Registered actor %s as %s"), *Actor->GetName(), *PhysicsType);
+    }
+    else
+    {
+        UE_LOG(LogTranspersonalPhysics, Warning, TEXT("Unknown physics type: %s"), *PhysicsType);
+    }
+}
+
+void UPhysicsSystemManager::UnregisterPhysicsActor(AActor* Actor)
+{
+    if (!Actor)
+    {
+        return;
+    }
+    
+    for (auto& ActorTypePair : PhysicsActorsByType)
+    {
+        ActorTypePair.Value.Remove(Actor);
+    }
+    
+    UE_LOG(LogTranspersonalPhysics, VeryVerbose, TEXT("Unregistered actor %s"), *Actor->GetName());
+}
+
+void UPhysicsSystemManager::GetPhysicsMetrics(int32& ActiveBodies, float& SimulationTime, int32& CollisionPairs) const
+{
+    ActiveBodies = ActivePhysicsBodies;
+    SimulationTime = LastSimulationTime;
+    CollisionPairs = LastCollisionPairs;
+}
+
+void UPhysicsSystemManager::SetPhysicsSimulationEnabled(bool bEnabled)
+{
+    bPhysicsSimulationEnabled = bEnabled;
+    
+    UE_LOG(LogTranspersonalPhysics, Log, TEXT("Physics simulation %s"), 
+           bEnabled ? TEXT("enabled") : TEXT("disabled"));
+    
+    // Apply to all registered actors
+    for (const auto& ActorTypePair : PhysicsActorsByType)
+    {
+        for (AActor* Actor : ActorTypePair.Value)
         {
-            UE_LOG(LogTemp, Warning, TEXT("PhysicsSystemManager: Physics simulation taking too long: %f ms"), 
-                   CurrentPhysicsTime * 1000.0f);
+            if (Actor && IsValid(Actor))
+            {
+                if (UPrimitiveComponent* PrimComp = Actor->FindComponentByClass<UPrimitiveComponent>())
+                {
+                    PrimComp->SetSimulatePhysics(bEnabled);
+                }
+            }
         }
     }
 }
 
-void UPhysicsSystemManager::InitializeJurassicPhysics()
+void UPhysicsSystemManager::SetupPhysicsLOD()
 {
-    if (!CachedWorld)
+    UE_LOG(LogTranspersonalPhysics, Log, TEXT("Setting up Physics LOD system..."));
+    
+    // Physics LOD will be applied via timer in ApplyPhysicsLOD()
+    UE_LOG(LogTranspersonalPhysics, Log, TEXT("Physics LOD system ready"));
+}
+
+void UPhysicsSystemManager::UpdatePhysicsMetrics()
+{
+    if (!bPhysicsSimulationEnabled)
     {
-        UE_LOG(LogTemp, Error, TEXT("PhysicsSystemManager: Cannot initialize physics without valid world"));
         return;
     }
-
-    // Configure Chaos Physics settings
-    InitializeChaosSettings();
     
-    // Setup physics materials for different terrain types
-    ConfigurePhysicsMaterials();
+    // Count active physics bodies
+    ActivePhysicsBodies = 0;
+    LastCollisionPairs = 0;
     
-    // Apply world gravity optimized for creature movement
-    if (CachedWorld->GetPhysicsScene())
+    for (const auto& ActorTypePair : PhysicsActorsByType)
     {
-        CachedWorld->GetPhysicsScene()->SetGravityZ(WorldGravityZ);
-        UE_LOG(LogTemp, Log, TEXT("PhysicsSystemManager: Set world gravity to %f"), WorldGravityZ);
+        for (AActor* Actor : ActorTypePair.Value)
+        {
+            if (Actor && IsValid(Actor))
+            {
+                if (UPrimitiveComponent* PrimComp = Actor->FindComponentByClass<UPrimitiveComponent>())
+                {
+                    if (PrimComp->IsSimulatingPhysics())
+                    {
+                        ActivePhysicsBodies++;
+                    }
+                }
+            }
+        }
     }
+    
+    // Update simulation time (simplified - would need actual physics solver access)
+    LastSimulationTime = GetWorld() ? GetWorld()->GetDeltaSeconds() : 0.0f;
 }
 
-void UPhysicsSystemManager::InitializeChaosSettings()
+void UPhysicsSystemManager::ApplyPhysicsLOD()
 {
-    // Get physics settings and configure for survival gameplay
-    UPhysicsSettings* PhysicsSettings = UPhysicsSettings::Get();
-    if (!PhysicsSettings)
+    if (!bPhysicsSimulationEnabled)
     {
-        UE_LOG(LogTemp, Error, TEXT("PhysicsSystemManager: Failed to get physics settings"));
         return;
     }
-
-    // Configure Chaos solver for organic movement
-    PhysicsSettings->DefaultGravityZ = WorldGravityZ;
-    PhysicsSettings->bSubstepping = true;
-    PhysicsSettings->MaxSubstepDeltaTime = FixedDeltaTime;
-    PhysicsSettings->MaxSubsteps = MaxSubsteps;
     
-    // Enable Chaos destruction for environmental interaction
-    PhysicsSettings->bEnableShapeSharing = true;
-    PhysicsSettings->bEnablePCM = true;
-    PhysicsSettings->bEnableStabilization = true;
-    
-    // Optimize collision detection for large world
-    PhysicsSettings->BounceThresholdVelocity = 200.0f;
-    PhysicsSettings->FrictionCombineMode = EFrictionCombineMode::Average;
-    PhysicsSettings->RestitutionCombineMode = EFrictionCombineMode::Average;
-    
-    UE_LOG(LogTemp, Log, TEXT("PhysicsSystemManager: Chaos physics configured for Jurassic survival"));
-}
-
-void UPhysicsSystemManager::ConfigureCollisionChannels()
-{
-    SetupCollisionProfiles();
-    
-    UE_LOG(LogTemp, Log, TEXT("PhysicsSystemManager: Collision channels configured for survival gameplay"));
-}
-
-void UPhysicsSystemManager::SetupCollisionProfiles()
-{
-    // This would typically be done in DefaultEngine.ini, but we log the expected setup
-    UE_LOG(LogTemp, Log, TEXT("PhysicsSystemManager: Setting up collision profiles:"));
-    UE_LOG(LogTemp, Log, TEXT("  - Player: Blocks World, Dinosaur, Projectile"));
-    UE_LOG(LogTemp, Log, TEXT("  - Dinosaur: Blocks World, Player, Dinosaur"));
-    UE_LOG(LogTemp, Log, TEXT("  - Environment: Blocks All"));
-    UE_LOG(LogTemp, Log, TEXT("  - Projectile: Blocks All except Projectile"));
-    UE_LOG(LogTemp, Log, TEXT("  - Destruction: Blocks All, generates events"));
-}
-
-void UPhysicsSystemManager::ConfigurePhysicsMaterials()
-{
-    // Create physics materials for different terrain types
-    TerrainPhysicsMaterials.Empty();
-    
-    // These would typically be created as assets, but we define the properties here
-    struct FTerrainPhysicsData
+    UWorld* World = GetWorld();
+    if (!World)
     {
-        FString Name;
-        float Friction;
-        float Restitution;
-        float Density;
-    };
-    
-    TArray<FTerrainPhysicsData> TerrainTypes = {
-        {TEXT("Grass"), 0.7f, 0.1f, 1.0f},
-        {TEXT("Rock"), 0.9f, 0.3f, 2.5f},
-        {TEXT("Mud"), 0.4f, 0.05f, 1.2f},
-        {TEXT("Sand"), 0.5f, 0.1f, 1.1f},
-        {TEXT("Wood"), 0.6f, 0.2f, 0.8f},
-        {TEXT("Water"), 0.1f, 0.0f, 1.0f}
-    };
-    
-    for (const FTerrainPhysicsData& TerrainData : TerrainTypes)
-    {
-        UE_LOG(LogTemp, Log, TEXT("PhysicsSystemManager: Configured %s material - Friction: %f, Restitution: %f"), 
-               *TerrainData.Name, TerrainData.Friction, TerrainData.Restitution);
-    }
-}
-
-void UPhysicsSystemManager::EnableCreatureRagdoll(USkeletalMeshComponent* SkeletalMeshComp, 
-                                                 FVector ImpulseLocation, 
-                                                 float ImpulseStrength)
-{
-    if (!SkeletalMeshComp)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("PhysicsSystemManager: Cannot enable ragdoll on null skeletal mesh"));
         return;
     }
-
-    // Enable physics simulation on the skeletal mesh
-    SkeletalMeshComp->SetSimulatePhysics(true);
-    SkeletalMeshComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-    SkeletalMeshComp->SetCollisionResponseToAllChannels(ECR_Block);
     
-    // Apply death impulse at impact location
-    FVector ImpulseDirection = (SkeletalMeshComp->GetComponentLocation() - ImpulseLocation).GetSafeNormal();
-    FVector FinalImpulse = ImpulseDirection * ImpulseStrength * RagdollImpulseMultiplier;
+    // Get player location for distance calculations
+    FVector PlayerLocation = FVector::ZeroVector;
+    if (APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(World, 0))
+    {
+        PlayerLocation = PlayerPawn->GetActorLocation();
+    }
     
-    SkeletalMeshComp->AddImpulseAtLocation(FinalImpulse, ImpulseLocation);
-    
-    UE_LOG(LogTemp, Log, TEXT("PhysicsSystemManager: Enabled ragdoll physics with impulse strength %f"), 
-           ImpulseStrength * RagdollImpulseMultiplier);
+    // Apply LOD to each physics type
+    for (const auto& ActorTypePair : PhysicsActorsByType)
+    {
+        const FString& PhysicsType = ActorTypePair.Key;
+        const float* LODDistance = PhysicsLODDistances.Find(PhysicsType);
+        
+        if (!LODDistance)
+        {
+            continue;
+        }
+        
+        for (AActor* Actor : ActorTypePair.Value)
+        {
+            if (!Actor || !IsValid(Actor))
+            {
+                continue;
+            }
+            
+            float Distance = FVector::Dist(PlayerLocation, Actor->GetActorLocation());
+            bool bShouldSimulate = Distance <= *LODDistance;
+            
+            if (UPrimitiveComponent* PrimComp = Actor->FindComponentByClass<UPrimitiveComponent>())
+            {
+                if (PrimComp->IsSimulatingPhysics() != bShouldSimulate)
+                {
+                    PrimComp->SetSimulatePhysics(bShouldSimulate);
+                }
+            }
+        }
+    }
 }
 
-void UPhysicsSystemManager::TriggerEnvironmentalDestruction(UGeometryCollectionComponent* GeometryCollection,
-                                                          FVector ImpactLocation,
-                                                          float DestructionRadius,
-                                                          float DestructionForce)
+// UDestructionSystemComponent Implementation
+
+UDestructionSystemComponent::UDestructionSystemComponent()
 {
-    if (!GeometryCollection)
+    PrimaryComponentTick.bCanEverTick = false;
+    
+    DestructionThreshold = 1000.0f;
+    MaxFragments = 50;
+    bCanBeDestroyed = true;
+}
+
+void UDestructionSystemComponent::BeginPlay()
+{
+    Super::BeginPlay();
+    RegisterWithPhysicsSystem();
+}
+
+void UDestructionSystemComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+    UnregisterFromPhysicsSystem();
+    Super::EndPlay(EndPlayReason);
+}
+
+void UDestructionSystemComponent::SetupDestruction(float NewDestructionThreshold, int32 NewMaxFragments)
+{
+    DestructionThreshold = NewDestructionThreshold;
+    MaxFragments = FMath::Clamp(NewMaxFragments, 1, 1000);
+    
+    UE_LOG(LogTranspersonalPhysics, Log, TEXT("Destruction setup: Threshold=%.1f, MaxFragments=%d"), 
+           DestructionThreshold, MaxFragments);
+}
+
+void UDestructionSystemComponent::TriggerDestruction(const FVector& ImpactLocation, float ImpactForce)
+{
+    if (!bCanBeDestroyed || ImpactForce < DestructionThreshold)
     {
-        UE_LOG(LogTemp, Warning, TEXT("PhysicsSystemManager: Cannot trigger destruction on null geometry collection"));
         return;
     }
-
-    if (!bEnableDestruction)
+    
+    UE_LOG(LogTranspersonalPhysics, Log, TEXT("Triggering destruction at %s with force %.1f"), 
+           *ImpactLocation.ToString(), ImpactForce);
+    
+    AActor* Owner = GetOwner();
+    if (!Owner)
     {
-        UE_LOG(LogTemp, Log, TEXT("PhysicsSystemManager: Destruction disabled, ignoring destruction request"));
         return;
     }
+    
+    // Find geometry collection component
+    if (UGeometryCollectionComponent* GeomComp = Owner->FindComponentByClass<UGeometryCollectionComponent>())
+    {
+        // Apply impulse at impact location
+        GeomComp->ApplyPhysicsField(true, EFieldPhysicsType::Field_LinearVelocity, nullptr, nullptr);
+    }
+    
+    // Spawn destruction effects
+    if (DestructionEffect)
+    {
+        UGameplayStatics::SpawnEmitterAtLocation(GetWorld(), DestructionEffect, ImpactLocation);
+    }
+    
+    if (DestructionSound)
+    {
+        UGameplayStatics::PlaySoundAtLocation(GetWorld(), DestructionSound, ImpactLocation);
+    }
+}
 
-    // Apply destruction field at impact location
-    // This would use Chaos Fields in a full implementation
-    GeometryCollection->SetNotifyBreaks(true);
-    GeometryCollection->SetNotifyCollisions(true);
+void UDestructionSystemComponent::RegisterWithPhysicsSystem()
+{
+    if (UPhysicsSystemManager* PhysicsManager = UPhysicsSystemManager::Get(this))
+    {
+        PhysicsManager->RegisterPhysicsActor(GetOwner(), TEXT("Destructible"));
+    }
+}
+
+void UDestructionSystemComponent::UnregisterFromPhysicsSystem()
+{
+    if (UPhysicsSystemManager* PhysicsManager = UPhysicsSystemManager::Get(this))
+    {
+        PhysicsManager->UnregisterPhysicsActor(GetOwner());
+    }
+}
+
+// URagdollSystemComponent Implementation
+
+URagdollSystemComponent::URagdollSystemComponent()
+{
+    PrimaryComponentTick.bCanEverTick = false;
     
-    // Apply radial damage to trigger fracturing
-    // In a full implementation, this would use Chaos Fields
-    FVector ImpulseDirection = FVector::UpVector;
-    GeometryCollection->AddRadialImpulse(ImpactLocation, DestructionRadius, DestructionForce, RIF_Linear, true);
+    bRagdollActive = false;
+    RagdollMass = 1.0f;
+    LinearDamping = 0.1f;
+    AngularDamping = 0.1f;
+    AutoDeactivateTime = 10.0f;
+}
+
+void URagdollSystemComponent::BeginPlay()
+{
+    Super::BeginPlay();
     
-    UE_LOG(LogTemp, Log, TEXT("PhysicsSystemManager: Triggered environmental destruction at %s with radius %f and force %f"), 
-           *ImpactLocation.ToString(), DestructionRadius, DestructionForce);
+    // Cache skeletal mesh component
+    SkeletalMeshComponent = GetOwner()->FindComponentByClass<USkeletalMeshComponent>();
+    
+    RegisterWithPhysicsSystem();
+}
+
+void URagdollSystemComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+    if (UWorld* World = GetWorld())
+    {
+        World->GetTimerManager().ClearTimer(AutoDeactivateTimer);
+    }
+    
+    UnregisterFromPhysicsSystem();
+    Super::EndPlay(EndPlayReason);
+}
+
+void URagdollSystemComponent::ActivateRagdoll(const FVector& ImpulseLocation, float ImpulseStrength)
+{
+    if (bRagdollActive || !SkeletalMeshComponent)
+    {
+        return;
+    }
+    
+    UE_LOG(LogTranspersonalPhysics, Log, TEXT("Activating ragdoll for %s"), *GetOwner()->GetName());
+    
+    // Enable physics simulation
+    SkeletalMeshComponent->SetSimulatePhysics(true);
+    SkeletalMeshComponent->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+    
+    // Apply impulse if specified
+    if (ImpulseStrength > 0.0f && ImpulseLocation != FVector::ZeroVector)
+    {
+        SkeletalMeshComponent->AddImpulseAtLocation(
+            (ImpulseLocation - SkeletalMeshComponent->GetComponentLocation()).GetSafeNormal() * ImpulseStrength,
+            ImpulseLocation
+        );
+    }
+    
+    bRagdollActive = true;
+    
+    // Set auto-deactivate timer
+    if (AutoDeactivateTime > 0.0f)
+    {
+        GetWorld()->GetTimerManager().SetTimer(AutoDeactivateTimer, this, 
+                                               &URagdollSystemComponent::AutoDeactivateRagdoll, 
+                                               AutoDeactivateTime, false);
+    }
+}
+
+void URagdollSystemComponent::DeactivateRagdoll()
+{
+    if (!bRagdollActive || !SkeletalMeshComponent)
+    {
+        return;
+    }
+    
+    UE_LOG(LogTranspersonalPhysics, Log, TEXT("Deactivating ragdoll for %s"), *GetOwner()->GetName());
+    
+    // Disable physics simulation
+    SkeletalMeshComponent->SetSimulatePhysics(false);
+    SkeletalMeshComponent->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+    
+    bRagdollActive = false;
+    
+    // Clear timer
+    GetWorld()->GetTimerManager().ClearTimer(AutoDeactivateTimer);
+}
+
+void URagdollSystemComponent::ConfigureRagdoll(float Mass, float NewLinearDamping, float NewAngularDamping)
+{
+    RagdollMass = Mass;
+    LinearDamping = NewLinearDamping;
+    AngularDamping = NewAngularDamping;
+    
+    if (SkeletalMeshComponent && bRagdollActive)
+    {
+        // Apply settings to all bodies
+        SkeletalMeshComponent->SetAllBodiesBelowLinearDamping(NAME_None, LinearDamping, true);
+        SkeletalMeshComponent->SetAllBodiesBelowAngularDamping(NAME_None, AngularDamping, true);
+    }
+}
+
+void URagdollSystemComponent::RegisterWithPhysicsSystem()
+{
+    if (UPhysicsSystemManager* PhysicsManager = UPhysicsSystemManager::Get(this))
+    {
+        PhysicsManager->RegisterPhysicsActor(GetOwner(), TEXT("Ragdoll"));
+    }
+}
+
+void URagdollSystemComponent::UnregisterFromPhysicsSystem()
+{
+    if (UPhysicsSystemManager* PhysicsManager = UPhysicsSystemManager::Get(this))
+    {
+        PhysicsManager->UnregisterPhysicsActor(GetOwner());
+    }
+}
+
+void URagdollSystemComponent::AutoDeactivateRagdoll()
+{
+    UE_LOG(LogTranspersonalPhysics, Log, TEXT("Auto-deactivating ragdoll for %s"), *GetOwner()->GetName());
+    DeactivateRagdoll();
+}
+
+// UCollisionSystemComponent Implementation
+
+UCollisionSystemComponent::UCollisionSystemComponent()
+{
+    PrimaryComponentTick.bCanEverTick = false;
+    
+    CollisionRadius = 100.0f;
+    CollisionHeight = 200.0f;
+    NearLODDistance = 1000.0f;
+    FarLODDistance = 5000.0f;
+    CurrentLODLevel = 0;
+}
+
+void UCollisionSystemComponent::BeginPlay()
+{
+    Super::BeginPlay();
+    RegisterWithPhysicsSystem();
+    
+    // Start LOD update timer
+    GetWorld()->GetTimerManager().SetTimer(LODUpdateTimer, this, 
+                                           &UCollisionSystemComponent::UpdateCollisionLOD, 
+                                           1.0f, true);
+}
+
+void UCollisionSystemComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+    GetWorld()->GetTimerManager().ClearTimer(LODUpdateTimer);
+    UnregisterFromPhysicsSystem();
+    Super::EndPlay(EndPlayReason);
+}
+
+void UCollisionSystemComponent::SetupDinosaurCollision(float NewCollisionRadius, float NewCollisionHeight)
+{
+    CollisionRadius = NewCollisionRadius;
+    CollisionHeight = NewCollisionHeight;
+    
+    UE_LOG(LogTranspersonalPhysics, Log, TEXT("Setup dinosaur collision: Radius=%.1f, Height=%.1f"), 
+           CollisionRadius, CollisionHeight);
+    
+    // Apply to owner's collision components
+    if (AActor* Owner = GetOwner())
+    {
+        if (UPrimitiveComponent* PrimComp = Owner->FindComponentByClass<UPrimitiveComponent>())
+        {
+            // Set collision response for dinosaur interactions
+            PrimComp->SetCollisionResponseToAllChannels(ECR_Block);
+            PrimComp->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
+            PrimComp->SetCollisionResponseToChannel(ECC_Vehicle, ECR_Block);
+        }
+    }
+}
+
+void UCollisionSystemComponent::SetupEnvironmentCollision()
+{
+    UE_LOG(LogTranspersonalPhysics, Log, TEXT("Setup environment collision for %s"), *GetOwner()->GetName());
+    
+    if (AActor* Owner = GetOwner())
+    {
+        if (UPrimitiveComponent* PrimComp = Owner->FindComponentByClass<UPrimitiveComponent>())
+        {
+            // Set collision response for environment
+            PrimComp->SetCollisionResponseToAllChannels(ECR_Block);
+            PrimComp->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
+            PrimComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+        }
+    }
+}
+
+void UCollisionSystemComponent::SetCollisionEnabled(bool bEnabled)
+{
+    if (AActor* Owner = GetOwner())
+    {
+        if (UPrimitiveComponent* PrimComp = Owner->FindComponentByClass<UPrimitiveComponent>())
+        {
+            PrimComp->SetCollisionEnabled(bEnabled ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision);
+        }
+    }
+}
+
+void UCollisionSystemComponent::SetupCollisionLOD(float NewNearDistance, float NewFarDistance)
+{
+    NearLODDistance = NewNearDistance;
+    FarLODDistance = NewFarDistance;
+    
+    UE_LOG(LogTranspersonalPhysics, Log, TEXT("Collision LOD setup: Near=%.1f, Far=%.1f"), 
+           NearLODDistance, FarLODDistance);
+}
+
+FVector UCollisionSystemComponent::GetCollisionBounds() const
+{
+    return FVector(CollisionRadius * 2.0f, CollisionRadius * 2.0f, CollisionHeight);
+}
+
+void UCollisionSystemComponent::RegisterWithPhysicsSystem()
+{
+    if (UPhysicsSystemManager* PhysicsManager = UPhysicsSystemManager::Get(this))
+    {
+        PhysicsManager->RegisterPhysicsActor(GetOwner(), TEXT("Environment"));
+    }
+}
+
+void UCollisionSystemComponent::UnregisterFromPhysicsSystem()
+{
+    if (UPhysicsSystemManager* PhysicsManager = UPhysicsSystemManager::Get(this))
+    {
+        PhysicsManager->UnregisterPhysicsActor(GetOwner());
+    }
+}
+
+void UCollisionSystemComponent::UpdateCollisionLOD()
+{
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return;
+    }
+    
+    // Get player location
+    FVector PlayerLocation = FVector::ZeroVector;
+    if (APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(World, 0))
+    {
+        PlayerLocation = PlayerPawn->GetActorLocation();
+    }
+    
+    // Calculate distance to player
+    float Distance = FVector::Dist(PlayerLocation, GetOwner()->GetActorLocation());
+    
+    // Determine LOD level
+    int32 NewLODLevel = 0;
+    if (Distance > FarLODDistance)
+    {
+        NewLODLevel = 2; // Lowest detail
+    }
+    else if (Distance > NearLODDistance)
+    {
+        NewLODLevel = 1; // Medium detail
+    }
+    else
+    {
+        NewLODLevel = 0; // Highest detail
+    }
+    
+    // Apply LOD if changed
+    if (NewLODLevel != CurrentLODLevel)
+    {
+        CurrentLODLevel = NewLODLevel;
+        
+        if (AActor* Owner = GetOwner())
+        {
+            if (UPrimitiveComponent* PrimComp = Owner->FindComponentByClass<UPrimitiveComponent>())
+            {
+                switch (CurrentLODLevel)
+                {
+                case 0: // High detail
+                    PrimComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+                    break;
+                case 1: // Medium detail
+                    PrimComp->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+                    break;
+                case 2: // Low detail
+                    PrimComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+                    break;
+                }
+            }
+        }
+    }
 }
