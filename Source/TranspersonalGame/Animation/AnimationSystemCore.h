@@ -3,157 +3,138 @@
 #include "CoreMinimal.h"
 #include "Engine/Engine.h"
 #include "Animation/AnimInstance.h"
-#include "Components/ActorComponent.h"
-#include "PoseSearch/PoseSearch.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "AnimationSystemCore.generated.h"
 
 /**
- * Core Animation System for Transpersonal Game
- * Handles Motion Matching, IK, and character-specific animation behaviors
+ * Core Animation System for Transpersonal Game Studio
+ * Handles Motion Matching, IK Systems, and Procedural Animation
+ * 
+ * Design Philosophy:
+ * - Every movement tells a story about the character
+ * - Weight and intention in every gesture
+ * - Seamless blending between states without breaking immersion
  */
 
 UENUM(BlueprintType)
 enum class ECharacterMovementState : uint8
 {
-    Idle,
-    Cautious,           // Slow, careful movement
-    Normal,             // Standard walking
-    Panicked,           // Fast, erratic movement when threatened
-    Crouched,           // Stealth movement
-    Injured,            // Limping, wounded movement
-    Exhausted,          // Tired, heavy breathing
-    Observing,          // Standing still, looking around
-    Hiding              // Pressed against surfaces, minimal movement
+    Idle UMETA(DisplayName = "Idle"),
+    Walking UMETA(DisplayName = "Walking"),
+    Running UMETA(DisplayName = "Running"),
+    Crouching UMETA(DisplayName = "Crouching"),
+    Hiding UMETA(DisplayName = "Hiding"),
+    Climbing UMETA(DisplayName = "Climbing"),
+    Swimming UMETA(DisplayName = "Swimming"),
+    Injured UMETA(DisplayName = "Injured"),
+    Exhausted UMETA(DisplayName = "Exhausted"),
+    Panicked UMETA(DisplayName = "Panicked")
 };
 
 UENUM(BlueprintType)
-enum class EThreatLevel : uint8
+enum class EDinosaurBehaviorState : uint8
 {
-    None,
-    Low,                // Distant sounds, movement
-    Medium,             // Visible predator at distance
-    High,               // Close predator, immediate danger
-    Extreme             // Active chase, combat
-};
-
-UENUM(BlueprintType)
-enum class ETerrainType : uint8
-{
-    Flat,
-    Uneven,
-    Steep,
-    Muddy,
-    Rocky,
-    Vegetation,
-    Water
+    Idle UMETA(DisplayName = "Idle"),
+    Grazing UMETA(DisplayName = "Grazing"),
+    Drinking UMETA(DisplayName = "Drinking"),
+    Sleeping UMETA(DisplayName = "Sleeping"),
+    Patrolling UMETA(DisplayName = "Patrolling"),
+    Hunting UMETA(DisplayName = "Hunting"),
+    Fleeing UMETA(DisplayName = "Fleeing"),
+    Fighting UMETA(DisplayName = "Fighting"),
+    Socializing UMETA(DisplayName = "Socializing"),
+    Nesting UMETA(DisplayName = "Nesting"),
+    Domesticated_Calm UMETA(DisplayName = "Domesticated Calm"),
+    Domesticated_Playful UMETA(DisplayName = "Domesticated Playful")
 };
 
 USTRUCT(BlueprintType)
-struct FCharacterAnimationData
+struct FAnimationPersonality
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadWrite, Category = "Movement")
-    ECharacterMovementState MovementState = ECharacterMovementState::Idle;
+    // Core personality traits that affect animation
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Nervousness = 0.5f;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Environment")
-    EThreatLevel ThreatLevel = EThreatLevel::None;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Confidence = 0.5f;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Environment")
-    ETerrainType CurrentTerrain = ETerrainType::Flat;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Aggressiveness = 0.5f;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Physical State")
-    float StaminaLevel = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Curiosity = 0.5f;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Physical State")
-    float HealthLevel = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float SocialTendency = 0.5f;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Emotional State")
-    float FearLevel = 0.0f;
+    // Physical characteristics that affect movement
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.8", ClampMax = "1.2"))
+    float MovementSpeedMultiplier = 1.0f;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Emotional State")
-    float ConfidenceLevel = 0.5f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.8", ClampMax = "1.2"))
+    float AnimationSpeedVariation = 1.0f;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Movement")
-    FVector MovementDirection = FVector::ZeroVector;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float LimpSeverity = 0.0f;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Movement")
-    float MovementSpeed = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FString UniqueIdentifier;
 };
 
-UCLASS(ClassGroup=(Animation), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UAnimationSystemCore : public UActorComponent
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UAnimationSystemCore : public UObject
 {
     GENERATED_BODY()
 
 public:
     UAnimationSystemCore();
 
+    // Motion Matching Database Management
+    UFUNCTION(BlueprintCallable, Category = "Animation System")
+    void InitializeMotionMatchingSystem();
+
+    UFUNCTION(BlueprintCallable, Category = "Animation System")
+    void SetCharacterMovementState(ECharacterMovementState NewState);
+
+    UFUNCTION(BlueprintCallable, Category = "Animation System")
+    void SetDinosaurBehaviorState(EDinosaurBehaviorState NewState);
+
+    // Personality-driven animation
+    UFUNCTION(BlueprintCallable, Category = "Animation System")
+    void ApplyAnimationPersonality(const FAnimationPersonality& Personality);
+
+    // Terrain adaptation
+    UFUNCTION(BlueprintCallable, Category = "Animation System")
+    void UpdateTerrainAdaptation(float SurfaceAngle, float SurfaceRoughness);
+
+    // Domestication system
+    UFUNCTION(BlueprintCallable, Category = "Animation System")
+    void UpdateDomesticationLevel(float DomesticationProgress);
+
 protected:
-    virtual void BeginPlay() override;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Motion Matching")
+    class UPoseSearchDatabase* HumanLocomotionDatabase;
 
-public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Motion Matching")
+    class UPoseSearchDatabase* DinosaurBehaviorDatabase;
 
-    // Core Animation Data
-    UPROPERTY(BlueprintReadWrite, Category = "Animation Data")
-    FCharacterAnimationData AnimationData;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Motion Matching")
+    class UPoseSearchSchema* DefaultMotionSchema;
 
-    // Motion Matching Database References
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    class UPoseSearchDatabase* IdleDatabase;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "IK System")
+    class UIKRigDefinition* HumanIKRig;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    class UPoseSearchDatabase* LocomotionDatabase;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    class UPoseSearchDatabase* PanicDatabase;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    class UPoseSearchDatabase* StealthDatabase;
-
-    // IK Settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK")
-    float FootIKInterpSpeed = 15.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK")
-    float FootTraceDistance = 50.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK")
-    float PelvisAdjustmentInterpSpeed = 10.0f;
-
-    // Animation Blending
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blending")
-    float StateTransitionSpeed = 5.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blending")
-    float ThreatResponseSpeed = 8.0f;
-
-    // Functions
-    UFUNCTION(BlueprintCallable, Category = "Animation System")
-    void UpdateMovementState(ECharacterMovementState NewState);
-
-    UFUNCTION(BlueprintCallable, Category = "Animation System")
-    void UpdateThreatLevel(EThreatLevel NewThreatLevel);
-
-    UFUNCTION(BlueprintCallable, Category = "Animation System")
-    void UpdateTerrainType(ETerrainType NewTerrain);
-
-    UFUNCTION(BlueprintCallable, Category = "Animation System")
-    class UPoseSearchDatabase* GetCurrentDatabase() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Animation System")
-    float GetBlendWeight(ECharacterMovementState State) const;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "IK System")
+    class UIKRigDefinition* DinosaurIKRig;
 
 private:
-    // Internal state tracking
-    ECharacterMovementState PreviousMovementState;
-    EThreatLevel PreviousThreatLevel;
+    ECharacterMovementState CurrentMovementState;
+    EDinosaurBehaviorState CurrentBehaviorState;
+    FAnimationPersonality CurrentPersonality;
     
-    float StateTransitionTimer = 0.0f;
-    float ThreatTransitionTimer = 0.0f;
-
-    void UpdateAnimationBlends(float DeltaTime);
-    void ProcessThreatResponse(float DeltaTime);
-    void UpdatePhysicalState(float DeltaTime);
+    float TerrainAngle;
+    float TerrainRoughness;
+    float DomesticationLevel;
 };
