@@ -1,227 +1,354 @@
 #include "CharacterArtistSystem.h"
 #include "Engine/Engine.h"
-#include "Kismet/KismetMathLibrary.h"
-#include "Kismet/KismetStringLibrary.h"
 
-FCharacterArchetypeDefinition UCharacterArchetypeDatabase::GetArchetypeDefinition(ECharacterArchetype ArchetypeType) const
+UCharacterArtistSystem::UCharacterArtistSystem()
 {
-    for (const auto& Archetype : Archetypes)
+    MaxUniqueCharacters = 50;
+    bEnsureVisualDiversity = true;
+    MinimumVariationThreshold = 0.3f;
+}
+
+FCharacterDefinition UCharacterArtistSystem::CreateCharacter(ECharacterArchetype Archetype, ECharacterGender Gender)
+{
+    FCharacterDefinition NewCharacter;
+    
+    // Set basic identity
+    NewCharacter.Archetype = Archetype;
+    
+    // Determine gender
+    if (Gender == ECharacterGender::Random)
     {
-        if (Archetype.ArchetypeType == ArchetypeType)
-        {
-            return Archetype;
-        }
+        NewCharacter.Gender = FMath::RandBool() ? ECharacterGender::Male : ECharacterGender::Female;
+    }
+    else
+    {
+        NewCharacter.Gender = Gender;
     }
     
-    // Return default if not found
-    FCharacterArchetypeDefinition DefaultArchetype;
-    DefaultArchetype.ArchetypeType = ECharacterArchetype::Protagonist;
-    DefaultArchetype.ArchetypeName = TEXT("Default Protagonist");
-    return DefaultArchetype;
-}
-
-TArray<ECharacterArchetype> UCharacterArchetypeDatabase::GetAvailableArchetypes() const
-{
-    TArray<ECharacterArchetype> AvailableTypes;
-    for (const auto& Archetype : Archetypes)
+    // Determine age based on archetype
+    switch (Archetype)
     {
-        AvailableTypes.Add(Archetype.ArchetypeType);
-    }
-    return AvailableTypes;
-}
-
-UCharacterVariationComponent::UCharacterVariationComponent()
-{
-    PrimaryComponentTick.bCanEverTick = false;
-    
-    // Default values
-    CurrentArchetype = ECharacterArchetype::Protagonist;
-    Gender = ECharacterGender::Male;
-    Age = ECharacterAge::Adult;
-    CharacterInstanceID = GenerateUniqueCharacterID();
-}
-
-void UCharacterVariationComponent::BeginPlay()
-{
-    Super::BeginPlay();
-    
-    // Find MetaHuman mesh component in owner
-    if (AActor* Owner = GetOwner())
-    {
-        MetaHumanMesh = Owner->FindComponentByClass<USkeletalMeshComponent>();
+        case ECharacterArchetype::TribalChild:
+            NewCharacter.Age = ECharacterAge::Child;
+            break;
+        case ECharacterArchetype::TribalElder:
+            NewCharacter.Age = ECharacterAge::Elder;
+            break;
+        case ECharacterArchetype::Protagonist:
+            NewCharacter.Age = ECharacterAge::Adult; // Paleontologist is experienced adult
+            break;
+        default:
+            // Random age for other archetypes, weighted towards adult
+            float AgeRoll = FMath::RandRange(0.0f, 1.0f);
+            if (AgeRoll < 0.1f) NewCharacter.Age = ECharacterAge::Young;
+            else if (AgeRoll < 0.7f) NewCharacter.Age = ECharacterAge::Adult;
+            else NewCharacter.Age = ECharacterAge::Elder;
+            break;
     }
     
-    // Apply initial variation
-    ApplyVariationToMesh();
+    // Generate physical variation
+    NewCharacter.PhysicalVariation = GenerateVariationForArchetype(Archetype, NewCharacter.Age);
+    
+    // Generate name
+    NewCharacter.CharacterName = GenerateCharacterName(NewCharacter.Gender, Archetype);
+    
+    // Generate personality traits
+    NewCharacter.PersonalityTraits = GeneratePersonalityTraits(Archetype);
+    
+    // Generate background story
+    NewCharacter.BackgroundStory = GenerateBackgroundStory(Archetype, NewCharacter.Gender);
+    
+    return NewCharacter;
 }
 
-void UCharacterVariationComponent::GenerateRandomVariation(ECharacterArchetype Archetype)
+FCharacterDefinition UCharacterArtistSystem::CreateProtagonist()
 {
-    CurrentArchetype = Archetype;
+    FCharacterDefinition Protagonist = CreateCharacter(ECharacterArchetype::Protagonist, ECharacterGender::Male);
     
-    if (!ArchetypeDatabase.IsNull())
-    {
-        UCharacterArchetypeDatabase* Database = ArchetypeDatabase.LoadSynchronous();
-        if (Database)
-        {
-            FCharacterArchetypeDefinition ArchetypeDef = Database->GetArchetypeDefinition(Archetype);
-            
-            // Random gender from preferred list
-            if (ArchetypeDef.PreferredGenders.Num() > 0)
-            {
-                int32 RandomIndex = FMath::RandRange(0, ArchetypeDef.PreferredGenders.Num() - 1);
-                Gender = ArchetypeDef.PreferredGenders[RandomIndex];
-            }
-            
-            // Random age from preferred list
-            if (ArchetypeDef.PreferredAges.Num() > 0)
-            {
-                int32 RandomIndex = FMath::RandRange(0, ArchetypeDef.PreferredAges.Num() - 1);
-                Age = ArchetypeDef.PreferredAges[RandomIndex];
-            }
-            
-            // Generate random variations within archetype ranges
-            VariationData.BodyMassVariation = FMath::FRandRange(
-                ArchetypeDef.BaseVariation.BodyMassVariation - ArchetypeDef.VariationRange.BodyMassVariation,
-                ArchetypeDef.BaseVariation.BodyMassVariation + ArchetypeDef.VariationRange.BodyMassVariation
-            );
-            
-            VariationData.HeightVariation = FMath::FRandRange(
-                ArchetypeDef.BaseVariation.HeightVariation - ArchetypeDef.VariationRange.HeightVariation,
-                ArchetypeDef.BaseVariation.HeightVariation + ArchetypeDef.VariationRange.HeightVariation
-            );
-            
-            VariationData.FacialFeatureVariation = FMath::FRandRange(
-                ArchetypeDef.BaseVariation.FacialFeatureVariation - ArchetypeDef.VariationRange.FacialFeatureVariation,
-                ArchetypeDef.BaseVariation.FacialFeatureVariation + ArchetypeDef.VariationRange.FacialFeatureVariation
-            );
-            
-            // Random skin tone variation
-            float SkinVariation = FMath::FRandRange(-0.1f, 0.1f);
-            VariationData.SkinTone = ArchetypeDef.BaseVariation.SkinTone;
-            VariationData.SkinTone.R = FMath::Clamp(VariationData.SkinTone.R + SkinVariation, 0.0f, 1.0f);
-            VariationData.SkinTone.G = FMath::Clamp(VariationData.SkinTone.G + SkinVariation, 0.0f, 1.0f);
-            VariationData.SkinTone.B = FMath::Clamp(VariationData.SkinTone.B + SkinVariation, 0.0f, 1.0f);
-            
-            // Copy clothing and accessories
-            VariationData.ClothingPieces = ArchetypeDef.TypicalAccessories;
-            
-            // Random weathering based on archetype
-            VariationData.WeatheringLevel = FMath::FRandRange(
-                ArchetypeDef.BaseVariation.WeatheringLevel - 0.2f,
-                ArchetypeDef.BaseVariation.WeatheringLevel + 0.2f
-            );
-            VariationData.WeatheringLevel = FMath::Clamp(VariationData.WeatheringLevel, 0.0f, 1.0f);
-        }
-    }
+    // Specific customization for the protagonist
+    Protagonist.CharacterName = "Dr. Marcus Thorne"; // Temporary name - will be set by Miguel
+    Protagonist.PhysicalVariation.WearLevel = 0.1f; // Starts clean, will get dirty
+    Protagonist.PhysicalVariation.ScarLevel = 0.0f; // No scars initially
+    Protagonist.PhysicalVariation.DirtLevel = 0.1f; // Clean at start
+    Protagonist.PhysicalVariation.BodyBuild = 0.4f; // Academic build, not muscular
     
-    ValidateVariationData();
-    CharacterInstanceID = GenerateUniqueCharacterID();
-}
-
-void UCharacterVariationComponent::ApplyVariationToMesh()
-{
-    if (!MetaHumanMesh)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("CharacterVariationComponent: No MetaHuman mesh found"));
-        return;
-    }
+    // Protagonist-specific traits
+    Protagonist.PersonalityTraits = {
+        "Curious and analytical",
+        "Determined survivor",
+        "Scientific mindset",
+        "Adaptable under pressure",
+        "Respectful of nature"
+    };
     
-    ApplyPhysicalVariations();
-    ApplyClothingAndAccessories();
-    ApplyWeatheringAndScars();
-    
-    UE_LOG(LogTemp, Log, TEXT("Applied character variation for ID: %s"), *CharacterInstanceID);
-}
-
-void UCharacterVariationComponent::SetArchetype(ECharacterArchetype NewArchetype)
-{
-    if (NewArchetype != CurrentArchetype)
-    {
-        GenerateRandomVariation(NewArchetype);
-        ApplyVariationToMesh();
-    }
-}
-
-FString UCharacterVariationComponent::GenerateUniqueCharacterID() const
-{
-    FString ArchetypeString = UEnum::GetValueAsString(CurrentArchetype);
-    FString GenderString = UEnum::GetValueAsString(Gender);
-    FString AgeString = UEnum::GetValueAsString(Age);
-    
-    // Remove enum prefixes
-    ArchetypeString = ArchetypeString.Right(ArchetypeString.Len() - ArchetypeString.Find(TEXT("::")) - 2);
-    GenderString = GenderString.Right(GenderString.Len() - GenderString.Find(TEXT("::")) - 2);
-    AgeString = AgeString.Right(AgeString.Len() - AgeString.Find(TEXT("::")) - 2);
-    
-    FString TimeStamp = FString::Printf(TEXT("%d"), FDateTime::Now().GetTicks());
-    FString RandomSuffix = FString::Printf(TEXT("%04d"), FMath::RandRange(1000, 9999));
-    
-    return FString::Printf(TEXT("%s_%s_%s_%s_%s"), 
-        *ArchetypeString, 
-        *GenderString, 
-        *AgeString, 
-        *TimeStamp.Right(8), 
-        *RandomSuffix
+    Protagonist.BackgroundStory = FText::FromString(
+        "Dr. Marcus Thorne was conducting a routine geological survey when he discovered the mysterious glowing gem. "
+        "A respected paleontologist with years of fieldwork experience, he now finds himself using every survival "
+        "skill he's learned in the most dangerous environment imaginable - the age of dinosaurs."
     );
+    
+    return Protagonist;
 }
 
-void UCharacterVariationComponent::ApplyPhysicalVariations()
+TArray<FCharacterDefinition> UCharacterArtistSystem::CreateTribalCommunity(int32 CommunitySize)
 {
-    if (!MetaHumanMesh) return;
+    TArray<FCharacterDefinition> Community;
     
-    // Apply scale variations
-    FVector CurrentScale = MetaHumanMesh->GetRelativeScale3D();
+    // Ensure we have essential community members
+    Community.Add(CreateCharacter(ECharacterArchetype::TribalElder, ECharacterGender::Random));
+    Community.Add(CreateCharacter(ECharacterArchetype::TribalShaman, ECharacterGender::Random));
+    Community.Add(CreateCharacter(ECharacterArchetype::TribalHunter, ECharacterGender::Male));
+    Community.Add(CreateCharacter(ECharacterArchetype::TribalGatherer, ECharacterGender::Female));
     
-    // Height variation
-    float HeightMultiplier = 0.9f + (VariationData.HeightVariation * 0.2f); // 0.9 to 1.1
-    CurrentScale.Z *= HeightMultiplier;
+    // Fill remaining slots with varied archetypes
+    for (int32 i = 4; i < CommunitySize; ++i)
+    {
+        ECharacterArchetype RandomArchetype;
+        float ArchetypeRoll = FMath::RandRange(0.0f, 1.0f);
+        
+        if (ArchetypeRoll < 0.3f) RandomArchetype = ECharacterArchetype::TribalHunter;
+        else if (ArchetypeRoll < 0.6f) RandomArchetype = ECharacterArchetype::TribalGatherer;
+        else if (ArchetypeRoll < 0.8f) RandomArchetype = ECharacterArchetype::TribalChild;
+        else if (ArchetypeRoll < 0.9f) RandomArchetype = ECharacterArchetype::Survivor;
+        else RandomArchetype = ECharacterArchetype::Wanderer;
+        
+        Community.Add(CreateCharacter(RandomArchetype, ECharacterGender::Random));
+    }
     
-    // Body mass variation affects X and Y scale
-    float MassMultiplier = 0.95f + (VariationData.BodyMassVariation * 0.1f); // 0.95 to 1.05
-    CurrentScale.X *= MassMultiplier;
-    CurrentScale.Y *= MassMultiplier;
-    
-    MetaHumanMesh->SetRelativeScale3D(CurrentScale);
-    
-    // TODO: Apply facial feature variations through MetaHuman parameters
-    // This would require MetaHuman Creator integration
+    return Community;
 }
 
-void UCharacterVariationComponent::ApplyClothingAndAccessories()
+FCharacterVariation UCharacterArtistSystem::GenerateVariationForArchetype(ECharacterArchetype Archetype, ECharacterAge Age)
 {
-    // TODO: Implement clothing system
-    // This would involve:
-    // 1. Loading appropriate clothing meshes based on archetype
-    // 2. Attaching them to the MetaHuman skeleton
-    // 3. Applying appropriate materials and weathering
+    FCharacterVariation Variation;
     
-    UE_LOG(LogTemp, Log, TEXT("Applying clothing for archetype: %s"), 
-        *UEnum::GetValueAsString(CurrentArchetype));
+    switch (Archetype)
+    {
+        case ECharacterArchetype::Protagonist:
+            // Paleontologist - clean, academic appearance initially
+            Variation.SkinTone = FMath::RandRange(0.3f, 0.7f);
+            Variation.BodyBuild = FMath::RandRange(0.3f, 0.5f); // Not heavily muscled
+            Variation.WearLevel = 0.1f; // Starts clean
+            Variation.ScarLevel = 0.0f; // No scars initially
+            Variation.DirtLevel = 0.1f; // Clean
+            break;
+            
+        case ECharacterArchetype::TribalHunter:
+            // Hunters are muscular, scarred, weathered
+            Variation.BodyBuild = FMath::RandRange(0.6f, 0.9f);
+            Variation.ScarLevel = FMath::RandRange(0.3f, 0.7f);
+            Variation.WearLevel = FMath::RandRange(0.4f, 0.8f);
+            Variation.DirtLevel = FMath::RandRange(0.5f, 0.8f);
+            break;
+            
+        case ECharacterArchetype::TribalGatherer:
+            // Gatherers are lean, practical, moderately worn
+            Variation.BodyBuild = FMath::RandRange(0.3f, 0.6f);
+            Variation.ScarLevel = FMath::RandRange(0.1f, 0.4f);
+            Variation.WearLevel = FMath::RandRange(0.3f, 0.6f);
+            Variation.DirtLevel = FMath::RandRange(0.4f, 0.7f);
+            break;
+            
+        case ECharacterArchetype::TribalElder:
+            // Elders show age, wisdom, many scars from long life
+            Variation.BodyBuild = FMath::RandRange(0.2f, 0.5f); // Less muscular with age
+            Variation.ScarLevel = FMath::RandRange(0.5f, 0.9f); // Many life experiences
+            Variation.WearLevel = FMath::RandRange(0.6f, 0.9f); // Well-worn items
+            break;
+            
+        case ECharacterArchetype::TribalShaman:
+            // Shamans are mystical, decorated, unique markings
+            Variation.ScarLevel = FMath::RandRange(0.2f, 0.6f); // Ritual markings/scars
+            Variation.WearLevel = FMath::RandRange(0.3f, 0.7f); // Ceremonial wear
+            break;
+            
+        case ECharacterArchetype::TribalChild:
+            // Children are smaller, cleaner, fewer scars
+            Variation.Height = FMath::RandRange(0.1f, 0.4f); // Shorter
+            Variation.BodyBuild = FMath::RandRange(0.2f, 0.4f); // Not muscular
+            Variation.ScarLevel = FMath::RandRange(0.0f, 0.2f); // Few scars
+            Variation.WearLevel = FMath::RandRange(0.2f, 0.5f);
+            break;
+            
+        default:
+            // Default random variation
+            break;
+    }
+    
+    // Age-based modifications
+    switch (Age)
+    {
+        case ECharacterAge::Child:
+            Variation.Height *= 0.6f; // Children are shorter
+            Variation.BodyBuild *= 0.5f; // Less muscle mass
+            Variation.ScarLevel *= 0.3f; // Fewer scars
+            break;
+        case ECharacterAge::Elder:
+            Variation.BodyBuild *= 0.8f; // Muscle loss with age
+            Variation.ScarLevel = FMath::Min(Variation.ScarLevel + 0.3f, 1.0f); // More life experience
+            break;
+        default:
+            break;
+    }
+    
+    return Variation;
 }
 
-void UCharacterVariationComponent::ApplyWeatheringAndScars()
+FString UCharacterArtistSystem::GenerateCharacterName(ECharacterGender Gender, ECharacterArchetype Archetype)
 {
-    // TODO: Implement weathering and scar system
-    // This would involve:
-    // 1. Applying weathering materials based on WeatheringLevel
-    // 2. Adding procedural dirt, wear, and aging effects
-    // 3. Applying scars and marks from the ScarsAndMarks array
+    TArray<FString> MaleNames = {
+        "Kael", "Thane", "Brok", "Daven", "Gareth", "Jorik", "Mael", "Nolan", "Orin", "Raven",
+        "Soren", "Talon", "Ulric", "Vance", "Wren", "Zane", "Ash", "Blade", "Cade", "Drake"
+    };
     
-    UE_LOG(LogTemp, Log, TEXT("Applying weathering level: %f"), VariationData.WeatheringLevel);
+    TArray<FString> FemaleNames = {
+        "Aria", "Brynn", "Cora", "Dara", "Elara", "Faye", "Gwen", "Hana", "Isla", "Jora",
+        "Kira", "Luna", "Mira", "Naia", "Ora", "Pira", "Quinn", "Rhea", "Sage", "Tara"
+    };
+    
+    // Special case for protagonist
+    if (Archetype == ECharacterArchetype::Protagonist)
+    {
+        return "Dr. Marcus Thorne"; // Temporary - will be set by Miguel
+    }
+    
+    FString BaseName;
+    if (Gender == ECharacterGender::Male)
+    {
+        BaseName = MaleNames[FMath::RandRange(0, MaleNames.Num() - 1)];
+    }
+    else
+    {
+        BaseName = FemaleNames[FMath::RandRange(0, FemaleNames.Num() - 1)];
+    }
+    
+    return BaseName;
 }
 
-void UCharacterVariationComponent::ValidateVariationData()
+TArray<FString> UCharacterArtistSystem::GeneratePersonalityTraits(ECharacterArchetype Archetype)
 {
-    // Clamp all values to valid ranges
-    VariationData.BodyMassVariation = FMath::Clamp(VariationData.BodyMassVariation, 0.0f, 1.0f);
-    VariationData.HeightVariation = FMath::Clamp(VariationData.HeightVariation, 0.0f, 1.0f);
-    VariationData.FacialFeatureVariation = FMath::Clamp(VariationData.FacialFeatureVariation, 0.0f, 1.0f);
-    VariationData.WeatheringLevel = FMath::Clamp(VariationData.WeatheringLevel, 0.0f, 1.0f);
+    TArray<FString> Traits;
     
-    // Ensure color values are valid
-    VariationData.SkinTone.R = FMath::Clamp(VariationData.SkinTone.R, 0.0f, 1.0f);
-    VariationData.SkinTone.G = FMath::Clamp(VariationData.SkinTone.G, 0.0f, 1.0f);
-    VariationData.SkinTone.B = FMath::Clamp(VariationData.SkinTone.B, 0.0f, 1.0f);
-    VariationData.SkinTone.A = 1.0f;
+    switch (Archetype)
+    {
+        case ECharacterArchetype::TribalHunter:
+            Traits = {"Brave", "Protective", "Skilled tracker", "Quick reflexes", "Pack loyalty"};
+            break;
+        case ECharacterArchetype::TribalGatherer:
+            Traits = {"Observant", "Patient", "Resourceful", "Nurturing", "Knowledge of plants"};
+            break;
+        case ECharacterArchetype::TribalElder:
+            Traits = {"Wise", "Experienced", "Storyteller", "Cautious", "Respected leader"};
+            break;
+        case ECharacterArchetype::TribalShaman:
+            Traits = {"Mystical", "Intuitive", "Healer", "Spiritual guide", "Keeper of traditions"};
+            break;
+        case ECharacterArchetype::TribalChild:
+            Traits = {"Curious", "Energetic", "Quick learner", "Innocent", "Adaptable"};
+            break;
+        case ECharacterArchetype::Survivor:
+            Traits = {"Resilient", "Self-reliant", "Paranoid", "Hardened", "Survivor instincts"};
+            break;
+        case ECharacterArchetype::Wanderer:
+            Traits = {"Independent", "Knowledgeable", "Mysterious", "Well-traveled", "Adaptable"};
+            break;
+        default:
+            Traits = {"Determined", "Adaptable", "Resourceful"};
+            break;
+    }
+    
+    return Traits;
+}
+
+FText UCharacterArtistSystem::GenerateBackgroundStory(ECharacterArchetype Archetype, ECharacterGender Gender)
+{
+    FString Story;
+    FString Pronoun = (Gender == ECharacterGender::Male) ? "He" : "She";
+    FString PronounLower = (Gender == ECharacterGender::Male) ? "he" : "she";
+    
+    switch (Archetype)
+    {
+        case ECharacterArchetype::TribalHunter:
+            Story = FString::Printf(TEXT("A skilled hunter who has provided for the tribe since youth. %s knows the hunting grounds better than anyone and has faced down predators that would terrify most. The scars on %s body tell stories of close encounters with the great beasts."), *Pronoun, *PronounLower);
+            break;
+        case ECharacterArchetype::TribalGatherer:
+            Story = FString::Printf(TEXT("An expert in finding sustenance in the harsh wilderness. %s can identify edible plants, locate water sources, and knows which materials are best for crafting. %s knowledge has kept the tribe fed through many difficult seasons."), *Pronoun, *Pronoun);
+            break;
+        case ECharacterArchetype::TribalElder:
+            Story = FString::Printf(TEXT("A repository of tribal wisdom and experience. %s has lived through many seasons and remembers when the great migrations began. %s guidance has helped the tribe survive countless dangers and %s stories preserve their history."), *Pronoun, *Pronoun, *PronounLower);
+            break;
+        case ECharacterArchetype::TribalShaman:
+            Story = FString::Printf(TEXT("The spiritual heart of the tribe, keeper of ancient rituals and healing knowledge. %s communes with the spirits of the land and tends to both physical and spiritual wounds. The tribe looks to %s for guidance in times of uncertainty."), *Pronoun, *PronounLower);
+            break;
+        case ECharacterArchetype::TribalChild:
+            Story = FString::Printf(TEXT("Born into this dangerous world, %s has known no other life than one of constant vigilance and survival. Despite the harsh realities, %s maintains the curiosity and wonder that comes with youth, learning from the adults around %s."), *PronounLower, *PronounLower, *PronounLower);
+            break;
+        case ECharacterArchetype::Survivor:
+            Story = FString::Printf(TEXT("A lone survivor whose tribe was lost to the great predators. %s has learned to trust only %s own skills and instincts. Every day is a battle for survival, and %s has become hardened by the constant struggle."), *Pronoun, *PronounLower, *PronounLower);
+            break;
+        case ECharacterArchetype::Wanderer:
+            Story = FString::Printf(TEXT("A traveler who moves between the scattered communities, carrying news and trading goods. %s has seen more of this dangerous world than most and knows the safest paths through predator territories."), *Pronoun);
+            break;
+        default:
+            Story = TEXT("A person shaped by the harsh realities of survival in the age of great beasts.");
+            break;
+    }
+    
+    return FText::FromString(Story);
+}
+
+bool UCharacterArtistSystem::ValidateCharacterDiversity(const FCharacterDefinition& NewCharacter)
+{
+    if (!bEnsureVisualDiversity)
+    {
+        return true;
+    }
+    
+    for (const FCharacterDefinition& ExistingCharacter : CharacterDatabase)
+    {
+        // Calculate visual similarity
+        float SimilarityScore = 0.0f;
+        const FCharacterVariation& NewVar = NewCharacter.PhysicalVariation;
+        const FCharacterVariation& ExistingVar = ExistingCharacter.PhysicalVariation;
+        
+        SimilarityScore += FMath::Abs(NewVar.SkinTone - ExistingVar.SkinTone);
+        SimilarityScore += FMath::Abs(NewVar.BodyBuild - ExistingVar.BodyBuild);
+        SimilarityScore += FMath::Abs(NewVar.Height - ExistingVar.Height);
+        SimilarityScore /= 3.0f; // Average
+        
+        if (SimilarityScore < MinimumVariationThreshold)
+        {
+            return false; // Too similar to existing character
+        }
+    }
+    
+    return true;
+}
+
+void UCharacterArtistSystem::SaveCharacterToDatabase(const FCharacterDefinition& Character)
+{
+    if (ValidateCharacterDiversity(Character))
+    {
+        CharacterDatabase.Add(Character);
+        
+        if (CharacterDatabase.Num() > MaxUniqueCharacters)
+        {
+            // Remove oldest character to maintain limit
+            CharacterDatabase.RemoveAt(0);
+        }
+    }
+}
+
+FCharacterDefinition UCharacterArtistSystem::GetCharacterByName(const FString& Name)
+{
+    for (const FCharacterDefinition& Character : CharacterDatabase)
+    {
+        if (Character.CharacterName == Name)
+        {
+            return Character;
+        }
+    }
+    
+    // Return empty character if not found
+    return FCharacterDefinition();
 }
