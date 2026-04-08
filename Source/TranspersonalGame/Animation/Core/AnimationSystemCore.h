@@ -3,196 +3,152 @@
 #include "CoreMinimal.h"
 #include "Engine/Engine.h"
 #include "Animation/AnimInstance.h"
-#include "PoseSearch/PoseSearchDatabase.h"
-#include "PoseSearch/PoseSearchSchema.h"
-#include "Components/SkeletalMeshComponent.h"
+#include "Components/ActorComponent.h"
 #include "AnimationSystemCore.generated.h"
 
 /**
  * Core Animation System for Transpersonal Game
- * Handles Motion Matching, IK systems, and character-specific animations
- * Based on RDR2 principles: every movement tells a story
+ * Handles Motion Matching, IK, and procedural animation behaviors
  */
 
 UENUM(BlueprintType)
-enum class ECharacterArchetype : uint8
+enum class ECharacterAnimationState : uint8
 {
-    PlayerPaleontologist    UMETA(DisplayName = "Player - Paleontologist"),
-    DinosaurHerbivore      UMETA(DisplayName = "Dinosaur - Herbivore"),
-    DinosaurCarnivore      UMETA(DisplayName = "Dinosaur - Carnivore"),
-    DinosaurFlying         UMETA(DisplayName = "Dinosaur - Flying"),
-    DinosaurAquatic        UMETA(DisplayName = "Dinosaur - Aquatic")
+    Idle,
+    Walking,
+    Running,
+    Crouching,
+    Hiding,
+    Climbing,
+    Swimming,
+    Injured,
+    Dying
 };
 
 UENUM(BlueprintType)
-enum class EMovementState : uint8
+enum class EDinosaurBehaviorState : uint8
 {
-    Idle                   UMETA(DisplayName = "Idle"),
-    Walking                UMETA(DisplayName = "Walking"),
-    Running                UMETA(DisplayName = "Running"),
-    Sprinting              UMETA(DisplayName = "Sprinting"),
-    Crouching              UMETA(DisplayName = "Crouching"),
-    Crawling               UMETA(DisplayName = "Crawling"),
-    Climbing               UMETA(DisplayName = "Climbing"),
-    Swimming               UMETA(DisplayName = "Swimming"),
-    Falling                UMETA(DisplayName = "Falling"),
-    Landing                UMETA(DisplayName = "Landing"),
-    Jumping                UMETA(DisplayName = "Jumping"),
-    Dodging                UMETA(DisplayName = "Dodging"),
-    Hiding                 UMETA(DisplayName = "Hiding"),
-    Interacting            UMETA(DisplayName = "Interacting"),
-    Crafting               UMETA(DisplayName = "Crafting"),
-    Gathering              UMETA(DisplayName = "Gathering"),
-    Combat                 UMETA(DisplayName = "Combat"),
-    Injured                UMETA(DisplayName = "Injured"),
-    Dying                  UMETA(DisplayName = "Dying"),
-    Dead                   UMETA(DisplayName = "Dead")
-};
-
-UENUM(BlueprintType)
-enum class EEmotionalState : uint8
-{
-    Neutral                UMETA(DisplayName = "Neutral"),
-    Fearful                UMETA(DisplayName = "Fearful"),
-    Terrified              UMETA(DisplayName = "Terrified"),
-    Cautious               UMETA(DisplayName = "Cautious"),
-    Alert                  UMETA(DisplayName = "Alert"),
-    Curious                UMETA(DisplayName = "Curious"),
-    Confident              UMETA(DisplayName = "Confident"),
-    Exhausted              UMETA(DisplayName = "Exhausted"),
-    Injured                UMETA(DisplayName = "Injured"),
-    Aggressive             UMETA(DisplayName = "Aggressive"),
-    Peaceful               UMETA(DisplayName = "Peaceful"),
-    Domesticated           UMETA(DisplayName = "Domesticated")
+    Idle,
+    Foraging,
+    Hunting,
+    Drinking,
+    Sleeping,
+    Territorial,
+    Fleeing,
+    Aggressive,
+    Curious,
+    Domesticated
 };
 
 USTRUCT(BlueprintType)
-struct FCharacterAnimationProfile
+struct FAnimationPersonalityTraits
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Identity")
-    ECharacterArchetype Archetype;
+    // Movimento base
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.5", ClampMax = "2.0"))
+    float MovementSpeed = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Identity")
-    FString CharacterName;
+    // Nervosismo - afeta frequência de olhar ao redor
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Nervousness = 0.5f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Identity")
-    int32 UniqueID;
+    // Confiança - afeta postura corporal
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Confidence = 0.5f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
-    float BaseMovementSpeed;
+    // Agressividade - afeta animações de ameaça
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Aggressiveness = 0.5f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
-    float SprintMultiplier;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
-    float CrouchSpeedMultiplier;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical Traits")
-    float Height;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical Traits")
-    float Weight;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical Traits")
-    float LegLength;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality")
-    float Nervousness; // 0.0 = Calm, 1.0 = Extremely nervous
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality")
-    float Confidence; // 0.0 = No confidence, 1.0 = Very confident
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality")
-    float Aggression; // 0.0 = Peaceful, 1.0 = Highly aggressive
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Databases")
-    TObjectPtr<UPoseSearchDatabase> LocomotionDatabase;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Databases")
-    TObjectPtr<UPoseSearchDatabase> InteractionDatabase;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Databases")
-    TObjectPtr<UPoseSearchDatabase> CombatDatabase;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Databases")
-    TObjectPtr<UPoseSearchDatabase> EmotionalDatabase;
-
-    FCharacterAnimationProfile()
-    {
-        Archetype = ECharacterArchetype::PlayerPaleontologist;
-        CharacterName = TEXT("Unknown");
-        UniqueID = 0;
-        BaseMovementSpeed = 400.0f;
-        SprintMultiplier = 2.0f;
-        CrouchSpeedMultiplier = 0.5f;
-        Height = 180.0f;
-        Weight = 75.0f;
-        LegLength = 90.0f;
-        Nervousness = 0.5f;
-        Confidence = 0.5f;
-        Aggression = 0.1f;
-        LocomotionDatabase = nullptr;
-        InteractionDatabase = nullptr;
-        CombatDatabase = nullptr;
-        EmotionalDatabase = nullptr;
-    }
+    // Curiosidade - afeta investigação de objetos
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Curiosity = 0.5f;
 };
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UAnimationSystemCore : public UObject
+USTRUCT(BlueprintType)
+struct FDinosaurPhysicalVariation
+{
+    GENERATED_BODY()
+
+    // Variações físicas que afetam animação
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.8", ClampMax = "1.2"))
+    float SizeScale = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.9", ClampMax = "1.1"))
+    float LimbLength = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.9", ClampMax = "1.1"))
+    float HeadSize = 1.0f;
+
+    // Ferimentos ou defeitos que afetam movimento
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bHasLimp = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FName LimpingLimb = NAME_None;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.1", ClampMax = "0.9"))
+    float LimpSeverity = 0.0f;
+};
+
+UCLASS(ClassGroup=(Animation), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UAnimationSystemCore : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
     UAnimationSystemCore();
 
-    // Core system functions
-    UFUNCTION(BlueprintCallable, Category = "Animation System")
-    void InitializeCharacterAnimation(AActor* Character, const FCharacterAnimationProfile& Profile);
-
-    UFUNCTION(BlueprintCallable, Category = "Animation System")
-    void UpdateMotionMatchingQuery(AActor* Character, FVector Velocity, EMovementState State, EEmotionalState Emotion);
-
-    UFUNCTION(BlueprintCallable, Category = "Animation System")
-    void ApplyFootIK(USkeletalMeshComponent* SkeletalMesh, float DeltaTime);
-
-    UFUNCTION(BlueprintCallable, Category = "Animation System")
-    FCharacterAnimationProfile GetCharacterProfile(int32 UniqueID);
-
-    UFUNCTION(BlueprintCallable, Category = "Animation System")
-    void RegisterCharacterProfile(const FCharacterAnimationProfile& Profile);
-
-    // Motion Matching utilities
-    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    UPoseSearchDatabase* SelectOptimalDatabase(ECharacterArchetype Archetype, EMovementState State, EEmotionalState Emotion);
-
-    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    float CalculateBlendTime(EMovementState FromState, EMovementState ToState, EEmotionalState Emotion);
-
 protected:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Profiles")
-    TMap<int32, FCharacterAnimationProfile> RegisteredProfiles;
+    virtual void BeginPlay() override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    TObjectPtr<UPoseSearchSchema> DefaultLocomotionSchema;
+public:
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    TObjectPtr<UPoseSearchSchema> DefaultInteractionSchema;
+    // Sistema de personalidade para animações
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Personality")
+    FAnimationPersonalityTraits PersonalityTraits;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK System")
-    float FootIKTraceDistance;
+    // Variações físicas para dinossauros
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical Variation")
+    FDinosaurPhysicalVariation PhysicalVariation;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK System")
-    float FootIKInterpSpeed;
+    // Estado atual de animação
+    UPROPERTY(BlueprintReadOnly, Category = "Animation State")
+    ECharacterAnimationState CurrentAnimationState;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Animation State")
+    EDinosaurBehaviorState CurrentBehaviorState;
+
+    // Funções para mudança de estado
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void SetAnimationState(ECharacterAnimationState NewState);
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void SetBehaviorState(EDinosaurBehaviorState NewState);
+
+    // Sistema de medo e tensão
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fear System", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float CurrentFearLevel = 0.0f;
+
+    UFUNCTION(BlueprintCallable, Category = "Fear System")
+    void UpdateFearLevel(float DeltaFear);
+
+    // Sistema de domesticação
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Domestication", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float DomesticationLevel = 0.0f;
+
+    UFUNCTION(BlueprintCallable, Category = "Domestication")
+    void UpdateDomestication(float DeltaTime, bool bPlayerNearby, bool bPlayerThreatening);
 
 private:
-    // Internal animation logic
-    void SetupMotionMatchingForCharacter(AActor* Character, const FCharacterAnimationProfile& Profile);
-    void ConfigureIKRigForCharacter(USkeletalMeshComponent* SkeletalMesh, ECharacterArchetype Archetype);
-    
-    // Foot IK implementation
-    FVector PerformFootTrace(USkeletalMeshComponent* SkeletalMesh, FName FootBoneName, FVector FootLocation);
-    void ApplyFootIKToLimb(USkeletalMeshComponent* SkeletalMesh, FName FootBone, FName KneeBone, FVector TargetLocation, float Alpha);
+    // Timers para comportamentos procedurais
+    float IdleBehaviorTimer = 0.0f;
+    float LookAroundTimer = 0.0f;
+    float PostureAdjustmentTimer = 0.0f;
+
+    void UpdateProceduralBehaviors(float DeltaTime);
+    void TriggerIdleBehavior();
+    void AdjustPostureBasedOnPersonality();
 };
