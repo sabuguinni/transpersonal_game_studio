@@ -1,0 +1,259 @@
+{
+    "VFXLibrary": {
+        "EnvironmentEffects": {
+            "FootstepDust": {
+                "Description": "Dust particles kicked up by player/dinosaur footsteps",
+                "NiagaraSystem": "/Game/VFX/Environment/NS_FootstepDust",
+                "Triggers": ["PlayerFootstep", "DinosaurFootstep"],
+                "Parameters": {
+                    "DustAmount": 1.0,
+                    "ParticleSize": 0.5,
+                    "WindInfluence": 0.3,
+                    "SurfaceType": "Dirt"
+                },
+                "LODSettings": {
+                    "Level0": {"ParticleCount": 100, "UpdateRate": 60},
+                    "Level1": {"ParticleCount": 70, "UpdateRate": 30},
+                    "Level2": {"ParticleCount": 40, "UpdateRate": 15},
+                    "Level3": {"ParticleCount": 10, "UpdateRate": 5}
+                }
+            },
+            "LeafFall": {
+                "Description": "Falling leaves creating prehistoric atmosphere",
+                "NiagaraSystem": "/Game/VFX/Environment/NS_LeafFall",
+                "Triggers": ["WindGust", "DinosaurMovement"],
+                "Parameters": {
+                    "LeafDensity": 0.8,
+                    "FallSpeed": 2.0,
+                    "WindStrength": 1.5,
+                    "LeafVariety": 3
+                }
+            },
+            "BranchBreak": {
+                "Description": "Branches breaking from dinosaur movement",
+                "NiagaraSystem": "/Game/VFX/Environment/NS_BranchBreak",
+                "Triggers": ["LargeDinosaurMovement"],
+                "Parameters": {
+                    "DebrisAmount": 1.2,
+                    "BreakForce": 2.5,
+                    "WoodParticles": true
+                }
+            },
+            "GroundCrack": {
+                "Description": "Ground cracking under heavy dinosaur weight",
+                "NiagaraSystem": "/Game/VFX/Environment/NS_GroundCrack",
+                "Triggers": ["HeavyDinosaurStep"],
+                "Parameters": {
+                    "CrackIntensity": 1.5,
+                    "DustCloud": true,
+                    "RockDebris": 0.8
+                }
+            }
+        },
+        "AtmosphereEffects": {
+            "DinosaurBreath": {
+                "Description": "Visible breath from dinosaurs in cold/humid conditions",
+                "NiagaraSystem": "/Game/VFX/Atmosphere/NS_DinosaurBreath",
+                "Triggers": ["DinosaurExhale", "ColdWeather"],
+                "Parameters": {
+                    "BreathDensity": 1.0,
+                    "Temperature": 15.0,
+                    "Humidity": 0.7,
+                    "BreathDuration": 3.0
+                }
+            },
+            "MorningMist": {
+                "Description": "Ground mist creating eerie prehistoric atmosphere",
+                "NiagaraSystem": "/Game/VFX/Atmosphere/NS_MorningMist",
+                "Triggers": ["TimeOfDay_Dawn"],
+                "Parameters": {
+                    "MistDensity": 0.6,
+                    "Height": 2.0,
+                    "Coverage": 0.8,
+                    "Opacity": 0.4
+                }
+            },
+            "Fireflies": {
+                "Description": "Prehistoric insects creating magical ambiance",
+                "NiagaraSystem": "/Game/VFX/Atmosphere/NS_Fireflies",
+                "Triggers": ["TimeOfDay_Dusk"],
+                "Parameters": {
+                    "SwarmSize": 50,
+                    "FlightPattern": "Random",
+                    "GlowIntensity": 1.2,
+                    "ColorVariation": 0.3
+                }
+            }
+        },
+        "CombatEffects": {
+            "BloodSplatter": {
+                "Description": "Blood effects for combat encounters",
+                "NiagaraSystem": "/Game/VFX/Combat/NS_BloodSplatter",
+                "Triggers": ["PlayerHit", "DinosaurHit"],
+                "Parameters": {
+                    "BloodAmount": 1.0,
+                    "SplatterRadius": 1.5,
+                    "Viscosity": 0.8,
+                    "BloodColor": "(0.6, 0.1, 0.1, 1.0)"
+                }
+            },
+            "ClawSlash": {
+                "Description": "Visual effect for dinosaur claw attacks",
+                "NiagaraSystem": "/Game/VFX/Combat/NS_ClawSlash",
+                "Triggers": ["DinosaurClawAttack"],
+                "Parameters": {
+                    "SlashLength": 2.0,
+                    "SlashSpeed": 10.0,
+                    "TrailOpacity": 0.7,
+                    "SlashColor": "(1.0, 0.8, 0.6, 1.0)"
+                }
+            },
+            "ImpactDust": {
+                "Description": "Dust and debris from heavy impacts",
+                "NiagaraSystem": "/Game/VFX/Combat/NS_ImpactDust",
+                "Triggers": ["HeavyImpact", "DinosaurCharge"],
+                "Parameters": {
+                    "ImpactForce": 2.0,
+                    "DebrisAmount": 1.5,
+                    "DustCloud": true,
+                    "ShockwaveRadius": 3.0
+                }
+            }
+        },
+        "WeatherEffects": {
+            "RainDrops": {
+                "Description": "Tropical rain system with varying intensity",
+                "NiagaraSystem": "/Game/VFX/Weather/NS_RainDrops",
+                "Triggers": ["WeatherSystem"],
+                "Parameters": {
+                    "RainIntensity": 1.0,
+                    "DropSize": 0.8,
+                    "WindDirection": "(1.0, 0.0, 0.0)",
+                    "SplashEffect": true
+                }
+            },
+            "Lightning": {
+                "Description": "Dramatic lightning strikes during storms",
+                "NiagaraSystem": "/Game/VFX/Weather/NS_Lightning",
+                "Triggers": ["ThunderStorm"],
+                "Parameters": {
+                    "LightningIntensity": 2.0,
+                    "BranchingFactor": 0.7,
+                    "FlashDuration": 0.2,
+                    "ThunderDelay": 3.0
+                }
+            },
+            "Fog": {
+                "Description": "Dense fog reducing visibility and creating tension",
+                "NiagaraSystem": "/Game/VFX/Weather/NS_Fog",
+                "Triggers": ["WeatherSystem", "TimeOfDay"],
+                "Parameters": {
+                    "FogDensity": 0.8,
+                    "VisibilityRange": 50.0,
+                    "FogHeight": 10.0,
+                    "Color": "(0.7, 0.7, 0.8, 1.0)"
+                }
+            }
+        },
+        "MagicEffects": {
+            "GemGlow": {
+                "Description": "Mystical glow from the time-travel gem",
+                "NiagaraSystem": "/Game/VFX/Magic/NS_GemGlow",
+                "Triggers": ["GemProximity", "GemActivation"],
+                "Parameters": {
+                    "GlowIntensity": 2.0,
+                    "PulseRate": 1.5,
+                    "EnergyParticles": true,
+                    "GlowColor": "(0.3, 0.8, 1.0, 1.0)"
+                }
+            },
+            "TimeRipple": {
+                "Description": "Temporal distortion effect around the gem",
+                "NiagaraSystem": "/Game/VFX/Magic/NS_TimeRipple",
+                "Triggers": ["GemActivation"],
+                "Parameters": {
+                    "RippleRadius": 5.0,
+                    "DistortionStrength": 1.5,
+                    "RippleSpeed": 2.0,
+                    "TemporalParticles": true
+                }
+            },
+            "Teleportation": {
+                "Description": "Visual effect for time travel sequence",
+                "NiagaraSystem": "/Game/VFX/Magic/NS_Teleportation",
+                "Triggers": ["TimeTravel"],
+                "Parameters": {
+                    "TeleportIntensity": 3.0,
+                    "ParticleSwirl": true,
+                    "EnergyBeam": true,
+                    "Duration": 5.0
+                }
+            }
+        },
+        "InteractionEffects": {
+            "ToolSpark": {
+                "Description": "Sparks from tool crafting and use",
+                "NiagaraSystem": "/Game/VFX/Interaction/NS_ToolSpark",
+                "Triggers": ["ToolCrafting", "ToolUse"],
+                "Parameters": {
+                    "SparkCount": 20,
+                    "SparkIntensity": 1.0,
+                    "SparkColor": "(1.0, 0.7, 0.3, 1.0)",
+                    "SparkLifetime": 2.0
+                }
+            },
+            "FireIgnition": {
+                "Description": "Fire starting and burning effects",
+                "NiagaraSystem": "/Game/VFX/Interaction/NS_FireIgnition",
+                "Triggers": ["FireStart", "FireMaintain"],
+                "Parameters": {
+                    "FlameHeight": 1.5,
+                    "FlameIntensity": 1.2,
+                    "SmokeAmount": 0.8,
+                    "EmberCount": 30
+                }
+            },
+            "WaterSplash": {
+                "Description": "Water interaction effects",
+                "NiagaraSystem": "/Game/VFX/Interaction/NS_WaterSplash",
+                "Triggers": ["WaterEntry", "WaterMovement"],
+                "Parameters": {
+                    "SplashSize": 1.0,
+                    "DropletCount": 50,
+                    "RippleRadius": 2.0,
+                    "WaterColor": "(0.2, 0.4, 0.6, 0.8)"
+                }
+            }
+        }
+    },
+    "GlobalSettings": {
+        "PerformanceProfile": {
+            "MaxActiveEffects": 100,
+            "LODDistances": [1000, 2500, 5000],
+            "UpdateFrequency": 0.1,
+            "CullingEnabled": true
+        },
+        "QualitySettings": {
+            "Low": {
+                "ParticleMultiplier": 0.3,
+                "UpdateRateMultiplier": 0.5,
+                "DistanceMultiplier": 0.7
+            },
+            "Medium": {
+                "ParticleMultiplier": 0.7,
+                "UpdateRateMultiplier": 0.8,
+                "DistanceMultiplier": 1.0
+            },
+            "High": {
+                "ParticleMultiplier": 1.0,
+                "UpdateRateMultiplier": 1.0,
+                "DistanceMultiplier": 1.3
+            },
+            "Epic": {
+                "ParticleMultiplier": 1.5,
+                "UpdateRateMultiplier": 1.2,
+                "DistanceMultiplier": 1.5
+            }
+        }
+    }
+}
