@@ -1,0 +1,78 @@
+# Transpersonal NPC Behavior Tree
+# Consciousness-driven AI behavior for transpersonal NPCs
+
+Root: Selector
+├── Sequence: Emergency Response
+│   ├── Decorator: Blackboard (PlayerThreatLevel > 0.8)
+│   ├── Task: BTTask_ReactToThreat
+│   └── Task: BTTask_SeekSafety
+│
+├── Sequence: Transformation State
+│   ├── Decorator: Blackboard (bIsTransforming == true)
+│   ├── Task: BTTask_PlayTransformationAnimation
+│   ├── Wait: 2.0s
+│   └── Task: BTTask_CompleteTransformation
+│
+├── Sequence: Player Interaction
+│   ├── Decorator: Blackboard (PlayerInRange == true)
+│   ├── Service: BTS_UpdatePlayerConsciousness
+│   ├── Selector: Interaction Type
+│   │   ├── Sequence: High Consciousness Interaction
+│   │   │   ├── Decorator: Blackboard (PlayerConsciousness > 0.7)
+│   │   │   ├── Task: BTTask_OfferWisdom
+│   │   │   └── Task: BTTask_TriggerTransformation
+│   │   │
+│   │   ├── Sequence: Medium Consciousness Interaction
+│   │   │   ├── Decorator: Blackboard (PlayerConsciousness > 0.4)
+│   │   │   ├── Task: BTTask_EngageDialogue
+│   │   │   └── Task: BTTask_ProvideGuidance
+│   │   │
+│   │   └── Sequence: Low Consciousness Interaction
+│   │       ├── Task: BTTask_ChallengePlayer
+│   │       └── Task: BTTask_RevealShadow
+│   │
+│   └── Task: BTTask_UpdateEmotionalResonance
+│
+├── Sequence: Consciousness Evolution
+│   ├── Decorator: Cooldown (30.0s)
+│   ├── Decorator: Blackboard (ConsciousnessLevel > EvolutionThreshold)
+│   ├── Task: BTTask_EvolveConsciousness
+│   └── Task: BTTask_UpdateBehaviorState
+│
+├── Sequence: Archetype Behavior
+│   ├── Service: BTS_UpdateArchetypeBehavior
+│   ├── Selector: Archetype Actions
+│   │   ├── Sequence: Shadow Self
+│   │   │   ├── Decorator: Blackboard (Archetype == ShadowSelf)
+│   │   │   ├── Task: BTTask_LurkInShadows
+│   │   │   └── Task: BTTask_EmergePeriodically
+│   │   │
+│   │   ├── Sequence: Wise Guide
+│   │   │   ├── Decorator: Blackboard (Archetype == WiseGuide)
+│   │   │   ├── Task: BTTask_Meditate
+│   │   │   └── Task: BTTask_OfferBlessings
+│   │   │
+│   │   ├── Sequence: Inner Child
+│   │   │   ├── Decorator: Blackboard (Archetype == InnerChild)
+│   │   │   ├── Task: BTTask_PlayfulMovement
+│   │   │   └── Task: BTTask_ExpressWonder
+│   │   │
+│   │   └── Task: BTTask_DefaultArchetypeBehavior
+│   │
+│   └── Task: BTTask_UpdateEmotionalState
+│
+└── Sequence: Default Behavior
+    ├── Task: BTTask_Wander
+    ├── Wait: Random(2.0, 5.0)
+    └── Task: BTTask_IdleAnimation
+
+Blackboard Keys:
+- PlayerInRange (bool)
+- PlayerConsciousness (float)
+- PlayerThreatLevel (float)
+- bIsTransforming (bool)
+- ConsciousnessLevel (float)
+- EmotionalState (float)
+- Archetype (enum)
+- EvolutionThreshold (float)
+- LastInteractionTime (float)
