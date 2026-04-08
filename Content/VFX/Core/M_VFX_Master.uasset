@@ -1,0 +1,186 @@
+# Material Master VFX - Base Material for All Visual Effects
+# Transpersonal Game Studio - VFX Agent #17
+
+## MATERIAL SETUP
+
+Material Domain: Surface
+Blend Mode: Translucent
+Shading Model: Unlit (para a maioria dos VFX)
+Two Sided: True
+
+## MAIN TEXTURE INPUTS
+
+### Base Color Network
+- TextureSample: T_VFX_Diffuse (conectar a Texture Object parameter)
+- Multiply por Color parameter "TintColor" (default: 1,1,1,1)
+- Multiply por Scalar parameter "Brightness" (default: 1.0)
+
+### Alpha/Opacity Network
+- TextureSample: T_VFX_Alpha (usar canal R ou Alpha da diffuse)
+- Multiply por Scalar parameter "OpacityMultiplier" (default: 1.0)
+- Multiply por Vertex Color Alpha (para fade por distância)
+
+### Emissive Network (para efeitos luminosos)
+- Base Color output multiplicado por Scalar parameter "EmissiveStrength" (default: 0.0)
+- Add com Color parameter "EmissiveColor" (default: 0,0,0,1)
+
+## ANIMATION PARAMETERS
+
+### UV Animation
+- Time node conectado a Panner para scroll UV
+- Scalar parameters: "ScrollSpeedU" e "ScrollSpeedV" (default: 0.0)
+- Add com TexCoord[0] para offset base
+
+### Rotation Animation
+- Time node conectado a Rotator
+- Scalar parameter: "RotationSpeed" (default: 0.0)
+- CenterPoint parameter para pivot: "RotationCenter" (default: 0.5, 0.5)
+
+### Pulsing/Breathing
+- Sine wave usando Time input
+- Scalar parameters: "PulseSpeed" (default: 1.0) e "PulseIntensity" (default: 0.0)
+- Multiply com Opacity ou Emissive
+
+## DISTORTION (para efeitos de calor/energia)
+
+### Heat Distortion Network
+- TextureSample: T_VFX_Normal (normal map para distortion)
+- Multiply por Scalar parameter "DistortionStrength" (default: 0.0)
+- ComponentMask (RG) para Screen Position offset
+- Conectar ao Scene Texture:PostProcessInput0
+
+## VERTEX OFFSET (para movimento de partículas)
+
+### Wind Effect
+- World Position offset usando Noise texture
+- Scalar parameters: "WindStrength" (default: 0.0)
+- Vector parameter: "WindDirection" (default: 1,0,0)
+- Time-based animation para movimento contínuo
+
+## FRESNEL EFFECTS
+
+### Edge Highlighting
+- Fresnel node com Exponent parameter "FresnelPower" (default: 1.0)
+- Multiply por Color parameter "FresnelColor" (default: 1,1,1,1)
+- Add ao Emissive network
+
+## DEPTH FADE
+
+### Soft Particle Implementation
+- DepthFade node com Distance parameter "FadeDistance" (default: 100.0)
+- Multiply com final Opacity
+- Evita hard edges quando partículas intersectam geometria
+
+## LOD SYSTEM INTEGRATION
+
+### Distance-Based LOD
+- CameraPosition distance calculation
+- If statements para diferentes níveis de detalhe:
+  - LOD0 (0-500): Full complexity
+  - LOD1 (500-1500): Reduced texture resolution, simplified effects
+  - LOD2 (1500+): Billboard-only, minimal effects
+
+### Performance Switches
+- Static Switch parameters para features:
+  - "EnableDistortion" (default: True)
+  - "EnableAnimation" (default: True)
+  - "EnableEmissive" (default: True)
+  - "EnableVertexOffset" (default: False)
+
+## PARAMETER GROUPS
+
+### Primary Controls
+- TintColor (Color)
+- Brightness (Scalar, 0-5)
+- OpacityMultiplier (Scalar, 0-2)
+
+### Animation Controls
+- ScrollSpeedU/V (Scalar, -5 to 5)
+- RotationSpeed (Scalar, -10 to 10)
+- PulseSpeed (Scalar, 0-10)
+- PulseIntensity (Scalar, 0-1)
+
+### Advanced Controls
+- DistortionStrength (Scalar, 0-1)
+- WindStrength (Scalar, 0-100)
+- WindDirection (Vector)
+- FresnelPower (Scalar, 0.1-10)
+- FadeDistance (Scalar, 10-1000)
+
+## MATERIAL INSTANCES TEMPLATE
+
+### Instance Naming Convention
+MI_VFX_[EffectType]_[Variant]
+Exemplos:
+- MI_VFX_Dust_Brown
+- MI_VFX_Blood_Fresh
+- MI_VFX_Spark_Electric
+- MI_VFX_Smoke_Dense
+
+### Common Presets
+1. **Dust/Dirt Effects**
+   - TintColor: (0.8, 0.6, 0.4, 1)
+   - Brightness: 0.7
+   - OpacityMultiplier: 0.6
+
+2. **Blood Effects**
+   - TintColor: (0.6, 0.1, 0.1, 1)
+   - Brightness: 0.8
+   - EmissiveStrength: 0.2
+
+3. **Energy/Magic Effects**
+   - EmissiveStrength: 2.0
+   - FresnelPower: 3.0
+   - PulseIntensity: 0.5
+
+4. **Atmospheric Effects**
+   - OpacityMultiplier: 0.3
+   - FadeDistance: 500
+   - WindStrength: 20
+
+## PERFORMANCE NOTES
+
+### Optimization Guidelines
+- Sempre usar Material Instances, nunca modificar o Master diretamente
+- Desabilitar features não utilizadas via Static Switches
+- Usar texturas DXT1/DXT5 comprimidas
+- Evitar complex math operations em pixel shader quando possível
+
+### Mobile Considerations
+- Reduzir instruction count para <100
+- Evitar Distortion effects em mobile
+- Usar simplified Fresnel calculations
+- Limit texture samples para <4 por material
+
+## INTEGRATION POINTS
+
+### Niagara Integration
+- All parameters exposed como User Parameters
+- Material deve ser compatível com GPU Sprites
+- Support para Mesh Renderers quando necessário
+
+### Blueprint Integration
+- Dynamic Material Instance creation
+- Parameter animation via Timeline
+- Event-driven effect triggering
+
+## TESTING CHECKLIST
+
+- [ ] Compila sem erros
+- [ ] Todas as Static Switches funcionam
+- [ ] LOD transitions são smooth
+- [ ] Performance dentro dos limites (instruction count)
+- [ ] Compatible com GPU Sprites
+- [ ] Depth Fade funciona corretamente
+- [ ] All parameters têm ranges apropriados
+
+## VERSION HISTORY
+
+v1.0 - Initial creation
+- Base material structure
+- Core parameter set
+- LOD system integration
+- Performance optimization
+
+Created by: VFX Agent #17
+Date: Março 2026
