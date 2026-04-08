@@ -1,0 +1,132 @@
+# VFX Master Library - Transpersonal Game Studio
+# Biblioteca central de todos os efeitos visuais do jogo
+
+## ESTRUTURA DE ORGANIZAÇÃO
+
+### /Core - Sistemas Base
+- VFX_MasterLibrary.uasset (este arquivo)
+- NS_GlobalParticleSettings.uasset
+- M_VFX_Master.uasset (Material master para VFX)
+
+### /Environment - Efeitos Ambientais
+- /Atmosphere
+  - NS_DustParticles.uasset
+  - NS_PollenFloat.uasset
+  - NS_LightRays.uasset
+- /Foliage
+  - NS_LeafFall.uasset
+  - NS_GrassRustle.uasset
+  - NS_BranchSway.uasset
+- /Weather
+  - NS_Rain.uasset
+  - NS_WindGusts.uasset
+  - NS_MistFog.uasset
+
+### /Creatures - Efeitos de Dinossauros
+- /Footsteps
+  - NS_DinoFootstep_Large.uasset
+  - NS_DinoFootstep_Medium.uasset
+  - NS_DinoFootstep_Small.uasset
+- /Breathing
+  - NS_DinoBreath_Cold.uasset
+  - NS_DinoBreath_Hot.uasset
+- /Interaction
+  - NS_DomesticationTrust.uasset
+  - NS_DomesticationFear.uasset
+
+### /Player - Efeitos do Jogador
+- /Movement
+  - NS_PlayerFootstep.uasset
+  - NS_PlayerRunDust.uasset
+- /Interaction
+  - NS_CraftingSparkles.uasset
+  - NS_GatheringEffect.uasset
+
+### /Combat - Efeitos de Combate
+- /Impact
+  - NS_BloodSplatter.uasset
+  - NS_ClawStrike.uasset
+  - NS_TeethBite.uasset
+- /Wounds
+  - NS_BleedingWound.uasset
+  - NS_HealingEffect.uasset
+
+### /Narrative - Efeitos Narrativos
+- /TimeGem
+  - NS_GemDiscovery.uasset
+  - NS_GemActivation.uasset
+  - NS_TimePortal.uasset
+
+## PADRÕES DE NOMENCLATURA
+
+NS_ = Niagara System
+M_ = Material
+T_ = Texture
+MF_ = Material Function
+
+## CONFIGURAÇÕES GLOBAIS DE PERFORMANCE
+
+### LOD Chain (3 níveis obrigatórios)
+- LOD0: Distância 0-500 unidades (qualidade máxima)
+- LOD1: Distância 500-1500 unidades (qualidade média)
+- LOD2: Distância 1500+ unidades (qualidade mínima)
+
+### Limites de Partículas
+- Máximo 10.000 partículas simultâneas no viewport
+- Máximo 50 sistemas Niagara ativos simultaneamente
+- Culling automático fora do frustum da câmera
+
+### Otimização GPU
+- Usar GPU Sprites sempre que possível
+- Evitar Mesh Renderers para partículas pequenas
+- Implementar Distance Culling em todos os sistemas
+
+## GUIDELINES DE DESIGN
+
+### Filosofia Visual
+"Efeitos que servem a narrativa, não a si próprios"
+
+### Paleta de Cores Base
+- Terra: #8B4513, #A0522D, #CD853F
+- Vegetação: #228B22, #32CD32, #90EE90
+- Sangue: #8B0000, #DC143C
+- Poeira: #D2B48C, #F5DEB3
+- Água: #4682B4, #87CEEB
+
+### Timing e Ritmo
+- Efeitos de impacto: 0.1-0.3 segundos
+- Efeitos ambientais: loops contínuos
+- Efeitos de interação: 0.5-1.5 segundos
+- Efeitos narrativos: 2-5 segundos
+
+## INTEGRAÇÃO COM OUTROS SISTEMAS
+
+### Audio Integration
+- Todos os VFX devem ter hooks para audio cues
+- Usar Niagara Events para triggerar sons
+- Sincronização com MetaSounds do Audio Agent
+
+### Animation Integration
+- VFX devem responder a Animation Notifies
+- Usar sockets de ossos para positioning
+- Integração com Motion Matching do Animation Agent
+
+### AI Integration
+- VFX de comportamento animal ligados ao Behavior Tree
+- Efeitos de domesticação controlados por AI states
+- Partículas de emoção baseadas em NPC mood
+
+## VERSIONING E CONTROLE
+
+Versão: 1.0
+Criado por: VFX Agent #17
+Data: Março 2026
+Última atualização: [AUTO-UPDATE]
+
+## PRÓXIMOS PASSOS
+
+1. Criar Material Master base
+2. Implementar sistema de pegadas
+3. Desenvolver efeitos ambientais básicos
+4. Integrar com sistema de LOD
+5. Testes de performance inicial
