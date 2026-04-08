@@ -18,49 +18,40 @@ public class TranspersonalGameTarget : TargetRules
         bUsePCHFiles = true;
         bUseSharedPCHs = true;
         
-        // Enable faster iteration
-        bWithLiveCoding = true;
+        // Enable modern C++ features
+        CppStandard = CppStandardVersion.Cpp20;
         
-        // Shipping optimizations
-        if (Configuration == UnrealTargetConfiguration.Shipping)
-        {
-            bUseLoggingInShipping = false;
-            bUseChecksInShipping = false;
-            bCompileWithStatsWithoutEngine = false;
-            bCompileWithPluginSupport = true;
-        }
-
-        // Development features
-        if (Configuration == UnrealTargetConfiguration.Development || 
-            Configuration == UnrealTargetConfiguration.DebugGame)
-        {
-            bUseLoggingInShipping = true;
-            bUseChecksInShipping = true;
-            bCompileWithStatsWithoutEngine = true;
-        }
-
         // Platform specific settings
         if (Target.Platform == UnrealTargetPlatform.Win64)
         {
             WindowsPlatform.PCHMemoryAllocationFactor = 2000;
         }
 
-        // Enable Chaos Physics
-        bUseChaos = true;
-        bCompileChaos = true;
-        bUseChaosChecked = false;
-        bCustomSceneQueryStructure = true;
+        // Build configuration optimizations
+        if (Target.Configuration == UnrealTargetConfiguration.Shipping)
+        {
+            bUseLoggingInShipping = false;
+            bUseChecksInShipping = false;
+            bCompileICU = false;
+        }
+        else
+        {
+            bUseLoggingInShipping = true;
+            bWithLiveCoding = true;
+        }
 
-        // Audio settings
-        bCompileWithPluginSupport = true;
-        
-        // Disable unnecessary features for performance
-        bBuildDeveloperTools = (Configuration != UnrealTargetConfiguration.Shipping);
-        bBuildWithEditorOnlyData = Target.bBuildEditor;
-        
-        // Memory and performance
-        bForceEnableExceptions = false;
-        bForceEnableObjCExceptions = false;
-        bForceEnableRTTI = false;
+        // Enable required plugins
+        EnablePlugins.AddRange(new string[]
+        {
+            "MassEntity",
+            "MassGameplay", 
+            "Niagara",
+            "MetaSounds",
+            "WorldPartition",
+            "Lumen",
+            "Nanite",
+            "ChaosPhysics",
+            "EnhancedInput"
+        });
     }
 }
