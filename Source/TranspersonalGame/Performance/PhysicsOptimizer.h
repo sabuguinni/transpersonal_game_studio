@@ -1,56 +1,49 @@
+/**
+ * @file PhysicsOptimizer.h
+ * @brief Performance optimization system for consciousness physics
+ * 
+ * Manages LOD, culling, and adaptive quality for consciousness-based physics systems
+ * to maintain 60+ FPS during peak spiritual experiences.
+ */
+
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/ActorComponent.h"
 #include "Engine/World.h"
-#include "PhysicsEngine/PhysicsSettings.h"
+#include "Components/ActorComponent.h"
 #include "PhysicsOptimizer.generated.h"
 
 UENUM(BlueprintType)
-enum class EPhysicsOptimizationLevel : uint8
+enum class EConsciousnessLOD : uint8
 {
-    None        UMETA(DisplayName = "No Optimization"),
-    Light       UMETA(DisplayName = "Light Optimization"),
-    Moderate    UMETA(DisplayName = "Moderate Optimization"),
-    Aggressive  UMETA(DisplayName = "Aggressive Optimization"),
-    Emergency   UMETA(DisplayName = "Emergency Optimization")
+    High        UMETA(DisplayName = "High Quality"),
+    Medium      UMETA(DisplayName = "Medium Quality"), 
+    Low         UMETA(DisplayName = "Low Quality"),
+    Minimal     UMETA(DisplayName = "Minimal Quality")
 };
 
 USTRUCT(BlueprintType)
-struct FPhysicsOptimizationSettings
+struct FPhysicsPerformanceMetrics
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Optimization")
-    float PhysicsSubstepDeltaTime;
+    UPROPERTY(BlueprintReadOnly)
+    float FrameTime = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Optimization")
-    int32 MaxPhysicsSubsteps;
+    UPROPERTY(BlueprintReadOnly)
+    int32 ActiveConsciousnessActors = 0;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Optimization")
-    float SolverIterationCount;
+    UPROPERTY(BlueprintReadOnly)
+    int32 PhysicsCalculationsPerFrame = 0;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Optimization")
-    float CollisionDistanceCulling;
+    UPROPERTY(BlueprintReadOnly)
+    float ConsciousnessFieldComplexity = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Optimization")
-    bool bEnableAsyncPhysics;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Optimization")
-    float SleepThresholdMultiplier;
-
-    FPhysicsOptimizationSettings()
-    {
-        PhysicsSubstepDeltaTime = 0.016667f; // 60Hz
-        MaxPhysicsSubsteps = 6;
-        SolverIterationCount = 8;
-        CollisionDistanceCulling = 1000.0f;
-        bEnableAsyncPhysics = true;
-        SleepThresholdMultiplier = 1.0f;
-    }
+    UPROPERTY(BlueprintReadOnly)
+    float MemoryUsageMB = 0.0f;
 };
 
-UCLASS(ClassGroup=(Performance), meta=(BlueprintSpawnableComponent))
+UCLASS(ClassGroup=(TranspersonalGame), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UPhysicsOptimizer : public UActorComponent
 {
     GENERATED_BODY()
@@ -60,89 +53,80 @@ public:
 
 protected:
     virtual void BeginPlay() override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, 
+                              FActorComponentTickFunction* ThisTickFunction) override;
 
 public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    // Performance monitoring
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    FPhysicsPerformanceMetrics GetCurrentMetrics() const;
 
-    // Optimization Control
-    UFUNCTION(BlueprintCallable, Category = "Physics Optimization")
-    void SetOptimizationLevel(EPhysicsOptimizationLevel Level);
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void SetTargetFrameRate(float TargetFPS);
 
-    UFUNCTION(BlueprintCallable, Category = "Physics Optimization")
-    void ApplyCustomOptimizationSettings(const FPhysicsOptimizationSettings& Settings);
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    EConsciousnessLOD GetCurrentLODLevel() const { return CurrentLOD; }
 
-    UFUNCTION(BlueprintCallable, Category = "Physics Optimization")
-    void ResetToDefaultSettings();
+    // Adaptive quality control
+    UFUNCTION(BlueprintCallable, Category = "Optimization")
+    void SetConsciousnessLOD(EConsciousnessLOD NewLOD);
 
-    // Consciousness-Aware Optimizations
-    UFUNCTION(BlueprintCallable, Category = "Physics Optimization")
-    void OptimizeForConsciousnessDistance(float PlayerConsciousnessRadius);
+    UFUNCTION(BlueprintCallable, Category = "Optimization")
+    void EnableAdaptiveQuality(bool bEnable);
 
-    UFUNCTION(BlueprintCallable, Category = "Physics Optimization")
-    void SetEmotionalPhysicsIntensity(float Intensity);
+    // Culling and distance management
+    UFUNCTION(BlueprintCallable, Category = "Culling")
+    void SetConsciousnessCullingDistance(float Distance);
 
-    // Performance Monitoring
-    UFUNCTION(BlueprintCallable, Category = "Physics Optimization")
-    float GetCurrentPhysicsTime() const;
+    UFUNCTION(BlueprintCallable, Category = "Culling")
+    void UpdateConsciousnessActorCulling();
 
-    UFUNCTION(BlueprintCallable, Category = "Physics Optimization")
-    int32 GetActivePhysicsObjectCount() const;
+    // Memory management
+    UFUNCTION(BlueprintCallable, Category = "Memory")
+    void OptimizeConsciousnessMemory();
 
-    UFUNCTION(BlueprintCallable, Category = "Physics Optimization")
-    bool IsPhysicsPerformanceOptimal() const;
-
-    // LOD System for Physics
-    UFUNCTION(BlueprintCallable, Category = "Physics Optimization")
-    void UpdatePhysicsLOD();
+    UFUNCTION(BlueprintCallable, Category = "Memory")
+    void FlushUnusedConsciousnessData();
 
 protected:
-    // Optimization settings for different levels
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Optimization Presets")
-    FPhysicsOptimizationSettings LightOptimization;
+    // Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float TargetFrameRate = 60.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Optimization Presets")
-    FPhysicsOptimizationSettings ModerateOptimization;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    bool bAdaptiveQualityEnabled = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Optimization Presets")
-    FPhysicsOptimizationSettings AggressiveOptimization;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float PerformanceCheckInterval = 0.1f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Optimization Presets")
-    FPhysicsOptimizationSettings EmergencyOptimization;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Culling")
+    float ConsciousnessCullingDistance = 5000.0f;
 
-    // Current state
-    UPROPERTY(BlueprintReadOnly, Category = "Current State")
-    EPhysicsOptimizationLevel CurrentOptimizationLevel;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Culling")
+    float ConsciousnessLODDistance1 = 1000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance Targets")
-    float TargetPhysicsTime;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Culling")
+    float ConsciousnessLODDistance2 = 2500.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance Targets")
-    float MaxAllowedPhysicsObjects;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Culling")
+    float ConsciousnessLODDistance3 = 4000.0f;
 
-    // Consciousness integration
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Consciousness Integration")
-    float ConsciousnessRadius;
+    // Runtime state
+    UPROPERTY(BlueprintReadOnly, Category = "State")
+    EConsciousnessLOD CurrentLOD = EConsciousnessLOD::High;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Consciousness Integration")
-    float EmotionalIntensityMultiplier;
+    UPROPERTY(BlueprintReadOnly, Category = "State")
+    FPhysicsPerformanceMetrics CurrentMetrics;
 
 private:
-    FPhysicsOptimizationSettings DefaultSettings;
-    FPhysicsOptimizationSettings CurrentSettings;
-    
-    float LastPhysicsTime;
-    int32 LastPhysicsObjectCount;
-    float LastOptimizationUpdate;
-    
-    // Optimization methods
-    void ApplyOptimizationSettings(const FPhysicsOptimizationSettings& Settings);
-    void OptimizePhysicsObjectsInRadius(const FVector& Center, float Radius, float OptimizationFactor);
-    void UpdateEmotionalPhysicsSettings();
-    void CullDistantPhysicsObjects();
-    void OptimizePhysicsSubstepping();
-    
-    // Performance tracking
-    void UpdatePerformanceMetrics();
-    bool ShouldIncreaseOptimization() const;
-    bool ShouldDecreaseOptimization() const;
+    float PerformanceTimer = 0.0f;
+    TArray<float> FrameTimeHistory;
+    static constexpr int32 FrameHistorySize = 60;
+
+    // Internal optimization methods
+    void UpdatePerformanceMetrics(float DeltaTime);
+    void CheckAdaptiveQuality();
+    EConsciousnessLOD CalculateOptimalLOD() const;
+    void ApplyLODSettings(EConsciousnessLOD LOD);
+    void UpdateConsciousnessActorLOD(class AConsciousnessActor* Actor, float Distance);
 };
