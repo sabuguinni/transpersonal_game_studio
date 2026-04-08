@@ -1,0 +1,100 @@
+{
+    "Type": "Blackboard",
+    "Description": "Blackboard for combat dinosaur AI with tactical decision making",
+    "Keys": [
+        {
+            "EntryName": "SelfActor",
+            "KeyType": "Object",
+            "BaseClass": "Actor",
+            "EntryDescription": "Reference to the AI dinosaur itself"
+        },
+        {
+            "EntryName": "TargetActor", 
+            "KeyType": "Object",
+            "BaseClass": "Actor",
+            "EntryDescription": "Current target (player or other threat)"
+        },
+        {
+            "EntryName": "TargetLocation",
+            "KeyType": "Vector",
+            "EntryDescription": "Last known position of target"
+        },
+        {
+            "EntryName": "PatrolLocation",
+            "KeyType": "Vector",
+            "EntryDescription": "Next patrol waypoint"
+        },
+        {
+            "EntryName": "FleeLocation",
+            "KeyType": "Vector",
+            "EntryDescription": "Safe location to retreat to"
+        },
+        {
+            "EntryName": "AttackPosition",
+            "KeyType": "Vector",
+            "EntryDescription": "Optimal position for attacking target"
+        },
+        {
+            "EntryName": "CombatState",
+            "KeyType": "Enum",
+            "EnumType": "ECombatState",
+            "EntryDescription": "Current combat behavior state"
+        },
+        {
+            "EntryName": "ThreatLevel",
+            "KeyType": "Enum", 
+            "EnumType": "EThreatLevel",
+            "EntryDescription": "Assessed threat level of current target"
+        },
+        {
+            "EntryName": "AggressionLevel",
+            "KeyType": "Float",
+            "EntryDescription": "Current aggression level (0.0 to 1.0)"
+        },
+        {
+            "EntryName": "HealthPercentage",
+            "KeyType": "Float",
+            "EntryDescription": "Current health as percentage (0.0 to 1.0)"
+        },
+        {
+            "EntryName": "InTerritory",
+            "KeyType": "Bool",
+            "EntryDescription": "Whether dinosaur is in its territorial area"
+        },
+        {
+            "EntryName": "CanSeeTarget",
+            "KeyType": "Bool",
+            "EntryDescription": "Whether target is currently visible"
+        },
+        {
+            "EntryName": "IsAttacking",
+            "KeyType": "Bool",
+            "EntryDescription": "Whether currently executing attack"
+        },
+        {
+            "EntryName": "IsFleeing",
+            "KeyType": "Bool",
+            "EntryDescription": "Whether currently fleeing from threat"
+        },
+        {
+            "EntryName": "LastNoiseLocation",
+            "KeyType": "Vector",
+            "EntryDescription": "Location of last heard sound"
+        },
+        {
+            "EntryName": "TimeSinceLastSeen",
+            "KeyType": "Float",
+            "EntryDescription": "Time since target was last seen"
+        },
+        {
+            "EntryName": "PreferredAttackRange",
+            "KeyType": "Float",
+            "EntryDescription": "Optimal distance for this dinosaur's attacks"
+        },
+        {
+            "EntryName": "TerritorialCenter",
+            "KeyType": "Vector",
+            "EntryDescription": "Center point of this dinosaur's territory"
+        }
+    ]
+}
