@@ -1,0 +1,79 @@
+# Niagara System: Dinosaur Presence Effects
+# Enhances the feeling that dinosaurs are living, breathing creatures
+
+## EMITTER 1: Breathing Steam (Large Predators)
+- Spawn Rate: 15-25 particles/second (tied to breathing animation)
+- Lifetime: 3-6 seconds
+- Size: 1.0-3.0 world units
+- Velocity: Forward from nostrils, slight upward curve
+- Color: White-gray (240,240,240) fading to transparent
+- Material: M_Steam_Volumetric
+
+### Behavior Modules:
+- Initial Location: Nostril bone sockets
+- Velocity: Animation-driven direction + random spread
+- Size Over Life: Rapid expansion then fade
+- Temperature Influence: More visible in cold weather
+- Wind Interaction: Disperses with environmental wind
+
+### Animation Integration:
+- Breathing_Rate_Parameter: Links to creature AI state
+- Exertion_Multiplier: Increases during chase/combat
+- Temperature_Modifier: Weather system integration
+
+## EMITTER 2: Footstep Dust Clouds
+- Spawn Rate: Burst on footfall events (50-100 particles)
+- Lifetime: 2-4 seconds
+- Size: 0.5-2.0 world units
+- Velocity: Outward from impact point
+- Color: Ground material dependent (brown/gray/green)
+- Material: M_Dust_Ground
+
+### Behavior Modules:
+- Initial Location: Foot bone impact position
+- Velocity: Radial burst with ground normal influence
+- Ground Material Detection: Surface type affects color/amount
+- Creature Weight Scaling: Larger dinosaurs = bigger clouds
+- Collision: Ground settle with bounce damping
+
+### Surface Response System:
+- Mud: Dark brown, sticky particles, longer lifetime
+- Dry Earth: Light brown, quick dispersion
+- Grass: Green tint, mixed with grass fragments
+- Rock: Gray particles, spark effects on hard impact
+
+## EMITTER 3: Eye Reflection Glints
+- Spawn Rate: 2-5 particles/second
+- Lifetime: 0.5-1.5 seconds
+- Size: 0.1-0.3 world units
+- Velocity: Minimal, follows eye movement
+- Color: Bright white-blue (255,255,255)
+- Material: M_EyeGlint_Additive
+
+### Behavior Modules:
+- Initial Location: Eye bone sockets
+- Camera Angle Dependency: Only visible at certain viewing angles
+- Blink Integration: Disappears during blink animations
+- Intelligence Indicator: Frequency varies by species intelligence
+- Distance Culling: Not visible beyond 30 meters
+
+## EMITTER 4: Saliva Drips (Predators Only)
+- Spawn Rate: 1-3 particles/second
+- Lifetime: 2-5 seconds
+- Size: 0.2-0.5 world units
+- Velocity: Gravity-driven downward
+- Color: Clear with slight yellow tint (255,255,200,180)
+- Material: M_Saliva_Translucent
+
+### Behavior Modules:
+- Initial Location: Mouth/jaw bone positions
+- Gravity: Strong downward pull
+- Collision: Ground splatter effect
+- Hunger State: More frequent when hunting
+- Stress Response: Increases during combat
+
+## SYSTEM PARAMETERS (Per Creature Type):
+- Creature_Size_Scale: 0.5-3.0 (affects all effect scales)
+- Activity_Level: 0.0-2.0 (calm to aggressive states)
+- Health_State: 0.0-1.0 (affects breathing intensity)
+- Environmental_Adaptation: Species-specific modifiers
