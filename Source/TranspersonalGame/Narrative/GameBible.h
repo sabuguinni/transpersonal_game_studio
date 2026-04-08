@@ -1,0 +1,278 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Engine/DataAsset.h"
+#include "GameplayTagContainer.h"
+#include "Engine/DataTable.h"
+#include "GameBible.generated.h"
+
+/**
+ * Core narrative themes of the game
+ */
+UENUM(BlueprintType)
+enum class ENarrativeTheme : uint8
+{
+    Survival        UMETA(DisplayName = "Survival Against Nature"),
+    Discovery       UMETA(DisplayName = "Scientific Discovery"),
+    Isolation       UMETA(DisplayName = "Isolation and Solitude"),
+    Wonder          UMETA(DisplayName = "Wonder and Awe"),
+    Fear            UMETA(DisplayName = "Primal Fear"),
+    Adaptation      UMETA(DisplayName = "Human Adaptation"),
+    TimeDisplacement UMETA(DisplayName = "Temporal Displacement"),
+    Connection      UMETA(DisplayName = "Connection with Nature")
+};
+
+/**
+ * Character archetypes in the narrative
+ */
+UENUM(BlueprintType)
+enum class ECharacterArchetype : uint8
+{
+    ScientistProtagonist    UMETA(DisplayName = "The Displaced Scientist"),
+    AlphaPredator          UMETA(DisplayName = "The Alpha Predator"),
+    WiseHerbivore          UMETA(DisplayName = "The Ancient Herbivore"),
+    CuriousYoung           UMETA(DisplayName = "The Curious Juvenile"),
+    TerritorialGuardian    UMETA(DisplayName = "The Territorial Guardian"),
+    PackHunter             UMETA(DisplayName = "The Pack Hunter"),
+    SolitaryGiant          UMETA(DisplayName = "The Solitary Giant"),
+    NatureItself           UMETA(DisplayName = "Nature as Character")
+};
+
+/**
+ * Story acts structure
+ */
+UENUM(BlueprintType)
+enum class EStoryAct : uint8
+{
+    Act1_Arrival        UMETA(DisplayName = "Act I: The Arrival"),
+    Act2_Adaptation     UMETA(DisplayName = "Act II: Adaptation"),
+    Act3_Understanding  UMETA(DisplayName = "Act III: Understanding"),
+    Act4_Integration    UMETA(DisplayName = "Act IV: Integration"),
+    Act5_Departure      UMETA(DisplayName = "Act V: The Choice")
+};
+
+/**
+ * Narrative location significance
+ */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FNarrativeLocation
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Location")
+    FName LocationID;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Location")
+    FText LocationName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Location")
+    FText NarrativeDescription;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Location")
+    ENarrativeTheme PrimaryTheme;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Location")
+    TArray<ENarrativeTheme> SecondaryThemes;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Location")
+    FGameplayTagContainer LocationTags;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Location")
+    TArray<FString> KeyNarrativeMoments;
+
+    FNarrativeLocation()
+    {
+        LocationID = NAME_None;
+        PrimaryTheme = ENarrativeTheme::Survival;
+    }
+};
+
+/**
+ * Character narrative profile
+ */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FCharacterNarrativeProfile
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    FName CharacterID;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    ECharacterArchetype Archetype;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    FText CharacterName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    FText BackgroundStory;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    FText PersonalityTraits;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    FText NarrativeRole;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    TArray<ENarrativeTheme> RelatedThemes;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    TArray<FString> CharacterArcs;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    FGameplayTagContainer CharacterTags;
+
+    FCharacterNarrativeProfile()
+    {
+        CharacterID = NAME_None;
+        Archetype = ECharacterArchetype::ScientistProtagonist;
+    }
+};
+
+/**
+ * Story beat with narrative weight
+ */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FStoryBeat
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    FName BeatID;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    EStoryAct Act;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    FText BeatTitle;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    FText BeatDescription;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    ENarrativeTheme PrimaryTheme;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    FGameplayTagContainer TriggerConditions;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    FGameplayTagContainer UnlockTags;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    TArray<FName> DialogueSequences;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    TArray<FName> RelatedQuests;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    int32 NarrativeWeight = 1;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    bool bIsMandatory = false;
+
+    FStoryBeat()
+    {
+        BeatID = NAME_None;
+        Act = EStoryAct::Act1_Arrival;
+        PrimaryTheme = ENarrativeTheme::Survival;
+        NarrativeWeight = 1;
+        bIsMandatory = false;
+    }
+};
+
+/**
+ * The Game Bible - Central narrative design document
+ */
+UCLASS(BlueprintType)
+class TRANSPERSONALGAME_API UGameBible : public UPrimaryDataAsset
+{
+    GENERATED_BODY()
+
+public:
+    UGameBible();
+
+    // Core Narrative Elements
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Core Narrative")
+    FText GameTitle;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Core Narrative")
+    FText CorePremise;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Core Narrative")
+    FText CentralTheme;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Core Narrative")
+    FText EmotionalCore;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Core Narrative")
+    TArray<ENarrativeTheme> PrimaryThemes;
+
+    // Protagonist
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Protagonist")
+    FCharacterNarrativeProfile ProtagonistProfile;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Protagonist")
+    FText ProtagonistJourney;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Protagonist")
+    TArray<FString> CharacterGrowthMilestones;
+
+    // World Building
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World")
+    FText WorldDescription;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World")
+    FText TimeAndPlace;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World")
+    TArray<FNarrativeLocation> KeyLocations;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World")
+    TArray<FCharacterNarrativeProfile> DinosaurCharacters;
+
+    // Story Structure
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Structure")
+    TArray<FStoryBeat> StoryBeats;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Structure")
+    TMap<EStoryAct, FText> ActDescriptions;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Structure")
+    FText ClimaxDescription;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Structure")
+    TArray<FText> PossibleEndings;
+
+    // Narrative Rules
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative Rules")
+    TArray<FString> NarrativeConstraints;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative Rules")
+    TArray<FString> ToneGuidelines;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative Rules")
+    TArray<FString> DialogueGuidelines;
+
+    // Discovery System
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Discovery")
+    TMap<FGameplayTag, FText> DiscoveryNarratives;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Discovery")
+    TArray<FString> ScientificObservations;
+
+    // Utility Functions
+    UFUNCTION(BlueprintCallable, Category = "Game Bible")
+    FStoryBeat GetStoryBeat(FName BeatID) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Game Bible")
+    TArray<FStoryBeat> GetStoryBeatsForAct(EStoryAct Act) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Game Bible")
+    FCharacterNarrativeProfile GetCharacterProfile(FName CharacterID) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Game Bible")
+    FNarrativeLocation GetLocationNarrative(FName LocationID) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Game Bible")
+    TArray<ENarrativeTheme> GetActiveThemes(const FGameplayTagContainer& CurrentTags) const;
+};
