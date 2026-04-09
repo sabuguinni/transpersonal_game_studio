@@ -1,185 +1,298 @@
+// Copyright Transpersonal Game Studio. All Rights Reserved.
+
 #include "QuestInstance.h"
-#include "QuestObjective.h"
 #include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
 
 UQuestInstance::UQuestInstance()
 {
-    QuestProgress = 0.0f;
-    bIsTimedQuest = false;
-    TimeLimit = 0.0f;
-    ElapsedTime = 0.0f;
+    StartTime = 0.0f;
 }
 
-void UQuestInstance::Initialize(const FQuestData& InQuestData)
+void UQuestInstance::InitializeQuest(const FQuestData& InQuestData)
 {
     QuestData = InQuestData;
-    StartTime = FDateTime::Now();
-    CreateObjectives();
+    StartTime = UGameplayStatics::GetTimeSeconds(GetWorld());
     
-    UE_LOG(LogTemp, Log, TEXT("Initialized quest instance: %s"), *QuestData.QuestTitle.ToString());
-}
-
-void UQuestInstance::UpdateQuest(float DeltaTime)
-{
-    // Update elapsed time
-    ElapsedTime += DeltaTime;
+    InitializeObjectiveProgress();
     
-    // Check time limit if this is a timed quest
-    if (bIsTimedQuest)
+    // Set initial emotional tone
+    if (EmotionalProgression.Num() == 0)
     {
-        CheckTimeLimit(DeltaTime);
+        EmotionalProgression.Add(QuestData.EmotionalTone);
     }
     
-    // Update all objectives
-    for (UQuestObjective* Objective : Objectives)
+    UE_LOG(LogTemp, Log, TEXT("QuestInstance: Initialized quest %s with %d objectives"), 
+           *QuestData.QuestID, QuestData.Objectives.Num());
+}
+
+bool UQuestInstance::UpdateObjectiveProgress(const FString& ObjectiveID, int32 Progress)
+{
+    if (!ValidateObjectiveID(ObjectiveID))
     {
-        if (Objective)
+        UE_LOG(LogTemp, Warning, TEXT("QuestInstance: Invalid objective ID %s"), *ObjectiveID);
+        return false;
+    }
+
+    // Find the objective in quest data
+    FQuestObjective* Objective = nullptr;
+    for (FQuestObjective& Obj : QuestData.Objectives)
+    {
+        if (Obj.ObjectiveID == ObjectiveID)
         {
-            Objective->UpdateObjective(DeltaTime);
+            Objective = &Obj;
+            break;
         }
     }
+
+    if (!Objective)
+    {
+        return false;
+    }
+
+    // Update progress
+    int32 OldProgress = Objective->CurrentCount;
+    Objective->CurrentCount = FMath::Min(Objective->CurrentCount + Progress, Objective->TargetCount);
     
-    // Update overall quest progress
-    UpdateQuestProgress();
+    // Cache the progress
+    ObjectiveProgressCache.Add(ObjectiveID, Objective->CurrentCount);
+
+    bool bWasCompleted = (OldProgress >= Objective->TargetCount);
+    bool bIsCompleted = (Objective->CurrentCount >= Objective->TargetCount);
+    bool bJustCompleted = !bWasCompleted && bIsCompleted;
+
+    // Trigger events
+    OnObjectiveProgressUpdated.Broadcast(ObjectiveID, Objective->CurrentCount);
+    
+    if (bJustCompleted)
+    {
+        OnObjectiveCompleted.Broadcast(ObjectiveID);
+        
+        // Add emotional moment for objective completion
+        EEmotionalTone CompletionTone = EEmotionalTone::Hope;
+        
+        // Determine emotional tone based on objective type
+        switch (Objective->Type)
+        {
+            case EObjectiveType::Survive:
+                CompletionTone = EEmotionalTone::Triumph;
+                break;
+            case EObjectiveType::Observe:
+                CompletionTone = EEmotionalTone::Wonder;
+                break;
+            case EObjectiveType::Escape:
+                CompletionTone = EEmotionalTone::Hope;
+                break;
+            case EObjectiveType::Discover:
+                CompletionTone = EEmotionalTone::Curiosity;
+                break;
+            default:
+                CompletionTone = EEmotionalTone::Hope;
+                break;
+        }
+        
+        AddEmotionalMoment(CompletionTone, FString::Printf(TEXT("Completed objective: %s"), *ObjectiveID));
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("QuestInstance: Updated objective %s progress to %d/%d (Quest: %s)"), 
+           *ObjectiveID, Objective->CurrentCount, Objective->TargetCount, *QuestData.QuestID);
+
+    return bJustCompleted;
 }
 
-bool UQuestInstance::AreAllObjectivesCompleted() const
+bool UQuestInstance::IsObjectiveCompleted(const FString& ObjectiveID) const
 {
-    for (const UQuestObjective* Objective : Objectives)
+    for (const FQuestObjective& Objective : QuestData.Objectives)
     {
-        if (Objective && !Objective->IsCompleted())
+        if (Objective.ObjectiveID == ObjectiveID)
+        {
+            return Objective.IsCompleted();
+        }
+    }
+    return false;
+}
+
+bool UQuestInstance::AreAllRequiredObjectivesCompleted() const
+{
+    for (const FQuestObjective& Objective : QuestData.Objectives)
+    {
+        if (!Objective.bIsOptional && !Objective.IsCompleted())
         {
             return false;
         }
     }
-    return Objectives.Num() > 0; // Must have at least one objective
-}
-
-bool UQuestInstance::HasObjective(const FString& ObjectiveID) const
-{
-    for (const UQuestObjective* Objective : Objectives)
-    {
-        if (Objective && Objective->GetObjectiveID() == ObjectiveID)
-        {
-            return true;
-        }
-    }
-    return false;
-}
-
-bool UQuestInstance::CompleteObjective(const FString& ObjectiveID)
-{
-    for (UQuestObjective* Objective : Objectives)
-    {
-        if (Objective && Objective->GetObjectiveID() == ObjectiveID)
-        {
-            Objective->CompleteObjective();
-            UpdateQuestProgress();
-            
-            UE_LOG(LogTemp, Log, TEXT("Completed objective %s for quest %s"), *ObjectiveID, *QuestData.QuestID);
-            return true;
-        }
-    }
-    return false;
-}
-
-void UQuestInstance::GiveRewards()
-{
-    // Give experience reward
-    if (QuestData.ExperienceReward > 0)
-    {
-        // TODO: Implement experience system integration
-        UE_LOG(LogTemp, Log, TEXT("Giving %d experience for quest %s"), QuestData.ExperienceReward, *QuestData.QuestID);
-    }
-    
-    // Give item rewards (if any)
-    // TODO: Implement item reward system
-    
-    // Trigger quest completion effects
-    // TODO: Implement visual/audio feedback for quest completion
-    
-    UE_LOG(LogTemp, Log, TEXT("Gave rewards for quest: %s"), *QuestData.QuestTitle.ToString());
+    return true;
 }
 
 float UQuestInstance::GetCompletionPercentage() const
 {
-    if (Objectives.Num() == 0)
+    if (QuestData.Objectives.Num() == 0)
     {
         return 0.0f;
     }
-    
-    float TotalProgress = 0.0f;
-    for (const UQuestObjective* Objective : Objectives)
+
+    int32 CompletedObjectives = 0;
+    int32 TotalObjectives = 0;
+
+    for (const FQuestObjective& Objective : QuestData.Objectives)
     {
-        if (Objective)
+        if (!Objective.bIsOptional)
         {
-            TotalProgress += Objective->GetProgress();
+            TotalObjectives++;
+            if (Objective.IsCompleted())
+            {
+                CompletedObjectives++;
+            }
         }
     }
-    
-    return TotalProgress / Objectives.Num();
+
+    return TotalObjectives > 0 ? (float)CompletedObjectives / (float)TotalObjectives : 0.0f;
 }
 
-void UQuestInstance::SetQuestProgress(float Progress)
+FQuestObjective UQuestInstance::GetObjective(const FString& ObjectiveID) const
 {
-    QuestProgress = FMath::Clamp(Progress, 0.0f, 1.0f);
-}
-
-void UQuestInstance::StartQuestTimer(float InTimeLimit)
-{
-    bIsTimedQuest = true;
-    TimeLimit = InTimeLimit;
-    ElapsedTime = 0.0f;
-    
-    UE_LOG(LogTemp, Log, TEXT("Started timer for quest %s: %f seconds"), *QuestData.QuestID, TimeLimit);
+    for (const FQuestObjective& Objective : QuestData.Objectives)
+    {
+        if (Objective.ObjectiveID == ObjectiveID)
+        {
+            return Objective;
+        }
+    }
+    return FQuestObjective();
 }
 
 float UQuestInstance::GetRemainingTime() const
 {
-    if (!bIsTimedQuest)
+    if (!HasTimeLimit())
     {
         return -1.0f; // No time limit
     }
+
+    float CurrentTime = UGameplayStatics::GetTimeSeconds(GetWorld());
+    float ElapsedTime = CurrentTime - StartTime;
+    float RemainingTime = QuestData.TimeLimit - ElapsedTime;
     
-    return FMath::Max(0.0f, TimeLimit - ElapsedTime);
+    return FMath::Max(0.0f, RemainingTime);
 }
 
-void UQuestInstance::CreateObjectives()
+void UQuestInstance::AddEmotionalMoment(EEmotionalTone Tone, const FString& Context)
 {
-    // Clear existing objectives
-    Objectives.Empty();
+    EmotionalProgression.Add(Tone);
     
-    // Create objectives based on quest data
-    for (const FString& ObjectiveID : QuestData.ObjectiveIDs)
+    // Broadcast emotional moment
+    OnEmotionalMoment.Broadcast(Tone, Context);
+    
+    UE_LOG(LogTemp, Log, TEXT("QuestInstance: Emotional moment in quest %s - %s: %s"), 
+           *QuestData.QuestID, *UEnum::GetValueAsString(Tone), *Context);
+}
+
+EEmotionalTone UQuestInstance::GetCurrentEmotionalState() const
+{
+    if (EmotionalProgression.Num() > 0)
     {
-        UQuestObjective* NewObjective = NewObject<UQuestObjective>(this);
-        if (NewObjective)
+        return EmotionalProgression.Last();
+    }
+    return QuestData.EmotionalTone;
+}
+
+bool UQuestInstance::IsPlayerInQuestArea(const FVector& PlayerLocation) const
+{
+    if (QuestData.QuestLocation == FVector::ZeroVector)
+    {
+        return true; // No specific location requirement
+    }
+
+    // Check if any objective has a location requirement
+    for (const FQuestObjective& Objective : QuestData.Objectives)
+    {
+        if (Objective.TargetLocation != FVector::ZeroVector)
         {
-            NewObjective->Initialize(ObjectiveID, QuestData.QuestType);
-            Objectives.Add(NewObjective);
-            
-            UE_LOG(LogTemp, Log, TEXT("Created objective %s for quest %s"), *ObjectiveID, *QuestData.QuestID);
+            float Distance = FVector::Dist(PlayerLocation, Objective.TargetLocation);
+            if (Distance <= Objective.TargetRadius)
+            {
+                return true;
+            }
         }
     }
-    
-    UE_LOG(LogTemp, Log, TEXT("Created %d objectives for quest %s"), Objectives.Num(), *QuestData.QuestID);
+
+    // Check main quest location
+    float Distance = FVector::Dist(PlayerLocation, QuestData.QuestLocation);
+    return Distance <= 2000.0f; // Default quest area radius
 }
 
-void UQuestInstance::UpdateQuestProgress()
+float UQuestInstance::GetDistanceToQuestLocation(const FVector& PlayerLocation) const
 {
-    float NewProgress = GetCompletionPercentage();
-    SetQuestProgress(NewProgress);
-}
-
-void UQuestInstance::CheckTimeLimit(float DeltaTime)
-{
-    if (ElapsedTime >= TimeLimit)
+    if (QuestData.QuestLocation == FVector::ZeroVector)
     {
-        // Quest has timed out - this should trigger quest failure
-        UE_LOG(LogTemp, Warning, TEXT("Quest %s has timed out!"), *QuestData.QuestID);
-        
-        // TODO: Trigger quest failure through quest manager
-        // This would typically be handled by the quest manager checking this state
+        return 0.0f;
     }
+
+    return FVector::Dist(PlayerLocation, QuestData.QuestLocation);
+}
+
+void UQuestInstance::AddDynamicObjective(const FQuestObjective& NewObjective)
+{
+    // Validate that the objective ID is unique
+    for (const FQuestObjective& ExistingObjective : QuestData.Objectives)
+    {
+        if (ExistingObjective.ObjectiveID == NewObjective.ObjectiveID)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("QuestInstance: Objective ID %s already exists"), *NewObjective.ObjectiveID);
+            return;
+        }
+    }
+
+    QuestData.Objectives.Add(NewObjective);
+    ObjectiveProgressCache.Add(NewObjective.ObjectiveID, NewObjective.CurrentCount);
+    
+    UE_LOG(LogTemp, Log, TEXT("QuestInstance: Added dynamic objective %s to quest %s"), 
+           *NewObjective.ObjectiveID, *QuestData.QuestID);
+}
+
+void UQuestInstance::RemoveObjective(const FString& ObjectiveID)
+{
+    QuestData.Objectives.RemoveAll([ObjectiveID](const FQuestObjective& Objective)
+    {
+        return Objective.ObjectiveID == ObjectiveID;
+    });
+    
+    ObjectiveProgressCache.Remove(ObjectiveID);
+    
+    UE_LOG(LogTemp, Log, TEXT("QuestInstance: Removed objective %s from quest %s"), 
+           *ObjectiveID, *QuestData.QuestID);
+}
+
+void UQuestInstance::UpdateObjectiveDescription(const FString& ObjectiveID, const FText& NewDescription)
+{
+    for (FQuestObjective& Objective : QuestData.Objectives)
+    {
+        if (Objective.ObjectiveID == ObjectiveID)
+        {
+            Objective.Description = NewDescription;
+            UE_LOG(LogTemp, Log, TEXT("QuestInstance: Updated description for objective %s"), *ObjectiveID);
+            return;
+        }
+    }
+}
+
+void UQuestInstance::InitializeObjectiveProgress()
+{
+    ObjectiveProgressCache.Empty();
+    
+    for (const FQuestObjective& Objective : QuestData.Objectives)
+    {
+        ObjectiveProgressCache.Add(Objective.ObjectiveID, Objective.CurrentCount);
+    }
+}
+
+bool UQuestInstance::ValidateObjectiveID(const FString& ObjectiveID) const
+{
+    for (const FQuestObjective& Objective : QuestData.Objectives)
+    {
+        if (Objective.ObjectiveID == ObjectiveID)
+        {
+            return true;
+        }
+    }
+    return false;
 }
