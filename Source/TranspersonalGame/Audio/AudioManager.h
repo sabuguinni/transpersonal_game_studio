@@ -1,104 +1,90 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/Engine.h"
-#include "Sound/SoundBase.h"
-#include "Sound/SoundCue.h"
+#include "Engine/World.h"
 #include "Components/AudioComponent.h"
-#include "AudioMixerBlueprintLibrary.h"
+#include "Sound/SoundCue.h"
+#include "Sound/SoundWave.h"
 #include "MetasoundSource.h"
+#include "AudioMixerBlueprintLibrary.h"
 #include "GameFramework/GameModeBase.h"
 #include "AudioManager.generated.h"
 
 UENUM(BlueprintType)
 enum class EEmotionalState : uint8
 {
-    Calm = 0,
+    Calm,
     Tense,
-    Danger,
-    Wonder,
     Fear,
+    Wonder,
     Melancholy,
-    Discovery,
-    Survival
+    Triumph,
+    Mystery,
+    Danger
 };
 
 UENUM(BlueprintType)
 enum class EEnvironmentalZone : uint8
 {
-    Forest = 0,
+    Forest,
     Plains,
-    Swamp,
     Mountains,
-    Cave,
-    River,
-    Clearing,
-    DenseJungle
+    Caves,
+    Water,
+    Ruins,
+    DinosaurTerritory
 };
 
 UENUM(BlueprintType)
 enum class ETimeOfDay : uint8
 {
-    Dawn = 0,
+    Dawn,
     Morning,
-    Noon,
+    Midday,
     Afternoon,
     Dusk,
     Night,
     DeepNight
 };
 
-UENUM(BlueprintType)
-enum class EWeatherState : uint8
-{
-    Clear = 0,
-    Cloudy,
-    LightRain,
-    HeavyRain,
-    Storm,
-    Fog,
-    Wind
-};
-
 USTRUCT(BlueprintType)
-struct FAudioLayerConfig
+struct FAudioState
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    class UMetaSoundSource* MetaSound;
-    
+    EEmotionalState EmotionalState = EEmotionalState::Calm;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float BaseVolume = 1.0f;
-    
+    EEnvironmentalZone Zone = EEnvironmentalZone::Forest;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float FadeTime = 2.0f;
-    
+    ETimeOfDay TimeOfDay = ETimeOfDay::Morning;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bLoop = true;
-    
+    float TensionLevel = 0.0f; // 0.0 to 1.0
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 Priority = 1;
+    float DinosaurProximity = 0.0f; // 0.0 to 1.0
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bInCombat = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bNearWater = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float WeatherIntensity = 0.0f; // 0.0 to 1.0
 };
 
-USTRUCT(BlueprintType)
-struct FEmotionalAudioState
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EEmotionalState CurrentState = EEmotionalState::Calm;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float Intensity = 0.5f; // 0.0 to 1.0
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float TransitionSpeed = 1.0f;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float Timestamp = 0.0f;
-};
-
+/**
+ * Central audio management system that handles adaptive music, environmental audio,
+ * and emotional state-driven sound design for the prehistoric survival experience.
+ * 
+ * This system is designed around the principle that audio is the emotional conductor
+ * of the player's experience - when done right, players don't notice the audio,
+ * they feel the world.
+ */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UAudioManager : public UObject
 {
@@ -107,125 +93,123 @@ class TRANSPERSONALGAME_API UAudioManager : public UObject
 public:
     UAudioManager();
 
-    // Core Audio Management
+    // Core Audio State Management
     UFUNCTION(BlueprintCallable, Category = "Audio Manager")
-    void Initialize();
+    void InitializeAudioManager(UWorld* World);
 
     UFUNCTION(BlueprintCallable, Category = "Audio Manager")
-    void UpdateAudioState(float DeltaTime);
+    void UpdateAudioState(const FAudioState& NewState);
 
-    // Emotional State Management
-    UFUNCTION(BlueprintCallable, Category = "Emotional Audio")
-    void SetEmotionalState(EEmotionalState NewState, float Intensity = 0.5f, float TransitionTime = 2.0f);
+    UFUNCTION(BlueprintCallable, Category = "Audio Manager")
+    void SetEmotionalState(EEmotionalState NewState, float TransitionTime = 2.0f);
 
-    UFUNCTION(BlueprintCallable, Category = "Emotional Audio")
-    void BlendEmotionalStates(EEmotionalState StateA, EEmotionalState StateB, float BlendFactor);
+    UFUNCTION(BlueprintCallable, Category = "Audio Manager")
+    void SetEnvironmentalZone(EEnvironmentalZone NewZone, float TransitionTime = 3.0f);
 
-    UFUNCTION(BlueprintPure, Category = "Emotional Audio")
-    EEmotionalState GetCurrentEmotionalState() const { return CurrentEmotionalState.CurrentState; }
+    // Adaptive Music System
+    UFUNCTION(BlueprintCallable, Category = "Adaptive Music")
+    void PlayAdaptiveMusic(EEmotionalState State, EEnvironmentalZone Zone);
+
+    UFUNCTION(BlueprintCallable, Category = "Adaptive Music")
+    void TransitionMusicLayers(float IntensityLevel, float TransitionTime = 2.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Adaptive Music")
+    void StopAllMusic(float FadeTime = 3.0f);
 
     // Environmental Audio
     UFUNCTION(BlueprintCallable, Category = "Environmental Audio")
-    void SetEnvironmentalZone(EEnvironmentalZone Zone);
+    void UpdateAmbientSounds(EEnvironmentalZone Zone, ETimeOfDay TimeOfDay);
 
     UFUNCTION(BlueprintCallable, Category = "Environmental Audio")
-    void UpdateTimeOfDay(ETimeOfDay TimeOfDay);
+    void PlayEnvironmentalStinger(const FString& EventName, FVector Location);
 
-    UFUNCTION(BlueprintCallable, Category = "Environmental Audio")
-    void UpdateWeather(EWeatherState Weather, float Intensity = 1.0f);
-
-    // Dynamic Music System
-    UFUNCTION(BlueprintCallable, Category = "Music System")
-    void PlayMusicLayer(const FString& LayerName, bool bFadeIn = true);
-
-    UFUNCTION(BlueprintCallable, Category = "Music System")
-    void StopMusicLayer(const FString& LayerName, bool bFadeOut = true);
-
-    UFUNCTION(BlueprintCallable, Category = "Music System")
-    void SetMusicParameter(const FString& ParameterName, float Value);
-
-    // Dinosaur Audio
+    // Dinosaur Audio System
     UFUNCTION(BlueprintCallable, Category = "Dinosaur Audio")
-    void PlayDinosaurSound(class ADinosaurBase* Dinosaur, const FString& SoundType, FVector Location);
+    void PlayDinosaurCall(const FString& DinosaurType, FVector Location, float Intensity = 1.0f);
 
     UFUNCTION(BlueprintCallable, Category = "Dinosaur Audio")
-    void UpdateDinosaurProximity(TArray<class ADinosaurBase*> NearbyDinosaurs);
+    void UpdateDinosaurProximityAudio(float ProximityLevel);
 
-    // Player Audio
-    UFUNCTION(BlueprintCallable, Category = "Player Audio")
-    void PlayPlayerAction(const FString& ActionType);
+    // UI and Interaction Audio
+    UFUNCTION(BlueprintCallable, Category = "UI Audio")
+    void PlayUISound(const FString& SoundName);
 
-    UFUNCTION(BlueprintCallable, Category = "Player Audio")
-    void UpdatePlayerStress(float StressLevel); // 0.0 to 1.0
+    UFUNCTION(BlueprintCallable, Category = "Interaction Audio")
+    void PlayInteractionSound(const FString& InteractionType, FVector Location);
 
-    // Spatial Audio
-    UFUNCTION(BlueprintCallable, Category = "Spatial Audio")
-    void Play3DSound(class USoundBase* Sound, FVector Location, float VolumeMultiplier = 1.0f);
+    // Voice and Dialogue
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void PlayVoiceLine(const FString& CharacterName, const FString& LineID, FVector Location);
 
-    UFUNCTION(BlueprintCallable, Category = "Spatial Audio")
-    void UpdateListenerPosition(FVector Position, FRotator Rotation);
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void PlayNarration(const FString& NarrationID);
+
+    // Audio Analysis and Feedback
+    UFUNCTION(BlueprintCallable, Category = "Audio Analysis")
+    float GetCurrentMusicIntensity() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Audio Analysis")
+    TArray<float> GetSpectrumData() const;
 
 protected:
-    // Audio Components
+    // Core Audio Components
     UPROPERTY(BlueprintReadOnly, Category = "Audio Components")
-    TMap<FString, class UAudioComponent*> AudioComponents;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Audio Components")
-    class UAudioComponent* MasterMusicComponent;
+    class UAudioComponent* MusicComponent;
 
     UPROPERTY(BlueprintReadOnly, Category = "Audio Components")
-    class UAudioComponent* AmbienceComponent;
+    class UAudioComponent* AmbientComponent;
 
-    // Audio Assets
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Assets")
-    TMap<EEmotionalState, FAudioLayerConfig> EmotionalMusicLayers;
+    UPROPERTY(BlueprintReadOnly, Category = "Audio Components")
+    class UAudioComponent* StingerComponent;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Assets")
-    TMap<EEnvironmentalZone, class UMetaSoundSource*> EnvironmentalSounds;
+    UPROPERTY(BlueprintReadOnly, Category = "Audio Components")
+    class UAudioComponent* VoiceComponent;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Assets")
-    TMap<EWeatherState, class UMetaSoundSource*> WeatherSounds;
-
-    // State Management
+    // Current Audio State
     UPROPERTY(BlueprintReadOnly, Category = "Audio State")
-    FEmotionalAudioState CurrentEmotionalState;
+    FAudioState CurrentAudioState;
 
     UPROPERTY(BlueprintReadOnly, Category = "Audio State")
-    FEmotionalAudioState TargetEmotionalState;
+    FAudioState TargetAudioState;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Audio State")
-    EEnvironmentalZone CurrentZone;
+    // Audio Asset References
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Music Assets")
+    TMap<EEmotionalState, class UMetaSoundSource*> EmotionalMusicTracks;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Audio State")
-    ETimeOfDay CurrentTimeOfDay;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ambient Assets")
+    TMap<EEnvironmentalZone, class USoundCue*> EnvironmentalAmbients;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Audio State")
-    EWeatherState CurrentWeather;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dinosaur Assets")
+    TMap<FString, class USoundCue*> DinosaurSounds;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Audio State")
-    float WeatherIntensity;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "UI Assets")
+    TMap<FString, class USoundWave*> UISounds;
 
     // Audio Parameters
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Audio Settings")
     float MasterVolume = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Audio Settings")
     float MusicVolume = 0.7f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
-    float SFXVolume = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Audio Settings")
+    float EnvironmentalVolume = 0.8f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
-    float AmbienceVolume = 0.8f;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Audio Settings")
+    float VoiceVolume = 1.0f;
 
-private:
     // Internal Methods
-    void UpdateEmotionalTransition(float DeltaTime);
     void UpdateMusicLayers();
-    void UpdateEnvironmentalAudio();
-    void CalculateAudioOcclusion(FVector SourceLocation, FVector ListenerLocation);
-    
-    // Timing
-    float EmotionalTransitionTimer;
-    float LastAudioUpdate;
+    void UpdateAmbientLayers();
+    void ProcessAudioTransitions(float DeltaTime);
+    void CalculateEmotionalBlending();
+
+    // Transition Management
+    FTimerHandle AudioUpdateTimer;
+    float TransitionProgress = 0.0f;
+    bool bIsTransitioning = false;
+
+    // World Reference
+    UPROPERTY()
+    UWorld* WorldContext;
 };
