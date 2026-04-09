@@ -1,232 +1,511 @@
+// Copyright Transpersonal Game Studio. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
-#include "Components/SceneComponent.h"
+#include "Subsystems/GameInstanceSubsystem.h"
+#include "Engine/World.h"
 #include "PCGComponent.h"
 #include "PCGGraph.h"
-#include "Engine/World.h"
-#include "Landscape.h"
-#include "WorldPartition/WorldPartition.h"
+#include "PCGSubsystem.h"
+#include "WorldPartition/WorldPartitionSubsystem.h"
+#include "Landscape/Landscape.h"
+#include "Components/HierarchicalInstancedStaticMeshComponent.h"
+#include "../Performance/PerformanceTargets.h"
 #include "ProceduralWorldSystemV6.generated.h"
 
+class UPCGSubsystem;
+class UWorldPartitionSubsystem;
+class ALandscape;
+class UPCGComponent;
+class UPCGGraph;
+
 /**
- * Advanced Procedural World System V6
- * Integrates all world generation systems with performance optimization
- * Uses UE5.5 PCG Framework with GPU acceleration and hierarchical generation
+ * @brief Procedural World System V6 — Transpersonal Game Studio
+ * 
+ * Next-generation procedural world system for creating living prehistoric worlds.
+ * Built on UE5.5 PCG Framework with GPU acceleration and hierarchical generation.
+ * 
+ * KEY INNOVATIONS V6:
+ * - GPU-accelerated terrain generation using Custom HLSL nodes
+ * - Real-time biome transitions with climate simulation
+ * - Hierarchical generation from continental to grass blade detail
+ * - Intelligent streaming with predictive loading
+ * - Ecosystem simulation driving procedural placement
+ * 
+ * PERFORMANCE TARGETS:
+ * - 60 FPS on RTX 4070 / RX 7700 XT
+ * - 30 FPS on RTX 3060 / RX 6600
+ * - 8GB VRAM maximum usage
+ * - Sub-second region regeneration
+ * 
+ * WORLD SCALE:
+ * - 16km x 16km playable area (64km x 64km with streaming)
+ * - 1cm precision at player location
+ * - 10m precision at 1km distance
+ * - 100m precision at 10km distance
+ * 
+ * @author Procedural World Generator — Agent #5
+ * @version 6.0 — March 2026
  */
 
+/** World generation quality presets */
 UENUM(BlueprintType)
-enum class EWorldGenerationPhase : uint8
+enum class EWorldGenQualityV6 : uint8
 {
-    Initialization      UMETA(DisplayName = "Initialization"),
-    TerrainGeneration   UMETA(DisplayName = "Terrain Generation"),
-    BiomeDistribution   UMETA(DisplayName = "Biome Distribution"),
-    WaterSystemGeneration UMETA(DisplayName = "Water System Generation"),
-    VegetationPlacement UMETA(DisplayName = "Vegetation Placement"),
-    DetailGeneration    UMETA(DisplayName = "Detail Generation"),
-    Optimization        UMETA(DisplayName = "Optimization"),
-    Complete           UMETA(DisplayName = "Complete")
+    Performance     UMETA(DisplayName = "Performance - 30 FPS Target"),
+    Balanced        UMETA(DisplayName = "Balanced - 45 FPS Target"),
+    Quality         UMETA(DisplayName = "Quality - 60 FPS Target"),
+    Ultra           UMETA(DisplayName = "Ultra - No Limits"),
+    Cinematic       UMETA(DisplayName = "Cinematic - Offline Rendering")
 };
 
+/** Geological time periods with accurate climate data */
+UENUM(BlueprintType)
+enum class EGeologicalEra : uint8
+{
+    TriassicEarly       UMETA(DisplayName = "Early Triassic (252-247 Ma) - Recovery Period"),
+    TriassicMiddle      UMETA(DisplayName = "Middle Triassic (247-237 Ma) - Diversification"),
+    TriassicLate        UMETA(DisplayName = "Late Triassic (237-201 Ma) - First Dinosaurs"),
+    JurassicEarly       UMETA(DisplayName = "Early Jurassic (201-174 Ma) - Pangaea Breakup"),
+    JurassicMiddle      UMETA(DisplayName = "Middle Jurassic (174-163 Ma) - Golden Age"),
+    JurassicLate        UMETA(DisplayName = "Late Jurassic (163-145 Ma) - Giant Sauropods"),
+    CretaceousEarly     UMETA(DisplayName = "Early Cretaceous (145-100 Ma) - Flowering Plants"),
+    CretaceousLate      UMETA(DisplayName = "Late Cretaceous (100-66 Ma) - T-Rex Era")
+};
+
+/** Ecosystem types based on real Mesozoic environments */
+UENUM(BlueprintType)
+enum class EEcosystemType : uint8
+{
+    TropicalRainforest      UMETA(DisplayName = "Tropical Rainforest - High Biodiversity"),
+    TemperateForest         UMETA(DisplayName = "Temperate Forest - Seasonal Changes"),
+    ConiferousForest        UMETA(DisplayName = "Coniferous Forest - Evergreen Dominance"),
+    FernPrairie             UMETA(DisplayName = "Fern Prairie - Open Grasslands"),
+    FloodplainForest        UMETA(DisplayName = "Floodplain Forest - Riverside Vegetation"),
+    SwamplandMarsh          UMETA(DisplayName = "Swampland Marsh - Wetland Ecosystem"),
+    CoastalMangrove         UMETA(DisplayName = "Coastal Mangrove - Tidal Zones"),
+    UplandScrub             UMETA(DisplayName = "Upland Scrub - Dry Highlands"),
+    VolcanicWasteland       UMETA(DisplayName = "Volcanic Wasteland - Sparse Life"),
+    RiverDelta              UMETA(DisplayName = "River Delta - Rich Sediments")
+};
+
+/** Climate parameters for realistic biome distribution */
 USTRUCT(BlueprintType)
-struct FWorldGenerationSettings
+struct FClimateParameters
 {
     GENERATED_BODY()
 
-    /** World size in square kilometers */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Size")
-    float WorldSizeKm = 200.0f;
+    /** Average annual temperature in Celsius */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Temperature")
+    float AnnualTemperature = 24.0f;
 
-    /** Landscape resolution (must be valid UE5 size) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
-    int32 LandscapeResolution = 8129; // 8129x8129 for 200km² world
+    /** Seasonal temperature variation */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Temperature")
+    float SeasonalVariation = 8.0f;
 
-    /** Maximum height in meters */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
-    float MaxHeightM = 2500.0f;
+    /** Annual precipitation in millimeters */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Precipitation")
+    float AnnualPrecipitation = 1200.0f;
 
-    /** Enable GPU acceleration for PCG */
+    /** Dry season length in months */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Precipitation")
+    float DrySeasonLength = 2.0f;
+
+    /** Humidity percentage */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Humidity")
+    float Humidity = 75.0f;
+
+    /** Wind speed in km/h */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wind")
+    float WindSpeed = 15.0f;
+
+    /** Atmospheric CO2 level (ppm) - Higher in Mesozoic */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
+    float CO2Level = 1800.0f; // 4-6x modern levels
+};
+
+/** Terrain generation configuration */
+USTRUCT(BlueprintType)
+struct FTerrainConfigV6
+{
+    GENERATED_BODY()
+
+    /** Heightmap resolution (power of 2 + 1) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Resolution")
+    int32 HeightmapResolution = 8129; // 8129x8129 for 64km world
+
+    /** World size in Unreal units */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scale")
+    FVector2D WorldSize = FVector2D(1600000.0f, 1600000.0f); // 16km x 16km
+
+    /** Maximum elevation in centimeters */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Elevation")
+    float MaxElevation = 400000.0f; // 4km mountains
+
+    /** Sea level elevation */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Elevation")
+    float SeaLevel = 0.0f;
+
+    /** Minimum elevation (ocean floor) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Elevation")
+    float MinElevation = -50000.0f; // 500m ocean depth
+
+    /** Continental shelf width */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Geology")
+    float ContinentalShelfWidth = 200000.0f; // 2km
+
+    /** Mountain range density */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Geology", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MountainDensity = 0.3f;
+
+    /** Valley network complexity */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Geology", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float ValleyComplexity = 0.7f;
+
+    /** Erosion simulation quality */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Erosion")
+    int32 ErosionIterations = 20;
+
+    /** Tectonic activity level */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Geology", meta = (ClampMin = "0.0", ClampMax = "2.0"))
+    float TectonicActivity = 1.5f; // Higher in Mesozoic
+
+    /** Use GPU acceleration for terrain generation */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
     bool bUseGPUAcceleration = true;
+};
+
+/** Hydrology system configuration */
+USTRUCT(BlueprintType)
+struct FHydrologyConfigV6
+{
+    GENERATED_BODY()
+
+    /** Number of major river systems */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rivers")
+    int32 MajorRiverCount = 4;
+
+    /** Tributaries per major river */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rivers")
+    int32 TributariesPerRiver = 8;
+
+    /** Minimum river length in meters */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rivers")
+    float MinRiverLength = 2000.0f;
+
+    /** Maximum river length in meters */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rivers")
+    float MaxRiverLength = 15000.0f;
+
+    /** River meandering factor */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rivers", meta = (ClampMin = "1.0", ClampMax = "3.0"))
+    float MeanderingFactor = 1.8f;
+
+    /** Lake density per square kilometer */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lakes")
+    float LakeDensity = 0.05f;
+
+    /** Wetland coverage percentage */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetlands", meta = (ClampMin = "0.0", ClampMax = "0.5"))
+    float WetlandCoverage = 0.15f;
+
+    /** Include coastal features */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Coastal")
+    bool bIncludeCoastalFeatures = true;
+
+    /** Tidal range in meters */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Coastal")
+    float TidalRange = 2.5f;
+};
+
+/** Vegetation generation configuration */
+USTRUCT(BlueprintType)
+struct FVegetationConfigV6
+{
+    GENERATED_BODY()
+
+    /** Overall vegetation density multiplier */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Density")
+    float DensityMultiplier = 1.0f;
+
+    /** Tree canopy coverage percentage */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Trees", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float CanopyCoverage = 0.8f;
+
+    /** Understory density */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Understory", meta = (ClampMin = "0.0", ClampMax = "2.0"))
+    float UnderstoryDensity = 1.2f;
+
+    /** Ground cover density */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ground Cover", meta = (ClampMin = "0.0", ClampMax = "3.0"))
+    float GroundCoverDensity = 2.0f;
+
+    /** Fern coverage (important in Mesozoic) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mesozoic Flora", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float FernCoverage = 0.6f;
+
+    /** Conifer dominance */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mesozoic Flora", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float ConiferDominance = 0.7f;
+
+    /** Flowering plant presence (Cretaceous only) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mesozoic Flora", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float FloweringPlantPresence = 0.3f;
+
+    /** Vegetation LOD distances */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    TArray<float> LODDistances = {1000.0f, 3000.0f, 8000.0f, 20000.0f};
+
+    /** Maximum instances per hierarchical cell */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 MaxInstancesPerCell = 50000;
+
+    /** Use GPU instancing for vegetation */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    bool bUseGPUInstancing = true;
+};
+
+/** Complete world generation configuration */
+USTRUCT(BlueprintType)
+struct FWorldGenerationConfigV6
+{
+    GENERATED_BODY()
+
+    /** Random seed for reproducible generation */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation")
+    int32 Seed = 42;
+
+    /** Generation quality preset */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quality")
+    EWorldGenQualityV6 Quality = EWorldGenQualityV6::Quality;
+
+    /** Geological time period */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Setting")
+    EGeologicalEra GeologicalEra = EGeologicalEra::JurassicLate;
+
+    /** Primary ecosystem type */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Setting")
+    EEcosystemType PrimaryEcosystem = EEcosystemType::TropicalRainforest;
+
+    /** Climate parameters */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Climate")
+    FClimateParameters Climate;
+
+    /** Terrain configuration */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
+    FTerrainConfigV6 Terrain;
+
+    /** Hydrology configuration */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hydrology")
+    FHydrologyConfigV6 Hydrology;
+
+    /** Vegetation configuration */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vegetation")
+    FVegetationConfigV6 Vegetation;
+
+    /** Enable World Partition streaming */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Streaming")
+    bool bEnableWorldPartition = true;
+
+    /** World Partition cell size */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Streaming")
+    float PartitionCellSize = 12800.0f; // 128m cells
 
     /** Enable hierarchical generation */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    bool bUseHierarchicalGeneration = true;
-
-    /** World Partition cell size in meters */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Streaming")
-    float CellSizeM = 512.0f;
-
-    /** Loading range in meters */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Streaming")
-    float LoadingRangeM = 1536.0f;
+    bool bEnableHierarchicalGeneration = true;
 
     /** Enable runtime generation */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Streaming")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
     bool bEnableRuntimeGeneration = true;
 
-    /** Seed for procedural generation */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation")
-    int32 WorldSeed = 12345;
+    /** Generation timeout in seconds */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float GenerationTimeoutSeconds = 300.0f;
 };
 
+/** Performance monitoring data */
 USTRUCT(BlueprintType)
-struct FPerformanceMetrics
+struct FWorldGenPerformanceStatsV6
 {
     GENERATED_BODY()
 
-    /** Current generation phase */
-    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
-    EWorldGenerationPhase CurrentPhase = EWorldGenerationPhase::Initialization;
+    /** Total generation time */
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float TotalGenerationTime = 0.0f;
 
-    /** Generation progress (0.0 to 1.0) */
-    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
-    float GenerationProgress = 0.0f;
+    /** Terrain generation time */
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float TerrainGenerationTime = 0.0f;
 
-    /** Memory usage in MB */
-    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
-    float MemoryUsageMB = 0.0f;
+    /** Hydrology generation time */
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float HydrologyGenerationTime = 0.0f;
 
-    /** Generation time in seconds */
-    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
-    float GenerationTimeSeconds = 0.0f;
+    /** Vegetation generation time */
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float VegetationGenerationTime = 0.0f;
 
-    /** Number of active PCG components */
-    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
-    int32 ActivePCGComponents = 0;
+    /** Peak memory usage in MB */
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float PeakMemoryUsageMB = 0.0f;
 
-    /** Current frame rate */
-    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
-    float CurrentFPS = 0.0f;
+    /** GPU memory usage in MB */
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float GPUMemoryUsageMB = 0.0f;
+
+    /** Number of PCG components created */
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    int32 PCGComponentCount = 0;
+
+    /** Number of mesh instances spawned */
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    int32 MeshInstanceCount = 0;
+
+    /** Current FPS during generation */
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float GenerationFPS = 0.0f;
 };
 
+/**
+ * @brief Procedural World System V6 - Game Instance Subsystem
+ * 
+ * Manages the complete procedural world generation pipeline with advanced features:
+ * - GPU-accelerated terrain and vegetation generation
+ * - Real-time climate simulation
+ * - Hierarchical detail management
+ * - Intelligent streaming and LOD
+ * - Performance monitoring and optimization
+ */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AProceduralWorldSystemV6 : public AActor
+class TRANSPERSONALGAME_API UProceduralWorldSystemV6 : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
-    AProceduralWorldSystemV6();
+    UProceduralWorldSystemV6();
+
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+    virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
+
+    /** Main world generation entry point */
+    UFUNCTION(BlueprintCallable, Category = "World Generation", CallInEditor = true)
+    void GeneratePrehistoricWorld(const FWorldGenerationConfigV6& Config);
+
+    /** Generate specific world components */
+    UFUNCTION(BlueprintCallable, Category = "Generation", CallInEditor = true)
+    void GenerateTerrain(const FTerrainConfigV6& Config);
+
+    UFUNCTION(BlueprintCallable, Category = "Generation", CallInEditor = true)
+    void GenerateHydrology(const FHydrologyConfigV6& Config);
+
+    UFUNCTION(BlueprintCallable, Category = "Generation", CallInEditor = true)
+    void GenerateVegetation(const FVegetationConfigV6& Config);
+
+    /** Performance monitoring */
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    FWorldGenPerformanceStatsV6 GetPerformanceStats() const { return PerformanceStats; }
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void SetPerformanceBudget(const FPerformanceBudget& Budget);
+
+    /** Runtime generation control */
+    UFUNCTION(BlueprintCallable, Category = "Runtime")
+    void EnableRuntimeGeneration(bool bEnabled);
+
+    UFUNCTION(BlueprintCallable, Category = "Runtime")
+    void RegenerateRegion(const FBox& WorldBounds, float Priority = 1.0f);
+
+    /** Quality and optimization */
+    UFUNCTION(BlueprintCallable, Category = "Quality")
+    void SetGenerationQuality(EWorldGenQualityV6 NewQuality);
+
+    UFUNCTION(BlueprintCallable, Category = "Optimization")
+    void OptimizeForTargetFramerate(float TargetFPS);
 
 protected:
-    virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
-    virtual void OnConstruction(const FTransform& Transform) override;
+    /** Current generation configuration */
+    UPROPERTY(BlueprintReadOnly, Category = "Configuration")
+    FWorldGenerationConfigV6 CurrentConfig;
 
-    /** Root scene component */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class USceneComponent* RootSceneComponent;
-
-    /** Master PCG component */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class UPCGComponent* MasterPCGComponent;
-
-    /** World generation settings */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Generation")
-    FWorldGenerationSettings WorldSettings;
-
-    /** Performance metrics */
+    /** Performance statistics */
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    FPerformanceMetrics PerformanceMetrics;
+    FWorldGenPerformanceStatsV6 PerformanceStats;
 
-    /** Master world generation graph */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG Graphs")
-    class UPCGGraph* MasterWorldGraph;
+    /** Performance budget */
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    FPerformanceBudget PerformanceBudget;
 
-    /** Terrain generation graph */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG Graphs")
-    class UPCGGraph* TerrainGraph;
+    /** PCG Subsystem reference */
+    UPROPERTY()
+    TObjectPtr<UPCGSubsystem> PCGSubsystem;
 
-    /** Biome distribution graph */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG Graphs")
-    class UPCGGraph* BiomeGraph;
+    /** World Partition Subsystem reference */
+    UPROPERTY()
+    TObjectPtr<UWorldPartitionSubsystem> WorldPartitionSubsystem;
 
-    /** Water system graph */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG Graphs")
-    class UPCGGraph* WaterSystemGraph;
+    /** Main PCG component for world generation */
+    UPROPERTY()
+    TObjectPtr<UPCGComponent> MainPCGComponent;
 
-    /** Vegetation graph */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG Graphs")
-    class UPCGGraph* VegetationGraph;
+    /** PCG graphs for different generation phases */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "PCG Graphs")
+    TObjectPtr<UPCGGraph> TerrainGenerationGraph;
 
-    /** Generated landscape reference */
-    UPROPERTY(BlueprintReadOnly, Category = "Generated World")
-    class ALandscape* GeneratedLandscape;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "PCG Graphs")
+    TObjectPtr<UPCGGraph> HydrologyGraph;
 
-public:
-    /** Start world generation process */
-    UFUNCTION(BlueprintCallable, Category = "World Generation")
-    void StartWorldGeneration();
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "PCG Graphs")
+    TObjectPtr<UPCGGraph> VegetationGraph;
 
-    /** Stop world generation process */
-    UFUNCTION(BlueprintCallable, Category = "World Generation")
-    void StopWorldGeneration();
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "PCG Graphs")
+    TObjectPtr<UPCGGraph> ClimateSimulationGraph;
 
-    /** Clear generated world */
-    UFUNCTION(BlueprintCallable, Category = "World Generation")
-    void ClearGeneratedWorld();
+    /** Generation state */
+    UPROPERTY(BlueprintReadOnly, Category = "State")
+    bool bIsGenerating = false;
 
-    /** Get current generation progress */
-    UFUNCTION(BlueprintPure, Category = "World Generation")
-    float GetGenerationProgress() const { return PerformanceMetrics.GenerationProgress; }
+    UPROPERTY(BlueprintReadOnly, Category = "State")
+    bool bRuntimeGenerationEnabled = false;
 
-    /** Get current generation phase */
-    UFUNCTION(BlueprintPure, Category = "World Generation")
-    EWorldGenerationPhase GetCurrentPhase() const { return PerformanceMetrics.CurrentPhase; }
+    /** Random stream for reproducible generation */
+    UPROPERTY()
+    FRandomStream RandomStream;
 
-    /** Check if generation is complete */
-    UFUNCTION(BlueprintPure, Category = "World Generation")
-    bool IsGenerationComplete() const { return PerformanceMetrics.CurrentPhase == EWorldGenerationPhase::Complete; }
-
-    /** Get performance metrics */
-    UFUNCTION(BlueprintPure, Category = "Performance")
-    FPerformanceMetrics GetPerformanceMetrics() const { return PerformanceMetrics; }
-
-protected:
-    /** Initialize world generation system */
-    void InitializeWorldGeneration();
-
-    /** Setup PCG components */
-    void SetupPCGComponents();
-
-    /** Configure World Partition */
-    void ConfigureWorldPartition();
-
-    /** Generate base terrain */
-    void GenerateTerrain();
-
-    /** Distribute biomes */
-    void DistributeBiomes();
-
-    /** Generate water systems */
-    void GenerateWaterSystems();
-
-    /** Place vegetation */
-    void PlaceVegetation();
-
-    /** Generate detail objects */
-    void GenerateDetails();
-
-    /** Optimize generated world */
-    void OptimizeWorld();
-
-    /** Update performance metrics */
-    void UpdatePerformanceMetrics();
-
-    /** Calculate memory usage */
-    float CalculateMemoryUsage();
-
-    /** Calculate current FPS */
-    float CalculateCurrentFPS();
+    /** Generation timing */
+    FDateTime GenerationStartTime;
+    FDateTime PhaseStartTime;
 
 private:
-    /** Generation start time */
-    double GenerationStartTime;
+    /** Internal generation methods */
+    void GenerateWorldInPhases(const FWorldGenerationConfigV6& Config);
+    void InitializeSubsystems();
+    void SetupPCGGraphs();
+    void ConfigureWorldPartition();
+    void StartPerformanceMonitoring();
+    void UpdatePerformanceStats();
+    void FinalizeGeneration();
 
-    /** Is generation in progress */
-    bool bGenerationInProgress;
+    /** Terrain generation internals */
+    void GenerateTerrainWithGPU(const FTerrainConfigV6& Config);
+    void GenerateHeightmapGPU(const FTerrainConfigV6& Config);
+    void ApplyGeologicalProcessesGPU(const FTerrainConfigV6& Config);
 
-    /** Generation timer handle */
-    FTimerHandle GenerationTimerHandle;
+    /** Hydrology generation internals */
+    void GenerateRiverNetworks(const FHydrologyConfigV6& Config);
+    void GenerateWaterBodies(const FHydrologyConfigV6& Config);
+    void SimulateWaterFlow(const FHydrologyConfigV6& Config);
+
+    /** Vegetation generation internals */
+    void GenerateVegetationWithHierarchy(const FVegetationConfigV6& Config);
+    void PlaceTreesWithEcosystemRules(const FVegetationConfigV6& Config);
+    void GenerateUnderstoryVegetation(const FVegetationConfigV6& Config);
+
+    /** Performance optimization */
+    void OptimizeForPerformanceBudget();
+    void AdjustQualityForFramerate(float CurrentFPS, float TargetFPS);
+    float GetCurrentFramerate() const;
 };
