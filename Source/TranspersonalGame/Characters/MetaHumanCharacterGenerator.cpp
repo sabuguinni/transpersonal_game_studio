@@ -1,20 +1,18 @@
 #include "MetaHumanCharacterGenerator.h"
-#include "CharacterArchetypes.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Materials/MaterialInterface.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Engine/DataTable.h"
-#include "Engine/SkeletalMesh.h"
-#include "Animation/AnimBlueprint.h"
-#include "Kismet/KismetMathLibrary.h"
-#include "Kismet/GameplayStatics.h"
 #include "Engine/World.h"
+#include "Kismet/KismetMathLibrary.h"
+#include "TranspersonalGame/TranspersonalGame.h"
 
 UMetaHumanCharacterGenerator::UMetaHumanCharacterGenerator()
 {
     PrimaryComponentTick.bCanEverTick = false;
-    RandomSeed = FMath::RandRange(1000, 999999);
-    bEnableDebugLogging = true;
+    
+    RandomSeed = FMath::Rand();
+    bEnableDebugLogging = false;
 }
 
 void UMetaHumanCharacterGenerator::BeginPlay()
@@ -24,49 +22,49 @@ void UMetaHumanCharacterGenerator::BeginPlay()
     // Initialize random stream with seed
     RandomStream.Initialize(RandomSeed);
     
-    if (bEnableDebugLogging)
-    {
-        UE_LOG(LogTemp, Log, TEXT("MetaHumanCharacterGenerator initialized with seed: %d"), RandomSeed);
-    }
+    UE_LOG(LogTranspersonalGame, Log, TEXT("MetaHumanCharacterGenerator initialized with seed: %d"), RandomSeed);
 }
 
 bool UMetaHumanCharacterGenerator::GenerateCharacterFromArchetype(const FCharacterArchetypeData& ArchetypeData, USkeletalMeshComponent* TargetMeshComponent)
 {
     if (!TargetMeshComponent)
     {
-        UE_LOG(LogTemp, Error, TEXT("GenerateCharacterFromArchetype: TargetMeshComponent is null"));
+        UE_LOG(LogTranspersonalGame, Error, TEXT("GenerateCharacterFromArchetype: Invalid target mesh component"));
         return false;
     }
 
     // Generate variation parameters based on archetype
     FMetaHumanVariationParams VariationParams = GenerateVariationParams(ArchetypeData);
     
-    // Generate clothing configuration
+    // Apply variations to the MetaHuman
+    if (!ApplyVariationToMetaHuman(TargetMeshComponent, VariationParams))
+    {
+        UE_LOG(LogTranspersonalGame, Error, TEXT("Failed to apply variations to MetaHuman for archetype: %s"), *ArchetypeData.ArchetypeName);
+        return false;
+    }
+
+    // Generate and apply clothing configuration
     FCharacterClothingConfig ClothingConfig = GenerateClothingConfig(ArchetypeData);
-    
-    // Apply variations to MetaHuman
-    bool bVariationSuccess = ApplyVariationToMetaHuman(TargetMeshComponent, VariationParams);
-    bool bClothingSuccess = ApplyClothingConfig(TargetMeshComponent, ClothingConfig);
-    
+    if (!ApplyClothingConfig(TargetMeshComponent, ClothingConfig))
+    {
+        UE_LOG(LogTranspersonalGame, Warning, TEXT("Failed to apply clothing config for archetype: %s"), *ArchetypeData.ArchetypeName);
+    }
+
     if (bEnableDebugLogging)
     {
-        FString CharacterID = GenerateUniqueCharacterID(ArchetypeData);
-        UE_LOG(LogTemp, Log, TEXT("Generated character %s - Variation: %s, Clothing: %s"), 
-            *CharacterID, 
-            bVariationSuccess ? TEXT("Success") : TEXT("Failed"),
-            bClothingSuccess ? TEXT("Success") : TEXT("Failed"));
+        UE_LOG(LogTranspersonalGame, Log, TEXT("Successfully generated character from archetype: %s"), *ArchetypeData.ArchetypeName);
     }
-    
-    return bVariationSuccess && bClothingSuccess;
+
+    return true;
 }
 
 FMetaHumanVariationParams UMetaHumanCharacterGenerator::GenerateVariationParams(const FCharacterArchetypeData& ArchetypeData)
 {
     FMetaHumanVariationParams Params;
     
-    // Base random variations
-    Params.FaceVariation = RandomStream.FRandRange(0.0f, 1.0f);
-    Params.BodyVariation = RandomStream.FRandRange(0.0f, 1.0f);
+    // Base randomization within reasonable bounds
+    Params.FaceVariation = RandomStream.FRandRange(0.2f, 0.8f);
+    Params.BodyVariation = RandomStream.FRandRange(0.2f, 0.8f);
     Params.SkinTone = RandomStream.FRandRange(0.1f, 0.9f);
     Params.HairColor = RandomStream.FRandRange(0.0f, 1.0f);
     Params.EyeColor = RandomStream.FRandRange(0.0f, 1.0f);
@@ -91,88 +89,71 @@ bool UMetaHumanCharacterGenerator::ApplyVariationToMetaHuman(USkeletalMeshCompon
     {
         return false;
     }
-    
-    // Get or create dynamic material instances for the MetaHuman
+
+    // Get or create dynamic material instances for each material slot
     TArray<UMaterialInterface*> Materials = MeshComponent->GetMaterials();
     
-    for (int32 MaterialIndex = 0; MaterialIndex < Materials.Num(); ++MaterialIndex)
+    for (int32 MaterialIndex = 0; MaterialIndex < Materials.Num(); MaterialIndex++)
     {
         UMaterialInterface* BaseMaterial = Materials[MaterialIndex];
         if (!BaseMaterial)
         {
             continue;
         }
-        
+
         // Create dynamic material instance
         UMaterialInstanceDynamic* DynamicMaterial = UMaterialInstanceDynamic::Create(BaseMaterial, MeshComponent);
         if (!DynamicMaterial)
         {
             continue;
         }
-        
-        // Apply variation parameters to material
+
+        // Apply skin tone variations
         DynamicMaterial->SetScalarParameterValue(TEXT("SkinTone"), Params.SkinTone);
+        DynamicMaterial->SetScalarParameterValue(TEXT("SkinVariation"), Params.FaceVariation);
+        
+        // Apply age-related parameters
         DynamicMaterial->SetScalarParameterValue(TEXT("Age"), Params.Age);
-        DynamicMaterial->SetScalarParameterValue(TEXT("Weight"), Params.Weight);
-        DynamicMaterial->SetScalarParameterValue(TEXT("Muscle"), Params.Muscle);
-        DynamicMaterial->SetScalarParameterValue(TEXT("WearLevel"), Params.WearLevel);
+        DynamicMaterial->SetScalarParameterValue(TEXT("WrinkleIntensity"), Params.Age * 0.7f);
+        
+        // Apply survival condition parameters
         DynamicMaterial->SetScalarParameterValue(TEXT("DirtLevel"), Params.DirtLevel);
+        DynamicMaterial->SetScalarParameterValue(TEXT("WearLevel"), Params.WearLevel);
         DynamicMaterial->SetScalarParameterValue(TEXT("ScarIntensity"), Params.ScarIntensity);
         
-        // Apply hair and eye color variations
+        // Apply color variations
         FLinearColor HairColorValue = FLinearColor::LerpUsingHSV(
-            FLinearColor(0.1f, 0.05f, 0.02f), // Dark brown
-            FLinearColor(0.9f, 0.8f, 0.6f),   // Blonde
+            FLinearColor(0.1f, 0.05f, 0.02f, 1.0f), // Dark brown
+            FLinearColor(0.9f, 0.8f, 0.6f, 1.0f),   // Blonde
             Params.HairColor
         );
+        DynamicMaterial->SetVectorParameterValue(TEXT("HairColor"), HairColorValue);
         
         FLinearColor EyeColorValue = FLinearColor::LerpUsingHSV(
-            FLinearColor(0.1f, 0.05f, 0.02f), // Dark brown
-            FLinearColor(0.2f, 0.6f, 0.9f),   // Blue
+            FLinearColor(0.2f, 0.1f, 0.05f, 1.0f), // Brown
+            FLinearColor(0.3f, 0.6f, 0.9f, 1.0f),  // Blue
             Params.EyeColor
         );
-        
-        DynamicMaterial->SetVectorParameterValue(TEXT("HairColor"), HairColorValue);
         DynamicMaterial->SetVectorParameterValue(TEXT("EyeColor"), EyeColorValue);
         
-        // Set the dynamic material on the mesh
+        // Set the dynamic material
         MeshComponent->SetMaterial(MaterialIndex, DynamicMaterial);
     }
-    
-    // Apply physical variations through morph targets or bone scaling
-    ApplyPhysicalVariations(MeshComponent, Params);
-    
-    return true;
-}
 
-void UMetaHumanCharacterGenerator::ApplyPhysicalVariations(USkeletalMeshComponent* MeshComponent, const FMetaHumanVariationParams& Params)
-{
-    if (!MeshComponent || !MeshComponent->GetSkeletalMeshAsset())
+    // Apply physical modifications through morph targets if available
+    if (USkeletalMesh* SkeletalMesh = MeshComponent->GetSkeletalMeshAsset())
     {
-        return;
-    }
-    
-    // Apply height scaling
-    float HeightScale = FMath::Lerp(0.9f, 1.1f, Params.Height);
-    FVector CurrentScale = MeshComponent->GetRelativeScale3D();
-    MeshComponent->SetRelativeScale3D(FVector(CurrentScale.X, CurrentScale.Y, CurrentScale.Z * HeightScale));
-    
-    // Apply morph targets for face and body variations
-    USkeletalMesh* SkeletalMesh = MeshComponent->GetSkeletalMeshAsset();
-    if (SkeletalMesh)
-    {
-        // Apply face variation morph targets
-        MeshComponent->SetMorphTarget(TEXT("FaceWidth"), FMath::Lerp(-0.5f, 0.5f, Params.FaceVariation));
-        MeshComponent->SetMorphTarget(TEXT("JawWidth"), FMath::Lerp(-0.3f, 0.3f, Params.FaceVariation));
+        // Apply height scaling
+        float HeightScale = FMath::Lerp(0.95f, 1.05f, Params.Height);
+        MeshComponent->SetWorldScale3D(FVector(1.0f, 1.0f, HeightScale));
         
-        // Apply body variation morph targets
-        MeshComponent->SetMorphTarget(TEXT("BodyWeight"), FMath::Lerp(-0.4f, 0.4f, Params.Weight));
-        MeshComponent->SetMorphTarget(TEXT("BodyMuscle"), FMath::Lerp(-0.3f, 0.5f, Params.Muscle));
-        
-        // Apply age-related morph targets
-        MeshComponent->SetMorphTarget(TEXT("AgeWrinkles"), Params.Age * 0.8f);
-        MeshComponent->SetMorphTarget(TEXT("AgeSagging"), Params.Age * 0.6f);
+        // Apply weight/muscle morph targets if they exist
+        MeshComponent->SetMorphTarget(TEXT("Weight"), Params.Weight);
+        MeshComponent->SetMorphTarget(TEXT("Muscle"), Params.Muscle);
+        MeshComponent->SetMorphTarget(TEXT("Age"), Params.Age);
     }
+
+    return true;
 }
 
 FCharacterClothingConfig UMetaHumanCharacterGenerator::GenerateClothingConfig(const FCharacterArchetypeData& ArchetypeData)
@@ -182,93 +163,59 @@ FCharacterClothingConfig UMetaHumanCharacterGenerator::GenerateClothingConfig(co
     // Determine clothing style based on archetype
     switch (ArchetypeData.Archetype)
     {
-        case ECharacterArchetype::Protagonist:
-            Config.ClothingStyle = TEXT("Paleontologist_Field");
+        case ECharacterArchetype::Survivor:
+            Config.ClothingStyle = TEXT("Rugged_Survival");
             Config.HasBackpack = true;
-            Config.HasHat = true;
+            Config.HasBoots = true;
             Config.EquipmentLevel = 2;
             break;
             
-        case ECharacterArchetype::Survivor_Leader:
-            Config.ClothingStyle = TEXT("Military_Tactical");
+        case ECharacterArchetype::Explorer:
+            Config.ClothingStyle = TEXT("Explorer_Gear");
             Config.HasBackpack = true;
+            Config.HasHat = true;
+            Config.HasGloves = true;
+            Config.HasBoots = true;
             Config.EquipmentLevel = 3;
             break;
             
-        case ECharacterArchetype::Survivor_Medic:
-            Config.ClothingStyle = TEXT("Medical_Scrubs");
-            Config.HasBackpack = true;
-            Config.EquipmentLevel = 2;
-            break;
-            
-        case ECharacterArchetype::Survivor_Engineer:
-            Config.ClothingStyle = TEXT("Work_Coveralls");
-            Config.HasGloves = true;
-            Config.EquipmentLevel = 2;
-            break;
-            
-        case ECharacterArchetype::Survivor_Hunter:
-            Config.ClothingStyle = TEXT("Camouflage_Outdoor");
+        case ECharacterArchetype::Scientist:
+            Config.ClothingStyle = TEXT("Field_Research");
             Config.HasBackpack = true;
             Config.HasGloves = true;
+            Config.HasBoots = true;
             Config.EquipmentLevel = 2;
             break;
             
-        case ECharacterArchetype::Survivor_Scholar:
-            Config.ClothingStyle = TEXT("Academic_Casual");
-            Config.HasBackpack = true;
-            Config.EquipmentLevel = 1;
-            break;
-            
-        case ECharacterArchetype::Survivor_Child:
-            Config.ClothingStyle = TEXT("Child_Casual");
+        case ECharacterArchetype::Tribal:
+            Config.ClothingStyle = TEXT("Primitive_Tribal");
+            Config.HasBackpack = false;
+            Config.HasBoots = false;
             Config.EquipmentLevel = 0;
             break;
             
-        case ECharacterArchetype::Survivor_Elder:
-            Config.ClothingStyle = TEXT("Elder_Comfortable");
-            Config.EquipmentLevel = 1;
-            break;
-            
-        case ECharacterArchetype::Hostile_Raider:
-            Config.ClothingStyle = TEXT("Raider_Makeshift");
-            Config.HasBackpack = false;
-            Config.EquipmentLevel = 1;
-            break;
-            
-        case ECharacterArchetype::Neutral_Trader:
-            Config.ClothingStyle = TEXT("Trader_Practical");
-            Config.HasBackpack = true;
-            Config.EquipmentLevel = 2;
-            break;
-            
         default:
-            Config.ClothingStyle = TEXT("Generic_Survivor");
+            Config.ClothingStyle = TEXT("Basic_Clothing");
             Config.EquipmentLevel = 1;
             break;
     }
     
-    // Apply survival condition to clothing wear
+    // Adjust for survival condition
     switch (ArchetypeData.SurvivalCondition)
     {
-        case ESurvivalCondition::Fresh:
-            Config.WearLevel = RandomStream.FRandRange(0.0f, 0.2f);
-            Config.DirtLevel = RandomStream.FRandRange(0.0f, 0.1f);
+        case ESurvivalCondition::Thriving:
+            // No modifications needed
             break;
             
-        case ESurvivalCondition::Weathered:
-            Config.WearLevel = RandomStream.FRandRange(0.2f, 0.5f);
-            Config.DirtLevel = RandomStream.FRandRange(0.1f, 0.4f);
+        case ESurvivalCondition::Struggling:
+            Config.EquipmentLevel = FMath::Max(0, Config.EquipmentLevel - 1);
             break;
             
-        case ESurvivalCondition::Hardened:
-            Config.WearLevel = RandomStream.FRandRange(0.4f, 0.7f);
-            Config.DirtLevel = RandomStream.FRandRange(0.3f, 0.6f);
-            break;
-            
-        case ESurvivalCondition::Broken:
-            Config.WearLevel = RandomStream.FRandRange(0.6f, 1.0f);
-            Config.DirtLevel = RandomStream.FRandRange(0.5f, 0.9f);
+        case ESurvivalCondition::Desperate:
+            Config.EquipmentLevel = 0;
+            Config.HasBackpack = false;
+            Config.HasHat = false;
+            Config.HasGloves = false;
             break;
     }
     
@@ -281,48 +228,58 @@ bool UMetaHumanCharacterGenerator::ApplyClothingConfig(USkeletalMeshComponent* M
     {
         return false;
     }
+
+    // This would typically involve:
+    // 1. Loading appropriate clothing meshes
+    // 2. Applying clothing materials
+    // 3. Setting up equipment attachments
+    // 4. Configuring clothing physics
     
-    // Apply clothing wear and dirt to materials
+    // For now, we'll apply material modifications to simulate clothing changes
     TArray<UMaterialInterface*> Materials = MeshComponent->GetMaterials();
     
-    for (int32 MaterialIndex = 0; MaterialIndex < Materials.Num(); ++MaterialIndex)
+    for (int32 MaterialIndex = 0; MaterialIndex < Materials.Num(); MaterialIndex++)
     {
-        UMaterialInstanceDynamic* DynamicMaterial = Cast<UMaterialInstanceDynamic>(MeshComponent->GetMaterial(MaterialIndex));
+        UMaterialInterface* BaseMaterial = Materials[MaterialIndex];
+        if (!BaseMaterial)
+        {
+            continue;
+        }
+
+        UMaterialInstanceDynamic* DynamicMaterial = UMaterialInstanceDynamic::Create(BaseMaterial, MeshComponent);
         if (!DynamicMaterial)
         {
             continue;
         }
+
+        // Apply equipment level modifications
+        float EquipmentQuality = static_cast<float>(ClothingConfig.EquipmentLevel) / 3.0f;
+        DynamicMaterial->SetScalarParameterValue(TEXT("EquipmentQuality"), EquipmentQuality);
         
-        // Apply clothing condition parameters
-        DynamicMaterial->SetScalarParameterValue(TEXT("ClothingWear"), ClothingConfig.WearLevel);
-        DynamicMaterial->SetScalarParameterValue(TEXT("ClothingDirt"), ClothingConfig.DirtLevel);
-        DynamicMaterial->SetScalarParameterValue(TEXT("EquipmentLevel"), float(ClothingConfig.EquipmentLevel) / 3.0f);
+        // Apply wear based on equipment level
+        float WearLevel = 1.0f - EquipmentQuality;
+        DynamicMaterial->SetScalarParameterValue(TEXT("ClothingWear"), WearLevel);
         
-        // Apply equipment flags
-        DynamicMaterial->SetScalarParameterValue(TEXT("HasBackpack"), ClothingConfig.HasBackpack ? 1.0f : 0.0f);
-        DynamicMaterial->SetScalarParameterValue(TEXT("HasHat"), ClothingConfig.HasHat ? 1.0f : 0.0f);
-        DynamicMaterial->SetScalarParameterValue(TEXT("HasGloves"), ClothingConfig.HasGloves ? 1.0f : 0.0f);
-        DynamicMaterial->SetScalarParameterValue(TEXT("HasBoots"), ClothingConfig.HasBoots ? 1.0f : 0.0f);
+        MeshComponent->SetMaterial(MaterialIndex, DynamicMaterial);
     }
-    
+
+    if (bEnableDebugLogging)
+    {
+        UE_LOG(LogTranspersonalGame, Log, TEXT("Applied clothing config: %s (Equipment Level: %d)"), 
+               *ClothingConfig.ClothingStyle, ClothingConfig.EquipmentLevel);
+    }
+
     return true;
 }
 
 FString UMetaHumanCharacterGenerator::GenerateUniqueCharacterID(const FCharacterArchetypeData& ArchetypeData)
 {
+    // Generate a unique ID based on archetype, timestamp, and random elements
     FString ArchetypeName = UEnum::GetValueAsString(ArchetypeData.Archetype);
-    FString AgeGroupName = UEnum::GetValueAsString(ArchetypeData.AgeGroup);
-    FString BuildName = UEnum::GetValueAsString(ArchetypeData.Build);
+    FString TimeStamp = FDateTime::Now().ToString(TEXT("%Y%m%d_%H%M%S"));
+    int32 RandomSuffix = RandomStream.RandRange(1000, 9999);
     
-    // Create unique ID from archetype data and random seed
-    FString UniqueID = FString::Printf(TEXT("%s_%s_%s_%d_%d"), 
-        *ArchetypeName, 
-        *AgeGroupName, 
-        *BuildName,
-        RandomSeed,
-        FMath::RandRange(1000, 9999));
-    
-    return UniqueID;
+    return FString::Printf(TEXT("%s_%s_%d"), *ArchetypeName, *TimeStamp, RandomSuffix);
 }
 
 void UMetaHumanCharacterGenerator::ApplyAgeModifications(FMetaHumanVariationParams& Params, ECharacterAgeGroup AgeGroup)
@@ -331,27 +288,24 @@ void UMetaHumanCharacterGenerator::ApplyAgeModifications(FMetaHumanVariationPara
     {
         case ECharacterAgeGroup::Young:
             Params.Age = RandomStream.FRandRange(0.0f, 0.3f);
-            Params.Weight = FMath::Clamp(Params.Weight + RandomStream.FRandRange(-0.2f, 0.1f), 0.0f, 1.0f);
-            Params.Muscle = FMath::Clamp(Params.Muscle + RandomStream.FRandRange(-0.1f, 0.3f), 0.0f, 1.0f);
+            Params.ScarIntensity *= 0.3f; // Young people have fewer scars
+            Params.WearLevel *= 0.7f; // Less wear on clothing
             break;
             
         case ECharacterAgeGroup::Adult:
             Params.Age = RandomStream.FRandRange(0.3f, 0.6f);
-            Params.Weight = FMath::Clamp(Params.Weight + RandomStream.FRandRange(-0.1f, 0.2f), 0.0f, 1.0f);
-            Params.Muscle = FMath::Clamp(Params.Muscle + RandomStream.FRandRange(-0.2f, 0.2f), 0.0f, 1.0f);
+            // No modifications needed for adults
             break;
             
-        case ECharacterAgeGroup::Mature:
+        case ECharacterAgeGroup::MiddleAged:
             Params.Age = RandomStream.FRandRange(0.6f, 0.8f);
-            Params.Weight = FMath::Clamp(Params.Weight + RandomStream.FRandRange(0.0f, 0.3f), 0.0f, 1.0f);
-            Params.Muscle = FMath::Clamp(Params.Muscle + RandomStream.FRandRange(-0.3f, 0.1f), 0.0f, 1.0f);
+            Params.ScarIntensity *= 1.2f; // More life experience
             break;
             
         case ECharacterAgeGroup::Elder:
             Params.Age = RandomStream.FRandRange(0.8f, 1.0f);
-            Params.Weight = FMath::Clamp(Params.Weight + RandomStream.FRandRange(-0.2f, 0.2f), 0.0f, 1.0f);
-            Params.Muscle = FMath::Clamp(Params.Muscle + RandomStream.FRandRange(-0.4f, -0.1f), 0.0f, 1.0f);
-            Params.ScarIntensity = FMath::Clamp(Params.ScarIntensity + RandomStream.FRandRange(0.1f, 0.3f), 0.0f, 1.0f);
+            Params.ScarIntensity *= 1.5f; // Lifetime of experiences
+            Params.WearLevel *= 1.3f; // Well-worn clothing
             break;
     }
 }
@@ -360,27 +314,24 @@ void UMetaHumanCharacterGenerator::ApplyBuildModifications(FMetaHumanVariationPa
 {
     switch (BuildType)
     {
-        case ECharacterBuild::Slim:
-            Params.Weight = FMath::Clamp(RandomStream.FRandRange(0.0f, 0.4f), 0.0f, 1.0f);
-            Params.Muscle = FMath::Clamp(RandomStream.FRandRange(0.0f, 0.3f), 0.0f, 1.0f);
-            Params.Height = FMath::Clamp(Params.Height + RandomStream.FRandRange(-0.1f, 0.2f), 0.0f, 1.0f);
+        case ECharacterBuild::Thin:
+            Params.Weight = RandomStream.FRandRange(0.0f, 0.3f);
+            Params.Muscle = RandomStream.FRandRange(0.0f, 0.4f);
             break;
             
         case ECharacterBuild::Average:
-            Params.Weight = FMath::Clamp(RandomStream.FRandRange(0.3f, 0.7f), 0.0f, 1.0f);
-            Params.Muscle = FMath::Clamp(RandomStream.FRandRange(0.2f, 0.6f), 0.0f, 1.0f);
+            Params.Weight = RandomStream.FRandRange(0.3f, 0.7f);
+            Params.Muscle = RandomStream.FRandRange(0.3f, 0.7f);
             break;
             
         case ECharacterBuild::Heavy:
-            Params.Weight = FMath::Clamp(RandomStream.FRandRange(0.6f, 1.0f), 0.0f, 1.0f);
-            Params.Muscle = FMath::Clamp(RandomStream.FRandRange(0.1f, 0.5f), 0.0f, 1.0f);
-            Params.Height = FMath::Clamp(Params.Height + RandomStream.FRandRange(-0.2f, 0.1f), 0.0f, 1.0f);
+            Params.Weight = RandomStream.FRandRange(0.7f, 1.0f);
+            Params.Muscle = RandomStream.FRandRange(0.2f, 0.6f);
             break;
             
-        case ECharacterBuild::Athletic:
-            Params.Weight = FMath::Clamp(RandomStream.FRandRange(0.4f, 0.7f), 0.0f, 1.0f);
-            Params.Muscle = FMath::Clamp(RandomStream.FRandRange(0.6f, 1.0f), 0.0f, 1.0f);
-            Params.Height = FMath::Clamp(Params.Height + RandomStream.FRandRange(0.0f, 0.3f), 0.0f, 1.0f);
+        case ECharacterBuild::Muscular:
+            Params.Weight = RandomStream.FRandRange(0.5f, 0.8f);
+            Params.Muscle = RandomStream.FRandRange(0.7f, 1.0f);
             break;
     }
 }
@@ -389,33 +340,23 @@ void UMetaHumanCharacterGenerator::ApplySurvivalModifications(FMetaHumanVariatio
 {
     switch (Condition)
     {
-        case ESurvivalCondition::Fresh:
-            Params.WearLevel = RandomStream.FRandRange(0.0f, 0.2f);
-            Params.DirtLevel = RandomStream.FRandRange(0.0f, 0.1f);
-            Params.ScarIntensity = RandomStream.FRandRange(0.0f, 0.1f);
+        case ESurvivalCondition::Thriving:
+            Params.DirtLevel = RandomStream.FRandRange(0.0f, 0.2f);
+            Params.WearLevel = RandomStream.FRandRange(0.0f, 0.3f);
+            Params.ScarIntensity *= 0.8f;
             break;
             
-        case ESurvivalCondition::Weathered:
-            Params.WearLevel = RandomStream.FRandRange(0.2f, 0.5f);
-            Params.DirtLevel = RandomStream.FRandRange(0.1f, 0.4f);
-            Params.ScarIntensity = RandomStream.FRandRange(0.1f, 0.3f);
-            Params.Weight = FMath::Clamp(Params.Weight + RandomStream.FRandRange(-0.2f, 0.0f), 0.0f, 1.0f);
-            break;
-            
-        case ESurvivalCondition::Hardened:
-            Params.WearLevel = RandomStream.FRandRange(0.4f, 0.7f);
+        case ESurvivalCondition::Struggling:
             Params.DirtLevel = RandomStream.FRandRange(0.3f, 0.6f);
-            Params.ScarIntensity = RandomStream.FRandRange(0.2f, 0.5f);
-            Params.Weight = FMath::Clamp(Params.Weight + RandomStream.FRandRange(-0.3f, -0.1f), 0.0f, 1.0f);
-            Params.Muscle = FMath::Clamp(Params.Muscle + RandomStream.FRandRange(0.1f, 0.3f), 0.0f, 1.0f);
+            Params.WearLevel = RandomStream.FRandRange(0.4f, 0.7f);
+            Params.ScarIntensity *= 1.2f;
             break;
             
-        case ESurvivalCondition::Broken:
-            Params.WearLevel = RandomStream.FRandRange(0.6f, 1.0f);
-            Params.DirtLevel = RandomStream.FRandRange(0.5f, 0.9f);
-            Params.ScarIntensity = RandomStream.FRandRange(0.4f, 0.8f);
-            Params.Weight = FMath::Clamp(Params.Weight + RandomStream.FRandRange(-0.4f, -0.2f), 0.0f, 1.0f);
-            Params.Age = FMath::Clamp(Params.Age + RandomStream.FRandRange(0.1f, 0.3f), 0.0f, 1.0f);
+        case ESurvivalCondition::Desperate:
+            Params.DirtLevel = RandomStream.FRandRange(0.7f, 1.0f);
+            Params.WearLevel = RandomStream.FRandRange(0.8f, 1.0f);
+            Params.ScarIntensity *= 1.5f;
+            Params.Weight *= 0.7f; // Malnutrition effects
             break;
     }
 }
@@ -424,31 +365,28 @@ void UMetaHumanCharacterGenerator::GenerateUniqueFeatures(FMetaHumanVariationPar
 {
     // Parse unique features string and apply modifications
     TArray<FString> Features;
-    UniqueFeatures.ParseIntoArray(Features, TEXT(","), true);
+    UniqueFeatures.ParseIntoArray(Features, TEXT(","));
     
     for (const FString& Feature : Features)
     {
         FString TrimmedFeature = Feature.TrimStartAndEnd();
         
-        if (TrimmedFeature.Contains(TEXT("Scar")))
+        if (TrimmedFeature.Contains(TEXT("scar")))
         {
-            Params.ScarIntensity = FMath::Clamp(Params.ScarIntensity + RandomStream.FRandRange(0.3f, 0.6f), 0.0f, 1.0f);
+            Params.ScarIntensity = FMath::Max(Params.ScarIntensity, 0.6f);
         }
-        else if (TrimmedFeature.Contains(TEXT("Muscular")))
+        else if (TrimmedFeature.Contains(TEXT("tan")))
         {
-            Params.Muscle = FMath::Clamp(Params.Muscle + RandomStream.FRandRange(0.2f, 0.4f), 0.0f, 1.0f);
+            Params.SkinTone = FMath::Min(Params.SkinTone + 0.3f, 1.0f);
         }
-        else if (TrimmedFeature.Contains(TEXT("Thin")))
+        else if (TrimmedFeature.Contains(TEXT("pale")))
         {
-            Params.Weight = FMath::Clamp(Params.Weight - RandomStream.FRandRange(0.2f, 0.4f), 0.0f, 1.0f);
+            Params.SkinTone = FMath::Max(Params.SkinTone - 0.3f, 0.0f);
         }
-        else if (TrimmedFeature.Contains(TEXT("Tall")))
+        else if (TrimmedFeature.Contains(TEXT("weathered")))
         {
-            Params.Height = FMath::Clamp(Params.Height + RandomStream.FRandRange(0.2f, 0.4f), 0.0f, 1.0f);
-        }
-        else if (TrimmedFeature.Contains(TEXT("Short")))
-        {
-            Params.Height = FMath::Clamp(Params.Height - RandomStream.FRandRange(0.2f, 0.4f), 0.0f, 1.0f);
+            Params.Age = FMath::Min(Params.Age + 0.2f, 1.0f);
+            Params.WearLevel = FMath::Min(Params.WearLevel + 0.3f, 1.0f);
         }
     }
 }
