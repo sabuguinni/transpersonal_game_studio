@@ -1,120 +1,311 @@
+// Copyright Transpersonal Game Studio. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/ActorComponent.h"
+#include "Engine/Engine.h"
 #include "Animation/AnimInstance.h"
-#include "Animation/MotionMatchingAnimNodeLibrary.h"
+#include "Animation/AnimSequence.h"
+#include "Animation/BlendSpace.h"
+#include "Animation/AnimMontage.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
+#include "PoseSearch/PoseSearchDatabase.h"
+#include "PoseSearch/PoseSearchSchema.h"
+#include "IKRig.h"
+#include "IKRigDefinition.h"
+#include "Engine/World.h"
+#include "TimerManager.h"
+#include "Kismet/KismetMathLibrary.h"
 #include "AnimationSystemCore.generated.h"
 
-UENUM(BlueprintType)
-enum class ECharacterMovementState : uint8
-{
-    Idle,
-    Walking,
-    Running,
-    Crouching,
-    Sneaking,
-    Climbing,
-    Swimming,
-    Falling,
-    Landing,
-    Injured,
-    Exhausted,
-    Frightened,
-    Observing
-};
-
-UENUM(BlueprintType)
-enum class EEmotionalState : uint8
-{
-    Calm,
-    Nervous,
-    Afraid,
-    Terrified,
-    Curious,
-    Cautious,
-    Confident,
-    Exhausted,
-    Injured
-};
-
-USTRUCT(BlueprintType)
-struct FCharacterAnimationData
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadWrite, Category = "Movement")
-    ECharacterMovementState MovementState = ECharacterMovementState::Idle;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Emotion")
-    EEmotionalState EmotionalState = EEmotionalState::Calm;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Movement")
-    float Speed = 0.0f;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Movement")
-    float Direction = 0.0f;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Environment")
-    float TerrainAngle = 0.0f;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Environment")
-    bool bIsOnUneven Terrain = false;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Interaction")
-    float StaminaLevel = 1.0f;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Interaction")
-    float FearLevel = 0.0f;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Interaction")
-    bool bIsNearDinosaur = false;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Interaction")
-    float DinosaurThreatLevel = 0.0f;
-};
+DECLARE_LOG_CATEGORY_EXTERN(LogAnimationSystem, Log, All);
 
 /**
- * Core animation system component for the paleontologist character
- * Handles Motion Matching, IK foot placement, and emotional state blending
+ * Core animation system that handles Motion Matching, IK, and procedural animations
+ * Based on RDR2's approach: every movement tells a story about the character
  */
-UCLASS(ClassGroup=(Animation), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UAnimationSystemCore : public UActorComponent
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UAnimationSystemCore : public UObject
 {
     GENERATED_BODY()
 
 public:
     UAnimationSystemCore();
 
+    // Core Animation State
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation State")
+    float MovementSpeed;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation State")
+    FVector MovementDirection;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation State")
+    float TurnRate;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation State")
+    bool bIsInAir;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation State")
+    bool bIsCrouching;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation State")
+    float StaminaLevel;
+
+    // Motion Matching Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    class UPoseSearchDatabase* LocomotionDatabase;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    class UPoseSearchDatabase* CombatDatabase;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    class UPoseSearchDatabase* InteractionDatabase;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    class UPoseSearchSchema* DefaultSchema;
+
+    // IK Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK System")
+    class UIKRigDefinition* CharacterIKRig;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK System")
+    float FootIKAlpha;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK System")
+    float HandIKAlpha;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK System")
+    bool bEnableFootIK;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK System")
+    bool bEnableHandIK;
+
+    // Animation Databases
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Data")
+    TArray<class UAnimSequence*> IdleAnimations;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Data")
+    TArray<class UAnimSequence*> WalkAnimations;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Data")
+    TArray<class UAnimSequence*> RunAnimations;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Data")
+    TArray<class UAnimSequence*> JumpAnimations;
+
+    // Character-Specific Animation Traits
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Traits")
+    float ConfidenceLevel; // 0-1: affects posture and gait
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Traits")
+    float FatigueLevel; // 0-1: affects animation speed and precision
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Traits")
+    float InjuryLevel; // 0-1: affects movement asymmetry
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Traits")
+    float AgeModifier; // affects movement speed and stability
+
+    // Environmental Adaptation
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environmental")
+    float TerrainRoughness; // affects foot placement
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environmental")
+    float SlopeAngle; // affects body lean
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environmental")
+    bool bIsOnUnstableSurface;
+
+    // Motion Matching Functions
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    void UpdateMotionMatchingQuery(float DeltaTime);
+
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    class UPoseSearchDatabase* SelectActiveDatabase();
+
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    void BlendBetweenDatabases(float BlendWeight);
+
+    // IK Functions
+    UFUNCTION(BlueprintCallable, Category = "IK System")
+    void UpdateFootIK(class USkeletalMeshComponent* SkeletalMesh, float DeltaTime);
+
+    UFUNCTION(BlueprintCallable, Category = "IK System")
+    void UpdateHandIK(class USkeletalMeshComponent* SkeletalMesh, float DeltaTime);
+
+    UFUNCTION(BlueprintCallable, Category = "IK System")
+    FVector CalculateFootPlacement(const FVector& FootLocation, const FVector& Normal);
+
+    // Character Trait Functions
+    UFUNCTION(BlueprintCallable, Category = "Character Traits")
+    void ApplyCharacterTraits(float& AnimationSpeed, float& PostureOffset);
+
+    UFUNCTION(BlueprintCallable, Category = "Character Traits")
+    void UpdateFatigueLevel(float DeltaTime, float MovementIntensity);
+
+    UFUNCTION(BlueprintCallable, Category = "Character Traits")
+    void ApplyInjuryEffects(FVector& MovementVector);
+
+    // Environmental Adaptation Functions
+    UFUNCTION(BlueprintCallable, Category = "Environmental")
+    void AdaptToTerrain(const FVector& SurfaceNormal, float SurfaceRoughness);
+
+    UFUNCTION(BlueprintCallable, Category = "Environmental")
+    void UpdateEnvironmentalFactors(const FVector& Location);
+
+    // Animation Blending
+    UFUNCTION(BlueprintCallable, Category = "Animation Blending")
+    float CalculateBlendWeight(const FString& AnimationType, float CurrentState);
+
+    UFUNCTION(BlueprintCallable, Category = "Animation Blending")
+    void SmoothTransition(float& CurrentValue, float TargetValue, float DeltaTime, float BlendSpeed);
+
+    // Debug Functions
+    UFUNCTION(BlueprintCallable, Category = "Debug")
+    void DrawDebugAnimationState(class UWorld* World);
+
+    UFUNCTION(BlueprintCallable, Category = "Debug")
+    void LogAnimationMetrics();
+
 protected:
-    virtual void BeginPlay() override;
+    // Internal state tracking
+    float LastMovementSpeed;
+    FVector LastMovementDirection;
+    float BlendTimer;
+    
+    // Performance optimization
+    float UpdateFrequency;
+    float TimeSinceLastUpdate;
+
+    // Animation quality settings
+    int32 AnimationLOD;
+    bool bHighQualityMode;
+};
+
+/**
+ * Character-specific animation instance that integrates with the core system
+ * Each character type (protagonist, NPCs) can have specialized behavior
+ */
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UCharacterAnimInstance : public UAnimInstance
+{
+    GENERATED_BODY()
 
 public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    UCharacterAnimInstance();
 
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void UpdateAnimationData(const FCharacterAnimationData& NewData);
+    virtual void NativeInitializeAnimation() override;
+    virtual void NativeUpdateAnimation(float DeltaTime) override;
 
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    FCharacterAnimationData GetCurrentAnimationData() const { return CurrentAnimationData; }
+    // Core animation system reference
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation System")
+    class UAnimationSystemCore* AnimationSystem;
 
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void SetEmotionalState(EEmotionalState NewState, float BlendTime = 0.3f);
+    // Character reference
+    UPROPERTY(BlueprintReadOnly, Category = "Character")
+    class ACharacter* OwningCharacter;
 
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void ReactToDinosaur(float ThreatLevel, float Distance);
+    UPROPERTY(BlueprintReadOnly, Category = "Character")
+    class UCharacterMovementComponent* MovementComponent;
+
+    // Animation state variables for Blueprint access
+    UPROPERTY(BlueprintReadOnly, Category = "Animation State")
+    float Speed;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Animation State")
+    float Direction;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Animation State")
+    bool bIsInAir;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Animation State")
+    bool bIsCrouching;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Animation State")
+    float LeanAmount;
+
+    // Motion Matching state
+    UPROPERTY(BlueprintReadOnly, Category = "Motion Matching")
+    class UPoseSearchDatabase* CurrentDatabase;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Motion Matching")
+    float DatabaseBlendWeight;
+
+    // IK state
+    UPROPERTY(BlueprintReadOnly, Category = "IK")
+    FVector LeftFootIKLocation;
+
+    UPROPERTY(BlueprintReadOnly, Category = "IK")
+    FVector RightFootIKLocation;
+
+    UPROPERTY(BlueprintReadOnly, Category = "IK")
+    FRotator LeftFootIKRotation;
+
+    UPROPERTY(BlueprintReadOnly, Category = "IK")
+    FRotator RightFootIKRotation;
+
+    // Character traits
+    UPROPERTY(BlueprintReadOnly, Category = "Character Traits")
+    float ConfidenceModifier;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Character Traits")
+    float FatigueModifier;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Character Traits")
+    float InjuryModifier;
 
 protected:
-    UPROPERTY(BlueprintReadOnly, Category = "Animation")
-    FCharacterAnimationData CurrentAnimationData;
+    // Update functions called from NativeUpdateAnimation
+    void UpdateMovementValues();
+    void UpdateMotionMatching(float DeltaTime);
+    void UpdateIKValues(float DeltaTime);
+    void UpdateCharacterTraits(float DeltaTime);
+};
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
-    float EmotionalBlendSpeed = 2.0f;
+/**
+ * Specialized animation instance for the protagonist paleontologist
+ * Includes scientific observation behaviors and stress responses
+ */
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UProtagonistAnimInstance : public UCharacterAnimInstance
+{
+    GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
-    float FearDecayRate = 0.5f;
+public:
+    UProtagonistAnimInstance();
 
-private:
-    void UpdateEmotionalState(float DeltaTime);
-    void UpdateFearLevel(float DeltaTime);
+    virtual void NativeUpdateAnimation(float DeltaTime) override;
+
+    // Protagonist-specific states
+    UPROPERTY(BlueprintReadOnly, Category = "Protagonist")
+    bool bIsObservingDinosaur;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Protagonist")
+    float StressLevel; // 0-1: affects breathing, fidgeting
+
+    UPROPERTY(BlueprintReadOnly, Category = "Protagonist")
+    float CuriosityLevel; // affects head movements, posture
+
+    UPROPERTY(BlueprintReadOnly, Category = "Protagonist")
+    bool bIsHoldingTool;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Protagonist")
+    bool bIsCrafting;
+
+    // Scientific behavior animations
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scientific Behavior")
+    class UAnimMontage* ObservationMontage;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scientific Behavior")
+    class UAnimMontage* NoteTakingMontage;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scientific Behavior")
+    class UAnimMontage* ToolUseMontage;
+
+protected:
+    void UpdateProtagonistBehaviors(float DeltaTime);
+    void UpdateStressResponse(float DeltaTime);
+    void UpdateScientificBehaviors(float DeltaTime);
 };
