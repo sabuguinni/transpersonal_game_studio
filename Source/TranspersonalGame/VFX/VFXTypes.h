@@ -1,294 +1,284 @@
+// Copyright Transpersonal Game Studio. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
 #include "Engine/Engine.h"
 #include "NiagaraSystem.h"
+#include "NiagaraComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "VFXTypes.generated.h"
 
 /**
- * Unified VFX Types for Transpersonal Game Studio
- * Consolidates all VFX enums, structs and data types
- * VFX Agent #17 - Consolidation Phase
+ * VFX Quality Levels for LOD Chain
+ * Used to optimize performance across different hardware
  */
-
 UENUM(BlueprintType)
-enum class EVFXCategory : uint8
+enum class EVFXQualityLevel : uint8
 {
-    // Environmental storytelling
-    EnvironmentalAmbient     UMETA(DisplayName = "Environmental Ambient"),
-    WeatherEffects          UMETA(DisplayName = "Weather Effects"),
-    VegetationInteraction   UMETA(DisplayName = "Vegetation Interaction"),
-    
-    // Creature behavior feedback
-    DinosaurBreathing       UMETA(DisplayName = "Dinosaur Breathing"),
-    DinosaurMovement        UMETA(DisplayName = "Dinosaur Movement"),
-    DinosaurEmotional       UMETA(DisplayName = "Dinosaur Emotional States"),
-    
-    // Player interaction
-    PlayerMovement          UMETA(DisplayName = "Player Movement"),
-    CraftingEffects         UMETA(DisplayName = "Crafting Effects"),
-    ToolUsage              UMETA(DisplayName = "Tool Usage"),
-    
-    // Tension amplifiers
-    DangerIndicators        UMETA(DisplayName = "Danger Indicators"),
-    StealthFeedback         UMETA(DisplayName = "Stealth Feedback"),
-    ThreatProximity         UMETA(DisplayName = "Threat Proximity"),
-    
-    // Combat and survival
-    ImpactEffects           UMETA(DisplayName = "Impact Effects"),
-    BloodEffects            UMETA(DisplayName = "Blood Effects"),
-    DestructionEffects      UMETA(DisplayName = "Destruction Effects"),
-    
-    // Special moments
-    GemEffects              UMETA(DisplayName = "Gem Effects"),
-    DomesticationEffects    UMETA(DisplayName = "Domestication Effects"),
-    TimeTransition          UMETA(DisplayName = "Time Transition"),
-    
-    // UI and Interaction
-    UIEffects               UMETA(DisplayName = "UI Effects"),
-    InteractionFeedback     UMETA(DisplayName = "Interaction Feedback"),
-    
-    // Atmospheric
-    AtmosphericEffects      UMETA(DisplayName = "Atmospheric Effects")
+    Low         UMETA(DisplayName = "Low Quality - Mobile/Weak Hardware"),
+    Medium      UMETA(DisplayName = "Medium Quality - Standard Hardware"), 
+    High        UMETA(DisplayName = "High Quality - High-end Hardware"),
+    Cinematic   UMETA(DisplayName = "Cinematic Quality - Offline/Cutscenes")
 };
 
+/**
+ * VFX Effect Types for categorization and management
+ */
 UENUM(BlueprintType)
-enum class EVFXPriority : uint8
+enum class EVFXEffectType : uint8
 {
-    Critical = 0    UMETA(DisplayName = "Critical"),      // Combat impacts, predator attacks
-    High = 1        UMETA(DisplayName = "High"),          // Environmental dangers, large creature movements  
-    Medium = 2      UMETA(DisplayName = "Medium"),        // Ambient effects, small creature interactions
-    Low = 3         UMETA(DisplayName = "Low"),           // Decorative effects, distant ambience
-    Background = 4  UMETA(DisplayName = "Background")     // Subtle atmospheric effects
+    Environmental   UMETA(DisplayName = "Environmental Effects"),
+    Combat          UMETA(DisplayName = "Combat Effects"),
+    Creature        UMETA(DisplayName = "Creature Effects"),
+    Weather         UMETA(DisplayName = "Weather Effects"),
+    Destruction     UMETA(DisplayName = "Destruction Effects"),
+    Magical         UMETA(DisplayName = "Consciousness/Magical Effects"),
+    UI              UMETA(DisplayName = "UI/HUD Effects"),
+    Ambient         UMETA(DisplayName = "Ambient/Atmospheric Effects")
 };
 
+/**
+ * VFX Intensity Levels for dynamic scaling
+ */
 UENUM(BlueprintType)
 enum class EVFXIntensity : uint8
 {
-    Subtle      UMETA(DisplayName = "Subtle"),      // Barely noticeable, atmospheric
-    Moderate    UMETA(DisplayName = "Moderate"),    // Clear but not overwhelming
-    Prominent   UMETA(DisplayName = "Prominent"),   // Clearly visible, important moment
-    Dramatic    UMETA(DisplayName = "Dramatic")     // High impact, critical moments
+    Subtle      UMETA(DisplayName = "Subtle - Background ambience"),
+    Moderate    UMETA(DisplayName = "Moderate - Standard gameplay"),
+    Intense     UMETA(DisplayName = "Intense - Combat/Action"),
+    Extreme     UMETA(DisplayName = "Extreme - Boss fights/Climax")
 };
 
-UENUM(BlueprintType)
-enum class EVFXLODLevel : uint8
-{
-    High        UMETA(DisplayName = "High Quality"),     // Close range (0-1000m), high detail
-    Medium      UMETA(DisplayName = "Medium Quality"),   // Mid range (1000-3000m), balanced
-    Low         UMETA(DisplayName = "Low Quality"),      // Far range (3000m+), performance optimized
-    Disabled    UMETA(DisplayName = "Disabled")          // Too far, disabled for performance
-};
-
+/**
+ * VFX System Configuration
+ * Holds settings for the entire VFX system
+ */
 USTRUCT(BlueprintType)
-struct FVFXEffectData
+struct TRANSPERSONALGAME_API FVFXSystemConfig
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Definition")
-    FString EffectName;
+    // Global VFX quality level
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quality")
+    EVFXQualityLevel GlobalQuality = EVFXQualityLevel::Medium;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Definition")
-    EVFXCategory Category;
+    // Maximum number of simultaneous VFX instances
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 MaxSimultaneousEffects = 50;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Definition")
-    EVFXPriority Priority;
+    // Distance culling for VFX
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float CullingDistance = 5000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Definition")
-    EVFXIntensity Intensity;
+    // Enable/disable VFX system entirely
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System")
+    bool bEnableVFX = true;
 
-    // LOD Chain - 3 levels for performance optimization
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX LOD")
-    TSoftObjectPtr<UNiagaraSystem> NiagaraSystem_High;
+    // Global VFX scale multiplier
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System")
+    float GlobalScale = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX LOD")
-    TSoftObjectPtr<UNiagaraSystem> NiagaraSystem_Medium;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX LOD")
-    TSoftObjectPtr<UNiagaraSystem> NiagaraSystem_Low;
-
-    // Performance and culling settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Performance")
-    float MaxDrawDistance = 5000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Performance")
-    int32 MaxInstances = 10;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Performance")
-    bool bUseDistanceLOD = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Performance")
-    bool bPooled = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Performance")
-    bool bAutoDestroy = true;
-
-    // Gameplay integration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Gameplay")
-    bool bRequiresPlayerProximity = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Gameplay")
-    float PlayerProximityRadius = 1000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Gameplay")
-    bool bRequiresLineOfSight = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Gameplay")
-    bool bAffectsGameplay = false;
-
-    // Narrative integration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Narrative")
-    FString EmotionalIntent;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Narrative")
-    FString NarrativePurpose;
-
-    // Additional properties for pool management
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Pool")
-    FString PoolName;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Parameters")
-    float Scale = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Parameters")
-    FLinearColor ColorTint = FLinearColor::White;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Parameters")
-    float Intensity = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Parameters")
-    float Duration = 0.0f; // 0 = infinite/looping
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Parameters")
-    bool bIsLooping = false;
-
-    FVFXEffectData()
+    FVFXSystemConfig()
     {
-        EffectName = TEXT("DefaultEffect");
-        Category = EVFXCategory::EnvironmentalAmbient;
-        Priority = EVFXPriority::Medium;
-        Intensity = EVFXIntensity::Subtle;
-        MaxDrawDistance = 5000.0f;
-        MaxInstances = 10;
-        bUseDistanceLOD = true;
-        bPooled = true;
-        bAutoDestroy = true;
-        bRequiresPlayerProximity = false;
-        PlayerProximityRadius = 1000.0f;
-        bRequiresLineOfSight = false;
-        bAffectsGameplay = false;
-        EmotionalIntent = TEXT("");
-        NarrativePurpose = TEXT("");
-        PoolName = TEXT("DefaultPool");
-        Scale = 1.0f;
-        ColorTint = FLinearColor::White;
-        Intensity = 1.0f;
-        Duration = 0.0f;
-        bIsLooping = false;
+        GlobalQuality = EVFXQualityLevel::Medium;
+        MaxSimultaneousEffects = 50;
+        CullingDistance = 5000.0f;
+        bEnableVFX = true;
+        GlobalScale = 1.0f;
     }
 };
 
+/**
+ * VFX Effect Definition
+ * Defines a specific visual effect with its properties
+ */
 USTRUCT(BlueprintType)
-struct FVFXPoolData
+struct TRANSPERSONALGAME_API FVFXEffectDefinition
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Pool")
-    TSoftObjectPtr<UNiagaraSystem> NiagaraSystemAsset;
+    // Unique identifier for this effect
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Identity")
+    FString EffectID;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Pool")
-    FString PoolName = TEXT("DefaultPool");
+    // Human-readable name
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Identity")
+    FString DisplayName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Pool")
-    int32 InitialPoolSize = 5;
+    // Effect type for categorization
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Identity")
+    EVFXEffectType EffectType = EVFXEffectType::Environmental;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Pool")
-    int32 MaxPoolSize = 10;
+    // Niagara systems for different quality levels
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Assets")
+    TSoftObjectPtr<UNiagaraSystem> LowQualitySystem;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Pool")
-    EVFXCategory Category = EVFXCategory::EnvironmentalAmbient;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Assets")
+    TSoftObjectPtr<UNiagaraSystem> MediumQualitySystem;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Pool")
-    EVFXPriority Priority = EVFXPriority::Medium;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Assets")
+    TSoftObjectPtr<UNiagaraSystem> HighQualitySystem;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Pool")
-    float MaxDistance = 5000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Assets")
+    TSoftObjectPtr<UNiagaraSystem> CinematicQualitySystem;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Pool")
-    bool bCanGrow = true;
+    // Performance cost (0-100, higher = more expensive)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance", meta = (ClampMin = "0", ClampMax = "100"))
+    int32 PerformanceCost = 50;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Pool")
-    bool bAutoRecycle = true;
+    // Default duration (0 = infinite/looping)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Timing")
+    float DefaultDuration = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Pool")
-    float RecycleTimeout = 30.0f;
+    // Can this effect be pooled for performance?
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    bool bCanBePooled = true;
 
-    FVFXPoolData()
+    // Audio cue to play with this effect
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    TSoftObjectPtr<USoundBase> AudioCue;
+
+    FVFXEffectDefinition()
     {
-        PoolName = TEXT("DefaultPool");
-        InitialPoolSize = 5;
-        MaxPoolSize = 10;
-        Category = EVFXCategory::EnvironmentalAmbient;
-        Priority = EVFXPriority::Medium;
-        MaxDistance = 5000.0f;
-        bCanGrow = true;
-        bAutoRecycle = true;
-        RecycleTimeout = 30.0f;
+        EffectID = TEXT("");
+        DisplayName = TEXT("Unnamed Effect");
+        EffectType = EVFXEffectType::Environmental;
+        PerformanceCost = 50;
+        DefaultDuration = 0.0f;
+        bCanBePooled = true;
     }
 };
 
+/**
+ * VFX Spawn Parameters
+ * Parameters for spawning a VFX effect
+ */
 USTRUCT(BlueprintType)
-struct FVFXLODSettings
+struct TRANSPERSONALGAME_API FVFXSpawnParams
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX LOD")
-    float HighQualityDistance = 1000.0f;
+    // World location to spawn the effect
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transform")
+    FVector Location = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX LOD")
-    float MediumQualityDistance = 3000.0f;
+    // World rotation for the effect
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transform")
+    FRotator Rotation = FRotator::ZeroRotator;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX LOD")
-    float CullDistance = 10000.0f;
+    // Scale of the effect
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transform")
+    FVector Scale = FVector::OneVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX LOD")
-    float LODUpdateInterval = 0.5f;
+    // Intensity level for this instance
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Properties")
+    EVFXIntensity Intensity = EVFXIntensity::Moderate;
 
-    FVFXLODSettings()
+    // Override duration (0 = use default)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Properties")
+    float DurationOverride = 0.0f;
+
+    // Actor to attach to (optional)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Attachment")
+    TWeakObjectPtr<AActor> AttachToActor;
+
+    // Socket name for attachment (if AttachToActor is set)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Attachment")
+    FName AttachSocketName = NAME_None;
+
+    // Custom parameters to pass to the Niagara system
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Custom")
+    TMap<FString, float> CustomFloatParams;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Custom")
+    TMap<FString, FVector> CustomVectorParams;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Custom")
+    TMap<FString, FLinearColor> CustomColorParams;
+
+    FVFXSpawnParams()
     {
-        HighQualityDistance = 1000.0f;
-        MediumQualityDistance = 3000.0f;
-        CullDistance = 10000.0f;
-        LODUpdateInterval = 0.5f;
+        Location = FVector::ZeroVector;
+        Rotation = FRotator::ZeroRotator;
+        Scale = FVector::OneVector;
+        Intensity = EVFXIntensity::Moderate;
+        DurationOverride = 0.0f;
+        AttachSocketName = NAME_None;
     }
 };
 
+/**
+ * Active VFX Instance
+ * Represents a currently playing VFX effect
+ */
 USTRUCT(BlueprintType)
-struct FVFXPerformanceSettings
+struct TRANSPERSONALGAME_API FActiveVFXInstance
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Performance")
-    int32 MaxActiveVFX = 100;
+    // Unique instance ID
+    UPROPERTY(BlueprintReadOnly, Category = "Instance")
+    int32 InstanceID = 0;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Performance")
-    int32 CurrentVFXQuality = 2; // 0=Low, 1=Medium, 2=High
+    // Effect definition this instance is based on
+    UPROPERTY(BlueprintReadOnly, Category = "Instance")
+    FString EffectID;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Performance")
-    float GlobalQualityMultiplier = 1.0f;
+    // The actual Niagara component
+    UPROPERTY(BlueprintReadOnly, Category = "Instance")
+    TWeakObjectPtr<UNiagaraComponent> NiagaraComponent;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Performance")
-    bool bEnableVFXCulling = true;
+    // Spawn parameters used for this instance
+    UPROPERTY(BlueprintReadOnly, Category = "Instance")
+    FVFXSpawnParams SpawnParams;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Performance")
-    bool bEnableVFXLOD = true;
+    // Time when this instance was created
+    UPROPERTY(BlueprintReadOnly, Category = "Instance")
+    float SpawnTime = 0.0f;
 
-    FVFXPerformanceSettings()
+    // Is this instance currently active?
+    UPROPERTY(BlueprintReadOnly, Category = "Instance")
+    bool bIsActive = false;
+
+    FActiveVFXInstance()
     {
-        MaxActiveVFX = 100;
-        CurrentVFXQuality = 2;
-        GlobalQualityMultiplier = 1.0f;
-        bEnableVFXCulling = true;
-        bEnableVFXLOD = true;
+        InstanceID = 0;
+        EffectID = TEXT("");
+        SpawnTime = 0.0f;
+        bIsActive = false;
+    }
+};
+
+/**
+ * VFX Pool Entry
+ * For object pooling of VFX components
+ */
+USTRUCT()
+struct TRANSPERSONALGAME_API FVFXPoolEntry
+{
+    GENERATED_BODY()
+
+    // The pooled Niagara component
+    UPROPERTY()
+    TWeakObjectPtr<UNiagaraComponent> Component;
+
+    // Effect ID this component is configured for
+    UPROPERTY()
+    FString EffectID;
+
+    // Is this component currently in use?
+    UPROPERTY()
+    bool bInUse = false;
+
+    // Last time this component was used
+    UPROPERTY()
+    float LastUsedTime = 0.0f;
+
+    FVFXPoolEntry()
+    {
+        EffectID = TEXT("");
+        bInUse = false;
+        LastUsedTime = 0.0f;
     }
 };
