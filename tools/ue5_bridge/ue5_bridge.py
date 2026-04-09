@@ -35,8 +35,8 @@ import requests
 # ─── Configuration ───────────────────────────────────────────────────────────
 
 SUPABASE_URL = "https://thdlkizjbpwdndtggleb.supabase.co"
-SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRoZGxraXpqYnB3ZG5kdGdnbGViIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDM3MDIyMDksImV4cCI6MjA1OTI3ODIwOX0.r5zBFDm7qVFHMOBxMFBPvnqIqHSIgfkwMOJwGhz-n3c"
-SUPABASE_SERVICE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRoZGxraXpqYnB3ZG5kdGdnbGViIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc0MzcwMjIwOSwiZXhwIjoyMDU5Mjc4MjA5fQ.LMCbJEbpBkZ3pFTxBaXqMOy3SjBLSNS-0ez-dlLAelk"
+SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRoZGxraXpqYnB3ZG5kdGdnbGViIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU1ODc0NDYsImV4cCI6MjA5MTE2MzQ0Nn0.tPMBpnVAJubJmFXxW7bFtBB_JSmFSqHkiSAKbzK_7JY"
+SUPABASE_SERVICE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRoZGxraXpqYnB3ZG5kdGdnbGViIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTU4NzQ0NiwiZXhwIjoyMDkxMTYzNDQ2fQ.VeA3rlif8X3dcDfVMxJqTn8e_VlzUMlco3O8KgkpLk8"
 
 TELEGRAM_BOT_TOKEN = "8470343698:AAHVuWkEFrMI_4VIEJHle867b7htMX_HuPU"
 TELEGRAM_CHAT_ID = "5308155885"
@@ -362,7 +362,7 @@ def main():
                 # Mark as "executing"
                 supabase_patch("ue5_commands", {"id": cmd_id}, {
                     "status": "executing",
-                    "started_at": datetime.now(timezone.utc).isoformat(),
+                    "executed_at": datetime.now(timezone.utc).isoformat(),
                 })
 
                 # Execute
