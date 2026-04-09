@@ -1,336 +1,330 @@
+// Copyright Transpersonal Game Studio. All Rights Reserved.
+
 #include "NarrativeManager.h"
-#include "Engine/World.h"
 #include "Engine/DataTable.h"
-#include "Components/AudioComponent.h"
-#include "Sound/DialogueWave.h"
-#include "Sound/DialogueVoice.h"
+#include "Engine/World.h"
+#include "GameFramework/Actor.h"
 #include "Kismet/GameplayStatics.h"
 #include "GameplayTagsManager.h"
-#include "Engine/Engine.h"
 
 UNarrativeManager::UNarrativeManager()
 {
-    bIsDialogueActive = false;
-    CurrentDialogueAudio = nullptr;
+    CurrentEmotionalState = 0.0f;
+    DominantTone = EEmotionalTone::Wonder;
+    MaxEmotionalHistorySize = 100;
+    EmotionalDecayRate = 0.1f;
 }
 
 void UNarrativeManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Initializing narrative system"));
+    InitializeDataTables();
     
-    // Initialize default narrative state
-    NarrativeState.StoryProgress = 0;
-    NarrativeState.CurrentChapter = FGameplayTag::RequestGameplayTag(FName("Story.Chapter.Arrival"));
+    // Initialize emotional state with wonder - the paleontologist's first reaction
+    UpdateEmotionalState(EEmotionalTone::Wonder, 1.0f);
     
-    // Load story events from data table if available
-    LoadStoryEventsFromDataTable();
-    
-    // Register core story events
-    RegisterCoreStoryEvents();
+    UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Initialized - The story begins with wonder"));
 }
 
 void UNarrativeManager::Deinitialize()
 {
-    if (CurrentDialogueAudio && IsValid(CurrentDialogueAudio))
-    {
-        CurrentDialogueAudio->Stop();
-        CurrentDialogueAudio = nullptr;
-    }
+    OnNarrativeEvent.Clear();
+    OnDialogueTriggered.Clear();
+    OnStoryBeatCompleted.Clear();
     
     Super::Deinitialize();
 }
 
-void UNarrativeManager::TriggerStoryEvent(FGameplayTag EventTag, const FString& EventData)
+void UNarrativeManager::InitializeDataTables()
 {
-    if (!EventTag.IsValid())
+    // Data tables will be set up in Blueprint or loaded from content
+    // This allows designers to modify narrative content without code changes
+    
+    if (!NarrativeEventsTable)
     {
-        UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Invalid event tag"));
+        UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: NarrativeEventsTable not set - narrative events will not function"));
+    }
+    
+    if (!DialogueTable)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: DialogueTable not set - dialogue system will not function"));
+    }
+    
+    if (!StoryBeatsTable)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: StoryBeatsTable not set - story progression will not function"));
+    }
+}
+
+void UNarrativeManager::TriggerNarrativeEvent(const FString& EventID, AActor* Instigator)
+{
+    if (TriggeredEvents.Contains(EventID))
+    {
+        return; // Event already triggered
+    }
+    
+    if (!NarrativeEventsTable)
+    {
+        UE_LOG(LogTemp, Error, TEXT("NarrativeManager: Cannot trigger event %s - NarrativeEventsTable not set"), *EventID);
         return;
     }
     
-    // Check if event can be triggered
-    if (!CanTriggerEvent(EventTag))
+    FNarrativeEvent* EventData = NarrativeEventsTable->FindRow<FNarrativeEvent>(FName(*EventID), TEXT("TriggerNarrativeEvent"));
+    if (!EventData)
     {
-        UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Cannot trigger event %s - prerequisites not met"), *EventTag.ToString());
+        UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Event %s not found in NarrativeEventsTable"), *EventID);
         return;
     }
     
-    // Check if already completed and not repeatable
-    if (IsEventCompleted(EventTag))
+    // Check if conditions are met
+    if (!EvaluateNarrativeConditions(EventData->RequiredTags))
     {
-        const FStoryEvent* Event = RegisteredEvents.Find(EventTag);
-        if (Event && !Event->bIsRepeatable)
+        UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Event %s conditions not met"), *EventID);
+        return;
+    }
+    
+    // Process the event
+    TriggeredEvents.Add(EventID);
+    ProcessEmotionalImpact(EventData->EmotionalImpact, EventData->EmotionalTone);
+    
+    // Grant tags
+    // TODO: Implement tag granting system when GameplayTags are fully integrated
+    
+    // Broadcast event
+    OnNarrativeEvent.Broadcast(*EventData, EventData->EmotionalImpact);
+    
+    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Triggered event %s with emotional impact %f"), 
+           *EventID, EventData->EmotionalImpact);
+}
+
+void UNarrativeManager::PlayDialogue(const FString& LineID, AActor* Speaker, AActor* Listener)
+{
+    if (!DialogueTable)
+    {
+        UE_LOG(LogTemp, Error, TEXT("NarrativeManager: Cannot play dialogue %s - DialogueTable not set"), *LineID);
+        return;
+    }
+    
+    FDialogueLine* DialogueData = DialogueTable->FindRow<FDialogueLine>(FName(*LineID), TEXT("PlayDialogue"));
+    if (!DialogueData)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Dialogue line %s not found in DialogueTable"), *LineID);
+        return;
+    }
+    
+    // Check conditions
+    if (!CanTriggerDialogue(LineID, Speaker, Listener))
+    {
+        UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Dialogue %s conditions not met"), *LineID);
+        return;
+    }
+    
+    // Update emotional state based on dialogue tone
+    float EmotionalImpact = 0.5f; // Dialogue has moderate emotional impact
+    ProcessEmotionalImpact(EmotionalImpact, DialogueData->Tone);
+    
+    // Broadcast dialogue event
+    OnDialogueTriggered.Broadcast(*DialogueData, Speaker, Listener);
+    
+    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Playing dialogue %s from %s"), 
+           *LineID, Speaker ? *Speaker->GetName() : TEXT("Unknown"));
+}
+
+void UNarrativeManager::CompleteStoryBeat(const FString& BeatID)
+{
+    if (CompletedStoryBeats.Contains(BeatID))
+    {
+        return; // Already completed
+    }
+    
+    if (!StoryBeatsTable)
+    {
+        UE_LOG(LogTemp, Error, TEXT("NarrativeManager: Cannot complete story beat %s - StoryBeatsTable not set"), *BeatID);
+        return;
+    }
+    
+    FStoryBeat* BeatData = StoryBeatsTable->FindRow<FStoryBeat>(FName(*BeatID), TEXT("CompleteStoryBeat"));
+    if (!BeatData)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Story beat %s not found in StoryBeatsTable"), *BeatID);
+        return;
+    }
+    
+    // Mark as completed
+    CompletedStoryBeats.Add(BeatID);
+    
+    // Process emotional impact
+    ProcessEmotionalImpact(BeatData->StoryWeight, BeatData->EmotionalArc);
+    
+    // Trigger follow-up events
+    for (const FString& TriggeredEvent : BeatData->TriggeredEvents)
+    {
+        TriggerNarrativeEvent(TriggeredEvent);
+    }
+    
+    // Broadcast completion
+    OnStoryBeatCompleted.Broadcast(*BeatData);
+    
+    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Completed story beat %s"), *BeatID);
+}
+
+bool UNarrativeManager::IsStoryBeatCompleted(const FString& BeatID) const
+{
+    return CompletedStoryBeats.Contains(BeatID);
+}
+
+TArray<FStoryBeat> UNarrativeManager::GetAvailableStoryBeats() const
+{
+    TArray<FStoryBeat> AvailableBeats;
+    
+    if (!StoryBeatsTable)
+    {
+        return AvailableBeats;
+    }
+    
+    TArray<FStoryBeat*> AllBeats;
+    StoryBeatsTable->GetAllRows<FStoryBeat>(TEXT("GetAvailableStoryBeats"), AllBeats);
+    
+    for (FStoryBeat* Beat : AllBeats)
+    {
+        if (!Beat || CompletedStoryBeats.Contains(Beat->BeatID))
         {
-            UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Event %s already completed and not repeatable"), *EventTag.ToString());
-            return;
+            continue; // Skip completed beats
+        }
+        
+        // Check if all required events are completed
+        bool bCanStart = true;
+        for (const FString& RequiredEvent : Beat->RequiredEvents)
+        {
+            if (!TriggeredEvents.Contains(RequiredEvent))
+            {
+                bCanStart = false;
+                break;
+            }
+        }
+        
+        if (bCanStart)
+        {
+            AvailableBeats.Add(*Beat);
         }
     }
     
-    // Mark event as completed
-    NarrativeState.CompletedEvents.AddUnique(EventTag);
-    NarrativeState.ActiveEvents.Remove(EventTag);
-    
-    // Process event
-    if (const FStoryEvent* Event = RegisteredEvents.Find(EventTag))
-    {
-        ProcessEventUnlocks(*Event);
-        
-        UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Triggered story event: %s - %s"), 
-               *EventTag.ToString(), *Event->EventTitle);
-    }
-    
-    // Broadcast event
-    OnStoryEventTriggered.Broadcast(EventTag, EventData);
-    
-    // Auto-advance story progress for major events
-    if (EventTag.MatchesTag(FGameplayTag::RequestGameplayTag(FName("Story.Major"))))
-    {
-        AdvanceStoryProgress(10);
-    }
-    else if (EventTag.MatchesTag(FGameplayTag::RequestGameplayTag(FName("Story.Minor"))))
-    {
-        AdvanceStoryProgress(1);
-    }
+    return AvailableBeats;
 }
 
-bool UNarrativeManager::IsEventCompleted(FGameplayTag EventTag) const
+void UNarrativeManager::UpdateEmotionalState(EEmotionalTone NewTone, float Intensity)
 {
-    return NarrativeState.CompletedEvents.Contains(EventTag);
+    // Map emotional tones to numerical values for blending
+    float ToneValue = 0.0f;
+    switch (NewTone)
+    {
+        case EEmotionalTone::Fear: ToneValue = -1.0f; break;
+        case EEmotionalTone::Desperation: ToneValue = -0.8f; break;
+        case EEmotionalTone::Loneliness: ToneValue = -0.5f; break;
+        case EEmotionalTone::Determination: ToneValue = 0.0f; break;
+        case EEmotionalTone::Hope: ToneValue = 0.3f; break;
+        case EEmotionalTone::Wonder: ToneValue = 0.6f; break;
+        case EEmotionalTone::Peace: ToneValue = 0.8f; break;
+        case EEmotionalTone::Awe: ToneValue = 1.0f; break;
+    }
+    
+    // Blend with current state
+    float NewEmotionalValue = ToneValue * Intensity;
+    CurrentEmotionalState = FMath::Lerp(CurrentEmotionalState, NewEmotionalValue, 0.3f);
+    
+    // Update dominant tone
+    DominantTone = NewTone;
+    
+    // Add to history
+    UpdateEmotionalHistory(CurrentEmotionalState);
+    
+    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Emotional state updated to %f (Tone: %d)"), 
+           CurrentEmotionalState, (int32)NewTone);
 }
 
-bool UNarrativeManager::CanTriggerEvent(FGameplayTag EventTag) const
+FDialogueLine UNarrativeManager::GetDialogueForContext(const FString& SpeakerID, EDialogueContext Context) const
 {
-    const FStoryEvent* Event = RegisteredEvents.Find(EventTag);
-    if (!Event)
+    FDialogueLine DefaultLine;
+    
+    if (!DialogueTable)
+    {
+        return DefaultLine;
+    }
+    
+    // Search for dialogue lines matching speaker and context
+    TArray<FDialogueLine*> AllDialogue;
+    DialogueTable->GetAllRows<FDialogueLine>(TEXT("GetDialogueForContext"), AllDialogue);
+    
+    for (FDialogueLine* Line : AllDialogue)
+    {
+        if (Line && Line->SpeakerName.ToString() == SpeakerID && Line->Context == Context)
+        {
+            if (EvaluateNarrativeConditions(Line->RequiredConditions))
+            {
+                return *Line;
+            }
+        }
+    }
+    
+    return DefaultLine;
+}
+
+bool UNarrativeManager::CanTriggerDialogue(const FString& LineID, AActor* Speaker, AActor* Listener) const
+{
+    if (!DialogueTable)
     {
         return false;
     }
     
-    // Check prerequisites
-    for (const FGameplayTag& Prerequisite : Event->PrerequisiteEvents)
+    FDialogueLine* DialogueData = DialogueTable->FindRow<FDialogueLine>(FName(*LineID), TEXT("CanTriggerDialogue"));
+    if (!DialogueData)
     {
-        if (!IsEventCompleted(Prerequisite))
-        {
-            return false;
-        }
+        return false;
     }
     
+    return EvaluateNarrativeConditions(DialogueData->RequiredConditions);
+}
+
+void UNarrativeManager::RecordPlayerChoice(const FString& ChoiceID, const FString& ChoiceValue)
+{
+    PlayerChoices.Add(ChoiceID, ChoiceValue);
+    
+    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Recorded player choice %s = %s"), *ChoiceID, *ChoiceValue);
+}
+
+FString UNarrativeManager::GetPlayerChoice(const FString& ChoiceID) const
+{
+    if (const FString* Choice = PlayerChoices.Find(ChoiceID))
+    {
+        return *Choice;
+    }
+    return FString();
+}
+
+void UNarrativeManager::UpdateEmotionalHistory(float NewValue)
+{
+    EmotionalHistory.Add(NewValue);
+    
+    // Maintain maximum history size
+    if (EmotionalHistory.Num() > MaxEmotionalHistorySize)
+    {
+        EmotionalHistory.RemoveAt(0);
+    }
+}
+
+bool UNarrativeManager::EvaluateNarrativeConditions(const FGameplayTagContainer& RequiredTags) const
+{
+    // TODO: Implement proper gameplay tag evaluation when system is integrated
+    // For now, return true to allow all narrative events
     return true;
 }
 
-void UNarrativeManager::RegisterStoryEvent(const FStoryEvent& NewEvent)
+void UNarrativeManager::ProcessEmotionalImpact(float Impact, EEmotionalTone Tone)
 {
-    if (NewEvent.EventTag.IsValid())
-    {
-        RegisteredEvents.Add(NewEvent.EventTag, NewEvent);
-        UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Registered story event: %s"), *NewEvent.EventTag.ToString());
-    }
-}
-
-void UNarrativeManager::StartDialogue(UDialogueWave* DialogueWave, AActor* Speaker, AActor* Listener)
-{
-    if (!DialogueWave || !Speaker)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Invalid dialogue wave or speaker"));
-        return;
-    }
+    // Apply emotional decay to previous state
+    CurrentEmotionalState *= (1.0f - EmotionalDecayRate);
     
-    if (bIsDialogueActive)
-    {
-        EndDialogue();
-    }
-    
-    bIsDialogueActive = true;
-    
-    // Create audio component for dialogue
-    CurrentDialogueAudio = UGameplayStatics::SpawnSoundAtLocation(
-        GetWorld(), 
-        DialogueWave, 
-        Speaker->GetActorLocation()
-    );
-    
-    if (CurrentDialogueAudio)
-    {
-        CurrentDialogueAudio->OnAudioFinished.AddDynamic(this, &UNarrativeManager::OnDialogueAudioFinished);
-    }
-    
-    // Broadcast dialogue started
-    OnDialogueStarted.Broadcast(DialogueWave, Speaker, Listener);
-    
-    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Started dialogue from %s"), 
-           Speaker ? *Speaker->GetName() : TEXT("Unknown"));
-}
-
-void UNarrativeManager::EndDialogue()
-{
-    if (!bIsDialogueActive)
-    {
-        return;
-    }
-    
-    bIsDialogueActive = false;
-    
-    if (CurrentDialogueAudio && IsValid(CurrentDialogueAudio))
-    {
-        CurrentDialogueAudio->Stop();
-        CurrentDialogueAudio = nullptr;
-    }
-    
-    OnDialogueEnded.Broadcast();
-    
-    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Ended dialogue"));
-}
-
-void UNarrativeManager::SetCurrentChapter(FGameplayTag ChapterTag)
-{
-    if (ChapterTag.IsValid())
-    {
-        NarrativeState.CurrentChapter = ChapterTag;
-        
-        // Trigger chapter change event
-        FGameplayTag ChapterEvent = FGameplayTag::RequestGameplayTag(
-            FName(*FString::Printf(TEXT("Story.Chapter.%s.Started"), *ChapterTag.ToString()))
-        );
-        TriggerStoryEvent(ChapterEvent);
-        
-        UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Set current chapter to %s"), *ChapterTag.ToString());
-    }
-}
-
-void UNarrativeManager::AdvanceStoryProgress(int32 ProgressAmount)
-{
-    NarrativeState.StoryProgress += ProgressAmount;
-    
-    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Advanced story progress by %d (Total: %d)"), 
-           ProgressAmount, NarrativeState.StoryProgress);
-    
-    // Check for chapter advancement
-    CheckChapterAdvancement();
-}
-
-void UNarrativeManager::SetCharacterRelationship(const FString& CharacterName, const FString& RelationshipStatus)
-{
-    NarrativeState.CharacterRelationships.Add(CharacterName, RelationshipStatus);
-    
-    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Set %s relationship to %s"), 
-           *CharacterName, *RelationshipStatus);
-}
-
-FString UNarrativeManager::GetCharacterRelationship(const FString& CharacterName) const
-{
-    if (const FString* Relationship = NarrativeState.CharacterRelationships.Find(CharacterName))
-    {
-        return *Relationship;
-    }
-    return TEXT("Unknown");
-}
-
-void UNarrativeManager::LoadStoryEventsFromDataTable()
-{
-    if (StoryEventsDataTable)
-    {
-        TArray<FStoryEvent*> StoryEvents;
-        StoryEventsDataTable->GetAllRows<FStoryEvent>(TEXT("LoadStoryEvents"), StoryEvents);
-        
-        for (const FStoryEvent* Event : StoryEvents)
-        {
-            if (Event && Event->EventTag.IsValid())
-            {
-                RegisterStoryEvent(*Event);
-            }
-        }
-        
-        UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Loaded %d story events from data table"), StoryEvents.Num());
-    }
-}
-
-void UNarrativeManager::ProcessEventPrerequisites(const FStoryEvent& Event)
-{
-    // Prerequisites are checked in CanTriggerEvent
-    // This function could be used for additional prerequisite processing
-}
-
-void UNarrativeManager::ProcessEventUnlocks(const FStoryEvent& Event)
-{
-    for (const FGameplayTag& UnlockEvent : Event.UnlockEvents)
-    {
-        if (UnlockEvent.IsValid() && !NarrativeState.ActiveEvents.Contains(UnlockEvent))
-        {
-            NarrativeState.ActiveEvents.AddUnique(UnlockEvent);
-            UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Unlocked event %s"), *UnlockEvent.ToString());
-        }
-    }
-}
-
-void UNarrativeManager::OnDialogueAudioFinished()
-{
-    EndDialogue();
-}
-
-void UNarrativeManager::RegisterCoreStoryEvents()
-{
-    // Register core story events for the prehistoric survival game
-    
-    // Chapter 1: Arrival
-    FStoryEvent ArrivalEvent;
-    ArrivalEvent.EventTag = FGameplayTag::RequestGameplayTag(FName("Story.Major.Arrival"));
-    ArrivalEvent.EventTitle = TEXT("Arrival in the Past");
-    ArrivalEvent.EventDescription = TEXT("The paleontologist touches the mysterious gem and is transported to prehistoric times");
-    ArrivalEvent.bIsRepeatable = false;
-    ArrivalEvent.Priority = 100;
-    RegisterStoryEvent(ArrivalEvent);
-    
-    // First Dinosaur Encounter
-    FStoryEvent FirstDinoEvent;
-    FirstDinoEvent.EventTag = FGameplayTag::RequestGameplayTag(FName("Story.Major.FirstDinosaur"));
-    FirstDinoEvent.EventTitle = TEXT("First Dinosaur Encounter");
-    FirstDinoEvent.EventDescription = TEXT("Player encounters their first living dinosaur");
-    FirstDinoEvent.PrerequisiteEvents.Add(ArrivalEvent.EventTag);
-    FirstDinoEvent.bIsRepeatable = false;
-    FirstDinoEvent.Priority = 90;
-    RegisterStoryEvent(FirstDinoEvent);
-    
-    // First Shelter
-    FStoryEvent FirstShelterEvent;
-    FirstShelterEvent.EventTag = FGameplayTag::RequestGameplayTag(FName("Story.Minor.FirstShelter"));
-    FirstShelterEvent.EventTitle = TEXT("First Shelter Built");
-    FirstShelterEvent.EventDescription = TEXT("Player constructs their first shelter for protection");
-    FirstShelterEvent.PrerequisiteEvents.Add(FirstDinoEvent.EventTag);
-    FirstShelterEvent.bIsRepeatable = false;
-    FirstShelterEvent.Priority = 80;
-    RegisterStoryEvent(FirstShelterEvent);
-    
-    // Discovery of the Return Gem
-    FStoryEvent GemDiscoveryEvent;
-    GemDiscoveryEvent.EventTag = FGameplayTag::RequestGameplayTag(FName("Story.Major.GemDiscovery"));
-    GemDiscoveryEvent.EventTitle = TEXT("Discovery of the Return Gem");
-    GemDiscoveryEvent.EventDescription = TEXT("Player discovers clues about the gem that can return them home");
-    GemDiscoveryEvent.PrerequisiteEvents.Add(FirstShelterEvent.EventTag);
-    GemDiscoveryEvent.bIsRepeatable = false;
-    GemDiscoveryEvent.Priority = 70;
-    RegisterStoryEvent(GemDiscoveryEvent);
-    
-    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Registered core story events"));
-}
-
-void UNarrativeManager::CheckChapterAdvancement()
-{
-    // Check if story progress warrants chapter advancement
-    if (NarrativeState.StoryProgress >= 100 && 
-        NarrativeState.CurrentChapter == FGameplayTag::RequestGameplayTag(FName("Story.Chapter.Arrival")))
-    {
-        SetCurrentChapter(FGameplayTag::RequestGameplayTag(FName("Story.Chapter.Survival")));
-    }
-    else if (NarrativeState.StoryProgress >= 250 && 
-             NarrativeState.CurrentChapter == FGameplayTag::RequestGameplayTag(FName("Story.Chapter.Survival")))
-    {
-        SetCurrentChapter(FGameplayTag::RequestGameplayTag(FName("Story.Chapter.Discovery")));
-    }
-    else if (NarrativeState.StoryProgress >= 500 && 
-             NarrativeState.CurrentChapter == FGameplayTag::RequestGameplayTag(FName("Story.Chapter.Discovery")))
-    {
-        SetCurrentChapter(FGameplayTag::RequestGameplayTag(FName("Story.Chapter.Return")));
-    }
+    // Update with new emotional input
+    UpdateEmotionalState(Tone, Impact);
 }
