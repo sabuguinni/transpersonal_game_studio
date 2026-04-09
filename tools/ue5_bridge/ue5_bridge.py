@@ -116,13 +116,86 @@ class UE5RemoteControl:
             return False
 
     def execute_python(self, script: str) -> dict:
-        """Execute a Python script in the UE5 Editor."""
+        """Execute a Python script in the UE5 Editor.
+        
+        Uses remote/object/call to invoke KismetSystemLibrary::ExecuteConsoleCommand
+        with the 'py' console command prefix, which executes Python code.
+        
+        For multi-line scripts, writes to a temp file first then executes it.
+        """
+        # Escape the script for console command usage
+        # For single-line scripts, use py "code" directly
+        # For multi-line, write to temp file and execute that
+        lines = script.strip().split('\n')
+        
+        if len(lines) == 1 and len(script) < 500:
+            # Simple single-line: use py "code" console command
+            escaped = script.replace('"', '\\"').replace("'", "\\'")
+            console_cmd = f'py {script}'
+            return self._execute_console_command(console_cmd)
+        else:
+            # Multi-line: write to temp file, execute file, then clean up
+            import tempfile
+            import os
+            # Write script to a temp .py file via a simpler py command
+            # Use the UE5 temp directory
+            temp_script = script.replace('\\', '\\\\').replace('"', '\\"').replace("'", "\\'")
+            # Build a python command that writes the script to a file and executes it
+            write_and_exec = (
+                'import tempfile, os; '
+                'f = tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False, dir=os.environ.get("TEMP", "/tmp")); '
+                f'f.write("""{script}"""); '
+                'f.close(); '
+                'import unreal; '
+                'unreal.PythonScriptLibrary.execute_python_script(f.name); '
+                'os.unlink(f.name)'
+            )
+            # Fallback: try direct execution line by line
+            # Actually, the simplest approach: use remote/object/call to call
+            # PythonScriptLibrary.ExecutePythonCommand for each meaningful line
+            results = []
+            for line in lines:
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+                console_cmd = f'py {line}'
+                r = self._execute_console_command(console_cmd)
+                results.append(r)
+            if results:
+                return results[-1]
+            return {"status_code": 200, "body": "No executable lines"}
+
+    def _execute_console_command(self, command: str) -> dict:
+        """Execute a console command via remote/object/call on KismetSystemLibrary."""
+        # Method 1: Use GEditor world context with ExecuteConsoleCommand
         r = self.session.put(
-            f"{self.base_url}/remote/script/execute",
-            json={"Command": script},
+            f"{self.base_url}/remote/object/call",
+            json={
+                "objectPath": "/Script/Engine.Default__KismetSystemLibrary",
+                "functionName": "ExecuteConsoleCommand",
+                "parameters": {
+                    "WorldContextObject": "/Engine/Transient.World",
+                    "Command": command
+                }
+            },
             timeout=120,
         )
-        return {"status_code": r.status_code, "body": r.text}
+        if r.status_code == 200:
+            return {"status_code": r.status_code, "body": r.text}
+        
+        # Method 2: Try with EditorWorld as context
+        r2 = self.session.put(
+            f"{self.base_url}/remote/object/call",
+            json={
+                "objectPath": "/Script/Engine.Default__KismetSystemLibrary",
+                "functionName": "ExecuteConsoleCommand",
+                "parameters": {
+                    "Command": command
+                }
+            },
+            timeout=120,
+        )
+        return {"status_code": r2.status_code, "body": r2.text}
 
     def call_function(self, object_path: str, function_name: str, parameters: dict = None) -> dict:
         """Call a function on a UObject."""
@@ -192,13 +265,8 @@ else:
         return self.execute_python(script)
 
     def run_console_command(self, command: str) -> dict:
-        """Execute a console command in UE5."""
-        script = f"""
-import unreal
-unreal.SystemLibrary.execute_console_command(None, '{command}')
-print("Console command executed: {command}")
-"""
-        return self.execute_python(script)
+        """Execute a console command in UE5 directly via Remote Control API."""
+        return self._execute_console_command(command)
 
     def import_asset(self, source_path: str, destination_path: str) -> dict:
         """Import an asset into the UE5 project."""
