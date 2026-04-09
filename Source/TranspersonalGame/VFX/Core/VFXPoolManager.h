@@ -270,67 +270,30 @@ public:
     void WarmUpPool(EVFXCategory Category, const FString& PoolName, int32 WarmUpCount);
 
     UFUNCTION(BlueprintCallable, Category = "VFX Pool Utility")
-    bool ValidatePoolIntegrity();
-
-    UFUNCTION(BlueprintCallable, Category = "VFX Pool Utility")
-    void ResetAllPools();
+    void ResetPool(EVFXCategory Category, const FString& PoolName);
 
 protected:
-    // Configuration
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Pool Manager Settings")
-    FVFXPoolManagerSettings PoolSettings;
+    // Internal helper functions
+    UNiagaraComponent* CreateNiagaraComponent(UNiagaraSystem* NiagaraSystem);
+    void ApplyEffectDataToComponent(UNiagaraComponent* VFXComponent, const FVFXEffectData& EffectData);
+    void UpdateVFXLODBasedOnDistance();
+    void RecycleExpiredVFXInstances();
 
-    // Pool Storage
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Pool Storage")
-    TMap<EVFXCategory, TArray<FVFXPool>> VFXPools;
+protected:
+    // Pool storage organized by category and pool name
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VFX Pool Manager")
+    TMap<EVFXCategory, TMap<FString, FVFXPool>> VFXPools;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Pool Storage")
-    TMap<UNiagaraComponent*, FVFXPoolEntry> ActiveVFXMap;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Pool Manager")
+    FVFXPoolManagerSettings PoolManagerSettings;
 
-    // Performance Tracking
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Performance")
-    int32 TotalActiveVFXCount = 0;
+    // Runtime tracking
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VFX Pool Manager")
+    int32 NextPoolID;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Performance")
-    int32 TotalPooledVFXCount = 0;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VFX Pool Manager")
+    float LastCleanupTime;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Performance")
-    float LastCleanupTime = 0.0f;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Performance")
-    float LastOptimizationTime = 0.0f;
-
-    // System State
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "System State")
-    bool bIsInitialized = false;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "System State")
-    bool bIsCleanupInProgress = false;
-
-private:
-    // Internal Pool Management
-    FVFXPool* FindPool(EVFXCategory Category, const FString& PoolName);
-    FVFXPool* FindBestPool(EVFXCategory Category, EVFXPriority Priority);
-    
-    bool CreatePoolEntry(FVFXPool& Pool, UNiagaraSystem* NiagaraSystem);
-    void DestroyPoolEntry(FVFXPoolEntry& Entry);
-    
-    UNiagaraComponent* GetAvailableVFXFromPool(FVFXPool& Pool);
-    bool ReturnVFXToSpecificPool(UNiagaraComponent* VFXComponent, FVFXPool& Pool);
-    
-    // Pool Maintenance
-    void UpdatePoolMaintenance(float DeltaTime);
-    void CleanupExpiredVFX();
-    void OptimizePoolMemory();
-    
-    // Performance Monitoring
-    void UpdatePerformanceMetrics();
-    bool ShouldCullVFX() const;
-    
-    // Utility
-    FString GeneratePoolKey(EVFXCategory Category, const FString& PoolName) const;
-    int32 GetNextPoolID();
-    
-    // Static counters
-    static int32 NextPoolEntryID;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VFX Pool Manager")
+    int32 TotalActiveVFXCount;
 };
