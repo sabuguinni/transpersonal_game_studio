@@ -1,12 +1,16 @@
+// Copyright Transpersonal Game Studio. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
 #include "UObject/NoExportTypes.h"
-#include "QuestManager.h"
+#include "QuestTypes.h"
 #include "QuestInstance.generated.h"
 
-class UQuestObjective;
-
+/**
+ * Quest Instance - Runtime representation of an active quest
+ * Tracks progress, emotional state, and player interactions
+ */
 UCLASS(BlueprintType)
 class TRANSPERSONALGAME_API UQuestInstance : public UObject
 {
@@ -16,84 +20,114 @@ public:
     UQuestInstance();
 
     // Initialization
-    void Initialize(const FQuestData& QuestData);
+    UFUNCTION(BlueprintCallable, Category = "Quest Instance")
+    void InitializeQuest(const FQuestData& InQuestData);
 
-    // Quest Management
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    void UpdateQuest(float DeltaTime);
+    // Progress Tracking
+    UFUNCTION(BlueprintCallable, Category = "Quest Instance")
+    bool UpdateObjectiveProgress(const FString& ObjectiveID, int32 Progress = 1);
 
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    bool AreAllObjectivesCompleted() const;
+    UFUNCTION(BlueprintCallable, Category = "Quest Instance")
+    bool IsObjectiveCompleted(const FString& ObjectiveID) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    bool HasObjective(const FString& ObjectiveID) const;
+    UFUNCTION(BlueprintCallable, Category = "Quest Instance")
+    bool AreAllRequiredObjectivesCompleted() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    bool CompleteObjective(const FString& ObjectiveID);
-
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    void GiveRewards();
-
-    // Getters
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    FString GetQuestID() const { return QuestData.QuestID; }
-
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    FText GetQuestTitle() const { return QuestData.QuestTitle; }
-
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    FText GetQuestDescription() const { return QuestData.QuestDescription; }
-
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    EQuestType GetQuestType() const { return QuestData.QuestType; }
-
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    TArray<UQuestObjective*> GetObjectives() const { return Objectives; }
-
-    UFUNCTION(BlueprintCallable, Category = "Quest")
+    UFUNCTION(BlueprintCallable, Category = "Quest Instance")
     float GetCompletionPercentage() const;
 
-    // Quest Progress
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    void SetQuestProgress(float Progress);
+    // Getters
+    UFUNCTION(BlueprintCallable, Category = "Quest Instance")
+    FString GetQuestID() const { return QuestData.QuestID; }
 
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    float GetQuestProgress() const { return QuestProgress; }
+    UFUNCTION(BlueprintCallable, Category = "Quest Instance")
+    FText GetTitle() const { return QuestData.Title; }
 
-    // Timer Management
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    void StartQuestTimer(float TimeLimit);
+    UFUNCTION(BlueprintCallable, Category = "Quest Instance")
+    FText GetDescription() const { return QuestData.Description; }
 
-    UFUNCTION(BlueprintCallable, Category = "Quest")
+    UFUNCTION(BlueprintCallable, Category = "Quest Instance")
+    EQuestType GetQuestType() const { return QuestData.QuestType; }
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Instance")
+    EEmotionalTone GetEmotionalTone() const { return QuestData.EmotionalTone; }
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Instance")
+    TArray<FQuestObjective> GetObjectives() const { return QuestData.Objectives; }
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Instance")
+    FQuestObjective GetObjective(const FString& ObjectiveID) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Instance")
+    bool HasTimeLimit() const { return QuestData.TimeLimit > 0.0f; }
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Instance")
     float GetRemainingTime() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Quest")
-    bool IsTimedQuest() const { return bIsTimedQuest; }
+    // Emotional Progression
+    UFUNCTION(BlueprintCallable, Category = "Quest Instance")
+    void AddEmotionalMoment(EEmotionalTone Tone, const FString& Context);
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Instance")
+    TArray<EEmotionalTone> GetEmotionalProgression() const { return EmotionalProgression; }
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Instance")
+    EEmotionalTone GetCurrentEmotionalState() const;
+
+    // Location Tracking
+    UFUNCTION(BlueprintCallable, Category = "Quest Instance")
+    bool IsPlayerInQuestArea(const FVector& PlayerLocation) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Instance")
+    float GetDistanceToQuestLocation(const FVector& PlayerLocation) const;
+
+    // Dynamic Content
+    UFUNCTION(BlueprintCallable, Category = "Quest Instance")
+    void AddDynamicObjective(const FQuestObjective& NewObjective);
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Instance")
+    void RemoveObjective(const FString& ObjectiveID);
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Instance")
+    void UpdateObjectiveDescription(const FString& ObjectiveID, const FText& NewDescription);
+
+    // Events
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnObjectiveProgressUpdated, const FString&, ObjectiveID, int32, NewProgress);
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnObjectiveCompleted, const FString&, ObjectiveID);
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnEmotionalMoment, EEmotionalTone, Tone, const FString&, Context);
+
+    UPROPERTY(BlueprintAssignable, Category = "Quest Events")
+    FOnObjectiveProgressUpdated OnObjectiveProgressUpdated;
+
+    UPROPERTY(BlueprintAssignable, Category = "Quest Events")
+    FOnObjectiveCompleted OnObjectiveCompleted;
+
+    UPROPERTY(BlueprintAssignable, Category = "Quest Events")
+    FOnEmotionalMoment OnEmotionalMoment;
 
 protected:
-    UPROPERTY(BlueprintReadOnly, Category = "Quest")
+    // Quest Data
+    UPROPERTY(BlueprintReadOnly, Category = "Quest Instance")
     FQuestData QuestData;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Quest")
-    TArray<UQuestObjective*> Objectives;
+    // Runtime State
+    UPROPERTY(BlueprintReadOnly, Category = "Quest Instance")
+    float StartTime;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Quest")
-    float QuestProgress;
+    UPROPERTY(BlueprintReadOnly, Category = "Quest Instance")
+    TArray<EEmotionalTone> EmotionalProgression;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Quest")
-    bool bIsTimedQuest;
+    UPROPERTY(BlueprintReadOnly, Category = "Quest Instance")
+    TMap<FString, FString> DynamicVariables;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Quest")
-    float TimeLimit;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Quest")
-    float ElapsedTime;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Quest")
-    FDateTime StartTime;
+    // Objective Progress Cache
+    UPROPERTY()
+    TMap<FString, int32> ObjectiveProgressCache;
 
 private:
-    void CreateObjectives();
-    void UpdateQuestProgress();
-    void CheckTimeLimit(float DeltaTime);
+    // Internal Methods
+    void InitializeObjectiveProgress();
+    void CacheObjectiveProgress();
+    bool ValidateObjectiveID(const FString& ObjectiveID) const;
+    void TriggerObjectiveEvents(const FString& ObjectiveID, bool bCompleted);
 };
