@@ -1,384 +1,231 @@
+// Copyright Transpersonal Game Studio. All Rights Reserved.
+
 #include "DialogueComponent.h"
 #include "NarrativeManager.h"
-#include "Engine/World.h"
-#include "Engine/DataTable.h"
 #include "Components/AudioComponent.h"
-#include "Sound/DialogueWave.h"
-#include "Sound/DialogueVoice.h"
+#include "Engine/World.h"
+#include "GameFramework/Actor.h"
 #include "Kismet/GameplayStatics.h"
-#include "GameplayTagsManager.h"
+#include "Sound/DialogueWave.h"
+#include "Sound/SoundCue.h"
 #include "TimerManager.h"
-#include "Engine/Engine.h"
 
 UDialogueComponent::UDialogueComponent()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.bStartWithTickEnabled = false;
+    PrimaryComponentTick.bCanEverTick = false;
     
-    CharacterName = TEXT("Unknown Character");
-    DefaultLineDuration = 3.0f;
-    bAutoAdvanceDialogue = true;
-    AutoAdvanceDelay = 0.5f;
-    CurrentState = EDialogueState::Idle;
-    CurrentLineIndex = 0;
-    CurrentListener = nullptr;
-    CurrentAudioComponent = nullptr;
+    bIsPlayingDialogue = false;
+    CurrentEmotionalTone = EEmotionalTone::Wonder;
+    EmotionalIntensity = 1.0f;
+    DialogueRange = 1000.0f;
+    bAutoFaceListener = true;
+    bUseSubtitles = true;
+    DefaultEmotionalTone = EEmotionalTone::Wonder;
 }
 
 void UDialogueComponent::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Load dialogue from data table if available
-    LoadDialogueFromDataTable();
-    
-    UE_LOG(LogTemp, Log, TEXT("DialogueComponent: Initialized for %s"), *CharacterName);
+    SetupAudioComponent();
+    CurrentEmotionalTone = DefaultEmotionalTone;
 }
 
-void UDialogueComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
+void UDialogueComponent::SetupAudioComponent()
 {
-    StopDialogueSequence();
-    Super::EndPlay(EndPlayReason);
-}
-
-void UDialogueComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
-{
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    
-    // Handle dialogue state updates if needed
-    if (CurrentState == EDialogueState::Playing)
+    // Create audio component if it doesn't exist
+    if (!AudioComponent)
     {
-        // Additional processing during dialogue playback
+        AudioComponent = NewObject<UAudioComponent>(GetOwner());
+        if (AudioComponent)
+        {
+            AudioComponent->SetupAttachment(GetOwner()->GetRootComponent());
+            AudioComponent->bAutoActivate = false;
+            AudioComponent->SetVolumeMultiplier(1.0f);
+            AudioComponent->SetPitchMultiplier(1.0f);
+            
+            // Set 3D audio properties for immersive dialogue
+            AudioComponent->bAllowSpatialization = true;
+            AudioComponent->bOverrideAttenuation = true;
+            
+            UE_LOG(LogTemp, Log, TEXT("DialogueComponent: Audio component created for %s"), 
+                   *GetOwner()->GetName());
+        }
     }
 }
 
-void UDialogueComponent::StartDialogueSequence(FGameplayTag SequenceTag, AActor* Listener)
+void UDialogueComponent::PlayDialogue(const FString& LineID, AActor* Listener)
 {
-    if (!SequenceTag.IsValid())
+    if (bIsPlayingDialogue)
     {
-        UE_LOG(LogTemp, Warning, TEXT("DialogueComponent: Invalid sequence tag"));
+        StopCurrentDialogue();
+    }
+    
+    UNarrativeManager* NarrativeManager = GetWorld()->GetGameInstance()->GetSubsystem<UNarrativeManager>();
+    if (!NarrativeManager)
+    {
+        UE_LOG(LogTemp, Error, TEXT("DialogueComponent: NarrativeManager not found"));
         return;
     }
     
-    if (!CanPlaySequence(SequenceTag))
+    // Check if dialogue can be triggered
+    if (!NarrativeManager->CanTriggerDialogue(LineID, GetOwner(), Listener))
     {
-        UE_LOG(LogTemp, Warning, TEXT("DialogueComponent: Cannot play sequence %s"), *SequenceTag.ToString());
+        UE_LOG(LogTemp, Log, TEXT("DialogueComponent: Dialogue %s cannot be triggered"), *LineID);
         return;
     }
     
-    // Stop any current dialogue
-    if (CurrentState != EDialogueState::Idle)
+    // Play dialogue through narrative manager
+    NarrativeManager->PlayDialogue(LineID, GetOwner(), Listener);
+    
+    // Set playing state
+    bIsPlayingDialogue = true;
+    
+    // Auto-face listener if enabled
+    if (bAutoFaceListener && Listener)
     {
-        StopDialogueSequence();
+        FVector DirectionToListener = (Listener->GetActorLocation() - GetOwner()->GetActorLocation()).GetSafeNormal();
+        FRotator NewRotation = DirectionToListener.Rotation();
+        NewRotation.Pitch = 0.0f; // Keep level
+        GetOwner()->SetActorRotation(NewRotation);
     }
     
-    // Find the dialogue sequence
-    const FDialogueSequence* Sequence = DialogueSequences.Find(SequenceTag);
-    if (!Sequence || Sequence->DialogueLines.Num() == 0)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("DialogueComponent: Sequence %s not found or empty"), *SequenceTag.ToString());
-        return;
-    }
-    
-    // Initialize dialogue state
-    CurrentSequenceTag = SequenceTag;
-    CurrentLineIndex = 0;
-    CurrentListener = Listener;
-    CurrentState = EDialogueState::Playing;
-    
-    // Enable ticking for dialogue updates
-    SetComponentTickEnabled(true);
-    
-    // Start the first line
-    ProcessCurrentLine();
-    
-    UE_LOG(LogTemp, Log, TEXT("DialogueComponent: Started sequence %s for %s"), 
-           *SequenceTag.ToString(), *CharacterName);
+    UE_LOG(LogTemp, Log, TEXT("DialogueComponent: Playing dialogue %s from %s"), 
+           *LineID, *GetOwner()->GetName());
 }
 
-void UDialogueComponent::StopDialogueSequence()
+void UDialogueComponent::PlayDialogueByContext(EDialogueContext Context, AActor* Listener)
 {
-    if (CurrentState == EDialogueState::Idle)
+    UNarrativeManager* NarrativeManager = GetWorld()->GetGameInstance()->GetSubsystem<UNarrativeManager>();
+    if (!NarrativeManager)
     {
         return;
     }
     
-    // Clear timers
-    if (UWorld* World = GetWorld())
+    // Get appropriate dialogue for context
+    FDialogueLine ContextDialogue = NarrativeManager->GetDialogueForContext(CharacterID, Context);
+    if (!ContextDialogue.LineID.IsEmpty())
     {
-        World->GetTimerManager().ClearTimer(LineTimerHandle);
-        World->GetTimerManager().ClearTimer(AutoAdvanceTimerHandle);
+        PlayDialogue(ContextDialogue.LineID, Listener);
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("DialogueComponent: No dialogue found for context %d"), (int32)Context);
+    }
+}
+
+void UDialogueComponent::StopCurrentDialogue()
+{
+    if (!bIsPlayingDialogue)
+    {
+        return;
     }
     
     // Stop audio
-    if (CurrentAudioComponent && IsValid(CurrentAudioComponent))
+    if (AudioComponent && AudioComponent->IsPlaying())
     {
-        CurrentAudioComponent->Stop();
-        CurrentAudioComponent = nullptr;
+        AudioComponent->Stop();
     }
     
-    // Reset state
-    CurrentState = EDialogueState::Idle;
-    CurrentSequenceTag = FGameplayTag::EmptyTag;
-    CurrentLineIndex = 0;
-    CurrentListener = nullptr;
-    
-    // Disable ticking
-    SetComponentTickEnabled(false);
-    
-    UE_LOG(LogTemp, Log, TEXT("DialogueComponent: Stopped dialogue for %s"), *CharacterName);
-}
-
-void UDialogueComponent::PauseDialogue()
-{
-    if (CurrentState == EDialogueState::Playing)
+    // Clear timer
+    if (GetWorld() && GetWorld()->GetTimerManager().IsTimerActive(DialogueTimerHandle))
     {
-        CurrentState = EDialogueState::Paused;
-        
-        if (CurrentAudioComponent && IsValid(CurrentAudioComponent))
-        {
-            CurrentAudioComponent->SetPaused(true);
-        }
-        
-        // Pause timers
-        if (UWorld* World = GetWorld())
-        {
-            World->GetTimerManager().PauseTimer(LineTimerHandle);
-            World->GetTimerManager().PauseTimer(AutoAdvanceTimerHandle);
-        }
+        GetWorld()->GetTimerManager().ClearTimer(DialogueTimerHandle);
     }
+    
+    // Update state
+    bIsPlayingDialogue = false;
+    
+    // Broadcast finish event
+    OnDialogueFinished.Broadcast(CurrentDialogueLine);
+    
+    UE_LOG(LogTemp, Log, TEXT("DialogueComponent: Stopped dialogue for %s"), *GetOwner()->GetName());
 }
 
-void UDialogueComponent::ResumeDialogue()
+void UDialogueComponent::SetCharacterVoice(UDialogueVoice* Voice)
 {
-    if (CurrentState == EDialogueState::Paused)
+    CharacterVoice = Voice;
+    UE_LOG(LogTemp, Log, TEXT("DialogueComponent: Character voice set for %s"), *GetOwner()->GetName());
+}
+
+void UDialogueComponent::SetEmotionalState(EEmotionalTone Tone, float Intensity)
+{
+    CurrentEmotionalTone = Tone;
+    EmotionalIntensity = FMath::Clamp(Intensity, 0.0f, 2.0f);
+    
+    UpdateEmotionalDisplay();
+    
+    UE_LOG(LogTemp, Log, TEXT("DialogueComponent: Emotional state updated - Tone: %d, Intensity: %f"), 
+           (int32)Tone, Intensity);
+}
+
+void UDialogueComponent::OnDialogueAudioFinished()
+{
+    if (bIsPlayingDialogue)
     {
-        CurrentState = EDialogueState::Playing;
+        bIsPlayingDialogue = false;
+        OnDialogueFinished.Broadcast(CurrentDialogueLine);
         
-        if (CurrentAudioComponent && IsValid(CurrentAudioComponent))
-        {
-            CurrentAudioComponent->SetPaused(false);
-        }
-        
-        // Resume timers
-        if (UWorld* World = GetWorld())
-        {
-            World->GetTimerManager().UnPauseTimer(LineTimerHandle);
-            World->GetTimerManager().UnPauseTimer(AutoAdvanceTimerHandle);
-        }
+        UE_LOG(LogTemp, Log, TEXT("DialogueComponent: Dialogue audio finished for %s"), *GetOwner()->GetName());
     }
 }
 
-void UDialogueComponent::AdvanceDialogue()
+FDialogueContext UDialogueComponent::CreateDialogueContext(AActor* Listener) const
 {
-    if (CurrentState == EDialogueState::Playing || CurrentState == EDialogueState::WaitingForInput)
+    FDialogueContext Context;
+    
+    // Set speaker voice
+    if (CharacterVoice)
     {
-        CompleteCurrentLine();
-        AdvanceToNextLine();
-    }
-}
-
-void UDialogueComponent::PlayDialogueLine(const FDialogueLine& DialogueLine, AActor* Listener)
-{
-    if (DialogueLine.DialogueText.IsEmpty())
-    {
-        UE_LOG(LogTemp, Warning, TEXT("DialogueComponent: Empty dialogue text"));
-        return;
+        Context.Speaker = CharacterVoice;
     }
     
-    // Stop any current audio
-    if (CurrentAudioComponent && IsValid(CurrentAudioComponent))
+    // Set listener voice if available
+    if (Listener)
     {
-        CurrentAudioComponent->Stop();
-    }
-    
-    // Play audio if available
-    if (DialogueLine.DialogueWave)
-    {
-        CurrentAudioComponent = UGameplayStatics::SpawnSoundAtLocation(
-            GetWorld(),
-            DialogueLine.DialogueWave,
-            GetOwner()->GetActorLocation()
-        );
-        
-        if (CurrentAudioComponent)
+        UDialogueComponent* ListenerDialogue = Listener->FindComponentByClass<UDialogueComponent>();
+        if (ListenerDialogue && ListenerDialogue->CharacterVoice)
         {
-            CurrentAudioComponent->OnAudioFinished.AddDynamic(this, &UDialogueComponent::OnAudioComponentFinished);
+            Context.Targets.Add(ListenerDialogue->CharacterVoice);
         }
     }
     
-    // Broadcast dialogue line
-    FString SpeakerName = DialogueLine.SpeakerName.IsEmpty() ? CharacterName : DialogueLine.SpeakerName;
-    OnDialogueLineSpoken.Broadcast(SpeakerName, DialogueLine.DialogueText, DialogueLine.DisplayDuration);
-    
-    // Trigger any events associated with this line
-    TriggerLineEvents(DialogueLine);
-    
-    UE_LOG(LogTemp, Log, TEXT("DialogueComponent: %s says: %s"), *SpeakerName, *DialogueLine.DialogueText);
+    return Context;
 }
 
-void UDialogueComponent::AddDialogueSequence(const FDialogueSequence& NewSequence)
+void UDialogueComponent::UpdateEmotionalDisplay()
 {
-    if (NewSequence.SequenceTag.IsValid())
+    // Update audio component properties based on emotional state
+    if (AudioComponent)
     {
-        DialogueSequences.Add(NewSequence.SequenceTag, NewSequence);
-        UE_LOG(LogTemp, Log, TEXT("DialogueComponent: Added dialogue sequence %s"), *NewSequence.SequenceTag.ToString());
-    }
-}
-
-bool UDialogueComponent::HasDialogueSequence(FGameplayTag SequenceTag) const
-{
-    return DialogueSequences.Contains(SequenceTag);
-}
-
-bool UDialogueComponent::CanPlaySequence(FGameplayTag SequenceTag) const
-{
-    const FDialogueSequence* Sequence = DialogueSequences.Find(SequenceTag);
-    if (!Sequence)
-    {
-        return false;
-    }
-    
-    // Check prerequisites with narrative manager
-    if (UNarrativeManager* NarrativeManager = GetWorld()->GetGameInstance()->GetSubsystem<UNarrativeManager>())
-    {
-        for (const FGameplayTag& PrereqTag : Sequence->PrerequisiteTags)
+        // Adjust pitch based on emotional tone
+        float PitchMultiplier = 1.0f;
+        switch (CurrentEmotionalTone)
         {
-            if (!NarrativeManager->IsEventCompleted(PrereqTag))
-            {
-                return false;
-            }
-        }
-    }
-    
-    return true;
-}
-
-void UDialogueComponent::LoadDialogueFromDataTable()
-{
-    if (DialogueDataTable)
-    {
-        TArray<FDialogueSequence*> DialogueData;
-        DialogueDataTable->GetAllRows<FDialogueSequence>(TEXT("LoadDialogue"), DialogueData);
-        
-        for (const FDialogueSequence* Sequence : DialogueData)
-        {
-            if (Sequence && Sequence->SequenceTag.IsValid())
-            {
-                AddDialogueSequence(*Sequence);
-            }
+            case EEmotionalTone::Fear:
+                PitchMultiplier = 1.2f; // Higher pitch for fear
+                break;
+            case EEmotionalTone::Desperation:
+                PitchMultiplier = 1.1f;
+                break;
+            case EEmotionalTone::Wonder:
+                PitchMultiplier = 1.05f; // Slightly higher for wonder
+                break;
+            case EEmotionalTone::Awe:
+                PitchMultiplier = 0.95f; // Lower for awe
+                break;
+            case EEmotionalTone::Peace:
+                PitchMultiplier = 0.9f; // Lower for peace
+                break;
+            default:
+                PitchMultiplier = 1.0f;
+                break;
         }
         
-        UE_LOG(LogTemp, Log, TEXT("DialogueComponent: Loaded %d dialogue sequences from data table"), DialogueData.Num());
-    }
-}
-
-void UDialogueComponent::ProcessCurrentLine()
-{
-    const FDialogueSequence* CurrentSequence = DialogueSequences.Find(CurrentSequenceTag);
-    if (!CurrentSequence || CurrentLineIndex >= CurrentSequence->DialogueLines.Num())
-    {
-        CompleteSequence();
-        return;
-    }
-    
-    const FDialogueLine& CurrentLine = CurrentSequence->DialogueLines[CurrentLineIndex];
-    
-    // Play the dialogue line
-    PlayDialogueLine(CurrentLine, CurrentListener);
-    
-    // Set up timing for line completion
-    float LineDuration = CurrentLine.DisplayDuration > 0 ? CurrentLine.DisplayDuration : DefaultLineDuration;
-    
-    if (CurrentLine.bWaitForInput)
-    {
-        CurrentState = EDialogueState::WaitingForInput;
-    }
-    else
-    {
-        // Auto-advance after duration
-        if (UWorld* World = GetWorld())
-        {
-            World->GetTimerManager().SetTimer(
-                LineTimerHandle,
-                [this]() { CompleteCurrentLine(); AdvanceToNextLine(); },
-                LineDuration,
-                false
-            );
-        }
-    }
-}
-
-void UDialogueComponent::CompleteCurrentLine()
-{
-    // Clear line timer
-    if (UWorld* World = GetWorld())
-    {
-        World->GetTimerManager().ClearTimer(LineTimerHandle);
-    }
-    
-    if (CurrentState == EDialogueState::WaitingForInput)
-    {
-        CurrentState = EDialogueState::Playing;
-    }
-}
-
-void UDialogueComponent::AdvanceToNextLine()
-{
-    CurrentLineIndex++;
-    
-    if (bAutoAdvanceDialogue && AutoAdvanceDelay > 0)
-    {
-        // Delay before next line
-        if (UWorld* World = GetWorld())
-        {
-            World->GetTimerManager().SetTimer(
-                AutoAdvanceTimerHandle,
-                [this]() { ProcessCurrentLine(); },
-                AutoAdvanceDelay,
-                false
-            );
-        }
-    }
-    else
-    {
-        ProcessCurrentLine();
-    }
-}
-
-void UDialogueComponent::CompleteSequence()
-{
-    FGameplayTag CompletedSequence = CurrentSequenceTag;
-    
-    // Broadcast completion
-    OnDialogueSequenceComplete.Broadcast(CompletedSequence);
-    
-    // Stop dialogue
-    StopDialogueSequence();
-    
-    UE_LOG(LogTemp, Log, TEXT("DialogueComponent: Completed sequence %s"), *CompletedSequence.ToString());
-}
-
-void UDialogueComponent::TriggerLineEvents(const FDialogueLine& Line)
-{
-    if (UNarrativeManager* NarrativeManager = GetWorld()->GetGameInstance()->GetSubsystem<UNarrativeManager>())
-    {
-        for (const FGameplayTag& EventTag : Line.TriggeredEvents)
-        {
-            if (EventTag.IsValid())
-            {
-                NarrativeManager->TriggerStoryEvent(EventTag, Line.DialogueText);
-            }
-        }
-    }
-}
-
-void UDialogueComponent::OnAudioComponentFinished()
-{
-    // Audio finished playing, handle auto-advance if needed
-    if (CurrentState == EDialogueState::Playing && bAutoAdvanceDialogue)
-    {
-        CompleteCurrentLine();
-        AdvanceToNextLine();
+        AudioComponent->SetPitchMultiplier(PitchMultiplier * EmotionalIntensity);
+        
+        // Adjust volume based on emotional intensity
+        float VolumeMultiplier = FMath::Lerp(0.7f, 1.3f, EmotionalIntensity);
+        AudioComponent->SetVolumeMultiplier(VolumeMultiplier);
     }
 }
