@@ -1,0 +1,307 @@
+// Copyright Transpersonal Game Studio. All Rights Reserved.
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Components/ActorComponent.h"
+#include "VFXSystemManager.h"
+#include "Engine/DataTable.h"
+#include "WeatherVFXController.generated.h"
+
+UENUM(BlueprintType)
+enum class EWeatherVFXType : uint8
+{
+    None = 0,
+    Rain,
+    Snow,
+    Fog,
+    Storm,
+    Lightning,
+    Wind,
+    Clouds,
+    Mist,
+    Hail,
+    Sandstorm
+};
+
+UENUM(BlueprintType)
+enum class EWeatherIntensity : uint8
+{
+    None = 0,
+    Light,
+    Moderate,
+    Heavy,
+    Extreme
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FWeatherVFXConfig : public FTableRowBase
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Config")
+    EWeatherVFXType WeatherType = EWeatherVFXType::None;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Config")
+    EVFXType NiagaraVFXType = EVFXType::Weather;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Config")
+    bool bEnabled = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Intensity")
+    EWeatherIntensity MinIntensity = EWeatherIntensity::Light;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Intensity")
+    EWeatherIntensity MaxIntensity = EWeatherIntensity::Extreme;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
+    float SpawnRadius = 5000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
+    int32 MaxParticleSystems = 10;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
+    float UpdateInterval = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Effects")
+    float WindSpeed = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Effects")
+    float Temperature = 20.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Effects")
+    float Humidity = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Effects")
+    float Visibility = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    bool bHasAudioEffects = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    float AudioVolume = 1.0f;
+};
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnWeatherChanged, EWeatherVFXType, WeatherType, EWeatherIntensity, Intensity, float, Duration);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnWeatherIntensityChanged, EWeatherVFXType, WeatherType, EWeatherIntensity, NewIntensity);
+
+/**
+ * Weather VFX Controller - Manages weather-based visual effects
+ * Handles rain, snow, storms, fog, and other atmospheric weather effects
+ */
+UCLASS(BlueprintType, Blueprintable, ClassGroup=(VFX), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UWeatherVFXController : public UActorComponent
+{
+    GENERATED_BODY()
+
+public:
+    UWeatherVFXController();
+
+    virtual void BeginPlay() override;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
+    // Weather Control
+    UFUNCTION(BlueprintCallable, Category = "Weather VFX")
+    void SetWeather(EWeatherVFXType WeatherType, EWeatherIntensity Intensity = EWeatherIntensity::Moderate, float Duration = -1.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Weather VFX")
+    void StopWeather(EWeatherVFXType WeatherType);
+
+    UFUNCTION(BlueprintCallable, Category = "Weather VFX")
+    void StopAllWeather();
+
+    UFUNCTION(BlueprintCallable, Category = "Weather VFX")
+    void TransitionToWeather(EWeatherVFXType NewWeatherType, EWeatherIntensity Intensity, float TransitionDuration = 5.0f);
+
+    // Weather State
+    UFUNCTION(BlueprintCallable, Category = "Weather VFX")
+    EWeatherVFXType GetCurrentWeatherType() const { return CurrentWeatherType; }
+
+    UFUNCTION(BlueprintCallable, Category = "Weather VFX")
+    EWeatherIntensity GetCurrentWeatherIntensity() const { return CurrentWeatherIntensity; }
+
+    UFUNCTION(BlueprintCallable, Category = "Weather VFX")
+    bool IsWeatherActive(EWeatherVFXType WeatherType) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Weather VFX")
+    float GetWeatherRemainingDuration() const { return WeatherRemainingDuration; }
+
+    // Intensity Control
+    UFUNCTION(BlueprintCallable, Category = "Weather VFX")
+    void SetWeatherIntensity(EWeatherVFXType WeatherType, EWeatherIntensity Intensity);
+
+    UFUNCTION(BlueprintCallable, Category = "Weather VFX")
+    void ModifyWeatherIntensity(EWeatherVFXType WeatherType, float IntensityDelta);
+
+    // Specific Weather Effects
+    UFUNCTION(BlueprintCallable, Category = "Weather VFX")
+    void StartRain(EWeatherIntensity Intensity = EWeatherIntensity::Moderate, float Duration = -1.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Weather VFX")
+    void StartSnow(EWeatherIntensity Intensity = EWeatherIntensity::Light, float Duration = -1.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Weather VFX")
+    void StartStorm(EWeatherIntensity Intensity = EWeatherIntensity::Heavy, float Duration = -1.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Weather VFX")
+    void StartFog(EWeatherIntensity Intensity = EWeatherIntensity::Moderate, float Duration = -1.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Weather VFX")
+    void TriggerLightning(FVector StrikeLocation = FVector::ZeroVector);
+
+    UFUNCTION(BlueprintCallable, Category = "Weather VFX")
+    void SetWindSpeed(float WindSpeed);
+
+    UFUNCTION(BlueprintCallable, Category = "Weather VFX")
+    float GetWindSpeed() const { return CurrentWindSpeed; }
+
+    // Environmental Effects
+    UFUNCTION(BlueprintCallable, Category = "Weather VFX")
+    void SetTemperature(float Temperature);
+
+    UFUNCTION(BlueprintCallable, Category = "Weather VFX")
+    float GetTemperature() const { return CurrentTemperature; }
+
+    UFUNCTION(BlueprintCallable, Category = "Weather VFX")
+    void SetHumidity(float Humidity);
+
+    UFUNCTION(BlueprintCallable, Category = "Weather VFX")
+    float GetHumidity() const { return CurrentHumidity; }
+
+    UFUNCTION(BlueprintCallable, Category = "Weather VFX")
+    void SetVisibility(float Visibility);
+
+    UFUNCTION(BlueprintCallable, Category = "Weather VFX")
+    float GetVisibility() const { return CurrentVisibility; }
+
+    // Random Weather
+    UFUNCTION(BlueprintCallable, Category = "Weather VFX")
+    void StartRandomWeather(float MinDuration = 60.0f, float MaxDuration = 300.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Weather VFX")
+    void EnableRandomWeatherCycle(bool bEnable, float CycleInterval = 120.0f);
+
+    // Configuration
+    UFUNCTION(BlueprintCallable, Category = "Weather VFX")
+    void LoadWeatherConfig(FName ConfigRowName);
+
+    UFUNCTION(BlueprintCallable, Category = "Weather VFX")
+    void SetWeatherEnabled(EWeatherVFXType WeatherType, bool bEnabled);
+
+    UFUNCTION(BlueprintCallable, Category = "Weather VFX")
+    void SetGlobalWeatherIntensityMultiplier(float Multiplier);
+
+    // Events
+    UPROPERTY(BlueprintAssignable, Category = "Weather VFX")
+    FOnWeatherChanged OnWeatherChanged;
+
+    UPROPERTY(BlueprintAssignable, Category = "Weather VFX")
+    FOnWeatherIntensityChanged OnWeatherIntensityChanged;
+
+    // Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Config")
+    UDataTable* WeatherConfigTable;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Config")
+    bool bAutoFollowPlayer = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Config")
+    float PlayerFollowRadius = 3000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Config")
+    float GlobalIntensityMultiplier = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Config")
+    bool bEnableRandomWeather = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Config")
+    float RandomWeatherCycleInterval = 180.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Config")
+    TArray<EWeatherVFXType> EnabledWeatherTypes;
+
+protected:
+    // Current Weather State
+    UPROPERTY()
+    EWeatherVFXType CurrentWeatherType = EWeatherVFXType::None;
+
+    UPROPERTY()
+    EWeatherIntensity CurrentWeatherIntensity = EWeatherIntensity::None;
+
+    UPROPERTY()
+    float WeatherRemainingDuration = 0.0f;
+
+    UPROPERTY()
+    bool bWeatherTransitioning = false;
+
+    UPROPERTY()
+    EWeatherVFXType TransitionTargetWeather = EWeatherVFXType::None;
+
+    UPROPERTY()
+    float TransitionRemainingTime = 0.0f;
+
+    UPROPERTY()
+    float TransitionTotalTime = 0.0f;
+
+    // Environmental State
+    UPROPERTY()
+    float CurrentWindSpeed = 0.0f;
+
+    UPROPERTY()
+    float CurrentTemperature = 20.0f;
+
+    UPROPERTY()
+    float CurrentHumidity = 0.5f;
+
+    UPROPERTY()
+    float CurrentVisibility = 1.0f;
+
+    // Random Weather
+    UPROPERTY()
+    bool bRandomWeatherEnabled = false;
+
+    UPROPERTY()
+    float RandomWeatherTimer = 0.0f;
+
+    // VFX Management
+    UPROPERTY()
+    UVFXSystemManager* VFXManager;
+
+    UPROPERTY()
+    TMap<EWeatherVFXType, FWeatherVFXConfig> WeatherConfigs;
+
+    UPROPERTY()
+    TMap<EWeatherVFXType, TArray<TWeakObjectPtr<UNiagaraComponent>>> ActiveWeatherVFX;
+
+    UPROPERTY()
+    TMap<EWeatherVFXType, float> WeatherIntensityValues;
+
+    // Player Following
+    UPROPERTY()
+    FVector LastPlayerLocation = FVector::ZeroVector;
+
+    UPROPERTY()
+    float PlayerFollowUpdateTimer = 0.0f;
+
+    // Internal Methods
+    void UpdateWeatherDuration(float DeltaTime);
+    void UpdateWeatherTransition(float DeltaTime);
+    void UpdateRandomWeather(float DeltaTime);
+    void UpdatePlayerFollowing(float DeltaTime);
+    void UpdateWeatherVFX(float DeltaTime);
+    void CleanupExpiredVFX();
+
+    void SpawnWeatherVFX(EWeatherVFXType WeatherType, EWeatherIntensity Intensity);
+    void RemoveWeatherVFX(EWeatherVFXType WeatherType);
+    void UpdateWeatherVFXIntensity(EWeatherVFXType WeatherType, float IntensityValue);
+
+    FVector GetPlayerLocation() const;
+    TArray<FVector> GenerateWeatherSpawnLocations(const FWeatherVFXConfig& Config) const;
+    float GetIntensityValue(EWeatherIntensity Intensity) const;
+    EWeatherVFXType GetRandomWeatherType() const;
+    EWeatherIntensity GetRandomWeatherIntensity() const;
+
+    bool CanActivateWeather(EWeatherVFXType WeatherType) const;
+    void ApplyEnvironmentalEffects(EWeatherVFXType WeatherType, EWeatherIntensity Intensity);
+};
