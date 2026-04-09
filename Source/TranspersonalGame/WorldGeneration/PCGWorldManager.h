@@ -1,0 +1,301 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Subsystems/WorldSubsystem.h"
+#include "PCGComponent.h"
+#include "PCGGraph.h"
+#include "PCGData.h"
+#include "Engine/World.h"
+#include "PCGWorldManager.generated.h"
+
+USTRUCT(BlueprintType)
+struct FPCGBiomeRule
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG Rule")
+    FString BiomeName = "DefaultBiome";
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG Rule")
+    TSoftObjectPtr<UPCGGraphInterface> PCGGraph;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG Rule")
+    float Priority = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG Rule")
+    float MinTemperature = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG Rule")
+    float MaxTemperature = 50.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG Rule")
+    float MinHumidity = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG Rule")
+    float MaxHumidity = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG Rule")
+    float MinElevation = -1000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG Rule")
+    float MaxElevation = 3000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG Rule")
+    TArray<TSoftObjectPtr<UStaticMesh>> VegetationMeshes;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG Rule")
+    TArray<TSoftObjectPtr<UMaterialInterface>> TerrainMaterials;
+};
+
+USTRUCT(BlueprintType)
+struct FPCGGenerationTask
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation Task")
+    FVector WorldLocation = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation Task")
+    FVector2D ChunkSize = FVector2D(2048.0f, 2048.0f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation Task")
+    FString BiomeType = "DenseForest";
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation Task")
+    float Priority = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation Task")
+    bool bIsCompleted = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation Task")
+    TWeakObjectPtr<UPCGComponent> PCGComponent;
+};
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnPCGGenerationComplete, const FVector&, Location, bool, bSuccess);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBiomeTransition, const FString&, NewBiome);
+
+/**
+ * PCG World Manager - Manages procedural content generation across the world
+ * Handles biome-specific PCG rules, streaming, and performance optimization
+ */
+UCLASS(BlueprintType)
+class TRANSPERSONALGAME_API UPCGWorldManager : public UWorldSubsystem
+{
+    GENERATED_BODY()
+
+public:
+    UPCGWorldManager();
+
+    // === USubsystem Interface ===
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+    virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
+
+protected:
+    virtual void OnWorldBeginPlay(UWorld& InWorld) override;
+
+public:
+    // === PCG RULE MANAGEMENT ===
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG Rules")
+    TArray<FPCGBiomeRule> BiomeRules;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG Rules")
+    TSoftObjectPtr<UPCGGraphInterface> DefaultPCGGraph;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG Rules")
+    float RuleBlendDistance = 500.0f;
+
+    // === GENERATION SETTINGS ===
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation")
+    bool bEnableRuntimeGeneration = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation")
+    float GenerationRadius = 5000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation")
+    int32 MaxConcurrentTasks = 4;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation")
+    float TaskTimeoutSeconds = 30.0f;
+
+    // === PERFORMANCE SETTINGS ===
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    bool bUseHierarchicalGeneration = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 LargeGridSize = 12800; // 128m
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 MediumGridSize = 6400;  // 64m
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 SmallGridSize = 3200;   // 32m
+
+    // === RUNTIME DATA ===
+    
+    UPROPERTY(BlueprintReadOnly, Category = "Runtime")
+    TArray<FPCGGenerationTask> ActiveTasks;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Runtime")
+    TMap<FVector2D, FString> ChunkBiomeMap;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Runtime")
+    bool bIsInitialized = false;
+
+    // === EVENTS ===
+    
+    UPROPERTY(BlueprintAssignable, Category = "Events")
+    FOnPCGGenerationComplete OnGenerationComplete;
+
+    UPROPERTY(BlueprintAssignable, Category = "Events")
+    FOnBiomeTransition OnBiomeTransition;
+
+public:
+    // === BLUEPRINT CALLABLE FUNCTIONS ===
+    
+    UFUNCTION(BlueprintCallable, Category = "PCG World Manager")
+    void InitializePCGSystem();
+
+    UFUNCTION(BlueprintCallable, Category = "PCG World Manager")
+    void ShutdownPCGSystem();
+
+    UFUNCTION(BlueprintCallable, Category = "Generation")
+    void RequestGenerationAtLocation(const FVector& Location, const FString& BiomeType = "", float Priority = 1.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Generation")
+    void CancelGenerationAtLocation(const FVector& Location);
+
+    UFUNCTION(BlueprintCallable, Category = "Generation")
+    void ClearAllGeneration();
+
+    // === BIOME RULE MANAGEMENT ===
+    
+    UFUNCTION(BlueprintCallable, Category = "Biome Rules")
+    void AddBiomeRule(const FPCGBiomeRule& Rule);
+
+    UFUNCTION(BlueprintCallable, Category = "Biome Rules")
+    void RemoveBiomeRule(const FString& BiomeName);
+
+    UFUNCTION(BlueprintCallable, Category = "Biome Rules")
+    FPCGBiomeRule GetBiomeRule(const FString& BiomeName) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Biome Rules")
+    TArray<FString> GetAvailableBiomes() const;
+
+    // === QUERY FUNCTIONS ===
+    
+    UFUNCTION(BlueprintCallable, Category = "Queries")
+    FString GetBiomeAtLocation(const FVector& Location) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Queries")
+    bool IsLocationGenerated(const FVector& Location) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Queries")
+    float GetGenerationProgress(const FVector& Location) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Queries")
+    TArray<FVector> GetActiveGenerationLocations() const;
+
+    // === STREAMING MANAGEMENT ===
+    
+    UFUNCTION(BlueprintCallable, Category = "Streaming")
+    void UpdateGenerationAroundPlayer(const FVector& PlayerLocation);
+
+    UFUNCTION(BlueprintCallable, Category = "Streaming")
+    void SetGenerationRadius(float NewRadius);
+
+    UFUNCTION(BlueprintCallable, Category = "Streaming")
+    void EnableRuntimeGeneration(bool bEnable);
+
+    // === DEBUGGING ===
+    
+    UFUNCTION(BlueprintCallable, Category = "Debug")
+    void DebugDrawActiveTasks();
+
+    UFUNCTION(BlueprintCallable, Category = "Debug")
+    void DebugDrawBiomeRules();
+
+    UFUNCTION(BlueprintCallable, Category = "Debug")
+    void LogPCGStatistics();
+
+private:
+    // === INTERNAL MANAGEMENT ===
+    
+    void ProcessGenerationTasks();
+    void UpdateTaskProgress();
+    void CleanupCompletedTasks();
+    
+    // === PCG COMPONENT MANAGEMENT ===
+    
+    UPCGComponent* CreatePCGComponentForLocation(const FVector& Location, const FString& BiomeType);
+    void ConfigurePCGComponent(UPCGComponent* Component, const FPCGBiomeRule& Rule);
+    void DestroyPCGComponent(UPCGComponent* Component);
+    
+    // === BIOME LOGIC ===
+    
+    FPCGBiomeRule SelectBiomeRuleForLocation(const FVector& Location) const;
+    bool DoesBiomeRuleMatch(const FPCGBiomeRule& Rule, const FVector& Location) const;
+    float CalculateBiomeRulePriority(const FPCGBiomeRule& Rule, const FVector& Location) const;
+    
+    // === TASK MANAGEMENT ===
+    
+    FPCGGenerationTask* FindTaskAtLocation(const FVector& Location);
+    void StartGenerationTask(FPCGGenerationTask& Task);
+    void CompleteGenerationTask(FPCGGenerationTask& Task, bool bSuccess);
+    
+    // === PERFORMANCE OPTIMIZATION ===
+    
+    bool ShouldGenerateAtLocation(const FVector& Location) const;
+    int32 GetOptimalGridSizeForLocation(const FVector& Location) const;
+    void OptimizePCGSettings(UPCGComponent* Component, int32 GridSize);
+    
+    // === STREAMING HELPERS ===
+    
+    TArray<FVector> GetLocationsInRadius(const FVector& Center, float Radius) const;
+    void UnloadDistantGeneration(const FVector& PlayerLocation);
+    
+    // === UTILITIES ===
+    
+    FVector2D WorldLocationToChunkCoords(const FVector& Location) const;
+    FVector ChunkCoordsToWorldLocation(const FVector2D& ChunkCoords) const;
+    float GetEnvironmentalValue(const FVector& Location, const FString& ValueType) const;
+
+private:
+    // === CACHED REFERENCES ===
+    
+    UPROPERTY()
+    class ATerrainGenerator* TerrainGenerator;
+
+    UPROPERTY()
+    class ARiverSystem* RiverSystem;
+
+    UPROPERTY()
+    TArray<TWeakObjectPtr<UPCGComponent>> ManagedComponents;
+
+    // === PERFORMANCE TRACKING ===
+    
+    UPROPERTY()
+    float LastUpdateTime = 0.0f;
+
+    UPROPERTY()
+    int32 TotalGeneratedChunks = 0;
+
+    UPROPERTY()
+    float AverageGenerationTime = 0.0f;
+
+    // === TASK QUEUE ===
+    
+    UPROPERTY()
+    TArray<FPCGGenerationTask> PendingTasks;
+
+    UPROPERTY()
+    TMap<FVector, float> TaskStartTimes;
+
+    // === TIMER HANDLES ===
+    
+    FTimerHandle UpdateTimerHandle;
+    FTimerHandle CleanupTimerHandle;
+};
