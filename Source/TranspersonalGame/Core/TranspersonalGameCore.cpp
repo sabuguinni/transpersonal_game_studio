@@ -283,7 +283,7 @@ void ATranspersonalGameModeBase::EndPlay(const EEndPlayReason::Type EndPlayReaso
 
 void ATranspersonalGameModeBase::OnCoreSystemsReady()
 {
-    UE_LOG(LogTranspersonalCore, Log, TEXT("Core systems ready - initializing game systems"));
+    UE_LOG(LogTranspersonalCore, Log, TEXT("Core systems ready - initializing game-specific systems"));
     OnGameSystemsInitialized();
 }
 
@@ -293,7 +293,6 @@ void ATranspersonalGameModeBase::OnCoreSystemsReady()
 ATranspersonalPlayerController::ATranspersonalPlayerController()
 {
     PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.bStartWithTickEnabled = true;
 }
 
 void ATranspersonalPlayerController::BeginPlay()
@@ -301,18 +300,13 @@ void ATranspersonalPlayerController::BeginPlay()
     Super::BeginPlay();
     
     UE_LOG(LogTranspersonalCore, Log, TEXT("Transpersonal Player Controller starting..."));
-    
-    if (bShowPerformanceMetrics)
-    {
-        TogglePerformanceDisplay();
-    }
 }
 
 void ATranspersonalPlayerController::SetupInputComponent()
 {
     Super::SetupInputComponent();
     
-    // Add debug input bindings
+    // Setup debug input bindings
     if (InputComponent)
     {
         InputComponent->BindAction("TogglePerformanceDisplay", IE_Pressed, this, &ATranspersonalPlayerController::TogglePerformanceDisplay);
@@ -354,20 +348,21 @@ void ATranspersonalPlayerController::DisplayPerformanceMetrics()
         
         CoreSubsystem->GetPerformanceMetrics(FrameTime, TriangleCount, MemoryUsage);
         
+        FString PerformanceText = FString::Printf(
+            TEXT("Frame Time: %.2fms | Memory: %.1fMB | Triangles: %d"),
+            FrameTime,
+            MemoryUsage,
+            TriangleCount
+        );
+        
         if (GEngine)
         {
-            GEngine->AddOnScreenDebugMessage(
-                -1, 1.0f, FColor::Green,
-                FString::Printf(TEXT("Frame Time: %.2f ms"), FrameTime)
-            );
-            GEngine->AddOnScreenDebugMessage(
-                -1, 1.0f, FColor::Green,
-                FString::Printf(TEXT("Memory Usage: %.1f MB"), MemoryUsage)
-            );
+            GEngine->AddOnScreenDebugMessage(-1, 1.0f, FColor::Green, PerformanceText);
         }
     }
 }
 
-#undef LOCTEXT_NAMESPACE
-
+// Module implementation
 IMPLEMENT_MODULE(FTranspersonalGameCoreModule, TranspersonalGameCore)
+
+#undef LOCTEXT_NAMESPACE
