@@ -1,253 +1,548 @@
+// Copyright Transpersonal Game Studio. All Rights Reserved.
+
 #include "CrowdMovementProcessor.h"
+#include "MassEntitySubsystem.h"
+#include "MassExecutionContext.h"
 #include "MassCommonFragments.h"
 #include "MassMovementFragments.h"
 #include "MassNavigationFragments.h"
-#include "MassExecutionContext.h"
-#include "MassEntitySubsystem.h"
+#include "MassLODFragments.h"
+#include "ZoneGraphSubsystem.h"
+#include "NavigationSystem.h"
 #include "Engine/World.h"
+#include "DrawDebugHelpers.h"
+#include "Kismet/KismetMathLibrary.h"
+
+DEFINE_LOG_CATEGORY_STATIC(LogCrowdMovement, Log, All);
 
 UCrowdMovementProcessor::UCrowdMovementProcessor()
 {
+    bAutoRegisterWithProcessingPhases = true;
     ExecutionFlags = (int32)(EProcessorExecutionFlags::All);
     ExecutionOrder.ExecuteInGroup = UE::Mass::ProcessorGroupNames::Movement;
     ExecutionOrder.ExecuteAfter.Add(UE::Mass::ProcessorGroupNames::Avoidance);
+
+    // Initialize default values
+    WanderUpdateInterval = 2.0f;
+    PerceptionUpdateInterval = 0.5f;
+    MaxMovementSpeed = 600.0f;
+    MinMovementSpeed = 50.0f;
+    FlockingRadius = 200.0f;
+    AvoidanceRadius = 150.0f;
+    ObstacleCheckDistance = 300.0f;
+    
+    WanderWeight = 1.0f;
+    FlockingWeight = 0.8f;
+    AvoidanceWeight = 1.5f;
+    FollowWeight = 2.0f;
+    FleeWeight = 3.0f;
 }
 
 void UCrowdMovementProcessor::ConfigureQueries()
 {
-    // Configure main crowd movement query
-    CrowdMovementQuery.AddRequirement<FTransformFragment>(EMassFragmentAccess::ReadWrite);
-    CrowdMovementQuery.AddRequirement<FMassVelocityFragment>(EMassFragmentAccess::ReadWrite);
-    CrowdMovementQuery.AddRequirement<FMassMoveTargetFragment>(EMassFragmentAccess::ReadOnly);
-    CrowdMovementQuery.AddRequirement<FCrowdAgentFragment>(EMassFragmentAccess::ReadWrite);
-    CrowdMovementQuery.AddChunkRequirement<FMassSimulationLODFragment>(EMassFragmentAccess::ReadOnly);
-    
-    // Configure nearby entities query for flocking
-    NearbyEntitiesQuery.AddRequirement<FTransformFragment>(EMassFragmentAccess::ReadOnly);
-    NearbyEntitiesQuery.AddRequirement<FMassVelocityFragment>(EMassFragmentAccess::ReadOnly);
-    NearbyEntitiesQuery.AddRequirement<FCrowdAgentFragment>(EMassFragmentAccess::ReadOnly);
+    MovementQuery.AddRequirement<FTransformFragment>(EMassFragmentAccess::ReadWrite);
+    MovementQuery.AddRequirement<FCrowdMovementFragment>(EMassFragmentAccess::ReadWrite);
+    MovementQuery.AddRequirement<FCrowdBehaviorFragment>(EMassFragmentAccess::ReadOnly);
+    MovementQuery.AddRequirement<FCrowdPerceptionFragment>(EMassFragmentAccess::ReadWrite);
+    MovementQuery.AddRequirement<FCrowdAvoidanceFragment>(EMassFragmentAccess::ReadWrite);
+    MovementQuery.AddOptionalRequirement<FMassVelocityFragment>(EMassFragmentAccess::ReadWrite);
+    MovementQuery.AddChunkRequirement<FMassVisualizationLODFragment>(EMassFragmentAccess::ReadOnly);
 }
 
 void UCrowdMovementProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
-    // Get world for timing
-    UWorld* World = EntityManager.GetWorld();
-    if (!World)
+    SCOPE_CYCLE_COUNTER(STAT_CrowdMovementProcessor);
+
+    const float DeltaTime = Context.GetDeltaTimeSeconds();
+    const float CurrentTime = Context.GetWorld()->GetTimeSeconds();
+    
+    // Get required subsystems
+    if (!ZoneGraphSubsystem)
     {
-        return;
+        ZoneGraphSubsystem = Context.GetWorld()->GetSubsystem<UZoneGraphSubsystem>();
     }
     
-    const float DeltaTime = World->GetDeltaSeconds();
-    
-    // Process crowd movement
-    CrowdMovementQuery.ForEachEntityChunk(EntityManager, Context, 
-        [this, DeltaTime](FMassExecutionContext& Context)
+    if (!NavigationSystem)
+    {
+        NavigationSystem = FNavigationSystem::GetCurrent<UNavigationSystemV1>(Context.GetWorld());
+    }
+
+    ProcessedEntityCount = 0;
+    const double StartTime = FPlatformTime::Seconds();
+
+    // Process movement for all entities
+    MovementQuery.ForEachEntityChunk(EntityManager, Context, 
+        [this, DeltaTime, CurrentTime](FMassExecutionContext& Context)
         {
+            const TConstArrayView<FTransformFragment> TransformList = Context.GetFragmentView<FTransformFragment>();
+            const TArrayView<FCrowdMovementFragment> MovementList = Context.GetMutableFragmentView<FCrowdMovementFragment>();
+            const TConstArrayView<FCrowdBehaviorFragment> BehaviorList = Context.GetFragmentView<FCrowdBehaviorFragment>();
+            const TArrayView<FCrowdPerceptionFragment> PerceptionList = Context.GetMutableFragmentView<FCrowdPerceptionFragment>();
+            const TArrayView<FCrowdAvoidanceFragment> AvoidanceList = Context.GetMutableFragmentView<FCrowdAvoidanceFragment>();
+            const TConstArrayView<FMassVisualizationLODFragment> LODList = Context.GetFragmentView<FMassVisualizationLODFragment>();
+
             const int32 NumEntities = Context.GetNumEntities();
-            const auto& TransformList = Context.GetMutableFragmentView<FTransformFragment>();
-            const auto& VelocityList = Context.GetMutableFragmentView<FMassVelocityFragment>();
-            const auto& MoveTargetList = Context.GetFragmentView<FMassMoveTargetFragment>();
-            const auto& CrowdAgentList = Context.GetMutableFragmentView<FCrowdAgentFragment>();
-            const auto& LODList = Context.GetChunkFragmentView<FMassSimulationLODFragment>();
-            
-            // Skip if LOD is too low for detailed simulation
-            if (LODList.Num() > 0 && LODList[0].LOD > EMassLOD::Medium)
-            {
-                return;
-            }
-            
+            ProcessedEntityCount += NumEntities;
+
             for (int32 EntityIndex = 0; EntityIndex < NumEntities; ++EntityIndex)
             {
-                FTransformFragment& Transform = TransformList[EntityIndex];
-                FMassVelocityFragment& Velocity = VelocityList[EntityIndex];
-                const FMassMoveTargetFragment& MoveTarget = MoveTargetList[EntityIndex];
-                FCrowdAgentFragment& CrowdAgent = CrowdAgentList[EntityIndex];
-                
-                const FMassEntityHandle EntityHandle = Context.GetEntity(EntityIndex);
-                
-                // Calculate steering forces
-                FVector SteeringForce = FVector::ZeroVector;
-                
-                // Basic movement toward target
-                FVector DesiredVelocity = (MoveTarget.Center - Transform.GetTransform().GetLocation()).GetSafeNormal() * CrowdAgent.PreferredSpeed;
-                FVector SeekForce = (DesiredVelocity - Velocity.Value).GetClampedToMaxSize(MaxForce);
-                SteeringForce += SeekForce;
-                
-                // Add flocking forces
-                FVector FlockingForce = CalculateFlockingForce(EntityHandle, Transform, CrowdAgent, Context);
-                SteeringForce += FlockingForce;
-                
-                // Emergency behavior
-                if (CrowdAgent.BehaviorState == FCrowdAgentFragment::ECrowdBehaviorState::Fleeing)
+                const FTransformFragment& Transform = TransformList[EntityIndex];
+                FCrowdMovementFragment& Movement = MovementList[EntityIndex];
+                const FCrowdBehaviorFragment& Behavior = BehaviorList[EntityIndex];
+                FCrowdPerceptionFragment& Perception = PerceptionList[EntityIndex];
+                FCrowdAvoidanceFragment& Avoidance = AvoidanceList[EntityIndex];
+                const FMassVisualizationLODFragment& LOD = LODList[EntityIndex];
+
+                // Skip processing for off-LOD entities
+                if (LOD.LODLevel == EMassLOD::Off)
                 {
-                    FVector FleeForce = CalculateFleeForce(Transform.GetTransform().GetLocation(), 
-                                                           CrowdAgent.LastKnownThreatLocation, 1000.0f);
-                    SteeringForce += FleeForce * FleeWeight;
-                    
-                    // Increase speed when panicking
-                    CrowdAgent.PreferredSpeed *= (1.0f + CrowdAgent.PanicLevel * PanicSpeedMultiplier);
+                    continue;
                 }
-                
-                // Apply forces
-                Velocity.Value += SteeringForce * DeltaTime;
-                Velocity.Value = Velocity.Value.GetClampedToMaxSize(MaxSpeed * (1.0f + CrowdAgent.PanicLevel));
-                
-                // Update position
-                FVector NewLocation = Transform.GetTransform().GetLocation() + Velocity.Value * DeltaTime;
-                Transform.GetMutableTransform().SetLocation(NewLocation);
-                
-                // Update rotation to face movement direction
-                if (!Velocity.Value.IsNearlyZero())
+
+                // Update perception periodically
+                if (CurrentTime - Perception.LastPerceptionUpdate >= Perception.PerceptionUpdateInterval)
                 {
-                    FRotator NewRotation = Velocity.Value.Rotation();
-                    Transform.GetMutableTransform().SetRotation(NewRotation.Quaternion());
+                    UpdatePerception(Perception, Transform, Context.GetEntityManagerChecked(), DeltaTime);
+                    Perception.LastPerceptionUpdate = CurrentTime;
                 }
-                
-                // Decay panic over time
-                if (CrowdAgent.PanicLevel > 0.0f)
+
+                // Update movement state
+                UpdateMovementState(Movement, Behavior, Perception, DeltaTime);
+
+                // Calculate movement forces based on current state
+                FVector TotalForce = FVector::ZeroVector;
+
+                switch (Movement.MovementState)
                 {
-                    CrowdAgent.PanicLevel = FMath::Max(0.0f, CrowdAgent.PanicLevel - PanicDecayRate * DeltaTime);
-                    
-                    if (CrowdAgent.PanicLevel <= 0.1f)
+                case ECrowdMovementState::Wandering:
                     {
-                        CrowdAgent.BehaviorState = FCrowdAgentFragment::ECrowdBehaviorState::Wandering;
+                        const FVector WanderForce = CalculateWanderForce(Transform, Movement, DeltaTime);
+                        const FVector FlockingForce = CalculateFlockingForce(Transform, Movement, Perception);
+                        const FVector AvoidanceForce = CalculateAvoidanceForce(Transform, Movement, Avoidance, Perception);
+                        
+                        TotalForce = (WanderForce * WanderWeight) + 
+                                   (FlockingForce * FlockingWeight) + 
+                                   (AvoidanceForce * AvoidanceWeight);
+                    }
+                    break;
+
+                case ECrowdMovementState::Following:
+                    {
+                        const FVector FollowForce = CalculateFollowForce(Transform, Behavior);
+                        const FVector AvoidanceForce = CalculateAvoidanceForce(Transform, Movement, Avoidance, Perception);
+                        
+                        TotalForce = (FollowForce * FollowWeight) + (AvoidanceForce * AvoidanceWeight);
+                    }
+                    break;
+
+                case ECrowdMovementState::Fleeing:
+                    {
+                        const FVector FleeForce = CalculateFleeForce(Transform, Behavior);
+                        const FVector AvoidanceForce = CalculateAvoidanceForce(Transform, Movement, Avoidance, Perception);
+                        
+                        TotalForce = (FleeForce * FleeWeight) + (AvoidanceForce * AvoidanceWeight * 0.5f);
+                    }
+                    break;
+
+                case ECrowdMovementState::Investigating:
+                    {
+                        const FVector Direction = (Behavior.InterestPoint - Transform.GetTransform().GetLocation()).GetSafeNormal();
+                        const FVector InvestigateForce = Direction * Movement.MaxSpeed;
+                        const FVector AvoidanceForce = CalculateAvoidanceForce(Transform, Movement, Avoidance, Perception);
+                        
+                        TotalForce = InvestigateForce + (AvoidanceForce * AvoidanceWeight);
+                    }
+                    break;
+
+                case ECrowdMovementState::Grazing:
+                case ECrowdMovementState::Resting:
+                    {
+                        // Minimal movement, just avoidance
+                        const FVector AvoidanceForce = CalculateAvoidanceForce(Transform, Movement, Avoidance, Perception);
+                        TotalForce = AvoidanceForce * AvoidanceWeight * 0.3f;
+                    }
+                    break;
+
+                default:
+                    // Default to wandering behavior
+                    TotalForce = CalculateWanderForce(Transform, Movement, DeltaTime);
+                    break;
+                }
+
+                // Add obstacle avoidance
+                const FVector ObstacleForce = CalculateObstacleAvoidance(Transform, Movement);
+                TotalForce += ObstacleForce;
+
+                // Apply force to velocity
+                Movement.CurrentVelocity += TotalForce * DeltaTime;
+                Movement.CurrentVelocity = ClampVelocity(Movement.CurrentVelocity, Movement.MaxSpeed);
+
+                // Apply velocity to transform
+                if (!Movement.CurrentVelocity.IsNearlyZero())
+                {
+                    const FVector NewLocation = Transform.GetTransform().GetLocation() + (Movement.CurrentVelocity * DeltaTime);
+                    
+                    // Validate the new location
+                    if (IsValidNavLocation(NewLocation))
+                    {
+                        FTransform NewTransform = Transform.GetTransform();
+                        NewTransform.SetLocation(NewLocation);
+                        
+                        // Update rotation to face movement direction
+                        if (Movement.CurrentVelocity.SizeSquared() > 1.0f)
+                        {
+                            const FVector ForwardDirection = Movement.CurrentVelocity.GetSafeNormal();
+                            const FRotator NewRotation = FRotationMatrix::MakeFromX(ForwardDirection).Rotator();
+                            NewTransform.SetRotation(NewRotation.Quaternion());
+                        }
+                        
+                        // Update the transform fragment
+                        const_cast<FTransformFragment&>(Transform).SetTransform(NewTransform);
+                    }
+                    else
+                    {
+                        // If location is invalid, reduce velocity and try to steer away
+                        Movement.CurrentVelocity *= 0.5f;
                     }
                 }
+
+                // Update state timer
+                Movement.StateTimer += DeltaTime;
             }
         });
+
+    // Track processing time
+    const double EndTime = FPlatformTime::Seconds();
+    LastProcessTime = (EndTime - StartTime) * 1000.0f; // Convert to milliseconds
+
+    UE_LOG(LogCrowdMovement, VeryVerbose, TEXT("Processed %d entities in %.2fms"), 
+           ProcessedEntityCount, LastProcessTime);
 }
 
-FVector UCrowdMovementProcessor::CalculateFlockingForce(const FMassEntityHandle& Entity, const FTransformFragment& Transform, 
-                                                        const FCrowdAgentFragment& CrowdAgent, FMassExecutionContext& Context)
+FVector UCrowdMovementProcessor::CalculateWanderForce(const FTransform& Transform, FCrowdMovementFragment& Movement, float DeltaTime)
 {
-    // In a full implementation, this would:
-    // 1. Query nearby entities within flocking radius
-    // 2. Calculate separation, alignment, and cohesion forces
-    // 3. Weight and combine the forces
+    const FVector CurrentLocation = Transform.GetLocation();
     
-    FVector FlockingForce = FVector::ZeroVector;
-    const FVector CurrentPosition = Transform.GetTransform().GetLocation();
-    
-    // Simplified flocking - would need spatial partitioning for performance
-    TArray<FMassEntityHandle> NearbyEntities;
-    
-    // Calculate separation (avoid crowding)
-    FVector SeparationForce = CalculateSeparationForce(CurrentPosition, CrowdAgent, NearbyEntities, Context);
-    FlockingForce += SeparationForce * SeparationWeight;
-    
-    // Calculate alignment (steer towards average heading)
-    FVector AlignmentForce = CalculateAlignmentForce(FVector::ZeroVector, NearbyEntities, Context);
-    FlockingForce += AlignmentForce * AlignmentWeight;
-    
-    // Calculate cohesion (steer towards average position)
-    FVector CohesionForce = CalculateCohesionForce(CurrentPosition, NearbyEntities, Context);
-    FlockingForce += CohesionForce * CohesionWeight;
-    
-    return FlockingForce.GetClampedToMaxSize(MaxForce);
-}
-
-FVector UCrowdMovementProcessor::CalculateSeparationForce(const FVector& Position, const FCrowdAgentFragment& CrowdAgent, 
-                                                          const TArray<FMassEntityHandle>& NearbyEntities, FMassExecutionContext& Context)
-{
-    FVector SeparationForce = FVector::ZeroVector;
-    int32 Count = 0;
-    
-    // In a full implementation, iterate through nearby entities
-    // and calculate repulsion forces based on distance
-    
-    for (const FMassEntityHandle& NearbyEntity : NearbyEntities)
+    // Update wander target periodically
+    if (Movement.StateTimer >= WanderUpdateInterval)
     {
-        // Calculate separation force from this neighbor
-        // SeparationForce += (Position - NeighborPosition).GetSafeNormal() / Distance;
-        Count++;
+        // Generate new random wander target
+        const float RandomAngle = FMath::RandRange(0.0f, 2.0f * PI);
+        const float RandomDistance = FMath::RandRange(Movement.WanderDistance * 0.5f, Movement.WanderDistance);
+        
+        const FVector RandomOffset = FVector(
+            FMath::Cos(RandomAngle) * RandomDistance,
+            FMath::Sin(RandomAngle) * RandomDistance,
+            0.0f
+        );
+        
+        Movement.WanderTarget = CurrentLocation + RandomOffset;
+        Movement.StateTimer = 0.0f;
     }
     
-    if (Count > 0)
+    // Calculate force towards wander target
+    const FVector ToTarget = Movement.WanderTarget - CurrentLocation;
+    if (ToTarget.SizeSquared() > 100.0f) // 10 units squared
     {
-        SeparationForce /= Count;
-        SeparationForce = SeparationForce.GetSafeNormal() * CrowdAgent.PreferredSpeed;
+        return ToTarget.GetSafeNormal() * Movement.MaxSpeed;
+    }
+    
+    return FVector::ZeroVector;
+}
+
+FVector UCrowdMovementProcessor::CalculateFlockingForce(const FTransform& Transform, const FCrowdMovementFragment& Movement, 
+                                                       const FCrowdPerceptionFragment& Perception)
+{
+    const FVector CurrentLocation = Transform.GetLocation();
+    
+    // Calculate flocking behaviors
+    const FVector Separation = CalculateSeparation(Transform, Perception, AvoidanceRadius);
+    const FVector Alignment = CalculateAlignment(Transform, Perception, FlockingRadius);
+    const FVector Cohesion = CalculateCohesion(Transform, Perception, FlockingRadius);
+    
+    // Combine forces with different weights
+    return (Separation * 1.5f) + (Alignment * 1.0f) + (Cohesion * 1.0f);
+}
+
+FVector UCrowdMovementProcessor::CalculateAvoidanceForce(const FTransform& Transform, const FCrowdMovementFragment& Movement,
+                                                        const FCrowdAvoidanceFragment& Avoidance, const FCrowdPerceptionFragment& Perception)
+{
+    FVector TotalAvoidance = FVector::ZeroVector;
+    const FVector CurrentLocation = Transform.GetLocation();
+    
+    // Avoid nearby agents
+    for (const TWeakObjectPtr<AActor>& NearbyAgent : Perception.NearbyAgents)
+    {
+        if (NearbyAgent.IsValid())
+        {
+            const FVector ToAgent = NearbyAgent->GetActorLocation() - CurrentLocation;
+            const float Distance = ToAgent.Size();
+            
+            if (Distance > 0.0f && Distance < Avoidance.AvoidanceRadius)
+            {
+                const FVector AvoidDirection = -ToAgent.GetSafeNormal();
+                const float AvoidStrength = (Avoidance.AvoidanceRadius - Distance) / Avoidance.AvoidanceRadius;
+                TotalAvoidance += AvoidDirection * AvoidStrength * Movement.MaxSpeed;
+            }
+        }
+    }
+    
+    return TotalAvoidance;
+}
+
+FVector UCrowdMovementProcessor::CalculateFollowForce(const FTransform& Transform, const FCrowdBehaviorFragment& Behavior)
+{
+    if (Behavior.FollowTarget.IsValid())
+    {
+        const FVector CurrentLocation = Transform.GetLocation();
+        const FVector TargetLocation = Behavior.FollowTarget->GetActorLocation();
+        const FVector ToTarget = TargetLocation - CurrentLocation;
+        
+        // Follow at a reasonable distance
+        const float FollowDistance = 200.0f;
+        if (ToTarget.Size() > FollowDistance)
+        {
+            return ToTarget.GetSafeNormal() * MaxMovementSpeed;
+        }
+    }
+    
+    return FVector::ZeroVector;
+}
+
+FVector UCrowdMovementProcessor::CalculateFleeForce(const FTransform& Transform, const FCrowdBehaviorFragment& Behavior)
+{
+    if (Behavior.FleeTarget.IsValid())
+    {
+        const FVector CurrentLocation = Transform.GetLocation();
+        const FVector ThreatLocation = Behavior.FleeTarget->GetActorLocation();
+        const FVector FromThreat = CurrentLocation - ThreatLocation;
+        
+        // Flee with maximum speed
+        return FromThreat.GetSafeNormal() * MaxMovementSpeed;
+    }
+    
+    return FVector::ZeroVector;
+}
+
+FVector UCrowdMovementProcessor::CalculateObstacleAvoidance(const FTransform& Transform, const FCrowdMovementFragment& Movement)
+{
+    if (!NavigationSystem || !Movement.bAvoidObstacles)
+    {
+        return FVector::ZeroVector;
+    }
+    
+    const FVector CurrentLocation = Transform.GetLocation();
+    const FVector ForwardDirection = Transform.GetRotation().GetForwardVector();
+    const FVector CheckLocation = CurrentLocation + (ForwardDirection * ObstacleCheckDistance);
+    
+    // Simple obstacle check using navigation system
+    FNavLocation NavResult;
+    if (!NavigationSystem->ProjectPointToNavigation(CheckLocation, NavResult, FVector(100.0f)))
+    {
+        // No valid navigation point ahead, steer away
+        const FVector RightDirection = Transform.GetRotation().GetRightVector();
+        const float SteerDirection = FMath::RandBool() ? 1.0f : -1.0f;
+        return RightDirection * SteerDirection * Movement.MaxSpeed;
+    }
+    
+    return FVector::ZeroVector;
+}
+
+FVector UCrowdMovementProcessor::CalculateSeparation(const FTransform& Transform, const FCrowdPerceptionFragment& Perception, float Radius)
+{
+    FVector SeparationForce = FVector::ZeroVector;
+    const FVector CurrentLocation = Transform.GetLocation();
+    int32 NeighborCount = 0;
+    
+    for (const TWeakObjectPtr<AActor>& NearbyAgent : Perception.NearbyAgents)
+    {
+        if (NearbyAgent.IsValid())
+        {
+            const FVector ToAgent = NearbyAgent->GetActorLocation() - CurrentLocation;
+            const float Distance = ToAgent.Size();
+            
+            if (Distance > 0.0f && Distance < Radius)
+            {
+                const FVector AwayFromAgent = -ToAgent.GetSafeNormal();
+                const float Weight = (Radius - Distance) / Radius; // Closer = stronger force
+                SeparationForce += AwayFromAgent * Weight;
+                NeighborCount++;
+            }
+        }
+    }
+    
+    if (NeighborCount > 0)
+    {
+        SeparationForce /= NeighborCount;
+        SeparationForce = SeparationForce.GetSafeNormal() * MaxMovementSpeed;
     }
     
     return SeparationForce;
 }
 
-FVector UCrowdMovementProcessor::CalculateAlignmentForce(const FVector& Velocity, const TArray<FMassEntityHandle>& NearbyEntities, 
-                                                         FMassExecutionContext& Context)
+FVector UCrowdMovementProcessor::CalculateAlignment(const FTransform& Transform, const FCrowdPerceptionFragment& Perception, float Radius)
 {
     FVector AverageVelocity = FVector::ZeroVector;
-    int32 Count = 0;
+    const FVector CurrentLocation = Transform.GetLocation();
+    int32 NeighborCount = 0;
     
-    // In a full implementation, average the velocities of nearby entities
-    for (const FMassEntityHandle& NearbyEntity : NearbyEntities)
+    for (const TWeakObjectPtr<AActor>& NearbyAgent : Perception.NearbyAgents)
     {
-        // AverageVelocity += NeighborVelocity;
-        Count++;
+        if (NearbyAgent.IsValid())
+        {
+            const FVector ToAgent = NearbyAgent->GetActorLocation() - CurrentLocation;
+            const float Distance = ToAgent.Size();
+            
+            if (Distance > 0.0f && Distance < Radius)
+            {
+                // Get agent's velocity (simplified - would need velocity component)
+                const FVector AgentVelocity = NearbyAgent->GetVelocity();
+                AverageVelocity += AgentVelocity;
+                NeighborCount++;
+            }
+        }
     }
     
-    if (Count > 0)
+    if (NeighborCount > 0)
     {
-        AverageVelocity /= Count;
-        return (AverageVelocity - Velocity).GetClampedToMaxSize(MaxForce);
+        AverageVelocity /= NeighborCount;
+        return AverageVelocity.GetSafeNormal() * MaxMovementSpeed;
     }
     
     return FVector::ZeroVector;
 }
 
-FVector UCrowdMovementProcessor::CalculateCohesionForce(const FVector& Position, const TArray<FMassEntityHandle>& NearbyEntities, 
-                                                        FMassExecutionContext& Context)
+FVector UCrowdMovementProcessor::CalculateCohesion(const FTransform& Transform, const FCrowdPerceptionFragment& Perception, float Radius)
 {
     FVector CenterOfMass = FVector::ZeroVector;
-    int32 Count = 0;
+    const FVector CurrentLocation = Transform.GetLocation();
+    int32 NeighborCount = 0;
     
-    // In a full implementation, calculate center of mass of nearby entities
-    for (const FMassEntityHandle& NearbyEntity : NearbyEntities)
+    for (const TWeakObjectPtr<AActor>& NearbyAgent : Perception.NearbyAgents)
     {
-        // CenterOfMass += NeighborPosition;
-        Count++;
+        if (NearbyAgent.IsValid())
+        {
+            const FVector AgentLocation = NearbyAgent->GetActorLocation();
+            const float Distance = FVector::Dist(CurrentLocation, AgentLocation);
+            
+            if (Distance > 0.0f && Distance < Radius)
+            {
+                CenterOfMass += AgentLocation;
+                NeighborCount++;
+            }
+        }
     }
     
-    if (Count > 0)
+    if (NeighborCount > 0)
     {
-        CenterOfMass /= Count;
-        FVector DesiredVelocity = (CenterOfMass - Position).GetSafeNormal() * MaxSpeed;
-        return DesiredVelocity.GetClampedToMaxSize(MaxForce);
-    }
-    
-    return FVector::ZeroVector;
-}
-
-FVector UCrowdMovementProcessor::CalculateAvoidanceForce(const FVector& Position, const FVector& Velocity, 
-                                                         const FCrowdAgentFragment& CrowdAgent, FMassExecutionContext& Context)
-{
-    // Obstacle avoidance using raycasting
-    // In a full implementation, this would cast rays ahead and calculate avoidance forces
-    return FVector::ZeroVector;
-}
-
-FVector UCrowdMovementProcessor::CalculateFleeForce(const FVector& Position, const FVector& ThreatLocation, float ThreatRadius)
-{
-    FVector FleeDirection = (Position - ThreatLocation).GetSafeNormal();
-    float Distance = FVector::Dist(Position, ThreatLocation);
-    
-    if (Distance < ThreatRadius)
-    {
-        float FleeStrength = 1.0f - (Distance / ThreatRadius);
-        return FleeDirection * FleeStrength * MaxForce;
+        CenterOfMass /= NeighborCount;
+        const FVector ToCenterOfMass = CenterOfMass - CurrentLocation;
+        return ToCenterOfMass.GetSafeNormal() * MaxMovementSpeed;
     }
     
     return FVector::ZeroVector;
 }
 
-void UCrowdMovementProcessor::UpdatePanicLevel(FCrowdAgentFragment& CrowdAgent, const FVector& Position, 
-                                               const FVector& ThreatLocation, float ThreatRadius, float DeltaTime)
+void UCrowdMovementProcessor::UpdateMovementState(FCrowdMovementFragment& Movement, const FCrowdBehaviorFragment& Behavior, 
+                                                 const FCrowdPerceptionFragment& Perception, float DeltaTime)
 {
-    float Distance = FVector::Dist(Position, ThreatLocation);
+    // Simple state machine for movement behaviors
     
-    if (Distance < ThreatRadius)
+    // Check for flee conditions
+    if (Behavior.FleeTarget.IsValid() && Movement.MovementState != ECrowdMovementState::Fleeing)
     {
-        float ThreatIntensity = 1.0f - (Distance / ThreatRadius);
-        CrowdAgent.PanicLevel = FMath::Min(1.0f, CrowdAgent.PanicLevel + ThreatIntensity * DeltaTime);
-        CrowdAgent.BehaviorState = FCrowdAgentFragment::ECrowdBehaviorState::Fleeing;
-        CrowdAgent.LastKnownThreatLocation = ThreatLocation;
+        Movement.MovementState = ECrowdMovementState::Fleeing;
+        Movement.StateTimer = 0.0f;
+        Movement.NextStateChangeTime = FMath::RandRange(3.0f, 8.0f);
+        return;
     }
+    
+    // Check for follow conditions
+    if (Behavior.FollowTarget.IsValid() && Movement.MovementState != ECrowdMovementState::Following)
+    {
+        Movement.MovementState = ECrowdMovementState::Following;
+        Movement.StateTimer = 0.0f;
+        Movement.NextStateChangeTime = FMath::RandRange(5.0f, 15.0f);
+        return;
+    }
+    
+    // Check for state change timer
+    if (Movement.StateTimer >= Movement.NextStateChangeTime)
+    {
+        // Randomly change state based on behavior
+        const float RandomValue = FMath::RandRange(0.0f, 1.0f);
+        
+        if (RandomValue < 0.6f)
+        {
+            Movement.MovementState = ECrowdMovementState::Wandering;
+        }
+        else if (RandomValue < 0.8f && Behavior.Energy > 0.5f)
+        {
+            Movement.MovementState = ECrowdMovementState::Socializing;
+        }
+        else if (RandomValue < 0.9f && Behavior.Hunger > 0.3f)
+        {
+            Movement.MovementState = ECrowdMovementState::Grazing;
+        }
+        else
+        {
+            Movement.MovementState = ECrowdMovementState::Resting;
+        }
+        
+        Movement.StateTimer = 0.0f;
+        Movement.NextStateChangeTime = FMath::RandRange(3.0f, 12.0f);
+    }
+}
+
+void UCrowdMovementProcessor::UpdatePerception(FCrowdPerceptionFragment& Perception, const FTransform& Transform, 
+                                              FMassEntityManager& EntityManager, float DeltaTime)
+{
+    // Clear previous perception data
+    Perception.VisibleActors.Empty();
+    Perception.NearbyAgents.Empty();
+    Perception.NearestThreat = nullptr;
+    Perception.NearestFood = nullptr;
+    Perception.NearestAlly = nullptr;
+    
+    // This is a simplified perception system
+    // In a full implementation, this would use spatial queries to find nearby entities
+    // and perform line-of-sight checks for visibility
+    
+    const FVector CurrentLocation = Transform.GetLocation();
+    
+    // For now, we'll just simulate some basic perception
+    // In a real implementation, this would query the spatial hash or use other spatial data structures
+}
+
+bool UCrowdMovementProcessor::IsValidNavLocation(const FVector& Location) const
+{
+    if (!NavigationSystem)
+    {
+        return true; // If no nav system, assume valid
+    }
+    
+    FNavLocation NavResult;
+    return NavigationSystem->ProjectPointToNavigation(Location, NavResult, FVector(50.0f));
+}
+
+FVector UCrowdMovementProcessor::ClampVelocity(const FVector& Velocity, float MaxSpeed) const
+{
+    if (Velocity.SizeSquared() > MaxSpeed * MaxSpeed)
+    {
+        return Velocity.GetSafeNormal() * MaxSpeed;
+    }
+    return Velocity;
+}
+
+FVector UCrowdMovementProcessor::SteerTowards(const FVector& CurrentVelocity, const FVector& DesiredDirection, float MaxForce) const
+{
+    const FVector DesiredVelocity = DesiredDirection.GetSafeNormal() * MaxMovementSpeed;
+    const FVector SteeringForce = DesiredVelocity - CurrentVelocity;
+    
+    if (SteeringForce.SizeSquared() > MaxForce * MaxForce)
+    {
+        return SteeringForce.GetSafeNormal() * MaxForce;
+    }
+    
+    return SteeringForce;
 }
