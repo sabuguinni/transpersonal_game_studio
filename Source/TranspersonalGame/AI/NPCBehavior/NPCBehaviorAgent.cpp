@@ -1,636 +1,636 @@
 #include "NPCBehaviorAgent.h"
 #include "Engine/World.h"
-#include "Engine/Engine.h"
-#include "GameFramework/Actor.h"
-#include "Components/ActorComponent.h"
+#include "Kismet/GameplayStatics.h"
 #include "BehaviorTree/BehaviorTreeComponent.h"
 #include "BehaviorTree/BlackboardComponent.h"
 #include "Perception/AIPerceptionComponent.h"
-#include "NavigationSystem.h"
-#include "AI/NavigationSystemBase.h"
-#include "Kismet/GameplayStatics.h"
-#include "TimerManager.h"
+#include "Components/StaticMeshComponent.h"
+#include "GameFramework/CharacterMovementComponent.h"
+#include "Math/UnrealMathUtility.h"
 
-DEFINE_LOG_CATEGORY(LogNPCBehavior);
-
-UNPCBehaviorAgent::UNPCBehaviorAgent()
+ANPCBehaviorAgent::ANPCBehaviorAgent()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f; // Update 10 times per second for performance
+    PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.TickInterval = 0.1f; // 10 FPS para performance
+
+    // Initialize components
+    BehaviorComponent = CreateDefaultSubobject<UNPCBehaviorComponent>(TEXT("BehaviorComponent"));
+    MemoryComponent = CreateDefaultSubobject<UNPCMemoryComponent>(TEXT("MemoryComponent"));
+    PersonalityComponent = CreateDefaultSubobject<UDinosaurPersonalityComponent>(TEXT("PersonalityComponent"));
     
-    // Initialize default values
-    BehaviorUpdateInterval = 0.5f;
-    MemoryUpdateInterval = 1.0f;
-    RoutineUpdateInterval = 5.0f;
+    // Setup AI Controller class
+    AIControllerClass = ADinosaurAIController::StaticClass();
     
-    // Initialize behavior weights
-    BehaviorWeights.Add(ENPCBehaviorType::Idle, 1.0f);
-    BehaviorWeights.Add(ENPCBehaviorType::Patrol, 0.8f);
-    BehaviorWeights.Add(ENPCBehaviorType::Investigate, 0.6f);
-    BehaviorWeights.Add(ENPCBehaviorType::Socialize, 0.4f);
-    BehaviorWeights.Add(ENPCBehaviorType::Work, 0.7f);
-    BehaviorWeights.Add(ENPCBehaviorType::Rest, 0.5f);
-    BehaviorWeights.Add(ENPCBehaviorType::Flee, 2.0f);
-    BehaviorWeights.Add(ENPCBehaviorType::Follow, 0.9f);
-    BehaviorWeights.Add(ENPCBehaviorType::Hunt, 1.5f);
-    BehaviorWeights.Add(ENPCBehaviorType::Forage, 0.6f);
+    // Initialize basic properties
+    Species = EDinosaurSpecies::Compsognathus;
+    CurrentBehaviorState = EDinosaurBehaviorState::Idle;
+    DomesticationLevel = EDomesticationLevel::Wild;
+    
+    // Initialize needs
+    CurrentNeeds.Hunger = 0.3f;
+    CurrentNeeds.Thirst = 0.2f;
+    CurrentNeeds.Energy = 0.8f;
+    CurrentNeeds.Social = 0.5f;
+    CurrentNeeds.Safety = 0.6f;
+    
+    // Setup collision
+    GetCapsuleComponent()->SetCollisionProfileName(TEXT("Pawn"));
+    
+    // Initialize movement
+    GetCharacterMovement()->MaxWalkSpeed = 300.0f;
+    GetCharacterMovement()->RotationRate = FRotator(0.0f, 540.0f, 0.0f);
 }
 
-void UNPCBehaviorAgent::BeginPlay()
+void ANPCBehaviorAgent::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Initialize the NPC behavior system
-    InitializeBehaviorSystem();
+    // Initialize unique personality
+    InitializePersonality();
     
-    // Set up timers for periodic updates
-    if (UWorld* World = GetWorld())
+    // Setup territory around spawn location
+    if (TerritoryCenter.IsZero())
     {
-        World->GetTimerManager().SetTimer(
-            BehaviorUpdateTimer,
-            this,
-            &UNPCBehaviorAgent::UpdateBehaviorDecision,
-            BehaviorUpdateInterval,
-            true
-        );
-        
-        World->GetTimerManager().SetTimer(
-            MemoryUpdateTimer,
-            this,
-            &UNPCBehaviorAgent::UpdateMemorySystem,
-            MemoryUpdateInterval,
-            true
-        );
-        
-        World->GetTimerManager().SetTimer(
-            RoutineUpdateTimer,
-            this,
-            &UNPCBehaviorAgent::UpdateDailyRoutine,
-            RoutineUpdateInterval,
-            true
-        );
+        TerritoryCenter = GetActorLocation();
     }
     
-    UE_LOG(LogNPCBehavior, Log, TEXT("NPCBehaviorAgent initialized for %s"), 
-           GetOwner() ? *GetOwner()->GetName() : TEXT("Unknown"));
+    // Initialize daily routines
+    SetupDailyRoutines();
+    
+    // Setup AI Controller
+    if (ADinosaurAIController* DinoController = Cast<ADinosaurAIController>(GetController()))
+    {
+        DinoController->InitializeBehaviorTree();
+    }
+    
+    // Register with NPC Manager
+    RegisterWithNPCManager();
+    
+    UE_LOG(LogTemp, Warning, TEXT("NPC Behavior Agent initialized: %s (%s)"), 
+           *GetName(), *UEnum::GetValueAsString(Species));
 }
 
-void UNPCBehaviorAgent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void ANPCBehaviorAgent::Tick(float DeltaTime)
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    Super::Tick(DeltaTime);
     
-    // Update needs and emotional state
+    // Update needs
     UpdateNeeds(DeltaTime);
-    UpdateEmotionalState(DeltaTime);
     
-    // Update behavior tree blackboard with current state
-    UpdateBlackboardValues();
+    // Process daily routine
+    ProcessDailyRoutine();
+    
+    // Update behavior based on current needs
+    UpdateBehaviorBasedOnNeeds();
+    
+    // Process social interactions
+    ProcessSocialInteractions(DeltaTime);
+    
+    // Update memory system
+    if (MemoryComponent)
+    {
+        MemoryComponent->UpdateMemory(DeltaTime);
+    }
+    
+    // Update domestication progress
+    UpdateDomestication(DeltaTime);
 }
 
-void UNPCBehaviorAgent::InitializeBehaviorSystem()
+void ANPCBehaviorAgent::InitializePersonality()
 {
-    // Initialize personality with some variation
-    if (Personality.Traits.Num() == 0)
+    if (!PersonalityComponent)
+        return;
+        
+    // Generate species-based personality with individual variation
+    FDinosaurPersonality NewPersonality;
+    
+    switch (Species)
     {
-        GenerateRandomPersonality();
+        case EDinosaurSpecies::TyrannosaurusRex:
+            NewPersonality.Aggressiveness = FMath::RandRange(0.8f, 1.0f);
+            NewPersonality.Fearfulness = FMath::RandRange(0.0f, 0.2f);
+            NewPersonality.Territoriality = FMath::RandRange(0.7f, 1.0f);
+            NewPersonality.Intelligence = FMath::RandRange(0.6f, 0.8f);
+            NewPersonality.Sociability = FMath::RandRange(0.0f, 0.3f);
+            NewPersonality.Curiosity = FMath::RandRange(0.3f, 0.6f);
+            break;
+            
+        case EDinosaurSpecies::Velociraptor:
+            NewPersonality.Aggressiveness = FMath::RandRange(0.6f, 0.9f);
+            NewPersonality.Intelligence = FMath::RandRange(0.8f, 1.0f);
+            NewPersonality.Sociability = FMath::RandRange(0.7f, 1.0f);
+            NewPersonality.Curiosity = FMath::RandRange(0.7f, 1.0f);
+            NewPersonality.Fearfulness = FMath::RandRange(0.2f, 0.5f);
+            NewPersonality.Territoriality = FMath::RandRange(0.5f, 0.8f);
+            break;
+            
+        case EDinosaurSpecies::Triceratops:
+            NewPersonality.Aggressiveness = FMath::RandRange(0.3f, 0.7f);
+            NewPersonality.Fearfulness = FMath::RandRange(0.2f, 0.5f);
+            NewPersonality.Territoriality = FMath::RandRange(0.4f, 0.8f);
+            NewPersonality.Sociability = FMath::RandRange(0.5f, 0.8f);
+            NewPersonality.Intelligence = FMath::RandRange(0.4f, 0.7f);
+            NewPersonality.Curiosity = FMath::RandRange(0.3f, 0.6f);
+            break;
+            
+        case EDinosaurSpecies::Compsognathus:
+            NewPersonality.Fearfulness = FMath::RandRange(0.7f, 1.0f);
+            NewPersonality.Curiosity = FMath::RandRange(0.6f, 0.9f);
+            NewPersonality.Sociability = FMath::RandRange(0.8f, 1.0f);
+            NewPersonality.Aggressiveness = FMath::RandRange(0.1f, 0.4f);
+            NewPersonality.Intelligence = FMath::RandRange(0.5f, 0.7f);
+            NewPersonality.Territoriality = FMath::RandRange(0.2f, 0.5f);
+            break;
+            
+        case EDinosaurSpecies::Parasaurolophus:
+            NewPersonality.Sociability = FMath::RandRange(0.8f, 1.0f);
+            NewPersonality.Fearfulness = FMath::RandRange(0.6f, 0.9f);
+            NewPersonality.Curiosity = FMath::RandRange(0.4f, 0.7f);
+            NewPersonality.Aggressiveness = FMath::RandRange(0.0f, 0.3f);
+            NewPersonality.Intelligence = FMath::RandRange(0.5f, 0.8f);
+            NewPersonality.Territoriality = FMath::RandRange(0.3f, 0.6f);
+            break;
+            
+        default:
+            // Default balanced personality
+            NewPersonality.Aggressiveness = FMath::RandRange(0.3f, 0.7f);
+            NewPersonality.Fearfulness = FMath::RandRange(0.3f, 0.7f);
+            NewPersonality.Curiosity = FMath::RandRange(0.3f, 0.7f);
+            NewPersonality.Sociability = FMath::RandRange(0.3f, 0.7f);
+            NewPersonality.Territoriality = FMath::RandRange(0.3f, 0.7f);
+            NewPersonality.Intelligence = FMath::RandRange(0.3f, 0.7f);
+            break;
     }
     
-    // Initialize memory system
-    Memory.KnownLocations.Empty();
-    Memory.KnownActors.Empty();
-    Memory.RecentEvents.Empty();
+    PersonalityComponent->SetPersonality(NewPersonality);
     
-    // Initialize needs
-    InitializeNeeds();
-    
-    // Initialize daily routine
-    if (DailyRoutine.ScheduledActivities.Num() == 0)
-    {
-        GenerateDefaultDailyRoutine();
-    }
-    
-    // Set initial behavior state
-    CurrentBehaviorType = ENPCBehaviorType::Idle;
-    BehaviorStartTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+    // Generate unique name
+    GenerateUniqueName();
 }
 
-void UNPCBehaviorAgent::GenerateRandomPersonality()
+void ANPCBehaviorAgent::GenerateUniqueName()
 {
-    Personality.Traits.Empty();
+    // Simple name generation based on species and personality
+    TArray<FString> NamePrefixes = {
+        TEXT("Alpha"), TEXT("Beta"), TEXT("Gamma"), TEXT("Delta"), TEXT("Echo"),
+        TEXT("Zeta"), TEXT("Theta"), TEXT("Kappa"), TEXT("Lambda"), TEXT("Sigma")
+    };
     
-    // Generate core personality traits
-    Personality.Traits.Add(TEXT("Curiosity"), FMath::RandRange(0.1f, 0.9f));
-    Personality.Traits.Add(TEXT("Aggressiveness"), FMath::RandRange(0.0f, 0.8f));
-    Personality.Traits.Add(TEXT("Sociability"), FMath::RandRange(0.2f, 1.0f));
-    Personality.Traits.Add(TEXT("Fearfulness"), FMath::RandRange(0.1f, 0.7f));
-    Personality.Traits.Add(TEXT("Intelligence"), FMath::RandRange(0.3f, 1.0f));
-    Personality.Traits.Add(TEXT("Loyalty"), FMath::RandRange(0.2f, 0.9f));
-    Personality.Traits.Add(TEXT("Territoriality"), FMath::RandRange(0.0f, 0.8f));
+    TArray<FString> NameSuffixes = {
+        TEXT("Claw"), TEXT("Fang"), TEXT("Horn"), TEXT("Scale"), TEXT("Roar"),
+        TEXT("Strike"), TEXT("Swift"), TEXT("Mighty"), TEXT("Wise"), TEXT("Bold")
+    };
     
-    // Set archetype based on dominant traits
-    float Aggressiveness = Personality.Traits.FindRef(TEXT("Aggressiveness"));
-    float Sociability = Personality.Traits.FindRef(TEXT("Sociability"));
-    float Fearfulness = Personality.Traits.FindRef(TEXT("Fearfulness"));
+    FString Prefix = NamePrefixes[FMath::RandRange(0, NamePrefixes.Num() - 1)];
+    FString Suffix = NameSuffixes[FMath::RandRange(0, NameSuffixes.Num() - 1)];
     
-    if (Aggressiveness > 0.6f)
+    IndividualName = FString::Printf(TEXT("%s%s"), *Prefix, *Suffix);
+}
+
+void ANPCBehaviorAgent::SetupDailyRoutines()
+{
+    DailyRoutines.Empty();
+    
+    if (IsHerbivore())
     {
-        Personality.Archetype = ENPCArchetype::Aggressive;
-    }
-    else if (Fearfulness > 0.6f)
-    {
-        Personality.Archetype = ENPCArchetype::Timid;
-    }
-    else if (Sociability > 0.7f)
-    {
-        Personality.Archetype = ENPCArchetype::Social;
+        // Herbivore routines: foraging, resting, socializing
+        FDailyRoutine MorningForaging;
+        MorningForaging.StartTime = 6.0f;
+        MorningForaging.EndTime = 10.0f;
+        MorningForaging.Activity = EDinosaurBehaviorState::Foraging;
+        MorningForaging.Priority = 1.0f;
+        MorningForaging.TargetLocation = FindNearestFoodSource();
+        DailyRoutines.Add(MorningForaging);
+        
+        FDailyRoutine MidDayRest;
+        MidDayRest.StartTime = 12.0f;
+        MidDayRest.EndTime = 14.0f;
+        MidDayRest.Activity = EDinosaurBehaviorState::Resting;
+        MidDayRest.Priority = 0.8f;
+        MidDayRest.TargetLocation = FindSafeRestingSpot();
+        DailyRoutines.Add(MidDayRest);
+        
+        FDailyRoutine EveningForaging;
+        EveningForaging.StartTime = 16.0f;
+        EveningForaging.EndTime = 19.0f;
+        EveningForaging.Activity = EDinosaurBehaviorState::Foraging;
+        EveningForaging.Priority = 1.0f;
+        EveningForaging.TargetLocation = FindNearestFoodSource();
+        DailyRoutines.Add(EveningForaging);
+        
+        FDailyRoutine EveningSocial;
+        EveningSocial.StartTime = 19.0f;
+        EveningSocial.EndTime = 21.0f;
+        EveningSocial.Activity = EDinosaurBehaviorState::Socializing;
+        EveningSocial.Priority = 0.6f;
+        DailyRoutines.Add(EveningSocial);
     }
     else
     {
-        Personality.Archetype = ENPCArchetype::Neutral;
+        // Carnivore routines: hunting, patrolling, resting
+        FDailyRoutine DawnHunt;
+        DawnHunt.StartTime = 5.0f;
+        DawnHunt.EndTime = 8.0f;
+        DawnHunt.Activity = EDinosaurBehaviorState::Hunting;
+        DawnHunt.Priority = 1.0f;
+        DailyRoutines.Add(DawnHunt);
+        
+        FDailyRoutine MorningPatrol;
+        MorningPatrol.StartTime = 8.0f;
+        MorningPatrol.EndTime = 12.0f;
+        MorningPatrol.Activity = EDinosaurBehaviorState::Patrolling;
+        MorningPatrol.Priority = 0.7f;
+        DailyRoutines.Add(MorningPatrol);
+        
+        FDailyRoutine AfternoonRest;
+        AfternoonRest.StartTime = 12.0f;
+        AfternoonRest.EndTime = 16.0f;
+        AfternoonRest.Activity = EDinosaurBehaviorState::Resting;
+        AfternoonRest.Priority = 0.8f;
+        DailyRoutines.Add(AfternoonRest);
+        
+        FDailyRoutine EveningHunt;
+        EveningHunt.StartTime = 18.0f;
+        EveningHunt.EndTime = 21.0f;
+        EveningHunt.Activity = EDinosaurBehaviorState::Hunting;
+        EveningHunt.Priority = 1.0f;
+        DailyRoutines.Add(EveningHunt);
     }
     
-    UE_LOG(LogNPCBehavior, Log, TEXT("Generated personality for %s: Archetype=%d, Aggressiveness=%.2f, Sociability=%.2f"), 
-           GetOwner() ? *GetOwner()->GetName() : TEXT("Unknown"),
-           (int32)Personality.Archetype, Aggressiveness, Sociability);
+    // All species need water
+    FDailyRoutine MorningDrink;
+    MorningDrink.StartTime = 7.0f;
+    MorningDrink.EndTime = 8.0f;
+    MorningDrink.Activity = EDinosaurBehaviorState::Drinking;
+    MorningDrink.Priority = 0.9f;
+    MorningDrink.TargetLocation = FindNearestWaterSource();
+    DailyRoutines.Add(MorningDrink);
+    
+    FDailyRoutine EveningDrink;
+    EveningDrink.StartTime = 17.0f;
+    EveningDrink.EndTime = 18.0f;
+    EveningDrink.Activity = EDinosaurBehaviorState::Drinking;
+    EveningDrink.Priority = 0.9f;
+    MorningDrink.TargetLocation = FindNearestWaterSource();
+    DailyRoutines.Add(EveningDrink);
 }
 
-void UNPCBehaviorAgent::InitializeNeeds()
+bool ANPCBehaviorAgent::IsHerbivore() const
 {
-    Needs.PhysicalNeeds.Empty();
-    Needs.SocialNeeds.Empty();
-    Needs.EmotionalNeeds.Empty();
-    
-    // Initialize physical needs
-    Needs.PhysicalNeeds.Add(TEXT("Hunger"), FMath::RandRange(0.2f, 0.6f));
-    Needs.PhysicalNeeds.Add(TEXT("Thirst"), FMath::RandRange(0.1f, 0.4f));
-    Needs.PhysicalNeeds.Add(TEXT("Rest"), FMath::RandRange(0.0f, 0.3f));
-    Needs.PhysicalNeeds.Add(TEXT("Safety"), FMath::RandRange(0.3f, 0.7f));
-    
-    // Initialize social needs
-    Needs.SocialNeeds.Add(TEXT("Companionship"), FMath::RandRange(0.2f, 0.8f));
-    Needs.SocialNeeds.Add(TEXT("Territory"), FMath::RandRange(0.1f, 0.6f));
-    Needs.SocialNeeds.Add(TEXT("Dominance"), FMath::RandRange(0.0f, 0.5f));
-    
-    // Initialize emotional needs
-    Needs.EmotionalNeeds.Add(TEXT("Stimulation"), FMath::RandRange(0.3f, 0.7f));
-    Needs.EmotionalNeeds.Add(TEXT("Comfort"), FMath::RandRange(0.2f, 0.6f));
-    Needs.EmotionalNeeds.Add(TEXT("Purpose"), FMath::RandRange(0.4f, 0.8f));
-}
-
-void UNPCBehaviorAgent::GenerateDefaultDailyRoutine()
-{
-    DailyRoutine.ScheduledActivities.Empty();
-    
-    // Morning routine (6:00 - 12:00)
-    FNPCScheduledActivity MorningActivity;
-    MorningActivity.ActivityType = ENPCBehaviorType::Forage;
-    MorningActivity.StartTime = 6.0f;
-    MorningActivity.Duration = 4.0f;
-    MorningActivity.Priority = 0.8f;
-    MorningActivity.Location = GetOwner() ? GetOwner()->GetActorLocation() : FVector::ZeroVector;
-    DailyRoutine.ScheduledActivities.Add(MorningActivity);
-    
-    // Afternoon routine (12:00 - 18:00)
-    FNPCScheduledActivity AfternoonActivity;
-    AfternoonActivity.ActivityType = ENPCBehaviorType::Socialize;
-    AfternoonActivity.StartTime = 12.0f;
-    AfternoonActivity.Duration = 3.0f;
-    AfternoonActivity.Priority = 0.6f;
-    AfternoonActivity.Location = GetOwner() ? GetOwner()->GetActorLocation() : FVector::ZeroVector;
-    DailyRoutine.ScheduledActivities.Add(AfternoonActivity);
-    
-    // Evening routine (18:00 - 22:00)
-    FNPCScheduledActivity EveningActivity;
-    EveningActivity.ActivityType = ENPCBehaviorType::Patrol;
-    EveningActivity.StartTime = 18.0f;
-    EveningActivity.Duration = 2.0f;
-    EveningActivity.Priority = 0.7f;
-    EveningActivity.Location = GetOwner() ? GetOwner()->GetActorLocation() : FVector::ZeroVector;
-    DailyRoutine.ScheduledActivities.Add(EveningActivity);
-    
-    // Night routine (22:00 - 6:00)
-    FNPCScheduledActivity NightActivity;
-    NightActivity.ActivityType = ENPCBehaviorType::Rest;
-    NightActivity.StartTime = 22.0f;
-    NightActivity.Duration = 8.0f;
-    NightActivity.Priority = 0.9f;
-    NightActivity.Location = GetOwner() ? GetOwner()->GetActorLocation() : FVector::ZeroVector;
-    DailyRoutine.ScheduledActivities.Add(NightActivity);
-}
-
-void UNPCBehaviorAgent::UpdateBehaviorDecision()
-{
-    if (!GetOwner())
+    switch (Species)
     {
-        return;
-    }
-    
-    // Calculate behavior scores based on needs, personality, and context
-    TMap<ENPCBehaviorType, float> BehaviorScores;
-    
-    for (const auto& BehaviorWeight : BehaviorWeights)
-    {
-        float Score = CalculateBehaviorScore(BehaviorWeight.Key);
-        BehaviorScores.Add(BehaviorWeight.Key, Score);
-    }
-    
-    // Find the highest scoring behavior
-    ENPCBehaviorType BestBehavior = ENPCBehaviorType::Idle;
-    float HighestScore = 0.0f;
-    
-    for (const auto& BehaviorScore : BehaviorScores)
-    {
-        if (BehaviorScore.Value > HighestScore)
-        {
-            HighestScore = BehaviorScore.Value;
-            BestBehavior = BehaviorScore.Key;
-        }
-    }
-    
-    // Change behavior if needed
-    if (BestBehavior != CurrentBehaviorType)
-    {
-        SetBehaviorType(BestBehavior);
-    }
-}
-
-float UNPCBehaviorAgent::CalculateBehaviorScore(ENPCBehaviorType BehaviorType)
-{
-    float BaseScore = BehaviorWeights.FindRef(BehaviorType);
-    
-    // Modify score based on needs
-    float NeedModifier = 1.0f;
-    switch (BehaviorType)
-    {
-        case ENPCBehaviorType::Rest:
-            NeedModifier = Needs.PhysicalNeeds.FindRef(TEXT("Rest")) * 2.0f;
-            break;
-        case ENPCBehaviorType::Forage:
-            NeedModifier = (Needs.PhysicalNeeds.FindRef(TEXT("Hunger")) + 
-                          Needs.PhysicalNeeds.FindRef(TEXT("Thirst"))) * 1.5f;
-            break;
-        case ENPCBehaviorType::Socialize:
-            NeedModifier = Needs.SocialNeeds.FindRef(TEXT("Companionship")) * 1.5f;
-            break;
-        case ENPCBehaviorType::Flee:
-            NeedModifier = (1.0f - Needs.PhysicalNeeds.FindRef(TEXT("Safety"))) * 3.0f;
-            break;
+        case EDinosaurSpecies::Compsognathus:
+        case EDinosaurSpecies::Parasaurolophus:
+        case EDinosaurSpecies::Triceratops:
+        case EDinosaurSpecies::Brachiosaurus:
+        case EDinosaurSpecies::Diplodocus:
+        case EDinosaurSpecies::Stegosaurus:
+            return true;
         default:
-            break;
-    }
-    
-    // Modify score based on personality
-    float PersonalityModifier = 1.0f;
-    switch (BehaviorType)
-    {
-        case ENPCBehaviorType::Investigate:
-            PersonalityModifier = Personality.Traits.FindRef(TEXT("Curiosity"));
-            break;
-        case ENPCBehaviorType::Hunt:
-            PersonalityModifier = Personality.Traits.FindRef(TEXT("Aggressiveness"));
-            break;
-        case ENPCBehaviorType::Socialize:
-            PersonalityModifier = Personality.Traits.FindRef(TEXT("Sociability"));
-            break;
-        case ENPCBehaviorType::Flee:
-            PersonalityModifier = Personality.Traits.FindRef(TEXT("Fearfulness"));
-            break;
-        default:
-            break;
-    }
-    
-    return BaseScore * NeedModifier * PersonalityModifier;
-}
-
-void UNPCBehaviorAgent::UpdateNeeds(float DeltaTime)
-{
-    // Update physical needs
-    for (auto& Need : Needs.PhysicalNeeds)
-    {
-        if (Need.Key == TEXT("Hunger"))
-        {
-            Need.Value = FMath::Clamp(Need.Value + (DeltaTime * 0.01f), 0.0f, 1.0f);
-        }
-        else if (Need.Key == TEXT("Thirst"))
-        {
-            Need.Value = FMath::Clamp(Need.Value + (DeltaTime * 0.015f), 0.0f, 1.0f);
-        }
-        else if (Need.Key == TEXT("Rest"))
-        {
-            if (CurrentBehaviorType == ENPCBehaviorType::Rest)
-            {
-                Need.Value = FMath::Clamp(Need.Value - (DeltaTime * 0.02f), 0.0f, 1.0f);
-            }
-            else
-            {
-                Need.Value = FMath::Clamp(Need.Value + (DeltaTime * 0.005f), 0.0f, 1.0f);
-            }
-        }
-    }
-    
-    // Update social needs
-    for (auto& Need : Needs.SocialNeeds)
-    {
-        if (Need.Key == TEXT("Companionship"))
-        {
-            if (CurrentBehaviorType == ENPCBehaviorType::Socialize)
-            {
-                Need.Value = FMath::Clamp(Need.Value - (DeltaTime * 0.01f), 0.0f, 1.0f);
-            }
-            else
-            {
-                Need.Value = FMath::Clamp(Need.Value + (DeltaTime * 0.003f), 0.0f, 1.0f);
-            }
-        }
+            return false;
     }
 }
 
-void UNPCBehaviorAgent::UpdateEmotionalState(float DeltaTime)
+void ANPCBehaviorAgent::UpdateNeeds(float DeltaTime)
 {
-    // Update emotional state based on current situation
-    float StressLevel = 0.0f;
+    // Natural degradation of needs
+    float BaseDecayRate = 0.001f; // 0.1% per second
     
-    // Calculate stress from unmet needs
-    for (const auto& Need : Needs.PhysicalNeeds)
+    // Hunger increases faster for carnivores
+    float HungerDecay = IsHerbivore() ? BaseDecayRate : BaseDecayRate * 1.5f;
+    CurrentNeeds.Hunger = FMath::Clamp(CurrentNeeds.Hunger + (HungerDecay * DeltaTime), 0.0f, 1.0f);
+    
+    // Thirst increases for all
+    CurrentNeeds.Thirst = FMath::Clamp(CurrentNeeds.Thirst + (BaseDecayRate * 1.2f * DeltaTime), 0.0f, 1.0f);
+    
+    // Energy decreases with activity
+    float EnergyDecay = BaseDecayRate;
+    if (CurrentBehaviorState == EDinosaurBehaviorState::Hunting || 
+        CurrentBehaviorState == EDinosaurBehaviorState::Fleeing)
     {
-        StressLevel += Need.Value * 0.3f;
+        EnergyDecay *= 3.0f;
+    }
+    else if (CurrentBehaviorState == EDinosaurBehaviorState::Resting)
+    {
+        EnergyDecay *= -2.0f; // Resting restores energy
     }
     
-    for (const auto& Need : Needs.SocialNeeds)
+    CurrentNeeds.Energy = FMath::Clamp(CurrentNeeds.Energy - (EnergyDecay * DeltaTime), 0.0f, 1.0f);
+    
+    // Social need increases when alone
+    if (GetNearbyDinosaurCount() == 0)
     {
-        StressLevel += Need.Value * 0.2f;
+        CurrentNeeds.Social = FMath::Clamp(CurrentNeeds.Social + (BaseDecayRate * 0.5f * DeltaTime), 0.0f, 1.0f);
     }
-    
-    // Update emotional state
-    EmotionalState.Stress = FMath::Clamp(StressLevel, 0.0f, 1.0f);
-    EmotionalState.Happiness = FMath::Clamp(1.0f - StressLevel * 0.8f, 0.0f, 1.0f);
-    
-    // Emotional recovery over time
-    EmotionalState.Stress = FMath::Clamp(EmotionalState.Stress - (DeltaTime * 0.01f), 0.0f, 1.0f);
-    EmotionalState.Happiness = FMath::Clamp(EmotionalState.Happiness + (DeltaTime * 0.005f), 0.0f, 1.0f);
+    else
+    {
+        CurrentNeeds.Social = FMath::Clamp(CurrentNeeds.Social - (BaseDecayRate * 2.0f * DeltaTime), 0.0f, 1.0f);
+    }
 }
 
-void UNPCBehaviorAgent::UpdateMemorySystem()
+void ANPCBehaviorAgent::ProcessDailyRoutine()
 {
-    if (!GetOwner())
+    // Get current time from world
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    float TimeOfDay = FMath::Fmod(CurrentTime / 3600.0f, 24.0f); // Convert to hours of day
+    
+    // Find best routine for current time
+    FDailyRoutine* BestRoutine = nullptr;
+    float BestPriority = 0.0f;
+    
+    for (FDailyRoutine& Routine : DailyRoutines)
     {
-        return;
-    }
-    
-    // Update memory of nearby actors
-    TArray<AActor*> NearbyActors;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), APawn::StaticClass(), NearbyActors);
-    
-    FVector MyLocation = GetOwner()->GetActorLocation();
-    
-    for (AActor* Actor : NearbyActors)
-    {
-        if (Actor && Actor != GetOwner())
-        {
-            float Distance = FVector::Dist(MyLocation, Actor->GetActorLocation());
-            if (Distance <= MemoryRange)
-            {
-                // Update or add to memory
-                FNPCMemoryEntry* ExistingEntry = Memory.KnownActors.Find(Actor);
-                if (ExistingEntry)
-                {
-                    ExistingEntry->LastSeenTime = GetWorld()->GetTimeSeconds();
-                    ExistingEntry->LastKnownLocation = Actor->GetActorLocation();
-                    ExistingEntry->Familiarity = FMath::Clamp(ExistingEntry->Familiarity + 0.1f, 0.0f, 1.0f);
-                }
-                else
-                {
-                    FNPCMemoryEntry NewEntry;
-                    NewEntry.LastSeenTime = GetWorld()->GetTimeSeconds();
-                    NewEntry.LastKnownLocation = Actor->GetActorLocation();
-                    NewEntry.ThreatLevel = CalculateThreatLevel(Actor);
-                    NewEntry.Familiarity = 0.1f;
-                    Memory.KnownActors.Add(Actor, NewEntry);
-                }
-            }
-        }
-    }
-    
-    // Clean up old memories
-    CleanupOldMemories();
-}
-
-void UNPCBehaviorAgent::UpdateDailyRoutine()
-{
-    if (!GetWorld())
-    {
-        return;
-    }
-    
-    float CurrentTime = GetGameTimeOfDay();
-    
-    // Find current scheduled activity
-    FNPCScheduledActivity* CurrentActivity = nullptr;
-    for (FNPCScheduledActivity& Activity : DailyRoutine.ScheduledActivities)
-    {
-        float EndTime = Activity.StartTime + Activity.Duration;
-        if (EndTime > 24.0f) EndTime -= 24.0f; // Handle day wrap
+        bool IsInTimeRange = false;
         
-        if (IsTimeInRange(CurrentTime, Activity.StartTime, EndTime))
+        if (Routine.StartTime <= Routine.EndTime)
         {
-            CurrentActivity = &Activity;
-            break;
-        }
-    }
-    
-    // Update routine-based behavior
-    if (CurrentActivity && CurrentActivity->ActivityType != CurrentBehaviorType)
-    {
-        // Check if we should override current behavior for routine
-        float RoutineScore = CurrentActivity->Priority * 1.2f; // Boost routine activities
-        float CurrentScore = CalculateBehaviorScore(CurrentBehaviorType);
-        
-        if (RoutineScore > CurrentScore)
-        {
-            SetBehaviorType(CurrentActivity->ActivityType);
-        }
-    }
-}
-
-void UNPCBehaviorAgent::SetBehaviorType(ENPCBehaviorType NewBehaviorType)
-{
-    if (CurrentBehaviorType != NewBehaviorType)
-    {
-        ENPCBehaviorType OldBehavior = CurrentBehaviorType;
-        CurrentBehaviorType = NewBehaviorType;
-        BehaviorStartTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
-        
-        // Notify behavior change
-        OnBehaviorChanged.Broadcast(OldBehavior, NewBehaviorType);
-        
-        UE_LOG(LogNPCBehavior, Log, TEXT("%s changed behavior from %d to %d"), 
-               GetOwner() ? *GetOwner()->GetName() : TEXT("Unknown"),
-               (int32)OldBehavior, (int32)NewBehaviorType);
-    }
-}
-
-void UNPCBehaviorAgent::UpdateBlackboardValues()
-{
-    // Update blackboard with current behavior state
-    if (AAIController* AIController = Cast<AAIController>(GetOwner()->GetInstigatorController()))
-    {
-        if (UBlackboardComponent* BlackboardComp = AIController->GetBlackboardComponent())
-        {
-            // Update behavior type
-            BlackboardComp->SetValueAsEnum(TEXT("CurrentBehaviorType"), (uint8)CurrentBehaviorType);
-            
-            // Update needs
-            BlackboardComp->SetValueAsFloat(TEXT("HungerLevel"), Needs.PhysicalNeeds.FindRef(TEXT("Hunger")));
-            BlackboardComp->SetValueAsFloat(TEXT("ThirstLevel"), Needs.PhysicalNeeds.FindRef(TEXT("Thirst")));
-            BlackboardComp->SetValueAsFloat(TEXT("RestLevel"), Needs.PhysicalNeeds.FindRef(TEXT("Rest")));
-            
-            // Update emotional state
-            BlackboardComp->SetValueAsFloat(TEXT("StressLevel"), EmotionalState.Stress);
-            BlackboardComp->SetValueAsFloat(TEXT("HappinessLevel"), EmotionalState.Happiness);
-        }
-    }
-}
-
-float UNPCBehaviorAgent::CalculateThreatLevel(AActor* Actor)
-{
-    if (!Actor)
-    {
-        return 0.0f;
-    }
-    
-    // Basic threat calculation based on actor type and distance
-    float ThreatLevel = 0.0f;
-    
-    if (Actor->IsA<APawn>())
-    {
-        // Check if it's a player
-        if (Actor->IsA<ACharacter>())
-        {
-            ThreatLevel = 0.3f; // Players are moderately threatening by default
+            IsInTimeRange = (TimeOfDay >= Routine.StartTime && TimeOfDay <= Routine.EndTime);
         }
         else
         {
-            ThreatLevel = 0.2f; // Other pawns are less threatening
+            // Crosses midnight
+            IsInTimeRange = (TimeOfDay >= Routine.StartTime || TimeOfDay <= Routine.EndTime);
+        }
+        
+        if (IsInTimeRange && Routine.Priority > BestPriority)
+        {
+            BestRoutine = &Routine;
+            BestPriority = Routine.Priority;
         }
     }
     
-    // Modify based on personality
-    ThreatLevel *= (1.0f + Personality.Traits.FindRef(TEXT("Fearfulness")));
-    
-    return FMath::Clamp(ThreatLevel, 0.0f, 1.0f);
+    // Apply routine if found and different from current state
+    if (BestRoutine && CurrentBehaviorState != BestRoutine->Activity)
+    {
+        if (CanPerformActivity(BestRoutine->Activity))
+        {
+            SetBehaviorState(BestRoutine->Activity);
+        }
+    }
 }
 
-void UNPCBehaviorAgent::CleanupOldMemories()
+bool ANPCBehaviorAgent::CanPerformActivity(EDinosaurBehaviorState Activity) const
 {
-    if (!GetWorld())
+    switch (Activity)
     {
+        case EDinosaurBehaviorState::Foraging:
+        case EDinosaurBehaviorState::Hunting:
+            return CurrentNeeds.Energy > 0.2f;
+            
+        case EDinosaurBehaviorState::Drinking:
+            return CurrentNeeds.Energy > 0.1f;
+            
+        case EDinosaurBehaviorState::Resting:
+            return true; // Can always rest
+            
+        case EDinosaurBehaviorState::Socializing:
+            return CurrentNeeds.Energy > 0.3f;
+            
+        default:
+            return true;
+    }
+}
+
+void ANPCBehaviorAgent::UpdateBehaviorBasedOnNeeds()
+{
+    // Override routine if critical needs
+    if (CurrentNeeds.Thirst > 0.8f && CurrentBehaviorState != EDinosaurBehaviorState::Drinking)
+    {
+        SetBehaviorState(EDinosaurBehaviorState::Drinking);
+    }
+    else if (CurrentNeeds.Hunger > 0.8f)
+    {
+        if (IsHerbivore() && CurrentBehaviorState != EDinosaurBehaviorState::Foraging)
+        {
+            SetBehaviorState(EDinosaurBehaviorState::Foraging);
+        }
+        else if (!IsHerbivore() && CurrentBehaviorState != EDinosaurBehaviorState::Hunting)
+        {
+            SetBehaviorState(EDinosaurBehaviorState::Hunting);
+        }
+    }
+    else if (CurrentNeeds.Energy < 0.2f && CurrentBehaviorState != EDinosaurBehaviorState::Resting)
+    {
+        SetBehaviorState(EDinosaurBehaviorState::Resting);
+    }
+}
+
+void ANPCBehaviorAgent::ProcessSocialInteractions(float DeltaTime)
+{
+    // Find nearby dinosaurs
+    TArray<AActor*> NearbyDinosaurs;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), ANPCBehaviorAgent::StaticClass(), NearbyDinosaurs);
+    
+    for (AActor* Actor : NearbyDinosaurs)
+    {
+        if (Actor == this) continue;
+        
+        ANPCBehaviorAgent* OtherDino = Cast<ANPCBehaviorAgent>(Actor);
+        if (!OtherDino) continue;
+        
+        float Distance = FVector::Dist(GetActorLocation(), OtherDino->GetActorLocation());
+        
+        // Social interaction range
+        if (Distance < 500.0f)
+        {
+            ProcessSocialInteractionWith(OtherDino, DeltaTime);
+        }
+    }
+}
+
+void ANPCBehaviorAgent::ProcessSocialInteractionWith(ANPCBehaviorAgent* OtherDino, float DeltaTime)
+{
+    if (!OtherDino || !PersonalityComponent || !OtherDino->PersonalityComponent)
         return;
-    }
+        
+    FDinosaurPersonality MyPersonality = PersonalityComponent->GetPersonality();
+    FDinosaurPersonality OtherPersonality = OtherDino->PersonalityComponent->GetPersonality();
     
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-    TArray<AActor*> ActorsToRemove;
-    
-    for (auto& MemoryPair : Memory.KnownActors)
+    // Same species interactions
+    if (Species == OtherDino->Species)
     {
-        if (CurrentTime - MemoryPair.Value.LastSeenTime > MemoryRetentionTime)
+        // Pack behavior for social species
+        if (MyPersonality.Sociability > 0.6f && OtherPersonality.Sociability > 0.6f)
         {
-            ActorsToRemove.Add(MemoryPair.Key);
-        }
-    }
-    
-    for (AActor* Actor : ActorsToRemove)
-    {
-        Memory.KnownActors.Remove(Actor);
-    }
-}
-
-float UNPCBehaviorAgent::GetGameTimeOfDay()
-{
-    // Simple time of day calculation (0-24 hours)
-    if (UWorld* World = GetWorld())
-    {
-        float GameTime = World->GetTimeSeconds();
-        return FMath::Fmod(GameTime / 3600.0f, 24.0f); // Convert to hours and wrap at 24
-    }
-    return 12.0f; // Default to noon
-}
-
-bool UNPCBehaviorAgent::IsTimeInRange(float CurrentTime, float StartTime, float EndTime)
-{
-    if (StartTime <= EndTime)
-    {
-        return CurrentTime >= StartTime && CurrentTime <= EndTime;
-    }
-    else
-    {
-        // Handle day wrap (e.g., 22:00 to 6:00)
-        return CurrentTime >= StartTime || CurrentTime <= EndTime;
-    }
-}
-
-void UNPCBehaviorAgent::RememberLocation(FVector Location, ENPCLocationMemoryType LocationType, float Importance)
-{
-    FNPCLocationMemory LocationMemory;
-    LocationMemory.Location = Location;
-    LocationMemory.LocationType = LocationType;
-    LocationMemory.Importance = Importance;
-    LocationMemory.LastVisited = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
-    
-    Memory.KnownLocations.Add(LocationMemory);
-    
-    // Limit memory size
-    if (Memory.KnownLocations.Num() > MaxLocationMemories)
-    {
-        Memory.KnownLocations.RemoveAt(0);
-    }
-}
-
-void UNPCBehaviorAgent::ForgetActor(AActor* Actor)
-{
-    if (Actor)
-    {
-        Memory.KnownActors.Remove(Actor);
-    }
-}
-
-FVector UNPCBehaviorAgent::GetNearestKnownLocation(ENPCLocationMemoryType LocationType)
-{
-    if (!GetOwner())
-    {
-        return FVector::ZeroVector;
-    }
-    
-    FVector MyLocation = GetOwner()->GetActorLocation();
-    FVector NearestLocation = FVector::ZeroVector;
-    float NearestDistance = FLT_MAX;
-    
-    for (const FNPCLocationMemory& LocationMemory : Memory.KnownLocations)
-    {
-        if (LocationMemory.LocationType == LocationType)
-        {
-            float Distance = FVector::Dist(MyLocation, LocationMemory.Location);
-            if (Distance < NearestDistance)
+            // Reduce social need when with compatible dinosaurs
+            CurrentNeeds.Social = FMath::Clamp(CurrentNeeds.Social - (0.001f * DeltaTime), 0.0f, 1.0f);
+            
+            // Synchronize some behaviors
+            if (CurrentBehaviorState == EDinosaurBehaviorState::Socializing)
             {
-                NearestDistance = Distance;
-                NearestLocation = LocationMemory.Location;
+                OtherDino->SetBehaviorState(EDinosaurBehaviorState::Socializing);
             }
         }
     }
-    
-    return NearestLocation;
+    else
+    {
+        // Different species interactions
+        bool IAmPredator = !IsHerbivore();
+        bool OtherIsPrey = OtherDino->IsHerbivore();
+        
+        if (IAmPredator && OtherIsPrey)
+        {
+            // Predator-prey interaction
+            if (CurrentNeeds.Hunger > 0.6f && MyPersonality.Aggressiveness > 0.5f)
+            {
+                SetBehaviorState(EDinosaurBehaviorState::Hunting);
+                OtherDino->SetBehaviorState(EDinosaurBehaviorState::Fleeing);
+            }
+        }
+    }
 }
 
-TArray<AActor*> UNPCBehaviorAgent::GetKnownActorsByThreatLevel(float MinThreatLevel, float MaxThreatLevel)
+void ANPCBehaviorAgent::UpdateDomestication(float DeltaTime)
 {
-    TArray<AActor*> FilteredActors;
+    if (!bCanBeDomesticated)
+        return;
+        
+    // Find player
+    APawn* Player = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    if (!Player)
+        return;
+        
+    float DistanceToPlayer = FVector::Dist(GetActorLocation(), Player->GetActorLocation());
     
-    for (const auto& MemoryPair : Memory.KnownActors)
+    // Player proximity affects domestication
+    if (DistanceToPlayer < 300.0f) // Close to player
     {
-        if (MemoryPair.Value.ThreatLevel >= MinThreatLevel && MemoryPair.Value.ThreatLevel <= MaxThreatLevel)
+        if (PersonalityComponent)
         {
-            FilteredActors.Add(MemoryPair.Key);
+            FDinosaurPersonality Personality = PersonalityComponent->GetPersonality();
+            
+            // Curious and less fearful dinosaurs domesticate faster
+            float DomesticationRate = (Personality.Curiosity - Personality.Fearfulness) * 0.0001f * DeltaTime;
+            
+            if (DomesticationRate > 0.0f)
+            {
+                DomesticationProgress = FMath::Clamp(DomesticationProgress + DomesticationRate, 0.0f, 1.0f);
+                
+                // Update domestication level based on progress
+                if (DomesticationProgress > 0.9f)
+                    DomesticationLevel = EDomesticationLevel::Domesticated;
+                else if (DomesticationProgress > 0.7f)
+                    DomesticationLevel = EDomesticationLevel::Bonded;
+                else if (DomesticationProgress > 0.5f)
+                    DomesticationLevel = EDomesticationLevel::Friendly;
+                else if (DomesticationProgress > 0.3f)
+                    DomesticationLevel = EDomesticationLevel::Tolerant;
+                else if (DomesticationProgress > 0.1f)
+                    DomesticationLevel = EDomesticationLevel::Curious;
+                else
+                    DomesticationLevel = EDomesticationLevel::Wary;
+            }
+        }
+    }
+}
+
+void ANPCBehaviorAgent::SetBehaviorState(EDinosaurBehaviorState NewState)
+{
+    if (CurrentBehaviorState == NewState)
+        return;
+        
+    EDinosaurBehaviorState OldState = CurrentBehaviorState;
+    CurrentBehaviorState = NewState;
+    
+    // Update AI Controller blackboard
+    if (ADinosaurAIController* DinoController = Cast<ADinosaurAIController>(GetController()))
+    {
+        DinoController->UpdateBehaviorState(NewState);
+    }
+    
+    // Broadcast state change
+    OnBehaviorStateChanged.Broadcast(OldState, NewState);
+    
+    UE_LOG(LogTemp, Log, TEXT("%s changed behavior from %s to %s"), 
+           *GetName(), 
+           *UEnum::GetValueAsString(OldState),
+           *UEnum::GetValueAsString(NewState));
+}
+
+int32 ANPCBehaviorAgent::GetNearbyDinosaurCount() const
+{
+    TArray<AActor*> NearbyDinosaurs;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), ANPCBehaviorAgent::StaticClass(), NearbyDinosaurs);
+    
+    int32 Count = 0;
+    for (AActor* Actor : NearbyDinosaurs)
+    {
+        if (Actor == this) continue;
+        
+        float Distance = FVector::Dist(GetActorLocation(), Actor->GetActorLocation());
+        if (Distance < 1000.0f) // 10 meter radius
+        {
+            Count++;
         }
     }
     
-    return FilteredActors;
+    return Count;
+}
+
+FVector ANPCBehaviorAgent::FindNearestWaterSource() const
+{
+    // For now, return a location near territory center
+    // In full implementation, this would query the world for actual water sources
+    return TerritoryCenter + FVector(FMath::RandRange(-500.0f, 500.0f), FMath::RandRange(-500.0f, 500.0f), 0.0f);
+}
+
+FVector ANPCBehaviorAgent::FindNearestFoodSource() const
+{
+    // For now, return a location within territory
+    // In full implementation, this would query for vegetation or prey
+    return TerritoryCenter + FVector(FMath::RandRange(-800.0f, 800.0f), FMath::RandRange(-800.0f, 800.0f), 0.0f);
+}
+
+FVector ANPCBehaviorAgent::FindSafeRestingSpot() const
+{
+    // Find elevated or secluded spot within territory
+    return TerritoryCenter + FVector(FMath::RandRange(-300.0f, 300.0f), FMath::RandRange(-300.0f, 300.0f), 50.0f);
+}
+
+void ANPCBehaviorAgent::RegisterWithNPCManager()
+{
+    // Find and register with NPC Manager for global coordination
+    // This would be implemented when the NPC Manager system is complete
+    UE_LOG(LogTemp, Log, TEXT("NPC %s registered with NPC Manager"), *GetName());
+}
+
+void ANPCBehaviorAgent::OnPlayerInteraction(bool bPositive)
+{
+    if (MemoryComponent)
+    {
+        MemoryComponent->RecordPlayerInteraction(bPositive);
+    }
+    
+    // Adjust domestication based on interaction
+    if (bCanBeDomesticated)
+    {
+        float InteractionImpact = bPositive ? 0.05f : -0.1f;
+        DomesticationProgress = FMath::Clamp(DomesticationProgress + InteractionImpact, 0.0f, 1.0f);
+    }
+}
+
+float ANPCBehaviorAgent::GetMostUrgentNeed() const
+{
+    float MaxNeed = FMath::Max({CurrentNeeds.Hunger, CurrentNeeds.Thirst, 1.0f - CurrentNeeds.Energy, CurrentNeeds.Social});
+    return MaxNeed;
+}
+
+void ANPCBehaviorAgent::SatisfyNeed(const FString& NeedType, float Amount)
+{
+    if (NeedType == TEXT("Hunger"))
+    {
+        CurrentNeeds.Hunger = FMath::Clamp(CurrentNeeds.Hunger - Amount, 0.0f, 1.0f);
+    }
+    else if (NeedType == TEXT("Thirst"))
+    {
+        CurrentNeeds.Thirst = FMath::Clamp(CurrentNeeds.Thirst - Amount, 0.0f, 1.0f);
+    }
+    else if (NeedType == TEXT("Energy"))
+    {
+        CurrentNeeds.Energy = FMath::Clamp(CurrentNeeds.Energy + Amount, 0.0f, 1.0f);
+    }
+    else if (NeedType == TEXT("Social"))
+    {
+        CurrentNeeds.Social = FMath::Clamp(CurrentNeeds.Social - Amount, 0.0f, 1.0f);
+    }
 }
