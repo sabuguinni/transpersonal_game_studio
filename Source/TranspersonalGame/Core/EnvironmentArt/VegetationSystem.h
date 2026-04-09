@@ -1,334 +1,348 @@
-// Copyright Transpersonal Game Studio. All Rights Reserved.
-
 #pragma once
 
 #include "CoreMinimal.h"
+#include "UObject/NoExportTypes.h"
 #include "Engine/World.h"
-#include "Components/ActorComponent.h"
-#include "Subsystems/GameInstanceSubsystem.h"
+#include "Subsystems/WorldSubsystem.h"
 #include "Engine/DataAsset.h"
-#include "PCGComponent.h"
-#include "PCGGraph.h"
-#include "Components/InstancedStaticMeshComponent.h"
+#include "FoliageType.h"
+#include "InstancedFoliageActor.h"
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Materials/MaterialInterface.h"
-#include "FoliageType_InstancedStaticMesh.h"
-#include "../WorldGeneration/BiomeSystem.h"
+#include "../WorldGeneration/ProceduralWorldGenerator.h"
 #include "VegetationSystem.generated.h"
 
+DECLARE_LOG_CATEGORY_EXTERN(LogVegetationSystem, Log, All);
+
 /**
- * @brief Advanced Vegetation System for Prehistoric World
- * 
- * Creates living, breathing ecosystems that tell environmental stories.
- * Every plant placement follows ecological principles and narrative purpose.
- * 
- * Core Philosophy:
- * - Vegetation reveals the history of the land
- * - Each cluster tells a story about water, soil, and time
- * - Realistic distribution based on real-world botanical principles
- * - Performance-first approach with Nanite and instancing
- * 
- * Key Features:
- * - Biome-specific vegetation distribution
- * - Realistic clustering and competition patterns
- * - Environmental storytelling through plant health and distribution
- * - Dynamic wind response and seasonal variation
- * - Nanite-optimized high-density foliage
- * - PCG-driven procedural placement with artistic control
- * 
- * @author Environment Artist — Agent #6
- * @version 1.0 — March 2026
+ * Vegetation Types for Jurassic Environment
  */
-
-/** Vegetation layer types for hierarchical distribution */
 UENUM(BlueprintType)
-enum class EVegetationLayer : uint8
+enum class EVegetationType : uint8
 {
-    Canopy          UMETA(DisplayName = "Canopy Layer"),      // 20-40m height
-    Understory      UMETA(DisplayName = "Understory"),       // 5-20m height
-    Shrub           UMETA(DisplayName = "Shrub Layer"),      // 1-5m height
-    Herbaceous      UMETA(DisplayName = "Herbaceous"),       // 0-1m height
-    Ground          UMETA(DisplayName = "Ground Cover"),     // 0-0.3m height
-    Emergent        UMETA(DisplayName = "Emergent"),         // 40m+ height
-    Aquatic         UMETA(DisplayName = "Aquatic"),          // Water plants
-    Epiphytic       UMETA(DisplayName = "Epiphytic")         // Growing on trees
+    // Trees
+    ConiferousTree         UMETA(DisplayName = "Coniferous Tree"),
+    BroadleafTree         UMETA(DisplayName = "Broadleaf Tree"),
+    PalmTree              UMETA(DisplayName = "Palm Tree"),
+    CycadTree             UMETA(DisplayName = "Cycad Tree"),
+    GinkgoTree            UMETA(DisplayName = "Ginkgo Tree"),
+    
+    // Ferns and Undergrowth
+    TreeFern              UMETA(DisplayName = "Tree Fern"),
+    SmallFern             UMETA(DisplayName = "Small Fern"),
+    Horsetail             UMETA(DisplayName = "Horsetail"),
+    Moss                  UMETA(DisplayName = "Moss"),
+    
+    // Aquatic Plants
+    WaterLily             UMETA(DisplayName = "Water Lily"),
+    Algae                 UMETA(DisplayName = "Algae"),
+    ReedGrass             UMETA(DisplayName = "Reed Grass"),
+    
+    // Ground Cover
+    LowShrub              UMETA(DisplayName = "Low Shrub"),
+    Grass                 UMETA(DisplayName = "Grass"),
+    Flowers               UMETA(DisplayName = "Flowers")
 };
 
-/** Plant health states for environmental storytelling */
+/**
+ * Vegetation Density Levels
+ */
 UENUM(BlueprintType)
-enum class EPlantHealthState : uint8
+enum class EVegetationDensity : uint8
 {
-    Thriving        UMETA(DisplayName = "Thriving"),
-    Healthy         UMETA(DisplayName = "Healthy"),
-    Stressed        UMETA(DisplayName = "Stressed"),
-    Struggling      UMETA(DisplayName = "Struggling"),
-    Dying           UMETA(DisplayName = "Dying"),
-    Dead            UMETA(DisplayName = "Dead"),
-    Fossilized      UMETA(DisplayName = "Fossilized")
+    Sparse                UMETA(DisplayName = "Sparse"),
+    Light                 UMETA(DisplayName = "Light"),
+    Medium                UMETA(DisplayName = "Medium"),
+    Dense                 UMETA(DisplayName = "Dense"),
+    VeryDense             UMETA(DisplayName = "Very Dense")
 };
 
-/** Vegetation interaction types with dinosaurs */
-UENUM(BlueprintType)
-enum class EVegetationInteraction : uint8
-{
-    None            UMETA(DisplayName = "No Interaction"),
-    Edible          UMETA(DisplayName = "Edible"),
-    Shelter         UMETA(DisplayName = "Provides Shelter"),
-    NestingMaterial UMETA(DisplayName = "Nesting Material"),
-    Destructible    UMETA(DisplayName = "Can Be Destroyed"),
-    Climbable       UMETA(DisplayName = "Climbable"),
-    Medicinal       UMETA(DisplayName = "Medicinal Properties")
-};
-
-/** Detailed vegetation species data */
+/**
+ * Growth Conditions for Vegetation
+ */
 USTRUCT(BlueprintType)
-struct FVegetationSpeciesData
+struct TRANSPERSONALGAME_API FVegetationGrowthConditions
 {
     GENERATED_BODY()
 
-    /** Species identification */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Species")
-    FString SpeciesName = "Prehistoric Fern";
+    /** Minimum elevation for growth (meters) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Elevation")
+    float MinElevation = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Species")
-    FString ScientificName = "Cyathea jurassica";
+    /** Maximum elevation for growth (meters) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Elevation")
+    float MaxElevation = 2000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Species")
-    FText Description = NSLOCTEXT("Vegetation", "FernDesc", "A large tree fern common in humid prehistoric forests");
+    /** Minimum slope angle (degrees) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
+    float MinSlope = 0.0f;
 
-    /** Visual assets */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Assets")
-    TSoftObjectPtr<UStaticMesh> HealthyMesh;
+    /** Maximum slope angle (degrees) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
+    float MaxSlope = 45.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Assets")
-    TSoftObjectPtr<UStaticMesh> StressedMesh;
+    /** Distance from water sources (meters) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hydrology")
+    float WaterDistance = 1000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Assets")
-    TSoftObjectPtr<UStaticMesh> DeadMesh;
+    /** Requires water proximity */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hydrology")
+    bool bRequiresWater = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Assets")
-    TArray<TSoftObjectPtr<UMaterialInterface>> SeasonalMaterials;
+    /** Preferred biomes */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    TArray<EBiomeType> PreferredBiomes;
 
-    /** Ecological requirements */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ecology")
-    EVegetationLayer PreferredLayer = EVegetationLayer::Understory;
+    /** Minimum temperature (Celsius) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Climate")
+    float MinTemperature = 15.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ecology")
-    FVector2D OptimalTemperatureRange = FVector2D(18.0f, 28.0f);
+    /** Maximum temperature (Celsius) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Climate")
+    float MaxTemperature = 35.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ecology")
-    FVector2D OptimalHumidityRange = FVector2D(60.0f, 90.0f);
+    /** Minimum humidity (0.0 to 1.0) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Climate")
+    float MinHumidity = 0.3f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ecology")
-    FVector2D WaterDistancePreference = FVector2D(50.0f, 500.0f);
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ecology")
-    FVector2D SoilRichnessRange = FVector2D(0.3f, 0.8f);
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ecology")
-    FVector2D SlopeToleranceRange = FVector2D(0.0f, 35.0f);
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ecology")
-    float SunlightRequirement = 0.6f; // 0 = shade tolerant, 1 = full sun
-
-    /** Growth characteristics */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Growth")
-    FVector2D MatureHeightRange = FVector2D(300.0f, 800.0f);
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Growth")
-    FVector2D MatureWidthRange = FVector2D(200.0f, 600.0f);
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Growth")
-    float GrowthRate = 1.0f; // Relative to other species
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Growth")
-    int32 LifespanYears = 50;
-
-    /** Distribution patterns */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Distribution")
-    float ClusteringTendency = 0.4f; // 0 = random, 1 = highly clustered
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Distribution")
-    float CompetitionRadius = 300.0f; // Distance affecting other plants
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Distribution")
-    float DensityPerSquareMeter = 0.5f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Distribution")
-    TArray<FString> CompanionSpecies; // Species that grow well together
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Distribution")
-    TArray<FString> CompetitorSpecies; // Species that compete for resources
-
-    /** Biome preferences */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biomes")
-    TMap<EBiomeType, float> BiomeAffinities; // 0-1 preference for each biome
-
-    /** Dinosaur interactions */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wildlife")
-    TArray<EVegetationInteraction> InteractionTypes;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wildlife")
-    float NutritionalValue = 0.5f; // For herbivores
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wildlife")
-    float ToxicityLevel = 0.0f; // 0 = safe, 1 = deadly
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wildlife")
-    TArray<FString> AttractedDinosaurTypes;
-
-    /** Performance settings */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    bool bUseNanite = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    TArray<float> LODDistances = {1000.0f, 2500.0f, 5000.0f};
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float CullingDistance = 10000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxInstancesPerComponent = 1000;
-
-    /** Wind and animation */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
-    float WindResponseStrength = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
-    float WindFrequencyMultiplier = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
-    bool bHasSeasonalVariation = true;
+    /** Maximum humidity (0.0 to 1.0) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Climate")
+    float MaxHumidity = 1.0f;
 };
 
-/** Vegetation cluster data for realistic distribution */
-USTRUCT(BlueprintType)
-struct FVegetationCluster
-{
-    GENERATED_BODY()
-
-    /** Cluster center location */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cluster")
-    FVector ClusterCenter = FVector::ZeroVector;
-
-    /** Cluster radius */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cluster")
-    float ClusterRadius = 1000.0f;
-
-    /** Primary species in this cluster */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cluster")
-    FString DominantSpecies;
-
-    /** Secondary species with their relative abundance */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cluster")
-    TMap<FString, float> SecondarySpecies;
-
-    /** Cluster health state */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cluster")
-    EPlantHealthState ClusterHealth = EPlantHealthState::Healthy;
-
-    /** Environmental story this cluster tells */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FString EnvironmentalStory = "Thriving ecosystem near water source";
-
-    /** Age of this cluster (affects appearance) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    float ClusterAgeYears = 25.0f;
-
-    /** Recent disturbance events */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    TArray<FString> DisturbanceHistory;
-};
-
-/** Main vegetation system class */
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UVegetationSystem : public UGameInstanceSubsystem
+/**
+ * Vegetation Species Configuration
+ */
+UCLASS(BlueprintType)
+class TRANSPERSONALGAME_API UVegetationSpeciesAsset : public UDataAsset
 {
     GENERATED_BODY()
 
 public:
-    UVegetationSystem();
+    /** Species name */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Species")
+    FString SpeciesName = TEXT("Unknown Species");
 
+    /** Vegetation type */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Species")
+    EVegetationType VegetationType = EVegetationType::Grass;
+
+    /** Static mesh for this species */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Mesh")
+    TSoftObjectPtr<UStaticMesh> SpeciesMesh;
+
+    /** LOD meshes for distance rendering */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Mesh")
+    TArray<TSoftObjectPtr<UStaticMesh>> LODMeshes;
+
+    /** Material overrides */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Material")
+    TArray<TSoftObjectPtr<UMaterialInterface>> MaterialOverrides;
+
+    /** Growth conditions */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Growth")
+    FVegetationGrowthConditions GrowthConditions;
+
+    /** Base density per square kilometer */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Density", meta = (ClampMin = "0.0"))
+    float BaseDensity = 100.0f;
+
+    /** Size variation range */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Variation")
+    FVector2D SizeVariation = FVector2D(0.8f, 1.2f);
+
+    /** Rotation randomness */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Variation")
+    bool bRandomRotation = true;
+
+    /** Wind responsiveness (0.0 to 1.0) */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Animation", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float WindResponsiveness = 0.5f;
+
+    /** Seasonal variation */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Seasonal")
+    bool bHasSeasonalVariation = false;
+
+    /** Collision enabled */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Collision")
+    bool bEnableCollision = true;
+
+    /** Cull distance */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance")
+    float CullDistance = 10000.0f;
+
+    /** Shadow casting */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Rendering")
+    bool bCastShadows = true;
+
+    /** Nanite enabled */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Rendering")
+    bool bNaniteEnabled = false;
+};
+
+/**
+ * Vegetation Cluster Configuration
+ */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FVegetationCluster
+{
+    GENERATED_BODY()
+
+    /** Center position of cluster */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Position")
+    FVector ClusterCenter = FVector::ZeroVector;
+
+    /** Cluster radius */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Size")
+    float ClusterRadius = 500.0f;
+
+    /** Primary species in cluster */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Species")
+    TSoftObjectPtr<UVegetationSpeciesAsset> PrimarySpecies;
+
+    /** Secondary species (undergrowth, etc.) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Species")
+    TArray<TSoftObjectPtr<UVegetationSpeciesAsset>> SecondarySpecies;
+
+    /** Density multiplier for this cluster */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Density", meta = (ClampMin = "0.0"))
+    float DensityMultiplier = 1.0f;
+
+    /** Biome type for this cluster */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
+    EBiomeType BiomeType = EBiomeType::TropicalRainforest;
+};
+
+/**
+ * Vegetation System - Manages procedural vegetation placement and rendering
+ * Uses UE5 Foliage system with Nanite support for massive vegetation scenes
+ */
+UCLASS()
+class TRANSPERSONALGAME_API UVegetationSystem : public UWorldSubsystem
+{
+    GENERATED_BODY()
+
+public:
     // USubsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
+    virtual void OnWorldBeginPlay(UWorld& InWorld) override;
 
-    /** Initialize vegetation system with world data */
-    UFUNCTION(BlueprintCallable, Category = "Vegetation System")
-    void InitializeVegetationSystem(UWorld* World);
+    /** Get the vegetation system instance */
+    UFUNCTION(BlueprintPure, Category = "Vegetation")
+    static UVegetationSystem* Get(const UObject* WorldContext);
 
-    /** Generate vegetation for a specific biome area */
-    UFUNCTION(BlueprintCallable, Category = "Vegetation System")
-    void GenerateVegetationForBiome(const FVector& WorldLocation, float Radius, EBiomeType BiomeType);
+    /** Generate vegetation for the entire world */
+    UFUNCTION(BlueprintCallable, Category = "Vegetation")
+    void GenerateWorldVegetation();
 
-    /** Create a vegetation cluster at specific location */
-    UFUNCTION(BlueprintCallable, Category = "Vegetation System")
-    void CreateVegetationCluster(const FVegetationCluster& ClusterData);
+    /** Generate vegetation for a specific biome */
+    UFUNCTION(BlueprintCallable, Category = "Vegetation")
+    void GenerateBiomeVegetation(EBiomeType BiomeType, const FVector& Center, float Radius);
 
-    /** Update vegetation based on environmental changes */
-    UFUNCTION(BlueprintCallable, Category = "Vegetation System")
-    void UpdateVegetationHealth(const FVector& Location, float Radius, EPlantHealthState NewHealth);
+    /** Place vegetation cluster at location */
+    UFUNCTION(BlueprintCallable, Category = "Vegetation")
+    void PlaceVegetationCluster(const FVegetationCluster& ClusterConfig);
 
-    /** Get vegetation species data */
-    UFUNCTION(BlueprintCallable, Category = "Vegetation System")
-    FVegetationSpeciesData GetSpeciesData(const FString& SpeciesName) const;
+    /** Remove vegetation in area */
+    UFUNCTION(BlueprintCallable, Category = "Vegetation")
+    void ClearVegetationInArea(const FVector& Center, float Radius);
 
-    /** Register a new vegetation species */
-    UFUNCTION(BlueprintCallable, Category = "Vegetation System")
-    void RegisterVegetationSpecies(const FString& SpeciesName, const FVegetationSpeciesData& SpeciesData);
+    /** Update vegetation LOD based on camera position */
+    UFUNCTION(BlueprintCallable, Category = "Vegetation")
+    void UpdateVegetationLOD(const FVector& ViewerPosition);
 
-    /** Get all vegetation in area */
-    UFUNCTION(BlueprintCallable, Category = "Vegetation System")
-    TArray<AActor*> GetVegetationInArea(const FVector& Center, float Radius) const;
+    /** Get vegetation density at position */
+    UFUNCTION(BlueprintPure, Category = "Vegetation")
+    float GetVegetationDensityAtPosition(const FVector& WorldPosition) const;
 
-    /** Remove vegetation in area (for dinosaur destruction) */
-    UFUNCTION(BlueprintCallable, Category = "Vegetation System")
-    void RemoveVegetationInArea(const FVector& Center, float Radius, bool bGradual = true);
+    /** Check if position is suitable for vegetation type */
+    UFUNCTION(BlueprintPure, Category = "Vegetation")
+    bool IsPositionSuitableForVegetation(const FVector& WorldPosition, EVegetationType VegetationType) const;
 
-    /** Spawn environmental storytelling props */
-    UFUNCTION(BlueprintCallable, Category = "Vegetation System")
-    void SpawnEnvironmentalProps(const FVector& Location, const FString& StoryType);
+    /** Get dominant vegetation type at position */
+    UFUNCTION(BlueprintPure, Category = "Vegetation")
+    EVegetationType GetDominantVegetationAtPosition(const FVector& WorldPosition) const;
+
+    /** Set vegetation density multiplier for biome */
+    UFUNCTION(BlueprintCallable, Category = "Vegetation")
+    void SetBiomeDensityMultiplier(EBiomeType BiomeType, float Multiplier);
+
+    /** Enable/disable vegetation rendering */
+    UFUNCTION(BlueprintCallable, Category = "Vegetation")
+    void SetVegetationRenderingEnabled(bool bEnabled);
+
+    /** Get vegetation rendering statistics */
+    UFUNCTION(BlueprintPure, Category = "Vegetation")
+    FString GetVegetationStats() const;
 
 protected:
-    /** All registered vegetation species */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Species Database")
-    TMap<FString, FVegetationSpeciesData> VegetationDatabase;
-
-    /** Active vegetation clusters in the world */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World State")
-    TArray<FVegetationCluster> ActiveClusters;
-
-    /** PCG components for each biome type */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG")
-    TMap<EBiomeType, TSoftObjectPtr<UPCGGraph>> BiomeVegetationGraphs;
-
-    /** Foliage components for instanced rendering */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering")
-    TMap<FString, UHierarchicalInstancedStaticMeshComponent*> VegetationComponents;
-
-    /** Current world reference */
+    /** Vegetation species database */
     UPROPERTY()
-    TWeakObjectPtr<UWorld> CurrentWorld;
+    TMap<EVegetationType, TObjectPtr<UVegetationSpeciesAsset>> VegetationSpecies;
+
+    /** Foliage actor for instanced rendering */
+    UPROPERTY()
+    TObjectPtr<AInstancedFoliageActor> FoliageActor;
+
+    /** Foliage types for each vegetation species */
+    UPROPERTY()
+    TMap<EVegetationType, TObjectPtr<UFoliageType>> FoliageTypes;
+
+    /** Vegetation clusters */
+    UPROPERTY()
+    TArray<FVegetationCluster> VegetationClusters;
+
+    /** Biome density multipliers */
+    UPROPERTY()
+    TMap<EBiomeType, float> BiomeDensityMultipliers;
+
+    /** Current LOD level */
+    UPROPERTY()
+    int32 CurrentLODLevel = 0;
+
+    /** Vegetation rendering enabled */
+    UPROPERTY()
+    bool bVegetationRenderingEnabled = true;
+
+    /** Generation progress */
+    UPROPERTY()
+    float GenerationProgress = 0.0f;
 
 private:
-    /** Initialize default vegetation species */
-    void InitializeDefaultSpecies();
-
-    /** Calculate optimal placement for vegetation */
-    TArray<FVector> CalculateVegetationPlacements(const FVegetationSpeciesData& Species, 
-                                                  const FVector& AreaCenter, 
-                                                  float AreaRadius, 
-                                                  EBiomeType BiomeType);
-
-    /** Evaluate site suitability for species */
-    float EvaluateSiteSuitability(const FVegetationSpeciesData& Species, 
-                                  const FVector& Location, 
-                                  EBiomeType BiomeType);
-
-    /** Create instanced mesh component for species */
-    UHierarchicalInstancedStaticMeshComponent* CreateVegetationComponent(const FString& SpeciesName);
-
-    /** Apply environmental storytelling to vegetation placement */
-    void ApplyEnvironmentalNarrative(FVegetationCluster& Cluster);
+    // Internal generation methods
+    void LoadVegetationSpecies();
+    void SetupFoliageActor();
+    void GenerateVegetationForBiome(EBiomeType BiomeType, const FVector& Center, float Radius);
+    void PlaceVegetationInstances(EVegetationType VegetationType, const TArray<FVector>& Positions, const TArray<FRotator>& Rotations, const TArray<FVector>& Scales);
+    
+    // Placement algorithms
+    TArray<FVector> GeneratePoissonDiskSampling(const FVector& Center, float Radius, float MinDistance, int32 MaxAttempts = 30);
+    TArray<FVector> GenerateClusteredPlacement(const FVector& Center, float Radius, int32 NumClusters, float ClusterRadius);
+    TArray<FVector> GenerateRandomPlacement(const FVector& Center, float Radius, int32 Count);
+    
+    // Validation methods
+    bool ValidateGrowthConditions(const FVector& Position, const FVegetationGrowthConditions& Conditions) const;
+    float CalculateVegetationSuitability(const FVector& Position, EVegetationType VegetationType) const;
+    
+    // LOD management
+    void UpdateInstanceLOD(UFoliageType* FoliageType, const FVector& ViewerPosition);
+    int32 CalculateLODLevel(float Distance, const TArray<float>& LODDistances) const;
+    
+    // Performance optimization
+    void OptimizeFoliageInstances();
+    void CullDistantVegetation(const FVector& ViewerPosition);
+    
+    // Utility functions
+    FRotator GenerateRandomRotation(bool bRandomYaw = true, bool bRandomPitch = false, bool bRandomRoll = false) const;
+    FVector GenerateRandomScale(const FVector2D& ScaleRange) const;
+    float GetTerrainSlope(const FVector& Position) const;
+    
+    FTimerHandle LODUpdateTimer;
+    FTimerHandle OptimizationTimer;
+    
+    // Reference to world generator
+    UPROPERTY()
+    TObjectPtr<UProceduralWorldGenerator> WorldGenerator;
 };
