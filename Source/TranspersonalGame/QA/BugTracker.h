@@ -1,0 +1,452 @@
+// Copyright Transpersonal Game Studio. All Rights Reserved.
+// BugTracker.h - Comprehensive bug tracking and reporting system
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Engine/Engine.h"
+#include "Subsystems/GameInstanceSubsystem.h"
+#include "QATestFramework.h"
+#include "BugTracker.generated.h"
+
+UENUM(BlueprintType)
+enum class EBugStatus : uint8
+{
+    Open        UMETA(DisplayName = "Open"),
+    InProgress  UMETA(DisplayName = "In Progress"),
+    Testing     UMETA(DisplayName = "Testing"),
+    Resolved    UMETA(DisplayName = "Resolved"),
+    Closed      UMETA(DisplayName = "Closed"),
+    Rejected    UMETA(DisplayName = "Rejected")
+};
+
+UENUM(BlueprintType)
+enum class EBugPriority : uint8
+{
+    Critical    UMETA(DisplayName = "Critical - Game Breaking"),
+    High        UMETA(DisplayName = "High - Major Feature"),
+    Medium      UMETA(DisplayName = "Medium - Minor Feature"),
+    Low         UMETA(DisplayName = "Low - Polish/Enhancement"),
+    Trivial     UMETA(DisplayName = "Trivial - Cosmetic")
+};
+
+UENUM(BlueprintType)
+enum class EBugType : uint8
+{
+    Crash           UMETA(DisplayName = "Crash"),
+    Performance     UMETA(DisplayName = "Performance"),
+    Gameplay        UMETA(DisplayName = "Gameplay"),
+    Audio           UMETA(DisplayName = "Audio"),
+    Visual          UMETA(DisplayName = "Visual"),
+    UI              UMETA(DisplayName = "User Interface"),
+    AI              UMETA(DisplayName = "AI Behavior"),
+    Physics         UMETA(DisplayName = "Physics"),
+    Animation       UMETA(DisplayName = "Animation"),
+    Networking      UMETA(DisplayName = "Networking"),
+    Memory          UMETA(DisplayName = "Memory"),
+    Compatibility   UMETA(DisplayName = "Compatibility")
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FBugReport
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadWrite, EditAnywhere)
+    FString BugID;
+
+    UPROPERTY(BlueprintReadWrite, EditAnywhere)
+    FString Title;
+
+    UPROPERTY(BlueprintReadWrite, EditAnywhere)
+    FString Description;
+
+    UPROPERTY(BlueprintReadWrite, EditAnywhere)
+    FString StepsToReproduce;
+
+    UPROPERTY(BlueprintReadWrite, EditAnywhere)
+    FString ExpectedBehavior;
+
+    UPROPERTY(BlueprintReadWrite, EditAnywhere)
+    FString ActualBehavior;
+
+    UPROPERTY(BlueprintReadWrite, EditAnywhere)
+    EBugType BugType;
+
+    UPROPERTY(BlueprintReadWrite, EditAnywhere)
+    EBugPriority Priority;
+
+    UPROPERTY(BlueprintReadWrite, EditAnywhere)
+    EBugStatus Status;
+
+    UPROPERTY(BlueprintReadWrite, EditAnywhere)
+    EQATestCategory Category;
+
+    UPROPERTY(BlueprintReadWrite, EditAnywhere)
+    FString ReporterName;
+
+    UPROPERTY(BlueprintReadWrite, EditAnywhere)
+    FString AssignedTo;
+
+    UPROPERTY(BlueprintReadWrite, EditAnywhere)
+    FDateTime DateReported;
+
+    UPROPERTY(BlueprintReadWrite, EditAnywhere)
+    FDateTime DateResolved;
+
+    UPROPERTY(BlueprintReadWrite, EditAnywhere)
+    FString BuildVersion;
+
+    UPROPERTY(BlueprintReadWrite, EditAnywhere)
+    FString Platform;
+
+    UPROPERTY(BlueprintReadWrite, EditAnywhere)
+    FString Environment;
+
+    UPROPERTY(BlueprintReadWrite, EditAnywhere)
+    TArray<FString> Screenshots;
+
+    UPROPERTY(BlueprintReadWrite, EditAnywhere)
+    TArray<FString> LogFiles;
+
+    UPROPERTY(BlueprintReadWrite, EditAnywhere)
+    FString Resolution;
+
+    UPROPERTY(BlueprintReadWrite, EditAnywhere)
+    TArray<FString> Comments;
+
+    UPROPERTY(BlueprintReadWrite, EditAnywhere)
+    bool bReproducible;
+
+    UPROPERTY(BlueprintReadWrite, EditAnywhere)
+    int32 ReproductionRate; // Percentage
+
+    UPROPERTY(BlueprintReadWrite, EditAnywhere)
+    FString WorkaroundDescription;
+
+    FBugReport()
+    {
+        BugID = TEXT("");
+        Title = TEXT("");
+        Description = TEXT("");
+        StepsToReproduce = TEXT("");
+        ExpectedBehavior = TEXT("");
+        ActualBehavior = TEXT("");
+        BugType = EBugType::Gameplay;
+        Priority = EBugPriority::Medium;
+        Status = EBugStatus::Open;
+        Category = EQATestCategory::Core;
+        ReporterName = TEXT("QA System");
+        AssignedTo = TEXT("");
+        DateReported = FDateTime::Now();
+        DateResolved = FDateTime(0);
+        BuildVersion = FApp::GetBuildVersion();
+        Platform = FPlatformProperties::PlatformName();
+        Environment = TEXT("Development");
+        Resolution = TEXT("");
+        bReproducible = false;
+        ReproductionRate = 0;
+        WorkaroundDescription = TEXT("");
+    }
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FBugStatistics
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadWrite, EditAnywhere)
+    int32 TotalBugs;
+
+    UPROPERTY(BlueprintReadWrite, EditAnywhere)
+    int32 OpenBugs;
+
+    UPROPERTY(BlueprintReadWrite, EditAnywhere)
+    int32 ResolvedBugs;
+
+    UPROPERTY(BlueprintReadWrite, EditAnywhere)
+    int32 CriticalBugs;
+
+    UPROPERTY(BlueprintReadWrite, EditAnywhere)
+    int32 HighPriorityBugs;
+
+    UPROPERTY(BlueprintReadWrite, EditAnywhere)
+    float AverageResolutionTime; // In hours
+
+    UPROPERTY(BlueprintReadWrite, EditAnywhere)
+    float BugDiscoveryRate; // Bugs per day
+
+    UPROPERTY(BlueprintReadWrite, EditAnywhere)
+    float BugResolutionRate; // Bugs resolved per day
+
+    FBugStatistics()
+    {
+        TotalBugs = 0;
+        OpenBugs = 0;
+        ResolvedBugs = 0;
+        CriticalBugs = 0;
+        HighPriorityBugs = 0;
+        AverageResolutionTime = 0.0f;
+        BugDiscoveryRate = 0.0f;
+        BugResolutionRate = 0.0f;
+    }
+};
+
+/**
+ * Bug Tracker Subsystem
+ * Comprehensive bug tracking and reporting system for prehistoric survival game
+ */
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UBugTracker : public UGameInstanceSubsystem
+{
+    GENERATED_BODY()
+
+public:
+    UBugTracker();
+
+    // Subsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+
+    // Bug reporting
+    UFUNCTION(BlueprintCallable, Category = "Bug Tracking")
+    FString ReportBug(const FBugReport& BugReport);
+
+    UFUNCTION(BlueprintCallable, Category = "Bug Tracking")
+    FString ReportCrash(const FString& CrashDescription, const FString& CallStack);
+
+    UFUNCTION(BlueprintCallable, Category = "Bug Tracking")
+    FString ReportPerformanceIssue(const FString& Description, float FrameTime, float MemoryUsage);
+
+    UFUNCTION(BlueprintCallable, Category = "Bug Tracking")
+    FString ReportGameplayBug(const FString& Description, const FString& Location, const FString& Context);
+
+    // Bug management
+    UFUNCTION(BlueprintCallable, Category = "Bug Tracking")
+    bool UpdateBugStatus(const FString& BugID, EBugStatus NewStatus);
+
+    UFUNCTION(BlueprintCallable, Category = "Bug Tracking")
+    bool AssignBug(const FString& BugID, const FString& AssigneeName);
+
+    UFUNCTION(BlueprintCallable, Category = "Bug Tracking")
+    bool ResolveBug(const FString& BugID, const FString& Resolution);
+
+    UFUNCTION(BlueprintCallable, Category = "Bug Tracking")
+    bool AddBugComment(const FString& BugID, const FString& Comment);
+
+    // Bug queries
+    UFUNCTION(BlueprintCallable, Category = "Bug Tracking")
+    FBugReport GetBugReport(const FString& BugID);
+
+    UFUNCTION(BlueprintCallable, Category = "Bug Tracking")
+    TArray<FBugReport> GetBugsByStatus(EBugStatus Status);
+
+    UFUNCTION(BlueprintCallable, Category = "Bug Tracking")
+    TArray<FBugReport> GetBugsByPriority(EBugPriority Priority);
+
+    UFUNCTION(BlueprintCallable, Category = "Bug Tracking")
+    TArray<FBugReport> GetBugsByCategory(EQATestCategory Category);
+
+    UFUNCTION(BlueprintCallable, Category = "Bug Tracking")
+    TArray<FBugReport> GetBugsByAssignee(const FString& AssigneeName);
+
+    // Statistics and reporting
+    UFUNCTION(BlueprintCallable, Category = "Bug Tracking")
+    FBugStatistics GetBugStatistics();
+
+    UFUNCTION(BlueprintCallable, Category = "Bug Tracking")
+    void GenerateBugReport();
+
+    UFUNCTION(BlueprintCallable, Category = "Bug Tracking")
+    void ExportBugsToCSV(const FString& FilePath);
+
+    UFUNCTION(BlueprintCallable, Category = "Bug Tracking")
+    void ExportBugsToJSON(const FString& FilePath);
+
+    // Automated bug detection
+    UFUNCTION(BlueprintCallable, Category = "Bug Tracking")
+    void StartAutomatedBugDetection();
+
+    UFUNCTION(BlueprintCallable, Category = "Bug Tracking")
+    void StopAutomatedBugDetection();
+
+    UFUNCTION(BlueprintCallable, Category = "Bug Tracking")
+    void CheckForPerformanceIssues();
+
+    UFUNCTION(BlueprintCallable, Category = "Bug Tracking")
+    void CheckForMemoryLeaks();
+
+    UFUNCTION(BlueprintCallable, Category = "Bug Tracking")
+    void CheckForCrashPatterns();
+
+    // Integration with external systems
+    UFUNCTION(BlueprintCallable, Category = "Bug Tracking")
+    bool SyncWithJira(const FString& JiraURL, const FString& ProjectKey);
+
+    UFUNCTION(BlueprintCallable, Category = "Bug Tracking")
+    bool SendSlackNotification(const FString& BugID, const FString& Channel);
+
+    UFUNCTION(BlueprintCallable, Category = "Bug Tracking")
+    bool SendEmailNotification(const FString& BugID, const FString& EmailAddress);
+
+protected:
+    UPROPERTY()
+    TArray<FBugReport> BugDatabase;
+
+    UPROPERTY()
+    TMap<FString, int32> BugIDToIndex;
+
+    // Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Bug Tracker Config")
+    bool bAutoDetectPerformanceIssues;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Bug Tracker Config")
+    bool bAutoDetectMemoryLeaks;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Bug Tracker Config")
+    bool bAutoDetectCrashes;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Bug Tracker Config")
+    float PerformanceThresholdMS;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Bug Tracker Config")
+    float MemoryThresholdMB;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Bug Tracker Config")
+    bool bGenerateDetailedReports;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Bug Tracker Config")
+    FString DefaultAssignee;
+
+private:
+    // Internal helpers
+    FString GenerateUniqueBugID();
+    
+    void SaveBugDatabase();
+    
+    void LoadBugDatabase();
+    
+    void InitializeAutomatedDetection();
+    
+    void CleanupAutomatedDetection();
+
+    // Automated detection
+    FTimerHandle PerformanceCheckTimer;
+    
+    FTimerHandle MemoryCheckTimer;
+    
+    bool bAutomatedDetectionActive;
+
+    // Statistics tracking
+    void UpdateStatistics();
+    
+    FBugStatistics CachedStatistics;
+    
+    FDateTime LastStatisticsUpdate;
+
+    // Notification system
+    void NotifyBugReported(const FBugReport& Bug);
+    
+    void NotifyBugResolved(const FBugReport& Bug);
+    
+    void NotifyHighPriorityBug(const FBugReport& Bug);
+
+    // Data persistence
+    FString GetBugDatabasePath();
+    
+    bool SerializeBugDatabase(const FString& FilePath);
+    
+    bool DeserializeBugDatabase(const FString& FilePath);
+};
+
+/**
+ * Bug Report Builder - Helper class for creating detailed bug reports
+ */
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UBugReportBuilder : public UObject
+{
+    GENERATED_BODY()
+
+public:
+    UFUNCTION(BlueprintCallable, Category = "Bug Report Builder")
+    static UBugReportBuilder* CreateBugReportBuilder();
+
+    UFUNCTION(BlueprintCallable, Category = "Bug Report Builder")
+    UBugReportBuilder* SetTitle(const FString& Title);
+
+    UFUNCTION(BlueprintCallable, Category = "Bug Report Builder")
+    UBugReportBuilder* SetDescription(const FString& Description);
+
+    UFUNCTION(BlueprintCallable, Category = "Bug Report Builder")
+    UBugReportBuilder* SetStepsToReproduce(const FString& Steps);
+
+    UFUNCTION(BlueprintCallable, Category = "Bug Report Builder")
+    UBugReportBuilder* SetExpectedBehavior(const FString& Expected);
+
+    UFUNCTION(BlueprintCallable, Category = "Bug Report Builder")
+    UBugReportBuilder* SetActualBehavior(const FString& Actual);
+
+    UFUNCTION(BlueprintCallable, Category = "Bug Report Builder")
+    UBugReportBuilder* SetBugType(EBugType Type);
+
+    UFUNCTION(BlueprintCallable, Category = "Bug Report Builder")
+    UBugReportBuilder* SetPriority(EBugPriority Priority);
+
+    UFUNCTION(BlueprintCallable, Category = "Bug Report Builder")
+    UBugReportBuilder* SetCategory(EQATestCategory Category);
+
+    UFUNCTION(BlueprintCallable, Category = "Bug Report Builder")
+    UBugReportBuilder* SetReporter(const FString& ReporterName);
+
+    UFUNCTION(BlueprintCallable, Category = "Bug Report Builder")
+    UBugReportBuilder* AddScreenshot(const FString& ScreenshotPath);
+
+    UFUNCTION(BlueprintCallable, Category = "Bug Report Builder")
+    UBugReportBuilder* AddLogFile(const FString& LogFilePath);
+
+    UFUNCTION(BlueprintCallable, Category = "Bug Report Builder")
+    UBugReportBuilder* SetReproducible(bool bIsReproducible, int32 ReproductionRate = 100);
+
+    UFUNCTION(BlueprintCallable, Category = "Bug Report Builder")
+    UBugReportBuilder* SetWorkaround(const FString& WorkaroundDescription);
+
+    UFUNCTION(BlueprintCallable, Category = "Bug Report Builder")
+    FBugReport Build();
+
+private:
+    FBugReport BugReport;
+};
+
+/**
+ * Automated Bug Detection Macros
+ */
+#define DETECT_PERFORMANCE_BUG(FrameTime, Threshold) \
+    if (FrameTime > Threshold) { \
+        if (UBugTracker* Tracker = UBugTracker::Get(GetWorld())) { \
+            Tracker->ReportPerformanceIssue( \
+                FString::Printf(TEXT("Frame time %.2fms exceeds threshold %.2fms"), FrameTime, Threshold), \
+                FrameTime, 0.0f \
+            ); \
+        } \
+    }
+
+#define DETECT_MEMORY_BUG(MemoryUsage, Threshold) \
+    if (MemoryUsage > Threshold) { \
+        if (UBugTracker* Tracker = UBugTracker::Get(GetWorld())) { \
+            Tracker->ReportPerformanceIssue( \
+                FString::Printf(TEXT("Memory usage %.2fMB exceeds threshold %.2fMB"), MemoryUsage, Threshold), \
+                0.0f, MemoryUsage \
+            ); \
+        } \
+    }
+
+#define DETECT_GAMEPLAY_BUG(Condition, Description) \
+    if (!(Condition)) { \
+        if (UBugTracker* Tracker = UBugTracker::Get(GetWorld())) { \
+            Tracker->ReportGameplayBug( \
+                Description, \
+                GetActorLocation().ToString(), \
+                GetClass()->GetName() \
+            ); \
+        } \
+    }
