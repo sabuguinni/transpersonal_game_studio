@@ -76,7 +76,8 @@ enum class EVFXLODLevel : uint8
 {
     High        UMETA(DisplayName = "High Quality"),     // Close range (0-1000m), high detail
     Medium      UMETA(DisplayName = "Medium Quality"),   // Mid range (1000-3000m), balanced
-    Low         UMETA(DisplayName = "Low Quality")       // Far range (3000m+), performance optimized
+    Low         UMETA(DisplayName = "Low Quality"),      // Far range (3000m+), performance optimized
+    Disabled    UMETA(DisplayName = "Disabled")          // Too far, disabled for performance
 };
 
 USTRUCT(BlueprintType)
@@ -142,6 +143,25 @@ struct FVFXEffectData
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Narrative")
     FString NarrativePurpose;
 
+    // Additional properties for pool management
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Pool")
+    FString PoolName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Parameters")
+    float Scale = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Parameters")
+    FLinearColor ColorTint = FLinearColor::White;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Parameters")
+    float Intensity = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Parameters")
+    float Duration = 0.0f; // 0 = infinite/looping
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Parameters")
+    bool bIsLooping = false;
+
     FVFXEffectData()
     {
         EffectName = TEXT("DefaultEffect");
@@ -159,6 +179,12 @@ struct FVFXEffectData
         bAffectsGameplay = false;
         EmotionalIntent = TEXT("");
         NarrativePurpose = TEXT("");
+        PoolName = TEXT("DefaultPool");
+        Scale = 1.0f;
+        ColorTint = FLinearColor::White;
+        Intensity = 1.0f;
+        Duration = 0.0f;
+        bIsLooping = false;
     }
 };
 
@@ -168,10 +194,16 @@ struct FVFXPoolData
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Pool")
-    TSoftObjectPtr<UNiagaraSystem> NiagaraSystem;
+    TSoftObjectPtr<UNiagaraSystem> NiagaraSystemAsset;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Pool")
-    int32 PoolSize = 10;
+    FString PoolName = TEXT("DefaultPool");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Pool")
+    int32 InitialPoolSize = 5;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Pool")
+    int32 MaxPoolSize = 10;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Pool")
     EVFXCategory Category = EVFXCategory::EnvironmentalAmbient;
@@ -183,15 +215,25 @@ struct FVFXPoolData
     float MaxDistance = 5000.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Pool")
+    bool bCanGrow = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Pool")
     bool bAutoRecycle = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Pool")
+    float RecycleTimeout = 30.0f;
 
     FVFXPoolData()
     {
-        PoolSize = 10;
+        PoolName = TEXT("DefaultPool");
+        InitialPoolSize = 5;
+        MaxPoolSize = 10;
         Category = EVFXCategory::EnvironmentalAmbient;
         Priority = EVFXPriority::Medium;
         MaxDistance = 5000.0f;
+        bCanGrow = true;
         bAutoRecycle = true;
+        RecycleTimeout = 30.0f;
     }
 };
 
