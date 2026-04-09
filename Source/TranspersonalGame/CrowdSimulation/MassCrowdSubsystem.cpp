@@ -1,380 +1,237 @@
 #include "MassCrowdSubsystem.h"
 #include "MassEntitySubsystem.h"
 #include "MassSpawnerSubsystem.h"
-#include "MassAgentComponent.h"
+#include "MassCommonFragments.h"
+#include "MassMovementFragments.h"
+#include "MassNavigationFragments.h"
+#include "MassZoneGraphNavigationFragments.h"
+#include "MassSimulationLOD.h"
+#include "ZoneGraphSubsystem.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
-#include "Kismet/GameplayStatics.h"
-#include "DrawDebugHelpers.h"
+#include "Engine/Engine.h"
+
+UMassCrowdSubsystem::UMassCrowdSubsystem()
+{
+    MaxCrowdAgents = 50000;
+    UpdateFrequency = 30.0f;
+    CurrentCrowdCount = 0;
+    bEmergencyActive = false;
+}
 
 void UMassCrowdSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    MassEntitySubsystem = Collection.InitializeDependency<UMassEntitySubsystem>();
+    UE_LOG(LogTemp, Warning, TEXT("MassCrowdSubsystem: Initializing crowd simulation system"));
     
-    UE_LOG(LogTemp, Warning, TEXT("MassCrowdSubsystem: Initialized for prehistoric world simulation"));
+    // Get required subsystems
+    EntitySubsystem = GetWorld()->GetSubsystem<UMassEntitySubsystem>();
+    SpawnerSubsystem = GetWorld()->GetSubsystem<UMassSpawnerSubsystem>();
+    ZoneGraphSubsystem = GetWorld()->GetSubsystem<UZoneGraphSubsystem>();
+    
+    if (!EntitySubsystem)
+    {
+        UE_LOG(LogTemp, Error, TEXT("MassCrowdSubsystem: Failed to get MassEntitySubsystem"));
+        return;
+    }
+    
+    InitializeMassEntity();
+    SetupCrowdProcessors();
+    
+    // Start density update timer
+    GetWorld()->GetTimerManager().SetTimer(
+        DensityUpdateTimer,
+        this,
+        &UMassCrowdSubsystem::UpdateDensityZones,
+        1.0f / UpdateFrequency,
+        true
+    );
 }
 
 void UMassCrowdSubsystem::Deinitialize()
 {
-    // Clear all timers
-    if (UWorld* World = GetWorld())
+    UE_LOG(LogTemp, Warning, TEXT("MassCrowdSubsystem: Shutting down crowd simulation"));
+    
+    DespawnAllCrowdAgents();
+    
+    if (GetWorld())
     {
-        World->GetTimerManager().ClearTimer(CrowdUpdateTimer);
-        World->GetTimerManager().ClearTimer(MigrationUpdateTimer);
-        World->GetTimerManager().ClearTimer(DensityAnalysisTimer);
+        GetWorld()->GetTimerManager().ClearTimer(DensityUpdateTimer);
+        GetWorld()->GetTimerManager().ClearTimer(CrowdUpdateTimer);
     }
-
+    
     Super::Deinitialize();
 }
 
 bool UMassCrowdSubsystem::ShouldCreateSubsystem(UObject* Outer) const
 {
-    // Only create in game worlds, not in editor preview
-    if (UWorld* World = Cast<UWorld>(Outer))
-    {
-        return World->IsGameWorld();
-    }
-    return false;
+    return Super::ShouldCreateSubsystem(Outer);
 }
 
-void UMassCrowdSubsystem::InitializeCrowdSystem()
+void UMassCrowdSubsystem::SpawnCrowdAgents(const TArray<FCrowdAgentData>& AgentData)
 {
-    if (!MassEntitySubsystem)
+    if (!EntitySubsystem || !SpawnerSubsystem)
     {
-        UE_LOG(LogTemp, Error, TEXT("MassCrowdSubsystem: MassEntitySubsystem not available"));
+        UE_LOG(LogTemp, Error, TEXT("MassCrowdSubsystem: Missing required subsystems for spawning"));
         return;
     }
-
-    UWorld* World = GetWorld();
-    if (!World)
+    
+    if (CurrentCrowdCount + AgentData.Num() > MaxCrowdAgents)
     {
+        UE_LOG(LogTemp, Warning, TEXT("MassCrowdSubsystem: Cannot spawn %d agents, would exceed max limit of %d"), 
+               AgentData.Num(), MaxCrowdAgents);
         return;
     }
-
-    // Initialize crowd density grid
-    CrowdDensityGrid.Empty();
     
-    // Set up periodic updates
-    World->GetTimerManager().SetTimer(
-        CrowdUpdateTimer,
-        this,
-        &UMassCrowdSubsystem::UpdateCrowdDensityGrid,
-        CrowdUpdateFrequency,
-        true
-    );
-
-    World->GetTimerManager().SetTimer(
-        MigrationUpdateTimer,
-        this,
-        &UMassCrowdSubsystem::ProcessMigrationLogic,
-        5.0f, // Check migration every 5 seconds
-        true
-    );
-
-    World->GetTimerManager().SetTimer(
-        DensityAnalysisTimer,
-        this,
-        &UMassCrowdSubsystem::HandlePredatorPreyInteractions,
-        2.0f, // Check predator-prey interactions every 2 seconds
-        true
-    );
-
-    UE_LOG(LogTemp, Warning, TEXT("MassCrowdSubsystem: Crowd system initialized with %d max agents"), MaxSimultaneousAgents);
-}
-
-void UMassCrowdSubsystem::SpawnDinosaurHerd(const FVector& Location, int32 HerdSize, TSubclassOf<class ADinosaurAgent> DinosaurClass)
-{
-    if (HerdSize <= 0 || HerdSize > 1000) // Reasonable limits per herd
-    {
-        UE_LOG(LogTemp, Warning, TEXT("MassCrowdSubsystem: Invalid herd size %d"), HerdSize);
-        return;
-    }
-
-    // Spawn herd in formation around the central location
-    for (int32 i = 0; i < HerdSize; i++)
-    {
-        // Create circular formation with some randomness
-        float Angle = (2.0f * PI * i) / HerdSize;
-        float Distance = FMath::RandRange(50.0f, 200.0f);
-        FVector SpawnOffset = FVector(
-            FMath::Cos(Angle) * Distance,
-            FMath::Sin(Angle) * Distance,
-            0.0f
-        );
-        
-        FVector SpawnLocation = Location + SpawnOffset;
-        SpawnMassAgents(SpawnLocation, 1, TEXT("DinosaurHerbivore"));
-    }
-
-    // Update density grid
-    FVector GridKey = GetGridKey(Location);
-    CrowdDensityGrid.FindOrAdd(GridKey) += HerdSize;
-
-    UE_LOG(LogTemp, Log, TEXT("MassCrowdSubsystem: Spawned dinosaur herd of %d at %s"), HerdSize, *Location.ToString());
-}
-
-void UMassCrowdSubsystem::SpawnHumanTribe(const FVector& Location, int32 TribeSize, float TerritoryRadius)
-{
-    if (TribeSize <= 0 || TribeSize > 200) // Prehistoric tribes were typically 20-150 people
-    {
-        UE_LOG(LogTemp, Warning, TEXT("MassCrowdSubsystem: Invalid tribe size %d"), TribeSize);
-        return;
-    }
-
-    // Spawn tribe members in small family groups
-    int32 GroupSize = FMath::Clamp(TribeSize / 4, 3, 8); // 3-8 people per family group
-    int32 NumGroups = FMath::CeilToInt(float(TribeSize) / GroupSize);
-
-    for (int32 GroupIndex = 0; GroupIndex < NumGroups; GroupIndex++)
-    {
-        // Position family groups around the territory
-        float Angle = (2.0f * PI * GroupIndex) / NumGroups;
-        float Distance = FMath::RandRange(TerritoryRadius * 0.3f, TerritoryRadius * 0.8f);
-        FVector GroupCenter = Location + FVector(
-            FMath::Cos(Angle) * Distance,
-            FMath::Sin(Angle) * Distance,
-            0.0f
-        );
-
-        // Spawn individual tribe members in this group
-        int32 ActualGroupSize = FMath::Min(GroupSize, TribeSize - (GroupIndex * GroupSize));
-        for (int32 i = 0; i < ActualGroupSize; i++)
-        {
-            FVector MemberOffset = FVector(
-                FMath::RandRange(-20.0f, 20.0f),
-                FMath::RandRange(-20.0f, 20.0f),
-                0.0f
-            );
-            SpawnMassAgents(GroupCenter + MemberOffset, 1, TEXT("HumanTribal"));
-        }
-    }
-
-    // Update density grid
-    FVector GridKey = GetGridKey(Location);
-    CrowdDensityGrid.FindOrAdd(GridKey) += TribeSize;
-
-    UE_LOG(LogTemp, Log, TEXT("MassCrowdSubsystem: Spawned human tribe of %d in %d groups at %s"), 
-           TribeSize, NumGroups, *Location.ToString());
-}
-
-void UMassCrowdSubsystem::SpawnPredatorPack(const FVector& Location, int32 PackSize, TSubclassOf<class APredatorAgent> PredatorClass)
-{
-    if (PackSize <= 0 || PackSize > 50) // Predator packs are typically small
-    {
-        UE_LOG(LogTemp, Warning, TEXT("MassCrowdSubsystem: Invalid pack size %d"), PackSize);
-        return;
-    }
-
-    // Spawn predators in loose formation
-    for (int32 i = 0; i < PackSize; i++)
-    {
-        FVector SpawnOffset = FVector(
-            FMath::RandRange(-100.0f, 100.0f),
-            FMath::RandRange(-100.0f, 100.0f),
-            0.0f
-        );
-        
-        SpawnMassAgents(Location + SpawnOffset, 1, TEXT("PredatorPack"));
-    }
-
-    // Update density grid
-    FVector GridKey = GetGridKey(Location);
-    CrowdDensityGrid.FindOrAdd(GridKey) += PackSize;
-
-    UE_LOG(LogTemp, Log, TEXT("MassCrowdSubsystem: Spawned predator pack of %d at %s"), PackSize, *Location.ToString());
-}
-
-void UMassCrowdSubsystem::TriggerSeasonalMigration(const FVector& FromRegion, const FVector& ToRegion, float MigrationSpeed)
-{
-    // Find all herds in the FromRegion
-    float SearchRadius = 5000.0f;
+    UE_LOG(LogTemp, Log, TEXT("MassCrowdSubsystem: Spawning %d crowd agents"), AgentData.Num());
     
-    // This would integrate with Mass Entity queries to find relevant agents
-    // For now, we'll broadcast the migration event
-    OnMigrationStarted.Broadcast(FMath::RandRange(1000, 9999), FromRegion, ToRegion);
-    
-    UE_LOG(LogTemp, Log, TEXT("MassCrowdSubsystem: Triggered seasonal migration from %s to %s"), 
-           *FromRegion.ToString(), *ToRegion.ToString());
-}
-
-void UMassCrowdSubsystem::SetWaterSourceLocations(const TArray<FVector>& WaterSources)
-{
-    WaterSourceLocations = WaterSources;
-    
-    UE_LOG(LogTemp, Log, TEXT("MassCrowdSubsystem: Updated water source locations - %d sources"), 
-           WaterSources.Num());
-}
-
-void UMassCrowdSubsystem::SetFoodSourceDensity(const FVector& Location, float Radius, float FoodDensity)
-{
-    // This would update the Mass Entity system's environmental data
-    // For now, we'll log the food source registration
-    UE_LOG(LogTemp, Log, TEXT("MassCrowdSubsystem: Set food density %.2f at %s (radius %.0f)"), 
-           FoodDensity, *Location.ToString(), Radius);
-}
-
-float UMassCrowdSubsystem::GetCrowdDensityAtLocation(const FVector& Location, float Radius) const
-{
-    float TotalDensity = 0.0f;
-    int32 CellsChecked = 0;
-
-    // Check multiple grid cells within the radius
-    int32 CellsToCheck = FMath::CeilToInt(Radius / GridCellSize);
-    
-    for (int32 X = -CellsToCheck; X <= CellsToCheck; X++)
+    for (const FCrowdAgentData& Agent : AgentData)
     {
-        for (int32 Y = -CellsToCheck; Y <= CellsToCheck; Y++)
-        {
-            FVector CellLocation = Location + FVector(X * GridCellSize, Y * GridCellSize, 0.0f);
-            FVector GridKey = GetGridKey(CellLocation);
-            
-            if (const float* Density = CrowdDensityGrid.Find(GridKey))
-            {
-                TotalDensity += *Density;
-                CellsChecked++;
+        // Create entity archetype with required fragments
+        FMassArchetypeHandle ArchetypeHandle = EntitySubsystem->CreateArchetype(
+            TArray<const UScriptStruct*>{
+                FTransformFragment::StaticStruct(),
+                FMassVelocityFragment::StaticStruct(),
+                FMassMoveTargetFragment::StaticStruct(),
+                FMassNavigationEdgesFragment::StaticStruct(),
+                FMassForceFragment::StaticStruct()
             }
-        }
-    }
-
-    return CellsChecked > 0 ? TotalDensity / CellsChecked : 0.0f;
-}
-
-TArray<FVector> UMassCrowdSubsystem::GetHighTrafficAreas(float MinDensity) const
-{
-    TArray<FVector> HighTrafficAreas;
-    
-    for (const auto& DensityPair : CrowdDensityGrid)
-    {
-        if (DensityPair.Value >= MinDensity)
-        {
-            HighTrafficAreas.Add(DensityPair.Key);
-        }
-    }
-    
-    return HighTrafficAreas;
-}
-
-FVector UMassCrowdSubsystem::GetNearestSafeZone(const FVector& FromLocation, float SearchRadius) const
-{
-    FVector SafestLocation = FromLocation;
-    float LowestDensity = GetCrowdDensityAtLocation(FromLocation, 500.0f);
-    
-    // Sample locations in a grid pattern to find the safest area
-    int32 SampleCount = 16;
-    for (int32 i = 0; i < SampleCount; i++)
-    {
-        float Angle = (2.0f * PI * i) / SampleCount;
-        FVector SampleLocation = FromLocation + FVector(
-            FMath::Cos(Angle) * SearchRadius,
-            FMath::Sin(Angle) * SearchRadius,
-            0.0f
         );
         
-        float SampleDensity = GetCrowdDensityAtLocation(SampleLocation, 500.0f);
-        if (SampleDensity < LowestDensity)
-        {
-            LowestDensity = SampleDensity;
-            SafestLocation = SampleLocation;
-        }
-    }
-    
-    return SafestLocation;
-}
-
-void UMassCrowdSubsystem::RegisterPredatorThreat(const FVector& ThreatLocation, float ThreatRadius, float ThreatLevel)
-{
-    // This would trigger Mass Entity behavior changes for nearby herbivores
-    UE_LOG(LogTemp, Log, TEXT("MassCrowdSubsystem: Predator threat registered at %s (level %.2f, radius %.0f)"), 
-           *ThreatLocation.ToString(), ThreatLevel, ThreatRadius);
-    
-    // Trigger herd scatter if threat level is high
-    if (ThreatLevel > 0.7f)
-    {
-        TriggerHerdScatter(ThreatLocation, ThreatRadius);
-    }
-}
-
-void UMassCrowdSubsystem::TriggerHerdScatter(const FVector& ThreatLocation, float ScatterRadius)
-{
-    // This would send scatter commands to all herbivores within the radius
-    UE_LOG(LogTemp, Warning, TEXT("MassCrowdSubsystem: HERD SCATTER triggered at %s (radius %.0f)"), 
-           *ThreatLocation.ToString(), ScatterRadius);
-}
-
-void UMassCrowdSubsystem::SetPlayerStealthLevel(float StealthLevel)
-{
-    CurrentPlayerStealthLevel = FMath::Clamp(StealthLevel, 0.0f, 1.0f);
-    PlayerDetectionRadius = FMath::Lerp(1500.0f, 200.0f, CurrentPlayerStealthLevel);
-    
-    UE_LOG(LogTemp, Log, TEXT("MassCrowdSubsystem: Player stealth level set to %.2f (detection radius %.0f)"), 
-           CurrentPlayerStealthLevel, PlayerDetectionRadius);
-}
-
-bool UMassCrowdSubsystem::IsPlayerDetectedByCrowd(const FVector& PlayerLocation) const
-{
-    float CrowdDensity = GetCrowdDensityAtLocation(PlayerLocation, PlayerDetectionRadius);
-    float DetectionThreshold = FMath::Lerp(1.0f, 10.0f, 1.0f - CurrentPlayerStealthLevel);
-    
-    return CrowdDensity > DetectionThreshold;
-}
-
-void UMassCrowdSubsystem::UpdateCrowdDensityGrid()
-{
-    // Decay existing density values over time
-    for (auto& DensityPair : CrowdDensityGrid)
-    {
-        DensityPair.Value *= 0.95f; // 5% decay per update
+        // Spawn entity
+        FMassEntityHandle EntityHandle = EntitySubsystem->CreateEntity(ArchetypeHandle);
         
-        if (DensityPair.Value < 0.1f)
+        if (EntityHandle.IsValid())
         {
-            DensityPair.Value = 0.0f;
+            // Set transform
+            FTransformFragment& TransformFragment = EntitySubsystem->GetFragmentDataChecked<FTransformFragment>(EntityHandle);
+            TransformFragment.SetTransform(FTransform(Agent.SpawnRotation, Agent.SpawnLocation));
+            
+            // Set velocity
+            FMassVelocityFragment& VelocityFragment = EntitySubsystem->GetFragmentDataChecked<FMassVelocityFragment>(EntityHandle);
+            VelocityFragment.Value = FVector::ZeroVector;
+            
+            // Set movement target
+            FMassMoveTargetFragment& MoveTargetFragment = EntitySubsystem->GetFragmentDataChecked<FMassMoveTargetFragment>(EntityHandle);
+            MoveTargetFragment.Center = Agent.SpawnLocation;
+            MoveTargetFragment.DesiredSpeed = FMassInt16Real(Agent.MovementSpeed);
+            
+            CurrentCrowdCount++;
         }
     }
     
-    // This would query Mass Entity system for current agent positions
-    // and update the density grid accordingly
+    UE_LOG(LogTemp, Log, TEXT("MassCrowdSubsystem: Total crowd count: %d"), CurrentCrowdCount);
 }
 
-void UMassCrowdSubsystem::ProcessMigrationLogic()
+void UMassCrowdSubsystem::DespawnAllCrowdAgents()
 {
-    // Check if any herds should start migrating based on:
-    // - Season changes
-    // - Food/water availability
-    // - Population pressure
-    
-    // This would integrate with the game's time/season system
-    UE_LOG(LogTemp, VeryVerbose, TEXT("MassCrowdSubsystem: Processing migration logic"));
-}
-
-void UMassCrowdSubsystem::HandlePredatorPreyInteractions()
-{
-    // Analyze crowd density to determine predator-prey dynamics
-    // High herbivore density attracts predators
-    // Predator presence causes herbivore scatter
-    
-    UE_LOG(LogTemp, VeryVerbose, TEXT("MassCrowdSubsystem: Processing predator-prey interactions"));
-}
-
-FVector UMassCrowdSubsystem::GetGridKey(const FVector& WorldLocation) const
-{
-    return FVector(
-        FMath::FloorToInt(WorldLocation.X / GridCellSize) * GridCellSize,
-        FMath::FloorToInt(WorldLocation.Y / GridCellSize) * GridCellSize,
-        0.0f
-    );
-}
-
-void UMassCrowdSubsystem::SpawnMassAgents(const FVector& Location, int32 Count, const FString& AgentType)
-{
-    if (!MassEntitySubsystem)
+    if (!EntitySubsystem)
     {
         return;
     }
+    
+    UE_LOG(LogTemp, Log, TEXT("MassCrowdSubsystem: Despawning all crowd agents"));
+    
+    // Note: In a real implementation, we'd iterate through all crowd entities
+    // and destroy them individually. For now, we'll reset the counter.
+    CurrentCrowdCount = 0;
+    bEmergencyActive = false;
+}
 
-    // This would use Mass Entity spawning system
-    // For now, we'll log the spawn request
-    UE_LOG(LogTemp, Log, TEXT("MassCrowdSubsystem: Spawning %d %s agents at %s"), 
-           Count, *AgentType, *Location.ToString());
+void UMassCrowdSubsystem::SetCrowdDensityZone(const FCrowdDensityZone& DensityZone)
+{
+    DensityZones.Add(DensityZone);
+    UE_LOG(LogTemp, Log, TEXT("MassCrowdSubsystem: Added density zone at %s with target density %d"), 
+           *DensityZone.ZoneCenter.ToString(), DensityZone.TargetDensity);
+}
+
+int32 UMassCrowdSubsystem::GetTotalCrowdCount() const
+{
+    return CurrentCrowdCount;
+}
+
+void UMassCrowdSubsystem::SetGlobalCrowdBehavior(const FString& BehaviorName)
+{
+    UE_LOG(LogTemp, Log, TEXT("MassCrowdSubsystem: Setting global crowd behavior to: %s"), *BehaviorName);
+    
+    // In a full implementation, this would update behavior tree or state tree assets
+    // for all crowd entities
+}
+
+void UMassCrowdSubsystem::TriggerCrowdEmergencyResponse(const FVector& ThreatLocation, float ThreatRadius)
+{
+    bEmergencyActive = true;
+    EmergencyThreatLocation = ThreatLocation;
+    EmergencyThreatRadius = ThreatRadius;
+    
+    UE_LOG(LogTemp, Warning, TEXT("MassCrowdSubsystem: Emergency triggered at %s with radius %f"), 
+           *ThreatLocation.ToString(), ThreatRadius);
+    
+    // In a full implementation, this would:
+    // 1. Query all entities within threat radius
+    // 2. Switch their behavior to panic/flee mode
+    // 3. Calculate evacuation paths away from threat
+}
+
+void UMassCrowdSubsystem::SetCrowdEvacuationTarget(const FVector& EvacuationPoint)
+{
+    EvacuationTarget = EvacuationPoint;
+    UE_LOG(LogTemp, Log, TEXT("MassCrowdSubsystem: Set evacuation target to %s"), *EvacuationPoint.ToString());
+}
+
+void UMassCrowdSubsystem::SetCrowdLODDistance(float NearDistance, float MidDistance, float FarDistance)
+{
+    UE_LOG(LogTemp, Log, TEXT("MassCrowdSubsystem: Set LOD distances - Near: %f, Mid: %f, Far: %f"), 
+           NearDistance, MidDistance, FarDistance);
+    
+    // In a full implementation, this would configure Mass LOD system
+}
+
+void UMassCrowdSubsystem::EnableCrowdCulling(bool bEnable)
+{
+    UE_LOG(LogTemp, Log, TEXT("MassCrowdSubsystem: Crowd culling %s"), bEnable ? TEXT("enabled") : TEXT("disabled"));
+}
+
+void UMassCrowdSubsystem::InitializeMassEntity()
+{
+    if (!EntitySubsystem)
+    {
+        UE_LOG(LogTemp, Error, TEXT("MassCrowdSubsystem: Cannot initialize Mass Entity - EntitySubsystem is null"));
+        return;
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("MassCrowdSubsystem: Initializing Mass Entity framework"));
+    
+    // Initialize Mass Entity processing pipeline
+    // In a full implementation, this would set up:
+    // - Entity archetypes for different crowd types
+    // - Processing phases and dependencies
+    // - LOD configuration
+    // - Spatial partitioning
+}
+
+void UMassCrowdSubsystem::SetupCrowdProcessors()
+{
+    UE_LOG(LogTemp, Log, TEXT("MassCrowdSubsystem: Setting up crowd processors"));
+    
+    // In a full implementation, this would register:
+    // - Movement processors
+    // - Avoidance processors  
+    // - Behavior processors
+    // - LOD processors
+    // - Visualization processors
+}
+
+void UMassCrowdSubsystem::UpdateDensityZones()
+{
+    // Update density zones and spawn/despawn agents as needed
+    for (FCrowdDensityZone& Zone : DensityZones)
+    {
+        // In a full implementation, this would:
+        // 1. Count entities in zone
+        // 2. Compare to target density
+        // 3. Spawn or despawn entities to reach target
+        // 4. Update Zone.CurrentDensity
+    }
 }
