@@ -5,6 +5,8 @@
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "Subsystems/GameInstanceSubsystem.h"
+#include "GameFramework/GameModeBase.h"
+#include "GameFramework/PlayerController.h"
 #include "TranspersonalGameCore.generated.h"
 
 DECLARE_LOG_CATEGORY_EXTERN(LogTranspersonalCore, Log, All);
