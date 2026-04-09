@@ -1,224 +1,580 @@
 #include "CombatAIArchitecture.h"
 #include "Engine/World.h"
-#include "GameFramework/Actor.h"
-#include "Components/ActorComponent.h"
-#include "AIController.h"
-#include "BehaviorTree/BlackboardComponent.h"
-#include "Perception/AIPerceptionComponent.h"
+#include "GameFramework/Pawn.h"
+#include "GameFramework/PlayerController.h"
+#include "Kismet/GameplayStatics.h"
+#include "DrawDebugHelpers.h"
 
-UCombatAIArchitecture::UCombatAIArchitecture()
+UCombatAIComponent::UCombatAIComponent()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f; // 10 FPS for AI architecture updates
+    PrimaryComponentTick.TickInterval = 0.1f; // Update 10 times per second for performance
     
     // Initialize default values
-    MaxCombatDistance = 2000.0f;
-    MinCombatDistance = 100.0f;
-    TacticalUpdateInterval = 0.5f;
-    MaxSimultaneousCombatants = 8;
-    
-    // Initialize tactical layers
-    InitializeTacticalLayers();
+    CurrentStamina = Capabilities.StaminaMax;
 }
 
-void UCombatAIArchitecture::BeginPlay()
+void UCombatAIComponent::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Register with global combat manager
-    RegisterWithCombatManager();
+    // Initialize combat state
+    SetCombatState(ECombatState::Passive);
+    CurrentThreatLevel = EThreatLevel::None;
     
-    // Initialize tactical grid
-    InitializeTacticalGrid();
-    
-    // Start tactical analysis timer
-    GetWorld()->GetTimerManager().SetTimer(
-        TacticalAnalysisTimer,
-        this,
-        &UCombatAIArchitecture::PerformTacticalAnalysis,
-        TacticalUpdateInterval,
-        true
-    );
-    
-    UE_LOG(LogTemp, Log, TEXT("CombatAIArchitecture initialized for %s"), 
+    UE_LOG(LogTemp, Log, TEXT("CombatAI Component initialized for %s"), 
            GetOwner() ? *GetOwner()->GetName() : TEXT("Unknown"));
 }
 
-void UCombatAIArchitecture::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UCombatAIComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    // Update combat state machine
-    UpdateCombatStateMachine(DeltaTime);
-    
-    // Update tactical awareness
-    UpdateTacticalAwareness(DeltaTime);
-    
-    // Process combat decisions
-    ProcessCombatDecisions(DeltaTime);
-}
-
-void UCombatAIArchitecture::InitializeTacticalLayers()
-{
-    // Layer 1: Immediate Threat Assessment
-    FTacticalLayer ImmediateLayer;
-    ImmediateLayer.LayerName = TEXT("Immediate");
-    ImmediateLayer.Priority = 10;
-    ImmediateLayer.UpdateFrequency = 0.1f;
-    ImmediateLayer.InfluenceRadius = 500.0f;
-    TacticalLayers.Add(ImmediateLayer);
-    
-    // Layer 2: Tactical Positioning
-    FTacticalLayer TacticalLayer;
-    TacticalLayer.LayerName = TEXT("Tactical");
-    TacticalLayer.Priority = 7;
-    TacticalLayer.UpdateFrequency = 0.3f;
-    TacticalLayer.InfluenceRadius = 1000.0f;
-    TacticalLayers.Add(TacticalLayer);
-    
-    // Layer 3: Strategic Overview
-    FTacticalLayer StrategicLayer;
-    StrategicLayer.LayerName = TEXT("Strategic");
-    StrategicLayer.Priority = 5;
-    StrategicLayer.UpdateFrequency = 1.0f;
-    StrategicLayer.InfluenceRadius = 2000.0f;
-    TacticalLayers.Add(StrategicLayer);
-}
-
-void UCombatAIArchitecture::RegisterWithCombatManager()
-{
-    // Find or create global combat manager
-    if (UWorld* World = GetWorld())
-    {
-        // Implementation would register this AI with a global combat coordination system
-        UE_LOG(LogTemp, Log, TEXT("Registering %s with Combat Manager"), 
-               GetOwner() ? *GetOwner()->GetName() : TEXT("Unknown"));
-    }
-}
-
-void UCombatAIArchitecture::InitializeTacticalGrid()
-{
-    // Create a spatial grid for tactical analysis
-    GridCellSize = 200.0f;
-    GridRadius = 1500.0f;
-    
-    int32 GridSize = FMath::CeilToInt((GridRadius * 2.0f) / GridCellSize);
-    TacticalGrid.SetNum(GridSize * GridSize);
-    
-    // Initialize grid cells
-    for (int32 i = 0; i < TacticalGrid.Num(); i++)
-    {
-        FTacticalGridCell& Cell = TacticalGrid[i];
-        Cell.CellIndex = i;
-        Cell.ThreatLevel = 0.0f;
-        Cell.CoverValue = 0.0f;
-        Cell.FlankingValue = 0.0f;
-        Cell.bIsOccupied = false;
-        Cell.OccupyingActor = nullptr;
-        
-        // Calculate world position for this cell
-        int32 X = i % GridSize;
-        int32 Y = i / GridSize;
-        
-        FVector OwnerLocation = GetOwner()->GetActorLocation();
-        Cell.WorldPosition = OwnerLocation + FVector(
-            (X - GridSize/2) * GridCellSize,
-            (Y - GridSize/2) * GridCellSize,
-            0.0f
-        );
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("Tactical grid initialized with %d cells"), TacticalGrid.Num());
-}
-
-void UCombatAIArchitecture::PerformTacticalAnalysis()
-{
     if (!GetOwner())
+    {
         return;
-        
-    // Update threat assessment
-    UpdateThreatAssessment();
+    }
     
-    // Analyze tactical positions
-    AnalyzeTacticalPositions();
+    // Update combat logic
+    UpdateCombatLogic(DeltaTime);
     
-    // Update combat priorities
-    UpdateCombatPriorities();
-    
-    // Broadcast tactical update to behavior tree
-    BroadcastTacticalUpdate();
+    // Regenerate stamina
+    if (CurrentStamina < Capabilities.StaminaMax)
+    {
+        CurrentStamina = FMath::Min(CurrentStamina + (Capabilities.StaminaRegenRate * DeltaTime), 
+                                   Capabilities.StaminaMax);
+    }
 }
 
-void UCombatAIArchitecture::UpdateThreatAssessment()
+void UCombatAIComponent::SetCombatState(ECombatState NewState)
 {
-    CurrentThreats.Empty();
+    if (CurrentCombatState == NewState)
+    {
+        return;
+    }
     
-    // Scan for threats within combat range
-    TArray<AActor*> NearbyActors;
+    ECombatState OldState = CurrentCombatState;
+    CurrentCombatState = NewState;
+    StateChangeTime = GetWorld()->GetTimeSeconds();
+    
+    // Update gameplay tags based on combat state
+    CombatTags.RemoveTag(FGameplayTag::RequestGameplayTag("Combat.State.Passive"));
+    CombatTags.RemoveTag(FGameplayTag::RequestGameplayTag("Combat.State.Investigating"));
+    CombatTags.RemoveTag(FGameplayTag::RequestGameplayTag("Combat.State.Stalking"));
+    CombatTags.RemoveTag(FGameplayTag::RequestGameplayTag("Combat.State.Hunting"));
+    CombatTags.RemoveTag(FGameplayTag::RequestGameplayTag("Combat.State.Attacking"));
+    CombatTags.RemoveTag(FGameplayTag::RequestGameplayTag("Combat.State.Retreating"));
+    CombatTags.RemoveTag(FGameplayTag::RequestGameplayTag("Combat.State.Defending"));
+    CombatTags.RemoveTag(FGameplayTag::RequestGameplayTag("Combat.State.Fleeing"));
+    
+    switch (NewState)
+    {
+        case ECombatState::Passive:
+            CombatTags.AddTag(FGameplayTag::RequestGameplayTag("Combat.State.Passive"));
+            break;
+        case ECombatState::Investigating:
+            CombatTags.AddTag(FGameplayTag::RequestGameplayTag("Combat.State.Investigating"));
+            break;
+        case ECombatState::Stalking:
+            CombatTags.AddTag(FGameplayTag::RequestGameplayTag("Combat.State.Stalking"));
+            break;
+        case ECombatState::Hunting:
+            CombatTags.AddTag(FGameplayTag::RequestGameplayTag("Combat.State.Hunting"));
+            break;
+        case ECombatState::Attacking:
+            CombatTags.AddTag(FGameplayTag::RequestGameplayTag("Combat.State.Attacking"));
+            break;
+        case ECombatState::Retreating:
+            CombatTags.AddTag(FGameplayTag::RequestGameplayTag("Combat.State.Retreating"));
+            break;
+        case ECombatState::Defending:
+            CombatTags.AddTag(FGameplayTag::RequestGameplayTag("Combat.State.Defending"));
+            break;
+        case ECombatState::Fleeing:
+            CombatTags.AddTag(FGameplayTag::RequestGameplayTag("Combat.State.Fleeing"));
+            break;
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("%s: Combat state changed from %d to %d"), 
+           *GetOwner()->GetName(), (int32)OldState, (int32)NewState);
+    
+    // Fire Blueprint event
+    OnCombatStateChanged(OldState, NewState);
+}
+
+void UCombatAIComponent::AddThreat(AActor* Threat, EThreatLevel ThreatLevel)
+{
+    if (!Threat || KnownThreats.Contains(Threat))
+    {
+        return;
+    }
+    
+    KnownThreats.AddUnique(Threat);
+    
+    // Update current threat level if this is more severe
+    if (ThreatLevel > CurrentThreatLevel)
+    {
+        CurrentThreatLevel = ThreatLevel;
+    }
+    
+    // Set as current target if we don't have one or this is a higher priority threat
+    if (!CurrentTarget || ThreatLevel > EvaluateThreatLevel(CurrentTarget))
+    {
+        CurrentTarget = Threat;
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("%s: Added threat %s with level %d"), 
+           *GetOwner()->GetName(), *Threat->GetName(), (int32)ThreatLevel);
+    
+    // Fire Blueprint event
+    OnThreatDetected(Threat, ThreatLevel);
+    
+    // Transition to appropriate combat state
+    if (CurrentCombatState == ECombatState::Passive)
+    {
+        if (Personality.Curiosity > 0.5f)
+        {
+            SetCombatState(ECombatState::Investigating);
+        }
+        else if (Personality.Aggression > 0.7f)
+        {
+            SetCombatState(ECombatState::Stalking);
+        }
+    }
+}
+
+void UCombatAIComponent::RemoveThreat(AActor* Threat)
+{
+    if (!Threat)
+    {
+        return;
+    }
+    
+    KnownThreats.Remove(Threat);
+    
+    if (CurrentTarget == Threat)
+    {
+        CurrentTarget = nullptr;
+        OnTargetLost();
+        
+        // Find new target from remaining threats
+        if (KnownThreats.Num() > 0)
+        {
+            EThreatLevel HighestThreat = EThreatLevel::None;
+            for (AActor* RemainingThreat : KnownThreats)
+            {
+                EThreatLevel ThreatLevel = EvaluateThreatLevel(RemainingThreat);
+                if (ThreatLevel > HighestThreat)
+                {
+                    HighestThreat = ThreatLevel;
+                    CurrentTarget = RemainingThreat;
+                }
+            }
+            CurrentThreatLevel = HighestThreat;
+        }
+        else
+        {
+            CurrentThreatLevel = EThreatLevel::None;
+            SetCombatState(ECombatState::Passive);
+        }
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("%s: Removed threat %s"), 
+           *GetOwner()->GetName(), *Threat->GetName());
+}
+
+EThreatLevel UCombatAIComponent::EvaluateThreatLevel(AActor* PotentialThreat)
+{
+    if (!PotentialThreat)
+    {
+        return EThreatLevel::None;
+    }
+    
+    float Distance = CalculateDistance(PotentialThreat);
+    bool bIsPlayer = PotentialThreat->IsA<APawn>() && 
+                     Cast<APawn>(PotentialThreat)->GetController() && 
+                     Cast<APawn>(PotentialThreat)->GetController()->IsA<APlayerController>();
+    
+    // Base threat level calculation
+    EThreatLevel ThreatLevel = EThreatLevel::Minimal;
+    
+    // Players are always considered higher threat
+    if (bIsPlayer)
+    {
+        ThreatLevel = EThreatLevel::Medium;
+    }
+    
+    // Distance modifies threat level
+    if (Distance < Capabilities.AttackRange)
+    {
+        ThreatLevel = static_cast<EThreatLevel>(FMath::Min((int32)ThreatLevel + 2, (int32)EThreatLevel::Lethal));
+    }
+    else if (Distance < Capabilities.DetectionRange * 0.5f)
+    {
+        ThreatLevel = static_cast<EThreatLevel>(FMath::Min((int32)ThreatLevel + 1, (int32)EThreatLevel::Critical));
+    }
+    
+    // Personality affects threat evaluation
+    if (Personality.Courage < 0.3f)
+    {
+        // Cowardly creatures see everything as more threatening
+        ThreatLevel = static_cast<EThreatLevel>(FMath::Min((int32)ThreatLevel + 1, (int32)EThreatLevel::Lethal));
+    }
+    else if (Personality.Aggression > 0.8f)
+    {
+        // Aggressive creatures are less concerned about threats
+        ThreatLevel = static_cast<EThreatLevel>(FMath::Max((int32)ThreatLevel - 1, (int32)EThreatLevel::None));
+    }
+    
+    return ThreatLevel;
+}
+
+bool UCombatAIComponent::ShouldEngageTarget(AActor* Target)
+{
+    if (!Target)
+    {
+        return false;
+    }
+    
+    // Check if we have enough stamina for combat
+    if (CurrentStamina < Capabilities.StaminaMax * 0.3f)
+    {
+        return false;
+    }
+    
+    float Distance = CalculateDistance(Target);
+    EThreatLevel ThreatLevel = EvaluateThreatLevel(Target);
+    
+    // Base engagement decision on personality and threat level
+    float EngagementThreshold = 0.5f;
+    
+    // Modify threshold based on personality
+    EngagementThreshold += (Personality.Aggression - 0.5f) * 0.4f;
+    EngagementThreshold -= (Personality.Courage - 0.5f) * 0.2f;
+    
+    // Modify based on combat role
+    switch (CombatRole)
+    {
+        case EDinosaurCombatRole::Predator:
+            EngagementThreshold -= 0.2f; // More likely to engage
+            break;
+        case EDinosaurCombatRole::PackHunter:
+            if (PackMembers.Num() > 0)
+            {
+                EngagementThreshold -= 0.3f; // Much more likely with pack support
+            }
+            break;
+        case EDinosaurCombatRole::Territorial:
+            if (Distance < Capabilities.DetectionRange * 0.5f) // In territory
+            {
+                EngagementThreshold -= 0.4f; // Very likely to defend territory
+            }
+            break;
+        case EDinosaurCombatRole::Herbivore:
+            EngagementThreshold += 0.3f; // Less likely to engage
+            break;
+        case EDinosaurCombatRole::Scavenger:
+            EngagementThreshold += 0.1f; // Slightly less likely
+            break;
+    }
+    
+    // Random factor for unpredictability
+    float RandomFactor = FMath::RandRange(-0.1f, 0.1f);
+    
+    return (Personality.Aggression + RandomFactor) > EngagementThreshold;
+}
+
+bool UCombatAIComponent::ShouldRetreat()
+{
+    // Check health/stamina status
+    if (CurrentStamina < Capabilities.StaminaMax * 0.2f)
+    {
+        return true;
+    }
+    
+    // Check if outnumbered (for pack hunters)
+    if (CombatRole == EDinosaurCombatRole::PackHunter && PackMembers.Num() == 0 && KnownThreats.Num() > 1)
+    {
+        return true;
+    }
+    
+    // Personality-based retreat decision
+    float RetreatThreshold = 1.0f - Personality.Courage;
+    
+    // Modify based on current threat level
+    switch (CurrentThreatLevel)
+    {
+        case EThreatLevel::Critical:
+            RetreatThreshold += 0.3f;
+            break;
+        case EThreatLevel::Lethal:
+            RetreatThreshold += 0.5f;
+            break;
+        default:
+            break;
+    }
+    
+    return FMath::RandRange(0.0f, 1.0f) < RetreatThreshold;
+}
+
+FVector UCombatAIComponent::GetOptimalAttackPosition(AActor* Target)
+{
+    if (!Target || !GetOwner())
+    {
+        return GetOwner()->GetActorLocation();
+    }
+    
+    FVector TargetLocation = Target->GetActorLocation();
+    FVector OwnerLocation = GetOwner()->GetActorLocation();
+    
+    // Calculate direction to target
+    FVector DirectionToTarget = (TargetLocation - OwnerLocation).GetSafeNormal();
+    
+    // Base position at attack range
+    FVector BasePosition = TargetLocation - (DirectionToTarget * Capabilities.AttackRange * 0.8f);
+    
+    // Modify based on combat role and personality
+    switch (CombatRole)
+    {
+        case EDinosaurCombatRole::Ambusher:
+            // Try to find cover or concealment
+            // For now, add some randomness to simulate finding hiding spots
+            BasePosition += FVector(FMath::RandRange(-300.0f, 300.0f), 
+                                   FMath::RandRange(-300.0f, 300.0f), 0.0f);
+            break;
+            
+        case EDinosaurCombatRole::PackHunter:
+            // Position to flank if pack members are present
+            if (PackMembers.Num() > 0)
+            {
+                FVector FlankDirection = FVector(-DirectionToTarget.Y, DirectionToTarget.X, 0.0f);
+                BasePosition += FlankDirection * 200.0f;
+            }
+            break;
+            
+        case EDinosaurCombatRole::Territorial:
+            // Stay closer to territory center (for now, stay closer to current position)
+            BasePosition = FMath::Lerp(BasePosition, OwnerLocation, 0.3f);
+            break;
+            
+        default:
+            // Direct approach for predators
+            break;
+    }
+    
+    return BasePosition;
+}
+
+void UCombatAIComponent::CallForPackSupport()
+{
+    if (!Capabilities.bCanCallForHelp)
+    {
+        return;
+    }
+    
+    // Find nearby pack members within hearing range
     UWorld* World = GetWorld();
-    if (!World) return;
+    if (!World)
+    {
+        return;
+    }
     
+    TArray<AActor*> NearbyActors;
     FVector OwnerLocation = GetOwner()->GetActorLocation();
     
     // Simple sphere overlap to find nearby actors
-    for (TActorIterator<APawn> ActorItr(World); ActorItr; ++ActorItr)
+    // In a real implementation, this would use proper collision detection
+    for (TActorIterator<APawn> ActorIterator(World); ActorIterator; ++ActorIterator)
     {
-        APawn* Pawn = *ActorItr;
+        APawn* Pawn = *ActorIterator;
         if (Pawn && Pawn != GetOwner())
         {
-            float Distance = FVector::Dist(OwnerLocation, Pawn->GetActorLocation());
-            if (Distance <= MaxCombatDistance)
+            float Distance = FVector::Dist(Pawn->GetActorLocation(), OwnerLocation);
+            if (Distance <= Capabilities.HearingRange)
             {
-                FCombatThreat Threat;
-                Threat.ThreatActor = Pawn;
-                Threat.ThreatLevel = CalculateThreatLevel(Pawn, Distance);
-                Threat.Distance = Distance;
-                Threat.LastSeenLocation = Pawn->GetActorLocation();
-                Threat.LastSeenTime = World->GetTimeSeconds();
-                
-                CurrentThreats.Add(Threat);
+                // Check if this pawn has the same combat AI component and is of same species
+                UCombatAIComponent* OtherCombatAI = Pawn->FindComponentByClass<UCombatAIComponent>();
+                if (OtherCombatAI && OtherCombatAI->CombatRole == CombatRole)
+                {
+                    // Add current target as threat to pack member
+                    if (CurrentTarget)
+                    {
+                        OtherCombatAI->AddThreat(CurrentTarget, CurrentThreatLevel);
+                    }
+                    
+                    PackMembers.AddUnique(Pawn);
+                }
             }
         }
     }
     
-    // Sort threats by priority
-    CurrentThreats.Sort([](const FCombatThreat& A, const FCombatThreat& B) {
-        return A.ThreatLevel > B.ThreatLevel;
-    });
+    UE_LOG(LogTemp, Log, TEXT("%s: Called for pack support, %d members responded"), 
+           *GetOwner()->GetName(), PackMembers.Num());
 }
 
-float UCombatAIArchitecture::CalculateThreatLevel(AActor* Actor, float Distance)
+void UCombatAIComponent::UpdateCombatLogic(float DeltaTime)
 {
-    if (!Actor) return 0.0f;
-    
-    float ThreatLevel = 0.0f;
-    
-    // Base threat from distance (closer = more threatening)
-    float DistanceThreat = FMath::Clamp(1.0f - (Distance / MaxCombatDistance), 0.0f, 1.0f);
-    ThreatLevel += DistanceThreat * 0.4f;
-    
-    // Check if it's a player character (higher threat)
-    if (Actor->IsA<APawn>())
+    if (!GetOwner())
     {
-        APawn* Pawn = Cast<APawn>(Actor);
-        if (Pawn && Pawn->IsPlayerControlled())
+        return;
+    }
+    
+    UpdateThreatAssessment();
+    UpdatePackCoordination();
+    
+    // State-specific logic
+    float TimeSinceStateChange = GetWorld()->GetTimeSeconds() - StateChangeTime;
+    
+    switch (CurrentCombatState)
+    {
+        case ECombatState::Passive:
+            // Look for threats
+            if (KnownThreats.Num() > 0)
+            {
+                SetCombatState(ECombatState::Investigating);
+            }
+            break;
+            
+        case ECombatState::Investigating:
+            if (CurrentTarget && TimeSinceStateChange > 2.0f)
+            {
+                if (ShouldEngageTarget(CurrentTarget))
+                {
+                    SetCombatState(ECombatState::Stalking);
+                }
+                else if (Personality.Courage < 0.4f)
+                {
+                    SetCombatState(ECombatState::Fleeing);
+                }
+                else
+                {
+                    SetCombatState(ECombatState::Passive);
+                }
+            }
+            break;
+            
+        case ECombatState::Stalking:
+            if (CurrentTarget)
+            {
+                float Distance = CalculateDistance(CurrentTarget);
+                if (Distance < Capabilities.AttackRange * 1.2f)
+                {
+                    SetCombatState(ECombatState::Attacking);
+                }
+                else if (TimeSinceStateChange > 10.0f && Personality.Persistence < 0.5f)
+                {
+                    SetCombatState(ECombatState::Passive);
+                }
+            }
+            break;
+            
+        case ECombatState::Attacking:
+            if (ShouldRetreat())
+            {
+                SetCombatState(ECombatState::Retreating);
+            }
+            else if (!CurrentTarget || CalculateDistance(CurrentTarget) > Capabilities.DetectionRange)
+            {
+                SetCombatState(ECombatState::Passive);
+            }
+            break;
+            
+        case ECombatState::Retreating:
+            if (TimeSinceStateChange > 5.0f && CurrentThreatLevel <= EThreatLevel::Low)
+            {
+                SetCombatState(ECombatState::Passive);
+            }
+            break;
+            
+        case ECombatState::Fleeing:
+            if (TimeSinceStateChange > 8.0f && KnownThreats.Num() == 0)
+            {
+                SetCombatState(ECombatState::Passive);
+            }
+            break;
+    }
+}
+
+void UCombatAIComponent::UpdateThreatAssessment()
+{
+    // Remove invalid or distant threats
+    for (int32 i = KnownThreats.Num() - 1; i >= 0; i--)
+    {
+        AActor* Threat = KnownThreats[i];
+        if (!IsValid(Threat))
         {
-            ThreatLevel += 0.6f; // Players are high priority threats
+            KnownThreats.RemoveAt(i);
+            continue;
+        }
+        
+        float Distance = CalculateDistance(Threat);
+        if (Distance > Capabilities.DetectionRange * 1.5f) // Give some buffer
+        {
+            RemoveThreat(Threat);
         }
     }
     
-    // Factor in line of sight
-    if (HasLineOfSight(Actor))
+    // Update current threat level based on remaining threats
+    CurrentThreatLevel = EThreatLevel::None;
+    for (AActor* Threat : KnownThreats)
     {
-        ThreatLevel += 0.2f;
+        EThreatLevel ThreatLevel = EvaluateThreatLevel(Threat);
+        if (ThreatLevel > CurrentThreatLevel)
+        {
+            CurrentThreatLevel = ThreatLevel;
+        }
     }
-    
-    return FMath::Clamp(ThreatLevel, 0.0f, 1.0f);
 }
 
-bool UCombatAIArchitecture::HasLineOfSight(AActor* Target)
+void UCombatAIComponent::UpdatePackCoordination()
 {
-    if (!Target || !GetOwner()) return false;
+    if (!Capabilities.bCanPackHunt)
+    {
+        return;
+    }
+    
+    // Remove invalid pack members
+    for (int32 i = PackMembers.Num() - 1; i >= 0; i--)
+    {
+        if (!IsValid(PackMembers[i]) || CalculateDistance(PackMembers[i]) > Capabilities.HearingRange)
+        {
+            PackMembers.RemoveAt(i);
+        }
+    }
+    
+    // Share threat information with pack
+    for (AActor* PackMember : PackMembers)
+    {
+        UCombatAIComponent* PackMemberAI = PackMember->FindComponentByClass<UCombatAIComponent>();
+        if (PackMemberAI && CurrentTarget && !PackMemberAI->KnownThreats.Contains(CurrentTarget))
+        {
+            PackMemberAI->AddThreat(CurrentTarget, CurrentThreatLevel);
+        }
+    }
+}
+
+float UCombatAIComponent::CalculateDistance(AActor* Target)
+{
+    if (!Target || !GetOwner())
+    {
+        return MAX_FLT;
+    }
+    
+    return FVector::Dist(GetOwner()->GetActorLocation(), Target->GetActorLocation());
+}
+
+bool UCombatAIComponent::HasLineOfSight(AActor* Target)
+{
+    if (!Target || !GetOwner())
+    {
+        return false;
+    }
+    
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return false;
+    }
     
     FVector Start = GetOwner()->GetActorLocation();
     FVector End = Target->GetActorLocation();
@@ -228,353 +584,18 @@ bool UCombatAIArchitecture::HasLineOfSight(AActor* Target)
     QueryParams.AddIgnoredActor(GetOwner());
     QueryParams.AddIgnoredActor(Target);
     
-    bool bHit = GetWorld()->LineTraceSingleByChannel(
-        HitResult,
-        Start,
-        End,
-        ECollisionChannel::ECC_Visibility,
-        QueryParams
-    );
+    bool bHit = World->LineTraceSingleByChannel(HitResult, Start, End, ECC_Visibility, QueryParams);
     
     return !bHit; // No hit means clear line of sight
 }
 
-void UCombatAIArchitecture::AnalyzeTacticalPositions()
+bool UCombatAIComponent::IsInAttackRange(AActor* Target)
 {
-    // Update tactical grid based on current threats
-    for (FTacticalGridCell& Cell : TacticalGrid)
+    if (!Target)
     {
-        AnalyzeCellTacticalValue(Cell);
-    }
-}
-
-void UCombatAIArchitecture::AnalyzeCellTacticalValue(FTacticalGridCell& Cell)
-{
-    Cell.ThreatLevel = 0.0f;
-    Cell.CoverValue = 0.0f;
-    Cell.FlankingValue = 0.0f;
-    
-    // Analyze threat exposure for this cell
-    for (const FCombatThreat& Threat : CurrentThreats)
-    {
-        if (Threat.ThreatActor)
-        {
-            float DistanceToThreat = FVector::Dist(Cell.WorldPosition, Threat.ThreatActor->GetActorLocation());
-            float ThreatInfluence = FMath::Clamp(1.0f - (DistanceToThreat / MaxCombatDistance), 0.0f, 1.0f);
-            Cell.ThreatLevel += ThreatInfluence * Threat.ThreatLevel;
-        }
+        return false;
     }
     
-    // Analyze cover opportunities (simplified - would use actual cover analysis in full implementation)
-    Cell.CoverValue = AnalyzeCoverAtPosition(Cell.WorldPosition);
-    
-    // Analyze flanking opportunities
-    Cell.FlankingValue = AnalyzeFlankingAtPosition(Cell.WorldPosition);
-}
-
-float UCombatAIArchitecture::AnalyzeCoverAtPosition(const FVector& Position)
-{
-    // Simplified cover analysis - in full implementation would check for actual cover objects
-    float CoverValue = 0.0f;
-    
-    // Check for nearby walls or obstacles
-    TArray<FVector> CheckDirections = {
-        FVector::ForwardVector,
-        FVector::RightVector,
-        FVector::BackwardVector,
-        -FVector::RightVector
-    };
-    
-    for (const FVector& Direction : CheckDirections)
-    {
-        FVector CheckEnd = Position + Direction * 100.0f;
-        FHitResult HitResult;
-        
-        bool bHit = GetWorld()->LineTraceSingleByChannel(
-            HitResult,
-            Position,
-            CheckEnd,
-            ECollisionChannel::ECC_WorldStatic
-        );
-        
-        if (bHit)
-        {
-            CoverValue += 0.25f; // Each direction with cover adds value
-        }
-    }
-    
-    return FMath::Clamp(CoverValue, 0.0f, 1.0f);
-}
-
-float UCombatAIArchitecture::AnalyzeFlankingAtPosition(const FVector& Position)
-{
-    // Simplified flanking analysis
-    float FlankingValue = 0.0f;
-    
-    for (const FCombatThreat& Threat : CurrentThreats)
-    {
-        if (Threat.ThreatActor)
-        {
-            FVector ThreatLocation = Threat.ThreatActor->GetActorLocation();
-            FVector ThreatForward = Threat.ThreatActor->GetActorForwardVector();
-            
-            FVector ToPosition = (Position - ThreatLocation).GetSafeNormal();
-            float DotProduct = FVector::DotProduct(ThreatForward, ToPosition);
-            
-            // Positions behind or to the side of threats have higher flanking value
-            if (DotProduct < 0.0f)
-            {
-                FlankingValue += FMath::Abs(DotProduct) * 0.5f;
-            }
-        }
-    }
-    
-    return FMath::Clamp(FlankingValue, 0.0f, 1.0f);
-}
-
-void UCombatAIArchitecture::UpdateCombatPriorities()
-{
-    // Update current tactical priorities based on analysis
-    CurrentTacticalPriorities.Empty();
-    
-    if (CurrentThreats.Num() > 0)
-    {
-        // Primary threat engagement
-        FTacticalPriority EngagePriority;
-        EngagePriority.PriorityType = ETacticalPriorityType::Engage;
-        EngagePriority.Priority = 8.0f;
-        EngagePriority.TargetActor = CurrentThreats[0].ThreatActor;
-        CurrentTacticalPriorities.Add(EngagePriority);
-        
-        // Positioning priority
-        FTacticalPriority PositionPriority;
-        PositionPriority.PriorityType = ETacticalPriorityType::Position;
-        PositionPriority.Priority = 6.0f;
-        PositionPriority.TargetLocation = FindOptimalTacticalPosition();
-        CurrentTacticalPriorities.Add(PositionPriority);
-    }
-    else
-    {
-        // Patrol priority when no threats
-        FTacticalPriority PatrolPriority;
-        PatrolPriority.PriorityType = ETacticalPriorityType::Patrol;
-        PatrolPriority.Priority = 3.0f;
-        CurrentTacticalPriorities.Add(PatrolPriority);
-    }
-}
-
-FVector UCombatAIArchitecture::FindOptimalTacticalPosition()
-{
-    FVector BestPosition = GetOwner()->GetActorLocation();
-    float BestScore = -1.0f;
-    
-    for (const FTacticalGridCell& Cell : TacticalGrid)
-    {
-        // Calculate tactical score for this cell
-        float Score = 0.0f;
-        
-        // Prefer positions with good cover
-        Score += Cell.CoverValue * 0.4f;
-        
-        // Prefer positions with flanking opportunities
-        Score += Cell.FlankingValue * 0.3f;
-        
-        // Avoid high threat areas
-        Score -= Cell.ThreatLevel * 0.5f;
-        
-        // Prefer positions not too far from current location
-        float DistanceFromCurrent = FVector::Dist(Cell.WorldPosition, GetOwner()->GetActorLocation());
-        float DistancePenalty = FMath::Clamp(DistanceFromCurrent / 1000.0f, 0.0f, 0.3f);
-        Score -= DistancePenalty;
-        
-        if (Score > BestScore && !Cell.bIsOccupied)
-        {
-            BestScore = Score;
-            BestPosition = Cell.WorldPosition;
-        }
-    }
-    
-    return BestPosition;
-}
-
-void UCombatAIArchitecture::BroadcastTacticalUpdate()
-{
-    // Update blackboard with tactical information
-    if (AAIController* AIController = Cast<AAIController>(GetOwner()))
-    {
-        if (UBlackboardComponent* Blackboard = AIController->GetBlackboardComponent())
-        {
-            // Update primary threat
-            if (CurrentThreats.Num() > 0)
-            {
-                Blackboard->SetValueAsObject(TEXT("PrimaryThreat"), CurrentThreats[0].ThreatActor);
-                Blackboard->SetValueAsVector(TEXT("ThreatLocation"), CurrentThreats[0].LastSeenLocation);
-                Blackboard->SetValueAsFloat(TEXT("ThreatLevel"), CurrentThreats[0].ThreatLevel);
-            }
-            else
-            {
-                Blackboard->ClearValue(TEXT("PrimaryThreat"));
-            }
-            
-            // Update tactical position
-            Blackboard->SetValueAsVector(TEXT("OptimalPosition"), FindOptimalTacticalPosition());
-            
-            // Update combat state
-            Blackboard->SetValueAsBool(TEXT("InCombat"), CurrentThreats.Num() > 0);
-        }
-    }
-}
-
-void UCombatAIArchitecture::UpdateCombatStateMachine(float DeltaTime)
-{
-    // Simple state machine update
-    switch (CurrentCombatState)
-    {
-        case ECombatAIState::Idle:
-            if (CurrentThreats.Num() > 0)
-            {
-                TransitionToState(ECombatAIState::Engaging);
-            }
-            break;
-            
-        case ECombatAIState::Engaging:
-            if (CurrentThreats.Num() == 0)
-            {
-                TransitionToState(ECombatAIState::Idle);
-            }
-            break;
-            
-        case ECombatAIState::Flanking:
-            // Flanking logic would be implemented here
-            break;
-            
-        case ECombatAIState::Retreating:
-            // Retreat logic would be implemented here
-            break;
-    }
-}
-
-void UCombatAIArchitecture::TransitionToState(ECombatAIState NewState)
-{
-    if (CurrentCombatState != NewState)
-    {
-        ECombatAIState PreviousState = CurrentCombatState;
-        CurrentCombatState = NewState;
-        
-        UE_LOG(LogTemp, Log, TEXT("%s transitioning from %d to %d"), 
-               GetOwner() ? *GetOwner()->GetName() : TEXT("Unknown"),
-               (int32)PreviousState, (int32)NewState);
-        
-        // Trigger state change events
-        OnCombatStateChanged.Broadcast(PreviousState, NewState);
-    }
-}
-
-void UCombatAIArchitecture::UpdateTacticalAwareness(float DeltaTime)
-{
-    // Update awareness of tactical situation
-    TacticalAwarenessLevel = 0.0f;
-    
-    // Factor in number of known threats
-    if (CurrentThreats.Num() > 0)
-    {
-        TacticalAwarenessLevel += FMath::Clamp(CurrentThreats.Num() / 3.0f, 0.0f, 0.5f);
-    }
-    
-    // Factor in recent combat activity
-    float TimeSinceLastCombat = GetWorld()->GetTimeSeconds() - LastCombatTime;
-    if (TimeSinceLastCombat < 30.0f)
-    {
-        TacticalAwarenessLevel += 0.3f;
-    }
-    
-    // Factor in environmental complexity
-    TacticalAwarenessLevel += CalculateEnvironmentalComplexity() * 0.2f;
-    
-    TacticalAwarenessLevel = FMath::Clamp(TacticalAwarenessLevel, 0.0f, 1.0f);
-}
-
-float UCombatAIArchitecture::CalculateEnvironmentalComplexity()
-{
-    // Simplified environmental complexity calculation
-    float Complexity = 0.0f;
-    
-    // Count nearby objects that could provide cover or tactical advantage
-    int32 NearbyObjects = 0;
-    FVector OwnerLocation = GetOwner()->GetActorLocation();
-    
-    for (TActorIterator<AActor> ActorItr(GetWorld()); ActorItr; ++ActorItr)
-    {
-        AActor* Actor = *ActorItr;
-        if (Actor && Actor != GetOwner())
-        {
-            float Distance = FVector::Dist(OwnerLocation, Actor->GetActorLocation());
-            if (Distance <= 500.0f && Actor->GetRootComponent() && Actor->GetRootComponent()->GetCollisionEnabled() != ECollisionEnabled::NoCollision)
-            {
-                NearbyObjects++;
-            }
-        }
-    }
-    
-    Complexity = FMath::Clamp(NearbyObjects / 20.0f, 0.0f, 1.0f);
-    return Complexity;
-}
-
-void UCombatAIArchitecture::ProcessCombatDecisions(float DeltaTime)
-{
-    // Process high-level combat decisions based on tactical analysis
-    if (CurrentThreats.Num() > 0)
-    {
-        // Update last combat time
-        LastCombatTime = GetWorld()->GetTimeSeconds();
-        
-        // Make combat decisions based on current priorities
-        for (const FTacticalPriority& Priority : CurrentTacticalPriorities)
-        {
-            ProcessTacticalPriority(Priority);
-        }
-    }
-}
-
-void UCombatAIArchitecture::ProcessTacticalPriority(const FTacticalPriority& Priority)
-{
-    switch (Priority.PriorityType)
-    {
-        case ETacticalPriorityType::Engage:
-            // Signal behavior tree to engage target
-            if (AAIController* AIController = Cast<AAIController>(GetOwner()))
-            {
-                if (UBlackboardComponent* Blackboard = AIController->GetBlackboardComponent())
-                {
-                    Blackboard->SetValueAsObject(TEXT("EngageTarget"), Priority.TargetActor);
-                }
-            }
-            break;
-            
-        case ETacticalPriorityType::Position:
-            // Signal behavior tree to move to tactical position
-            if (AAIController* AIController = Cast<AAIController>(GetOwner()))
-            {
-                if (UBlackboardComponent* Blackboard = AIController->GetBlackboardComponent())
-                {
-                    Blackboard->SetValueAsVector(TEXT("TacticalMoveLocation"), Priority.TargetLocation);
-                }
-            }
-            break;
-            
-        case ETacticalPriorityType::Patrol:
-            // Continue patrol behavior
-            break;
-            
-        case ETacticalPriorityType::Retreat:
-            // Signal retreat
-            if (AAIController* AIController = Cast<AAIController>(GetOwner()))
-            {
-                if (UBlackboardComponent* Blackboard = AIController->GetBlackboardComponent())
-                {
-                    Blackboard->SetValueAsBool(TEXT("ShouldRetreat"), true);
-                }
-            }
-            break;
-    }
+    float Distance = CalculateDistance(Target);
+    return Distance <= Capabilities.AttackRange;
 }
