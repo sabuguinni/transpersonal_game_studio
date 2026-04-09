@@ -1,0 +1,302 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "GameFramework/Actor.h"
+#include "Components/SplineComponent.h"
+#include "Engine/StaticMeshActor.h"
+#include "WaterBodyRiver.h"
+#include "WaterBodyLake.h"
+#include "RiverSystem.generated.h"
+
+USTRUCT(BlueprintType)
+struct FRiverNode
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River")
+    FVector Location = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River")
+    float Width = 500.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River")
+    float Depth = 200.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River")
+    float FlowRate = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River")
+    bool bIsSource = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River")
+    bool bIsJunction = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River")
+    TArray<int32> ConnectedNodes;
+};
+
+USTRUCT(BlueprintType)
+struct FRiverSegment
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River")
+    int32 StartNodeIndex = -1;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River")
+    int32 EndNodeIndex = -1;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River")
+    TArray<FVector> SplinePoints;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River")
+    float AverageWidth = 500.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River")
+    float Length = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River")
+    TWeakObjectPtr<AWaterBodyRiver> WaterBodyActor;
+};
+
+USTRUCT(BlueprintType)
+struct FLakeData
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lake")
+    FVector Center = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lake")
+    float Radius = 2000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lake")
+    float Depth = 500.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lake")
+    TArray<int32> ConnectedRiverNodes;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lake")
+    TWeakObjectPtr<AWaterBodyLake> WaterBodyActor;
+};
+
+/**
+ * Procedural River and Water System Generator
+ * Creates realistic river networks, lakes, and water bodies for the prehistoric world
+ */
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API ARiverSystem : public AActor
+{
+    GENERATED_BODY()
+
+public:
+    ARiverSystem();
+
+protected:
+    virtual void BeginPlay() override;
+
+#if WITH_EDITOR
+    virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
+#endif
+
+public:
+    // === RIVER NETWORK CONFIGURATION ===
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River Network")
+    int32 NumberOfRiverSources = 5;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River Network")
+    float MinRiverLength = 5000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River Network")
+    float MaxRiverLength = 20000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River Network")
+    float RiverBranchingProbability = 0.3f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River Network")
+    float MinRiverWidth = 200.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River Network")
+    float MaxRiverWidth = 800.0f;
+
+    // === LAKE CONFIGURATION ===
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lakes")
+    int32 NumberOfLakes = 3;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lakes")
+    float MinLakeRadius = 1000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lakes")
+    float MaxLakeRadius = 4000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lakes")
+    float LakeDepthVariation = 0.3f;
+
+    // === WATER FLOW SIMULATION ===
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water Flow")
+    bool bEnableFlowSimulation = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water Flow")
+    float BaseFlowRate = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water Flow")
+    float FlowAcceleration = 0.1f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water Flow")
+    bool bFlowsTowardsOcean = true;
+
+    // === TERRAIN INTEGRATION ===
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
+    float TerrainCarveDepth = 100.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
+    float TerrainCarveWidth = 1.5f; // Multiplier of river width
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
+    bool bCarveTerrainForRivers = true;
+
+    // === GENERATION PARAMETERS ===
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation")
+    int32 RandomSeed = 54321;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation")
+    FVector WorldBounds = FVector(10000.0f, 10000.0f, 2000.0f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation")
+    float NoiseScale = 0.001f;
+
+    // === RUNTIME DATA ===
+    
+    UPROPERTY(BlueprintReadOnly, Category = "Runtime")
+    TArray<FRiverNode> RiverNodes;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Runtime")
+    TArray<FRiverSegment> RiverSegments;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Runtime")
+    TArray<FLakeData> Lakes;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Runtime")
+    bool bIsGenerated = false;
+
+public:
+    // === BLUEPRINT CALLABLE FUNCTIONS ===
+    
+    UFUNCTION(BlueprintCallable, Category = "River System")
+    void GenerateRiverNetwork();
+
+    UFUNCTION(BlueprintCallable, Category = "River System")
+    void ClearRiverNetwork();
+
+    UFUNCTION(BlueprintCallable, Category = "River System")
+    void GenerateLakes();
+
+    UFUNCTION(BlueprintCallable, Category = "River System")
+    void ConnectRiversToLakes();
+
+    UFUNCTION(BlueprintCallable, Category = "Water Flow")
+    void SimulateWaterFlow();
+
+    UFUNCTION(BlueprintCallable, Category = "Water Flow")
+    float GetFlowRateAtLocation(const FVector& Location) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Water Flow")
+    FVector GetFlowDirectionAtLocation(const FVector& Location) const;
+
+    // === TERRAIN MODIFICATION ===
+    
+    UFUNCTION(BlueprintCallable, Category = "Terrain")
+    void CarveRiverBeds();
+
+    UFUNCTION(BlueprintCallable, Category = "Terrain")
+    void CreateRiverBanks();
+
+    // === QUERY FUNCTIONS ===
+    
+    UFUNCTION(BlueprintCallable, Category = "Queries")
+    bool IsLocationInWater(const FVector& Location, float Tolerance = 100.0f) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Queries")
+    float GetWaterDepthAtLocation(const FVector& Location) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Queries")
+    FVector GetNearestWaterSource(const FVector& Location) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Queries")
+    TArray<FVector> GetWaterSourcesInRadius(const FVector& Center, float Radius) const;
+
+    // === DEBUGGING ===
+    
+    UFUNCTION(BlueprintCallable, Category = "Debug")
+    void DebugDrawRiverNetwork();
+
+    UFUNCTION(BlueprintCallable, Category = "Debug")
+    void DebugDrawWaterFlow();
+
+private:
+    // === GENERATION INTERNALS ===
+    
+    void GenerateRiverSources();
+    void GrowRiverFromSource(int32 SourceNodeIndex);
+    void CreateRiverSegment(int32 StartNodeIndex, int32 EndNodeIndex);
+    void OptimizeRiverNetwork();
+    
+    // === LAKE GENERATION ===
+    
+    void PlaceLakeAtLocation(const FVector& Location, float Radius);
+    void ConnectLakeToNearestRiver(int32 LakeIndex);
+    
+    // === WATER BODY CREATION ===
+    
+    AWaterBodyRiver* CreateWaterBodyRiver(const FRiverSegment& Segment);
+    AWaterBodyLake* CreateWaterBodyLake(const FLakeData& Lake);
+    
+    // === FLOW SIMULATION ===
+    
+    void CalculateFlowRates();
+    void PropagateFlowDownstream();
+    FVector CalculateFlowDirection(int32 NodeIndex) const;
+    
+    // === TERRAIN UTILITIES ===
+    
+    float GetTerrainHeightAtLocation(const FVector& Location) const;
+    void ModifyTerrainAtLocation(const FVector& Location, float Radius, float Depth);
+    
+    // === PATHFINDING ===
+    
+    FVector FindDownhillDirection(const FVector& Location) const;
+    bool IsValidRiverPath(const FVector& Start, const FVector& End) const;
+    TArray<FVector> GenerateRiverPath(const FVector& Start, const FVector& End) const;
+    
+    // === UTILITIES ===
+    
+    int32 FindNearestNode(const FVector& Location) const;
+    float CalculateDistance(const FVector& A, const FVector& B) const;
+    bool AreNodesConnected(int32 NodeA, int32 NodeB) const;
+    void ConnectNodes(int32 NodeA, int32 NodeB);
+
+private:
+    // === CACHED REFERENCES ===
+    
+    UPROPERTY()
+    class ATerrainGenerator* TerrainGenerator;
+
+    UPROPERTY()
+    TArray<TWeakObjectPtr<AWaterBodyRiver>> CreatedRivers;
+
+    UPROPERTY()
+    TArray<TWeakObjectPtr<AWaterBodyLake>> CreatedLakes;
+
+    // === PERFORMANCE TRACKING ===
+    
+    UPROPERTY()
+    float LastGenerationTime = 0.0f;
+
+    UPROPERTY()
+    int32 TotalRiverLength = 0;
+};
