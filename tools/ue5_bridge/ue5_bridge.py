@@ -123,36 +123,14 @@ class UE5RemoteControl:
         
         For multi-line scripts, writes to a temp file first then executes it.
         """
-        # Escape the script for console command usage
-        # For single-line scripts, use py "code" directly
-        # For multi-line, write to temp file and execute that
         lines = script.strip().split('\n')
         
         if len(lines) == 1 and len(script) < 500:
             # Simple single-line: use py "code" console command
-            escaped = script.replace('"', '\\"').replace("'", "\\'")
             console_cmd = f'py {script}'
             return self._execute_console_command(console_cmd)
         else:
-            # Multi-line: write to temp file, execute file, then clean up
-            import tempfile
-            import os
-            # Write script to a temp .py file via a simpler py command
-            # Use the UE5 temp directory
-            temp_script = script.replace('\\', '\\\\').replace('"', '\\"').replace("'", "\\'")
-            # Build a python command that writes the script to a file and executes it
-            write_and_exec = (
-                'import tempfile, os; '
-                'f = tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False, dir=os.environ.get("TEMP", "/tmp")); '
-                f'f.write("""{script}"""); '
-                'f.close(); '
-                'import unreal; '
-                'unreal.PythonScriptLibrary.execute_python_script(f.name); '
-                'os.unlink(f.name)'
-            )
-            # Fallback: try direct execution line by line
-            # Actually, the simplest approach: use remote/object/call to call
-            # PythonScriptLibrary.ExecutePythonCommand for each meaningful line
+            # Multi-line: execute line by line via py console command
             results = []
             for line in lines:
                 line = line.strip()
@@ -183,7 +161,7 @@ class UE5RemoteControl:
         if r.status_code == 200:
             return {"status_code": r.status_code, "body": r.text}
         
-        # Method 2: Try with EditorWorld as context
+        # Method 2: Try without WorldContextObject
         r2 = self.session.put(
             f"{self.base_url}/remote/object/call",
             json={
@@ -241,10 +219,8 @@ class UE5RemoteControl:
 
     def spawn_actor(self, class_path: str, location: dict = None, rotation: dict = None, label: str = None) -> dict:
         """Spawn an actor in the current level."""
-        # Use Python scripting to spawn — more flexible than object/call
         loc = location or {"X": 0, "Y": 0, "Z": 0}
         rot = rotation or {"Pitch": 0, "Yaw": 0, "Roll": 0}
-        label_str = f'.set_actor_label("{label}")' if label else ""
 
         script = f"""
 import unreal
@@ -284,6 +260,26 @@ print(f"Imported: {source_path} -> {destination_path}")
         return self.execute_python(script)
 
 
+# ─── Command Type Aliases ───────────────────────────────────────────────────
+# Maps various command_type names to their canonical handler names.
+# This ensures backwards compatibility when agents or tool-executor versions
+# use different naming conventions.
+
+COMMAND_TYPE_ALIASES = {
+    "python": "execute_python",
+    "execute_python": "execute_python",
+    "run_python": "execute_python",
+    "set_property": "set_property",
+    "get_property": "get_property",
+    "spawn_actor": "spawn_actor",
+    "import_asset": "import_asset",
+    "call_function": "call_function",
+    "console": "run_console_command",
+    "run_console_command": "run_console_command",
+    "run_console": "run_console_command",
+}
+
+
 # ─── Command Executor ────────────────────────────────────────────────────────
 
 def execute_command(ue5: UE5RemoteControl, cmd: dict) -> dict:
@@ -291,7 +287,9 @@ def execute_command(ue5: UE5RemoteControl, cmd: dict) -> dict:
     Execute a single ue5_command on the UE5 instance.
     Returns {"success": bool, "result": str}
     """
-    cmd_type = cmd.get("command_type", "").lower()
+    raw_type = cmd.get("command_type", "").lower().strip()
+    cmd_type = COMMAND_TYPE_ALIASES.get(raw_type, raw_type)
+    
     # DB column is 'command_data', but we also check 'parameters' for backwards compat
     params = cmd.get("command_data", cmd.get("parameters", {}))
 
@@ -302,20 +300,21 @@ def execute_command(ue5: UE5RemoteControl, cmd: dict) -> dict:
         except json.JSONDecodeError:
             params = {"raw": params}
 
-    log.info(f"Executing command: {cmd_type} | Agent #{cmd.get('agent_number')} | Cycle: {cmd.get('cycle_id')}")
+    log.info(f"Executing command: {raw_type} -> {cmd_type} | Agent #{cmd.get('agent_number')} | Cycle: {cmd.get('cycle_id')}")
 
     try:
         if cmd_type == "execute_python":
-            script = params.get("script", params.get("code", params.get("raw", "")))
+            # Accept multiple field names for the script content
+            script = params.get("script", params.get("python_code", params.get("code", params.get("raw", ""))))
             if not script:
-                return {"success": False, "result": "No script provided in parameters"}
+                return {"success": False, "result": "No script provided in parameters. Expected 'script', 'python_code', or 'code' field."}
             result = ue5.execute_python(script)
 
         elif cmd_type == "set_property":
             result = ue5.set_property(
                 params.get("object_path", ""),
                 params.get("property_name", ""),
-                params.get("value"),
+                params.get("value", params.get("property_value")),
             )
 
         elif cmd_type == "get_property":
@@ -326,7 +325,7 @@ def execute_command(ue5: UE5RemoteControl, cmd: dict) -> dict:
 
         elif cmd_type == "spawn_actor":
             result = ue5.spawn_actor(
-                params.get("class_path", ""),
+                params.get("class_path", params.get("actor_class", "")),
                 params.get("location"),
                 params.get("rotation"),
                 params.get("label"),
@@ -334,7 +333,7 @@ def execute_command(ue5: UE5RemoteControl, cmd: dict) -> dict:
 
         elif cmd_type == "import_asset":
             result = ue5.import_asset(
-                params.get("source_path", ""),
+                params.get("source_path", params.get("asset_path", "")),
                 params.get("destination_path", ""),
             )
 
@@ -350,7 +349,7 @@ def execute_command(ue5: UE5RemoteControl, cmd: dict) -> dict:
             result = ue5.run_console_command(command)
 
         else:
-            return {"success": False, "result": f"Unknown command type: {cmd_type}"}
+            return {"success": False, "result": f"Unknown command type: '{raw_type}' (resolved: '{cmd_type}'). Valid types: {list(COMMAND_TYPE_ALIASES.keys())}"}
 
         # Check if UE5 returned an error
         status_code = result.get("status_code", 0)
@@ -366,7 +365,7 @@ def execute_command(ue5: UE5RemoteControl, cmd: dict) -> dict:
     except requests.exceptions.ConnectionError:
         return {"success": False, "result": "Cannot connect to UE5 Remote Control API"}
     except Exception as e:
-        return {"success": False, "result": f"Exception: {str(e)}"}
+        return {"success": False, "result": f"Exception: {str(e)}\n{traceback.format_exc()[:1000]}"}
 
 
 # ─── Main Loop ───────────────────────────────────────────────────────────────
@@ -382,18 +381,19 @@ def main():
     ue5 = UE5RemoteControl(host=args.ue5_host, port=args.ue5_port)
 
     # Startup health check
-    log.info(f"UE5 Bridge starting — connecting to {args.ue5_host}:{args.ue5_port}")
+    log.info(f"UE5 Bridge v2 starting — connecting to {args.ue5_host}:{args.ue5_port}")
     if ue5.health_check():
         log.info("UE5 Remote Control API is reachable")
         notify_telegram(
-            f"🟢 <b>UE5 Bridge Online</b>\n"
+            f"🟢 <b>UE5 Bridge v2 Online</b>\n"
             f"Connected to {args.ue5_host}:{args.ue5_port}\n"
-            f"Polling interval: {args.poll_interval}s"
+            f"Polling interval: {args.poll_interval}s\n"
+            f"Supported types: {list(COMMAND_TYPE_ALIASES.keys())}"
         )
     else:
         log.warning("UE5 Remote Control API is NOT reachable — will retry on each poll")
         notify_telegram(
-            f"🟡 <b>UE5 Bridge Started (UE5 not yet reachable)</b>\n"
+            f"🟡 <b>UE5 Bridge v2 Started (UE5 not yet reachable)</b>\n"
             f"Target: {args.ue5_host}:{args.ue5_port}\n"
             f"Will retry on each poll cycle"
         )
@@ -453,24 +453,19 @@ def main():
                     })
                     commands_failed += 1
                     log.error(f"Command {cmd_id} FAILED: {result['result'][:200]}")
-
-                    # Notify on error
-                    agent_num = cmd.get("agent_number", "?")
-                    cycle_id = cmd.get("cycle_id", "?")
                     notify_telegram(
-                        f"🔴 <b>UE5 Command Failed</b>\n"
-                        f"Agent: #{agent_num}\n"
-                        f"Cycle: {cycle_id}\n"
-                        f"Type: {cmd.get('command_type', '?')}\n"
+                        f"❌ <b>UE5 Command Failed</b>\n"
+                        f"ID: #{cmd_id}\n"
+                        f"Agent: #{cmd.get('agent_number')} {cmd.get('agent_name', '')}\n"
+                        f"Type: {cmd.get('command_type')}\n"
                         f"Error: {result['result'][:300]}"
                     )
 
-        except requests.exceptions.ConnectionError:
-            log.error("Lost connection to Supabase — retrying in 30s")
-            time.sleep(30)
+        except requests.exceptions.RequestException as e:
+            log.error(f"Network error in main loop: {e}")
+            time.sleep(10)
         except Exception as e:
-            log.error(f"Unexpected error in main loop: {e}")
-            log.error(traceback.format_exc())
+            log.error(f"Unexpected error in main loop: {e}\n{traceback.format_exc()}")
             time.sleep(10)
 
         time.sleep(args.poll_interval)
