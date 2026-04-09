@@ -1,0 +1,304 @@
+// Copyright Transpersonal Game Studio. All Rights Reserved.
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Components/ActorComponent.h"
+#include "VFXSystemManager.h"
+#include "Engine/DataTable.h"
+#include "Components/StaticMeshComponent.h"
+#include "Components/PrimitiveComponent.h"
+#include "EnvironmentalVFXController.generated.h"
+
+UENUM(BlueprintType)
+enum class EEnvironmentalVFXType : uint8
+{
+    None = 0,
+    // Vegetation Effects
+    TreeSway,
+    LeafFall,
+    GrassRustle,
+    FlowerPollen,
+    BranchBreak,
+    
+    // Weather Effects
+    RainDrops,
+    Mist,
+    FogRoll,
+    WindGust,
+    SunRays,
+    Lightning,
+    
+    // Water Effects
+    WaterRipples,
+    WaterSplash,
+    StreamFlow,
+    WaterfallMist,
+    
+    // Ground Effects
+    Dust,
+    RockCrumble,
+    GroundCrack,
+    Erosion,
+    
+    // Atmospheric Effects
+    Fireflies,
+    Insects,
+    Birds,
+    AmbientParticles
+};
+
+UENUM(BlueprintType)
+enum class EWeatherState : uint8
+{
+    Clear = 0,
+    Cloudy,
+    Rainy,
+    Stormy,
+    Foggy,
+    Windy
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FEnvironmentalVFXConfig : public FTableRowBase
+{
+    GENERATED_BODY()
+
+    // Basic Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Config")
+    EEnvironmentalVFXType VFXType = EEnvironmentalVFXType::None;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Config")
+    EVFXType NiagaraVFXType = EVFXType::None;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Config")
+    bool bEnabled = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Config")
+    bool bAutoTrigger = true;
+
+    // Trigger Conditions
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Triggers")
+    float TriggerRadius = 1000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Triggers")
+    float TriggerInterval = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Triggers")
+    TArray<EWeatherState> RequiredWeatherStates;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Triggers")
+    float MinWindSpeed = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Triggers")
+    float MaxWindSpeed = 1000.0f;
+
+    // VFX Properties
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Properties")
+    float IntensityMultiplier = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Properties")
+    FVector ScaleRange = FVector(0.5f, 1.5f, 1.0f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Properties")
+    float LifetimeMultiplier = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Properties")
+    bool bAttachToObject = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Properties")
+    FName AttachSocket = NAME_None;
+
+    // Spawn Parameters
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
+    int32 MaxSimultaneousVFX = 5;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
+    float SpawnChance = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
+    FVector SpawnOffset = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
+    bool bRandomizeSpawnLocation = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
+    float RandomSpawnRadius = 100.0f;
+};
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams(FOnEnvironmentalVFXTriggered, EEnvironmentalVFXType, VFXType, FVector, Location, float, Intensity, EWeatherState, WeatherState);
+
+/**
+ * Environmental VFX Controller - Manages environmental visual effects
+ * Handles weather-based effects, vegetation interactions, and atmospheric VFX
+ */
+UCLASS(BlueprintType, Blueprintable, ClassGroup=(VFX), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UEnvironmentalVFXController : public UActorComponent
+{
+    GENERATED_BODY()
+
+public:
+    UEnvironmentalVFXController();
+
+    virtual void BeginPlay() override;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
+    // Weather Management
+    UFUNCTION(BlueprintCallable, Category = "Environmental VFX")
+    void SetWeatherState(EWeatherState NewWeatherState);
+
+    UFUNCTION(BlueprintCallable, Category = "Environmental VFX")
+    EWeatherState GetWeatherState() const { return CurrentWeatherState; }
+
+    UFUNCTION(BlueprintCallable, Category = "Environmental VFX")
+    void SetWindSpeed(float NewWindSpeed);
+
+    UFUNCTION(BlueprintCallable, Category = "Environmental VFX")
+    float GetWindSpeed() const { return CurrentWindSpeed; }
+
+    // VFX Triggering
+    UFUNCTION(BlueprintCallable, Category = "Environmental VFX")
+    void TriggerEnvironmentalVFX(EEnvironmentalVFXType VFXType, FVector Location = FVector::ZeroVector, float Intensity = 1.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Environmental VFX")
+    void TriggerVFXAtLocation(EEnvironmentalVFXType VFXType, FVector Location, float Intensity = 1.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Environmental VFX")
+    void TriggerRandomVFX(float Intensity = 1.0f);
+
+    // Vegetation Effects
+    UFUNCTION(BlueprintCallable, Category = "Environmental VFX")
+    void TriggerTreeSway(float WindIntensity = 1.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Environmental VFX")
+    void TriggerLeafFall(int32 LeafCount = 10);
+
+    UFUNCTION(BlueprintCallable, Category = "Environmental VFX")
+    void OnVegetationImpact(FVector ImpactLocation, float ImpactForce);
+
+    // Water Effects
+    UFUNCTION(BlueprintCallable, Category = "Environmental VFX")
+    void TriggerWaterRipples(FVector WaterSurfaceLocation, float RippleIntensity = 1.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Environmental VFX")
+    void TriggerWaterSplash(FVector SplashLocation, float SplashSize = 1.0f);
+
+    // Weather Effects
+    UFUNCTION(BlueprintCallable, Category = "Environmental VFX")
+    void StartRainEffect(float RainIntensity = 1.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Environmental VFX")
+    void StopRainEffect();
+
+    UFUNCTION(BlueprintCallable, Category = "Environmental VFX")
+    void TriggerLightningStrike(FVector StrikeLocation);
+
+    // Ground Effects
+    UFUNCTION(BlueprintCallable, Category = "Environmental VFX")
+    void TriggerGroundDust(FVector Location, float DustIntensity = 1.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Environmental VFX")
+    void TriggerRockCrumble(FVector Location, float CrumbleSize = 1.0f);
+
+    // Player Interaction
+    UFUNCTION(BlueprintCallable, Category = "Environmental VFX")
+    void OnPlayerEnterArea();
+
+    UFUNCTION(BlueprintCallable, Category = "Environmental VFX")
+    void OnPlayerExitArea();
+
+    UFUNCTION(BlueprintCallable, Category = "Environmental VFX")
+    void OnPlayerMovement(FVector PlayerLocation, float MovementSpeed);
+
+    // Configuration
+    UFUNCTION(BlueprintCallable, Category = "Environmental VFX")
+    void LoadVFXConfig(FName ConfigRowName);
+
+    UFUNCTION(BlueprintCallable, Category = "Environmental VFX")
+    void EnableVFXType(EEnvironmentalVFXType VFXType, bool bEnable);
+
+    UFUNCTION(BlueprintCallable, Category = "Environmental VFX")
+    void SetVFXIntensityMultiplier(float Multiplier);
+
+    // Events
+    UPROPERTY(BlueprintAssignable, Category = "Environmental VFX")
+    FOnEnvironmentalVFXTriggered OnEnvironmentalVFXTriggered;
+
+    // Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Config")
+    UDataTable* EnvironmentalVFXConfigTable;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Config")
+    bool bAutoDetectWeather = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Config")
+    bool bAutoDetectPlayerProximity = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Config")
+    float PlayerDetectionRadius = 2000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Config")
+    float GlobalIntensityMultiplier = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Config")
+    TArray<EEnvironmentalVFXType> EnabledVFXTypes;
+
+protected:
+    // Runtime State
+    UPROPERTY()
+    EWeatherState CurrentWeatherState = EWeatherState::Clear;
+
+    UPROPERTY()
+    EWeatherState PreviousWeatherState = EWeatherState::Clear;
+
+    UPROPERTY()
+    float CurrentWindSpeed = 0.0f;
+
+    UPROPERTY()
+    bool bPlayerInArea = false;
+
+    UPROPERTY()
+    FVector LastPlayerLocation = FVector::ZeroVector;
+
+    UPROPERTY()
+    float LastPlayerMovementSpeed = 0.0f;
+
+    // VFX Management
+    UPROPERTY()
+    UVFXSystemManager* VFXManager;
+
+    UPROPERTY()
+    TMap<EEnvironmentalVFXType, FEnvironmentalVFXConfig> VFXConfigs;
+
+    UPROPERTY()
+    TMap<EEnvironmentalVFXType, TArray<TWeakObjectPtr<UNiagaraComponent>>> ActiveVFX;
+
+    UPROPERTY()
+    TMap<EEnvironmentalVFXType, float> VFXTimers;
+
+    // Rain Effect Management
+    UPROPERTY()
+    TArray<TWeakObjectPtr<UNiagaraComponent>> ActiveRainVFX;
+
+    UPROPERTY()
+    bool bRainActive = false;
+
+    UPROPERTY()
+    float CurrentRainIntensity = 0.0f;
+
+    // Internal Methods
+    void UpdateWeatherVFX(float DeltaTime);
+    void UpdatePlayerProximityVFX(float DeltaTime);
+    void UpdateAutoTriggerVFX(float DeltaTime);
+    void CleanupExpiredVFX();
+    
+    bool CanTriggerVFX(EEnvironmentalVFXType VFXType) const;
+    bool IsWeatherStateValid(EEnvironmentalVFXType VFXType) const;
+    FVector GetRandomSpawnLocation(const FEnvironmentalVFXConfig& Config, FVector BaseLocation) const;
+    void ApplyVFXConfig(UNiagaraComponent* VFXComponent, const FEnvironmentalVFXConfig& Config, float Intensity) const;
+    
+    void LoadDefaultConfigs();
+    APawn* GetPlayerPawn() const;
+    float GetDistanceToPlayer(FVector Location) const;
+};
