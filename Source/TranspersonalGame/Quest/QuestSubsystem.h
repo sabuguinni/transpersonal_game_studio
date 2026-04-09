@@ -1,0 +1,525 @@
+// Copyright Transpersonal Game Studio. All Rights Reserved.
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Subsystems/WorldSubsystem.h"
+#include "Engine/World.h"
+#include "GameplayTags.h"
+#include "Templates/SubclassOf.h"
+#include "UObject/SoftObjectPtr.h"
+#include "QuestSubsystem.generated.h"
+
+class UQuestComponent;
+class UObjectiveComponent;
+class AMissionTrigger;
+class UMassCrowdSubsystem;
+class UNarrativeSubsystem;
+
+UENUM(BlueprintType)
+enum class EQuestType : uint8
+{
+    MainStory,          // Critical path quests
+    SideQuest,          // Optional exploration quests
+    Discovery,          // Environmental discovery missions
+    Survival,           // Resource gathering and shelter building
+    Observation,        // Dinosaur behavior study missions
+    Domestication,      // Creature taming quests
+    Exploration,        // Area mapping and landmark discovery
+    Collection,         // Item and resource gathering
+    Escort,             // Protecting or guiding NPCs/creatures
+    Investigation,      // Mystery solving and clue finding
+    Emergency,          // Time-sensitive survival situations
+    Ritual,             // Transpersonal/spiritual experiences
+    GemQuest           // Final quest to find the return gem
+};
+
+UENUM(BlueprintType)
+enum class EQuestStatus : uint8
+{
+    NotStarted,         // Quest not yet available
+    Available,          // Can be started
+    Active,             // Currently in progress
+    Completed,          // Successfully finished
+    Failed,             // Failed and cannot be retried
+    Abandoned,          // Player abandoned the quest
+    Locked,             // Prerequisites not met
+    Hidden              // Exists but not visible to player
+};
+
+UENUM(BlueprintType)
+enum class EObjectiveType : uint8
+{
+    GoTo,               // Travel to a location
+    Collect,            // Gather items or resources
+    Interact,           // Interact with objects or NPCs
+    Observe,            // Watch dinosaur behavior
+    Survive,            // Stay alive for duration
+    Build,              // Construct shelter or tools
+    Tame,               // Domesticate a creature
+    Avoid,              // Stay away from danger
+    Follow,             // Track or follow a target
+    Defend,             // Protect something
+    Hunt,               // Eliminate specific targets
+    Discover,           // Find hidden locations
+    Learn,              // Gain knowledge or skills
+    Ritual,             // Perform transpersonal activities
+    Escape              // Flee from danger
+};
+
+UENUM(BlueprintType)
+enum class EMissionDifficulty : uint8
+{
+    Tutorial,           // Learning missions
+    Easy,               // Low risk, simple objectives
+    Medium,             // Moderate challenge
+    Hard,               // High risk, complex objectives
+    Extreme,            // Maximum difficulty
+    Adaptive            // Scales with player progress
+};
+
+USTRUCT(BlueprintType)
+struct FQuestObjective
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
+    FString ObjectiveID;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
+    FText ObjectiveTitle;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
+    FText ObjectiveDescription;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
+    EObjectiveType ObjectiveType = EObjectiveType::GoTo;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
+    FVector TargetLocation = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
+    float TargetRadius = 500.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
+    TArray<FGameplayTag> RequiredTags;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
+    TArray<FGameplayTag> ForbiddenTags;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
+    int32 RequiredQuantity = 1;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
+    int32 CurrentProgress = 0;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
+    float TimeLimit = 0.0f; // 0 = no time limit
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
+    bool bIsOptional = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
+    bool bIsCompleted = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
+    bool bIsHidden = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
+    FString TargetActorName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
+    TArray<FString> RequiredItems;
+
+    FQuestObjective()
+    {
+        ObjectiveID = TEXT("");
+        ObjectiveTitle = FText::GetEmpty();
+        ObjectiveDescription = FText::GetEmpty();
+        ObjectiveType = EObjectiveType::GoTo;
+        TargetLocation = FVector::ZeroVector;
+        TargetRadius = 500.0f;
+        RequiredQuantity = 1;
+        CurrentProgress = 0;
+        TimeLimit = 0.0f;
+        bIsOptional = false;
+        bIsCompleted = false;
+        bIsHidden = false;
+        TargetActorName = TEXT("");
+    }
+};
+
+USTRUCT(BlueprintType)
+struct FQuestReward
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reward")
+    int32 ExperiencePoints = 0;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reward")
+    TArray<FString> ItemRewards;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reward")
+    TArray<FGameplayTag> UnlockedTags;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reward")
+    TArray<FString> UnlockedRecipes;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reward")
+    TArray<FString> UnlockedAreas;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reward")
+    FText RewardDescription;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reward")
+    bool bUnlocksNewQuestLine = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reward")
+    FString UnlockedQuestLineID;
+
+    FQuestReward()
+    {
+        ExperiencePoints = 0;
+        RewardDescription = FText::GetEmpty();
+        bUnlocksNewQuestLine = false;
+        UnlockedQuestLineID = TEXT("");
+    }
+};
+
+USTRUCT(BlueprintType)
+struct FQuestData
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    FString QuestID;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    FText QuestTitle;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    FText QuestDescription;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    FText QuestLore;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    EQuestType QuestType = EQuestType::SideQuest;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    EMissionDifficulty Difficulty = EMissionDifficulty::Medium;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    EQuestStatus Status = EQuestStatus::NotStarted;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    TArray<FQuestObjective> Objectives;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    TArray<FString> PrerequisiteQuests;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    TArray<FGameplayTag> RequiredTags;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    FQuestReward Rewards;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    float EstimatedDuration = 600.0f; // 10 minutes default
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    int32 RecommendedLevel = 1;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    FVector QuestOrigin = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    float QuestRadius = 5000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    bool bIsRepeatable = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    bool bIsTimeLimited = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    float QuestTimeLimit = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    bool bRequiresSpecificTimeOfDay = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    float RequiredTimeOfDay = 12.0f; // Noon
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    bool bRequiresSpecificWeather = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    FGameplayTag RequiredWeatherTag;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    FString QuestGiverNPC;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    FString CompletionNPC;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    TArray<FString> DialogueKeys;
+
+    FQuestData()
+    {
+        QuestID = TEXT("");
+        QuestTitle = FText::GetEmpty();
+        QuestDescription = FText::GetEmpty();
+        QuestLore = FText::GetEmpty();
+        QuestType = EQuestType::SideQuest;
+        Difficulty = EMissionDifficulty::Medium;
+        Status = EQuestStatus::NotStarted;
+        EstimatedDuration = 600.0f;
+        RecommendedLevel = 1;
+        QuestOrigin = FVector::ZeroVector;
+        QuestRadius = 5000.0f;
+        bIsRepeatable = false;
+        bIsTimeLimited = false;
+        QuestTimeLimit = 0.0f;
+        bRequiresSpecificTimeOfDay = false;
+        RequiredTimeOfDay = 12.0f;
+        bRequiresSpecificWeather = false;
+        QuestGiverNPC = TEXT("");
+        CompletionNPC = TEXT("");
+    }
+};
+
+USTRUCT(BlueprintType)
+struct FMissionTemplate
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Template")
+    FString TemplateID;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Template")
+    FString TemplateName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Template")
+    EQuestType DefaultQuestType = EQuestType::SideQuest;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Template")
+    TArray<EObjectiveType> ObjectivePattern;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Template")
+    FText DescriptionTemplate;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Template")
+    TArray<FGameplayTag> ContextTags;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Template")
+    EMissionDifficulty DefaultDifficulty = EMissionDifficulty::Medium;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Template")
+    bool bCanBeProcedurallyGenerated = false;
+
+    FMissionTemplate()
+    {
+        TemplateID = TEXT("");
+        TemplateName = TEXT("");
+        DefaultQuestType = EQuestType::SideQuest;
+        DescriptionTemplate = FText::GetEmpty();
+        DefaultDifficulty = EMissionDifficulty::Medium;
+        bCanBeProcedurallyGenerated = false;
+    }
+};
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnQuestStatusChanged, const FString&, QuestID, EQuestStatus, NewStatus);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnObjectiveUpdated, const FString&, QuestID, const FString&, ObjectiveID, int32, NewProgress);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnQuestCompleted, const FString&, QuestID);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnQuestFailed, const FString&, QuestID);
+
+/**
+ * Quest Subsystem - Manages the quest and mission system for the transpersonal survival game
+ * Handles quest progression, objective tracking, and integration with crowd simulation
+ * Supports both scripted and procedurally generated missions
+ */
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UQuestSubsystem : public UWorldSubsystem
+{
+    GENERATED_BODY()
+
+public:
+    UQuestSubsystem();
+
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+    virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
+
+    // Tick interface
+    virtual void Tick(float DeltaTime) override;
+    virtual bool IsTickable() const override;
+    virtual TStatId GetStatId() const override;
+
+    // Quest Management
+    UFUNCTION(BlueprintCallable, Category = "Quest Management")
+    bool StartQuest(const FString& QuestID);
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Management")
+    bool CompleteQuest(const FString& QuestID);
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Management")
+    bool FailQuest(const FString& QuestID);
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Management")
+    bool AbandonQuest(const FString& QuestID);
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Management")
+    void UpdateObjectiveProgress(const FString& QuestID, const FString& ObjectiveID, int32 Progress);
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Management")
+    bool IsQuestActive(const FString& QuestID) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Management")
+    bool IsQuestCompleted(const FString& QuestID) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Management")
+    EQuestStatus GetQuestStatus(const FString& QuestID) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Management")
+    TArray<FString> GetActiveQuests() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Management")
+    TArray<FString> GetAvailableQuests() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Management")
+    TArray<FString> GetCompletedQuests() const;
+
+    // Quest Data Access
+    UFUNCTION(BlueprintCallable, Category = "Quest Data")
+    FQuestData GetQuestData(const FString& QuestID) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Data")
+    bool AddQuest(const FQuestData& QuestData);
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Data")
+    bool RemoveQuest(const FString& QuestID);
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Data")
+    void LoadQuestsFromDataTable(class UDataTable* QuestDataTable);
+
+    // Procedural Quest Generation
+    UFUNCTION(BlueprintCallable, Category = "Procedural Quests")
+    FString GenerateProceduralQuest(const FString& TemplateID, const FVector& PlayerLocation);
+
+    UFUNCTION(BlueprintCallable, Category = "Procedural Quests")
+    void RegisterMissionTemplate(const FMissionTemplate& Template);
+
+    UFUNCTION(BlueprintCallable, Category = "Procedural Quests")
+    TArray<FString> GetAvailableTemplates() const;
+
+    // Location-based Quests
+    UFUNCTION(BlueprintCallable, Category = "Location Quests")
+    TArray<FString> GetQuestsNearLocation(const FVector& Location, float Radius) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Location Quests")
+    void TriggerLocationBasedQuests(const FVector& PlayerLocation);
+
+    // Integration with other systems
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void OnPlayerEnteredArea(const FVector& Location, const FGameplayTag& AreaTag);
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void OnPlayerInteractedWithObject(AActor* InteractedActor, const FGameplayTag& InteractionTag);
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void OnPlayerObservedCreature(const FGameplayTag& CreatureTag, float ObservationDuration);
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void OnPlayerBuiltStructure(const FGameplayTag& StructureTag, const FVector& Location);
+
+    // Events
+    UPROPERTY(BlueprintAssignable, Category = "Quest Events")
+    FOnQuestStatusChanged OnQuestStatusChanged;
+
+    UPROPERTY(BlueprintAssignable, Category = "Quest Events")
+    FOnObjectiveUpdated OnObjectiveUpdated;
+
+    UPROPERTY(BlueprintAssignable, Category = "Quest Events")
+    FOnQuestCompleted OnQuestCompleted;
+
+    UPROPERTY(BlueprintAssignable, Category = "Quest Events")
+    FOnQuestFailed OnQuestFailed;
+
+protected:
+    // Core Systems
+    UPROPERTY()
+    UMassCrowdSubsystem* CrowdSubsystem;
+
+    UPROPERTY()
+    UNarrativeSubsystem* NarrativeSubsystem;
+
+    // Quest Storage
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Storage")
+    TMap<FString, FQuestData> AllQuests;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Storage")
+    TArray<FString> ActiveQuests;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Storage")
+    TArray<FString> CompletedQuests;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Storage")
+    TArray<FString> FailedQuests;
+
+    // Mission Templates
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Templates")
+    TMap<FString, FMissionTemplate> MissionTemplates;
+
+    // Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
+    float QuestUpdateInterval = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
+    float ProximityCheckRadius = 2000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
+    int32 MaxActiveQuests = 10;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
+    int32 MaxProceduralQuests = 5;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
+    bool bEnableProceduralGeneration = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
+    bool bEnableLocationBasedQuests = true;
+
+    // Runtime State
+    UPROPERTY(BlueprintReadOnly, Category = "Runtime State")
+    float LastUpdateTime = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Runtime State")
+    FVector LastPlayerLocation = FVector::ZeroVector;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Runtime State")
+    int32 ProceduralQuestCounter = 0;
+
+private:
+    // Internal quest management
+    void UpdateQuestObjectives(float DeltaTime);
+    void CheckQuestCompletion(const FString& QuestID);
+    void CheckQuestFailure(const FString& QuestID);
+    void ProcessQuestRewards(const FString& QuestID);
+    bool ArePrerequisitesMet(const FQuestData& QuestData) const;
+    void UpdateQuestAvailability();
+    
+    // Procedural generation helpers
+    FQuestData GenerateObservationQuest(const FVector& PlayerLocation);
+    FQuestData GenerateCollectionQuest(const FVector& PlayerLocation);
+    FQuestData GenerateExplorationQuest(const FVector& PlayerLocation);
+    FQuestData GenerateSurvivalQuest(const FVector& PlayerLocation);
+    
+    // Utility functions
+    FString GenerateUniqueQuestID();
+    FVector FindNearbyPointOfInterest(const FVector& Origin, float SearchRadius);
+    TArray<FGameplayTag> GetAreaTags(const FVector& Location);
+};
