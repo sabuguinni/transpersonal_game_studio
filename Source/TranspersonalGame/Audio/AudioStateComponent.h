@@ -1,0 +1,423 @@
+// Copyright Transpersonal Game Studio. All Rights Reserved.
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Components/ActorComponent.h"
+#include "GameplayTags.h"
+#include "AudioSubsystem.h"
+#include "AudioStateComponent.generated.h"
+
+class UAudioSubsystem;
+class USoundCue;
+class UMetaSoundSource;
+
+UENUM(BlueprintType)
+enum class EAudioTriggerType : uint8
+{
+    OnBeginPlay,        // Start when component begins play
+    OnPlayerProximity,  // Trigger when player enters range
+    OnGameplayEvent,    // Trigger on specific gameplay event
+    OnTimeOfDay,        // Trigger at specific time
+    OnWeatherChange,    // Trigger on weather events
+    OnCreaturePresence, // Trigger when creatures nearby
+    OnPlayerState,      // Trigger on player state change
+    OnQuestEvent,       // Trigger on quest progression
+    OnCombatState,      // Trigger on combat start/end
+    Manual              // Manually triggered only
+};
+
+UENUM(BlueprintType)
+enum class EAudioBehavior : uint8
+{
+    PlayOnce,           // Play once and stop
+    Loop,               // Loop continuously
+    RandomInterval,     // Play at random intervals
+    Conditional,        // Play based on conditions
+    Reactive,           // React to player actions
+    Adaptive,           // Adapt to game state
+    Procedural,         // Generate procedurally
+    Interactive         // Respond to player input
+};
+
+USTRUCT(BlueprintType)
+struct FAudioTriggerCondition
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Condition")
+    EAudioTriggerType TriggerType = EAudioTriggerType::OnBeginPlay;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Condition")
+    FGameplayTag RequiredTag;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Condition")
+    TArray<FGameplayTag> RequiredTags;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Condition")
+    TArray<FGameplayTag> ForbiddenTags;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Condition")
+    float TriggerRadius = 1000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Condition")
+    float MinTimeOfDay = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Condition")
+    float MaxTimeOfDay = 24.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Condition")
+    float MinInterval = 5.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Condition")
+    float MaxInterval = 30.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Condition")
+    float Probability = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Condition")
+    bool bRequireLineOfSight = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Condition")
+    bool bOnlyTriggerOnce = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Condition")
+    int32 MaxTriggerCount = -1;
+
+    FAudioTriggerCondition()
+    {
+        TriggerType = EAudioTriggerType::OnBeginPlay;
+        TriggerRadius = 1000.0f;
+        MinTimeOfDay = 0.0f;
+        MaxTimeOfDay = 24.0f;
+        MinInterval = 5.0f;
+        MaxInterval = 30.0f;
+        Probability = 1.0f;
+        bRequireLineOfSight = false;
+        bOnlyTriggerOnce = false;
+        MaxTriggerCount = -1;
+    }
+};
+
+USTRUCT(BlueprintType)
+struct FAudioStateConfiguration
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio State")
+    FString ConfigurationID;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio State")
+    EAudioState TargetState = EAudioState::Ambient;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio State")
+    EAudioIntensity Intensity = EAudioIntensity::Medium;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio State")
+    EAudioBehavior Behavior = EAudioBehavior::Loop;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio State")
+    FAudioTriggerCondition TriggerCondition;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio State")
+    TArray<FAudioLayerConfig> AudioLayers;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio State")
+    float Duration = 30.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio State")
+    float FadeInTime = 2.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio State")
+    float FadeOutTime = 2.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio State")
+    float Priority = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio State")
+    bool bOverrideGlobalState = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio State")
+    bool bAffectGlobalState = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio State")
+    FString NextConfiguration;
+
+    FAudioStateConfiguration()
+    {
+        ConfigurationID = TEXT("");
+        TargetState = EAudioState::Ambient;
+        Intensity = EAudioIntensity::Medium;
+        Behavior = EAudioBehavior::Loop;
+        Duration = 30.0f;
+        FadeInTime = 2.0f;
+        FadeOutTime = 2.0f;
+        Priority = 1.0f;
+        bOverrideGlobalState = false;
+        bAffectGlobalState = true;
+        NextConfiguration = TEXT("");
+    }
+};
+
+USTRUCT(BlueprintType)
+struct FProceduralAudioSettings
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Procedural")
+    bool bEnableProcedural = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Procedural")
+    TSoftObjectPtr<UMetaSoundSource> GenerativeMetaSound;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Procedural")
+    TMap<FString, float> GenerationParameters;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Procedural")
+    float RegenerationInterval = 60.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Procedural")
+    float VariationAmount = 0.3f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Procedural")
+    bool bReactToEnvironment = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Procedural")
+    bool bReactToPlayer = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Procedural")
+    bool bReactToCreatures = true;
+
+    FProceduralAudioSettings()
+    {
+        bEnableProcedural = false;
+        RegenerationInterval = 60.0f;
+        VariationAmount = 0.3f;
+        bReactToEnvironment = true;
+        bReactToPlayer = true;
+        bReactToCreatures = true;
+    }
+};
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnAudioStateTriggered, const FString&, ConfigurationID, EAudioState, State);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnAudioConfigurationComplete, const FString&, ConfigurationID);
+
+/**
+ * Audio State Component - Manages localized audio states and behaviors
+ * Handles spatial audio triggers and environmental audio responses
+ * Integrates with global Audio Subsystem for coordinated audio management
+ */
+UCLASS(BlueprintType, Blueprintable, ClassGroup=(Audio), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UAudioStateComponent : public UActorComponent
+{
+    GENERATED_BODY()
+
+public:
+    UAudioStateComponent();
+
+    // UActorComponent interface
+    virtual void BeginPlay() override;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
+    // Configuration Management
+    UFUNCTION(BlueprintCallable, Category = "Audio State")
+    void AddAudioConfiguration(const FAudioStateConfiguration& Configuration);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio State")
+    void RemoveAudioConfiguration(const FString& ConfigurationID);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio State")
+    void TriggerConfiguration(const FString& ConfigurationID, bool bForceOverride = false);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio State")
+    void StopConfiguration(const FString& ConfigurationID, float FadeOutTime = 2.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio State")
+    void StopAllConfigurations(float FadeOutTime = 2.0f);
+
+    // State Control
+    UFUNCTION(BlueprintCallable, Category = "Audio State")
+    void SetAudioState(EAudioState NewState, EAudioIntensity Intensity = EAudioIntensity::Medium);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio State")
+    EAudioState GetCurrentAudioState() const { return CurrentState; }
+
+    UFUNCTION(BlueprintCallable, Category = "Audio State")
+    void SetEnabled(bool bEnabled);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio State")
+    bool IsEnabled() const { return bIsEnabled; }
+
+    // Trigger Control
+    UFUNCTION(BlueprintCallable, Category = "Audio State")
+    void SetTriggerRadius(float NewRadius);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio State")
+    void AddRequiredTag(const FGameplayTag& Tag);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio State")
+    void RemoveRequiredTag(const FGameplayTag& Tag);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio State")
+    void SetProbability(float NewProbability);
+
+    // Player Interaction
+    UFUNCTION(BlueprintCallable, Category = "Audio State")
+    void OnPlayerEnterRange(APawn* Player);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio State")
+    void OnPlayerExitRange(APawn* Player);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio State")
+    bool IsPlayerInRange() const { return bPlayerInRange; }
+
+    // Environmental Response
+    UFUNCTION(BlueprintCallable, Category = "Audio State")
+    void OnTimeOfDayChanged(float TimeOfDay);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio State")
+    void OnWeatherChanged(const FGameplayTag& WeatherType, float Intensity);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio State")
+    void OnCreatureNearby(const FGameplayTag& CreatureType, float Distance);
+
+    // Gameplay Events
+    UFUNCTION(BlueprintCallable, Category = "Audio State")
+    void OnGameplayEvent(const FGameplayTag& EventTag);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio State")
+    void OnQuestEvent(const FString& QuestID, const FGameplayTag& EventType);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio State")
+    void OnCombatStateChanged(bool bInCombat);
+
+    // Procedural Audio
+    UFUNCTION(BlueprintCallable, Category = "Audio State")
+    void EnableProceduralAudio(bool bEnable);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio State")
+    void SetProceduralParameter(const FString& ParameterName, float Value);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio State")
+    void RegenerateProceduralAudio();
+
+    // Debug and Visualization
+    UFUNCTION(BlueprintCallable, Category = "Audio State")
+    void DebugPrintState() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Audio State")
+    TArray<FString> GetActiveConfigurations() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Audio State")
+    void SetDebugVisualization(bool bEnabled);
+
+    // Events
+    UPROPERTY(BlueprintAssignable, Category = "Audio State|Events")
+    FOnAudioStateTriggered OnAudioStateTriggered;
+
+    UPROPERTY(BlueprintAssignable, Category = "Audio State|Events")
+    FOnAudioConfigurationComplete OnAudioConfigurationComplete;
+
+    // Configuration Properties
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio State")
+    TArray<FAudioStateConfiguration> AudioConfigurations;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio State")
+    FProceduralAudioSettings ProceduralSettings;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio State")
+    bool bAutoStartOnBeginPlay = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio State")
+    bool bStopOnEndPlay = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio State")
+    float UpdateFrequency = 0.1f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio State")
+    bool bDebugEnabled = false;
+
+protected:
+    // Internal update functions
+    void UpdateAudioState(float DeltaTime);
+    void UpdateTriggerConditions(float DeltaTime);
+    void UpdateProceduralAudio(float DeltaTime);
+    void CheckPlayerProximity();
+    void CheckTimeBasedTriggers();
+    void CheckConditionalTriggers();
+
+    // Configuration management
+    bool CanTriggerConfiguration(const FAudioStateConfiguration& Config) const;
+    void ExecuteConfiguration(const FAudioStateConfiguration& Config);
+    void StopConfigurationInternal(const FString& ConfigurationID, float FadeOutTime);
+
+    // Audio component management
+    void CreateAudioComponents();
+    void UpdateAudioComponents();
+    void CleanupAudioComponents();
+
+    // Procedural audio
+    void InitializeProceduralAudio();
+    void UpdateProceduralParameters();
+    void GenerateProceduralVariation();
+
+private:
+    // Current state
+    UPROPERTY()
+    EAudioState CurrentState = EAudioState::Ambient;
+
+    UPROPERTY()
+    EAudioIntensity CurrentIntensity = EAudioIntensity::Medium;
+
+    UPROPERTY()
+    bool bIsEnabled = true;
+
+    UPROPERTY()
+    bool bPlayerInRange = false;
+
+    UPROPERTY()
+    float LastUpdateTime = 0.0f;
+
+    // Active configurations
+    UPROPERTY()
+    TArray<FString> ActiveConfigurationIDs;
+
+    UPROPERTY()
+    TMap<FString, float> ConfigurationStartTimes;
+
+    UPROPERTY()
+    TMap<FString, int32> ConfigurationTriggerCounts;
+
+    // Audio components
+    UPROPERTY()
+    TMap<FString, UAudioComponent*> ConfigurationAudioComponents;
+
+    UPROPERTY()
+    UAudioComponent* ProceduralAudioComponent = nullptr;
+
+    // Trigger state
+    UPROPERTY()
+    float LastTriggerTime = 0.0f;
+
+    UPROPERTY()
+    float NextRandomTriggerTime = 0.0f;
+
+    UPROPERTY()
+    TArray<FGameplayTag> CurrentEnvironmentTags;
+
+    // Procedural state
+    UPROPERTY()
+    float LastProceduralUpdate = 0.0f;
+
+    UPROPERTY()
+    TMap<FString, float> ProceduralParameters;
+
+    // Subsystem references
+    UPROPERTY()
+    UAudioSubsystem* AudioSubsystem = nullptr;
+
+    // Timer handles
+    FTimerHandle UpdateTimer;
+    FTimerHandle ProceduralTimer;
+};
