@@ -283,7 +283,7 @@ void ATranspersonalGameModeBase::EndPlay(const EEndPlayReason::Type EndPlayReaso
 
 void ATranspersonalGameModeBase::OnCoreSystemsReady()
 {
-    UE_LOG(LogTranspersonalCore, Warning, TEXT("Core systems ready - initializing game systems"));
+    UE_LOG(LogTranspersonalCore, Log, TEXT("Core systems ready - initializing game systems"));
     OnGameSystemsInitialized();
 }
 
@@ -293,11 +293,14 @@ void ATranspersonalGameModeBase::OnCoreSystemsReady()
 ATranspersonalPlayerController::ATranspersonalPlayerController()
 {
     PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.bStartWithTickEnabled = true;
 }
 
 void ATranspersonalPlayerController::BeginPlay()
 {
     Super::BeginPlay();
+    
+    UE_LOG(LogTranspersonalCore, Log, TEXT("Transpersonal Player Controller starting..."));
     
     if (bShowPerformanceMetrics)
     {
@@ -309,7 +312,11 @@ void ATranspersonalPlayerController::SetupInputComponent()
 {
     Super::SetupInputComponent();
     
-    // Debug input bindings would go here
+    // Add debug input bindings
+    if (InputComponent)
+    {
+        InputComponent->BindAction("TogglePerformanceDisplay", IE_Pressed, this, &ATranspersonalPlayerController::TogglePerformanceDisplay);
+    }
 }
 
 UTranspersonalCoreSubsystem* ATranspersonalPlayerController::GetCoreSubsystem() const
@@ -347,15 +354,16 @@ void ATranspersonalPlayerController::DisplayPerformanceMetrics()
         
         CoreSubsystem->GetPerformanceMetrics(FrameTime, TriangleCount, MemoryUsage);
         
-        FString DebugString = FString::Printf(
-            TEXT("Frame Time: %.2fms | Memory: %.1fMB | Target: 60fps/8192MB"),
-            FrameTime,
-            MemoryUsage
-        );
-        
         if (GEngine)
         {
-            GEngine->AddOnScreenDebugMessage(-1, 1.0f, FColor::Green, DebugString);
+            GEngine->AddOnScreenDebugMessage(
+                -1, 1.0f, FColor::Green,
+                FString::Printf(TEXT("Frame Time: %.2f ms"), FrameTime)
+            );
+            GEngine->AddOnScreenDebugMessage(
+                -1, 1.0f, FColor::Green,
+                FString::Printf(TEXT("Memory Usage: %.1f MB"), MemoryUsage)
+            );
         }
     }
 }
