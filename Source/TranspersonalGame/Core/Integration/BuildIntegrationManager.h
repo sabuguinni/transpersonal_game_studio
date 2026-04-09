@@ -1,12 +1,12 @@
 // Copyright Transpersonal Game Studio. All Rights Reserved.
-// BuildIntegrationManager.h - Manages build integration and compilation validation
+// BuildIntegrationManager.h - Manages build integration and deployment pipeline
 
 #pragma once
 
 #include "CoreMinimal.h"
 #include "Engine/Engine.h"
-#include "Subsystems/GameInstanceSubsystem.h"
-#include "HAL/PlatformProcess.h"
+#include "Subsystems/EngineSubsystem.h"
+#include "HAL/Platform.h"
 #include "Misc/DateTime.h"
 #include "BuildIntegrationManager.generated.h"
 
@@ -15,189 +15,179 @@ DECLARE_LOG_CATEGORY_EXTERN(LogBuildIntegration, Log, All);
 /**
  * Build configuration information
  */
-UENUM(BlueprintType)
-enum class EBuildConfiguration : uint8
-{
-    Debug           UMETA(DisplayName = "Debug"),
-    DebugGame       UMETA(DisplayName = "DebugGame"),
-    Development     UMETA(DisplayName = "Development"),
-    Test            UMETA(DisplayName = "Test"),
-    Shipping        UMETA(DisplayName = "Shipping")
-};
-
-/**
- * Build target platform
- */
-UENUM(BlueprintType)
-enum class EBuildTargetPlatform : uint8
-{
-    Win64           UMETA(DisplayName = "Windows 64-bit"),
-    Mac             UMETA(DisplayName = "macOS"),
-    Linux           UMETA(DisplayName = "Linux"),
-    Android         UMETA(DisplayName = "Android"),
-    IOS             UMETA(DisplayName = "iOS"),
-    PS5             UMETA(DisplayName = "PlayStation 5"),
-    XboxSeriesX     UMETA(DisplayName = "Xbox Series X|S")
-};
-
-/**
- * Build status information
- */
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuildStatus
+struct TRANSPERSONALGAME_API FBuildConfiguration
 {
     GENERATED_BODY()
 
     UPROPERTY(BlueprintReadOnly, Category = "Build")
-    bool bBuildSuccessful = false;
+    FString BuildName;
 
     UPROPERTY(BlueprintReadOnly, Category = "Build")
-    bool bCompilationSuccessful = false;
+    FString BuildVersion;
 
     UPROPERTY(BlueprintReadOnly, Category = "Build")
-    bool bLinkingSuccessful = false;
+    FString BuildNumber;
 
     UPROPERTY(BlueprintReadOnly, Category = "Build")
-    int32 ErrorCount = 0;
+    FString TargetPlatform;
 
     UPROPERTY(BlueprintReadOnly, Category = "Build")
-    int32 WarningCount = 0;
+    FString BuildConfiguration_Type; // Development, Shipping, Debug
 
     UPROPERTY(BlueprintReadOnly, Category = "Build")
-    TArray<FString> ErrorMessages;
+    FDateTime BuildTimestamp;
 
     UPROPERTY(BlueprintReadOnly, Category = "Build")
-    TArray<FString> WarningMessages;
+    TArray<FString> IncludedModules;
 
     UPROPERTY(BlueprintReadOnly, Category = "Build")
-    float BuildTime = 0.0f;
+    TArray<FString> AgentSystems;
 
     UPROPERTY(BlueprintReadOnly, Category = "Build")
-    FDateTime BuildStartTime;
+    bool bIsStableBuild = false;
 
     UPROPERTY(BlueprintReadOnly, Category = "Build")
-    FDateTime BuildEndTime;
+    bool bPassedQA = false;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Build")
-    EBuildConfiguration BuildConfiguration = EBuildConfiguration::Development;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Build")
-    EBuildTargetPlatform TargetPlatform = EBuildTargetPlatform::Win64;
-
-    FBuildStatus()
+    FBuildConfiguration()
     {
-        bBuildSuccessful = false;
-        bCompilationSuccessful = false;
-        bLinkingSuccessful = false;
-        ErrorCount = 0;
-        WarningCount = 0;
-        BuildTime = 0.0f;
-        BuildStartTime = FDateTime::MinValue();
-        BuildEndTime = FDateTime::MinValue();
+        BuildName = TEXT("");
+        BuildVersion = TEXT("1.0.0");
+        BuildNumber = TEXT("0");
+        TargetPlatform = TEXT("Windows");
+        BuildConfiguration_Type = TEXT("Development");
+        BuildTimestamp = FDateTime::Now();
+        bIsStableBuild = false;
+        bPassedQA = false;
     }
 };
 
 /**
- * Module compilation status
+ * Build validation result
  */
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FModuleCompilationStatus
+struct TRANSPERSONALGAME_API FBuildValidationResult
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Module")
-    FString ModuleName;
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    bool bIsValid = false;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Module")
-    bool bCompilationSuccessful = false;
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    TArray<FString> Errors;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Module")
-    int32 ErrorCount = 0;
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    TArray<FString> Warnings;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Module")
-    int32 WarningCount = 0;
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    TArray<FString> MissingDependencies;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Module")
-    TArray<FString> ErrorMessages;
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    TArray<FString> ValidationSteps;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Module")
-    TArray<FString> WarningMessages;
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    float ValidationTime = 0.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Module")
-    float CompilationTime = 0.0f;
+    FBuildValidationResult()
+    {
+        bIsValid = false;
+        ValidationTime = 0.0f;
+    }
+};
 
-    UPROPERTY(BlueprintReadOnly, Category = "Module")
+/**
+ * Agent integration status for build
+ */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FAgentBuildStatus
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Agent")
     FString AgentNumber;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Module")
+    UPROPERTY(BlueprintReadOnly, Category = "Agent")
     FString AgentName;
 
-    FModuleCompilationStatus()
+    UPROPERTY(BlueprintReadOnly, Category = "Agent")
+    bool bSystemsReady = false;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Agent")
+    bool bAssetsReady = false;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Agent")
+    bool bCodeReady = false;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Agent")
+    TArray<FString> PendingTasks;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Agent")
+    TArray<FString> CompletedTasks;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Agent")
+    float CompletionPercentage = 0.0f;
+
+    FAgentBuildStatus()
     {
-        ModuleName = TEXT("");
-        bCompilationSuccessful = false;
-        ErrorCount = 0;
-        WarningCount = 0;
-        CompilationTime = 0.0f;
         AgentNumber = TEXT("");
         AgentName = TEXT("");
+        bSystemsReady = false;
+        bAssetsReady = false;
+        bCodeReady = false;
+        CompletionPercentage = 0.0f;
     }
 };
 
 /**
- * Build integration report
+ * Build deployment information
  */
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuildIntegrationReport
+struct TRANSPERSONALGAME_API FBuildDeploymentInfo
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Report")
-    FBuildStatus OverallBuildStatus;
+    UPROPERTY(BlueprintReadOnly, Category = "Deployment")
+    FString DeploymentTarget;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Report")
-    TArray<FModuleCompilationStatus> ModuleStatuses;
+    UPROPERTY(BlueprintReadOnly, Category = "Deployment")
+    FString DeploymentPath;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Report")
-    int32 TotalModules = 0;
+    UPROPERTY(BlueprintReadOnly, Category = "Deployment")
+    FDateTime DeploymentTime;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Report")
-    int32 SuccessfulModules = 0;
+    UPROPERTY(BlueprintReadOnly, Category = "Deployment")
+    bool bDeploymentSuccessful = false;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Report")
-    int32 FailedModules = 0;
+    UPROPERTY(BlueprintReadOnly, Category = "Deployment")
+    TArray<FString> DeployedFiles;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Report")
-    float TotalBuildTime = 0.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Deployment")
+    int64 TotalSize = 0;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Report")
-    FDateTime ReportGeneratedTime;
+    UPROPERTY(BlueprintReadOnly, Category = "Deployment")
+    FString DeploymentNotes;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Report")
-    TArray<FString> CriticalIssues;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Report")
-    TArray<FString> Recommendations;
-
-    FBuildIntegrationReport()
+    FBuildDeploymentInfo()
     {
-        TotalModules = 0;
-        SuccessfulModules = 0;
-        FailedModules = 0;
-        TotalBuildTime = 0.0f;
-        ReportGeneratedTime = FDateTime::Now();
+        DeploymentTarget = TEXT("");
+        DeploymentPath = TEXT("");
+        DeploymentTime = FDateTime::Now();
+        bDeploymentSuccessful = false;
+        TotalSize = 0;
+        DeploymentNotes = TEXT("");
     }
 };
 
 /**
  * Build Integration Manager
  * 
- * This subsystem manages the build integration process for the Transpersonal Game Studio.
- * It handles compilation validation, build status tracking, and integration reporting
- * for all agent-created modules and systems.
+ * This subsystem manages the integration of all agent outputs into cohesive builds,
+ * handles build validation, deployment, and maintains build history for rollback.
+ * It ensures that all 19 agents' work is properly integrated and tested.
  */
 UCLASS()
-class TRANSPERSONALGAME_API UBuildIntegrationManager : public UGameInstanceSubsystem
+class TRANSPERSONALGAME_API UBuildIntegrationManager : public UEngineSubsystem
 {
     GENERATED_BODY()
 
@@ -208,155 +198,186 @@ public:
 
     // Build Management
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool StartBuild(EBuildConfiguration Configuration = EBuildConfiguration::Development, 
-                   EBuildTargetPlatform Platform = EBuildTargetPlatform::Win64);
+    bool CreateNewBuild(const FBuildConfiguration& BuildConfig);
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool CompileProject();
+    bool ValidateBuild(const FString& BuildName, FBuildValidationResult& ValidationResult);
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool CompileModule(const FString& ModuleName);
+    bool DeployBuild(const FString& BuildName, const FString& DeploymentTarget, FBuildDeploymentInfo& DeploymentInfo);
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool ValidateAllModules();
-
-    // Build Status
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    FBuildStatus GetCurrentBuildStatus() const { return CurrentBuildStatus; }
+    TArray<FBuildConfiguration> GetAvailableBuilds() const { return BuildHistory; }
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    TArray<FModuleCompilationStatus> GetModuleCompilationStatuses() const { return ModuleStatuses; }
+    FBuildConfiguration GetBuildConfiguration(const FString& BuildName) const;
+
+    // Agent Integration
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    bool IntegrateAgentOutput(const FString& AgentNumber, const TArray<FString>& OutputPaths);
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    FModuleCompilationStatus GetModuleStatus(const FString& ModuleName) const;
+    FAgentBuildStatus GetAgentBuildStatus(const FString& AgentNumber) const;
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool IsBuildInProgress() const { return bBuildInProgress; }
-
-    // Integration Validation
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool ValidateSystemIntegration();
+    TArray<FAgentBuildStatus> GetAllAgentStatuses() const { return AgentStatuses; }
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool CheckModuleDependencies(const FString& ModuleName);
+    bool ValidateAgentIntegration(const FString& AgentNumber);
+
+    // Build History and Rollback
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    bool RollbackToBuild(const FString& BuildName);
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    TArray<FString> GetMissingDependencies(const FString& ModuleName);
-
-    // Reporting
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    FBuildIntegrationReport GenerateBuildReport();
+    TArray<FString> GetStableBuilds() const;
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool SaveBuildReport(const FString& FilePath = TEXT(""));
+    bool MarkBuildAsStable(const FString& BuildName);
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    void LogBuildSummary();
+    bool ArchiveOldBuilds(int32 MaxBuildsToKeep = 10);
 
-    // Agent Module Registration
+    // QA Integration
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool RegisterAgentModule(const FString& ModuleName, const FString& AgentNumber, const FString& AgentName);
-
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    TArray<FString> GetRegisteredModules() const;
+    bool SubmitBuildForQA(const FString& BuildName);
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    TArray<FString> GetModulesForAgent(const FString& AgentNumber) const;
-
-    // Build Configuration
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    void SetBuildConfiguration(EBuildConfiguration Configuration) { DefaultBuildConfiguration = Configuration; }
+    bool ProcessQAResults(const FString& BuildName, bool bPassed, const TArray<FString>& QANotes);
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    EBuildConfiguration GetBuildConfiguration() const { return DefaultBuildConfiguration; }
+    TArray<FString> GetBuildsAwaitingQA() const;
+
+    // Continuous Integration
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    bool SetupContinuousIntegration();
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    void SetTargetPlatform(EBuildTargetPlatform Platform) { DefaultTargetPlatform = Platform; }
+    bool TriggerAutomatedBuild();
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    EBuildTargetPlatform GetTargetPlatform() const { return DefaultTargetPlatform; }
+    bool IsAutomatedBuildRunning() const { return bAutomatedBuildInProgress; }
+
+    // Performance Monitoring
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    void GenerateBuildReport(const FString& BuildName);
+
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    void GenerateIntegrationMetrics();
+
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    float GetAverageBuildTime() const;
 
     // Events
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBuildStarted, EBuildConfiguration, Configuration);
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBuildCreated, FString, BuildName);
     UPROPERTY(BlueprintAssignable, Category = "Build Integration")
-    FOnBuildStarted OnBuildStarted;
+    FOnBuildCreated OnBuildCreated;
 
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBuildCompleted, FBuildStatus, BuildStatus);
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnBuildValidated, FString, BuildName, bool, bIsValid);
     UPROPERTY(BlueprintAssignable, Category = "Build Integration")
-    FOnBuildCompleted OnBuildCompleted;
+    FOnBuildValidated OnBuildValidated;
 
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnModuleCompiled, FString, ModuleName, bool, bSuccess);
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnBuildDeployed, FString, BuildName, bool, bSuccessful);
     UPROPERTY(BlueprintAssignable, Category = "Build Integration")
-    FOnModuleCompiled OnModuleCompiled;
+    FOnBuildDeployed OnBuildDeployed;
 
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnBuildError, FString, ErrorMessage, FString, ModuleName);
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnAgentIntegrated, FString, AgentNumber, bool, bSuccessful);
     UPROPERTY(BlueprintAssignable, Category = "Build Integration")
-    FOnBuildError OnBuildError;
+    FOnAgentIntegrated OnAgentIntegrated;
 
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnBuildWarning, FString, WarningMessage, FString, ModuleName);
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnQACompleted, FString, BuildName, bool, bPassed);
     UPROPERTY(BlueprintAssignable, Category = "Build Integration")
-    FOnBuildWarning OnBuildWarning;
+    FOnQACompleted OnQACompleted;
 
 protected:
     // Internal build management
-    bool ExecuteBuildCommand(const FString& Command, FString& Output, FString& Errors);
-    bool ParseBuildOutput(const FString& Output, const FString& Errors);
-    void UpdateBuildStatus();
-    void ResetBuildStatus();
+    bool CreateBuildDirectory(const FString& BuildName);
+    bool CopyAgentOutputs(const FString& BuildName);
+    bool CompileProject(const FString& BuildName);
+    bool PackageProject(const FString& BuildName, const FString& Platform);
 
-    // Module management
-    bool CompileModuleInternal(const FString& ModuleName);
-    void UpdateModuleStatus(const FString& ModuleName, bool bSuccess, const TArray<FString>& Errors, const TArray<FString>& Warnings, float CompileTime);
-    FModuleCompilationStatus* FindModuleStatus(const FString& ModuleName);
+    // Validation helpers
+    bool ValidateProjectStructure(const FString& BuildName, TArray<FString>& Errors);
+    bool ValidateAgentDependencies(const FString& BuildName, TArray<FString>& Errors);
+    bool ValidateAssetIntegrity(const FString& BuildName, TArray<FString>& Errors);
+    bool ValidateCodeCompilation(const FString& BuildName, TArray<FString>& Errors);
 
-    // Dependency validation
-    bool ValidateModuleDependenciesInternal(const FString& ModuleName, TArray<FString>& MissingDeps);
-    TArray<FString> GetModuleDependencies(const FString& ModuleName);
+    // Agent integration helpers
+    bool ProcessAgentAssets(const FString& AgentNumber, const TArray<FString>& AssetPaths);
+    bool ProcessAgentCode(const FString& AgentNumber, const TArray<FString>& CodePaths);
+    bool ProcessAgentConfigurations(const FString& AgentNumber, const TArray<FString>& ConfigPaths);
+    void UpdateAgentStatus(const FString& AgentNumber);
 
-    // Report generation
-    void GenerateReportContent(FString& ReportContent);
-    void AnalyzeBuildIssues(FBuildIntegrationReport& Report);
+    // Build history management
+    void SaveBuildConfiguration(const FBuildConfiguration& BuildConfig);
+    void LoadBuildHistory();
+    void CleanupOldBuilds();
+
+    // Metrics and reporting
+    void RecordBuildMetrics(const FString& BuildName, float BuildTime, bool bSuccessful);
+    void GenerateBuildStatistics();
 
 private:
-    // Build state
+    // Build management
+    UPROPERTY()
+    TArray<FBuildConfiguration> BuildHistory;
+
+    UPROPERTY()
+    TMap<FString, int32> BuildNameToIndex;
+
+    UPROPERTY()
+    FString CurrentBuildName;
+
     UPROPERTY()
     bool bBuildInProgress = false;
 
+    // Agent integration tracking
     UPROPERTY()
-    FBuildStatus CurrentBuildStatus;
+    TArray<FAgentBuildStatus> AgentStatuses;
 
     UPROPERTY()
-    TArray<FModuleCompilationStatus> ModuleStatuses;
+    TMap<FString, int32> AgentNumberToIndex;
+
+    // QA integration
+    UPROPERTY()
+    TArray<FString> BuildsAwaitingQA;
 
     UPROPERTY()
-    TMap<FString, int32> ModuleNameToIndex;
+    TMap<FString, bool> QAResults;
+
+    // Continuous integration
+    UPROPERTY()
+    bool bContinuousIntegrationEnabled = false;
+
+    UPROPERTY()
+    bool bAutomatedBuildInProgress = false;
+
+    UPROPERTY()
+    float LastAutomatedBuildTime = 0.0f;
+
+    // Build metrics
+    UPROPERTY()
+    TArray<float> BuildTimes;
+
+    UPROPERTY()
+    TArray<bool> BuildSuccessRates;
+
+    UPROPERTY()
+    int32 TotalBuildsCreated = 0;
+
+    UPROPERTY()
+    int32 SuccessfulBuilds = 0;
 
     // Configuration
     UPROPERTY()
-    EBuildConfiguration DefaultBuildConfiguration = EBuildConfiguration::Development;
+    FString BuildOutputDirectory;
 
     UPROPERTY()
-    EBuildTargetPlatform DefaultTargetPlatform = EBuildTargetPlatform::Win64;
-
-    // Agent module registry
-    UPROPERTY()
-    TMap<FString, FString> ModuleToAgentNumber;
+    FString DeploymentDirectory;
 
     UPROPERTY()
-    TMap<FString, FString> ModuleToAgentName;
+    int32 MaxBuildHistorySize = 50;
 
-    // Build process tracking
-    UPROPERTY()
-    FProcHandle CurrentBuildProcess;
-
-    UPROPERTY()
-    float BuildStartTime = 0.0f;
-
-    // Build history
-    UPROPERTY()
-    TArray<FBuildIntegrationReport> BuildHistory;
-
-    // Constants
-    static const int32 MaxBuildHistoryEntries = 50;
-    static const float BuildTimeoutSeconds = 600.0f; // 10 minutes
+    // Agent chain definition (for validation)
+    static const TArray<FString> RequiredAgents;
 };
