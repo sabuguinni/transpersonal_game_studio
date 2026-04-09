@@ -1,341 +1,493 @@
 #include "MetaHumanCharacterComponent.h"
-#include "Components/SkeletalMeshComponent.h"
-#include "Animation/AnimBlueprint.h"
-#include "Materials/MaterialInstanceDynamic.h"
 #include "Engine/Engine.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "GameFramework/Character.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "Animation/AnimInstance.h"
 
 UMetaHumanCharacterComponent::UMetaHumanCharacterComponent()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.bStartWithTickEnabled = false;
+    PrimaryComponentTick.TickInterval = 0.1f;
     
-    // Initialize default values
-    CurrentSurvivalState = ESurvivalCondition::Fresh;
-    DaysSurvived = 0;
-    HealthCondition = 1.0f;
-    MentalState = 1.0f;
+    // Initialize MetaHuman settings
+    CurrentBodyType = EMetaHumanBodyType::Medium;
+    CurrentGender = EMetaHumanGender::Male;
+    CurrentAgeRange = EMetaHumanAgeRange::Adult;
     
-    // Set default visual traits
-    CurrentVisualTraits.Height = 1.0f;
-    CurrentVisualTraits.Weight = 1.0f;
-    CurrentVisualTraits.Muscle = 0.5f;
-    CurrentVisualTraits.FaceWidth = 0.5f;
-    CurrentVisualTraits.JawWidth = 0.5f;
-    CurrentVisualTraits.EyeSize = 0.5f;
-    CurrentVisualTraits.NoseSize = 0.5f;
-    CurrentVisualTraits.SkinDamage = 0.0f;
-    CurrentVisualTraits.Fatigue = 0.0f;
-    CurrentVisualTraits.Weathering = 0.0f;
+    bIsMetaHumanActive = false;
+    bUseProceduralFacialAnimation = true;
+    bUseLODSystem = true;
+    
+    FacialExpressionIntensity = 1.0f;
+    EmotionalResponseMultiplier = 1.0f;
+    
+    InitializeMetaHumanPresets();
 }
 
 void UMetaHumanCharacterComponent::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Find the skeletal mesh component on the owner
-    if (AActor* Owner = GetOwner())
+    if (bIsMetaHumanActive)
     {
-        CachedMeshComponent = Owner->FindComponentByClass<USkeletalMeshComponent>();
+        InitializeMetaHuman();
     }
     
-    // Apply the initial archetype if set
-    if (CharacterArchetype.IsValid())
-    {
-        if (UCharacterArchetype* LoadedArchetype = CharacterArchetype.LoadSynchronous())
-        {
-            ApplyArchetype(LoadedArchetype);
-        }
-    }
-    
-    SetupMetaHumanMesh();
+    UE_LOG(LogTemp, Log, TEXT("MetaHuman Character Component initialized"));
 }
 
-void UMetaHumanCharacterComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
-    FActorComponentTickFunction* ThisTickFunction)
+void UMetaHumanCharacterComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    // Update material parameters based on current state
-    UpdateMaterialParameters();
+    if (bIsMetaHumanActive)
+    {
+        UpdateFacialExpressions(DeltaTime);
+        UpdateLODSystem(DeltaTime);
+    }
 }
 
-void UMetaHumanCharacterComponent::ApplyArchetype(UCharacterArchetype* NewArchetype)
+void UMetaHumanCharacterComponent::InitializeMetaHuman()
 {
-    if (!NewArchetype)
+    if (!GetOwner()) return;
+    
+    ACharacter* Character = Cast<ACharacter>(GetOwner());
+    if (!Character) return;
+    
+    USkeletalMeshComponent* MeshComp = Character->GetMesh();
+    if (!MeshComp) return;
+    
+    // Set up MetaHuman mesh based on current configuration
+    ApplyMetaHumanConfiguration();
+    
+    // Initialize facial animation system
+    if (bUseProceduralFacialAnimation)
     {
-        UE_LOG(LogTemp, Warning, TEXT("MetaHumanCharacterComponent: Attempted to apply null archetype"));
-        return;
+        SetupFacialAnimationSystem();
     }
     
-    CharacterArchetype = NewArchetype;
-    
-    // Copy archetype data to component
-    CurrentVisualTraits = NewArchetype->VisualTraits;
-    CurrentClothing = NewArchetype->ClothingSetup;
-    CurrentSurvivalState = NewArchetype->SurvivalState;
-    DaysSurvived = NewArchetype->DaysInJurassic;
-    
-    // Apply the MetaHuman mesh
-    if (NewArchetype->MetaHumanMesh.IsValid())
+    // Set up LOD system
+    if (bUseLODSystem)
     {
-        if (CachedMeshComponent)
+        SetupLODSystem();
+    }
+    
+    bIsMetaHumanActive = true;
+    OnMetaHumanInitialized.Broadcast();
+    
+    UE_LOG(LogTemp, Log, TEXT("MetaHuman initialized successfully"));
+}
+
+void UMetaHumanCharacterComponent::SetBodyType(EMetaHumanBodyType NewBodyType)
+{
+    if (CurrentBodyType != NewBodyType)
+    {
+        CurrentBodyType = NewBodyType;
+        if (bIsMetaHumanActive)
         {
-            USkeletalMesh* LoadedMesh = NewArchetype->MetaHumanMesh.LoadSynchronous();
-            CachedMeshComponent->SetSkeletalMesh(LoadedMesh);
+            ApplyBodyTypeChanges();
         }
+        OnBodyTypeChanged.Broadcast(NewBodyType);
     }
-    
-    // Apply animation blueprint
-    if (NewArchetype->CharacterAnimBP.IsValid())
+}
+
+void UMetaHumanCharacterComponent::SetGender(EMetaHumanGender NewGender)
+{
+    if (CurrentGender != NewGender)
     {
-        if (CachedMeshComponent)
+        CurrentGender = NewGender;
+        if (bIsMetaHumanActive)
         {
-            UClass* AnimBPClass = NewArchetype->CharacterAnimBP.LoadSynchronous();
-            CachedMeshComponent->SetAnimInstanceClass(AnimBPClass);
+            ApplyGenderChanges();
         }
+        OnGenderChanged.Broadcast(NewGender);
     }
-    
-    RefreshCharacterMesh();
-    
-    UE_LOG(LogTemp, Log, TEXT("Applied archetype: %s"), *NewArchetype->CharacterName);
 }
 
-void UMetaHumanCharacterComponent::UpdateVisualTraits(const FCharacterVisualTraits& NewTraits)
+void UMetaHumanCharacterComponent::SetAgeRange(EMetaHumanAgeRange NewAgeRange)
 {
-    CurrentVisualTraits = NewTraits;
-    ApplyBodyMorphs();
-    ApplyFacialMorphs();
-    
-    OnAppearanceChanged.Broadcast(CurrentVisualTraits);
-}
-
-void UMetaHumanCharacterComponent::UpdateClothing(const FCharacterClothing& NewClothing)
-{
-    CurrentClothing = NewClothing;
-    ApplyClothingMeshes();
-    UpdateClothingCondition();
-}
-
-void UMetaHumanCharacterComponent::AdvanceSurvivalState(int32 DaysElapsed)
-{
-    DaysSurvived += DaysElapsed;
-    
-    // Update survival state based on days survived
-    if (DaysSurvived < 30)
+    if (CurrentAgeRange != NewAgeRange)
     {
-        CurrentSurvivalState = ESurvivalCondition::Fresh;
-    }
-    else if (DaysSurvived < 180)
-    {
-        CurrentSurvivalState = ESurvivalCondition::Weathered;
-    }
-    else if (DaysSurvived < 365)
-    {
-        CurrentSurvivalState = ESurvivalCondition::Hardened;
-    }
-    else
-    {
-        CurrentSurvivalState = ESurvivalCondition::Broken;
-    }
-    
-    CalculateSurvivalEffects();
-    ApplySurvivalWear();
-}
-
-void UMetaHumanCharacterComponent::ApplyInjury(float InjurySeverity)
-{
-    HealthCondition = FMath::Clamp(HealthCondition - InjurySeverity, 0.0f, 1.0f);
-    
-    // Increase skin damage based on injury
-    CurrentVisualTraits.SkinDamage = FMath::Clamp(
-        CurrentVisualTraits.SkinDamage + InjurySeverity * 0.3f, 0.0f, 1.0f);
-    
-    UpdateVisualTraits(CurrentVisualTraits);
-}
-
-void UMetaHumanCharacterComponent::ApplyPsychologicalStress(float StressLevel)
-{
-    MentalState = FMath::Clamp(MentalState - StressLevel, 0.0f, 1.0f);
-    
-    // Increase fatigue based on stress
-    CurrentVisualTraits.Fatigue = FMath::Clamp(
-        CurrentVisualTraits.Fatigue + StressLevel * 0.5f, 0.0f, 1.0f);
-    
-    UpdateVisualTraits(CurrentVisualTraits);
-}
-
-void UMetaHumanCharacterComponent::RefreshCharacterMesh()
-{
-    if (!CachedMeshComponent)
-        return;
-    
-    ApplyBodyMorphs();
-    ApplyFacialMorphs();
-    ApplyClothingMeshes();
-    ApplySurvivalWear();
-    UpdateMaterialParameters();
-}
-
-void UMetaHumanCharacterComponent::ApplySurvivalWear()
-{
-    // Calculate weathering based on survival state
-    float WeatheringAmount = 0.0f;
-    
-    switch (CurrentSurvivalState)
-    {
-        case ESurvivalCondition::Fresh:
-            WeatheringAmount = 0.1f;
-            break;
-        case ESurvivalCondition::Weathered:
-            WeatheringAmount = 0.4f;
-            break;
-        case ESurvivalCondition::Hardened:
-            WeatheringAmount = 0.7f;
-            break;
-        case ESurvivalCondition::Broken:
-            WeatheringAmount = 1.0f;
-            break;
-    }
-    
-    CurrentVisualTraits.Weathering = WeatheringAmount;
-    CurrentClothing.ClothingWear = WeatheringAmount * 0.8f;
-    CurrentClothing.DirtLevel = WeatheringAmount * 0.9f;
-    
-    UpdateVisualTraits(CurrentVisualTraits);
-    UpdateClothing(CurrentClothing);
-}
-
-void UMetaHumanCharacterComponent::UpdateClothingCondition()
-{
-    // This will be expanded when clothing mesh system is implemented
-    // For now, just update material parameters
-    UpdateMaterialParameters();
-}
-
-FString UMetaHumanCharacterComponent::GetCharacterDisplayName() const
-{
-    if (CharacterArchetype.IsValid())
-    {
-        if (UCharacterArchetype* LoadedArchetype = CharacterArchetype.LoadSynchronous())
+        CurrentAgeRange = NewAgeRange;
+        if (bIsMetaHumanActive)
         {
-            return LoadedArchetype->CharacterName;
+            ApplyAgeChanges();
         }
+        OnAgeChanged.Broadcast(NewAgeRange);
     }
-    
-    return TEXT("Unknown Survivor");
 }
 
-FText UMetaHumanCharacterComponent::GetCharacterDescription() const
+void UMetaHumanCharacterComponent::ApplyFacialExpression(EFacialExpression Expression, float Intensity)
 {
-    if (CharacterArchetype.IsValid())
+    if (!bIsMetaHumanActive || !bUseProceduralFacialAnimation) return;
+    
+    Intensity = FMath::Clamp(Intensity, 0.0f, 1.0f);
+    CurrentFacialExpression = Expression;
+    FacialExpressionIntensity = Intensity;
+    
+    // Apply the facial expression through morph targets or control rig
+    ApplyFacialMorphTargets(Expression, Intensity);
+    
+    OnFacialExpressionChanged.Broadcast(Expression, Intensity);
+    
+    UE_LOG(LogTemp, Log, TEXT("Applied facial expression: %d with intensity: %f"), 
+           static_cast<int32>(Expression), Intensity);
+}
+
+void UMetaHumanCharacterComponent::TriggerEmotionalResponse(EEmotionalTrigger Trigger, float Intensity)
+{
+    if (!bIsMetaHumanActive) return;
+    
+    // Map emotional triggers to facial expressions
+    EFacialExpression TargetExpression = EFacialExpression::Neutral;
+    float ExpressionIntensity = Intensity * EmotionalResponseMultiplier;
+    
+    switch (Trigger)
     {
-        if (UCharacterArchetype* LoadedArchetype = CharacterArchetype.LoadSynchronous())
-        {
-            return LoadedArchetype->CharacterDescription;
-        }
-    }
-    
-    return FText::FromString(TEXT("A survivor in the Jurassic world"));
-}
-
-float UMetaHumanCharacterComponent::GetOverallCondition() const
-{
-    return (HealthCondition + MentalState) * 0.5f;
-}
-
-void UMetaHumanCharacterComponent::CalculateSurvivalEffects()
-{
-    // Calculate effects based on survival time and conditions
-    float SurvivalRatio = FMath::Clamp(DaysSurvived / 365.0f, 0.0f, 1.0f);
-    
-    // Gradual deterioration over time
-    CurrentVisualTraits.Fatigue = FMath::Clamp(SurvivalRatio * 0.6f, 0.0f, 1.0f);
-    CurrentVisualTraits.Weathering = FMath::Clamp(SurvivalRatio * 0.8f, 0.0f, 1.0f);
-    
-    // Health affects appearance
-    CurrentVisualTraits.SkinDamage = FMath::Clamp((1.0f - HealthCondition) * 0.7f, 0.0f, 1.0f);
-}
-
-void UMetaHumanCharacterComponent::UpdateMaterialParameters()
-{
-    if (!CachedMeshComponent)
-        return;
-    
-    // Update material parameters for survival effects
-    for (int32 MaterialIndex = 0; MaterialIndex < CachedMeshComponent->GetNumMaterials(); MaterialIndex++)
-    {
-        if (UMaterialInstanceDynamic* DynMaterial = CachedMeshComponent->CreateDynamicMaterialInstance(MaterialIndex))
-        {
-            // Apply survival wear parameters
-            DynMaterial->SetScalarParameterValue(TEXT("SkinDamage"), CurrentVisualTraits.SkinDamage);
-            DynMaterial->SetScalarParameterValue(TEXT("Fatigue"), CurrentVisualTraits.Fatigue);
-            DynMaterial->SetScalarParameterValue(TEXT("Weathering"), CurrentVisualTraits.Weathering);
-            DynMaterial->SetScalarParameterValue(TEXT("HealthCondition"), HealthCondition);
-            DynMaterial->SetScalarParameterValue(TEXT("MentalState"), MentalState);
+        case EEmotionalTrigger::DinosaurSighting:
+            TargetExpression = EFacialExpression::Surprised;
+            ExpressionIntensity *= 0.8f;
+            break;
             
-            // Clothing wear parameters
-            DynMaterial->SetScalarParameterValue(TEXT("ClothingWear"), CurrentClothing.ClothingWear);
-            DynMaterial->SetScalarParameterValue(TEXT("DirtLevel"), CurrentClothing.DirtLevel);
-            DynMaterial->SetScalarParameterValue(TEXT("BloodStains"), CurrentClothing.BloodStains);
+        case EEmotionalTrigger::PredatorNearby:
+            TargetExpression = EFacialExpression::Fearful;
+            ExpressionIntensity *= 1.2f;
+            break;
+            
+        case EEmotionalTrigger::SafeAreaReached:
+            TargetExpression = EFacialExpression::Happy;
+            ExpressionIntensity *= 0.6f;
+            break;
+            
+        case EEmotionalTrigger::FoodFound:
+            TargetExpression = EFacialExpression::Happy;
+            ExpressionIntensity *= 0.7f;
+            break;
+            
+        case EEmotionalTrigger::LowHealth:
+            TargetExpression = EFacialExpression::Pained;
+            ExpressionIntensity *= 0.9f;
+            break;
+    }
+    
+    ApplyFacialExpression(TargetExpression, ExpressionIntensity);
+}
+
+void UMetaHumanCharacterComponent::UpdateClothingMaterial(int32 MaterialIndex, UMaterialInterface* NewMaterial)
+{
+    if (!GetOwner()) return;
+    
+    ACharacter* Character = Cast<ACharacter>(GetOwner());
+    if (!Character) return;
+    
+    USkeletalMeshComponent* MeshComp = Character->GetMesh();
+    if (!MeshComp || MaterialIndex >= MeshComp->GetNumMaterials()) return;
+    
+    MeshComp->SetMaterial(MaterialIndex, NewMaterial);
+    OnClothingChanged.Broadcast(MaterialIndex, NewMaterial);
+    
+    UE_LOG(LogTemp, Log, TEXT("Updated clothing material at index: %d"), MaterialIndex);
+}
+
+void UMetaHumanCharacterComponent::SetLODLevel(int32 LODLevel)
+{
+    if (!GetOwner()) return;
+    
+    ACharacter* Character = Cast<ACharacter>(GetOwner());
+    if (!Character) return;
+    
+    USkeletalMeshComponent* MeshComp = Character->GetMesh();
+    if (!MeshComp) return;
+    
+    LODLevel = FMath::Clamp(LODLevel, 0, MeshComp->GetNumLODs() - 1);
+    MeshComp->SetForcedLOD(LODLevel + 1); // UE5 uses 1-based LOD indexing
+    
+    UE_LOG(LogTemp, Log, TEXT("Set MetaHuman LOD level to: %d"), LODLevel);
+}
+
+FMetaHumanConfiguration UMetaHumanCharacterComponent::GetCurrentConfiguration() const
+{
+    FMetaHumanConfiguration Config;
+    Config.BodyType = CurrentBodyType;
+    Config.Gender = CurrentGender;
+    Config.AgeRange = CurrentAgeRange;
+    Config.FacialExpression = CurrentFacialExpression;
+    Config.ExpressionIntensity = FacialExpressionIntensity;
+    return Config;
+}
+
+void UMetaHumanCharacterComponent::ApplyConfiguration(const FMetaHumanConfiguration& Configuration)
+{
+    CurrentBodyType = Configuration.BodyType;
+    CurrentGender = Configuration.Gender;
+    CurrentAgeRange = Configuration.AgeRange;
+    
+    if (bIsMetaHumanActive)
+    {
+        ApplyMetaHumanConfiguration();
+        ApplyFacialExpression(Configuration.FacialExpression, Configuration.ExpressionIntensity);
+    }
+    
+    OnConfigurationChanged.Broadcast(Configuration);
+}
+
+void UMetaHumanCharacterComponent::InitializeMetaHumanPresets()
+{
+    // Initialize body type presets
+    BodyTypePresets.Empty();
+    BodyTypePresets.Add(EMetaHumanBodyType::Slim, TEXT("Slim body type with lean proportions"));
+    BodyTypePresets.Add(EMetaHumanBodyType::Medium, TEXT("Average body type with balanced proportions"));
+    BodyTypePresets.Add(EMetaHumanBodyType::Heavy, TEXT("Heavy body type with robust proportions"));
+    BodyTypePresets.Add(EMetaHumanBodyType::Athletic, TEXT("Athletic body type with muscular definition"));
+    
+    // Initialize facial expression mappings
+    FacialExpressionMorphTargets.Empty();
+    FacialExpressionMorphTargets.Add(EFacialExpression::Neutral, TArray<FString>{TEXT("Neutral_Base")});
+    FacialExpressionMorphTargets.Add(EFacialExpression::Happy, TArray<FString>{TEXT("Smile_L"), TEXT("Smile_R"), TEXT("CheekPuff_L"), TEXT("CheekPuff_R")});
+    FacialExpressionMorphTargets.Add(EFacialExpression::Sad, TArray<FString>{TEXT("FrownMouth_L"), TEXT("FrownMouth_R"), TEXT("BrowDown_L"), TEXT("BrowDown_R")});
+    FacialExpressionMorphTargets.Add(EFacialExpression::Angry, TArray<FString>{TEXT("BrowDown_L"), TEXT("BrowDown_R"), TEXT("NoseWrinkle_L"), TEXT("NoseWrinkle_R")});
+    FacialExpressionMorphTargets.Add(EFacialExpression::Surprised, TArray<FString>{TEXT("BrowUp_L"), TEXT("BrowUp_R"), TEXT("EyeWide_L"), TEXT("EyeWide_R")});
+    FacialExpressionMorphTargets.Add(EFacialExpression::Fearful, TArray<FString>{TEXT("BrowUp_L"), TEXT("BrowUp_R"), TEXT("EyeWide_L"), TEXT("EyeWide_R"), TEXT("MouthOpen")});
+    FacialExpressionMorphTargets.Add(EFacialExpression::Disgusted, TArray<FString>{TEXT("NoseWrinkle_L"), TEXT("NoseWrinkle_R"), TEXT("UpperLipUp_L"), TEXT("UpperLipUp_R")});
+    FacialExpressionMorphTargets.Add(EFacialExpression::Contemptuous, TArray<FString>{TEXT("LipCornerPull_L"), TEXT("NoseWrinkle_L")});
+    FacialExpressionMorphTargets.Add(EFacialExpression::Pained, TArray<FString>{TEXT("EyeSquint_L"), TEXT("EyeSquint_R"), TEXT("BrowDown_L"), TEXT("BrowDown_R")});
+}
+
+void UMetaHumanCharacterComponent::ApplyMetaHumanConfiguration()
+{
+    if (!GetOwner()) return;
+    
+    ACharacter* Character = Cast<ACharacter>(GetOwner());
+    if (!Character) return;
+    
+    USkeletalMeshComponent* MeshComp = Character->GetMesh();
+    if (!MeshComp) return;
+    
+    // Apply body type scaling
+    FVector BodyScale = GetBodyTypeScale(CurrentBodyType);
+    Character->SetActorScale3D(BodyScale);
+    
+    // Apply gender-specific adjustments
+    ApplyGenderSpecificSettings();
+    
+    // Apply age-specific adjustments
+    ApplyAgeSpecificSettings();
+    
+    UE_LOG(LogTemp, Log, TEXT("Applied MetaHuman configuration: BodyType=%d, Gender=%d, Age=%d"), 
+           static_cast<int32>(CurrentBodyType), static_cast<int32>(CurrentGender), static_cast<int32>(CurrentAgeRange));
+}
+
+void UMetaHumanCharacterComponent::ApplyBodyTypeChanges()
+{
+    if (!GetOwner()) return;
+    
+    FVector NewScale = GetBodyTypeScale(CurrentBodyType);
+    GetOwner()->SetActorScale3D(NewScale);
+}
+
+void UMetaHumanCharacterComponent::ApplyGenderChanges()
+{
+    ApplyGenderSpecificSettings();
+}
+
+void UMetaHumanCharacterComponent::ApplyAgeChanges()
+{
+    ApplyAgeSpecificSettings();
+}
+
+void UMetaHumanCharacterComponent::SetupFacialAnimationSystem()
+{
+    if (!GetOwner()) return;
+    
+    ACharacter* Character = Cast<ACharacter>(GetOwner());
+    if (!Character) return;
+    
+    USkeletalMeshComponent* MeshComp = Character->GetMesh();
+    if (!MeshComp) return;
+    
+    // Initialize morph target values
+    for (const auto& ExpressionPair : FacialExpressionMorphTargets)
+    {
+        for (const FString& MorphTargetName : ExpressionPair.Value)
+        {
+            MeshComp->SetMorphTarget(FName(*MorphTargetName), 0.0f);
+        }
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Facial animation system setup complete"));
+}
+
+void UMetaHumanCharacterComponent::SetupLODSystem()
+{
+    if (!GetOwner()) return;
+    
+    ACharacter* Character = Cast<ACharacter>(GetOwner());
+    if (!Character) return;
+    
+    USkeletalMeshComponent* MeshComp = Character->GetMesh();
+    if (!MeshComp) return;
+    
+    // Configure LOD settings for performance
+    MeshComp->bAllowAnimCurveEvaluation = true;
+    MeshComp->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
+    
+    UE_LOG(LogTemp, Log, TEXT("LOD system setup complete"));
+}
+
+void UMetaHumanCharacterComponent::UpdateFacialExpressions(float DeltaTime)
+{
+    // Gradually blend facial expressions back to neutral if no active expression
+    if (CurrentFacialExpression != EFacialExpression::Neutral && FacialExpressionIntensity > 0.0f)
+    {
+        FacialExpressionIntensity = FMath::Max(0.0f, FacialExpressionIntensity - (DeltaTime * 0.5f));
+        
+        if (FacialExpressionIntensity <= 0.0f)
+        {
+            CurrentFacialExpression = EFacialExpression::Neutral;
+        }
+        
+        ApplyFacialMorphTargets(CurrentFacialExpression, FacialExpressionIntensity);
+    }
+}
+
+void UMetaHumanCharacterComponent::UpdateLODSystem(float DeltaTime)
+{
+    if (!bUseLODSystem || !GetOwner()) return;
+    
+    // Automatic LOD management based on distance to player
+    if (APlayerController* PC = GetWorld()->GetFirstPlayerController())
+    {
+        if (APawn* PlayerPawn = PC->GetPawn())
+        {
+            float Distance = FVector::Dist(GetOwner()->GetActorLocation(), PlayerPawn->GetActorLocation());
+            
+            int32 TargetLOD = 0;
+            if (Distance > 2000.0f) TargetLOD = 3;
+            else if (Distance > 1000.0f) TargetLOD = 2;
+            else if (Distance > 500.0f) TargetLOD = 1;
+            
+            SetLODLevel(TargetLOD);
         }
     }
 }
 
-void UMetaHumanCharacterComponent::SetupMetaHumanMesh()
+void UMetaHumanCharacterComponent::ApplyFacialMorphTargets(EFacialExpression Expression, float Intensity)
 {
-    if (!CachedMeshComponent)
-        return;
+    if (!GetOwner()) return;
     
-    // Apply appropriate base mesh based on archetype gender
-    if (CharacterArchetype.IsValid())
+    ACharacter* Character = Cast<ACharacter>(GetOwner());
+    if (!Character) return;
+    
+    USkeletalMeshComponent* MeshComp = Character->GetMesh();
+    if (!MeshComp) return;
+    
+    // Reset all morph targets first
+    for (const auto& ExpressionPair : FacialExpressionMorphTargets)
     {
-        if (UCharacterArchetype* LoadedArchetype = CharacterArchetype.LoadSynchronous())
+        for (const FString& MorphTargetName : ExpressionPair.Value)
         {
-            TSoftObjectPtr<USkeletalMesh> TargetMesh = LoadedArchetype->bIsMale ? BaseMaleMesh : BaseFemaleMesh;
-            
-            if (TargetMesh.IsValid())
+            MeshComp->SetMorphTarget(FName(*MorphTargetName), 0.0f);
+        }
+    }
+    
+    // Apply current expression morph targets
+    if (FacialExpressionMorphTargets.Contains(Expression))
+    {
+        const TArray<FString>& MorphTargets = FacialExpressionMorphTargets[Expression];
+        for (const FString& MorphTargetName : MorphTargets)
+        {
+            MeshComp->SetMorphTarget(FName(*MorphTargetName), Intensity);
+        }
+    }
+}
+
+FVector UMetaHumanCharacterComponent::GetBodyTypeScale(EMetaHumanBodyType BodyType) const
+{
+    switch (BodyType)
+    {
+        case EMetaHumanBodyType::Slim:
+            return FVector(0.9f, 0.9f, 1.0f);
+        case EMetaHumanBodyType::Medium:
+            return FVector(1.0f, 1.0f, 1.0f);
+        case EMetaHumanBodyType::Heavy:
+            return FVector(1.2f, 1.2f, 1.0f);
+        case EMetaHumanBodyType::Athletic:
+            return FVector(1.1f, 1.1f, 1.05f);
+        default:
+            return FVector(1.0f, 1.0f, 1.0f);
+    }
+}
+
+void UMetaHumanCharacterComponent::ApplyGenderSpecificSettings()
+{
+    // Apply gender-specific material parameters or mesh adjustments
+    if (!GetOwner()) return;
+    
+    ACharacter* Character = Cast<ACharacter>(GetOwner());
+    if (!Character) return;
+    
+    USkeletalMeshComponent* MeshComp = Character->GetMesh();
+    if (!MeshComp) return;
+    
+    // Example: Apply different voice pitch or animation sets based on gender
+    float VoicePitch = (CurrentGender == EMetaHumanGender::Female) ? 1.2f : 0.8f;
+    
+    // Apply gender-specific material parameters
+    for (int32 i = 0; i < MeshComp->GetNumMaterials(); i++)
+    {
+        if (UMaterialInterface* Material = MeshComp->GetMaterial(i))
+        {
+            UMaterialInstanceDynamic* DynamicMaterial = UMaterialInstanceDynamic::Create(Material, this);
+            if (DynamicMaterial)
             {
-                USkeletalMesh* LoadedMesh = TargetMesh.LoadSynchronous();
-                CachedMeshComponent->SetSkeletalMesh(LoadedMesh);
+                DynamicMaterial->SetScalarParameterValue(TEXT("VoicePitch"), VoicePitch);
+                MeshComp->SetMaterial(i, DynamicMaterial);
             }
         }
     }
+}
+
+void UMetaHumanCharacterComponent::ApplyAgeSpecificSettings()
+{
+    // Apply age-specific adjustments like skin texture, posture, etc.
+    if (!GetOwner()) return;
     
-    // Apply animation blueprint
-    if (CharacterAnimBlueprint.IsValid())
+    ACharacter* Character = Cast<ACharacter>(GetOwner());
+    if (!Character) return;
+    
+    USkeletalMeshComponent* MeshComp = Character->GetMesh();
+    if (!MeshComp) return;
+    
+    float AgeMultiplier = 1.0f;
+    switch (CurrentAgeRange)
     {
-        UClass* AnimBPClass = CharacterAnimBlueprint.LoadSynchronous();
-        CachedMeshComponent->SetAnimInstanceClass(AnimBPClass);
+        case EMetaHumanAgeRange::Young:
+            AgeMultiplier = 0.8f;
+            break;
+        case EMetaHumanAgeRange::Adult:
+            AgeMultiplier = 1.0f;
+            break;
+        case EMetaHumanAgeRange::MiddleAged:
+            AgeMultiplier = 1.1f;
+            break;
+        case EMetaHumanAgeRange::Elderly:
+            AgeMultiplier = 1.2f;
+            break;
     }
-}
-
-void UMetaHumanCharacterComponent::ApplyBodyMorphs()
-{
-    if (!CachedMeshComponent)
-        return;
     
-    // Apply body morphs based on visual traits
-    // These correspond to MetaHuman morph target names
-    CachedMeshComponent->SetMorphTarget(TEXT("Height"), CurrentVisualTraits.Height);
-    CachedMeshComponent->SetMorphTarget(TEXT("Weight"), CurrentVisualTraits.Weight);
-    CachedMeshComponent->SetMorphTarget(TEXT("Muscle"), CurrentVisualTraits.Muscle);
-}
-
-void UMetaHumanCharacterComponent::ApplyFacialMorphs()
-{
-    if (!CachedMeshComponent)
-        return;
-    
-    // Apply facial morphs based on visual traits
-    CachedMeshComponent->SetMorphTarget(TEXT("FaceWidth"), CurrentVisualTraits.FaceWidth);
-    CachedMeshComponent->SetMorphTarget(TEXT("JawWidth"), CurrentVisualTraits.JawWidth);
-    CachedMeshComponent->SetMorphTarget(TEXT("EyeSize"), CurrentVisualTraits.EyeSize);
-    CachedMeshComponent->SetMorphTarget(TEXT("NoseSize"), CurrentVisualTraits.NoseSize);
-}
-
-void UMetaHumanCharacterComponent::ApplyClothingMeshes()
-{
-    // This will be expanded when modular clothing system is implemented
-    // For now, clothing is handled through material parameters
-    UpdateMaterialParameters();
+    // Apply age-specific material parameters
+    for (int32 i = 0; i < MeshComp->GetNumMaterials(); i++)
+    {
+        if (UMaterialInterface* Material = MeshComp->GetMaterial(i))
+        {
+            UMaterialInstanceDynamic* DynamicMaterial = UMaterialInstanceDynamic::Create(Material, this);
+            if (DynamicMaterial)
+            {
+                DynamicMaterial->SetScalarParameterValue(TEXT("AgeMultiplier"), AgeMultiplier);
+                DynamicMaterial->SetScalarParameterValue(TEXT("SkinRoughness"), AgeMultiplier * 0.5f);
+                MeshComp->SetMaterial(i, DynamicMaterial);
+            }
+        }
+    }
 }
