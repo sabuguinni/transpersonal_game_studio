@@ -7,8 +7,9 @@
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "Subsystems/GameInstanceSubsystem.h"
-#include "MODULE_MAPPING.h"
 #include "EngineArchitecture.generated.h"
+
+DECLARE_LOG_CATEGORY_EXTERN(LogEngineArchitecture, Log, All);
 
 /**
  * TRANSPERSONAL GAME ENGINE ARCHITECTURE
@@ -17,7 +18,7 @@
  * that ALL agents must follow. These are the laws of the engine.
  * 
  * ESTABLISHED BY: Agent #02 - Engine Architect
- * VERSION: 1.0 - Consolidation Phase
+ * VERSION: 2.0 - Complete Implementation
  */
 
 // ============================================================================
@@ -211,6 +212,13 @@ namespace TranspersonalGame
         
         // Rule 5: All systems must support hot-reloading
     }
+    
+    namespace ArchitecturalValidation
+    {
+        // Global validation functions
+        bool IsEngineCompliant();
+        void LogArchitecturalStatus();
+    }
 }
 
 /**
@@ -227,6 +235,12 @@ public:
     // USubsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
+
+    // Get subsystem instance
+    static UTranspersonalEngineArchitectureSubsystem* Get(UGameInstance* GameInstance)
+    {
+        return GameInstance ? GameInstance->GetSubsystem<UTranspersonalEngineArchitectureSubsystem>() : nullptr;
+    }
 
     // Architecture validation
     UFUNCTION(BlueprintCallable, Category = "Architecture")
@@ -255,7 +269,29 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Architecture")
     bool IsSystemCompliant(const FString& SystemName) const;
 
+    // Settings access
+    UFUNCTION(BlueprintCallable, Category = "Settings")
+    FTranspersonalWorldPartitionSettings GetWorldPartitionSettings() const { return WorldPartitionSettings; }
+
+    UFUNCTION(BlueprintCallable, Category = "Settings")
+    FTranspersonalNaniteSettings GetNaniteSettings() const { return NaniteSettings; }
+
+    UFUNCTION(BlueprintCallable, Category = "Settings")
+    FTranspersonalLumenSettings GetLumenSettings() const { return LumenSettings; }
+
+    UFUNCTION(BlueprintCallable, Category = "Settings")
+    FTranspersonalVSMSettings GetVSMSettings() const { return VSMSettings; }
+
+    UFUNCTION(BlueprintCallable, Category = "Settings")
+    FTranspersonalMassAISettings GetMassAISettings() const { return MassAISettings; }
+
+    UFUNCTION(BlueprintCallable, Category = "Settings")
+    FTranspersonalPerformanceTargets GetPerformanceTargets() const { return PerformanceTargets; }
+
 protected:
+    // Initialize default settings
+    void InitializeDefaultSettings();
+
     // Architecture settings
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Settings")
     FTranspersonalWorldPartitionSettings WorldPartitionSettings;
@@ -295,34 +331,34 @@ private:
  * Use these macros to ensure your systems comply with architecture
  */
 #define TRANSPERSONAL_VALIDATE_ARCHITECTURE() \
-    if (UTranspersonalEngineArchitectureSubsystem* ArchSubsystem = GetGameInstance()->GetSubsystem<UTranspersonalEngineArchitectureSubsystem>()) \
+    if (UTranspersonalEngineArchitectureSubsystem* ArchSubsystem = UTranspersonalEngineArchitectureSubsystem::Get(GetGameInstance())) \
     { \
-        ensureAlways(ArchSubsystem->IsSystemCompliant(GetClass()->GetName())); \
-    }
-
-#define TRANSPERSONAL_CHECK_PERFORMANCE() \
-    if (UTranspersonalEngineArchitectureSubsystem* ArchSubsystem = GetGameInstance()->GetSubsystem<UTranspersonalEngineArchitectureSubsystem>()) \
-    { \
-        if (!ArchSubsystem->IsPerformanceTargetMet()) \
+        if (!ArchSubsystem->IsSystemCompliant(TEXT("All"))) \
         { \
-            UE_LOG(LogTemp, Warning, TEXT("Performance target not met in %s"), *GetClass()->GetName()); \
+            UE_LOG(LogTemp, Error, TEXT("ARCHITECTURAL VIOLATION in %s"), *GetClass()->GetName()); \
         } \
     }
 
-// ============================================================================
-// FORWARD DECLARATIONS FOR CORE SYSTEMS
-// ============================================================================
+#define TRANSPERSONAL_REQUIRE_NANITE(StaticMesh) \
+    if (StaticMesh && !StaticMesh->IsNaniteEnabled()) \
+    { \
+        UE_LOG(LogTemp, Error, TEXT("ARCHITECTURAL VIOLATION: Static mesh %s must use Nanite"), *StaticMesh->GetName()); \
+    }
 
-class UPhysicsSystemManager;
-class UPerformanceOptimizer;
-class UWorldPartitionManager;
-class UMassAIController;
+#define TRANSPERSONAL_REQUIRE_WORLD_PARTITION() \
+    if (UWorld* World = GetWorld()) \
+    { \
+        if (!World->IsPartitionedWorld()) \
+        { \
+            UE_LOG(LogTemp, Error, TEXT("ARCHITECTURAL VIOLATION: World must use World Partition")); \
+        } \
+    }
 
-/**
- * END OF ENGINE ARCHITECTURE
- * 
- * This architecture is MANDATORY and NON-NEGOTIABLE.
- * All agents must comply with these rules.
- * 
- * Violations will be rejected by the QA agent.
- */
+#define TRANSPERSONAL_PERFORMANCE_CHECK(SystemName) \
+    if (UTranspersonalEngineArchitectureSubsystem* ArchSubsystem = UTranspersonalEngineArchitectureSubsystem::Get(GetGameInstance())) \
+    { \
+        if (!ArchSubsystem->IsPerformanceTargetMet()) \
+        { \
+            UE_LOG(LogTemp, Warning, TEXT("PERFORMANCE WARNING in %s: Targets not met"), *SystemName); \
+        } \
+    }
