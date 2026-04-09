@@ -322,7 +322,7 @@ void UDialogueManager::LoadDialogueData()
     }
     else
     {
-        UE_LOG(LogTemp, Warning, TEXT("DialogueManager: No dialogue data table specified"));
+        UE_LOG(LogTemp, Warning, TEXT("DialogueManager: No dialogue data table assigned"));
     }
 }
 
@@ -339,7 +339,7 @@ FDialogueEntry* UDialogueManager::FindDialogueEntry(FName DialogueID) const
         return nullptr;
     }
     
-    return DataTable->FindRow<FDialogueEntry>(DialogueID, TEXT("DialogueManager"));
+    return DataTable->FindRow<FDialogueEntry>(DialogueID, TEXT("FindDialogueEntry"));
 }
 
 bool UDialogueManager::ValidateDialogueConditions(const FDialogueEntry& Entry, const FGameplayTagContainer& CurrentTags) const
@@ -367,7 +367,7 @@ bool UDialogueManager::ValidateDialogueConditions(const FDialogueEntry& Entry, c
 
 void UDialogueManager::ProcessDialogueQueue()
 {
-    if (IsDialoguePlaying() || DialogueQueue.Num() == 0)
+    if (DialogueQueue.Num() == 0 || IsDialoguePlaying())
     {
         return;
     }
@@ -385,20 +385,20 @@ void UDialogueManager::StartDialoguePlayback(FDialogueQueueEntry& QueueEntry)
     CurrentDialogue.bIsPlaying = true;
     CurrentDialogueStartTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
     
-    // Choose appropriate audio component
+    // Select appropriate audio component
     UAudioComponent* ActiveComponent = CurrentDialogue.DialogueData.bIsInternalMonologue ? 
         InternalMonologueAudioComponent : DialogueAudioComponent;
     
-    // Load and play audio if available
-    if (CurrentDialogue.DialogueData.AudioClip.IsValid())
+    // Load and play audio
+    if (CurrentDialogue.DialogueData.AudioClip.IsValid() && ActiveComponent)
     {
         USoundWave* SoundWave = CurrentDialogue.DialogueData.AudioClip.LoadSynchronous();
-        if (SoundWave && ActiveComponent)
+        if (SoundWave)
         {
             ActiveComponent->SetSound(SoundWave);
             ActiveComponent->Play();
             
-            // Update duration from audio if not manually set
+            // Update duration if not set
             if (CurrentDialogue.DialogueData.Duration <= 0.0f)
             {
                 CurrentDialogue.DialogueData.Duration = SoundWave->GetDuration();
@@ -406,14 +406,14 @@ void UDialogueManager::StartDialoguePlayback(FDialogueQueueEntry& QueueEntry)
         }
     }
     
-    // Display subtitle
-    FText SubtitleText = CurrentDialogue.DialogueData.SubtitleOverride.IsEmpty() ? 
-        CurrentDialogue.DialogueData.DialogueText : CurrentDialogue.DialogueData.SubtitleOverride;
-    
-    DisplaySubtitle(SubtitleText, CurrentDialogue.DialogueData.Duration, CurrentDialogue.DialogueData.bIsInternalMonologue);
-    
-    // Update emotional context
-    UpdateEmotionalContext(CurrentDialogue.DialogueData.EmotionalContext);
+    // Display subtitles
+    if (bSubtitlesEnabled)
+    {
+        FText SubtitleText = CurrentDialogue.DialogueData.SubtitleOverride.IsEmpty() ? 
+            CurrentDialogue.DialogueData.DialogueText : CurrentDialogue.DialogueData.SubtitleOverride;
+        
+        DisplaySubtitle(SubtitleText, CurrentDialogue.DialogueData.Duration, CurrentDialogue.DialogueData.bIsInternalMonologue);
+    }
     
     // Broadcast dialogue started event
     OnDialogueStarted.Broadcast(CurrentDialogue.DialogueData.DialogueID, CurrentDialogue.Speaker, CurrentDialogue.DialogueData.DialogueText);
@@ -425,29 +425,26 @@ void UDialogueManager::OnDialogueAudioFinished()
 {
     if (IsDialoguePlaying())
     {
+        // Broadcast dialogue finished event
+        OnDialogueFinished.Broadcast(CurrentDialogue.DialogueData.DialogueID, CurrentDialogue.Speaker);
+        
         // Check for follow-up dialogues
         if (CurrentDialogue.DialogueData.FollowUpDialogues.Num() > 0)
         {
-            // Queue follow-up dialogues
-            for (FName FollowUpID : CurrentDialogue.DialogueData.FollowUpDialogues)
-            {
-                QueueDialogue(FollowUpID, CurrentDialogue.Speaker, CurrentDialogue.DialogueData.EmotionalContext);
-            }
+            // Queue the first follow-up dialogue
+            QueueDialogue(CurrentDialogue.DialogueData.FollowUpDialogues[0], CurrentDialogue.Speaker, CurrentDialogue.DialogueData.EmotionalContext);
         }
         
-        // Finish current dialogue
-        OnDialogueFinished.Broadcast(CurrentDialogue.DialogueData.DialogueID, CurrentDialogue.Speaker);
+        // Clear current dialogue
         CurrentDialogue = FDialogueQueueEntry();
+        
+        UE_LOG(LogTemp, Log, TEXT("DialogueManager: Audio finished, dialogue complete"));
     }
 }
 
 void UDialogueManager::DisplaySubtitle(const FText& SubtitleText, float Duration, bool bIsInternalMonologue)
 {
-    if (!bSubtitlesEnabled)
-    {
-        return;
-    }
-    
+    // Broadcast subtitle event for UI to handle
     OnSubtitleDisplayed.Broadcast(SubtitleText, Duration, bIsInternalMonologue);
     
     // Set timer to clear subtitle
@@ -462,7 +459,7 @@ void UDialogueManager::DisplaySubtitle(const FText& SubtitleText, float Duration
 
 void UDialogueManager::SortDialogueQueue()
 {
-    // Sort by priority (higher priority first) then by queue time (older first)
+    // Sort by priority (highest first), then by queue time (oldest first)
     DialogueQueue.Sort([](const FDialogueQueueEntry& A, const FDialogueQueueEntry& B)
     {
         if (A.DialogueData.Priority != B.DialogueData.Priority)
