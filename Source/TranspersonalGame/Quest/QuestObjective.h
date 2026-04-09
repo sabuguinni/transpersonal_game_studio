@@ -1,0 +1,166 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "UObject/NoExportTypes.h"
+#include "QuestManager.h"
+#include "GameplayTagContainer.h"
+#include "QuestObjective.generated.h"
+
+UENUM(BlueprintType)
+enum class EObjectiveType : uint8
+{
+    Kill                UMETA(DisplayName = "Kill Target"),
+    Collect             UMETA(DisplayName = "Collect Items"),
+    Reach               UMETA(DisplayName = "Reach Location"),
+    Interact            UMETA(DisplayName = "Interact With Object"),
+    Survive             UMETA(DisplayName = "Survive Duration"),
+    Craft               UMETA(DisplayName = "Craft Items"),
+    Tame                UMETA(DisplayName = "Tame Creature"),
+    Discover            UMETA(DisplayName = "Discover Location"),
+    Escort              UMETA(DisplayName = "Escort Target"),
+    Defend              UMETA(DisplayName = "Defend Location"),
+    Build               UMETA(DisplayName = "Build Structure"),
+    Gather              UMETA(DisplayName = "Gather Resources")
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FObjectiveData
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
+    FString ObjectiveID;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
+    FText ObjectiveDescription;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
+    EObjectiveType ObjectiveType;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
+    FGameplayTagContainer TargetTags;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
+    int32 RequiredCount;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
+    FVector TargetLocation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
+    float TargetRadius;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
+    bool bIsOptional;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
+    bool bIsHidden;
+
+    FObjectiveData()
+    {
+        ObjectiveType = EObjectiveType::Collect;
+        RequiredCount = 1;
+        TargetLocation = FVector::ZeroVector;
+        TargetRadius = 100.0f;
+        bIsOptional = false;
+        bIsHidden = false;
+    }
+};
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnObjectiveCompleted, const FString&, ObjectiveID);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnObjectiveProgressChanged, const FString&, ObjectiveID, float, Progress);
+
+UCLASS(BlueprintType)
+class TRANSPERSONALGAME_API UQuestObjective : public UObject
+{
+    GENERATED_BODY()
+
+public:
+    UQuestObjective();
+
+    // Initialization
+    void Initialize(const FString& ObjectiveID, EQuestType QuestType);
+
+    // Objective Management
+    UFUNCTION(BlueprintCallable, Category = "Objective")
+    void UpdateObjective(float DeltaTime);
+
+    UFUNCTION(BlueprintCallable, Category = "Objective")
+    bool CompleteObjective();
+
+    UFUNCTION(BlueprintCallable, Category = "Objective")
+    void SetProgress(float NewProgress);
+
+    UFUNCTION(BlueprintCallable, Category = "Objective")
+    void IncrementProgress(float Amount = 1.0f);
+
+    // Progress Tracking
+    UFUNCTION(BlueprintCallable, Category = "Objective")
+    float GetProgress() const { return CurrentProgress; }
+
+    UFUNCTION(BlueprintCallable, Category = "Objective")
+    float GetProgressPercentage() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Objective")
+    int32 GetCurrentCount() const { return CurrentCount; }
+
+    UFUNCTION(BlueprintCallable, Category = "Objective")
+    int32 GetRequiredCount() const { return ObjectiveData.RequiredCount; }
+
+    UFUNCTION(BlueprintCallable, Category = "Objective")
+    bool IsCompleted() const { return bIsCompleted; }
+
+    // Getters
+    UFUNCTION(BlueprintCallable, Category = "Objective")
+    FString GetObjectiveID() const { return ObjectiveData.ObjectiveID; }
+
+    UFUNCTION(BlueprintCallable, Category = "Objective")
+    FText GetObjectiveDescription() const { return ObjectiveData.ObjectiveDescription; }
+
+    UFUNCTION(BlueprintCallable, Category = "Objective")
+    EObjectiveType GetObjectiveType() const { return ObjectiveData.ObjectiveType; }
+
+    UFUNCTION(BlueprintCallable, Category = "Objective")
+    bool IsOptional() const { return ObjectiveData.bIsOptional; }
+
+    UFUNCTION(BlueprintCallable, Category = "Objective")
+    bool IsHidden() const { return ObjectiveData.bIsHidden; }
+
+    // Location-based objectives
+    UFUNCTION(BlueprintCallable, Category = "Objective")
+    bool CheckLocationObjective(const FVector& PlayerLocation);
+
+    UFUNCTION(BlueprintCallable, Category = "Objective")
+    FVector GetTargetLocation() const { return ObjectiveData.TargetLocation; }
+
+    UFUNCTION(BlueprintCallable, Category = "Objective")
+    float GetTargetRadius() const { return ObjectiveData.TargetRadius; }
+
+    // Events
+    UPROPERTY(BlueprintAssignable, Category = "Objective Events")
+    FOnObjectiveCompleted OnObjectiveCompleted;
+
+    UPROPERTY(BlueprintAssignable, Category = "Objective Events")
+    FOnObjectiveProgressChanged OnObjectiveProgressChanged;
+
+protected:
+    UPROPERTY(BlueprintReadOnly, Category = "Objective")
+    FObjectiveData ObjectiveData;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Objective")
+    float CurrentProgress;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Objective")
+    int32 CurrentCount;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Objective")
+    bool bIsCompleted;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Objective")
+    bool bIsTracking;
+
+private:
+    void LoadObjectiveData(const FString& ObjectiveID);
+    void UpdateLocationTracking();
+    void UpdateSurvivalTracking(float DeltaTime);
+    void NotifyProgressChanged();
+};
