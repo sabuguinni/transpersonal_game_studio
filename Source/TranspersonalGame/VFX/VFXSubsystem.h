@@ -1,0 +1,568 @@
+// Copyright Transpersonal Game Studio. All Rights Reserved.
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Subsystems/WorldSubsystem.h"
+#include "Engine/World.h"
+#include "GameplayTags.h"
+#include "Templates/SubclassOf.h"
+#include "UObject/SoftObjectPtr.h"
+#include "NiagaraSystem.h"
+#include "NiagaraComponent.h"
+#include "NiagaraDataInterface.h"
+#include "Materials/MaterialParameterCollection.h"
+#include "Components/DecalComponent.h"
+#include "VFXSubsystem.generated.h"
+
+class UNarrativeSubsystem;
+class UAudioSubsystem;
+class UVFXStateComponent;
+class UNiagaraSystem;
+class UNiagaraComponent;
+class UMaterialInterface;
+class UMaterialInstanceDynamic;
+class UDecalComponent;
+class UPostProcessComponent;
+
+UENUM(BlueprintType)
+enum class EVFXCategory : uint8
+{
+    Environmental,      // Weather, atmosphere, natural phenomena
+    Creature,          // Dinosaur-related effects (breath, footsteps, roars)
+    Combat,            // Impact, damage, destruction effects
+    Magical,           // Transpersonal, mystical, time-related effects
+    Interactive,       // Player interaction feedback
+    Atmospheric,       // Mood enhancement, lighting effects
+    Particle,          // Dust, debris, organic particles
+    Liquid,            // Water, blood, other fluids
+    Energy,            // Glows, sparks, electrical effects
+    Destruction,       // Breaking, crumbling, explosion effects
+    Temporal,          // Time distortion, portal effects
+    Consciousness      // Transpersonal awareness effects
+};
+
+UENUM(BlueprintType)
+enum class EVFXIntensity : uint8
+{
+    Subtle,            // Barely noticeable, ambient
+    Low,               // Gentle, background effects
+    Medium,            // Noticeable, standard intensity
+    High,              // Strong, attention-grabbing
+    Extreme            // Overwhelming, dramatic moments
+};
+
+UENUM(BlueprintType)
+enum class EVFXState : uint8
+{
+    Inactive,          // Effect not playing
+    FadingIn,          // Starting up
+    Active,            // Fully playing
+    FadingOut,         // Ending
+    Paused,            // Temporarily stopped
+    Transitioning      // Changing to another effect
+};
+
+UENUM(BlueprintType)
+enum class EVFXTrigger : uint8
+{
+    Manual,            // Triggered by code/blueprint
+    Automatic,         // Triggered by conditions
+    Audio,             // Synced with audio events
+    Narrative,         // Triggered by story moments
+    Gameplay,          // Triggered by game mechanics
+    Environmental,     // Triggered by world conditions
+    Temporal,          // Time-based triggers
+    Proximity          // Distance-based triggers
+};
+
+USTRUCT(BlueprintType)
+struct FVFXEffectData
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Effect")
+    FString EffectID;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Effect")
+    FText EffectName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Effect")
+    EVFXCategory Category = EVFXCategory::Environmental;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Effect")
+    EVFXIntensity Intensity = EVFXIntensity::Medium;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Effect")
+    EVFXTrigger TriggerType = EVFXTrigger::Manual;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Effect")
+    TSoftObjectPtr<UNiagaraSystem> NiagaraSystem;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Effect")
+    TSoftObjectPtr<UMaterialInterface> Material;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Effect")
+    FVector SpawnLocation = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Effect")
+    FRotator SpawnRotation = FRotator::ZeroRotator;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Effect")
+    FVector SpawnScale = FVector::OneVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Effect")
+    float Duration = 5.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Effect")
+    float FadeInTime = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Effect")
+    float FadeOutTime = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Effect")
+    bool bLooping = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Effect")
+    bool bAutoDestroy = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Effect")
+    bool bAttachToActor = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Effect")
+    FName AttachSocketName = NAME_None;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Effect")
+    int32 Priority = 100;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Effect")
+    float CullingDistance = 5000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Effect")
+    TArray<FGameplayTag> RequiredTags;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Effect")
+    TArray<FGameplayTag> ForbiddenTags;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Effect")
+    TMap<FString, float> FloatParameters;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Effect")
+    TMap<FString, FVector> VectorParameters;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Effect")
+    TMap<FString, FLinearColor> ColorParameters;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Effect")
+    TMap<FString, bool> BoolParameters;
+
+    FVFXEffectData()
+    {
+        EffectID = TEXT("");
+        EffectName = FText::GetEmpty();
+        Category = EVFXCategory::Environmental;
+        Intensity = EVFXIntensity::Medium;
+        TriggerType = EVFXTrigger::Manual;
+        SpawnLocation = FVector::ZeroVector;
+        SpawnRotation = FRotator::ZeroRotator;
+        SpawnScale = FVector::OneVector;
+        Duration = 5.0f;
+        FadeInTime = 1.0f;
+        FadeOutTime = 1.0f;
+        bLooping = false;
+        bAutoDestroy = true;
+        bAttachToActor = false;
+        AttachSocketName = NAME_None;
+        Priority = 100;
+        CullingDistance = 5000.0f;
+    }
+};
+
+USTRUCT(BlueprintType)
+struct FVFXEnvironmentalState
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environmental")
+    FString StateID;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environmental")
+    float TimeOfDay = 12.0f; // 0-24 hour format
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environmental")
+    float WeatherIntensity = 0.0f; // 0-1 range
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environmental")
+    FString WeatherType = TEXT("Clear");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environmental")
+    float WindStrength = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environmental")
+    FVector WindDirection = FVector(1.0f, 0.0f, 0.0f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environmental")
+    float Temperature = 25.0f; // Celsius
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environmental")
+    float Humidity = 0.6f; // 0-1 range
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environmental")
+    float AtmosphericPressure = 1013.25f; // hPa
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environmental")
+    FLinearColor AmbientLightColor = FLinearColor::White;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environmental")
+    float AmbientLightIntensity = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environmental")
+    FLinearColor FogColor = FLinearColor(0.7f, 0.8f, 0.9f, 1.0f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environmental")
+    float FogDensity = 0.02f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environmental")
+    float FogStartDistance = 100.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environmental")
+    float FogFalloff = 0.2f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environmental")
+    TArray<FGameplayTag> BiomeTags;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environmental")
+    TArray<FGameplayTag> SeasonTags;
+
+    FVFXEnvironmentalState()
+    {
+        StateID = TEXT("");
+        TimeOfDay = 12.0f;
+        WeatherIntensity = 0.0f;
+        WeatherType = TEXT("Clear");
+        WindStrength = 0.5f;
+        WindDirection = FVector(1.0f, 0.0f, 0.0f);
+        Temperature = 25.0f;
+        Humidity = 0.6f;
+        AtmosphericPressure = 1013.25f;
+        AmbientLightColor = FLinearColor::White;
+        AmbientLightIntensity = 1.0f;
+        FogColor = FLinearColor(0.7f, 0.8f, 0.9f, 1.0f);
+        FogDensity = 0.02f;
+        FogStartDistance = 100.0f;
+        FogFalloff = 0.2f;
+    }
+};
+
+USTRUCT(BlueprintType)
+struct FVFXCreatureEffect
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Creature")
+    FString CreatureType;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Creature")
+    FString EffectType; // "Footstep", "Breath", "Roar", "Death", etc.
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Creature")
+    FVFXEffectData EffectData;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Creature")
+    float CreatureSizeMultiplier = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Creature")
+    float CreatureHealthMultiplier = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Creature")
+    bool bScaleWithCreatureSize = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Creature")
+    bool bModulateWithHealth = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Creature")
+    TArray<FString> SurfaceTypes; // Ground materials that affect the effect
+
+    FVFXCreatureEffect()
+    {
+        CreatureType = TEXT("");
+        EffectType = TEXT("");
+        CreatureSizeMultiplier = 1.0f;
+        CreatureHealthMultiplier = 1.0f;
+        bScaleWithCreatureSize = true;
+        bModulateWithHealth = false;
+    }
+};
+
+USTRUCT(BlueprintType)
+struct FVFXTranspersonalEffect
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transpersonal")
+    FString EffectName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transpersonal")
+    FString ConsciousnessLevel; // "Awakening", "Transcendence", "Unity", etc.
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transpersonal")
+    FVFXEffectData BaseEffect;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transpersonal")
+    float ConsciousnessIntensity = 0.5f; // 0-1 range
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transpersonal")
+    float SacredGeometryInfluence = 0.3f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transpersonal")
+    float TemporalDistortionAmount = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transpersonal")
+    FLinearColor AuraColor = FLinearColor(0.8f, 0.9f, 1.0f, 0.5f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transpersonal")
+    float AuraRadius = 500.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transpersonal")
+    bool bAffectsPostProcess = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transpersonal")
+    bool bAffectsAudio = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transpersonal")
+    TArray<FString> GeometryPatterns;
+
+    FVFXTranspersonalEffect()
+    {
+        EffectName = TEXT("");
+        ConsciousnessLevel = TEXT("");
+        ConsciousnessIntensity = 0.5f;
+        SacredGeometryInfluence = 0.3f;
+        TemporalDistortionAmount = 0.0f;
+        AuraColor = FLinearColor(0.8f, 0.9f, 1.0f, 0.5f);
+        AuraRadius = 500.0f;
+        bAffectsPostProcess = true;
+        bAffectsAudio = true;
+    }
+};
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnVFXEffectStarted, const FString&, EffectID, const FVFXEffectData&, EffectData);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnVFXEffectFinished, const FString&, EffectID, const FVFXEffectData&, EffectData);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnVFXStateChanged, EVFXState, OldState, EVFXState, NewState, const FString&, EffectID);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnEnvironmentalVFXChanged, const FVFXEnvironmentalState&, OldState, const FVFXEnvironmentalState&, NewState);
+
+/**
+ * VFX Subsystem - Manages all visual effects in the transpersonal prehistoric world
+ * 
+ * This subsystem handles:
+ * - Environmental effects (weather, atmosphere, natural phenomena)
+ * - Creature effects (dinosaur-specific visual feedback)
+ * - Transpersonal effects (consciousness, mystical experiences)
+ * - Combat and interaction effects
+ * - Performance optimization through LOD and culling
+ * - Integration with audio and narrative systems
+ */
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UVFXSubsystem : public UWorldSubsystem
+{
+    GENERATED_BODY()
+
+public:
+    UVFXSubsystem();
+
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+    virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
+
+    // Core VFX Management
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    FString PlayVFXEffect(const FVFXEffectData& EffectData, AActor* AttachActor = nullptr);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    bool StopVFXEffect(const FString& EffectID, bool bFadeOut = true);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    bool PauseVFXEffect(const FString& EffectID);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    bool ResumeVFXEffect(const FString& EffectID);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void StopAllVFXEffects(EVFXCategory Category = EVFXCategory::Environmental, bool bFadeOut = true);
+
+    // Environmental VFX
+    UFUNCTION(BlueprintCallable, Category = "VFX|Environmental")
+    void SetEnvironmentalState(const FVFXEnvironmentalState& NewState, float TransitionTime = 3.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX|Environmental")
+    FVFXEnvironmentalState GetCurrentEnvironmentalState() const { return CurrentEnvironmentalState; }
+
+    UFUNCTION(BlueprintCallable, Category = "VFX|Environmental")
+    void UpdateWeatherEffects(const FString& WeatherType, float Intensity, float TransitionTime = 5.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX|Environmental")
+    void UpdateTimeOfDayEffects(float TimeOfDay, float TransitionTime = 2.0f);
+
+    // Creature VFX
+    UFUNCTION(BlueprintCallable, Category = "VFX|Creature")
+    FString PlayCreatureEffect(const FVFXCreatureEffect& CreatureEffect, AActor* CreatureActor);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX|Creature")
+    void RegisterCreatureEffects(const FString& CreatureType, const TArray<FVFXCreatureEffect>& Effects);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX|Creature")
+    void TriggerCreatureFootstep(AActor* CreatureActor, const FVector& FootstepLocation, const FString& SurfaceType);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX|Creature")
+    void TriggerCreatureBreath(AActor* CreatureActor, const FVector& MouthLocation, float IntensityMultiplier = 1.0f);
+
+    // Transpersonal VFX
+    UFUNCTION(BlueprintCallable, Category = "VFX|Transpersonal")
+    FString PlayTranspersonalEffect(const FVFXTranspersonalEffect& TranspersonalEffect, const FVector& Location);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX|Transpersonal")
+    void SetConsciousnessLevel(const FString& Level, float Intensity, float TransitionTime = 5.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX|Transpersonal")
+    void TriggerTemporalDistortion(const FVector& EpicenterLocation, float Radius, float Intensity, float Duration);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX|Transpersonal")
+    void ShowSacredGeometry(const FVector& Location, const FString& Pattern, float Scale = 1.0f, float Duration = 10.0f);
+
+    // Combat & Interaction VFX
+    UFUNCTION(BlueprintCallable, Category = "VFX|Combat")
+    FString PlayImpactEffect(const FVector& ImpactLocation, const FVector& ImpactNormal, const FString& SurfaceType, float ImpactForce);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX|Combat")
+    FString PlayDamageEffect(AActor* DamagedActor, const FVector& DamageLocation, float DamageAmount, const FString& DamageType);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX|Combat")
+    void CreateBloodEffect(const FVector& Location, const FVector& Direction, float Amount, const FLinearColor& BloodColor);
+
+    // Performance & Optimization
+    UFUNCTION(BlueprintCallable, Category = "VFX|Performance")
+    void SetVFXQualityLevel(int32 QualityLevel); // 0=Low, 1=Medium, 2=High, 3=Ultra
+
+    UFUNCTION(BlueprintCallable, Category = "VFX|Performance")
+    void SetMaxActiveEffects(int32 MaxEffects);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX|Performance")
+    void UpdateVFXLOD(const FVector& ViewerLocation);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX|Performance")
+    int32 GetActiveEffectCount() const;
+
+    // Parameter Control
+    UFUNCTION(BlueprintCallable, Category = "VFX|Parameters")
+    void SetEffectFloatParameter(const FString& EffectID, const FString& ParameterName, float Value);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX|Parameters")
+    void SetEffectVectorParameter(const FString& EffectID, const FString& ParameterName, const FVector& Value);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX|Parameters")
+    void SetEffectColorParameter(const FString& EffectID, const FString& ParameterName, const FLinearColor& Value);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX|Parameters")
+    void SetGlobalVFXParameter(const FString& ParameterName, float Value);
+
+    // Integration with other systems
+    UFUNCTION(BlueprintCallable, Category = "VFX|Integration")
+    void SyncWithAudioEvent(const FString& AudioEventID, const FString& VFXEffectID);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX|Integration")
+    void SyncWithNarrativeEvent(const FString& NarrativeEventID, const TArray<FString>& VFXEffectIDs);
+
+    // Events
+    UPROPERTY(BlueprintAssignable, Category = "VFX|Events")
+    FOnVFXEffectStarted OnVFXEffectStarted;
+
+    UPROPERTY(BlueprintAssignable, Category = "VFX|Events")
+    FOnVFXEffectFinished OnVFXEffectFinished;
+
+    UPROPERTY(BlueprintAssignable, Category = "VFX|Events")
+    FOnVFXStateChanged OnVFXStateChanged;
+
+    UPROPERTY(BlueprintAssignable, Category = "VFX|Events")
+    FOnEnvironmentalVFXChanged OnEnvironmentalVFXChanged;
+
+protected:
+    // Core state
+    UPROPERTY(BlueprintReadOnly, Category = "VFX")
+    FVFXEnvironmentalState CurrentEnvironmentalState;
+
+    UPROPERTY(BlueprintReadOnly, Category = "VFX")
+    TMap<FString, UNiagaraComponent*> ActiveEffects;
+
+    UPROPERTY(BlueprintReadOnly, Category = "VFX")
+    TMap<FString, FVFXEffectData> EffectDataMap;
+
+    UPROPERTY(BlueprintReadOnly, Category = "VFX")
+    TMap<FString, EVFXState> EffectStateMap;
+
+    // Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VFX|Config")
+    int32 MaxActiveEffects = 100;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VFX|Config")
+    int32 VFXQualityLevel = 2; // 0=Low, 1=Medium, 2=High, 3=Ultra
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VFX|Config")
+    float GlobalVFXScale = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VFX|Config")
+    bool bEnableVFXLOD = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VFX|Config")
+    bool bEnableVFXCulling = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VFX|Config")
+    float VFXCullingDistance = 10000.0f;
+
+    // Material Parameter Collections
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VFX|Materials")
+    TSoftObjectPtr<UMaterialParameterCollection> GlobalVFXParameters;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VFX|Materials")
+    TSoftObjectPtr<UMaterialParameterCollection> EnvironmentalParameters;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VFX|Materials")
+    TSoftObjectPtr<UMaterialParameterCollection> TranspersonalParameters;
+
+    // Effect Libraries
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VFX|Libraries")
+    TMap<FString, FVFXCreatureEffect> CreatureEffectLibrary;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VFX|Libraries")
+    TMap<FString, FVFXTranspersonalEffect> TranspersonalEffectLibrary;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VFX|Libraries")
+    TMap<FString, FVFXEffectData> EnvironmentalEffectLibrary;
+
+    // System references
+    UPROPERTY()
+    UNarrativeSubsystem* NarrativeSubsystem;
+
+    UPROPERTY()
+    UAudioSubsystem* AudioSubsystem;
+
+private:
+    // Internal methods
+    void InitializeVFXLibraries();
+    void LoadVFXAssets();
+    void SetupMaterialParameterCollections();
+    void CleanupFinishedEffects();
+    void UpdateEffectLOD(UNiagaraComponent* EffectComponent, float DistanceToViewer);
+    FString GenerateUniqueEffectID();
+    void ApplyQualitySettings();
+    void UpdateGlobalParameters();
+
+    // Timers
+    FTimerHandle EffectCleanupTimer;
+    FTimerHandle LODUpdateTimer;
+    FTimerHandle ParameterUpdateTimer;
+
+    // Counters
+    int32 EffectIDCounter = 0;
+    int32 CurrentActiveEffectCount = 0;
+};
