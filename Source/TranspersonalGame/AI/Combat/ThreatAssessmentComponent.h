@@ -4,34 +4,30 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "Engine/World.h"
 #include "GameplayTags.h"
+#include "Engine/World.h"
 #include "ThreatAssessmentComponent.generated.h"
 
 UENUM(BlueprintType)
 enum class EThreatType : uint8
 {
-    Unknown,
+    None,
     Player,
     Predator,
     Prey,
-    Neutral,
     Environmental,
-    Territorial,
-    Pack
+    Unknown
 };
 
 UENUM(BlueprintType)
 enum class EThreatResponse : uint8
 {
     Ignore,
-    Observe,
-    Approach,
-    Avoid,
-    Flee,
+    Monitor,
     Investigate,
+    Approach,
+    Flee,
     Attack,
-    Defend,
     CallForHelp
 };
 
@@ -40,129 +36,93 @@ struct FThreatData
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadWrite, Category = "Threat")
-    TWeakObjectPtr<AActor> ThreatActor;
+    UPROPERTY(BlueprintReadWrite)
+    AActor* ThreatActor = nullptr;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Threat")
-    EThreatType ThreatType = EThreatType::Unknown;
+    UPROPERTY(BlueprintReadWrite)
+    EThreatType ThreatType = EThreatType::None;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Threat")
+    UPROPERTY(BlueprintReadWrite)
     float ThreatLevel = 0.0f;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Threat")
+    UPROPERTY(BlueprintReadWrite)
     float Distance = 0.0f;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Threat")
-    FVector Position = FVector::ZeroVector;
+    UPROPERTY(BlueprintReadWrite)
+    FVector LastKnownLocation = FVector::ZeroVector;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Threat")
-    FVector Velocity = FVector::ZeroVector;
+    UPROPERTY(BlueprintReadWrite)
+    float FirstDetectedTime = 0.0f;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Threat")
-    float DetectionTime = 0.0f;
+    UPROPERTY(BlueprintReadWrite)
+    float LastSeenTime = 0.0f;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Threat")
-    float LastUpdateTime = 0.0f;
+    UPROPERTY(BlueprintReadWrite)
+    bool bIsVisible = false;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Threat")
-    bool bHasLineOfSight = false;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Threat")
+    UPROPERTY(BlueprintReadWrite)
     bool bIsMoving = false;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Threat")
-    bool bIsApproaching = false;
+    UPROPERTY(BlueprintReadWrite)
+    FVector Velocity = FVector::ZeroVector;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Threat")
-    bool bIsHostile = false;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Threat")
-    float HostilityLevel = 0.0f;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Threat")
-    TArray<FGameplayTag> KnownCapabilities;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Threat")
-    EThreatResponse RecommendedResponse = EThreatResponse::Observe;
+    UPROPERTY(BlueprintReadWrite)
+    EThreatResponse RecommendedResponse = EThreatResponse::Monitor;
 
     FThreatData()
     {
         ThreatActor = nullptr;
-        ThreatType = EThreatType::Unknown;
+        ThreatType = EThreatType::None;
         ThreatLevel = 0.0f;
         Distance = 0.0f;
-        Position = FVector::ZeroVector;
-        Velocity = FVector::ZeroVector;
-        DetectionTime = 0.0f;
-        LastUpdateTime = 0.0f;
-        bHasLineOfSight = false;
+        LastKnownLocation = FVector::ZeroVector;
+        FirstDetectedTime = 0.0f;
+        LastSeenTime = 0.0f;
+        bIsVisible = false;
         bIsMoving = false;
-        bIsApproaching = false;
-        bIsHostile = false;
-        HostilityLevel = 0.0f;
-        RecommendedResponse = EThreatResponse::Observe;
+        Velocity = FVector::ZeroVector;
+        RecommendedResponse = EThreatResponse::Monitor;
     }
 };
 
 USTRUCT(BlueprintType)
-struct FThreatAssessmentConfig
+struct FThreatAssessmentResult
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Threat Assessment")
-    float MaxDetectionRange = 2000.0f;
+    UPROPERTY(BlueprintReadWrite)
+    float OverallThreatLevel = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Threat Assessment")
-    float CriticalThreatRange = 300.0f;
+    UPROPERTY(BlueprintReadWrite)
+    AActor* PrimaryThreat = nullptr;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Threat Assessment")
-    float HighThreatRange = 600.0f;
+    UPROPERTY(BlueprintReadWrite)
+    TArray<FThreatData> ActiveThreats;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Threat Assessment")
-    float MediumThreatRange = 1000.0f;
+    UPROPERTY(BlueprintReadWrite)
+    EThreatResponse RecommendedAction = EThreatResponse::Monitor;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Threat Assessment")
-    float ThreatDecayRate = 0.1f;
+    UPROPERTY(BlueprintReadWrite)
+    FVector SafeDirection = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Threat Assessment")
-    float MemoryDuration = 30.0f;
+    UPROPERTY(BlueprintReadWrite)
+    bool bShouldCallForHelp = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Threat Assessment")
-    float UpdateInterval = 0.5f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Threat Assessment")
-    bool bUseLineOfSightChecks = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Threat Assessment")
-    bool bConsiderMovement = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Threat Assessment")
-    bool bConsiderSize = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Threat Assessment")
-    bool bConsiderPreviousExperience = true;
-
-    FThreatAssessmentConfig()
+    FThreatAssessmentResult()
     {
-        MaxDetectionRange = 2000.0f;
-        CriticalThreatRange = 300.0f;
-        HighThreatRange = 600.0f;
-        MediumThreatRange = 1000.0f;
-        ThreatDecayRate = 0.1f;
-        MemoryDuration = 30.0f;
-        UpdateInterval = 0.5f;
-        bUseLineOfSightChecks = true;
-        bConsiderMovement = true;
-        bConsiderSize = true;
-        bConsiderPreviousExperience = true;
+        OverallThreatLevel = 0.0f;
+        PrimaryThreat = nullptr;
+        RecommendedAction = EThreatResponse::Monitor;
+        SafeDirection = FVector::ZeroVector;
+        bShouldCallForHelp = false;
     }
 };
 
 /**
- * Threat Assessment Component for advanced AI threat evaluation and response
- * Analyzes multiple threat factors and recommends appropriate responses
+ * Component that analyzes threats and determines appropriate responses
+ * Implements intelligent threat assessment for combat AI
  */
-UCLASS(BlueprintType, Blueprintable, ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UThreatAssessmentComponent : public UActorComponent
 {
     GENERATED_BODY()
@@ -174,195 +134,142 @@ protected:
     virtual void BeginPlay() override;
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // Threat Configuration
+    // Assessment Parameters
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Threat Assessment")
-    FThreatAssessmentConfig Config;
+    float AssessmentRange = 2000.0f;
 
-    // Current Threats
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Threat Assessment")
+    float CriticalThreatThreshold = 0.8f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Threat Assessment")
+    float HighThreatThreshold = 0.6f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Threat Assessment")
+    float MediumThreatThreshold = 0.4f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Threat Assessment")
+    float LowThreatThreshold = 0.2f;
+
+    // AI Personality
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Threat Assessment")
+    float Courage = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Threat Assessment")
+    float Aggression = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Threat Assessment")
+    float Caution = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Threat Assessment")
+    float SocialTendency = 0.5f;
+
+    // Current Assessment
     UPROPERTY(BlueprintReadOnly, Category = "Threat Assessment")
-    TMap<AActor*, FThreatData> ActiveThreats;
+    FThreatAssessmentResult CurrentAssessment;
 
     UPROPERTY(BlueprintReadOnly, Category = "Threat Assessment")
-    TArray<FThreatData> ThreatHistory;
-
-    // Assessment Results
-    UPROPERTY(BlueprintReadOnly, Category = "Threat Assessment")
-    AActor* PrimaryThreat;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Threat Assessment")
-    float OverallThreatLevel = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Threat Assessment")
-    EThreatResponse CurrentRecommendedResponse = EThreatResponse::Observe;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Threat Assessment")
-    bool bInDanger = false;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Threat Assessment")
-    bool bShouldFlee = false;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Threat Assessment")
-    bool bShouldAttack = false;
+    TMap<AActor*, FThreatData> TrackedThreats;
 
 public:
-    // Threat Detection and Registration
+    // Main Assessment Functions
     UFUNCTION(BlueprintCallable, Category = "Threat Assessment")
-    void RegisterThreat(AActor* ThreatActor, EThreatType ThreatType = EThreatType::Unknown);
+    void AssessThreats();
 
     UFUNCTION(BlueprintCallable, Category = "Threat Assessment")
-    void UnregisterThreat(AActor* ThreatActor);
+    FThreatAssessmentResult GetThreatAssessment();
 
     UFUNCTION(BlueprintCallable, Category = "Threat Assessment")
-    void UpdateThreatData(AActor* ThreatActor);
+    void AddThreat(AActor* ThreatActor);
 
     UFUNCTION(BlueprintCallable, Category = "Threat Assessment")
-    void ClearAllThreats();
+    void RemoveThreat(AActor* ThreatActor);
+
+    UFUNCTION(BlueprintCallable, Category = "Threat Assessment")
+    void UpdateThreat(AActor* ThreatActor);
 
     // Threat Analysis
     UFUNCTION(BlueprintPure, Category = "Threat Assessment")
-    bool HasActiveThreats() const;
+    float CalculateThreatLevel(AActor* ThreatActor) const;
 
     UFUNCTION(BlueprintPure, Category = "Threat Assessment")
-    int32 GetActiveThreatCount() const;
+    EThreatType DetermineThreatType(AActor* ThreatActor) const;
 
+    UFUNCTION(BlueprintPure, Category = "Threat Assessment")
+    EThreatResponse DetermineResponse(const FThreatData& ThreatData) const;
+
+    UFUNCTION(BlueprintPure, Category = "Threat Assessment")
+    bool IsActorThreatening(AActor* Actor) const;
+
+    // Threat Queries
     UFUNCTION(BlueprintPure, Category = "Threat Assessment")
     AActor* GetHighestThreat() const;
-
-    UFUNCTION(BlueprintPure, Category = "Threat Assessment")
-    float GetThreatLevel(AActor* ThreatActor) const;
-
-    UFUNCTION(BlueprintPure, Category = "Threat Assessment")
-    FThreatData GetThreatData(AActor* ThreatActor) const;
 
     UFUNCTION(BlueprintPure, Category = "Threat Assessment")
     TArray<AActor*> GetThreatsInRange(float Range) const;
 
     UFUNCTION(BlueprintPure, Category = "Threat Assessment")
-    TArray<AActor*> GetThreatsByType(EThreatType ThreatType) const;
+    TArray<AActor*> GetThreatsByType(EThreatType Type) const;
 
-    // Threat Response Recommendations
+    UFUNCTION(BlueprintPure, Category = "Threat Assessment")
+    float GetOverallThreatLevel() const { return CurrentAssessment.OverallThreatLevel; }
+
+    // Environmental Assessment
     UFUNCTION(BlueprintCallable, Category = "Threat Assessment")
-    EThreatResponse EvaluateBestResponse();
+    FVector FindSafeDirection();
 
-    UFUNCTION(BlueprintPure, Category = "Threat Assessment")
-    EThreatResponse GetRecommendedResponse(AActor* ThreatActor) const;
-
-    UFUNCTION(BlueprintPure, Category = "Threat Assessment")
-    bool ShouldEngageThreat(AActor* ThreatActor) const;
-
-    UFUNCTION(BlueprintPure, Category = "Threat Assessment")
-    bool ShouldAvoidThreat(AActor* ThreatActor) const;
-
-    UFUNCTION(BlueprintPure, Category = "Threat Assessment")
-    bool ShouldFleeFromThreat(AActor* ThreatActor) const;
-
-    // Situational Assessment
-    UFUNCTION(BlueprintPure, Category = "Threat Assessment")
-    bool IsInCombatSituation() const;
-
-    UFUNCTION(BlueprintPure, Category = "Threat Assessment")
-    bool IsOutnumbered() const;
-
-    UFUNCTION(BlueprintPure, Category = "Threat Assessment")
-    bool HasEscapeRoute() const;
-
-    UFUNCTION(BlueprintPure, Category = "Threat Assessment")
-    FVector GetSafestDirection() const;
-
-    UFUNCTION(BlueprintPure, Category = "Threat Assessment")
-    FVector GetBestAttackPosition(AActor* Target) const;
-
-    // Threat Prediction
-    UFUNCTION(BlueprintPure, Category = "Threat Assessment")
-    FVector PredictThreatPosition(AActor* ThreatActor, float PredictionTime) const;
-
-    UFUNCTION(BlueprintPure, Category = "Threat Assessment")
-    bool WillThreatReachLocation(AActor* ThreatActor, FVector Location, float TimeLimit) const;
-
-    UFUNCTION(BlueprintPure, Category = "Threat Assessment")
-    float GetTimeToThreatContact(AActor* ThreatActor) const;
-
-    // Environmental Threat Assessment
     UFUNCTION(BlueprintCallable, Category = "Threat Assessment")
-    void AssessEnvironmentalThreats();
+    TArray<FVector> FindSafePositions(float SearchRadius, int32 MaxPositions = 5);
 
     UFUNCTION(BlueprintPure, Category = "Threat Assessment")
-    bool IsLocationSafe(FVector Location, float SafetyRadius = 500.0f) const;
+    bool IsPositionSafe(FVector Position, float SafetyRadius = 500.0f) const;
+
+    // Response Recommendations
+    UFUNCTION(BlueprintPure, Category = "Threat Assessment")
+    bool ShouldFlee() const;
 
     UFUNCTION(BlueprintPure, Category = "Threat Assessment")
-    float GetLocationThreatLevel(FVector Location) const;
+    bool ShouldAttack() const;
 
-    // Configuration
+    UFUNCTION(BlueprintPure, Category = "Threat Assessment")
+    bool ShouldCallForHelp() const;
+
+    UFUNCTION(BlueprintPure, Category = "Threat Assessment")
+    bool ShouldHide() const;
+
+    // Personality Modifiers
     UFUNCTION(BlueprintCallable, Category = "Threat Assessment")
-    void SetThreatAssessmentConfig(const FThreatAssessmentConfig& NewConfig);
+    void SetPersonality(float InCourage, float InAggression, float InCaution, float InSocialTendency);
 
     UFUNCTION(BlueprintPure, Category = "Threat Assessment")
-    FThreatAssessmentConfig GetThreatAssessmentConfig() const { return Config; }
-
-    // Events
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnThreatDetected, AActor*, ThreatActor, float, ThreatLevel);
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnThreatLost, AActor*, ThreatActor);
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnThreatLevelChanged, float, NewThreatLevel);
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnRecommendedResponseChanged, EThreatResponse, NewResponse);
-
-    UPROPERTY(BlueprintAssignable, Category = "Threat Assessment")
-    FOnThreatDetected OnThreatDetected;
-
-    UPROPERTY(BlueprintAssignable, Category = "Threat Assessment")
-    FOnThreatLost OnThreatLost;
-
-    UPROPERTY(BlueprintAssignable, Category = "Threat Assessment")
-    FOnThreatLevelChanged OnThreatLevelChanged;
-
-    UPROPERTY(BlueprintAssignable, Category = "Threat Assessment")
-    FOnRecommendedResponseChanged OnRecommendedResponseChanged;
-
-    // Debugging
-    UFUNCTION(BlueprintCallable, Category = "Debug")
-    void DebugDrawThreatAssessment() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Debug")
-    void DebugPrintThreatData() const;
+    float GetPersonalityModifier(EThreatResponse Response) const;
 
 protected:
-    // Internal Assessment Logic
-    void UpdateAllThreats(float DeltaTime);
-    void CalculateOverallThreatLevel();
-    void DetermineRecommendedResponse();
-    void CleanupExpiredThreats();
+    // Internal Assessment Functions
+    void UpdateTrackedThreats();
+    void CalculateOverallThreat();
+    void DetermineRecommendedAction();
+    void CleanupOldThreats();
 
-    // Threat Calculation Methods
-    float CalculateThreatLevel(const FThreatData& ThreatData) const;
+    // Threat Calculation Helpers
     float CalculateDistanceFactor(float Distance) const;
-    float CalculateMovementFactor(const FThreatData& ThreatData) const;
-    float CalculateSizeFactor(AActor* ThreatActor) const;
-    float CalculateExperienceFactor(AActor* ThreatActor) const;
-    float CalculateHostilityFactor(const FThreatData& ThreatData) const;
+    float CalculateVisibilityFactor(bool bIsVisible, float TimeSinceLastSeen) const;
+    float CalculateMovementFactor(const FVector& Velocity) const;
+    float CalculateTypeFactor(EThreatType Type) const;
+    float CalculatePersonalityFactor(EThreatResponse Response) const;
 
-    // Response Evaluation
-    EThreatResponse EvaluateResponseToThreat(const FThreatData& ThreatData) const;
-    bool CanEngageThreat(const FThreatData& ThreatData) const;
-    bool ShouldRetreatFromThreat(const FThreatData& ThreatData) const;
-
-    // Utility Functions
-    bool HasLineOfSight(AActor* Target) const;
-    FVector GetOwnerLocation() const;
-    float GetOwnerRadius() const;
-    bool IsActorMoving(AActor* Actor) const;
-    FVector GetActorVelocity(AActor* Actor) const;
+    // Environmental Helpers
+    bool HasLineOfSight(FVector FromLocation, FVector ToLocation) const;
+    float GetTerrainCover(FVector Position) const;
+    TArray<FVector> SamplePositionsInRadius(FVector Center, float Radius, int32 NumSamples) const;
 
     // Timers
-    float UpdateTimer = 0.0f;
-    float CleanupTimer = 0.0f;
-    float EnvironmentalAssessmentTimer = 0.0f;
+    FTimerHandle AssessmentTimer;
+    FTimerHandle CleanupTimer;
 
-    // Cached References
-    class AAIController* OwnerController;
-    class APawn* OwnerPawn;
-    class UWorld* CachedWorld;
-    class UCombatMemoryComponent* CombatMemory;
+    void OnAssessmentUpdate();
+    void OnCleanupUpdate();
 
-    // Previous state tracking
-    float PreviousOverallThreatLevel = 0.0f;
-    EThreatResponse PreviousRecommendedResponse = EThreatResponse::Observe;
+    // Cached Data
+    float LastAssessmentTime = 0.0f;
+    float AssessmentFrequency = 0.2f; // 5 times per second
 };
