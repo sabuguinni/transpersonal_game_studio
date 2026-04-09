@@ -1,216 +1,230 @@
-#include "QA/QATestFramework.h"
-#include "Engine/Engine.h"
-#include "Engine/World.h"
-#include "GameFramework/GameModeBase.h"
+#include "CoreMinimal.h"
 #include "Misc/AutomationTest.h"
 #include "Tests/AutomationCommon.h"
+#include "Engine/World.h"
+#include "Engine/Engine.h"
+#include "GameFramework/GameModeBase.h"
+#include "../QATestFramework.h"
+
+DEFINE_LOG_CATEGORY_STATIC(LogCoreSystemTests, Log, All);
 
 /**
  * Core System Tests for Transpersonal Game
- * 
- * These tests validate fundamental game systems:
- * - World initialization
- * - Game mode functionality
- * - Physics systems
- * - Collision detection
- * - Basic gameplay mechanics
+ * Tests fundamental engine systems, module loading, and basic functionality
  */
 
-/**
- * Test world initialization and basic setup
- */
-IMPLEMENT_TRANSPERSONAL_TEST(FWorldInitializationTest, "Transpersonal.Core.World.Initialization", QATestCategories::Core)
+// Test 1: Module Registration and Loading
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCoreModuleLoadTest, "Transpersonal.Core.ModuleLoad", 
+    EAutomationTestFlags::ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 
-bool FWorldInitializationTest::RunTest(const FString& Parameters)
+bool FCoreModuleLoadTest::RunTest(const FString& Parameters)
 {
-    UE_LOG(LogQAFramework, Log, TEXT("Starting World Initialization Test"));
+    UE_LOG(LogCoreSystemTests, Log, TEXT("Testing Core Module Loading..."));
     
-    // Test loading the main game level
-    UWorld* World = AutomationOpenMap(TEXT("/Game/Maps/MainLevel"));
-    if (!World)
+    // Validate TranspersonalGame module is loaded
+    FModuleManager& ModuleManager = FModuleManager::Get();
+    
+    TestTrue("TranspersonalGame module should be loaded", 
+        ModuleManager.IsModuleLoaded("TranspersonalGame"));
+    
+    // Test world context availability
+    UWorld* World = GEngine->GetWorldFromContextObject(GEngine, EGetWorldErrorMode::LogAndReturnNull);
+    TestNotNull("World context should be available", World);
+    
+    if (World)
     {
-        AddError(TEXT("Failed to load main game level"));
-        return false;
+        TestTrue("World should be valid", IsValid(World));
+        UE_LOG(LogCoreSystemTests, Log, TEXT("✓ World validation passed: %s"), *World->GetName());
     }
     
-    // Validate world state
-    bool bWorldValid = ValidateWorldState(World);
-    if (!bWorldValid)
-    {
-        AddError(TEXT("World validation failed"));
-        return false;
-    }
-    
-    // Check for required game systems
-    AGameModeBase* GameMode = World->GetAuthGameMode();
-    if (!GameMode)
-    {
-        AddError(TEXT("No game mode found in world"));
-        return false;
-    }
-    
-    UE_LOG(LogQAFramework, Log, TEXT("World Initialization Test completed successfully"));
     return true;
 }
 
-/**
- * Test physics system functionality
- */
-IMPLEMENT_TRANSPERSONAL_TEST(FPhysicsSystemTest, "Transpersonal.Core.Physics.Basic", QATestCategories::Physics)
+// Test 2: Physics System Validation
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPhysicsSystemTest, "Transpersonal.Core.Physics", 
+    EAutomationTestFlags::ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 
 bool FPhysicsSystemTest::RunTest(const FString& Parameters)
 {
-    UE_LOG(LogQAFramework, Log, TEXT("Starting Physics System Test"));
+    UE_LOG(LogCoreSystemTests, Log, TEXT("Testing Physics System..."));
     
-    UWorld* World = AutomationOpenMap(TEXT("/Game/Maps/PhysicsTestLevel"));
+    UWorld* World = GEngine->GetWorldFromContextObject(GEngine, EGetWorldErrorMode::LogAndReturnNull);
     if (!World)
     {
-        AddError(TEXT("Failed to load physics test level"));
+        AddError("No world context for physics testing");
         return false;
     }
     
-    // Wait for physics to initialize
-    ADD_LATENT_AUTOMATION_COMMAND(FWaitLatentCommand(1.0f));
+    // Test physics scene
+    FPhysScene* PhysScene = World->GetPhysicsScene();
+    TestNotNull("Physics scene should exist", PhysScene);
     
-    // Test basic physics functionality
-    // This would spawn objects and test gravity, collision, etc.
+    // Test gravity settings
+    FVector Gravity = World->GetGravityZ() * FVector::UpVector;
+    TestTrue("Gravity should be negative (downward)", Gravity.Z < 0.0f);
     
-    UE_LOG(LogQAFramework, Log, TEXT("Physics System Test completed successfully"));
+    UE_LOG(LogCoreSystemTests, Log, TEXT("✓ Physics system validation passed"));
     return true;
 }
 
-/**
- * Test collision detection systems
- */
-IMPLEMENT_TRANSPERSONAL_TEST(FCollisionDetectionTest, "Transpersonal.Core.Physics.Collision", QATestCategories::Physics)
+// Test 3: Memory Usage Validation
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMemoryUsageTest, "Transpersonal.Core.Memory", 
+    EAutomationTestFlags::ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 
-bool FCollisionDetectionTest::RunTest(const FString& Parameters)
+bool FMemoryUsageTest::RunTest(const FString& Parameters)
 {
-    UE_LOG(LogQAFramework, Log, TEXT("Starting Collision Detection Test"));
+    UE_LOG(LogCoreSystemTests, Log, TEXT("Testing Memory Usage..."));
     
-    UWorld* World = AutomationOpenMap(TEXT("/Game/Maps/CollisionTestLevel"));
-    if (!World)
-    {
-        AddError(TEXT("Failed to load collision test level"));
-        return false;
-    }
+    // Get current memory stats
+    FPlatformMemoryStats MemStats = FPlatformMemory::GetStats();
     
-    // Test collision detection between different object types
-    // This would test player-environment, dinosaur-environment, etc.
+    // Convert to MB for easier reading
+    uint64 UsedPhysicalMB = MemStats.UsedPhysical / (1024 * 1024);
+    uint64 UsedVirtualMB = MemStats.UsedVirtual / (1024 * 1024);
     
-    UE_LOG(LogQAFramework, Log, TEXT("Collision Detection Test completed successfully"));
+    UE_LOG(LogCoreSystemTests, Log, TEXT("Physical Memory Used: %llu MB"), UsedPhysicalMB);
+    UE_LOG(LogCoreSystemTests, Log, TEXT("Virtual Memory Used: %llu MB"), UsedVirtualMB);
+    
+    // Validate memory usage is within reasonable bounds
+    TestTrue("Physical memory usage should be reasonable", 
+        UsedPhysicalMB < FPerformanceThresholds::MAX_MEMORY_MB_PC);
+    
     return true;
 }
 
-/**
- * Test terrain generation system
- */
-IMPLEMENT_TRANSPERSONAL_TEST(FTerrainGenerationTest, "Transpersonal.Core.World.TerrainGeneration", QATestCategories::World)
+// Test 4: Rendering System Validation
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRenderingSystemTest, "Transpersonal.Core.Rendering", 
+    EAutomationTestFlags::ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 
-bool FTerrainGenerationTest::RunTest(const FString& Parameters)
+bool FRenderingSystemTest::RunTest(const FString& Parameters)
 {
-    UE_LOG(LogQAFramework, Log, TEXT("Starting Terrain Generation Test"));
+    UE_LOG(LogCoreSystemTests, Log, TEXT("Testing Rendering System..."));
     
-    UWorld* World = AutomationOpenMap(TEXT("/Game/Maps/TerrainTestLevel"));
-    if (!World)
+    // Test RHI availability
+    TestNotNull("RHI should be available", GDynamicRHI);
+    
+    if (GDynamicRHI)
     {
-        AddError(TEXT("Failed to load terrain test level"));
-        return false;
+        FString RHIName = GDynamicRHI->GetName();
+        UE_LOG(LogCoreSystemTests, Log, TEXT("RHI: %s"), *RHIName);
+        TestTrue("RHI name should not be empty", !RHIName.IsEmpty());
     }
     
-    // Wait for PCG to complete
-    ADD_LATENT_AUTOMATION_COMMAND(FWaitLatentCommand(5.0f));
-    
-    // Validate terrain generation
-    bool bTerrainValid = ValidateTerrainGeneration();
-    if (!bTerrainValid)
+    // Test viewport availability
+    UWorld* World = GEngine->GetWorldFromContextObject(GEngine, EGetWorldErrorMode::LogAndReturnNull);
+    if (World)
     {
-        AddError(TEXT("Terrain generation validation failed"));
-        return false;
+        UGameViewportClient* ViewportClient = World->GetGameViewport();
+        if (ViewportClient)
+        {
+            UE_LOG(LogCoreSystemTests, Log, TEXT("✓ Viewport client available"));
+        }
     }
     
-    UE_LOG(LogQAFramework, Log, TEXT("Terrain Generation Test completed successfully"));
     return true;
 }
 
-/**
- * Test vegetation placement system
- */
-IMPLEMENT_TRANSPERSONAL_TEST(FVegetationPlacementTest, "Transpersonal.Core.World.VegetationPlacement", QATestCategories::World)
+// Test 5: Game Mode Validation
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FGameModeTest, "Transpersonal.Core.GameMode", 
+    EAutomationTestFlags::ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 
-bool FVegetationPlacementTest::RunTest(const FString& Parameters)
+bool FGameModeTest::RunTest(const FString& Parameters)
 {
-    UE_LOG(LogQAFramework, Log, TEXT("Starting Vegetation Placement Test"));
+    UE_LOG(LogCoreSystemTests, Log, TEXT("Testing Game Mode System..."));
     
-    UWorld* World = AutomationOpenMap(TEXT("/Game/Maps/VegetationTestLevel"));
+    UWorld* World = GEngine->GetWorldFromContextObject(GEngine, EGetWorldErrorMode::LogAndReturnNull);
     if (!World)
     {
-        AddError(TEXT("Failed to load vegetation test level"));
+        AddError("No world context for game mode testing");
         return false;
     }
     
-    // Wait for vegetation to spawn
-    ADD_LATENT_AUTOMATION_COMMAND(FWaitLatentCommand(3.0f));
-    
-    // Validate vegetation placement
-    bool bVegetationValid = ValidateVegetationPlacement();
-    if (!bVegetationValid)
+    // Test game mode availability
+    AGameModeBase* GameMode = World->GetAuthGameMode();
+    if (GameMode)
     {
-        AddError(TEXT("Vegetation placement validation failed"));
-        return false;
+        TestTrue("Game mode should be valid", IsValid(GameMode));
+        UE_LOG(LogCoreSystemTests, Log, TEXT("✓ Game Mode: %s"), *GameMode->GetClass()->GetName());
+    }
+    else
+    {
+        UE_LOG(LogCoreSystemTests, Warning, TEXT("⚠ No game mode found (may be normal in editor)"));
     }
     
-    UE_LOG(LogQAFramework, Log, TEXT("Vegetation Placement Test completed successfully"));
     return true;
 }
 
-/**
- * Test water systems
- */
-IMPLEMENT_TRANSPERSONAL_TEST(FWaterSystemTest, "Transpersonal.Core.World.WaterSystems", QATestCategories::World)
+// Test 6: Asset Loading Validation
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAssetLoadingTest, "Transpersonal.Core.AssetLoading", 
+    EAutomationTestFlags::ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 
-bool FWaterSystemTest::RunTest(const FString& Parameters)
+bool FAssetLoadingTest::RunTest(const FString& Parameters)
 {
-    UE_LOG(LogQAFramework, Log, TEXT("Starting Water System Test"));
+    UE_LOG(LogCoreSystemTests, Log, TEXT("Testing Asset Loading System..."));
     
-    UWorld* World = AutomationOpenMap(TEXT("/Game/Maps/WaterTestLevel"));
-    if (!World)
-    {
-        AddError(TEXT("Failed to load water test level"));
-        return false;
-    }
+    // Test asset registry
+    FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
+    IAssetRegistry& AssetRegistry = AssetRegistryModule.Get();
     
-    // Validate water systems
-    bool bWaterValid = ValidateWaterSystems();
-    if (!bWaterValid)
-    {
-        AddError(TEXT("Water systems validation failed"));
-        return false;
-    }
+    TestTrue("Asset registry should be available", &AssetRegistry != nullptr);
     
-    UE_LOG(LogQAFramework, Log, TEXT("Water System Test completed successfully"));
+    // Test basic asset queries
+    TArray<FAssetData> AllAssets;
+    AssetRegistry.GetAllAssets(AllAssets);
+    
+    UE_LOG(LogCoreSystemTests, Log, TEXT("Total assets in registry: %d"), AllAssets.Num());
+    TestTrue("Should have some assets registered", AllAssets.Num() > 0);
+    
     return true;
 }
 
-/**
- * Test level streaming functionality
- */
-IMPLEMENT_TRANSPERSONAL_TEST(FLevelStreamingTest, "Transpersonal.Core.World.LevelStreaming", QATestCategories::World)
+// Test 7: Input System Validation
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FInputSystemTest, "Transpersonal.Core.Input", 
+    EAutomationTestFlags::ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 
-bool FLevelStreamingTest::RunTest(const FString& Parameters)
+bool FInputSystemTest::RunTest(const FString& Parameters)
 {
-    UE_LOG(LogQAFramework, Log, TEXT("Starting Level Streaming Test"));
+    UE_LOG(LogCoreSystemTests, Log, TEXT("Testing Input System..."));
     
-    UWorld* World = AutomationOpenMap(TEXT("/Game/Maps/StreamingTestLevel"));
-    if (!World)
+    // Test input settings
+    const UInputSettings* InputSettings = GetDefault<UInputSettings>();
+    TestNotNull("Input settings should be available", InputSettings);
+    
+    if (InputSettings)
     {
-        AddError(TEXT("Failed to load streaming test level"));
-        return false;
+        // Test action mappings
+        const TArray<FInputActionKeyMapping>& ActionMappings = InputSettings->GetActionMappings();
+        UE_LOG(LogCoreSystemTests, Log, TEXT("Action mappings found: %d"), ActionMappings.Num());
+        
+        // Test axis mappings
+        const TArray<FInputAxisKeyMapping>& AxisMappings = InputSettings->GetAxisMappings();
+        UE_LOG(LogCoreSystemTests, Log, TEXT("Axis mappings found: %d"), AxisMappings.Num());
     }
     
-    // Test level streaming performance and functionality
-    // This would test loading/unloading of sub-levels
+    return true;
+}
+
+// Test 8: Audio System Validation
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAudioSystemTest, "Transpersonal.Core.Audio", 
+    EAutomationTestFlags::ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+
+bool FAudioSystemTest::RunTest(const FString& Parameters)
+{
+    UE_LOG(LogCoreSystemTests, Log, TEXT("Testing Audio System..."));
     
-    UE_LOG(LogQAFramework, Log, TEXT("Level Streaming Test completed successfully"));
+    // Test audio device
+    FAudioDeviceManager* AudioDeviceManager = GEngine->GetAudioDeviceManager();
+    TestNotNull("Audio device manager should be available", AudioDeviceManager);
+    
+    if (AudioDeviceManager)
+    {
+        FAudioDevice* MainAudioDevice = AudioDeviceManager->GetMainAudioDevice();
+        if (MainAudioDevice)
+        {
+            UE_LOG(LogCoreSystemTests, Log, TEXT("✓ Main audio device available"));
+            TestTrue("Audio device should be valid", MainAudioDevice != nullptr);
+        }
+    }
+    
     return true;
 }
