@@ -1,421 +1,506 @@
 #include "DinosaurVFXComponent.h"
 #include "Engine/World.h"
-#include "GameFramework/PlayerController.h"
-#include "Kismet/GameplayStatics.h"
 #include "Components/SkeletalMeshComponent.h"
-#include "Math/UnrealMathUtility.h"
-#include "VFXTypes.h"
+#include "GameFramework/Actor.h"
+#include "TimerManager.h"
+#include "Kismet/GameplayStatics.h"
 
 UDinosaurVFXComponent::UDinosaurVFXComponent()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f; // 10 FPS para otimização
-    
-    // Configuração padrão
-    DinosaurSize = EDinosaurSize::Medium;
-    CurrentState = EDinosaurBehaviorState::Idle;
-    HealthPercentage = 1.0f;
-    StaminaPercentage = 1.0f;
-    IndividualSeed = 0;
-    BreathingInterval = 3.0f;
-    LastBreathTime = 0.0f;
-    MaxEffectDistance = 5000.0f; // 50 metros
-    
-    // Inicializar componentes
-    ActiveBreathingEffect = nullptr;
-    ActiveFootstepEffects.Empty();
-    
-    // Variação procedural padrão
-    BreathTint = FLinearColor::White;
-    BreathIntensity = 1.0f;
-    FootstepScale = 1.0f;
+    PrimaryComponentTick.TickInterval = 0.1f; // Tick every 100ms for performance
 }
 
 void UDinosaurVFXComponent::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Gerar variação procedural baseada no seed
-    if (IndividualSeed == 0)
+    // Get VFX Manager reference
+    if (UWorld* World = GetWorld())
     {
-        IndividualSeed = FMath::RandRange(1, 999999);
+        VFXManager = World->GetSubsystem<UVFXManager>();
     }
-    GenerateProceduralVariation();
     
-    // Iniciar breathing se o dinossauro está vivo
-    if (CurrentState != EDinosaurBehaviorState::Dead)
-    {
-        StartBreathing();
-    }
+    InitializeVFXComponents();
+    
+    UE_LOG(LogTemp, Log, TEXT("DinosaurVFXComponent: Initialized for %s dinosaur"), *DinosaurType);
+}
+
+void UDinosaurVFXComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+    CleanupVFXComponents();
+    Super::EndPlay(EndPlayReason);
 }
 
 void UDinosaurVFXComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    // Verificar se deve spawnar efeitos baseado na distância
-    if (!ShouldSpawnEffect(GetOwner()->GetActorLocation()))
+    UpdateVFXBasedOnState();
+}
+
+void UDinosaurVFXComponent::SetDinosaurVFXState(EDinosaurVFXState NewState)
+{
+    if (CurrentVFXState == NewState)
     {
         return;
     }
     
-    // Atualizar breathing
-    UpdateBreathingEffect();
+    EDinosaurVFXState PreviousState = CurrentVFXState;
+    CurrentVFXState = NewState;
     
-    // Limpar efeitos finalizados
-    CleanupFinishedEffects();
-}
-
-void UDinosaurVFXComponent::SetBehaviorState(EDinosaurBehaviorState NewState)
-{
-    if (CurrentState == NewState) return;
+    UE_LOG(LogTemp, Log, TEXT("DinosaurVFXComponent: State changed from %d to %d"), (int32)PreviousState, (int32)NewState);
     
-    EDinosaurBehaviorState PreviousState = CurrentState;
-    CurrentState = NewState;
-    
-    // Ajustar breathing baseado no estado
+    // Handle state-specific VFX changes
     switch (NewState)
     {
-        case EDinosaurBehaviorState::Running:
-        case EDinosaurBehaviorState::Hunting:
-        case EDinosaurBehaviorState::Aggressive:
-            UpdateBreathingIntensity(2.0f);
-            BreathingInterval = 1.5f;
+        case EDinosaurVFXState::Moving:
+            StartMovementTrail();
             break;
             
-        case EDinosaurBehaviorState::Sleeping:
-            UpdateBreathingIntensity(0.3f);
-            BreathingInterval = 5.0f;
+        case EDinosaurVFXState::Attacking:
+            StopMovementTrail();
             break;
             
-        case EDinosaurBehaviorState::Dead:
-            StopBreathing();
+        case EDinosaurVFXState::Roaring:
+            TriggerRoarBreath(2.0f);
             break;
             
+        case EDinosaurVFXState::Injured:
+            // Injury effects are handled separately
+            break;
+            
+        case EDinosaurVFXState::Dying:
+            StopAllActiveVFX();
+            break;
+            
+        case EDinosaurVFXState::Idle:
         default:
-            UpdateBreathingIntensity(1.0f);
-            BreathingInterval = 3.0f;
+            StopMovementTrail();
             break;
     }
-    
-    // Trigger efeitos especiais para certas transições
-    if (PreviousState == EDinosaurBehaviorState::Sleeping && NewState != EDinosaurBehaviorState::Sleeping)
-    {
-        // Efeito de despertar
-        if (VFXSet.SleepingZzz && ActiveBreathingEffect)
-        {
-            ActiveBreathingEffect->SetFloatParameter(TEXT("WakeUpIntensity"), 2.0f);
-        }
-    }
 }
 
-void UDinosaurVFXComponent::UpdateHealthStatus(float HealthPercent)
+void UDinosaurVFXComponent::StartBreathEffect(const FString& BreathType)
 {
-    HealthPercentage = FMath::Clamp(HealthPercent, 0.0f, 1.0f);
-    
-    // Ajustar breathing baseado na saúde
-    if (HealthPercentage < 0.3f)
+    if (!VFXSettings.bEnableBreathVFX || !VFXManager)
     {
-        // Respiração pesada quando ferido
-        UpdateBreathingIntensity(1.5f);
-        BreathingInterval = 2.0f;
-        
-        if (ActiveBreathingEffect)
-        {
-            ActiveBreathingEffect->SetColorParameter(TEXT("BreathColor"), 
-                FLinearColor::LerpUsingHSV(BreathTint, FLinearColor::Red, 0.4f));
-        }
-    }
-    else
-    {
-        // Respiração normal
-        if (ActiveBreathingEffect)
-        {
-            ActiveBreathingEffect->SetColorParameter(TEXT("BreathColor"), BreathTint);
-        }
-    }
-}
-
-void UDinosaurVFXComponent::TriggerFootstep(FVector Location, FName SurfaceType)
-{
-    if (!ShouldSpawnEffect(Location)) return;
-    
-    UNiagaraSystem* FootstepEffect = GetFootstepEffect(SurfaceType);
-    if (!FootstepEffect) return;
-    
-    // Spawn footstep effect
-    UNiagaraComponent* FootstepComponent = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
-        GetWorld(),
-        FootstepEffect,
-        Location,
-        FRotator::ZeroRotator,
-        FVector(FootstepScale),
-        true,
-        true,
-        ENCPoolMethod::None,
-        true
-    );
-    
-    if (FootstepComponent)
-    {
-        // Configurar parâmetros baseados no tamanho do dinossauro
-        float SizeMultiplier = 1.0f;
-        switch (DinosaurSize)
-        {
-            case EDinosaurSize::Tiny: SizeMultiplier = 0.3f; break;
-            case EDinosaurSize::Small: SizeMultiplier = 0.6f; break;
-            case EDinosaurSize::Medium: SizeMultiplier = 1.0f; break;
-            case EDinosaurSize::Large: SizeMultiplier = 1.5f; break;
-            case EDinosaurSize::Massive: SizeMultiplier = 2.5f; break;
-        }
-        
-        FootstepComponent->SetFloatParameter(TEXT("SizeMultiplier"), SizeMultiplier * FootstepScale);
-        FootstepComponent->SetFloatParameter(TEXT("Intensity"), FMath::Lerp(0.5f, 1.5f, StaminaPercentage));
-        
-        // Adicionar à lista de efeitos ativos
-        ActiveFootstepEffects.Add(FootstepComponent);
-    }
-}
-
-void UDinosaurVFXComponent::TriggerCombatEffect(FName EffectType, FVector Location, FRotator Rotation)
-{
-    if (!ShouldSpawnEffect(Location)) return;
-    
-    UNiagaraSystem* CombatEffect = nullptr;
-    
-    if (EffectType == TEXT("BloodSplatter"))
-    {
-        CombatEffect = VFXSet.BloodSplatter;
-    }
-    else if (EffectType == TEXT("ClawScratch"))
-    {
-        CombatEffect = VFXSet.ClawScratch;
-    }
-    else if (EffectType == TEXT("BiteImpact"))
-    {
-        CombatEffect = VFXSet.BiteImpact;
+        return;
     }
     
-    if (CombatEffect)
+    StopBreathEffect();
+    
+    if (USkeletalMeshComponent* SkeletalMesh = GetOwner()->FindComponentByClass<USkeletalMeshComponent>())
     {
-        UNiagaraComponent* CombatComponent = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
-            GetWorld(),
-            CombatEffect,
-            Location,
-            Rotation,
-            FVector::OneVector,
-            true,
-            true,
-            ENCPoolMethod::None,
-            true
+        BreathVFXComponent = VFXManager->SpawnVFXAttached(
+            EVFXType::DinosaurBreath,
+            SkeletalMesh,
+            MouthSocketName
         );
         
-        if (CombatComponent)
+        if (BreathVFXComponent)
         {
-            // Configurar intensidade baseada no tamanho e agressividade
-            float Intensity = 1.0f;
-            switch (DinosaurSize)
-            {
-                case EDinosaurSize::Tiny: Intensity = 0.4f; break;
-                case EDinosaurSize::Small: Intensity = 0.7f; break;
-                case EDinosaurSize::Medium: Intensity = 1.0f; break;
-                case EDinosaurSize::Large: Intensity = 1.4f; break;
-                case EDinosaurSize::Massive: Intensity = 2.0f; break;
-            }
+            BreathVFXComponent->SetNiagaraVariableFloat(FString("BreathIntensity"), VFXSettings.VFXIntensityMultiplier);
+            BreathVFXComponent->SetNiagaraVariableFloat(FString("DinosaurSize"), DinosaurSizeMultiplier);
+            BreathVFXComponent->SetNiagaraVariableLinearColor(FString("BreathColor"), VFXSettings.DinosaurColorTint);
             
-            CombatComponent->SetFloatParameter(TEXT("Intensity"), Intensity);
-            CombatComponent->SetFloatParameter(TEXT("Aggression"), 
-                CurrentState == EDinosaurBehaviorState::Aggressive ? 1.5f : 1.0f);
+            ActiveVFXComponents.Add(BreathVFXComponent);
         }
     }
 }
 
-void UDinosaurVFXComponent::SetIndividualVariation(int32 Seed)
+void UDinosaurVFXComponent::StopBreathEffect()
 {
-    IndividualSeed = Seed;
-    GenerateProceduralVariation();
+    if (BreathVFXComponent)
+    {
+        VFXManager->StopVFXEffect(BreathVFXComponent);
+        ActiveVFXComponents.Remove(BreathVFXComponent);
+        BreathVFXComponent = nullptr;
+    }
 }
 
-void UDinosaurVFXComponent::StartBreathing()
+void UDinosaurVFXComponent::TriggerRoarBreath(float Duration)
 {
-    if (CurrentState == EDinosaurBehaviorState::Dead) return;
-    
-    UNiagaraSystem* BreathingSystem = nullptr;
-    
-    // Escolher sistema de breathing baseado no estado
-    switch (CurrentState)
+    if (!VFXSettings.bEnableRoarVFX)
     {
-        case EDinosaurBehaviorState::Running:
-        case EDinosaurBehaviorState::Hunting:
-        case EDinosaurBehaviorState::Aggressive:
-            BreathingSystem = VFXSet.HeavyBreathing;
+        return;
+    }
+    
+    StartBreathEffect("Roar");
+    
+    // Set timer to stop roar breath
+    if (UWorld* World = GetWorld())
+    {
+        World->GetTimerManager().SetTimer(
+            BreathEffectTimer,
+            this,
+            &UDinosaurVFXComponent::StopBreathEffect,
+            Duration,
+            false
+        );
+    }
+    
+    // Trigger additional roar VFX
+    TriggerRoarEffect(2.0f);
+}
+
+void UDinosaurVFXComponent::TriggerFootstepEffect(const FVector& FootLocation, const FString& SurfaceType)
+{
+    if (!VFXSettings.bEnableFootstepVFX || !VFXManager)
+    {
+        return;
+    }
+    
+    // Spawn dust/debris effect at foot location
+    UNiagaraComponent* FootstepVFX = VFXManager->SpawnVFXAtLocation(
+        EVFXType::ImpactEffect,
+        FootLocation,
+        FRotator::ZeroRotator,
+        FVector(DinosaurSizeMultiplier * 0.5f)
+    );
+    
+    if (FootstepVFX)
+    {
+        FootstepVFX->SetNiagaraVariableFloat(FString("SurfaceType"), SurfaceType == "Water" ? 1.0f : 0.0f);
+        FootstepVFX->SetNiagaraVariableFloat(FString("FootstepIntensity"), DinosaurSizeMultiplier);
+    }
+}
+
+void UDinosaurVFXComponent::StartMovementTrail()
+{
+    if (!VFXManager || MovementTrailComponent)
+    {
+        return;
+    }
+    
+    MovementTrailComponent = VFXManager->SpawnVFXAttached(
+        EVFXType::SmokeTrail,
+        GetOwner()->GetRootComponent()
+    );
+    
+    if (MovementTrailComponent)
+    {
+        MovementTrailComponent->SetNiagaraVariableFloat(FString("TrailIntensity"), DinosaurSizeMultiplier * 0.3f);
+        ActiveVFXComponents.Add(MovementTrailComponent);
+    }
+}
+
+void UDinosaurVFXComponent::StopMovementTrail()
+{
+    if (MovementTrailComponent)
+    {
+        VFXManager->StopVFXEffect(MovementTrailComponent);
+        ActiveVFXComponents.Remove(MovementTrailComponent);
+        MovementTrailComponent = nullptr;
+    }
+}
+
+void UDinosaurVFXComponent::TriggerAttackEffect(const FVector& AttackLocation, const FVector& AttackDirection)
+{
+    if (!VFXManager)
+    {
+        return;
+    }
+    
+    // Spawn attack impact VFX
+    UNiagaraComponent* AttackVFX = VFXManager->SpawnVFXAtLocation(
+        EVFXType::ImpactEffect,
+        AttackLocation,
+        AttackDirection.Rotation(),
+        FVector(DinosaurSizeMultiplier)
+    );
+    
+    if (AttackVFX)
+    {
+        AttackVFX->SetNiagaraVariableVec3(FString("AttackDirection"), AttackDirection);
+        AttackVFX->SetNiagaraVariableFloat(FString("AttackPower"), DinosaurSizeMultiplier * 2.0f);
+    }
+    
+    // Add screen shake effect through VFX manager
+    VFXManager->SetGlobalVFXParameter(FName("ScreenShakeIntensity"), DinosaurSizeMultiplier * 0.5f);
+}
+
+void UDinosaurVFXComponent::TriggerInjuryEffect(const FVector& InjuryLocation, float Severity)
+{
+    if (!VFXSettings.bEnableBloodVFX || !VFXManager)
+    {
+        return;
+    }
+    
+    VFXManager->SpawnBloodEffect(InjuryLocation, FVector::UpVector, Severity);
+    
+    // Start bleeding effect if severe injury
+    if (Severity > 0.7f)
+    {
+        StartBleedingEffect(InjuryLocation);
+    }
+}
+
+void UDinosaurVFXComponent::StartBleedingEffect(const FVector& BleedLocation)
+{
+    if (BleedingVFXComponent)
+    {
+        return; // Already bleeding
+    }
+    
+    BleedingVFXComponent = VFXManager->SpawnVFXAtLocation(
+        EVFXType::BloodSplatter,
+        BleedLocation
+    );
+    
+    if (BleedingVFXComponent)
+    {
+        BleedingVFXComponent->SetNiagaraVariableFloat(FString("BleedingRate"), 0.5f);
+        ActiveVFXComponents.Add(BleedingVFXComponent);
+        
+        // Set timer to stop bleeding after some time
+        if (UWorld* World = GetWorld())
+        {
+            World->GetTimerManager().SetTimer(
+                BleedingEffectTimer,
+                this,
+                &UDinosaurVFXComponent::StopBleedingEffect,
+                10.0f,
+                false
+            );
+        }
+    }
+}
+
+void UDinosaurVFXComponent::StopBleedingEffect()
+{
+    if (BleedingVFXComponent)
+    {
+        VFXManager->StopVFXEffect(BleedingVFXComponent);
+        ActiveVFXComponents.Remove(BleedingVFXComponent);
+        BleedingVFXComponent = nullptr;
+    }
+}
+
+void UDinosaurVFXComponent::TriggerRoarEffect(float Intensity)
+{
+    if (!VFXManager)
+    {
+        return;
+    }
+    
+    FVector RoarLocation = GetSocketLocation(MouthSocketName);
+    
+    // Spawn roar VFX
+    UNiagaraComponent* RoarVFX = VFXManager->SpawnVFXAtLocation(
+        EVFXType::ImpactEffect, // Reuse impact for roar shockwave
+        RoarLocation,
+        FRotator::ZeroRotator,
+        FVector(Intensity * DinosaurSizeMultiplier)
+    );
+    
+    if (RoarVFX)
+    {
+        RoarVFX->SetNiagaraVariableFloat(FString("RoarIntensity"), Intensity);
+        RoarVFX->SetNiagaraVariableLinearColor(FString("RoarColor"), VFXSettings.DinosaurColorTint);
+    }
+    
+    // Trigger environmental effects
+    StartDustCloud();
+}
+
+void UDinosaurVFXComponent::StartFeedingEffect()
+{
+    // Feeding creates blood and gore effects
+    if (VFXSettings.bEnableBloodVFX && VFXManager)
+    {
+        FVector FeedingLocation = GetSocketLocation(MouthSocketName);
+        VFXManager->SpawnBloodEffect(FeedingLocation, FVector::DownVector, 0.8f);
+    }
+}
+
+void UDinosaurVFXComponent::StopFeedingEffect()
+{
+    // Stop any feeding-related VFX
+    StopBleedingEffect();
+}
+
+void UDinosaurVFXComponent::TriggerWaterSplash(const FVector& WaterLocation, float SplashSize)
+{
+    if (!VFXManager)
+    {
+        return;
+    }
+    
+    UNiagaraComponent* SplashVFX = VFXManager->SpawnVFXAtLocation(
+        EVFXType::WaterSplash,
+        WaterLocation,
+        FRotator::ZeroRotator,
+        FVector(SplashSize * DinosaurSizeMultiplier)
+    );
+    
+    if (SplashVFX)
+    {
+        SplashVFX->SetNiagaraVariableFloat(FString("SplashIntensity"), DinosaurSizeMultiplier);
+    }
+}
+
+void UDinosaurVFXComponent::StartDustCloud()
+{
+    if (DustCloudComponent)
+    {
+        return;
+    }
+    
+    DustCloudComponent = VFXManager->SpawnVFXAttached(
+        EVFXType::SmokeTrail,
+        GetOwner()->GetRootComponent(),
+        NAME_None,
+        FVector(0, 0, -50) // Slightly below the dinosaur
+    );
+    
+    if (DustCloudComponent)
+    {
+        DustCloudComponent->SetNiagaraVariableFloat(FString("DustIntensity"), DinosaurSizeMultiplier * 0.5f);
+        ActiveVFXComponents.Add(DustCloudComponent);
+    }
+}
+
+void UDinosaurVFXComponent::StopDustCloud()
+{
+    if (DustCloudComponent)
+    {
+        VFXManager->StopVFXEffect(DustCloudComponent);
+        ActiveVFXComponents.Remove(DustCloudComponent);
+        DustCloudComponent = nullptr;
+    }
+}
+
+void UDinosaurVFXComponent::UpdateVFXSettings(const FDinosaurVFXSettings& NewSettings)
+{
+    VFXSettings = NewSettings;
+    
+    // Update existing VFX with new settings
+    for (UNiagaraComponent* VFXComp : ActiveVFXComponents)
+    {
+        if (IsValid(VFXComp))
+        {
+            VFXComp->SetNiagaraVariableFloat(FString("IntensityMultiplier"), VFXSettings.VFXIntensityMultiplier);
+            VFXComp->SetNiagaraVariableLinearColor(FString("ColorTint"), VFXSettings.DinosaurColorTint);
+        }
+    }
+}
+
+void UDinosaurVFXComponent::SetDinosaurSize(float SizeMultiplier)
+{
+    DinosaurSizeMultiplier = FMath::Clamp(SizeMultiplier, 0.1f, 10.0f);
+    
+    // Update existing VFX with new size
+    for (UNiagaraComponent* VFXComp : ActiveVFXComponents)
+    {
+        if (IsValid(VFXComp))
+        {
+            VFXComp->SetNiagaraVariableFloat(FString("SizeMultiplier"), DinosaurSizeMultiplier);
+        }
+    }
+}
+
+void UDinosaurVFXComponent::SetDinosaurType(const FString& NewDinosaurType)
+{
+    DinosaurType = NewDinosaurType;
+    UE_LOG(LogTemp, Log, TEXT("DinosaurVFXComponent: Set dinosaur type to %s"), *DinosaurType);
+}
+
+void UDinosaurVFXComponent::InitializeVFXComponents()
+{
+    // Pre-initialize commonly used VFX components for better performance
+    if (VFXSettings.bEnableBreathVFX)
+    {
+        // Breath VFX will be created on-demand
+    }
+}
+
+void UDinosaurVFXComponent::CleanupVFXComponents()
+{
+    // Stop all active VFX
+    for (UNiagaraComponent* VFXComp : ActiveVFXComponents)
+    {
+        if (IsValid(VFXComp) && VFXManager)
+        {
+            VFXManager->StopVFXEffect(VFXComp);
+        }
+    }
+    
+    ActiveVFXComponents.Empty();
+    
+    // Clear component references
+    BreathVFXComponent = nullptr;
+    MovementTrailComponent = nullptr;
+    BleedingVFXComponent = nullptr;
+    DustCloudComponent = nullptr;
+    
+    // Clear timers
+    if (UWorld* World = GetWorld())
+    {
+        World->GetTimerManager().ClearTimer(BreathEffectTimer);
+        World->GetTimerManager().ClearTimer(BleedingEffectTimer);
+    }
+}
+
+void UDinosaurVFXComponent::UpdateVFXBasedOnState()
+{
+    // Update VFX parameters based on current state and dinosaur behavior
+    switch (CurrentVFXState)
+    {
+        case EDinosaurVFXState::Moving:
+            // Adjust movement trail intensity based on speed
+            if (MovementTrailComponent)
+            {
+                float Speed = GetOwner()->GetVelocity().Size();
+                float TrailIntensity = FMath::Clamp(Speed / 1000.0f, 0.1f, 2.0f);
+                MovementTrailComponent->SetNiagaraVariableFloat(FString("TrailIntensity"), TrailIntensity);
+            }
+            break;
+            
+        case EDinosaurVFXState::Attacking:
+            // Increase VFX intensity during attacks
+            VFXManager->SetGlobalVFXParameter(FName("CombatIntensity"), 1.5f);
             break;
             
         default:
-            BreathingSystem = VFXSet.IdleBreathing;
+            // Reset combat intensity
+            if (VFXManager)
+            {
+                VFXManager->SetGlobalVFXParameter(FName("CombatIntensity"), 1.0f);
+            }
             break;
     }
-    
-    if (!BreathingSystem) return;
-    
-    // Parar breathing anterior
-    StopBreathing();
-    
-    // Encontrar socket de breathing (nariz/boca)
-    USkeletalMeshComponent* MeshComp = GetOwner()->FindComponentByClass<USkeletalMeshComponent>();
-    FVector BreathLocation = GetOwner()->GetActorLocation();
-    FRotator BreathRotation = GetOwner()->GetActorRotation();
-    
-    if (MeshComp && MeshComp->DoesSocketExist(TEXT("Nose")))
-    {
-        BreathLocation = MeshComp->GetSocketLocation(TEXT("Nose"));
-        BreathRotation = MeshComp->GetSocketRotation(TEXT("Nose"));
-    }
-    else if (MeshComp && MeshComp->DoesSocketExist(TEXT("Head")))
-    {
-        BreathLocation = MeshComp->GetSocketLocation(TEXT("Head"));
-        BreathRotation = MeshComp->GetSocketRotation(TEXT("Head"));
-    }
-    
-    // Spawn breathing effect
-    ActiveBreathingEffect = UNiagaraFunctionLibrary::SpawnSystemAttached(
-        BreathingSystem,
-        MeshComp ? MeshComp : GetOwner()->GetRootComponent(),
-        MeshComp && MeshComp->DoesSocketExist(TEXT("Nose")) ? TEXT("Nose") : NAME_None,
-        FVector::ZeroVector,
-        FRotator::ZeroRotator,
-        EAttachLocation::KeepRelativeOffset,
-        true
-    );
-    
-    if (ActiveBreathingEffect)
-    {
-        // Configurar parâmetros procedurais
-        ActiveBreathingEffect->SetColorParameter(TEXT("BreathColor"), BreathTint);
-        ActiveBreathingEffect->SetFloatParameter(TEXT("Intensity"), BreathIntensity);
-        ActiveBreathingEffect->SetFloatParameter(TEXT("Size"), FootstepScale);
-        ActiveBreathingEffect->SetFloatParameter(TEXT("Interval"), BreathingInterval);
-    }
 }
 
-void UDinosaurVFXComponent::StopBreathing()
+FVector UDinosaurVFXComponent::GetSocketLocation(const FName& SocketName) const
 {
-    if (ActiveBreathingEffect)
+    if (USkeletalMeshComponent* SkeletalMesh = GetOwner()->FindComponentByClass<USkeletalMeshComponent>())
     {
-        ActiveBreathingEffect->DestroyComponent();
-        ActiveBreathingEffect = nullptr;
-    }
-}
-
-void UDinosaurVFXComponent::UpdateBreathingIntensity(float Intensity)
-{
-    BreathIntensity = Intensity;
-    
-    if (ActiveBreathingEffect)
-    {
-        ActiveBreathingEffect->SetFloatParameter(TEXT("Intensity"), BreathIntensity);
-    }
-}
-
-void UDinosaurVFXComponent::GenerateProceduralVariation()
-{
-    // Usar seed para gerar variação consistente
-    FRandomStream RandomStream(IndividualSeed);
-    
-    // Gerar cor de respiração baseada em "genética"
-    float Hue = RandomStream.FRandRange(0.0f, 360.0f);
-    float Saturation = RandomStream.FRandRange(0.1f, 0.4f);
-    float Value = RandomStream.FRandRange(0.8f, 1.0f);
-    BreathTint = FLinearColor::MakeFromHSV8(Hue, Saturation * 255, Value * 255);
-    
-    // Gerar intensidade de respiração
-    BreathIntensity = RandomStream.FRandRange(0.7f, 1.3f);
-    
-    // Gerar escala de pegadas
-    FootstepScale = RandomStream.FRandRange(0.8f, 1.2f);
-}
-
-void UDinosaurVFXComponent::UpdateBreathingEffect()
-{
-    if (!ActiveBreathingEffect || CurrentState == EDinosaurBehaviorState::Dead) return;
-    
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-    
-    // Verificar se é hora de uma nova respiração
-    if (CurrentTime - LastBreathTime >= BreathingInterval)
-    {
-        LastBreathTime = CurrentTime;
-        
-        // Trigger breathing pulse
-        if (ActiveBreathingEffect)
+        if (SkeletalMesh->DoesSocketExist(SocketName))
         {
-            ActiveBreathingEffect->SetFloatParameter(TEXT("TriggerBreath"), 1.0f);
-            
-            // Reset trigger após um frame
-            FTimerHandle ResetHandle;
-            GetWorld()->GetTimerManager().SetTimer(ResetHandle, [this]()
-            {
-                if (ActiveBreathingEffect)
-                {
-                    ActiveBreathingEffect->SetFloatParameter(TEXT("TriggerBreath"), 0.0f);
-                }
-            }, 0.1f, false);
+            return SkeletalMesh->GetSocketLocation(SocketName);
         }
     }
-}
-
-bool UDinosaurVFXComponent::ShouldSpawnEffect(FVector EffectLocation)
-{
-    // Verificar distância ao jogador
-    float DistanceToPlayer = GetDistanceToPlayer();
-    return DistanceToPlayer <= MaxEffectDistance;
-}
-
-UNiagaraSystem* UDinosaurVFXComponent::GetFootstepEffect(FName SurfaceType)
-{
-    if (SurfaceType == TEXT("Water") || SurfaceType == TEXT("Mud"))
-    {
-        return VFXSet.FootstepSplash;
-    }
-    else if (SurfaceType == TEXT("Leaves") || SurfaceType == TEXT("Grass"))
-    {
-        return VFXSet.FootstepLeaves;
-    }
-    else
-    {
-        return VFXSet.FootstepDust;
-    }
-}
-
-void UDinosaurVFXComponent::CleanupFinishedEffects()
-{
-    // Remover efeitos de footstep que já terminaram
-    ActiveFootstepEffects.RemoveAll([](UNiagaraComponent* Component)
-    {
-        return !Component || !Component->IsActive();
-    });
-}
-
-float UDinosaurVFXComponent::GetDistanceToPlayer()
-{
-    APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
-    if (!PC || !PC->GetPawn()) return MAX_FLT;
     
-    return FVector::Dist(GetOwner()->GetActorLocation(), PC->GetPawn()->GetActorLocation());
+    // Fallback to actor location
+    return GetOwner()->GetActorLocation();
 }
 
-EVFXPriority UDinosaurVFXComponent::GetEffectPriority(FName EffectType)
+void UDinosaurVFXComponent::StopAllActiveVFX()
 {
-    if (EffectType == TEXT("BloodSplatter") || EffectType == TEXT("BiteImpact"))
+    StopBreathEffect();
+    StopMovementTrail();
+    StopBleedingEffect();
+    StopDustCloud();
+    
+    // Stop any remaining active VFX
+    for (UNiagaraComponent* VFXComp : ActiveVFXComponents)
     {
-        return EVFXPriority::High;
+        if (IsValid(VFXComp) && VFXManager)
+        {
+            VFXManager->StopVFXEffect(VFXComp);
+        }
     }
-    else if (EffectType == TEXT("Breathing"))
-    {
-        return EVFXPriority::Medium;
-    }
-    else
-    {
-        return EVFXPriority::Low;
-    }
+    
+    ActiveVFXComponents.Empty();
 }
