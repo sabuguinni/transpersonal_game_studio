@@ -1,0 +1,325 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "GameFramework/Actor.h"
+#include "Engine/DirectionalLight.h"
+#include "Engine/SkyLight.h"
+#include "Components/TimelineComponent.h"
+#include "LightingManager.h"
+#include "LightingAtmosphereSystem.h"
+#include "DynamicTimeOfDayController.generated.h"
+
+USTRUCT(BlueprintType)
+struct FSunMoonConfiguration
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sun")
+    FLinearColor SunColor = FLinearColor(1.0f, 0.95f, 0.8f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sun")
+    float SunIntensity = 10.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sun")
+    float SunTemperature = 5500.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon")
+    FLinearColor MoonColor = FLinearColor(0.8f, 0.9f, 1.0f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon")
+    float MoonIntensity = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Moon")
+    float MoonTemperature = 4000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sky")
+    float SkyLightIntensity = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sky")
+    FLinearColor SkyTint = FLinearColor::White;
+};
+
+USTRUCT(BlueprintType)
+struct FTimeOfDayKeyframe
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time")
+    float TimeOfDay = 12.0f; // 0-24 hours
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sun/Moon")
+    FSunMoonConfiguration LightConfiguration;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
+    EAtmospherePreset AtmospherePreset = EAtmospherePreset::EarthLike;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
+    EWeatherState WeatherState = EWeatherState::Clear;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotional")
+    EEmotionalTone EmotionalTone = EEmotionalTone::Peaceful;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Post Process")
+    float ExposureCompensation = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Post Process")
+    FLinearColor ColorGrading = FLinearColor::White;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Post Process")
+    float Contrast = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Post Process")
+    float Saturation = 1.0f;
+};
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnTimeOfDayUpdate, float, CurrentTime);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnTimeOfDayPhaseChanged, ETimeOfDay, OldPhase, ETimeOfDay, NewPhase);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnSunriseEvent, float, SunriseTime);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnSunsetEvent, float, SunsetTime);
+
+UCLASS(Blueprintable, BlueprintType)
+class TRANSPERSONALGAME_API ADynamicTimeOfDayController : public AActor
+{
+    GENERATED_BODY()
+
+public:
+    ADynamicTimeOfDayController();
+
+protected:
+    virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
+
+    // Core lighting actors
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting Actors")
+    class ADirectionalLight* SunLight;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting Actors")
+    class ADirectionalLight* MoonLight;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting Actors")
+    class ASkyLight* SkyLight;
+
+    // Manager references
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Managers")
+    class ALightingManager* LightingManager;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Managers")
+    class ULightingAtmosphereSystem* AtmosphereSystem;
+
+    // Time control
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time Control")
+    float CurrentTimeOfDay = 12.0f; // 0-24 hours
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time Control")
+    float TimeSpeed = 1.0f; // Real-time multiplier
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time Control")
+    bool bAutoAdvanceTime = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time Control")
+    bool bLoopTime = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time Control")
+    float DayDurationMinutes = 24.0f; // Real minutes for full day cycle
+
+    // Sun/Moon positioning
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Celestial Bodies")
+    float SunriseTime = 6.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Celestial Bodies")
+    float SunsetTime = 18.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Celestial Bodies")
+    float SunElevationAngle = 45.0f; // Maximum sun elevation at noon
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Celestial Bodies")
+    float MoonPhaseOffset = 12.0f; // Hours offset from sun
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Celestial Bodies")
+    FVector SunDirection = FVector(0.0f, 1.0f, 0.0f);
+
+    // Keyframe animation system
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+    TArray<FTimeOfDayKeyframe> TimeKeyframes;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+    bool bUseKeyframeSystem = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+    bool bSmoothTransitions = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+    float TransitionDuration = 2.0f;
+
+    // Current state tracking
+    UPROPERTY(BlueprintReadOnly, Category = "Current State")
+    ETimeOfDay CurrentPhase = ETimeOfDay::Noon;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Current State")
+    float SunAngle = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Current State")
+    float MoonAngle = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Current State")
+    bool bIsDaytime = true;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Current State")
+    bool bIsTransitioning = false;
+
+    // Transition state
+    float TransitionTimer = 0.0f;
+    FTimeOfDayKeyframe SourceKeyframe;
+    FTimeOfDayKeyframe TargetKeyframe;
+
+    // Timeline component for smooth animations
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class UTimelineComponent* TimelineComponent;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+    class UCurveFloat* TimeTransitionCurve;
+
+public:
+    // Events
+    UPROPERTY(BlueprintAssignable, Category = "Events")
+    FOnTimeOfDayUpdate OnTimeOfDayUpdate;
+
+    UPROPERTY(BlueprintAssignable, Category = "Events")
+    FOnTimeOfDayPhaseChanged OnTimeOfDayPhaseChanged;
+
+    UPROPERTY(BlueprintAssignable, Category = "Events")
+    FOnSunriseEvent OnSunriseEvent;
+
+    UPROPERTY(BlueprintAssignable, Category = "Events")
+    FOnSunsetEvent OnSunsetEvent;
+
+    // Public API
+    UFUNCTION(BlueprintCallable, Category = "Time Control")
+    void SetTimeOfDay(float NewTime, bool bImmediate = false);
+
+    UFUNCTION(BlueprintCallable, Category = "Time Control")
+    void SetTimeSpeed(float NewSpeed);
+
+    UFUNCTION(BlueprintCallable, Category = "Time Control")
+    void PauseTime();
+
+    UFUNCTION(BlueprintCallable, Category = "Time Control")
+    void ResumeTime();
+
+    UFUNCTION(BlueprintCallable, Category = "Time Control")
+    void SkipToTime(float TargetTime, float SkipDuration = 2.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Time Control")
+    void SkipToNextPhase(float SkipDuration = 2.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Time Control")
+    void SkipToPreviousPhase(float SkipDuration = 2.0f);
+
+    UFUNCTION(BlueprintPure, Category = "Time Control")
+    float GetCurrentTimeOfDay() const { return CurrentTimeOfDay; }
+
+    UFUNCTION(BlueprintPure, Category = "Time Control")
+    ETimeOfDay GetCurrentPhase() const { return CurrentPhase; }
+
+    UFUNCTION(BlueprintPure, Category = "Time Control")
+    bool GetIsDaytime() const { return bIsDaytime; }
+
+    UFUNCTION(BlueprintPure, Category = "Time Control")
+    float GetSunAngle() const { return SunAngle; }
+
+    UFUNCTION(BlueprintPure, Category = "Time Control")
+    float GetMoonAngle() const { return MoonAngle; }
+
+    UFUNCTION(BlueprintPure, Category = "Time Control")
+    float GetTimeUntilSunrise() const;
+
+    UFUNCTION(BlueprintPure, Category = "Time Control")
+    float GetTimeUntilSunset() const;
+
+    // Keyframe system
+    UFUNCTION(BlueprintCallable, Category = "Keyframes")
+    void AddKeyframe(const FTimeOfDayKeyframe& Keyframe);
+
+    UFUNCTION(BlueprintCallable, Category = "Keyframes")
+    void RemoveKeyframe(int32 Index);
+
+    UFUNCTION(BlueprintCallable, Category = "Keyframes")
+    void ClearKeyframes();
+
+    UFUNCTION(BlueprintCallable, Category = "Keyframes")
+    void SortKeyframes();
+
+    UFUNCTION(BlueprintCallable, Category = "Keyframes")
+    FTimeOfDayKeyframe GetCurrentKeyframe() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Keyframes")
+    void SaveCurrentStateAsKeyframe();
+
+    UFUNCTION(BlueprintCallable, Category = "Keyframes")
+    void LoadKeyframePreset(const FString& PresetName);
+
+    // Celestial positioning
+    UFUNCTION(BlueprintCallable, Category = "Celestial")
+    void UpdateSunPosition();
+
+    UFUNCTION(BlueprintCallable, Category = "Celestial")
+    void UpdateMoonPosition();
+
+    UFUNCTION(BlueprintPure, Category = "Celestial")
+    FRotator CalculateSunRotation(float TimeOfDay) const;
+
+    UFUNCTION(BlueprintPure, Category = "Celestial")
+    FRotator CalculateMoonRotation(float TimeOfDay) const;
+
+    // Weather and atmosphere integration
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void TriggerWeatherTransition(EWeatherState NewWeather, float TransitionTime = 5.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void TriggerEmotionalToneChange(EEmotionalTone NewTone, float TransitionTime = 3.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void TriggerAtmosphereChange(EAtmospherePreset NewPreset, float TransitionTime = 8.0f);
+
+protected:
+    // Internal methods
+    void InitializeLightingActors();
+    void InitializeKeyframes();
+    void UpdateTimeOfDay(float DeltaTime);
+    void UpdateLightingFromKeyframes();
+    void UpdateCelestialBodies();
+    void UpdatePhaseTracking();
+    void UpdateManagers();
+
+    // Keyframe interpolation
+    void FindKeyframeRange(float Time, int32& LowerIndex, int32& UpperIndex, float& Alpha) const;
+    FTimeOfDayKeyframe InterpolateKeyframes(const FTimeOfDayKeyframe& A, const FTimeOfDayKeyframe& B, float Alpha) const;
+    FSunMoonConfiguration InterpolateSunMoonConfig(const FSunMoonConfiguration& A, const FSunMoonConfiguration& B, float Alpha) const;
+
+    // Transition system
+    void StartTransition(const FTimeOfDayKeyframe& Target);
+    void UpdateTransition(float DeltaTime);
+
+    // Utility methods
+    float NormalizeTime(float Time) const;
+    ETimeOfDay TimeToPhase(float Time) const;
+    float CalculateSunElevation(float Time) const;
+    float CalculateMoonElevation(float Time) const;
+    bool IsTimeInRange(float Time, float Start, float End) const;
+
+    // Timeline callbacks
+    UFUNCTION()
+    void OnTimelineUpdate(float Value);
+
+    UFUNCTION()
+    void OnTimelineFinished();
+
+    // Event triggers
+    void CheckForSunriseEvent();
+    void CheckForSunsetEvent();
+    void CheckForPhaseChange();
+
+    // Default configurations
+    void SetupDefaultKeyframes();
+    void SetupDefaultSunMoonConfig();
+};
