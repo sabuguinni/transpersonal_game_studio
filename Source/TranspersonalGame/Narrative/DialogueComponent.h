@@ -1,100 +1,29 @@
+// Copyright Transpersonal Game Studio. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "GameplayTagContainer.h"
+#include "GameplayTags.h"
 #include "Sound/DialogueWave.h"
 #include "Sound/DialogueVoice.h"
-#include "Engine/DataTable.h"
+#include "Components/AudioComponent.h"
+#include "NarrativeSubsystem.h"
 #include "DialogueComponent.generated.h"
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnDialogueLineSpoken, const FString&, SpeakerName, const FString&, DialogueText, float, Duration);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDialogueSequenceComplete, FGameplayTag, DialogueTag);
+class UNarrativeSubsystem;
+class UWidgetComponent;
+class UUserWidget;
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FDialogueLine
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FString SpeakerName;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue", meta = (MultiLine = true))
-    FString DialogueText;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    class UDialogueWave* DialogueWave;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    class UDialogueVoice* SpeakerVoice;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    float DisplayDuration = 3.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    bool bWaitForInput = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    TArray<FGameplayTag> RequiredTags;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    TArray<FGameplayTag> TriggeredEvents;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FGameplayTag EmotionTag;
-
-    FDialogueLine()
-    {
-        DisplayDuration = 3.0f;
-        bWaitForInput = false;
-    }
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FDialogueSequence
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FGameplayTag SequenceTag;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FString SequenceName;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    TArray<FDialogueLine> DialogueLines;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    TArray<FGameplayTag> PrerequisiteTags;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    bool bIsRepeatable = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    int32 Priority = 0;
-
-    FDialogueSequence()
-    {
-        bIsRepeatable = true;
-        Priority = 0;
-    }
-};
-
-UENUM(BlueprintType)
-enum class EDialogueState : uint8
-{
-    Idle,
-    Playing,
-    WaitingForInput,
-    Paused,
-    Complete
-};
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDialogueLineStarted, const FDialogueLine&, DialogueLine);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDialogueLineCompleted, const FDialogueLine&, DialogueLine);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDialogueSequenceCompleted, const FString&, SequenceID);
 
 /**
- * Dialogue Component - Handles character dialogue and conversation sequences
- * Attached to NPCs and interactive objects that can speak
+ * Dialogue Component - Handles individual dialogue playback and subtitle display
+ * Attached to actors that can speak (NPCs, environmental objects, or the player)
  */
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent), BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UDialogueComponent : public UActorComponent
 {
     GENERATED_BODY()
@@ -109,12 +38,15 @@ protected:
 public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // Dialogue Sequence Management
+    // Core dialogue functions
     UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void StartDialogueSequence(FGameplayTag SequenceTag, class AActor* Listener = nullptr);
+    void PlayDialogueLine(const FDialogueLine& DialogueLine);
 
     UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void StopDialogueSequence();
+    void PlayDialogueSequence(const FString& SequenceID);
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void StopDialogue();
 
     UFUNCTION(BlueprintCallable, Category = "Dialogue")
     void PauseDialogue();
@@ -123,102 +55,200 @@ public:
     void ResumeDialogue();
 
     UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void AdvanceDialogue();
+    void SkipCurrentLine();
 
-    // Dialogue Line Management
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void PlayDialogueLine(const FDialogueLine& DialogueLine, class AActor* Listener = nullptr);
+    // Configuration
+    UFUNCTION(BlueprintCallable, Category = "Dialogue|Setup")
+    void SetDefaultVoice(UDialogueVoice* Voice);
 
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void AddDialogueSequence(const FDialogueSequence& NewSequence);
+    UFUNCTION(BlueprintCallable, Category = "Dialogue|Setup")
+    void SetVolumeMultiplier(float Multiplier);
 
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    bool HasDialogueSequence(FGameplayTag SequenceTag) const;
+    UFUNCTION(BlueprintCallable, Category = "Dialogue|Setup")
+    void SetPitchMultiplier(float Multiplier);
 
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    bool CanPlaySequence(FGameplayTag SequenceTag) const;
+    UFUNCTION(BlueprintCallable, Category = "Dialogue|Setup")
+    void EnableSubtitles(bool bEnable);
 
-    // State Management
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    EDialogueState GetDialogueState() const { return CurrentState; }
+    UFUNCTION(BlueprintCallable, Category = "Dialogue|Setup")
+    void SetSubtitleWidget(TSubclassOf<UUserWidget> WidgetClass);
 
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    bool IsDialogueActive() const { return CurrentState != EDialogueState::Idle; }
+    // Context and emotion
+    UFUNCTION(BlueprintCallable, Category = "Dialogue|Context")
+    void SetDialogueContext(EDialogueContext Context);
 
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    FGameplayTag GetCurrentSequenceTag() const { return CurrentSequenceTag; }
+    UFUNCTION(BlueprintCallable, Category = "Dialogue|Context")
+    void SetEmotionalTone(ENarrativeTone Tone, float Intensity = 1.0f);
 
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    UFUNCTION(BlueprintCallable, Category = "Dialogue|Context")
+    void AddContextualTags(const TArray<FGameplayTag>& Tags);
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue|Context")
+    void RemoveContextualTags(const TArray<FGameplayTag>& Tags);
+
+    // Query functions
+    UFUNCTION(BlueprintPure, Category = "Dialogue|Query")
+    bool IsDialoguePlaying() const;
+
+    UFUNCTION(BlueprintPure, Category = "Dialogue|Query")
+    bool IsDialoguePaused() const;
+
+    UFUNCTION(BlueprintPure, Category = "Dialogue|Query")
+    FString GetCurrentSequenceID() const { return CurrentSequenceID; }
+
+    UFUNCTION(BlueprintPure, Category = "Dialogue|Query")
     int32 GetCurrentLineIndex() const { return CurrentLineIndex; }
 
-    // Character Configuration
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void SetCharacterName(const FString& NewName) { CharacterName = NewName; }
+    UFUNCTION(BlueprintPure, Category = "Dialogue|Query")
+    float GetDialogueProgress() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    FString GetCharacterName() const { return CharacterName; }
+    UFUNCTION(BlueprintPure, Category = "Dialogue|Query")
+    FDialogueLine GetCurrentDialogueLine() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void SetDefaultVoice(class UDialogueVoice* NewVoice) { DefaultVoice = NewVoice; }
+    // Advanced features
+    UFUNCTION(BlueprintCallable, Category = "Dialogue|Advanced")
+    void SetDialogueSpeed(float SpeedMultiplier);
 
-    // Events
-    UPROPERTY(BlueprintAssignable, Category = "Dialogue")
-    FOnDialogueLineSpoken OnDialogueLineSpoken;
+    UFUNCTION(BlueprintCallable, Category = "Dialogue|Advanced")
+    void SetAutoAdvance(bool bEnable, float DelayBetweenLines = 1.0f);
 
-    UPROPERTY(BlueprintAssignable, Category = "Dialogue")
-    FOnDialogueSequenceComplete OnDialogueSequenceComplete;
+    UFUNCTION(BlueprintCallable, Category = "Dialogue|Advanced")
+    void SetInterruptible(bool bCanInterrupt);
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue|Advanced")
+    void SetSpatialAudio(bool bEnable, float MaxDistance = 2000.0f);
+
+    // Delegates
+    UPROPERTY(BlueprintAssignable, Category = "Dialogue|Events")
+    FOnDialogueLineStarted OnDialogueLineStarted;
+
+    UPROPERTY(BlueprintAssignable, Category = "Dialogue|Events")
+    FOnDialogueLineCompleted OnDialogueLineCompleted;
+
+    UPROPERTY(BlueprintAssignable, Category = "Dialogue|Events")
+    FOnDialogueSequenceCompleted OnDialogueSequenceCompleted;
+
+    // Configuration properties
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Settings")
+    TSoftObjectPtr<UDialogueVoice> DefaultDialogueVoice;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Settings")
+    float VolumeMultiplier = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Settings")
+    float PitchMultiplier = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Settings")
+    bool bShowSubtitles = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Settings")
+    bool bAutoAdvance = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Settings")
+    float AutoAdvanceDelay = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Settings")
+    bool bInterruptible = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Settings")
+    bool bUseSpatialAudio = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Settings")
+    float MaxAudioDistance = 2000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Settings")
+    TSubclassOf<UUserWidget> SubtitleWidgetClass;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Context")
+    EDialogueContext DefaultContext = EDialogueContext::Environmental;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Context")
+    TArray<FGameplayTag> ContextualTags;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Context")
+    ENarrativeTone DefaultTone = ENarrativeTone::Neutral;
 
 protected:
-    // Configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
-    FString CharacterName;
+    // Components
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    TObjectPtr<UAudioComponent> AudioComponent;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
-    class UDialogueVoice* DefaultVoice;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    TObjectPtr<UWidgetComponent> SubtitleWidgetComponent;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    TMap<FGameplayTag, FDialogueSequence> DialogueSequences;
+    // Current state
+    UPROPERTY()
+    FString CurrentSequenceID;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    class UDataTable* DialogueDataTable;
+    UPROPERTY()
+    int32 CurrentLineIndex = 0;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    float DefaultLineDuration = 3.0f;
+    UPROPERTY()
+    FNarrativeSequence CurrentSequence;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    bool bAutoAdvanceDialogue = true;
+    UPROPERTY()
+    FDialogueLine CurrentLine;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    float AutoAdvanceDelay = 0.5f;
+    UPROPERTY()
+    bool bIsPlaying = false;
 
-    // Runtime State
-    UPROPERTY(BlueprintReadOnly, Category = "Dialogue")
-    EDialogueState CurrentState;
+    UPROPERTY()
+    bool bIsPaused = false;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dialogue")
-    FGameplayTag CurrentSequenceTag;
+    UPROPERTY()
+    float CurrentLineStartTime = 0.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dialogue")
-    int32 CurrentLineIndex;
+    UPROPERTY()
+    float DialogueSpeedMultiplier = 1.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dialogue")
-    class AActor* CurrentListener;
+    UPROPERTY()
+    ENarrativeTone CurrentEmotionalTone = ENarrativeTone::Neutral;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dialogue")
-    class UAudioComponent* CurrentAudioComponent;
+    UPROPERTY()
+    float EmotionalIntensity = 1.0f;
+
+    // Subsystem references
+    UPROPERTY()
+    TObjectPtr<UNarrativeSubsystem> NarrativeSubsystem;
+
+    // Widget references
+    UPROPERTY()
+    TObjectPtr<UUserWidget> SubtitleWidget;
 
     // Timers
-    FTimerHandle LineTimerHandle;
-    FTimerHandle AutoAdvanceTimerHandle;
+    FTimerHandle LineAdvanceTimer;
+    FTimerHandle AutoAdvanceTimer;
+
+    // Internal functions
+    void InitializeComponents();
+    void SetupAudioComponent();
+    void SetupSubtitleWidget();
+    void PlayNextLine();
+    void OnAudioFinished();
+    void OnLineCompleted();
+    void OnSequenceCompleted();
+    void UpdateSubtitles();
+    void ApplyEmotionalModifiers();
+    void ProcessContextualTags();
+
+    // Audio processing
+    void ConfigureDialogueWave(UDialogueWave* DialogueWave, const FDialogueLine& Line);
+    void ApplyVoiceModifiers(const FDialogueLine& Line);
+    void SetupSpatialAudio();
+
+    // Subtitle management
+    void ShowSubtitle(const FText& Text, float Duration);
+    void HideSubtitle();
+    void UpdateSubtitlePosition();
+
+    // Context processing
+    void ProcessEmotionalContext();
+    void ProcessEnvironmentalContext();
+    void ProcessSituationalContext();
 
 private:
-    void LoadDialogueFromDataTable();
-    void ProcessCurrentLine();
-    void CompleteCurrentLine();
-    void AdvanceToNextLine();
-    void CompleteSequence();
-    void TriggerLineEvents(const FDialogueLine& Line);
-    
-    UFUNCTION()
-    void OnAudioComponentFinished();
+    // Internal state
+    bool bComponentsInitialized = false;
+    float LastUpdateTime = 0.0f;
+    FVector LastPlayerLocation = FVector::ZeroVector;
 };
