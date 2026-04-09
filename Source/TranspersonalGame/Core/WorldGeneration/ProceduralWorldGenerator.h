@@ -1,418 +1,262 @@
-// Copyright Transpersonal Game Studio. All Rights Reserved.
-
 #pragma once
 
 #include "CoreMinimal.h"
+#include "UObject/NoExportTypes.h"
 #include "Engine/World.h"
-#include "Components/ActorComponent.h"
-#include "Subsystems/GameInstanceSubsystem.h"
+#include "Subsystems/WorldSubsystem.h"
 #include "Engine/DataAsset.h"
-#include "Landscape/Classes/Landscape.h"
 #include "PCGComponent.h"
 #include "PCGGraph.h"
+#include "Landscape.h"
 #include "ProceduralWorldGenerator.generated.h"
 
-/**
- * @brief Procedural World Generator for the Jurassic Survival Game
- * 
- * Creates the physical world of the game using UE5's PCG Framework and World Partition.
- * Generates terrains, biomes, rivers, geological structures that support dinosaur ecosystems.
- * 
- * Core Features:
- * - Prehistoric biome generation (forests, plains, swamps, mountains)
- * - Realistic river systems and water flow
- * - Geological formations (caves, cliffs, valleys)
- * - Dinosaur habitat zones with appropriate vegetation
- * - Resource distribution (materials for crafting)
- * - Hidden gem placement for the main quest
- * 
- * Technical Implementation:
- * - Uses PCG Framework for procedural content generation
- * - World Partition for streaming large worlds
- * - Hierarchical Generation for performance optimization
- * - Runtime Generation for dynamic world changes
- * - Landscape system integration for terrain
- * 
- * @author Procedural World Generator — Agent #5
- * @version 1.0 — March 2026
- */
+DECLARE_LOG_CATEGORY_EXTERN(LogProceduralWorld, Log, All);
 
-/** Biome types for the prehistoric world */
+// Forward declarations
+class UPCGComponent;
+class UPCGGraph;
+class ALandscape;
+class ULandscapeComponent;
+class UWorldPartitionSubsystem;
+
+/**
+ * Biome Types for the Jurassic World
+ */
 UENUM(BlueprintType)
 enum class EBiomeType : uint8
 {
-    DenseForest         UMETA(DisplayName = "Dense Forest"),
-    OpenWoodland        UMETA(DisplayName = "Open Woodland"),
-    GrasslandPlains     UMETA(DisplayName = "Grassland Plains"),
-    RiverDelta          UMETA(DisplayName = "River Delta"),
-    SwampMarshland      UMETA(DisplayName = "Swamp Marshland"),
-    RockyOutcrops       UMETA(DisplayName = "Rocky Outcrops"),
-    MountainousRegion   UMETA(DisplayName = "Mountainous Region"),
-    CaveSystem          UMETA(DisplayName = "Cave System"),
-    CoastalArea         UMETA(DisplayName = "Coastal Area"),
-    VolcanicRegion      UMETA(DisplayName = "Volcanic Region")
+    TropicalRainforest      UMETA(DisplayName = "Tropical Rainforest"),
+    FloodPlains            UMETA(DisplayName = "Flood Plains"),
+    CoastalWetlands        UMETA(DisplayName = "Coastal Wetlands"),
+    VolcanicRegions        UMETA(DisplayName = "Volcanic Regions"),
+    RiverDeltas            UMETA(DisplayName = "River Deltas"),
+    UplandForests          UMETA(DisplayName = "Upland Forests"),
+    OpenWoodlands          UMETA(DisplayName = "Open Woodlands"),
+    LagoonSystems          UMETA(DisplayName = "Lagoon Systems")
 };
 
-/** Geological feature types */
+/**
+ * Terrain Feature Types
+ */
 UENUM(BlueprintType)
-enum class EGeologicalFeature : uint8
+enum class ETerrainFeature : uint8
 {
-    River               UMETA(DisplayName = "River"),
-    Lake                UMETA(DisplayName = "Lake"),
-    Waterfall           UMETA(DisplayName = "Waterfall"),
-    Cave                UMETA(DisplayName = "Cave"),
-    Cliff               UMETA(DisplayName = "Cliff"),
-    Valley              UMETA(DisplayName = "Valley"),
-    Hill                UMETA(DisplayName = "Hill"),
-    Boulder             UMETA(DisplayName = "Boulder"),
-    Ravine              UMETA(DisplayName = "Ravine"),
-    Plateau             UMETA(DisplayName = "Plateau")
+    River                  UMETA(DisplayName = "River"),
+    Lake                   UMETA(DisplayName = "Lake"),
+    Mountain               UMETA(DisplayName = "Mountain"),
+    Valley                 UMETA(DisplayName = "Valley"),
+    Canyon                 UMETA(DisplayName = "Canyon"),
+    Plateau                UMETA(DisplayName = "Plateau"),
+    Cave                   UMETA(DisplayName = "Cave"),
+    Waterfall              UMETA(DisplayName = "Waterfall")
 };
 
-/** Resource types scattered throughout the world */
-UENUM(BlueprintType)
-enum class EResourceType : uint8
-{
-    Stone               UMETA(DisplayName = "Stone"),
-    Wood                UMETA(DisplayName = "Wood"),
-    Flint               UMETA(DisplayName = "Flint"),
-    Clay                UMETA(DisplayName = "Clay"),
-    Fiber               UMETA(DisplayName = "Plant Fiber"),
-    Berries             UMETA(DisplayName = "Berries"),
-    Herbs               UMETA(DisplayName = "Medicinal Herbs"),
-    Water               UMETA(DisplayName = "Fresh Water"),
-    Obsidian            UMETA(DisplayName = "Obsidian"),
-    Amber               UMETA(DisplayName = "Amber"),
-    Crystal             UMETA(DisplayName = "Crystal"),
-    TimeGem             UMETA(DisplayName = "Time Gem") // The main quest item
-};
-
-/** Biome configuration data asset */
+/**
+ * Biome Configuration Data Asset
+ */
 UCLASS(BlueprintType)
-class TRANSPERSONALGAME_API UBiomeData : public UDataAsset
+class TRANSPERSONALGAME_API UBiomeConfigurationAsset : public UDataAsset
 {
     GENERATED_BODY()
 
 public:
-    /** Biome type identifier */
+    /** Biome type */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Biome")
-    EBiomeType BiomeType = EBiomeType::DenseForest;
-
-    /** Biome display name */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Biome")
-    FString BiomeName = "Dense Forest";
-
-    /** Biome description */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Biome", meta = (MultiLine = true))
-    FString BiomeDescription = "A thick prehistoric forest with towering conifers and dense undergrowth.";
-
-    /** Terrain height range for this biome */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Terrain")
-    FVector2D HeightRange = FVector2D(0.0f, 500.0f);
-
-    /** Terrain slope range (0-90 degrees) */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Terrain")
-    FVector2D SlopeRange = FVector2D(0.0f, 30.0f);
-
-    /** Temperature range (Celsius) */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Climate")
-    FVector2D TemperatureRange = FVector2D(15.0f, 25.0f);
-
-    /** Humidity percentage */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Climate")
-    FVector2D HumidityRange = FVector2D(60.0f, 90.0f);
-
-    /** Vegetation density (0-1) */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Vegetation")
-    float VegetationDensity = 0.8f;
-
-    /** Tree types for this biome */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Vegetation")
-    TArray<TSoftObjectPtr<UStaticMesh>> TreeMeshes;
-
-    /** Undergrowth vegetation */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Vegetation")
-    TArray<TSoftObjectPtr<UStaticMesh>> UndergrowthMeshes;
-
-    /** Ground cover vegetation */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Vegetation")
-    TArray<TSoftObjectPtr<UStaticMesh>> GroundCoverMeshes;
-
-    /** Rock and geological features */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Geology")
-    TArray<TSoftObjectPtr<UStaticMesh>> RockMeshes;
-
-    /** Resources available in this biome */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Resources")
-    TMap<EResourceType, float> ResourceAvailability;
-
-    /** Dinosaur habitat suitability (0-1) */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Wildlife")
-    TMap<FString, float> DinosaurHabitatSuitability;
+    EBiomeType BiomeType = EBiomeType::TropicalRainforest;
 
     /** PCG Graph for this biome */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Generation")
     TSoftObjectPtr<UPCGGraph> BiomePCGGraph;
 
-    /** Biome transition blend distance */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Generation")
-    float TransitionBlendDistance = 1000.0f;
+    /** Vegetation density (0.0 to 1.0) */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Vegetation", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float VegetationDensity = 0.7f;
+
+    /** Average temperature in Celsius */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Climate")
+    float Temperature = 25.0f;
+
+    /** Humidity level (0.0 to 1.0) */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Climate", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Humidity = 0.8f;
+
+    /** Elevation range for this biome */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Terrain")
+    FVector2D ElevationRange = FVector2D(0.0f, 500.0f);
+
+    /** Allowed terrain features */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Terrain")
+    TArray<ETerrainFeature> AllowedTerrainFeatures;
 };
 
-/** World generation parameters */
+/**
+ * World Generation Parameters
+ */
 USTRUCT(BlueprintType)
-struct FWorldGenerationParams
+struct TRANSPERSONALGAME_API FWorldGenerationParams
 {
     GENERATED_BODY()
 
-    /** World size in Unreal units */
+    /** World size in kilometers */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Size")
-    FVector2D WorldSize = FVector2D(20480.0f, 20480.0f); // 20km x 20km
+    FVector2D WorldSizeKm = FVector2D(20.0f, 20.0f);
 
-    /** Landscape resolution */
+    /** Heightmap resolution */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
-    int32 LandscapeResolution = 4033; // 4033x4033 vertices
+    int32 HeightmapResolution = 4033;
 
-    /** Height scale multiplier */
+    /** Maximum elevation in meters */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
-    float HeightScale = 100.0f;
+    float MaxElevation = 2000.0f;
 
-    /** Number of major biomes */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biomes")
-    int32 MajorBiomeCount = 5;
-
-    /** Number of minor biome variations */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biomes")
-    int32 MinorBiomeCount = 12;
-
-    /** River system complexity (1-10) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water Systems")
-    int32 RiverComplexity = 6;
+    /** Sea level in meters */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
+    float SeaLevel = 0.0f;
 
     /** Number of major rivers */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water Systems")
-    int32 MajorRiverCount = 3;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hydrology")
+    int32 MajorRivers = 3;
 
-    /** Lake generation probability */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water Systems")
-    float LakeGenerationProbability = 0.3f;
+    /** Number of lakes */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hydrology")
+    int32 Lakes = 8;
 
-    /** Cave system density */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Geological Features")
-    float CaveSystemDensity = 0.15f;
+    /** Erosion strength */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Erosion", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float ErosionStrength = 0.3f;
 
-    /** Resource distribution density */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Resources")
-    float ResourceDensity = 1.0f;
-
-    /** Time gem spawn locations count */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Items")
-    int32 TimeGemLocations = 1;
-
-    /** Random seed for generation */
+    /** Seed for random generation */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation")
-    int32 WorldSeed = 12345;
+    int32 Seed = 12345;
 };
 
-/** River system data */
-USTRUCT(BlueprintType)
-struct FRiverSystemData
-{
-    GENERATED_BODY()
-
-    /** River spline points */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River")
-    TArray<FVector> SplinePoints;
-
-    /** River width at each point */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River")
-    TArray<float> WidthAtPoints;
-
-    /** River depth at each point */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River")
-    TArray<float> DepthAtPoints;
-
-    /** Flow velocity */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River")
-    float FlowVelocity = 100.0f;
-
-    /** River type */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River")
-    FString RiverType = "Meandering";
-
-    /** Connected lakes */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River")
-    TArray<FVector> ConnectedLakes;
-};
-
-/** Main Procedural World Generator class */
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UProceduralWorldGenerator : public UGameInstanceSubsystem
+/**
+ * Procedural World Generator
+ * Generates vast Jurassic landscapes using PCG Framework and World Partition
+ */
+UCLASS()
+class TRANSPERSONALGAME_API UProceduralWorldGenerator : public UWorldSubsystem
 {
     GENERATED_BODY()
 
 public:
-    UProceduralWorldGenerator();
-
     // USubsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
+    virtual void OnWorldBeginPlay(UWorld& InWorld) override;
 
-    /** Generate the complete world */
+    /** Get the procedural world generator instance */
+    UFUNCTION(BlueprintPure, Category = "World Generation")
+    static UProceduralWorldGenerator* Get(const UObject* WorldContext);
+
+    /** Generate the world with specified parameters */
     UFUNCTION(BlueprintCallable, Category = "World Generation")
     void GenerateWorld(const FWorldGenerationParams& Params);
 
-    /** Generate specific biome at location */
+    /** Generate terrain heightmap */
     UFUNCTION(BlueprintCallable, Category = "World Generation")
-    void GenerateBiomeAtLocation(FVector Location, EBiomeType BiomeType, float Radius = 5000.0f);
+    void GenerateTerrain(const FWorldGenerationParams& Params);
 
-    /** Generate river system */
+    /** Generate biome distribution */
     UFUNCTION(BlueprintCallable, Category = "World Generation")
-    void GenerateRiverSystem(const FRiverSystemData& RiverData);
+    void GenerateBiomes();
 
-    /** Place geological features */
+    /** Generate river systems */
     UFUNCTION(BlueprintCallable, Category = "World Generation")
-    void PlaceGeologicalFeatures(EGeologicalFeature FeatureType, TArray<FVector> Locations);
+    void GenerateRivers(int32 NumRivers);
 
-    /** Distribute resources across the world */
+    /** Generate lake systems */
     UFUNCTION(BlueprintCallable, Category = "World Generation")
-    void DistributeResources();
+    void GenerateLakes(int32 NumLakes);
 
-    /** Place the time gem (main quest item) */
+    /** Apply erosion to terrain */
     UFUNCTION(BlueprintCallable, Category = "World Generation")
-    void PlaceTimeGem(FVector Location);
+    void ApplyErosion(float Strength, int32 Iterations = 10);
 
-    /** Get biome type at world location */
+    /** Setup World Partition for large world streaming */
     UFUNCTION(BlueprintCallable, Category = "World Generation")
-    EBiomeType GetBiomeAtLocation(FVector WorldLocation) const;
-
-    /** Get available resources at location */
-    UFUNCTION(BlueprintCallable, Category = "World Generation")
-    TArray<EResourceType> GetResourcesAtLocation(FVector WorldLocation, float SearchRadius = 1000.0f) const;
-
-    /** Check if location is suitable for dinosaur habitat */
-    UFUNCTION(BlueprintCallable, Category = "World Generation")
-    float GetDinosaurHabitatSuitability(FVector WorldLocation, const FString& DinosaurSpecies) const;
-
-protected:
-    /** Initialize PCG system for world generation */
-    void InitializePCGSystem();
-
-    /** Create base landscape */
-    void CreateBaseLandscape(const FWorldGenerationParams& Params);
-
-    /** Generate height maps using noise functions */
-    void GenerateHeightMaps(const FWorldGenerationParams& Params);
-
-    /** Create biome distribution map */
-    void CreateBiomeDistribution(const FWorldGenerationParams& Params);
-
-    /** Generate water systems (rivers, lakes) */
-    void GenerateWaterSystems(const FWorldGenerationParams& Params);
-
-    /** Place vegetation using PCG */
-    void PlaceVegetation();
-
-    /** Generate geological features */
-    void GenerateGeologicalFeatures(const FWorldGenerationParams& Params);
-
-    /** Create cave systems */
-    void GenerateCaveSystems(const FWorldGenerationParams& Params);
-
-    /** Setup World Partition streaming */
     void SetupWorldPartition();
 
-    /** Apply performance optimizations */
-    void ApplyPerformanceOptimizations();
+    /** Setup PCG components for procedural content */
+    UFUNCTION(BlueprintCallable, Category = "World Generation")
+    void SetupPCGComponents();
 
-private:
-    /** Available biome data assets */
-    UPROPERTY(EditAnywhere, Category = "Biomes")
-    TArray<TSoftObjectPtr<UBiomeData>> AvailableBiomes;
+    /** Generate vegetation using PCG */
+    UFUNCTION(BlueprintCallable, Category = "World Generation")
+    void GenerateVegetation();
 
+    /** Generate geological features */
+    UFUNCTION(BlueprintCallable, Category = "World Generation")
+    void GenerateGeologicalFeatures();
+
+    /** Get biome at world position */
+    UFUNCTION(BlueprintPure, Category = "World Generation")
+    EBiomeType GetBiomeAtPosition(const FVector& WorldPosition) const;
+
+    /** Get elevation at world position */
+    UFUNCTION(BlueprintPure, Category = "World Generation")
+    float GetElevationAtPosition(const FVector& WorldPosition) const;
+
+    /** Check if position is near water */
+    UFUNCTION(BlueprintPure, Category = "World Generation")
+    bool IsNearWater(const FVector& WorldPosition, float Range = 1000.0f) const;
+
+    /** Get generation progress (0.0 to 1.0) */
+    UFUNCTION(BlueprintPure, Category = "World Generation")
+    float GetGenerationProgress() const;
+
+protected:
     /** Current world generation parameters */
     UPROPERTY()
-    FWorldGenerationParams CurrentWorldParams;
+    FWorldGenerationParams CurrentParams;
 
-    /** Generated landscape reference */
+    /** Generated landscape actor */
     UPROPERTY()
     TObjectPtr<ALandscape> GeneratedLandscape;
 
-    /** PCG World Actor for procedural generation */
+    /** PCG components for different biomes */
     UPROPERTY()
-    TObjectPtr<class APCGWorldActor> PCGWorldActor;
+    TMap<EBiomeType, TObjectPtr<UPCGComponent>> BiomePCGComponents;
 
-    /** Biome distribution texture */
+    /** Biome configuration assets */
     UPROPERTY()
-    TObjectPtr<UTexture2D> BiomeDistributionTexture;
+    TMap<EBiomeType, TObjectPtr<UBiomeConfigurationAsset>> BiomeConfigurations;
 
-    /** Height map texture */
+    /** River spline components */
     UPROPERTY()
-    TObjectPtr<UTexture2D> HeightMapTexture;
+    TArray<TObjectPtr<class USplineComponent>> RiverSplines;
 
-    /** Water flow texture */
+    /** Lake actors */
     UPROPERTY()
-    TObjectPtr<UTexture2D> WaterFlowTexture;
+    TArray<TObjectPtr<AActor>> LakeActors;
 
-    /** Resource distribution map */
+    /** Generation progress */
     UPROPERTY()
-    TMap<EResourceType, TArray<FVector>> ResourceDistributionMap;
+    float GenerationProgress = 0.0f;
 
-    /** Generated river systems */
+    /** Is generation in progress */
     UPROPERTY()
-    TArray<FRiverSystemData> GeneratedRivers;
+    bool bGenerationInProgress = false;
 
-    /** Time gem location (main quest) */
-    UPROPERTY()
-    FVector TimeGemLocation;
-
-    /** World generation seed */
-    int32 GenerationSeed = 12345;
-
-    /** Performance metrics during generation */
-    float GenerationStartTime = 0.0f;
-    int32 GeneratedActorCount = 0;
-    float TotalGenerationTime = 0.0f;
-
-    /** Utility functions */
+private:
+    // Internal generation methods
+    void GenerateHeightmapData(TArray<uint16>& HeightData, int32 Resolution);
+    void GenerateBiomeMap(TArray<uint8>& BiomeData, int32 Resolution);
+    void CreateLandscapeActor(const TArray<uint16>& HeightData, int32 Resolution);
+    void SetupLandscapeMaterials();
+    void GenerateRiverSpline(const FVector& StartPoint, const FVector& EndPoint);
+    void PlaceLake(const FVector& Position, float Radius);
+    void ApplyHydraulicErosion(TArray<uint16>& HeightData, int32 Resolution, float Strength);
+    void SetupBiomePCG(EBiomeType BiomeType);
+    
+    // Noise generation
     float GeneratePerlinNoise(float X, float Y, float Scale, int32 Octaves = 4) const;
     float GenerateRidgedNoise(float X, float Y, float Scale) const;
-    FVector2D GenerateGradientNoise(float X, float Y) const;
-    EBiomeType SelectBiomeBasedOnConditions(float Height, float Temperature, float Humidity, float Slope) const;
-    bool IsLocationSuitableForWater(FVector Location) const;
-    TArray<FVector> GenerateRiverPath(FVector StartLocation, FVector EndLocation) const;
-    void BlendBiomeTransitions(FVector Location, float BlendRadius) const;
-};
-
-/** PCG-based biome generator component */
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UBiomeGeneratorComponent : public UPCGComponent
-{
-    GENERATED_BODY()
-
-public:
-    UBiomeGeneratorComponent();
-
-    /** Set biome data for generation */
-    UFUNCTION(BlueprintCallable, Category = "Biome Generation")
-    void SetBiomeData(UBiomeData* BiomeData);
-
-    /** Generate biome content at location */
-    UFUNCTION(BlueprintCallable, Category = "Biome Generation")
-    void GenerateBiomeContent(FVector CenterLocation, float Radius);
-
-protected:
-    /** Biome data reference */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Biome")
-    TObjectPtr<UBiomeData> BiomeData;
-
-    /** Generation parameters */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Generation")
-    float VegetationDensityMultiplier = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Generation")
-    float ResourceDensityMultiplier = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Generation")
-    bool bEnableRuntimeGeneration = true;
+    float GenerateVoronoiNoise(float X, float Y, float Scale) const;
+    
+    // Utility functions
+    FVector2D WorldToHeightmapCoords(const FVector& WorldPos) const;
+    FVector HeightmapToWorldCoords(const FVector2D& HeightmapCoords) const;
+    
+    FTimerHandle GenerationTimer;
 };
