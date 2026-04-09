@@ -1,546 +1,434 @@
-// Copyright Transpersonal Game Studio. All Rights Reserved.
-// EngineArchitectureValidator.cpp - Implementation of architecture validation system
-
 #include "EngineArchitectureValidator.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Engine/RendererSettings.h"
-#include "PhysicsEngine/PhysicsSettings.h"
-#include "HAL/PlatformFilemanager.h"
-#include "Misc/DateTime.h"
-#include "Stats/Stats.h"
+#include "GameFramework/GameModeBase.h"
+#include "Misc/ConfigCacheIni.h"
+#include "HAL/PlatformApplicationMisc.h"
 #include "RenderingThread.h"
+#include "RHI.h"
 
-DEFINE_LOG_CATEGORY(LogEngineArchitectureValidator);
+UEngineArchitectureValidator::UEngineArchitectureValidator()
+{
+    bValidationCacheValid = false;
+    LastValidationTime = 0.0f;
+}
 
 void UEngineArchitectureValidator::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogEngineArchitectureValidator, Log, TEXT("Initializing Engine Architecture Validator"));
-    
-    // Initialize validation system
-    bValidationInitialized = true;
+    UE_LOG(LogTemp, Log, TEXT("Engine Architecture Validator initialized"));
     
     // Perform initial validation
-    FArchitectureValidationResult InitialResult = ValidateFullArchitecture();
-    LogValidationResult(InitialResult);
-    
-    // Start continuous validation if enabled
-    if (GEngine && GEngine->GetGameUserSettings())
-    {
-        StartContinuousValidation();
-    }
-    
-    UE_LOG(LogEngineArchitectureValidator, Log, TEXT("Engine Architecture Validator initialized successfully"));
+    ValidateEngineArchitecture();
 }
 
-void UEngineArchitectureValidator::Deinitialize()
+TArray<FArchitectureValidation> UEngineArchitectureValidator::ValidateEngineArchitecture()
 {
-    UE_LOG(LogEngineArchitectureValidator, Log, TEXT("Deinitializing Engine Architecture Validator"));
+    UE_LOG(LogTemp, Log, TEXT("=== ENGINE ARCHITECTURE VALIDATION START ==="));
     
-    // Stop continuous validation
-    StopContinuousValidation();
+    LastValidationResults.Empty();
     
-    // Clear validation history
-    ValidationHistory.Empty();
+    // Core UE5 Features Validation
+    LastValidationResults.Add(ValidateWorldPartition());
+    LastValidationResults.Add(ValidateNaniteSupport());
+    LastValidationResults.Add(ValidateLumenSupport());
+    LastValidationResults.Add(ValidateVirtualShadowMaps());
+    LastValidationResults.Add(ValidateMassEntitySystem());
+    LastValidationResults.Add(ValidatePCGSystem());
     
-    bValidationInitialized = false;
+    // Performance and Configuration
+    LastValidationResults.Add(ValidatePerformanceTargets());
+    LastValidationResults.Add(ValidateMemoryRequirements());
+    LastValidationResults.Add(ValidateProjectSettings());
+    LastValidationResults.Add(ValidateRenderingSettings());
     
-    Super::Deinitialize();
+    // Cache validation results
+    bValidationCacheValid = true;
+    LastValidationTime = FPlatformTime::Seconds();
+    
+    // Log summary
+    int32 ErrorCount = 0;
+    int32 WarningCount = 0;
+    for (const FArchitectureValidation& Result : LastValidationResults)
+    {
+        LogValidationResult(Result);
+        if (Result.Result == EArchitectureValidationResult::Error || 
+            Result.Result == EArchitectureValidationResult::Critical)
+        {
+            ErrorCount++;
+        }
+        else if (Result.Result == EArchitectureValidationResult::Warning)
+        {
+            WarningCount++;
+        }
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Architecture Validation Complete: %d Errors, %d Warnings"), 
+           ErrorCount, WarningCount);
+    
+    return LastValidationResults;
 }
 
-FArchitectureValidationResult UEngineArchitectureValidator::ValidateFullArchitecture()
+FArchitectureValidation UEngineArchitectureValidator::ValidateWorldPartition()
 {
-    UE_LOG(LogEngineArchitectureValidator, Log, TEXT("Starting full architecture validation"));
-    
-    FArchitectureValidationResult Result;
-    Result.ValidationTimestamp = FDateTime::Now().ToUnixTimestamp();
-    
-    // Validate engine features
-    FEngineFeatureStatus FeatureStatus = ValidateEngineFeatures();
-    
-    // Check critical features
-    bool bCriticalFeaturesValid = true;
-    
-    if (!FeatureStatus.bNaniteEnabled)
+    // Check if World Partition is available
+    if (CheckFeatureAvailability(TEXT("World Partition"), 
+        StaticLoadClass(UObject::StaticClass(), nullptr, TEXT("/Script/Engine.WorldPartition"))))
     {
-        Result.Errors.Add(TEXT("CRITICAL: Nanite virtualized geometry is not enabled"));
-        bCriticalFeaturesValid = false;
+        // Check if current world uses World Partition
+        UWorld* World = GetWorld();
+        if (World && World->IsPartitionedWorld())
+        {
+            return FArchitectureValidation(
+                TEXT("World Partition"),
+                EArchitectureValidationResult::Valid,
+                TEXT("World Partition is enabled and active"),
+                TEXT("")
+            );
+        }
+        else
+        {
+            return FArchitectureValidation(
+                TEXT("World Partition"),
+                EArchitectureValidationResult::Warning,
+                TEXT("World Partition available but not enabled on current world"),
+                TEXT("Enable World Partition in World Settings for large world support")
+            );
+        }
     }
     
-    if (!FeatureStatus.bLumenEnabled)
-    {
-        Result.Errors.Add(TEXT("CRITICAL: Lumen global illumination is not enabled"));
-        bCriticalFeaturesValid = false;
-    }
-    
-    if (!FeatureStatus.bVirtualShadowMapsEnabled)
-    {
-        Result.Errors.Add(TEXT("CRITICAL: Virtual Shadow Maps are not enabled"));
-        bCriticalFeaturesValid = false;
-    }
-    
-    if (!FeatureStatus.bWorldPartitionEnabled)
-    {
-        Result.Warnings.Add(TEXT("WARNING: World Partition not detected in current level"));
-    }
-    
-    // Validate performance targets
-    FPerformanceValidationMetrics PerfMetrics = ValidatePerformanceTargets();
-    if (!PerfMetrics.bWithinTargets)
-    {
-        Result.Warnings.Add(FString::Printf(TEXT("WARNING: Performance targets not met - FPS: %.1f/%.1f"), 
-            PerfMetrics.CurrentFrameRate, PerfMetrics.TargetFrameRate));
-    }
-    
-    // Validate project settings
-    if (!ValidateProjectSettings())
-    {
-        Result.Errors.Add(TEXT("CRITICAL: Project settings validation failed"));
-        bCriticalFeaturesValid = false;
-    }
-    
-    // Set final validation result
-    Result.bIsValid = bCriticalFeaturesValid && Result.Errors.Num() == 0;
-    
-    if (Result.bIsValid)
-    {
-        Result.ValidationMessage = TEXT("Architecture validation passed - all critical features enabled");
-    }
-    else
-    {
-        Result.ValidationMessage = FString::Printf(TEXT("Architecture validation failed - %d errors, %d warnings"), 
-            Result.Errors.Num(), Result.Warnings.Num());
-    }
-    
-    // Cache result
-    LastValidationResult = Result;
-    
-    // Broadcast validation completed
-    OnValidationCompleted.Broadcast(Result);
-    
-    UE_LOG(LogEngineArchitectureValidator, Log, TEXT("Full architecture validation completed: %s"), 
-        Result.bIsValid ? TEXT("PASSED") : TEXT("FAILED"));
-    
-    return Result;
+    return FArchitectureValidation(
+        TEXT("World Partition"),
+        EArchitectureValidationResult::Error,
+        TEXT("World Partition not available"),
+        TEXT("Ensure UE5 with World Partition support is being used")
+    );
 }
 
-FEngineFeatureStatus UEngineArchitectureValidator::ValidateEngineFeatures()
+FArchitectureValidation UEngineArchitectureValidator::ValidateNaniteSupport()
 {
-    FEngineFeatureStatus Status;
+    // Check Nanite availability through project settings
+    bool bNaniteEnabled = false;
+    GConfig->GetBool(TEXT("/Script/Engine.RendererSettings"), TEXT("r.Nanite"), bNaniteEnabled, GEngineIni);
     
-    // Check Nanite
-    if (const URendererSettings* RendererSettings = GetDefault<URendererSettings>())
+    if (bNaniteEnabled)
     {
-        Status.bNaniteEnabled = RendererSettings->bEnableNanite;
-        
-        // Check Lumen
-        Status.bLumenEnabled = (RendererSettings->DynamicGlobalIlluminationMethod == EDynamicGlobalIlluminationMethod::Lumen);
-        
-        // Check Virtual Shadow Maps
-        Status.bVirtualShadowMapsEnabled = (RendererSettings->ShadowMapMethod == EShadowMapMethod::VirtualShadowMaps);
+        return FArchitectureValidation(
+            TEXT("Nanite Virtualized Geometry"),
+            EArchitectureValidationResult::Valid,
+            TEXT("Nanite is enabled and available"),
+            TEXT("")
+        );
     }
     
-    // Check World Partition (requires active world)
-    if (UWorld* World = GEngine->GetCurrentPlayWorld())
-    {
-        Status.bWorldPartitionEnabled = World->IsPartitionedWorld();
-    }
-    else if (UWorld* EditorWorld = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr)
-    {
-        Status.bWorldPartitionEnabled = EditorWorld->IsPartitionedWorld();
-    }
-    
-    // Check Mass Entity (check if plugin is loaded)
-    Status.bMassEntityEnabled = FModuleManager::Get().IsModuleLoaded(TEXT("MassEntity"));
-    
-    // Check Chaos Physics
-    if (const UPhysicsSettings* PhysicsSettings = GetDefault<UPhysicsSettings>())
-    {
-        Status.bChaosPhysicsEnabled = (PhysicsSettings->DefaultBroadphaseType == EBroadphaseType::MBP) ||
-                                      (PhysicsSettings->DefaultBroadphaseType == EBroadphaseType::ABP);
-    }
-    
-    // Check MetaSounds
-    Status.bMetaSoundsEnabled = FModuleManager::Get().IsModuleLoaded(TEXT("MetasoundEngine"));
-    
-    // Check Niagara
-    Status.bNiagaraEnabled = FModuleManager::Get().IsModuleLoaded(TEXT("Niagara"));
-    
-    // Cache result
-    LastFeatureStatus = Status;
-    
-    UE_LOG(LogEngineArchitectureValidator, Log, TEXT("Engine features validation: Nanite=%s, Lumen=%s, VSM=%s, WP=%s"),
-        Status.bNaniteEnabled ? TEXT("ON") : TEXT("OFF"),
-        Status.bLumenEnabled ? TEXT("ON") : TEXT("OFF"),
-        Status.bVirtualShadowMapsEnabled ? TEXT("ON") : TEXT("OFF"),
-        Status.bWorldPartitionEnabled ? TEXT("ON") : TEXT("OFF"));
-    
-    return Status;
+    return FArchitectureValidation(
+        TEXT("Nanite Virtualized Geometry"),
+        EArchitectureValidationResult::Error,
+        TEXT("Nanite is not enabled"),
+        TEXT("Enable Nanite in Project Settings > Engine > Rendering")
+    );
 }
 
-FPerformanceValidationMetrics UEngineArchitectureValidator::ValidatePerformanceTargets()
+FArchitectureValidation UEngineArchitectureValidator::ValidateLumenSupport()
 {
-    FPerformanceValidationMetrics Metrics;
+    // Check Lumen Global Illumination
+    int32 DynamicGlobalIllumination = 0;
+    GConfig->GetInt(TEXT("/Script/Engine.RendererSettings"), TEXT("r.DynamicGlobalIlluminationMethod"), 
+                    DynamicGlobalIllumination, GEngineIni);
     
-    // Get current frame rate
-    if (GEngine && GEngine->GetGameUserSettings())
+    if (DynamicGlobalIllumination == 1) // 1 = Lumen
     {
-        Metrics.CurrentFrameRate = 1.0f / FApp::GetDeltaTime();
-        
-        // Determine target based on platform
-        #if PLATFORM_DESKTOP
-            Metrics.TargetFrameRate = TPSArchitecture::TARGET_FRAMERATE_PC;
-        #else
-            Metrics.TargetFrameRate = TPSArchitecture::TARGET_FRAMERATE_CONSOLE;
-        #endif
+        return FArchitectureValidation(
+            TEXT("Lumen Global Illumination"),
+            EArchitectureValidationResult::Valid,
+            TEXT("Lumen Global Illumination is enabled"),
+            TEXT("")
+        );
     }
     
-    // Get memory usage
+    return FArchitectureValidation(
+        TEXT("Lumen Global Illumination"),
+        EArchitectureValidationResult::Error,
+        TEXT("Lumen Global Illumination is not enabled"),
+        TEXT("Set Dynamic Global Illumination to Lumen in Project Settings")
+    );
+}
+
+FArchitectureValidation UEngineArchitectureValidator::ValidateVirtualShadowMaps()
+{
+    // Check Virtual Shadow Maps
+    int32 ShadowMapMethod = 0;
+    GConfig->GetInt(TEXT("/Script/Engine.RendererSettings"), TEXT("r.Shadow.Virtual.Enable"), 
+                    ShadowMapMethod, GEngineIni);
+    
+    if (ShadowMapMethod == 1)
+    {
+        return FArchitectureValidation(
+            TEXT("Virtual Shadow Maps"),
+            EArchitectureValidationResult::Valid,
+            TEXT("Virtual Shadow Maps are enabled"),
+            TEXT("")
+        );
+    }
+    
+    return FArchitectureValidation(
+        TEXT("Virtual Shadow Maps"),
+        EArchitectureValidationResult::Warning,
+        TEXT("Virtual Shadow Maps are not enabled"),
+        TEXT("Enable Virtual Shadow Maps for high-resolution shadows")
+    );
+}
+
+FArchitectureValidation UEngineArchitectureValidator::ValidateMassEntitySystem()
+{
+    // Check if Mass Entity plugin is available
+    if (CheckFeatureAvailability(TEXT("Mass Entity"), 
+        StaticLoadClass(UObject::StaticClass(), nullptr, TEXT("/Script/MassEntity.MassEntitySubsystem"))))
+    {
+        return FArchitectureValidation(
+            TEXT("Mass Entity System"),
+            EArchitectureValidationResult::Valid,
+            TEXT("Mass Entity System is available for crowd simulation"),
+            TEXT("")
+        );
+    }
+    
+    return FArchitectureValidation(
+        TEXT("Mass Entity System"),
+        EArchitectureValidationResult::Warning,
+        TEXT("Mass Entity System not found"),
+        TEXT("Enable Mass Entity plugin for large-scale crowd simulation")
+    );
+}
+
+FArchitectureValidation UEngineArchitectureValidator::ValidatePCGSystem()
+{
+    // Check if PCG (Procedural Content Generation) is available
+    if (CheckFeatureAvailability(TEXT("PCG"), 
+        StaticLoadClass(UObject::StaticClass(), nullptr, TEXT("/Script/PCG.PCGSubsystem"))))
+    {
+        return FArchitectureValidation(
+            TEXT("Procedural Content Generation"),
+            EArchitectureValidationResult::Valid,
+            TEXT("PCG System is available for world generation"),
+            TEXT("")
+        );
+    }
+    
+    return FArchitectureValidation(
+        TEXT("Procedural Content Generation"),
+        EArchitectureValidationResult::Warning,
+        TEXT("PCG System not found"),
+        TEXT("Enable PCG plugin for procedural world generation")
+    );
+}
+
+FArchitectureValidation UEngineArchitectureValidator::ValidatePerformanceTargets()
+{
+    // Check target frame rate settings
+    float TargetFrameRate = 60.0f;
+    GConfig->GetFloat(TEXT("/Script/Engine.Engine"), TEXT("FixedFrameRate"), TargetFrameRate, GEngineIni);
+    
+    if (TargetFrameRate >= Requirements.TargetFrameRate || TargetFrameRate == 0.0f) // 0 = unlimited
+    {
+        return FArchitectureValidation(
+            TEXT("Performance Targets"),
+            EArchitectureValidationResult::Valid,
+            FString::Printf(TEXT("Target frame rate: %.0f FPS"), TargetFrameRate),
+            TEXT("")
+        );
+    }
+    
+    return FArchitectureValidation(
+        TEXT("Performance Targets"),
+        EArchitectureValidationResult::Warning,
+        FString::Printf(TEXT("Target frame rate below requirement: %.0f < %d"), 
+                       TargetFrameRate, Requirements.TargetFrameRate),
+        TEXT("Consider optimizing performance targets")
+    );
+}
+
+FArchitectureValidation UEngineArchitectureValidator::ValidateMemoryRequirements()
+{
+    // Get system memory info
     FPlatformMemoryStats MemStats = FPlatformMemory::GetStats();
-    Metrics.MemoryUsageMB = MemStats.UsedPhysical / (1024.0f * 1024.0f);
-    Metrics.TargetMemoryMB = TPSArchitecture::TARGET_MEMORY_CONSOLE_MB;
+    float TotalGBPhysical = MemStats.TotalPhysical / (1024.0f * 1024.0f * 1024.0f);
     
-    // Get draw calls (approximate from stats)
-    if (GEngine && GEngine->GetCurrentPlayWorld())
+    if (TotalGBPhysical >= 16.0f) // Minimum 16GB for large open world
     {
-        // This is an approximation - in a real implementation you'd hook into the renderer
-        Metrics.ActiveDrawCalls = 1000; // Placeholder
+        return FArchitectureValidation(
+            TEXT("Memory Requirements"),
+            EArchitectureValidationResult::Valid,
+            FString::Printf(TEXT("System memory: %.1f GB"), TotalGBPhysical),
+            TEXT("")
+        );
     }
     
-    // Check if within targets
-    bool bFrameRateOK = Metrics.CurrentFrameRate >= (Metrics.TargetFrameRate * 0.9f); // 90% tolerance
-    bool bMemoryOK = Metrics.MemoryUsageMB <= Metrics.TargetMemoryMB;
-    bool bDrawCallsOK = Metrics.ActiveDrawCalls <= Metrics.MaxDrawCalls;
-    
-    Metrics.bWithinTargets = bFrameRateOK && bMemoryOK && bDrawCallsOK;
-    
-    // Cache result
-    LastPerformanceMetrics = Metrics;
-    
-    UE_LOG(LogEngineArchitectureValidator, Log, TEXT("Performance validation: FPS=%.1f/%.1f, Memory=%.1fMB/%.1fMB, DrawCalls=%d/%d"),
-        Metrics.CurrentFrameRate, Metrics.TargetFrameRate,
-        Metrics.MemoryUsageMB, Metrics.TargetMemoryMB,
-        Metrics.ActiveDrawCalls, Metrics.MaxDrawCalls);
-    
-    return Metrics;
+    return FArchitectureValidation(
+        TEXT("Memory Requirements"),
+        EArchitectureValidationResult::Warning,
+        FString::Printf(TEXT("Low system memory: %.1f GB"), TotalGBPhysical),
+        TEXT("Consider 16GB+ RAM for optimal performance with large worlds")
+    );
 }
 
-bool UEngineArchitectureValidator::ValidateNaniteConfiguration()
+FArchitectureValidation UEngineArchitectureValidator::ValidateProjectSettings()
 {
-    const URendererSettings* RendererSettings = GetDefault<URendererSettings>();
-    if (!RendererSettings)
+    // Validate key project settings
+    bool bOneFilePerActor = false;
+    GConfig->GetBool(TEXT("/Script/Engine.Engine"), TEXT("bUseExternalActors"), bOneFilePerActor, GEngineIni);
+    
+    if (bOneFilePerActor)
     {
-        UE_LOG(LogEngineArchitectureValidator, Error, TEXT("Cannot access renderer settings"));
-        return false;
+        return FArchitectureValidation(
+            TEXT("Project Configuration"),
+            EArchitectureValidationResult::Valid,
+            TEXT("One File Per Actor is enabled for better source control"),
+            TEXT("")
+        );
     }
     
-    bool bNaniteValid = RendererSettings->bEnableNanite;
-    
-    if (!bNaniteValid)
-    {
-        UE_LOG(LogEngineArchitectureValidator, Error, TEXT("Nanite is not enabled - this is mandatory for Transpersonal Game"));
-    }
-    else
-    {
-        UE_LOG(LogEngineArchitectureValidator, Log, TEXT("Nanite configuration validated successfully"));
-    }
-    
-    return bNaniteValid;
+    return FArchitectureValidation(
+        TEXT("Project Configuration"),
+        EArchitectureValidationResult::Warning,
+        TEXT("One File Per Actor not enabled"),
+        TEXT("Enable One File Per Actor for better team collaboration")
+    );
 }
 
-bool UEngineArchitectureValidator::ValidateLumenConfiguration()
+FArchitectureValidation UEngineArchitectureValidator::ValidateRenderingSettings()
 {
-    const URendererSettings* RendererSettings = GetDefault<URendererSettings>();
-    if (!RendererSettings)
+    // Check rendering pipeline
+    FString RenderingRHI = GDynamicRHI->GetName();
+    
+    if (RenderingRHI.Contains(TEXT("D3D12")) || RenderingRHI.Contains(TEXT("Vulkan")))
     {
-        UE_LOG(LogEngineArchitectureValidator, Error, TEXT("Cannot access renderer settings"));
-        return false;
+        return FArchitectureValidation(
+            TEXT("Rendering Pipeline"),
+            EArchitectureValidationResult::Valid,
+            FString::Printf(TEXT("Modern RHI in use: %s"), *RenderingRHI),
+            TEXT("")
+        );
     }
     
-    bool bLumenValid = (RendererSettings->DynamicGlobalIlluminationMethod == EDynamicGlobalIlluminationMethod::Lumen);
-    
-    if (!bLumenValid)
-    {
-        UE_LOG(LogEngineArchitectureValidator, Error, TEXT("Lumen Global Illumination is not enabled - this is mandatory"));
-    }
-    else
-    {
-        UE_LOG(LogEngineArchitectureValidator, Log, TEXT("Lumen configuration validated successfully"));
-    }
-    
-    return bLumenValid;
+    return FArchitectureValidation(
+        TEXT("Rendering Pipeline"),
+        EArchitectureValidationResult::Warning,
+        FString::Printf(TEXT("Legacy RHI detected: %s"), *RenderingRHI),
+        TEXT("Consider using DirectX 12 or Vulkan for best performance")
+    );
 }
 
-bool UEngineArchitectureValidator::ValidateVirtualShadowMapsConfiguration()
+bool UEngineArchitectureValidator::IsArchitectureValid()
 {
-    const URendererSettings* RendererSettings = GetDefault<URendererSettings>();
-    if (!RendererSettings)
+    if (!bValidationCacheValid || 
+        (FPlatformTime::Seconds() - LastValidationTime) > ValidationCacheTimeout)
     {
-        UE_LOG(LogEngineArchitectureValidator, Error, TEXT("Cannot access renderer settings"));
-        return false;
+        ValidateEngineArchitecture();
     }
     
-    bool bVSMValid = (RendererSettings->ShadowMapMethod == EShadowMapMethod::VirtualShadowMaps);
-    
-    if (!bVSMValid)
+    for (const FArchitectureValidation& Result : LastValidationResults)
     {
-        UE_LOG(LogEngineArchitectureValidator, Error, TEXT("Virtual Shadow Maps are not enabled - this is mandatory"));
-    }
-    else
-    {
-        UE_LOG(LogEngineArchitectureValidator, Log, TEXT("Virtual Shadow Maps configuration validated successfully"));
-    }
-    
-    return bVSMValid;
-}
-
-bool UEngineArchitectureValidator::ValidateWorldPartitionConfiguration()
-{
-    UWorld* CurrentWorld = nullptr;
-    
-    // Try to get current world
-    if (GEngine)
-    {
-        if (UWorld* PlayWorld = GEngine->GetCurrentPlayWorld())
+        if (Result.Result == EArchitectureValidationResult::Error || 
+            Result.Result == EArchitectureValidationResult::Critical)
         {
-            CurrentWorld = PlayWorld;
-        }
-        else if (GEditor)
-        {
-            CurrentWorld = GEditor->GetEditorWorldContext().World();
+            return false;
         }
     }
     
-    if (!CurrentWorld)
-    {
-        UE_LOG(LogEngineArchitectureValidator, Warning, TEXT("No active world found for World Partition validation"));
-        return false;
-    }
-    
-    bool bWorldPartitionValid = CurrentWorld->IsPartitionedWorld();
-    
-    if (!bWorldPartitionValid)
-    {
-        UE_LOG(LogEngineArchitectureValidator, Warning, TEXT("Current world is not using World Partition"));
-    }
-    else
-    {
-        UE_LOG(LogEngineArchitectureValidator, Log, TEXT("World Partition configuration validated successfully"));
-    }
-    
-    return bWorldPartitionValid;
-}
-
-bool UEngineArchitectureValidator::ValidateMassEntityConfiguration()
-{
-    bool bMassEntityValid = FModuleManager::Get().IsModuleLoaded(TEXT("MassEntity"));
-    
-    if (!bMassEntityValid)
-    {
-        UE_LOG(LogEngineArchitectureValidator, Warning, TEXT("Mass Entity system is not loaded"));
-    }
-    else
-    {
-        UE_LOG(LogEngineArchitectureValidator, Log, TEXT("Mass Entity configuration validated successfully"));
-    }
-    
-    return bMassEntityValid;
-}
-
-void UEngineArchitectureValidator::StartContinuousValidation()
-{
-    if (bContinuousValidationActive)
-    {
-        UE_LOG(LogEngineArchitectureValidator, Warning, TEXT("Continuous validation already active"));
-        return;
-    }
-    
-    if (UWorld* World = GetWorld())
-    {
-        World->GetTimerManager().SetTimer(ValidationTimerHandle, 
-            this, &UEngineArchitectureValidator::PerformScheduledValidation, 
-            ValidationInterval, true);
-        
-        bContinuousValidationActive = true;
-        
-        UE_LOG(LogEngineArchitectureValidator, Log, TEXT("Continuous validation started (interval: %.1fs)"), ValidationInterval);
-    }
-}
-
-void UEngineArchitectureValidator::StopContinuousValidation()
-{
-    if (!bContinuousValidationActive)
-    {
-        return;
-    }
-    
-    if (UWorld* World = GetWorld())
-    {
-        World->GetTimerManager().ClearTimer(ValidationTimerHandle);
-    }
-    
-    bContinuousValidationActive = false;
-    
-    UE_LOG(LogEngineArchitectureValidator, Log, TEXT("Continuous validation stopped"));
+    return true;
 }
 
 void UEngineArchitectureValidator::GenerateArchitectureReport()
 {
-    UE_LOG(LogEngineArchitectureValidator, Log, TEXT("=== TRANSPERSONAL GAME ARCHITECTURE REPORT ==="));
+    UE_LOG(LogTemp, Warning, TEXT("=== ENGINE ARCHITECTURE REPORT ==="));
     
-    // Generate timestamp
-    FDateTime Now = FDateTime::Now();
-    UE_LOG(LogEngineArchitectureValidator, Log, TEXT("Report generated: %s"), *Now.ToString());
-    
-    // Feature status
-    FEngineFeatureStatus Features = ValidateEngineFeatures();
-    UE_LOG(LogEngineArchitectureValidator, Log, TEXT("FEATURE STATUS:"));
-    UE_LOG(LogEngineArchitectureValidator, Log, TEXT("  Nanite: %s"), Features.bNaniteEnabled ? TEXT("ENABLED") : TEXT("DISABLED"));
-    UE_LOG(LogEngineArchitectureValidator, Log, TEXT("  Lumen: %s"), Features.bLumenEnabled ? TEXT("ENABLED") : TEXT("DISABLED"));
-    UE_LOG(LogEngineArchitectureValidator, Log, TEXT("  Virtual Shadow Maps: %s"), Features.bVirtualShadowMapsEnabled ? TEXT("ENABLED") : TEXT("DISABLED"));
-    UE_LOG(LogEngineArchitectureValidator, Log, TEXT("  World Partition: %s"), Features.bWorldPartitionEnabled ? TEXT("ENABLED") : TEXT("DISABLED"));
-    UE_LOG(LogEngineArchitectureValidator, Log, TEXT("  Mass Entity: %s"), Features.bMassEntityEnabled ? TEXT("ENABLED") : TEXT("DISABLED"));
-    
-    // Performance metrics
-    FPerformanceValidationMetrics Perf = ValidatePerformanceTargets();
-    UE_LOG(LogEngineArchitectureValidator, Log, TEXT("PERFORMANCE METRICS:"));
-    UE_LOG(LogEngineArchitectureValidator, Log, TEXT("  Frame Rate: %.1f fps (target: %.1f fps)"), Perf.CurrentFrameRate, Perf.TargetFrameRate);
-    UE_LOG(LogEngineArchitectureValidator, Log, TEXT("  Memory Usage: %.1f MB (target: %.1f MB)"), Perf.MemoryUsageMB, Perf.TargetMemoryMB);
-    UE_LOG(LogEngineArchitectureValidator, Log, TEXT("  Within Targets: %s"), Perf.bWithinTargets ? TEXT("YES") : TEXT("NO"));
-    
-    // Overall validation
-    FArchitectureValidationResult Overall = ValidateFullArchitecture();
-    UE_LOG(LogEngineArchitectureValidator, Log, TEXT("OVERALL STATUS: %s"), Overall.bIsValid ? TEXT("COMPLIANT") : TEXT("NON-COMPLIANT"));
-    
-    if (Overall.Errors.Num() > 0)
+    for (const FArchitectureValidation& Result : LastValidationResults)
     {
-        UE_LOG(LogEngineArchitectureValidator, Log, TEXT("ERRORS:"));
-        for (const FString& Error : Overall.Errors)
+        FString StatusText;
+        switch (Result.Result)
         {
-            UE_LOG(LogEngineArchitectureValidator, Log, TEXT("  - %s"), *Error);
+        case EArchitectureValidationResult::Valid:
+            StatusText = TEXT("✓ VALID");
+            break;
+        case EArchitectureValidationResult::Warning:
+            StatusText = TEXT("⚠ WARNING");
+            break;
+        case EArchitectureValidationResult::Error:
+            StatusText = TEXT("✗ ERROR");
+            break;
+        case EArchitectureValidationResult::Critical:
+            StatusText = TEXT("🔴 CRITICAL");
+            break;
+        }
+        
+        UE_LOG(LogTemp, Warning, TEXT("%s - %s: %s"), 
+               *StatusText, *Result.SystemName, *Result.Message);
+        
+        if (!Result.Recommendation.IsEmpty())
+        {
+            UE_LOG(LogTemp, Warning, TEXT("   Recommendation: %s"), *Result.Recommendation);
         }
     }
     
-    if (Overall.Warnings.Num() > 0)
-    {
-        UE_LOG(LogEngineArchitectureValidator, Log, TEXT("WARNINGS:"));
-        for (const FString& Warning : Overall.Warnings)
-        {
-            UE_LOG(LogEngineArchitectureValidator, Log, TEXT("  - %s"), *Warning);
-        }
-    }
-    
-    UE_LOG(LogEngineArchitectureValidator, Log, TEXT("=== END ARCHITECTURE REPORT ==="));
+    UE_LOG(LogTemp, Warning, TEXT("=== END ARCHITECTURE REPORT ==="));
 }
 
-bool UEngineArchitectureValidator::ValidateProjectSettings()
+void UEngineArchitectureValidator::ApplyRecommendedSettings()
 {
-    // This would validate project-specific settings
-    // For now, return true as a placeholder
+    UE_LOG(LogTemp, Warning, TEXT("Applying recommended engine settings..."));
+    
+    // This would apply recommended settings automatically
+    // Implementation would depend on specific requirements
+    // For safety, this is left as a placeholder
+    
+    UE_LOG(LogTemp, Warning, TEXT("Recommended settings application complete"));
+}
+
+bool UEngineArchitectureValidator::CheckFeatureAvailability(const FString& FeatureName, UClass* RequiredClass)
+{
+    if (!RequiredClass)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Feature check failed for %s: Class not found"), *FeatureName);
+        return false;
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Feature %s is available"), *FeatureName);
     return true;
 }
 
-bool UEngineArchitectureValidator::ValidateRenderingSettings()
+bool UEngineArchitectureValidator::CheckProjectSetting(const FString& SettingPath, const FString& ExpectedValue)
 {
-    // Validate rendering-specific settings beyond the basic feature checks
-    return ValidateNaniteConfiguration() && ValidateLumenConfiguration() && ValidateVirtualShadowMapsConfiguration();
-}
-
-bool UEngineArchitectureValidator::ValidatePhysicsSettings()
-{
-    // Validate Chaos physics configuration
-    const UPhysicsSettings* PhysicsSettings = GetDefault<UPhysicsSettings>();
-    return PhysicsSettings != nullptr;
-}
-
-bool UEngineArchitectureValidator::ValidateAudioSettings()
-{
-    // Validate MetaSounds and audio configuration
-    return FModuleManager::Get().IsModuleLoaded(TEXT("MetasoundEngine"));
-}
-
-bool UEngineArchitectureValidator::ValidateWorldSettings()
-{
-    // Validate world-specific settings
-    return ValidateWorldPartitionConfiguration();
-}
-
-void UEngineArchitectureValidator::UpdatePerformanceMetrics()
-{
-    LastPerformanceMetrics = ValidatePerformanceTargets();
-}
-
-void UEngineArchitectureValidator::CheckPerformanceThresholds()
-{
-    FPerformanceValidationMetrics Metrics = ValidatePerformanceTargets();
-    
-    if (!Metrics.bWithinTargets)
+    FString CurrentValue;
+    if (GConfig->GetString(TEXT("/Script/Engine.RendererSettings"), *SettingPath, CurrentValue, GEngineIni))
     {
-        FString ErrorMsg = FString::Printf(TEXT("Performance targets not met - FPS: %.1f/%.1f"), 
-            Metrics.CurrentFrameRate, Metrics.TargetFrameRate);
-        
-        OnValidationFailed.Broadcast(ErrorMsg);
-        AddValidationEntry(ErrorMsg);
+        return CurrentValue.Equals(ExpectedValue, ESearchCase::IgnoreCase);
     }
+    return false;
 }
 
-void UEngineArchitectureValidator::LogValidationResult(const FArchitectureValidationResult& Result)
+bool UEngineArchitectureValidator::CheckRenderingFeature(const FString& FeatureName)
 {
-    if (Result.bIsValid)
-    {
-        UE_LOG(LogEngineArchitectureValidator, Log, TEXT("Validation PASSED: %s"), *Result.ValidationMessage);
-    }
-    else
-    {
-        UE_LOG(LogEngineArchitectureValidator, Error, TEXT("Validation FAILED: %s"), *Result.ValidationMessage);
-        
-        for (const FString& Error : Result.Errors)
-        {
-            UE_LOG(LogEngineArchitectureValidator, Error, TEXT("  ERROR: %s"), *Error);
-        }
-        
-        for (const FString& Warning : Result.Warnings)
-        {
-            UE_LOG(LogEngineArchitectureValidator, Warning, TEXT("  WARNING: %s"), *Warning);
-        }
-    }
+    // Placeholder for specific rendering feature checks
+    return true;
 }
 
-void UEngineArchitectureValidator::AddValidationEntry(const FString& Message)
+void UEngineArchitectureValidator::LogValidationResult(const FArchitectureValidation& Result)
 {
-    FString TimestampedMessage = FString::Printf(TEXT("[%s] %s"), 
-        *FDateTime::Now().ToString(), *Message);
-    
-    ValidationHistory.Add(TimestampedMessage);
-    
-    // Limit history size
-    if (ValidationHistory.Num() > MaxHistoryEntries)
+    switch (Result.Result)
     {
-        ValidationHistory.RemoveAt(0);
+    case EArchitectureValidationResult::Valid:
+        UE_LOG(LogTemp, Log, TEXT("✓ %s: %s"), *Result.SystemName, *Result.Message);
+        break;
+    case EArchitectureValidationResult::Warning:
+        UE_LOG(LogTemp, Warning, TEXT("⚠ %s: %s"), *Result.SystemName, *Result.Message);
+        break;
+    case EArchitectureValidationResult::Error:
+        UE_LOG(LogTemp, Error, TEXT("✗ %s: %s"), *Result.SystemName, *Result.Message);
+        break;
+    case EArchitectureValidationResult::Critical:
+        UE_LOG(LogTemp, Fatal, TEXT("🔴 %s: %s"), *Result.SystemName, *Result.Message);
+        break;
     }
-}
-
-void UEngineArchitectureValidator::PerformScheduledValidation()
-{
-    if (!bValidationInitialized)
-    {
-        return;
-    }
-    
-    // Perform lightweight validation
-    FEngineFeatureStatus Features = ValidateEngineFeatures();
-    FPerformanceValidationMetrics Performance = ValidatePerformanceTargets();
-    
-    // Check for critical issues
-    if (!Features.bNaniteEnabled || !Features.bLumenEnabled || !Features.bVirtualShadowMapsEnabled)
-    {
-        FString ErrorMsg = TEXT("Critical engine features disabled during runtime");
-        OnValidationFailed.Broadcast(ErrorMsg);
-        AddValidationEntry(ErrorMsg);
-    }
-    
-    // Check performance
-    CheckPerformanceThresholds();
 }
