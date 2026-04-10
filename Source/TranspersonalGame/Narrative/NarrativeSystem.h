@@ -3,241 +3,112 @@
 #include "CoreMinimal.h"
 #include "Engine/GameInstanceSubsystem.h"
 #include "Engine/DataTable.h"
-#include "GameplayTagContainer.h"
-#include "Sound/SoundWave.h"
 #include "NarrativeSystem.generated.h"
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnDialogueTriggered, FName, DialogueID, AActor*, Speaker);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnNarrativeEvent, FGameplayTag, EventTag);
-
-/**
- * Dialogue Voice Types for different character archetypes
- */
-UENUM(BlueprintType)
-enum class EDialogueVoiceType : uint8
-{
-    Protagonist     UMETA(DisplayName = "Dr. Protagonist"),
-    DinosaurAlpha   UMETA(DisplayName = "Dinosaur Alpha"),
-    DinosaurBeta    UMETA(DisplayName = "Dinosaur Beta"),
-    Environment     UMETA(DisplayName = "Environment"),
-    Narrator        UMETA(DisplayName = "Narrator")
-};
-
-/**
- * Emotional states for contextual dialogue
- */
-UENUM(BlueprintType)
-enum class EEmotionalState : uint8
-{
-    Calm        UMETA(DisplayName = "Calm"),
-    Anxious     UMETA(DisplayName = "Anxious"),
-    Terrified   UMETA(DisplayName = "Terrified"),
-    Curious     UMETA(DisplayName = "Curious"),
-    Determined  UMETA(DisplayName = "Determined"),
-    Exhausted   UMETA(DisplayName = "Exhausted"),
-    Hopeful     UMETA(DisplayName = "Hopeful")
-};
-
-/**
- * Data structure for dialogue context
- */
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FDialogueContext : public FTableRowBase
+struct TRANSPERSONALGAME_API FDialogueEntry : public FTableRowBase
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FName DialogueID;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    EDialogueVoiceType SpeakerType;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    EEmotionalState EmotionalContext;
+    FString SpeakerName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
     FText DialogueText;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FText SubtitleOverride;
+    FString AudioPath;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    TSoftObjectPtr<USoundWave> AudioClip;
+    TArray<FString> ResponseOptions;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FGameplayTagContainer RequiredTags;
+    FString NextDialogueID;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    float Priority = 1.0f;
+    bool bIsQuestDialogue;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    bool bIsInternalMonologue = false;
-
-    FDialogueContext()
-    {
-        DialogueID = NAME_None;
-        SpeakerType = EDialogueVoiceType::Protagonist;
-        EmotionalContext = EEmotionalState::Calm;
-        Priority = 1.0f;
-        bIsInternalMonologue = false;
-    }
+    FString QuestID;
 };
 
-/**
- * Narrative beats for story progression
- */
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarrativeBeat : public FTableRowBase
+struct TRANSPERSONALGAME_API FNarrativeEvent
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FName BeatID;
+    FString EventID;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FText BeatTitle;
+    FText EventDescription;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FText BeatDescription;
+    bool bIsTriggered;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FGameplayTagContainer TriggerConditions;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FGameplayTagContainer CompletionTags;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    TArray<FName> DialogueSequence;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    int32 StoryWeight = 1;
-
-    FNarrativeBeat()
-    {
-        BeatID = NAME_None;
-        StoryWeight = 1;
-    }
+    TArray<FString> Prerequisites;
 };
 
-/**
- * Main Narrative System - manages story progression, dialogue, and character development
- */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnDialogueStarted, const FString&, DialogueID, const FString&, SpeakerName);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDialogueEnded, const FString&, DialogueID);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnNarrativeEvent, const FString&, EventID, const FText&, EventDescription);
+
 UCLASS()
 class TRANSPERSONALGAME_API UNarrativeSystem : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
-    UNarrativeSystem();
-
-    // Subsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
-
-    // Dialogue System
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void TriggerDialogue(FName DialogueID, AActor* Speaker, EEmotionalState EmotionalContext = EEmotionalState::Calm);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    bool CanTriggerDialogue(FName DialogueID, const FGameplayTagContainer& CurrentTags) const;
+    void StartDialogue(const FString& DialogueID, AActor* Speaker = nullptr);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void PlayInternalMonologue(FName DialogueID, EEmotionalState EmotionalContext);
-
-    // Story Progression
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void AdvanceNarrativeBeat(FName BeatID);
+    void EndDialogue();
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    bool IsNarrativeBeatActive(FName BeatID) const;
+    void SelectDialogueResponse(int32 ResponseIndex);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void CheckNarrativeProgression(const FGameplayTagContainer& CurrentGameState);
-
-    // Character Development
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void UpdateProtagonistState(EEmotionalState NewState, const FString& Reason);
+    void TriggerNarrativeEvent(const FString& EventID);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    EEmotionalState GetCurrentEmotionalState() const { return CurrentEmotionalState; }
-
-    // Discovery System
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void RegisterDiscovery(FGameplayTag DiscoveryTag, const FString& DiscoveryDescription);
+    bool IsEventTriggered(const FString& EventID) const;
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    TArray<FString> GetDiscoveryLog() const { return DiscoveryLog; }
+    FDialogueEntry GetDialogueEntry(const FString& DialogueID) const;
 
-    // Events
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void LoadDialogueTable(UDataTable* DialogueDataTable);
+
     UPROPERTY(BlueprintAssignable, Category = "Narrative")
-    FOnDialogueTriggered OnDialogueTriggered;
+    FOnDialogueStarted OnDialogueStarted;
+
+    UPROPERTY(BlueprintAssignable, Category = "Narrative")
+    FOnDialogueEnded OnDialogueEnded;
 
     UPROPERTY(BlueprintAssignable, Category = "Narrative")
     FOnNarrativeEvent OnNarrativeEvent;
 
 protected:
-    // Data Tables
-    UPROPERTY(EditDefaultsOnly, Category = "Narrative")
-    TSoftObjectPtr<UDataTable> DialogueDataTable;
+    UPROPERTY()
+    UDataTable* DialogueTable;
 
-    UPROPERTY(EditDefaultsOnly, Category = "Narrative")
-    TSoftObjectPtr<UDataTable> NarrativeBeatsDataTable;
+    UPROPERTY()
+    TMap<FString, FNarrativeEvent> NarrativeEvents;
 
-    // Current State
-    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
-    EEmotionalState CurrentEmotionalState;
+    UPROPERTY()
+    FString CurrentDialogueID;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
-    TArray<FName> ActiveNarrativeBeats;
+    UPROPERTY()
+    AActor* CurrentSpeaker;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
-    TArray<FName> CompletedNarrativeBeats;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
-    TArray<FString> DiscoveryLog;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
-    FGameplayTagContainer CurrentStoryTags;
+    UPROPERTY()
+    bool bIsDialogueActive;
 
 private:
-    void LoadNarrativeData();
-    FDialogueContext* FindDialogueContext(FName DialogueID, EEmotionalState EmotionalContext) const;
-    void ProcessNarrativeBeatCompletion(const FNarrativeBeat& Beat);
-};
-
-/**
- * Component for actors that can participate in dialogue
- */
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UDialogueComponent : public UActorComponent
-{
-    GENERATED_BODY()
-
-public:
-    UDialogueComponent();
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void InitiateDialogue(FName DialogueID, AActor* Target = nullptr);
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void SetEmotionalState(EEmotionalState NewState);
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void AddDialogueTag(FGameplayTag Tag);
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void RemoveDialogueTag(FGameplayTag Tag);
-
-protected:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    EDialogueVoiceType VoiceType;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    EEmotionalState CurrentEmotionalState;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FGameplayTagContainer DialogueTags;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    TArray<FName> AvailableDialogues;
+    void InitializeNarrativeEvents();
+    void ProcessDialogueLogic(const FString& DialogueID);
 };
