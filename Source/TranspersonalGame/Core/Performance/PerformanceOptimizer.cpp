@@ -1,642 +1,455 @@
-// Copyright Transpersonal Game Studio. All Rights Reserved.
-
 #include "PerformanceOptimizer.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "HAL/IConsoleManager.h"
-#include "Stats/StatsHierarchical.h"
-#include "RenderingThread.h"
-#include "Engine/GameViewportClient.h"
-#include "Kismet/GameplayStatics.h"
-#include "PhysicsEngine/PhysicsSettings.h"
-#include "Engine/RendererSettings.h"
+#include "Engine/Engine.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMeshActor.h"
 #include "HAL/PlatformMemory.h"
-#include "Misc/ConfigCacheIni.h"
+#include "Stats/Stats.h"
+#include "RenderingThread.h"
+#include "PhysicsEngine/PhysicsSettings.h"
+#include "Kismet/GameplayStatics.h"
+#include "Engine/GameViewportClient.h"
 
-DEFINE_LOG_CATEGORY(LogPerformanceOptimizer);
-
-DECLARE_CYCLE_STAT(TEXT("Performance Optimization"), STAT_PerformanceOptimization, STATGROUP_Game);
-DECLARE_CYCLE_STAT(TEXT("Metrics Collection"), STAT_MetricsCollection, STATGROUP_Game);
-DECLARE_CYCLE_STAT(TEXT("Quality Adjustment"), STAT_QualityAdjustment, STATGROUP_Game);
+// Initialize static instance
+UPerformanceOptimizer* UPerformanceOptimizer::Instance = nullptr;
 
 UPerformanceOptimizer::UPerformanceOptimizer()
-    : bOptimizationActive(false)
-    , LastOptimizationTime(0.0f)
-    , CPUBudgetMS(16.67f) // 60 FPS target
-    , GPUBudgetMS(16.67f)
-    , MemoryBudgetMB(4096.0f)
-    , bDynamicQualityEnabled(true)
-    , CurrentQualityScale(1.0f)
-    , QualityScaleTarget(1.0f)
 {
-    // Initialize default optimization settings
-    OptimizationSettings.OptimizationLevel = EPerformanceOptimizationLevel::Balanced;
-    OptimizationSettings.TargetPlatform = EPerformanceTargetPlatform::HighEndPC;
-    OptimizationSettings.TargetFrameRate = 60.0f;
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 0.1f; // Update 10 times per second
     
-    bEnableAutomaticOptimization = true;
-    OptimizationInterval = 1.0f; // Check every second
-    bEnableDetailedLogging = false;
+    // Default settings optimized for 60fps PC target
+    TargetFrameRate = 60.0f;
+    CurrentPerformanceLevel = EPerformanceLevel::Ultra;
+    bAutoScalingEnabled = true;
+    bPhysicsLODEnabled = true;
+    MaxActivePhysicsObjects = 100;
+    PhysicsLODDistance = 2000.0f; // 20 meters
+    
+    TimeSinceLastOptimization = 0.0f;
+    
+    // Initialize frame time history
+    FrameTimeHistory.Reserve(MaxFrameTimeHistory);
 }
 
-void UPerformanceOptimizer::Initialize(FSubsystemCollectionBase& Collection)
+void UPerformanceOptimizer::BeginPlay()
 {
-    Super::Initialize(Collection);
+    Super::BeginPlay();
     
-    UE_LOG(LogPerformanceOptimizer, Log, TEXT("Performance Optimizer initialized"));
+    // Set singleton instance
+    Instance = this;
     
-    // Set initial performance budgets based on platform
-    SetPerformanceBudgets(CPUBudgetMS, GPUBudgetMS, MemoryBudgetMB);
+    InitializeOptimizer();
+    
+    UE_LOG(LogTemp, Log, TEXT("PerformanceOptimizer: System initialized with target %f FPS"), TargetFrameRate);
 }
 
-void UPerformanceOptimizer::Deinitialize()
+void UPerformanceOptimizer::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-    StopOptimization();
-    Super::Deinitialize();
-    
-    UE_LOG(LogPerformanceOptimizer, Log, TEXT("Performance Optimizer deinitialized"));
-}
-
-bool UPerformanceOptimizer::ShouldCreateSubsystem(UObject* Outer) const
-{
-    return true;
-}
-
-void UPerformanceOptimizer::OnWorldBeginPlay(UWorld& InWorld)
-{
-    Super::OnWorldBeginPlay(InWorld);
-    
-    if (bEnableAutomaticOptimization)
+    // Clear singleton instance
+    if (Instance == this)
     {
-        StartOptimization();
+        Instance = nullptr;
+    }
+    
+    Super::EndPlay(EndPlayReason);
+}
+
+void UPerformanceOptimizer::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    
+    // Update performance metrics
+    UpdatePerformanceMetrics(DeltaTime);
+    
+    // Check if we need to optimize
+    TimeSinceLastOptimization += DeltaTime;
+    if (TimeSinceLastOptimization >= OptimizationInterval)
+    {
+        if (bAutoScalingEnabled)
+        {
+            AnalyzeAndOptimize();
+        }
+        TimeSinceLastOptimization = 0.0f;
     }
 }
 
-void UPerformanceOptimizer::StartOptimization()
+void UPerformanceOptimizer::InitializeOptimizer()
 {
-    SCOPE_CYCLE_COUNTER(STAT_PerformanceOptimization);
+    UE_LOG(LogTemp, Log, TEXT("PerformanceOptimizer: Initializing performance optimization system"));
     
-    if (bOptimizationActive)
+    // Set initial physics settings for optimal performance
+    if (UPhysicsSettings* PhysicsSettings = UPhysicsSettings::Get())
     {
-        return;
-    }
-    
-    bOptimizationActive = true;
-    
-    UWorld* World = GetWorld();
-    if (World)
-    {
-        // Start optimization timer
-        World->GetTimerManager().SetTimer(
-            OptimizationTimerHandle,
-            FTimerDelegate::CreateUObject(this, &UPerformanceOptimizer::UpdatePerformanceMetrics),
-            OptimizationInterval,
-            true
-        );
+        // Optimize physics timestep for target framerate
+        float OptimalSubstepTime = 1.0f / (TargetFrameRate * 2.0f); // Half of target frame time
+        PhysicsSettings->MaxSubstepDeltaTime = OptimalSubstepTime;
+        PhysicsSettings->MaxSubsteps = 6;
+        PhysicsSettings->bSyncSceneQueryAndPhysicsSimulation = true;
         
-        UE_LOG(LogPerformanceOptimizer, Log, TEXT("Performance optimization started - Target: %.1f FPS"), 
-               OptimizationSettings.TargetFrameRate);
+        UE_LOG(LogTemp, Log, TEXT("PerformanceOptimizer: Physics settings optimized"));
+    }
+    
+    // Initialize performance level based on current hardware
+    SetPerformanceLevel(EPerformanceLevel::Ultra);
+}
+
+FPerformanceMetrics UPerformanceOptimizer::GetPerformanceMetrics() const
+{
+    return CurrentMetrics;
+}
+
+void UPerformanceOptimizer::SetTargetFrameRate(float TargetFPS)
+{
+    TargetFrameRate = FMath::Clamp(TargetFPS, 15.0f, 120.0f);
+    UE_LOG(LogTemp, Log, TEXT("PerformanceOptimizer: Target frame rate set to %f FPS"), TargetFrameRate);
+}
+
+void UPerformanceOptimizer::SetPerformanceLevel(EPerformanceLevel Level)
+{
+    if (CurrentPerformanceLevel != Level)
+    {
+        CurrentPerformanceLevel = Level;
+        AdjustRenderingQuality(Level);
+        
+        UE_LOG(LogTemp, Log, TEXT("PerformanceOptimizer: Performance level changed to %d"), (int32)Level);
     }
 }
 
-void UPerformanceOptimizer::StopOptimization()
+void UPerformanceOptimizer::SetAutoScalingEnabled(bool bEnabled)
 {
-    if (!bOptimizationActive)
+    bAutoScalingEnabled = bEnabled;
+    UE_LOG(LogTemp, Log, TEXT("PerformanceOptimizer: Auto-scaling %s"), bEnabled ? TEXT("enabled") : TEXT("disabled"));
+}
+
+void UPerformanceOptimizer::OptimizePhysicsObjects()
+{
+    if (!bPhysicsLODEnabled)
     {
         return;
     }
     
-    bOptimizationActive = false;
-    
     UWorld* World = GetWorld();
-    if (World)
+    if (!World)
     {
-        World->GetTimerManager().ClearTimer(OptimizationTimerHandle);
-        World->GetTimerManager().ClearTimer(ProfilingTimerHandle);
+        return;
     }
     
-    UE_LOG(LogPerformanceOptimizer, Log, TEXT("Performance optimization stopped"));
-}
-
-FPerformanceMetrics UPerformanceOptimizer::GetCurrentMetrics()
-{
-    SCOPE_CYCLE_COUNTER(STAT_MetricsCollection);
+    // Get player location for distance calculations
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(World, 0);
+    FVector PlayerLocation = PlayerPawn ? PlayerPawn->GetActorLocation() : FVector::ZeroVector;
     
-    FPerformanceMetrics Metrics;
+    // Find all physics objects and optimize based on distance
+    TArray<AActor*> AllActors;
+    UGameplayStatics::GetAllActorsOfClass(World, AStaticMeshActor::StaticClass(), AllActors);
     
-    // Collect frame timing
-    Metrics.FrameTime = FApp::GetDeltaTime() * 1000.0f; // Convert to milliseconds
-    Metrics.GameThreadTime = GetGameThreadTime();
-    Metrics.RenderThreadTime = GetRenderThreadTime();
-    Metrics.GPUTime = GetGPUTime();
-    Metrics.PhysicsTime = GetPhysicsTime();
+    int32 OptimizedCount = 0;
+    int32 ActivePhysicsCount = 0;
     
-    // Collect rendering stats
-    Metrics.DrawCalls = GetDrawCallCount();
-    Metrics.Triangles = GetTriangleCount();
-    
-    // Collect memory usage
-    Metrics.MemoryUsageMB = GetMemoryUsage();
-    
-    // Collect physics stats
-    Metrics.ActivePhysicsObjects = GetActivePhysicsObjectCount();
-    
-    // Collect quality settings
-    Metrics.LODBias = GetConsoleVariableFloat(TEXT("r.StaticMeshLODBias"));
-    Metrics.ShadowQuality = GetConsoleVariableFloat(TEXT("sg.ShadowQuality"));
-    Metrics.TextureQuality = GetConsoleVariableFloat(TEXT("sg.TextureQuality"));
-    Metrics.EffectsQuality = GetConsoleVariableFloat(TEXT("sg.EffectsQuality"));
-    
-    return Metrics;
-}
-
-void UPerformanceOptimizer::ApplyOptimizationPreset(EPerformanceOptimizationLevel Level, EPerformanceTargetPlatform Platform)
-{
-    OptimizationSettings.OptimizationLevel = Level;
-    OptimizationSettings.TargetPlatform = Platform;
-    
-    // Apply platform-specific settings
-    switch (Platform)
+    for (AActor* Actor : AllActors)
     {
-        case EPerformanceTargetPlatform::HighEndPC:
-            OptimizationSettings.TargetFrameRate = 60.0f;
-            OptimizationSettings.MaxMemoryUsageMB = 8192.0f;
-            ApplyPCOptimizations();
-            break;
-            
-        case EPerformanceTargetPlatform::MidRangePC:
-            OptimizationSettings.TargetFrameRate = 60.0f;
-            OptimizationSettings.MaxMemoryUsageMB = 4096.0f;
-            ApplyPCOptimizations();
-            break;
-            
-        case EPerformanceTargetPlatform::Console:
-            OptimizationSettings.TargetFrameRate = 30.0f;
-            OptimizationSettings.MaxMemoryUsageMB = 6144.0f;
-            ApplyConsoleOptimizations();
-            break;
-            
-        case EPerformanceTargetPlatform::Mobile:
-            OptimizationSettings.TargetFrameRate = 30.0f;
-            OptimizationSettings.MaxMemoryUsageMB = 2048.0f;
-            ApplyMobileOptimizations();
-            break;
-            
-        case EPerformanceTargetPlatform::VR:
-            OptimizationSettings.TargetFrameRate = 90.0f;
-            OptimizationSettings.MaxMemoryUsageMB = 4096.0f;
-            ApplyVROptimizations();
-            break;
+        if (AStaticMeshActor* MeshActor = Cast<AStaticMeshActor>(Actor))
+        {
+            UStaticMeshComponent* MeshComp = MeshActor->GetStaticMeshComponent();
+            if (MeshComp && MeshComp->IsSimulatingPhysics())
+            {
+                float Distance = FVector::Dist(Actor->GetActorLocation(), PlayerLocation);
+                
+                // Apply LOD based on distance
+                if (Distance > PhysicsLODDistance)
+                {
+                    // Disable physics for very distant objects
+                    MeshComp->SetSimulatePhysics(false);
+                    MeshComp->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+                    OptimizedCount++;
+                }
+                else if (Distance > PhysicsLODDistance * 0.5f)
+                {
+                    // Reduce physics quality for medium distance objects
+                    MeshComp->SetMassOverrideInKg(NAME_None, 5.0f, true);
+                }
+                else
+                {
+                    // Full physics for nearby objects
+                    ActivePhysicsCount++;
+                }
+            }
+        }
     }
     
-    // Apply optimization level settings
+    CurrentMetrics.ActivePhysicsObjects = ActivePhysicsCount;
+    
+    UE_LOG(LogTemp, Log, TEXT("PerformanceOptimizer: Optimized %d physics objects, %d remain active"), 
+           OptimizedCount, ActivePhysicsCount);
+}
+
+void UPerformanceOptimizer::AdjustRenderingQuality(EPerformanceLevel Level)
+{
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return;
+    }
+    
+    // Adjust shadow quality
+    AdjustShadowQuality(Level);
+    
+    // Adjust LOD bias based on performance level
+    float LODBias = 0.0f;
+    float ViewDistanceScale = 1.0f;
+    
     switch (Level)
     {
-        case EPerformanceOptimizationLevel::Conservative:
-            SetConsoleVariable(TEXT("r.StaticMeshLODBias"), 0.0f);
-            SetConsoleVariable(TEXT("sg.ShadowQuality"), 3);
-            SetConsoleVariable(TEXT("sg.TextureQuality"), 3);
-            SetConsoleVariable(TEXT("sg.EffectsQuality"), 3);
+        case EPerformanceLevel::Ultra:
+            LODBias = 0.0f;
+            ViewDistanceScale = 1.0f;
             break;
-            
-        case EPerformanceOptimizationLevel::Balanced:
-            SetConsoleVariable(TEXT("r.StaticMeshLODBias"), 0.5f);
-            SetConsoleVariable(TEXT("sg.ShadowQuality"), 2);
-            SetConsoleVariable(TEXT("sg.TextureQuality"), 2);
-            SetConsoleVariable(TEXT("sg.EffectsQuality"), 2);
+        case EPerformanceLevel::High:
+            LODBias = 0.5f;
+            ViewDistanceScale = 0.9f;
             break;
-            
-        case EPerformanceOptimizationLevel::Aggressive:
-            SetConsoleVariable(TEXT("r.StaticMeshLODBias"), 1.0f);
-            SetConsoleVariable(TEXT("sg.ShadowQuality"), 1);
-            SetConsoleVariable(TEXT("sg.TextureQuality"), 1);
-            SetConsoleVariable(TEXT("sg.EffectsQuality"), 1);
+        case EPerformanceLevel::Medium:
+            LODBias = 1.0f;
+            ViewDistanceScale = 0.8f;
             break;
-            
-        case EPerformanceOptimizationLevel::Maximum:
-            SetConsoleVariable(TEXT("r.StaticMeshLODBias"), 2.0f);
-            SetConsoleVariable(TEXT("sg.ShadowQuality"), 0);
-            SetConsoleVariable(TEXT("sg.TextureQuality"), 0);
-            SetConsoleVariable(TEXT("sg.EffectsQuality"), 0);
+        case EPerformanceLevel::Low:
+            LODBias = 1.5f;
+            ViewDistanceScale = 0.7f;
+            break;
+        case EPerformanceLevel::Emergency:
+            LODBias = 2.0f;
+            ViewDistanceScale = 0.5f;
             break;
     }
     
-    UE_LOG(LogPerformanceOptimizer, Log, TEXT("Applied optimization preset: Level=%d, Platform=%d"), 
-           (int32)Level, (int32)Platform);
+    // Apply console commands for immediate effect
+    if (UGameViewportClient* ViewportClient = World->GetGameViewport())
+    {
+        ViewportClient->ConsoleCommand(FString::Printf(TEXT("r.StaticMeshLODBias %f"), LODBias));
+        ViewportClient->ConsoleCommand(FString::Printf(TEXT("r.SkeletalMeshLODBias %f"), LODBias));
+        ViewportClient->ConsoleCommand(FString::Printf(TEXT("r.ViewDistanceScale %f"), ViewDistanceScale));
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("PerformanceOptimizer: Rendering quality adjusted for level %d"), (int32)Level);
 }
 
-void UPerformanceOptimizer::OptimizePhysicsPerformance()
-{
-    if (!OptimizationSettings.bOptimizePhysics)
-    {
-        return;
-    }
-    
-    // Optimize physics substep settings
-    SetConsoleVariable(TEXT("p.DefaultMaxSubstepDeltaTime"), OptimizationSettings.PhysicsSubstepDeltaTime);
-    SetConsoleVariable(TEXT("p.MaxSubsteps"), 6);
-    
-    // Optimize Chaos physics settings
-    SetConsoleVariable(TEXT("p.Chaos.Solver.IterationCount"), 4);
-    SetConsoleVariable(TEXT("p.Chaos.Solver.PushOutIterationCount"), 2);
-    SetConsoleVariable(TEXT("p.Chaos.Solver.CollisionCullDistance"), 5.0f);
-    
-    // Optimize physics object limits
-    int32 CurrentPhysicsObjects = GetActivePhysicsObjectCount();
-    if (CurrentPhysicsObjects > OptimizationSettings.MaxPhysicsObjects)
-    {
-        UE_LOG(LogPerformanceOptimizer, Warning, 
-               TEXT("Physics object count (%d) exceeds limit (%d)"), 
-               CurrentPhysicsObjects, OptimizationSettings.MaxPhysicsObjects);
-    }
-    
-    UE_LOG(LogPerformanceOptimizer, Log, TEXT("Physics performance optimized"));
-}
-
-void UPerformanceOptimizer::OptimizeRenderingPerformance()
-{
-    if (!OptimizationSettings.bOptimizeRendering)
-    {
-        return;
-    }
-    
-    // Apply dynamic LOD bias
-    SetConsoleVariable(TEXT("r.StaticMeshLODBias"), OptimizationSettings.DynamicLODBias);
-    SetConsoleVariable(TEXT("r.SkeletalMeshLODBias"), OptimizationSettings.DynamicLODBias);
-    
-    // Optimize shadow rendering
-    SetConsoleVariable(TEXT("r.Shadow.MaxResolution"), 2048);
-    SetConsoleVariable(TEXT("r.Shadow.RadiusThreshold"), 0.05f);
-    
-    // Optimize texture streaming
-    SetConsoleVariable(TEXT("r.Streaming.MipBias"), 0.5f);
-    SetConsoleVariable(TEXT("r.Streaming.PoolSize"), 2048);
-    
-    // Enable dynamic resolution if configured
-    if (OptimizationSettings.bUseDynamicResolution)
-    {
-        SetConsoleVariable(TEXT("r.DynamicRes.OperationMode"), 2);
-        SetConsoleVariable(TEXT("r.DynamicRes.MinResolutionFraction"), OptimizationSettings.MinResolutionScale);
-    }
-    
-    UE_LOG(LogPerformanceOptimizer, Log, TEXT("Rendering performance optimized"));
-}
-
-void UPerformanceOptimizer::OptimizeCullingPerformance()
-{
-    if (!OptimizationSettings.bOptimizeCulling)
-    {
-        return;
-    }
-    
-    // Optimize view distance culling
-    SetConsoleVariable(TEXT("r.ViewDistanceScale"), OptimizationSettings.CullDistanceMultiplier);
-    
-    // Enable occlusion culling if configured
-    if (OptimizationSettings.bUseOcclusionCulling)
-    {
-        SetConsoleVariable(TEXT("r.AllowOcclusionQueries"), 1);
-        SetConsoleVariable(TEXT("r.HZBOcclusion"), 1);
-    }
-    
-    // Optimize frustum culling
-    SetConsoleVariable(TEXT("r.EarlyZPass"), 3);
-    SetConsoleVariable(TEXT("r.EarlyZPassOnlyMaterialMasking"), 1);
-    
-    UE_LOG(LogPerformanceOptimizer, Log, TEXT("Culling performance optimized"));
-}
-
-void UPerformanceOptimizer::OptimizeMemoryUsage()
+void UPerformanceOptimizer::ForceMemoryCleanup()
 {
     // Force garbage collection
     GEngine->ForceGarbageCollection(true);
     
-    // Optimize texture memory
-    SetConsoleVariable(TEXT("r.Streaming.PoolSize"), 1024);
-    SetConsoleVariable(TEXT("r.Streaming.MaxTempMemoryAllowed"), 50);
+    // Clear texture streaming pool
+    if (UGameViewportClient* ViewportClient = GetWorld()->GetGameViewport())
+    {
+        ViewportClient->ConsoleCommand(TEXT("r.Streaming.PoolSize 0"));
+        ViewportClient->ConsoleCommand(TEXT("r.Streaming.PoolSize 1000"));
+    }
     
-    // Optimize audio memory
-    SetConsoleVariable(TEXT("au.StreamCaching.MaxMemoryInMB"), 128);
-    
-    UE_LOG(LogPerformanceOptimizer, Log, TEXT("Memory usage optimized"));
+    UE_LOG(LogTemp, Log, TEXT("PerformanceOptimizer: Memory cleanup completed"));
 }
 
-void UPerformanceOptimizer::ResetToDefaultSettings()
+FString UPerformanceOptimizer::GeneratePerformanceReport() const
 {
-    // Reset all console variables to defaults
-    SetConsoleVariable(TEXT("r.StaticMeshLODBias"), 0.0f);
-    SetConsoleVariable(TEXT("r.SkeletalMeshLODBias"), 0.0f);
-    SetConsoleVariable(TEXT("sg.ShadowQuality"), 3);
-    SetConsoleVariable(TEXT("sg.TextureQuality"), 3);
-    SetConsoleVariable(TEXT("sg.EffectsQuality"), 3);
-    SetConsoleVariable(TEXT("r.ViewDistanceScale"), 1.0f);
+    FString Report;
+    Report += TEXT("=== PERFORMANCE OPTIMIZATION REPORT ===\n");
+    Report += FString::Printf(TEXT("Target FPS: %.1f\n"), TargetFrameRate);
+    Report += FString::Printf(TEXT("Current FPS: %.1f\n"), CurrentMetrics.CurrentFPS);
+    Report += FString::Printf(TEXT("Frame Time: %.2f ms\n"), CurrentMetrics.FrameTimeMS);
+    Report += FString::Printf(TEXT("Game Thread: %.2f ms\n"), CurrentMetrics.GameThreadTimeMS);
+    Report += FString::Printf(TEXT("Render Thread: %.2f ms\n"), CurrentMetrics.RenderThreadTimeMS);
+    Report += FString::Printf(TEXT("Physics Time: %.2f ms\n"), CurrentMetrics.PhysicsTimeMS);
+    Report += FString::Printf(TEXT("Memory Usage: %.1f MB\n"), CurrentMetrics.MemoryUsageMB);
+    Report += FString::Printf(TEXT("Active Physics Objects: %d\n"), CurrentMetrics.ActivePhysicsObjects);
+    Report += FString::Printf(TEXT("Performance Level: %d\n"), (int32)CurrentPerformanceLevel);
+    Report += FString::Printf(TEXT("Performance Score: %.1f/100\n"), CalculatePerformanceScore());
+    Report += TEXT("==========================================");
     
-    // Reset optimization settings
-    OptimizationSettings = FPerformanceOptimizationSettings();
-    
-    UE_LOG(LogPerformanceOptimizer, Log, TEXT("Settings reset to defaults"));
+    return Report;
 }
 
-void UPerformanceOptimizer::StartPerformanceProfiling()
+UPerformanceOptimizer* UPerformanceOptimizer::GetPerformanceOptimizer(UWorld* World)
 {
-    UWorld* World = GetWorld();
+    if (Instance)
+    {
+        return Instance;
+    }
+    
+    // Search for existing instance in world
     if (World)
     {
-        World->GetTimerManager().SetTimer(
-            ProfilingTimerHandle,
-            FTimerDelegate::CreateLambda([this]()
-            {
-                FPerformanceMetrics Metrics = GetCurrentMetrics();
-                MetricsHistory.Add(Metrics);
-                
-                if (bEnableDetailedLogging)
-                {
-                    LogPerformanceMetrics(Metrics);
-                }
-            }),
-            0.1f, // Sample every 100ms for detailed profiling
-            true
-        );
-        
-        UE_LOG(LogPerformanceOptimizer, Log, TEXT("Performance profiling started"));
-    }
-}
-
-void UPerformanceOptimizer::StopPerformanceProfiling()
-{
-    UWorld* World = GetWorld();
-    if (World)
-    {
-        World->GetTimerManager().ClearTimer(ProfilingTimerHandle);
-    }
-    
-    UE_LOG(LogPerformanceOptimizer, Log, TEXT("Performance profiling stopped"));
-}
-
-void UPerformanceOptimizer::GeneratePerformanceReport()
-{
-    FString ReportPath = FPaths::ProjectSavedDir() / TEXT("PerformanceReports");
-    FString FileName = FString::Printf(TEXT("PerformanceReport_%s.txt"), 
-                                       *FDateTime::Now().ToString());
-    FString FullPath = ReportPath / FileName;
-    
-    SavePerformanceReport(FullPath);
-    
-    UE_LOG(LogPerformanceOptimizer, Log, TEXT("Performance report generated: %s"), *FullPath);
-}
-
-void UPerformanceOptimizer::OptimizeForTargetFramerate(float TargetFPS)
-{
-    OptimizationSettings.TargetFrameRate = TargetFPS;
-    OptimizationSettings.MaxFrameTime = 1000.0f / TargetFPS; // Convert to milliseconds
-    
-    CPUBudgetMS = OptimizationSettings.MaxFrameTime;
-    GPUBudgetMS = OptimizationSettings.MaxFrameTime;
-    
-    UE_LOG(LogPerformanceOptimizer, Log, TEXT("Target framerate set to %.1f FPS"), TargetFPS);
-}
-
-void UPerformanceOptimizer::EnableDynamicQualityScaling(bool bEnable)
-{
-    bDynamicQualityEnabled = bEnable;
-    
-    UE_LOG(LogPerformanceOptimizer, Log, TEXT("Dynamic quality scaling %s"), 
-           bEnable ? TEXT("enabled") : TEXT("disabled"));
-}
-
-void UPerformanceOptimizer::SetPerformanceBudgets(float CPUBudgetMS_In, float GPUBudgetMS_In, float MemoryBudgetMB_In)
-{
-    CPUBudgetMS = CPUBudgetMS_In;
-    GPUBudgetMS = GPUBudgetMS_In;
-    MemoryBudgetMB = MemoryBudgetMB_In;
-    
-    UE_LOG(LogPerformanceOptimizer, Log, 
-           TEXT("Performance budgets set - CPU: %.2fms, GPU: %.2fms, Memory: %.1fMB"),
-           CPUBudgetMS, GPUBudgetMS, MemoryBudgetMB);
-}
-
-void UPerformanceOptimizer::UpdatePerformanceMetrics()
-{
-    CurrentMetrics = GetCurrentMetrics();
-    AnalyzePerformance();
-    
-    if (bDynamicQualityEnabled)
-    {
-        AdjustQualitySettings();
-    }
-    
-    OnPerformanceOptimized.Broadcast(CurrentMetrics);
-}
-
-void UPerformanceOptimizer::AnalyzePerformance()
-{
-    // Check if we're exceeding performance budgets
-    if (CurrentMetrics.FrameTime > OptimizationSettings.MaxFrameTime)
-    {
-        OnPerformanceThresholdExceeded.Broadcast(TEXT("FrameTime"), CurrentMetrics.FrameTime);
-        
-        if (bEnableAutomaticOptimization)
+        for (TActorIterator<AActor> ActorIterator(World); ActorIterator; ++ActorIterator)
         {
-            ApplyOptimizations();
+            AActor* Actor = *ActorIterator;
+            if (UPerformanceOptimizer* Optimizer = Actor->FindComponentByClass<UPerformanceOptimizer>())
+            {
+                Instance = Optimizer;
+                return Instance;
+            }
         }
     }
     
-    if (CurrentMetrics.MemoryUsageMB > OptimizationSettings.MaxMemoryUsageMB)
-    {
-        OnPerformanceThresholdExceeded.Broadcast(TEXT("MemoryUsage"), CurrentMetrics.MemoryUsageMB);
-        OptimizeMemoryUsage();
-    }
+    return nullptr;
 }
 
-void UPerformanceOptimizer::ApplyOptimizations()
+void UPerformanceOptimizer::UpdatePerformanceMetrics(float DeltaTime)
 {
-    SCOPE_CYCLE_COUNTER(STAT_PerformanceOptimization);
+    // Calculate current FPS
+    CurrentMetrics.CurrentFPS = 1.0f / DeltaTime;
+    CurrentMetrics.FrameTimeMS = DeltaTime * 1000.0f;
     
-    // Apply physics optimizations
-    OptimizePhysicsSettings();
-    
-    // Apply rendering optimizations
-    OptimizeRenderingSettings();
-    
-    // Apply culling optimizations
-    OptimizeCullingSettings();
-    
-    UE_LOG(LogPerformanceOptimizer, Log, TEXT("Automatic optimizations applied"));
-}
-
-void UPerformanceOptimizer::AdjustQualitySettings()
-{
-    SCOPE_CYCLE_COUNTER(STAT_QualityAdjustment);
-    
-    float TargetFrameTime = 1000.0f / OptimizationSettings.TargetFrameRate;
-    float FrameTimeRatio = CurrentMetrics.FrameTime / TargetFrameTime;
-    
-    // Adjust quality scale based on performance
-    if (FrameTimeRatio > 1.1f) // 10% over budget
+    // Update frame time history
+    FrameTimeHistory.Add(DeltaTime);
+    if (FrameTimeHistory.Num() > MaxFrameTimeHistory)
     {
-        QualityScaleTarget = FMath::Max(0.5f, CurrentQualityScale - 0.1f);
-    }
-    else if (FrameTimeRatio < 0.9f) // 10% under budget
-    {
-        QualityScaleTarget = FMath::Min(1.0f, CurrentQualityScale + 0.05f);
+        FrameTimeHistory.RemoveAt(0);
     }
     
-    // Smoothly interpolate to target quality scale
-    CurrentQualityScale = FMath::FInterpTo(CurrentQualityScale, QualityScaleTarget, 
-                                           FApp::GetDeltaTime(), 2.0f);
-    
-    // Apply quality scale to various settings
-    SetConsoleVariable(TEXT("r.ScreenPercentage"), CurrentQualityScale * 100.0f);
-    SetConsoleVariable(TEXT("r.StaticMeshLODBias"), (1.0f - CurrentQualityScale) * 2.0f);
-}
-
-// Implementation of private helper methods continues...
-// [Additional implementation methods for platform-specific optimizations, 
-//  metrics collection, console variable management, etc.]
-
-float UPerformanceOptimizer::GetGameThreadTime() const
-{
-    return FPlatformTime::ToMilliseconds(GGameThreadTime);
-}
-
-float UPerformanceOptimizer::GetRenderThreadTime() const
-{
-    return FPlatformTime::ToMilliseconds(GRenderThreadTime);
-}
-
-float UPerformanceOptimizer::GetGPUTime() const
-{
-    return FPlatformTime::ToMilliseconds(RHIGetGPUFrameCycles());
-}
-
-float UPerformanceOptimizer::GetPhysicsTime() const
-{
-    // Implementation depends on physics system integration
-    return 0.0f; // Placeholder
-}
-
-int32 UPerformanceOptimizer::GetDrawCallCount() const
-{
-    // Implementation depends on rendering stats
-    return 0; // Placeholder
-}
-
-int32 UPerformanceOptimizer::GetTriangleCount() const
-{
-    // Implementation depends on rendering stats
-    return 0; // Placeholder
-}
-
-float UPerformanceOptimizer::GetMemoryUsage() const
-{
+    // Get memory usage
     FPlatformMemoryStats MemStats = FPlatformMemory::GetStats();
-    return MemStats.UsedPhysical / (1024.0f * 1024.0f); // Convert to MB
+    CurrentMetrics.MemoryUsageMB = MemStats.UsedPhysical / (1024.0f * 1024.0f);
+    
+    // Update thread times (simplified - would need more complex implementation for accurate measurement)
+    CurrentMetrics.GameThreadTimeMS = DeltaTime * 1000.0f * 0.6f; // Estimated
+    CurrentMetrics.RenderThreadTimeMS = DeltaTime * 1000.0f * 0.3f; // Estimated
+    CurrentMetrics.PhysicsTimeMS = DeltaTime * 1000.0f * 0.1f; // Estimated
 }
 
-int32 UPerformanceOptimizer::GetActivePhysicsObjectCount() const
+void UPerformanceOptimizer::AnalyzeAndOptimize()
 {
-    // Implementation depends on physics system integration
-    return 0; // Placeholder
-}
-
-void UPerformanceOptimizer::SetConsoleVariable(const FString& VariableName, float Value)
-{
-    IConsoleVariable* CVar = IConsoleManager::Get().FindConsoleVariable(*VariableName);
-    if (CVar)
+    // Calculate average FPS from recent history
+    float AverageFPS = 0.0f;
+    if (FrameTimeHistory.Num() > 0)
     {
-        CVar->Set(Value);
+        float TotalTime = 0.0f;
+        for (float FrameTime : FrameTimeHistory)
+        {
+            TotalTime += FrameTime;
+        }
+        AverageFPS = FrameTimeHistory.Num() / TotalTime;
+    }
+    else
+    {
+        AverageFPS = CurrentMetrics.CurrentFPS;
+    }
+    
+    // Determine appropriate performance level
+    EPerformanceLevel NewLevel = CurrentPerformanceLevel;
+    
+    if (AverageFPS >= UltraFPSThreshold)
+    {
+        NewLevel = EPerformanceLevel::Ultra;
+    }
+    else if (AverageFPS >= HighFPSThreshold)
+    {
+        NewLevel = EPerformanceLevel::High;
+    }
+    else if (AverageFPS >= MediumFPSThreshold)
+    {
+        NewLevel = EPerformanceLevel::Medium;
+    }
+    else if (AverageFPS >= LowFPSThreshold)
+    {
+        NewLevel = EPerformanceLevel::Low;
+    }
+    else
+    {
+        NewLevel = EPerformanceLevel::Emergency;
+    }
+    
+    // Apply optimizations if performance level changed
+    if (NewLevel != CurrentPerformanceLevel)
+    {
+        SetPerformanceLevel(NewLevel);
+        OptimizePhysicsObjects();
+        
+        // Force memory cleanup if performance is critical
+        if (NewLevel == EPerformanceLevel::Emergency)
+        {
+            ForceMemoryCleanup();
+        }
     }
 }
 
-void UPerformanceOptimizer::SetConsoleVariable(const FString& VariableName, int32 Value)
+void UPerformanceOptimizer::ApplyPhysicsLOD()
 {
-    IConsoleVariable* CVar = IConsoleManager::Get().FindConsoleVariable(*VariableName);
-    if (CVar)
+    OptimizePhysicsObjects();
+}
+
+void UPerformanceOptimizer::AdjustShadowQuality(EPerformanceLevel Level)
+{
+    UWorld* World = GetWorld();
+    if (!World || !World->GetGameViewport())
     {
-        CVar->Set(Value);
+        return;
+    }
+    
+    int32 ShadowQuality = 3;
+    int32 ShadowResolution = 2048;
+    
+    switch (Level)
+    {
+        case EPerformanceLevel::Ultra:
+            ShadowQuality = 3;
+            ShadowResolution = 2048;
+            break;
+        case EPerformanceLevel::High:
+            ShadowQuality = 2;
+            ShadowResolution = 1024;
+            break;
+        case EPerformanceLevel::Medium:
+            ShadowQuality = 1;
+            ShadowResolution = 512;
+            break;
+        case EPerformanceLevel::Low:
+        case EPerformanceLevel::Emergency:
+            ShadowQuality = 0;
+            ShadowResolution = 256;
+            break;
+    }
+    
+    UGameViewportClient* ViewportClient = World->GetGameViewport();
+    ViewportClient->ConsoleCommand(FString::Printf(TEXT("r.ShadowQuality %d"), ShadowQuality));
+    ViewportClient->ConsoleCommand(FString::Printf(TEXT("r.Shadow.MaxResolution %d"), ShadowResolution));
+}
+
+void UPerformanceOptimizer::OptimizeTextureStreaming()
+{
+    UWorld* World = GetWorld();
+    if (!World || !World->GetGameViewport())
+    {
+        return;
+    }
+    
+    // Adjust texture streaming based on memory pressure
+    float MemoryPressure = CurrentMetrics.MemoryUsageMB / 8192.0f; // Assume 8GB target
+    
+    if (MemoryPressure > 0.8f)
+    {
+        // High memory pressure - reduce texture quality
+        World->GetGameViewport()->ConsoleCommand(TEXT("r.Streaming.MipBias 2"));
+        World->GetGameViewport()->ConsoleCommand(TEXT("r.Streaming.PoolSize 512"));
+    }
+    else if (MemoryPressure > 0.6f)
+    {
+        // Medium memory pressure
+        World->GetGameViewport()->ConsoleCommand(TEXT("r.Streaming.MipBias 1"));
+        World->GetGameViewport()->ConsoleCommand(TEXT("r.Streaming.PoolSize 1024"));
+    }
+    else
+    {
+        // Low memory pressure - full quality
+        World->GetGameViewport()->ConsoleCommand(TEXT("r.Streaming.MipBias 0"));
+        World->GetGameViewport()->ConsoleCommand(TEXT("r.Streaming.PoolSize 2048"));
     }
 }
 
-float UPerformanceOptimizer::GetConsoleVariableFloat(const FString& VariableName) const
+float UPerformanceOptimizer::CalculatePerformanceScore() const
 {
-    IConsoleVariable* CVar = IConsoleManager::Get().FindConsoleVariable(*VariableName);
-    return CVar ? CVar->GetFloat() : 0.0f;
-}
-
-int32 UPerformanceOptimizer::GetConsoleVariableInt(const FString& VariableName) const
-{
-    IConsoleVariable* CVar = IConsoleManager::Get().FindConsoleVariable(*VariableName);
-    return CVar ? CVar->GetInt() : 0;
-}
-
-void UPerformanceOptimizer::LogPerformanceMetrics(const FPerformanceMetrics& Metrics)
-{
-    UE_LOG(LogPerformanceOptimizer, Log, 
-           TEXT("Performance Metrics - Frame: %.2fms, Game: %.2fms, Render: %.2fms, GPU: %.2fms, Memory: %.1fMB"),
-           Metrics.FrameTime, Metrics.GameThreadTime, Metrics.RenderThreadTime, 
-           Metrics.GPUTime, Metrics.MemoryUsageMB);
-}
-
-void UPerformanceOptimizer::LogOptimizationAction(const FString& Action, const FString& Details)
-{
-    UE_LOG(LogPerformanceOptimizer, Log, TEXT("Optimization Action: %s - %s"), *Action, *Details);
-}
-
-void UPerformanceOptimizer::SavePerformanceReport(const FString& FilePath)
-{
-    // Implementation for saving detailed performance report to file
-    // This would include historical metrics, optimization actions taken, etc.
-}
-
-void UPerformanceOptimizer::ApplyPCOptimizations()
-{
-    // PC-specific optimizations
-    SetConsoleVariable(TEXT("r.Shadow.MaxResolution"), 4096);
-    SetConsoleVariable(TEXT("r.TextureStreaming"), 1);
-}
-
-void UPerformanceOptimizer::ApplyConsoleOptimizations()
-{
-    // Console-specific optimizations
-    SetConsoleVariable(TEXT("r.Shadow.MaxResolution"), 2048);
-    SetConsoleVariable(TEXT("r.MobileHDR"), 0);
-}
-
-void UPerformanceOptimizer::ApplyMobileOptimizations()
-{
-    // Mobile-specific optimizations
-    SetConsoleVariable(TEXT("r.Shadow.MaxResolution"), 1024);
-    SetConsoleVariable(TEXT("r.MobileHDR"), 0);
-    SetConsoleVariable(TEXT("r.Mobile.EnableStaticAndCSMShadowReceivers"), 0);
-}
-
-void UPerformanceOptimizer::ApplyVROptimizations()
-{
-    // VR-specific optimizations
-    SetConsoleVariable(TEXT("r.VR.PixelDensity"), 1.0f);
-    SetConsoleVariable(TEXT("r.VR.RoundRobinOcclusion"), 1);
-}
-
-void UPerformanceOptimizer::OptimizePhysicsSettings()
-{
-    OptimizePhysicsPerformance();
-}
-
-void UPerformanceOptimizer::OptimizeRenderingSettings()
-{
-    OptimizeRenderingPerformance();
-}
-
-void UPerformanceOptimizer::OptimizeCullingSettings()
-{
-    OptimizeCullingPerformance();
-}
-
-void UPerformanceOptimizer::MonitorMemoryUsage()
-{
-    float CurrentMemory = GetMemoryUsage();
-    if (CurrentMemory > MemoryBudgetMB)
-    {
-        OptimizeMemoryUsage();
-    }
+    // Calculate performance score based on multiple factors
+    float FPSScore = FMath::Clamp(CurrentMetrics.CurrentFPS / TargetFrameRate, 0.0f, 1.0f) * 40.0f;
+    float FrameTimeScore = FMath::Clamp(1.0f - (CurrentMetrics.FrameTimeMS / 33.33f), 0.0f, 1.0f) * 30.0f;
+    float MemoryScore = FMath::Clamp(1.0f - (CurrentMetrics.MemoryUsageMB / 8192.0f), 0.0f, 1.0f) * 20.0f;
+    float PhysicsScore = FMath::Clamp(1.0f - (CurrentMetrics.PhysicsTimeMS / 5.0f), 0.0f, 1.0f) * 10.0f;
+    
+    return FPSScore + FrameTimeScore + MemoryScore + PhysicsScore;
 }
