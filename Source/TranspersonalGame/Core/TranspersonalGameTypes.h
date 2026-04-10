@@ -1,0 +1,372 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Engine/Engine.h"
+#include "UObject/ObjectMacros.h"
+#include "TranspersonalGameTypes.generated.h"
+
+/**
+ * Core type definitions for Transpersonal Game Studio
+ * Engine Architecture v1.0 - March 2026
+ * 
+ * This file defines all fundamental types, enums, and structures
+ * used throughout the game systems. All other systems depend on these definitions.
+ */
+
+UENUM(BlueprintType)
+enum class ESystemLOD : uint8
+{
+    High = 0        UMETA(DisplayName = "High Detail"),      // 0-500m: Full detail, all features
+    Medium = 1      UMETA(DisplayName = "Medium Detail"),    // 500m-1km: Reduced detail, essential features  
+    Low = 2         UMETA(DisplayName = "Low Detail"),       // 1km-2km: Minimal detail, silhouettes only
+    Culled = 3      UMETA(DisplayName = "Culled")            // 2km+: Not rendered/updated
+};
+
+UENUM(BlueprintType)
+enum class EDinosaurState : uint8
+{
+    Idle = 0        UMETA(DisplayName = "Idle"),
+    Feeding = 1     UMETA(DisplayName = "Feeding"),
+    Drinking = 2    UMETA(DisplayName = "Drinking"),
+    Hunting = 3     UMETA(DisplayName = "Hunting"),
+    Fleeing = 4     UMETA(DisplayName = "Fleeing"),
+    Sleeping = 5    UMETA(DisplayName = "Sleeping"),
+    Socializing = 6 UMETA(DisplayName = "Socializing"),
+    Patrolling = 7  UMETA(DisplayName = "Patrolling"),
+    Investigating = 8 UMETA(DisplayName = "Investigating"),
+    Aggressive = 9  UMETA(DisplayName = "Aggressive")
+};
+
+UENUM(BlueprintType)
+enum class EDinosaurType : uint8
+{
+    SmallHerbivore = 0   UMETA(DisplayName = "Small Herbivore"),    // Compsognathus, etc.
+    MediumHerbivore = 1  UMETA(DisplayName = "Medium Herbivore"),   // Parasaurolophus, etc.
+    LargeHerbivore = 2   UMETA(DisplayName = "Large Herbivore"),    // Triceratops, etc.
+    SmallCarnivore = 3   UMETA(DisplayName = "Small Carnivore"),    // Velociraptor, etc.
+    MediumCarnivore = 4  UMETA(DisplayName = "Medium Carnivore"),   // Allosaurus, etc.
+    LargeCarnivore = 5   UMETA(DisplayName = "Large Carnivore"),    // T-Rex, etc.
+    Flying = 6           UMETA(DisplayName = "Flying"),             // Pteranodon, etc.
+    Aquatic = 7          UMETA(DisplayName = "Aquatic")             // Plesiosaur, etc.
+};
+
+UENUM(BlueprintType)
+enum class EDomesticationStage : uint8
+{
+    Wild = 0        UMETA(DisplayName = "Wild"),           // Completely untamed
+    Curious = 1     UMETA(DisplayName = "Curious"),        // Shows interest in player
+    Tolerant = 2    UMETA(DisplayName = "Tolerant"),       // Doesn't flee immediately
+    Friendly = 3    UMETA(DisplayName = "Friendly"),       // Approaches player
+    Bonded = 4      UMETA(DisplayName = "Bonded")          // Fully domesticated
+};
+
+UENUM(BlueprintType)
+enum class ETraitType : uint8
+{
+    Size = 0        UMETA(DisplayName = "Size"),
+    Color = 1       UMETA(DisplayName = "Color"),
+    Scar = 2        UMETA(DisplayName = "Scar"),
+    Horn = 3        UMETA(DisplayName = "Horn"),
+    Pattern = 4     UMETA(DisplayName = "Pattern"),
+    Posture = 5     UMETA(DisplayName = "Posture"),
+    Voice = 6       UMETA(DisplayName = "Voice")
+};
+
+UENUM(BlueprintType)
+enum class EBiomeType : uint8
+{
+    Forest = 0      UMETA(DisplayName = "Forest"),
+    Plains = 1      UMETA(DisplayName = "Plains"),
+    River = 2       UMETA(DisplayName = "River"),
+    Mountains = 3   UMETA(DisplayName = "Mountains"),
+    Swamp = 4       UMETA(DisplayName = "Swamp"),
+    Desert = 5      UMETA(DisplayName = "Desert"),
+    Coast = 6       UMETA(DisplayName = "Coast")
+};
+
+UENUM(BlueprintType)
+enum class EResourceType : uint8
+{
+    // Primitive materials
+    Stone = 0       UMETA(DisplayName = "Stone"),
+    Wood = 1        UMETA(DisplayName = "Wood"),
+    PlantFiber = 2  UMETA(DisplayName = "Plant Fiber"),
+    Bone = 3        UMETA(DisplayName = "Bone"),
+    
+    // Processed materials  
+    Rope = 10       UMETA(DisplayName = "Rope"),
+    SharpStone = 11 UMETA(DisplayName = "Sharp Stone"),
+    HardenedWood = 12 UMETA(DisplayName = "Hardened Wood"),
+    
+    // Advanced materials
+    Metal = 20      UMETA(DisplayName = "Metal"),
+    Leather = 21    UMETA(DisplayName = "Leather"),
+    Composite = 22  UMETA(DisplayName = "Composite")
+};
+
+UENUM(BlueprintType)
+enum class EWeatherType : uint8
+{
+    Clear = 0       UMETA(DisplayName = "Clear"),
+    Cloudy = 1      UMETA(DisplayName = "Cloudy"),
+    Rainy = 2       UMETA(DisplayName = "Rainy"),
+    Stormy = 3      UMETA(DisplayName = "Stormy"),
+    Foggy = 4       UMETA(DisplayName = "Foggy")
+};
+
+UENUM(BlueprintType)
+enum class ETimeOfDay : uint8
+{
+    Dawn = 0        UMETA(DisplayName = "Dawn"),        // 5-7 AM
+    Morning = 1     UMETA(DisplayName = "Morning"),     // 7-11 AM
+    Noon = 2        UMETA(DisplayName = "Noon"),        // 11 AM - 1 PM
+    Afternoon = 3   UMETA(DisplayName = "Afternoon"),   // 1-5 PM
+    Evening = 4     UMETA(DisplayName = "Evening"),     // 5-7 PM
+    Dusk = 5        UMETA(DisplayName = "Dusk"),        // 7-9 PM
+    Night = 6       UMETA(DisplayName = "Night")        // 9 PM - 5 AM
+};
+
+// Core data structures
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FPhysicalTrait
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Trait")
+    ETraitType Type = ETraitType::Size;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Trait")
+    FVector Value = FVector::ZeroVector;  // RGB for color, XYZ for size, etc.
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Trait")
+    float Intensity = 1.0f;  // How pronounced this trait is (0.0 - 2.0)
+
+    FPhysicalTrait()
+    {
+        Type = ETraitType::Size;
+        Value = FVector::ZeroVector;
+        Intensity = 1.0f;
+    }
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FDinosaurPersonality
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality")
+    float Aggressiveness = 0.5f;  // 0.0 = Passive, 1.0 = Highly Aggressive
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality")
+    float Curiosity = 0.5f;       // 0.0 = Avoidant, 1.0 = Very Curious
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality")
+    float Sociability = 0.5f;     // 0.0 = Loner, 1.0 = Highly Social
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality")
+    float Intelligence = 0.5f;    // 0.0 = Simple, 1.0 = Highly Intelligent
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality")
+    float Fearfulness = 0.5f;     // 0.0 = Fearless, 1.0 = Very Fearful
+
+    FDinosaurPersonality()
+    {
+        Aggressiveness = 0.5f;
+        Curiosity = 0.5f;
+        Sociability = 0.5f;
+        Intelligence = 0.5f;
+        Fearfulness = 0.5f;
+    }
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FSurvivalStats
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
+    float Hunger = 100.0f;        // 0-100
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
+    float Thirst = 100.0f;        // 0-100
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
+    float Health = 100.0f;        // 0-100
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
+    float Stamina = 100.0f;       // 0-100
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
+    float Temperature = 20.0f;    // Celsius
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
+    bool bIsWet = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
+    float FearLevel = 0.0f;       // 0-100
+
+    FSurvivalStats()
+    {
+        Hunger = 100.0f;
+        Thirst = 100.0f;
+        Health = 100.0f;
+        Stamina = 100.0f;
+        Temperature = 20.0f;
+        bIsWet = false;
+        FearLevel = 0.0f;
+    }
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FEnvironmentalConditions
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
+    EWeatherType Weather = EWeatherType::Clear;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
+    ETimeOfDay TimeOfDay = ETimeOfDay::Noon;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
+    float Temperature = 20.0f;    // Celsius
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
+    float Humidity = 50.0f;       // 0-100%
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
+    float WindSpeed = 0.0f;       // m/s
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
+    FVector WindDirection = FVector::ForwardVector;
+
+    FEnvironmentalConditions()
+    {
+        Weather = EWeatherType::Clear;
+        TimeOfDay = ETimeOfDay::Noon;
+        Temperature = 20.0f;
+        Humidity = 50.0f;
+        WindSpeed = 0.0f;
+        WindDirection = FVector::ForwardVector;
+    }
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FLODSettings
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
+    float HighDetailDistance = 500.0f;    // 0-500m
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
+    float MediumDetailDistance = 1000.0f; // 500m-1km
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
+    float LowDetailDistance = 2000.0f;    // 1km-2km
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
+    float CullDistance = 3000.0f;         // 2km+ culled
+
+    FLODSettings()
+    {
+        HighDetailDistance = 500.0f;
+        MediumDetailDistance = 1000.0f;
+        LowDetailDistance = 2000.0f;
+        CullDistance = 3000.0f;
+    }
+};
+
+// Global constants
+namespace TranspersonalGameConstants
+{
+    // World settings
+    constexpr float WORLD_SIZE = 800000.0f;           // 8km in UE units (8000m * 100)
+    constexpr float GRID_SIZE = 100000.0f;            // 1km grid cells
+    constexpr float STREAMING_DISTANCE = 200000.0f;   // 2km streaming radius
+    
+    // Performance targets
+    constexpr float TARGET_FRAMERATE = 60.0f;
+    constexpr float MIN_FRAMERATE = 30.0f;
+    constexpr int32 MAX_AI_AGENTS = 50000;
+    
+    // LOD distances (in UE units - cm)
+    constexpr float LOD_HIGH_DISTANCE = 50000.0f;     // 500m
+    constexpr float LOD_MEDIUM_DISTANCE = 100000.0f;  // 1km
+    constexpr float LOD_LOW_DISTANCE = 200000.0f;     // 2km
+    constexpr float LOD_CULL_DISTANCE = 300000.0f;    // 3km
+    
+    // Survival constants
+    constexpr float HUNGER_DECAY_RATE = 0.1f;         // Per minute
+    constexpr float THIRST_DECAY_RATE = 0.15f;        // Per minute
+    constexpr float STAMINA_REGEN_RATE = 2.0f;        // Per second when resting
+    
+    // Temperature constants
+    constexpr float COMFORTABLE_TEMP_MIN = 15.0f;     // Celsius
+    constexpr float COMFORTABLE_TEMP_MAX = 25.0f;     // Celsius
+    constexpr float HYPOTHERMIA_TEMP = 5.0f;          // Celsius
+    constexpr float HYPERTHERMIA_TEMP = 35.0f;        // Celsius
+}
+
+// Utility functions
+namespace TranspersonalGameUtils
+{
+    /**
+     * Calculate LOD level based on distance from observer
+     */
+    FORCEINLINE ESystemLOD CalculateLODFromDistance(float Distance)
+    {
+        if (Distance <= TranspersonalGameConstants::LOD_HIGH_DISTANCE)
+        {
+            return ESystemLOD::High;
+        }
+        else if (Distance <= TranspersonalGameConstants::LOD_MEDIUM_DISTANCE)
+        {
+            return ESystemLOD::Medium;
+        }
+        else if (Distance <= TranspersonalGameConstants::LOD_LOW_DISTANCE)
+        {
+            return ESystemLOD::Low;
+        }
+        else
+        {
+            return ESystemLOD::Culled;
+        }
+    }
+
+    /**
+     * Convert UE units (cm) to meters
+     */
+    FORCEINLINE float UEUnitsToMeters(float UEUnits)
+    {
+        return UEUnits / 100.0f;
+    }
+
+    /**
+     * Convert meters to UE units (cm)
+     */
+    FORCEINLINE float MetersToUEUnits(float Meters)
+    {
+        return Meters * 100.0f;
+    }
+
+    /**
+     * Calculate comfort level based on temperature
+     */
+    FORCEINLINE float CalculateTemperatureComfort(float Temperature)
+    {
+        if (Temperature >= TranspersonalGameConstants::COMFORTABLE_TEMP_MIN && 
+            Temperature <= TranspersonalGameConstants::COMFORTABLE_TEMP_MAX)
+        {
+            return 1.0f;  // Fully comfortable
+        }
+        
+        float DistanceFromComfort = FMath::Min(
+            FMath::Abs(Temperature - TranspersonalGameConstants::COMFORTABLE_TEMP_MIN),
+            FMath::Abs(Temperature - TranspersonalGameConstants::COMFORTABLE_TEMP_MAX)
+        );
+        
+        return FMath::Clamp(1.0f - (DistanceFromComfort / 10.0f), 0.0f, 1.0f);
+    }
+}
