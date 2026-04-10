@@ -1,397 +1,422 @@
-# ARQUITECTURA TÉCNICA — TRANSPERSONAL GAME STUDIO
-## Jurassic Survival Game — Engine Architecture Document
-**Versão:** 1.0  
-**Data:** Março 2026  
-**Responsável:** Engine Architect (Agente #02)  
-**Aprovação:** OBRIGATÓRIA para todos os agentes técnicos
+# TRANSPERSONAL GAME STUDIO — ENGINE ARCHITECTURE
+## Agent #02 — Engine Architect
+**Version:** 1.0  
+**Date:** March 2026  
+**Project:** Prehistoric Survival Game  
 
 ---
 
-## VISÃO ARQUITECTURAL
+## EXECUTIVE SUMMARY
 
-### Conceito Base
-- **Género:** Survival de mundo aberto
-- **Escala:** Regional (4-8km²)
-- **Período:** Jurássico/Cretáceo
-- **Plataforma Primária:** PC Windows (60fps)
-- **Plataforma Secundária:** Consolas (30fps)
-- **Engine:** Unreal Engine 5.3+
+This document defines the complete technical architecture for the Transpersonal Game Studio's prehistoric survival game. The architecture is designed to support:
 
-### Pilares Técnicos
-1. **Performance Primeiro** — 60fps PC, 30fps consola é inviolável
-2. **Escalabilidade** — Suporta mundos até 8km² sem degradação
-3. **Modularidade** — Cada sistema é independente e substituível
-4. **Robustez** — Zero crashes em builds de produção
+- **60 FPS on PC, 30 FPS on console** with dynamic quality scaling
+- **Regional world scale** (8km x 8km) using UE5 World Partition
+- **Up to 50,000 simultaneous AI agents** using Mass Entity framework
+- **Individual dinosaur recognition** through procedural variation system
+- **Real-time ecosystem simulation** with independent AI behaviors
+- **Modular expansion** for future content additions
 
 ---
 
-## ARQUITECTURA DE SISTEMAS
+## CORE ARCHITECTURAL PRINCIPLES
 
-### Core Engine Stack
+### 1. PERFORMANCE-FIRST DESIGN
+- **LOD Chain Mandatory:** All systems implement 3-level LOD (High/Medium/Low)
+- **Culling Aggressive:** Frustum + occlusion + distance culling on all systems
+- **Memory Streaming:** World Partition + texture streaming for large environments
+- **Async Processing:** Heavy computations moved to background threads
+
+### 2. MODULARITY & EXTENSIBILITY  
+- **Component-Based Architecture:** All gameplay features as UE5 Components
+- **Plugin Structure:** Core systems as plugins for easy maintenance
+- **Data-Driven Design:** Configuration through Data Assets, not hardcoded values
+- **Hot-Reload Support:** Development-time iteration without full rebuilds
+
+### 3. SCALABILITY TARGETS
+- **Minimum Spec:** GTX 1060 / RX 580 @ 30fps 1080p Medium
+- **Recommended:** RTX 3070 / RX 6700 XT @ 60fps 1080p High  
+- **Optimal:** RTX 4080 / RX 7800 XT @ 60fps 1440p Ultra
+
+---
+
+## SYSTEM ARCHITECTURE OVERVIEW
+
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    GAME LAYER                               │
+│                    TRANSPERSONAL GAME                      │
 ├─────────────────────────────────────────────────────────────┤
-│  Survival │ Dinosaur │ World  │ Player │ Quest │ Audio │ VFX │
-│  Systems  │    AI    │  Gen   │ Systems│ System│ Engine│ Eng │
+│  PRESENTATION LAYER                                         │
+│  ┌─────────────────┐ ┌─────────────────┐ ┌──────────────┐  │
+│  │   UI/UMG        │ │   Audio/Meta    │ │  VFX/Niagara │  │
+│  │   - HUD         │ │   Sounds        │ │  - Weather   │  │
+│  │   - Menus       │ │   - 3D Audio    │ │  - Particles │  │
+│  │   - Inventory   │ │   - Music       │ │  - Destruction│  │
+│  └─────────────────┘ └─────────────────┘ └──────────────┘  │
 ├─────────────────────────────────────────────────────────────┤
-│                  FRAMEWORK LAYER                            │
+│  GAMEPLAY LAYER                                             │
+│  ┌─────────────────┐ ┌─────────────────┐ ┌──────────────┐  │
+│  │  Player Systems │ │  AI & Behavior  │ │ World Systems│  │
+│  │  - Survival     │ │  - Mass AI      │ │ - Day/Night  │  │
+│  │  - Crafting     │ │  - Behavior     │ │ - Weather    │  │
+│  │  - Building     │ │    Trees        │ │ - Ecosystem  │  │
+│  │  - Combat       │ │  - Individual   │ │ - Streaming  │  │
+│  │                 │ │    Recognition  │ │              │  │
+│  └─────────────────┘ └─────────────────┘ └──────────────┘  │
 ├─────────────────────────────────────────────────────────────┤
-│  Physics  │ Collision│ Memory │ Thread │ Asset │ Render│ Net │
-│  Engine   │ Detection│  Mgmt  │  Pool  │  Mgmt │ Pipeline│ Mgr │
+│  CORE SYSTEMS LAYER                                         │
+│  ┌─────────────────┐ ┌─────────────────┐ ┌──────────────┐  │
+│  │   Physics       │ │   Rendering     │ │  Networking  │  │
+│  │   - Chaos       │ │   - Lumen GI    │ │  - Replication│  │
+│  │   - Destruction │ │   - Nanite      │ │  - Prediction │  │
+│  │   - Cloth       │ │   - TSR         │ │  - Lag Comp  │  │
+│  │   - Fluids      │ │   - World Part. │ │              │  │
+│  └─────────────────┘ └─────────────────┘ └──────────────┘  │
 ├─────────────────────────────────────────────────────────────┤
-│                   UNREAL ENGINE 5                           │
-├─────────────────────────────────────────────────────────────┤
-│ Nanite │ Lumen │ World │ Chaos │ MetaSound │ Niagara │ VSM  │
-│        │       │ Part. │ Physics│           │         │      │
+│  ENGINE LAYER (UE5.5)                                       │
+│  Core • Threading • Memory • Asset Pipeline • Tools        │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### Módulos Principais
-1. **TranspersonalGame** — Módulo principal do jogo
-2. **CoreSystems** — Física, colisão, ragdoll, destruição
-3. **WorldGeneration** — PCG, terrenos, biomas
-4. **DinosaurAI** — Comportamento, rotinas, memória
-5. **SurvivalSystems** — Fome, sede, crafting, base building
-6. **AudioEngine** — MetaSounds, música adaptativa
-7. **VFXSystems** — Niagara, weather, particles
-
 ---
 
-## WORLD PARTITION ARCHITECTURE
+## CRITICAL SYSTEMS BREAKDOWN
 
-### Configuração Obrigatória
-- **World Partition:** ATIVADO para todos os níveis
-- **Cell Size:** 512m x 512m (optimizado para 4-8km²)
-- **Loading Range:** 1024m (2x cell size)
-- **One File Per Actor:** ATIVADO
-- **Data Layers:** OBRIGATÓRIO para organização
+### A. WORLD ARCHITECTURE
 
-### Estrutura de Células
+**World Partition Configuration:**
+- **Grid Size:** 1km x 1km cells (64 total cells for 8x8km world)
+- **Streaming Distance:** 2km radius around player
+- **LOD Distances:** 500m / 1km / 2km for High/Medium/Low detail
+- **Async Loading:** Background streaming with 2-frame prediction
+
+**Level Structure:**
 ```
-Grid Layout (8km x 8km):
-┌────┬────┬────┬────┬────┬────┬────┬────┐
-│ 0,0│ 1,0│ 2,0│ 3,0│ 4,0│ 5,0│ 6,0│ 7,0│
-├────┼────┼────┼────┼────┼────┼────┼────┤
-│ 0,1│ 1,1│ 2,1│ 3,1│ 4,1│ 5,1│ 6,1│ 7,1│
-├────┼────┼────┼────┼────┼────┼────┼────┤
-│ 0,2│ 1,2│ 2,2│ 3,2│ 4,2│ 5,2│ 6,2│ 7,2│
-└────┴────┴────┴────┴────┴────┴────┴────┘
+/Game/Maps/
+├── MainWorld_Persistent     # Always loaded core systems
+├── Biome_Forest_01         # Procedural forest sections
+├── Biome_Plains_01         # Open grassland areas  
+├── Biome_River_01          # Water systems
+├── Biome_Mountains_01      # Elevated terrain
+└── Structures/             # Buildings and landmarks
+    ├── Cave_System_01
+    ├── Ancient_Ruins_01
+    └── Player_Bases/
 ```
 
-### Data Layers Obrigatórias
-- **DL_Terrain** — Paisagem base
-- **DL_Vegetation** — Árvores, plantas, foliage
-- **DL_Structures** — Rochas, cavernas, ruínas
-- **DL_Dinosaurs** — Spawn points e rotas dos dinossauros
-- **DL_Resources** — Pontos de recursos para crafting
-- **DL_Audio** — Ambient sounds, audio triggers
-- **DL_Lighting** — Luzes dinâmicas e atmosfera
+### B. AI ARCHITECTURE (MASS ENTITY)
 
----
+**Population Targets:**
+- **Herbivores:** 30,000 agents (Triceratops, Parasaurolophus, etc.)
+- **Carnivores:** 5,000 agents (T-Rex, Velociraptors, etc.)
+- **Small Fauna:** 15,000 agents (Birds, small mammals, insects)
 
-## NANITE & RENDERING PIPELINE
-
-### Nanite Configuration
-- **OBRIGATÓRIO** para toda a geometria estática
-- **Minimum Triangle Count:** 1000+ para activar Nanite
-- **Fallback Mesh:** Sempre configurado para ray-tracing
-- **LOD Strategy:** Nanite automático (sem LODs manuais)
-
-### Rendering Stack
-```
-Frame Rendering Pipeline:
-┌─────────────────┐
-│   Scene Setup   │ ← Camera, frustum, culling
-├─────────────────┤
-│ Nanite Raster   │ ← Geometry rendering
-├─────────────────┤
-│ Lumen GI        │ ← Global illumination
-├─────────────────┤
-│ Virtual Shadows │ ← High-res shadows
-├─────────────────┤
-│ Post Processing │ ← TAA, bloom, tone mapping
-├─────────────────┤
-│   UI Overlay    │ ← HUD, menus
-└─────────────────┘
-```
-
-### Performance Targets
-- **PC (Epic Settings):** 60fps @ 1440p
-- **PC (High Settings):** 60fps @ 1080p
-- **Console (High Settings):** 30fps @ 4K upscaled
-- **Console (Medium Settings):** 60fps @ 1080p upscaled
-
----
-
-## LUMEN GLOBAL ILLUMINATION
-
-### Configuration
-- **Dynamic GI:** ATIVADO (substitui lightmaps)
-- **Software Ray Tracing:** Fallback para hardware não suportado
-- **Hardware Ray Tracing:** Preferido quando disponível
-- **Scene View Distance:** 400m (optimizado para survival)
-- **Final Gather Quality:** High (para interiores de cavernas)
-
-### Lighting Strategy
-- **Primary Light:** Directional Light (sol)
-- **Sky Light:** Atmospheric scattering
-- **Local Lights:** Point/Spot lights para cavernas e fogueiras
-- **Emissive Materials:** Cristais, lava, bioluminescência
-
----
-
-## VIRTUAL SHADOW MAPS
-
-### Configuration
-- **VSM:** ATIVADO por defeito
-- **Page Pool Size:** 128MB (ajustável por scalability)
-- **Clipmap Levels:** 6-22 (64cm a 40km)
-- **SMRT Ray Count:** 8 rays (Epic), 4 rays (High)
-- **Caching:** ATIVADO para geometria estática
-
-### Shadow Quality Tiers
-- **Epic:** 16k VSM, 8 SMRT rays, full caching
-- **High:** 16k VSM, 4 SMRT rays, limited caching
-- **Medium:** 8k VSM, 2 SMRT rays, minimal caching
-- **Low:** Traditional shadow maps
-
----
-
-## CHAOS PHYSICS ARCHITECTURE
-
-### Physics Configuration
-- **Chaos Physics:** ATIVADO (substitui PhysX)
-- **Substeps:** 4 (60fps), 2 (30fps)
-- **Solver Iterations:** 8 position, 4 velocity
-- **Collision Channels:** Custom setup para dinossauros
-
-### Collision Channels
+**Behavior System:**
 ```cpp
-// Custom Collision Channels
-ECC_Dinosaur        = ECC_GameTraceChannel1
-ECC_Player          = ECC_GameTraceChannel2  
-ECC_Environment     = ECC_GameTraceChannel3
-ECC_Projectile      = ECC_GameTraceChannel4
-ECC_Interaction     = ECC_GameTraceChannel5
-ECC_Audio           = ECC_GameTraceChannel6
+// Mass Entity Components
+struct FDinosaurMassTag : public FMassTag {};
+struct FHerbivoreMassTag : public FMassTag {};
+struct FCarnivoreTag : public FMassTag {};
+
+struct FDinosaurMovementFragment : public FMassFragment {
+    FVector Velocity;
+    FVector TargetLocation;
+    float MaxSpeed;
+    float TurnRate;
+};
+
+struct FDinosaurBehaviorFragment : public FMassFragment {
+    EDinosaurState CurrentState;  // Idle, Feeding, Hunting, Fleeing, etc.
+    float StateTimer;
+    FVector HomeTerritory;
+    float TerritoryRadius;
+};
+
+struct FDinosaurNeedsFragment : public FMassFragment {
+    float Hunger;        // 0.0 - 1.0
+    float Thirst;        // 0.0 - 1.0  
+    float Energy;        // 0.0 - 1.0
+    float Fear;          // 0.0 - 1.0
+};
 ```
 
-### Destruction System
-- **Chaos Destruction:** Para árvores, rochas, estruturas
-- **Fracture Depth:** 3 níveis máximo
-- **Debris Lifetime:** 30 segundos
-- **Max Debris Count:** 500 simultâneos
-
----
-
-## MASS AI FRAMEWORK
-
-### Configuration
-- **Mass Entity:** ATIVADO para crowds de dinossauros
-- **Max Entities:** 50,000 simultâneos
-- **LOD Distances:** 100m/500m/1000m/2000m
-- **Update Frequency:** 60Hz/30Hz/10Hz/1Hz por LOD
-
-### AI Behaviour Stack
-```
-┌─────────────────────────────────────┐
-│        Behaviour Trees              │ ← Individual dinosaur logic
-├─────────────────────────────────────┤
-│        State Trees                  │ ← High-level states
-├─────────────────────────────────────┤
-│        Mass Simulation              │ ← Crowd behaviour
-├─────────────────────────────────────┤
-│        Navigation Mesh             │ ← Pathfinding
-└─────────────────────────────────────┘
-```
-
----
-
-## METASOUNDS AUDIO ARCHITECTURE
-
-### Audio Pipeline
-- **MetaSounds:** OBRIGATÓRIO para toda a música e SFX
-- **Spatial Audio:** 3D positioning com atenuação realista
-- **Adaptive Music:** Baseada em tensão, localização, hora do dia
-- **Dynamic Range:** -23 LUFS (broadcast standard)
-
-### Audio Categories
-- **Music:** Adaptive orchestral score
-- **Ambience:** Forest sounds, wind, water
-- **Dinosaur SFX:** Roars, footsteps, breathing
-- **Player SFX:** Footsteps, crafting, inventory
-- **Environmental:** Weather, fire, water
-
----
-
-## NIAGARA VFX SYSTEM
-
-### VFX Architecture
-- **Niagara:** OBRIGATÓRIO para todos os efeitos
-- **LOD Chain:** 3 níveis (Near/Medium/Far)
-- **GPU Simulation:** Para particles > 1000
-- **CPU Simulation:** Para particles < 1000
-
-### Effect Categories
-- **Weather:** Rain, fog, wind particles
-- **Environmental:** Dust, leaves, water splashes
-- **Magical:** Gem effects, teleportation
-- **Combat:** Blood, impact effects
-- **Atmospheric:** God rays, volumetric fog
-
----
-
-## MEMORY ARCHITECTURE
-
-### Memory Pools
+**Individual Recognition System:**
 ```cpp
-// Memory Layout (8GB target)
-Engine Core:        1.5GB
-World Streaming:    2.0GB
-Audio:             512MB
-Textures:          2.5GB
-Meshes:            1.0GB
-AI/Gameplay:       512MB
-Reserve:           512MB
+struct FDinosaurIdentityFragment : public FMassFragment {
+    FGuid UniqueID;
+    FString GeneratedName;        // "Scarface", "Limping Bull", etc.
+    TArray<FPhysicalTrait> Traits; // Size, color, scars, etc.
+    FDinosaurPersonality Personality;
+    float FamiliarityWithPlayer;  // 0.0 - 1.0
+};
+
+struct FPhysicalTrait {
+    ETraitType Type;     // Size, Color, Scar, Horn, etc.
+    FVector Value;       // RGB for color, XYZ for size, etc.
+    float Intensity;     // How pronounced this trait is
+};
 ```
 
-### Streaming Strategy
-- **Texture Streaming:** Virtual textures para paisagens
-- **Audio Streaming:** Compressed audio com 3-second buffer
-- **Mesh Streaming:** Nanite automático
+### C. PERFORMANCE ARCHITECTURE
+
+**LOD System Implementation:**
+```cpp
+// Distance-based LOD for all systems
+enum class ESystemLOD : uint8 {
+    High = 0,    // 0-500m: Full detail, all features
+    Medium = 1,  // 500m-1km: Reduced detail, essential features
+    Low = 2,     // 1km-2km: Minimal detail, silhouettes only
+    Culled = 3   // 2km+: Not rendered/updated
+};
+
+// Applied to:
+// - Mesh rendering (Nanite handles automatically)
+// - Animation (full/reduced/pose-only/static)
+// - AI behavior (full/simplified/basic/none)
+// - Physics (full/reduced/kinematic/static)
+// - Audio (3D/stereo/mono/muted)
+```
+
+**Memory Management:**
+- **Texture Streaming:** 2GB pool, aggressive mip-mapping
+- **Mesh Streaming:** Nanite virtualized geometry
+- **Audio Streaming:** Compressed audio with distance attenuation
 - **Animation Streaming:** LOD-based animation compression
 
+### D. RENDERING PIPELINE
+
+**Lumen Global Illumination:**
+- **Indoor Scenes:** Full Lumen with reflections
+- **Outdoor Scenes:** Lumen with skylight optimization
+- **Performance Scaling:** Auto-adjust Lumen quality based on framerate
+
+**Nanite Virtualized Geometry:**
+- **All Static Meshes:** Converted to Nanite (except UI elements)
+- **LOD Elimination:** Automatic detail scaling
+- **Memory Efficiency:** Stream geometry detail on demand
+
+**Temporal Super Resolution (TSR):**
+- **Render Scale:** 67% internal resolution with TSR upscaling
+- **Quality Modes:** High/Medium/Low TSR quality settings
+- **Fallback:** FXAA for unsupported hardware
+
 ---
 
-## PERFORMANCE MONITORING
+## GAMEPLAY SYSTEMS INTEGRATION
 
-### Profiling Tools
-- **Unreal Insights:** Primary profiling tool
-- **GPU Profiler:** Frame time analysis
-- **Memory Profiler:** Allocation tracking
-- **Network Profiler:** Multiplayer (futuro)
+### A. SURVIVAL MECHANICS
 
-### Performance Metrics
+**Core Systems:**
 ```cpp
-// Target Frame Times
-Epic (60fps):    16.67ms
-High (60fps):    16.67ms  
-Medium (30fps):  33.33ms
-Low (30fps):     33.33ms
-
-// Breakdown
-Render Thread:   12ms max
-Game Thread:     14ms max
-GPU:            15ms max
+class TRANSPERSONALGAME_API USurvivalComponent : public UActorComponent {
+public:
+    // Basic needs
+    UPROPERTY(BlueprintReadWrite)
+    float Hunger = 100.0f;
+    
+    UPROPERTY(BlueprintReadWrite) 
+    float Thirst = 100.0f;
+    
+    UPROPERTY(BlueprintReadWrite)
+    float Health = 100.0f;
+    
+    UPROPERTY(BlueprintReadWrite)
+    float Stamina = 100.0f;
+    
+    // Environmental factors
+    UPROPERTY(BlueprintReadWrite)
+    float Temperature = 20.0f; // Celsius
+    
+    UPROPERTY(BlueprintReadWrite)
+    bool bIsWet = false;
+    
+    UPROPERTY(BlueprintReadWrite)
+    float FearLevel = 0.0f;
+};
 ```
+
+### B. CRAFTING & BUILDING
+
+**Resource System:**
+- **Primitive Materials:** Stone, Wood, Plant Fiber, Bone
+- **Processed Materials:** Rope, Sharp Stone, Hardened Wood
+- **Advanced Materials:** Metal (rare), Leather, Composite Tools
+
+**Building Constraints:**
+- **Physics-Based:** All structures must be physically stable
+- **Material Requirements:** Realistic material costs
+- **Environmental Impact:** Structures affect local ecosystem
+
+### C. DOMESTICATION SYSTEM
+
+**Taming Mechanics:**
+```cpp
+class TRANSPERSONALGAME_API UDomesticationComponent : public UActorComponent {
+public:
+    UPROPERTY(BlueprintReadWrite)
+    float TrustLevel = 0.0f;      // 0-100
+    
+    UPROPERTY(BlueprintReadWrite)
+    float FearOfPlayer = 50.0f;   // 0-100
+    
+    UPROPERTY(BlueprintReadWrite)
+    EDomesticationStage Stage = EDomesticationStage::Wild;
+    
+    // Wild -> Curious -> Tolerant -> Friendly -> Bonded
+};
+```
+
+**Tameable Species:**
+- **Small Herbivores:** Compsognathus, Dryosaurus
+- **Medium Herbivores:** Parasaurolophus juveniles
+- **Utility Creatures:** Pteranodon (limited flight), Ankylosaurus (protection)
 
 ---
 
-## SCALABILITY FRAMEWORK
+## DEVELOPMENT WORKFLOW
 
-### Scalability Groups
-- **ViewDistance:** 0.5x / 0.75x / 1.0x / 1.25x
-- **AntiAliasing:** Off / FXAA / TAA / TSR
-- **PostProcessing:** Low / Medium / High / Epic
-- **Textures:** 512 / 1024 / 2048 / 4096
-- **Effects:** 25% / 50% / 75% / 100%
-- **Foliage:** 0.5x / 0.75x / 1.0x / 1.25x
+### A. COMPILATION REQUIREMENTS
 
-### Platform Presets
+**Required Modules:**
+```cpp
+// TranspersonalGame.Build.cs
+PublicDependencyModuleNames.AddRange(new string[] {
+    "Core", "CoreUObject", "Engine", "UnrealEd",
+    "ToolMenus", "EditorStyle", "EditorWidgets",
+    "Slate", "SlateCore", "UMG", 
+    "NavigationSystem", "AIModule", "GameplayTasks",
+    "Niagara", "Chaos", "MassEntity", "MassAI",
+    "WorldPartition", "Landscape", "Foliage"
+});
+```
+
+**Plugin Dependencies:**
+- **Mass Entity** (AI simulation)
+- **World Partition** (Large world streaming)
+- **Chaos Physics** (Destruction & cloth)
+- **Niagara** (VFX system)
+- **MetaSounds** (Procedural audio)
+- **Lumen** (Global illumination)
+- **Nanite** (Virtualized geometry)
+
+### B. BUILD CONFIGURATION
+
+**Development Settings:**
 ```ini
-[PC_Epic]
-ViewDistance=1.25
-AntiAliasing=3 (TSR)
-PostProcessing=3
-Textures=3
-Effects=3
-Foliage=1.25
+[/Script/Engine.Engine]
+bUseFixedFrameRate=False
+FixedFrameRate=60.0
+bSmoothFrameRate=True
+SmoothedFrameRateRange=(LowerBound=(Type=Inclusive,Value=30.0),UpperBound=(Type=Exclusive,Value=120.0))
 
-[Console_High]
-ViewDistance=1.0
-AntiAliasing=2 (TAA)
-PostProcessing=2
-Textures=2
-Effects=2
-Foliage=1.0
+[/Script/Engine.RendererSettings]
+r.DefaultFeature.AutoExposure=True
+r.DefaultFeature.MotionBlur=True
+r.TemporalAA.Algorithm=1
+r.AntiAliasingMethod=3
+
+[/Script/Engine.WorldPartitionSettings]
+EnableWorldPartition=True
+DefaultGridSize=102400  // 1km in UE units
+LoadingRange=204800     // 2km loading radius
 ```
 
 ---
 
-## BUILD PIPELINE
+## PERFORMANCE TARGETS & MONITORING
 
-### Build Configurations
-- **Debug:** Full symbols, no optimization
-- **Development:** Partial optimization, logging
-- **Test:** Full optimization, test features
-- **Shipping:** Maximum optimization, no debug
+### A. FRAMERATE TARGETS
 
-### Packaging Pipeline
-```bash
-# Standard build process
-1. Source compilation (C++)
-2. Blueprint compilation
-3. Asset cooking
-4. Texture compression
-5. Audio compression
-6. Pak file generation
-7. Platform packaging
-```
+**PC (Recommended Specs):**
+- **1080p High:** 60 FPS stable
+- **1440p High:** 60 FPS stable  
+- **4K Medium:** 60 FPS stable
 
----
+**Console (PS5/Xbox Series X):**
+- **Quality Mode:** 30 FPS @ 4K with ray tracing
+- **Performance Mode:** 60 FPS @ 1440p upscaled
 
-## REGRAS TÉCNICAS INVIOLÁVEIS
+**Minimum Specs:**
+- **1080p Medium:** 30 FPS stable
+- **Dynamic Resolution:** Scale to maintain framerate
 
-### 1. Performance Rules
-- **60fps PC é obrigatório** — qualquer feature que quebra isto é rejeitada
-- **30fps consola é obrigatório** — sem excepções
-- **16GB RAM máximo** — incluindo OS overhead
-- **Loading times < 10 segundos** — entre áreas do mundo
+### B. MEMORY TARGETS
 
-### 2. World Partition Rules
-- **Todos os níveis usam World Partition** — sem excepções
-- **Cell size 512m** — não modificar sem aprovação do Engine Architect
-- **One File Per Actor obrigatório** — para colaboração de equipa
-- **Data Layers organizados** — seguir convenção definida
+**PC:**
+- **Minimum:** 8GB RAM, 6GB VRAM
+- **Recommended:** 16GB RAM, 8GB VRAM
+- **Optimal:** 32GB RAM, 12GB VRAM
 
-### 3. Rendering Rules
-- **Nanite obrigatório** — para toda a geometria estática > 1000 tris
-- **Lumen obrigatório** — sem lightmaps estáticos
-- **Virtual Shadow Maps obrigatório** — sem shadow maps tradicionais
-- **Material complexity < 300 instructions** — para performance
+**Console:**
+- **Shared Memory Pool:** 13.5GB available (PS5)
+- **Memory Streaming:** Aggressive texture/mesh streaming
 
-### 4. Audio Rules
-- **MetaSounds obrigatório** — sem audio cues tradicionais
-- **Spatial audio obrigatório** — para imersão
-- **-23 LUFS target** — para consistência de volume
-- **Compressed audio** — OGG Vorbis para música, WAV para SFX curtos
+### C. PROFILING & OPTIMIZATION
 
-### 5. Memory Rules
-- **8GB target total** — incluindo OS
-- **Streaming obrigatório** — para assets > 10MB
-- **Garbage collection < 5ms** — sem hitches perceptíveis
-- **Memory pools** — para allocations frequentes
+**Continuous Monitoring:**
+- **Frame Time:** Target 16.67ms (60 FPS)
+- **Memory Usage:** Track streaming efficiency
+- **AI Performance:** Mass Entity update times
+- **Network Performance:** Replication costs
 
-### 6. Code Rules
-- **Epic C++ Standards** — sem desvios
-- **Modular architecture** — cada sistema independente
-- **Interface-based design** — para testabilidade
-- **Performance-first** — optimização não é opcional
+**Optimization Priorities:**
+1. **AI System Optimization** (Mass Entity performance)
+2. **Rendering Optimization** (Lumen/Nanite tuning)
+3. **Memory Optimization** (Streaming efficiency)
+4. **Physics Optimization** (Chaos performance)
 
 ---
 
-## APROVAÇÃO E DISTRIBUIÇÃO
+## RISK MITIGATION
 
-**Este documento é OBRIGATÓRIO para todos os agentes técnicos.**
+### A. TECHNICAL RISKS
 
-Qualquer desvio destas especificações requer aprovação explícita do Engine Architect e Studio Director.
+**Large World Performance:**
+- **Mitigation:** Aggressive LOD system + World Partition
+- **Fallback:** Reduce world size to 4x4km if needed
 
-**Próximo Agente:** Core Systems Programmer (#03)  
-**Inputs Necessários:** Esta arquitectura técnica completa  
-**Outputs Esperados:** Implementação dos sistemas base (física, colisão, ragdoll, destruição)
+**AI Population Scale:**
+- **Mitigation:** Mass Entity + behavior simplification at distance
+- **Fallback:** Reduce max population to 25,000 agents
+
+**Memory Constraints:**
+- **Mitigation:** Streaming systems + texture compression
+- **Fallback:** Reduce asset quality on lower-end hardware
+
+### B. DEVELOPMENT RISKS
+
+**UE5.5 Stability:**
+- **Mitigation:** Extensive testing + fallback to UE5.4 if critical bugs
+- **Timeline:** Buffer 2 weeks for engine issues
+
+**Team Coordination:**
+- **Mitigation:** Strict architecture enforcement + code reviews
+- **Process:** All systems must conform to this architecture
 
 ---
 
-*Documento criado pelo Engine Architect — Agente #02*  
-*Transpersonal Game Studio — Março 2026*
+## NEXT STEPS FOR CORE SYSTEMS PROGRAMMER
+
+The Core Systems Programmer (Agent #03) should focus on:
+
+1. **Implement Base Classes** defined in this architecture
+2. **Set up Mass Entity framework** for AI simulation  
+3. **Create Component System** for modular gameplay features
+4. **Establish Performance Profiling** infrastructure
+5. **Build Physics Integration** with Chaos system
+
+**Priority Order:**
+1. Core gameplay components (Survival, Building, Combat)
+2. AI foundation systems (Mass Entity setup)
+3. Physics systems (Destruction, cloth, fluids)
+4. Performance monitoring (Profiling tools)
+
+**Dependencies:**
+- This architecture document must be approved before implementation
+- UE5.5 project must compile successfully
+- Required plugins must be enabled and functional
+
+---
+
+*Document prepared by Engine Architect #02*  
+*Transpersonal Game Studio — March 2026*
