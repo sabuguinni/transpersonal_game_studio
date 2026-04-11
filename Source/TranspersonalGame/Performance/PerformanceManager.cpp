@@ -1,308 +1,369 @@
 #include "PerformanceManager.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Engine/GameViewportClient.h"
 #include "HAL/PlatformFilemanager.h"
 #include "Stats/Stats.h"
 #include "RenderingThread.h"
-#include "RHI.h"
-#include "Engine/StaticMeshActor.h"
+#include "Engine/GameViewportClient.h"
 #include "Components/StaticMeshComponent.h"
-#include "Materials/MaterialInterface.h"
-#include "Engine/TextureRenderTarget2D.h"
-#include "GameFramework/GameUserSettings.h"
-#include "Scalability.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Components/LightComponent.h"
+#include "Particles/ParticleSystemComponent.h"
+#include "Engine/PostProcessVolume.h"
 
 UPerformanceManager::UPerformanceManager()
 {
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = MonitoringInterval;
+    
+    // Initialize default thresholds
+    Thresholds = FPerformanceThresholds();
     CurrentMetrics = FPerformanceMetrics();
-    MetricsHistory.Reserve(MaxHistorySize);
-}
-
-void UPerformanceManager::Initialize(FSubsystemCollectionBase& Collection)
-{
-    Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Warning, TEXT("PerformanceManager: Initializing performance monitoring system"));
-    
-    // Start monitoring by default
-    StartPerformanceMonitoring();
-    
-    // Set up memory optimization timer
-    GetWorld()->GetTimerManager().SetTimer(
-        MemoryOptimizationTimer,
-        this,
-        &UPerformanceManager::OptimizeMemoryUsage,
-        30.0f, // Every 30 seconds
-        true
-    );
-}
-
-void UPerformanceManager::Deinitialize()
-{
-    StopPerformanceMonitoring();
-    
-    if (GetWorld())
+    // Initialize performance history
+    for (int32 i = 0; i < 10; i++)
     {
-        GetWorld()->GetTimerManager().ClearTimer(PerformanceUpdateTimer);
-        GetWorld()->GetTimerManager().ClearTimer(MemoryOptimizationTimer);
-    }
-    
-    Super::Deinitialize();
-}
-
-bool UPerformanceManager::ShouldCreateSubsystem(UObject* Outer) const
-{
-    return true;
-}
-
-void UPerformanceManager::StartPerformanceMonitoring()
-{
-    if (bIsMonitoring)
-    {
-        return;
-    }
-    
-    bIsMonitoring = true;
-    
-    // Update metrics every frame
-    GetWorld()->GetTimerManager().SetTimer(
-        PerformanceUpdateTimer,
-        this,
-        &UPerformanceManager::UpdatePerformanceMetrics,
-        0.016f, // ~60 FPS
-        true
-    );
-    
-    UE_LOG(LogTemp, Warning, TEXT("PerformanceManager: Performance monitoring started"));
-}
-
-void UPerformanceManager::StopPerformanceMonitoring()
-{
-    if (!bIsMonitoring)
-    {
-        return;
-    }
-    
-    bIsMonitoring = false;
-    
-    if (GetWorld())
-    {
-        GetWorld()->GetTimerManager().ClearTimer(PerformanceUpdateTimer);
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("PerformanceManager: Performance monitoring stopped"));
-}
-
-FPerformanceMetrics UPerformanceManager::GetCurrentMetrics() const
-{
-    return CurrentMetrics;
-}
-
-void UPerformanceManager::SetTargetFPS(float InTargetFPS)
-{
-    TargetFPS = FMath::Clamp(InTargetFPS, 30.0f, 120.0f);
-    MaxFrameTimeThreshold = 1000.0f / TargetFPS; // Convert to milliseconds
-    
-    UE_LOG(LogTemp, Warning, TEXT("PerformanceManager: Target FPS set to %.1f"), TargetFPS);
-}
-
-void UPerformanceManager::SetPerformanceThresholds(float MaxFrameTime, float MaxGameThreadTime, float MaxRenderThreadTime)
-{
-    MaxFrameTimeThreshold = MaxFrameTime;
-    MaxGameThreadTimeThreshold = MaxGameThreadTime;
-    MaxRenderThreadTimeThreshold = MaxRenderThreadTime;
-    
-    UE_LOG(LogTemp, Warning, TEXT("PerformanceManager: Performance thresholds updated"));
-}
-
-void UPerformanceManager::SetGlobalLODBias(int32 LODBias)
-{
-    static IConsoleVariable* LODBiasVar = IConsoleManager::Get().FindConsoleVariable(TEXT("r.ForceLOD"));
-    if (LODBiasVar)
-    {
-        LODBiasVar->Set(LODBias);
-        UE_LOG(LogTemp, Warning, TEXT("PerformanceManager: LOD bias set to %d"), LODBias);
+        PerformanceHistory[i] = 60.0f; // Start optimistic
     }
 }
 
-void UPerformanceManager::SetViewDistanceScale(float Scale)
+void UPerformanceManager::BeginPlay()
 {
-    static IConsoleVariable* ViewDistanceVar = IConsoleManager::Get().FindConsoleVariable(TEXT("r.ViewDistanceScale"));
-    if (ViewDistanceVar)
-    {
-        ViewDistanceVar->Set(Scale);
-        UE_LOG(LogTemp, Warning, TEXT("PerformanceManager: View distance scale set to %.2f"), Scale);
-    }
+    Super::BeginPlay();
+    
+    UE_LOG(LogTemp, Warning, TEXT("Performance Manager initialized - Target FPS: %.1f"), Thresholds.TargetFPS_PC);
+    
+    // Set initial quality based on platform
+    #if PLATFORM_WINDOWS || PLATFORM_MAC || PLATFORM_LINUX
+        CurrentQualityScale = 1.0f; // Full quality on PC
+    #else
+        CurrentQualityScale = 0.8f; // Reduced quality on console
+    #endif
 }
 
-void UPerformanceManager::SetRenderingQuality(int32 QualityLevel)
+void UPerformanceManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    QualityLevel = FMath::Clamp(QualityLevel, 0, 4);
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    // Apply scalability settings
-    Scalability::SetQualityLevels(Scalability::CreateQualityLevelSet(
-        QualityLevel, // ResolutionQuality
-        QualityLevel, // ViewDistanceQuality
-        QualityLevel, // AntiAliasingQuality
-        QualityLevel, // ShadowQuality
-        QualityLevel, // GlobalIlluminationQuality
-        QualityLevel, // ReflectionQuality
-        QualityLevel, // PostProcessQuality
-        QualityLevel, // TextureQuality
-        QualityLevel, // EffectsQuality
-        QualityLevel  // FoliageQuality
-    ));
+    TimeSinceLastUpdate += DeltaTime;
     
-    UE_LOG(LogTemp, Warning, TEXT("PerformanceManager: Rendering quality set to %d"), QualityLevel);
-}
-
-void UPerformanceManager::EnablePerformanceMode(bool bEnable)
-{
-    bPerformanceModeEnabled = bEnable;
-    
-    if (bEnable)
+    if (TimeSinceLastUpdate >= MonitoringInterval)
     {
-        // Store original settings
-        UGameUserSettings* Settings = UGameUserSettings::GetGameUserSettings();
-        if (Settings)
+        UpdatePerformanceMetrics();
+        CheckPerformanceThresholds();
+        
+        if (bAutoOptimizationEnabled && !bOptimizationInProgress)
         {
-            OriginalQualityLevel = Settings->GetOverallScalabilityLevel();
+            ApplyPerformanceOptimizations();
         }
         
-        // Apply performance optimizations
-        SetRenderingQuality(1); // Low quality
-        SetViewDistanceScale(0.7f);
-        SetGlobalLODBias(1);
-        
-        // Disable expensive features
-        static IConsoleVariable* MotionBlurVar = IConsoleManager::Get().FindConsoleVariable(TEXT("r.MotionBlurQuality"));
-        if (MotionBlurVar) MotionBlurVar->Set(0);
-        
-        static IConsoleVariable* BloomVar = IConsoleManager::Get().FindConsoleVariable(TEXT("r.BloomQuality"));
-        if (BloomVar) BloomVar->Set(1);
-        
-        UE_LOG(LogTemp, Warning, TEXT("PerformanceManager: Performance mode ENABLED"));
+        TimeSinceLastUpdate = 0.0f;
     }
-    else
+    
+    // Smooth quality transitions
+    if (FMath::Abs(CurrentQualityScale - TargetQualityScale) > 0.01f)
     {
-        // Restore original settings
-        SetRenderingQuality(OriginalQualityLevel);
-        SetViewDistanceScale(OriginalViewDistanceScale);
-        SetGlobalLODBias(OriginalLODBias);
-        
-        UE_LOG(LogTemp, Warning, TEXT("PerformanceManager: Performance mode DISABLED"));
+        CurrentQualityScale = FMath::FInterpTo(CurrentQualityScale, TargetQualityScale, DeltaTime, QualityTransitionSpeed);
+        AdjustRenderQuality(CurrentQualityScale);
     }
-}
-
-void UPerformanceManager::ForceGarbageCollection()
-{
-    GEngine->ForceGarbageCollection(true);
-    UE_LOG(LogTemp, Warning, TEXT("PerformanceManager: Forced garbage collection"));
-}
-
-void UPerformanceManager::OptimizeMemoryUsage()
-{
-    // Force garbage collection
-    ForceGarbageCollection();
-    
-    // Flush rendering commands
-    FlushRenderingCommands();
-    
-    // Trim memory pools
-    FPlatformMisc::TrimMemory();
-    
-    UE_LOG(LogTemp, Log, TEXT("PerformanceManager: Memory optimization completed"));
 }
 
 void UPerformanceManager::UpdatePerformanceMetrics()
 {
-    if (!bIsMonitoring)
+    // Get current FPS
+    if (GEngine && GEngine->GetGameViewport())
     {
-        return;
+        CurrentMetrics.CurrentFPS = 1.0f / GetWorld()->GetDeltaSeconds();
+        CurrentMetrics.FrameTime = GetWorld()->GetDeltaSeconds() * 1000.0f; // Convert to milliseconds
     }
     
-    // Get FPS and frame time
-    CurrentMetrics.CurrentFPS = 1.0f / GetWorld()->GetDeltaSeconds();
-    CurrentMetrics.FrameTime = GetWorld()->GetDeltaSeconds() * 1000.0f; // Convert to ms
-    
-    // Get thread times (approximation)
-    CurrentMetrics.GameThreadTime = FPlatformTime::ToMilliseconds(GGameThreadTime);
-    CurrentMetrics.RenderThreadTime = FPlatformTime::ToMilliseconds(GRenderThreadTime);
-    CurrentMetrics.GPUTime = FPlatformTime::ToMilliseconds(GGPUFrameTime);
+    // Update FPS history for rolling average
+    PerformanceHistory[HistoryIndex] = CurrentMetrics.CurrentFPS;
+    HistoryIndex = (HistoryIndex + 1) % 10;
     
     // Get memory usage
     FPlatformMemoryStats MemStats = FPlatformMemory::GetStats();
     CurrentMetrics.MemoryUsageMB = MemStats.UsedPhysical / (1024.0f * 1024.0f);
     
-    // Get scene complexity
-    CurrentMetrics.ActiveActors = GetWorld()->GetActorCount();
-    
-    // Store in history
-    MetricsHistory.Add(CurrentMetrics);
-    if (MetricsHistory.Num() > MaxHistorySize)
+    // Count actors in world
+    UWorld* World = GetWorld();
+    if (World)
     {
-        MetricsHistory.RemoveAt(0);
+        CurrentMetrics.ActiveActors = World->GetActorCount();
+        
+        // Count visible actors (simplified - would need proper frustum culling check)
+        int32 VisibleCount = 0;
+        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+        {
+            AActor* Actor = *ActorItr;
+            if (Actor && !Actor->IsHidden())
+            {
+                VisibleCount++;
+            }
+        }
+        CurrentMetrics.VisibleActors = VisibleCount;
     }
     
-    // Check thresholds
-    CheckPerformanceThresholds();
+    // Estimate draw calls and triangles (simplified)
+    CurrentMetrics.DrawCalls = CurrentMetrics.VisibleActors; // Rough estimate
+    CurrentMetrics.TriangleCount = CurrentMetrics.VisibleActors * 1000; // Very rough estimate
 }
 
 void UPerformanceManager::CheckPerformanceThresholds()
 {
-    bool bThresholdExceeded = false;
-    
-    if (CurrentMetrics.FrameTime > MaxFrameTimeThreshold)
+    // Calculate rolling average FPS
+    float AverageFPS = 0.0f;
+    for (int32 i = 0; i < 10; i++)
     {
-        bThresholdExceeded = true;
-        UE_LOG(LogTemp, Warning, TEXT("PerformanceManager: Frame time threshold exceeded: %.2fms"), CurrentMetrics.FrameTime);
+        AverageFPS += PerformanceHistory[i];
+    }
+    AverageFPS /= 10.0f;
+    
+    // Check FPS threshold
+    float TargetFPS = Thresholds.TargetFPS_PC;
+    #if !PLATFORM_WINDOWS && !PLATFORM_MAC && !PLATFORM_LINUX
+        TargetFPS = Thresholds.TargetFPS_Console;
+    #endif
+    
+    if (AverageFPS < TargetFPS * 0.9f) // 10% tolerance
+    {
+        OnFPSThresholdExceeded.Broadcast(AverageFPS);
+        UE_LOG(LogTemp, Warning, TEXT("Performance: FPS below target (%.1f < %.1f)"), AverageFPS, TargetFPS);
     }
     
-    if (CurrentMetrics.GameThreadTime > MaxGameThreadTimeThreshold)
-    {
-        bThresholdExceeded = true;
-        UE_LOG(LogTemp, Warning, TEXT("PerformanceManager: Game thread time threshold exceeded: %.2fms"), CurrentMetrics.GameThreadTime);
-    }
+    // Check memory threshold
+    float MaxMemory = Thresholds.MaxMemoryUsage_PC;
+    #if !PLATFORM_WINDOWS && !PLATFORM_MAC && !PLATFORM_LINUX
+        MaxMemory = Thresholds.MaxMemoryUsage_Console;
+    #endif
     
-    if (CurrentMetrics.RenderThreadTime > MaxRenderThreadTimeThreshold)
+    if (CurrentMetrics.MemoryUsageMB > MaxMemory * 0.9f) // 10% tolerance
     {
-        bThresholdExceeded = true;
-        UE_LOG(LogTemp, Warning, TEXT("PerformanceManager: Render thread time threshold exceeded: %.2fms"), CurrentMetrics.RenderThreadTime);
-    }
-    
-    if (bThresholdExceeded)
-    {
-        OnPerformanceThresholdExceeded.Broadcast(CurrentMetrics);
-        
-        // Auto-apply optimizations if not in performance mode
-        if (!bPerformanceModeEnabled)
-        {
-            ApplyPerformanceOptimizations();
-        }
+        OnMemoryThresholdExceeded.Broadcast(CurrentMetrics.MemoryUsageMB);
+        UE_LOG(LogTemp, Warning, TEXT("Performance: Memory usage high (%.1f MB > %.1f MB)"), CurrentMetrics.MemoryUsageMB, MaxMemory);
     }
 }
 
 void UPerformanceManager::ApplyPerformanceOptimizations()
 {
-    // Reduce LOD bias temporarily
-    SetGlobalLODBias(1);
+    if (bOptimizationInProgress) return;
     
-    // Reduce view distance
-    SetViewDistanceScale(0.8f);
+    bOptimizationInProgress = true;
     
-    // Schedule restoration after a few seconds
-    FTimerHandle RestoreTimer;
-    GetWorld()->GetTimerManager().SetTimer(
-        RestoreTimer,
-        [this]()
+    // Calculate performance deficit
+    float TargetFPS = Thresholds.TargetFPS_PC;
+    #if !PLATFORM_WINDOWS && !PLATFORM_MAC && !PLATFORM_LINUX
+        TargetFPS = Thresholds.TargetFPS_Console;
+    #endif
+    
+    float AverageFPS = 0.0f;
+    for (int32 i = 0; i < 10; i++)
+    {
+        AverageFPS += PerformanceHistory[i];
+    }
+    AverageFPS /= 10.0f;
+    
+    if (AverageFPS < TargetFPS * 0.9f)
+    {
+        // Performance is below target - reduce quality
+        float PerformanceRatio = AverageFPS / TargetFPS;
+        TargetQualityScale = FMath::Clamp(PerformanceRatio, 0.5f, 1.0f);
+        
+        UE_LOG(LogTemp, Log, TEXT("Performance: Reducing quality scale to %.2f (FPS: %.1f/%.1f)"), TargetQualityScale, AverageFPS, TargetFPS);
+        
+        // Apply specific optimizations
+        OptimizeLODForCurrentPerformance();
+        OptimizeLighting();
+        OptimizeParticles();
+    }
+    else if (AverageFPS > TargetFPS * 1.1f && TargetQualityScale < 1.0f)
+    {
+        // Performance is above target - can increase quality
+        TargetQualityScale = FMath::Min(TargetQualityScale + 0.1f, 1.0f);
+        
+        UE_LOG(LogTemp, Log, TEXT("Performance: Increasing quality scale to %.2f"), TargetQualityScale);
+    }
+    
+    bOptimizationInProgress = false;
+}
+
+void UPerformanceManager::SetPerformanceThresholds(const FPerformanceThresholds& NewThresholds)
+{
+    Thresholds = NewThresholds;
+    UE_LOG(LogTemp, Log, TEXT("Performance thresholds updated"));
+}
+
+bool UPerformanceManager::IsPerformanceWithinTargets() const
+{
+    float TargetFPS = Thresholds.TargetFPS_PC;
+    #if !PLATFORM_WINDOWS && !PLATFORM_MAC && !PLATFORM_LINUX
+        TargetFPS = Thresholds.TargetFPS_Console;
+    #endif
+    
+    return CurrentMetrics.CurrentFPS >= TargetFPS * 0.9f;
+}
+
+void UPerformanceManager::ForcePerformanceOptimization()
+{
+    bOptimizationInProgress = false; // Reset flag
+    ApplyPerformanceOptimizations();
+}
+
+void UPerformanceManager::SetGlobalLODBias(float LODBias)
+{
+    if (GEngine)
+    {
+        // Apply LOD bias to all static meshes
+        UWorld* World = GetWorld();
+        if (World)
         {
-            SetGlobalLODBias(0);
-            SetViewDistanceScale(1.0f);
-        },
-        5.0f,
-        false
-    );
+            for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+            {
+                AActor* Actor = *ActorItr;
+                if (Actor)
+                {
+                    TArray<UStaticMeshComponent*> StaticMeshComponents;
+                    Actor->GetComponents<UStaticMeshComponent>(StaticMeshComponents);
+                    
+                    for (UStaticMeshComponent* MeshComp : StaticMeshComponents)
+                    {
+                        if (MeshComp)
+                        {
+                            MeshComp->SetForcedLodModel(FMath::Clamp(FMath::RoundToInt(LODBias), 0, 3));
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+void UPerformanceManager::OptimizeLODForCurrentPerformance()
+{
+    float LODBias = FMath::Lerp(0.0f, 2.0f, 1.0f - CurrentQualityScale);
+    SetGlobalLODBias(LODBias);
+}
+
+void UPerformanceManager::TriggerGarbageCollection()
+{
+    GEngine->ForceGarbageCollection(true);
+    UE_LOG(LogTemp, Log, TEXT("Performance: Forced garbage collection"));
+}
+
+void UPerformanceManager::OptimizeMemoryUsage()
+{
+    TriggerGarbageCollection();
     
-    UE_LOG(LogTemp, Warning, TEXT("PerformanceManager: Applied temporary performance optimizations"));
+    // Additional memory optimizations could be added here
+    // - Texture streaming optimization
+    // - Audio memory cleanup
+    // - Unused asset cleanup
+}
+
+void UPerformanceManager::AdjustRenderQuality(float QualityScale)
+{
+    if (GEngine && GEngine->GameViewport)
+    {
+        // Adjust screen percentage
+        float ScreenPercentage = FMath::Lerp(50.0f, 100.0f, QualityScale);
+        
+        // Apply via console command (simplified approach)
+        GEngine->Exec(GetWorld(), *FString::Printf(TEXT("r.ScreenPercentage %f"), ScreenPercentage));
+        
+        // Adjust shadow quality
+        int32 ShadowQuality = FMath::Clamp(FMath::RoundToInt(QualityScale * 3), 0, 3);
+        GEngine->Exec(GetWorld(), *FString::Printf(TEXT("r.ShadowQuality %d"), ShadowQuality));
+        
+        // Adjust post-processing quality
+        int32 PostProcessQuality = FMath::Clamp(FMath::RoundToInt(QualityScale * 3), 0, 3);
+        GEngine->Exec(GetWorld(), *FString::Printf(TEXT("r.PostProcessAAQuality %d"), PostProcessQuality));
+    }
+}
+
+void UPerformanceManager::SetDynamicQualityEnabled(bool bEnabled)
+{
+    bDynamicQualityEnabled = bEnabled;
+    UE_LOG(LogTemp, Log, TEXT("Dynamic quality adjustment %s"), bEnabled ? TEXT("enabled") : TEXT("disabled"));
+}
+
+void UPerformanceManager::OptimizeLighting()
+{
+    UWorld* World = GetWorld();
+    if (!World) return;
+    
+    // Reduce light intensity and range for performance
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    {
+        AActor* Actor = *ActorItr;
+        if (Actor)
+        {
+            TArray<ULightComponent*> LightComponents;
+            Actor->GetComponents<ULightComponent>(LightComponents);
+            
+            for (ULightComponent* LightComp : LightComponents)
+            {
+                if (LightComp)
+                {
+                    // Reduce light range for performance
+                    float OriginalRadius = LightComp->AttenuationRadius;
+                    float OptimizedRadius = OriginalRadius * CurrentQualityScale;
+                    LightComp->SetAttenuationRadius(OptimizedRadius);
+                }
+            }
+        }
+    }
+}
+
+void UPerformanceManager::OptimizeParticles()
+{
+    UWorld* World = GetWorld();
+    if (!World) return;
+    
+    // Reduce particle counts and complexity
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    {
+        AActor* Actor = *ActorItr;
+        if (Actor)
+        {
+            TArray<UParticleSystemComponent*> ParticleComponents;
+            Actor->GetComponents<UParticleSystemComponent>(ParticleComponents);
+            
+            for (UParticleSystemComponent* ParticleComp : ParticleComponents)
+            {
+                if (ParticleComp)
+                {
+                    // Scale particle counts based on quality
+                    float ParticleScale = FMath::Lerp(0.3f, 1.0f, CurrentQualityScale);
+                    // Note: Actual particle scaling would require more complex implementation
+                    // This is a simplified example
+                }
+            }
+        }
+    }
+}
+
+void UPerformanceManager::OptimizePostProcessing()
+{
+    // Adjust post-processing settings based on performance
+    if (GEngine)
+    {
+        int32 PPQuality = FMath::Clamp(FMath::RoundToInt(CurrentQualityScale * 3), 0, 3);
+        GEngine->Exec(GetWorld(), *FString::Printf(TEXT("r.PostProcessAAQuality %d"), PPQuality));
+        GEngine->Exec(GetWorld(), *FString::Printf(TEXT("r.BloomQuality %d"), PPQuality));
+        GEngine->Exec(GetWorld(), *FString::Printf(TEXT("r.MotionBlurQuality %d"), PPQuality));
+    }
+}
+
+void UPerformanceManager::OptimizeShadows()
+{
+    if (GEngine)
+    {
+        // Adjust shadow quality and distance based on performance
+        int32 ShadowQuality = FMath::Clamp(FMath::RoundToInt(CurrentQualityScale * 4), 1, 4);
+        float ShadowDistance = FMath::Lerp(2000.0f, 8000.0f, CurrentQualityScale);
+        
+        GEngine->Exec(GetWorld(), *FString::Printf(TEXT("r.ShadowQuality %d"), ShadowQuality));
+        GEngine->Exec(GetWorld(), *FString::Printf(TEXT("r.Shadow.MaxResolution %d"), ShadowQuality * 512));
+        GEngine->Exec(GetWorld(), *FString::Printf(TEXT("r.Shadow.DistanceScale %f"), CurrentQualityScale));
+    }
 }
