@@ -1,88 +1,74 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/Engine.h"
-#include "Subsystems/GameInstanceSubsystem.h"
+#include "Engine/GameInstanceSubsystem.h"
 #include "Engine/World.h"
-#include "GameFramework/GameModeBase.h"
 #include "IntegrationManager.generated.h"
 
 DECLARE_LOG_CATEGORY_EXTERN(LogIntegration, Log, All);
 
-/**
- * Integration Manager for Transpersonal Game Studio
- * 
- * Coordinates integration between all 18 agent systems:
- * - Core Systems (Physics, Performance)
- * - World Generation (PCG, Environment, Architecture, Lighting)
- * - Characters & Animation (MetaHuman, Motion Matching)
- * - AI Systems (NPC Behavior, Combat AI, Crowd Simulation)
- * - Narrative & Quest Systems
- * - Audio & VFX
- * - QA & Testing
- * 
- * Ensures all systems work together coherently and maintains
- * build integrity across the entire project.
- */
-
-UENUM(BlueprintType)
-enum class EIntegrationStatus : uint8
-{
-    NotInitialized,
-    Initializing,
-    Ready,
-    Error,
-    Disabled
-};
-
-UENUM(BlueprintType)
-enum class ESystemPriority : uint8
-{
-    Critical = 0,    // Core, Physics, Performance
-    High = 1,        // World Generation, Characters
-    Medium = 2,      // AI, Animation, Audio
-    Low = 3,         // VFX, Narrative
-    Testing = 4      // QA, Debug systems
-};
-
 USTRUCT(BlueprintType)
-struct FSystemIntegrationInfo
+struct FModuleStatus
 {
     GENERATED_BODY()
 
     UPROPERTY(BlueprintReadOnly)
-    FString SystemName;
+    FString ModuleName;
 
     UPROPERTY(BlueprintReadOnly)
-    EIntegrationStatus Status;
+    bool bIsLoaded;
 
     UPROPERTY(BlueprintReadOnly)
-    ESystemPriority Priority;
+    bool bIsCompiled;
 
     UPROPERTY(BlueprintReadOnly)
-    float InitializationTime;
+    FString LastError;
 
     UPROPERTY(BlueprintReadOnly)
-    TArray<FString> Dependencies;
+    float LoadTime;
 
-    UPROPERTY(BlueprintReadOnly)
-    TArray<FString> ErrorMessages;
-
-    FSystemIntegrationInfo()
+    FModuleStatus()
     {
-        SystemName = TEXT("");
-        Status = EIntegrationStatus::NotInitialized;
-        Priority = ESystemPriority::Medium;
-        InitializationTime = 0.0f;
+        ModuleName = TEXT("");
+        bIsLoaded = false;
+        bIsCompiled = false;
+        LastError = TEXT("");
+        LoadTime = 0.0f;
     }
 };
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnSystemStatusChanged, const FString&, SystemName, EIntegrationStatus, NewStatus);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnIntegrationComplete, bool, bSuccess);
+USTRUCT(BlueprintType)
+struct FBuildStatus
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly)
+    int32 BuildNumber;
+
+    UPROPERTY(BlueprintReadOnly)
+    FDateTime BuildTime;
+
+    UPROPERTY(BlueprintReadOnly)
+    bool bIsStable;
+
+    UPROPERTY(BlueprintReadOnly)
+    TArray<FModuleStatus> ModuleStatuses;
+
+    UPROPERTY(BlueprintReadOnly)
+    FString BuildNotes;
+
+    FBuildStatus()
+    {
+        BuildNumber = 0;
+        BuildTime = FDateTime::Now();
+        bIsStable = false;
+        BuildNotes = TEXT("");
+    }
+};
 
 /**
- * Main Integration Manager Subsystem
- * Manages the initialization and coordination of all game systems
+ * Integration Manager - Coordinates all game systems and ensures compatibility
+ * Responsible for module loading, dependency resolution, and build verification
  */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UIntegrationManager : public UGameInstanceSubsystem
@@ -96,142 +82,76 @@ public:
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Integration Management
+    // Module Management
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    void InitializeAllSystems();
+    bool LoadGameModule(const FString& ModuleName);
 
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    void ShutdownAllSystems();
+    bool UnloadGameModule(const FString& ModuleName);
 
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool RegisterSystem(const FString& SystemName, ESystemPriority Priority, const TArray<FString>& Dependencies);
+    FModuleStatus GetModuleStatus(const FString& ModuleName);
 
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool UnregisterSystem(const FString& SystemName);
-
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    void SetSystemStatus(const FString& SystemName, EIntegrationStatus Status);
-
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    EIntegrationStatus GetSystemStatus(const FString& SystemName) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    TArray<FSystemIntegrationInfo> GetAllSystemsInfo() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool AreAllCriticalSystemsReady() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    float GetOverallIntegrationProgress() const;
+    TArray<FModuleStatus> GetAllModuleStatuses();
 
     // Build Management
-    UFUNCTION(BlueprintCallable, Category = "Build")
-    void ValidateBuildIntegrity();
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    FBuildStatus GetCurrentBuildStatus();
 
-    UFUNCTION(BlueprintCallable, Category = "Build")
-    void GenerateBuildReport();
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    bool ValidateBuildIntegrity();
 
-    UFUNCTION(BlueprintCallable, Category = "Build")
-    bool CheckSystemCompatibility(const FString& SystemA, const FString& SystemB);
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void CreateBuildSnapshot(const FString& BuildNotes);
 
-    // Performance Monitoring
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void StartPerformanceMonitoring();
+    // System Integration
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    bool InitializeAllSystems();
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void StopPerformanceMonitoring();
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    bool ShutdownAllSystems();
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    float GetCurrentFrameRate() const;
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void RefreshSystemDependencies();
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    int32 GetCurrentMemoryUsage() const;
+    // Debugging and Diagnostics
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void RunIntegrationDiagnostics();
 
-    // Events
-    UPROPERTY(BlueprintAssignable)
-    FOnSystemStatusChanged OnSystemStatusChanged;
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    FString GenerateSystemReport();
 
-    UPROPERTY(BlueprintAssignable)
-    FOnIntegrationComplete OnIntegrationComplete;
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void LogSystemStatus();
 
 protected:
-    // System Registry
+    // Internal module tracking
     UPROPERTY()
-    TMap<FString, FSystemIntegrationInfo> RegisteredSystems;
-
-    // Integration State
-    UPROPERTY()
-    bool bIsInitializing;
+    TMap<FString, FModuleStatus> ModuleRegistry;
 
     UPROPERTY()
-    bool bIntegrationComplete;
+    FBuildStatus CurrentBuild;
 
     UPROPERTY()
-    float IntegrationStartTime;
+    TArray<FBuildStatus> BuildHistory;
 
-    // Performance Monitoring
+    // System initialization order
     UPROPERTY()
-    bool bPerformanceMonitoringActive;
+    TArray<FString> SystemInitOrder;
 
-    UPROPERTY()
-    TArray<float> FrameRateHistory;
-
-    UPROPERTY()
-    TArray<int32> MemoryUsageHistory;
-
-    // Internal Methods
-    void InitializeSystemsByPriority();
-    void InitializeSystem(const FString& SystemName);
-    bool CheckSystemDependencies(const FString& SystemName);
-    void UpdateIntegrationProgress();
-    void LogSystemStatus(const FString& SystemName, EIntegrationStatus Status);
-
-    // Performance Monitoring
-    void UpdatePerformanceMetrics();
-    void ValidatePerformanceThresholds();
-
-    // Build Validation
+    // Internal methods
+    void RegisterCoreModules();
     void ValidateModuleDependencies();
-    void ValidateAssetReferences();
-    void ValidateConfigurationFiles();
-};
+    bool CheckModuleCompatibility(const FString& ModuleName);
+    void UpdateModuleStatus(const FString& ModuleName, bool bLoaded, const FString& Error = TEXT(""));
 
-/**
- * Integration Utilities - Static helper functions
- */
-UCLASS()
-class TRANSPERSONALGAME_API UIntegrationUtilities : public UBlueprintFunctionLibrary
-{
-    GENERATED_BODY()
+private:
+    // Build management
+    int32 NextBuildNumber;
+    bool bSystemsInitialized;
 
-public:
-    // System Validation
-    UFUNCTION(BlueprintCallable, Category = "Integration|Utilities")
-    static bool ValidateSystemModule(const FString& ModuleName);
-
-    UFUNCTION(BlueprintCallable, Category = "Integration|Utilities")
-    static TArray<FString> GetMissingDependencies(const FString& SystemName);
-
-    UFUNCTION(BlueprintCallable, Category = "Integration|Utilities")
-    static bool CheckModuleCompilation(const FString& ModuleName);
-
-    // Build Utilities
-    UFUNCTION(BlueprintCallable, Category = "Integration|Utilities")
-    static FString GenerateSystemReport(const FString& SystemName);
-
-    UFUNCTION(BlueprintCallable, Category = "Integration|Utilities")
-    static bool ExportIntegrationLog(const FString& FilePath);
-
-    UFUNCTION(BlueprintCallable, Category = "Integration|Utilities")
-    static void ClearIntegrationCache();
-
-    // Performance Utilities
-    UFUNCTION(BlueprintCallable, Category = "Integration|Utilities")
-    static float MeasureSystemInitTime(const FString& SystemName);
-
-    UFUNCTION(BlueprintCallable, Category = "Integration|Utilities")
-    static int32 MeasureSystemMemoryFootprint(const FString& SystemName);
-
-    UFUNCTION(BlueprintCallable, Category = "Integration|Utilities")
-    static bool ValidatePerformanceTarget(float TargetFPS, int32 MaxMemoryMB);
+    // Performance tracking
+    double LastIntegrationCheck;
+    float IntegrationCheckInterval;
 };
