@@ -1,391 +1,460 @@
 #include "QuestSystemManager.h"
+#include "QuestData.h"
+#include "QuestInstance.h"
+#include "QuestObjective.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Engine/DataTable.h"
 #include "Kismet/GameplayStatics.h"
-#include "GameFramework/PlayerController.h"
-#include "GameFramework/Character.h"
+#include "UObject/ConstructorHelpers.h"
 
 UQuestSystemManager::UQuestSystemManager()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    TotalSpiritualEnergy = 0.0f;
+    bIsInitialized = false;
 }
 
-void UQuestSystemManager::BeginPlay()
+void UQuestSystemManager::Initialize(FSubsystemCollectionBase& Collection)
 {
-    Super::BeginPlay();
-    LoadQuestData();
+    Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Warning, TEXT("Quest System Manager initialized"));
-}
-
-void UQuestSystemManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
-{
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    UE_LOG(LogTemp, Warning, TEXT("QuestSystemManager: Initializing Quest System"));
     
-    // Check location-based quest triggers
-    if (APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0))
-    {
-        if (ACharacter* PlayerCharacter = Cast<ACharacter>(PC->GetPawn()))
-        {
-            CheckLocationTriggers(PlayerCharacter->GetActorLocation());
-        }
-    }
+    InitializeEmotionalJourneys();
+    LoadQuestProgress();
+    
+    bIsInitialized = true;
+    
+    UE_LOG(LogTemp, Warning, TEXT("QuestSystemManager: Quest System initialized successfully"));
 }
 
-bool UQuestSystemManager::StartQuest(const FString& QuestID)
+void UQuestSystemManager::Deinitialize()
 {
-    if (!CanStartQuest(QuestID))
+    UE_LOG(LogTemp, Warning, TEXT("QuestSystemManager: Shutting down Quest System"));
+    
+    SaveQuestProgress();
+    
+    // Clear all quest data
+    ActiveQuests.Empty();
+    CompletedQuests.Empty();
+    FailedQuests.Empty();
+    QuestDatabase.Empty();
+    EmotionalJourneyProgress.Empty();
+    
+    bIsInitialized = false;
+    
+    Super::Deinitialize();
+}
+
+bool UQuestSystemManager::ShouldCreateSubsystem(UObject* Outer) const
+{
+    return true;
+}
+
+void UQuestSystemManager::InitializeEmotionalJourneys()
+{
+    // Initialize core emotional journey types
+    EmotionalJourneyProgress.Add(TEXT("SpiritualAwakening"), 0.0f);
+    EmotionalJourneyProgress.Add(TEXT("TribalBonding"), 0.0f);
+    EmotionalJourneyProgress.Add(TEXT("NatureConnection"), 0.0f);
+    EmotionalJourneyProgress.Add(TEXT("InnerHealing"), 0.0f);
+    EmotionalJourneyProgress.Add(TEXT("WisdomGathering"), 0.0f);
+    EmotionalJourneyProgress.Add(TEXT("CourageBuilding"), 0.0f);
+    EmotionalJourneyProgress.Add(TEXT("CompassionDevelopment"), 0.0f);
+    
+    UE_LOG(LogTemp, Warning, TEXT("QuestSystemManager: Initialized %d emotional journey types"), EmotionalJourneyProgress.Num());
+}
+
+UQuestInstance* UQuestSystemManager::StartQuest(const FString& QuestID, AActor* QuestGiver)
+{
+    if (!bIsInitialized)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Cannot start quest: %s"), *QuestID);
-        return false;
+        UE_LOG(LogTemp, Error, TEXT("QuestSystemManager: Cannot start quest - system not initialized"));
+        return nullptr;
     }
 
-    // Load quest from data table
-    if (QuestDataTable)
+    // Check if quest is already active
+    if (ActiveQuests.Contains(QuestID))
     {
-        FQuestData* QuestData = QuestDataTable->FindRow<FQuestData>(FName(*QuestID), TEXT(""));
-        if (QuestData)
-        {
-            FQuestData NewQuest = *QuestData;
-            NewQuest.QuestStatus = EQuestStatus::InProgress;
-            ActiveQuests.Add(QuestID, NewQuest);
-            
-            UpdateQuestStatus(QuestID, EQuestStatus::InProgress);
-            
-            UE_LOG(LogTemp, Log, TEXT("Started quest: %s"), *QuestData->QuestName.ToString());
-            return true;
-        }
+        UE_LOG(LogTemp, Warning, TEXT("QuestSystemManager: Quest %s is already active"), *QuestID);
+        return ActiveQuests[QuestID];
     }
 
-    UE_LOG(LogTemp, Error, TEXT("Quest data not found for ID: %s"), *QuestID);
-    return false;
+    // Check if quest exists in database
+    UQuestData* QuestData = GetQuestData(QuestID);
+    if (!QuestData)
+    {
+        UE_LOG(LogTemp, Error, TEXT("QuestSystemManager: Quest %s not found in database"), *QuestID);
+        return nullptr;
+    }
+
+    // Check prerequisites
+    if (!CheckQuestPrerequisites(QuestID))
+    {
+        UE_LOG(LogTemp, Warning, TEXT("QuestSystemManager: Prerequisites not met for quest %s"), *QuestID);
+        return nullptr;
+    }
+
+    // Create quest instance
+    UQuestInstance* NewQuest = NewObject<UQuestInstance>(this);
+    NewQuest->Initialize(QuestData, QuestGiver);
+    
+    // Add to active quests
+    ActiveQuests.Add(QuestID, NewQuest);
+    
+    // Broadcast quest started
+    OnQuestStateChanged.Broadcast(NewQuest, EQuestState::Active);
+    
+    UE_LOG(LogTemp, Warning, TEXT("QuestSystemManager: Started quest %s"), *QuestID);
+    
+    return NewQuest;
 }
 
 bool UQuestSystemManager::CompleteQuest(const FString& QuestID)
 {
-    if (!ActiveQuests.Contains(QuestID))
+    UQuestInstance* Quest = GetActiveQuest(QuestID);
+    if (!Quest)
     {
+        UE_LOG(LogTemp, Warning, TEXT("QuestSystemManager: Cannot complete quest %s - not active"), *QuestID);
         return false;
     }
 
-    FQuestData& QuestData = ActiveQuests[QuestID];
+    // Mark quest as completed
+    Quest->SetQuestState(EQuestState::Completed);
     
-    // Check if all required objectives are completed
-    bool bAllObjectivesComplete = true;
-    for (const FQuestObjective& Objective : QuestData.Objectives)
-    {
-        if (!Objective.bIsOptional && !Objective.bIsCompleted)
-        {
-            bAllObjectivesComplete = false;
-            break;
-        }
-    }
+    // Move from active to completed
+    ActiveQuests.Remove(QuestID);
+    CompletedQuests.Add(Quest);
+    
+    // Process completion effects
+    ProcessQuestCompletion(Quest);
+    
+    // Update quest chains
+    UpdateQuestChains(QuestID);
+    
+    // Broadcast completion
+    OnQuestStateChanged.Broadcast(Quest, EQuestState::Completed);
+    
+    UE_LOG(LogTemp, Warning, TEXT("QuestSystemManager: Completed quest %s"), *QuestID);
+    
+    return true;
+}
 
-    if (!bAllObjectivesComplete)
+bool UQuestSystemManager::FailQuest(const FString& QuestID, const FString& Reason)
+{
+    UQuestInstance* Quest = GetActiveQuest(QuestID);
+    if (!Quest)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Cannot complete quest %s - not all objectives finished"), *QuestID);
+        UE_LOG(LogTemp, Warning, TEXT("QuestSystemManager: Cannot fail quest %s - not active"), *QuestID);
         return false;
     }
 
-    // Complete the quest
-    QuestData.QuestStatus = EQuestStatus::Completed;
-    CompletedQuests.Add(QuestID, QuestData);
+    // Mark quest as failed
+    Quest->SetQuestState(EQuestState::Failed);
+    Quest->SetFailureReason(Reason);
+    
+    // Move from active to failed
     ActiveQuests.Remove(QuestID);
-
-    // Give rewards
-    GiveQuestRewards(QuestData);
-
-    // Broadcast completion
-    OnQuestCompleted.Broadcast(QuestID);
-    UpdateQuestStatus(QuestID, EQuestStatus::Completed);
-
-    UE_LOG(LogTemp, Log, TEXT("Completed quest: %s"), *QuestData.QuestName.ToString());
+    FailedQuests.Add(Quest);
+    
+    // Broadcast failure
+    OnQuestStateChanged.Broadcast(Quest, EQuestState::Failed);
+    
+    UE_LOG(LogTemp, Warning, TEXT("QuestSystemManager: Failed quest %s - Reason: %s"), *QuestID, *Reason);
+    
     return true;
 }
 
 bool UQuestSystemManager::AbandonQuest(const FString& QuestID)
 {
-    if (!ActiveQuests.Contains(QuestID))
+    UQuestInstance* Quest = GetActiveQuest(QuestID);
+    if (!Quest)
     {
+        UE_LOG(LogTemp, Warning, TEXT("QuestSystemManager: Cannot abandon quest %s - not active"), *QuestID);
         return false;
     }
 
-    FQuestData& QuestData = ActiveQuests[QuestID];
-    QuestData.QuestStatus = EQuestStatus::Abandoned;
+    // Only allow abandoning if quest allows it
+    if (!Quest->GetQuestData()->bCanBeAbandoned)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("QuestSystemManager: Quest %s cannot be abandoned"), *QuestID);
+        return false;
+    }
+
+    // Mark quest as abandoned
+    Quest->SetQuestState(EQuestState::Abandoned);
+    
+    // Remove from active quests
     ActiveQuests.Remove(QuestID);
-
-    UpdateQuestStatus(QuestID, EQuestStatus::Abandoned);
-
-    UE_LOG(LogTemp, Log, TEXT("Abandoned quest: %s"), *QuestData.QuestName.ToString());
+    
+    // Broadcast abandonment
+    OnQuestStateChanged.Broadcast(Quest, EQuestState::Abandoned);
+    
+    UE_LOG(LogTemp, Warning, TEXT("QuestSystemManager: Abandoned quest %s"), *QuestID);
+    
     return true;
 }
 
-bool UQuestSystemManager::IsQuestActive(const FString& QuestID) const
-{
-    return ActiveQuests.Contains(QuestID);
-}
-
-bool UQuestSystemManager::IsQuestCompleted(const FString& QuestID) const
-{
-    return CompletedQuests.Contains(QuestID);
-}
-
-TArray<FQuestData> UQuestSystemManager::GetActiveQuests() const
-{
-    TArray<FQuestData> Result;
-    for (const auto& QuestPair : ActiveQuests)
-    {
-        Result.Add(QuestPair.Value);
-    }
-    return Result;
-}
-
-TArray<FQuestData> UQuestSystemManager::GetCompletedQuests() const
-{
-    TArray<FQuestData> Result;
-    for (const auto& QuestPair : CompletedQuests)
-    {
-        Result.Add(QuestPair.Value);
-    }
-    return Result;
-}
-
-FQuestData UQuestSystemManager::GetQuestData(const FString& QuestID) const
+UQuestInstance* UQuestSystemManager::GetActiveQuest(const FString& QuestID) const
 {
     if (ActiveQuests.Contains(QuestID))
     {
         return ActiveQuests[QuestID];
     }
-    if (CompletedQuests.Contains(QuestID))
-    {
-        return CompletedQuests[QuestID];
-    }
-    
-    // Return empty quest data if not found
-    return FQuestData();
+    return nullptr;
 }
 
-bool UQuestSystemManager::UpdateObjectiveProgress(const FString& QuestID, const FString& ObjectiveID, int32 Progress)
+TArray<UQuestInstance*> UQuestSystemManager::GetActiveQuests() const
 {
-    if (!ActiveQuests.Contains(QuestID))
-    {
-        return false;
-    }
+    TArray<UQuestInstance*> Result;
+    ActiveQuests.GenerateValueArray(Result);
+    return Result;
+}
 
-    FQuestData& QuestData = ActiveQuests[QuestID];
-    
-    for (FQuestObjective& Objective : QuestData.Objectives)
-    {
-        if (Objective.ObjectiveID == ObjectiveID)
-        {
-            Objective.CurrentProgress = FMath::Min(Progress, Objective.RequiredQuantity);
-            
-            if (Objective.CurrentProgress >= Objective.RequiredQuantity && !Objective.bIsCompleted)
-            {
-                CompleteObjective(QuestID, ObjectiveID);
-            }
-            
-            return true;
-        }
-    }
-    
-    return false;
+TArray<UQuestInstance*> UQuestSystemManager::GetCompletedQuests() const
+{
+    return CompletedQuests;
 }
 
 bool UQuestSystemManager::CompleteObjective(const FString& QuestID, const FString& ObjectiveID)
 {
-    if (!ActiveQuests.Contains(QuestID))
+    UQuestInstance* Quest = GetActiveQuest(QuestID);
+    if (!Quest)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("QuestSystemManager: Cannot complete objective - quest %s not active"), *QuestID);
+        return false;
+    }
+
+    UQuestObjective* Objective = Quest->GetObjective(ObjectiveID);
+    if (!Objective)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("QuestSystemManager: Objective %s not found in quest %s"), *ObjectiveID, *QuestID);
+        return false;
+    }
+
+    // Complete the objective
+    Objective->Complete();
+    
+    // Process objective completion
+    ProcessObjectiveCompletion(Quest, Objective);
+    
+    // Check if quest is complete
+    if (Quest->AreAllObjectivesComplete())
+    {
+        CompleteQuest(QuestID);
+    }
+    
+    // Broadcast objective completion
+    OnObjectiveCompleted.Broadcast(Quest, Objective);
+    
+    UE_LOG(LogTemp, Warning, TEXT("QuestSystemManager: Completed objective %s in quest %s"), *ObjectiveID, *QuestID);
+    
+    return true;
+}
+
+bool UQuestSystemManager::UpdateObjectiveProgress(const FString& QuestID, const FString& ObjectiveID, float Progress)
+{
+    UQuestInstance* Quest = GetActiveQuest(QuestID);
+    if (!Quest)
     {
         return false;
     }
 
-    FQuestData& QuestData = ActiveQuests[QuestID];
-    
-    for (FQuestObjective& Objective : QuestData.Objectives)
-    {
-        if (Objective.ObjectiveID == ObjectiveID && !Objective.bIsCompleted)
-        {
-            Objective.bIsCompleted = true;
-            Objective.CurrentProgress = Objective.RequiredQuantity;
-            
-            OnObjectiveCompleted.Broadcast(QuestID, ObjectiveID);
-            
-            UE_LOG(LogTemp, Log, TEXT("Completed objective %s in quest %s"), *ObjectiveID, *QuestID);
-            
-            // Check if all objectives are complete
-            bool bAllComplete = true;
-            for (const FQuestObjective& CheckObjective : QuestData.Objectives)
-            {
-                if (!CheckObjective.bIsOptional && !CheckObjective.bIsCompleted)
-                {
-                    bAllComplete = false;
-                    break;
-                }
-            }
-            
-            if (bAllComplete)
-            {
-                CompleteQuest(QuestID);
-            }
-            
-            return true;
-        }
-    }
-    
-    return false;
-}
-
-bool UQuestSystemManager::IsObjectiveCompleted(const FString& QuestID, const FString& ObjectiveID) const
-{
-    if (const FQuestData* QuestData = ActiveQuests.Find(QuestID))
-    {
-        for (const FQuestObjective& Objective : QuestData->Objectives)
-        {
-            if (Objective.ObjectiveID == ObjectiveID)
-            {
-                return Objective.bIsCompleted;
-            }
-        }
-    }
-    
-    return false;
-}
-
-TArray<FQuestData> UQuestSystemManager::GetAvailableQuests() const
-{
-    TArray<FQuestData> AvailableQuests;
-    
-    if (QuestDataTable)
-    {
-        TArray<FQuestData*> AllQuests;
-        QuestDataTable->GetAllRows<FQuestData>(TEXT(""), AllQuests);
-        
-        for (FQuestData* Quest : AllQuests)
-        {
-            if (Quest && CanStartQuest(Quest->QuestID))
-            {
-                AvailableQuests.Add(*Quest);
-            }
-        }
-    }
-    
-    return AvailableQuests;
-}
-
-bool UQuestSystemManager::CanStartQuest(const FString& QuestID) const
-{
-    // Check if already active or completed
-    if (IsQuestActive(QuestID) || IsQuestCompleted(QuestID))
+    UQuestObjective* Objective = Quest->GetObjective(ObjectiveID);
+    if (!Objective)
     {
         return false;
     }
-    
-    // Check prerequisites
-    return CheckPrerequisites(QuestID);
-}
 
-void UQuestSystemManager::CheckLocationTriggers(const FVector& PlayerLocation)
-{
-    for (const auto& TriggerPair : QuestLocationTriggers)
+    Objective->UpdateProgress(Progress);
+    
+    // Check if objective is now complete
+    if (Objective->IsComplete())
     {
-        const FString& QuestID = TriggerPair.Key;
-        const FVector& TriggerLocation = TriggerPair.Value;
+        ProcessObjectiveCompletion(Quest, Objective);
+        OnObjectiveCompleted.Broadcast(Quest, Objective);
         
-        if (QuestTriggerRadii.Contains(QuestID))
+        // Check if quest is complete
+        if (Quest->AreAllObjectivesComplete())
         {
-            float TriggerRadius = QuestTriggerRadii[QuestID];
-            float Distance = FVector::Dist(PlayerLocation, TriggerLocation);
-            
-            if (Distance <= TriggerRadius && CanStartQuest(QuestID))
-            {
-                StartQuest(QuestID);
-                UE_LOG(LogTemp, Log, TEXT("Location triggered quest: %s"), *QuestID);
-            }
-        }
-    }
-}
-
-void UQuestSystemManager::RegisterQuestLocation(const FString& QuestID, const FVector& Location, float TriggerRadius)
-{
-    QuestLocationTriggers.Add(QuestID, Location);
-    QuestTriggerRadii.Add(QuestID, TriggerRadius);
-    
-    UE_LOG(LogTemp, Log, TEXT("Registered location trigger for quest %s at %s"), *QuestID, *Location.ToString());
-}
-
-void UQuestSystemManager::UpdateSpiritualProgress(const FString& QuestID, float SpiritualGain)
-{
-    TotalSpiritualEnergy += SpiritualGain;
-    
-    UE_LOG(LogTemp, Log, TEXT("Gained %.2f spiritual energy from quest %s. Total: %.2f"), 
-           SpiritualGain, *QuestID, TotalSpiritualEnergy);
-}
-
-float UQuestSystemManager::GetTotalSpiritualEnergy() const
-{
-    return TotalSpiritualEnergy;
-}
-
-void UQuestSystemManager::LoadQuestData()
-{
-    // Quest data table will be set in Blueprint or loaded from asset
-    if (!QuestDataTable)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Quest Data Table not set - quests will need to be loaded manually"));
-    }
-}
-
-bool UQuestSystemManager::CheckPrerequisites(const FString& QuestID) const
-{
-    if (QuestDataTable)
-    {
-        FQuestData* QuestData = QuestDataTable->FindRow<FQuestData>(FName(*QuestID), TEXT(""));
-        if (QuestData)
-        {
-            for (const FString& PrereqID : QuestData->Prerequisites)
-            {
-                if (!IsQuestCompleted(PrereqID))
-                {
-                    return false;
-                }
-            }
+            CompleteQuest(QuestID);
         }
     }
     
     return true;
 }
 
-void UQuestSystemManager::GiveQuestRewards(const FQuestData& QuestData)
+void UQuestSystemManager::UpdateEmotionalJourney(const FString& JourneyType, float ProgressDelta)
 {
-    // Give experience points
-    if (QuestData.Rewards.ExperiencePoints > 0)
+    if (!EmotionalJourneyProgress.Contains(JourneyType))
     {
-        UE_LOG(LogTemp, Log, TEXT("Gained %d experience points"), QuestData.Rewards.ExperiencePoints);
+        EmotionalJourneyProgress.Add(JourneyType, 0.0f);
     }
     
-    // Give spiritual energy
-    if (QuestData.Rewards.SpiritualEnergy > 0)
+    float CurrentProgress = EmotionalJourneyProgress[JourneyType];
+    float NewProgress = FMath::Clamp(CurrentProgress + ProgressDelta, 0.0f, 1.0f);
+    
+    EmotionalJourneyProgress[JourneyType] = NewProgress;
+    
+    // Broadcast progress update
+    OnEmotionalJourneyProgressed.Broadcast(JourneyType, NewProgress);
+    
+    UE_LOG(LogTemp, Log, TEXT("QuestSystemManager: Updated emotional journey %s: %.2f -> %.2f"), 
+           *JourneyType, CurrentProgress, NewProgress);
+}
+
+float UQuestSystemManager::GetEmotionalJourneyProgress(const FString& JourneyType) const
+{
+    if (EmotionalJourneyProgress.Contains(JourneyType))
     {
-        UpdateSpiritualProgress(QuestData.QuestID, QuestData.Rewards.SpiritualEnergy);
+        return EmotionalJourneyProgress[JourneyType];
+    }
+    return 0.0f;
+}
+
+TArray<FString> UQuestSystemManager::GetActiveEmotionalJourneys() const
+{
+    TArray<FString> Result;
+    for (const auto& Journey : EmotionalJourneyProgress)
+    {
+        if (Journey.Value > 0.0f)
+        {
+            Result.Add(Journey.Key);
+        }
+    }
+    return Result;
+}
+
+UQuestData* UQuestSystemManager::GetQuestData(const FString& QuestID) const
+{
+    if (QuestDatabase.Contains(QuestID))
+    {
+        return QuestDatabase[QuestID];
+    }
+    return nullptr;
+}
+
+bool UQuestSystemManager::CheckQuestPrerequisites(const FString& QuestID, AActor* Player) const
+{
+    UQuestData* QuestData = GetQuestData(QuestID);
+    if (!QuestData)
+    {
+        return false;
+    }
+
+    // Check completed quest prerequisites
+    for (const FString& PrereqQuest : QuestData->PrerequisiteQuests)
+    {
+        if (!HasCompletedQuest(PrereqQuest))
+        {
+            return false;
+        }
+    }
+
+    // Check emotional journey prerequisites
+    for (const auto& EmotionalPrereq : QuestData->EmotionalPrerequisites)
+    {
+        float CurrentProgress = GetEmotionalJourneyProgress(EmotionalPrereq.Key);
+        if (CurrentProgress < EmotionalPrereq.Value)
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool UQuestSystemManager::HasCompletedQuest(const FString& QuestID) const
+{
+    for (const UQuestInstance* Quest : CompletedQuests)
+    {
+        if (Quest && Quest->GetQuestData()->QuestID == QuestID)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+void UQuestSystemManager::ProcessQuestCompletion(UQuestInstance* Quest)
+{
+    if (!Quest || !Quest->GetQuestData())
+    {
+        return;
+    }
+
+    UQuestData* QuestData = Quest->GetQuestData();
+    
+    // Apply emotional journey rewards
+    for (const auto& EmotionalReward : QuestData->EmotionalRewards)
+    {
+        UpdateEmotionalJourney(EmotionalReward.Key, EmotionalReward.Value);
     }
     
-    // Give item rewards
-    for (const FString& ItemID : QuestData.Rewards.ItemRewards)
+    UE_LOG(LogTemp, Warning, TEXT("QuestSystemManager: Processed completion for quest %s"), *QuestData->QuestID);
+}
+
+void UQuestSystemManager::ProcessObjectiveCompletion(UQuestInstance* Quest, UQuestObjective* Objective)
+{
+    if (!Quest || !Objective)
     {
-        UE_LOG(LogTemp, Log, TEXT("Received item: %s"), *ItemID);
-        // TODO: Add to player inventory
+        return;
     }
-    
-    // Special rewards
-    if (!QuestData.Rewards.SpecialRewardDescription.IsEmpty())
+
+    // Apply objective-specific emotional rewards
+    for (const auto& EmotionalReward : Objective->GetEmotionalRewards())
     {
-        UE_LOG(LogTemp, Log, TEXT("Special reward: %s"), *QuestData.Rewards.SpecialRewardDescription.ToString());
+        UpdateEmotionalJourney(EmotionalReward.Key, EmotionalReward.Value);
     }
 }
 
-void UQuestSystemManager::UpdateQuestStatus(const FString& QuestID, EQuestStatus NewStatus)
+void UQuestSystemManager::UpdateQuestChains(const FString& CompletedQuestID)
 {
-    OnQuestStatusChanged.Broadcast(QuestID, NewStatus);
+    // Check if completing this quest unlocks any new quests
+    for (const auto& QuestEntry : QuestDatabase)
+    {
+        UQuestData* QuestData = QuestEntry.Value;
+        if (QuestData && QuestData->PrerequisiteQuests.Contains(CompletedQuestID))
+        {
+            if (IsQuestAvailable(QuestData->QuestID))
+            {
+                UE_LOG(LogTemp, Warning, TEXT("QuestSystemManager: Quest %s is now available after completing %s"), 
+                       *QuestData->QuestID, *CompletedQuestID);
+            }
+        }
+    }
+}
+
+void UQuestSystemManager::SaveQuestProgress()
+{
+    // Implementation for saving quest progress to persistent storage
+    UE_LOG(LogTemp, Warning, TEXT("QuestSystemManager: Saving quest progress..."));
+}
+
+void UQuestSystemManager::LoadQuestProgress()
+{
+    // Implementation for loading quest progress from persistent storage
+    UE_LOG(LogTemp, Warning, TEXT("QuestSystemManager: Loading quest progress..."));
+}
+
+void UQuestSystemManager::DebugPrintActiveQuests() const
+{
+    UE_LOG(LogTemp, Warning, TEXT("=== ACTIVE QUESTS ==="));
+    for (const auto& QuestEntry : ActiveQuests)
+    {
+        UQuestInstance* Quest = QuestEntry.Value;
+        if (Quest && Quest->GetQuestData())
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Quest: %s - %s"), 
+                   *Quest->GetQuestData()->QuestID, 
+                   *Quest->GetQuestData()->Title);
+        }
+    }
+}
+
+void UQuestSystemManager::DebugPrintEmotionalJourneys() const
+{
+    UE_LOG(LogTemp, Warning, TEXT("=== EMOTIONAL JOURNEYS ==="));
+    for (const auto& Journey : EmotionalJourneyProgress)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("%s: %.2f"), *Journey.Key, Journey.Value);
+    }
 }
