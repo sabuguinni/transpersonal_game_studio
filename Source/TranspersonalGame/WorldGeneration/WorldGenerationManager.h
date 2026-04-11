@@ -1,192 +1,216 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
 #include "Engine/World.h"
-#include "Components/SceneComponent.h"
+#include "Components/ActorComponent.h"
+#include "Engine/DataAsset.h"
 #include "PCGComponent.h"
 #include "PCGGraph.h"
+#include "WorldPartition/WorldPartition.h"
 #include "WorldGenerationManager.generated.h"
-
-class UBiomeDefinition;
-class APCGVolume;
-class UPCGComponent;
 
 UENUM(BlueprintType)
 enum class EBiomeType : uint8
 {
     Forest      UMETA(DisplayName = "Forest"),
-    Savanna     UMETA(DisplayName = "Savanna"),
-    Mountain    UMETA(DisplayName = "Mountain"),
+    Volcanic    UMETA(DisplayName = "Volcanic"),
+    Coastal     UMETA(DisplayName = "Coastal"),
+    Grassland   UMETA(DisplayName = "Grassland"),
     River       UMETA(DisplayName = "River"),
-    Desert      UMETA(DisplayName = "Desert"),
-    Swamp       UMETA(DisplayName = "Swamp"),
-    Tundra      UMETA(DisplayName = "Tundra"),
-    Coastal     UMETA(DisplayName = "Coastal")
+    Mountain    UMETA(DisplayName = "Mountain"),
+    Desert      UMETA(DisplayName = "Desert")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBiomeConfiguration
+struct TRANSPERSONALGAME_API FBiomeData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
     EBiomeType BiomeType = EBiomeType::Forest;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FVector Location = FVector::ZeroVector;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FVector Size = FVector(2000.0f, 2000.0f, 500.0f);
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    TSoftObjectPtr<UPCGGraph> PCGGraph;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
     float Temperature = 20.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Humidity = 0.5f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float Humidity = 50.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Elevation = 100.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float Elevation = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    bool bIsActive = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float VegetationDensity = 0.7f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TObjectPtr<class UPCGGraphAsset> PCGGraph = nullptr;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TArray<TObjectPtr<class UStaticMesh>> BiomeMeshes;
+
+    FBiomeData()
+    {
+        BiomeType = EBiomeType::Forest;
+        Temperature = 20.0f;
+        Humidity = 50.0f;
+        Elevation = 0.0f;
+        VegetationDensity = 0.7f;
+    }
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FWorldGenerationSettings
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    int32 WorldSizeKm = 100;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    int32 BiomeResolution = 512;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float NoiseScale = 0.01f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    int32 RandomSeed = 12345;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bUseWorldPartition = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float StreamingCellSize = 25600.0f; // 256m cells
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TArray<FBiomeData> BiomeDefinitions;
+
+    FWorldGenerationSettings()
+    {
+        WorldSizeKm = 100;
+        BiomeResolution = 512;
+        NoiseScale = 0.01f;
+        RandomSeed = 12345;
+        bUseWorldPartition = true;
+        StreamingCellSize = 25600.0f;
+    }
 };
 
 /**
- * Central manager for procedural world generation using PCG and World Partition
- * Coordinates biome generation, terrain modification, and environmental systems
+ * World Generation Manager - Controls procedural generation of the entire game world
+ * Manages biome distribution, terrain generation, and integration with World Partition
  */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AWorldGenerationManager : public AActor
+class TRANSPERSONALGAME_API UWorldGenerationManager : public UObject
 {
     GENERATED_BODY()
 
 public:
-    AWorldGenerationManager();
-
-protected:
-    virtual void BeginPlay() override;
-    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
-
-#if WITH_EDITOR
-    virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
-#endif
-
-public:
-    virtual void Tick(float DeltaTime) override;
+    UWorldGenerationManager();
 
     // Core Generation Functions
     UFUNCTION(BlueprintCallable, Category = "World Generation")
-    void InitializeWorldGeneration();
+    void InitializeWorldGeneration(UWorld* TargetWorld);
 
     UFUNCTION(BlueprintCallable, Category = "World Generation")
-    void GenerateAllBiomes();
+    void GenerateWorld();
 
     UFUNCTION(BlueprintCallable, Category = "World Generation")
-    void GenerateBiome(EBiomeType BiomeType, const FVector& Location, const FVector& Size);
+    void GenerateBiomeMap();
 
     UFUNCTION(BlueprintCallable, Category = "World Generation")
-    void RefreshPCGGeneration();
+    void GenerateRiverSystems();
 
     UFUNCTION(BlueprintCallable, Category = "World Generation")
-    void ClearAllGeneration();
+    void GenerateSettlements();
 
     // Biome Management
-    UFUNCTION(BlueprintCallable, Category = "Biome Management")
-    void AddBiomeConfiguration(const FBiomeConfiguration& BiomeConfig);
+    UFUNCTION(BlueprintCallable, Category = "Biomes")
+    EBiomeType GetBiomeAtLocation(const FVector& WorldLocation) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Biome Management")
-    void RemoveBiomeConfiguration(int32 Index);
+    UFUNCTION(BlueprintCallable, Category = "Biomes")
+    FBiomeData GetBiomeData(EBiomeType BiomeType) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Biome Management")
-    FBiomeConfiguration GetBiomeConfiguration(int32 Index) const;
+    UFUNCTION(BlueprintCallable, Category = "Biomes")
+    void SetBiomeAtLocation(const FVector& WorldLocation, EBiomeType BiomeType);
 
-    UFUNCTION(BlueprintCallable, Category = "Biome Management")
-    int32 GetBiomeConfigurationCount() const;
+    // PCG Integration
+    UFUNCTION(BlueprintCallable, Category = "PCG")
+    void CreatePCGVolumeForBiome(const FVector& Location, const FVector& Extent, EBiomeType BiomeType);
 
-    // Query Functions
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "World Generation")
-    EBiomeType GetBiomeTypeAtLocation(const FVector& WorldLocation) const;
+    UFUNCTION(BlueprintCallable, Category = "PCG")
+    void RefreshPCGGeneration();
 
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "World Generation")
-    float GetTerrainHeightAtLocation(const FVector& WorldLocation) const;
+    // World Partition Integration
+    UFUNCTION(BlueprintCallable, Category = "World Partition")
+    void SetupWorldPartition();
 
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "World Generation")
-    bool IsLocationInWater(const FVector& WorldLocation) const;
+    UFUNCTION(BlueprintCallable, Category = "World Partition")
+    void CreateStreamingCells();
 
-    // PCG Volume Management
-    UFUNCTION(BlueprintCallable, Category = "PCG Management")
-    APCGVolume* CreatePCGVolumeForBiome(const FBiomeConfiguration& BiomeConfig);
+    // Noise and Terrain
+    UFUNCTION(BlueprintCallable, Category = "Terrain")
+    float GetHeightAtLocation(const FVector& WorldLocation) const;
 
-    UFUNCTION(BlueprintCallable, Category = "PCG Management")
-    void UpdatePCGVolume(APCGVolume* PCGVolume, const FBiomeConfiguration& BiomeConfig);
+    UFUNCTION(BlueprintCallable, Category = "Terrain")
+    float GetTemperatureAtLocation(const FVector& WorldLocation) const;
 
-    UFUNCTION(BlueprintCallable, Category = "PCG Management")
-    TArray<APCGVolume*> GetAllPCGVolumes() const;
+    UFUNCTION(BlueprintCallable, Category = "Terrain")
+    float GetHumidityAtLocation(const FVector& WorldLocation) const;
+
+    // Settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
+    FWorldGenerationSettings GenerationSettings;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
+    TObjectPtr<class UPCGGraphAsset> MasterDistributionGraph;
 
 protected:
-    // Core Components
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    TObjectPtr<USceneComponent> RootSceneComponent;
+    // Internal state
+    UPROPERTY()
+    TObjectPtr<UWorld> TargetWorld;
 
-    // Biome Configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Generation")
-    TArray<FBiomeConfiguration> BiomeConfigurations;
+    UPROPERTY()
+    TArray<TArray<EBiomeType>> BiomeMap;
 
-    // PCG Graphs for different biomes
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG Graphs")
-    TMap<EBiomeType, TSoftObjectPtr<UPCGGraph>> BiomePCGGraphs;
+    UPROPERTY()
+    TArray<TObjectPtr<class APCGVolume>> PCGVolumes;
 
-    // World Generation Settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Settings")
-    int32 WorldSizeX = 10000;
+    UPROPERTY()
+    TObjectPtr<class UWorldPartition> WorldPartition;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Settings")
-    int32 WorldSizeY = 10000;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Settings")
-    float SeaLevel = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Settings")
-    bool bUseWorldPartition = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Settings")
-    bool bAutoGenerateOnBeginPlay = true;
-
-    // Runtime State
-    UPROPERTY(BlueprintReadOnly, Category = "Runtime")
-    TArray<TObjectPtr<APCGVolume>> SpawnedPCGVolumes;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Runtime")
-    bool bIsGenerationInProgress = false;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Runtime")
-    float GenerationProgress = 0.0f;
+    // Internal generation functions
+    void InitializeBiomeDefinitions();
+    float GenerateNoise(float X, float Y, float Scale = 1.0f, int32 Octaves = 4) const;
+    EBiomeType DetermineBiomeType(float Temperature, float Humidity, float Elevation) const;
+    void CreateRiverPath(const FVector& StartLocation, const FVector& EndLocation);
+    FVector FindNearestWaterSource(const FVector& Location) const;
 
 private:
-    // Internal Functions
-    void LoadBiomePCGGraphs();
-    void SetupDefaultBiomeConfigurations();
-    void CleanupPCGVolumes();
+    // Noise generation state
+    mutable class FRandomStream RandomStream;
     
-    // Biome Logic
-    EBiomeType DetermineBiomeType(const FVector& Location, float Temperature, float Humidity, float Elevation) const;
-    FVector2D WorldToNoiseCoordinates(const FVector& WorldLocation) const;
-    
-    // PCG Integration
-    void OnPCGGenerationComplete(UPCGComponent* PCGComponent);
-    
-    // Delegates
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBiomeGenerationComplete, EBiomeType, BiomeType);
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnWorldGenerationComplete);
-    
+    // Performance tracking
+    double LastGenerationTime = 0.0;
+    int32 GeneratedCellCount = 0;
+};
+
+/**
+ * World Generation Data Asset - Stores presets and configurations
+ */
+UCLASS(BlueprintType)
+class TRANSPERSONALGAME_API UWorldGenerationDataAsset : public UDataAsset
+{
+    GENERATED_BODY()
+
 public:
-    UPROPERTY(BlueprintAssignable, Category = "Events")
-    FOnBiomeGenerationComplete OnBiomeGenerationComplete;
-    
-    UPROPERTY(BlueprintAssignable, Category = "Events")
-    FOnWorldGenerationComplete OnWorldGenerationComplete;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Generation")
+    FWorldGenerationSettings DefaultSettings;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biomes")
+    TArray<FBiomeData> BiomePresets;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG")
+    TObjectPtr<class UPCGGraphAsset> DefaultTerrainGraph;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG")
+    TMap<EBiomeType, TObjectPtr<class UPCGGraphAsset>> BiomeGraphs;
 };
