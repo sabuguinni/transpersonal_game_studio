@@ -1,466 +1,399 @@
 #include "PerformanceManager.h"
 #include "Engine/Engine.h"
-#include "Engine/World.h"
-#include "RenderingThread.h"
+#include "HAL/PlatformApplicationMisc.h"
 #include "Stats/Stats.h"
-#include "HAL/PlatformFilemanager.h"
-#include "Misc/DateTime.h"
-#include "Engine/GameViewportClient.h"
-#include "GameFramework/GameUserSettings.h"
+#include "Engine/World.h"
+#include "Kismet/KismetSystemLibrary.h"
+#include "Engine/Console.h"
+#include "UnrealEngine.h"
 
-DEFINE_LOG_CATEGORY_STATIC(LogPerformanceManager, Log, All);
-
-UPerformanceManager::UPerformanceManager()
+APerformanceManager::APerformanceManager()
 {
-    CurrentTarget = EPerformanceTarget::PC_HighEnd_60FPS;
-    CurrentLevel = EPerformanceLevel::High;
-    bEnableDynamicQualityAdjustment = true;
-    bShowPerformanceHUD = false;
-    PerformanceUpdateInterval = 0.1f;
+    PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.TickInterval = 0.1f; // Update 10 times per second
     
-    FrameTimeHistory.Reserve(HistorySize);
-    GPUTimeHistory.Reserve(HistorySize);
+    // Initialize default settings
+    CurrentSettings = FPerformanceSettings();
+    FPSHistory.Reserve(MaxFPSHistorySize);
 }
 
-void UPerformanceManager::Initialize(EPerformanceTarget Target)
+void APerformanceManager::BeginPlay()
+{
+    Super::BeginPlay();
+    
+    UE_LOG(LogTemp, Warning, TEXT("PerformanceManager: Starting performance monitoring"));
+    
+    // Apply initial settings based on target
+    ApplyTargetSettings();
+    
+    if (bAutoOptimizationEnabled)
+    {
+        StartAutoOptimization();
+    }
+}
+
+void APerformanceManager::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+    
+    // Update FPS tracking
+    UpdateFPSHistory();
+    
+    // Check if we need to optimize
+    if (bAutoOptimizationEnabled)
+    {
+        LastOptimizationCheck += DeltaTime;
+        if (LastOptimizationCheck >= OptimizationCheckInterval)
+        {
+            CheckPerformanceAndOptimize();
+            LastOptimizationCheck = 0.0f;
+        }
+    }
+}
+
+float APerformanceManager::GetCurrentFPS() const
+{
+    if (GEngine && GEngine->GetGameViewport())
+    {
+        return 1.0f / GetWorld()->GetDeltaSeconds();
+    }
+    return 0.0f;
+}
+
+float APerformanceManager::GetAverageFPS() const
+{
+    if (FPSHistory.Num() == 0)
+    {
+        return 0.0f;
+    }
+    
+    float Total = 0.0f;
+    for (float FPS : FPSHistory)
+    {
+        Total += FPS;
+    }
+    
+    return Total / FPSHistory.Num();
+}
+
+float APerformanceManager::GetMemoryUsageMB() const
+{
+    FPlatformMemoryStats MemStats = FPlatformMemory::GetStats();
+    return MemStats.UsedPhysical / (1024.0f * 1024.0f);
+}
+
+int32 APerformanceManager::GetDrawCalls() const
+{
+    // This would require access to rendering stats
+    // For now, return a placeholder
+    return 0;
+}
+
+int32 APerformanceManager::GetTriangleCount() const
+{
+    // This would require access to rendering stats
+    // For now, return a placeholder
+    return 0;
+}
+
+void APerformanceManager::SetPerformanceTarget(EPerformanceTarget Target)
 {
     CurrentTarget = Target;
+    ApplyTargetSettings();
     
-    // Set performance budgets based on target platform
-    switch (Target)
-    {
-        case EPerformanceTarget::PC_HighEnd_60FPS:
-            CurrentBudget.TargetFrameTime = 16.67f; // 60fps
-            CurrentBudget.GameThreadBudget = 8.0f;
-            CurrentBudget.RenderThreadBudget = 12.0f;
-            CurrentBudget.GPUBudget = 14.0f;
-            CurrentBudget.MaxDrawCalls = 3000;
-            CurrentBudget.MaxTriangles = 3000000;
-            CurrentBudget.TextureMemoryBudget = 4096.0f; // 4GB
-            CurrentBudget.MeshMemoryBudget = 2048.0f; // 2GB
-            SetPerformanceLevel(EPerformanceLevel::Epic);
-            break;
-            
-        case EPerformanceTarget::Console_30FPS:
-            CurrentBudget.TargetFrameTime = 33.33f; // 30fps
-            CurrentBudget.GameThreadBudget = 16.0f;
-            CurrentBudget.RenderThreadBudget = 24.0f;
-            CurrentBudget.GPUBudget = 28.0f;
-            CurrentBudget.MaxDrawCalls = 2000;
-            CurrentBudget.MaxTriangles = 2000000;
-            CurrentBudget.TextureMemoryBudget = 2048.0f; // 2GB
-            CurrentBudget.MeshMemoryBudget = 1024.0f; // 1GB
-            SetPerformanceLevel(EPerformanceLevel::High);
-            break;
-            
-        case EPerformanceTarget::PC_MidRange_30FPS:
-            CurrentBudget.TargetFrameTime = 33.33f; // 30fps
-            CurrentBudget.GameThreadBudget = 18.0f;
-            CurrentBudget.RenderThreadBudget = 26.0f;
-            CurrentBudget.GPUBudget = 30.0f;
-            CurrentBudget.MaxDrawCalls = 1500;
-            CurrentBudget.MaxTriangles = 1500000;
-            CurrentBudget.TextureMemoryBudget = 1536.0f; // 1.5GB
-            CurrentBudget.MeshMemoryBudget = 768.0f; // 768MB
-            SetPerformanceLevel(EPerformanceLevel::Medium);
-            break;
-            
-        case EPerformanceTarget::Mobile_30FPS:
-            CurrentBudget.TargetFrameTime = 33.33f; // 30fps
-            CurrentBudget.GameThreadBudget = 20.0f;
-            CurrentBudget.RenderThreadBudget = 28.0f;
-            CurrentBudget.GPUBudget = 30.0f;
-            CurrentBudget.MaxDrawCalls = 800;
-            CurrentBudget.MaxTriangles = 500000;
-            CurrentBudget.TextureMemoryBudget = 512.0f; // 512MB
-            CurrentBudget.MeshMemoryBudget = 256.0f; // 256MB
-            SetPerformanceLevel(EPerformanceLevel::Low);
-            break;
-    }
-    
-    ApplyPerformanceBudget();
-    
-    UE_LOG(LogPerformanceManager, Log, TEXT("Performance Manager initialized for target: %d"), (int32)Target);
-    UE_LOG(LogPerformanceManager, Log, TEXT("Target frame time: %.2fms (%.1f fps)"), 
-           CurrentBudget.TargetFrameTime, 1000.0f / CurrentBudget.TargetFrameTime);
+    UE_LOG(LogTemp, Warning, TEXT("PerformanceManager: Target set to %d"), (int32)Target);
 }
 
-void UPerformanceManager::SetPerformanceLevel(EPerformanceLevel Level)
+void APerformanceManager::SetPerformanceLevel(EPerformanceLevel Level)
 {
     CurrentLevel = Level;
-    UpdateScalabilitySettings();
+    CurrentSettings = GetSettingsForLevel(Level);
+    ApplyPerformanceSettings(CurrentSettings);
     
-    UE_LOG(LogPerformanceManager, Log, TEXT("Performance level set to: %d"), (int32)Level);
+    UE_LOG(LogTemp, Warning, TEXT("PerformanceManager: Performance level set to %d"), (int32)Level);
 }
 
-void UPerformanceManager::UpdatePerformanceMetrics()
+void APerformanceManager::ApplyPerformanceSettings(const FPerformanceSettings& Settings)
 {
-    if (!GEngine || !GEngine->GetWorld())
-    {
-        return;
-    }
-
-    FDateTime Now = FDateTime::Now();
-    if ((Now - LastPerformanceUpdate).GetTotalSeconds() < PerformanceUpdateInterval)
-    {
-        return;
-    }
-    LastPerformanceUpdate = Now;
-
-    // Get frame time metrics
-    float DeltaTime = GEngine->GetWorld()->GetDeltaSeconds();
-    CurrentMetrics.CurrentFrameTime = DeltaTime * 1000.0f; // Convert to milliseconds
-    CurrentMetrics.CurrentFPS = 1.0f / DeltaTime;
-
-    // Update frame time history
-    FrameTimeHistory.Add(CurrentMetrics.CurrentFrameTime);
-    if (FrameTimeHistory.Num() > HistorySize)
-    {
-        FrameTimeHistory.RemoveAt(0);
-    }
-
-    // Collect rendering and memory metrics
-    CollectRenderingMetrics();
-    CollectMemoryMetrics();
-
-    // Check if we're within budget
-    CheckPerformanceThresholds();
-
-    // Auto-adjust quality if enabled and needed
-    if (bEnableDynamicQualityAdjustment && !CurrentMetrics.bIsWithinBudget)
-    {
-        AdjustQualityForPerformance();
-    }
-}
-
-bool UPerformanceManager::IsWithinPerformanceBudget() const
-{
-    return CurrentMetrics.bIsWithinBudget;
-}
-
-void UPerformanceManager::AdjustQualityForPerformance()
-{
-    if (CurrentMetrics.CurrentFrameTime > CurrentBudget.TargetFrameTime * 1.2f) // 20% over budget
-    {
-        UE_LOG(LogPerformanceManager, Warning, TEXT("Performance over budget (%.2fms vs %.2fms target). Adjusting quality."),
-               CurrentMetrics.CurrentFrameTime, CurrentBudget.TargetFrameTime);
-
-        // Progressive quality reduction
-        if (CurrentMetrics.GPUTime > CurrentBudget.GPUBudget)
-        {
-            // GPU bound - reduce visual quality
-            AdjustShadowQuality(FMath::Max(0, (int32)CurrentLevel - 1));
-            AdjustEffectsQuality(FMath::Max(0, (int32)CurrentLevel - 1));
-            SetDynamicResolutionScale(0.9f); // Reduce resolution by 10%
-        }
-        else if (CurrentMetrics.GameThreadTime > CurrentBudget.GameThreadBudget)
-        {
-            // Game thread bound - reduce simulation complexity
-            AdjustViewDistance(0.8f); // Reduce view distance by 20%
-        }
-        else if (CurrentMetrics.RenderThreadTime > CurrentBudget.RenderThreadBudget)
-        {
-            // Render thread bound - reduce draw calls
-            AdjustViewDistance(0.85f);
-            AdjustTextureQuality(FMath::Max(0, (int32)CurrentLevel - 1));
-        }
-    }
-    else if (CurrentMetrics.CurrentFrameTime < CurrentBudget.TargetFrameTime * 0.8f) // 20% under budget
-    {
-        // We have performance headroom - can increase quality
-        if ((int32)CurrentLevel < (int32)EPerformanceLevel::Epic)
-        {
-            UE_LOG(LogPerformanceManager, Log, TEXT("Performance under budget. Considering quality increase."));
-            // Cautiously increase quality
-        }
-    }
-}
-
-void UPerformanceManager::SetDynamicResolutionScale(float Scale)
-{
-    Scale = FMath::Clamp(Scale, 0.5f, 1.0f);
+    CurrentSettings = Settings;
     
-    if (GEngine && GEngine->GameViewport)
+    // Apply shadow settings
+    ExecuteConsoleCommand(FString::Printf(TEXT("r.Shadow.MaxResolution %d"), Settings.ShadowMapResolution));
+    
+    // Apply view distance
+    ExecuteConsoleCommand(FString::Printf(TEXT("r.ViewDistanceScale %f"), Settings.ViewDistanceScale));
+    
+    // Apply lighting settings
+    ExecuteConsoleCommand(FString::Printf(TEXT("r.MaxAnisotropy %d"), FMath::Clamp(Settings.MaxLights, 1, 16)));
+    
+    // Apply ray tracing
+    ExecuteConsoleCommand(FString::Printf(TEXT("r.RayTracing %d"), Settings.bEnableRayTracing ? 1 : 0));
+    
+    // Apply Lumen
+    ExecuteConsoleCommand(FString::Printf(TEXT("r.Lumen.GlobalIllumination %d"), Settings.bEnableLumen ? 1 : 0));
+    ExecuteConsoleCommand(FString::Printf(TEXT("r.Lumen.Reflections %d"), Settings.bEnableLumen ? 1 : 0));
+    
+    // Apply anti-aliasing
+    ExecuteConsoleCommand(FString::Printf(TEXT("r.DefaultFeature.AntiAliasing %d"), Settings.AntiAliasingMethod));
+    ExecuteConsoleCommand(FString::Printf(TEXT("r.PostProcessAAQuality %d"), Settings.PostProcessQuality));
+    
+    // Apply texture settings
+    ExecuteConsoleCommand(FString::Printf(TEXT("r.Streaming.PoolSize %d"), Settings.TexturePoolSize));
+    
+    // Apply LOD settings
+    ExecuteConsoleCommand(FString::Printf(TEXT("r.StaticMeshLODDistanceScale %f"), 1.0f + Settings.LODBias));
+    
+    UE_LOG(LogTemp, Warning, TEXT("PerformanceManager: Applied performance settings"));
+}
+
+void APerformanceManager::OptimizeShadows()
+{
+    // Reduce shadow resolution and distance for performance
+    ExecuteConsoleCommand(TEXT("r.Shadow.MaxResolution 1024"));
+    ExecuteConsoleCommand(TEXT("r.Shadow.RadiusThreshold 0.05"));
+    ExecuteConsoleCommand(TEXT("r.Shadow.DistanceScale 0.5"));
+    
+    UE_LOG(LogTemp, Warning, TEXT("PerformanceManager: Shadows optimized"));
+}
+
+void APerformanceManager::OptimizeLighting()
+{
+    // Optimize lighting for performance
+    ExecuteConsoleCommand(TEXT("r.LightMaxDrawDistanceScale 0.8"));
+    ExecuteConsoleCommand(TEXT("r.MaxAnisotropy 8"));
+    
+    UE_LOG(LogTemp, Warning, TEXT("PerformanceManager: Lighting optimized"));
+}
+
+void APerformanceManager::OptimizeTextures()
+{
+    // Optimize texture streaming
+    ExecuteConsoleCommand(TEXT("r.Streaming.PoolSize 1500"));
+    ExecuteConsoleCommand(TEXT("r.Streaming.MaxTempMemoryAllowed 50"));
+    ExecuteConsoleCommand(TEXT("r.MipMapLODBias 1"));
+    
+    UE_LOG(LogTemp, Warning, TEXT("PerformanceManager: Textures optimized"));
+}
+
+void APerformanceManager::OptimizeLOD()
+{
+    // Increase LOD bias for better performance
+    ExecuteConsoleCommand(TEXT("r.StaticMeshLODDistanceScale 1.5"));
+    ExecuteConsoleCommand(TEXT("r.SkeletalMeshLODBias 1"));
+    
+    UE_LOG(LogTemp, Warning, TEXT("PerformanceManager: LOD optimized"));
+}
+
+void APerformanceManager::EnablePerformanceMode()
+{
+    // Apply aggressive performance optimizations
+    OptimizeShadows();
+    OptimizeLighting();
+    OptimizeTextures();
+    OptimizeLOD();
+    
+    // Disable expensive features
+    ExecuteConsoleCommand(TEXT("r.RayTracing 0"));
+    ExecuteConsoleCommand(TEXT("r.Lumen.GlobalIllumination.Quality 1"));
+    ExecuteConsoleCommand(TEXT("r.PostProcessAAQuality 2"));
+    
+    UE_LOG(LogTemp, Warning, TEXT("PerformanceManager: Performance mode enabled"));
+}
+
+void APerformanceManager::DisablePerformanceMode()
+{
+    // Restore quality settings
+    ApplyTargetSettings();
+    
+    UE_LOG(LogTemp, Warning, TEXT("PerformanceManager: Performance mode disabled"));
+}
+
+void APerformanceManager::StartAutoOptimization()
+{
+    bAutoOptimizationEnabled = true;
+    LastOptimizationCheck = 0.0f;
+    
+    UE_LOG(LogTemp, Warning, TEXT("PerformanceManager: Auto-optimization started"));
+}
+
+void APerformanceManager::StopAutoOptimization()
+{
+    bAutoOptimizationEnabled = false;
+    
+    UE_LOG(LogTemp, Warning, TEXT("PerformanceManager: Auto-optimization stopped"));
+}
+
+void APerformanceManager::UpdateFPSHistory()
+{
+    float CurrentFPS = GetCurrentFPS();
+    
+    FPSHistory.Add(CurrentFPS);
+    
+    // Keep only recent history
+    if (FPSHistory.Num() > MaxFPSHistorySize)
     {
-        // Apply dynamic resolution scaling
-        static IConsoleVariable* CVarScreenPercentage = IConsoleManager::Get().FindConsoleVariable(TEXT("r.ScreenPercentage"));
-        if (CVarScreenPercentage)
+        FPSHistory.RemoveAt(0);
+    }
+}
+
+void APerformanceManager::CheckPerformanceAndOptimize()
+{
+    float AvgFPS = GetAverageFPS();
+    
+    if (AvgFPS < MinAcceptableFPS)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("PerformanceManager: FPS below threshold (%.1f), applying optimizations"), AvgFPS);
+        
+        // Apply progressive optimizations based on how bad performance is
+        if (AvgFPS < MinAcceptableFPS * 0.5f)
         {
-            float CurrentScale = CVarScreenPercentage->GetFloat() / 100.0f;
-            float NewScale = FMath::Clamp(CurrentScale * Scale, 50.0f, 100.0f);
-            CVarScreenPercentage->Set(NewScale);
+            // Very bad performance - aggressive optimization
+            EnablePerformanceMode();
+        }
+        else if (AvgFPS < MinAcceptableFPS * 0.75f)
+        {
+            // Moderate performance issues
+            OptimizeShadows();
+            OptimizeLOD();
+        }
+        else
+        {
+            // Minor performance issues
+            OptimizeTextures();
+        }
+    }
+    else if (AvgFPS > TargetFPS * 1.2f)
+    {
+        // Performance is good, we can increase quality if needed
+        UE_LOG(LogTemp, Log, TEXT("PerformanceManager: Performance is good (%.1f FPS)"), AvgFPS);
+    }
+}
+
+void APerformanceManager::ApplyTargetSettings()
+{
+    FPerformanceSettings TargetSettings = GetSettingsForTarget(CurrentTarget);
+    ApplyPerformanceSettings(TargetSettings);
+    
+    // Set target FPS based on platform
+    switch (CurrentTarget)
+    {
+        case EPerformanceTarget::PC_High:
+            TargetFPS = 60.0f;
+            MinAcceptableFPS = 45.0f;
+            break;
+        case EPerformanceTarget::PC_Medium:
+            TargetFPS = 45.0f;
+            MinAcceptableFPS = 30.0f;
+            break;
+        case EPerformanceTarget::Console:
+            TargetFPS = 30.0f;
+            MinAcceptableFPS = 25.0f;
+            break;
+        case EPerformanceTarget::Mobile:
+            TargetFPS = 30.0f;
+            MinAcceptableFPS = 20.0f;
+            break;
+    }
+    
+    ExecuteConsoleCommand(FString::Printf(TEXT("t.MaxFPS %f"), TargetFPS));
+}
+
+void APerformanceManager::ExecuteConsoleCommand(const FString& Command)
+{
+    if (GEngine && GEngine->GetGameViewport())
+    {
+        GEngine->GetGameViewport()->ConsoleCommand(Command);
+    }
+}
+
+FPerformanceSettings APerformanceManager::GetSettingsForLevel(EPerformanceLevel Level) const
+{
+    FPerformanceSettings Settings;
+    
+    switch (Level)
+    {
+        case EPerformanceLevel::Ultra:
+            Settings.ShadowMapResolution = 4096;
+            Settings.ViewDistanceScale = 1.2f;
+            Settings.MaxLights = 32;
+            Settings.bEnableRayTracing = true;
+            Settings.bEnableLumen = true;
+            Settings.AntiAliasingMethod = 2; // TAA
+            Settings.PostProcessQuality = 4;
+            Settings.TexturePoolSize = 3000;
+            Settings.LODBias = -0.5f;
+            Settings.CullingDistance = 15000.0f;
+            break;
             
-            UE_LOG(LogPerformanceManager, Log, TEXT("Dynamic resolution scale adjusted to %.1f%%"), NewScale);
-        }
-    }
-}
-
-void UPerformanceManager::StartPerformanceCapture(const FString& CaptureName)
-{
-    if (bIsCapturing)
-    {
-        UE_LOG(LogPerformanceManager, Warning, TEXT("Performance capture already in progress. Stopping previous capture."));
-        StopPerformanceCapture();
-    }
-
-    CurrentCaptureName = CaptureName;
-    bIsCapturing = true;
-    
-    // Start Unreal Insights capture
-    FString Command = FString::Printf(TEXT("stat startfile %s"), *CaptureName);
-    GEngine->Exec(GEngine->GetWorld(), *Command);
-    
-    UE_LOG(LogPerformanceManager, Log, TEXT("Started performance capture: %s"), *CaptureName);
-}
-
-void UPerformanceManager::StopPerformanceCapture()
-{
-    if (!bIsCapturing)
-    {
-        UE_LOG(LogPerformanceManager, Warning, TEXT("No performance capture in progress."));
-        return;
-    }
-
-    // Stop Unreal Insights capture
-    GEngine->Exec(GEngine->GetWorld(), TEXT("stat stopfile"));
-    
-    UE_LOG(LogPerformanceManager, Log, TEXT("Stopped performance capture: %s"), *CurrentCaptureName);
-    
-    bIsCapturing = false;
-    CurrentCaptureName.Empty();
-}
-
-void UPerformanceManager::LogPerformanceReport()
-{
-    UE_LOG(LogPerformanceManager, Log, TEXT("=== PERFORMANCE REPORT ==="));
-    UE_LOG(LogPerformanceManager, Log, TEXT("Target: %d, Level: %d"), (int32)CurrentTarget, (int32)CurrentLevel);
-    UE_LOG(LogPerformanceManager, Log, TEXT("Current FPS: %.1f (Target: %.1f)"), 
-           CurrentMetrics.CurrentFPS, 1000.0f / CurrentBudget.TargetFrameTime);
-    UE_LOG(LogPerformanceManager, Log, TEXT("Frame Time: %.2fms (Budget: %.2fms)"), 
-           CurrentMetrics.CurrentFrameTime, CurrentBudget.TargetFrameTime);
-    UE_LOG(LogPerformanceManager, Log, TEXT("Game Thread: %.2fms (Budget: %.2fms)"), 
-           CurrentMetrics.GameThreadTime, CurrentBudget.GameThreadBudget);
-    UE_LOG(LogPerformanceManager, Log, TEXT("Render Thread: %.2fms (Budget: %.2fms)"), 
-           CurrentMetrics.RenderThreadTime, CurrentBudget.RenderThreadBudget);
-    UE_LOG(LogPerformanceManager, Log, TEXT("GPU Time: %.2fms (Budget: %.2fms)"), 
-           CurrentMetrics.GPUTime, CurrentBudget.GPUBudget);
-    UE_LOG(LogPerformanceManager, Log, TEXT("Draw Calls: %d (Budget: %d)"), 
-           CurrentMetrics.CurrentDrawCalls, CurrentBudget.MaxDrawCalls);
-    UE_LOG(LogPerformanceManager, Log, TEXT("Triangles: %d (Budget: %d)"), 
-           CurrentMetrics.CurrentTriangles, CurrentBudget.MaxTriangles);
-    UE_LOG(LogPerformanceManager, Log, TEXT("Within Budget: %s"), 
-           CurrentMetrics.bIsWithinBudget ? TEXT("YES") : TEXT("NO"));
-    
-    if (CurrentMetrics.PerformanceWarnings.Num() > 0)
-    {
-        UE_LOG(LogPerformanceManager, Warning, TEXT("Performance Warnings:"));
-        for (const FString& Warning : CurrentMetrics.PerformanceWarnings)
-        {
-            UE_LOG(LogPerformanceManager, Warning, TEXT("  - %s"), *Warning);
-        }
+        case EPerformanceLevel::High:
+            Settings.ShadowMapResolution = 2048;
+            Settings.ViewDistanceScale = 1.0f;
+            Settings.MaxLights = 16;
+            Settings.bEnableRayTracing = false;
+            Settings.bEnableLumen = true;
+            Settings.AntiAliasingMethod = 2; // TAA
+            Settings.PostProcessQuality = 3;
+            Settings.TexturePoolSize = 2000;
+            Settings.LODBias = 0.0f;
+            Settings.CullingDistance = 10000.0f;
+            break;
+            
+        case EPerformanceLevel::Medium:
+            Settings.ShadowMapResolution = 1024;
+            Settings.ViewDistanceScale = 0.8f;
+            Settings.MaxLights = 8;
+            Settings.bEnableRayTracing = false;
+            Settings.bEnableLumen = true;
+            Settings.AntiAliasingMethod = 1; // FXAA
+            Settings.PostProcessQuality = 2;
+            Settings.TexturePoolSize = 1500;
+            Settings.LODBias = 0.5f;
+            Settings.CullingDistance = 8000.0f;
+            break;
+            
+        case EPerformanceLevel::Low:
+            Settings.ShadowMapResolution = 512;
+            Settings.ViewDistanceScale = 0.6f;
+            Settings.MaxLights = 4;
+            Settings.bEnableRayTracing = false;
+            Settings.bEnableLumen = false;
+            Settings.AntiAliasingMethod = 1; // FXAA
+            Settings.PostProcessQuality = 1;
+            Settings.TexturePoolSize = 1000;
+            Settings.LODBias = 1.0f;
+            Settings.CullingDistance = 5000.0f;
+            break;
+            
+        case EPerformanceLevel::Potato:
+            Settings.ShadowMapResolution = 256;
+            Settings.ViewDistanceScale = 0.4f;
+            Settings.MaxLights = 2;
+            Settings.bEnableRayTracing = false;
+            Settings.bEnableLumen = false;
+            Settings.AntiAliasingMethod = 0; // None
+            Settings.PostProcessQuality = 0;
+            Settings.TexturePoolSize = 500;
+            Settings.LODBias = 2.0f;
+            Settings.CullingDistance = 3000.0f;
+            break;
     }
     
-    UE_LOG(LogPerformanceManager, Log, TEXT("========================"));
+    return Settings;
 }
 
-void UPerformanceManager::ShowPerformanceStats()
+FPerformanceSettings APerformanceManager::GetSettingsForTarget(EPerformanceTarget Target) const
 {
-    if (GEngine)
+    switch (Target)
     {
-        GEngine->Exec(GEngine->GetWorld(), TEXT("stat unit"));
-        GEngine->Exec(GEngine->GetWorld(), TEXT("stat fps"));
-        GEngine->Exec(GEngine->GetWorld(), TEXT("stat engine"));
-    }
-}
-
-void UPerformanceManager::SetPerformanceTarget(int32 TargetFPS)
-{
-    float NewTargetFrameTime = 1000.0f / FMath::Clamp(TargetFPS, 15, 120);
-    CurrentBudget.TargetFrameTime = NewTargetFrameTime;
-    
-    UE_LOG(LogPerformanceManager, Log, TEXT("Performance target set to %d fps (%.2fms frame time)"), 
-           TargetFPS, NewTargetFrameTime);
-}
-
-void UPerformanceManager::TogglePerformanceHUD()
-{
-    bShowPerformanceHUD = !bShowPerformanceHUD;
-    
-    if (bShowPerformanceHUD)
-    {
-        ShowPerformanceStats();
-    }
-    else if (GEngine)
-    {
-        GEngine->Exec(GEngine->GetWorld(), TEXT("stat none"));
-    }
-}
-
-void UPerformanceManager::ApplyPerformanceBudget()
-{
-    // Apply frame rate cap
-    if (GEngine)
-    {
-        float TargetFPS = 1000.0f / CurrentBudget.TargetFrameTime;
-        FString Command = FString::Printf(TEXT("t.MaxFPS %.1f"), TargetFPS);
-        GEngine->Exec(GEngine->GetWorld(), *Command);
-    }
-    
-    UpdateScalabilitySettings();
-}
-
-void UPerformanceManager::UpdateScalabilitySettings()
-{
-    if (!GEngine)
-    {
-        return;
-    }
-
-    UWorld* World = GEngine->GetWorld();
-    if (!World)
-    {
-        return;
-    }
-
-    // Apply scalability settings based on performance level
-    int32 QualityLevel = (int32)CurrentLevel;
-    
-    // Set scalability groups
-    FString Commands[] = {
-        FString::Printf(TEXT("sg.ResolutionQuality %d"), QualityLevel),
-        FString::Printf(TEXT("sg.ViewDistanceQuality %d"), QualityLevel),
-        FString::Printf(TEXT("sg.AntiAliasingQuality %d"), QualityLevel),
-        FString::Printf(TEXT("sg.ShadowQuality %d"), QualityLevel),
-        FString::Printf(TEXT("sg.PostProcessQuality %d"), QualityLevel),
-        FString::Printf(TEXT("sg.TextureQuality %d"), QualityLevel),
-        FString::Printf(TEXT("sg.EffectsQuality %d"), QualityLevel),
-        FString::Printf(TEXT("sg.FoliageQuality %d"), QualityLevel)
-    };
-    
-    for (const FString& Command : Commands)
-    {
-        GEngine->Exec(World, *Command);
-    }
-}
-
-void UPerformanceManager::CheckPerformanceThresholds()
-{
-    CurrentMetrics.PerformanceWarnings.Empty();
-    CurrentMetrics.bIsWithinBudget = true;
-
-    // Check frame time budget
-    if (CurrentMetrics.CurrentFrameTime > CurrentBudget.TargetFrameTime * 1.1f) // 10% tolerance
-    {
-        CurrentMetrics.bIsWithinBudget = false;
-        CurrentMetrics.PerformanceWarnings.Add(
-            FString::Printf(TEXT("Frame time over budget: %.2fms vs %.2fms"), 
-                          CurrentMetrics.CurrentFrameTime, CurrentBudget.TargetFrameTime));
-    }
-
-    // Check thread budgets
-    if (CurrentMetrics.GameThreadTime > CurrentBudget.GameThreadBudget)
-    {
-        CurrentMetrics.bIsWithinBudget = false;
-        CurrentMetrics.PerformanceWarnings.Add(
-            FString::Printf(TEXT("Game thread over budget: %.2fms vs %.2fms"), 
-                          CurrentMetrics.GameThreadTime, CurrentBudget.GameThreadBudget));
-    }
-
-    if (CurrentMetrics.RenderThreadTime > CurrentBudget.RenderThreadBudget)
-    {
-        CurrentMetrics.bIsWithinBudget = false;
-        CurrentMetrics.PerformanceWarnings.Add(
-            FString::Printf(TEXT("Render thread over budget: %.2fms vs %.2fms"), 
-                          CurrentMetrics.RenderThreadTime, CurrentBudget.RenderThreadBudget));
-    }
-
-    if (CurrentMetrics.GPUTime > CurrentBudget.GPUBudget)
-    {
-        CurrentMetrics.bIsWithinBudget = false;
-        CurrentMetrics.PerformanceWarnings.Add(
-            FString::Printf(TEXT("GPU time over budget: %.2fms vs %.2fms"), 
-                          CurrentMetrics.GPUTime, CurrentBudget.GPUBudget));
-    }
-
-    // Check draw call budget
-    if (CurrentMetrics.CurrentDrawCalls > CurrentBudget.MaxDrawCalls)
-    {
-        CurrentMetrics.bIsWithinBudget = false;
-        CurrentMetrics.PerformanceWarnings.Add(
-            FString::Printf(TEXT("Draw calls over budget: %d vs %d"), 
-                          CurrentMetrics.CurrentDrawCalls, CurrentBudget.MaxDrawCalls));
-    }
-}
-
-void UPerformanceManager::CollectRenderingMetrics()
-{
-    // These would be populated by actual engine stats in a real implementation
-    // For now, we'll use placeholder values that would come from the rendering system
-    
-    // In a real implementation, these would come from:
-    // - RenderThread stats for draw calls and triangles
-    // - GPU profiler for GPU timing
-    // - Engine stats for various rendering metrics
-    
-    CurrentMetrics.CurrentDrawCalls = 1500; // Placeholder
-    CurrentMetrics.CurrentTriangles = 1800000; // Placeholder
-    CurrentMetrics.CurrentInstances = 8500; // Placeholder
-    
-    // These would come from actual profiling
-    CurrentMetrics.GameThreadTime = 12.5f; // Placeholder
-    CurrentMetrics.RenderThreadTime = 15.2f; // Placeholder
-    CurrentMetrics.GPUTime = 13.8f; // Placeholder
-}
-
-void UPerformanceManager::CollectMemoryMetrics()
-{
-    // Memory metrics would be collected from the engine's memory tracking systems
-    CurrentMetrics.UsedTextureMemory = 1800.0f; // Placeholder - MB
-    CurrentMetrics.UsedMeshMemory = 950.0f; // Placeholder - MB
-    CurrentMetrics.UsedAudioMemory = 280.0f; // Placeholder - MB
-}
-
-void UPerformanceManager::AdjustViewDistance(float Multiplier)
-{
-    if (GEngine)
-    {
-        FString Command = FString::Printf(TEXT("r.ViewDistanceScale %.2f"), Multiplier);
-        GEngine->Exec(GEngine->GetWorld(), *Command);
-    }
-}
-
-void UPerformanceManager::AdjustShadowQuality(int32 Quality)
-{
-    if (GEngine)
-    {
-        FString Command = FString::Printf(TEXT("sg.ShadowQuality %d"), FMath::Clamp(Quality, 0, 3));
-        GEngine->Exec(GEngine->GetWorld(), *Command);
-    }
-}
-
-void UPerformanceManager::AdjustTextureQuality(int32 Quality)
-{
-    if (GEngine)
-    {
-        FString Command = FString::Printf(TEXT("sg.TextureQuality %d"), FMath::Clamp(Quality, 0, 3));
-        GEngine->Exec(GEngine->GetWorld(), *Command);
-    }
-}
-
-void UPerformanceManager::AdjustEffectsQuality(int32 Quality)
-{
-    if (GEngine)
-    {
-        FString Command = FString::Printf(TEXT("sg.EffectsQuality %d"), FMath::Clamp(Quality, 0, 3));
-        GEngine->Exec(GEngine->GetWorld(), *Command);
-    }
-}
-
-void UPerformanceManager::AdjustPostProcessQuality(int32 Quality)
-{
-    if (GEngine)
-    {
-        FString Command = FString::Printf(TEXT("sg.PostProcessQuality %d"), FMath::Clamp(Quality, 0, 3));
-        GEngine->Exec(GEngine->GetWorld(), *Command);
+        case EPerformanceTarget::PC_High:
+            return GetSettingsForLevel(EPerformanceLevel::High);
+        case EPerformanceTarget::PC_Medium:
+            return GetSettingsForLevel(EPerformanceLevel::Medium);
+        case EPerformanceTarget::Console:
+            return GetSettingsForLevel(EPerformanceLevel::Medium);
+        case EPerformanceTarget::Mobile:
+            return GetSettingsForLevel(EPerformanceLevel::Low);
+        default:
+            return GetSettingsForLevel(EPerformanceLevel::Medium);
     }
 }
