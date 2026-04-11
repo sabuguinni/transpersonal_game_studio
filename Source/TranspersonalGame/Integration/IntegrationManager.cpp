@@ -1,595 +1,464 @@
 #include "IntegrationManager.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Engine/GameInstance.h"
+#include "Modules/ModuleManager.h"
 #include "HAL/PlatformFilemanager.h"
 #include "Misc/DateTime.h"
 #include "Misc/Paths.h"
-#include "Stats/Stats.h"
-#include "HAL/MemoryBase.h"
 
 DEFINE_LOG_CATEGORY(LogIntegration);
 
 UIntegrationManager::UIntegrationManager()
 {
-    bIsInitializing = false;
-    bIntegrationComplete = false;
-    IntegrationStartTime = 0.0f;
-    bPerformanceMonitoringActive = false;
+    NextBuildNumber = 1;
+    bSystemsInitialized = false;
+    LastIntegrationCheck = 0.0;
+    IntegrationCheckInterval = 5.0f; // Check every 5 seconds
 }
 
 void UIntegrationManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogIntegration, Log, TEXT("IntegrationManager: Initializing..."));
+    UE_LOG(LogIntegration, Log, TEXT("Integration Manager initializing..."));
     
-    // Initialize default system registry
-    RegisterSystem(TEXT("CoreSystems"), ESystemPriority::Critical, {});
-    RegisterSystem(TEXT("PhysicsCore"), ESystemPriority::Critical, {TEXT("CoreSystems")});
-    RegisterSystem(TEXT("Performance"), ESystemPriority::Critical, {TEXT("CoreSystems")});
-    RegisterSystem(TEXT("WorldGeneration"), ESystemPriority::High, {TEXT("CoreSystems"), TEXT("PhysicsCore")});
-    RegisterSystem(TEXT("Environment"), ESystemPriority::High, {TEXT("WorldGeneration")});
-    RegisterSystem(TEXT("Architecture"), ESystemPriority::High, {TEXT("Environment")});
-    RegisterSystem(TEXT("Lighting"), ESystemPriority::High, {TEXT("Architecture")});
-    RegisterSystem(TEXT("Characters"), ESystemPriority::High, {TEXT("CoreSystems")});
-    RegisterSystem(TEXT("Animation"), ESystemPriority::Medium, {TEXT("Characters")});
-    RegisterSystem(TEXT("NPCBehavior"), ESystemPriority::Medium, {TEXT("Characters", TEXT("Animation")});
-    RegisterSystem(TEXT("CombatAI"), ESystemPriority::Medium, {TEXT("NPCBehavior")});
-    RegisterSystem(TEXT("CrowdSimulation"), ESystemPriority::Medium, {TEXT("NPCBehavior")});
-    RegisterSystem(TEXT("Narrative"), ESystemPriority::Low, {TEXT("Characters")});
-    RegisterSystem(TEXT("Quest"), ESystemPriority::Low, {TEXT("Narrative")});
-    RegisterSystem(TEXT("Audio"), ESystemPriority::Medium, {TEXT("CoreSystems")});
-    RegisterSystem(TEXT("VFX"), ESystemPriority::Low, {TEXT("CoreSystems")});
-    RegisterSystem(TEXT("QA"), ESystemPriority::Testing, {});
+    // Initialize build status
+    CurrentBuild.BuildNumber = NextBuildNumber++;
+    CurrentBuild.BuildTime = FDateTime::Now();
+    CurrentBuild.bIsStable = false;
+    CurrentBuild.BuildNotes = TEXT("Initial build - Integration Manager startup");
     
-    UE_LOG(LogIntegration, Log, TEXT("IntegrationManager: Initialized with %d systems"), RegisteredSystems.Num());
+    // Register core modules
+    RegisterCoreModules();
+    
+    // Set up system initialization order
+    SystemInitOrder.Add(TEXT("TranspersonalGame"));
+    SystemInitOrder.Add(TEXT("Core"));
+    SystemInitOrder.Add(TEXT("Physics"));
+    SystemInitOrder.Add(TEXT("Consciousness"));
+    SystemInitOrder.Add(TEXT("Environment"));
+    SystemInitOrder.Add(TEXT("Character"));
+    SystemInitOrder.Add(TEXT("AI"));
+    SystemInitOrder.Add(TEXT("Audio"));
+    SystemInitOrder.Add(TEXT("VFX"));
+    
+    UE_LOG(LogIntegration, Log, TEXT("Integration Manager initialized successfully"));
 }
 
 void UIntegrationManager::Deinitialize()
 {
-    UE_LOG(LogIntegration, Log, TEXT("IntegrationManager: Shutting down..."));
+    UE_LOG(LogIntegration, Log, TEXT("Integration Manager shutting down..."));
     
     ShutdownAllSystems();
-    RegisteredSystems.Empty();
     
     Super::Deinitialize();
 }
 
-void UIntegrationManager::InitializeAllSystems()
+void UIntegrationManager::RegisterCoreModules()
 {
-    if (bIsInitializing)
+    UE_LOG(LogIntegration, Log, TEXT("Registering core modules..."));
+    
+    // Core UE5 modules
+    TArray<FString> CoreModules = {
+        TEXT("Core"),
+        TEXT("CoreUObject"),
+        TEXT("Engine"),
+        TEXT("UnrealEd"),
+        TEXT("TranspersonalGame")
+    };
+    
+    for (const FString& ModuleName : CoreModules)
     {
-        UE_LOG(LogIntegration, Warning, TEXT("InitializeAllSystems: Already initializing"));
-        return;
+        FModuleStatus Status;
+        Status.ModuleName = ModuleName;
+        Status.bIsLoaded = FModuleManager::Get().IsModuleLoaded(*ModuleName);
+        Status.bIsCompiled = Status.bIsLoaded; // Assume compiled if loaded
+        Status.LoadTime = 0.0f;
+        
+        if (Status.bIsLoaded)
+        {
+            UE_LOG(LogIntegration, Log, TEXT("Module %s: LOADED"), *ModuleName);
+        }
+        else
+        {
+            UE_LOG(LogIntegration, Warning, TEXT("Module %s: NOT LOADED"), *ModuleName);
+            Status.LastError = TEXT("Module not loaded");
+        }
+        
+        ModuleRegistry.Add(ModuleName, Status);
     }
     
-    UE_LOG(LogIntegration, Log, TEXT("InitializeAllSystems: Starting initialization of %d systems"), RegisteredSystems.Num());
-    
-    bIsInitializing = true;
-    bIntegrationComplete = false;
-    IntegrationStartTime = FPlatformTime::Seconds();
-    
-    InitializeSystemsByPriority();
+    // Update current build status
+    CurrentBuild.ModuleStatuses.Empty();
+    for (auto& ModulePair : ModuleRegistry)
+    {
+        CurrentBuild.ModuleStatuses.Add(ModulePair.Value);
+    }
 }
 
-void UIntegrationManager::ShutdownAllSystems()
+bool UIntegrationManager::LoadGameModule(const FString& ModuleName)
 {
-    UE_LOG(LogIntegration, Log, TEXT("ShutdownAllSystems: Shutting down all systems"));
+    UE_LOG(LogIntegration, Log, TEXT("Attempting to load module: %s"), *ModuleName);
     
-    // Shutdown in reverse priority order
-    for (int32 Priority = static_cast<int32>(ESystemPriority::Testing); Priority >= 0; Priority--)
+    double StartTime = FPlatformTime::Seconds();
+    
+    try
     {
-        for (auto& SystemPair : RegisteredSystems)
+        if (FModuleManager::Get().IsModuleLoaded(*ModuleName))
         {
-            if (static_cast<int32>(SystemPair.Value.Priority) == Priority)
+            UE_LOG(LogIntegration, Log, TEXT("Module %s already loaded"), *ModuleName);
+            UpdateModuleStatus(ModuleName, true);
+            return true;
+        }
+        
+        FModuleManager::Get().LoadModule(*ModuleName);
+        
+        bool bLoaded = FModuleManager::Get().IsModuleLoaded(*ModuleName);
+        float LoadTime = FPlatformTime::Seconds() - StartTime;
+        
+        if (bLoaded)
+        {
+            UE_LOG(LogIntegration, Log, TEXT("Module %s loaded successfully in %.3f seconds"), *ModuleName, LoadTime);
+            UpdateModuleStatus(ModuleName, true);
+            
+            // Update module status with load time
+            if (FModuleStatus* Status = ModuleRegistry.Find(ModuleName))
             {
-                SetSystemStatus(SystemPair.Key, EIntegrationStatus::NotInitialized);
+                Status->LoadTime = LoadTime;
+            }
+        }
+        else
+        {
+            UE_LOG(LogIntegration, Error, TEXT("Failed to load module %s"), *ModuleName);
+            UpdateModuleStatus(ModuleName, false, TEXT("Load failed"));
+        }
+        
+        return bLoaded;
+    }
+    catch (...)
+    {
+        UE_LOG(LogIntegration, Error, TEXT("Exception while loading module %s"), *ModuleName);
+        UpdateModuleStatus(ModuleName, false, TEXT("Exception during load"));
+        return false;
+    }
+}
+
+bool UIntegrationManager::UnloadGameModule(const FString& ModuleName)
+{
+    UE_LOG(LogIntegration, Log, TEXT("Attempting to unload module: %s"), *ModuleName);
+    
+    try
+    {
+        if (!FModuleManager::Get().IsModuleLoaded(*ModuleName))
+        {
+            UE_LOG(LogIntegration, Log, TEXT("Module %s not loaded"), *ModuleName);
+            return true;
+        }
+        
+        FModuleManager::Get().UnloadModule(*ModuleName);
+        
+        bool bUnloaded = !FModuleManager::Get().IsModuleLoaded(*ModuleName);
+        
+        if (bUnloaded)
+        {
+            UE_LOG(LogIntegration, Log, TEXT("Module %s unloaded successfully"), *ModuleName);
+            UpdateModuleStatus(ModuleName, false);
+        }
+        else
+        {
+            UE_LOG(LogIntegration, Error, TEXT("Failed to unload module %s"), *ModuleName);
+            UpdateModuleStatus(ModuleName, true, TEXT("Unload failed"));
+        }
+        
+        return bUnloaded;
+    }
+    catch (...)
+    {
+        UE_LOG(LogIntegration, Error, TEXT("Exception while unloading module %s"), *ModuleName);
+        return false;
+    }
+}
+
+FModuleStatus UIntegrationManager::GetModuleStatus(const FString& ModuleName)
+{
+    if (FModuleStatus* Status = ModuleRegistry.Find(ModuleName))
+    {
+        // Update real-time status
+        Status->bIsLoaded = FModuleManager::Get().IsModuleLoaded(*ModuleName);
+        return *Status;
+    }
+    
+    // Create new status for unknown module
+    FModuleStatus NewStatus;
+    NewStatus.ModuleName = ModuleName;
+    NewStatus.bIsLoaded = FModuleManager::Get().IsModuleLoaded(*ModuleName);
+    NewStatus.bIsCompiled = NewStatus.bIsLoaded;
+    NewStatus.LastError = TEXT("Module not registered");
+    
+    return NewStatus;
+}
+
+TArray<FModuleStatus> UIntegrationManager::GetAllModuleStatuses()
+{
+    TArray<FModuleStatus> Statuses;
+    
+    for (auto& ModulePair : ModuleRegistry)
+    {
+        // Update real-time status
+        ModulePair.Value.bIsLoaded = FModuleManager::Get().IsModuleLoaded(*ModulePair.Key);
+        Statuses.Add(ModulePair.Value);
+    }
+    
+    return Statuses;
+}
+
+FBuildStatus UIntegrationManager::GetCurrentBuildStatus()
+{
+    // Update module statuses in current build
+    CurrentBuild.ModuleStatuses = GetAllModuleStatuses();
+    
+    // Check if build is stable (all core modules loaded)
+    bool bAllCoreLoaded = true;
+    for (const FModuleStatus& Status : CurrentBuild.ModuleStatuses)
+    {
+        if (Status.ModuleName == TEXT("TranspersonalGame") || 
+            Status.ModuleName == TEXT("Core") || 
+            Status.ModuleName == TEXT("Engine"))
+        {
+            if (!Status.bIsLoaded)
+            {
+                bAllCoreLoaded = false;
+                break;
             }
         }
     }
     
-    bIsInitializing = false;
-    bIntegrationComplete = false;
+    CurrentBuild.bIsStable = bAllCoreLoaded;
+    
+    return CurrentBuild;
 }
 
-bool UIntegrationManager::RegisterSystem(const FString& SystemName, ESystemPriority Priority, const TArray<FString>& Dependencies)
+bool UIntegrationManager::ValidateBuildIntegrity()
 {
-    if (SystemName.IsEmpty())
+    UE_LOG(LogIntegration, Log, TEXT("Validating build integrity..."));
+    
+    bool bIntegrityValid = true;
+    
+    // Check all registered modules
+    for (auto& ModulePair : ModuleRegistry)
     {
-        UE_LOG(LogIntegration, Error, TEXT("RegisterSystem: SystemName cannot be empty"));
-        return false;
-    }
-    
-    if (RegisteredSystems.Contains(SystemName))
-    {
-        UE_LOG(LogIntegration, Warning, TEXT("RegisterSystem: System '%s' already registered"), *SystemName);
-        return false;
-    }
-    
-    FSystemIntegrationInfo NewSystem;
-    NewSystem.SystemName = SystemName;
-    NewSystem.Priority = Priority;
-    NewSystem.Status = EIntegrationStatus::NotInitialized;
-    NewSystem.Dependencies = Dependencies;
-    NewSystem.InitializationTime = 0.0f;
-    
-    RegisteredSystems.Add(SystemName, NewSystem);
-    
-    UE_LOG(LogIntegration, Log, TEXT("RegisterSystem: Registered '%s' with priority %d"), *SystemName, static_cast<int32>(Priority));
-    
-    return true;
-}
-
-bool UIntegrationManager::UnregisterSystem(const FString& SystemName)
-{
-    if (!RegisteredSystems.Contains(SystemName))
-    {
-        UE_LOG(LogIntegration, Warning, TEXT("UnregisterSystem: System '%s' not found"), *SystemName);
-        return false;
-    }
-    
-    RegisteredSystems.Remove(SystemName);
-    UE_LOG(LogIntegration, Log, TEXT("UnregisterSystem: Unregistered '%s'"), *SystemName);
-    
-    return true;
-}
-
-void UIntegrationManager::SetSystemStatus(const FString& SystemName, EIntegrationStatus Status)
-{
-    if (!RegisteredSystems.Contains(SystemName))
-    {
-        UE_LOG(LogIntegration, Warning, TEXT("SetSystemStatus: System '%s' not found"), *SystemName);
-        return;
-    }
-    
-    FSystemIntegrationInfo& SystemInfo = RegisteredSystems[SystemName];
-    EIntegrationStatus OldStatus = SystemInfo.Status;
-    SystemInfo.Status = Status;
-    
-    LogSystemStatus(SystemName, Status);
-    
-    // Broadcast status change
-    OnSystemStatusChanged.Broadcast(SystemName, Status);
-    
-    // Update overall integration progress
-    UpdateIntegrationProgress();
-}
-
-EIntegrationStatus UIntegrationManager::GetSystemStatus(const FString& SystemName) const
-{
-    if (const FSystemIntegrationInfo* SystemInfo = RegisteredSystems.Find(SystemName))
-    {
-        return SystemInfo->Status;
-    }
-    
-    return EIntegrationStatus::NotInitialized;
-}
-
-TArray<FSystemIntegrationInfo> UIntegrationManager::GetAllSystemsInfo() const
-{
-    TArray<FSystemIntegrationInfo> AllSystems;
-    
-    for (const auto& SystemPair : RegisteredSystems)
-    {
-        AllSystems.Add(SystemPair.Value);
-    }
-    
-    // Sort by priority
-    AllSystems.Sort([](const FSystemIntegrationInfo& A, const FSystemIntegrationInfo& B)
-    {
-        return static_cast<int32>(A.Priority) < static_cast<int32>(B.Priority);
-    });
-    
-    return AllSystems;
-}
-
-bool UIntegrationManager::AreAllCriticalSystemsReady() const
-{
-    for (const auto& SystemPair : RegisteredSystems)
-    {
-        if (SystemPair.Value.Priority == ESystemPriority::Critical)
+        const FString& ModuleName = ModulePair.Key;
+        bool bCurrentlyLoaded = FModuleManager::Get().IsModuleLoaded(*ModuleName);
+        
+        if (!bCurrentlyLoaded && (ModuleName == TEXT("TranspersonalGame") || ModuleName == TEXT("Core")))
         {
-            if (SystemPair.Value.Status != EIntegrationStatus::Ready)
-            {
-                return false;
-            }
+            UE_LOG(LogIntegration, Error, TEXT("Critical module %s is not loaded"), *ModuleName);
+            bIntegrityValid = false;
         }
     }
     
-    return true;
+    // Validate dependencies
+    ValidateModuleDependencies();
+    
+    UE_LOG(LogIntegration, Log, TEXT("Build integrity validation: %s"), 
+           bIntegrityValid ? TEXT("PASSED") : TEXT("FAILED"));
+    
+    return bIntegrityValid;
 }
 
-float UIntegrationManager::GetOverallIntegrationProgress() const
+void UIntegrationManager::CreateBuildSnapshot(const FString& BuildNotes)
 {
-    if (RegisteredSystems.Num() == 0)
+    UE_LOG(LogIntegration, Log, TEXT("Creating build snapshot..."));
+    
+    FBuildStatus Snapshot = GetCurrentBuildStatus();
+    Snapshot.BuildNotes = BuildNotes;
+    
+    BuildHistory.Add(Snapshot);
+    
+    // Keep only last 10 builds
+    if (BuildHistory.Num() > 10)
     {
-        return 0.0f;
+        BuildHistory.RemoveAt(0);
     }
     
-    int32 ReadySystems = 0;
-    for (const auto& SystemPair : RegisteredSystems)
+    UE_LOG(LogIntegration, Log, TEXT("Build snapshot created: Build #%d"), Snapshot.BuildNumber);
+}
+
+bool UIntegrationManager::InitializeAllSystems()
+{
+    UE_LOG(LogIntegration, Log, TEXT("Initializing all systems in order..."));
+    
+    bool bAllInitialized = true;
+    
+    for (const FString& SystemName : SystemInitOrder)
     {
-        if (SystemPair.Value.Status == EIntegrationStatus::Ready)
+        UE_LOG(LogIntegration, Log, TEXT("Initializing system: %s"), *SystemName);
+        
+        if (!LoadGameModule(SystemName))
         {
-            ReadySystems++;
+            UE_LOG(LogIntegration, Error, TEXT("Failed to initialize system: %s"), *SystemName);
+            bAllInitialized = false;
         }
     }
     
-    return static_cast<float>(ReadySystems) / static_cast<float>(RegisteredSystems.Num());
+    bSystemsInitialized = bAllInitialized;
+    
+    UE_LOG(LogIntegration, Log, TEXT("System initialization: %s"), 
+           bAllInitialized ? TEXT("SUCCESS") : TEXT("FAILED"));
+    
+    return bAllInitialized;
 }
 
-void UIntegrationManager::ValidateBuildIntegrity()
+bool UIntegrationManager::ShutdownAllSystems()
 {
-    UE_LOG(LogIntegration, Log, TEXT("ValidateBuildIntegrity: Starting build validation"));
+    UE_LOG(LogIntegration, Log, TEXT("Shutting down all systems..."));
     
-    // Get Build Validator subsystem
-    if (UBuildValidator* BuildValidator = GetWorld()->GetSubsystem<UBuildValidator>())
+    // Shutdown in reverse order
+    for (int32 i = SystemInitOrder.Num() - 1; i >= 0; i--)
     {
-        BuildValidator->RunFullValidation();
+        const FString& SystemName = SystemInitOrder[i];
+        UE_LOG(LogIntegration, Log, TEXT("Shutting down system: %s"), *SystemName);
+        // Note: We don't actually unload core modules as it can cause crashes
     }
-    else
-    {
-        UE_LOG(LogIntegration, Error, TEXT("ValidateBuildIntegrity: BuildValidator subsystem not available"));
-    }
+    
+    bSystemsInitialized = false;
+    
+    UE_LOG(LogIntegration, Log, TEXT("System shutdown complete"));
+    
+    return true;
 }
 
-void UIntegrationManager::GenerateBuildReport()
+void UIntegrationManager::RefreshSystemDependencies()
 {
-    UE_LOG(LogIntegration, Log, TEXT("GenerateBuildReport: Generating integration report"));
+    UE_LOG(LogIntegration, Log, TEXT("Refreshing system dependencies..."));
     
-    FString ReportPath = FPaths::ProjectLogDir() / TEXT("Integration") / FString::Printf(TEXT("IntegrationReport_%s.txt"), *FDateTime::Now().ToString());
+    ValidateModuleDependencies();
+    RegisterCoreModules();
     
-    FString Report = TEXT("=== TRANSPERSONAL GAME INTEGRATION REPORT ===\n\n");
+    UE_LOG(LogIntegration, Log, TEXT("System dependencies refreshed"));
+}
+
+void UIntegrationManager::RunIntegrationDiagnostics()
+{
+    UE_LOG(LogIntegration, Log, TEXT("=== INTEGRATION DIAGNOSTICS ==="));
+    
+    // Module status
+    UE_LOG(LogIntegration, Log, TEXT("Module Status:"));
+    for (auto& ModulePair : ModuleRegistry)
+    {
+        const FModuleStatus& Status = ModulePair.Value;
+        UE_LOG(LogIntegration, Log, TEXT("  %s: %s (Load Time: %.3fs)"), 
+               *Status.ModuleName,
+               Status.bIsLoaded ? TEXT("LOADED") : TEXT("NOT LOADED"),
+               Status.LoadTime);
+        
+        if (!Status.LastError.IsEmpty())
+        {
+            UE_LOG(LogIntegration, Log, TEXT("    Error: %s"), *Status.LastError);
+        }
+    }
+    
+    // Build status
+    FBuildStatus BuildStatus = GetCurrentBuildStatus();
+    UE_LOG(LogIntegration, Log, TEXT("Build #%d: %s"), 
+           BuildStatus.BuildNumber,
+           BuildStatus.bIsStable ? TEXT("STABLE") : TEXT("UNSTABLE"));
+    
+    // System status
+    UE_LOG(LogIntegration, Log, TEXT("Systems Initialized: %s"), 
+           bSystemsInitialized ? TEXT("YES") : TEXT("NO"));
+    
+    UE_LOG(LogIntegration, Log, TEXT("=== DIAGNOSTICS COMPLETE ==="));
+}
+
+FString UIntegrationManager::GenerateSystemReport()
+{
+    FString Report = TEXT("=== TRANSPERSONAL GAME STUDIO - SYSTEM REPORT ===\n\n");
+    
     Report += FString::Printf(TEXT("Generated: %s\n"), *FDateTime::Now().ToString());
-    Report += FString::Printf(TEXT("Integration Progress: %.1f%%\n"), GetOverallIntegrationProgress() * 100.0f);
-    Report += FString::Printf(TEXT("Critical Systems Ready: %s\n\n"), AreAllCriticalSystemsReady() ? TEXT("YES") : TEXT("NO"));
+    Report += FString::Printf(TEXT("Build: #%d (%s)\n\n"), 
+                             CurrentBuild.BuildNumber,
+                             CurrentBuild.bIsStable ? TEXT("STABLE") : TEXT("UNSTABLE"));
     
-    Report += TEXT("SYSTEM STATUS:\n");
-    for (const auto& SystemPair : RegisteredSystems)
+    Report += TEXT("MODULE STATUS:\n");
+    for (auto& ModulePair : ModuleRegistry)
     {
-        const FSystemIntegrationInfo& SystemInfo = SystemPair.Value;
-        FString StatusString;
-        
-        switch (SystemInfo.Status)
-        {
-            case EIntegrationStatus::NotInitialized: StatusString = TEXT("NOT_INITIALIZED"); break;
-            case EIntegrationStatus::Initializing: StatusString = TEXT("INITIALIZING"); break;
-            case EIntegrationStatus::Ready: StatusString = TEXT("READY"); break;
-            case EIntegrationStatus::Error: StatusString = TEXT("ERROR"); break;
-            case EIntegrationStatus::Disabled: StatusString = TEXT("DISABLED"); break;
-        }
-        
-        Report += FString::Printf(TEXT("  %s: %s (Priority: %d, Init Time: %.2fs)\n"), 
-            *SystemInfo.SystemName, *StatusString, static_cast<int32>(SystemInfo.Priority), SystemInfo.InitializationTime);
+        const FModuleStatus& Status = ModulePair.Value;
+        Report += FString::Printf(TEXT("  %-20s: %s\n"), 
+                                 *Status.ModuleName,
+                                 Status.bIsLoaded ? TEXT("LOADED") : TEXT("NOT LOADED"));
     }
     
-    // Save report to file
-    FFileHelper::SaveStringToFile(Report, *ReportPath);
-    UE_LOG(LogIntegration, Log, TEXT("GenerateBuildReport: Report saved to %s"), *ReportPath);
-}
-
-bool UIntegrationManager::CheckSystemCompatibility(const FString& SystemA, const FString& SystemB)
-{
-    // Basic compatibility check - systems are compatible if they don't conflict
-    // This is a simplified implementation - real compatibility would check for conflicts
-    
-    if (SystemA == SystemB)
+    Report += TEXT("\nSYSTEM INITIALIZATION ORDER:\n");
+    for (int32 i = 0; i < SystemInitOrder.Num(); i++)
     {
-        return true; // System is compatible with itself
+        Report += FString::Printf(TEXT("  %d. %s\n"), i + 1, *SystemInitOrder[i]);
     }
     
-    // Check if systems exist
-    if (!RegisteredSystems.Contains(SystemA) || !RegisteredSystems.Contains(SystemB))
-    {
-        return false;
-    }
+    Report += FString::Printf(TEXT("\nSystems Initialized: %s\n"), 
+                             bSystemsInitialized ? TEXT("YES") : TEXT("NO"));
     
-    // For now, assume all systems are compatible unless explicitly conflicting
-    // In a real implementation, you'd have a compatibility matrix
-    
-    return true;
-}
-
-void UIntegrationManager::StartPerformanceMonitoring()
-{
-    if (bPerformanceMonitoringActive)
-    {
-        UE_LOG(LogIntegration, Warning, TEXT("StartPerformanceMonitoring: Already active"));
-        return;
-    }
-    
-    bPerformanceMonitoringActive = true;
-    FrameRateHistory.Empty();
-    MemoryUsageHistory.Empty();
-    
-    UE_LOG(LogIntegration, Log, TEXT("StartPerformanceMonitoring: Performance monitoring started"));
-    
-    // Start monitoring timer
-    if (UWorld* World = GetWorld())
-    {
-        World->GetTimerManager().SetTimer(FTimerHandle(), this, &UIntegrationManager::UpdatePerformanceMetrics, 1.0f, true);
-    }
-}
-
-void UIntegrationManager::StopPerformanceMonitoring()
-{
-    if (!bPerformanceMonitoringActive)
-    {
-        return;
-    }
-    
-    bPerformanceMonitoringActive = false;
-    
-    if (UWorld* World = GetWorld())
-    {
-        World->GetTimerManager().ClearAllTimersForObject(this);
-    }
-    
-    UE_LOG(LogIntegration, Log, TEXT("StopPerformanceMonitoring: Performance monitoring stopped"));
-}
-
-float UIntegrationManager::GetCurrentFrameRate() const
-{
-    if (FrameRateHistory.Num() > 0)
-    {
-        return FrameRateHistory.Last();
-    }
-    
-    return 0.0f;
-}
-
-int32 UIntegrationManager::GetCurrentMemoryUsage() const
-{
-    if (MemoryUsageHistory.Num() > 0)
-    {
-        return MemoryUsageHistory.Last();
-    }
-    
-    return 0;
-}
-
-void UIntegrationManager::InitializeSystemsByPriority()
-{
-    // Initialize systems in priority order
-    for (int32 Priority = 0; Priority <= static_cast<int32>(ESystemPriority::Testing); Priority++)
-    {
-        for (auto& SystemPair : RegisteredSystems)
-        {
-            if (static_cast<int32>(SystemPair.Value.Priority) == Priority)
-            {
-                InitializeSystem(SystemPair.Key);
-            }
-        }
-    }
-}
-
-void UIntegrationManager::InitializeSystem(const FString& SystemName)
-{
-    if (!RegisteredSystems.Contains(SystemName))
-    {
-        return;
-    }
-    
-    FSystemIntegrationInfo& SystemInfo = RegisteredSystems[SystemName];
-    
-    // Check dependencies first
-    if (!CheckSystemDependencies(SystemName))
-    {
-        UE_LOG(LogIntegration, Error, TEXT("InitializeSystem: Dependencies not met for '%s'"), *SystemName);
-        SetSystemStatus(SystemName, EIntegrationStatus::Error);
-        return;
-    }
-    
-    // Start initialization
-    SetSystemStatus(SystemName, EIntegrationStatus::Initializing);
-    
-    float StartTime = FPlatformTime::Seconds();
-    
-    // Simulate system initialization
-    // In a real implementation, this would call the actual system initialization
-    bool bInitSuccess = true; // Assume success for now
-    
-    float EndTime = FPlatformTime::Seconds();
-    SystemInfo.InitializationTime = EndTime - StartTime;
-    
-    if (bInitSuccess)
-    {
-        SetSystemStatus(SystemName, EIntegrationStatus::Ready);
-    }
-    else
-    {
-        SetSystemStatus(SystemName, EIntegrationStatus::Error);
-    }
-}
-
-bool UIntegrationManager::CheckSystemDependencies(const FString& SystemName)
-{
-    const FSystemIntegrationInfo* SystemInfo = RegisteredSystems.Find(SystemName);
-    if (!SystemInfo)
-    {
-        return false;
-    }
-    
-    // Check if all dependencies are ready
-    for (const FString& Dependency : SystemInfo->Dependencies)
-    {
-        const FSystemIntegrationInfo* DepInfo = RegisteredSystems.Find(Dependency);
-        if (!DepInfo || DepInfo->Status != EIntegrationStatus::Ready)
-        {
-            UE_LOG(LogIntegration, Warning, TEXT("CheckSystemDependencies: Dependency '%s' not ready for '%s'"), *Dependency, *SystemName);
-            return false;
-        }
-    }
-    
-    return true;
-}
-
-void UIntegrationManager::UpdateIntegrationProgress()
-{
-    float Progress = GetOverallIntegrationProgress();
-    
-    if (Progress >= 1.0f && !bIntegrationComplete)
-    {
-        bIntegrationComplete = true;
-        bIsInitializing = false;
-        
-        UE_LOG(LogIntegration, Log, TEXT("UpdateIntegrationProgress: Integration complete!"));
-        OnIntegrationComplete.Broadcast(true);
-    }
-}
-
-void UIntegrationManager::LogSystemStatus(const FString& SystemName, EIntegrationStatus Status)
-{
-    FString StatusString;
-    switch (Status)
-    {
-        case EIntegrationStatus::NotInitialized: StatusString = TEXT("Not Initialized"); break;
-        case EIntegrationStatus::Initializing: StatusString = TEXT("Initializing"); break;
-        case EIntegrationStatus::Ready: StatusString = TEXT("Ready"); break;
-        case EIntegrationStatus::Error: StatusString = TEXT("Error"); break;
-        case EIntegrationStatus::Disabled: StatusString = TEXT("Disabled"); break;
-    }
-    
-    UE_LOG(LogIntegration, Log, TEXT("System '%s': %s"), *SystemName, *StatusString);
-}
-
-void UIntegrationManager::UpdatePerformanceMetrics()
-{
-    if (!bPerformanceMonitoringActive)
-    {
-        return;
-    }
-    
-    // Get current frame rate
-    float CurrentFPS = 1.0f / FApp::GetDeltaTime();
-    FrameRateHistory.Add(CurrentFPS);
-    
-    // Get current memory usage (simplified)
-    int32 CurrentMemory = FPlatformMemory::GetStats().UsedPhysical / (1024 * 1024); // Convert to MB
-    MemoryUsageHistory.Add(CurrentMemory);
-    
-    // Keep history limited
-    const int32 MaxHistorySize = 300; // 5 minutes at 1 second intervals
-    if (FrameRateHistory.Num() > MaxHistorySize)
-    {
-        FrameRateHistory.RemoveAt(0);
-    }
-    if (MemoryUsageHistory.Num() > MaxHistorySize)
-    {
-        MemoryUsageHistory.RemoveAt(0);
-    }
-    
-    // Validate performance thresholds
-    ValidatePerformanceThresholds();
-}
-
-void UIntegrationManager::ValidatePerformanceThresholds()
-{
-    const float MinAcceptableFPS = 30.0f;
-    const int32 MaxAcceptableMemoryMB = 4096; // 4GB
-    
-    float CurrentFPS = GetCurrentFrameRate();
-    int32 CurrentMemory = GetCurrentMemoryUsage();
-    
-    if (CurrentFPS < MinAcceptableFPS)
-    {
-        UE_LOG(LogIntegration, Warning, TEXT("Performance: FPS below threshold (%.1f < %.1f)"), CurrentFPS, MinAcceptableFPS);
-    }
-    
-    if (CurrentMemory > MaxAcceptableMemoryMB)
-    {
-        UE_LOG(LogIntegration, Warning, TEXT("Performance: Memory usage above threshold (%d MB > %d MB)"), CurrentMemory, MaxAcceptableMemoryMB);
-    }
-}
-
-// Integration Utilities Implementation
-bool UIntegrationUtilities::ValidateSystemModule(const FString& ModuleName)
-{
-    // Check if module exists and is loaded
-    return FModuleManager::Get().IsModuleLoaded(*ModuleName);
-}
-
-TArray<FString> UIntegrationUtilities::GetMissingDependencies(const FString& SystemName)
-{
-    TArray<FString> MissingDeps;
-    
-    // This would check actual module dependencies
-    // For now, return empty array
-    
-    return MissingDeps;
-}
-
-bool UIntegrationUtilities::CheckModuleCompilation(const FString& ModuleName)
-{
-    // Check if module compiled successfully
-    return FModuleManager::Get().IsModuleLoaded(*ModuleName);
-}
-
-FString UIntegrationUtilities::GenerateSystemReport(const FString& SystemName)
-{
-    FString Report = FString::Printf(TEXT("=== SYSTEM REPORT: %s ===\n"), *SystemName);
-    Report += FString::Printf(TEXT("Generated: %s\n"), *FDateTime::Now().ToString());
-    
-    // Add system-specific information
-    if (UIntegrationManager* IntegrationManager = GEngine->GetEngineSubsystem<UIntegrationManager>())
-    {
-        EIntegrationStatus Status = IntegrationManager->GetSystemStatus(SystemName);
-        Report += FString::Printf(TEXT("Status: %d\n"), static_cast<int32>(Status));
-    }
+    Report += TEXT("\n=== END REPORT ===");
     
     return Report;
 }
 
-bool UIntegrationUtilities::ExportIntegrationLog(const FString& FilePath)
+void UIntegrationManager::LogSystemStatus()
 {
-    // Export integration log to file
-    FString LogContent = TEXT("Integration Log Export\n");
-    LogContent += FString::Printf(TEXT("Exported: %s\n"), *FDateTime::Now().ToString());
+    RunIntegrationDiagnostics();
+}
+
+void UIntegrationManager::ValidateModuleDependencies()
+{
+    UE_LOG(LogIntegration, Log, TEXT("Validating module dependencies..."));
     
-    return FFileHelper::SaveStringToFile(LogContent, *FilePath);
-}
-
-void UIntegrationUtilities::ClearIntegrationCache()
-{
-    // Clear any cached integration data
-    UE_LOG(LogIntegration, Log, TEXT("Integration cache cleared"));
-}
-
-float UIntegrationUtilities::MeasureSystemInitTime(const FString& SystemName)
-{
-    // Measure system initialization time
-    if (UIntegrationManager* IntegrationManager = GEngine->GetEngineSubsystem<UIntegrationManager>())
+    // Check that core dependencies are met
+    TMap<FString, TArray<FString>> Dependencies;
+    Dependencies.Add(TEXT("TranspersonalGame"), {TEXT("Core"), TEXT("CoreUObject"), TEXT("Engine")});
+    Dependencies.Add(TEXT("Physics"), {TEXT("TranspersonalGame"), TEXT("Core")});
+    Dependencies.Add(TEXT("Consciousness"), {TEXT("TranspersonalGame"), TEXT("Core")});
+    
+    for (auto& DepPair : Dependencies)
     {
-        TArray<FSystemIntegrationInfo> AllSystems = IntegrationManager->GetAllSystemsInfo();
-        for (const FSystemIntegrationInfo& SystemInfo : AllSystems)
+        const FString& ModuleName = DepPair.Key;
+        const TArray<FString>& RequiredModules = DepPair.Value;
+        
+        if (FModuleManager::Get().IsModuleLoaded(*ModuleName))
         {
-            if (SystemInfo.SystemName == SystemName)
+            for (const FString& RequiredModule : RequiredModules)
             {
-                return SystemInfo.InitializationTime;
+                if (!FModuleManager::Get().IsModuleLoaded(*RequiredModule))
+                {
+                    UE_LOG(LogIntegration, Warning, 
+                           TEXT("Module %s is loaded but dependency %s is not"), 
+                           *ModuleName, *RequiredModule);
+                }
             }
         }
     }
-    
-    return 0.0f;
 }
 
-int32 UIntegrationUtilities::MeasureSystemMemoryFootprint(const FString& SystemName)
+bool UIntegrationManager::CheckModuleCompatibility(const FString& ModuleName)
 {
-    // Measure system memory footprint
-    // This would require more detailed memory tracking
-    return 0;
+    // Basic compatibility check - can be extended
+    return FModuleManager::Get().ModuleExists(*ModuleName);
 }
 
-bool UIntegrationUtilities::ValidatePerformanceTarget(float TargetFPS, int32 MaxMemoryMB)
+void UIntegrationManager::UpdateModuleStatus(const FString& ModuleName, bool bLoaded, const FString& Error)
 {
-    if (UIntegrationManager* IntegrationManager = GEngine->GetEngineSubsystem<UIntegrationManager>())
+    if (FModuleStatus* Status = ModuleRegistry.Find(ModuleName))
     {
-        float CurrentFPS = IntegrationManager->GetCurrentFrameRate();
-        int32 CurrentMemory = IntegrationManager->GetCurrentMemoryUsage();
-        
-        return (CurrentFPS >= TargetFPS) && (CurrentMemory <= MaxMemoryMB);
+        Status->bIsLoaded = bLoaded;
+        Status->bIsCompiled = bLoaded;
+        Status->LastError = Error;
     }
-    
-    return false;
+    else
+    {
+        FModuleStatus NewStatus;
+        NewStatus.ModuleName = ModuleName;
+        NewStatus.bIsLoaded = bLoaded;
+        NewStatus.bIsCompiled = bLoaded;
+        NewStatus.LastError = Error;
+        ModuleRegistry.Add(ModuleName, NewStatus);
+    }
 }
