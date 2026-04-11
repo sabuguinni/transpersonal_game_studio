@@ -5,7 +5,7 @@ public class TranspersonalGame : ModuleRules
     public TranspersonalGame(ReadOnlyTargetRules Target) : base(Target)
     {
         PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
-
+        
         PublicDependencyModuleNames.AddRange(new string[] 
         { 
             "Core", 
@@ -19,75 +19,53 @@ public class TranspersonalGame : ModuleRules
             "NavigationSystem",
             "AIModule",
             "GameplayTasks",
-            "Niagara",
             "PhysicsCore",
             "Chaos",
             "ChaosVehicles",
             "GeometryCollectionEngine",
             "FieldSystemEngine",
-            "ProceduralMeshComponent",
-            "Landscape",
-            "Foliage",
-            "MetasoundEngine",
+            "Niagara",
             "AudioMixer",
-            "CinematicCamera",
-            "LevelSequence",
-            "MovieScene"
+            "MetasoundEngine",
+            "PCG",
+            "WorldPartitionRuntime"
         });
 
         PrivateDependencyModuleNames.AddRange(new string[] 
-        {
-            "Slate",
+        { 
+            "Slate", 
             "SlateCore",
             "ToolMenus",
             "EditorStyle",
             "EditorWidgets",
             "UnrealEd",
+            "LevelEditor",
             "PropertyEditor",
-            "Kismet",
-            "KismetCompiler",
-            "BlueprintGraph",
-            "AnimGraph",
-            "AnimationCore",
-            "AnimGraphRuntime",
-            "MotionWarping",
-            "GameplayAbilities",
-            "GameplayTags",
-            "GameplayTasks",
-            "NetCore",
-            "OnlineSubsystem",
-            "OnlineSubsystemUtils",
-            "HTTP",
-            "Json",
-            "JsonUtilities"
+            "RenderCore",
+            "RHI",
+            "Landscape",
+            "Foliage",
+            "ProceduralMeshComponent",
+            "MassEntity",
+            "MassCommon",
+            "MassMovement",
+            "MassSpawner",
+            "MassActors",
+            "StateTree",
+            "StructUtils"
         });
-
-        // Optimization settings
+        
+        // Optimization settings for prehistoric world simulation
         OptimizeCode = CodeOptimization.InShippingBuildsOnly;
         
-        // Enable RTTI for reflection
+        // Enable RTTI for consciousness system reflection
         bUseRTTI = true;
         
-        // Enable exceptions for error handling
+        // Enable exceptions for advanced AI error handling
         bEnableExceptions = true;
         
-        // PCG and World Partition support
-        if (Target.bBuildEditor)
-        {
-            PrivateDependencyModuleNames.AddRange(new string[]
-            {
-                "PCG",
-                "WorldPartitionEditor",
-                "LevelEditor",
-                "ContentBrowser",
-                "AssetTools"
-            });
-        }
-        
-        PublicDependencyModuleNames.AddRange(new string[]
-        {
-            "PCG",
-            "WorldPartition"
-        });
+        PublicDefinitions.Add("TRANSPERSONAL_GAME=1");
+        PublicDefinitions.Add("CONSCIOUSNESS_SYSTEM_ENABLED=1");
+        PublicDefinitions.Add("PREHISTORIC_WORLD_SIMULATION=1");
     }
 }
