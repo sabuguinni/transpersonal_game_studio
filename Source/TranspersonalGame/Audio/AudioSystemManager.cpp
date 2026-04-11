@@ -1,406 +1,324 @@
 #include "AudioSystemManager.h"
 #include "Engine/World.h"
-#include "Components/AudioComponent.h"
-#include "AudioMixerBlueprintLibrary.h"
 #include "Kismet/GameplayStatics.h"
-#include "Engine/Engine.h"
+#include "Components/AudioComponent.h"
+#include "Sound/SoundMix.h"
 #include "AudioDevice.h"
-#include "Sound/SoundSubmix.h"
 
 UAudioSystemManager::UAudioSystemManager()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickGroup = TG_PostPhysics;
-    
-    // Initialize default audio layer configurations
-    AudioLayers.Add(EAudioLayer::Ambience, FAudioLayerConfig());
-    AudioLayers.Add(EAudioLayer::Music, FAudioLayerConfig());
-    AudioLayers.Add(EAudioLayer::SFX, FAudioLayerConfig());
-    AudioLayers.Add(EAudioLayer::Voice, FAudioLayerConfig());
-    AudioLayers.Add(EAudioLayer::UI, FAudioLayerConfig());
-
-    // Set default volumes for each layer
-    AudioLayers[EAudioLayer::Ambience].Volume = 0.7f;
-    AudioLayers[EAudioLayer::Music].Volume = 0.6f;
-    AudioLayers[EAudioLayer::SFX].Volume = 0.8f;
-    AudioLayers[EAudioLayer::Voice].Volume = 1.0f;
-    AudioLayers[EAudioLayer::UI].Volume = 0.5f;
-}
-
-void UAudioSystemManager::BeginPlay()
-{
-    Super::BeginPlay();
-    
-    InitializeAudioSystem();
-    SetupDefaultConsciousnessProfiles();
-    InitializeAudioComponents();
-    
-    UE_LOG(LogTemp, Warning, TEXT("Audio System Manager initialized - Ready for consciousness-based audio"));
-}
-
-void UAudioSystemManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
-{
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    
-    if (bIsTransitioning)
-    {
-        UpdateConsciousnessTransition(DeltaTime);
-    }
-    
-    UpdateAudioMixerSettings();
+    // Initialize default values
+    CurrentMusicState = "Silence";
+    CurrentConsciousnessLevel = 0.0f;
+    MasterVolumeLevel = 1.0f;
+    MusicTransitionTimer = 0.0f;
+    ConsciousnessFilterIntensity = 0.0f;
+    bIsTransitioning = false;
+    PendingMusicState = "";
+    PendingFadeTime = 2.0f;
 }
 
 void UAudioSystemManager::InitializeAudioSystem()
 {
-    UE_LOG(LogTemp, Warning, TEXT("Initializing Transpersonal Audio System..."));
-    
-    // Verify audio device is available
-    FAudioDevice* AudioDevice = GetAudioDevice();
-    if (!AudioDevice)
+    UE_LOG(LogTemp, Warning, TEXT("AudioSystemManager: Initializing Audio System..."));
+
+    // Create audio components for different audio layers
+    if (!MusicAudioComponent)
     {
-        UE_LOG(LogTemp, Error, TEXT("Audio device not available - cannot initialize audio system"));
-        return;
+        MusicAudioComponent = NewObject<UAudioComponent>(this);
+        if (MusicAudioComponent)
+        {
+            MusicAudioComponent->SetVolumeMultiplier(0.7f); // Music slightly lower than SFX
+            UE_LOG(LogTemp, Warning, TEXT("AudioSystemManager: Music AudioComponent created"));
+        }
     }
-    
-    // Initialize audio components for each layer
-    InitializeAudioComponents();
-    
-    // Set initial consciousness state
-    SetConsciousnessState(EConsciousnessState::Awakening);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Audio System initialization complete"));
+
+    if (!AmbienceAudioComponent)
+    {
+        AmbienceAudioComponent = NewObject<UAudioComponent>(this);
+        if (AmbienceAudioComponent)
+        {
+            AmbienceAudioComponent->SetVolumeMultiplier(0.5f); // Ambience in background
+            AmbienceAudioComponent->bAutoActivate = true;
+            UE_LOG(LogTemp, Warning, TEXT("AudioSystemManager: Ambience AudioComponent created"));
+        }
+    }
+
+    if (!NarrationAudioComponent)
+    {
+        NarrationAudioComponent = NewObject<UAudioComponent>(this);
+        if (NarrationAudioComponent)
+        {
+            NarrationAudioComponent->SetVolumeMultiplier(0.9f); // Narration prominent
+            UE_LOG(LogTemp, Warning, TEXT("AudioSystemManager: Narration AudioComponent created"));
+        }
+    }
+
+    // Initialize default audio states
+    CurrentMusicState = "Awakening";
+    CurrentConsciousnessLevel = 0.1f; // Start slightly awakened
+
+    UE_LOG(LogTemp, Warning, TEXT("AudioSystemManager: Audio System initialization complete"));
 }
 
-void UAudioSystemManager::SetAudioLayerVolume(EAudioLayer Layer, float Volume, float FadeTime)
+void UAudioSystemManager::UpdateAudioState(float DeltaTime)
 {
-    if (!AudioLayers.Contains(Layer))
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Audio layer not found: %d"), (int32)Layer);
-        return;
-    }
+    // Update adaptive music based on consciousness level
+    UpdateAdaptiveMusic(DeltaTime);
     
-    FAudioLayerConfig& LayerConfig = AudioLayers[Layer];
-    LayerConfig.Volume = FMath::Clamp(Volume, 0.0f, 1.0f);
-    LayerConfig.FadeTime = FadeTime;
+    // Process consciousness-based audio effects
+    ProcessConsciousnessAudio();
     
-    // Apply volume to audio component if it exists
-    if (AudioComponents.Contains(Layer) && AudioComponents[Layer])
-    {
-        AudioComponents[Layer]->SetVolumeMultiplier(LayerConfig.Volume);
-        AudioComponents[Layer]->FadeIn(FadeTime, LayerConfig.Volume);
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("Set audio layer %d volume to %f"), (int32)Layer, Volume);
+    // Handle any pending audio transitions
+    HandleAudioTransitions();
 }
 
-void UAudioSystemManager::PlaySoundOnLayer(EAudioLayer Layer, USoundCue* Sound, bool bLoop)
+void UAudioSystemManager::SetMasterVolume(float Volume)
+{
+    MasterVolumeLevel = FMath::Clamp(Volume, 0.0f, 1.0f);
+    
+    // Apply to all audio components
+    if (MusicAudioComponent)
+    {
+        MusicAudioComponent->SetVolumeMultiplier(0.7f * MasterVolumeLevel);
+    }
+    
+    if (AmbienceAudioComponent)
+    {
+        AmbienceAudioComponent->SetVolumeMultiplier(0.5f * MasterVolumeLevel);
+    }
+    
+    if (NarrationAudioComponent)
+    {
+        NarrationAudioComponent->SetVolumeMultiplier(0.9f * MasterVolumeLevel);
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("AudioSystemManager: Master volume set to %f"), MasterVolumeLevel);
+}
+
+void UAudioSystemManager::TransitionToMusicState(const FString& NewState, float FadeTime)
+{
+    if (NewState == CurrentMusicState)
+    {
+        return; // Already in this state
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("AudioSystemManager: Transitioning from %s to %s (fade: %fs)"), 
+           *CurrentMusicState, *NewState, FadeTime);
+
+    PendingMusicState = NewState;
+    PendingFadeTime = FadeTime;
+    bIsTransitioning = true;
+    MusicTransitionTimer = 0.0f;
+
+    // Start fade out of current music
+    if (MusicAudioComponent && MusicAudioComponent->IsPlaying())
+    {
+        MusicAudioComponent->FadeOut(FadeTime * 0.5f, 0.0f);
+    }
+}
+
+void UAudioSystemManager::SetConsciousnessLevel(float Level)
+{
+    float PreviousLevel = CurrentConsciousnessLevel;
+    CurrentConsciousnessLevel = FMath::Clamp(Level, 0.0f, 1.0f);
+
+    UE_LOG(LogTemp, Warning, TEXT("AudioSystemManager: Consciousness level changed from %f to %f"), 
+           PreviousLevel, CurrentConsciousnessLevel);
+
+    // Trigger music state changes based on consciousness thresholds
+    if (CurrentConsciousnessLevel < 0.3f && PreviousLevel >= 0.3f)
+    {
+        TransitionToMusicState("Dormant", 3.0f);
+    }
+    else if (CurrentConsciousnessLevel >= 0.3f && CurrentConsciousnessLevel < 0.7f)
+    {
+        TransitionToMusicState("Awakening", 2.5f);
+    }
+    else if (CurrentConsciousnessLevel >= 0.7f && PreviousLevel < 0.7f)
+    {
+        TransitionToMusicState("Enlightened", 4.0f);
+    }
+}
+
+void UAudioSystemManager::TriggerSpiritualMoment(const FString& MomentType)
+{
+    UE_LOG(LogTemp, Warning, TEXT("AudioSystemManager: Triggering spiritual moment: %s"), *MomentType);
+
+    // Play specific audio cues for different spiritual moments
+    if (MomentType == "VisionQuest")
+    {
+        ApplyConsciousnessFilter(0.8f);
+        TransitionToMusicState("Transcendent", 1.5f);
+    }
+    else if (MomentType == "AncientWisdom")
+    {
+        TriggerAncientWisdomWhisper(FVector::ZeroVector);
+    }
+    else if (MomentType == "SoulConnection")
+    {
+        ApplyConsciousnessFilter(0.6f);
+    }
+}
+
+void UAudioSystemManager::PlaySoundAtLocation(USoundBase* Sound, FVector Location, float Volume)
 {
     if (!Sound)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Attempted to play null sound on layer %d"), (int32)Layer);
+        UE_LOG(LogTemp, Warning, TEXT("AudioSystemManager: Attempted to play null sound"));
         return;
     }
-    
-    if (!AudioComponents.Contains(Layer) || !AudioComponents[Layer])
+
+    UWorld* World = GetWorld();
+    if (World)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Audio component not found for layer %d"), (int32)Layer);
-        return;
+        UGameplayStatics::PlaySoundAtLocation(World, Sound, Location, Volume * MasterVolumeLevel);
+        UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Played sound at location (%s)"), *Location.ToString());
     }
-    
-    UAudioComponent* AudioComp = AudioComponents[Layer];
-    
-    // Stop current sound if playing
-    if (AudioComp->IsPlaying())
-    {
-        AudioComp->Stop();
-    }
-    
-    // Configure and play new sound
-    AudioComp->SetSound(Sound);
-    AudioComp->SetLooping(bLoop);
-    AudioComp->SetVolumeMultiplier(AudioLayers[Layer].Volume);
-    AudioComp->Play();
-    
-    // Update layer config
-    AudioLayers[Layer].CurrentSound = Sound;
-    AudioLayers[Layer].bIsActive = true;
-    
-    UE_LOG(LogTemp, Log, TEXT("Playing sound on layer %d: %s"), (int32)Layer, *Sound->GetName());
 }
 
-void UAudioSystemManager::StopSoundOnLayer(EAudioLayer Layer, float FadeTime)
+void UAudioSystemManager::SetEnvironmentAudioProfile(const FString& ProfileName)
 {
-    if (!AudioComponents.Contains(Layer) || !AudioComponents[Layer])
+    UE_LOG(LogTemp, Warning, TEXT("AudioSystemManager: Setting environment audio profile: %s"), *ProfileName);
+
+    // Look for the environment profile in our asset map
+    if (EnvironmentProfiles.Contains(ProfileName))
     {
-        return;
-    }
-    
-    UAudioComponent* AudioComp = AudioComponents[Layer];
-    
-    if (AudioComp->IsPlaying())
-    {
-        if (FadeTime > 0.0f)
+        USoundBase* ProfileSound = EnvironmentProfiles[ProfileName];
+        if (ProfileSound && AmbienceAudioComponent)
         {
-            AudioComp->FadeOut(FadeTime, 0.0f);
-        }
-        else
-        {
-            AudioComp->Stop();
+            AmbienceAudioComponent->SetSound(ProfileSound);
+            AmbienceAudioComponent->Play();
+            UE_LOG(LogTemp, Warning, TEXT("AudioSystemManager: Environment profile %s activated"), *ProfileName);
         }
     }
-    
-    AudioLayers[Layer].bIsActive = false;
-    AudioLayers[Layer].CurrentSound = nullptr;
-    
-    UE_LOG(LogTemp, Log, TEXT("Stopped sound on layer %d"), (int32)Layer);
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("AudioSystemManager: Environment profile %s not found"), *ProfileName);
+    }
 }
 
-void UAudioSystemManager::SetConsciousnessState(EConsciousnessState NewState)
+void UAudioSystemManager::ApplyConsciousnessFilter(float Intensity)
 {
-    if (CurrentConsciousnessState == NewState)
+    ConsciousnessFilterIntensity = FMath::Clamp(Intensity, 0.0f, 1.0f);
+    
+    UE_LOG(LogTemp, Warning, TEXT("AudioSystemManager: Applying consciousness filter with intensity %f"), 
+           ConsciousnessFilterIntensity);
+
+    // Apply ethereal audio processing effects
+    // This would typically involve audio DSP effects, reverb, filtering
+    // For now, we'll adjust volume and apply some basic effects
+    
+    float FilteredVolume = FMath::Lerp(1.0f, 0.7f, ConsciousnessFilterIntensity);
+    
+    if (MusicAudioComponent)
     {
-        return;
+        MusicAudioComponent->SetVolumeMultiplier(FilteredVolume * 0.7f * MasterVolumeLevel);
     }
-    
-    CurrentConsciousnessState = NewState;
-    TargetConsciousnessState = NewState;
-    bIsTransitioning = false;
-    TransitionProgress = 1.0f;
-    
-    // Apply consciousness audio profile immediately
-    if (ConsciousnessProfiles.Contains(NewState))
-    {
-        ApplyConsciousnessAudioProfile(ConsciousnessProfiles[NewState], 1.0f);
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Consciousness state changed to: %d"), (int32)NewState);
 }
 
-void UAudioSystemManager::TransitionToConsciousnessState(EConsciousnessState NewState, float TransitionTime)
+void UAudioSystemManager::PlayNarrationVoice(const FString& NarrationKey, bool bInterruptCurrent)
 {
-    if (CurrentConsciousnessState == NewState)
-    {
-        return;
-    }
-    
-    TargetConsciousnessState = NewState;
-    TransitionDuration = FMath::Max(TransitionTime, 0.1f);
-    TransitionProgress = 0.0f;
-    bIsTransitioning = true;
-    
-    UE_LOG(LogTemp, Warning, TEXT("Starting consciousness transition from %d to %d over %f seconds"), 
-           (int32)CurrentConsciousnessState, (int32)NewState, TransitionTime);
-}
+    UE_LOG(LogTemp, Warning, TEXT("AudioSystemManager: Playing narration voice: %s"), *NarrationKey);
 
-void UAudioSystemManager::SetMetaSoundParameter(EAudioLayer Layer, FName ParameterName, float Value)
-{
-    if (!ActiveMetaSounds.Contains(Layer) || !ActiveMetaSounds[Layer])
+    if (bInterruptCurrent && NarrationAudioComponent && NarrationAudioComponent->IsPlaying())
     {
-        UE_LOG(LogTemp, Warning, TEXT("No MetaSound active on layer %d"), (int32)Layer);
-        return;
+        NarrationAudioComponent->Stop();
     }
-    
-    // MetaSound parameter setting would be implemented here
-    // This requires UE5's MetaSound API which may vary by version
-    UE_LOG(LogTemp, Log, TEXT("Setting MetaSound parameter %s to %f on layer %d"), 
-           *ParameterName.ToString(), Value, (int32)Layer);
-}
 
-void UAudioSystemManager::TriggerMetaSoundEvent(EAudioLayer Layer, FName EventName)
-{
-    if (!ActiveMetaSounds.Contains(Layer) || !ActiveMetaSounds[Layer])
+    if (NarrationVoices.Contains(NarrationKey))
     {
-        UE_LOG(LogTemp, Warning, TEXT("No MetaSound active on layer %d"), (int32)Layer);
-        return;
-    }
-    
-    // MetaSound event triggering would be implemented here
-    UE_LOG(LogTemp, Log, TEXT("Triggering MetaSound event %s on layer %d"), 
-           *EventName.ToString(), (int32)Layer);
-}
-
-void UAudioSystemManager::UpdateListenerPosition(FVector Position, FRotator Rotation)
-{
-    if (UWorld* World = GetWorld())
-    {
-        if (APlayerController* PC = World->GetFirstPlayerController())
+        USoundBase* NarrationSound = NarrationVoices[NarrationKey];
+        if (NarrationSound && NarrationAudioComponent)
         {
-            if (APawn* Pawn = PC->GetPawn())
-            {
-                // Update 3D audio listener position
-                UGameplayStatics::SetGlobalListenerFocusParameters(World, 0.0f, Position, Rotation.Vector());
-            }
+            NarrationAudioComponent->SetSound(NarrationSound);
+            NarrationAudioComponent->Play();
+            UE_LOG(LogTemp, Warning, TEXT("AudioSystemManager: Narration %s started"), *NarrationKey);
         }
     }
-}
-
-void UAudioSystemManager::RegisterSpatialAudioSource(AActor* SourceActor, USoundCue* Sound, float MaxDistance)
-{
-    if (!SourceActor || !Sound)
+    else
     {
-        return;
-    }
-    
-    // Create audio component on the source actor
-    UAudioComponent* SpatialAudioComp = UGameplayStatics::SpawnSoundAttached(
-        Sound, SourceActor->GetRootComponent(), NAME_None, FVector::ZeroVector, 
-        EAttachLocation::KeepRelativeOffset, false, 1.0f, 1.0f, 0.0f, nullptr, nullptr, true
-    );
-    
-    if (SpatialAudioComp)
-    {
-        SpatialAudioComp->SetIntParameter(FName("MaxDistance"), MaxDistance);
-        UE_LOG(LogTemp, Log, TEXT("Registered spatial audio source: %s"), *SourceActor->GetName());
+        UE_LOG(LogTemp, Warning, TEXT("AudioSystemManager: Narration key %s not found"), *NarrationKey);
     }
 }
 
-void UAudioSystemManager::SetEnvironmentalReverb(float ReverbAmount, float DecayTime)
+void UAudioSystemManager::TriggerAncientWisdomWhisper(FVector Location)
 {
-    // Environmental reverb implementation
-    // This would typically involve setting reverb submix parameters
-    UE_LOG(LogTemp, Log, TEXT("Setting environmental reverb: Amount=%f, Decay=%f"), ReverbAmount, DecayTime);
+    UE_LOG(LogTemp, Warning, TEXT("AudioSystemManager: Triggering ancient wisdom whisper"));
+
+    if (SpiritualWhisperSound)
+    {
+        PlaySoundAtLocation(SpiritualWhisperSound, Location, 0.8f);
+        
+        // Apply temporary consciousness filter for ethereal effect
+        float PreviousIntensity = ConsciousnessFilterIntensity;
+        ApplyConsciousnessFilter(0.9f);
+        
+        // TODO: Set timer to restore previous filter intensity after whisper ends
+    }
 }
 
-void UAudioSystemManager::UpdateWeatherAudio(float WindIntensity, float RainIntensity, float ThunderProbability)
+void UAudioSystemManager::UpdateAdaptiveMusic(float DeltaTime)
 {
-    // Weather audio updates - would modify MetaSound parameters for weather layers
-    UE_LOG(LogTemp, Log, TEXT("Weather audio update: Wind=%f, Rain=%f, Thunder=%f"), 
-           WindIntensity, RainIntensity, ThunderProbability);
+    // Adaptive music logic based on consciousness level and game state
+    // Music becomes more ethereal and complex as consciousness increases
+    
+    if (MusicAudioComponent)
+    {
+        // Adjust music parameters based on consciousness level
+        float ConsciousnessVolume = FMath::Lerp(0.3f, 0.8f, CurrentConsciousnessLevel);
+        float BaseVolume = 0.7f * MasterVolumeLevel * ConsciousnessVolume;
+        
+        MusicAudioComponent->SetVolumeMultiplier(BaseVolume);
+    }
 }
 
-void UAudioSystemManager::UpdateConsciousnessTransition(float DeltaTime)
+void UAudioSystemManager::ProcessConsciousnessAudio()
+{
+    // Process consciousness-based audio effects
+    // Higher consciousness = more ethereal, spiritual audio processing
+    
+    if (ConsciousnessFilterIntensity > 0.0f)
+    {
+        // Gradually reduce filter intensity over time for natural decay
+        ConsciousnessFilterIntensity = FMath::Max(0.0f, ConsciousnessFilterIntensity - 0.1f * GetWorld()->GetDeltaSeconds());
+    }
+}
+
+void UAudioSystemManager::HandleAudioTransitions()
 {
     if (!bIsTransitioning)
     {
         return;
     }
-    
-    TransitionProgress += DeltaTime / TransitionDuration;
-    
-    if (TransitionProgress >= 1.0f)
-    {
-        // Transition complete
-        TransitionProgress = 1.0f;
-        bIsTransitioning = false;
-        CurrentConsciousnessState = TargetConsciousnessState;
-        
-        UE_LOG(LogTemp, Warning, TEXT("Consciousness transition complete - now in state %d"), (int32)CurrentConsciousnessState);
-    }
-    
-    // Blend between current and target consciousness profiles
-    if (ConsciousnessProfiles.Contains(CurrentConsciousnessState) && ConsciousnessProfiles.Contains(TargetConsciousnessState))
-    {
-        float BlendAlpha = FMath::SmoothStep(0.0f, 1.0f, TransitionProgress);
-        
-        // Apply blended consciousness profile
-        const FConsciousnessAudioProfile& CurrentProfile = ConsciousnessProfiles[CurrentConsciousnessState];
-        const FConsciousnessAudioProfile& TargetProfile = ConsciousnessProfiles[TargetConsciousnessState];
-        
-        // Blend reverb wetness
-        float BlendedReverb = FMath::Lerp(CurrentProfile.ReverbWetness, TargetProfile.ReverbWetness, BlendAlpha);
-        SetEnvironmentalReverb(BlendedReverb, 2.0f);
-    }
-}
 
-void UAudioSystemManager::ApplyConsciousnessAudioProfile(const FConsciousnessAudioProfile& Profile, float BlendWeight)
-{
-    // Apply reverb settings
-    SetEnvironmentalReverb(Profile.ReverbWetness * BlendWeight, 2.0f);
+    MusicTransitionTimer += GetWorld()->GetDeltaSeconds();
     
-    // Apply MetaSound assignments
-    if (Profile.AmbienceMetaSound)
+    // Check if we're halfway through transition (time to start new music)
+    if (MusicTransitionTimer >= PendingFadeTime * 0.5f && !PendingMusicState.IsEmpty())
     {
-        ActiveMetaSounds[EAudioLayer::Ambience] = Profile.AmbienceMetaSound;
-    }
-    
-    if (Profile.MusicMetaSound)
-    {
-        ActiveMetaSounds[EAudioLayer::Music] = Profile.MusicMetaSound;
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("Applied consciousness audio profile with blend weight %f"), BlendWeight);
-}
-
-void UAudioSystemManager::InitializeAudioComponents()
-{
-    AActor* Owner = GetOwner();
-    if (!Owner)
-    {
-        UE_LOG(LogTemp, Error, TEXT("Cannot initialize audio components - no owner actor"));
-        return;
-    }
-    
-    // Create audio components for each layer
-    for (auto& LayerPair : AudioLayers)
-    {
-        EAudioLayer Layer = LayerPair.Key;
+        CurrentMusicState = PendingMusicState;
         
-        UAudioComponent* AudioComp = NewObject<UAudioComponent>(Owner);
-        if (AudioComp)
+        // Look for the new music state in our asset map
+        if (MusicStates.Contains(CurrentMusicState))
         {
-            AudioComp->AttachToComponent(Owner->GetRootComponent(), 
-                FAttachmentTransformRules::KeepRelativeTransform);
-            AudioComp->SetVolumeMultiplier(LayerPair.Value.Volume);
-            AudioComp->RegisterComponent();
-            
-            AudioComponents.Add(Layer, AudioComp);
-            
-            UE_LOG(LogTemp, Log, TEXT("Created audio component for layer %d"), (int32)Layer);
+            USoundBase* NewMusic = MusicStates[CurrentMusicState];
+            if (NewMusic && MusicAudioComponent)
+            {
+                MusicAudioComponent->SetSound(NewMusic);
+                MusicAudioComponent->FadeIn(PendingFadeTime * 0.5f, 0.7f * MasterVolumeLevel);
+                UE_LOG(LogTemp, Warning, TEXT("AudioSystemManager: Started new music state: %s"), *CurrentMusicState);
+            }
         }
+        
+        PendingMusicState = "";
     }
-}
-
-void UAudioSystemManager::SetupDefaultConsciousnessProfiles()
-{
-    // Awakening State - Minimal, mysterious
-    FConsciousnessAudioProfile AwakeningProfile;
-    AwakeningProfile.ReverbWetness = 0.2f;
-    AwakeningProfile.LowPassFilter = 0.7f;
-    AwakeningProfile.SpatialBlend = 0.3f;
-    ConsciousnessProfiles.Add(EConsciousnessState::Awakening, AwakeningProfile);
     
-    // Grounded State - Natural, present
-    FConsciousnessAudioProfile GroundedProfile;
-    GroundedProfile.ReverbWetness = 0.4f;
-    GroundedProfile.LowPassFilter = 1.0f;
-    GroundedProfile.SpatialBlend = 0.6f;
-    ConsciousnessProfiles.Add(EConsciousnessState::Grounded, GroundedProfile);
-    
-    // Elevated State - Expanded, flowing
-    FConsciousnessAudioProfile ElevatedProfile;
-    ElevatedProfile.ReverbWetness = 0.6f;
-    ElevatedProfile.LowPassFilter = 1.0f;
-    ElevatedProfile.SpatialBlend = 0.8f;
-    ConsciousnessProfiles.Add(EConsciousnessState::Elevated, ElevatedProfile);
-    
-    // Transcendent State - Ethereal, boundless
-    FConsciousnessAudioProfile TranscendentProfile;
-    TranscendentProfile.ReverbWetness = 0.8f;
-    TranscendentProfile.LowPassFilter = 0.9f;
-    TranscendentProfile.SpatialBlend = 1.0f;
-    ConsciousnessProfiles.Add(EConsciousnessState::Transcendent, TranscendentProfile);
-    
-    // Unity State - Infinite, unified
-    FConsciousnessAudioProfile UnityProfile;
-    UnityProfile.ReverbWetness = 1.0f;
-    UnityProfile.LowPassFilter = 0.8f;
-    UnityProfile.SpatialBlend = 1.0f;
-    ConsciousnessProfiles.Add(EConsciousnessState::Unity, UnityProfile);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Default consciousness audio profiles configured"));
-}
-
-FAudioDevice* UAudioSystemManager::GetAudioDevice() const
-{
-    if (UWorld* World = GetWorld())
+    // Check if transition is complete
+    if (MusicTransitionTimer >= PendingFadeTime)
     {
-        return World->GetAudioDeviceRaw();
+        bIsTransitioning = false;
+        MusicTransitionTimer = 0.0f;
+        UE_LOG(LogTemp, Warning, TEXT("AudioSystemManager: Music transition complete"));
     }
-    return nullptr;
-}
-
-void UAudioSystemManager::UpdateAudioMixerSettings()
-{
-    // Continuous audio mixer updates based on current state
-    // This would be called every tick to maintain smooth audio transitions
 }
