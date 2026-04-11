@@ -1,25 +1,24 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "UObject/NoExportTypes.h"
-#include "Engine/World.h"
+#include "Engine/Engine.h"
 #include "Components/ActorComponent.h"
 #include "Animation/AnimInstance.h"
-#include "Animation/BlendSpace.h"
 #include "Animation/AnimMontage.h"
+#include "Animation/BlendSpace.h"
 #include "PoseSearch/PoseSearchDatabase.h"
 #include "AnimationSystemManager.generated.h"
 
 class UMotionMatchingComponent;
 class UFootIKComponent;
-class UAnimationBlueprint;
+class UCharacterMovementComponent;
 
 /**
- * Central manager for all animation systems in the Transpersonal Game
- * Coordinates Motion Matching, IK systems, and procedural animations
- * Based on RDR2's character-specific movement philosophy
+ * Core animation system manager for Transpersonal Game
+ * Handles Motion Matching, procedural IK, and character animation coordination
+ * Based on RDR2-style character movement with prehistoric authenticity
  */
-UCLASS(BlueprintType, Blueprintable, meta = (DisplayName = "Animation System Manager"))
+UCLASS(BlueprintType, Blueprintable, ClassGroup=(Animation))
 class TRANSPERSONALGAME_API UAnimationSystemManager : public UActorComponent
 {
     GENERATED_BODY()
@@ -32,134 +31,145 @@ protected:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 public:
-    // Core Animation Systems
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Systems")
-    class UMotionMatchingComponent* MotionMatchingComponent;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Systems")
-    class UFootIKComponent* FootIKComponent;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Systems")
-    class UProceduralAnimationComponent* ProceduralAnimComponent;
-
-    // Animation Assets
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
+    // Motion Matching System
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
     class UPoseSearchDatabase* LocomotionDatabase;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
-    class UBlendSpace* LocomotionBlendSpace;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    class UPoseSearchDatabase* CombatDatabase;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
-    TArray<class UAnimMontage*> CombatMontages;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    class UPoseSearchDatabase* InteractionDatabase;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
-    TArray<class UAnimMontage*> InteractionMontages;
+    // IK System Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK System")
+    bool bEnableFootIK = true;
 
-    // Character Movement State
-    UPROPERTY(BlueprintReadOnly, Category = "Movement State")
-    float CurrentSpeed;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK System")
+    bool bEnableHandIK = true;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Movement State")
-    float MovementDirection;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK System")
+    float FootIKRange = 50.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Movement State")
-    bool bIsInCombat;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK System")
+    float HandIKRange = 30.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Movement State")
-    bool bIsInteracting;
+    // Animation State Management
+    UPROPERTY(BlueprintReadOnly, Category = "Animation State")
+    bool bIsInCombat = false;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Movement State")
-    FVector GroundNormal;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation State")
+    bool bIsClimbing = false;
 
-    // Animation Configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    float MotionMatchingBlendTime;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation State")
+    bool bIsSwimming = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    float FootIKInterpSpeed;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation State")
+    bool bIsCrouching = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    float TerrainAdaptationStrength;
-
-    // Character Personality Settings (RDR2 inspired)
+    // Character Personality Traits (affects animation style)
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Personality")
-    float WalkingCadence; // How rhythmic the walk is
+    float ConfidenceLevel = 0.5f; // 0.0 = timid, 1.0 = confident
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Personality")
-    float PosturalTension; // How tense/relaxed the character appears
+    float AgilityLevel = 0.5f; // 0.0 = clumsy, 1.0 = graceful
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Personality")
-    float MovementWeight; // How heavy/light the character feels
+    float StrengthLevel = 0.5f; // 0.0 = weak, 1.0 = powerful
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Personality")
-    float GestureFrequency; // How often idle gestures occur
+    // Animation Blending
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Blending")
+    float BlendInTime = 0.2f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Blending")
+    float BlendOutTime = 0.2f;
 
 public:
     // Core Animation Functions
     UFUNCTION(BlueprintCallable, Category = "Animation System")
-    void InitializeAnimationSystems();
+    void InitializeAnimationSystem();
 
     UFUNCTION(BlueprintCallable, Category = "Animation System")
-    void UpdateMovementState(float Speed, float Direction, const FVector& Normal);
-
-    UFUNCTION(BlueprintCallable, Category = "Animation System")
-    void SetCombatMode(bool bInCombat);
-
-    UFUNCTION(BlueprintCallable, Category = "Animation System")
-    void TriggerInteraction(const FString& InteractionType);
+    void UpdateAnimationState(float DeltaTime);
 
     // Motion Matching Functions
     UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    void UpdateMotionMatchingSearch();
+    void SetMotionMatchingDatabase(class UPoseSearchDatabase* Database);
 
     UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    void SetLocomotionDatabase(class UPoseSearchDatabase* NewDatabase);
+    FVector GetDesiredVelocity() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    float GetMovementSpeed() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    FVector GetMovementDirection() const;
 
     // IK System Functions
     UFUNCTION(BlueprintCallable, Category = "IK System")
     void UpdateFootIK(float DeltaTime);
 
     UFUNCTION(BlueprintCallable, Category = "IK System")
-    void EnableFootIK(bool bEnable);
+    void UpdateHandIK(float DeltaTime);
 
-    // Procedural Animation Functions
-    UFUNCTION(BlueprintCallable, Category = "Procedural Animation")
-    void UpdateProceduralBreathing(float DeltaTime);
+    UFUNCTION(BlueprintCallable, Category = "IK System")
+    FVector GetFootIKOffset(bool bIsLeftFoot) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Procedural Animation")
-    void UpdateProceduralLookAt(const FVector& TargetLocation);
+    UFUNCTION(BlueprintCallable, Category = "IK System")
+    FVector GetHandIKOffset(bool bIsLeftHand) const;
+
+    // Animation State Functions
+    UFUNCTION(BlueprintCallable, Category = "Animation State")
+    void SetCombatMode(bool bInCombat);
+
+    UFUNCTION(BlueprintCallable, Category = "Animation State")
+    void SetClimbingMode(bool bClimbing);
+
+    UFUNCTION(BlueprintCallable, Category = "Animation State")
+    void SetSwimmingMode(bool bSwimming);
+
+    UFUNCTION(BlueprintCallable, Category = "Animation State")
+    void SetCrouchingMode(bool bCrouching);
 
     // Character Personality Functions
     UFUNCTION(BlueprintCallable, Category = "Character Personality")
-    void SetCharacterPersonality(float Cadence, float Tension, float Weight, float GestureFreq);
+    void SetCharacterPersonality(float Confidence, float Agility, float Strength);
 
     UFUNCTION(BlueprintCallable, Category = "Character Personality")
-    void ApplyPersonalityToAnimation();
+    float GetPersonalityBlendWeight(const FString& AnimationType) const;
 
-    // Terrain Adaptation
-    UFUNCTION(BlueprintCallable, Category = "Terrain Adaptation")
-    void UpdateTerrainAdaptation(const FVector& SurfaceNormal, float SurfaceAngle);
+    // Utility Functions
+    UFUNCTION(BlueprintCallable, Category = "Animation System")
+    class UAnimInstance* GetAnimInstance() const;
 
-    // Debug Functions
-    UFUNCTION(BlueprintCallable, Category = "Debug")
-    void DebugDrawAnimationState();
+    UFUNCTION(BlueprintCallable, Category = "Animation System")
+    class USkeletalMeshComponent* GetSkeletalMeshComponent() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Debug")
-    void LogAnimationPerformance();
+    UFUNCTION(BlueprintCallable, Category = "Animation System")
+    class UCharacterMovementComponent* GetCharacterMovement() const;
 
 private:
     // Internal state tracking
+    FVector LastVelocity;
+    FVector LastPosition;
     float LastUpdateTime;
-    FVector PreviousLocation;
-    FRotator PreviousRotation;
-    
-    // Performance tracking
-    float MotionMatchingCost;
-    float IKUpdateCost;
-    float ProceduralAnimCost;
+
+    // Component references
+    UPROPERTY()
+    class UMotionMatchingComponent* MotionMatchingComponent;
+
+    UPROPERTY()
+    class UFootIKComponent* FootIKComponent;
+
+    UPROPERTY()
+    class USkeletalMeshComponent* SkeletalMeshComponent;
+
+    UPROPERTY()
+    class UCharacterMovementComponent* CharacterMovementComponent;
 
     // Internal helper functions
-    void CalculateMovementMetrics();
-    void UpdateAnimationBlending(float DeltaTime);
-    void OptimizePerformance();
+    void CacheComponentReferences();
+    void UpdateMovementData(float DeltaTime);
+    float CalculatePersonalityInfluence(const FString& AnimationType) const;
+    void ValidateAnimationDatabases();
 };
