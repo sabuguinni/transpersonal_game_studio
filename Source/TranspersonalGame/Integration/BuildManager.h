@@ -2,39 +2,27 @@
 
 #include "CoreMinimal.h"
 #include "Engine/Engine.h"
-#include "Modules/ModuleManager.h"
-#include "HAL/PlatformFilemanager.h"
-#include "Misc/DateTime.h"
+#include "Subsystems/GameInstanceSubsystem.h"
 #include "BuildManager.generated.h"
 
 UENUM(BlueprintType)
 enum class EBuildStatus : uint8
 {
-    Unknown,
-    Compiling,
-    Success,
-    Failed,
-    Warning
+    Unknown         UMETA(DisplayName = "Unknown"),
+    Stable          UMETA(DisplayName = "Stable"),
+    Unstable        UMETA(DisplayName = "Unstable"),
+    Broken          UMETA(DisplayName = "Broken"),
+    Testing         UMETA(DisplayName = "Testing")
 };
 
 UENUM(BlueprintType)
-enum class EModuleType : uint8
+enum class EModuleStatus : uint8
 {
-    Core,
-    Physics,
-    AI,
-    Animation,
-    Audio,
-    Environment,
-    Lighting,
-    Characters,
-    Combat,
-    Crowd,
-    Narrative,
-    Quest,
-    VFX,
-    Performance,
-    Integration
+    NotLoaded       UMETA(DisplayName = "Not Loaded"),
+    Loading         UMETA(DisplayName = "Loading"),
+    Loaded          UMETA(DisplayName = "Loaded"),
+    Failed          UMETA(DisplayName = "Failed"),
+    Integrated      UMETA(DisplayName = "Integrated")
 };
 
 USTRUCT(BlueprintType)
@@ -42,33 +30,31 @@ struct TRANSPERSONALGAME_API FModuleInfo
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly)
+    UPROPERTY(BlueprintReadOnly, Category = "Module")
     FString ModuleName;
 
-    UPROPERTY(BlueprintReadOnly)
-    EModuleType ModuleType;
+    UPROPERTY(BlueprintReadOnly, Category = "Module")
+    EModuleStatus Status;
 
-    UPROPERTY(BlueprintReadOnly)
-    EBuildStatus BuildStatus;
+    UPROPERTY(BlueprintReadOnly, Category = "Module")
+    FDateTime LastUpdate;
 
-    UPROPERTY(BlueprintReadOnly)
-    FDateTime LastCompileTime;
+    UPROPERTY(BlueprintReadOnly, Category = "Module")
+    int32 IssueCount;
 
-    UPROPERTY(BlueprintReadOnly)
+    UPROPERTY(BlueprintReadOnly, Category = "Module")
+    bool bDependenciesMet;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Module")
     TArray<FString> Dependencies;
-
-    UPROPERTY(BlueprintReadOnly)
-    TArray<FString> CompileErrors;
-
-    UPROPERTY(BlueprintReadOnly)
-    TArray<FString> CompileWarnings;
 
     FModuleInfo()
     {
         ModuleName = TEXT("");
-        ModuleType = EModuleType::Core;
-        BuildStatus = EBuildStatus::Unknown;
-        LastCompileTime = FDateTime::Now();
+        Status = EModuleStatus::NotLoaded;
+        LastUpdate = FDateTime::Now();
+        IssueCount = 0;
+        bDependenciesMet = false;
     }
 };
 
@@ -77,162 +63,162 @@ struct TRANSPERSONALGAME_API FBuildReport
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly)
-    FDateTime BuildTime;
+    UPROPERTY(BlueprintReadOnly, Category = "Build")
+    FString BuildId;
 
-    UPROPERTY(BlueprintReadOnly)
-    EBuildStatus OverallStatus;
+    UPROPERTY(BlueprintReadOnly, Category = "Build")
+    EBuildStatus Status;
 
-    UPROPERTY(BlueprintReadOnly)
-    TArray<FModuleInfo> ModuleReports;
+    UPROPERTY(BlueprintReadOnly, Category = "Build")
+    FDateTime Timestamp;
 
-    UPROPERTY(BlueprintReadOnly)
-    int32 TotalErrors;
+    UPROPERTY(BlueprintReadOnly, Category = "Build")
+    int32 TestsPassed;
 
-    UPROPERTY(BlueprintReadOnly)
-    int32 TotalWarnings;
+    UPROPERTY(BlueprintReadOnly, Category = "Build")
+    int32 TestsFailed;
 
-    UPROPERTY(BlueprintReadOnly)
-    float CompileTimeSeconds;
+    UPROPERTY(BlueprintReadOnly, Category = "Build")
+    TArray<FString> CriticalIssues;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Build")
+    TArray<FString> Warnings;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Build")
+    float IntegrationHealthPercentage;
 
     FBuildReport()
     {
-        BuildTime = FDateTime::Now();
-        OverallStatus = EBuildStatus::Unknown;
-        TotalErrors = 0;
-        TotalWarnings = 0;
-        CompileTimeSeconds = 0.0f;
+        BuildId = TEXT("");
+        Status = EBuildStatus::Unknown;
+        Timestamp = FDateTime::Now();
+        TestsPassed = 0;
+        TestsFailed = 0;
+        IntegrationHealthPercentage = 0.0f;
     }
 };
 
 /**
- * BuildManager - Handles compilation, dependency tracking, and build verification
- * for the Transpersonal Game project. This is the core integration system that
- * ensures all modules compile correctly and dependencies are resolved.
+ * Build Manager - Handles integration, compilation, and build verification
+ * Responsible for coordinating all 18 agent outputs into a coherent build
  */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UBuildManager : public UObject
+class TRANSPERSONALGAME_API UBuildManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
     UBuildManager();
 
-    // Core build functions
-    UFUNCTION(BlueprintCallable, Category = "Build Manager")
-    bool StartFullBuild();
-
-    UFUNCTION(BlueprintCallable, Category = "Build Manager")
-    bool CompileModule(const FString& ModuleName);
-
-    UFUNCTION(BlueprintCallable, Category = "Build Manager")
-    bool VerifyDependencies();
-
-    UFUNCTION(BlueprintCallable, Category = "Build Manager")
-    FBuildReport GetLastBuildReport() const { return LastBuildReport; }
-
-    // Module management
-    UFUNCTION(BlueprintCallable, Category = "Build Manager")
-    void RegisterModule(const FString& ModuleName, EModuleType ModuleType, const TArray<FString>& Dependencies);
-
-    UFUNCTION(BlueprintCallable, Category = "Build Manager")
-    bool IsModuleLoaded(const FString& ModuleName);
-
-    UFUNCTION(BlueprintCallable, Category = "Build Manager")
-    TArray<FModuleInfo> GetAllModules() const { return RegisteredModules; }
-
-    // Error handling
-    UFUNCTION(BlueprintCallable, Category = "Build Manager")
-    TArray<FString> GetCompileErrors() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Build Manager")
-    TArray<FString> GetCompileWarnings() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Build Manager")
-    void ClearBuildCache();
-
-    // Build verification
-    UFUNCTION(BlueprintCallable, Category = "Build Manager")
-    bool VerifyBuildIntegrity();
-
-    UFUNCTION(BlueprintCallable, Category = "Build Manager")
-    bool CheckForDuplicateFiles();
-
-    UFUNCTION(BlueprintCallable, Category = "Build Manager")
-    bool ValidateIncludePaths();
-
-    // Utility functions
-    UFUNCTION(BlueprintCallable, Category = "Build Manager")
-    void LogBuildStatus();
-
-    UFUNCTION(BlueprintCallable, Category = "Build Manager")
-    void ExportBuildReport(const FString& FilePath);
-
-protected:
-    // Internal build functions
-    bool CompileModuleInternal(const FString& ModuleName);
-    bool CheckModuleDependencies(const FString& ModuleName);
-    void UpdateModuleStatus(const FString& ModuleName, EBuildStatus Status);
-    void ScanForSourceFiles();
-    void ValidateModuleStructure();
-
-    // Error collection
-    void CollectCompileErrors();
-    void CollectCompileWarnings();
-    void ParseBuildOutput(const FString& BuildOutput);
-
-private:
-    UPROPERTY()
-    TArray<FModuleInfo> RegisteredModules;
-
-    UPROPERTY()
-    FBuildReport LastBuildReport;
-
-    UPROPERTY()
-    TArray<FString> SourceFilePaths;
-
-    UPROPERTY()
-    TArray<FString> HeaderFilePaths;
-
-    UPROPERTY()
-    bool bBuildInProgress;
-
-    UPROPERTY()
-    FDateTime BuildStartTime;
-
-    // Module dependency graph
-    TMap<FString, TArray<FString>> ModuleDependencies;
-    TMap<FString, EBuildStatus> ModuleStatusCache;
-
-    // Build configuration
-    FString ProjectPath;
-    FString SourcePath;
-    FString BuildPath;
-
-    // Error tracking
-    TArray<FString> CurrentErrors;
-    TArray<FString> CurrentWarnings;
-};
-
-/**
- * Build Manager Subsystem - Singleton access to build management
- */
-UCLASS()
-class TRANSPERSONALGAME_API UBuildManagerSubsystem : public UEngineSubsystem
-{
-    GENERATED_BODY()
-
-public:
+    // Subsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    UFUNCTION(BlueprintCallable, Category = "Build Manager")
-    static UBuildManagerSubsystem* Get();
+    // Build Management
+    UFUNCTION(BlueprintCallable, Category = "Build Management")
+    void StartBuildVerification(const FString& BuildId);
 
-    UFUNCTION(BlueprintCallable, Category = "Build Manager")
-    UBuildManager* GetBuildManager() const { return BuildManager; }
+    UFUNCTION(BlueprintCallable, Category = "Build Management")
+    void RunCompilationTest();
+
+    UFUNCTION(BlueprintCallable, Category = "Build Management")
+    void CreateBuildReport();
+
+    UFUNCTION(BlueprintCallable, Category = "Build Management")
+    EBuildStatus GetCurrentBuildStatus() const { return CurrentBuildStatus; }
+
+    UFUNCTION(BlueprintCallable, Category = "Build Management")
+    FBuildReport GetLatestBuildReport() const { return LatestBuildReport; }
+
+    // Module Management
+    UFUNCTION(BlueprintCallable, Category = "Module Management")
+    void RegisterModule(const FString& ModuleName, const TArray<FString>& Dependencies);
+
+    UFUNCTION(BlueprintCallable, Category = "Module Management")
+    void UpdateModuleStatus(const FString& ModuleName, EModuleStatus NewStatus);
+
+    UFUNCTION(BlueprintCallable, Category = "Module Management")
+    FModuleInfo GetModuleInfo(const FString& ModuleName) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Module Management")
+    TArray<FModuleInfo> GetAllModules() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Module Management")
+    bool AreAllDependenciesMet(const FString& ModuleName) const;
+
+    // Integration Testing
+    UFUNCTION(BlueprintCallable, Category = "Integration Testing")
+    void RunIntegrationTests();
+
+    UFUNCTION(BlueprintCallable, Category = "Integration Testing")
+    void TestModuleCompatibility(const FString& ModuleA, const FString& ModuleB);
+
+    UFUNCTION(BlueprintCallable, Category = "Integration Testing")
+    void ValidateSystemIntegration();
+
+    // Performance Validation
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void RunPerformanceTests();
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    bool ValidateFrameRate(float TargetFPS);
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    bool ValidateMemoryUsage(int32 MaxMemoryMB);
+
+    // Build History
+    UFUNCTION(BlueprintCallable, Category = "Build History")
+    void SaveBuildSnapshot(const FString& BuildId);
+
+    UFUNCTION(BlueprintCallable, Category = "Build History")
+    void RollbackToBuild(const FString& BuildId);
+
+    UFUNCTION(BlueprintCallable, Category = "Build History")
+    TArray<FString> GetBuildHistory() const;
+
+    // Events
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBuildStatusChanged, EBuildStatus, NewStatus);
+    UPROPERTY(BlueprintAssignable, Category = "Events")
+    FOnBuildStatusChanged OnBuildStatusChanged;
+
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnModuleStatusChanged, const FModuleInfo&, ModuleInfo);
+    UPROPERTY(BlueprintAssignable, Category = "Events")
+    FOnModuleStatusChanged OnModuleStatusChanged;
+
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBuildReportGenerated, const FBuildReport&, Report);
+    UPROPERTY(BlueprintAssignable, Category = "Events")
+    FOnBuildReportGenerated OnBuildReportGenerated;
 
 protected:
+    // Internal state
     UPROPERTY()
-    UBuildManager* BuildManager;
+    EBuildStatus CurrentBuildStatus;
+
+    UPROPERTY()
+    FBuildReport LatestBuildReport;
+
+    UPROPERTY()
+    TMap<FString, FModuleInfo> RegisteredModules;
+
+    UPROPERTY()
+    TArray<FString> BuildHistory;
+
+    UPROPERTY()
+    FString CurrentBuildId;
+
+    // Internal methods
+    void InitializeDefaultModules();
+    void CheckModuleDependencies();
+    void UpdateBuildStatus(EBuildStatus NewStatus);
+    void LogBuildEvent(const FString& Event);
+    bool TestBasicFunctionality();
+    bool TestAssetSystem();
+    bool TestLevelSystem();
+    float CalculateIntegrationHealth();
+
+    // Module definitions for all 18 agents
+    static const TArray<FString> CoreModules;
+    static const TArray<FString> GameplayModules;
+    static const TArray<FString> ContentModules;
+    static const TArray<FString> QualityModules;
 };
