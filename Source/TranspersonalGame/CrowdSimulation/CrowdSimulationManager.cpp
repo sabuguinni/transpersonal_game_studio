@@ -1,1 +1,392 @@
-#include \"CrowdSimulationManager.h\"\n#include \"Engine/World.h\"\n#include \"GameFramework/Pawn.h\"\n#include \"Kismet/GameplayStatics.h\"\n#include \"MassEntitySubsystem.h\"\n#include \"MassSpawnerSubsystem.h\"\n#include \"MassSimulationSubsystem.h\"\n\nACrowdSimulationManager::ACrowdSimulationManager()\n{\n    PrimaryActorTick.bCanEverTick = true;\n    PrimaryActorTick.TickInterval = 0.1f; // 10Hz update for performance\n    \n    // Initialize default crowd configurations\n    FCrowdSpawnParameters HerbivoreConfig;\n    HerbivoreConfig.CrowdType = ECrowdType::HerbivoreHerd;\n    HerbivoreConfig.MinGroupSize = 8;\n    HerbivoreConfig.MaxGroupSize = 25;\n    HerbivoreConfig.SpawnRadius = 2000.0f;\n    HerbivoreConfig.GroupCohesionRadius = 800.0f;\n    HerbivoreConfig.PlayerDetectionRange = 1200.0f;\n    HerbivoreConfig.FleeDistance = 2500.0f;\n    CrowdConfigurations.Add(HerbivoreConfig);\n    \n    FCrowdSpawnParameters PredatorConfig;\n    PredatorConfig.CrowdType = ECrowdType::PredatorPack;\n    PredatorConfig.MinGroupSize = 3;\n    PredatorConfig.MaxGroupSize = 8;\n    PredatorConfig.SpawnRadius = 3000.0f;\n    PredatorConfig.GroupCohesionRadius = 600.0f;\n    PredatorConfig.PlayerDetectionRange = 2000.0f;\n    PredatorConfig.FleeDistance = 1500.0f;\n    CrowdConfigurations.Add(PredatorConfig);\n}\n\nvoid ACrowdSimulationManager::BeginPlay()\n{\n    Super::BeginPlay();\n    \n    InitializeMassEntitySystem();\n    \n    // Find player pawn\n    PlayerPawn = UGameplayStatics::GetPlayerPawn(this, 0);\n    if (PlayerPawn)\n    {\n        LastKnownPlayerPosition = PlayerPawn->GetActorLocation();\n    }\n    \n    UE_LOG(LogTemp, Warning, TEXT(\"CrowdSimulationManager: Initialized with %d crowd configurations\"), CrowdConfigurations.Num());\n}\n\nvoid ACrowdSimulationManager::Tick(float DeltaTime)\n{\n    Super::Tick(DeltaTime);\n    \n    if (!MassEntitySubsystem || !MassSimulationSubsystem)\n    {\n        return;\n    }\n    \n    UpdateCrowdBehaviors(DeltaTime);\n    ProcessPlayerInteractions(DeltaTime);\n    ManageLODSystem(DeltaTime);\n    UpdateEcosystemDynamics(DeltaTime);\n}\n\nvoid ACrowdSimulationManager::InitializeMassEntitySystem()\n{\n    UWorld* World = GetWorld();\n    if (!World)\n    {\n        UE_LOG(LogTemp, Error, TEXT(\"CrowdSimulationManager: No valid world found\"));\n        return;\n    }\n    \n    MassEntitySubsystem = World->GetSubsystem<UMassEntitySubsystem>();\n    MassSpawnerSubsystem = World->GetSubsystem<UMassSpawnerSubsystem>();\n    MassSimulationSubsystem = World->GetSubsystem<UMassSimulationSubsystem>();\n    \n    if (!MassEntitySubsystem || !MassSpawnerSubsystem || !MassSimulationSubsystem)\n    {\n        UE_LOG(LogTemp, Error, TEXT(\"CrowdSimulationManager: Failed to initialize Mass Entity subsystems\"));\n        return;\n    }\n    \n    UE_LOG(LogTemp, Warning, TEXT(\"CrowdSimulationManager: Mass Entity subsystems initialized successfully\"));\n}\n\nvoid ACrowdSimulationManager::SpawnCrowdGroup(const FCrowdSpawnParameters& Parameters, const FVector& Location)\n{\n    if (!MassSpawnerSubsystem)\n    {\n        UE_LOG(LogTemp, Error, TEXT(\"CrowdSimulationManager: Cannot spawn crowd - MassSpawnerSubsystem not available\"));\n        return;\n    }\n    \n    int32 GroupSize = FMath::RandRange(Parameters.MinGroupSize, Parameters.MaxGroupSize);\n    int32 NewGroupID = ActiveCrowdGroups.Num();\n    \n    // Store group information\n    ActiveCrowdGroups.Add(NewGroupID);\n    GroupBehaviorStates.Add(NewGroupID, ECrowdBehaviorState::Grazing);\n    GroupCenterLocations.Add(NewGroupID, Location);\n    \n    UE_LOG(LogTemp, Warning, TEXT(\"CrowdSimulationManager: Spawned crowd group %d with %d agents at location %s\"), \n           NewGroupID, GroupSize, *Location.ToString());\n}\n\nvoid ACrowdSimulationManager::DespawnCrowdGroup(int32 GroupID)\n{\n    if (ActiveCrowdGroups.Contains(GroupID))\n    {\n        ActiveCrowdGroups.Remove(GroupID);\n        GroupBehaviorStates.Remove(GroupID);\n        GroupCenterLocations.Remove(GroupID);\n        \n        UE_LOG(LogTemp, Warning, TEXT(\"CrowdSimulationManager: Despawned crowd group %d\"), GroupID);\n    }\n}\n\nvoid ACrowdSimulationManager::SetPlayerThreatLevel(float NewThreatLevel)\n{\n    PlayerThreatLevel = FMath::Clamp(NewThreatLevel, 0.0f, 10.0f);\n    UE_LOG(LogTemp, Log, TEXT(\"CrowdSimulationManager: Player threat level set to %f\"), PlayerThreatLevel);\n}\n\nvoid ACrowdSimulationManager::TriggerMassFleeResponse(const FVector& ThreatLocation, float ThreatRadius)\n{\n    for (auto& GroupPair : GroupCenterLocations)\n    {\n        int32 GroupID = GroupPair.Key;\n        FVector GroupLocation = GroupPair.Value;\n        \n        float DistanceToThreat = FVector::Dist(GroupLocation, ThreatLocation);\n        if (DistanceToThreat <= ThreatRadius)\n        {\n            GroupBehaviorStates[GroupID] = ECrowdBehaviorState::Fleeing;\n            UE_LOG(LogTemp, Warning, TEXT(\"CrowdSimulationManager: Group %d entering flee state due to threat\"), GroupID);\n        }\n    }\n}\n\nTArray<FVector> ACrowdSimulationManager::GetNearbyHerdLocations(const FVector& QueryLocation, float Radius)\n{\n    TArray<FVector> NearbyLocations;\n    \n    for (const auto& GroupPair : GroupCenterLocations)\n    {\n        FVector GroupLocation = GroupPair.Value;\n        float Distance = FVector::Dist(QueryLocation, GroupLocation);\n        \n        if (Distance <= Radius)\n        {\n            NearbyLocations.Add(GroupLocation);\n        }\n    }\n    \n    return NearbyLocations;\n}\n\nvoid ACrowdSimulationManager::UpdateCrowdBehaviors(float DeltaTime)\n{\n    // Update behavior states based on ecosystem conditions\n    for (auto& BehaviorPair : GroupBehaviorStates)\n    {\n        int32 GroupID = BehaviorPair.Key;\n        ECrowdBehaviorState& CurrentState = BehaviorPair.Value;\n        \n        // Simple state machine - can be expanded\n        switch (CurrentState)\n        {\n        case ECrowdBehaviorState::Fleeing:\n            // Transition back to grazing after some time\n            if (FMath::RandRange(0.0f, 1.0f) < 0.01f) // 1% chance per tick\n            {\n                CurrentState = ECrowdBehaviorState::Grazing;\n            }\n            break;\n            \n        case ECrowdBehaviorState::Grazing:\n            // Occasionally transition to migrating\n            if (FMath::RandRange(0.0f, 1.0f) < 0.005f) // 0.5% chance per tick\n            {\n                CurrentState = ECrowdBehaviorState::Migrating;\n            }\n            break;\n            \n        default:\n            break;\n        }\n    }\n}\n\nvoid ACrowdSimulationManager::ProcessPlayerInteractions(float DeltaTime)\n{\n    if (!PlayerPawn)\n    {\n        return;\n    }\n    \n    FVector CurrentPlayerPosition = PlayerPawn->GetActorLocation();\n    float PlayerMovementSpeed = FVector::Dist(CurrentPlayerPosition, LastKnownPlayerPosition) / DeltaTime;\n    \n    // Update player position tracking\n    LastKnownPlayerPosition = CurrentPlayerPosition;\n    LastPlayerPositionUpdate += DeltaTime;\n    \n    // Check player influence on nearby groups\n    for (auto& GroupPair : GroupCenterLocations)\n    {\n        int32 GroupID = GroupPair.Key;\n        FVector GroupLocation = GroupPair.Value;\n        \n        float DistanceToPlayer = FVector::Dist(GroupLocation, CurrentPlayerPosition);\n        \n        if (DistanceToPlayer <= PlayerInfluenceRadius)\n        {\n            // Player is close - adjust behavior based on threat level and movement\n            if (PlayerMovementSpeed > 500.0f || PlayerThreatLevel > 3.0f)\n            {\n                GroupBehaviorStates[GroupID] = ECrowdBehaviorState::AlertToPlayer;\n            }\n            \n            if (DistanceToPlayer <= PlayerInfluenceRadius * 0.5f && PlayerThreatLevel > 5.0f)\n            {\n                GroupBehaviorStates[GroupID] = ECrowdBehaviorState::PanickedByPlayer;\n            }\n        }\n    }\n}\n\nvoid ACrowdSimulationManager::ManageLODSystem(float DeltaTime)\n{\n    if (!PlayerPawn)\n    {\n        return;\n    }\n    \n    FVector PlayerLocation = PlayerPawn->GetActorLocation();\n    \n    // Simple LOD management based on distance to player\n    for (const auto& GroupPair : GroupCenterLocations)\n    {\n        int32 GroupID = GroupPair.Key;\n        FVector GroupLocation = GroupPair.Value;\n        float DistanceToPlayer = FVector::Dist(GroupLocation, PlayerLocation);\n        \n        // Determine LOD level\n        int32 LODLevel = 0;\n        if (DistanceToPlayer > LODDistance3)\n        {\n            LODLevel = 3; // Minimal simulation\n        }\n        else if (DistanceToPlayer > LODDistance2)\n        {\n            LODLevel = 2; // Reduced simulation\n        }\n        else if (DistanceToPlayer > LODDistance1)\n        {\n            LODLevel = 1; // Standard simulation\n        }\n        // LODLevel 0 = Full simulation (default)\n    }\n}\n\nvoid ACrowdSimulationManager::UpdateEcosystemDynamics(float DeltaTime)\n{\n    // Simple ecosystem interactions\n    // Predators hunt herbivores, herbivores flee from predators, etc.\n    \n    TArray<int32> HerbivoreGroups;\n    TArray<int32> PredatorGroups;\n    \n    // Categorize groups by type (would need to store this information)\n    for (int32 GroupID : ActiveCrowdGroups)\n    {\n        // This is simplified - in reality we'd store the crowd type per group\n        if (GroupID % 2 == 0)\n        {\n            HerbivoreGroups.Add(GroupID);\n        }\n        else\n        {\n            PredatorGroups.Add(GroupID);\n        }\n    }\n    \n    // Simple predator-prey interactions\n    for (int32 PredatorID : PredatorGroups)\n    {\n        FVector PredatorLocation = GroupCenterLocations[PredatorID];\n        \n        for (int32 HerbivoreID : HerbivoreGroups)\n        {\n            FVector HerbivoreLocation = GroupCenterLocations[HerbivoreID];\n            float Distance = FVector::Dist(PredatorLocation, HerbivoreLocation);\n            \n            if (Distance <= 1500.0f) // Predator detection range\n            {\n                GroupBehaviorStates[HerbivoreID] = ECrowdBehaviorState::Fleeing;\n                GroupBehaviorStates[PredatorID] = ECrowdBehaviorState::Hunting;\n            }\n        }\n    }\n}
+#include "CrowdSimulationManager.h"
+#include "Engine/Engine.h"
+#include "Engine/World.h"
+#include "GameFramework/PlayerController.h"
+#include "GameFramework/Pawn.h"
+#include "Kismet/GameplayStatics.h"
+#include "DrawDebugHelpers.h"
+#include "TimerManager.h"
+
+ACrowdSimulationManager::ACrowdSimulationManager()
+{
+    PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.bStartWithTickEnabled = true;
+    
+    // Create root component
+    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootScene"));
+    RootComponent = RootSceneComponent;
+    
+    // Initialize default values
+    MaxCrowdAgents = 10000;
+    CrowdDensityMultiplier = 1.0f;
+    bEnableDynamicDensity = true;
+    bEnableEmergencyBehavior = true;
+    
+    HighDetailDistance = 1000.0f;
+    MediumDetailDistance = 3000.0f;
+    LowDetailDistance = 8000.0f;
+    
+    SpawnInterval = 5.0f;
+    AgentsPerSpawn = 10;
+    
+    // Initialize runtime values
+    CurrentActiveAgents = 0;
+    CurrentFrameTime = 0.0f;
+    HighDetailAgents = 0;
+    MediumDetailAgents = 0;
+    LowDetailAgents = 0;
+    
+    LastSpawnTime = 0.0f;
+    LastPerformanceCheck = 0.0f;
+    PerformanceCheckInterval = 1.0f;
+    
+    bEmergencyActive = false;
+    CurrentEmergencyType = ECrowdEmergencyType::None;
+    EmergencyRadius = 0.0f;
+    EmergencyStartTime = 0.0f;
+    
+    GridCellSize = 1000.0f;
+}
+
+void ACrowdSimulationManager::BeginPlay()
+{
+    Super::BeginPlay();
+    
+    UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationManager: Starting crowd simulation system"));
+    
+    // Initialize agent pool
+    AgentPool.Reserve(MaxCrowdAgents);
+    ActiveAgents.Reserve(MaxCrowdAgents);
+    
+    // Auto-find spawn points if none assigned
+    if (SpawnPoints.Num() == 0)
+    {
+        TArray<AActor*> FoundSpawnPoints;
+        UGameplayStatics::GetAllActorsOfClass(GetWorld(), ACrowdSpawnPoint::StaticClass(), FoundSpawnPoints);
+        
+        for (AActor* Actor : FoundSpawnPoints)
+        {
+            if (ACrowdSpawnPoint* SpawnPoint = Cast<ACrowdSpawnPoint>(Actor))
+            {
+                SpawnPoints.Add(SpawnPoint);
+            }
+        }
+        
+        UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationManager: Found %d spawn points"), SpawnPoints.Num());
+    }
+    
+    // Start simulation
+    StartCrowdSimulation();
+}
+
+void ACrowdSimulationManager::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+    StopCrowdSimulation();
+    Super::EndPlay(EndPlayReason);
+}
+
+void ACrowdSimulationManager::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+    
+    CurrentFrameTime = DeltaTime;
+    
+    // Performance monitoring
+    if (GetWorld()->GetTimeSeconds() - LastPerformanceCheck >= PerformanceCheckInterval)
+    {
+        OptimizePerformance();
+        LastPerformanceCheck = GetWorld()->GetTimeSeconds();
+    }
+    
+    // Update spatial grid
+    UpdateSpatialGrid();
+    
+    // Process emergency behavior
+    if (bEmergencyActive && bEnableEmergencyBehavior)
+    {
+        ProcessEmergencyBehavior(DeltaTime);
+    }
+    
+    // Spawn new agents
+    if (GetWorld()->GetTimeSeconds() - LastSpawnTime >= SpawnInterval)
+    {
+        for (ACrowdSpawnPoint* SpawnPoint : SpawnPoints)
+        {
+            if (SpawnPoint && SpawnPoint->IsActive())
+            {
+                int32 SpawnCount = FMath::Min(AgentsPerSpawn, MaxCrowdAgents - CurrentActiveAgents);
+                if (SpawnCount > 0)
+                {
+                    SpawnAgentsAtPoint(SpawnPoint, SpawnCount);
+                }
+            }
+        }
+        LastSpawnTime = GetWorld()->GetTimeSeconds();
+    }
+    
+    // Update agent LODs based on distance to player
+    APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
+    if (PC && PC->GetPawn())
+    {
+        FVector PlayerLocation = PC->GetPawn()->GetActorLocation();
+        
+        HighDetailAgents = 0;
+        MediumDetailAgents = 0;
+        LowDetailAgents = 0;
+        
+        for (FCrowdAgent& Agent : ActiveAgents)
+        {
+            float DistanceToPlayer = FVector::Dist(Agent.Location, PlayerLocation);
+            UpdateAgentLOD(Agent, DistanceToPlayer);
+        }
+    }
+    
+    // Update density tracking
+    float CurrentDensity = GetCurrentDensity();
+    OnCrowdDensityChanged.Broadcast(CurrentDensity, 1.0f);
+}
+
+void ACrowdSimulationManager::StartCrowdSimulation()
+{
+    UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationManager: Starting crowd simulation"));
+    SetActorTickEnabled(true);
+    
+    // Initialize first wave of agents
+    for (ACrowdSpawnPoint* SpawnPoint : SpawnPoints)
+    {
+        if (SpawnPoint && SpawnPoint->IsActive())
+        {
+            SpawnAgentsAtPoint(SpawnPoint, AgentsPerSpawn);
+        }
+    }
+}
+
+void ACrowdSimulationManager::StopCrowdSimulation()
+{
+    UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationManager: Stopping crowd simulation"));
+    SetActorTickEnabled(false);
+    
+    // Clear all agents
+    ActiveAgents.Empty();
+    CurrentActiveAgents = 0;
+    
+    // Clear emergency state
+    ClearEmergencyEvent();
+}
+
+void ACrowdSimulationManager::PauseCrowdSimulation()
+{
+    SetActorTickEnabled(!IsActorTickEnabled());
+    UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationManager: Simulation %s"), 
+           IsActorTickEnabled() ? TEXT("Resumed") : TEXT("Paused"));
+}
+
+void ACrowdSimulationManager::SetCrowdDensity(float NewDensity)
+{
+    CrowdDensityMultiplier = FMath::Clamp(NewDensity, 0.1f, 5.0f);
+    UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationManager: Density set to %.2f"), CrowdDensityMultiplier);
+}
+
+void ACrowdSimulationManager::TriggerEmergencyEvent(ECrowdEmergencyType EventType, FVector Location, float Radius)
+{
+    bEmergencyActive = true;
+    CurrentEmergencyType = EventType;
+    EmergencyLocation = Location;
+    EmergencyRadius = Radius;
+    EmergencyStartTime = GetWorld()->GetTimeSeconds();
+    
+    UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationManager: Emergency event triggered at %s"), 
+           *Location.ToString());
+    
+    OnCrowdEmergencyEvent.Broadcast(EventType);
+}
+
+void ACrowdSimulationManager::ClearEmergencyEvent()
+{
+    if (bEmergencyActive)
+    {
+        bEmergencyActive = false;
+        CurrentEmergencyType = ECrowdEmergencyType::None;
+        EmergencyRadius = 0.0f;
+        
+        UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationManager: Emergency event cleared"));
+    }
+}
+
+int32 ACrowdSimulationManager::GetAgentsInRadius(FVector Center, float Radius) const
+{
+    int32 Count = 0;
+    float RadiusSquared = Radius * Radius;
+    
+    for (const FCrowdAgent& Agent : ActiveAgents)
+    {
+        if (FVector::DistSquared(Agent.Location, Center) <= RadiusSquared)
+        {
+            Count++;
+        }
+    }
+    
+    return Count;
+}
+
+float ACrowdSimulationManager::GetCrowdDensityAtLocation(FVector Location, float SampleRadius) const
+{
+    int32 AgentsInArea = GetAgentsInRadius(Location, SampleRadius);
+    float AreaSize = PI * SampleRadius * SampleRadius;
+    return AgentsInArea / AreaSize * 10000.0f; // Agents per 10,000 square units
+}
+
+TArray<FVector> ACrowdSimulationManager::GetHighTrafficAreas() const
+{
+    TArray<FVector> HighTrafficAreas;
+    
+    // Sample grid points across the level
+    for (const auto& GridCell : SpatialGrid)
+    {
+        if (GridCell.Value.Num() > 20) // Threshold for "high traffic"
+        {
+            FVector CellCenter = FVector(GridCell.Key) * GridCellSize;
+            HighTrafficAreas.Add(CellCenter);
+        }
+    }
+    
+    return HighTrafficAreas;
+}
+
+void ACrowdSimulationManager::SpawnAgentsAtPoint(ACrowdSpawnPoint* SpawnPoint, int32 Count)
+{
+    if (!SpawnPoint || CurrentActiveAgents >= MaxCrowdAgents)
+    {
+        return;
+    }
+    
+    for (int32 i = 0; i < Count && CurrentActiveAgents < MaxCrowdAgents; i++)
+    {
+        FCrowdAgent NewAgent;
+        NewAgent.AgentID = ActiveAgents.Num();
+        NewAgent.Location = SpawnPoint->GetRandomSpawnLocation();
+        NewAgent.Velocity = FVector::ZeroVector;
+        NewAgent.TargetLocation = SpawnPoint->GetRandomDestination();
+        NewAgent.BehaviorState = ECrowdBehaviorState::Walking;
+        NewAgent.LODLevel = ECrowdLODLevel::High;
+        NewAgent.LastUpdateTime = GetWorld()->GetTimeSeconds();
+        NewAgent.SpawnTime = GetWorld()->GetTimeSeconds();
+        
+        ActiveAgents.Add(NewAgent);
+        CurrentActiveAgents++;
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: Spawned %d agents at %s"), 
+           Count, *SpawnPoint->GetName());
+}
+
+void ACrowdSimulationManager::UpdateAgentLOD(FCrowdAgent& Agent, float DistanceToPlayer)
+{
+    ECrowdLODLevel NewLOD;
+    
+    if (DistanceToPlayer <= HighDetailDistance)
+    {
+        NewLOD = ECrowdLODLevel::High;
+        HighDetailAgents++;
+    }
+    else if (DistanceToPlayer <= MediumDetailDistance)
+    {
+        NewLOD = ECrowdLODLevel::Medium;
+        MediumDetailAgents++;
+    }
+    else if (DistanceToPlayer <= LowDetailDistance)
+    {
+        NewLOD = ECrowdLODLevel::Low;
+        LowDetailAgents++;
+    }
+    else
+    {
+        NewLOD = ECrowdLODLevel::Culled;
+    }
+    
+    Agent.LODLevel = NewLOD;
+}
+
+void ACrowdSimulationManager::UpdateSpatialGrid()
+{
+    SpatialGrid.Empty();
+    
+    for (int32 i = 0; i < ActiveAgents.Num(); i++)
+    {
+        const FCrowdAgent& Agent = ActiveAgents[i];
+        FIntVector GridCoord = FIntVector(
+            FMath::FloorToInt(Agent.Location.X / GridCellSize),
+            FMath::FloorToInt(Agent.Location.Y / GridCellSize),
+            FMath::FloorToInt(Agent.Location.Z / GridCellSize)
+        );
+        
+        SpatialGrid.FindOrAdd(GridCoord).Add(i);
+    }
+}
+
+void ACrowdSimulationManager::ProcessEmergencyBehavior(float DeltaTime)
+{
+    float EmergencyDuration = GetWorld()->GetTimeSeconds() - EmergencyStartTime;
+    
+    // Auto-clear emergency after 30 seconds
+    if (EmergencyDuration > 30.0f)
+    {
+        ClearEmergencyEvent();
+        return;
+    }
+    
+    // Update agent behaviors based on emergency
+    for (FCrowdAgent& Agent : ActiveAgents)
+    {
+        float DistanceToEmergency = FVector::Dist(Agent.Location, EmergencyLocation);
+        
+        if (DistanceToEmergency <= EmergencyRadius)
+        {
+            switch (CurrentEmergencyType)
+            {
+                case ECrowdEmergencyType::Fire:
+                case ECrowdEmergencyType::Predator:
+                    Agent.BehaviorState = ECrowdBehaviorState::Fleeing;
+                    // Set target away from emergency
+                    Agent.TargetLocation = Agent.Location + (Agent.Location - EmergencyLocation).GetSafeNormal() * 2000.0f;
+                    break;
+                    
+                case ECrowdEmergencyType::Curiosity:
+                    Agent.BehaviorState = ECrowdBehaviorState::Investigating;
+                    // Move towards emergency (but not too close)
+                    Agent.TargetLocation = EmergencyLocation + FMath::VRand() * 500.0f;
+                    break;
+            }
+        }
+    }
+}
+
+void ACrowdSimulationManager::OptimizePerformance()
+{
+    // Remove agents that are too far from player or have been active too long
+    APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
+    if (!PC || !PC->GetPawn())
+    {
+        return;
+    }
+    
+    FVector PlayerLocation = PC->GetPawn()->GetActorLocation();
+    float MaxDistance = LowDetailDistance * 1.5f;
+    float MaxLifetime = 300.0f; // 5 minutes
+    
+    for (int32 i = ActiveAgents.Num() - 1; i >= 0; i--)
+    {
+        const FCrowdAgent& Agent = ActiveAgents[i];
+        float DistanceToPlayer = FVector::Dist(Agent.Location, PlayerLocation);
+        float Lifetime = GetWorld()->GetTimeSeconds() - Agent.SpawnTime;
+        
+        if (DistanceToPlayer > MaxDistance || Lifetime > MaxLifetime)
+        {
+            ActiveAgents.RemoveAt(i);
+            CurrentActiveAgents--;
+        }
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationManager: Performance optimization - %d active agents"), 
+           CurrentActiveAgents);
+}
