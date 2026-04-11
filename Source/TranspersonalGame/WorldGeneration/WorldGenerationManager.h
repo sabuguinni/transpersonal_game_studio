@@ -1,207 +1,196 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "GameFramework/Actor.h"
 #include "Engine/World.h"
-#include "Components/ActorComponent.h"
-#include "Engine/DataAsset.h"
+#include "PCGComponent.h"
+#include "PCGGraph.h"
+#include "WorldPartition/WorldPartition.h"
 #include "WorldGenerationManager.generated.h"
 
-class UPCGComponent;
-class ALandscape;
-class AWaterBody;
-class UWorldPartitionSubsystem;
-
-/**
- * Biome types for the prehistoric world
- */
 UENUM(BlueprintType)
 enum class EBiomeType : uint8
 {
-    DenseJungle         UMETA(DisplayName = "Dense Jungle"),
-    OpenPlains          UMETA(DisplayName = "Open Plains"),
-    RiverDelta          UMETA(DisplayName = "River Delta"),
-    RockyOutcrops       UMETA(DisplayName = "Rocky Outcrops"),
-    Swamplands          UMETA(DisplayName = "Swamplands"),
-    CoastalRegion       UMETA(DisplayName = "Coastal Region")
+    Savanna     UMETA(DisplayName = "Savanna"),
+    Forest      UMETA(DisplayName = "Forest"),
+    Desert      UMETA(DisplayName = "Desert"),
+    Wetlands    UMETA(DisplayName = "Wetlands"),
+    Mountains   UMETA(DisplayName = "Mountains"),
+    Coastline   UMETA(DisplayName = "Coastline")
 };
 
-/**
- * Terrain density levels for performance optimization
- */
-UENUM(BlueprintType)
-enum class ETerrainDensity : uint8
-{
-    Low                 UMETA(DisplayName = "Low Density"),
-    Medium              UMETA(DisplayName = "Medium Density"),
-    High                UMETA(DisplayName = "High Density"),
-    Ultra               UMETA(DisplayName = "Ultra Density")
-};
-
-/**
- * Biome configuration data asset
- */
-UCLASS(BlueprintType)
-class TRANSPERSONALGAME_API UBiomeDataAsset : public UDataAsset
-{
-    GENERATED_BODY()
-
-public:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    EBiomeType BiomeType;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FString BiomeName;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vegetation")
-    TArray<TSoftObjectPtr<UStaticMesh>> VegetationMeshes;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vegetation")
-    float VegetationDensity = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
-    float TerrainRoughness = 0.5f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
-    float ElevationVariance = 100.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water")
-    bool bHasWaterFeatures = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water")
-    float WaterCoverage = 0.0f;
-};
-
-/**
- * World generation configuration
- */
 USTRUCT(BlueprintType)
-struct FWorldGenerationConfig
+struct TRANSPERSONALGAME_API FBiomeParameters
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Size")
-    int32 WorldSizeX = 8129;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    EBiomeType BiomeType = EBiomeType::Savanna;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Size")
-    int32 WorldSizeY = 8129;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    float Density = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    ETerrainDensity TerrainDensity = ETerrainDensity::Medium;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    float Scale = 100.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxComponentsPerGrid = 1024;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    float HeightVariation = 50.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biomes")
-    TArray<UBiomeDataAsset*> AvailableBiomes;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    FVector2D TemperatureRange = FVector2D(15.0f, 35.0f);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rivers")
-    int32 MaxRiverSystems = 3;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    FVector2D HumidityRange = FVector2D(0.3f, 0.8f);
+};
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rivers")
-    float RiverWidth = 500.0f;
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FTerrainGenerationSettings
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
+    FIntPoint TerrainSize = FIntPoint(4096, 4096);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
+    float HeightScale = 100.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
+    float NoiseScale = 0.01f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
+    int32 Octaves = 6;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
+    float Persistence = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
+    float Lacunarity = 2.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
+    TArray<FBiomeParameters> BiomeSettings;
 };
 
 /**
- * Main world generation manager component
- * Handles procedural generation of terrain, biomes, and water systems
+ * World Generation Manager - Core system for procedural world generation
+ * Handles terrain generation, biome distribution, and world streaming
  */
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UWorldGenerationManager : public UActorComponent
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API AWorldGenerationManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UWorldGenerationManager();
+    AWorldGenerationManager();
 
 protected:
     virtual void BeginPlay() override;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    virtual void Tick(float DeltaTime) override;
 
-    // World Generation Functions
+    // Core Generation Functions
     UFUNCTION(BlueprintCallable, Category = "World Generation")
-    void GenerateWorld();
-
-    UFUNCTION(BlueprintCallable, Category = "World Generation")
-    void GenerateTerrain();
+    void InitializeWorldGeneration();
 
     UFUNCTION(BlueprintCallable, Category = "World Generation")
-    void GenerateBiomes();
+    void GenerateTerrainChunk(const FIntPoint& ChunkCoordinates);
 
     UFUNCTION(BlueprintCallable, Category = "World Generation")
-    void GenerateRiverSystems();
+    void GenerateBiomeDistribution();
 
     UFUNCTION(BlueprintCallable, Category = "World Generation")
-    void GenerateVegetation();
+    EBiomeType GetBiomeAtLocation(const FVector& WorldLocation) const;
+
+    UFUNCTION(BlueprintCallable, Category = "World Generation")
+    float GetHeightAtLocation(const FVector& WorldLocation) const;
+
+    // PCG Integration
+    UFUNCTION(BlueprintCallable, Category = "PCG")
+    void SetupPCGGraphs();
+
+    UFUNCTION(BlueprintCallable, Category = "PCG")
+    void ExecutePCGGeneration(const FIntPoint& ChunkCoordinates);
+
+    // World Partition Integration
+    UFUNCTION(BlueprintCallable, Category = "World Partition")
+    void InitializeWorldPartition();
+
+    UFUNCTION(BlueprintCallable, Category = "World Partition")
+    void LoadWorldPartitionCell(const FIntPoint& CellCoordinates);
+
+    UFUNCTION(BlueprintCallable, Category = "World Partition")
+    void UnloadWorldPartitionCell(const FIntPoint& CellCoordinates);
+
+    // Biome System
+    UFUNCTION(BlueprintCallable, Category = "Biomes")
+    void RegisterBiome(EBiomeType BiomeType, const FBiomeParameters& Parameters);
+
+    UFUNCTION(BlueprintCallable, Category = "Biomes")
+    FBiomeParameters GetBiomeParameters(EBiomeType BiomeType) const;
 
     // Utility Functions
-    UFUNCTION(BlueprintCallable, Category = "World Generation")
-    EBiomeType GetBiomeAtLocation(FVector WorldLocation);
+    UFUNCTION(BlueprintCallable, Category = "Utilities")
+    FVector WorldToChunkCoordinates(const FVector& WorldLocation) const;
 
-    UFUNCTION(BlueprintCallable, Category = "World Generation")
-    float GetTerrainHeightAtLocation(FVector WorldLocation);
-
-    UFUNCTION(BlueprintCallable, Category = "World Generation")
-    bool IsLocationNearWater(FVector WorldLocation, float SearchRadius = 1000.0f);
-
-    // Performance Monitoring
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    int32 GetActiveComponentCount();
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    float GetGenerationProgress();
+    UFUNCTION(BlueprintCallable, Category = "Utilities")
+    FVector ChunkToWorldCoordinates(const FIntPoint& ChunkCoordinates) const;
 
 protected:
-    // Configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    FWorldGenerationConfig WorldConfig;
+    // Core Components
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class USceneComponent* RootSceneComponent;
 
-    // PCG Components
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PCG")
-    TObjectPtr<UPCGComponent> TerrainPCGComponent;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class UPCGComponent* TerrainPCGComponent;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PCG")
-    TObjectPtr<UPCGComponent> BiomePCGComponent;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class UPCGComponent* BiomePCGComponent;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PCG")
-    TObjectPtr<UPCGComponent> VegetationPCGComponent;
+    // Generation Settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation Settings")
+    FTerrainGenerationSettings TerrainSettings;
 
-    // Landscape Reference
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Landscape")
-    TObjectPtr<ALandscape> GeneratedLandscape;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation Settings")
+    float ChunkSize = 1000.0f;
 
-    // Water System References
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Water")
-    TArray<TObjectPtr<AWaterBody>> GeneratedWaterBodies;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation Settings")
+    int32 MaxActiveChunks = 25;
 
-    // Generation State
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "State")
-    bool bIsGenerating;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation Settings")
+    float GenerationRadius = 2000.0f;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "State")
-    float GenerationProgress;
+    // PCG Assets
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG Assets")
+    TSoftObjectPtr<UPCGGraph> TerrainPCGGraph;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "State")
-    int32 CurrentGenerationStep;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG Assets")
+    TSoftObjectPtr<UPCGGraph> BiomePCGGraph;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "State")
-    int32 TotalGenerationSteps;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG Assets")
+    TSoftObjectPtr<UPCGGraph> VegetationPCGGraph;
+
+    // Runtime Data
+    UPROPERTY(BlueprintReadOnly, Category = "Runtime")
+    TMap<FIntPoint, bool> GeneratedChunks;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Runtime")
+    TMap<EBiomeType, FBiomeParameters> BiomeRegistry;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Runtime")
+    bool bIsWorldGenerationInitialized = false;
 
 private:
     // Internal generation functions
-    void InitializePCGComponents();
-    void SetupWorldPartition();
-    void CreateLandscapeActor();
-    void ApplyBiomeDistribution();
-    void GenerateRiverSplines();
-    void PopulateVegetation();
-    void OptimizeForPerformance();
+    void GenerateHeightmapData(const FIntPoint& ChunkCoordinates);
+    void ApplyBiomeInfluence(const FIntPoint& ChunkCoordinates, EBiomeType BiomeType);
+    void CleanupDistantChunks(const FVector& PlayerLocation);
 
-    // Performance tracking
-    int32 ActiveComponentCount;
-    float LastPerformanceCheck;
-    
-    // World Partition
-    UWorldPartitionSubsystem* WorldPartitionSubsystem;
+    // Noise generation
+    float GeneratePerlinNoise(float X, float Y, int32 Octaves, float Persistence, float Scale) const;
+    float SampleBiomeNoise(const FVector& Location) const;
+
+    // World Partition reference
+    UPROPERTY()
+    class UWorldPartition* WorldPartitionRef;
 };
