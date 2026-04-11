@@ -1,462 +1,414 @@
 #include "CombatAIController.h"
-#include "BehaviorTree/BehaviorTreeComponent.h"
+#include "BehaviorTree/BehaviorTree.h"
 #include "BehaviorTree/BlackboardComponent.h"
+#include "BehaviorTree/BehaviorTreeComponent.h"
 #include "Perception/AIPerceptionComponent.h"
 #include "Perception/AISenseConfig_Sight.h"
 #include "Perception/AISenseConfig_Hearing.h"
-#include "Perception/AISenseConfig_Damage.h"
 #include "GameFramework/Pawn.h"
-#include "GameFramework/Character.h"
 #include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
-#include "NavigationSystem.h"
-#include "NavigationPath.h"
 
 ACombatAIController::ACombatAIController()
 {
     PrimaryActorTick.bCanEverTick = true;
 
-    // Initialize Components
+    // Initialize AI Components
     BehaviorTreeComponent = CreateDefaultSubobject<UBehaviorTreeComponent>(TEXT("BehaviorTreeComponent"));
     BlackboardComponent = CreateDefaultSubobject<UBlackboardComponent>(TEXT("BlackboardComponent"));
-    AIPerceptionComponent = CreateDefaultSubobject<UAIPerceptionComponent>(TEXT("AIPerceptionComponent"));
+    PerceptionComponent = CreateDefaultSubobject<UAIPerceptionComponent>(TEXT("PerceptionComponent"));
 
-    // Configure AI Perception - Sight
-    UAISenseConfig_Sight* SightConfig = CreateDefaultSubobject<UAISenseConfig_Sight>(TEXT("SightConfig"));
-    SightConfig->SightRadius = SightRadius;
-    SightConfig->LoseSightRadius = LoseSightRadius;
-    SightConfig->PeripheralVisionAngleDegrees = PeripheralVisionAngleDegrees;
-    SightConfig->SetMaxAge(5.0f);
-    SightConfig->AutoSuccessRangeFromLastSeenLocation = 300.0f;
-    SightConfig->DetectionByAffiliation.bDetectNeutrals = true;
-    SightConfig->DetectionByAffiliation.bDetectFriendlies = false;
-    SightConfig->DetectionByAffiliation.bDetectEnemies = true;
+    // Default values
+    AIType = ECombatAIType::Predator;
+    CurrentState = ECombatAIState::Idle;
+    
+    // Perception defaults
+    SightRadius = 1500.0f;
+    LoseSightRadius = 1600.0f;
+    PeripheralVisionAngleDegrees = 90.0f;
+    HearingRange = 1000.0f;
+    
+    // Combat defaults
+    AttackRange = 200.0f;
+    FlankingDistance = 500.0f;
+    RetreatHealthThreshold = 0.3f;
+    bCanCallForHelp = true;
+    GroupCoordinationRadius = 800.0f;
+    
+    // State tracking
+    CurrentTarget = nullptr;
+    LastKnownTargetLocation = FVector::ZeroVector;
+    TimeSinceLastSawTarget = 0.0f;
+    LastAllyUpdateTime = 0.0f;
+    StateTransitionCooldown = 0.0f;
+    bIsCoordinatingAttack = false;
 
-    // Configure AI Perception - Hearing
-    UAISenseConfig_Hearing* HearingConfig = CreateDefaultSubobject<UAISenseConfig_Hearing>(TEXT("HearingConfig"));
-    HearingConfig->HearingRange = HearingRange;
-    HearingConfig->SetMaxAge(3.0f);
-    HearingConfig->DetectionByAffiliation.bDetectNeutrals = true;
-    HearingConfig->DetectionByAffiliation.bDetectFriendlies = false;
-    HearingConfig->DetectionByAffiliation.bDetectEnemies = true;
-
-    // Configure AI Perception - Damage
-    UAISenseConfig_Damage* DamageConfig = CreateDefaultSubobject<UAISenseConfig_Damage>(TEXT("DamageConfig"));
-    DamageConfig->SetMaxAge(10.0f);
-
-    // Add senses to perception component
-    AIPerceptionComponent->ConfigureSense(*SightConfig);
-    AIPerceptionComponent->ConfigureSense(*HearingConfig);
-    AIPerceptionComponent->ConfigureSense(*DamageConfig);
-    AIPerceptionComponent->SetDominantSense(SightConfig->GetSenseImplementation());
-
-    // Initialize state
-    CurrentCombatState = ECombatState::Idle;
-    StateChangeTimer = 0.0f;
-    LastPlayerSightingTime = 0.0f;
-    TacticalEvaluationTimer = 0.0f;
+    SetupPerception();
 }
 
 void ACombatAIController::BeginPlay()
 {
     Super::BeginPlay();
-
-    // Bind perception events
-    AIPerceptionComponent->OnPerceptionUpdated.AddDynamic(this, &ACombatAIController::OnPerceptionUpdated);
-    AIPerceptionComponent->OnTargetPerceptionUpdated.AddDynamic(this, &ACombatAIController::OnTargetPerceptionUpdated);
-
-    // Cache player reference
-    PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
-
-    // Start behavior tree if assigned
-    if (BehaviorTreeAsset && BlackboardComponent)
+    
+    if (BehaviorTree)
     {
-        RunBehaviorTree(BehaviorTreeAsset);
+        RunBehaviorTree(BehaviorTree);
     }
 }
 
 void ACombatAIController::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
-
-    UpdateCombatMemory(DeltaTime);
     
-    TacticalEvaluationTimer += DeltaTime;
-    if (TacticalEvaluationTimer >= 1.0f) // Evaluate tactics every second
+    TimeSinceLastSawTarget += DeltaTime;
+    StateTransitionCooldown -= DeltaTime;
+    
+    UpdateCombatState();
+    HandleStateTransitions();
+    
+    // Update nearby allies periodically
+    LastAllyUpdateTime += DeltaTime;
+    if (LastAllyUpdateTime >= 2.0f)
     {
-        EvaluateTacticalOptions();
-        TacticalEvaluationTimer = 0.0f;
+        UpdateNearbyAllies();
+        LastAllyUpdateTime = 0.0f;
     }
-
-    UpdateBlackboardValues();
 }
 
 void ACombatAIController::OnPossess(APawn* InPawn)
 {
     Super::OnPossess(InPawn);
-
-    if (BehaviorTreeAsset)
+    
+    if (BlackboardComponent && BehaviorTree)
     {
-        RunBehaviorTree(BehaviorTreeAsset);
+        BlackboardComponent->InitializeBlackboard(*BehaviorTree->BlackboardAsset);
     }
 }
 
-void ACombatAIController::SetCombatState(ECombatState NewState)
+void ACombatAIController::SetupPerception()
 {
-    if (CurrentCombatState != NewState)
-    {
-        ECombatState PreviousState = CurrentCombatState;
-        CurrentCombatState = NewState;
-        StateChangeTimer = 0.0f;
+    if (!PerceptionComponent)
+        return;
 
+    // Setup sight sense
+    UAISenseConfig_Sight* SightConfig = CreateDefaultSubobject<UAISenseConfig_Sight>(TEXT("SightConfig"));
+    SightConfig->SightRadius = SightRadius;
+    SightConfig->LoseSightRadius = LoseSightRadius;
+    SightConfig->PeripheralVisionAngleDegrees = PeripheralVisionAngleDegrees;
+    SightConfig->SetMaxAge(5.0f);
+    SightConfig->AutoSuccessRangeFromLastSeenLocation = 520.0f;
+    SightConfig->DetectionByAffiliation.bDetectNeutrals = true;
+    SightConfig->DetectionByAffiliation.bDetectFriendlies = true;
+    SightConfig->DetectionByAffiliation.bDetectEnemies = true;
+
+    // Setup hearing sense
+    UAISenseConfig_Hearing* HearingConfig = CreateDefaultSubobject<UAISenseConfig_Hearing>(TEXT("HearingConfig"));
+    HearingConfig->HearingRange = HearingRange;
+    HearingConfig->SetMaxAge(3.0f);
+    HearingConfig->DetectionByAffiliation.bDetectNeutrals = true;
+    HearingConfig->DetectionByAffiliation.bDetectFriendlies = true;
+    HearingConfig->DetectionByAffiliation.bDetectEnemies = true;
+
+    PerceptionComponent->ConfigureSense(*SightConfig);
+    PerceptionComponent->ConfigureSense(*HearingConfig);
+    PerceptionComponent->SetDominantSense(SightConfig->GetSenseImplementation());
+
+    // Bind perception events
+    PerceptionComponent->OnPerceptionUpdated.AddDynamic(this, &ACombatAIController::OnPerceptionUpdated);
+    PerceptionComponent->OnTargetPerceptionUpdated.AddDynamic(this, &ACombatAIController::OnTargetSeen);
+}
+
+void ACombatAIController::SetCombatState(ECombatAIState NewState)
+{
+    if (CurrentState != NewState)
+    {
+        CurrentState = NewState;
+        
         // Update blackboard
         if (BlackboardComponent)
         {
-            BlackboardComponent->SetValueAsEnum(TEXT("CombatState"), static_cast<uint8>(NewState));
+            BlackboardComponent->SetValueAsEnum(TEXT("CombatState"), (uint8)NewState);
         }
-
-        // Log state change for debugging
-        UE_LOG(LogTemp, Log, TEXT("Combat AI State changed from %d to %d"), 
-               static_cast<int32>(PreviousState), static_cast<int32>(NewState));
+        
+        UE_LOG(LogTemp, Log, TEXT("Combat AI State changed to: %d"), (int32)NewState);
     }
 }
 
-void ACombatAIController::UpdateThreatLevel(EThreatLevel NewThreatLevel)
+void ACombatAIController::SetTarget(AActor* NewTarget)
 {
-    CombatMemory.CurrentThreatLevel = NewThreatLevel;
+    CurrentTarget = NewTarget;
     
     if (BlackboardComponent)
     {
-        BlackboardComponent->SetValueAsEnum(TEXT("ThreatLevel"), static_cast<uint8>(NewThreatLevel));
+        BlackboardComponent->SetValueAsObject(TEXT("TargetActor"), NewTarget);
+        
+        if (NewTarget)
+        {
+            LastKnownTargetLocation = NewTarget->GetActorLocation();
+            BlackboardComponent->SetValueAsVector(TEXT("TargetLocation"), LastKnownTargetLocation);
+            TimeSinceLastSawTarget = 0.0f;
+        }
     }
 }
 
-void ACombatAIController::RecordPlayerSighting(const FVector& PlayerLocation)
+bool ACombatAIController::CanSeeTarget() const
 {
-    CombatMemory.LastKnownPlayerLocation = PlayerLocation;
-    CombatMemory.TimeSinceLastSighting = 0.0f;
-    LastPlayerSightingTime = GetWorld()->GetTimeSeconds();
-
-    if (BlackboardComponent)
-    {
-        BlackboardComponent->SetValueAsVector(TEXT("LastKnownPlayerLocation"), PlayerLocation);
-        BlackboardComponent->SetValueAsBool(TEXT("HasRecentPlayerSighting"), true);
-    }
-
-    // Escalate threat level based on proximity
-    float DistanceToPlayer = FVector::Dist(GetPawn()->GetActorLocation(), PlayerLocation);
-    if (DistanceToPlayer < AttackRange)
-    {
-        UpdateThreatLevel(EThreatLevel::Critical);
-    }
-    else if (DistanceToPlayer < PreferredCombatDistance)
-    {
-        UpdateThreatLevel(EThreatLevel::High);
-    }
-    else
-    {
-        UpdateThreatLevel(EThreatLevel::Medium);
-    }
-}
-
-void ACombatAIController::RecordFailedAttack()
-{
-    CombatMemory.FailedAttackCount++;
+    if (!CurrentTarget || !PerceptionComponent)
+        return false;
+        
+    FActorPerceptionBlueprintInfo Info;
+    PerceptionComponent->GetActorsPerception(CurrentTarget, Info);
     
-    if (BlackboardComponent)
+    for (const FAIStimulus& Stimulus : Info.LastSensedStimuli)
     {
-        BlackboardComponent->SetValueAsInt(TEXT("FailedAttackCount"), CombatMemory.FailedAttackCount);
+        if (Stimulus.Type == UAISense::GetSenseID<UAISense_Sight>() && Stimulus.WasSuccessfullySensed())
+        {
+            return true;
+        }
     }
+    
+    return false;
+}
+
+bool ACombatAIController::IsInAttackRange() const
+{
+    if (!CurrentTarget || !GetPawn())
+        return false;
+        
+    float Distance = FVector::Dist(GetPawn()->GetActorLocation(), CurrentTarget->GetActorLocation());
+    return Distance <= AttackRange;
+}
+
+FVector ACombatAIController::GetFlankingPosition() const
+{
+    if (!CurrentTarget || !GetPawn())
+        return GetPawn()->GetActorLocation();
+    
+    FVector TargetLocation = CurrentTarget->GetActorLocation();
+    FVector MyLocation = GetPawn()->GetActorLocation();
+    FVector DirectionToTarget = (TargetLocation - MyLocation).GetSafeNormal();
+    
+    // Calculate perpendicular direction for flanking
+    FVector FlankDirection = FVector::CrossProduct(DirectionToTarget, FVector::UpVector).GetSafeNormal();
+    
+    // Randomly choose left or right flank
+    if (FMath::RandBool())
+    {
+        FlankDirection *= -1.0f;
+    }
+    
+    return TargetLocation + (FlankDirection * FlankingDistance);
+}
+
+void ACombatAIController::CallForHelp()
+{
+    if (!bCanCallForHelp)
+        return;
+    
+    for (ACombatAIController* Ally : NearbyAllies)
+    {
+        if (Ally && Ally->CurrentTarget == nullptr)
+        {
+            Ally->SetTarget(CurrentTarget);
+            Ally->SetCombatState(ECombatAIState::Chasing);
+        }
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Combat AI called for help from %d allies"), NearbyAllies.Num());
+}
+
+void ACombatAIController::CoordinateGroupAttack()
+{
+    if (bIsCoordinatingAttack || NearbyAllies.Num() == 0)
+        return;
+    
+    bIsCoordinatingAttack = true;
+    
+    // Assign different roles to allies
+    for (int32 i = 0; i < NearbyAllies.Num(); ++i)
+    {
+        ACombatAIController* Ally = NearbyAllies[i];
+        if (!Ally) continue;
+        
+        switch (i % 3)
+        {
+            case 0:
+                Ally->SetCombatState(ECombatAIState::Attacking);
+                break;
+            case 1:
+                Ally->SetCombatState(ECombatAIState::Flanking);
+                break;
+            case 2:
+                Ally->SetCombatState(ECombatAIState::GroupCoordination);
+                break;
+        }
+    }
+    
+    // Reset coordination flag after delay
+    GetWorld()->GetTimerManager().SetTimer(
+        FTimerHandle(),
+        [this]() { bIsCoordinatingAttack = false; },
+        5.0f,
+        false
+    );
 }
 
 bool ACombatAIController::ShouldRetreat() const
 {
-    return CombatMemory.FailedAttackCount >= MaxFailedAttacksBeforeRetreat ||
-           CombatMemory.CurrentThreatLevel == EThreatLevel::Critical;
-}
-
-bool ACombatAIController::CanSeePlayer() const
-{
-    if (!PlayerPawn || !AIPerceptionComponent)
-    {
-        return false;
-    }
-
-    FActorPerceptionBlueprintInfo Info;
-    AIPerceptionComponent->GetActorsPerception(PlayerPawn, Info);
-    
-    return Info.LastSensedStimuli.Num() > 0 && 
-           Info.LastSensedStimuli[0].WasSuccessfullySensed();
-}
-
-FVector ACombatAIController::CalculateOptimalAttackPosition()
-{
-    if (!PlayerPawn)
-    {
-        return GetPawn()->GetActorLocation();
-    }
-
-    FVector PlayerLocation = PlayerPawn->GetActorLocation();
-    FVector MyLocation = GetPawn()->GetActorLocation();
-    
-    // Calculate position that maintains optimal attack distance
-    FVector DirectionToPlayer = (PlayerLocation - MyLocation).GetSafeNormal();
-    FVector OptimalPosition = PlayerLocation - (DirectionToPlayer * PreferredCombatDistance);
-
-    // Add some randomization to avoid predictable positioning
-    FVector RandomOffset = FVector(
-        FMath::RandRange(-200.0f, 200.0f),
-        FMath::RandRange(-200.0f, 200.0f),
-        0.0f
-    );
-    
-    return OptimalPosition + RandomOffset;
-}
-
-FVector ACombatAIController::CalculateCirclingPosition()
-{
-    if (!PlayerPawn)
-    {
-        return GetPawn()->GetActorLocation();
-    }
-
-    FVector PlayerLocation = PlayerPawn->GetActorLocation();
-    FVector MyLocation = GetPawn()->GetActorLocation();
-    
-    // Calculate perpendicular direction for circling
-    FVector ToPlayer = (PlayerLocation - MyLocation).GetSafeNormal();
-    FVector RightVector = FVector::CrossProduct(ToPlayer, FVector::UpVector);
-    
-    // Alternate circling direction based on time
-    float CircleDirection = FMath::Sin(GetWorld()->GetTimeSeconds() * 0.5f) > 0 ? 1.0f : -1.0f;
-    
-    FVector CirclePosition = PlayerLocation + (RightVector * CirclingRadius * CircleDirection);
-    
-    return CirclePosition;
-}
-
-FVector ACombatAIController::CalculateAmbushPosition()
-{
-    if (!PlayerPawn)
-    {
-        return GetPawn()->GetActorLocation();
-    }
-
-    // Predict where player will be
-    FVector PredictedPlayerPos = PredictPlayerMovement();
-    
-    // Find a position that's hidden but close to predicted path
-    FVector AmbushPos = PredictedPlayerPos + FVector(
-        FMath::RandRange(-400.0f, 400.0f),
-        FMath::RandRange(-400.0f, 400.0f),
-        0.0f
-    );
-
-    return AmbushPos;
-}
-
-bool ACombatAIController::ShouldUseAmbushTactic() const
-{
-    return CombatMemory.CurrentThreatLevel <= EThreatLevel::Medium &&
-           CombatMemory.TimeSinceLastSighting > 2.0f &&
-           CombatMemory.TimeSinceLastSighting < 10.0f;
-}
-
-bool ACombatAIController::ShouldCirclePlayer() const
-{
-    return CombatMemory.CurrentThreatLevel == EThreatLevel::High &&
-           CalculateDistanceToPlayer() > AttackRange &&
-           CalculateDistanceToPlayer() < CirclingRadius * 1.5f;
+    // Check health threshold (would need health component reference)
+    // For now, retreat based on overwhelming enemy numbers
+    return NearbyAllies.Num() < 2 && TimeSinceLastSawTarget > 10.0f;
 }
 
 void ACombatAIController::OnPerceptionUpdated(const TArray<AActor*>& UpdatedActors)
 {
     for (AActor* Actor : UpdatedActors)
     {
-        if (Actor == PlayerPawn)
+        if (Actor && Actor->IsA<APawn>())
         {
-            RecordPlayerSighting(Actor->GetActorLocation());
-            break;
+            // Check if this is a potential target (player or enemy)
+            if (!CurrentTarget)
+            {
+                SetTarget(Actor);
+                SetCombatState(ECombatAIState::Investigating);
+            }
         }
     }
 }
 
-void ACombatAIController::OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus)
+void ACombatAIController::OnTargetSeen(AActor* Actor, FAIStimulus Stimulus)
 {
-    if (Actor == PlayerPawn && Stimulus.WasSuccessfullySensed())
+    if (Stimulus.WasSuccessfullySensed())
     {
-        RecordPlayerSighting(Stimulus.StimulusLocation);
-    }
-}
-
-void ACombatAIController::UpdateCombatMemory(float DeltaTime)
-{
-    CombatMemory.TimeSinceLastSighting += DeltaTime;
-    StateChangeTimer += DeltaTime;
-
-    // Decay threat level over time
-    if (CombatMemory.TimeSinceLastSighting > ThreatEscalationTime)
-    {
-        if (CombatMemory.CurrentThreatLevel > EThreatLevel::None)
+        SetTarget(Actor);
+        LastKnownTargetLocation = Stimulus.StimulusLocation;
+        TimeSinceLastSawTarget = 0.0f;
+        
+        if (BlackboardComponent)
         {
-            EThreatLevel NewLevel = static_cast<EThreatLevel>(
-                static_cast<int32>(CombatMemory.CurrentThreatLevel) - 1
-            );
-            UpdateThreatLevel(NewLevel);
+            BlackboardComponent->SetValueAsVector(TEXT("TargetLocation"), LastKnownTargetLocation);
         }
     }
-
-    // Update player hiding status
-    CombatMemory.bPlayerIsHiding = !CanSeePlayer() && 
-                                   CombatMemory.TimeSinceLastSighting > 3.0f;
 }
 
-void ACombatAIController::EvaluateTacticalOptions()
+void ACombatAIController::OnTargetLost(AActor* Actor, FAIStimulus Stimulus)
 {
-    if (!PlayerPawn)
+    if (Actor == CurrentTarget)
     {
+        LastKnownTargetLocation = Stimulus.StimulusLocation;
+        
+        if (BlackboardComponent)
+        {
+            BlackboardComponent->SetValueAsVector(TEXT("LastKnownTargetLocation"), LastKnownTargetLocation);
+        }
+        
+        SetCombatState(ECombatAIState::Investigating);
+    }
+}
+
+void ACombatAIController::UpdateNearbyAllies()
+{
+    NearbyAllies.Empty();
+    
+    if (!GetPawn())
+        return;
+    
+    FVector MyLocation = GetPawn()->GetActorLocation();
+    
+    // Find all combat AI controllers in range
+    for (TActorIterator<ACombatAIController> ActorItr(GetWorld()); ActorItr; ++ActorItr)
+    {
+        ACombatAIController* OtherAI = *ActorItr;
+        if (OtherAI && OtherAI != this && OtherAI->GetPawn())
+        {
+            float Distance = FVector::Dist(MyLocation, OtherAI->GetPawn()->GetActorLocation());
+            if (Distance <= GroupCoordinationRadius)
+            {
+                NearbyAllies.Add(OtherAI);
+            }
+        }
+    }
+}
+
+void ACombatAIController::UpdateCombatState()
+{
+    if (!CurrentTarget)
+    {
+        if (CurrentState != ECombatAIState::Patrolling)
+        {
+            SetCombatState(ECombatAIState::Patrolling);
+        }
         return;
     }
-
-    float DistanceToPlayer = CalculateDistanceToPlayer();
     
-    // State machine logic
-    switch (CurrentCombatState)
+    bool bCanSeeTarget = CanSeeTarget();
+    bool bInAttackRange = IsInAttackRange();
+    
+    // State logic based on AI type
+    switch (AIType)
     {
-        case ECombatState::Idle:
-            if (CanSeePlayer())
+        case ECombatAIType::Predator:
+            if (bCanSeeTarget && bInAttackRange)
             {
-                SetCombatState(ECombatState::Stalking);
+                SetCombatState(ECombatAIState::Attacking);
+            }
+            else if (bCanSeeTarget)
+            {
+                SetCombatState(ECombatAIState::Chasing);
+            }
+            else if (TimeSinceLastSawTarget < 5.0f)
+            {
+                SetCombatState(ECombatAIState::Investigating);
             }
             break;
-
-        case ECombatState::Stalking:
-            if (!CanSeePlayer() && ShouldUseAmbushTactic())
+            
+        case ECombatAIType::Pack:
+            if (NearbyAllies.Num() >= 2)
             {
-                SetCombatState(ECombatState::Ambushing);
+                CoordinateGroupAttack();
             }
-            else if (DistanceToPlayer < AttackRange)
+            else if (bCanSeeTarget)
             {
-                SetCombatState(ECombatState::Attacking);
-            }
-            else if (ShouldCirclePlayer())
-            {
-                SetCombatState(ECombatState::Circling);
+                CallForHelp();
+                SetCombatState(ECombatAIState::Chasing);
             }
             break;
-
-        case ECombatState::Attacking:
-            if (ShouldRetreat())
+            
+        case ECombatAIType::Ambush:
+            if (bCanSeeTarget && bInAttackRange)
             {
-                SetCombatState(ECombatState::Retreating);
+                SetCombatState(ECombatAIState::Attacking);
             }
-            else if (DistanceToPlayer > AttackRange * 1.5f)
+            else
             {
-                SetCombatState(ECombatState::Hunting);
-            }
-            break;
-
-        case ECombatState::Circling:
-            if (DistanceToPlayer < AttackRange)
-            {
-                SetCombatState(ECombatState::Attacking);
-            }
-            else if (!CanSeePlayer())
-            {
-                SetCombatState(ECombatState::Hunting);
+                SetCombatState(ECombatAIState::Idle); // Wait for ambush opportunity
             }
             break;
-
-        case ECombatState::Retreating:
-            if (DistanceToPlayer > RetreatDistance)
-            {
-                SetCombatState(ECombatState::Idle);
-                CombatMemory.FailedAttackCount = 0; // Reset failed attacks
-            }
-            break;
-
-        case ECombatState::Ambushing:
-            if (CanSeePlayer() && DistanceToPlayer < AttackRange)
-            {
-                SetCombatState(ECombatState::Attacking);
-            }
-            else if (StateChangeTimer > AmbushWaitTime)
-            {
-                SetCombatState(ECombatState::Hunting);
-            }
-            break;
-
-        case ECombatState::Hunting:
-            if (CanSeePlayer())
-            {
-                SetCombatState(ECombatState::Stalking);
-            }
-            else if (CombatMemory.TimeSinceLastSighting > 30.0f)
-            {
-                SetCombatState(ECombatState::Idle);
-            }
+            
+        default:
             break;
     }
 }
 
-void ACombatAIController::UpdateBlackboardValues()
+void ACombatAIController::HandleStateTransitions()
 {
-    if (!BlackboardComponent)
-    {
+    if (StateTransitionCooldown > 0.0f)
         return;
-    }
-
-    // Update all relevant blackboard keys
-    BlackboardComponent->SetValueAsFloat(TEXT("DistanceToPlayer"), CalculateDistanceToPlayer());
-    BlackboardComponent->SetValueAsBool(TEXT("CanSeePlayer"), CanSeePlayer());
-    BlackboardComponent->SetValueAsBool(TEXT("ShouldRetreat"), ShouldRetreat());
-    BlackboardComponent->SetValueAsVector(TEXT("OptimalAttackPosition"), CalculateOptimalAttackPosition());
-    BlackboardComponent->SetValueAsVector(TEXT("CirclingPosition"), CalculateCirclingPosition());
-    BlackboardComponent->SetValueAsVector(TEXT("AmbushPosition"), CalculateAmbushPosition());
-    BlackboardComponent->SetValueAsBool(TEXT("ShouldUseAmbush"), ShouldUseAmbushTactic());
-    BlackboardComponent->SetValueAsBool(TEXT("ShouldCircle"), ShouldCirclePlayer());
-}
-
-float ACombatAIController::CalculateDistanceToPlayer() const
-{
-    if (!PlayerPawn)
-    {
-        return FLT_MAX;
-    }
-
-    return FVector::Dist(GetPawn()->GetActorLocation(), PlayerPawn->GetActorLocation());
-}
-
-bool ACombatAIController::IsPlayerInLineOfSight() const
-{
-    if (!PlayerPawn)
-    {
-        return false;
-    }
-
-    FVector Start = GetPawn()->GetActorLocation();
-    FVector End = PlayerPawn->GetActorLocation();
     
-    FHitResult HitResult;
-    FCollisionQueryParams Params;
-    Params.AddIgnoredActor(GetPawn());
-    
-    return !GetWorld()->LineTraceSingleByChannel(
-        HitResult, Start, End, ECC_Visibility, Params
-    );
-}
-
-FVector ACombatAIController::PredictPlayerMovement() const
-{
-    if (!PlayerPawn)
+    // Handle retreat logic
+    if (ShouldRetreat() && CurrentState != ECombatAIState::Retreating)
     {
-        return FVector::ZeroVector;
+        SetCombatState(ECombatAIState::Retreating);
+        StateTransitionCooldown = 2.0f;
     }
-
-    // Simple prediction based on current velocity
-    FVector PlayerVelocity = PlayerPawn->GetVelocity();
-    FVector PlayerLocation = PlayerPawn->GetActorLocation();
     
-    // Predict 2 seconds ahead
-    return PlayerLocation + (PlayerVelocity * 2.0f);
+    // Handle flanking maneuvers
+    if (CurrentState == ECombatAIState::Chasing && NearbyAllies.Num() > 0)
+    {
+        if (FMath::RandRange(0.0f, 1.0f) < 0.3f) // 30% chance to flank
+        {
+            SetCombatState(ECombatAIState::Flanking);
+            StateTransitionCooldown = 3.0f;
+        }
+    }
 }
