@@ -5,28 +5,22 @@
 #include "Components/ActorComponent.h"
 #include "Engine/Engine.h"
 #include "PhysicsEngine/PhysicsSettings.h"
+#include "Chaos/ChaosEngineInterface.h"
 #include "PhysicsSystemManager.generated.h"
 
-class UAdvancedCollisionComponent;
-class URagdollPhysicsComponent;
-class UDestructionComponent;
+class UPhysicsCollisionManager;
+class URagdollSystemManager;
+class UDestructionSystemManager;
+class UVehiclePhysicsManager;
 
 /**
- * @class UPhysicsSystemManager
- * @brief Central manager for all physics systems in the Transpersonal Game
+ * @brief Central physics system manager for Transpersonal Game
  * 
- * This component manages the lifecycle and coordination of all physics subsystems:
- * - Advanced collision detection and response
- * - Ragdoll physics for characters and creatures
- * - Environmental destruction systems
- * - Performance optimization for physics calculations
- * 
- * Design Philosophy:
- * - Physics is the emotional signature of the game world
- * - Every physics interaction must feel believable and consistent
- * - Performance is not a feature, it's a requirement
+ * Orchestrates all physics subsystems including collision, ragdoll, destruction, and vehicle physics.
+ * Implements performance monitoring and LOD systems for 60fps PC / 30fps console targets.
  * 
  * @author Core Systems Programmer #03
+ * @version 1.0
  * @date 2024
  */
 UCLASS(ClassGroup=(TranspersonalGame), meta=(BlueprintSpawnableComponent))
@@ -37,133 +31,127 @@ class TRANSPERSONALGAME_API UPhysicsSystemManager : public UActorComponent
 public:
     UPhysicsSystemManager();
 
-protected:
+    //~ Begin UActorComponent Interface
     virtual void BeginPlay() override;
-    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+    //~ End UActorComponent Interface
 
-public:
     /**
      * Initialize all physics subsystems
-     * Called during BeginPlay to set up the physics environment
+     * @param InWorld The world context for physics simulation
      */
     UFUNCTION(BlueprintCallable, Category = "Physics System")
-    void InitializePhysicsSystems();
+    void InitializePhysicsSystems(UWorld* InWorld);
 
     /**
      * Shutdown all physics subsystems gracefully
-     * Ensures proper cleanup of physics resources
      */
     UFUNCTION(BlueprintCallable, Category = "Physics System")
     void ShutdownPhysicsSystems();
 
     /**
-     * Register a collision component with the physics system
-     * @param CollisionComponent The component to register
+     * Update physics LOD based on performance metrics
+     * @param CurrentFPS Current frame rate
+     * @param TargetFPS Target frame rate (60 PC, 30 console)
      */
     UFUNCTION(BlueprintCallable, Category = "Physics System")
-    void RegisterCollisionComponent(UAdvancedCollisionComponent* CollisionComponent);
+    void UpdatePhysicsLOD(float CurrentFPS, float TargetFPS);
 
     /**
-     * Unregister a collision component from the physics system
-     * @param CollisionComponent The component to unregister
+     * Get collision manager subsystem
      */
     UFUNCTION(BlueprintCallable, Category = "Physics System")
-    void UnregisterCollisionComponent(UAdvancedCollisionComponent* CollisionComponent);
+    UPhysicsCollisionManager* GetCollisionManager() const { return CollisionManager; }
 
     /**
-     * Register a ragdoll component with the physics system
-     * @param RagdollComponent The component to register
+     * Get ragdoll system manager
      */
     UFUNCTION(BlueprintCallable, Category = "Physics System")
-    void RegisterRagdollComponent(URagdollPhysicsComponent* RagdollComponent);
+    URagdollSystemManager* GetRagdollManager() const { return RagdollManager; }
 
     /**
-     * Unregister a ragdoll component from the physics system
-     * @param RagdollComponent The component to unregister
+     * Get destruction system manager
      */
     UFUNCTION(BlueprintCallable, Category = "Physics System")
-    void UnregisterRagdollComponent(URagdollPhysicsComponent* RagdollComponent);
+    UDestructionSystemManager* GetDestructionManager() const { return DestructionManager; }
 
     /**
-     * Register a destruction component with the physics system
-     * @param DestructionComponent The component to register
+     * Get vehicle physics manager
      */
     UFUNCTION(BlueprintCallable, Category = "Physics System")
-    void RegisterDestructionComponent(UDestructionComponent* DestructionComponent);
+    UVehiclePhysicsManager* GetVehicleManager() const { return VehicleManager; }
 
     /**
-     * Unregister a destruction component from the physics system
-     * @param DestructionComponent The component to unregister
+     * Enable/disable physics simulation globally
      */
     UFUNCTION(BlueprintCallable, Category = "Physics System")
-    void UnregisterDestructionComponent(UDestructionComponent* DestructionComponent);
+    void SetPhysicsEnabled(bool bEnabled);
 
     /**
-     * Get the current physics performance metrics
-     * @return Struct containing performance data
+     * Get current physics performance metrics
      */
     UFUNCTION(BlueprintCallable, Category = "Physics System")
-    FString GetPhysicsPerformanceMetrics() const;
-
-    /**
-     * Enable or disable physics system optimizations
-     * @param bEnable Whether to enable optimizations
-     */
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
-    void SetPhysicsOptimizationsEnabled(bool bEnable);
-
-    /**
-     * Get the singleton instance of the physics system manager
-     * @param World The world context
-     * @return The physics system manager instance
-     */
-    UFUNCTION(BlueprintCallable, Category = "Physics System", CallInEditor = true)
-    static UPhysicsSystemManager* GetPhysicsSystemManager(UWorld* World);
+    FString GetPhysicsPerformanceReport() const;
 
 protected:
+    /** Collision detection and response manager */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Physics Subsystems")
+    TObjectPtr<UPhysicsCollisionManager> CollisionManager;
+
+    /** Ragdoll physics and death animations */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Physics Subsystems")
+    TObjectPtr<URagdollSystemManager> RagdollManager;
+
+    /** Destruction and fracture system */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Physics Subsystems")
+    TObjectPtr<UDestructionSystemManager> DestructionManager;
+
+    /** Vehicle and mount physics */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Physics Subsystems")
+    TObjectPtr<UVehiclePhysicsManager> VehicleManager;
+
+    /** Current physics LOD level (0=highest, 3=lowest) */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Performance")
+    int32 CurrentPhysicsLOD;
+
+    /** Maximum number of active physics bodies */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance", meta = (ClampMin = "100", ClampMax = "10000"))
+    int32 MaxActivePhysicsBodies;
+
+    /** Physics simulation enabled flag */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Physics System")
+    bool bPhysicsEnabled;
+
+    /** Performance monitoring */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Performance")
+    float AveragePhysicsFrameTime;
+
+    /** Frame time samples for averaging */
+    TArray<float> PhysicsFrameTimeSamples;
+
+    /** Maximum samples to keep for averaging */
+    static constexpr int32 MaxFrameTimeSamples = 60;
+
+private:
     /**
-     * Update physics performance monitoring
-     * @param DeltaTime Time since last update
+     * Create and initialize subsystem managers
+     */
+    void CreateSubsystemManagers();
+
+    /**
+     * Update performance metrics
      */
     void UpdatePerformanceMetrics(float DeltaTime);
 
     /**
-     * Apply physics optimizations based on current performance
+     * Determine optimal LOD level based on performance
      */
-    void ApplyPhysicsOptimizations();
+    int32 CalculateOptimalLOD(float CurrentFPS, float TargetFPS) const;
 
-private:
-    /** Array of registered collision components */
-    UPROPERTY()
-    TArray<UAdvancedCollisionComponent*> RegisteredCollisionComponents;
+    /** World reference for physics simulation */
+    TWeakObjectPtr<UWorld> WorldContext;
 
-    /** Array of registered ragdoll components */
-    UPROPERTY()
-    TArray<URagdollPhysicsComponent*> RegisteredRagdollComponents;
-
-    /** Array of registered destruction components */
-    UPROPERTY()
-    TArray<UDestructionComponent*> RegisteredDestructionComponents;
-
-    /** Whether physics optimizations are enabled */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Physics Settings", meta = (AllowPrivateAccess = "true"))
-    bool bPhysicsOptimizationsEnabled;
-
-    /** Maximum number of physics objects to simulate per frame */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Physics Settings", meta = (AllowPrivateAccess = "true"))
-    int32 MaxPhysicsObjectsPerFrame;
-
-    /** Target physics frame rate */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Physics Settings", meta = (AllowPrivateAccess = "true"))
-    float TargetPhysicsFrameRate;
-
-    /** Current physics frame time */
-    float CurrentPhysicsFrameTime;
-
-    /** Physics performance history for averaging */
-    TArray<float> PhysicsFrameTimeHistory;
-
-    /** Static instance for singleton pattern */
-    static UPhysicsSystemManager* Instance;
+    /** Last frame time for performance tracking */
+    float LastFrameTime;
 };
