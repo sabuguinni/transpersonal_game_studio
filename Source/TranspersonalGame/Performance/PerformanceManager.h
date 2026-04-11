@@ -2,170 +2,175 @@
 
 #include "CoreMinimal.h"
 #include "Engine/Engine.h"
+#include "GameFramework/Actor.h"
+#include "Components/ActorComponent.h"
 #include "Engine/World.h"
-#include "GameFramework/GameModeBase.h"
-#include "PerformanceTargets.h"
 #include "PerformanceManager.generated.h"
 
+UENUM(BlueprintType)
+enum class EPerformanceTarget : uint8
+{
+    PC_High = 0     UMETA(DisplayName = "PC High-End (60 FPS)"),
+    PC_Medium = 1   UMETA(DisplayName = "PC Medium (45 FPS)"),
+    Console = 2     UMETA(DisplayName = "Console (30 FPS)"),
+    Mobile = 3      UMETA(DisplayName = "Mobile (30 FPS)")
+};
+
+UENUM(BlueprintType)
+enum class EPerformanceLevel : uint8
+{
+    Ultra = 0       UMETA(DisplayName = "Ultra Quality"),
+    High = 1        UMETA(DisplayName = "High Quality"),
+    Medium = 2      UMETA(DisplayName = "Medium Quality"),
+    Low = 3         UMETA(DisplayName = "Low Quality"),
+    Potato = 4      UMETA(DisplayName = "Potato Mode")
+};
+
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FPerformanceMetrics
+struct FPerformanceSettings
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Frame Metrics")
-    float CurrentFPS = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering")
+    int32 ShadowMapResolution = 2048;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Frame Metrics")
-    float CurrentFrameTime = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering")
+    float ViewDistanceScale = 1.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Frame Metrics")
-    float GameThreadTime = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering")
+    int32 MaxLights = 16;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Frame Metrics")
-    float RenderThreadTime = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering")
+    bool bEnableRayTracing = false;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Frame Metrics")
-    float GPUTime = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering")
+    bool bEnableLumen = true;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Rendering Metrics")
-    int32 CurrentDrawCalls = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Post Process")
+    int32 AntiAliasingMethod = 2; // TAA
 
-    UPROPERTY(BlueprintReadOnly, Category = "Rendering Metrics")
-    int32 CurrentTriangles = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Post Process")
+    int32 PostProcessQuality = 3;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Rendering Metrics")
-    int32 CurrentInstances = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Textures")
+    int32 TexturePoolSize = 2000;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Memory Metrics")
-    float UsedTextureMemory = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
+    float LODBias = 0.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Memory Metrics")
-    float UsedMeshMemory = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Culling")
+    float CullingDistance = 10000.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Memory Metrics")
-    float UsedAudioMemory = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance Status")
-    bool bIsWithinBudget = true;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance Status")
-    TArray<FString> PerformanceWarnings;
-
-    FPerformanceMetrics()
+    FPerformanceSettings()
     {
-        CurrentFPS = 0.0f;
-        CurrentFrameTime = 0.0f;
-        GameThreadTime = 0.0f;
-        RenderThreadTime = 0.0f;
-        GPUTime = 0.0f;
-        CurrentDrawCalls = 0;
-        CurrentTriangles = 0;
-        CurrentInstances = 0;
-        UsedTextureMemory = 0.0f;
-        UsedMeshMemory = 0.0f;
-        UsedAudioMemory = 0.0f;
-        bIsWithinBudget = true;
+        // Default constructor with safe defaults
     }
 };
 
-/**
- * Central performance management system for Transpersonal Game Studio
- * Ensures 60fps on PC high-end and 30fps on console
- * Monitors and enforces performance budgets across all systems
- * 
- * This is the legacy performance manager - use DynamicPerformanceManager for new features
- */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UPerformanceManager : public UObject
+class TRANSPERSONALGAME_API APerformanceManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UPerformanceManager();
+    APerformanceManager();
 
-    // Core performance management
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void Initialize(EPerformanceTarget Target);
+protected:
+    virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
 
+public:
+    // Performance monitoring
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void UpdatePerformanceMetrics();
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    bool IsWithinPerformanceBudget() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    FPerformanceMetrics GetCurrentMetrics() const { return CurrentMetrics; }
+    float GetCurrentFPS() const;
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    FPerformanceBudget GetCurrentBudget() const { return CurrentBudget; }
-
-    // Dynamic quality adjustment
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void AdjustQualityForPerformance();
+    float GetAverageFPS() const;
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void SetDynamicResolutionScale(float Scale);
-
-    // Monitoring and debugging
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void StartPerformanceCapture(const FString& CaptureName);
+    float GetMemoryUsageMB() const;
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void StopPerformanceCapture();
+    int32 GetDrawCalls() const;
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void LogPerformanceReport();
+    int32 GetTriangleCount() const;
 
-    // Console commands
-    UFUNCTION(Exec)
-    void ShowPerformanceStats();
+    // Performance settings
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void SetPerformanceTarget(EPerformanceTarget Target);
 
-    UFUNCTION(Exec)
-    void SetPerformanceTarget(int32 TargetFPS);
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void SetPerformanceLevel(EPerformanceLevel Level);
 
-    UFUNCTION(Exec)
-    void TogglePerformanceHUD();
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void ApplyPerformanceSettings(const FPerformanceSettings& Settings);
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    FPerformanceSettings GetCurrentSettings() const { return CurrentSettings; }
+
+    // Optimization functions
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void OptimizeShadows();
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void OptimizeLighting();
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void OptimizeTextures();
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void OptimizeLOD();
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void EnablePerformanceMode();
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void DisablePerformanceMode();
+
+    // Auto-optimization
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void StartAutoOptimization();
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void StopAutoOptimization();
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    bool IsAutoOptimizationEnabled() const { return bAutoOptimizationEnabled; }
 
 protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    EPerformanceTarget CurrentTarget = EPerformanceTarget::PC_HighEnd;
+    EPerformanceTarget CurrentTarget = EPerformanceTarget::PC_High;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    FPerformanceBudget CurrentBudget;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    FPerformanceMetrics CurrentMetrics;
+    EPerformanceLevel CurrentLevel = EPerformanceLevel::High;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    bool bEnableDynamicQualityAdjustment = true;
+    FPerformanceSettings CurrentSettings;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    bool bShowPerformanceHUD = false;
+    float TargetFPS = 60.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float PerformanceUpdateInterval = 0.1f; // Update every 100ms
+    float MinAcceptableFPS = 30.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    bool bAutoOptimizationEnabled = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float OptimizationCheckInterval = 5.0f;
 
 private:
-    // Internal performance tracking
-    TArray<float> FrameTimeHistory;
-    TArray<float> GPUTimeHistory;
-    int32 HistorySize = 60; // 60 samples for 1-second average
+    // Performance tracking
+    TArray<float> FPSHistory;
+    float LastOptimizationCheck = 0.0f;
+    int32 MaxFPSHistorySize = 60; // 1 second at 60fps
 
-    FDateTime LastPerformanceUpdate;
-    bool bIsCapturing = false;
-    FString CurrentCaptureName;
-
-    // Performance adjustment methods
-    void ApplyPerformanceBudget();
-    void UpdateScalabilitySettings();
-    void CheckPerformanceThresholds();
-    void CollectRenderingMetrics();
-    void CollectMemoryMetrics();
-    
-    // Quality adjustment helpers
-    void AdjustViewDistance(float Multiplier);
-    void AdjustShadowQuality(int32 Quality);
-    void AdjustTextureQuality(int32 Quality);
-    void AdjustEffectsQuality(int32 Quality);
-    void AdjustPostProcessQuality(int32 Quality);
+    // Internal functions
+    void UpdateFPSHistory();
+    void CheckPerformanceAndOptimize();
+    void ApplyTargetSettings();
+    void ExecuteConsoleCommand(const FString& Command);
+    FPerformanceSettings GetSettingsForLevel(EPerformanceLevel Level) const;
+    FPerformanceSettings GetSettingsForTarget(EPerformanceTarget Target) const;
 };
