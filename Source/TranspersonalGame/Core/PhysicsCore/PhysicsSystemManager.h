@@ -1,29 +1,39 @@
+// Copyright Transpersonal Game Studio. All Rights Reserved.
+
 #pragma once
 
 #include "CoreMinimal.h"
 #include "Engine/World.h"
 #include "Components/ActorComponent.h"
-#include "Engine/Engine.h"
 #include "PhysicsEngine/PhysicsSettings.h"
 #include "Chaos/ChaosEngineInterface.h"
+#include "TranspersonalGameTypes.h"
 #include "PhysicsSystemManager.generated.h"
 
-class UPhysicsCollisionManager;
-class URagdollSystemManager;
-class UDestructionSystemManager;
-class UVehiclePhysicsManager;
+class UTranspersonalRagdollComponent;
+class UTranspersonalDestructionComponent;
+class UTranspersonalVehicleComponent;
 
 /**
- * @brief Central physics system manager for Transpersonal Game
+ * @brief Core physics orchestration system for Transpersonal Game
  * 
- * Orchestrates all physics subsystems including collision, ragdoll, destruction, and vehicle physics.
- * Implements performance monitoring and LOD systems for 60fps PC / 30fps console targets.
+ * Manages all physics subsystems including:
+ * - Chaos Physics integration
+ * - Ragdoll system coordination
+ * - Destruction system management
+ * - Vehicle physics oversight
+ * - Performance monitoring and LOD
+ * 
+ * Design Philosophy (Casey Muratori): 
+ * "Physics that can't be tested in isolation will fail when it matters most"
+ * 
+ * Performance Philosophy (Mike Acton):
+ * "Performance is not a feature - it's a requirement"
  * 
  * @author Core Systems Programmer #03
  * @version 1.0
- * @date 2024
  */
-UCLASS(ClassGroup=(TranspersonalGame), meta=(BlueprintSpawnableComponent))
+UCLASS(BlueprintType, meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UPhysicsSystemManager : public UActorComponent
 {
     GENERATED_BODY()
@@ -38,120 +48,119 @@ public:
     //~ End UActorComponent Interface
 
     /**
-     * Initialize all physics subsystems
-     * @param InWorld The world context for physics simulation
+     * @brief Initialize the physics system with world context
+     * @param InWorld The world to initialize physics for
+     * @return True if initialization succeeded
      */
     UFUNCTION(BlueprintCallable, Category = "Physics System")
-    void InitializePhysicsSystems(UWorld* InWorld);
+    bool InitializePhysicsSystem(UWorld* InWorld);
 
     /**
-     * Shutdown all physics subsystems gracefully
+     * @brief Register a ragdoll component with the system
+     * @param RagdollComponent The component to register
      */
     UFUNCTION(BlueprintCallable, Category = "Physics System")
-    void ShutdownPhysicsSystems();
+    void RegisterRagdollComponent(UTranspersonalRagdollComponent* RagdollComponent);
 
     /**
-     * Update physics LOD based on performance metrics
-     * @param CurrentFPS Current frame rate
-     * @param TargetFPS Target frame rate (60 PC, 30 console)
+     * @brief Register a destruction component with the system
+     * @param DestructionComponent The component to register
      */
     UFUNCTION(BlueprintCallable, Category = "Physics System")
-    void UpdatePhysicsLOD(float CurrentFPS, float TargetFPS);
+    void RegisterDestructionComponent(UTranspersonalDestructionComponent* DestructionComponent);
 
     /**
-     * Get collision manager subsystem
+     * @brief Register a vehicle component with the system
+     * @param VehicleComponent The component to register
      */
     UFUNCTION(BlueprintCallable, Category = "Physics System")
-    UPhysicsCollisionManager* GetCollisionManager() const { return CollisionManager; }
+    void RegisterVehicleComponent(UTranspersonalVehicleComponent* VehicleComponent);
 
     /**
-     * Get ragdoll system manager
+     * @brief Get current physics performance metrics
+     * @return Physics performance data
      */
     UFUNCTION(BlueprintCallable, Category = "Physics System")
-    URagdollSystemManager* GetRagdollManager() const { return RagdollManager; }
+    FTranspersonalPhysicsMetrics GetPhysicsMetrics() const;
 
     /**
-     * Get destruction system manager
+     * @brief Set physics quality level for performance scaling
+     * @param QualityLevel 0=Low, 1=Medium, 2=High, 3=Ultra
      */
     UFUNCTION(BlueprintCallable, Category = "Physics System")
-    UDestructionSystemManager* GetDestructionManager() const { return DestructionManager; }
+    void SetPhysicsQualityLevel(int32 QualityLevel);
 
     /**
-     * Get vehicle physics manager
+     * @brief Emergency physics reset - use when physics goes unstable
      */
     UFUNCTION(BlueprintCallable, Category = "Physics System")
-    UVehiclePhysicsManager* GetVehicleManager() const { return VehicleManager; }
-
-    /**
-     * Enable/disable physics simulation globally
-     */
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
-    void SetPhysicsEnabled(bool bEnabled);
-
-    /**
-     * Get current physics performance metrics
-     */
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
-    FString GetPhysicsPerformanceReport() const;
+    void EmergencyPhysicsReset();
 
 protected:
-    /** Collision detection and response manager */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Physics Subsystems")
-    TObjectPtr<UPhysicsCollisionManager> CollisionManager;
-
-    /** Ragdoll physics and death animations */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Physics Subsystems")
-    TObjectPtr<URagdollSystemManager> RagdollManager;
-
-    /** Destruction and fracture system */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Physics Subsystems")
-    TObjectPtr<UDestructionSystemManager> DestructionManager;
-
-    /** Vehicle and mount physics */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Physics Subsystems")
-    TObjectPtr<UVehiclePhysicsManager> VehicleManager;
-
-    /** Current physics LOD level (0=highest, 3=lowest) */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Performance")
-    int32 CurrentPhysicsLOD;
-
-    /** Maximum number of active physics bodies */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance", meta = (ClampMin = "100", ClampMax = "10000"))
-    int32 MaxActivePhysicsBodies;
-
-    /** Physics simulation enabled flag */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Physics System")
-    bool bPhysicsEnabled;
-
-    /** Performance monitoring */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Performance")
-    float AveragePhysicsFrameTime;
-
-    /** Frame time samples for averaging */
-    TArray<float> PhysicsFrameTimeSamples;
-
-    /** Maximum samples to keep for averaging */
-    static constexpr int32 MaxFrameTimeSamples = 60;
-
-private:
     /**
-     * Create and initialize subsystem managers
+     * @brief Initialize Chaos Physics settings
      */
-    void CreateSubsystemManagers();
+    void InitializeChaosPhysics();
 
     /**
-     * Update performance metrics
+     * @brief Update physics performance monitoring
      */
     void UpdatePerformanceMetrics(float DeltaTime);
 
     /**
-     * Determine optimal LOD level based on performance
+     * @brief Apply physics LOD based on distance and performance
      */
-    int32 CalculateOptimalLOD(float CurrentFPS, float TargetFPS) const;
+    void ApplyPhysicsLOD();
 
-    /** World reference for physics simulation */
+    /**
+     * @brief Validate physics system integrity
+     * @return True if all systems are functioning correctly
+     */
+    bool ValidatePhysicsIntegrity() const;
+
+private:
+    /** Current world context */
+    UPROPERTY()
     TWeakObjectPtr<UWorld> WorldContext;
 
-    /** Last frame time for performance tracking */
-    float LastFrameTime;
+    /** Registered ragdoll components */
+    UPROPERTY()
+    TArray<TWeakObjectPtr<UTranspersonalRagdollComponent>> RegisteredRagdolls;
+
+    /** Registered destruction components */
+    UPROPERTY()
+    TArray<TWeakObjectPtr<UTranspersonalDestructionComponent>> RegisteredDestructionComponents;
+
+    /** Registered vehicle components */
+    UPROPERTY()
+    TArray<TWeakObjectPtr<UTranspersonalVehicleComponent>> RegisteredVehicles;
+
+    /** Current physics metrics */
+    UPROPERTY(BlueprintReadOnly, Category = "Physics System", meta = (AllowPrivateAccess = "true"))
+    FTranspersonalPhysicsMetrics CurrentMetrics;
+
+    /** Physics quality level (0-3) */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Physics System", meta = (AllowPrivateAccess = "true"))
+    int32 PhysicsQualityLevel = 2;
+
+    /** Maximum physics objects before LOD kicks in */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Physics System", meta = (AllowPrivateAccess = "true"))
+    int32 MaxPhysicsObjects = 500;
+
+    /** Physics update frequency (Hz) */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Physics System", meta = (AllowPrivateAccess = "true"))
+    float PhysicsUpdateFrequency = 60.0f;
+
+    /** Performance monitoring interval */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Physics System", meta = (AllowPrivateAccess = "true"))
+    float MetricsUpdateInterval = 1.0f;
+
+    /** Last metrics update time */
+    float LastMetricsUpdate = 0.0f;
+
+    /** Physics system initialized flag */
+    bool bPhysicsSystemInitialized = false;
+
+    /** Emergency reset cooldown */
+    float EmergencyResetCooldown = 0.0f;
 };
