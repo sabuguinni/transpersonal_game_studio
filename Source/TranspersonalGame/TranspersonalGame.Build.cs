@@ -6,94 +6,114 @@ public class TranspersonalGame : ModuleRules
     {
         PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 
-        // Core UE5 modules required for all systems
         PublicDependencyModuleNames.AddRange(new string[] 
         { 
             "Core", 
             "CoreUObject", 
-            "Engine", 
+            "Engine",
             "InputCore",
             "EnhancedInput",
             "UMG",
             "Slate",
-            "SlateCore"
-        });
-
-        // UE5.5 specific modules for advanced features
-        PrivateDependencyModuleNames.AddRange(new string[] 
-        { 
-            "GameplayTags",
-            "GameplayTasks",
-            "AIModule",
+            "SlateCore",
             "NavigationSystem",
-            "Niagara",
-            "CinematicCamera",
-            "LevelSequence",
-            "MovieScene",
+            "AIModule",
+            "GameplayTasks",
+            "GameplayTags",
             "PhysicsCore",
             "Chaos",
             "ChaosVehicles",
             "GeometryCollectionEngine",
             "FieldSystemEngine",
-            "PCG",  // Procedural Content Generation
-            "WorldPartitionEditor",
+            "Niagara",
+            "AudioMixer",
+            "MetasoundEngine",
+            "ProceduralMeshComponent",
+            "Landscape",
+            "Foliage",
             "MassEntity",
             "MassMovement",
             "MassSpawner",
             "MassActors",
             "MassCommon",
-            "MassGameplay",
-            "MassLOD",
-            "MassRepresentation",
             "MassSimulation",
-            "StateTree",
-            "MetaSounds",
-            "AudioMixer",
-            "AudioExtensions"
+            "MassGameplay",
+            "StructUtils",
+            "StateTreeModule",
+            "SmartObjectsModule",
+            "WorldPartition",
+            "PCG"
         });
 
-        // Editor-only modules for development tools
-        if (Target.bBuildEditor)
-        {
-            PrivateDependencyModuleNames.AddRange(new string[]
-            {
-                "UnrealEd",
-                "EditorStyle",
-                "EditorWidgets",
-                "ToolMenus",
-                "PropertyEditor",
-                "DetailCustomizations"
-            });
-        }
+        PrivateDependencyModuleNames.AddRange(new string[] 
+        { 
+            "RenderCore",
+            "RHI",
+            "ApplicationCore",
+            "Json",
+            "JsonObjectConverter",
+            "HTTP",
+            "ToolMenus",
+            "EditorStyle",
+            "EditorWidgets",
+            "UnrealEd",
+            "LevelEditor",
+            "PropertyEditor",
+            "DetailCustomizations",
+            "ComponentVisualizers",
+            "EngineSettings",
+            "DeveloperSettings"
+        });
 
-        // Platform specific optimizations
-        if (Target.Platform == UnrealTargetPlatform.Win64)
+        // Enable RTTI for advanced reflection
+        bUseRTTI = true;
+        
+        // Enable exceptions for error handling
+        bEnableExceptions = true;
+        
+        // Optimization settings
+        OptimizeCode = CodeOptimization.InShippingBuildsOnly;
+        
+        // Include paths
+        PublicIncludePaths.AddRange(new string[] 
         {
-            PublicDefinitions.Add("TRANSPERSONAL_PLATFORM_WINDOWS=1");
-        }
-        else if (Target.Platform == UnrealTargetPlatform.PS5)
+            "TranspersonalGame/Public",
+            "TranspersonalGame/Public/Core",
+            "TranspersonalGame/Public/Systems",
+            "TranspersonalGame/Public/Components",
+            "TranspersonalGame/Public/Actors",
+            "TranspersonalGame/Public/UI",
+            "TranspersonalGame/Public/World",
+            "TranspersonalGame/Public/AI",
+            "TranspersonalGame/Public/Audio",
+            "TranspersonalGame/Public/VFX"
+        });
+        
+        PrivateIncludePaths.AddRange(new string[] 
         {
-            PublicDefinitions.Add("TRANSPERSONAL_PLATFORM_PS5=1");
-        }
-        else if (Target.Platform == UnrealTargetPlatform.XSX)
-        {
-            PublicDefinitions.Add("TRANSPERSONAL_PLATFORM_XBOX=1");
-        }
+            "TranspersonalGame/Private",
+            "TranspersonalGame/Private/Core",
+            "TranspersonalGame/Private/Systems",
+            "TranspersonalGame/Private/Components",
+            "TranspersonalGame/Private/Actors",
+            "TranspersonalGame/Private/UI",
+            "TranspersonalGame/Private/World",
+            "TranspersonalGame/Private/AI",
+            "TranspersonalGame/Private/Audio",
+            "TranspersonalGame/Private/VFX"
+        });
 
-        // Performance and memory optimizations
+        // Preprocessor definitions
         PublicDefinitions.AddRange(new string[]
         {
-            "TRANSPERSONAL_ENABLE_PROFILING=1",
-            "TRANSPERSONAL_MAX_WORLD_SIZE=8192",  // 8km x 8km world limit
-            "TRANSPERSONAL_TARGET_FPS_PC=60",
-            "TRANSPERSONAL_TARGET_FPS_CONSOLE=30"
+            "TRANSPERSONAL_GAME=1",
+            "UE_BUILD_SHIPPING_WITH_EDITOR=1"
         });
 
-        // Development build settings
         if (Target.Configuration == UnrealTargetConfiguration.Development || 
             Target.Configuration == UnrealTargetConfiguration.Debug)
         {
-            PublicDefinitions.Add("TRANSPERSONAL_DEVELOPMENT=1");
+            PublicDefinitions.Add("TRANSPERSONAL_DEBUG=1");
         }
     }
 }
