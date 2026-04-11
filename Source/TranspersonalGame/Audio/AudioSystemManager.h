@@ -1,97 +1,15 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/Engine.h"
-#include "Sound/SoundCue.h"
+#include "Engine/World.h"
+#include "Sound/SoundClass.h"
 #include "Components/AudioComponent.h"
-#include "MetasoundSource.h"
+#include "AudioDevice.h"
 #include "AudioSystemManager.generated.h"
 
-UENUM(BlueprintType)
-enum class EAudioZoneType : uint8
-{
-    Forest          UMETA(DisplayName = "Forest"),
-    Plains          UMETA(DisplayName = "Plains"),
-    Mountains       UMETA(DisplayName = "Mountains"),
-    Rivers          UMETA(DisplayName = "Rivers"),
-    Sacred          UMETA(DisplayName = "Sacred Sites"),
-    Combat          UMETA(DisplayName = "Combat"),
-    Meditation      UMETA(DisplayName = "Meditation")
-};
-
-UENUM(BlueprintType)
-enum class EEmotionalState : uint8
-{
-    Peaceful        UMETA(DisplayName = "Peaceful"),
-    Tense           UMETA(DisplayName = "Tense"),
-    Wonder          UMETA(DisplayName = "Wonder"),
-    Fear            UMETA(DisplayName = "Fear"),
-    Spiritual       UMETA(DisplayName = "Spiritual"),
-    Action          UMETA(DisplayName = "Action")
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAudioZoneConfig
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
-    EAudioZoneType ZoneType = EAudioZoneType::Forest;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
-    TSoftObjectPtr<USoundCue> AmbientSound;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
-    TSoftObjectPtr<UMetaSoundSource> AdaptiveMusic;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
-    float BaseVolume = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
-    float FadeInTime = 2.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
-    float FadeOutTime = 2.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
-    bool bLoopAmbient = true;
-
-    FAudioZoneConfig()
-    {
-        ZoneType = EAudioZoneType::Forest;
-        BaseVolume = 1.0f;
-        FadeInTime = 2.0f;
-        FadeOutTime = 2.0f;
-        bLoopAmbient = true;
-    }
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEmotionalAudioState
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotional Audio")
-    EEmotionalState CurrentState = EEmotionalState::Peaceful;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotional Audio")
-    float Intensity = 0.5f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotional Audio")
-    float TransitionSpeed = 1.0f;
-
-    FEmotionalAudioState()
-    {
-        CurrentState = EEmotionalState::Peaceful;
-        Intensity = 0.5f;
-        TransitionSpeed = 1.0f;
-    }
-};
-
 /**
- * Core Audio System Manager for Transpersonal Game
- * Handles adaptive music, ambient soundscapes, and emotional audio transitions
- * Based on Walter Murch's philosophy: "The sound that doesn't exist is often more powerful than the sound that does"
+ * Central audio system manager for the Transpersonal Game
+ * Handles adaptive music, consciousness-based audio states, and spatial audio
  */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UAudioSystemManager : public UObject
@@ -101,107 +19,91 @@ class TRANSPERSONALGAME_API UAudioSystemManager : public UObject
 public:
     UAudioSystemManager();
 
-    // Core System Functions
+    // Core audio state management
     UFUNCTION(BlueprintCallable, Category = "Audio System")
-    void InitializeAudioSystem();
+    void InitializeAudioSystem(UWorld* World);
 
     UFUNCTION(BlueprintCallable, Category = "Audio System")
-    void ShutdownAudioSystem();
+    void UpdateAudioState(float DeltaTime);
 
-    // Zone-based Audio Management
-    UFUNCTION(BlueprintCallable, Category = "Audio Zones")
-    void TransitionToAudioZone(EAudioZoneType NewZone, float TransitionTime = 3.0f);
+    // Consciousness-based audio
+    UFUNCTION(BlueprintCallable, Category = "Consciousness Audio")
+    void SetConsciousnessLevel(float Level);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio Zones")
-    void RegisterAudioZone(EAudioZoneType ZoneType, const FAudioZoneConfig& Config);
+    UFUNCTION(BlueprintCallable, Category = "Consciousness Audio")
+    void TriggerTranscendenceAudio();
 
-    UFUNCTION(BlueprintCallable, Category = "Audio Zones")
-    EAudioZoneType GetCurrentAudioZone() const { return CurrentAudioZone; }
+    // Adaptive music system
+    UFUNCTION(BlueprintCallable, Category = "Music")
+    void TransitionToMusicState(const FString& StateName, float FadeTime = 2.0f);
 
-    // Emotional State Management
-    UFUNCTION(BlueprintCallable, Category = "Emotional Audio")
-    void SetEmotionalState(EEmotionalState NewState, float Intensity = 0.5f, float TransitionTime = 2.0f);
+    UFUNCTION(BlueprintCallable, Category = "Music")
+    void SetMusicIntensity(float Intensity);
 
-    UFUNCTION(BlueprintCallable, Category = "Emotional Audio")
-    FEmotionalAudioState GetCurrentEmotionalState() const { return CurrentEmotionalState; }
+    // Environmental audio
+    UFUNCTION(BlueprintCallable, Category = "Environment")
+    void UpdateEnvironmentalAudio(const FVector& PlayerLocation);
 
-    // Adaptive Music System
-    UFUNCTION(BlueprintCallable, Category = "Adaptive Music")
-    void PlayAdaptiveMusic(const FString& MusicID, bool bFadeIn = true);
+    UFUNCTION(BlueprintCallable, Category = "Environment")
+    void SetBiomeAudio(const FString& BiomeName);
 
-    UFUNCTION(BlueprintCallable, Category = "Adaptive Music")
-    void StopAdaptiveMusic(bool bFadeOut = true);
+    // Spatial audio management
+    UFUNCTION(BlueprintCallable, Category = "Spatial Audio")
+    void RegisterSpatialAudioSource(AActor* SourceActor, USoundBase* Sound);
 
-    UFUNCTION(BlueprintCallable, Category = "Adaptive Music")
-    void SetMusicParameter(const FString& ParameterName, float Value);
-
-    // Ambient Sound Management
-    UFUNCTION(BlueprintCallable, Category = "Ambient Audio")
-    void PlayAmbientSound(USoundCue* AmbientCue, float Volume = 1.0f, bool bLoop = true);
-
-    UFUNCTION(BlueprintCallable, Category = "Ambient Audio")
-    void StopAmbientSound(float FadeOutTime = 2.0f);
-
-    // 3D Positional Audio
-    UFUNCTION(BlueprintCallable, Category = "3D Audio")
-    void PlaySoundAtLocation(USoundCue* Sound, FVector Location, float Volume = 1.0f, float Pitch = 1.0f);
-
-    UFUNCTION(BlueprintCallable, Category = "3D Audio")
-    UAudioComponent* CreateAudioComponentAtLocation(USoundCue* Sound, FVector Location);
-
-    // Audio Events for Gameplay
-    UFUNCTION(BlueprintCallable, Category = "Audio Events")
-    void TriggerAudioEvent(const FString& EventName, FVector Location = FVector::ZeroVector);
-
-    // Performance and Optimization
-    UFUNCTION(BlueprintCallable, Category = "Audio Performance")
-    void SetAudioQualityLevel(int32 QualityLevel);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio Performance")
-    void OptimizeAudioForPerformance();
+    UFUNCTION(BlueprintCallable, Category = "Spatial Audio")
+    void UpdateSpatialAudioAttenuation();
 
 protected:
-    // Current Audio State
+    // Audio state tracking
     UPROPERTY(BlueprintReadOnly, Category = "Audio State")
-    EAudioZoneType CurrentAudioZone;
+    float CurrentConsciousnessLevel;
 
     UPROPERTY(BlueprintReadOnly, Category = "Audio State")
-    FEmotionalAudioState CurrentEmotionalState;
+    float CurrentMusicIntensity;
 
-    // Audio Zone Configurations
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zones")
-    TMap<EAudioZoneType, FAudioZoneConfig> AudioZoneConfigs;
+    UPROPERTY(BlueprintReadOnly, Category = "Audio State")
+    FString CurrentBiome;
 
-    // Active Audio Components
+    UPROPERTY(BlueprintReadOnly, Category = "Audio State")
+    FString CurrentMusicState;
+
+    // Audio components
     UPROPERTY(BlueprintReadOnly, Category = "Audio Components")
-    TObjectPtr<UAudioComponent> CurrentAmbientComponent;
+    TArray<UAudioComponent*> ActiveAudioComponents;
 
     UPROPERTY(BlueprintReadOnly, Category = "Audio Components")
-    TObjectPtr<UAudioComponent> CurrentMusicComponent;
+    UAudioComponent* MusicComponent;
 
     UPROPERTY(BlueprintReadOnly, Category = "Audio Components")
-    TArray<TObjectPtr<UAudioComponent>> Active3DAudioComponents;
+    UAudioComponent* AmbienceComponent;
 
-    // Audio Asset References
+    // Audio assets
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Assets")
-    TMap<FString, TSoftObjectPtr<USoundCue>> AudioEventLibrary;
+    TMap<FString, USoundBase*> MusicStates;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Assets")
-    TMap<FString, TSoftObjectPtr<UMetaSoundSource>> AdaptiveMusicLibrary;
+    TMap<FString, USoundBase*> BiomeAmbiences;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Assets")
+    TMap<FString, USoundBase*> ConsciousnessAudioStates;
 
 private:
-    // Internal transition management
-    void ExecuteZoneTransition(EAudioZoneType FromZone, EAudioZoneType ToZone, float TransitionTime);
-    void ExecuteEmotionalTransition(EEmotionalState FromState, EEmotionalState ToState, float TransitionTime);
-    
-    // Audio component management
-    void CleanupInactiveAudioComponents();
-    void UpdateAudioComponentsForPerformance();
+    // Internal audio processing
+    void ProcessAudioFades(float DeltaTime);
+    void UpdateConsciousnessAudioFilters();
+    void CalculateSpatialAudioParameters();
 
-    // Transition timers
-    FTimerHandle ZoneTransitionTimer;
-    FTimerHandle EmotionalTransitionTimer;
-    
-    bool bIsInitialized = false;
-    bool bIsTransitioning = false;
+    // Fade management
+    struct FAudioFade
+    {
+        UAudioComponent* Component;
+        float StartVolume;
+        float TargetVolume;
+        float FadeTime;
+        float ElapsedTime;
+    };
+
+    TArray<FAudioFade> ActiveFades;
+    UWorld* WorldContext;
 };
