@@ -5,184 +5,141 @@
 #include "Components/ActorComponent.h"
 #include "Engine/Engine.h"
 #include "PhysicsEngine/PhysicsSettings.h"
+#include "Chaos/ChaosEngineInterface.h"
 #include "PhysicsSystemManager.generated.h"
 
-class UAdvancedRagdollComponent;
-class UDestructionComponent;
-class UVehiclePhysicsComponent;
+class UCore_RagdollComponent;
+class UCore_DestructionComponent;
+class UCore_CollisionComponent;
+
+UENUM(BlueprintType)
+enum class ECore_PhysicsQuality : uint8
+{
+    Low         UMETA(DisplayName = "Low Quality"),
+    Medium      UMETA(DisplayName = "Medium Quality"),
+    High        UMETA(DisplayName = "High Quality"),
+    Ultra       UMETA(DisplayName = "Ultra Quality")
+};
+
+USTRUCT(BlueprintType)
+struct FCore_PhysicsSettings
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    float GravityScale = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    int32 MaxSubsteps = 6;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    float FixedTimeStep = 0.016667f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    ECore_PhysicsQuality QualityLevel = ECore_PhysicsQuality::High;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 MaxSimulatedBodies = 1000;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float CullDistance = 5000.0f;
+};
+
+USTRUCT(BlueprintType)
+struct FCore_PhysicsStats
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Stats")
+    int32 ActiveRigidBodies = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Stats")
+    int32 SleepingBodies = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Stats")
+    float PhysicsFrameTime = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Stats")
+    int32 CollisionPairs = 0;
+};
 
 /**
- * @brief Central manager for all physics systems in the Transpersonal Game
- * 
- * This class orchestrates physics simulation, manages performance budgets,
- * and provides unified interface for all physics-related operations.
- * 
- * Key responsibilities:
- * - Physics simulation management and optimization
- * - Ragdoll system coordination
- * - Destruction system oversight
- * - Vehicle physics integration
- * - Performance monitoring and LOD management
- * 
- * @author Core Systems Programmer - Agent #03
- * @version 1.0
- * @date 2024
+ * Core physics system manager that orchestrates all physics subsystems
+ * Manages ragdoll, destruction, collision, and performance optimization
  */
 UCLASS(BlueprintType, Blueprintable, ClassGroup=(TranspersonalGame))
-class TRANSPERSONALGAME_API UPhysicsSystemManager : public UActorComponent
+class TRANSPERSONALGAME_API UCore_PhysicsSystemManager : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    UPhysicsSystemManager();
+    UCore_PhysicsSystemManager();
 
 protected:
     virtual void BeginPlay() override;
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 public:
-    /**
-     * @brief Initialize the physics system with performance parameters
-     * @param MaxSimulatedBodies Maximum number of physics bodies to simulate simultaneously
-     * @param PhysicsLODDistance Distance at which physics LOD kicks in
-     */
+    // Core physics management
     UFUNCTION(BlueprintCallable, Category = "Physics System")
-    void InitializePhysicsSystem(int32 MaxSimulatedBodies = 1000, float PhysicsLODDistance = 5000.0f);
+    void InitializePhysicsSystem();
 
-    /**
-     * @brief Register a ragdoll component for management
-     * @param RagdollComponent The ragdoll component to register
-     */
     UFUNCTION(BlueprintCallable, Category = "Physics System")
-    void RegisterRagdollComponent(UAdvancedRagdollComponent* RagdollComponent);
+    void ShutdownPhysicsSystem();
 
-    /**
-     * @brief Register a destruction component for management
-     * @param DestructionComponent The destruction component to register
-     */
     UFUNCTION(BlueprintCallable, Category = "Physics System")
-    void RegisterDestructionComponent(UDestructionComponent* DestructionComponent);
+    void UpdatePhysicsSettings(const FCore_PhysicsSettings& NewSettings);
 
-    /**
-     * @brief Register a vehicle physics component for management
-     * @param VehicleComponent The vehicle physics component to register
-     */
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
-    void RegisterVehicleComponent(UVehiclePhysicsComponent* VehicleComponent);
+    // Performance management
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void OptimizePhysicsPerformance();
 
-    /**
-     * @brief Get current physics performance metrics
-     * @return Struct containing performance data
-     */
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
-    FPhysicsPerformanceData GetPhysicsPerformanceData() const;
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void CullDistantPhysicsBodies(const FVector& ViewerLocation);
 
-    /**
-     * @brief Force physics LOD update for all managed components
-     */
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
-    void UpdatePhysicsLOD();
+    // Component registration
+    UFUNCTION(BlueprintCallable, Category = "Component Management")
+    void RegisterRagdollComponent(UCore_RagdollComponent* Component);
 
-    /**
-     * @brief Enable/disable physics simulation globally
-     * @param bEnabled Whether physics should be enabled
-     */
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
-    void SetPhysicsEnabled(bool bEnabled);
+    UFUNCTION(BlueprintCallable, Category = "Component Management")
+    void RegisterDestructionComponent(UCore_DestructionComponent* Component);
+
+    UFUNCTION(BlueprintCallable, Category = "Component Management")
+    void RegisterCollisionComponent(UCore_CollisionComponent* Component);
+
+    // Stats and monitoring
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Stats")
+    FCore_PhysicsStats GetPhysicsStats() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Debug")
+    void TogglePhysicsDebugDraw();
+
+    UFUNCTION(CallInEditor, Category = "Editor Tools")
+    void ValidatePhysicsSetup();
 
 protected:
-    /** Maximum number of physics bodies that can be simulated simultaneously */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxSimulatedBodies;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
+    FCore_PhysicsSettings PhysicsSettings;
 
-    /** Distance at which physics LOD reduction begins */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float PhysicsLODDistance;
+    UPROPERTY(BlueprintReadOnly, Category = "Stats")
+    FCore_PhysicsStats CurrentStats;
 
-    /** Whether physics simulation is currently enabled */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics System")
-    bool bPhysicsEnabled;
+    UPROPERTY(BlueprintReadOnly, Category = "Components")
+    TArray<UCore_RagdollComponent*> RegisteredRagdollComponents;
 
-    /** Current frame time budget for physics (in milliseconds) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float PhysicsTimeBudget;
+    UPROPERTY(BlueprintReadOnly, Category = "Components")
+    TArray<UCore_DestructionComponent*> RegisteredDestructionComponents;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Components")
+    TArray<UCore_CollisionComponent*> RegisteredCollisionComponents;
 
 private:
-    /** Registered ragdoll components */
-    UPROPERTY()
-    TArray<UAdvancedRagdollComponent*> RegisteredRagdolls;
+    void UpdatePhysicsStats();
+    void ApplyQualitySettings();
+    void ManagePhysicsLOD();
 
-    /** Registered destruction components */
-    UPROPERTY()
-    TArray<UDestructionComponent*> RegisteredDestructionComponents;
-
-    /** Registered vehicle physics components */
-    UPROPERTY()
-    TArray<UVehiclePhysicsComponent*> RegisteredVehicleComponents;
-
-    /** Current physics performance metrics */
-    mutable FPhysicsPerformanceData CachedPerformanceData;
-
-    /** Last time performance data was updated */
-    mutable float LastPerformanceUpdateTime;
-
-    /** Performance data cache duration */
-    static constexpr float PERFORMANCE_CACHE_DURATION = 0.1f; // 100ms
-
-    /**
-     * @brief Update internal performance metrics
-     */
-    void UpdatePerformanceMetrics() const;
-
-    /**
-     * @brief Apply LOD to physics components based on distance
-     */
-    void ApplyPhysicsLOD();
-
-    /**
-     * @brief Manage physics simulation budget
-     */
-    void ManagePhysicsBudget(float DeltaTime);
-};
-
-/**
- * @brief Structure containing physics performance data
- */
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FPhysicsPerformanceData
-{
-    GENERATED_BODY()
-
-    /** Number of currently active physics bodies */
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 ActivePhysicsBodies;
-
-    /** Current physics simulation time in milliseconds */
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float PhysicsSimulationTime;
-
-    /** Number of active ragdoll instances */
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 ActiveRagdolls;
-
-    /** Number of active destruction instances */
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 ActiveDestructions;
-
-    /** Number of active vehicle physics instances */
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 ActiveVehicles;
-
-    /** Current physics LOD level (0 = full detail, higher = reduced detail) */
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 CurrentLODLevel;
-
-    FPhysicsPerformanceData()
-        : ActivePhysicsBodies(0)
-        , PhysicsSimulationTime(0.0f)
-        , ActiveRagdolls(0)
-        , ActiveDestructions(0)
-        , ActiveVehicles(0)
-        , CurrentLODLevel(0)
-    {}
+    bool bIsInitialized = false;
+    bool bDebugDrawEnabled = false;
+    float StatsUpdateTimer = 0.0f;
+    static constexpr float STATS_UPDATE_FREQUENCY = 0.1f; // 10 times per second
 };
