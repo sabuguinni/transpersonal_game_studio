@@ -1,107 +1,155 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/Engine.h"
+#include "Engine/World.h"
 #include "Components/AudioComponent.h"
-#include "Sound/SoundWave.h"
 #include "Sound/SoundCue.h"
-#include "MetasoundSource.h"
+#include "Sound/SoundWave.h"
+#include "Engine/Engine.h"
+#include "Subsystems/WorldSubsystem.h"
 #include "AudioSystemManager.generated.h"
 
+UENUM(BlueprintType)
+enum class EAudio_MusicLayer : uint8
+{
+    Ambient     UMETA(DisplayName = "Ambient Layer"),
+    Melodic     UMETA(DisplayName = "Melodic Layer"),
+    Rhythmic    UMETA(DisplayName = "Rhythmic Layer"),
+    Spiritual   UMETA(DisplayName = "Spiritual Layer")
+};
+
+UENUM(BlueprintType)
+enum class EAudio_EmotionalState : uint8
+{
+    Peaceful        UMETA(DisplayName = "Peaceful"),
+    Contemplative   UMETA(DisplayName = "Contemplative"),
+    Mystical        UMETA(DisplayName = "Mystical"),
+    Transformative  UMETA(DisplayName = "Transformative"),
+    Awakening       UMETA(DisplayName = "Awakening")
+};
+
+USTRUCT(BlueprintType)
+struct FAudio_MusicConfiguration
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Music")
+    float AmbientVolume = 0.7f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Music")
+    float MelodicVolume = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Music")
+    float RhythmicVolume = 0.3f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Music")
+    float SpiritualVolume = 0.4f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Music")
+    EAudio_EmotionalState CurrentEmotionalState = EAudio_EmotionalState::Peaceful;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Music")
+    float TransitionDuration = 3.0f;
+};
+
+USTRUCT(BlueprintType)
+struct FAudio_SpatialConfiguration
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spatial Audio")
+    float MaxAudibleDistance = 5000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spatial Audio")
+    float AttenuationRadius = 1000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spatial Audio")
+    bool bUse3DAudio = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spatial Audio")
+    float DopplerFactor = 1.0f;
+};
+
 /**
- * Audio System Manager - Core audio orchestration for Transpersonal Game
- * Handles adaptive music, spatial audio, consciousness-based audio transitions
- * Based on Walter Murch principles: "The sound that doesn't exist is often more powerful than the sound that does"
+ * Audio System Manager - Handles adaptive music, spatial audio, and consciousness-based sound design
+ * Implements Walter Murch's philosophy: the sound that doesn't exist is often more powerful than the sound that does
  */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UAudioSystemManager : public UObject
+class TRANSPERSONALGAME_API UAudioSystemManager : public UWorldSubsystem
 {
     GENERATED_BODY()
 
 public:
     UAudioSystemManager();
 
-    // === CORE AUDIO MANAGEMENT ===
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+
+    // Music System
     UFUNCTION(BlueprintCallable, Category = "Audio System")
-    void InitializeAudioSystem();
+    void SetEmotionalState(EAudio_EmotionalState NewState, float TransitionTime = 3.0f);
 
     UFUNCTION(BlueprintCallable, Category = "Audio System")
-    void UpdateAudioState(float DeltaTime);
+    void SetMusicLayerVolume(EAudio_MusicLayer Layer, float Volume, float FadeTime = 2.0f);
 
     UFUNCTION(BlueprintCallable, Category = "Audio System")
-    void SetMasterVolume(float Volume);
+    void PlayConsciousnessShiftSound(FVector Location = FVector::ZeroVector);
 
-    // === ADAPTIVE MUSIC SYSTEM ===
-    UFUNCTION(BlueprintCallable, Category = "Adaptive Music")
-    void TransitionToMusicState(const FString& NewState, float FadeTime = 2.0f);
+    // Spatial Audio
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void RegisterSpatialAudioSource(AActor* SourceActor, USoundCue* SoundCue, const FAudio_SpatialConfiguration& Config);
 
-    UFUNCTION(BlueprintCallable, Category = "Adaptive Music")
-    void SetConsciousnessLevel(float Level); // 0.0 = unconscious, 1.0 = fully awakened
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void UpdateListenerPosition(FVector NewPosition, FRotator NewRotation);
 
-    UFUNCTION(BlueprintCallable, Category = "Adaptive Music")
-    void TriggerSpiritualMoment(const FString& MomentType);
+    // Ambient System
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void SetBiomeAmbience(const FString& BiomeName, float FadeTime = 5.0f);
 
-    // === SPATIAL AUDIO ===
-    UFUNCTION(BlueprintCallable, Category = "Spatial Audio")
-    void PlaySoundAtLocation(USoundBase* Sound, FVector Location, float Volume = 1.0f);
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void AddAmbienceLayer(const FString& LayerName, USoundCue* SoundCue, float Volume = 0.5f);
 
-    UFUNCTION(BlueprintCallable, Category = "Spatial Audio")
-    void SetEnvironmentAudioProfile(const FString& ProfileName);
+    // Voice & Narration
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void PlayNarration(USoundWave* NarrationSound, bool bInterruptCurrent = false);
 
-    // === CONSCIOUSNESS AUDIO EFFECTS ===
-    UFUNCTION(BlueprintCallable, Category = "Consciousness Audio")
-    void ApplyConsciousnessFilter(float Intensity); // Applies ethereal/spiritual audio processing
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void SetNarrationVolume(float Volume);
 
-    UFUNCTION(BlueprintCallable, Category = "Consciousness Audio")
-    void PlayNarrationVoice(const FString& NarrationKey, bool bInterruptCurrent = false);
+    // Debug & Testing
+    UFUNCTION(BlueprintCallable, Category = "Audio System", CallInEditor)
+    void TestAudioSystem();
 
-    UFUNCTION(BlueprintCallable, Category = "Consciousness Audio")
-    void TriggerAncientWisdomWhisper(FVector Location);
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void LogCurrentAudioState();
 
 protected:
-    // === AUDIO STATE TRACKING ===
-    UPROPERTY(BlueprintReadOnly, Category = "Audio State")
-    FString CurrentMusicState;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
+    FAudio_MusicConfiguration MusicConfig;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Audio State")
-    float CurrentConsciousnessLevel;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Audio State")
-    float MasterVolumeLevel;
-
-    // === AUDIO COMPONENTS ===
-    UPROPERTY(BlueprintReadOnly, Category = "Audio Components")
-    TObjectPtr<UAudioComponent> MusicAudioComponent;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
+    FAudio_SpatialConfiguration DefaultSpatialConfig;
 
     UPROPERTY(BlueprintReadOnly, Category = "Audio Components")
-    TObjectPtr<UAudioComponent> AmbienceAudioComponent;
+    TArray<UAudioComponent*> MusicLayers;
 
     UPROPERTY(BlueprintReadOnly, Category = "Audio Components")
-    TObjectPtr<UAudioComponent> NarrationAudioComponent;
+    TArray<UAudioComponent*> AmbienceLayers;
 
-    // === AUDIO ASSETS ===
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Audio Assets")
-    TMap<FString, TObjectPtr<USoundBase>> MusicStates;
+    UPROPERTY(BlueprintReadOnly, Category = "Audio Components")
+    UAudioComponent* NarrationComponent;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Audio Assets")
-    TMap<FString, TObjectPtr<USoundBase>> EnvironmentProfiles;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Audio Assets")
-    TMap<FString, TObjectPtr<USoundBase>> NarrationVoices;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Audio Assets")
-    TObjectPtr<USoundBase> SpiritualWhisperSound;
+    UPROPERTY(BlueprintReadOnly, Category = "Audio Components")
+    UAudioComponent* SFXComponent;
 
 private:
-    // === INTERNAL AUDIO PROCESSING ===
-    void UpdateAdaptiveMusic(float DeltaTime);
-    void ProcessConsciousnessAudio();
-    void HandleAudioTransitions();
+    void InitializeMusicLayers();
+    void InitializeAmbienceLayers();
+    void UpdateMusicBasedOnEmotionalState();
+    void CrossfadeToNewState(EAudio_EmotionalState NewState, float Duration);
 
-    // === AUDIO STATE VARIABLES ===
-    float MusicTransitionTimer;
-    float ConsciousnessFilterIntensity;
+    FTimerHandle MusicTransitionTimer;
+    EAudio_EmotionalState PreviousEmotionalState;
     bool bIsTransitioning;
-    FString PendingMusicState;
-    float PendingFadeTime;
 };
