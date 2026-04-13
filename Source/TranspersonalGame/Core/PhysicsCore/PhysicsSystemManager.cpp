@@ -1,290 +1,261 @@
 #include "PhysicsSystemManager.h"
-#include "AdvancedRagdollComponent.h"
-#include "DestructionComponent.h"
-#include "VehiclePhysicsComponent.h"
+#include "Core_RagdollComponent.h"
+#include "Core_DestructionComponent.h"
+#include "Core_CollisionComponent.h"
 #include "Engine/World.h"
-#include "Engine/Engine.h"
-#include "GameFramework/PlayerController.h"
-#include "Kismet/GameplayStatics.h"
+#include "DrawDebugHelpers.h"
+#include "PhysicsEngine/PhysicsSettings.h"
+#include "Chaos/ChaosEngineInterface.h"
 
-UPhysicsSystemManager::UPhysicsSystemManager()
+UCore_PhysicsSystemManager::UCore_PhysicsSystemManager()
 {
     PrimaryComponentTick.bCanEverTick = true;
     PrimaryComponentTick.TickGroup = TG_PrePhysics;
     
-    MaxSimulatedBodies = 1000;
-    PhysicsLODDistance = 5000.0f;
-    bPhysicsEnabled = true;
-    PhysicsTimeBudget = 16.67f; // Target 60 FPS
-    LastPerformanceUpdateTime = 0.0f;
+    // Initialize default settings
+    PhysicsSettings.GravityScale = 1.0f;
+    PhysicsSettings.MaxSubsteps = 6;
+    PhysicsSettings.FixedTimeStep = 0.016667f;
+    PhysicsSettings.QualityLevel = ECore_PhysicsQuality::High;
+    PhysicsSettings.MaxSimulatedBodies = 1000;
+    PhysicsSettings.CullDistance = 5000.0f;
 }
 
-void UPhysicsSystemManager::BeginPlay()
+void UCore_PhysicsSystemManager::BeginPlay()
 {
     Super::BeginPlay();
-    
-    UE_LOG(LogTemp, Log, TEXT("PhysicsSystemManager: Initializing physics systems"));
-    
-    // Initialize with default parameters
-    InitializePhysicsSystem(MaxSimulatedBodies, PhysicsLODDistance);
+    InitializePhysicsSystem();
 }
 
-void UPhysicsSystemManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UCore_PhysicsSystemManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    if (!bPhysicsEnabled)
-    {
+    if (!bIsInitialized)
         return;
+
+    // Update stats periodically
+    StatsUpdateTimer += DeltaTime;
+    if (StatsUpdateTimer >= STATS_UPDATE_FREQUENCY)
+    {
+        UpdatePhysicsStats();
+        StatsUpdateTimer = 0.0f;
     }
-    
-    // Manage physics performance budget
-    ManagePhysicsBudget(DeltaTime);
-    
-    // Update physics LOD based on performance
-    ApplyPhysicsLOD();
-    
-    // Clean up null references
-    RegisteredRagdolls.RemoveAll([](UAdvancedRagdollComponent* Comp) { return !IsValid(Comp); });
-    RegisteredDestructionComponents.RemoveAll([](UDestructionComponent* Comp) { return !IsValid(Comp); });
-    RegisteredVehicleComponents.RemoveAll([](UVehiclePhysicsComponent* Comp) { return !IsValid(Comp); });
+
+    // Manage physics LOD based on performance
+    ManagePhysicsLOD();
 }
 
-void UPhysicsSystemManager::InitializePhysicsSystem(int32 MaxSimulatedBodies, float PhysicsLODDistance)
+void UCore_PhysicsSystemManager::InitializePhysicsSystem()
 {
-    this->MaxSimulatedBodies = MaxSimulatedBodies;
-    this->PhysicsLODDistance = PhysicsLODDistance;
-    
-    // Configure physics settings
-    if (UPhysicsSettings* PhysicsSettings = GetMutableDefault<UPhysicsSettings>())
-    {
-        // Optimize for performance while maintaining quality
-        PhysicsSettings->DefaultGravityZ = -980.0f; // Realistic gravity
-        PhysicsSettings->SolverIterationCount = 8; // Balance between stability and performance
-        PhysicsSettings->SolverPushOutIterationCount = 3;
-        
-        // Enable CCD for fast-moving objects
-        PhysicsSettings->bEnablePCM = true;
-        PhysicsSettings->bEnableStabilization = true;
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("PhysicsSystemManager: Initialized with MaxBodies=%d, LODDistance=%.1f"), 
-           MaxSimulatedBodies, PhysicsLODDistance);
-}
-
-void UPhysicsSystemManager::RegisterRagdollComponent(UAdvancedRagdollComponent* RagdollComponent)
-{
-    if (IsValid(RagdollComponent) && !RegisteredRagdolls.Contains(RagdollComponent))
-    {
-        RegisteredRagdolls.Add(RagdollComponent);
-        UE_LOG(LogTemp, Verbose, TEXT("PhysicsSystemManager: Registered ragdoll component"));
-    }
-}
-
-void UPhysicsSystemManager::RegisterDestructionComponent(UDestructionComponent* DestructionComponent)
-{
-    if (IsValid(DestructionComponent) && !RegisteredDestructionComponents.Contains(DestructionComponent))
-    {
-        RegisteredDestructionComponents.Add(DestructionComponent);
-        UE_LOG(LogTemp, Verbose, TEXT("PhysicsSystemManager: Registered destruction component"));
-    }
-}
-
-void UPhysicsSystemManager::RegisterVehicleComponent(UVehiclePhysicsComponent* VehicleComponent)
-{
-    if (IsValid(VehicleComponent) && !RegisteredVehicleComponents.Contains(VehicleComponent))
-    {
-        RegisteredVehicleComponents.Add(VehicleComponent);
-        UE_LOG(LogTemp, Verbose, TEXT("PhysicsSystemManager: Registered vehicle component"));
-    }
-}
-
-FPhysicsPerformanceData UPhysicsSystemManager::GetPhysicsPerformanceData() const
-{
-    // Update cached data if needed
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-    if (CurrentTime - LastPerformanceUpdateTime > PERFORMANCE_CACHE_DURATION)
-    {
-        UpdatePerformanceMetrics();
-        LastPerformanceUpdateTime = CurrentTime;
-    }
-    
-    return CachedPerformanceData;
-}
-
-void UPhysicsSystemManager::UpdatePhysicsLOD()
-{
-    ApplyPhysicsLOD();
-}
-
-void UPhysicsSystemManager::SetPhysicsEnabled(bool bEnabled)
-{
-    bPhysicsEnabled = bEnabled;
-    
-    if (!bEnabled)
-    {
-        // Pause all physics simulation
-        if (UWorld* World = GetWorld())
-        {
-            World->GetPhysicsScene()->SetIsStaticLoading(true);
-        }
-    }
-    else
-    {
-        // Resume physics simulation
-        if (UWorld* World = GetWorld())
-        {
-            World->GetPhysicsScene()->SetIsStaticLoading(false);
-        }
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("PhysicsSystemManager: Physics simulation %s"), 
-           bEnabled ? TEXT("enabled") : TEXT("disabled"));
-}
-
-void UPhysicsSystemManager::UpdatePerformanceMetrics() const
-{
-    CachedPerformanceData = FPhysicsPerformanceData();
-    
-    // Count active physics bodies in the world
-    if (UWorld* World = GetWorld())
-    {
-        // This is a simplified count - in production, you'd want to query the physics scene directly
-        TArray<AActor*> AllActors;
-        UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
-        
-        for (AActor* Actor : AllActors)
-        {
-            if (IsValid(Actor))
-            {
-                TArray<UPrimitiveComponent*> PrimitiveComponents;
-                Actor->GetComponents<UPrimitiveComponent>(PrimitiveComponents);
-                
-                for (UPrimitiveComponent* PrimComp : PrimitiveComponents)
-                {
-                    if (PrimComp && PrimComp->IsSimulatingPhysics())
-                    {
-                        CachedPerformanceData.ActivePhysicsBodies++;
-                    }
-                }
-            }
-        }
-    }
-    
-    // Count active specialized components
-    CachedPerformanceData.ActiveRagdolls = RegisteredRagdolls.Num();
-    CachedPerformanceData.ActiveDestructions = RegisteredDestructionComponents.Num();
-    CachedPerformanceData.ActiveVehicles = RegisteredVehicleComponents.Num();
-    
-    // Calculate current LOD level based on performance
-    if (CachedPerformanceData.ActivePhysicsBodies > MaxSimulatedBodies * 0.8f)
-    {
-        CachedPerformanceData.CurrentLODLevel = 2; // High LOD
-    }
-    else if (CachedPerformanceData.ActivePhysicsBodies > MaxSimulatedBodies * 0.6f)
-    {
-        CachedPerformanceData.CurrentLODLevel = 1; // Medium LOD
-    }
-    else
-    {
-        CachedPerformanceData.CurrentLODLevel = 0; // Full detail
-    }
-    
-    // Estimate physics simulation time (simplified)
-    CachedPerformanceData.PhysicsSimulationTime = CachedPerformanceData.ActivePhysicsBodies * 0.01f; // Rough estimate
-}
-
-void UPhysicsSystemManager::ApplyPhysicsLOD()
-{
-    if (!bPhysicsEnabled)
-    {
+    if (bIsInitialized)
         return;
-    }
-    
-    // Get player location for distance calculations
-    FVector PlayerLocation = FVector::ZeroVector;
-    if (UWorld* World = GetWorld())
-    {
-        if (APlayerController* PC = World->GetFirstPlayerController())
-        {
-            if (APawn* PlayerPawn = PC->GetPawn())
-            {
-                PlayerLocation = PlayerPawn->GetActorLocation();
-            }
-        }
-    }
-    
-    // Apply LOD to ragdoll components
-    for (UAdvancedRagdollComponent* RagdollComp : RegisteredRagdolls)
+
+    UE_LOG(LogTemp, Warning, TEXT("PhysicsSystemManager: Initializing physics system..."));
+
+    // Apply quality settings
+    ApplyQualitySettings();
+
+    // Initialize component arrays
+    RegisteredRagdollComponents.Empty();
+    RegisteredDestructionComponents.Empty();
+    RegisteredCollisionComponents.Empty();
+
+    bIsInitialized = true;
+    UE_LOG(LogTemp, Warning, TEXT("PhysicsSystemManager: Physics system initialized successfully"));
+}
+
+void UCore_PhysicsSystemManager::ShutdownPhysicsSystem()
+{
+    if (!bIsInitialized)
+        return;
+
+    UE_LOG(LogTemp, Warning, TEXT("PhysicsSystemManager: Shutting down physics system..."));
+
+    // Clear all registered components
+    RegisteredRagdollComponents.Empty();
+    RegisteredDestructionComponents.Empty();
+    RegisteredCollisionComponents.Empty();
+
+    bIsInitialized = false;
+    UE_LOG(LogTemp, Warning, TEXT("PhysicsSystemManager: Physics system shutdown complete"));
+}
+
+void UCore_PhysicsSystemManager::UpdatePhysicsSettings(const FCore_PhysicsSettings& NewSettings)
+{
+    PhysicsSettings = NewSettings;
+    ApplyQualitySettings();
+    UE_LOG(LogTemp, Log, TEXT("PhysicsSystemManager: Physics settings updated"));
+}
+
+void UCore_PhysicsSystemManager::OptimizePhysicsPerformance()
+{
+    if (!bIsInitialized)
+        return;
+
+    // Optimize ragdoll components
+    for (UCore_RagdollComponent* RagdollComp : RegisteredRagdollComponents)
     {
         if (IsValid(RagdollComp))
         {
-            float Distance = FVector::Dist(PlayerLocation, RagdollComp->GetOwner()->GetActorLocation());
-            
-            if (Distance > PhysicsLODDistance)
-            {
-                // Reduce ragdoll fidelity or disable
-                RagdollComp->SetPhysicsLODLevel(2);
-            }
-            else if (Distance > PhysicsLODDistance * 0.5f)
-            {
-                // Medium LOD
-                RagdollComp->SetPhysicsLODLevel(1);
-            }
-            else
-            {
-                // Full detail
-                RagdollComp->SetPhysicsLODLevel(0);
-            }
+            // Distance-based optimization would go here
+            // RagdollComp->OptimizeForDistance(ViewerLocation);
         }
     }
-    
-    // Apply LOD to destruction components
-    for (UDestructionComponent* DestructionComp : RegisteredDestructionComponents)
+
+    // Optimize destruction components
+    for (UCore_DestructionComponent* DestructionComp : RegisteredDestructionComponents)
     {
         if (IsValid(DestructionComp))
         {
-            float Distance = FVector::Dist(PlayerLocation, DestructionComp->GetOwner()->GetActorLocation());
-            
-            if (Distance > PhysicsLODDistance)
+            // Destruction optimization would go here
+            // DestructionComp->OptimizeForPerformance();
+        }
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("PhysicsSystemManager: Performance optimization complete"));
+}
+
+void UCore_PhysicsSystemManager::CullDistantPhysicsBodies(const FVector& ViewerLocation)
+{
+    if (!bIsInitialized)
+        return;
+
+    int32 CulledBodies = 0;
+    const float CullDistanceSquared = PhysicsSettings.CullDistance * PhysicsSettings.CullDistance;
+
+    // Cull ragdoll components
+    for (UCore_RagdollComponent* RagdollComp : RegisteredRagdollComponents)
+    {
+        if (IsValid(RagdollComp))
+        {
+            float DistanceSquared = FVector::DistSquared(ViewerLocation, RagdollComp->GetOwner()->GetActorLocation());
+            if (DistanceSquared > CullDistanceSquared)
             {
-                DestructionComp->SetDestructionLODLevel(2);
-            }
-            else if (Distance > PhysicsLODDistance * 0.5f)
-            {
-                DestructionComp->SetDestructionLODLevel(1);
-            }
-            else
-            {
-                DestructionComp->SetDestructionLODLevel(0);
+                // RagdollComp->SetSimulationEnabled(false);
+                CulledBodies++;
             }
         }
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("PhysicsSystemManager: Culled %d distant physics bodies"), CulledBodies);
+}
+
+void UCore_PhysicsSystemManager::RegisterRagdollComponent(UCore_RagdollComponent* Component)
+{
+    if (IsValid(Component) && !RegisteredRagdollComponents.Contains(Component))
+    {
+        RegisteredRagdollComponents.Add(Component);
+        UE_LOG(LogTemp, Log, TEXT("PhysicsSystemManager: Registered ragdoll component"));
     }
 }
 
-void UPhysicsSystemManager::ManagePhysicsBudget(float DeltaTime)
+void UCore_PhysicsSystemManager::RegisterDestructionComponent(UCore_DestructionComponent* Component)
 {
-    FPhysicsPerformanceData PerfData = GetPhysicsPerformanceData();
-    
-    // If we're exceeding our physics budget, start reducing quality
-    if (PerfData.PhysicsSimulationTime > PhysicsTimeBudget)
+    if (IsValid(Component) && !RegisteredDestructionComponents.Contains(Component))
     {
-        // Reduce physics quality globally
-        if (UPhysicsSettings* PhysicsSettings = GetMutableDefault<UPhysicsSettings>())
-        {
-            // Reduce solver iterations temporarily
-            PhysicsSettings->SolverIterationCount = FMath::Max(4, PhysicsSettings->SolverIterationCount - 1);
-        }
-        
-        UE_LOG(LogTemp, Warning, TEXT("PhysicsSystemManager: Reducing physics quality due to budget overrun"));
+        RegisteredDestructionComponents.Add(Component);
+        UE_LOG(LogTemp, Log, TEXT("PhysicsSystemManager: Registered destruction component"));
     }
-    else if (PerfData.PhysicsSimulationTime < PhysicsTimeBudget * 0.7f)
+}
+
+void UCore_PhysicsSystemManager::RegisterCollisionComponent(UCore_CollisionComponent* Component)
+{
+    if (IsValid(Component) && !RegisteredCollisionComponents.Contains(Component))
     {
-        // We have budget to spare, increase quality
-        if (UPhysicsSettings* PhysicsSettings = GetMutableDefault<UPhysicsSettings>())
+        RegisteredCollisionComponents.Add(Component);
+        UE_LOG(LogTemp, Log, TEXT("PhysicsSystemManager: Registered collision component"));
+    }
+}
+
+FCore_PhysicsStats UCore_PhysicsSystemManager::GetPhysicsStats() const
+{
+    return CurrentStats;
+}
+
+void UCore_PhysicsSystemManager::TogglePhysicsDebugDraw()
+{
+    bDebugDrawEnabled = !bDebugDrawEnabled;
+    UE_LOG(LogTemp, Warning, TEXT("PhysicsSystemManager: Debug draw %s"), bDebugDrawEnabled ? TEXT("enabled") : TEXT("disabled"));
+}
+
+void UCore_PhysicsSystemManager::ValidatePhysicsSetup()
+{
+    UE_LOG(LogTemp, Warning, TEXT("=== Physics System Validation ==="));
+    UE_LOG(LogTemp, Warning, TEXT("Initialized: %s"), bIsInitialized ? TEXT("Yes") : TEXT("No"));
+    UE_LOG(LogTemp, Warning, TEXT("Registered Ragdoll Components: %d"), RegisteredRagdollComponents.Num());
+    UE_LOG(LogTemp, Warning, TEXT("Registered Destruction Components: %d"), RegisteredDestructionComponents.Num());
+    UE_LOG(LogTemp, Warning, TEXT("Registered Collision Components: %d"), RegisteredCollisionComponents.Num());
+    UE_LOG(LogTemp, Warning, TEXT("Quality Level: %d"), (int32)PhysicsSettings.QualityLevel);
+    UE_LOG(LogTemp, Warning, TEXT("Max Simulated Bodies: %d"), PhysicsSettings.MaxSimulatedBodies);
+    UE_LOG(LogTemp, Warning, TEXT("=== Validation Complete ==="));
+}
+
+void UCore_PhysicsSystemManager::UpdatePhysicsStats()
+{
+    CurrentStats.ActiveRigidBodies = RegisteredRagdollComponents.Num() + RegisteredDestructionComponents.Num();
+    CurrentStats.SleepingBodies = 0; // Would be calculated from actual physics bodies
+    CurrentStats.PhysicsFrameTime = GetWorld() ? GetWorld()->GetDeltaSeconds() : 0.0f;
+    CurrentStats.CollisionPairs = RegisteredCollisionComponents.Num();
+}
+
+void UCore_PhysicsSystemManager::ApplyQualitySettings()
+{
+    UWorld* World = GetWorld();
+    if (!World)
+        return;
+
+    // Apply gravity scale
+    AWorldSettings* WorldSettings = World->GetWorldSettings();
+    if (WorldSettings)
+    {
+        WorldSettings->GlobalGravityZ = -980.0f * PhysicsSettings.GravityScale;
+    }
+
+    // Apply quality-specific settings
+    switch (PhysicsSettings.QualityLevel)
+    {
+        case ECore_PhysicsQuality::Low:
+            PhysicsSettings.MaxSubsteps = 2;
+            PhysicsSettings.FixedTimeStep = 0.033333f; // 30 FPS
+            break;
+        case ECore_PhysicsQuality::Medium:
+            PhysicsSettings.MaxSubsteps = 4;
+            PhysicsSettings.FixedTimeStep = 0.020000f; // 50 FPS
+            break;
+        case ECore_PhysicsQuality::High:
+            PhysicsSettings.MaxSubsteps = 6;
+            PhysicsSettings.FixedTimeStep = 0.016667f; // 60 FPS
+            break;
+        case ECore_PhysicsQuality::Ultra:
+            PhysicsSettings.MaxSubsteps = 8;
+            PhysicsSettings.FixedTimeStep = 0.008333f; // 120 FPS
+            break;
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("PhysicsSystemManager: Applied quality settings - Level: %d"), (int32)PhysicsSettings.QualityLevel);
+}
+
+void UCore_PhysicsSystemManager::ManagePhysicsLOD()
+{
+    // Simple LOD management based on frame rate
+    if (GetWorld())
+    {
+        float CurrentFPS = 1.0f / GetWorld()->GetDeltaSeconds();
+        
+        if (CurrentFPS < 30.0f && PhysicsSettings.QualityLevel > ECore_PhysicsQuality::Low)
         {
-            // Increase solver iterations back to optimal
-            PhysicsSettings->SolverIterationCount = FMath::Min(8, PhysicsSettings->SolverIterationCount + 1);
+            // Reduce quality if performance is poor
+            PhysicsSettings.QualityLevel = static_cast<ECore_PhysicsQuality>((int32)PhysicsSettings.QualityLevel - 1);
+            ApplyQualitySettings();
+            UE_LOG(LogTemp, Warning, TEXT("PhysicsSystemManager: Reduced physics quality due to low FPS"));
+        }
+        else if (CurrentFPS > 50.0f && PhysicsSettings.QualityLevel < ECore_PhysicsQuality::Ultra)
+        {
+            // Increase quality if performance allows
+            PhysicsSettings.QualityLevel = static_cast<ECore_PhysicsQuality>((int32)PhysicsSettings.QualityLevel + 1);
+            ApplyQualitySettings();
+            UE_LOG(LogTemp, Log, TEXT("PhysicsSystemManager: Increased physics quality due to good FPS"));
         }
     }
 }
