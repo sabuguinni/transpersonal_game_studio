@@ -1,372 +1,415 @@
 #include "AnimationSystemManager.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Animation/AnimInstance.h"
+#include "Animation/AnimMontage.h"
+#include "Animation/BlendSpace.h"
 #include "Engine/World.h"
 #include "DrawDebugHelpers.h"
 #include "Kismet/KismetMathLibrary.h"
-#include "MotionMatchingComponent.h"
-#include "FootIKComponent.h"
+#include "CollisionQueryParams.h"
 
 UAnimationSystemManager::UAnimationSystemManager()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickGroup = TG_PrePhysics;
-
+    PrimaryComponentTick.bStartWithTickEnabled = true;
+    
     // Initialize default values
-    LocomotionDatabase = nullptr;
-    CombatDatabase = nullptr;
-    InteractionDatabase = nullptr;
-
-    bEnableFootIK = true;
-    bEnableHandIK = true;
-    FootIKRange = 50.0f;
-    HandIKRange = 30.0f;
-
-    bIsInCombat = false;
-    bIsClimbing = false;
-    bIsSwimming = false;
-    bIsCrouching = false;
-
-    ConfidenceLevel = 0.5f;
-    AgilityLevel = 0.5f;
-    StrengthLevel = 0.5f;
-
-    BlendInTime = 0.2f;
-    BlendOutTime = 0.2f;
-
+    CurrentMovementState = EAnim_MovementState::Idle;
+    CurrentTerrainType = EAnim_TerrainType::Flat;
+    CurrentSpeed = 0.0f;
+    CurrentDirection = 0.0f;
     LastVelocity = FVector::ZeroVector;
-    LastPosition = FVector::ZeroVector;
-    LastUpdateTime = 0.0f;
-
-    MotionMatchingComponent = nullptr;
-    FootIKComponent = nullptr;
-    SkeletalMeshComponent = nullptr;
-    CharacterMovementComponent = nullptr;
+    LeftFootOffset = FVector::ZeroVector;
+    RightFootOffset = FVector::ZeroVector;
+    TerrainSlope = 0.0f;
+    TerrainNormal = FVector::UpVector;
+    
+    // Set default character animation data
+    CharacterAnimData.CharacterName = TEXT("PrehistoricCharacter");
+    CharacterAnimData.MovementSpeed = 300.0f;
+    CharacterAnimData.TurnRate = 90.0f;
 }
 
 void UAnimationSystemManager::BeginPlay()
 {
     Super::BeginPlay();
-
-    InitializeAnimationSystem();
+    
+    // Bind to character components
+    BindToCharacterComponents();
+    
+    // Initialize animation systems
+    InitializeMotionMatching();
+    InitializeIKSystem();
 }
 
 void UAnimationSystemManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
-    UpdateAnimationState(DeltaTime);
-}
-
-void UAnimationSystemManager::InitializeAnimationSystem()
-{
-    UE_LOG(LogTemp, Warning, TEXT("AnimationSystemManager: Initializing animation system..."));
-
-    // Cache component references
-    CacheComponentReferences();
-
-    // Create Motion Matching component if not exists
-    if (!MotionMatchingComponent && GetOwner())
-    {
-        MotionMatchingComponent = NewObject<UMotionMatchingComponent>(GetOwner());
-        if (MotionMatchingComponent)
-        {
-            GetOwner()->AddInstanceComponent(MotionMatchingComponent);
-            MotionMatchingComponent->RegisterComponent();
-            UE_LOG(LogTemp, Warning, TEXT("AnimationSystemManager: Created Motion Matching component"));
-        }
-    }
-
-    // Create Foot IK component if not exists
-    if (!FootIKComponent && GetOwner())
-    {
-        FootIKComponent = NewObject<UFootIKComponent>(GetOwner());
-        if (FootIKComponent)
-        {
-            GetOwner()->AddInstanceComponent(FootIKComponent);
-            FootIKComponent->RegisterComponent();
-            UE_LOG(LogTemp, Warning, TEXT("AnimationSystemManager: Created Foot IK component"));
-        }
-    }
-
-    // Validate animation databases
-    ValidateAnimationDatabases();
-
-    // Initialize position tracking
-    if (GetOwner())
-    {
-        LastPosition = GetOwner()->GetActorLocation();
-        LastUpdateTime = GetWorld()->GetTimeSeconds();
-    }
-
-    UE_LOG(LogTemp, Warning, TEXT("AnimationSystemManager: Animation system initialized successfully"));
-}
-
-void UAnimationSystemManager::UpdateAnimationState(float DeltaTime)
-{
-    if (!GetOwner() || !SkeletalMeshComponent)
-    {
-        return;
-    }
-
-    // Update movement data
-    UpdateMovementData(DeltaTime);
-
-    // Update IK systems
-    if (bEnableFootIK)
+    
+    // Update movement parameters
+    UpdateMovementParameters();
+    
+    // Perform terrain analysis
+    PerformTerrainTrace();
+    
+    // Update IK foot placement
+    if (CharacterAnimData.IKConfig.bEnableFootIK)
     {
         UpdateFootIK(DeltaTime);
     }
+    
+    // Update animation blending
+    UpdateAnimationBlending(DeltaTime);
+    
+    // Update trajectory prediction for Motion Matching
+    UpdateTrajectoryPrediction();
+}
 
-    if (bEnableHandIK)
+void UAnimationSystemManager::SetMovementState(EAnim_MovementState NewState)
+{
+    if (CurrentMovementState != NewState)
     {
-        UpdateHandIK(DeltaTime);
-    }
-
-    // Update Motion Matching component
-    if (MotionMatchingComponent)
-    {
-        // Motion Matching will be handled by the component itself
-        // We just provide the necessary data
+        EAnim_MovementState PreviousState = CurrentMovementState;
+        CurrentMovementState = NewState;
+        
+        UE_LOG(LogTemp, Log, TEXT("Animation state changed: %d -> %d"), 
+               (int32)PreviousState, (int32)CurrentMovementState);
+        
+        // Handle state-specific logic
+        switch (CurrentMovementState)
+        {
+            case EAnim_MovementState::Gathering:
+            case EAnim_MovementState::Crafting:
+            case EAnim_MovementState::Combat:
+                // Play appropriate action montage
+                PlayActionMontage(CurrentMovementState);
+                break;
+            default:
+                // Stop any playing montages for locomotion states
+                StopCurrentMontage();
+                break;
+        }
     }
 }
 
-void UAnimationSystemManager::SetMotionMatchingDatabase(UPoseSearchDatabase* Database)
+void UAnimationSystemManager::SetTerrainType(EAnim_TerrainType NewTerrainType)
 {
-    if (Database)
+    if (CurrentTerrainType != NewTerrainType)
     {
-        LocomotionDatabase = Database;
-        UE_LOG(LogTemp, Warning, TEXT("AnimationSystemManager: Motion Matching database set: %s"), *Database->GetName());
+        CurrentTerrainType = NewTerrainType;
+        UE_LOG(LogTemp, Log, TEXT("Terrain type changed: %d"), (int32)CurrentTerrainType);
     }
 }
 
-FVector UAnimationSystemManager::GetDesiredVelocity() const
+void UAnimationSystemManager::InitializeMotionMatching()
 {
-    if (CharacterMovementComponent)
+    if (!CharacterAnimData.MotionMatchingConfig.MotionDatabase)
     {
-        return CharacterMovementComponent->GetLastInputVector() * CharacterMovementComponent->GetMaxSpeed();
+        UE_LOG(LogTemp, Warning, TEXT("Motion Matching Database not set for character: %s"), 
+               *CharacterAnimData.CharacterName);
+        return;
     }
-    return FVector::ZeroVector;
+    
+    ConfigureMotionMatchingParameters();
+    
+    UE_LOG(LogTemp, Log, TEXT("Motion Matching initialized for character: %s"), 
+           *CharacterAnimData.CharacterName);
 }
 
-float UAnimationSystemManager::GetMovementSpeed() const
+void UAnimationSystemManager::UpdateMotionMatchingDatabase(class UPoseSearchDatabase* NewDatabase)
 {
-    if (CharacterMovementComponent)
-    {
-        return CharacterMovementComponent->Velocity.Size();
-    }
-    return 0.0f;
+    CharacterAnimData.MotionMatchingConfig.MotionDatabase = NewDatabase;
+    InitializeMotionMatching();
 }
 
-FVector UAnimationSystemManager::GetMovementDirection() const
+void UAnimationSystemManager::InitializeIKSystem()
 {
-    if (CharacterMovementComponent)
+    if (!CharacterAnimData.IKConfig.IKRig)
     {
-        FVector Velocity = CharacterMovementComponent->Velocity;
-        Velocity.Z = 0.0f; // Ignore vertical movement for direction
-        return Velocity.GetSafeNormal();
+        UE_LOG(LogTemp, Warning, TEXT("IK Rig not set for character: %s"), 
+               *CharacterAnimData.CharacterName);
+        return;
     }
-    return FVector::ForwardVector;
+    
+    UE_LOG(LogTemp, Log, TEXT("IK System initialized for character: %s"), 
+           *CharacterAnimData.CharacterName);
 }
 
 void UAnimationSystemManager::UpdateFootIK(float DeltaTime)
 {
-    if (!FootIKComponent || !bEnableFootIK)
+    if (!SkeletalMeshComponent || !CharacterAnimData.IKConfig.bEnableFootIK)
     {
         return;
     }
-
-    // Foot IK will be handled by the FootIKComponent
-    // This is where we would update foot placement based on terrain
+    
+    // Get foot bone locations
+    FVector LeftFootLocation = SkeletalMeshComponent->GetBoneLocation(TEXT("foot_l"));
+    FVector RightFootLocation = SkeletalMeshComponent->GetBoneLocation(TEXT("foot_r"));
+    
+    // Perform foot traces
+    FVector LeftFootTarget = GetFootPlacementOffset(true);
+    FVector RightFootTarget = GetFootPlacementOffset(false);
+    
+    // Smoothly interpolate foot offsets
+    float InterpSpeed = CharacterAnimData.IKConfig.FootAdjustmentSpeed;
+    LeftFootOffset = FMath::VInterpTo(LeftFootOffset, LeftFootTarget, DeltaTime, InterpSpeed);
+    RightFootOffset = FMath::VInterpTo(RightFootOffset, RightFootTarget, DeltaTime, InterpSpeed);
+    
+    // Clamp foot offsets to maximum allowed
+    float MaxOffset = CharacterAnimData.IKConfig.MaxFootOffset;
+    LeftFootOffset = LeftFootOffset.GetClampedToMaxSize(MaxOffset);
+    RightFootOffset = RightFootOffset.GetClampedToMaxSize(MaxOffset);
 }
 
-void UAnimationSystemManager::UpdateHandIK(float DeltaTime)
+FVector UAnimationSystemManager::GetFootPlacementOffset(bool bIsLeftFoot) const
 {
-    if (!bEnableHandIK)
+    if (!SkeletalMeshComponent)
+    {
+        return FVector::ZeroVector;
+    }
+    
+    // Get foot bone name
+    FName FootBoneName = bIsLeftFoot ? TEXT("foot_l") : TEXT("foot_r");
+    FVector FootLocation = SkeletalMeshComponent->GetBoneLocation(FootBoneName);
+    
+    // Perform line trace downward
+    FVector TraceStart = FootLocation;
+    FVector TraceEnd = TraceStart - FVector(0, 0, CharacterAnimData.IKConfig.FootTraceDistance);
+    
+    FHitResult HitResult;
+    FCollisionQueryParams QueryParams;
+    QueryParams.AddIgnoredActor(GetOwner());
+    
+    bool bHit = GetWorld()->LineTraceSingleByChannel(
+        HitResult,
+        TraceStart,
+        TraceEnd,
+        ECC_WorldStatic,
+        QueryParams
+    );
+    
+    if (bHit)
+    {
+        // Calculate offset needed to place foot on ground
+        float DistanceToGround = FVector::Dist(TraceStart, HitResult.Location);
+        float TargetOffset = CharacterAnimData.IKConfig.FootTraceDistance - DistanceToGround;
+        
+        return FVector(0, 0, TargetOffset);
+    }
+    
+    return FVector::ZeroVector;
+}
+
+bool UAnimationSystemManager::PlayActionMontage(EAnim_MovementState ActionType, float PlayRate)
+{
+    if (!SkeletalMeshComponent || !SkeletalMeshComponent->GetAnimInstance())
+    {
+        return false;
+    }
+    
+    UAnimMontage** MontagePtr = CharacterAnimData.ActionMontages.Find(ActionType);
+    if (!MontagePtr || !*MontagePtr)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("No montage found for action type: %d"), (int32)ActionType);
+        return false;
+    }
+    
+    UAnimInstance* AnimInstance = SkeletalMeshComponent->GetAnimInstance();
+    float MontageLength = AnimInstance->Montage_Play(*MontagePtr, PlayRate);
+    
+    if (MontageLength > 0.0f)
+    {
+        UE_LOG(LogTemp, Log, TEXT("Playing action montage for state: %d"), (int32)ActionType);
+        return true;
+    }
+    
+    return false;
+}
+
+void UAnimationSystemManager::StopCurrentMontage(float BlendOutTime)
+{
+    if (SkeletalMeshComponent && SkeletalMeshComponent->GetAnimInstance())
+    {
+        SkeletalMeshComponent->GetAnimInstance()->Montage_Stop(BlendOutTime);
+    }
+}
+
+void UAnimationSystemManager::SetupCharacterAnimation(const FAnim_CharacterAnimData& NewAnimData)
+{
+    CharacterAnimData = NewAnimData;
+    
+    // Reinitialize systems with new data
+    InitializeMotionMatching();
+    InitializeIKSystem();
+    
+    UE_LOG(LogTemp, Log, TEXT("Character animation setup complete for: %s"), 
+           *CharacterAnimData.CharacterName);
+}
+
+void UAnimationSystemManager::BindToCharacterComponents()
+{
+    AActor* Owner = GetOwner();
+    if (!Owner)
     {
         return;
     }
-
-    // Hand IK for interaction with environment
-    // This would handle reaching for objects, climbing, etc.
-}
-
-FVector UAnimationSystemManager::GetFootIKOffset(bool bIsLeftFoot) const
-{
-    if (FootIKComponent)
+    
+    // Get skeletal mesh component
+    SkeletalMeshComponent = Owner->FindComponentByClass<USkeletalMeshComponent>();
+    if (!SkeletalMeshComponent)
     {
-        return FootIKComponent->GetFootIKOffset(bIsLeftFoot);
+        UE_LOG(LogTemp, Warning, TEXT("No SkeletalMeshComponent found on owner: %s"), 
+               *Owner->GetName());
     }
-    return FVector::ZeroVector;
-}
-
-FVector UAnimationSystemManager::GetHandIKOffset(bool bIsLeftHand) const
-{
-    // Hand IK implementation would go here
-    // For now, return zero offset
-    return FVector::ZeroVector;
-}
-
-void UAnimationSystemManager::SetCombatMode(bool bInCombat)
-{
-    if (bIsInCombat != bInCombat)
+    
+    // Get character movement component
+    MovementComponent = Owner->FindComponentByClass<UCharacterMovementComponent>();
+    if (!MovementComponent)
     {
-        bIsInCombat = bInCombat;
-        UE_LOG(LogTemp, Warning, TEXT("AnimationSystemManager: Combat mode set to %s"), bInCombat ? TEXT("true") : TEXT("false"));
-
-        // Switch to combat database if available
-        if (bInCombat && CombatDatabase)
-        {
-            SetMotionMatchingDatabase(CombatDatabase);
-        }
-        else if (!bInCombat && LocomotionDatabase)
-        {
-            SetMotionMatchingDatabase(LocomotionDatabase);
-        }
+        UE_LOG(LogTemp, Warning, TEXT("No CharacterMovementComponent found on owner: %s"), 
+               *Owner->GetName());
     }
 }
 
-void UAnimationSystemManager::SetClimbingMode(bool bClimbing)
+EAnim_TerrainType UAnimationSystemManager::AnalyzeCurrentTerrain()
 {
-    bIsClimbing = bClimbing;
-    UE_LOG(LogTemp, Warning, TEXT("AnimationSystemManager: Climbing mode set to %s"), bClimbing ? TEXT("true") : TEXT("false"));
-}
-
-void UAnimationSystemManager::SetSwimmingMode(bool bSwimming)
-{
-    bIsSwimming = bSwimming;
-    UE_LOG(LogTemp, Warning, TEXT("AnimationSystemManager: Swimming mode set to %s"), bSwimming ? TEXT("true") : TEXT("false"));
-}
-
-void UAnimationSystemManager::SetCrouchingMode(bool bCrouching)
-{
-    bIsCrouching = bCrouching;
-    UE_LOG(LogTemp, Warning, TEXT("AnimationSystemManager: Crouching mode set to %s"), bCrouching ? TEXT("true") : TEXT("false"));
-}
-
-void UAnimationSystemManager::SetCharacterPersonality(float Confidence, float Agility, float Strength)
-{
-    ConfidenceLevel = FMath::Clamp(Confidence, 0.0f, 1.0f);
-    AgilityLevel = FMath::Clamp(Agility, 0.0f, 1.0f);
-    StrengthLevel = FMath::Clamp(Strength, 0.0f, 1.0f);
-
-    UE_LOG(LogTemp, Warning, TEXT("AnimationSystemManager: Character personality set - Confidence: %.2f, Agility: %.2f, Strength: %.2f"), 
-           ConfidenceLevel, AgilityLevel, StrengthLevel);
-}
-
-float UAnimationSystemManager::GetPersonalityBlendWeight(const FString& AnimationType) const
-{
-    return CalculatePersonalityInfluence(AnimationType);
-}
-
-UAnimInstance* UAnimationSystemManager::GetAnimInstance() const
-{
-    if (SkeletalMeshComponent)
+    // Simple terrain analysis based on slope and surface material
+    float SlopeAngle = FMath::RadiansToDegrees(FMath::Acos(FVector::DotProduct(TerrainNormal, FVector::UpVector)));
+    
+    if (SlopeAngle > 30.0f)
     {
-        return SkeletalMeshComponent->GetAnimInstance();
+        return EAnim_TerrainType::Slope;
     }
-    return nullptr;
-}
-
-USkeletalMeshComponent* UAnimationSystemManager::GetSkeletalMeshComponent() const
-{
-    return SkeletalMeshComponent;
-}
-
-UCharacterMovementComponent* UAnimationSystemManager::GetCharacterMovement() const
-{
-    return CharacterMovementComponent;
-}
-
-void UAnimationSystemManager::CacheComponentReferences()
-{
-    if (GetOwner())
+    else if (SlopeAngle > 15.0f)
     {
-        SkeletalMeshComponent = GetOwner()->FindComponentByClass<USkeletalMeshComponent>();
-        CharacterMovementComponent = GetOwner()->FindComponentByClass<UCharacterMovementComponent>();
+        return EAnim_TerrainType::Rocky;
+    }
+    
+    // Default to flat terrain
+    return EAnim_TerrainType::Flat;
+}
 
-        if (!SkeletalMeshComponent)
-        {
-            UE_LOG(LogTemp, Error, TEXT("AnimationSystemManager: No SkeletalMeshComponent found on owner!"));
-        }
+float UAnimationSystemManager::GetTerrainSlope() const
+{
+    return TerrainSlope;
+}
 
-        if (!CharacterMovementComponent)
+void UAnimationSystemManager::UpdateMovementParameters()
+{
+    if (!MovementComponent)
+    {
+        return;
+    }
+    
+    FVector CurrentVelocity = MovementComponent->Velocity;
+    CurrentSpeed = CurrentVelocity.Size();
+    
+    // Calculate direction relative to actor forward
+    if (CurrentSpeed > 1.0f)
+    {
+        FVector ForwardVector = GetOwner()->GetActorForwardVector();
+        FVector VelocityDirection = CurrentVelocity.GetSafeNormal();
+        CurrentDirection = FMath::RadiansToDegrees(FMath::Acos(FVector::DotProduct(ForwardVector, VelocityDirection)));
+        
+        // Determine if turning left or right
+        FVector CrossProduct = FVector::CrossProduct(ForwardVector, VelocityDirection);
+        if (CrossProduct.Z < 0.0f)
         {
-            UE_LOG(LogTemp, Error, TEXT("AnimationSystemManager: No CharacterMovementComponent found on owner!"));
+            CurrentDirection *= -1.0f;
         }
     }
+    else
+    {
+        CurrentDirection = 0.0f;
+    }
+    
+    // Update movement state based on speed
+    if (CurrentSpeed < 1.0f)
+    {
+        SetMovementState(EAnim_MovementState::Idle);
+    }
+    else if (CurrentSpeed < 150.0f)
+    {
+        SetMovementState(EAnim_MovementState::Walking);
+    }
+    else if (CurrentSpeed < 400.0f)
+    {
+        SetMovementState(EAnim_MovementState::Running);
+    }
+    else
+    {
+        SetMovementState(EAnim_MovementState::Sprinting);
+    }
+    
+    LastVelocity = CurrentVelocity;
 }
 
-void UAnimationSystemManager::UpdateMovementData(float DeltaTime)
+void UAnimationSystemManager::PerformTerrainTrace()
 {
     if (!GetOwner())
     {
         return;
     }
-
-    FVector CurrentPosition = GetOwner()->GetActorLocation();
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-
-    // Calculate velocity from position change
-    if (CurrentTime > LastUpdateTime)
+    
+    FVector ActorLocation = GetOwner()->GetActorLocation();
+    FVector TraceStart = ActorLocation + FVector(0, 0, 50);
+    FVector TraceEnd = ActorLocation - FVector(0, 0, 100);
+    
+    FHitResult HitResult;
+    FCollisionQueryParams QueryParams;
+    QueryParams.AddIgnoredActor(GetOwner());
+    
+    bool bHit = GetWorld()->LineTraceSingleByChannel(
+        HitResult,
+        TraceStart,
+        TraceEnd,
+        ECC_WorldStatic,
+        QueryParams
+    );
+    
+    if (bHit)
     {
-        FVector PositionDelta = CurrentPosition - LastPosition;
-        float TimeDelta = CurrentTime - LastUpdateTime;
-        LastVelocity = PositionDelta / TimeDelta;
+        TerrainNormal = HitResult.Normal;
+        TerrainSlope = FMath::RadiansToDegrees(FMath::Acos(FVector::DotProduct(TerrainNormal, FVector::UpVector)));
+        
+        // Update terrain type
+        EAnim_TerrainType NewTerrainType = AnalyzeCurrentTerrain();
+        SetTerrainType(NewTerrainType);
     }
-
-    LastPosition = CurrentPosition;
-    LastUpdateTime = CurrentTime;
 }
 
-float UAnimationSystemManager::CalculatePersonalityInfluence(const FString& AnimationType) const
+void UAnimationSystemManager::UpdateAnimationBlending(float DeltaTime)
 {
-    // Calculate how personality traits affect different animation types
-    float BlendWeight = 0.5f; // Default neutral
-
-    if (AnimationType == "Confident")
+    // Update animation parameters in the Animation Blueprint
+    if (SkeletalMeshComponent && SkeletalMeshComponent->GetAnimInstance())
     {
-        BlendWeight = ConfidenceLevel;
+        UAnimInstance* AnimInstance = SkeletalMeshComponent->GetAnimInstance();
+        
+        // Set movement parameters
+        AnimInstance->SetRootMotionMode(ERootMotionMode::RootMotionFromEverything);
     }
-    else if (AnimationType == "Agile")
-    {
-        BlendWeight = AgilityLevel;
-    }
-    else if (AnimationType == "Strong")
-    {
-        BlendWeight = StrengthLevel;
-    }
-    else if (AnimationType == "Timid")
-    {
-        BlendWeight = 1.0f - ConfidenceLevel;
-    }
-    else if (AnimationType == "Clumsy")
-    {
-        BlendWeight = 1.0f - AgilityLevel;
-    }
-    else if (AnimationType == "Weak")
-    {
-        BlendWeight = 1.0f - StrengthLevel;
-    }
-
-    return FMath::Clamp(BlendWeight, 0.0f, 1.0f);
 }
 
-void UAnimationSystemManager::ValidateAnimationDatabases()
+void UAnimationSystemManager::ConfigureMotionMatchingParameters()
 {
-    if (!LocomotionDatabase)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("AnimationSystemManager: No locomotion database assigned!"));
-    }
+    // Configure Motion Matching specific parameters
+    // This would interface with the Motion Matching system when available
+    UE_LOG(LogTemp, Log, TEXT("Configuring Motion Matching parameters"));
+}
 
-    if (!CombatDatabase)
+void UAnimationSystemManager::UpdateTrajectoryPrediction()
+{
+    // Update trajectory prediction for Motion Matching
+    // This calculates where the character will be in the near future
+    if (MovementComponent && CharacterAnimData.MotionMatchingConfig.bUseTrajectoryMatching)
     {
-        UE_LOG(LogTemp, Warning, TEXT("AnimationSystemManager: No combat database assigned!"));
-    }
-
-    if (!InteractionDatabase)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("AnimationSystemManager: No interaction database assigned!"));
+        // Simple trajectory prediction based on current velocity
+        FVector PredictedLocation = GetOwner()->GetActorLocation() + (MovementComponent->Velocity * 0.5f);
+        
+        // This would feed into the Motion Matching system
+        // For now, we just log it for debugging
+        UE_LOG(LogTemp, VeryVerbose, TEXT("Predicted location: %s"), *PredictedLocation.ToString());
     }
 }
