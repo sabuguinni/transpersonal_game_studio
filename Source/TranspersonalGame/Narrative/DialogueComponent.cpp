@@ -1,316 +1,316 @@
 #include "DialogueComponent.h"
-#include "Engine/Engine.h"
-#include "Engine/World.h"
-#include "GameFramework/Actor.h"
+#include "NarrativeManager.h"
 #include "Components/AudioComponent.h"
-#include "Kismet/GameplayStatics.h"
 #include "Engine/DataTable.h"
+#include "Engine/World.h"
+#include "GameFramework/PlayerController.h"
+#include "Kismet/GameplayStatics.h"
+#include "Sound/SoundBase.h"
 
-UNarr_DialogueComponent::UNarr_DialogueComponent()
+UDialogueComponent::UDialogueComponent()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.bStartWithTickEnabled = false;
+    PrimaryComponentTick.bCanEverTick = false;
     
-    MaxInteractionDistance = 300.0f;
     bIsDialogueActive = false;
-    CurrentDialogueIndex = 0;
-    CurrentPlayerActor = nullptr;
-    DialogueTimer = 0.0f;
-    CurrentSpeakerName = TEXT("");
+    CharacterArchetype = ENarr_CharacterArchetype::Elder;
+    DefaultSpeakerName = TEXT("Unknown Speaker");
     
-    // Initialize character data with default values
-    CharacterData.CharacterName = TEXT("Unknown NPC");
-    CharacterData.Archetype = ENarr_CharacterArchetype::Elder;
-    CharacterData.BackgroundStory = FText::FromString(TEXT("A mysterious character with untold stories."));
-    CharacterData.PrimaryTheme = ENarr_NarrativeTheme::SelfDiscovery;
-    CharacterData.bIsEssentialCharacter = false;
-    CharacterData.VoiceActorName = TEXT("DefaultVoice");
+    // Create audio component
+    AudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AudioComponent"));
+    if (AudioComponent)
+    {
+        AudioComponent->bAutoActivate = false;
+        AudioComponent->SetVolumeMultiplier(1.0f);
+    }
 }
 
-void UNarr_DialogueComponent::BeginPlay()
+void UDialogueComponent::BeginPlay()
 {
     Super::BeginPlay();
     
-    LoadDialogueFromDataTable();
-    
-    // Set up default dialogue if none exists
-    if (CharacterData.DialogueLines.Num() == 0)
+    // Get reference to narrative manager
+    if (UWorld* World = GetWorld())
     {
-        FNarr_DialogueLine DefaultLine;
-        DefaultLine.SpeakerName = CharacterData.CharacterName;
-        DefaultLine.DialogueText = FText::FromString(TEXT("Greetings, traveler. I sense you are on a journey of discovery."));
-        DefaultLine.Emotion = ENarr_DialogueEmotion::Wise;
-        DefaultLine.RequiredConsciousnessLevel = ENarr_ConsciousnessLevel::Unaware;
-        DefaultLine.Duration = 4.0f;
-        DefaultLine.bIsPlayerChoice = false;
-        
-        CharacterData.DialogueLines.Add(DefaultLine);
-    }
-}
-
-void UNarr_DialogueComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
-{
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    
-    if (bIsDialogueActive && CurrentPlayerActor)
-    {
-        // Check distance to player
-        float Distance = FVector::Dist(GetOwner()->GetActorLocation(), CurrentPlayerActor->GetActorLocation());
-        if (Distance > MaxInteractionDistance)
+        if (UGameInstance* GameInstance = World->GetGameInstance())
         {
-            EndDialogue();
-            return;
-        }
-        
-        // Update dialogue timer
-        DialogueTimer += DeltaTime;
-        
-        // Auto-advance dialogue if no player choices are available
-        if (CurrentPlayerChoices.Num() == 0 && DialogueTimer >= CurrentDialogueLine.Duration)
-        {
-            ProcessNextDialogueLine();
+            NarrativeManager = GameInstance->GetSubsystem<UNarrativeManager>();
         }
     }
 }
 
-bool UNarr_DialogueComponent::StartDialogue(AActor* PlayerActor)
+bool UDialogueComponent::StartDialogue(const FString& DialogueID, AActor* InteractingActor)
 {
-    if (!PlayerActor || bIsDialogueActive)
+    if (bIsDialogueActive)
     {
+        UE_LOG(LogTemp, Warning, TEXT("Dialogue already active, ending current dialogue first"));
+        EndDialogue();
+    }
+    
+    if (DialogueID.IsEmpty())
+    {
+        UE_LOG(LogTemp, Error, TEXT("Cannot start dialogue with empty DialogueID"));
         return false;
     }
     
-    // Check distance
-    float Distance = FVector::Dist(GetOwner()->GetActorLocation(), PlayerActor->GetActorLocation());
-    if (Distance > MaxInteractionDistance)
+    // Load the dialogue line
+    if (!LoadDialogueLine(DialogueID))
     {
+        UE_LOG(LogTemp, Error, TEXT("Failed to load dialogue line: %s"), *DialogueID);
         return false;
     }
     
-    CurrentPlayerActor = PlayerActor;
+    // Check consciousness level requirements
+    if (!CanAccessDialogueLine(CurrentDialogueLine))
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Player consciousness level too low for dialogue: %s"), *DialogueID);
+        return false;
+    }
+    
     bIsDialogueActive = true;
-    CurrentDialogueIndex = 0;
-    DialogueTimer = 0.0f;
-    CurrentSpeakerName = CharacterData.CharacterName;
+    CurrentDialogueID = DialogueID;
     
-    SetComponentTickEnabled(true);
+    // Update dialogue choices
+    UpdateDialogueChoices();
     
-    // Start with the first dialogue line
-    if (CharacterData.DialogueLines.Num() > 0)
+    // Broadcast events
+    OnDialogueStarted.Broadcast(DialogueID, CurrentDialogueLine.SpeakerName);
+    OnDialogueLineChanged.Broadcast(CurrentDialogueLine.DialogueText, CurrentDialogueLine.SpeakerName, CurrentDialogueLine.EmotionalState);
+    
+    // Play audio if available
+    PlayDialogueAudio();
+    
+    // Register with narrative manager
+    if (NarrativeManager)
     {
-        CurrentDialogueLine = CharacterData.DialogueLines[0];
-        PlayDialogueAudio(CurrentDialogueLine);
-        OnDialogueStarted.Broadcast(CurrentSpeakerName, CurrentDialogueLine.DialogueText);
-        
-        // Check for player choices
-        FindPlayerChoices();
+        NarrativeManager->RegisterActiveDialogue(this);
     }
     
+    UE_LOG(LogTemp, Log, TEXT("Started dialogue: %s"), *DialogueID);
     return true;
 }
 
-void UNarr_DialogueComponent::EndDialogue()
+void UDialogueComponent::EndDialogue()
 {
     if (!bIsDialogueActive)
     {
         return;
     }
     
+    StopDialogueAudio();
+    
+    FString EndedDialogueID = CurrentDialogueID;
+    
     bIsDialogueActive = false;
-    SetComponentTickEnabled(false);
+    CurrentDialogueID.Empty();
+    CurrentChoices.Empty();
+    CurrentDialogueLine = FNarr_DialogueLine();
     
-    OnDialogueEnded.Broadcast(CurrentSpeakerName);
-    
-    CurrentPlayerActor = nullptr;
-    CurrentDialogueIndex = 0;
-    DialogueTimer = 0.0f;
-    CurrentPlayerChoices.Empty();
-}
-
-void UNarr_DialogueComponent::SelectPlayerChoice(int32 ChoiceIndex)
-{
-    if (!bIsDialogueActive || ChoiceIndex < 0 || ChoiceIndex >= CurrentPlayerChoices.Num())
+    // Unregister from narrative manager
+    if (NarrativeManager)
     {
-        return;
+        NarrativeManager->UnregisterActiveDialogue(this);
     }
     
-    // Process the selected choice
-    FNarr_DialogueLine SelectedChoice = CurrentPlayerChoices[ChoiceIndex];
-    CurrentDialogueLine = SelectedChoice;
-    CurrentSpeakerName = TEXT("Player");
-    DialogueTimer = 0.0f;
+    OnDialogueEnded.Broadcast(EndedDialogueID);
     
-    // Broadcast the player's choice
-    OnDialogueStarted.Broadcast(CurrentSpeakerName, SelectedChoice.DialogueText);
-    
-    // Clear current choices and move to next NPC line
-    CurrentPlayerChoices.Empty();
-    ProcessNextDialogueLine();
+    UE_LOG(LogTemp, Log, TEXT("Ended dialogue: %s"), *EndedDialogueID);
 }
 
-TArray<FNarr_DialogueLine> UNarr_DialogueComponent::GetAvailableDialogue(ENarr_ConsciousnessLevel PlayerConsciousnessLevel) const
+bool UDialogueComponent::AdvanceDialogue()
 {
-    TArray<FNarr_DialogueLine> AvailableLines;
-    
-    for (const FNarr_DialogueLine& Line : CharacterData.DialogueLines)
+    if (!bIsDialogueActive)
     {
-        if (MeetsDialogueRequirements(Line, PlayerConsciousnessLevel))
-        {
-            AvailableLines.Add(Line);
-        }
-    }
-    
-    return AvailableLines;
-}
-
-void UNarr_DialogueComponent::AddDialogueLine(const FNarr_DialogueLine& NewLine)
-{
-    CharacterData.DialogueLines.Add(NewLine);
-}
-
-void UNarr_DialogueComponent::RemoveDialogueLine(int32 LineIndex)
-{
-    if (LineIndex >= 0 && LineIndex < CharacterData.DialogueLines.Num())
-    {
-        CharacterData.DialogueLines.RemoveAt(LineIndex);
-    }
-}
-
-void UNarr_DialogueComponent::SetCharacterData(const FNarr_CharacterData& InCharacterData)
-{
-    CharacterData = InCharacterData;
-}
-
-void UNarr_DialogueComponent::ProcessNextDialogueLine()
-{
-    CurrentDialogueIndex++;
-    DialogueTimer = 0.0f;
-    
-    // Find next appropriate dialogue line
-    ENarr_ConsciousnessLevel PlayerLevel = GetPlayerConsciousnessLevel(CurrentPlayerActor);
-    TArray<FNarr_DialogueLine> AvailableLines = GetAvailableDialogue(PlayerLevel);
-    
-    // Filter out player choice lines for NPC responses
-    TArray<FNarr_DialogueLine> NPCLines;
-    for (const FNarr_DialogueLine& Line : AvailableLines)
-    {
-        if (!Line.bIsPlayerChoice)
-        {
-            NPCLines.Add(Line);
-        }
-    }
-    
-    if (CurrentDialogueIndex < NPCLines.Num())
-    {
-        CurrentDialogueLine = NPCLines[CurrentDialogueIndex];
-        CurrentSpeakerName = CharacterData.CharacterName;
-        PlayDialogueAudio(CurrentDialogueLine);
-        OnDialogueStarted.Broadcast(CurrentSpeakerName, CurrentDialogueLine.DialogueText);
-        
-        // Check for new player choices
-        FindPlayerChoices();
-    }
-    else
-    {
-        // End dialogue if no more lines
-        EndDialogue();
-    }
-}
-
-void UNarr_DialogueComponent::FindPlayerChoices()
-{
-    CurrentPlayerChoices.Empty();
-    
-    ENarr_ConsciousnessLevel PlayerLevel = GetPlayerConsciousnessLevel(CurrentPlayerActor);
-    
-    // Find all available player choice lines
-    for (const FNarr_DialogueLine& Line : CharacterData.DialogueLines)
-    {
-        if (Line.bIsPlayerChoice && MeetsDialogueRequirements(Line, PlayerLevel))
-        {
-            CurrentPlayerChoices.Add(Line);
-        }
-    }
-    
-    // If player choices are available, broadcast them
-    if (CurrentPlayerChoices.Num() > 0)
-    {
-        OnPlayerChoiceAvailable.Broadcast(CurrentPlayerChoices, 0, 30.0f); // 30 second time limit
-    }
-}
-
-bool UNarr_DialogueComponent::MeetsDialogueRequirements(const FNarr_DialogueLine& DialogueLine, ENarr_ConsciousnessLevel PlayerLevel) const
-{
-    // Check consciousness level requirement
-    if (static_cast<int32>(PlayerLevel) < static_cast<int32>(DialogueLine.RequiredConsciousnessLevel))
-    {
+        UE_LOG(LogTemp, Warning, TEXT("Cannot advance dialogue - no active dialogue"));
         return false;
     }
     
-    // TODO: Add more complex conditional logic based on tags
-    // For now, all lines that meet consciousness requirements are available
+    // Check if there's a next dialogue line
+    if (CurrentDialogueLine.NextDialogueID.IsEmpty())
+    {
+        UE_LOG(LogTemp, Log, TEXT("No next dialogue line, ending dialogue"));
+        EndDialogue();
+        return false;
+    }
+    
+    // Load next dialogue line
+    if (!LoadDialogueLine(CurrentDialogueLine.NextDialogueID))
+    {
+        UE_LOG(LogTemp, Error, TEXT("Failed to load next dialogue line: %s"), *CurrentDialogueLine.NextDialogueID);
+        EndDialogue();
+        return false;
+    }
+    
+    CurrentDialogueID = CurrentDialogueLine.NextDialogueID;
+    
+    // Update dialogue choices
+    UpdateDialogueChoices();
+    
+    // Broadcast line change
+    OnDialogueLineChanged.Broadcast(CurrentDialogueLine.DialogueText, CurrentDialogueLine.SpeakerName, CurrentDialogueLine.EmotionalState);
+    
+    // Play new audio
+    PlayDialogueAudio();
     
     return true;
 }
 
-ENarr_ConsciousnessLevel UNarr_DialogueComponent::GetPlayerConsciousnessLevel(AActor* PlayerActor) const
+bool UDialogueComponent::SelectDialogueChoice(int32 ChoiceIndex)
 {
-    if (!PlayerActor)
+    if (!bIsDialogueActive)
     {
-        return ENarr_ConsciousnessLevel::Unaware;
+        UE_LOG(LogTemp, Warning, TEXT("Cannot select choice - no active dialogue"));
+        return false;
     }
     
-    // Try to get consciousness component from player
-    UConsciousnessComponent* ConsciousnessComp = PlayerActor->FindComponentByClass<UConsciousnessComponent>();
-    if (ConsciousnessComp)
+    if (!CurrentChoices.IsValidIndex(ChoiceIndex))
     {
-        // TODO: Map consciousness component state to narrative consciousness level
-        // For now, return a default level
-        return ENarr_ConsciousnessLevel::Aware;
+        UE_LOG(LogTemp, Error, TEXT("Invalid choice index: %d"), ChoiceIndex);
+        return false;
     }
     
-    return ENarr_ConsciousnessLevel::Unaware;
+    FString ChoiceDialogueID = CurrentChoices[ChoiceIndex];
+    
+    // Load the chosen dialogue line
+    if (!LoadDialogueLine(ChoiceDialogueID))
+    {
+        UE_LOG(LogTemp, Error, TEXT("Failed to load choice dialogue: %s"), *ChoiceDialogueID);
+        return false;
+    }
+    
+    CurrentDialogueID = ChoiceDialogueID;
+    
+    // Update dialogue choices for the new line
+    UpdateDialogueChoices();
+    
+    // Broadcast line change
+    OnDialogueLineChanged.Broadcast(CurrentDialogueLine.DialogueText, CurrentDialogueLine.SpeakerName, CurrentDialogueLine.EmotionalState);
+    
+    // Play audio
+    PlayDialogueAudio();
+    
+    return true;
 }
 
-void UNarr_DialogueComponent::PlayDialogueAudio(const FNarr_DialogueLine& DialogueLine)
+TArray<FString> UDialogueComponent::GetDialogueChoices() const
 {
-    if (DialogueLine.AudioAssetPath.IsEmpty())
+    return CurrentChoices;
+}
+
+void UDialogueComponent::SetDialogueDataTable(UDataTable* NewDialogueTable)
+{
+    DialogueDataTable = NewDialogueTable;
+    UE_LOG(LogTemp, Log, TEXT("Set dialogue data table: %s"), NewDialogueTable ? *NewDialogueTable->GetName() : TEXT("None"));
+}
+
+void UDialogueComponent::PlayDialogueAudio()
+{
+    if (!AudioComponent || CurrentDialogueLine.AudioAssetPath.IsEmpty())
     {
         return;
     }
     
-    // Try to load and play audio asset
-    USoundBase* DialogueSound = LoadObject<USoundBase>(nullptr, *DialogueLine.AudioAssetPath);
-    if (DialogueSound)
+    // Stop current audio
+    StopDialogueAudio();
+    
+    // Load and play audio asset
+    if (USoundBase* DialogueSound = LoadObject<USoundBase>(nullptr, *CurrentDialogueLine.AudioAssetPath))
     {
-        UGameplayStatics::PlaySoundAtLocation(
-            GetWorld(),
-            DialogueSound,
-            GetOwner()->GetActorLocation(),
-            1.0f, // Volume
-            1.0f, // Pitch
-            0.0f  // Start time
-        );
+        AudioComponent->SetSound(DialogueSound);
+        AudioComponent->Play();
+        UE_LOG(LogTemp, Log, TEXT("Playing dialogue audio: %s"), *CurrentDialogueLine.AudioAssetPath);
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Failed to load dialogue audio: %s"), *CurrentDialogueLine.AudioAssetPath);
     }
 }
 
-void UNarr_DialogueComponent::LoadDialogueFromDataTable()
+void UDialogueComponent::StopDialogueAudio()
+{
+    if (AudioComponent && AudioComponent->IsPlaying())
+    {
+        AudioComponent->Stop();
+    }
+}
+
+bool UDialogueComponent::LoadDialogueLine(const FString& DialogueID)
 {
     if (!DialogueDataTable)
     {
+        UE_LOG(LogTemp, Error, TEXT("No dialogue data table set"));
+        return false;
+    }
+    
+    // Find the dialogue line in the data table
+    FNarr_DialogueLine* DialogueLine = DialogueDataTable->FindRow<FNarr_DialogueLine>(FName(*DialogueID), TEXT("LoadDialogueLine"));
+    
+    if (!DialogueLine)
+    {
+        UE_LOG(LogTemp, Error, TEXT("Dialogue line not found in data table: %s"), *DialogueID);
+        return false;
+    }
+    
+    CurrentDialogueLine = *DialogueLine;
+    
+    // Use default speaker name if not specified
+    if (CurrentDialogueLine.SpeakerName.IsEmpty())
+    {
+        CurrentDialogueLine.SpeakerName = DefaultSpeakerName;
+    }
+    
+    return true;
+}
+
+bool UDialogueComponent::CanAccessDialogueLine(const FNarr_DialogueLine& DialogueLine) const
+{
+    // Check consciousness level requirement
+    int32 PlayerConsciousnessLevel = GetPlayerConsciousnessLevel();
+    if (PlayerConsciousnessLevel < DialogueLine.ConsciousnessLevel)
+    {
+        return false;
+    }
+    
+    // Check quest stage requirement
+    if (DialogueLine.RequiredQuestStage >= 0)
+    {
+        // TODO: Implement quest stage checking when quest system is available
+        // For now, assume all quest requirements are met
+    }
+    
+    return true;
+}
+
+int32 UDialogueComponent::GetPlayerConsciousnessLevel() const
+{
+    // TODO: Get actual player consciousness level from player character or game state
+    // For now, return a default level
+    return 1;
+}
+
+void UDialogueComponent::UpdateDialogueChoices()
+{
+    CurrentChoices.Empty();
+    
+    if (!DialogueDataTable || !bIsDialogueActive)
+    {
         return;
     }
     
-    // Get all rows from the data table
-    TArray<FNarr_DialogueLine*> AllRows;
-    DialogueDataTable->GetAllRows<FNarr_DialogueLine>(TEXT("LoadDialogueFromDataTable"), AllRows);
+    // Find all dialogue lines that are player choices and reference the current line
+    TArray<FNarr_DialogueLine*> AllDialogueLines;
+    DialogueDataTable->GetAllRows<FNarr_DialogueLine>(TEXT("UpdateDialogueChoices"), AllDialogueLines);
     
-    // Add rows to character dialogue lines
-    for (FNarr_DialogueLine* Row : AllRows)
+    for (const FNarr_DialogueLine* DialogueLine : AllDialogueLines)
     {
-        if (Row)
+        if (DialogueLine && DialogueLine->IsPlayerChoice)
         {
-            CharacterData.DialogueLines.Add(*Row);
+            // Check if this choice is accessible
+            if (CanAccessDialogueLine(*DialogueLine))
+            {
+                // For now, add all player choices - in a full implementation,
+                // you'd want to check if this choice is valid for the current dialogue context
+                CurrentChoices.Add(DialogueLine->DialogueText);
+            }
         }
     }
 }
