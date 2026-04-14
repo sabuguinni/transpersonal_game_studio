@@ -1,501 +1,465 @@
 #include "BuildIntegrationManager.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Engine/GameInstance.h"
-#include "Kismet/GameplayStatics.h"
-#include "HAL/PlatformFilemanager.h"
-#include "Misc/DateTime.h"
+#include "Materials/Material.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
+#include "UObject/ConstructorHelpers.h"
+#include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
-#include "UObject/UObjectGlobals.h"
+#include "HAL/PlatformFilemanager.h"
+#include "Dom/JsonObject.h"
+#include "Serialization/JsonSerializer.h"
+#include "Serialization/JsonWriter.h"
 
-// Static module lists
-const TArray<FString> UBuildIntegrationManager::CoreModules = {
-    TEXT("Core.PhysicsSystemManager"),
-    TEXT("Core.ConsciousnessSystem"),
-    TEXT("Core.PerformanceManager"),
-    TEXT("World.WorldGenerationSubsystem"),
-    TEXT("Environment.EnvironmentManager")
-};
-
-const TArray<FString> UBuildIntegrationManager::GameplayModules = {
-    TEXT("Characters.CharacterManager"),
-    TEXT("AI.NPCBehaviorManager"),
-    TEXT("Combat.CombatSystemManager"),
-    TEXT("Quest.QuestManager"),
-    TEXT("Narrative.DialogueManager")
-};
-
-const TArray<FString> UBuildIntegrationManager::ContentModules = {
-    TEXT("Audio.AudioManager"),
-    TEXT("VFX.VFXManager"),
-    TEXT("Lighting.LightingManager"),
-    TEXT("Architecture.ArchitectureManager"),
-    TEXT("Crowd.CrowdSimulationManager")
-};
-
-UBuildIntegrationManager::UBuildIntegrationManager()
+ABuild_IntegrationMonitor::ABuild_IntegrationMonitor()
 {
-    bIsRunningTests = false;
-    CurrentReport.OverallStatus = EBuild_IntegrationStatus::Unknown;
+    PrimaryActorTick.bCanEverTick = false;
+
+    // Create root component
+    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
+    RootComponent = RootSceneComponent;
+
+    // Create status mesh component
+    StatusMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("StatusMesh"));
+    StatusMesh->SetupAttachment(RootComponent);
+
+    // Set default mesh to cube
+    static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMeshAsset(TEXT("/Engine/BasicShapes/Cube"));
+    if (CubeMeshAsset.Succeeded())
+    {
+        StatusMesh->SetStaticMesh(CubeMeshAsset.Object);
+    }
+
+    // Set default material
+    static ConstructorHelpers::FObjectFinder<UMaterial> DefaultMaterial(TEXT("/Engine/BasicShapes/BasicShapeMaterial"));
+    if (DefaultMaterial.Succeeded())
+    {
+        StatusMesh->SetMaterial(0, DefaultMaterial.Object);
+    }
+
+    // Initialize status
+    CurrentStatus = EBuild_BuildStatus::Unknown;
+    
+    // Set actor properties
+    SetActorScale3D(FVector(2.0f, 2.0f, 2.0f));
 }
 
-void UBuildIntegrationManager::Initialize(FSubsystemCollectionBase& Collection)
+void ABuild_IntegrationMonitor::BeginPlay()
+{
+    Super::BeginPlay();
+    
+    // Initialize with current status
+    UpdateVisualStatus();
+    
+    UE_LOG(LogTemp, Log, TEXT("Build Integration Monitor initialized"));
+}
+
+void ABuild_IntegrationMonitor::UpdateBuildStatus(EBuild_BuildStatus NewStatus)
+{
+    if (CurrentStatus != NewStatus)
+    {
+        CurrentStatus = NewStatus;
+        UpdateVisualStatus();
+        
+        UE_LOG(LogTemp, Log, TEXT("Build status updated to: %d"), (int32)NewStatus);
+    }
+}
+
+void ABuild_IntegrationMonitor::SetIntegrationReport(const FBuild_IntegrationReport& Report)
+{
+    LastReport = Report;
+    UpdateBuildStatus(Report.OverallStatus);
+}
+
+void ABuild_IntegrationMonitor::UpdateVisualStatus()
+{
+    if (!StatusMesh)
+        return;
+
+    // Change material color based on status
+    FLinearColor StatusColor = FLinearColor::White;
+    
+    switch (CurrentStatus)
+    {
+        case EBuild_BuildStatus::Success:
+            StatusColor = FLinearColor::Green;
+            break;
+        case EBuild_BuildStatus::Failed:
+            StatusColor = FLinearColor::Red;
+            break;
+        case EBuild_BuildStatus::Warning:
+            StatusColor = FLinearColor::Yellow;
+            break;
+        case EBuild_BuildStatus::Compiling:
+        case EBuild_BuildStatus::Testing:
+            StatusColor = FLinearColor::Blue;
+            break;
+        case EBuild_BuildStatus::Initializing:
+            StatusColor = FLinearColor(1.0f, 0.5f, 0.0f); // Orange
+            break;
+        default:
+            StatusColor = FLinearColor::Gray;
+            break;
+    }
+
+    // Create dynamic material instance to change color
+    if (UMaterialInterface* CurrentMaterial = StatusMesh->GetMaterial(0))
+    {
+        UMaterialInstanceDynamic* DynamicMaterial = StatusMesh->CreateDynamicMaterialInstance(0, CurrentMaterial);
+        if (DynamicMaterial)
+        {
+            DynamicMaterial->SetVectorParameterValue(TEXT("BaseColor"), StatusColor);
+        }
+    }
+}
+
+// Build Integration Subsystem Implementation
+
+void UBuild_IntegrationSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Initializing integration testing system"));
+    InitializeTestParameters();
     
-    // Initialize module status tracking
-    TArray<FString> AllModules;
-    AllModules.Append(CoreModules);
-    AllModules.Append(GameplayModules);
-    AllModules.Append(ContentModules);
+    // Initialize current report
+    CurrentReport.CycleId = TEXT("PROD_CYCLE_014");
+    CurrentReport.Timestamp = FDateTime::Now();
+    CurrentReport.OverallStatus = EBuild_BuildStatus::Initializing;
     
-    for (const FString& ModuleName : AllModules)
-    {
-        FBuild_ModuleStatus Status;
-        Status.ModuleName = ModuleName;
-        Status.Status = EBuild_IntegrationStatus::Initializing;
-        ModuleStatuses.Add(ModuleName, Status);
-    }
-    
-    // Start initial validation
-    ValidateAllSystems();
+    UE_LOG(LogTemp, Log, TEXT("Build Integration Subsystem initialized"));
 }
 
-void UBuildIntegrationManager::Deinitialize()
+void UBuild_IntegrationSubsystem::Deinitialize()
 {
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Shutting down integration system"));
-    ModuleStatuses.Empty();
     Super::Deinitialize();
+    UE_LOG(LogTemp, Log, TEXT("Build Integration Subsystem deinitialized"));
 }
 
-void UBuildIntegrationManager::RunFullIntegrationTest()
+void UBuild_IntegrationSubsystem::InitializeTestParameters()
 {
-    if (bIsRunningTests)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Integration test already running, skipping"));
-        return;
-    }
-    
-    bIsRunningTests = true;
-    UE_LOG(LogTemp, Warning, TEXT("Starting full integration test suite"));
-    
-    float StartTime = FPlatformTime::Seconds();
-    
-    // Test core modules first
-    TestCorePhysicsModule();
-    TestWorldGenerationModule();
-    TestEnvironmentModule();
-    
-    // Test gameplay modules
-    TestCharacterModule();
-    TestAIModule();
-    TestQuestModule();
-    
-    // Test content modules
-    TestAudioModule();
-    TestVFXModule();
-    
-    // Run cross-module integration tests
-    RunCrossModuleTest();
-    
-    // Generate final report
-    CurrentReport.TotalTestTime = FPlatformTime::Seconds() - StartTime;
-    CurrentReport.LastBuildTime = FDateTime::Now();
-    CurrentReport.BuildVersion = TEXT("CYCLE_012");
-    
-    // Determine overall status
-    int32 FailedCount = 0;
-    int32 PassedCount = 0;
-    
-    for (const auto& StatusPair : ModuleStatuses)
-    {
-        if (StatusPair.Value.Status == EBuild_IntegrationStatus::Failed)
-        {
-            FailedCount++;
-        }
-        else if (StatusPair.Value.Status == EBuild_IntegrationStatus::Success)
-        {
-            PassedCount++;
-        }
-    }
-    
-    if (FailedCount == 0)
-    {
-        CurrentReport.OverallStatus = EBuild_IntegrationStatus::Success;
-    }
-    else if (PassedCount > FailedCount)
-    {
-        CurrentReport.OverallStatus = EBuild_IntegrationStatus::Testing;
-    }
-    else
-    {
-        CurrentReport.OverallStatus = EBuild_IntegrationStatus::Failed;
-    }
-    
-    // Update report with current statuses
-    CurrentReport.ModuleStatuses.Empty();
-    for (const auto& StatusPair : ModuleStatuses)
-    {
-        CurrentReport.ModuleStatuses.Add(StatusPair.Value);
-    }
-    
-    bIsRunningTests = false;
-    
-    UE_LOG(LogTemp, Warning, TEXT("Integration test completed: %d passed, %d failed"), PassedCount, FailedCount);
-    
-    // Broadcast completion
-    OnIntegrationTestComplete.Broadcast(CurrentReport);
-}
-
-void UBuildIntegrationManager::RunModuleTest(const FString& ModuleName)
-{
-    UE_LOG(LogTemp, Warning, TEXT("Testing module: %s"), *ModuleName);
-    
-    bool bTestPassed = false;
-    FString ErrorMessage;
-    
-    // Check if module is loaded
-    if (IsModuleLoaded(ModuleName))
-    {
-        bTestPassed = true;
-        LogIntegrationResult(ModuleName, true, TEXT("Module loaded successfully"));
-    }
-    else
-    {
-        ErrorMessage = TEXT("Module not loaded or not found");
-        LogIntegrationResult(ModuleName, false, ErrorMessage);
-    }
-    
-    // Update status
-    EBuild_IntegrationStatus Status = bTestPassed ? EBuild_IntegrationStatus::Success : EBuild_IntegrationStatus::Failed;
-    UpdateModuleStatus(ModuleName, Status, ErrorMessage);
-    
-    // Broadcast module test completion
-    OnModuleTestComplete.Broadcast(ModuleName, Status);
-}
-
-void UBuildIntegrationManager::RunCrossModuleTest()
-{
-    UE_LOG(LogTemp, Warning, TEXT("Running cross-module integration tests"));
-    
-    TestPhysicsWorldIntegration();
-    TestCharacterEnvironmentIntegration();
-    TestAIQuestIntegration();
-    TestAudioVFXIntegration();
-}
-
-void UBuildIntegrationManager::TestCorePhysicsModule()
-{
-    const FString ModuleName = TEXT("Core.PhysicsSystemManager");
-    
-    // Try to find physics-related classes
-    UClass* PhysicsClass = FindObject<UClass>(ANY_PACKAGE, TEXT("PhysicsSystemManager"));
-    if (PhysicsClass)
-    {
-        UpdateModuleStatus(ModuleName, EBuild_IntegrationStatus::Success);
-        LogIntegrationResult(ModuleName, true, TEXT("PhysicsSystemManager class found"));
-    }
-    else
-    {
-        UpdateModuleStatus(ModuleName, EBuild_IntegrationStatus::Failed, TEXT("PhysicsSystemManager class not found"));
-        LogIntegrationResult(ModuleName, false, TEXT("PhysicsSystemManager class not found"));
-    }
-}
-
-void UBuildIntegrationManager::TestWorldGenerationModule()
-{
-    const FString ModuleName = TEXT("World.WorldGenerationSubsystem");
-    
-    // Try to find world generation subsystem
-    UClass* WorldGenClass = FindObject<UClass>(ANY_PACKAGE, TEXT("WorldGenerationSubsystem"));
-    if (WorldGenClass)
-    {
-        UpdateModuleStatus(ModuleName, EBuild_IntegrationStatus::Success);
-        LogIntegrationResult(ModuleName, true, TEXT("WorldGenerationSubsystem class found"));
-    }
-    else
-    {
-        UpdateModuleStatus(ModuleName, EBuild_IntegrationStatus::Failed, TEXT("WorldGenerationSubsystem class not found"));
-        LogIntegrationResult(ModuleName, false, TEXT("WorldGenerationSubsystem class not found"));
-    }
-}
-
-void UBuildIntegrationManager::TestEnvironmentModule()
-{
-    const FString ModuleName = TEXT("Environment.EnvironmentManager");
-    
-    // Check for environment-related classes
-    bool bFoundEnvironmentClasses = false;
-    
-    // Look for common environment classes
-    TArray<FString> EnvironmentClasses = {
-        TEXT("EnvironmentManager"),
-        TEXT("FoliageManager"),
-        TEXT("TerrainManager")
+    // Define modules to test
+    ModulesToTest = {
+        TEXT("Core Systems"),
+        TEXT("World Generation"),
+        TEXT("AI & Crowd"),
+        TEXT("Character Systems"),
+        TEXT("Environment"),
+        TEXT("Physics"),
+        TEXT("Audio"),
+        TEXT("VFX"),
+        TEXT("Quest & Narrative")
     };
+
+    // Define critical classes that must load
+    CriticalClasses = {
+        TEXT("/Script/TranspersonalGame.TranspersonalGameState"),
+        TEXT("/Script/TranspersonalGame.TranspersonalCharacter"),
+        TEXT("/Script/TranspersonalGame.PCGWorldGenerator"),
+        TEXT("/Script/TranspersonalGame.FoliageManager"),
+        TEXT("/Script/TranspersonalGame.CrowdSimulationManager")
+    };
+}
+
+void UBuild_IntegrationSubsystem::RunIntegrationTests()
+{
+    UE_LOG(LogTemp, Log, TEXT("Starting integration tests..."));
     
-    for (const FString& ClassName : EnvironmentClasses)
+    CurrentReport.Timestamp = FDateTime::Now();
+    CurrentReport.OverallStatus = EBuild_BuildStatus::Testing;
+    CurrentReport.ModuleResults.Empty();
+    CurrentReport.CompilationErrors.Empty();
+    CurrentReport.Recommendations.Empty();
+
+    // Test module loading
+    TestModuleLoading();
+    
+    // Update overall status based on results
+    UpdateOverallStatus();
+    
+    // Generate recommendations
+    GenerateIntegrationReport();
+    
+    UE_LOG(LogTemp, Log, TEXT("Integration tests completed with status: %d"), (int32)CurrentReport.OverallStatus);
+}
+
+void UBuild_IntegrationSubsystem::TestModuleLoading()
+{
+    // Test core systems
+    TArray<FString> CoreClasses = {
+        TEXT("/Script/TranspersonalGame.TranspersonalGameState"),
+        TEXT("/Script/TranspersonalGame.TranspersonalCharacter")
+    };
+    FBuild_ModuleTestResult CoreResult = TestModule(TEXT("Core Systems"), CoreClasses);
+    CurrentReport.ModuleResults.Add(CoreResult);
+
+    // Test world generation
+    TArray<FString> WorldGenClasses = {
+        TEXT("/Script/TranspersonalGame.PCGWorldGenerator"),
+        TEXT("/Script/TranspersonalGame.FoliageManager")
+    };
+    FBuild_ModuleTestResult WorldGenResult = TestModule(TEXT("World Generation"), WorldGenClasses);
+    CurrentReport.ModuleResults.Add(WorldGenResult);
+
+    // Test AI & Crowd
+    TArray<FString> AIClasses = {
+        TEXT("/Script/TranspersonalGame.CrowdSimulationManager")
+    };
+    FBuild_ModuleTestResult AIResult = TestModule(TEXT("AI & Crowd"), AIClasses);
+    CurrentReport.ModuleResults.Add(AIResult);
+}
+
+FBuild_ModuleTestResult UBuild_IntegrationSubsystem::TestModule(const FString& ModuleName, const TArray<FString>& ClassPaths)
+{
+    FBuild_ModuleTestResult Result;
+    Result.ModuleName = ModuleName;
+    Result.TotalClasses = ClassPaths.Num();
+    Result.ClassesLoaded = 0;
+
+    for (const FString& ClassPath : ClassPaths)
     {
-        UClass* EnvClass = FindObject<UClass>(ANY_PACKAGE, *ClassName);
-        if (EnvClass)
+        FString Error;
+        if (TestClassLoading(ClassPath, Error))
         {
-            bFoundEnvironmentClasses = true;
-            break;
+            Result.ClassesLoaded++;
+        }
+        else
+        {
+            Result.ErrorMessages.Add(FString::Printf(TEXT("%s: %s"), *ClassPath, *Error));
         }
     }
-    
-    if (bFoundEnvironmentClasses)
+
+    // Determine status
+    if (Result.ClassesLoaded == Result.TotalClasses)
     {
-        UpdateModuleStatus(ModuleName, EBuild_IntegrationStatus::Success);
-        LogIntegrationResult(ModuleName, true, TEXT("Environment classes found"));
+        Result.Status = EBuild_BuildStatus::Success;
+    }
+    else if (Result.ClassesLoaded > 0)
+    {
+        Result.Status = EBuild_BuildStatus::Warning;
     }
     else
     {
-        UpdateModuleStatus(ModuleName, EBuild_IntegrationStatus::Failed, TEXT("No environment classes found"));
-        LogIntegrationResult(ModuleName, false, TEXT("No environment classes found"));
+        Result.Status = EBuild_BuildStatus::Failed;
     }
+
+    return Result;
 }
 
-void UBuildIntegrationManager::TestCharacterModule()
+bool UBuild_IntegrationSubsystem::TestClassLoading(const FString& ClassPath, FString& OutError)
 {
-    const FString ModuleName = TEXT("Characters.CharacterManager");
-    
-    // Look for character-related classes
-    UClass* CharacterClass = FindObject<UClass>(ANY_PACKAGE, TEXT("TranspersonalCharacter"));
-    if (!CharacterClass)
+    try
     {
-        CharacterClass = FindObject<UClass>(ANY_PACKAGE, TEXT("CharacterManager"));
-    }
-    
-    if (CharacterClass)
-    {
-        UpdateModuleStatus(ModuleName, EBuild_IntegrationStatus::Success);
-        LogIntegrationResult(ModuleName, true, TEXT("Character classes found"));
-    }
-    else
-    {
-        UpdateModuleStatus(ModuleName, EBuild_IntegrationStatus::Failed, TEXT("No character classes found"));
-        LogIntegrationResult(ModuleName, false, TEXT("No character classes found"));
-    }
-}
-
-void UBuildIntegrationManager::TestAIModule()
-{
-    const FString ModuleName = TEXT("AI.NPCBehaviorManager");
-    
-    // Look for AI-related classes
-    UClass* AIClass = FindObject<UClass>(ANY_PACKAGE, TEXT("NPCBehaviorManager"));
-    if (!AIClass)
-    {
-        AIClass = FindObject<UClass>(ANY_PACKAGE, TEXT("NPCBehaviorComponent"));
-    }
-    
-    if (AIClass)
-    {
-        UpdateModuleStatus(ModuleName, EBuild_IntegrationStatus::Success);
-        LogIntegrationResult(ModuleName, true, TEXT("AI classes found"));
-    }
-    else
-    {
-        UpdateModuleStatus(ModuleName, EBuild_IntegrationStatus::Failed, TEXT("No AI classes found"));
-        LogIntegrationResult(ModuleName, false, TEXT("No AI classes found"));
-    }
-}
-
-void UBuildIntegrationManager::TestQuestModule()
-{
-    const FString ModuleName = TEXT("Quest.QuestManager");
-    
-    // Look for quest-related classes
-    UClass* QuestClass = FindObject<UClass>(ANY_PACKAGE, TEXT("QuestManager"));
-    if (!QuestClass)
-    {
-        QuestClass = FindObject<UClass>(ANY_PACKAGE, TEXT("QuestComponent"));
-    }
-    
-    if (QuestClass)
-    {
-        UpdateModuleStatus(ModuleName, EBuild_IntegrationStatus::Success);
-        LogIntegrationResult(ModuleName, true, TEXT("Quest classes found"));
-    }
-    else
-    {
-        UpdateModuleStatus(ModuleName, EBuild_IntegrationStatus::Failed, TEXT("No quest classes found"));
-        LogIntegrationResult(ModuleName, false, TEXT("No quest classes found"));
-    }
-}
-
-void UBuildIntegrationManager::TestAudioModule()
-{
-    const FString ModuleName = TEXT("Audio.AudioManager");
-    
-    // Look for audio-related classes
-    UClass* AudioClass = FindObject<UClass>(ANY_PACKAGE, TEXT("AudioManager"));
-    if (!AudioClass)
-    {
-        AudioClass = FindObject<UClass>(ANY_PACKAGE, TEXT("AdaptiveAudioManager"));
-    }
-    
-    if (AudioClass)
-    {
-        UpdateModuleStatus(ModuleName, EBuild_IntegrationStatus::Success);
-        LogIntegrationResult(ModuleName, true, TEXT("Audio classes found"));
-    }
-    else
-    {
-        UpdateModuleStatus(ModuleName, EBuild_IntegrationStatus::Failed, TEXT("No audio classes found"));
-        LogIntegrationResult(ModuleName, false, TEXT("No audio classes found"));
-    }
-}
-
-void UBuildIntegrationManager::TestVFXModule()
-{
-    const FString ModuleName = TEXT("VFX.VFXManager");
-    
-    // Look for VFX-related classes
-    UClass* VFXClass = FindObject<UClass>(ANY_PACKAGE, TEXT("VFXManager"));
-    if (!VFXClass)
-    {
-        VFXClass = FindObject<UClass>(ANY_PACKAGE, TEXT("VFXSystemManager"));
-    }
-    
-    if (VFXClass)
-    {
-        UpdateModuleStatus(ModuleName, EBuild_IntegrationStatus::Success);
-        LogIntegrationResult(ModuleName, true, TEXT("VFX classes found"));
-    }
-    else
-    {
-        UpdateModuleStatus(ModuleName, EBuild_IntegrationStatus::Failed, TEXT("No VFX classes found"));
-        LogIntegrationResult(ModuleName, false, TEXT("No VFX classes found"));
-    }
-}
-
-void UBuildIntegrationManager::TestPhysicsWorldIntegration()
-{
-    LogIntegrationResult(TEXT("PhysicsWorldIntegration"), true, TEXT("Cross-module test placeholder"));
-}
-
-void UBuildIntegrationManager::TestCharacterEnvironmentIntegration()
-{
-    LogIntegrationResult(TEXT("CharacterEnvironmentIntegration"), true, TEXT("Cross-module test placeholder"));
-}
-
-void UBuildIntegrationManager::TestAIQuestIntegration()
-{
-    LogIntegrationResult(TEXT("AIQuestIntegration"), true, TEXT("Cross-module test placeholder"));
-}
-
-void UBuildIntegrationManager::TestAudioVFXIntegration()
-{
-    LogIntegrationResult(TEXT("AudioVFXIntegration"), true, TEXT("Cross-module test placeholder"));
-}
-
-FBuild_IntegrationReport UBuildIntegrationManager::GetIntegrationReport() const
-{
-    return CurrentReport;
-}
-
-EBuild_IntegrationStatus UBuildIntegrationManager::GetOverallStatus() const
-{
-    return CurrentReport.OverallStatus;
-}
-
-TArray<FString> UBuildIntegrationManager::GetFailedModules() const
-{
-    TArray<FString> FailedModules;
-    
-    for (const auto& StatusPair : ModuleStatuses)
-    {
-        if (StatusPair.Value.Status == EBuild_IntegrationStatus::Failed)
+        UClass* LoadedClass = LoadClass<UObject>(nullptr, *ClassPath);
+        if (LoadedClass)
         {
-            FailedModules.Add(StatusPair.Key);
+            // Try to get CDO
+            UObject* CDO = LoadedClass->GetDefaultObject();
+            if (CDO)
+            {
+                return true;
+            }
+            else
+            {
+                OutError = TEXT("CDO not available");
+                return false;
+            }
+        }
+        else
+        {
+            OutError = TEXT("Class not found");
+            return false;
         }
     }
-    
-    return FailedModules;
-}
-
-void UBuildIntegrationManager::CreateBuildSnapshot()
-{
-    UE_LOG(LogTemp, Warning, TEXT("Creating build snapshot for CYCLE_012"));
-    
-    // Create a snapshot of current build state
-    FString SnapshotPath = FPaths::ProjectSavedDir() / TEXT("BuildSnapshots") / TEXT("CYCLE_012");
-    
-    // Log snapshot creation
-    LogIntegrationResult(TEXT("BuildSnapshot"), true, FString::Printf(TEXT("Snapshot created at: %s"), *SnapshotPath));
-}
-
-void UBuildIntegrationManager::ValidateAllSystems()
-{
-    UE_LOG(LogTemp, Warning, TEXT("Validating all systems for integration"));
-    
-    // Basic validation - check if we're in a valid game world
-    UWorld* World = GetWorld();
-    if (World)
+    catch (...)
     {
-        UE_LOG(LogTemp, Warning, TEXT("World validation: SUCCESS"));
+        OutError = TEXT("Exception during loading");
+        return false;
+    }
+}
+
+void UBuild_IntegrationSubsystem::UpdateOverallStatus()
+{
+    int32 SuccessCount = 0;
+    int32 WarningCount = 0;
+    int32 FailedCount = 0;
+
+    for (const FBuild_ModuleTestResult& Result : CurrentReport.ModuleResults)
+    {
+        switch (Result.Status)
+        {
+            case EBuild_BuildStatus::Success:
+                SuccessCount++;
+                break;
+            case EBuild_BuildStatus::Warning:
+                WarningCount++;
+                break;
+            case EBuild_BuildStatus::Failed:
+                FailedCount++;
+                break;
+        }
+    }
+
+    if (FailedCount > 0)
+    {
+        CurrentReport.OverallStatus = EBuild_BuildStatus::Failed;
+    }
+    else if (WarningCount > 0)
+    {
+        CurrentReport.OverallStatus = EBuild_BuildStatus::Warning;
+    }
+    else if (SuccessCount > 0)
+    {
+        CurrentReport.OverallStatus = EBuild_BuildStatus::Success;
     }
     else
     {
-        UE_LOG(LogTemp, Error, TEXT("World validation: FAILED - No world found"));
-    }
-    
-    // Check game instance
-    UGameInstance* GameInstance = GetGameInstance();
-    if (GameInstance)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("GameInstance validation: SUCCESS"));
-    }
-    else
-    {
-        UE_LOG(LogTemp, Error, TEXT("GameInstance validation: FAILED"));
+        CurrentReport.OverallStatus = EBuild_BuildStatus::Unknown;
     }
 }
 
-void UBuildIntegrationManager::UpdateModuleStatus(const FString& ModuleName, EBuild_IntegrationStatus Status, const FString& Error)
+void UBuild_IntegrationSubsystem::GenerateIntegrationReport()
 {
-    if (FBuild_ModuleStatus* ExistingStatus = ModuleStatuses.Find(ModuleName))
+    CurrentReport.Recommendations.Empty();
+
+    // Analyze results and generate recommendations
+    for (const FBuild_ModuleTestResult& Result : CurrentReport.ModuleResults)
     {
-        ExistingStatus->Status = Status;
-        ExistingStatus->LastError = Error;
-        ExistingStatus->LastTestTime = FPlatformTime::Seconds();
+        if (Result.Status == EBuild_BuildStatus::Failed)
+        {
+            CurrentReport.Recommendations.Add(
+                FString::Printf(TEXT("CRITICAL: %s module failed to load - requires immediate attention"), *Result.ModuleName)
+            );
+        }
+        else if (Result.Status == EBuild_BuildStatus::Warning)
+        {
+            CurrentReport.Recommendations.Add(
+                FString::Printf(TEXT("WARNING: %s module partially loaded (%d/%d classes)"), 
+                    *Result.ModuleName, Result.ClassesLoaded, Result.TotalClasses)
+            );
+        }
+    }
+
+    // Add general recommendations
+    if (CurrentReport.OverallStatus == EBuild_BuildStatus::Success)
+    {
+        CurrentReport.Recommendations.Add(TEXT("All modules loaded successfully - ready for next development phase"));
+    }
+    else
+    {
+        CurrentReport.Recommendations.Add(TEXT("Build integration issues detected - review module dependencies"));
+    }
+}
+
+bool UBuild_IntegrationSubsystem::SaveReportToFile(const FString& FilePath)
+{
+    TSharedPtr<FJsonObject> JsonObject = MakeShareable(new FJsonObject);
+    
+    JsonObject->SetStringField(TEXT("CycleId"), CurrentReport.CycleId);
+    JsonObject->SetStringField(TEXT("Timestamp"), CurrentReport.Timestamp.ToString());
+    JsonObject->SetNumberField(TEXT("OverallStatus"), (int32)CurrentReport.OverallStatus);
+    
+    // Add module results
+    TArray<TSharedPtr<FJsonValue>> ModuleArray;
+    for (const FBuild_ModuleTestResult& Result : CurrentReport.ModuleResults)
+    {
+        TSharedPtr<FJsonObject> ModuleObj = MakeShareable(new FJsonObject);
+        ModuleObj->SetStringField(TEXT("ModuleName"), Result.ModuleName);
+        ModuleObj->SetNumberField(TEXT("ClassesLoaded"), Result.ClassesLoaded);
+        ModuleObj->SetNumberField(TEXT("TotalClasses"), Result.TotalClasses);
+        ModuleObj->SetNumberField(TEXT("Status"), (int32)Result.Status);
         
-        if (Status == EBuild_IntegrationStatus::Success)
+        TArray<TSharedPtr<FJsonValue>> ErrorArray;
+        for (const FString& Error : Result.ErrorMessages)
         {
-            ExistingStatus->TestsPassed++;
+            ErrorArray.Add(MakeShareable(new FJsonValueString(Error)));
         }
-        else if (Status == EBuild_IntegrationStatus::Failed)
-        {
-            ExistingStatus->TestsFailed++;
-        }
+        ModuleObj->SetArrayField(TEXT("ErrorMessages"), ErrorArray);
+        
+        ModuleArray.Add(MakeShareable(new FJsonValueObject(ModuleObj)));
     }
+    JsonObject->SetArrayField(TEXT("ModuleResults"), ModuleArray);
+    
+    // Add recommendations
+    TArray<TSharedPtr<FJsonValue>> RecommendationArray;
+    for (const FString& Recommendation : CurrentReport.Recommendations)
+    {
+        RecommendationArray.Add(MakeShareable(new FJsonValueString(Recommendation)));
+    }
+    JsonObject->SetArrayField(TEXT("Recommendations"), RecommendationArray);
+    
+    // Serialize to string
+    FString OutputString;
+    TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&OutputString);
+    FJsonSerializer::Serialize(JsonObject.ToSharedRef(), Writer);
+    
+    // Save to file
+    return FFileHelper::SaveStringToFile(OutputString, *FilePath);
 }
 
-bool UBuildIntegrationManager::IsModuleLoaded(const FString& ModuleName) const
+bool UBuild_IntegrationSubsystem::LoadReportFromFile(const FString& FilePath)
 {
-    // Simple check - try to find any class with the module name
-    FString ClassName = ModuleName;
-    if (ClassName.Contains(TEXT(".")))
+    FString JsonString;
+    if (!FFileHelper::LoadFileToString(JsonString, *FilePath))
     {
-        ClassName = ClassName.Right(ClassName.Len() - ClassName.Find(TEXT(".")) - 1);
+        return false;
     }
     
-    UClass* FoundClass = FindObject<UClass>(ANY_PACKAGE, *ClassName);
-    return FoundClass != nullptr;
-}
-
-void UBuildIntegrationManager::LogIntegrationResult(const FString& TestName, bool bSuccess, const FString& Details)
-{
-    if (bSuccess)
+    TSharedPtr<FJsonObject> JsonObject;
+    TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(JsonString);
+    
+    if (FJsonSerializer::Deserialize(Reader, JsonObject) && JsonObject.IsValid())
     {
-        UE_LOG(LogTemp, Warning, TEXT("INTEGRATION TEST [%s]: SUCCESS - %s"), *TestName, *Details);
+        CurrentReport.CycleId = JsonObject->GetStringField(TEXT("CycleId"));
+        
+        FString TimestampString = JsonObject->GetStringField(TEXT("Timestamp"));
+        FDateTime::Parse(TimestampString, CurrentReport.Timestamp);
+        
+        CurrentReport.OverallStatus = (EBuild_BuildStatus)JsonObject->GetIntegerField(TEXT("OverallStatus"));
+        
+        // Load module results
+        CurrentReport.ModuleResults.Empty();
+        const TArray<TSharedPtr<FJsonValue>>* ModuleArray;
+        if (JsonObject->TryGetArrayField(TEXT("ModuleResults"), ModuleArray))
+        {
+            for (const TSharedPtr<FJsonValue>& ModuleValue : *ModuleArray)
+            {
+                TSharedPtr<FJsonObject> ModuleObj = ModuleValue->AsObject();
+                if (ModuleObj.IsValid())
+                {
+                    FBuild_ModuleTestResult Result;
+                    Result.ModuleName = ModuleObj->GetStringField(TEXT("ModuleName"));
+                    Result.ClassesLoaded = ModuleObj->GetIntegerField(TEXT("ClassesLoaded"));
+                    Result.TotalClasses = ModuleObj->GetIntegerField(TEXT("TotalClasses"));
+                    Result.Status = (EBuild_BuildStatus)ModuleObj->GetIntegerField(TEXT("Status"));
+                    
+                    const TArray<TSharedPtr<FJsonValue>>* ErrorArray;
+                    if (ModuleObj->TryGetArrayField(TEXT("ErrorMessages"), ErrorArray))
+                    {
+                        for (const TSharedPtr<FJsonValue>& ErrorValue : *ErrorArray)
+                        {
+                            Result.ErrorMessages.Add(ErrorValue->AsString());
+                        }
+                    }
+                    
+                    CurrentReport.ModuleResults.Add(Result);
+                }
+            }
+        }
+        
+        // Load recommendations
+        CurrentReport.Recommendations.Empty();
+        const TArray<TSharedPtr<FJsonValue>>* RecommendationArray;
+        if (JsonObject->TryGetArrayField(TEXT("Recommendations"), RecommendationArray))
+        {
+            for (const TSharedPtr<FJsonValue>& RecommendationValue : *RecommendationArray)
+            {
+                CurrentReport.Recommendations.Add(RecommendationValue->AsString());
+            }
+        }
+        
+        return true;
     }
-    else
-    {
-        UE_LOG(LogTemp, Error, TEXT("INTEGRATION TEST [%s]: FAILED - %s"), *TestName, *Details);
-    }
+    
+    return false;
 }
