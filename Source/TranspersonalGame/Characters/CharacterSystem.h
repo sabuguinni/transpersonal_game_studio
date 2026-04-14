@@ -2,152 +2,201 @@
 
 #include "CoreMinimal.h"
 #include "Engine/Engine.h"
+#include "Components/ActorComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Animation/AnimInstance.h"
-#include "GameFramework/Character.h"
+#include "../SharedTypes.h"
 #include "CharacterSystem.generated.h"
 
-/**
- * Base Character System for Transpersonal Game
- * Handles MetaHuman integration and character variation system
- */
-
+// Character archetype definitions for the prehistoric world
 UENUM(BlueprintType)
-enum class ECharacterType : uint8
+enum class EChar_CharacterArchetype : uint8
 {
-    Protagonist     UMETA(DisplayName = "Protagonist"),
-    NPC_Survivor    UMETA(DisplayName = "NPC Survivor"),
-    NPC_Tribal      UMETA(DisplayName = "NPC Tribal"),
-    NPC_Researcher  UMETA(DisplayName = "NPC Researcher")
+    Hunter          UMETA(DisplayName = "Hunter"),
+    Gatherer        UMETA(DisplayName = "Gatherer"),
+    Shaman          UMETA(DisplayName = "Shaman"),
+    Elder           UMETA(DisplayName = "Elder"),
+    Child           UMETA(DisplayName = "Child"),
+    Warrior         UMETA(DisplayName = "Warrior"),
+    Crafter         UMETA(DisplayName = "Crafter"),
+    Scout           UMETA(DisplayName = "Scout")
 };
 
-UENUM(BlueprintType)
-enum class ECharacterGender : uint8
-{
-    Male    UMETA(DisplayName = "Male"),
-    Female  UMETA(DisplayName = "Female")
-};
-
-UENUM(BlueprintType)
-enum class ECharacterAge : uint8
-{
-    Young   UMETA(DisplayName = "Young (20-30)"),
-    Adult   UMETA(DisplayName = "Adult (30-50)"),
-    Elder   UMETA(DisplayName = "Elder (50+)")
-};
-
+// Physical characteristics for character generation
 USTRUCT(BlueprintType)
-struct FCharacterVariationData
+struct TRANSPERSONALGAME_API FChar_PhysicalTraits
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Variation")
-    ECharacterType CharacterType;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical Traits")
+    float Height = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Variation")
-    ECharacterGender Gender;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical Traits")
+    float Weight = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Variation")
-    ECharacterAge Age;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical Traits")
+    float Age = 25.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Variation")
-    FString CharacterName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical Traits")
+    FLinearColor SkinTone = FLinearColor(0.8f, 0.6f, 0.4f, 1.0f);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Variation")
-    FLinearColor SkinTone;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical Traits")
+    FString HairStyle = TEXT("Braided");
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Variation")
-    int32 HairStyleIndex;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical Traits")
+    FLinearColor HairColor = FLinearColor(0.2f, 0.1f, 0.05f, 1.0f);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Variation")
-    FLinearColor HairColor;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical Traits")
+    bool bHasScars = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Variation")
-    int32 ClothingSetIndex;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Variation")
-    float HeightVariation; // -0.1 to 0.1 (10% variation)
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Variation")
-    float BodyMassVariation; // -0.2 to 0.2 (20% variation)
-
-    // Facial feature variations
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Facial Features")
-    float EyeSize;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Facial Features")
-    float NoseSize;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Facial Features")
-    float JawWidth;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Facial Features")
-    float CheekboneHeight;
-
-    FCharacterVariationData()
-    {
-        CharacterType = ECharacterType::NPC_Survivor;
-        Gender = ECharacterGender::Male;
-        Age = ECharacterAge::Adult;
-        CharacterName = TEXT("Unknown");
-        SkinTone = FLinearColor(0.8f, 0.6f, 0.4f, 1.0f);
-        HairStyleIndex = 0;
-        HairColor = FLinearColor(0.2f, 0.1f, 0.05f, 1.0f);
-        ClothingSetIndex = 0;
-        HeightVariation = 0.0f;
-        BodyMassVariation = 0.0f;
-        EyeSize = 0.0f;
-        NoseSize = 0.0f;
-        JawWidth = 0.0f;
-        CheekboneHeight = 0.0f;
-    }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical Traits")
+    bool bHasTattoos = false;
 };
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API ATranspersonalCharacter : public ACharacter
+// Clothing and equipment system
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FChar_ClothingSet
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clothing")
+    FString ClothingName = TEXT("Basic Hide");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clothing")
+    TArray<FString> MaterialTypes;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clothing")
+    FLinearColor PrimaryColor = FLinearColor(0.6f, 0.4f, 0.2f, 1.0f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clothing")
+    FLinearColor SecondaryColor = FLinearColor(0.3f, 0.2f, 0.1f, 1.0f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clothing")
+    float WearLevel = 0.0f; // 0.0 = new, 1.0 = heavily worn
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clothing")
+    TArray<FString> Accessories;
+};
+
+// Character personality and background
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FChar_PersonalityProfile
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality")
+    FString CharacterName = TEXT("Unnamed");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality")
+    FString BackgroundStory = TEXT("");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality")
+    float Courage = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality")
+    float Wisdom = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality")
+    float Compassion = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality")
+    float Aggression = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality")
+    TArray<FString> Quirks;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality")
+    TArray<FString> Fears;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality")
+    TArray<FString> Motivations;
+};
+
+/**
+ * Core character system component that manages character appearance,
+ * personality, and visual storytelling elements
+ */
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UCharacterSystem : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    ATranspersonalCharacter();
+    UCharacterSystem();
 
 protected:
     virtual void BeginPlay() override;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Character System")
-    class UMetaHumanComponent* MetaHumanComponent;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Data")
-    FCharacterVariationData CharacterData;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Assets")
-    TArray<USkeletalMesh*> MaleMetaHumanBodies;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Assets")
-    TArray<USkeletalMesh*> FemaleMetaHumanBodies;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Assets")
-    TArray<USkeletalMesh*> HairStyles;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Assets")
-    TArray<USkeletalMesh*> ClothingSets;
-
 public:
-    UFUNCTION(BlueprintCallable, Category = "Character System")
-    void ApplyCharacterVariation(const FCharacterVariationData& VariationData);
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    UFUNCTION(BlueprintCallable, Category = "Character System")
-    void GenerateRandomVariation(ECharacterType Type);
+    // Core character definition
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Definition")
+    EChar_CharacterArchetype CharacterArchetype = EChar_CharacterArchetype::Hunter;
 
-    UFUNCTION(BlueprintCallable, Category = "Character System")
-    FCharacterVariationData GetCharacterData() const { return CharacterData; }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Definition")
+    FChar_PhysicalTraits PhysicalTraits;
 
-    UFUNCTION(BlueprintCallable, Category = "Character System")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Definition")
+    FChar_ClothingSet ClothingSet;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Definition")
+    FChar_PersonalityProfile PersonalityProfile;
+
+    // MetaHuman integration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
+    TSoftObjectPtr<USkeletalMesh> MetaHumanMesh;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
+    TSoftClassPtr<UAnimInstance> AnimationBlueprint;
+
+    // Character generation and customization
+    UFUNCTION(BlueprintCallable, Category = "Character Generation")
+    void GenerateRandomCharacter(EChar_CharacterArchetype Archetype);
+
+    UFUNCTION(BlueprintCallable, Category = "Character Generation")
+    void ApplyPhysicalTraits();
+
+    UFUNCTION(BlueprintCallable, Category = "Character Generation")
+    void ApplyClothingSet();
+
+    UFUNCTION(BlueprintCallable, Category = "Character Customization")
     void SetCharacterName(const FString& NewName);
 
+    UFUNCTION(BlueprintCallable, Category = "Character Customization")
+    void AddPersonalityQuirk(const FString& Quirk);
+
+    UFUNCTION(BlueprintCallable, Category = "Character Customization")
+    void SetBackgroundStory(const FString& Story);
+
+    // Visual storytelling
+    UFUNCTION(BlueprintCallable, Category = "Visual Storytelling")
+    void ApplyAgeEffects(float AgeYears);
+
+    UFUNCTION(BlueprintCallable, Category = "Visual Storytelling")
+    void ApplyWeatherEffects(float Intensity);
+
+    UFUNCTION(BlueprintCallable, Category = "Visual Storytelling")
+    void AddBattleScars(int32 NumScars);
+
+    // Character validation and testing
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Testing")
+    void ValidateCharacterSetup();
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Testing")
+    void PreviewCharacterVariations();
+
 private:
-    void UpdateMetaHumanAppearance();
-    void ApplyBodyVariations();
-    void ApplyFacialVariations();
-    void ApplyClothing();
+    // Internal character generation helpers
+    void GeneratePhysicalTraitsForArchetype(EChar_CharacterArchetype Archetype);
+    void GenerateClothingForArchetype(EChar_CharacterArchetype Archetype);
+    void GeneratePersonalityForArchetype(EChar_CharacterArchetype Archetype);
+    
+    // Material and mesh management
+    void UpdateCharacterMaterials();
+    void ApplyDynamicMaterialParameters();
+    
+    // Reference to the skeletal mesh component
+    UPROPERTY()
+    USkeletalMeshComponent* SkeletalMeshComponent;
 };
