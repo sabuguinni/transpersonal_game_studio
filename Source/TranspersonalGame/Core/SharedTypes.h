@@ -3,117 +3,246 @@
 #include "CoreMinimal.h"
 #include "Engine/Engine.h"
 #include "Components/ActorComponent.h"
-#include "Engine/World.h"
+#include "GameFramework/Actor.h"
 #include "SharedTypes.generated.h"
 
 /**
- * TRANSPERSONAL GAME STUDIO - SHARED TYPES
- * Engine Architect #02 - Core Architecture Definition
+ * TRANSPERSONAL GAME STUDIO - SHARED ARCHITECTURE TYPES
+ * Engine Architect Agent #02
  * 
  * This file contains ALL shared types used across the entire project.
- * ALL agents MUST use these types for cross-system communication.
+ * ALL agents must check this file before creating new structs/enums.
  * 
- * CRITICAL: Before creating ANY new struct/enum, check if it exists here first.
- * Use the "Eng_" prefix for all architecture-level types.
+ * NAMING CONVENTION: All types use "Eng_" prefix to avoid conflicts.
  */
 
 // ═══════════════════════════════════════════════════════════════
-// CORE ARCHITECTURE ENUMS
+// CORE SYSTEM ENUMS
 // ═══════════════════════════════════════════════════════════════
 
 UENUM(BlueprintType)
 enum class EEng_SystemPriority : uint8
 {
-    Critical    UMETA(DisplayName = "Critical - Physics/Input"),
-    High        UMETA(DisplayName = "High - Gameplay"),
-    Medium      UMETA(DisplayName = "Medium - AI/Audio"),
-    Low         UMETA(DisplayName = "Low - VFX/UI"),
-    Background  UMETA(DisplayName = "Background - Streaming")
+    Critical = 0    UMETA(DisplayName = "Critical"),
+    High = 1        UMETA(DisplayName = "High"),
+    Normal = 2      UMETA(DisplayName = "Normal"),
+    Low = 3         UMETA(DisplayName = "Low"),
+    Background = 4  UMETA(DisplayName = "Background")
 };
 
 UENUM(BlueprintType)
-enum class EEng_PerformanceLevel : uint8
+enum class EEng_SystemState : uint8
 {
-    Ultra       UMETA(DisplayName = "Ultra - High-end PC"),
-    High        UMETA(DisplayName = "High - Mid-range PC"),
-    Medium      UMETA(DisplayName = "Medium - Console/Low PC"),
-    Low         UMETA(DisplayName = "Low - Mobile/Minimum"),
-    Potato      UMETA(DisplayName = "Potato - Emergency fallback")
+    Uninitialized = 0   UMETA(DisplayName = "Uninitialized"),
+    Initializing = 1    UMETA(DisplayName = "Initializing"),
+    Running = 2         UMETA(DisplayName = "Running"),
+    Paused = 3          UMETA(DisplayName = "Paused"),
+    Error = 4           UMETA(DisplayName = "Error"),
+    Shutdown = 5        UMETA(DisplayName = "Shutdown")
 };
 
 UENUM(BlueprintType)
-enum class EEng_WorldScale : uint8
+enum class EEng_PerformanceTier : uint8
 {
-    Micro       UMETA(DisplayName = "Micro - Under 1km²"),
-    Small       UMETA(DisplayName = "Small - 1-4km²"),
-    Medium      UMETA(DisplayName = "Medium - 4-16km²"),
-    Large       UMETA(DisplayName = "Large - 16-64km²"),
-    Massive     UMETA(DisplayName = "Massive - Over 64km²")
-};
-
-UENUM(BlueprintType)
-enum class EEng_SimulationComplexity : uint8
-{
-    Simple      UMETA(DisplayName = "Simple - Basic physics"),
-    Standard    UMETA(DisplayName = "Standard - Full physics"),
-    Complex     UMETA(DisplayName = "Complex - Advanced simulation"),
-    Extreme     UMETA(DisplayName = "Extreme - Research-level")
+    Ultra = 0       UMETA(DisplayName = "Ultra"),
+    High = 1        UMETA(DisplayName = "High"),
+    Medium = 2      UMETA(DisplayName = "Medium"),
+    Low = 3         UMETA(DisplayName = "Low"),
+    Potato = 4      UMETA(DisplayName = "Potato")
 };
 
 // ═══════════════════════════════════════════════════════════════
-// PERFORMANCE ARCHITECTURE STRUCTS
+// PHYSICS SYSTEM TYPES
 // ═══════════════════════════════════════════════════════════════
+
+UENUM(BlueprintType)
+enum class EEng_PhysicsLayer : uint8
+{
+    Default = 0         UMETA(DisplayName = "Default"),
+    Terrain = 1         UMETA(DisplayName = "Terrain"),
+    Vegetation = 2      UMETA(DisplayName = "Vegetation"),
+    Characters = 3      UMETA(DisplayName = "Characters"),
+    Dinosaurs = 4       UMETA(DisplayName = "Dinosaurs"),
+    Structures = 5      UMETA(DisplayName = "Structures"),
+    Projectiles = 6     UMETA(DisplayName = "Projectiles"),
+    Triggers = 7        UMETA(DisplayName = "Triggers")
+};
+
+UENUM(BlueprintType)
+enum class EEng_DestructionLevel : uint8
+{
+    Indestructible = 0  UMETA(DisplayName = "Indestructible"),
+    Minor = 1           UMETA(DisplayName = "Minor"),
+    Moderate = 2        UMETA(DisplayName = "Moderate"),
+    Major = 3           UMETA(DisplayName = "Major"),
+    Complete = 4        UMETA(DisplayName = "Complete")
+};
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_PerformanceConstraints
+struct TRANSPERSONALGAME_API FEng_PhysicsSettings
 {
     GENERATED_BODY()
 
-    // Target framerates (MANDATORY limits)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 TargetFPS_PC = 60;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    float Gravity = -980.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 TargetFPS_Console = 30;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    float LinearDamping = 0.01f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MinimumFPS = 20;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    float AngularDamping = 0.05f;
 
-    // Memory constraints (MB)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxMemoryUsage_PC = 8192;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    bool bEnableRagdoll = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxMemoryUsage_Console = 4096;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    EEng_DestructionLevel MaxDestructionLevel = EEng_DestructionLevel::Moderate;
 
-    // Entity limits for Mass simulation
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxSimultaneousEntities = 50000;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxVisibleEntities = 2000;
-
-    // LOD distances (Unreal Units)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float LOD0_Distance = 1000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float LOD1_Distance = 3000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float LOD2_Distance = 8000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float CullingDistance = 15000.0f;
-
-    FEng_PerformanceConstraints()
+    FEng_PhysicsSettings()
     {
-        // Default constructor with safe values
+        Gravity = -980.0f;
+        LinearDamping = 0.01f;
+        AngularDamping = 0.05f;
+        bEnableRagdoll = true;
+        MaxDestructionLevel = EEng_DestructionLevel::Moderate;
     }
 };
 
+// ═══════════════════════════════════════════════════════════════
+// WORLD GENERATION TYPES
+// ═══════════════════════════════════════════════════════════════
+
+UENUM(BlueprintType)
+enum class EEng_BiomeType : uint8
+{
+    Grassland = 0       UMETA(DisplayName = "Grassland"),
+    Forest = 1          UMETA(DisplayName = "Forest"),
+    Desert = 2          UMETA(DisplayName = "Desert"),
+    Swamp = 3           UMETA(DisplayName = "Swamp"),
+    Mountains = 4       UMETA(DisplayName = "Mountains"),
+    River = 5           UMETA(DisplayName = "River"),
+    Lake = 6            UMETA(DisplayName = "Lake"),
+    Coast = 7           UMETA(DisplayName = "Coast")
+};
+
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_SystemConfiguration
+struct TRANSPERSONALGAME_API FEng_WorldCell
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World")
+    int32 X = 0;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World")
+    int32 Y = 0;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World")
+    EEng_BiomeType BiomeType = EEng_BiomeType::Grassland;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World")
+    float Elevation = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World")
+    float Temperature = 20.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World")
+    float Humidity = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World")
+    bool bIsLoaded = false;
+
+    FEng_WorldCell()
+    {
+        X = 0;
+        Y = 0;
+        BiomeType = EEng_BiomeType::Grassland;
+        Elevation = 0.0f;
+        Temperature = 20.0f;
+        Humidity = 0.5f;
+        bIsLoaded = false;
+    }
+};
+
+// ═══════════════════════════════════════════════════════════════
+// CONSCIOUSNESS SYSTEM TYPES
+// ═══════════════════════════════════════════════════════════════
+
+UENUM(BlueprintType)
+enum class EEng_ConsciousnessState : uint8
+{
+    Awake = 0           UMETA(DisplayName = "Awake"),
+    Dreaming = 1        UMETA(DisplayName = "Dreaming"),
+    Meditation = 2      UMETA(DisplayName = "Meditation"),
+    Unconscious = 3     UMETA(DisplayName = "Unconscious"),
+    Transcendent = 4    UMETA(DisplayName = "Transcendent")
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FEng_ConsciousnessData
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Consciousness")
+    EEng_ConsciousnessState State = EEng_ConsciousnessState::Awake;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Consciousness")
+    float Awareness = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Consciousness")
+    float Coherence = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Consciousness")
+    float Resonance = 0.0f;
+
+    FEng_ConsciousnessData()
+    {
+        State = EEng_ConsciousnessState::Awake;
+        Awareness = 1.0f;
+        Coherence = 1.0f;
+        Resonance = 0.0f;
+    }
+};
+
+// ═══════════════════════════════════════════════════════════════
+// PERFORMANCE MONITORING TYPES
+// ═══════════════════════════════════════════════════════════════
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FEng_PerformanceMetrics
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float FrameRate = 60.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float MemoryUsageMB = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 DrawCalls = 0;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 TriangleCount = 0;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    EEng_PerformanceTier CurrentTier = EEng_PerformanceTier::High;
+
+    FEng_PerformanceMetrics()
+    {
+        FrameRate = 60.0f;
+        MemoryUsageMB = 0.0f;
+        DrawCalls = 0;
+        TriangleCount = 0;
+        CurrentTier = EEng_PerformanceTier::High;
+    }
+};
+
+// ═══════════════════════════════════════════════════════════════
+// SYSTEM COMMUNICATION TYPES
+// ═══════════════════════════════════════════════════════════════
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FEng_SystemMessage
 {
     GENERATED_BODY()
 
@@ -121,170 +250,23 @@ struct TRANSPERSONALGAME_API FEng_SystemConfiguration
     FString SystemName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System")
-    EEng_SystemPriority Priority = EEng_SystemPriority::Medium;
+    FString MessageType;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System")
-    bool bEnabled = true;
+    FString Data;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System")
-    bool bTickEnabled = true;
+    EEng_SystemPriority Priority = EEng_SystemPriority::Normal;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System")
-    float TickInterval = 0.0f; // 0 = every frame
+    float Timestamp = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System")
-    int32 MaxInstancesPerFrame = 100;
-
-    FEng_SystemConfiguration()
+    FEng_SystemMessage()
     {
-        SystemName = TEXT("UnnamedSystem");
-    }
-};
-
-// ═══════════════════════════════════════════════════════════════
-// WORLD ARCHITECTURE STRUCTS
-// ═══════════════════════════════════════════════════════════════
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_WorldConfiguration
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World")
-    EEng_WorldScale WorldScale = EEng_WorldScale::Large;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World")
-    bool bUseWorldPartition = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World")
-    bool bUseLevelStreaming = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World")
-    int32 StreamingPoolSize = 512; // MB
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World")
-    float StreamingDistance = 5000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World")
-    int32 MaxStreamingLevels = 16;
-
-    // Procedural generation settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World")
-    bool bUsePCG = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World")
-    int32 PCG_Seed = 12345;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World")
-    float TerrainScale = 100.0f;
-
-    FEng_WorldConfiguration()
-    {
-        // Default constructor
-    }
-};
-
-// ═══════════════════════════════════════════════════════════════
-// PHYSICS ARCHITECTURE STRUCTS
-// ═══════════════════════════════════════════════════════════════
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_PhysicsConfiguration
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    EEng_SimulationComplexity SimulationLevel = EEng_SimulationComplexity::Standard;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    bool bUseChaosPhysics = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    bool bEnableRagdoll = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    bool bEnableDestruction = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    float PhysicsTimeStep = 0.016667f; // 60Hz
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    int32 MaxPhysicsObjects = 5000;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    float CollisionTolerance = 0.1f;
-
-    FEng_PhysicsConfiguration()
-    {
-        // Default constructor
-    }
-};
-
-// ═══════════════════════════════════════════════════════════════
-// RENDERING ARCHITECTURE STRUCTS  
-// ═══════════════════════════════════════════════════════════════
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_RenderingConfiguration
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering")
-    bool bUseLumen = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering")
-    bool bUseNanite = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering")
-    bool bUseVirtualShadowMaps = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering")
-    int32 MaxDrawCalls = 5000;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering")
-    int32 MaxTriangles = 2000000;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering")
-    float ViewDistance = 20000.0f;
-
-    FEng_RenderingConfiguration()
-    {
-        // Default constructor
-    }
-};
-
-// ═══════════════════════════════════════════════════════════════
-// MASTER ARCHITECTURE CONFIGURATION
-// ═══════════════════════════════════════════════════════════════
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_MasterArchitecture
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    FEng_PerformanceConstraints Performance;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    FEng_WorldConfiguration World;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    FEng_PhysicsConfiguration Physics;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    FEng_RenderingConfiguration Rendering;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    EEng_PerformanceLevel TargetPerformanceLevel = EEng_PerformanceLevel::High;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    bool bDebugMode = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    bool bProfilingEnabled = true;
-
-    FEng_MasterArchitecture()
-    {
-        // Initialize with safe defaults
+        SystemName = TEXT("");
+        MessageType = TEXT("");
+        Data = TEXT("");
+        Priority = EEng_SystemPriority::Normal;
+        Timestamp = 0.0f;
     }
 };
