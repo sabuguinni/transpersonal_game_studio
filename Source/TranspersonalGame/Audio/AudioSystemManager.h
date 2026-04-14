@@ -1,191 +1,213 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "UObject/NoExportTypes.h"
-#include "Engine/Engine.h"
+#include "Engine/World.h"
+#include "Subsystems/WorldSubsystem.h"
 #include "Components/AudioComponent.h"
-#include "MetasoundSource.h"
+#include "Sound/SoundCue.h"
 #include "Sound/SoundWave.h"
+#include "Engine/Engine.h"
+#include "../SharedTypes.h"
 #include "AudioSystemManager.generated.h"
 
 UENUM(BlueprintType)
-enum class EAudio_ConsciousnessState : uint8
+enum class EAudio_SoundCategory : uint8
 {
-    Dormant         UMETA(DisplayName = "Dormant"),
-    Awakening       UMETA(DisplayName = "Awakening"),
-    Aware           UMETA(DisplayName = "Aware"),
-    Transcendent    UMETA(DisplayName = "Transcendent"),
-    Unity           UMETA(DisplayName = "Unity")
+    None                UMETA(DisplayName = "None"),
+    Ambient            UMETA(DisplayName = "Ambient"),
+    Music              UMETA(DisplayName = "Music"),
+    SFX                UMETA(DisplayName = "Sound Effects"),
+    Voice              UMETA(DisplayName = "Voice/Dialogue"),
+    UI                 UMETA(DisplayName = "User Interface"),
+    Consciousness      UMETA(DisplayName = "Consciousness Events")
 };
 
 UENUM(BlueprintType)
 enum class EAudio_EnvironmentType : uint8
 {
-    PrimordialForest    UMETA(DisplayName = "Primordial Forest"),
-    SacredGrove         UMETA(DisplayName = "Sacred Grove"),
-    AncientRiver        UMETA(DisplayName = "Ancient River"),
-    MysticCave          UMETA(DisplayName = "Mystic Cave"),
-    SpiritualPlain      UMETA(DisplayName = "Spiritual Plain")
+    Forest             UMETA(DisplayName = "Forest"),
+    Cave               UMETA(DisplayName = "Cave"),
+    River              UMETA(DisplayName = "River"),
+    Mountain           UMETA(DisplayName = "Mountain"),
+    Sacred             UMETA(DisplayName = "Sacred Site"),
+    Mystical           UMETA(DisplayName = "Mystical Realm")
 };
 
 USTRUCT(BlueprintType)
-struct FAudio_ConsciousnessLayer
+struct TRANSPERSONALGAME_API FAudio_SoundEntry
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Consciousness Audio")
-    EAudio_ConsciousnessState State = EAudio_ConsciousnessState::Dormant;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    FString SoundID;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Consciousness Audio")
-    float Intensity = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    TSoftObjectPtr<USoundBase> SoundAsset;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Consciousness Audio")
-    float TransitionSpeed = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    EAudio_SoundCategory Category;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Consciousness Audio")
-    TSoftObjectPtr<UMetaSoundSource> MetaSoundAsset;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    float Volume;
 
-    FAudio_ConsciousnessLayer()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    float Pitch;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    bool bLooping;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    float FadeInTime;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    float FadeOutTime;
+
+    FAudio_SoundEntry()
     {
-        State = EAudio_ConsciousnessState::Dormant;
-        Intensity = 0.0f;
-        TransitionSpeed = 1.0f;
+        SoundID = TEXT("");
+        Category = EAudio_SoundCategory::None;
+        Volume = 1.0f;
+        Pitch = 1.0f;
+        bLooping = false;
+        FadeInTime = 0.0f;
+        FadeOutTime = 0.0f;
     }
 };
 
 USTRUCT(BlueprintType)
-struct FAudio_EnvironmentProfile
+struct TRANSPERSONALGAME_API FAudio_EnvironmentSettings
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment Audio")
-    EAudio_EnvironmentType EnvironmentType = EAudio_EnvironmentType::PrimordialForest;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Environment")
+    EAudio_EnvironmentType EnvironmentType;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment Audio")
-    TSoftObjectPtr<UMetaSoundSource> AmbienceMetaSound;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Environment")
+    TArray<FAudio_SoundEntry> AmbientSounds;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment Audio")
-    TArray<TSoftObjectPtr<USoundWave>> LayerSounds;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Environment")
+    FAudio_SoundEntry BackgroundMusic;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment Audio")
-    float BaseVolume = 0.7f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Environment")
+    float MasterVolume;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment Audio")
-    float FadeInTime = 3.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Environment")
+    float ReverbIntensity;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment Audio")
-    float FadeOutTime = 2.0f;
-
-    FAudio_EnvironmentProfile()
+    FAudio_EnvironmentSettings()
     {
-        EnvironmentType = EAudio_EnvironmentType::PrimordialForest;
-        BaseVolume = 0.7f;
-        FadeInTime = 3.0f;
-        FadeOutTime = 2.0f;
+        EnvironmentType = EAudio_EnvironmentType::Forest;
+        MasterVolume = 1.0f;
+        ReverbIntensity = 0.5f;
     }
 };
 
 /**
- * Core audio system manager for the Transpersonal Game
- * Handles adaptive music, consciousness-based audio layers, and environmental soundscapes
- * Uses MetaSounds for real-time audio synthesis and procedural composition
+ * Audio System Manager - Handles all audio playback, adaptive music, and environmental audio
+ * Manages consciousness-based audio transitions and mystical soundscapes
  */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UAudioSystemManager : public UObject
+class TRANSPERSONALGAME_API UAudioSystemManager : public UWorldSubsystem
 {
     GENERATED_BODY()
 
 public:
     UAudioSystemManager();
 
-    // Core System Methods
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+
+    // Core Audio Management
     UFUNCTION(BlueprintCallable, Category = "Audio System")
-    void InitializeAudioSystem();
+    void PlaySound(const FString& SoundID, FVector Location = FVector::ZeroVector, float VolumeMultiplier = 1.0f);
 
     UFUNCTION(BlueprintCallable, Category = "Audio System")
-    void ShutdownAudioSystem();
+    void StopSound(const FString& SoundID, float FadeOutTime = 0.0f);
 
-    // Consciousness Audio Control
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void PlayAmbientSound(const FString& SoundID, bool bLooping = true);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void StopAllAmbientSounds(float FadeOutTime = 2.0f);
+
+    // Environment Audio
+    UFUNCTION(BlueprintCallable, Category = "Audio Environment")
+    void SetEnvironmentType(EAudio_EnvironmentType NewEnvironment, float TransitionTime = 3.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio Environment")
+    void UpdateEnvironmentSettings(const FAudio_EnvironmentSettings& NewSettings);
+
+    // Consciousness Audio Events
     UFUNCTION(BlueprintCallable, Category = "Consciousness Audio")
-    void SetConsciousnessState(EAudio_ConsciousnessState NewState, float TransitionTime = 2.0f);
+    void PlayConsciousnessEvent(EConsciousnessLevel Level, float Intensity = 1.0f);
 
     UFUNCTION(BlueprintCallable, Category = "Consciousness Audio")
-    void UpdateConsciousnessIntensity(float NewIntensity, float BlendTime = 1.0f);
+    void TriggerMysticalTransition(float Duration = 5.0f);
 
-    UFUNCTION(BlueprintPure, Category = "Consciousness Audio")
-    EAudio_ConsciousnessState GetCurrentConsciousnessState() const { return CurrentConsciousnessState; }
+    // Music System
+    UFUNCTION(BlueprintCallable, Category = "Music System")
+    void PlayBackgroundMusic(const FString& MusicID, bool bCrossfade = true, float CrossfadeTime = 2.0f);
 
-    // Environment Audio Control
-    UFUNCTION(BlueprintCallable, Category = "Environment Audio")
-    void TransitionToEnvironment(EAudio_EnvironmentType NewEnvironment, float TransitionTime = 4.0f);
+    UFUNCTION(BlueprintCallable, Category = "Music System")
+    void StopBackgroundMusic(float FadeOutTime = 2.0f);
 
-    UFUNCTION(BlueprintCallable, Category = "Environment Audio")
-    void SetEnvironmentIntensity(float Intensity, float BlendTime = 1.5f);
+    UFUNCTION(BlueprintCallable, Category = "Music System")
+    void SetMusicVolume(float Volume, float FadeTime = 1.0f);
 
-    // Narrative Audio Control
-    UFUNCTION(BlueprintCallable, Category = "Narrative Audio")
-    void PlayNarrationLine(const FString& NarrationKey, bool bInterruptCurrent = false);
+    // Audio Registration
+    UFUNCTION(BlueprintCallable, Category = "Audio Registration")
+    void RegisterSoundEntry(const FAudio_SoundEntry& SoundEntry);
 
-    UFUNCTION(BlueprintCallable, Category = "Narrative Audio")
-    void StopNarration(float FadeOutTime = 1.0f);
+    UFUNCTION(BlueprintCallable, Category = "Audio Registration")
+    void LoadAudioDatabase();
 
-    // MetaSounds Integration
-    UFUNCTION(BlueprintCallable, Category = "MetaSounds")
-    void UpdateMetaSoundParameter(const FString& ParameterName, float Value);
+    // Volume Controls
+    UFUNCTION(BlueprintCallable, Category = "Audio Controls")
+    void SetMasterVolume(float Volume);
 
-    UFUNCTION(BlueprintCallable, Category = "MetaSounds")
-    void TriggerMetaSoundEvent(const FString& EventName);
+    UFUNCTION(BlueprintCallable, Category = "Audio Controls")
+    void SetCategoryVolume(EAudio_SoundCategory Category, float Volume);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio Controls")
+    float GetCategoryVolume(EAudio_SoundCategory Category) const;
 
 protected:
-    // Current State
-    UPROPERTY(BlueprintReadOnly, Category = "Audio State", meta = (AllowPrivateAccess = "true"))
-    EAudio_ConsciousnessState CurrentConsciousnessState;
+    // Audio Storage
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Audio Database")
+    TMap<FString, FAudio_SoundEntry> RegisteredSounds;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Audio State", meta = (AllowPrivateAccess = "true"))
-    EAudio_EnvironmentType CurrentEnvironment;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Audio Environment")
+    FAudio_EnvironmentSettings CurrentEnvironment;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Audio State", meta = (AllowPrivateAccess = "true"))
-    float ConsciousnessIntensity;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Audio Environment")
+    TMap<EAudio_EnvironmentType, FAudio_EnvironmentSettings> EnvironmentPresets;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Audio State", meta = (AllowPrivateAccess = "true"))
-    float EnvironmentIntensity;
+    // Active Audio Components
+    UPROPERTY()
+    TMap<FString, UAudioComponent*> ActiveAudioComponents;
 
-    // Audio Components
-    UPROPERTY(BlueprintReadOnly, Category = "Audio Components", meta = (AllowPrivateAccess = "true"))
-    TObjectPtr<UAudioComponent> ConsciousnessAudioComponent;
+    UPROPERTY()
+    UAudioComponent* BackgroundMusicComponent;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Audio Components", meta = (AllowPrivateAccess = "true"))
-    TObjectPtr<UAudioComponent> EnvironmentAudioComponent;
+    UPROPERTY()
+    TArray<UAudioComponent*> AmbientAudioComponents;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Audio Components", meta = (AllowPrivateAccess = "true"))
-    TObjectPtr<UAudioComponent> NarrationAudioComponent;
+    // Volume Settings
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Volume Settings")
+    float MasterVolume;
 
-    // Configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Configuration", meta = (AllowPrivateAccess = "true"))
-    TMap<EAudio_ConsciousnessState, FAudio_ConsciousnessLayer> ConsciousnessLayers;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Volume Settings")
+    TMap<EAudio_SoundCategory, float> CategoryVolumes;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Configuration", meta = (AllowPrivateAccess = "true"))
-    TMap<EAudio_EnvironmentType, FAudio_EnvironmentProfile> EnvironmentProfiles;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Configuration", meta = (AllowPrivateAccess = "true"))
-    TMap<FString, TSoftObjectPtr<USoundWave>> NarrationLibrary;
+    // Internal Methods
+    UAudioComponent* CreateAudioComponent(const FAudio_SoundEntry& SoundEntry, FVector Location);
+    void CleanupFinishedAudioComponents();
+    void InitializeEnvironmentPresets();
+    void InitializeCategoryVolumes();
+    float CalculateFinalVolume(const FAudio_SoundEntry& SoundEntry) const;
 
 private:
-    // Internal Methods
-    void InitializeConsciousnessLayers();
-    void InitializeEnvironmentProfiles();
-    void InitializeNarrationLibrary();
-    
-    void UpdateConsciousnessAudio();
-    void UpdateEnvironmentAudio();
-    
+    FTimerHandle CleanupTimerHandle;
     bool bIsInitialized;
-    float MasterVolume;
-    
-    // Transition Management
-    FTimerHandle ConsciousnessTransitionTimer;
-    FTimerHandle EnvironmentTransitionTimer;
-    
-    void OnConsciousnessTransitionComplete();
-    void OnEnvironmentTransitionComplete();
 };
