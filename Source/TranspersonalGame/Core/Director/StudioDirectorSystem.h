@@ -4,23 +4,31 @@
 #include "Engine/World.h"
 #include "Components/ActorComponent.h"
 #include "Engine/Engine.h"
-#include "Kismet/GameplayStatics.h"
 #include "StudioDirectorSystem.generated.h"
 
-// Studio Director Production States
 UENUM(BlueprintType)
-enum class EDir_ProductionState : uint8
+enum class EDir_ProductionPhase : uint8
 {
-    Planning        UMETA(DisplayName = "Planning"),
-    InProgress      UMETA(DisplayName = "In Progress"),
-    Review          UMETA(DisplayName = "Review"),
-    Complete        UMETA(DisplayName = "Complete"),
-    Blocked         UMETA(DisplayName = "Blocked")
+    PreProduction   UMETA(DisplayName = "Pre-Production"),
+    Production      UMETA(DisplayName = "Production"),
+    Alpha          UMETA(DisplayName = "Alpha"),
+    Beta           UMETA(DisplayName = "Beta"),
+    Gold           UMETA(DisplayName = "Gold Master"),
+    PostLaunch     UMETA(DisplayName = "Post-Launch")
 };
 
-// Agent Status Information
+UENUM(BlueprintType)
+enum class EDir_AgentStatus : uint8
+{
+    Idle           UMETA(DisplayName = "Idle"),
+    Working        UMETA(DisplayName = "Working"),
+    Blocked        UMETA(DisplayName = "Blocked"),
+    Complete       UMETA(DisplayName = "Complete"),
+    Error          UMETA(DisplayName = "Error")
+};
+
 USTRUCT(BlueprintType)
-struct FDir_AgentStatus
+struct FDir_AgentInfo
 {
     GENERATED_BODY()
 
@@ -31,69 +39,64 @@ struct FDir_AgentStatus
     int32 AgentID;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
-    EDir_ProductionState CurrentState;
+    EDir_AgentStatus Status;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
     FString CurrentTask;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
-    float ProgressPercentage;
+    float CompletionPercentage;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
-    FDateTime LastUpdate;
+    TArray<FString> Dependencies;
 
-    FDir_AgentStatus()
+    FDir_AgentInfo()
     {
-        AgentName = TEXT("Unknown");
+        AgentName = TEXT("");
         AgentID = 0;
-        CurrentState = EDir_ProductionState::Planning;
-        CurrentTask = TEXT("Idle");
-        ProgressPercentage = 0.0f;
-        LastUpdate = FDateTime::Now();
+        Status = EDir_AgentStatus::Idle;
+        CurrentTask = TEXT("");
+        CompletionPercentage = 0.0f;
     }
 };
 
-// Production Cycle Information
 USTRUCT(BlueprintType)
-struct FDir_ProductionCycle
+struct FDir_ProductionMetrics
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cycle")
-    FString CycleID;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Metrics")
+    int32 TotalAgents;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cycle")
-    int32 CycleNumber;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Metrics")
+    int32 ActiveAgents;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cycle")
-    FDateTime StartTime;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Metrics")
+    int32 BlockedAgents;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cycle")
-    FDateTime EstimatedEndTime;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Metrics")
+    float OverallProgress;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cycle")
-    TArray<FDir_AgentStatus> AgentStatuses;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Metrics")
+    FString CurrentBottleneck;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cycle")
-    EDir_ProductionState OverallState;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Metrics")
+    float EstimatedCompletionHours;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cycle")
-    FString CreativeDirectorNotes;
-
-    FDir_ProductionCycle()
+    FDir_ProductionMetrics()
     {
-        CycleID = TEXT("PROD_CYCLE_000");
-        CycleNumber = 0;
-        StartTime = FDateTime::Now();
-        EstimatedEndTime = FDateTime::Now();
-        OverallState = EDir_ProductionState::Planning;
-        CreativeDirectorNotes = TEXT("");
+        TotalAgents = 19;
+        ActiveAgents = 0;
+        BlockedAgents = 0;
+        OverallProgress = 0.0f;
+        CurrentBottleneck = TEXT("None");
+        EstimatedCompletionHours = 0.0f;
     }
 };
 
 /**
- * Studio Director System - Central coordination and management component
- * Manages the 19-agent production chain and ensures Miguel's vision is preserved
+ * Studio Director System - Central coordination and oversight component
+ * Manages the 19-agent production pipeline and ensures creative vision integrity
  */
 UCLASS(ClassGroup=(TranspersonalGame), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UStudioDirectorSystem : public UActorComponent
@@ -107,89 +110,107 @@ protected:
     virtual void BeginPlay() override;
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // Current production cycle
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production", meta = (AllowPrivateAccess = "true"))
-    FDir_ProductionCycle CurrentCycle;
+    // Production Pipeline Management
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production Pipeline")
+    EDir_ProductionPhase CurrentPhase;
 
-    // All registered agents
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production", meta = (AllowPrivateAccess = "true"))
-    TArray<FDir_AgentStatus> RegisteredAgents;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production Pipeline")
+    TArray<FDir_AgentInfo> AgentChain;
 
-    // Production settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings", meta = (AllowPrivateAccess = "true"))
-    float CycleTimeoutHours;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production Pipeline")
+    FDir_ProductionMetrics ProductionMetrics;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings", meta = (AllowPrivateAccess = "true"))
-    bool bAutoAdvanceAgents;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production Pipeline")
+    int32 CurrentActiveAgent;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings", meta = (AllowPrivateAccess = "true"))
-    bool bStrictSequenceMode;
+    // Creative Vision Protection
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Creative Vision")
+    FString CreativeDirectorVision;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Creative Vision")
+    TArray<FString> CorePillars;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Creative Vision")
+    bool bVisionIntegrityMaintained;
+
+    // Quality Gates
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quality Control")
+    bool bQAApprovalRequired;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quality Control")
+    TArray<FString> QualityGatesCriteria;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quality Control")
+    int32 FailedQualityChecks;
 
 public:
-    // Production cycle management
-    UFUNCTION(BlueprintCallable, Category = "Production")
-    void StartNewCycle(const FString& CycleID, const FString& CreativeNotes);
+    // Production Management Functions
+    UFUNCTION(BlueprintCallable, Category = "Production Management")
+    void InitializeProductionPipeline();
 
-    UFUNCTION(BlueprintCallable, Category = "Production")
-    void CompleteCycle();
-
-    UFUNCTION(BlueprintCallable, Category = "Production")
-    void BlockCycle(const FString& Reason);
-
-    // Agent management
-    UFUNCTION(BlueprintCallable, Category = "Agents")
-    void RegisterAgent(int32 AgentID, const FString& AgentName);
-
-    UFUNCTION(BlueprintCallable, Category = "Agents")
-    void UpdateAgentStatus(int32 AgentID, EDir_ProductionState NewState, const FString& CurrentTask, float Progress);
-
-    UFUNCTION(BlueprintCallable, Category = "Agents")
-    FDir_AgentStatus GetAgentStatus(int32 AgentID);
-
-    UFUNCTION(BlueprintCallable, Category = "Agents")
+    UFUNCTION(BlueprintCallable, Category = "Production Management")
     void AdvanceToNextAgent();
 
-    // Production oversight
-    UFUNCTION(BlueprintCallable, Category = "Production")
-    bool ValidateProductionChain();
+    UFUNCTION(BlueprintCallable, Category = "Production Management")
+    void BlockAgent(int32 AgentID, const FString& Reason);
 
-    UFUNCTION(BlueprintCallable, Category = "Production")
-    TArray<FString> GetProductionWarnings();
+    UFUNCTION(BlueprintCallable, Category = "Production Management")
+    void UnblockAgent(int32 AgentID);
 
-    UFUNCTION(BlueprintCallable, Category = "Production")
-    float GetOverallProgress();
+    UFUNCTION(BlueprintCallable, Category = "Production Management")
+    FDir_ProductionMetrics GetProductionMetrics() const;
 
-    // Creative direction preservation
-    UFUNCTION(BlueprintCallable, Category = "Creative")
-    void SetCreativeVision(const FString& VisionStatement);
+    // Creative Vision Functions
+    UFUNCTION(BlueprintCallable, Category = "Creative Vision")
+    void SetCreativeVision(const FString& Vision);
 
-    UFUNCTION(BlueprintCallable, Category = "Creative")
-    FString GetCreativeVision();
+    UFUNCTION(BlueprintCallable, Category = "Creative Vision")
+    bool ValidateAgentOutput(int32 AgentID, const FString& Output);
 
-    UFUNCTION(BlueprintCallable, Category = "Creative")
-    bool ValidateAgainstVision(const FString& ProposedChange);
+    UFUNCTION(BlueprintCallable, Category = "Creative Vision")
+    void EnforceVisionCompliance();
 
-    // Debug and monitoring
+    // Quality Control Functions
+    UFUNCTION(BlueprintCallable, Category = "Quality Control")
+    bool RunQualityGate();
+
+    UFUNCTION(BlueprintCallable, Category = "Quality Control")
+    void TriggerQAReview();
+
+    UFUNCTION(BlueprintCallable, Category = "Quality Control")
+    void HandleQABlock(const FString& BlockReason);
+
+    // Agent Communication Functions
+    UFUNCTION(BlueprintCallable, Category = "Agent Communication")
+    void SendTaskToAgent(int32 AgentID, const FString& TaskDescription);
+
+    UFUNCTION(BlueprintCallable, Category = "Agent Communication")
+    void ReceiveAgentReport(int32 AgentID, const FString& Report);
+
+    UFUNCTION(BlueprintCallable, Category = "Agent Communication")
+    void BroadcastToAllAgents(const FString& Message);
+
+    // Debug and Monitoring Functions
     UFUNCTION(BlueprintCallable, CallInEditor, Category = "Debug")
-    void LogProductionStatus();
+    void DebugPrintPipelineStatus();
 
     UFUNCTION(BlueprintCallable, CallInEditor, Category = "Debug")
-    void ResetProductionChain();
+    void SimulateAgentWork(int32 AgentID, float ProgressAmount);
 
     UFUNCTION(BlueprintCallable, CallInEditor, Category = "Debug")
-    void SimulateAgentProgress();
+    void ResetProductionPipeline();
+
+protected:
+    // Internal helper functions
+    void UpdateProductionMetrics();
+    void CheckForBottlenecks();
+    void ValidateAgentDependencies();
+    bool IsAgentReadyToWork(int32 AgentID) const;
+    void LogProductionEvent(const FString& Event);
 
 private:
-    // Internal state
-    FString CreativeVision;
-    int32 CurrentActiveAgent;
-    bool bCycleInProgress;
-    
-    // Agent chain definition
-    TArray<FString> AgentChain;
-    
-    void InitializeAgentChain();
-    void ValidateAgentSequence();
-    bool IsAgentReadyToAdvance(int32 AgentID);
-    void NotifyAgentActivation(int32 AgentID);
+    // Internal state tracking
+    float LastMetricsUpdate;
+    TArray<FString> ProductionLog;
+    bool bPipelineInitialized;
 };
