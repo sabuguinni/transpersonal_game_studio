@@ -13,62 +13,76 @@
 UENUM(BlueprintType)
 enum class ECombat_AIState : uint8
 {
-    Idle,
-    Patrol,
-    Investigating,
-    Combat,
-    Flanking,
-    Retreating,
-    Regrouping,
-    Ambushing
+    Idle UMETA(DisplayName = "Idle"),
+    Patrolling UMETA(DisplayName = "Patrolling"),
+    Investigating UMETA(DisplayName = "Investigating"),
+    Chasing UMETA(DisplayName = "Chasing"),
+    Attacking UMETA(DisplayName = "Attacking"),
+    Flanking UMETA(DisplayName = "Flanking"),
+    Retreating UMETA(DisplayName = "Retreating"),
+    Coordinating UMETA(DisplayName = "Coordinating"),
+    Dead UMETA(DisplayName = "Dead")
 };
 
 UENUM(BlueprintType)
 enum class ECombat_TacticalRole : uint8
 {
-    Aggressive,
-    Defensive,
-    Support,
-    Flanker,
-    Leader,
-    Scout
+    Lone_Hunter UMETA(DisplayName = "Lone Hunter"),
+    Pack_Leader UMETA(DisplayName = "Pack Leader"),
+    Pack_Member UMETA(DisplayName = "Pack Member"),
+    Ambush_Predator UMETA(DisplayName = "Ambush Predator"),
+    Tank UMETA(DisplayName = "Tank"),
+    Scout UMETA(DisplayName = "Scout"),
+    Support UMETA(DisplayName = "Support")
 };
 
 USTRUCT(BlueprintType)
-struct FCombat_TacticalData
+struct TRANSPERSONALGAME_API FCombat_TacticalData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    ECombat_TacticalRole Role = ECombat_TacticalRole::Aggressive;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tactical")
+    ECombat_TacticalRole Role = ECombat_TacticalRole::Lone_Hunter;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float AggressionLevel = 0.7f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tactical")
+    float AggressionLevel = 0.5f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tactical")
     float CautiousLevel = 0.3f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float FlankingPreference = 0.5f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tactical")
+    float PackCoordination = 0.7f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float GroupCoordination = 0.8f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tactical")
+    float PreferredAttackDistance = 300.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float RetreatThreshold = 0.2f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tactical")
+    float FlankingRadius = 800.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tactical")
+    bool bCanCallForHelp = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tactical")
+    bool bCanFlank = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tactical")
+    bool bCanRetreat = true;
 
     FCombat_TacticalData()
     {
-        Role = ECombat_TacticalRole::Aggressive;
-        AggressionLevel = 0.7f;
+        Role = ECombat_TacticalRole::Lone_Hunter;
+        AggressionLevel = 0.5f;
         CautiousLevel = 0.3f;
-        FlankingPreference = 0.5f;
-        GroupCoordination = 0.8f;
-        RetreatThreshold = 0.2f;
+        PackCoordination = 0.7f;
+        PreferredAttackDistance = 300.0f;
+        FlankingRadius = 800.0f;
+        bCanCallForHelp = true;
+        bCanFlank = true;
+        bCanRetreat = true;
     }
 };
 
-UCLASS(BlueprintType, Blueprintable)
+UCLASS(Blueprintable, BlueprintType)
 class TRANSPERSONALGAME_API ACombatAIController : public AAIController
 {
     GENERATED_BODY()
@@ -82,59 +96,45 @@ protected:
 
     // AI Perception
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI Perception")
-    UAIPerceptionComponent* AIPerceptionComponent;
+    class UAIPerceptionComponent* AIPerceptionComponent;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI Perception")
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI Perception")
     class UAISenseConfig_Sight* SightConfig;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI Perception")
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI Perception")
     class UAISenseConfig_Hearing* HearingConfig;
 
     // Behavior Tree
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI Behavior")
     class UBehaviorTree* BehaviorTree;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI Behavior")
-    UBehaviorTreeComponent* BehaviorTreeComponent;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI Behavior")
-    UBlackboardComponent* BlackboardComponent;
-
-    // Combat State
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
-    ECombat_AIState CurrentState = ECombat_AIState::Idle;
-
+    // Tactical Data
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
     FCombat_TacticalData TacticalData;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
-    float CombatRange = 1000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
-    float FlankingRange = 1500.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
-    float RetreatRange = 500.0f;
+    // Current State
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat AI")
+    ECombat_AIState CurrentState;
 
     // Target Management
-    UPROPERTY(BlueprintReadOnly, Category = "Combat AI")
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat AI")
     AActor* CurrentTarget;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Combat AI")
-    TArray<AActor*> KnownEnemies;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Combat AI")
-    TArray<AActor*> AlliedUnits;
-
-    // Tactical Positioning
-    UPROPERTY(BlueprintReadOnly, Category = "Combat AI")
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat AI")
     FVector LastKnownTargetLocation;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Combat AI")
-    FVector PreferredCombatPosition;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat AI")
+    float TimeSinceLastTargetSeen;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Combat AI")
-    FVector FlankingPosition;
+    // Pack Coordination
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat AI")
+    TArray<ACombatAIController*> PackMembers;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat AI")
+    ACombatAIController* PackLeader;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat AI")
+    bool bIsPackLeader;
 
 public:
     // AI State Management
@@ -152,58 +152,64 @@ public:
     AActor* GetCurrentTarget() const { return CurrentTarget; }
 
     UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void AddKnownEnemy(AActor* Enemy);
+    void LoseTarget();
+
+    // Tactical Decision Making
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    bool ShouldAttack() const;
 
     UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void RemoveKnownEnemy(AActor* Enemy);
-
-    // Tactical Functions
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    FVector CalculateFlankingPosition(AActor* Target);
+    bool ShouldFlank() const;
 
     UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    FVector FindCoverPosition(AActor* ThreatActor);
+    bool ShouldRetreat() const;
 
     UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    bool ShouldRetreat();
+    bool ShouldCallForHelp() const;
 
     UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    bool CanSeeTarget(AActor* Target);
+    FVector GetFlankingPosition() const;
 
     UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    float GetDistanceToTarget(AActor* Target);
+    FVector GetRetreatPosition() const;
 
-    // Group Coordination
+    // Pack Coordination
     UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void CoordinateWithAllies();
-
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void RequestBackup();
+    void JoinPack(ACombatAIController* Leader);
 
     UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void ShareTargetInformation(AActor* Target);
+    void LeavePack();
 
-protected:
-    // Perception Events
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void BecomePackLeader();
+
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void CallPackToTarget(AActor* Target);
+
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void CoordinatePackAttack();
+
+    // Perception Callbacks
     UFUNCTION()
     void OnPerceptionUpdated(const TArray<AActor*>& UpdatedActors);
 
     UFUNCTION()
     void OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus);
 
-    // Internal Functions
-    void UpdateCombatState(float DeltaTime);
-    void UpdateTacticalPositioning();
-    void ProcessThreatAssessment();
-    void ExecuteCombatBehavior();
-    void HandleGroupCoordination();
+protected:
+    // Internal Methods
+    void UpdateBlackboard();
+    void EvaluateTacticalSituation();
+    void ProcessPackCommunication();
+    bool IsInAttackRange() const;
+    bool IsTargetVisible() const;
+    float GetDistanceToTarget() const;
+    void UpdatePackFormation();
 
-    // Blackboard Keys
-    static const FName BB_CurrentTarget;
-    static const FName BB_LastKnownLocation;
-    static const FName BB_AIState;
-    static const FName BB_CombatPosition;
-    static const FName BB_FlankingPosition;
-    static const FName BB_ShouldRetreat;
-    static const FName BB_AlliesInRange;
+private:
+    // Timers and Cooldowns
+    float LastTacticalEvaluation;
+    float TacticalEvaluationInterval;
+    float LastPackCommunication;
+    float PackCommunicationInterval;
 };
