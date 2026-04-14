@@ -1,471 +1,411 @@
 #include "DialogueManager.h"
-#include "Engine/Engine.h"
+#include "Engine/DataTable.h"
 #include "Engine/World.h"
-#include "Components/AudioComponent.h"
-#include "Sound/SoundWave.h"
 #include "Kismet/GameplayStatics.h"
-#include "GameplayTagsManager.h"
-#include "TimerManager.h"
+#include "Engine/Engine.h"
 
-UDialogueManager::UDialogueManager()
+ADialogueManager::ADialogueManager()
 {
-    DialogueVolume = 1.0f;
-    bSubtitlesEnabled = true;
-    bInternalMonologueEnabled = true;
-    MaxQueueSize = 10.0f;
-    DialogueFadeTime = 0.5f;
-    CurrentDialogueStartTime = 0.0f;
-    bIsInitialized = false;
+    PrimaryActorTick.bCanEverTick = true;
+    
+    // Initialize dialogue state
+    bIsDialogueActive = false;
+    CurrentDialogueID = TEXT("");
+    CurrentLineIndex = 0;
+    bAutoAdvanceEnabled = false;
+    AutoAdvanceDelay = 3.0f;
+    AutoAdvanceTimer = 0.0f;
+    bWaitingForChoice = false;
+    
+    DialogueDataTable = nullptr;
+    CharacterDataTable = nullptr;
 }
 
-void UDialogueManager::Initialize(FSubsystemCollectionBase& Collection)
+void ADialogueManager::BeginPlay()
 {
-    Super::Initialize(Collection);
+    Super::BeginPlay();
     
-    UE_LOG(LogTemp, Warning, TEXT("DialogueManager: Initializing..."));
+    ResetDialogueState();
+}
+
+void ADialogueManager::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
     
-    // Create audio components
-    if (UWorld* World = GetWorld())
+    // Handle auto-advance
+    if (bIsDialogueActive && bAutoAdvanceEnabled && !bWaitingForChoice)
     {
-        // Main dialogue audio component
-        DialogueAudioComponent = UGameplayStatics::CreateSound2D(World, nullptr);
-        if (DialogueAudioComponent)
+        AutoAdvanceTimer += DeltaTime;
+        if (AutoAdvanceTimer >= AutoAdvanceDelay)
         {
-            DialogueAudioComponent->SetVolumeMultiplier(DialogueVolume);
-            DialogueAudioComponent->OnAudioFinished.AddDynamic(this, &UDialogueManager::OnDialogueAudioFinished);
+            AdvanceDialogue();
+            AutoAdvanceTimer = 0.0f;
         }
-        
-        // Internal monologue audio component (separate for mixing control)
-        InternalMonologueAudioComponent = UGameplayStatics::CreateSound2D(World, nullptr);
-        if (InternalMonologueAudioComponent)
+    }
+}
+
+bool ADialogueManager::StartDialogue(const FString& DialogueID)
+{
+    if (bIsDialogueActive)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Dialogue already active. Cannot start new dialogue."));
+        return false;
+    }
+    
+    FNarr_DialogueNode* DialogueNode = GetDialogueNode(DialogueID);
+    if (!DialogueNode)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Dialogue ID not found: %s"), *DialogueID);
+        return false;
+    }
+    
+    // Start the dialogue
+    CurrentDialogueID = DialogueID;
+    CurrentDialogueNode = *DialogueNode;
+    CurrentLineIndex = 0;
+    bIsDialogueActive = true;
+    bWaitingForChoice = false;
+    AutoAdvanceTimer = 0.0f;
+    
+    // Broadcast dialogue started
+    FString SpeakerName = TEXT("Unknown");
+    if (CurrentDialogueNode.DialogueLines.Num() > 0)
+    {
+        SpeakerName = CurrentDialogueNode.DialogueLines[0].SpeakerName;
+    }
+    OnDialogueStarted.Broadcast(DialogueID, SpeakerName);
+    
+    // Process first line
+    ProcessCurrentLine();
+    
+    UE_LOG(LogTemp, Log, TEXT("Started dialogue: %s"), *DialogueID);
+    return true;
+}
+
+void ADialogueManager::EndDialogue()
+{
+    if (!bIsDialogueActive)
+    {
+        return;
+    }
+    
+    FString EndedDialogueID = CurrentDialogueID;
+    ResetDialogueState();
+    
+    OnDialogueEnded.Broadcast(EndedDialogueID);
+    UE_LOG(LogTemp, Log, TEXT("Ended dialogue: %s"), *EndedDialogueID);
+}
+
+bool ADialogueManager::AdvanceDialogue()
+{
+    if (!bIsDialogueActive || bWaitingForChoice)
+    {
+        return false;
+    }
+    
+    CurrentLineIndex++;
+    
+    // Check if we've reached the end of dialogue lines
+    if (CurrentLineIndex >= CurrentDialogueNode.DialogueLines.Num())
+    {
+        // Check if there are player choices
+        if (CurrentDialogueNode.PlayerChoices.Num() > 0)
         {
-            InternalMonologueAudioComponent->SetVolumeMultiplier(DialogueVolume * 0.8f); // Slightly quieter
-        }
-    }
-    
-    LoadDialogueData();
-    
-    // Set up dialogue processing timer
-    if (UWorld* World = GetWorld())
-    {
-        World->GetTimerManager().SetTimer(DialogueProcessingTimer, this, &UDialogueManager::ProcessDialogueQueue, 0.1f, true);
-    }
-    
-    bIsInitialized = true;
-    UE_LOG(LogTemp, Warning, TEXT("DialogueManager: Initialization complete"));
-}
-
-void UDialogueManager::Deinitialize()
-{
-    UE_LOG(LogTemp, Warning, TEXT("DialogueManager: Deinitializing..."));
-    
-    StopAllDialogue();
-    
-    if (UWorld* World = GetWorld())
-    {
-        World->GetTimerManager().ClearTimer(DialogueProcessingTimer);
-        World->GetTimerManager().ClearTimer(SubtitleTimer);
-    }
-    
-    if (DialogueAudioComponent)
-    {
-        DialogueAudioComponent->Stop();
-        DialogueAudioComponent = nullptr;
-    }
-    
-    if (InternalMonologueAudioComponent)
-    {
-        InternalMonologueAudioComponent->Stop();
-        InternalMonologueAudioComponent = nullptr;
-    }
-    
-    DialogueQueue.Empty();
-    bIsInitialized = false;
-    
-    Super::Deinitialize();
-}
-
-void UDialogueManager::Tick(float DeltaTime)
-{
-    // Update emotional context duration
-    if (CurrentEmotionalContext.Duration >= 0.0f)
-    {
-        CurrentEmotionalContext.Duration += DeltaTime;
-    }
-    
-    // Check for emotional state transitions
-    if (CurrentEmotionalContext.bIsTransitioning)
-    {
-        // Handle transition logic here if needed
-    }
-}
-
-bool UDialogueManager::TriggerDialogue(FName DialogueID, AActor* Speaker, const FEmotionalContext& EmotionalContext)
-{
-    if (!bIsInitialized)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("DialogueManager: Attempted to trigger dialogue before initialization"));
-        return false;
-    }
-    
-    FDialogueEntry* DialogueEntry = FindDialogueEntry(DialogueID);
-    if (!DialogueEntry)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("DialogueManager: Dialogue entry not found: %s"), *DialogueID.ToString());
-        return false;
-    }
-    
-    // Get current gameplay tags from game state
-    FGameplayTagContainer CurrentTags;
-    // TODO: Get actual current tags from game state
-    
-    if (!ValidateDialogueConditions(*DialogueEntry, CurrentTags))
-    {
-        UE_LOG(LogTemp, Log, TEXT("DialogueManager: Dialogue conditions not met: %s"), *DialogueID.ToString());
-        return false;
-    }
-    
-    // Check if we can interrupt current dialogue
-    if (IsDialoguePlaying())
-    {
-        if (!CurrentDialogue.DialogueData.bCanInterrupt && 
-            DialogueEntry->Priority <= CurrentDialogue.DialogueData.Priority)
-        {
-            // Queue the dialogue instead
-            QueueDialogue(DialogueID, Speaker, EmotionalContext);
+            bWaitingForChoice = true;
+            OnChoicesPresented.Broadcast(CurrentDialogueNode.PlayerChoices);
             return true;
         }
         else
         {
-            // Stop current dialogue to play higher priority one
-            StopCurrentDialogue(true);
+            // No more lines and no choices - end dialogue
+            EndDialogue();
+            return false;
         }
     }
     
-    // Create queue entry
-    FDialogueQueueEntry QueueEntry;
-    QueueEntry.DialogueData = *DialogueEntry;
-    QueueEntry.Speaker = Speaker;
-    QueueEntry.QueueTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
-    
-    // Apply emotional context override
-    if (EmotionalContext.PrimaryState != EEmotionalState::Calm || EmotionalContext.Intensity != EEmotionalIntensity::Moderate)
-    {
-        QueueEntry.DialogueData.EmotionalContext = EmotionalContext;
-    }
-    
-    // Start playing immediately
-    StartDialoguePlayback(QueueEntry);
-    
-    UE_LOG(LogTemp, Log, TEXT("DialogueManager: Triggered dialogue: %s"), *DialogueID.ToString());
+    // Process next line
+    ProcessCurrentLine();
     return true;
 }
 
-void UDialogueManager::QueueDialogue(FName DialogueID, AActor* Speaker, const FEmotionalContext& EmotionalContext)
+bool ADialogueManager::SelectChoice(int32 ChoiceIndex)
 {
-    if (DialogueQueue.Num() >= MaxQueueSize)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("DialogueManager: Dialogue queue is full, dropping oldest entry"));
-        DialogueQueue.RemoveAt(0);
-    }
-    
-    FDialogueEntry* DialogueEntry = FindDialogueEntry(DialogueID);
-    if (!DialogueEntry)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("DialogueManager: Cannot queue unknown dialogue: %s"), *DialogueID.ToString());
-        return;
-    }
-    
-    FDialogueQueueEntry QueueEntry;
-    QueueEntry.DialogueData = *DialogueEntry;
-    QueueEntry.Speaker = Speaker;
-    QueueEntry.QueueTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
-    
-    // Apply emotional context override
-    if (EmotionalContext.PrimaryState != EEmotionalState::Calm || EmotionalContext.Intensity != EEmotionalIntensity::Moderate)
-    {
-        QueueEntry.DialogueData.EmotionalContext = EmotionalContext;
-    }
-    
-    DialogueQueue.Add(QueueEntry);
-    SortDialogueQueue();
-    
-    UE_LOG(LogTemp, Log, TEXT("DialogueManager: Queued dialogue: %s"), *DialogueID.ToString());
-}
-
-void UDialogueManager::StopCurrentDialogue(bool bFadeOut)
-{
-    if (!IsDialoguePlaying())
-    {
-        return;
-    }
-    
-    UAudioComponent* ActiveComponent = CurrentDialogue.DialogueData.bIsInternalMonologue ? 
-        InternalMonologueAudioComponent : DialogueAudioComponent;
-    
-    if (ActiveComponent && ActiveComponent->IsPlaying())
-    {
-        if (bFadeOut)
-        {
-            ActiveComponent->FadeOut(DialogueFadeTime, 0.0f);
-        }
-        else
-        {
-            ActiveComponent->Stop();
-        }
-    }
-    
-    // Clear subtitle timer
-    if (UWorld* World = GetWorld())
-    {
-        World->GetTimerManager().ClearTimer(SubtitleTimer);
-    }
-    
-    // Broadcast dialogue finished event
-    OnDialogueFinished.Broadcast(CurrentDialogue.DialogueData.DialogueID, CurrentDialogue.Speaker);
-    
-    // Clear current dialogue
-    CurrentDialogue = FDialogueQueueEntry();
-    
-    UE_LOG(LogTemp, Log, TEXT("DialogueManager: Stopped current dialogue"));
-}
-
-void UDialogueManager::StopAllDialogue()
-{
-    StopCurrentDialogue(false);
-    DialogueQueue.Empty();
-    
-    UE_LOG(LogTemp, Log, TEXT("DialogueManager: Stopped all dialogue"));
-}
-
-void UDialogueManager::PlayInternalMonologue(FName DialogueID, const FEmotionalContext& EmotionalContext)
-{
-    if (!bInternalMonologueEnabled)
-    {
-        return;
-    }
-    
-    FDialogueEntry* DialogueEntry = FindDialogueEntry(DialogueID);
-    if (!DialogueEntry)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("DialogueManager: Internal monologue entry not found: %s"), *DialogueID.ToString());
-        return;
-    }
-    
-    // Force internal monologue flag
-    DialogueEntry->bIsInternalMonologue = true;
-    
-    TriggerDialogue(DialogueID, nullptr, EmotionalContext);
-}
-
-bool UDialogueManager::CanTriggerDialogue(FName DialogueID, const FGameplayTagContainer& CurrentTags) const
-{
-    FDialogueEntry* DialogueEntry = FindDialogueEntry(DialogueID);
-    if (!DialogueEntry)
+    if (!bIsDialogueActive || !bWaitingForChoice)
     {
         return false;
     }
     
-    return ValidateDialogueConditions(*DialogueEntry, CurrentTags);
-}
-
-float UDialogueManager::GetCurrentDialogueProgress() const
-{
-    if (!IsDialoguePlaying() || CurrentDialogue.DialogueData.Duration <= 0.0f)
+    if (ChoiceIndex < 0 || ChoiceIndex >= CurrentDialogueNode.PlayerChoices.Num())
     {
-        return 0.0f;
+        UE_LOG(LogTemp, Warning, TEXT("Invalid choice index: %d"), ChoiceIndex);
+        return false;
     }
     
-    float CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
-    float ElapsedTime = CurrentTime - CurrentDialogueStartTime;
+    const FNarr_DialogueChoice& SelectedChoice = CurrentDialogueNode.PlayerChoices[ChoiceIndex];
     
-    return FMath::Clamp(ElapsedTime / CurrentDialogue.DialogueData.Duration, 0.0f, 1.0f);
-}
-
-void UDialogueManager::SetDialogueVolume(float Volume)
-{
-    DialogueVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
-    
-    if (DialogueAudioComponent)
+    // Check if choice requirements are met
+    if (!AreRequirementsMet(SelectedChoice.RequiredFlags))
     {
-        DialogueAudioComponent->SetVolumeMultiplier(DialogueVolume);
+        UE_LOG(LogTemp, Warning, TEXT("Choice requirements not met"));
+        return false;
     }
     
-    if (InternalMonologueAudioComponent)
-    {
-        InternalMonologueAudioComponent->SetVolumeMultiplier(DialogueVolume * 0.8f);
-    }
-}
-
-void UDialogueManager::UpdateEmotionalContext(const FEmotionalContext& NewContext)
-{
-    CurrentEmotionalContext = NewContext;
-    CurrentEmotionalContext.Duration = 0.0f; // Reset duration for new context
+    // Apply choice effects
+    ApplyChoiceEffects(SelectedChoice);
     
-    UE_LOG(LogTemp, Log, TEXT("DialogueManager: Updated emotional context to %d"), (int32)NewContext.PrimaryState);
-}
-
-void UDialogueManager::LoadDialogueData()
-{
-    // Load dialogue data table
-    if (DialogueDataTable.IsValid())
+    // Continue to next dialogue or end
+    if (SelectedChoice.NextDialogueID.IsEmpty())
     {
-        UDataTable* DataTable = DialogueDataTable.LoadSynchronous();
-        if (DataTable)
-        {
-            UE_LOG(LogTemp, Log, TEXT("DialogueManager: Loaded dialogue data table with %d entries"), DataTable->GetRowNames().Num());
-        }
-        else
-        {
-            UE_LOG(LogTemp, Warning, TEXT("DialogueManager: Failed to load dialogue data table"));
-        }
+        EndDialogue();
     }
     else
     {
-        UE_LOG(LogTemp, Warning, TEXT("DialogueManager: No dialogue data table assigned"));
-    }
-}
-
-FDialogueEntry* UDialogueManager::FindDialogueEntry(FName DialogueID) const
-{
-    if (!DialogueDataTable.IsValid())
-    {
-        return nullptr;
-    }
-    
-    UDataTable* DataTable = DialogueDataTable.LoadSynchronous();
-    if (!DataTable)
-    {
-        return nullptr;
-    }
-    
-    return DataTable->FindRow<FDialogueEntry>(DialogueID, TEXT("FindDialogueEntry"));
-}
-
-bool UDialogueManager::ValidateDialogueConditions(const FDialogueEntry& Entry, const FGameplayTagContainer& CurrentTags) const
-{
-    // Check required tags
-    if (Entry.RequiredTags.Num() > 0)
-    {
-        if (!CurrentTags.HasAll(Entry.RequiredTags))
-        {
-            return false;
-        }
-    }
-    
-    // Check blocking tags
-    if (Entry.BlockingTags.Num() > 0)
-    {
-        if (CurrentTags.HasAny(Entry.BlockingTags))
-        {
-            return false;
-        }
+        EndDialogue();
+        StartDialogue(SelectedChoice.NextDialogueID);
     }
     
     return true;
 }
 
-void UDialogueManager::ProcessDialogueQueue()
+FNarr_DialogueLine ADialogueManager::GetCurrentLine() const
 {
-    if (DialogueQueue.Num() == 0 || IsDialoguePlaying())
+    if (!bIsDialogueActive || CurrentLineIndex >= CurrentDialogueNode.DialogueLines.Num())
+    {
+        return FNarr_DialogueLine();
+    }
+    
+    return CurrentDialogueNode.DialogueLines[CurrentLineIndex];
+}
+
+TArray<FNarr_DialogueChoice> ADialogueManager::GetCurrentChoices() const
+{
+    if (!bIsDialogueActive || !bWaitingForChoice)
+    {
+        return TArray<FNarr_DialogueChoice>();
+    }
+    
+    // Filter choices based on requirements
+    TArray<FNarr_DialogueChoice> AvailableChoices;
+    for (const FNarr_DialogueChoice& Choice : CurrentDialogueNode.PlayerChoices)
+    {
+        if (AreRequirementsMet(Choice.RequiredFlags))
+        {
+            AvailableChoices.Add(Choice);
+        }
+    }
+    
+    return AvailableChoices;
+}
+
+void ADialogueManager::SetPlayerFlag(const FString& FlagName)
+{
+    if (!FlagName.IsEmpty() && !PlayerFlags.Contains(FlagName))
+    {
+        PlayerFlags.Add(FlagName);
+        UE_LOG(LogTemp, Log, TEXT("Set player flag: %s"), *FlagName);
+    }
+}
+
+bool ADialogueManager::HasPlayerFlag(const FString& FlagName) const
+{
+    return PlayerFlags.Contains(FlagName);
+}
+
+void ADialogueManager::RemovePlayerFlag(const FString& FlagName)
+{
+    if (PlayerFlags.Contains(FlagName))
+    {
+        PlayerFlags.Remove(FlagName);
+        UE_LOG(LogTemp, Log, TEXT("Removed player flag: %s"), *FlagName);
+    }
+}
+
+void ADialogueManager::ClearAllFlags()
+{
+    PlayerFlags.Empty();
+    UE_LOG(LogTemp, Log, TEXT("Cleared all player flags"));
+}
+
+bool ADialogueManager::IsDialogueAvailable(const FString& DialogueID) const
+{
+    return GetDialogueNode(DialogueID) != nullptr;
+}
+
+bool ADialogueManager::AreRequirementsMet(const TArray<FString>& RequiredFlags) const
+{
+    for (const FString& Flag : RequiredFlags)
+    {
+        if (!HasPlayerFlag(Flag))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+FNarr_CharacterLore ADialogueManager::GetCharacterLore(const FString& CharacterID) const
+{
+    if (!CharacterDataTable)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Character data table not set"));
+        return FNarr_CharacterLore();
+    }
+    
+    FNarr_CharacterTableRow* CharacterRow = CharacterDataTable->FindRow<FNarr_CharacterTableRow>(FName(*CharacterID), TEXT(""));
+    if (CharacterRow)
+    {
+        return CharacterRow->CharacterData;
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Character not found: %s"), *CharacterID);
+    return FNarr_CharacterLore();
+}
+
+void ADialogueManager::ProcessCurrentLine()
+{
+    if (!bIsDialogueActive || CurrentLineIndex >= CurrentDialogueNode.DialogueLines.Num())
     {
         return;
     }
     
-    // Get the highest priority dialogue from queue
-    FDialogueQueueEntry NextDialogue = DialogueQueue[0];
-    DialogueQueue.RemoveAt(0);
+    const FNarr_DialogueLine& CurrentLine = CurrentDialogueNode.DialogueLines[CurrentLineIndex];
     
-    StartDialoguePlayback(NextDialogue);
+    // Broadcast line changed event
+    OnDialogueLineChanged.Broadcast(CurrentLine, CurrentLineIndex, CurrentDialogueNode.DialogueLines.Num());
+    
+    // Reset auto-advance timer
+    AutoAdvanceTimer = 0.0f;
+    
+    UE_LOG(LogTemp, Log, TEXT("Processing dialogue line %d: %s"), CurrentLineIndex, *CurrentLine.DialogueText.ToString());
 }
 
-void UDialogueManager::StartDialoguePlayback(FDialogueQueueEntry& QueueEntry)
+void ADialogueManager::ApplyChoiceEffects(const FNarr_DialogueChoice& Choice)
 {
-    CurrentDialogue = QueueEntry;
-    CurrentDialogue.bIsPlaying = true;
-    CurrentDialogueStartTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
-    
-    // Select appropriate audio component
-    UAudioComponent* ActiveComponent = CurrentDialogue.DialogueData.bIsInternalMonologue ? 
-        InternalMonologueAudioComponent : DialogueAudioComponent;
-    
-    // Load and play audio
-    if (CurrentDialogue.DialogueData.AudioClip.IsValid() && ActiveComponent)
+    // Set flags from choice
+    for (const FString& Flag : Choice.SetFlags)
     {
-        USoundWave* SoundWave = CurrentDialogue.DialogueData.AudioClip.LoadSynchronous();
-        if (SoundWave)
+        SetPlayerFlag(Flag);
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Applied choice effects. Set %d flags."), Choice.SetFlags.Num());
+}
+
+FNarr_DialogueNode* ADialogueManager::GetDialogueNode(const FString& DialogueID) const
+{
+    if (!DialogueDataTable)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Dialogue data table not set"));
+        return nullptr;
+    }
+    
+    FNarr_DialogueTableRow* DialogueRow = DialogueDataTable->FindRow<FNarr_DialogueTableRow>(FName(*DialogueID), TEXT(""));
+    if (DialogueRow)
+    {
+        return &DialogueRow->DialogueData;
+    }
+    
+    return nullptr;
+}
+
+void ADialogueManager::ResetDialogueState()
+{
+    bIsDialogueActive = false;
+    CurrentDialogueID = TEXT("");
+    CurrentLineIndex = 0;
+    bWaitingForChoice = false;
+    AutoAdvanceTimer = 0.0f;
+    CurrentDialogueNode = FNarr_DialogueNode();
+}
+
+// UDialogueParticipantComponent Implementation
+
+UDialogueParticipantComponent::UDialogueParticipantComponent()
+{
+    PrimaryComponentTick.bCanEverTick = false;
+    
+    CharacterID = TEXT("");
+    DefaultDialogueID = TEXT("");
+    bCanInitiateDialogue = true;
+    InteractionDistance = 300.0f;
+    DialogueManager = nullptr;
+}
+
+void UDialogueParticipantComponent::BeginPlay()
+{
+    Super::BeginPlay();
+    
+    FindDialogueManager();
+}
+
+bool UDialogueParticipantComponent::StartDialogueWithPlayer()
+{
+    if (!CanStartDialogue())
+    {
+        return false;
+    }
+    
+    FString DialogueToStart = GetBestAvailableDialogue();
+    if (DialogueToStart.IsEmpty())
+    {
+        UE_LOG(LogTemp, Warning, TEXT("No available dialogue for character: %s"), *CharacterID);
+        return false;
+    }
+    
+    return DialogueManager->StartDialogue(DialogueToStart);
+}
+
+bool UDialogueParticipantComponent::CanStartDialogue() const
+{
+    return bCanInitiateDialogue && DialogueManager && !DialogueManager->bIsDialogueActive;
+}
+
+FString UDialogueParticipantComponent::GetBestAvailableDialogue() const
+{
+    if (!DialogueManager)
+    {
+        return TEXT("");
+    }
+    
+    // Check available dialogues in order
+    for (const FString& DialogueID : AvailableDialogues)
+    {
+        if (DialogueManager->IsDialogueAvailable(DialogueID))
         {
-            ActiveComponent->SetSound(SoundWave);
-            ActiveComponent->Play();
-            
-            // Update duration if not set
-            if (CurrentDialogue.DialogueData.Duration <= 0.0f)
-            {
-                CurrentDialogue.DialogueData.Duration = SoundWave->GetDuration();
-            }
+            return DialogueID;
         }
     }
     
-    // Display subtitles
-    if (bSubtitlesEnabled)
+    // Fall back to default dialogue
+    if (DialogueManager->IsDialogueAvailable(DefaultDialogueID))
     {
-        FText SubtitleText = CurrentDialogue.DialogueData.SubtitleOverride.IsEmpty() ? 
-            CurrentDialogue.DialogueData.DialogueText : CurrentDialogue.DialogueData.SubtitleOverride;
-        
-        DisplaySubtitle(SubtitleText, CurrentDialogue.DialogueData.Duration, CurrentDialogue.DialogueData.bIsInternalMonologue);
+        return DefaultDialogueID;
     }
     
-    // Broadcast dialogue started event
-    OnDialogueStarted.Broadcast(CurrentDialogue.DialogueData.DialogueID, CurrentDialogue.Speaker, CurrentDialogue.DialogueData.DialogueText);
-    
-    UE_LOG(LogTemp, Log, TEXT("DialogueManager: Started playback of dialogue: %s"), *CurrentDialogue.DialogueData.DialogueID.ToString());
+    return TEXT("");
 }
 
-void UDialogueManager::OnDialogueAudioFinished()
+void UDialogueParticipantComponent::AddAvailableDialogue(const FString& DialogueID)
 {
-    if (IsDialoguePlaying())
+    if (!DialogueID.IsEmpty() && !AvailableDialogues.Contains(DialogueID))
     {
-        // Broadcast dialogue finished event
-        OnDialogueFinished.Broadcast(CurrentDialogue.DialogueData.DialogueID, CurrentDialogue.Speaker);
-        
-        // Check for follow-up dialogues
-        if (CurrentDialogue.DialogueData.FollowUpDialogues.Num() > 0)
-        {
-            // Queue the first follow-up dialogue
-            QueueDialogue(CurrentDialogue.DialogueData.FollowUpDialogues[0], CurrentDialogue.Speaker, CurrentDialogue.DialogueData.EmotionalContext);
-        }
-        
-        // Clear current dialogue
-        CurrentDialogue = FDialogueQueueEntry();
-        
-        UE_LOG(LogTemp, Log, TEXT("DialogueManager: Audio finished, dialogue complete"));
+        AvailableDialogues.Add(DialogueID);
     }
 }
 
-void UDialogueManager::DisplaySubtitle(const FText& SubtitleText, float Duration, bool bIsInternalMonologue)
+void UDialogueParticipantComponent::RemoveAvailableDialogue(const FString& DialogueID)
 {
-    // Broadcast subtitle event for UI to handle
-    OnSubtitleDisplayed.Broadcast(SubtitleText, Duration, bIsInternalMonologue);
-    
-    // Set timer to clear subtitle
+    AvailableDialogues.Remove(DialogueID);
+}
+
+void UDialogueParticipantComponent::FindDialogueManager()
+{
     if (UWorld* World = GetWorld())
     {
-        World->GetTimerManager().SetTimer(SubtitleTimer, [this]()
+        DialogueManager = Cast<ADialogueManager>(UGameplayStatics::GetActorOfClass(World, ADialogueManager::StaticClass()));
+        
+        if (!DialogueManager)
         {
-            OnSubtitleDisplayed.Broadcast(FText::GetEmpty(), 0.0f, false);
-        }, Duration, false);
-    }
-}
-
-void UDialogueManager::SortDialogueQueue()
-{
-    // Sort by priority (highest first), then by queue time (oldest first)
-    DialogueQueue.Sort([](const FDialogueQueueEntry& A, const FDialogueQueueEntry& B)
-    {
-        if (A.DialogueData.Priority != B.DialogueData.Priority)
-        {
-            return A.DialogueData.Priority > B.DialogueData.Priority;
+            UE_LOG(LogTemp, Warning, TEXT("No DialogueManager found in the world"));
         }
-        return A.QueueTime < B.QueueTime;
-    });
+    }
 }
