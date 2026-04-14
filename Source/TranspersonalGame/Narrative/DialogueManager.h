@@ -1,267 +1,184 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/GameInstanceSubsystem.h"
+#include "GameFramework/Actor.h"
 #include "Engine/DataTable.h"
-#include "GameplayTagContainer.h"
-#include "Sound/SoundWave.h"
-#include "Components/AudioComponent.h"
-#include "EmotionalStates.h"
+#include "Components/ActorComponent.h"
+#include "NarrativeTypes.h"
 #include "DialogueManager.generated.h"
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnDialogueStarted, FName, DialogueID, AActor*, Speaker, const FText&, DialogueText);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnDialogueFinished, FName, DialogueID, AActor*, Speaker);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnSubtitleDisplayed, const FText&, SubtitleText, float, Duration, bool, bIsInternalMonologue);
+class UDataTable;
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnDialogueStarted, const FString&, DialogueID, const FString&, SpeakerName);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDialogueEnded, const FString&, DialogueID);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnDialogueLineChanged, const FNarr_DialogueLine&, CurrentLine, int32, LineIndex, int32, TotalLines);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnChoicesPresented, const TArray<FNarr_DialogueChoice>&, Choices);
 
 /**
- * Dialogue Voice Types for different character archetypes in the prehistoric world
+ * Manages dialogue system and conversation flow
  */
-UENUM(BlueprintType)
-enum class EDialogueVoiceType : uint8
-{
-    Protagonist     UMETA(DisplayName = "Dr. Protagonist - Internal Voice"),
-    DinosaurAlpha   UMETA(DisplayName = "Dinosaur Alpha - Dominant Creature"),
-    DinosaurBeta    UMETA(DisplayName = "Dinosaur Beta - Submissive Creature"),
-    Environment     UMETA(DisplayName = "Environment - Nature Sounds"),
-    Narrator        UMETA(DisplayName = "Narrator - Omniscient Voice"),
-    AncientSpirit   UMETA(DisplayName = "Ancient Spirit - Mystical Presence"),
-    Echo            UMETA(DisplayName = "Echo - Memory Fragment")
-};
-
-/**
- * Dialogue priority levels for managing concurrent dialogue requests
- */
-UENUM(BlueprintType)
-enum class EDialoguePriority : uint8
-{
-    Background      UMETA(DisplayName = "Background - Environmental"),
-    Normal          UMETA(DisplayName = "Normal - Standard Dialogue"),
-    Important       UMETA(DisplayName = "Important - Story Critical"),
-    Urgent          UMETA(DisplayName = "Urgent - Immediate Attention"),
-    Emergency       UMETA(DisplayName = "Emergency - Life or Death")
-};
-
-/**
- * Complete dialogue entry with all necessary context and audio data
- */
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FDialogueEntry : public FTableRowBase
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FName DialogueID;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    EDialogueVoiceType SpeakerType;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FEmotionalContext EmotionalContext;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FText DialogueText;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FText SubtitleOverride;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    TSoftObjectPtr<USoundWave> AudioClip;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FGameplayTagContainer RequiredTags;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FGameplayTagContainer BlockingTags;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    EDialoguePriority Priority;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    float Duration; // Auto-calculated from audio or manual override
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    bool bIsInternalMonologue;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    bool bCanInterrupt;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    bool bRequiresPlayerAttention;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    TArray<FName> FollowUpDialogues;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FString VoiceActorNotes;
-
-    FDialogueEntry()
-    {
-        DialogueID = NAME_None;
-        SpeakerType = EDialogueVoiceType::Protagonist;
-        Priority = EDialoguePriority::Normal;
-        Duration = 0.0f;
-        bIsInternalMonologue = false;
-        bCanInterrupt = false;
-        bRequiresPlayerAttention = false;
-    }
-};
-
-/**
- * Dialogue queue entry for managing dialogue playback order
- */
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FDialogueQueueEntry
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly)
-    FDialogueEntry DialogueData;
-
-    UPROPERTY(BlueprintReadOnly)
-    AActor* Speaker;
-
-    UPROPERTY(BlueprintReadOnly)
-    float QueueTime;
-
-    UPROPERTY(BlueprintReadOnly)
-    bool bIsPlaying;
-
-    FDialogueQueueEntry()
-    {
-        Speaker = nullptr;
-        QueueTime = 0.0f;
-        bIsPlaying = false;
-    }
-};
-
-/**
- * Advanced Dialogue Manager for the Transpersonal Game
- * Handles contextual dialogue, emotional state integration, and audio management
- */
-UCLASS()
-class TRANSPERSONALGAME_API UDialogueManager : public UGameInstanceSubsystem
+UCLASS(BlueprintType, Blueprintable, ClassGroup=(Narrative))
+class TRANSPERSONALGAME_API ADialogueManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UDialogueManager();
-
-    // Subsystem interface
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
-    virtual void Tick(float DeltaTime) override;
-    virtual bool ShouldCreateSubsystem(UObject* Outer) const override { return true; }
-
-    // Core Dialogue Functions
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    bool TriggerDialogue(FName DialogueID, AActor* Speaker = nullptr, const FEmotionalContext& EmotionalContext = FEmotionalContext());
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void QueueDialogue(FName DialogueID, AActor* Speaker = nullptr, const FEmotionalContext& EmotionalContext = FEmotionalContext());
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void StopCurrentDialogue(bool bFadeOut = true);
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void StopAllDialogue();
-
-    // Internal Monologue System
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void PlayInternalMonologue(FName DialogueID, const FEmotionalContext& EmotionalContext = FEmotionalContext());
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void SetInternalMonologueEnabled(bool bEnabled) { bInternalMonologueEnabled = bEnabled; }
-
-    // Dialogue State Queries
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    bool IsDialoguePlaying() const { return CurrentDialogue.bIsPlaying; }
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    bool CanTriggerDialogue(FName DialogueID, const FGameplayTagContainer& CurrentTags) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    FName GetCurrentDialogueID() const { return CurrentDialogue.DialogueData.DialogueID; }
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    float GetCurrentDialogueProgress() const;
-
-    // Audio Management
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void SetDialogueVolume(float Volume);
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void SetSubtitlesEnabled(bool bEnabled) { bSubtitlesEnabled = bEnabled; }
-
-    // Emotional Context Integration
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void UpdateEmotionalContext(const FEmotionalContext& NewContext);
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    FEmotionalContext GetCurrentEmotionalContext() const { return CurrentEmotionalContext; }
-
-    // Events
-    UPROPERTY(BlueprintAssignable, Category = "Dialogue")
-    FOnDialogueStarted OnDialogueStarted;
-
-    UPROPERTY(BlueprintAssignable, Category = "Dialogue")
-    FOnDialogueFinished OnDialogueFinished;
-
-    UPROPERTY(BlueprintAssignable, Category = "Dialogue")
-    FOnSubtitleDisplayed OnSubtitleDisplayed;
+    ADialogueManager();
 
 protected:
-    // Data Tables
-    UPROPERTY(EditDefaultsOnly, Category = "Dialogue")
-    TSoftObjectPtr<UDataTable> DialogueDataTable;
+    virtual void BeginPlay() override;
 
-    // Audio Components
-    UPROPERTY()
-    UAudioComponent* DialogueAudioComponent;
+public:
+    virtual void Tick(float DeltaTime) override;
 
-    UPROPERTY()
-    UAudioComponent* InternalMonologueAudioComponent;
+    // Dialogue Events
+    UPROPERTY(BlueprintAssignable, Category = "Dialogue Events")
+    FOnDialogueStarted OnDialogueStarted;
 
-    // Current State
-    UPROPERTY(BlueprintReadOnly, Category = "Dialogue")
-    FDialogueQueueEntry CurrentDialogue;
+    UPROPERTY(BlueprintAssignable, Category = "Dialogue Events")
+    FOnDialogueEnded OnDialogueEnded;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dialogue")
-    TArray<FDialogueQueueEntry> DialogueQueue;
+    UPROPERTY(BlueprintAssignable, Category = "Dialogue Events")
+    FOnDialogueLineChanged OnDialogueLineChanged;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Dialogue")
-    FEmotionalContext CurrentEmotionalContext;
+    UPROPERTY(BlueprintAssignable, Category = "Dialogue Events")
+    FOnChoicesPresented OnChoicesPresented;
 
-    // Settings
-    UPROPERTY(EditDefaultsOnly, Category = "Dialogue")
-    float DialogueVolume;
+    // Dialogue Data
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue Data")
+    UDataTable* DialogueDataTable;
 
-    UPROPERTY(EditDefaultsOnly, Category = "Dialogue")
-    bool bSubtitlesEnabled;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue Data")
+    UDataTable* CharacterDataTable;
 
-    UPROPERTY(EditDefaultsOnly, Category = "Dialogue")
-    bool bInternalMonologueEnabled;
+    // Current Dialogue State
+    UPROPERTY(BlueprintReadOnly, Category = "Dialogue State")
+    bool bIsDialogueActive;
 
-    UPROPERTY(EditDefaultsOnly, Category = "Dialogue")
-    float MaxQueueSize;
+    UPROPERTY(BlueprintReadOnly, Category = "Dialogue State")
+    FString CurrentDialogueID;
 
-    UPROPERTY(EditDefaultsOnly, Category = "Dialogue")
-    float DialogueFadeTime;
+    UPROPERTY(BlueprintReadOnly, Category = "Dialogue State")
+    int32 CurrentLineIndex;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Dialogue State")
+    FNarr_DialogueNode CurrentDialogueNode;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Dialogue State")
+    TArray<FString> PlayerFlags;
+
+    // Dialogue Control Functions
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    bool StartDialogue(const FString& DialogueID);
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void EndDialogue();
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    bool AdvanceDialogue();
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    bool SelectChoice(int32 ChoiceIndex);
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    FNarr_DialogueLine GetCurrentLine() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    TArray<FNarr_DialogueChoice> GetCurrentChoices() const;
+
+    // Flag Management
+    UFUNCTION(BlueprintCallable, Category = "Dialogue Flags")
+    void SetPlayerFlag(const FString& FlagName);
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue Flags")
+    bool HasPlayerFlag(const FString& FlagName) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue Flags")
+    void RemovePlayerFlag(const FString& FlagName);
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue Flags")
+    void ClearAllFlags();
+
+    // Dialogue Utilities
+    UFUNCTION(BlueprintCallable, Category = "Dialogue Utilities")
+    bool IsDialogueAvailable(const FString& DialogueID) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue Utilities")
+    bool AreRequirementsMet(const TArray<FString>& RequiredFlags) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue Utilities")
+    FNarr_CharacterLore GetCharacterLore(const FString& CharacterID) const;
+
+    // Auto-advance settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Auto Advance")
+    bool bAutoAdvanceEnabled;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Auto Advance")
+    float AutoAdvanceDelay;
 
 private:
-    // Internal Functions
-    void LoadDialogueData();
-    FDialogueEntry* FindDialogueEntry(FName DialogueID) const;
-    bool ValidateDialogueConditions(const FDialogueEntry& Entry, const FGameplayTagContainer& CurrentTags) const;
-    void ProcessDialogueQueue();
-    void StartDialoguePlayback(FDialogueQueueEntry& QueueEntry);
-    void OnDialogueAudioFinished();
-    void DisplaySubtitle(const FText& SubtitleText, float Duration, bool bIsInternalMonologue);
-    void SortDialogueQueue();
-    
-    // Timers
-    FTimerHandle DialogueProcessingTimer;
-    FTimerHandle SubtitleTimer;
-    
-    float CurrentDialogueStartTime;
-    bool bIsInitialized;
+    // Internal state
+    float AutoAdvanceTimer;
+    bool bWaitingForChoice;
+
+    // Internal functions
+    void ProcessCurrentLine();
+    void ApplyChoiceEffects(const FNarr_DialogueChoice& Choice);
+    FNarr_DialogueNode* GetDialogueNode(const FString& DialogueID) const;
+    void ResetDialogueState();
+};
+
+/**
+ * Component for actors that can participate in dialogue
+ */
+UCLASS(BlueprintType, Blueprintable, ClassGroup=(Narrative), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UDialogueParticipantComponent : public UActorComponent
+{
+    GENERATED_BODY()
+
+public:
+    UDialogueParticipantComponent();
+
+protected:
+    virtual void BeginPlay() override;
+
+public:
+    // Participant Data
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue Participant")
+    FString CharacterID;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue Participant")
+    FString DefaultDialogueID;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue Participant")
+    TArray<FString> AvailableDialogues;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue Participant")
+    bool bCanInitiateDialogue;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue Participant")
+    float InteractionDistance;
+
+    // References
+    UPROPERTY(BlueprintReadOnly, Category = "Dialogue Participant")
+    ADialogueManager* DialogueManager;
+
+    // Dialogue Functions
+    UFUNCTION(BlueprintCallable, Category = "Dialogue Participant")
+    bool StartDialogueWithPlayer();
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue Participant")
+    bool CanStartDialogue() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue Participant")
+    FString GetBestAvailableDialogue() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue Participant")
+    void AddAvailableDialogue(const FString& DialogueID);
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue Participant")
+    void RemoveAvailableDialogue(const FString& DialogueID);
+
+private:
+    void FindDialogueManager();
 };
