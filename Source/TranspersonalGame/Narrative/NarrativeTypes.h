@@ -1,219 +1,322 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/Engine.h"
 #include "Engine/DataTable.h"
 #include "UObject/NoExportTypes.h"
 #include "NarrativeTypes.generated.h"
 
 /**
- * Dialogue emotion states for character expressions and voice modulation
+ * Dialogue emotion types for character expression
  */
 UENUM(BlueprintType)
 enum class ENarr_DialogueEmotion : uint8
 {
     Neutral     UMETA(DisplayName = "Neutral"),
-    Wise        UMETA(DisplayName = "Wise"),
+    Happy       UMETA(DisplayName = "Happy"),
+    Sad         UMETA(DisplayName = "Sad"),
+    Angry       UMETA(DisplayName = "Angry"),
+    Fearful     UMETA(DisplayName = "Fearful"),
+    Surprised   UMETA(DisplayName = "Surprised"),
     Mystical    UMETA(DisplayName = "Mystical"),
-    Urgent      UMETA(DisplayName = "Urgent"),
-    Calm        UMETA(DisplayName = "Calm"),
-    Reverent    UMETA(DisplayName = "Reverent"),
-    Warning     UMETA(DisplayName = "Warning"),
-    Teaching    UMETA(DisplayName = "Teaching"),
-    Questioning UMETA(DisplayName = "Questioning"),
-    Inspiring   UMETA(DisplayName = "Inspiring")
+    Wise        UMETA(DisplayName = "Wise"),
+    Determined  UMETA(DisplayName = "Determined")
 };
 
 /**
- * Character archetypes for the transpersonal journey
+ * Quest states for progression tracking
  */
 UENUM(BlueprintType)
-enum class ENarr_CharacterArchetype : uint8
+enum class ENarr_QuestState : uint8
 {
-    Elder       UMETA(DisplayName = "Tribal Elder"),
-    Shaman      UMETA(DisplayName = "Spiritual Shaman"),
-    Hunter      UMETA(DisplayName = "Skilled Hunter"),
-    Healer      UMETA(DisplayName = "Village Healer"),
-    Storyteller UMETA(DisplayName = "Tribal Storyteller"),
-    Guardian    UMETA(DisplayName = "Sacred Guardian"),
-    Seeker      UMETA(DisplayName = "Truth Seeker"),
-    Guide       UMETA(DisplayName = "Spirit Guide")
+    NotStarted  UMETA(DisplayName = "Not Started"),
+    Active      UMETA(DisplayName = "Active"),
+    Completed   UMETA(DisplayName = "Completed"),
+    Failed      UMETA(DisplayName = "Failed"),
+    Hidden      UMETA(DisplayName = "Hidden")
 };
 
 /**
- * Consciousness states that affect dialogue options and narrative flow
+ * Consciousness awakening levels
  */
 UENUM(BlueprintType)
 enum class ENarr_ConsciousnessLevel : uint8
 {
-    Unaware     UMETA(DisplayName = "Unaware"),
+    Dormant     UMETA(DisplayName = "Dormant"),
+    Stirring    UMETA(DisplayName = "Stirring"),
     Awakening   UMETA(DisplayName = "Awakening"),
     Aware       UMETA(DisplayName = "Aware"),
-    Expanding   UMETA(DisplayName = "Expanding"),
+    Enlightened UMETA(DisplayName = "Enlightened"),
     Transcendent UMETA(DisplayName = "Transcendent")
 };
 
 /**
- * Narrative themes that drive quest progression and character development
+ * Dialogue choice consequence types
  */
 UENUM(BlueprintType)
-enum class ENarr_NarrativeTheme : uint8
+enum class ENarr_ChoiceConsequence : uint8
 {
-    SelfDiscovery       UMETA(DisplayName = "Self Discovery"),
-    TribalWisdom        UMETA(DisplayName = "Tribal Wisdom"),
-    SacredConnection    UMETA(DisplayName = "Sacred Connection"),
-    InnerJourney        UMETA(DisplayName = "Inner Journey"),
-    AncestralMemory     UMETA(DisplayName = "Ancestral Memory"),
-    NaturalHarmony      UMETA(DisplayName = "Natural Harmony"),
-    SpiritualAwakening  UMETA(DisplayName = "Spiritual Awakening"),
-    CollectiveUnity     UMETA(DisplayName = "Collective Unity")
+    None        UMETA(DisplayName = "None"),
+    Minor       UMETA(DisplayName = "Minor"),
+    Moderate    UMETA(DisplayName = "Moderate"),
+    Major       UMETA(DisplayName = "Major"),
+    Permanent   UMETA(DisplayName = "Permanent")
 };
 
 /**
- * Core dialogue line structure for the narrative system
+ * Single dialogue line data
  */
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_DialogueLine : public FTableRowBase
+struct TRANSPERSONALGAME_API FNarr_DialogueLine
 {
     GENERATED_BODY()
 
-    FNarr_DialogueLine()
-        : SpeakerName(TEXT("Unknown"))
-        , DialogueText(TEXT(""))
-        , Emotion(ENarr_DialogueEmotion::Neutral)
-        , RequiredConsciousnessLevel(ENarr_ConsciousnessLevel::Unaware)
-        , AudioAssetPath(TEXT(""))
-        , Duration(3.0f)
-        , bIsPlayerChoice(false)
-    {
-    }
-
-    /** Name of the character speaking */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
     FString SpeakerName;
 
-    /** The actual dialogue text */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
     FText DialogueText;
 
-    /** Emotional state for this line */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
     ENarr_DialogueEmotion Emotion;
 
-    /** Minimum consciousness level required to see this dialogue option */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    ENarr_ConsciousnessLevel RequiredConsciousnessLevel;
-
-    /** Path to audio asset for voice acting */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    FString AudioAssetPath;
-
-    /** Duration of the dialogue line in seconds */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
     float Duration;
 
-    /** Whether this is a player dialogue choice */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    bool bIsPlayerChoice;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    TSoftObjectPtr<class USoundBase> VoiceClip;
 
-    /** Tags for conditional dialogue logic */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    TArray<FString> ConditionalTags;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+    TSoftObjectPtr<class UAnimMontage> FacialAnimation;
+
+    FNarr_DialogueLine()
+    {
+        SpeakerName = TEXT("");
+        DialogueText = FText::GetEmpty();
+        Emotion = ENarr_DialogueEmotion::Neutral;
+        Duration = 3.0f;
+        VoiceClip = nullptr;
+        FacialAnimation = nullptr;
+    }
 };
 
 /**
- * Character data structure for NPCs with narrative roles
+ * Dialogue choice option
  */
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_CharacterData : public FTableRowBase
+struct TRANSPERSONALGAME_API FNarr_DialogueChoice
 {
     GENERATED_BODY()
 
-    FNarr_CharacterData()
-        : CharacterName(TEXT("Unknown"))
-        , Archetype(ENarr_CharacterArchetype::Elder)
-        , BackgroundStory(TEXT(""))
-        , PrimaryTheme(ENarr_NarrativeTheme::SelfDiscovery)
-        , bIsEssentialCharacter(false)
-        , VoiceActorName(TEXT(""))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Choice")
+    FText ChoiceText;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Choice")
+    FString NextDialogueID;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Choice")
+    ENarr_ChoiceConsequence ConsequenceLevel;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Choice")
+    TArray<FString> RequiredFlags;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Choice")
+    TArray<FString> SetFlags;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Choice")
+    int32 ConsciousnessRequirement;
+
+    FNarr_DialogueChoice()
     {
+        ChoiceText = FText::GetEmpty();
+        NextDialogueID = TEXT("");
+        ConsequenceLevel = ENarr_ChoiceConsequence::None;
+        ConsciousnessRequirement = 0;
     }
+};
 
-    /** Display name of the character */
+/**
+ * Complete dialogue node
+ */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FNarr_DialogueNode
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    FString DialogueID;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    TArray<FNarr_DialogueLine> DialogueLines;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    TArray<FNarr_DialogueChoice> PlayerChoices;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    bool bIsQuestDialogue;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    FString AssociatedQuestID;
+
+    FNarr_DialogueNode()
+    {
+        DialogueID = TEXT("");
+        bIsQuestDialogue = false;
+        AssociatedQuestID = TEXT("");
+    }
+};
+
+/**
+ * Quest objective data
+ */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FNarr_QuestObjective
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    FString ObjectiveID;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    FText ObjectiveDescription;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    bool bIsCompleted;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    bool bIsOptional;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    int32 TargetCount;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    int32 CurrentCount;
+
+    FNarr_QuestObjective()
+    {
+        ObjectiveID = TEXT("");
+        ObjectiveDescription = FText::GetEmpty();
+        bIsCompleted = false;
+        bIsOptional = false;
+        TargetCount = 1;
+        CurrentCount = 0;
+    }
+};
+
+/**
+ * Complete quest data
+ */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FNarr_QuestData
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    FString QuestID;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    FText QuestTitle;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    FText QuestDescription;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    ENarr_QuestState CurrentState;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    TArray<FNarr_QuestObjective> Objectives;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    TArray<FString> PrerequisiteQuests;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    int32 ExperienceReward;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    int32 ConsciousnessReward;
+
+    FNarr_QuestData()
+    {
+        QuestID = TEXT("");
+        QuestTitle = FText::GetEmpty();
+        QuestDescription = FText::GetEmpty();
+        CurrentState = ENarr_QuestState::NotStarted;
+        ExperienceReward = 0;
+        ConsciousnessReward = 0;
+    }
+};
+
+/**
+ * Character lore and background data
+ */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FNarr_CharacterLore
+{
+    GENERATED_BODY()
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
-    FString CharacterName;
+    FString CharacterID;
 
-    /** Character's role archetype */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
-    ENarr_CharacterArchetype Archetype;
+    FText CharacterName;
 
-    /** Character's background story and personality */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
     FText BackgroundStory;
 
-    /** Primary narrative theme this character represents */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
-    ENarr_NarrativeTheme PrimaryTheme;
+    ENarr_ConsciousnessLevel ConsciousnessLevel;
 
-    /** Whether this character is essential to the main story */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
-    bool bIsEssentialCharacter;
+    TArray<FString> PersonalityTraits;
 
-    /** Voice actor or TTS voice ID for this character */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    FString VoiceActorName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    TArray<FString> Relationships;
 
-    /** Available dialogue lines for this character */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    TArray<FNarr_DialogueLine> DialogueLines;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    FString TribeAffiliation;
+
+    FNarr_CharacterLore()
+    {
+        CharacterID = TEXT("");
+        CharacterName = FText::GetEmpty();
+        BackgroundStory = FText::GetEmpty();
+        ConsciousnessLevel = ENarr_ConsciousnessLevel::Dormant;
+        TribeAffiliation = TEXT("");
+    }
 };
 
 /**
- * Narrative event structure for story progression tracking
+ * Data table row for dialogue data
  */
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_StoryEvent
+struct TRANSPERSONALGAME_API FNarr_DialogueTableRow : public FTableRowBase
 {
     GENERATED_BODY()
 
-    FNarr_StoryEvent()
-        : EventID(TEXT(""))
-        , EventName(TEXT(""))
-        , Description(TEXT(""))
-        , Theme(ENarr_NarrativeTheme::SelfDiscovery)
-        , bIsCompleted(false)
-        , bIsRepeatable(false)
-    {
-    }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    FNarr_DialogueNode DialogueData;
+};
 
-    /** Unique identifier for this story event */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    FString EventID;
+/**
+ * Data table row for quest data
+ */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FNarr_QuestTableRow : public FTableRowBase
+{
+    GENERATED_BODY()
 
-    /** Display name of the event */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    FString EventName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    FNarr_QuestData QuestData;
+};
 
-    /** Detailed description of what happens in this event */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    FText Description;
+/**
+ * Data table row for character lore
+ */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FNarr_CharacterTableRow : public FTableRowBase
+{
+    GENERATED_BODY()
 
-    /** Narrative theme this event explores */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    ENarr_NarrativeTheme Theme;
-
-    /** Whether this event has been completed */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    bool bIsCompleted;
-
-    /** Whether this event can be triggered multiple times */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    bool bIsRepeatable;
-
-    /** Prerequisites for this event to trigger */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    TArray<FString> Prerequisites;
-
-    /** Events that become available after completing this one */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    TArray<FString> UnlockedEvents;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    FNarr_CharacterLore CharacterData;
 };
