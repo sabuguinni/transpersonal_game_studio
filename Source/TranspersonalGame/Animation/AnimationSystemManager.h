@@ -2,281 +2,170 @@
 
 #include "CoreMinimal.h"
 #include "Engine/World.h"
-#include "Components/ActorComponent.h"
+#include "Subsystems/WorldSubsystem.h"
 #include "Animation/AnimInstance.h"
-#include "Animation/AnimMontage.h"
 #include "Animation/BlendSpace.h"
-#include "GameFramework/Character.h"
+#include "Animation/AnimMontage.h"
 #include "../SharedTypes.h"
 #include "AnimationSystemManager.generated.h"
 
 // Forward declarations
-class UMotionMatchingComponent;
-class UTerrainIKComponent;
-
-UENUM(BlueprintType)
-enum class EAnim_PrehistoricAction : uint8
-{
-    None            UMETA(DisplayName = "None"),
-    Gathering       UMETA(DisplayName = "Gathering"),
-    Hunting         UMETA(DisplayName = "Hunting"), 
-    Crafting        UMETA(DisplayName = "Crafting"),
-    Social          UMETA(DisplayName = "Social"),
-    Survival        UMETA(DisplayName = "Survival"),
-    Combat          UMETA(DisplayName = "Combat"),
-    Ritual          UMETA(DisplayName = "Ritual")
-};
-
-UENUM(BlueprintType)
-enum class EAnim_TerrainType : uint8
-{
-    Rock            UMETA(DisplayName = "Rock"),
-    Dirt            UMETA(DisplayName = "Dirt"),
-    Grass           UMETA(DisplayName = "Grass"),
-    Mud             UMETA(DisplayName = "Mud"),
-    Sand            UMETA(DisplayName = "Sand"),
-    Snow            UMETA(DisplayName = "Snow")
-};
+class UMotionMatchingDatabase;
+class UAnimSequence;
+class UBlendSpace;
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAnim_MotionMatchingData
+struct TRANSPERSONALGAME_API FAnim_LocomotionData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    FVector Velocity;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Locomotion")
+    float Speed = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    float Speed;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Locomotion")
+    float Direction = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    float Direction;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Locomotion")
+    bool bIsOnGround = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    bool bIsAccelerating;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Locomotion")
+    bool bIsClimbing = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    EAnim_PrehistoricAction CurrentAction;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Locomotion")
+    bool bIsSwimming = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    float ActionBlendWeight;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Locomotion")
+    EAnim_TerrainType TerrainType = EAnim_TerrainType::Grass;
 
-    FAnim_MotionMatchingData()
+    FAnim_LocomotionData()
     {
-        Velocity = FVector::ZeroVector;
         Speed = 0.0f;
         Direction = 0.0f;
-        bIsAccelerating = false;
-        CurrentAction = EAnim_PrehistoricAction::None;
-        ActionBlendWeight = 0.0f;
+        bIsOnGround = true;
+        bIsClimbing = false;
+        bIsSwimming = false;
+        TerrainType = EAnim_TerrainType::Grass;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAnim_TerrainAdaptationData
+struct TRANSPERSONALGAME_API FAnim_IKFootData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Adaptation")
-    float GroundSlope;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK")
+    FVector FootLocation = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Adaptation")
-    EAnim_TerrainType SurfaceType;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK")
+    FRotator FootRotation = FRotator::ZeroRotator;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Adaptation")
-    FVector LeftFootTarget;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK")
+    float IKAlpha = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Adaptation")
-    FVector RightFootTarget;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK")
+    bool bValidHit = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Adaptation")
-    float IKBlendWeight;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Adaptation")
-    bool bIsOnUnevenTerrain;
-
-    FAnim_TerrainAdaptationData()
+    FAnim_IKFootData()
     {
-        GroundSlope = 0.0f;
-        SurfaceType = EAnim_TerrainType::Dirt;
-        LeftFootTarget = FVector::ZeroVector;
-        RightFootTarget = FVector::ZeroVector;
-        IKBlendWeight = 0.0f;
-        bIsOnUnevenTerrain = false;
+        FootLocation = FVector::ZeroVector;
+        FootRotation = FRotator::ZeroRotator;
+        IKAlpha = 1.0f;
+        bValidHit = false;
     }
 };
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAnim_MontageConfig
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Montage")
-    TSoftObjectPtr<UAnimMontage> MontageAsset;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Montage")
-    FString MontageName;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Montage")
-    EAnim_PrehistoricAction ActionType;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Montage")
-    float PlayRate;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Montage")
-    bool bLooping;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Montage")
-    TArray<FString> SectionNames;
-
-    FAnim_MontageConfig()
-    {
-        MontageName = TEXT("DefaultMontage");
-        ActionType = EAnim_PrehistoricAction::None;
-        PlayRate = 1.0f;
-        bLooping = false;
-    }
-};
-
-/**
- * Core Animation System Manager for Transpersonal Game
- * Handles Motion Matching, Terrain Adaptation IK, and Prehistoric Action Montages
- * Inspired by RDR2's character-specific movement and Richard Williams' principles of life in animation
- */
-UCLASS(BlueprintType, Blueprintable, meta = (BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UAnimationSystemManager : public UActorComponent
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UAnimationSystemManager : public UWorldSubsystem
 {
     GENERATED_BODY()
 
 public:
     UAnimationSystemManager();
 
-protected:
-    virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
 
     // Motion Matching System
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    FAnim_MotionMatchingData MotionData;
+    UFUNCTION(BlueprintCallable, Category = "Animation|Motion Matching")
+    void InitializeMotionMatchingDatabase();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    TSoftObjectPtr<UBlendSpace> LocomotionBlendSpace;
+    UFUNCTION(BlueprintCallable, Category = "Animation|Motion Matching")
+    UAnimSequence* FindBestMatchingAnimation(const FAnim_LocomotionData& LocomotionData);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    float MotionMatchingThreshold;
+    UFUNCTION(BlueprintCallable, Category = "Animation|Motion Matching")
+    void RegisterCharacterForMotionMatching(class APawn* Character);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    float BlendTime;
+    // Procedural Animation System
+    UFUNCTION(BlueprintCallable, Category = "Animation|Procedural")
+    FAnim_IKFootData CalculateFootIK(class APawn* Character, const FName& FootBoneName, float TraceDistance = 50.0f);
 
-    // Terrain Adaptation System
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Adaptation")
-    FAnim_TerrainAdaptationData TerrainData;
+    UFUNCTION(BlueprintCallable, Category = "Animation|Procedural")
+    void UpdateTerrainAdaptation(class APawn* Character);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Adaptation")
-    float IKTraceDistance;
+    UFUNCTION(BlueprintCallable, Category = "Animation|Procedural")
+    void ApplyEnvironmentalAnimations(class APawn* Character, EAnim_TerrainType TerrainType);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Adaptation")
-    float IKInterpSpeed;
+    // Animation Montage System
+    UFUNCTION(BlueprintCallable, Category = "Animation|Montages")
+    bool PlaySurvivalMontage(class APawn* Character, EAnim_SurvivalAction Action);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Adaptation")
-    bool bEnableTerrainAdaptation;
+    UFUNCTION(BlueprintCallable, Category = "Animation|Montages")
+    void StopAllMontages(class APawn* Character);
 
-    // Prehistoric Action Montages
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Prehistoric Actions")
-    TMap<EAnim_PrehistoricAction, FAnim_MontageConfig> ActionMontages;
+    UFUNCTION(BlueprintCallable, Category = "Animation|Montages")
+    bool IsPlayingMontage(class APawn* Character, EAnim_SurvivalAction Action);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Prehistoric Actions")
-    EAnim_PrehistoricAction CurrentPlayingAction;
+    // Blend Space Management
+    UFUNCTION(BlueprintCallable, Category = "Animation|BlendSpaces")
+    void UpdateLocomotionBlendSpace(class APawn* Character, const FAnim_LocomotionData& LocomotionData);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Prehistoric Actions")
-    bool bIsPlayingActionMontage;
+    UFUNCTION(BlueprintCallable, Category = "Animation|BlendSpaces")
+    UBlendSpace* GetTerrainSpecificBlendSpace(EAnim_TerrainType TerrainType);
 
-    // Character Reference
-    UPROPERTY(BlueprintReadOnly, Category = "Character")
-    ACharacter* OwnerCharacter;
+    // Animation Events
+    UFUNCTION(BlueprintCallable, Category = "Animation|Events")
+    void TriggerFootstepEvent(class APawn* Character, const FName& FootBoneName);
 
-    UPROPERTY(BlueprintReadOnly, Category = "Character")
-    USkeletalMeshComponent* CharacterMesh;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Character")
-    UAnimInstance* AnimInstance;
-
-public:
-    // Motion Matching Functions
-    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    void UpdateMotionMatchingData(const FVector& InVelocity, float InSpeed, float InDirection);
-
-    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    void SetMotionMatchingBlendSpace(UBlendSpace* InBlendSpace);
-
-    UFUNCTION(BlueprintPure, Category = "Motion Matching")
-    FAnim_MotionMatchingData GetMotionMatchingData() const { return MotionData; }
-
-    // Terrain Adaptation Functions
-    UFUNCTION(BlueprintCallable, Category = "Terrain Adaptation")
-    void UpdateTerrainAdaptation(float DeltaTime);
-
-    UFUNCTION(BlueprintCallable, Category = "Terrain Adaptation")
-    void PerformFootIKTrace(bool bLeftFoot, FVector& OutFootTarget, float& OutIKAlpha);
-
-    UFUNCTION(BlueprintCallable, Category = "Terrain Adaptation")
-    void SetTerrainAdaptationEnabled(bool bEnabled);
-
-    UFUNCTION(BlueprintPure, Category = "Terrain Adaptation")
-    FAnim_TerrainAdaptationData GetTerrainAdaptationData() const { return TerrainData; }
-
-    // Prehistoric Action Functions
-    UFUNCTION(BlueprintCallable, Category = "Prehistoric Actions")
-    bool PlayPrehistoricAction(EAnim_PrehistoricAction ActionType, float PlayRate = 1.0f);
-
-    UFUNCTION(BlueprintCallable, Category = "Prehistoric Actions")
-    void StopCurrentAction();
-
-    UFUNCTION(BlueprintCallable, Category = "Prehistoric Actions")
-    void RegisterActionMontage(EAnim_PrehistoricAction ActionType, UAnimMontage* Montage, const FString& MontageName);
-
-    UFUNCTION(BlueprintPure, Category = "Prehistoric Actions")
-    bool IsPlayingAction() const { return bIsPlayingActionMontage; }
-
-    UFUNCTION(BlueprintPure, Category = "Prehistoric Actions")
-    EAnim_PrehistoricAction GetCurrentAction() const { return CurrentPlayingAction; }
-
-    // System Integration Functions
-    UFUNCTION(BlueprintCallable, Category = "Animation System")
-    void InitializeAnimationSystem(ACharacter* InCharacter);
-
-    UFUNCTION(BlueprintCallable, Category = "Animation System")
-    void SetupDefaultMontages();
-
-    UFUNCTION(BlueprintCallable, Category = "Animation System")
-    void ResetAnimationSystem();
+    UFUNCTION(BlueprintCallable, Category = "Animation|Events")
+    void TriggerSurvivalActionEvent(class APawn* Character, EAnim_SurvivalAction Action);
 
 protected:
-    // Internal helper functions
-    void UpdateCharacterReferences();
-    void CalculateMotionMatchingParameters();
-    void ProcessTerrainAdaptation(float DeltaTime);
-    void HandleActionMontageEvents();
+    // Motion Matching Database
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Motion Matching", meta = (AllowPrivateAccess = "true"))
+    UMotionMatchingDatabase* PrehistoricLocomotionDatabase;
 
-    // Terrain analysis
-    EAnim_TerrainType AnalyzeSurfaceType(const FHitResult& HitResult);
-    float CalculateGroundSlope(const FVector& GroundNormal);
+    // Blend Spaces for different terrains
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Blend Spaces", meta = (AllowPrivateAccess = "true"))
+    TMap<EAnim_TerrainType, UBlendSpace*> TerrainBlendSpaces;
 
-    // Motion matching helpers
-    float CalculateDirectionAngle(const FVector& Velocity, const FVector& Forward);
-    bool ShouldTransitionMotion(const FAnim_MotionMatchingData& NewData);
+    // Animation Montages for survival actions
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Montages", meta = (AllowPrivateAccess = "true"))
+    TMap<EAnim_SurvivalAction, UAnimMontage*> SurvivalMontages;
+
+    // Registered characters for motion matching
+    UPROPERTY(BlueprintReadOnly, Category = "Motion Matching", meta = (AllowPrivateAccess = "true"))
+    TArray<TWeakObjectPtr<APawn>> RegisteredCharacters;
+
+    // IK Settings
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "IK", meta = (AllowPrivateAccess = "true"))
+    float FootIKTraceDistance = 50.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "IK", meta = (AllowPrivateAccess = "true"))
+    float FootIKInterpSpeed = 10.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "IK", meta = (AllowPrivateAccess = "true"))
+    float MaxFootIKOffset = 30.0f;
 
 private:
-    // Internal state tracking
-    float LastMotionUpdateTime;
-    FVector LastValidVelocity;
-    bool bSystemInitialized;
+    // Internal helper functions
+    void LoadAnimationAssets();
+    void SetupTerrainBlendSpaces();
+    void SetupSurvivalMontages();
     
-    // IK foot placement cache
-    FVector CachedLeftFootTarget;
-    FVector CachedRightFootTarget;
-    float LeftFootIKAlpha;
-    float RightFootIKAlpha;
+    FVector PerformFootTrace(class APawn* Character, const FName& FootBoneName, float TraceDistance);
+    FRotator CalculateFootRotationFromNormal(const FVector& SurfaceNormal);
+    
+    bool ValidateCharacterForAnimation(class APawn* Character);
+    class USkeletalMeshComponent* GetCharacterMesh(class APawn* Character);
 };
-
-#include "AnimationSystemManager.generated.h"
