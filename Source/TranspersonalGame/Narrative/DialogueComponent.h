@@ -3,141 +3,125 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "Engine/DataTable.h"
-#include "Sound/SoundBase.h"
 #include "NarrativeTypes.h"
 #include "DialogueComponent.generated.h"
 
-class UConsciousnessComponent;
+class UAudioComponent;
+class UNarrativeManager;
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnDialogueStarted, const FString&, SpeakerName, const FText&, DialogueText);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDialogueEnded, const FString&, SpeakerName);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnPlayerChoiceAvailable, const TArray<FNarr_DialogueLine>&, Choices, int32, DefaultChoice, float, TimeLimit);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnDialogueStarted, const FString&, DialogueID, const FString&, SpeakerName);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDialogueEnded, const FString&, DialogueID);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnDialogueLineChanged, const FString&, DialogueText, const FString&, SpeakerName, ENarr_EmotionalState, EmotionalState);
 
 /**
- * Component that manages dialogue interactions for NPCs
- * Integrates with consciousness system to provide contextual dialogue
+ * Component that handles dialogue interactions for NPCs and story triggers
  */
 UCLASS(ClassGroup=(Narrative), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UNarr_DialogueComponent : public UActorComponent
+class TRANSPERSONALGAME_API UDialogueComponent : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    UNarr_DialogueComponent();
+    UDialogueComponent();
 
 protected:
     virtual void BeginPlay() override;
 
 public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
-
-    /** Start a dialogue conversation with this NPC */
+    /** Start a dialogue sequence */
     UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    bool StartDialogue(AActor* PlayerActor);
+    bool StartDialogue(const FString& DialogueID, AActor* InteractingActor = nullptr);
 
-    /** End the current dialogue conversation */
+    /** End the current dialogue */
     UFUNCTION(BlueprintCallable, Category = "Dialogue")
     void EndDialogue();
 
-    /** Select a player dialogue choice */
+    /** Advance to the next dialogue line */
     UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void SelectPlayerChoice(int32 ChoiceIndex);
+    bool AdvanceDialogue();
+
+    /** Select a dialogue choice (for branching conversations) */
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    bool SelectDialogueChoice(int32 ChoiceIndex);
+
+    /** Get available dialogue choices */
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    TArray<FString> GetDialogueChoices() const;
 
     /** Check if dialogue is currently active */
-    UFUNCTION(BlueprintPure, Category = "Dialogue")
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
     bool IsDialogueActive() const { return bIsDialogueActive; }
 
-    /** Get the current speaker name */
-    UFUNCTION(BlueprintPure, Category = "Dialogue")
-    FString GetCurrentSpeaker() const { return CurrentSpeakerName; }
-
-    /** Get available dialogue lines based on player's consciousness level */
+    /** Get current dialogue line */
     UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    TArray<FNarr_DialogueLine> GetAvailableDialogue(ENarr_ConsciousnessLevel PlayerConsciousnessLevel) const;
+    FNarr_DialogueLine GetCurrentDialogueLine() const { return CurrentDialogueLine; }
 
-    /** Add a new dialogue line to this character */
+    /** Set the dialogue data table */
     UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void AddDialogueLine(const FNarr_DialogueLine& NewLine);
+    void SetDialogueDataTable(UDataTable* NewDialogueTable);
 
-    /** Remove a dialogue line by index */
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void RemoveDialogueLine(int32 LineIndex);
+    /** Play audio for current dialogue line */
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void PlayDialogueAudio();
 
-    /** Set the character data for this dialogue component */
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void SetCharacterData(const FNarr_CharacterData& InCharacterData);
-
-    /** Get the character data */
-    UFUNCTION(BlueprintPure, Category = "Dialogue")
-    const FNarr_CharacterData& GetCharacterData() const { return CharacterData; }
+    /** Stop current dialogue audio */
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void StopDialogueAudio();
 
     /** Events */
-    UPROPERTY(BlueprintAssignable, Category = "Dialogue Events")
+    UPROPERTY(BlueprintAssignable, Category = "Events")
     FOnDialogueStarted OnDialogueStarted;
 
-    UPROPERTY(BlueprintAssignable, Category = "Dialogue Events")
+    UPROPERTY(BlueprintAssignable, Category = "Events")
     FOnDialogueEnded OnDialogueEnded;
 
-    UPROPERTY(BlueprintAssignable, Category = "Dialogue Events")
-    FOnPlayerChoiceAvailable OnPlayerChoiceAvailable;
+    UPROPERTY(BlueprintAssignable, Category = "Events")
+    FOnDialogueLineChanged OnDialogueLineChanged;
 
 protected:
-    /** Character data containing dialogue lines and personality */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character", meta = (AllowPrivateAccess = "true"))
-    FNarr_CharacterData CharacterData;
-
-    /** Data table containing additional dialogue lines */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue", meta = (AllowPrivateAccess = "true"))
+    /** Data table containing dialogue lines */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
     UDataTable* DialogueDataTable;
 
-    /** Maximum interaction distance */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue", meta = (AllowPrivateAccess = "true"))
-    float MaxInteractionDistance;
+    /** Character archetype for this dialogue component */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    ENarr_CharacterArchetype CharacterArchetype;
 
-    /** Whether dialogue is currently active */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dialogue", meta = (AllowPrivateAccess = "true"))
+    /** Default speaker name if not specified in dialogue data */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    FString DefaultSpeakerName;
+
+    /** Audio component for playing dialogue sounds */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio")
+    UAudioComponent* AudioComponent;
+
+    /** Current dialogue state */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "State")
     bool bIsDialogueActive;
 
-    /** Current dialogue line index */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dialogue", meta = (AllowPrivateAccess = "true"))
-    int32 CurrentDialogueIndex;
-
-    /** Current speaker name */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dialogue", meta = (AllowPrivateAccess = "true"))
-    FString CurrentSpeakerName;
-
-    /** Reference to the player actor currently in dialogue */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dialogue", meta = (AllowPrivateAccess = "true"))
-    AActor* CurrentPlayerActor;
-
-    /** Timer for automatic dialogue progression */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dialogue", meta = (AllowPrivateAccess = "true"))
-    float DialogueTimer;
-
-    /** Current dialogue line being displayed */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dialogue", meta = (AllowPrivateAccess = "true"))
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "State")
     FNarr_DialogueLine CurrentDialogueLine;
 
-    /** Available player choices for current dialogue */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dialogue", meta = (AllowPrivateAccess = "true"))
-    TArray<FNarr_DialogueLine> CurrentPlayerChoices;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "State")
+    FString CurrentDialogueID;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "State")
+    TArray<FString> CurrentChoices;
+
+    /** Reference to the narrative manager */
+    UPROPERTY()
+    UNarrativeManager* NarrativeManager;
 
 private:
-    /** Process the next dialogue line */
-    void ProcessNextDialogueLine();
+    /** Load dialogue line from data table */
+    bool LoadDialogueLine(const FString& DialogueID);
 
-    /** Find player choices based on current context */
-    void FindPlayerChoices();
+    /** Process dialogue line for consciousness level requirements */
+    bool CanAccessDialogueLine(const FNarr_DialogueLine& DialogueLine) const;
 
-    /** Check if a dialogue line meets requirements */
-    bool MeetsDialogueRequirements(const FNarr_DialogueLine& DialogueLine, ENarr_ConsciousnessLevel PlayerLevel) const;
+    /** Get player consciousness level */
+    int32 GetPlayerConsciousnessLevel() const;
 
-    /** Get player's consciousness level */
-    ENarr_ConsciousnessLevel GetPlayerConsciousnessLevel(AActor* PlayerActor) const;
-
-    /** Play audio for dialogue line */
-    void PlayDialogueAudio(const FNarr_DialogueLine& DialogueLine);
-
-    /** Load dialogue from data table */
-    void LoadDialogueFromDataTable();
+    /** Update dialogue choices based on current line */
+    void UpdateDialogueChoices();
 };
