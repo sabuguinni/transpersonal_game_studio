@@ -2,89 +2,71 @@
 
 #include "CoreMinimal.h"
 #include "Engine/World.h"
-#include "Components/ActorComponent.h"
-#include "GameFramework/Actor.h"
+#include "Subsystems/WorldSubsystem.h"
+#include "Components/StaticMeshComponent.h"
 #include "../SharedTypes.h"
 #include "ArchitectureManager.generated.h"
 
 UENUM(BlueprintType)
-enum class EArch_StructureType : uint8
+enum class EArch_BuildingType : uint8
 {
+    None            UMETA(DisplayName = "None"),
     Hut             UMETA(DisplayName = "Stone Age Hut"),
     CaveDwelling    UMETA(DisplayName = "Cave Dwelling"),
-    Megalith        UMETA(DisplayName = "Megalithic Structure"),
-    CliffDwelling   UMETA(DisplayName = "Cliff Dwelling"),
-    Palisade        UMETA(DisplayName = "Wooden Palisade"),
-    FirePit         UMETA(DisplayName = "Central Fire Pit"),
-    StoragePit      UMETA(DisplayName = "Storage Pit"),
-    Watchtower      UMETA(DisplayName = "Watchtower"),
-    Bridge          UMETA(DisplayName = "Primitive Bridge"),
-    Shrine          UMETA(DisplayName = "Ritual Shrine")
+    StoneCircle     UMETA(DisplayName = "Stone Circle"),
+    UndergroundShelter UMETA(DisplayName = "Underground Shelter"),
+    TribalHall      UMETA(DisplayName = "Tribal Hall"),
+    StorageHut      UMETA(DisplayName = "Storage Hut"),
+    CraftingArea    UMETA(DisplayName = "Crafting Area"),
+    DefensiveWall   UMETA(DisplayName = "Defensive Wall")
 };
 
 UENUM(BlueprintType)
-enum class EArch_StructureState : uint8
+enum class EArch_StructuralMaterial : uint8
 {
-    Intact          UMETA(DisplayName = "Intact"),
-    Weathered       UMETA(DisplayName = "Weathered"),
-    Damaged         UMETA(DisplayName = "Damaged"),
-    Ruined          UMETA(DisplayName = "Ruined"),
-    Abandoned       UMETA(DisplayName = "Abandoned"),
-    Occupied        UMETA(DisplayName = "Occupied"),
-    UnderConstruction UMETA(DisplayName = "Under Construction")
+    Stone           UMETA(DisplayName = "Stone"),
+    Wood            UMETA(DisplayName = "Wood"),
+    AnimalHide      UMETA(DisplayName = "Animal Hide"),
+    Thatch          UMETA(DisplayName = "Thatch"),
+    Earth           UMETA(DisplayName = "Earth/Mud"),
+    Bone            UMETA(DisplayName = "Bone"),
+    Mixed           UMETA(DisplayName = "Mixed Materials")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FArch_StructureData
+struct TRANSPERSONALGAME_API FArch_BuildingData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    EArch_StructureType StructureType = EArch_StructureType::Hut;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building")
+    EArch_BuildingType BuildingType = EArch_BuildingType::None;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    EArch_StructureState State = EArch_StructureState::Intact;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building")
+    EArch_StructuralMaterial PrimaryMaterial = EArch_StructuralMaterial::Stone;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    float ConstructionProgress = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building")
+    FVector Dimensions = FVector(500.0f, 500.0f, 300.0f);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building")
     int32 Capacity = 4;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    int32 CurrentOccupants = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building")
+    float StructuralIntegrity = 100.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    float DurabilityPercent = 100.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building")
+    bool bHasFireplace = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    float AgeInDays = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building")
+    bool bHasStorage = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    bool bHasFireplace = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building")
+    TArray<FString> InteriorFeatures;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    bool bHasStorage = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    bool bIsDefensive = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    FString OwnerTribeName = TEXT("Unknown");
-
-    FArch_StructureData()
+    FArch_BuildingData()
     {
-        StructureType = EArch_StructureType::Hut;
-        State = EArch_StructureState::Intact;
-        ConstructionProgress = 1.0f;
-        Capacity = 4;
-        CurrentOccupants = 0;
-        DurabilityPercent = 100.0f;
-        AgeInDays = 0.0f;
-        bHasFireplace = false;
-        bHasStorage = false;
-        bIsDefensive = false;
-        OwnerTribeName = TEXT("Unknown");
+        InteriorFeatures.Add("Fire Pit");
+        InteriorFeatures.Add("Sleeping Area");
+        InteriorFeatures.Add("Tool Storage");
     }
 };
 
@@ -97,114 +79,103 @@ struct TRANSPERSONALGAME_API FArch_SettlementLayout
     FVector CenterLocation = FVector::ZeroVector;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settlement")
-    float Radius = 500.0f;
+    float Radius = 2000.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settlement")
-    int32 MaxStructures = 20;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settlement")
-    bool bHasPalisade = false;
+    int32 MaxBuildings = 12;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settlement")
     bool bHasCentralFirePit = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settlement")
-    FString SettlementName = TEXT("Unnamed Settlement");
+    bool bHasDefensiveWalls = false;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settlement")
-    int32 Population = 0;
-
-    FArch_SettlementLayout()
-    {
-        CenterLocation = FVector::ZeroVector;
-        Radius = 500.0f;
-        MaxStructures = 20;
-        bHasPalisade = false;
-        bHasCentralFirePit = true;
-        SettlementName = TEXT("Unnamed Settlement");
-        Population = 0;
-    }
+    TArray<FArch_BuildingData> Buildings;
 };
 
+/**
+ * Architecture Manager - Handles all building placement, settlement generation, and structural systems
+ * Responsible for creating authentic Stone Age architecture with proper materials and layouts
+ */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UArchitectureManager : public UActorComponent
+class TRANSPERSONALGAME_API UArchitectureManager : public UWorldSubsystem
 {
     GENERATED_BODY()
 
 public:
     UArchitectureManager();
 
-protected:
-    virtual void BeginPlay() override;
+    // Subsystem overrides
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
 
-public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
-
-    // Structure Management
+    // Building Generation
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    AActor* CreateStructure(EArch_StructureType StructureType, FVector Location, FRotator Rotation);
+    class AArch_BuildingActor* SpawnBuilding(EArch_BuildingType BuildingType, FVector Location, FRotator Rotation = FRotator::ZeroRotator);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool RemoveStructure(AActor* Structure);
+    void GenerateSettlement(FVector CenterLocation, int32 BuildingCount = 8);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void UpdateStructureState(AActor* Structure, EArch_StructureState NewState);
+    void GenerateTribalVillage(FVector Location, float Radius = 1500.0f);
+
+    // Interior Systems
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    void PopulateInterior(class AArch_BuildingActor* Building, EArch_BuildingType BuildingType);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void AgeStructures(float DeltaTime);
+    void AddInteriorFeature(class AArch_BuildingActor* Building, const FString& FeatureName, FVector RelativeLocation);
+
+    // Structural Analysis
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    float CalculateStructuralIntegrity(const FArch_BuildingData& BuildingData);
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    bool ValidateBuildingPlacement(FVector Location, EArch_BuildingType BuildingType);
+
+    // Material Systems
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    class UMaterialInterface* GetMaterialForType(EArch_StructuralMaterial MaterialType);
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    void ApplyWeatheringEffects(class AArch_BuildingActor* Building, float WeatheringAmount = 0.3f);
 
     // Settlement Management
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void CreateSettlement(FVector CenterLocation, float Radius, int32 StructureCount);
+    TArray<class AArch_BuildingActor*> GetBuildingsInRadius(FVector Center, float Radius);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void GenerateSettlementLayout(const FArch_SettlementLayout& Layout);
+    FArch_SettlementLayout GenerateSettlementLayout(FVector Center, int32 BuildingCount);
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    TArray<AActor*> GetStructuresInRadius(FVector Center, float Radius);
+    // Debug and Testing
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Architecture|Debug")
+    void DebugSpawnTestBuilding();
 
-    // Interior Management
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void PopulateInterior(AActor* Structure, EArch_StructureType StructureType);
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Architecture|Debug")
+    void DebugGenerateTestSettlement();
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void AddInteriorDetails(AActor* Structure, bool bAddFurniture, bool bAddTools, bool bAddPersonalItems);
-
-    // Procedural Generation
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void GenerateRandomSettlement(FVector Location, int32 MinStructures, int32 MaxStructures);
-
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    FVector FindOptimalStructureLocation(FVector CenterPoint, float MinDistance, float MaxDistance);
-
-    // Utility Functions
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    EArch_StructureType GetRandomStructureType();
-
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    float CalculateStructureDurability(const FArch_StructureData& StructureData);
-
-    UFUNCTION(BlueprintCallable, Category = "Architecture", CallInEditor)
-    void DebugCreateTestSettlement();
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Architecture|Debug")
+    void ClearAllBuildings();
 
 protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    TArray<AActor*> ManagedStructures;
+    TArray<class AArch_BuildingActor*> ManagedBuildings;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
     FArch_SettlementLayout CurrentSettlement;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    float StructureAgingRate = 1.0f;
+    TMap<EArch_StructuralMaterial, TSoftObjectPtr<UMaterialInterface>> MaterialLibrary;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    bool bAutoAgeStructures = true;
+    float MinBuildingDistance = 800.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    float WeatheringFactor = 0.1f;
+    bool bAutoPopulateInteriors = true;
 
 private:
-    void InitializeStructureData(AActor* Structure, EArch_StructureType StructureType);
-    void ApplyWeathering(AActor* Structure, float DeltaTime);
-    FVector GetCircularPosition(FVector Center, float Radius, float Angle);
+    void InitializeMaterialLibrary();
+    FVector FindValidBuildingLocation(FVector PreferredLocation, float SearchRadius = 1000.0f);
+    void SetupBuildingDefaults(class AArch_BuildingActor* Building, EArch_BuildingType BuildingType);
 };
