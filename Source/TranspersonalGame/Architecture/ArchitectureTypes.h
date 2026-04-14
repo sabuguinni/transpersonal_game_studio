@@ -2,56 +2,91 @@
 
 #include "CoreMinimal.h"
 #include "Engine/Engine.h"
-#include "Components/StaticMeshComponent.h"
 #include "ArchitectureTypes.generated.h"
 
 /**
- * Enum for different types of prehistoric structures
+ * Types of prehistoric structures that can be built
  */
 UENUM(BlueprintType)
 enum class EArch_StructureType : uint8
 {
-    Dwelling        UMETA(DisplayName = "Dwelling"),
-    Workshop        UMETA(DisplayName = "Workshop"),
-    Storage         UMETA(DisplayName = "Storage"),
-    Community       UMETA(DisplayName = "Community Hall"),
-    Ceremonial      UMETA(DisplayName = "Ceremonial"),
-    Defensive       UMETA(DisplayName = "Defensive"),
-    Cave            UMETA(DisplayName = "Cave Dwelling"),
-    Megalith        UMETA(DisplayName = "Megalithic Structure")
+    None            UMETA(DisplayName = "None"),
+    TribalHut       UMETA(DisplayName = "Tribal Hut"),
+    CaveDwelling    UMETA(DisplayName = "Cave Dwelling"),
+    PlatformHouse   UMETA(DisplayName = "Platform House"),
+    StoragePit      UMETA(DisplayName = "Storage Pit"),
+    CookingArea     UMETA(DisplayName = "Cooking Area"),
+    CraftingStation UMETA(DisplayName = "Crafting Station"),
+    Palisade        UMETA(DisplayName = "Palisade"),
+    WatchTower      UMETA(DisplayName = "Watch Tower"),
+    RitualCircle    UMETA(DisplayName = "Ritual Circle"),
+    BurialMound     UMETA(DisplayName = "Burial Mound"),
+    StoneMegaliths  UMETA(DisplayName = "Stone Megaliths"),
+    Ruins           UMETA(DisplayName = "Ruins")
 };
 
 /**
- * Enum for construction materials available in prehistoric era
+ * Construction materials available in the stone age
  */
 UENUM(BlueprintType)
 enum class EArch_MaterialType : uint8
 {
-    Wood            UMETA(DisplayName = "Wood"),
-    Stone           UMETA(DisplayName = "Stone"),
-    Clay            UMETA(DisplayName = "Clay/Mud"),
-    Thatch          UMETA(DisplayName = "Thatch"),
-    AnimalHide      UMETA(DisplayName = "Animal Hide"),
-    Bone            UMETA(DisplayName = "Bone"),
-    Natural         UMETA(DisplayName = "Natural Cave")
+    None        UMETA(DisplayName = "None"),
+    Wood        UMETA(DisplayName = "Wood"),
+    Stone       UMETA(DisplayName = "Stone"),
+    Clay        UMETA(DisplayName = "Clay"),
+    AnimalHide  UMETA(DisplayName = "Animal Hide"),
+    PlantFiber  UMETA(DisplayName = "Plant Fiber"),
+    Bone        UMETA(DisplayName = "Bone"),
+    Thatch      UMETA(DisplayName = "Thatch"),
+    Mud         UMETA(DisplayName = "Mud")
 };
 
 /**
- * Enum for structural condition/age
+ * Structural integrity levels
  */
 UENUM(BlueprintType)
-enum class EArch_StructureCondition : uint8
+enum class EArch_StructuralIntegrity : uint8
 {
-    New             UMETA(DisplayName = "New"),
-    WellMaintained  UMETA(DisplayName = "Well Maintained"),
-    Weathered       UMETA(DisplayName = "Weathered"),
-    Damaged         UMETA(DisplayName = "Damaged"),
-    Ruined          UMETA(DisplayName = "Ruined"),
-    Ancient         UMETA(DisplayName = "Ancient Ruins")
+    Collapsed   UMETA(DisplayName = "Collapsed"),
+    Damaged     UMETA(DisplayName = "Damaged"),
+    Weathered   UMETA(DisplayName = "Weathered"),
+    Stable      UMETA(DisplayName = "Stable"),
+    Pristine    UMETA(DisplayName = "Pristine")
 };
 
 /**
- * Structure data for building configuration
+ * Age categories for structures
+ */
+UENUM(BlueprintType)
+enum class EArch_StructureAge : uint8
+{
+    New         UMETA(DisplayName = "New"),
+    Recent      UMETA(DisplayName = "Recent"),
+    Established UMETA(DisplayName = "Established"),
+    Old         UMETA(DisplayName = "Old"),
+    Ancient     UMETA(DisplayName = "Ancient"),
+    Prehistoric UMETA(DisplayName = "Prehistoric")
+};
+
+/**
+ * Interior layout types for dwellings
+ */
+UENUM(BlueprintType)
+enum class EArch_InteriorLayout : uint8
+{
+    Empty           UMETA(DisplayName = "Empty"),
+    SingleRoom      UMETA(DisplayName = "Single Room"),
+    SleepingArea    UMETA(DisplayName = "Sleeping Area"),
+    CookingArea     UMETA(DisplayName = "Cooking Area"),
+    StorageArea     UMETA(DisplayName = "Storage Area"),
+    WorkshopArea    UMETA(DisplayName = "Workshop Area"),
+    RitualArea      UMETA(DisplayName = "Ritual Area"),
+    MultiPurpose    UMETA(DisplayName = "Multi Purpose")
+};
+
+/**
+ * Structure data for procedural generation
  */
 USTRUCT(BlueprintType)
 struct TRANSPERSONALGAME_API FArch_StructureData
@@ -59,43 +94,47 @@ struct TRANSPERSONALGAME_API FArch_StructureData
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    EArch_StructureType StructureType = EArch_StructureType::Dwelling;
+    EArch_StructureType StructureType = EArch_StructureType::None;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    EArch_MaterialType PrimaryMaterial = EArch_MaterialType::Wood;
+    FVector Location = FVector::ZeroVector;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    EArch_MaterialType SecondaryMaterial = EArch_MaterialType::Stone;
+    FRotator Rotation = FRotator::ZeroRotator;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    EArch_StructureCondition Condition = EArch_StructureCondition::WellMaintained;
+    FVector Scale = FVector::OneVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    FString StructureName = TEXT("Unnamed Structure");
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
+    TArray<EArch_MaterialType> PrimaryMaterials;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    float StructureAge = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Condition")
+    EArch_StructuralIntegrity Integrity = EArch_StructuralIntegrity::Stable;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    int32 MaxOccupants = 1;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Condition")
+    EArch_StructureAge Age = EArch_StructureAge::Established;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    bool bIsInhabited = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
+    EArch_InteriorLayout InteriorLayout = EArch_InteriorLayout::Empty;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    bool bHasInterior = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inhabitants")
+    int32 MaxOccupants = 0;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inhabitants")
+    bool bIsOccupied = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Functionality")
+    bool bHasFire = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Functionality")
+    bool bHasStorage = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Functionality")
+    bool bIsDefensive = false;
 
     FArch_StructureData()
     {
-        StructureType = EArch_StructureType::Dwelling;
-        PrimaryMaterial = EArch_MaterialType::Wood;
-        SecondaryMaterial = EArch_MaterialType::Stone;
-        Condition = EArch_StructureCondition::WellMaintained;
-        StructureName = TEXT("Unnamed Structure");
-        StructureAge = 0.0f;
-        MaxOccupants = 1;
-        bIsInhabited = true;
-        bHasInterior = true;
+        PrimaryMaterials.Add(EArch_MaterialType::Wood);
     }
 };
 
@@ -103,38 +142,52 @@ struct TRANSPERSONALGAME_API FArch_StructureData
  * Interior furnishing data
  */
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FArch_InteriorData
+struct TRANSPERSONALGAME_API FArch_InteriorFurnishing
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
-    TArray<FString> FurnishingItems;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Furnishing")
+    FString FurnishingName = TEXT("Unknown");
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
-    bool bHasFireplace = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Furnishing")
+    FVector RelativeLocation = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
-    bool bHasWorkbench = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Furnishing")
+    FRotator RelativeRotation = FRotator::ZeroRotator;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
-    bool bHasStorage = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Furnishing")
+    EArch_MaterialType Material = EArch_MaterialType::Wood;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
-    bool bHasBedding = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Furnishing")
+    bool bIsEssential = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
-    float InteriorTemperature = 20.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Furnishing")
+    float WearLevel = 0.0f; // 0.0 = new, 1.0 = completely worn
+};
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
-    float LightLevel = 0.5f;
+/**
+ * Settlement layout data
+ */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FArch_SettlementLayout
+{
+    GENERATED_BODY()
 
-    FArch_InteriorData()
-    {
-        bHasFireplace = false;
-        bHasWorkbench = false;
-        bHasStorage = false;
-        bHasBedding = false;
-        InteriorTemperature = 20.0f;
-        LightLevel = 0.5f;
-    }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settlement")
+    FVector CenterLocation = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settlement")
+    float Radius = 1000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settlement")
+    TArray<FArch_StructureData> Structures;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settlement")
+    int32 Population = 0;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settlement")
+    bool bHasDefenses = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settlement")
+    bool bIsAbandoned = false;
 };
