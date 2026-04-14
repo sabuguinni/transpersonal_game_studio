@@ -3,185 +3,196 @@
 #include "CoreMinimal.h"
 #include "Engine/GameInstanceSubsystem.h"
 #include "Engine/DataTable.h"
+#include "../SharedTypes.h"
 #include "NarrativeManager.generated.h"
 
+class UDialogueComponent;
+class UQuestComponent;
+
 UENUM(BlueprintType)
-enum class EConsciousnessLevel : uint8
+enum class ENarr_DialogueState : uint8
 {
-    Unaware = 0,
-    Awakening = 1,
-    Aware = 2,
-    Enlightened = 3,
-    Transcendent = 4
+    Inactive        UMETA(DisplayName = "Inactive"),
+    Active          UMETA(DisplayName = "Active"),
+    Completed       UMETA(DisplayName = "Completed"),
+    Locked          UMETA(DisplayName = "Locked")
 };
 
 UENUM(BlueprintType)
-enum class EStoryBeat : uint8
+enum class ENarr_StoryBeat : uint8
 {
-    Introduction,
-    FirstAwakening,
-    SpiritualCrisis,
-    Deepening,
-    Integration,
-    Transcendence
+    Awakening       UMETA(DisplayName = "The Awakening"),
+    FirstVision     UMETA(DisplayName = "First Vision"),
+    ShamanMeeting   UMETA(DisplayName = "Meeting the Shaman"),
+    BeastEncounter  UMETA(DisplayName = "First Beast Encounter"),
+    PlantCeremony   UMETA(DisplayName = "Plant Medicine Ceremony"),
+    SpiritWalk      UMETA(DisplayName = "Spirit Walk"),
+    Transcendence   UMETA(DisplayName = "Final Transcendence")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FDialogueEntry : public FTableRowBase
+struct TRANSPERSONALGAME_API FNarr_DialogueEntry : public FTableRowBase
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString CharacterName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    FString SpeakerName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
     FText DialogueText;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
     FString AudioAssetPath;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EConsciousnessLevel RequiredConsciousnessLevel;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    TArray<FString> ResponseOptions;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TArray<FString> DialogueChoices;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    ENarr_StoryBeat RequiredStoryBeat;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TArray<FString> ChoiceConsequences;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    float EmotionalWeight;
 
-    FDialogueEntry()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    bool bIsTranscendentalMoment;
+
+    FNarr_DialogueEntry()
     {
-        CharacterName = TEXT("");
+        SpeakerName = TEXT("");
         DialogueText = FText::GetEmpty();
         AudioAssetPath = TEXT("");
-        RequiredConsciousnessLevel = EConsciousnessLevel::Unaware;
+        RequiredStoryBeat = ENarr_StoryBeat::Awakening;
+        EmotionalWeight = 1.0f;
+        bIsTranscendentalMoment = false;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarrativeEvent
+struct TRANSPERSONALGAME_API FNarr_StoryState
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString EventID;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    ENarr_StoryBeat CurrentBeat;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FText EventDescription;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    TArray<ENarr_StoryBeat> CompletedBeats;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EStoryBeat StoryBeat;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    float ConsciousnessLevel;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float ConsciousnessImpact;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    TMap<FString, bool> CharacterRelationships;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TArray<FString> UnlockedDialogues;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    TArray<FString> UnlockedLoreEntries;
 
-    FNarrativeEvent()
+    FNarr_StoryState()
     {
-        EventID = TEXT("");
-        EventDescription = FText::GetEmpty();
-        StoryBeat = EStoryBeat::Introduction;
-        ConsciousnessImpact = 0.0f;
+        CurrentBeat = ENarr_StoryBeat::Awakening;
+        ConsciousnessLevel = 0.0f;
     }
 };
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnNarrativeEvent, const FNarrativeEvent&, Event);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnConsciousnessChanged, EConsciousnessLevel, OldLevel, EConsciousnessLevel, NewLevel);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnDialogueStarted, const FString&, SpeakerName, const FText&, DialogueText);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnStoryBeatCompleted, ENarr_StoryBeat, CompletedBeat);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnConsciousnessLevelChanged, float, NewLevel);
 
-UCLASS()
+/**
+ * Core narrative system that manages story progression, dialogue, and consciousness evolution
+ * Integrates with the transpersonal themes of the game
+ */
+UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UNarrativeManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
+    UNarrativeManager();
+
+    // USubsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Core narrative functions
+    // Story progression
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void TriggerNarrativeEvent(const FString& EventID);
+    void AdvanceStoryBeat(ENarr_StoryBeat NewBeat);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void UpdateConsciousnessLevel(float DeltaConsciousness);
+    bool IsStoryBeatCompleted(ENarr_StoryBeat Beat) const;
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    EConsciousnessLevel GetCurrentConsciousnessLevel() const { return CurrentConsciousnessLevel; }
+    ENarr_StoryBeat GetCurrentStoryBeat() const;
+
+    // Consciousness system
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void ModifyConsciousnessLevel(float Delta);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    float GetConsciousnessProgress() const { return ConsciousnessProgress; }
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    EStoryBeat GetCurrentStoryBeat() const { return CurrentStoryBeat; }
+    float GetConsciousnessLevel() const;
 
     // Dialogue system
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    bool StartDialogue(const FString& DialogueID, AActor* Speaker);
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    bool StartDialogue(const FString& DialogueID, AActor* Speaker, AActor* Listener);
 
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void SelectDialogueChoice(int32 ChoiceIndex);
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void EndDialogue();
 
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    TArray<FString> GetAvailableDialogueChoices() const;
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    TArray<FString> GetAvailableDialogueOptions() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    bool IsDialogueActive() const { return bDialogueActive; }
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    bool SelectDialogueOption(int32 OptionIndex);
 
-    // Story progression
-    UFUNCTION(BlueprintCallable, Category = "Story")
-    void AdvanceStoryBeat();
+    // Character relationships
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void SetCharacterRelationship(const FString& CharacterName, bool bIsFriendly);
 
-    UFUNCTION(BlueprintCallable, Category = "Story")
-    TArray<FString> GetUnlockedDialogues() const { return UnlockedDialogues; }
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    bool GetCharacterRelationship(const FString& CharacterName) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Story")
-    bool IsDialogueUnlocked(const FString& DialogueID) const;
+    // Lore system
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void UnlockLoreEntry(const FString& LoreID);
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    bool IsLoreEntryUnlocked(const FString& LoreID) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    TArray<FString> GetUnlockedLoreEntries() const;
 
     // Events
-    UPROPERTY(BlueprintAssignable)
-    FOnNarrativeEvent OnNarrativeEvent;
+    UPROPERTY(BlueprintAssignable, Category = "Narrative")
+    FOnDialogueStarted OnDialogueStarted;
 
-    UPROPERTY(BlueprintAssignable)
-    FOnConsciousnessChanged OnConsciousnessChanged;
+    UPROPERTY(BlueprintAssignable, Category = "Narrative")
+    FOnStoryBeatCompleted OnStoryBeatCompleted;
+
+    UPROPERTY(BlueprintAssignable, Category = "Narrative")
+    FOnConsciousnessLevelChanged OnConsciousnessLevelChanged;
 
 protected:
-    // Data tables
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Data")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    FNarr_StoryState CurrentStoryState;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
     UDataTable* DialogueDataTable;
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Data")
-    UDataTable* NarrativeEventsDataTable;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    TMap<FString, FNarr_DialogueEntry> ActiveDialogues;
 
-    // Current state
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "State")
-    EConsciousnessLevel CurrentConsciousnessLevel;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    FString CurrentDialogueID;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "State")
-    float ConsciousnessProgress;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    TWeakObjectPtr<AActor> CurrentSpeaker;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "State")
-    EStoryBeat CurrentStoryBeat;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "State")
-    TArray<FString> UnlockedDialogues;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "State")
-    TArray<FString> CompletedEvents;
-
-    // Dialogue state
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dialogue")
-    bool bDialogueActive;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dialogue")
-    FDialogueEntry CurrentDialogue;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dialogue")
-    AActor* CurrentSpeaker;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    TWeakObjectPtr<AActor> CurrentListener;
 
 private:
-    void LoadNarrativeData();
-    void ProcessNarrativeEvent(const FNarrativeEvent& Event);
-    EConsciousnessLevel CalculateConsciousnessLevel(float Progress) const;
-    void UpdateStoryBeatBasedOnConsciousness();
+    void InitializeStoryState();
+    void LoadDialogueData();
+    FNarr_DialogueEntry* GetDialogueEntry(const FString& DialogueID);
+    bool ValidateStoryBeatProgression(ENarr_StoryBeat NewBeat) const;
 };
