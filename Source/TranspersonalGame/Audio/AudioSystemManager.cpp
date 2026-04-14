@@ -1,562 +1,381 @@
 #include "AudioSystemManager.h"
-#include "Engine/World.h"
 #include "Engine/Engine.h"
-#include "TimerManager.h"
+#include "Engine/World.h"
+#include "Kismet/GameplayStatics.h"
 #include "Components/AudioComponent.h"
 #include "Sound/SoundCue.h"
-#include "Kismet/GameplayStatics.h"
-#include "AudioDevice.h"
+#include "TimerManager.h"
 
 UAudioSystemManager::UAudioSystemManager()
 {
-    MasterVolume = 1.0f;
-    bIsInitialized = false;
-    BackgroundMusicComponent = nullptr;
+    // Initialize default values
+    CurrentSoundscapeConfig = FAudio_SoundscapeConfig();
+    CurrentMusicState = FAudio_MusicState();
+    CurrentEnvironment = EAudio_EnvironmentType::Forest;
 }
 
 void UAudioSystemManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Warning, TEXT("AudioSystemManager: Initializing..."));
+    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Initializing audio subsystem"));
     
-    InitializeCategoryVolumes();
-    InitializeEnvironmentPresets();
-    LoadAudioDatabase();
+    // Initialize audio system
+    InitializeAudioSystem();
     
-    // Set up cleanup timer for finished audio components
+    // Start consciousness update timer
     if (UWorld* World = GetWorld())
     {
         World->GetTimerManager().SetTimer(
-            CleanupTimerHandle,
+            ConsciousnessUpdateTimer,
             this,
-            &UAudioSystemManager::CleanupFinishedAudioComponents,
-            5.0f, // Every 5 seconds
-            true  // Looping
+            &UAudioSystemManager::ProcessConsciousnessInfluence,
+            0.1f, // Update every 100ms
+            true
         );
     }
-    
-    bIsInitialized = true;
-    UE_LOG(LogTemp, Warning, TEXT("AudioSystemManager: Initialization complete"));
 }
 
 void UAudioSystemManager::Deinitialize()
 {
-    UE_LOG(LogTemp, Warning, TEXT("AudioSystemManager: Deinitializing..."));
+    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Deinitializing audio subsystem"));
     
-    // Stop all active audio
-    StopAllAmbientSounds(0.5f);
-    StopBackgroundMusic(0.5f);
-    
-    // Clear timer
+    // Clear timers
     if (UWorld* World = GetWorld())
     {
-        World->GetTimerManager().ClearTimer(CleanupTimerHandle);
+        World->GetTimerManager().ClearTimer(MusicTransitionTimer);
+        World->GetTimerManager().ClearTimer(ConsciousnessUpdateTimer);
     }
     
     // Clean up audio components
-    for (auto& Pair : ActiveAudioComponents)
+    if (AmbientAudioComponent)
     {
-        if (IsValid(Pair.Value))
-        {
-            Pair.Value->Stop();
-            Pair.Value->DestroyComponent();
-        }
-    }
-    ActiveAudioComponents.Empty();
-    
-    for (UAudioComponent* AmbientComp : AmbientAudioComponents)
-    {
-        if (IsValid(AmbientComp))
-        {
-            AmbientComp->Stop();
-            AmbientComp->DestroyComponent();
-        }
-    }
-    AmbientAudioComponents.Empty();
-    
-    if (IsValid(BackgroundMusicComponent))
-    {
-        BackgroundMusicComponent->Stop();
-        BackgroundMusicComponent->DestroyComponent();
-        BackgroundMusicComponent = nullptr;
+        AmbientAudioComponent->Stop();
+        AmbientAudioComponent = nullptr;
     }
     
-    bIsInitialized = false;
+    if (MusicAudioComponent)
+    {
+        MusicAudioComponent->Stop();
+        MusicAudioComponent = nullptr;
+    }
+    
+    if (SFXAudioComponent)
+    {
+        SFXAudioComponent->Stop();
+        SFXAudioComponent = nullptr;
+    }
     
     Super::Deinitialize();
 }
 
-void UAudioSystemManager::PlaySound(const FString& SoundID, FVector Location, float VolumeMultiplier)
+void UAudioSystemManager::InitializeAudioSystem()
 {
-    if (!bIsInitialized)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("AudioSystemManager: Not initialized, cannot play sound %s"), *SoundID);
-        return;
-    }
-    
-    const FAudio_SoundEntry* SoundEntry = RegisteredSounds.Find(SoundID);
-    if (!SoundEntry)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("AudioSystemManager: Sound ID %s not found in database"), *SoundID);
-        return;
-    }
-    
-    UAudioComponent* AudioComp = CreateAudioComponent(*SoundEntry, Location);
-    if (AudioComp)
-    {
-        float FinalVolume = CalculateFinalVolume(*SoundEntry) * VolumeMultiplier;
-        AudioComp->SetVolumeMultiplier(FinalVolume);
-        AudioComp->Play();
-        
-        ActiveAudioComponents.Add(SoundID + FString::Printf(TEXT("_%d"), FMath::RandRange(1000, 9999)), AudioComp);
-        
-        UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Playing sound %s at volume %.2f"), *SoundID, FinalVolume);
-    }
-}
-
-void UAudioSystemManager::StopSound(const FString& SoundID, float FadeOutTime)
-{
-    TArray<FString> KeysToRemove;
-    
-    for (auto& Pair : ActiveAudioComponents)
-    {
-        if (Pair.Key.StartsWith(SoundID))
-        {
-            if (IsValid(Pair.Value))
-            {
-                if (FadeOutTime > 0.0f)
-                {
-                    Pair.Value->FadeOut(FadeOutTime, 0.0f);
-                }
-                else
-                {
-                    Pair.Value->Stop();
-                }
-            }
-            KeysToRemove.Add(Pair.Key);
-        }
-    }
-    
-    for (const FString& Key : KeysToRemove)
-    {
-        ActiveAudioComponents.Remove(Key);
-    }
-}
-
-void UAudioSystemManager::PlayAmbientSound(const FString& SoundID, bool bLooping)
-{
-    const FAudio_SoundEntry* SoundEntry = RegisteredSounds.Find(SoundID);
-    if (!SoundEntry)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("AudioSystemManager: Ambient sound ID %s not found"), *SoundID);
-        return;
-    }
-    
-    UAudioComponent* AudioComp = CreateAudioComponent(*SoundEntry, FVector::ZeroVector);
-    if (AudioComp)
-    {
-        AudioComp->bIsUISound = true; // Ambient sounds follow the listener
-        AudioComp->SetVolumeMultiplier(CalculateFinalVolume(*SoundEntry));
-        
-        if (bLooping)
-        {
-            AudioComp->Play();
-        }
-        else
-        {
-            AudioComp->Play();
-        }
-        
-        AmbientAudioComponents.Add(AudioComp);
-        UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Playing ambient sound %s"), *SoundID);
-    }
-}
-
-void UAudioSystemManager::StopAllAmbientSounds(float FadeOutTime)
-{
-    for (UAudioComponent* AmbientComp : AmbientAudioComponents)
-    {
-        if (IsValid(AmbientComp))
-        {
-            if (FadeOutTime > 0.0f)
-            {
-                AmbientComp->FadeOut(FadeOutTime, 0.0f);
-            }
-            else
-            {
-                AmbientComp->Stop();
-            }
-        }
-    }
-    
-    // Clear the array after a delay if fading out
-    if (FadeOutTime > 0.0f && GetWorld())
-    {
-        GetWorld()->GetTimerManager().SetTimer(
-            FTimerHandle(),
-            [this]()
-            {
-                AmbientAudioComponents.Empty();
-            },
-            FadeOutTime + 0.5f,
-            false
-        );
-    }
-    else
-    {
-        AmbientAudioComponents.Empty();
-    }
-}
-
-void UAudioSystemManager::SetEnvironmentType(EAudio_EnvironmentType NewEnvironment, float TransitionTime)
-{
-    if (CurrentEnvironment.EnvironmentType == NewEnvironment)
-    {
-        return;
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Transitioning to environment type %d"), (int32)NewEnvironment);
-    
-    // Stop current ambient sounds
-    StopAllAmbientSounds(TransitionTime * 0.5f);
-    
-    // Load new environment settings
-    const FAudio_EnvironmentSettings* NewSettings = EnvironmentPresets.Find(NewEnvironment);
-    if (NewSettings)
-    {
-        CurrentEnvironment = *NewSettings;
-        
-        // Start new ambient sounds after transition
-        if (GetWorld())
-        {
-            GetWorld()->GetTimerManager().SetTimer(
-                FTimerHandle(),
-                [this]()
-                {
-                    for (const FAudio_SoundEntry& AmbientSound : CurrentEnvironment.AmbientSounds)
-                    {
-                        PlayAmbientSound(AmbientSound.SoundID, AmbientSound.bLooping);
-                    }
-                    
-                    // Play background music if specified
-                    if (!CurrentEnvironment.BackgroundMusic.SoundID.IsEmpty())
-                    {
-                        PlayBackgroundMusic(CurrentEnvironment.BackgroundMusic.SoundID, true, TransitionTime * 0.5f);
-                    }
-                },
-                TransitionTime * 0.6f,
-                false
-            );
-        }
-    }
-}
-
-void UAudioSystemManager::UpdateEnvironmentSettings(const FAudio_EnvironmentSettings& NewSettings)
-{
-    CurrentEnvironment = NewSettings;
-    EnvironmentPresets.Add(NewSettings.EnvironmentType, NewSettings);
-    
-    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Updated environment settings for type %d"), (int32)NewSettings.EnvironmentType);
-}
-
-void UAudioSystemManager::PlayConsciousnessEvent(EConsciousnessLevel Level, float Intensity)
-{
-    FString SoundID;
-    
-    switch (Level)
-    {
-        case EConsciousnessLevel::Awakening:
-            SoundID = TEXT("consciousness_awakening");
-            break;
-        case EConsciousnessLevel::Aware:
-            SoundID = TEXT("consciousness_aware");
-            break;
-        case EConsciousnessLevel::Enlightened:
-            SoundID = TEXT("consciousness_enlightened");
-            break;
-        case EConsciousnessLevel::Transcendent:
-            SoundID = TEXT("consciousness_transcendent");
-            break;
-        default:
-            SoundID = TEXT("consciousness_base");
-            break;
-    }
-    
-    PlaySound(SoundID, FVector::ZeroVector, Intensity);
-    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Playing consciousness event for level %d at intensity %.2f"), (int32)Level, Intensity);
-}
-
-void UAudioSystemManager::TriggerMysticalTransition(float Duration)
-{
-    PlaySound(TEXT("mystical_transition"), FVector::ZeroVector, 1.0f);
-    
-    // Temporarily reduce other audio during mystical events
-    float OriginalVolume = MasterVolume;
-    SetMasterVolume(MasterVolume * 0.3f);
-    
-    if (GetWorld())
-    {
-        GetWorld()->GetTimerManager().SetTimer(
-            FTimerHandle(),
-            [this, OriginalVolume]()
-            {
-                SetMasterVolume(OriginalVolume);
-            },
-            Duration,
-            false
-        );
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Triggered mystical transition for %.2f seconds"), Duration);
-}
-
-void UAudioSystemManager::PlayBackgroundMusic(const FString& MusicID, bool bCrossfade, float CrossfadeTime)
-{
-    const FAudio_SoundEntry* MusicEntry = RegisteredSounds.Find(MusicID);
-    if (!MusicEntry)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("AudioSystemManager: Music ID %s not found"), *MusicID);
-        return;
-    }
-    
-    // Stop current music if crossfading
-    if (IsValid(BackgroundMusicComponent) && bCrossfade)
-    {
-        BackgroundMusicComponent->FadeOut(CrossfadeTime, 0.0f);
-    }
-    else if (IsValid(BackgroundMusicComponent))
-    {
-        BackgroundMusicComponent->Stop();
-        BackgroundMusicComponent->DestroyComponent();
-    }
-    
-    // Create new music component
-    BackgroundMusicComponent = CreateAudioComponent(*MusicEntry, FVector::ZeroVector);
-    if (BackgroundMusicComponent)
-    {
-        BackgroundMusicComponent->bIsUISound = true;
-        BackgroundMusicComponent->SetVolumeMultiplier(CalculateFinalVolume(*MusicEntry));
-        
-        if (bCrossfade && CrossfadeTime > 0.0f)
-        {
-            BackgroundMusicComponent->FadeIn(CrossfadeTime, CalculateFinalVolume(*MusicEntry));
-        }
-        else
-        {
-            BackgroundMusicComponent->Play();
-        }
-        
-        UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Playing background music %s"), *MusicID);
-    }
-}
-
-void UAudioSystemManager::StopBackgroundMusic(float FadeOutTime)
-{
-    if (IsValid(BackgroundMusicComponent))
-    {
-        if (FadeOutTime > 0.0f)
-        {
-            BackgroundMusicComponent->FadeOut(FadeOutTime, 0.0f);
-        }
-        else
-        {
-            BackgroundMusicComponent->Stop();
-        }
-        
-        UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Stopping background music"));
-    }
-}
-
-void UAudioSystemManager::SetMusicVolume(float Volume, float FadeTime)
-{
-    if (IsValid(BackgroundMusicComponent))
-    {
-        if (FadeTime > 0.0f)
-        {
-            // Implement gradual volume change
-            BackgroundMusicComponent->SetVolumeMultiplier(Volume);
-        }
-        else
-        {
-            BackgroundMusicComponent->SetVolumeMultiplier(Volume);
-        }
-    }
-}
-
-void UAudioSystemManager::RegisterSoundEntry(const FAudio_SoundEntry& SoundEntry)
-{
-    RegisteredSounds.Add(SoundEntry.SoundID, SoundEntry);
-    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Registered sound %s"), *SoundEntry.SoundID);
-}
-
-void UAudioSystemManager::LoadAudioDatabase()
-{
-    // Register default consciousness sounds
-    FAudio_SoundEntry ConsciousnessAwakening;
-    ConsciousnessAwakening.SoundID = TEXT("consciousness_awakening");
-    ConsciousnessAwakening.Category = EAudio_SoundCategory::Consciousness;
-    ConsciousnessAwakening.Volume = 0.8f;
-    ConsciousnessAwakening.bLooping = false;
-    RegisterSoundEntry(ConsciousnessAwakening);
-    
-    FAudio_SoundEntry MysticalTransition;
-    MysticalTransition.SoundID = TEXT("mystical_transition");
-    MysticalTransition.Category = EAudio_SoundCategory::SFX;
-    MysticalTransition.Volume = 1.0f;
-    MysticalTransition.FadeInTime = 1.0f;
-    MysticalTransition.FadeOutTime = 2.0f;
-    RegisterSoundEntry(MysticalTransition);
-    
-    // Register forest ambient sounds
-    FAudio_SoundEntry ForestAmbient;
-    ForestAmbient.SoundID = TEXT("forest_ambient");
-    ForestAmbient.Category = EAudio_SoundCategory::Ambient;
-    ForestAmbient.Volume = 0.6f;
-    ForestAmbient.bLooping = true;
-    RegisterSoundEntry(ForestAmbient);
-    
-    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Loaded default audio database"));
-}
-
-void UAudioSystemManager::SetMasterVolume(float Volume)
-{
-    MasterVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
-    
-    // Update all active audio components
-    for (auto& Pair : ActiveAudioComponents)
-    {
-        if (IsValid(Pair.Value))
-        {
-            // Recalculate volume based on new master volume
-            // Note: This is a simplified approach - in production you'd store original volumes
-            Pair.Value->SetVolumeMultiplier(Pair.Value->VolumeMultiplier * MasterVolume);
-        }
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Set master volume to %.2f"), MasterVolume);
-}
-
-void UAudioSystemManager::SetCategoryVolume(EAudio_SoundCategory Category, float Volume)
-{
-    CategoryVolumes.Add(Category, FMath::Clamp(Volume, 0.0f, 1.0f));
-    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Set category %d volume to %.2f"), (int32)Category, Volume);
-}
-
-float UAudioSystemManager::GetCategoryVolume(EAudio_SoundCategory Category) const
-{
-    const float* Volume = CategoryVolumes.Find(Category);
-    return Volume ? *Volume : 1.0f;
-}
-
-UAudioComponent* UAudioSystemManager::CreateAudioComponent(const FAudio_SoundEntry& SoundEntry, FVector Location)
-{
-    if (!SoundEntry.SoundAsset.IsValid())
-    {
-        UE_LOG(LogTemp, Warning, TEXT("AudioSystemManager: Invalid sound asset for %s"), *SoundEntry.SoundID);
-        return nullptr;
-    }
+    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Initializing core audio components"));
     
     UWorld* World = GetWorld();
     if (!World)
     {
-        UE_LOG(LogTemp, Warning, TEXT("AudioSystemManager: No valid world"));
-        return nullptr;
+        UE_LOG(LogTemp, Warning, TEXT("AudioSystemManager: No valid world found"));
+        return;
     }
     
-    UAudioComponent* AudioComp = NewObject<UAudioComponent>(World);
-    if (!AudioComp)
+    // Create audio components
+    if (!AmbientAudioComponent)
     {
-        UE_LOG(LogTemp, Warning, TEXT("AudioSystemManager: Failed to create audio component"));
-        return nullptr;
-    }
-    
-    AudioComp->SetSound(SoundEntry.SoundAsset.LoadSynchronous());
-    AudioComp->SetWorldLocation(Location);
-    AudioComp->SetPitchMultiplier(SoundEntry.Pitch);
-    AudioComp->bAutoDestroy = !SoundEntry.bLooping;
-    
-    return AudioComp;
-}
-
-void UAudioSystemManager::CleanupFinishedAudioComponents()
-{
-    TArray<FString> KeysToRemove;
-    
-    for (auto& Pair : ActiveAudioComponents)
-    {
-        if (!IsValid(Pair.Value) || !Pair.Value->IsPlaying())
+        AmbientAudioComponent = NewObject<UAudioComponent>(this);
+        if (AmbientAudioComponent)
         {
-            KeysToRemove.Add(Pair.Key);
-            if (IsValid(Pair.Value))
-            {
-                Pair.Value->DestroyComponent();
-            }
+            AmbientAudioComponent->SetVolumeMultiplier(CurrentSoundscapeConfig.AmbientVolume);
+            AmbientAudioComponent->bAutoActivate = false;
         }
     }
     
-    for (const FString& Key : KeysToRemove)
+    if (!MusicAudioComponent)
     {
-        ActiveAudioComponents.Remove(Key);
+        MusicAudioComponent = NewObject<UAudioComponent>(this);
+        if (MusicAudioComponent)
+        {
+            MusicAudioComponent->SetVolumeMultiplier(CurrentSoundscapeConfig.MusicVolume);
+            MusicAudioComponent->bAutoActivate = false;
+        }
     }
     
-    // Clean up ambient components
-    AmbientAudioComponents.RemoveAll([](UAudioComponent* Comp)
+    if (!SFXAudioComponent)
     {
-        if (!IsValid(Comp) || !Comp->IsPlaying())
+        SFXAudioComponent = NewObject<UAudioComponent>(this);
+        if (SFXAudioComponent)
         {
-            if (IsValid(Comp))
-            {
-                Comp->DestroyComponent();
-            }
-            return true;
+            SFXAudioComponent->SetVolumeMultiplier(CurrentSoundscapeConfig.SFXVolume);
+            SFXAudioComponent->bAutoActivate = false;
         }
-        return false;
-    });
+    }
+    
+    // Set initial environment
+    SetEnvironmentType(EAudio_EnvironmentType::Forest);
 }
 
-void UAudioSystemManager::InitializeEnvironmentPresets()
+void UAudioSystemManager::SetSoundscapeConfig(const FAudio_SoundscapeConfig& Config)
 {
-    // Forest Environment
-    FAudio_EnvironmentSettings ForestSettings;
-    ForestSettings.EnvironmentType = EAudio_EnvironmentType::Forest;
-    ForestSettings.MasterVolume = 1.0f;
-    ForestSettings.ReverbIntensity = 0.3f;
+    CurrentSoundscapeConfig = Config;
     
-    FAudio_SoundEntry ForestAmbient;
-    ForestAmbient.SoundID = TEXT("forest_ambient");
-    ForestAmbient.Category = EAudio_SoundCategory::Ambient;
-    ForestAmbient.Volume = 0.6f;
-    ForestAmbient.bLooping = true;
-    ForestSettings.AmbientSounds.Add(ForestAmbient);
+    // Update audio component volumes
+    if (AmbientAudioComponent)
+    {
+        AmbientAudioComponent->SetVolumeMultiplier(Config.AmbientVolume);
+    }
     
-    EnvironmentPresets.Add(EAudio_EnvironmentType::Forest, ForestSettings);
+    if (MusicAudioComponent)
+    {
+        MusicAudioComponent->SetVolumeMultiplier(Config.MusicVolume);
+    }
     
-    // Cave Environment
-    FAudio_EnvironmentSettings CaveSettings;
-    CaveSettings.EnvironmentType = EAudio_EnvironmentType::Cave;
-    CaveSettings.MasterVolume = 0.8f;
-    CaveSettings.ReverbIntensity = 0.8f;
-    EnvironmentPresets.Add(EAudio_EnvironmentType::Cave, CaveSettings);
+    if (SFXAudioComponent)
+    {
+        SFXAudioComponent->SetVolumeMultiplier(Config.SFXVolume);
+    }
     
-    // Set default environment
-    CurrentEnvironment = ForestSettings;
+    // Update environment
+    SetEnvironmentType(Config.EnvironmentType);
     
-    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Initialized environment presets"));
+    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Soundscape config updated"));
 }
 
-void UAudioSystemManager::InitializeCategoryVolumes()
+void UAudioSystemManager::UpdateMusicState(const FAudio_MusicState& NewState)
 {
-    CategoryVolumes.Add(EAudio_SoundCategory::Ambient, 1.0f);
-    CategoryVolumes.Add(EAudio_SoundCategory::Music, 0.8f);
-    CategoryVolumes.Add(EAudio_SoundCategory::SFX, 1.0f);
-    CategoryVolumes.Add(EAudio_SoundCategory::Voice, 1.0f);
-    CategoryVolumes.Add(EAudio_SoundCategory::UI, 0.9f);
-    CategoryVolumes.Add(EAudio_SoundCategory::Consciousness, 1.2f);
+    CurrentMusicState = NewState;
+    UpdateMusicAudio();
+    
+    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Music state updated - Layer: %d, Intensity: %f"), 
+           (int32)NewState.CurrentLayer, NewState.Intensity);
 }
 
-float UAudioSystemManager::CalculateFinalVolume(const FAudio_SoundEntry& SoundEntry) const
+void UAudioSystemManager::TransitionToMusicLayer(EAudio_MusicLayer NewLayer, float TransitionTime)
 {
-    float CategoryVolume = GetCategoryVolume(SoundEntry.Category);
-    return SoundEntry.Volume * CategoryVolume * MasterVolume;
+    if (CurrentMusicState.CurrentLayer == NewLayer)
+    {
+        return;
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Transitioning to music layer %d over %f seconds"), 
+           (int32)NewLayer, TransitionTime);
+    
+    CurrentMusicState.CurrentLayer = NewLayer;
+    
+    // Start transition timer
+    if (UWorld* World = GetWorld())
+    {
+        World->GetTimerManager().SetTimer(
+            MusicTransitionTimer,
+            [this]()
+            {
+                UpdateMusicAudio();
+            },
+            TransitionTime,
+            false
+        );
+    }
+}
+
+void UAudioSystemManager::SetMusicIntensity(float Intensity)
+{
+    CurrentMusicState.Intensity = FMath::Clamp(Intensity, 0.0f, 1.0f);
+    UpdateMusicAudio();
+}
+
+void UAudioSystemManager::SetEmotionalState(float EmotionalValue)
+{
+    CurrentMusicState.EmotionalState = FMath::Clamp(EmotionalValue, -1.0f, 1.0f);
+    UpdateMusicAudio();
+}
+
+void UAudioSystemManager::SetSpiritualResonance(float ResonanceValue)
+{
+    CurrentMusicState.SpiritualResonance = FMath::Clamp(ResonanceValue, 0.0f, 1.0f);
+    UpdateMusicAudio();
+}
+
+void UAudioSystemManager::SetEnvironmentType(EAudio_EnvironmentType NewEnvironment)
+{
+    if (CurrentEnvironment == NewEnvironment)
+    {
+        return;
+    }
+    
+    CurrentEnvironment = NewEnvironment;
+    UpdateAmbientAudio();
+    
+    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Environment changed to %d"), (int32)NewEnvironment);
+}
+
+void UAudioSystemManager::PlayEnvironmentSound(const FString& SoundName, FVector Location, float Volume)
+{
+    if (!SFXAudioComponent)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("AudioSystemManager: No SFX audio component available"));
+        return;
+    }
+    
+    // Play 3D sound at location
+    UGameplayStatics::PlaySoundAtLocation(
+        GetWorld(),
+        nullptr, // Would load sound by name in real implementation
+        Location,
+        Volume * CurrentSoundscapeConfig.SFXVolume
+    );
+    
+    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Playing environment sound '%s' at location %s"), 
+           *SoundName, *Location.ToString());
+}
+
+void UAudioSystemManager::TriggerConsciousnessShift(float ShiftIntensity)
+{
+    float ClampedIntensity = FMath::Clamp(ShiftIntensity, 0.0f, 1.0f);
+    
+    // Influence spiritual resonance
+    CurrentMusicState.SpiritualResonance += ClampedIntensity * 0.3f;
+    CurrentMusicState.SpiritualResonance = FMath::Clamp(CurrentMusicState.SpiritualResonance, 0.0f, 1.0f);
+    
+    // Trigger special consciousness sound effect
+    PlaySacredSound(TEXT("ConsciousnessShift"), ClampedIntensity);
+    
+    UpdateMusicAudio();
+    
+    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Consciousness shift triggered with intensity %f"), ClampedIntensity);
+}
+
+void UAudioSystemManager::PlaySacredSound(const FString& SoundName, float SpiritualPower)
+{
+    if (!SFXAudioComponent)
+    {
+        return;
+    }
+    
+    float Volume = SpiritualPower * CurrentSoundscapeConfig.SFXVolume;
+    
+    // In real implementation, would load and play sacred sound from SacredSounds map
+    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Playing sacred sound '%s' with spiritual power %f"), 
+           *SoundName, SpiritualPower);
+}
+
+void UAudioSystemManager::SetMasterVolume(float Volume)
+{
+    float ClampedVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
+    
+    // Apply to all audio components
+    if (AmbientAudioComponent)
+    {
+        AmbientAudioComponent->SetVolumeMultiplier(CurrentSoundscapeConfig.AmbientVolume * ClampedVolume);
+    }
+    
+    if (MusicAudioComponent)
+    {
+        MusicAudioComponent->SetVolumeMultiplier(CurrentSoundscapeConfig.MusicVolume * ClampedVolume);
+    }
+    
+    if (SFXAudioComponent)
+    {
+        SFXAudioComponent->SetVolumeMultiplier(CurrentSoundscapeConfig.SFXVolume * ClampedVolume);
+    }
+}
+
+void UAudioSystemManager::SetAmbientVolume(float Volume)
+{
+    CurrentSoundscapeConfig.AmbientVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
+    
+    if (AmbientAudioComponent)
+    {
+        AmbientAudioComponent->SetVolumeMultiplier(CurrentSoundscapeConfig.AmbientVolume);
+    }
+}
+
+void UAudioSystemManager::SetMusicVolume(float Volume)
+{
+    CurrentSoundscapeConfig.MusicVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
+    
+    if (MusicAudioComponent)
+    {
+        MusicAudioComponent->SetVolumeMultiplier(CurrentSoundscapeConfig.MusicVolume);
+    }
+}
+
+void UAudioSystemManager::SetSFXVolume(float Volume)
+{
+    CurrentSoundscapeConfig.SFXVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
+    
+    if (SFXAudioComponent)
+    {
+        SFXAudioComponent->SetVolumeMultiplier(CurrentSoundscapeConfig.SFXVolume);
+    }
+}
+
+void UAudioSystemManager::UpdateAmbientAudio()
+{
+    if (!AmbientAudioComponent)
+    {
+        return;
+    }
+    
+    // In real implementation, would switch ambient sounds based on environment
+    switch (CurrentEnvironment)
+    {
+        case EAudio_EnvironmentType::Forest:
+            UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Updating ambient audio for Forest environment"));
+            break;
+        case EAudio_EnvironmentType::Cave:
+            UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Updating ambient audio for Cave environment"));
+            break;
+        case EAudio_EnvironmentType::Plains:
+            UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Updating ambient audio for Plains environment"));
+            break;
+        case EAudio_EnvironmentType::Sacred:
+            UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Updating ambient audio for Sacred environment"));
+            break;
+    }
+}
+
+void UAudioSystemManager::UpdateMusicAudio()
+{
+    if (!MusicAudioComponent || !CurrentSoundscapeConfig.bEnableAdaptiveMusic)
+    {
+        return;
+    }
+    
+    // Calculate final music parameters based on state
+    float FinalVolume = CurrentSoundscapeConfig.MusicVolume * CurrentMusicState.Intensity;
+    
+    // Apply spiritual resonance influence
+    if (CurrentMusicState.SpiritualResonance > 0.5f)
+    {
+        FinalVolume *= (1.0f + CurrentMusicState.SpiritualResonance * 0.3f);
+    }
+    
+    MusicAudioComponent->SetVolumeMultiplier(FinalVolume);
+    
+    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Music updated - Layer: %d, Volume: %f, Spiritual: %f"), 
+           (int32)CurrentMusicState.CurrentLayer, FinalVolume, CurrentMusicState.SpiritualResonance);
+}
+
+void UAudioSystemManager::ProcessConsciousnessInfluence()
+{
+    if (!CurrentSoundscapeConfig.bEnableAdaptiveMusic)
+    {
+        return;
+    }
+    
+    // Gradually decay spiritual resonance
+    if (CurrentMusicState.SpiritualResonance > 0.0f)
+    {
+        CurrentMusicState.SpiritualResonance -= 0.01f; // Decay rate
+        CurrentMusicState.SpiritualResonance = FMath::Max(0.0f, CurrentMusicState.SpiritualResonance);
+    }
+    
+    // Apply consciousness influence to music
+    float ConsciousnessEffect = CurrentSoundscapeConfig.ConsciousnessInfluence * CurrentMusicState.SpiritualResonance;
+    
+    if (ConsciousnessEffect > 0.1f)
+    {
+        // Consciousness is influencing the audio
+        UpdateMusicAudio();
+    }
 }
