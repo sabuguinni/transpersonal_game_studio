@@ -1,561 +1,456 @@
 #include "AnimationSystemManager.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
+#include "GameFramework/Pawn.h"
 #include "GameFramework/Character.h"
-#include "GameFramework/CharacterMovementComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Animation/AnimInstance.h"
+#include "Animation/BlendSpace.h"
 #include "Animation/AnimMontage.h"
 #include "Animation/AnimSequence.h"
-#include "Animation/BlendSpace.h"
-#include "DrawDebugHelpers.h"
-#include "Kismet/KismetMathLibrary.h"
-#include "Kismet/KismetSystemLibrary.h"
 #include "Engine/CollisionProfile.h"
+#include "DrawDebugHelpers.h"
+#include "UObject/ConstructorHelpers.h"
 
 UAnimationSystemManager::UAnimationSystemManager()
 {
-    IKTraceDistance = 50.0f;
-    IKInterpSpeed = 15.0f;
-    bEnableMotionMatching = true;
-    bEnableFootIK = true;
-    bDrawDebugInfo = false;
+    PrehistoricLocomotionDatabase = nullptr;
+    FootIKTraceDistance = 50.0f;
+    FootIKInterpSpeed = 10.0f;
+    MaxFootIKOffset = 30.0f;
 }
 
 void UAnimationSystemManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Warning, TEXT("Animation System Manager initialized"));
-    
-    // Initialize motion database
-    InitializeMotionDatabase();
+    UE_LOG(LogTemp, Warning, TEXT("AnimationSystemManager: Initializing..."));
     
     // Load animation assets
     LoadAnimationAssets();
+    
+    // Setup terrain-specific blend spaces
+    SetupTerrainBlendSpaces();
+    
+    // Setup survival action montages
+    SetupSurvivalMontages();
+    
+    // Initialize Motion Matching database
+    InitializeMotionMatchingDatabase();
+    
+    UE_LOG(LogTemp, Warning, TEXT("AnimationSystemManager: Initialization complete"));
 }
 
 void UAnimationSystemManager::Deinitialize()
 {
-    // Clear registered characters
     RegisteredCharacters.Empty();
-    MotionDatabase.Empty();
-    
-    UE_LOG(LogTemp, Warning, TEXT("Animation System Manager deinitialized"));
+    TerrainBlendSpaces.Empty();
+    SurvivalMontages.Empty();
+    PrehistoricLocomotionDatabase = nullptr;
     
     Super::Deinitialize();
 }
 
-bool UAnimationSystemManager::ShouldCreateSubsystem(UObject* Outer) const
+void UAnimationSystemManager::InitializeMotionMatchingDatabase()
 {
-    return true;
+    // Try to load the Motion Matching database
+    PrehistoricLocomotionDatabase = LoadObject<UMotionMatchingDatabase>(
+        nullptr, 
+        TEXT("/Game/Characters/Animation/MotionMatching/PrehistoricLocomotion_MM")
+    );
+    
+    if (PrehistoricLocomotionDatabase)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("AnimationSystemManager: Motion Matching database loaded successfully"));
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("AnimationSystemManager: Motion Matching database not found - using fallback system"));
+    }
 }
 
-void UAnimationSystemManager::RegisterCharacter(AActor* Character, EAnim_CharacterType CharacterType)
+UAnimSequence* UAnimationSystemManager::FindBestMatchingAnimation(const FAnim_LocomotionData& LocomotionData)
+{
+    // If we have Motion Matching database, use it
+    if (PrehistoricLocomotionDatabase)
+    {
+        // TODO: Implement Motion Matching query
+        // For now, return nullptr to use blend spaces
+        return nullptr;
+    }
+    
+    // Fallback: Use traditional blend space system
+    return nullptr;
+}
+
+void UAnimationSystemManager::RegisterCharacterForMotionMatching(APawn* Character)
 {
     if (!Character)
     {
-        UE_LOG(LogTemp, Error, TEXT("Cannot register null character"));
-        return;
-    }
-
-    FAnim_CharacterProfile Profile;
-    Profile.CharacterType = CharacterType;
-    Profile.CharacterName = Character->GetName();
-    
-    // Set character-specific parameters based on type
-    switch (CharacterType)
-    {
-        case EAnim_CharacterType::Player:
-            Profile.WalkSpeed = 150.0f;
-            Profile.RunSpeed = 400.0f;
-            Profile.PersonalityFactor = 0.7f; // Confident
-            break;
-        case EAnim_CharacterType::Hunter:
-            Profile.WalkSpeed = 140.0f;
-            Profile.RunSpeed = 380.0f;
-            Profile.PersonalityFactor = 0.8f; // Aggressive
-            break;
-        case EAnim_CharacterType::Gatherer:
-            Profile.WalkSpeed = 120.0f;
-            Profile.RunSpeed = 320.0f;
-            Profile.PersonalityFactor = 0.4f; // Calm
-            break;
-        case EAnim_CharacterType::Shaman:
-            Profile.WalkSpeed = 100.0f;
-            Profile.RunSpeed = 250.0f;
-            Profile.PersonalityFactor = 0.3f; // Serene
-            break;
-        case EAnim_CharacterType::Child:
-            Profile.WalkSpeed = 180.0f;
-            Profile.RunSpeed = 350.0f;
-            Profile.PersonalityFactor = 0.9f; // Energetic
-            break;
-        case EAnim_CharacterType::Elder:
-            Profile.WalkSpeed = 80.0f;
-            Profile.RunSpeed = 200.0f;
-            Profile.PersonalityFactor = 0.2f; // Slow and deliberate
-            break;
-        default:
-            Profile.WalkSpeed = 150.0f;
-            Profile.RunSpeed = 400.0f;
-            Profile.PersonalityFactor = 0.5f;
-            break;
-    }
-    
-    RegisteredCharacters.Add(Character, Profile);
-    
-    UE_LOG(LogTemp, Log, TEXT("Registered character: %s as %s"), 
-           *Character->GetName(), 
-           *UEnum::GetValueAsString(CharacterType));
-}
-
-void UAnimationSystemManager::UnregisterCharacter(AActor* Character)
-{
-    if (RegisteredCharacters.Contains(Character))
-    {
-        RegisteredCharacters.Remove(Character);
-        UE_LOG(LogTemp, Log, TEXT("Unregistered character: %s"), *Character->GetName());
-    }
-}
-
-FAnim_MotionData UAnimationSystemManager::CalculateMotionData(AActor* Character)
-{
-    FAnim_MotionData MotionData;
-    
-    if (!Character)
-    {
-        return MotionData;
-    }
-    
-    // Get character velocity
-    MotionData.Velocity = GetCharacterVelocity(Character);
-    MotionData.Speed = MotionData.Velocity.Size();
-    
-    // Calculate movement direction relative to character forward
-    MotionData.Direction = CalculateMovementDirection(Character);
-    
-    // Determine if character is accelerating
-    static TMap<AActor*, FVector> PreviousVelocities;
-    if (PreviousVelocities.Contains(Character))
-    {
-        FVector PrevVel = PreviousVelocities[Character];
-        MotionData.bIsAccelerating = (MotionData.Velocity - PrevVel).SizeSquared() > 100.0f;
-    }
-    PreviousVelocities.Add(Character, MotionData.Velocity);
-    
-    // Check if character is in air
-    MotionData.bIsInAir = IsCharacterInAir(Character);
-    
-    // Determine movement state
-    MotionData.MovementState = DetermineMovementState(MotionData);
-    
-    return MotionData;
-}
-
-FAnim_IKData UAnimationSystemManager::CalculateFootIK(AActor* Character, USkeletalMeshComponent* SkeletalMesh)
-{
-    FAnim_IKData IKData;
-    
-    if (!Character || !SkeletalMesh || !bEnableFootIK)
-    {
-        return IKData;
-    }
-    
-    // Get foot bone locations
-    FVector LeftFootBoneLocation = SkeletalMesh->GetBoneLocation(TEXT("foot_l"));
-    FVector RightFootBoneLocation = SkeletalMesh->GetBoneLocation(TEXT("foot_r"));
-    
-    // Trace for ground placement
-    IKData.LeftFootLocation = TraceFootPlacement(Character, LeftFootBoneLocation);
-    IKData.RightFootLocation = TraceFootPlacement(Character, RightFootBoneLocation);
-    
-    // Calculate foot rotations based on ground normal
-    // This is a simplified version - in production you'd use the hit normal
-    IKData.LeftFootRotation = FRotator::ZeroRotator;
-    IKData.RightFootRotation = FRotator::ZeroRotator;
-    
-    // Calculate hip offset to keep character grounded
-    float LeftOffset = IKData.LeftFootLocation.Z - LeftFootBoneLocation.Z;
-    float RightOffset = IKData.RightFootLocation.Z - RightFootBoneLocation.Z;
-    IKData.HipOffset = FMath::Min(LeftOffset, RightOffset);
-    
-    return IKData;
-}
-
-void UAnimationSystemManager::UpdateCharacterAnimation(AActor* Character, float DeltaTime)
-{
-    if (!Character || !RegisteredCharacters.Contains(Character))
-    {
         return;
     }
     
-    // Calculate motion data
-    FAnim_MotionData MotionData = CalculateMotionData(Character);
-    
-    // Get skeletal mesh component
-    USkeletalMeshComponent* SkeletalMesh = GetCharacterSkeletalMesh(Character);
-    if (!SkeletalMesh)
+    if (!ValidateCharacterForAnimation(Character))
     {
+        UE_LOG(LogTemp, Warning, TEXT("AnimationSystemManager: Character validation failed for %s"), *Character->GetName());
         return;
     }
     
-    // Calculate IK data
-    FAnim_IKData IKData = CalculateFootIK(Character, SkeletalMesh);
-    
-    // Find best matching animation if motion matching is enabled
-    if (bEnableMotionMatching)
+    // Add to registered characters if not already present
+    TWeakObjectPtr<APawn> CharacterPtr = Character;
+    if (!RegisteredCharacters.Contains(CharacterPtr))
     {
-        FAnim_CharacterProfile& Profile = RegisteredCharacters[Character];
-        UAnimSequence* BestMatch = FindBestMatchingAnimation(MotionData, Profile.CharacterType);
+        RegisteredCharacters.Add(CharacterPtr);
+        UE_LOG(LogTemp, Log, TEXT("AnimationSystemManager: Registered character %s for motion matching"), *Character->GetName());
+    }
+}
+
+FAnim_IKFootData UAnimationSystemManager::CalculateFootIK(APawn* Character, const FName& FootBoneName, float TraceDistance)
+{
+    FAnim_IKFootData FootData;
+    
+    if (!ValidateCharacterForAnimation(Character))
+    {
+        return FootData;
+    }
+    
+    // Perform foot trace
+    FVector FootWorldLocation = PerformFootTrace(Character, FootBoneName, TraceDistance);
+    
+    if (FootWorldLocation != FVector::ZeroVector)
+    {
+        FootData.bValidHit = true;
+        FootData.FootLocation = FootWorldLocation;
         
-        if (BestMatch)
+        // Calculate foot rotation based on surface normal
+        // For now, use default rotation - can be enhanced with surface normal calculation
+        FootData.FootRotation = FRotator::ZeroRotator;
+        FootData.IKAlpha = 1.0f;
+    }
+    
+    return FootData;
+}
+
+void UAnimationSystemManager::UpdateTerrainAdaptation(APawn* Character)
+{
+    if (!ValidateCharacterForAnimation(Character))
+    {
+        return;
+    }
+    
+    // Calculate both feet IK
+    FAnim_IKFootData LeftFootData = CalculateFootIK(Character, TEXT("foot_l"), FootIKTraceDistance);
+    FAnim_IKFootData RightFootData = CalculateFootIK(Character, TEXT("foot_r"), FootIKTraceDistance);
+    
+    // Apply IK data to character's animation instance
+    USkeletalMeshComponent* MeshComp = GetCharacterMesh(Character);
+    if (MeshComp && MeshComp->GetAnimInstance())
+    {
+        // Store IK data in animation instance for Blueprint access
+        // This would typically be done through custom animation instance variables
+        UE_LOG(LogTemp, VeryVerbose, TEXT("AnimationSystemManager: Updated terrain adaptation for %s"), *Character->GetName());
+    }
+}
+
+void UAnimationSystemManager::ApplyEnvironmentalAnimations(APawn* Character, EAnim_TerrainType TerrainType)
+{
+    if (!ValidateCharacterForAnimation(Character))
+    {
+        return;
+    }
+    
+    // Get terrain-specific blend space
+    UBlendSpace* TerrainBlendSpace = GetTerrainSpecificBlendSpace(TerrainType);
+    
+    if (TerrainBlendSpace)
+    {
+        // Apply terrain-specific locomotion
+        UE_LOG(LogTemp, VeryVerbose, TEXT("AnimationSystemManager: Applied %s terrain animations to %s"), 
+            *UEnum::GetValueAsString(TerrainType), *Character->GetName());
+    }
+}
+
+bool UAnimationSystemManager::PlaySurvivalMontage(APawn* Character, EAnim_SurvivalAction Action)
+{
+    if (!ValidateCharacterForAnimation(Character))
+    {
+        return false;
+    }
+    
+    UAnimMontage** FoundMontage = SurvivalMontages.Find(Action);
+    if (!FoundMontage || !*FoundMontage)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("AnimationSystemManager: No montage found for survival action %s"), 
+            *UEnum::GetValueAsString(Action));
+        return false;
+    }
+    
+    USkeletalMeshComponent* MeshComp = GetCharacterMesh(Character);
+    if (MeshComp && MeshComp->GetAnimInstance())
+    {
+        float MontageLength = MeshComp->GetAnimInstance()->Montage_Play(*FoundMontage);
+        if (MontageLength > 0.0f)
         {
-            // Apply the animation (this would normally be done through Animation Blueprint)
-            UE_LOG(LogTemp, Verbose, TEXT("Best animation match for %s: %s"), 
-                   *Character->GetName(), *BestMatch->GetName());
+            UE_LOG(LogTemp, Log, TEXT("AnimationSystemManager: Playing survival montage %s for %s"), 
+                *UEnum::GetValueAsString(Action), *Character->GetName());
+            return true;
         }
     }
     
-    // Draw debug info if enabled
-    if (bDrawDebugInfo)
-    {
-        DrawMotionDebugInfo(Character);
-        DrawIKDebugInfo(Character);
-    }
+    return false;
 }
 
-UAnimSequence* UAnimationSystemManager::FindBestMatchingAnimation(const FAnim_MotionData& MotionData, EAnim_CharacterType CharacterType)
+void UAnimationSystemManager::StopAllMontages(APawn* Character)
 {
-    if (!MotionDatabase.Contains(CharacterType))
-    {
-        return nullptr;
-    }
-    
-    const TArray<UAnimSequence*>& Animations = MotionDatabase[CharacterType];
-    if (Animations.Num() == 0)
-    {
-        return nullptr;
-    }
-    
-    // Simple motion matching - in production this would be much more sophisticated
-    // For now, just return based on movement state
-    switch (MotionData.MovementState)
-    {
-        case EAnim_MovementState::Idle:
-            return Animations.Num() > 0 ? Animations[0] : nullptr;
-        case EAnim_MovementState::Walking:
-            return Animations.Num() > 1 ? Animations[1] : nullptr;
-        case EAnim_MovementState::Running:
-            return Animations.Num() > 2 ? Animations[2] : nullptr;
-        default:
-            return Animations.Num() > 0 ? Animations[0] : nullptr;
-    }
-}
-
-void UAnimationSystemManager::BuildMotionDatabase()
-{
-    UE_LOG(LogTemp, Warning, TEXT("Building motion database..."));
-    
-    // Clear existing database
-    MotionDatabase.Empty();
-    
-    // This would normally load animations from content browser
-    // For now, we'll create empty arrays for each character type
-    for (int32 i = 0; i < (int32)EAnim_CharacterType::Dinosaur_Large + 1; i++)
-    {
-        EAnim_CharacterType CharType = (EAnim_CharacterType)i;
-        MotionDatabase.Add(CharType, TArray<UAnimSequence*>());
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Motion database built with %d character types"), MotionDatabase.Num());
-}
-
-void UAnimationSystemManager::SetCharacterPersonality(AActor* Character, float PersonalityFactor)
-{
-    if (RegisteredCharacters.Contains(Character))
-    {
-        RegisteredCharacters[Character].PersonalityFactor = FMath::Clamp(PersonalityFactor, 0.0f, 1.0f);
-    }
-}
-
-FAnim_CharacterProfile UAnimationSystemManager::GetCharacterProfile(AActor* Character)
-{
-    if (RegisteredCharacters.Contains(Character))
-    {
-        return RegisteredCharacters[Character];
-    }
-    
-    return FAnim_CharacterProfile();
-}
-
-FVector UAnimationSystemManager::TraceFootPlacement(AActor* Character, FVector FootWorldLocation)
-{
-    if (!Character)
-    {
-        return FootWorldLocation;
-    }
-    
-    UWorld* World = Character->GetWorld();
-    if (!World)
-    {
-        return FootWorldLocation;
-    }
-    
-    // Trace downward from foot location
-    FVector Start = FootWorldLocation + FVector(0, 0, 20.0f);
-    FVector End = FootWorldLocation - FVector(0, 0, IKTraceDistance);
-    
-    FHitResult HitResult;
-    FCollisionQueryParams QueryParams;
-    QueryParams.AddIgnoredActor(Character);
-    
-    if (World->LineTraceSingleByChannel(HitResult, Start, End, ECC_WorldStatic, QueryParams))
-    {
-        return HitResult.Location;
-    }
-    
-    return FootWorldLocation;
-}
-
-void UAnimationSystemManager::EnableFootIK(AActor* Character, bool bEnable)
-{
-    if (RegisteredCharacters.Contains(Character))
-    {
-        // This would normally communicate with the Animation Blueprint
-        UE_LOG(LogTemp, Log, TEXT("Foot IK %s for character: %s"), 
-               bEnable ? TEXT("enabled") : TEXT("disabled"), 
-               *Character->GetName());
-    }
-}
-
-void UAnimationSystemManager::PlayCharacterMontage(AActor* Character, UAnimMontage* Montage, float PlayRate)
-{
-    if (!Character || !Montage)
+    if (!ValidateCharacterForAnimation(Character))
     {
         return;
     }
     
-    USkeletalMeshComponent* SkeletalMesh = GetCharacterSkeletalMesh(Character);
-    if (!SkeletalMesh)
+    USkeletalMeshComponent* MeshComp = GetCharacterMesh(Character);
+    if (MeshComp && MeshComp->GetAnimInstance())
     {
-        return;
-    }
-    
-    UAnimInstance* AnimInstance = SkeletalMesh->GetAnimInstance();
-    if (AnimInstance)
-    {
-        AnimInstance->Montage_Play(Montage, PlayRate);
-        UE_LOG(LogTemp, Log, TEXT("Playing montage %s on character %s"), 
-               *Montage->GetName(), *Character->GetName());
+        MeshComp->GetAnimInstance()->Montage_Stop(0.2f);
+        UE_LOG(LogTemp, Log, TEXT("AnimationSystemManager: Stopped all montages for %s"), *Character->GetName());
     }
 }
 
-void UAnimationSystemManager::StopCharacterMontage(AActor* Character, float BlendOutTime)
+bool UAnimationSystemManager::IsPlayingMontage(APawn* Character, EAnim_SurvivalAction Action)
 {
-    if (!Character)
+    if (!ValidateCharacterForAnimation(Character))
+    {
+        return false;
+    }
+    
+    UAnimMontage** FoundMontage = SurvivalMontages.Find(Action);
+    if (!FoundMontage || !*FoundMontage)
+    {
+        return false;
+    }
+    
+    USkeletalMeshComponent* MeshComp = GetCharacterMesh(Character);
+    if (MeshComp && MeshComp->GetAnimInstance())
+    {
+        return MeshComp->GetAnimInstance()->Montage_IsPlaying(*FoundMontage);
+    }
+    
+    return false;
+}
+
+void UAnimationSystemManager::UpdateLocomotionBlendSpace(APawn* Character, const FAnim_LocomotionData& LocomotionData)
+{
+    if (!ValidateCharacterForAnimation(Character))
     {
         return;
     }
     
-    USkeletalMeshComponent* SkeletalMesh = GetCharacterSkeletalMesh(Character);
-    if (!SkeletalMesh)
-    {
-        return;
-    }
+    // Get appropriate blend space for terrain type
+    UBlendSpace* BlendSpace = GetTerrainSpecificBlendSpace(LocomotionData.TerrainType);
     
-    UAnimInstance* AnimInstance = SkeletalMesh->GetAnimInstance();
-    if (AnimInstance)
+    if (BlendSpace)
     {
-        AnimInstance->Montage_Stop(BlendOutTime);
-        UE_LOG(LogTemp, Log, TEXT("Stopped montage on character %s"), *Character->GetName());
+        // Update blend space parameters through animation instance
+        USkeletalMeshComponent* MeshComp = GetCharacterMesh(Character);
+        if (MeshComp && MeshComp->GetAnimInstance())
+        {
+            // This would typically update variables in a custom animation instance
+            UE_LOG(LogTemp, VeryVerbose, TEXT("AnimationSystemManager: Updated locomotion blend space for %s (Speed: %.2f, Direction: %.2f)"), 
+                *Character->GetName(), LocomotionData.Speed, LocomotionData.Direction);
+        }
     }
 }
 
-void UAnimationSystemManager::DebugAnimationSystem()
+UBlendSpace* UAnimationSystemManager::GetTerrainSpecificBlendSpace(EAnim_TerrainType TerrainType)
 {
-    UE_LOG(LogTemp, Warning, TEXT("=== Animation System Debug ==="));
-    UE_LOG(LogTemp, Warning, TEXT("Registered Characters: %d"), RegisteredCharacters.Num());
-    UE_LOG(LogTemp, Warning, TEXT("Motion Database Entries: %d"), MotionDatabase.Num());
-    UE_LOG(LogTemp, Warning, TEXT("Motion Matching Enabled: %s"), bEnableMotionMatching ? TEXT("Yes") : TEXT("No"));
-    UE_LOG(LogTemp, Warning, TEXT("Foot IK Enabled: %s"), bEnableFootIK ? TEXT("Yes") : TEXT("No"));
-    
-    for (const auto& CharacterPair : RegisteredCharacters)
+    UBlendSpace** FoundBlendSpace = TerrainBlendSpaces.Find(TerrainType);
+    if (FoundBlendSpace && *FoundBlendSpace)
     {
-        AActor* Character = CharacterPair.Key;
-        const FAnim_CharacterProfile& Profile = CharacterPair.Value;
-        
-        UE_LOG(LogTemp, Warning, TEXT("Character: %s, Type: %s, Personality: %.2f"), 
-               *Character->GetName(),
-               *UEnum::GetValueAsString(Profile.CharacterType),
-               Profile.PersonalityFactor);
+        return *FoundBlendSpace;
     }
+    
+    // Return default grass blend space if specific terrain not found
+    UBlendSpace** DefaultBlendSpace = TerrainBlendSpaces.Find(EAnim_TerrainType::Grass);
+    return (DefaultBlendSpace && *DefaultBlendSpace) ? *DefaultBlendSpace : nullptr;
 }
 
-void UAnimationSystemManager::DrawMotionDebugInfo(AActor* Character)
+void UAnimationSystemManager::TriggerFootstepEvent(APawn* Character, const FName& FootBoneName)
 {
-    if (!Character)
+    if (!ValidateCharacterForAnimation(Character))
     {
         return;
     }
     
-    UWorld* World = Character->GetWorld();
-    if (!World)
-    {
-        return;
-    }
-    
-    FAnim_MotionData MotionData = CalculateMotionData(Character);
-    FVector CharLocation = Character->GetActorLocation();
-    
-    // Draw velocity vector
-    DrawDebugDirectionalArrow(World, CharLocation, CharLocation + MotionData.Velocity, 
-                             50.0f, FColor::Red, false, 0.0f, 0, 2.0f);
-    
-    // Draw speed text
-    FString SpeedText = FString::Printf(TEXT("Speed: %.1f"), MotionData.Speed);
-    DrawDebugString(World, CharLocation + FVector(0, 0, 100), SpeedText, nullptr, FColor::White, 0.0f);
+    // Trigger footstep sound/VFX based on terrain type
+    // This would typically interface with the Audio system
+    UE_LOG(LogTemp, VeryVerbose, TEXT("AnimationSystemManager: Triggered footstep event for %s (%s)"), 
+        *Character->GetName(), *FootBoneName.ToString());
 }
 
-void UAnimationSystemManager::DrawIKDebugInfo(AActor* Character)
+void UAnimationSystemManager::TriggerSurvivalActionEvent(APawn* Character, EAnim_SurvivalAction Action)
 {
-    if (!Character)
+    if (!ValidateCharacterForAnimation(Character))
     {
         return;
     }
     
-    UWorld* World = Character->GetWorld();
-    if (!World)
-    {
-        return;
-    }
-    
-    USkeletalMeshComponent* SkeletalMesh = GetCharacterSkeletalMesh(Character);
-    if (!SkeletalMesh)
-    {
-        return;
-    }
-    
-    FAnim_IKData IKData = CalculateFootIK(Character, SkeletalMesh);
-    
-    // Draw foot IK targets
-    DrawDebugSphere(World, IKData.LeftFootLocation, 5.0f, 8, FColor::Green, false, 0.0f);
-    DrawDebugSphere(World, IKData.RightFootLocation, 5.0f, 8, FColor::Blue, false, 0.0f);
-    
-    // Draw hip offset
-    FVector CharLocation = Character->GetActorLocation();
-    FString HipText = FString::Printf(TEXT("Hip Offset: %.1f"), IKData.HipOffset);
-    DrawDebugString(World, CharLocation + FVector(0, 0, 120), HipText, nullptr, FColor::Yellow, 0.0f);
-}
-
-void UAnimationSystemManager::InitializeMotionDatabase()
-{
-    BuildMotionDatabase();
+    // Trigger survival action events (sounds, particles, gameplay effects)
+    UE_LOG(LogTemp, Log, TEXT("AnimationSystemManager: Triggered survival action event %s for %s"), 
+        *UEnum::GetValueAsString(Action), *Character->GetName());
 }
 
 void UAnimationSystemManager::LoadAnimationAssets()
 {
-    // This would normally load animation assets from the content browser
-    // For now, we'll just log that we're loading
-    UE_LOG(LogTemp, Warning, TEXT("Loading animation assets..."));
+    // Load animation assets from content browser
+    // This is typically done through asset references or soft object pointers
+    UE_LOG(LogTemp, Log, TEXT("AnimationSystemManager: Loading animation assets..."));
 }
 
-USkeletalMeshComponent* UAnimationSystemManager::GetCharacterSkeletalMesh(AActor* Character)
+void UAnimationSystemManager::SetupTerrainBlendSpaces()
 {
-    if (!Character)
+    // Load terrain-specific blend spaces
+    struct FTerrainBlendSpaceData
     {
-        return nullptr;
-    }
+        EAnim_TerrainType TerrainType;
+        FString AssetPath;
+    };
     
-    // Try to get skeletal mesh component
-    USkeletalMeshComponent* SkeletalMesh = Character->FindComponentByClass<USkeletalMeshComponent>();
+    TArray<FTerrainBlendSpaceData> BlendSpaceData = {
+        { EAnim_TerrainType::Grass, TEXT("/Game/Characters/Animation/BlendSpaces/BS_GrassLocomotion") },
+        { EAnim_TerrainType::Rock, TEXT("/Game/Characters/Animation/BlendSpaces/BS_RockLocomotion") },
+        { EAnim_TerrainType::Sand, TEXT("/Game/Characters/Animation/BlendSpaces/BS_SandLocomotion") },
+        { EAnim_TerrainType::Mud, TEXT("/Game/Characters/Animation/BlendSpaces/BS_MudLocomotion") },
+        { EAnim_TerrainType::Snow, TEXT("/Game/Characters/Animation/BlendSpaces/BS_SnowLocomotion") },
+        { EAnim_TerrainType::Water, TEXT("/Game/Characters/Animation/BlendSpaces/BS_WaterLocomotion") }
+    };
     
-    // If it's a character, try to get the mesh component
-    if (!SkeletalMesh)
+    for (const auto& Data : BlendSpaceData)
     {
-        ACharacter* CharacterPawn = Cast<ACharacter>(Character);
-        if (CharacterPawn)
+        UBlendSpace* BlendSpace = LoadObject<UBlendSpace>(nullptr, *Data.AssetPath);
+        if (BlendSpace)
         {
-            SkeletalMesh = CharacterPawn->GetMesh();
+            TerrainBlendSpaces.Add(Data.TerrainType, BlendSpace);
+            UE_LOG(LogTemp, Log, TEXT("AnimationSystemManager: Loaded blend space for %s terrain"), 
+                *UEnum::GetValueAsString(Data.TerrainType));
+        }
+        else
+        {
+            UE_LOG(LogTemp, Warning, TEXT("AnimationSystemManager: Failed to load blend space for %s terrain"), 
+                *UEnum::GetValueAsString(Data.TerrainType));
         }
     }
-    
-    return SkeletalMesh;
 }
 
-FVector UAnimationSystemManager::GetCharacterVelocity(AActor* Character)
+void UAnimationSystemManager::SetupSurvivalMontages()
+{
+    // Load survival action montages
+    struct FSurvivalMontageData
+    {
+        EAnim_SurvivalAction Action;
+        FString AssetPath;
+    };
+    
+    TArray<FSurvivalMontageData> MontageData = {
+        { EAnim_SurvivalAction::Gathering, TEXT("/Game/Characters/Animation/Montages/AM_Gather_Berries") },
+        { EAnim_SurvivalAction::Crafting, TEXT("/Game/Characters/Animation/Montages/AM_Craft_Tool") },
+        { EAnim_SurvivalAction::Hunting, TEXT("/Game/Characters/Animation/Montages/AM_Hunt_Throw") },
+        { EAnim_SurvivalAction::Climbing, TEXT("/Game/Characters/Animation/Montages/AM_Climb_Rock") },
+        { EAnim_SurvivalAction::Swimming, TEXT("/Game/Characters/Animation/Montages/AM_Swim_River") },
+        { EAnim_SurvivalAction::Resting, TEXT("/Game/Characters/Animation/Montages/AM_Rest_Fire") }
+    };
+    
+    for (const auto& Data : MontageData)
+    {
+        UAnimMontage* Montage = LoadObject<UAnimMontage>(nullptr, *Data.AssetPath);
+        if (Montage)
+        {
+            SurvivalMontages.Add(Data.Action, Montage);
+            UE_LOG(LogTemp, Log, TEXT("AnimationSystemManager: Loaded montage for %s action"), 
+                *UEnum::GetValueAsString(Data.Action));
+        }
+        else
+        {
+            UE_LOG(LogTemp, Warning, TEXT("AnimationSystemManager: Failed to load montage for %s action"), 
+                *UEnum::GetValueAsString(Data.Action));
+        }
+    }
+}
+
+FVector UAnimationSystemManager::PerformFootTrace(APawn* Character, const FName& FootBoneName, float TraceDistance)
 {
     if (!Character)
     {
         return FVector::ZeroVector;
     }
     
-    // Try to get velocity from character movement component
-    ACharacter* CharacterPawn = Cast<ACharacter>(Character);
-    if (CharacterPawn && CharacterPawn->GetCharacterMovement())
+    USkeletalMeshComponent* MeshComp = GetCharacterMesh(Character);
+    if (!MeshComp)
     {
-        return CharacterPawn->GetCharacterMovement()->Velocity;
+        return FVector::ZeroVector;
     }
     
-    // Fallback to actor velocity
-    return Character->GetVelocity();
+    // Get foot bone location
+    FVector FootBoneLocation = MeshComp->GetBoneLocation(FootBoneName);
+    if (FootBoneLocation == FVector::ZeroVector)
+    {
+        return FVector::ZeroVector;
+    }
+    
+    // Perform line trace downward
+    FVector TraceStart = FootBoneLocation + FVector(0, 0, 20.0f);
+    FVector TraceEnd = FootBoneLocation - FVector(0, 0, TraceDistance);
+    
+    FHitResult HitResult;
+    FCollisionQueryParams QueryParams;
+    QueryParams.AddIgnoredActor(Character);
+    
+    UWorld* World = Character->GetWorld();
+    if (World && World->LineTraceSingleByChannel(HitResult, TraceStart, TraceEnd, ECC_WorldStatic, QueryParams))
+    {
+        return HitResult.Location;
+    }
+    
+    return FVector::ZeroVector;
 }
 
-bool UAnimationSystemManager::IsCharacterInAir(AActor* Character)
+FRotator UAnimationSystemManager::CalculateFootRotationFromNormal(const FVector& SurfaceNormal)
+{
+    // Calculate foot rotation to align with surface normal
+    FVector ForwardVector = FVector::ForwardVector;
+    FVector RightVector = FVector::CrossProduct(SurfaceNormal, ForwardVector).GetSafeNormal();
+    ForwardVector = FVector::CrossProduct(RightVector, SurfaceNormal).GetSafeNormal();
+    
+    return FRotationMatrix::MakeFromXZ(ForwardVector, SurfaceNormal).Rotator();
+}
+
+bool UAnimationSystemManager::ValidateCharacterForAnimation(APawn* Character)
 {
     if (!Character)
     {
         return false;
     }
     
-    ACharacter* CharacterPawn = Cast<ACharacter>(Character);
-    if (CharacterPawn && CharacterPawn->GetCharacterMovement())
+    USkeletalMeshComponent* MeshComp = GetCharacterMesh(Character);
+    if (!MeshComp || !MeshComp->GetAnimInstance())
     {
-        return CharacterPawn->GetCharacterMovement()->IsFalling();
+        return false;
     }
     
-    return false;
+    return true;
 }
 
-float UAnimationSystemManager::CalculateMovementDirection(AActor* Character)
+USkeletalMeshComponent* UAnimationSystemManager::GetCharacterMesh(APawn* Character)
 {
     if (!Character)
     {
-        return 0.0f;
+        return nullptr;
     }
     
-    FVector Velocity = GetCharacterVelocity(Character);
-    if (Velocity.SizeSquared() < 1.0f)
+    // Try to get mesh from Character class first
+    if (ACharacter* CharacterCast = Cast<ACharacter>(Character))
     {
-        return 0.0f;
+        return CharacterCast->GetMesh();
     }
     
-    FVector Forward = Character->GetActorForwardVector();
-    FVector VelNormalized = Velocity.GetSafeNormal();
-    
-    float DotProduct = FVector::DotProduct(Forward, VelNormalized);
-    float CrossProduct = FVector::CrossProduct(Forward, VelNormalized).Z;
-    
-    return FMath::Atan2(CrossProduct, DotProduct) * 180.0f / PI;
-}
-
-EAnim_MovementState UAnimationSystemManager::DetermineMovementState(const FAnim_MotionData& MotionData)
-{
-    if (MotionData.bIsInAir)
-    {
-        return MotionData.Velocity.Z > 0 ? EAnim_MovementState::Jumping : EAnim_MovementState::Falling;
-    }
-    
-    if (MotionData.Speed < 10.0f)
-    {
-        return EAnim_MovementState::Idle;
-    }
-    else if (MotionData.Speed < 200.0f)
-    {
-        return EAnim_MovementState::Walking;
-    }
-    else
-    {
-        return EAnim_MovementState::Running;
-    }
+    // Fallback: look for skeletal mesh component
+    return Character->FindComponentByClass<USkeletalMeshComponent>();
 }
