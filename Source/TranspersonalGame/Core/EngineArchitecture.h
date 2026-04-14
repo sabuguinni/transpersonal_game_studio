@@ -1,364 +1,250 @@
-// Copyright Transpersonal Game Studio. All Rights Reserved.
-// EngineArchitecture.h - Core engine architecture definitions and rules
-
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/Engine.h"
-#include "Engine/World.h"
-#include "Subsystems/GameInstanceSubsystem.h"
+#include "Engine/GameInstanceSubsystem.h"
+#include "Subsystems/WorldSubsystem.h"
+#include "Components/ActorComponent.h"
+#include "SharedTypes.h"
 #include "EngineArchitecture.generated.h"
 
-DECLARE_LOG_CATEGORY_EXTERN(LogEngineArchitecture, Log, All);
-
 /**
- * TRANSPERSONAL GAME ENGINE ARCHITECTURE
+ * TRANSPERSONAL GAME STUDIO - ENGINE ARCHITECTURE
+ * Engine Architect Agent #02
  * 
- * This header defines the core architectural principles and systems
- * that ALL agents must follow. These are the laws of the engine.
+ * This is the master architecture that defines how ALL systems interact.
+ * Every agent must follow these patterns and interfaces.
  * 
- * ESTABLISHED BY: Agent #02 - Engine Architect
- * VERSION: 2.0 - Complete Implementation
+ * ARCHITECTURE PRINCIPLES:
+ * 1. Modular Design - Each system is independent and replaceable
+ * 2. Event-Driven Communication - Systems communicate via events, not direct calls
+ * 3. Performance First - 60fps PC / 30fps console is non-negotiable
+ * 4. Scalable Structure - Must support 50,000+ entities via Mass AI
+ * 5. Hot-Reload Friendly - All systems must support runtime changes
  */
 
-// ============================================================================
-// CORE ARCHITECTURAL PRINCIPLES
-// ============================================================================
+// ═══════════════════════════════════════════════════════════════
+// CORE SYSTEM INTERFACE
+// ═══════════════════════════════════════════════════════════════
 
-/**
- * PRINCIPLE 1: WORLD PARTITION MANDATORY
- * All worlds > 4km² MUST use World Partition with these settings:
- */
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FTranspersonalWorldPartitionSettings
-{
-    GENERATED_BODY()
-
-    // Cell size for streaming (meters)
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "World Partition")
-    int32 CellSize = 51200; // 512m x 512m cells
-
-    // Loading range around player (meters)
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "World Partition")
-    float LoadingRange = 1536.0f; // 3x cell size
-
-    // Enable HLOD for distant geometry
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "World Partition")
-    bool bEnableHLOD = true;
-
-    // Maximum HLOD distance
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "World Partition")
-    float MaxHLODDistance = 10000.0f; // 10km
-};
-
-/**
- * PRINCIPLE 2: NANITE MANDATORY
- * All static geometry > 1000 triangles MUST use Nanite
- */
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FTranspersonalNaniteSettings
-{
-    GENERATED_BODY()
-
-    // Minimum triangle count for Nanite enablement
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Nanite")
-    int32 MinTriangleCount = 1000;
-
-    // Enable Nanite Foliage for vegetation
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Nanite")
-    bool bEnableNaniteFoliage = true;
-
-    // Enable Nanite Assemblies for complex objects
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Nanite")
-    bool bEnableNaniteAssemblies = true;
-
-    // Enable Nanite Voxelization for aggregate geometry
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Nanite")
-    bool bEnableNaniteVoxelization = true;
-};
-
-/**
- * PRINCIPLE 3: LUMEN MANDATORY
- * All lighting MUST use Lumen Global Illumination
- */
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FTranspersonalLumenSettings
-{
-    GENERATED_BODY()
-
-    // Enable Lumen Global Illumination
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Lumen")
-    bool bEnableLumenGI = true;
-
-    // Enable Lumen Reflections
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Lumen")
-    bool bEnableLumenReflections = true;
-
-    // Lumen scene view distance (meters)
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Lumen")
-    float LumenSceneViewDistance = 800.0f;
-
-    // Enable Hardware Ray Tracing if supported
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Lumen")
-    bool bEnableHardwareRayTracing = true;
-};
-
-/**
- * PRINCIPLE 4: VIRTUAL SHADOW MAPS MANDATORY
- * All shadows MUST use Virtual Shadow Maps
- */
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FTranspersonalVSMSettings
-{
-    GENERATED_BODY()
-
-    // Enable Virtual Shadow Maps
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VSM")
-    bool bEnableVirtualShadowMaps = true;
-
-    // Virtual shadow map resolution
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VSM")
-    int32 VirtualShadowMapResolution = 16384; // 16K
-
-    // Enable caching for performance
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VSM")
-    bool bEnableCaching = true;
-
-    // Enable soft shadows with SMRT
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VSM")
-    bool bEnableSoftShadows = true;
-};
-
-/**
- * PRINCIPLE 5: MASS AI MANDATORY
- * All crowd simulation MUST use Mass Entity framework
- */
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FTranspersonalMassAISettings
-{
-    GENERATED_BODY()
-
-    // Maximum concurrent entities
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Mass AI")
-    int32 MaxConcurrentEntities = 50000;
-
-    // LOD distances for entity processing
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Mass AI")
-    TArray<float> LODDistances = {100.0f, 500.0f, 1000.0f, 5000.0f};
-
-    // Enable Mass Movement
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Mass AI")
-    bool bEnableMassMovement = true;
-
-    // Enable Mass Spawning
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Mass AI")
-    bool bEnableMassSpawning = true;
-};
-
-// ============================================================================
-// PERFORMANCE TARGETS (NON-NEGOTIABLE)
-// ============================================================================
-
-/**
- * PERFORMANCE LAW: These targets are MANDATORY
- * Any system that cannot meet these targets is REJECTED
- */
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FTranspersonalPerformanceTargets
-{
-    GENERATED_BODY()
-
-    // Target framerate on PC (minimum)
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance")
-    int32 TargetFPS_PC = 60;
-
-    // Target framerate on console (minimum)
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance")
-    int32 TargetFPS_Console = 30;
-
-    // Maximum memory usage (MB)
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance")
-    int32 MaxMemoryUsage_MB = 8192; // 8GB
-
-    // Maximum GPU time per frame (ms)
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance")
-    float MaxGPUTime_MS = 16.67f; // 60fps = 16.67ms
-
-    // Maximum CPU time per frame (ms)
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance")
-    float MaxCPUTime_MS = 16.67f; // 60fps = 16.67ms
-};
-
-// ============================================================================
-// SYSTEM INTEGRATION RULES
-// ============================================================================
-
-/**
- * INTEGRATION LAW: Module Communication Rules
- * All inter-module communication MUST follow these patterns
- */
-namespace TranspersonalGame
-{
-    namespace ArchitecturalRules
-    {
-        // Rule 1: No direct dependencies between gameplay modules
-        // Use interfaces and subsystems only
-        
-        // Rule 2: All core systems communicate through UGameInstanceSubsystem
-        
-        // Rule 3: Physics systems have priority over all other systems
-        
-        // Rule 4: Performance monitoring is mandatory in all systems
-        
-        // Rule 5: All systems must support hot-reloading
-    }
-    
-    namespace ArchitecturalValidation
-    {
-        // Global validation functions
-        bool IsEngineCompliant();
-        void LogArchitecturalStatus();
-    }
-}
-
-/**
- * TRANSPERSONAL ENGINE ARCHITECTURE SUBSYSTEM
- * 
- * This subsystem enforces architectural rules and monitors compliance
- */
-UCLASS()
-class TRANSPERSONALGAME_API UTranspersonalEngineArchitectureSubsystem : public UGameInstanceSubsystem
+UCLASS(Abstract, BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UEng_SystemBase : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    // USubsystem interface
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
+    UEng_SystemBase();
 
-    // Get subsystem instance
-    static UTranspersonalEngineArchitectureSubsystem* Get(UGameInstance* GameInstance)
-    {
-        return GameInstance ? GameInstance->GetSubsystem<UTranspersonalEngineArchitectureSubsystem>() : nullptr;
-    }
+    // Core system lifecycle
+    UFUNCTION(BlueprintCallable, Category = "System")
+    virtual void InitializeSystem();
 
-    // Architecture validation
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool ValidateWorldPartitionSettings() const;
+    UFUNCTION(BlueprintCallable, Category = "System")
+    virtual void ShutdownSystem();
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool ValidateNaniteSettings() const;
+    UFUNCTION(BlueprintCallable, Category = "System")
+    virtual void UpdateSystem(float DeltaTime);
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool ValidateLumenSettings() const;
+    // System state management
+    UFUNCTION(BlueprintCallable, Category = "System")
+    EEng_SystemState GetSystemState() const { return CurrentState; }
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool ValidateVSMSettings() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool ValidateMassAISettings() const;
+    UFUNCTION(BlueprintCallable, Category = "System")
+    void SetSystemState(EEng_SystemState NewState) { CurrentState = NewState; }
 
     // Performance monitoring
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    bool IsPerformanceTargetMet() const;
+    FEng_PerformanceMetrics GetPerformanceMetrics() const { return PerformanceData; }
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    FTranspersonalPerformanceTargets GetCurrentPerformanceMetrics() const;
+    // System communication
+    UFUNCTION(BlueprintCallable, Category = "Communication")
+    virtual void ReceiveSystemMessage(const FEng_SystemMessage& Message);
 
-    // System status
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool IsSystemCompliant(const FString& SystemName) const;
-
-    // Settings access
-    UFUNCTION(BlueprintCallable, Category = "Settings")
-    FTranspersonalWorldPartitionSettings GetWorldPartitionSettings() const { return WorldPartitionSettings; }
-
-    UFUNCTION(BlueprintCallable, Category = "Settings")
-    FTranspersonalNaniteSettings GetNaniteSettings() const { return NaniteSettings; }
-
-    UFUNCTION(BlueprintCallable, Category = "Settings")
-    FTranspersonalLumenSettings GetLumenSettings() const { return LumenSettings; }
-
-    UFUNCTION(BlueprintCallable, Category = "Settings")
-    FTranspersonalVSMSettings GetVSMSettings() const { return VSMSettings; }
-
-    UFUNCTION(BlueprintCallable, Category = "Settings")
-    FTranspersonalMassAISettings GetMassAISettings() const { return MassAISettings; }
-
-    UFUNCTION(BlueprintCallable, Category = "Settings")
-    FTranspersonalPerformanceTargets GetPerformanceTargets() const { return PerformanceTargets; }
+    UFUNCTION(BlueprintCallable, Category = "Communication")
+    void SendSystemMessage(const FEng_SystemMessage& Message);
 
 protected:
-    // Initialize default settings
-    void InitializeDefaultSettings();
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System")
+    EEng_SystemState CurrentState = EEng_SystemState::Uninitialized;
 
-    // Architecture settings
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Settings")
-    FTranspersonalWorldPartitionSettings WorldPartitionSettings;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System")
+    EEng_SystemPriority SystemPriority = EEng_SystemPriority::Normal;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Settings")
-    FTranspersonalNaniteSettings NaniteSettings;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    FEng_PerformanceMetrics PerformanceData;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Settings")
-    FTranspersonalLumenSettings LumenSettings;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Settings")
-    FTranspersonalVSMSettings VSMSettings;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Settings")
-    FTranspersonalMassAISettings MassAISettings;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Settings")
-    FTranspersonalPerformanceTargets PerformanceTargets;
-
-private:
-    // Internal validation functions
-    void ValidateEngineSettings();
-    void SetupPerformanceMonitoring();
-    void EnforceArchitecturalRules();
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System")
+    FString SystemName = TEXT("BaseSystem");
 
     // Performance tracking
-    mutable float LastFrameTime;
-    mutable float LastGPUTime;
-    mutable int32 LastMemoryUsage;
+    virtual void UpdatePerformanceMetrics(float DeltaTime);
 };
 
-// ============================================================================
-// AGENT COMPLIANCE MACROS
-// ============================================================================
+// ═══════════════════════════════════════════════════════════════
+// ARCHITECTURE MANAGER SUBSYSTEM
+// ═══════════════════════════════════════════════════════════════
 
-/**
- * Use these macros to ensure your systems comply with architecture
- */
-#define TRANSPERSONAL_VALIDATE_ARCHITECTURE() \
-    if (UTranspersonalEngineArchitectureSubsystem* ArchSubsystem = UTranspersonalEngineArchitectureSubsystem::Get(GetGameInstance())) \
-    { \
-        if (!ArchSubsystem->IsSystemCompliant(TEXT("All"))) \
-        { \
-            UE_LOG(LogTemp, Error, TEXT("ARCHITECTURAL VIOLATION in %s"), *GetClass()->GetName()); \
-        } \
-    }
+UCLASS()
+class TRANSPERSONALGAME_API UEng_ArchitectureManager : public UGameInstanceSubsystem
+{
+    GENERATED_BODY()
 
-#define TRANSPERSONAL_REQUIRE_NANITE(StaticMesh) \
-    if (StaticMesh && !StaticMesh->IsNaniteEnabled()) \
-    { \
-        UE_LOG(LogTemp, Error, TEXT("ARCHITECTURAL VIOLATION: Static mesh %s must use Nanite"), *StaticMesh->GetName()); \
-    }
+public:
+    // Subsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
 
-#define TRANSPERSONAL_REQUIRE_WORLD_PARTITION() \
-    if (UWorld* World = GetWorld()) \
-    { \
-        if (!World->IsPartitionedWorld()) \
-        { \
-            UE_LOG(LogTemp, Error, TEXT("ARCHITECTURAL VIOLATION: World must use World Partition")); \
-        } \
-    }
+    // System registration and management
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    void RegisterSystem(UEng_SystemBase* System);
 
-#define TRANSPERSONAL_PERFORMANCE_CHECK(SystemName) \
-    if (UTranspersonalEngineArchitectureSubsystem* ArchSubsystem = UTranspersonalEngineArchitectureSubsystem::Get(GetGameInstance())) \
-    { \
-        if (!ArchSubsystem->IsPerformanceTargetMet()) \
-        { \
-            UE_LOG(LogTemp, Warning, TEXT("PERFORMANCE WARNING in %s: Targets not met"), *SystemName); \
-        } \
-    }
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    void UnregisterSystem(UEng_SystemBase* System);
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    UEng_SystemBase* GetSystem(const FString& SystemName);
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    TArray<UEng_SystemBase*> GetAllSystems() const { return RegisteredSystems; }
+
+    // Global system control
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    void InitializeAllSystems();
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    void ShutdownAllSystems();
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    void UpdateAllSystems(float DeltaTime);
+
+    // Performance monitoring
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    FEng_PerformanceMetrics GetGlobalPerformanceMetrics() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void SetPerformanceTier(EEng_PerformanceTier NewTier);
+
+    // System communication hub
+    UFUNCTION(BlueprintCallable, Category = "Communication")
+    void BroadcastSystemMessage(const FEng_SystemMessage& Message);
+
+    UFUNCTION(BlueprintCallable, Category = "Communication")
+    void SendSystemMessage(const FString& TargetSystem, const FEng_SystemMessage& Message);
+
+    // Architecture validation
+    UFUNCTION(BlueprintCallable, Category = "Architecture", CallInEditor)
+    bool ValidateArchitecture();
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture", CallInEditor)
+    void GenerateArchitectureReport();
+
+protected:
+    UPROPERTY()
+    TArray<UEng_SystemBase*> RegisteredSystems;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    EEng_PerformanceTier CurrentPerformanceTier = EEng_PerformanceTier::High;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    FEng_PerformanceMetrics GlobalPerformanceData;
+
+    // System initialization order (critical for dependencies)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    TArray<FString> SystemInitializationOrder;
+
+    // Message queue for inter-system communication
+    UPROPERTY()
+    TArray<FEng_SystemMessage> MessageQueue;
+
+    void ProcessMessageQueue();
+    void InitializeSystemOrder();
+};
+
+// ═══════════════════════════════════════════════════════════════
+// WORLD ARCHITECTURE SUBSYSTEM
+// ═══════════════════════════════════════════════════════════════
+
+UCLASS()
+class TRANSPERSONALGAME_API UEng_WorldArchitecture : public UWorldSubsystem
+{
+    GENERATED_BODY()
+
+public:
+    // Subsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+    virtual void OnWorldBeginPlay(UWorld& InWorld) override;
+
+    // World Partition management
+    UFUNCTION(BlueprintCallable, Category = "World")
+    void InitializeWorldPartition();
+
+    UFUNCTION(BlueprintCallable, Category = "World")
+    void LoadWorldCell(const FEng_WorldCell& Cell);
+
+    UFUNCTION(BlueprintCallable, Category = "World")
+    void UnloadWorldCell(const FEng_WorldCell& Cell);
+
+    // Streaming and LOD management
+    UFUNCTION(BlueprintCallable, Category = "World")
+    void UpdateWorldStreaming(const FVector& PlayerLocation);
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void SetWorldLODLevel(int32 LODLevel);
+
+    // World state management
+    UFUNCTION(BlueprintCallable, Category = "World")
+    TArray<FEng_WorldCell> GetLoadedCells() const { return LoadedCells; }
+
+    UFUNCTION(BlueprintCallable, Category = "World")
+    bool IsWorldCellLoaded(int32 X, int32 Y) const;
+
+protected:
+    UPROPERTY()
+    TArray<FEng_WorldCell> LoadedCells;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World")
+    float CellSize = 1000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World")
+    int32 LoadRadius = 3;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 CurrentLODLevel = 2;
+
+    void UpdateCellLoading(const FVector& PlayerLocation);
+    FEng_WorldCell* FindWorldCell(int32 X, int32 Y);
+};
+
+// ═══════════════════════════════════════════════════════════════
+// ARCHITECTURE CONSTANTS AND RULES
+// ═══════════════════════════════════════════════════════════════
+
+namespace EngineArchitectureConstants
+{
+    // Performance targets (non-negotiable)
+    constexpr float TARGET_FPS_PC = 60.0f;
+    constexpr float TARGET_FPS_CONSOLE = 30.0f;
+    constexpr float MAX_FRAME_TIME_MS = 16.67f;
+
+    // World limits
+    constexpr float WORLD_SIZE_KM = 16.0f;
+    constexpr float CELL_SIZE_M = 1000.0f;
+    constexpr int32 MAX_LOADED_CELLS = 25;
+
+    // Entity limits for Mass AI
+    constexpr int32 MAX_ENTITIES_TOTAL = 50000;
+    constexpr int32 MAX_ENTITIES_PER_CELL = 2000;
+    constexpr int32 MAX_ACTIVE_ENTITIES = 1000;
+
+    // Memory budgets (MB)
+    constexpr float MEMORY_BUDGET_TEXTURES = 2048.0f;
+    constexpr float MEMORY_BUDGET_MESHES = 1024.0f;
+    constexpr float MEMORY_BUDGET_AUDIO = 512.0f;
+    constexpr float MEMORY_BUDGET_PHYSICS = 256.0f;
+
+    // System update frequencies
+    constexpr float PHYSICS_TICK_RATE = 60.0f;
+    constexpr float AI_TICK_RATE = 30.0f;
+    constexpr float WORLD_STREAMING_RATE = 10.0f;
+    constexpr float PERFORMANCE_MONITOR_RATE = 1.0f;
+}
