@@ -1,94 +1,102 @@
-// Copyright Transpersonal Game Studio. All Rights Reserved.
-
 #pragma once
 
 #include "CoreMinimal.h"
 #include "Subsystems/GameInstanceSubsystem.h"
-#include "Engine/DataTable.h"
-#include "QuestTypes.h"
+#include "Engine/Engine.h"
+#include "SharedTypes.h"
 #include "QuestManager.generated.h"
 
-class UQuestInstance;
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnQuestStatusChanged, const FString&, QuestID, EQuest_QuestStatus, NewStatus);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnObjectiveUpdated, const FString&, QuestID, const FString&, ObjectiveID, int32, NewProgress);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnEmotionalStateChanged, EQuest_EmotionalState, OldState, EQuest_EmotionalState, NewState);
 
 /**
- * Quest Manager - Core system for managing quest progression and emotional storytelling
- * Inspired by Pawel Sasko's approach to meaningful side quests with complete emotional arcs
+ * Core Quest Management System
+ * Handles quest progression, emotional journeys, and spiritual growth
+ * Designed around the principle that every quest is an emotional arc
  */
-UCLASS()
+UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UQuestManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
-    // USubsystem interface
+    UQuestManager();
+
+    // Subsystem Interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
     // Quest Management
-    UFUNCTION(BlueprintCallable, Category = "Quest Manager")
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
     bool StartQuest(const FString& QuestID);
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Manager")
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
     bool CompleteQuest(const FString& QuestID);
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Manager")
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
     bool FailQuest(const FString& QuestID);
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Manager")
-    bool AbandonQuest(const FString& QuestID);
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    bool IsQuestActive(const FString& QuestID) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Manager")
-    void UpdateObjectiveProgress(const FString& QuestID, const FString& ObjectiveID, int32 Progress = 1);
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    bool IsQuestCompleted(const FString& QuestID) const;
 
-    // Quest Queries
-    UFUNCTION(BlueprintCallable, Category = "Quest Manager")
-    TArray<FString> GetActiveQuests() const;
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    EQuest_QuestStatus GetQuestStatus(const FString& QuestID) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Manager")
-    TArray<FString> GetAvailableQuests() const;
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    TArray<FQuest_QuestData> GetActiveQuests() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Manager")
-    TArray<FString> GetCompletedQuests() const;
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    TArray<FQuest_QuestData> GetAvailableQuests() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Manager")
-    EQuestStatus GetQuestStatus(const FString& QuestID) const;
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    FQuest_QuestData GetQuestData(const FString& QuestID) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Manager")
-    UQuestInstance* GetQuestInstance(const FString& QuestID) const;
+    // Objective Management
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    bool UpdateObjectiveProgress(const FString& QuestID, const FString& ObjectiveID, int32 Progress);
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Manager")
-    FQuestData GetQuestData(const FString& QuestID) const;
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    bool CompleteObjective(const FString& QuestID, const FString& ObjectiveID);
 
-    // Emotional Progression
-    UFUNCTION(BlueprintCallable, Category = "Quest Manager")
-    void TriggerEmotionalMoment(const FString& QuestID, EEmotionalTone Tone, const FString& Context);
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    bool IsObjectiveCompleted(const FString& QuestID, const FString& ObjectiveID) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Manager")
-    TArray<FString> GetQuestsByEmotionalTone(EEmotionalTone Tone) const;
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    int32 GetObjectiveProgress(const FString& QuestID, const FString& ObjectiveID) const;
 
-    // Location-based Quest Discovery
-    UFUNCTION(BlueprintCallable, Category = "Quest Manager")
-    void CheckLocationBasedQuests(const FVector& PlayerLocation, float Radius = 1000.0f);
+    // Emotional Journey System
+    UFUNCTION(BlueprintCallable, Category = "Emotional Journey")
+    void UpdateEmotionalState(const FString& QuestID, EQuest_EmotionalState NewState);
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Manager")
-    void RegisterQuestTrigger(const FString& QuestID, const FVector& Location, float Radius);
+    UFUNCTION(BlueprintCallable, Category = "Emotional Journey")
+    EQuest_EmotionalState GetCurrentEmotionalState(const FString& QuestID) const;
 
-    // Dynamic Quest Generation
-    UFUNCTION(BlueprintCallable, Category = "Quest Manager")
-    FString GenerateSurvivalQuest(EEmotionalTone Tone, const FVector& Location);
+    UFUNCTION(BlueprintCallable, Category = "Emotional Journey")
+    float GetEmotionalProgress(const FString& QuestID) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Manager")
-    FString GenerateDiscoveryQuest(const FString& DinosaurSpecies, const FVector& Location);
+    UFUNCTION(BlueprintCallable, Category = "Emotional Journey")
+    void AddEmotionalMilestone(const FString& QuestID, const FText& Milestone);
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Manager")
-    FString GenerateEmergencyQuest(const FString& ThreatType, const FVector& Location);
+    // Quest Discovery and Prerequisites
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    void RegisterQuest(const FQuest_QuestData& QuestData);
 
-    // Save/Load
-    UFUNCTION(BlueprintCallable, Category = "Quest Manager")
-    void SaveQuestProgress();
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    bool CheckQuestPrerequisites(const FString& QuestID) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Manager")
-    void LoadQuestProgress();
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    void UpdateQuestAvailability();
+
+    // Spiritual Growth Integration
+    UFUNCTION(BlueprintCallable, Category = "Spiritual Growth")
+    float CalculateSpiritualGrowth(const FString& QuestID) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Spiritual Growth")
+    void ApplyQuestRewards(const FString& QuestID);
 
     // Events
     UPROPERTY(BlueprintAssignable, Category = "Quest Events")
@@ -98,42 +106,53 @@ public:
     FOnObjectiveUpdated OnObjectiveUpdated;
 
     UPROPERTY(BlueprintAssignable, Category = "Quest Events")
-    FOnQuestCompleted OnQuestCompleted;
+    FOnEmotionalStateChanged OnEmotionalStateChanged;
+
+    // Debug and Testing
+    UFUNCTION(BlueprintCallable, Category = "Quest System", CallInEditor)
+    void CreateTestQuests();
+
+    UFUNCTION(BlueprintCallable, Category = "Quest System", CallInEditor)
+    void LogQuestSystemStatus();
 
 protected:
-    // Quest Data
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Quest Manager")
-    class UDataTable* QuestDataTable;
+    // Quest Storage
+    UPROPERTY(BlueprintReadOnly, Category = "Quest Data")
+    TMap<FString, FQuest_QuestData> AllQuests;
 
-    UPROPERTY()
-    TMap<FString, UQuestInstance*> ActiveQuestInstances;
+    UPROPERTY(BlueprintReadOnly, Category = "Quest Data")
+    TArray<FString> ActiveQuestIDs;
 
-    UPROPERTY()
-    TMap<FString, EQuestStatus> QuestStatusMap;
+    UPROPERTY(BlueprintReadOnly, Category = "Quest Data")
+    TArray<FString> CompletedQuestIDs;
 
-    // Location Triggers
-    UPROPERTY()
-    TMap<FString, FVector> QuestTriggerLocations;
+    UPROPERTY(BlueprintReadOnly, Category = "Quest Data")
+    TArray<FString> AvailableQuestIDs;
 
-    UPROPERTY()
-    TMap<FString, float> QuestTriggerRadii;
+    // Current Player State
+    UPROPERTY(BlueprintReadOnly, Category = "Player State")
+    EQuest_EmotionalState CurrentGlobalEmotionalState;
 
-    // Emotional Tracking
-    UPROPERTY()
-    TMap<FString, TArray<EEmotionalTone>> QuestEmotionalHistory;
+    UPROPERTY(BlueprintReadOnly, Category = "Player State")
+    float TotalSpiritualGrowth;
 
-    // Dynamic Quest Counter
-    int32 DynamicQuestCounter;
+    // Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Config")
+    bool bAutoUpdateAvailability;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Config")
+    float EmotionalStateUpdateThreshold;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Config")
+    int32 MaxActiveQuests;
 
 private:
-    // Internal Methods
-    bool CanStartQuest(const FString& QuestID) const;
-    void ProcessQuestCompletion(const FString& QuestID);
-    void UpdateQuestAvailability();
-    FString GenerateUniqueQuestID(const FString& Prefix);
-    void CreateDynamicQuestData(const FString& QuestID, const FQuestData& QuestData);
-
-    // Emotional Design Helpers
-    FText GenerateEmotionalDescription(EEmotionalTone Tone, EQuestType Type, const FString& Context);
-    TArray<FQuestObjective> GenerateObjectivesForTone(EEmotionalTone Tone, EQuestType Type, const FVector& Location);
+    // Internal Helper Functions
+    void CheckQuestCompletion(const FString& QuestID);
+    void UpdateQuestEmotionalProgress(const FString& QuestID);
+    bool AreAllObjectivesCompleted(const FQuest_QuestData& Quest) const;
+    void BroadcastQuestStatusChange(const FString& QuestID, EQuest_QuestStatus NewStatus);
+    void BroadcastObjectiveUpdate(const FString& QuestID, const FString& ObjectiveID, int32 NewProgress);
+    void SaveQuestProgress();
+    void LoadQuestProgress();
 };
