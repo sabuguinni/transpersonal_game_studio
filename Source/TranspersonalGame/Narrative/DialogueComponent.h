@@ -2,68 +2,79 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "Components/AudioComponent.h"
+#include "Engine/DataTable.h"
 #include "../SharedTypes.h"
-#include "NarrativeManager.h"
 #include "DialogueComponent.generated.h"
 
-class UNarrativeManager;
-
-UENUM(BlueprintType)
-enum class ENarr_DialogueTrigger : uint8
-{
-    OnInteraction   UMETA(DisplayName = "On Interaction"),
-    OnProximity     UMETA(DisplayName = "On Proximity"),
-    OnStoryBeat     UMETA(DisplayName = "On Story Beat"),
-    OnConsciousness UMETA(DisplayName = "On Consciousness Level"),
-    Manual          UMETA(DisplayName = "Manual")
-};
-
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_DialogueTriggerCondition
+struct TRANSPERSONALGAME_API FNarr_DialogueNode
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    ENarr_DialogueTrigger TriggerType;
+    FString SpeakerName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FString DialogueID;
+    FText DialogueText;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    ENarr_StoryBeat RequiredStoryBeat;
+    FString VoiceClipPath;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    float MinConsciousnessLevel;
+    TArray<FString> PlayerResponses;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    float ProximityDistance;
+    TArray<int32> NextNodeIDs;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    bool bOnlyTriggerOnce;
+    ENarr_EmotionalState EmotionalTone;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    bool bHasTriggered;
+    bool bRequiresConsciousnessLevel;
 
-    FNarr_DialogueTriggerCondition()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    int32 MinConsciousnessLevel;
+
+    FNarr_DialogueNode()
     {
-        TriggerType = ENarr_DialogueTrigger::OnInteraction;
-        DialogueID = TEXT("");
-        RequiredStoryBeat = ENarr_StoryBeat::Awakening;
-        MinConsciousnessLevel = 0.0f;
-        ProximityDistance = 500.0f;
-        bOnlyTriggerOnce = true;
-        bHasTriggered = false;
+        SpeakerName = TEXT("Unknown");
+        DialogueText = FText::GetEmpty();
+        VoiceClipPath = TEXT("");
+        EmotionalTone = ENarr_EmotionalState::Neutral;
+        bRequiresConsciousnessLevel = false;
+        MinConsciousnessLevel = 0;
     }
 };
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnDialogueTriggered, const FString&, DialogueID, AActor*, Speaker);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDialogueCompleted, const FString&, DialogueID);
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FNarr_DialogueTree
+{
+    GENERATED_BODY()
 
-/**
- * Component that handles dialogue interactions for NPCs and interactive objects
- * Integrates with the NarrativeManager for story-driven conversations
- */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    FString TreeName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    TArray<FNarr_DialogueNode> DialogueNodes;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    int32 RootNodeID;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    ENarr_CharacterArchetype SpeakerArchetype;
+
+    FNarr_DialogueTree()
+    {
+        TreeName = TEXT("DefaultTree");
+        RootNodeID = 0;
+        SpeakerArchetype = ENarr_CharacterArchetype::Neutral;
+    }
+};
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnDialogueStarted, const FString&, SpeakerName, const FText&, DialogueText);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDialogueEnded, bool, bCompletedSuccessfully);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnPlayerResponseSelected, int32, ResponseIndex, const FString&, ResponseText, int32, NextNodeID);
+
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UDialogueComponent : public UActorComponent
 {
@@ -74,86 +85,76 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // Dialogue interaction
+    // Dialogue Management
     UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    bool TriggerDialogue(AActor* Interactor, const FString& DialogueID = TEXT(""));
-
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void EndCurrentDialogue();
+    void StartDialogue(const FString& TreeName);
 
     UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    bool IsInDialogue() const;
-
-    // Trigger conditions
-    UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void AddDialogueTrigger(const FNarr_DialogueTriggerCondition& TriggerCondition);
+    void EndDialogue();
 
     UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void RemoveDialogueTrigger(const FString& DialogueID);
+    void SelectPlayerResponse(int32 ResponseIndex);
 
     UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    bool CanTriggerDialogue(const FString& DialogueID, AActor* Interactor) const;
+    void AdvanceToNextNode(int32 NodeID);
 
-    // Audio playback
+    // Dialogue Tree Management
     UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void PlayDialogueAudio(const FString& AudioAssetPath);
+    void LoadDialogueTree(const FString& TreeName);
 
     UFUNCTION(BlueprintCallable, Category = "Dialogue")
-    void StopDialogueAudio();
+    void AddDialogueTree(const FNarr_DialogueTree& NewTree);
 
-    // Configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    TArray<FNarr_DialogueTriggerCondition> DialogueTriggers;
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    bool HasDialogueTree(const FString& TreeName) const;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FString CharacterName;
+    // State Queries
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Dialogue")
+    bool IsDialogueActive() const { return bDialogueActive; }
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    bool bAutoPlayAudio;
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Dialogue")
+    FNarr_DialogueNode GetCurrentNode() const { return CurrentNode; }
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    float AudioVolume;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    bool bInterruptible;
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Dialogue")
+    TArray<FString> GetCurrentResponses() const { return CurrentNode.PlayerResponses; }
 
     // Events
-    UPROPERTY(BlueprintAssignable, Category = "Dialogue")
-    FOnDialogueTriggered OnDialogueTriggered;
+    UPROPERTY(BlueprintAssignable, Category = "Dialogue Events")
+    FOnDialogueStarted OnDialogueStarted;
 
-    UPROPERTY(BlueprintAssignable, Category = "Dialogue")
-    FOnDialogueCompleted OnDialogueCompleted;
+    UPROPERTY(BlueprintAssignable, Category = "Dialogue Events")
+    FOnDialogueEnded OnDialogueEnded;
+
+    UPROPERTY(BlueprintAssignable, Category = "Dialogue Events")
+    FOnPlayerResponseSelected OnPlayerResponseSelected;
 
 protected:
-    UPROPERTY()
-    UNarrativeManager* NarrativeManager;
+    // Dialogue State
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dialogue State")
+    bool bDialogueActive;
 
-    UPROPERTY()
-    UAudioComponent* AudioComponent;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dialogue State")
+    FNarr_DialogueNode CurrentNode;
 
-    UPROPERTY()
-    FString CurrentDialogueID;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dialogue State")
+    FString CurrentTreeName;
 
-    UPROPERTY()
-    TWeakObjectPtr<AActor> CurrentInteractor;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dialogue State")
+    int32 CurrentNodeID;
 
-private:
-    void InitializeComponent();
-    void CheckProximityTriggers();
-    void CheckStoryBeatTriggers();
-    void CheckConsciousnessTriggers();
-    
-    UFUNCTION()
-    void OnStoryBeatCompleted(ENarr_StoryBeat CompletedBeat);
-    
-    UFUNCTION()
-    void OnConsciousnessLevelChanged(float NewLevel);
+    // Dialogue Data
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue Data")
+    TMap<FString, FNarr_DialogueTree> DialogueTrees;
 
-    bool EvaluateTriggerCondition(const FNarr_DialogueTriggerCondition& Condition, AActor* Interactor) const;
-    FNarr_DialogueTriggerCondition* FindTriggerCondition(const FString& DialogueID);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue Data")
+    class UDataTable* DialogueDataTable;
+
+    // Helper Functions
+    bool ValidateNodeTransition(int32 FromNodeID, int32 ToNodeID) const;
+    bool CheckConsciousnessRequirement(const FNarr_DialogueNode& Node) const;
+    void ProcessDialogueEffects(const FNarr_DialogueNode& Node);
 };
