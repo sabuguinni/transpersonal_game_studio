@@ -1,259 +1,313 @@
 #include "NarrativeManager.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Engine/DataTable.h"
-#include "Kismet/GameplayStatics.h"
 
 UNarrativeManager::UNarrativeManager()
 {
-    DialogueDataTable = nullptr;
-    CurrentDialogueID = TEXT("");
+    CurrentDialogueIndex = 0;
+    bIsInDialogue = false;
+    CurrentCharacterID = TEXT("");
 }
 
 void UNarrativeManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Initializing narrative system"));
+    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Initializing narrative subsystem"));
     
-    InitializeStoryState();
-    LoadDialogueData();
+    LoadStoryData();
+    LoadCharacterData();
     
-    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Initialization complete"));
+    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Initialized with %d story beats and %d characters"), 
+           StoryBeats.Num(), CharacterProfiles.Num());
 }
 
 void UNarrativeManager::Deinitialize()
 {
-    // Clear any active dialogue
-    EndDialogue();
+    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Shutting down narrative subsystem"));
     
-    // Clear delegates
-    OnDialogueStarted.Clear();
-    OnStoryBeatCompleted.Clear();
-    OnConsciousnessLevelChanged.Clear();
+    StoryBeats.Empty();
+    CharacterProfiles.Empty();
+    CurrentDialogue.Empty();
     
     Super::Deinitialize();
 }
 
-void UNarrativeManager::InitializeStoryState()
+void UNarrativeManager::AdvanceStoryBeat(const FString& BeatID)
 {
-    CurrentStoryState = FNarr_StoryState();
-    CurrentStoryState.CurrentBeat = ENarr_StoryBeat::Awakening;
-    CurrentStoryState.ConsciousnessLevel = 0.0f;
-    
-    // Initialize basic character relationships
-    CurrentStoryState.CharacterRelationships.Add(TEXT("Elder_Shaman"), false);
-    CurrentStoryState.CharacterRelationships.Add(TEXT("Beast_Speaker"), false);
-    CurrentStoryState.CharacterRelationships.Add(TEXT("Vision_Walker"), false);
-    
-    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Story state initialized"));
-}
-
-void UNarrativeManager::LoadDialogueData()
-{
-    // TODO: Load dialogue data from data table
-    // For now, create some default dialogue entries
-    
-    FNarr_DialogueEntry WelcomeDialogue;
-    WelcomeDialogue.SpeakerName = TEXT("Elder_Shaman");
-    WelcomeDialogue.DialogueText = FText::FromString(TEXT("Welcome, young seeker. The spirits have been expecting you."));
-    WelcomeDialogue.RequiredStoryBeat = ENarr_StoryBeat::Awakening;
-    WelcomeDialogue.EmotionalWeight = 2.0f;
-    WelcomeDialogue.bIsTranscendentalMoment = true;
-    WelcomeDialogue.ResponseOptions.Add(TEXT("I feel drawn to this place..."));
-    WelcomeDialogue.ResponseOptions.Add(TEXT("What do the spirits want from me?"));
-    
-    ActiveDialogues.Add(TEXT("shaman_welcome"), WelcomeDialogue);
-    
-    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Dialogue data loaded"));
-}
-
-void UNarrativeManager::AdvanceStoryBeat(ENarr_StoryBeat NewBeat)
-{
-    if (!ValidateStoryBeatProgression(NewBeat))
+    for (FNarr_StoryBeat& Beat : StoryBeats)
     {
-        UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Invalid story beat progression to %d"), (int32)NewBeat);
-        return;
-    }
-    
-    // Mark current beat as completed
-    if (!CurrentStoryState.CompletedBeats.Contains(CurrentStoryState.CurrentBeat))
-    {
-        CurrentStoryState.CompletedBeats.Add(CurrentStoryState.CurrentBeat);
-    }
-    
-    // Set new current beat
-    ENarr_StoryBeat PreviousBeat = CurrentStoryState.CurrentBeat;
-    CurrentStoryState.CurrentBeat = NewBeat;
-    
-    // Increase consciousness level based on story progression
-    float ConsciousnessIncrease = 10.0f;
-    if (NewBeat == ENarr_StoryBeat::PlantCeremony || NewBeat == ENarr_StoryBeat::SpiritWalk)
-    {
-        ConsciousnessIncrease = 25.0f; // Major consciousness expansions
-    }
-    
-    ModifyConsciousnessLevel(ConsciousnessIncrease);
-    
-    // Broadcast completion event
-    OnStoryBeatCompleted.Broadcast(PreviousBeat);
-    
-    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Advanced story beat to %d"), (int32)NewBeat);
-}
-
-bool UNarrativeManager::IsStoryBeatCompleted(ENarr_StoryBeat Beat) const
-{
-    return CurrentStoryState.CompletedBeats.Contains(Beat);
-}
-
-ENarr_StoryBeat UNarrativeManager::GetCurrentStoryBeat() const
-{
-    return CurrentStoryState.CurrentBeat;
-}
-
-void UNarrativeManager::ModifyConsciousnessLevel(float Delta)
-{
-    float PreviousLevel = CurrentStoryState.ConsciousnessLevel;
-    CurrentStoryState.ConsciousnessLevel = FMath::Clamp(CurrentStoryState.ConsciousnessLevel + Delta, 0.0f, 100.0f);
-    
-    if (FMath::Abs(CurrentStoryState.ConsciousnessLevel - PreviousLevel) > 0.1f)
-    {
-        OnConsciousnessLevelChanged.Broadcast(CurrentStoryState.ConsciousnessLevel);
-        UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Consciousness level changed to %.2f"), CurrentStoryState.ConsciousnessLevel);
+        if (Beat.BeatID == BeatID && !Beat.bIsCompleted)
+        {
+            Beat.bIsCompleted = true;
+            UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Completed story beat '%s'"), *BeatID);
+            
+            // Unlock new quests
+            for (const FString& QuestID : Beat.UnlockedQuests)
+            {
+                UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Unlocked quest '%s'"), *QuestID);
+            }
+            
+            break;
+        }
     }
 }
 
-float UNarrativeManager::GetConsciousnessLevel() const
+bool UNarrativeManager::IsStoryBeatCompleted(const FString& BeatID) const
 {
-    return CurrentStoryState.ConsciousnessLevel;
+    for (const FNarr_StoryBeat& Beat : StoryBeats)
+    {
+        if (Beat.BeatID == BeatID)
+        {
+            return Beat.bIsCompleted;
+        }
+    }
+    return false;
 }
 
-bool UNarrativeManager::StartDialogue(const FString& DialogueID, AActor* Speaker, AActor* Listener)
+TArray<FString> UNarrativeManager::GetAvailableQuests() const
 {
-    if (!Speaker || !Listener)
+    TArray<FString> AvailableQuests;
+    
+    for (const FNarr_StoryBeat& Beat : StoryBeats)
     {
-        UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Cannot start dialogue - invalid Speaker or Listener"));
-        return false;
+        if (Beat.bIsCompleted)
+        {
+            for (const FString& QuestID : Beat.UnlockedQuests)
+            {
+                AvailableQuests.AddUnique(QuestID);
+            }
+        }
     }
     
-    FNarr_DialogueEntry* DialogueEntry = GetDialogueEntry(DialogueID);
-    if (!DialogueEntry)
+    return AvailableQuests;
+}
+
+void UNarrativeManager::StartDialogue(const FString& CharacterID, const FString& DialogueID)
+{
+    if (bIsInDialogue)
     {
-        UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Dialogue entry not found: %s"), *DialogueID);
-        return false;
+        UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Already in dialogue, ending current dialogue first"));
+        EndDialogue();
     }
     
-    // Check if story beat requirements are met
-    if (!IsStoryBeatCompleted(DialogueEntry->RequiredStoryBeat) && 
-        DialogueEntry->RequiredStoryBeat != CurrentStoryState.CurrentBeat)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Story beat requirement not met for dialogue: %s"), *DialogueID);
-        return false;
-    }
+    CurrentCharacterID = CharacterID;
+    CurrentDialogueIndex = 0;
+    bIsInDialogue = true;
     
-    // Set current dialogue
-    CurrentDialogueID = DialogueID;
-    CurrentSpeaker = Speaker;
-    CurrentListener = Listener;
+    // Load dialogue lines for this character/dialogue combination
+    // For now, create a sample dialogue
+    CurrentDialogue.Empty();
     
-    // Broadcast dialogue started event
-    OnDialogueStarted.Broadcast(DialogueEntry->SpeakerName, DialogueEntry->DialogueText);
+    FNarr_DialogueLine SampleLine;
+    SampleLine.SpeakerName = CharacterID;
+    SampleLine.DialogueText = FText::FromString(TEXT("Greetings, traveler. The spirits have guided you here."));
+    SampleLine.Duration = 4.0f;
+    SampleLine.ResponseOptions.Add(TEXT("Tell me about the spirits."));
+    SampleLine.ResponseOptions.Add(TEXT("I seek wisdom."));
+    SampleLine.ResponseOptions.Add(TEXT("Farewell."));
     
-    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Started dialogue %s with speaker %s"), 
-           *DialogueID, *DialogueEntry->SpeakerName);
+    CurrentDialogue.Add(SampleLine);
     
-    return true;
+    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Started dialogue with %s"), *CharacterID);
 }
 
 void UNarrativeManager::EndDialogue()
 {
-    if (!CurrentDialogueID.IsEmpty())
+    if (bIsInDialogue)
     {
-        UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Ending dialogue %s"), *CurrentDialogueID);
+        UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Ended dialogue with %s"), *CurrentCharacterID);
         
-        CurrentDialogueID = TEXT("");
-        CurrentSpeaker = nullptr;
-        CurrentListener = nullptr;
+        bIsInDialogue = false;
+        CurrentCharacterID = TEXT("");
+        CurrentDialogueIndex = 0;
+        CurrentDialogue.Empty();
     }
 }
 
-TArray<FString> UNarrativeManager::GetAvailableDialogueOptions() const
+FNarr_DialogueLine UNarrativeManager::GetCurrentDialogueLine() const
 {
-    if (CurrentDialogueID.IsEmpty())
+    if (bIsInDialogue && CurrentDialogue.IsValidIndex(CurrentDialogueIndex))
     {
-        return TArray<FString>();
+        return CurrentDialogue[CurrentDialogueIndex];
     }
     
-    FNarr_DialogueEntry* DialogueEntry = const_cast<UNarrativeManager*>(this)->GetDialogueEntry(CurrentDialogueID);
-    if (DialogueEntry)
+    return FNarr_DialogueLine();
+}
+
+void UNarrativeManager::SelectDialogueResponse(int32 ResponseIndex)
+{
+    if (!bIsInDialogue || !CurrentDialogue.IsValidIndex(CurrentDialogueIndex))
     {
-        return DialogueEntry->ResponseOptions;
+        return;
     }
     
-    return TArray<FString>();
-}
-
-bool UNarrativeManager::SelectDialogueOption(int32 OptionIndex)
-{
-    TArray<FString> Options = GetAvailableDialogueOptions();
+    const FNarr_DialogueLine& CurrentLine = CurrentDialogue[CurrentDialogueIndex];
     
-    if (!Options.IsValidIndex(OptionIndex))
+    if (CurrentLine.ResponseOptions.IsValidIndex(ResponseIndex))
     {
-        UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Invalid dialogue option index: %d"), OptionIndex);
-        return false;
+        const FString& SelectedResponse = CurrentLine.ResponseOptions[ResponseIndex];
+        UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Player selected response: %s"), *SelectedResponse);
+        
+        // Advance dialogue or end based on response
+        if (SelectedResponse.Contains(TEXT("Farewell")))
+        {
+            EndDialogue();
+        }
+        else
+        {
+            // For now, just end dialogue after any response
+            // In a full implementation, this would branch to different dialogue paths
+            EndDialogue();
+        }
     }
-    
-    FString SelectedOption = Options[OptionIndex];
-    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Selected dialogue option: %s"), *SelectedOption);
-    
-    // TODO: Process dialogue option selection and potentially advance story
-    
-    return true;
 }
 
-void UNarrativeManager::SetCharacterRelationship(const FString& CharacterName, bool bIsFriendly)
+void UNarrativeManager::ModifyRelationship(const FString& CharacterID, float DeltaValue)
 {
-    CurrentStoryState.CharacterRelationships.Add(CharacterName, bIsFriendly);
-    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Set relationship with %s to %s"), 
-           *CharacterName, bIsFriendly ? TEXT("Friendly") : TEXT("Unfriendly"));
-}
-
-bool UNarrativeManager::GetCharacterRelationship(const FString& CharacterName) const
-{
-    const bool* Relationship = CurrentStoryState.CharacterRelationships.Find(CharacterName);
-    return Relationship ? *Relationship : false;
-}
-
-void UNarrativeManager::UnlockLoreEntry(const FString& LoreID)
-{
-    if (!CurrentStoryState.UnlockedLoreEntries.Contains(LoreID))
+    for (FNarr_CharacterProfile& Profile : CharacterProfiles)
     {
-        CurrentStoryState.UnlockedLoreEntries.Add(LoreID);
-        UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Unlocked lore entry: %s"), *LoreID);
+        if (Profile.CharacterID == CharacterID)
+        {
+            Profile.RelationshipLevel = FMath::Clamp(Profile.RelationshipLevel + DeltaValue, -100.0f, 100.0f);
+            UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Modified relationship with %s by %.1f (now %.1f)"), 
+                   *CharacterID, DeltaValue, Profile.RelationshipLevel);
+            return;
+        }
     }
-}
-
-bool UNarrativeManager::IsLoreEntryUnlocked(const FString& LoreID) const
-{
-    return CurrentStoryState.UnlockedLoreEntries.Contains(LoreID);
-}
-
-TArray<FString> UNarrativeManager::GetUnlockedLoreEntries() const
-{
-    return CurrentStoryState.UnlockedLoreEntries;
-}
-
-FNarr_DialogueEntry* UNarrativeManager::GetDialogueEntry(const FString& DialogueID)
-{
-    return ActiveDialogues.Find(DialogueID);
-}
-
-bool UNarrativeManager::ValidateStoryBeatProgression(ENarr_StoryBeat NewBeat) const
-{
-    // Basic validation - ensure we're not skipping too far ahead
-    int32 CurrentBeatIndex = (int32)CurrentStoryState.CurrentBeat;
-    int32 NewBeatIndex = (int32)NewBeat;
     
-    // Allow progression to next beat or replay of current/previous beats
-    return (NewBeatIndex <= CurrentBeatIndex + 1);
+    UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Character %s not found for relationship modification"), *CharacterID);
+}
+
+float UNarrativeManager::GetRelationshipLevel(const FString& CharacterID) const
+{
+    for (const FNarr_CharacterProfile& Profile : CharacterProfiles)
+    {
+        if (Profile.CharacterID == CharacterID)
+        {
+            return Profile.RelationshipLevel;
+        }
+    }
+    
+    return 0.0f;
+}
+
+FNarr_CharacterProfile UNarrativeManager::GetCharacterProfile(const FString& CharacterID) const
+{
+    for (const FNarr_CharacterProfile& Profile : CharacterProfiles)
+    {
+        if (Profile.CharacterID == CharacterID)
+        {
+            return Profile;
+        }
+    }
+    
+    return FNarr_CharacterProfile();
+}
+
+void UNarrativeManager::TriggerConsciousnessEvent(const FString& EventID, float IntensityLevel)
+{
+    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Consciousness event '%s' triggered with intensity %.2f"), 
+           *EventID, IntensityLevel);
+    
+    // This would integrate with the consciousness system to trigger narrative events
+    // based on the player's consciousness level and specific events
+}
+
+void UNarrativeManager::UpdateNarrativeBasedOnConsciousness(float ConsciousnessLevel)
+{
+    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Updating narrative based on consciousness level %.2f"), 
+           ConsciousnessLevel);
+    
+    // Adjust available story beats and dialogue options based on consciousness level
+    // Higher consciousness might unlock deeper spiritual dialogues and story paths
+}
+
+void UNarrativeManager::LoadStoryData()
+{
+    // In a full implementation, this would load from data tables or JSON files
+    InitializeDefaultStoryBeats();
+}
+
+void UNarrativeManager::LoadCharacterData()
+{
+    // In a full implementation, this would load from data tables or JSON files
+    InitializeDefaultCharacters();
+}
+
+void UNarrativeManager::InitializeDefaultStoryBeats()
+{
+    StoryBeats.Empty();
+    
+    // Awakening Arc
+    FNarr_StoryBeat AwakeningBeat;
+    AwakeningBeat.BeatID = TEXT("awakening_intro");
+    AwakeningBeat.Title = FText::FromString(TEXT("The Great Awakening"));
+    AwakeningBeat.Description = FText::FromString(TEXT("The player awakens to their consciousness in the prehistoric world."));
+    AwakeningBeat.UnlockedQuests.Add(TEXT("meet_elder"));
+    AwakeningBeat.UnlockedQuests.Add(TEXT("explore_sacred_grove"));
+    AwakeningBeat.bIsCompleted = false;
+    StoryBeats.Add(AwakeningBeat);
+    
+    // Elder Meeting Arc
+    FNarr_StoryBeat ElderBeat;
+    ElderBeat.BeatID = TEXT("elder_meeting");
+    ElderBeat.Title = FText::FromString(TEXT("Wisdom of the Ancients"));
+    ElderBeat.Description = FText::FromString(TEXT("The tribal elder shares ancient wisdom about consciousness and the spirit world."));
+    ElderBeat.RequiredQuests.Add(TEXT("meet_elder"));
+    ElderBeat.UnlockedQuests.Add(TEXT("spirit_quest"));
+    ElderBeat.UnlockedQuests.Add(TEXT("beast_communication"));
+    ElderBeat.bIsCompleted = false;
+    StoryBeats.Add(ElderBeat);
+    
+    // Beast Speaker Arc
+    FNarr_StoryBeat BeastBeat;
+    BeastBeat.BeatID = TEXT("beast_communion");
+    BeastBeat.Title = FText::FromString(TEXT("Language of the Ancient Ones"));
+    BeastBeat.Description = FText::FromString(TEXT("Learning to communicate with the great beasts of the prehistoric world."));
+    BeastBeat.RequiredQuests.Add(TEXT("beast_communication"));
+    BeastBeat.UnlockedQuests.Add(TEXT("dinosaur_alliance"));
+    BeastBeat.bIsCompleted = false;
+    StoryBeats.Add(BeastBeat);
+}
+
+void UNarrativeManager::InitializeDefaultCharacters()
+{
+    CharacterProfiles.Empty();
+    
+    // Elder Shaman
+    FNarr_CharacterProfile ElderProfile;
+    ElderProfile.CharacterID = TEXT("elder_shaman");
+    ElderProfile.CharacterName = FText::FromString(TEXT("Keeper of Ancient Ways"));
+    ElderProfile.BackgroundStory = FText::FromString(TEXT("A wise elder who has spent decades studying the connection between consciousness and the natural world."));
+    ElderProfile.PersonalityTraits.Add(TEXT("Wise"));
+    ElderProfile.PersonalityTraits.Add(TEXT("Patient"));
+    ElderProfile.PersonalityTraits.Add(TEXT("Mystical"));
+    ElderProfile.VoiceActorProfile = TEXT("Elder_Shaman");
+    ElderProfile.RelationshipLevel = 10.0f;
+    CharacterProfiles.Add(ElderProfile);
+    
+    // Beast Speaker
+    FNarr_CharacterProfile BeastProfile;
+    BeastProfile.CharacterID = TEXT("beast_speaker");
+    BeastProfile.CharacterName = FText::FromString(TEXT("Voice of the Wild"));
+    BeastProfile.BackgroundStory = FText::FromString(TEXT("A tribal member with the rare gift of communicating with the great beasts."));
+    BeastProfile.PersonalityTraits.Add(TEXT("Intuitive"));
+    BeastProfile.PersonalityTraits.Add(TEXT("Brave"));
+    BeastProfile.PersonalityTraits.Add(TEXT("Empathetic"));
+    BeastProfile.VoiceActorProfile = TEXT("Beast_Speaker");
+    BeastProfile.RelationshipLevel = 0.0f;
+    CharacterProfiles.Add(BeastProfile);
+    
+    // Tribal Leader
+    FNarr_CharacterProfile LeaderProfile;
+    LeaderProfile.CharacterID = TEXT("tribal_leader");
+    LeaderProfile.CharacterName = FText::FromString(TEXT("Guardian of the People"));
+    LeaderProfile.BackgroundStory = FText::FromString(TEXT("The strong leader who guides the tribe through the challenges of the prehistoric world."));
+    LeaderProfile.PersonalityTraits.Add(TEXT("Charismatic"));
+    LeaderProfile.PersonalityTraits.Add(TEXT("Protective"));
+    LeaderProfile.PersonalityTraits.Add(TEXT("Inspiring"));
+    LeaderProfile.VoiceActorProfile = TEXT("Tribal_Leader");
+    LeaderProfile.RelationshipLevel = 5.0f;
+    CharacterProfiles.Add(LeaderProfile);
 }
