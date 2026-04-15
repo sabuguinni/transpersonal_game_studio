@@ -1,332 +1,314 @@
 #include "PerformanceMonitoringSystem.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "HAL/IConsoleManager.h"
-#include "Stats/StatsHierarchical.h"
+#include "HAL/PlatformFilemanager.h"
+#include "Misc/DateTime.h"
+#include "Stats/Stats.h"
 #include "RenderingThread.h"
-#include "RHI.h"
 #include "Engine/GameViewportClient.h"
-#include "EngineUtils.h"
+#include "Components/SceneComponent.h"
 
-DEFINE_STAT(STAT_PerformanceMonitorUpdate);
-DEFINE_STAT(STAT_ActiveActors);
-DEFINE_STAT(STAT_FrameTimeMS);
-
-APerformanceMonitoringSystem::APerformanceMonitoringSystem()
+APerf_PerformanceMonitoringSystem::APerf_PerformanceMonitoringSystem()
 {
     PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 0.0f; // Tick every frame for accurate monitoring
+    PrimaryActorTick.TickInterval = 0.1f; // Update 10 times per second
 
     // Create root component
-    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
+    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
     RootComponent = RootSceneComponent;
 
     // Initialize default values
-    MonitoringInterval = 0.1f; // Update metrics 10 times per second
-    bEnableLogging = true;
-    bEnableAutomaticOptimization = false;
-    MaxHistorySize = 300; // 30 seconds at 10Hz
-    
-    TimeSinceLastUpdate = 0.0f;
-    AccumulatedFrameTime = 0.0f;
-    FrameCount = 0;
+    TargetFPS = 60.0f;
+    MinimumFPS = 30.0f;
+    MaxMemoryUsageMB = 4096.0f;
+    MaxDrawCalls = 2000;
+    bAutomaticQualityAdjustment = true;
+    MetricsUpdateInterval = 1.0f;
+    LastMetricsUpdate = 0.0f;
 
-    // Initialize thresholds
-    PerformanceThresholds = FPerf_PerformanceThresholds();
+    // Initialize LOD settings
+    CurrentLODSettings.LODDistanceScale = 1.0f;
+    CurrentLODSettings.CullingDistanceScale = 1.0f;
+    CurrentLODSettings.MaxLODLevel = 3;
+    CurrentLODSettings.bEnableAutomaticLOD = true;
+
+    // Initialize FPS history
+    FPSHistory.Reserve(MaxFPSHistorySize);
 }
 
-void APerformanceMonitoringSystem::BeginPlay()
+void APerf_PerformanceMonitoringSystem::BeginPlay()
 {
     Super::BeginPlay();
 
-    UE_LOG(LogTemp, Warning, TEXT("Performance Monitoring System started"));
-    
-    // Initialize performance history
-    FrameTimeHistory.Reserve(MaxHistorySize);
-    
-    // Enable stats collection
-    if (GEngine && GEngine->GetGameViewport())
-    {
-        GEngine->Exec(GetWorld(), TEXT("stat fps"));
-        GEngine->Exec(GetWorld(), TEXT("stat unit"));
-    }
-}
+    UE_LOG(LogTemp, Log, TEXT("Performance Monitoring System initialized"));
 
-void APerformanceMonitoringSystem::EndPlay(const EEndPlayReason::Type EndPlayReason)
-{
-    if (bEnableLogging)
+    // Register with world subsystem
+    if (UPerf_PerformanceWorldSubsystem* PerfSubsystem = UPerf_PerformanceWorldSubsystem::Get(this))
     {
-        LogPerformanceReport();
+        PerfSubsystem->RegisterPerformanceMonitor(this);
     }
 
-    Super::EndPlay(EndPlayReason);
+    // Apply initial performance settings
+    ApplyPerformanceLevelSettings(EPerf_PerformanceLevel::High);
 }
 
-void APerformanceMonitoringSystem::Tick(float DeltaTime)
+void APerf_PerformanceMonitoringSystem::Tick(float DeltaTime)
 {
-    SCOPE_CYCLE_COUNTER(STAT_PerformanceMonitorUpdate);
-    
     Super::Tick(DeltaTime);
 
-    // Accumulate frame time data
-    AccumulatedFrameTime += DeltaTime;
-    FrameCount++;
-    TimeSinceLastUpdate += DeltaTime;
+    LastMetricsUpdate += DeltaTime;
 
     // Update metrics at specified interval
-    if (TimeSinceLastUpdate >= MonitoringInterval)
+    if (LastMetricsUpdate >= MetricsUpdateInterval)
     {
         UpdatePerformanceMetrics();
-        TimeSinceLastUpdate = 0.0f;
         
-        // Check if automatic optimization is needed
-        if (bEnableAutomaticOptimization && !IsPerformanceAcceptable())
+        if (bAutomaticQualityAdjustment)
         {
-            TriggerPerformanceOptimization();
+            AdjustQualitySettings();
         }
+
+        LastMetricsUpdate = 0.0f;
     }
 }
 
-void APerformanceMonitoringSystem::UpdatePerformanceMetrics()
+void APerf_PerformanceMonitoringSystem::UpdatePerformanceMetrics()
 {
-    if (FrameCount == 0) return;
+    // Get current FPS
+    float CurrentFPS = 1.0f / GetWorld()->GetDeltaSeconds();
+    CurrentFPS = FMath::Clamp(CurrentFPS, 1.0f, 300.0f); // Reasonable bounds
 
-    // Calculate average frame time and FPS
-    float AvgFrameTime = AccumulatedFrameTime / FrameCount;
-    CurrentMetrics.FrameTimeMS = AvgFrameTime * 1000.0f;
-    CurrentMetrics.FPS = 1.0f / AvgFrameTime;
+    // Update FPS history
+    UpdateFPSHistory(CurrentFPS);
 
-    // Add to history
-    FrameTimeHistory.Add(CurrentMetrics.FrameTimeMS);
-    if (FrameTimeHistory.Num() > MaxHistorySize)
-    {
-        FrameTimeHistory.RemoveAt(0);
-    }
+    // Calculate metrics
+    CurrentMetrics.CurrentFPS = CurrentFPS;
+    CurrentMetrics.AverageFPS = CalculateAverageFPS();
+    CurrentMetrics.FrameTime = (1.0f / CurrentFPS) * 1000.0f; // Convert to milliseconds
 
-    // Count active actors in the world
-    if (UWorld* World = GetWorld())
-    {
-        CurrentMetrics.ActiveActorCount = 0;
-        CurrentMetrics.VisibleActorCount = 0;
-        
-        for (TActorIterator<AActor> ActorIterator(World); ActorIterator; ++ActorIterator)
-        {
-            AActor* Actor = *ActorIterator;
-            if (Actor && !Actor->IsPendingKill())
-            {
-                CurrentMetrics.ActiveActorCount++;
-                
-                // Check if actor is visible (has renderable components)
-                if (Actor->GetRootComponent() && !Actor->IsHidden())
-                {
-                    CurrentMetrics.VisibleActorCount++;
-                }
-            }
-        }
-    }
-
-    // Update stats
-    SET_DWORD_STAT(STAT_ActiveActors, CurrentMetrics.ActiveActorCount);
-    SET_FLOAT_STAT(STAT_FrameTimeMS, CurrentMetrics.FrameTimeMS);
-
-    // Get memory usage (approximate)
+    // Get memory usage (approximation)
     FPlatformMemoryStats MemStats = FPlatformMemory::GetStats();
     CurrentMetrics.MemoryUsageMB = MemStats.UsedPhysical / (1024.0f * 1024.0f);
 
-    // Estimate draw calls and triangles (these would need more complex implementation)
-    // For now, use approximations based on visible actors
-    CurrentMetrics.DrawCalls = CurrentMetrics.VisibleActorCount * 2; // Rough estimate
-    CurrentMetrics.TriangleCount = CurrentMetrics.VisibleActorCount * 1000; // Very rough estimate
+    // Get visible actors count
+    if (UWorld* World = GetWorld())
+    {
+        int32 ActorCount = 0;
+        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+        {
+            if (ActorItr->WasRecentlyRendered(0.1f))
+            {
+                ActorCount++;
+            }
+        }
+        CurrentMetrics.VisibleActors = ActorCount;
+    }
 
-    // Reset accumulation
-    AccumulatedFrameTime = 0.0f;
-    FrameCount = 0;
-
-    // Log performance if enabled
-    if (bEnableLogging)
+    // Determine performance level based on current FPS
+    if (CurrentMetrics.AverageFPS >= 55.0f)
     {
-        UE_LOG(LogTemp, Log, TEXT("Performance: FPS=%.1f, FrameTime=%.2fms, Actors=%d, Memory=%.1fMB"), 
-               CurrentMetrics.FPS, CurrentMetrics.FrameTimeMS, 
-               CurrentMetrics.ActiveActorCount, CurrentMetrics.MemoryUsageMB);
+        CurrentMetrics.CurrentLevel = EPerf_PerformanceLevel::Ultra;
     }
-}
-
-EPerf_PerformanceLevel APerformanceMonitoringSystem::GetCurrentPerformanceLevel() const
-{
-    float CurrentFPS = CurrentMetrics.FPS;
-    
-    // Determine target FPS based on platform
-    float TargetFPS = PerformanceThresholds.TargetFPS_PC; // Default to PC target
-    
-    if (CurrentFPS >= TargetFPS * 0.95f)
+    else if (CurrentMetrics.AverageFPS >= 45.0f)
     {
-        return EPerf_PerformanceLevel::Excellent;
+        CurrentMetrics.CurrentLevel = EPerf_PerformanceLevel::High;
     }
-    else if (CurrentFPS >= TargetFPS * 0.85f)
+    else if (CurrentMetrics.AverageFPS >= 35.0f)
     {
-        return EPerf_PerformanceLevel::Good;
+        CurrentMetrics.CurrentLevel = EPerf_PerformanceLevel::Medium;
     }
-    else if (CurrentFPS >= TargetFPS * 0.70f)
+    else if (CurrentMetrics.AverageFPS >= 25.0f)
     {
-        return EPerf_PerformanceLevel::Acceptable;
-    }
-    else if (CurrentFPS >= TargetFPS * 0.50f)
-    {
-        return EPerf_PerformanceLevel::Poor;
+        CurrentMetrics.CurrentLevel = EPerf_PerformanceLevel::Low;
     }
     else
     {
-        return EPerf_PerformanceLevel::Critical;
+        CurrentMetrics.CurrentLevel = EPerf_PerformanceLevel::Potato;
     }
 }
 
-float APerformanceMonitoringSystem::GetAverageFrameTime() const
+void APerf_PerformanceMonitoringSystem::AdjustQualitySettings()
 {
-    if (FrameTimeHistory.Num() == 0) return 0.0f;
+    static EPerf_PerformanceLevel LastLevel = EPerf_PerformanceLevel::High;
     
-    float Sum = 0.0f;
-    for (float FrameTime : FrameTimeHistory)
+    // Only adjust if performance level has changed
+    if (CurrentMetrics.CurrentLevel != LastLevel)
     {
-        Sum += FrameTime;
+        ApplyPerformanceLevelSettings(CurrentMetrics.CurrentLevel);
+        LastLevel = CurrentMetrics.CurrentLevel;
+        
+        UE_LOG(LogTemp, Warning, TEXT("Performance level adjusted to: %d"), (int32)CurrentMetrics.CurrentLevel);
     }
-    
-    return Sum / FrameTimeHistory.Num();
 }
 
-float APerformanceMonitoringSystem::GetAverageFPS() const
+void APerf_PerformanceMonitoringSystem::ApplyPerformanceLevelSettings(EPerf_PerformanceLevel Level)
 {
-    float AvgFrameTime = GetAverageFrameTime();
-    return AvgFrameTime > 0.0f ? 1000.0f / AvgFrameTime : 0.0f;
-}
+    if (!GetWorld())
+    {
+        return;
+    }
 
-void APerformanceMonitoringSystem::ResetPerformanceHistory()
-{
-    FrameTimeHistory.Empty();
-    AccumulatedFrameTime = 0.0f;
-    FrameCount = 0;
-    TimeSinceLastUpdate = 0.0f;
-    
-    UE_LOG(LogTemp, Warning, TEXT("Performance history reset"));
-}
-
-bool APerformanceMonitoringSystem::IsPerformanceAcceptable() const
-{
-    EPerf_PerformanceLevel Level = GetCurrentPerformanceLevel();
-    return Level == EPerf_PerformanceLevel::Excellent || 
-           Level == EPerf_PerformanceLevel::Good || 
-           Level == EPerf_PerformanceLevel::Acceptable;
-}
-
-void APerformanceMonitoringSystem::TriggerPerformanceOptimization()
-{
-    UE_LOG(LogTemp, Warning, TEXT("Triggering automatic performance optimization"));
-    
-    EPerf_PerformanceLevel Level = GetCurrentPerformanceLevel();
-    
     switch (Level)
     {
-        case EPerf_PerformanceLevel::Poor:
-            OptimizeLODSettings();
-            OptimizeCullingSettings();
+        case EPerf_PerformanceLevel::Ultra:
+            // Ultra quality settings
+            GetWorld()->Exec(GetWorld(), TEXT("r.ShadowQuality 4"));
+            GetWorld()->Exec(GetWorld(), TEXT("r.PostProcessAAQuality 6"));
+            GetWorld()->Exec(GetWorld(), TEXT("r.DetailMode 2"));
+            GetWorld()->Exec(GetWorld(), TEXT("r.ViewDistanceScale 1.0"));
+            CurrentLODSettings.LODDistanceScale = 1.0f;
             break;
-            
-        case EPerf_PerformanceLevel::Critical:
-            OptimizeLODSettings();
-            OptimizeCullingSettings();
-            OptimizeShadowSettings();
-            OptimizeTextureStreaming();
+
+        case EPerf_PerformanceLevel::High:
+            // High quality settings
+            GetWorld()->Exec(GetWorld(), TEXT("r.ShadowQuality 3"));
+            GetWorld()->Exec(GetWorld(), TEXT("r.PostProcessAAQuality 4"));
+            GetWorld()->Exec(GetWorld(), TEXT("r.DetailMode 2"));
+            GetWorld()->Exec(GetWorld(), TEXT("r.ViewDistanceScale 0.9"));
+            CurrentLODSettings.LODDistanceScale = 1.1f;
             break;
-            
-        default:
+
+        case EPerf_PerformanceLevel::Medium:
+            // Medium quality settings
+            GetWorld()->Exec(GetWorld(), TEXT("r.ShadowQuality 2"));
+            GetWorld()->Exec(GetWorld(), TEXT("r.PostProcessAAQuality 2"));
+            GetWorld()->Exec(GetWorld(), TEXT("r.DetailMode 1"));
+            GetWorld()->Exec(GetWorld(), TEXT("r.ViewDistanceScale 0.8"));
+            CurrentLODSettings.LODDistanceScale = 1.3f;
+            break;
+
+        case EPerf_PerformanceLevel::Low:
+            // Low quality settings
+            GetWorld()->Exec(GetWorld(), TEXT("r.ShadowQuality 1"));
+            GetWorld()->Exec(GetWorld(), TEXT("r.PostProcessAAQuality 0"));
+            GetWorld()->Exec(GetWorld(), TEXT("r.DetailMode 0"));
+            GetWorld()->Exec(GetWorld(), TEXT("r.ViewDistanceScale 0.6"));
+            CurrentLODSettings.LODDistanceScale = 1.5f;
+            break;
+
+        case EPerf_PerformanceLevel::Potato:
+            // Potato quality settings
+            GetWorld()->Exec(GetWorld(), TEXT("r.ShadowQuality 0"));
+            GetWorld()->Exec(GetWorld(), TEXT("r.PostProcessAAQuality 0"));
+            GetWorld()->Exec(GetWorld(), TEXT("r.DetailMode 0"));
+            GetWorld()->Exec(GetWorld(), TEXT("r.ViewDistanceScale 0.4"));
+            CurrentLODSettings.LODDistanceScale = 2.0f;
             break;
     }
+
+    // Apply LOD settings
+    ApplyLODSettings(CurrentLODSettings);
 }
 
-void APerformanceMonitoringSystem::LogPerformanceReport()
+FPerf_PerformanceMetrics APerf_PerformanceMonitoringSystem::GetCurrentMetrics() const
 {
-    UE_LOG(LogTemp, Warning, TEXT("=== PERFORMANCE REPORT ==="));
-    UE_LOG(LogTemp, Warning, TEXT("Current FPS: %.1f"), CurrentMetrics.FPS);
-    UE_LOG(LogTemp, Warning, TEXT("Frame Time: %.2f ms"), CurrentMetrics.FrameTimeMS);
-    UE_LOG(LogTemp, Warning, TEXT("Active Actors: %d"), CurrentMetrics.ActiveActorCount);
-    UE_LOG(LogTemp, Warning, TEXT("Visible Actors: %d"), CurrentMetrics.VisibleActorCount);
-    UE_LOG(LogTemp, Warning, TEXT("Memory Usage: %.1f MB"), CurrentMetrics.MemoryUsageMB);
-    UE_LOG(LogTemp, Warning, TEXT("Performance Level: %s"), 
-           *UEnum::GetValueAsString(GetCurrentPerformanceLevel()));
-    UE_LOG(LogTemp, Warning, TEXT("Average FPS (history): %.1f"), GetAverageFPS());
-    UE_LOG(LogTemp, Warning, TEXT("=== END REPORT ==="));
+    return CurrentMetrics;
 }
 
-void APerformanceMonitoringSystem::OptimizeLODSettings()
+void APerf_PerformanceMonitoringSystem::SetPerformanceLevel(EPerf_PerformanceLevel NewLevel)
 {
+    ApplyPerformanceLevelSettings(NewLevel);
+    CurrentMetrics.CurrentLevel = NewLevel;
+}
+
+void APerf_PerformanceMonitoringSystem::EnableAutomaticQualityAdjustment(bool bEnable)
+{
+    bAutomaticQualityAdjustment = bEnable;
+    UE_LOG(LogTemp, Log, TEXT("Automatic quality adjustment: %s"), bEnable ? TEXT("Enabled") : TEXT("Disabled"));
+}
+
+void APerf_PerformanceMonitoringSystem::ApplyLODSettings(const FPerf_LODSettings& Settings)
+{
+    CurrentLODSettings = Settings;
+
     if (UWorld* World = GetWorld())
     {
-        UE_LOG(LogTemp, Warning, TEXT("Optimizing LOD settings for better performance"));
-        
-        // Increase LOD bias to use lower detail models sooner
-        if (GEngine)
+        // Apply LOD distance scale
+        FString Command = FString::Printf(TEXT("r.StaticMeshLODDistanceScale %f"), Settings.LODDistanceScale);
+        World->Exec(World, *Command);
+
+        // Apply culling distance scale
+        Command = FString::Printf(TEXT("r.CullDistanceScale %f"), Settings.CullingDistanceScale);
+        World->Exec(World, *Command);
+
+        // Force LOD level if not automatic
+        if (!Settings.bEnableAutomaticLOD)
         {
-            GEngine->Exec(World, TEXT("r.ForceLOD 1"));
-            GEngine->Exec(World, TEXT("r.StaticMeshLODDistanceScale 0.8"));
-            GEngine->Exec(World, TEXT("r.SkeletalMeshLODBias 1"));
+            Command = FString::Printf(TEXT("r.ForceLOD %d"), Settings.MaxLODLevel);
+            World->Exec(World, *Command);
+        }
+        else
+        {
+            World->Exec(World, TEXT("r.ForceLOD -1")); // Enable automatic LOD
         }
     }
 }
 
-void APerformanceMonitoringSystem::OptimizeCullingSettings()
+void APerf_PerformanceMonitoringSystem::ForceGarbageCollection()
 {
-    if (UWorld* World = GetWorld())
+    if (GEngine)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Optimizing culling settings for better performance"));
-        
-        if (GEngine)
-        {
-            // Reduce view distance
-            GEngine->Exec(World, TEXT("r.ViewDistanceScale 0.7"));
-            
-            // Enable more aggressive occlusion culling
-            GEngine->Exec(World, TEXT("r.HZBOcclusion 1"));
-            GEngine->Exec(World, TEXT("r.AllowOcclusionQueries 1"));
-            
-            // Reduce foliage render distance
-            GEngine->Exec(World, TEXT("foliage.MaxTrianglesToRender 500000"));
-        }
+        GEngine->ForceGarbageCollection(true);
+        UE_LOG(LogTemp, Log, TEXT("Forced garbage collection"));
     }
 }
 
-void APerformanceMonitoringSystem::OptimizeShadowSettings()
+float APerf_PerformanceMonitoringSystem::CalculateAverageFPS() const
 {
-    if (UWorld* World = GetWorld())
+    if (FPSHistory.Num() == 0)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Optimizing shadow settings for better performance"));
-        
-        if (GEngine)
-        {
-            // Reduce shadow resolution
-            GEngine->Exec(World, TEXT("r.Shadow.MaxResolution 1024"));
-            
-            // Reduce shadow distance
-            GEngine->Exec(World, TEXT("r.Shadow.DistanceScale 0.6"));
-            
-            // Disable some shadow features
-            GEngine->Exec(World, TEXT("r.Shadow.Virtual.Enable 0"));
-        }
+        return 60.0f; // Default
+    }
+
+    float Sum = 0.0f;
+    for (float FPS : FPSHistory)
+    {
+        Sum += FPS;
+    }
+
+    return Sum / FPSHistory.Num();
+}
+
+void APerf_PerformanceMonitoringSystem::UpdateFPSHistory(float CurrentFPS)
+{
+    FPSHistory.Add(CurrentFPS);
+
+    // Keep history size within bounds
+    if (FPSHistory.Num() > MaxFPSHistorySize)
+    {
+        FPSHistory.RemoveAt(0);
     }
 }
 
-void APerformanceMonitoringSystem::OptimizeTextureStreaming()
+// World Subsystem Implementation
+void UPerf_PerformanceWorldSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
-    if (UWorld* World = GetWorld())
+    Super::Initialize(Collection);
+    PerformanceMonitor = nullptr;
+}
+
+void UPerf_PerformanceWorldSubsystem::Deinitialize()
+{
+    PerformanceMonitor = nullptr;
+    Super::Deinitialize();
+}
+
+UPerf_PerformanceWorldSubsystem* UPerf_PerformanceWorldSubsystem::Get(const UObject* WorldContext)
+{
+    if (const UWorld* World = GEngine->GetWorldFromContextObject(WorldContext, EGetWorldErrorMode::LogAndReturnNull))
     {
-        UE_LOG(LogTemp, Warning, TEXT("Optimizing texture streaming for better performance"));
-        
-        if (GEngine)
-        {
-            // Reduce texture pool size
-            GEngine->Exec(World, TEXT("r.Streaming.PoolSize 512"));
-            
-            // Enable more aggressive texture streaming
-            GEngine->Exec(World, TEXT("r.TextureStreaming 1"));
-            GEngine->Exec(World, TEXT("r.Streaming.MipBias 1"));
-        }
+        return World->GetSubsystem<UPerf_PerformanceWorldSubsystem>();
     }
+    return nullptr;
+}
+
+APerf_PerformanceMonitoringSystem* UPerf_PerformanceWorldSubsystem::GetPerformanceMonitor() const
+{
+    return PerformanceMonitor;
+}
+
+void UPerf_PerformanceWorldSubsystem::RegisterPerformanceMonitor(APerf_PerformanceMonitoringSystem* Monitor)
+{
+    PerformanceMonitor = Monitor;
+    UE_LOG(LogTemp, Log, TEXT("Performance monitor registered with world subsystem"));
 }
