@@ -3,143 +3,151 @@
 #include "CoreMinimal.h"
 #include "Engine/World.h"
 #include "Components/ActorComponent.h"
-#include "Engine/Engine.h"
+#include "Components/PrimitiveComponent.h"
+#include "Engine/HitResult.h"
 #include "PhysicsEngine/PhysicsSettings.h"
-#include "Chaos/ChaosEngineInterface.h"
+#include "Subsystems/WorldSubsystem.h"
+#include "../SharedTypes.h"
 #include "PhysicsSystemManager.generated.h"
 
-class UCore_RagdollComponent;
-class UCore_DestructionComponent;
-class UCore_CollisionComponent;
-
-UENUM(BlueprintType)
-enum class ECore_PhysicsQuality : uint8
-{
-    Low         UMETA(DisplayName = "Low Quality"),
-    Medium      UMETA(DisplayName = "Medium Quality"),
-    High        UMETA(DisplayName = "High Quality"),
-    Ultra       UMETA(DisplayName = "Ultra Quality")
-};
-
-USTRUCT(BlueprintType)
-struct FCore_PhysicsSettings
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    float GravityScale = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    int32 MaxSubsteps = 6;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    float FixedTimeStep = 0.016667f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    ECore_PhysicsQuality QualityLevel = ECore_PhysicsQuality::High;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxSimulatedBodies = 1000;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float CullDistance = 5000.0f;
-};
-
-USTRUCT(BlueprintType)
-struct FCore_PhysicsStats
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly, Category = "Stats")
-    int32 ActiveRigidBodies = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Stats")
-    int32 SleepingBodies = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Stats")
-    float PhysicsFrameTime = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Stats")
-    int32 CollisionPairs = 0;
-};
+class UCollisionManager;
+class URagdollSystem;
+class UDestructionSystem;
 
 /**
- * Core physics system manager that orchestrates all physics subsystems
- * Manages ragdoll, destruction, collision, and performance optimization
+ * Core physics system manager that coordinates all physics subsystems
+ * Handles physics simulation settings, collision detection, and performance optimization
  */
-UCLASS(BlueprintType, Blueprintable, ClassGroup=(TranspersonalGame))
-class TRANSPERSONALGAME_API UCore_PhysicsSystemManager : public UActorComponent
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UPhysicsSystemManager : public UWorldSubsystem
 {
     GENERATED_BODY()
 
 public:
-    UCore_PhysicsSystemManager();
+    UPhysicsSystemManager();
+
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+    virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
+
+    // Physics simulation control
+    UFUNCTION(BlueprintCallable, Category = "Physics")
+    void SetPhysicsSimulationEnabled(bool bEnabled);
+
+    UFUNCTION(BlueprintCallable, Category = "Physics")
+    bool IsPhysicsSimulationEnabled() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Physics")
+    void SetGravityScale(float NewGravityScale);
+
+    UFUNCTION(BlueprintCallable, Category = "Physics")
+    float GetGravityScale() const;
+
+    // Performance optimization
+    UFUNCTION(BlueprintCallable, Category = "Physics|Performance")
+    void SetPhysicsLODDistance(float Distance);
+
+    UFUNCTION(BlueprintCallable, Category = "Physics|Performance")
+    void OptimizePhysicsForPerformance();
+
+    UFUNCTION(BlueprintCallable, Category = "Physics|Performance")
+    void SetMaxPhysicsObjects(int32 MaxObjects);
+
+    // Collision management
+    UFUNCTION(BlueprintCallable, Category = "Physics|Collision")
+    bool LineTrace(const FVector& Start, const FVector& End, FHitResult& OutHit, bool bTraceComplex = false);
+
+    UFUNCTION(BlueprintCallable, Category = "Physics|Collision")
+    bool SphereTrace(const FVector& Start, const FVector& End, float Radius, FHitResult& OutHit);
+
+    UFUNCTION(BlueprintCallable, Category = "Physics|Collision")
+    void RegisterCollisionObject(UPrimitiveComponent* Component);
+
+    UFUNCTION(BlueprintCallable, Category = "Physics|Collision")
+    void UnregisterCollisionObject(UPrimitiveComponent* Component);
+
+    // Ragdoll system integration
+    UFUNCTION(BlueprintCallable, Category = "Physics|Ragdoll")
+    void EnableRagdollForActor(AActor* Actor);
+
+    UFUNCTION(BlueprintCallable, Category = "Physics|Ragdoll")
+    void DisableRagdollForActor(AActor* Actor);
+
+    // Destruction system integration
+    UFUNCTION(BlueprintCallable, Category = "Physics|Destruction")
+    void TriggerDestruction(AActor* Actor, const FVector& ImpactPoint, float Force);
+
+    UFUNCTION(BlueprintCallable, Category = "Physics|Destruction")
+    void SetDestructionEnabled(bool bEnabled);
+
+    // Physics material management
+    UFUNCTION(BlueprintCallable, Category = "Physics|Materials")
+    void ApplyPhysicsMaterial(UPrimitiveComponent* Component, class UPhysicalMaterial* Material);
+
+    // Debug and diagnostics
+    UFUNCTION(BlueprintCallable, Category = "Physics|Debug", CallInEditor)
+    void RunPhysicsSystemDiagnostics();
+
+    UFUNCTION(BlueprintCallable, Category = "Physics|Debug")
+    void TogglePhysicsDebugDraw(bool bEnabled);
+
+    UFUNCTION(BlueprintCallable, Category = "Physics|Debug")
+    FString GetPhysicsSystemStatus() const;
 
 protected:
-    virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    // Physics simulation settings
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Physics Settings")
+    bool bPhysicsSimulationEnabled;
 
-public:
-    // Core physics management
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
-    void InitializePhysicsSystem();
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Physics Settings")
+    float GravityScale;
 
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
-    void ShutdownPhysicsSystem();
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Physics Settings")
+    float PhysicsLODDistance;
 
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
-    void UpdatePhysicsSettings(const FCore_PhysicsSettings& NewSettings);
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Physics Settings")
+    int32 MaxPhysicsObjects;
 
-    // Performance management
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void OptimizePhysicsPerformance();
+    // Performance settings
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance")
+    bool bOptimizeForPerformance;
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void CullDistantPhysicsBodies(const FVector& ViewerLocation);
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance")
+    float PhysicsTickRate;
 
-    // Component registration
-    UFUNCTION(BlueprintCallable, Category = "Component Management")
-    void RegisterRagdollComponent(UCore_RagdollComponent* Component);
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance")
+    int32 MaxSimulationSteps;
 
-    UFUNCTION(BlueprintCallable, Category = "Component Management")
-    void RegisterDestructionComponent(UCore_DestructionComponent* Component);
+    // Subsystem references
+    UPROPERTY()
+    TObjectPtr<UCollisionManager> CollisionManager;
 
-    UFUNCTION(BlueprintCallable, Category = "Component Management")
-    void RegisterCollisionComponent(UCore_CollisionComponent* Component);
+    UPROPERTY()
+    TObjectPtr<URagdollSystem> RagdollSystem;
 
-    // Stats and monitoring
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Stats")
-    FCore_PhysicsStats GetPhysicsStats() const;
+    UPROPERTY()
+    TObjectPtr<UDestructionSystem> DestructionSystem;
 
-    UFUNCTION(BlueprintCallable, Category = "Debug")
-    void TogglePhysicsDebugDraw();
+    // Registered collision objects
+    UPROPERTY()
+    TArray<TWeakObjectPtr<UPrimitiveComponent>> RegisteredCollisionObjects;
 
-    UFUNCTION(CallInEditor, Category = "Editor Tools")
-    void ValidatePhysicsSetup();
+    // Debug settings
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Debug")
+    bool bDebugDrawEnabled;
 
-protected:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    FCore_PhysicsSettings PhysicsSettings;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Stats")
-    FCore_PhysicsStats CurrentStats;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Components")
-    TArray<UCore_RagdollComponent*> RegisteredRagdollComponents;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Components")
-    TArray<UCore_DestructionComponent*> RegisteredDestructionComponents;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Components")
-    TArray<UCore_CollisionComponent*> RegisteredCollisionComponents;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Debug")
+    bool bShowPhysicsStats;
 
 private:
-    void UpdatePhysicsStats();
-    void ApplyQualitySettings();
-    void ManagePhysicsLOD();
-
-    bool bIsInitialized = false;
-    bool bDebugDrawEnabled = false;
-    float StatsUpdateTimer = 0.0f;
-    static constexpr float STATS_UPDATE_FREQUENCY = 0.1f; // 10 times per second
+    void InitializeSubsystems();
+    void CleanupSubsystems();
+    void UpdatePhysicsSettings();
+    void ValidatePhysicsObjects();
+    
+    // Performance monitoring
+    float LastPerformanceCheck;
+    int32 CurrentPhysicsObjectCount;
+    float AveragePhysicsTickTime;
 };
