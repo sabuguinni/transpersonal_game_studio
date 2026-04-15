@@ -1,490 +1,409 @@
 #include "EngineArchitectureManager.h"
-#include "PerformanceProfiler.h"
-#include "SystemValidationManager.h"
-#include "ModuleDependencyTracker.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "TimerManager.h"
+#include "HAL/PlatformMemory.h"
+#include "Stats/Stats.h"
 #include "Misc/DateTime.h"
+#include "Engine/GameInstance.h"
+#include "WorldPartition/WorldPartition.h"
 
 UEngineArchitectureManager::UEngineArchitectureManager()
 {
-    // Set default performance targets
-    CurrentPerformanceTarget = EEng_PerformanceTarget::Balanced;
-    bEnforceStrictValidation = true;
-    bAutoValidateOnSystemChange = true;
-    ValidationInterval = 30.0f; // Validate every 30 seconds
-    
-    // Set default performance constraints
-    MaxFrameTime = 16.67f; // 60 FPS target
-    MaxDrawCalls = 2000;
-    MaxMemoryUsageMB = 8192; // 8GB limit
-    
-    // Initialize state
-    bArchitectureInitialized = false;
-    bValidationPassed = false;
-    LastValidationTime = 0.0f;
+    // Initialize default configuration
+    ArchitectureConfig = FEng_ArchitectureConfig();
+    LastFrameRate = 60.0f;
+    LastMemoryUsage = 0;
 }
 
 void UEngineArchitectureManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Log, TEXT("Engine Architecture Manager: Initializing..."));
+    UE_LOG(LogTemp, Log, TEXT("EngineArchitectureManager: Initializing..."));
     
-    InitializeSubsystems();
+    // Set up initial configuration
+    ArchitectureConfig = FEng_ArchitectureConfig();
     
-    // Perform initial validation
-    if (ValidateSystemArchitecture())
-    {
-        bArchitectureInitialized = true;
-        UE_LOG(LogTemp, Log, TEXT("Engine Architecture Manager: Initialization complete"));
-        
-        // Start periodic validation if enabled
-        if (bAutoValidateOnSystemChange && ValidationInterval > 0.0f)
-        {
-            if (UWorld* World = GetWorld())
-            {
-                World->GetTimerManager().SetTimer(
-                    ValidationTimerHandle,
-                    this,
-                    &UEngineArchitectureManager::PerformScheduledValidation,
-                    ValidationInterval,
-                    true // Loop
-                );
-            }
-        }
-    }
-    else
-    {
-        UE_LOG(LogTemp, Error, TEXT("Engine Architecture Manager: Initialization failed - validation errors"));
-    }
+    // Clear system registries
+    RegisteredSystems.Empty();
+    SystemStatuses.Empty();
+    
+    // Register core engine systems
+    RegisterSystem(TEXT("Engine"), GEngine);
+    RegisterSystem(TEXT("GameInstance"), GetGameInstance());
+    
+    // Run initial validation
+    ValidateSystemArchitecture();
+    
+    UE_LOG(LogTemp, Log, TEXT("EngineArchitectureManager: Initialization complete"));
 }
 
 void UEngineArchitectureManager::Deinitialize()
 {
-    UE_LOG(LogTemp, Log, TEXT("Engine Architecture Manager: Shutting down..."));
+    UE_LOG(LogTemp, Log, TEXT("EngineArchitectureManager: Shutting down..."));
     
-    // Clear validation timer
-    if (UWorld* World = GetWorld())
-    {
-        World->GetTimerManager().ClearTimer(ValidationTimerHandle);
-    }
-    
-    CleanupSubsystems();
+    // Clear all registered systems
     RegisteredSystems.Empty();
+    SystemStatuses.Empty();
     
     Super::Deinitialize();
 }
 
-void UEngineArchitectureManager::InitializeSubsystems()
-{
-    // Create performance profiler
-    PerformanceProfiler = NewObject<UPerformanceProfiler>(this);
-    if (PerformanceProfiler)
-    {
-        PerformanceProfiler->Initialize();
-        UE_LOG(LogTemp, Log, TEXT("Performance Profiler initialized"));
-    }
-    
-    // Create validation manager
-    ValidationManager = NewObject<USystemValidationManager>(this);
-    if (ValidationManager)
-    {
-        ValidationManager->Initialize();
-        UE_LOG(LogTemp, Log, TEXT("System Validation Manager initialized"));
-    }
-    
-    // Create dependency tracker
-    DependencyTracker = NewObject<UModuleDependencyTracker>(this);
-    if (DependencyTracker)
-    {
-        DependencyTracker->Initialize();
-        UE_LOG(LogTemp, Log, TEXT("Module Dependency Tracker initialized"));
-    }
-}
-
-void UEngineArchitectureManager::CleanupSubsystems()
-{
-    if (PerformanceProfiler)
-    {
-        PerformanceProfiler->Shutdown();
-        PerformanceProfiler = nullptr;
-    }
-    
-    if (ValidationManager)
-    {
-        ValidationManager->Shutdown();
-        ValidationManager = nullptr;
-    }
-    
-    if (DependencyTracker)
-    {
-        DependencyTracker->Shutdown();
-        DependencyTracker = nullptr;
-    }
-}
-
 bool UEngineArchitectureManager::ValidateSystemArchitecture()
 {
-    if (!ValidationManager)
+    UE_LOG(LogTemp, Log, TEXT("EngineArchitectureManager: Validating system architecture..."));
+    
+    bool bValidationPassed = true;
+    
+    // Validate World Partition setup
+    if (!ValidateWorldPartitionSetup())
     {
-        UE_LOG(LogTemp, Error, TEXT("Cannot validate architecture - ValidationManager is null"));
-        return false;
+        LogArchitectureWarning(TEXT("World Partition validation failed"));
+        bValidationPassed = false;
     }
     
-    UE_LOG(LogTemp, Log, TEXT("Validating system architecture..."));
-    
-    bool bValidationSuccess = true;
+    // Validate memory limits
+    if (!ValidateMemoryLimits())
+    {
+        LogArchitectureWarning(TEXT("Memory limits validation failed"));
+        bValidationPassed = false;
+    }
     
     // Validate system dependencies
     if (!ValidateSystemDependencies())
     {
-        UE_LOG(LogTemp, Error, TEXT("System dependency validation failed"));
-        bValidationSuccess = false;
+        LogArchitectureWarning(TEXT("System dependencies validation failed"));
+        bValidationPassed = false;
     }
     
-    // Validate performance targets
-    if (!ValidatePerformanceTargets())
-    {
-        UE_LOG(LogTemp, Error, TEXT("Performance target validation failed"));
-        bValidationSuccess = false;
-    }
+    // Update system statuses
+    UpdateSystemStatuses();
     
-    // Validate memory constraints
-    if (!ValidateMemoryConstraints())
-    {
-        UE_LOG(LogTemp, Error, TEXT("Memory constraint validation failed"));
-        bValidationSuccess = false;
-    }
+    UE_LOG(LogTemp, Log, TEXT("EngineArchitectureManager: Architecture validation %s"), 
+           bValidationPassed ? TEXT("PASSED") : TEXT("FAILED"));
     
-    // Update validation state
-    bValidationPassed = bValidationSuccess;
-    LastValidationTime = FDateTime::Now().GetTimeOfDay().GetTotalSeconds();
-    
-    if (bValidationSuccess)
-    {
-        UE_LOG(LogTemp, Log, TEXT("Architecture validation passed"));
-    }
-    else
-    {
-        UE_LOG(LogTemp, Error, TEXT("Architecture validation failed"));
-    }
-    
-    return bValidationSuccess;
+    return bValidationPassed;
 }
 
-void UEngineArchitectureManager::EnforcePerformanceConstraints()
+void UEngineArchitectureManager::RegisterSystem(const FString& SystemName, UObject* SystemObject)
 {
-    if (!PerformanceProfiler)
+    if (!SystemObject)
     {
+        LogArchitectureError(FString::Printf(TEXT("Cannot register null system: %s"), *SystemName));
         return;
     }
     
-    FEng_PerformanceMetrics CurrentMetrics = GetCurrentPerformanceMetrics();
-    
-    // Check frame time
-    if (CurrentMetrics.FrameTime > MaxFrameTime)
+    // Validate system integrity
+    if (!ValidateSystemIntegrity(SystemName, SystemObject))
     {
-        UE_LOG(LogTemp, Warning, TEXT("Frame time exceeded: %.2fms (limit: %.2fms)"), 
-               CurrentMetrics.FrameTime, MaxFrameTime);
+        LogArchitectureError(FString::Printf(TEXT("System integrity validation failed: %s"), *SystemName));
+        return;
     }
     
-    // Check draw calls
-    if (CurrentMetrics.DrawCalls > MaxDrawCalls)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Draw calls exceeded: %d (limit: %d)"), 
-               CurrentMetrics.DrawCalls, MaxDrawCalls);
-    }
+    // Register the system
+    RegisteredSystems.Add(SystemName, SystemObject);
     
-    // Check memory usage
-    if (CurrentMetrics.MemoryUsageMB > MaxMemoryUsageMB)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Memory usage exceeded: %dMB (limit: %dMB)"), 
-               CurrentMetrics.MemoryUsageMB, MaxMemoryUsageMB);
-    }
+    // Create initial status
+    FEng_SystemStatus Status;
+    Status.SystemName = SystemName;
+    Status.bIsInitialized = true;
+    Status.bIsActive = true;
+    Status.PerformanceScore = 100.0f;
+    Status.LastError = TEXT("");
+    
+    SystemStatuses.Add(SystemName, Status);
+    
+    UE_LOG(LogTemp, Log, TEXT("EngineArchitectureManager: Registered system '%s'"), *SystemName);
 }
 
-bool UEngineArchitectureManager::CheckModuleDependencies()
+void UEngineArchitectureManager::UnregisterSystem(const FString& SystemName)
 {
-    if (!DependencyTracker)
-    {
-        return false;
-    }
-    
-    return DependencyTracker->ValidateAllDependencies();
-}
-
-void UEngineArchitectureManager::GenerateArchitectureReport()
-{
-    UE_LOG(LogTemp, Log, TEXT("=== ARCHITECTURE REPORT ==="));
-    UE_LOG(LogTemp, Log, TEXT("Architecture Initialized: %s"), bArchitectureInitialized ? TEXT("Yes") : TEXT("No"));
-    UE_LOG(LogTemp, Log, TEXT("Validation Passed: %s"), bValidationPassed ? TEXT("Yes") : TEXT("No"));
-    UE_LOG(LogTemp, Log, TEXT("Last Validation: %.2f seconds ago"), 
-           FDateTime::Now().GetTimeOfDay().GetTotalSeconds() - LastValidationTime);
-    
-    UE_LOG(LogTemp, Log, TEXT("Registered Systems: %d"), RegisteredSystems.Num());
-    for (const auto& SystemPair : RegisteredSystems)
-    {
-        UE_LOG(LogTemp, Log, TEXT("  - %s: %s"), 
-               *SystemPair.Key, 
-               SystemPair.Value ? *SystemPair.Value->GetClass()->GetName() : TEXT("NULL"));
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("Performance Target: %s"), 
-           *UEnum::GetValueAsString(CurrentPerformanceTarget));
-    
-    if (PerformanceProfiler)
-    {
-        FEng_PerformanceMetrics Metrics = GetCurrentPerformanceMetrics();
-        UE_LOG(LogTemp, Log, TEXT("Current Performance:"));
-        UE_LOG(LogTemp, Log, TEXT("  Frame Time: %.2fms"), Metrics.FrameTime);
-        UE_LOG(LogTemp, Log, TEXT("  Draw Calls: %d"), Metrics.DrawCalls);
-        UE_LOG(LogTemp, Log, TEXT("  Memory: %dMB"), Metrics.MemoryUsageMB);
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("=== END REPORT ==="));
-}
-
-bool UEngineArchitectureManager::RegisterCoreSystem(const FString& SystemName, UObject* SystemInstance)
-{
-    if (!SystemInstance)
-    {
-        UE_LOG(LogTemp, Error, TEXT("Cannot register null system: %s"), *SystemName);
-        return false;
-    }
-    
     if (RegisteredSystems.Contains(SystemName))
     {
-        UE_LOG(LogTemp, Warning, TEXT("System already registered, replacing: %s"), *SystemName);
-    }
-    
-    RegisteredSystems.Add(SystemName, SystemInstance);
-    UE_LOG(LogTemp, Log, TEXT("Registered core system: %s"), *SystemName);
-    
-    // Trigger validation if auto-validation is enabled
-    if (bAutoValidateOnSystemChange)
-    {
-        ValidateSystemArchitecture();
-    }
-    
-    return true;
-}
-
-void UEngineArchitectureManager::UnregisterCoreSystem(const FString& SystemName)
-{
-    if (RegisteredSystems.Remove(SystemName) > 0)
-    {
-        UE_LOG(LogTemp, Log, TEXT("Unregistered core system: %s"), *SystemName);
-        
-        // Trigger validation if auto-validation is enabled
-        if (bAutoValidateOnSystemChange)
-        {
-            ValidateSystemArchitecture();
-        }
-    }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Attempted to unregister unknown system: %s"), *SystemName);
+        RegisteredSystems.Remove(SystemName);
+        SystemStatuses.Remove(SystemName);
+        UE_LOG(LogTemp, Log, TEXT("EngineArchitectureManager: Unregistered system '%s'"), *SystemName);
     }
 }
 
-UObject* UEngineArchitectureManager::GetCoreSystem(const FString& SystemName)
+FEng_SystemStatus UEngineArchitectureManager::GetSystemStatus(const FString& SystemName)
 {
-    if (TObjectPtr<UObject>* SystemPtr = RegisteredSystems.Find(SystemName))
+    if (SystemStatuses.Contains(SystemName))
     {
-        return *SystemPtr;
+        return SystemStatuses[SystemName];
     }
     
-    return nullptr;
+    // Return default status for unknown systems
+    FEng_SystemStatus DefaultStatus;
+    DefaultStatus.SystemName = SystemName;
+    DefaultStatus.bIsInitialized = false;
+    DefaultStatus.bIsActive = false;
+    DefaultStatus.LastError = TEXT("System not registered");
+    
+    return DefaultStatus;
 }
 
-FEng_PerformanceMetrics UEngineArchitectureManager::GetCurrentPerformanceMetrics()
+TArray<FEng_SystemStatus> UEngineArchitectureManager::GetAllSystemStatuses()
 {
-    if (PerformanceProfiler)
+    TArray<FEng_SystemStatus> AllStatuses;
+    
+    for (const auto& StatusPair : SystemStatuses)
     {
-        return PerformanceProfiler->GetCurrentMetrics();
+        AllStatuses.Add(StatusPair.Value);
     }
     
-    // Return default metrics if profiler is not available
-    FEng_PerformanceMetrics DefaultMetrics;
-    DefaultMetrics.FrameTime = 16.67f;
-    DefaultMetrics.DrawCalls = 0;
-    DefaultMetrics.MemoryUsageMB = 0;
-    DefaultMetrics.TriangleCount = 0;
-    DefaultMetrics.TextureMemoryMB = 0;
-    DefaultMetrics.AudioMemoryMB = 0;
+    return AllStatuses;
+}
+
+float UEngineArchitectureManager::GetCurrentFrameRate()
+{
+    if (GEngine && GEngine->GetFPSCounter())
+    {
+        LastFrameRate = 1.0f / GEngine->GetFPSCounter()->GetAvgFrameTime();
+    }
     
-    return DefaultMetrics;
+    return LastFrameRate;
+}
+
+int32 UEngineArchitectureManager::GetCurrentMemoryUsageMB()
+{
+    FPlatformMemoryStats MemStats = FPlatformMemory::GetStats();
+    LastMemoryUsage = static_cast<int32>(MemStats.UsedPhysical / (1024 * 1024));
+    return LastMemoryUsage;
 }
 
 bool UEngineArchitectureManager::IsPerformanceWithinLimits()
 {
-    FEng_PerformanceMetrics CurrentMetrics = GetCurrentPerformanceMetrics();
+    float CurrentFPS = GetCurrentFrameRate();
+    int32 CurrentMemory = GetCurrentMemoryUsageMB();
     
-    return (CurrentMetrics.FrameTime <= MaxFrameTime &&
-            CurrentMetrics.DrawCalls <= MaxDrawCalls &&
-            CurrentMetrics.MemoryUsageMB <= MaxMemoryUsageMB);
+    bool bFPSWithinLimits = CurrentFPS >= (ArchitectureConfig.TargetFrameRate * 0.8f);
+    bool bMemoryWithinLimits = CurrentMemory <= ArchitectureConfig.MaxMemoryMB;
+    
+    return bFPSWithinLimits && bMemoryWithinLimits;
 }
 
-void UEngineArchitectureManager::SetPerformanceTarget(EEng_PerformanceTarget Target)
+void UEngineArchitectureManager::EnforcePerformanceLimits()
 {
-    CurrentPerformanceTarget = Target;
-    
-    // Adjust performance constraints based on target
-    switch (Target)
+    if (!IsPerformanceWithinLimits())
     {
-        case EEng_PerformanceTarget::HighEnd:
-            MaxFrameTime = 8.33f; // 120 FPS
-            MaxDrawCalls = 5000;
-            MaxMemoryUsageMB = 16384; // 16GB
-            break;
-            
-        case EEng_PerformanceTarget::Balanced:
-            MaxFrameTime = 16.67f; // 60 FPS
-            MaxDrawCalls = 2000;
-            MaxMemoryUsageMB = 8192; // 8GB
-            break;
-            
-        case EEng_PerformanceTarget::LowEnd:
-            MaxFrameTime = 33.33f; // 30 FPS
-            MaxDrawCalls = 1000;
-            MaxMemoryUsageMB = 4096; // 4GB
-            break;
+        UE_LOG(LogTemp, Warning, TEXT("EngineArchitectureManager: Performance limits exceeded - enforcing restrictions"));
+        
+        // Reduce quality settings if needed
+        if (GetCurrentFrameRate() < ArchitectureConfig.TargetFrameRate * 0.8f)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Low FPS detected - consider reducing visual quality"));
+        }
+        
+        if (GetCurrentMemoryUsageMB() > ArchitectureConfig.MaxMemoryMB)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("High memory usage detected - consider reducing actor count"));
+        }
     }
-    
-    UE_LOG(LogTemp, Log, TEXT("Performance target set to: %s"), *UEnum::GetValueAsString(Target));
 }
 
-TArray<FEng_ValidationResult> UEngineArchitectureManager::ValidateAllSystems()
+void UEngineArchitectureManager::SetArchitectureConfig(const FEng_ArchitectureConfig& NewConfig)
 {
-    TArray<FEng_ValidationResult> Results;
+    ArchitectureConfig = NewConfig;
+    UE_LOG(LogTemp, Log, TEXT("EngineArchitectureManager: Configuration updated"));
     
-    if (!ValidationManager)
-    {
-        FEng_ValidationResult ErrorResult;
-        ErrorResult.SystemName = TEXT("ValidationManager");
-        ErrorResult.bPassed = false;
-        ErrorResult.ErrorMessage = TEXT("ValidationManager is null");
-        ErrorResult.Severity = EEng_ValidationSeverity::Critical;
-        Results.Add(ErrorResult);
-        return Results;
-    }
-    
-    // Validate each registered system
-    for (const auto& SystemPair : RegisteredSystems)
-    {
-        FEng_ValidationResult Result = ValidationManager->ValidateSystem(SystemPair.Key, SystemPair.Value);
-        Results.Add(Result);
-    }
-    
-    return Results;
+    // Re-validate with new configuration
+    ValidateSystemArchitecture();
 }
 
-bool UEngineArchitectureManager::ValidateSystemIntegration(const FString& SystemA, const FString& SystemB)
+bool UEngineArchitectureManager::ValidateWorldPartitionSetup()
 {
-    if (!ValidationManager)
+    UWorld* World = GetWorld();
+    if (!World)
     {
         return false;
     }
     
-    UObject* SystemInstanceA = GetCoreSystem(SystemA);
-    UObject* SystemInstanceB = GetCoreSystem(SystemB);
-    
-    if (!SystemInstanceA || !SystemInstanceB)
+    // Check if world partition is enabled for large worlds
+    if (ArchitectureConfig.WorldSizeKm > 4.0f)
     {
-        UE_LOG(LogTemp, Error, TEXT("Cannot validate integration - one or both systems not found: %s, %s"), 
-               *SystemA, *SystemB);
+        if (UWorldPartition* WorldPartition = World->GetWorldPartition())
+        {
+            UE_LOG(LogTemp, Log, TEXT("EngineArchitectureManager: World Partition is properly configured"));
+            return true;
+        }
+        else
+        {
+            LogArchitectureWarning(TEXT("Large world detected but World Partition not enabled"));
+            return false;
+        }
+    }
+    
+    return true;
+}
+
+bool UEngineArchitectureManager::ValidateMemoryLimits()
+{
+    int32 CurrentMemory = GetCurrentMemoryUsageMB();
+    
+    if (CurrentMemory > ArchitectureConfig.MaxMemoryMB)
+    {
+        LogArchitectureWarning(FString::Printf(TEXT("Memory usage (%d MB) exceeds limit (%d MB)"), 
+                                               CurrentMemory, ArchitectureConfig.MaxMemoryMB));
         return false;
     }
     
-    return ValidationManager->ValidateSystemIntegration(SystemInstanceA, SystemInstanceB);
-}
-
-TArray<FString> UEngineArchitectureManager::GetLoadedModules()
-{
-    if (DependencyTracker)
-    {
-        return DependencyTracker->GetLoadedModules();
-    }
-    
-    return TArray<FString>();
-}
-
-bool UEngineArchitectureManager::IsModuleLoaded(const FString& ModuleName)
-{
-    if (DependencyTracker)
-    {
-        return DependencyTracker->IsModuleLoaded(ModuleName);
-    }
-    
-    return false;
-}
-
-void UEngineArchitectureManager::RefreshModuleDependencies()
-{
-    if (DependencyTracker)
-    {
-        DependencyTracker->RefreshDependencies();
-    }
+    return true;
 }
 
 bool UEngineArchitectureManager::ValidateSystemDependencies()
 {
-    // Check that all required subsystems are available
-    if (!PerformanceProfiler || !ValidationManager || !DependencyTracker)
+    // Check that core systems are registered
+    TArray<FString> RequiredSystems = {
+        TEXT("Engine"),
+        TEXT("GameInstance")
+    };
+    
+    for (const FString& SystemName : RequiredSystems)
     {
-        UE_LOG(LogTemp, Error, TEXT("Missing required subsystems"));
+        if (!RegisteredSystems.Contains(SystemName))
+        {
+            LogArchitectureError(FString::Printf(TEXT("Required system not registered: %s"), *SystemName));
+            return false;
+        }
+        
+        TWeakObjectPtr<UObject> SystemPtr = RegisteredSystems[SystemName];
+        if (!SystemPtr.IsValid())
+        {
+            LogArchitectureError(FString::Printf(TEXT("Required system is invalid: %s"), *SystemName));
+            return false;
+        }
+    }
+    
+    return true;
+}
+
+void UEngineArchitectureManager::RunArchitectureDiagnostics()
+{
+    UE_LOG(LogTemp, Log, TEXT("=== ENGINE ARCHITECTURE DIAGNOSTICS ==="));
+    
+    // System overview
+    UE_LOG(LogTemp, Log, TEXT("Registered Systems: %d"), RegisteredSystems.Num());
+    
+    for (const auto& SystemPair : RegisteredSystems)
+    {
+        FString SystemName = SystemPair.Key;
+        bool bIsValid = SystemPair.Value.IsValid();
+        UE_LOG(LogTemp, Log, TEXT("  - %s: %s"), *SystemName, bIsValid ? TEXT("VALID") : TEXT("INVALID"));
+    }
+    
+    // Performance metrics
+    float CurrentFPS = GetCurrentFrameRate();
+    int32 CurrentMemory = GetCurrentMemoryUsageMB();
+    
+    UE_LOG(LogTemp, Log, TEXT("Performance Metrics:"));
+    UE_LOG(LogTemp, Log, TEXT("  - Current FPS: %.1f (Target: %.1f)"), CurrentFPS, ArchitectureConfig.TargetFrameRate);
+    UE_LOG(LogTemp, Log, TEXT("  - Memory Usage: %d MB (Limit: %d MB)"), CurrentMemory, ArchitectureConfig.MaxMemoryMB);
+    UE_LOG(LogTemp, Log, TEXT("  - Performance OK: %s"), IsPerformanceWithinLimits() ? TEXT("YES") : TEXT("NO"));
+    
+    // Configuration
+    UE_LOG(LogTemp, Log, TEXT("Architecture Configuration:"));
+    UE_LOG(LogTemp, Log, TEXT("  - World Size: %.1f km"), ArchitectureConfig.WorldSizeKm);
+    UE_LOG(LogTemp, Log, TEXT("  - Max Actors Per Chunk: %d"), ArchitectureConfig.MaxActorsPerChunk);
+    UE_LOG(LogTemp, Log, TEXT("  - Max Dinosaurs: %d"), ArchitectureConfig.MaxSimultaneousDinosaurs);
+    
+    UE_LOG(LogTemp, Log, TEXT("=== DIAGNOSTICS COMPLETE ==="));
+}
+
+void UEngineArchitectureManager::GenerateSystemReport()
+{
+    FString ReportText = TEXT("=== TRANSPERSONAL GAME STUDIO - SYSTEM ARCHITECTURE REPORT ===\n");
+    ReportText += FString::Printf(TEXT("Generated: %s\n\n"), *FDateTime::Now().ToString());
+    
+    // System status
+    ReportText += TEXT("REGISTERED SYSTEMS:\n");
+    for (const auto& StatusPair : SystemStatuses)
+    {
+        const FEng_SystemStatus& Status = StatusPair.Value;
+        ReportText += FString::Printf(TEXT("  %s: %s | Active: %s | Score: %.1f\n"),
+                                      *Status.SystemName,
+                                      Status.bIsInitialized ? TEXT("INIT") : TEXT("UNINIT"),
+                                      Status.bIsActive ? TEXT("YES") : TEXT("NO"),
+                                      Status.PerformanceScore);
+    }
+    
+    // Performance
+    ReportText += TEXT("\nPERFORMANCE METRICS:\n");
+    ReportText += FString::Printf(TEXT("  Frame Rate: %.1f FPS\n"), GetCurrentFrameRate());
+    ReportText += FString::Printf(TEXT("  Memory Usage: %d MB\n"), GetCurrentMemoryUsageMB());
+    ReportText += FString::Printf(TEXT("  Within Limits: %s\n"), IsPerformanceWithinLimits() ? TEXT("YES") : TEXT("NO"));
+    
+    UE_LOG(LogTemp, Log, TEXT("%s"), *ReportText);
+}
+
+void UEngineArchitectureManager::UpdateSystemStatuses()
+{
+    for (auto& StatusPair : SystemStatuses)
+    {
+        FString SystemName = StatusPair.Key;
+        FEng_SystemStatus& Status = StatusPair.Value;
+        
+        // Check if system object is still valid
+        if (RegisteredSystems.Contains(SystemName))
+        {
+            TWeakObjectPtr<UObject> SystemPtr = RegisteredSystems[SystemName];
+            Status.bIsActive = SystemPtr.IsValid();
+            
+            if (!Status.bIsActive)
+            {
+                Status.LastError = TEXT("System object became invalid");
+                Status.PerformanceScore = 0.0f;
+            }
+        }
+        else
+        {
+            Status.bIsActive = false;
+            Status.LastError = TEXT("System not registered");
+        }
+    }
+}
+
+void UEngineArchitectureManager::CheckPerformanceThresholds()
+{
+    float CurrentFPS = GetCurrentFrameRate();
+    int32 CurrentMemory = GetCurrentMemoryUsageMB();
+    
+    // Update performance scores for all systems
+    for (auto& StatusPair : SystemStatuses)
+    {
+        FEng_SystemStatus& Status = StatusPair.Value;
+        
+        // Calculate performance score based on FPS and memory
+        float FPSScore = FMath::Clamp((CurrentFPS / ArchitectureConfig.TargetFrameRate) * 100.0f, 0.0f, 100.0f);
+        float MemoryScore = FMath::Clamp((1.0f - (float)CurrentMemory / ArchitectureConfig.MaxMemoryMB) * 100.0f, 0.0f, 100.0f);
+        
+        Status.PerformanceScore = (FPSScore + MemoryScore) * 0.5f;
+    }
+}
+
+bool UEngineArchitectureManager::ValidateSystemIntegrity(const FString& SystemName, UObject* SystemObject)
+{
+    if (!SystemObject)
+    {
         return false;
     }
     
-    // Validate module dependencies
-    if (!CheckModuleDependencies())
+    // Check if object is valid and not pending kill
+    if (!IsValid(SystemObject))
     {
-        UE_LOG(LogTemp, Error, TEXT("Module dependency validation failed"));
+        LogArchitectureError(FString::Printf(TEXT("System object is not valid: %s"), *SystemName));
         return false;
     }
     
     return true;
 }
 
-bool UEngineArchitectureManager::ValidatePerformanceTargets()
+void UEngineArchitectureManager::LogArchitectureWarning(const FString& Warning)
 {
-    // Check if current performance is within acceptable limits
-    if (!IsPerformanceWithinLimits())
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Performance is outside acceptable limits"));
-        // Don't fail validation for performance issues, just warn
-    }
-    
-    return true;
+    UE_LOG(LogTemp, Warning, TEXT("EngineArchitectureManager: %s"), *Warning);
 }
 
-bool UEngineArchitectureManager::ValidateMemoryConstraints()
+void UEngineArchitectureManager::LogArchitectureError(const FString& Error)
 {
-    FEng_PerformanceMetrics CurrentMetrics = GetCurrentPerformanceMetrics();
-    
-    // Check memory usage
-    if (CurrentMetrics.MemoryUsageMB > MaxMemoryUsageMB)
-    {
-        UE_LOG(LogTemp, Error, TEXT("Memory usage exceeds limit: %dMB > %dMB"), 
-               CurrentMetrics.MemoryUsageMB, MaxMemoryUsageMB);
-        return false;
-    }
-    
-    return true;
-}
-
-void UEngineArchitectureManager::UpdatePerformanceMetrics()
-{
-    if (PerformanceProfiler)
-    {
-        PerformanceProfiler->UpdateMetrics();
-    }
-}
-
-void UEngineArchitectureManager::PerformScheduledValidation()
-{
-    UE_LOG(LogTemp, Log, TEXT("Performing scheduled architecture validation..."));
-    ValidateSystemArchitecture();
+    UE_LOG(LogTemp, Error, TEXT("EngineArchitectureManager: %s"), *Error);
 }
