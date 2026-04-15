@@ -7,109 +7,15 @@
 #include "../../SharedTypes.h"
 #include "EngineArchitectureManager.generated.h"
 
-UENUM(BlueprintType)
-enum class EEng_ArchitectureValidationResult : uint8
-{
-    Valid UMETA(DisplayName = "Valid"),
-    Warning UMETA(DisplayName = "Warning"),
-    Error UMETA(DisplayName = "Error"),
-    Critical UMETA(DisplayName = "Critical")
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_SystemRequirements
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Requirements")
-    int32 MinMemoryMB = 8192;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Requirements")
-    int32 MaxActorsPerLevel = 50000;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Requirements")
-    float TargetFrameRate = 60.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Requirements")
-    bool bRequiresWorldPartition = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Requirements")
-    bool bRequiresLumen = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Requirements")
-    bool bRequiresNanite = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Requirements")
-    bool bRequiresChaosPhysics = true;
-
-    FEng_SystemRequirements()
-    {
-        MinMemoryMB = 8192;
-        MaxActorsPerLevel = 50000;
-        TargetFrameRate = 60.0f;
-        bRequiresWorldPartition = true;
-        bRequiresLumen = true;
-        bRequiresNanite = true;
-        bRequiresChaosPhysics = true;
-    }
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_ArchitectureRule
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rule")
-    FString RuleName;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rule")
-    FString Description;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rule")
-    EEng_ArchitectureValidationResult Severity;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rule")
-    bool bEnforced = true;
-
-    FEng_ArchitectureRule()
-    {
-        RuleName = TEXT("");
-        Description = TEXT("");
-        Severity = EEng_ArchitectureValidationResult::Warning;
-        bEnforced = true;
-    }
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_ValidationReport
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Report")
-    TArray<FString> Warnings;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Report")
-    TArray<FString> Errors;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Report")
-    TArray<FString> CriticalIssues;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Report")
-    bool bPassedValidation = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Report")
-    float ValidationTime = 0.0f;
-
-    FEng_ValidationReport()
-    {
-        bPassedValidation = false;
-        ValidationTime = 0.0f;
-    }
-};
+// Forward declarations
+class UPerformanceProfiler;
+class USystemValidationManager;
+class UModuleDependencyTracker;
 
 /**
- * Engine Architecture Manager - Defines and enforces technical architecture rules
- * This is the master system that validates all other systems comply with architecture requirements
+ * Core Engine Architecture Manager
+ * Establishes and enforces the technical foundation for the entire project
+ * Manages system dependencies, performance constraints, and architectural rules
  */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UEngineArchitectureManager : public UGameInstanceSubsystem
@@ -123,73 +29,116 @@ public:
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Architecture validation
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    FEng_ValidationReport ValidateSystemArchitecture();
+    // Core Architecture Management
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    bool ValidateSystemArchitecture();
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool ValidateWorldPartitionSetup(UWorld* World);
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    void EnforcePerformanceConstraints();
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool ValidateRenderingPipeline();
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    bool CheckModuleDependencies();
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool ValidatePhysicsSetup();
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture", CallInEditor)
+    void GenerateArchitectureReport();
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool ValidateMemoryRequirements();
+    // System Registration
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    bool RegisterCoreSystem(const FString& SystemName, UObject* SystemInstance);
 
-    // Rule management
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void AddArchitectureRule(const FEng_ArchitectureRule& Rule);
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    void UnregisterCoreSystem(const FString& SystemName);
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void RemoveArchitectureRule(const FString& RuleName);
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    UObject* GetCoreSystem(const FString& SystemName);
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    TArray<FEng_ArchitectureRule> GetAllRules() const;
-
-    // Performance monitoring
+    // Performance Monitoring
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    float GetCurrentFrameRate() const;
+    FEng_PerformanceMetrics GetCurrentPerformanceMetrics();
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    int32 GetCurrentActorCount() const;
+    bool IsPerformanceWithinLimits();
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    float GetMemoryUsageMB() const;
+    void SetPerformanceTarget(EEng_PerformanceTarget Target);
 
-    // System requirements
-    UFUNCTION(BlueprintCallable, Category = "Requirements")
-    void SetSystemRequirements(const FEng_SystemRequirements& Requirements);
+    // Architecture Validation
+    UFUNCTION(BlueprintCallable, Category = "Validation")
+    TArray<FEng_ValidationResult> ValidateAllSystems();
 
-    UFUNCTION(BlueprintCallable, Category = "Requirements")
-    FEng_SystemRequirements GetSystemRequirements() const;
+    UFUNCTION(BlueprintCallable, Category = "Validation")
+    bool ValidateSystemIntegration(const FString& SystemA, const FString& SystemB);
 
-    // Debug and testing
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Debug")
-    void RunFullArchitectureValidation();
+    // Module Management
+    UFUNCTION(BlueprintCallable, Category = "Modules")
+    TArray<FString> GetLoadedModules();
 
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Debug")
-    void LogSystemStatus();
+    UFUNCTION(BlueprintCallable, Category = "Modules")
+    bool IsModuleLoaded(const FString& ModuleName);
+
+    UFUNCTION(BlueprintCallable, Category = "Modules")
+    void RefreshModuleDependencies();
 
 protected:
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Architecture", meta = (AllowPrivateAccess = "true"))
-    FEng_SystemRequirements SystemRequirements;
+    // Core subsystem references
+    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
+    TObjectPtr<UPerformanceProfiler> PerformanceProfiler;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Architecture", meta = (AllowPrivateAccess = "true"))
-    TArray<FEng_ArchitectureRule> ArchitectureRules;
+    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
+    TObjectPtr<USystemValidationManager> ValidationManager;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Architecture", meta = (AllowPrivateAccess = "true"))
-    FEng_ValidationReport LastValidationReport;
+    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
+    TObjectPtr<UModuleDependencyTracker> DependencyTracker;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance", meta = (AllowPrivateAccess = "true"))
-    float PerformanceCheckInterval = 1.0f;
+    // Registered core systems
+    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
+    TMap<FString, TObjectPtr<UObject>> RegisteredSystems;
+
+    // Architecture configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
+    EEng_PerformanceTarget CurrentPerformanceTarget;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
+    bool bEnforceStrictValidation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
+    bool bAutoValidateOnSystemChange;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
+    float ValidationInterval;
+
+    // Performance constraints
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float MaxFrameTime;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 MaxDrawCalls;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 MaxMemoryUsageMB;
+
+    // System state tracking
+    UPROPERTY(BlueprintReadOnly, Category = "State")
+    bool bArchitectureInitialized;
+
+    UPROPERTY(BlueprintReadOnly, Category = "State")
+    bool bValidationPassed;
+
+    UPROPERTY(BlueprintReadOnly, Category = "State")
+    float LastValidationTime;
 
 private:
-    void InitializeDefaultRules();
-    void ValidateEngineFeatures();
-    bool CheckWorldPartitionCompatibility(UWorld* World);
-    bool CheckRenderingFeatures();
-    void LogValidationResult(const FEng_ValidationReport& Report);
+    // Internal validation methods
+    bool ValidateSystemDependencies();
+    bool ValidatePerformanceTargets();
+    bool ValidateMemoryConstraints();
+    
+    // Internal management
+    void InitializeSubsystems();
+    void CleanupSubsystems();
+    void UpdatePerformanceMetrics();
+    
+    // Validation timer
+    FTimerHandle ValidationTimerHandle;
+    void PerformScheduledValidation();
 };
