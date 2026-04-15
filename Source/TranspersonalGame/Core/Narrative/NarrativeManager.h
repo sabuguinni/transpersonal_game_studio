@@ -6,25 +6,49 @@
 #include "../SharedTypes.h"
 #include "NarrativeManager.generated.h"
 
+class UDialogueComponent;
+class ANarrativeNPC;
+
+UENUM(BlueprintType)
+enum class ENarr_DialogueState : uint8
+{
+    Inactive,
+    WaitingForPlayer,
+    InProgress,
+    Completed,
+    Failed
+};
+
+UENUM(BlueprintType)
+enum class ENarr_NPCMood : uint8
+{
+    Neutral,
+    Friendly,
+    Cautious,
+    Hostile,
+    Fearful,
+    Aggressive
+};
+
 USTRUCT(BlueprintType)
 struct TRANSPERSONALGAME_API FNarr_DialogueLine
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
     FString SpeakerName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
     FText DialogueText;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
     FString AudioAssetPath;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
     float Duration;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    bool bIsPlayerChoice;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    ENarr_NPCMood RequiredMood;
 
     FNarr_DialogueLine()
     {
@@ -32,7 +56,7 @@ struct TRANSPERSONALGAME_API FNarr_DialogueLine
         DialogueText = FText::GetEmpty();
         AudioAssetPath = TEXT("");
         Duration = 3.0f;
-        bIsPlayerChoice = false;
+        RequiredMood = ENarr_NPCMood::Neutral;
     }
 };
 
@@ -41,145 +65,129 @@ struct TRANSPERSONALGAME_API FNarr_DialogueSequence
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
     FString SequenceID;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
     TArray<FNarr_DialogueLine> DialogueLines;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
     bool bIsRepeatable;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    bool bRequiresQuestProgress;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    int32 Priority;
 
     FNarr_DialogueSequence()
     {
         SequenceID = TEXT("");
-        bIsRepeatable = true;
-        bRequiresQuestProgress = false;
+        bIsRepeatable = false;
+        Priority = 0;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_StoryBeat
+struct TRANSPERSONALGAME_API FNarr_NPCProfile
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    FString BeatID;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FString NPCName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    FText BeatTitle;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FString NPCRole;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    FText BeatDescription;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TArray<FNarr_DialogueSequence> AvailableDialogues;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    bool bIsCompleted;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    ENarr_NPCMood CurrentMood;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    TArray<FString> RequiredBeats;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float TrustLevel;
 
-    FNarr_StoryBeat()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TArray<FString> CompletedDialogues;
+
+    FNarr_NPCProfile()
     {
-        BeatID = TEXT("");
-        BeatTitle = FText::GetEmpty();
-        BeatDescription = FText::GetEmpty();
-        bIsCompleted = false;
+        NPCName = TEXT("");
+        NPCRole = TEXT("");
+        CurrentMood = ENarr_NPCMood::Neutral;
+        TrustLevel = 0.5f;
     }
 };
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDialogueStarted, const FString&, DialogueID);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDialogueCompleted, const FString&, DialogueID);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnStoryBeatCompleted, const FString&, BeatID);
-
-/**
- * Core narrative system that manages story progression, dialogue sequences, and character interactions
- * Handles the main story arc of survival in a prehistoric world with realistic dialogue
- */
-UCLASS(BlueprintType, Blueprintable)
+UCLASS()
 class TRANSPERSONALGAME_API UNarrativeManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
-    UNarrativeManager();
-
-    // Subsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Dialogue management
+    // Dialogue Management
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    bool StartDialogue(const FString& DialogueID, AActor* Speaker = nullptr);
+    bool StartDialogue(const FString& NPCName, const FString& SequenceID);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void EndCurrentDialogue();
+    void EndDialogue();
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
     bool IsDialogueActive() const;
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    FNarr_DialogueSequence GetDialogueSequence(const FString& DialogueID) const;
-
-    // Story progression
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void CompleteStoryBeat(const FString& BeatID);
+    FNarr_DialogueLine GetCurrentDialogueLine() const;
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    bool IsStoryBeatCompleted(const FString& BeatID) const;
+    void AdvanceDialogue();
+
+    // NPC Management
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void RegisterNPC(const FString& NPCName, const FNarr_NPCProfile& Profile);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    TArray<FNarr_StoryBeat> GetAvailableStoryBeats() const;
-
-    // Character relationship tracking
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void ModifyCharacterRelationship(const FString& CharacterID, int32 RelationshipChange);
+    FNarr_NPCProfile GetNPCProfile(const FString& NPCName) const;
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    int32 GetCharacterRelationship(const FString& CharacterID) const;
+    void UpdateNPCMood(const FString& NPCName, ENarr_NPCMood NewMood);
 
-    // Events
-    UPROPERTY(BlueprintAssignable, Category = "Narrative")
-    FOnDialogueStarted OnDialogueStarted;
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void UpdateNPCTrust(const FString& NPCName, float TrustDelta);
 
-    UPROPERTY(BlueprintAssignable, Category = "Narrative")
-    FOnDialogueCompleted OnDialogueCompleted;
+    // Story Progress
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void MarkDialogueCompleted(const FString& NPCName, const FString& SequenceID);
 
-    UPROPERTY(BlueprintAssignable, Category = "Narrative")
-    FOnStoryBeatCompleted OnStoryBeatCompleted;
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    bool IsDialogueCompleted(const FString& NPCName, const FString& SequenceID) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    TArray<FString> GetAvailableDialogues(const FString& NPCName) const;
 
 protected:
-    // Current dialogue state
-    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
-    FString CurrentDialogueID;
+    UPROPERTY()
+    TMap<FString, FNarr_NPCProfile> NPCProfiles;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
-    int32 CurrentDialogueLineIndex;
+    UPROPERTY()
+    FString CurrentNPCName;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
-    bool bDialogueActive;
+    UPROPERTY()
+    FString CurrentSequenceID;
 
-    // Story data
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    TMap<FString, FNarr_DialogueSequence> DialogueDatabase;
+    UPROPERTY()
+    int32 CurrentLineIndex;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    TMap<FString, FNarr_StoryBeat> StoryBeats;
+    UPROPERTY()
+    ENarr_DialogueState DialogueState;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    TMap<FString, int32> CharacterRelationships;
-
-    // Configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    float DefaultDialogueLineDelay;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    bool bAutoAdvanceDialogue;
+    UPROPERTY()
+    float DialogueStartTime;
 
 private:
-    void LoadDialogueData();
-    void LoadStoryData();
-    void InitializeCharacterRelationships();
+    void LoadDefaultNPCProfiles();
+    void CreateSurvivalDialogues();
+    FNarr_NPCProfile CreateElderHunterProfile();
+    FNarr_NPCProfile CreateScoutRunnerProfile();
+    FNarr_NPCProfile CreateTribeChiefProfile();
 };
