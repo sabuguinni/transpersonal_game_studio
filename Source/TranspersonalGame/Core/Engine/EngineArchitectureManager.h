@@ -2,20 +2,76 @@
 
 #include "CoreMinimal.h"
 #include "Engine/GameInstanceSubsystem.h"
-#include "Engine/World.h"
-#include "Subsystems/WorldSubsystem.h"
-#include "../../SharedTypes.h"
+#include "SharedTypes.h"
 #include "EngineArchitectureManager.generated.h"
 
-// Forward declarations
-class UPerformanceProfiler;
-class USystemValidationManager;
-class UModuleDependencyTracker;
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FEng_SystemStatus
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "System Status")
+    FString SystemName;
+
+    UPROPERTY(BlueprintReadOnly, Category = "System Status")
+    bool bIsInitialized = false;
+
+    UPROPERTY(BlueprintReadOnly, Category = "System Status")
+    bool bIsActive = false;
+
+    UPROPERTY(BlueprintReadOnly, Category = "System Status")
+    float PerformanceScore = 100.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "System Status")
+    FString LastError;
+
+    FEng_SystemStatus()
+    {
+        SystemName = TEXT("Unknown");
+        bIsInitialized = false;
+        bIsActive = false;
+        PerformanceScore = 100.0f;
+        LastError = TEXT("");
+    }
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FEng_ArchitectureConfig
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 MaxActorsPerChunk = 500;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float TargetFrameRate = 60.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 MaxSimultaneousDinosaurs = 50;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World")
+    float WorldSizeKm = 16.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World")
+    int32 BiomeCount = 8;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
+    int32 MaxMemoryMB = 8192;
+
+    FEng_ArchitectureConfig()
+    {
+        MaxActorsPerChunk = 500;
+        TargetFrameRate = 60.0f;
+        MaxSimultaneousDinosaurs = 50;
+        WorldSizeKm = 16.0f;
+        BiomeCount = 8;
+        MaxMemoryMB = 8192;
+    }
+};
 
 /**
- * Core Engine Architecture Manager
- * Establishes and enforces the technical foundation for the entire project
- * Manages system dependencies, performance constraints, and architectural rules
+ * Engine Architecture Manager - Core system that validates and monitors all game systems
+ * Ensures performance targets, memory limits, and architectural rules are enforced
  */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UEngineArchitectureManager : public UGameInstanceSubsystem
@@ -29,116 +85,79 @@ public:
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Core Architecture Management
+    // Core Architecture Functions
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
     bool ValidateSystemArchitecture();
 
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    void EnforcePerformanceConstraints();
+    void RegisterSystem(const FString& SystemName, UObject* SystemObject);
 
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    bool CheckModuleDependencies();
-
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture", CallInEditor)
-    void GenerateArchitectureReport();
-
-    // System Registration
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    bool RegisterCoreSystem(const FString& SystemName, UObject* SystemInstance);
+    void UnregisterSystem(const FString& SystemName);
 
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    void UnregisterCoreSystem(const FString& SystemName);
+    FEng_SystemStatus GetSystemStatus(const FString& SystemName);
 
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    UObject* GetCoreSystem(const FString& SystemName);
+    TArray<FEng_SystemStatus> GetAllSystemStatuses();
 
     // Performance Monitoring
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    FEng_PerformanceMetrics GetCurrentPerformanceMetrics();
+    float GetCurrentFrameRate();
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    int32 GetCurrentMemoryUsageMB();
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
     bool IsPerformanceWithinLimits();
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void SetPerformanceTarget(EEng_PerformanceTarget Target);
+    void EnforcePerformanceLimits();
 
-    // Architecture Validation
+    // Configuration
+    UFUNCTION(BlueprintCallable, Category = "Configuration")
+    FEng_ArchitectureConfig GetArchitectureConfig() const { return ArchitectureConfig; }
+
+    UFUNCTION(BlueprintCallable, Category = "Configuration")
+    void SetArchitectureConfig(const FEng_ArchitectureConfig& NewConfig);
+
+    // Validation and Rules
     UFUNCTION(BlueprintCallable, Category = "Validation")
-    TArray<FEng_ValidationResult> ValidateAllSystems();
+    bool ValidateWorldPartitionSetup();
 
     UFUNCTION(BlueprintCallable, Category = "Validation")
-    bool ValidateSystemIntegration(const FString& SystemA, const FString& SystemB);
+    bool ValidateMemoryLimits();
 
-    // Module Management
-    UFUNCTION(BlueprintCallable, Category = "Modules")
-    TArray<FString> GetLoadedModules();
+    UFUNCTION(BlueprintCallable, Category = "Validation")
+    bool ValidateSystemDependencies();
 
-    UFUNCTION(BlueprintCallable, Category = "Modules")
-    bool IsModuleLoaded(const FString& ModuleName);
+    // Debug and Diagnostics
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Debug")
+    void RunArchitectureDiagnostics();
 
-    UFUNCTION(BlueprintCallable, Category = "Modules")
-    void RefreshModuleDependencies();
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Debug")
+    void GenerateSystemReport();
 
 protected:
-    // Core subsystem references
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    TObjectPtr<UPerformanceProfiler> PerformanceProfiler;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    TObjectPtr<USystemValidationManager> ValidationManager;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    TObjectPtr<UModuleDependencyTracker> DependencyTracker;
-
-    // Registered core systems
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    TMap<FString, TObjectPtr<UObject>> RegisteredSystems;
-
-    // Architecture configuration
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    EEng_PerformanceTarget CurrentPerformanceTarget;
+    FEng_ArchitectureConfig ArchitectureConfig;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    bool bEnforceStrictValidation;
+    UPROPERTY(BlueprintReadOnly, Category = "System Registry")
+    TMap<FString, TWeakObjectPtr<UObject>> RegisteredSystems;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    bool bAutoValidateOnSystemChange;
+    UPROPERTY(BlueprintReadOnly, Category = "System Status")
+    TMap<FString, FEng_SystemStatus> SystemStatuses;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    float ValidationInterval;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float LastFrameRate = 60.0f;
 
-    // Performance constraints
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float MaxFrameTime;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxDrawCalls;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxMemoryUsageMB;
-
-    // System state tracking
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    bool bArchitectureInitialized;
-
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    bool bValidationPassed;
-
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    float LastValidationTime;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    int32 LastMemoryUsage = 0;
 
 private:
-    // Internal validation methods
-    bool ValidateSystemDependencies();
-    bool ValidatePerformanceTargets();
-    bool ValidateMemoryConstraints();
-    
-    // Internal management
-    void InitializeSubsystems();
-    void CleanupSubsystems();
-    void UpdatePerformanceMetrics();
-    
-    // Validation timer
-    FTimerHandle ValidationTimerHandle;
-    void PerformScheduledValidation();
+    void UpdateSystemStatuses();
+    void CheckPerformanceThresholds();
+    bool ValidateSystemIntegrity(const FString& SystemName, UObject* SystemObject);
+    void LogArchitectureWarning(const FString& Warning);
+    void LogArchitectureError(const FString& Error);
 };
