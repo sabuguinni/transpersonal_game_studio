@@ -2,79 +2,94 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Components/ActorComponent.h"
 #include "Engine/World.h"
+#include "Components/AudioComponent.h"
+#include "Sound/SoundCue.h"
+#include "Materials/MaterialInterface.h"
 #include "../SharedTypes.h"
 #include "World_BiomeManager.generated.h"
 
 UENUM(BlueprintType)
 enum class EWorld_BiomeType : uint8
 {
-    Coastal         UMETA(DisplayName = "Coastal"),
-    TemperateForest UMETA(DisplayName = "Temperate Forest"),
-    Grasslands      UMETA(DisplayName = "Grasslands"),
-    Mountains       UMETA(DisplayName = "Mountains"),
-    Wetlands        UMETA(DisplayName = "Wetlands"),
-    Desert          UMETA(DisplayName = "Desert"),
-    TropicalForest  UMETA(DisplayName = "Tropical Forest"),
-    Tundra          UMETA(DisplayName = "Tundra")
+    Forest      UMETA(DisplayName = "Forest"),
+    Desert      UMETA(DisplayName = "Desert"), 
+    Mountain    UMETA(DisplayName = "Mountain"),
+    Swamp       UMETA(DisplayName = "Swamp"),
+    Plains      UMETA(DisplayName = "Plains"),
+    Volcanic    UMETA(DisplayName = "Volcanic"),
+    Coastal     UMETA(DisplayName = "Coastal")
+};
+
+UENUM(BlueprintType)
+enum class EWorld_WeatherType : uint8
+{
+    Clear       UMETA(DisplayName = "Clear"),
+    Cloudy      UMETA(DisplayName = "Cloudy"),
+    Rainy       UMETA(DisplayName = "Rainy"),
+    Stormy      UMETA(DisplayName = "Stormy"),
+    Foggy       UMETA(DisplayName = "Foggy"),
+    Windy       UMETA(DisplayName = "Windy")
 };
 
 USTRUCT(BlueprintType)
-struct FWorld_BiomeParameters
+struct FWorld_BiomeData
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    EWorld_BiomeType BiomeType = EWorld_BiomeType::TemperateForest;
+    EWorld_BiomeType BiomeType = EWorld_BiomeType::Forest;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    FString BiomeName = TEXT("Unknown Biome");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    TSoftObjectPtr<USoundCue> AmbientSound;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Visual")
+    TSoftObjectPtr<UMaterialInterface> TerrainMaterial;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
     float Temperature = 20.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
     float Humidity = 0.5f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float Elevation = 100.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
+    float WindStrength = 0.3f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float VegetationDensity = 0.7f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FLinearColor BiomeColor = FLinearColor::Green;
-
-    FWorld_BiomeParameters()
+    FWorld_BiomeData()
     {
+        BiomeType = EWorld_BiomeType::Forest;
+        BiomeName = TEXT("Unknown Biome");
         Temperature = 20.0f;
         Humidity = 0.5f;
-        Elevation = 100.0f;
-        VegetationDensity = 0.7f;
-        BiomeColor = FLinearColor::Green;
+        WindStrength = 0.3f;
     }
 };
 
 USTRUCT(BlueprintType)
-struct FWorld_BiomeZone
+struct FWorld_WeatherData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Zone")
-    FVector Center = FVector::ZeroVector;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
+    EWorld_WeatherType WeatherType = EWorld_WeatherType::Clear;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Zone")
-    float Radius = 5000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
+    float Intensity = 0.5f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Zone")
-    FWorld_BiomeParameters Parameters;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
+    float Duration = 300.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Zone")
-    float BlendDistance = 1000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    TSoftObjectPtr<USoundCue> WeatherSound;
 
-    FWorld_BiomeZone()
+    FWorld_WeatherData()
     {
-        Center = FVector::ZeroVector;
-        Radius = 5000.0f;
-        BlendDistance = 1000.0f;
+        WeatherType = EWorld_WeatherType::Clear;
+        Intensity = 0.5f;
+        Duration = 300.0f;
     }
 };
 
@@ -88,55 +103,91 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-
-public:
     virtual void Tick(float DeltaTime) override;
 
-    // Biome Management
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biomes")
-    TArray<FWorld_BiomeZone> BiomeZones;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class USceneComponent* RootSceneComponent;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biomes")
-    float GlobalTemperature = 20.0f;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class UAudioComponent* BiomeAudioComponent;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biomes")
-    float GlobalHumidity = 0.5f;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class UAudioComponent* WeatherAudioComponent;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biomes")
-    bool bEnableSeasonalChanges = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome System")
+    TArray<FWorld_BiomeData> AvailableBiomes;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biomes")
-    float SeasonCycleLength = 300.0f; // seconds for full cycle
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather System")
+    TArray<FWorld_WeatherData> AvailableWeather;
 
-    // Core Functions
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    FWorld_BiomeParameters GetBiomeAtLocation(const FVector& Location) const;
+    UPROPERTY(BlueprintReadOnly, Category = "Current State")
+    FWorld_BiomeData CurrentBiome;
 
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    EWorld_BiomeType GetDominantBiomeType(const FVector& Location) const;
+    UPROPERTY(BlueprintReadOnly, Category = "Current State")
+    FWorld_WeatherData CurrentWeather;
 
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    void AddBiomeZone(const FVector& Center, float Radius, EWorld_BiomeType BiomeType);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
+    float BiomeAudioVolume = 0.7f;
 
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    void RemoveBiomeZone(int32 ZoneIndex);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
+    float WeatherAudioVolume = 0.5f;
 
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    void UpdateSeasonalParameters(float SeasonProgress);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transition Settings")
+    float BiomeTransitionTime = 5.0f;
 
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    float CalculateBiomeInfluence(const FVector& Location, const FWorld_BiomeZone& Zone) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Biome")
-    void GenerateDefaultBiomes();
-
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Biome")
-    void RegenerateBiomes();
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transition Settings")
+    float WeatherTransitionTime = 3.0f;
 
 private:
-    UPROPERTY()
-    float CurrentSeasonTime = 0.0f;
+    float CurrentTransitionTime = 0.0f;
+    bool bIsTransitioning = false;
+    FWorld_BiomeData TargetBiome;
+    FWorld_WeatherData TargetWeather;
+
+public:
+    UFUNCTION(BlueprintCallable, Category = "Biome System")
+    void SetCurrentBiome(EWorld_BiomeType NewBiomeType);
+
+    UFUNCTION(BlueprintCallable, Category = "Weather System")
+    void SetCurrentWeather(EWorld_WeatherType NewWeatherType, float NewIntensity = 0.5f);
+
+    UFUNCTION(BlueprintCallable, Category = "Biome System")
+    EWorld_BiomeType GetCurrentBiomeType() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Weather System")
+    EWorld_WeatherType GetCurrentWeatherType() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Environment")
+    float GetCurrentTemperature() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Environment")
+    float GetCurrentHumidity() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Environment")
+    float GetCurrentWindStrength() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void UpdateBiomeAudio();
+
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void UpdateWeatherAudio();
+
+    UFUNCTION(BlueprintCallable, Category = "Transition System")
+    void StartBiomeTransition(EWorld_BiomeType TargetBiomeType);
+
+    UFUNCTION(BlueprintCallable, Category = "Transition System")
+    void StartWeatherTransition(EWorld_WeatherType TargetWeatherType, float TargetIntensity = 0.5f);
+
+protected:
+    UFUNCTION(BlueprintImplementableEvent, Category = "Events")
+    void OnBiomeChanged(EWorld_BiomeType NewBiome);
+
+    UFUNCTION(BlueprintImplementableEvent, Category = "Events")
+    void OnWeatherChanged(EWorld_WeatherType NewWeather, float Intensity);
 
     void InitializeDefaultBiomes();
-    FWorld_BiomeParameters BlendBiomeParameters(const TArray<TPair<FWorld_BiomeParameters, float>>& BiomesWithWeights) const;
+    void InitializeDefaultWeather();
+    void ProcessTransitions(float DeltaTime);
+    FWorld_BiomeData* FindBiomeData(EWorld_BiomeType BiomeType);
+    FWorld_WeatherData* FindWeatherData(EWorld_WeatherType WeatherType);
 };
