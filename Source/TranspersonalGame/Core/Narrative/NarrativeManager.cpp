@@ -1,288 +1,344 @@
 #include "NarrativeManager.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Engine/GameInstance.h"
-#include "Kismet/GameplayStatics.h"
-
-UNarrativeManager::UNarrativeManager()
-{
-    CurrentDialogueID = TEXT("");
-    CurrentDialogueLineIndex = 0;
-    bDialogueActive = false;
-    DefaultDialogueLineDelay = 3.0f;
-    bAutoAdvanceDialogue = false;
-}
+#include "TimerManager.h"
 
 void UNarrativeManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Initializing narrative system"));
+    DialogueState = ENarr_DialogueState::Inactive;
+    CurrentLineIndex = 0;
+    DialogueStartTime = 0.0f;
+    CurrentNPCName = TEXT("");
+    CurrentSequenceID = TEXT("");
     
-    LoadDialogueData();
-    LoadStoryData();
-    InitializeCharacterRelationships();
+    LoadDefaultNPCProfiles();
     
-    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Loaded %d dialogue sequences, %d story beats"), 
-           DialogueDatabase.Num(), StoryBeats.Num());
+    UE_LOG(LogTemp, Warning, TEXT("NarrativeManager initialized with %d NPC profiles"), NPCProfiles.Num());
 }
 
 void UNarrativeManager::Deinitialize()
 {
-    if (bDialogueActive)
-    {
-        EndCurrentDialogue();
-    }
-    
-    DialogueDatabase.Empty();
-    StoryBeats.Empty();
-    CharacterRelationships.Empty();
+    EndDialogue();
+    NPCProfiles.Empty();
     
     Super::Deinitialize();
 }
 
-bool UNarrativeManager::StartDialogue(const FString& DialogueID, AActor* Speaker)
+bool UNarrativeManager::StartDialogue(const FString& NPCName, const FString& SequenceID)
 {
-    if (bDialogueActive)
+    if (DialogueState == ENarr_DialogueState::InProgress)
     {
-        UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Cannot start dialogue %s - dialogue already active"), *DialogueID);
+        UE_LOG(LogTemp, Warning, TEXT("Cannot start dialogue - another dialogue is already in progress"));
         return false;
     }
-    
-    if (!DialogueDatabase.Contains(DialogueID))
+
+    if (!NPCProfiles.Contains(NPCName))
     {
-        UE_LOG(LogTemp, Error, TEXT("NarrativeManager: Dialogue %s not found in database"), *DialogueID);
+        UE_LOG(LogTemp, Error, TEXT("NPC profile not found: %s"), *NPCName);
         return false;
     }
+
+    FNarr_NPCProfile& NPCProfile = NPCProfiles[NPCName];
     
-    CurrentDialogueID = DialogueID;
-    CurrentDialogueLineIndex = 0;
-    bDialogueActive = true;
-    
-    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Started dialogue %s"), *DialogueID);
-    
-    OnDialogueStarted.Broadcast(DialogueID);
-    
+    // Find the requested dialogue sequence
+    FNarr_DialogueSequence* FoundSequence = nullptr;
+    for (FNarr_DialogueSequence& Sequence : NPCProfile.AvailableDialogues)
+    {
+        if (Sequence.SequenceID == SequenceID)
+        {
+            FoundSequence = &Sequence;
+            break;
+        }
+    }
+
+    if (!FoundSequence)
+    {
+        UE_LOG(LogTemp, Error, TEXT("Dialogue sequence not found: %s for NPC: %s"), *SequenceID, *NPCName);
+        return false;
+    }
+
+    // Check if dialogue was already completed and is not repeatable
+    if (!FoundSequence->bIsRepeatable && IsDialogueCompleted(NPCName, SequenceID))
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Dialogue already completed and not repeatable: %s"), *SequenceID);
+        return false;
+    }
+
+    CurrentNPCName = NPCName;
+    CurrentSequenceID = SequenceID;
+    CurrentLineIndex = 0;
+    DialogueState = ENarr_DialogueState::InProgress;
+    DialogueStartTime = GetWorld()->GetTimeSeconds();
+
+    UE_LOG(LogTemp, Log, TEXT("Started dialogue: %s with NPC: %s"), *SequenceID, *NPCName);
     return true;
 }
 
-void UNarrativeManager::EndCurrentDialogue()
+void UNarrativeManager::EndDialogue()
 {
-    if (!bDialogueActive)
+    if (DialogueState == ENarr_DialogueState::InProgress)
     {
-        return;
+        DialogueState = ENarr_DialogueState::Completed;
+        
+        if (!CurrentNPCName.IsEmpty() && !CurrentSequenceID.IsEmpty())
+        {
+            MarkDialogueCompleted(CurrentNPCName, CurrentSequenceID);
+        }
+        
+        UE_LOG(LogTemp, Log, TEXT("Ended dialogue: %s"), *CurrentSequenceID);
     }
-    
-    FString CompletedDialogueID = CurrentDialogueID;
-    
-    CurrentDialogueID = TEXT("");
-    CurrentDialogueLineIndex = 0;
-    bDialogueActive = false;
-    
-    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Ended dialogue %s"), *CompletedDialogueID);
-    
-    OnDialogueCompleted.Broadcast(CompletedDialogueID);
+
+    CurrentNPCName = TEXT("");
+    CurrentSequenceID = TEXT("");
+    CurrentLineIndex = 0;
+    DialogueState = ENarr_DialogueState::Inactive;
 }
 
 bool UNarrativeManager::IsDialogueActive() const
 {
-    return bDialogueActive;
+    return DialogueState == ENarr_DialogueState::InProgress;
 }
 
-FNarr_DialogueSequence UNarrativeManager::GetDialogueSequence(const FString& DialogueID) const
+FNarr_DialogueLine UNarrativeManager::GetCurrentDialogueLine() const
 {
-    if (DialogueDatabase.Contains(DialogueID))
+    if (!IsDialogueActive() || CurrentNPCName.IsEmpty() || CurrentSequenceID.IsEmpty())
     {
-        return DialogueDatabase[DialogueID];
+        return FNarr_DialogueLine();
     }
-    
-    UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Dialogue sequence %s not found"), *DialogueID);
-    return FNarr_DialogueSequence();
+
+    const FNarr_NPCProfile* NPCProfile = NPCProfiles.Find(CurrentNPCName);
+    if (!NPCProfile)
+    {
+        return FNarr_DialogueLine();
+    }
+
+    for (const FNarr_DialogueSequence& Sequence : NPCProfile->AvailableDialogues)
+    {
+        if (Sequence.SequenceID == CurrentSequenceID)
+        {
+            if (CurrentLineIndex >= 0 && CurrentLineIndex < Sequence.DialogueLines.Num())
+            {
+                return Sequence.DialogueLines[CurrentLineIndex];
+            }
+            break;
+        }
+    }
+
+    return FNarr_DialogueLine();
 }
 
-void UNarrativeManager::CompleteStoryBeat(const FString& BeatID)
+void UNarrativeManager::AdvanceDialogue()
 {
-    if (!StoryBeats.Contains(BeatID))
+    if (!IsDialogueActive())
     {
-        UE_LOG(LogTemp, Error, TEXT("NarrativeManager: Story beat %s not found"), *BeatID);
         return;
     }
-    
-    FNarr_StoryBeat& Beat = StoryBeats[BeatID];
-    if (!Beat.bIsCompleted)
-    {
-        Beat.bIsCompleted = true;
-        UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Completed story beat %s"), *BeatID);
-        OnStoryBeatCompleted.Broadcast(BeatID);
-    }
-}
 
-bool UNarrativeManager::IsStoryBeatCompleted(const FString& BeatID) const
-{
-    if (StoryBeats.Contains(BeatID))
+    const FNarr_NPCProfile* NPCProfile = NPCProfiles.Find(CurrentNPCName);
+    if (!NPCProfile)
     {
-        return StoryBeats[BeatID].bIsCompleted;
+        EndDialogue();
+        return;
     }
-    return false;
-}
 
-TArray<FNarr_StoryBeat> UNarrativeManager::GetAvailableStoryBeats() const
-{
-    TArray<FNarr_StoryBeat> AvailableBeats;
-    
-    for (const auto& BeatPair : StoryBeats)
+    for (const FNarr_DialogueSequence& Sequence : NPCProfile->AvailableDialogues)
     {
-        const FNarr_StoryBeat& Beat = BeatPair.Value;
-        
-        if (Beat.bIsCompleted)
+        if (Sequence.SequenceID == CurrentSequenceID)
         {
-            continue;
-        }
-        
-        // Check if all required beats are completed
-        bool bCanStart = true;
-        for (const FString& RequiredBeatID : Beat.RequiredBeats)
-        {
-            if (!IsStoryBeatCompleted(RequiredBeatID))
+            CurrentLineIndex++;
+            
+            if (CurrentLineIndex >= Sequence.DialogueLines.Num())
             {
-                bCanStart = false;
-                break;
+                EndDialogue();
+            }
+            
+            UE_LOG(LogTemp, Log, TEXT("Advanced dialogue to line %d"), CurrentLineIndex);
+            return;
+        }
+    }
+
+    EndDialogue();
+}
+
+void UNarrativeManager::RegisterNPC(const FString& NPCName, const FNarr_NPCProfile& Profile)
+{
+    NPCProfiles.Add(NPCName, Profile);
+    UE_LOG(LogTemp, Log, TEXT("Registered NPC: %s with %d dialogue sequences"), *NPCName, Profile.AvailableDialogues.Num());
+}
+
+FNarr_NPCProfile UNarrativeManager::GetNPCProfile(const FString& NPCName) const
+{
+    const FNarr_NPCProfile* FoundProfile = NPCProfiles.Find(NPCName);
+    return FoundProfile ? *FoundProfile : FNarr_NPCProfile();
+}
+
+void UNarrativeManager::UpdateNPCMood(const FString& NPCName, ENarr_NPCMood NewMood)
+{
+    FNarr_NPCProfile* NPCProfile = NPCProfiles.Find(NPCName);
+    if (NPCProfile)
+    {
+        NPCProfile->CurrentMood = NewMood;
+        UE_LOG(LogTemp, Log, TEXT("Updated NPC %s mood to %d"), *NPCName, (int32)NewMood);
+    }
+}
+
+void UNarrativeManager::UpdateNPCTrust(const FString& NPCName, float TrustDelta)
+{
+    FNarr_NPCProfile* NPCProfile = NPCProfiles.Find(NPCName);
+    if (NPCProfile)
+    {
+        NPCProfile->TrustLevel = FMath::Clamp(NPCProfile->TrustLevel + TrustDelta, 0.0f, 1.0f);
+        UE_LOG(LogTemp, Log, TEXT("Updated NPC %s trust level to %f"), *NPCName, NPCProfile->TrustLevel);
+    }
+}
+
+void UNarrativeManager::MarkDialogueCompleted(const FString& NPCName, const FString& SequenceID)
+{
+    FNarr_NPCProfile* NPCProfile = NPCProfiles.Find(NPCName);
+    if (NPCProfile)
+    {
+        NPCProfile->CompletedDialogues.AddUnique(SequenceID);
+        UE_LOG(LogTemp, Log, TEXT("Marked dialogue completed: %s for NPC: %s"), *SequenceID, *NPCName);
+    }
+}
+
+bool UNarrativeManager::IsDialogueCompleted(const FString& NPCName, const FString& SequenceID) const
+{
+    const FNarr_NPCProfile* NPCProfile = NPCProfiles.Find(NPCName);
+    return NPCProfile && NPCProfile->CompletedDialogues.Contains(SequenceID);
+}
+
+TArray<FString> UNarrativeManager::GetAvailableDialogues(const FString& NPCName) const
+{
+    TArray<FString> AvailableSequences;
+    
+    const FNarr_NPCProfile* NPCProfile = NPCProfiles.Find(NPCName);
+    if (NPCProfile)
+    {
+        for (const FNarr_DialogueSequence& Sequence : NPCProfile->AvailableDialogues)
+        {
+            if (Sequence.bIsRepeatable || !IsDialogueCompleted(NPCName, Sequence.SequenceID))
+            {
+                AvailableSequences.Add(Sequence.SequenceID);
             }
         }
-        
-        if (bCanStart)
-        {
-            AvailableBeats.Add(Beat);
-        }
     }
-    
-    return AvailableBeats;
+
+    return AvailableSequences;
 }
 
-void UNarrativeManager::ModifyCharacterRelationship(const FString& CharacterID, int32 RelationshipChange)
+void UNarrativeManager::LoadDefaultNPCProfiles()
 {
-    if (!CharacterRelationships.Contains(CharacterID))
-    {
-        CharacterRelationships.Add(CharacterID, 0);
-    }
+    CreateSurvivalDialogues();
     
-    CharacterRelationships[CharacterID] += RelationshipChange;
-    
-    // Clamp relationship values between -100 and 100
-    CharacterRelationships[CharacterID] = FMath::Clamp(CharacterRelationships[CharacterID], -100, 100);
-    
-    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Character %s relationship changed by %d, now %d"), 
-           *CharacterID, RelationshipChange, CharacterRelationships[CharacterID]);
+    RegisterNPC(TEXT("ElderHunter"), CreateElderHunterProfile());
+    RegisterNPC(TEXT("ScoutRunner"), CreateScoutRunnerProfile());
+    RegisterNPC(TEXT("TribeChief"), CreateTribeChiefProfile());
 }
 
-int32 UNarrativeManager::GetCharacterRelationship(const FString& CharacterID) const
+void UNarrativeManager::CreateSurvivalDialogues()
 {
-    if (CharacterRelationships.Contains(CharacterID))
-    {
-        return CharacterRelationships[CharacterID];
-    }
-    return 0;
+    // This method sets up the core survival-focused dialogue system
+    UE_LOG(LogTemp, Log, TEXT("Creating survival-focused dialogue sequences"));
 }
 
-void UNarrativeManager::LoadDialogueData()
+FNarr_NPCProfile UNarrativeManager::CreateElderHunterProfile()
 {
-    // Initialize with basic survival-focused dialogue sequences
-    
-    // Elder Hunter dialogue
-    FNarr_DialogueSequence ElderHunterIntro;
-    ElderHunterIntro.SequenceID = TEXT("elder_hunter_intro");
-    ElderHunterIntro.bIsRepeatable = false;
-    
+    FNarr_NPCProfile Profile;
+    Profile.NPCName = TEXT("Elder Hunter");
+    Profile.NPCRole = TEXT("Experienced Tracker");
+    Profile.CurrentMood = ENarr_NPCMood::Cautious;
+    Profile.TrustLevel = 0.7f;
+
+    // Warning about predator tracks
+    FNarr_DialogueSequence PredatorWarning;
+    PredatorWarning.SequenceID = TEXT("PredatorTracks");
+    PredatorWarning.bIsRepeatable = false;
+    PredatorWarning.Priority = 10;
+
     FNarr_DialogueLine Line1;
     Line1.SpeakerName = TEXT("Elder Hunter");
-    Line1.DialogueText = FText::FromString(TEXT("You look lost, young one. This valley is dangerous for those who don't know its ways."));
+    Line1.DialogueText = FText::FromString(TEXT("The tracks are fresh. Three-toed, deep impressions in the mud. A large predator passed this way not long ago."));
     Line1.Duration = 4.0f;
-    ElderHunterIntro.DialogueLines.Add(Line1);
-    
+    Line1.RequiredMood = ENarr_NPCMood::Cautious;
+
     FNarr_DialogueLine Line2;
     Line2.SpeakerName = TEXT("Elder Hunter");
-    Line2.DialogueText = FText::FromString(TEXT("The three-toed tracks by the river... Carnotaurus. It hunts at dawn and dusk."));
-    Line2.Duration = 3.5f;
-    ElderHunterIntro.DialogueLines.Add(Line2);
-    
-    DialogueDatabase.Add(TEXT("elder_hunter_intro"), ElderHunterIntro);
-    
-    // Scout Runner dialogue
-    FNarr_DialogueSequence ScoutReport;
-    ScoutReport.SequenceID = TEXT("scout_herd_report");
-    ScoutReport.bIsRepeatable = true;
-    
-    FNarr_DialogueLine ScoutLine1;
-    ScoutLine1.SpeakerName = TEXT("Scout Runner");
-    ScoutLine1.DialogueText = FText::FromString(TEXT("The herds move toward the great lake! We must hurry if we want fresh meat."));
-    ScoutLine1.Duration = 3.0f;
-    ScoutReport.DialogueLines.Add(ScoutLine1);
-    
-    DialogueDatabase.Add(TEXT("scout_herd_report"), ScoutReport);
-    
-    // Tribe Leader dialogue
-    FNarr_DialogueSequence LeaderHunt;
-    LeaderHunt.SequenceID = TEXT("leader_hunt_preparation");
-    LeaderHunt.bIsRepeatable = true;
-    
-    FNarr_DialogueLine LeaderLine1;
-    LeaderLine1.SpeakerName = TEXT("Tribe Leader");
-    LeaderLine1.DialogueText = FText::FromString(TEXT("Today we hunt the giant lizards. Stay together, watch the flanks."));
-    LeaderLine1.Duration = 3.5f;
-    LeaderHunt.DialogueLines.Add(LeaderLine1);
-    
-    FNarr_DialogueLine LeaderLine2;
-    LeaderLine2.SpeakerName = TEXT("Tribe Leader");
-    LeaderLine2.DialogueText = FText::FromString(TEXT("One mistake feeds us to the predators. Are you ready?"));
-    LeaderLine2.Duration = 3.0f;
-    LeaderHunt.DialogueLines.Add(LeaderLine2);
-    
-    DialogueDatabase.Add(TEXT("leader_hunt_preparation"), LeaderHunt);
+    Line2.DialogueText = FText::FromString(TEXT("We should move camp before nightfall. Carnotaurus hunts in the darkness, and its bite can crush bone."));
+    Line2.Duration = 4.5f;
+    Line2.RequiredMood = ENarr_NPCMood::Cautious;
+
+    PredatorWarning.DialogueLines.Add(Line1);
+    PredatorWarning.DialogueLines.Add(Line2);
+    Profile.AvailableDialogues.Add(PredatorWarning);
+
+    return Profile;
 }
 
-void UNarrativeManager::LoadStoryData()
+FNarr_NPCProfile UNarrativeManager::CreateScoutRunnerProfile()
 {
-    // Initialize main story beats focused on survival progression
-    
-    FNarr_StoryBeat FirstSurvival;
-    FirstSurvival.BeatID = TEXT("first_survival");
-    FirstSurvival.BeatTitle = FText::FromString(TEXT("First Day"));
-    FirstSurvival.BeatDescription = FText::FromString(TEXT("Survive your first day in the prehistoric valley"));
-    FirstSurvival.bIsCompleted = false;
-    StoryBeats.Add(TEXT("first_survival"), FirstSurvival);
-    
-    FNarr_StoryBeat MeetTribe;
-    MeetTribe.BeatID = TEXT("meet_tribe");
-    MeetTribe.BeatTitle = FText::FromString(TEXT("Contact"));
-    MeetTribe.BeatDescription = FText::FromString(TEXT("Make contact with the local tribe"));
-    MeetTribe.bIsCompleted = false;
-    MeetTribe.RequiredBeats.Add(TEXT("first_survival"));
-    StoryBeats.Add(TEXT("meet_tribe"), MeetTribe);
-    
-    FNarr_StoryBeat FirstHunt;
-    FirstHunt.BeatID = TEXT("first_hunt");
-    FirstHunt.BeatTitle = FText::FromString(TEXT("The Hunt"));
-    FirstHunt.BeatDescription = FText::FromString(TEXT("Participate in your first dinosaur hunt"));
-    FirstHunt.bIsCompleted = false;
-    FirstHunt.RequiredBeats.Add(TEXT("meet_tribe"));
-    StoryBeats.Add(TEXT("first_hunt"), FirstHunt);
-    
-    FNarr_StoryBeat ProveWorth;
-    ProveWorth.BeatID = TEXT("prove_worth");
-    ProveWorth.BeatTitle = FText::FromString(TEXT("Proving Ground"));
-    ProveWorth.BeatDescription = FText::FromString(TEXT("Prove your worth to the tribe through skill and courage"));
-    ProveWorth.bIsCompleted = false;
-    ProveWorth.RequiredBeats.Add(TEXT("first_hunt"));
-    StoryBeats.Add(TEXT("prove_worth"), ProveWorth);
+    FNarr_NPCProfile Profile;
+    Profile.NPCName = TEXT("Scout Runner");
+    Profile.NPCRole = TEXT("Young Scout");
+    Profile.CurrentMood = ENarr_NPCMood::Neutral;
+    Profile.TrustLevel = 0.6f;
+
+    // Herd movement report
+    FNarr_DialogueSequence HerdReport;
+    HerdReport.SequenceID = TEXT("HerdMovement");
+    HerdReport.bIsRepeatable = true;
+    HerdReport.Priority = 8;
+
+    FNarr_DialogueLine Line1;
+    Line1.SpeakerName = TEXT("Scout Runner");
+    Line1.DialogueText = FText::FromString(TEXT("Chief! The herds are moving south toward the river valley. Hundreds of them - good hunting ahead."));
+    Line1.Duration = 3.5f;
+    Line1.RequiredMood = ENarr_NPCMood::Neutral;
+
+    FNarr_DialogueLine Line2;
+    Line2.SpeakerName = TEXT("Scout Runner");
+    Line2.DialogueText = FText::FromString(TEXT("But something's driving them. Something big is hunting behind the migration."));
+    Line2.Duration = 3.0f;
+    Line2.RequiredMood = ENarr_NPCMood::Fearful;
+
+    HerdReport.DialogueLines.Add(Line1);
+    HerdReport.DialogueLines.Add(Line2);
+    Profile.AvailableDialogues.Add(HerdReport);
+
+    return Profile;
 }
 
-void UNarrativeManager::InitializeCharacterRelationships()
+FNarr_NPCProfile UNarrativeManager::CreateTribeChiefProfile()
 {
-    // Initialize neutral relationships with key NPCs
-    CharacterRelationships.Add(TEXT("elder_hunter"), 0);
-    CharacterRelationships.Add(TEXT("scout_runner"), 0);
-    CharacterRelationships.Add(TEXT("tribe_leader"), 0);
-    CharacterRelationships.Add(TEXT("wounded_warrior"), 0);
-    CharacterRelationships.Add(TEXT("tribal_crafter"), 0);
-    CharacterRelationships.Add(TEXT("cave_painter"), 0);
+    FNarr_NPCProfile Profile;
+    Profile.NPCName = TEXT("Tribe Chief");
+    Profile.NPCRole = TEXT("Tribal Leader");
+    Profile.CurrentMood = ENarr_NPCMood::Friendly;
+    Profile.TrustLevel = 0.8f;
+
+    // Leadership wisdom
+    FNarr_DialogueSequence LeadershipWisdom;
+    LeadershipWisdom.SequenceID = TEXT("SurvivalWisdom");
+    LeadershipWisdom.bIsRepeatable = false;
+    LeadershipWisdom.Priority = 9;
+
+    FNarr_DialogueLine Line1;
+    Line1.SpeakerName = TEXT("Tribe Chief");
+    Line1.DialogueText = FText::FromString(TEXT("This land has fed our people for generations, but it demands respect."));
+    Line1.Duration = 3.0f;
+    Line1.RequiredMood = ENarr_NPCMood::Friendly;
+
+    FNarr_DialogueLine Line2;
+    Line2.SpeakerName = TEXT("Tribe Chief");
+    Line2.DialogueText = FText::FromString(TEXT("Every dawn brings new dangers. Only the strong and the wise will see another sunrise."));
+    Line2.Duration = 4.0f;
+    Line2.RequiredMood = ENarr_NPCMood::Neutral;
+
+    LeadershipWisdom.DialogueLines.Add(Line1);
+    LeadershipWisdom.DialogueLines.Add(Line2);
+    Profile.AvailableDialogues.Add(LeadershipWisdom);
+
+    return Profile;
 }
