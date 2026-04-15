@@ -1,13 +1,16 @@
 #include "NarrativeManager.h"
 #include "Engine/Engine.h"
-#include "Engine/DataTable.h"
-#include "TimerManager.h"
+#include "Engine/World.h"
+#include "Engine/GameInstance.h"
 #include "Kismet/GameplayStatics.h"
 
 UNarrativeManager::UNarrativeManager()
 {
-    CurrentNarrativeState = ENarr_NarrativeState::Intro;
-    bIsDialogueActive = false;
+    CurrentDialogueID = TEXT("");
+    CurrentDialogueLineIndex = 0;
+    bDialogueActive = false;
+    DefaultDialogueLineDelay = 3.0f;
+    bAutoAdvanceDialogue = false;
 }
 
 void UNarrativeManager::Initialize(FSubsystemCollectionBase& Collection)
@@ -16,227 +19,270 @@ void UNarrativeManager::Initialize(FSubsystemCollectionBase& Collection)
     
     UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Initializing narrative system"));
     
-    LoadNarrativeData();
-    InitializeStoryBeats();
+    LoadDialogueData();
+    LoadStoryData();
+    InitializeCharacterRelationships();
     
-    // Set initial narrative flags
-    SetNarrativeFlag(TEXT("GameStarted"), true);
-    SetNarrativeFlag(TEXT("HasFire"), false);
-    SetNarrativeFlag(TEXT("HasWeapon"), false);
-    SetNarrativeFlag(TEXT("MetTribe"), false);
-    SetNarrativeFlag(TEXT("FirstHuntComplete"), false);
+    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Loaded %d dialogue sequences, %d story beats"), 
+           DialogueDatabase.Num(), StoryBeats.Num());
 }
 
 void UNarrativeManager::Deinitialize()
 {
-    if (GetWorld() && GetWorld()->GetTimerManager().IsTimerActive(DialogueTimerHandle))
+    if (bDialogueActive)
     {
-        GetWorld()->GetTimerManager().ClearTimer(DialogueTimerHandle);
+        EndCurrentDialogue();
     }
+    
+    DialogueDatabase.Empty();
+    StoryBeats.Empty();
+    CharacterRelationships.Empty();
     
     Super::Deinitialize();
 }
 
-void UNarrativeManager::TriggerNarrativeEvent(const FString& EventID, const FString& EventData)
+bool UNarrativeManager::StartDialogue(const FString& DialogueID, AActor* Speaker)
 {
-    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Triggering event %s with data: %s"), *EventID, *EventData);
-    
-    // Handle specific narrative events
-    if (EventID == TEXT("PlayerDeath"))
+    if (bDialogueActive)
     {
-        SetNarrativeFlag(TEXT("HasDied"), true);
-    }
-    else if (EventID == TEXT("FirstKill"))
-    {
-        SetNarrativeFlag(TEXT("FirstKillComplete"), true);
-        AdvanceStoryBeat(TEXT("FirstHunt"));
-    }
-    else if (EventID == TEXT("FireCreated"))
-    {
-        SetNarrativeFlag(TEXT("HasFire"), true);
-        AdvanceStoryBeat(TEXT("Survival_Fire"));
-    }
-    else if (EventID == TEXT("WeaponCrafted"))
-    {
-        SetNarrativeFlag(TEXT("HasWeapon"), true);
-    }
-    else if (EventID == TEXT("TribalEncounter"))
-    {
-        SetNarrativeFlag(TEXT("MetTribe"), true);
-        SetNarrativeState(ENarr_NarrativeState::TribalContact);
+        UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Cannot start dialogue %s - dialogue already active"), *DialogueID);
+        return false;
     }
     
-    // Broadcast the event
-    OnNarrativeEvent.Broadcast(EventID, EventData);
-}
-
-void UNarrativeManager::SetNarrativeFlag(const FString& FlagName, bool bValue)
-{
-    NarrativeFlags.Add(FlagName, bValue);
-    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Set flag %s to %s"), *FlagName, bValue ? TEXT("true") : TEXT("false"));
-}
-
-bool UNarrativeManager::GetNarrativeFlag(const FString& FlagName) const
-{
-    const bool* FoundFlag = NarrativeFlags.Find(FlagName);
-    return FoundFlag ? *FoundFlag : false;
-}
-
-void UNarrativeManager::AdvanceStoryBeat(const FString& BeatID)
-{
-    FNarr_StoryBeat* Beat = StoryBeats.Find(BeatID);
-    if (Beat && !Beat->bIsCompleted)
+    if (!DialogueDatabase.Contains(DialogueID))
     {
-        if (CheckConditions(Beat->TriggerConditions))
-        {
-            Beat->bIsCompleted = true;
-            ProcessCompletionFlags(Beat->CompletionFlags);
-            
-            UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Completed story beat %s"), *BeatID);
-            TriggerNarrativeEvent(TEXT("StoryBeatCompleted"), BeatID);
-        }
+        UE_LOG(LogTemp, Error, TEXT("NarrativeManager: Dialogue %s not found in database"), *DialogueID);
+        return false;
+    }
+    
+    CurrentDialogueID = DialogueID;
+    CurrentDialogueLineIndex = 0;
+    bDialogueActive = true;
+    
+    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Started dialogue %s"), *DialogueID);
+    
+    OnDialogueStarted.Broadcast(DialogueID);
+    
+    return true;
+}
+
+void UNarrativeManager::EndCurrentDialogue()
+{
+    if (!bDialogueActive)
+    {
+        return;
+    }
+    
+    FString CompletedDialogueID = CurrentDialogueID;
+    
+    CurrentDialogueID = TEXT("");
+    CurrentDialogueLineIndex = 0;
+    bDialogueActive = false;
+    
+    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Ended dialogue %s"), *CompletedDialogueID);
+    
+    OnDialogueCompleted.Broadcast(CompletedDialogueID);
+}
+
+bool UNarrativeManager::IsDialogueActive() const
+{
+    return bDialogueActive;
+}
+
+FNarr_DialogueSequence UNarrativeManager::GetDialogueSequence(const FString& DialogueID) const
+{
+    if (DialogueDatabase.Contains(DialogueID))
+    {
+        return DialogueDatabase[DialogueID];
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Dialogue sequence %s not found"), *DialogueID);
+    return FNarr_DialogueSequence();
+}
+
+void UNarrativeManager::CompleteStoryBeat(const FString& BeatID)
+{
+    if (!StoryBeats.Contains(BeatID))
+    {
+        UE_LOG(LogTemp, Error, TEXT("NarrativeManager: Story beat %s not found"), *BeatID);
+        return;
+    }
+    
+    FNarr_StoryBeat& Beat = StoryBeats[BeatID];
+    if (!Beat.bIsCompleted)
+    {
+        Beat.bIsCompleted = true;
+        UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Completed story beat %s"), *BeatID);
+        OnStoryBeatCompleted.Broadcast(BeatID);
     }
 }
 
 bool UNarrativeManager::IsStoryBeatCompleted(const FString& BeatID) const
 {
-    const FNarr_StoryBeat* Beat = StoryBeats.Find(BeatID);
-    return Beat ? Beat->bIsCompleted : false;
+    if (StoryBeats.Contains(BeatID))
+    {
+        return StoryBeats[BeatID].bIsCompleted;
+    }
+    return false;
 }
 
-void UNarrativeManager::StartDialogue(const FString& DialogueID)
+TArray<FNarr_StoryBeat> UNarrativeManager::GetAvailableStoryBeats() const
 {
-    if (bIsDialogueActive)
-    {
-        EndDialogue();
-    }
+    TArray<FNarr_StoryBeat> AvailableBeats;
     
-    // Load dialogue from data table
-    if (DialogueDataTable.IsValid())
+    for (const auto& BeatPair : StoryBeats)
     {
-        UDataTable* Table = DialogueDataTable.LoadSynchronous();
-        if (Table)
+        const FNarr_StoryBeat& Beat = BeatPair.Value;
+        
+        if (Beat.bIsCompleted)
         {
-            FNarr_DialogueEntry* DialogueEntry = Table->FindRow<FNarr_DialogueEntry>(FName(*DialogueID), TEXT(""));
-            if (DialogueEntry && CheckConditions(DialogueEntry->RequiredFlags))
+            continue;
+        }
+        
+        // Check if all required beats are completed
+        bool bCanStart = true;
+        for (const FString& RequiredBeatID : Beat.RequiredBeats)
+        {
+            if (!IsStoryBeatCompleted(RequiredBeatID))
             {
-                CurrentDialogue = *DialogueEntry;
-                bIsDialogueActive = true;
-                
-                // Process flags set by this dialogue
-                ProcessCompletionFlags(DialogueEntry->SetFlags);
-                
-                // Start dialogue timer
-                if (GetWorld())
-                {
-                    GetWorld()->GetTimerManager().SetTimer(
-                        DialogueTimerHandle,
-                        this,
-                        &UNarrativeManager::OnDialogueTimeout,
-                        CurrentDialogue.Duration,
-                        false
-                    );
-                }
-                
-                OnDialogueStarted.Broadcast(CurrentDialogue);
-                UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Started dialogue %s"), *DialogueID);
+                bCanStart = false;
+                break;
             }
         }
-    }
-}
-
-void UNarrativeManager::EndDialogue()
-{
-    if (bIsDialogueActive)
-    {
-        bIsDialogueActive = false;
         
-        if (GetWorld() && GetWorld()->GetTimerManager().IsTimerActive(DialogueTimerHandle))
+        if (bCanStart)
         {
-            GetWorld()->GetTimerManager().ClearTimer(DialogueTimerHandle);
-        }
-        
-        OnDialogueEnded.Broadcast();
-        UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Ended dialogue"));
-    }
-}
-
-void UNarrativeManager::SetNarrativeState(ENarr_NarrativeState NewState)
-{
-    if (CurrentNarrativeState != NewState)
-    {
-        ENarr_NarrativeState PreviousState = CurrentNarrativeState;
-        CurrentNarrativeState = NewState;
-        
-        UE_LOG(LogTemp, Log, TEXT("NarrativeManager: State changed from %d to %d"), 
-               (int32)PreviousState, (int32)NewState);
-        
-        // Trigger state-specific events
-        FString StateEventID = FString::Printf(TEXT("StateChanged_%d"), (int32)NewState);
-        TriggerNarrativeEvent(StateEventID, FString::Printf(TEXT("%d"), (int32)PreviousState));
-    }
-}
-
-void UNarrativeManager::LoadNarrativeData()
-{
-    // Set up data table references
-    DialogueDataTable = TSoftObjectPtr<UDataTable>(FSoftObjectPath(TEXT("/Game/Data/DialogueTable")));
-    StoryBeatsDataTable = TSoftObjectPtr<UDataTable>(FSoftObjectPath(TEXT("/Game/Data/StoryBeatsTable")));
-    
-    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Loaded narrative data references"));
-}
-
-void UNarrativeManager::InitializeStoryBeats()
-{
-    // Initialize core story beats
-    FNarr_StoryBeat IntroductionBeat;
-    IntroductionBeat.BeatID = TEXT("Introduction");
-    IntroductionBeat.Title = FText::FromString(TEXT("Awakening"));
-    IntroductionBeat.Description = FText::FromString(TEXT("The player awakens in the prehistoric world"));
-    IntroductionBeat.TriggerConditions.Add(TEXT("GameStarted"));
-    IntroductionBeat.CompletionFlags.Add(TEXT("IntroComplete"));
-    StoryBeats.Add(IntroductionBeat.BeatID, IntroductionBeat);
-    
-    FNarr_StoryBeat FirstHuntBeat;
-    FirstHuntBeat.BeatID = TEXT("FirstHunt");
-    FirstHuntBeat.Title = FText::FromString(TEXT("First Hunt"));
-    FirstHuntBeat.Description = FText::FromString(TEXT("Player's first successful hunt"));
-    FirstHuntBeat.TriggerConditions.Add(TEXT("FirstKillComplete"));
-    FirstHuntBeat.CompletionFlags.Add(TEXT("FirstHuntComplete"));
-    StoryBeats.Add(FirstHuntBeat.BeatID, FirstHuntBeat);
-    
-    FNarr_StoryBeat SurvivalFireBeat;
-    SurvivalFireBeat.BeatID = TEXT("Survival_Fire");
-    SurvivalFireBeat.Title = FText::FromString(TEXT("Mastery of Fire"));
-    SurvivalFireBeat.Description = FText::FromString(TEXT("Player learns to create and maintain fire"));
-    SurvivalFireBeat.TriggerConditions.Add(TEXT("HasFire"));
-    SurvivalFireBeat.CompletionFlags.Add(TEXT("FireMasteryComplete"));
-    StoryBeats.Add(SurvivalFireBeat.BeatID, SurvivalFireBeat);
-    
-    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Initialized %d story beats"), StoryBeats.Num());
-}
-
-bool UNarrativeManager::CheckConditions(const TArray<FString>& Conditions) const
-{
-    for (const FString& Condition : Conditions)
-    {
-        if (!GetNarrativeFlag(Condition))
-        {
-            return false;
+            AvailableBeats.Add(Beat);
         }
     }
-    return true;
+    
+    return AvailableBeats;
 }
 
-void UNarrativeManager::ProcessCompletionFlags(const TArray<FString>& Flags)
+void UNarrativeManager::ModifyCharacterRelationship(const FString& CharacterID, int32 RelationshipChange)
 {
-    for (const FString& Flag : Flags)
+    if (!CharacterRelationships.Contains(CharacterID))
     {
-        SetNarrativeFlag(Flag, true);
+        CharacterRelationships.Add(CharacterID, 0);
     }
+    
+    CharacterRelationships[CharacterID] += RelationshipChange;
+    
+    // Clamp relationship values between -100 and 100
+    CharacterRelationships[CharacterID] = FMath::Clamp(CharacterRelationships[CharacterID], -100, 100);
+    
+    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Character %s relationship changed by %d, now %d"), 
+           *CharacterID, RelationshipChange, CharacterRelationships[CharacterID]);
 }
 
-void UNarrativeManager::OnDialogueTimeout()
+int32 UNarrativeManager::GetCharacterRelationship(const FString& CharacterID) const
 {
-    EndDialogue();
+    if (CharacterRelationships.Contains(CharacterID))
+    {
+        return CharacterRelationships[CharacterID];
+    }
+    return 0;
+}
+
+void UNarrativeManager::LoadDialogueData()
+{
+    // Initialize with basic survival-focused dialogue sequences
+    
+    // Elder Hunter dialogue
+    FNarr_DialogueSequence ElderHunterIntro;
+    ElderHunterIntro.SequenceID = TEXT("elder_hunter_intro");
+    ElderHunterIntro.bIsRepeatable = false;
+    
+    FNarr_DialogueLine Line1;
+    Line1.SpeakerName = TEXT("Elder Hunter");
+    Line1.DialogueText = FText::FromString(TEXT("You look lost, young one. This valley is dangerous for those who don't know its ways."));
+    Line1.Duration = 4.0f;
+    ElderHunterIntro.DialogueLines.Add(Line1);
+    
+    FNarr_DialogueLine Line2;
+    Line2.SpeakerName = TEXT("Elder Hunter");
+    Line2.DialogueText = FText::FromString(TEXT("The three-toed tracks by the river... Carnotaurus. It hunts at dawn and dusk."));
+    Line2.Duration = 3.5f;
+    ElderHunterIntro.DialogueLines.Add(Line2);
+    
+    DialogueDatabase.Add(TEXT("elder_hunter_intro"), ElderHunterIntro);
+    
+    // Scout Runner dialogue
+    FNarr_DialogueSequence ScoutReport;
+    ScoutReport.SequenceID = TEXT("scout_herd_report");
+    ScoutReport.bIsRepeatable = true;
+    
+    FNarr_DialogueLine ScoutLine1;
+    ScoutLine1.SpeakerName = TEXT("Scout Runner");
+    ScoutLine1.DialogueText = FText::FromString(TEXT("The herds move toward the great lake! We must hurry if we want fresh meat."));
+    ScoutLine1.Duration = 3.0f;
+    ScoutReport.DialogueLines.Add(ScoutLine1);
+    
+    DialogueDatabase.Add(TEXT("scout_herd_report"), ScoutReport);
+    
+    // Tribe Leader dialogue
+    FNarr_DialogueSequence LeaderHunt;
+    LeaderHunt.SequenceID = TEXT("leader_hunt_preparation");
+    LeaderHunt.bIsRepeatable = true;
+    
+    FNarr_DialogueLine LeaderLine1;
+    LeaderLine1.SpeakerName = TEXT("Tribe Leader");
+    LeaderLine1.DialogueText = FText::FromString(TEXT("Today we hunt the giant lizards. Stay together, watch the flanks."));
+    LeaderLine1.Duration = 3.5f;
+    LeaderHunt.DialogueLines.Add(LeaderLine1);
+    
+    FNarr_DialogueLine LeaderLine2;
+    LeaderLine2.SpeakerName = TEXT("Tribe Leader");
+    LeaderLine2.DialogueText = FText::FromString(TEXT("One mistake feeds us to the predators. Are you ready?"));
+    LeaderLine2.Duration = 3.0f;
+    LeaderHunt.DialogueLines.Add(LeaderLine2);
+    
+    DialogueDatabase.Add(TEXT("leader_hunt_preparation"), LeaderHunt);
+}
+
+void UNarrativeManager::LoadStoryData()
+{
+    // Initialize main story beats focused on survival progression
+    
+    FNarr_StoryBeat FirstSurvival;
+    FirstSurvival.BeatID = TEXT("first_survival");
+    FirstSurvival.BeatTitle = FText::FromString(TEXT("First Day"));
+    FirstSurvival.BeatDescription = FText::FromString(TEXT("Survive your first day in the prehistoric valley"));
+    FirstSurvival.bIsCompleted = false;
+    StoryBeats.Add(TEXT("first_survival"), FirstSurvival);
+    
+    FNarr_StoryBeat MeetTribe;
+    MeetTribe.BeatID = TEXT("meet_tribe");
+    MeetTribe.BeatTitle = FText::FromString(TEXT("Contact"));
+    MeetTribe.BeatDescription = FText::FromString(TEXT("Make contact with the local tribe"));
+    MeetTribe.bIsCompleted = false;
+    MeetTribe.RequiredBeats.Add(TEXT("first_survival"));
+    StoryBeats.Add(TEXT("meet_tribe"), MeetTribe);
+    
+    FNarr_StoryBeat FirstHunt;
+    FirstHunt.BeatID = TEXT("first_hunt");
+    FirstHunt.BeatTitle = FText::FromString(TEXT("The Hunt"));
+    FirstHunt.BeatDescription = FText::FromString(TEXT("Participate in your first dinosaur hunt"));
+    FirstHunt.bIsCompleted = false;
+    FirstHunt.RequiredBeats.Add(TEXT("meet_tribe"));
+    StoryBeats.Add(TEXT("first_hunt"), FirstHunt);
+    
+    FNarr_StoryBeat ProveWorth;
+    ProveWorth.BeatID = TEXT("prove_worth");
+    ProveWorth.BeatTitle = FText::FromString(TEXT("Proving Ground"));
+    ProveWorth.BeatDescription = FText::FromString(TEXT("Prove your worth to the tribe through skill and courage"));
+    ProveWorth.bIsCompleted = false;
+    ProveWorth.RequiredBeats.Add(TEXT("first_hunt"));
+    StoryBeats.Add(TEXT("prove_worth"), ProveWorth);
+}
+
+void UNarrativeManager::InitializeCharacterRelationships()
+{
+    // Initialize neutral relationships with key NPCs
+    CharacterRelationships.Add(TEXT("elder_hunter"), 0);
+    CharacterRelationships.Add(TEXT("scout_runner"), 0);
+    CharacterRelationships.Add(TEXT("tribe_leader"), 0);
+    CharacterRelationships.Add(TEXT("wounded_warrior"), 0);
+    CharacterRelationships.Add(TEXT("tribal_crafter"), 0);
+    CharacterRelationships.Add(TEXT("cave_painter"), 0);
 }
