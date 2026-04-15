@@ -1,510 +1,546 @@
 #include "AudioSystemManager.h"
 #include "Engine/World.h"
+#include "Engine/GameInstance.h"
 #include "Kismet/GameplayStatics.h"
-#include "Sound/SoundCue.h"
 #include "Components/AudioComponent.h"
+#include "Sound/SoundCue.h"
+#include "Sound/SoundWave.h"
+#include "AudioDevice.h"
 #include "Engine/Engine.h"
 
-UAudioSystemManager::UAudioSystemManager()
+UAudio_AudioSystemManager::UAudio_AudioSystemManager()
 {
-    MasterVolume = 1.0f;
+    bIsInitialized = false;
+    CurrentBiome = EAudio_BiomeAmbience::Forest;
+    TargetBiome = EAudio_BiomeAmbience::Forest;
+    CurrentTimeOfDay = EAudio_TimeOfDay::Midday;
+    bIsTransitioningBiome = false;
+    BiomeTransitionTime = 0.0f;
+    BiomeTransitionDuration = 2.0f;
     
-    // Initialize category volumes
-    CategoryVolumes.Add(EAudio_SoundCategory::Environment, 0.8f);
-    CategoryVolumes.Add(EAudio_SoundCategory::Creatures, 1.0f);
-    CategoryVolumes.Add(EAudio_SoundCategory::Combat, 0.9f);
-    CategoryVolumes.Add(EAudio_SoundCategory::Crafting, 0.7f);
-    CategoryVolumes.Add(EAudio_SoundCategory::Music, 0.6f);
-    CategoryVolumes.Add(EAudio_SoundCategory::UI, 0.8f);
-    CategoryVolumes.Add(EAudio_SoundCategory::Narration, 0.9f);
+    CurrentMusicComponent = nullptr;
+    CurrentAmbienceComponent = nullptr;
+    
+    MasterVolume = 1.0f;
+    MusicVolume = 0.7f;
+    SFXVolume = 1.0f;
+    AmbienceVolume = 0.8f;
+    
+    RandomSoundTimer = 0.0f;
+    NextRandomSoundTime = 10.0f;
 }
 
-void UAudioSystemManager::Initialize(FSubsystemCollectionBase& Collection)
+void UAudio_AudioSystemManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Warning, TEXT("AudioSystemManager: Initializing audio system for prehistoric survival game"));
+    UE_LOG(LogTemp, Log, TEXT("Audio System Manager: Initializing..."));
     
-    InitializeAudioComponents();
-    InitializeSoundDatabase();
-    InitializeBiomeAmbientSounds();
-    InitializeDangerLevelMusic();
-    
-    // Set default music state
-    CurrentMusicState.DangerLevel = EAudio_DangerLevel::Safe;
-    CurrentMusicState.CurrentBiome = EEng_BiomeType::Forest;
-    CurrentMusicState.IntensityLevel = 0.0f;
-    CurrentMusicState.bInCombat = false;
-    CurrentMusicState.bNearWater = false;
-    CurrentMusicState.TimeOfDay = 12.0f;
-    
-    UE_LOG(LogTemp, Warning, TEXT("AudioSystemManager: Audio system initialized successfully"));
+    InitializeAudioSystem();
 }
 
-void UAudioSystemManager::Deinitialize()
+void UAudio_AudioSystemManager::Deinitialize()
 {
-    UE_LOG(LogTemp, Warning, TEXT("AudioSystemManager: Shutting down audio system"));
+    UE_LOG(LogTemp, Log, TEXT("Audio System Manager: Shutting down..."));
     
-    // Stop all audio components
-    for (auto& ComponentPair : CategoryAudioComponents)
-    {
-        if (ComponentPair.Value && IsValid(ComponentPair.Value))
-        {
-            ComponentPair.Value->Stop();
-        }
-    }
-    
-    if (MusicAudioComponent && IsValid(MusicAudioComponent))
-    {
-        MusicAudioComponent->Stop();
-    }
-    
-    if (AmbienceAudioComponent && IsValid(AmbienceAudioComponent))
-    {
-        AmbienceAudioComponent->Stop();
-    }
-    
-    CategoryAudioComponents.Empty();
-    SoundDatabase.Empty();
-    BiomeAmbientSounds.Empty();
-    DangerLevelMusic.Empty();
+    ShutdownAudioSystem();
     
     Super::Deinitialize();
 }
 
-void UAudioSystemManager::InitializeAudioComponents()
+void UAudio_AudioSystemManager::InitializeAudioSystem()
 {
-    UWorld* World = GetWorld();
-    if (!World)
+    if (bIsInitialized)
     {
-        UE_LOG(LogTemp, Error, TEXT("AudioSystemManager: No world context available for audio components"));
+        UE_LOG(LogTemp, Warning, TEXT("Audio System Manager: Already initialized"));
         return;
     }
     
-    // Create main music audio component
-    MusicAudioComponent = NewObject<UAudioComponent>(this);
-    if (MusicAudioComponent)
+    UE_LOG(LogTemp, Log, TEXT("Audio System Manager: Setting up audio system..."));
+    
+    // Initialize biome audio data
+    LoadBiomeAudioData();
+    
+    // Set initial biome
+    SetCurrentBiome(EAudio_BiomeAmbience::Forest, 0.0f);
+    SetTimeOfDay(EAudio_TimeOfDay::Midday);
+    
+    bIsInitialized = true;
+    
+    UE_LOG(LogTemp, Log, TEXT("Audio System Manager: Initialization complete"));
+}
+
+void UAudio_AudioSystemManager::ShutdownAudioSystem()
+{
+    if (!bIsInitialized)
     {
-        MusicAudioComponent->SetVolumeMultiplier(CategoryVolumes[EAudio_SoundCategory::Music]);
-        MusicAudioComponent->bAutoActivate = false;
-    }
-    
-    // Create ambience audio component
-    AmbienceAudioComponent = NewObject<UAudioComponent>(this);
-    if (AmbienceAudioComponent)
-    {
-        AmbienceAudioComponent->SetVolumeMultiplier(CategoryVolumes[EAudio_SoundCategory::Environment]);
-        AmbienceAudioComponent->bAutoActivate = false;
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("AudioSystemManager: Audio components initialized"));
-}
-
-void UAudioSystemManager::InitializeSoundDatabase()
-{
-    // Initialize basic sound database with placeholder entries
-    // These would be populated with actual sound assets in a full implementation
-    
-    FAudio_SoundData WindSound;
-    WindSound.Category = EAudio_SoundCategory::Environment;
-    WindSound.Volume = 0.6f;
-    WindSound.bLooping = true;
-    WindSound.bIs3D = false;
-    SoundDatabase.Add(TEXT("Wind_Forest"), WindSound);
-    
-    FAudio_SoundData FootstepsHeavy;
-    FootstepsHeavy.Category = EAudio_SoundCategory::Creatures;
-    FootstepsHeavy.Volume = 0.8f;
-    FootstepsHeavy.AttenuationDistance = 2000.0f;
-    SoundDatabase.Add(TEXT("Footsteps_Heavy"), FootstepsHeavy);
-    
-    FAudio_SoundData RoarTyrannosaurus;
-    RoarTyrannosaurus.Category = EAudio_SoundCategory::Creatures;
-    RoarTyrannosaurus.Volume = 1.0f;
-    RoarTyrannosaurus.AttenuationDistance = 5000.0f;
-    SoundDatabase.Add(TEXT("Roar_TRex"), RoarTyrannosaurus);
-    
-    FAudio_SoundData CraftingStone;
-    CraftingStone.Category = EAudio_SoundCategory::Crafting;
-    CraftingStone.Volume = 0.7f;
-    CraftingStone.AttenuationDistance = 500.0f;
-    SoundDatabase.Add(TEXT("Crafting_Stone"), CraftingStone);
-    
-    UE_LOG(LogTemp, Warning, TEXT("AudioSystemManager: Sound database initialized with %d entries"), SoundDatabase.Num());
-}
-
-void UAudioSystemManager::InitializeBiomeAmbientSounds()
-{
-    // Forest biome ambient sounds
-    TArray<FAudio_SoundData> ForestSounds;
-    
-    FAudio_SoundData ForestWind;
-    ForestWind.Category = EAudio_SoundCategory::Environment;
-    ForestWind.Volume = 0.5f;
-    ForestWind.bLooping = true;
-    ForestWind.bIs3D = false;
-    ForestSounds.Add(ForestWind);
-    
-    FAudio_SoundData BirdCalls;
-    BirdCalls.Category = EAudio_SoundCategory::Environment;
-    BirdCalls.Volume = 0.4f;
-    BirdCalls.bLooping = true;
-    BirdCalls.bIs3D = false;
-    ForestSounds.Add(BirdCalls);
-    
-    BiomeAmbientSounds.Add(EEng_BiomeType::Forest, ForestSounds);
-    
-    // Grassland biome ambient sounds
-    TArray<FAudio_SoundData> GrasslandSounds;
-    
-    FAudio_SoundData GrassWind;
-    GrassWind.Category = EAudio_SoundCategory::Environment;
-    GrassWind.Volume = 0.6f;
-    GrassWind.bLooping = true;
-    GrassWind.bIs3D = false;
-    GrasslandSounds.Add(GrassWind);
-    
-    BiomeAmbientSounds.Add(EEng_BiomeType::Grassland, GrasslandSounds);
-    
-    UE_LOG(LogTemp, Warning, TEXT("AudioSystemManager: Biome ambient sounds initialized"));
-}
-
-void UAudioSystemManager::InitializeDangerLevelMusic()
-{
-    // Safe level music
-    TArray<FAudio_SoundData> SafeMusic;
-    
-    FAudio_SoundData PeacefulAmbient;
-    PeacefulAmbient.Category = EAudio_SoundCategory::Music;
-    PeacefulAmbient.Volume = 0.4f;
-    PeacefulAmbient.bLooping = true;
-    PeacefulAmbient.bIs3D = false;
-    SafeMusic.Add(PeacefulAmbient);
-    
-    DangerLevelMusic.Add(EAudio_DangerLevel::Safe, SafeMusic);
-    
-    // Dangerous level music
-    TArray<FAudio_SoundData> DangerousMusic;
-    
-    FAudio_SoundData TenseMusic;
-    TenseMusic.Category = EAudio_SoundCategory::Music;
-    TenseMusic.Volume = 0.6f;
-    TenseMusic.bLooping = true;
-    TenseMusic.bIs3D = false;
-    DangerousMusic.Add(TenseMusic);
-    
-    DangerLevelMusic.Add(EAudio_DangerLevel::Dangerous, DangerousMusic);
-    
-    UE_LOG(LogTemp, Warning, TEXT("AudioSystemManager: Danger level music initialized"));
-}
-
-void UAudioSystemManager::PlaySound3D(const FAudio_SoundData& SoundData, const FVector& Location, AActor* Instigator)
-{
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        UE_LOG(LogTemp, Error, TEXT("AudioSystemManager: No world context for 3D sound"));
         return;
     }
     
-    if (!SoundData.SoundCue.IsValid())
+    // Stop all active audio
+    StopMusic(0.0f);
+    
+    // Clean up all audio components
+    for (UAudioComponent* AudioComp : ActiveAudioComponents)
     {
-        UE_LOG(LogTemp, Warning, TEXT("AudioSystemManager: Invalid sound cue for 3D playback"));
+        if (AudioComp && IsValid(AudioComp))
+        {
+            AudioComp->Stop();
+            AudioComp->DestroyComponent();
+        }
+    }
+    ActiveAudioComponents.Empty();
+    
+    CurrentMusicComponent = nullptr;
+    CurrentAmbienceComponent = nullptr;
+    
+    bIsInitialized = false;
+    
+    UE_LOG(LogTemp, Log, TEXT("Audio System Manager: Shutdown complete"));
+}
+
+void UAudio_AudioSystemManager::UpdateAudioSystem(float DeltaTime)
+{
+    if (!bIsInitialized)
+    {
         return;
     }
     
-    float FinalVolume = SoundData.Volume * CategoryVolumes[SoundData.Category] * MasterVolume;
+    // Update biome transitions
+    UpdateBiomeAudio(DeltaTime);
     
-    UGameplayStatics::PlaySoundAtLocation(
-        World,
-        SoundData.SoundCue.Get(),
+    // Update random environmental sounds
+    UpdateRandomSounds(DeltaTime);
+    
+    // Clean up finished audio components
+    CleanupFinishedAudioComponents();
+}
+
+void UAudio_AudioSystemManager::SetCurrentBiome(EAudio_BiomeAmbience NewBiome, float TransitionTime)
+{
+    if (NewBiome == CurrentBiome && !bIsTransitioningBiome)
+    {
+        return;
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Audio System Manager: Transitioning to biome %d"), (int32)NewBiome);
+    
+    TargetBiome = NewBiome;
+    BiomeTransitionDuration = FMath::Max(TransitionTime, 0.1f);
+    BiomeTransitionTime = 0.0f;
+    bIsTransitioningBiome = true;
+}
+
+void UAudio_AudioSystemManager::SetTimeOfDay(EAudio_TimeOfDay NewTimeOfDay)
+{
+    if (NewTimeOfDay == CurrentTimeOfDay)
+    {
+        return;
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Audio System Manager: Time of day changed to %d"), (int32)NewTimeOfDay);
+    
+    CurrentTimeOfDay = NewTimeOfDay;
+    
+    // Adjust ambient volume based on time of day
+    float TimeBasedVolume = AmbienceVolume;
+    switch (CurrentTimeOfDay)
+    {
+        case EAudio_TimeOfDay::Dawn:
+        case EAudio_TimeOfDay::Dusk:
+            TimeBasedVolume *= 0.8f;
+            break;
+        case EAudio_TimeOfDay::Night:
+            TimeBasedVolume *= 0.6f;
+            break;
+        default:
+            break;
+    }
+    
+    if (CurrentAmbienceComponent && IsValid(CurrentAmbienceComponent))
+    {
+        CurrentAmbienceComponent->SetVolumeMultiplier(TimeBasedVolume);
+    }
+}
+
+UAudioComponent* UAudio_AudioSystemManager::PlaySound2D(USoundBase* Sound, const FAudio_SoundSettings& Settings)
+{
+    if (!Sound || !bIsInitialized)
+    {
+        return nullptr;
+    }
+    
+    UAudioComponent* AudioComp = UGameplayStatics::SpawnSound2D(
+        GetWorld(),
+        Sound,
+        Settings.Volume * SFXVolume * MasterVolume,
+        Settings.Pitch,
+        Settings.FadeInTime
+    );
+    
+    if (AudioComp)
+    {
+        AudioComp->bAutoDestroy = !Settings.bLooping;
+        ActiveAudioComponents.Add(AudioComp);
+        
+        UE_LOG(LogTemp, VeryVerbose, TEXT("Audio System Manager: Playing 2D sound"));
+    }
+    
+    return AudioComp;
+}
+
+UAudioComponent* UAudio_AudioSystemManager::PlaySound3D(USoundBase* Sound, FVector Location, const FAudio_SoundSettings& Settings)
+{
+    if (!Sound || !bIsInitialized)
+    {
+        return nullptr;
+    }
+    
+    UAudioComponent* AudioComp = UGameplayStatics::SpawnSoundAtLocation(
+        GetWorld(),
+        Sound,
         Location,
-        FinalVolume,
-        SoundData.Pitch
+        FRotator::ZeroRotator,
+        Settings.Volume * SFXVolume * MasterVolume,
+        Settings.Pitch,
+        Settings.FadeInTime,
+        nullptr,
+        nullptr,
+        !Settings.bLooping
     );
     
-    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Playing 3D sound at location %s"), *Location.ToString());
+    if (AudioComp)
+    {
+        ActiveAudioComponents.Add(AudioComp);
+        
+        UE_LOG(LogTemp, VeryVerbose, TEXT("Audio System Manager: Playing 3D sound at location %s"), 
+               *Location.ToString());
+    }
+    
+    return AudioComp;
 }
 
-void UAudioSystemManager::PlaySound2D(const FAudio_SoundData& SoundData, AActor* Instigator)
+void UAudio_AudioSystemManager::StopSound(UAudioComponent* AudioComponent, float FadeOutTime)
 {
-    UWorld* World = GetWorld();
-    if (!World)
+    if (!AudioComponent || !IsValid(AudioComponent))
     {
-        UE_LOG(LogTemp, Error, TEXT("AudioSystemManager: No world context for 2D sound"));
         return;
     }
     
-    if (!SoundData.SoundCue.IsValid())
+    if (FadeOutTime > 0.0f)
     {
-        UE_LOG(LogTemp, Warning, TEXT("AudioSystemManager: Invalid sound cue for 2D playback"));
+        AudioComponent->FadeOut(FadeOutTime, 0.0f);
+    }
+    else
+    {
+        AudioComponent->Stop();
+    }
+    
+    // Remove from active components list
+    ActiveAudioComponents.Remove(AudioComponent);
+}
+
+void UAudio_AudioSystemManager::PlayMusic(UMetaSoundSource* MusicTrack, float FadeInTime)
+{
+    if (!MusicTrack || !bIsInitialized)
+    {
         return;
     }
     
-    float FinalVolume = SoundData.Volume * CategoryVolumes[SoundData.Category] * MasterVolume;
+    // Stop current music if playing
+    if (CurrentMusicComponent && IsValid(CurrentMusicComponent))
+    {
+        StopMusic(FadeInTime * 0.5f);
+    }
     
-    UGameplayStatics::PlaySound2D(
-        World,
-        SoundData.SoundCue.Get(),
-        FinalVolume,
-        SoundData.Pitch
+    // Play new music
+    CurrentMusicComponent = UGameplayStatics::SpawnSound2D(
+        GetWorld(),
+        MusicTrack,
+        MusicVolume * MasterVolume,
+        1.0f,
+        FadeInTime
     );
     
-    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Playing 2D sound"));
-}
-
-void UAudioSystemManager::StopAllSoundsOfCategory(EAudio_SoundCategory Category)
-{
-    UAudioComponent* Component = CategoryAudioComponents.FindRef(Category);
-    if (Component && IsValid(Component))
+    if (CurrentMusicComponent)
     {
-        Component->Stop();
-        UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Stopped all sounds of category %d"), (int32)Category);
+        CurrentMusicComponent->bAutoDestroy = false;
+        ActiveAudioComponents.Add(CurrentMusicComponent);
+        
+        UE_LOG(LogTemp, Log, TEXT("Audio System Manager: Playing music track"));
     }
 }
 
-void UAudioSystemManager::SetCategoryVolume(EAudio_SoundCategory Category, float Volume)
+void UAudio_AudioSystemManager::StopMusic(float FadeOutTime)
 {
-    CategoryVolumes[Category] = FMath::Clamp(Volume, 0.0f, 1.0f);
-    
-    UAudioComponent* Component = CategoryAudioComponents.FindRef(Category);
-    if (Component && IsValid(Component))
+    if (CurrentMusicComponent && IsValid(CurrentMusicComponent))
     {
-        Component->SetVolumeMultiplier(CategoryVolumes[Category] * MasterVolume);
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Set category %d volume to %f"), (int32)Category, Volume);
-}
-
-void UAudioSystemManager::UpdateEnvironmentalAudio(const FVector& PlayerLocation, EEng_BiomeType Biome)
-{
-    UpdateAmbienceForBiome(Biome, PlayerLocation);
-    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Updated environmental audio for biome %d"), (int32)Biome);
-}
-
-void UAudioSystemManager::PlayWindSound(float WindIntensity, const FVector& Location)
-{
-    FAudio_SoundData* WindSoundData = SoundDatabase.Find(TEXT("Wind_Forest"));
-    if (WindSoundData)
-    {
-        FAudio_SoundData ModifiedWindSound = *WindSoundData;
-        ModifiedWindSound.Volume = FMath::Clamp(WindIntensity, 0.1f, 1.0f);
-        ModifiedWindSound.Pitch = FMath::Lerp(0.8f, 1.2f, WindIntensity);
-        
-        PlaySound3D(ModifiedWindSound, Location);
-    }
-}
-
-void UAudioSystemManager::PlayWaterSound(const FVector& Location, bool bIsRiver)
-{
-    // Implementation for water sounds
-    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Playing water sound at %s (River: %s)"), 
-           *Location.ToString(), bIsRiver ? TEXT("Yes") : TEXT("No"));
-}
-
-void UAudioSystemManager::PlayCreatureFootsteps(const FVector& Location, float CreatureSize, float MovementSpeed)
-{
-    FAudio_SoundData* FootstepData = SoundDatabase.Find(TEXT("Footsteps_Heavy"));
-    if (FootstepData)
-    {
-        FAudio_SoundData ModifiedFootsteps = *FootstepData;
-        ModifiedFootsteps.Volume = FMath::Clamp(CreatureSize * 0.1f, 0.3f, 1.0f);
-        ModifiedFootsteps.Pitch = FMath::Lerp(0.7f, 1.3f, MovementSpeed / 10.0f);
-        
-        PlaySound3D(ModifiedFootsteps, Location);
-    }
-}
-
-void UAudioSystemManager::PlayCreatureRoar(const FVector& Location, float CreatureSize, EAudio_DangerLevel ThreatLevel)
-{
-    FAudio_SoundData* RoarData = SoundDatabase.Find(TEXT("Roar_TRex"));
-    if (RoarData)
-    {
-        FAudio_SoundData ModifiedRoar = *RoarData;
-        ModifiedRoar.Volume = FMath::Clamp(CreatureSize * 0.15f, 0.5f, 1.0f);
-        ModifiedRoar.Pitch = FMath::Lerp(0.6f, 1.2f, (float)ThreatLevel / 4.0f);
-        
-        PlaySound3D(ModifiedRoar, Location);
-        
-        // Update danger level based on roar
-        if (ThreatLevel >= EAudio_DangerLevel::Dangerous)
+        if (FadeOutTime > 0.0f)
         {
-            SetDangerLevel(ThreatLevel);
+            CurrentMusicComponent->FadeOut(FadeOutTime, 0.0f);
         }
-    }
-}
-
-void UAudioSystemManager::PlayCreatureBreathing(const FVector& Location, float CreatureSize, bool bIsAggressive)
-{
-    // Implementation for creature breathing sounds
-    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Playing creature breathing at %s (Size: %f, Aggressive: %s)"), 
-           *Location.ToString(), CreatureSize, bIsAggressive ? TEXT("Yes") : TEXT("No"));
-}
-
-void UAudioSystemManager::UpdateMusicState(const FAudio_MusicState& NewState)
-{
-    bool bStateChanged = false;
-    
-    if (CurrentMusicState.DangerLevel != NewState.DangerLevel)
-    {
-        bStateChanged = true;
-        UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Danger level changed from %d to %d"), 
-               (int32)CurrentMusicState.DangerLevel, (int32)NewState.DangerLevel);
-    }
-    
-    if (CurrentMusicState.CurrentBiome != NewState.CurrentBiome)
-    {
-        bStateChanged = true;
-        UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Biome changed from %d to %d"), 
-               (int32)CurrentMusicState.CurrentBiome, (int32)NewState.CurrentBiome);
-    }
-    
-    CurrentMusicState = NewState;
-    
-    if (bStateChanged)
-    {
-        // Trigger music transition based on new state
-        FString MusicTrackName = FString::Printf(TEXT("Music_%s_%s"), 
-                                                *UEnum::GetValueAsString(NewState.CurrentBiome),
-                                                *UEnum::GetValueAsString(NewState.DangerLevel));
-        TransitionToMusic(MusicTrackName, 3.0f);
-    }
-}
-
-void UAudioSystemManager::SetDangerLevel(EAudio_DangerLevel NewDangerLevel)
-{
-    if (CurrentMusicState.DangerLevel != NewDangerLevel)
-    {
-        CurrentMusicState.DangerLevel = NewDangerLevel;
-        
-        // Find appropriate music for this danger level
-        TArray<FAudio_SoundData>* DangerMusic = DangerLevelMusic.Find(NewDangerLevel);
-        if (DangerMusic && DangerMusic->Num() > 0)
+        else
         {
-            // For now, just log the transition
-            UE_LOG(LogTemp, Warning, TEXT("AudioSystemManager: Transitioning to danger level %d music"), (int32)NewDangerLevel);
+            CurrentMusicComponent->Stop();
         }
+        
+        ActiveAudioComponents.Remove(CurrentMusicComponent);
+        CurrentMusicComponent = nullptr;
+        
+        UE_LOG(LogTemp, Log, TEXT("Audio System Manager: Stopped music"));
     }
 }
 
-void UAudioSystemManager::TransitionToMusic(const FString& MusicTrackName, float FadeTime)
+void UAudio_AudioSystemManager::CrossfadeMusic(UMetaSoundSource* NewTrack, float CrossfadeTime)
 {
-    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Transitioning to music track '%s' with fade time %f"), 
-           *MusicTrackName, FadeTime);
-    
-    // Implementation would handle crossfading between music tracks
-    // For now, just log the transition
-}
-
-void UAudioSystemManager::PlayWeaponSound(const FVector& Location, const FString& WeaponType)
-{
-    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Playing weapon sound '%s' at %s"), 
-           *WeaponType, *Location.ToString());
-}
-
-void UAudioSystemManager::PlayImpactSound(const FVector& Location, const FString& MaterialType)
-{
-    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Playing impact sound on '%s' at %s"), 
-           *MaterialType, *Location.ToString());
-}
-
-void UAudioSystemManager::PlayCraftingSound(const FVector& Location, const FString& CraftingAction)
-{
-    FAudio_SoundData* CraftingData = SoundDatabase.Find(TEXT("Crafting_Stone"));
-    if (CraftingData)
+    if (!NewTrack || !bIsInitialized)
     {
-        PlaySound3D(*CraftingData, Location);
-        UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Playing crafting sound '%s' at %s"), 
-               *CraftingAction, *Location.ToString());
+        return;
     }
+    
+    // Start new track with fade in
+    PlayMusic(NewTrack, CrossfadeTime);
 }
 
-void UAudioSystemManager::SetMasterVolume(float Volume)
+void UAudio_AudioSystemManager::SetMasterVolume(float Volume)
 {
     MasterVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
     
-    // Update all audio components with new master volume
-    for (auto& ComponentPair : CategoryAudioComponents)
+    // Update all active audio components
+    for (UAudioComponent* AudioComp : ActiveAudioComponents)
     {
-        if (ComponentPair.Value && IsValid(ComponentPair.Value))
+        if (AudioComp && IsValid(AudioComp))
         {
-            ComponentPair.Value->SetVolumeMultiplier(CategoryVolumes[ComponentPair.Key] * MasterVolume);
+            // Note: This is a simplified approach - in a full implementation,
+            // we'd need to track original volumes and apply master volume as a multiplier
+            AudioComp->SetVolumeMultiplier(MasterVolume);
         }
     }
     
-    if (MusicAudioComponent && IsValid(MusicAudioComponent))
+    UE_LOG(LogTemp, Log, TEXT("Audio System Manager: Master volume set to %f"), MasterVolume);
+}
+
+void UAudio_AudioSystemManager::SetMusicVolume(float Volume)
+{
+    MusicVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
+    
+    if (CurrentMusicComponent && IsValid(CurrentMusicComponent))
     {
-        MusicAudioComponent->SetVolumeMultiplier(CategoryVolumes[EAudio_SoundCategory::Music] * MasterVolume);
+        CurrentMusicComponent->SetVolumeMultiplier(MusicVolume * MasterVolume);
     }
     
-    if (AmbienceAudioComponent && IsValid(AmbienceAudioComponent))
+    UE_LOG(LogTemp, Log, TEXT("Audio System Manager: Music volume set to %f"), MusicVolume);
+}
+
+void UAudio_AudioSystemManager::SetSFXVolume(float Volume)
+{
+    SFXVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
+    UE_LOG(LogTemp, Log, TEXT("Audio System Manager: SFX volume set to %f"), SFXVolume);
+}
+
+void UAudio_AudioSystemManager::SetAmbienceVolume(float Volume)
+{
+    AmbienceVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
+    
+    if (CurrentAmbienceComponent && IsValid(CurrentAmbienceComponent))
     {
-        AmbienceAudioComponent->SetVolumeMultiplier(CategoryVolumes[EAudio_SoundCategory::Environment] * MasterVolume);
+        CurrentAmbienceComponent->SetVolumeMultiplier(AmbienceVolume * MasterVolume);
     }
     
-    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Set master volume to %f"), Volume);
+    UE_LOG(LogTemp, Log, TEXT("Audio System Manager: Ambience volume set to %f"), AmbienceVolume);
 }
 
-void UAudioSystemManager::SetSFXVolume(float Volume)
+void UAudio_AudioSystemManager::UpdateBiomeAudio(float DeltaTime)
 {
-    SetCategoryVolume(EAudio_SoundCategory::Environment, Volume);
-    SetCategoryVolume(EAudio_SoundCategory::Creatures, Volume);
-    SetCategoryVolume(EAudio_SoundCategory::Combat, Volume);
-    SetCategoryVolume(EAudio_SoundCategory::Crafting, Volume);
-}
-
-void UAudioSystemManager::SetMusicVolume(float Volume)
-{
-    SetCategoryVolume(EAudio_SoundCategory::Music, Volume);
-}
-
-void UAudioSystemManager::SetVoiceVolume(float Volume)
-{
-    SetCategoryVolume(EAudio_SoundCategory::Narration, Volume);
-}
-
-UAudioComponent* UAudioSystemManager::GetOrCreateAudioComponent(EAudio_SoundCategory Category)
-{
-    UAudioComponent* Component = CategoryAudioComponents.FindRef(Category);
-    if (!Component || !IsValid(Component))
-    {
-        Component = NewObject<UAudioComponent>(this);
-        if (Component)
-        {
-            Component->SetVolumeMultiplier(CategoryVolumes[Category] * MasterVolume);
-            Component->bAutoActivate = false;
-            CategoryAudioComponents.Add(Category, Component);
-        }
-    }
-    return Component;
-}
-
-void UAudioSystemManager::UpdateAmbienceForBiome(EEng_BiomeType Biome, const FVector& Location)
-{
-    TArray<FAudio_SoundData>* BiomeSounds = BiomeAmbientSounds.Find(Biome);
-    if (BiomeSounds && BiomeSounds->Num() > 0)
-    {
-        // Play the first ambient sound for this biome
-        const FAudio_SoundData& AmbientSound = (*BiomeSounds)[0];
-        
-        if (AmbienceAudioComponent && IsValid(AmbienceAudioComponent))
-        {
-            // Stop current ambience
-            AmbienceAudioComponent->Stop();
-            
-            // Start new ambience (would need actual sound cue)
-            UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Updated ambience for biome %d"), (int32)Biome);
-        }
-    }
-}
-
-void UAudioSystemManager::CrossfadeMusic(USoundCue* NewMusic, float FadeTime)
-{
-    if (!NewMusic || !MusicAudioComponent || !IsValid(MusicAudioComponent))
+    if (!bIsTransitioningBiome)
     {
         return;
     }
     
-    // Implementation would handle smooth crossfading between music tracks
-    UE_LOG(LogTemp, Log, TEXT("AudioSystemManager: Crossfading to new music over %f seconds"), FadeTime);
+    BiomeTransitionTime += DeltaTime;
+    float TransitionAlpha = BiomeTransitionTime / BiomeTransitionDuration;
+    
+    if (TransitionAlpha >= 1.0f)
+    {
+        // Transition complete
+        CurrentBiome = TargetBiome;
+        bIsTransitioningBiome = false;
+        TransitionBiomeAudio();
+        
+        UE_LOG(LogTemp, Log, TEXT("Audio System Manager: Biome transition complete"));
+    }
+    else
+    {
+        // Update transition volumes
+        if (CurrentAmbienceComponent && IsValid(CurrentAmbienceComponent))
+        {
+            float FadeOutVolume = (1.0f - TransitionAlpha) * AmbienceVolume * MasterVolume;
+            CurrentAmbienceComponent->SetVolumeMultiplier(FadeOutVolume);
+        }
+    }
+}
+
+void UAudio_AudioSystemManager::UpdateRandomSounds(float DeltaTime)
+{
+    RandomSoundTimer += DeltaTime;
+    
+    if (RandomSoundTimer >= NextRandomSoundTime)
+    {
+        // Play a random environmental sound for current biome
+        if (BiomeAudioData.Contains(CurrentBiome))
+        {
+            const FAudio_BiomeAudioData& BiomeData = BiomeAudioData[CurrentBiome];
+            if (BiomeData.RandomSounds.Num() > 0)
+            {
+                int32 RandomIndex = FMath::RandRange(0, BiomeData.RandomSounds.Num() - 1);
+                USoundCue* RandomSound = BiomeData.RandomSounds[RandomIndex].LoadSynchronous();
+                
+                if (RandomSound)
+                {
+                    FAudio_SoundSettings Settings;
+                    Settings.Volume = FMath::RandRange(0.3f, 0.8f);
+                    Settings.b3DSound = true;
+                    
+                    // Play at a random location around the player
+                    FVector PlayerLocation = FVector::ZeroVector;
+                    if (GetWorld() && GetWorld()->GetFirstPlayerController())
+                    {
+                        APawn* PlayerPawn = GetWorld()->GetFirstPlayerController()->GetPawn();
+                        if (PlayerPawn)
+                        {
+                            PlayerLocation = PlayerPawn->GetActorLocation();
+                        }
+                    }
+                    
+                    FVector RandomOffset = FVector(
+                        FMath::RandRange(-500.0f, 500.0f),
+                        FMath::RandRange(-500.0f, 500.0f),
+                        FMath::RandRange(-100.0f, 100.0f)
+                    );
+                    
+                    PlaySound3D(RandomSound, PlayerLocation + RandomOffset, Settings);
+                }
+            }
+            
+            // Set next random sound time
+            NextRandomSoundTime = FMath::RandRange(
+                BiomeData.RandomSoundInterval * 0.5f,
+                BiomeData.RandomSoundInterval * 1.5f
+            );
+        }
+        else
+        {
+            NextRandomSoundTime = 10.0f; // Default interval
+        }
+        
+        RandomSoundTimer = 0.0f;
+    }
+}
+
+void UAudio_AudioSystemManager::TransitionBiomeAudio()
+{
+    // Stop current ambience
+    if (CurrentAmbienceComponent && IsValid(CurrentAmbienceComponent))
+    {
+        CurrentAmbienceComponent->Stop();
+        ActiveAudioComponents.Remove(CurrentAmbienceComponent);
+        CurrentAmbienceComponent = nullptr;
+    }
+    
+    // Start new biome ambience
+    if (BiomeAudioData.Contains(CurrentBiome))
+    {
+        const FAudio_BiomeAudioData& BiomeData = BiomeAudioData[CurrentBiome];
+        if (BiomeData.AmbienceLoops.Num() > 0)
+        {
+            // Pick a random ambience loop for this biome
+            int32 RandomIndex = FMath::RandRange(0, BiomeData.AmbienceLoops.Num() - 1);
+            USoundCue* AmbienceSound = BiomeData.AmbienceLoops[RandomIndex].LoadSynchronous();
+            
+            if (AmbienceSound)
+            {
+                CurrentAmbienceComponent = UGameplayStatics::SpawnSound2D(
+                    GetWorld(),
+                    AmbienceSound,
+                    AmbienceVolume * MasterVolume,
+                    1.0f,
+                    BiomeData.MusicCrossfadeTime
+                );
+                
+                if (CurrentAmbienceComponent)
+                {
+                    CurrentAmbienceComponent->bAutoDestroy = false;
+                    ActiveAudioComponents.Add(CurrentAmbienceComponent);
+                }
+            }
+        }
+    }
+}
+
+void UAudio_AudioSystemManager::LoadBiomeAudioData()
+{
+    // Initialize biome audio data with default values
+    // In a full implementation, this would load from data assets or configuration files
+    
+    for (int32 i = 0; i < (int32)EAudio_BiomeAmbience::Cave + 1; ++i)
+    {
+        EAudio_BiomeAmbience BiomeType = (EAudio_BiomeAmbience)i;
+        FAudio_BiomeAudioData BiomeData;
+        BiomeData.BiomeType = BiomeType;
+        
+        switch (BiomeType)
+        {
+            case EAudio_BiomeAmbience::Forest:
+                BiomeData.RandomSoundInterval = 8.0f;
+                break;
+            case EAudio_BiomeAmbience::Desert:
+                BiomeData.RandomSoundInterval = 15.0f;
+                break;
+            case EAudio_BiomeAmbience::Swamp:
+                BiomeData.RandomSoundInterval = 6.0f;
+                break;
+            case EAudio_BiomeAmbience::Cave:
+                BiomeData.RandomSoundInterval = 20.0f;
+                break;
+            default:
+                BiomeData.RandomSoundInterval = 10.0f;
+                break;
+        }
+        
+        BiomeAudioData.Add(BiomeType, BiomeData);
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Audio System Manager: Loaded biome audio data for %d biomes"), 
+           BiomeAudioData.Num());
+}
+
+void UAudio_AudioSystemManager::CleanupFinishedAudioComponents()
+{
+    // Remove any audio components that have finished playing
+    for (int32 i = ActiveAudioComponents.Num() - 1; i >= 0; --i)
+    {
+        UAudioComponent* AudioComp = ActiveAudioComponents[i];
+        if (!AudioComp || !IsValid(AudioComp) || !AudioComp->IsPlaying())
+        {
+            ActiveAudioComponents.RemoveAt(i);
+        }
+    }
+}
+
+UAudioComponent* UAudio_AudioSystemManager::CreateAudioComponent(USoundBase* Sound)
+{
+    if (!Sound || !GetWorld())
+    {
+        return nullptr;
+    }
+    
+    UAudioComponent* AudioComp = NewObject<UAudioComponent>(this);
+    if (AudioComp)
+    {
+        AudioComp->SetSound(Sound);
+        AudioComp->bAutoActivate = false;
+        AudioComp->bAutoDestroy = true;
+    }
+    
+    return AudioComp;
 }
