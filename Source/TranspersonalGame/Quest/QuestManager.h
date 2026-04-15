@@ -1,33 +1,31 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/GameModeBase.h"
+#include "Subsystems/GameInstanceSubsystem.h"
 #include "Engine/World.h"
-#include "Components/ActorComponent.h"
-#include "SharedTypes.h"
+#include "../SharedTypes.h"
 #include "QuestManager.generated.h"
 
-class ATranspersonalCharacter;
+class AQuest_QuestGiver;
+class UQuest_QuestComponent;
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnQuestStatusChanged, const FString&, QuestID, EQuest_QuestStatus, NewStatus);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnObjectiveCompleted, const FString&, QuestID, const FString&, ObjectiveID, int32, Progress);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnEmotionalStateChanged, EQuest_EmotionalState, OldState, EQuest_EmotionalState, NewState);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnQuestStarted, const FQuest_QuestData&, QuestData);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnQuestCompleted, const FQuest_QuestData&, QuestData);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnObjectiveUpdated, const FString&, QuestID, const FQuest_ObjectiveData&, Objective);
 
-UCLASS(BlueprintType, Blueprintable, ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UQuestManager : public UActorComponent
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UQuestManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
     UQuestManager();
 
-protected:
-    virtual void BeginPlay() override;
+    // Subsystem overrides
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
 
-public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
-
-    // Quest Management
+    // Quest management
     UFUNCTION(BlueprintCallable, Category = "Quest System")
     bool StartQuest(const FString& QuestID);
 
@@ -36,6 +34,9 @@ public:
 
     UFUNCTION(BlueprintCallable, Category = "Quest System")
     bool FailQuest(const FString& QuestID);
+
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    bool UpdateObjective(const FString& QuestID, const FString& ObjectiveID, int32 Progress);
 
     UFUNCTION(BlueprintCallable, Category = "Quest System")
     bool IsQuestActive(const FString& QuestID) const;
@@ -52,92 +53,61 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Quest System")
     TArray<FQuest_QuestData> GetAvailableQuests() const;
 
-    // Objective Management
+    // Objective tracking
     UFUNCTION(BlueprintCallable, Category = "Quest System")
-    bool UpdateObjectiveProgress(const FString& QuestID, const FString& ObjectiveID, int32 Progress);
+    void TrackLocationObjective(const FString& QuestID, const FString& ObjectiveID, const FVector& PlayerLocation);
 
     UFUNCTION(BlueprintCallable, Category = "Quest System")
-    bool CompleteObjective(const FString& QuestID, const FString& ObjectiveID);
+    void TrackKillObjective(const FString& QuestID, const FString& ObjectiveID, const FString& TargetType);
 
     UFUNCTION(BlueprintCallable, Category = "Quest System")
-    bool IsObjectiveCompleted(const FString& QuestID, const FString& ObjectiveID) const;
+    void TrackCollectionObjective(const FString& QuestID, const FString& ObjectiveID, const FString& ItemType, int32 Amount);
 
-    UFUNCTION(BlueprintCallable, Category = "Quest System")
-    int32 GetObjectiveProgress(const FString& QuestID, const FString& ObjectiveID) const;
-
-    // Location-based objectives
-    UFUNCTION(BlueprintCallable, Category = "Quest System")
-    bool CheckLocationObjective(const FString& QuestID, const FString& ObjectiveID, const FVector& PlayerLocation, float Tolerance = 200.0f);
-
-    // Survival-specific quest functions
-    UFUNCTION(BlueprintCallable, Category = "Quest System")
-    bool RegisterHuntKill(const FString& DinosaurType, const FVector& KillLocation);
-
-    UFUNCTION(BlueprintCallable, Category = "Quest System")
-    bool RegisterResourceGathered(const FString& ResourceType, int32 Quantity);
-
-    UFUNCTION(BlueprintCallable, Category = "Quest System")
-    bool RegisterCraftedItem(const FString& ItemType);
-
-    UFUNCTION(BlueprintCallable, Category = "Quest System")
-    bool RegisterAreaExplored(const FVector& Location, float ExplorationRadius);
-
-    // Emotional Journey System
-    UFUNCTION(BlueprintCallable, Category = "Quest System")
-    void UpdateEmotionalState(const FString& QuestID, EQuest_EmotionalState NewState);
-
-    UFUNCTION(BlueprintCallable, Category = "Quest System")
-    EQuest_EmotionalState GetCurrentEmotionalState(const FString& QuestID) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Quest System")
-    float GetEmotionalProgress(const FString& QuestID) const;
-
-    // Quest Creation and Management
+    // Quest registration
     UFUNCTION(BlueprintCallable, Category = "Quest System")
     void RegisterQuest(const FQuest_QuestData& QuestData);
 
     UFUNCTION(BlueprintCallable, Category = "Quest System")
-    void InitializeDefaultQuests();
+    void RegisterQuestGiver(AQuest_QuestGiver* QuestGiver);
 
     // Events
-    UPROPERTY(BlueprintAssignable, Category = "Quest Events")
-    FOnQuestStatusChanged OnQuestStatusChanged;
+    UPROPERTY(BlueprintAssignable, Category = "Quest System")
+    FOnQuestStarted OnQuestStarted;
 
-    UPROPERTY(BlueprintAssignable, Category = "Quest Events")
-    FOnObjectiveCompleted OnObjectiveCompleted;
+    UPROPERTY(BlueprintAssignable, Category = "Quest System")
+    FOnQuestCompleted OnQuestCompleted;
 
-    UPROPERTY(BlueprintAssignable, Category = "Quest Events")
-    FOnEmotionalStateChanged OnEmotionalStateChanged;
+    UPROPERTY(BlueprintAssignable, Category = "Quest System")
+    FOnObjectiveUpdated OnObjectiveUpdated;
 
 protected:
-    // Quest Storage
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Quest Data")
-    TMap<FString, FQuest_QuestData> ActiveQuests;
+    // Quest storage
+    UPROPERTY(BlueprintReadOnly, Category = "Quest System")
+    TMap<FString, FQuest_QuestData> AllQuests;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Quest Data")
-    TMap<FString, FQuest_QuestData> CompletedQuests;
+    UPROPERTY(BlueprintReadOnly, Category = "Quest System")
+    TArray<FString> ActiveQuestIDs;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Quest Data")
-    TMap<FString, FQuest_QuestData> AvailableQuests;
+    UPROPERTY(BlueprintReadOnly, Category = "Quest System")
+    TArray<FString> CompletedQuestIDs;
 
-    // Player reference for quest tracking
-    UPROPERTY()
-    ATranspersonalCharacter* PlayerCharacter;
+    UPROPERTY(BlueprintReadOnly, Category = "Quest System")
+    TArray<AQuest_QuestGiver*> RegisteredQuestGivers;
 
     // Helper functions
-    FQuest_QuestData* FindQuestData(const FString& QuestID);
-    const FQuest_QuestData* FindQuestData(const FString& QuestID) const;
-    FQuest_ObjectiveData* FindObjectiveData(const FString& QuestID, const FString& ObjectiveID);
-    const FQuest_ObjectiveData* FindObjectiveData(const FString& QuestID, const FString& ObjectiveID) const;
+    void InitializeDefaultQuests();
+    void CreateSurvivalQuests();
+    void CreateHuntingQuests();
+    void CreateExplorationQuests();
     
-    void CheckQuestCompletion(const FString& QuestID);
-    void ProcessQuestRewards(const FQuest_QuestData& QuestData);
-    void UpdateEmotionalProgression(const FString& QuestID);
+    bool CheckQuestPrerequisites(const FQuest_QuestData& QuestData) const;
+    void UpdateQuestStatus(FQuest_QuestData& QuestData);
+    void CheckObjectiveCompletion(FQuest_QuestData& QuestData, FQuest_ObjectiveData& Objective);
 
-    // Default quest creation helpers
-    FQuest_QuestData CreateHuntingQuest();
-    FQuest_QuestData CreateGatheringQuest();
-    FQuest_QuestData CreateExplorationQuest();
-    FQuest_QuestData CreateCraftingQuest();
-    FQuest_QuestData CreateSurvivalQuest();
+private:
+    bool bIsInitialized;
+    
+    // Quest validation
+    bool IsValidQuestID(const FString& QuestID) const;
+    bool IsValidObjectiveID(const FString& QuestID, const FString& ObjectiveID) const;
 };
