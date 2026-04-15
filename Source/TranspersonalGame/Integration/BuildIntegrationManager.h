@@ -6,12 +6,13 @@
 #include "SharedTypes.h"
 #include "BuildIntegrationManager.generated.h"
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBuildStatusChanged, EBuild_BuildStatus, NewStatus);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnModuleValidated, FString, ModuleName, bool, bIsValid);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBuildValidationComplete, bool, bSuccess);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnModuleStatusChanged, FString, ModuleName, EBuild_ModuleStatus, Status);
 
 /**
- * Build Integration Manager - Orchestrates compilation, validation, and integration
- * of all game systems. Ensures cross-module compatibility and build health.
+ * Build Integration Manager
+ * Orchestrates integration between all game systems and validates build health
+ * Ensures all modules work together cohesively
  */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UBuildIntegrationManager : public UGameInstanceSubsystem
@@ -25,111 +26,100 @@ public:
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Build Status Management
+    // Build validation
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    EBuild_BuildStatus GetCurrentBuildStatus() const { return CurrentBuildStatus; }
+    void ValidateBuildHealth();
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    void SetBuildStatus(EBuild_BuildStatus NewStatus);
+    bool IsModuleHealthy(const FString& ModuleName) const;
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool IsSystemHealthy() const;
+    float GetOverallBuildHealth() const;
 
-    // Module Validation
+    // Module registration
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    void ValidateAllModules();
-
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool ValidateModule(const FString& ModuleName);
+    void RegisterModule(const FString& ModuleName, EBuild_ModuleStatus Status);
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    TArray<FString> GetFailedModules() const { return FailedModules; }
+    void UpdateModuleStatus(const FString& ModuleName, EBuild_ModuleStatus NewStatus);
 
-    // Integration Testing
+    // Integration testing
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
     void RunIntegrationTests();
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool TestCrossModuleCompatibility();
+    bool TestModuleInteraction(const FString& ModuleA, const FString& ModuleB);
+
+    // Build reporting
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    FBuild_HealthReport GenerateHealthReport() const;
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    void GenerateBuildReport();
-
-    // Dependency Management
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    void CheckModuleDependencies();
+    TArray<FString> GetFailedModules() const;
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool ResolveDependencyConflicts();
-
-    // Performance Monitoring
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    FBuild_PerformanceMetrics GetPerformanceMetrics() const { return PerformanceMetrics; }
-
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    void UpdatePerformanceMetrics();
+    TArray<FString> GetHealthyModules() const;
 
     // Events
     UPROPERTY(BlueprintAssignable, Category = "Build Integration")
-    FOnBuildStatusChanged OnBuildStatusChanged;
+    FOnBuildValidationComplete OnBuildValidationComplete;
 
     UPROPERTY(BlueprintAssignable, Category = "Build Integration")
-    FOnModuleValidated OnModuleValidated;
+    FOnModuleStatusChanged OnModuleStatusChanged;
 
 protected:
-    // Core Properties
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Build Status")
-    EBuild_BuildStatus CurrentBuildStatus;
+    // Module tracking
+    UPROPERTY(BlueprintReadOnly, Category = "Build Integration", meta = (AllowPrivateAccess = "true"))
+    TMap<FString, EBuild_ModuleStatus> ModuleStatuses;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Build Status")
-    TArray<FString> ValidatedModules;
+    UPROPERTY(BlueprintReadOnly, Category = "Build Integration", meta = (AllowPrivateAccess = "true"))
+    TMap<FString, float> ModuleHealthScores;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Build Status")
-    TArray<FString> FailedModules;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Build Status")
-    FBuild_PerformanceMetrics PerformanceMetrics;
-
-    // Integration Settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration Settings")
-    bool bAutoValidateOnStartup;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration Settings")
-    float ValidationInterval;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration Settings")
-    int32 MaxRetryAttempts;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration Settings")
-    bool bGenerateDetailedReports;
-
-    // Module Dependencies
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dependencies")
-    TMap<FString, TArray<FString>> ModuleDependencies;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dependencies")
+    UPROPERTY(BlueprintReadOnly, Category = "Build Integration", meta = (AllowPrivateAccess = "true"))
     TArray<FString> CriticalModules;
 
-    // Validation State
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Validation")
-    bool bValidationInProgress;
+    // Integration state
+    UPROPERTY(BlueprintReadOnly, Category = "Build Integration", meta = (AllowPrivateAccess = "true"))
+    bool bIntegrationTestsRunning;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Validation")
-    FDateTime LastValidationTime;
+    UPROPERTY(BlueprintReadOnly, Category = "Build Integration", meta = (AllowPrivateAccess = "true"))
+    float LastValidationTime;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Validation")
-    int32 ValidationAttempts;
+    UPROPERTY(BlueprintReadOnly, Category = "Build Integration", meta = (AllowPrivateAccess = "true"))
+    int32 ValidationCycleCount;
+
+    // Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Build Integration")
+    float HealthValidationInterval;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Build Integration")
+    float MinimumHealthThreshold;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Build Integration")
+    bool bAutoRunValidation;
 
 private:
-    // Internal Methods
-    void InitializeModuleDependencies();
-    void ValidateModuleInternal(const FString& ModuleName);
-    void UpdateBuildMetrics();
-    void LogBuildStatus(const FString& Message, bool bIsError = false);
-    bool CheckClassAvailability(const FString& ClassName);
-    void PerformSystemHealthCheck();
+    // Internal validation methods
+    void ValidateModuleHealth(const FString& ModuleName);
+    void ValidateModuleInteractions();
+    void ValidateSystemIntegration();
+    
+    // Health calculation
+    float CalculateModuleHealth(const FString& ModuleName) const;
+    float CalculateOverallHealth() const;
+    
+    // Integration testing
+    bool TestWorldGeneration();
+    bool TestCharacterSystems();
+    bool TestAISystems();
+    bool TestCombatSystems();
+    bool TestAudioSystems();
+    bool TestVFXSystems();
+    
+    // Reporting
+    void LogHealthReport(const FBuild_HealthReport& Report) const;
+    void NotifyHealthChange(const FString& ModuleName, float OldHealth, float NewHealth);
 
-    // Timers
+    // Timer handles
     FTimerHandle ValidationTimerHandle;
-    FTimerHandle MetricsUpdateHandle;
 };
