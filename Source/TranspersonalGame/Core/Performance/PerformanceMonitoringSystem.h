@@ -2,17 +2,21 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Engine/Engine.h"
-#include "HAL/Platform.h"
-#include "Stats/Stats.h"
+#include "Engine/World.h"
+#include "Components/SceneComponent.h"
+#include "Subsystems/WorldSubsystem.h"
 #include "../SharedTypes.h"
 #include "PerformanceMonitoringSystem.generated.h"
 
-DECLARE_STATS_GROUP(TEXT("TranspersonalGame"), STATGROUP_TranspersonalGame, STATCAT_Advanced);
-
-DECLARE_CYCLE_STAT(TEXT("Performance Monitor Update"), STAT_PerformanceMonitorUpdate, STATGROUP_TranspersonalGame);
-DECLARE_DWORD_COUNTER_STAT(TEXT("Active Actors"), STAT_ActiveActors, STATGROUP_TranspersonalGame);
-DECLARE_FLOAT_COUNTER_STAT(TEXT("Frame Time MS"), STAT_FrameTimeMS, STATGROUP_TranspersonalGame);
+UENUM(BlueprintType)
+enum class EPerf_PerformanceLevel : uint8
+{
+    Ultra       UMETA(DisplayName = "Ultra"),
+    High        UMETA(DisplayName = "High"), 
+    Medium      UMETA(DisplayName = "Medium"),
+    Low         UMETA(DisplayName = "Low"),
+    Potato      UMETA(DisplayName = "Potato")
+};
 
 USTRUCT(BlueprintType)
 struct TRANSPERSONALGAME_API FPerf_PerformanceMetrics
@@ -20,174 +24,167 @@ struct TRANSPERSONALGAME_API FPerf_PerformanceMetrics
     GENERATED_BODY()
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float FrameTimeMS;
+    float CurrentFPS = 0.0f;
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float FPS;
+    float AverageFPS = 0.0f;
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 DrawCalls;
+    float FrameTime = 0.0f;
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 TriangleCount;
+    int32 DrawCalls = 0;
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float MemoryUsageMB;
+    int32 VisibleActors = 0;
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float GPUTimeMS;
+    float MemoryUsageMB = 0.0f;
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 ActiveActorCount;
+    float GPUMemoryUsageMB = 0.0f;
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 VisibleActorCount;
+    EPerf_PerformanceLevel CurrentLevel = EPerf_PerformanceLevel::High;
 
     FPerf_PerformanceMetrics()
-        : FrameTimeMS(0.0f)
-        , FPS(0.0f)
-        , DrawCalls(0)
-        , TriangleCount(0)
-        , MemoryUsageMB(0.0f)
-        , GPUTimeMS(0.0f)
-        , ActiveActorCount(0)
-        , VisibleActorCount(0)
-    {}
+    {
+        CurrentFPS = 60.0f;
+        AverageFPS = 60.0f;
+        FrameTime = 16.67f;
+        DrawCalls = 0;
+        VisibleActors = 0;
+        MemoryUsageMB = 0.0f;
+        GPUMemoryUsageMB = 0.0f;
+        CurrentLevel = EPerf_PerformanceLevel::High;
+    }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FPerf_PerformanceThresholds
+struct TRANSPERSONALGAME_API FPerf_LODSettings
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Thresholds")
-    float TargetFPS_PC;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
+    float LODDistanceScale = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Thresholds")
-    float TargetFPS_Console;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
+    float CullingDistanceScale = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Thresholds")
-    float MaxFrameTimeMS;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
+    int32 MaxLODLevel = 3;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Thresholds")
-    int32 MaxDrawCalls;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
+    bool bEnableAutomaticLOD = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Thresholds")
-    float MaxMemoryUsageMB;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Thresholds")
-    int32 MaxActiveActors;
-
-    FPerf_PerformanceThresholds()
-        : TargetFPS_PC(60.0f)
-        , TargetFPS_Console(30.0f)
-        , MaxFrameTimeMS(16.67f)  // 60 FPS target
-        , MaxDrawCalls(2000)
-        , MaxMemoryUsageMB(4096.0f)
-        , MaxActiveActors(10000)
-    {}
+    FPerf_LODSettings()
+    {
+        LODDistanceScale = 1.0f;
+        CullingDistanceScale = 1.0f;
+        MaxLODLevel = 3;
+        bEnableAutomaticLOD = true;
+    }
 };
 
-UENUM(BlueprintType)
-enum class EPerf_PerformanceLevel : uint8
-{
-    Excellent   UMETA(DisplayName = "Excellent"),
-    Good        UMETA(DisplayName = "Good"),
-    Acceptable  UMETA(DisplayName = "Acceptable"),
-    Poor        UMETA(DisplayName = "Poor"),
-    Critical    UMETA(DisplayName = "Critical")
-};
-
+/**
+ * Performance Monitoring System for Transpersonal Game
+ * Tracks FPS, memory usage, draw calls, and automatically adjusts quality settings
+ */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API APerformanceMonitoringSystem : public AActor
+class TRANSPERSONALGAME_API APerf_PerformanceMonitoringSystem : public AActor
 {
     GENERATED_BODY()
 
 public:
-    APerformanceMonitoringSystem();
+    APerf_PerformanceMonitoringSystem();
 
 protected:
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
-    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
-    // Performance monitoring components
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Performance")
-    class USceneComponent* RootSceneComponent;
-
-    // Current performance metrics
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    FPerf_PerformanceMetrics CurrentMetrics;
-
-    // Performance thresholds
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    FPerf_PerformanceThresholds PerformanceThresholds;
-
-    // Monitoring settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float MonitoringInterval;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    bool bEnableLogging;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    bool bEnableAutomaticOptimization;
-
-    // Performance history
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    TArray<float> FrameTimeHistory;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxHistorySize;
-
-private:
-    float TimeSinceLastUpdate;
-    float AccumulatedFrameTime;
-    int32 FrameCount;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    USceneComponent* RootSceneComponent;
 
 public:
     // Performance monitoring functions
     UFUNCTION(BlueprintCallable, Category = "Performance")
+    FPerf_PerformanceMetrics GetCurrentMetrics() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void SetPerformanceLevel(EPerf_PerformanceLevel NewLevel);
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void EnableAutomaticQualityAdjustment(bool bEnable);
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void ApplyLODSettings(const FPerf_LODSettings& Settings);
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void ForceGarbageCollection();
+
+    // Performance thresholds
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Thresholds")
+    float TargetFPS = 60.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Thresholds")
+    float MinimumFPS = 30.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Thresholds")
+    float MaxMemoryUsageMB = 4096.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Thresholds")
+    int32 MaxDrawCalls = 2000;
+
+protected:
+    // Internal performance tracking
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    FPerf_PerformanceMetrics CurrentMetrics;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    bool bAutomaticQualityAdjustment = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float MetricsUpdateInterval = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    FPerf_LODSettings CurrentLODSettings;
+
+private:
+    // Internal tracking variables
+    float LastMetricsUpdate;
+    TArray<float> FPSHistory;
+    int32 MaxFPSHistorySize = 60;
+
+    // Performance adjustment functions
     void UpdatePerformanceMetrics();
+    void AdjustQualitySettings();
+    void ApplyPerformanceLevelSettings(EPerf_PerformanceLevel Level);
+    float CalculateAverageFPS() const;
+    void UpdateFPSHistory(float CurrentFPS);
+};
+
+/**
+ * World Subsystem for global performance management
+ */
+UCLASS()
+class TRANSPERSONALGAME_API UPerf_PerformanceWorldSubsystem : public UWorldSubsystem
+{
+    GENERATED_BODY()
+
+public:
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    EPerf_PerformanceLevel GetCurrentPerformanceLevel() const;
+    static UPerf_PerformanceWorldSubsystem* Get(const UObject* WorldContext);
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    float GetAverageFrameTime() const;
+    APerf_PerformanceMonitoringSystem* GetPerformanceMonitor() const;
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    float GetAverageFPS() const;
+    void RegisterPerformanceMonitor(APerf_PerformanceMonitoringSystem* Monitor);
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void ResetPerformanceHistory();
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    bool IsPerformanceAcceptable() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void TriggerPerformanceOptimization();
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void LogPerformanceReport();
-
-    // Performance optimization functions
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void OptimizeLODSettings();
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void OptimizeCullingSettings();
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void OptimizeShadowSettings();
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void OptimizeTextureStreaming();
-
-    // Getters for current metrics
-    UFUNCTION(BlueprintPure, Category = "Performance")
-    const FPerf_PerformanceMetrics& GetCurrentMetrics() const { return CurrentMetrics; }
-
-    UFUNCTION(BlueprintPure, Category = "Performance")
-    const FPerf_PerformanceThresholds& GetPerformanceThresholds() const { return PerformanceThresholds; }
+protected:
+    UPROPERTY()
+    APerf_PerformanceMonitoringSystem* PerformanceMonitor;
 };
