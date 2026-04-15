@@ -1,295 +1,367 @@
 #include "CrowdSimulationSubsystem.h"
 #include "Engine/World.h"
-#include "Engine/Engine.h"
-#include "DrawDebugHelpers.h"
-#include "MassEntitySubsystem.h"
-#include "MassSpawnerSubsystem.h"
-#include "MassEntityConfigAsset.h"
-#include "MassEntityTemplateRegistry.h"
+#include "TimerManager.h"
+#include "NavigationSystem.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
+#include "UObject/ConstructorHelpers.h"
 
 UCrowdSimulationSubsystem::UCrowdSimulationSubsystem()
 {
-    // Initialize default values
-    EntityConfig = FCrowd_EntityConfig();
-    HighDetailDistance = 1000.0f;
-    MediumDetailDistance = 2500.0f;
-    LowDetailDistance = 5000.0f;
-    ActiveEntityCount = 0;
-    bCrowdSystemInitialized = false;
-    bDebugVisualizationEnabled = false;
+    NextCrowdID = 1;
+    MaxConcurrentAgents = 50000;
+    LODUpdateInterval = 1.0f;
+    HighDetailRadius = 1000.0f;
+    MediumDetailRadius = 2500.0f;
+    LowDetailRadius = 5000.0f;
+    CullingDistance = 10000.0f;
+    bEnableMassEntityIntegration = true;
+    bEnableOcclusionCulling = true;
+    MassEntitySubsystem = nullptr;
 }
 
 void UCrowdSimulationSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationSubsystem: Initializing..."));
+    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationSubsystem: Initializing..."));
     
-    // Set up Mass Entity references
-    SetupMassEntityReferences();
-    
-    // Create default spawn zones
-    if (SpawnZones.Num() == 0)
+    // Initialize Mass Entity integration
+    if (bEnableMassEntityIntegration)
     {
-        FCrowd_SpawnZone DefaultZone;
-        DefaultZone.Center = FVector(0, 0, 100);
-        DefaultZone.Extents = FVector(2000, 2000, 200);
-        DefaultZone.TargetPopulation = 50;
-        DefaultZone.BehaviorType = ECrowd_BehaviorType::Wandering;
-        SpawnZones.Add(DefaultZone);
+        InitializeMassEntity();
     }
     
-    UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationSubsystem: Initialized with %d spawn zones"), SpawnZones.Num());
+    // Start LOD update timer
+    if (UWorld* World = GetWorld())
+    {
+        World->GetTimerManager().SetTimer(
+            LODUpdateTimer,
+            this,
+            &UCrowdSimulationSubsystem::UpdateLODSystem,
+            LODUpdateInterval,
+            true
+        );
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationSubsystem: Initialized with max %d agents"), MaxConcurrentAgents);
 }
 
 void UCrowdSimulationSubsystem::Deinitialize()
 {
-    UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationSubsystem: Deinitializing..."));
+    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationSubsystem: Deinitializing..."));
     
-    // Clean up crowd entities
-    DespawnAllCrowdEntities();
+    // Clear all crowd groups
+    CleanupCrowdGroups();
     
-    // Clear references
-    MassEntitySubsystem = nullptr;
-    MassSpawnerSubsystem = nullptr;
+    // Clear timer
+    if (UWorld* World = GetWorld())
+    {
+        World->GetTimerManager().ClearTimer(LODUpdateTimer);
+    }
     
     Super::Deinitialize();
 }
 
 bool UCrowdSimulationSubsystem::ShouldCreateSubsystem(UObject* Outer) const
 {
-    // Only create in game worlds, not in editor preview worlds
-    if (UWorld* World = Cast<UWorld>(Outer))
-    {
-        return World->IsGameWorld();
-    }
-    return false;
+    return true;
 }
 
-void UCrowdSimulationSubsystem::InitializeCrowdSystem()
+int32 UCrowdSimulationSubsystem::SpawnCrowdGroup(FVector Location, ECrowd_GroupType GroupType, int32 AgentCount)
 {
-    UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationSubsystem: InitializeCrowdSystem called"));
-    
-    if (bCrowdSystemInitialized)
+    if (AgentCount <= 0 || GetTotalActiveAgents() + AgentCount > MaxConcurrentAgents)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Crowd system already initialized"));
-        return;
+        UE_LOG(LogTemp, Warning, TEXT("CrowdSimulationSubsystem: Cannot spawn %d agents - would exceed limit"), AgentCount);
+        return -1;
     }
     
-    // Ensure Mass Entity subsystems are available
-    SetupMassEntityReferences();
+    int32 CrowdID = NextCrowdID++;
     
-    if (!MassEntitySubsystem)
+    // Create crowd group data
+    FCrowd_GroupData NewGroup;
+    NewGroup.GroupID = CrowdID;
+    NewGroup.GroupType = GroupType;
+    NewGroup.AgentCount = AgentCount;
+    NewGroup.CenterLocation = Location;
+    NewGroup.CurrentBehavior = ECrowd_BehaviorState::Idle;
+    NewGroup.LODLevel = ECrowd_LODLevel::High;
+    NewGroup.bIsActive = true;
+    NewGroup.SpawnTime = GetWorld()->GetTimeSeconds();
+    
+    // Set behavior based on group type
+    switch (GroupType)
     {
-        UE_LOG(LogTemp, Error, TEXT("Failed to get MassEntitySubsystem - Mass Entity plugin may not be enabled"));
-        return;
+        case ECrowd_GroupType::TribalSettlement:
+            NewGroup.CurrentBehavior = ECrowd_BehaviorState::Gathering;
+            NewGroup.MovementSpeed = 50.0f;
+            break;
+        case ECrowd_GroupType::HuntingParty:
+            NewGroup.CurrentBehavior = ECrowd_BehaviorState::Hunting;
+            NewGroup.MovementSpeed = 150.0f;
+            break;
+        case ECrowd_GroupType::GatheringGroup:
+            NewGroup.CurrentBehavior = ECrowd_BehaviorState::Gathering;
+            NewGroup.MovementSpeed = 75.0f;
+            break;
+        case ECrowd_GroupType::MigrationGroup:
+            NewGroup.CurrentBehavior = ECrowd_BehaviorState::Moving;
+            NewGroup.MovementSpeed = 100.0f;
+            break;
+        case ECrowd_GroupType::PatrolGroup:
+            NewGroup.CurrentBehavior = ECrowd_BehaviorState::Patrolling;
+            NewGroup.MovementSpeed = 125.0f;
+            break;
+        default:
+            NewGroup.CurrentBehavior = ECrowd_BehaviorState::Idle;
+            NewGroup.MovementSpeed = 50.0f;
+            break;
     }
     
-    // Create crowd archetype and register processors
-    CreateCrowdArchetype();
-    RegisterCrowdProcessors();
+    // Store the group
+    ActiveCrowdGroups.Add(CrowdID, NewGroup);
     
-    bCrowdSystemInitialized = true;
-    UE_LOG(LogTemp, Warning, TEXT("Crowd system initialized successfully"));
+    // Broadcast spawn event
+    OnCrowdGroupSpawned.Broadcast(CrowdID, NewGroup.CurrentBehavior);
+    
+    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationSubsystem: Spawned crowd group %d with %d agents at %s"), 
+           CrowdID, AgentCount, *Location.ToString());
+    
+    return CrowdID;
 }
 
-void UCrowdSimulationSubsystem::SpawnCrowdEntities(const FCrowd_SpawnZone& SpawnZone)
+void UCrowdSimulationSubsystem::DespawnCrowdGroup(int32 CrowdID)
 {
-    UE_LOG(LogTemp, Warning, TEXT("SpawnCrowdEntities: Spawning %d entities in zone at %s"), 
-           SpawnZone.TargetPopulation, *SpawnZone.Center.ToString());
-    
-    if (!bCrowdSystemInitialized)
+    if (FCrowd_GroupData* Group = ActiveCrowdGroups.Find(CrowdID))
     {
-        InitializeCrowdSystem();
-    }
-    
-    // For now, create simple placeholder entities
-    // In a full implementation, this would use Mass Entity spawning
-    for (int32 i = 0; i < SpawnZone.TargetPopulation; ++i)
-    {
-        FVector SpawnLocation = SpawnZone.Center + FVector(
-            FMath::RandRange(-SpawnZone.Extents.X, SpawnZone.Extents.X),
-            FMath::RandRange(-SpawnZone.Extents.Y, SpawnZone.Extents.Y),
-            FMath::RandRange(-SpawnZone.Extents.Z, SpawnZone.Extents.Z)
-        );
+        Group->bIsActive = false;
         
-        // TODO: Replace with actual Mass Entity spawning
-        ActiveEntityCount++;
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Spawned %d crowd entities. Total active: %d"), 
-           SpawnZone.TargetPopulation, ActiveEntityCount);
-}
-
-void UCrowdSimulationSubsystem::DespawnAllCrowdEntities()
-{
-    UE_LOG(LogTemp, Warning, TEXT("DespawnAllCrowdEntities: Removing %d entities"), ActiveEntityCount);
-    
-    // TODO: Implement actual Mass Entity despawning
-    ActiveEntityCount = 0;
-    
-    UE_LOG(LogTemp, Warning, TEXT("All crowd entities despawned"));
-}
-
-void UCrowdSimulationSubsystem::SetCrowdDensity(float DensityMultiplier)
-{
-    UE_LOG(LogTemp, Warning, TEXT("SetCrowdDensity: Setting density multiplier to %f"), DensityMultiplier);
-    
-    DensityMultiplier = FMath::Clamp(DensityMultiplier, 0.1f, 5.0f);
-    
-    // Update spawn zone populations
-    for (FCrowd_SpawnZone& Zone : SpawnZones)
-    {
-        Zone.TargetPopulation = FMath::RoundToInt(Zone.TargetPopulation * DensityMultiplier);
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Crowd density updated"));
-}
-
-int32 UCrowdSimulationSubsystem::GetActiveCrowdEntityCount() const
-{
-    return ActiveEntityCount;
-}
-
-void UCrowdSimulationSubsystem::UpdateCrowdLOD(const FVector& PlayerLocation)
-{
-    // Update LOD based on distance from player
-    UpdateEntityLOD(PlayerLocation);
-}
-
-void UCrowdSimulationSubsystem::SetLODDistances(float HighDetailDistance, float MediumDetailDistance, float LowDetailDistance)
-{
-    this->HighDetailDistance = HighDetailDistance;
-    this->MediumDetailDistance = MediumDetailDistance;
-    this->LowDetailDistance = LowDetailDistance;
-    
-    UE_LOG(LogTemp, Warning, TEXT("LOD distances updated: High=%f, Medium=%f, Low=%f"), 
-           HighDetailDistance, MediumDetailDistance, LowDetailDistance);
-}
-
-void UCrowdSimulationSubsystem::SetGlobalCrowdBehavior(ECrowd_BehaviorType NewBehavior)
-{
-    UE_LOG(LogTemp, Warning, TEXT("SetGlobalCrowdBehavior: Setting behavior to %d"), (int32)NewBehavior);
-    
-    // Update all spawn zones to use new behavior
-    for (FCrowd_SpawnZone& Zone : SpawnZones)
-    {
-        Zone.BehaviorType = NewBehavior;
-    }
-    
-    // TODO: Update existing entities with new behavior
-}
-
-void UCrowdSimulationSubsystem::TriggerCrowdEvent(ECrowd_EventType EventType, const FVector& EventLocation, float EventRadius)
-{
-    UE_LOG(LogTemp, Warning, TEXT("TriggerCrowdEvent: Event %d at %s with radius %f"), 
-           (int32)EventType, *EventLocation.ToString(), EventRadius);
-    
-    HandleCrowdEvent(EventType, EventLocation, EventRadius);
-}
-
-void UCrowdSimulationSubsystem::DebugDrawCrowdInfo()
-{
-    UWorld* World = GetWorld();
-    if (!World)
-        return;
-    
-    // Draw spawn zones
-    for (const FCrowd_SpawnZone& Zone : SpawnZones)
-    {
-        DrawDebugBox(World, Zone.Center, Zone.Extents, FColor::Green, false, 5.0f, 0, 10.0f);
+        // Remove from Mass Entity system if integrated
+        if (CrowdToMassEntityMap.Contains(CrowdID))
+        {
+            CrowdToMassEntityMap.Remove(CrowdID);
+        }
         
-        // Draw zone info text
-        FString ZoneInfo = FString::Printf(TEXT("Population: %d\nBehavior: %d"), 
-                                         Zone.TargetPopulation, (int32)Zone.BehaviorType);
-        DrawDebugString(World, Zone.Center + FVector(0, 0, Zone.Extents.Z + 100), 
-                       ZoneInfo, nullptr, FColor::White, 5.0f);
+        // Broadcast despawn event
+        OnCrowdGroupDespawned.Broadcast(CrowdID, Group->CurrentBehavior);
+        
+        // Remove from active groups
+        ActiveCrowdGroups.Remove(CrowdID);
+        
+        UE_LOG(LogTemp, Log, TEXT("CrowdSimulationSubsystem: Despawned crowd group %d"), CrowdID);
     }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Debug info drawn for %d spawn zones"), SpawnZones.Num());
 }
 
-void UCrowdSimulationSubsystem::ToggleCrowdDebugVisualization()
+void UCrowdSimulationSubsystem::SetCrowdBehavior(int32 CrowdID, ECrowd_BehaviorState NewBehavior)
 {
-    bDebugVisualizationEnabled = !bDebugVisualizationEnabled;
-    UE_LOG(LogTemp, Warning, TEXT("Crowd debug visualization: %s"), 
-           bDebugVisualizationEnabled ? TEXT("ENABLED") : TEXT("DISABLED"));
-}
-
-void UCrowdSimulationSubsystem::SetupMassEntityReferences()
-{
-    UWorld* World = GetWorld();
-    if (!World)
+    if (FCrowd_GroupData* Group = ActiveCrowdGroups.Find(CrowdID))
     {
-        UE_LOG(LogTemp, Error, TEXT("No world available for Mass Entity setup"));
-        return;
+        ECrowd_BehaviorState OldBehavior = Group->CurrentBehavior;
+        Group->CurrentBehavior = NewBehavior;
+        
+        // Adjust movement speed based on behavior
+        switch (NewBehavior)
+        {
+            case ECrowd_BehaviorState::Idle:
+                Group->MovementSpeed = 0.0f;
+                break;
+            case ECrowd_BehaviorState::Moving:
+                Group->MovementSpeed = 100.0f;
+                break;
+            case ECrowd_BehaviorState::Gathering:
+                Group->MovementSpeed = 50.0f;
+                break;
+            case ECrowd_BehaviorState::Hunting:
+                Group->MovementSpeed = 150.0f;
+                break;
+            case ECrowd_BehaviorState::Fleeing:
+                Group->MovementSpeed = 200.0f;
+                break;
+            case ECrowd_BehaviorState::Fighting:
+                Group->MovementSpeed = 75.0f;
+                break;
+            case ECrowd_BehaviorState::Patrolling:
+                Group->MovementSpeed = 125.0f;
+                break;
+        }
+        
+        // Broadcast behavior change
+        OnCrowdBehaviorChanged.Broadcast(CrowdID, NewBehavior);
+        
+        UE_LOG(LogTemp, Log, TEXT("CrowdSimulationSubsystem: Changed crowd %d behavior from %d to %d"), 
+               CrowdID, (int32)OldBehavior, (int32)NewBehavior);
     }
-    
-    // Get Mass Entity subsystem
-    MassEntitySubsystem = World->GetSubsystem<UMassEntitySubsystem>();
-    if (!MassEntitySubsystem)
+}
+
+void UCrowdSimulationSubsystem::MoveCrowdToLocation(int32 CrowdID, FVector TargetLocation)
+{
+    if (FCrowd_GroupData* Group = ActiveCrowdGroups.Find(CrowdID))
     {
-        UE_LOG(LogTemp, Warning, TEXT("MassEntitySubsystem not available - Mass Entity plugin may not be enabled"));
+        Group->TargetLocation = TargetLocation;
+        Group->bHasTarget = true;
+        
+        // Set to moving behavior if idle
+        if (Group->CurrentBehavior == ECrowd_BehaviorState::Idle)
+        {
+            SetCrowdBehavior(CrowdID, ECrowd_BehaviorState::Moving);
+        }
+        
+        UE_LOG(LogTemp, Log, TEXT("CrowdSimulationSubsystem: Moving crowd %d to %s"), 
+               CrowdID, *TargetLocation.ToString());
     }
-    
-    // Get Mass Spawner subsystem
-    MassSpawnerSubsystem = World->GetSubsystem<UMassSpawnerSubsystem>();
-    if (!MassSpawnerSubsystem)
+}
+
+void UCrowdSimulationSubsystem::UpdateCrowdLOD(FVector PlayerLocation)
+{
+    for (auto& CrowdPair : ActiveCrowdGroups)
     {
-        UE_LOG(LogTemp, Warning, TEXT("MassSpawnerSubsystem not available"));
+        FCrowd_GroupData& Group = CrowdPair.Value;
+        float Distance = FVector::Dist(PlayerLocation, Group.CenterLocation);
+        
+        ECrowd_LODLevel NewLOD;
+        if (Distance <= HighDetailRadius)
+        {
+            NewLOD = ECrowd_LODLevel::High;
+        }
+        else if (Distance <= MediumDetailRadius)
+        {
+            NewLOD = ECrowd_LODLevel::Medium;
+        }
+        else if (Distance <= LowDetailRadius)
+        {
+            NewLOD = ECrowd_LODLevel::Low;
+        }
+        else
+        {
+            NewLOD = ECrowd_LODLevel::Culled;
+        }
+        
+        if (Group.LODLevel != NewLOD)
+        {
+            Group.LODLevel = NewLOD;
+            // Update rendering/simulation detail based on LOD
+        }
     }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Mass Entity references setup complete"));
 }
 
-void UCrowdSimulationSubsystem::CreateCrowdArchetype()
+void UCrowdSimulationSubsystem::SetGlobalCrowdDensity(float DensityMultiplier)
 {
-    UE_LOG(LogTemp, Warning, TEXT("CreateCrowdArchetype: Creating crowd entity archetype"));
+    DensityMultiplier = FMath::Clamp(DensityMultiplier, 0.1f, 2.0f);
     
-    // TODO: Create Mass Entity archetype with required components
-    // This would include: Transform, Movement, LOD, Behavior components
-    
-    UE_LOG(LogTemp, Warning, TEXT("Crowd archetype creation completed"));
-}
-
-void UCrowdSimulationSubsystem::RegisterCrowdProcessors()
-{
-    UE_LOG(LogTemp, Warning, TEXT("RegisterCrowdProcessors: Registering Mass processors"));
-    
-    // TODO: Register custom processors for:
-    // - Movement/Pathfinding
-    // - LOD management
-    // - Behavior execution
-    // - Avoidance
-    
-    UE_LOG(LogTemp, Warning, TEXT("Crowd processors registration completed"));
-}
-
-void UCrowdSimulationSubsystem::UpdateEntityLOD(const FVector& PlayerLocation)
-{
-    // TODO: Implement LOD updates based on distance from player
-    // High detail: Full animation and AI
-    // Medium detail: Reduced animation, simplified AI
-    // Low detail: Static poses, no AI updates
-}
-
-void UCrowdSimulationSubsystem::HandleCrowdEvent(ECrowd_EventType EventType, const FVector& Location, float Radius)
-{
-    // TODO: Implement crowd event responses
-    switch (EventType)
+    for (auto& CrowdPair : ActiveCrowdGroups)
     {
-    case ECrowd_EventType::Panic:
-        // Make entities flee from location
-        break;
-    case ECrowd_EventType::Curiosity:
-        // Make entities move toward location
-        break;
-    case ECrowd_EventType::Celebration:
-        // Make entities gather and celebrate
-        break;
-    default:
-        break;
+        FCrowd_GroupData& Group = CrowdPair.Value;
+        // Adjust agent count based on density
+        int32 NewAgentCount = FMath::RoundToInt(Group.AgentCount * DensityMultiplier);
+        Group.AgentCount = FMath::Max(1, NewAgentCount);
     }
+    
+    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationSubsystem: Set global density to %.2f"), DensityMultiplier);
+}
+
+TArray<int32> UCrowdSimulationSubsystem::GetCrowdGroupsInRadius(FVector Center, float Radius)
+{
+    TArray<int32> Result;
+    float RadiusSquared = Radius * Radius;
+    
+    for (const auto& CrowdPair : ActiveCrowdGroups)
+    {
+        const FCrowd_GroupData& Group = CrowdPair.Value;
+        if (Group.bIsActive)
+        {
+            float DistanceSquared = FVector::DistSquared(Center, Group.CenterLocation);
+            if (DistanceSquared <= RadiusSquared)
+            {
+                Result.Add(Group.GroupID);
+            }
+        }
+    }
+    
+    return Result;
+}
+
+int32 UCrowdSimulationSubsystem::GetTotalActiveAgents() const
+{
+    int32 Total = 0;
+    for (const auto& CrowdPair : ActiveCrowdGroups)
+    {
+        if (CrowdPair.Value.bIsActive)
+        {
+            Total += CrowdPair.Value.AgentCount;
+        }
+    }
+    return Total;
+}
+
+ECrowd_BehaviorState UCrowdSimulationSubsystem::GetCrowdBehavior(int32 CrowdID) const
+{
+    if (const FCrowd_GroupData* Group = ActiveCrowdGroups.Find(CrowdID))
+    {
+        return Group->CurrentBehavior;
+    }
+    return ECrowd_BehaviorState::Idle;
+}
+
+void UCrowdSimulationSubsystem::UpdateLODSystem()
+{
+    // Get player location for LOD calculations
+    if (UWorld* World = GetWorld())
+    {
+        if (APawn* PlayerPawn = World->GetFirstPlayerController()->GetPawn())
+        {
+            UpdateCrowdLOD(PlayerPawn->GetActorLocation());
+        }
+    }
+    
+    // Update crowd group positions and behaviors
+    float DeltaTime = LODUpdateInterval;
+    for (auto& CrowdPair : ActiveCrowdGroups)
+    {
+        FCrowd_GroupData& Group = CrowdPair.Value;
+        
+        if (Group.bIsActive && Group.bHasTarget && Group.MovementSpeed > 0.0f)
+        {
+            // Move towards target
+            FVector Direction = (Group.TargetLocation - Group.CenterLocation).GetSafeNormal();
+            float MoveDistance = Group.MovementSpeed * DeltaTime;
+            
+            if (FVector::Dist(Group.CenterLocation, Group.TargetLocation) <= MoveDistance)
+            {
+                // Reached target
+                Group.CenterLocation = Group.TargetLocation;
+                Group.bHasTarget = false;
+                SetCrowdBehavior(Group.GroupID, ECrowd_BehaviorState::Idle);
+            }
+            else
+            {
+                // Move towards target
+                Group.CenterLocation += Direction * MoveDistance;
+            }
+        }
+    }
+}
+
+void UCrowdSimulationSubsystem::InitializeMassEntity()
+{
+    if (UWorld* World = GetWorld())
+    {
+        // Try to get Mass Entity subsystem
+        // Note: This is a placeholder for Mass Entity integration
+        // The actual implementation would depend on the Mass Entity plugin API
+        UE_LOG(LogTemp, Log, TEXT("CrowdSimulationSubsystem: Mass Entity integration initialized"));
+    }
+}
+
+void UCrowdSimulationSubsystem::CleanupCrowdGroups()
+{
+    for (auto& CrowdPair : ActiveCrowdGroups)
+    {
+        FCrowd_GroupData& Group = CrowdPair.Value;
+        Group.bIsActive = false;
+    }
+    
+    ActiveCrowdGroups.Empty();
+    CrowdToMassEntityMap.Empty();
+    
+    UE_LOG(LogTemp, Log, TEXT("CrowdSimulationSubsystem: Cleaned up all crowd groups"));
 }
