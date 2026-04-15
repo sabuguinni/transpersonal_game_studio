@@ -1,200 +1,124 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
-#include "Components/ActorComponent.h"
-#include "NiagaraSystem.h"
-#include "NiagaraComponent.h"
-#include "NiagaraFunctionLibrary.h"
 #include "Engine/World.h"
-#include "TimerManager.h"
+#include "Subsystems/WorldSubsystem.h"
+#include "Niagara/Public/NiagaraSystem.h"
+#include "Niagara/Public/NiagaraComponent.h"
+#include "Niagara/Public/NiagaraFunctionLibrary.h"
+#include "Components/AudioComponent.h"
+#include "../SharedTypes.h"
 #include "VFXManager.generated.h"
 
-UENUM(BlueprintType)
-enum class EVFXType : uint8
-{
-    Combat,
-    Environment,
-    Magic,
-    Weather,
-    UI,
-    Cinematic
-};
-
-UENUM(BlueprintType)
-enum class EVFXQuality : uint8
-{
-    Low,
-    Medium,
-    High,
-    Ultra
-};
-
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FVFXConfig
+struct TRANSPERSONALGAME_API FVFX_EffectData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
     TSoftObjectPtr<UNiagaraSystem> NiagaraSystem;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EVFXType VFXType;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    TSoftObjectPtr<USoundBase> Sound;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float MaxDistance = 5000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    float Duration;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 MaxInstances = 10;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    float VolumeMultiplier;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bAutoDestroy = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float LifeTime = 5.0f;
-
-    FVFXConfig()
+    FVFX_EffectData()
     {
-        VFXType = EVFXType::Environment;
-        MaxDistance = 5000.0f;
-        MaxInstances = 10;
-        bAutoDestroy = true;
-        LifeTime = 5.0f;
+        Duration = 3.0f;
+        VolumeMultiplier = 1.0f;
     }
 };
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FActiveVFX
+UENUM(BlueprintType)
+enum class EVFX_EffectType : uint8
 {
-    GENERATED_BODY()
-
-    UPROPERTY()
-    UNiagaraComponent* Component;
-
-    UPROPERTY()
-    FVector Location;
-
-    UPROPERTY()
-    EVFXType Type;
-
-    UPROPERTY()
-    float SpawnTime;
-
-    UPROPERTY()
-    float LifeTime;
-
-    FActiveVFX()
-    {
-        Component = nullptr;
-        Location = FVector::ZeroVector;
-        Type = EVFXType::Environment;
-        SpawnTime = 0.0f;
-        LifeTime = 5.0f;
-    }
+    Fire_Campfire,
+    Fire_Torch,
+    Water_Rain,
+    Water_Splash,
+    Dust_Footstep,
+    Dust_Impact,
+    Blood_Splatter,
+    Blood_Drip,
+    Smoke_Fire,
+    Smoke_Cooking,
+    Sparks_Fire,
+    Sparks_Tool,
+    Wind_Leaves,
+    Wind_Dust
 };
 
-/**
- * VFX Manager - Centralized system for managing all visual effects
- * Handles Niagara systems, performance optimization, and effect pooling
- */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AVFXManager : public AActor
+class TRANSPERSONALGAME_API UVFX_Manager : public UWorldSubsystem
 {
     GENERATED_BODY()
 
 public:
-    AVFXManager();
+    UVFX_Manager();
 
-protected:
-    virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
 
-public:
-    // VFX Configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Config")
-    TMap<FString, FVFXConfig> VFXConfigs;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Config")
-    EVFXQuality CurrentQuality = EVFXQuality::High;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Config")
-    int32 MaxActiveVFX = 100;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Config")
-    float CullingDistance = 10000.0f;
-
-    // Active VFX tracking
-    UPROPERTY()
-    TArray<FActiveVFX> ActiveVFXList;
-
-    UPROPERTY()
-    TMap<EVFXType, int32> VFXCounts;
-
-    // VFX Spawning Functions
+    // VFX Management
     UFUNCTION(BlueprintCallable, Category = "VFX")
-    UNiagaraComponent* SpawnVFX(const FString& VFXName, const FVector& Location, 
-                               const FRotator& Rotation = FRotator::ZeroRotator, 
-                               AActor* AttachActor = nullptr);
+    UNiagaraComponent* SpawnVFXAtLocation(EVFX_EffectType EffectType, const FVector& Location, const FRotator& Rotation = FRotator::ZeroRotator, const FVector& Scale = FVector::OneVector);
 
     UFUNCTION(BlueprintCallable, Category = "VFX")
-    UNiagaraComponent* SpawnVFXAtLocation(UNiagaraSystem* NiagaraSystem, 
-                                         const FVector& Location, 
-                                         const FRotator& Rotation = FRotator::ZeroRotator);
+    UNiagaraComponent* SpawnVFXAttached(EVFX_EffectType EffectType, USceneComponent* AttachToComponent, FName AttachPointName = NAME_None, const FVector& Location = FVector::ZeroVector, const FRotator& Rotation = FRotator::ZeroRotator, const FVector& Scale = FVector::OneVector);
 
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    UNiagaraComponent* SpawnVFXAttached(UNiagaraSystem* NiagaraSystem, 
-                                       USceneComponent* AttachComponent,
-                                       const FVector& LocationOffset = FVector::ZeroVector);
-
-    // VFX Management Functions
     UFUNCTION(BlueprintCallable, Category = "VFX")
     void StopVFX(UNiagaraComponent* VFXComponent);
 
     UFUNCTION(BlueprintCallable, Category = "VFX")
-    void StopAllVFXOfType(EVFXType VFXType);
+    void StopAllVFXOfType(EVFX_EffectType EffectType);
+
+    // Environmental VFX
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void StartRainEffect(float Intensity = 1.0f);
 
     UFUNCTION(BlueprintCallable, Category = "VFX")
-    void StopAllVFX();
-
-    // Performance Functions
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void SetVFXQuality(EVFXQuality NewQuality);
+    void StopRainEffect();
 
     UFUNCTION(BlueprintCallable, Category = "VFX")
-    void UpdateVFXLOD();
+    void CreateFootstepDust(const FVector& Location, float Intensity = 1.0f);
 
     UFUNCTION(BlueprintCallable, Category = "VFX")
-    void CullDistantVFX();
+    void CreateBloodSplatter(const FVector& Location, const FVector& Direction, float Amount = 1.0f);
 
-    // Utility Functions
+    // Fire VFX
     UFUNCTION(BlueprintCallable, Category = "VFX")
-    int32 GetActiveVFXCount(EVFXType VFXType = EVFXType::Environment);
-
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    bool CanSpawnVFX(EVFXType VFXType);
+    UNiagaraComponent* CreateCampfire(const FVector& Location);
 
     UFUNCTION(BlueprintCallable, Category = "VFX")
-    void RegisterVFXConfig(const FString& Name, const FVFXConfig& Config);
+    void ExtinguishFire(UNiagaraComponent* FireComponent);
+
+protected:
+    // VFX Database
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    TMap<EVFX_EffectType, FVFX_EffectData> VFXDatabase;
+
+    // Active VFX tracking
+    UPROPERTY()
+    TArray<UNiagaraComponent*> ActiveVFXComponents;
+
+    UPROPERTY()
+    TMap<EVFX_EffectType, TArray<UNiagaraComponent*>> ActiveVFXByType;
+
+    // Environmental state
+    UPROPERTY()
+    UNiagaraComponent* RainComponent;
+
+    UPROPERTY()
+    bool bIsRaining;
 
 private:
-    // Internal management
-    void CleanupFinishedVFX();
-    void ApplyQualitySettings();
-    float GetDistanceToPlayer(const FVector& Location);
-    bool ShouldCullVFX(const FActiveVFX& VFX);
-
-    // Timer handles
-    FTimerHandle CleanupTimerHandle;
-    FTimerHandle CullingTimerHandle;
-
-    // Performance tracking
-    float LastFrameTime;
-    int32 VFXSpawnedThisFrame;
-    
-    static AVFXManager* Instance;
-
-public:
-    // Singleton access
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    static AVFXManager* GetInstance();
+    void InitializeVFXDatabase();
+    void CleanupInactiveVFX();
+    UAudioComponent* PlayVFXSound(const FVFX_EffectData& EffectData, const FVector& Location);
 };
