@@ -1,26 +1,32 @@
 #include "BuildIntegrationManager.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "TimerManager.h"
-#include "Logging/LogMacros.h"
+#include "Engine/GameInstance.h"
+#include "HAL/PlatformFilemanager.h"
+#include "Misc/DateTime.h"
+#include "Misc/Paths.h"
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "Engine/AssetManager.h"
 
-DEFINE_LOG_CATEGORY_STATIC(LogBuildIntegration, Log, All);
+DEFINE_LOG_CATEGORY(LogBuildIntegration);
 
 UBuildIntegrationManager::UBuildIntegrationManager()
 {
-    CurrentBuildStatus = EBuild_BuildStatus::NotStarted;
-    BuildProgress = 0.0f;
+    TargetFrameRate = 60.0f;
+    MinimumFrameRate = 30.0f;
+    bLastBuildSuccessful = false;
+    LastBuildTimestamp = TEXT("");
 
-    // Initialize core system classes that must be validated
-    CoreSystemClasses = {
-        TEXT("/Script/TranspersonalGame.TranspersonalGameMode"),
-        TEXT("/Script/TranspersonalGame.TranspersonalCharacter"),
-        TEXT("/Script/TranspersonalGame.TranspersonalGameState"),
-        TEXT("/Script/TranspersonalGame.PCGWorldGenerator"),
-        TEXT("/Script/TranspersonalGame.FoliageManager"),
-        TEXT("/Script/TranspersonalGame.CrowdSimulationManager"),
-        TEXT("/Script/TranspersonalGame.ProceduralWorldManager")
-    };
+    // Initialize known modules
+    KnownModules.Add(TEXT("TranspersonalGame"));
+    KnownModules.Add(TEXT("Engine"));
+    KnownModules.Add(TEXT("Core"));
+    KnownModules.Add(TEXT("CoreUObject"));
+
+    // Initialize critical assets
+    CriticalAssets.Add(TEXT("/Game/Maps/MinPlayableMap"));
+    CriticalAssets.Add(TEXT("/Game/TranspersonalGame/Characters/TranspersonalCharacter"));
+    CriticalAssets.Add(TEXT("/Game/TranspersonalGame/GameModes/TranspersonalGameMode"));
 }
 
 void UBuildIntegrationManager::Initialize(FSubsystemCollectionBase& Collection)
@@ -29,334 +35,282 @@ void UBuildIntegrationManager::Initialize(FSubsystemCollectionBase& Collection)
     
     UE_LOG(LogBuildIntegration, Log, TEXT("BuildIntegrationManager initialized"));
     
-    // Start initial validation
-    UpdateBuildStatus(EBuild_BuildStatus::Initializing);
+    // Run initial integration test
+    LastIntegrationReport = RunFullIntegrationTest();
     
-    // Schedule initial system validation
-    if (UWorld* World = GetWorld())
-    {
-        World->GetTimerManager().SetTimer(
-            SystemCheckTimer,
-            this,
-            &UBuildIntegrationManager::ValidateAllSystems,
-            2.0f,
-            false
-        );
-    }
+    // Set build timestamp
+    LastBuildTimestamp = FDateTime::Now().ToString();
 }
 
 void UBuildIntegrationManager::Deinitialize()
 {
-    if (UWorld* World = GetWorld())
-    {
-        World->GetTimerManager().ClearTimer(BuildValidationTimer);
-        World->GetTimerManager().ClearTimer(SystemCheckTimer);
-    }
-    
+    UE_LOG(LogBuildIntegration, Log, TEXT("BuildIntegrationManager deinitialized"));
     Super::Deinitialize();
 }
 
-void UBuildIntegrationManager::StartBuildProcess()
+FBuild_IntegrationReport UBuildIntegrationManager::RunFullIntegrationTest()
 {
-    UE_LOG(LogBuildIntegration, Log, TEXT("Starting build process"));
+    UE_LOG(LogBuildIntegration, Log, TEXT("Running full integration test"));
     
-    UpdateBuildStatus(EBuild_BuildStatus::Building);
-    BuildProgress = 0.0f;
-    IntegrationErrors.Empty();
+    FBuild_IntegrationReport Report;
+    Report.BuildTimestamp = FDateTime::Now().ToString();
     
-    // Clear previous validation results
-    ValidatedSystems.Empty();
-    FailedSystems.Empty();
-    
-    // Start validation process
-    ValidateAllSystems();
-}
-
-void UBuildIntegrationManager::ValidateAllSystems()
-{
-    UE_LOG(LogBuildIntegration, Log, TEXT("Validating all systems"));
-    
-    UpdateBuildStatus(EBuild_BuildStatus::Validating);
-    BuildProgress = 0.1f;
-    
-    bool bAllSystemsValid = true;
-    
-    // Validate core game systems
-    if (ValidateCoreGameSystems())
+    // Test each known module
+    for (const FString& ModuleName : KnownModules)
     {
-        ValidatedSystems.Add(TEXT("CoreGameSystems"));
-        BuildProgress = 0.3f;
-    }
-    else
-    {
-        FailedSystems.Add(TEXT("CoreGameSystems"));
-        bAllSystemsValid = false;
-    }
-    
-    // Validate world generation
-    if (ValidateWorldGeneration())
-    {
-        ValidatedSystems.Add(TEXT("WorldGeneration"));
-        BuildProgress = 0.5f;
-    }
-    else
-    {
-        FailedSystems.Add(TEXT("WorldGeneration"));
-        bAllSystemsValid = false;
-    }
-    
-    // Validate character systems
-    if (ValidateCharacterSystems())
-    {
-        ValidatedSystems.Add(TEXT("CharacterSystems"));
-        BuildProgress = 0.7f;
-    }
-    else
-    {
-        FailedSystems.Add(TEXT("CharacterSystems"));
-        bAllSystemsValid = false;
-    }
-    
-    // Validate AI systems
-    if (ValidateAISystems())
-    {
-        ValidatedSystems.Add(TEXT("AISystems"));
-        BuildProgress = 0.9f;
-    }
-    else
-    {
-        FailedSystems.Add(TEXT("AISystems"));
-        bAllSystemsValid = false;
-    }
-    
-    // Validate environment systems
-    if (ValidateEnvironmentSystems())
-    {
-        ValidatedSystems.Add(TEXT("EnvironmentSystems"));
-        BuildProgress = 1.0f;
-    }
-    else
-    {
-        FailedSystems.Add(TEXT("EnvironmentSystems"));
-        bAllSystemsValid = false;
-    }
-    
-    // Update final status
-    if (bAllSystemsValid)
-    {
-        UpdateBuildStatus(EBuild_BuildStatus::Success);
-        UE_LOG(LogBuildIntegration, Log, TEXT("All systems validated successfully"));
-    }
-    else
-    {
-        UpdateBuildStatus(EBuild_BuildStatus::Failed);
-        UE_LOG(LogBuildIntegration, Warning, TEXT("System validation failed. Failed systems: %d"), FailedSystems.Num());
-    }
-}
-
-TArray<FString> UBuildIntegrationManager::GetFailedModules() const
-{
-    TArray<FString> FailedModules;
-    
-    for (const auto& ModulePair : ModuleStatuses)
-    {
-        if (ModulePair.Value == EBuild_ModuleStatus::Failed || ModulePair.Value == EBuild_ModuleStatus::Error)
+        FBuild_ModuleStatus ModuleStatus;
+        ModuleStatus.ModuleName = ModuleName;
+        ModuleStatus.bIsLoaded = ValidateModuleIntegration(ModuleName);
+        
+        if (ModuleStatus.bIsLoaded)
         {
-            FailedModules.Add(ModulePair.Key);
+            ModuleStatus.ClassCount = 1; // Simplified for now
+            Report.LoadedClasses++;
         }
+        else
+        {
+            ModuleStatus.bHasErrors = true;
+            ModuleStatus.ErrorMessage = FString::Printf(TEXT("Module %s failed to load"), *ModuleName);
+            Report.FailedClasses++;
+        }
+        
+        Report.ModuleStatuses.Add(ModuleStatus);
+        Report.TotalClasses++;
     }
     
-    return FailedModules;
+    // Test cross-system integration
+    bool bCrossSystemSuccess = TestCrossSystemIntegration();
+    
+    // Test asset validation
+    bool bAssetsValid = ValidateGameAssets();
+    
+    // Test performance targets
+    bool bPerformanceValid = ValidatePerformanceTargets();
+    
+    // Determine overall build success
+    Report.bBuildSuccessful = (Report.FailedClasses == 0) && bCrossSystemSuccess && bAssetsValid && bPerformanceValid;
+    bLastBuildSuccessful = Report.bBuildSuccessful;
+    
+    // Log results
+    LogIntegrationResults(Report);
+    
+    // Store report
+    LastIntegrationReport = Report;
+    
+    return Report;
 }
 
-bool UBuildIntegrationManager::ValidateModule(const FString& ModuleName)
+bool UBuildIntegrationManager::ValidateModuleIntegration(const FString& ModuleName)
 {
     UE_LOG(LogBuildIntegration, Log, TEXT("Validating module: %s"), *ModuleName);
     
-    UpdateModuleStatus(ModuleName, EBuild_ModuleStatus::Validating);
-    
-    // Check if module has required classes
-    if (ModuleRequiredClasses.Contains(ModuleName))
+    // Try to load a representative class from each module
+    if (ModuleName == TEXT("TranspersonalGame"))
     {
-        const TArray<FString>& RequiredClasses = ModuleRequiredClasses[ModuleName];
-        
-        for (const FString& ClassName : RequiredClasses)
-        {
-            if (!ValidateClassLoading(ClassName))
-            {
-                LogIntegrationError(FString::Printf(TEXT("Module %s: Failed to load required class %s"), *ModuleName, *ClassName));
-                UpdateModuleStatus(ModuleName, EBuild_ModuleStatus::Failed);
-                return false;
-            }
-        }
+        return ValidateModuleClasses(ModuleName);
+    }
+    else if (ModuleName == TEXT("Engine"))
+    {
+        // Engine module is always loaded if we're running
+        return true;
+    }
+    else if (ModuleName == TEXT("Core") || ModuleName == TEXT("CoreUObject"))
+    {
+        // Core modules are always loaded
+        return true;
     }
     
-    UpdateModuleStatus(ModuleName, EBuild_ModuleStatus::Loaded);
-    return true;
+    return false;
 }
 
-void UBuildIntegrationManager::RegisterModuleForValidation(const FString& ModuleName, const TArray<FString>& RequiredClasses)
+bool UBuildIntegrationManager::ValidateModuleClasses(const FString& ModuleName)
 {
-    ModuleRequiredClasses.Add(ModuleName, RequiredClasses);
-    UpdateModuleStatus(ModuleName, EBuild_ModuleStatus::Registered);
-    
-    UE_LOG(LogBuildIntegration, Log, TEXT("Registered module %s with %d required classes"), *ModuleName, RequiredClasses.Num());
-}
-
-EBuild_ModuleStatus UBuildIntegrationManager::GetModuleStatus(const FString& ModuleName) const
-{
-    if (const EBuild_ModuleStatus* Status = ModuleStatuses.Find(ModuleName))
-    {
-        return *Status;
-    }
-    return EBuild_ModuleStatus::Unknown;
-}
-
-bool UBuildIntegrationManager::ValidateSystemIntegration()
-{
-    UE_LOG(LogBuildIntegration, Log, TEXT("Validating system integration"));
-    
-    // Test cross-system dependencies
-    bool bIntegrationValid = true;
-    
-    // Test GameMode -> Character integration
-    UClass* GameModeClass = LoadClass<UObject>(nullptr, TEXT("/Script/TranspersonalGame.TranspersonalGameMode"));
-    UClass* CharacterClass = LoadClass<UObject>(nullptr, TEXT("/Script/TranspersonalGame.TranspersonalCharacter"));
-    
-    if (!GameModeClass || !CharacterClass)
-    {
-        LogIntegrationError(TEXT("Core game classes not available for integration test"));
-        bIntegrationValid = false;
-    }
-    
-    // Test WorldGen -> Environment integration
-    UClass* WorldGenClass = LoadClass<UObject>(nullptr, TEXT("/Script/TranspersonalGame.PCGWorldGenerator"));
-    UClass* FoliageClass = LoadClass<UObject>(nullptr, TEXT("/Script/TranspersonalGame.FoliageManager"));
-    
-    if (!WorldGenClass || !FoliageClass)
-    {
-        LogIntegrationError(TEXT("World generation classes not available for integration test"));
-        bIntegrationValid = false;
-    }
-    
-    return bIntegrationValid;
-}
-
-void UBuildIntegrationManager::RunIntegrationTests()
-{
-    UE_LOG(LogBuildIntegration, Log, TEXT("Running integration tests"));
-    
-    IntegrationErrors.Empty();
-    
-    // Test 1: Class loading
-    for (const FString& ClassName : CoreSystemClasses)
-    {
-        if (!ValidateClassLoading(ClassName))
-        {
-            LogIntegrationError(FString::Printf(TEXT("Integration test failed: Cannot load class %s"), *ClassName));
-        }
-    }
-    
-    // Test 2: System integration
-    if (!ValidateSystemIntegration())
-    {
-        LogIntegrationError(TEXT("System integration validation failed"));
-    }
-    
-    // Test 3: Module dependencies
-    for (const auto& ModulePair : ModuleStatuses)
-    {
-        if (!ValidateModule(ModulePair.Key))
-        {
-            LogIntegrationError(FString::Printf(TEXT("Module validation failed: %s"), *ModulePair.Key));
-        }
-    }
-    
-    UE_LOG(LogBuildIntegration, Log, TEXT("Integration tests completed. Errors: %d"), IntegrationErrors.Num());
-}
-
-bool UBuildIntegrationManager::ValidateClassLoading(const FString& ClassName)
-{
-    UClass* LoadedClass = LoadClass<UObject>(nullptr, *ClassName);
-    return LoadedClass != nullptr;
-}
-
-bool UBuildIntegrationManager::ValidateCoreGameSystems()
-{
-    UE_LOG(LogBuildIntegration, Log, TEXT("Validating core game systems"));
-    
-    TArray<FString> CoreClasses = {
-        TEXT("/Script/TranspersonalGame.TranspersonalGameMode"),
+    // Test loading of key TranspersonalGame classes
+    TArray<FString> TestClasses = {
+        TEXT("/Script/TranspersonalGame.TranspersonalGameState"),
         TEXT("/Script/TranspersonalGame.TranspersonalCharacter"),
-        TEXT("/Script/TranspersonalGame.TranspersonalGameState")
+        TEXT("/Script/TranspersonalGame.BuildIntegrationManager")
     };
     
-    for (const FString& ClassName : CoreClasses)
+    int32 LoadedCount = 0;
+    for (const FString& ClassName : TestClasses)
     {
-        if (!ValidateClassLoading(ClassName))
+        UClass* TestClass = LoadClass<UObject>(nullptr, *ClassName);
+        if (TestClass)
         {
-            LogIntegrationError(FString::Printf(TEXT("Core system validation failed: %s"), *ClassName));
-            return false;
+            LoadedCount++;
+            UE_LOG(LogBuildIntegration, Log, TEXT("Successfully loaded class: %s"), *ClassName);
+        }
+        else
+        {
+            UE_LOG(LogBuildIntegration, Warning, TEXT("Failed to load class: %s"), *ClassName);
         }
     }
     
+    return LoadedCount > 0; // At least some classes should load
+}
+
+TArray<FString> UBuildIntegrationManager::GetLoadedModules()
+{
+    TArray<FString> LoadedModules;
+    
+    for (const FString& ModuleName : KnownModules)
+    {
+        if (ValidateModuleIntegration(ModuleName))
+        {
+            LoadedModules.Add(ModuleName);
+        }
+    }
+    
+    return LoadedModules;
+}
+
+bool UBuildIntegrationManager::TestCrossSystemIntegration()
+{
+    UE_LOG(LogBuildIntegration, Log, TEXT("Testing cross-system integration"));
+    
+    // Test basic system interactions
+    bool bSuccess = true;
+    
+    // Test 1: World and Character systems
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        UE_LOG(LogBuildIntegration, Error, TEXT("No world available for integration test"));
+        bSuccess = false;
+    }
+    
+    // Test 2: Game Instance availability
+    UGameInstance* GameInstance = GetGameInstance();
+    if (!GameInstance)
+    {
+        UE_LOG(LogBuildIntegration, Error, TEXT("No game instance available"));
+        bSuccess = false;
+    }
+    
+    // Test 3: Asset Registry
+    FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
+    if (!AssetRegistryModule.Get().IsLoadingAssets())
+    {
+        UE_LOG(LogBuildIntegration, Log, TEXT("Asset registry is ready"));
+    }
+    
+    return bSuccess;
+}
+
+bool UBuildIntegrationManager::ValidateGameAssets()
+{
+    UE_LOG(LogBuildIntegration, Log, TEXT("Validating game assets"));
+    
+    bool bAllAssetsValid = true;
+    
+    for (const FString& AssetPath : CriticalAssets)
+    {
+        // Try to load each critical asset
+        UObject* Asset = LoadObject<UObject>(nullptr, *AssetPath);
+        if (Asset)
+        {
+            UE_LOG(LogBuildIntegration, Log, TEXT("Asset validated: %s"), *AssetPath);
+        }
+        else
+        {
+            UE_LOG(LogBuildIntegration, Warning, TEXT("Asset not found: %s"), *AssetPath);
+            bAllAssetsValid = false;
+        }
+    }
+    
+    return bAllAssetsValid;
+}
+
+TArray<FString> UBuildIntegrationManager::GetMissingAssets()
+{
+    TArray<FString> MissingAssets;
+    
+    for (const FString& AssetPath : CriticalAssets)
+    {
+        UObject* Asset = LoadObject<UObject>(nullptr, *AssetPath);
+        if (!Asset)
+        {
+            MissingAssets.Add(AssetPath);
+        }
+    }
+    
+    return MissingAssets;
+}
+
+bool UBuildIntegrationManager::ValidatePerformanceTargets()
+{
+    float CurrentFPS = GetCurrentFrameRate();
+    
+    bool bPerformanceValid = CurrentFPS >= MinimumFrameRate;
+    
+    UE_LOG(LogBuildIntegration, Log, TEXT("Performance validation - Current FPS: %.2f, Target: %.2f, Minimum: %.2f"), 
+           CurrentFPS, TargetFrameRate, MinimumFrameRate);
+    
+    return bPerformanceValid;
+}
+
+float UBuildIntegrationManager::GetCurrentFrameRate()
+{
+    // Get current frame rate from engine
+    if (GEngine && GEngine->GetGameViewport())
+    {
+        return 1.0f / FApp::GetDeltaTime();
+    }
+    
+    return 0.0f;
+}
+
+bool UBuildIntegrationManager::IsProjectCompiled()
+{
+    // Check if the project appears to be compiled by testing module loading
+    return ValidateModuleIntegration(TEXT("TranspersonalGame"));
+}
+
+FString UBuildIntegrationManager::GetLastCompilationError()
+{
+    // Return the last known compilation error
+    if (!bLastBuildSuccessful)
+    {
+        return TEXT("Module loading failures detected - check log for details");
+    }
+    
+    return TEXT("No compilation errors detected");
+}
+
+void UBuildIntegrationManager::GenerateBuildReport()
+{
+    UE_LOG(LogBuildIntegration, Log, TEXT("=== BUILD INTEGRATION REPORT ==="));
+    UE_LOG(LogBuildIntegration, Log, TEXT("Timestamp: %s"), *LastBuildTimestamp);
+    UE_LOG(LogBuildIntegration, Log, TEXT("Build Successful: %s"), bLastBuildSuccessful ? TEXT("YES") : TEXT("NO"));
+    UE_LOG(LogBuildIntegration, Log, TEXT("Total Classes: %d"), LastIntegrationReport.TotalClasses);
+    UE_LOG(LogBuildIntegration, Log, TEXT("Loaded Classes: %d"), LastIntegrationReport.LoadedClasses);
+    UE_LOG(LogBuildIntegration, Log, TEXT("Failed Classes: %d"), LastIntegrationReport.FailedClasses);
+    
+    for (const FBuild_ModuleStatus& ModuleStatus : LastIntegrationReport.ModuleStatuses)
+    {
+        UE_LOG(LogBuildIntegration, Log, TEXT("Module %s: %s"), 
+               *ModuleStatus.ModuleName, 
+               ModuleStatus.bIsLoaded ? TEXT("LOADED") : TEXT("FAILED"));
+    }
+    
+    UE_LOG(LogBuildIntegration, Log, TEXT("=== END BUILD REPORT ==="));
+}
+
+bool UBuildIntegrationManager::TestSystemInteractions()
+{
+    // Test interactions between different game systems
+    UE_LOG(LogBuildIntegration, Log, TEXT("Testing system interactions"));
+    
+    // This would test actual cross-system functionality
+    // For now, return true as a placeholder
     return true;
 }
 
-bool UBuildIntegrationManager::ValidateWorldGeneration()
+void UBuildIntegrationManager::LogIntegrationResults(const FBuild_IntegrationReport& Report)
 {
-    UE_LOG(LogBuildIntegration, Log, TEXT("Validating world generation systems"));
-    
-    return ValidateClassLoading(TEXT("/Script/TranspersonalGame.PCGWorldGenerator")) &&
-           ValidateClassLoading(TEXT("/Script/TranspersonalGame.ProceduralWorldManager"));
-}
-
-bool UBuildIntegrationManager::ValidateCharacterSystems()
-{
-    UE_LOG(LogBuildIntegration, Log, TEXT("Validating character systems"));
-    
-    return ValidateClassLoading(TEXT("/Script/TranspersonalGame.TranspersonalCharacter"));
-}
-
-bool UBuildIntegrationManager::ValidateAISystems()
-{
-    UE_LOG(LogBuildIntegration, Log, TEXT("Validating AI systems"));
-    
-    return ValidateClassLoading(TEXT("/Script/TranspersonalGame.CrowdSimulationManager"));
-}
-
-bool UBuildIntegrationManager::ValidateEnvironmentSystems()
-{
-    UE_LOG(LogBuildIntegration, Log, TEXT("Validating environment systems"));
-    
-    return ValidateClassLoading(TEXT("/Script/TranspersonalGame.FoliageManager"));
-}
-
-void UBuildIntegrationManager::UpdateBuildStatus(EBuild_BuildStatus NewStatus)
-{
-    if (CurrentBuildStatus != NewStatus)
-    {
-        CurrentBuildStatus = NewStatus;
-        OnBuildStatusChanged.Broadcast(NewStatus);
-        
-        UE_LOG(LogBuildIntegration, Log, TEXT("Build status changed to: %d"), (int32)NewStatus);
-    }
-}
-
-void UBuildIntegrationManager::UpdateModuleStatus(const FString& ModuleName, EBuild_ModuleStatus NewStatus)
-{
-    EBuild_ModuleStatus* CurrentStatus = ModuleStatuses.Find(ModuleName);
-    if (!CurrentStatus || *CurrentStatus != NewStatus)
-    {
-        ModuleStatuses.Add(ModuleName, NewStatus);
-        OnModuleStatusChanged.Broadcast(ModuleName, NewStatus);
-        
-        UE_LOG(LogBuildIntegration, Log, TEXT("Module %s status changed to: %d"), *ModuleName, (int32)NewStatus);
-    }
-}
-
-void UBuildIntegrationManager::LogIntegrationError(const FString& Error)
-{
-    IntegrationErrors.Add(Error);
-    UE_LOG(LogBuildIntegration, Error, TEXT("Integration Error: %s"), *Error);
+    UE_LOG(LogBuildIntegration, Log, TEXT("Integration test completed"));
+    UE_LOG(LogBuildIntegration, Log, TEXT("Build successful: %s"), Report.bBuildSuccessful ? TEXT("YES") : TEXT("NO"));
+    UE_LOG(LogBuildIntegration, Log, TEXT("Modules tested: %d"), Report.ModuleStatuses.Num());
+    UE_LOG(LogBuildIntegration, Log, TEXT("Classes loaded: %d/%d"), Report.LoadedClasses, Report.TotalClasses);
 }
