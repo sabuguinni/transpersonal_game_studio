@@ -1,18 +1,91 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Subsystems/WorldSubsystem.h"
 #include "Engine/World.h"
+#include "Subsystems/WorldSubsystem.h"
 #include "Components/StaticMeshComponent.h"
-#include "ArchitectureTypes.h"
+#include "../SharedTypes.h"
 #include "ArchitectureManager.generated.h"
 
-class AArch_StructureActor;
-class UArch_StructureComponent;
+class AActor;
+class UStaticMesh;
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FArch_ShelterData
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Shelter")
+    EArch_ShelterType ShelterType;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Shelter")
+    FVector Location;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Shelter")
+    FRotator Rotation;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Shelter")
+    float StructuralIntegrity;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Shelter")
+    int32 MaxOccupants;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Shelter")
+    bool bIsWeatherProof;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Shelter")
+    TArray<AActor*> StructuralComponents;
+
+    FArch_ShelterData()
+    {
+        ShelterType = EArch_ShelterType::SimpleHut;
+        Location = FVector::ZeroVector;
+        Rotation = FRotator::ZeroRotator;
+        StructuralIntegrity = 100.0f;
+        MaxOccupants = 2;
+        bIsWeatherProof = false;
+    }
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FArch_InteriorSpace
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Interior")
+    EArch_InteriorType InteriorType;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Interior")
+    FVector Bounds;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Interior")
+    float Temperature;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Interior")
+    float Humidity;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Interior")
+    bool bHasFireplace;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Interior")
+    TArray<AActor*> Furniture;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Interior")
+    TArray<AActor*> StorageContainers;
+
+    FArch_InteriorSpace()
+    {
+        InteriorType = EArch_InteriorType::LivingArea;
+        Bounds = FVector(400.0f, 400.0f, 300.0f);
+        Temperature = 20.0f;
+        Humidity = 50.0f;
+        bHasFireplace = false;
+    }
+};
 
 /**
- * World subsystem that manages all architectural structures in the game world
- * Handles procedural placement, settlement generation, and structural integrity
+ * Architecture Manager - Handles all building construction and interior design
+ * Manages shelter placement, structural integrity, and interior furnishing
  */
 UCLASS(BlueprintType)
 class TRANSPERSONALGAME_API UArchitectureManager : public UWorldSubsystem
@@ -26,123 +99,82 @@ public:
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // World subsystem interface
-    virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
-
-    /**
-     * Generate a prehistoric settlement at the specified location
-     */
+    // Shelter Management
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool GenerateSettlement(const FVector& CenterLocation, int32 PopulationSize = 20, float Radius = 1000.0f);
+    AActor* CreateShelter(EArch_ShelterType ShelterType, const FVector& Location, const FRotator& Rotation);
 
-    /**
-     * Place a single structure at the specified location
-     */
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    AArch_StructureActor* PlaceStructure(const FArch_StructureData& StructureData);
+    bool DestroyShelter(AActor* ShelterActor);
 
-    /**
-     * Find suitable locations for structure placement based on terrain
-     */
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    TArray<FVector> FindBuildableLocations(const FVector& SearchCenter, float SearchRadius, int32 MaxLocations = 10);
+    TArray<AActor*> GetAllShelters() const;
 
-    /**
-     * Generate interior furnishings for a structure
-     */
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    TArray<FArch_InteriorFurnishing> GenerateInteriorFurnishings(EArch_StructureType StructureType, EArch_InteriorLayout LayoutType);
+    FArch_ShelterData GetShelterData(AActor* ShelterActor) const;
 
-    /**
-     * Update structural integrity over time (weathering, damage)
-     */
+    // Interior Management
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void UpdateStructuralIntegrity(float DeltaTime);
+    bool SetupInterior(AActor* ShelterActor, EArch_InteriorType InteriorType);
 
-    /**
-     * Get all structures within a radius
-     */
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    TArray<AArch_StructureActor*> GetStructuresInRadius(const FVector& Location, float Radius);
+    AActor* PlaceFurniture(AActor* ShelterActor, EArch_FurnitureType FurnitureType, const FVector& RelativeLocation);
 
-    /**
-     * Generate ruins from existing structures
-     */
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void ConvertToRuins(AArch_StructureActor* Structure, float RuinLevel = 0.7f);
+    bool RemoveFurniture(AActor* FurnitureActor);
 
-    /**
-     * Create a ritual stone circle
-     */
+    // Construction System
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    AArch_StructureActor* CreateRitualCircle(const FVector& Location, float Radius = 500.0f, int32 StoneCount = 12);
+    bool CanBuildAtLocation(const FVector& Location, EArch_ShelterType ShelterType) const;
 
-    /**
-     * Generate cave dwelling interior
-     */
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void SetupCaveDwelling(AArch_StructureActor* CaveStructure);
+    TArray<EArch_MaterialType> GetRequiredMaterials(EArch_ShelterType ShelterType) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    float CalculateConstructionTime(EArch_ShelterType ShelterType) const;
+
+    // Structural Integrity
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    void UpdateStructuralIntegrity(AActor* ShelterActor, float DeltaTime);
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    bool RepairStructure(AActor* ShelterActor, float RepairAmount);
+
+    // Weather Protection
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    bool IsLocationProtectedFromWeather(const FVector& Location) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    float GetShelterEffectiveness(AActor* ShelterActor, EArch_WeatherType WeatherType) const;
+
+    // Editor Tools
+    UFUNCTION(CallInEditor, Category = "Architecture")
+    void GenerateTestShelters();
+
+    UFUNCTION(CallInEditor, Category = "Architecture")
+    void ClearAllShelters();
 
 protected:
-    /**
-     * All active structures in the world
-     */
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    TArray<AArch_StructureActor*> ActiveStructures;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Architecture")
+    TMap<AActor*, FArch_ShelterData> RegisteredShelters;
 
-    /**
-     * Settlement layouts for tracking communities
-     */
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    TArray<FArch_SettlementLayout> Settlements;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Architecture")
+    TMap<AActor*, FArch_InteriorSpace> InteriorSpaces;
 
-    /**
-     * Timer for structural integrity updates
-     */
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    float IntegrityUpdateTimer = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    TMap<EArch_ShelterType, UStaticMesh*> ShelterMeshes;
 
-    /**
-     * How often to update structural integrity (in seconds)
-     */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture|Settings")
-    float IntegrityUpdateInterval = 60.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    TMap<EArch_FurnitureType, UStaticMesh*> FurnitureMeshes;
 
-    /**
-     * Base weathering rate per minute
-     */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture|Settings")
-    float WeatheringRate = 0.001f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    float StructuralDecayRate;
 
-    /**
-     * Maximum number of structures allowed in world
-     */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture|Settings")
-    int32 MaxStructures = 500;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    float WeatherDamageMultiplier;
 
 private:
-    /**
-     * Validate location for structure placement
-     */
-    bool IsValidBuildLocation(const FVector& Location, EArch_StructureType StructureType);
-
-    /**
-     * Calculate structure spacing based on type
-     */
-    float GetMinimumStructureSpacing(EArch_StructureType StructureType);
-
-    /**
-     * Generate structure data for settlement
-     */
-    FArch_StructureData GenerateStructureForSettlement(const FVector& SettlementCenter, float SettlementRadius, int32 PopulationSize);
-
-    /**
-     * Apply weathering effects to structure
-     */
-    void ApplyWeathering(AArch_StructureActor* Structure, float WeatheringAmount);
-
-    /**
-     * Clean up destroyed or invalid structures
-     */
-    void CleanupInvalidStructures();
+    AActor* SpawnShelterComponents(EArch_ShelterType ShelterType, const FVector& Location, const FRotator& Rotation);
+    void SetupShelterCollision(AActor* ShelterActor);
+    void ApplyWeatherDamage(AActor* ShelterActor, float DeltaTime);
+    bool ValidateBuildLocation(const FVector& Location) const;
 };
