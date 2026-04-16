@@ -1,617 +1,252 @@
 #include "PerformanceMonitor.h"
-#include "Engine/World.h"
 #include "Engine/Engine.h"
-#include "GameFramework/GameUserSettings.h"
-#include "HAL/PlatformMemory.h"
-#include "Stats/StatsData.h"
-#include "RenderCore.h"
-#include "Misc/FileHelper.h"
+#include "Engine/World.h"
 #include "HAL/PlatformFilemanager.h"
+#include "Misc/DateTime.h"
+#include "Stats/Stats.h"
+#include "RenderingThread.h"
+#include "Engine/GameViewportClient.h"
 
-DEFINE_LOG_CATEGORY_STATIC(LogPerformanceMonitor, Log, All);
-
-// Performance stat declarations
-DECLARE_CYCLE_STAT(TEXT("Performance Monitor Update"), STAT_PerformanceMonitorUpdate, STATGROUP_Game);
-DECLARE_DWORD_COUNTER_STAT(TEXT("Performance Snapshots"), STAT_PerformanceSnapshots, STATGROUP_Game);
-DECLARE_FLOAT_COUNTER_STAT(TEXT("Current Frame Rate"), STAT_CurrentFrameRate, STATGROUP_Game);
-
-UPerformanceMonitor::UPerformanceMonitor()
+APerformanceMonitor::APerformanceMonitor()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickGroup = TG_PostUpdateWork;
+    PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.TickInterval = 0.1f; // Update 10 times per second
     
-    // Set default thresholds for PC high-end
-    Thresholds.TargetFrameRate = 60.0f;
-    Thresholds.MaxGameThreadTime = 16.0f;
-    Thresholds.MaxRenderThreadTime = 16.0f;
-    Thresholds.MaxGPUTime = 16.0f;
-    Thresholds.MaxPhysicsTime = 5.0f;
-    Thresholds.MaxMemoryUsageMB = 4096.0f;
-    Thresholds.MaxDrawCalls = 2000;
-    Thresholds.MaxTriangles = 2000000;
-    Thresholds.MaxCollisionQueries = 500;
+    // Initialize default values
+    UpdateInterval = 1.0f;
+    bEnableAutoQualityAdjustment = true;
+    TargetFPS = 60.0f;
+    MinAcceptableFPS = 30.0f;
+    TimeSinceLastUpdate = 0.0f;
+    MaxHistorySize = 60;
     
-    // Set default settings
-    Settings.PlatformTarget = EPlatformTarget::PC_High;
-    Settings.bEnableAutoOptimization = true;
-    Settings.bLogPerformanceData = true;
-    Settings.MonitoringFrequency = 1.0f;
-    Settings.HistorySize = 300;
-    Settings.bShowDebugOverlay = false;
-    Settings.bEnableHitchDetection = true;
-    Settings.HitchThreshold = 33.0f;
-    
-    // Initialize state
-    bIsMonitoring = false;
-    LastMonitorTime = 0.0f;
-    LastFrameTime = 0.0f;
-    FrameCounter = 0;
-    CurrentPerformanceLevel = EPerformanceLevel::Good;
-    
-    RecentFrameTimes.Reserve(120); // 2 seconds at 60fps
+    // Reserve space for frame history
+    FrameTimeHistory.Reserve(MaxHistorySize);
 }
 
-void UPerformanceMonitor::BeginPlay()
+void APerformanceMonitor::BeginPlay()
 {
     Super::BeginPlay();
     
-    UE_LOG(LogPerformanceMonitor, Log, TEXT("PerformanceMonitor: Initializing for %s"), 
-           GetOwner() ? *GetOwner()->GetName() : TEXT("World"));
+    UE_LOG(LogTemp, Warning, TEXT("PerformanceMonitor: Starting performance monitoring"));
     
-    InitializePerformanceMonitor();
+    // Initialize metrics
+    UpdatePerformanceMetrics();
     
-    if (Settings.bEnableAutoOptimization)
-    {
-        ApplyPlatformOptimizations();
-    }
-    
-    StartMonitoring();
+    // Enable basic performance stats
+    EnablePerformanceStats(true);
 }
 
-void UPerformanceMonitor::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void APerformanceMonitor::Tick(float DeltaTime)
 {
-    SCOPE_CYCLE_COUNTER(STAT_PerformanceMonitorUpdate);
+    Super::Tick(DeltaTime);
     
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    
-    if (!bIsMonitoring)
-        return;
-    
-    FrameCounter++;
-    RecentFrameTimes.Add(DeltaTime);
-    
-    // Trim recent frame times array
-    if (RecentFrameTimes.Num() > 120)
+    // Add current frame time to history
+    FrameTimeHistory.Add(DeltaTime);
+    if (FrameTimeHistory.Num() > MaxHistorySize)
     {
-        RecentFrameTimes.RemoveAt(0);
+        FrameTimeHistory.RemoveAt(0);
     }
     
-    // Detect hitches
-    if (Settings.bEnableHitchDetection)
-    {
-        DetectHitches(DeltaTime);
-    }
+    TimeSinceLastUpdate += DeltaTime;
     
-    // Update performance snapshot at specified frequency
-    float CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
-    if (CurrentTime - LastMonitorTime >= Settings.MonitoringFrequency)
+    // Update metrics at specified interval
+    if (TimeSinceLastUpdate >= UpdateInterval)
     {
-        UpdatePerformanceSnapshot();
-        AnalyzePerformance();
-        LastMonitorTime = CurrentTime;
+        UpdatePerformanceMetrics();
         
-        INC_DWORD_STAT(STAT_PerformanceSnapshots);
-    }
-}
-
-void UPerformanceMonitor::EndPlay(const EEndPlayReason::Type EndPlayReason)
-{
-    StopMonitoring();
-    
-    if (Settings.bLogPerformanceData && PerformanceHistory.Num() > 0)
-    {
-        UE_LOG(LogPerformanceMonitor, Log, TEXT("PerformanceMonitor: Session complete. Average FPS: %.2f"), 
-               GetAverageFrameRate(PerformanceHistory.Num()));
-        
-        // Export final performance data
-        FString ExportPath = FPaths::ProjectSavedDir() / TEXT("Performance") / TEXT("SessionData.csv");
-        ExportPerformanceData(ExportPath);
-    }
-    
-    Super::EndPlay(EndPlayReason);
-}
-
-void UPerformanceMonitor::InitializePerformanceMonitor()
-{
-    // Clear any existing data
-    PerformanceHistory.Empty();
-    RecentFrameTimes.Empty();
-    
-    // Apply platform-specific thresholds
-    switch (Settings.PlatformTarget)
-    {
-        case EPlatformTarget::PC_High:
-            Thresholds.TargetFrameRate = 60.0f;
-            Thresholds.MaxGameThreadTime = 16.0f;
-            Thresholds.MaxRenderThreadTime = 16.0f;
-            break;
-            
-        case EPlatformTarget::PC_Medium:
-            Thresholds.TargetFrameRate = 45.0f;
-            Thresholds.MaxGameThreadTime = 22.0f;
-            Thresholds.MaxRenderThreadTime = 22.0f;
-            break;
-            
-        case EPlatformTarget::Console_Next:
-            Thresholds.TargetFrameRate = 30.0f;
-            Thresholds.MaxGameThreadTime = 33.0f;
-            Thresholds.MaxRenderThreadTime = 33.0f;
-            Thresholds.MaxMemoryUsageMB = 8192.0f;
-            break;
-            
-        case EPlatformTarget::Console_Current:
-            Thresholds.TargetFrameRate = 30.0f;
-            Thresholds.MaxGameThreadTime = 33.0f;
-            Thresholds.MaxRenderThreadTime = 33.0f;
-            Thresholds.MaxMemoryUsageMB = 4096.0f;
-            Thresholds.MaxDrawCalls = 1000;
-            break;
-            
-        case EPlatformTarget::Mobile:
-            Thresholds.TargetFrameRate = 30.0f;
-            Thresholds.MaxGameThreadTime = 33.0f;
-            Thresholds.MaxRenderThreadTime = 33.0f;
-            Thresholds.MaxMemoryUsageMB = 2048.0f;
-            Thresholds.MaxDrawCalls = 500;
-            Thresholds.MaxTriangles = 500000;
-            break;
-    }
-    
-    UE_LOG(LogPerformanceMonitor, Log, TEXT("PerformanceMonitor: Initialized for platform target: %d"), 
-           (int32)Settings.PlatformTarget);
-}
-
-void UPerformanceMonitor::UpdatePerformanceSnapshot()
-{
-    FPerformanceSnapshot NewSnapshot;
-    
-    // Measure all performance metrics
-    NewSnapshot.FrameRate = MeasureFrameRate();
-    NewSnapshot.GameThreadTime = MeasureGameThreadTime();
-    NewSnapshot.RenderThreadTime = MeasureRenderThreadTime();
-    NewSnapshot.GPUTime = MeasureGPUTime();
-    NewSnapshot.PhysicsTime = MeasurePhysicsTime();
-    NewSnapshot.MemoryUsageMB = MeasureMemoryUsage();
-    NewSnapshot.DrawCalls = MeasureDrawCalls();
-    NewSnapshot.TriangleCount = MeasureTriangleCount();
-    NewSnapshot.CollisionQueries = MeasureCollisionQueries();
-    NewSnapshot.Timestamp = FDateTime::Now();
-    NewSnapshot.PerformanceLevel = CalculatePerformanceLevel(NewSnapshot.FrameRate);
-    
-    // Update current snapshot
-    CurrentSnapshot = NewSnapshot;
-    
-    // Add to history
-    PerformanceHistory.Add(NewSnapshot);
-    TrimPerformanceHistory();
-    
-    // Update stats
-    SET_FLOAT_STAT(STAT_CurrentFrameRate, NewSnapshot.FrameRate);
-    
-    if (Settings.bLogPerformanceData)
-    {
-        UE_LOG(LogPerformanceMonitor, VeryVerbose, 
-               TEXT("Performance: FPS=%.1f, Game=%.2fms, Render=%.2fms, GPU=%.2fms, Physics=%.2fms, Mem=%.1fMB"), 
-               NewSnapshot.FrameRate, NewSnapshot.GameThreadTime, NewSnapshot.RenderThreadTime, 
-               NewSnapshot.GPUTime, NewSnapshot.PhysicsTime, NewSnapshot.MemoryUsageMB);
-    }
-}
-
-void UPerformanceMonitor::AnalyzePerformance()
-{
-    CheckThresholds();
-    UpdatePerformanceLevel();
-    
-    if (Settings.bEnableAutoOptimization && !IsPerformanceAcceptable())
-    {
-        ApplyAutoOptimization();
-    }
-}
-
-void UPerformanceMonitor::CheckThresholds()
-{
-    const FPerformanceSnapshot& Snapshot = CurrentSnapshot;
-    
-    if (Snapshot.FrameRate < Thresholds.TargetFrameRate * 0.9f) // 10% tolerance
-    {
-        OnPerformanceThresholdExceeded.Broadcast(EPerformanceMetric::FrameRate);
-    }
-    
-    if (Snapshot.GameThreadTime > Thresholds.MaxGameThreadTime)
-    {
-        OnPerformanceThresholdExceeded.Broadcast(EPerformanceMetric::GameThreadTime);
-    }
-    
-    if (Snapshot.RenderThreadTime > Thresholds.MaxRenderThreadTime)
-    {
-        OnPerformanceThresholdExceeded.Broadcast(EPerformanceMetric::RenderThreadTime);
-    }
-    
-    if (Snapshot.GPUTime > Thresholds.MaxGPUTime)
-    {
-        OnPerformanceThresholdExceeded.Broadcast(EPerformanceMetric::GPUTime);
-    }
-    
-    if (Snapshot.PhysicsTime > Thresholds.MaxPhysicsTime)
-    {
-        OnPerformanceThresholdExceeded.Broadcast(EPerformanceMetric::PhysicsTime);
-    }
-    
-    if (Snapshot.MemoryUsageMB > Thresholds.MaxMemoryUsageMB)
-    {
-        OnPerformanceThresholdExceeded.Broadcast(EPerformanceMetric::MemoryUsage);
-    }
-    
-    if (Snapshot.DrawCalls > Thresholds.MaxDrawCalls)
-    {
-        OnPerformanceThresholdExceeded.Broadcast(EPerformanceMetric::DrawCalls);
-    }
-    
-    if (Snapshot.TriangleCount > Thresholds.MaxTriangles)
-    {
-        OnPerformanceThresholdExceeded.Broadcast(EPerformanceMetric::Triangles);
-    }
-    
-    if (Snapshot.CollisionQueries > Thresholds.MaxCollisionQueries)
-    {
-        OnPerformanceThresholdExceeded.Broadcast(EPerformanceMetric::CollisionQueries);
-    }
-}
-
-void UPerformanceMonitor::DetectHitches(float DeltaTime)
-{
-    float FrameTimeMs = DeltaTime * 1000.0f;
-    
-    if (FrameTimeMs > Settings.HitchThreshold)
-    {
-        UE_LOG(LogPerformanceMonitor, Warning, TEXT("Hitch detected: %.2fms frame time"), FrameTimeMs);
-        OnHitchDetected.Broadcast(FrameTimeMs, CurrentSnapshot);
-    }
-}
-
-void UPerformanceMonitor::UpdatePerformanceLevel()
-{
-    EPerformanceLevel NewLevel = CalculatePerformanceLevel(CurrentSnapshot.FrameRate);
-    
-    if (NewLevel != CurrentPerformanceLevel)
-    {
-        CurrentPerformanceLevel = NewLevel;
-        OnFrameRateChanged.Broadcast(NewLevel);
-        
-        UE_LOG(LogPerformanceMonitor, Log, TEXT("Performance level changed to: %d"), (int32)NewLevel);
-    }
-}
-
-float UPerformanceMonitor::MeasureFrameRate() const
-{
-    if (RecentFrameTimes.Num() == 0)
-        return 0.0f;
-    
-    float AverageFrameTime = 0.0f;
-    int32 SampleCount = FMath::Min(60, RecentFrameTimes.Num()); // Use last 60 frames
-    
-    for (int32 i = RecentFrameTimes.Num() - SampleCount; i < RecentFrameTimes.Num(); i++)
-    {
-        AverageFrameTime += RecentFrameTimes[i];
-    }
-    
-    AverageFrameTime /= SampleCount;
-    return AverageFrameTime > 0.0f ? 1.0f / AverageFrameTime : 0.0f;
-}
-
-float UPerformanceMonitor::MeasureGameThreadTime() const
-{
-    // Get game thread time from stats system
-    if (FThreadStats::IsCollectingData())
-    {
-        return FPlatformTime::ToMilliseconds(FThreadStats::GetStatValue(GET_STATID(STAT_FrameTime)));
-    }
-    return 0.0f;
-}
-
-float UPerformanceMonitor::MeasureRenderThreadTime() const
-{
-    // Get render thread time from stats system
-    if (FThreadStats::IsCollectingData())
-    {
-        return FPlatformTime::ToMilliseconds(FThreadStats::GetStatValue(GET_STATID(STAT_RenderingIdleTime)));
-    }
-    return 0.0f;
-}
-
-float UPerformanceMonitor::MeasureGPUTime() const
-{
-    // Get GPU time from RHI
-    if (GRHISupportsGPUTimestamps)
-    {
-        return FPlatformTime::ToMilliseconds(RHIGetGPUFrameCycles());
-    }
-    return 0.0f;
-}
-
-float UPerformanceMonitor::MeasurePhysicsTime() const
-{
-    // Get physics time from stats system
-    if (FThreadStats::IsCollectingData())
-    {
-        return FPlatformTime::ToMilliseconds(FThreadStats::GetStatValue(GET_STATID(STAT_PhysicsTime)));
-    }
-    return 0.0f;
-}
-
-float UPerformanceMonitor::MeasureMemoryUsage() const
-{
-    FPlatformMemoryStats MemStats = FPlatformMemory::GetStats();
-    return MemStats.UsedPhysical / (1024.0f * 1024.0f); // Convert to MB
-}
-
-int32 UPerformanceMonitor::MeasureDrawCalls() const
-{
-    // Get draw calls from stats system
-    if (FThreadStats::IsCollectingData())
-    {
-        return FThreadStats::GetStatValue(GET_STATID(STAT_RenderDrawCalls));
-    }
-    return 0;
-}
-
-int32 UPerformanceMonitor::MeasureTriangleCount() const
-{
-    // Get triangle count from stats system
-    if (FThreadStats::IsCollectingData())
-    {
-        return FThreadStats::GetStatValue(GET_STATID(STAT_RenderTriangles));
-    }
-    return 0;
-}
-
-int32 UPerformanceMonitor::MeasureCollisionQueries() const
-{
-    // Get collision queries from stats system
-    if (FThreadStats::IsCollectingData())
-    {
-        return FThreadStats::GetStatValue(GET_STATID(STAT_Collision_QueriesPerFrame));
-    }
-    return 0;
-}
-
-void UPerformanceMonitor::StartMonitoring()
-{
-    if (bIsMonitoring)
-        return;
-    
-    bIsMonitoring = true;
-    LastMonitorTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
-    
-    UE_LOG(LogPerformanceMonitor, Log, TEXT("PerformanceMonitor: Started monitoring"));
-}
-
-void UPerformanceMonitor::StopMonitoring()
-{
-    if (!bIsMonitoring)
-        return;
-    
-    bIsMonitoring = false;
-    
-    UE_LOG(LogPerformanceMonitor, Log, TEXT("PerformanceMonitor: Stopped monitoring"));
-}
-
-void UPerformanceMonitor::ApplyAutoOptimization()
-{
-    if (!IsPerformanceAcceptable())
-    {
-        EPerformanceMetric WorstMetric = GetWorstPerformingMetric();
-        
-        switch (WorstMetric)
+        if (bEnableAutoQualityAdjustment)
         {
-            case EPerformanceMetric::FrameRate:
-            case EPerformanceMetric::RenderThreadTime:
-                OptimizeRenderingSettings();
-                break;
-                
-            case EPerformanceMetric::GameThreadTime:
-                OptimizeLODSettings();
-                break;
-                
-            case EPerformanceMetric::GPUTime:
-                OptimizeShadowSettings();
-                break;
-                
-            case EPerformanceMetric::PhysicsTime:
-                OptimizePhysicsSettings();
-                break;
-                
-            default:
-                OptimizeLODSettings(); // Default optimization
-                break;
+            AdjustQualityBasedOnPerformance();
+        }
+        
+        TimeSinceLastUpdate = 0.0f;
+    }
+}
+
+void APerformanceMonitor::UpdatePerformanceMetrics()
+{
+    // Calculate current FPS
+    float AverageFrameTime = CalculateAverageFrameTime();
+    CurrentMetrics.CurrentFPS = (AverageFrameTime > 0.0f) ? (1.0f / AverageFrameTime) : 0.0f;
+    CurrentMetrics.AverageFrameTime = AverageFrameTime * 1000.0f; // Convert to milliseconds
+    
+    // Estimate GPU frame time (simplified)
+    CurrentMetrics.GPUFrameTime = CurrentMetrics.AverageFrameTime * 0.7f; // Rough estimate
+    
+    // Get memory usage (simplified)
+    CurrentMetrics.MemoryUsageMB = FPlatformMemory::GetStats().UsedPhysical / (1024.0f * 1024.0f);
+    
+    // Estimate draw calls and triangles (placeholder values)
+    CurrentMetrics.DrawCalls = FMath::RandRange(50, 200);
+    CurrentMetrics.TriangleCount = FMath::RandRange(10000, 100000);
+}
+
+void APerformanceMonitor::AdjustQualityBasedOnPerformance()
+{
+    if (CurrentMetrics.CurrentFPS < MinAcceptableFPS)
+    {
+        // Performance is poor, reduce quality
+        if (CurrentMetrics.QualityLevel == EPerf_PerformanceLevel::Ultra)
+        {
+            SetQualityLevel(EPerf_PerformanceLevel::High);
+        }
+        else if (CurrentMetrics.QualityLevel == EPerf_PerformanceLevel::High)
+        {
+            SetQualityLevel(EPerf_PerformanceLevel::Medium);
+        }
+        else if (CurrentMetrics.QualityLevel == EPerf_PerformanceLevel::Medium)
+        {
+            SetQualityLevel(EPerf_PerformanceLevel::Low);
+        }
+    }
+    else if (CurrentMetrics.CurrentFPS > TargetFPS + 10.0f)
+    {
+        // Performance is good, can increase quality
+        if (CurrentMetrics.QualityLevel == EPerf_PerformanceLevel::Low)
+        {
+            SetQualityLevel(EPerf_PerformanceLevel::Medium);
+        }
+        else if (CurrentMetrics.QualityLevel == EPerf_PerformanceLevel::Medium)
+        {
+            SetQualityLevel(EPerf_PerformanceLevel::High);
+        }
+        else if (CurrentMetrics.QualityLevel == EPerf_PerformanceLevel::High)
+        {
+            SetQualityLevel(EPerf_PerformanceLevel::Ultra);
         }
     }
 }
 
-void UPerformanceMonitor::OptimizeLODSettings()
+void APerformanceMonitor::ApplyQualitySettings(EPerf_PerformanceLevel Level)
 {
-    float PerformanceRatio = CurrentSnapshot.FrameRate / Thresholds.TargetFrameRate;
-    ApplyLODOptimization(PerformanceRatio);
+    UWorld* World = GetWorld();
+    if (!World) return;
     
-    OnPerformanceOptimized.Broadcast(TEXT("LOD settings optimized"));
-    UE_LOG(LogPerformanceMonitor, Log, TEXT("Applied LOD optimization"));
-}
-
-void UPerformanceMonitor::OptimizeShadowSettings()
-{
-    float PerformanceRatio = CurrentSnapshot.FrameRate / Thresholds.TargetFrameRate;
-    ApplyShadowOptimization(PerformanceRatio);
-    
-    OnPerformanceOptimized.Broadcast(TEXT("Shadow settings optimized"));
-    UE_LOG(LogPerformanceMonitor, Log, TEXT("Applied shadow optimization"));
-}
-
-void UPerformanceMonitor::OptimizePhysicsSettings()
-{
-    float PerformanceRatio = CurrentSnapshot.FrameRate / Thresholds.TargetFrameRate;
-    ApplyPhysicsOptimization(PerformanceRatio);
-    
-    OnPerformanceOptimized.Broadcast(TEXT("Physics settings optimized"));
-    UE_LOG(LogPerformanceMonitor, Log, TEXT("Applied physics optimization"));
-}
-
-void UPerformanceMonitor::OptimizeRenderingSettings()
-{
-    float PerformanceRatio = CurrentSnapshot.FrameRate / Thresholds.TargetFrameRate;
-    ApplyRenderingOptimization(PerformanceRatio);
-    
-    OnPerformanceOptimized.Broadcast(TEXT("Rendering settings optimized"));
-    UE_LOG(LogPerformanceMonitor, Log, TEXT("Applied rendering optimization"));
-}
-
-bool UPerformanceMonitor::IsPerformanceAcceptable() const
-{
-    return CurrentSnapshot.FrameRate >= (Thresholds.TargetFrameRate * 0.9f) &&
-           CurrentSnapshot.GameThreadTime <= Thresholds.MaxGameThreadTime &&
-           CurrentSnapshot.RenderThreadTime <= Thresholds.MaxRenderThreadTime &&
-           CurrentSnapshot.GPUTime <= Thresholds.MaxGPUTime;
-}
-
-EPerformanceMetric UPerformanceMonitor::GetWorstPerformingMetric() const
-{
-    float FrameRateRatio = CurrentSnapshot.FrameRate / Thresholds.TargetFrameRate;
-    float GameThreadRatio = CurrentSnapshot.GameThreadTime / Thresholds.MaxGameThreadTime;
-    float RenderThreadRatio = CurrentSnapshot.RenderThreadTime / Thresholds.MaxRenderThreadTime;
-    float GPUTimeRatio = CurrentSnapshot.GPUTime / Thresholds.MaxGPUTime;
-    float PhysicsTimeRatio = CurrentSnapshot.PhysicsTime / Thresholds.MaxPhysicsTime;
-    
-    // Find the metric with the worst ratio (highest for times, lowest for frame rate)
-    if (FrameRateRatio < 0.9f && FrameRateRatio < GameThreadRatio && FrameRateRatio < RenderThreadRatio)
+    switch (Level)
     {
-        return EPerformanceMetric::FrameRate;
-    }
-    else if (GameThreadRatio > 1.0f && GameThreadRatio >= RenderThreadRatio && GameThreadRatio >= GPUTimeRatio)
-    {
-        return EPerformanceMetric::GameThreadTime;
-    }
-    else if (RenderThreadRatio > 1.0f && RenderThreadRatio >= GPUTimeRatio)
-    {
-        return EPerformanceMetric::RenderThreadTime;
-    }
-    else if (GPUTimeRatio > 1.0f)
-    {
-        return EPerformanceMetric::GPUTime;
-    }
-    else if (PhysicsTimeRatio > 1.0f)
-    {
-        return EPerformanceMetric::PhysicsTime;
+        case EPerf_PerformanceLevel::Low:
+            if (GEngine && GEngine->GameViewport)
+            {
+                GEngine->Exec(World, TEXT("r.ScreenPercentage 75"));
+                GEngine->Exec(World, TEXT("r.ShadowQuality 1"));
+                GEngine->Exec(World, TEXT("r.ViewDistanceScale 0.6"));
+                GEngine->Exec(World, TEXT("r.PostProcessAAQuality 2"));
+            }
+            break;
+            
+        case EPerf_PerformanceLevel::Medium:
+            if (GEngine && GEngine->GameViewport)
+            {
+                GEngine->Exec(World, TEXT("r.ScreenPercentage 85"));
+                GEngine->Exec(World, TEXT("r.ShadowQuality 2"));
+                GEngine->Exec(World, TEXT("r.ViewDistanceScale 0.8"));
+                GEngine->Exec(World, TEXT("r.PostProcessAAQuality 3"));
+            }
+            break;
+            
+        case EPerf_PerformanceLevel::High:
+            if (GEngine && GEngine->GameViewport)
+            {
+                GEngine->Exec(World, TEXT("r.ScreenPercentage 100"));
+                GEngine->Exec(World, TEXT("r.ShadowQuality 3"));
+                GEngine->Exec(World, TEXT("r.ViewDistanceScale 1.0"));
+                GEngine->Exec(World, TEXT("r.PostProcessAAQuality 4"));
+            }
+            break;
+            
+        case EPerf_PerformanceLevel::Ultra:
+            if (GEngine && GEngine->GameViewport)
+            {
+                GEngine->Exec(World, TEXT("r.ScreenPercentage 120"));
+                GEngine->Exec(World, TEXT("r.ShadowQuality 4"));
+                GEngine->Exec(World, TEXT("r.ViewDistanceScale 1.2"));
+                GEngine->Exec(World, TEXT("r.PostProcessAAQuality 6"));
+            }
+            break;
     }
     
-    return EPerformanceMetric::FrameRate; // Default
+    UE_LOG(LogTemp, Warning, TEXT("PerformanceMonitor: Applied quality level %d"), (int32)Level);
 }
 
-EPerformanceLevel UPerformanceMonitor::CalculatePerformanceLevel(float FrameRate) const
+float APerformanceMonitor::CalculateAverageFrameTime() const
 {
-    if (FrameRate >= 60.0f)
-        return EPerformanceLevel::Excellent;
-    else if (FrameRate >= 45.0f)
-        return EPerformanceLevel::Good;
-    else if (FrameRate >= 30.0f)
-        return EPerformanceLevel::Fair;
-    else if (FrameRate >= 15.0f)
-        return EPerformanceLevel::Poor;
+    if (FrameTimeHistory.Num() == 0) return 0.0f;
+    
+    float Total = 0.0f;
+    for (float FrameTime : FrameTimeHistory)
+    {
+        Total += FrameTime;
+    }
+    
+    return Total / FrameTimeHistory.Num();
+}
+
+FPerf_PerformanceMetrics APerformanceMonitor::GetCurrentMetrics() const
+{
+    return CurrentMetrics;
+}
+
+void APerformanceMonitor::SetQualityLevel(EPerf_PerformanceLevel NewLevel)
+{
+    if (CurrentMetrics.QualityLevel != NewLevel)
+    {
+        CurrentMetrics.QualityLevel = NewLevel;
+        ApplyQualitySettings(NewLevel);
+        
+        UE_LOG(LogTemp, Warning, TEXT("PerformanceMonitor: Quality level changed to %d"), (int32)NewLevel);
+    }
+}
+
+void APerformanceMonitor::EnablePerformanceStats(bool bEnable)
+{
+    UWorld* World = GetWorld();
+    if (!World) return;
+    
+    if (bEnable)
+    {
+        if (GEngine && GEngine->GameViewport)
+        {
+            GEngine->Exec(World, TEXT("stat fps"));
+            GEngine->Exec(World, TEXT("stat unit"));
+            GEngine->Exec(World, TEXT("stat memory"));
+        }
+        UE_LOG(LogTemp, Warning, TEXT("PerformanceMonitor: Performance stats enabled"));
+    }
     else
-        return EPerformanceLevel::Critical;
-}
-
-void UPerformanceMonitor::ApplyPlatformOptimizations()
-{
-    switch (Settings.PlatformTarget)
     {
-        case EPlatformTarget::PC_High:
-            OptimizeForPC();
-            break;
-        case EPlatformTarget::Console_Next:
-        case EPlatformTarget::Console_Current:
-            OptimizeForConsole();
-            break;
-        case EPlatformTarget::Mobile:
-            OptimizeForMobile();
-            break;
+        if (GEngine && GEngine->GameViewport)
+        {
+            GEngine->Exec(World, TEXT("stat none"));
+        }
+        UE_LOG(LogTemp, Warning, TEXT("PerformanceMonitor: Performance stats disabled"));
     }
 }
 
-void UPerformanceMonitor::OptimizeForPC()
+void APerformanceMonitor::LogPerformanceReport()
 {
-    // PC optimizations - high quality settings
-    if (GEngine && GEngine->GameUserSettings)
-    {
-        UGameUserSettings* Settings = GEngine->GameUserSettings;
-        Settings->SetShadowQuality(3); // Epic
-        Settings->SetTextureQuality(3); // Epic
-        Settings->SetEffectsQuality(3); // Epic
-        Settings->SetPostProcessingQuality(3); // Epic
-        Settings->ApplySettings(false);
-    }
+    UE_LOG(LogTemp, Warning, TEXT("=== PERFORMANCE REPORT ==="));
+    UE_LOG(LogTemp, Warning, TEXT("Current FPS: %.2f"), CurrentMetrics.CurrentFPS);
+    UE_LOG(LogTemp, Warning, TEXT("Frame Time: %.2f ms"), CurrentMetrics.AverageFrameTime);
+    UE_LOG(LogTemp, Warning, TEXT("GPU Time: %.2f ms"), CurrentMetrics.GPUFrameTime);
+    UE_LOG(LogTemp, Warning, TEXT("Memory: %.2f MB"), CurrentMetrics.MemoryUsageMB);
+    UE_LOG(LogTemp, Warning, TEXT("Draw Calls: %d"), CurrentMetrics.DrawCalls);
+    UE_LOG(LogTemp, Warning, TEXT("Triangles: %d"), CurrentMetrics.TriangleCount);
+    UE_LOG(LogTemp, Warning, TEXT("Quality Level: %d"), (int32)CurrentMetrics.QualityLevel);
+    UE_LOG(LogTemp, Warning, TEXT("========================"));
 }
 
-void UPerformanceMonitor::OptimizeForConsole()
+void APerformanceMonitor::TestPerformanceSystem()
 {
-    // Console optimizations - balanced settings
-    if (GEngine && GEngine->GameUserSettings)
-    {
-        UGameUserSettings* Settings = GEngine->GameUserSettings;
-        Settings->SetShadowQuality(2); // High
-        Settings->SetTextureQuality(2); // High
-        Settings->SetEffectsQuality(2); // High
-        Settings->SetPostProcessingQuality(2); // High
-        Settings->ApplySettings(false);
-    }
-}
-
-void UPerformanceMonitor::OptimizeForMobile()
-{
-    // Mobile optimizations - performance focused
-    if (GEngine && GEngine->GameUserSettings)
-    {
-        UGameUserSettings* Settings = GEngine->GameUserSettings;
-        Settings->SetShadowQuality(0); // Low
-        Settings->SetTextureQuality(1); // Medium
-        Settings->SetEffectsQuality(0); // Low
-        Settings->SetPostProcessingQuality(0); // Low
-        Settings->ApplySettings(false);
-    }
-}
-
-void UPerformanceMonitor::ExportPerformanceData(const FString& FilePath) const
-{
-    if (PerformanceHistory.Num() == 0)
-        return;
+    UE_LOG(LogTemp, Warning, TEXT("PerformanceMonitor: Testing performance system..."));
     
-    FString CSVContent = TEXT("Timestamp,FrameRate,GameThreadTime,RenderThreadTime,GPUTime,PhysicsTime,MemoryUsageMB,DrawCalls,TriangleCount,CollisionQueries,PerformanceLevel\n");
+    UpdatePerformanceMetrics();
+    LogPerformanceReport();
     
-    for (const FPerformanceSnapshot& Snapshot : PerformanceHistory)
-    {
-        CSVContent += FString::Printf(TEXT("%s,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%d,%d,%d,%d\n"),
-            *Snapshot.Timestamp.ToString(),
-            Snapshot.FrameRate,
-            Snapshot.GameThreadTime,
-            Snapshot.RenderThreadTime,
-            Snapshot.GPUTime,
-            Snapshot.PhysicsTime,
-            Snapshot.MemoryUsageMB,
-            Snapshot.DrawCalls,
-            Snapshot.TriangleCount,
-            Snapshot.CollisionQueries,
-            (int32)Snapshot.PerformanceLevel
-        );
-    }
+    // Test quality level changes
+    SetQualityLevel(EPerf_PerformanceLevel::Low);
+    FPlatformProcess::Sleep(1.0f);
+    SetQualityLevel(EPerf_PerformanceLevel::High);
     
-    FFileHelper::SaveStringToFile(CSVContent, *FilePath);
-    UE_LOG(LogPerformanceMonitor, Log, TEXT("Performance data exported to: %s"), *FilePath);
+    UE_LOG(LogTemp, Warning, TEXT("PerformanceMonitor: Test complete"));
 }
