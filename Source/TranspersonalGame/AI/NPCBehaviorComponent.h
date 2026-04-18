@@ -2,19 +2,28 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "Engine/World.h"
-#include "TimerManager.h"
+#include "Engine/Engine.h"
+#include "GameFramework/Character.h"
+#include "BehaviorTree/BehaviorTreeComponent.h"
+#include "BehaviorTree/BlackboardComponent.h"
+#include "AIController.h"
 #include "NPCBehaviorTypes.h"
 #include "NPCBehaviorComponent.generated.h"
 
-class AActor;
-
 /**
- * TRANSPERSONAL GAME STUDIO - NPC BEHAVIOR COMPONENT
- * NPC Behavior Agent #11
+ * NPC BEHAVIOR COMPONENT - CORE NPC BEHAVIOR SYSTEM
  * 
- * Core component that drives NPC behavior, personality, needs, and social interactions.
- * This component gives life to NPCs through emergent behavior patterns.
+ * This component handles all NPC behavior logic including:
+ * - Personality-driven decision making
+ * - Needs management and satisfaction
+ * - Memory and relationship tracking
+ * - Dynamic dialogue selection
+ * - Daily routine execution
+ * - Threat response and survival instincts
+ * 
+ * DESIGN PHILOSOPHY:
+ * Every NPC is a living being with their own agenda, fears, and relationships.
+ * The player is just another actor in their world, not the center of it.
  */
 
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
@@ -31,217 +40,206 @@ protected:
 
 public:
     // ═══════════════════════════════════════════════════════════════
-    // CORE NPC DATA
+    // CORE NPC PROPERTIES
     // ═══════════════════════════════════════════════════════════════
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Identity")
-    FString NPCName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Core")
+    FString NPCName = TEXT("Unnamed");
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Identity")
-    ENPC_Profession Profession;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Core")
+    FNPC_PersonalityProfile PersonalityProfile;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Identity")
-    int32 Age;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Identity")
-    FString TribeName;
-
-    // ═══════════════════════════════════════════════════════════════
-    // PERSONALITY & BEHAVIOR
-    // ═══════════════════════════════════════════════════════════════
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality")
-    FNPC_Personality Personality;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    ENPC_BehaviorState CurrentBehaviorState;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    ENPC_BehaviorState PreviousBehaviorState;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    float BehaviorStateTime;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    bool bCanInterruptCurrentBehavior;
-
-    // ═══════════════════════════════════════════════════════════════
-    // NEEDS & DRIVES
-    // ═══════════════════════════════════════════════════════════════
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Needs")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Core")
     FNPC_Needs CurrentNeeds;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Needs")
-    float NeedsDecayRate;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Core")
+    ENPC_BehaviorState CurrentBehaviorState = ENPC_BehaviorState::Idle;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Needs")
-    float CriticalNeedsThreshold;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Core")
+    ENPC_ThreatLevel CurrentThreatLevel = ENPC_ThreatLevel::None;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Core")
+    float StressLevel = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Core")
+    bool bIsConscious = true;
 
     // ═══════════════════════════════════════════════════════════════
-    // SCHEDULE & ROUTINES
+    // MEMORY AND RELATIONSHIPS
+    // ═══════════════════════════════════════════════════════════════
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
+    TArray<FNPC_Memory> ShortTermMemory;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
+    TArray<FNPC_Memory> LongTermMemory;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
+    TArray<FNPC_Relationship> Relationships;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
+    int32 MaxShortTermMemories = 10;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
+    int32 MaxLongTermMemories = 50;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
+    float MemoryDecayRate = 0.1f;
+
+    // ═══════════════════════════════════════════════════════════════
+    // SCHEDULE AND ROUTINE
     // ═══════════════════════════════════════════════════════════════
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Schedule")
     FNPC_DailySchedule DailySchedule;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Schedule")
-    bool bFollowSchedule;
+    bool bFollowSchedule = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Schedule")
-    float ScheduleFlexibility;
+    float ScheduleFlexibility = 0.2f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Schedule")
+    AActor* CurrentTarget = nullptr;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Schedule")
+    FVector CurrentDestination = FVector::ZeroVector;
 
     // ═══════════════════════════════════════════════════════════════
-    // MEMORY & RELATIONSHIPS
-    // ═══════════════════════════════════════════════════════════════
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
-    TArray<FNPC_Memory> Memories;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
-    int32 MaxMemories;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Relationships")
-    TArray<FNPC_Relationship> Relationships;
-
-    // ═══════════════════════════════════════════════════════════════
-    // DIALOGUE & COMMUNICATION
+    // DIALOGUE AND COMMUNICATION
     // ═══════════════════════════════════════════════════════════════
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    TArray<FNPC_DialogueLine> DialogueLines;
+    TArray<FNPC_DialogueLine> AvailableDialogue;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    float LastDialogueTime;
+    float LastDialogueTime = 0.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    float DialogueCooldown;
+    float DialogueCooldown = 5.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    bool bCanSpeak = true;
 
     // ═══════════════════════════════════════════════════════════════
-    // ENVIRONMENTAL AWARENESS
+    // AI AND BEHAVIOR TREE INTEGRATION
     // ═══════════════════════════════════════════════════════════════
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Awareness")
-    float SightRange;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI")
+    class UBehaviorTree* BehaviorTree = nullptr;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Awareness")
-    float HearingRange;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI")
+    class UBlackboardData* BlackboardAsset = nullptr;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Awareness")
-    TArray<AActor*> NearbyActors;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI")
+    float AIUpdateFrequency = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Awareness")
-    TArray<AActor*> ThreatActors;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI")
+    float LastAIUpdateTime = 0.0f;
 
     // ═══════════════════════════════════════════════════════════════
-    // BEHAVIOR FUNCTIONS
+    // CORE BEHAVIOR FUNCTIONS
     // ═══════════════════════════════════════════════════════════════
-
-    UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
-    void SetBehaviorState(ENPC_BehaviorState NewState);
 
     UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
     void UpdateNeeds(float DeltaTime);
 
     UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
-    void ProcessSchedule();
+    void ProcessMemories(float CurrentTime);
 
     UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
-    ENPC_BehaviorState DetermineNextBehavior();
+    void UpdateBehaviorState();
 
     UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
-    void ExecuteBehavior(float DeltaTime);
+    void ExecuteCurrentBehavior(float DeltaTime);
+
+    UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
+    void RespondToThreat(AActor* ThreatActor, ENPC_ThreatLevel ThreatLevel);
+
+    UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
+    void AddMemory(const FString& Description, const FVector& Location, float EmotionalWeight, AActor* RelatedActor = nullptr, ENPC_ThreatLevel ThreatLevel = ENPC_ThreatLevel::None);
+
+    UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
+    void UpdateRelationship(AActor* TargetActor, float TrustChange, float RespectChange, float FearChange);
+
+    UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
+    FNPC_Relationship* GetRelationship(AActor* TargetActor);
+
+    UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
+    FString GetDialogue(ENPC_DialogueType DialogueType, AActor* TargetActor = nullptr);
+
+    UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
+    bool ShouldFlee() const;
+
+    UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
+    bool ShouldFight() const;
+
+    UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
+    bool ShouldSeekHelp() const;
 
     // ═══════════════════════════════════════════════════════════════
-    // MEMORY FUNCTIONS
+    // SCHEDULE AND ROUTINE FUNCTIONS
     // ═══════════════════════════════════════════════════════════════
 
-    UFUNCTION(BlueprintCallable, Category = "NPC Memory")
-    void AddMemory(const FString& EventDescription, const FVector& Location, float EmotionalIntensity);
+    UFUNCTION(BlueprintCallable, Category = "Schedule")
+    void UpdateSchedule(float CurrentTime);
 
-    UFUNCTION(BlueprintCallable, Category = "NPC Memory")
-    void ForgetOldMemories();
+    UFUNCTION(BlueprintCallable, Category = "Schedule")
+    FNPC_ScheduleEntry* GetCurrentScheduledActivity();
 
-    UFUNCTION(BlueprintCallable, Category = "NPC Memory")
-    TArray<FNPC_Memory> GetMemoriesAtLocation(const FVector& Location, float Radius);
+    UFUNCTION(BlueprintCallable, Category = "Schedule")
+    void SetDestination(const FVector& NewDestination);
 
-    // ═══════════════════════════════════════════════════════════════
-    // RELATIONSHIP FUNCTIONS
-    // ═══════════════════════════════════════════════════════════════
-
-    UFUNCTION(BlueprintCallable, Category = "NPC Relationships")
-    void UpdateRelationship(const FString& TargetName, ENPC_RelationshipType Type, float AffectionChange);
-
-    UFUNCTION(BlueprintCallable, Category = "NPC Relationships")
-    FNPC_Relationship GetRelationship(const FString& TargetName);
-
-    UFUNCTION(BlueprintCallable, Category = "NPC Relationships")
-    bool HasRelationship(const FString& TargetName);
+    UFUNCTION(BlueprintCallable, Category = "Schedule")
+    void InterruptSchedule(ENPC_BehaviorState NewState, float Duration = 60.0f);
 
     // ═══════════════════════════════════════════════════════════════
-    // DIALOGUE FUNCTIONS
+    // PERSONALITY AND DECISION MAKING
     // ═══════════════════════════════════════════════════════════════
 
-    UFUNCTION(BlueprintCallable, Category = "NPC Dialogue")
-    FString GetDialogue(ENPC_DialogueType Type);
+    UFUNCTION(BlueprintCallable, Category = "Personality")
+    float GetPersonalityInfluence(ENPC_PersonalityTrait Trait) const;
 
-    UFUNCTION(BlueprintCallable, Category = "NPC Dialogue")
-    bool CanSpeak();
+    UFUNCTION(BlueprintCallable, Category = "Personality")
+    bool MakePersonalityBasedDecision(float BaseChance, ENPC_PersonalityTrait InfluencingTrait, float TraitWeight = 1.0f) const;
 
-    UFUNCTION(BlueprintCallable, Category = "NPC Dialogue")
-    void InitiateDialogue(AActor* Target);
+    UFUNCTION(BlueprintCallable, Category = "Personality")
+    ENPC_BehaviorState ChooseBehaviorBasedOnNeeds();
 
-    // ═══════════════════════════════════════════════════════════════
-    // AWARENESS FUNCTIONS
-    // ═══════════════════════════════════════════════════════════════
-
-    UFUNCTION(BlueprintCallable, Category = "NPC Awareness")
-    void UpdateAwareness();
-
-    UFUNCTION(BlueprintCallable, Category = "NPC Awareness")
-    void DetectNearbyActors();
-
-    UFUNCTION(BlueprintCallable, Category = "NPC Awareness")
-    bool IsActorThreat(AActor* Actor);
-
-    UFUNCTION(BlueprintCallable, Category = "NPC Awareness")
-    AActor* GetNearestThreat();
-
-private:
-    // ═══════════════════════════════════════════════════════════════
-    // INTERNAL BEHAVIOR LOGIC
-    // ═══════════════════════════════════════════════════════════════
-
-    void HandleIdleBehavior(float DeltaTime);
-    void HandleWorkingBehavior(float DeltaTime);
-    void HandleSocializingBehavior(float DeltaTime);
-    void HandleEatingBehavior(float DeltaTime);
-    void HandleSleepingBehavior(float DeltaTime);
-    void HandlePatrollingBehavior(float DeltaTime);
-    void HandleFleeingBehavior(float DeltaTime);
-    void HandleFightingBehavior(float DeltaTime);
-    void HandleGatheringBehavior(float DeltaTime);
-    void HandleHuntingBehavior(float DeltaTime);
-    void HandleCraftingBehavior(float DeltaTime);
-    void HandleTradingBehavior(float DeltaTime);
+    UFUNCTION(BlueprintCallable, Category = "Personality")
+    void ModifyNeedsBasedOnPersonality(float DeltaTime);
 
     // ═══════════════════════════════════════════════════════════════
     // UTILITY FUNCTIONS
     // ═══════════════════════════════════════════════════════════════
 
-    float GetCurrentGameHour();
-    bool IsNightTime();
-    bool IsDayTime();
-    FVector GetRandomLocationNearby(float Radius);
-    void InitializeDefaultPersonality();
+    UFUNCTION(BlueprintCallable, Category = "Utility")
+    float GetCurrentGameHour() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Utility")
+    bool IsNearLocation(const FVector& Location, float Tolerance = 100.0f) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Utility")
+    TArray<AActor*> GetNearbyActors(float Radius = 1000.0f, TSubclassOf<AActor> ActorClass = nullptr) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Utility")
+    AActor* FindNearestActorOfType(TSubclassOf<AActor> ActorClass, float MaxDistance = 2000.0f) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Utility")
+    void LogBehaviorDebug(const FString& Message) const;
+
+private:
+    // Internal state tracking
+    float ScheduleInterruptEndTime = 0.0f;
+    ENPC_BehaviorState PreInterruptState = ENPC_BehaviorState::Idle;
+    float LastNeedsUpdateTime = 0.0f;
+    float LastMemoryProcessTime = 0.0f;
+
+    // Helper functions
     void InitializeDefaultSchedule();
     void InitializeDefaultDialogue();
-
-    // ═══════════════════════════════════════════════════════════════
-    // TIMER HANDLES
-    // ═══════════════════════════════════════════════════════════════
-
-    FTimerHandle BehaviorUpdateTimer;
-    FTimerHandle NeedsUpdateTimer;
-    FTimerHandle AwarenessUpdateTimer;
+    void CleanupOldMemories();
+    void ConsolidateMemories();
+    float CalculateStressLevel() const;
+    void UpdateBlackboardValues();
 };
