@@ -1,432 +1,331 @@
 #include "AudioLODManager.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "Engine/Engine.h"
+#include "Components/AudioComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
-#include "Components/AudioComponent.h"
-#include "Sound/SoundCue.h"
-#include "AudioDevice.h"
-#include "Engine/GameInstance.h"
 
 UAudioLODManager::UAudioLODManager()
 {
-    TargetFrameRate = 60.0f;
-    MaxAudioCPUBudget = 15.0f;
-    MaxAudioMemoryBudgetMB = 256.0f;
-    LODUpdateFrequency = 0.1f;
-    LastLODUpdateTime = 0.0f;
-}
-
-void UAudioLODManager::Initialize(FSubsystemCollectionBase& Collection)
-{
-    Super::Initialize(Collection);
-    
-    UE_LOG(LogTemp, Log, TEXT("AudioLODManager: Initializing audio performance optimization system"));
+    CurrentLODLevel = EAudio_LODLevel::High;
+    LODUpdateInterval = 0.5f;
+    TimeSinceLastLODUpdate = 0.0f;
+    bAutoLODEnabled = true;
+    PerformanceThreshold = 60.0f; // Target 60 FPS
     
     InitializeLODSettings();
-    
-    // Initialize performance metrics
-    CurrentMetrics = FAudio_PerformanceMetrics();
-    
-    UE_LOG(LogTemp, Log, TEXT("AudioLODManager: Initialization complete"));
 }
 
-void UAudioLODManager::Deinitialize()
+void UAudioLODManager::InitializeLODSystem(UWorld* World)
 {
-    UE_LOG(LogTemp, Log, TEXT("AudioLODManager: Shutting down"));
+    if (!World)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("AudioLODManager: Cannot initialize - World is null"));
+        return;
+    }
+
+    // Clear existing registrations
+    RegisteredAudioComponents.Empty();
     
-    RegisteredComponents.Empty();
-    LODSettings.Empty();
-    
-    Super::Deinitialize();
+    // Find and register all existing audio components
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    {
+        AActor* Actor = *ActorItr;
+        if (Actor)
+        {
+            TArray<UAudioComponent*> AudioComponents;
+            Actor->GetComponents<UAudioComponent>(AudioComponents);
+            
+            for (UAudioComponent* AudioComp : AudioComponents)
+            {
+                if (AudioComp)
+                {
+                    RegisterAudioComponent(AudioComp);
+                }
+            }
+        }
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("AudioLODManager: Initialized with %d audio components"), RegisteredAudioComponents.Num());
 }
 
-void UAudioLODManager::InitializeLODSettings()
+void UAudioLODManager::SetLODLevel(EAudio_LODLevel NewLODLevel)
 {
-    // Highest quality settings
-    FAudio_LODSettings HighestSettings;
-    HighestSettings.MaxDistance = 10000.0f;
-    HighestSettings.VolumeMultiplier = 1.0f;
-    HighestSettings.MaxConcurrentSounds = 64;
-    HighestSettings.bEnableReverb = true;
-    HighestSettings.bEnableOcclusion = true;
-    HighestSettings.bEnableSpatialization = true;
-    LODSettings.Add(EAudio_LODLevel::Highest, HighestSettings);
-
-    // High quality settings
-    FAudio_LODSettings HighSettings;
-    HighSettings.MaxDistance = 7500.0f;
-    HighSettings.VolumeMultiplier = 0.9f;
-    HighSettings.MaxConcurrentSounds = 48;
-    HighSettings.bEnableReverb = true;
-    HighSettings.bEnableOcclusion = true;
-    HighSettings.bEnableSpatialization = true;
-    LODSettings.Add(EAudio_LODLevel::High, HighSettings);
-
-    // Medium quality settings
-    FAudio_LODSettings MediumSettings;
-    MediumSettings.MaxDistance = 5000.0f;
-    MediumSettings.VolumeMultiplier = 0.8f;
-    MediumSettings.MaxConcurrentSounds = 32;
-    MediumSettings.bEnableReverb = true;
-    MediumSettings.bEnableOcclusion = false;
-    MediumSettings.bEnableSpatialization = true;
-    LODSettings.Add(EAudio_LODLevel::Medium, MediumSettings);
-
-    // Low quality settings
-    FAudio_LODSettings LowSettings;
-    LowSettings.MaxDistance = 2500.0f;
-    LowSettings.VolumeMultiplier = 0.6f;
-    LowSettings.MaxConcurrentSounds = 16;
-    LowSettings.bEnableReverb = false;
-    LowSettings.bEnableOcclusion = false;
-    LowSettings.bEnableSpatialization = true;
-    LODSettings.Add(EAudio_LODLevel::Low, LowSettings);
-
-    // Lowest quality settings
-    FAudio_LODSettings LowestSettings;
-    LowestSettings.MaxDistance = 1000.0f;
-    LowestSettings.VolumeMultiplier = 0.4f;
-    LowestSettings.MaxConcurrentSounds = 8;
-    LowestSettings.bEnableReverb = false;
-    LowestSettings.bEnableOcclusion = false;
-    LowestSettings.bEnableSpatialization = false;
-    LODSettings.Add(EAudio_LODLevel::Lowest, LowestSettings);
-
-    UE_LOG(LogTemp, Log, TEXT("AudioLODManager: LOD settings initialized"));
+    if (CurrentLODLevel != NewLODLevel)
+    {
+        CurrentLODLevel = NewLODLevel;
+        ApplyLODSettings();
+        
+        UE_LOG(LogTemp, Log, TEXT("AudioLODManager: LOD Level changed to %d"), (int32)CurrentLODLevel);
+    }
 }
 
 void UAudioLODManager::UpdateAudioLOD(float DeltaTime)
 {
-    float CurrentTime = GetWorld()->GetTimeSeconds();
+    TimeSinceLastLODUpdate += DeltaTime;
     
-    // Check if it's time to update LOD
-    if (CurrentTime - LastLODUpdateTime < LODUpdateFrequency)
+    if (TimeSinceLastLODUpdate >= LODUpdateInterval)
+    {
+        TimeSinceLastLODUpdate = 0.0f;
+        
+        // Clean up invalid weak pointers
+        RegisteredAudioComponents.RemoveAll([](const TWeakObjectPtr<UAudioComponent>& WeakPtr)
+        {
+            return !WeakPtr.IsValid();
+        });
+        
+        // Cull distant audio sources
+        CullDistantAudioSources();
+        
+        // Auto-adjust LOD if enabled
+        if (bAutoLODEnabled)
+        {
+            EAudio_LODLevel OptimalLOD = DetermineOptimalLODLevel();
+            SetLODLevel(OptimalLOD);
+        }
+        
+        // Optimize active audio sources
+        OptimizeActiveAudioSources();
+    }
+}
+
+void UAudioLODManager::RegisterAudioComponent(UAudioComponent* AudioComp)
+{
+    if (AudioComp && !RegisteredAudioComponents.Contains(AudioComp))
+    {
+        RegisteredAudioComponents.Add(AudioComp);
+    }
+}
+
+void UAudioLODManager::UnregisterAudioComponent(UAudioComponent* AudioComp)
+{
+    if (AudioComp)
+    {
+        RegisteredAudioComponents.Remove(AudioComp);
+    }
+}
+
+void UAudioLODManager::SetPerformanceMode(bool bLowPerformanceMode)
+{
+    if (bLowPerformanceMode)
+    {
+        SetLODLevel(EAudio_LODLevel::Low);
+        bAutoLODEnabled = false;
+    }
+    else
+    {
+        SetLODLevel(EAudio_LODLevel::High);
+        bAutoLODEnabled = true;
+    }
+}
+
+float UAudioLODManager::GetCurrentAudioLoad() const
+{
+    int32 ActiveSounds = 0;
+    
+    for (const TWeakObjectPtr<UAudioComponent>& WeakAudioComp : RegisteredAudioComponents)
+    {
+        if (UAudioComponent* AudioComp = WeakAudioComp.Get())
+        {
+            if (AudioComp->IsPlaying())
+            {
+                ActiveSounds++;
+            }
+        }
+    }
+    
+    const FAudio_LODSettings& CurrentSettings = LODSettings[CurrentLODLevel];
+    return (float)ActiveSounds / (float)CurrentSettings.MaxSimultaneousSounds;
+}
+
+void UAudioLODManager::InitializeLODSettings()
+{
+    // High Quality LOD
+    FAudio_LODSettings HighLOD;
+    HighLOD.MaxSimultaneousSounds = 64;
+    HighLOD.MaxAudibleDistance = 8000.0f;
+    HighLOD.VolumeMultiplier = 1.0f;
+    HighLOD.bEnableReverb = true;
+    HighLOD.bEnableOcclusion = true;
+    LODSettings.Add(EAudio_LODLevel::High, HighLOD);
+    
+    // Medium Quality LOD
+    FAudio_LODSettings MediumLOD;
+    MediumLOD.MaxSimultaneousSounds = 32;
+    MediumLOD.MaxAudibleDistance = 5000.0f;
+    MediumLOD.VolumeMultiplier = 0.8f;
+    MediumLOD.bEnableReverb = true;
+    MediumLOD.bEnableOcclusion = false;
+    LODSettings.Add(EAudio_LODLevel::Medium, MediumLOD);
+    
+    // Low Quality LOD
+    FAudio_LODSettings LowLOD;
+    LowLOD.MaxSimultaneousSounds = 16;
+    LowLOD.MaxAudibleDistance = 3000.0f;
+    LowLOD.VolumeMultiplier = 0.6f;
+    LowLOD.bEnableReverb = false;
+    LowLOD.bEnableOcclusion = false;
+    LODSettings.Add(EAudio_LODLevel::Low, LowLOD);
+    
+    // Minimal Quality LOD
+    FAudio_LODSettings MinimalLOD;
+    MinimalLOD.MaxSimultaneousSounds = 8;
+    MinimalLOD.MaxAudibleDistance = 1500.0f;
+    MinimalLOD.VolumeMultiplier = 0.4f;
+    MinimalLOD.bEnableReverb = false;
+    MinimalLOD.bEnableOcclusion = false;
+    LODSettings.Add(EAudio_LODLevel::Minimal, MinimalLOD);
+}
+
+void UAudioLODManager::ApplyLODSettings()
+{
+    const FAudio_LODSettings& CurrentSettings = LODSettings[CurrentLODLevel];
+    
+    for (const TWeakObjectPtr<UAudioComponent>& WeakAudioComp : RegisteredAudioComponents)
+    {
+        if (UAudioComponent* AudioComp = WeakAudioComp.Get())
+        {
+            // Apply volume multiplier
+            AudioComp->SetVolumeMultiplier(AudioComp->VolumeMultiplier * CurrentSettings.VolumeMultiplier);
+            
+            // Apply attenuation settings
+            if (AudioComp->AttenuationSettings)
+            {
+                // Note: In a real implementation, you'd modify attenuation settings
+                // For now, we'll just log the change
+                UE_LOG(LogTemp, Verbose, TEXT("AudioLODManager: Applied LOD settings to audio component"));
+            }
+        }
+    }
+}
+
+void UAudioLODManager::CullDistantAudioSources()
+{
+    UWorld* World = GetWorld();
+    if (!World)
     {
         return;
     }
     
-    LastLODUpdateTime = CurrentTime;
-    
-    // Get player location
-    APlayerController* PlayerController = UGameplayStatics::GetPlayerController(GetWorld(), 0);
+    APlayerController* PlayerController = World->GetFirstPlayerController();
     if (!PlayerController || !PlayerController->GetPawn())
     {
         return;
     }
     
-    FVector ListenerLocation = PlayerController->GetPawn()->GetActorLocation();
+    FVector PlayerLocation = PlayerController->GetPawn()->GetActorLocation();
+    const FAudio_LODSettings& CurrentSettings = LODSettings[CurrentLODLevel];
     
-    // Update LOD for all registered components
-    for (auto& ComponentPair : RegisteredComponents)
+    for (const TWeakObjectPtr<UAudioComponent>& WeakAudioComp : RegisteredAudioComponents)
     {
-        UAudioComponent* AudioComponent = ComponentPair.Key;
-        if (IsValid(AudioComponent) && AudioComponent->GetOwner())
+        if (UAudioComponent* AudioComp = WeakAudioComp.Get())
         {
-            EAudio_LODLevel NewLODLevel = CalculateLODLevel(AudioComponent->GetOwner(), ListenerLocation);
-            SetAudioLODLevel(AudioComponent, NewLODLevel);
+            float Distance = FVector::Dist(AudioComp->GetComponentLocation(), PlayerLocation);
+            
+            if (Distance > CurrentSettings.MaxAudibleDistance)
+            {
+                if (AudioComp->IsPlaying())
+                {
+                    AudioComp->Stop();
+                }
+            }
         }
-    }
-    
-    // Update distance culling
-    UpdateDistanceCulling(ListenerLocation);
-    
-    // Update performance metrics
-    UpdatePerformanceMetrics();
-    
-    // Apply performance optimizations if needed
-    if (CurrentMetrics.AudioCPUUsagePercent > MaxAudioCPUBudget || 
-        CurrentMetrics.AudioMemoryUsageMB > MaxAudioMemoryBudgetMB)
-    {
-        ApplyPerformanceOptimizations();
     }
 }
 
-EAudio_LODLevel UAudioLODManager::CalculateLODLevel(AActor* AudioSource, const FVector& ListenerLocation) const
+void UAudioLODManager::OptimizeActiveAudioSources()
 {
-    if (!AudioSource)
+    const FAudio_LODSettings& CurrentSettings = LODSettings[CurrentLODLevel];
+    
+    // Count currently playing sounds
+    TArray<UAudioComponent*> PlayingComponents;
+    for (const TWeakObjectPtr<UAudioComponent>& WeakAudioComp : RegisteredAudioComponents)
     {
-        return EAudio_LODLevel::Lowest;
+        if (UAudioComponent* AudioComp = WeakAudioComp.Get())
+        {
+            if (AudioComp->IsPlaying())
+            {
+                PlayingComponents.Add(AudioComp);
+            }
+        }
     }
     
-    float Distance = FVector::Dist(AudioSource->GetActorLocation(), ListenerLocation);
+    // If we're over the limit, stop the least important sounds
+    if (PlayingComponents.Num() > CurrentSettings.MaxSimultaneousSounds)
+    {
+        // Sort by priority (distance from player, volume, etc.)
+        UWorld* World = GetWorld();
+        if (World)
+        {
+            APlayerController* PlayerController = World->GetFirstPlayerController();
+            if (PlayerController && PlayerController->GetPawn())
+            {
+                FVector PlayerLocation = PlayerController->GetPawn()->GetActorLocation();
+                
+                PlayingComponents.Sort([PlayerLocation](const UAudioComponent& A, const UAudioComponent& B)
+                {
+                    float DistA = FVector::Dist(A.GetComponentLocation(), PlayerLocation);
+                    float DistB = FVector::Dist(B.GetComponentLocation(), PlayerLocation);
+                    return DistA < DistB; // Closer sounds have higher priority
+                });
+                
+                // Stop the furthest sounds
+                int32 SoundsToStop = PlayingComponents.Num() - CurrentSettings.MaxSimultaneousSounds;
+                for (int32 i = PlayingComponents.Num() - SoundsToStop; i < PlayingComponents.Num(); i++)
+                {
+                    PlayingComponents[i]->Stop();
+                }
+            }
+        }
+    }
+}
+
+EAudio_LODLevel UAudioLODManager::DetermineOptimalLODLevel()
+{
+    // Get current frame rate
+    float CurrentFPS = 1.0f / GetWorld()->GetDeltaSeconds();
     
-    // Distance-based LOD calculation
-    if (Distance < 500.0f)
+    // Calculate audio complexity
+    float AudioComplexity = CalculateAudioComplexity();
+    
+    // Determine optimal LOD based on performance
+    if (CurrentFPS < 30.0f || AudioComplexity > 0.9f)
     {
-        return EAudio_LODLevel::Highest;
+        return EAudio_LODLevel::Minimal;
     }
-    else if (Distance < 1500.0f)
-    {
-        return EAudio_LODLevel::High;
-    }
-    else if (Distance < 3000.0f)
-    {
-        return EAudio_LODLevel::Medium;
-    }
-    else if (Distance < 5000.0f)
+    else if (CurrentFPS < 45.0f || AudioComplexity > 0.7f)
     {
         return EAudio_LODLevel::Low;
     }
-    else
+    else if (CurrentFPS < 55.0f || AudioComplexity > 0.5f)
     {
-        return EAudio_LODLevel::Lowest;
-    }
-}
-
-void UAudioLODManager::SetAudioLODLevel(UAudioComponent* AudioComponent, EAudio_LODLevel LODLevel)
-{
-    if (!IsValid(AudioComponent))
-    {
-        return;
+        return EAudio_LODLevel::Medium;
     }
     
-    const FAudio_LODSettings* Settings = LODSettings.Find(LODLevel);
-    if (!Settings)
-    {
-        return;
-    }
+    return EAudio_LODLevel::High;
+}
+
+float UAudioLODManager::CalculateAudioComplexity() const
+{
+    int32 ActiveSounds = 0;
+    int32 TotalSounds = 0;
     
-    // Apply LOD settings to audio component
-    AudioComponent->SetVolumeMultiplier(Settings->VolumeMultiplier);
-    
-    // Enable/disable spatialization
-    if (Settings->bEnableSpatialization)
+    for (const TWeakObjectPtr<UAudioComponent>& WeakAudioComp : RegisteredAudioComponents)
     {
-        AudioComponent->SetBoolParameter(FName("EnableSpatialization"), true);
-    }
-    else
-    {
-        AudioComponent->SetBoolParameter(FName("EnableSpatialization"), false);
-    }
-    
-    // Set attenuation distance
-    if (AudioComponent->GetAttenuationSettings())
-    {
-        // Note: In a real implementation, you'd modify the attenuation settings
-        // This is a simplified version
-    }
-}
-
-void UAudioLODManager::RegisterAudioComponent(UAudioComponent* AudioComponent, EAudio_SourceType SourceType)
-{
-    if (IsValid(AudioComponent))
-    {
-        RegisteredComponents.Add(AudioComponent, SourceType);
-        UE_LOG(LogTemp, VeryVerbose, TEXT("AudioLODManager: Registered audio component %s"), 
-               *AudioComponent->GetName());
-    }
-}
-
-void UAudioLODManager::UnregisterAudioComponent(UAudioComponent* AudioComponent)
-{
-    if (RegisteredComponents.Contains(AudioComponent))
-    {
-        RegisteredComponents.Remove(AudioComponent);
-        UE_LOG(LogTemp, VeryVerbose, TEXT("AudioLODManager: Unregistered audio component %s"), 
-               AudioComponent ? *AudioComponent->GetName() : TEXT("NULL"));
-    }
-}
-
-void UAudioLODManager::SetTargetFrameRate(float TargetFPS)
-{
-    TargetFrameRate = FMath::Clamp(TargetFPS, 30.0f, 120.0f);
-    UE_LOG(LogTemp, Log, TEXT("AudioLODManager: Target frame rate set to %f"), TargetFrameRate);
-}
-
-FAudio_PerformanceMetrics UAudioLODManager::GetPerformanceMetrics() const
-{
-    return CurrentMetrics;
-}
-
-void UAudioLODManager::OptimizeForPerformance()
-{
-    UE_LOG(LogTemp, Log, TEXT("AudioLODManager: Applying performance optimizations"));
-    
-    // Reduce LOD level for distant sources
-    APlayerController* PlayerController = UGameplayStatics::GetPlayerController(GetWorld(), 0);
-    if (PlayerController && PlayerController->GetPawn())
-    {
-        FVector ListenerLocation = PlayerController->GetPawn()->GetActorLocation();
-        
-        for (auto& ComponentPair : RegisteredComponents)
+        if (UAudioComponent* AudioComp = WeakAudioComp.Get())
         {
-            UAudioComponent* AudioComponent = ComponentPair.Key;
-            if (IsValid(AudioComponent) && AudioComponent->GetOwner())
+            TotalSounds++;
+            if (AudioComp->IsPlaying())
             {
-                float Distance = FVector::Dist(AudioComponent->GetOwner()->GetActorLocation(), ListenerLocation);
-                
-                // More aggressive culling during performance issues
-                if (Distance > 2000.0f)
-                {
-                    SetAudioLODLevel(AudioComponent, EAudio_LODLevel::Lowest);
-                }
-                else if (Distance > 1000.0f)
-                {
-                    SetAudioLODLevel(AudioComponent, EAudio_LODLevel::Low);
-                }
-            }
-        }
-    }
-}
-
-void UAudioLODManager::UpdateDistanceCulling(const FVector& ListenerLocation)
-{
-    int32 CulledCount = 0;
-    
-    for (auto& ComponentPair : RegisteredComponents)
-    {
-        UAudioComponent* AudioComponent = ComponentPair.Key;
-        EAudio_SourceType SourceType = ComponentPair.Value;
-        
-        if (IsValid(AudioComponent) && AudioComponent->GetOwner())
-        {
-            FVector SourceLocation = AudioComponent->GetOwner()->GetActorLocation();
-            
-            if (ShouldCullAudioSource(SourceLocation, ListenerLocation, SourceType))
-            {
-                if (AudioComponent->IsPlaying())
-                {
-                    AudioComponent->Stop();
-                    CulledCount++;
-                }
-            }
-            else
-            {
-                if (!AudioComponent->IsPlaying() && AudioComponent->GetSound())
-                {
-                    AudioComponent->Play();
-                }
+                ActiveSounds++;
             }
         }
     }
     
-    CurrentMetrics.CulledAudioSources = CulledCount;
-}
-
-bool UAudioLODManager::ShouldCullAudioSource(const FVector& SourceLocation, const FVector& ListenerLocation, EAudio_SourceType SourceType) const
-{
-    float Distance = FVector::Dist(SourceLocation, ListenerLocation);
-    
-    // Different culling distances based on source type
-    switch (SourceType)
+    if (TotalSounds == 0)
     {
-        case EAudio_SourceType::Music:
-            return false; // Never cull music
-            
-        case EAudio_SourceType::Dialogue:
-            return Distance > 2000.0f; // Keep dialogue closer
-            
-        case EAudio_SourceType::SFX:
-            return Distance > 5000.0f;
-            
-        case EAudio_SourceType::Ambience:
-            return Distance > 7500.0f;
-            
-        case EAudio_SourceType::UI:
-            return false; // Never cull UI sounds
-            
-        default:
-            return Distance > 3000.0f;
-    }
-}
-
-void UAudioLODManager::SetLODSettings(EAudio_LODLevel LODLevel, const FAudio_LODSettings& Settings)
-{
-    LODSettings.Add(LODLevel, Settings);
-    UE_LOG(LogTemp, Log, TEXT("AudioLODManager: Updated LOD settings for level %d"), (int32)LODLevel);
-}
-
-FAudio_LODSettings UAudioLODManager::GetLODSettings(EAudio_LODLevel LODLevel) const
-{
-    const FAudio_LODSettings* Settings = LODSettings.Find(LODLevel);
-    return Settings ? *Settings : FAudio_LODSettings();
-}
-
-void UAudioLODManager::SetGlobalAudioQuality(EAudio_LODLevel Quality)
-{
-    UE_LOG(LogTemp, Log, TEXT("AudioLODManager: Setting global audio quality to %d"), (int32)Quality);
-    
-    // Apply quality settings to all registered components
-    for (auto& ComponentPair : RegisteredComponents)
-    {
-        UAudioComponent* AudioComponent = ComponentPair.Key;
-        if (IsValid(AudioComponent))
-        {
-            SetAudioLODLevel(AudioComponent, Quality);
-        }
-    }
-}
-
-void UAudioLODManager::UpdatePerformanceMetrics()
-{
-    // Count active audio sources
-    int32 ActiveCount = 0;
-    for (auto& ComponentPair : RegisteredComponents)
-    {
-        if (IsValid(ComponentPair.Key) && ComponentPair.Key->IsPlaying())
-        {
-            ActiveCount++;
-        }
+        return 0.0f;
     }
     
-    CurrentMetrics.ActiveAudioSources = ActiveCount;
-    
-    // Estimate memory usage (simplified)
-    CurrentMetrics.AudioMemoryUsageMB = ActiveCount * 2.0f; // Rough estimate
-    
-    // Estimate CPU usage based on active sources and quality settings
-    CurrentMetrics.AudioCPUUsagePercent = FMath::Min(ActiveCount * 0.5f, 25.0f);
-    
-    // Estimate latency (simplified)
-    CurrentMetrics.AverageLatencyMS = FMath::RandRange(5.0f, 15.0f);
-}
-
-void UAudioLODManager::ApplyPerformanceOptimizations()
-{
-    UE_LOG(LogTemp, Warning, TEXT("AudioLODManager: Performance budget exceeded, applying optimizations"));
-    
-    // Reduce quality globally
-    if (CurrentMetrics.AudioCPUUsagePercent > MaxAudioCPUBudget)
-    {
-        SetGlobalAudioQuality(EAudio_LODLevel::Low);
-    }
-    
-    // Cull more aggressively
-    APlayerController* PlayerController = UGameplayStatics::GetPlayerController(GetWorld(), 0);
-    if (PlayerController && PlayerController->GetPawn())
-    {
-        FVector ListenerLocation = PlayerController->GetPawn()->GetActorLocation();
-        CullDistantAudioSources(ListenerLocation);
-    }
-}
-
-float UAudioLODManager::CalculateDistanceFactor(float Distance, float MaxDistance) const
-{
-    return FMath::Clamp(1.0f - (Distance / MaxDistance), 0.0f, 1.0f);
-}
-
-void UAudioLODManager::CullDistantAudioSources(const FVector& ListenerLocation)
-{
-    for (auto& ComponentPair : RegisteredComponents)
-    {
-        UAudioComponent* AudioComponent = ComponentPair.Key;
-        EAudio_SourceType SourceType = ComponentPair.Value;
-        
-        if (IsValid(AudioComponent) && AudioComponent->GetOwner())
-        {
-            // More aggressive culling during performance issues
-            float CullDistance = 2000.0f; // Reduced from normal culling distances
-            
-            float Distance = FVector::Dist(AudioComponent->GetOwner()->GetActorLocation(), ListenerLocation);
-            
-            if (Distance > CullDistance && SourceType != EAudio_SourceType::Music && SourceType != EAudio_SourceType::UI)
-            {
-                if (AudioComponent->IsPlaying())
-                {
-                    AudioComponent->Stop();
-                }
-            }
-        }
-    }
+    return (float)ActiveSounds / (float)TotalSounds;
 }
