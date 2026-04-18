@@ -1,132 +1,194 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "GameFramework/GameInstanceSubsystem.h"
 #include "Engine/World.h"
-#include "GameFramework/Actor.h"
 #include "Components/ActorComponent.h"
-#include "Engine/Engine.h"
 #include "../SharedTypes.h"
 #include "CombatAIManager.generated.h"
 
-class AEnemyAIController;
-class APawn;
+class ADinosaurPawn;
+class ATranspersonalCharacter;
+class UCombat_TacticalAIComponent;
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCombat_TacticalPosition
+UENUM(BlueprintType)
+enum class ECombat_TacticalState : uint8
 {
-    GENERATED_BODY()
+    Idle,
+    Hunting,
+    Stalking,
+    Coordinating,
+    Attacking,
+    Retreating,
+    Regrouping
+};
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tactical")
-    FVector Position;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tactical")
-    float ThreatLevel;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tactical")
-    bool bIsFlankingPosition;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tactical")
-    bool bHasCover;
-
-    FCombat_TacticalPosition()
-    {
-        Position = FVector::ZeroVector;
-        ThreatLevel = 0.0f;
-        bIsFlankingPosition = false;
-        bHasCover = false;
-    }
+UENUM(BlueprintType)
+enum class ECombat_PackRole : uint8
+{
+    Alpha,
+    Flanker,
+    Ambusher,
+    Distractor,
+    Support
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCombat_PackFormation
+struct TRANSPERSONALGAME_API FCombat_TacticalGroup
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Formation")
-    TArray<FCombat_TacticalPosition> Positions;
+    UPROPERTY(BlueprintReadWrite)
+    TArray<TWeakObjectPtr<ADinosaurPawn>> Members;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Formation")
-    FVector CenterPoint;
+    UPROPERTY(BlueprintReadWrite)
+    TWeakObjectPtr<ADinosaurPawn> Alpha;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Formation")
+    UPROPERTY(BlueprintReadWrite)
+    ECombat_TacticalState CurrentState;
+
+    UPROPERTY(BlueprintReadWrite)
+    FVector TargetLocation;
+
+    UPROPERTY(BlueprintReadWrite)
+    TWeakObjectPtr<ATranspersonalCharacter> CurrentTarget;
+
+    UPROPERTY(BlueprintReadWrite)
     float FormationRadius;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Formation")
-    ECombat_FormationType FormationType;
+    UPROPERTY(BlueprintReadWrite)
+    float LastCoordinationTime;
 
-    FCombat_PackFormation()
+    FCombat_TacticalGroup()
     {
-        CenterPoint = FVector::ZeroVector;
+        CurrentState = ECombat_TacticalState::Idle;
+        TargetLocation = FVector::ZeroVector;
         FormationRadius = 500.0f;
-        FormationType = ECombat_FormationType::Circle;
+        LastCoordinationTime = 0.0f;
     }
 };
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API ACombatAIManager : public AActor
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FCombat_TacticalCommand
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadWrite)
+    ECombat_TacticalState CommandType;
+
+    UPROPERTY(BlueprintReadWrite)
+    FVector TargetPosition;
+
+    UPROPERTY(BlueprintReadWrite)
+    ECombat_PackRole AssignedRole;
+
+    UPROPERTY(BlueprintReadWrite)
+    float Priority;
+
+    UPROPERTY(BlueprintReadWrite)
+    float ExecutionTime;
+
+    FCombat_TacticalCommand()
+    {
+        CommandType = ECombat_TacticalState::Idle;
+        TargetPosition = FVector::ZeroVector;
+        AssignedRole = ECombat_PackRole::Support;
+        Priority = 1.0f;
+        ExecutionTime = 0.0f;
+    }
+};
+
+/**
+ * Combat AI Manager - Orchestrates tactical combat AI for dinosaur packs
+ * Manages pack coordination, tactical positioning, and combat strategies
+ */
+UCLASS(BlueprintType)
+class TRANSPERSONALGAME_API UCombatAIManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
-    ACombatAIManager();
+    UCombatAIManager();
+
+    // Subsystem overrides
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+
+    // Group management
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    int32 CreateTacticalGroup(const TArray<ADinosaurPawn*>& Members, ADinosaurPawn* Alpha);
+
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void DisbandTacticalGroup(int32 GroupID);
+
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void AddMemberToGroup(int32 GroupID, ADinosaurPawn* NewMember);
+
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void RemoveMemberFromGroup(int32 GroupID, ADinosaurPawn* Member);
+
+    // Tactical coordination
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void SetGroupTarget(int32 GroupID, ATranspersonalCharacter* Target);
+
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void SetGroupState(int32 GroupID, ECombat_TacticalState NewState);
+
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void CoordinateGroupAttack(int32 GroupID);
+
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void ExecuteTacticalRetreat(int32 GroupID);
+
+    // Combat analysis
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    bool ShouldEngageTarget(const FCombat_TacticalGroup& Group, ATranspersonalCharacter* PotentialTarget) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    FVector CalculateFlankingPosition(const FCombat_TacticalGroup& Group, ATranspersonalCharacter* Target, ECombat_PackRole Role) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    ECombat_PackRole AssignOptimalRole(ADinosaurPawn* Member, const FCombat_TacticalGroup& Group) const;
+
+    // Utility functions
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    FCombat_TacticalGroup* GetTacticalGroup(int32 GroupID);
+
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    TArray<int32> GetActiveGroupIDs() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void UpdateAllGroups(float DeltaTime);
 
 protected:
-    virtual void BeginPlay() override;
+    // Group storage
+    UPROPERTY()
+    TMap<int32, FCombat_TacticalGroup> TacticalGroups;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
-    TArray<AEnemyAIController*> RegisteredEnemies;
+    UPROPERTY()
+    int32 NextGroupID;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
-    APawn* CurrentTarget;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
-    FCombat_PackFormation CurrentFormation;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
-    float TacticalUpdateInterval;
-
+    // Combat parameters
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
     float MaxEngagementRange;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
-    bool bUsePackTactics;
+    float MinGroupCoordinationInterval;
 
-    FTimerHandle TacticalUpdateTimer;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
+    float FlankingDistance;
 
-public:
-    virtual void Tick(float DeltaTime) override;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
+    float AmbushPositionRadius;
 
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void RegisterEnemy(AEnemyAIController* Enemy);
+    // Internal methods
+    void UpdateGroupCoordination(FCombat_TacticalGroup& Group, float DeltaTime);
+    void ExecuteGroupCommand(FCombat_TacticalGroup& Group, const FCombat_TacticalCommand& Command);
+    bool ValidateGroupIntegrity(FCombat_TacticalGroup& Group);
+    void CleanupInvalidGroups();
 
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void UnregisterEnemy(AEnemyAIController* Enemy);
-
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void SetTarget(APawn* NewTarget);
-
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void UpdateTacticalPositions();
-
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    FCombat_TacticalPosition CalculateFlankingPosition(const FVector& TargetLocation, int32 FlankIndex);
-
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    bool ShouldEngageTarget(APawn* Target) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void ExecutePackTactic(ECombat_FormationType TacticType);
-
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    TArray<FCombat_TacticalPosition> GenerateFormationPositions(const FVector& CenterPoint, ECombat_FormationType FormationType, int32 NumPositions);
-
-protected:
-    UFUNCTION()
-    void OnTacticalUpdate();
-
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    float CalculateThreatLevel(const FVector& Position, APawn* Target) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    bool HasLineOfSight(const FVector& FromPosition, const FVector& ToPosition) const;
+    // Combat calculations
+    float CalculateGroupThreatLevel(const FCombat_TacticalGroup& Group) const;
+    float CalculateTargetThreatLevel(ATranspersonalCharacter* Target) const;
+    bool IsPositionStrategic(const FVector& Position, const FCombat_TacticalGroup& Group, ATranspersonalCharacter* Target) const;
 };
