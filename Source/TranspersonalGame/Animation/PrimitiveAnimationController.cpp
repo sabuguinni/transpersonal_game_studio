@@ -3,6 +3,7 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Animation/AnimInstance.h"
+#include "Animation/AnimMontage.h"
 #include "Engine/Engine.h"
 #include "Kismet/KismetMathLibrary.h"
 
@@ -10,388 +11,388 @@ UPrimitiveAnimationController::UPrimitiveAnimationController()
 {
     PrimaryComponentTick.bCanEverTick = true;
     PrimaryComponentTick.TickGroup = TG_PrePhysics;
-
-    // Initialize state
-    CurrentState = EAnim_PrimitiveState::Idle;
-    PreviousState = EAnim_PrimitiveState::Idle;
-
-    // Initialize movement data
-    MovementSpeed = 0.0f;
-    MovementDirection = 0.0f;
-    bIsInAir = false;
-    bIsCrouching = false;
-
-    // Initialize timers
-    StateTimer = 0.0f;
-    ActionTimer = 0.0f;
-
-    // Set speed thresholds
+    
+    // Initialize default thresholds
     WalkSpeedThreshold = 50.0f;
-    RunSpeedThreshold = 200.0f;
-
-    // Initialize blend data
-    BlendData.BlendTime = 0.3f;
-    BlendData.BlendWeight = 0.0f;
-    BlendData.bIsBlending = false;
-
-    OwnerCharacter = nullptr;
-    MovementComponent = nullptr;
+    RunSpeedThreshold = 300.0f;
+    IdleSpeedThreshold = 5.0f;
+    
+    // Initialize states
+    CurrentMovementState = EAnim_MovementState::Idle;
+    PreviousMovementState = EAnim_MovementState::Idle;
+    CurrentActionState = EAnim_ActionState::None;
+    
+    StateChangeTimer = 0.0f;
+    bIsTransitioning = false;
 }
 
 void UPrimitiveAnimationController::BeginPlay()
 {
     Super::BeginPlay();
-
-    // Get owner character and movement component
+    
+    // Get component references
     OwnerCharacter = Cast<ACharacter>(GetOwner());
     if (OwnerCharacter)
     {
         MovementComponent = OwnerCharacter->GetCharacterMovement();
-        UE_LOG(LogTemp, Log, TEXT("PrimitiveAnimationController: Initialized for character %s"), *OwnerCharacter->GetName());
+        MeshComponent = OwnerCharacter->GetMesh();
+        
+        if (MeshComponent)
+        {
+            AnimInstance = MeshComponent->GetAnimInstance();
+        }
     }
-    else
-    {
-        UE_LOG(LogTemp, Error, TEXT("PrimitiveAnimationController: Owner is not a Character!"));
-    }
-
-    // Set initial state
-    SetAnimationState(EAnim_PrimitiveState::Idle);
+    
+    // Initialize state transitions
+    InitializeStateTransitions();
+    
+    UE_LOG(LogTemp, Log, TEXT("PrimitiveAnimationController initialized for %s"), 
+           OwnerCharacter ? *OwnerCharacter->GetName() : TEXT("Unknown"));
 }
 
 void UPrimitiveAnimationController::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
+    
     if (!OwnerCharacter || !MovementComponent)
     {
         return;
     }
-
-    // Update timers
-    UpdateStateTimer(DeltaTime);
-    UpdateBlending(DeltaTime);
-
-    // Analyze current movement
-    AnalyzeMovement();
-
-    // Check for automatic state transitions
-    CheckStateTransitions();
-}
-
-void UPrimitiveAnimationController::SetAnimationState(EAnim_PrimitiveState NewState)
-{
-    if (CurrentState == NewState)
-    {
-        return;
-    }
-
-    EAnim_PrimitiveState OldState = CurrentState;
     
-    // Handle state exit
-    HandleStateExit(OldState);
-
-    // Update states
-    PreviousState = CurrentState;
-    CurrentState = NewState;
-
-    // Handle state entry
-    HandleStateEntry(NewState);
-
-    // Reset state timer
-    StateTimer = 0.0f;
-
-    // Log state change
-    LogStateChange(OldState, NewState);
-}
-
-void UPrimitiveAnimationController::UpdateMovementAnimation(float Speed, bool bInAir, bool bCrouching)
-{
-    MovementSpeed = Speed;
-    bIsInAir = bInAir;
-    bIsCrouching = bCrouching;
-
-    // Update movement direction
-    MovementDirection = CalculateMovementDirection();
-
-    // Auto-transition based on movement
-    if (ShouldTransitionToMovementState())
-    {
-        if (bIsInAir)
-        {
-            if (MovementComponent->IsFalling())
-            {
-                SetAnimationState(EAnim_PrimitiveState::Falling);
-            }
-            else
-            {
-                SetAnimationState(EAnim_PrimitiveState::Jumping);
-            }
-        }
-        else if (bIsCrouching)
-        {
-            SetAnimationState(EAnim_PrimitiveState::Crouching);
-        }
-        else if (Speed > RunSpeedThreshold)
-        {
-            SetAnimationState(EAnim_PrimitiveState::Running);
-        }
-        else if (Speed > WalkSpeedThreshold)
-        {
-            SetAnimationState(EAnim_PrimitiveState::Walking);
-        }
-        else
-        {
-            SetAnimationState(EAnim_PrimitiveState::Idle);
-        }
-    }
-}
-
-void UPrimitiveAnimationController::PlayGatheringAnimation(float Duration)
-{
-    SetAnimationState(EAnim_PrimitiveState::Gathering);
-    ActionTimer = Duration;
+    // Update movement data every frame
+    UpdateMovementData();
     
-    UE_LOG(LogTemp, Log, TEXT("PrimitiveAnimationController: Playing gathering animation for %.2f seconds"), Duration);
-}
-
-void UPrimitiveAnimationController::PlayCraftingAnimation(float Duration)
-{
-    SetAnimationState(EAnim_PrimitiveState::Crafting);
-    ActionTimer = Duration;
+    // Update animation state based on movement
+    UpdateAnimationState();
     
-    UE_LOG(LogTemp, Log, TEXT("PrimitiveAnimationController: Playing crafting animation for %.2f seconds"), Duration);
-}
-
-void UPrimitiveAnimationController::PlayAttackAnimation(bool bIsHeavyAttack)
-{
-    SetAnimationState(EAnim_PrimitiveState::Attacking);
-    ActionTimer = bIsHeavyAttack ? 1.5f : 0.8f;
-    
-    UE_LOG(LogTemp, Log, TEXT("PrimitiveAnimationController: Playing %s attack animation"), 
-           bIsHeavyAttack ? TEXT("heavy") : TEXT("light"));
-}
-
-void UPrimitiveAnimationController::PlayInjuredAnimation(float Severity)
-{
-    SetAnimationState(EAnim_PrimitiveState::Injured);
-    ActionTimer = FMath::Lerp(1.0f, 3.0f, Severity);
-    
-    UE_LOG(LogTemp, Log, TEXT("PrimitiveAnimationController: Playing injured animation (severity: %.2f)"), Severity);
-}
-
-void UPrimitiveAnimationController::BlendToState(EAnim_PrimitiveState TargetState, float BlendDuration)
-{
-    BlendData.bIsBlending = true;
-    BlendData.BlendTime = BlendDuration;
-    BlendData.BlendWeight = 0.0f;
-
-    // Set target state after blend completes
-    SetAnimationState(TargetState);
-}
-
-void UPrimitiveAnimationController::UpdateStateTimer(float DeltaTime)
-{
-    StateTimer += DeltaTime;
-    
-    if (ActionTimer > 0.0f)
+    // Handle state transition timing
+    if (bIsTransitioning)
     {
-        ActionTimer -= DeltaTime;
-        if (ActionTimer <= 0.0f)
+        StateChangeTimer += DeltaTime;
+        if (StateChangeTimer >= 0.2f) // Default transition time
         {
-            ActionTimer = 0.0f;
-            // Action completed, return to appropriate state
-            if (IsMoving())
-            {
-                UpdateMovementAnimation(MovementSpeed, bIsInAir, bIsCrouching);
-            }
-            else
-            {
-                SetAnimationState(EAnim_PrimitiveState::Idle);
-            }
+            bIsTransitioning = false;
+            StateChangeTimer = 0.0f;
         }
     }
 }
 
-void UPrimitiveAnimationController::UpdateBlending(float DeltaTime)
-{
-    if (BlendData.bIsBlending)
-    {
-        BlendData.BlendWeight += DeltaTime / BlendData.BlendTime;
-        
-        if (BlendData.BlendWeight >= 1.0f)
-        {
-            BlendData.BlendWeight = 1.0f;
-            BlendData.bIsBlending = false;
-        }
-    }
-}
-
-void UPrimitiveAnimationController::CheckStateTransitions()
-{
-    // Only auto-transition if not in an action state
-    if (ActionTimer > 0.0f)
-    {
-        return;
-    }
-
-    // Check for death state
-    if (OwnerCharacter)
-    {
-        // This would typically check health from a health component
-        // For now, we'll skip this check
-    }
-
-    // Auto-transition based on movement when not in action
-    if (ShouldTransitionToMovementState())
-    {
-        UpdateMovementAnimation(MovementSpeed, bIsInAir, bIsCrouching);
-    }
-}
-
-void UPrimitiveAnimationController::HandleStateEntry(EAnim_PrimitiveState NewState)
-{
-    switch (NewState)
-    {
-        case EAnim_PrimitiveState::Idle:
-            UE_LOG(LogTemp, Verbose, TEXT("Entering Idle state"));
-            break;
-            
-        case EAnim_PrimitiveState::Walking:
-            UE_LOG(LogTemp, Verbose, TEXT("Entering Walking state"));
-            break;
-            
-        case EAnim_PrimitiveState::Running:
-            UE_LOG(LogTemp, Verbose, TEXT("Entering Running state"));
-            break;
-            
-        case EAnim_PrimitiveState::Jumping:
-            UE_LOG(LogTemp, Verbose, TEXT("Entering Jumping state"));
-            break;
-            
-        case EAnim_PrimitiveState::Falling:
-            UE_LOG(LogTemp, Verbose, TEXT("Entering Falling state"));
-            break;
-            
-        case EAnim_PrimitiveState::Crouching:
-            UE_LOG(LogTemp, Verbose, TEXT("Entering Crouching state"));
-            break;
-            
-        case EAnim_PrimitiveState::Attacking:
-            UE_LOG(LogTemp, Log, TEXT("Entering Attacking state"));
-            break;
-            
-        case EAnim_PrimitiveState::Gathering:
-            UE_LOG(LogTemp, Log, TEXT("Entering Gathering state"));
-            break;
-            
-        case EAnim_PrimitiveState::Crafting:
-            UE_LOG(LogTemp, Log, TEXT("Entering Crafting state"));
-            break;
-            
-        case EAnim_PrimitiveState::Injured:
-            UE_LOG(LogTemp, Warning, TEXT("Entering Injured state"));
-            break;
-            
-        case EAnim_PrimitiveState::Dead:
-            UE_LOG(LogTemp, Warning, TEXT("Entering Dead state"));
-            break;
-    }
-}
-
-void UPrimitiveAnimationController::HandleStateExit(EAnim_PrimitiveState OldState)
-{
-    // Cleanup for specific states
-    switch (OldState)
-    {
-        case EAnim_PrimitiveState::Attacking:
-            // Reset attack flags, etc.
-            break;
-            
-        case EAnim_PrimitiveState::Gathering:
-            // Complete gathering action
-            break;
-            
-        case EAnim_PrimitiveState::Crafting:
-            // Complete crafting action
-            break;
-            
-        default:
-            break;
-    }
-}
-
-void UPrimitiveAnimationController::AnalyzeMovement()
+void UPrimitiveAnimationController::UpdateMovementData()
 {
     if (!MovementComponent)
     {
         return;
     }
-
+    
     // Get current velocity
-    FVector Velocity = MovementComponent->Velocity;
-    MovementSpeed = Velocity.Size2D();
-
-    // Update air state
-    bIsInAir = MovementComponent->IsFalling() || MovementComponent->IsFlying();
-
-    // Update crouching state
-    bIsCrouching = MovementComponent->IsCrouching();
-
-    // Calculate movement direction relative to character facing
-    MovementDirection = CalculateMovementDirection();
+    FVector CurrentVelocity = MovementComponent->Velocity;
+    MovementData.Velocity = CurrentVelocity;
+    
+    // Calculate speed (magnitude of horizontal velocity)
+    FVector HorizontalVelocity = FVector(CurrentVelocity.X, CurrentVelocity.Y, 0.0f);
+    MovementData.Speed = HorizontalVelocity.Size();
+    MovementData.GroundSpeed = MovementData.Speed;
+    
+    // Calculate movement direction relative to character forward
+    if (OwnerCharacter && MovementData.Speed > 1.0f)
+    {
+        FVector ForwardVector = OwnerCharacter->GetActorForwardVector();
+        FVector NormalizedVelocity = HorizontalVelocity.GetSafeNormal();
+        
+        float DotProduct = FVector::DotProduct(ForwardVector, NormalizedVelocity);
+        float CrossProduct = FVector::CrossProduct(ForwardVector, NormalizedVelocity).Z;
+        
+        MovementData.Direction = UKismetMathLibrary::DegAtan2(CrossProduct, DotProduct);
+    }
+    else
+    {
+        MovementData.Direction = 0.0f;
+    }
+    
+    // Update movement flags
+    MovementData.bIsInAir = MovementComponent->IsFalling();
+    MovementData.bIsCrouching = MovementComponent->IsCrouching();
 }
 
-float UPrimitiveAnimationController::CalculateMovementDirection()
+void UPrimitiveAnimationController::UpdateAnimationState()
 {
-    if (!OwnerCharacter || !MovementComponent)
+    EAnim_MovementState NewState = CurrentMovementState;
+    
+    // Determine new state based on movement data
+    if (MovementData.bIsInAir)
     {
-        return 0.0f;
+        if (MovementComponent->Velocity.Z > 0.0f)
+        {
+            NewState = EAnim_MovementState::Jumping;
+        }
+        else
+        {
+            NewState = EAnim_MovementState::Falling;
+        }
     }
-
-    FVector Velocity = MovementComponent->Velocity;
-    if (Velocity.Size2D() < 5.0f)
+    else if (MovementData.bIsCrouching)
     {
-        return 0.0f;
+        NewState = EAnim_MovementState::Crouching;
     }
-
-    FVector ForwardVector = OwnerCharacter->GetActorForwardVector();
-    FVector VelocityDirection = Velocity.GetSafeNormal2D();
-
-    float DotProduct = FVector::DotProduct(ForwardVector, VelocityDirection);
-    float CrossProduct = FVector::CrossProduct(ForwardVector, VelocityDirection).Z;
-
-    return FMath::Atan2(CrossProduct, DotProduct) * 180.0f / PI;
+    else if (MovementData.Speed <= IdleSpeedThreshold)
+    {
+        NewState = EAnim_MovementState::Idle;
+    }
+    else if (MovementData.Speed <= WalkSpeedThreshold)
+    {
+        NewState = EAnim_MovementState::Walking;
+    }
+    else if (MovementData.Speed > RunSpeedThreshold)
+    {
+        NewState = EAnim_MovementState::Running;
+    }
+    else
+    {
+        NewState = EAnim_MovementState::Walking;
+    }
+    
+    // Apply state change if different and valid
+    if (NewState != CurrentMovementState && CanTransitionTo(NewState))
+    {
+        SetMovementState(NewState);
+    }
 }
 
-bool UPrimitiveAnimationController::ShouldTransitionToMovementState()
+void UPrimitiveAnimationController::SetMovementState(EAnim_MovementState NewState)
 {
-    // Don't auto-transition if in an action state with active timer
-    if (ActionTimer > 0.0f)
+    if (NewState == CurrentMovementState)
+    {
+        return;
+    }
+    
+    if (!CanTransitionTo(NewState))
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Invalid state transition from %d to %d"), 
+               (int32)CurrentMovementState, (int32)NewState);
+        return;
+    }
+    
+    PreviousMovementState = CurrentMovementState;
+    CurrentMovementState = NewState;
+    bIsTransitioning = true;
+    StateChangeTimer = 0.0f;
+    
+    UE_LOG(LogTemp, Log, TEXT("Animation state changed: %d -> %d"), 
+           (int32)PreviousMovementState, (int32)CurrentMovementState);
+}
+
+void UPrimitiveAnimationController::SetActionState(EAnim_ActionState NewState)
+{
+    if (NewState != CurrentActionState)
+    {
+        CurrentActionState = NewState;
+        UE_LOG(LogTemp, Log, TEXT("Action state changed to: %d"), (int32)CurrentActionState);
+    }
+}
+
+void UPrimitiveAnimationController::UpdateMovementState()
+{
+    UpdateAnimationState();
+}
+
+void UPrimitiveAnimationController::TriggerJump()
+{
+    if (CanTransitionTo(EAnim_MovementState::Jumping))
+    {
+        SetMovementState(EAnim_MovementState::Jumping);
+        UE_LOG(LogTemp, Log, TEXT("Jump animation triggered"));
+    }
+}
+
+void UPrimitiveAnimationController::TriggerLand()
+{
+    if (CurrentMovementState == EAnim_MovementState::Falling || 
+        CurrentMovementState == EAnim_MovementState::Jumping)
+    {
+        // Determine landing state based on current speed
+        EAnim_MovementState LandingState = MovementData.Speed > IdleSpeedThreshold ? 
+            EAnim_MovementState::Walking : EAnim_MovementState::Idle;
+        
+        SetMovementState(LandingState);
+        UE_LOG(LogTemp, Log, TEXT("Land animation triggered, transitioning to state: %d"), (int32)LandingState);
+    }
+}
+
+void UPrimitiveAnimationController::TriggerGatherAction()
+{
+    SetActionState(EAnim_ActionState::Gathering);
+    UE_LOG(LogTemp, Log, TEXT("Gather action triggered"));
+}
+
+void UPrimitiveAnimationController::TriggerCombatAction()
+{
+    SetActionState(EAnim_ActionState::Combat);
+    UE_LOG(LogTemp, Log, TEXT("Combat action triggered"));
+}
+
+void UPrimitiveAnimationController::PlayMontage(UAnimMontage* Montage, float PlayRate)
+{
+    if (!AnimInstance || !Montage)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Cannot play montage - missing AnimInstance or Montage"));
+        return;
+    }
+    
+    float Duration = AnimInstance->Montage_Play(Montage, PlayRate);
+    if (Duration > 0.0f)
+    {
+        UE_LOG(LogTemp, Log, TEXT("Playing montage: %s (Duration: %f)"), *Montage->GetName(), Duration);
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Failed to play montage: %s"), *Montage->GetName());
+    }
+}
+
+void UPrimitiveAnimationController::StopMontage(UAnimMontage* Montage)
+{
+    if (!AnimInstance)
+    {
+        return;
+    }
+    
+    if (Montage)
+    {
+        AnimInstance->Montage_Stop(0.2f, Montage);
+        UE_LOG(LogTemp, Log, TEXT("Stopped specific montage: %s"), *Montage->GetName());
+    }
+    else
+    {
+        AnimInstance->StopAllMontages(0.2f);
+        UE_LOG(LogTemp, Log, TEXT("Stopped all montages"));
+    }
+}
+
+bool UPrimitiveAnimationController::CanTransitionTo(EAnim_MovementState NewState) const
+{
+    // Check if we're in a transition period
+    if (bIsTransitioning && StateChangeTimer < 0.1f)
     {
         return false;
     }
+    
+    // Validate transition using rules
+    return ValidateStateTransition(CurrentMovementState, NewState);
+}
 
-    // Don't auto-transition if in death state
-    if (CurrentState == EAnim_PrimitiveState::Dead)
+void UPrimitiveAnimationController::AddStateTransition(const FAnim_StateTransition& Transition)
+{
+    StateTransitions.Add(Transition);
+    UE_LOG(LogTemp, Log, TEXT("Added state transition: %d -> %d"), 
+           (int32)Transition.FromState, (int32)Transition.ToState);
+}
+
+void UPrimitiveAnimationController::InitializeStateTransitions()
+{
+    StateTransitions.Empty();
+    
+    // Define basic state transitions
+    FAnim_StateTransition IdleToWalk;
+    IdleToWalk.FromState = EAnim_MovementState::Idle;
+    IdleToWalk.ToState = EAnim_MovementState::Walking;
+    IdleToWalk.TransitionDuration = 0.2f;
+    IdleToWalk.bCanInterrupt = true;
+    StateTransitions.Add(IdleToWalk);
+    
+    FAnim_StateTransition WalkToRun;
+    WalkToRun.FromState = EAnim_MovementState::Walking;
+    WalkToRun.ToState = EAnim_MovementState::Running;
+    WalkToRun.TransitionDuration = 0.3f;
+    WalkToRun.bCanInterrupt = true;
+    StateTransitions.Add(WalkToRun);
+    
+    FAnim_StateTransition RunToWalk;
+    RunToWalk.FromState = EAnim_MovementState::Running;
+    RunToWalk.ToState = EAnim_MovementState::Walking;
+    RunToWalk.TransitionDuration = 0.2f;
+    RunToWalk.bCanInterrupt = true;
+    StateTransitions.Add(RunToWalk);
+    
+    FAnim_StateTransition WalkToIdle;
+    WalkToIdle.FromState = EAnim_MovementState::Walking;
+    WalkToIdle.ToState = EAnim_MovementState::Idle;
+    WalkToIdle.TransitionDuration = 0.2f;
+    WalkToIdle.bCanInterrupt = true;
+    StateTransitions.Add(WalkToIdle);
+    
+    // Jump transitions
+    FAnim_StateTransition AnyToJump;
+    AnyToJump.ToState = EAnim_MovementState::Jumping;
+    AnyToJump.TransitionDuration = 0.1f;
+    AnyToJump.bCanInterrupt = false;
+    StateTransitions.Add(AnyToJump);
+    
+    FAnim_StateTransition JumpToFall;
+    JumpToFall.FromState = EAnim_MovementState::Jumping;
+    JumpToFall.ToState = EAnim_MovementState::Falling;
+    JumpToFall.TransitionDuration = 0.1f;
+    JumpToFall.bCanInterrupt = false;
+    StateTransitions.Add(JumpToFall);
+    
+    UE_LOG(LogTemp, Log, TEXT("Initialized %d state transitions"), StateTransitions.Num());
+}
+
+bool UPrimitiveAnimationController::ValidateStateTransition(EAnim_MovementState FromState, EAnim_MovementState ToState) const
+{
+    // Always allow transitions to the same state
+    if (FromState == ToState)
     {
-        return false;
+        return true;
     }
-
-    return true;
-}
-
-void UPrimitiveAnimationController::ResetActionTimer()
-{
-    ActionTimer = 0.0f;
-}
-
-bool UPrimitiveAnimationController::IsActionComplete() const
-{
-    return ActionTimer <= 0.0f;
-}
-
-void UPrimitiveAnimationController::LogStateChange(EAnim_PrimitiveState From, EAnim_PrimitiveState To)
-{
-    UE_LOG(LogTemp, Log, TEXT("PrimitiveAnimationController: State transition %d -> %d"), 
-           static_cast<int32>(From), static_cast<int32>(To));
+    
+    // Check if we have a specific rule for this transition
+    for (const FAnim_StateTransition& Transition : StateTransitions)
+    {
+        if (Transition.FromState == FromState && Transition.ToState == ToState)
+        {
+            return true;
+        }
+        
+        // Special case: "any state" transitions (FromState not specified means any)
+        if (Transition.ToState == ToState && 
+            (Transition.FromState == EAnim_MovementState::Idle && ToState == EAnim_MovementState::Jumping))
+        {
+            return true;
+        }
+    }
+    
+    // Default allowed transitions (fallback)
+    switch (FromState)
+    {
+        case EAnim_MovementState::Idle:
+            return ToState == EAnim_MovementState::Walking || 
+                   ToState == EAnim_MovementState::Jumping ||
+                   ToState == EAnim_MovementState::Crouching;
+            
+        case EAnim_MovementState::Walking:
+            return ToState == EAnim_MovementState::Idle || 
+                   ToState == EAnim_MovementState::Running ||
+                   ToState == EAnim_MovementState::Jumping ||
+                   ToState == EAnim_MovementState::Crouching;
+            
+        case EAnim_MovementState::Running:
+            return ToState == EAnim_MovementState::Walking || 
+                   ToState == EAnim_MovementState::Jumping ||
+                   ToState == EAnim_MovementState::Falling;
+            
+        case EAnim_MovementState::Jumping:
+            return ToState == EAnim_MovementState::Falling;
+            
+        case EAnim_MovementState::Falling:
+            return ToState == EAnim_MovementState::Idle || 
+                   ToState == EAnim_MovementState::Walking ||
+                   ToState == EAnim_MovementState::Running;
+            
+        case EAnim_MovementState::Crouching:
+            return ToState == EAnim_MovementState::Idle || 
+                   ToState == EAnim_MovementState::Walking;
+            
+        default:
+            return true; // Allow unknown transitions
+    }
 }
