@@ -7,13 +7,11 @@
 #include "../SharedTypes.h"
 #include "EngineArchitectureManager.generated.h"
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnArchitectureRuleViolation, FString, SystemName, FString, ViolationDetails);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnPerformanceThresholdExceeded, FString, SystemName, float, CurrentValue, float, ThresholdValue);
+DECLARE_LOG_CATEGORY_EXTERN(LogEngineArchitecture, Log, All);
 
 /**
- * Core Engine Architecture Manager
- * Enforces architectural rules and validates system interactions
- * This is the technical backbone that ensures all other systems follow the established patterns
+ * Core engine architecture validation and management system
+ * Ensures all game systems follow architectural standards and performance requirements
  */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UEngineArchitectureManager : public UGameInstanceSubsystem
@@ -27,102 +25,99 @@ public:
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Core Architecture Validation
+    // Architecture validation
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    bool ValidateSystemArchitecture();
+
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    bool ValidatePerformanceRequirements();
+
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    void RegisterSystemModule(const FString& ModuleName, int32 Priority);
+
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    void UnregisterSystemModule(const FString& ModuleName);
+
+    // Performance monitoring
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    float GetCurrentFrameRate() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    int32 GetActiveActorCount() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    float GetMemoryUsageMB() const;
+
+    // System health checks
+    UFUNCTION(BlueprintCallable, Category = "System Health")
+    bool CheckWorldPartitionHealth();
+
+    UFUNCTION(BlueprintCallable, Category = "System Health")
+    bool CheckLODSystemHealth();
+
+    UFUNCTION(BlueprintCallable, Category = "System Health")
+    bool CheckCullingSystemHealth();
+
+    // Architecture enforcement
     UFUNCTION(BlueprintCallable, Category = "Architecture", CallInEditor)
-    bool ValidateSystemArchitecture(const FString& SystemName);
+    void EnforceArchitecturalStandards();
 
     UFUNCTION(BlueprintCallable, Category = "Architecture", CallInEditor)
-    void RegisterSystem(const FString& SystemName, EEng_SystemType SystemType, int32 Priority);
+    void ValidateModuleDependencies();
 
     UFUNCTION(BlueprintCallable, Category = "Architecture", CallInEditor)
-    void UnregisterSystem(const FString& SystemName);
-
-    // Performance Monitoring
-    UFUNCTION(BlueprintCallable, Category = "Performance", CallInEditor)
-    void SetPerformanceThreshold(const FString& SystemName, float ThresholdMS);
-
-    UFUNCTION(BlueprintCallable, Category = "Performance", CallInEditor)
-    float GetSystemPerformance(const FString& SystemName) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Performance", CallInEditor)
-    void LogPerformanceMetrics();
-
-    // Module Dependency Tracking
-    UFUNCTION(BlueprintCallable, Category = "Dependencies", CallInEditor)
-    bool ValidateModuleDependencies();
-
-    UFUNCTION(BlueprintCallable, Category = "Dependencies", CallInEditor)
-    void AddModuleDependency(const FString& ModuleName, const FString& DependsOn);
-
-    // Rule Engine
-    UFUNCTION(BlueprintCallable, Category = "Rules", CallInEditor)
-    void AddArchitectureRule(const FString& RuleName, const FString& RuleDescription);
-
-    UFUNCTION(BlueprintCallable, Category = "Rules", CallInEditor)
-    bool CheckRule(const FString& RuleName, const FString& SystemName);
-
-    // System Health Monitoring
-    UFUNCTION(BlueprintCallable, Category = "Health", CallInEditor)
-    EEng_SystemHealth GetSystemHealth(const FString& SystemName) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Health", CallInEditor)
-    void UpdateSystemHealth(const FString& SystemName, EEng_SystemHealth NewHealth);
-
-    // Events
-    UPROPERTY(BlueprintAssignable, Category = "Events")
-    FOnArchitectureRuleViolation OnArchitectureRuleViolation;
-
-    UPROPERTY(BlueprintAssignable, Category = "Events")
-    FOnPerformanceThresholdExceeded OnPerformanceThresholdExceeded;
-
-    // Configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    bool bEnableRealTimeValidation = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    float ValidationIntervalSeconds = 5.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    bool bLogViolationsToFile = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    int32 MaxConcurrentSystems = 50;
+    void GenerateArchitectureReport();
 
 protected:
-    // Internal system tracking
-    UPROPERTY()
-    TMap<FString, FEng_SystemInfo> RegisteredSystems;
+    // Core architecture settings
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Architecture Settings")
+    int32 MaxActiveActors = 10000;
 
-    UPROPERTY()
-    TMap<FString, float> PerformanceThresholds;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Architecture Settings")
+    float TargetFrameRate = 60.0f;
 
-    UPROPERTY()
-    TMap<FString, float> CurrentPerformanceMetrics;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Architecture Settings")
+    float MaxMemoryUsageMB = 8192.0f;
 
-    UPROPERTY()
-    TMap<FString, TArray<FString>> ModuleDependencies;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Architecture Settings")
+    bool bEnforceWorldPartition = true;
 
-    UPROPERTY()
-    TMap<FString, FString> ArchitectureRules;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Architecture Settings")
+    bool bEnforceLODChain = true;
 
-    UPROPERTY()
-    TMap<FString, EEng_SystemHealth> SystemHealthStatus;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Architecture Settings")
+    bool bEnablePerformanceMonitoring = true;
 
-    // Internal validation methods
-    bool ValidateSystemType(const FString& SystemName, EEng_SystemType ExpectedType);
-    bool ValidateSystemPriority(const FString& SystemName, int32 Priority);
-    void LogArchitectureViolation(const FString& SystemName, const FString& Details);
-    void CheckPerformanceThresholds();
+    // Registered system modules
+    UPROPERTY(BlueprintReadOnly, Category = "System Modules")
+    TMap<FString, int32> RegisteredModules;
 
-    // Timer handles
-    FTimerHandle ValidationTimerHandle;
-    FTimerHandle PerformanceTimerHandle;
+    UPROPERTY(BlueprintReadOnly, Category = "System Health")
+    bool bSystemHealthy = true;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float LastFrameTime = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    int32 LastActorCount = 0;
 
 private:
-    // Architecture constants
-    static constexpr float DEFAULT_PERFORMANCE_THRESHOLD = 16.67f; // 60 FPS target
-    static constexpr int32 MAX_VALIDATION_ERRORS = 100;
+    // Internal validation methods
+    bool ValidateWorldPartitionSetup();
+    bool ValidateLODConfiguration();
+    bool ValidateMemoryPools();
+    bool ValidateRenderingPipeline();
     
-    int32 ValidationErrorCount = 0;
-    bool bArchitectureValid = true;
+    // Performance tracking
+    void UpdatePerformanceMetrics();
+    void LogPerformanceWarnings();
+    
+    // Architecture enforcement
+    void EnforceNamingConventions();
+    void EnforceModuleStructure();
+    void EnforceComponentLimits();
+    
+    // Timer handles
+    FTimerHandle PerformanceMonitorTimer;
+    FTimerHandle ArchitectureValidationTimer;
 };
