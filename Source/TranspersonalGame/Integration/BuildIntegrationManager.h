@@ -3,10 +3,9 @@
 #include "CoreMinimal.h"
 #include "Engine/GameInstanceSubsystem.h"
 #include "Engine/World.h"
-#include "SharedTypes.h"
+#include "UObject/NoExportTypes.h"
+#include "../SharedTypes.h"
 #include "BuildIntegrationManager.generated.h"
-
-DECLARE_LOG_CATEGORY_EXTERN(LogBuildIntegration, Log, All);
 
 USTRUCT(BlueprintType)
 struct TRANSPERSONALGAME_API FBuild_ModuleStatus
@@ -39,35 +38,30 @@ struct TRANSPERSONALGAME_API FBuild_ModuleStatus
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_IntegrationReport
+struct TRANSPERSONALGAME_API FBuild_ValidationResult
 {
     GENERATED_BODY()
 
     UPROPERTY(BlueprintReadOnly, Category = "Build")
-    TArray<FBuild_ModuleStatus> ModuleStatuses;
+    bool bSuccess;
 
     UPROPERTY(BlueprintReadOnly, Category = "Build")
-    int32 TotalClasses;
+    FString ValidationMessage;
 
     UPROPERTY(BlueprintReadOnly, Category = "Build")
-    int32 LoadedClasses;
+    TArray<FString> Errors;
 
     UPROPERTY(BlueprintReadOnly, Category = "Build")
-    int32 FailedClasses;
+    TArray<FString> Warnings;
 
     UPROPERTY(BlueprintReadOnly, Category = "Build")
-    bool bBuildSuccessful;
+    float ValidationTime;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Build")
-    FString BuildTimestamp;
-
-    FBuild_IntegrationReport()
+    FBuild_ValidationResult()
     {
-        TotalClasses = 0;
-        LoadedClasses = 0;
-        FailedClasses = 0;
-        bBuildSuccessful = false;
-        BuildTimestamp = TEXT("");
+        bSuccess = false;
+        ValidationMessage = TEXT("");
+        ValidationTime = 0.0f;
     }
 };
 
@@ -79,74 +73,72 @@ class TRANSPERSONALGAME_API UBuildIntegrationManager : public UGameInstanceSubsy
 public:
     UBuildIntegrationManager();
 
-    // USubsystem interface
+    // Subsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
     // Build validation functions
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    FBuild_IntegrationReport RunFullIntegrationTest();
+    FBuild_ValidationResult ValidateModuleIntegration();
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool ValidateModuleIntegration(const FString& ModuleName);
+    TArray<FBuild_ModuleStatus> GetModuleStatusList();
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    TArray<FString> GetLoadedModules();
+    bool ValidateClassRegistration(const FString& ClassName);
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool TestCrossSystemIntegration();
+    bool ValidateActorSpawning(const FString& ActorClassName);
 
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    FBuild_ValidationResult RunIntegrationTests();
+
+    // Cross-system validation
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    bool ValidateWorldGeneration();
+
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    bool ValidateCharacterSystems();
+
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    bool ValidateAISystems();
+
+    // Build reporting
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
     void GenerateBuildReport();
 
-    // Asset validation
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool ValidateGameAssets();
+    FString GetBuildVersion();
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    TArray<FString> GetMissingAssets();
-
-    // Performance validation
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool ValidatePerformanceTargets();
-
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    float GetCurrentFrameRate();
-
-    // Compilation status
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool IsProjectCompiled();
-
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    FString GetLastCompilationError();
+    FString GetLastBuildTime();
 
 protected:
-    // Internal validation functions
+    // Internal validation helpers
     bool ValidateModuleClasses(const FString& ModuleName);
-    bool TestSystemInteractions();
-    void LogIntegrationResults(const FBuild_IntegrationReport& Report);
+    bool ValidateComponentRegistration();
+    bool ValidateSubsystemInitialization();
+    bool ValidateCrossModuleDependencies();
+
+    // Error tracking
+    void LogValidationError(const FString& ErrorMessage);
+    void LogValidationWarning(const FString& WarningMessage);
 
 private:
     UPROPERTY()
-    FBuild_IntegrationReport LastIntegrationReport;
+    TArray<FBuild_ModuleStatus> CachedModuleStatus;
 
     UPROPERTY()
-    TArray<FString> KnownModules;
+    FBuild_ValidationResult LastValidationResult;
 
     UPROPERTY()
-    TArray<FString> CriticalAssets;
-
-    // Performance tracking
-    UPROPERTY()
-    float TargetFrameRate;
+    FString BuildVersion;
 
     UPROPERTY()
-    float MinimumFrameRate;
+    FDateTime LastBuildTime;
 
-    // Build state
-    UPROPERTY()
-    bool bLastBuildSuccessful;
-
-    UPROPERTY()
-    FString LastBuildTimestamp;
+    // Validation state
+    bool bValidationInProgress;
+    TArray<FString> ValidationErrors;
+    TArray<FString> ValidationWarnings;
 };
