@@ -1,228 +1,235 @@
 #include "DialogueComponent.h"
 #include "Engine/Engine.h"
+#include "Sound/SoundBase.h"
+#include "Components/AudioComponent.h"
 #include "Kismet/GameplayStatics.h"
 
-UDialogueComponent::UDialogueComponent()
+UNarr_DialogueComponent::UNarr_DialogueComponent()
 {
     PrimaryComponentTick.bCanEverTick = false;
-    bIsDialogueActive = false;
-    CurrentTreeIndex = -1;
-    CurrentNodeID = 0;
+    
+    CurrentSequenceID = TEXT("");
     CurrentLineIndex = 0;
+    bIsDialogueActive = false;
+    InteractionRange = 300.0f;
+    DefaultVoiceSound = nullptr;
 }
 
-void UDialogueComponent::BeginPlay()
+void UNarr_DialogueComponent::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Initialize default dialogue trees for tribal characters
-    if (DialogueTrees.Num() == 0)
-    {
-        // Create a default greeting tree
-        FNarr_DialogueTree GreetingTree;
-        GreetingTree.TreeName = TEXT("Greeting");
-        GreetingTree.StartNodeID = 0;
-
-        FNarr_DialogueNode GreetingNode;
-        GreetingNode.NodeID = 0;
-        GreetingNode.bEndsConversation = true;
-
-        FNarr_DialogueLine GreetingLine;
-        GreetingLine.SpeakerName = TEXT("Tribal Hunter");
-        GreetingLine.DialogueText = FText::FromString(TEXT("The beasts grow restless. Stay alert, traveler."));
-        GreetingLine.Duration = 3.0f;
-
-        GreetingNode.Lines.Add(GreetingLine);
-        GreetingTree.Nodes.Add(GreetingNode);
-        DialogueTrees.Add(GreetingTree);
-    }
+    // Initialize default dialogue sequences for tribal NPCs
+    FNarr_DialogueSequence ChieftainGreeting;
+    ChieftainGreeting.SequenceID = TEXT("ChieftainGreeting");
+    ChieftainGreeting.bRepeatable = true;
+    ChieftainGreeting.Priority = 10;
+    
+    FNarr_DialogueLine GreetingLine;
+    GreetingLine.SpeakerName = TEXT("Tribal Chieftain");
+    GreetingLine.DialogueText = FText::FromString(TEXT("Welcome, hunter. The great beasts grow bolder each day. We need warriors who can face the Carnotaurus and live to tell the tale."));
+    GreetingLine.Duration = 6.0f;
+    GreetingLine.EmotionalTone = ENarr_EmotionalTone::Authoritative;
+    
+    ChieftainGreeting.DialogueLines.Add(GreetingLine);
+    DialogueSequences.Add(ChieftainGreeting);
+    
+    // Scout warning dialogue
+    FNarr_DialogueSequence ScoutWarning;
+    ScoutWarning.SequenceID = TEXT("ScoutWarning");
+    ScoutWarning.bRepeatable = false;
+    ScoutWarning.Priority = 15;
+    
+    FNarr_DialogueLine WarningLine;
+    WarningLine.SpeakerName = TEXT("Scout");
+    WarningLine.DialogueText = FText::FromString(TEXT("Chief! The pack hunters circle the eastern ridge. Three Velociraptors, moving in formation. They've learned to coordinate their attacks."));
+    WarningLine.Duration = 7.0f;
+    WarningLine.EmotionalTone = ENarr_EmotionalTone::Urgent;
+    
+    ScoutWarning.DialogueLines.Add(WarningLine);
+    DialogueSequences.Add(ScoutWarning);
 }
 
-void UDialogueComponent::StartDialogue(const FString& TreeName)
+bool UNarr_DialogueComponent::StartDialogueSequence(const FString& SequenceID)
 {
     if (bIsDialogueActive)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Dialogue already active"));
-        return;
+        UE_LOG(LogTemp, Warning, TEXT("Dialogue already active, cannot start new sequence"));
+        return false;
     }
-
-    // Find the dialogue tree
-    CurrentTreeIndex = -1;
-    for (int32 i = 0; i < DialogueTrees.Num(); i++)
-    {
-        if (DialogueTrees[i].TreeName == TreeName)
-        {
-            CurrentTreeIndex = i;
-            break;
-        }
-    }
-
-    if (CurrentTreeIndex == -1)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Dialogue tree '%s' not found"), *TreeName);
-        return;
-    }
-
-    bIsDialogueActive = true;
-    CurrentNodeID = DialogueTrees[CurrentTreeIndex].StartNodeID;
-    CurrentLineIndex = 0;
-
-    ProcessCurrentNode();
-}
-
-void UDialogueComponent::AdvanceDialogue()
-{
-    if (!bIsDialogueActive)
-    {
-        return;
-    }
-
-    FNarr_DialogueNode* CurrentNode = GetCurrentNode();
-    if (!CurrentNode)
-    {
-        EndDialogue();
-        return;
-    }
-
-    CurrentLineIndex++;
-
-    // Check if we've finished all lines in this node
-    if (CurrentLineIndex >= CurrentNode->Lines.Num())
-    {
-        if (CurrentNode->bEndsConversation)
-        {
-            EndDialogue();
-            return;
-        }
-
-        // Check for player choices
-        if (CurrentNode->NextNodeIDs.Num() > 1)
-        {
-            HandlePlayerChoices(*CurrentNode);
-            return;
-        }
-
-        // Move to next node if only one option
-        if (CurrentNode->NextNodeIDs.Num() == 1)
-        {
-            CurrentNodeID = CurrentNode->NextNodeIDs[0];
-            CurrentLineIndex = 0;
-            ProcessCurrentNode();
-        }
-        else
-        {
-            EndDialogue();
-        }
-    }
-    else
-    {
-        ProcessCurrentNode();
-    }
-}
-
-void UDialogueComponent::MakeChoice(int32 ChoiceIndex)
-{
-    if (!bIsDialogueActive)
-    {
-        return;
-    }
-
-    FNarr_DialogueNode* CurrentNode = GetCurrentNode();
-    if (!CurrentNode || ChoiceIndex < 0 || ChoiceIndex >= CurrentNode->NextNodeIDs.Num())
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Invalid choice index: %d"), ChoiceIndex);
-        return;
-    }
-
-    CurrentNodeID = CurrentNode->NextNodeIDs[ChoiceIndex];
-    CurrentLineIndex = 0;
-    ProcessCurrentNode();
-}
-
-void UDialogueComponent::EndDialogue()
-{
-    bIsDialogueActive = false;
-    CurrentTreeIndex = -1;
-    CurrentNodeID = 0;
-    CurrentLineIndex = 0;
-
-    OnDialogueEnded.Broadcast();
-}
-
-void UDialogueComponent::AddDialogueTree(const FNarr_DialogueTree& NewTree)
-{
-    // Check if tree with this name already exists
-    for (int32 i = 0; i < DialogueTrees.Num(); i++)
-    {
-        if (DialogueTrees[i].TreeName == NewTree.TreeName)
-        {
-            DialogueTrees[i] = NewTree;
-            return;
-        }
-    }
-
-    DialogueTrees.Add(NewTree);
-}
-
-bool UDialogueComponent::HasDialogueTree(const FString& TreeName) const
-{
-    for (const FNarr_DialogueTree& Tree : DialogueTrees)
-    {
-        if (Tree.TreeName == TreeName)
-        {
-            return true;
-        }
-    }
-    return false;
-}
-
-void UDialogueComponent::ProcessCurrentNode()
-{
-    FNarr_DialogueNode* CurrentNode = GetCurrentNode();
-    if (!CurrentNode || CurrentLineIndex >= CurrentNode->Lines.Num())
-    {
-        EndDialogue();
-        return;
-    }
-
-    const FNarr_DialogueLine& CurrentLine = CurrentNode->Lines[CurrentLineIndex];
     
-    // Broadcast dialogue started event
-    OnDialogueStarted.Broadcast(CurrentLine.SpeakerName, CurrentLine.DialogueText);
-
-    // Log dialogue for debugging
-    UE_LOG(LogTemp, Log, TEXT("%s: %s"), *CurrentLine.SpeakerName, *CurrentLine.DialogueText.ToString());
+    FNarr_DialogueSequence* Sequence = FindSequenceByID(SequenceID);
+    if (!Sequence || Sequence->DialogueLines.Num() == 0)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Dialogue sequence not found or empty: %s"), *SequenceID);
+        return false;
+    }
+    
+    if (!CanStartDialogue(SequenceID))
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Cannot start dialogue sequence: %s"), *SequenceID);
+        return false;
+    }
+    
+    CurrentSequenceID = SequenceID;
+    CurrentLineIndex = 0;
+    bIsDialogueActive = true;
+    
+    const FNarr_DialogueLine& FirstLine = Sequence->DialogueLines[0];
+    PlayVoiceLine(FirstLine);
+    
+    OnDialogueStarted.Broadcast(SequenceID, FirstLine);
+    
+    UE_LOG(LogTemp, Log, TEXT("Started dialogue sequence: %s"), *SequenceID);
+    return true;
 }
 
-FNarr_DialogueNode* UDialogueComponent::GetCurrentNode()
+void UNarr_DialogueComponent::NextDialogueLine()
 {
-    if (CurrentTreeIndex < 0 || CurrentTreeIndex >= DialogueTrees.Num())
+    if (!bIsDialogueActive)
     {
-        return nullptr;
+        return;
     }
-
-    FNarr_DialogueTree& CurrentTree = DialogueTrees[CurrentTreeIndex];
-    for (FNarr_DialogueNode& Node : CurrentTree.Nodes)
+    
+    FNarr_DialogueSequence* CurrentSequence = FindSequenceByID(CurrentSequenceID);
+    if (!CurrentSequence)
     {
-        if (Node.NodeID == CurrentNodeID)
+        EndDialogue();
+        return;
+    }
+    
+    CurrentLineIndex++;
+    
+    if (CurrentLineIndex >= CurrentSequence->DialogueLines.Num())
+    {
+        EndDialogue();
+        return;
+    }
+    
+    const FNarr_DialogueLine& NextLine = CurrentSequence->DialogueLines[CurrentLineIndex];
+    PlayVoiceLine(NextLine);
+    
+    OnDialogueLineChanged.Broadcast(NextLine);
+    
+    UE_LOG(LogTemp, Log, TEXT("Advanced to dialogue line %d"), CurrentLineIndex);
+}
+
+void UNarr_DialogueComponent::EndDialogue()
+{
+    if (!bIsDialogueActive)
+    {
+        return;
+    }
+    
+    bIsDialogueActive = false;
+    CurrentSequenceID = TEXT("");
+    CurrentLineIndex = 0;
+    
+    OnDialogueEnded.Broadcast();
+    
+    UE_LOG(LogTemp, Log, TEXT("Dialogue ended"));
+}
+
+FNarr_DialogueLine UNarr_DialogueComponent::GetCurrentDialogueLine() const
+{
+    if (!bIsDialogueActive)
+    {
+        return FNarr_DialogueLine();
+    }
+    
+    const FNarr_DialogueSequence* CurrentSequence = const_cast<UNarr_DialogueComponent*>(this)->FindSequenceByID(CurrentSequenceID);
+    if (!CurrentSequence || CurrentLineIndex >= CurrentSequence->DialogueLines.Num())
+    {
+        return FNarr_DialogueLine();
+    }
+    
+    return CurrentSequence->DialogueLines[CurrentLineIndex];
+}
+
+bool UNarr_DialogueComponent::CanStartDialogue(const FString& SequenceID) const
+{
+    const FNarr_DialogueSequence* Sequence = const_cast<UNarr_DialogueComponent*>(this)->FindSequenceByID(SequenceID);
+    if (!Sequence)
+    {
+        return false;
+    }
+    
+    // Check if sequence is repeatable or hasn't been played yet
+    // For now, all sequences are available (quest phase checking can be added later)
+    return true;
+}
+
+void UNarr_DialogueComponent::AddDialogueSequence(const FNarr_DialogueSequence& NewSequence)
+{
+    // Remove existing sequence with same ID if it exists
+    DialogueSequences.RemoveAll([&NewSequence](const FNarr_DialogueSequence& Existing)
+    {
+        return Existing.SequenceID == NewSequence.SequenceID;
+    });
+    
+    DialogueSequences.Add(NewSequence);
+    
+    // Sort by priority (higher priority first)
+    DialogueSequences.Sort([](const FNarr_DialogueSequence& A, const FNarr_DialogueSequence& B)
+    {
+        return A.Priority > B.Priority;
+    });
+    
+    UE_LOG(LogTemp, Log, TEXT("Added dialogue sequence: %s"), *NewSequence.SequenceID);
+}
+
+TArray<FString> UNarr_DialogueComponent::GetAvailableSequenceIDs() const
+{
+    TArray<FString> AvailableIDs;
+    
+    for (const FNarr_DialogueSequence& Sequence : DialogueSequences)
+    {
+        if (CanStartDialogue(Sequence.SequenceID))
         {
-            return &Node;
+            AvailableIDs.Add(Sequence.SequenceID);
         }
     }
+    
+    return AvailableIDs;
+}
 
+FNarr_DialogueSequence* UNarr_DialogueComponent::FindSequenceByID(const FString& SequenceID)
+{
+    for (FNarr_DialogueSequence& Sequence : DialogueSequences)
+    {
+        if (Sequence.SequenceID == SequenceID)
+        {
+            return &Sequence;
+        }
+    }
+    
     return nullptr;
 }
 
-void UDialogueComponent::HandlePlayerChoices(const FNarr_DialogueNode& Node)
+void UNarr_DialogueComponent::PlayVoiceLine(const FNarr_DialogueLine& DialogueLine)
 {
-    TArray<FText> Choices;
-    
-    // For now, create generic choice text based on next node count
-    for (int32 i = 0; i < Node.NextNodeIDs.Num(); i++)
+    if (DialogueLine.AudioAssetPath.IsEmpty() && !DefaultVoiceSound)
     {
-        FString ChoiceText = FString::Printf(TEXT("Choice %d"), i + 1);
-        Choices.Add(FText::FromString(ChoiceText));
+        UE_LOG(LogTemp, Warning, TEXT("No audio asset specified for dialogue line"));
+        return;
     }
-
-    OnDialogueChoiceRequired.Broadcast(Choices);
+    
+    USoundBase* SoundToPlay = DefaultVoiceSound;
+    
+    if (!DialogueLine.AudioAssetPath.IsEmpty())
+    {
+        // Try to load the specific audio asset
+        SoundToPlay = LoadObject<USoundBase>(nullptr, *DialogueLine.AudioAssetPath);
+        if (!SoundToPlay)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Failed to load audio asset: %s"), *DialogueLine.AudioAssetPath);
+            SoundToPlay = DefaultVoiceSound;
+        }
+    }
+    
+    if (SoundToPlay)
+    {
+        UGameplayStatics::PlaySound2D(GetWorld(), SoundToPlay);
+        UE_LOG(LogTemp, Log, TEXT("Playing voice line for: %s"), *DialogueLine.SpeakerName);
+    }
 }
