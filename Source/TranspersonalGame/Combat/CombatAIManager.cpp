@@ -1,293 +1,544 @@
 #include "CombatAIManager.h"
-#include "EnemyAIController.h"
+#include "../Characters/DinosaurPawn.h"
+#include "../Characters/TranspersonalCharacter.h"
 #include "Engine/World.h"
-#include "TimerManager.h"
-#include "GameFramework/Pawn.h"
-#include "Engine/Engine.h"
-#include "DrawDebugHelpers.h"
-#include "CollisionQueryParams.h"
+#include "Kismet/GameplayStatics.h"
+#include "Math/UnrealMathUtility.h"
 
-ACombatAIManager::ACombatAIManager()
+UCombatAIManager::UCombatAIManager()
 {
-    PrimaryActorTick.bCanEverTick = true;
-    
-    TacticalUpdateInterval = 2.0f;
+    NextGroupID = 1;
     MaxEngagementRange = 2000.0f;
-    bUsePackTactics = true;
-    CurrentTarget = nullptr;
-    
-    CurrentFormation.FormationType = ECombat_FormationType::Circle;
-    CurrentFormation.FormationRadius = 500.0f;
+    MinGroupCoordinationInterval = 2.0f;
+    FlankingDistance = 800.0f;
+    AmbushPositionRadius = 1200.0f;
 }
 
-void ACombatAIManager::BeginPlay()
+void UCombatAIManager::Initialize(FSubsystemCollectionBase& Collection)
 {
-    Super::BeginPlay();
+    Super::Initialize(Collection);
     
-    // Start tactical update timer
-    GetWorldTimerManager().SetTimer(TacticalUpdateTimer, this, &ACombatAIManager::OnTacticalUpdate, TacticalUpdateInterval, true);
+    UE_LOG(LogTemp, Log, TEXT("CombatAIManager initialized"));
     
-    UE_LOG(LogTemp, Warning, TEXT("CombatAIManager: Initialized with tactical update interval: %f"), TacticalUpdateInterval);
-}
-
-void ACombatAIManager::Tick(float DeltaTime)
-{
-    Super::Tick(DeltaTime);
-    
-    // Clean up null references
-    RegisteredEnemies.RemoveAll([](AEnemyAIController* Enemy) {
-        return !IsValid(Enemy);
-    });
-    
-    // Update formation center if we have a target
-    if (CurrentTarget && RegisteredEnemies.Num() > 0)
+    // Set up periodic group updates
+    if (UWorld* World = GetWorld())
     {
-        CurrentFormation.CenterPoint = CurrentTarget->GetActorLocation();
+        World->GetTimerManager().SetTimer(
+            FTimerHandle(),
+            [this]()
+            {
+                UpdateAllGroups(GetWorld()->GetDeltaSeconds());
+            },
+            0.1f, // Update every 100ms
+            true
+        );
     }
 }
 
-void ACombatAIManager::RegisterEnemy(AEnemyAIController* Enemy)
+void UCombatAIManager::Deinitialize()
 {
-    if (IsValid(Enemy) && !RegisteredEnemies.Contains(Enemy))
-    {
-        RegisteredEnemies.Add(Enemy);
-        UE_LOG(LogTemp, Warning, TEXT("CombatAIManager: Registered enemy %s. Total enemies: %d"), 
-               *Enemy->GetName(), RegisteredEnemies.Num());
-        
-        // Update tactical positions when new enemy joins
-        UpdateTacticalPositions();
-    }
+    TacticalGroups.Empty();
+    Super::Deinitialize();
 }
 
-void ACombatAIManager::UnregisterEnemy(AEnemyAIController* Enemy)
+int32 UCombatAIManager::CreateTacticalGroup(const TArray<ADinosaurPawn*>& Members, ADinosaurPawn* Alpha)
 {
-    if (RegisteredEnemies.Contains(Enemy))
+    if (Members.Num() == 0 || !Alpha)
     {
-        RegisteredEnemies.Remove(Enemy);
-        UE_LOG(LogTemp, Warning, TEXT("CombatAIManager: Unregistered enemy %s. Remaining enemies: %d"), 
-               *Enemy->GetName(), RegisteredEnemies.Num());
-        
-        // Update tactical positions when enemy leaves
-        UpdateTacticalPositions();
+        UE_LOG(LogTemp, Warning, TEXT("Cannot create tactical group: invalid members or alpha"));
+        return -1;
     }
-}
 
-void ACombatAIManager::SetTarget(APawn* NewTarget)
-{
-    if (CurrentTarget != NewTarget)
+    int32 GroupID = NextGroupID++;
+    FCombat_TacticalGroup NewGroup;
+    
+    // Add members
+    for (ADinosaurPawn* Member : Members)
     {
-        CurrentTarget = NewTarget;
-        
-        if (CurrentTarget)
+        if (Member)
         {
-            UE_LOG(LogTemp, Warning, TEXT("CombatAIManager: New target acquired: %s"), *CurrentTarget->GetName());
-            UpdateTacticalPositions();
-        }
-        else
-        {
-            UE_LOG(LogTemp, Warning, TEXT("CombatAIManager: Target cleared"));
+            NewGroup.Members.Add(Member);
         }
     }
+    
+    NewGroup.Alpha = Alpha;
+    NewGroup.CurrentState = ECombat_TacticalState::Idle;
+    NewGroup.FormationRadius = 500.0f;
+    
+    TacticalGroups.Add(GroupID, NewGroup);
+    
+    UE_LOG(LogTemp, Log, TEXT("Created tactical group %d with %d members"), GroupID, NewGroup.Members.Num());
+    
+    return GroupID;
 }
 
-void ACombatAIManager::UpdateTacticalPositions()
+void UCombatAIManager::DisbandTacticalGroup(int32 GroupID)
 {
-    if (!CurrentTarget || RegisteredEnemies.Num() == 0)
+    if (TacticalGroups.Contains(GroupID))
+    {
+        TacticalGroups.Remove(GroupID);
+        UE_LOG(LogTemp, Log, TEXT("Disbanded tactical group %d"), GroupID);
+    }
+}
+
+void UCombatAIManager::AddMemberToGroup(int32 GroupID, ADinosaurPawn* NewMember)
+{
+    if (FCombat_TacticalGroup* Group = TacticalGroups.Find(GroupID))
+    {
+        if (NewMember && !Group->Members.Contains(NewMember))
+        {
+            Group->Members.Add(NewMember);
+            UE_LOG(LogTemp, Log, TEXT("Added member to tactical group %d"), GroupID);
+        }
+    }
+}
+
+void UCombatAIManager::RemoveMemberFromGroup(int32 GroupID, ADinosaurPawn* Member)
+{
+    if (FCombat_TacticalGroup* Group = TacticalGroups.Find(GroupID))
+    {
+        Group->Members.RemoveAll([Member](const TWeakObjectPtr<ADinosaurPawn>& WeakPtr)
+        {
+            return WeakPtr.Get() == Member;
+        });
+        
+        // If alpha was removed, assign new alpha
+        if (Group->Alpha.Get() == Member && Group->Members.Num() > 0)
+        {
+            Group->Alpha = Group->Members[0];
+        }
+        
+        // Disband if no members left
+        if (Group->Members.Num() == 0)
+        {
+            DisbandTacticalGroup(GroupID);
+        }
+    }
+}
+
+void UCombatAIManager::SetGroupTarget(int32 GroupID, ATranspersonalCharacter* Target)
+{
+    if (FCombat_TacticalGroup* Group = TacticalGroups.Find(GroupID))
+    {
+        Group->CurrentTarget = Target;
+        if (Target)
+        {
+            Group->TargetLocation = Target->GetActorLocation();
+            UE_LOG(LogTemp, Log, TEXT("Set target for tactical group %d"), GroupID);
+        }
+    }
+}
+
+void UCombatAIManager::SetGroupState(int32 GroupID, ECombat_TacticalState NewState)
+{
+    if (FCombat_TacticalGroup* Group = TacticalGroups.Find(GroupID))
+    {
+        Group->CurrentState = NewState;
+        Group->LastCoordinationTime = GetWorld()->GetTimeSeconds();
+        
+        UE_LOG(LogTemp, Log, TEXT("Set tactical group %d state to %d"), GroupID, (int32)NewState);
+    }
+}
+
+void UCombatAIManager::CoordinateGroupAttack(int32 GroupID)
+{
+    FCombat_TacticalGroup* Group = TacticalGroups.Find(GroupID);
+    if (!Group || !Group->CurrentTarget.IsValid())
     {
         return;
     }
-    
-    // Generate formation positions based on current tactic
-    TArray<FCombat_TacticalPosition> NewPositions = GenerateFormationPositions(
-        CurrentTarget->GetActorLocation(), 
-        CurrentFormation.FormationType, 
-        RegisteredEnemies.Num()
-    );
-    
-    CurrentFormation.Positions = NewPositions;
-    
-    // Assign positions to enemies
-    for (int32 i = 0; i < RegisteredEnemies.Num() && i < NewPositions.Num(); i++)
+
+    ATranspersonalCharacter* Target = Group->CurrentTarget.Get();
+    if (!Target)
     {
-        if (IsValid(RegisteredEnemies[i]))
+        return;
+    }
+
+    // Assign roles and positions to each member
+    for (int32 i = 0; i < Group->Members.Num(); ++i)
+    {
+        ADinosaurPawn* Member = Group->Members[i].Get();
+        if (!Member)
         {
-            // TODO: Send tactical position to enemy AI controller
-            // This would be implemented when EnemyAIController is created
-            UE_LOG(LogTemp, Log, TEXT("CombatAIManager: Assigned tactical position to %s at %s"), 
-                   *RegisteredEnemies[i]->GetName(), *NewPositions[i].Position.ToString());
+            continue;
+        }
+
+        ECombat_PackRole Role = AssignOptimalRole(Member, *Group);
+        FVector TargetPosition = CalculateFlankingPosition(*Group, Target, Role);
+        
+        // Create tactical command
+        FCombat_TacticalCommand Command;
+        Command.CommandType = ECombat_TacticalState::Attacking;
+        Command.TargetPosition = TargetPosition;
+        Command.AssignedRole = Role;
+        Command.Priority = (Role == ECombat_PackRole::Alpha) ? 10.0f : 5.0f;
+        Command.ExecutionTime = GetWorld()->GetTimeSeconds() + (i * 0.5f); // Stagger attacks
+        
+        ExecuteGroupCommand(*Group, Command);
+    }
+    
+    SetGroupState(GroupID, ECombat_TacticalState::Attacking);
+}
+
+void UCombatAIManager::ExecuteTacticalRetreat(int32 GroupID)
+{
+    FCombat_TacticalGroup* Group = TacticalGroups.Find(GroupID);
+    if (!Group)
+    {
+        return;
+    }
+
+    // Calculate retreat positions away from target
+    FVector RetreatCenter = FVector::ZeroVector;
+    if (Group->CurrentTarget.IsValid())
+    {
+        FVector TargetLocation = Group->CurrentTarget->GetActorLocation();
+        FVector GroupCenter = FVector::ZeroVector;
+        
+        // Calculate group center
+        int32 ValidMembers = 0;
+        for (const TWeakObjectPtr<ADinosaurPawn>& MemberPtr : Group->Members)
+        {
+            if (ADinosaurPawn* Member = MemberPtr.Get())
+            {
+                GroupCenter += Member->GetActorLocation();
+                ValidMembers++;
+            }
+        }
+        
+        if (ValidMembers > 0)
+        {
+            GroupCenter /= ValidMembers;
+            FVector RetreatDirection = (GroupCenter - TargetLocation).GetSafeNormal();
+            RetreatCenter = GroupCenter + (RetreatDirection * 1500.0f);
         }
     }
+
+    // Assign retreat positions
+    for (int32 i = 0; i < Group->Members.Num(); ++i)
+    {
+        ADinosaurPawn* Member = Group->Members[i].Get();
+        if (!Member)
+        {
+            continue;
+        }
+
+        FVector RetreatPosition = RetreatCenter + FVector(
+            FMath::RandRange(-500.0f, 500.0f),
+            FMath::RandRange(-500.0f, 500.0f),
+            0.0f
+        );
+        
+        FCombat_TacticalCommand Command;
+        Command.CommandType = ECombat_TacticalState::Retreating;
+        Command.TargetPosition = RetreatPosition;
+        Command.AssignedRole = ECombat_PackRole::Support;
+        Command.Priority = 8.0f;
+        Command.ExecutionTime = GetWorld()->GetTimeSeconds();
+        
+        ExecuteGroupCommand(*Group, Command);
+    }
+    
+    SetGroupState(GroupID, ECombat_TacticalState::Retreating);
 }
 
-FCombat_TacticalPosition ACombatAIManager::CalculateFlankingPosition(const FVector& TargetLocation, int32 FlankIndex)
+bool UCombatAIManager::ShouldEngageTarget(const FCombat_TacticalGroup& Group, ATranspersonalCharacter* PotentialTarget) const
 {
-    FCombat_TacticalPosition FlankPosition;
-    
-    // Calculate flanking angle based on index
-    float AngleStep = 360.0f / FMath::Max(RegisteredEnemies.Num(), 1);
-    float FlankAngle = FlankIndex * AngleStep;
-    
-    // Convert to radians
-    float AngleRadians = FMath::DegreesToRadians(FlankAngle);
-    
-    // Calculate position around target
-    FVector Offset = FVector(
-        FMath::Cos(AngleRadians) * CurrentFormation.FormationRadius,
-        FMath::Sin(AngleRadians) * CurrentFormation.FormationRadius,
-        0.0f
-    );
-    
-    FlankPosition.Position = TargetLocation + Offset;
-    FlankPosition.bIsFlankingPosition = true;
-    FlankPosition.ThreatLevel = CalculateThreatLevel(FlankPosition.Position, CurrentTarget);
-    FlankPosition.bHasCover = false; // TODO: Implement cover detection
-    
-    return FlankPosition;
-}
+    if (!PotentialTarget || Group.Members.Num() == 0)
+    {
+        return false;
+    }
 
-bool ACombatAIManager::ShouldEngageTarget(APawn* Target) const
-{
-    if (!Target)
+    // Calculate distance to target
+    FVector GroupCenter = FVector::ZeroVector;
+    int32 ValidMembers = 0;
+    
+    for (const TWeakObjectPtr<ADinosaurPawn>& MemberPtr : Group.Members)
+    {
+        if (ADinosaurPawn* Member = MemberPtr.Get())
+        {
+            GroupCenter += Member->GetActorLocation();
+            ValidMembers++;
+        }
+    }
+    
+    if (ValidMembers == 0)
     {
         return false;
     }
     
-    // Check distance
-    float DistanceToTarget = FVector::Dist(GetActorLocation(), Target->GetActorLocation());
+    GroupCenter /= ValidMembers;
+    float DistanceToTarget = FVector::Dist(GroupCenter, PotentialTarget->GetActorLocation());
+    
+    // Check if target is within engagement range
     if (DistanceToTarget > MaxEngagementRange)
     {
         return false;
     }
     
-    // Check if target is alive (has health component or similar)
-    // TODO: Implement health check when health system is available
+    // Calculate threat levels
+    float GroupThreat = CalculateGroupThreatLevel(Group);
+    float TargetThreat = CalculateTargetThreatLevel(PotentialTarget);
     
-    return true;
+    // Engage if group has advantage
+    return GroupThreat > TargetThreat * 0.7f; // 70% confidence threshold
 }
 
-void ACombatAIManager::ExecutePackTactic(ECombat_FormationType TacticType)
+FVector UCombatAIManager::CalculateFlankingPosition(const FCombat_TacticalGroup& Group, ATranspersonalCharacter* Target, ECombat_PackRole Role) const
 {
-    CurrentFormation.FormationType = TacticType;
-    UpdateTacticalPositions();
-    
-    UE_LOG(LogTemp, Warning, TEXT("CombatAIManager: Executing pack tactic: %d"), (int32)TacticType);
-}
-
-TArray<FCombat_TacticalPosition> ACombatAIManager::GenerateFormationPositions(const FVector& CenterPoint, ECombat_FormationType FormationType, int32 NumPositions)
-{
-    TArray<FCombat_TacticalPosition> Positions;
-    
-    if (NumPositions <= 0)
+    if (!Target)
     {
-        return Positions;
+        return FVector::ZeroVector;
     }
+
+    FVector TargetLocation = Target->GetActorLocation();
+    FVector TargetForward = Target->GetActorForwardVector();
     
-    switch (FormationType)
+    switch (Role)
     {
-        case ECombat_FormationType::Circle:
-        {
-            float AngleStep = 360.0f / NumPositions;
-            for (int32 i = 0; i < NumPositions; i++)
-            {
-                FCombat_TacticalPosition Position = CalculateFlankingPosition(CenterPoint, i);
-                Positions.Add(Position);
-            }
-            break;
-        }
-        
-        case ECombat_FormationType::Line:
-        {
-            FVector LineDirection = FVector::ForwardVector;
-            float Spacing = CurrentFormation.FormationRadius / NumPositions;
+        case ECombat_PackRole::Alpha:
+            // Alpha attacks from front
+            return TargetLocation + (TargetForward * FlankingDistance);
             
-            for (int32 i = 0; i < NumPositions; i++)
+        case ECombat_PackRole::Flanker:
+            // Flanker attacks from side
             {
-                FCombat_TacticalPosition Position;
-                Position.Position = CenterPoint + (LineDirection * (i - NumPositions/2) * Spacing);
-                Position.ThreatLevel = CalculateThreatLevel(Position.Position, CurrentTarget);
-                Position.bIsFlankingPosition = (i == 0 || i == NumPositions - 1);
-                Positions.Add(Position);
+                FVector RightVector = Target->GetActorRightVector();
+                float SideMultiplier = FMath::RandBool() ? 1.0f : -1.0f;
+                return TargetLocation + (RightVector * FlankingDistance * SideMultiplier);
             }
-            break;
-        }
-        
-        case ECombat_FormationType::Ambush:
-        {
-            // Create ambush positions with some enemies hidden
-            for (int32 i = 0; i < NumPositions; i++)
+            
+        case ECombat_PackRole::Ambusher:
+            // Ambusher attacks from behind
+            return TargetLocation - (TargetForward * FlankingDistance);
+            
+        case ECombat_PackRole::Distractor:
+            // Distractor stays at medium range
             {
-                FCombat_TacticalPosition Position = CalculateFlankingPosition(CenterPoint, i);
-                Position.bHasCover = (i % 2 == 0); // Alternate cover positions
-                Positions.Add(Position);
+                FVector RandomDirection = FMath::VRand();
+                RandomDirection.Z = 0.0f;
+                RandomDirection.Normalize();
+                return TargetLocation + (RandomDirection * FlankingDistance * 0.7f);
             }
-            break;
-        }
-        
+            
         default:
-            // Default to circle formation
-            return GenerateFormationPositions(CenterPoint, ECombat_FormationType::Circle, NumPositions);
+            // Support role - maintain distance
+            {
+                FVector RandomDirection = FMath::VRand();
+                RandomDirection.Z = 0.0f;
+                RandomDirection.Normalize();
+                return TargetLocation + (RandomDirection * FlankingDistance * 1.2f);
+            }
+    }
+}
+
+ECombat_PackRole UCombatAIManager::AssignOptimalRole(ADinosaurPawn* Member, const FCombat_TacticalGroup& Group) const
+{
+    if (!Member)
+    {
+        return ECombat_PackRole::Support;
+    }
+
+    // Alpha is always the alpha
+    if (Group.Alpha.Get() == Member)
+    {
+        return ECombat_PackRole::Alpha;
+    }
+
+    // Assign roles based on member capabilities and group needs
+    // For now, use simple rotation
+    int32 MemberIndex = Group.Members.IndexOfByPredicate([Member](const TWeakObjectPtr<ADinosaurPawn>& Ptr)
+    {
+        return Ptr.Get() == Member;
+    });
+
+    switch (MemberIndex % 4)
+    {
+        case 0: return ECombat_PackRole::Flanker;
+        case 1: return ECombat_PackRole::Ambusher;
+        case 2: return ECombat_PackRole::Distractor;
+        default: return ECombat_PackRole::Support;
+    }
+}
+
+FCombat_TacticalGroup* UCombatAIManager::GetTacticalGroup(int32 GroupID)
+{
+    return TacticalGroups.Find(GroupID);
+}
+
+TArray<int32> UCombatAIManager::GetActiveGroupIDs() const
+{
+    TArray<int32> GroupIDs;
+    TacticalGroups.GetKeys(GroupIDs);
+    return GroupIDs;
+}
+
+void UCombatAIManager::UpdateAllGroups(float DeltaTime)
+{
+    // Clean up invalid groups first
+    CleanupInvalidGroups();
+    
+    // Update each group
+    for (auto& GroupPair : TacticalGroups)
+    {
+        UpdateGroupCoordination(GroupPair.Value, DeltaTime);
+    }
+}
+
+void UCombatAIManager::UpdateGroupCoordination(FCombat_TacticalGroup& Group, float DeltaTime)
+{
+    // Validate group integrity
+    if (!ValidateGroupIntegrity(Group))
+    {
+        return;
+    }
+
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    
+    // Check if it's time for coordination update
+    if (CurrentTime - Group.LastCoordinationTime < MinGroupCoordinationInterval)
+    {
+        return;
+    }
+
+    // Update based on current state
+    switch (Group.CurrentState)
+    {
+        case ECombat_TacticalState::Hunting:
+            // Look for targets
+            if (!Group.CurrentTarget.IsValid())
+            {
+                // Find nearest player
+                if (UWorld* World = GetWorld())
+                {
+                    ATranspersonalCharacter* Player = Cast<ATranspersonalCharacter>(
+                        UGameplayStatics::GetPlayerCharacter(World, 0)
+                    );
+                    
+                    if (Player && ShouldEngageTarget(Group, Player))
+                    {
+                        Group.CurrentTarget = Player;
+                        Group.CurrentState = ECombat_TacticalState::Stalking;
+                    }
+                }
+            }
+            break;
+            
+        case ECombat_TacticalState::Stalking:
+            // Check if target is still valid and in range
+            if (Group.CurrentTarget.IsValid())
+            {
+                if (ShouldEngageTarget(Group, Group.CurrentTarget.Get()))
+                {
+                    Group.CurrentState = ECombat_TacticalState::Coordinating;
+                }
+            }
+            else
+            {
+                Group.CurrentState = ECombat_TacticalState::Hunting;
+            }
+            break;
+            
+        case ECombat_TacticalState::Coordinating:
+            // Prepare for attack
+            Group.CurrentState = ECombat_TacticalState::Attacking;
+            break;
     }
     
-    return Positions;
+    Group.LastCoordinationTime = CurrentTime;
 }
 
-void ACombatAIManager::OnTacticalUpdate()
+void UCombatAIManager::ExecuteGroupCommand(FCombat_TacticalGroup& Group, const FCombat_TacticalCommand& Command)
 {
-    if (bUsePackTactics && RegisteredEnemies.Num() > 0)
+    // This would integrate with the AI controller to execute the command
+    // For now, just log the command
+    UE_LOG(LogTemp, Log, TEXT("Executing tactical command: State=%d, Position=(%f,%f,%f), Role=%d"),
+        (int32)Command.CommandType,
+        Command.TargetPosition.X, Command.TargetPosition.Y, Command.TargetPosition.Z,
+        (int32)Command.AssignedRole
+    );
+}
+
+bool UCombatAIManager::ValidateGroupIntegrity(FCombat_TacticalGroup& Group)
+{
+    // Remove invalid members
+    Group.Members.RemoveAll([](const TWeakObjectPtr<ADinosaurPawn>& WeakPtr)
     {
-        UpdateTacticalPositions();
-        
-        // Debug visualization
-        if (GEngine && CurrentTarget)
+        return !WeakPtr.IsValid();
+    });
+    
+    // Check if alpha is still valid
+    if (!Group.Alpha.IsValid() && Group.Members.Num() > 0)
+    {
+        Group.Alpha = Group.Members[0];
+    }
+    
+    return Group.Members.Num() > 0;
+}
+
+void UCombatAIManager::CleanupInvalidGroups()
+{
+    TArray<int32> GroupsToRemove;
+    
+    for (auto& GroupPair : TacticalGroups)
+    {
+        if (!ValidateGroupIntegrity(GroupPair.Value))
         {
-            for (const FCombat_TacticalPosition& Position : CurrentFormation.Positions)
-            {
-                FColor DebugColor = Position.bIsFlankingPosition ? FColor::Red : FColor::Yellow;
-                DrawDebugSphere(GetWorld(), Position.Position, 50.0f, 8, DebugColor, false, TacticalUpdateInterval);
-            }
+            GroupsToRemove.Add(GroupPair.Key);
         }
+    }
+    
+    for (int32 GroupID : GroupsToRemove)
+    {
+        TacticalGroups.Remove(GroupID);
+        UE_LOG(LogTemp, Log, TEXT("Removed invalid tactical group %d"), GroupID);
     }
 }
 
-float ACombatAIManager::CalculateThreatLevel(const FVector& Position, APawn* Target) const
+float UCombatAIManager::CalculateGroupThreatLevel(const FCombat_TacticalGroup& Group) const
+{
+    float ThreatLevel = 0.0f;
+    
+    for (const TWeakObjectPtr<ADinosaurPawn>& MemberPtr : Group.Members)
+    {
+        if (ADinosaurPawn* Member = MemberPtr.Get())
+        {
+            // Base threat per member
+            ThreatLevel += 10.0f;
+            
+            // Bonus for pack coordination
+            ThreatLevel += Group.Members.Num() * 2.0f;
+        }
+    }
+    
+    return ThreatLevel;
+}
+
+float UCombatAIManager::CalculateTargetThreatLevel(ATranspersonalCharacter* Target) const
 {
     if (!Target)
     {
         return 0.0f;
     }
     
-    float Distance = FVector::Dist(Position, Target->GetActorLocation());
-    float ThreatLevel = 1.0f - (Distance / MaxEngagementRange);
+    // Base player threat
+    float ThreatLevel = 15.0f;
     
-    // Higher threat for closer positions
-    ThreatLevel = FMath::Clamp(ThreatLevel, 0.0f, 1.0f);
+    // Add weapon bonuses, health, etc. when those systems exist
     
-    // Bonus threat for flanking positions
-    FVector ToTarget = (Target->GetActorLocation() - Position).GetSafeNormal();
-    FVector TargetForward = Target->GetActorForwardVector();
-    float DotProduct = FVector::DotProduct(ToTarget, TargetForward);
-    
-    if (DotProduct < 0.0f) // Behind target
-    {
-        ThreatLevel += 0.3f;
-    }
-    
-    return FMath::Clamp(ThreatLevel, 0.0f, 2.0f);
+    return ThreatLevel;
 }
 
-bool ACombatAIManager::HasLineOfSight(const FVector& FromPosition, const FVector& ToPosition) const
+bool UCombatAIManager::IsPositionStrategic(const FVector& Position, const FCombat_TacticalGroup& Group, ATranspersonalCharacter* Target) const
 {
-    FHitResult HitResult;
-    FCollisionQueryParams QueryParams;
-    QueryParams.AddIgnoredActor(this);
+    if (!Target)
+    {
+        return false;
+    }
     
-    bool bHit = GetWorld()->LineTraceSingleByChannel(
-        HitResult,
-        FromPosition,
-        ToPosition,
-        ECC_Visibility,
-        QueryParams
-    );
+    FVector TargetLocation = Target->GetActorLocation();
+    float DistanceToTarget = FVector::Dist(Position, TargetLocation);
     
-    return !bHit;
+    // Position is strategic if it's within optimal range
+    return DistanceToTarget >= FlankingDistance * 0.5f && DistanceToTarget <= FlankingDistance * 1.5f;
 }
