@@ -1,484 +1,204 @@
-// Copyright Transpersonal Game Studio. All Rights Reserved.
-
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
+#include "Engine/World.h"
 #include "Components/ActorComponent.h"
-#include "PCGComponent.h"
-#include "PCGGraph.h"
-#include "PCGData.h"
+#include "Components/StaticMeshComponent.h"
+#include "Components/InstancedStaticMeshComponent.h"
+#include "Materials/MaterialInterface.h"
 #include "Engine/StaticMesh.h"
-#include "Engine/SkeletalMesh.h"
-#include "Materials/Material.h"
-#include "Materials/MaterialInstance.h"
-#include "Foliage/Public/FoliageType.h"
-#include "Foliage/Public/FoliageType_InstancedStaticMesh.h"
-#include "WorldGeneration/JurassicBiomeManager.h"
-#include "Engine/DataAsset.h"
-#include "Engine/DataTable.h"
+#include "Engine/DirectionalLight.h"
+#include "Components/DirectionalLightComponent.h"
+#include "Components/ExponentialHeightFogComponent.h"
+#include "Engine/ExponentialHeightFog.h"
+#include "Particles/ParticleSystemComponent.h"
+#include "Engine/PostProcessVolume.h"
+#include "Sound/AmbientSound.h"
+#include "Components/AudioComponent.h"
+#include "../SharedTypes.h"
 #include "EnvironmentArtManager.generated.h"
 
-class UPCGGraph;
-class UPCGComponent;
-class UStaticMesh;
-class UMaterialInterface;
-class UFoliageType;
-class AJurassicBiomeManager;
-
-/**
- * @brief Environment Artist System for Transpersonal Game Studio
- * 
- * Transforms the procedurally generated world into a living, breathing prehistoric environment.
- * Each prop, rock, and plant tells a story of the world that existed before the player arrived.
- * 
- * Design Philosophy (Roger Deakins + RDR2 Environmental Team):
- * "A luz e a composição contam a história antes de qualquer personagem falar.
- * Cada detalhe existe para criar uma ilusão de história — um mundo que existiu 
- * antes de o jogador chegar e que vai continuar a existir depois de ele sair."
- * 
- * Core Responsibilities:
- * - Vegetation placement and variation (trees, bushes, grass, ferns)
- * - Rock and geological detail placement
- * - Environmental props and storytelling elements
- * - Material application and blending
- * - Atmospheric detail (fallen logs, bones, ancient traces)
- * - Performance optimization through LOD and culling
- * 
- * @author Environment Artist — Agent #6
- * @version 1.0 — March 2026
- */
-
-/** Vegetation types for Jurassic environment */
 UENUM(BlueprintType)
-enum class EJurassicVegetationType : uint8
+enum class EEnvArt_BiomeType : uint8
 {
-    // Trees
-    ConiferLarge        UMETA(DisplayName = "Conifer Large (Araucaria)"),
-    ConiferMedium       UMETA(DisplayName = "Conifer Medium (Podocarpus)"),
-    ConiferSmall        UMETA(DisplayName = "Conifer Small (Juniper)"),
-    CycadLarge          UMETA(DisplayName = "Cycad Large (Cycas)"),
-    CycadMedium         UMETA(DisplayName = "Cycad Medium (Zamia)"),
-    FernTreeLarge       UMETA(DisplayName = "Fern Tree Large (Dicksonia)"),
-    FernTreeMedium      UMETA(DisplayName = "Fern Tree Medium (Cyathea)"),
-    
-    // Bushes and Understory
-    FernBush            UMETA(DisplayName = "Fern Bush (Osmunda)"),
-    CycadBush           UMETA(DisplayName = "Cycad Bush (Dioon)"),
-    HorseTailBush       UMETA(DisplayName = "Horsetail Bush (Equisetum)"),
-    MossPatch           UMETA(DisplayName = "Moss Patch"),
-    LichenPatch         UMETA(DisplayName = "Lichen Patch"),
-    
-    // Ground Cover
-    FernGround          UMETA(DisplayName = "Ground Ferns"),
-    MossGround          UMETA(DisplayName = "Ground Moss"),
-    LiverwortGround     UMETA(DisplayName = "Ground Liverwort"),
-    AlgaeGround         UMETA(DisplayName = "Ground Algae"),
-    
-    // Aquatic
-    WaterFern           UMETA(DisplayName = "Water Fern (Azolla)"),
-    WaterMoss           UMETA(DisplayName = "Water Moss"),
-    ReedGrass           UMETA(DisplayName = "Reed Grass"),
-    
-    // Dead/Ancient
-    DeadLog             UMETA(DisplayName = "Dead Log"),
-    FallenTrunk         UMETA(DisplayName = "Fallen Trunk"),
-    RottenStump         UMETA(DisplayName = "Rotten Stump"),
-    PetrifiedWood       UMETA(DisplayName = "Petrified Wood")
+    Forest          UMETA(DisplayName = "Dense Forest"),
+    Grassland       UMETA(DisplayName = "Open Grassland"),
+    Volcanic        UMETA(DisplayName = "Volcanic Region"),
+    Riverside       UMETA(DisplayName = "River Valley"),
+    Cave            UMETA(DisplayName = "Cave System"),
+    Mountain        UMETA(DisplayName = "Mountain Ridge")
 };
 
-/** Rock and geological feature types */
 UENUM(BlueprintType)
-enum class EJurassicRockType : uint8
+enum class EEnvArt_TimeOfDay : uint8
 {
-    // Large Formations
-    BoulderLarge        UMETA(DisplayName = "Boulder Large (Granite)"),
-    BoulderMedium       UMETA(DisplayName = "Boulder Medium (Sandstone)"),
-    BoulderSmall        UMETA(DisplayName = "Boulder Small (Limestone)"),
-    RockOutcrop         UMETA(DisplayName = "Rock Outcrop"),
-    CliffFace           UMETA(DisplayName = "Cliff Face"),
-    
-    // Medium Rocks
-    RockCluster         UMETA(DisplayName = "Rock Cluster"),
-    WeatheredRock       UMETA(DisplayName = "Weathered Rock"),
-    MossyRock           UMETA(DisplayName = "Mossy Rock"),
-    SplitRock           UMETA(DisplayName = "Split Rock"),
-    
-    // Small Details
-    Pebbles             UMETA(DisplayName = "Pebbles"),
-    RockDebris          UMETA(DisplayName = "Rock Debris"),
-    Cobbles             UMETA(DisplayName = "Cobbles"),
-    
-    // Geological Features
-    FossilRock          UMETA(DisplayName = "Fossil Rock"),
-    CrystalFormation    UMETA(DisplayName = "Crystal Formation"),
-    IronOxideRock       UMETA(DisplayName = "Iron Oxide Rock"),
-    VolcanicRock        UMETA(DisplayName = "Volcanic Rock")
+    Dawn            UMETA(DisplayName = "Dawn"),
+    Morning         UMETA(DisplayName = "Morning"),
+    Noon            UMETA(DisplayName = "Noon"),
+    Afternoon       UMETA(DisplayName = "Afternoon"),
+    Dusk            UMETA(DisplayName = "Dusk"),
+    Night           UMETA(DisplayName = "Night")
 };
 
-/** Environmental storytelling props */
-UENUM(BlueprintType)
-enum class EJurassicStoryProp : uint8
-{
-    // Dinosaur Traces
-    DinosaurBones       UMETA(DisplayName = "Dinosaur Bones"),
-    DinosaurSkull       UMETA(DisplayName = "Dinosaur Skull"),
-    DinosaurFootprint   UMETA(DisplayName = "Dinosaur Footprint"),
-    DinosaurNest        UMETA(DisplayName = "Dinosaur Nest"),
-    DinosaurEggshells   UMETA(DisplayName = "Dinosaur Eggshells"),
-    
-    // Ancient Activity
-    ScratchMarks        UMETA(DisplayName = "Scratch Marks"),
-    BiteMarks           UMETA(DisplayName = "Bite Marks"),
-    WornPath            UMETA(DisplayName = "Worn Path"),
-    WallowPit           UMETA(DisplayName = "Wallow Pit"),
-    
-    // Natural Events
-    LightningStrike     UMETA(DisplayName = "Lightning Strike"),
-    FloodDebris         UMETA(DisplayName = "Flood Debris"),
-    LandslideRubble     UMETA(DisplayName = "Landslide Rubble"),
-    ErosionPattern      UMETA(DisplayName = "Erosion Pattern"),
-    
-    // Mysterious Elements
-    AncientGem          UMETA(DisplayName = "Ancient Gem (Quest Item)"),
-    StrangeFormation    UMETA(DisplayName = "Strange Formation"),
-    UnknownStructure    UMETA(DisplayName = "Unknown Structure")
-};
-
-/** Asset configuration for each environment element */
 USTRUCT(BlueprintType)
-struct FEnvironmentAssetConfig
+struct TRANSPERSONALGAME_API FEnvArt_LightingSettings
 {
     GENERATED_BODY()
 
-    /** Static mesh asset */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Asset")
-    TSoftObjectPtr<UStaticMesh> StaticMesh;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
+    FRotator SunRotation = FRotator(-30.0f, 45.0f, 0.0f);
 
-    /** Material overrides */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Asset")
-    TArray<TSoftObjectPtr<UMaterialInterface>> MaterialOverrides;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
+    FLinearColor SunColor = FLinearColor(1.0f, 0.9f, 0.7f, 1.0f);
 
-    /** Scale variation range */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Variation")
-    FVector2D ScaleRange = FVector2D(0.8f, 1.2f);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
+    float SunIntensity = 3.0f;
 
-    /** Rotation variation (degrees) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Variation")
-    FVector RotationVariation = FVector(0.0f, 0.0f, 360.0f);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
+    FLinearColor SkyColor = FLinearColor(0.3f, 0.6f, 1.0f, 1.0f);
 
-    /** Color tint variation */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Variation")
-    FLinearColor ColorTintBase = FLinearColor::White;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Variation")
-    FLinearColor ColorTintVariation = FLinearColor(0.1f, 0.1f, 0.1f, 0.0f);
-
-    /** Placement rules */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Placement")
-    float MinSlope = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Placement")
-    float MaxSlope = 45.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Placement")
-    float MinElevation = -1000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Placement")
-    float MaxElevation = 50000.0f;
-
-    /** Density controls */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Density", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float BaseDensity = 0.5f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Density", meta = (ClampMin = "0.0", ClampMax = "10.0"))
-    float DensityVariation = 1.0f;
-
-    /** Distance-based culling */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float CullDistance = 50000.0f; // 500m
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float FadeDistance = 45000.0f; // 450m
-
-    /** LOD settings */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    bool bUseLOD = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 LODLevels = 3;
-
-    /** Collision settings */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    bool bHasCollision = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    bool bBlocksNavigation = false;
-
-    /** Audio settings for ambient sounds */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    TSoftObjectPtr<class USoundBase> AmbientSound;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float SoundRadius = 1000.0f;
-
-    /** Interaction settings */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction")
-    bool bIsInteractable = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction")
-    bool bIsDestructible = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction")
-    bool bProvidesResources = false;
-
-    /** Storytelling weight (higher = more important for narrative) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Storytelling", meta = (ClampMin = "0.0", ClampMax = "10.0"))
-    float StorytellingWeight = 1.0f;
-
-    /** Biome affinity (how much this asset likes each biome) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Affinity")
-    TMap<EJurassicBiomeType, float> BiomeAffinityMap;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
+    float AtmosphereIntensity = 1.0f;
 };
 
-/** Biome-specific environment configuration */
 USTRUCT(BlueprintType)
-struct FBiomeEnvironmentConfig
+struct TRANSPERSONALGAME_API FEnvArt_FogSettings
 {
     GENERATED_BODY()
 
-    /** Biome type */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    EJurassicBiomeType BiomeType = EJurassicBiomeType::DenseForest;
-
-    /** Vegetation configurations */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vegetation")
-    TMap<EJurassicVegetationType, FEnvironmentAssetConfig> VegetationConfigs;
-
-    /** Rock configurations */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rocks")
-    TMap<EJurassicRockType, FEnvironmentAssetConfig> RockConfigs;
-
-    /** Story prop configurations */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Props")
-    TMap<EJurassicStoryProp, FEnvironmentAssetConfig> StoryPropConfigs;
-
-    /** Landscape material for this biome */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
-    TSoftObjectPtr<UMaterialInterface> LandscapeMaterial;
-
-    /** Material layers for blending */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
-    TArray<TSoftObjectPtr<UMaterialInterface>> MaterialLayers;
-
-    /** Overall vegetation density multiplier */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Density", meta = (ClampMin = "0.0", ClampMax = "5.0"))
-    float VegetationDensityMultiplier = 1.0f;
-
-    /** Overall rock density multiplier */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Density", meta = (ClampMin = "0.0", ClampMax = "5.0"))
-    float RockDensityMultiplier = 1.0f;
-
-    /** Story prop density multiplier */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Density", meta = (ClampMin = "0.0", ClampMax = "2.0"))
-    float StoryPropDensityMultiplier = 1.0f;
-
-    /** Atmospheric settings */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog")
     FLinearColor FogColor = FLinearColor(0.7f, 0.8f, 0.9f, 1.0f);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog")
     float FogDensity = 0.02f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
-    FLinearColor LightColor = FLinearColor(1.0f, 0.95f, 0.8f, 1.0f);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog")
+    float FogHeightFalloff = 0.2f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
-    float LightIntensity = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog")
+    float FogStartDistance = 0.0f;
 
-    /** PCG Graph for this biome's environment */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG")
-    TSoftObjectPtr<UPCGGraph> EnvironmentPCGGraph;
-
-    /** Performance settings */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxInstancesPerChunk = 10000;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float StreamingDistance = 100000.0f; // 1km
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog")
+    bool bVolumetricFog = true;
 };
 
-/**
- * Data Asset containing all environment art configurations
- */
-UCLASS(BlueprintType)
-class TRANSPERSONALGAME_API UEnvironmentArtDataAsset : public UDataAsset
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FEnvArt_VegetationCluster
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vegetation")
+    TSoftObjectPtr<UStaticMesh> MeshAsset;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vegetation")
+    FVector Location = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vegetation")
+    FRotator Rotation = FRotator::ZeroRotator;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vegetation")
+    FVector Scale = FVector(1.0f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vegetation")
+    int32 InstanceCount = 1;
+};
+
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UEnvironmentArtManager : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    /** Biome environment configurations */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biomes")
-    TArray<FBiomeEnvironmentConfig> BiomeConfigs;
-
-    /** Global environment settings */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Global Settings")
-    float GlobalVegetationScale = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Global Settings")
-    float GlobalRockScale = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Global Settings")
-    bool bEnableStorytellingProps = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Global Settings")
-    int32 MaxStoryPropsPerBiome = 50;
-
-    /** Performance settings */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    bool bUseGPUCulling = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    bool bUseLODSystem = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float MaxDrawDistance = 200000.0f; // 2km
-
-    /** Quality settings */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quality")
-    int32 EnvironmentQualityLevel = 3; // 1-5 scale
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quality")
-    bool bHighDetailMode = true;
-};
-
-/**
- * Main Environment Art Manager
- * Coordinates with the Biome Manager to populate the world with detailed environmental art
- */
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AEnvironmentArtManager : public AActor
-{
-    GENERATED_BODY()
-
-public:
-    AEnvironmentArtManager();
+    UEnvironmentArtManager();
 
 protected:
     virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
-
-    /** Root component */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class USceneComponent* RootSceneComponent;
-
-    /** PCG component for environment generation */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class UPCGComponent* EnvironmentPCGComponent;
-
-    /** Reference to the biome manager */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Generation")
-    class AJurassicBiomeManager* BiomeManager;
-
-    /** Environment art configuration */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    class UEnvironmentArtDataAsset* EnvironmentConfig;
-
-    /** World bounds for environment generation */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Bounds")
-    FVector WorldOrigin = FVector::ZeroVector;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Bounds")
-    FVector WorldSize = FVector(2016000.0f, 2016000.0f, 256000.0f); // 20.16km x 20.16km x 2.56km
-
-    /** Streaming settings */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Streaming")
-    float ChunkSize = 128000.0f; // 1.28km chunks
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Streaming")
-    int32 MaxActiveChunks = 25; // 5x5 grid around player
-
-    /** Performance monitoring */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Performance")
-    int32 CurrentInstanceCount = 0;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Performance")
-    float LastGenerationTime = 0.0f;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Performance")
-    int32 ActiveChunkCount = 0;
 
 public:
-    /** Environment generation functions */
-    UFUNCTION(BlueprintCallable, Category = "Environment Generation")
-    void GenerateEnvironmentForBiome(EJurassicBiomeType BiomeType, FVector Center, float Radius);
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    UFUNCTION(BlueprintCallable, Category = "Environment Generation")
-    void GenerateEnvironmentForArea(FVector Center, float Radius);
+    // Lighting Control
+    UFUNCTION(BlueprintCallable, Category = "Environment Art")
+    void SetTimeOfDay(EEnvArt_TimeOfDay NewTimeOfDay);
 
-    UFUNCTION(BlueprintCallable, Category = "Environment Generation")
-    void RefreshEnvironmentGeneration();
+    UFUNCTION(BlueprintCallable, Category = "Environment Art")
+    void UpdateLighting(const FEnvArt_LightingSettings& LightingSettings);
 
-    UFUNCTION(BlueprintCallable, Category = "Environment Generation")
-    void ClearEnvironmentGeneration();
+    UFUNCTION(BlueprintCallable, Category = "Environment Art")
+    void SetGoldenHourLighting();
 
-    /** Asset placement functions */
-    UFUNCTION(BlueprintCallable, Category = "Asset Placement")
-    void PlaceVegetationCluster(EJurassicVegetationType VegType, FVector Location, float Radius, int32 Count);
+    // Atmosphere Control
+    UFUNCTION(BlueprintCallable, Category = "Environment Art")
+    void UpdateFogSettings(const FEnvArt_FogSettings& FogSettings);
 
-    UFUNCTION(BlueprintCallable, Category = "Asset Placement")
-    void PlaceRockFormation(EJurassicRockType RockType, FVector Location, float Radius);
+    UFUNCTION(BlueprintCallable, Category = "Environment Art")
+    void CreateVolumetricFog(FVector Location, float Radius);
 
-    UFUNCTION(BlueprintCallable, Category = "Asset Placement")
-    void PlaceStoryProp(EJurassicStoryProp PropType, FVector Location, FRotator Rotation);
+    UFUNCTION(BlueprintCallable, Category = "Environment Art")
+    void SpawnAtmosphericParticles(FVector Location, EEnvArt_BiomeType BiomeType);
 
-    /** Query functions */
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Environment Query")
-    FBiomeEnvironmentConfig GetBiomeEnvironmentConfig(EJurassicBiomeType BiomeType) const;
+    // Vegetation Management
+    UFUNCTION(BlueprintCallable, Category = "Environment Art")
+    void PopulateBiome(EEnvArt_BiomeType BiomeType, FVector Center, float Radius);
 
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Environment Query")
-    bool CanPlaceAssetAtLocation(FVector Location, float AssetRadius) const;
+    UFUNCTION(BlueprintCallable, Category = "Environment Art")
+    void PlaceVegetationCluster(const FEnvArt_VegetationCluster& ClusterData);
 
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Environment Query")
-    float GetVegetationDensityAtLocation(FVector Location) const;
+    UFUNCTION(BlueprintCallable, Category = "Environment Art")
+    void ScatterRocks(FVector Center, float Radius, int32 Count);
 
-    /** Storytelling functions */
-    UFUNCTION(BlueprintCallable, Category = "Storytelling")
-    void CreateStorytellingVignette(FVector Location, float Radius, const FString& StoryTheme);
+    // Audio Atmosphere
+    UFUNCTION(BlueprintCallable, Category = "Environment Art")
+    void SetupAmbientAudio(EEnvArt_BiomeType BiomeType);
 
-    UFUNCTION(BlueprintCallable, Category = "Storytelling")
-    TArray<FVector> FindStorytellingLocations(EJurassicBiomeType BiomeType, int32 MaxLocations) const;
+    UFUNCTION(BlueprintCallable, Category = "Environment Art")
+    void PlayEnvironmentalSound(FVector Location, const FString& SoundName);
 
-    /** Performance functions */
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void OptimizeEnvironmentLOD();
+    // Material Control
+    UFUNCTION(BlueprintCallable, Category = "Environment Art")
+    void ApplyBiomeMaterials(EEnvArt_BiomeType BiomeType);
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void UpdateStreamingChunks(FVector PlayerLocation);
+    UFUNCTION(BlueprintCallable, Category = "Environment Art")
+    void UpdateTerrainMaterial(UMaterialInterface* NewMaterial);
 
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Performance")
-    int32 GetTotalInstanceCount() const { return CurrentInstanceCount; }
+protected:
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Environment Art")
+    EEnvArt_TimeOfDay CurrentTimeOfDay = EEnvArt_TimeOfDay::Afternoon;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Environment Art")
+    FEnvArt_LightingSettings CurrentLighting;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Environment Art")
+    FEnvArt_FogSettings CurrentFog;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Environment Art")
+    TArray<FEnvArt_VegetationCluster> VegetationClusters;
+
+    // Component References
+    UPROPERTY(BlueprintReadOnly, Category = "Environment Art")
+    TWeakObjectPtr<ADirectionalLight> SunLight;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Environment Art")
+    TWeakObjectPtr<AExponentialHeightFog> HeightFog;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Environment Art")
+    TWeakObjectPtr<APostProcessVolume> PostProcessVolume;
+
+    // Asset References
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Assets")
+    TMap<EEnvArt_BiomeType, TSoftObjectPtr<UStaticMesh>> TreeMeshes;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Assets")
+    TMap<EEnvArt_BiomeType, TSoftObjectPtr<UStaticMesh>> RockMeshes;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Assets")
+    TMap<EEnvArt_BiomeType, TSoftObjectPtr<UMaterialInterface>> TerrainMaterials;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Assets")
+    TMap<EEnvArt_BiomeType, TSoftObjectPtr<USoundBase>> AmbientSounds;
 
 private:
-    /** Internal generation helpers */
-    void SetupPCGEnvironmentGeneration();
-    void GenerateVegetationForBiome(const FBiomeEnvironmentConfig& BiomeConfig, FVector Center, float Radius);
-    void GenerateRocksForBiome(const FBiomeEnvironmentConfig& BiomeConfig, FVector Center, float Radius);
-    void GenerateStoryPropsForBiome(const FBiomeEnvironmentConfig& BiomeConfig, FVector Center, float Radius);
-    
-    /** Asset variation helpers */
-    FTransform CreateVariedTransform(const FEnvironmentAssetConfig& AssetConfig, FVector BaseLocation) const;
-    UMaterialInterface* SelectVariedMaterial(const FEnvironmentAssetConfig& AssetConfig) const;
-    
-    /** Placement validation */
-    bool ValidatePlacement(FVector Location, const FEnvironmentAssetConfig& AssetConfig) const;
-    float CalculatePlacementSuitability(FVector Location, const FEnvironmentAssetConfig& AssetConfig) const;
-    
-    /** Streaming management */
-    TArray<FVector> ActiveChunkCenters;
-    TMap<FVector, float> ChunkGenerationTimes;
-    
-    /** Performance tracking */
-    void UpdatePerformanceMetrics();
-    void OptimizeInstanceCounts();
+    void FindSceneComponents();
+    void InitializeAssetMaps();
+    FEnvArt_LightingSettings GetTimeOfDayLighting(EEnvArt_TimeOfDay TimeOfDay);
 };
