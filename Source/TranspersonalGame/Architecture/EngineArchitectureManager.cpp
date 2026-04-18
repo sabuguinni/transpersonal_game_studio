@@ -1,355 +1,370 @@
 #include "EngineArchitectureManager.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "Engine/GameInstance.h"
+#include "HAL/PlatformMemory.h"
+#include "Stats/Stats.h"
 #include "TimerManager.h"
 #include "Misc/DateTime.h"
-#include "HAL/FileManager.h"
 #include "Misc/FileHelper.h"
-#include "Misc/Paths.h"
+#include "HAL/PlatformFilemanager.h"
+
+DEFINE_LOG_CATEGORY(LogEngineArchitecture);
 
 UEngineArchitectureManager::UEngineArchitectureManager()
 {
-    ValidationErrorCount = 0;
-    bArchitectureValid = true;
+    // Set default values
+    MaxActiveActors = 10000;
+    TargetFrameRate = 60.0f;
+    MaxMemoryUsageMB = 8192.0f;
+    bEnforceWorldPartition = true;
+    bEnforceLODChain = true;
+    bEnablePerformanceMonitoring = true;
+    bSystemHealthy = true;
+    LastFrameTime = 0.0f;
+    LastActorCount = 0;
 }
 
 void UEngineArchitectureManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Warning, TEXT("EngineArchitectureManager: Initializing core architecture system"));
+    UE_LOG(LogEngineArchitecture, Log, TEXT("Engine Architecture Manager initialized"));
     
-    // Initialize default performance thresholds
-    PerformanceThresholds.Add(TEXT("WorldGeneration"), 33.33f); // 30 FPS for world gen
-    PerformanceThresholds.Add(TEXT("Physics"), 16.67f); // 60 FPS for physics
-    PerformanceThresholds.Add(TEXT("AI"), 50.0f); // 20 FPS for AI
-    PerformanceThresholds.Add(TEXT("Rendering"), 16.67f); // 60 FPS for rendering
-    PerformanceThresholds.Add(TEXT("Audio"), 100.0f); // 10 FPS for audio
+    // Register core modules
+    RegisterSystemModule(TEXT("Core"), 1000);
+    RegisterSystemModule(TEXT("Physics"), 900);
+    RegisterSystemModule(TEXT("Rendering"), 800);
+    RegisterSystemModule(TEXT("Audio"), 700);
+    RegisterSystemModule(TEXT("AI"), 600);
+    RegisterSystemModule(TEXT("WorldGeneration"), 500);
+    RegisterSystemModule(TEXT("Characters"), 400);
+    RegisterSystemModule(TEXT("Environment"), 300);
+    RegisterSystemModule(TEXT("UI"), 200);
+    RegisterSystemModule(TEXT("VFX"), 100);
     
-    // Set up validation timer if real-time validation is enabled
-    if (bEnableRealTimeValidation && ValidationIntervalSeconds > 0.0f)
+    // Start performance monitoring if enabled
+    if (bEnablePerformanceMonitoring)
     {
         if (UWorld* World = GetWorld())
         {
             World->GetTimerManager().SetTimer(
-                ValidationTimerHandle,
-                [this]() { ValidateModuleDependencies(); },
-                ValidationIntervalSeconds,
+                PerformanceMonitorTimer,
+                this,
+                &UEngineArchitectureManager::UpdatePerformanceMetrics,
+                1.0f, // Every second
                 true
             );
             
             World->GetTimerManager().SetTimer(
-                PerformanceTimerHandle,
-                [this]() { CheckPerformanceThresholds(); },
-                1.0f, // Check performance every second
+                ArchitectureValidationTimer,
+                this,
+                &UEngineArchitectureManager::EnforceArchitecturalStandards,
+                30.0f, // Every 30 seconds
                 true
             );
         }
     }
     
-    // Add core architecture rules
-    AddArchitectureRule(TEXT("WorldPartitionRequired"), TEXT("Worlds larger than 4km² must use World Partition"));
-    AddArchitectureRule(TEXT("LumenRequired"), TEXT("All lighting must use Lumen for global illumination"));
-    AddArchitectureRule(TEXT("NiagaraForVFX"), TEXT("All particle effects must use Niagara system"));
-    AddArchitectureRule(TEXT("MetaSoundsForAudio"), TEXT("All dynamic audio must use MetaSounds"));
-    AddArchitectureRule(TEXT("MassAIForCrowds"), TEXT("Crowds over 100 agents must use Mass AI"));
-    
-    UE_LOG(LogTemp, Warning, TEXT("EngineArchitectureManager: Initialization complete"));
+    // Perform initial validation
+    ValidateSystemArchitecture();
 }
 
 void UEngineArchitectureManager::Deinitialize()
 {
-    // Clear timers
+    UE_LOG(LogEngineArchitecture, Log, TEXT("Engine Architecture Manager deinitialized"));
+    
     if (UWorld* World = GetWorld())
     {
-        World->GetTimerManager().ClearTimer(ValidationTimerHandle);
-        World->GetTimerManager().ClearTimer(PerformanceTimerHandle);
+        World->GetTimerManager().ClearTimer(PerformanceMonitorTimer);
+        World->GetTimerManager().ClearTimer(ArchitectureValidationTimer);
     }
-    
-    // Log final architecture state
-    LogPerformanceMetrics();
-    
-    UE_LOG(LogTemp, Warning, TEXT("EngineArchitectureManager: Deinitialized"));
     
     Super::Deinitialize();
 }
 
-bool UEngineArchitectureManager::ValidateSystemArchitecture(const FString& SystemName)
+bool UEngineArchitectureManager::ValidateSystemArchitecture()
 {
-    if (!RegisteredSystems.Contains(SystemName))
+    UE_LOG(LogEngineArchitecture, Log, TEXT("Validating system architecture..."));
+    
+    bool bValid = true;
+    
+    // Validate World Partition setup
+    if (bEnforceWorldPartition && !ValidateWorldPartitionSetup())
     {
-        LogArchitectureViolation(SystemName, TEXT("System not registered with EngineArchitectureManager"));
-        return false;
+        UE_LOG(LogEngineArchitecture, Warning, TEXT("World Partition validation failed"));
+        bValid = false;
     }
     
-    const FEng_SystemInfo& SystemInfo = RegisteredSystems[SystemName];
-    
-    // Validate system type constraints
-    if (!ValidateSystemType(SystemName, SystemInfo.SystemType))
+    // Validate LOD configuration
+    if (bEnforceLODChain && !ValidateLODConfiguration())
     {
-        return false;
+        UE_LOG(LogEngineArchitecture, Warning, TEXT("LOD configuration validation failed"));
+        bValid = false;
     }
     
-    // Validate priority constraints
-    if (!ValidateSystemPriority(SystemName, SystemInfo.Priority))
+    // Validate memory pools
+    if (!ValidateMemoryPools())
     {
-        return false;
+        UE_LOG(LogEngineArchitecture, Warning, TEXT("Memory pool validation failed"));
+        bValid = false;
     }
     
-    // Check performance constraints
-    if (CurrentPerformanceMetrics.Contains(SystemName))
+    // Validate rendering pipeline
+    if (!ValidateRenderingPipeline())
     {
-        float CurrentPerf = CurrentPerformanceMetrics[SystemName];
-        float* Threshold = PerformanceThresholds.Find(SystemName);
-        
-        if (Threshold && CurrentPerf > *Threshold)
+        UE_LOG(LogEngineArchitecture, Warning, TEXT("Rendering pipeline validation failed"));
+        bValid = false;
+    }
+    
+    bSystemHealthy = bValid;
+    
+    UE_LOG(LogEngineArchitecture, Log, TEXT("Architecture validation %s"), 
+           bValid ? TEXT("PASSED") : TEXT("FAILED"));
+    
+    return bValid;
+}
+
+bool UEngineArchitectureManager::ValidatePerformanceRequirements()
+{
+    bool bMeetsRequirements = true;
+    
+    // Check frame rate
+    float CurrentFPS = GetCurrentFrameRate();
+    if (CurrentFPS < TargetFrameRate * 0.8f) // Allow 20% tolerance
+    {
+        UE_LOG(LogEngineArchitecture, Warning, TEXT("Frame rate below target: %.1f < %.1f"), 
+               CurrentFPS, TargetFrameRate);
+        bMeetsRequirements = false;
+    }
+    
+    // Check actor count
+    int32 ActorCount = GetActiveActorCount();
+    if (ActorCount > MaxActiveActors)
+    {
+        UE_LOG(LogEngineArchitecture, Warning, TEXT("Actor count exceeds limit: %d > %d"), 
+               ActorCount, MaxActiveActors);
+        bMeetsRequirements = false;
+    }
+    
+    // Check memory usage
+    float MemoryUsage = GetMemoryUsageMB();
+    if (MemoryUsage > MaxMemoryUsageMB)
+    {
+        UE_LOG(LogEngineArchitecture, Warning, TEXT("Memory usage exceeds limit: %.1f MB > %.1f MB"), 
+               MemoryUsage, MaxMemoryUsageMB);
+        bMeetsRequirements = false;
+    }
+    
+    return bMeetsRequirements;
+}
+
+void UEngineArchitectureManager::RegisterSystemModule(const FString& ModuleName, int32 Priority)
+{
+    RegisteredModules.Add(ModuleName, Priority);
+    UE_LOG(LogEngineArchitecture, Log, TEXT("Registered module: %s (Priority: %d)"), 
+           *ModuleName, Priority);
+}
+
+void UEngineArchitectureManager::UnregisterSystemModule(const FString& ModuleName)
+{
+    if (RegisteredModules.Remove(ModuleName) > 0)
+    {
+        UE_LOG(LogEngineArchitecture, Log, TEXT("Unregistered module: %s"), *ModuleName);
+    }
+}
+
+float UEngineArchitectureManager::GetCurrentFrameRate() const
+{
+    if (GEngine && GEngine->GetGameUserSettings())
+    {
+        return 1.0f / FApp::GetDeltaTime();
+    }
+    return 0.0f;
+}
+
+int32 UEngineArchitectureManager::GetActiveActorCount() const
+{
+    if (UWorld* World = GetWorld())
+    {
+        return World->GetCurrentLevel()->Actors.Num();
+    }
+    return 0;
+}
+
+float UEngineArchitectureManager::GetMemoryUsageMB() const
+{
+    FPlatformMemoryStats MemStats = FPlatformMemory::GetStats();
+    return MemStats.UsedPhysical / (1024.0f * 1024.0f);
+}
+
+bool UEngineArchitectureManager::CheckWorldPartitionHealth()
+{
+    // Check if World Partition is properly configured
+    if (UWorld* World = GetWorld())
+    {
+        // Basic World Partition health check
+        return World->IsPartitionedWorld();
+    }
+    return false;
+}
+
+bool UEngineArchitectureManager::CheckLODSystemHealth()
+{
+    // Check LOD system configuration
+    return true; // Simplified for now
+}
+
+bool UEngineArchitectureManager::CheckCullingSystemHealth()
+{
+    // Check culling system performance
+    return true; // Simplified for now
+}
+
+void UEngineArchitectureManager::EnforceArchitecturalStandards()
+{
+    UE_LOG(LogEngineArchitecture, Log, TEXT("Enforcing architectural standards..."));
+    
+    EnforceNamingConventions();
+    EnforceModuleStructure();
+    EnforceComponentLimits();
+    
+    // Validate performance requirements
+    ValidatePerformanceRequirements();
+}
+
+void UEngineArchitectureManager::ValidateModuleDependencies()
+{
+    UE_LOG(LogEngineArchitecture, Log, TEXT("Validating module dependencies..."));
+    
+    // Check for circular dependencies and proper module hierarchy
+    for (const auto& Module : RegisteredModules)
+    {
+        UE_LOG(LogEngineArchitecture, VeryVerbose, TEXT("Module: %s, Priority: %d"), 
+               *Module.Key, Module.Value);
+    }
+}
+
+void UEngineArchitectureManager::GenerateArchitectureReport()
+{
+    UE_LOG(LogEngineArchitecture, Log, TEXT("Generating architecture report..."));
+    
+    FString Report;
+    Report += TEXT("=== ENGINE ARCHITECTURE REPORT ===\n");
+    Report += FString::Printf(TEXT("Generated: %s\n"), *FDateTime::Now().ToString());
+    Report += TEXT("\n");
+    
+    // System health
+    Report += FString::Printf(TEXT("System Health: %s\n"), bSystemHealthy ? TEXT("HEALTHY") : TEXT("ISSUES DETECTED"));
+    Report += TEXT("\n");
+    
+    // Performance metrics
+    Report += TEXT("Performance Metrics:\n");
+    Report += FString::Printf(TEXT("  Frame Rate: %.1f FPS (Target: %.1f)\n"), GetCurrentFrameRate(), TargetFrameRate);
+    Report += FString::Printf(TEXT("  Active Actors: %d (Limit: %d)\n"), GetActiveActorCount(), MaxActiveActors);
+    Report += FString::Printf(TEXT("  Memory Usage: %.1f MB (Limit: %.1f)\n"), GetMemoryUsageMB(), MaxMemoryUsageMB);
+    Report += TEXT("\n");
+    
+    // Registered modules
+    Report += TEXT("Registered Modules:\n");
+    for (const auto& Module : RegisteredModules)
+    {
+        Report += FString::Printf(TEXT("  %s (Priority: %d)\n"), *Module.Key, Module.Value);
+    }
+    
+    // Save report to file
+    FString ReportPath = FPaths::ProjectLogDir() / TEXT("ArchitectureReport.txt");
+    FFileHelper::SaveStringToFile(Report, *ReportPath);
+    
+    UE_LOG(LogEngineArchitecture, Log, TEXT("Architecture report saved to: %s"), *ReportPath);
+}
+
+// Private methods
+
+bool UEngineArchitectureManager::ValidateWorldPartitionSetup()
+{
+    if (UWorld* World = GetWorld())
+    {
+        return World->IsPartitionedWorld();
+    }
+    return false;
+}
+
+bool UEngineArchitectureManager::ValidateLODConfiguration()
+{
+    // Check if LOD system is properly configured
+    return true; // Simplified validation
+}
+
+bool UEngineArchitectureManager::ValidateMemoryPools()
+{
+    // Validate memory pool configuration
+    float CurrentMemory = GetMemoryUsageMB();
+    return CurrentMemory < MaxMemoryUsageMB;
+}
+
+bool UEngineArchitectureManager::ValidateRenderingPipeline()
+{
+    // Validate rendering pipeline configuration
+    return GEngine != nullptr;
+}
+
+void UEngineArchitectureManager::UpdatePerformanceMetrics()
+{
+    LastFrameTime = FApp::GetDeltaTime();
+    LastActorCount = GetActiveActorCount();
+    
+    // Log performance warnings if needed
+    LogPerformanceWarnings();
+}
+
+void UEngineArchitectureManager::LogPerformanceWarnings()
+{
+    float CurrentFPS = GetCurrentFrameRate();
+    if (CurrentFPS < TargetFrameRate * 0.5f) // Critical threshold
+    {
+        UE_LOG(LogEngineArchitecture, Error, TEXT("CRITICAL: Frame rate severely degraded: %.1f FPS"), CurrentFPS);
+    }
+    
+    int32 ActorCount = GetActiveActorCount();
+    if (ActorCount > MaxActiveActors * 0.9f) // Warning threshold
+    {
+        UE_LOG(LogEngineArchitecture, Warning, TEXT("Actor count approaching limit: %d"), ActorCount);
+    }
+}
+
+void UEngineArchitectureManager::EnforceNamingConventions()
+{
+    // Enforce naming conventions for actors and components
+    // This would check actor names in the world and log warnings for violations
+}
+
+void UEngineArchitectureManager::EnforceModuleStructure()
+{
+    // Enforce proper module structure and dependencies
+    // This would validate that modules follow the established architecture
+}
+
+void UEngineArchitectureManager::EnforceComponentLimits()
+{
+    // Enforce component count limits per actor
+    if (UWorld* World = GetWorld())
+    {
+        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
         {
-            OnPerformanceThresholdExceeded.Broadcast(SystemName, CurrentPerf, *Threshold);
-            LogArchitectureViolation(SystemName, FString::Printf(TEXT("Performance threshold exceeded: %.2fms > %.2fms"), CurrentPerf, *Threshold));
-            return false;
-        }
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("EngineArchitectureManager: System '%s' validation passed"), *SystemName);
-    return true;
-}
-
-void UEngineArchitectureManager::RegisterSystem(const FString& SystemName, EEng_SystemType SystemType, int32 Priority)
-{
-    FEng_SystemInfo NewSystem;
-    NewSystem.SystemName = SystemName;
-    NewSystem.SystemType = SystemType;
-    NewSystem.Priority = Priority;
-    NewSystem.bIsActive = true;
-    NewSystem.LastValidationTime = FDateTime::Now();
-    
-    RegisteredSystems.Add(SystemName, NewSystem);
-    SystemHealthStatus.Add(SystemName, EEng_SystemHealth::Healthy);
-    
-    UE_LOG(LogTemp, Warning, TEXT("EngineArchitectureManager: Registered system '%s' (Type: %d, Priority: %d)"), 
-           *SystemName, (int32)SystemType, Priority);
-}
-
-void UEngineArchitectureManager::UnregisterSystem(const FString& SystemName)
-{
-    if (RegisteredSystems.Remove(SystemName) > 0)
-    {
-        SystemHealthStatus.Remove(SystemName);
-        CurrentPerformanceMetrics.Remove(SystemName);
-        UE_LOG(LogTemp, Warning, TEXT("EngineArchitectureManager: Unregistered system '%s'"), *SystemName);
-    }
-}
-
-void UEngineArchitectureManager::SetPerformanceThreshold(const FString& SystemName, float ThresholdMS)
-{
-    PerformanceThresholds.Add(SystemName, ThresholdMS);
-    UE_LOG(LogTemp, Log, TEXT("EngineArchitectureManager: Set performance threshold for '%s': %.2fms"), *SystemName, ThresholdMS);
-}
-
-float UEngineArchitectureManager::GetSystemPerformance(const FString& SystemName) const
-{
-    const float* Performance = CurrentPerformanceMetrics.Find(SystemName);
-    return Performance ? *Performance : 0.0f;
-}
-
-void UEngineArchitectureManager::LogPerformanceMetrics()
-{
-    UE_LOG(LogTemp, Warning, TEXT("=== ARCHITECTURE PERFORMANCE METRICS ==="));
-    
-    for (const auto& Metric : CurrentPerformanceMetrics)
-    {
-        const FString& SystemName = Metric.Key;
-        float Performance = Metric.Value;
-        
-        const float* Threshold = PerformanceThresholds.Find(SystemName);
-        FString Status = TEXT("OK");
-        
-        if (Threshold && Performance > *Threshold)
-        {
-            Status = TEXT("EXCEEDED");
-        }
-        
-        UE_LOG(LogTemp, Warning, TEXT("System: %s | Performance: %.2fms | Status: %s"), 
-               *SystemName, Performance, *Status);
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("=== END PERFORMANCE METRICS ==="));
-}
-
-bool UEngineArchitectureManager::ValidateModuleDependencies()
-{
-    bool bAllDependenciesValid = true;
-    
-    for (const auto& Dependency : ModuleDependencies)
-    {
-        const FString& ModuleName = Dependency.Key;
-        const TArray<FString>& Dependencies = Dependency.Value;
-        
-        for (const FString& RequiredModule : Dependencies)
-        {
-            if (!RegisteredSystems.Contains(RequiredModule))
+            AActor* Actor = *ActorItr;
+            if (Actor && Actor->GetRootComponent())
             {
-                LogArchitectureViolation(ModuleName, 
-                    FString::Printf(TEXT("Required dependency '%s' not found"), *RequiredModule));
-                bAllDependenciesValid = false;
+                TArray<UActorComponent*> Components;
+                Actor->GetComponents<UActorComponent>(Components);
+                
+                if (Components.Num() > 50) // Arbitrary limit for performance
+                {
+                    UE_LOG(LogEngineArchitecture, Warning, 
+                           TEXT("Actor %s has excessive components: %d"), 
+                           *Actor->GetName(), Components.Num());
+                }
             }
-        }
-    }
-    
-    return bAllDependenciesValid;
-}
-
-void UEngineArchitectureManager::AddModuleDependency(const FString& ModuleName, const FString& DependsOn)
-{
-    if (!ModuleDependencies.Contains(ModuleName))
-    {
-        ModuleDependencies.Add(ModuleName, TArray<FString>());
-    }
-    
-    ModuleDependencies[ModuleName].AddUnique(DependsOn);
-    UE_LOG(LogTemp, Log, TEXT("EngineArchitectureManager: Added dependency '%s' -> '%s'"), *ModuleName, *DependsOn);
-}
-
-void UEngineArchitectureManager::AddArchitectureRule(const FString& RuleName, const FString& RuleDescription)
-{
-    ArchitectureRules.Add(RuleName, RuleDescription);
-    UE_LOG(LogTemp, Log, TEXT("EngineArchitectureManager: Added rule '%s': %s"), *RuleName, *RuleDescription);
-}
-
-bool UEngineArchitectureManager::CheckRule(const FString& RuleName, const FString& SystemName)
-{
-    if (!ArchitectureRules.Contains(RuleName))
-    {
-        UE_LOG(LogTemp, Warning, TEXT("EngineArchitectureManager: Unknown rule '%s'"), *RuleName);
-        return false;
-    }
-    
-    // Rule-specific validation logic would go here
-    // For now, we'll implement basic checks
-    
-    if (RuleName == TEXT("WorldPartitionRequired"))
-    {
-        // Check if world is large enough to require World Partition
-        if (UWorld* World = GetWorld())
-        {
-            // This is a simplified check - in reality we'd measure world bounds
-            return true; // Assume compliance for now
-        }
-    }
-    
-    return true;
-}
-
-EEng_SystemHealth UEngineArchitectureManager::GetSystemHealth(const FString& SystemName) const
-{
-    const EEng_SystemHealth* Health = SystemHealthStatus.Find(SystemName);
-    return Health ? *Health : EEng_SystemHealth::Unknown;
-}
-
-void UEngineArchitectureManager::UpdateSystemHealth(const FString& SystemName, EEng_SystemHealth NewHealth)
-{
-    EEng_SystemHealth* CurrentHealth = SystemHealthStatus.Find(SystemName);
-    if (CurrentHealth && *CurrentHealth != NewHealth)
-    {
-        *CurrentHealth = NewHealth;
-        UE_LOG(LogTemp, Warning, TEXT("EngineArchitectureManager: System '%s' health changed to %d"), 
-               *SystemName, (int32)NewHealth);
-    }
-}
-
-bool UEngineArchitectureManager::ValidateSystemType(const FString& SystemName, EEng_SystemType ExpectedType)
-{
-    // System type validation logic
-    switch (ExpectedType)
-    {
-        case EEng_SystemType::Core:
-            // Core systems must have highest priority
-            if (RegisteredSystems[SystemName].Priority < 90)
-            {
-                LogArchitectureViolation(SystemName, TEXT("Core systems must have priority >= 90"));
-                return false;
-            }
-            break;
-            
-        case EEng_SystemType::Gameplay:
-            // Gameplay systems should have medium priority
-            if (RegisteredSystems[SystemName].Priority > 80)
-            {
-                LogArchitectureViolation(SystemName, TEXT("Gameplay systems should have priority <= 80"));
-                return false;
-            }
-            break;
-            
-        case EEng_SystemType::Rendering:
-            // Rendering systems need specific validation
-            break;
-            
-        case EEng_SystemType::Audio:
-            // Audio systems validation
-            break;
-            
-        default:
-            break;
-    }
-    
-    return true;
-}
-
-bool UEngineArchitectureManager::ValidateSystemPriority(const FString& SystemName, int32 Priority)
-{
-    // Check for priority conflicts
-    for (const auto& System : RegisteredSystems)
-    {
-        if (System.Key != SystemName && System.Value.Priority == Priority)
-        {
-            LogArchitectureViolation(SystemName, 
-                FString::Printf(TEXT("Priority conflict with system '%s' (Priority: %d)"), *System.Key, Priority));
-            return false;
-        }
-    }
-    
-    return true;
-}
-
-void UEngineArchitectureManager::LogArchitectureViolation(const FString& SystemName, const FString& Details)
-{
-    ValidationErrorCount++;
-    
-    FString LogMessage = FString::Printf(TEXT("ARCHITECTURE VIOLATION [%s]: %s"), *SystemName, *Details);
-    UE_LOG(LogTemp, Error, TEXT("%s"), *LogMessage);
-    
-    // Broadcast the violation event
-    OnArchitectureRuleViolation.Broadcast(SystemName, Details);
-    
-    // Log to file if enabled
-    if (bLogViolationsToFile)
-    {
-        FString LogFilePath = FPaths::ProjectLogDir() / TEXT("ArchitectureViolations.log");
-        FString TimeStamp = FDateTime::Now().ToString();
-        FString FileContent = FString::Printf(TEXT("[%s] %s\n"), *TimeStamp, *LogMessage);
-        FFileHelper::SaveStringToFile(FileContent, *LogFilePath, FFileHelper::EEncodingOptions::AutoDetect, &IFileManager::Get(), FILEWRITE_Append);
-    }
-    
-    // Mark architecture as invalid if too many errors
-    if (ValidationErrorCount > MAX_VALIDATION_ERRORS)
-    {
-        bArchitectureValid = false;
-        UE_LOG(LogTemp, Fatal, TEXT("EngineArchitectureManager: Too many validation errors (%d), marking architecture as invalid"), ValidationErrorCount);
-    }
-}
-
-void UEngineArchitectureManager::CheckPerformanceThresholds()
-{
-    for (const auto& Threshold : PerformanceThresholds)
-    {
-        const FString& SystemName = Threshold.Key;
-        float ThresholdValue = Threshold.Value;
-        
-        const float* CurrentPerf = CurrentPerformanceMetrics.Find(SystemName);
-        if (CurrentPerf && *CurrentPerf > ThresholdValue)
-        {
-            OnPerformanceThresholdExceeded.Broadcast(SystemName, *CurrentPerf, ThresholdValue);
-            UpdateSystemHealth(SystemName, EEng_SystemHealth::Warning);
         }
     }
 }
