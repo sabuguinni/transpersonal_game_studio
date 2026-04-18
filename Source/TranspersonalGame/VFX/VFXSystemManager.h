@@ -1,41 +1,44 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/World.h"
 #include "Subsystems/GameInstanceSubsystem.h"
+#include "Engine/World.h"
 #include "NiagaraSystem.h"
 #include "NiagaraComponent.h"
+#include "NiagaraFunctionLibrary.h"
 #include "Components/AudioComponent.h"
 #include "Sound/SoundCue.h"
-#include "../SharedTypes.h"
+#include "SharedTypes.h"
 #include "VFXSystemManager.generated.h"
 
-// VFX-specific enums for prehistoric survival effects
+// VFX-specific enums for realistic prehistoric effects
 UENUM(BlueprintType)
 enum class EVFX_EffectType : uint8
 {
-    None            UMETA(DisplayName = "None"),
-    Fire            UMETA(DisplayName = "Fire"),
-    Dust            UMETA(DisplayName = "Dust"),
-    Water           UMETA(DisplayName = "Water"),
-    Blood           UMETA(DisplayName = "Blood"),
-    Impact          UMETA(DisplayName = "Impact"),
-    Weather         UMETA(DisplayName = "Weather"),
-    Footstep        UMETA(DisplayName = "Footstep"),
-    Breath          UMETA(DisplayName = "Breath"),
-    Destruction     UMETA(DisplayName = "Destruction")
+    Fire_Campfire       UMETA(DisplayName = "Campfire"),
+    Fire_Torch          UMETA(DisplayName = "Torch"),
+    Impact_Footstep     UMETA(DisplayName = "Footstep Impact"),
+    Impact_DinoStep     UMETA(DisplayName = "Dinosaur Footstep"),
+    Impact_WeaponHit    UMETA(DisplayName = "Weapon Hit"),
+    Weather_Rain        UMETA(DisplayName = "Rain"),
+    Weather_Fog         UMETA(DisplayName = "Fog"),
+    Weather_Wind        UMETA(DisplayName = "Wind"),
+    Blood_Splatter      UMETA(DisplayName = "Blood Splatter"),
+    Dust_Cloud          UMETA(DisplayName = "Dust Cloud"),
+    Water_Splash        UMETA(DisplayName = "Water Splash"),
+    Smoke_Fire          UMETA(DisplayName = "Fire Smoke"),
+    Sparks_Fire         UMETA(DisplayName = "Fire Sparks")
 };
 
 UENUM(BlueprintType)
 enum class EVFX_IntensityLevel : uint8
 {
-    Low             UMETA(DisplayName = "Low"),
-    Medium          UMETA(DisplayName = "Medium"),
-    High            UMETA(DisplayName = "High"),
-    Extreme         UMETA(DisplayName = "Extreme")
+    Low         UMETA(DisplayName = "Low"),
+    Medium      UMETA(DisplayName = "Medium"),
+    High        UMETA(DisplayName = "High"),
+    Extreme     UMETA(DisplayName = "Extreme")
 };
 
-// VFX effect data structure
 USTRUCT(BlueprintType)
 struct TRANSPERSONALGAME_API FVFX_EffectData
 {
@@ -45,45 +48,79 @@ struct TRANSPERSONALGAME_API FVFX_EffectData
     EVFX_EffectType EffectType;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    EVFX_IntensityLevel Intensity;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    FVector Location;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    FRotator Rotation;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    FVector Scale;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    float Duration;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    bool bAutoDestroy;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
     TSoftObjectPtr<UNiagaraSystem> NiagaraSystem;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
     TSoftObjectPtr<USoundCue> AudioCue;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    EVFX_IntensityLevel DefaultIntensity;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    float Duration;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    bool bLooping;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    FVector DefaultScale;
+
     FVFX_EffectData()
     {
-        EffectType = EVFX_EffectType::None;
-        Intensity = EVFX_IntensityLevel::Medium;
-        Location = FVector::ZeroVector;
-        Rotation = FRotator::ZeroRotator;
-        Scale = FVector::OneVector;
+        EffectType = EVFX_EffectType::Fire_Campfire;
+        DefaultIntensity = EVFX_IntensityLevel::Medium;
         Duration = 5.0f;
-        bAutoDestroy = true;
+        bLooping = false;
+        DefaultScale = FVector(1.0f, 1.0f, 1.0f);
+    }
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FVFX_ActiveEffect
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "VFX")
+    int32 EffectID;
+
+    UPROPERTY(BlueprintReadOnly, Category = "VFX")
+    EVFX_EffectType EffectType;
+
+    UPROPERTY(BlueprintReadOnly, Category = "VFX")
+    UNiagaraComponent* NiagaraComponent;
+
+    UPROPERTY(BlueprintReadOnly, Category = "VFX")
+    UAudioComponent* AudioComponent;
+
+    UPROPERTY(BlueprintReadOnly, Category = "VFX")
+    FVector Location;
+
+    UPROPERTY(BlueprintReadOnly, Category = "VFX")
+    float StartTime;
+
+    UPROPERTY(BlueprintReadOnly, Category = "VFX")
+    float Duration;
+
+    UPROPERTY(BlueprintReadOnly, Category = "VFX")
+    bool bIsLooping;
+
+    FVFX_ActiveEffect()
+    {
+        EffectID = -1;
+        EffectType = EVFX_EffectType::Fire_Campfire;
+        NiagaraComponent = nullptr;
+        AudioComponent = nullptr;
+        Location = FVector::ZeroVector;
+        StartTime = 0.0f;
+        Duration = 0.0f;
+        bIsLooping = false;
     }
 };
 
 /**
  * VFX System Manager - Handles all visual effects for the prehistoric survival game
- * Manages Niagara particle systems, audio-visual synchronization, and performance optimization
- * Focus: Realistic prehistoric effects (fire, dust, water, blood, weather, impacts)
+ * Focuses on realistic effects: fire, smoke, dust, blood, weather, impacts
+ * NO mystical/spiritual effects - only physically plausible prehistoric VFX
  */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UVFX_SystemManager : public UGameInstanceSubsystem
@@ -97,87 +134,100 @@ public:
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Core VFX spawning functions
+    // Core VFX functions
     UFUNCTION(BlueprintCallable, Category = "VFX")
-    class UNiagaraComponent* SpawnEffect(const FVFX_EffectData& EffectData, AActor* AttachToActor = nullptr);
+    int32 PlayEffect(EVFX_EffectType EffectType, const FVector& Location, const FRotator& Rotation = FRotator::ZeroRotator, EVFX_IntensityLevel Intensity = EVFX_IntensityLevel::Medium);
 
     UFUNCTION(BlueprintCallable, Category = "VFX")
-    void SpawnFireEffect(const FVector& Location, EVFX_IntensityLevel Intensity = EVFX_IntensityLevel::Medium);
-
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void SpawnDustImpact(const FVector& Location, const FVector& ImpactNormal, float ImpactForce = 1.0f);
-
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void SpawnFootstepEffect(const FVector& Location, float CreatureSize = 1.0f, bool bIsWet = false);
-
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void SpawnBloodSplatter(const FVector& Location, const FVector& Direction, EVFX_IntensityLevel Intensity = EVFX_IntensityLevel::Medium);
-
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void SpawnWaterSplash(const FVector& Location, float SplashRadius = 100.0f);
-
-    // Weather and environmental effects
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void StartRainEffect(EVFX_IntensityLevel Intensity = EVFX_IntensityLevel::Medium);
-
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void StopRainEffect();
-
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void SpawnBreathVapor(const FVector& Location, const FRotator& Direction);
-
-    // Performance and cleanup
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void CleanupExpiredEffects();
-
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void SetVFXQualityLevel(int32 QualityLevel);
-
-    // Effect management
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void StopEffect(UNiagaraComponent* EffectComponent);
+    void StopEffect(int32 EffectID);
 
     UFUNCTION(BlueprintCallable, Category = "VFX")
     void StopAllEffects();
 
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void StopEffectsByType(EVFX_EffectType EffectType);
+
+    // Specific effect functions for common game scenarios
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    int32 PlayCampfire(const FVector& Location);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    int32 PlayDinosaurFootstep(const FVector& Location, float DinosaurSize = 1.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    int32 PlayWeaponImpact(const FVector& Location, const FVector& ImpactNormal);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    int32 PlayBloodSplatter(const FVector& Location, const FVector& Direction);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    int32 PlayDustCloud(const FVector& Location, float Intensity = 1.0f);
+
+    // Weather effects
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void StartRain(EVFX_IntensityLevel Intensity = EVFX_IntensityLevel::Medium);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void StopRain();
+
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void SetFogIntensity(float Intensity);
+
+    // Effect management
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    bool IsEffectActive(int32 EffectID) const;
+
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    int32 GetActiveEffectCount() const;
+
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    TArray<FVFX_ActiveEffect> GetActiveEffects() const;
+
     // Configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
-    int32 MaxActiveEffects;
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void SetEffectData(EVFX_EffectType EffectType, const FVFX_EffectData& EffectData);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
-    float EffectCullDistance;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
-    bool bEnableAudioSync;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
-    float GlobalVFXScale;
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    FVFX_EffectData GetEffectData(EVFX_EffectType EffectType) const;
 
 protected:
-    // Internal effect tracking
-    UPROPERTY()
-    TArray<UNiagaraComponent*> ActiveEffects;
+    // Effect registry
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VFX")
+    TMap<EVFX_EffectType, FVFX_EffectData> EffectRegistry;
 
-    UPROPERTY()
-    UNiagaraComponent* RainEffectComponent;
+    // Active effects tracking
+    UPROPERTY(BlueprintReadOnly, Category = "VFX")
+    TMap<int32, FVFX_ActiveEffect> ActiveEffects;
 
-    // Effect templates
-    UPROPERTY(EditAnywhere, Category = "VFX Templates")
-    TMap<EVFX_EffectType, TSoftObjectPtr<UNiagaraSystem>> EffectTemplates;
+    // Global VFX settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    float GlobalVFXScale;
 
-    UPROPERTY(EditAnywhere, Category = "VFX Audio")
-    TMap<EVFX_EffectType, TSoftObjectPtr<USoundCue>> EffectAudioTemplates;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    bool bVFXEnabled;
 
-    // Internal helper functions
-    UNiagaraComponent* CreateEffectComponent(UNiagaraSystem* NiagaraSystem, const FVector& Location, const FRotator& Rotation);
-    void PlayEffectAudio(EVFX_EffectType EffectType, const FVector& Location, float VolumeMultiplier = 1.0f);
-    void RegisterActiveEffect(UNiagaraComponent* Effect);
-    void UnregisterActiveEffect(UNiagaraComponent* Effect);
-    bool ShouldCullEffect(const FVector& EffectLocation) const;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    int32 MaxActiveEffects;
+
+    // Performance settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Performance")
+    float EffectCullDistance;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Performance")
+    bool bUseLOD;
 
 private:
-    // Performance tracking
-    int32 CurrentActiveEffectCount;
-    float LastCleanupTime;
-    static constexpr float CleanupInterval = 5.0f;
+    // Internal management
+    int32 NextEffectID;
+    UWorld* CachedWorld;
+
+    // Helper functions
+    void InitializeEffectRegistry();
+    void CleanupExpiredEffects();
+    UNiagaraComponent* CreateNiagaraComponent(const FVFX_EffectData& EffectData, const FVector& Location, const FRotator& Rotation);
+    UAudioComponent* CreateAudioComponent(const FVFX_EffectData& EffectData, const FVector& Location);
+    void UpdateEffectIntensity(FVFX_ActiveEffect& Effect, EVFX_IntensityLevel Intensity);
+
+    // Timer handle for cleanup
+    FTimerHandle CleanupTimerHandle;
 };
