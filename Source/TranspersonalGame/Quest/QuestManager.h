@@ -6,18 +6,17 @@
 #include "../SharedTypes.h"
 #include "QuestManager.generated.h"
 
-class AQuestGiver;
-class AQuestObjective;
+class AQuest_QuestGiverNPC;
+class UQuest_QuestComponent;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnQuestStatusChanged, const FString&, QuestID, EQuest_QuestStatus, NewStatus);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnObjectiveUpdated, const FString&, QuestID, const FString&, ObjectiveID, int32, NewProgress);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnObjectiveCompleted, const FString&, QuestID, const FString&, ObjectiveID);
 
 /**
- * Quest Manager - Core quest system subsystem
- * Manages all active quests, objectives, and quest progression
- * Realistic survival-focused quest system without spiritual content
+ * Quest Manager - Central system for handling all quest logic
+ * Manages quest progression, objectives, and NPC interactions
  */
-UCLASS(BlueprintType, Blueprintable)
+UCLASS()
 class TRANSPERSONALGAME_API UQuestManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
@@ -25,7 +24,7 @@ class TRANSPERSONALGAME_API UQuestManager : public UGameInstanceSubsystem
 public:
     UQuestManager();
 
-    // Subsystem overrides
+    // Subsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
@@ -40,13 +39,7 @@ public:
     bool FailQuest(const FString& QuestID);
 
     UFUNCTION(BlueprintCallable, Category = "Quest System")
-    bool IsQuestActive(const FString& QuestID) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Quest System")
-    bool IsQuestCompleted(const FString& QuestID) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Quest System")
-    FQuest_QuestData GetQuestData(const FString& QuestID) const;
+    EQuest_QuestStatus GetQuestStatus(const FString& QuestID) const;
 
     UFUNCTION(BlueprintCallable, Category = "Quest System")
     TArray<FQuest_QuestData> GetActiveQuests() const;
@@ -56,7 +49,7 @@ public:
 
     // Objective Management
     UFUNCTION(BlueprintCallable, Category = "Quest System")
-    bool UpdateObjectiveProgress(const FString& QuestID, const FString& ObjectiveID, int32 ProgressAmount = 1);
+    bool UpdateObjectiveProgress(const FString& QuestID, const FString& ObjectiveID, int32 Progress);
 
     UFUNCTION(BlueprintCallable, Category = "Quest System")
     bool CompleteObjective(const FString& QuestID, const FString& ObjectiveID);
@@ -64,68 +57,68 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Quest System")
     bool IsObjectiveCompleted(const FString& QuestID, const FString& ObjectiveID) const;
 
+    // Quest Data Access
     UFUNCTION(BlueprintCallable, Category = "Quest System")
-    int32 GetObjectiveProgress(const FString& QuestID, const FString& ObjectiveID) const;
-
-    // Quest Registration (for quest givers and objectives)
-    UFUNCTION(BlueprintCallable, Category = "Quest System")
-    void RegisterQuestGiver(AQuestGiver* QuestGiver);
+    FQuest_QuestData GetQuestData(const FString& QuestID) const;
 
     UFUNCTION(BlueprintCallable, Category = "Quest System")
-    void RegisterQuestObjective(AQuestObjective* QuestObjective);
+    bool AddQuest(const FQuest_QuestData& QuestData);
+
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    bool RemoveQuest(const FString& QuestID);
 
     // Location-based objectives
     UFUNCTION(BlueprintCallable, Category = "Quest System")
-    bool CheckLocationObjective(const FString& QuestID, const FString& ObjectiveID, const FVector& PlayerLocation, float Tolerance = 500.0f);
+    void CheckLocationObjectives(const FVector& PlayerLocation, float Radius = 200.0f);
 
-    // Item collection objectives
+    // NPC Interaction
     UFUNCTION(BlueprintCallable, Category = "Quest System")
-    bool CheckItemCollectionObjective(const FString& QuestID, const FString& ObjectiveID, const FString& ItemID, int32 Quantity);
+    TArray<FString> GetQuestsFromNPC(const FString& NPCID) const;
 
-    // Kill target objectives
     UFUNCTION(BlueprintCallable, Category = "Quest System")
-    bool CheckKillTargetObjective(const FString& QuestID, const FString& ObjectiveID, const FString& TargetType);
+    void RegisterQuestGiver(AQuest_QuestGiverNPC* QuestGiver);
+
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    void UnregisterQuestGiver(AQuest_QuestGiverNPC* QuestGiver);
 
     // Events
-    UPROPERTY(BlueprintAssignable, Category = "Quest System")
+    UPROPERTY(BlueprintAssignable, Category = "Quest Events")
     FOnQuestStatusChanged OnQuestStatusChanged;
 
-    UPROPERTY(BlueprintAssignable, Category = "Quest System")
-    FOnObjectiveUpdated OnObjectiveUpdated;
+    UPROPERTY(BlueprintAssignable, Category = "Quest Events")
+    FOnObjectiveCompleted OnObjectiveCompleted;
 
     // Debug functions
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Quest System")
+    UFUNCTION(BlueprintCallable, Category = "Quest Debug", CallInEditor = true)
     void DebugPrintAllQuests();
 
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Quest System")
-    void LoadDefaultSurvivalQuests();
+    UFUNCTION(BlueprintCallable, Category = "Quest Debug", CallInEditor = true)
+    void CreateTestQuests();
 
 protected:
     // Quest storage
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Quest System")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Quest Data")
     TMap<FString, FQuest_QuestData> AllQuests;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Quest System")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Quest Data")
     TArray<FString> ActiveQuestIDs;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Quest System")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Quest Data")
     TArray<FString> CompletedQuestIDs;
 
-    // Registered quest actors
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Quest System")
-    TArray<AQuestGiver*> RegisteredQuestGivers;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Quest System")
-    TArray<AQuestObjective*> RegisteredQuestObjectives;
+    // NPC references
+    UPROPERTY()
+    TArray<AQuest_QuestGiverNPC*> RegisteredQuestGivers;
 
 private:
-    // Internal quest management
+    // Internal quest logic
     void InitializeDefaultQuests();
-    void CreateSurvivalQuest(const FString& QuestID, const FText& Title, const FText& Description, EQuest_QuestType Type);
-    void AddObjectiveToQuest(const FString& QuestID, const FString& ObjectiveID, const FText& Description, EQuest_ObjectiveType Type, const FVector& Location = FVector::ZeroVector, const FString& TargetID = "", int32 RequiredQuantity = 1);
-    
     bool CheckQuestPrerequisites(const FString& QuestID) const;
     void UpdateQuestStatus(const FString& QuestID, EQuest_QuestStatus NewStatus);
-    void CheckQuestCompletion(const FString& QuestID);
-    void GiveQuestRewards(const FString& QuestID);
+    void ProcessQuestCompletion(const FString& QuestID);
+    void ProcessObjectiveCompletion(const FString& QuestID, const FString& ObjectiveID);
+
+    // Quest validation
+    bool IsValidQuestID(const FString& QuestID) const;
+    bool IsValidObjectiveID(const FString& QuestID, const FString& ObjectiveID) const;
 };
