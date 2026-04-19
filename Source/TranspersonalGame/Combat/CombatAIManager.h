@@ -1,194 +1,191 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/GameInstanceSubsystem.h"
 #include "Engine/World.h"
+#include "GameFramework/Actor.h"
 #include "Components/ActorComponent.h"
+#include "AIController.h"
+#include "BehaviorTree/BehaviorTreeComponent.h"
+#include "BehaviorTree/BlackboardComponent.h"
+#include "Perception/AIPerceptionComponent.h"
 #include "../SharedTypes.h"
 #include "CombatAIManager.generated.h"
 
-class ADinosaurPawn;
-class ATranspersonalCharacter;
+class APawn;
+class ACharacter;
 class UCombat_TacticalAIComponent;
 
-UENUM(BlueprintType)
-enum class ECombat_TacticalState : uint8
-{
-    Idle,
-    Hunting,
-    Stalking,
-    Coordinating,
-    Attacking,
-    Retreating,
-    Regrouping
-};
-
-UENUM(BlueprintType)
-enum class ECombat_PackRole : uint8
-{
-    Alpha,
-    Flanker,
-    Ambusher,
-    Distractor,
-    Support
-};
-
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCombat_TacticalGroup
+struct FCombat_ThreatAssessment
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadWrite)
-    TArray<TWeakObjectPtr<ADinosaurPawn>> Members;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
+    float ThreatLevel;
 
-    UPROPERTY(BlueprintReadWrite)
-    TWeakObjectPtr<ADinosaurPawn> Alpha;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
+    float Distance;
 
-    UPROPERTY(BlueprintReadWrite)
-    ECombat_TacticalState CurrentState;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
+    FVector LastKnownPosition;
 
-    UPROPERTY(BlueprintReadWrite)
-    FVector TargetLocation;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
+    float TimeSinceLastSeen;
 
-    UPROPERTY(BlueprintReadWrite)
-    TWeakObjectPtr<ATranspersonalCharacter> CurrentTarget;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
+    bool bIsHostile;
 
-    UPROPERTY(BlueprintReadWrite)
-    float FormationRadius;
-
-    UPROPERTY(BlueprintReadWrite)
-    float LastCoordinationTime;
-
-    FCombat_TacticalGroup()
+    FCombat_ThreatAssessment()
     {
-        CurrentState = ECombat_TacticalState::Idle;
-        TargetLocation = FVector::ZeroVector;
-        FormationRadius = 500.0f;
-        LastCoordinationTime = 0.0f;
+        ThreatLevel = 0.0f;
+        Distance = 0.0f;
+        LastKnownPosition = FVector::ZeroVector;
+        TimeSinceLastSeen = 0.0f;
+        bIsHostile = false;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCombat_TacticalCommand
+struct FCombat_TacticalState
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadWrite)
-    ECombat_TacticalState CommandType;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
+    ECombat_TacticalMode CurrentMode;
 
-    UPROPERTY(BlueprintReadWrite)
-    FVector TargetPosition;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
+    TArray<AActor*> AlliedUnits;
 
-    UPROPERTY(BlueprintReadWrite)
-    ECombat_PackRole AssignedRole;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
+    TArray<AActor*> EnemyTargets;
 
-    UPROPERTY(BlueprintReadWrite)
-    float Priority;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
+    AActor* PrimaryTarget;
 
-    UPROPERTY(BlueprintReadWrite)
-    float ExecutionTime;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
+    float GroupCohesion;
 
-    FCombat_TacticalCommand()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
+    FVector GroupCenter;
+
+    FCombat_TacticalState()
     {
-        CommandType = ECombat_TacticalState::Idle;
-        TargetPosition = FVector::ZeroVector;
-        AssignedRole = ECombat_PackRole::Support;
-        Priority = 1.0f;
-        ExecutionTime = 0.0f;
+        CurrentMode = ECombat_TacticalMode::Patrol;
+        PrimaryTarget = nullptr;
+        GroupCohesion = 1.0f;
+        GroupCenter = FVector::ZeroVector;
     }
 };
 
-/**
- * Combat AI Manager - Orchestrates tactical combat AI for dinosaur packs
- * Manages pack coordination, tactical positioning, and combat strategies
- */
-UCLASS(BlueprintType)
-class TRANSPERSONALGAME_API UCombatAIManager : public UGameInstanceSubsystem
+UCLASS(Blueprintable, BlueprintType, ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UCombatAIManager : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
     UCombatAIManager();
 
-    // Subsystem overrides
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
+protected:
+    virtual void BeginPlay() override;
 
-    // Group management
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    int32 CreateTacticalGroup(const TArray<ADinosaurPawn*>& Members, ADinosaurPawn* Alpha);
+public:
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
+    // Core tactical AI functions
     UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void DisbandTacticalGroup(int32 GroupID);
-
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void AddMemberToGroup(int32 GroupID, ADinosaurPawn* NewMember);
+    void InitializeCombatAI();
 
     UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void RemoveMemberFromGroup(int32 GroupID, ADinosaurPawn* Member);
-
-    // Tactical coordination
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void SetGroupTarget(int32 GroupID, ATranspersonalCharacter* Target);
+    void UpdateTacticalState(float DeltaTime);
 
     UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void SetGroupState(int32 GroupID, ECombat_TacticalState NewState);
+    void AssessThreat(AActor* PotentialThreat, FCombat_ThreatAssessment& OutAssessment);
 
     UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void CoordinateGroupAttack(int32 GroupID);
+    void SelectTacticalMode();
 
     UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void ExecuteTacticalRetreat(int32 GroupID);
-
-    // Combat analysis
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    bool ShouldEngageTarget(const FCombat_TacticalGroup& Group, ATranspersonalCharacter* PotentialTarget) const;
+    void CoordinateGroupTactics();
 
     UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    FVector CalculateFlankingPosition(const FCombat_TacticalGroup& Group, ATranspersonalCharacter* Target, ECombat_PackRole Role) const;
+    void ExecuteTacticalManeuver(ECombat_TacticalManeuver Maneuver);
+
+    // Pack coordination
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void RegisterPackMember(AActor* PackMember);
 
     UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    ECombat_PackRole AssignOptimalRole(ADinosaurPawn* Member, const FCombat_TacticalGroup& Group) const;
-
-    // Utility functions
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    FCombat_TacticalGroup* GetTacticalGroup(int32 GroupID);
+    void UnregisterPackMember(AActor* PackMember);
 
     UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    TArray<int32> GetActiveGroupIDs() const;
+    void UpdatePackFormation();
 
     UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void UpdateAllGroups(float DeltaTime);
+    FVector CalculateFlankingPosition(AActor* Target, int32 FlankIndex);
+
+    // Threat management
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void AddThreat(AActor* ThreatActor, float ThreatLevel);
+
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void RemoveThreat(AActor* ThreatActor);
+
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    AActor* GetHighestThreat() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void UpdateThreatLevels(float DeltaTime);
+
+    // Combat state queries
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Combat AI")
+    bool IsInCombat() const;
+
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Combat AI")
+    ECombat_TacticalMode GetCurrentTacticalMode() const;
+
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Combat AI")
+    float GetGroupCohesion() const;
+
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Combat AI")
+    FVector GetOptimalAttackPosition(AActor* Target) const;
 
 protected:
-    // Group storage
-    UPROPERTY()
-    TMap<int32, FCombat_TacticalGroup> TacticalGroups;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat AI")
+    FCombat_TacticalState TacticalState;
 
-    UPROPERTY()
-    int32 NextGroupID;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat AI")
+    TMap<AActor*, FCombat_ThreatAssessment> ThreatMap;
 
-    // Combat parameters
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
+    float TacticalUpdateInterval;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
     float MaxEngagementRange;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
-    float MinGroupCoordinationInterval;
+    float MinFlankingDistance;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
-    float FlankingDistance;
+    float GroupFormationRadius;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
-    float AmbushPositionRadius;
+    int32 MaxPackSize;
 
-    // Internal methods
-    void UpdateGroupCoordination(FCombat_TacticalGroup& Group, float DeltaTime);
-    void ExecuteGroupCommand(FCombat_TacticalGroup& Group, const FCombat_TacticalCommand& Command);
-    bool ValidateGroupIntegrity(FCombat_TacticalGroup& Group);
-    void CleanupInvalidGroups();
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
+    bool bEnablePackTactics;
 
-    // Combat calculations
-    float CalculateGroupThreatLevel(const FCombat_TacticalGroup& Group) const;
-    float CalculateTargetThreatLevel(ATranspersonalCharacter* Target) const;
-    bool IsPositionStrategic(const FVector& Position, const FCombat_TacticalGroup& Group, ATranspersonalCharacter* Target) const;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
+    bool bEnableFlankingManeuvers;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
+    bool bEnableAmbushTactics;
+
+private:
+    float LastTacticalUpdate;
+    float ThreatDecayRate;
+    
+    void CalculateGroupCenter();
+    void UpdateGroupCohesion();
+    ECombat_TacticalManeuver SelectOptimalManeuver(AActor* Target) const;
+    bool CanExecuteManeuver(ECombat_TacticalManeuver Maneuver) const;
 };
