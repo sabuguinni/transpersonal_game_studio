@@ -1,46 +1,56 @@
 #include "PrimitiveAnimationController.h"
-#include "GameFramework/Character.h"
-#include "GameFramework/CharacterMovementComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Animation/AnimInstance.h"
-#include "Animation/AnimMontage.h"
+#include "Animation/AnimSingleNodeInstance.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "Engine/World.h"
-#include "Kismet/KismetMathLibrary.h"
 
 UPrimitiveAnimationController::UPrimitiveAnimationController()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickGroup = TG_PrePhysics;
+    PrimaryComponentTick.bStartWithTickEnabled = true;
     
     // Initialize default values
-    CurrentState = EAnim_MovementState::Idle;
-    WalkSpeedThreshold = 100.0f;
-    RunSpeedThreshold = 300.0f;
-    BlendSpeed = 5.0f;
+    CurrentMovementState = EAnim_MovementState::Idle;
+    PreviousMovementState = EAnim_MovementState::Idle;
     
-    // Initialize blend data
-    BlendData.Speed = 0.0f;
-    BlendData.Direction = 0.0f;
-    BlendData.bIsInAir = false;
-    BlendData.bIsCrouching = false;
-    BlendData.AimPitch = 0.0f;
-    BlendData.AimYaw = 0.0f;
+    // Set default thresholds for prehistoric human movement
+    WalkSpeedThreshold = 150.0f;  // Slower, more deliberate movement
+    RunSpeedThreshold = 400.0f;   // Sprint speed for escaping predators
+    JumpVelocityThreshold = 50.0f;
+    
+    // Initialize blend data with realistic timing
+    IdleBlendData.BlendTime = 0.3f;
+    IdleBlendData.PlayRate = 1.0f;
+    IdleBlendData.bLooping = true;
+    
+    WalkBlendData.BlendTime = 0.2f;
+    WalkBlendData.PlayRate = 1.0f;
+    WalkBlendData.bLooping = true;
+    
+    RunBlendData.BlendTime = 0.15f;
+    RunBlendData.PlayRate = 1.2f;  // Slightly faster for urgency
+    RunBlendData.bLooping = true;
+    
+    JumpBlendData.BlendTime = 0.1f;
+    JumpBlendData.PlayRate = 1.0f;
+    JumpBlendData.bLooping = false;
+    
+    bDebugAnimationStates = false;
+    StateTransitionTimer = 0.0f;
+    bIsTransitioning = false;
 }
 
 void UPrimitiveAnimationController::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Cache owner character reference
-    OwnerCharacter = Cast<ACharacter>(GetOwner());
-    if (OwnerCharacter)
+    InitializeSkeletalMeshComponent();
+    
+    if (bDebugAnimationStates)
     {
-        SkeletalMeshComp = OwnerCharacter->GetMesh();
-        UE_LOG(LogTemp, Log, TEXT("PrimitiveAnimationController: Initialized for character %s"), *OwnerCharacter->GetName());
-    }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("PrimitiveAnimationController: Owner is not a Character!"));
+        UE_LOG(LogTemp, Warning, TEXT("PrimitiveAnimationController: BeginPlay - Component initialized"));
     }
 }
 
@@ -48,165 +58,275 @@ void UPrimitiveAnimationController::TickComponent(float DeltaTime, ELevelTick Ti
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    if (!OwnerCharacter)
+    // Handle state transition timing
+    if (bIsTransitioning)
     {
-        return;
-    }
-    
-    // Get movement data from character
-    UCharacterMovementComponent* MovementComp = OwnerCharacter->GetCharacterMovement();
-    if (!MovementComp)
-    {
-        return;
-    }
-    
-    // Calculate current speed and movement state
-    FVector Velocity = MovementComp->Velocity;
-    float CurrentSpeed = Velocity.Size2D();
-    bool bIsInAir = MovementComp->IsFalling();
-    bool bIsCrouching = MovementComp->IsCrouching();
-    
-    // Update movement state
-    UpdateMovementState(CurrentSpeed, bIsInAir, bIsCrouching);
-    
-    // Update blend data with smooth interpolation
-    UpdateBlendData(DeltaTime);
-}
-
-void UPrimitiveAnimationController::UpdateMovementState(float Speed, bool bIsInAir, bool bIsCrouching)
-{
-    // Store target values for smooth blending
-    TargetSpeed = Speed;
-    
-    // Determine movement state based on conditions
-    DetermineMovementState(Speed, bIsInAir, bIsCrouching);
-    
-    // Update immediate boolean states
-    BlendData.bIsInAir = bIsInAir;
-    BlendData.bIsCrouching = bIsCrouching;
-}
-
-void UPrimitiveAnimationController::DetermineMovementState(float Speed, bool bIsInAir, bool bIsCrouching)
-{
-    EAnim_MovementState NewState = CurrentState;
-    
-    if (bIsInAir)
-    {
-        // In air states
-        if (OwnerCharacter && OwnerCharacter->GetCharacterMovement())
+        StateTransitionTimer += DeltaTime;
+        
+        FAnim_BlendData CurrentBlendData = GetBlendDataForState(CurrentMovementState);
+        if (StateTransitionTimer >= CurrentBlendData.BlendTime)
         {
-            float VerticalVelocity = OwnerCharacter->GetCharacterMovement()->Velocity.Z;
-            if (VerticalVelocity > 0.0f)
+            bIsTransitioning = false;
+            StateTransitionTimer = 0.0f;
+            
+            if (bDebugAnimationStates)
             {
-                NewState = EAnim_MovementState::Jumping;
-            }
-            else
-            {
-                NewState = EAnim_MovementState::Falling;
+                UE_LOG(LogTemp, Log, TEXT("PrimitiveAnimationController: Transition complete to %s"), 
+                    *UEnum::GetValueAsString(CurrentMovementState));
             }
         }
     }
-    else if (bIsCrouching)
+    
+    // Auto-update animation based on character movement if we have a character
+    if (ACharacter* Character = Cast<ACharacter>(GetOwner()))
     {
-        NewState = EAnim_MovementState::Crouching;
-    }
-    else
-    {
-        // Ground movement states
-        if (Speed < 10.0f)
+        if (UCharacterMovementComponent* MovementComp = Character->GetCharacterMovement())
         {
-            NewState = EAnim_MovementState::Idle;
+            FVector Velocity = MovementComp->Velocity;
+            bool bIsJumping = MovementComp->IsFalling();
+            bool bIsCrouching = MovementComp->IsCrouching();
+            
+            UpdateAnimationFromMovement(Velocity, bIsJumping, bIsCrouching);
         }
-        else if (Speed < RunSpeedThreshold)
+    }
+}
+
+void UPrimitiveAnimationController::InitializeSkeletalMeshComponent()
+{
+    if (AActor* Owner = GetOwner())
+    {
+        SkeletalMeshComponent = Owner->FindComponentByClass<USkeletalMeshComponent>();
+        
+        if (SkeletalMeshComponent)
         {
-            NewState = EAnim_MovementState::Walking;
+            AnimInstance = SkeletalMeshComponent->GetAnimInstance();
+            
+            if (bDebugAnimationStates)
+            {
+                UE_LOG(LogTemp, Warning, TEXT("PrimitiveAnimationController: Found SkeletalMeshComponent and AnimInstance"));
+            }
         }
         else
         {
-            NewState = EAnim_MovementState::Running;
+            UE_LOG(LogTemp, Error, TEXT("PrimitiveAnimationController: No SkeletalMeshComponent found on owner %s"), 
+                *Owner->GetName());
+        }
+    }
+}
+
+void UPrimitiveAnimationController::SetMovementState(EAnim_MovementState NewState)
+{
+    if (CurrentMovementState != NewState)
+    {
+        HandleStateTransition(NewState);
+    }
+}
+
+void UPrimitiveAnimationController::UpdateAnimationFromMovement(const FVector& Velocity, bool bIsJumping, bool bIsCrouching)
+{
+    EAnim_MovementState NewState = CalculateMovementStateFromVelocity(Velocity, bIsJumping, bIsCrouching);
+    SetMovementState(NewState);
+}
+
+EAnim_MovementState UPrimitiveAnimationController::CalculateMovementStateFromVelocity(const FVector& Velocity, bool bIsJumping, bool bIsCrouching)
+{
+    // Handle jumping/falling first
+    if (bIsJumping || Velocity.Z > JumpVelocityThreshold)
+    {
+        return EAnim_MovementState::Jumping;
+    }
+    
+    if (Velocity.Z < -JumpVelocityThreshold)
+    {
+        return EAnim_MovementState::Falling;
+    }
+    
+    // Handle crouching states
+    if (bIsCrouching)
+    {
+        float HorizontalSpeed = FVector(Velocity.X, Velocity.Y, 0.0f).Size();
+        if (HorizontalSpeed > WalkSpeedThreshold * 0.5f) // Slower threshold for crouching
+        {
+            return EAnim_MovementState::Crawling;
+        }
+        else
+        {
+            return EAnim_MovementState::Crouching;
         }
     }
     
-    // Log state changes
-    if (NewState != CurrentState)
-    {
-        UE_LOG(LogTemp, Log, TEXT("Animation State Change: %d -> %d (Speed: %.1f)"), 
-               (int32)CurrentState, (int32)NewState, Speed);
-        CurrentState = NewState;
-    }
-}
-
-void UPrimitiveAnimationController::UpdateBlendData(float DeltaTime)
-{
-    // Smooth interpolation of blend values
-    BlendData.Speed = FMath::FInterpTo(BlendData.Speed, TargetSpeed, DeltaTime, BlendSpeed);
-    BlendData.Direction = FMath::FInterpTo(BlendData.Direction, TargetDirection, DeltaTime, BlendSpeed);
-    BlendData.AimPitch = FMath::FInterpTo(BlendData.AimPitch, TargetAimPitch, DeltaTime, BlendSpeed);
-    BlendData.AimYaw = FMath::FInterpTo(BlendData.AimYaw, TargetAimYaw, DeltaTime, BlendSpeed);
+    // Handle normal movement states
+    float HorizontalSpeed = FVector(Velocity.X, Velocity.Y, 0.0f).Size();
     
-    // Calculate movement direction relative to character rotation
-    if (OwnerCharacter && TargetSpeed > 10.0f)
+    if (HorizontalSpeed > RunSpeedThreshold)
     {
-        FVector Velocity = OwnerCharacter->GetCharacterMovement()->Velocity;
-        FVector ForwardVector = OwnerCharacter->GetActorForwardVector();
-        FVector RightVector = OwnerCharacter->GetActorRightVector();
-        
-        // Project velocity onto character's local axes
-        float ForwardComponent = FVector::DotProduct(Velocity.GetSafeNormal2D(), ForwardVector);
-        float RightComponent = FVector::DotProduct(Velocity.GetSafeNormal2D(), RightVector);
-        
-        // Convert to angle (-180 to 180)
-        TargetDirection = FMath::Atan2(RightComponent, ForwardComponent) * (180.0f / PI);
+        return EAnim_MovementState::Running;
+    }
+    else if (HorizontalSpeed > WalkSpeedThreshold)
+    {
+        return EAnim_MovementState::Walking;
     }
     else
     {
-        TargetDirection = 0.0f;
+        return EAnim_MovementState::Idle;
     }
 }
 
-void UPrimitiveAnimationController::PlayJumpAnimation()
+void UPrimitiveAnimationController::HandleStateTransition(EAnim_MovementState NewState)
 {
-    if (JumpMontage)
+    PreviousMovementState = CurrentMovementState;
+    CurrentMovementState = NewState;
+    
+    bIsTransitioning = true;
+    StateTransitionTimer = 0.0f;
+    
+    ApplyAnimationForState(CurrentMovementState);
+    
+    if (bDebugAnimationStates)
     {
-        PlayMontageIfValid(JumpMontage);
-        UE_LOG(LogTemp, Log, TEXT("Playing jump animation"));
-    }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Jump montage not assigned!"));
-    }
-}
-
-void UPrimitiveAnimationController::PlayClimbAnimation()
-{
-    if (ClimbMontage)
-    {
-        PlayMontageIfValid(ClimbMontage);
-        CurrentState = EAnim_MovementState::Climbing;
-        UE_LOG(LogTemp, Log, TEXT("Playing climb animation"));
-    }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Climb montage not assigned!"));
+        UE_LOG(LogTemp, Warning, TEXT("PrimitiveAnimationController: State transition from %s to %s"), 
+            *UEnum::GetValueAsString(PreviousMovementState),
+            *UEnum::GetValueAsString(CurrentMovementState));
     }
 }
 
-void UPrimitiveAnimationController::SetAimOffset(float Pitch, float Yaw)
+void UPrimitiveAnimationController::ApplyAnimationForState(EAnim_MovementState State)
 {
-    TargetAimPitch = FMath::Clamp(Pitch, -90.0f, 90.0f);
-    TargetAimYaw = FMath::Clamp(Yaw, -180.0f, 180.0f);
-}
-
-void UPrimitiveAnimationController::PlayMontageIfValid(UAnimMontage* Montage)
-{
-    if (!Montage || !SkeletalMeshComp)
+    if (!SkeletalMeshComponent || !AnimInstance)
     {
         return;
     }
     
-    UAnimInstance* AnimInstance = SkeletalMeshComp->GetAnimInstance();
+    UAnimSequence* AnimToPlay = nullptr;
+    FAnim_BlendData BlendData = GetBlendDataForState(State);
+    
+    // Select appropriate animation based on state
+    switch (State)
+    {
+        case EAnim_MovementState::Idle:
+            AnimToPlay = IdleAnimation;
+            break;
+            
+        case EAnim_MovementState::Walking:
+            AnimToPlay = WalkAnimation;
+            break;
+            
+        case EAnim_MovementState::Running:
+            AnimToPlay = RunAnimation;
+            break;
+            
+        case EAnim_MovementState::Jumping:
+            AnimToPlay = JumpStartAnimation;
+            break;
+            
+        case EAnim_MovementState::Falling:
+            AnimToPlay = JumpLoopAnimation;
+            break;
+            
+        case EAnim_MovementState::Landing:
+            AnimToPlay = JumpLandAnimation;
+            break;
+            
+        case EAnim_MovementState::Crouching:
+            AnimToPlay = CrouchIdleAnimation;
+            break;
+            
+        case EAnim_MovementState::Crawling:
+            AnimToPlay = CrouchWalkAnimation;
+            break;
+            
+        default:
+            AnimToPlay = IdleAnimation;
+            break;
+    }
+    
+    // Play the animation if we have one
+    if (AnimToPlay)
+    {
+        if (UAnimSingleNodeInstance* SingleNodeInstance = Cast<UAnimSingleNodeInstance>(AnimInstance))
+        {
+            SingleNodeInstance->SetAnimationAsset(AnimToPlay);
+            SingleNodeInstance->SetPlayRate(BlendData.PlayRate);
+            SingleNodeInstance->SetLooping(BlendData.bLooping);
+            
+            if (bDebugAnimationStates)
+            {
+                UE_LOG(LogTemp, Log, TEXT("PrimitiveAnimationController: Playing animation %s for state %s"), 
+                    *AnimToPlay->GetName(),
+                    *UEnum::GetValueAsString(State));
+            }
+        }
+    }
+    else if (bDebugAnimationStates)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("PrimitiveAnimationController: No animation asset for state %s"), 
+            *UEnum::GetValueAsString(State));
+    }
+}
+
+FAnim_BlendData UPrimitiveAnimationController::GetBlendDataForState(EAnim_MovementState State)
+{
+    switch (State)
+    {
+        case EAnim_MovementState::Idle:
+        case EAnim_MovementState::Crouching:
+            return IdleBlendData;
+            
+        case EAnim_MovementState::Walking:
+        case EAnim_MovementState::Crawling:
+            return WalkBlendData;
+            
+        case EAnim_MovementState::Running:
+            return RunBlendData;
+            
+        case EAnim_MovementState::Jumping:
+        case EAnim_MovementState::Falling:
+        case EAnim_MovementState::Landing:
+            return JumpBlendData;
+            
+        default:
+            return IdleBlendData;
+    }
+}
+
+bool UPrimitiveAnimationController::PlayActionMontage(UAnimMontage* Montage, float PlayRate)
+{
+    if (!AnimInstance || !Montage)
+    {
+        return false;
+    }
+    
+    float MontageLength = AnimInstance->Montage_Play(Montage, PlayRate);
+    
+    if (bDebugAnimationStates)
+    {
+        UE_LOG(LogTemp, Log, TEXT("PrimitiveAnimationController: Playing montage %s (length: %f)"), 
+            *Montage->GetName(), MontageLength);
+    }
+    
+    return MontageLength > 0.0f;
+}
+
+void UPrimitiveAnimationController::StopCurrentMontage(float BlendOutTime)
+{
     if (AnimInstance)
     {
-        AnimInstance->Montage_Play(Montage);
+        AnimInstance->Montage_Stop(BlendOutTime);
+        
+        if (bDebugAnimationStates)
+        {
+            UE_LOG(LogTemp, Log, TEXT("PrimitiveAnimationController: Stopped current montage"));
+        }
     }
+}
+
+void UPrimitiveAnimationController::LogCurrentAnimationState()
+{
+    UE_LOG(LogTemp, Warning, TEXT("PrimitiveAnimationController Debug:"));
+    UE_LOG(LogTemp, Warning, TEXT("  Current State: %s"), *UEnum::GetValueAsString(CurrentMovementState));
+    UE_LOG(LogTemp, Warning, TEXT("  Previous State: %s"), *UEnum::GetValueAsString(PreviousMovementState));
+    UE_LOG(LogTemp, Warning, TEXT("  Is Transitioning: %s"), bIsTransitioning ? TEXT("Yes") : TEXT("No"));
+    UE_LOG(LogTemp, Warning, TEXT("  Transition Timer: %f"), StateTransitionTimer);
+    UE_LOG(LogTemp, Warning, TEXT("  Has SkeletalMesh: %s"), SkeletalMeshComponent ? TEXT("Yes") : TEXT("No"));
+    UE_LOG(LogTemp, Warning, TEXT("  Has AnimInstance: %s"), AnimInstance ? TEXT("Yes") : TEXT("No"));
 }
