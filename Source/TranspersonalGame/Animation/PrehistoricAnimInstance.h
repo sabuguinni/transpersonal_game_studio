@@ -2,81 +2,19 @@
 
 #include "CoreMinimal.h"
 #include "Animation/AnimInstance.h"
-#include "Animation/BlendSpace.h"
-#include "Animation/AnimSequence.h"
-#include "Animation/AnimMontage.h"
+#include "Engine/Engine.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "PrimitiveAnimationController.h"
-#include "../SharedTypes.h"
+#include "SharedTypes.h"
 #include "PrehistoricAnimInstance.generated.h"
 
-USTRUCT(BlueprintType)
-struct FAnim_BlendSpaceInput
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly, Category = "Animation")
-    float Speed = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Animation")
-    float Direction = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Animation")
-    float Lean = 0.0f;
-
-    FAnim_BlendSpaceInput()
-    {
-        Speed = 0.0f;
-        Direction = 0.0f;
-        Lean = 0.0f;
-    }
-};
-
-USTRUCT(BlueprintType)
-struct FAnim_IKData
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly, Category = "IK")
-    FVector LeftFootLocation = FVector::ZeroVector;
-
-    UPROPERTY(BlueprintReadOnly, Category = "IK")
-    FVector RightFootLocation = FVector::ZeroVector;
-
-    UPROPERTY(BlueprintReadOnly, Category = "IK")
-    FRotator LeftFootRotation = FRotator::ZeroRotator;
-
-    UPROPERTY(BlueprintReadOnly, Category = "IK")
-    FRotator RightFootRotation = FRotator::ZeroRotator;
-
-    UPROPERTY(BlueprintReadOnly, Category = "IK")
-    float LeftFootIKAlpha = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "IK")
-    float RightFootIKAlpha = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "IK")
-    float HipOffset = 0.0f;
-
-    FAnim_IKData()
-    {
-        LeftFootLocation = FVector::ZeroVector;
-        RightFootLocation = FVector::ZeroVector;
-        LeftFootRotation = FRotator::ZeroRotator;
-        RightFootRotation = FRotator::ZeroRotator;
-        LeftFootIKAlpha = 0.0f;
-        RightFootIKAlpha = 0.0f;
-        HipOffset = 0.0f;
-    }
-};
-
 /**
- * Prehistoric Animation Instance for primitive human characters
- * Handles locomotion, foot IK, and survival action animations
- * Designed for realistic prehistoric human movement and behavior
+ * Prehistoric Animation Instance
+ * Custom AnimInstance for prehistoric human characters
+ * Handles animation logic for survival gameplay without spiritual elements
  */
-UCLASS(BlueprintType, Blueprintable)
+UCLASS(Blueprintable, BlueprintType)
 class TRANSPERSONALGAME_API UPrehistoricAnimInstance : public UAnimInstance
 {
     GENERATED_BODY()
@@ -86,143 +24,145 @@ public:
 
 protected:
     virtual void NativeInitializeAnimation() override;
-    virtual void NativeUpdateAnimation(float DeltaTimeX) override;
+    virtual void NativeUpdateAnimation(float DeltaSeconds) override;
 
 public:
-    // Core animation variables (exposed to Blueprint)
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Movement")
+    // === ANIMATION VARIABLES (Blueprint accessible) ===
+
+    /** Current movement speed (horizontal) */
+    UPROPERTY(BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
     float Speed = 0.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Movement")
+    /** Current movement direction relative to character forward */
+    UPROPERTY(BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
     float Direction = 0.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Movement")
+    /** Vertical velocity (for jump/fall detection) */
+    UPROPERTY(BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
+    float VerticalVelocity = 0.0f;
+
+    /** Is the character in the air? */
+    UPROPERTY(BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
     bool bIsInAir = false;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Movement")
-    bool bIsMoving = false;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Movement")
-    bool bIsRunning = false;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Movement")
+    /** Is the character crouching? */
+    UPROPERTY(BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
     bool bIsCrouching = false;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Movement")
-    bool bIsJumping = false;
+    /** Is the character moving? */
+    UPROPERTY(BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
+    bool bIsMoving = false;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Movement")
-    bool bIsFalling = false;
+    /** Is the character running (vs walking)? */
+    UPROPERTY(BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
+    bool bIsRunning = false;
 
-    // Blend space inputs
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|BlendSpace")
-    FAnim_BlendSpaceInput BlendSpaceInput;
+    /** Current animation state from controller */
+    UPROPERTY(BlueprintReadOnly, Category = "Animation", meta = (AllowPrivateAccess = "true"))
+    EAnim_MovementState CurrentAnimationState = EAnim_MovementState::Idle;
 
-    // Animation states
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|State")
-    EAnim_MovementState MovementState = EAnim_MovementState::Idle;
+    /** Time since last state change (for transition blending) */
+    UPROPERTY(BlueprintReadOnly, Category = "Animation", meta = (AllowPrivateAccess = "true"))
+    float TimeSinceStateChange = 0.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|State")
-    EAnim_ActionState ActionState = EAnim_ActionState::None;
+    // === SURVIVAL ANIMATION VARIABLES ===
 
-    // Foot IK data
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|IK")
-    FAnim_IKData FootIKData;
+    /** Character health percentage (affects posture) */
+    UPROPERTY(BlueprintReadOnly, Category = "Survival", meta = (AllowPrivateAccess = "true"))
+    float HealthPercentage = 1.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|IK")
-    bool bEnableFootIK = true;
+    /** Character stamina percentage (affects movement style) */
+    UPROPERTY(BlueprintReadOnly, Category = "Survival", meta = (AllowPrivateAccess = "true"))
+    float StaminaPercentage = 1.0f;
 
-    // Survival action flags
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Actions")
-    bool bIsGathering = false;
+    /** Character fear level (affects movement urgency) */
+    UPROPERTY(BlueprintReadOnly, Category = "Survival", meta = (AllowPrivateAccess = "true"))
+    float FearLevel = 0.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Actions")
-    bool bIsCrafting = false;
+    /** Is character carrying something heavy? */
+    UPROPERTY(BlueprintReadOnly, Category = "Survival", meta = (AllowPrivateAccess = "true"))
+    bool bIsCarryingLoad = false;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Actions")
-    bool bIsInCombat = false;
+    /** Character temperature (affects idle animations) */
+    UPROPERTY(BlueprintReadOnly, Category = "Survival", meta = (AllowPrivateAccess = "true"))
+    float Temperature = 0.5f; // 0 = freezing, 1 = hot
 
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Actions")
-    bool bIsInteracting = false;
+    // === ANIMATION SETTINGS ===
 
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Actions")
-    bool bIsEating = false;
+    /** Speed threshold for walking animation */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
+    float WalkSpeedThreshold = 150.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Actions")
-    bool bIsDrinking = false;
+    /** Speed threshold for running animation */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
+    float RunSpeedThreshold = 400.0f;
 
-    // Animation assets (to be set in Blueprint)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|Assets")
-    UBlendSpace* LocomotionBlendSpace = nullptr;
+    /** Minimum vertical velocity to trigger falling animation */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
+    float FallingVelocityThreshold = -200.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|Assets")
-    UAnimSequence* IdleAnimation = nullptr;
+    /** How quickly to update direction changes */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
+    float DirectionSmoothingRate = 10.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|Assets")
-    UAnimSequence* JumpStartAnimation = nullptr;
+    /** How quickly to update speed changes */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
+    float SpeedSmoothingRate = 5.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|Assets")
-    UAnimSequence* JumpLoopAnimation = nullptr;
+    // === DEBUGGING ===
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|Assets")
-    UAnimSequence* JumpEndAnimation = nullptr;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug")
+    bool bDebugAnimationValues = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|Assets")
-    UAnimMontage* GatherMontage = nullptr;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|Assets")
-    UAnimMontage* CraftMontage = nullptr;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|Assets")
-    UAnimMontage* CombatMontage = nullptr;
-
-    // IK configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|IK Config")
-    float FootIKTraceDistance = 50.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|IK Config")
-    float FootIKInterpSpeed = 15.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|IK Config")
-    FName LeftFootBoneName = TEXT("foot_l");
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|IK Config")
-    FName RightFootBoneName = TEXT("foot_r");
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|IK Config")
-    FName HipBoneName = TEXT("pelvis");
-
-    // Animation thresholds
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|Config")
-    float MovingSpeedThreshold = 5.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|Config")
-    float RunningSpeedThreshold = 300.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|Config")
-    float DirectionChangeThreshold = 90.0f;
-
-protected:
-    // Component references
-    UPROPERTY(BlueprintReadOnly, Category = "References")
-    ACharacter* OwnerCharacter = nullptr;
-
-    UPROPERTY(BlueprintReadOnly, Category = "References")
-    UCharacterMovementComponent* MovementComponent = nullptr;
-
-    UPROPERTY(BlueprintReadOnly, Category = "References")
-    UPrimitiveAnimationController* AnimController = nullptr;
-
-    // Internal state
-    FVector LastVelocity = FVector::ZeroVector;
-    float LastDirection = 0.0f;
-    float DirectionChangeTimer = 0.0f;
+    UFUNCTION(BlueprintCallable, Category = "Debug")
+    void LogAnimationState();
 
 private:
-    void UpdateMovementVariables();
-    void UpdateActionVariables();
-    void UpdateFootIK(float DeltaTime);
-    void CalculateFootIKData(const FName& FootBoneName, FVector& OutLocation, FRotator& OutRotation, float& OutIKAlpha);
-    FVector GetFootWorldLocation(const FName& FootBoneName) const;
-    bool TraceForGround(const FVector& StartLocation, FVector& OutHitLocation, FVector& OutHitNormal) const;
+    // === CACHED REFERENCES ===
+
+    UPROPERTY()
+    TObjectPtr<ACharacter> OwnerCharacter;
+
+    UPROPERTY()
+    TObjectPtr<UCharacterMovementComponent> MovementComponent;
+
+    UPROPERTY()
+    TObjectPtr<UPrimitiveAnimationController> AnimationController;
+
+    // === INTERNAL STATE ===
+
+    FVector LastFrameVelocity = FVector::ZeroVector;
+    EAnim_MovementState LastAnimationState = EAnim_MovementState::Idle;
+    float StateChangeTimer = 0.0f;
+
+    // Smoothed values for animation
+    float SmoothedSpeed = 0.0f;
+    float SmoothedDirection = 0.0f;
+
+    // === INTERNAL METHODS ===
+
+    /**
+     * Update movement-related animation variables
+     */
+    void UpdateMovementVariables(float DeltaSeconds);
+
+    /**
+     * Update survival-related animation variables
+     */
+    void UpdateSurvivalVariables();
+
+    /**
+     * Calculate movement direction relative to character facing
+     */
+    float CalculateDirection(const FVector& Velocity, const FRotator& Rotation);
+
+    /**
+     * Smooth a value towards a target
+     */
+    float SmoothValue(float Current, float Target, float Rate, float DeltaTime);
+
+    /**
+     * Get survival stats from character (if available)
+     */
+    void UpdateSurvivalStats();
 };
