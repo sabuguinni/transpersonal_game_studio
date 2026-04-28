@@ -6,6 +6,7 @@
 #include "MassCommonFragments.h"
 #include "MassMovementFragments.h"
 #include "JurassicCrowdTypes.h"
+#include "MassEntityTypes.h"
 #include "JurassicPredatorProcessor.generated.h"
 
 /**
@@ -117,12 +118,12 @@ private:
  * Processor para comportamento territorial e dominância
  */
 UCLASS()
-class TRANSPERSONALGAME_API UJurassicTerritorialProcessor : public UMassProcessor
+class TRANSPERSONALGAME_API UAI_JurassicTerritorialProcessor : public UMassProcessor
 {
     GENERATED_BODY()
 
 public:
-    UJurassicTerritorialProcessor();
+    UAI_JurassicTerritorialProcessor();
 
 protected:
     virtual void ConfigureQueries() override;

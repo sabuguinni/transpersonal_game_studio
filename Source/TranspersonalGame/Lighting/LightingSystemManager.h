@@ -6,13 +6,13 @@
 #include "Components/SkyAtmosphereComponent.h"
 #include "Components/ExponentialHeightFogComponent.h"
 #include "Engine/DirectionalLight.h"
-#include "Engine/SkyAtmosphere.h"
+#include "Components/SkyAtmosphereComponent.h"
 #include "Engine/ExponentialHeightFog.h"
-#include "Engine/VolumetricCloud.h"
+#include "Components/VolumetricCloudComponent.h"
 #include "LightingSystemManager.generated.h"
 
 UENUM(BlueprintType)
-enum class ETimeOfDay : uint8
+enum class ELight_TimeOfDay_B3E : uint8
 {
     Dawn = 0,
     Morning,
@@ -23,7 +23,7 @@ enum class ETimeOfDay : uint8
 };
 
 UENUM(BlueprintType)
-enum class EWeatherState : uint8
+enum class ELight_WeatherState_B3E : uint8
 {
     Clear = 0,
     PartlyCloudy,
@@ -72,7 +72,7 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
+    virtual void Tick(float DeltaTime);
 
     // Core lighting components
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Lighting System")
@@ -99,14 +99,14 @@ protected:
     float DayNightCycleSpeed = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
-    EWeatherState CurrentWeatherState = EWeatherState::Clear;
+    ELight_WeatherState_B3E CurrentWeatherState = ELight_WeatherState_B3E::Clear;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float WeatherTransitionSpeed = 0.5f;
 
     // Lighting presets for different times of day
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting Presets")
-    TMap<ETimeOfDay, FLightingPreset> LightingPresets;
+    TMap<ELight_TimeOfDay_B3E, FLightingPreset> LightingPresets;
 
     // Interior lighting settings
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior Lighting")
@@ -127,24 +127,24 @@ public:
     float GetTimeOfDay() const { return CurrentTimeOfDay; }
 
     UFUNCTION(BlueprintCallable, Category = "Day/Night Cycle")
-    ETimeOfDay GetCurrentTimeOfDayEnum() const;
+    ELight_TimeOfDay_B3E GetCurrentTimeOfDayEnum() const;
 
     UFUNCTION(BlueprintCallable, Category = "Day/Night Cycle")
     void SetDayNightCycleSpeed(float NewSpeed);
 
     // Weather control functions
     UFUNCTION(BlueprintCallable, Category = "Weather")
-    void SetWeatherState(EWeatherState NewWeatherState);
+    void SetWeatherState(ELight_WeatherState_B3E NewWeatherState);
 
     UFUNCTION(BlueprintCallable, Category = "Weather")
-    void TransitionToWeather(EWeatherState TargetWeather, float TransitionTime = 5.0f);
+    void TransitionToWeather(ELight_WeatherState_B3E TargetWeather, float TransitionTime = 5.0f);
 
     // Lighting preset functions
     UFUNCTION(BlueprintCallable, Category = "Lighting")
-    void ApplyLightingPreset(ETimeOfDay TimeOfDay);
+    void ApplyLightingPreset(ELight_TimeOfDay_B3E TimeOfDay);
 
     UFUNCTION(BlueprintCallable, Category = "Lighting")
-    void InterpolateLightingPresets(ETimeOfDay FromTime, ETimeOfDay ToTime, float Alpha);
+    void InterpolateLightingPresets(ELight_TimeOfDay_B3E FromTime, ELight_TimeOfDay_B3E ToTime, float Alpha);
 
     // Interior lighting functions
     UFUNCTION(BlueprintCallable, Category = "Interior Lighting")
@@ -172,7 +172,7 @@ private:
     void InitializeLightingPresets();
     
     // Weather transition variables
-    EWeatherState TargetWeatherState;
+    ELight_WeatherState_B3E TargetWeatherState;
     float WeatherTransitionTimer = 0.0f;
     float WeatherTransitionDuration = 5.0f;
     bool bIsTransitioningWeather = false;

@@ -1,9 +1,10 @@
 // Copyright Transpersonal Game Studio. All Rights Reserved.
 
 #pragma once
+// DISABLED: // DISABLED: #include "TranspersonalGameSharedTypes.h"
 
 #include "CoreMinimal.h"
-#include "GameFramework/GameInstanceSubsystem.h"
+#include "Subsystems/GameInstanceSubsystem.h"
 #include "Engine/DataTable.h"
 #include "NarrativeTypes.h"
 #include "GameplayTagContainer.h"

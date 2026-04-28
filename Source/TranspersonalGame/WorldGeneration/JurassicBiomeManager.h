@@ -69,7 +69,7 @@ struct FJurassicBiomeData
 
     // PCG Generation
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation")
-    class UPCGGraph* BiomePCGGraph;
+    class UPCGGraph* BiomePCGGraph = nullptr;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation", meta = (ClampMin = "0", ClampMax = "10"))
     int32 GenerationPriority = 5;

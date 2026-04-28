@@ -8,7 +8,7 @@
 DECLARE_LOG_CATEGORY_EXTERN(LogStudioDirectorV43, Log, All);
 
 UENUM(BlueprintType)
-enum class EProductionPhase : uint8
+enum class ECore_ProductionPhase : uint8
 {
     Initialization  UMETA(DisplayName = "Initialization"),
     Active         UMETA(DisplayName = "Active Production"),
@@ -140,14 +140,14 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
+    virtual void Tick(float DeltaTime);
 
     // Production Cycle Management
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
     FString CurrentCycleID;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
-    EProductionPhase ProductionPhase;
+    ECore_ProductionPhase ProductionPhase;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
     FDateTime CycleStartTime;
@@ -201,7 +201,7 @@ public:
 
     // Getters
     UFUNCTION(BlueprintPure, Category = "Studio Director")
-    EProductionPhase GetCurrentPhase() const { return ProductionPhase; }
+    ECore_ProductionPhase GetCurrentPhase() const { return ProductionPhase; }
 
     UFUNCTION(BlueprintPure, Category = "Studio Director")
     FString GetCurrentCycleID() const { return CurrentCycleID; }

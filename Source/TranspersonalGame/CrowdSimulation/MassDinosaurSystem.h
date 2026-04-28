@@ -5,7 +5,7 @@
 #include "MassProcessor.h"
 #include "MassCommonFragments.h"
 #include "MassMovementFragments.h"
-#include "MassDinosaurFragments.h"
+// FIXME: Missing header - #include "MassDinosaurFragments.h"
 #include "MassDinosaurSystem.generated.h"
 
 /**

@@ -14,7 +14,7 @@ class UPhysicalMaterial;
 
 /** Physics event types for different gameplay scenarios */
 UENUM(BlueprintType)
-enum class EPhysicsEventType : uint8
+enum class ECore_PhysicsEventType_602 : uint8
 {
     Collision           UMETA(DisplayName = "Collision Impact"),
     Destruction         UMETA(DisplayName = "Object Destruction"),
@@ -27,13 +27,13 @@ enum class EPhysicsEventType : uint8
 
 /** Detailed physics event data */
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FPhysicsEventData
+struct TRANSPERSONALGAME_API FCore_PhysicsEventData
 {
     GENERATED_BODY()
 
     /** Type of physics event */
     UPROPERTY(BlueprintReadOnly)
-    EPhysicsEventType EventType = EPhysicsEventType::Collision;
+    ECore_PhysicsEventType_602 EventType = ECore_PhysicsEventType_602::Collision;
 
     /** Primary actor involved in the event */
     UPROPERTY(BlueprintReadOnly)
@@ -81,8 +81,8 @@ struct TRANSPERSONALGAME_API FPhysicsEventData
 };
 
 /** Physics event delegate signatures */
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FPhysicsEventDelegate, const FPhysicsEventData&, EventData);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FCollisionEventDelegate, AActor*, ActorA, AActor*, ActorB);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FPhysicsEventDelegate, const FCore_PhysicsEventData&, EventData);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FPhysicsCollisionEventDelegate, AActor*, ActorA, AActor*, ActorB);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FDestructionEventDelegate, AActor*, DestroyedActor, FVector, Location, float, Force);
 
 /**
@@ -126,22 +126,22 @@ public:
      * @param EventType Type of events to listen for
      * @param Callback Function to call when events occur
      */
-    UFUNCTION(BlueprintCallable, Category = "Physics Events")
-    void RegisterEventListener(EPhysicsEventType EventType, const FPhysicsEventDelegate& Callback);
+// [UHT-FIX2]     UFUNCTION(BlueprintCallable, Category = "Physics Events")
+    void RegisterEventListener(ECore_PhysicsEventType_602 EventType, const FPhysicsEventDelegate& Callback);
 
     /**
      * Unregister from physics event notifications
      * @param EventType Type of events to stop listening for
      */
     UFUNCTION(BlueprintCallable, Category = "Physics Events")
-    void UnregisterEventListener(EPhysicsEventType EventType);
+    void UnregisterEventListener(ECore_PhysicsEventType_602 EventType);
 
     /**
      * Dispatch a physics event to all registered listeners
      * @param EventData Complete event data to dispatch
      */
     UFUNCTION(BlueprintCallable, Category = "Physics Events")
-    void DispatchPhysicsEvent(const FPhysicsEventData& EventData);
+    void DispatchPhysicsEvent(const FCore_PhysicsEventData& EventData);
 
     /**
      * Create and dispatch a collision event
@@ -187,7 +187,7 @@ public:
      * @return Array of recent physics events
      */
     UFUNCTION(BlueprintPure, Category = "Physics Events")
-    TArray<FPhysicsEventData> GetRecentEvents(EPhysicsEventType EventType, int32 MaxEvents = 10) const;
+    TArray<FCore_PhysicsEventData> GetRecentEvents(ECore_PhysicsEventType_602 EventType, int32 MaxEvents = 10) const;
 
     /**
      * Clear all event history
@@ -207,11 +207,11 @@ public:
 protected:
     /** Event listeners by event type */
     UPROPERTY()
-    TMap<EPhysicsEventType, FPhysicsEventDelegate> EventListeners;
+    TMap<ECore_PhysicsEventType_602, FPhysicsEventDelegate> EventListeners;
 
     /** Event history for debugging and analytics */
     UPROPERTY()
-    TArray<FPhysicsEventData> EventHistory;
+    TArray<FCore_PhysicsEventData> EventHistory;
 
     /** Event filtering parameters */
     UPROPERTY(EditAnywhere, Category = "Event Filtering")
@@ -242,16 +242,16 @@ private:
     void ProcessQueuedEvents();
 
     /** Filter event based on current filtering settings */
-    bool ShouldProcessEvent(const FPhysicsEventData& EventData) const;
+    bool ShouldProcessEvent(const FCore_PhysicsEventData& EventData) const;
 
     /** Add event to history if tracking is enabled */
-    void AddToEventHistory(const FPhysicsEventData& EventData);
+    void AddToEventHistory(const FCore_PhysicsEventData& EventData);
 
     /** Update performance statistics */
     void UpdateEventStatistics();
 
     /** Queued events for batch processing */
-    TArray<FPhysicsEventData> QueuedEvents;
+    TArray<FCore_PhysicsEventData> QueuedEvents;
 
     /** Timer handle for event processing */
     FTimerHandle EventProcessingTimer;

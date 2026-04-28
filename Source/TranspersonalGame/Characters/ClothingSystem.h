@@ -76,13 +76,13 @@ struct FClothingPiece
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clothing")
-    EClothingSlot Slot;
+    EClothingSlot Slot = EClothingSlot::Undergarments;
     
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clothing")
-    EClothingStyle Style;
+    EClothingStyle Style = EClothingStyle::ModernCasual;
     
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clothing")
-    EClothingCondition Condition;
+    EClothingCondition Condition = EClothingCondition::Perfect;
     
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mesh")
     TSoftObjectPtr<class USkeletalMesh> ClothingMesh;

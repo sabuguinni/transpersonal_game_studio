@@ -1,10 +1,11 @@
 #pragma once
+// DISABLED: // DISABLED: #include "TranspersonalGameSharedTypes.h"
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "Components/AudioComponent.h"
 #include "Sound/SoundAttenuation.h"
-#include "AudioTypes.h"
+// DISABLED: #include "AudioTypes.h"
 #include "Engine/World.h"
 #include "SpatialAudioSystem.generated.h"
 

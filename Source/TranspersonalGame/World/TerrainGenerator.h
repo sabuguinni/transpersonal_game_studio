@@ -35,7 +35,7 @@ enum class ETerrainLayer : uint8
  * Geological Formation Types
  */
 UENUM(BlueprintType)
-enum class EGeologicalFormation : uint8
+enum class EWorld_GeologicalFormation : uint8
 {
     Plains              UMETA(DisplayName = "Plains"),
     Hills               UMETA(DisplayName = "Hills"),
@@ -53,7 +53,7 @@ enum class EGeologicalFormation : uint8
  * Terrain Generation Settings
  */
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FTerrainGenerationSettings
+struct TRANSPERSONALGAME_API FWorld_TerrainGenerationSettings
 {
     GENERATED_BODY()
 
@@ -115,7 +115,7 @@ struct TRANSPERSONALGAME_API FTerrainGenerationSettings
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Erosion")
     float SedimentCapacity = 0.3f;
 
-    FTerrainGenerationSettings()
+    FWorld_TerrainGenerationSettings()
     {
         // Default constructor with reasonable values
     }
@@ -212,7 +212,7 @@ public:
     float GetSlopeAtWorldLocation(const FVector& WorldLocation) const;
 
     UFUNCTION(BlueprintCallable, Category = "Terrain Utilities")
-    EGeologicalFormation GetFormationAtLocation(const FVector& WorldLocation) const;
+    EWorld_GeologicalFormation GetFormationAtLocation(const FVector& WorldLocation) const;
 
     UFUNCTION(BlueprintCallable, Category = "Terrain Utilities")
     ETerrainLayer GetTerrainLayerAtLocation(const FVector& WorldLocation) const;
@@ -237,7 +237,7 @@ public:
 protected:
     // Generation settings
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    FTerrainGenerationSettings GenerationSettings;
+    FWorld_TerrainGenerationSettings GenerationSettings;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
     int32 TerrainSeed = 42;
@@ -312,7 +312,7 @@ public:
     UPROPERTY(BlueprintAssignable, Category = "Events")
     FOnTerrainGenerated OnTerrainGenerated;
 
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnGeologicalFeatureCreated, EGeologicalFormation, FormationType, FVector, Location);
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnGeologicalFeatureCreated, EWorld_GeologicalFormation, FormationType, FVector, Location);
     UPROPERTY(BlueprintAssignable, Category = "Events")
     FOnGeologicalFeatureCreated OnGeologicalFeatureCreated;
 };

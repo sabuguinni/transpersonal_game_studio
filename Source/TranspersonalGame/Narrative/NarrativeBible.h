@@ -356,7 +356,7 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Narrative Bible")
     FString GetCurrentAct() const { return CurrentAct; }
 
-    UFUNCTION(BlueprintCallable, Category = "Narrative Bible")
+// [UHT-FIX]     UFUNCTION(BlueprintCallable, Category = "Narrative Bible")
     const FLoreEntry* GetLoreEntry(const FString& LoreKey) const;
 
     UFUNCTION(BlueprintCallable, Category = "Narrative Bible")

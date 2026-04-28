@@ -8,7 +8,7 @@
 #include "RHI.h"
 #include "RenderingThread.h"
 #include "Stats/Stats.h"
-#include "HAL/PlatformFilemanager.h"
+#include "HAL/PlatformFileManager.h"
 #include "Misc/DateTime.h"
 #include "Engine/StaticMesh.h"
 #include "Components/StaticMeshComponent.h"
@@ -25,7 +25,7 @@ DECLARE_CYCLE_STAT(TEXT("Culling Optimization"), STAT_CullingOptimization, STATG
 DECLARE_CYCLE_STAT(TEXT("Memory Optimization"), STAT_MemoryOptimization, STATGROUP_TranspersonalPerformance);
 
 UENUM(BlueprintType)
-enum class EPerformanceTarget : uint8
+enum class ECore_PerformanceTarget : uint8
 {
     PC_60FPS        UMETA(DisplayName = "PC 60 FPS"),
     Console_30FPS   UMETA(DisplayName = "Console 30 FPS"),
@@ -34,7 +34,7 @@ enum class EPerformanceTarget : uint8
 };
 
 UENUM(BlueprintType)
-enum class EPerformanceLevel : uint8
+enum class ECore_PerformanceLevel : uint8
 {
     Low         UMETA(DisplayName = "Low"),
     Medium      UMETA(DisplayName = "Medium"),
@@ -44,7 +44,7 @@ enum class EPerformanceLevel : uint8
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FPerformanceMetrics
+struct TRANSPERSONALGAME_API FCore_PerformanceMetrics_042
 {
     GENERATED_BODY()
 
@@ -75,7 +75,7 @@ struct TRANSPERSONALGAME_API FPerformanceMetrics
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
     int32 OccludedPrimitives;
 
-    FPerformanceMetrics()
+    FCore_PerformanceMetrics_042()
     {
         FrameTime = 0.0f;
         GameThreadTime = 0.0f;
@@ -95,10 +95,10 @@ struct TRANSPERSONALGAME_API FPerformanceProfile
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Profile")
-    EPerformanceTarget TargetPlatform;
+    ECore_PerformanceTarget TargetPlatform;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Profile")
-    EPerformanceLevel QualityLevel;
+    ECore_PerformanceLevel QualityLevel;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Profile")
     float TargetFrameRate;
@@ -132,8 +132,8 @@ struct TRANSPERSONALGAME_API FPerformanceProfile
 
     FPerformanceProfile()
     {
-        TargetPlatform = EPerformanceTarget::PC_60FPS;
-        QualityLevel = EPerformanceLevel::High;
+        TargetPlatform = ECore_PerformanceTarget::PC_60FPS;
+        QualityLevel = ECore_PerformanceLevel::High;
         TargetFrameRate = 60.0f;
         MaxFrameTime = 16.67f; // 60fps
         MaxDrawCalls = 5000;
@@ -167,7 +167,7 @@ public:
     void StopPerformanceAnalysis();
 
     UFUNCTION(BlueprintCallable, Category = "Performance Optimizer")
-    FPerformanceMetrics GetCurrentPerformanceMetrics();
+    FCore_PerformanceMetrics_042 GetCurrentPerformanceMetrics();
 
     UFUNCTION(BlueprintCallable, Category = "Performance Optimizer")
     void SetPerformanceProfile(const FPerformanceProfile& Profile);
@@ -177,7 +177,7 @@ public:
 
     // Optimization Functions
     UFUNCTION(BlueprintCallable, Category = "Performance Optimizer")
-    void OptimizeForTarget(EPerformanceTarget Target);
+    void OptimizeForTarget(ECore_PerformanceTarget Target);
 
     UFUNCTION(BlueprintCallable, Category = "Performance Optimizer")
     void ApplyDynamicLODOptimization();
@@ -245,7 +245,7 @@ private:
     FPerformanceProfile CurrentProfile;
 
     UPROPERTY()
-    FPerformanceMetrics CurrentMetrics;
+    FCore_PerformanceMetrics_042 CurrentMetrics;
 
     // Performance monitoring
     FTimerHandle PerformanceMonitorTimer;
@@ -253,7 +253,7 @@ private:
     float AnalysisStartTime;
     
     // Performance history
-    TArray<FPerformanceMetrics> MetricsHistory;
+    TArray<FCore_PerformanceMetrics_042> MetricsHistory;
     int32 MaxHistorySize;
 
     // Dynamic adjustment thresholds

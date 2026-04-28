@@ -22,3 +22,4 @@ void ATranspersonalGameMode::InitializeGameSystems()
 {
     UE_LOG(LogTemp, Log, TEXT("TranspersonalGameMode: Core systems initialized"));
 }
+// Force rebuild timestamp: Wed Apr 15 11:19:25 EDT 2026

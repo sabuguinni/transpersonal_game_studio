@@ -11,7 +11,7 @@
 #include "NPCBehaviorComponent.generated.h"
 
 UENUM(BlueprintType)
-enum class ENPCEmotionalState : uint8
+enum class EAI_NPCEmotionalState_A78 : uint8
 {
     Neutral     UMETA(DisplayName = "Neutral"),
     Happy       UMETA(DisplayName = "Happy"),
@@ -39,7 +39,7 @@ enum class ENPCActivity : uint8
 };
 
 USTRUCT(BlueprintType)
-struct FNPCMemoryEntry
+struct FAI_NPCMemoryEntry_A78
 {
     GENERATED_BODY()
 
@@ -56,18 +56,18 @@ struct FNPCMemoryEntry
     float LastInteractionTime;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    ENPCEmotionalState LastEmotionalResponse;
+    EAI_NPCEmotionalState_A78 LastEmotionalResponse;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     TArray<FString> InteractionHistory;
 
-    FNPCMemoryEntry()
+    FAI_NPCMemoryEntry_A78()
     {
         Actor = nullptr;
         LastKnownLocation = FVector::ZeroVector;
         RelationshipValue = 0.0f;
         LastInteractionTime = 0.0f;
-        LastEmotionalResponse = ENPCEmotionalState::Neutral;
+        LastEmotionalResponse = EAI_NPCEmotionalState_A78::Neutral;
     }
 };
 
@@ -105,17 +105,17 @@ struct FNPCRoutineEntry
     }
 };
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnNPCEmotionalStateChanged, ENPCEmotionalState, OldState, ENPCEmotionalState, NewState);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnNPCEmotionalStateChanged, EAI_NPCEmotionalState_A78, OldState, EAI_NPCEmotionalState_A78, NewState);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnNPCActivityChanged, ENPCActivity, OldActivity, ENPCActivity, NewActivity);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnNPCInteraction, AActor*, OtherActor, float, RelationshipChange, FString, InteractionType);
 
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UNPCBehaviorComponent : public UActorComponent
+class TRANSPERSONALGAME_API UAI_NPCBehaviorComponent : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    UNPCBehaviorComponent();
+    UAI_NPCBehaviorComponent();
 
 protected:
     virtual void BeginPlay() override;
@@ -146,7 +146,7 @@ public:
 
     // Current State
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "NPC State")
-    ENPCEmotionalState CurrentEmotionalState;
+    EAI_NPCEmotionalState_A78 CurrentEmotionalState;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "NPC State")
     ENPCActivity CurrentActivity;
@@ -162,7 +162,7 @@ public:
 
     // Memory System
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "NPC Memory")
-    TArray<FNPCMemoryEntry> MemoryEntries;
+    TArray<FAI_NPCMemoryEntry_A78> MemoryEntries;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Memory")
     int32 MaxMemoryEntries;
@@ -206,7 +206,7 @@ public:
 
     // Core Functions
     UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
-    void SetEmotionalState(ENPCEmotionalState NewState);
+    void SetEmotionalState(EAI_NPCEmotionalState_A78 NewState);
 
     UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
     void SetActivity(ENPCActivity NewActivity);
@@ -214,8 +214,8 @@ public:
     UFUNCTION(BlueprintCallable, Category = "NPC Memory")
     void RememberActor(AActor* Actor, float RelationshipChange, const FString& InteractionType);
 
-    UFUNCTION(BlueprintCallable, Category = "NPC Memory")
-    FNPCMemoryEntry* GetMemoryOfActor(AActor* Actor);
+// [UHT-FIX]     UFUNCTION(BlueprintCallable, Category = "NPC Memory")
+    FAI_NPCMemoryEntry_A78* GetMemoryOfActor(AActor* Actor);
 
     UFUNCTION(BlueprintCallable, Category = "NPC Memory")
     float GetRelationshipWith(AActor* Actor);

@@ -23,7 +23,7 @@ enum class ENPCSpeciesType : uint8
 };
 
 UENUM(BlueprintType)
-enum class ENPCBehaviorState : uint8
+enum class EAI_NPCBehaviorState : uint8
 {
     Idle               UMETA(DisplayName = "Idle"),
     Foraging           UMETA(DisplayName = "Foraging"),
@@ -63,7 +63,7 @@ enum class ENPCDomesticationLevel : uint8
 
 // Estruturas de dados comportamentais
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNPCMemoryEntry
+struct TRANSPERSONALGAME_API FAI_NPCMemoryEntry_416
 {
     GENERATED_BODY()
 
@@ -85,7 +85,7 @@ struct TRANSPERSONALGAME_API FNPCMemoryEntry
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     FString InteractionHistory;
 
-    FNPCMemoryEntry()
+    FAI_NPCMemoryEntry_416()
     {
         TargetActor = nullptr;
         LastKnownLocation = FVector::ZeroVector;
@@ -97,7 +97,7 @@ struct TRANSPERSONALGAME_API FNPCMemoryEntry
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNPCPersonalityTraits
+struct TRANSPERSONALGAME_API FAI_NPCPersonalityTraits
 {
     GENERATED_BODY()
 
@@ -123,7 +123,7 @@ struct TRANSPERSONALGAME_API FNPCPersonalityTraits
     UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float Patience;
 
-    FNPCPersonalityTraits()
+    FAI_NPCPersonalityTraits()
     {
         Aggressiveness = 0.5f;
         Curiosity = 0.5f;
@@ -136,7 +136,7 @@ struct TRANSPERSONALGAME_API FNPCPersonalityTraits
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNPCDailyRoutine
+struct TRANSPERSONALGAME_API FAI_NPCDailyRoutine_416
 {
     GENERATED_BODY()
 
@@ -147,7 +147,7 @@ struct TRANSPERSONALGAME_API FNPCDailyRoutine
     float Duration; // Duração em horas
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    ENPCBehaviorState BehaviorState;
+    EAI_NPCBehaviorState BehaviorState;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     FVector PreferredLocation;
@@ -155,11 +155,11 @@ struct TRANSPERSONALGAME_API FNPCDailyRoutine
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     float Priority; // 0.0 a 1.0
 
-    FNPCDailyRoutine()
+    FAI_NPCDailyRoutine_416()
     {
         StartTime = 0.0f;
         Duration = 1.0f;
-        BehaviorState = ENPCBehaviorState::Idle;
+        BehaviorState = EAI_NPCBehaviorState::Idle;
         PreferredLocation = FVector::ZeroVector;
         Priority = 0.5f;
     }
@@ -227,7 +227,7 @@ public:
     int32 UniqueID;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Configuration")
-    FNPCPersonalityTraits PersonalityTraits;
+    FAI_NPCPersonalityTraits PersonalityTraits;
 
     // Sistema de necessidades
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Needs")
@@ -238,7 +238,7 @@ public:
 
     // Sistema de memória
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Memory")
-    TArray<FNPCMemoryEntry> MemoryEntries;
+    TArray<FAI_NPCMemoryEntry_416> MemoryEntries;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Memory")
     float MemoryDecayRate;
@@ -248,14 +248,14 @@ public:
 
     // Rotinas diárias
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Routine")
-    TArray<FNPCDailyRoutine> DailyRoutines;
+    TArray<FAI_NPCDailyRoutine_416> DailyRoutines;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Routine")
     float RoutineFlexibility; // Quão flexível é em seguir rotinas
 
     // Estado atual
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC State")
-    ENPCBehaviorState CurrentBehaviorState;
+    EAI_NPCBehaviorState CurrentBehaviorState;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC State")
     ENPCDomesticationLevel DomesticationLevel;
@@ -277,20 +277,20 @@ public:
     UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
     void AddMemoryEntry(AActor* Target, ENPCThreatLevel ThreatLevel, const FString& InteractionType);
 
-    UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
-    FNPCMemoryEntry* GetMemoryEntry(AActor* Target);
+// [UHT-FIX]     UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
+    FAI_NPCMemoryEntry_416* GetMemoryEntry(AActor* Target);
 
     UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
     void UpdateNeeds(float DeltaTime);
 
     UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
-    ENPCBehaviorState GetMostUrgentNeed();
+    EAI_NPCBehaviorState GetMostUrgentNeed();
 
     UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
     bool ShouldFollowRoutine();
 
     UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
-    FNPCDailyRoutine GetCurrentRoutine();
+    FAI_NPCDailyRoutine_416 GetCurrentRoutine();
 
     UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
     void ModifyPlayerRelationship(float Delta);

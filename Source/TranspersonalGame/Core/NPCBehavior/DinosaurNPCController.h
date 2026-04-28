@@ -4,10 +4,11 @@
 #include "AIController.h"
 #include "BehaviorTree/BehaviorTreeComponent.h"
 #include "BehaviorTree/BlackboardComponent.h"
-#include "Perception/AIPerceptionComponent.h"
+// DISABLED: #include "Perception/PerceptionComponent.h"
 #include "Perception/AISenseConfig_Sight.h"
 #include "Perception/AISenseConfig_Hearing.h"
-#include "NPCBehaviorSystem.h"
+// FIXME: Missing header - #include "NPCBehaviorSystem.h"
+#include "Perception/AIPerceptionComponent.h"
 #include "DinosaurNPCController.generated.h"
 
 /**
@@ -24,15 +25,14 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
+    virtual void Tick(float DeltaTime);
     virtual void OnPossess(APawn* InPawn) override;
 
     // Core AI Components
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI Components")
     class UNPCBehaviorComponent* BehaviorComponent;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI Components")
-    class UAIPerceptionComponent* AIPerceptionComponent;
+    // SHADOWED: UPROPERTY class UAIPerceptionComponent* PerceptionComponent;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI Components")
     class UBehaviorTreeComponent* BehaviorTreeComponent;
@@ -44,8 +44,8 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
     class UBehaviorTree* DefaultBehaviorTree;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    class UBlackboardAsset* DefaultBlackboard;
+// [UHT-FIX]     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
+    class UBlackboardData* DefaultBlackboard;
 
     // Perception Configuration
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Perception")

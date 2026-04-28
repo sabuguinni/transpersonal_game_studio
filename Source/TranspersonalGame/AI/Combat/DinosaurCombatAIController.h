@@ -2,9 +2,10 @@
 
 #include "CoreMinimal.h"
 #include "AIController.h"
-#include "Perception/AIPerceptionComponent.h"
+// DISABLED: #include "Perception/PerceptionComponent.h"
 #include "BehaviorTree/BlackboardComponent.h"
 #include "Engine/Engine.h"
+#include "Perception/AIPerceptionComponent.h"
 #include "DinosaurCombatAIController.generated.h"
 
 class UBehaviorTreeComponent;
@@ -14,7 +15,7 @@ class UAISenseConfig_Hearing;
 class UAISenseConfig_Damage;
 
 UENUM(BlueprintType)
-enum class EDinosaurCombatState : uint8
+enum class EAI_DinosaurCombatState : uint8
 {
     Idle,
     Hunting,
@@ -27,7 +28,7 @@ enum class EDinosaurCombatState : uint8
 };
 
 UENUM(BlueprintType)
-enum class EDinosaurThreatLevel : uint8
+enum class EAI_DinosaurThreatLevel : uint8
 {
     None,
     Low,
@@ -37,7 +38,7 @@ enum class EDinosaurThreatLevel : uint8
 };
 
 USTRUCT(BlueprintType)
-struct FCombatMemory
+struct FAI_CombatMemory_461
 {
     GENERATED_BODY()
 
@@ -51,7 +52,7 @@ struct FCombatMemory
     float TimeSinceLastSeen = 0.0f;
 
     UPROPERTY(BlueprintReadWrite)
-    EDinosaurThreatLevel ThreatLevel = EDinosaurThreatLevel::None;
+    EAI_DinosaurThreatLevel ThreatLevel = EAI_DinosaurThreatLevel::None;
 
     UPROPERTY(BlueprintReadWrite)
     bool bHasBeenDamaged = false;
@@ -74,18 +75,17 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
+    virtual void Tick(float DeltaTime);
 
     // Behavior Tree e Blackboard
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI")
     class UBehaviorTree* BehaviorTree;
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI")
-    class UBlackboardAsset* BlackboardAsset;
+// [UHT-FIX]     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI")
+    class UBlackboardData* BlackboardAsset;
 
     // Componentes de Percepção
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI")
-    class UAIPerceptionComponent* AIPerceptionComponent;
+    // SHADOWED: UPROPERTY class UAIPerceptionComponent* PerceptionComponent;
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Perception")
     class UAISenseConfig_Sight* SightConfig;
@@ -120,10 +120,10 @@ protected:
 
     // Estado de Combate
     UPROPERTY(BlueprintReadOnly, Category = "Combat")
-    EDinosaurCombatState CurrentCombatState = EDinosaurCombatState::Idle;
+    EAI_DinosaurCombatState CurrentCombatState = EAI_DinosaurCombatState::Idle;
 
     UPROPERTY(BlueprintReadOnly, Category = "Combat")
-    FCombatMemory CombatMemory;
+    FAI_CombatMemory_461 CombatMemory;
 
     UPROPERTY(BlueprintReadOnly, Category = "Combat")
     TArray<AActor*> KnownThreats;
@@ -134,10 +134,10 @@ protected:
 public:
     // Funções de Combate
     UFUNCTION(BlueprintCallable, Category = "Combat")
-    void SetCombatState(EDinosaurCombatState NewState);
+    void SetCombatState(EAI_DinosaurCombatState NewState);
 
     UFUNCTION(BlueprintCallable, Category = "Combat")
-    EDinosaurThreatLevel EvaluateThreatLevel(AActor* Target);
+    EAI_DinosaurThreatLevel EvaluateThreatLevel(AActor* Target);
 
     UFUNCTION(BlueprintCallable, Category = "Combat")
     bool CanSeeTarget(AActor* Target);

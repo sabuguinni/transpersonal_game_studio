@@ -6,7 +6,7 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "Materials/MaterialParameterCollection.h"
 #include "Materials/MaterialParameterCollectionInstance.h"
-#include "Lighting/LumenIntegratedLightingSystem.h"
+// FIXME: Missing header - #include "Lighting/LumenIntegratedLightingSystem.h"
 #include "MetaHumanLightingIntegration.generated.h"
 
 class UMaterialParameterCollection;
@@ -152,7 +152,7 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "References")
     TObjectPtr<USkeletalMeshComponent> CharacterMesh;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "References")
+// [UHT-FIX]     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "References")
     TObjectPtr<ALumenIntegratedLightingSystem> LightingSystem;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")

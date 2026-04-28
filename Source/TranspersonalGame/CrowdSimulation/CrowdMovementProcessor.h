@@ -7,7 +7,7 @@
 #include "MassEntityTypes.h"
 #include "MassCommonTypes.h"
 #include "MassMovementTypes.h"
-#include "MassNavigationTypes.h"
+// FIXME: Missing header - #include "MassNavigationTypes.h"
 #include "MassLODTypes.h"
 #include "MassRepresentationTypes.h"
 #include "GameplayTagContainer.h"
@@ -239,7 +239,7 @@ protected:
     FMassEntityQuery MovementQuery;
 
     // Subsystem references
-    UPROPERTY()
+    // UPROPERTY() removed - ZoneGraph module not linked
     UZoneGraphSubsystem* ZoneGraphSubsystem;
 
     UPROPERTY()

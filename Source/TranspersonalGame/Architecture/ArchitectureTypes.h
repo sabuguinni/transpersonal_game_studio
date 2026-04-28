@@ -58,7 +58,7 @@ enum class EInteriorType : uint8
 };
 
 UENUM(BlueprintType)
-enum class EConstructionMaterial : uint8
+enum class EArch_ConstructionMaterial : uint8
 {
     // NATURAL MATERIALS
     Wood                UMETA(DisplayName = "Wood"),
@@ -83,10 +83,10 @@ struct FArchitectureSpec
     EArchitectureType Type;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    EConstructionMaterial PrimaryMaterial;
+    EArch_ConstructionMaterial PrimaryMaterial;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    EConstructionMaterial SecondaryMaterial;
+    EArch_ConstructionMaterial SecondaryMaterial;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
     FVector Dimensions;
@@ -109,8 +109,8 @@ struct FArchitectureSpec
     FArchitectureSpec()
     {
         Type = EArchitectureType::BasicShelter;
-        PrimaryMaterial = EConstructionMaterial::Wood;
-        SecondaryMaterial = EConstructionMaterial::Leaves;
+        PrimaryMaterial = EArch_ConstructionMaterial::Wood;
+        SecondaryMaterial = EArch_ConstructionMaterial::Leaves;
         Dimensions = FVector(300.0f, 300.0f, 200.0f);
         StructuralIntegrity = 1.0f;
         WeatherResistance = 0.5f;
@@ -132,7 +132,7 @@ public:
     TArray<FArchitectureSpec> ArchitecturePresets;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Material Mapping")
-    TMap<EConstructionMaterial, TSoftObjectPtr<UMaterialInterface>> MaterialMap;
+    TMap<EArch_ConstructionMaterial, TSoftObjectPtr<UMaterialInterface>> MaterialMap;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mesh Mapping")
     TMap<EArchitectureType, TSoftObjectPtr<UStaticMesh>> MeshMap;

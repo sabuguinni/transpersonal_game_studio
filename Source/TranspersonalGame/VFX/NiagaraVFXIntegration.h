@@ -13,7 +13,7 @@ DECLARE_LOG_CATEGORY_EXTERN(LogNiagaraVFXIntegration, Log, All);
  * VFX Quality levels for performance scaling
  */
 UENUM(BlueprintType)
-enum class EVFXQualityLevel : uint8
+enum class EVFX_VFXQualityLevel : uint8
 {
     Low         UMETA(DisplayName = "Low"),
     Medium      UMETA(DisplayName = "Medium"),
@@ -25,7 +25,7 @@ enum class EVFXQualityLevel : uint8
  * VFX categories for prehistoric environment
  */
 UENUM(BlueprintType)
-enum class EVFXCategory : uint8
+enum class EVFX_VFXCategory : uint8
 {
     Atmospheric     UMETA(DisplayName = "Atmospheric"),
     Environmental   UMETA(DisplayName = "Environmental"),
@@ -49,7 +49,7 @@ struct FPrehistoricVFXData
 
     /** VFX category for organization and performance management */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    EVFXCategory Category;
+    EVFX_VFXCategory Category;
 
     /** Particle spawn rate */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
@@ -69,7 +69,7 @@ struct FPrehistoricVFXData
 
     FPrehistoricVFXData()
         : SystemPath(TEXT(""))
-        , Category(EVFXCategory::Atmospheric)
+        , Category(EVFX_VFXCategory::Atmospheric)
         , SpawnRate(50.0f)
         , Lifetime(5.0f)
         , InitialVelocity(FVector::ZeroVector)
@@ -77,7 +77,7 @@ struct FPrehistoricVFXData
     {
     }
 
-    FPrehistoricVFXData(const FString& InSystemPath, EVFXCategory InCategory, float InSpawnRate, 
+    FPrehistoricVFXData(const FString& InSystemPath, EVFX_VFXCategory InCategory, float InSpawnRate, 
                        float InLifetime, const FVector& InInitialVelocity, bool InAffectedByWind)
         : SystemPath(InSystemPath)
         , Category(InCategory)
@@ -130,13 +130,13 @@ public:
      * Set VFX quality level for performance scaling
      */
     UFUNCTION(BlueprintCallable, Category = "Prehistoric VFX")
-    void SetVFXQuality(EVFXQualityLevel NewQualityLevel);
+    void SetVFXQuality(EVFX_VFXQualityLevel NewQualityLevel);
 
     /**
      * Get current VFX quality level
      */
     UFUNCTION(BlueprintPure, Category = "Prehistoric VFX")
-    EVFXQualityLevel GetVFXQuality() const { return VFXQualityLevel; }
+    EVFX_VFXQualityLevel GetVFXQuality() const { return VFXQualityLevel; }
 
 protected:
     /**
@@ -212,7 +212,7 @@ protected:
 protected:
     /** VFX quality level for performance scaling */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    EVFXQualityLevel VFXQualityLevel;
+    EVFX_VFXQualityLevel VFXQualityLevel;
 
     /** Maximum particles per VFX system */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
@@ -240,7 +240,7 @@ public:
     TMap<FString, FPrehistoricVFXData> BP_PrehistoricVFXSystems;
 
     /** Delegate for VFX system events */
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnVFXSystemEvent, const FString&, VFXName, EVFXCategory, Category);
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnVFXSystemEvent, const FString&, VFXName, EVFX_VFXCategory, Category);
 
     /** Event fired when a VFX system is spawned */
     UPROPERTY(BlueprintAssignable, Category = "VFX Events")

@@ -33,7 +33,7 @@ enum class EEmotionalTone : uint8
 };
 
 UENUM(BlueprintType)
-enum class EDialogueContext : uint8
+enum class ENarr_DialogueContext : uint8
 {
     FirstEncounter,
     Friendly,
@@ -86,7 +86,7 @@ struct TRANSPERSONALGAME_API FNarrativeEvent : public FTableRowBase
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FDialogueLine : public FTableRowBase
+struct TRANSPERSONALGAME_API FNarr_DialogueLine : public FTableRowBase
 {
     GENERATED_BODY()
 
@@ -100,7 +100,7 @@ struct TRANSPERSONALGAME_API FDialogueLine : public FTableRowBase
     FText DialogueText;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    EDialogueContext Context;
+    ENarr_DialogueContext Context;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
     EEmotionalTone Tone;
@@ -114,16 +114,16 @@ struct TRANSPERSONALGAME_API FDialogueLine : public FTableRowBase
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
     FGameplayTagContainer RequiredConditions;
 
-    FDialogueLine()
+    FNarr_DialogueLine()
     {
-        Context = EDialogueContext::Neutral;
+        Context = ENarr_DialogueContext::Neutral;
         Tone = EEmotionalTone::Wonder;
         Duration = 3.0f;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FStoryBeat
+struct TRANSPERSONALGAME_API FNarr_StoryBeat
 {
     GENERATED_BODY()
 
@@ -151,7 +151,7 @@ struct TRANSPERSONALGAME_API FStoryBeat
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
     float StoryWeight;
 
-    FStoryBeat()
+    FNarr_StoryBeat()
     {
         BeatType = ENarrativeEventType::Discovery;
         EmotionalArc = EEmotionalTone::Wonder;

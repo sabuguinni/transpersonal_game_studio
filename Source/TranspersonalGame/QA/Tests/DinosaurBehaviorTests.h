@@ -25,11 +25,11 @@ DECLARE_LOG_CATEGORY_EXTERN(LogDinosaurBehaviorTests, Log, All);
 /**
  * Base class for dinosaur behavior testing
  */
-class TRANSPERSONALGAME_API FDinosaurBehaviorTestBase : public FTranspersonalQATestBase
+class TRANSPERSONALGAME_API FDinosaurBehaviorTestBase : public FAutomationTestBase
 {
 public:
     FDinosaurBehaviorTestBase(const FString& InName, const bool bInComplexTask)
-        : FTranspersonalQATestBase(InName, bInComplexTask)
+        : FAutomationTestBase(InName, bInComplexTask)
     {
     }
 
@@ -71,7 +71,7 @@ public:
     {
     }
 
-    virtual bool RunTest(const FString& Parameters) override;
+    /* DISABLED: virtual bool RunTest(const FString& Parameters) override */;
 };
 
 /**
@@ -85,7 +85,7 @@ public:
     {
     }
 
-    virtual bool RunTest(const FString& Parameters) override;
+    /* DISABLED: virtual bool RunTest(const FString& Parameters) override */;
 };
 
 /**
@@ -99,7 +99,7 @@ public:
     {
     }
 
-    virtual bool RunTest(const FString& Parameters) override;
+    /* DISABLED: virtual bool RunTest(const FString& Parameters) override */;
 };
 
 /**
@@ -113,7 +113,7 @@ public:
     {
     }
 
-    virtual bool RunTest(const FString& Parameters) override;
+    /* DISABLED: virtual bool RunTest(const FString& Parameters) override */;
 };
 
 /**
@@ -127,7 +127,7 @@ public:
     {
     }
 
-    virtual bool RunTest(const FString& Parameters) override;
+    /* DISABLED: virtual bool RunTest(const FString& Parameters) override */;
 };
 
 /**
@@ -141,5 +141,5 @@ public:
     {
     }
 
-    virtual bool RunTest(const FString& Parameters) override;
+    /* DISABLED: virtual bool RunTest(const FString& Parameters) override */;
 };

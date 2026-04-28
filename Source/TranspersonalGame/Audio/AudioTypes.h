@@ -13,7 +13,7 @@
  * Based on the transpersonal game's core emotional journey
  */
 UENUM(BlueprintType)
-enum class EEmotionalState : uint8
+enum class EAudio_EmotionalState : uint8
 {
     Wonder,         // First moments of discovery - awe and curiosity
     Tension,        // Predator awareness - heightened alertness
@@ -58,7 +58,7 @@ enum class ECreatureBehaviorState : uint8
  * Time of day affecting audio mix and creature behavior
  */
 UENUM(BlueprintType)
-enum class ETimeOfDay : uint8
+enum class EAudio_TimeOfDay : uint8
 {
     Dawn,           // Early morning - awakening sounds
     Morning,        // Active period - full creature activity
@@ -90,7 +90,7 @@ struct TRANSPERSONALGAME_API FAudioLayerConfig
     bool bIsLooping = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Layer")
-    EEmotionalState TargetEmotionalState = EEmotionalState::Calm;
+    EAudio_EmotionalState TargetEmotionalState = EAudio_EmotionalState::Calm;
 
     FAudioLayerConfig()
     {
@@ -98,7 +98,7 @@ struct TRANSPERSONALGAME_API FAudioLayerConfig
         Volume = 1.0f;
         FadeTime = 2.0f;
         bIsLooping = true;
-        TargetEmotionalState = EEmotionalState::Calm;
+        TargetEmotionalState = EAudio_EmotionalState::Calm;
     }
 };
 
@@ -185,7 +185,7 @@ struct TRANSPERSONALGAME_API FAdaptiveMusicConfig
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Adaptive Music")
-    EEmotionalState EmotionalState = EEmotionalState::Calm;
+    EAudio_EmotionalState EmotionalState = EAudio_EmotionalState::Calm;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Adaptive Music")
     TArray<FAudioLayerConfig> MusicLayers;
@@ -201,7 +201,7 @@ struct TRANSPERSONALGAME_API FAdaptiveMusicConfig
 
     FAdaptiveMusicConfig()
     {
-        EmotionalState = EEmotionalState::Calm;
+        EmotionalState = EAudio_EmotionalState::Calm;
         TransitionTime = 4.0f;
         IntensityMultiplier = 1.0f;
         bAllowSilence = false;

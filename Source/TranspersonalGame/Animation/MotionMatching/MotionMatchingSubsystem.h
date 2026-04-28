@@ -2,13 +2,13 @@
 
 #include "CoreMinimal.h"
 #include "Subsystems/GameInstanceSubsystem.h"
-#include "Animation/PoseSearch/PoseSearchDatabase.h"
-#include "Animation/PoseSearch/PoseSearchSchema.h"
+// DISABLED: #include "Animation/PoseSearch/PoseSearchDatabase.h"
+// DISABLED: #include "Animation/PoseSearch/PoseSearchSchema.h"
 #include "Animation/AnimInstance.h"
 #include "MotionMatchingSubsystem.generated.h"
 
 UENUM(BlueprintType)
-enum class EMotionMatchingContext : uint8
+enum class EAnim_MotionMatchingContext : uint8
 {
     Locomotion          UMETA(DisplayName = "Locomotion"),
     Stealth            UMETA(DisplayName = "Stealth"),
@@ -22,7 +22,7 @@ enum class EMotionMatchingContext : uint8
 };
 
 USTRUCT(BlueprintType)
-struct FMotionMatchingQuery
+struct FAnim_MotionMatchingQuery
 {
     GENERATED_BODY()
 
@@ -61,11 +61,11 @@ struct FMotionMatchingQuery
 
     // Activity context
     UPROPERTY(BlueprintReadWrite, Category = "Activity")
-    EMotionMatchingContext Context = EMotionMatchingContext::Locomotion;
+    EAnim_MotionMatchingContext Context = EAnim_MotionMatchingContext::Locomotion;
 };
 
 USTRUCT(BlueprintType)
-struct FMotionMatchingDatabaseSet
+struct FAnim_MotionMatchingDatabaseSet
 {
     GENERATED_BODY()
 
@@ -118,7 +118,7 @@ public:
      * @return Base de dados de pose search mais apropriada
      */
     UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    UPoseSearchDatabase* SelectOptimalDatabase(const FMotionMatchingQuery& Query, const FString& CharacterType = "Player");
+    UPoseSearchDatabase* SelectOptimalDatabase(const FAnim_MotionMatchingQuery& Query, const FString& CharacterType = "Player");
 
     /**
      * Calcula o blend time ideal entre animações baseado no contexto emocional
@@ -128,7 +128,7 @@ public:
      * @return Tempo de blend em segundos
      */
     UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    float CalculateOptimalBlendTime(EMotionMatchingContext FromContext, EMotionMatchingContext ToContext, float EmotionalIntensity = 0.5f);
+    float CalculateOptimalBlendTime(EAnim_MotionMatchingContext FromContext, EAnim_MotionMatchingContext ToContext, float EmotionalIntensity = 0.5f);
 
     /**
      * Regista uma nova base de dados para um tipo de personagem
@@ -136,7 +136,7 @@ public:
      * @param DatabaseSet - Conjunto de bases de dados para diferentes contextos
      */
     UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    void RegisterCharacterDatabases(const FString& CharacterType, const FMotionMatchingDatabaseSet& DatabaseSet);
+    void RegisterCharacterDatabases(const FString& CharacterType, const FAnim_MotionMatchingDatabaseSet& DatabaseSet);
 
     /**
      * Aplica modificadores emocionais ao query de motion matching
@@ -147,16 +147,16 @@ public:
      * @return Query modificado com factores emocionais
      */
     UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    FMotionMatchingQuery ApplyEmotionalModifiers(const FMotionMatchingQuery& BaseQuery, float FearLevel, float ExhaustionLevel, float InjuryLevel);
+    FAnim_MotionMatchingQuery ApplyEmotionalModifiers(const FAnim_MotionMatchingQuery& BaseQuery, float FearLevel, float ExhaustionLevel, float InjuryLevel);
 
 protected:
     // Mapeamento de tipos de personagem para as suas bases de dados
     UPROPERTY()
-    TMap<FString, FMotionMatchingDatabaseSet> CharacterDatabases;
+    TMap<FString, FAnim_MotionMatchingDatabaseSet> CharacterDatabases;
 
     // Configurações de blend time por contexto
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    TMap<EMotionMatchingContext, float> ContextBlendTimes;
+    TMap<EAnim_MotionMatchingContext, float> ContextBlendTimes;
 
     // Pesos para diferentes factores emocionais
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
@@ -170,6 +170,6 @@ protected:
 
 private:
     void InitializeDefaultBlendTimes();
-    EMotionMatchingContext DetermineOptimalContext(const FMotionMatchingQuery& Query);
-    float CalculateContextPriority(EMotionMatchingContext Context, const FMotionMatchingQuery& Query);
+    EAnim_MotionMatchingContext DetermineOptimalContext(const FAnim_MotionMatchingQuery& Query);
+    float CalculateContextPriority(EAnim_MotionMatchingContext Context, const FAnim_MotionMatchingQuery& Query);
 };

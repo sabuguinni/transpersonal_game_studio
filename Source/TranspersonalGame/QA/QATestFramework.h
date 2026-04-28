@@ -6,7 +6,7 @@
 #include "CoreMinimal.h"
 #include "Engine/Engine.h"
 #include "Subsystems/GameInstanceSubsystem.h"
-#include "AutomationTest.h"
+#include "Misc/AutomationTest.h"
 #include "QATestFramework.generated.h"
 
 UENUM(BlueprintType)
@@ -20,7 +20,7 @@ enum class EQATestSeverity : uint8
 };
 
 UENUM(BlueprintType)
-enum class EQATestCategory : uint8
+enum class EQA_QATestCategory : uint8
 {
     Core        UMETA(DisplayName = "Core Systems"),
     Physics     UMETA(DisplayName = "Physics"),
@@ -35,7 +35,7 @@ enum class EQATestCategory : uint8
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FQATestResult
+struct TRANSPERSONALGAME_API FQA_QATestResult_07D
 {
     GENERATED_BODY()
 
@@ -43,7 +43,7 @@ struct TRANSPERSONALGAME_API FQATestResult
     FString TestName;
 
     UPROPERTY(BlueprintReadWrite, EditAnywhere)
-    EQATestCategory Category;
+    EQA_QATestCategory Category;
 
     UPROPERTY(BlueprintReadWrite, EditAnywhere)
     EQATestSeverity Severity;
@@ -63,10 +63,10 @@ struct TRANSPERSONALGAME_API FQATestResult
     UPROPERTY(BlueprintReadWrite, EditAnywhere)
     FString BuildVersion;
 
-    FQATestResult()
+    FQA_QATestResult_07D()
     {
         TestName = TEXT("");
-        Category = EQATestCategory::Core;
+        Category = EQA_QATestCategory::Core;
         Severity = EQATestSeverity::Medium;
         bPassed = false;
         ErrorMessage = TEXT("");
@@ -139,30 +139,30 @@ public:
     void RunAllTests();
 
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    void RunTestsByCategory(EQATestCategory Category);
+    void RunTestsByCategory(EQA_QATestCategory Category);
 
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    FQATestResult RunSingleTest(const FString& TestName);
+    FQA_QATestResult_07D RunSingleTest(const FString& TestName);
 
     // Core system tests
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    FQATestResult TestCoreSystemsIntegration();
+    FQA_QATestResult_07D TestCoreSystemsIntegration();
 
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    FQATestResult TestPhysicsSystem();
+    FQA_QATestResult_07D TestPhysicsSystem();
 
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    FQATestResult TestAIBehaviorTrees();
+    FQA_QATestResult_07D TestAIBehaviorTrees();
 
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    FQATestResult TestAudioSubsystem();
+    FQA_QATestResult_07D TestAudioSubsystem();
 
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    FQATestResult TestVFXSystems();
+    FQA_QATestResult_07D TestVFXSystems();
 
     // Performance tests
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    FQATestResult TestPerformanceTargets();
+    FQA_QATestResult_07D TestPerformanceTargets();
 
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
     FQAPerformanceMetrics GetCurrentPerformanceMetrics();
@@ -172,27 +172,27 @@ public:
 
     // Gameplay tests
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    FQATestResult TestDinosaurSpawning();
+    FQA_QATestResult_07D TestDinosaurSpawning();
 
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    FQATestResult TestPlayerSurvivalMechanics();
+    FQA_QATestResult_07D TestPlayerSurvivalMechanics();
 
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    FQATestResult TestWorldGeneration();
+    FQA_QATestResult_07D TestWorldGeneration();
 
     // Memory tests
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    FQATestResult TestMemoryLeaks();
+    FQA_QATestResult_07D TestMemoryLeaks();
 
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    FQATestResult TestGarbageCollection();
+    FQA_QATestResult_07D TestGarbageCollection();
 
     // Stress tests
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    FQATestResult StressTestActorSpawning(int32 ActorCount = 1000);
+    FQA_QATestResult_07D StressTestActorSpawning(int32 ActorCount = 1000);
 
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    FQATestResult StressTestAIBehavior(int32 AICount = 100);
+    FQA_QATestResult_07D StressTestAIBehavior(int32 AICount = 100);
 
     // Reporting
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
@@ -202,18 +202,18 @@ public:
     void ExportTestResults(const FString& FilePath);
 
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    TArray<FQATestResult> GetTestHistory();
+    TArray<FQA_QATestResult_07D> GetTestHistory();
 
     // Bug tracking integration
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    void ReportBug(const FString& BugDescription, EQATestSeverity Severity, EQATestCategory Category);
+    void ReportBug(const FString& BugDescription, EQATestSeverity Severity, EQA_QATestCategory Category);
 
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
     void MarkBugFixed(const FString& BugID);
 
 protected:
     UPROPERTY()
-    TArray<FQATestResult> TestResults;
+    TArray<FQA_QATestResult_07D> TestResults;
 
     UPROPERTY()
     TArray<FQAPerformanceMetrics> PerformanceHistory;
@@ -233,11 +233,11 @@ protected:
 
 private:
     // Internal test helpers
-    FQATestResult CreateTestResult(const FString& TestName, EQATestCategory Category, 
+    FQA_QATestResult_07D CreateTestResult(const FString& TestName, EQA_QATestCategory Category, 
                                   EQATestSeverity Severity, bool bPassed, 
                                   const FString& ErrorMessage = TEXT(""));
 
-    void LogTestResult(const FQATestResult& Result);
+    void LogTestResult(const FQA_QATestResult_07D& Result);
     
     bool ValidateSystemRequirements();
     
@@ -268,7 +268,7 @@ private:
  * Automated Test Macros for Prehistoric Game Testing
  */
 #define PREHISTORIC_TEST_INIT(TestName, Category) \
-    FQATestResult TestResult; \
+    FQA_QATestResult_07D TestResult; \
     TestResult.TestName = TestName; \
     TestResult.Category = Category; \
     TestResult.Timestamp = FDateTime::Now(); \

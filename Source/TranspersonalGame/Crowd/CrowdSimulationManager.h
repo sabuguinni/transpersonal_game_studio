@@ -21,7 +21,7 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
+    virtual void Tick(float DeltaTime);
 
     // Core simulation parameters
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Simulation")
@@ -74,13 +74,13 @@ private:
 
 public:
     // Public interface for other systems
-    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
+// [UHT-FIX]     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
     void SpawnHerd(FVector Location, int32 HerdSize, TSubclassOf<class ADinosaur> DinosaurClass);
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
+// [UHT-FIX]     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
     void SpawnFlock(FVector Location, int32 FlockSize, TSubclassOf<class AFlyingDinosaur> FlyingDinosaurClass);
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
+// [UHT-FIX]     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
     void SpawnPack(FVector Location, int32 PackSize, TSubclassOf<class APredatorDinosaur> PredatorClass);
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")

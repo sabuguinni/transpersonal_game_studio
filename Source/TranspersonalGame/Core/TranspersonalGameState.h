@@ -6,7 +6,7 @@
 #include "TranspersonalGameState.generated.h"
 
 UENUM(BlueprintType)
-enum class EGamePhase : uint8
+enum class ECore_GamePhase : uint8
 {
     Initialization,
     EarlyGame,
@@ -16,7 +16,7 @@ enum class EGamePhase : uint8
 };
 
 UENUM(BlueprintType)
-enum class ETimeOfDay : uint8
+enum class ECore_TimeOfDay : uint8
 {
     Dawn,
     Morning,
@@ -41,16 +41,16 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
+    virtual void Tick(float DeltaTime);
 
 public:
     /** Get current game phase */
     UFUNCTION(BlueprintPure, Category = "Game State")
-    EGamePhase GetCurrentGamePhase() const { return CurrentGamePhase; }
+    ECore_GamePhase GetCurrentGamePhase() const { return CurrentGamePhase; }
 
     /** Get current time of day */
     UFUNCTION(BlueprintPure, Category = "Game State")
-    ETimeOfDay GetCurrentTimeOfDay() const { return CurrentTimeOfDay; }
+    ECore_TimeOfDay GetCurrentTimeOfDay() const { return CurrentTimeOfDay; }
 
     /** Get game time in hours (0-24) */
     UFUNCTION(BlueprintPure, Category = "Game State")
@@ -70,7 +70,7 @@ public:
 
     /** Set game phase */
     UFUNCTION(BlueprintCallable, Category = "Game State")
-    void SetGamePhase(EGamePhase NewPhase);
+    void SetGamePhase(ECore_GamePhase NewPhase);
 
     /** Add creature to count */
     UFUNCTION(BlueprintCallable, Category = "Game State")
@@ -103,11 +103,11 @@ public:
 protected:
     /** Current game phase */
     UPROPERTY(Replicated, BlueprintReadOnly, Category = "Game State")
-    EGamePhase CurrentGamePhase = EGamePhase::Initialization;
+    ECore_GamePhase CurrentGamePhase = ECore_GamePhase::Initialization;
 
     /** Current time of day */
     UPROPERTY(Replicated, BlueprintReadOnly, Category = "Game State")
-    ETimeOfDay CurrentTimeOfDay = ETimeOfDay::Dawn;
+    ECore_TimeOfDay CurrentTimeOfDay = ECore_TimeOfDay::Dawn;
 
     /** Game time in hours (0-24) */
     UPROPERTY(Replicated, BlueprintReadOnly, Category = "Game State")
@@ -152,8 +152,8 @@ private:
 
 public:
     /** Event dispatchers */
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnTimeOfDayChanged, ETimeOfDay, NewTimeOfDay);
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGamePhaseChanged, EGamePhase, NewPhase);
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnTimeOfDayChanged, ECore_TimeOfDay, NewTimeOfDay);
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGamePhaseChanged, ECore_GamePhase, NewPhase);
     DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnCreatureCountChanged, int32, NewCount);
 
     UPROPERTY(BlueprintAssignable, Category = "Game Events")

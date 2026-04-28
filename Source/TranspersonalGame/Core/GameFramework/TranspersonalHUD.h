@@ -2,9 +2,9 @@
 
 #pragma once
 
-#include \"CoreMinimal.h\"
-#include \"GameFramework/HUD.h\"
-#include \"TranspersonalHUD.generated.h\"
+#include "CoreMinimal.h"
+#include "GameFramework/HUD.h"
+#include "TranspersonalHUD.generated.h"
 
 DECLARE_LOG_CATEGORY_EXTERN(LogTranspersonalHUD, Log, All);
 
@@ -40,55 +40,55 @@ protected:
 
 public:
     // HUD Settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = \"HUD Settings\")
-    bool bShowDebugInfo;
+// [UHT-FIX3]     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HUD Settings")
+// [UHT-FIX3]     bool bShowDebugInfo;
     
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = \"HUD Settings\")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HUD Settings")
     bool bShowSurvivalStats;
     
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = \"HUD Settings\")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HUD Settings")
     bool bShowFearIndicator;
     
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = \"HUD Settings\")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HUD Settings")
     bool bMinimalHUD;
     
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = \"HUD Settings\")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HUD Settings")
     float HUDOpacity;
     
     // Widget Classes
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = \"Widgets\")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Widgets")
     TSubclassOf<UUserWidget> SurvivalStatsWidgetClass;
     
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = \"Widgets\")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Widgets")
     TSubclassOf<UUserWidget> CraftingMenuWidgetClass;
     
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = \"Widgets\")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Widgets")
     TSubclassOf<UUserWidget> InventoryWidgetClass;
     
     // Color Settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = \"Colors\")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Colors")
     FLinearColor HealthColor;
     
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = \"Colors\")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Colors")
     FLinearColor StaminaColor;
     
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = \"Colors\")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Colors")
     FLinearColor HungerColor;
     
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = \"Colors\")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Colors")
     FLinearColor ThirstColor;
     
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = \"Colors\")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Colors")
     FLinearColor FearColor;
 
     // HUD Control Functions
-    UFUNCTION(BlueprintCallable, Category = \"HUD\")
+    UFUNCTION(BlueprintCallable, Category = "HUD")
     void ToggleDebugInfo();
     
-    UFUNCTION(BlueprintCallable, Category = \"HUD\")
+    UFUNCTION(BlueprintCallable, Category = "HUD")
     void ToggleMinimalHUD();
     
-    UFUNCTION(BlueprintCallable, Category = \"HUD\")
+    UFUNCTION(BlueprintCallable, Category = "HUD")
     void SetHUDOpacity(float NewOpacity);
 
 protected:
@@ -112,4 +112,4 @@ protected:
     // Helper Functions
     void DrawStatBar(float X, float Y, float Width, float Height, 
                     float Percentage, const FLinearColor& Color, const FString& Label);
-};"
+};

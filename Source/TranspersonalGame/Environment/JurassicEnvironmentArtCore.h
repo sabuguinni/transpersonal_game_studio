@@ -49,7 +49,7 @@ enum class EDetailLevel : uint8
 };
 
 UENUM(BlueprintType)
-enum class ENarrativeTheme : uint8
+enum class EEnvArt_NarrativeTheme : uint8
 {
     Ancient             UMETA(DisplayName = "Ancient Geological"),
     DinosaurActivity    UMETA(DisplayName = "Dinosaur Activity"),
@@ -246,7 +246,7 @@ struct FEnvironmentProp
 
     // Narrative context
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Storytelling")
-    ENarrativeTheme NarrativeTheme = ENarrativeTheme::NaturalBeauty;
+    EEnvArt_NarrativeTheme NarrativeTheme = EEnvArt_NarrativeTheme::NaturalBeauty;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Storytelling")
     FString StoryContext;
@@ -273,7 +273,7 @@ struct FNarrativeEnvironmentCluster
     FString ClusterName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    ENarrativeTheme Theme = ENarrativeTheme::NaturalBeauty;
+    EEnvArt_NarrativeTheme Theme = EEnvArt_NarrativeTheme::NaturalBeauty;
 
     // Story this cluster tells
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
@@ -443,7 +443,7 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
+    virtual void Tick(float DeltaTime);
 
     // Core components
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
@@ -555,7 +555,7 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Materials")
     void UpdateMaterialsForWeather(FVector Center, float Radius, float MoistureLevel, float Temperature);
 
-private:
+protected:
     // Internal generation helpers
     void SpawnVegetationCluster(const FVegetationCluster& Cluster, FVector Center, float Radius);
     void SpawnRockFormation(const FRockFormationCluster& Formation, FVector Center);

@@ -2,9 +2,9 @@
 
 #include "CoreMinimal.h"
 #include "Animation/AnimInstance.h"
-#include "Animation/PoseSearchDatabase.h"
-#include "Animation/MotionMatchingAnimNodeLibrary.h"
-#include "IKRigInterface.h"
+// FIXME: Missing header - #include "Animation/PoseSearchDatabase.h"
+// DISABLED: #include "Animation/MotionMatchingAnimNodeLibrary.h"
+// DISABLED: #include "IKRigInterface.h"
 #include "Engine/Engine.h"
 #include "../Core/AnimationSystemManager.h"
 #include "PlayerAnimInstance.generated.h"

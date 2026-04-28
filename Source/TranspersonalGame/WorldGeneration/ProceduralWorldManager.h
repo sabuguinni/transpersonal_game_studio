@@ -17,7 +17,7 @@ class AWaterBody;
  * Based on Jurassic/Cretaceous period environments
  */
 UENUM(BlueprintType)
-enum class EBiomeType : uint8
+enum class EWorld_BiomeType : uint8
 {
     None                UMETA(DisplayName = "None"),
     DenseForest         UMETA(DisplayName = "Dense Forest"),
@@ -53,7 +53,7 @@ class TRANSPERSONALGAME_API UBiomeDefinition : public UDataAsset
 public:
     /** Biome type identifier */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Biome")
-    EBiomeType BiomeType = EBiomeType::None;
+    EWorld_BiomeType BiomeType = EWorld_BiomeType::None;
 
     /** Climate zone for this biome */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Biome")
@@ -221,11 +221,11 @@ public:
 
     /** Get biome type at world location */
     UFUNCTION(BlueprintCallable, Category = "World Query")
-    EBiomeType GetBiomeAtLocation(const FVector& WorldLocation) const;
+    EWorld_BiomeType GetBiomeAtLocation(const FVector& WorldLocation) const;
 
     /** Get biome definition for a biome type */
     UFUNCTION(BlueprintCallable, Category = "World Query")
-    UBiomeDefinition* GetBiomeDefinition(EBiomeType BiomeType) const;
+    UBiomeDefinition* GetBiomeDefinition(EWorld_BiomeType BiomeType) const;
 
     /** Check if location is suitable for dinosaur spawning */
     UFUNCTION(BlueprintCallable, Category = "World Query")
@@ -240,12 +240,12 @@ private:
     float GenerateBiomeNoise(const FVector2D& Location) const;
 
     /** Calculate biome weights at location */
-    TMap<EBiomeType, float> CalculateBiomeWeights(const FVector& WorldLocation) const;
+    TMap<EWorld_BiomeType, float> CalculateBiomeWeights(const FVector& WorldLocation) const;
 
     /** Setup World Partition for the generated world */
     void SetupWorldPartition();
 
     /** Cached biome definitions for quick access */
     UPROPERTY()
-    TMap<EBiomeType, TObjectPtr<UBiomeDefinition>> CachedBiomeDefinitions;
+    TMap<EWorld_BiomeType, TObjectPtr<UBiomeDefinition>> CachedBiomeDefinitions;
 };

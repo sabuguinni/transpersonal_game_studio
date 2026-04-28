@@ -20,7 +20,7 @@ class UNiagaraSystem;
 class UAudioComponent;
 
 UENUM(BlueprintType)
-enum class EEnvironmentLayer : uint8
+enum class EEnvi_EnvironmentLayer : uint8
 {
     GroundCover      UMETA(DisplayName = "Ground Cover"),
     Undergrowth      UMETA(DisplayName = "Undergrowth"),
@@ -118,7 +118,7 @@ struct TRANSPERSONALGAME_API FEnvironmentLayerData
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Layer")
-    EEnvironmentLayer LayerType = EEnvironmentLayer::GroundCover;
+    EEnvi_EnvironmentLayer LayerType = EEnvi_EnvironmentLayer::GroundCover;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Layer")
     FString LayerName = TEXT("Environment Layer");
@@ -149,7 +149,7 @@ struct TRANSPERSONALGAME_API FEnvironmentLayerData
 
     FEnvironmentLayerData()
     {
-        LayerType = EEnvironmentLayer::GroundCover;
+        LayerType = EEnvi_EnvironmentLayer::GroundCover;
         LayerName = TEXT("Environment Layer");
         BaseDensity = 1.0f;
         DensityVariation = 0.2f;
@@ -271,7 +271,7 @@ public:
 protected:
     virtual void BeginPlay() override;
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
-    virtual void Tick(float DeltaTime) override;
+    virtual void Tick(float DeltaTime);
 
 public:
     // Environment Management Interface
@@ -279,7 +279,7 @@ public:
     void InitializeEnvironment(UPrehistoricEnvironmentDataAsset* EnvironmentData);
 
     UFUNCTION(BlueprintCallable, Category = "Environment")
-    void PopulateEnvironmentLayer(EEnvironmentLayer LayerType, const FBox& AreaBounds);
+    void PopulateEnvironmentLayer(EEnvi_EnvironmentLayer LayerType, const FBox& AreaBounds);
 
     UFUNCTION(BlueprintCallable, Category = "Environment")
     void SetEnvironmentMood(EEnvironmentMood NewMood, float TransitionTime = 2.0f);
@@ -295,10 +295,10 @@ public:
     void PlaceFoliageInstances(const FEnvironmentLayerData& LayerData, const FBox& PlacementArea);
 
     UFUNCTION(BlueprintCallable, Category = "Foliage")
-    void RemoveFoliageInArea(const FVector& Center, float Radius, EEnvironmentLayer LayerType = EEnvironmentLayer::GroundCover);
+    void RemoveFoliageInArea(const FVector& Center, float Radius, EEnvi_EnvironmentLayer LayerType = EEnvi_EnvironmentLayer::GroundCover);
 
     UFUNCTION(BlueprintCallable, Category = "Foliage")
-    int32 GetFoliageInstanceCount(EEnvironmentLayer LayerType) const;
+    int32 GetFoliageInstanceCount(EEnvi_EnvironmentLayer LayerType) const;
 
     // Performance Management
     UFUNCTION(BlueprintCallable, Category = "Performance")
@@ -325,17 +325,17 @@ public:
 
     // Debug and Visualization
     UFUNCTION(BlueprintCallable, Category = "Debug")
-    void ToggleLayerVisibility(EEnvironmentLayer LayerType, bool bVisible);
+    void ToggleLayerVisibility(EEnvi_EnvironmentLayer LayerType, bool bVisible);
 
     UFUNCTION(BlueprintCallable, Category = "Debug")
     void DebugDrawEnvironmentBounds(bool bEnable);
 
     UFUNCTION(BlueprintCallable, Category = "Debug")
-    void RegenerateLayer(EEnvironmentLayer LayerType);
+    void RegenerateLayer(EEnvi_EnvironmentLayer LayerType);
 
     // Events
     DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnEnvironmentInitialized, bool, bSuccess, FString, ErrorMessage);
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnLayerPopulated, EEnvironmentLayer, LayerType, int32, InstanceCount, float, CompletionTime);
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnLayerPopulated, EEnvi_EnvironmentLayer, LayerType, int32, InstanceCount, float, CompletionTime);
     DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnMoodChanged, EEnvironmentMood, OldMood, EEnvironmentMood, NewMood);
 
     UPROPERTY(BlueprintAssignable, Category = "Events")
@@ -370,7 +370,7 @@ protected:
 
     // Internal Management
     UPROPERTY()
-    TMap<EEnvironmentLayer, TObjectPtr<AInstancedFoliageActor>> LayerFoliageActors;
+    TMap<EEnvi_EnvironmentLayer, TObjectPtr<AInstancedFoliageActor>> LayerFoliageActors;
 
     UPROPERTY()
     TObjectPtr<UMaterialParameterCollection> MaterialParameterCollection;

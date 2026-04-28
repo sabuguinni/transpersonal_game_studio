@@ -59,7 +59,7 @@ enum class EGeologicalFormation : uint8
 
 /** Biome types for prehistoric world */
 UENUM(BlueprintType)
-enum class EPrehistoricBiome : uint8
+enum class EPCG_PrehistoricBiome : uint8
 {
     TropicalRainforest  UMETA(DisplayName = "Tropical Rainforest"),
     TemperateForest     UMETA(DisplayName = "Temperate Forest"),
@@ -74,7 +74,7 @@ enum class EPrehistoricBiome : uint8
 
 /** Water body types */
 UENUM(BlueprintType)
-enum class EWaterBodyType : uint8
+enum class EPCG_WaterBodyType : uint8
 {
     River               UMETA(DisplayName = "River"),
     Stream              UMETA(DisplayName = "Stream"),
@@ -86,7 +86,7 @@ enum class EWaterBodyType : uint8
 
 /** Terrain generation parameters */
 USTRUCT(BlueprintType)
-struct FTerrainGenerationParams
+struct FPCG_TerrainGenerationParams
 {
     GENERATED_BODY()
 
@@ -147,7 +147,7 @@ struct FBiomeDistributionParams
 
     /** Biome weights by type */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Distribution")
-    TMap<EPrehistoricBiome, float> BiomeWeights;
+    TMap<EPCG_PrehistoricBiome, float> BiomeWeights;
 };
 
 /** River generation parameters */
@@ -280,7 +280,7 @@ protected:
 
     /** Generation parameters */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation Parameters")
-    FTerrainGenerationParams TerrainParams;
+    FPCG_TerrainGenerationParams TerrainParams;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation Parameters")
     FBiomeDistributionParams BiomeParams;
@@ -292,16 +292,16 @@ protected:
     FVegetationGenerationParams VegetationParams;
 
     /** Data Layers for organization */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Data Layers")
+// [UHT-FIX]     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Data Layers")
     TObjectPtr<UDataLayer> TerrainDataLayer;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Data Layers")
+// [UHT-FIX]     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Data Layers")
     TObjectPtr<UDataLayer> VegetationDataLayer;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Data Layers")
+// [UHT-FIX]     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Data Layers")
     TObjectPtr<UDataLayer> WaterDataLayer;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Data Layers")
+// [UHT-FIX]     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Data Layers")
     TObjectPtr<UDataLayer> GeologyDataLayer;
 
 public:
@@ -335,7 +335,7 @@ public:
 
     /** Get biome type at world location */
     UFUNCTION(BlueprintCallable, BlueprintPure, Category = "World Query")
-    EPrehistoricBiome GetBiomeAtLocation(const FVector& WorldLocation) const;
+    EPCG_PrehistoricBiome GetBiomeAtLocation(const FVector& WorldLocation) const;
 
     /** Get terrain height at location */
     UFUNCTION(BlueprintCallable, BlueprintPure, Category = "World Query")
@@ -351,7 +351,7 @@ public:
 
     /** Find locations suitable for dinosaur spawning */
     UFUNCTION(BlueprintCallable, Category = "World Query")
-    TArray<FVector> FindDinosaurSpawnLocations(EPrehistoricBiome PreferredBiome, int32 MaxLocations = 20) const;
+    TArray<FVector> FindDinosaurSpawnLocations(EPCG_PrehistoricBiome PreferredBiome, int32 MaxLocations = 20) const;
 
     /** Get generation progress (0-1) */
     UFUNCTION(BlueprintCallable, BlueprintPure, Category = "World Generation")
@@ -372,7 +372,7 @@ protected:
     void ApplyGeologicalFormations();
 
     /** Calculate biome weights at location */
-    TMap<EPrehistoricBiome, float> CalculateBiomeWeights(const FVector& Location) const;
+    TMap<EPCG_PrehistoricBiome, float> CalculateBiomeWeights(const FVector& Location) const;
 
     /** Generate noise for terrain */
     float GenerateTerrainNoise(const FVector2D& Location) const;

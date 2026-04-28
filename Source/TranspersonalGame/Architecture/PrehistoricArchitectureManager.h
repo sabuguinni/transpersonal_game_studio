@@ -23,7 +23,7 @@ class UBoxComponent;
 class USphereComponent;
 
 UENUM(BlueprintType)
-enum class EArchitectureType : uint8
+enum class EArch_ArchitectureType_FC8 : uint8
 {
     Cave                 UMETA(DisplayName = "Cave"),
     RockShelter         UMETA(DisplayName = "Rock Shelter"),
@@ -39,7 +39,7 @@ enum class EArchitectureType : uint8
 };
 
 UENUM(BlueprintType)
-enum class EConstructionMaterial : uint8
+enum class EArch_ConstructionMaterial_FC8 : uint8
 {
     Stone               UMETA(DisplayName = "Stone"),
     Wood                UMETA(DisplayName = "Wood"),
@@ -212,13 +212,13 @@ struct TRANSPERSONALGAME_API FBuildingTemplate
     FString BuildingName = TEXT("Prehistoric Structure");
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Type")
-    EArchitectureType ArchitectureType = EArchitectureType::SimpleHut;
+    EArch_ArchitectureType_FC8 ArchitectureType = EArch_ArchitectureType_FC8::SimpleHut;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
-    EConstructionMaterial PrimaryMaterial = EConstructionMaterial::Wood;
+    EArch_ConstructionMaterial_FC8 PrimaryMaterial = EArch_ConstructionMaterial_FC8::Wood;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
-    TArray<EConstructionMaterial> SecondaryMaterials;
+    TArray<EArch_ConstructionMaterial_FC8> SecondaryMaterials;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Condition")
     EArchitecturalCondition Condition = EArchitecturalCondition::WellMaintained;
@@ -262,8 +262,8 @@ struct TRANSPERSONALGAME_API FBuildingTemplate
     FBuildingTemplate()
     {
         BuildingName = TEXT("Prehistoric Structure");
-        ArchitectureType = EArchitectureType::SimpleHut;
-        PrimaryMaterial = EConstructionMaterial::Wood;
+        ArchitectureType = EArch_ArchitectureType_FC8::SimpleHut;
+        PrimaryMaterial = EArch_ConstructionMaterial_FC8::Wood;
         Condition = EArchitecturalCondition::WellMaintained;
         BuildingDimensions = FVector(400.0f, 400.0f, 300.0f);
         MinSlopeAngle = 0.0f;
@@ -342,7 +342,7 @@ public:
     TSoftObjectPtr<UMaterialParameterCollection> ArchitecturalMaterialParameters;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
-    TMap<EConstructionMaterial, TSoftObjectPtr<UMaterialInterface>> MaterialLibrary;
+    TMap<EArch_ConstructionMaterial_FC8, TSoftObjectPtr<UMaterialInterface>> MaterialLibrary;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG")
     TSoftObjectPtr<UPCGGraph> BuildingPlacementGraph;
@@ -383,7 +383,7 @@ public:
 protected:
     virtual void BeginPlay() override;
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
-    virtual void Tick(float DeltaTime) override;
+    virtual void Tick(float DeltaTime);
 
 #if WITH_EDITOR
     virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
@@ -496,7 +496,7 @@ protected:
     // Generation Helpers
     TArray<FVector> GenerateBuildingLocations(int32 Count, const FVector& CenterPoint, float Radius);
     FBuildingTemplate SelectAppropriateTemplate(const FVector& Location);
-    void ApplyMaterialVariations(AActor* Building, EConstructionMaterial MaterialType);
+    void ApplyMaterialVariations(AActor* Building, EArch_ConstructionMaterial_FC8 MaterialType);
     void SetupBuildingLOD(AActor* Building, const FBuildingTemplate& Template);
     
     // Performance Optimization
@@ -515,7 +515,7 @@ private:
     UPrehistoricArchitectureDataAsset* CachedArchitectureData;
     
     UPROPERTY()
-    TMap<EConstructionMaterial, UMaterialInterface*> CachedMaterials;
+    TMap<EArch_ConstructionMaterial_FC8, UMaterialInterface*> CachedMaterials;
     
     UPROPERTY()
     TArray<UInstancedStaticMeshComponent*> InstancedComponents;

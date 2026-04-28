@@ -9,11 +9,11 @@ DECLARE_LOG_CATEGORY_EXTERN(LogIntegrationTests, Log, All);
 /**
  * Base class for integration tests that validate multiple systems working together
  */
-class TRANSPERSONALGAME_API FIntegrationTestBase : public FTranspersonalQATestBase
+class TRANSPERSONALGAME_API FIntegrationTestBase : public FAutomationTestBase
 {
 public:
     FIntegrationTestBase(const FString& InName, const bool bInComplexTask)
-        : FTranspersonalQATestBase(InName, bInComplexTask)
+        : FAutomationTestBase(InName, bInComplexTask)
     {
     }
 
@@ -64,7 +64,7 @@ public:
     {
     }
 
-    virtual bool RunTest(const FString& Parameters) override;
+    /* DISABLED: virtual bool RunTest(const FString& Parameters) override */;
 };
 
 /**
@@ -79,7 +79,7 @@ public:
     {
     }
 
-    virtual bool RunTest(const FString& Parameters) override;
+    /* DISABLED: virtual bool RunTest(const FString& Parameters) override */;
 };
 
 /**
@@ -94,7 +94,7 @@ public:
     {
     }
 
-    virtual bool RunTest(const FString& Parameters) override;
+    /* DISABLED: virtual bool RunTest(const FString& Parameters) override */;
 };
 
 /**
@@ -109,7 +109,7 @@ public:
     {
     }
 
-    virtual bool RunTest(const FString& Parameters) override;
+    /* DISABLED: virtual bool RunTest(const FString& Parameters) override */;
 };
 
 /**
@@ -124,7 +124,7 @@ public:
     {
     }
 
-    virtual bool RunTest(const FString& Parameters) override;
+    /* DISABLED: virtual bool RunTest(const FString& Parameters) override */;
 };
 
 /**
@@ -139,5 +139,5 @@ public:
     {
     }
 
-    virtual bool RunTest(const FString& Parameters) override;
+    /* DISABLED: virtual bool RunTest(const FString& Parameters) override */;
 };

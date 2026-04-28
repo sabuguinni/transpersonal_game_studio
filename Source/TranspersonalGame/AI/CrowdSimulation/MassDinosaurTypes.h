@@ -24,7 +24,7 @@ enum class EDinosaurHerdType : uint8
 };
 
 UENUM(BlueprintType)
-enum class EDinosaurBehaviorState : uint8
+enum class EAI_DinosaurBehaviorState : uint8
 {
     Grazing = 0,        // Herbívoros alimentando-se
     Hunting,            // Predadores caçando
@@ -47,7 +47,7 @@ struct TRANSPERSONALGAME_API FMassDinosaurFragment : public FMassFragment
     EDinosaurHerdType HerdType = EDinosaurHerdType::None;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EDinosaurBehaviorState BehaviorState = EDinosaurBehaviorState::Grazing;
+    EAI_DinosaurBehaviorState BehaviorState = EAI_DinosaurBehaviorState::Grazing;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     int32 HerdID = -1;
@@ -85,7 +85,7 @@ struct TRANSPERSONALGAME_API FMassHerdLeaderFragment : public FMassFragment
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+// [UHT-FIX2]     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     TArray<FMassEntityHandle> HerdMembers;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
@@ -165,7 +165,7 @@ struct TRANSPERSONALGAME_API FMassTerritoryFragment : public FMassFragment
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FDinosaurSpeciesData : public FTableRowBase
+struct TRANSPERSONALGAME_API FAI_DinosaurSpeciesData_B43 : public FTableRowBase
 {
     GENERATED_BODY()
 
@@ -173,7 +173,7 @@ struct TRANSPERSONALGAME_API FDinosaurSpeciesData : public FTableRowBase
     FString SpeciesName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EDinosaurHerdType DefaultHerdType;
+    EDinosaurHerdType DefaultHerdType = EDinosaurHerdType::None;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     float MovementSpeed = 300.0f;

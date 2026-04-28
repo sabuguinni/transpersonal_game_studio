@@ -9,7 +9,7 @@
 
 /** Physics validation test types */
 UENUM(BlueprintType)
-enum class EPhysicsValidationType : uint8
+enum class ECore_PhysicsValidationType : uint8
 {
     CollisionAccuracy       UMETA(DisplayName = "Collision Accuracy"),
     RigidBodyStability      UMETA(DisplayName = "Rigid Body Stability"),
@@ -51,7 +51,7 @@ struct FPhysicsValidationResult
 };
 
 /** Delegate for validation completion */
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FPhysicsValidationDelegate, EPhysicsValidationType, ValidationType, const FPhysicsValidationResult&, Result);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FPhysicsValidationDelegate, ECore_PhysicsValidationType, ValidationType, const FPhysicsValidationResult&, Result);
 
 /**
  * @brief Physics validation component for testing and debugging physics systems
@@ -86,7 +86,7 @@ public:
      * @return Validation result with detailed metrics
      */
     UFUNCTION(BlueprintCallable, Category = "Physics Validation")
-    FPhysicsValidationResult RunPhysicsValidation(EPhysicsValidationType ValidationType);
+    FPhysicsValidationResult RunPhysicsValidation(ECore_PhysicsValidationType ValidationType);
 
     /**
      * @brief Run all physics validation tests
@@ -196,7 +196,7 @@ private:
     FPhysicsValidationResult CheckMemoryUsage();
 
     /** Log validation result */
-    void LogValidationResult(EPhysicsValidationType ValidationType, const FPhysicsValidationResult& Result);
+    void LogValidationResult(ECore_PhysicsValidationType ValidationType, const FPhysicsValidationResult& Result);
 
     /** Continuous validation timer */
     FTimerHandle ValidationTimer;

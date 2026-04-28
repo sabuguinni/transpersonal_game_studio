@@ -33,7 +33,7 @@ enum class EFormation : uint8
 };
 
 USTRUCT(BlueprintType)
-struct FTacticalPosition
+struct FAI_TacticalPosition
 {
     GENERATED_BODY()
 
@@ -55,7 +55,7 @@ struct FTacticalPosition
     UPROPERTY(BlueprintReadWrite)
     AActor* OccupyingActor = nullptr;
 
-    FTacticalPosition()
+    FAI_TacticalPosition()
     {
         Position = FVector::ZeroVector;
         Rotation = FRotator::ZeroRotator;
@@ -67,7 +67,7 @@ struct FTacticalPosition
 };
 
 USTRUCT(BlueprintType)
-struct FTacticalPlan
+struct FAI_TacticalPlan
 {
     GENERATED_BODY()
 
@@ -78,7 +78,7 @@ struct FTacticalPlan
     EFormation Formation = EFormation::None;
 
     UPROPERTY(BlueprintReadWrite)
-    TArray<FTacticalPosition> Positions;
+    TArray<FAI_TacticalPosition> Positions;
 
     UPROPERTY(BlueprintReadWrite)
     AActor* TargetActor = nullptr;
@@ -89,7 +89,7 @@ struct FTacticalPlan
     UPROPERTY(BlueprintReadWrite)
     float SuccessChance = 0.0f;
 
-    FTacticalPlan()
+    FAI_TacticalPlan()
     {
         PrimaryTactic = ETacticType::None;
         Formation = EFormation::None;
@@ -130,7 +130,7 @@ protected:
 
     // Current Tactical State
     UPROPERTY(BlueprintReadOnly, Category = "Tactics")
-    FTacticalPlan CurrentPlan;
+    FAI_TacticalPlan CurrentPlan;
 
     UPROPERTY(BlueprintReadOnly, Category = "Tactics")
     ETacticType ActiveTactic = ETacticType::None;
@@ -154,10 +154,10 @@ public:
     void UpdateTactics(AActor* Target);
 
     UFUNCTION(BlueprintCallable, Category = "Combat Tactics")
-    FTacticalPlan GenerateTacticalPlan(AActor* Target, ETacticType PreferredTactic = ETacticType::None);
+    FAI_TacticalPlan GenerateTacticalPlan(AActor* Target, ETacticType PreferredTactic = ETacticType::None);
 
     UFUNCTION(BlueprintCallable, Category = "Combat Tactics")
-    bool ExecuteTacticalPlan(const FTacticalPlan& Plan);
+    bool ExecuteTacticalPlan(const FAI_TacticalPlan& Plan);
 
     // Tactical Positioning
     UFUNCTION(BlueprintCallable, Category = "Combat Tactics")
@@ -210,7 +210,7 @@ public:
     FVector GetTacticalTargetLocation() const { return TacticalTargetLocation; }
 
     UFUNCTION(BlueprintPure, Category = "Combat Tactics")
-    FTacticalPlan GetCurrentPlan() const { return CurrentPlan; }
+    FAI_TacticalPlan GetCurrentPlan() const { return CurrentPlan; }
 
 protected:
     // Internal Functions

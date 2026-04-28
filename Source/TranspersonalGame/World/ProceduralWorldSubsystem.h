@@ -8,6 +8,7 @@
 #include "Subsystems/WorldSubsystem.h"
 #include "Engine/DataAsset.h"
 #include "Components/ActorComponent.h"
+// DISABLED: // DISABLED: #include "TranspersonalGameSharedTypes.h"
 #include "ProceduralWorldSubsystem.generated.h"
 
 class ULandscape;
@@ -17,7 +18,7 @@ class UWorldPartitionSubsystem;
 class APhysicsPerformanceProfiler;
 
 UENUM(BlueprintType)
-enum class EPrehistoricBiome : uint8
+enum class EWorld_PrehistoricBiome_B7A : uint8
 {
     DenseJungle         UMETA(DisplayName = "Dense Jungle"),
     OpenPlains          UMETA(DisplayName = "Open Plains"),
@@ -35,7 +36,7 @@ struct TRANSPERSONALGAME_API FBiomeGenerationData
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    EPrehistoricBiome BiomeType = EPrehistoricBiome::DenseJungle;
+    EWorld_PrehistoricBiome_B7A BiomeType = EWorld_PrehistoricBiome_B7A::DenseJungle;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
     float Temperature = 25.0f; // Celsius
@@ -177,7 +178,7 @@ public:
     void PlacePCGVolumes();
 
     UFUNCTION(BlueprintCallable, Category = "World Generation")
-    EPrehistoricBiome GetBiomeAtLocation(const FVector& WorldLocation) const;
+    EWorld_PrehistoricBiome_B7A GetBiomeAtLocation(const FVector& WorldLocation) const;
 
     // Performance Interface
     UFUNCTION(BlueprintCallable, Category = "Performance")
@@ -198,7 +199,7 @@ public:
 
     // Events
     DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnWorldGenerationComplete, bool, bSuccess);
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnBiomeGenerated, EPrehistoricBiome, BiomeType, float, CompletionPercent);
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnBiomeGenerated, EWorld_PrehistoricBiome_B7A, BiomeType, float, CompletionPercent);
 
     UPROPERTY(BlueprintAssignable, Category = "Events")
     FOnWorldGenerationComplete OnWorldGenerationComplete;
@@ -218,15 +219,15 @@ protected:
     float SampleNoise(float X, float Y) const;
 
     // Biome logic
-    EPrehistoricBiome DetermineBiomeType(float Height, float Temperature, float Humidity) const;
-    FBiomeGenerationData GetBiomeData(EPrehistoricBiome BiomeType) const;
+    EWorld_PrehistoricBiome_B7A DetermineBiomeType(float Height, float Temperature, float Humidity) const;
+    FBiomeGenerationData GetBiomeData(EWorld_PrehistoricBiome_B7A BiomeType) const;
 
     // Performance monitoring
     void UpdatePerformanceMetrics();
     void CheckPerformanceBudget();
 
 private:
-    UPROPERTY()
+// [UHT-FIX]     UPROPERTY()
     TObjectPtr<ULandscape> GeneratedLandscape;
 
     UPROPERTY()
@@ -235,7 +236,7 @@ private:
     UPROPERTY()
     TObjectPtr<UProceduralWorldDataAsset> CurrentWorldData;
 
-    UPROPERTY()
+// [UHT-FIX]     UPROPERTY()
     TObjectPtr<APhysicsPerformanceProfiler> PerformanceProfiler;
 
     // Generation state
@@ -246,7 +247,7 @@ private:
     int32 TotalBiomeCount = 0;
 
     // Cached biome map for fast lookups
-    TArray<TArray<EPrehistoricBiome>> BiomeMap;
+    TArray<TArray<EWorld_PrehistoricBiome_B7A>> BiomeMap;
     int32 BiomeMapResolution = 512;
 
     // Performance tracking

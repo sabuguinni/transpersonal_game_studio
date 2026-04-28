@@ -9,7 +9,7 @@
 #include "MassEntityFragments.h"
 #include "MassCommonFragments.h"
 #include "MassMovementFragments.h"
-#include "MassNavigationFragments.h"
+// FIXME: Missing header - #include "MassNavigationFragments.h"
 #include "Engine/World.h"
 #include "MassEntityProcessors.generated.h"
 
@@ -37,15 +37,15 @@ private:
     void FindNearbyResources(FMassExecutionContext& Context);
 
     // Activity-specific behaviors
-    void ProcessIdleBehavior(FMassDinosaurLifecycleFragment& Lifecycle, FMassDinosaurSpeciesFragment& Species, 
+    void ProcessIdleBehavior(FMassDinosaurLifecycleFragment& Lifecycle, FMassFragment& Species, 
                            FTransformFragment& Transform, float DeltaTime);
-    void ProcessFeedingBehavior(FMassDinosaurLifecycleFragment& Lifecycle, FMassDinosaurSpeciesFragment& Species, 
+    void ProcessFeedingBehavior(FMassDinosaurLifecycleFragment& Lifecycle, FMassFragment& Species, 
                               FTransformFragment& Transform, float DeltaTime);
-    void ProcessHuntingBehavior(FMassDinosaurLifecycleFragment& Lifecycle, FMassDinosaurSpeciesFragment& Species, 
+    void ProcessHuntingBehavior(FMassDinosaurLifecycleFragment& Lifecycle, FMassFragment& Species, 
                               FTransformFragment& Transform, float DeltaTime);
-    void ProcessRestingBehavior(FMassDinosaurLifecycleFragment& Lifecycle, FMassDinosaurSpeciesFragment& Species, 
+    void ProcessRestingBehavior(FMassDinosaurLifecycleFragment& Lifecycle, FMassFragment& Species, 
                               FTransformFragment& Transform, float DeltaTime);
-    void ProcessMigratingBehavior(FMassDinosaurLifecycleFragment& Lifecycle, FMassDinosaurSpeciesFragment& Species, 
+    void ProcessMigratingBehavior(FMassDinosaurLifecycleFragment& Lifecycle, FMassFragment& Species, 
                                 FTransformFragment& Transform, float DeltaTime);
 
 public:
@@ -67,12 +67,12 @@ public:
  * Processor for herd behavior and social interactions
  */
 UCLASS()
-class TRANSPERSONALGAME_API UMassHerdBehaviorProcessor : public UMassProcessor
+class TRANSPERSONALGAME_API UCrowdSim_MassHerdBehaviorProcessor : public UMassProcessor
 {
     GENERATED_BODY()
 
 public:
-    UMassHerdBehaviorProcessor();
+    UCrowdSim_MassHerdBehaviorProcessor();
 
 protected:
     virtual void ConfigureQueries() override;
@@ -169,12 +169,12 @@ public:
  * Processor for visual representation and LOD management
  */
 UCLASS()
-class TRANSPERSONALGAME_API UMassVisualizationProcessor : public UMassProcessor
+class TRANSPERSONALGAME_API UCrowdSim_MassVisualizationProcessor : public UMassProcessor
 {
     GENERATED_BODY()
 
 public:
-    UMassVisualizationProcessor();
+    UCrowdSim_MassVisualizationProcessor();
 
 protected:
     virtual void ConfigureQueries() override;

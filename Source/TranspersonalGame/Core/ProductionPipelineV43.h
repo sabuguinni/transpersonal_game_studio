@@ -18,7 +18,7 @@ enum class EPipelineState : uint8
 };
 
 UENUM(BlueprintType)
-enum class EAgentStatus : uint8
+enum class ECore_AgentStatus : uint8
 {
     Pending     UMETA(DisplayName = "Pending"),
     Active      UMETA(DisplayName = "Active"),
@@ -62,7 +62,7 @@ struct FAgentStatus
     int32 AgentID = 0;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EAgentStatus Status = EAgentStatus::Pending;
+    ECore_AgentStatus Status = ECore_AgentStatus::Pending;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     FDateTime StartTime;
@@ -79,7 +79,7 @@ struct FAgentStatus
     FAgentStatus()
     {
         AgentID = 0;
-        Status = EAgentStatus::Pending;
+        Status = ECore_AgentStatus::Pending;
         StartTime = FDateTime::MinValue();
         EndTime = FDateTime::MinValue();
         Duration = FTimespan::Zero();
@@ -88,7 +88,7 @@ struct FAgentStatus
 };
 
 USTRUCT(BlueprintType)
-struct FProductionMetrics
+struct FCore_ProductionMetrics
 {
     GENERATED_BODY()
 
@@ -156,12 +156,12 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agents")
     TMap<int32, FAgentStatus> AgentStatus;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agents")
+// [UHT-FIX]     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agents")
     TMap<int32, TArray<int32>> AgentDependencies;
 
     // Metrics
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Metrics")
-    FProductionMetrics ProductionMetrics;
+    FCore_ProductionMetrics ProductionMetrics;
 
 public:
     // Pipeline Management
@@ -210,8 +210,8 @@ public:
     int32 GetCompletedAgentCount() const { return ProductionMetrics.CompletedAgents; }
 
     UFUNCTION(BlueprintPure, Category = "Agent Management")
-    EAgentStatus GetAgentStatus(int32 AgentID) const 
+    ECore_AgentStatus GetAgentStatus(int32 AgentID) const 
     { 
-        return AgentStatus.Contains(AgentID) ? AgentStatus[AgentID].Status : EAgentStatus::Error; 
+        return AgentStatus.Contains(AgentID) ? AgentStatus[AgentID].Status : ECore_AgentStatus::Error; 
     }
 };

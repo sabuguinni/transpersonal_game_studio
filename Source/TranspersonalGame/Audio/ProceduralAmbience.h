@@ -12,7 +12,7 @@ struct FAmbientSoundData : public FTableRowBase
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    class USoundBase* SoundAsset;
+    class USoundBase* SoundAsset = nullptr;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     float MinDelay = 5.0f;

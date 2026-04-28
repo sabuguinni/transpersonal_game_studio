@@ -8,7 +8,7 @@
 #include "MotionMatchingComponent.generated.h"
 
 UENUM(BlueprintType)
-enum class EMotionMatchingState : uint8
+enum class EAnim_MotionMatchingState : uint8
 {
     Locomotion,
     Combat,
@@ -21,7 +21,7 @@ enum class EMotionMatchingState : uint8
 };
 
 USTRUCT(BlueprintType)
-struct FMotionMatchingConfig
+struct FAnim_MotionMatchingConfig
 {
     GENERATED_BODY()
 
@@ -37,7 +37,7 @@ struct FMotionMatchingConfig
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
     bool bUseTrajectoryPrediction;
 
-    FMotionMatchingConfig()
+    FAnim_MotionMatchingConfig()
     {
         Database = nullptr;
         BlendTime = 0.2f;
@@ -47,12 +47,12 @@ struct FMotionMatchingConfig
 };
 
 UCLASS(ClassGroup=(Animation), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UMotionMatchingComponent : public UActorComponent
+class TRANSPERSONALGAME_API UAnim_MotionMatchingComponent : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    UMotionMatchingComponent();
+    UAnim_MotionMatchingComponent();
 
 protected:
     virtual void BeginPlay() override;
@@ -61,13 +61,13 @@ public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
     UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    void SetMotionMatchingState(EMotionMatchingState NewState);
+    void SetMotionMatchingState(EAnim_MotionMatchingState NewState);
 
     UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    EMotionMatchingState GetCurrentState() const { return CurrentState; }
+    EAnim_MotionMatchingState GetCurrentState() const { return CurrentState; }
 
     UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    void SetDatabase(EMotionMatchingState State, UPoseSearchDatabase* Database);
+    void SetDatabase(EAnim_MotionMatchingState State, UPoseSearchDatabase* Database);
 
     UFUNCTION(BlueprintCallable, Category = "Motion Matching")
     UPoseSearchDatabase* GetCurrentDatabase() const;
@@ -98,10 +98,10 @@ public:
 
 protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    TMap<EMotionMatchingState, FMotionMatchingConfig> StateConfigurations;
+    TMap<EAnim_MotionMatchingState, FAnim_MotionMatchingConfig> StateConfigurations;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
-    EMotionMatchingState CurrentState;
+    EAnim_MotionMatchingState CurrentState;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
     float StateTransitionTime;
@@ -131,9 +131,9 @@ protected:
 private:
     void InitializeDefaultConfigurations();
     void UpdateStateBasedOnConditions();
-    void HandleStateTransition(EMotionMatchingState NewState);
+    void HandleStateTransition(EAnim_MotionMatchingState NewState);
     void UpdateSurvivalStates(float DeltaTime);
 
     float StateTransitionTimer;
-    EMotionMatchingState PreviousState;
+    EAnim_MotionMatchingState PreviousState;
 };

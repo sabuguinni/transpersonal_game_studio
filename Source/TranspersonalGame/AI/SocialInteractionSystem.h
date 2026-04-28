@@ -6,7 +6,7 @@
 #include "Components/ActorComponent.h"
 #include "Engine/World.h"
 #include "GameFramework/Character.h"
-#include "NPCBehaviorCore.h"
+// FIXME: Missing header - #include "NPCBehaviorCore.h"
 #include "SocialInteractionSystem.generated.h"
 
 UENUM(BlueprintType)
@@ -174,7 +174,7 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Social Profile")
     FSocialProfile SocialProfile;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Social Profile")
+// [UHT-FIX]     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Social Profile")
     FSocialGroup* CurrentGroup;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Social Profile")
@@ -248,13 +248,13 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Social Interaction")
     void RespondToInteraction(const FSocialInteraction& Interaction, bool bAccept);
 
-    UFUNCTION(BlueprintCallable, Category = "Group Management")
+// [UHT-FIX]     UFUNCTION(BlueprintCallable, Category = "Group Management")
     void JoinGroup(FSocialGroup* Group);
 
     UFUNCTION(BlueprintCallable, Category = "Group Management")
     void LeaveGroup();
 
-    UFUNCTION(BlueprintCallable, Category = "Group Management")
+// [UHT-FIX]     UFUNCTION(BlueprintCallable, Category = "Group Management")
     FSocialGroup* CreateNewGroup();
 
     UFUNCTION(BlueprintCallable, Category = "Group Management")

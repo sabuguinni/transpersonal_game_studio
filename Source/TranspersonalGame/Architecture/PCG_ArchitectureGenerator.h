@@ -103,7 +103,7 @@ protected:
     // Environmental analysis
     float AnalyzeEnvironmentalSuitability(const FVector& Location, const UPCGArchitectureSettings* Settings, FPCGContext* Context) const;
     EArchitectureType DetermineArchitectureType(const FVector& Location, const UPCGArchitectureSettings* Settings, FPCGContext* Context) const;
-    EConstructionMaterial DeterminePrimaryMaterial(const FVector& Location, FPCGContext* Context) const;
+    EArch_ConstructionMaterial DeterminePrimaryMaterial(const FVector& Location, FPCGContext* Context) const;
     
     // Narrative generation
     void ApplyNarrativeElements(FPCGPoint& Point, const UPCGArchitectureSettings* Settings, FPCGContext* Context) const;

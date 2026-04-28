@@ -102,7 +102,7 @@ public:
     virtual bool ExecuteInternal(FPCGContext* Context) const override;
 
 protected:
-    bool GenerateBuildingPoints(FPCGContext* Context, const UPCGBuildingGeneratorSettings* Settings, const UPCGSpatialData* SpatialData, UPCGPointData* OutputData) const;
+    bool GenerateBuildingPoints(FPCGContext* Context, const UPCGBuildingGeneratorSettings* Settings, const UPCGSpatialData* SpatialData, UPCGData* OutputData) const;
     bool IsValidBuildingLocation(const FVector& Location, const UPCGBuildingGeneratorSettings* Settings, const UPCGSpatialData* SpatialData) const;
     float CalculateLocationScore(const FVector& Location, const UPCGBuildingGeneratorSettings* Settings, const UPCGSpatialData* SpatialData) const;
     FString SelectBuildingStyle(const UPCGBuildingGeneratorSettings* Settings) const;

@@ -4,12 +4,12 @@
 #include "MassProcessor.h"
 #include "MassCommonFragments.h"
 #include "MassMovementFragments.h"
-#include "MassNavigationFragments.h"
+// FIXME: Missing header - #include "MassNavigationFragments.h"
 #include "DinosaurFlockingProcessor.generated.h"
 
 // Custom fragments for dinosaur behavior
 USTRUCT()
-struct FDinosaurFlockingFragment : public FMassFragment
+struct FCrowd_DinosaurFlockingFragment : public FMassFragment
 {
     GENERATED_BODY()
 
@@ -37,7 +37,7 @@ struct FDinosaurFlockingFragment : public FMassFragment
 };
 
 USTRUCT()
-struct FDinosaurTypeFragment : public FMassFragment
+struct FAI_DinosaurTypeFragment_16E : public FMassFragment
 {
     GENERATED_BODY()
 
@@ -107,32 +107,32 @@ private:
     // Core flocking calculations
     FVector CalculateCohesion(const FMassExecutionContext& Context, 
                              const FTransformFragment& Transform,
-                             const FDinosaurFlockingFragment& Flocking,
+                             const FCrowd_DinosaurFlockingFragment& Flocking,
                              uint32 HerdID);
 
     FVector CalculateSeparation(const FMassExecutionContext& Context,
                                const FTransformFragment& Transform,
-                               const FDinosaurFlockingFragment& Flocking,
+                               const FCrowd_DinosaurFlockingFragment& Flocking,
                                uint32 HerdID);
 
     FVector CalculateAlignment(const FMassExecutionContext& Context,
                               const FTransformFragment& Transform,
-                              const FDinosaurFlockingFragment& Flocking,
+                              const FCrowd_DinosaurFlockingFragment& Flocking,
                               uint32 HerdID);
 
     FVector CalculateAvoidance(const FMassExecutionContext& Context,
                               const FTransformFragment& Transform,
-                              const FDinosaurFlockingFragment& Flocking,
-                              const FDinosaurTypeFragment& Type);
+                              const FCrowd_DinosaurFlockingFragment& Flocking,
+                              const FAI_DinosaurTypeFragment_16E& Type);
 
     // Predator-prey interactions
     FVector CalculateFleeFromPredators(const FMassExecutionContext& Context,
                                       const FTransformFragment& Transform,
-                                      const FDinosaurTypeFragment& Type);
+                                      const FAI_DinosaurTypeFragment_16E& Type);
 
     FVector CalculateHuntPrey(const FMassExecutionContext& Context,
                              const FTransformFragment& Transform,
-                             const FDinosaurTypeFragment& Type);
+                             const FAI_DinosaurTypeFragment_16E& Type);
 
     // Environmental awareness
     FVector CalculateObstacleAvoidance(const FTransformFragment& Transform,

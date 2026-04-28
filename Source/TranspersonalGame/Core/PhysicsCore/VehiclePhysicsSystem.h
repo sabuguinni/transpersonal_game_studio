@@ -119,7 +119,7 @@ protected:
     TObjectPtr<APawn> CurrentRider;
 
     /** Vehicle movement component reference */
-    UPROPERTY()
+// [UHT-FIX]     UPROPERTY()
     TObjectPtr<UChaosVehicleMovementComponent> VehicleMovementComponent;
 
     /** Physics enabled state */

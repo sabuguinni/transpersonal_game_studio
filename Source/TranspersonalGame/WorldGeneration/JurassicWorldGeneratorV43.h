@@ -17,7 +17,7 @@
 #include "JurassicWorldGeneratorV43.generated.h"
 
 UENUM(BlueprintType)
-enum class EJurassicBiomeType : uint8
+enum class EWorld_JurassicBiomeType_1A8 : uint8
 {
     DenseForest      UMETA(DisplayName = "Dense Forest"),
     RiverDelta       UMETA(DisplayName = "River Delta"), 
@@ -41,12 +41,12 @@ enum class EWorldGenerationPhase : uint8
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FJurassicBiomeData
+struct TRANSPERSONALGAME_API FWorld_JurassicBiomeData
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    EJurassicBiomeType BiomeType = EJurassicBiomeType::DenseForest;
+    EWorld_JurassicBiomeType_1A8 BiomeType = EWorld_JurassicBiomeType_1A8::DenseForest;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
     FVector BiomeCenter = FVector::ZeroVector;
@@ -74,7 +74,7 @@ struct TRANSPERSONALGAME_API FJurassicBiomeData
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FRiverSystemData
+struct TRANSPERSONALGAME_API FWorld_RiverSystemData_1A8
 {
     GENERATED_BODY()
 
@@ -93,8 +93,8 @@ struct TRANSPERSONALGAME_API FRiverSystemData
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River")
     float FlowSpeed = 200.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River")
-    TArray<FRiverSystemData> Tributaries;
+// [UHT-FIX2]     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River")
+    TArray<FWorld_RiverSystemData_1A8> Tributaries;
 };
 
 USTRUCT(BlueprintType)
@@ -153,7 +153,7 @@ protected:
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 public:
-    virtual void Tick(float DeltaTime) override;
+    virtual void Tick(float DeltaTime);
 
     // Core Generation Functions
     UFUNCTION(BlueprintCallable, Category = "World Generation")
@@ -189,20 +189,20 @@ public:
 
     // Biome Management
     UFUNCTION(BlueprintCallable, Category = "Biomes")
-    void CreateBiome(EJurassicBiomeType BiomeType, FVector Location, float Radius);
+    void CreateBiome(EWorld_JurassicBiomeType_1A8 BiomeType, FVector Location, float Radius);
 
     UFUNCTION(BlueprintCallable, Category = "Biomes")
-    FJurassicBiomeData GetBiomeDataAtLocation(FVector WorldLocation);
+    FWorld_JurassicBiomeData GetBiomeDataAtLocation(FVector WorldLocation);
 
     UFUNCTION(BlueprintCallable, Category = "Biomes")
-    TArray<FJurassicBiomeData> GetAllBiomes() const { return BiomeData; }
+    TArray<FWorld_JurassicBiomeData> GetAllBiomes() const { return BiomeData; }
 
     // River System
     UFUNCTION(BlueprintCallable, Category = "Rivers")
     void CreateMainRiverSystem();
 
     UFUNCTION(BlueprintCallable, Category = "Rivers")
-    void CreateTributary(const FRiverSystemData& TributaryData);
+    void CreateTributary(const FWorld_RiverSystemData_1A8& TributaryData);
 
     // World Partition Integration
     UFUNCTION(BlueprintCallable, Category = "World Partition")
@@ -252,17 +252,17 @@ protected:
 
     // Biome System
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biomes")
-    TArray<FJurassicBiomeData> BiomeData;
+    TArray<FWorld_JurassicBiomeData> BiomeData;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biomes")
-    TMap<EJurassicBiomeType, TSoftObjectPtr<UPCGGraph>> BiomePCGGraphs;
+    TMap<EWorld_JurassicBiomeType_1A8, TSoftObjectPtr<UPCGGraph>> BiomePCGGraphs;
 
     // River System
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rivers")
-    FRiverSystemData MainRiverSystem;
+    FWorld_RiverSystemData_1A8 MainRiverSystem;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rivers")
-    TArray<FRiverSystemData> AdditionalRivers;
+    TArray<FWorld_RiverSystemData_1A8> AdditionalRivers;
 
     // World References
     UPROPERTY()

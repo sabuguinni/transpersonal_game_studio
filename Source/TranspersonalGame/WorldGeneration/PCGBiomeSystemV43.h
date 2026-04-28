@@ -269,10 +269,10 @@ public:
 
 #if WITH_EDITOR
     // Editor Utilities
-    UFUNCTION(CallInEditor = true, Category = "Editor")
+    UFUNCTION(CallInEditor, Category = "Editor")
     void ValidateBiomeData();
 
-    UFUNCTION(CallInEditor = true, Category = "Editor")
+    UFUNCTION(CallInEditor, Category = "Editor")
     void GeneratePreviewThumbnail();
 #endif
 };

@@ -18,7 +18,7 @@
  */
 
 UENUM(BlueprintType)
-enum class EVFXCategory : uint8
+enum class EVFX_VFXCategory_2A1 : uint8
 {
     // Environmental storytelling
     EnvironmentalAmbient     UMETA(DisplayName = "Environmental Ambient"),
@@ -52,7 +52,7 @@ enum class EVFXCategory : uint8
 };
 
 UENUM(BlueprintType)
-enum class EVFXIntensity : uint8
+enum class EVFX_VFXIntensity : uint8
 {
     Subtle      UMETA(DisplayName = "Subtle"),      // Barely noticeable, atmospheric
     Moderate    UMETA(DisplayName = "Moderate"),    // Clear but not overwhelming
@@ -61,7 +61,7 @@ enum class EVFXIntensity : uint8
 };
 
 UENUM(BlueprintType)
-enum class EVFXLODLevel : uint8
+enum class EVFX_VFXLODLevel : uint8
 {
     High        UMETA(DisplayName = "High Quality"),     // Close range, high detail
     Medium      UMETA(DisplayName = "Medium Quality"),   // Mid range, balanced
@@ -77,10 +77,10 @@ struct FVFXDefinition
     FString EffectName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Definition")
-    EVFXCategory Category;
+    EVFX_VFXCategory_2A1 Category;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Definition")
-    EVFXIntensity Intensity;
+    EVFX_VFXIntensity Intensity;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Definition")
     TSoftObjectPtr<UNiagaraSystem> NiagaraSystem_High;
@@ -106,8 +106,8 @@ struct FVFXDefinition
     FVFXDefinition()
     {
         EffectName = TEXT("");
-        Category = EVFXCategory::EnvironmentalAmbient;
-        Intensity = EVFXIntensity::Subtle;
+        Category = EVFX_VFXCategory_2A1::EnvironmentalAmbient;
+        Intensity = EVFX_VFXIntensity::Subtle;
         MaxDrawDistance = 5000.0f;
         bRequiresPlayerProximity = false;
         PlayerProximityRadius = 1000.0f;
@@ -120,12 +120,12 @@ struct FVFXDefinition
  * Handles LOD switching, performance optimization, and effect triggering
  */
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UVFXManagerComponent : public UActorComponent
+class TRANSPERSONALGAME_API UVFX_VFXManagerComponent : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    UVFXManagerComponent();
+    UVFX_VFXManagerComponent();
 
 protected:
     virtual void BeginPlay() override;
@@ -140,7 +140,7 @@ public:
     void StopVFXEffect(const FString& EffectName);
 
     UFUNCTION(BlueprintCallable, Category = "VFX Management")
-    void SetVFXLODLevel(EVFXLODLevel NewLODLevel);
+    void SetVFXLODLevel(EVFX_VFXLODLevel NewLODLevel);
 
     // Performance management
     UFUNCTION(BlueprintCallable, Category = "VFX Performance")
@@ -151,7 +151,7 @@ public:
 
     // Tension system integration
     UFUNCTION(BlueprintCallable, Category = "VFX Tension")
-    void TriggerTensionEffect(EVFXCategory TensionType, float Intensity);
+    void TriggerTensionEffect(EVFX_VFXCategory_2A1 TensionType, float Intensity);
 
     UFUNCTION(BlueprintCallable, Category = "VFX Tension")
     void SetEnvironmentalTension(float TensionLevel); // 0.0 = calm, 1.0 = maximum danger
@@ -167,7 +167,7 @@ protected:
     float LODUpdateInterval;
 
     UPROPERTY(BlueprintReadOnly, Category = "VFX State")
-    EVFXLODLevel CurrentLODLevel;
+    EVFX_VFXLODLevel CurrentLODLevel;
 
     UPROPERTY(BlueprintReadOnly, Category = "VFX State")
     float CurrentEnvironmentalTension;
@@ -176,7 +176,7 @@ private:
     TMap<FString, UNiagaraComponent*> ActiveEffects;
     float LastLODUpdateTime;
 
-    EVFXLODLevel CalculateLODLevel(float DistanceToPlayer);
-    UNiagaraSystem* GetNiagaraSystemForLOD(const FVFXDefinition& VFXDef, EVFXLODLevel LODLevel);
+    EVFX_VFXLODLevel CalculateLODLevel(float DistanceToPlayer);
+    UNiagaraSystem* GetNiagaraSystemForLOD(const FVFXDefinition& VFXDef, EVFX_VFXLODLevel LODLevel);
     void CleanupInactiveEffects();
 };

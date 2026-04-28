@@ -6,8 +6,8 @@
 #include "BehaviorTree/BehaviorTree.h"
 #include "BehaviorTree/BlackboardComponent.h"
 #include "AIController.h"
-#include "Perception/AIPerceptionComponent.h"
-#include "Characters/CharacterArchetypes.h"
+// DISABLED: #include "Perception/PerceptionComponent.h"
+// FIXME: Missing header - #include "Characters/CharacterArchetypes.h"
 #include "NPCBehaviorCore.generated.h"
 
 class UBehaviorTreeComponent;
@@ -59,7 +59,7 @@ enum class ENPCPersonalityTrait : uint8
 };
 
 UENUM(BlueprintType)
-enum class ENPCEmotionalState : uint8
+enum class EAI_NPCEmotionalState_6D3 : uint8
 {
     Neutral                UMETA(DisplayName = "Neutral"),
     Happy                  UMETA(DisplayName = "Happy"),
@@ -78,7 +78,7 @@ enum class ENPCEmotionalState : uint8
 };
 
 UENUM(BlueprintType)
-enum class ENPCActivity : uint8
+enum class EAI_NPCActivity : uint8
 {
     // Atividades básicas
     Idle                   UMETA(DisplayName = "Idle"),
@@ -120,7 +120,7 @@ enum class ENPCActivity : uint8
 };
 
 UENUM(BlueprintType)
-enum class ENPCRelationshipType : uint8
+enum class EAI_NPCRelationshipType_6D3 : uint8
 {
     Stranger               UMETA(DisplayName = "Stranger"),
     Acquaintance           UMETA(DisplayName = "Acquaintance"),
@@ -141,11 +141,11 @@ enum class ENPCRelationshipType : uint8
  * Estrutura que define a personalidade única de um NPC
  */
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNPCPersonality
+struct TRANSPERSONALGAME_API FAI_NPCPersonality
 {
     GENERATED_BODY()
 
-    FNPCPersonality()
+    FAI_NPCPersonality()
         : Openness(0.5f)
         , Conscientiousness(0.5f)
         , Extraversion(0.5f)
@@ -218,7 +218,7 @@ struct TRANSPERSONALGAME_API FNPCPersonality
     void CalculateDominantTraits();
     
     // Calcula compatibilidade com outra personalidade (0.0 - 1.0)
-    float CalculateCompatibility(const FNPCPersonality& Other) const;
+    float CalculateCompatibility(const FAI_NPCPersonality& Other) const;
     
     // Modifica personalidade baseada em experiências
     void ModifyFromExperience(const FString& ExperienceType, float Intensity);
@@ -263,7 +263,7 @@ struct TRANSPERSONALGAME_API FNPCMemoryEvent
     FDateTime Timestamp;
     
     // Atores envolvidos
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+// [UHT-FIX2]     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     TArray<TWeakObjectPtr<AActor>> InvolvedActors;
     
     // Impacto emocional
@@ -294,14 +294,14 @@ struct TRANSPERSONALGAME_API FNPCMemoryEvent
  * Relacionamento com outro NPC ou o jogador
  */
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNPCRelationship
+struct TRANSPERSONALGAME_API FAI_NPCRelationship_6D3
 {
     GENERATED_BODY()
 
-    FNPCRelationship()
+    FAI_NPCRelationship_6D3()
         : TargetActor(nullptr)
         , TargetName(TEXT(""))
-        , RelationshipType(ENPCRelationshipType::Stranger)
+        , RelationshipType(EAI_NPCRelationshipType_6D3::Stranger)
         , TrustLevel(0.0f)
         , AffectionLevel(0.0f)
         , RespectLevel(0.0f)
@@ -322,7 +322,7 @@ struct TRANSPERSONALGAME_API FNPCRelationship
     
     // Tipo de relacionamento
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    ENPCRelationshipType RelationshipType;
+    EAI_NPCRelationshipType_6D3 RelationshipType;
     
     // Níveis emocionais (-1.0 a 1.0)
     UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "-1.0", ClampMax = "1.0"))
@@ -376,7 +376,7 @@ struct TRANSPERSONALGAME_API FNPCRoutineItem
     GENERATED_BODY()
 
     FNPCRoutineItem()
-        : Activity(ENPCActivity::Idle)
+        : Activity(EAI_NPCActivity::Idle)
         , StartTime(8.0f)
         , Duration(1.0f)
         , Priority(0.5f)
@@ -392,7 +392,7 @@ struct TRANSPERSONALGAME_API FNPCRoutineItem
 
     // Atividade a realizar
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    ENPCActivity Activity;
+    EAI_NPCActivity Activity;
     
     // Timing
     UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "24.0"))

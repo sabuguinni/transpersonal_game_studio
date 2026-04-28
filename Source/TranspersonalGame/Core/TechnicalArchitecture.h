@@ -190,7 +190,7 @@ private:
 // =============================================================================
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FPerformanceMetrics
+struct TRANSPERSONALGAME_API FCore_PerformanceMetrics_533
 {
 	GENERATED_BODY()
 

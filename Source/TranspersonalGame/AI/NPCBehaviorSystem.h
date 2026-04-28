@@ -5,14 +5,14 @@
 #include "BehaviorTree/BehaviorTree.h"
 #include "BehaviorTree/BlackboardComponent.h"
 #include "AIController.h"
-#include "Perception/AIPerceptionComponent.h"
-#include "Perception/AISightConfig.h"
-#include "Perception/AIHearingConfig.h"
+// DISABLED: #include "Perception/PerceptionComponent.h"
+#include "Perception/AISenseConfig_Sight.h"
+#include "Perception/AISenseConfig_Hearing.h"
 #include "Components/ActorComponent.h"
 #include "NPCBehaviorSystem.generated.h"
 
 UENUM(BlueprintType)
-enum class EDinosaurSpecies : uint8
+enum class EAI_DinosaurSpecies_ABB : uint8
 {
     // Herbívoros Pequenos (Domesticáveis)
     Compsognathus     UMETA(DisplayName = "Compsognathus"),
@@ -35,7 +35,7 @@ enum class EDinosaurSpecies : uint8
 };
 
 UENUM(BlueprintType)
-enum class EDinosaurBehaviorState : uint8
+enum class EAI_DinosaurBehaviorState_ABB : uint8
 {
     Idle              UMETA(DisplayName = "Idle"),
     Foraging          UMETA(DisplayName = "Foraging"),
@@ -52,7 +52,7 @@ enum class EDinosaurBehaviorState : uint8
 };
 
 UENUM(BlueprintType)
-enum class EDomesticationLevel : uint8
+enum class EAI_DomesticationLevel_ABB : uint8
 {
     Wild              UMETA(DisplayName = "Wild"),
     Wary              UMETA(DisplayName = "Wary"),
@@ -64,7 +64,7 @@ enum class EDomesticationLevel : uint8
 };
 
 USTRUCT(BlueprintType)
-struct FDinosaurPersonality
+struct FAI_DinosaurPersonality_ABB
 {
     GENERATED_BODY()
 
@@ -96,7 +96,7 @@ struct FDinosaurPersonality
 };
 
 USTRUCT(BlueprintType)
-struct FDinosaurMemory
+struct FAI_DinosaurMemory
 {
     GENERATED_BODY()
 
@@ -122,7 +122,7 @@ struct FDinosaurMemory
     
     // Memória do jogador
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FVector LastKnownPlayerLocation;
+    FVector LastKnownPlayerLocation = FVector::ZeroVector;
     
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     FDateTime LastPlayerEncounter;
@@ -139,7 +139,7 @@ struct FDinosaurMemory
 };
 
 USTRUCT(BlueprintType)
-struct FDinosaurNeeds
+struct FAI_DinosaurNeeds_ABB
 {
     GENERATED_BODY()
 
@@ -193,10 +193,10 @@ protected:
 public:
     // === CONFIGURAÇÃO BÁSICA ===
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Config")
-    EDinosaurSpecies Species = EDinosaurSpecies::Compsognathus;
+    EAI_DinosaurSpecies_ABB Species = EAI_DinosaurSpecies_ABB::Compsognathus;
     
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Config")
-    FDinosaurPersonality Personality;
+    FAI_DinosaurPersonality_ABB Personality;
     
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Config")
     FString IndividualName; // Nome único gerado proceduralmente
@@ -205,22 +205,22 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI")
     UBehaviorTree* BehaviorTreeAsset;
     
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI")
-    UBlackboardAsset* BlackboardAsset;
+// [UHT-FIX]     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI")
+    UBlackboardData* BlackboardAsset;
     
     // === ESTADO COMPORTAMENTAL ===
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Behavior State")
-    EDinosaurBehaviorState CurrentBehaviorState = EDinosaurBehaviorState::Idle;
+    EAI_DinosaurBehaviorState_ABB CurrentBehaviorState = EAI_DinosaurBehaviorState_ABB::Idle;
     
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Behavior State")
-    FDinosaurNeeds CurrentNeeds;
+    FAI_DinosaurNeeds_ABB CurrentNeeds;
     
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Behavior State")
-    FDinosaurMemory Memory;
+    FAI_DinosaurMemory Memory;
     
     // === DOMESTICAÇÃO ===
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Domestication")
-    EDomesticationLevel DomesticationLevel = EDomesticationLevel::Wild;
+    EAI_DomesticationLevel_ABB DomesticationLevel = EAI_DomesticationLevel_ABB::Wild;
     
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Domestication")
     bool bCanBeDomesticated = false;
@@ -236,10 +236,10 @@ public:
     
     // Gestão de estado comportamental
     UFUNCTION(BlueprintCallable, Category = "Behavior")
-    void SetBehaviorState(EDinosaurBehaviorState NewState);
+    void SetBehaviorState(EAI_DinosaurBehaviorState_ABB NewState);
     
     UFUNCTION(BlueprintCallable, Category = "Behavior")
-    EDinosaurBehaviorState GetBehaviorState() const { return CurrentBehaviorState; }
+    EAI_DinosaurBehaviorState_ABB GetBehaviorState() const { return CurrentBehaviorState; }
     
     // Gestão de necessidades
     UFUNCTION(BlueprintCallable, Category = "Needs")

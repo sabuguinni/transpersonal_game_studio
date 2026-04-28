@@ -61,42 +61,42 @@ public:
      * Register a collision component with the physics system
      * @param CollisionComponent The component to register
      */
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
+// [UHT-FIX]     UFUNCTION(BlueprintCallable, Category = "Physics System")
     void RegisterCollisionComponent(UAdvancedCollisionComponent* CollisionComponent);
 
     /**
      * Unregister a collision component from the physics system
      * @param CollisionComponent The component to unregister
      */
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
+// [UHT-FIX]     UFUNCTION(BlueprintCallable, Category = "Physics System")
     void UnregisterCollisionComponent(UAdvancedCollisionComponent* CollisionComponent);
 
     /**
      * Register a ragdoll component with the physics system
      * @param RagdollComponent The component to register
      */
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
+// [UHT-FIX]     UFUNCTION(BlueprintCallable, Category = "Physics System")
     void RegisterRagdollComponent(URagdollPhysicsComponent* RagdollComponent);
 
     /**
      * Unregister a ragdoll component from the physics system
      * @param RagdollComponent The component to unregister
      */
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
+// [UHT-FIX]     UFUNCTION(BlueprintCallable, Category = "Physics System")
     void UnregisterRagdollComponent(URagdollPhysicsComponent* RagdollComponent);
 
     /**
      * Register a destruction component with the physics system
      * @param DestructionComponent The component to register
      */
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
+// [UHT-FIX]     UFUNCTION(BlueprintCallable, Category = "Physics System")
     void RegisterDestructionComponent(UDestructionComponent* DestructionComponent);
 
     /**
      * Unregister a destruction component from the physics system
      * @param DestructionComponent The component to unregister
      */
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
+// [UHT-FIX]     UFUNCTION(BlueprintCallable, Category = "Physics System")
     void UnregisterDestructionComponent(UDestructionComponent* DestructionComponent);
 
     /**
@@ -118,7 +118,7 @@ public:
      * @param World The world context
      * @return The physics system manager instance
      */
-    UFUNCTION(BlueprintCallable, Category = "Physics System", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Physics System", CallInEditor)
     static UPhysicsSystemManager* GetPhysicsSystemManager(UWorld* World);
 
 protected:
@@ -133,17 +133,17 @@ protected:
      */
     void ApplyPhysicsOptimizations();
 
-private:
+protected:
     /** Array of registered collision components */
-    UPROPERTY()
+// [UHT-FIX]     UPROPERTY()
     TArray<UAdvancedCollisionComponent*> RegisteredCollisionComponents;
 
     /** Array of registered ragdoll components */
-    UPROPERTY()
+// [UHT-FIX]     UPROPERTY()
     TArray<URagdollPhysicsComponent*> RegisteredRagdollComponents;
 
     /** Array of registered destruction components */
-    UPROPERTY()
+// [UHT-FIX]     UPROPERTY()
     TArray<UDestructionComponent*> RegisteredDestructionComponents;
 
     /** Whether physics optimizations are enabled */

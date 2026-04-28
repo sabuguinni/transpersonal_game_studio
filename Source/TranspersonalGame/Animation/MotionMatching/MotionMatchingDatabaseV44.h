@@ -149,7 +149,7 @@ public:
     float InjuryAnimationBias;
 
     // Blueprint interface
-    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+// [UHT-FIX]     UFUNCTION(BlueprintCallable, Category = "Motion Matching")
     FCharacterArchetypeMotionData* GetArchetypeData(const FString& ArchetypeName);
 
     UFUNCTION(BlueprintCallable, Category = "Motion Matching")
@@ -169,13 +169,13 @@ public:
 
     // Editor utilities
 #if WITH_EDITOR
-    UFUNCTION(CallInEditor = true, Category = "Database")
+    UFUNCTION(CallInEditor, Category = "Database")
     void RebuildDatabase();
 
-    UFUNCTION(CallInEditor = true, Category = "Database")
+    UFUNCTION(CallInEditor, Category = "Database")
     void ValidateAllAnimations();
 
-    UFUNCTION(CallInEditor = true, Category = "Database")
+    UFUNCTION(CallInEditor, Category = "Database")
     void GenerateArchetypeFromAnimations();
 #endif
 

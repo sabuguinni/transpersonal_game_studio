@@ -6,7 +6,7 @@
 #include "DinosaurBehaviorFragments.generated.h"
 
 UENUM(BlueprintType)
-enum class EDinosaurBehaviorState : uint8
+enum class ECrowd_DinosaurBehaviorState_3FD : uint8
 {
     Idle,
     Grazing,
@@ -31,7 +31,7 @@ enum class EDinosaurSpeciesType : uint8
 };
 
 USTRUCT()
-struct TRANSPERSONALGAME_API FDinosaurSpeciesFragment : public FMassFragment
+struct TRANSPERSONALGAME_API FCrowd_DinosaurSpeciesFragment_3FD : public FMassFragment
 {
     GENERATED_BODY()
 
@@ -45,12 +45,12 @@ struct TRANSPERSONALGAME_API FDinosaurSpeciesFragment : public FMassFragment
 };
 
 USTRUCT()
-struct TRANSPERSONALGAME_API FDinosaurBehaviorFragment : public FMassFragment
+struct TRANSPERSONALGAME_API FCrowd_DinosaurBehaviorFragment_3FD : public FMassFragment
 {
     GENERATED_BODY()
 
-    EDinosaurBehaviorState CurrentState = EDinosaurBehaviorState::Idle;
-    EDinosaurBehaviorState PreviousState = EDinosaurBehaviorState::Idle;
+    ECrowd_DinosaurBehaviorState_3FD CurrentState = ECrowd_DinosaurBehaviorState_3FD::Idle;
+    ECrowd_DinosaurBehaviorState_3FD PreviousState = ECrowd_DinosaurBehaviorState_3FD::Idle;
     float StateTimer = 0.0f;
     float StateDuration = 5.0f;
     FVector TargetLocation = FVector::ZeroVector;
@@ -58,7 +58,7 @@ struct TRANSPERSONALGAME_API FDinosaurBehaviorFragment : public FMassFragment
 };
 
 USTRUCT()
-struct TRANSPERSONALGAME_API FDinosaurNeedsFragment : public FMassFragment
+struct TRANSPERSONALGAME_API FCrowd_DinosaurBehaviorNeedsFragment : public FMassFragment
 {
     GENERATED_BODY()
 
@@ -76,7 +76,7 @@ struct TRANSPERSONALGAME_API FDinosaurNeedsFragment : public FMassFragment
 };
 
 USTRUCT()
-struct TRANSPERSONALGAME_API FDinosaurFlockingFragment : public FMassFragment
+struct TRANSPERSONALGAME_API FCrowd_DinosaurBehaviorFlockingFragment : public FMassFragment
 {
     GENERATED_BODY()
 
@@ -95,7 +95,7 @@ struct TRANSPERSONALGAME_API FDinosaurFlockingFragment : public FMassFragment
 };
 
 USTRUCT()
-struct TRANSPERSONALGAME_API FDinosaurTerritoryFragment : public FMassFragment
+struct TRANSPERSONALGAME_API FCrowd_DinosaurTerritoryFragment : public FMassFragment
 {
     GENERATED_BODY()
 
@@ -107,7 +107,7 @@ struct TRANSPERSONALGAME_API FDinosaurTerritoryFragment : public FMassFragment
 };
 
 USTRUCT()
-struct TRANSPERSONALGAME_API FDinosaurMemoryFragment : public FMassFragment
+struct TRANSPERSONALGAME_API FCrowd_DinosaurBehaviorMemoryFragment : public FMassFragment
 {
     GENERATED_BODY()
 
@@ -121,7 +121,7 @@ struct TRANSPERSONALGAME_API FDinosaurMemoryFragment : public FMassFragment
 };
 
 USTRUCT()
-struct TRANSPERSONALGAME_API FDinosaurVariationFragment : public FMassFragment
+struct TRANSPERSONALGAME_API FCrowd_DinosaurVariationFragment : public FMassFragment
 {
     GENERATED_BODY()
 

@@ -16,7 +16,7 @@ DECLARE_LOG_CATEGORY_EXTERN(LogPerformanceArchitecture, Log, All);
  * Ensures 60fps on PC and 30fps on console as per technical requirements
  */
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FPerformanceMetrics
+struct TRANSPERSONALGAME_API FCore_PerformanceMetrics
 {
     GENERATED_BODY()
 
@@ -91,7 +91,7 @@ struct TRANSPERSONALGAME_API FPerformanceTargets
  * LOD management for performance optimization
  */
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FLODSettings
+struct TRANSPERSONALGAME_API FCore_LODSettings_73E
 {
     GENERATED_BODY()
 
@@ -142,7 +142,7 @@ public:
 
     // Performance monitoring
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    FPerformanceMetrics GetCurrentMetrics() const;
+    FCore_PerformanceMetrics GetCurrentMetrics() const;
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
     void SetPerformanceTargets(const FPerformanceTargets& NewTargets);
@@ -155,10 +155,10 @@ public:
 
     // LOD management
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void SetLODSettings(const FLODSettings& NewSettings);
+    void SetLODSettings(const FCore_LODSettings_73E& NewSettings);
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    FLODSettings GetLODSettings() const;
+    FCore_LODSettings_73E GetLODSettings() const;
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
     void ApplyPerformanceOptimizations();
@@ -199,7 +199,7 @@ protected:
 
     // Current performance metrics
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    FPerformanceMetrics CurrentMetrics;
+    FCore_PerformanceMetrics CurrentMetrics;
 
     // Performance targets
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
@@ -207,7 +207,7 @@ protected:
 
     // LOD settings
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    FLODSettings LODSettings;
+    FCore_LODSettings_73E LODSettings;
 
     // Auto-optimization settings
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")

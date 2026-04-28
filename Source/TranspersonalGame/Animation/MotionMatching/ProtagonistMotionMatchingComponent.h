@@ -2,7 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "PoseSearch/PoseSearch.h"
+// FIXME: Missing header - #include "PoseSearch/PoseSearch.h"
 #include "Engine/Engine.h"
 #include "ProtagonistMotionMatchingComponent.generated.h"
 
@@ -127,7 +127,7 @@ private:
     // === RUNTIME DATA ===
     
     /** Referência ao Motion Matching node activo */
-    UPROPERTY()
+// [UHT-FIX]     UPROPERTY()
     class UMotionMatchingAnimInstance* ActiveMotionMatchingInstance;
     
     /** Database actualmente seleccionada */

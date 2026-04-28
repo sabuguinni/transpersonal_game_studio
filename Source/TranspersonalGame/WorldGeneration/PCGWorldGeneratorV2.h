@@ -17,6 +17,7 @@
 #include "WorldPartition/DataLayer/DataLayer.h"
 #include "Engine/DataTable.h"
 #include "Math/UnrealMathUtility.h"
+// DISABLED: // DISABLED: #include "TranspersonalGameSharedTypes.h"
 #include "PCGWorldGeneratorV2.generated.h"
 
 class UPCGGraph;
@@ -47,7 +48,7 @@ class UDataLayer;
 
 /** Jurassic biome types following the Geographic Guide */
 UENUM(BlueprintType)
-enum class EJurassicBiomeType : uint8
+enum class EWorld_JurassicBiomeType_4D5 : uint8
 {
     Forest          UMETA(DisplayName = "Forest (Tropical Forest - Center)"),
     Swamp           UMETA(DisplayName = "Swamp (Southeast)"),
@@ -61,7 +62,7 @@ enum class EJurassicBiomeType : uint8
 
 /** Geological formation types for realistic terrain generation */
 UENUM(BlueprintType)
-enum class EGeologicalFormation : uint8
+enum class EWorld_GeologicalFormation_4D5 : uint8
 {
     Sedimentary     UMETA(DisplayName = "Sedimentary (Plains, Swamps)"),
     Igneous         UMETA(DisplayName = "Igneous (Mountains, Volcanic)"),
@@ -92,7 +93,7 @@ struct FBiomeTerrainSettings
 
     /** Biome identifier */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    EJurassicBiomeType BiomeType = EJurassicBiomeType::Forest;
+    EWorld_JurassicBiomeType_4D5 BiomeType = EWorld_JurassicBiomeType_4D5::Forest;
 
     /** Elevation range for this biome (in cm) */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain", meta = (ClampMin = "0", ClampMax = "500000"))
@@ -104,7 +105,7 @@ struct FBiomeTerrainSettings
 
     /** Geological formation type */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Geology")
-    EGeologicalFormation GeologyType = EGeologicalFormation::Sedimentary;
+    EWorld_GeologicalFormation_4D5 GeologyType = EWorld_GeologicalFormation_4D5::Sedimentary;
 
     /** Primary noise parameters for large-scale features */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Noise Primary")
@@ -181,7 +182,7 @@ struct FBiomeTerrainSettings
 
 /** River system configuration */
 USTRUCT(BlueprintType)
-struct FRiverSystemConfig
+struct FWorld_RiverSystemConfig
 {
     GENERATED_BODY()
 
@@ -334,32 +335,32 @@ protected:
 
 public:
     /** Generate the complete world */
-    UFUNCTION(BlueprintCallable, Category = "World Generation", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "World Generation", CallInEditor)
     void GenerateWorld();
 
     /** Generate only terrain heightfield */
-    UFUNCTION(BlueprintCallable, Category = "World Generation", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "World Generation", CallInEditor)
     void GenerateTerrain();
 
     /** Generate biome distribution */
-    UFUNCTION(BlueprintCallable, Category = "World Generation", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "World Generation", CallInEditor)
     void GenerateBiomes();
 
     /** Generate river system */
-    UFUNCTION(BlueprintCallable, Category = "World Generation", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "World Generation", CallInEditor)
     void GenerateRivers();
 
     /** Setup World Partition */
-    UFUNCTION(BlueprintCallable, Category = "World Generation", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "World Generation", CallInEditor)
     void SetupWorldPartition();
 
     /** Clear all generated content */
-    UFUNCTION(BlueprintCallable, Category = "World Generation", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "World Generation", CallInEditor)
     void ClearWorld();
 
     /** Get biome type at world location */
     UFUNCTION(BlueprintCallable, Category = "World Query")
-    EJurassicBiomeType GetBiomeAtLocation(const FVector& WorldLocation) const;
+    EWorld_JurassicBiomeType_4D5 GetBiomeAtLocation(const FVector& WorldLocation) const;
 
     /** Get elevation at world location */
     UFUNCTION(BlueprintCallable, Category = "World Query")
@@ -392,11 +393,11 @@ protected:
 
     /** Biome terrain settings for each biome type */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Configuration")
-    TMap<EJurassicBiomeType, FBiomeTerrainSettings> BiomeSettings;
+    TMap<EWorld_JurassicBiomeType_4D5, FBiomeTerrainSettings> BiomeSettings;
 
     /** River system configuration */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "River Configuration")
-    FRiverSystemConfig RiverConfig;
+    FWorld_RiverSystemConfig RiverConfig;
 
     /** PCG Graphs for different generation phases */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "PCG Graphs")
@@ -416,7 +417,7 @@ protected:
     TObjectPtr<ALandscape> GeneratedLandscape;
 
     /** Data layers for World Partition */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "World Partition")
+// [UHT-FIX]     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "World Partition")
     TArray<TObjectPtr<UDataLayer>> BiomeDataLayers;
 
 private:
@@ -436,7 +437,7 @@ private:
     FVector2D WorldLocationToBiomeCoordinate(const FVector& WorldLocation) const;
     float CalculateDistanceFromCenter(const FVector& WorldLocation) const;
     float CalculateDistanceFromBorder(const FVector& WorldLocation) const;
-    EJurassicBiomeType DetermineBiomeFromLocation(const FVector& WorldLocation) const;
+    EWorld_JurassicBiomeType_4D5 DetermineBiomeFromLocation(const FVector& WorldLocation) const;
 
     /** Performance monitoring */
     void StartPerformanceTimer(const FString& OperationName);

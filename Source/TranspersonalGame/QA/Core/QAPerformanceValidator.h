@@ -2,7 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Engine/Engine.h"
-#include "HAL/PlatformFilemanager.h"
+#include "HAL/PlatformFileManager.h"
 #include "Misc/DateTime.h"
 #include "Stats/Stats.h"
 #include "RenderingThread.h"
@@ -14,7 +14,7 @@ DECLARE_LOG_CATEGORY_EXTERN(LogQAPerformance, Log, All);
  * Performance validation thresholds for different platforms
  */
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FPerformanceThresholds
+struct TRANSPERSONALGAME_API FQA_PerformanceThresholds
 {
     GENERATED_BODY()
 
@@ -50,7 +50,7 @@ struct TRANSPERSONALGAME_API FPerformanceThresholds
  * Performance measurement data structure
  */
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FPerformanceMetrics
+struct TRANSPERSONALGAME_API FQA_PerformanceMetrics
 {
     GENERATED_BODY()
 
@@ -123,13 +123,13 @@ public:
      * Get current performance metrics
      */
     UFUNCTION(BlueprintCallable, Category = "QA Performance")
-    FPerformanceMetrics GetCurrentMetrics();
+    FQA_PerformanceMetrics GetCurrentMetrics();
 
     /**
      * Validate current performance against thresholds
      */
     UFUNCTION(BlueprintCallable, Category = "QA Performance")
-    bool ValidatePerformance(const FPerformanceThresholds& Thresholds, FString& OutFailureReason);
+    bool ValidatePerformance(const FQA_PerformanceThresholds& Thresholds, FString& OutFailureReason);
 
     /**
      * Generate performance report
@@ -147,7 +147,7 @@ public:
      * Get performance thresholds for current platform
      */
     UFUNCTION(BlueprintPure, Category = "QA Performance")
-    FPerformanceThresholds GetPlatformThresholds() const;
+    FQA_PerformanceThresholds GetPlatformThresholds() const;
 
     /**
      * Validate frame rate stability
@@ -175,7 +175,7 @@ public:
 
 protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    FPerformanceThresholds DefaultThresholds;
+    FQA_PerformanceThresholds DefaultThresholds;
 
     UPROPERTY(BlueprintReadOnly, Category = "State")
     bool bIsMonitoring = false;
@@ -187,7 +187,7 @@ protected:
     float ElapsedMonitoringTime = 0.0f;
 
     // Performance data storage
-    TArray<FPerformanceMetrics> PerformanceHistory;
+    TArray<FQA_PerformanceMetrics> PerformanceHistory;
     
     // Timing
     FDateTime MonitoringStartTime;
@@ -202,7 +202,7 @@ private:
     /**
      * Collect current performance data
      */
-    FPerformanceMetrics CollectMetrics();
+    FQA_PerformanceMetrics CollectMetrics();
 
     /**
      * Get current platform type
@@ -212,7 +212,7 @@ private:
     /**
      * Calculate average metrics over time period
      */
-    FPerformanceMetrics CalculateAverageMetrics(float TimePeriod) const;
+    FQA_PerformanceMetrics CalculateAverageMetrics(float TimePeriod) const;
 
     /**
      * Check for performance hitches

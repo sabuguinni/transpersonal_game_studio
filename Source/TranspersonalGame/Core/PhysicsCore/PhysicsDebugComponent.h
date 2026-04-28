@@ -165,7 +165,7 @@ public:
      * @param Duration How long to keep the debug lines visible
      */
     UFUNCTION(BlueprintCallable, Category = "Physics Debug")
-    void DrawPhysicsConstraints(AActor* TargetActor, FColor Color = FColor::Orange, float Duration = 0.0f);
+    void DrawPhysicsConstraints(AActor* TargetActor, FColor Color, float Duration = 0.0f);
 
     /**
      * @brief Draw performance metrics overlay

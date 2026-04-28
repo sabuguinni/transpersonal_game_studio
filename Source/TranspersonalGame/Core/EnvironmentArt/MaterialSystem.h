@@ -7,7 +7,7 @@
 #include "Materials/MaterialInterface.h"
 #include "Materials/MaterialParameterCollection.h"
 #include "Engine/Texture2D.h"
-#include "Landscape/Classes/LandscapeLayerInfoObject.h"
+#include "LandscapeProxy.h"
 #include "MaterialSystem.generated.h"
 
 /**

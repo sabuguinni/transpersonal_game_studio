@@ -6,6 +6,7 @@
 #include "MassCommonFragments.h"
 #include "MassMovementFragments.h"
 #include "MassDinosaurTypes.h"
+#include "MassEntityTypes.h"
 #include "MassHerdBehaviorProcessor.generated.h"
 
 /**

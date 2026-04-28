@@ -3,11 +3,11 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "Engine/World.h"
-#include "DinosaurAIController.h"
+// DISABLED: // DISABLED: #include "DinosaurAIController.h"
 #include "DinosaurSocialComponent.generated.h"
 
 UENUM(BlueprintType)
-enum class ESocialInteractionType : uint8
+enum class EAI_SocialInteractionType : uint8
 {
     Greeting,
     Dominance,
@@ -37,7 +37,7 @@ enum class ESocialRelationship : uint8
 };
 
 USTRUCT(BlueprintType)
-struct FSocialRelationship
+struct FAI_SocialRelationship
 {
     GENERATED_BODY()
 
@@ -63,9 +63,9 @@ struct FSocialRelationship
     int32 InteractionCount;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Social")
-    TArray<ESocialInteractionType> RecentInteractions;
+    TArray<EAI_SocialInteractionType> RecentInteractions;
 
-    FSocialRelationship()
+    FAI_SocialRelationship()
     {
         OtherActor = nullptr;
         RelationshipType = ESocialRelationship::Unknown;
@@ -78,12 +78,12 @@ struct FSocialRelationship
 };
 
 USTRUCT(BlueprintType)
-struct FSocialInteraction
+struct FAI_SocialInteraction
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Social")
-    ESocialInteractionType InteractionType;
+    EAI_SocialInteractionType InteractionType;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Social")
     TWeakObjectPtr<AActor> Initiator;
@@ -103,9 +103,9 @@ struct FSocialInteraction
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Social")
     FVector InteractionLocation;
 
-    FSocialInteraction()
+    FAI_SocialInteraction()
     {
-        InteractionType = ESocialInteractionType::Greeting;
+        InteractionType = EAI_SocialInteractionType::Greeting;
         Initiator = nullptr;
         Target = nullptr;
         Duration = 0.0f;
@@ -120,7 +120,7 @@ struct FHerdBehavior
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Herd")
+// [UHT-FIX2]     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Herd")
     TArray<TWeakObjectPtr<AActor>> HerdMembers;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Herd")
@@ -170,10 +170,10 @@ protected:
 
     // Social Data
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Social")
-    TArray<FSocialRelationship> Relationships;
+    TArray<FAI_SocialRelationship> Relationships;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Social")
-    FSocialInteraction CurrentInteraction;
+    FAI_SocialInteraction CurrentInteraction;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Social")
     FHerdBehavior HerdInfo;
@@ -216,7 +216,7 @@ public:
     void EstablishRelationship(AActor* OtherActor, ESocialRelationship RelationType = ESocialRelationship::Neutral);
 
     UFUNCTION(BlueprintPure, Category = "Social")
-    FSocialRelationship GetRelationshipWith(AActor* OtherActor) const;
+    FAI_SocialRelationship GetRelationshipWith(AActor* OtherActor) const;
 
     UFUNCTION(BlueprintCallable, Category = "Social")
     void UpdateRelationship(AActor* OtherActor, float AffinityChange, float DominanceChange, float TrustChange);
@@ -232,7 +232,7 @@ public:
 
     // Interaction System
     UFUNCTION(BlueprintCallable, Category = "Social")
-    bool BeginInteraction(AActor* TargetActor, ESocialInteractionType InteractionType = ESocialInteractionType::Greeting);
+    bool BeginInteraction(AActor* TargetActor, EAI_SocialInteractionType InteractionType = EAI_SocialInteractionType::Greeting);
 
     UFUNCTION(BlueprintCallable, Category = "Social")
     void EndInteraction(bool bWasSuccessful = true);
@@ -244,7 +244,7 @@ public:
     bool CanInteractWith(AActor* OtherActor) const;
 
     UFUNCTION(BlueprintCallable, Category = "Social")
-    void RespondToInteraction(AActor* Initiator, ESocialInteractionType InteractionType);
+    void RespondToInteraction(AActor* Initiator, EAI_SocialInteractionType InteractionType);
 
     // Herd Behavior
     UFUNCTION(BlueprintCallable, Category = "Social")
@@ -302,7 +302,7 @@ public:
     float GetDominanceRank() const;
 
     // Events
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnInteractionStarted, AActor*, OtherActor, ESocialInteractionType, InteractionType);
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnInteractionStarted, AActor*, OtherActor, EAI_SocialInteractionType, InteractionType);
     DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnInteractionEnded, AActor*, OtherActor, bool, bWasSuccessful);
     DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnRelationshipChanged, AActor*, OtherActor);
     DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnJoinedHerd, int32, HerdSize);
@@ -330,9 +330,9 @@ protected:
     void DecayRelationships(float DeltaTime);
     void CleanupInvalidRelationships();
     
-    ESocialInteractionType DetermineInteractionType(AActor* OtherActor) const;
-    float CalculateInteractionSuccess(ESocialInteractionType InteractionType, AActor* OtherActor) const;
-    void ApplyInteractionEffects(ESocialInteractionType InteractionType, AActor* OtherActor, bool bWasSuccessful);
+    EAI_SocialInteractionType DetermineInteractionType(AActor* OtherActor) const;
+    float CalculateInteractionSuccess(EAI_SocialInteractionType InteractionType, AActor* OtherActor) const;
+    void ApplyInteractionEffects(EAI_SocialInteractionType InteractionType, AActor* OtherActor, bool bWasSuccessful);
     
     // Herd management
     void UpdateHerdCenter();

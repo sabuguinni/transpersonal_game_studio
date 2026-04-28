@@ -24,7 +24,7 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
+    virtual void Tick(float DeltaTime);
 
     // Core components
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
@@ -44,7 +44,7 @@ protected:
     TArray<UStaticMeshComponent*> InteriorProps;
 
     // Structure data
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
+// [UHT-FIX]     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
     UPrehistoricStructureData* StructureData;
 
     // Dynamic properties
@@ -75,7 +75,7 @@ protected:
 
 public:
     // Initialization
-    UFUNCTION(BlueprintCallable, Category = "Structure")
+// [UHT-FIX]     UFUNCTION(BlueprintCallable, Category = "Structure")
     void InitializeFromData(UPrehistoricStructureData* Data);
 
     UFUNCTION(BlueprintCallable, Category = "Structure")

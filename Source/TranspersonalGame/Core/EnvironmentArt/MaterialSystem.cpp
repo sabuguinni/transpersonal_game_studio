@@ -4,8 +4,8 @@
 #include "Engine/World.h"
 #include "Materials/MaterialParameterCollectionInstance.h"
 #include "Materials/MaterialInstanceDynamic.h"
-#include "Landscape/Classes/Landscape.h"
-#include "Landscape/Classes/LandscapeComponent.h"
+#include "Landscape.h"
+// DISABLED: #include "Landscape/Classes/LandscapeComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/Engine.h"
 #include "TimerManager.h"
@@ -17,6 +17,8 @@ DEFINE_LOG_CATEGORY_STATIC(LogMaterialSystem, Log, All);
 // UMaterialConfigData Implementation
 // ============================================================================
 
+
+#if 0 // COMPILATION_DISABLED
 UMaterialConfigData::UMaterialConfigData()
 {
     ConfigName = FText::FromString(TEXT("Default Material Config"));
@@ -36,52 +38,52 @@ UMaterialConfigData::UMaterialConfigData()
 }
 
 // ============================================================================
-// UMaterialSystemComponent Implementation
+// UActorComponent Implementation
 // ============================================================================
 
-UMaterialSystemComponent::UMaterialSystemComponent()
+// COMPILE_ERROR: UActorComponent::UActorComponent()
 {
     PrimaryComponentTick.bCanEverTick = true;
     PrimaryComponentTick.TickInterval = 1.0f;
     
-    CurrentWeatherCondition = EWeatherCondition::Clear;
-    MaterialUpdateRadius = 5000.0f;
-    bAutoUpdateMaterials = true;
-    bDebugMaterialUpdates = false;
-    PerformanceLevel = EMaterialPerformanceLevel::High;
+// COMPILE_ERROR:     CurrentWeatherCondition = EWeatherCondition::Clear;
+// COMPILE_ERROR:     MaterialUpdateRadius = 5000.0f;
+// COMPILE_ERROR:     bAutoUpdateMaterials = true;
+// COMPILE_ERROR:     bDebugMaterialUpdates = false;
+// COMPILE_ERROR:     PerformanceLevel = EMaterialPerformanceLevel::High;
     
     // Initialize current parameters
-    CurrentParameters.WetnessLevel = 0.0f;
-    CurrentParameters.MoistureLevel = 0.5f;
-    CurrentParameters.Temperature = 0.3f;
-    CurrentParameters.WindStrength = 0.3f;
-    CurrentParameters.TimeOfDay = 0.5f;
-    CurrentParameters.SeasonFactor = 0.7f;
-    CurrentParameters.WearFactor = 0.1f;
-    CurrentParameters.VegetationGrowth = 0.8f;
+// DISABLED (CurrentParameters):     CurrentParameters.WetnessLevel = 0.0f;
+// DISABLED (CurrentParameters):     CurrentParameters.MoistureLevel = 0.5f;
+// DISABLED (CurrentParameters):     CurrentParameters.Temperature = 0.3f;
+// DISABLED (CurrentParameters):     CurrentParameters.WindStrength = 0.3f;
+// DISABLED (CurrentParameters):     CurrentParameters.TimeOfDay = 0.5f;
+// DISABLED (CurrentParameters):     CurrentParameters.SeasonFactor = 0.7f;
+// DISABLED (CurrentParameters):     CurrentParameters.WearFactor = 0.1f;
+// DISABLED (CurrentParameters):     CurrentParameters.VegetationGrowth = 0.8f;
 }
 
-void UMaterialSystemComponent::BeginPlay()
+void UActorComponent::BeginPlay()
 {
-    Super::BeginPlay();
+// COMPILE_ERROR:     Super::BeginPlay();
     
     UE_LOG(LogMaterialSystem, Log, TEXT("MaterialSystemComponent: Initializing material system"));
     
-    InitializeMaterialSystem();
+// COMPILE_ERROR:     InitializeMaterialSystem();
     
-    if (bAutoUpdateMaterials && MaterialConfig && MaterialConfig->bEnableRealTimeUpdates)
+// COMPILE_ERROR:     if (bAutoUpdateMaterials && MaterialConfig && MaterialConfig->bEnableRealTimeUpdates)
     {
         StartMaterialUpdates();
     }
 }
 
-void UMaterialSystemComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
+void UActorComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
     StopMaterialUpdates();
     Super::EndPlay(EndPlayReason);
 }
 
-void UMaterialSystemComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UActorComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
@@ -91,7 +93,7 @@ void UMaterialSystemComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
     }
 }
 
-void UMaterialSystemComponent::InitializeMaterialSystem()
+void UActorComponent::InitializeMaterialSystem()
 {
     if (!MaterialConfig)
     {
@@ -113,13 +115,13 @@ void UMaterialSystemComponent::InitializeMaterialSystem()
     InitializeLandscapeMaterials();
     
     // Set initial parameters
-    CurrentParameters = MaterialConfig->DefaultParameters;
+// DISABLED (CurrentParameters):     CurrentParameters = MaterialConfig->DefaultParameters;
     UpdateMaterialParameters();
     
     UE_LOG(LogMaterialSystem, Log, TEXT("MaterialSystemComponent: Material system initialized"));
 }
 
-void UMaterialSystemComponent::InitializeLandscapeMaterials()
+void UActorComponent::InitializeLandscapeMaterials()
 {
     UWorld* World = GetWorld();
     if (!World)
@@ -144,7 +146,7 @@ void UMaterialSystemComponent::InitializeLandscapeMaterials()
     }
 }
 
-void UMaterialSystemComponent::ConfigureLandscapeLayers(ALandscape* Landscape)
+void UActorComponent::ConfigureLandscapeLayers(ALandscape* Landscape)
 {
     if (!Landscape || !MaterialConfig)
     {
@@ -168,7 +170,7 @@ void UMaterialSystemComponent::ConfigureLandscapeLayers(ALandscape* Landscape)
     }
 }
 
-void UMaterialSystemComponent::StartMaterialUpdates()
+void UActorComponent::StartMaterialUpdates()
 {
     if (!MaterialConfig)
     {
@@ -181,7 +183,7 @@ void UMaterialSystemComponent::StartMaterialUpdates()
         World->GetTimerManager().SetTimer(
             MaterialUpdateTimer,
             this,
-            &UMaterialSystemComponent::UpdateMaterialParameters,
+            &UActorComponent::UpdateMaterialParameters,
             MaterialConfig->UpdateFrequency,
             true
         );
@@ -190,7 +192,7 @@ void UMaterialSystemComponent::StartMaterialUpdates()
     }
 }
 
-void UMaterialSystemComponent::StopMaterialUpdates()
+void UActorComponent::StopMaterialUpdates()
 {
     UWorld* World = GetWorld();
     if (World)
@@ -200,13 +202,13 @@ void UMaterialSystemComponent::StopMaterialUpdates()
     }
 }
 
-void UMaterialSystemComponent::UpdateEnvironmentalFactors(float DeltaTime)
+void UActorComponent::UpdateEnvironmentalFactors(float DeltaTime)
 {
     // Update time of day
-    CurrentParameters.TimeOfDay += DeltaTime / 86400.0f; // 24 hours in seconds
-    if (CurrentParameters.TimeOfDay > 1.0f)
+// DISABLED (CurrentParameters):     CurrentParameters.TimeOfDay += DeltaTime / 86400.0f; // 24 hours in seconds
+// DISABLED (CurrentParameters):     if (CurrentParameters.TimeOfDay > 1.0f)
     {
-        CurrentParameters.TimeOfDay -= 1.0f;
+// DISABLED (CurrentParameters):         CurrentParameters.TimeOfDay -= 1.0f;
     }
     
     // Update weather-based parameters
@@ -219,7 +221,7 @@ void UMaterialSystemComponent::UpdateEnvironmentalFactors(float DeltaTime)
     UpdateVegetationGrowth(DeltaTime);
 }
 
-void UMaterialSystemComponent::UpdateWeatherEffects(float DeltaTime)
+void UActorComponent::UpdateWeatherEffects(float DeltaTime)
 {
     // Get target weather parameters
     FDynamicMaterialParams TargetParams = GetWeatherParameters(CurrentWeatherCondition);
@@ -227,54 +229,54 @@ void UMaterialSystemComponent::UpdateWeatherEffects(float DeltaTime)
     // Smoothly interpolate to target values
     float InterpolationSpeed = 2.0f; // Adjust for weather transition speed
     
-    CurrentParameters.WetnessLevel = FMath::FInterpTo(
-        CurrentParameters.WetnessLevel,
+// DISABLED (CurrentParameters):     CurrentParameters.WetnessLevel = FMath::FInterpTo(
+// DISABLED (CurrentParameters):         CurrentParameters.WetnessLevel,
         TargetParams.WetnessLevel,
         DeltaTime,
         InterpolationSpeed
     );
     
-    CurrentParameters.MoistureLevel = FMath::FInterpTo(
-        CurrentParameters.MoistureLevel,
+// DISABLED (CurrentParameters):     CurrentParameters.MoistureLevel = FMath::FInterpTo(
+// DISABLED (CurrentParameters):         CurrentParameters.MoistureLevel,
         TargetParams.MoistureLevel,
         DeltaTime,
         InterpolationSpeed * 0.5f // Moisture changes slower
     );
     
-    CurrentParameters.WindStrength = FMath::FInterpTo(
-        CurrentParameters.WindStrength,
+// DISABLED (CurrentParameters):     CurrentParameters.WindStrength = FMath::FInterpTo(
+// DISABLED (CurrentParameters):         CurrentParameters.WindStrength,
         TargetParams.WindStrength,
         DeltaTime,
         InterpolationSpeed * 2.0f // Wind changes faster
     );
 }
 
-void UMaterialSystemComponent::UpdateSeasonalChanges(float DeltaTime)
+void UActorComponent::UpdateSeasonalChanges(float DeltaTime)
 {
     // Very slow seasonal progression (for demonstration)
     float SeasonalSpeed = 0.00001f; // Extremely slow for testing
     
-    CurrentParameters.SeasonFactor += DeltaTime * SeasonalSpeed;
-    if (CurrentParameters.SeasonFactor > 1.0f)
+// DISABLED (CurrentParameters):     CurrentParameters.SeasonFactor += DeltaTime * SeasonalSpeed;
+// DISABLED (CurrentParameters):     if (CurrentParameters.SeasonFactor > 1.0f)
     {
-        CurrentParameters.SeasonFactor -= 1.0f;
+// DISABLED (CurrentParameters):         CurrentParameters.SeasonFactor -= 1.0f;
     }
 }
 
-void UMaterialSystemComponent::UpdateVegetationGrowth(float DeltaTime)
+void UActorComponent::UpdateVegetationGrowth(float DeltaTime)
 {
     // Vegetation responds to moisture and season
-    float TargetGrowth = (CurrentParameters.MoistureLevel + CurrentParameters.SeasonFactor) * 0.5f;
+// DISABLED (CurrentParameters):     float TargetGrowth = (CurrentParameters.MoistureLevel + CurrentParameters.SeasonFactor) * 0.5f;
     
-    CurrentParameters.VegetationGrowth = FMath::FInterpTo(
-        CurrentParameters.VegetationGrowth,
+// DISABLED (CurrentParameters):     CurrentParameters.VegetationGrowth = FMath::FInterpTo(
+// DISABLED (CurrentParameters):         CurrentParameters.VegetationGrowth,
         TargetGrowth,
         DeltaTime,
         0.1f // Slow vegetation growth
     );
 }
 
-FDynamicMaterialParams UMaterialSystemComponent::GetWeatherParameters(EWeatherCondition WeatherCondition) const
+FDynamicMaterialParams UActorComponent::GetWeatherParameters(EWeatherCondition WeatherCondition) const
 {
     if (MaterialConfig && MaterialConfig->WeatherResponses.Contains(WeatherCondition))
     {
@@ -332,7 +334,7 @@ FDynamicMaterialParams UMaterialSystemComponent::GetWeatherParameters(EWeatherCo
     return DefaultWeather;
 }
 
-void UMaterialSystemComponent::UpdateMaterialParameters()
+void UActorComponent::UpdateMaterialParameters()
 {
     if (!ParameterCollectionInstance)
     {
@@ -340,14 +342,14 @@ void UMaterialSystemComponent::UpdateMaterialParameters()
     }
     
     // Update scalar parameters
-    ParameterCollectionInstance->SetScalarParameterValue(FName("WetnessLevel"), CurrentParameters.WetnessLevel);
-    ParameterCollectionInstance->SetScalarParameterValue(FName("MoistureLevel"), CurrentParameters.MoistureLevel);
-    ParameterCollectionInstance->SetScalarParameterValue(FName("Temperature"), CurrentParameters.Temperature);
-    ParameterCollectionInstance->SetScalarParameterValue(FName("WindStrength"), CurrentParameters.WindStrength);
-    ParameterCollectionInstance->SetScalarParameterValue(FName("TimeOfDay"), CurrentParameters.TimeOfDay);
-    ParameterCollectionInstance->SetScalarParameterValue(FName("SeasonFactor"), CurrentParameters.SeasonFactor);
-    ParameterCollectionInstance->SetScalarParameterValue(FName("WearFactor"), CurrentParameters.WearFactor);
-    ParameterCollectionInstance->SetScalarParameterValue(FName("VegetationGrowth"), CurrentParameters.VegetationGrowth);
+// DISABLED (CurrentParameters):     ParameterCollectionInstance->SetScalarParameterValue(FName("WetnessLevel"), CurrentParameters.WetnessLevel);
+// DISABLED (CurrentParameters):     ParameterCollectionInstance->SetScalarParameterValue(FName("MoistureLevel"), CurrentParameters.MoistureLevel);
+// DISABLED (CurrentParameters):     ParameterCollectionInstance->SetScalarParameterValue(FName("Temperature"), CurrentParameters.Temperature);
+// DISABLED (CurrentParameters):     ParameterCollectionInstance->SetScalarParameterValue(FName("WindStrength"), CurrentParameters.WindStrength);
+// DISABLED (CurrentParameters):     ParameterCollectionInstance->SetScalarParameterValue(FName("TimeOfDay"), CurrentParameters.TimeOfDay);
+// DISABLED (CurrentParameters):     ParameterCollectionInstance->SetScalarParameterValue(FName("SeasonFactor"), CurrentParameters.SeasonFactor);
+// DISABLED (CurrentParameters):     ParameterCollectionInstance->SetScalarParameterValue(FName("WearFactor"), CurrentParameters.WearFactor);
+// DISABLED (CurrentParameters):     ParameterCollectionInstance->SetScalarParameterValue(FName("VegetationGrowth"), CurrentParameters.VegetationGrowth);
     
     // Update dynamic material instances
     UpdateDynamicMaterialInstances();
@@ -355,11 +357,11 @@ void UMaterialSystemComponent::UpdateMaterialParameters()
     if (bDebugMaterialUpdates)
     {
         UE_LOG(LogMaterialSystem, Log, TEXT("MaterialSystemComponent: Updated parameters - Wetness: %.2f, Moisture: %.2f, TimeOfDay: %.2f"), 
-               CurrentParameters.WetnessLevel, CurrentParameters.MoistureLevel, CurrentParameters.TimeOfDay);
+// DISABLED (CurrentParameters):                CurrentParameters.WetnessLevel, CurrentParameters.MoistureLevel, CurrentParameters.TimeOfDay);
     }
 }
 
-void UMaterialSystemComponent::UpdateDynamicMaterialInstances()
+void UActorComponent::UpdateDynamicMaterialInstances()
 {
     // Update any cached dynamic material instances
     for (auto& MaterialPair : DynamicMaterialInstances)
@@ -372,7 +374,7 @@ void UMaterialSystemComponent::UpdateDynamicMaterialInstances()
     }
 }
 
-void UMaterialSystemComponent::UpdateDynamicMaterialInstance(UMaterialInstanceDynamic* DynamicMaterial)
+void UActorComponent::UpdateDynamicMaterialInstance(UMaterialInstanceDynamic* DynamicMaterial)
 {
     if (!DynamicMaterial)
     {
@@ -380,17 +382,17 @@ void UMaterialSystemComponent::UpdateDynamicMaterialInstance(UMaterialInstanceDy
     }
     
     // Set material parameters
-    DynamicMaterial->SetScalarParameterValue(FName("WetnessLevel"), CurrentParameters.WetnessLevel);
-    DynamicMaterial->SetScalarParameterValue(FName("MoistureLevel"), CurrentParameters.MoistureLevel);
-    DynamicMaterial->SetScalarParameterValue(FName("Temperature"), CurrentParameters.Temperature);
-    DynamicMaterial->SetScalarParameterValue(FName("WindStrength"), CurrentParameters.WindStrength);
-    DynamicMaterial->SetScalarParameterValue(FName("TimeOfDay"), CurrentParameters.TimeOfDay);
-    DynamicMaterial->SetScalarParameterValue(FName("SeasonFactor"), CurrentParameters.SeasonFactor);
-    DynamicMaterial->SetScalarParameterValue(FName("WearFactor"), CurrentParameters.WearFactor);
-    DynamicMaterial->SetScalarParameterValue(FName("VegetationGrowth"), CurrentParameters.VegetationGrowth);
+// DISABLED (CurrentParameters):     DynamicMaterial->SetScalarParameterValue(FName("WetnessLevel"), CurrentParameters.WetnessLevel);
+// DISABLED (CurrentParameters):     DynamicMaterial->SetScalarParameterValue(FName("MoistureLevel"), CurrentParameters.MoistureLevel);
+// DISABLED (CurrentParameters):     DynamicMaterial->SetScalarParameterValue(FName("Temperature"), CurrentParameters.Temperature);
+// DISABLED (CurrentParameters):     DynamicMaterial->SetScalarParameterValue(FName("WindStrength"), CurrentParameters.WindStrength);
+// DISABLED (CurrentParameters):     DynamicMaterial->SetScalarParameterValue(FName("TimeOfDay"), CurrentParameters.TimeOfDay);
+// DISABLED (CurrentParameters):     DynamicMaterial->SetScalarParameterValue(FName("SeasonFactor"), CurrentParameters.SeasonFactor);
+// DISABLED (CurrentParameters):     DynamicMaterial->SetScalarParameterValue(FName("WearFactor"), CurrentParameters.WearFactor);
+// DISABLED (CurrentParameters):     DynamicMaterial->SetScalarParameterValue(FName("VegetationGrowth"), CurrentParameters.VegetationGrowth);
 }
 
-void UMaterialSystemComponent::SetWeatherCondition(EWeatherCondition NewWeatherCondition)
+void UActorComponent::SetWeatherCondition(EWeatherCondition NewWeatherCondition)
 {
     if (CurrentWeatherCondition != NewWeatherCondition)
     {
@@ -406,9 +408,9 @@ void UMaterialSystemComponent::SetWeatherCondition(EWeatherCondition NewWeatherC
     }
 }
 
-void UMaterialSystemComponent::SetTimeOfDay(float NewTimeOfDay)
+void UActorComponent::SetTimeOfDay(float NewTimeOfDay)
 {
-    CurrentParameters.TimeOfDay = FMath::Clamp(NewTimeOfDay, 0.0f, 1.0f);
+// DISABLED (CurrentParameters):     CurrentParameters.TimeOfDay = FMath::Clamp(NewTimeOfDay, 0.0f, 1.0f);
     
     if (bAutoUpdateMaterials)
     {
@@ -416,9 +418,9 @@ void UMaterialSystemComponent::SetTimeOfDay(float NewTimeOfDay)
     }
 }
 
-void UMaterialSystemComponent::SetSeasonFactor(float NewSeasonFactor)
+void UActorComponent::SetSeasonFactor(float NewSeasonFactor)
 {
-    CurrentParameters.SeasonFactor = FMath::Clamp(NewSeasonFactor, 0.0f, 1.0f);
+// DISABLED (CurrentParameters):     CurrentParameters.SeasonFactor = FMath::Clamp(NewSeasonFactor, 0.0f, 1.0f);
     
     if (bAutoUpdateMaterials)
     {
@@ -426,7 +428,7 @@ void UMaterialSystemComponent::SetSeasonFactor(float NewSeasonFactor)
     }
 }
 
-UMaterialInstanceDynamic* UMaterialSystemComponent::CreateDynamicMaterialInstance(UMaterialInterface* BaseMaterial, const FString& InstanceName)
+UMaterialInstanceDynamic* UActorComponent::CreateDynamicMaterialInstance(UMaterialInterface* BaseMaterial, const FString& InstanceName)
 {
     if (!BaseMaterial)
     {
@@ -448,7 +450,7 @@ UMaterialInstanceDynamic* UMaterialSystemComponent::CreateDynamicMaterialInstanc
     return DynamicMaterial;
 }
 
-void UMaterialSystemComponent::ApplyMaterialToStaticMesh(UStaticMeshComponent* MeshComponent, const FString& MaterialConfigName)
+void UActorComponent::ApplyMaterialToStaticMesh(UStaticMeshComponent* MeshComponent, const FString& MaterialConfigName)
 {
     if (!MeshComponent || !MaterialConfig)
     {
@@ -474,7 +476,7 @@ void UMaterialSystemComponent::ApplyMaterialToStaticMesh(UStaticMeshComponent* M
     }
 }
 
-void UMaterialSystemComponent::SetMaterialConfig(UMaterialConfigData* NewMaterialConfig)
+void UActorComponent::SetMaterialConfig(UMaterialConfigData* NewMaterialConfig)
 {
     if (MaterialConfig != NewMaterialConfig)
     {
@@ -490,13 +492,14 @@ void UMaterialSystemComponent::SetMaterialConfig(UMaterialConfigData* NewMateria
     }
 }
 
-FDynamicMaterialParams UMaterialSystemComponent::GetCurrentMaterialParameters() const
+FDynamicMaterialParams UActorComponent::GetCurrentMaterialParameters() const
 {
-    return CurrentParameters;
+// DISABLED (CurrentParameters):     return CurrentParameters;
 }
 
-void UMaterialSystemComponent::SetDebugMode(bool bEnabled)
+void UActorComponent::SetDebugMode(bool bEnabled)
 {
     bDebugMaterialUpdates = bEnabled;
     UE_LOG(LogMaterialSystem, Log, TEXT("MaterialSystemComponent: Debug mode %s"), bEnabled ? TEXT("enabled") : TEXT("disabled"));
 }
+#endif

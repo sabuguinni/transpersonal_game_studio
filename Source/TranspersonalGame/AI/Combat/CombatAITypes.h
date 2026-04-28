@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
 #include "GameplayTags.h"
+#include "GameplayTagContainer.h"
 #include "CombatAITypes.generated.h"
 
 UENUM(BlueprintType)

@@ -9,7 +9,7 @@
  * Fragment for dinosaur species identification and characteristics
  */
 USTRUCT()
-struct TRANSPERSONALGAME_API FMassDinosaurSpeciesFragment : public FMassFragment
+struct TRANSPERSONALGAME_API FTP_MassFragment : public FMassFragment
 {
     GENERATED_BODY()
 
@@ -47,7 +47,7 @@ struct TRANSPERSONALGAME_API FMassDinosaurSpeciesFragment : public FMassFragment
  * Each dinosaur should be visually unique and identifiable
  */
 USTRUCT()
-struct TRANSPERSONALGAME_API FMassDinosaurVariationFragment : public FMassFragment
+struct TRANSPERSONALGAME_API FMassDinosaurVariationFragment : public FTP_MassFragment
 {
     GENERATED_BODY()
 
@@ -87,7 +87,7 @@ struct TRANSPERSONALGAME_API FMassDinosaurVariationFragment : public FMassFragme
  * Fragment for herd membership and social behaviors
  */
 USTRUCT()
-struct TRANSPERSONALGAME_API FMassDinosaurHerdFragment : public FMassFragment
+struct TRANSPERSONALGAME_API FMassDinosaurHerdFragment : public FTP_MassFragment
 {
     GENERATED_BODY()
 
@@ -126,7 +126,7 @@ struct TRANSPERSONALGAME_API FMassDinosaurHerdFragment : public FMassFragment
  * Fragment for dinosaur survival needs and states
  */
 USTRUCT()
-struct TRANSPERSONALGAME_API FMassDinosaurNeedsFragment : public FMassFragment
+struct TRANSPERSONALGAME_API FMassDinosaurNeedsFragment : public FTP_MassFragment
 {
     GENERATED_BODY()
 
@@ -165,7 +165,7 @@ struct TRANSPERSONALGAME_API FMassDinosaurNeedsFragment : public FMassFragment
  * Fragment for dinosaur awareness and perception
  */
 USTRUCT()
-struct TRANSPERSONALGAME_API FMassDinosaurAwarenessFragment : public FMassFragment
+struct TRANSPERSONALGAME_API FMassDinosaurAwarenessFragment : public FTP_MassFragment
 {
     GENERATED_BODY()
 
@@ -211,7 +211,7 @@ struct TRANSPERSONALGAME_API FMassDinosaurAwarenessFragment : public FMassFragme
  * Fragment for dinosaur territory and migration patterns
  */
 USTRUCT()
-struct TRANSPERSONALGAME_API FMassDinosaurTerritoryFragment : public FMassFragment
+struct TRANSPERSONALGAME_API FMassDinosaurTerritoryFragment : public FTP_MassFragment
 {
     GENERATED_BODY()
 

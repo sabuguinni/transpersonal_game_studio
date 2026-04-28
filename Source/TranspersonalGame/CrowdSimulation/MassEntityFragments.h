@@ -6,7 +6,7 @@
 #include "MassEntityTypes.h"
 #include "MassCommonFragments.h"
 #include "MassMovementFragments.h"
-#include "MassNavigationFragments.h"
+// FIXME: Missing header - #include "MassNavigationFragments.h"
 #include "Engine/World.h"
 #include "MassEntityFragments.generated.h"
 
@@ -18,7 +18,7 @@ class USkeletalMeshComponent;
  * Fragment for dinosaur species identification and behavior parameters
  */
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FMassDinosaurSpeciesFragment : public FMassFragment
+struct TRANSPERSONALGAME_API FCrowdSim_MassDinosaurSpeciesFragment_05B : public FMassFragment
 {
     GENERATED_BODY()
 
@@ -111,7 +111,7 @@ struct TRANSPERSONALGAME_API FMassHerdBehaviorFragment : public FMassFragment
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     bool bIsHerdLeader = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+// [UHT-FIX2]     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     FMassEntityHandle HerdLeaderEntity;
 
     // Social behavior parameters
@@ -125,13 +125,13 @@ struct TRANSPERSONALGAME_API FMassHerdBehaviorFragment : public FMassFragment
     float AlignmentWeight = 1.0f;
 
     // Nearby entities tracking
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+// [UHT-FIX2]     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     TArray<FMassEntityHandle> NearbyHerdMembers;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+// [UHT-FIX2]     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     TArray<FMassEntityHandle> NearbyPredators;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+// [UHT-FIX2]     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     TArray<FMassEntityHandle> NearbyPrey;
 
     // Communication

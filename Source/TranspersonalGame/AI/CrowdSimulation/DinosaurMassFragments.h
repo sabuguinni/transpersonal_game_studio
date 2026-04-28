@@ -6,7 +6,7 @@
 #include "DinosaurMassFragments.generated.h"
 
 UENUM(BlueprintType)
-enum class EDinosaurDiet : uint8
+enum class EAI_DinosaurDiet : uint8
 {
     Herbivore,
     Carnivore,
@@ -15,7 +15,7 @@ enum class EDinosaurDiet : uint8
 };
 
 UENUM(BlueprintType)
-enum class EDinosaurSize : uint8
+enum class EAI_DinosaurSize_9A1 : uint8
 {
     Tiny,       // < 1m (Compsognathus)
     Small,      // 1-3m (Dryosaurus)
@@ -25,7 +25,7 @@ enum class EDinosaurSize : uint8
 };
 
 UENUM(BlueprintType)
-enum class EDinosaurBehaviorState : uint8
+enum class EAI_DinosaurBehaviorState_9A1 : uint8
 {
     Idle,
     Foraging,
@@ -41,7 +41,7 @@ enum class EDinosaurBehaviorState : uint8
 };
 
 UENUM(BlueprintType)
-enum class EDinosaurAggressionLevel : uint8
+enum class EAI_DinosaurAggressionLevel : uint8
 {
     Passive,
     Defensive,
@@ -54,7 +54,7 @@ enum class EDinosaurAggressionLevel : uint8
  * Core species data for each dinosaur type
  */
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FDinosaurSpeciesFragment : public FMassFragment
+struct TRANSPERSONALGAME_API FAI_DinosaurSpeciesFragment : public FMassFragment
 {
     GENERATED_BODY()
 
@@ -62,13 +62,13 @@ struct TRANSPERSONALGAME_API FDinosaurSpeciesFragment : public FMassFragment
     FName SpeciesName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EDinosaurDiet Diet = EDinosaurDiet::Herbivore;
+    EAI_DinosaurDiet Diet = EAI_DinosaurDiet::Herbivore;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EDinosaurSize Size = EDinosaurSize::Medium;
+    EAI_DinosaurSize_9A1 Size = EAI_DinosaurSize_9A1::Medium;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EDinosaurAggressionLevel AggressionLevel = EDinosaurAggressionLevel::Passive;
+    EAI_DinosaurAggressionLevel AggressionLevel = EAI_DinosaurAggressionLevel::Passive;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     float MaxSpeed = 800.0f; // cm/s
@@ -93,7 +93,7 @@ struct TRANSPERSONALGAME_API FDinosaurSpeciesFragment : public FMassFragment
  * Individual dinosaur characteristics that make each one unique
  */
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FDinosaurIndividualFragment : public FMassFragment
+struct TRANSPERSONALGAME_API FAI_DinosaurIndividualFragment : public FMassFragment
 {
     GENERATED_BODY()
 
@@ -139,15 +139,15 @@ struct TRANSPERSONALGAME_API FDinosaurIndividualFragment : public FMassFragment
  * Current behavior state and routine management
  */
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FDinosaurBehaviorFragment : public FMassFragment
+struct TRANSPERSONALGAME_API FAI_DinosaurBehaviorFragment : public FMassFragment
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EDinosaurBehaviorState CurrentState = EDinosaurBehaviorState::Idle;
+    EAI_DinosaurBehaviorState_9A1 CurrentState = EAI_DinosaurBehaviorState_9A1::Idle;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EDinosaurBehaviorState PreviousState = EDinosaurBehaviorState::Idle;
+    EAI_DinosaurBehaviorState_9A1 PreviousState = EAI_DinosaurBehaviorState_9A1::Idle;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     float StateTimer = 0.0f;
@@ -158,7 +158,7 @@ struct TRANSPERSONALGAME_API FDinosaurBehaviorFragment : public FMassFragment
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     FVector TargetLocation = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+// [UHT-FIX2]     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     FMassEntityHandle TargetEntity; // For hunting, following, etc.
 
     // Daily routine tracking
@@ -188,14 +188,14 @@ struct TRANSPERSONALGAME_API FDinosaurBehaviorFragment : public FMassFragment
  * Social group and pack behavior
  */
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FDinosaurSocialFragment : public FMassFragment
+struct TRANSPERSONALGAME_API FAI_DinosaurSocialFragment : public FMassFragment
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+// [UHT-FIX2]     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     FMassEntityHandle PackLeader;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+// [UHT-FIX2]     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     TArray<FMassEntityHandle> PackMembers;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
@@ -231,7 +231,7 @@ struct TRANSPERSONALGAME_API FDinosaurTerritoryFragment : public FMassFragment
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     bool bDefendsTerritory = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+// [UHT-FIX2]     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     TArray<FMassEntityHandle> KnownIntruders;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)

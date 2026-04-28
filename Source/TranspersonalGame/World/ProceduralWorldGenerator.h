@@ -15,7 +15,7 @@
  */
 
 UENUM(BlueprintType)
-enum class EBiomeType : uint8
+enum class EWorld_BiomeType_E19 : uint8
 {
     DenseForest     UMETA(DisplayName = "Dense Forest"),
     RiverValley     UMETA(DisplayName = "River Valley"),
@@ -26,7 +26,7 @@ enum class EBiomeType : uint8
 };
 
 UENUM(BlueprintType)
-enum class ETerrainFeature : uint8
+enum class EWorld_TerrainFeature : uint8
 {
     River           UMETA(DisplayName = "River"),
     Hill            UMETA(DisplayName = "Hill"),
@@ -37,12 +37,12 @@ enum class ETerrainFeature : uint8
 };
 
 USTRUCT(BlueprintType)
-struct FBiomeDefinition
+struct FWorld_BiomeDefinition
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EBiomeType BiomeType;
+    EWorld_BiomeType_E19 BiomeType;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     float Humidity;
@@ -57,11 +57,11 @@ struct FBiomeDefinition
     float DrainageLevel;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TArray<ETerrainFeature> SupportedFeatures;
+    TArray<EWorld_TerrainFeature> SupportedFeatures;
 
-    FBiomeDefinition()
+    FWorld_BiomeDefinition()
     {
-        BiomeType = EBiomeType::DenseForest;
+        BiomeType = EWorld_BiomeType_E19::DenseForest;
         Humidity = 0.7f;
         Temperature = 0.6f;
         Elevation = 0.5f;
@@ -70,7 +70,7 @@ struct FBiomeDefinition
 };
 
 USTRUCT(BlueprintType)
-struct FRiverSystemData
+struct FWorld_RiverSystemData
 {
     GENERATED_BODY()
 
@@ -92,7 +92,7 @@ struct FRiverSystemData
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     TArray<FVector> TributaryPoints;
 
-    FRiverSystemData()
+    FWorld_RiverSystemData()
     {
         SourceLocation = FVector::ZeroVector;
         MouthLocation = FVector::ZeroVector;
@@ -131,14 +131,14 @@ public:
 
     // Biome Configuration
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biomes")
-    TArray<FBiomeDefinition> BiomeDefinitions;
+    TArray<FWorld_BiomeDefinition> BiomeDefinitions;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biomes")
     float BiomeTransitionDistance;
 
     // River System
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rivers")
-    TArray<FRiverSystemData> RiverSystems;
+    TArray<FWorld_RiverSystemData> RiverSystems;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rivers")
     int32 MaxRiverBranches;
@@ -171,7 +171,7 @@ public:
 
     // Utility Functions
     UFUNCTION(BlueprintCallable, Category = "World Generation")
-    EBiomeType GetBiomeAtLocation(FVector Location);
+    EWorld_BiomeType_E19 GetBiomeAtLocation(FVector Location);
 
     UFUNCTION(BlueprintCallable, Category = "World Generation")
     float GetElevationAtLocation(FVector Location);

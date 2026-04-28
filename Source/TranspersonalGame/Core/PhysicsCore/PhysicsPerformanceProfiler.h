@@ -5,7 +5,7 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "Engine/World.h"
-#include "HAL/PlatformFilemanager.h"
+#include "HAL/PlatformFileManager.h"
 #include "Misc/DateTime.h"
 #include "PhysicsPerformanceProfiler.generated.h"
 
@@ -15,7 +15,7 @@ DECLARE_LOG_CATEGORY_EXTERN(LogPhysicsProfiler, Log, All);
  * Performance metrics structure for physics systems
  */
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FPhysicsPerformanceMetrics
+struct TRANSPERSONALGAME_API FCore_PhysicsPerformanceMetrics
 {
     GENERATED_BODY()
 
@@ -46,7 +46,7 @@ struct TRANSPERSONALGAME_API FPhysicsPerformanceMetrics
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
     float TimeStamp;
 
-    FPhysicsPerformanceMetrics()
+    FCore_PhysicsPerformanceMetrics()
         : FrameTime(0.0f)
         , PhysicsTime(0.0f)
         , ActivePhysicsObjects(0)
@@ -75,7 +75,7 @@ enum class EPerformanceAlertLevel : uint8
  * Performance alert structure
  */
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FPerformanceAlert
+struct TRANSPERSONALGAME_API FCore_PerformanceAlert
 {
     GENERATED_BODY()
 
@@ -97,7 +97,7 @@ struct TRANSPERSONALGAME_API FPerformanceAlert
     UPROPERTY(BlueprintReadOnly, Category = "Alert")
     float ThresholdValue;
 
-    FPerformanceAlert()
+    FCore_PerformanceAlert()
         : AlertLevel(EPerformanceAlertLevel::Normal)
         , AlertMessage(TEXT(""))
         , TimeStamp(0.0f)
@@ -107,8 +107,8 @@ struct TRANSPERSONALGAME_API FPerformanceAlert
     {}
 };
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnPerformanceAlert, const FPerformanceAlert&, Alert);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnPerformanceReport, const FPhysicsPerformanceMetrics&, Metrics);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnPhysicsPerformanceAlert, const FCore_PerformanceAlert&, Alert);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnPerformanceReport, const FCore_PhysicsPerformanceMetrics&, Metrics);
 
 /**
  * Physics Performance Profiler Component
@@ -165,7 +165,7 @@ public:
 
     // Events
     UPROPERTY(BlueprintAssignable, Category = "Events")
-    FOnPerformanceAlert OnPerformanceAlert;
+    FOnPhysicsPerformanceAlert OnPhysicsPerformanceAlert;
 
     UPROPERTY(BlueprintAssignable, Category = "Events")
     FOnPerformanceReport OnPerformanceReport;
@@ -181,13 +181,13 @@ public:
     void ResetMetrics();
 
     UFUNCTION(BlueprintCallable, Category = "Profiling")
-    FPhysicsPerformanceMetrics GetCurrentMetrics() const;
+    FCore_PhysicsPerformanceMetrics GetCurrentMetrics() const;
 
     UFUNCTION(BlueprintCallable, Category = "Profiling")
-    TArray<FPhysicsPerformanceMetrics> GetMetricsHistory() const;
+    TArray<FCore_PhysicsPerformanceMetrics> GetMetricsHistory() const;
 
     UFUNCTION(BlueprintCallable, Category = "Profiling")
-    TArray<FPerformanceAlert> GetActiveAlerts() const;
+    TArray<FCore_PerformanceAlert> GetActiveAlerts() const;
 
     UFUNCTION(BlueprintCallable, Category = "Profiling")
     void ExportMetricsToCSV(const FString& FilePath);
@@ -209,8 +209,8 @@ private:
     // Internal state
     bool bProfilingActive;
     float LastProfilingTime;
-    TArray<FPhysicsPerformanceMetrics> MetricsHistory;
-    TArray<FPerformanceAlert> ActiveAlerts;
+    TArray<FCore_PhysicsPerformanceMetrics> MetricsHistory;
+    TArray<FCore_PerformanceAlert> ActiveAlerts;
     
     // Performance tracking
     float AccumulatedFrameTime;
@@ -227,10 +227,10 @@ private:
     
     // Internal methods
     void UpdateMetrics();
-    void CollectPerformanceData(FPhysicsPerformanceMetrics& OutMetrics);
-    void CheckPerformanceThresholds(const FPhysicsPerformanceMetrics& Metrics);
+    void CollectPerformanceData(FCore_PhysicsPerformanceMetrics& OutMetrics);
+    void CheckPerformanceThresholds(const FCore_PhysicsPerformanceMetrics& Metrics);
     void TriggerAlert(EPerformanceAlertLevel Level, const FString& Message, const FString& MetricName, float Value, float Threshold);
-    void LogMetricsToFile(const FPhysicsPerformanceMetrics& Metrics);
+    void LogMetricsToFile(const FCore_PhysicsPerformanceMetrics& Metrics);
     void InitializeLogFile();
     
     // Platform-specific performance queries
@@ -242,6 +242,6 @@ private:
     int32 GetDrawCallCount() const;
     
     // Optimization suggestions
-    void AnalyzePerformanceBottlenecks(const FPhysicsPerformanceMetrics& Metrics);
+    void AnalyzePerformanceBottlenecks(const FCore_PhysicsPerformanceMetrics& Metrics);
     void SuggestOptimizations();
 };

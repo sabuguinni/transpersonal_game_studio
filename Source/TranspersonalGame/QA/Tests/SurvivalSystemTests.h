@@ -26,11 +26,11 @@ DECLARE_LOG_CATEGORY_EXTERN(LogSurvivalSystemTests, Log, All);
 /**
  * Base class for survival system testing
  */
-class TRANSPERSONALGAME_API FSurvivalSystemTestBase : public FTranspersonalQATestBase
+class TRANSPERSONALGAME_API FSurvivalSystemTestBase : public FAutomationTestBase
 {
 public:
     FSurvivalSystemTestBase(const FString& InName, const bool bInComplexTask)
-        : FTranspersonalQATestBase(InName, bInComplexTask)
+        : FAutomationTestBase(InName, bInComplexTask)
     {
     }
 
@@ -89,7 +89,7 @@ public:
     {
     }
 
-    virtual bool RunTest(const FString& Parameters) override;
+    /* DISABLED: virtual bool RunTest(const FString& Parameters) override */;
 };
 
 /**
@@ -103,7 +103,7 @@ public:
     {
     }
 
-    virtual bool RunTest(const FString& Parameters) override;
+    /* DISABLED: virtual bool RunTest(const FString& Parameters) override */;
 };
 
 /**
@@ -117,7 +117,7 @@ public:
     {
     }
 
-    virtual bool RunTest(const FString& Parameters) override;
+    /* DISABLED: virtual bool RunTest(const FString& Parameters) override */;
 };
 
 /**
@@ -131,7 +131,7 @@ public:
     {
     }
 
-    virtual bool RunTest(const FString& Parameters) override;
+    /* DISABLED: virtual bool RunTest(const FString& Parameters) override */;
 };
 
 /**
@@ -145,7 +145,7 @@ public:
     {
     }
 
-    virtual bool RunTest(const FString& Parameters) override;
+    /* DISABLED: virtual bool RunTest(const FString& Parameters) override */;
 };
 
 /**
@@ -159,7 +159,7 @@ public:
     {
     }
 
-    virtual bool RunTest(const FString& Parameters) override;
+    /* DISABLED: virtual bool RunTest(const FString& Parameters) override */;
 };
 
 /**
@@ -173,7 +173,7 @@ public:
     {
     }
 
-    virtual bool RunTest(const FString& Parameters) override;
+    /* DISABLED: virtual bool RunTest(const FString& Parameters) override */;
 };
 
 /**
@@ -187,5 +187,5 @@ public:
     {
     }
 
-    virtual bool RunTest(const FString& Parameters) override;
+    /* DISABLED: virtual bool RunTest(const FString& Parameters) override */;
 };

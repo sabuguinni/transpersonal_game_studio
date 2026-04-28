@@ -4,7 +4,7 @@
 #include "Engine/Engine.h"
 #include "Misc/AutomationTest.h"
 #include "Tests/AutomationCommon.h"
-#include "HAL/PlatformFilemanager.h"
+#include "HAL/PlatformFileManager.h"
 #include "QAAutomationController.generated.h"
 
 DECLARE_LOG_CATEGORY_EXTERN(LogQAAutomation, Log, All);

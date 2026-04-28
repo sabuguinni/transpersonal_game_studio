@@ -10,7 +10,7 @@
 
 /** Physics optimization levels */
 UENUM(BlueprintType)
-enum class EPhysicsOptimizationLevel : uint8
+enum class ECore_PhysicsOptimizationLevel : uint8
 {
     Disabled        UMETA(DisplayName = "Disabled"),
     Low             UMETA(DisplayName = "Low Optimization"),
@@ -21,7 +21,7 @@ enum class EPhysicsOptimizationLevel : uint8
 
 /** Physics LOD settings */
 USTRUCT(BlueprintType)
-struct FPhysicsLODSettings
+struct FCore_PhysicsLODSettings
 {
     GENERATED_BODY()
 
@@ -79,11 +79,11 @@ public:
 
     /** Set global physics optimization level */
     UFUNCTION(BlueprintCallable, Category = "Physics Optimization")
-    void SetOptimizationLevel(EPhysicsOptimizationLevel Level);
+    void SetOptimizationLevel(ECore_PhysicsOptimizationLevel Level);
 
     /** Configure physics LOD settings */
     UFUNCTION(BlueprintCallable, Category = "Physics Optimization")
-    void ConfigurePhysicsLOD(const TArray<FPhysicsLODSettings>& LODSettings);
+    void ConfigurePhysicsLOD(const TArray<FCore_PhysicsLODSettings>& LODSettings);
 
     /** Register an actor for physics optimization */
     UFUNCTION(BlueprintCallable, Category = "Physics Optimization")
@@ -112,11 +112,11 @@ public:
 protected:
     /** Current optimization level */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Optimization")
-    EPhysicsOptimizationLevel CurrentOptimizationLevel = EPhysicsOptimizationLevel::Medium;
+    ECore_PhysicsOptimizationLevel CurrentOptimizationLevel = ECore_PhysicsOptimizationLevel::Medium;
 
     /** Physics LOD settings array */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "LOD")
-    TArray<FPhysicsLODSettings> PhysicsLODSettings;
+    TArray<FCore_PhysicsLODSettings> PhysicsLODSettings;
 
     /** Target frame time in milliseconds */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance", meta = (ClampMin = "16.0", ClampMax = "33.0"))
@@ -155,7 +155,7 @@ private:
     void InitializeDefaultLODSettings();
 
     /** Apply optimization to a specific actor */
-    void ApplyOptimizationToActor(AActor* Actor, const FPhysicsLODSettings& LODSettings);
+    void ApplyOptimizationToActor(AActor* Actor, const FCore_PhysicsLODSettings& LODSettings);
 
     /** Calculate LOD level for an actor based on distance */
     int32 CalculateLODLevel(AActor* Actor, FVector ViewerLocation) const;
@@ -170,5 +170,5 @@ private:
     float GetDistanceToViewer(AActor* Actor) const;
 
     /** Apply LOD settings to actor's physics components */
-    void ApplyLODToPhysicsComponents(AActor* Actor, const FPhysicsLODSettings& LODSettings);
+    void ApplyLODToPhysicsComponents(AActor* Actor, const FCore_PhysicsLODSettings& LODSettings);
 };

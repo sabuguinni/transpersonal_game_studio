@@ -11,7 +11,7 @@
 #include "LightingMasterController.generated.h"
 
 UENUM(BlueprintType)
-enum class ETimeOfDay : uint8
+enum class ELight_TimeOfDay_88A : uint8
 {
     Dawn        UMETA(DisplayName = "Dawn"),
     Morning     UMETA(DisplayName = "Morning"),
@@ -22,7 +22,7 @@ enum class ETimeOfDay : uint8
 };
 
 UENUM(BlueprintType)
-enum class EWeatherState : uint8
+enum class ELight_WeatherState_88A : uint8
 {
     Clear       UMETA(DisplayName = "Clear"),
     Overcast    UMETA(DisplayName = "Overcast"),
@@ -33,7 +33,7 @@ enum class EWeatherState : uint8
 };
 
 UENUM(BlueprintType)
-enum class EMoodState : uint8
+enum class ELight_MoodState : uint8
 {
     Peaceful    UMETA(DisplayName = "Peaceful"),
     Tense       UMETA(DisplayName = "Tense"),
@@ -44,7 +44,7 @@ enum class EMoodState : uint8
 };
 
 USTRUCT(BlueprintType)
-struct FLightingPreset
+struct FLight_LightingPreset_88A
 {
     GENERATED_BODY()
 
@@ -103,7 +103,7 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
+    virtual void Tick(float DeltaTime);
 
     // Core Components
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Lighting")
@@ -134,48 +134,48 @@ public:
     
     // Weather System
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
-    EWeatherState CurrentWeather = EWeatherState::Clear;
+    ELight_WeatherState_88A CurrentWeather = ELight_WeatherState_88A::Clear;
     
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
     float WeatherTransitionSpeed = 1.0f;
     
     // Mood System
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mood")
-    EMoodState CurrentMood = EMoodState::Peaceful;
+    ELight_MoodState CurrentMood = ELight_MoodState::Peaceful;
     
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mood")
     float MoodInfluenceStrength = 0.5f;
     
     // Lighting Presets
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Presets")
-    TMap<ETimeOfDay, FLightingPreset> TimePresets;
+    TMap<ELight_TimeOfDay_88A, FLight_LightingPreset_88A> TimePresets;
     
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Presets")
-    TMap<EWeatherState, FLightingPreset> WeatherPresets;
+    TMap<ELight_WeatherState_88A, FLight_LightingPreset_88A> WeatherPresets;
     
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Presets")
-    TMap<EMoodState, FLightingPreset> MoodPresets;
+    TMap<ELight_MoodState, FLight_LightingPreset_88A> MoodPresets;
 
     // Public Functions
     UFUNCTION(BlueprintCallable, Category = "Lighting")
     void SetTimeOfDay(float Hours);
     
     UFUNCTION(BlueprintCallable, Category = "Lighting")
-    void SetWeather(EWeatherState NewWeather);
+    void SetWeather(ELight_WeatherState_88A NewWeather);
     
     UFUNCTION(BlueprintCallable, Category = "Lighting")
-    void SetMood(EMoodState NewMood);
+    void SetMood(ELight_MoodState NewMood);
     
     UFUNCTION(BlueprintCallable, Category = "Lighting")
-    ETimeOfDay GetCurrentTimeOfDay() const;
+    ELight_TimeOfDay_88A GetCurrentTimeOfDay() const;
     
     UFUNCTION(BlueprintCallable, Category = "Lighting")
     void UpdateLighting();
 
 private:
     // Internal state
-    FLightingPreset CurrentPreset;
-    FLightingPreset TargetPreset;
+    FLight_LightingPreset_88A CurrentPreset;
+    FLight_LightingPreset_88A TargetPreset;
     float TransitionProgress = 0.0f;
     bool bIsTransitioning = false;
     
@@ -189,11 +189,11 @@ private:
     void UpdateTimeOfDay(float DeltaTime);
     void CalculateTargetPreset();
     void InterpolateLighting(float DeltaTime);
-    void ApplyLightingPreset(const FLightingPreset& Preset);
-    FLightingPreset BlendPresets(const FLightingPreset& A, const FLightingPreset& B, float Alpha);
+    void ApplyLightingPreset(const FLight_LightingPreset_88A& Preset);
+    FLight_LightingPreset_88A BlendPresets(const FLight_LightingPreset_88A& A, const FLight_LightingPreset_88A& B, float Alpha);
     
     // Preset calculation helpers
-    FLightingPreset GetTimeBasedPreset() const;
-    FLightingPreset GetWeatherModifiedPreset(const FLightingPreset& BasePreset) const;
-    FLightingPreset GetMoodModifiedPreset(const FLightingPreset& BasePreset) const;
+    FLight_LightingPreset_88A GetTimeBasedPreset() const;
+    FLight_LightingPreset_88A GetWeatherModifiedPreset(const FLight_LightingPreset_88A& BasePreset) const;
+    FLight_LightingPreset_88A GetMoodModifiedPreset(const FLight_LightingPreset_88A& BasePreset) const;
 };

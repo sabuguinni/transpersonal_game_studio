@@ -89,7 +89,7 @@ protected:
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 public:
-    virtual void Tick(float DeltaTime) override;
+    virtual void Tick(float DeltaTime);
 
     /** Run all physics integration tests */
     UFUNCTION(BlueprintCallable, Category = "Physics Testing")

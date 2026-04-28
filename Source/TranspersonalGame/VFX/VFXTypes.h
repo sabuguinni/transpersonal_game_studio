@@ -255,7 +255,7 @@ struct TRANSPERSONALGAME_API FActiveVFXInstance
  * For object pooling of VFX components
  */
 USTRUCT()
-struct TRANSPERSONALGAME_API FVFXPoolEntry
+struct TRANSPERSONALGAME_API FVFX_VFXPoolEntry
 {
     GENERATED_BODY()
 
@@ -275,7 +275,7 @@ struct TRANSPERSONALGAME_API FVFXPoolEntry
     UPROPERTY()
     float LastUsedTime = 0.0f;
 
-    FVFXPoolEntry()
+    FVFX_VFXPoolEntry()
     {
         EffectID = TEXT("");
         bInUse = false;

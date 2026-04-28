@@ -8,7 +8,7 @@
 #include "PCGComponent.h"
 #include "PCGGraph.h"
 #include "PCGData.h"
-#include "Landscape/Classes/Landscape.h"
+#include "Landscape.h"
 #include "Engine/DataTable.h"
 #include "Math/UnrealMathUtility.h"
 #include "ProceduralWorldCore.generated.h"
@@ -36,7 +36,7 @@
 
 /** Biome types following the Geographic Guide */
 UENUM(BlueprintType)
-enum class EJurassicBiome : uint8
+enum class EWorld_JurassicBiome : uint8
 {
     Forest          UMETA(DisplayName = "Forest (Tropical Forest)"),
     Swamp           UMETA(DisplayName = "Swamp"),
@@ -60,7 +60,7 @@ enum class ETerrainGenerationType : uint8
 
 /** Water flow characteristics per biome */
 UENUM(BlueprintType)
-enum class EWaterFlowType : uint8
+enum class EWorld_WaterFlowType : uint8
 {
     FastRiver       UMETA(DisplayName = "Fast River (Forest)"),
     SlowRiver       UMETA(DisplayName = "Slow River (Swamp)"),
@@ -77,7 +77,7 @@ struct FBiomeGenerationSettings
 
     /** Biome type identifier */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    EJurassicBiome BiomeType = EJurassicBiome::Forest;
+    EWorld_JurassicBiome BiomeType = EWorld_JurassicBiome::Forest;
 
     /** Elevation range for this biome (in cm) */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain", meta = (ClampMin = "0", ClampMax = "300000"))
@@ -97,7 +97,7 @@ struct FBiomeGenerationSettings
 
     /** Water flow characteristics */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water")
-    EWaterFlowType WaterFlowType = EWaterFlowType::FastRiver;
+    EWorld_WaterFlowType WaterFlowType = EWorld_WaterFlowType::FastRiver;
 
     /** Noise parameters for terrain generation */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Noise")
@@ -137,7 +137,7 @@ struct FBiomeGenerationSettings
 
 /** World generation configuration */
 USTRUCT(BlueprintType)
-struct FWorldGenerationConfig
+struct FWorld_WorldGenerationConfig_2E1
 {
     GENERATED_BODY()
 
@@ -251,7 +251,7 @@ public:
      * @param Config World generation configuration
      */
     UFUNCTION(BlueprintCallable, Category = "World Generation")
-    void InitializeWorldGeneration(const FWorldGenerationConfig& Config);
+    void InitializeWorldGeneration(const FWorld_WorldGenerationConfig_2E1& Config);
 
     /**
      * @brief Generate the complete world
@@ -321,7 +321,7 @@ public:
      * @return Biome type at that location
      */
     UFUNCTION(BlueprintCallable, BlueprintPure, Category = "World Generation")
-    EJurassicBiome GetBiomeAtLocation(const FVector& WorldLocation) const;
+    EWorld_JurassicBiome GetBiomeAtLocation(const FVector& WorldLocation) const;
 
     /**
      * @brief Get terrain elevation at world location
@@ -356,7 +356,7 @@ public:
      * @param bClearExisting Whether to clear existing content first
      */
     UFUNCTION(BlueprintCallable, Category = "World Generation")
-    void RegenerateBiome(EJurassicBiome BiomeType, bool bClearExisting = true);
+    void RegenerateBiome(EWorld_JurassicBiome BiomeType, bool bClearExisting = true);
 
     /**
      * @brief Setup World Partition for streaming
@@ -380,11 +380,11 @@ public:
 protected:
     /** World generation configuration */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Configuration")
-    FWorldGenerationConfig WorldConfig;
+    FWorld_WorldGenerationConfig_2E1 WorldConfig;
 
     /** Biome generation settings for each biome type */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Configuration")
-    TMap<EJurassicBiome, FBiomeGenerationSettings> BiomeSettings;
+    TMap<EWorld_JurassicBiome, FBiomeGenerationSettings> BiomeSettings;
 
     /** Master PCG component for world-level generation */
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
@@ -421,7 +421,7 @@ private:
     void GenerateMountainBorders();
 
     /** Calculate biome weights for each location */
-    TMap<EJurassicBiome, float> CalculateBiomeWeights(const FVector2D& Location) const;
+    TMap<EWorld_JurassicBiome, float> CalculateBiomeWeights(const FVector2D& Location) const;
 
     /** Generate noise value at location */
     float GenerateNoise(const FVector2D& Location, float Frequency, int32 Octaves, float Persistence) const;

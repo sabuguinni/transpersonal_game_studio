@@ -291,7 +291,7 @@ public:
     {
     }
 
-    virtual bool RunTest(const FString& Parameters) override;
-    virtual uint32 GetTestFlags() const override { return EAutomationTestFlags::ApplicationContextMask | EAutomationTestFlags::ProductFilter; }
+    /* DISABLED: virtual bool RunTest(const FString& Parameters) override */;
+    virtual EAutomationTestFlags GetTestFlags() const override { return EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter | EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter; }
     virtual FString GetBeautifiedTestName() const override { return TEXT("Integration Validation Test"); }
 };

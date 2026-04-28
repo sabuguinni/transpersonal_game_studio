@@ -104,7 +104,7 @@ public:
     virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
 
     // Get subsystem instance
-    UFUNCTION(BlueprintCallable, Category = "Physics", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Physics", CallInEditor)
     static UTranspersonalPhysicsSubsystem* Get(const UObject* WorldContext);
 
     // Physics settings management

@@ -4,7 +4,7 @@
 #include "Components/ActorComponent.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
-#include "HAL/PlatformFilemanager.h"
+#include "HAL/PlatformFileManager.h"
 #include "Misc/DateTime.h"
 #include "PerformanceOptimizer.generated.h"
 
@@ -12,7 +12,7 @@
  * Performance metrics structure for tracking frame performance
  */
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FPerformanceMetrics
+struct TRANSPERSONALGAME_API FCore_PerformanceMetrics_40B
 {
     GENERATED_BODY()
 
@@ -48,7 +48,7 @@ struct TRANSPERSONALGAME_API FPerformanceMetrics
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
     int32 RenderedTriangles;
 
-    FPerformanceMetrics()
+    FCore_PerformanceMetrics_40B()
     {
         CurrentFPS = 0.0f;
         FrameTimeMS = 0.0f;
@@ -119,7 +119,7 @@ public:
      * Get current performance metrics
      */
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    FPerformanceMetrics GetPerformanceMetrics() const;
+    FCore_PerformanceMetrics_40B GetPerformanceMetrics() const;
 
     /**
      * Set target frame rate (60fps PC, 30fps console)
@@ -166,7 +166,7 @@ public:
     /**
      * Get singleton instance
      */
-    UFUNCTION(BlueprintCallable, Category = "Performance", CallInEditor = true)
+    UFUNCTION(BlueprintCallable, Category = "Performance", CallInEditor)
     static UPerformanceOptimizer* GetPerformanceOptimizer(UWorld* World);
 
 protected:
@@ -200,7 +200,7 @@ protected:
      */
     float CalculatePerformanceScore() const;
 
-private:
+protected:
     /** Target frame rate (60fps PC, 30fps console) */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance Settings", meta = (AllowPrivateAccess = "true"))
     float TargetFrameRate;
@@ -227,7 +227,7 @@ private:
 
     /** Current performance metrics */
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Performance Status", meta = (AllowPrivateAccess = "true"))
-    FPerformanceMetrics CurrentMetrics;
+    FCore_PerformanceMetrics_40B CurrentMetrics;
 
     /** Frame time history for averaging */
     TArray<float> FrameTimeHistory;

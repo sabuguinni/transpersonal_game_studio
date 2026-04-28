@@ -86,7 +86,7 @@ struct FPaleontologistAnimationData
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EPaleontologistMovementType MovementType;
+    EPaleontologistMovementType MovementType = EPaleontologistMovementType::Idle_Calm;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     UAnimSequence* AnimationSequence = nullptr;

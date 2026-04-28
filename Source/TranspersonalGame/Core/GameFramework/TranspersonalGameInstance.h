@@ -3,7 +3,7 @@
 #include "CoreMinimal.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
-#include "../TranspersonalGameModule.h"
+// FIXME: Missing header - #include "../TranspersonalGameModule.h"
 #include "TranspersonalGameInstance.generated.h"
 
 /**
@@ -24,7 +24,7 @@ enum class EGamePhase : uint8
  * Based on the Jurassic/Cretaceous setting from B1 concept
  */
 UENUM(BlueprintType)
-enum class EBiomeType : uint8
+enum class ECore_BiomeType : uint8
 {
 	JurassicForest		UMETA(DisplayName = "Jurassic Forest"),
 	CretaceousPlains	UMETA(DisplayName = "Cretaceous Plains"),
@@ -90,12 +90,12 @@ struct FDinosaurSettings
  * Configures procedural world generation
  */
 USTRUCT(BlueprintType)
-struct FWorldSettings
+struct FTranspersonalWorldSettings
 {
 	GENERATED_BODY()
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World")
-	EBiomeType BiomeType = EBiomeType::JurassicForest;
+	ECore_BiomeType BiomeType = ECore_BiomeType::JurassicForest;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World")
 	bool bEnableDynamicWeather = true;
@@ -160,7 +160,7 @@ public:
 	const FDinosaurSettings& GetDinosaurSettings() const { return DinosaurSettings; }
 
 	UFUNCTION(BlueprintPure, Category = "Configuration")
-	const FWorldSettings& GetWorldSettings() const { return WorldSettings; }
+	const FTranspersonalWorldSettings& GetWorldSettings() const { return WorldSettings; }
 
 protected:
 	/**
@@ -218,5 +218,5 @@ private:
 	FDinosaurSettings DinosaurSettings;
 
 	UPROPERTY()
-	FWorldSettings WorldSettings;
+	FTranspersonalWorldSettings WorldSettings;
 };

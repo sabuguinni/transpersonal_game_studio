@@ -3,8 +3,8 @@
 #include "CoreMinimal.h"
 #include "Engine/Engine.h"
 #include "Animation/AnimInstance.h"
-#include "Animation/PoseSearchDatabase.h"
-#include "Animation/MotionMatchingAnimNodeLibrary.h"
+// FIXME: Missing header - #include "Animation/PoseSearchDatabase.h"
+// DISABLED: #include "Animation/MotionMatchingAnimNodeLibrary.h"
 #include "Components/ActorComponent.h"
 #include "AnimationSystemManager.generated.h"
 

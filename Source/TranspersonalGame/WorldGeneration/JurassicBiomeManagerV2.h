@@ -22,7 +22,7 @@
  */
 
 UENUM(BlueprintType)
-enum class EJurassicBiomeType : uint8
+enum class EWorld_JurassicBiomeType : uint8
 {
     Forest          UMETA(DisplayName = "Forest (Tropical Forest)"),
     Swamp           UMETA(DisplayName = "Swamp"),
@@ -108,7 +108,7 @@ struct FJurassicBiomeDefinition
 
     /** Biome type */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    EJurassicBiomeType BiomeType = EJurassicBiomeType::Forest;
+    EWorld_JurassicBiomeType BiomeType = EWorld_JurassicBiomeType::Forest;
 
     /** Biome name for display */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
@@ -152,11 +152,11 @@ struct FJurassicBiomeDefinition
 
     /** Adjacent biomes for natural transitions */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transitions")
-    TArray<EJurassicBiomeType> AdjacentBiomes;
+    TArray<EWorld_JurassicBiomeType> AdjacentBiomes;
 
     /** PCG Graph for this biome */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation")
-    class UPCGGraph* BiomePCGGraph;
+    class UPCGGraph* BiomePCGGraph = nullptr;
 
     /** Biome coverage percentage of total world */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Distribution", meta = (ClampMin = "0.0", ClampMax = "1.0"))
@@ -174,11 +174,11 @@ struct FBiomeTransitionData
 
     /** Source biome */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transition")
-    EJurassicBiomeType SourceBiome = EJurassicBiomeType::Forest;
+    EWorld_JurassicBiomeType SourceBiome = EWorld_JurassicBiomeType::Forest;
 
     /** Target biome */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transition")
-    EJurassicBiomeType TargetBiome = EJurassicBiomeType::Swamp;
+    EWorld_JurassicBiomeType TargetBiome = EWorld_JurassicBiomeType::Swamp;
 
     /** Transition smoothness (0.0 = hard edge, 1.0 = very smooth) */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transition", meta = (ClampMin = "0.0", ClampMax = "1.0"))
@@ -190,7 +190,7 @@ struct FBiomeTransitionData
 
     /** PCG Graph for transition zone */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Generation")
-    class UPCGGraph* TransitionPCGGraph;
+    class UPCGGraph* TransitionPCGGraph = nullptr;
 };
 
 UCLASS(BlueprintType, Blueprintable)
@@ -252,11 +252,11 @@ public:
 
     /** Get biome at world location */
     UFUNCTION(BlueprintPure, Category = "Biome Management")
-    EJurassicBiomeType GetBiomeAtLocation(const FVector& WorldLocation) const;
+    EWorld_JurassicBiomeType GetBiomeAtLocation(const FVector& WorldLocation) const;
 
     /** Get biome definition by type */
     UFUNCTION(BlueprintPure, Category = "Biome Management")
-    FJurassicBiomeDefinition GetBiomeDefinition(EJurassicBiomeType BiomeType) const;
+    FJurassicBiomeDefinition GetBiomeDefinition(EWorld_JurassicBiomeType BiomeType) const;
 
     /** Get climate data at location */
     UFUNCTION(BlueprintPure, Category = "Biome Management")
@@ -276,7 +276,7 @@ public:
 
     /** Get all biomes within radius */
     UFUNCTION(BlueprintPure, Category = "Biome Management")
-    TArray<EJurassicBiomeType> GetBiomesInRadius(const FVector& CenterLocation, float Radius) const;
+    TArray<EWorld_JurassicBiomeType> GetBiomesInRadius(const FVector& CenterLocation, float Radius) const;
 
 protected:
     /** Setup default biome definitions */
@@ -286,17 +286,17 @@ protected:
     void SetupBiomeTransitions();
 
     /** Calculate biome distribution using noise */
-    EJurassicBiomeType CalculateBiomeAtLocation(const FVector& WorldLocation) const;
+    EWorld_JurassicBiomeType CalculateBiomeAtLocation(const FVector& WorldLocation) const;
 
     /** Calculate transition influence */
-    float CalculateTransitionInfluence(const FVector& WorldLocation, EJurassicBiomeType BiomeType) const;
+    float CalculateTransitionInfluence(const FVector& WorldLocation, EWorld_JurassicBiomeType BiomeType) const;
 
     /** Generate Perlin noise for biome distribution */
     float GenerateBiomeNoise(const FVector& WorldLocation, float Frequency, int32 Octaves = 4) const;
 
 private:
     /** Cached biome map for performance */
-    mutable TMap<FIntPoint, EJurassicBiomeType> BiomeCache;
+    mutable TMap<FIntPoint, EWorld_JurassicBiomeType> BiomeCache;
 
     /** Cache grid size in meters */
     float BiomeCacheGridSize = 1000.0f;
