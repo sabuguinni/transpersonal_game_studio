@@ -7,20 +7,16 @@
 #include "NPCBehaviorTypes.generated.h"
 
 /**
- * NPC BEHAVIOR AGENT #11 - COMPREHENSIVE NPC BEHAVIOR TYPES
+ * TRANSPERSONAL GAME STUDIO - NPC BEHAVIOR TYPES
+ * NPC Behavior Agent #11
  * 
- * This file defines all NPC behavior types, personality traits, needs systems,
- * memory structures, and social dynamics for the prehistoric survival world.
- * 
- * DESIGN PHILOSOPHY:
- * - NPCs exist to live their own lives, not serve the player
- * - Emergent behavior is more memorable than scripted sequences
- * - Every NPC has survival needs, fears, and social relationships
- * - Behavior is driven by personality + current needs + environmental threats
+ * Comprehensive NPC behavior system for prehistoric survival game.
+ * Defines personality traits, behavior states, needs, memory, and relationships.
+ * Focus: Realistic human tribal behavior in dangerous prehistoric world.
  */
 
 // ═══════════════════════════════════════════════════════════════
-// NPC PERSONALITY AND BEHAVIOR TYPES
+// NPC PERSONALITY TRAITS
 // ═══════════════════════════════════════════════════════════════
 
 UENUM(BlueprintType)
@@ -30,29 +26,29 @@ enum class ENPC_PersonalityTrait : uint8
     Cautious = 1        UMETA(DisplayName = "Cautious"),
     Aggressive = 2      UMETA(DisplayName = "Aggressive"),
     Peaceful = 3        UMETA(DisplayName = "Peaceful"),
-    Social = 4          UMETA(DisplayName = "Social"),
-    Loner = 5           UMETA(DisplayName = "Loner"),
-    Curious = 6         UMETA(DisplayName = "Curious"),
-    Paranoid = 7        UMETA(DisplayName = "Paranoid"),
-    Leader = 8          UMETA(DisplayName = "Leader"),
-    Follower = 9        UMETA(DisplayName = "Follower")
+    Curious = 4         UMETA(DisplayName = "Curious"),
+    Withdrawn = 5       UMETA(DisplayName = "Withdrawn"),
+    Leader = 6          UMETA(DisplayName = "Leader"),
+    Follower = 7        UMETA(DisplayName = "Follower"),
+    Protective = 8      UMETA(DisplayName = "Protective"),
+    Selfish = 9         UMETA(DisplayName = "Selfish")
 };
 
 UENUM(BlueprintType)
 enum class ENPC_BehaviorState : uint8
 {
     Idle = 0            UMETA(DisplayName = "Idle"),
-    Working = 1         UMETA(DisplayName = "Working"),
-    Eating = 2          UMETA(DisplayName = "Eating"),
-    Sleeping = 3        UMETA(DisplayName = "Sleeping"),
-    Socializing = 4     UMETA(DisplayName = "Socializing"),
-    Patrolling = 5      UMETA(DisplayName = "Patrolling"),
-    Fleeing = 6         UMETA(DisplayName = "Fleeing"),
-    Fighting = 7        UMETA(DisplayName = "Fighting"),
-    Hunting = 8         UMETA(DisplayName = "Hunting"),
-    Gathering = 9       UMETA(DisplayName = "Gathering"),
-    Crafting = 10       UMETA(DisplayName = "Crafting"),
-    Panicking = 11      UMETA(DisplayName = "Panicking")
+    Patrolling = 1      UMETA(DisplayName = "Patrolling"),
+    Hunting = 2         UMETA(DisplayName = "Hunting"),
+    Gathering = 3       UMETA(DisplayName = "Gathering"),
+    Crafting = 4        UMETA(DisplayName = "Crafting"),
+    Socializing = 5     UMETA(DisplayName = "Socializing"),
+    Sleeping = 6        UMETA(DisplayName = "Sleeping"),
+    Fleeing = 7         UMETA(DisplayName = "Fleeing"),
+    Fighting = 8        UMETA(DisplayName = "Fighting"),
+    Investigating = 9   UMETA(DisplayName = "Investigating"),
+    Following = 10      UMETA(DisplayName = "Following"),
+    Guarding = 11       UMETA(DisplayName = "Guarding")
 };
 
 UENUM(BlueprintType)
@@ -62,38 +58,15 @@ enum class ENPC_Profession : uint8
     Gatherer = 1        UMETA(DisplayName = "Gatherer"),
     Crafter = 2         UMETA(DisplayName = "Crafter"),
     Guard = 3           UMETA(DisplayName = "Guard"),
-    Shaman = 4          UMETA(DisplayName = "Shaman"),
-    Elder = 5           UMETA(DisplayName = "Elder"),
-    Child = 6           UMETA(DisplayName = "Child"),
-    Scout = 7           UMETA(DisplayName = "Scout"),
-    Builder = 8         UMETA(DisplayName = "Builder")
-};
-
-UENUM(BlueprintType)
-enum class ENPC_ThreatLevel : uint8
-{
-    None = 0            UMETA(DisplayName = "None"),
-    Low = 1             UMETA(DisplayName = "Low"),
-    Medium = 2          UMETA(DisplayName = "Medium"),
-    High = 3            UMETA(DisplayName = "High"),
-    Extreme = 4         UMETA(DisplayName = "Extreme")
-};
-
-UENUM(BlueprintType)
-enum class ENPC_RelationshipType : uint8
-{
-    Stranger = 0        UMETA(DisplayName = "Stranger"),
-    Acquaintance = 1    UMETA(DisplayName = "Acquaintance"),
-    Friend = 2          UMETA(DisplayName = "Friend"),
-    Family = 3          UMETA(DisplayName = "Family"),
-    Rival = 4           UMETA(DisplayName = "Rival"),
-    Enemy = 5           UMETA(DisplayName = "Enemy"),
-    Leader = 6          UMETA(DisplayName = "Leader"),
-    Follower = 7        UMETA(DisplayName = "Follower")
+    Scout = 4           UMETA(DisplayName = "Scout"),
+    Healer = 5          UMETA(DisplayName = "Healer"),
+    Elder = 6           UMETA(DisplayName = "Elder"),
+    Child = 7           UMETA(DisplayName = "Child"),
+    Chieftain = 8       UMETA(DisplayName = "Chieftain")
 };
 
 // ═══════════════════════════════════════════════════════════════
-// NPC NEEDS AND SURVIVAL SYSTEM
+// NPC NEEDS SYSTEM
 // ═══════════════════════════════════════════════════════════════
 
 USTRUCT(BlueprintType)
@@ -101,93 +74,49 @@ struct TRANSPERSONALGAME_API FNPC_Needs
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Needs")
-    float Hunger = 100.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Needs", meta = (ClampMin = "0.0", ClampMax = "100.0"))
+    float Hunger = 50.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Needs")
-    float Thirst = 100.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Needs", meta = (ClampMin = "0.0", ClampMax = "100.0"))
+    float Thirst = 50.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Needs")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Needs", meta = (ClampMin = "0.0", ClampMax = "100.0"))
     float Energy = 100.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Needs")
-    float Warmth = 100.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Needs", meta = (ClampMin = "0.0", ClampMax = "100.0"))
+    float Safety = 75.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Needs")
-    float Safety = 100.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Needs", meta = (ClampMin = "0.0", ClampMax = "100.0"))
+    float Social = 50.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Needs")
-    float Social = 100.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Needs", meta = (ClampMin = "0.0", ClampMax = "100.0"))
+    float Warmth = 50.0f;
 
     FNPC_Needs()
     {
-        Hunger = 100.0f;
-        Thirst = 100.0f;
+        Hunger = 50.0f;
+        Thirst = 50.0f;
         Energy = 100.0f;
-        Warmth = 100.0f;
-        Safety = 100.0f;
-        Social = 100.0f;
-    }
-
-    // Get the most critical need (lowest value)
-    float GetMostCriticalNeed() const
-    {
-        return FMath::Min({Hunger, Thirst, Energy, Warmth, Safety, Social});
-    }
-
-    // Check if any need is critically low
-    bool HasCriticalNeed(float CriticalThreshold = 20.0f) const
-    {
-        return GetMostCriticalNeed() < CriticalThreshold;
+        Safety = 75.0f;
+        Social = 50.0f;
+        Warmth = 50.0f;
     }
 };
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNPC_PersonalityProfile
+// ═══════════════════════════════════════════════════════════════
+// NPC MEMORY SYSTEM
+// ═══════════════════════════════════════════════════════════════
+
+UENUM(BlueprintType)
+enum class ENPC_MemoryType : uint8
 {
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality")
-    TArray<ENPC_PersonalityTrait> PrimaryTraits;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality")
-    float Bravery = 0.5f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality")
-    float Sociability = 0.5f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality")
-    float Aggression = 0.5f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality")
-    float Curiosity = 0.5f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality")
-    float Loyalty = 0.5f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality")
-    ENPC_Profession Profession = ENPC_Profession::Gatherer;
-
-    FNPC_PersonalityProfile()
-    {
-        Bravery = 0.5f;
-        Sociability = 0.5f;
-        Aggression = 0.5f;
-        Curiosity = 0.5f;
-        Loyalty = 0.5f;
-        Profession = ENPC_Profession::Gatherer;
-    }
-
-    // Check if NPC has a specific trait
-    bool HasTrait(ENPC_PersonalityTrait Trait) const
-    {
-        return PrimaryTraits.Contains(Trait);
-    }
+    DangerLocation = 0      UMETA(DisplayName = "Danger Location"),
+    SafeLocation = 1        UMETA(DisplayName = "Safe Location"),
+    ResourceLocation = 2    UMETA(DisplayName = "Resource Location"),
+    PersonEncounter = 3     UMETA(DisplayName = "Person Encounter"),
+    DinosaurSighting = 4    UMETA(DisplayName = "Dinosaur Sighting"),
+    ImportantEvent = 5      UMETA(DisplayName = "Important Event")
 };
-
-// ═══════════════════════════════════════════════════════════════
-// NPC MEMORY AND KNOWLEDGE SYSTEM
-// ═══════════════════════════════════════════════════════════════
 
 USTRUCT(BlueprintType)
 struct TRANSPERSONALGAME_API FNPC_Memory
@@ -195,38 +124,50 @@ struct TRANSPERSONALGAME_API FNPC_Memory
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
-    FString EventDescription;
+    ENPC_MemoryType MemoryType = ENPC_MemoryType::ImportantEvent;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
-    FVector Location;
+    FVector Location = FVector::ZeroVector;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
-    float Timestamp = 0.0f;
+    FString Description;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
-    float EmotionalWeight = 0.0f;
+    float Importance = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
-    AActor* RelatedActor = nullptr;
+    float TimeStamp = 0.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
-    ENPC_ThreatLevel ThreatLevel = ENPC_ThreatLevel::None;
+    float DecayRate = 0.1f;
 
     FNPC_Memory()
     {
-        EventDescription = TEXT("");
+        MemoryType = ENPC_MemoryType::ImportantEvent;
         Location = FVector::ZeroVector;
-        Timestamp = 0.0f;
-        EmotionalWeight = 0.0f;
-        RelatedActor = nullptr;
-        ThreatLevel = ENPC_ThreatLevel::None;
+        Description = TEXT("");
+        Importance = 1.0f;
+        TimeStamp = 0.0f;
+        DecayRate = 0.1f;
     }
+};
 
-    // Check if memory is still relevant (not too old)
-    bool IsRelevant(float CurrentTime, float MaxAge = 300.0f) const
-    {
-        return (CurrentTime - Timestamp) < MaxAge;
-    }
+// ═══════════════════════════════════════════════════════════════
+// NPC RELATIONSHIP SYSTEM
+// ═══════════════════════════════════════════════════════════════
+
+UENUM(BlueprintType)
+enum class ENPC_RelationshipType : uint8
+{
+    Stranger = 0        UMETA(DisplayName = "Stranger"),
+    Acquaintance = 1    UMETA(DisplayName = "Acquaintance"),
+    Friend = 2          UMETA(DisplayName = "Friend"),
+    Enemy = 3           UMETA(DisplayName = "Enemy"),
+    Family = 4          UMETA(DisplayName = "Family"),
+    Mate = 5            UMETA(DisplayName = "Mate"),
+    Rival = 6           UMETA(DisplayName = "Rival"),
+    Leader = 7          UMETA(DisplayName = "Leader"),
+    Follower = 8        UMETA(DisplayName = "Follower")
 };
 
 USTRUCT(BlueprintType)
@@ -235,48 +176,36 @@ struct TRANSPERSONALGAME_API FNPC_Relationship
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Relationship")
-    AActor* TargetActor = nullptr;
+    TWeakObjectPtr<AActor> TargetActor;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Relationship")
-    ENPC_RelationshipType RelationshipType = ENPC_RelationshipType::Stranger;
+    ENPC_RelationshipType RelationType = ENPC_RelationshipType::Stranger;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Relationship", meta = (ClampMin = "-100.0", ClampMax = "100.0"))
+    float Affection = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Relationship", meta = (ClampMin = "0.0", ClampMax = "100.0"))
+    float Trust = 50.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Relationship", meta = (ClampMin = "0.0", ClampMax = "100.0"))
+    float Respect = 50.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Relationship")
-    float Trust = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Relationship")
-    float Respect = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Relationship")
-    float Fear = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Relationship")
-    float LastInteractionTime = 0.0f;
+    float LastInteraction = 0.0f;
 
     FNPC_Relationship()
     {
         TargetActor = nullptr;
-        RelationshipType = ENPC_RelationshipType::Stranger;
-        Trust = 0.0f;
-        Respect = 0.0f;
-        Fear = 0.0f;
-        LastInteractionTime = 0.0f;
-    }
-
-    // Get overall relationship strength (positive or negative)
-    float GetRelationshipStrength() const
-    {
-        return (Trust + Respect) - Fear;
-    }
-
-    // Check if this is a positive relationship
-    bool IsPositiveRelationship() const
-    {
-        return GetRelationshipStrength() > 0.0f;
+        RelationType = ENPC_RelationshipType::Stranger;
+        Affection = 0.0f;
+        Trust = 50.0f;
+        Respect = 50.0f;
+        LastInteraction = 0.0f;
     }
 };
 
 // ═══════════════════════════════════════════════════════════════
-// NPC DIALOGUE AND COMMUNICATION TYPES
+// NPC DIALOGUE SYSTEM
 // ═══════════════════════════════════════════════════════════════
 
 UENUM(BlueprintType)
@@ -286,10 +215,10 @@ enum class ENPC_DialogueType : uint8
     Warning = 1         UMETA(DisplayName = "Warning"),
     Request = 2         UMETA(DisplayName = "Request"),
     Information = 3     UMETA(DisplayName = "Information"),
-    Threat = 4          UMETA(DisplayName = "Threat"),
-    Farewell = 5        UMETA(DisplayName = "Farewell"),
-    Panic = 6           UMETA(DisplayName = "Panic"),
-    Celebration = 7     UMETA(DisplayName = "Celebration")
+    Trade = 4           UMETA(DisplayName = "Trade"),
+    Threat = 5          UMETA(DisplayName = "Threat"),
+    Farewell = 6        UMETA(DisplayName = "Farewell"),
+    Emergency = 7       UMETA(DisplayName = "Emergency")
 };
 
 USTRUCT(BlueprintType)
@@ -304,101 +233,108 @@ struct TRANSPERSONALGAME_API FNPC_DialogueLine
     FString Text;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    float EmotionalIntensity = 0.5f;
+    FString AudioPath;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    float Priority = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
     TArray<ENPC_PersonalityTrait> RequiredTraits;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    ENPC_Profession RequiredProfession = ENPC_Profession::Gatherer;
 
     FNPC_DialogueLine()
     {
         DialogueType = ENPC_DialogueType::Greeting;
         Text = TEXT("");
-        EmotionalIntensity = 0.5f;
-        RequiredProfession = ENPC_Profession::Gatherer;
+        AudioPath = TEXT("");
+        Priority = 1.0f;
     }
 };
 
 // ═══════════════════════════════════════════════════════════════
-// NPC ROUTINE AND SCHEDULE SYSTEM
+// NPC TASK SYSTEM
 // ═══════════════════════════════════════════════════════════════
 
+UENUM(BlueprintType)
+enum class ENPC_TaskType : uint8
+{
+    MoveTo = 0          UMETA(DisplayName = "Move To"),
+    Interact = 1        UMETA(DisplayName = "Interact"),
+    Gather = 2          UMETA(DisplayName = "Gather"),
+    Craft = 3           UMETA(DisplayName = "Craft"),
+    Hunt = 4            UMETA(DisplayName = "Hunt"),
+    Guard = 5           UMETA(DisplayName = "Guard"),
+    Follow = 6          UMETA(DisplayName = "Follow"),
+    Wait = 7            UMETA(DisplayName = "Wait"),
+    Flee = 8            UMETA(DisplayName = "Flee"),
+    Attack = 9          UMETA(DisplayName = "Attack")
+};
+
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNPC_ScheduleEntry
+struct TRANSPERSONALGAME_API FNPC_Task
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Schedule")
-    float StartHour = 8.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Task")
+    ENPC_TaskType TaskType = ENPC_TaskType::Wait;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Schedule")
-    float EndHour = 12.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Schedule")
-    ENPC_BehaviorState Activity = ENPC_BehaviorState::Working;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Schedule")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Task")
     FVector TargetLocation = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Schedule")
-    FString ActivityDescription;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Task")
+    TWeakObjectPtr<AActor> TargetActor;
 
-    FNPC_ScheduleEntry()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Task")
+    float Priority = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Task")
+    float Duration = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Task")
+    bool bIsCompleted = false;
+
+    FNPC_Task()
     {
-        StartHour = 8.0f;
-        EndHour = 12.0f;
-        Activity = ENPC_BehaviorState::Working;
+        TaskType = ENPC_TaskType::Wait;
         TargetLocation = FVector::ZeroVector;
-        ActivityDescription = TEXT("");
-    }
-
-    // Check if this activity should be active at the given time
-    bool IsActiveAtTime(float CurrentHour) const
-    {
-        if (StartHour <= EndHour)
-        {
-            return CurrentHour >= StartHour && CurrentHour < EndHour;
-        }
-        else
-        {
-            // Activity spans midnight
-            return CurrentHour >= StartHour || CurrentHour < EndHour;
-        }
+        TargetActor = nullptr;
+        Priority = 1.0f;
+        Duration = 0.0f;
+        bIsCompleted = false;
     }
 };
 
+// ═══════════════════════════════════════════════════════════════
+// NPC PERCEPTION DATA
+// ═══════════════════════════════════════════════════════════════
+
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNPC_DailySchedule
+struct TRANSPERSONALGAME_API FNPC_PerceptionData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Schedule")
-    TArray<FNPC_ScheduleEntry> ScheduleEntries;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Perception")
+    float SightRange = 1500.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Schedule")
-    FVector HomeLocation = FVector::ZeroVector;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Perception")
+    float HearingRange = 800.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Schedule")
-    FVector WorkLocation = FVector::ZeroVector;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Perception")
+    float SightAngle = 90.0f;
 
-    FNPC_DailySchedule()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Perception")
+    float AlertnessLevel = 50.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Perception")
+    TArray<TWeakObjectPtr<AActor>> VisibleActors;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Perception")
+    TArray<TWeakObjectPtr<AActor>> HeardActors;
+
+    FNPC_PerceptionData()
     {
-        HomeLocation = FVector::ZeroVector;
-        WorkLocation = FVector::ZeroVector;
-    }
-
-    // Get the current activity for the given time
-    FNPC_ScheduleEntry* GetCurrentActivity(float CurrentHour)
-    {
-        for (FNPC_ScheduleEntry& Entry : ScheduleEntries)
-        {
-            if (Entry.IsActiveAtTime(CurrentHour))
-            {
-                return &Entry;
-            }
-        }
-        return nullptr;
+        SightRange = 1500.0f;
+        HearingRange = 800.0f;
+        SightAngle = 90.0f;
+        AlertnessLevel = 50.0f;
     }
 };
