@@ -9,84 +9,90 @@
 #include "ArchitectureManager.generated.h"
 
 UENUM(BlueprintType)
-enum class EArch_BuildingType : uint8
+enum class EArch_DwellingType : uint8
 {
-    None = 0,
-    RoundHut = 1,
-    CaveDwelling = 2,
-    LeanToShelter = 3,
-    StoragePlatform = 4,
-    DefensiveWall = 5,
-    Watchtower = 6,
-    CommunalFirePit = 7,
-    WorkshopArea = 8
+    StoneCircular UMETA(DisplayName = "Stone Circular Hut"),
+    CaveInterior UMETA(DisplayName = "Cave Dwelling"),
+    ElevatedPlatform UMETA(DisplayName = "Elevated Platform"),
+    CommunalLonghouse UMETA(DisplayName = "Communal Longhouse"),
+    TemporaryLeanTo UMETA(DisplayName = "Temporary Lean-To"),
+    UndergroundBurrow UMETA(DisplayName = "Underground Burrow")
 };
 
 UENUM(BlueprintType)
-enum class EArch_ConstructionMaterial : uint8
+enum class EArch_InteriorPropType : uint8
 {
-    Stone = 0,
-    Wood = 1,
-    AnimalHide = 2,
-    ThatchedGrass = 3,
-    Bone = 4,
-    Clay = 5,
-    Vine = 6
+    FirePit UMETA(DisplayName = "Fire Pit"),
+    SleepingArea UMETA(DisplayName = "Sleeping Area"),
+    StorageBasket UMETA(DisplayName = "Storage Basket"),
+    ToolRack UMETA(DisplayName = "Tool Rack"),
+    CookingArea UMETA(DisplayName = "Cooking Area"),
+    WorkBench UMETA(DisplayName = "Work Bench"),
+    WaterContainer UMETA(DisplayName = "Water Container"),
+    FoodStorage UMETA(DisplayName = "Food Storage")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FArch_BuildingComponent
+struct FArch_DwellingConfig
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building Component")
-    EArch_ConstructionMaterial Material = EArch_ConstructionMaterial::Wood;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dwelling")
+    EArch_DwellingType DwellingType = EArch_DwellingType::StoneCircular;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building Component")
-    FVector Scale = FVector(1.0f, 1.0f, 1.0f);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dwelling")
+    FVector Size = FVector(400.0f, 400.0f, 300.0f);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building Component")
-    float DurabilityPercent = 100.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dwelling")
+    int32 MaxOccupants = 4;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building Component")
-    bool bIsStructural = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dwelling")
+    bool bHasFirePit = true;
 
-    FArch_BuildingComponent()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dwelling")
+    bool bHasStorage = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dwelling")
+    float StructuralIntegrity = 100.0f;
+
+    FArch_DwellingConfig()
     {
-        Material = EArch_ConstructionMaterial::Wood;
-        Scale = FVector(1.0f, 1.0f, 1.0f);
-        DurabilityPercent = 100.0f;
-        bIsStructural = true;
+        DwellingType = EArch_DwellingType::StoneCircular;
+        Size = FVector(400.0f, 400.0f, 300.0f);
+        MaxOccupants = 4;
+        bHasFirePit = true;
+        bHasStorage = true;
+        StructuralIntegrity = 100.0f;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FArch_SettlementLayout
+struct FArch_InteriorProp
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settlement")
-    FVector CenterLocation = FVector::ZeroVector;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
+    EArch_InteriorPropType PropType = EArch_InteriorPropType::FirePit;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settlement")
-    float DefensiveRadius = 500.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
+    FVector RelativeLocation = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settlement")
-    int32 MaxBuildings = 12;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
+    FRotator RelativeRotation = FRotator::ZeroRotator;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settlement")
-    bool bHasDefensiveWall = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
+    FVector Scale = FVector::OneVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settlement")
-    bool bHasCentralFirePit = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
+    bool bIsActive = true;
 
-    FArch_SettlementLayout()
+    FArch_InteriorProp()
     {
-        CenterLocation = FVector::ZeroVector;
-        DefensiveRadius = 500.0f;
-        MaxBuildings = 12;
-        bHasDefensiveWall = false;
-        bHasCentralFirePit = true;
+        PropType = EArch_InteriorPropType::FirePit;
+        RelativeLocation = FVector::ZeroVector;
+        RelativeRotation = FRotator::ZeroRotator;
+        Scale = FVector::OneVector;
+        bIsActive = true;
     }
 };
 
@@ -104,60 +110,74 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     USceneComponent* RootSceneComponent;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture Settings")
-    FArch_SettlementLayout SettlementConfig;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    FArch_DwellingConfig DwellingConfig;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture Settings")
-    TArray<EArch_BuildingType> AllowedBuildingTypes;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    TArray<FArch_InteriorProp> InteriorProps;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Architecture State")
-    TArray<AActor*> PlacedBuildings;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Architecture")
+    TArray<UStaticMeshComponent*> StructuralComponents;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture Settings")
-    float MinBuildingSpacing = 200.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture Settings")
-    bool bAutoGenerateSettlement = true;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Architecture")
+    TArray<UStaticMeshComponent*> InteriorComponents;
 
 public:
     virtual void Tick(float DeltaTime) override;
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool PlaceBuilding(EArch_BuildingType BuildingType, FVector Location, FRotator Rotation);
+    void BuildDwelling(EArch_DwellingType DwellingType, FVector Size);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void GenerateSettlement();
+    void AddInteriorProp(EArch_InteriorPropType PropType, FVector Location, FRotator Rotation);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void ClearSettlement();
+    void RemoveInteriorProp(int32 PropIndex);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    TArray<FVector> GetValidBuildingLocations(int32 NumLocations);
+    void RepairStructure(float RepairAmount);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool IsLocationValidForBuilding(FVector Location, EArch_BuildingType BuildingType);
+    void DamageStructure(float DamageAmount);
+
+    UFUNCTION(BlueprintPure, Category = "Architecture")
+    float GetStructuralIntegrity() const { return DwellingConfig.StructuralIntegrity; }
+
+    UFUNCTION(BlueprintPure, Category = "Architecture")
+    bool CanAccommodateOccupants(int32 NumOccupants) const;
+
+    UFUNCTION(BlueprintPure, Category = "Architecture")
+    FVector GetDwellingSize() const { return DwellingConfig.Size; }
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    AActor* CreateBuildingActor(EArch_BuildingType BuildingType, FVector Location, FRotator Rotation);
-
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void UpdateBuildingDurability(AActor* Building, float DamageAmount);
-
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    FArch_BuildingComponent GetBuildingComponent(EArch_BuildingType BuildingType);
+    void SetDwellingConfig(const FArch_DwellingConfig& NewConfig);
 
 protected:
-    UFUNCTION(BlueprintImplementableEvent, Category = "Architecture")
-    void OnSettlementGenerated();
+    UFUNCTION()
+    void CreateStructuralComponents();
 
-    UFUNCTION(BlueprintImplementableEvent, Category = "Architecture")
-    void OnBuildingPlaced(AActor* NewBuilding, EArch_BuildingType BuildingType);
+    UFUNCTION()
+    void CreateInteriorComponents();
 
-    UFUNCTION(BlueprintImplementableEvent, Category = "Architecture")
-    void OnBuildingDestroyed(AActor* DestroyedBuilding);
+    UFUNCTION()
+    void UpdateStructuralIntegrity();
+
+    UFUNCTION()
+    UStaticMeshComponent* CreateMeshComponent(const FString& ComponentName);
+
+    UFUNCTION()
+    void SetupStoneCircularHut();
+
+    UFUNCTION()
+    void SetupElevatedPlatform();
+
+    UFUNCTION()
+    void SetupCommunalLonghouse();
+
+    UFUNCTION()
+    void SetupCaveInterior();
 
 private:
-    void InitializeDefaultBuildingTypes();
-    FVector FindNearestValidLocation(FVector DesiredLocation, EArch_BuildingType BuildingType);
-    bool CheckTerrainSuitability(FVector Location);
+    float LastIntegrityCheck;
+    bool bNeedsStructuralUpdate;
 };
