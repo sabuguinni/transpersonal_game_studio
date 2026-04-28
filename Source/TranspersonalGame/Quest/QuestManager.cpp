@@ -2,544 +2,401 @@
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
-#include "Kismet/GameplayStatics.h"
+#include "Components/ActorComponent.h"
 
 UQuestManager::UQuestManager()
 {
-    // Initialize quest storage
-    AllQuests.Empty();
-    ActiveQuestIDs.Empty();
-    CompletedQuestIDs.Empty();
-    FailedQuestIDs.Empty();
-    RegisteredQuestGivers.Empty();
-    QuestLocationMarkers.Empty();
-}
-
-void UQuestManager::Initialize(FSubsystemCollectionBase& Collection)
-{
-    Super::Initialize(Collection);
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 1.0f; // Check quest progress every second
     
-    UE_LOG(LogTemp, Warning, TEXT("QuestManager: Initializing Quest System"));
+    bAutoActivate = true;
+    bWantsInitializeComponent = true;
     
-    // Create default survival quests
+    // Initialize default prehistoric survival quests
     InitializeDefaultQuests();
-    
-    UE_LOG(LogTemp, Warning, TEXT("QuestManager: Quest System Initialized with %d quests"), AllQuests.Num());
 }
 
-void UQuestManager::Deinitialize()
+void UQuestManager::BeginPlay()
 {
-    // Clean up quest data
-    AllQuests.Empty();
-    ActiveQuestIDs.Empty();
-    CompletedQuestIDs.Empty();
-    FailedQuestIDs.Empty();
-    RegisteredQuestGivers.Empty();
-    QuestLocationMarkers.Empty();
+    Super::BeginPlay();
     
-    Super::Deinitialize();
+    UE_LOG(LogTemp, Warning, TEXT("QuestManager: BeginPlay - Initializing quest system"));
+    
+    // Register quest NPCs
+    RegisterQuestNPCs();
+    
+    // Start with first available quest
+    if (AvailableQuests.Num() > 0)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("QuestManager: %d quests available"), AvailableQuests.Num());
+    }
+}
+
+void UQuestManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    
+    // Update active quest progress
+    UpdateActiveQuests(DeltaTime);
+    
+    // Check for quest completion
+    CheckQuestCompletion();
 }
 
 void UQuestManager::InitializeDefaultQuests()
 {
-    // Quest 1: Hunt the Raptors
-    FQuest_QuestData HuntQuest;
-    HuntQuest.QuestID = TEXT("HUNT_RAPTORS_01");
-    HuntQuest.Title = FText::FromString(TEXT("Raptor Threat"));
-    HuntQuest.Description = FText::FromString(TEXT("The raptors have been hunting too close to our camp. Eliminate 3 raptors to ensure our safety."));
-    HuntQuest.QuestType = EQuest_QuestType::Survival;
-    HuntQuest.Status = EQuest_QuestStatus::Available;
-    HuntQuest.ExperienceReward = 150;
-    HuntQuest.ItemRewards.Add(TEXT("Stone_Spear"));
-    HuntQuest.bIsRepeatable = false;
+    UE_LOG(LogTemp, Warning, TEXT("QuestManager: Initializing default prehistoric survival quests"));
     
-    // Hunt objective
-    FQuest_ObjectiveData HuntObjective;
-    HuntObjective.ObjectiveID = TEXT("KILL_RAPTORS");
-    HuntObjective.Description = FText::FromString(TEXT("Kill 3 Raptors"));
-    HuntObjective.Type = EQuest_ObjectiveType::KillTarget;
-    HuntObjective.TargetActorID = TEXT("Raptor");
-    HuntObjective.RequiredQuantity = 3;
-    HuntObjective.CurrentProgress = 0;
-    HuntObjective.bIsCompleted = false;
-    HuntObjective.bIsOptional = false;
+    // Quest 1: Hunt the Raptor Pack
+    FQuest_Data HuntQuest;
+    HuntQuest.QuestID = TEXT("HUNT_001");
+    HuntQuest.QuestName = TEXT("Hunt the Raptor Pack");
+    HuntQuest.Description = TEXT("A pack of raptors threatens our hunting grounds. Eliminate 3 raptors to secure the area.");
+    HuntQuest.QuestType = EQuest_Type::Hunt;
+    HuntQuest.Difficulty = EQuest_Difficulty::Hard;
+    HuntQuest.QuestGiverName = TEXT("Elder Grok");
+    HuntQuest.MinLevel = 3;
     
-    HuntQuest.Objectives.Add(HuntObjective);
-    AllQuests.Add(HuntQuest.QuestID, HuntQuest);
+    FQuest_Objective HuntObj;
+    HuntObj.Type = EQuest_ObjectiveType::KillTarget;
+    HuntObj.Description = TEXT("Kill Raptors");
+    HuntObj.TargetName = TEXT("Raptor");
+    HuntObj.RequiredCount = 3;
+    HuntObj.CurrentCount = 0;
+    HuntQuest.Objectives.Add(HuntObj);
+    
+    FQuest_Reward HuntReward;
+    HuntReward.ItemName = TEXT("Raptor Claw");
+    HuntReward.Quantity = 3;
+    HuntReward.ExperiencePoints = 150;
+    HuntReward.Description = TEXT("Sharp claws for crafting advanced weapons");
+    HuntQuest.Rewards.Add(HuntReward);
+    
+    AvailableQuests.Add(HuntQuest.QuestID, HuntQuest);
     
     // Quest 2: Gather Crystal Shards
-    FQuest_QuestData GatherQuest;
-    GatherQuest.QuestID = TEXT("GATHER_CRYSTALS_01");
-    GatherQuest.Title = FText::FromString(TEXT("Crystal Harvest"));
-    GatherQuest.Description = FText::FromString(TEXT("Collect crystal shards from the northern caves to craft better tools."));
-    GatherQuest.QuestType = EQuest_QuestType::Exploration;
-    GatherQuest.Status = EQuest_QuestStatus::Available;
-    GatherQuest.ExperienceReward = 100;
-    GatherQuest.ItemRewards.Add(TEXT("Crystal_Knife"));
-    GatherQuest.bIsRepeatable = true;
+    FQuest_Data GatherQuest;
+    GatherQuest.QuestID = TEXT("GATHER_001");
+    GatherQuest.QuestName = TEXT("Crystal Cave Expedition");
+    GatherQuest.Description = TEXT("The healer needs rare crystal shards from the dangerous caves. Gather 5 crystal shards.");
+    GatherQuest.QuestType = EQuest_Type::Gather;
+    GatherQuest.Difficulty = EQuest_Difficulty::Medium;
+    GatherQuest.QuestGiverName = TEXT("Healer Nala");
+    GatherQuest.MinLevel = 2;
     
-    // Gather objective
-    FQuest_ObjectiveData GatherObjective;
-    GatherObjective.ObjectiveID = TEXT("COLLECT_CRYSTALS");
-    GatherObjective.Description = FText::FromString(TEXT("Collect 5 Crystal Shards"));
-    GatherObjective.Type = EQuest_ObjectiveType::CollectItem;
-    GatherObjective.TargetActorID = TEXT("Crystal_Shard");
-    GatherObjective.RequiredQuantity = 5;
-    GatherObjective.CurrentProgress = 0;
-    GatherObjective.bIsCompleted = false;
-    GatherObjective.bIsOptional = false;
+    FQuest_Objective GatherObj;
+    GatherObj.Type = EQuest_ObjectiveType::CollectItem;
+    GatherObj.Description = TEXT("Collect Crystal Shards");
+    GatherObj.TargetName = TEXT("Crystal Shard");
+    GatherObj.RequiredCount = 5;
+    GatherObj.CurrentCount = 0;
+    GatherQuest.Objectives.Add(GatherObj);
     
-    GatherQuest.Objectives.Add(GatherObjective);
-    AllQuests.Add(GatherQuest.QuestID, GatherQuest);
+    FQuest_Reward GatherReward;
+    GatherReward.ItemName = TEXT("Healing Potion");
+    GatherReward.Quantity = 2;
+    GatherReward.ExperiencePoints = 75;
+    GatherReward.Description = TEXT("Potent healing medicine");
+    GatherQuest.Rewards.Add(GatherReward);
     
-    // Quest 3: Explore the Ancient Cave
-    FQuest_QuestData ExploreQuest;
-    ExploreQuest.QuestID = TEXT("EXPLORE_CAVE_01");
-    ExploreQuest.Title = FText::FromString(TEXT("Cave Exploration"));
-    ExploreQuest.Description = FText::FromString(TEXT("Investigate the mysterious cave system to the north. What secrets does it hold?"));
-    ExploreQuest.QuestType = EQuest_QuestType::Discovery;
-    ExploreQuest.Status = EQuest_QuestStatus::Available;
-    ExploreQuest.ExperienceReward = 200;
-    ExploreQuest.ItemRewards.Add(TEXT("Ancient_Map"));
-    ExploreQuest.bIsRepeatable = false;
+    AvailableQuests.Add(GatherQuest.QuestID, GatherQuest);
     
-    // Exploration objective
-    FQuest_ObjectiveData ExploreObjective;
-    ExploreObjective.ObjectiveID = TEXT("REACH_CAVE_DEPTHS");
-    ExploreObjective.Description = FText::FromString(TEXT("Reach the deepest chamber of the cave"));
-    ExploreObjective.Type = EQuest_ObjectiveType::GoToLocation;
-    ExploreObjective.TargetLocation = FVector(200, 800, 300);
-    ExploreObjective.RequiredQuantity = 1;
-    ExploreObjective.CurrentProgress = 0;
-    ExploreObjective.bIsCompleted = false;
-    ExploreObjective.bIsOptional = false;
+    // Quest 3: Explore High Ground
+    FQuest_Data ExploreQuest;
+    ExploreQuest.QuestID = TEXT("EXPLORE_001");
+    ExploreQuest.QuestName = TEXT("Scout the High Ground");
+    ExploreQuest.Description = TEXT("Scout Kira needs eyes on the distant mountains. Reach the observation post and report back.");
+    ExploreQuest.QuestType = EQuest_Type::Explore;
+    ExploreQuest.Difficulty = EQuest_Difficulty::Easy;
+    ExploreQuest.QuestGiverName = TEXT("Scout Kira");
+    ExploreQuest.MinLevel = 1;
     
-    ExploreQuest.Objectives.Add(ExploreObjective);
-    AllQuests.Add(ExploreQuest.QuestID, ExploreQuest);
+    FQuest_Objective ExploreObj;
+    ExploreObj.Type = EQuest_ObjectiveType::ReachLocation;
+    ExploreObj.Description = TEXT("Reach the observation post");
+    ExploreObj.TargetLocation = FVector(1000, -1000, 300);
+    ExploreObj.Radius = 200.0f;
+    ExploreObj.RequiredCount = 1;
+    ExploreObj.CurrentCount = 0;
+    ExploreQuest.Objectives.Add(ExploreObj);
     
-    // Quest 4: Survival Challenge
-    FQuest_QuestData SurvivalQuest;
-    SurvivalQuest.QuestID = TEXT("SURVIVE_NIGHT_01");
-    SurvivalQuest.Title = FText::FromString(TEXT("Night Survival"));
-    SurvivalQuest.Description = FText::FromString(TEXT("Survive through the night without returning to the main camp. Build shelter and maintain your health."));
-    SurvivalQuest.QuestType = EQuest_QuestType::Survival;
-    SurvivalQuest.Status = EQuest_QuestStatus::Available;
-    SurvivalQuest.ExperienceReward = 300;
-    SurvivalQuest.ItemRewards.Add(TEXT("Survival_Kit"));
-    SurvivalQuest.bIsRepeatable = true;
-    SurvivalQuest.TimeLimit = 600.0f; // 10 minutes
+    FQuest_Reward ExploreReward;
+    ExploreReward.ItemName = TEXT("Map Fragment");
+    ExploreReward.Quantity = 1;
+    ExploreReward.ExperiencePoints = 50;
+    ExploreReward.Description = TEXT("Reveals new areas to explore");
+    ExploreQuest.Rewards.Add(ExploreReward);
     
-    // Survival objective
-    FQuest_ObjectiveData SurvivalObjective;
-    SurvivalObjective.ObjectiveID = TEXT("SURVIVE_DURATION");
-    SurvivalObjective.Description = FText::FromString(TEXT("Survive for 10 minutes away from camp"));
-    SurvivalObjective.Type = EQuest_ObjectiveType::Survive;
-    SurvivalObjective.RequiredQuantity = 1;
-    SurvivalObjective.CurrentProgress = 0;
-    SurvivalObjective.bIsCompleted = false;
-    SurvivalObjective.bIsOptional = false;
+    AvailableQuests.Add(ExploreQuest.QuestID, ExploreQuest);
     
-    SurvivalQuest.Objectives.Add(SurvivalObjective);
-    AllQuests.Add(SurvivalQuest.QuestID, SurvivalQuest);
+    // Quest 4: Craft Survival Tools
+    FQuest_Data CraftQuest;
+    CraftQuest.QuestID = TEXT("CRAFT_001");
+    CraftQuest.QuestName = TEXT("Tools for Survival");
+    CraftQuest.Description = TEXT("Crafter Thane needs help making essential tools. Craft a stone axe and spear.");
+    CraftQuest.QuestType = EQuest_Type::Craft;
+    CraftQuest.Difficulty = EQuest_Difficulty::Easy;
+    CraftQuest.QuestGiverName = TEXT("Crafter Thane");
+    CraftQuest.MinLevel = 1;
     
-    UE_LOG(LogTemp, Warning, TEXT("QuestManager: Created %d default survival quests"), AllQuests.Num());
+    FQuest_Objective CraftObj1;
+    CraftObj1.Type = EQuest_ObjectiveType::CraftItem;
+    CraftObj1.Description = TEXT("Craft Stone Axe");
+    CraftObj1.TargetName = TEXT("Stone Axe");
+    CraftObj1.RequiredCount = 1;
+    CraftObj1.CurrentCount = 0;
+    CraftQuest.Objectives.Add(CraftObj1);
+    
+    FQuest_Objective CraftObj2;
+    CraftObj2.Type = EQuest_ObjectiveType::CraftItem;
+    CraftObj2.Description = TEXT("Craft Stone Spear");
+    CraftObj2.TargetName = TEXT("Stone Spear");
+    CraftObj2.RequiredCount = 1;
+    CraftObj2.CurrentCount = 0;
+    CraftQuest.Objectives.Add(CraftObj2);
+    
+    FQuest_Reward CraftReward;
+    CraftReward.ItemName = TEXT("Crafting Knowledge");
+    CraftReward.Quantity = 1;
+    CraftReward.ExperiencePoints = 40;
+    CraftReward.Description = TEXT("Learn advanced crafting techniques");
+    CraftQuest.Rewards.Add(CraftReward);
+    
+    AvailableQuests.Add(CraftQuest.QuestID, CraftQuest);
+    
+    UE_LOG(LogTemp, Warning, TEXT("QuestManager: Initialized %d default quests"), AvailableQuests.Num());
+}
+
+void UQuestManager::RegisterQuestNPCs()
+{
+    // Register quest giver NPCs
+    FQuest_NPCData ElderGrok;
+    ElderGrok.NPCName = TEXT("Elder Grok");
+    ElderGrok.Role = TEXT("Tribal Elder");
+    ElderGrok.Location = FVector(500, 0, 150);
+    ElderGrok.AvailableQuests.Add(TEXT("HUNT_001"));
+    ElderGrok.Greeting = TEXT("Greetings, young hunter. The tribe needs your strength.");
+    
+    FQuest_NPCData HealerNala;
+    HealerNala.NPCName = TEXT("Healer Nala");
+    HealerNala.Role = TEXT("Medicine Woman");
+    HealerNala.Location = FVector(-600, -200, 130);
+    HealerNala.AvailableQuests.Add(TEXT("GATHER_001"));
+    HealerNala.Greeting = TEXT("The spirits guide us to healing. Will you help gather what we need?");
+    
+    FQuest_NPCData ScoutKira;
+    ScoutKira.NPCName = TEXT("Scout Kira");
+    ScoutKira.Role = TEXT("Scout");
+    ScoutKira.Location = FVector(-300, 400, 120);
+    ScoutKira.AvailableQuests.Add(TEXT("EXPLORE_001"));
+    ScoutKira.Greeting = TEXT("The lands beyond hold secrets. Are you brave enough to discover them?");
+    
+    FQuest_NPCData CrafterThane;
+    CrafterThane.NPCName = TEXT("Crafter Thane");
+    CrafterThane.Role = TEXT("Tool Maker");
+    CrafterThane.Location = FVector(200, -500, 100);
+    CrafterThane.AvailableQuests.Add(TEXT("CRAFT_001"));
+    CrafterThane.Greeting = TEXT("Good tools mean survival. Let me teach you the old ways.");
+    
+    QuestNPCs.Add(ElderGrok.NPCName, ElderGrok);
+    QuestNPCs.Add(HealerNala.NPCName, HealerNala);
+    QuestNPCs.Add(ScoutKira.NPCName, ScoutKira);
+    QuestNPCs.Add(CrafterThane.NPCName, CrafterThane);
+    
+    UE_LOG(LogTemp, Warning, TEXT("QuestManager: Registered %d quest NPCs"), QuestNPCs.Num());
 }
 
 bool UQuestManager::StartQuest(const FString& QuestID)
 {
-    if (!AllQuests.Contains(QuestID))
+    if (!AvailableQuests.Contains(QuestID))
     {
         UE_LOG(LogTemp, Error, TEXT("QuestManager: Quest %s not found"), *QuestID);
         return false;
     }
     
-    FQuest_QuestData& Quest = AllQuests[QuestID];
-    
-    if (Quest.Status != EQuest_QuestStatus::Available)
+    if (ActiveQuests.Contains(QuestID))
     {
-        UE_LOG(LogTemp, Warning, TEXT("QuestManager: Quest %s is not available (Status: %d)"), *QuestID, (int32)Quest.Status);
+        UE_LOG(LogTemp, Warning, TEXT("QuestManager: Quest %s already active"), *QuestID);
         return false;
     }
     
-    if (!CheckQuestPrerequisites(QuestID))
-    {
-        UE_LOG(LogTemp, Warning, TEXT("QuestManager: Quest %s prerequisites not met"), *QuestID);
-        return false;
-    }
+    FQuest_Data QuestData = AvailableQuests[QuestID];
+    QuestData.Status = EQuest_Status::Active;
     
-    // Start the quest
-    Quest.Status = EQuest_QuestStatus::Active;
-    ActiveQuestIDs.AddUnique(QuestID);
+    ActiveQuests.Add(QuestID, QuestData);
     
-    // Reset all objectives
-    for (FQuest_ObjectiveData& Objective : Quest.Objectives)
-    {
-        Objective.CurrentProgress = 0;
-        Objective.bIsCompleted = false;
-    }
+    UE_LOG(LogTemp, Warning, TEXT("QuestManager: Started quest '%s'"), *QuestData.QuestName);
     
-    UE_LOG(LogTemp, Warning, TEXT("QuestManager: Started quest %s"), *QuestID);
-    
-    // Broadcast quest started
-    OnQuestStatusChanged.Broadcast(QuestID, EQuest_QuestStatus::Active);
+    // Broadcast quest started event
+    OnQuestStarted.Broadcast(QuestData);
     
     return true;
 }
 
 bool UQuestManager::CompleteQuest(const FString& QuestID)
 {
-    if (!AllQuests.Contains(QuestID))
+    if (!ActiveQuests.Contains(QuestID))
     {
+        UE_LOG(LogTemp, Error, TEXT("QuestManager: Active quest %s not found"), *QuestID);
         return false;
     }
     
-    FQuest_QuestData& Quest = AllQuests[QuestID];
+    FQuest_Data& QuestData = ActiveQuests[QuestID];
+    QuestData.Status = EQuest_Status::Completed;
     
-    if (Quest.Status != EQuest_QuestStatus::Active)
+    // Move to completed quests
+    CompletedQuests.Add(QuestID, QuestData);
+    ActiveQuests.Remove(QuestID);
+    
+    UE_LOG(LogTemp, Warning, TEXT("QuestManager: Completed quest '%s'"), *QuestData.QuestName);
+    
+    // Grant rewards
+    for (const FQuest_Reward& Reward : QuestData.Rewards)
     {
-        return false;
+        UE_LOG(LogTemp, Warning, TEXT("QuestManager: Granted reward: %s x%d"), *Reward.ItemName, Reward.Quantity);
     }
     
-    // Check if all required objectives are completed
-    if (!AreAllObjectivesCompleted(QuestID))
-    {
-        UE_LOG(LogTemp, Warning, TEXT("QuestManager: Cannot complete quest %s - objectives not finished"), *QuestID);
-        return false;
-    }
-    
-    // Complete the quest
-    Quest.Status = EQuest_QuestStatus::Completed;
-    ActiveQuestIDs.Remove(QuestID);
-    CompletedQuestIDs.AddUnique(QuestID);
-    
-    // Give rewards
-    GiveQuestRewards(Quest);
-    
-    UE_LOG(LogTemp, Warning, TEXT("QuestManager: Completed quest %s"), *QuestID);
-    
-    // Broadcast quest completed
-    OnQuestStatusChanged.Broadcast(QuestID, EQuest_QuestStatus::Completed);
+    // Broadcast quest completed event
+    OnQuestCompleted.Broadcast(QuestData);
     
     return true;
+}
+
+void UQuestManager::UpdateActiveQuests(float DeltaTime)
+{
+    for (auto& QuestPair : ActiveQuests)
+    {
+        FQuest_Data& QuestData = QuestPair.Value;
+        
+        // Update time-limited quests
+        if (QuestData.bHasTimeLimit)
+        {
+            QuestData.TimeLimit -= DeltaTime;
+            if (QuestData.TimeLimit <= 0.0f)
+            {
+                FailQuest(QuestData.QuestID);
+                continue;
+            }
+        }
+        
+        // Update objective progress based on quest type
+        UpdateQuestObjectives(QuestData);
+    }
+}
+
+void UQuestManager::UpdateQuestObjectives(FQuest_Data& QuestData)
+{
+    // This would be expanded to check actual game state
+    // For now, just log the update
+    for (FQuest_Objective& Objective : QuestData.Objectives)
+    {
+        if (!Objective.bIsCompleted)
+        {
+            // Here we would check game state for objective completion
+            // Example: check if player is in target location, has killed targets, etc.
+        }
+    }
+}
+
+void UQuestManager::CheckQuestCompletion()
+{
+    TArray<FString> QuestsToComplete;
+    
+    for (auto& QuestPair : ActiveQuests)
+    {
+        FQuest_Data& QuestData = QuestPair.Value;
+        bool bAllObjectivesComplete = true;
+        
+        for (const FQuest_Objective& Objective : QuestData.Objectives)
+        {
+            if (!Objective.bIsCompleted)
+            {
+                bAllObjectivesComplete = false;
+                break;
+            }
+        }
+        
+        if (bAllObjectivesComplete)
+        {
+            QuestsToComplete.Add(QuestData.QuestID);
+        }
+    }
+    
+    // Complete all finished quests
+    for (const FString& QuestID : QuestsToComplete)
+    {
+        CompleteQuest(QuestID);
+    }
 }
 
 bool UQuestManager::FailQuest(const FString& QuestID)
 {
-    if (!AllQuests.Contains(QuestID))
+    if (!ActiveQuests.Contains(QuestID))
     {
         return false;
     }
     
-    FQuest_QuestData& Quest = AllQuests[QuestID];
+    FQuest_Data QuestData = ActiveQuests[QuestID];
+    QuestData.Status = EQuest_Status::Failed;
     
-    if (Quest.Status != EQuest_QuestStatus::Active)
-    {
-        return false;
-    }
+    FailedQuests.Add(QuestID, QuestData);
+    ActiveQuests.Remove(QuestID);
     
-    // Fail the quest
-    Quest.Status = EQuest_QuestStatus::Failed;
-    ActiveQuestIDs.Remove(QuestID);
-    FailedQuestIDs.AddUnique(QuestID);
+    UE_LOG(LogTemp, Warning, TEXT("QuestManager: Failed quest '%s'"), *QuestData.QuestName);
     
-    UE_LOG(LogTemp, Warning, TEXT("QuestManager: Failed quest %s"), *QuestID);
-    
-    // Broadcast quest failed
-    OnQuestStatusChanged.Broadcast(QuestID, EQuest_QuestStatus::Failed);
+    OnQuestFailed.Broadcast(QuestData);
     
     return true;
 }
 
-bool UQuestManager::UpdateObjectiveProgress(const FString& QuestID, const FString& ObjectiveID, int32 ProgressAmount)
+TArray<FQuest_Data> UQuestManager::GetAvailableQuestsForNPC(const FString& NPCName) const
 {
-    if (!AllQuests.Contains(QuestID))
-    {
-        return false;
-    }
+    TArray<FQuest_Data> NPCQuests;
     
-    FQuest_QuestData& Quest = AllQuests[QuestID];
-    
-    if (Quest.Status != EQuest_QuestStatus::Active)
+    if (QuestNPCs.Contains(NPCName))
     {
-        return false;
-    }
-    
-    // Find and update the objective
-    for (FQuest_ObjectiveData& Objective : Quest.Objectives)
-    {
-        if (Objective.ObjectiveID == ObjectiveID)
+        const FQuest_NPCData& NPCData = QuestNPCs[NPCName];
+        
+        for (const FString& QuestID : NPCData.AvailableQuests)
         {
-            if (Objective.bIsCompleted)
+            if (AvailableQuests.Contains(QuestID) && !ActiveQuests.Contains(QuestID) && !CompletedQuests.Contains(QuestID))
             {
-                return false; // Already completed
+                NPCQuests.Add(AvailableQuests[QuestID]);
             }
+        }
+    }
+    
+    return NPCQuests;
+}
+
+FString UQuestManager::GetNPCGreeting(const FString& NPCName) const
+{
+    if (QuestNPCs.Contains(NPCName))
+    {
+        return QuestNPCs[NPCName].Greeting;
+    }
+    
+    return TEXT("Hello, traveler.");
+}
+
+void UQuestManager::UpdateObjectiveProgress(const FString& QuestID, int32 ObjectiveIndex, int32 Progress)
+{
+    if (ActiveQuests.Contains(QuestID))
+    {
+        FQuest_Data& QuestData = ActiveQuests[QuestID];
+        
+        if (QuestData.Objectives.IsValidIndex(ObjectiveIndex))
+        {
+            FQuest_Objective& Objective = QuestData.Objectives[ObjectiveIndex];
+            Objective.CurrentCount = FMath::Min(Objective.CurrentCount + Progress, Objective.RequiredCount);
             
-            Objective.CurrentProgress = FMath::Min(Objective.CurrentProgress + ProgressAmount, Objective.RequiredQuantity);
-            
-            // Check if objective is now completed
-            if (Objective.CurrentProgress >= Objective.RequiredQuantity)
+            if (Objective.CurrentCount >= Objective.RequiredCount)
             {
                 Objective.bIsCompleted = true;
-                UE_LOG(LogTemp, Warning, TEXT("QuestManager: Completed objective %s for quest %s"), *ObjectiveID, *QuestID);
-            }
-            
-            // Broadcast objective updated
-            OnObjectiveUpdated.Broadcast(QuestID, ObjectiveID, Objective.CurrentProgress);
-            
-            // Check if quest can be completed
-            if (AreAllObjectivesCompleted(QuestID))
-            {
-                CompleteQuest(QuestID);
-            }
-            
-            return true;
-        }
-    }
-    
-    return false;
-}
-
-bool UQuestManager::IsQuestActive(const FString& QuestID) const
-{
-    if (!AllQuests.Contains(QuestID))
-    {
-        return false;
-    }
-    
-    return AllQuests[QuestID].Status == EQuest_QuestStatus::Active;
-}
-
-bool UQuestManager::IsQuestCompleted(const FString& QuestID) const
-{
-    if (!AllQuests.Contains(QuestID))
-    {
-        return false;
-    }
-    
-    return AllQuests[QuestID].Status == EQuest_QuestStatus::Completed;
-}
-
-TArray<FQuest_QuestData> UQuestManager::GetActiveQuests() const
-{
-    TArray<FQuest_QuestData> ActiveQuests;
-    
-    for (const FString& QuestID : ActiveQuestIDs)
-    {
-        if (AllQuests.Contains(QuestID))
-        {
-            ActiveQuests.Add(AllQuests[QuestID]);
-        }
-    }
-    
-    return ActiveQuests;
-}
-
-TArray<FQuest_QuestData> UQuestManager::GetCompletedQuests() const
-{
-    TArray<FQuest_QuestData> CompletedQuests;
-    
-    for (const FString& QuestID : CompletedQuestIDs)
-    {
-        if (AllQuests.Contains(QuestID))
-        {
-            CompletedQuests.Add(AllQuests[QuestID]);
-        }
-    }
-    
-    return CompletedQuests;
-}
-
-FQuest_QuestData UQuestManager::GetQuestData(const FString& QuestID) const
-{
-    if (AllQuests.Contains(QuestID))
-    {
-        return AllQuests[QuestID];
-    }
-    
-    return FQuest_QuestData(); // Return empty quest data
-}
-
-void UQuestManager::OnPlayerKilledActor(AActor* KilledActor)
-{
-    if (!KilledActor)
-    {
-        return;
-    }
-    
-    FString ActorName = KilledActor->GetName();
-    
-    // Check all active quests for kill objectives
-    for (const FString& QuestID : ActiveQuestIDs)
-    {
-        if (AllQuests.Contains(QuestID))
-        {
-            FQuest_QuestData& Quest = AllQuests[QuestID];
-            
-            for (FQuest_ObjectiveData& Objective : Quest.Objectives)
-            {
-                if (Objective.Type == EQuest_ObjectiveType::KillTarget && 
-                    !Objective.bIsCompleted &&
-                    ActorName.Contains(Objective.TargetActorID))
-                {
-                    UpdateObjectiveProgress(QuestID, Objective.ObjectiveID, 1);
-                    UE_LOG(LogTemp, Warning, TEXT("QuestManager: Kill objective progress - %s (%d/%d)"), 
-                           *Objective.ObjectiveID, Objective.CurrentProgress, Objective.RequiredQuantity);
-                }
+                UE_LOG(LogTemp, Warning, TEXT("QuestManager: Objective completed: %s"), *Objective.Description);
+                
+                OnObjectiveCompleted.Broadcast(QuestData, Objective);
             }
         }
     }
-}
-
-void UQuestManager::OnPlayerCollectedItem(const FString& ItemID, int32 Quantity)
-{
-    // Check all active quests for collection objectives
-    for (const FString& QuestID : ActiveQuestIDs)
-    {
-        if (AllQuests.Contains(QuestID))
-        {
-            FQuest_QuestData& Quest = AllQuests[QuestID];
-            
-            for (FQuest_ObjectiveData& Objective : Quest.Objectives)
-            {
-                if (Objective.Type == EQuest_ObjectiveType::CollectItem && 
-                    !Objective.bIsCompleted &&
-                    ItemID.Contains(Objective.TargetActorID))
-                {
-                    UpdateObjectiveProgress(QuestID, Objective.ObjectiveID, Quantity);
-                    UE_LOG(LogTemp, Warning, TEXT("QuestManager: Collection objective progress - %s (%d/%d)"), 
-                           *Objective.ObjectiveID, Objective.CurrentProgress, Objective.RequiredQuantity);
-                }
-            }
-        }
-    }
-}
-
-void UQuestManager::OnPlayerReachedLocation(const FVector& Location, float Radius)
-{
-    // Check all active quests for location objectives
-    for (const FString& QuestID : ActiveQuestIDs)
-    {
-        if (AllQuests.Contains(QuestID))
-        {
-            FQuest_QuestData& Quest = AllQuests[QuestID];
-            
-            for (FQuest_ObjectiveData& Objective : Quest.Objectives)
-            {
-                if (Objective.Type == EQuest_ObjectiveType::GoToLocation && 
-                    !Objective.bIsCompleted)
-                {
-                    float Distance = FVector::Dist(Location, Objective.TargetLocation);
-                    if (Distance <= Radius)
-                    {
-                        UpdateObjectiveProgress(QuestID, Objective.ObjectiveID, 1);
-                        UE_LOG(LogTemp, Warning, TEXT("QuestManager: Location objective reached - %s"), *Objective.ObjectiveID);
-                    }
-                }
-            }
-        }
-    }
-}
-
-bool UQuestManager::CheckQuestPrerequisites(const FString& QuestID) const
-{
-    if (!AllQuests.Contains(QuestID))
-    {
-        return false;
-    }
-    
-    const FQuest_QuestData& Quest = AllQuests[QuestID];
-    
-    // Check if all prerequisite quests are completed
-    for (const FString& PrereqID : Quest.Prerequisites)
-    {
-        if (!IsQuestCompleted(PrereqID))
-        {
-            return false;
-        }
-    }
-    
-    return true;
-}
-
-bool UQuestManager::AreAllObjectivesCompleted(const FString& QuestID) const
-{
-    if (!AllQuests.Contains(QuestID))
-    {
-        return false;
-    }
-    
-    const FQuest_QuestData& Quest = AllQuests[QuestID];
-    
-    for (const FQuest_ObjectiveData& Objective : Quest.Objectives)
-    {
-        if (!Objective.bIsOptional && !Objective.bIsCompleted)
-        {
-            return false;
-        }
-    }
-    
-    return true;
-}
-
-void UQuestManager::GiveQuestRewards(const FQuest_QuestData& QuestData)
-{
-    UE_LOG(LogTemp, Warning, TEXT("QuestManager: Giving rewards for quest %s"), *QuestData.QuestID);
-    UE_LOG(LogTemp, Warning, TEXT("QuestManager: Experience reward: %d"), QuestData.ExperienceReward);
-    
-    for (const FString& ItemReward : QuestData.ItemRewards)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("QuestManager: Item reward: %s"), *ItemReward);
-    }
-    
-    // TODO: Integrate with player progression and inventory systems
-}
-
-void UQuestManager::CreateDefaultSurvivalQuests()
-{
-    InitializeDefaultQuests();
-    UE_LOG(LogTemp, Warning, TEXT("QuestManager: Recreated default survival quests"));
-}
-
-void UQuestManager::DebugPrintActiveQuests()
-{
-    UE_LOG(LogTemp, Warning, TEXT("QuestManager: === ACTIVE QUESTS ==="));
-    
-    for (const FString& QuestID : ActiveQuestIDs)
-    {
-        if (AllQuests.Contains(QuestID))
-        {
-            const FQuest_QuestData& Quest = AllQuests[QuestID];
-            UE_LOG(LogTemp, Warning, TEXT("Quest: %s - %s"), *QuestID, *Quest.Title.ToString());
-            
-            for (const FQuest_ObjectiveData& Objective : Quest.Objectives)
-            {
-                UE_LOG(LogTemp, Warning, TEXT("  Objective: %s (%d/%d) %s"), 
-                       *Objective.ObjectiveID, 
-                       Objective.CurrentProgress, 
-                       Objective.RequiredQuantity,
-                       Objective.bIsCompleted ? TEXT("[COMPLETED]") : TEXT("[ACTIVE]"));
-            }
-        }
-    }
-}
-
-void UQuestManager::ResetAllQuests()
-{
-    ActiveQuestIDs.Empty();
-    CompletedQuestIDs.Empty();
-    FailedQuestIDs.Empty();
-    
-    for (auto& QuestPair : AllQuests)
-    {
-        FQuest_QuestData& Quest = QuestPair.Value;
-        Quest.Status = EQuest_QuestStatus::Available;
-        
-        for (FQuest_ObjectiveData& Objective : Quest.Objectives)
-        {
-            Objective.CurrentProgress = 0;
-            Objective.bIsCompleted = false;
-        }
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("QuestManager: Reset all quests"));
 }
