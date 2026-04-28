@@ -2,193 +2,193 @@
 
 #include "CoreMinimal.h"
 #include "Engine/World.h"
-#include "Components/PrimitiveComponent.h"
-#include "Engine/HitResult.h"
+#include "Components/ActorComponent.h"
+#include "Engine/Engine.h"
 #include "PhysicsEngine/PhysicsSettings.h"
-#include "Subsystems/WorldSubsystem.h"
+#include "Materials/MaterialInterface.h"
+#include "PhysicalMaterials/PhysicalMaterial.h"
+#include "Components/StaticMeshComponent.h"
+#include "Components/PrimitiveComponent.h"
+#include "Engine/StaticMeshActor.h"
 #include "../SharedTypes.h"
 #include "PhysicsSystemManager.generated.h"
 
-class UStaticMeshComponent;
-class USkeletalMeshComponent;
-class UCapsuleComponent;
-class USphereComponent;
-class UBoxComponent;
-
 /**
- * Core physics system manager for Transpersonal Game.
- * Handles physics simulation, collision detection, ragdoll physics, and destruction.
- * Designed for realistic prehistoric survival gameplay with dynamic environments.
+ * Core Physics System Manager
+ * Handles all physics simulation, collision detection, and material properties
+ * for the prehistoric survival game. Manages realistic physics for dinosaurs,
+ * environmental objects, and player interactions.
  */
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UPhysicsSystemManager : public UWorldSubsystem
+UCLASS(BlueprintType, Blueprintable, meta = (BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UPhysicsSystemManager : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
     UPhysicsSystemManager();
 
-    // Subsystem Interface
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
-    virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
-
-    // Physics Simulation Control
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
-    void SetPhysicsSimulationEnabled(bool bEnabled);
-
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
-    bool IsPhysicsSimulationEnabled() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
-    void SetGlobalPhysicsScale(float Scale);
-
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
-    float GetGlobalPhysicsScale() const;
-
-    // Collision Detection
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
-    bool PerformLineTrace(const FVector& Start, const FVector& End, FHitResult& OutHit, 
-                         bool bTraceComplex = false, const TArray<AActor*>& ActorsToIgnore = TArray<AActor*>());
-
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
-    bool PerformSphereTrace(const FVector& Start, const FVector& End, float Radius, 
-                           FHitResult& OutHit, bool bTraceComplex = false);
-
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
-    bool PerformBoxTrace(const FVector& Start, const FVector& End, const FVector& HalfSize, 
-                        const FRotator& Orientation, FHitResult& OutHit, bool bTraceComplex = false);
-
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
-    TArray<FHitResult> PerformMultiLineTrace(const FVector& Start, const FVector& End, 
-                                           bool bTraceComplex = false);
-
-    // Ragdoll Physics
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
-    void EnableRagdollPhysics(USkeletalMeshComponent* SkeletalMesh, bool bBlendPhysics = true);
-
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
-    void DisableRagdollPhysics(USkeletalMeshComponent* SkeletalMesh, bool bBlendBack = true);
-
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
-    bool IsRagdollActive(USkeletalMeshComponent* SkeletalMesh) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
-    void SetRagdollBlendWeight(USkeletalMeshComponent* SkeletalMesh, float BlendWeight);
-
-    // Dynamic Destruction
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
-    void ApplyDestructionForce(UPrimitiveComponent* Component, const FVector& Force, 
-                              const FVector& Location, float Radius = 500.0f);
-
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
-    void CreateDestructionField(const FVector& Location, float Radius, float Force, 
-                               float Duration = 5.0f);
-
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
-    void FractureStaticMesh(UStaticMeshComponent* MeshComponent, const FVector& ImpactPoint, 
-                           const FVector& ImpactForce);
-
-    // Physics Materials and Properties
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
-    void SetPhysicsMaterial(UPrimitiveComponent* Component, class UPhysicalMaterial* PhysMaterial);
-
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
-    void SetCollisionResponseToChannel(UPrimitiveComponent* Component, 
-                                     ECollisionChannel Channel, ECollisionResponse Response);
-
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
-    void SetMassOverride(UPrimitiveComponent* Component, float Mass, bool bOverrideMass = true);
-
-    // Environmental Physics
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
-    void ApplyWindForce(const FVector& WindDirection, float WindStrength, float Radius, 
-                       const FVector& Location);
-
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
-    void SimulateEarthquake(const FVector& Epicenter, float Magnitude, float Duration, 
-                           float Radius = 5000.0f);
-
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
-    void CreateWaterBuoyancy(UPrimitiveComponent* Component, float WaterLevel, 
-                            float BuoyancyForce = 1000.0f);
-
-    // Performance and Optimization
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
-    void SetPhysicsLOD(UPrimitiveComponent* Component, int32 LODLevel);
-
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
-    void EnablePhysicsOptimization(bool bEnable);
-
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
-    int32 GetActivePhysicsObjectCount() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
-    float GetPhysicsFrameTime() const;
-
-    // Debug and Visualization
-    UFUNCTION(BlueprintCallable, Category = "Physics System", CallInEditor = true)
-    void DebugDrawPhysicsShapes(bool bEnabled, float Duration = 5.0f);
-
-    UFUNCTION(BlueprintCallable, Category = "Physics System", CallInEditor = true)
-    void DebugDrawCollisionQueries(bool bEnabled);
-
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
-    void LogPhysicsStats() const;
-
 protected:
-    // Internal physics state
-    UPROPERTY(BlueprintReadOnly, Category = "Physics System", meta = (AllowPrivateAccess = "true"))
-    bool bPhysicsSimulationEnabled;
+    virtual void BeginPlay() override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Physics System", meta = (AllowPrivateAccess = "true"))
-    float GlobalPhysicsScale;
+public:
+    // === PHYSICS CONFIGURATION ===
+    
+    /** Global gravity multiplier for the game world */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Settings")
+    float GravityMultiplier = 1.0f;
+    
+    /** Maximum physics simulation distance from player */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Settings")
+    float MaxPhysicsDistance = 5000.0f;
+    
+    /** Enable/disable physics simulation globally */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Settings")
+    bool bEnablePhysicsSimulation = true;
+    
+    /** Physics update frequency (Hz) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Settings", meta = (ClampMin = "30", ClampMax = "120"))
+    int32 PhysicsUpdateFrequency = 60;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Physics System", meta = (AllowPrivateAccess = "true"))
-    bool bPhysicsOptimizationEnabled;
+    // === COLLISION DETECTION ===
+    
+    /** Enable advanced collision detection for dinosaurs */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision")
+    bool bEnableAdvancedCollision = true;
+    
+    /** Collision detection accuracy level */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision")
+    ECore_CollisionAccuracy CollisionAccuracy = ECore_CollisionAccuracy::High;
+    
+    /** Maximum number of collision checks per frame */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision")
+    int32 MaxCollisionChecksPerFrame = 500;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Physics System", meta = (AllowPrivateAccess = "true"))
-    int32 MaxSimulatedBodies;
+    // === PHYSICS MATERIALS ===
+    
+    /** Rock physics material */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Materials")
+    TObjectPtr<UPhysicalMaterial> RockPhysicsMaterial;
+    
+    /** Wood physics material */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Materials")
+    TObjectPtr<UPhysicalMaterial> WoodPhysicsMaterial;
+    
+    /** Flesh physics material (for dinosaurs) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Materials")
+    TObjectPtr<UPhysicalMaterial> FleshPhysicsMaterial;
+    
+    /** Ground/terrain physics material */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Materials")
+    TObjectPtr<UPhysicalMaterial> GroundPhysicsMaterial;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Physics System", meta = (AllowPrivateAccess = "true"))
-    float PhysicsSubstepDeltaTime;
+    // === RAGDOLL PHYSICS ===
+    
+    /** Enable ragdoll physics for dead dinosaurs */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
+    bool bEnableRagdollPhysics = true;
+    
+    /** Ragdoll simulation time before cleanup */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
+    float RagdollLifetime = 30.0f;
+    
+    /** Maximum number of active ragdolls */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
+    int32 MaxActiveRagdolls = 10;
 
-    // Destruction tracking
-    UPROPERTY()
-    TArray<TWeakObjectPtr<UPrimitiveComponent>> ActiveDestructionComponents;
+    // === DESTRUCTION PHYSICS ===
+    
+    /** Enable destructible environments */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction")
+    bool bEnableDestruction = true;
+    
+    /** Destruction force threshold */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction")
+    float DestructionThreshold = 1000.0f;
 
-    UPROPERTY()
-    TArray<TWeakObjectPtr<USkeletalMeshComponent>> ActiveRagdolls;
+    // === PHYSICS FUNCTIONS ===
+    
+    /** Initialize physics system */
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void InitializePhysicsSystem();
+    
+    /** Update physics simulation */
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void UpdatePhysicsSimulation(float DeltaTime);
+    
+    /** Apply physics material to component */
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void ApplyPhysicsMaterial(UPrimitiveComponent* Component, ECore_PhysicsMaterialType MaterialType);
+    
+    /** Enable ragdoll physics on skeletal mesh */
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void EnableRagdollPhysics(class USkeletalMeshComponent* SkeletalMesh);
+    
+    /** Disable ragdoll physics */
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void DisableRagdollPhysics(class USkeletalMeshComponent* SkeletalMesh);
+    
+    /** Create physics constraint between two components */
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    class UPhysicsConstraintComponent* CreatePhysicsConstraint(
+        UPrimitiveComponent* ComponentA, 
+        UPrimitiveComponent* ComponentB,
+        FVector ConstraintLocation
+    );
+    
+    /** Apply impulse to physics object */
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void ApplyImpulse(UPrimitiveComponent* Component, FVector Impulse, FVector Location = FVector::ZeroVector);
+    
+    /** Check if physics simulation is active for component */
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Physics System")
+    bool IsPhysicsSimulationActive(UPrimitiveComponent* Component) const;
+    
+    /** Get physics material type for component */
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Physics System")
+    ECore_PhysicsMaterialType GetPhysicsMaterialType(UPrimitiveComponent* Component) const;
 
-    // Internal helper methods
-    void InitializePhysicsSettings();
-    void CleanupDestroyedComponents();
-    void UpdatePhysicsLOD();
-    void ProcessDestructionFields(float DeltaTime);
-
-    // Physics event handlers
-    UFUNCTION()
-    void OnComponentHit(UPrimitiveComponent* HitComponent, AActor* OtherActor, 
-                       UPrimitiveComponent* OtherComponent, FVector NormalImpulse, 
-                       const FHitResult& Hit);
-
-    UFUNCTION()
-    void OnComponentBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, 
-                                UPrimitiveComponent* OtherComponent, int32 OtherBodyIndex, 
-                                bool bFromSweep, const FHitResult& SweepResult);
+    // === PERFORMANCE MONITORING ===
+    
+    /** Get current physics performance metrics */
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Physics System")
+    FCore_PhysicsPerformanceData GetPhysicsPerformanceData() const;
+    
+    /** Get number of active physics bodies */
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Physics System")
+    int32 GetActivePhysicsBodiesCount() const;
 
 private:
-    // Timer handles for periodic updates
-    FTimerHandle PhysicsUpdateTimer;
-    FTimerHandle CleanupTimer;
-    FTimerHandle LODUpdateTimer;
-
-    // Performance tracking
-    float LastPhysicsFrameTime;
-    int32 ActivePhysicsObjectCount;
+    // === INTERNAL STATE ===
     
-    // Debug state
-    bool bDebugPhysicsShapes;
-    bool bDebugCollisionQueries;
-    float DebugDrawDuration;
+    /** Active ragdoll components */
+    UPROPERTY()
+    TArray<TObjectPtr<class USkeletalMeshComponent>> ActiveRagdolls;
+    
+    /** Physics performance tracking */
+    FCore_PhysicsPerformanceData PerformanceData;
+    
+    /** Last physics update time */
+    float LastPhysicsUpdateTime = 0.0f;
+    
+    /** Physics bodies within simulation range */
+    UPROPERTY()
+    TArray<TObjectPtr<UPrimitiveComponent>> ActivePhysicsBodies;
+
+    // === INTERNAL FUNCTIONS ===
+    
+    /** Update active physics bodies list */
+    void UpdateActivePhysicsBodies();
+    
+    /** Cleanup old ragdolls */
+    void CleanupRagdolls();
+    
+    /** Update performance metrics */
+    void UpdatePerformanceMetrics();
+    
+    /** Create default physics materials */
+    void CreateDefaultPhysicsMaterials();
+    
+    /** Validate physics configuration */
+    bool ValidatePhysicsConfiguration() const;
 };
