@@ -1,0 +1,200 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "UObject/NoExportTypes.h"
+#include "Engine/World.h"
+#include "Subsystems/WorldSubsystem.h"
+#include "Components/ActorComponent.h"
+#include "Engine/Engine.h"
+#include "PhysicsEngine/PhysicsSettings.h"
+#include "Chaos/ChaosEngineInterface.h"
+#include "ChaosPhysicsSystemV43.generated.h"
+
+DECLARE_LOG_CATEGORY_EXTERN(LogChaosPhysicsV43, Log, All);
+
+// Physics simulation quality levels
+UENUM(BlueprintType)
+enum class ECore_PhysicsQualityLevel : uint8
+{
+    Low = 0,        // Minimal physics for distant objects
+    Medium = 1,     // Standard physics for mid-range objects
+    High = 2,       // Full physics for nearby objects
+    Cinematic = 3   // Maximum quality for cutscenes
+};
+
+// Physics event types for the Jurassic survival game
+UENUM(BlueprintType)
+enum class ECore_PhysicsEventType : uint8
+{
+    DinosaurCollision = 0,
+    EnvironmentDestruction = 1,
+    PlayerImpact = 2,
+    VegetationInteraction = 3,
+    WaterSplash = 4,
+    RockSlide = 5
+};
+
+// Delegate for physics events
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnChaosPhysicsEvent, ECore_PhysicsEventType, EventType, AActor*, Actor, FVector, Location);
+
+// Forward declarations
+class UObjectComponent;
+class URagdollSystemComponent;
+class UCollisionSystemComponent;
+class UFluidPhysicsComponent;
+
+/**
+ * Enhanced Chaos Physics System V43
+ * Implements advanced physics simulation for the Jurassic survival game
+ * Features: Large-scale destruction, realistic creature physics, environmental interaction
+ * Performance: Optimized for 60fps PC / 30fps console with LOD system
+ */
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UChaosPhysicsSystemV43 : public UWorldSubsystem
+{
+    GENERATED_BODY()
+
+public:
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+    virtual void OnWorldBeginPlay(UWorld& InWorld) override;
+    virtual void Tick(float DeltaTime);
+
+    /** Get the physics system instance */
+    UFUNCTION(BlueprintPure, Category = "Physics System", CallInEditor)
+    static UChaosPhysicsSystemV43* Get(const UObject* WorldContext);
+
+    /** Initialize Chaos Physics with optimized settings for large-scale simulation */
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void InitializeAdvancedChaosPhysics();
+
+    /** Configure physics specifically for dinosaur creatures */
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void ConfigureDinosaurPhysicsSettings();
+
+    /** Setup environmental destruction system */
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void InitializeDestructionSystem();
+
+    /** Configure ragdoll physics for character death/unconsciousness */
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void InitializeRagdollSystem();
+
+    /** Setup advanced collision detection for large world */
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void InitializeCollisionSystem();
+
+    /** Initialize fluid physics for water and blood */
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void InitializeFluidPhysics();
+
+    /** Register a physics actor with specific quality level */
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void RegisterPhysicsActor(AActor* Actor, ECore_PhysicsQualityLevel QualityLevel, const FString& PhysicsType);
+
+    /** Unregister a physics actor */
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void UnregisterPhysicsActor(AActor* Actor);
+
+    /** Set physics quality level for an actor */
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void SetActorPhysicsQuality(AActor* Actor, ECore_PhysicsQualityLevel QualityLevel);
+
+    /** Get comprehensive physics performance metrics */
+    UFUNCTION(BlueprintPure, Category = "Physics System")
+    void GetDetailedPhysicsMetrics(int32& ActiveBodies, float& SimulationTime, int32& CollisionPairs, 
+                                  float& MemoryUsage, int32& DestructionEvents) const;
+
+    /** Enable/disable physics simulation with graceful degradation */
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void SetPhysicsSimulationEnabled(bool bEnabled, bool bGracefulTransition = true);
+
+    /** Configure adaptive physics LOD based on distance and importance */
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void SetupAdaptivePhysicsLOD();
+
+    /** Force physics update for critical events */
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void ForcePhysicsUpdate();
+
+    /** Set global physics time dilation for slow-motion effects */
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void SetPhysicsTimeDilation(float TimeDilation);
+
+    /** Create physics field for environmental effects */
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void CreatePhysicsField(FVector Location, float Radius, float Strength, float Duration);
+
+    /** Physics event dispatcher */
+    UPROPERTY(BlueprintAssignable, Category = "Physics Events")
+    FOnChaosPhysicsEvent OnChaosPhysicsEvent;
+
+protected:
+    /** Registered physics actors by quality level */
+// [UHT-FIX]     UPROPERTY()
+    TMap<ECore_PhysicsQualityLevel, TArray<TObjectPtr<AActor>>> PhysicsActorsByQuality;
+
+    /** Physics actors by type for specialized handling */
+// [UHT-FIX]     UPROPERTY()
+    TMap<FString, TArray<TObjectPtr<AActor>>> PhysicsActorsByType;
+
+    /** Current physics simulation state */
+    UPROPERTY()
+    bool bPhysicsSimulationEnabled = true;
+
+    /** Current physics quality level */
+    UPROPERTY()
+    ECore_PhysicsQualityLevel CurrentGlobalQuality = ECore_PhysicsQualityLevel::High;
+
+    /** Performance metrics */
+    UPROPERTY()
+    int32 ActivePhysicsBodies = 0;
+
+    UPROPERTY()
+    float LastSimulationTime = 0.0f;
+
+    UPROPERTY()
+    int32 LastCollisionPairs = 0;
+
+    UPROPERTY()
+    float PhysicsMemoryUsage = 0.0f;
+
+    UPROPERTY()
+    int32 DestructionEventCount = 0;
+
+    /** LOD distances for different quality levels */
+    UPROPERTY()
+    TMap<ECore_PhysicsQualityLevel, float> PhysicsLODDistances;
+
+    /** Physics time dilation factor */
+    UPROPERTY()
+    float PhysicsTimeDilation = 1.0f;
+
+    /** Active physics fields */
+    UPROPERTY()
+    TArray<TObjectPtr<class AFieldSystemActor>> ActivePhysicsFields;
+
+private:
+    void UpdatePhysicsMetrics();
+    void ApplyAdaptivePhysicsLOD();
+    void ProcessPhysicsEvents();
+    void OptimizePhysicsPerformance();
+    void HandleLowPerformanceMode();
+    void CleanupInactivePhysicsObjects();
+    
+    // Timer handles
+    FTimerHandle PhysicsUpdateTimer;
+    FTimerHandle PhysicsLODTimer;
+    FTimerHandle PhysicsOptimizationTimer;
+    
+    // Performance tracking
+    float LastFrameTime = 0.0f;
+    int32 LowPerformanceFrameCount = 0;
+    bool bInLowPerformanceMode = false;
+    
+    // Physics settings cache
+    float OriginalGravityZ = -980.0f;
+    float OriginalMaxDeltaTime = 0.033f;
+    bool OriginalSubstepping = true;
+};

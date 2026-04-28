@@ -1,0 +1,154 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Engine/DataAsset.h"
+#include "Engine/StaticMesh.h"
+#include "Materials/MaterialInterface.h"
+#include "ArchitectureTypology.generated.h"
+
+UENUM(BlueprintType)
+enum class EBuildingType : uint8
+{
+    ShelterBasic         UMETA(DisplayName = "Basic Shelter"),
+    ShelterReinforced    UMETA(DisplayName = "Reinforced Shelter"),
+    Watchtower          UMETA(DisplayName = "Watchtower"),
+    StorageHut          UMETA(DisplayName = "Storage Hut"),
+    WorkshopBasic       UMETA(DisplayName = "Basic Workshop"),
+    DefensiveWall       UMETA(DisplayName = "Defensive Wall"),
+    TrapPit             UMETA(DisplayName = "Trap Pit"),
+    FirePit             UMETA(DisplayName = "Fire Pit"),
+    WaterCistern        UMETA(DisplayName = "Water Cistern"),
+    AbandonedRuin       UMETA(DisplayName = "Abandoned Ruin")
+};
+
+UENUM(BlueprintType)
+enum class EArch_ConstructionMaterial_395 : uint8
+{
+    Wood                UMETA(DisplayName = "Wood"),
+    Stone               UMETA(DisplayName = "Stone"),
+    Mud                 UMETA(DisplayName = "Mud/Clay"),
+    Bone                UMETA(DisplayName = "Bone"),
+    Hide                UMETA(DisplayName = "Hide"),
+    Thatch              UMETA(DisplayName = "Thatch"),
+    Vine                UMETA(DisplayName = "Vine")
+};
+
+UENUM(BlueprintType)
+enum class EBuildingCondition : uint8
+{
+    New                 UMETA(DisplayName = "New"),
+    WellMaintained      UMETA(DisplayName = "Well Maintained"),
+    Weathered           UMETA(DisplayName = "Weathered"),
+    Damaged             UMETA(DisplayName = "Damaged"),
+    Ruined              UMETA(DisplayName = "Ruined"),
+    Overgrown           UMETA(DisplayName = "Overgrown")
+};
+
+USTRUCT(BlueprintType)
+struct FInteriorObject
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TSoftObjectPtr<UStaticMesh> Mesh;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FString ObjectName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FString StoryImplication;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FVector RelativePosition;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FRotator RelativeRotation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float SpawnProbability = 1.0f;
+
+    FInteriorObject()
+    {
+        RelativePosition = FVector::ZeroVector;
+        RelativeRotation = FRotator::ZeroRotator;
+    }
+};
+
+USTRUCT(BlueprintType)
+struct FArch_BuildingTemplate
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    EBuildingType BuildingType;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TSoftObjectPtr<UStaticMesh> StructureMesh;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TArray<TSoftObjectPtr<UMaterialInterface>> MaterialVariants;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TArray<FInteriorObject> InteriorObjects;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FVector2D SizeRange = FVector2D(100.0f, 300.0f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    EArch_ConstructionMaterial_395 PrimaryMaterial;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    EBuildingCondition DefaultCondition;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FString ArchitecturalDescription;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FString NarrativeContext;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bRequiresWaterAccess = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bRequiresHighGround = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bRequiresTreeCover = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float MinDistanceFromDangerZones = 500.0f;
+};
+
+/**
+ * Data Asset that defines the complete typology of prehistoric human architecture
+ * Each building type represents a stage of human adaptation to the Jurassic environment
+ */
+UCLASS(BlueprintType)
+class TRANSPERSONALGAME_API UArchitectureTypology : public UDataAsset
+{
+    GENERATED_BODY()
+
+public:
+    UArchitectureTypology();
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building Templates")
+    TArray<FArch_BuildingTemplate> BuildingTemplates;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Material Library")
+    TMap<EArch_ConstructionMaterial_395, TSoftObjectPtr<UMaterialInterface>> MaterialLibrary;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weathering")
+    TMap<EBuildingCondition, float> WeatheringMaterialBlends;
+
+    // Get building template by type
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    FArch_BuildingTemplate GetBuildingTemplate(EBuildingType BuildingType) const;
+
+    // Get random building template suitable for environment conditions
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    FArch_BuildingTemplate GetSuitableBuildingTemplate(bool bNearWater, bool bHighGround, bool bTreeCover) const;
+
+    // Get material for construction type and condition
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    UMaterialInterface* GetMaterialForConstruction(EArch_ConstructionMaterial_395 MaterialType, EBuildingCondition Condition) const;
+};

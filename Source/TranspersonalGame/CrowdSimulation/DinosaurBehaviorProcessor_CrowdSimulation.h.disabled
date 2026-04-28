@@ -1,0 +1,200 @@
+#pragma once
+#ifndef FTP_DINOSPECIESFRAGMENT_DEFINED
+#define FTP_DINOSPECIESFRAGMENT_DEFINED
+struct FTP_DinoSpeciesFragment { FName SpeciesName; float Size = 1.0f; };
+#endif
+
+
+
+
+#include "CoreMinimal.h"
+#include "MassProcessor.h"
+#include "MassEntityTypes.h"
+#include "MassCommonFragments.h"
+#include "DinosaurCrowdManager.h"
+#include "TranspersonalGameSharedTypes.h"
+#include "DinosaurBehaviorProcessor_CrowdSimulation.generated.h"
+
+
+#if 0 // HEADER_DISABLED
+/**
+ * Processor principal para comportamento de dinossauros usando Mass Entity
+ * Implementa state machine para cada dinossauro baseado em necessidades biológicas
+ */
+UCLASS()
+class TRANSPERSONALGAME_API UCrowdSim_DinosaurBehaviorProcessor : public UMassProcessor
+{
+    GENERATED_BODY()
+
+public:
+    UCrowdSim_DinosaurBehaviorProcessor();
+
+protected:
+    virtual void ConfigureQueries() override;
+    virtual void Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context) override;
+
+private:
+    // Query para dinossauros ativos
+    FMassEntityQuery DinosaurQuery;
+
+    // Sistemas de comportamento
+    void ProcessWanderingBehavior(FMassEntityManager& EntityManager, FMassExecutionContext& Context, FMassEntityHandle Entity, FCrowdSim_DinoBehaviorFrag& Behavior, FTransformFragment& Transform, FTP_DinoSpeciesFragment& Species);
+    void ProcessFeedingBehavior(FMassEntityManager& EntityManager, FMassExecutionContext& Context, FMassEntityHandle Entity, FCrowdSim_DinoBehaviorFrag& Behavior, FTransformFragment& Transform, FTP_DinoSpeciesFragment& Species);
+    void ProcessHuntingBehavior(FMassEntityManager& EntityManager, FMassExecutionContext& Context, FMassEntityHandle Entity, FCrowdSim_DinoBehaviorFrag& Behavior, FTransformFragment& Transform, FTP_DinoSpeciesFragment& Species);
+    void ProcessFleeingBehavior(FMassEntityManager& EntityManager, FMassExecutionContext& Context, FMassEntityHandle Entity, FCrowdSim_DinoBehaviorFrag& Behavior, FTransformFragment& Transform, FTP_DinoSpeciesFragment& Species);
+    void ProcessSocializingBehavior(FMassEntityManager& EntityManager, FMassExecutionContext& Context, FMassEntityHandle Entity, FCrowdSim_DinoBehaviorFrag& Behavior, FCrowdSim_DinoBehaviorFrag& Social);
+
+    // Transições de estado
+    void EvaluateStateTransitions(FMassEntityManager& EntityManager, FMassExecutionContext& Context, FMassEntityHandle Entity, FCrowdSim_DinoBehaviorFrag& Behavior, FTP_DinoSpeciesFragment& Species, FTransformFragment& Transform);
+
+    // Utilitários
+    bool FindNearestFood(FVector CurrentLocation, EDinosaurType SpeciesType, float SearchRadius, FVector& OutFoodLocation);
+    bool FindNearestWater(FVector CurrentLocation, float SearchRadius, FVector& OutWaterLocation);
+    bool DetectThreats(FVector CurrentLocation, float DetectionRadius, uint8 /* EDinosaurSize */ MySize, FVector& OutThreatLocation);
+    bool FindSafeLocation(FVector CurrentLocation, FVector ThreatLocation, float MinDistance, FVector& OutSafeLocation);
+
+    // Configurações
+    UPROPERTY(EditAnywhere, Category = "Behavior Settings")
+    float StateChangeInterval = 2.0f;
+
+    UPROPERTY(EditAnywhere, Category = "Behavior Settings")
+    float FoodSearchRadius = 1000.0f;
+
+    UPROPERTY(EditAnywhere, Category = "Behavior Settings")
+    float WaterSearchRadius = 2000.0f;
+
+    UPROPERTY(EditAnywhere, Category = "Behavior Settings")
+    float ThreatDetectionRadius = 1500.0f;
+};
+
+/**
+ * Processor para movimento de dinossauros com avoidance
+ * Integra com o sistema Mass Avoidance para movimentos naturais
+ */
+UCLASS()
+class TRANSPERSONALGAME_API UCrowdSim_DinosaurMovementProcessor : public UMassProcessor
+{
+    GENERATED_BODY()
+
+public:
+    UCrowdSim_DinosaurMovementProcessor();
+
+protected:
+    virtual void ConfigureQueries() override;
+    virtual void Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context) override;
+
+private:
+    FMassEntityQuery MovementQuery;
+
+    // Sistemas de movimento
+    void ProcessWanderingMovement(FMassEntityManager& EntityManager, FMassExecutionContext& Context, FMassEntityHandle Entity, FTransformFragment& Transform, FMassVelocityFragment& Velocity, FCrowdSim_DinoBehaviorFrag& Behavior, FTP_DinoSpeciesFragment& Species);
+    void ProcessTargetedMovement(FMassEntityManager& EntityManager, FMassExecutionContext& Context, FMassEntityHandle Entity, FTransformFragment& Transform, FMassVelocityFragment& Velocity, FCrowdSim_DinoBehaviorFrag& Behavior, FTP_DinoSpeciesFragment& Species);
+    void ProcessFleeMovement(FMassEntityManager& EntityManager, FMassExecutionContext& Context, FMassEntityHandle Entity, FTransformFragment& Transform, FMassVelocityFragment& Velocity, FCrowdSim_DinoBehaviorFrag& Behavior, FTP_DinoSpeciesFragment& Species);
+
+    // Movimento de bando
+    void ApplyPackCohesion(FMassEntityManager& EntityManager, FMassEntityHandle Entity, FTransformFragment& Transform, FMassVelocityFragment& Velocity, FCrowdSim_DinoBehaviorFrag& Social);
+    void ApplyPackSeparation(FMassEntityManager& EntityManager, FMassEntityHandle Entity, FTransformFragment& Transform, FMassVelocityFragment& Velocity, FCrowdSim_DinoBehaviorFrag& Social);
+    void ApplyPackAlignment(FMassEntityManager& EntityManager, FMassEntityHandle Entity, FTransformFragment& Transform, FMassVelocityFragment& Velocity, FCrowdSim_DinoBehaviorFrag& Social);
+
+    // Configurações de movimento
+    UPROPERTY(EditAnywhere, Category = "Movement Settings")
+    float MaxWanderSpeed = 300.0f;
+
+    UPROPERTY(EditAnywhere, Category = "Movement Settings")
+    float MaxFleeSpeed = 800.0f;
+
+    UPROPERTY(EditAnywhere, Category = "Movement Settings")
+    float PackCohesionStrength = 0.3f;
+
+    UPROPERTY(EditAnywhere, Category = "Movement Settings")
+    float PackSeparationStrength = 0.5f;
+
+    UPROPERTY(EditAnywhere, Category = "Movement Settings")
+    float PackAlignmentStrength = 0.2f;
+};
+
+/**
+ * Processor para interações sociais entre dinossauros
+ * Gere formação de bandos, hierarquias e comunicação
+ */
+UCLASS()
+class TRANSPERSONALGAME_API UDinosaurSocialProcessor : public UMassProcessor
+{
+    GENERATED_BODY()
+
+public:
+    UDinosaurSocialProcessor();
+
+protected:
+    virtual void ConfigureQueries() override;
+    virtual void Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context) override;
+
+private:
+    FMassEntityQuery SocialQuery;
+
+    // Sistemas sociais
+    void ProcessPackFormation(FMassEntityManager& EntityManager, FMassExecutionContext& Context);
+    void ProcessPackMaintenance(FMassEntityManager& EntityManager, FMassExecutionContext& Context, FMassEntityHandle Entity, FCrowdSim_DinoBehaviorFrag& Social, FTransformFragment& Transform);
+    void ProcessTerritorialBehavior(FMassEntityManager& EntityManager, FMassExecutionContext& Context, FMassEntityHandle Entity, FCrowdSim_DinoBehaviorFrag& Behavior, FTransformFragment& Transform, FTP_DinoSpeciesFragment& Species);
+
+    // Comunicação entre dinossauros
+    void ProcessDinosaurCommunication(FMassEntityManager& EntityManager, FMassExecutionContext& Context, FMassEntityHandle Entity, FCrowdSim_DinoBehaviorFrag& Social, FTransformFragment& Transform);
+
+    // Gestão de bandos
+    void CreateNewPack(FMassEntityManager& EntityManager, TArray<FMassEntityHandle>& Entities, EDinosaurType SpeciesType);
+    void DisbandPack(FMassEntityManager& EntityManager, int32 PackID);
+    bool ShouldFormPack(FMassEntityManager& EntityManager, FMassEntityHandle Entity, FTP_DinoSpeciesFragment& Species, FCrowdSim_DinoBehaviorFrag& Social);
+
+    // Configurações sociais
+    UPROPERTY(EditAnywhere, Category = "Social Settings")
+    float PackFormationRadius = 800.0f;
+
+    UPROPERTY(EditAnywhere, Category = "Social Settings")
+    float PackDisbandDistance = 2000.0f;
+
+    UPROPERTY(EditAnywhere, Category = "Social Settings")
+    int32 MaxPacksPerSpecies = 20;
+
+    // Tracking de bandos ativos
+    TMap<int32, TArray<FMassEntityHandle>> ActivePacks;
+    int32 NextPackID = 0;
+};
+
+/**
+ * Processor para necessidades biológicas dos dinossauros
+ * Gere fome, sede, cansaço e reprodução
+ */
+UCLASS()
+class TRANSPERSONALGAME_API UCrowdSim_DinosaurNeedsProcessor : public UMassProcessor
+{
+    GENERATED_BODY()
+
+public:
+    UCrowdSim_DinosaurNeedsProcessor();
+
+protected:
+    virtual void ConfigureQueries() override;
+    virtual void Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context) override;
+
+private:
+    FMassEntityQuery NeedsQuery;
+
+    // Sistemas de necessidades
+    void UpdateHunger(FMassEntityManager& EntityManager, FMassExecutionContext& Context, FMassEntityHandle Entity, FCrowdSim_DinoBehaviorFrag& Behavior, FTP_DinoSpeciesFragment& Species, float DeltaTime);
+    void UpdateThirst(FMassEntityManager& EntityManager, FMassExecutionContext& Context, FMassEntityHandle Entity, FCrowdSim_DinoBehaviorFrag& Behavior, float DeltaTime);
+    void UpdateFatigue(FMassEntityManager& EntityManager, FMassExecutionContext& Context, FMassEntityHandle Entity, FCrowdSim_DinoBehaviorFrag& Behavior, float DeltaTime);
+
+    // Configurações de necessidades
+    UPROPERTY(EditAnywhere, Category = "Needs Settings")
+    float HungerIncreaseRate = 0.1f; // Por minuto
+
+    UPROPERTY(EditAnywhere, Category = "Needs Settings")
+    float ThirstIncreaseRate = 0.15f; // Por minuto
+
+    UPROPERTY(EditAnywhere, Category = "Needs Settings")
+    float FatigueIncreaseRate = 0.05f; // Por minuto
+
+    UPROPERTY(EditAnywhere, Category = "Needs Settings")
+    float CriticalNeedThreshold = 0.8f; // Quando as necessidades se tornam críticas
+};
+#endif // HEADER_DISABLED

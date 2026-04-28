@@ -1,0 +1,309 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "MassEntitySubsystem.h"
+#include "MassProcessor.h"
+#include "MassCommonFragments.h"
+#include "MassMovementFragments.h"
+#include "Engine/World.h"
+#include "MassEntityTypes.h"
+#include "CrowdSimulationSystem.generated.h"
+
+// Forward declarations
+class UMassEntitySubsystem;
+struct FMassEntityHandle;
+
+/**
+ * Dinosaur Species Types for Mass Simulation
+ */
+UENUM(BlueprintType)
+enum class ECrowd_DinosaurSpecies : uint8
+{
+    // Herbivores - Small
+    Compsognathus,
+    Hypsilophodon,
+    Dryosaurus,
+    
+    // Herbivores - Medium
+    Parasaurolophus,
+    Triceratops,
+    Stegosaurus,
+    
+    // Herbivores - Large
+    Brachiosaurus,
+    Diplodocus,
+    Apatosaurus,
+    
+    // Carnivores - Small
+    Velociraptor,
+    Deinonychus,
+    Compsognathus_Predator,
+    
+    // Carnivores - Medium
+    Allosaurus,
+    Carnotaurus,
+    Dilophosaurus,
+    
+    // Carnivores - Large
+    TyrannosaurusRex,
+    Giganotosaurus,
+    Spinosaurus,
+    
+    // Flying
+    Pteranodon,
+    Quetzalcoatlus,
+    
+    // Marine (for water areas)
+    Plesiosaur,
+    Mosasaurus,
+    
+    MAX UMETA(Hidden)
+};
+
+/**
+ * Dinosaur Behavior States
+ */
+UENUM(BlueprintType)
+enum class ECrowd_DinosaurBehaviorState : uint8
+{
+    Idle,
+    Foraging,
+    Hunting,
+    Eating,
+    Drinking,
+    Sleeping,
+    Socializing,
+    Migrating,
+    Fleeing,
+    Territorial,
+    Mating,
+    Nesting,
+    MAX UMETA(Hidden)
+};
+
+/**
+ * Fragment: Dinosaur Species Data
+ */
+USTRUCT()
+struct TRANSPERSONALGAME_API FCrowd_DinosaurSpeciesFragment : public FMassFragment
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere)
+    ECrowd_DinosaurSpecies Species = ECrowd_DinosaurSpecies::Compsognathus;
+    
+    UPROPERTY(EditAnywhere)
+    float BaseSize = 1.0f;
+    
+    UPROPERTY(EditAnywhere)
+    float SizeVariation = 0.2f; // ±20% size variation
+    
+    UPROPERTY(EditAnywhere)
+    bool bIsHerbivore = true;
+    
+    UPROPERTY(EditAnywhere)
+    bool bIsPackHunter = false;
+    
+    UPROPERTY(EditAnywhere)
+    float TerritoryRadius = 500.0f;
+    
+    UPROPERTY(EditAnywhere)
+    float DetectionRange = 1000.0f;
+    
+    UPROPERTY(EditAnywhere)
+    float MaxSpeed = 600.0f; // cm/s
+};
+
+/**
+ * Fragment: Individual Dinosaur Traits
+ */
+USTRUCT()
+struct TRANSPERSONALGAME_API FDinosaurIndividualFragment : public FMassFragment
+{
+    GENERATED_BODY()
+
+    // Physical variations
+    UPROPERTY(EditAnywhere)
+    float ActualSize = 1.0f;
+    
+    UPROPERTY(EditAnywhere)
+    FLinearColor ColorTint = FLinearColor::White;
+    
+    UPROPERTY(EditAnywhere)
+    int32 UniqueMarkings = 0; // Bitmask for scars, patterns, etc.
+    
+    // Behavioral traits
+    UPROPERTY(EditAnywhere)
+    float Aggression = 0.5f; // 0-1
+    
+    UPROPERTY(EditAnywhere)
+    float Curiosity = 0.5f; // 0-1
+    
+    UPROPERTY(EditAnywhere)
+    float Fearfulness = 0.5f; // 0-1
+    
+    // Health and status
+    UPROPERTY(EditAnywhere)
+    float Health = 100.0f;
+    
+    UPROPERTY(EditAnywhere)
+    float Hunger = 0.0f; // 0-100, higher = more hungry
+    
+    UPROPERTY(EditAnywhere)
+    float Thirst = 0.0f; // 0-100, higher = more thirsty
+    
+    UPROPERTY(EditAnywhere)
+    float Energy = 100.0f; // 0-100, lower = more tired
+    
+    // Social data
+    UPROPERTY(EditAnywhere)
+    TArray<FMassEntityHandle> PackMembers;
+    
+    UPROPERTY(EditAnywhere)
+    FMassEntityHandle PackLeader;
+    
+    // Unique identifier for player recognition
+    UPROPERTY(EditAnywhere)
+    FGuid UniqueID;
+};
+
+/**
+ * Fragment: Dinosaur Behavior State
+ */
+USTRUCT()
+struct TRANSPERSONALGAME_API FCrowd_DinosaurBehaviorFragment : public FMassFragment
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere)
+    ECrowd_DinosaurBehaviorState CurrentState = ECrowd_DinosaurBehaviorState::Idle;
+    
+    UPROPERTY(EditAnywhere)
+    ECrowd_DinosaurBehaviorState PreviousState = ECrowd_DinosaurBehaviorState::Idle;
+    
+    UPROPERTY(EditAnywhere)
+    float StateTimer = 0.0f;
+    
+    UPROPERTY(EditAnywhere)
+    float StateDuration = 5.0f; // How long to stay in current state
+    
+    UPROPERTY(EditAnywhere)
+    FVector TargetLocation = FVector::ZeroVector;
+    
+    UPROPERTY(EditAnywhere)
+    FMassEntityHandle TargetEntity; // For hunting, fleeing, socializing
+    
+    UPROPERTY(EditAnywhere)
+    float LastPlayerDetectionTime = -1.0f;
+    
+    UPROPERTY(EditAnywhere)
+    FVector LastKnownPlayerLocation = FVector::ZeroVector;
+};
+
+/**
+ * Fragment: Dinosaur Daily Routine
+ */
+USTRUCT()
+struct TRANSPERSONALGAME_API FDinosaurRoutineFragment : public FMassFragment
+{
+    GENERATED_BODY()
+
+    // Time-based behavior patterns (0-24 hour cycle)
+    UPROPERTY(EditAnywhere)
+    float WakeTime = 6.0f;
+    
+    UPROPERTY(EditAnywhere)
+    float SleepTime = 20.0f;
+    
+    UPROPERTY(EditAnywhere)
+    TArray<float> FeedingTimes; // Multiple feeding periods
+    
+    UPROPERTY(EditAnywhere)
+    TArray<float> DrinkingTimes; // Water break times
+    
+    // Territory and movement
+    UPROPERTY(EditAnywhere)
+    FVector HomeLocation = FVector::ZeroVector;
+    
+    UPROPERTY(EditAnywhere)
+    FVector WaterSource = FVector::ZeroVector;
+    
+    UPROPERTY(EditAnywhere)
+    TArray<FVector> PatrolPoints;
+    
+    UPROPERTY(EditAnywhere)
+    int32 CurrentPatrolIndex = 0;
+    
+    // Social behavior
+    UPROPERTY(EditAnywhere)
+    float SocializationTime = 12.0f; // Midday socializing
+    
+    UPROPERTY(EditAnywhere)
+    FVector MeetingPoint = FVector::ZeroVector;
+};
+
+/**
+ * Main Crowd Simulation System
+ * Manages all dinosaur entities using Mass Entity Framework
+ */
+UCLASS()
+class TRANSPERSONALGAME_API UCrowdSimulationSystem : public UWorldSubsystem
+{
+    GENERATED_BODY()
+
+public:
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+    virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
+
+    // Crowd management
+    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
+    void InitializeCrowdSimulation();
+    
+    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
+    void SpawnDinosaurHerd(ECrowd_DinosaurSpecies Species, const FVector& Location, int32 Count = 10, float SpreadRadius = 1000.0f);
+    
+    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
+    void SpawnSolitaryDinosaur(ECrowd_DinosaurSpecies Species, const FVector& Location);
+    
+    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
+    void PopulateEcosystem(const FVector& CenterLocation, float Radius = 10000.0f);
+    
+    // Player interaction
+    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
+    void NotifyPlayerLocation(const FVector& PlayerLocation);
+    
+// [UHT-FIX2]     UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
+    TArray<FMassEntityHandle> GetNearbyDinosaurs(const FVector& Location, float Radius = 2000.0f);
+    
+    // Ecosystem management
+    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
+    void SetTimeOfDay(float Hours); // 0-24
+    
+    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
+    void TriggerEcosystemEvent(const FString& EventType, const FVector& Location, float Radius = 5000.0f);
+
+protected:
+    UPROPERTY()
+    TObjectPtr<UMassEntitySubsystem> MassEntitySubsystem;
+    
+    // Ecosystem data
+    UPROPERTY(EditAnywhere, Category = "Ecosystem")
+    TMap<ECrowd_DinosaurSpecies, int32> SpeciesPopulation;
+    
+    UPROPERTY(EditAnywhere, Category = "Ecosystem")
+    float CurrentTimeOfDay = 12.0f; // Start at noon
+    
+    UPROPERTY(EditAnywhere, Category = "Ecosystem")
+    FVector PlayerLastKnownLocation = FVector::ZeroVector;
+    
+    UPROPERTY(EditAnywhere, Category = "Ecosystem")
+    float PlayerDetectionRadius = 1500.0f;
+    
+private:
+    void SetupSpeciesPopulation();
+    void CreateDinosaurEntity(ECrowd_DinosaurSpecies Species, const FVector& Location, bool bIsPackMember = false);
+    FDinosaurIndividualFragment GenerateIndividualTraits(ECrowd_DinosaurSpecies Species);
+    FDinosaurRoutineFragment GenerateRoutine(ECrowd_DinosaurSpecies Species, const FVector& HomeLocation);
+};

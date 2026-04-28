@@ -1,0 +1,331 @@
+#pragma once
+
+
+
+
+#include "CoreMinimal.h"
+#include "Components/ActorComponent.h"
+#include "GameplayTagContainer.h"
+#include "QuestSystem.h"
+// DISABLED: #include "../CrowdSimulation/MassDinosaurFragments.h"
+#include "MassEntityTypes.h"
+#include "TranspersonalGameSharedTypes.h"
+#include "QuestObjectiveComponent.generated.h"
+
+class UQuestSystem;
+class UMassEntitySubsystem;
+
+
+#if 0 // HEADER_DISABLED - references disabled class
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FObservationTarget
+{
+    GENERATED_BODY()
+
+// [UHT-FIX2]     UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FMassEntityHandle TargetEntity;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FGameplayTag SpeciesTag;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    EBehaviorState RequiredBehavior = EBehaviorState::Idle;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float ObservationDistance = 1000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float MinObservationTime = 10.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bMustRemainHidden = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FVector LastKnownLocation = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float CurrentObservationTime = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsBeingObserved = false;
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FDomesticationTarget
+{
+    GENERATED_BODY()
+
+// [UHT-FIX2]     UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FMassEntityHandle TargetEntity;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FGameplayTag SpeciesTag;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float TrustLevel = 0.0f; // 0-100
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float FearLevel = 50.0f; // 0-100
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    int32 PositiveInteractions = 0;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    int32 NegativeInteractions = 0;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float LastInteractionTime = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TArray<FGameplayTag> PreferredFoods;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bCanBeDomesticated = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float DomesticationThreshold = 80.0f;
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FDiscoveryTarget
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FVector TargetLocation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float DiscoveryRadius = 100.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FGameplayTag LocationTag;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FText LocationName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FText LocationDescription;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bRequiresSpecificTime = false; // Algumas descobertas só acontecem em certas horas
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float RequiredTimeOfDay = 12.0f; // 0-24 horas
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bRequiresSpecificWeather = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FGameplayTag RequiredWeatherTag;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsDiscovered = false;
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FSurvivalChallenge
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FGameplayTag ChallengeType; // Hunger, Thirst, Temperature, Predator
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float TargetDuration = 300.0f; // Tempo que precisa sobreviver
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float CurrentDuration = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FVector ChallengeArea = FVector::ZeroVector; // Centro da área de desafio
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float ChallengeRadius = 1000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TArray<FGameplayTag> AllowedActions; // O que o jogador pode fazer
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TArray<FGameplayTag> ForbiddenActions; // O que não pode fazer
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsActive = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float IntensityLevel = 1.0f; // 0-1, quão difícil é o desafio
+};
+
+/**
+ * Component que gerencia objetivos específicos de missões, integrando com o sistema Mass
+ * para criar experiências de gameplay dinâmicas e responsivas
+ */
+UCLASS(BlueprintType, ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UQuestObjectiveComponent : public UActorComponent
+{
+    GENERATED_BODY()
+
+public:
+    UQuestObjectiveComponent();
+
+protected:
+    virtual void BeginPlay() override;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
+public:
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
+    // Observation Objectives
+    UFUNCTION(BlueprintCallable, Category = "Quest Objectives")
+    bool StartObservationObjective(FName QuestID, int32 ObjectiveIndex, const FObservationTarget& Target);
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Objectives")
+    bool UpdateObservationProgress(const FObservationTarget& Target, float DeltaTime);
+
+// [UHT-FIX2]     UFUNCTION(BlueprintCallable, Category = "Quest Objectives")
+    bool IsValidObservationTarget(FMassEntityHandle Entity, EBehaviorState RequiredBehavior);
+
+// [UHT-FIX2]     UFUNCTION(BlueprintCallable, Category = "Quest Objectives")
+    float GetDistanceToEntity(FMassEntityHandle Entity);
+
+    // Domestication Objectives
+    UFUNCTION(BlueprintCallable, Category = "Quest Objectives")
+    bool StartDomesticationObjective(FName QuestID, int32 ObjectiveIndex, const FDomesticationTarget& Target);
+
+// [UHT-FIX2]     UFUNCTION(BlueprintCallable, Category = "Quest Objectives")
+    bool ProcessDomesticationInteraction(FMassEntityHandle Entity, FGameplayTag InteractionType, bool bPositive);
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Objectives")
+    float CalculateDomesticationProgress(const FDomesticationTarget& Target);
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Objectives")
+    bool IsDomesticationComplete(const FDomesticationTarget& Target);
+
+    // Discovery Objectives
+    UFUNCTION(BlueprintCallable, Category = "Quest Objectives")
+    bool StartDiscoveryObjective(FName QuestID, int32 ObjectiveIndex, const FDiscoveryTarget& Target);
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Objectives")
+    bool CheckDiscoveryConditions(const FDiscoveryTarget& Target);
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Objectives")
+    bool ProcessDiscovery(const FDiscoveryTarget& Target);
+
+    // Survival Objectives
+    UFUNCTION(BlueprintCallable, Category = "Quest Objectives")
+    bool StartSurvivalChallenge(FName QuestID, int32 ObjectiveIndex, const FSurvivalChallenge& Challenge);
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Objectives")
+    bool UpdateSurvivalChallenge(FSurvivalChallenge& Challenge, float DeltaTime);
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Objectives")
+    bool IsSurvivalChallengeComplete(const FSurvivalChallenge& Challenge);
+
+    // Entity Tracking
+// [UHT-FIX2]     UFUNCTION(BlueprintCallable, Category = "Quest Objectives")
+    TArray<FMassEntityHandle> FindEntitiesWithTag(FGameplayTag SpeciesTag, FVector SearchCenter, float SearchRadius);
+
+// [UHT-FIX2]     UFUNCTION(BlueprintCallable, Category = "Quest Objectives")
+    FMassEntityHandle FindNearestEntityWithBehavior(EBehaviorState Behavior, FVector SearchCenter, float SearchRadius);
+
+// [UHT-FIX2]     UFUNCTION(BlueprintCallable, Category = "Quest Objectives")
+    bool IsEntityAlive(FMassEntityHandle Entity);
+
+// [UHT-FIX2]     UFUNCTION(BlueprintCallable, Category = "Quest Objectives")
+    FVector GetEntityLocation(FMassEntityHandle Entity);
+
+    // Player State Tracking
+    UFUNCTION(BlueprintCallable, Category = "Quest Objectives")
+    void UpdatePlayerLocation(FVector NewLocation);
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Objectives")
+    bool IsPlayerHidden(); // Verifica se o jogador está escondido dos dinossauros
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Objectives")
+    float GetPlayerNoiseLevel(); // Quão barulhento o jogador está sendo
+
+// [UHT-FIX2]     UFUNCTION(BlueprintCallable, Category = "Quest Objectives")
+    TArray<FMassEntityHandle> GetEntitiesAwareOfPlayer();
+
+    // Quest Integration
+    UFUNCTION(BlueprintCallable, Category = "Quest Objectives")
+    void RegisterWithQuest(FName QuestID, int32 ObjectiveIndex);
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Objectives")
+    void NotifyObjectiveProgress(FName QuestID, int32 ObjectiveIndex, float Progress);
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Objectives")
+    void CompleteObjective(FName QuestID, int32 ObjectiveIndex);
+
+protected:
+    UPROPERTY()
+    TObjectPtr<UQuestSystem> QuestSystem;
+
+    UPROPERTY()
+    TObjectPtr<UMassEntitySubsystem> MassEntitySubsystem;
+
+    // Active Objectives
+    UPROPERTY()
+    TArray<FObservationTarget> ActiveObservationTargets;
+
+    UPROPERTY()
+    TArray<FDomesticationTarget> ActiveDomesticationTargets;
+
+    UPROPERTY()
+    TArray<FDiscoveryTarget> ActiveDiscoveryTargets;
+
+    UPROPERTY()
+    TArray<FSurvivalChallenge> ActiveSurvivalChallenges;
+
+    // Quest Mapping
+// [UHT-FIX]     UPROPERTY()
+    TMap<FName, TArray<int32>> QuestObjectiveMapping; // QuestID -> Objective Indices
+
+    // Player State
+    UPROPERTY()
+    FVector PlayerLocation = FVector::ZeroVector;
+
+    UPROPERTY()
+    float PlayerNoiseLevel = 0.0f;
+
+    UPROPERTY()
+    bool bPlayerIsHidden = false;
+
+    UPROPERTY()
+    TArray<FMassEntityHandle> EntitiesAwareOfPlayer;
+
+    // Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Config")
+    float ObservationUpdateInterval = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Config")
+    float DomesticationUpdateInterval = 2.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Config")
+    float DiscoveryUpdateInterval = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Config")
+    float SurvivalUpdateInterval = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Config")
+    float MaxObservationDistance = 2000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Config")
+    float HiddenDetectionThreshold = 0.3f; // Quão bem escondido precisa estar
+
+private:
+    FTimerHandle ObservationUpdateTimer;
+    FTimerHandle DomesticationUpdateTimer;
+    FTimerHandle DiscoveryUpdateTimer;
+    FTimerHandle SurvivalUpdateTimer;
+
+    void UpdateObservationObjectives();
+    void UpdateDomesticationObjectives();
+    void UpdateDiscoveryObjectives();
+    void UpdateSurvivalObjectives();
+    void UpdatePlayerState();
+
+    bool CanPlayerObserveEntity(FMassEntityHandle Entity, float RequiredDistance, bool bMustBeHidden);
+    void ProcessEntityAwareness();
+    float CalculateNoiseLevel();
+};#endif // HEADER_DISABLED
+#endif // HEADER_DISABLED

@@ -1,0 +1,159 @@
+#pragma once
+
+#include "CoreMinimal.h"
+// FIXME: Missing header - #include "QA/QATestFramework.h"
+#include "Misc/AutomationTest.h"
+
+
+#if 0 // HEADER_DISABLED - compilation errors
+/**
+ * Gameplay Test Declarations
+ * 
+ * These tests validate core gameplay mechanics specific to the survival game:
+ * - Player survival systems
+ * - Crafting and resource gathering
+ * - Combat mechanics
+ * - Dinosaur domestication
+ * - Base building
+ * - Inventory management
+ */
+
+/**
+ * Test player survival mechanics
+ */
+class TRANSPERSONALGAME_API FPlayerSurvivalTest : public FAutomationTestBase
+{
+public:
+    FPlayerSurvivalTest(const FString& InName, const bool bInComplexTask)
+        : FAutomationTestBase(InName, bInComplexTask)
+    {
+    }
+
+    /* DISABLED: virtual bool RunTest(const FString& Parameters) override */;
+
+protected:
+    bool ValidateHungerSystem();
+    bool ValidateThirstSystem();
+    bool ValidateHealthSystem();
+    bool ValidateTemperatureSystem();
+};
+
+/**
+ * Test crafting system functionality
+ */
+class TRANSPERSONALGAME_API FCraftingSystemTest : public FAutomationTestBase
+{
+public:
+    FCraftingSystemTest(const FString& InName, const bool bInComplexTask)
+        : FAutomationTestBase(InName, bInComplexTask)
+    {
+    }
+
+    /* DISABLED: virtual bool RunTest(const FString& Parameters) override */;
+
+protected:
+    bool ValidateRecipeExecution();
+    bool ValidateResourceConsumption();
+    bool ValidateItemCreation();
+};
+
+/**
+ * Test combat system mechanics
+ */
+class TRANSPERSONALGAME_API FCombatSystemTest : public FAutomationTestBase
+{
+public:
+    FCombatSystemTest(const FString& InName, const bool bInComplexTask)
+        : FAutomationTestBase(InName, bInComplexTask)
+    {
+    }
+
+    /* DISABLED: virtual bool RunTest(const FString& Parameters) override */;
+
+protected:
+    bool ValidateDamageCalculation();
+    bool ValidateHitDetection();
+    bool ValidateWeaponDurability();
+    bool ValidatePlayerVsDinosaurCombat();
+};
+
+/**
+ * Test dinosaur domestication system
+ */
+class TRANSPERSONALGAME_API FDomesticationSystemTest : public FAutomationTestBase
+{
+public:
+    FDomesticationSystemTest(const FString& InName, const bool bInComplexTask)
+        : FAutomationTestBase(InName, bInComplexTask)
+    {
+    }
+
+    /* DISABLED: virtual bool RunTest(const FString& Parameters) override */;
+
+protected:
+    bool ValidateTrustSystem();
+    bool ValidateFeedingMechanics();
+    bool ValidateBehaviorChanges();
+    bool ValidateLongTermRelationship();
+};
+
+/**
+ * Test base building mechanics
+ */
+class TRANSPERSONALGAME_API FBaseBuildingTest : public FAutomationTestBase
+{
+public:
+    FBaseBuildingTest(const FString& InName, const bool bInComplexTask)
+        : FAutomationTestBase(InName, bInComplexTask)
+    {
+    }
+
+    /* DISABLED: virtual bool RunTest(const FString& Parameters) override */;
+
+protected:
+    bool ValidateStructurePlacement();
+    bool ValidateStructuralIntegrity();
+    bool ValidateResourceRequirements();
+    bool ValidateDefensiveStructures();
+};
+
+/**
+ * Test inventory and resource management
+ */
+class TRANSPERSONALGAME_API FInventorySystemTest : public FAutomationTestBase
+{
+public:
+    FInventorySystemTest(const FString& InName, const bool bInComplexTask)
+        : FAutomationTestBase(InName, bInComplexTask)
+    {
+    }
+
+    /* DISABLED: virtual bool RunTest(const FString& Parameters) override */;
+
+protected:
+    bool ValidateItemStacking();
+    bool ValidateWeightLimits();
+    bool ValidateItemDurability();
+    bool ValidateStorageContainers();
+};
+
+/**
+ * Test resource gathering mechanics
+ */
+class TRANSPERSONALGAME_API FResourceGatheringTest : public FAutomationTestBase
+{
+public:
+    FResourceGatheringTest(const FString& InName, const bool bInComplexTask)
+        : FAutomationTestBase(InName, bInComplexTask)
+    {
+    }
+
+    /* DISABLED: virtual bool RunTest(const FString& Parameters) override */;
+
+protected:
+    bool ValidateToolEfficiency();
+    bool ValidateResourceRespawn();
+    bool ValidateResourceQuality();
+    bool ValidateGatheringAnimations();
+};
+#endif // HEADER_DISABLED

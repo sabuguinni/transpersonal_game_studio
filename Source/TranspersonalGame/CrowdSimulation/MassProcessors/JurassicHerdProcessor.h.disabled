@@ -1,0 +1,170 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "MassProcessor.h"
+#include "MassEntityQuery.h"
+#include "MassCommonFragments.h"
+#include "MassMovementFragments.h"
+// FIXME: Missing header - #include "../JurassicCrowdManager.h"
+#include "MassEntityTypes.h"
+#include "JurassicHerdProcessor.generated.h"
+
+// Fragmentos específicos para dinossauros
+
+#if 0 // HEADER_DISABLED
+USTRUCT()
+struct FCrowdSim_JurassicHerdFragment : public FMassFragment
+{
+    GENERATED_BODY()
+
+    EDinosaurHerdType HerdType = EDinosaurHerdType::SmallHerbivore;
+    int32 HerdID = -1;                    // ID único do grupo
+    FVector HerdCenter = FVector::ZeroVector; // Centro atual do grupo
+    float LastUpdateTime = 0.0f;
+    bool bInPanic = false;
+    float PanicEndTime = 0.0f;
+    FVector FleeDirection = FVector::ZeroVector;
+};
+
+USTRUCT()
+struct FCrowdSim_JurassicBehaviorFragment : public FMassFragment
+{
+    GENERATED_BODY()
+
+    float BaseSpeed = 300.0f;
+    float CurrentSpeed = 300.0f;
+    float AlertRadius = 2000.0f;
+    float CohesionRadius = 1000.0f;
+    float SeparationRadius = 200.0f;
+    float PanicSpeedMultiplier = 3.0f;
+    
+    // Estado comportamental
+    float HungerLevel = 0.5f;           // 0.0 = saciado, 1.0 = faminto
+    float ThirstLevel = 0.3f;           // 0.0 = saciado, 1.0 = sedento
+    float EnergyLevel = 1.0f;           // 0.0 = exausto, 1.0 = energético
+    
+    // Timers
+    float LastFeedTime = 0.0f;
+    float LastDrinkTime = 0.0f;
+    float LastRestTime = 0.0f;
+    
+    // Objetivos atuais
+    FVector TargetLocation = FVector::ZeroVector;
+    bool bHasTarget = false;
+    float TargetReachRadius = 100.0f;
+};
+
+USTRUCT()
+struct FJurassicPerceptionFragment : public FMassFragment
+{
+    GENERATED_BODY()
+
+    TArray<FMassEntityHandle> NearbyPredators;
+    TArray<FMassEntityHandle> NearbyPrey;
+    TArray<FMassEntityHandle> NearbyHerdMembers;
+    
+    float LastPerceptionUpdate = 0.0f;
+    float PerceptionUpdateInterval = 0.5f; // Atualiza a cada 0.5 segundos
+    
+    bool bCanSeePredator = false;
+    bool bCanSeePrey = false;
+    FVector PredatorDirection = FVector::ZeroVector;
+    FVector PreyDirection = FVector::ZeroVector;
+};
+
+/**
+ * Processador principal para comportamento de grupos de dinossauros
+ * Implementa flocking, predador-presa, e comportamentos de sobrevivência
+ */
+UCLASS()
+class TRANSPERSONALGAME_API UJurassicHerdProcessor : public UMassProcessor
+{
+    GENERATED_BODY()
+
+public:
+    UJurassicHerdProcessor();
+
+protected:
+    virtual void ConfigureQueries() override;
+    virtual void Execute(UMassEntitySubsystem& EntitySubsystem, FMassExecutionContext& Context) override;
+
+private:
+    // Queries para diferentes tipos de entidades
+    FMassEntityQuery HerbivoreQuery;
+    FMassEntityQuery CarnivoreQuery;
+    FMassEntityQuery FlyingQuery;
+    
+    // Configurações
+    UPROPERTY(EditAnywhere, Category = "Behavior")
+    float MaxProcessingDistance = 15000.0f; // Distância máxima do jogador para processar
+
+    UPROPERTY(EditAnywhere, Category = "Behavior")
+    float FlockingWeight = 1.0f;
+
+    UPROPERTY(EditAnywhere, Category = "Behavior")
+    float SeparationWeight = 2.0f;
+
+    UPROPERTY(EditAnywhere, Category = "Behavior")
+    float CohesionWeight = 1.0f;
+
+    UPROPERTY(EditAnywhere, Category = "Behavior")
+    float AlignmentWeight = 1.0f;
+
+    UPROPERTY(EditAnywhere, Category = "Behavior")
+    float AvoidanceWeight = 5.0f;
+
+    UPROPERTY(EditAnywhere, Category = "Behavior")
+    float SeekWeight = 3.0f;
+
+    // Métodos de comportamento
+    FVector CalculateFlockingForce(const FMassExecutionContext& Context, 
+                                   const FTransformFragment& Transform,
+                                   const FCrowdSim_JurassicHerdFragment& HerdData,
+                                   const FCrowdSim_JurassicBehaviorFragment& Behavior,
+                                   const FJurassicPerceptionFragment& Perception);
+
+    FVector CalculateSeparation(const FMassExecutionContext& Context,
+                               const FTransformFragment& Transform,
+                               const FJurassicPerceptionFragment& Perception,
+                               float SeparationRadius);
+
+    FVector CalculateCohesion(const FMassExecutionContext& Context,
+                             const FTransformFragment& Transform,
+                             const FJurassicPerceptionFragment& Perception,
+                             const FCrowdSim_JurassicHerdFragment& HerdData);
+
+    FVector CalculateAlignment(const FMassExecutionContext& Context,
+                              const FMassVelocityFragment& Velocity,
+                              const FJurassicPerceptionFragment& Perception);
+
+    FVector CalculatePredatorAvoidance(const FMassExecutionContext& Context,
+                                      const FTransformFragment& Transform,
+                                      const FJurassicPerceptionFragment& Perception);
+
+    FVector CalculatePreySeeking(const FMassExecutionContext& Context,
+                                const FTransformFragment& Transform,
+                                const FJurassicPerceptionFragment& Perception,
+                                const FCrowdSim_JurassicBehaviorFragment& Behavior);
+
+    FVector CalculateNeedsBasedMovement(const FMassExecutionContext& Context,
+                                       const FTransformFragment& Transform,
+                                       const FCrowdSim_JurassicBehaviorFragment& Behavior);
+
+    // Utilitários
+    void UpdatePerception(FJurassicPerceptionFragment& Perception,
+                         const FTransformFragment& Transform,
+                         const FCrowdSim_JurassicBehaviorFragment& Behavior,
+                         const UMassEntitySubsystem& EntitySubsystem,
+                         float DeltaTime);
+
+    void UpdateBehaviorState(FCrowdSim_JurassicBehaviorFragment& Behavior,
+                           const FJurassicPerceptionFragment& Perception,
+                           float DeltaTime);
+
+    bool IsPlayerNearby(const FVector& Location, float MaxDistance) const;
+    
+    FVector GetNearestWaterSource(const FVector& Location) const;
+    FVector GetNearestFoodSource(const FVector& Location, EDinosaurHerdType HerdType) const;
+    FVector GetSafeRestingSpot(const FVector& Location) const;
+};
+#endif // HEADER_DISABLED

@@ -1,0 +1,529 @@
+// Copyright Transpersonal Game Studio. All Rights Reserved.
+// Jurassic Lighting Master System - Complete atmospheric lighting control
+// Agent #8 - Lighting & Atmosphere Agent
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "GameFramework/Actor.h"
+#include "Components/ActorComponent.h"
+#include "Engine/DirectionalLight.h"
+#include "Components/SkyAtmosphereComponent.h"
+#include "Components/VolumetricCloudComponent.h"
+#include "Components/SkyLightComponent.h"
+#include "Components/ExponentialHeightFogComponent.h"
+#include "Components/PostProcessComponent.h"
+#include "Engine/PostProcessVolume.h"
+#include "Materials/MaterialParameterCollection.h"
+#include "Curves/CurveFloat.h"
+#include "Curves/CurveLinearColor.h"
+#include "../WorldGeneration/JurassicBiomeManager.h"
+#include "JurassicLightingMasterSystem.generated.h"
+
+
+#if 0 // HEADER_DISABLED
+/**
+ * Master Lighting System for the Jurassic World
+ * Handles complete atmospheric control including:
+ * - Dynamic day/night cycle with realistic sun positioning
+ * - Weather systems (clear, overcast, rain, storms, fog)
+ * - Emotional lighting that responds to gameplay tension
+ * - Biome-specific lighting variations
+ * - Volumetric fog and cloud systems
+ * - Interior lighting transitions
+ * - Performance-optimized LOD system
+ */
+
+UENUM(BlueprintType)
+enum class ELight_JurassicTimeOfDay_A8E : uint8
+{
+    PreDawn     UMETA(DisplayName = "Pre-Dawn (4:00-5:30)"),
+    Dawn        UMETA(DisplayName = "Dawn (5:30-7:00)"),
+    Morning     UMETA(DisplayName = "Morning (7:00-10:00)"),
+    Midday      UMETA(DisplayName = "Midday (10:00-14:00)"),
+    Afternoon   UMETA(DisplayName = "Afternoon (14:00-17:00)"),
+    Dusk        UMETA(DisplayName = "Dusk (17:00-19:00)"),
+    Twilight    UMETA(DisplayName = "Twilight (19:00-20:30)"),
+    Night       UMETA(DisplayName = "Night (20:30-4:00)")
+};
+
+UENUM(BlueprintType)
+enum class EJurassicWeatherType : uint8
+{
+    Clear           UMETA(DisplayName = "Clear Sky"),
+    PartlyCloudy    UMETA(DisplayName = "Partly Cloudy"),
+    Overcast        UMETA(DisplayName = "Overcast"),
+    LightRain       UMETA(DisplayName = "Light Rain"),
+    HeavyRain       UMETA(DisplayName = "Heavy Rain"),
+    Thunderstorm    UMETA(DisplayName = "Thunderstorm"),
+    DenseFog        UMETA(DisplayName = "Dense Fog"),
+    MorningMist     UMETA(DisplayName = "Morning Mist"),
+    HeatHaze        UMETA(DisplayName = "Heat Haze")
+};
+
+UENUM(BlueprintType)
+enum class EEmotionalLightingMode : uint8
+{
+    Neutral         UMETA(DisplayName = "Neutral - Normal exploration"),
+    Peaceful        UMETA(DisplayName = "Peaceful - Safe areas"),
+    Tense           UMETA(DisplayName = "Tense - Something approaches"),
+    Danger          UMETA(DisplayName = "Danger - Immediate threat"),
+    Terror          UMETA(DisplayName = "Terror - Apex predator nearby"),
+    Mystery         UMETA(DisplayName = "Mystery - Unknown presence"),
+    Isolation       UMETA(DisplayName = "Isolation - Alone and vulnerable"),
+    Discovery       UMETA(DisplayName = "Discovery - Finding clues/gema"),
+    Wonder          UMETA(DisplayName = "Wonder - Beautiful natural moments")
+};
+
+UENUM(BlueprintType)
+enum class ELight_LightingQuality : uint8
+{
+    Performance     UMETA(DisplayName = "Performance - 60fps target"),
+    Balanced        UMETA(DisplayName = "Balanced - 45fps target"),
+    Quality         UMETA(DisplayName = "Quality - 30fps target"),
+    Cinematic       UMETA(DisplayName = "Cinematic - No fps limit")
+};
+
+USTRUCT(BlueprintType)
+struct FJurassicSunParameters
+{
+    GENERATED_BODY()
+
+    // Sun position and rotation
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sun Position")
+    FRotator SunRotation = FRotator(-30.0f, 180.0f, 0.0f);
+
+    // Sun light properties
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sun Light")
+    FLinearColor SunColor = FLinearColor(1.0f, 0.95f, 0.8f, 1.0f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sun Light")
+    float SunIntensity = 10.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sun Light")
+    float SunSourceAngle = 0.5f; // For soft shadows
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sun Light")
+    float SunTemperature = 5500.0f; // Kelvin temperature
+
+    // Atmospheric scattering
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
+    float AtmosphereHaziness = 0.3f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
+    float RayleighScattering = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
+    float MieScattering = 1.0f;
+
+    // Sky color influence
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sky")
+    FLinearColor SkyTint = FLinearColor(0.3f, 0.6f, 1.0f, 1.0f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sky")
+    float SkyLuminanceFactor = 1.0f;
+};
+
+USTRUCT(BlueprintType)
+struct FJurassicCloudParameters
+{
+    GENERATED_BODY()
+
+    // Cloud coverage and density
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cloud Coverage")
+    float CloudCoverage = 0.4f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cloud Coverage")
+    float CloudDensity = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cloud Coverage")
+    float CloudOpacity = 0.8f;
+
+    // Cloud movement
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cloud Movement")
+    FVector2D CloudVelocity = FVector2D(10.0f, 5.0f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cloud Movement")
+    float CloudTurbulence = 0.3f;
+
+    // Cloud lighting
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cloud Lighting")
+    FLinearColor CloudAlbedo = FLinearColor(0.9f, 0.9f, 0.9f, 1.0f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cloud Lighting")
+    float CloudScatteringLuminance = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cloud Lighting")
+    float CloudShadowStrength = 0.7f;
+
+    // Cloud types
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cloud Types")
+    float CumulusAmount = 0.6f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cloud Types")
+    float CirrusAmount = 0.3f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cloud Types")
+    float StratusAmount = 0.1f;
+};
+
+USTRUCT(BlueprintType)
+struct FJurassicFogParameters
+{
+    GENERATED_BODY()
+
+    // Fog density and distribution
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog Density")
+    float FogDensity = 0.02f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog Density")
+    float FogHeightFalloff = 0.2f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog Density")
+    float FogMaxOpacity = 1.0f;
+
+    // Fog color and lighting
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog Color")
+    FLinearColor FogInscatteringColor = FLinearColor(0.7f, 0.8f, 0.9f, 1.0f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog Color")
+    FLinearColor DirectionalInscatteringColor = FLinearColor(1.0f, 0.9f, 0.7f, 1.0f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fog Color")
+    float DirectionalInscatteringExponent = 4.0f;
+
+    // Volumetric fog
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volumetric Fog")
+    bool bVolumetricFog = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volumetric Fog")
+    float VolumetricFogScatteringDistribution = 0.2f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volumetric Fog")
+    float VolumetricFogExtinctionScale = 1.0f;
+
+    // Distance fog
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Distance")
+    float StartDistance = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Distance")
+    float FogCutoffDistance = 50000.0f;
+};
+
+USTRUCT(BlueprintType)
+struct FJurassicPostProcessParameters
+{
+    GENERATED_BODY()
+
+    // Exposure and tone mapping
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Exposure")
+    float ExposureBias = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Exposure")
+    float ExposureMinBrightness = 0.1f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Exposure")
+    float ExposureMaxBrightness = 2.0f;
+
+    // Color grading
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Color Grading")
+    FVector4 ColorSaturation = FVector4(1.0f, 1.0f, 1.0f, 1.0f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Color Grading")
+    FVector4 ColorContrast = FVector4(1.0f, 1.0f, 1.0f, 1.0f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Color Grading")
+    FVector4 ColorGamma = FVector4(1.0f, 1.0f, 1.0f, 1.0f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Color Grading")
+    FVector4 ColorGain = FVector4(1.0f, 1.0f, 1.0f, 1.0f);
+
+    // Emotional tinting
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotional")
+    FLinearColor EmotionalTint = FLinearColor::White;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotional")
+    float EmotionalIntensity = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotional")
+    float VignetteIntensity = 0.0f;
+
+    // Film grain and effects
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Film Effects")
+    float FilmGrainIntensity = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Film Effects")
+    float ChromaticAberrationIntensity = 0.0f;
+};
+
+USTRUCT(BlueprintType)
+struct FLight_JurassicLightingPreset
+{
+    GENERATED_BODY()
+
+    // Preset identification
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Preset Info")
+    FString PresetName = "Default";
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Preset Info")
+    FString Description = "";
+
+    // Core lighting parameters
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
+    FJurassicSunParameters SunParameters;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
+    FJurassicCloudParameters CloudParameters;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
+    FJurassicFogParameters FogParameters;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
+    FJurassicPostProcessParameters PostProcessParameters;
+
+    // Transition settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transition")
+    float DefaultTransitionDuration = 5.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transition")
+    bool bAllowInterruption = true;
+};
+
+/**
+ * Master Actor that controls all lighting and atmospheric systems
+ */
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API AJurassicLightingMasterSystem : public AActor
+{
+    GENERATED_BODY()
+
+public:
+    AJurassicLightingMasterSystem();
+
+protected:
+    virtual void BeginPlay() override;
+
+public:
+    virtual void Tick(float DeltaTime);
+
+    // === CORE LIGHTING CONTROL ===
+
+    UFUNCTION(BlueprintCallable, Category = "Lighting Control")
+    void SetTimeOfDay(ELight_JurassicTimeOfDay_A8E NewTimeOfDay, float TransitionDuration = 5.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Lighting Control")
+    void SetWeatherType(EJurassicWeatherType NewWeather, float TransitionDuration = 10.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Lighting Control")
+    void SetEmotionalLighting(EEmotionalLightingMode NewMode, float Intensity = 1.0f, float Duration = -1.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Lighting Control")
+    void SetLightingQuality(ELight_LightingQuality NewQuality);
+
+    // === TIME SYSTEM ===
+
+    UFUNCTION(BlueprintCallable, Category = "Time System")
+    void EnableDynamicTime(bool bEnable, float TimeScale = 1.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Time System")
+    void SetCurrentTime(float Hours); // 0.0 = midnight, 12.0 = noon
+
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Time System")
+    float GetCurrentTime() const { return CurrentTimeHours; }
+
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Time System")
+    ELight_JurassicTimeOfDay_A8E GetCurrentTimeOfDay() const { return CurrentTimeOfDay; }
+
+    // === WEATHER SYSTEM ===
+
+    UFUNCTION(BlueprintCallable, Category = "Weather System")
+    void StartWeatherTransition(EJurassicWeatherType TargetWeather, float Duration = 15.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Weather System")
+    void TriggerLightning(FVector Location = FVector::ZeroVector);
+
+    UFUNCTION(BlueprintCallable, Category = "Weather System")
+    void EnableDynamicWeather(bool bEnable, float ChangeFrequency = 300.0f);
+
+    // === EMOTIONAL LIGHTING TRIGGERS ===
+
+    UFUNCTION(BlueprintCallable, Category = "Emotional Lighting")
+    void TriggerDangerLighting(float Intensity = 1.0f, float Duration = 5.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Emotional Lighting")
+    void TriggerTerrorLighting(float Intensity = 1.0f, float Duration = 8.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Emotional Lighting")
+    void TriggerMysteryLighting(float Intensity = 1.0f, float Duration = 10.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Emotional Lighting")
+    void TriggerDiscoveryLighting(float Intensity = 1.0f, float Duration = 6.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Emotional Lighting")
+    void RestoreNeutralLighting(float TransitionDuration = 3.0f);
+
+    // === BIOME INTEGRATION ===
+
+    UFUNCTION(BlueprintCallable, Category = "Biome Lighting")
+    void UpdateBiomeLighting(EJurassicBiomeType BiomeType, float BlendWeight = 1.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Biome Lighting")
+    void SetBiomeManager(AJurassicBiomeManager* BiomeManager);
+
+    // === INTERIOR LIGHTING ===
+
+    UFUNCTION(BlueprintCallable, Category = "Interior Lighting")
+    void EnterInteriorSpace(float InteriorLightingScale = 0.3f, float TransitionDuration = 2.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Interior Lighting")
+    void ExitInteriorSpace(float TransitionDuration = 2.0f);
+
+protected:
+    // === COMPONENT REFERENCES ===
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    USceneComponent* RootSceneComponent;
+
+    // Core lighting components
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting Components")
+    TObjectPtr<ADirectionalLight> SunLight;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting Components")
+    TObjectPtr<ASkyLight> SkyLight;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting Components")
+    TObjectPtr<ASkyAtmosphere> SkyAtmosphere;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting Components")
+    TObjectPtr<AVolumetricCloud> VolumetricClouds;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting Components")
+    TObjectPtr<AExponentialHeightFog> HeightFog;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting Components")
+    TObjectPtr<APostProcessVolume> PostProcessVolume;
+
+    // Material parameter collection for global lighting values
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Material Parameters")
+    UMaterialParameterCollection* LightingParameterCollection;
+
+    // === CURRENT STATE ===
+
+    UPROPERTY(BlueprintReadOnly, Category = "Current State")
+    ELight_JurassicTimeOfDay_A8E CurrentTimeOfDay = ELight_JurassicTimeOfDay_A8E::Morning;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Current State")
+    EJurassicWeatherType CurrentWeather = EJurassicWeatherType::Clear;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Current State")
+    EEmotionalLightingMode CurrentEmotionalMode = EEmotionalLightingMode::Neutral;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Current State")
+    ELight_LightingQuality CurrentQuality = ELight_LightingQuality::Balanced;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Current State")
+    float CurrentTimeHours = 8.0f; // Start at 8:00 AM
+
+    // === LIGHTING PRESETS ===
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Presets")
+    TMap<ELight_JurassicTimeOfDay_A8E, FLight_JurassicLightingPreset> TimeOfDayPresets;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Presets")
+    TMap<EJurassicWeatherType, FLight_JurassicLightingPreset> WeatherPresets;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Presets")
+    TMap<EEmotionalLightingMode, FLight_JurassicLightingPreset> EmotionalPresets;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Presets")
+    TMap<EJurassicBiomeType, FLight_JurassicLightingPreset> BiomePresets;
+
+    // === DYNAMIC SYSTEMS ===
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dynamic Time")
+    bool bDynamicTimeEnabled = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dynamic Time")
+    float TimeScale = 1.0f; // 1.0 = real time, 60.0 = 1 minute = 1 hour
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dynamic Time")
+    float DayDurationMinutes = 24.0f; // Full day cycle in real minutes
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dynamic Weather")
+    bool bDynamicWeatherEnabled = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dynamic Weather")
+    float WeatherChangeFrequency = 300.0f; // Seconds between weather changes
+
+    // === TRANSITION SYSTEM ===
+
+    UPROPERTY(BlueprintReadOnly, Category = "Transitions")
+    bool bIsTransitioning = false;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Transitions")
+    float TransitionProgress = 0.0f;
+
+    FLight_JurassicLightingPreset SourcePreset;
+    FLight_JurassicLightingPreset TargetPreset;
+    float TransitionDuration = 0.0f;
+    float TransitionTimer = 0.0f;
+
+    // === BIOME INTEGRATION ===
+
+    UPROPERTY(BlueprintReadOnly, Category = "Biome Integration")
+    TObjectPtr<AJurassicBiomeManager> BiomeManager;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Biome Integration")
+    EJurassicBiomeType CurrentBiome = EJurassicBiomeType::DenseForest;
+
+    // === PERFORMANCE SETTINGS ===
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    bool bUseLumenGI = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    bool bUseVirtualShadowMaps = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    bool bUseVolumetricFog = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 MaxCloudQuality = 2; // 0=Low, 1=Medium, 2=High, 3=Ultra
+
+private:
+    // === INTERNAL METHODS ===
+
+    void InitializeLightingComponents();
+    void InitializePresets();
+    void UpdateTimeProgression(float DeltaTime);
+    void UpdateWeatherProgression(float DeltaTime);
+    void UpdateTransitions(float DeltaTime);
+    void UpdateBiomeLighting(float DeltaTime);
+    void ApplyLightingPreset(const FLight_JurassicLightingPreset& Preset);
+    void StartTransition(const FLight_JurassicLightingPreset& Target, float Duration);
+    FLight_JurassicLightingPreset GetCurrentTargetPreset() const;
+    FLight_JurassicLightingPreset BlendPresets(const FLight_JurassicLightingPreset& A, const FLight_JurassicLightingPreset& B, float Alpha) const;
+    void FindOrCreateLightingComponents();
+    ELight_JurassicTimeOfDay_A8E GetTimeOfDayFromHour(float Hour) const;
+    void UpdateMaterialParameters();
+    void ApplyQualitySettings();
+    void UpdateSunPosition();
+    void UpdateCloudSystem();
+    void UpdateFogSystem();
+    void UpdatePostProcessing();
+
+    // Emotional lighting
+    float EmotionalLightingTimer = 0.0f;
+    float EmotionalLightingDuration = 0.0f;
+    EEmotionalLightingMode PreviousEmotionalMode = EEmotionalLightingMode::Neutral;
+
+    // Weather system
+    float WeatherTimer = 0.0f;
+    bool bWeatherTransitionPending = false;
+    EJurassicWeatherType PendingWeatherType = EJurassicWeatherType::Clear;
+
+    // Interior lighting
+    bool bInInteriorSpace = false;
+    float InteriorLightingScale = 1.0f;
+};
+#endif // HEADER_DISABLED

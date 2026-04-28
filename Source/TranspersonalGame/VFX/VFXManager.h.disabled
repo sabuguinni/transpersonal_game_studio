@@ -1,0 +1,175 @@
+// Copyright Transpersonal Game Studio. All Rights Reserved.
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Subsystems/GameInstanceSubsystem.h"
+#include "Engine/World.h"
+#include "TimerManager.h"
+#include "NiagaraSystem.h"
+#include "NiagaraComponent.h"
+#include "NiagaraFunctionLibrary.h"
+#include "VFXTypes.h"
+#include "VFXManager.generated.h"
+
+class UNiagaraComponent;
+class USoundBase;
+class UAudioComponent;
+
+/**
+ * VFX Manager
+ * Central system for managing all visual effects in the game
+ * Handles Niagara systems, LOD chains, pooling, and performance optimization
+ */
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UVFXManager : public UGameInstanceSubsystem
+{
+    GENERATED_BODY()
+
+public:
+    UVFXManager();
+
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+
+    // Core VFX Management
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    int32 SpawnVFXEffect(const FString& EffectID, const FVFXSpawnParams& SpawnParams);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    bool StopVFXEffect(int32 InstanceID);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    bool IsVFXEffectActive(int32 InstanceID) const;
+
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void StopAllVFXEffects();
+
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void StopVFXEffectsByType(EVFXEffectType EffectType);
+
+    // Effect Definition Management
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void RegisterVFXEffect(const FVFXEffectDefinition& EffectDefinition);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    bool GetVFXEffectDefinition(const FString& EffectID, FVFXEffectDefinition& OutDefinition) const;
+
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    TArray<FString> GetAllEffectIDs() const;
+
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    TArray<FString> GetEffectIDsByType(EVFXEffectType EffectType) const;
+
+    // Quality and Performance Management
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void SetGlobalVFXQuality(EVFXQualityLevel NewQuality);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    EVFXQualityLevel GetGlobalVFXQuality() const;
+
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void UpdateVFXSystemConfig(const FVFXSystemConfig& NewConfig);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    FVFXSystemConfig GetVFXSystemConfig() const;
+
+    // Performance Monitoring
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    int32 GetActiveVFXCount() const;
+
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    int32 GetActiveVFXCountByType(EVFXEffectType EffectType) const;
+
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    float GetCurrentVFXPerformanceCost() const;
+
+    // Pooling Management
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void PrewarmVFXPool(const FString& EffectID, int32 PoolSize);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void ClearVFXPool();
+
+    // Utility Functions
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    UNiagaraComponent* GetVFXComponent(int32 InstanceID) const;
+
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    bool SetVFXParameter(int32 InstanceID, const FString& ParameterName, float Value);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    bool SetVFXVectorParameter(int32 InstanceID, const FString& ParameterName, const FVector& Value);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    bool SetVFXColorParameter(int32 InstanceID, const FString& ParameterName, const FLinearColor& Value);
+
+    // Event Delegates
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnVFXSpawned, int32, InstanceID, const FString&, EffectID);
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnVFXStopped, int32, InstanceID, const FString&, EffectID);
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnVFXQualityChanged, EVFXQualityLevel, NewQuality);
+
+    UPROPERTY(BlueprintAssignable, Category = "VFX Events")
+    FOnVFXSpawned OnVFXSpawned;
+
+    UPROPERTY(BlueprintAssignable, Category = "VFX Events")
+    FOnVFXStopped OnVFXStopped;
+
+    UPROPERTY(BlueprintAssignable, Category = "VFX Events")
+    FOnVFXQualityChanged OnVFXQualityChanged;
+
+protected:
+    // Internal Management
+    void TickVFXSystem();
+    void CleanupFinishedEffects();
+    void UpdateLODLevels();
+    void ManagePerformance();
+
+    // Pooling System
+    UNiagaraComponent* GetPooledComponent(const FString& EffectID);
+    void ReturnComponentToPool(UNiagaraComponent* Component, const FString& EffectID);
+    void CreatePooledComponent(const FString& EffectID);
+
+    // Quality Management
+    UNiagaraSystem* GetNiagaraSystemForQuality(const FVFXEffectDefinition& Definition, EVFXQualityLevel Quality) const;
+    void ApplyQualitySettings(UNiagaraComponent* Component, EVFXQualityLevel Quality) const;
+
+    // Distance Culling
+    bool ShouldCullVFXByDistance(const FVector& EffectLocation) const;
+    float GetDistanceToPlayer(const FVector& Location) const;
+
+private:
+    // Configuration
+    UPROPERTY()
+    FVFXSystemConfig SystemConfig;
+
+    // Effect Definitions Registry
+    UPROPERTY()
+    TMap<FString, FVFXEffectDefinition> EffectDefinitions;
+
+    // Active Instances
+    UPROPERTY()
+    TMap<int32, FActiveVFXInstance> ActiveInstances;
+
+    // Object Pooling
+// [UHT-FIX]     UPROPERTY()
+    TMap<FString, TArray<FTableRowBase>> ComponentPools;
+
+    // Instance ID counter
+    int32 NextInstanceID;
+
+    // Performance tracking
+    float LastPerformanceUpdate;
+    float CurrentPerformanceCost;
+
+    // Timer handles
+    FTimerHandle VFXTickTimer;
+    FTimerHandle PerformanceTimer;
+
+    // Constants
+    static const float VFX_TICK_INTERVAL;
+    static const float PERFORMANCE_UPDATE_INTERVAL;
+    static const int32 MAX_POOLED_COMPONENTS_PER_EFFECT;
+    static const float POOL_CLEANUP_TIME;
+};

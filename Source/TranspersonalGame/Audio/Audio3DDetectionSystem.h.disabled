@@ -1,0 +1,138 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Components/ActorComponent.h"
+#include "Sound/SoundAttenuation.h"
+#include "Audio3DDetectionSystem.generated.h"
+
+
+#if 0 // HEADER_DISABLED
+USTRUCT(BlueprintType)
+struct FAudioDetectionData
+{
+    GENERATED_BODY()
+
+// [UHT-FIX]     UPROPERTY(BlueprintReadOnly)
+    class ADinosaur* Source = nullptr;
+
+    UPROPERTY(BlueprintReadOnly)
+    FVector Direction = FVector::ZeroVector;
+
+    UPROPERTY(BlueprintReadOnly)
+    float Distance = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly)
+    float Intensity = 0.0f; // 0-1, how loud/threatening
+
+    UPROPERTY(BlueprintReadOnly)
+    bool bIsVisible = false;
+
+// [UHT-FIX]     UPROPERTY(BlueprintReadOnly)
+    float TimeSinceDetected = 0.0f;
+};
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnAudioDetection, const FAudioDetectionData&, DetectionData);
+// [UHT-FIX] DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnAudioLost, class ADinosaur*, LostDinosaur);
+
+/**
+ * Sistema de detecção de áudio 3D
+ * Permite ao jogador ouvir e localizar dinossauros através do som
+ */
+UCLASS(ClassGroup=(Audio), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UAudio3DDetectionSystem : public UActorComponent
+{
+    GENERATED_BODY()
+
+public:
+    UAudio3DDetectionSystem();
+
+protected:
+    virtual void BeginPlay() override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
+public:
+    // Configurações de detecção
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Detection Settings")
+    float MaxDetectionRange = 5000.0f; // Unreal Units
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Detection Settings")
+    float MinAudibleIntensity = 0.1f; // Minimum sound intensity to detect
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Detection Settings")
+    float DetectionUpdateRate = 10.0f; // Updates per second
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Detection Settings")
+    bool bUseOcclusion = true; // Account for walls/obstacles
+
+// [UHT-FIX]     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Detection Settings")
+    bool bUseDirectionalHearing = true; // Stereo positioning
+
+    // Filtros de detecção
+// [UHT-FIX]     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Detection Filters")
+    TArray<TSubclassOf<class ADinosaur>> DetectableDinosaurTypes;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Detection Filters")
+    bool bDetectAllDinosaurs = true;
+
+    // Estado atual
+    UPROPERTY(BlueprintReadOnly, Category = "Detection State")
+    TArray<FAudioDetectionData> CurrentDetections;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Detection State")
+    FAudioDetectionData ClosestThreat;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Detection State")
+    FAudioDetectionData LoudestSound;
+
+    // Eventos
+    UPROPERTY(BlueprintAssignable, Category = "Audio Events")
+    FOnAudioDetection OnNewDetection;
+
+    UPROPERTY(BlueprintAssignable, Category = "Audio Events")
+    FOnAudioDetection OnDetectionUpdated;
+
+// [UHT-FIX]     UPROPERTY(BlueprintAssignable, Category = "Audio Events")
+    FOnAudioLost OnDetectionLost;
+
+    // Funções públicas
+    UFUNCTION(BlueprintCallable, Category = "Audio Detection")
+    TArray<FAudioDetectionData> GetNearbyThreats(float MaxDistance = 2000.0f) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Audio Detection")
+    bool IsThreateningDinosaurNearby(float MaxDistance = 1000.0f) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Audio Detection")
+    FVector GetDirectionToClosestThreat() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Audio Detection")
+    void SetDetectionSensitivity(float Sensitivity); // 0-1
+
+    UFUNCTION(BlueprintPure, Category = "Audio Detection")
+    float GetTotalThreatLevel() const;
+
+private:
+    // Estado interno
+    float DetectionSensitivity = 1.0f;
+    float LastDetectionUpdate = 0.0f;
+    float DetectionUpdateInterval = 0.1f; // Calculated from DetectionUpdateRate
+
+    TMap<class ADinosaur*, float> LastDetectionTimes;
+
+    // Funções internas
+    void UpdateDetections();
+    void ProcessDinosaur(class ADinosaur* Dinosaur);
+    FAudioDetectionData CreateDetectionData(class ADinosaur* Dinosaur);
+    
+    float CalculateAudioIntensity(class ADinosaur* Dinosaur, float Distance) const;
+    bool IsOccluded(const FVector& Start, const FVector& End) const;
+    bool ShouldDetectDinosaur(class ADinosaur* Dinosaur) const;
+    
+    void UpdateClosestThreat();
+    void UpdateLoudestSound();
+    void CleanupOldDetections();
+
+    // Helpers
+    float GetDinosaurThreatLevel(class ADinosaur* Dinosaur) const;
+    float GetDistanceAttenuation(float Distance) const;
+};
+#endif // HEADER_DISABLED

@@ -1,0 +1,142 @@
+#pragma once
+
+
+
+#include "CoreMinimal.h"
+#include "Components/ActorComponent.h"
+#include "CharacterArchetypeSystem.h"
+#include "MetaHumanSDKRuntime/Public/MetaHumanBodyType.h"
+#include "TranspersonalGameSharedTypes.h"
+#include "MetaHumanCharacterComponent.generated.h"
+
+class UMetaHumanIdentity;
+class USkeletalMeshComponent;
+class UGroomComponent;
+
+
+#if 0 // HEADER_DISABLED
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UMetaHumanCharacterComponent : public UActorComponent
+{
+    GENERATED_BODY()
+
+public:
+    UMetaHumanCharacterComponent();
+
+protected:
+    virtual void BeginPlay() override;
+
+public:
+    // Character data
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    FCharacterArchetypeData CharacterData;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    FString CharacterName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    FString CharacterID; // Unique identifier for this character instance
+
+    // MetaHuman assets
+// [UHT-FIX]     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
+    TSoftObjectPtr<UMetaHumanIdentity> MetaHumanIdentity;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
+    USkeletalMeshComponent* BodyMeshComponent;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
+    USkeletalMeshComponent* FaceMeshComponent;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
+    USceneComponent* /* was UGroomComponent* */ HairGroomComponent;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
+    USceneComponent* /* was UGroomComponent* */ FacialHairGroomComponent;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
+    USceneComponent* /* was UGroomComponent* */ EyebrowGroomComponent;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
+    USceneComponent* /* was UGroomComponent* */ EyelashGroomComponent;
+
+    // Clothing components
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clothing")
+    TArray<USkeletalMeshComponent*> ClothingComponents;
+
+    // Material instances for customization
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
+    UMaterialInstanceDynamic* SkinMaterialInstance;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
+    UMaterialInstanceDynamic* EyeMaterialInstance;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
+    TArray<UMaterialInstanceDynamic*> ClothingMaterialInstances;
+
+    // Generation functions
+    UFUNCTION(BlueprintCallable, Category = "Character Generation")
+    void GenerateCharacterFromArchetype(ECharacterArchetype Archetype, bool bRandomizeTraits = true);
+
+    UFUNCTION(BlueprintCallable, Category = "Character Generation")
+    void ApplyCharacterData(const FCharacterArchetypeData& InCharacterData);
+
+    UFUNCTION(BlueprintCallable, Category = "Character Customization")
+    void UpdateSkinTone(ESkinTone SkinTone);
+
+    UFUNCTION(BlueprintCallable, Category = "Character Customization")
+    void UpdateHairColor(const FLinearColor& HairColor);
+
+    UFUNCTION(BlueprintCallable, Category = "Character Customization")
+    void UpdateEyeColor(const FLinearColor& EyeColor);
+
+    UFUNCTION(BlueprintCallable, Category = "Character Customization")
+    void UpdateClothingColor(int32 ClothingIndex, const FLinearColor& PrimaryColor, const FLinearColor& SecondaryColor);
+
+    UFUNCTION(BlueprintCallable, Category = "Character Customization")
+    void UpdateClothingWear(int32 ClothingIndex, float WearLevel);
+
+    UFUNCTION(BlueprintCallable, Category = "Character Customization")
+    void ApplyScarsAndTattoos();
+
+    UFUNCTION(BlueprintCallable, Category = "Character Info")
+    FString GetCharacterDescription() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Character Info")
+    bool IsHostile() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Character Info")
+    bool CanBeTamed() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Character Info")
+    float GetTrustLevel() const;
+
+protected:
+    UFUNCTION()
+    void InitializeMetaHumanComponents();
+
+    UFUNCTION()
+    void LoadMetaHumanPreset(ECharacterGender Gender);
+
+    UFUNCTION()
+    void SetupClothingComponents();
+
+    UFUNCTION()
+    void CreateMaterialInstances();
+
+    UFUNCTION()
+    FLinearColor GetSkinToneColor(ESkinTone SkinTone) const;
+
+    UPROPERTY()
+    class UCharacterArchetypeDataAsset* ArchetypeDataAsset;
+
+private:
+    bool bIsInitialized = false;
+    
+    // LOD settings for performance
+    UPROPERTY(EditAnywhere, Category = "Performance")
+    int32 MaxLODLevel = 3;
+
+    UPROPERTY(EditAnywhere, Category = "Performance")
+    float LODDistanceMultiplier = 1.0f;
+};
+#endif // HEADER_DISABLED

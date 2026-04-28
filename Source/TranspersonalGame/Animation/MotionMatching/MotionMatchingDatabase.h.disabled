@@ -1,0 +1,181 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Engine/DataAsset.h"
+// FIXME: Missing header - #include "PoseSearch/PoseSearch.h"
+#include "Animation/AnimSequence.h"
+#include "../AnimationSystemCore.h"
+#include "AI/Combat/CombatAITypes.h"
+#include "MotionMatchingDatabase.generated.h"
+
+
+#if 0 // HEADER_DISABLED
+/**
+ * Motion Matching Database Configuration for Transpersonal Game
+ * Manages pose search databases organized by character state and context
+ * Implements dynamic database selection based on gameplay conditions
+ */
+
+USTRUCT(BlueprintType)
+struct FAnimationContextData
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Context")
+    ECharacterMovementState MovementState = ECharacterMovementState::Idle;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Context")
+    EThreatLevel ThreatLevel = EThreatLevel::None;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Context")
+    float FearIntensity = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Context")
+    float StaminaLevel = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Context")
+    bool bIsInjured = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Context")
+    bool bIsCarryingObject = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Context")
+    FString EnvironmentType = TEXT("Forest");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Context")
+    float TerrainSlope = 0.0f;
+};
+
+USTRUCT(BlueprintType)
+struct FDatabaseEntry
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Database")
+    TSoftObjectPtr<UPoseSearchDatabase> Database;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Database")
+    FAnimationContextData RequiredContext;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Database")
+    float Priority = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Database")
+    float BlendWeight = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Database")
+    bool bIsActive = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Database")
+    TArray<FString> RequiredTags;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Database")
+    TArray<FString> ExcludedTags;
+};
+
+USTRUCT(BlueprintType)
+struct FMotionMatchingLOD
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
+    int32 LODLevel = 0;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
+    float MaxDistance = 1000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
+    int32 MaxAnimationsInDatabase = 50;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
+    float QueryFrequency = 60.0f; // Hz
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
+    bool bUseReducedPrecision = false;
+};
+
+UCLASS(BlueprintType)
+class TRANSPERSONALGAME_API UMotionMatchingDatabase : public UDataAsset
+{
+    GENERATED_BODY()
+
+public:
+    UMotionMatchingDatabase();
+
+    // Core Database Entries
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching|Core")
+    TArray<FDatabaseEntry> DatabaseEntries;
+
+    // LOD Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching|Performance")
+    TArray<FMotionMatchingLOD> LODLevels;
+
+    // Schema Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching|Schema")
+    TSoftObjectPtr<class UPoseSearchSchema> DefaultSchema;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching|Schema")
+    TMap<ECharacterMovementState, TSoftObjectPtr<class UPoseSearchSchema>> StateSpecificSchemas;
+
+    // Performance Settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching|Performance")
+    float MaxQueryDistance = 2000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching|Performance")
+    int32 MaxConcurrentQueries = 10;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching|Performance")
+    float QueryCooldownTime = 0.016f; // ~60fps
+
+    // Context Matching
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching|Context")
+    bool bUseContextualMatching = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching|Context")
+    float ContextMatchingThreshold = 0.8f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching|Context")
+    TMap<FString, float> ContextWeights;
+
+    // Functions
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    UPoseSearchDatabase* GetBestDatabase(const FAnimationContextData& Context, int32 LODLevel = 0) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    TArray<UPoseSearchDatabase*> GetDatabasesForContext(const FAnimationContextData& Context) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    float CalculateContextMatch(const FAnimationContextData& RequiredContext, const FAnimationContextData& CurrentContext) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    int32 GetOptimalLODLevel(float DistanceToPlayer) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    void RefreshDatabaseCache();
+
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    bool ValidateDatabase(const FDatabaseEntry& Entry) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    void OptimizeForPerformance();
+
+protected:
+    // Cached data for performance
+    UPROPERTY(Transient)
+    TMap<FString, UPoseSearchDatabase*> DatabaseCache;
+
+    UPROPERTY(Transient)
+    TArray<FDatabaseEntry> SortedEntries;
+
+    UPROPERTY(Transient)
+    float LastCacheRefresh = 0.0f;
+
+private:
+    void SortEntriesByPriority();
+    float CalculateStateWeight(ECharacterMovementState RequiredState, ECharacterMovementState CurrentState) const;
+    float CalculateThreatWeight(EThreatLevel RequiredThreat, EThreatLevel CurrentThreat) const;
+    bool DoesEntryMatchTags(const FDatabaseEntry& Entry, const TArray<FString>& CurrentTags) const;
+    void LoadDatabasesAsync();
+    void UnloadUnusedDatabases();
+};
+#endif // HEADER_DISABLED

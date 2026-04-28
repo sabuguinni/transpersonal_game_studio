@@ -1,0 +1,367 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "MassEntityTypes.h"
+#include "MassProcessor.h"
+#include "MassCommonFragments.h"
+#include "MassMovementFragments.h"
+// FIXME: Missing header - #include "MassDinosaurFragments.h"
+#include "Subsystems/WorldSubsystem.h"
+#include "Engine/DataTable.h"
+#include "AdvancedCrowdSimulation.generated.h"
+
+/**
+ * Advanced Crowd Simulation System for Transpersonal Game
+ * Handles up to 50,000 simultaneous dinosaur agents with emergent behaviors
+ * 
+ * Key Features:
+ * - Hierarchical LOD system for performance scaling
+ * - Emergent ecosystem behaviors (predator-prey dynamics)
+ * - Individual recognition and memory systems
+ * - Dynamic territory and migration patterns
+ * - Player threat assessment and response
+ * - Weather and time-of-day behavioral changes
+ */
+
+UENUM(BlueprintType)
+enum class ECrowdSimulationLOD : uint8
+{
+    Cinematic,      // Full AI, individual behaviors, visual details
+    High,           // Full AI, simplified visuals
+    Medium,         // Simplified AI, basic behaviors
+    Low,            // Group behaviors only, minimal processing
+    Culled          // No processing, position updates only
+};
+
+UENUM(BlueprintType)
+enum class EEcosystemState : uint8
+{
+    Peaceful,       // Normal grazing, low alertness
+    Tense,          // Predators nearby, increased vigilance
+    Panic,          // Active threat, mass fleeing
+    Hunting,        // Predators actively hunting
+    Migration,      // Large-scale movement patterns
+    Territorial     // Aggressive competition for resources
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FCrowdSimulationConfig : public FTableRowBase
+{
+    GENERATED_BODY()
+
+    // Performance settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 MaxActiveAgents = 50000;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 CinematicLODLimit = 50;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 HighLODLimit = 500;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 MediumLODLimit = 5000;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float LODUpdateFrequency = 1.0f; // Seconds between LOD updates
+    
+    // Ecosystem settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ecosystem")
+    float EcosystemUpdateRadius = 20000.0f; // cm
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ecosystem")
+    float PredatorPreyRatio = 0.1f; // 10% predators, 90% prey
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ecosystem")
+    float TerritoryOverlapTolerance = 0.3f;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ecosystem")
+    float MigrationSeasonDuration = 300.0f; // Seconds
+    
+    // Player interaction
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player")
+    float PlayerThreatRadius = 5000.0f; // cm
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player")
+    float PlayerMemoryDuration = 600.0f; // Seconds
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player")
+    float ThreatEscalationRate = 0.1f; // Per encounter
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FMassCrowdLODFragment : public FMassFragment
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    ECrowdSimulationLOD CurrentLOD = ECrowdSimulationLOD::Medium;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float DistanceToPlayer = 99999.0f;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float LastLODUpdateTime = 0.0f;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsVisibleToPlayer = false;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsInPlayerFocus = false; // Within player's view cone
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    int32 FramesSinceLastUpdate = 0;
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FMassEcosystemFragment : public FMassFragment
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    EEcosystemState LocalEcosystemState = EEcosystemState::Peaceful;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float EcosystemTension = 0.0f; // 0-1
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    int32 LocalPopulationDensity = 0;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    int32 LocalPredatorCount = 0;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float ResourceAvailability = 1.0f; // 0-1
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FVector MigrationDirection = FVector::ZeroVector;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float MigrationUrgency = 0.0f; // 0-1
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TArray<FVector> KnownThreatLocations;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float LastPlayerSightingTime = -1.0f;
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FMassEmergentBehaviorFragment : public FMassFragment
+{
+    GENERATED_BODY()
+
+    // Emergent behavior patterns that arise from group dynamics
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsStampeding = false;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FVector StampedeDirection = FVector::ZeroVector;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float StampedeIntensity = 0.0f; // 0-1
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsInMatingDisplay = false;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsDefendingTerritory = false;
+    
+// [UHT-FIX2]     UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FMassEntityHandle TerritorialRival;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsFollowingMigration = false;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    int32 MigrationGroupID = -1;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float SocialInfluence = 0.5f; // How much this entity influences others
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float Conformity = 0.7f; // How much this entity follows others
+};
+
+/**
+ * Advanced LOD Management Processor
+ * Dynamically adjusts simulation detail based on player proximity and performance
+ */
+UCLASS()
+class TRANSPERSONALGAME_API UMassCrowdLODProcessor : public UMassProcessor
+{
+    GENERATED_BODY()
+
+public:
+    UMassCrowdLODProcessor();
+
+protected:
+    virtual void ConfigureQueries() override;
+    virtual void Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context) override;
+
+private:
+    FMassEntityQuery LODQuery;
+    
+    UPROPERTY(EditAnywhere, Category = "LOD")
+    FCrowdSimulationConfig Config;
+    
+    // Performance tracking
+    float LastFrameTime = 0.0f;
+    int32 ActiveAgentCount = 0;
+    
+    void UpdateLODLevels(FMassExecutionContext& Context, const FVector& PlayerLocation);
+    ECrowdSimulationLOD CalculateOptimalLOD(float DistanceToPlayer, bool bIsVisible, bool bInFocus) const;
+};
+
+/**
+ * Ecosystem State Management Processor
+ * Manages large-scale ecosystem behaviors and emergent patterns
+ */
+UCLASS()
+class TRANSPERSONALGAME_API UCrowdSim_MassEcosystemProcessor : public UMassProcessor
+{
+    GENERATED_BODY()
+
+public:
+    UCrowdSim_MassEcosystemProcessor();
+
+protected:
+    virtual void ConfigureQueries() override;
+    virtual void Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context) override;
+
+private:
+    FMassEntityQuery EcosystemQuery;
+    
+    UPROPERTY(EditAnywhere, Category = "Ecosystem")
+    float EcosystemUpdateInterval = 2.0f; // Seconds
+    
+    UPROPERTY(EditAnywhere, Category = "Ecosystem")
+    float TensionPropagationSpeed = 1000.0f; // cm/s
+    
+    float LastEcosystemUpdate = 0.0f;
+    TMap<int32, EEcosystemState> RegionalStates; // Grid-based ecosystem states
+    
+    void PropagateEcosystemTension(FMassExecutionContext& Context);
+    void UpdateMigrationPatterns(FMassExecutionContext& Context);
+    void HandlePlayerThreatResponse(FMassExecutionContext& Context, const FVector& PlayerLocation);
+    EEcosystemState CalculateRegionalState(const FVector& Location, FMassExecutionContext& Context);
+};
+
+/**
+ * Emergent Behavior Processor
+ * Handles complex behaviors that emerge from group dynamics
+ */
+UCLASS()
+class TRANSPERSONALGAME_API UMassEmergentBehaviorProcessor : public UMassProcessor
+{
+    GENERATED_BODY()
+
+public:
+    UMassEmergentBehaviorProcessor();
+
+protected:
+    virtual void ConfigureQueries() override;
+    virtual void Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context) override;
+
+private:
+    FMassEntityQuery EmergentQuery;
+    
+    UPROPERTY(EditAnywhere, Category = "Emergent")
+    float StampedeThreshold = 0.7f; // Tension level to trigger stampede
+    
+    UPROPERTY(EditAnywhere, Category = "Emergent")
+    float MigrationGroupRadius = 2000.0f; // cm
+    
+    UPROPERTY(EditAnywhere, Category = "Emergent")
+    int32 MinMigrationGroupSize = 5;
+    
+    void ProcessStampedeBehavior(FMassExecutionContext& Context);
+    void ProcessMigrationGroups(FMassExecutionContext& Context);
+    void ProcessTerritorialBehavior(FMassExecutionContext& Context);
+    void ProcessSocialInfluence(FMassExecutionContext& Context);
+};
+
+/**
+ * Advanced Crowd Simulation Subsystem
+ * Manages the overall crowd simulation state and performance
+ */
+UCLASS()
+class TRANSPERSONALGAME_API UAdvancedCrowdSimulationSubsystem : public UWorldSubsystem
+{
+    GENERATED_BODY()
+
+public:
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+    virtual void Tick(float DeltaTime);
+    virtual bool ShouldCreateSubsystem(UObject* Outer) const override { return true; }
+
+    // Public interface for other systems
+    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
+    void SetPlayerLocation(const FVector& Location);
+    
+    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
+    void TriggerEcosystemEvent(EEcosystemState NewState, const FVector& Location, float Radius);
+    
+    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
+    void SetSimulationQuality(float QualityLevel); // 0-1
+    
+    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
+    int32 GetActiveAgentCount() const { return CurrentActiveAgents; }
+    
+    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
+    float GetCurrentPerformanceMetric() const { return PerformanceMetric; }
+
+protected:
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
+    FCrowdSimulationConfig SimulationConfig;
+    
+    // Performance tracking
+    int32 CurrentActiveAgents = 0;
+    float PerformanceMetric = 1.0f; // 0-1, where 1 is perfect performance
+    float TargetFrameTime = 16.67f; // 60 FPS target
+    
+    // Player tracking
+    FVector PlayerLocation = FVector::ZeroVector;
+    bool bPlayerLocationValid = false;
+    
+    // Ecosystem state
+    TMap<int32, EEcosystemState> GlobalEcosystemState;
+    float GlobalTensionLevel = 0.0f;
+    
+private:
+    void UpdatePerformanceMetrics(float DeltaTime);
+    void AdjustSimulationQuality();
+    void UpdateGlobalEcosystemState();
+    
+    // Grid-based spatial partitioning for ecosystem management
+    static constexpr int32 EcosystemGridSize = 1000; // 10km x 10km cells
+    int32 GetGridIndex(const FVector& Location) const;
+    FVector GetGridCenter(int32 GridIndex) const;
+};
+
+/**
+ * Crowd Simulation Debug Visualizer
+ * Provides visual debugging tools for crowd simulation
+ */
+UCLASS()
+class TRANSPERSONALGAME_API UCrowdSimulationDebugger : public UObject
+{
+    GENERATED_BODY()
+
+public:
+    UFUNCTION(BlueprintCallable, Category = "Debug")
+    static void DrawCrowdDebugInfo(UWorld* World, bool bShowLOD = true, bool bShowEcosystem = true, bool bShowEmergent = true);
+    
+// [UHT-FIX2]     UFUNCTION(BlueprintCallable, Category = "Debug")
+    static void DrawEntityDebugInfo(UWorld* World, FMassEntityHandle Entity);
+    
+    UFUNCTION(BlueprintCallable, Category = "Debug")
+    static void ToggleDebugMode(bool bEnabled);
+
+private:
+    static bool bDebugEnabled;
+    static void DrawLODDebugInfo(UWorld* World);
+    static void DrawEcosystemDebugInfo(UWorld* World);
+    static void DrawEmergentBehaviorDebugInfo(UWorld* World);
+};

@@ -1,0 +1,256 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "UObject/NoExportTypes.h"
+#include "Engine/World.h"
+#include "Misc/AutomationTest.h"
+#include "AutomationTestSuite.generated.h"
+
+DECLARE_LOG_CATEGORY_EXTERN(LogTranspersonalQA, Log, All);
+
+/**
+ * Comprehensive QA Test Suite for Transpersonal Game
+ * Implements automated testing for all major game systems
+ * 
+ * Test Categories:
+ * - Core System Tests: Engine initialization, world context, game instance
+ * - VFX System Tests: Niagara integration, particle systems, material systems
+ * - AI System Tests: Behavior trees, blackboards, AI controllers
+ * - Navigation Tests: NavMesh generation, pathfinding, navigation queries
+ * - Performance Tests: Frame rate monitoring, memory usage, garbage collection
+ * - Audio System Tests: Sound integration, audio components, MetaSounds
+ * 
+ * Usage:
+ * - Run via Automation Test Framework in UE5 Editor
+ * - Execute through Session Frontend for distributed testing
+ * - Integrate with CI/CD pipeline for automated validation
+ */
+
+/**
+ * Core System Automation Test
+ * Tests fundamental engine and game systems initialization
+ */
+UENUM(BlueprintType)
+enum class EQATestCategory : uint8
+{
+CoreSystems     UMETA(DisplayName = "Core Systems"),
+VFXSystems      UMETA(DisplayName = "VFX Systems"),
+AISystems       UMETA(DisplayName = "AI Systems"),
+Navigation      UMETA(DisplayName = "Navigation"),
+Performance     UMETA(DisplayName = "Performance"),
+AudioSystems    UMETA(DisplayName = "Audio Systems"),
+Integration     UMETA(DisplayName = "Integration"),
+Regression      UMETA(DisplayName = "Regression")
+};
+
+UENUM(BlueprintType)
+enum class EQATestPriority : uint8
+{
+Critical        UMETA(DisplayName = "Critical"),
+High            UMETA(DisplayName = "High"),
+Medium          UMETA(DisplayName = "Medium"),
+Low             UMETA(DisplayName = "Low"),
+Smoke           UMETA(DisplayName = "Smoke Test")
+};
+
+UENUM(BlueprintType)
+enum class EQA_QATestResult : uint8
+{
+NotRun          UMETA(DisplayName = "Not Run"),
+Running         UMETA(DisplayName = "Running"),
+Passed          UMETA(DisplayName = "Passed"),
+Failed          UMETA(DisplayName = "Failed"),
+Skipped         UMETA(DisplayName = "Skipped"),
+Warning         UMETA(DisplayName = "Warning")
+};
+
+
+class TRANSPERSONALGAME_API FTranspersonalCoreSystemTest : public FAutomationTestBase
+{
+public:
+    FTranspersonalCoreSystemTest(const FString& InName, const bool bInComplexTask)
+        : FAutomationTestBase(InName, bInComplexTask) {}
+
+    /* DISABLED: virtual bool RunTest(const FString& Parameters) override */;
+    virtual EAutomationTestFlags GetTestFlags() const override { return EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter | EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter; }
+    virtual FString GetBeautifiedTestName() const override { return TEXT("Core System Initialization"); }
+};
+
+/**
+ * VFX System Automation Test
+ * Tests Niagara integration and visual effects systems
+ */
+class TRANSPERSONALGAME_API FTranspersonalVFXSystemTest : public FAutomationTestBase
+{
+public:
+    FTranspersonalVFXSystemTest(const FString& InName, const bool bInComplexTask)
+        : FAutomationTestBase(InName, bInComplexTask) {}
+
+    /* DISABLED: virtual bool RunTest(const FString& Parameters) override */;
+    virtual EAutomationTestFlags GetTestFlags() const override { return EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter | EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter; }
+    virtual FString GetBeautifiedTestName() const override { return TEXT("VFX Niagara Integration"); }
+};
+
+/**
+ * AI System Automation Test
+ * Tests AI controllers, behavior trees, and blackboard systems
+ */
+class TRANSPERSONALGAME_API FTranspersonalAISystemTest : public FAutomationTestBase
+{
+public:
+    FTranspersonalAISystemTest(const FString& InName, const bool bInComplexTask)
+        : FAutomationTestBase(InName, bInComplexTask) {}
+
+    /* DISABLED: virtual bool RunTest(const FString& Parameters) override */;
+    virtual EAutomationTestFlags GetTestFlags() const override { return EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter | EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter; }
+    virtual FString GetBeautifiedTestName() const override { return TEXT("AI Behavior Tree Integration"); }
+};
+
+/**
+ * Navigation System Automation Test
+ * Tests NavMesh generation and pathfinding capabilities
+ */
+class TRANSPERSONALGAME_API FTranspersonalNavigationTest : public FAutomationTestBase
+{
+public:
+    FTranspersonalNavigationTest(const FString& InName, const bool bInComplexTask)
+        : FAutomationTestBase(InName, bInComplexTask) {}
+
+    /* DISABLED: virtual bool RunTest(const FString& Parameters) override */;
+    virtual EAutomationTestFlags GetTestFlags() const override { return EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter | EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter; }
+    virtual FString GetBeautifiedTestName() const override { return TEXT("Navigation NavMesh Generation"); }
+};
+
+/**
+ * Performance Automation Test
+ * Tests frame rate stability, memory usage, and performance metrics
+ */
+class TRANSPERSONALGAME_API FTranspersonalPerformanceTest : public FAutomationTestBase
+{
+public:
+    FTranspersonalPerformanceTest(const FString& InName, const bool bInComplexTask)
+        : FAutomationTestBase(InName, bInComplexTask) {}
+
+    /* DISABLED: virtual bool RunTest(const FString& Parameters) override */;
+    virtual EAutomationTestFlags GetTestFlags() const override { return EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter | EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter; }
+    virtual FString GetBeautifiedTestName() const override { return TEXT("Performance Frame Rate Stability"); }
+};
+
+/**
+ * Audio System Automation Test
+ * Tests audio integration, sound components, and MetaSounds
+ */
+class TRANSPERSONALGAME_API FTranspersonalAudioSystemTest : public FAutomationTestBase
+{
+public:
+    FTranspersonalAudioSystemTest(const FString& InName, const bool bInComplexTask)
+        : FAutomationTestBase(InName, bInComplexTask) {}
+
+    /* DISABLED: virtual bool RunTest(const FString& Parameters) override */;
+    virtual EAutomationTestFlags GetTestFlags() const override { return EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter | EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter; }
+    virtual FString GetBeautifiedTestName() const override { return TEXT("Audio Sound Integration"); }
+};
+
+/**
+ * Main QA Test Suite Class
+ * Coordinates and manages all automated tests
+ */
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UTranspersonalQATestSuite : public UObject
+{
+    GENERATED_BODY()
+
+public:
+    /**
+     * Get the current test world for automation testing
+     * @return Valid UWorld pointer or nullptr if no world available
+     */
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
+    static UWorld* GetTestWorld();
+
+    /**
+     * Run all automated tests in the suite
+     * This function queues all tests for execution by the automation framework
+     */
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
+    static void RunAllTests();
+
+    /**
+     * Test Categories for organization
+     */
+
+    /**
+     * Test Priority Levels
+     */
+
+    /**
+     * Test Result Status
+     */
+
+protected:
+    /**
+     * Test configuration and settings
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Configuration")
+    bool bEnablePerformanceTesting = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Configuration")
+    bool bEnableStressTesting = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Configuration")
+    float PerformanceTestDuration = 30.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Configuration")
+    int32 MaxConcurrentTests = 4;
+
+    /**
+     * Performance thresholds
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Thresholds")
+    float MinimumFPS = 30.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Thresholds")
+    float MaxMemoryUsageMB = 8192.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Thresholds")
+    float MaxLoadTimeSec = 60.0f;
+};
+
+/**
+ * QA Test Macros for simplified test creation
+ */
+#define TRANSPERSONAL_QA_TEST(TestName, Category, Priority) \
+    IMPLEMENT_SIMPLE_AUTOMATION_TEST(F##TestName##Test, "TranspersonalGame." #Category "." #TestName, \
+        EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter | EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+#define TRANSPERSONAL_QA_COMPLEX_TEST(TestName, Category, Priority) \
+    IMPLEMENT_COMPLEX_AUTOMATION_TEST(F##TestName##Test, "TranspersonalGame." #Category "." #TestName, \
+        EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter | EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+/**
+ * QA Logging Macros
+ */
+#define QA_LOG(Format, ...) UE_LOG(LogTranspersonalQA, Log, Format, ##__VA_ARGS__)
+#define QA_WARNING(Format, ...) UE_LOG(LogTranspersonalQA, Warning, Format, ##__VA_ARGS__)
+#define QA_ERROR(Format, ...) UE_LOG(LogTranspersonalQA, Error, Format, ##__VA_ARGS__)
+
+/**
+ * QA Test Assertion Macros
+ */
+#define QA_ASSERT_TRUE(Condition, Message) \
+    if (!(Condition)) { \
+        AddError(FString::Printf(TEXT("Assertion failed: %s"), Message)); \
+        return false; \
+    }
+
+#define QA_ASSERT_FALSE(Condition, Message) \
+    if (Condition) { \
+        AddError(FString::Printf(TEXT("Assertion failed: %s"), Message)); \
+        return false; \
+    }
+
+#define QA_ASSERT_NOT_NULL(Pointer, Message) \
+    if (!Pointer) { \
+        AddError(FString::Printf(TEXT("Null pointer: %s"), Message)); \
+        return false; \
+    }

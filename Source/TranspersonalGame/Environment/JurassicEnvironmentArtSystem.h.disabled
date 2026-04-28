@@ -1,0 +1,217 @@
+// Copyright Transpersonal Game Studio. All Rights Reserved.
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "GameFramework/Actor.h"
+#include "Components/ActorComponent.h"
+#include "Engine/World.h"
+#include "Landscape.h"
+#include "Components/HierarchicalInstancedStaticMeshComponent.h"
+#include "Components/InstancedStaticMeshComponent.h"
+#include "FoliageType.h"
+#include "InstancedFoliageActor.h"
+#include "Materials/MaterialInterface.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "PCGComponent.h"
+#include "PCGGraph.h"
+#include "WorldPartition/WorldPartition.h"
+#include "JurassicEnvironmentArtSystem.generated.h"
+
+class UStaticMesh;
+class UMaterialInterface;
+class UMaterialInstanceDynamic;
+class UFoliageType;
+class AInstancedFoliageActor;
+class UPCGComponent;
+class ALandscape;
+
+/**
+ * @brief Jurassic Environment Art System
+ * 
+ * Core system for managing environment art in the Jurassic world.
+ * Handles vegetation distribution, material blending, and environmental storytelling.
+ * 
+ * DESIGN PHILOSOPHY:
+ * - Every placement tells a story
+ * - Ecologically accurate vegetation distribution
+ * - Performance-aware LOD and culling
+ * - Seamless integration with PCG systems
+ * 
+ * @author Environment Artist — Agent #6
+ * @version 1.1 — Consolidated March 2026
+ */
+
+/** Biome types for environment art distribution */
+UENUM(BlueprintType)
+enum class EEnvArt_JurassicBiome : uint8
+{
+    Forest              UMETA(DisplayName = "Dense Forest"),
+    Swamp               UMETA(DisplayName = "Swamp Lands"),
+    Savana              UMETA(DisplayName = "Open Savana"),
+    Desert              UMETA(DisplayName = "Arid Desert"),
+    SnowRockside        UMETA(DisplayName = "Snowy Mountains"),
+    RiverValley         UMETA(DisplayName = "River Valley"),
+    RockyOutcrops       UMETA(DisplayName = "Rocky Outcrops")
+};
+
+/** Environment art configuration for each biome */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FJurassicBiomeArtConfig
+{
+    GENERATED_BODY()
+
+    /** Vegetation density multiplier */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vegetation")
+    float VegetationDensity = 1.0f;
+
+    /** Primary vegetation types for this biome */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vegetation")
+    TArray<TSoftObjectPtr<UStaticMesh>> PrimaryVegetation;
+
+    /** Secondary vegetation (understory) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vegetation")
+    TArray<TSoftObjectPtr<UStaticMesh>> SecondaryVegetation;
+
+    /** Ground cover vegetation */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vegetation")
+    TArray<TSoftObjectPtr<UStaticMesh>> GroundCover;
+
+    /** Rock and geological props */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Geology")
+    TArray<TSoftObjectPtr<UStaticMesh>> GeologicalProps;
+
+    /** Environmental storytelling props */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Storytelling")
+    TArray<TSoftObjectPtr<UStaticMesh>> StoryProps;
+
+    /** Landscape material for this biome */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
+    TSoftObjectPtr<UMaterialInterface> LandscapeMaterial;
+
+    /** Foliage material variations */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
+    TArray<TSoftObjectPtr<UMaterialInterface>> FoliageMaterials;
+
+    /** LOD distances for this biome */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    TArray<float> LODDistances = {1000.0f, 2500.0f, 5000.0f};
+
+    /** Culling distance for small props */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float CullingDistance = 10000.0f;
+};
+
+/**
+ * @brief Main Environment Art System Actor
+ * 
+ * Manages all environment art placement and configuration for the Jurassic world.
+ * Integrates with PCG systems and provides performance optimization.
+ */
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API AJurassicEnvironmentArtSystem : public AActor
+{
+    GENERATED_BODY()
+
+public:
+    AJurassicEnvironmentArtSystem();
+
+protected:
+    virtual void BeginPlay() override;
+
+public:
+    /** PCG Component for procedural generation */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    TObjectPtr<UPCGComponent> PCGComponent;
+
+    /** Root scene component */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    TObjectPtr<USceneComponent> RootSceneComponent;
+
+    /** Biome art configurations */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
+    TMap<EEnvArt_JurassicBiome, FJurassicBiomeArtConfig> BiomeConfigurations;
+
+    /** PCG Graph for vegetation distribution */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG")
+    TSoftObjectPtr<UPCGGraph> VegetationPCGGraph;
+
+    /** PCG Graph for prop distribution */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG")
+    TSoftObjectPtr<UPCGGraph> PropPCGGraph;
+
+    /** Global vegetation density multiplier */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Global Settings", meta = (ClampMin = "0.0", ClampMax = "2.0"))
+    float GlobalVegetationDensity = 1.0f;
+
+    /** Global prop density multiplier */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Global Settings", meta = (ClampMin = "0.0", ClampMax = "2.0"))
+    float GlobalPropDensity = 1.0f;
+
+    /** Enable performance optimizations */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    bool bEnablePerformanceOptimizations = true;
+
+    /** Maximum render distance for environment art */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float MaxRenderDistance = 50000.0f;
+
+public:
+    /** Initialize environment art system */
+    UFUNCTION(BlueprintCallable, Category = "Environment Art")
+    void InitializeEnvironmentArt();
+
+    /** Generate environment art for specific biome */
+    UFUNCTION(BlueprintCallable, Category = "Environment Art")
+    void GenerateEnvironmentArtForBiome(EEnvArt_JurassicBiome Biome, const FVector& Location, float Radius);
+
+    /** Update vegetation density in area */
+    UFUNCTION(BlueprintCallable, Category = "Environment Art")
+    void UpdateVegetationDensity(const FVector& Location, float Radius, float NewDensity);
+
+    /** Clear environment art in area */
+    UFUNCTION(BlueprintCallable, Category = "Environment Art")
+    void ClearEnvironmentArt(const FVector& Location, float Radius);
+
+    /** Get biome configuration */
+    UFUNCTION(BlueprintPure, Category = "Environment Art")
+    FJurassicBiomeArtConfig GetBiomeConfiguration(EEnvArt_JurassicBiome Biome) const;
+
+    /** Set biome configuration */
+    UFUNCTION(BlueprintCallable, Category = "Environment Art")
+    void SetBiomeConfiguration(EEnvArt_JurassicBiome Biome, const FJurassicBiomeArtConfig& Config);
+
+protected:
+    /** Setup PCG components */
+    void SetupPCGComponents();
+
+    /** Configure biome-specific settings */
+    void ConfigureBiomeSettings();
+
+    /** Apply performance optimizations */
+    void ApplyPerformanceOptimizations();
+
+    /** Setup material blending */
+    void SetupMaterialBlending();
+
+private:
+    /** Cached landscape reference */
+    UPROPERTY()
+    TObjectPtr<ALandscape> CachedLandscape;
+
+    /** Active foliage actors */
+    UPROPERTY()
+    TArray<TObjectPtr<AInstancedFoliageActor>> FoliageActors;
+
+    /** Performance optimization timer */
+    FTimerHandle PerformanceOptimizationTimer;
+
+    /** Initialize default biome configurations */
+    void InitializeDefaultBiomeConfigurations();
+
+    /** Update LOD levels based on distance */
+    void UpdateLODLevels();
+
+    /** Cull distant objects */
+    void CullDistantObjects();
+};

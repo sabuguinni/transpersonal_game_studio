@@ -1,0 +1,394 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "MassEntityTypes.h"
+#include "MassProcessor.h"
+#include "MassObserverProcessor.h"
+#include "MassCommonFragments.h"
+#include "MassMovementFragments.h"
+// FIXME: Missing header - #include "MassNavigationFragments.h"
+// DISABLED: #include "MassZoneGraphNavigationFragments.h"
+#include "ZoneGraphTypes.h"
+#include "GameFramework/Actor.h"
+#include "Engine/World.h"
+#include "Components/ActorComponent.h"
+#include "MassCrowdIntelligenceV43.generated.h"
+
+// Forward declarations
+class UMassEntitySubsystem;
+class UZoneGraphSubsystem;
+struct FMassEntityHandle;
+
+/**
+ * Enhanced crowd intelligence states for V43
+ */
+UENUM(BlueprintType)
+enum class EMassCrowdIntelligenceState : uint8
+{
+    Idle,
+    Grazing,
+    Migration,
+    FleeingPredator,
+    FleeingPlayer,
+    Territorial,
+    Mating,
+    Nesting,
+    Hunting,
+    Resting,
+    Stampeding,
+    Flocking,
+    Investigating,
+    Socializing
+};
+
+/**
+ * Crowd behavior complexity levels
+ */
+UENUM(BlueprintType)
+enum class ECrowdBehaviorComplexity : uint8
+{
+    Simple,      // Basic movement and avoidance
+    Moderate,    // Group behaviors and basic reactions
+    Advanced,    // Complex social interactions
+    Elite        // Full AI with memory and learning
+};
+
+/**
+ * Mass fragment for crowd intelligence data
+ */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FMassCrowdIntelligenceFragment : public FMassFragment
+{
+    GENERATED_BODY()
+
+    FMassCrowdIntelligenceFragment()
+        : CurrentState(EMassCrowdIntelligenceState::Idle)
+        , PreviousState(EMassCrowdIntelligenceState::Idle)
+        , BehaviorComplexity(ECrowdBehaviorComplexity::Moderate)
+        , StateTimer(0.0f)
+        , AlertLevel(0.0f)
+        , SocialInfluence(0.0f)
+        , GroupCohesion(0.5f)
+        , IndividualWill(0.3f)
+        , StressLevel(0.0f)
+        , EnergyLevel(1.0f)
+        , HungerLevel(0.0f)
+        , ThirstLevel(0.0f)
+        , GroupID(INDEX_NONE)
+        , LeaderEntityHandle()
+        , FollowDistance(500.0f)
+        , PersonalSpace(200.0f)
+        , MaxSpeed(600.0f)
+        , PreferredSpeed(300.0f)
+        , ReactionTime(0.5f)
+        , MemoryDuration(30.0f)
+        , LastThreatLocation(FVector::ZeroVector)
+        , LastThreatTime(0.0f)
+        , HomeLocation(FVector::ZeroVector)
+        , DestinationLocation(FVector::ZeroVector)
+        , bIsGroupLeader(false)
+        , bCanBecomeLeader(true)
+        , bIsInPanic(false)
+        , bHasMemoryOfPlayer(false)
+        , bIsNocturnal(false)
+        , bPrefersSolitude(false)
+    {}
+
+    // Core state management
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    EMassCrowdIntelligenceState CurrentState;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    EMassCrowdIntelligenceState PreviousState;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    ECrowdBehaviorComplexity BehaviorComplexity;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float StateTimer;
+
+    // Emotional and social states
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float AlertLevel;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float SocialInfluence;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float GroupCohesion;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float IndividualWill;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float StressLevel;
+
+    // Biological needs
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float EnergyLevel;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float HungerLevel;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float ThirstLevel;
+
+    // Group dynamics
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    int32 GroupID;
+
+// [UHT-FIX2]     UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FMassEntityHandle LeaderEntityHandle;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float FollowDistance;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float PersonalSpace;
+
+    // Movement characteristics
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float MaxSpeed;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float PreferredSpeed;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float ReactionTime;
+
+    // Memory and awareness
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float MemoryDuration;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FVector LastThreatLocation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float LastThreatTime;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FVector HomeLocation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FVector DestinationLocation;
+
+    // Behavioral flags
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsGroupLeader;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bCanBecomeLeader;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsInPanic;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bHasMemoryOfPlayer;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsNocturnal;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bPrefersSolitude;
+};
+
+/**
+ * Mass fragment for crowd environmental awareness
+ */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FMassCrowdEnvironmentFragment : public FMassFragment
+{
+    GENERATED_BODY()
+
+    FMassCrowdEnvironmentFragment()
+        : NearbyEntitiesCount(0)
+        , NearbyPredatorsCount(0)
+        , NearbyPreyCount(0)
+        , DistanceToWater(FLT_MAX)
+        , DistanceToShelter(FLT_MAX)
+        , DistanceToFood(FLT_MAX)
+        , DistanceToPlayer(FLT_MAX)
+        , TerrainSlope(0.0f)
+        , VegetationDensity(0.0f)
+        , NoiseLevel(0.0f)
+        , VisibilityLevel(1.0f)
+        , SafetyLevel(0.5f)
+        , bIsInWater(false)
+        , bIsInShelter(false)
+        , bCanSeePlayer(false)
+        , bCanHearPlayer(false)
+        , bIsOnGameTrail(false)
+        , bIsInTerritory(false)
+    {}
+
+    // Nearby entity counts
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    int32 NearbyEntitiesCount;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    int32 NearbyPredatorsCount;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    int32 NearbyPreyCount;
+
+    // Distance measurements
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float DistanceToWater;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float DistanceToShelter;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float DistanceToFood;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float DistanceToPlayer;
+
+    // Environmental factors
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float TerrainSlope;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float VegetationDensity;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float NoiseLevel;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float VisibilityLevel;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float SafetyLevel;
+
+    // Environmental state flags
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsInWater;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsInShelter;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bCanSeePlayer;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bCanHearPlayer;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsOnGameTrail;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsInTerritory;
+};
+
+/**
+ * Mass processor for advanced crowd intelligence V43
+ */
+UCLASS()
+class TRANSPERSONALGAME_API UMassCrowdIntelligenceProcessorV43 : public UMassProcessor
+{
+    GENERATED_BODY()
+
+public:
+    UMassCrowdIntelligenceProcessorV43();
+
+protected:
+    virtual void ConfigureQueries() override;
+    virtual void Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context) override;
+
+private:
+    // Core processing functions
+    void ProcessCrowdIntelligence(FMassEntityManager& EntityManager, FMassExecutionContext& Context);
+    void UpdateCrowdStates(FMassEntityManager& EntityManager, FMassExecutionContext& Context);
+    void ProcessGroupDynamics(FMassEntityManager& EntityManager, FMassExecutionContext& Context);
+    void HandleEmergentBehaviors(FMassEntityManager& EntityManager, FMassExecutionContext& Context);
+
+    // State management
+    void UpdateIndividualState(FMassCrowdIntelligenceFragment& Intelligence, 
+                              const FMassCrowdEnvironmentFragment& Environment,
+                              const FTransformFragment& Transform,
+                              float DeltaTime);
+
+    void ProcessStateTransitions(FMassCrowdIntelligenceFragment& Intelligence,
+                                const FMassCrowdEnvironmentFragment& Environment,
+                                float DeltaTime);
+
+    // Group behavior functions
+    void UpdateGroupCohesion(FMassCrowdIntelligenceFragment& Intelligence,
+                            const FMassCrowdEnvironmentFragment& Environment,
+                            const TArrayView<FMassEntityHandle>& NearbyEntities);
+
+    void ProcessLeadershipDynamics(FMassCrowdIntelligenceFragment& Intelligence,
+                                  const FMassCrowdEnvironmentFragment& Environment);
+
+    // Environmental awareness
+    void UpdateEnvironmentalAwareness(FMassCrowdEnvironmentFragment& Environment,
+                                     const FTransformFragment& Transform,
+                                     const FMassEntityHandle& EntityHandle);
+
+    // Emergent behavior detection
+    bool DetectStampedeConditions(const FMassCrowdIntelligenceFragment& Intelligence,
+                                 const FMassCrowdEnvironmentFragment& Environment);
+
+    bool DetectFlockingBehavior(const FMassCrowdIntelligenceFragment& Intelligence,
+                               const FMassCrowdEnvironmentFragment& Environment);
+
+    // Queries
+    FMassEntityQuery CrowdIntelligenceQuery;
+    FMassEntityQuery GroupDynamicsQuery;
+    FMassEntityQuery EnvironmentAwarenessQuery;
+
+    // Configuration parameters
+    UPROPERTY(EditAnywhere, Category = "Crowd Intelligence")
+    float ProcessingRange = 2000.0f;
+
+    UPROPERTY(EditAnywhere, Category = "Crowd Intelligence")
+    float GroupFormationDistance = 1000.0f;
+
+    UPROPERTY(EditAnywhere, Category = "Crowd Intelligence")
+    float PanicSpreadRadius = 1500.0f;
+
+    UPROPERTY(EditAnywhere, Category = "Crowd Intelligence")
+    float LeadershipInfluenceRadius = 800.0f;
+
+    UPROPERTY(EditAnywhere, Category = "Crowd Intelligence")
+    int32 MaxEntitiesPerFrame = 1000;
+
+    UPROPERTY(EditAnywhere, Category = "Performance")
+    bool bEnableAdvancedBehaviors = true;
+
+    UPROPERTY(EditAnywhere, Category = "Performance")
+    bool bEnableEmergentBehaviors = true;
+
+    UPROPERTY(EditAnywhere, Category = "Performance")
+    float UpdateFrequency = 0.1f;
+
+private:
+    float LastUpdateTime = 0.0f;
+    TArray<FMassEntityHandle> ProcessedEntities;
+    TMap<int32, TArray<FMassEntityHandle>> GroupEntities;
+};
+
+/**
+ * Mass observer processor for crowd intelligence events
+ */
+UCLASS()
+class TRANSPERSONALGAME_API UMassCrowdIntelligenceObserverV43 : public UMassObserverProcessor
+{
+    GENERATED_BODY()
+
+public:
+    UMassCrowdIntelligenceObserverV43();
+
+protected:
+    virtual void ConfigureQueries() override;
+    virtual void Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context) override;
+
+private:
+    void OnCrowdStateChanged(FMassEntityManager& EntityManager, FMassExecutionContext& Context);
+    void OnGroupFormation(FMassEntityManager& EntityManager, FMassExecutionContext& Context);
+    void OnEmergentBehaviorDetected(FMassEntityManager& EntityManager, FMassExecutionContext& Context);
+
+    FMassEntityQuery StateChangeQuery;
+    FMassEntityQuery GroupFormationQuery;
+    FMassEntityQuery EmergentBehaviorQuery;
+};

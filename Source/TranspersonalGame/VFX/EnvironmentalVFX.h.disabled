@@ -1,0 +1,230 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Components/ActorComponent.h"
+#include "Engine/World.h"
+#include "NiagaraComponent.h"
+#include "VFXManager.h"
+#include "Components/PostProcessComponent.h"
+#include "EnvironmentalVFX.generated.h"
+
+UENUM(BlueprintType)
+enum class EVFX_WeatherType : uint8
+{
+    Clear,
+    LightRain,
+    HeavyRain,
+    Thunderstorm,
+    Fog,
+    Mist,
+    Sandstorm,
+    Snow
+};
+
+UENUM(BlueprintType)
+enum class EVFX_TimeOfDay_73C : uint8
+{
+    Dawn,
+    Morning,
+    Midday,
+    Afternoon,
+    Dusk,
+    Night
+};
+
+USTRUCT(BlueprintType)
+struct FWeatherVFXSettings
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float Intensity = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float WindStrength = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FLinearColor WeatherTint = FLinearColor::White;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float VisibilityRange = 10000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bEnableLightning = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float LightningFrequency = 0.1f; // Per second
+};
+
+USTRUCT(BlueprintType)
+struct FAtmosphericVFXSettings
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float DustParticleIntensity = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float PollenIntensity = 0.3f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float FireflyIntensity = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float VolumetricFogDensity = 0.1f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FLinearColor AtmosphericColor = FLinearColor(1.0f, 0.9f, 0.7f, 1.0f);
+};
+
+/**
+ * Environmental VFX Component - Manages weather, atmospheric effects, and environmental particles
+ * Handles dynamic weather systems, fog, atmospheric particles, and lighting effects
+ */
+UCLASS(ClassGroup=(VFX), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UEnvironmentalVFX : public UActorComponent
+{
+    GENERATED_BODY()
+
+public:
+    UEnvironmentalVFX();
+
+protected:
+    virtual void BeginPlay() override;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
+public:
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
+    // Weather System
+    UFUNCTION(BlueprintCallable, Category = "Environmental VFX|Weather")
+    void SetWeatherType(EVFX_WeatherType NewWeatherType, float TransitionTime = 5.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Environmental VFX|Weather")
+    void UpdateWeatherIntensity(float NewIntensity);
+
+    UFUNCTION(BlueprintCallable, Category = "Environmental VFX|Weather")
+    void TriggerLightningStrike(const FVector& StrikeLocation = FVector::ZeroVector);
+
+    UFUNCTION(BlueprintCallable, Category = "Environmental VFX|Weather")
+    void SetWindDirection(const FVector& WindDirection, float WindSpeed = 1.0f);
+
+    // Atmospheric Effects
+    UFUNCTION(BlueprintCallable, Category = "Environmental VFX|Atmosphere")
+    void UpdateAtmosphericSettings(const FAtmosphericVFXSettings& NewSettings);
+
+    UFUNCTION(BlueprintCallable, Category = "Environmental VFX|Atmosphere")
+    void SetTimeOfDay(EVFX_TimeOfDay_73C NewTimeOfDay, float TransitionTime = 10.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Environmental VFX|Atmosphere")
+    void SpawnAtmosphericParticles(const FVector& Location, float Radius = 1000.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Environmental VFX|Atmosphere")
+    void UpdateVolumetricFog(float Density, const FLinearColor& FogColor);
+
+    // Environmental Interactions
+    UFUNCTION(BlueprintCallable, Category = "Environmental VFX|Interaction")
+    void TriggerEnvironmentalDisturbance(const FVector& Location, float Radius = 500.0f, float Intensity = 1.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Environmental VFX|Interaction")
+    void SpawnWildlifeDisturbance(const FVector& Location, const FString& DisturbanceType = "Birds");
+
+    UFUNCTION(BlueprintCallable, Category = "Environmental VFX|Interaction")
+    void CreateWaterRipples(const FVector& WaterSurfaceLocation, float RippleSize = 1.0f);
+
+    // Mystical Environmental Effects
+    UFUNCTION(BlueprintCallable, Category = "Environmental VFX|Mystical")
+    void TriggerConsciousnessWave(const FVector& OriginLocation, float WaveRadius = 2000.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Environmental VFX|Mystical")
+    void SpawnEnergyAurora(const FVector& SkyLocation, const FLinearColor& AuroraColor);
+
+    UFUNCTION(BlueprintCallable, Category = "Environmental VFX|Mystical")
+    void CreateTemporalDistortion(const FVector& Location, float Duration = 5.0f);
+
+    // Getters
+    UFUNCTION(BlueprintCallable, Category = "Environmental VFX")
+    EVFX_WeatherType GetCurrentWeatherType() const { return CurrentWeatherType; }
+
+    UFUNCTION(BlueprintCallable, Category = "Environmental VFX")
+    EVFX_TimeOfDay_73C GetCurrentTimeOfDay() const { return CurrentTimeOfDay; }
+
+    UFUNCTION(BlueprintCallable, Category = "Environmental VFX")
+    float GetWeatherIntensity() const { return WeatherSettings.Intensity; }
+
+protected:
+    // Weather Settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
+    FWeatherVFXSettings WeatherSettings;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
+    FAtmosphericVFXSettings AtmosphericSettings;
+
+    // Current State
+    UPROPERTY(BlueprintReadOnly, Category = "State")
+    EVFX_WeatherType CurrentWeatherType = EVFX_WeatherType::Clear;
+
+    UPROPERTY(BlueprintReadOnly, Category = "State")
+    EVFX_TimeOfDay_73C CurrentTimeOfDay = EVFX_TimeOfDay_73C::Midday;
+
+    UPROPERTY(BlueprintReadOnly, Category = "State")
+    FVector CurrentWindDirection = FVector(1, 0, 0);
+
+    UPROPERTY(BlueprintReadOnly, Category = "State")
+    float CurrentWindSpeed = 1.0f;
+
+    // VFX Components
+    UPROPERTY()
+    UNiagaraComponent* RainVFXComponent;
+
+    UPROPERTY()
+    UNiagaraComponent* FogVFXComponent;
+
+    UPROPERTY()
+    UNiagaraComponent* AtmosphericParticlesComponent;
+
+    UPROPERTY()
+    UNiagaraComponent* LightningVFXComponent;
+
+    UPROPERTY()
+    TArray<UNiagaraComponent*> ActiveEnvironmentalVFX;
+
+    // Post Process Component for weather effects
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Components")
+    UPostProcessComponent* WeatherPostProcess;
+
+    // References
+    UPROPERTY()
+    UVFXManager* VFXManager;
+
+    // Weather Transition
+    UPROPERTY()
+    bool bIsTransitioning = false;
+
+    UPROPERTY()
+    float TransitionProgress = 0.0f;
+
+    UPROPERTY()
+    float TransitionDuration = 5.0f;
+
+    UPROPERTY()
+    EVFX_WeatherType TargetWeatherType = EVFX_WeatherType::Clear;
+
+private:
+    // Internal Functions
+    void InitializeEnvironmentalVFX();
+    void UpdateWeatherVFX();
+    void UpdateAtmosphericVFX();
+    void TransitionWeather(float DeltaTime);
+    void ApplyWeatherPostProcessing();
+    void UpdateWindEffects();
+    void HandleLightningSystem(float DeltaTime);
+
+    // Lightning System
+    float LightningTimer = 0.0f;
+    TArray<FVector> PotentialLightningLocations;
+
+    // Timer Handles
+    FTimerHandle WeatherTransitionTimer;
+    FTimerHandle AtmosphericUpdateTimer;
+};

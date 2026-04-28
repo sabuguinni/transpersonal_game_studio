@@ -1,0 +1,184 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Engine/Engine.h"
+#include "NiagaraSystem.h"
+#include "NiagaraComponent.h"
+#include "Components/ActorComponent.h"
+#include "VFXSystemCore.generated.h"
+
+UENUM(BlueprintType)
+enum class EVFX_VFXQualityLevel_D19 : uint8
+{
+    Low = 0,
+    Medium = 1,
+    High = 2
+};
+
+UENUM(BlueprintType)
+enum class EVFX_VFXCategory_D19 : uint8
+{
+    Atmosphere,
+    DinosaurPresence,
+    Survival,
+    Environment,
+    Combat,
+    Narrative
+};
+
+USTRUCT(BlueprintType)
+struct FVFXLODSettings
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float MaxDrawDistance = 5000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float ParticleCountMultiplier = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float UpdateFrequency = 60.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bEnableCollision = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bCastShadows = true;
+};
+
+/**
+ * Core VFX System for Transpersonal Game Studio
+ * Manages all visual effects with performance-optimized LOD chain
+ */
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UVFXSystemCore : public UActorComponent
+{
+    GENERATED_BODY()
+
+public:
+    UVFXSystemCore();
+
+protected:
+    virtual void BeginPlay() override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
+public:
+    // Core VFX Management
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    class UNiagaraComponent* SpawnVFX(UNiagaraSystem* VFXSystem, FVector Location, FRotator Rotation, EVFX_VFXCategory_D19 Category);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void SetVFXQuality(EVFX_VFXQualityLevel_D19 QualityLevel);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void UpdateLODForDistance(class UNiagaraComponent* VFXComponent, float Distance);
+
+    // Atmosphere VFX
+    UFUNCTION(BlueprintCallable, Category = "VFX|Atmosphere")
+    void SpawnAtmosphericFog(FVector Location, float Intensity = 1.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX|Atmosphere")
+    void SpawnDustParticles(FVector Location, FVector WindDirection, float Intensity = 1.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX|Atmosphere")
+    void SpawnInsectSwarm(FVector Location, float Radius = 500.0f);
+
+    // Dinosaur Presence VFX
+    UFUNCTION(BlueprintCallable, Category = "VFX|Dinosaur")
+    void SpawnFootstepDust(FVector Location, float DinosaurSize = 1.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX|Dinosaur")
+    void SpawnBreathVapor(FVector Location, FVector Direction, float Temperature = 0.5f);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX|Dinosaur")
+    void SpawnVegetationDisturbance(FVector Location, float Intensity = 1.0f);
+
+    // Survival VFX
+    UFUNCTION(BlueprintCallable, Category = "VFX|Survival")
+    void SpawnCampfire(FVector Location, float Size = 1.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX|Survival")
+    void SpawnToolSparks(FVector Location, FVector Direction);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX|Survival")
+    void SpawnSmoke(FVector Location, FVector Direction, float Intensity = 1.0f);
+
+    // Environment VFX
+    UFUNCTION(BlueprintCallable, Category = "VFX|Environment")
+    void SpawnWaterSplash(FVector Location, float Force = 1.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX|Environment")
+    void SpawnLeafFall(FVector Location, float Radius = 1000.0f);
+
+    // Combat VFX
+    UFUNCTION(BlueprintCallable, Category = "VFX|Combat")
+    void SpawnBloodSplatter(FVector Location, FVector Direction, float Amount = 1.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX|Combat")
+    void SpawnImpactEffect(FVector Location, FVector Normal, class UPhysicalMaterial* Material);
+
+protected:
+    // VFX Asset References
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VFX Assets|Atmosphere")
+    UNiagaraSystem* AtmosphericFogVFX;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VFX Assets|Atmosphere")
+    UNiagaraSystem* DustParticlesVFX;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VFX Assets|Atmosphere")
+    UNiagaraSystem* InsectSwarmVFX;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VFX Assets|Dinosaur")
+    UNiagaraSystem* FootstepDustVFX;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VFX Assets|Dinosaur")
+    UNiagaraSystem* BreathVaporVFX;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VFX Assets|Dinosaur")
+    UNiagaraSystem* VegetationDisturbanceVFX;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VFX Assets|Survival")
+    UNiagaraSystem* CampfireVFX;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VFX Assets|Survival")
+    UNiagaraSystem* ToolSparksVFX;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VFX Assets|Survival")
+    UNiagaraSystem* SmokeVFX;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VFX Assets|Environment")
+    UNiagaraSystem* WaterSplashVFX;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VFX Assets|Environment")
+    UNiagaraSystem* LeafFallVFX;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VFX Assets|Combat")
+    UNiagaraSystem* BloodSplatterVFX;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "VFX Assets|Combat")
+    UNiagaraSystem* ImpactEffectVFX;
+
+    // LOD Settings
+// [UHT-FIX2]     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance")
+    FVFXLODSettings LODSettings[3]; // Low, Medium, High
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance")
+    EVFX_VFXQualityLevel_D19 CurrentQualityLevel = EVFX_VFXQualityLevel_D19::High;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance")
+    float MaxActiveVFXCount = 100.0f;
+
+private:
+    // Active VFX tracking
+    UPROPERTY()
+    TArray<class UNiagaraComponent*> ActiveVFXComponents;
+
+    // Performance monitoring
+    float LastPerformanceCheck = 0.0f;
+    float PerformanceCheckInterval = 1.0f;
+
+    void UpdateVFXPerformance();
+    void CleanupInactiveVFX();
+    FVFXLODSettings GetCurrentLODSettings() const;
+};

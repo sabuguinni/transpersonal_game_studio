@@ -1,0 +1,129 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Engine/Engine.h"
+#include "Components/AudioComponent.h"
+#include "Sound/SoundCue.h"
+// FIXME: Missing header - #include "MetasoundSource.h"
+#include "AudioGameplayVolume.h"
+#include "AudioArchitecture.generated.h"
+
+
+#if 0 // HEADER_DISABLED
+/**
+ * Sistema central de áudio adaptativo para o jogo de dinossauros
+ * Controla música dinâmica, ambientes sonoros e efeitos contextuais
+ */
+UENUM(BlueprintType)
+enum class EAudio_EmotionalState_040 : uint8
+{
+Calm_Wonder,        // Exploração pacífica, admiração
+Tension_Building,   // Algo está errado, tensão crescente
+Immediate_Danger,   // Predador próximo, fuga necessária
+Relief_Safety,      // Chegada a área segura
+Domestication,      // Interação com herbívoros amigáveis
+Discovery          // Encontrar pistas sobre a gema
+};
+
+UENUM(BlueprintType)
+enum class EAmbientType : uint8
+{
+Dense_Forest,       // Floresta densa, sons abafados
+Open_Plains,        // Planícies, sons distantes
+Water_Edge,         // Próximo a rios/lagos
+Cave_System,        // Cavernas, eco natural
+Danger_Zone        // Área com predadores ativos
+};
+
+
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UAudio_AudioManager_040 : public UObject
+{
+    GENERATED_BODY()
+
+public:
+    UAudio_AudioManager_040();
+
+    // Estados emocionais principais
+
+    // Tipos de ambiente sonoro
+
+    // Sistema de música adaptativa
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Adaptive Music")
+    TMap<EAudio_EmotionalState_040, UAudioComponent*> EmotionalTracks;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ambient Audio")
+    TMap<EAmbientType, UAudioComponent*> AmbientSystems;
+
+    // Controle de estado atual
+    UPROPERTY(BlueprintReadOnly, Category = "Current State")
+    EAudio_EmotionalState_040 CurrentEmotionalState;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Current State")
+    EAmbientType CurrentAmbientType;
+
+    // Componentes de áudio principais
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Components")
+    UAudioComponent* MusicComponent;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Components")
+    UAudioComponent* AmbientComponent;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Components")
+    UAudioComponent* DinosaurComponent;
+
+    // Funções principais
+    UFUNCTION(BlueprintCallable, Category = "Audio Control")
+    void TransitionToEmotionalState(EAudio_EmotionalState_040 NewState, float TransitionTime = 2.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio Control")
+    void SetAmbientEnvironment(EAmbientType NewAmbient, float TransitionTime = 3.0f);
+
+// [UHT-FIX]     UFUNCTION(BlueprintCallable, Category = "Audio Control")
+    void PlayDinosaurSound(class ADinosaurCharacter* Dinosaur, const FString& SoundType);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio Control")
+    void TriggerStingerSound(const FString& StingerType);
+
+protected:
+    virtual void BeginPlay() override;
+
+private:
+    // Sistema de transição suave
+    FTimerHandle MusicTransitionTimer;
+    FTimerHandle AmbientTransitionTimer;
+    
+    void ExecuteMusicTransition(UAudioComponent* NewTrack);
+    void ExecuteAmbientTransition(UAudioComponent* NewAmbient);
+};
+
+/**
+ * Volume de áudio que detecta a presença de dinossauros
+ * Ajusta automaticamente o estado emocional baseado na proximidade de predadores
+ */
+UCLASS()
+class TRANSPERSONALGAME_API ADinosaurAudioVolume : public AAudioGameplayVolume
+{
+    GENERATED_BODY()
+
+public:
+    ADinosaurAudioVolume();
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Detection")
+    float PredatorDetectionRadius = 1500.0f;
+
+// [UHT-FIX]     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Detection")
+    UAudio_AudioManager_040::EAudio_EmotionalState_040 TriggerEmotionalState = UAudio_AudioManager_040::EAudio_EmotionalState_040::Tension_Building;
+
+protected:
+    virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime);
+
+private:
+    UPROPERTY()
+    UAudio_AudioManager_040* AudioManager;
+
+    void CheckForNearbyDinosaurs();
+    bool HasPredatorsInRange();
+};
+#endif // HEADER_DISABLED

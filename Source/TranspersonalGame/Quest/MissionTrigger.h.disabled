@@ -1,0 +1,370 @@
+// Copyright Transpersonal Game Studio. All Rights Reserved.
+
+#pragma once
+
+#include "TranspersonalGameSharedTypes.h"
+
+#include "CoreMinimal.h"
+#include "GameFramework/Actor.h"
+#include "Components/BoxComponent.h"
+#include "Components/SphereComponent.h"
+#include "GameplayTags.h"
+#include "QuestSubsystem.h"
+#include "GameplayTagContainer.h"
+#include "MissionTrigger.generated.h"
+
+class UQuestSubsystem;
+class UQuestComponent;
+
+
+#if 0 // HEADER_DISABLED - references disabled class
+UENUM(BlueprintType)
+enum class EQuest_TriggerType : uint8
+{
+    EnterArea,          // Player enters trigger volume
+    ExitArea,           // Player exits trigger volume
+    StayInArea,         // Player remains in area for duration
+    InteractWithObject, // Player interacts with specific object
+    ObserveCreature,    // Player observes dinosaur behavior
+    CollectItem,        // Player collects specific items
+    BuildStructure,     // Player builds something in area
+    TimeOfDay,          // Specific time condition
+    WeatherCondition,   // Specific weather condition
+    PlayerHealth,       // Player health threshold
+    InventoryCondition, // Player has specific items
+    CreatureNearby,     // Specific creature type nearby
+    CrowdDensity,       // Crowd density in area
+    Custom              // Custom trigger logic
+};
+
+UENUM(BlueprintType)
+enum class EQuest_TriggerState : uint8
+{
+    Inactive,           // Trigger is disabled
+    Active,             // Trigger is monitoring conditions
+    Triggered,          // Trigger condition has been met
+    Cooldown,           // Trigger is in cooldown period
+    Expired             // Trigger has expired
+};
+
+USTRUCT(BlueprintType)
+struct FTriggerCondition
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Condition")
+    EQuest_TriggerType TriggerType = EQuest_TriggerType::EnterArea;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Condition")
+    FGameplayTag RequiredTag;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Condition")
+    FString RequiredActorName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Condition")
+    float RequiredDuration = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Condition")
+    int32 RequiredQuantity = 1;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Condition")
+    float RequiredValue = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Condition")
+    TArray<FGameplayTag> RequiredTags;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Condition")
+    TArray<FString> RequiredItems;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Condition")
+    bool bInvertCondition = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Condition")
+    bool bRequireAllTags = true;
+
+    FTriggerCondition()
+    {
+        TriggerType = EQuest_TriggerType::EnterArea;
+        RequiredTag = FGameplayTag();
+        RequiredActorName = TEXT("");
+        RequiredDuration = 0.0f;
+        RequiredQuantity = 1;
+        RequiredValue = 0.0f;
+        bInvertCondition = false;
+        bRequireAllTags = true;
+    }
+};
+
+USTRUCT(BlueprintType)
+struct FMissionAction
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Action")
+    FString ActionType;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Action")
+    FString TargetQuestID;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Action")
+    FString TargetObjectiveID;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Action")
+    int32 ProgressAmount = 1;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Action")
+    TArray<FGameplayTag> TagsToAdd;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Action")
+    TArray<FGameplayTag> TagsToRemove;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Action")
+    FString DialogueToTrigger;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Action")
+    FString EventToFire;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Action")
+    bool bCompleteQuest = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Action")
+    bool bStartNewQuest = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Action")
+    FString NewQuestID;
+
+    FMissionAction()
+    {
+        ActionType = TEXT("UpdateObjective");
+        TargetQuestID = TEXT("");
+        TargetObjectiveID = TEXT("");
+        ProgressAmount = 1;
+        DialogueToTrigger = TEXT("");
+        EventToFire = TEXT("");
+        bCompleteQuest = false;
+        bStartNewQuest = false;
+        NewQuestID = TEXT("");
+    }
+};
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnMissionTriggered, AMissionTrigger*, Trigger);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnTriggerStateChanged, AMissionTrigger*, Trigger, EQuest_TriggerState, NewState);
+
+/**
+ * Mission Trigger - Spatial and conditional trigger system for quest objectives
+ * Monitors various game conditions and triggers quest progression
+ * Integrates with crowd simulation and environmental systems
+ */
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API AMissionTrigger : public AActor
+{
+    GENERATED_BODY()
+
+public:
+    AMissionTrigger();
+
+protected:
+    virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime);
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
+    // Components
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    USceneComponent* RootSceneComponent;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UBoxComponent* BoxTrigger;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    USphereComponent* SphereTrigger;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UStaticMeshComponent* VisualizationMesh;
+
+public:
+    // Trigger Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Trigger Setup")
+    FString TriggerID;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Trigger Setup")
+    FString TriggerName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Trigger Setup")
+    FText TriggerDescription;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Trigger Setup")
+    EQuest_TriggerState CurrentState = EQuest_TriggerState::Active;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Trigger Setup")
+    TArray<FTriggerCondition> TriggerConditions;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Trigger Setup")
+    TArray<FMissionAction> ActionsOnTrigger;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Trigger Setup")
+    bool bRequireAllConditions = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Trigger Setup")
+    bool bIsReusable = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Trigger Setup")
+    float CooldownDuration = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Trigger Setup")
+    float ExpirationTime = 0.0f; // 0 = never expires
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Trigger Setup")
+    int32 MaxActivations = 1;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Trigger Setup")
+    bool bStartEnabled = true;
+
+    // Visual Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Visualization")
+    bool bShowVisualization = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Visualization")
+    bool bShowInGame = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Visualization")
+    FLinearColor TriggerColor = FLinearColor::Green;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Visualization")
+    float TriggerOpacity = 0.3f;
+
+    // Area Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Area Setup")
+    bool bUseBoxTrigger = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Area Setup")
+    FVector BoxExtent = FVector(500.0f, 500.0f, 500.0f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Area Setup")
+    float SphereRadius = 500.0f;
+
+    // Quest Integration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Integration")
+    TArray<FString> RelatedQuestIDs;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Integration")
+    TArray<FString> RequiredActiveQuests;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Integration")
+    TArray<FString> RequiredCompletedQuests;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Integration")
+    TArray<FGameplayTag> RequiredPlayerTags;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Integration")
+    TArray<FGameplayTag> ForbiddenPlayerTags;
+
+    // Runtime State
+    UPROPERTY(BlueprintReadOnly, Category = "Runtime State")
+    int32 ActivationCount = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Runtime State")
+    float LastActivationTime = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Runtime State")
+    float StateStartTime = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Runtime State")
+    TArray<AActor*> ActorsInTrigger;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Runtime State")
+    bool bPlayerInTrigger = false;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Runtime State")
+    float PlayerTimeInTrigger = 0.0f;
+
+    // Events
+    UPROPERTY(BlueprintAssignable, Category = "Trigger Events")
+    FOnMissionTriggered OnMissionTriggered;
+
+    UPROPERTY(BlueprintAssignable, Category = "Trigger Events")
+    FOnTriggerStateChanged OnTriggerStateChanged;
+
+    // Public Interface
+    UFUNCTION(BlueprintCallable, Category = "Trigger Control")
+    void EnableTrigger();
+
+    UFUNCTION(BlueprintCallable, Category = "Trigger Control")
+    void DisableTrigger();
+
+    UFUNCTION(BlueprintCallable, Category = "Trigger Control")
+    void ResetTrigger();
+
+    UFUNCTION(BlueprintCallable, Category = "Trigger Control")
+    void ForceTrigger();
+
+    UFUNCTION(BlueprintCallable, Category = "Trigger Control")
+    bool CanTrigger() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Trigger Control")
+    void SetTriggerState(EQuest_TriggerState NewState);
+
+    UFUNCTION(BlueprintCallable, Category = "Trigger Query")
+    bool IsPlayerInTrigger() const { return bPlayerInTrigger; }
+
+    UFUNCTION(BlueprintCallable, Category = "Trigger Query")
+    float GetPlayerTimeInTrigger() const { return PlayerTimeInTrigger; }
+
+    UFUNCTION(BlueprintCallable, Category = "Trigger Query")
+    TArray<AActor*> GetActorsInTrigger() const { return ActorsInTrigger; }
+
+    UFUNCTION(BlueprintCallable, Category = "Trigger Query")
+    bool AreConditionsMet() const;
+
+    // Collision Events
+    UFUNCTION()
+    void OnBoxBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
+
+    UFUNCTION()
+    void OnBoxEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
+
+    UFUNCTION()
+    void OnSphereBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
+
+    UFUNCTION()
+    void OnSphereEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
+
+protected:
+    // Core Systems
+    UPROPERTY()
+    UQuestSubsystem* QuestSubsystem;
+
+    // Internal Logic
+    void UpdateTriggerState(float DeltaTime);
+    void CheckTriggerConditions();
+    void ExecuteTriggerActions();
+    bool EvaluateCondition(const FTriggerCondition& Condition) const;
+    void ExecuteAction(const FMissionAction& Action);
+    void UpdateVisualization();
+    void SetupCollisionComponents();
+    
+    // Condition Evaluation Helpers
+    bool CheckAreaCondition(const FTriggerCondition& Condition) const;
+    bool CheckInteractionCondition(const FTriggerCondition& Condition) const;
+    bool CheckObservationCondition(const FTriggerCondition& Condition) const;
+    bool CheckInventoryCondition(const FTriggerCondition& Condition) const;
+    bool CheckTimeCondition(const FTriggerCondition& Condition) const;
+    bool CheckWeatherCondition(const FTriggerCondition& Condition) const;
+    bool CheckHealthCondition(const FTriggerCondition& Condition) const;
+    bool CheckCreatureCondition(const FTriggerCondition& Condition) const;
+    bool CheckCrowdCondition(const FTriggerCondition& Condition) const;
+
+    // Utility Functions
+    APawn* GetPlayerPawn() const;
+    bool HasRequiredTags(AActor* Actor, const TArray<FGameplayTag>& Tags, bool bRequireAll = true) const;
+    float GetCurrentTimeOfDay() const;
+    FGameplayTag GetCurrentWeatherTag() const;
+    int32 GetCreatureCountNearby(const FGameplayTag& CreatureTag, float Radius) const;
+    int32 GetCrowdDensityInArea(float Radius) const;
+
+private:
+    // Internal state tracking
+    TMap<FString, float> ConditionTimers;
+    TMap<FString, int32> ConditionCounters;
+    TArray<FTriggerCondition> MetConditions;
+};#endif // HEADER_DISABLED
+#endif // HEADER_DISABLED

@@ -1,0 +1,251 @@
+#pragma once
+
+
+
+#include "CoreMinimal.h"
+#include "Components/ActorComponent.h"
+#include "Engine/DataTable.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "Components/SkeletalMeshComponent.h"
+// FIXME: Missing header - #include "CharacterArtistSystem.h"
+#include "TranspersonalGameSharedTypes.h"
+#include "MetaHumanCharacterCreator.generated.h"
+
+
+#if 0 // HEADER_DISABLED - compilation errors
+/**
+ * MetaHuman Character Creator - Specialized component for creating characters using MetaHuman Creator
+ * 
+ * This component handles:
+ * - MetaHuman preset loading and customization
+ * - Facial parameter manipulation for unique appearances
+ * - Body type and proportion adjustments
+ * - Clothing and material assignment
+ * - Real-time character variation generation
+ */
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FMetaHumanPresetData
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
+    FString PresetName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
+    TSoftObjectPtr<USkeletalMesh> HeadMesh;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
+    TSoftObjectPtr<USkeletalMesh> BodyMesh;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
+    TSoftObjectPtr<USkeletalMesh> HairMesh;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
+    TSoftObjectPtr<UAnimBlueprint> AnimationBlueprint;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
+    TMap<FString, float> DefaultFacialParameters;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
+    TMap<FString, FLinearColor> DefaultColorParameters;
+
+    FMetaHumanPresetData()
+    {
+        PresetName = TEXT("Default");
+    }
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FFacialParameterRange
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Range")
+    float MinValue;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Range")
+    float MaxValue;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Range")
+    float DefaultValue;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Range")
+    FString ParameterDescription;
+
+    FFacialParameterRange()
+    {
+        MinValue = 0.0f;
+        MaxValue = 1.0f;
+        DefaultValue = 0.5f;
+        ParameterDescription = TEXT("");
+    }
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FCharacterClothingSet
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clothing")
+    FString ClothingSetName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clothing")
+    TSoftObjectPtr<USkeletalMesh> TorsoMesh;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clothing")
+    TSoftObjectPtr<USkeletalMesh> LegsMesh;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clothing")
+    TSoftObjectPtr<USkeletalMesh> FootwearMesh;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clothing")
+    TSoftObjectPtr<USkeletalMesh> AccessoriesMesh;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clothing")
+    TArray<TSoftObjectPtr<UMaterialInterface>> ClothingMaterials;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clothing")
+    EClothingStyle ClothingStyle;
+
+    FCharacterClothingSet()
+    {
+        ClothingSetName = TEXT("Default");
+        ClothingStyle = EClothingStyle::FieldResearcher;
+    }
+};
+
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UMetaHumanCharacterCreator : public UActorComponent
+{
+    GENERATED_BODY()
+
+public:
+    UMetaHumanCharacterCreator();
+
+protected:
+    virtual void BeginPlay() override;
+
+public:
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
+    // MetaHuman Creation Methods
+// [UHT-FIX]     UFUNCTION(BlueprintCallable, Category = "MetaHuman Creation")
+    class ACharacter* CreateMetaHumanCharacter(const FCharacterVisualProfile& Profile, FVector SpawnLocation);
+
+    UFUNCTION(BlueprintCallable, Category = "MetaHuman Creation")
+    bool LoadMetaHumanPreset(class USkeletalMeshComponent* MeshComponent, const FString& PresetName);
+
+    UFUNCTION(BlueprintCallable, Category = "MetaHuman Creation")
+    void ApplyRandomizedFacialParameters(class USkeletalMeshComponent* MeshComponent, EEthnicity Ethnicity, int32 Age);
+
+// [UHT-FIX]     UFUNCTION(BlueprintCallable, Category = "MetaHuman Creation")
+    void ApplyBodyTypeModifications(class USkeletalMeshComponent* MeshComponent, EBodyType BodyType, float Height);
+
+    // Facial Customization
+    UFUNCTION(BlueprintCallable, Category = "Facial Customization")
+    void SetFacialParameter(class USkeletalMeshComponent* MeshComponent, const FString& ParameterName, float Value);
+
+    UFUNCTION(BlueprintCallable, Category = "Facial Customization")
+    float GetFacialParameter(class USkeletalMeshComponent* MeshComponent, const FString& ParameterName);
+
+    UFUNCTION(BlueprintCallable, Category = "Facial Customization")
+    void ApplyAgeEffects(class USkeletalMeshComponent* MeshComponent, int32 Age);
+
+    UFUNCTION(BlueprintCallable, Category = "Facial Customization")
+    void ApplyEthnicityFeatures(class USkeletalMeshComponent* MeshComponent, EEthnicity Ethnicity);
+
+    // Clothing and Materials
+    UFUNCTION(BlueprintCallable, Category = "Clothing")
+    void ApplyClothingSet(class ACharacter* Character, const FString& ClothingSetName);
+
+    UFUNCTION(BlueprintCallable, Category = "Clothing")
+    void ApplyWeatherEffects(class ACharacter* Character, float WearLevel, float DirtLevel);
+
+    UFUNCTION(BlueprintCallable, Category = "Clothing")
+    void ApplySurvivalWear(class ACharacter* Character, int32 DaysSurvived);
+
+    // Color and Material Customization
+    UFUNCTION(BlueprintCallable, Category = "Materials")
+    void SetSkinTone(class USkeletalMeshComponent* MeshComponent, FLinearColor SkinColor);
+
+    UFUNCTION(BlueprintCallable, Category = "Materials")
+    void SetEyeColor(class USkeletalMeshComponent* MeshComponent, FLinearColor EyeColor);
+
+    UFUNCTION(BlueprintCallable, Category = "Materials")
+    void SetHairColor(class USkeletalMeshComponent* MeshComponent, FLinearColor HairColor);
+
+    // Preset Management
+    UFUNCTION(BlueprintCallable, Category = "Presets")
+    void LoadCharacterPresets();
+
+    UFUNCTION(BlueprintCallable, Category = "Presets")
+    FMetaHumanPresetData GetRandomPresetForArchetype(ECharacterArchetype Archetype);
+
+    UFUNCTION(BlueprintCallable, Category = "Presets")
+    void SaveCharacterAsPreset(class ACharacter* Character, const FString& PresetName);
+
+    // Validation and Quality Control
+// [UHT-FIX]     UFUNCTION(BlueprintCallable, Category = "Quality Control")
+    bool ValidateCharacterConfiguration(const FCharacterVisualProfile& Profile);
+
+// [UHT-FIX]     UFUNCTION(BlueprintCallable, Category = "Quality Control")
+    void OptimizeCharacterForPerformance(class ACharacter* Character, ECharacterQuality QualityLevel);
+
+protected:
+    // MetaHuman Preset Database
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MetaHuman Database")
+    TMap<FString, FMetaHumanPresetData> MetaHumanPresets;
+
+    // Facial Parameter Ranges
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Facial Parameters")
+    TMap<FString, FFacialParameterRange> FacialParameterRanges;
+
+    // Clothing Sets Database
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Clothing Database")
+    TMap<FString, FCharacterClothingSet> ClothingSets;
+
+    // Ethnicity-specific parameter sets
+// [UHT-FIX]     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ethnicity")
+    TMap<EEthnicity, TMap<FString, float>> EthnicityParameterSets;
+
+    // Age-based parameter modifications
+// [UHT-FIX]     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Age")
+    TMap<int32, TMap<FString, float>> AgeParameterModifiers;
+
+    // Performance settings
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance")
+    int32 MaxConcurrentCreations;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance")
+    float CreationTimeSliceMs;
+
+    // Quality settings
+// [UHT-FIX]     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Quality")
+    ECharacterQuality DefaultQualityLevel;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Quality")
+    bool bEnableRealTimeParameterUpdates;
+
+private:
+    // Internal state
+    UPROPERTY()
+    TArray<class ACharacter*> ManagedCharacters;
+
+// [UHT-FIX]     UPROPERTY()
+    TQueue<FCharacterCreationRequest> CreationQueue;
+
+    // Helper methods
+    void InitializeMetaHumanPresets();
+    void InitializeFacialParameterRanges();
+    void InitializeClothingSets();
+    void InitializeEthnicityParameters();
+    void InitializeAgeParameters();
+
+    FLinearColor GenerateRandomSkinTone(EEthnicity Ethnicity);
+    FLinearColor GenerateRandomEyeColor(EEthnicity Ethnicity);
+    FLinearColor GenerateRandomHairColor(EEthnicity Ethnicity, int32 Age);
+
+    void ApplyParameterWithVariation(class USkeletalMeshComponent* MeshComponent, const FString& ParameterName, float BaseValue, float VariationRange);
+};
+#endif // HEADER_DISABLED

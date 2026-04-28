@@ -1,0 +1,129 @@
+#pragma once
+#ifndef FCROWD_FLOCKINGFRAG_DEFINED
+#define FCROWD_FLOCKINGFRAG_DEFINED
+struct FCrowd_FlockingFrag { FVector CohesionForce; FVector SeparationForce; FVector AlignmentForce; };
+#endif
+
+#ifndef FTP_DINOSPECIESFRAGMENT_DEFINED
+#define FTP_DINOSPECIESFRAGMENT_DEFINED
+struct FTP_DinoSpeciesFragment { FName SpeciesName; float Size = 1.0f; };
+#endif
+
+
+
+
+#include "CoreMinimal.h"
+#include "MassProcessor.h"
+#include "MassEntityQuery.h"
+#include "DinosaurBehaviorFragments.h"
+#include "TranspersonalGameSharedTypes.h"
+#include "DinosaurBehaviorProcessor.generated.h"
+
+
+#if 0 // HEADER_DISABLED
+UCLASS()
+class TRANSPERSONALGAME_API UCrowd_DinosaurBehaviorProcessor : public UMassProcessor
+{
+    GENERATED_BODY()
+
+public:
+    UCrowd_DinosaurBehaviorProcessor();
+
+protected:
+    virtual void ConfigureQueries() override;
+    virtual void Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context) override;
+
+private:
+    FMassEntityQuery BehaviorQuery;
+    FMassEntityQuery FlockingQuery;
+    FMassEntityQuery NeedsQuery;
+
+    void ProcessBehaviorStates(FMassEntityManager& EntityManager, FMassExecutionContext& Context);
+    void ProcessFlockingBehavior(FMassEntityManager& EntityManager, FMassExecutionContext& Context);
+    void ProcessNeedsSystem(FMassEntityManager& EntityManager, FMassExecutionContext& Context);
+    
+    void UpdateBehaviorState(FDinosaurBehaviorFragment& Behavior, const FCrowd_DinosaurTerritoryFragment& Needs, 
+                           const FTP_DinoSpeciesFragment& Species, float DeltaTime);
+    
+    EDinosaurBehaviorState DetermineNextState(const FDinosaurBehaviorFragment& Behavior, 
+                                            const FCrowd_DinosaurTerritoryFragment& Needs,
+                                            const FTP_DinoSpeciesFragment& Species);
+    
+    FVector CalculateFlockingForces(const FTransformFragment& Transform, 
+                                  const FCrowd_FlockingFrag& Flocking,
+                                  const FTP_DinoSpeciesFragment& Species);
+};
+
+UCLASS()
+class TRANSPERSONALGAME_API UDinosaurNeedsProcessor : public UMassProcessor
+{
+    GENERATED_BODY()
+
+public:
+    UDinosaurNeedsProcessor();
+
+protected:
+    virtual void ConfigureQueries() override;
+    virtual void Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context) override;
+
+private:
+    FMassEntityQuery NeedsUpdateQuery;
+    
+    void UpdateNeedsOverTime(FCrowd_DinosaurTerritoryFragment& Needs, const FTP_DinoSpeciesFragment& Species, 
+                           const FDinosaurBehaviorFragment& Behavior, float DeltaTime);
+    
+    void ProcessHunger(FCrowd_DinosaurTerritoryFragment& Needs, const FDinosaurBehaviorFragment& Behavior, float DeltaTime);
+    void ProcessThirst(FCrowd_DinosaurTerritoryFragment& Needs, const FDinosaurBehaviorFragment& Behavior, float DeltaTime);
+    void ProcessEnergy(FCrowd_DinosaurTerritoryFragment& Needs, const FDinosaurBehaviorFragment& Behavior, float DeltaTime);
+    void ProcessSocial(FCrowd_DinosaurTerritoryFragment& Needs, const FCrowd_FlockingFrag& Flocking, float DeltaTime);
+};
+
+UCLASS()
+class TRANSPERSONALGAME_API UCrowd_DinosaurFlockingProcessor : public UMassProcessor
+{
+    GENERATED_BODY()
+
+public:
+    UCrowd_DinosaurFlockingProcessor();
+
+protected:
+    virtual void ConfigureQueries() override;
+    virtual void Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context) override;
+
+private:
+    FMassEntityQuery FlockingUpdateQuery;
+    FMassEntityQuery NearbyEntitiesQuery;
+    
+    void UpdateFlockingForces(FMassEntityManager& EntityManager, FMassExecutionContext& Context);
+    void FindNearbyEntities(FMassEntityManager& EntityManager, const FTransformFragment& Transform,
+                          FCrowd_FlockingFrag& Flocking, const FTP_DinoSpeciesFragment& Species);
+    
+    FVector CalculateSeparation(const FTransformFragment& Transform, const FCrowd_FlockingFrag& Flocking);
+    FVector CalculateAlignment(const FTransformFragment& Transform, const FCrowd_FlockingFrag& Flocking,
+                             FMassEntityManager& EntityManager);
+    FVector CalculateCohesion(const FTransformFragment& Transform, const FCrowd_FlockingFrag& Flocking,
+                            FMassEntityManager& EntityManager);
+};
+
+UCLASS()
+class TRANSPERSONALGAME_API UDinosaurTerritoryProcessor : public UMassProcessor
+{
+    GENERATED_BODY()
+
+public:
+    UDinosaurTerritoryProcessor();
+
+protected:
+    virtual void ConfigureQueries() override;
+    virtual void Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context) override;
+
+private:
+    FMassEntityQuery TerritoryQuery;
+    
+    void ProcessTerritorialBehavior(FMassEntityManager& EntityManager, FMassExecutionContext& Context);
+    void EstablishTerritory(FDinosaurTerritoryFragment& Territory, const FTransformFragment& Transform,
+                          const FTP_DinoSpeciesFragment& Species);
+    void DefendTerritory(FDinosaurTerritoryFragment& Territory, FDinosaurBehaviorFragment& Behavior,
+                       const FTransformFragment& Transform, const FTP_DinoSpeciesFragment& Species);
+};
+#endif // HEADER_DISABLED

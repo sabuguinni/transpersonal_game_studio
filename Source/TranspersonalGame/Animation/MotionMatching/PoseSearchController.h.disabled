@@ -1,0 +1,261 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Components/ActorComponent.h"
+// FIXME: Missing header - #include "PoseSearch/PoseSearch.h"
+#include "PoseSearch/PoseSearchSchema.h"
+#include "Animation/AnimInstance.h"
+#include "Engine/DataAsset.h"
+#include "../AnimationSystemCore.h"
+#include "MotionMatchingDatabase.h"
+#include "PoseSearchController.generated.h"
+
+
+#if 0 // HEADER_DISABLED
+/**
+ * Pose Search Controller for advanced motion matching
+ * Manages pose search queries, trajectory prediction, and database selection
+ * Implements real-time pose matching with contextual awareness
+ */
+
+USTRUCT(BlueprintType)
+struct FTrajectoryPoint
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadWrite, Category = "Trajectory")
+    FVector Position = FVector::ZeroVector;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Trajectory")
+    FVector Velocity = FVector::ZeroVector;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Trajectory")
+    FRotator Rotation = FRotator::ZeroRotator;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Trajectory")
+    float TimeOffset = 0.0f;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Trajectory")
+    float Speed = 0.0f;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Trajectory")
+    bool bIsValid = true;
+};
+
+USTRUCT(BlueprintType)
+struct FPoseSearchQuery
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadWrite, Category = "Query")
+    TArray<FTrajectoryPoint> TrajectoryHistory;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Query")
+    TArray<FTrajectoryPoint> TrajectoryPrediction;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Query")
+    FAnimationContextData Context;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Query")
+    TArray<FString> ActiveTags;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Query")
+    float QueryTime = 0.0f;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Query")
+    int32 QueryID = 0;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Query")
+    bool bIsHighPriority = false;
+};
+
+USTRUCT(BlueprintType)
+struct FPoseSearchResult
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadWrite, Category = "Result")
+    class UPoseSearchDatabase* SelectedDatabase = nullptr;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Result")
+    int32 SelectedPoseIndex = -1;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Result")
+    float MatchScore = 0.0f;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Result")
+    float BlendTime = 0.2f;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Result")
+    FVector PredictedRootMotion = FVector::ZeroVector;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Result")
+    bool bIsValid = false;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Result")
+    float ResultTime = 0.0f;
+};
+
+UCLASS(ClassGroup=(Animation), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UPoseSearchController : public UActorComponent
+{
+    GENERATED_BODY()
+
+public:
+    UPoseSearchController();
+
+protected:
+    virtual void BeginPlay() override;
+
+public:
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
+    // Core Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pose Search|Core")
+    TSoftObjectPtr<UMotionMatchingDatabase> MotionDatabase;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pose Search|Core")
+    TSoftObjectPtr<UPoseSearchSchema> DefaultSchema;
+
+    // Trajectory Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pose Search|Trajectory")
+    int32 TrajectoryHistorySize = 5;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pose Search|Trajectory")
+    int32 TrajectoryPredictionSize = 10;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pose Search|Trajectory")
+    float TrajectoryTimeStep = 0.1f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pose Search|Trajectory")
+    float PredictionTimeHorizon = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pose Search|Trajectory")
+    bool bUsePredictiveTrajectory = true;
+
+    // Query Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pose Search|Query")
+    float QueryFrequency = 60.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pose Search|Query")
+    float MinQueryInterval = 0.016f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pose Search|Query")
+    int32 MaxConcurrentQueries = 3;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pose Search|Query")
+    bool bUseAsyncQueries = true;
+
+    // Performance Settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pose Search|Performance")
+    float MaxQueryDistance = 2000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pose Search|Performance")
+    bool bUseLODSystem = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pose Search|Performance")
+    bool bCacheResults = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pose Search|Performance")
+    float CacheLifetime = 1.0f;
+
+    // Debug Settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pose Search|Debug")
+    bool bDrawTrajectory = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pose Search|Debug")
+    bool bDrawQueryResults = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pose Search|Debug")
+    bool bLogQueryPerformance = false;
+
+    // Animation System Reference
+    UPROPERTY(BlueprintReadOnly, Category = "References")
+    class UAnimationSystemCore* AnimationSystem;
+
+    // Character Movement Reference
+    UPROPERTY(BlueprintReadOnly, Category = "References")
+    class UCharacterMovementComponent* MovementComponent;
+
+    // Functions
+    UFUNCTION(BlueprintCallable, Category = "Pose Search")
+    FPoseSearchResult ExecutePoseSearch(const FPoseSearchQuery& Query);
+
+    UFUNCTION(BlueprintCallable, Category = "Pose Search")
+    FPoseSearchQuery BuildCurrentQuery();
+
+    UFUNCTION(BlueprintCallable, Category = "Pose Search")
+    void UpdateTrajectory(float DeltaTime);
+
+    UFUNCTION(BlueprintCallable, Category = "Pose Search")
+    TArray<FTrajectoryPoint> PredictTrajectory(float TimeHorizon);
+
+    UFUNCTION(BlueprintCallable, Category = "Pose Search")
+    void SetContextData(const FAnimationContextData& NewContext);
+
+    UFUNCTION(BlueprintCallable, Category = "Pose Search")
+    void AddContextTag(const FString& Tag);
+
+    UFUNCTION(BlueprintCallable, Category = "Pose Search")
+    void RemoveContextTag(const FString& Tag);
+
+    UFUNCTION(BlueprintCallable, Category = "Pose Search")
+    bool IsQueryValid(const FPoseSearchQuery& Query) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Pose Search")
+    float GetCurrentQueryLoad() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Pose Search")
+    void OptimizePerformance();
+
+protected:
+    // Trajectory Data
+    UPROPERTY(Transient)
+    TArray<FTrajectoryPoint> TrajectoryHistory;
+
+    UPROPERTY(Transient)
+    TArray<FTrajectoryPoint> PredictedTrajectory;
+
+    // Current Context
+    UPROPERTY(Transient)
+    FAnimationContextData CurrentContext;
+
+    UPROPERTY(Transient)
+    TArray<FString> ActiveTags;
+
+    // Query Management
+    UPROPERTY(Transient)
+    TArray<FPoseSearchQuery> PendingQueries;
+
+    UPROPERTY(Transient)
+    TMap<int32, FPoseSearchResult> CachedResults;
+
+    // Performance Tracking
+    UPROPERTY(Transient)
+    float LastQueryTime = 0.0f;
+
+    UPROPERTY(Transient)
+    int32 CurrentQueryID = 0;
+
+    UPROPERTY(Transient)
+    float AverageQueryTime = 0.0f;
+
+    UPROPERTY(Transient)
+    int32 QueryCount = 0;
+
+private:
+    void InitializeTrajectory();
+    void UpdateTrajectoryHistory(const FTrajectoryPoint& NewPoint);
+    FTrajectoryPoint CreateTrajectoryPoint(const FVector& Position, const FVector& Velocity, float TimeOffset) const;
+    void PredictFutureTrajectory();
+    FPoseSearchResult SearchInDatabase(UPoseSearchDatabase* Database, const FPoseSearchQuery& Query);
+    float CalculatePoseScore(const FPoseSearchQuery& Query, int32 PoseIndex, UPoseSearchDatabase* Database) const;
+    void ProcessAsyncQuery(const FPoseSearchQuery& Query);
+    void CleanupCache();
+    void UpdatePerformanceMetrics(float QueryTime);
+    int32 GetOptimalLODLevel() const;
+    bool ShouldSkipQuery() const;
+    void DrawDebugTrajectory() const;
+    void DrawDebugQueryResults(const FPoseSearchResult& Result) const;
+};
+#endif // HEADER_DISABLED

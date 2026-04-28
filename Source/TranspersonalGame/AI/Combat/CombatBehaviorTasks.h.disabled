@@ -1,0 +1,295 @@
+// Copyright Transpersonal Game Studio. All Rights Reserved.
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "BehaviorTree/BTTaskNode.h"
+#include "BehaviorTree/BTService.h"
+#include "BehaviorTree/BTDecorator.h"
+#include "CombatAIController.h"
+#include "AI/Combat/CombatAITypes.h"
+#include "CombatBehaviorTasks.generated.h"
+
+
+#if 0 // HEADER_DISABLED
+/**
+ * Task: Execute Combat Attack
+ * Performs a combat attack on the current target
+ */
+UCLASS()
+class TRANSPERSONALGAME_API UBTTask_CombatAttack : public UBTTaskNode
+{
+    GENERATED_BODY()
+
+public:
+    UBTTask_CombatAttack();
+
+    virtual EBTNodeResult::Type ExecuteTask(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory) override;
+
+protected:
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    FBlackboardKeySelector TargetKey;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    float AttackDuration = 2.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    bool bWaitForAnimationComplete = true;
+};
+
+/**
+ * Task: Execute Tactical Maneuver
+ * Executes a specific tactical maneuver (flanking, ambush, etc.)
+ */
+UCLASS()
+class TRANSPERSONALGAME_API UBTTask_TacticalManeuver : public UBTTaskNode
+{
+    GENERATED_BODY()
+
+public:
+    UBTTask_TacticalManeuver();
+
+    virtual EBTNodeResult::Type ExecuteTask(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory) override;
+
+protected:
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tactics")
+    FBlackboardKeySelector TargetKey;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tactics")
+    FBlackboardKeySelector TacticalPositionKey;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tactics")
+    ETacticType PreferredTactic = ETacticType::None;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tactics")
+    float ManeuverTimeout = 10.0f;
+};
+
+/**
+ * Task: Coordinate Pack Attack
+ * Coordinates with other pack members for a group attack
+ */
+UCLASS()
+class TRANSPERSONALGAME_API UBTTask_CoordinatePackAttack : public UBTTaskNode
+{
+    GENERATED_BODY()
+
+public:
+    UBTTask_CoordinatePackAttack();
+
+    virtual EBTNodeResult::Type ExecuteTask(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory) override;
+
+protected:
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack")
+    FBlackboardKeySelector TargetKey;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack")
+    float CoordinationRadius = 2000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack")
+    EFormation PreferredFormation = EFormation::Circle;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack")
+    float SynchronizationTime = 3.0f;
+};
+
+/**
+ * Task: Stalk Target
+ * Follows target while maintaining stealth and optimal distance
+ */
+UCLASS()
+class TRANSPERSONALGAME_API UBTTask_StalkTarget : public UBTTaskNode
+{
+    GENERATED_BODY()
+
+public:
+    UBTTask_StalkTarget();
+
+    virtual EBTNodeResult::Type ExecuteTask(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory) override;
+    virtual void TickTask(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory, float DeltaSeconds) override;
+
+protected:
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stalking")
+    FBlackboardKeySelector TargetKey;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stalking")
+    float OptimalStalkingDistance = 800.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stalking")
+    float MinStalkingDistance = 400.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stalking")
+    float MaxStalkingDistance = 1200.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stalking")
+    bool bUseCover = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stalking")
+    float StalkingSpeed = 0.3f;
+};
+
+/**
+ * Service: Update Combat State
+ * Continuously updates combat-related blackboard values
+ */
+UCLASS()
+class TRANSPERSONALGAME_API UBTService_UpdateCombatState : public UBTService
+{
+    GENERATED_BODY()
+
+public:
+    UBTService_UpdateCombatState();
+
+protected:
+    virtual void TickNode(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory, float DeltaSeconds) override;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    FBlackboardKeySelector TargetKey;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    FBlackboardKeySelector CombatStateKey;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    FBlackboardKeySelector ThreatLevelKey;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    FBlackboardKeySelector CanAttackKey;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    FBlackboardKeySelector DistanceToTargetKey;
+};
+
+/**
+ * Service: Threat Assessment
+ * Continuously assesses threats and updates threat-related data
+ */
+UCLASS()
+class TRANSPERSONALGAME_API UBTService_ThreatAssessment : public UBTService
+{
+    GENERATED_BODY()
+
+public:
+    UBTService_ThreatAssessment();
+
+protected:
+    virtual void TickNode(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory, float DeltaSeconds) override;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Threat")
+    FBlackboardKeySelector PrimaryThreatKey;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Threat")
+    FBlackboardKeySelector ThreatLevelKey;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Threat")
+    FBlackboardKeySelector ShouldFleeKey;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Threat")
+    FBlackboardKeySelector SafeDirectionKey;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Threat")
+    float AssessmentFrequency = 0.2f;
+
+private:
+    float LastAssessmentTime = 0.0f;
+};
+
+/**
+ * Decorator: Can Execute Tactic
+ * Checks if a specific tactic can be executed
+ */
+UCLASS()
+class TRANSPERSONALGAME_API UBTDecorator_CanExecuteTactic : public UBTDecorator
+{
+    GENERATED_BODY()
+
+public:
+    UBTDecorator_CanExecuteTactic();
+
+protected:
+    virtual bool CalculateRawConditionValue(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory) const override;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tactics")
+    ETacticType RequiredTactic = ETacticType::DirectAssault;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tactics")
+    FBlackboardKeySelector TargetKey;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tactics")
+    float MinEffectiveness = 0.5f;
+};
+
+/**
+ * Decorator: In Combat Range
+ * Checks if target is within combat range
+ */
+UCLASS()
+class TRANSPERSONALGAME_API UBTDecorator_InCombatRange : public UBTDecorator
+{
+    GENERATED_BODY()
+
+public:
+    UBTDecorator_InCombatRange();
+
+protected:
+    virtual bool CalculateRawConditionValue(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory) const override;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    FBlackboardKeySelector TargetKey;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    float CombatRange = 300.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    bool bRequireLineOfSight = true;
+};
+
+/**
+ * Decorator: Pack Available
+ * Checks if pack members are available for coordination
+ */
+UCLASS()
+class TRANSPERSONALGAME_API UBTDecorator_PackAvailable : public UBTDecorator
+{
+    GENERATED_BODY()
+
+public:
+    UBTDecorator_PackAvailable();
+
+protected:
+    virtual bool CalculateRawConditionValue(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory) const override;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack")
+    int32 MinPackSize = 2;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack")
+    float PackRadius = 2000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pack")
+    bool bRequireAvailableMembers = true;
+};
+
+/**
+ * Decorator: Threat Level Check
+ * Checks if current threat level meets specified criteria
+ */
+UCLASS()
+class TRANSPERSONALGAME_API UBTDecorator_ThreatLevel : public UBTDecorator
+{
+    GENERATED_BODY()
+
+public:
+    UBTDecorator_ThreatLevel();
+
+protected:
+    virtual bool CalculateRawConditionValue(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory) const override;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Threat")
+    EThreatLevel MinThreatLevel = EThreatLevel::Low;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Threat")
+    EThreatLevel MaxThreatLevel = EThreatLevel::Critical;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Threat")
+    FBlackboardKeySelector ThreatLevelKey;
+};
+#endif // HEADER_DISABLED

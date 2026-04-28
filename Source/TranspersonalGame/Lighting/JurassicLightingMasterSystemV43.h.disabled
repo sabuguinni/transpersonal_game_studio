@@ -1,0 +1,482 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "GameFramework/Actor.h"
+#include "Components/DirectionalLightComponent.h"
+#include "Components/SkyLightComponent.h"
+#include "Components/ExponentialHeightFogComponent.h"
+#include "Components/PostProcessComponent.h"
+#include "Engine/DirectionalLight.h"
+#include "Engine/SkyLight.h"
+#include "Engine/ExponentialHeightFog.h"
+#include "Engine/PostProcessVolume.h"
+#include "Engine/PointLight.h"
+#include "Engine/SpotLight.h"
+#include "Engine/RectLight.h"
+#include "Atmosphere/AtmosphericFogComponent.h"
+#include "Components/SkyAtmosphereComponent.h"
+#include "Components/VolumetricCloudComponent.h"
+#include "Engine/World.h"
+#include "TimerManager.h"
+#include "Curves/CurveFloat.h"
+#include "JurassicLightingMasterSystemV43.generated.h"
+
+// Forward declarations
+class UDirectionalLightComponent;
+class USkyLightComponent;
+class UExponentialHeightFogComponent;
+class USkyAtmosphereComponent;
+class UVolumetricCloudComponent;
+class UPostProcessComponent;
+
+/**
+ * Prehistoric Time of Day States
+ */
+UENUM(BlueprintType)
+enum class EPrehistoricTimeOfDay : uint8
+{
+    Dawn        UMETA(DisplayName = "Dawn"),
+    Morning     UMETA(DisplayName = "Morning"),
+    Noon        UMETA(DisplayName = "Noon"),
+    Afternoon   UMETA(DisplayName = "Afternoon"),
+    Dusk        UMETA(DisplayName = "Dusk"),
+    Night       UMETA(DisplayName = "Night"),
+    Midnight    UMETA(DisplayName = "Midnight")
+};
+
+/**
+ * Weather States for Prehistoric Atmosphere
+ */
+UENUM(BlueprintType)
+enum class EPrehistoricWeather : uint8
+{
+    Clear       UMETA(DisplayName = "Clear"),
+    Misty       UMETA(DisplayName = "Misty"),
+    Stormy      UMETA(DisplayName = "Stormy"),
+    Humid       UMETA(DisplayName = "Humid"),
+    Foggy       UMETA(DisplayName = "Foggy")
+};
+
+/**
+ * Emotional Lighting Moods for Atmospheric Storytelling
+ */
+UENUM(BlueprintType)
+enum class EEmotionalLightingMood : uint8
+{
+    Peaceful        UMETA(DisplayName = "Peaceful"),
+    Mysterious      UMETA(DisplayName = "Mysterious"),
+    Dangerous       UMETA(DisplayName = "Dangerous"),
+    Sacred          UMETA(DisplayName = "Sacred"),
+    Abandoned       UMETA(DisplayName = "Abandoned"),
+    Threatening     UMETA(DisplayName = "Threatening"),
+    Melancholic     UMETA(DisplayName = "Melancholic"),
+    Hopeful         UMETA(DisplayName = "Hopeful")
+};
+
+/**
+ * Time of Day Configuration Structure
+ */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FPrehistoricTimeConfig
+{
+    GENERATED_BODY()
+
+    // Sun properties
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sun")
+    FRotator SunRotation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sun")
+    float SunIntensity;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sun")
+    FLinearColor SunColor;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sun")
+    float SunTemperature;
+
+    // Sky properties
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sky")
+    float SkyLightIntensity;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sky")
+    FLinearColor SkyLightColor;
+
+    // Atmosphere properties
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
+    float FogDensity;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
+    FLinearColor FogColor;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Atmosphere")
+    float AtmosphereOpacity;
+
+    // Post-processing
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PostProcess")
+    float ExposureBias;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PostProcess")
+    FVector4 ColorGrading;
+
+    FPrehistoricTimeConfig()
+    {
+        SunRotation = FRotator(-45.0f, 0.0f, 0.0f);
+        SunIntensity = 8.0f;
+        SunColor = FLinearColor(1.0f, 0.95f, 0.8f, 1.0f);
+        SunTemperature = 5800.0f;
+        SkyLightIntensity = 1.5f;
+        SkyLightColor = FLinearColor(0.9f, 0.95f, 1.0f, 1.0f);
+        FogDensity = 0.02f;
+        FogColor = FLinearColor(0.8f, 0.9f, 1.0f, 1.0f);
+        AtmosphereOpacity = 0.8f;
+        ExposureBias = 0.5f;
+        ColorGrading = FVector4(1.1f, 1.0f, 0.9f, 1.0f);
+    }
+};
+
+/**
+ * Weather Configuration Structure
+ */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FPrehistoricWeatherConfig
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
+    float CloudCoverage;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
+    float FogDensityMultiplier;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
+    float WindIntensity;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
+    FLinearColor AtmosphericTint;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
+    float LightingIntensityMultiplier;
+
+    FPrehistoricWeatherConfig()
+    {
+        CloudCoverage = 0.3f;
+        FogDensityMultiplier = 1.0f;
+        WindIntensity = 0.5f;
+        AtmosphericTint = FLinearColor::White;
+        LightingIntensityMultiplier = 1.0f;
+    }
+};
+
+/**
+ * Firepit Lighting Configuration
+ */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FFirepitLightingConfig
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Firepit")
+    float BaseIntensity;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Firepit")
+    float FlickerAmount;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Firepit")
+    float FlickerSpeed;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Firepit")
+    FLinearColor FireColor;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Firepit")
+    float AttenuationRadius;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Firepit")
+    float SourceRadius;
+
+    FFirepitLightingConfig()
+    {
+        BaseIntensity = 2000.0f;
+        FlickerAmount = 0.3f;
+        FlickerSpeed = 2.0f;
+        FireColor = FLinearColor(1.0f, 0.6f, 0.3f, 1.0f);
+        AttenuationRadius = 800.0f;
+        SourceRadius = 25.0f;
+    }
+};
+
+/**
+ * Jurassic Lighting Master System V43
+ * 
+ * Comprehensive lighting and atmosphere system for prehistoric environments.
+ * Handles day/night cycles, weather systems, firepit lighting, interior illumination,
+ * and emotional atmospheric storytelling through dynamic lighting.
+ * 
+ * Features:
+ * - Dynamic time-of-day system with realistic sun movement
+ * - Weather-based atmospheric changes
+ * - Firepit and interior lighting systems
+ * - Emotional mood lighting for storytelling
+ * - Lumen global illumination integration
+ * - Performance-optimized lighting management
+ */
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API AJurassicLightingMasterSystemV43 : public AActor
+{
+    GENERATED_BODY()
+
+public:
+    AJurassicLightingMasterSystemV43();
+
+protected:
+    virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime);
+
+public:
+    // === CORE LIGHTING COMPONENTS ===
+    
+    /** Main directional light for sun */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Core Lighting")
+    class ADirectionalLight* SunLight;
+
+    /** Sky light for ambient illumination */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Core Lighting")
+    class ASkyLight* SkyLight;
+
+    /** Exponential height fog for atmospheric depth */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Core Lighting")
+    class AExponentialHeightFog* AtmosphericFog;
+
+    /** Sky atmosphere component for realistic sky rendering */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Core Lighting")
+    class ASkyAtmosphere* SkyAtmosphere;
+
+    /** Volumetric clouds for weather effects */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Core Lighting")
+    class AVolumetricCloud* VolumetricClouds;
+
+    /** Post-process volume for atmospheric effects */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Core Lighting")
+    class APostProcessVolume* AtmosphericPostProcess;
+
+    // === TIME OF DAY SYSTEM ===
+
+    /** Current time of day (0-24 hours) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time of Day", meta = (ClampMin = "0.0", ClampMax = "24.0"))
+    float CurrentTimeOfDay;
+
+    /** Speed of time progression (1.0 = real time, 60.0 = 1 minute = 1 hour) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time of Day", meta = (ClampMin = "0.1", ClampMax = "3600.0"))
+    float TimeProgressionSpeed;
+
+    /** Enable automatic time progression */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time of Day")
+    bool bAutoTimeProgression;
+
+    /** Current time of day state */
+    UPROPERTY(BlueprintReadOnly, Category = "Time of Day")
+    EPrehistoricTimeOfDay CurrentTimeState;
+
+    /** Time configurations for different periods */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time of Day")
+    TMap<EPrehistoricTimeOfDay, FPrehistoricTimeConfig> TimeConfigurations;
+
+    // === WEATHER SYSTEM ===
+
+    /** Current weather state */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
+    EPrehistoricWeather CurrentWeather;
+
+    /** Weather configurations */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
+    TMap<EPrehistoricWeather, FPrehistoricWeatherConfig> WeatherConfigurations;
+
+    /** Weather transition duration in seconds */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather", meta = (ClampMin = "1.0", ClampMax = "300.0"))
+    float WeatherTransitionDuration;
+
+    /** Enable automatic weather changes */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
+    bool bAutoWeatherChanges;
+
+    // === FIREPIT LIGHTING SYSTEM ===
+
+    /** Central communal firepit lights */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Firepit Lighting")
+    TArray<class APointLight*> FirepitLights;
+
+    /** Shelter interior fires */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Firepit Lighting")
+    TArray<class APointLight*> ShelterFires;
+
+    /** Firepit lighting configuration */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Firepit Lighting")
+    FFirepitLightingConfig FirepitConfig;
+
+    /** Enable firepit flickering animation */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Firepit Lighting")
+    bool bEnableFirepitFlickering;
+
+    // === INTERIOR LIGHTING SYSTEM ===
+
+    /** Cave interior lighting */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Interior Lighting")
+    TArray<class ASpotLight*> CaveInteriorLights;
+
+    /** Shelter interior lighting */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Interior Lighting")
+    TArray<class ASpotLight*> ShelterInteriorLights;
+
+    /** Storytelling atmospheric lights */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Interior Lighting")
+    TArray<class ARectLight*> StorytellingLights;
+
+    // === EMOTIONAL LIGHTING SYSTEM ===
+
+    /** Current emotional lighting mood */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotional Lighting")
+    EEmotionalLightingMood CurrentMood;
+
+    /** Mood lighting zones */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Emotional Lighting")
+    TArray<class APointLight*> MoodLights;
+
+    /** Mood transition duration in seconds */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emotional Lighting", meta = (ClampMin = "0.5", ClampMax = "60.0"))
+    float MoodTransitionDuration;
+
+    // === PERFORMANCE SETTINGS ===
+
+    /** Enable Lumen global illumination */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    bool bEnableLumenGI;
+
+    /** Enable Virtual Shadow Maps */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    bool bEnableVirtualShadowMaps;
+
+    /** Enable volumetric fog */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    bool bEnableVolumetricFog;
+
+    /** Lighting update frequency (updates per second) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance", meta = (ClampMin = "1.0", ClampMax = "60.0"))
+    float LightingUpdateFrequency;
+
+    // === PUBLIC FUNCTIONS ===
+
+    /** Set specific time of day */
+    UFUNCTION(BlueprintCallable, Category = "Time of Day")
+    void SetTimeOfDay(float NewTime);
+
+    /** Set weather state */
+    UFUNCTION(BlueprintCallable, Category = "Weather")
+    void SetWeather(EPrehistoricWeather NewWeather);
+
+    /** Set emotional lighting mood */
+    UFUNCTION(BlueprintCallable, Category = "Emotional Lighting")
+    void SetEmotionalMood(EEmotionalLightingMood NewMood);
+
+    /** Create firepit lighting at location */
+    UFUNCTION(BlueprintCallable, Category = "Firepit Lighting")
+    class APointLight* CreateFirepitLight(FVector Location, bool bIsCentralFirepit = false);
+
+    /** Create interior lighting for cave */
+    UFUNCTION(BlueprintCallable, Category = "Interior Lighting")
+    class ASpotLight* CreateCaveInteriorLight(FVector Location, FRotator Rotation);
+
+    /** Create interior lighting for shelter */
+    UFUNCTION(BlueprintCallable, Category = "Interior Lighting")
+    class ASpotLight* CreateShelterInteriorLight(FVector Location, FRotator Rotation);
+
+    /** Create atmospheric storytelling light */
+    UFUNCTION(BlueprintCallable, Category = "Interior Lighting")
+    class ARectLight* CreateStorytellingLight(FVector Location, FRotator Rotation, EEmotionalLightingMood Mood);
+
+    /** Get current sun direction */
+    UFUNCTION(BlueprintPure, Category = "Time of Day")
+    FVector GetSunDirection() const;
+
+    /** Get current lighting intensity factor */
+    UFUNCTION(BlueprintPure, Category = "Lighting")
+    float GetCurrentLightingIntensity() const;
+
+    /** Check if it's currently night time */
+    UFUNCTION(BlueprintPure, Category = "Time of Day")
+    bool IsNightTime() const;
+
+protected:
+    // === INTERNAL FUNCTIONS ===
+
+    /** Initialize lighting system components */
+    void InitializeLightingSystem();
+
+    /** Setup time of day configurations */
+    void SetupTimeConfigurations();
+
+    /** Setup weather configurations */
+    void SetupWeatherConfigurations();
+
+    /** Update time of day lighting */
+    void UpdateTimeOfDayLighting();
+
+    /** Update weather effects */
+    void UpdateWeatherEffects();
+
+    /** Update firepit flickering animation */
+    void UpdateFirepitFlickering(float DeltaTime);
+
+    /** Update emotional mood lighting */
+    void UpdateEmotionalLighting();
+
+    /** Apply Lumen settings */
+    void ApplyLumenSettings();
+
+    /** Apply performance optimizations */
+    void ApplyPerformanceSettings();
+
+    /** Calculate sun rotation for time of day */
+    FRotator CalculateSunRotation(float TimeOfDay) const;
+
+    /** Get time state from current time */
+    EPrehistoricTimeOfDay GetTimeStateFromHour(float Hour) const;
+
+    /** Interpolate between time configurations */
+    FPrehistoricTimeConfig InterpolateTimeConfigs(const FPrehistoricTimeConfig& A, const FPrehistoricTimeConfig& B, float Alpha) const;
+
+    /** Apply lighting configuration */
+    void ApplyLightingConfiguration(const FPrehistoricTimeConfig& Config);
+
+    /** Apply weather configuration */
+    void ApplyWeatherConfiguration(const FPrehistoricWeatherConfig& Config);
+
+    // === TIMER HANDLES ===
+
+    /** Timer for lighting updates */
+    FTimerHandle LightingUpdateTimer;
+
+    /** Timer for weather changes */
+    FTimerHandle WeatherChangeTimer;
+
+    // === INTERNAL STATE ===
+
+    /** Time accumulator for smooth transitions */
+    float TimeAccumulator;
+
+    /** Weather transition progress */
+    float WeatherTransitionProgress;
+
+    /** Previous weather state for transitions */
+    EPrehistoricWeather PreviousWeather;
+
+    /** Firepit flicker time accumulator */
+    float FirepitFlickerTime;
+
+    /** Mood transition progress */
+    float MoodTransitionProgress;
+
+    /** Previous mood for transitions */
+    EEmotionalLightingMood PreviousMood;
+
+    /** Is system initialized */
+    bool bSystemInitialized;
+};

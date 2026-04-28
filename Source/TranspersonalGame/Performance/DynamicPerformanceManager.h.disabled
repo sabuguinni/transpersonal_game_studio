@@ -1,0 +1,314 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Subsystems/GameInstanceSubsystem.h"
+#include "PerformanceTargets.h"
+#include "Engine/World.h"
+#include "DynamicPerformanceManager.generated.h"
+
+class UMassEntitySubsystem;
+class ALandscape;
+
+
+#if 0 // HEADER_DISABLED
+UENUM(BlueprintType)
+enum class EPerf_PerformanceLevel : uint8
+{
+    Ultra = 0,      // All features enabled, maximum quality
+    High,           // Minor reductions, still high quality
+    Medium,         // Balanced quality/performance
+    Low,            // Aggressive optimizations
+    Potato          // Minimum viable quality for performance
+};
+
+UENUM(BlueprintType)
+enum class EPerformanceBottleneck : uint8
+{
+    None = 0,
+    GameThread,
+    RenderThread,
+    GPU,
+    Memory,
+    Streaming,
+    MassAI,
+    Physics
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FPerf_PerformanceMetrics
+{
+    GENERATED_BODY()
+
+    // Frame timing
+    UPROPERTY(BlueprintReadOnly, Category = "Timing")
+    float FrameTime = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Timing")
+    float GameThreadTime = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Timing")
+    float RenderThreadTime = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Timing")
+    float GPUTime = 0.0f;
+
+    // System-specific timing
+    UPROPERTY(BlueprintReadOnly, Category = "Systems")
+    float MassAITime = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Systems")
+    float PhysicsTime = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Systems")
+    float RenderingTime = 0.0f;
+
+    // Memory usage (MB)
+    UPROPERTY(BlueprintReadOnly, Category = "Memory")
+    float UsedMemory = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Memory")
+    float TextureMemory = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Memory")
+    float MeshMemory = 0.0f;
+
+    // Rendering stats
+    UPROPERTY(BlueprintReadOnly, Category = "Rendering")
+    int32 DrawCalls = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Rendering")
+    int32 Triangles = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Rendering")
+    int32 VisiblePrimitives = 0;
+
+    // Mass AI stats
+    UPROPERTY(BlueprintReadOnly, Category = "MassAI")
+    int32 ActiveAgents = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "MassAI")
+    int32 ProcessedAgents = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "MassAI")
+    int32 CulledAgents = 0;
+
+    FPerf_PerformanceMetrics()
+    {
+        // Initialize to safe defaults
+    }
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FPerformanceSettings
+{
+    GENERATED_BODY()
+
+    // Rendering settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering")
+    float ScreenPercentage = 100.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering")
+    int32 ViewDistanceScale = 100;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering")
+    int32 ShadowQuality = 3;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering")
+    int32 TextureQuality = 3;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering")
+    int32 EffectsQuality = 3;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering")
+    int32 PostProcessQuality = 3;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering")
+    bool bNaniteEnabled = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering")
+    bool bLumenEnabled = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering")
+    bool bVirtualShadowMapsEnabled = true;
+
+    // Mass AI settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MassAI")
+    int32 MaxActiveAgents = 50000;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MassAI")
+    float AITickRate = 30.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MassAI")
+    float DinosaurCullDistance = 25000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MassAI")
+    int32 MaxBehaviorTreesActive = 1000;
+
+    // Physics settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    float PhysicsTickRate = 60.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    int32 MaxPhysicsBodies = 10000;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    bool bDestructionEnabled = true;
+
+    // Streaming settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Streaming")
+    int32 MaxStreamingCells = 25;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Streaming")
+    float TextureStreamingPoolSize = 4096.0f;
+
+    FPerformanceSettings()
+    {
+        // Default to high quality settings
+    }
+
+    static FPerformanceSettings GetSettingsForLevel(EPerf_PerformanceLevel Level);
+};
+
+/**
+ * Dynamic Performance Manager
+ * 
+ * Monitors performance in real-time and automatically adjusts quality settings
+ * to maintain target framerates. Specifically designed for the Jurassic survival
+ * game with massive dinosaur ecosystems.
+ * 
+ * Key responsibilities:
+ * - Monitor frame timing and identify bottlenecks
+ * - Dynamically adjust Mass AI simulation complexity
+ * - Scale rendering quality based on performance
+ * - Manage memory usage and streaming
+ * - Provide performance telemetry
+ */
+UCLASS(BlueprintType)
+class TRANSPERSONALGAME_API UDynamicPerformanceManager : public UGameInstanceSubsystem
+{
+    GENERATED_BODY()
+
+public:
+    UDynamicPerformanceManager();
+
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+
+    // Core performance management
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void SetPerformanceTarget(EPerformanceTarget Target);
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void SetPerformanceLevel(EPerf_PerformanceLevel Level);
+
+    UFUNCTION(BlueprintPure, Category = "Performance")
+    EPerf_PerformanceLevel GetCurrentPerformanceLevel() const { return CurrentPerformanceLevel; }
+
+    UFUNCTION(BlueprintPure, Category = "Performance")
+    FPerf_PerformanceMetrics GetCurrentMetrics() const { return CurrentMetrics; }
+
+    UFUNCTION(BlueprintPure, Category = "Performance")
+    EPerformanceBottleneck GetCurrentBottleneck() const { return CurrentBottleneck; }
+
+    // Dynamic adjustment controls
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void EnableDynamicAdjustment(bool bEnable) { bDynamicAdjustmentEnabled = bEnable; }
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void SetAdjustmentSensitivity(float Sensitivity) { AdjustmentSensitivity = FMath::Clamp(Sensitivity, 0.1f, 2.0f); }
+
+    // Manual overrides
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void OverrideMassAISettings(int32 MaxAgents, float TickRate, float CullDistance);
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void OverrideRenderingSettings(float ScreenPercentage, int32 ViewDistance, int32 ShadowQuality);
+
+    // Telemetry and debugging
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void StartPerformanceCapture(const FString& SessionName);
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void StopPerformanceCapture();
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void DumpPerformanceReport();
+
+    // Events
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnPerformanceLevelChanged, EPerf_PerformanceLevel, NewLevel);
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBottleneckDetected, EPerformanceBottleneck, Bottleneck);
+
+    UPROPERTY(BlueprintAssignable, Category = "Performance")
+    FOnPerformanceLevelChanged OnPerformanceLevelChanged;
+
+    UPROPERTY(BlueprintAssignable, Category = "Performance")
+    FOnBottleneckDetected OnBottleneckDetected;
+
+protected:
+    // Core monitoring
+    void UpdatePerformanceMetrics();
+    void AnalyzeBottlenecks();
+    void ApplyDynamicAdjustments();
+
+    // Specific system adjustments
+    void AdjustMassAIPerformance(float TargetTime, float CurrentTime);
+    void AdjustRenderingPerformance(float TargetTime, float CurrentTime);
+    void AdjustPhysicsPerformance(float TargetTime, float CurrentTime);
+    void AdjustStreamingPerformance();
+
+    // Settings management
+    void ApplyPerformanceSettings(const FPerformanceSettings& Settings);
+    void ValidateSettings(FPerformanceSettings& Settings);
+
+    // Telemetry
+    void CapturePerformanceData();
+    void WritePerformanceLog();
+
+private:
+    // Current state
+    UPROPERTY()
+    EPerformanceTarget CurrentTarget = EPerformanceTarget::PC_HighEnd;
+
+    UPROPERTY()
+    EPerf_PerformanceLevel CurrentPerformanceLevel = EPerf_PerformanceLevel::High;
+
+    UPROPERTY()
+    EPerformanceBottleneck CurrentBottleneck = EPerformanceBottleneck::None;
+
+    UPROPERTY()
+    FPerformanceBudget CurrentBudget;
+
+    UPROPERTY()
+    FPerf_PerformanceMetrics CurrentMetrics;
+
+    UPROPERTY()
+    FPerformanceSettings CurrentSettings;
+
+    // Dynamic adjustment settings
+    UPROPERTY()
+    bool bDynamicAdjustmentEnabled = true;
+
+    UPROPERTY()
+    float AdjustmentSensitivity = 1.0f;
+
+    UPROPERTY()
+    float PerformanceHistoryWindow = 3.0f;  // Seconds
+
+    // Performance history for smoothing
+    TArray<float> FrameTimeHistory;
+    TArray<float> GameThreadHistory;
+    TArray<float> RenderThreadHistory;
+    TArray<float> GPUTimeHistory;
+
+    // Timers and tracking
+    FTimerHandle MetricsUpdateTimer;
+    float LastAdjustmentTime = 0.0f;
+    float AdjustmentCooldown = 2.0f;  // Seconds between adjustments
+
+    // Telemetry
+    bool bCapturingPerformance = false;
+    FString CurrentSessionName;
+    TArray<FString> PerformanceLog;
+};
+#endif // HEADER_DISABLED

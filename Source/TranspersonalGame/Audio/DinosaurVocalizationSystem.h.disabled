@@ -1,0 +1,204 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Components/ActorComponent.h"
+#include "Engine/DataTable.h"
+#include "Sound/SoundCue.h"
+#include "DinosaurVocalizationSystem.generated.h"
+
+UENUM(BlueprintType)
+enum class EVocalizationType : uint8
+{
+    Idle            UMETA(DisplayName = "Idle"),
+    Alert           UMETA(DisplayName = "Alert"),
+    Aggressive      UMETA(DisplayName = "Aggressive"),
+    Hunting         UMETA(DisplayName = "Hunting"),
+    Feeding         UMETA(DisplayName = "Feeding"),
+    Territorial     UMETA(DisplayName = "Territorial"),
+    Mating          UMETA(DisplayName = "Mating"),
+    Distress        UMETA(DisplayName = "Distress"),
+    Death           UMETA(DisplayName = "Death"),
+    Communication   UMETA(DisplayName = "Communication"),
+    Warning         UMETA(DisplayName = "Warning")
+};
+
+UENUM(BlueprintType)
+enum class EAudio_DinosaurSize_FBB : uint8
+{
+    Small           UMETA(DisplayName = "Small"),
+    Medium          UMETA(DisplayName = "Medium"),
+    Large           UMETA(DisplayName = "Large"),
+    Massive         UMETA(DisplayName = "Massive")
+};
+
+USTRUCT(BlueprintType)
+struct FVocalizationData : public FTableRowBase
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    EVocalizationType VocalizationType = EVocalizationType::Idle;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    EAudio_DinosaurSize_FBB DinosaurSize = EAudio_DinosaurSize_FBB::Medium;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TArray<USoundCue*> SoundVariations;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float MinInterval = 5.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float MaxInterval = 15.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float BaseVolume = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float BasePitch = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float MaxAudibleDistance = 2000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float ThreatRadius = 500.0f; // Distance at which this sound causes fear
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bCanInterruptOtherSounds = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bAlertsOtherDinosaurs = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float EmotionalImpact = 0.5f; // How much this affects player stress/fear
+};
+
+USTRUCT(BlueprintType)
+struct FDinosaurVoiceProfile
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FString DinosaurSpecies;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    EAudio_DinosaurSize_FBB Size = EAudio_DinosaurSize_FBB::Medium;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float VoicePitchVariation = 0.2f; // Individual voice variation
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float VolumeVariation = 0.1f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float AggressionModifier = 1.0f; // How aggressive this individual sounds
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsAlpha = false; // Alpha individuals have different vocalizations
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TMap<EVocalizationType, float> VocalizationFrequencies;
+};
+
+/**
+ * Manages dinosaur vocalizations with procedural variation and emotional impact
+ * Each dinosaur has unique voice characteristics while maintaining species consistency
+ */
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UDinosaurVocalizationSystem : public UActorComponent
+{
+    GENERATED_BODY()
+
+public:
+    UDinosaurVocalizationSystem();
+
+protected:
+    virtual void BeginPlay() override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
+public:
+    // Vocalization database
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vocalization Data")
+    UDataTable* VocalizationDataTable;
+
+    // This dinosaur's voice profile
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voice Profile")
+    FDinosaurVoiceProfile VoiceProfile;
+
+    // Audio component for playing sounds
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio")
+    class UAudioComponent* VocalizationAudioComponent;
+
+    // Current state
+    UPROPERTY(BlueprintReadOnly, Category = "State")
+    EVocalizationType CurrentVocalizationState = EVocalizationType::Idle;
+
+    UPROPERTY(BlueprintReadOnly, Category = "State")
+    bool bIsVocalizing = false;
+
+    // Timing controls
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Timing")
+    float IdleVocalizationChance = 0.1f; // Per second chance of idle vocalization
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Timing")
+    float MinTimeBetweenVocalizations = 2.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Timing")
+    float EmotionalCooldownTime = 5.0f; // Time before returning to idle
+
+    // Environmental factors
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
+    float NightVocalizationMultiplier = 2.0f; // More vocalizations at night
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Environment")
+    float WeatherVocalizationModifier = 1.0f; // Weather affects vocalization frequency
+
+    // Public interface
+    UFUNCTION(BlueprintCallable, Category = "Vocalization")
+    void TriggerVocalization(EVocalizationType VocalizationType, bool bForcePlay = false);
+
+    UFUNCTION(BlueprintCallable, Category = "Vocalization")
+    void SetVocalizationState(EVocalizationType NewState);
+
+    UFUNCTION(BlueprintCallable, Category = "Vocalization")
+    void OnSpotPlayer(float Distance);
+
+    UFUNCTION(BlueprintCallable, Category = "Vocalization")
+    void OnEnterCombat();
+
+    UFUNCTION(BlueprintCallable, Category = "Vocalization")
+    void OnTakeDamage();
+
+    UFUNCTION(BlueprintCallable, Category = "Vocalization")
+    void OnStartFeeding();
+
+    UFUNCTION(BlueprintCallable, Category = "Vocalization")
+    void OnHearOtherDinosaur(UDinosaurVocalizationSystem* OtherDinosaur, EVocalizationType VocalizationType);
+
+    UFUNCTION(BlueprintCallable, Category = "Vocalization")
+    bool CanHearVocalization(const FVector& SourceLocation, float MaxDistance) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Vocalization")
+    float GetEmotionalImpactAtDistance(float Distance) const;
+
+private:
+    // Internal state
+    float LastVocalizationTime = 0.0f;
+    float StateChangeTime = 0.0f;
+    float NextIdleVocalizationTime = 0.0f;
+    
+    // Cached data
+    TMap<EVocalizationType, FVocalizationData*> CachedVocalizationData;
+
+    // Internal methods
+    void UpdateIdleVocalizations(float DeltaTime);
+    void UpdateVocalizationState(float DeltaTime);
+    void PlayVocalizationSound(const FVocalizationData& VocalizationData);
+    FVocalizationData* GetVocalizationData(EVocalizationType VocalizationType);
+    void CacheVocalizationData();
+    void NotifyNearbyDinosaurs(EVocalizationType VocalizationType);
+    void NotifyAudioSystem(EVocalizationType VocalizationType);
+    float CalculateVocalizationChance(EVocalizationType VocalizationType) const;
+    float GetTimeOfDayModifier() const;
+    USoundCue* SelectSoundVariation(const TArray<USoundCue*>& SoundVariations) const;
+};

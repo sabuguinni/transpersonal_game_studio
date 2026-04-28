@@ -1,0 +1,120 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "GameFramework/Character.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Animation/AnimInstance.h"
+#include "TranspersonalCharacterBase.generated.h"
+
+class UCharacterVariationComponent;
+class UMetaHumanCharacterAsset;
+
+/**
+ * Base character class for all human characters in the Transpersonal Game
+ * Supports MetaHuman integration with procedural variation
+ */
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API ATranspersonalCharacterBase : public ACharacter
+{
+    GENERATED_BODY()
+
+public:
+    ATranspersonalCharacterBase();
+
+protected:
+    virtual void BeginPlay() override;
+
+public:
+    virtual void Tick(float DeltaTime);
+
+    // Character identity
+    UFUNCTION(BlueprintCallable, Category = "Character")
+    void SetCharacterName(const FString& NewName);
+
+    UFUNCTION(BlueprintPure, Category = "Character")
+    FString GetCharacterName() const { return CharacterName; }
+
+    UFUNCTION(BlueprintCallable, Category = "Character")
+    void SetCharacterArchetype(const FString& NewArchetype);
+
+    UFUNCTION(BlueprintPure, Category = "Character")
+    FString GetCharacterArchetype() const { return CharacterArchetype; }
+
+    UFUNCTION(BlueprintCallable, Category = "Character")
+    void SetIsProtagonist(bool bNewIsProtagonist);
+
+    UFUNCTION(BlueprintPure, Category = "Character")
+    bool IsProtagonist() const { return bIsProtagonist; }
+
+    // Character variation
+    UFUNCTION(BlueprintCallable, Category = "Character Variation")
+    void SetCharacterVariationHash(const FString& NewHash);
+
+    UFUNCTION(BlueprintPure, Category = "Character Variation")
+    FString GetCharacterVariationHash() const { return VariationHash; }
+
+    UFUNCTION(BlueprintCallable, Category = "Character Variation")
+    void ApplyCharacterVariation();
+
+    // MetaHuman integration
+// [UHT-FIX]     UFUNCTION(BlueprintCallable, Category = "MetaHuman")
+    void SetMetaHumanAsset(UMetaHumanCharacterAsset* NewAsset);
+
+    UFUNCTION(BlueprintCallable, Category = "MetaHuman")
+    void LoadMetaHumanFromPreset(const FString& PresetName);
+
+protected:
+    // Character identity
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Identity")
+    FString CharacterName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Identity")
+    FString CharacterArchetype;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Identity")
+    bool bIsProtagonist = false;
+
+    // Character appearance
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Appearance")
+    FString VariationHash;
+
+// [UHT-FIX]     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Appearance")
+    TSoftObjectPtr<UMetaHumanCharacterAsset> MetaHumanAsset;
+
+    // Character variation component
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UCharacterVariationComponent* VariationComponent;
+
+    // MetaHuman mesh components (following MetaHuman structure)
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MetaHuman")
+    USkeletalMeshComponent* BodyMesh;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MetaHuman")
+    USkeletalMeshComponent* FaceMesh;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MetaHuman")
+    USkeletalMeshComponent* HairMesh;
+
+    // Character stats (for survival mechanics)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Stats")
+    float Health = 100.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Stats")
+    float MaxHealth = 100.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Stats")
+    float Hunger = 100.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Stats")
+    float Thirst = 100.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Stats")
+    float Temperature = 37.0f; // Normal body temperature
+
+private:
+    // Initialize MetaHuman components
+    void InitializeMetaHumanComponents();
+
+    // Apply variation to MetaHuman components
+    void ApplyMetaHumanVariation();
+};

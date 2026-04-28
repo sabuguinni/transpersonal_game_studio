@@ -1,0 +1,188 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "GameFramework/Character.h"
+#include "Components/ActorComponent.h"
+#include "AIController.h"
+#include "BehaviorTree/BehaviorTreeComponent.h"
+#include "BehaviorTree/BlackboardComponent.h"
+#include "DinosaurNPC.generated.h"
+
+class UDinosaurPersonalityComponent;
+class UDinosaurMemoryComponent;
+class UDinosaurNeedsComponent;
+class UDinosaurSocialComponent;
+
+/**
+ * Enumeração para tipos de dinossauros
+ */
+UENUM(BlueprintType)
+enum class EAI_DinosaurType_A8E : uint8
+{
+    // Herbívoros pequenos (domesticáveis)
+    Compsognathus    UMETA(DisplayName = "Compsognathus"),
+    Gallimimus       UMETA(DisplayName = "Gallimimus"),
+    Parasaurolophus  UMETA(DisplayName = "Parasaurolophus"),
+    
+    // Herbívoros médios
+    Triceratops      UMETA(DisplayName = "Triceratops"),
+    Stegosaurus      UMETA(DisplayName = "Stegosaurus"),
+    Ankylosaurus     UMETA(DisplayName = "Ankylosaurus"),
+    
+    // Herbívoros grandes
+    Brachiosaurus    UMETA(DisplayName = "Brachiosaurus"),
+    Diplodocus       UMETA(DisplayName = "Diplodocus"),
+    
+    // Carnívoros pequenos
+    Dilophosaurus    UMETA(DisplayName = "Dilophosaurus"),
+    Utahraptor       UMETA(DisplayName = "Utahraptor"),
+    
+    // Carnívoros médios
+    Allosaurus       UMETA(DisplayName = "Allosaurus"),
+    Carnotaurus      UMETA(DisplayName = "Carnotaurus"),
+    
+    // Carnívoros grandes (apex predators)
+    TyrannosaurusRex UMETA(DisplayName = "Tyrannosaurus Rex"),
+    Spinosaurus      UMETA(DisplayName = "Spinosaurus"),
+    Giganotosaurus   UMETA(DisplayName = "Giganotosaurus")
+};
+
+/**
+ * Enumeração para estados comportamentais
+ */
+UENUM(BlueprintType)
+enum class EAI_DinosaurBehaviorState_A8E : uint8
+{
+    Idle            UMETA(DisplayName = "Idle"),
+    Foraging        UMETA(DisplayName = "Foraging"),
+    Hunting         UMETA(DisplayName = "Hunting"),
+    Fleeing         UMETA(DisplayName = "Fleeing"),
+    Socializing     UMETA(DisplayName = "Socializing"),
+    Resting         UMETA(DisplayName = "Resting"),
+    Drinking        UMETA(DisplayName = "Drinking"),
+    Patrolling      UMETA(DisplayName = "Patrolling"),
+    Mating          UMETA(DisplayName = "Mating"),
+    Nesting         UMETA(DisplayName = "Nesting"),
+    PlayBehavior    UMETA(DisplayName = "Play Behavior"),
+    Territorial     UMETA(DisplayName = "Territorial"),
+    Investigating   UMETA(DisplayName = "Investigating"),
+    Domesticated    UMETA(DisplayName = "Domesticated")
+};
+
+/**
+ * Classe base para todos os NPCs dinossauro
+ * Cada dinossauro é único e tem a sua própria personalidade, memórias e rotinas
+ */
+#if 0 // HEADER_DISABLED - references disabled class
+UCLASS()
+class TRANSPERSONALGAME_API ADinosaurNPC : public ACharacter
+{
+    GENERATED_BODY()
+
+public:
+    ADinosaurNPC();
+
+protected:
+    virtual void BeginPlay() override;
+
+public:
+    virtual void Tick(float DeltaTime);
+
+    // Identificação única do dinossauro
+    UPROPERTY(BlueprintReadOnly, Category = "Identity")
+    int32 DinosaurID;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Identity")
+    EAI_DinosaurType_A8E DinosaurType;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Identity")
+    FString DinosaurName;
+
+    // Estado comportamental actual
+    UPROPERTY(BlueprintReadOnly, Category = "Behavior")
+    EAI_DinosaurBehaviorState_A8E CurrentBehaviorState;
+
+    // Componentes especializados
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UDinosaurPersonalityComponent* PersonalityComponent;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UDinosaurMemoryComponent* MemoryComponent;
+
+// [UHT-FIX]     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UDinosaurNeedsComponent* NeedsComponent;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UDinosaurSocialComponent* SocialComponent;
+
+    // Variações físicas únicas
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical Variation")
+    float SizeVariation = 1.0f; // 0.8 a 1.2
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical Variation")
+    FLinearColor PrimaryColor;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical Variation")
+    FLinearColor SecondaryColor;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical Variation")
+    TArray<FString> UniqueFeatures; // "Cicatriz no olho esquerdo", "Corno ligeiramente curvado", etc.
+
+    // Sistema de domesticação
+    UPROPERTY(BlueprintReadOnly, Category = "Domestication")
+    float TrustLevel = 0.0f; // 0.0 a 100.0
+
+    UPROPERTY(BlueprintReadOnly, Category = "Domestication")
+    bool bIsDomesticated = false;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Domestication")
+    bool bCanBeDomesticated = false;
+
+    // Funções principais
+    UFUNCTION(BlueprintCallable, Category = "Behavior")
+    void SetBehaviorState(EAI_DinosaurBehaviorState_A8E NewState);
+
+    UFUNCTION(BlueprintCallable, Category = "Domestication")
+    void IncreaseTrust(float Amount);
+
+    UFUNCTION(BlueprintCallable, Category = "Domestication")
+    void DecreaseTrust(float Amount);
+
+    UFUNCTION(BlueprintCallable, Category = "Identity")
+    void GenerateUniqueVariations();
+
+    UFUNCTION(BlueprintCallable, Category = "Behavior")
+    bool IsHostileTowards(ADinosaurNPC* OtherDinosaur);
+
+    UFUNCTION(BlueprintCallable, Category = "Behavior")
+    bool ShouldFleeFrom(ADinosaurNPC* OtherDinosaur);
+
+    // Funções para interação com o jogador
+    UFUNCTION(BlueprintCallable, Category = "Player Interaction")
+    void OnPlayerApproach(float Distance);
+
+    UFUNCTION(BlueprintCallable, Category = "Player Interaction")
+    void OnPlayerFeedAttempt();
+
+    UFUNCTION(BlueprintCallable, Category = "Player Interaction")
+    void OnPlayerThreatening();
+
+protected:
+    // Função para determinar se pode ser domesticado baseado no tipo
+    void DetermineDomesticationPotential();
+
+    // Função para gerar nome único baseado nas características
+    void GenerateUniqueName();
+
+    // Timer para comportamentos autónomos
+    FTimerHandle AutonomousBehaviorTimer;
+
+    // Função chamada pelo timer para executar comportamentos autónomos
+    UFUNCTION()
+    void ExecuteAutonomousBehavior();
+
+
+private:
+    // Contador estático para IDs únicos
+    static int32 NextDinosaurID;
+#endif // HEADER_DISABLED

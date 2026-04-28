@@ -1,0 +1,414 @@
+// Copyright Transpersonal Game Studio. All Rights Reserved.
+
+#pragma once
+
+#include "TranspersonalGameSharedTypes.h"
+
+#include "CoreMinimal.h"
+#include "Components/ActorComponent.h"
+#include "GameplayTags.h"
+#include "QuestSubsystem.h"
+#include "GameplayTagContainer.h"
+#include "QuestComponent.generated.h"
+
+class UQuestSubsystem;
+
+
+#if 0 // HEADER_DISABLED - references disabled class
+UENUM(BlueprintType)
+enum class EQuestComponentRole : uint8
+{
+    QuestGiver,         // NPC that gives quests
+    QuestTarget,        // Object/NPC that is quest target
+    QuestItem,          // Item required for quests
+    QuestLocation,      // Location marker for quests
+    QuestObservable,    // Object that can be observed
+    QuestInteractable,  // Object that can be interacted with
+    QuestCollectable,   // Object that can be collected
+    QuestBarrier,       // Object that blocks quest progress
+    QuestReward,        // Reward container
+    QuestHint          // Provides hints or guidance
+};
+
+USTRUCT(BlueprintType)
+struct FQuestInteraction
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction")
+    FString InteractionID;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction")
+    FText InteractionPrompt;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction")
+    FGameplayTag InteractionTag;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction")
+    TArray<FString> RequiredQuests;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction")
+    TArray<FString> RequiredItems;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction")
+    TArray<FGameplayTag> RequiredTags;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction")
+    bool bIsRepeatable = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction")
+    float InteractionDuration = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction")
+    float CooldownDuration = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction")
+    FString DialogueKey;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction")
+    FString AnimationToPlay;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction")
+    FString SoundToPlay;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction")
+    FString ParticleEffect;
+
+    FQuestInteraction()
+    {
+        InteractionID = TEXT("");
+        InteractionPrompt = FText::GetEmpty();
+        InteractionTag = FGameplayTag();
+        bIsRepeatable = false;
+        InteractionDuration = 0.0f;
+        CooldownDuration = 0.0f;
+        DialogueKey = TEXT("");
+        AnimationToPlay = TEXT("");
+        SoundToPlay = TEXT("");
+        ParticleEffect = TEXT("");
+    }
+};
+
+USTRUCT(BlueprintType)
+struct FQuestGiverData
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Giver")
+    TArray<FString> AvailableQuests;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Giver")
+    TArray<FString> CompletableQuests;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Giver")
+    FText GreetingText;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Giver")
+    FText QuestOfferText;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Giver")
+    FText QuestCompleteText;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Giver")
+    FText NoQuestsText;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Giver")
+    bool bCanGiveMultipleQuests = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Giver")
+    bool bCanCompleteQuests = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Giver")
+    FGameplayTag NPCTag;
+
+    FQuestGiverData()
+    {
+        GreetingText = FText::FromString(TEXT("Hello, traveler."));
+        QuestOfferText = FText::FromString(TEXT("I have a task for you."));
+        QuestCompleteText = FText::FromString(TEXT("Well done!"));
+        NoQuestsText = FText::FromString(TEXT("I have nothing for you right now."));
+        bCanGiveMultipleQuests = true;
+        bCanCompleteQuests = true;
+        NPCTag = FGameplayTag();
+    }
+};
+
+USTRUCT(BlueprintType)
+struct FQuestTargetData
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Target")
+    TArray<FString> RelatedQuests;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Target")
+    TArray<FString> RelatedObjectives;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Target")
+    FGameplayTag TargetTag;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Target")
+    bool bIsUnique = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Target")
+    bool bIsConsumable = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Target")
+    int32 MaxInteractions = -1; // -1 = unlimited
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Target")
+    float RespawnTime = 0.0f;
+
+    FQuestTargetData()
+    {
+        TargetTag = FGameplayTag();
+        bIsUnique = false;
+        bIsConsumable = false;
+        MaxInteractions = -1;
+        RespawnTime = 0.0f;
+    }
+};
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnQuestInteraction, AActor*, InteractingActor, const FString&, InteractionID, const FGameplayTag&, InteractionTag);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnQuestStateChanged, const FString&, QuestID, EQuestStatus, NewStatus);
+
+/**
+ * Quest Component - Attaches quest functionality to actors in the world
+ * Handles quest giving, target marking, item collection, and interaction logic
+ * Integrates with the Quest Subsystem for centralized quest management
+ */
+UCLASS(BlueprintType, Blueprintable, ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UQuestComponent : public UActorComponent
+{
+    GENERATED_BODY()
+
+public:
+    UQuestComponent();
+
+protected:
+    virtual void BeginPlay() override;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
+public:
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
+    // Component Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Setup")
+    EQuestComponentRole ComponentRole = EQuestComponentRole::QuestInteractable;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Setup")
+    FString ComponentID;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Setup")
+    FText ComponentName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Setup")
+    FText ComponentDescription;
+
+// [UHT-FIX3]     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Setup")
+// [UHT-FIX3]     TArray<FGameplayTag> ComponentTags;
+
+    // Interaction System
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interactions")
+    TArray<FQuestInteraction> AvailableInteractions;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interactions")
+    float InteractionRange = 200.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interactions")
+    bool bRequireLineOfSight = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interactions")
+    bool bShowInteractionPrompt = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interactions")
+    FText DefaultInteractionPrompt;
+
+    // Quest Giver Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Giver", meta = (EditCondition = "ComponentRole == EQuestComponentRole::QuestGiver"))
+    FQuestGiverData QuestGiverData;
+
+    // Quest Target Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Target", meta = (EditCondition = "ComponentRole == EQuestComponentRole::QuestTarget"))
+    FQuestTargetData QuestTargetData;
+
+    // Visual Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Visual")
+    bool bShowQuestMarker = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Visual")
+    bool bHighlightWhenRelevant = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Visual")
+    FLinearColor QuestMarkerColor = FLinearColor::Yellow;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Visual")
+    float QuestMarkerSize = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Visual")
+    UStaticMesh* QuestMarkerMesh;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Visual")
+    UMaterialInterface* QuestMarkerMaterial;
+
+    // Audio Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    USoundBase* InteractionSound;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    USoundBase* QuestCompleteSound;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    USoundBase* QuestAvailableSound;
+
+    // Runtime State
+    UPROPERTY(BlueprintReadOnly, Category = "Runtime State")
+    bool bIsPlayerNearby = false;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Runtime State")
+    float PlayerDistance = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Runtime State")
+    int32 InteractionCount = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Runtime State")
+    float LastInteractionTime = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Runtime State")
+    TArray<FString> ActiveRelatedQuests;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Runtime State")
+    bool bIsCurrentlyRelevant = false;
+
+    // Events
+    UPROPERTY(BlueprintAssignable, Category = "Quest Events")
+    FOnQuestInteraction OnQuestInteraction;
+
+    UPROPERTY(BlueprintAssignable, Category = "Quest Events")
+    FOnQuestStateChanged OnQuestStateChanged;
+
+    // Public Interface
+    UFUNCTION(BlueprintCallable, Category = "Quest Component")
+    bool CanInteract(AActor* InteractingActor) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Component")
+    bool Interact(AActor* InteractingActor, const FString& InteractionID = TEXT(""));
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Component")
+    TArray<FQuestInteraction> GetAvailableInteractions(AActor* InteractingActor) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Component")
+    FQuestInteraction GetBestInteraction(AActor* InteractingActor) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Component")
+    bool IsRelevantToQuest(const FString& QuestID) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Component")
+    bool IsRelevantToObjective(const FString& QuestID, const FString& ObjectiveID) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Component")
+    void SetQuestRelevance(const FString& QuestID, bool bIsRelevant);
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Component")
+    void UpdateQuestMarker();
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Component")
+    void ShowQuestMarker(bool bShow);
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Component")
+    void SetQuestMarkerColor(const FLinearColor& NewColor);
+
+    // Quest Giver Functions
+    UFUNCTION(BlueprintCallable, Category = "Quest Giver", meta = (CallInEditor = "true"))
+    TArray<FString> GetAvailableQuests(AActor* PlayerActor) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Giver")
+    bool OfferQuest(AActor* PlayerActor, const FString& QuestID);
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Giver")
+    bool CompleteQuest(AActor* PlayerActor, const FString& QuestID);
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Giver")
+    bool HasQuestsAvailable(AActor* PlayerActor) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Giver")
+    bool HasQuestsToComplete(AActor* PlayerActor) const;
+
+    // Quest Target Functions
+    UFUNCTION(BlueprintCallable, Category = "Quest Target")
+    void RegisterAsQuestTarget(const FString& QuestID, const FString& ObjectiveID);
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Target")
+    void UnregisterAsQuestTarget(const FString& QuestID, const FString& ObjectiveID);
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Target")
+    bool IsRegisteredTarget(const FString& QuestID, const FString& ObjectiveID) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Target")
+    void OnTargetReached(AActor* ReachingActor);
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Target")
+    void OnTargetInteracted(AActor* InteractingActor);
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Target")
+    void OnTargetObserved(AActor* ObservingActor, float ObservationDuration);
+
+    // Utility Functions
+    UFUNCTION(BlueprintCallable, Category = "Quest Utility")
+    bool HasRequiredTags(AActor* Actor, const TArray<FGameplayTag>& RequiredTags) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Utility")
+    bool HasRequiredItems(AActor* Actor, const TArray<FString>& RequiredItems) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Utility")
+    bool HasActiveQuest(AActor* Actor, const FString& QuestID) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Utility")
+    float GetDistanceToPlayer() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Quest Utility")
+    bool IsPlayerInRange() const;
+
+protected:
+    // Core Systems
+    UPROPERTY()
+    UQuestSubsystem* QuestSubsystem;
+
+    // Visual Components
+    UPROPERTY()
+    UStaticMeshComponent* QuestMarkerComponent;
+
+    // Internal Logic
+    void UpdatePlayerProximity();
+    void UpdateQuestRelevance();
+    void UpdateVisualState();
+    void ProcessInteraction(AActor* InteractingActor, const FQuestInteraction& Interaction);
+    bool EvaluateInteractionRequirements(AActor* InteractingActor, const FQuestInteraction& Interaction) const;
+    void PlayInteractionEffects(const FQuestInteraction& Interaction);
+    void CreateQuestMarker();
+    void DestroyQuestMarker();
+    
+    // Quest Giver Helpers
+    void ProcessQuestOffer(AActor* PlayerActor, const FString& QuestID);
+    void ProcessQuestCompletion(AActor* PlayerActor, const FString& QuestID);
+    bool CanOfferQuest(AActor* PlayerActor, const FString& QuestID) const;
+    bool CanCompleteQuest(AActor* PlayerActor, const FString& QuestID) const;
+    
+    // Quest Target Helpers
+    void NotifyQuestProgress(const FString& QuestID, const FString& ObjectiveID, int32 Progress = 1);
+    void HandleTargetConsumption();
+    void HandleTargetRespawn();
+    
+    // Utility Helpers
+    APawn* GetPlayerPawn() const;
+    class UInventoryComponent* GetPlayerInventory() const;
+    class UGameplayTagComponent* GetPlayerTags() const;
+
+private:
+    // Internal state
+    TMap<FString, float> InteractionCooldowns;
+    TMap<FString, int32> InteractionCounts;
+    float LastProximityCheck = 0.0f;
+    float LastRelevanceCheck = 0.0f;
+};#endif // HEADER_DISABLED
+#endif // HEADER_DISABLED

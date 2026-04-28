@@ -1,0 +1,327 @@
+// Copyright Transpersonal Game Studio. All Rights Reserved.
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "MassProcessor.h"
+#include "MassEntityTypes.h"
+#include "MassLODTypes.h"
+#include "MassRepresentationTypes.h"
+#include "MassCommonTypes.h"
+#include "GameFramework/PlayerController.h"
+#include "Engine/World.h"
+#include "CrowdLODProcessor.generated.h"
+
+
+#if 0 // HEADER_DISABLED
+UENUM(BlueprintType)
+enum class ECrowdLODLevel : uint8
+{
+    High,           // Full detail, full AI, full rendering
+    Medium,         // Reduced AI frequency, simplified rendering
+    Low,            // Basic AI, instanced rendering
+    Off,            // No AI, culled from rendering
+    Hibernating     // Completely disabled until needed
+};
+
+USTRUCT()
+struct FCrowdLODFragment : public FMassFragment
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, Category = "LOD")
+    ECrowdLODLevel CurrentLODLevel = ECrowdLODLevel::Medium;
+
+    UPROPERTY(EditAnywhere, Category = "LOD")
+    ECrowdLODLevel PreviousLODLevel = ECrowdLODLevel::Medium;
+
+    UPROPERTY(EditAnywhere, Category = "LOD")
+    float DistanceToPlayer = 0.0f;
+
+    UPROPERTY(EditAnywhere, Category = "LOD")
+    float LastLODUpdateTime = 0.0f;
+
+    UPROPERTY(EditAnywhere, Category = "LOD")
+    float LODUpdateInterval = 1.0f;
+
+    UPROPERTY(EditAnywhere, Category = "LOD")
+    bool bIsVisible = true;
+
+    UPROPERTY(EditAnywhere, Category = "LOD")
+    bool bWasVisibleLastFrame = true;
+
+    UPROPERTY(EditAnywhere, Category = "LOD")
+    float VisibilityTimer = 0.0f;
+
+    UPROPERTY(EditAnywhere, Category = "LOD")
+    int32 FramesSinceVisible = 0;
+
+    UPROPERTY(EditAnywhere, Category = "LOD")
+    bool bForceHighLOD = false;
+
+    UPROPERTY(EditAnywhere, Category = "LOD")
+    float ImportanceScore = 1.0f;
+};
+
+USTRUCT()
+struct FCrowdPerformanceFragment : public FMassFragment
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, Category = "Performance")
+    float AIProcessingTime = 0.0f;
+
+    UPROPERTY(EditAnywhere, Category = "Performance")
+    float RenderingCost = 1.0f;
+
+    UPROPERTY(EditAnywhere, Category = "Performance")
+    int32 TriangleCount = 1000;
+
+    UPROPERTY(EditAnywhere, Category = "Performance")
+    bool bUseInstancedRendering = false;
+
+    UPROPERTY(EditAnywhere, Category = "Performance")
+    bool bCastShadows = true;
+
+    UPROPERTY(EditAnywhere, Category = "Performance")
+    float UpdateFrequency = 1.0f;
+
+    UPROPERTY(EditAnywhere, Category = "Performance")
+    float LastUpdateTime = 0.0f;
+
+    UPROPERTY(EditAnywhere, Category = "Performance")
+    bool bIsProcessingThisFrame = true;
+};
+
+USTRUCT(BlueprintType)
+struct FCrowdLODSettings
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD Distances")
+    float HighLODDistance = 1000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD Distances")
+    float MediumLODDistance = 2500.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD Distances")
+    float LowLODDistance = 5000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD Distances")
+    float CullDistance = 8000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD Distances")
+    float HibernationDistance = 12000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 MaxHighLODEntities = 100;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 MaxMediumLODEntities = 500;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 MaxLowLODEntities = 2000;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float TargetFrameTime = 16.67f; // 60 FPS
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float MaxLODProcessingTime = 2.0f; // 2ms per frame
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Adaptive")
+    bool bEnableAdaptiveLOD = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Adaptive")
+    float AdaptiveScaleFactor = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Adaptive")
+    float MinAdaptiveScale = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Adaptive")
+    float MaxAdaptiveScale = 1.5f;
+
+    FCrowdLODSettings()
+    {
+        HighLODDistance = 1000.0f;
+        MediumLODDistance = 2500.0f;
+        LowLODDistance = 5000.0f;
+        CullDistance = 8000.0f;
+        HibernationDistance = 12000.0f;
+        MaxHighLODEntities = 100;
+        MaxMediumLODEntities = 500;
+        MaxLowLODEntities = 2000;
+        TargetFrameTime = 16.67f;
+        MaxLODProcessingTime = 2.0f;
+        bEnableAdaptiveLOD = true;
+        AdaptiveScaleFactor = 1.0f;
+        MinAdaptiveScale = 0.5f;
+        MaxAdaptiveScale = 1.5f;
+    }
+};
+
+USTRUCT(BlueprintType)
+struct FCrowdLODStats
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Stats")
+    int32 HighLODCount = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Stats")
+    int32 MediumLODCount = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Stats")
+    int32 LowLODCount = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Stats")
+    int32 OffLODCount = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Stats")
+    int32 HibernatingCount = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Stats")
+    float TotalProcessingTime = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Stats")
+    float AverageFrameTime = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Stats")
+    int32 LODTransitions = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Stats")
+    float CurrentAdaptiveScale = 1.0f;
+
+    FCrowdLODStats()
+    {
+        HighLODCount = 0;
+        MediumLODCount = 0;
+        LowLODCount = 0;
+        OffLODCount = 0;
+        HibernatingCount = 0;
+        TotalProcessingTime = 0.0f;
+        AverageFrameTime = 0.0f;
+        LODTransitions = 0;
+        CurrentAdaptiveScale = 1.0f;
+    }
+};
+
+/**
+ * Mass processor for crowd LOD management
+ * Handles performance optimization by adjusting level of detail based on distance to player
+ * Supports adaptive LOD scaling based on performance metrics
+ * Manages up to 50,000 entities with intelligent culling and hibernation
+ */
+UCLASS()
+class TRANSPERSONALGAME_API UCrowdLODProcessor : public UMassProcessor
+{
+    GENERATED_BODY()
+
+public:
+    UCrowdLODProcessor();
+
+protected:
+    virtual void ConfigureQueries() override;
+    virtual void Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context) override;
+
+    // Query for entities with LOD components
+    FMassEntityQuery LODQuery;
+
+    // LOD Configuration
+    UPROPERTY(EditAnywhere, Category = "LOD Settings")
+    FCrowdLODSettings LODSettings;
+
+    // Performance tracking
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    FCrowdLODStats CurrentStats;
+
+    // Adaptive LOD system
+    UPROPERTY(EditAnywhere, Category = "Adaptive LOD")
+    bool bEnableAdaptiveLOD = true;
+
+    UPROPERTY(EditAnywhere, Category = "Adaptive LOD")
+    float PerformanceCheckInterval = 1.0f;
+
+    UPROPERTY(EditAnywhere, Category = "Adaptive LOD")
+    float PerformanceHistory[10] = {16.67f, 16.67f, 16.67f, 16.67f, 16.67f, 16.67f, 16.67f, 16.67f, 16.67f, 16.67f};
+
+    UPROPERTY(EditAnywhere, Category = "Adaptive LOD")
+    int32 PerformanceHistoryIndex = 0;
+
+    // Player tracking
+    UPROPERTY()
+    TWeakObjectPtr<APlayerController> CachedPlayerController;
+
+    UPROPERTY()
+    FVector LastPlayerLocation = FVector::ZeroVector;
+
+    UPROPERTY()
+    float LastPlayerLocationUpdateTime = 0.0f;
+
+    // Internal state
+    float LastPerformanceCheckTime = 0.0f;
+    float LastAdaptiveScaleChange = 0.0f;
+    int32 ProcessedEntityCount = 0;
+
+public:
+    // Configuration
+    UFUNCTION(BlueprintCallable, Category = "Crowd LOD")
+    void SetLODSettings(const FCrowdLODSettings& NewSettings);
+
+    UFUNCTION(BlueprintPure, Category = "Crowd LOD")
+    FCrowdLODSettings GetLODSettings() const { return LODSettings; }
+
+    UFUNCTION(BlueprintPure, Category = "Crowd LOD")
+    FCrowdLODStats GetLODStats() const { return CurrentStats; }
+
+    // LOD Control
+    UFUNCTION(BlueprintCallable, Category = "Crowd LOD")
+    void SetAdaptiveLODEnabled(bool bEnabled);
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd LOD")
+    void ForceAdaptiveScale(float NewScale);
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd LOD")
+    void ResetAdaptiveScale();
+
+    // Debug and Visualization
+    UFUNCTION(BlueprintCallable, Category = "Debug")
+    void ToggleLODDebugDisplay(bool bEnabled);
+
+    UFUNCTION(BlueprintCallable, Category = "Debug")
+    void ShowLODStats(bool bEnabled);
+
+protected:
+    // LOD Calculation
+    ECrowdLODLevel CalculateLODLevel(float DistanceToPlayer, float ImportanceScore) const;
+    float CalculateImportanceScore(const FTransformFragment& Transform, const FCrowdLODFragment& LOD) const;
+    
+    // Performance Management
+    void UpdatePerformanceMetrics(float DeltaTime);
+    void UpdateAdaptiveLOD(float DeltaTime);
+    float GetAverageFrameTime() const;
+    
+    // Player Tracking
+    void UpdatePlayerLocation(const UWorld* World);
+    FVector GetPlayerLocation(const UWorld* World) const;
+    
+    // LOD Transitions
+    void HandleLODTransition(FCrowdLODFragment& LOD, ECrowdLODLevel NewLOD, 
+                           FCrowdPerformanceFragment& Performance);
+    void ApplyLODSettings(FCrowdPerformanceFragment& Performance, ECrowdLODLevel LODLevel);
+    
+    // Utility
+    bool ShouldUpdateLOD(const FCrowdLODFragment& LOD, float CurrentTime) const;
+    void UpdateLODStats();
+    void ResetStats();
+
+private:
+    // Debug visualization
+    bool bDebugDisplayEnabled = false;
+    bool bStatsDisplayEnabled = false;
+    
+    // Performance optimization
+    static constexpr int32 MaxEntitiesPerFrame = 1000;
+    static constexpr float MinLODUpdateInterval = 0.1f;
+    static constexpr float MaxLODUpdateInterval = 2.0f;
+};
+#endif // HEADER_DISABLED

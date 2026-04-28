@@ -1,0 +1,86 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "BehaviorTree/BlackboardComponent.h"
+#include "CombatAITypes.h"
+#include "CombatAIBlackboard.generated.h"
+
+
+#if 0 // HEADER_DISABLED
+/**
+ * Specialized Blackboard Component for Combat AI
+ * Provides structured access to combat-specific data
+ */
+UCLASS(BlueprintType, ClassGroup=(AI))
+class TRANSPERSONALGAME_API UCombatAIBlackboard : public UBlackboardComponent
+{
+    GENERATED_BODY()
+
+public:
+    UCombatAIBlackboard();
+
+    // Key Names - Static for performance
+    static const FName PlayerActorKey;
+    static const FName PlayerLocationKey;
+    static const FName LastKnownPlayerLocationKey;
+    static const FName CombatStateKey;
+    static const FName ThreatLevelKey;
+    static const FName CurrentTargetKey;
+    static const FName PatrolPointKey;
+    static const FName HomeLocationKey;
+    static const FName PackLeaderKey;
+    static const FName PackMembersKey;
+    static const FName StaminaKey;
+    static const FName HealthPercentageKey;
+    static const FName CanSeePlayerKey;
+    static const FName TimeSinceLastSightingKey;
+    static const FName IsInTerritoryKey;
+    static const FName FleeLocationKey;
+    static const FName AttackTargetKey;
+    static const FName IsPackHuntingKey;
+    static const FName PlayerHasWeaponKey;
+    static const FName PlayerNearFireKey;
+    static const FName HungerLevelKey;
+    static const FName FearLevelKey;
+
+    // Convenience functions for common operations
+// [UHT-FIX]     UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void SetCombatState(ECombatAIState NewState);
+
+// [UHT-FIX]     UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    ECombatAIState GetCombatState() const;
+
+// [UHT-FIX]     UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void SetThreatLevel(ECombatThreatLevel NewThreatLevel);
+
+// [UHT-FIX]     UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    ECombatThreatLevel GetThreatLevel() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void UpdatePlayerMemory(AActor* PlayerActor, const FVector& PlayerLocation, bool bCanSeePlayer);
+
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void SetPackLeader(AActor* LeaderActor);
+
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void AddPackMember(AActor* MemberActor);
+
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void RemovePackMember(AActor* MemberActor);
+
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    bool IsPackHunting() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    float GetDistanceToPlayer() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    bool ShouldFlee() const;
+
+protected:
+    virtual void BeginPlay() override;
+
+private:
+    void InitializeKeys();
+};
+#endif // HEADER_DISABLED

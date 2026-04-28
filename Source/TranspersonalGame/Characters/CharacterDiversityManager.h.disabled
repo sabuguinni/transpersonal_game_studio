@@ -1,0 +1,154 @@
+#pragma once
+
+
+
+#include "CoreMinimal.h"
+#include "Subsystems/WorldSubsystem.h"
+#include "Engine/DataTable.h"
+#include "JurassicCharacterArtist.h"
+#include "TranspersonalGameSharedTypes.h"
+#include "CharacterDiversityManager.generated.h"
+
+class ACharacter;
+
+
+#if 0 // HEADER_DISABLED
+/**
+ * Diversity tracking for character generation
+ */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FCharacterDiversityStats
+{
+    GENERATED_BODY()
+
+    FCharacterDiversityStats()
+        : TotalCharacters(0)
+    {
+        GenderCounts.Add(ECharacterGender::Male, 0);
+        GenderCounts.Add(ECharacterGender::Female, 0);
+        
+        SkinToneCounts.Add(ESkinTone::VeryPale, 0);
+        SkinToneCounts.Add(ESkinTone::Pale, 0);
+        SkinToneCounts.Add(ESkinTone::Light, 0);
+        SkinToneCounts.Add(ESkinTone::Medium, 0);
+        SkinToneCounts.Add(ESkinTone::Olive, 0);
+        SkinToneCounts.Add(ESkinTone::Tan, 0);
+        SkinToneCounts.Add(ESkinTone::Dark, 0);
+        SkinToneCounts.Add(ESkinTone::VeryDark, 0);
+    }
+
+    UPROPERTY(BlueprintReadOnly, Category = "Stats")
+    int32 TotalCharacters;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Stats")
+    TMap<ECharacterGender, int32> GenderCounts;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Stats")
+    TMap<ESkinTone, int32> SkinToneCounts;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Stats")
+    TArray<FString> UsedCharacterNames;
+};
+
+/**
+ * Character Diversity Manager
+ * 
+ * Ensures no two characters look identical and maintains realistic diversity
+ * across the population. Tracks generated characters to prevent clones.
+ */
+UCLASS()
+class TRANSPERSONALGAME_API UCharacterDiversityManager : public UWorldSubsystem
+{
+    GENERATED_BODY()
+
+public:
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+
+    // Diversity management
+    UFUNCTION(BlueprintCallable, Category = "Diversity")
+    FMetaHumanCustomization GenerateDiverseCharacter(ECharacterArchetype BaseArchetype);
+
+    UFUNCTION(BlueprintCallable, Category = "Diversity")
+    bool ValidateCharacterUniqueness(const FMetaHumanCustomization& Customization);
+
+    UFUNCTION(BlueprintCallable, Category = "Diversity")
+    void RegisterCharacter(ACharacter* Character, const FMetaHumanCustomization& Customization);
+
+    UFUNCTION(BlueprintCallable, Category = "Diversity")
+    void UnregisterCharacter(ACharacter* Character);
+
+    UFUNCTION(BlueprintCallable, Category = "Diversity")
+    FCharacterDiversityStats GetDiversityStats() const;
+
+    // Name generation
+    UFUNCTION(BlueprintCallable, Category = "Names")
+    FString GenerateUniqueName(ECharacterGender Gender, const FString& CulturalBackground = TEXT(""));
+
+    UFUNCTION(BlueprintCallable, Category = "Names")
+    bool IsNameAvailable(const FString& Name) const;
+
+    // Facial feature variation
+    UFUNCTION(BlueprintCallable, Category = "Features")
+    FFacialFeatureSet GenerateUniqueFacialFeatures(ESkinTone SkinTone, ECharacterGender Gender);
+
+    UFUNCTION(BlueprintCallable, Category = "Features")
+    float CalculateFacialSimilarity(const FFacialFeatureSet& Features1, const FFacialFeatureSet& Features2);
+
+    // Quality control
+    UFUNCTION(BlueprintCallable, Category = "Quality")
+    void EnsureMinimumVariation(TArray<FMetaHumanCustomization>& Characters);
+
+    UFUNCTION(BlueprintCallable, Category = "Quality")
+    void FixDiversityImbalance();
+
+protected:
+    // Diversity tracking
+    UPROPERTY()
+    FCharacterDiversityStats DiversityStats;
+
+    UPROPERTY()
+    TArray<FMetaHumanCustomization> GeneratedCharacters;
+
+    UPROPERTY()
+    TMap<ACharacter*, FMetaHumanCustomization> ActiveCharacters;
+
+    // Name databases
+    UPROPERTY(EditAnywhere, Category = "Names")
+    TArray<FString> MaleNames;
+
+    UPROPERTY(EditAnywhere, Category = "Names")
+    TArray<FString> FemaleNames;
+
+    UPROPERTY(EditAnywhere, Category = "Names")
+    TArray<FString> Surnames;
+
+    // Diversity targets (percentages)
+    UPROPERTY(EditAnywhere, Category = "Diversity Targets", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float TargetFemaleRatio = 0.45f;
+
+    UPROPERTY(EditAnywhere, Category = "Diversity Targets")
+    TMap<ESkinTone, float> TargetSkinToneDistribution;
+
+    // Similarity thresholds
+    UPROPERTY(EditAnywhere, Category = "Similarity")
+    float MinimumFacialDifference = 0.15f;
+
+    UPROPERTY(EditAnywhere, Category = "Similarity")
+    float MaximumAllowedSimilarity = 0.8f;
+
+private:
+    void InitializeNameDatabases();
+    void InitializeDiversityTargets();
+    
+    ECharacterGender SelectBalancedGender();
+    ESkinTone SelectBalancedSkinTone();
+    
+    void AddVariationToFeatures(FFacialFeatureSet& Features, float VariationAmount);
+    bool IsTooSimilarToExisting(const FFacialFeatureSet& Features);
+    
+    FString GenerateRandomName(ECharacterGender Gender);
+    void LoadNamesFromDataTable();
+};
+#endif // HEADER_DISABLED

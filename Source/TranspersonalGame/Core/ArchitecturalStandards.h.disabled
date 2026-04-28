@@ -1,0 +1,365 @@
+// Copyright Transpersonal Game Studio. All Rights Reserved.
+// ArchitecturalStandards.h - Coding standards and architectural guidelines
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Engine/Engine.h"
+#include "ArchitecturalStandards.generated.h"
+
+/**
+ * TRANSPERSONAL GAME ARCHITECTURAL STANDARDS
+ * 
+ * This header defines coding standards, naming conventions, and architectural
+ * patterns that ALL agents must follow when creating systems.
+ * 
+ * ESTABLISHED BY: Agent #02 - Engine Architect
+ * VERSION: 1.0 - Initial Standards
+ */
+
+// ============================================================================
+// NAMING CONVENTIONS (MANDATORY)
+// ============================================================================
+
+/**
+ * CLASS NAMING STANDARDS:
+ * - All game classes: UTranspersonal[System][Type]
+ * - All actors: ATranspersonal[Type]
+ * - All components: UTranspersonal[System]Component
+ * - All subsystems: UTranspersonal[System]Subsystem
+ * - All interfaces: ITranspersonal[System]Interface
+ * - All structs: FTranspersonal[System][Data]
+ * - All enums: ETranspersonal[System][Type]
+ */
+
+// Example naming patterns:
+// UTranspersonalDinosaurCharacter (Character system)
+// ATranspersonalPaleontologist (Main player actor)
+// UTranspersonalSurvivalComponent (Survival system component)
+// UTranspersonalWorldGenerationSubsystem (World generation subsystem)
+// ITranspersonalDomesticationInterface (Domestication system interface)
+// FTranspersonalDinosaurStats (Dinosaur data structure)
+// ETranspersonalDinosaurBehavior (Dinosaur behavior enum)
+
+// ============================================================================
+// MODULE ORGANIZATION STANDARDS
+// ============================================================================
+
+/**
+ * DIRECTORY STRUCTURE (MANDATORY):
+ * 
+ * Source/TranspersonalGame/
+ * ├── Core/                    # Core engine systems (Agent #02)
+ * │   ├── PhysicsCore/         # Physics systems (Agent #03)
+ * │   └── GameFramework/       # Game mode, state, controller
+ * ├── Performance/             # Performance optimization (Agent #04)
+ * ├── World/                   # World generation (Agent #05)
+ * ├── Environment/             # Environment art (Agent #06)
+ * ├── Architecture/            # Buildings & structures (Agent #07)
+ * ├── Lighting/               # Lighting & atmosphere (Agent #08)
+ * ├── Characters/             # Character creation (Agent #09)
+ * ├── Animation/              # Animation systems (Agent #10)
+ * ├── AI/                     # NPC behavior (Agent #11)
+ * ├── Combat/                 # Combat & enemy AI (Agent #12)
+ * ├── Crowd/                  # Crowd simulation (Agent #13)
+ * ├── Quest/                  # Quest & missions (Agent #14)
+ * ├── Narrative/              # Narrative & dialogue (Agent #15)
+ * ├── Audio/                  # Audio systems (Agent #16)
+ * ├── VFX/                    # Visual effects (Agent #17)
+ * └── QA/                     # Quality assurance (Agent #18)
+ */
+
+// ============================================================================
+// CODING STANDARDS (MANDATORY)
+// ============================================================================
+
+/**
+ * HEADER STRUCTURE:
+ * Every .h file must follow this structure:
+ */
+/*
+// Copyright Transpersonal Game Studio. All Rights Reserved.
+// [FileName].h - [Brief description]
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Engine/Engine.h"
+// ... other includes
+#include "[FileName].generated.h"
+
+DECLARE_LOG_CATEGORY_EXTERN(Log[SystemName], Log, All);
+
+// Class/struct/enum definitions
+
+#include "[FileName].generated.h" // Must be last include
+*/
+
+/**
+ * CPP STRUCTURE:
+ * Every .cpp file must follow this structure:
+ */
+/*
+// Copyright Transpersonal Game Studio. All Rights Reserved.
+// [FileName].cpp - [Brief description]
+
+#include "[FileName].h"
+#include "Engine/Engine.h"
+// ... other includes
+
+DEFINE_LOG_CATEGORY(Log[SystemName]);
+
+// Implementation
+*/
+
+// ============================================================================
+// PERFORMANCE STANDARDS (MANDATORY)
+// ============================================================================
+
+/**
+ * PERFORMANCE REQUIREMENTS:
+ * - All systems must maintain 60fps on PC, 30fps on console
+ * - Maximum memory allocation per frame: 1MB
+ * - Maximum garbage collection time: 1ms
+ * - All async operations must use proper threading
+ * - No blocking operations on game thread
+ */
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FTranspersonalPerformanceGuidelines
+{
+    GENERATED_BODY()
+
+    // Maximum frame time budget per system (milliseconds)
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance")
+    float MaxFrameTimeBudget_MS = 2.0f;
+
+    // Maximum memory allocation per frame (bytes)
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance")
+    int32 MaxFrameAllocation_Bytes = 1048576; // 1MB
+
+    // Maximum draw calls per system
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance")
+    int32 MaxDrawCalls = 100;
+
+    // Maximum concurrent async tasks
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance")
+    int32 MaxAsyncTasks = 10;
+};
+
+// ============================================================================
+// SYSTEM INTEGRATION PATTERNS (MANDATORY)
+// ============================================================================
+
+/**
+ * SUBSYSTEM PATTERN:
+ * All major systems must inherit from UGameInstanceSubsystem
+ */
+UCLASS(Abstract)
+class TRANSPERSONALGAME_API UTranspersonalBaseSubsystem : public UGameInstanceSubsystem
+{
+    GENERATED_BODY()
+
+public:
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+
+    // System identification
+    UFUNCTION(BlueprintCallable, Category = "System")
+    virtual FString GetSystemName() const PURE_VIRTUAL(UTranspersonalBaseSubsystem::GetSystemName, return TEXT("Unknown"););
+
+    UFUNCTION(BlueprintCallable, Category = "System")
+    virtual FString GetAgentResponsible() const PURE_VIRTUAL(UTranspersonalBaseSubsystem::GetAgentResponsible, return TEXT("Unknown"););
+
+    // Performance monitoring
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    virtual bool IsPerformanceCompliant() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    virtual FTranspersonalPerformanceGuidelines GetPerformanceMetrics() const;
+
+protected:
+    // Performance tracking
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    FTranspersonalPerformanceGuidelines PerformanceGuidelines;
+
+    // System state
+    UPROPERTY(BlueprintReadOnly, Category = "System")
+    bool bSystemInitialized = false;
+
+    UPROPERTY(BlueprintReadOnly, Category = "System")
+    float SystemInitializationTime = 0.0f;
+
+private:
+    // Internal performance tracking
+    mutable float LastFrameTime = 0.0f;
+    mutable int32 LastFrameAllocations = 0;
+    mutable int32 LastDrawCalls = 0;
+};
+
+/**
+ * COMPONENT PATTERN:
+ * All gameplay components must inherit from UTranspersonalBaseComponent
+ */
+UCLASS(Abstract, BlueprintType, ClassGroup=(TranspersonalGame), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UTranspersonalBaseComponent : public UActorComponent
+{
+    GENERATED_BODY()
+
+public:
+    UTranspersonalBaseComponent();
+
+    // UActorComponent interface
+    virtual void BeginPlay() override;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
+    // Component identification
+    UFUNCTION(BlueprintCallable, Category = "Component")
+    virtual FString GetComponentSystemName() const PURE_VIRTUAL(UTranspersonalBaseComponent::GetComponentSystemName, return TEXT("Unknown"););
+
+    // Performance monitoring
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    virtual bool IsComponentPerformanceCompliant() const;
+
+protected:
+    // Component configuration
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Component")
+    bool bEnablePerformanceMonitoring = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Component")
+    float MaxTickTime_MS = 0.5f; // 0.5ms max per tick
+
+    // Performance tracking
+    mutable float LastTickTime = 0.0f;
+    mutable int32 TickCount = 0;
+};
+
+/**
+ * ACTOR PATTERN:
+ * All game actors must inherit from ATranspersonalBaseActor
+ */
+UCLASS(Abstract, BlueprintType)
+class TRANSPERSONALGAME_API ATranspersonalBaseActor : public AActor
+{
+    GENERATED_BODY()
+
+public:
+    ATranspersonalBaseActor();
+
+    // AActor interface
+    virtual void BeginPlay() override;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+    virtual void Tick(float DeltaTime);
+
+    // Actor identification
+    UFUNCTION(BlueprintCallable, Category = "Actor")
+    virtual FString GetActorSystemName() const PURE_VIRTUAL(ATranspersonalBaseActor::GetActorSystemName, return TEXT("Unknown"););
+
+    // Performance monitoring
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    virtual bool IsActorPerformanceCompliant() const;
+
+    // Architectural compliance
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    virtual bool ValidateArchitecturalCompliance() const;
+
+protected:
+    // Actor configuration
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Actor")
+    bool bEnableArchitecturalValidation = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Actor")
+    bool bEnablePerformanceMonitoring = true;
+
+    // Performance tracking
+    mutable float LastTickTime = 0.0f;
+    mutable int32 ComponentCount = 0;
+};
+
+// ============================================================================
+// LOGGING STANDARDS (MANDATORY)
+// ============================================================================
+
+/**
+ * LOGGING CATEGORIES:
+ * Each system must define its own log category
+ */
+
+// System-specific log categories (to be defined by each agent)
+DECLARE_LOG_CATEGORY_EXTERN(LogTranspersonalCore, Log, All);
+DECLARE_LOG_CATEGORY_EXTERN(LogTranspersonalPhysics, Log, All);
+DECLARE_LOG_CATEGORY_EXTERN(LogTranspersonalPerformance, Log, All);
+DECLARE_LOG_CATEGORY_EXTERN(LogTranspersonalWorld, Log, All);
+DECLARE_LOG_CATEGORY_EXTERN(LogTranspersonalEnvironment, Log, All);
+DECLARE_LOG_CATEGORY_EXTERN(LogTranspersonalArchitecture, Log, All);
+DECLARE_LOG_CATEGORY_EXTERN(LogTranspersonalLighting, Log, All);
+DECLARE_LOG_CATEGORY_EXTERN(LogTranspersonalCharacters, Log, All);
+DECLARE_LOG_CATEGORY_EXTERN(LogTranspersonalAnimation, Log, All);
+DECLARE_LOG_CATEGORY_EXTERN(LogTranspersonalAI, Log, All);
+DECLARE_LOG_CATEGORY_EXTERN(LogTranspersonalCombat, Log, All);
+DECLARE_LOG_CATEGORY_EXTERN(LogTranspersonalCrowd, Log, All);
+DECLARE_LOG_CATEGORY_EXTERN(LogTranspersonalQuest, Log, All);
+DECLARE_LOG_CATEGORY_EXTERN(LogTranspersonalNarrative, Log, All);
+DECLARE_LOG_CATEGORY_EXTERN(LogTranspersonalAudio, Log, All);
+DECLARE_LOG_CATEGORY_EXTERN(LogTranspersonalVFX, Log, All);
+// DUPLICATE: DECLARE_LOG_CATEGORY_EXTERN(LogTranspersonalQA, Log, All);
+
+/**
+ * LOGGING MACROS:
+ * Use these macros for consistent logging
+ */
+#define TRANSPERSONAL_LOG(Category, Verbosity, Format, ...) \
+    UE_LOG(LogTranspersonal##Category, Verbosity, TEXT("[%s] ") Format, *GetClass()->GetName(), ##__VA_ARGS__)
+
+#define TRANSPERSONAL_LOG_SYSTEM(SystemName, Verbosity, Format, ...) \
+    UE_LOG(LogTranspersonal##SystemName, Verbosity, TEXT("[SYSTEM] ") Format, ##__VA_ARGS__)
+
+#define TRANSPERSONAL_LOG_PERFORMANCE(SystemName, Format, ...) \
+    UE_LOG(LogTranspersonalPerformance, Warning, TEXT("[%s] ") Format, TEXT(#SystemName), ##__VA_ARGS__)
+
+#define TRANSPERSONAL_LOG_ARCHITECTURE(Format, ...) \
+    UE_LOG(LogTranspersonalCore, Error, TEXT("[ARCHITECTURE] ") Format, ##__VA_ARGS__)
+
+// ============================================================================
+// VALIDATION MACROS (MANDATORY)
+// ============================================================================
+
+/**
+ * ARCHITECTURAL VALIDATION:
+ * Use these macros to validate architectural compliance
+ */
+#define TRANSPERSONAL_VALIDATE_SYSTEM(SystemName) \
+    if (!IsValid(this)) \
+    { \
+        TRANSPERSONAL_LOG_ARCHITECTURE("Invalid system instance: %s", TEXT(#SystemName)); \
+        return false; \
+    }
+
+#define TRANSPERSONAL_VALIDATE_PERFORMANCE(MaxTime) \
+    { \
+        float StartTime = FPlatformTime::Seconds(); \
+        ON_SCOPE_EXIT \
+        { \
+            float ElapsedTime = (FPlatformTime::Seconds() - StartTime) * 1000.0f; \
+            if (ElapsedTime > MaxTime) \
+            { \
+                TRANSPERSONAL_LOG_PERFORMANCE(Unknown, "Performance violation: %.2fms > %.2fms", ElapsedTime, MaxTime); \
+            } \
+        }; \
+    }
+
+#define TRANSPERSONAL_VALIDATE_MEMORY(MaxBytes) \
+    { \
+        SIZE_T StartMemory = FPlatformMemory::GetStats().UsedPhysical; \
+        ON_SCOPE_EXIT \
+        { \
+            SIZE_T EndMemory = FPlatformMemory::GetStats().UsedPhysical; \
+            SIZE_T AllocatedBytes = EndMemory - StartMemory; \
+            if (AllocatedBytes > MaxBytes) \
+            { \
+                TRANSPERSONAL_LOG_PERFORMANCE(Unknown, "Memory violation: %llu bytes > %d bytes", AllocatedBytes, MaxBytes); \
+            } \
+        }; \
+    }

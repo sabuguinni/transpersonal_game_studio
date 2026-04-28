@@ -1,0 +1,240 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Components/ActorComponent.h"
+#include "Engine/DataTable.h"
+#include "Materials/MaterialInterface.h"
+#include "CharacterVisualVariationSystem.generated.h"
+
+USTRUCT(BlueprintType)
+struct FChar_CharacterVariationData_5A9 : public FTableRowBase
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical Traits")
+    FString CharacterName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical Traits")
+    float Height;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical Traits")
+    float Weight;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical Traits")
+    FLinearColor SkinTone;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical Traits")
+    FLinearColor HairColor;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical Traits")
+    FLinearColor EyeColor;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical Traits")
+    int32 AgeRange;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical Traits")
+    FString Gender;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical Traits")
+    FString Ethnicity;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clothing")
+    TArray<TSoftObjectPtr<UMaterialInterface>> ClothingMaterials;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Accessories")
+    TArray<FString> AccessorySlots;
+
+    FChar_CharacterVariationData_5A9()
+    {
+        CharacterName = TEXT("DefaultCharacter");
+        Height = 175.0f;
+        Weight = 70.0f;
+        SkinTone = FLinearColor(0.8f, 0.7f, 0.6f, 1.0f);
+        HairColor = FLinearColor(0.3f, 0.2f, 0.1f, 1.0f);
+        EyeColor = FLinearColor(0.2f, 0.4f, 0.6f, 1.0f);
+        AgeRange = 30;
+        Gender = TEXT("Male");
+        Ethnicity = TEXT("Mixed");
+    }
+};
+
+USTRUCT(BlueprintType)
+struct FDinosaurVariationData : public FTableRowBase
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Species")
+    FString SpeciesName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical Traits")
+    float ScaleVariation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical Traits")
+    FLinearColor PrimaryColor;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical Traits")
+    FLinearColor SecondaryColor;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical Traits")
+    FLinearColor PatternColor;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical Traits")
+    FString PatternType;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical Traits")
+    float HornSize;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical Traits")
+    float ClawLength;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical Traits")
+    float TailLength;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
+    FString TemperamentType;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
+    float AggressionLevel;
+
+    FDinosaurVariationData()
+    {
+        SpeciesName = TEXT("Triceratops");
+        ScaleVariation = 1.0f;
+        PrimaryColor = FLinearColor(0.4f, 0.6f, 0.3f, 1.0f);
+        SecondaryColor = FLinearColor(0.3f, 0.4f, 0.2f, 1.0f);
+        PatternColor = FLinearColor(0.2f, 0.3f, 0.1f, 1.0f);
+        PatternType = TEXT("Stripes");
+        HornSize = 1.0f;
+        ClawLength = 1.0f;
+        TailLength = 1.0f;
+        TemperamentType = TEXT("Docile");
+        AggressionLevel = 0.2f;
+    }
+};
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnCharacterVariationApplied, const FChar_CharacterVariationData_5A9&, VariationData);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDinosaurVariationApplied, const FDinosaurVariationData&, VariationData);
+
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UCharacterVisualVariationSystem : public UActorComponent
+{
+    GENERATED_BODY()
+
+public:
+    UCharacterVisualVariationSystem();
+
+protected:
+    virtual void BeginPlay() override;
+
+public:
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
+    // Character Variation Functions
+    UFUNCTION(BlueprintCallable, Category = "Character Variation")
+    void ApplyCharacterVariation(const FChar_CharacterVariationData_5A9& VariationData);
+
+    UFUNCTION(BlueprintCallable, Category = "Character Variation")
+    FChar_CharacterVariationData_5A9 GenerateRandomCharacterVariation();
+
+    UFUNCTION(BlueprintCallable, Category = "Character Variation")
+    void ApplyDinosaurVariation(const FDinosaurVariationData& VariationData);
+
+    UFUNCTION(BlueprintCallable, Category = "Character Variation")
+    FDinosaurVariationData GenerateRandomDinosaurVariation(const FString& SpeciesName);
+
+    // Diversity Management
+    UFUNCTION(BlueprintCallable, Category = "Diversity")
+    void EnsureDiversityInGroup(TArray<AActor*> Characters);
+
+    UFUNCTION(BlueprintCallable, Category = "Diversity")
+    bool ValidateCharacterDiversity(const TArray<FChar_CharacterVariationData_5A9>& CharacterData);
+
+    // Material and Mesh Management
+    UFUNCTION(BlueprintCallable, Category = "Visual")
+    void UpdateCharacterMaterials(const FChar_CharacterVariationData_5A9& VariationData);
+
+    UFUNCTION(BlueprintCallable, Category = "Visual")
+    void UpdateDinosaurMaterials(const FDinosaurVariationData& VariationData);
+
+    // Getters
+    UFUNCTION(BlueprintPure, Category = "Character Variation")
+    FChar_CharacterVariationData_5A9 GetCurrentCharacterVariation() const { return CurrentCharacterVariation; }
+
+    UFUNCTION(BlueprintPure, Category = "Character Variation")
+    FDinosaurVariationData GetCurrentDinosaurVariation() const { return CurrentDinosaurVariation; }
+
+    // Events
+    UPROPERTY(BlueprintAssignable, Category = "Events")
+    FOnCharacterVariationApplied OnCharacterVariationApplied;
+
+    UPROPERTY(BlueprintAssignable, Category = "Events")
+    FOnDinosaurVariationApplied OnDinosaurVariationApplied;
+
+protected:
+    // Data Tables
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Data")
+    UDataTable* CharacterVariationDataTable;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Data")
+    UDataTable* DinosaurVariationDataTable;
+
+    // Current Variations
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Current State")
+    FChar_CharacterVariationData_5A9 CurrentCharacterVariation;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Current State")
+    FDinosaurVariationData CurrentDinosaurVariation;
+
+    // Variation Parameters
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
+    float MinHeightVariation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
+    float MaxHeightVariation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
+    float MinScaleVariation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
+    float MaxScaleVariation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
+    TArray<FLinearColor> SkinTonePresets;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
+    TArray<FLinearColor> HairColorPresets;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
+    TArray<FLinearColor> EyeColorPresets;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
+    TArray<FString> EthnicityTypes;
+
+    // Dinosaur Variation Settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Settings")
+    TArray<FLinearColor> DinosaurColorPresets;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Settings")
+    TArray<FString> DinosaurPatternTypes;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Settings")
+    TArray<FString> DinosaurTemperaments;
+
+private:
+    // Helper Functions
+    FLinearColor GenerateRandomSkinTone();
+    FLinearColor GenerateRandomHairColor();
+    FLinearColor GenerateRandomEyeColor();
+    FString GenerateRandomEthnicity();
+    FString GenerateRandomGender();
+    int32 GenerateRandomAge();
+
+    FLinearColor GenerateRandomDinosaurColor();
+    FString GenerateRandomDinosaurPattern();
+    FString GenerateRandomDinosaurTemperament();
+    float GenerateRandomScale();
+
+    void InitializePresets();
+    void ApplyMaterialParameters(UMaterialInterface* Material, const FChar_CharacterVariationData_5A9& VariationData);
+    void ApplyDinosaurMaterialParameters(UMaterialInterface* Material, const FDinosaurVariationData& VariationData);
+};

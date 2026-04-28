@@ -1,0 +1,543 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "GameFramework/Actor.h"
+#include "MassEntityTypes.h"
+#include "MassSpawnerTypes.h"
+#include "MassCommonFragments.h"
+#include "Engine/World.h"
+#include "Components/SceneComponent.h"
+#include "MassCrowdIntelligenceV43.h"
+#include "EcosystemCrowdManagerV43.generated.h"
+
+// Forward declarations
+class UMassEntitySubsystem;
+class UMassSpawnerSubsystem;
+class UZoneGraphSubsystem;
+struct FMassEntityTemplate;
+
+
+#if 0 // HEADER_DISABLED
+/**
+ * Ecosystem zone types for crowd distribution
+ */
+UENUM(BlueprintType)
+enum class EEcosystemZoneType : uint8
+{
+    RiverBank,
+    FeedingGrounds,
+    NestingArea,
+    MigrationCorridor,
+    TerritorialBoundary,
+    WaterSource,
+    ShelterZone,
+    HuntingGrounds,
+    RestingArea,
+    SocialGathering,
+    DangerZone,
+    NeutralTerritory
+};
+
+/**
+ * Dinosaur species distribution data
+ */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FDinosaurSpeciesDistribution
+{
+    GENERATED_BODY()
+
+    FDinosaurSpeciesDistribution()
+        : SpeciesName(TEXT("Unknown"))
+        , PreferredZoneTypes()
+        , MinGroupSize(1)
+        , MaxGroupSize(10)
+        , PopulationDensity(0.5f)
+        , TerritorialRadius(1000.0f)
+        , ActivityPattern(EDinosaurActivityPattern::Diurnal)
+        , SocialBehavior(EDinosaurSocialBehavior::Herd)
+        , AggressionLevel(0.3f)
+        , FlightResponse(0.7f)
+        , bIsPredator(false)
+        , bIsHerbivore(true)
+        , bCanFly(false)
+        , bIsAquatic(false)
+        , bIsNocturnal(false)
+    {}
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FString SpeciesName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TArray<EEcosystemZoneType> PreferredZoneTypes;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "1", ClampMax = "100"))
+    int32 MinGroupSize;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "1", ClampMax = "1000"))
+    int32 MaxGroupSize;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float PopulationDensity;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float TerritorialRadius;
+
+// [UHT-FIX]     UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    EDinosaurActivityPattern ActivityPattern;
+
+// [UHT-FIX]     UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    EDinosaurSocialBehavior SocialBehavior;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float AggressionLevel;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float FlightResponse;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsPredator;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsHerbivore;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bCanFly;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsAquatic;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsNocturnal;
+};
+
+/**
+ * Ecosystem zone configuration
+ */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FEcosystemZoneConfig
+{
+    GENERATED_BODY()
+
+    FEcosystemZoneConfig()
+        : ZoneType(EEcosystemZoneType::NeutralTerritory)
+        , ZoneName(TEXT("Unnamed Zone"))
+        , CenterLocation(FVector::ZeroVector)
+        , ZoneRadius(2000.0f)
+        , MaxPopulation(100)
+        , CurrentPopulation(0)
+        , ResourceAvailability(0.5f)
+        , SafetyLevel(0.5f)
+        , NoiseLevel(0.3f)
+        , VegetationDensity(0.5f)
+        , WaterAccess(0.5f)
+        , ShelterAvailability(0.5f)
+        , bIsActiveZone(true)
+        , bAllowsPredators(true)
+        , bAllowsHerbivores(true)
+        , bIsMigrationRoute(false)
+        , bIsSeasonalZone(false)
+    {}
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    EEcosystemZoneType ZoneType;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FString ZoneName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FVector CenterLocation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float ZoneRadius;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    int32 MaxPopulation;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+    int32 CurrentPopulation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float ResourceAvailability;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float SafetyLevel;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float NoiseLevel;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float VegetationDensity;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float WaterAccess;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float ShelterAvailability;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsActiveZone;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bAllowsPredators;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bAllowsHerbivores;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsMigrationRoute;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsSeasonalZone;
+
+    // Runtime data
+// [UHT-FIX2]     UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+    TArray<FMassEntityHandle> ZoneEntities;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+    TMap<FString, int32> SpeciesCount;
+};
+
+/**
+ * Migration route data
+ */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FAI_MigrationRoute
+{
+    GENERATED_BODY()
+
+    FAI_MigrationRoute()
+        : RouteName(TEXT("Unnamed Route"))
+        , StartZone(EEcosystemZoneType::NeutralTerritory)
+        , EndZone(EEcosystemZoneType::NeutralTerritory)
+        , RoutePoints()
+        , MigrationSeason(0)
+        , MigrationDuration(24.0f)
+        , bIsActive(false)
+        , bIsBidirectional(true)
+    {}
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FString RouteName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    EEcosystemZoneType StartZone;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    EEcosystemZoneType EndZone;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TArray<FVector> RoutePoints;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0", ClampMax = "3"))
+    int32 MigrationSeason; // 0=Spring, 1=Summer, 2=Autumn, 3=Winter
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float MigrationDuration; // In game hours
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsActive;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsBidirectional;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TArray<FString> MigratingSpecies;
+};
+
+/**
+ * Crowd simulation performance settings
+ */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FCrowdPerformanceSettings
+{
+    GENERATED_BODY()
+
+    FCrowdPerformanceSettings()
+        : MaxSimulatedEntities(50000)
+        , MaxActiveEntities(10000)
+        , MaxVisibleEntities(2000)
+        , LODDistance1(1000.0f)
+        , LODDistance2(3000.0f)
+        , LODDistance3(8000.0f)
+        , CullingDistance(15000.0f)
+        , UpdateFrequency(0.1f)
+        , bEnableDynamicLOD(true)
+        , bEnableOcclusion(true)
+        , bEnableDistanceCulling(true)
+        , bEnableViewFrustumCulling(true)
+    {}
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "1000", ClampMax = "100000"))
+    int32 MaxSimulatedEntities;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "100", ClampMax = "20000"))
+    int32 MaxActiveEntities;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "50", ClampMax = "5000"))
+    int32 MaxVisibleEntities;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float LODDistance1;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float LODDistance2;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float LODDistance3;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float CullingDistance;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.01", ClampMax = "1.0"))
+    float UpdateFrequency;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bEnableDynamicLOD;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bEnableOcclusion;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bEnableDistanceCulling;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bEnableViewFrustumCulling;
+};
+
+/**
+ * V43 Ecosystem Crowd Manager - Manages large-scale dinosaur populations and ecosystem dynamics
+ */
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API AEcosystemCrowdManagerV43 : public AActor
+{
+    GENERATED_BODY()
+
+public:
+    AEcosystemCrowdManagerV43();
+
+protected:
+    virtual void BeginPlay() override;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+    virtual void Tick(float DeltaTime);
+
+public:
+    // Core ecosystem management
+    UFUNCTION(BlueprintCallable, Category = "Ecosystem Management")
+    void InitializeEcosystem();
+
+    UFUNCTION(BlueprintCallable, Category = "Ecosystem Management")
+    void UpdateEcosystemDynamics(float DeltaTime);
+
+    UFUNCTION(BlueprintCallable, Category = "Ecosystem Management")
+    void ShutdownEcosystem();
+
+    // Zone management
+    UFUNCTION(BlueprintCallable, Category = "Zone Management")
+    void CreateEcosystemZone(const FEcosystemZoneConfig& ZoneConfig);
+
+    UFUNCTION(BlueprintCallable, Category = "Zone Management")
+    void RemoveEcosystemZone(const FString& ZoneName);
+
+    UFUNCTION(BlueprintCallable, Category = "Zone Management")
+    void UpdateZonePopulation(const FString& ZoneName);
+
+    UFUNCTION(BlueprintCallable, Category = "Zone Management")
+    FEcosystemZoneConfig GetZoneConfig(const FString& ZoneName) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Zone Management")
+    TArray<FString> GetAllZoneNames() const;
+
+    // Species management
+    UFUNCTION(BlueprintCallable, Category = "Species Management")
+    void RegisterSpecies(const FDinosaurSpeciesDistribution& SpeciesData);
+
+    UFUNCTION(BlueprintCallable, Category = "Species Management")
+    void SpawnSpeciesGroup(const FString& SpeciesName, const FVector& Location, int32 GroupSize);
+
+    UFUNCTION(BlueprintCallable, Category = "Species Management")
+    void DespawnSpeciesGroup(const FString& SpeciesName, const FVector& Location, float Radius);
+
+    UFUNCTION(BlueprintCallable, Category = "Species Management")
+    int32 GetSpeciesPopulation(const FString& SpeciesName) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Species Management")
+    TArray<FString> GetAllSpeciesNames() const;
+
+    // Migration management
+    UFUNCTION(BlueprintCallable, Category = "Migration Management")
+    void CreateMigrationRoute(const FAI_MigrationRoute& Route);
+
+    UFUNCTION(BlueprintCallable, Category = "Migration Management")
+    void StartMigration(const FString& RouteName);
+
+    UFUNCTION(BlueprintCallable, Category = "Migration Management")
+    void StopMigration(const FString& RouteName);
+
+    UFUNCTION(BlueprintCallable, Category = "Migration Management")
+    bool IsMigrationActive(const FString& RouteName) const;
+
+    // Crowd simulation control
+    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
+    void SetSimulationActive(bool bActive);
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
+    void SetPerformanceSettings(const FCrowdPerformanceSettings& Settings);
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
+    void UpdateLODSettings();
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd Simulation")
+    void ForceUpdateAllEntities();
+
+    // Player interaction
+    UFUNCTION(BlueprintCallable, Category = "Player Interaction")
+    void OnPlayerEnterZone(const FString& ZoneName, const FVector& PlayerLocation);
+
+    UFUNCTION(BlueprintCallable, Category = "Player Interaction")
+    void OnPlayerExitZone(const FString& ZoneName, const FVector& PlayerLocation);
+
+    UFUNCTION(BlueprintCallable, Category = "Player Interaction")
+    void TriggerPlayerThreatResponse(const FVector& PlayerLocation, float ThreatRadius, float ThreatIntensity);
+
+    // Environmental events
+    UFUNCTION(BlueprintCallable, Category = "Environmental Events")
+    void TriggerStampede(const FVector& Location, float Radius, const FVector& FleeDirection);
+
+    UFUNCTION(BlueprintCallable, Category = "Environmental Events")
+    void TriggerPredatorHunt(const FVector& Location, const FString& PredatorSpecies, const FString& PreySpecies);
+
+    UFUNCTION(BlueprintCallable, Category = "Environmental Events")
+    void TriggerSeasonalMigration(int32 Season);
+
+    // Debug and monitoring
+    UFUNCTION(BlueprintCallable, Category = "Debug")
+    void ToggleDebugVisualization();
+
+    UFUNCTION(BlueprintCallable, Category = "Debug")
+    void PrintEcosystemStats();
+
+    UFUNCTION(BlueprintCallable, Category = "Debug")
+    void PrintZoneStats(const FString& ZoneName);
+
+    UFUNCTION(BlueprintCallable, Category = "Debug")
+    void PrintSpeciesStats(const FString& SpeciesName);
+
+    // Getters for monitoring
+    UFUNCTION(BlueprintPure, Category = "Monitoring")
+    int32 GetTotalPopulation() const;
+
+    UFUNCTION(BlueprintPure, Category = "Monitoring")
+    int32 GetActiveEntitiesCount() const;
+
+    UFUNCTION(BlueprintPure, Category = "Monitoring")
+    int32 GetVisibleEntitiesCount() const;
+
+    UFUNCTION(BlueprintPure, Category = "Monitoring")
+    float GetSimulationPerformance() const;
+
+protected:
+    // Core systems
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    USceneComponent* RootSceneComponent;
+
+    // Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ecosystem Configuration")
+    TArray<FEcosystemZoneConfig> EcosystemZones;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Species Configuration")
+    TArray<FDinosaurSpeciesDistribution> SpeciesDistributions;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Migration Configuration")
+    TArray<FAI_MigrationRoute> MigrationRoutes;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    FCrowdPerformanceSettings PerformanceSettings;
+
+    // Runtime settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Runtime Settings")
+    bool bAutoStartSimulation = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Runtime Settings")
+    bool bEnableDebugVisualization = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Runtime Settings")
+    float EcosystemUpdateInterval = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Runtime Settings")
+    float PopulationBalanceInterval = 10.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Runtime Settings")
+    float MigrationCheckInterval = 30.0f;
+
+private:
+    // Internal management
+    void UpdateZonePopulations();
+    void BalanceEcosystemPopulations();
+    void ProcessMigrations();
+    void UpdatePerformanceOptimizations();
+    void HandlePlayerProximity();
+
+    // Spawning and despawning
+    void SpawnEntitiesInZone(const FString& ZoneName, const FString& SpeciesName, int32 Count);
+    void DespawnEntitiesInZone(const FString& ZoneName, int32 Count);
+    void OptimizeEntityDistribution();
+
+    // Zone calculations
+    FEcosystemZoneConfig* FindZoneByName(const FString& ZoneName);
+    FEcosystemZoneConfig* FindZoneByLocation(const FVector& Location);
+    float CalculateZoneCapacity(const FEcosystemZoneConfig& Zone) const;
+    bool IsLocationInZone(const FVector& Location, const FEcosystemZoneConfig& Zone) const;
+
+    // Species calculations
+    FDinosaurSpeciesDistribution* FindSpeciesByName(const FString& SpeciesName);
+    int32 CalculateOptimalGroupSize(const FDinosaurSpeciesDistribution& Species, const FEcosystemZoneConfig& Zone) const;
+    bool CanSpeciesLiveInZone(const FDinosaurSpeciesDistribution& Species, const FEcosystemZoneConfig& Zone) const;
+
+    // Migration calculations
+    FAI_MigrationRoute* FindMigrationRoute(const FString& RouteName);
+    bool ShouldStartMigration(const FAI_MigrationRoute& Route) const;
+    void ProcessMigrationMovement(FAI_MigrationRoute& Route, float DeltaTime);
+
+    // Performance optimization
+    void UpdateEntityLOD();
+    void CullDistantEntities();
+    void UpdateVisibilityStates();
+
+    // Debug visualization
+    void DrawZoneDebugInfo();
+    void DrawMigrationRoutes();
+    void DrawPopulationStats();
+
+    // Subsystem references
+    UPROPERTY()
+    UMassEntitySubsystem* MassEntitySubsystem;
+
+    UPROPERTY()
+    UMassSpawnerSubsystem* MassSpawnerSubsystem;
+
+    UPROPERTY()
+    UZoneGraphSubsystem* ZoneGraphSubsystem;
+
+    // Runtime data
+    TMap<FString, FEcosystemZoneConfig> ActiveZones;
+    TMap<FString, FDinosaurSpeciesDistribution> RegisteredSpecies;
+    TMap<FString, FAI_MigrationRoute> ActiveMigrations;
+    TArray<FMassEntityHandle> ManagedEntities;
+    
+    // Timing
+    float LastEcosystemUpdate = 0.0f;
+    float LastPopulationBalance = 0.0f;
+    float LastMigrationCheck = 0.0f;
+    
+    // Performance tracking
+    int32 CurrentActiveEntities = 0;
+    int32 CurrentVisibleEntities = 0;
+    float LastPerformanceCheck = 0.0f;
+    float AverageFrameTime = 0.0f;
+    
+    // Player tracking
+    FVector LastPlayerLocation = FVector::ZeroVector;
+    FString CurrentPlayerZone = TEXT("");
+    float PlayerMovementSpeed = 0.0f;
+};
+#endif // HEADER_DISABLED

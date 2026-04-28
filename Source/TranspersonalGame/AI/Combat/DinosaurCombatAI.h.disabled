@@ -1,0 +1,208 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "AIController.h"
+#include "BehaviorTree/BehaviorTreeComponent.h"
+#include "BehaviorTree/BlackboardComponent.h"
+// DISABLED: #include "Perception/PerceptionComponent.h"
+#include "Perception/AISenseConfig_Sight.h"
+#include "Perception/AISenseConfig_Hearing.h"
+#include "GameplayTagContainer.h"
+#include "Perception/AIPerceptionComponent.h"
+#include "DinosaurCombatAI.generated.h"
+
+class UBehaviorTree;
+class UBlackboardData;
+class ADinosaurCharacter;
+
+UENUM(BlueprintType)
+enum class EDinosaurCombatState : uint8
+{
+    Idle,
+    Hunting,
+    Stalking,
+    Attacking,
+    Fleeing,
+    Territorial,
+    Feeding,
+    Resting,
+    Investigating
+};
+
+UENUM(BlueprintType)
+enum class EDinosaurAggressionLevel : uint8
+{
+    Passive,
+    Cautious,
+    Defensive,
+    Aggressive,
+    Enraged
+};
+
+USTRUCT(BlueprintType)
+struct FAI_CombatPersonality_C5E
+{
+    GENERATED_BODY()
+
+    // Agressividade base (0.0 = pacífico, 1.0 = extremamente agressivo)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float BaseAggression = 0.5f;
+
+    // Curiosidade (afeta investigação de sons/movimentos)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Curiosity = 0.3f;
+
+    // Territorialidade (defende área específica)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Territoriality = 0.4f;
+
+    // Inteligência tática (coordenação, flanqueamento)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float TacticalIntelligence = 0.5f;
+
+    // Persistência na caça
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float HuntingPersistence = 0.6f;
+
+    // Medo de humanos (afeta comportamento inicial)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float HumanFear = 0.7f;
+
+    FAI_CombatPersonality_C5E()
+    {
+        BaseAggression = FMath::RandRange(0.2f, 0.8f);
+        Curiosity = FMath::RandRange(0.1f, 0.7f);
+        Territoriality = FMath::RandRange(0.2f, 0.9f);
+        TacticalIntelligence = FMath::RandRange(0.3f, 0.8f);
+        HuntingPersistence = FMath::RandRange(0.4f, 0.9f);
+        HumanFear = FMath::RandRange(0.3f, 0.9f);
+    }
+};
+
+UCLASS()
+class TRANSPERSONALGAME_API ADinosaurCombatAI : public AAIController
+{
+    GENERATED_BODY()
+
+public:
+    ADinosaurCombatAI();
+
+protected:
+    virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime);
+
+    // Componentes de IA
+    // SHADOWED: UPROPERTY class UAIPerceptionComponent* PerceptionComponent;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI")
+    class UBehaviorTreeComponent* BehaviorTreeComponent;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI")
+    class UBlackboardComponent* BlackboardComponent;
+
+    // Assets de IA
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI")
+    UBehaviorTree* BehaviorTree;
+
+// [UHT-FIX]     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI")
+    UBlackboardData* BlackboardAsset;
+
+    // Personalidade de combate
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    FAI_CombatPersonality_C5E CombatPersonality;
+
+    // Estado atual de combate
+    UPROPERTY(BlueprintReadOnly, Category = "Combat")
+    EDinosaurCombatState CurrentCombatState;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Combat")
+    EDinosaurAggressionLevel CurrentAggressionLevel;
+
+    // Target atual
+    UPROPERTY(BlueprintReadOnly, Category = "Combat")
+    AActor* CurrentTarget;
+
+    // Memória de combate
+    UPROPERTY(BlueprintReadOnly, Category = "Combat")
+    TArray<AActor*> KnownThreats;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Combat")
+    TArray<AActor*> RecentlySeenActors;
+
+    // Timers
+    UPROPERTY(BlueprintReadOnly, Category = "Combat")
+    float LastTargetSeenTime;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Combat")
+    float CombatStateChangeTime;
+
+    // Configurações de percepção
+    UPROPERTY(EditDefaultsOnly, Category = "AI|Perception")
+    float SightRadius = 1500.0f;
+
+    UPROPERTY(EditDefaultsOnly, Category = "AI|Perception")
+    float LoseSightRadius = 1600.0f;
+
+    UPROPERTY(EditDefaultsOnly, Category = "AI|Perception")
+    float PeripheralVisionAngleDegrees = 90.0f;
+
+    UPROPERTY(EditDefaultsOnly, Category = "AI|Perception")
+    float HearingRange = 1200.0f;
+
+public:
+    // Funções públicas de combate
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    void SetCombatState(EDinosaurCombatState NewState);
+
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    void SetAggressionLevel(EDinosaurAggressionLevel NewLevel);
+
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    bool IsTargetInSight(AActor* Target);
+
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    float GetDistanceToTarget(AActor* Target);
+
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    bool ShouldEngageTarget(AActor* Target);
+
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    void AddKnownThreat(AActor* Threat);
+
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    void RemoveKnownThreat(AActor* Threat);
+
+    UFUNCTION(BlueprintPure, Category = "Combat")
+    FAI_CombatPersonality_C5E GetCombatPersonality() const { return CombatPersonality; }
+
+    UFUNCTION(BlueprintPure, Category = "Combat")
+    EDinosaurCombatState GetCombatState() const { return CurrentCombatState; }
+
+    UFUNCTION(BlueprintPure, Category = "Combat")
+    EDinosaurAggressionLevel GetAggressionLevel() const { return CurrentAggressionLevel; }
+
+protected:
+    // Callbacks de percepção
+    UFUNCTION()
+    void OnPerceptionUpdated(const TArray<AActor*>& UpdatedActors);
+
+    UFUNCTION()
+    void OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus);
+
+    // Lógica de combate
+    void UpdateCombatLogic(float DeltaTime);
+    void EvaluateThreats();
+    void UpdateAggressionLevel();
+    void HandleCombatStateTransitions();
+
+    // Configuração inicial
+    void SetupPerception();
+    void InitializeCombatPersonality();
+    void StartBehaviorTree();
+
+    // Utilitários
+    bool IsPlayerCharacter(AActor* Actor);
+    float CalculateThreatLevel(AActor* Actor);
+    FVector GetOptimalAttackPosition(AActor* Target);
+    bool CanFlankTarget(AActor* Target);
+};

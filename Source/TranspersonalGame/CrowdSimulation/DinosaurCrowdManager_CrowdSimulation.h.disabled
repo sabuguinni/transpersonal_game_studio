@@ -1,0 +1,300 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "MassEntitySubsystem.h"
+#include "MassProcessor.h"
+#include "MassEntityTypes.h"
+#include "MassCommonFragments.h"
+#include "MassMovementFragments.h"
+#include "DinosaurCrowdManager_CrowdSimulation.generated.h"
+
+// Fragmentos específicos para dinossauros
+
+#if 0 // HEADER_DISABLED
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FTP_CrowdSimMassFragment /* FDinosaurSpeciesFragment */ : public FMassFragment
+{
+    GENERATED_BODY()
+
+    // Tipo de dinossauro (Herbívoro, Carnívoro, Omnívoro)
+// [UHT-FIX4]     UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    ECrowdSim_DinosaurType SpeciesType = ECrowdSim_DinosaurType::Herbivore;
+
+    // Tamanho do dinossauro (Small, Medium, Large, Massive)
+// [UHT-FIX4]     UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    ECrowdSim_DinosaurSize Size = ECrowdSim_DinosaurSize::Medium;
+
+    // Características únicas visuais
+// [UHT-FIX4]     UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FDinosaurUniqueTraits UniqueTraits;
+
+    // Nível de agressividade (0.0 = pacífico, 1.0 = extremamente agressivo)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float AggressionLevel = 0.3f;
+
+    // Velocidade máxima de movimento
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float MaxSpeed = 600.0f;
+
+    // Raio de detecção de ameaças
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float ThreatDetectionRadius = 1500.0f;
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FCrowdSim_DinosaurBehaviorFragment : public FMassFragment
+{
+    GENERATED_BODY()
+
+    // Estado comportamental atual
+// [UHT-FIX4]     UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    ECrowdSim_DinosaurBehaviorState CurrentState = ECrowdSim_DinosaurBehaviorState::Wandering;
+
+    // Tempo restante no estado atual
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float StateTimer = 0.0f;
+
+    // Posição do território/área preferida
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FVector TerritoryCenter = FVector::ZeroVector;
+
+    // Raio do território
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float TerritoryRadius = 2000.0f;
+
+    // Nível de fome (0.0 = saciado, 1.0 = faminto)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float HungerLevel = 0.3f;
+
+    // Nível de sede
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float ThirstLevel = 0.2f;
+
+    // Nível de cansaço
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float FatigueLevel = 0.1f;
+
+    // Target atual (comida, água, abrigo, etc.)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FVector CurrentTarget = FVector::ZeroVector;
+
+    // Tem target válido
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bHasValidTarget = false;
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FCrowdSim_DinoBehaviorFrag : public FMassFragment
+{
+    GENERATED_BODY()
+
+    // É um dinossauro de bando
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsPackAnimal = false;
+
+    // ID do bando (se aplicável)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    int32 PackID = -1;
+
+    // Posição no bando (Leader, Follower, Scout)
+// [UHT-FIX4]     UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    EPackRole PackRole = EPackRole::Follower;
+
+    // Distância preferida de outros membros do bando
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float PreferredPackDistance = 500.0f;
+
+    // Lista de entidades próximas (para interações sociais)
+// [UHT-FIX2]     UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TArray<FMassEntityHandle> NearbyEntities;
+};
+
+// Enums para comportamento
+UENUM(BlueprintType)
+enum class ECrowdSim_DinosaurType : uint8
+{
+    Herbivore,
+    Carnivore,
+    Omnivore,
+    Scavenger
+};
+
+UENUM(BlueprintType)
+enum class ECrowdSim_DinosaurSize : uint8
+{
+    Tiny,       // Compsognathus
+    Small,      // Velociraptors
+    Medium,     // Parasaurolophus
+    Large,      // T-Rex
+    Massive     // Brontosaurus
+};
+
+UENUM(BlueprintType)
+enum class ECrowdSim_DinosaurBehaviorState : uint8
+{
+    Wandering,
+    Feeding,
+    Drinking,
+    Resting,
+    Hunting,
+    Fleeing,
+    Socializing,
+    Territorial,
+    Sleeping,
+    Investigating
+};
+
+UENUM(BlueprintType)
+enum class EPackRole : uint8
+{
+    Leader,
+    Follower,
+    Scout,
+    Guardian
+};
+
+// Estrutura para características únicas
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FDinosaurUniqueTraits
+{
+    GENERATED_BODY()
+
+    // Variações de cor
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FLinearColor PrimaryColor = FLinearColor::White;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FLinearColor SecondaryColor = FLinearColor::Gray;
+
+    // Variações de escala
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FVector ScaleVariation = FVector(1.0f, 1.0f, 1.0f);
+
+    // Características físicas únicas
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float HornSize = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float TailLength = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float NeckLength = 1.0f;
+
+    // Padrões de movimento únicos
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float MovementQuirkiness = 0.0f; // 0.0 = movimento normal, 1.0 = movimento muito peculiar
+};
+
+/**
+ * Manager principal para simulação de crowd de dinossauros
+ * Coordena todos os sistemas de Mass Entity para criar ecossistemas vivos
+ */
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API ACrowdSim_DinosaurCrowdManager : public AActor
+{
+    GENERATED_BODY()
+
+public:
+    ACrowdSim_DinosaurCrowdManager();
+
+protected:
+    virtual void BeginPlay() override;
+
+public:
+    virtual void Tick(float DeltaTime);
+
+    // Configurações de spawn
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Configuration")
+    int32 MaxDinosaursPerSpecies = 200;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Configuration")
+    int32 MaxTotalDinosaurs = 2000;
+
+// [UHT-FIX4]     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Configuration")
+    float SpawnRadius = 10000.0f;
+
+// [UHT-FIX4]     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Configuration")
+    TArray<FDinosaurSpeciesConfig> SpeciesConfigurations;
+
+    // Sistema de LOD para performance
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float HighDetailRadius = 2000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float MediumDetailRadius = 5000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float LowDetailRadius = 10000.0f;
+
+    // Referência ao jogador para sistemas de proximidade
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player Interaction")
+    APawn* PlayerPawn;
+
+    // Funções públicas
+    UFUNCTION(BlueprintCallable, Category = "Crowd Management")
+    void SpawnDinosaurHerd(ECrowdSim_DinosaurType SpeciesType, int32 Count, FVector Location, float Radius = 1000.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd Management")
+    void DespawnDinosaursInRadius(FVector Location, float Radius);
+
+// [UHT-FIX2]     UFUNCTION(BlueprintCallable, Category = "Crowd Management")
+    TArray<FMassEntityHandle> GetDinosaursInRadius(FVector Location, float Radius);
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd Management")
+    void TriggerMassFleeResponse(FVector ThreatLocation, float ThreatRadius, float FleeIntensity = 1.0f);
+
+private:
+    // Sistema Mass Entity
+    UPROPERTY()
+    UMassEntitySubsystem* MassEntitySubsystem;
+
+    // Configurações internas
+    void InitializeMassSystem();
+    void SetupDinosaurArchetypes();
+    void RegisterProcessors();
+
+    // Spawning interno
+    FMassEntityHandle SpawnSingleDinosaur(ECrowdSim_DinosaurType SpeciesType, FVector Location, FDinosaurUniqueTraits UniqueTraits);
+    FDinosaurUniqueTraits GenerateUniqueTraits(ECrowdSim_DinosaurType SpeciesType);
+
+    // Performance e LOD
+    void UpdateLODLevels();
+    void CullDistantEntities();
+
+    // Ecossistema
+    void UpdateEcosystemBalance();
+    void HandlePredatorPreyInteractions();
+    void ManageResourceDistribution();
+};
+
+// Configuração de espécie
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FDinosaurSpeciesConfig
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    ECrowdSim_DinosaurType SpeciesType = ECrowdSim_DinosaurType::Herbivore;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    ECrowdSim_DinosaurSize Size = ECrowdSim_DinosaurSize::Medium;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    int32 MinPackSize = 1;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    int32 MaxPackSize = 8;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float SpawnWeight = 1.0f; // Probabilidade relativa de spawn
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TArray<FString> PreferredBiomes;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UStaticMesh* DinosaurMesh;
+
+// [UHT-FIX]     UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UAnimationBlueprint* AnimationBlueprint;
+};
+#endif // HEADER_DISABLED

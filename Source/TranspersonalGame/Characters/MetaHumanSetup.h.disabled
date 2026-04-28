@@ -1,0 +1,164 @@
+// MetaHuman Setup and Integration Header
+// Transpersonal Game Studio — Character Artist Agent #09
+// Production Cycle: PROD_JURASSIC_001
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "GameFramework/Character.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "MetaHumanSetup.generated.h"
+
+UENUM(BlueprintType)
+enum class EChar_CharacterArchetype_658 : uint8
+{
+    Protagonist     UMETA(DisplayName = "Protagonist - Dr. Paleontologist"),
+    TribalNative    UMETA(DisplayName = "Tribal Native - Indigenous Survivor"),
+    TimeTraveler    UMETA(DisplayName = "Time Traveler - Lost Explorer"),
+    BackgroundNPC   UMETA(DisplayName = "Background NPC - Environmental Population")
+};
+
+UENUM(BlueprintType)
+enum class EChar_SurvivalState : uint8
+{
+    Fresh           UMETA(DisplayName = "Fresh - Recently Arrived"),
+    Adapting        UMETA(DisplayName = "Adapting - Learning to Survive"),
+    Hardened        UMETA(DisplayName = "Hardened - Experienced Survivor"),
+    Desperate       UMETA(DisplayName = "Desperate - Struggling to Survive")
+};
+
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API AMetaHumanCharacter : public ACharacter
+{
+    GENERATED_BODY()
+
+public:
+    AMetaHumanCharacter();
+
+protected:
+    virtual void BeginPlay() override;
+
+public:
+    virtual void Tick(float DeltaTime);
+
+    // Core Components
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MetaHuman")
+    class USkeletalMeshComponent* MetaHumanMesh;
+
+    // Character Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Setup")
+    EChar_CharacterArchetype_658 CharacterArchetype;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Setup")
+    EChar_SurvivalState SurvivalState;
+
+    // Survival Parameters
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float SurvivalLevel;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float EnvironmentalDamage;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float FatigueLevel;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float StressLevel;
+
+    // Visual Customization
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
+    FLinearColor SkinTone;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
+    FLinearColor HairColor;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
+    FLinearColor EyeColor;
+
+    // Tribal Customization
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal", meta = (EditCondition = "CharacterArchetype == EChar_CharacterArchetype_658::TribalNative"))
+    bool bHasTribalMarkings;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal", meta = (EditCondition = "bHasTribalMarkings"))
+    FLinearColor TribalMarkingColor;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal", meta = (EditCondition = "bHasTribalMarkings", ClampMin = "0.0", ClampMax = "1.0"))
+    float TribalMarkingIntensity;
+
+    // Time Traveler Customization
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time Traveler", meta = (EditCondition = "CharacterArchetype == EChar_CharacterArchetype_658::TimeTraveler"))
+    int32 DaysInPast;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time Traveler", meta = (EditCondition = "CharacterArchetype == EChar_CharacterArchetype_658::TimeTraveler"))
+    bool bHasModernClothing;
+
+    // Performance Settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    bool bUseOptimizedLOD;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 ForcedLODLevel;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    bool bEnableClothSimulation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    bool bEnableHairPhysics;
+
+    // Blueprint Functions
+    UFUNCTION(BlueprintCallable, Category = "Character Setup")
+    void SetCharacterArchetype(EChar_CharacterArchetype_658 NewArchetype);
+
+    UFUNCTION(BlueprintCallable, Category = "Survival")
+    void UpdateSurvivalAppearance();
+
+    UFUNCTION(BlueprintCallable, Category = "Survival")
+    void ApplyEnvironmentalDamage(float DamageAmount);
+
+    UFUNCTION(BlueprintCallable, Category = "Appearance")
+    void ApplyTribalMarkings();
+
+    UFUNCTION(BlueprintCallable, Category = "Appearance")
+    void SetTribalClothing();
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void OptimizeForCrowdRendering();
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void RestoreFullQuality();
+
+    // Blueprint Events
+    UFUNCTION(BlueprintImplementableEvent, Category = "Character Events")
+    void OnArchetypeChanged(EChar_CharacterArchetype_658 NewArchetype);
+
+    UFUNCTION(BlueprintImplementableEvent, Category = "Character Events")
+    void OnSurvivalStateChanged(EChar_SurvivalState NewState);
+
+protected:
+    // Internal Setup Functions
+    void SetupLODConfiguration();
+    void ApplyArchetypeSettings();
+    void ApplyProtagonistSettings();
+    void ApplyTribalSettings();
+    void ApplyTimeTravelerSettings();
+    void ApplyBackgroundNPCSettings();
+    void LoadMaterialSet(const FString& MaterialSetName);
+    void InitializeSurvivalState();
+    void UpdateFacialState(float WellbeingLevel);
+    void UpdateCharacterState(float DeltaTime);
+
+    // Material Management
+    UPROPERTY()
+    TArray<UMaterialInstanceDynamic*> DynamicMaterials;
+
+    // Internal State
+    float LastUpdateTime;
+    bool bIsInitialized;
+    
+private:
+    // Performance tracking
+    int32 CurrentLODLevel;
+    float LastLODUpdateTime;
+    float DistanceToPlayer;
+};

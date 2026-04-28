@@ -1,0 +1,133 @@
+#pragma once
+
+
+
+#include "CoreMinimal.h"
+#include "Components/ActorComponent.h"
+#include "GameplayTagContainer.h"
+#include "../Core/NPCBehaviorTypes.h"
+#include "TranspersonalGameSharedTypes.h"
+#include "NPCMemoryComponent.generated.h"
+
+
+#if 0 // HEADER_DISABLED
+/**
+ * Component responsible for managing NPC memory and learning
+ * Stores experiences, relationships, and learned behaviors
+ */
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UNPCMemoryComponent : public UActorComponent
+{
+    GENERATED_BODY()
+
+public:
+    UNPCMemoryComponent();
+
+protected:
+    virtual void BeginPlay() override;
+
+public:
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
+    // Memory Management
+// [UHT-FIX]     UFUNCTION(BlueprintCallable, Category = "Memory")
+    void AddMemory(const FMemoryEntry& NewMemory);
+
+// [UHT-FIX]     UFUNCTION(BlueprintCallable, Category = "Memory")
+    TArray<FMemoryEntry> GetMemoriesAtLocation(FVector Location, float Radius = 500.0f);
+
+// [UHT-FIX]     UFUNCTION(BlueprintCallable, Category = "Memory")
+    TArray<FMemoryEntry> GetMemoriesByTag(FGameplayTag EventTag);
+
+// [UHT-FIX]     UFUNCTION(BlueprintCallable, Category = "Memory")
+    TArray<FMemoryEntry> GetMemoriesWithActor(AActor* Actor);
+
+    UFUNCTION(BlueprintCallable, Category = "Memory")
+    void ForgetOldMemories(float MaxAge = 86400.0f); // 24 hours default
+
+    // Relationship Management
+    UFUNCTION(BlueprintCallable, Category = "Relationships")
+    void UpdateRelationship(AActor* TargetActor, float TrustChange, float FamiliarityChange);
+
+// [UHT-FIX]     UFUNCTION(BlueprintCallable, Category = "Relationships")
+    FRelationshipData GetRelationship(AActor* TargetActor);
+
+// [UHT-FIX]     UFUNCTION(BlueprintCallable, Category = "Relationships")
+    ETrustLevel GetTrustLevel(AActor* TargetActor);
+
+    UFUNCTION(BlueprintCallable, Category = "Relationships")
+    bool IsKnownActor(AActor* TargetActor);
+
+    // Learning and Adaptation
+    UFUNCTION(BlueprintCallable, Category = "Learning")
+    void LearnFromExperience(FGameplayTag ExperienceType, bool bPositive, float Intensity = 1.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Learning")
+    float GetExperienceWeight(FGameplayTag ExperienceType);
+
+    UFUNCTION(BlueprintCallable, Category = "Learning")
+    bool ShouldAvoidLocation(FVector Location, float Radius = 100.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Learning")
+    bool ShouldAvoidActor(AActor* Actor);
+
+    // Memory Queries
+    UFUNCTION(BlueprintCallable, Category = "Memory")
+    FVector GetLastKnownLocationOf(AActor* Actor);
+
+    UFUNCTION(BlueprintCallable, Category = "Memory")
+    float GetTimeSinceLastSeen(AActor* Actor);
+
+    UFUNCTION(BlueprintCallable, Category = "Memory")
+    TArray<FVector> GetDangerousLocations();
+
+    UFUNCTION(BlueprintCallable, Category = "Memory")
+    TArray<FVector> GetSafeLocations();
+
+    UFUNCTION(BlueprintCallable, Category = "Memory")
+    TArray<FVector> GetFoodLocations();
+
+    UFUNCTION(BlueprintCallable, Category = "Memory")
+    TArray<FVector> GetWaterLocations();
+
+protected:
+    // Memory Storage
+// [UHT-FIX]     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Memory")
+    TArray<FMemoryEntry> Memories;
+
+// [UHT-FIX]     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Relationships")
+    TArray<FRelationshipData> Relationships;
+
+    // Memory Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory Settings")
+    int32 MaxMemories = 100;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory Settings")
+    float MemoryDecayRate = 0.1f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory Settings")
+    float ImportantMemoryThreshold = 0.7f;
+
+    // Learning weights for different experience types
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Learning")
+    TMap<FGameplayTag, float> ExperienceWeights;
+
+    // Relationship decay over time
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Relationships")
+    float RelationshipDecayRate = 0.05f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Relationships")
+    float MaxRelationshipAge = 604800.0f; // 1 week
+
+private:
+    // Helper functions
+    void DecayMemories(float DeltaTime);
+    void DecayRelationships(float DeltaTime);
+    FRelationshipData* FindOrCreateRelationship(AActor* TargetActor);
+    void CleanupOldMemories();
+    float CalculateMemoryImportance(const FMemoryEntry& Memory);
+
+    // Current game time for memory timestamps
+    float CurrentGameTime = 0.0f;
+};
+#endif // HEADER_DISABLED

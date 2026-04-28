@@ -1,0 +1,115 @@
+// Copyright Transpersonal Game Studio. All Rights Reserved.
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Components/ActorComponent.h"
+#include "NarrativeTypes.h"
+#include "Sound/DialogueWave.h"
+#include "Sound/DialogueVoice.h"
+#include "DialogueComponent.generated.h"
+
+
+#if 0 // HEADER_DISABLED
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnDialogueStarted, const FDialogueLine&, Line, float, Duration);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDialogueFinished, const FDialogueLine&, Line);
+
+/**
+ * Component that handles dialogue playback for characters
+ * Integrates with UE5's dialogue system and narrative manager
+ */
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UDialogueComponent : public UActorComponent
+{
+    GENERATED_BODY()
+
+public:
+    UDialogueComponent();
+
+protected:
+    virtual void BeginPlay() override;
+
+public:
+    // Dialogue Playback
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void PlayDialogue(const FString& LineID, AActor* Listener = nullptr);
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void PlayDialogueByContext(EDialogueContext Context, AActor* Listener = nullptr);
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void StopCurrentDialogue();
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    bool IsPlayingDialogue() const { return bIsPlayingDialogue; }
+
+    // Character Voice Setup
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void SetCharacterVoice(UDialogueVoice* Voice);
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void SetCharacterID(const FString& ID) { CharacterID = ID; }
+
+    // Emotional Response
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void SetEmotionalState(EEmotionalTone Tone, float Intensity);
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    EEmotionalTone GetCurrentEmotionalTone() const { return CurrentEmotionalTone; }
+
+    // Events
+    UPROPERTY(BlueprintAssignable, Category = "Dialogue")
+    FOnDialogueStarted OnDialogueStarted;
+
+    UPROPERTY(BlueprintAssignable, Category = "Dialogue")
+    FOnDialogueFinished OnDialogueFinished;
+
+protected:
+    // Character Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    FString CharacterID;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    TObjectPtr<UDialogueVoice> CharacterVoice;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    EEmotionalTone DefaultEmotionalTone;
+
+    // Current State
+    UPROPERTY(BlueprintReadOnly, Category = "State")
+    bool bIsPlayingDialogue;
+
+    UPROPERTY(BlueprintReadOnly, Category = "State")
+    EEmotionalTone CurrentEmotionalTone;
+
+    UPROPERTY(BlueprintReadOnly, Category = "State")
+    float EmotionalIntensity;
+
+    UPROPERTY(BlueprintReadOnly, Category = "State")
+    FDialogueLine CurrentDialogueLine;
+
+    // Audio Components
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio")
+    TObjectPtr<class UAudioComponent> AudioComponent;
+
+    // Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Config")
+    float DialogueRange;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Config")
+    bool bAutoFaceListener;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Config")
+    bool bUseSubtitles;
+
+private:
+    // Internal Functions
+    void OnDialogueAudioFinished();
+    void SetupAudioComponent();
+    FDialogueContext CreateDialogueContext(AActor* Listener) const;
+    void UpdateEmotionalDisplay();
+
+    // Timers
+    FTimerHandle DialogueTimerHandle;
+};
+#endif // HEADER_DISABLED

@@ -1,0 +1,273 @@
+// Copyright Transpersonal Game Studio. All Rights Reserved.
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "CharacterSystemCore.h"
+#include "GameFramework/Character.h"
+#include "Components/TimelineComponent.h"
+#include "Engine/Engine.h"
+#include "ProtagonistCharacter.generated.h"
+
+UENUM(BlueprintType)
+enum class EProtagonistState : uint8
+{
+    Exploring       UMETA(DisplayName = "Exploring"),
+    Hiding          UMETA(DisplayName = "Hiding from Predators"),
+    Crafting        UMETA(DisplayName = "Crafting Tools"),
+    Observing       UMETA(DisplayName = "Observing Dinosaurs"),
+    Surviving       UMETA(DisplayName = "Basic Survival"),
+    Investigating   UMETA(DisplayName = "Investigating Clues"),
+    Interacting     UMETA(DisplayName = "Interacting with NPCs")
+};
+
+USTRUCT(BlueprintType)
+struct FProtagonistStats
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
+    float Health = 100.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
+    float Stamina = 100.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
+    float Hunger = 0.0f; // 0 = not hungry, 100 = starving
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
+    float Thirst = 0.0f; // 0 = not thirsty, 100 = dehydrated
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
+    float Fear = 0.0f; // 0 = calm, 100 = terrified
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Knowledge")
+    float ScientificKnowledge = 85.0f; // Starts high as paleontologist
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Knowledge")
+    float SurvivalSkills = 15.0f; // Starts low, improves over time
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Knowledge")
+    float DinosaurKnowledge = 90.0f; // High theoretical knowledge
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Knowledge")
+    float TribalRelations = 0.0f; // No initial contact with tribes
+
+    FProtagonistStats()
+    {
+        // Constructor with default values already set above
+    }
+};
+
+USTRUCT(BlueprintType)
+struct FProtagonistEquipment
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tools")
+    bool bHasStoneKnife = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tools")
+    bool bHasSpear = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tools")
+    bool bHasFire = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tools")
+    bool bHasShelter = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clothing")
+    int32 ClothingCondition = 100; // 100 = pristine, 0 = tattered
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Special")
+    bool bHasTimeGem = false; // The gem that brought her here
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Special")
+    int32 GemClues = 0; // Clues found about the return gem
+
+    FProtagonistEquipment()
+    {
+        // Constructor with default values already set above
+    }
+};
+
+/**
+ * The protagonist character - Dr. Elena Rodriguez, a paleontologist transported to the prehistoric world
+ * Handles player-specific mechanics, survival systems, and character progression
+ */
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API AProtagonistCharacter : public ACharacterSystemCore
+{
+    GENERATED_BODY()
+
+public:
+    AProtagonistCharacter();
+
+protected:
+    virtual void BeginPlay() override;
+
+public:
+    virtual void Tick(float DeltaTime);
+    virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
+
+    // Protagonist State
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Protagonist State")
+    EProtagonistState CurrentState = EProtagonistState::Exploring;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Protagonist Stats")
+    FProtagonistStats Stats;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Protagonist Equipment")
+    FProtagonistEquipment Equipment;
+
+    // Survival System
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
+    float SurvivalTimer = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
+    float FearDecayRate = 10.0f; // Fear reduces over time
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
+    float HungerIncreaseRate = 5.0f; // Hunger increases over time
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
+    float ThirstIncreaseRate = 8.0f; // Thirst increases faster than hunger
+
+    // Character Development
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Development")
+    float DaysInPrehistoricWorld = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Development")
+    TArray<FString> UnlockedSkills;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Development")
+    TArray<FString> DinosaurObservations;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Development")
+    TArray<FString> TribalInteractions;
+
+    // Timeline Components for smooth transitions
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Animation")
+    UTimelineComponent* FearTimeline;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Animation")
+    UTimelineComponent* StaminaTimeline;
+
+    // Protagonist-specific functions
+    UFUNCTION(BlueprintCallable, Category = "Protagonist")
+    void SetProtagonistState(EProtagonistState NewState);
+
+    UFUNCTION(BlueprintCallable, Category = "Survival")
+    void ModifyHealth(float Amount);
+
+    UFUNCTION(BlueprintCallable, Category = "Survival")
+    void ModifyStamina(float Amount);
+
+    UFUNCTION(BlueprintCallable, Category = "Survival")
+    void ModifyFear(float Amount);
+
+    UFUNCTION(BlueprintCallable, Category = "Survival")
+    void ConsumeFood(float NutritionValue);
+
+    UFUNCTION(BlueprintCallable, Category = "Survival")
+    void DrinkWater(float HydrationValue);
+
+    // Skill Development
+    UFUNCTION(BlueprintCallable, Category = "Character Development")
+    void GainSurvivalExperience(float Amount);
+
+    UFUNCTION(BlueprintCallable, Category = "Character Development")
+    void LearnSkill(const FString& SkillName);
+
+    UFUNCTION(BlueprintCallable, Category = "Character Development")
+    bool HasSkill(const FString& SkillName) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Character Development")
+    void ObserveDinosaur(const FString& DinosaurSpecies, const FString& Behavior);
+
+    UFUNCTION(BlueprintCallable, Category = "Character Development")
+    void InteractWithTribal(const FString& TribalName, const FString& InteractionType);
+
+    // Equipment Management
+    UFUNCTION(BlueprintCallable, Category = "Equipment")
+    void CraftTool(const FString& ToolName);
+
+    UFUNCTION(BlueprintCallable, Category = "Equipment")
+    void DamageClothing(int32 DamageAmount);
+
+    UFUNCTION(BlueprintCallable, Category = "Equipment")
+    void RepairClothing(int32 RepairAmount);
+
+    // Special Mechanics
+    UFUNCTION(BlueprintCallable, Category = "Special")
+    void FindGemClue(const FString& ClueDescription);
+
+    UFUNCTION(BlueprintCallable, Category = "Special")
+    void ActivateTimeGem();
+
+    UFUNCTION(BlueprintCallable, Category = "Special")
+    bool CanReturnToPresent() const;
+
+    // State Queries
+    UFUNCTION(BlueprintCallable, Category = "State")
+    bool IsHealthy() const;
+
+    UFUNCTION(BlueprintCallable, Category = "State")
+    bool IsHungry() const;
+
+    UFUNCTION(BlueprintCallable, Category = "State")
+    bool IsThirsty() const;
+
+    UFUNCTION(BlueprintCallable, Category = "State")
+    bool IsAfraid() const;
+
+    UFUNCTION(BlueprintCallable, Category = "State")
+    bool IsExhausted() const;
+
+    UFUNCTION(BlueprintCallable, Category = "State")
+    float GetOverallCondition() const;
+
+    // Visual Updates
+    UFUNCTION(BlueprintCallable, Category = "Visuals")
+    void UpdateProtagonistAppearance();
+
+    UFUNCTION(BlueprintCallable, Category = "Visuals")
+    void ShowFearExpression(float Intensity);
+
+    UFUNCTION(BlueprintCallable, Category = "Visuals")
+    void ShowExhaustionEffects();
+
+    UFUNCTION(BlueprintCallable, Category = "Visuals")
+    void ShowHungerEffects();
+
+    // Dialogue System Integration
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    FString GetContextualDialogue() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    TArray<FString> GetAvailableResponses() const;
+
+protected:
+    // Internal update functions
+    void UpdateSurvivalStats(float DeltaTime);
+    void UpdateCharacterDevelopment(float DeltaTime);
+    void UpdateVisualEffects();
+    void CheckCriticalStates();
+    
+    // Timeline callbacks
+    UFUNCTION()
+    void OnFearTimelineUpdate(float Value);
+    
+    UFUNCTION()
+    void OnStaminaTimelineUpdate(float Value);
+
+private:
+    // Internal state tracking
+    float LastHealthCheckTime = 0.0f;
+    float LastSkillUpdateTime = 0.0f;
+    bool bNeedsAppearanceUpdate = false;
+    
+    // Performance optimization
+    float StatUpdateInterval = 1.0f; // Update stats every second
+    float LastStatUpdateTime = 0.0f;
+};
