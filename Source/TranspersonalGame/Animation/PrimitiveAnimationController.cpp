@@ -2,7 +2,9 @@
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Components/SkeletalMeshComponent.h"
-#include "Engine/World.h"
+#include "Animation/AnimInstance.h"
+#include "Animation/AnimMontage.h"
+#include "Engine/Engine.h"
 #include "Kismet/KismetMathLibrary.h"
 
 UPrimitiveAnimationController::UPrimitiveAnimationController()
@@ -11,285 +13,235 @@ UPrimitiveAnimationController::UPrimitiveAnimationController()
     PrimaryComponentTick.TickGroup = TG_PrePhysics;
     
     // Initialize default values
-    CurrentMovementState = EAnim_MovementState::Idle;
-    PreviousMovementState = EAnim_MovementState::Idle;
+    WalkThreshold = 50.0f;
+    RunThreshold = 300.0f;
+    AttackCooldown = 1.0f;
+    TimeSinceLastAttack = 0.0f;
     
-    WalkSpeedThreshold = 50.0f;
-    RunSpeedThreshold = 300.0f;
-    AnimationBlendSpeed = 5.0f;
-    DirectionBlendSpeed = 8.0f;
-    
-    LastGroundedTime = 0.0f;
-    bWasInAir = false;
-    LastVelocity = FVector::ZeroVector;
+    // Initialize component pointers
+    OwnerCharacter = nullptr;
+    MovementComponent = nullptr;
+    MeshComponent = nullptr;
 }
 
 void UPrimitiveAnimationController::BeginPlay()
 {
     Super::BeginPlay();
     
-    InitializeComponents();
+    // Cache owner character and components
+    OwnerCharacter = Cast<ACharacter>(GetOwner());
+    if (OwnerCharacter)
+    {
+        MovementComponent = OwnerCharacter->GetCharacterMovement();
+        MeshComponent = OwnerCharacter->GetMesh();
+        
+        UE_LOG(LogTemp, Log, TEXT("PrimitiveAnimationController initialized for character: %s"), 
+               *OwnerCharacter->GetName());
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("PrimitiveAnimationController: Owner is not a Character!"));
+    }
     
-    // Initialize blend parameters
-    BlendParameters = FAnim_BlendParameters();
-    
-    UE_LOG(LogTemp, Log, TEXT("PrimitiveAnimationController: BeginPlay completed"));
+    // Initialize animation data
+    MovementData = FAnim_MovementData();
+    CombatData = FAnim_CombatData();
 }
 
 void UPrimitiveAnimationController::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    if (!MovementComponent || !SkeletalMeshComponent)
+    if (!OwnerCharacter || !MovementComponent)
     {
         return;
     }
     
-    UpdateAnimationState(DeltaTime);
+    // Update animation systems
+    UpdateMovementAnimation(DeltaTime);
+    UpdateCombatState();
+    
+    // Update timing
+    TimeSinceLastAttack += DeltaTime;
 }
 
-void UPrimitiveAnimationController::InitializeComponents()
+void UPrimitiveAnimationController::UpdateMovementAnimation(float DeltaTime)
 {
-    // Get the character owner
-    ACharacter* Character = Cast<ACharacter>(GetOwner());
-    if (!Character)
+    if (!OwnerCharacter || !MovementComponent)
     {
-        UE_LOG(LogTemp, Warning, TEXT("PrimitiveAnimationController: Owner is not a Character"));
         return;
     }
     
-    // Get movement component
-    MovementComponent = Character->GetCharacterMovement();
-    if (!MovementComponent)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("PrimitiveAnimationController: No CharacterMovementComponent found"));
-        return;
-    }
+    // Calculate current speed
+    FVector Velocity = MovementComponent->Velocity;
+    MovementData.Speed = Velocity.Size2D();
     
-    // Get skeletal mesh component
-    SkeletalMeshComponent = Character->GetMesh();
-    if (!SkeletalMeshComponent)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("PrimitiveAnimationController: No SkeletalMeshComponent found"));
-        return;
-    }
+    // Calculate movement direction relative to character facing
+    CalculateMovementDirection();
     
-    UE_LOG(LogTemp, Log, TEXT("PrimitiveAnimationController: Components initialized successfully"));
+    // Update air state
+    MovementData.bIsInAir = MovementComponent->IsFalling();
+    MovementData.bIsCrouching = MovementComponent->IsCrouching();
+    
+    // Update movement state based on speed and conditions
+    UpdateMovementState();
 }
 
-void UPrimitiveAnimationController::UpdateAnimationState(float DeltaTime)
+void UPrimitiveAnimationController::UpdateMovementState()
 {
     if (!MovementComponent)
     {
         return;
     }
     
-    // Store previous state
-    PreviousMovementState = CurrentMovementState;
+    EAnim_MovementState NewState = EAnim_MovementState::Idle;
     
-    // Calculate new movement state
-    CalculateMovementState();
-    
-    // Update blend parameters
-    UpdateBlendParameters(DeltaTime);
-    
-    // Smooth blend values
-    SmoothBlendValues(DeltaTime);
-    
-    // Track air time
-    if (MovementComponent->IsFalling())
-    {
-        if (!bWasInAir)
-        {
-            bWasInAir = true;
-            UE_LOG(LogTemp, Log, TEXT("Character entered air state"));
-        }
-    }
-    else
-    {
-        if (bWasInAir)
-        {
-            bWasInAir = false;
-            LastGroundedTime = GetWorld()->GetTimeSeconds();
-            TriggerLandAnimation();
-        }
-    }
-    
-    // Store velocity for next frame
-    LastVelocity = MovementComponent->Velocity;
-}
-
-void UPrimitiveAnimationController::CalculateMovementState()
-{
-    if (!MovementComponent)
-    {
-        return;
-    }
-    
-    // Check if in air
-    if (MovementComponent->IsFalling())
+    // Check air states first (highest priority)
+    if (MovementData.bIsInAir)
     {
         if (MovementComponent->Velocity.Z > 0)
         {
-            CurrentMovementState = EAnim_MovementState::Jumping;
+            NewState = EAnim_MovementState::Jumping;
         }
         else
         {
-            CurrentMovementState = EAnim_MovementState::Falling;
+            NewState = EAnim_MovementState::Falling;
         }
-        return;
     }
-    
-    // Check if crouching
-    if (MovementComponent->IsCrouching())
+    // Check crouching
+    else if (MovementData.bIsCrouching)
     {
-        CurrentMovementState = EAnim_MovementState::Crouching;
-        return;
+        NewState = EAnim_MovementState::Crouching;
     }
-    
-    // Calculate horizontal speed
-    FVector HorizontalVelocity = MovementComponent->Velocity;
-    HorizontalVelocity.Z = 0.0f;
-    float Speed = HorizontalVelocity.Size();
-    
-    // Determine movement state based on speed
-    if (Speed < WalkSpeedThreshold)
+    // Check ground movement
+    else if (MovementData.Speed > RunThreshold)
     {
-        CurrentMovementState = EAnim_MovementState::Idle;
+        NewState = EAnim_MovementState::Running;
     }
-    else if (Speed < RunSpeedThreshold)
+    else if (MovementData.Speed > WalkThreshold)
     {
-        CurrentMovementState = EAnim_MovementState::Walking;
+        NewState = EAnim_MovementState::Walking;
     }
     else
     {
-        CurrentMovementState = EAnim_MovementState::Running;
+        NewState = EAnim_MovementState::Idle;
+    }
+    
+    // Update state if changed
+    if (NewState != MovementData.MovementState)
+    {
+        SetMovementState(NewState);
     }
 }
 
-void UPrimitiveAnimationController::UpdateBlendParameters(float DeltaTime)
+void UPrimitiveAnimationController::SetMovementState(EAnim_MovementState NewState)
 {
-    if (!MovementComponent)
+    if (MovementData.MovementState != NewState)
     {
+        EAnim_MovementState OldState = MovementData.MovementState;
+        MovementData.MovementState = NewState;
+        
+        UE_LOG(LogTemp, Log, TEXT("Movement state changed from %d to %d"), 
+               (int32)OldState, (int32)NewState);
+    }
+}
+
+void UPrimitiveAnimationController::UpdateCombatState()
+{
+    // Update combat timing
+    if (CombatData.bIsAttacking && TimeSinceLastAttack > AttackCooldown)
+    {
+        CombatData.bIsAttacking = false;
+    }
+}
+
+void UPrimitiveAnimationController::CalculateMovementDirection()
+{
+    if (!OwnerCharacter || !MovementComponent)
+    {
+        MovementData.Direction = 0.0f;
         return;
     }
     
-    // Calculate speed
-    FVector HorizontalVelocity = MovementComponent->Velocity;
-    HorizontalVelocity.Z = 0.0f;
-    float CurrentSpeed = HorizontalVelocity.Size();
-    
-    // Update speed parameter
-    BlendParameters.Speed = CurrentSpeed;
-    
-    // Update direction parameter
-    BlendParameters.Direction = CalculateMovementDirection();
-    
-    // Update air state
-    BlendParameters.bIsInAir = MovementComponent->IsFalling();
-    
-    // Update crouch state
-    BlendParameters.bIsCrouching = MovementComponent->IsCrouching();
-    
-    // Calculate lean amount based on velocity change
-    FVector VelocityDelta = MovementComponent->Velocity - LastVelocity;
-    VelocityDelta.Z = 0.0f;
-    BlendParameters.LeanAmount = FMath::Clamp(VelocityDelta.Size() / 1000.0f, -1.0f, 1.0f);
-}
-
-void UPrimitiveAnimationController::SmoothBlendValues(float DeltaTime)
-{
-    // Smooth speed transitions
-    float TargetSpeed = BlendParameters.Speed;
-    BlendParameters.Speed = FMath::FInterpTo(BlendParameters.Speed, TargetSpeed, DeltaTime, AnimationBlendSpeed);
-    
-    // Smooth direction transitions
-    float TargetDirection = BlendParameters.Direction;
-    BlendParameters.Direction = FMath::FInterpTo(BlendParameters.Direction, TargetDirection, DeltaTime, DirectionBlendSpeed);
-    
-    // Smooth lean amount
-    BlendParameters.LeanAmount = FMath::FInterpTo(BlendParameters.LeanAmount, 0.0f, DeltaTime, 2.0f);
-}
-
-bool UPrimitiveAnimationController::IsMoving() const
-{
-    if (!MovementComponent)
-    {
-        return false;
-    }
-    
-    FVector HorizontalVelocity = MovementComponent->Velocity;
-    HorizontalVelocity.Z = 0.0f;
-    return HorizontalVelocity.Size() > WalkSpeedThreshold;
-}
-
-float UPrimitiveAnimationController::CalculateMovementDirection() const
-{
-    if (!MovementComponent || !IsMoving())
-    {
-        return 0.0f;
-    }
-    
-    ACharacter* Character = Cast<ACharacter>(GetOwner());
-    if (!Character)
-    {
-        return 0.0f;
-    }
-    
-    // Get movement direction relative to character forward
     FVector Velocity = MovementComponent->Velocity;
-    Velocity.Z = 0.0f;
-    Velocity.Normalize();
+    FVector ForwardVector = OwnerCharacter->GetActorForwardVector();
     
-    FVector Forward = Character->GetActorForwardVector();
-    Forward.Z = 0.0f;
-    Forward.Normalize();
-    
-    // Calculate angle between forward and velocity
-    float DotProduct = FVector::DotProduct(Forward, Velocity);
-    float CrossProduct = FVector::CrossProduct(Forward, Velocity).Z;
-    
-    return FMath::Atan2(CrossProduct, DotProduct) * (180.0f / PI);
-}
-
-void UPrimitiveAnimationController::TriggerJumpAnimation()
-{
-    CurrentMovementState = EAnim_MovementState::Jumping;
-    UE_LOG(LogTemp, Log, TEXT("Jump animation triggered"));
-}
-
-void UPrimitiveAnimationController::TriggerLandAnimation()
-{
-    UE_LOG(LogTemp, Log, TEXT("Land animation triggered"));
-    
-    // Reset to appropriate ground state
-    if (IsMoving())
+    if (Velocity.Size2D() > 0.1f)
     {
-        CalculateMovementState();
+        FVector VelocityNormalized = Velocity.GetSafeNormal2D();
+        float DotProduct = FVector::DotProduct(ForwardVector, VelocityNormalized);
+        float CrossProduct = FVector::CrossProduct(ForwardVector, VelocityNormalized).Z;
+        
+        MovementData.Direction = UKismetMathLibrary::Atan2(CrossProduct, DotProduct) * (180.0f / PI);
     }
     else
     {
-        CurrentMovementState = EAnim_MovementState::Idle;
+        MovementData.Direction = 0.0f;
     }
 }
 
-void UPrimitiveAnimationController::SetCrouchState(bool bShouldCrouch)
+void UPrimitiveAnimationController::SetCombatState(EAnim_CombatState NewState)
 {
-    if (!MovementComponent)
+    if (CombatData.CombatState != NewState)
+    {
+        EAnim_CombatState OldState = CombatData.CombatState;
+        CombatData.CombatState = NewState;
+        
+        UE_LOG(LogTemp, Log, TEXT("Combat state changed from %d to %d"), 
+               (int32)OldState, (int32)NewState);
+    }
+}
+
+void UPrimitiveAnimationController::TriggerAttackAnimation()
+{
+    if (TimeSinceLastAttack >= AttackCooldown)
+    {
+        CombatData.bIsAttacking = true;
+        TimeSinceLastAttack = 0.0f;
+        
+        UE_LOG(LogTemp, Log, TEXT("Attack animation triggered"));
+    }
+}
+
+void UPrimitiveAnimationController::TriggerBlockAnimation()
+{
+    CombatData.bIsBlocking = !CombatData.bIsBlocking;
+    
+    UE_LOG(LogTemp, Log, TEXT("Block state toggled: %s"), 
+           CombatData.bIsBlocking ? TEXT("ON") : TEXT("OFF"));
+}
+
+void UPrimitiveAnimationController::PlayMontage(UAnimMontage* Montage, float PlayRate)
+{
+    if (!MeshComponent || !Montage)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Cannot play montage: Missing mesh component or montage"));
+        return;
+    }
+    
+    UAnimInstance* AnimInstance = MeshComponent->GetAnimInstance();
+    if (AnimInstance)
+    {
+        AnimInstance->Montage_Play(Montage, PlayRate);
+        UE_LOG(LogTemp, Log, TEXT("Playing montage: %s"), *Montage->GetName());
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Cannot play montage: No AnimInstance found"));
+    }
+}
+
+void UPrimitiveAnimationController::StopAllMontages()
+{
+    if (!MeshComponent)
     {
         return;
     }
     
-    if (bShouldCrouch)
+    UAnimInstance* AnimInstance = MeshComponent->GetAnimInstance();
+    if (AnimInstance)
     {
-        MovementComponent->Crouch();
-        CurrentMovementState = EAnim_MovementState::Crouching;
+        AnimInstance->Montage_Stop(0.2f);
+        UE_LOG(LogTemp, Log, TEXT("Stopped all montages"));
     }
-    else
-    {
-        MovementComponent->UnCrouch();
-        CalculateMovementState();
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("Crouch state set to: %s"), bShouldCrouch ? TEXT("true") : TEXT("false"));
 }
