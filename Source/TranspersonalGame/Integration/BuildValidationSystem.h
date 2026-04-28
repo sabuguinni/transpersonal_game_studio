@@ -1,234 +1,226 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/GameInstanceSubsystem.h"
+#include "GameFramework/Actor.h"
 #include "Engine/World.h"
-#include "UObject/NoExportTypes.h"
+#include "Engine/Engine.h"
 #include "../SharedTypes.h"
 #include "BuildValidationSystem.generated.h"
 
-UENUM(BlueprintType)
-enum class EBuild_ValidationResult : uint8
-{
-    NotTested = 0,
-    Passed = 1,
-    Failed = 2,
-    Warning = 3
-};
+/**
+ * Build Validation System - Comprehensive integration testing and validation
+ * Validates module loading, actor spawning, cross-system integration
+ * Used by Integration & Build Agent #19 for continuous integration
+ */
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_ClassValidationData
+struct TRANSPERSONALGAME_API FBuild_ModuleStatus
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    FString ClassName;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    bool bClassLoadable;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    bool bCDOAccessible;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    bool bActorSpawnable;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    FString ErrorMessage;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    EBuild_ValidationResult ValidationResult;
-
-    FBuild_ClassValidationData()
-    {
-        ClassName = TEXT("");
-        bClassLoadable = false;
-        bCDOAccessible = false;
-        bActorSpawnable = false;
-        ErrorMessage = TEXT("");
-        ValidationResult = EBuild_ValidationResult::NotTested;
-    }
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_ModuleValidationReport
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    UPROPERTY(BlueprintReadOnly, Category = "Build Validation")
     FString ModuleName;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    TArray<FBuild_ClassValidationData> ClassValidations;
+    UPROPERTY(BlueprintReadOnly, Category = "Build Validation")
+    EBuild_ValidationResult LoadStatus;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    int32 PassedTests;
+    UPROPERTY(BlueprintReadOnly, Category = "Build Validation")
+    FString ErrorMessage;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    int32 FailedTests;
+    UPROPERTY(BlueprintReadOnly, Category = "Build Validation")
+    float LoadTime;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    int32 WarningTests;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    float ValidationScore;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    FDateTime LastValidationTime;
-
-    FBuild_ModuleValidationReport()
+    FBuild_ModuleStatus()
     {
         ModuleName = TEXT("");
-        PassedTests = 0;
-        FailedTests = 0;
-        WarningTests = 0;
-        ValidationScore = 0.0f;
-        LastValidationTime = FDateTime::Now();
+        LoadStatus = EBuild_ValidationResult::Pending;
+        ErrorMessage = TEXT("");
+        LoadTime = 0.0f;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_IntegrationTestResult
+struct TRANSPERSONALGAME_API FBuild_IntegrationTest
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    UPROPERTY(BlueprintReadOnly, Category = "Build Validation")
     FString TestName;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    FString TestDescription;
+    UPROPERTY(BlueprintReadOnly, Category = "Build Validation")
+    EBuild_ValidationResult Result;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    bool bTestPassed;
+    UPROPERTY(BlueprintReadOnly, Category = "Build Validation")
+    FString Description;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    float ExecutionTimeMs;
+    UPROPERTY(BlueprintReadOnly, Category = "Build Validation")
+    TArray<FString> Dependencies;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    FString ResultMessage;
+    UPROPERTY(BlueprintReadOnly, Category = "Build Validation")
+    float ExecutionTime;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    TArray<FString> DependentSystems;
-
-    FBuild_IntegrationTestResult()
+    FBuild_IntegrationTest()
     {
         TestName = TEXT("");
-        TestDescription = TEXT("");
-        bTestPassed = false;
-        ExecutionTimeMs = 0.0f;
-        ResultMessage = TEXT("");
+        Result = EBuild_ValidationResult::Pending;
+        Description = TEXT("");
+        ExecutionTime = 0.0f;
     }
 };
 
-/**
- * Build Validation System - Comprehensive validation and integration testing
- * Validates compilation, class loading, actor spawning, and cross-system integration
- */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FBuild_SystemHealth
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Build Validation")
+    float ModuleSuccessRate;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Build Validation")
+    float IntegrationSuccessRate;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Build Validation")
+    int32 TotalActorsInLevel;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Build Validation")
+    EBuild_HealthStatus OverallHealth;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Build Validation")
+    TArray<FString> CriticalIssues;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Build Validation")
+    TArray<FString> Recommendations;
+
+    FBuild_SystemHealth()
+    {
+        ModuleSuccessRate = 0.0f;
+        IntegrationSuccessRate = 0.0f;
+        TotalActorsInLevel = 0;
+        OverallHealth = EBuild_HealthStatus::Unknown;
+    }
+};
+
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UBuildValidationSystem : public UGameInstanceSubsystem
+class TRANSPERSONALGAME_API ABuildValidationSystem : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UBuildValidationSystem();
-
-    // USubsystem interface
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
-
-    // Core validation functions
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    void RunFullValidationSuite();
-
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    FBuild_ModuleValidationReport ValidateModule(const FString& ModuleName);
-
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    FBuild_ClassValidationData ValidateClass(const FString& ClassPath);
-
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    TArray<FBuild_IntegrationTestResult> RunIntegrationTests();
-
-    // Specific validation tests
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    bool ValidateClassLoading(const FString& ClassPath, FString& OutErrorMessage);
-
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    bool ValidateCDOAccess(UClass* TestClass, FString& OutErrorMessage);
-
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    bool ValidateActorSpawning(UClass* ActorClass, FString& OutErrorMessage);
-
-    // Integration tests
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    FBuild_IntegrationTestResult TestWorldGenerationIntegration();
-
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    FBuild_IntegrationTestResult TestCharacterSystemIntegration();
-
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    FBuild_IntegrationTestResult TestAISystemIntegration();
-
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    FBuild_IntegrationTestResult TestCombatSystemIntegration();
-
-    // Reporting functions
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    void GenerateValidationReport();
-
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    FString GetValidationSummary() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    float GetOverallValidationScore() const;
-
-    // Getters
-    UFUNCTION(BlueprintPure, Category = "Build Validation")
-    const TArray<FBuild_ModuleValidationReport>& GetModuleReports() const { return ModuleReports; }
-
-    UFUNCTION(BlueprintPure, Category = "Build Validation")
-    const TArray<FBuild_IntegrationTestResult>& GetIntegrationResults() const { return IntegrationResults; }
-
-    UFUNCTION(BlueprintPure, Category = "Build Validation")
-    bool IsValidationComplete() const { return bValidationComplete; }
+    ABuildValidationSystem();
 
 protected:
+    virtual void BeginPlay() override;
+
     // Core validation data
-    UPROPERTY(BlueprintReadOnly, Category = "Validation Data")
-    TArray<FBuild_ModuleValidationReport> ModuleReports;
+    UPROPERTY(BlueprintReadOnly, Category = "Build Validation", meta = (AllowPrivateAccess = "true"))
+    TArray<FBuild_ModuleStatus> ModuleStatuses;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation Data")
-    TArray<FBuild_IntegrationTestResult> IntegrationResults;
+    UPROPERTY(BlueprintReadOnly, Category = "Build Validation", meta = (AllowPrivateAccess = "true"))
+    TArray<FBuild_IntegrationTest> IntegrationTests;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation Data")
-    bool bValidationComplete;
+    UPROPERTY(BlueprintReadOnly, Category = "Build Validation", meta = (AllowPrivateAccess = "true"))
+    FBuild_SystemHealth SystemHealth;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation Data")
-    FDateTime LastFullValidation;
+    // Validation settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Build Validation")
+    bool bAutoRunValidationOnStart;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation Data")
-    float OverallValidationScore;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Build Validation")
+    float ValidationInterval;
 
-    // Test configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation Config")
-    TArray<FString> CoreClassPaths;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Build Validation")
+    bool bCreateTestActors;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation Config")
-    TArray<FString> ModulesToValidate;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Build Validation")
+    bool bLogDetailedResults;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation Config")
-    bool bRunIntegrationTests;
+    // Timer for periodic validation
+    UPROPERTY()
+    FTimerHandle ValidationTimerHandle;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation Config")
-    bool bVerboseLogging;
+public:
+    // Main validation functions
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    void RunFullValidation();
+
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    void ValidateModuleLoading();
+
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    void RunIntegrationTests();
+
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    void ValidateActorSpawning();
+
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    void AnalyzeSystemHealth();
+
+    // Specific module tests
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    bool TestModuleLoad(const FString& ModuleName, const FString& ClassName);
+
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    bool TestActorSpawn(const FString& ClassName, FVector SpawnLocation);
+
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    bool TestCrossSystemIntegration(const FString& System1, const FString& System2);
+
+    // Integration test scenarios
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    void TestWorldGenEnvironmentIntegration();
+
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    void TestCharacterGameStateIntegration();
+
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    void TestCrowdSimulationIntegration();
+
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    void TestQuestNarrativeIntegration();
+
+    // Utility functions
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    void ClearValidationResults();
+
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    void SaveValidationReport(const FString& FilePath);
+
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    FBuild_SystemHealth GetSystemHealth() const { return SystemHealth; }
+
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    TArray<FBuild_ModuleStatus> GetModuleStatuses() const { return ModuleStatuses; }
+
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    TArray<FBuild_IntegrationTest> GetIntegrationTests() const { return IntegrationTests; }
+
+    // Event delegates
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnValidationComplete, FBuild_SystemHealth, SystemHealth);
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnModuleValidated, FString, ModuleName, EBuild_ValidationResult, Result);
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnIntegrationTestComplete, FString, TestName, EBuild_ValidationResult, Result);
+
+    UPROPERTY(BlueprintAssignable, Category = "Build Validation")
+    FOnValidationComplete OnValidationComplete;
+
+    UPROPERTY(BlueprintAssignable, Category = "Build Validation")
+    FOnModuleValidated OnModuleValidated;
+
+    UPROPERTY(BlueprintAssignable, Category = "Build Validation")
+    FOnIntegrationTestComplete OnIntegrationTestComplete;
 
 private:
-    // Internal validation helpers
-    void InitializeCoreClassPaths();
-    void InitializeModuleList();
-    FBuild_ClassValidationData InternalValidateClass(const FString& ClassPath);
-    FBuild_IntegrationTestResult RunSingleIntegrationTest(const FString& TestName, TFunction<bool()> TestFunction);
-    void LogValidationResult(const FBuild_ClassValidationData& Result);
-    void LogIntegrationResult(const FBuild_IntegrationTestResult& Result);
-    float CalculateModuleScore(const FBuild_ModuleValidationReport& Report);
+    // Internal helper functions
+    void InitializeValidationSystem();
+    void SetupValidationTimer();
+    void LogValidationResults();
+    void UpdateSystemHealthMetrics();
+    EBuild_HealthStatus CalculateOverallHealth();
+    void GenerateRecommendations();
+    
+    // Test actor management
+    UPROPERTY()
+    TArray<AActor*> TestActors;
+    
+    void CleanupTestActors();
+    void CreateIntegrationTestMarkers();
 };
