@@ -1,411 +1,356 @@
 #include "DialogueManager.h"
-#include "Engine/DataTable.h"
+#include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
-#include "Engine/Engine.h"
 
-ADialogueManager::ADialogueManager()
+UDialogueManager::UDialogueManager()
 {
-    PrimaryActorTick.bCanEverTick = true;
-    
-    // Initialize dialogue state
     bIsDialogueActive = false;
-    CurrentDialogueID = TEXT("");
-    CurrentLineIndex = 0;
-    bAutoAdvanceEnabled = false;
-    AutoAdvanceDelay = 3.0f;
-    AutoAdvanceTimer = 0.0f;
-    bWaitingForChoice = false;
-    
-    DialogueDataTable = nullptr;
-    CharacterDataTable = nullptr;
+    CurrentNPCName = TEXT("");
+    CurrentDialogueTreeID = TEXT("");
+    CurrentDialogueIndex = 0;
+    CurrentStoryPhase = ENarr_StoryPhase::Introduction;
 }
 
-void ADialogueManager::BeginPlay()
+void UDialogueManager::Initialize(FSubsystemCollectionBase& Collection)
 {
-    Super::BeginPlay();
+    Super::Initialize(Collection);
     
-    ResetDialogueState();
+    UE_LOG(LogTemp, Log, TEXT("DialogueManager: Initializing narrative system"));
+    
+    // Initialize default dialogues and story progression
+    InitializeDefaultDialogues();
+    
+    // Set initial story phase
+    SetStoryPhase(ENarr_StoryPhase::Introduction);
+    
+    UE_LOG(LogTemp, Log, TEXT("DialogueManager: Initialization complete"));
 }
 
-void ADialogueManager::Tick(float DeltaTime)
+void UDialogueManager::Deinitialize()
 {
-    Super::Tick(DeltaTime);
+    // Clean up dialogue state
+    EndDialogue();
+    DialogueTrees.Empty();
+    StoryProgressValues.Empty();
+    PlayerActionCounts.Empty();
     
-    // Handle auto-advance
-    if (bIsDialogueActive && bAutoAdvanceEnabled && !bWaitingForChoice)
-    {
-        AutoAdvanceTimer += DeltaTime;
-        if (AutoAdvanceTimer >= AutoAdvanceDelay)
-        {
-            AdvanceDialogue();
-            AutoAdvanceTimer = 0.0f;
-        }
-    }
+    Super::Deinitialize();
 }
 
-bool ADialogueManager::StartDialogue(const FString& DialogueID)
+void UDialogueManager::StartDialogue(const FString& NPCName, const FString& DialogueTreeID)
 {
     if (bIsDialogueActive)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Dialogue already active. Cannot start new dialogue."));
-        return false;
+        UE_LOG(LogTemp, Warning, TEXT("DialogueManager: Cannot start dialogue - another dialogue is active"));
+        return;
     }
-    
-    FNarr_DialogueNode* DialogueNode = GetDialogueNode(DialogueID);
-    if (!DialogueNode)
+
+    if (!DialogueTrees.Contains(DialogueTreeID))
     {
-        UE_LOG(LogTemp, Warning, TEXT("Dialogue ID not found: %s"), *DialogueID);
-        return false;
+        UE_LOG(LogTemp, Error, TEXT("DialogueManager: Dialogue tree not found: %s"), *DialogueTreeID);
+        return;
     }
-    
-    // Start the dialogue
-    CurrentDialogueID = DialogueID;
-    CurrentDialogueNode = *DialogueNode;
-    CurrentLineIndex = 0;
+
     bIsDialogueActive = true;
-    bWaitingForChoice = false;
-    AutoAdvanceTimer = 0.0f;
+    CurrentNPCName = NPCName;
+    CurrentDialogueTreeID = DialogueTreeID;
+    CurrentDialogueIndex = 0;
+
+    UE_LOG(LogTemp, Log, TEXT("DialogueManager: Started dialogue with %s using tree %s"), *NPCName, *DialogueTreeID);
     
-    // Broadcast dialogue started
-    FString SpeakerName = TEXT("Unknown");
-    if (CurrentDialogueNode.DialogueLines.Num() > 0)
-    {
-        SpeakerName = CurrentDialogueNode.DialogueLines[0].SpeakerName;
-    }
-    OnDialogueStarted.Broadcast(DialogueID, SpeakerName);
-    
-    // Process first line
-    ProcessCurrentLine();
-    
-    UE_LOG(LogTemp, Log, TEXT("Started dialogue: %s"), *DialogueID);
-    return true;
+    // Broadcast dialogue started event
+    OnDialogueStarted.Broadcast(NPCName, DialogueTreeID);
 }
 
-void ADialogueManager::EndDialogue()
+void UDialogueManager::EndDialogue()
 {
     if (!bIsDialogueActive)
     {
         return;
     }
+
+    FString EndedDialogueID = CurrentDialogueTreeID;
     
-    FString EndedDialogueID = CurrentDialogueID;
-    ResetDialogueState();
+    bIsDialogueActive = false;
+    CurrentNPCName = TEXT("");
+    CurrentDialogueTreeID = TEXT("");
+    CurrentDialogueIndex = 0;
+
+    UE_LOG(LogTemp, Log, TEXT("DialogueManager: Ended dialogue"));
     
+    // Broadcast dialogue ended event
     OnDialogueEnded.Broadcast(EndedDialogueID);
-    UE_LOG(LogTemp, Log, TEXT("Ended dialogue: %s"), *EndedDialogueID);
 }
 
-bool ADialogueManager::AdvanceDialogue()
+bool UDialogueManager::IsDialogueActive() const
 {
-    if (!bIsDialogueActive || bWaitingForChoice)
-    {
-        return false;
-    }
-    
-    CurrentLineIndex++;
-    
-    // Check if we've reached the end of dialogue lines
-    if (CurrentLineIndex >= CurrentDialogueNode.DialogueLines.Num())
-    {
-        // Check if there are player choices
-        if (CurrentDialogueNode.PlayerChoices.Num() > 0)
-        {
-            bWaitingForChoice = true;
-            OnChoicesPresented.Broadcast(CurrentDialogueNode.PlayerChoices);
-            return true;
-        }
-        else
-        {
-            // No more lines and no choices - end dialogue
-            EndDialogue();
-            return false;
-        }
-    }
-    
-    // Process next line
-    ProcessCurrentLine();
-    return true;
+    return bIsDialogueActive;
 }
 
-bool ADialogueManager::SelectChoice(int32 ChoiceIndex)
+FNarr_DialogueLine UDialogueManager::GetCurrentDialogueLine() const
 {
-    if (!bIsDialogueActive || !bWaitingForChoice)
-    {
-        return false;
-    }
-    
-    if (ChoiceIndex < 0 || ChoiceIndex >= CurrentDialogueNode.PlayerChoices.Num())
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Invalid choice index: %d"), ChoiceIndex);
-        return false;
-    }
-    
-    const FNarr_DialogueChoice& SelectedChoice = CurrentDialogueNode.PlayerChoices[ChoiceIndex];
-    
-    // Check if choice requirements are met
-    if (!AreRequirementsMet(SelectedChoice.RequiredFlags))
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Choice requirements not met"));
-        return false;
-    }
-    
-    // Apply choice effects
-    ApplyChoiceEffects(SelectedChoice);
-    
-    // Continue to next dialogue or end
-    if (SelectedChoice.NextDialogueID.IsEmpty())
-    {
-        EndDialogue();
-    }
-    else
-    {
-        EndDialogue();
-        StartDialogue(SelectedChoice.NextDialogueID);
-    }
-    
-    return true;
-}
-
-FNarr_DialogueLine ADialogueManager::GetCurrentLine() const
-{
-    if (!bIsDialogueActive || CurrentLineIndex >= CurrentDialogueNode.DialogueLines.Num())
+    if (!bIsDialogueActive || !DialogueTrees.Contains(CurrentDialogueTreeID))
     {
         return FNarr_DialogueLine();
     }
+
+    const FNarr_DialogueTree& CurrentTree = DialogueTrees[CurrentDialogueTreeID];
     
-    return CurrentDialogueNode.DialogueLines[CurrentLineIndex];
-}
-
-TArray<FNarr_DialogueChoice> ADialogueManager::GetCurrentChoices() const
-{
-    if (!bIsDialogueActive || !bWaitingForChoice)
+    if (CurrentDialogueIndex >= 0 && CurrentDialogueIndex < CurrentTree.DialogueLines.Num())
     {
-        return TArray<FNarr_DialogueChoice>();
+        return CurrentTree.DialogueLines[CurrentDialogueIndex];
     }
-    
-    // Filter choices based on requirements
-    TArray<FNarr_DialogueChoice> AvailableChoices;
-    for (const FNarr_DialogueChoice& Choice : CurrentDialogueNode.PlayerChoices)
-    {
-        if (AreRequirementsMet(Choice.RequiredFlags))
-        {
-            AvailableChoices.Add(Choice);
-        }
-    }
-    
-    return AvailableChoices;
+
+    return FNarr_DialogueLine();
 }
 
-void ADialogueManager::SetPlayerFlag(const FString& FlagName)
+void UDialogueManager::AdvanceDialogue(int32 ResponseIndex)
 {
-    if (!FlagName.IsEmpty() && !PlayerFlags.Contains(FlagName))
-    {
-        PlayerFlags.Add(FlagName);
-        UE_LOG(LogTemp, Log, TEXT("Set player flag: %s"), *FlagName);
-    }
-}
-
-bool ADialogueManager::HasPlayerFlag(const FString& FlagName) const
-{
-    return PlayerFlags.Contains(FlagName);
-}
-
-void ADialogueManager::RemovePlayerFlag(const FString& FlagName)
-{
-    if (PlayerFlags.Contains(FlagName))
-    {
-        PlayerFlags.Remove(FlagName);
-        UE_LOG(LogTemp, Log, TEXT("Removed player flag: %s"), *FlagName);
-    }
-}
-
-void ADialogueManager::ClearAllFlags()
-{
-    PlayerFlags.Empty();
-    UE_LOG(LogTemp, Log, TEXT("Cleared all player flags"));
-}
-
-bool ADialogueManager::IsDialogueAvailable(const FString& DialogueID) const
-{
-    return GetDialogueNode(DialogueID) != nullptr;
-}
-
-bool ADialogueManager::AreRequirementsMet(const TArray<FString>& RequiredFlags) const
-{
-    for (const FString& Flag : RequiredFlags)
-    {
-        if (!HasPlayerFlag(Flag))
-        {
-            return false;
-        }
-    }
-    return true;
-}
-
-FNarr_CharacterLore ADialogueManager::GetCharacterLore(const FString& CharacterID) const
-{
-    if (!CharacterDataTable)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Character data table not set"));
-        return FNarr_CharacterLore();
-    }
-    
-    FNarr_CharacterTableRow* CharacterRow = CharacterDataTable->FindRow<FNarr_CharacterTableRow>(FName(*CharacterID), TEXT(""));
-    if (CharacterRow)
-    {
-        return CharacterRow->CharacterData;
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Character not found: %s"), *CharacterID);
-    return FNarr_CharacterLore();
-}
-
-void ADialogueManager::ProcessCurrentLine()
-{
-    if (!bIsDialogueActive || CurrentLineIndex >= CurrentDialogueNode.DialogueLines.Num())
+    if (!bIsDialogueActive)
     {
         return;
     }
+
+    CurrentDialogueIndex++;
     
-    const FNarr_DialogueLine& CurrentLine = CurrentDialogueNode.DialogueLines[CurrentLineIndex];
+    const FNarr_DialogueTree& CurrentTree = DialogueTrees[CurrentDialogueTreeID];
     
-    // Broadcast line changed event
-    OnDialogueLineChanged.Broadcast(CurrentLine, CurrentLineIndex, CurrentDialogueNode.DialogueLines.Num());
-    
-    // Reset auto-advance timer
-    AutoAdvanceTimer = 0.0f;
-    
-    UE_LOG(LogTemp, Log, TEXT("Processing dialogue line %d: %s"), CurrentLineIndex, *CurrentLine.DialogueText.ToString());
+    // Check if we've reached the end of the dialogue
+    if (CurrentDialogueIndex >= CurrentTree.DialogueLines.Num())
+    {
+        EndDialogue();
+        return;
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("DialogueManager: Advanced to dialogue line %d"), CurrentDialogueIndex);
 }
 
-void ADialogueManager::ApplyChoiceEffects(const FNarr_DialogueChoice& Choice)
+void UDialogueManager::RegisterDialogueTree(const FNarr_DialogueTree& DialogueTree)
 {
-    // Set flags from choice
-    for (const FString& Flag : Choice.SetFlags)
+    if (!ValidateDialogueTree(DialogueTree))
     {
-        SetPlayerFlag(Flag);
+        UE_LOG(LogTemp, Error, TEXT("DialogueManager: Invalid dialogue tree: %s"), *DialogueTree.TreeID);
+        return;
+    }
+
+    DialogueTrees.Add(DialogueTree.TreeID, DialogueTree);
+    UE_LOG(LogTemp, Log, TEXT("DialogueManager: Registered dialogue tree: %s"), *DialogueTree.TreeID);
+}
+
+FNarr_DialogueTree UDialogueManager::GetDialogueTree(const FString& TreeID) const
+{
+    if (DialogueTrees.Contains(TreeID))
+    {
+        return DialogueTrees[TreeID];
     }
     
-    UE_LOG(LogTemp, Log, TEXT("Applied choice effects. Set %d flags."), Choice.SetFlags.Num());
+    return FNarr_DialogueTree();
 }
 
-FNarr_DialogueNode* ADialogueManager::GetDialogueNode(const FString& DialogueID) const
+TArray<FString> UDialogueManager::GetAvailableDialogues(const FString& NPCName) const
 {
-    if (!DialogueDataTable)
+    TArray<FString> AvailableDialogues;
+    
+    for (const auto& TreePair : DialogueTrees)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Dialogue data table not set"));
-        return nullptr;
-    }
-    
-    FNarr_DialogueTableRow* DialogueRow = DialogueDataTable->FindRow<FNarr_DialogueTableRow>(FName(*DialogueID), TEXT(""));
-    if (DialogueRow)
-    {
-        return &DialogueRow->DialogueData;
-    }
-    
-    return nullptr;
-}
-
-void ADialogueManager::ResetDialogueState()
-{
-    bIsDialogueActive = false;
-    CurrentDialogueID = TEXT("");
-    CurrentLineIndex = 0;
-    bWaitingForChoice = false;
-    AutoAdvanceTimer = 0.0f;
-    CurrentDialogueNode = FNarr_DialogueNode();
-}
-
-// UDialogueParticipantComponent Implementation
-
-UDialogueParticipantComponent::UDialogueParticipantComponent()
-{
-    PrimaryComponentTick.bCanEverTick = false;
-    
-    CharacterID = TEXT("");
-    DefaultDialogueID = TEXT("");
-    bCanInitiateDialogue = true;
-    InteractionDistance = 300.0f;
-    DialogueManager = nullptr;
-}
-
-void UDialogueParticipantComponent::BeginPlay()
-{
-    Super::BeginPlay();
-    
-    FindDialogueManager();
-}
-
-bool UDialogueParticipantComponent::StartDialogueWithPlayer()
-{
-    if (!CanStartDialogue())
-    {
-        return false;
-    }
-    
-    FString DialogueToStart = GetBestAvailableDialogue();
-    if (DialogueToStart.IsEmpty())
-    {
-        UE_LOG(LogTemp, Warning, TEXT("No available dialogue for character: %s"), *CharacterID);
-        return false;
-    }
-    
-    return DialogueManager->StartDialogue(DialogueToStart);
-}
-
-bool UDialogueParticipantComponent::CanStartDialogue() const
-{
-    return bCanInitiateDialogue && DialogueManager && !DialogueManager->bIsDialogueActive;
-}
-
-FString UDialogueParticipantComponent::GetBestAvailableDialogue() const
-{
-    if (!DialogueManager)
-    {
-        return TEXT("");
-    }
-    
-    // Check available dialogues in order
-    for (const FString& DialogueID : AvailableDialogues)
-    {
-        if (DialogueManager->IsDialogueAvailable(DialogueID))
+        if (TreePair.Value.NPCName == NPCName)
         {
-            return DialogueID;
+            AvailableDialogues.Add(TreePair.Key);
         }
     }
     
-    // Fall back to default dialogue
-    if (DialogueManager->IsDialogueAvailable(DefaultDialogueID))
+    return AvailableDialogues;
+}
+
+void UDialogueManager::SetStoryPhase(ENarr_StoryPhase NewPhase)
+{
+    ENarr_StoryPhase OldPhase = CurrentStoryPhase;
+    CurrentStoryPhase = NewPhase;
+    
+    UE_LOG(LogTemp, Log, TEXT("DialogueManager: Story phase changed from %d to %d"), 
+           (int32)OldPhase, (int32)NewPhase);
+    
+    // Broadcast story phase change event
+    OnStoryPhaseChanged.Broadcast(OldPhase, NewPhase);
+}
+
+ENarr_StoryPhase UDialogueManager::GetCurrentStoryPhase() const
+{
+    return CurrentStoryPhase;
+}
+
+void UDialogueManager::UpdateStoryProgress(const FString& EventName, float ProgressValue)
+{
+    StoryProgressValues.Add(EventName, ProgressValue);
+    
+    UE_LOG(LogTemp, Log, TEXT("DialogueManager: Updated story progress - %s: %f"), 
+           *EventName, ProgressValue);
+    
+    // Check for story phase transitions based on progress
+    if (EventName == TEXT("FirstHunt") && ProgressValue >= 1.0f && CurrentStoryPhase == ENarr_StoryPhase::EarlyExploration)
     {
-        return DefaultDialogueID;
+        SetStoryPhase(ENarr_StoryPhase::FirstHunt);
+    }
+    else if (EventName == TEXT("TribeMembers") && ProgressValue >= 3.0f && CurrentStoryPhase == ENarr_StoryPhase::FirstHunt)
+    {
+        SetStoryPhase(ENarr_StoryPhase::TribeBuilding);
+    }
+}
+
+void UDialogueManager::OnQuestCompleted(const FString& QuestID)
+{
+    UE_LOG(LogTemp, Log, TEXT("DialogueManager: Quest completed: %s"), *QuestID);
+    
+    // Update story progress based on quest completion
+    if (QuestID == TEXT("RaptorThreat"))
+    {
+        UpdateStoryProgress(TEXT("FirstHunt"), 1.0f);
+    }
+    else if (QuestID == TEXT("CrystalHarvest"))
+    {
+        UpdateStoryProgress(TEXT("ResourceGathering"), 1.0f);
+    }
+}
+
+void UDialogueManager::OnQuestStarted(const FString& QuestID)
+{
+    UE_LOG(LogTemp, Log, TEXT("DialogueManager: Quest started: %s"), *QuestID);
+    
+    // Track quest initiation for story progression
+    TrackPlayerAction(TEXT("QuestStarted"), QuestID);
+}
+
+void UDialogueManager::TrackPlayerAction(const FString& ActionType, const FString& ActionData)
+{
+    if (PlayerActionCounts.Contains(ActionType))
+    {
+        PlayerActionCounts[ActionType]++;
+    }
+    else
+    {
+        PlayerActionCounts.Add(ActionType, 1);
     }
     
-    return TEXT("");
+    UE_LOG(LogTemp, Log, TEXT("DialogueManager: Tracked action %s (count: %d)"), 
+           *ActionType, PlayerActionCounts[ActionType]);
 }
 
-void UDialogueParticipantComponent::AddAvailableDialogue(const FString& DialogueID)
+int32 UDialogueManager::GetPlayerActionCount(const FString& ActionType) const
 {
-    if (!DialogueID.IsEmpty() && !AvailableDialogues.Contains(DialogueID))
+    if (PlayerActionCounts.Contains(ActionType))
     {
-        AvailableDialogues.Add(DialogueID);
+        return PlayerActionCounts[ActionType];
     }
+    
+    return 0;
 }
 
-void UDialogueParticipantComponent::RemoveAvailableDialogue(const FString& DialogueID)
+void UDialogueManager::InitializeDefaultDialogues()
 {
-    AvailableDialogues.Remove(DialogueID);
+    CreateSurvivalDialogues();
+    CreateQuestDialogues();
 }
 
-void UDialogueParticipantComponent::FindDialogueManager()
+void UDialogueManager::CreateSurvivalDialogues()
 {
-    if (UWorld* World = GetWorld())
+    // Tribal Elder introduction dialogue
+    FNarr_DialogueTree ElderIntro;
+    ElderIntro.TreeID = TEXT("ElderIntroduction");
+    ElderIntro.NPCName = TEXT("TribalElder");
+    ElderIntro.bIsQuestRelated = false;
+    
+    FNarr_DialogueLine ElderLine1;
+    ElderLine1.SpeakerName = TEXT("Tribal Elder");
+    ElderLine1.DialogueText = FText::FromString(TEXT("Welcome, young hunter. You have survived your first night in these dangerous lands. That alone marks you as stronger than most."));
+    ElderLine1.DisplayDuration = 4.0f;
+    ElderLine1.PlayerResponseOptions.Add(TEXT("Thank you for the guidance."));
+    ElderLine1.PlayerResponseOptions.Add(TEXT("What dangers should I know about?"));
+    
+    FNarr_DialogueLine ElderLine2;
+    ElderLine2.SpeakerName = TEXT("Tribal Elder");
+    ElderLine2.DialogueText = FText::FromString(TEXT("The great beasts follow ancient patterns. Learn their rhythms - when they hunt, when they rest, when they migrate. This knowledge will keep you alive."));
+    ElderLine2.DisplayDuration = 5.0f;
+    
+    ElderIntro.DialogueLines.Add(ElderLine1);
+    ElderIntro.DialogueLines.Add(ElderLine2);
+    
+    RegisterDialogueTree(ElderIntro);
+    
+    // Scout warning dialogue
+    FNarr_DialogueTree ScoutWarning;
+    ScoutWarning.TreeID = TEXT("ScoutWarning");
+    ScoutWarning.NPCName = TEXT("Scout");
+    ScoutWarning.bIsQuestRelated = true;
+    ScoutWarning.AssociatedQuestID = TEXT("RaptorThreat");
+    
+    FNarr_DialogueLine ScoutLine1;
+    ScoutLine1.SpeakerName = TEXT("Scout");
+    ScoutLine1.DialogueText = FText::FromString(TEXT("The pack hunters have been circling our territory. Three of them, moving in coordinated patterns. They're learning our routines."));
+    ScoutLine1.DisplayDuration = 4.0f;
+    ScoutLine1.PlayerResponseOptions.Add(TEXT("I'll help deal with them."));
+    ScoutLine1.PlayerResponseOptions.Add(TEXT("How do we avoid them?"));
+    
+    ScoutWarning.DialogueLines.Add(ScoutLine1);
+    RegisterDialogueTree(ScoutWarning);
+}
+
+void UDialogueManager::CreateQuestDialogues()
+{
+    // Hunter quest giver dialogue
+    FNarr_DialogueTree HunterQuest;
+    HunterQuest.TreeID = TEXT("HunterQuestGiver");
+    HunterQuest.NPCName = TEXT("Hunter");
+    HunterQuest.bIsQuestRelated = true;
+    HunterQuest.AssociatedQuestID = TEXT("RaptorThreat");
+    
+    FNarr_DialogueLine HunterLine1;
+    HunterLine1.SpeakerName = TEXT("Hunter");
+    HunterLine1.DialogueText = FText::FromString(TEXT("The raptors have been hunting too close to our camp. We need someone brave enough to thin their numbers before they become bolder."));
+    HunterLine1.DisplayDuration = 4.0f;
+    HunterLine1.PlayerResponseOptions.Add(TEXT("I accept this hunt."));
+    HunterLine1.PlayerResponseOptions.Add(TEXT("Tell me more about these raptors."));
+    
+    HunterQuest.DialogueLines.Add(HunterLine1);
+    RegisterDialogueTree(HunterQuest);
+    
+    // Gatherer quest giver dialogue
+    FNarr_DialogueTree GathererQuest;
+    GathererQuest.TreeID = TEXT("GathererQuestGiver");
+    GathererQuest.NPCName = TEXT("Gatherer");
+    GathererQuest.bIsQuestRelated = true;
+    GathererQuest.AssociatedQuestID = TEXT("CrystalHarvest");
+    
+    FNarr_DialogueLine GathererLine1;
+    GathererLine1.SpeakerName = TEXT("Gatherer");
+    GathererLine1.DialogueText = FText::FromString(TEXT("The crystal formations near the old riverbed hold powerful energy. We need those shards to craft better tools and weapons."));
+    GathererLine1.DisplayDuration = 4.0f;
+    GathererLine1.PlayerResponseOptions.Add(TEXT("I'll gather the crystals."));
+    GathererLine1.PlayerResponseOptions.Add(TEXT("Where exactly is this riverbed?"));
+    
+    GathererQuest.DialogueLines.Add(GathererLine1);
+    RegisterDialogueTree(GathererQuest);
+}
+
+bool UDialogueManager::ValidateDialogueTree(const FNarr_DialogueTree& DialogueTree) const
+{
+    if (DialogueTree.TreeID.IsEmpty())
     {
-        DialogueManager = Cast<ADialogueManager>(UGameplayStatics::GetActorOfClass(World, ADialogueManager::StaticClass()));
-        
-        if (!DialogueManager)
-        {
-            UE_LOG(LogTemp, Warning, TEXT("No DialogueManager found in the world"));
-        }
+        UE_LOG(LogTemp, Error, TEXT("DialogueManager: Dialogue tree missing TreeID"));
+        return false;
     }
+    
+    if (DialogueTree.NPCName.IsEmpty())
+    {
+        UE_LOG(LogTemp, Error, TEXT("DialogueManager: Dialogue tree missing NPCName"));
+        return false;
+    }
+    
+    if (DialogueTree.DialogueLines.Num() == 0)
+    {
+        UE_LOG(LogTemp, Error, TEXT("DialogueManager: Dialogue tree has no dialogue lines"));
+        return false;
+    }
+    
+    return true;
 }
