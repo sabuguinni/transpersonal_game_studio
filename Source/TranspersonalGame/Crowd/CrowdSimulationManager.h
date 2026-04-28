@@ -1,21 +1,17 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/World.h"
 #include "GameFramework/Actor.h"
-#include "Components/StaticMeshComponent.h"
-#include "Components/SphereComponent.h"
-#include "Engine/Engine.h"
-#include "../SharedTypes.h"
+#include "Components/ActorComponent.h"
+#include "Engine/World.h"
+#include "NavigationSystem.h"
+#include "AI/NavigationSystemBase.h"
+#include "CrowdSimulationTypes.h"
 #include "CrowdSimulationManager.generated.h"
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnCrowdDensityChanged, float, NewDensity, FVector, Location);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnCrowdEvent, ECrowd_EventType, EventType, FVector, Location, float, Intensity);
+class UCrowdAgentComponent;
+class ACrowdWaypoint;
 
-/**
- * Main manager for crowd simulation using Mass Entity system
- * Handles spawn points, LOD management, and crowd behavior coordination
- */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API ACrowdSimulationManager : public AActor
 {
@@ -28,141 +24,133 @@ protected:
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
 
-    // Core crowd management
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Crowd System")
-    class USphereComponent* CrowdBounds;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Crowd System")
-    class UStaticMeshComponent* VisualizationMesh;
-
-    // Crowd configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Config", meta = (ClampMin = "10", ClampMax = "50000"))
+    // Crowd Management
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Settings")
     int32 MaxCrowdAgents;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Config", meta = (ClampMin = "0.1", ClampMax = "10.0"))
-    float CrowdDensity;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Settings")
+    float SpawnRadius;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Config")
-    ECrowd_BehaviorType DefaultBehaviorType;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Settings")
+    float UpdateFrequency;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Config")
-    ECrowd_ActivityType DefaultActivityType;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Settings")
+    FCrowd_LODSettings LODSettings;
 
-    // LOD system
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD System", meta = (ClampMin = "100.0", ClampMax = "5000.0"))
-    float HighDetailRadius;
+    // Agent Management
+    UPROPERTY(BlueprintReadOnly, Category = "Crowd State")
+    TArray<FCrowd_AgentData> ActiveAgents;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD System", meta = (ClampMin = "500.0", ClampMax = "10000.0"))
-    float MediumDetailRadius;
+    UPROPERTY(BlueprintReadOnly, Category = "Crowd State")
+    TArray<AActor*> CrowdActors;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD System", meta = (ClampMin = "1000.0", ClampMax = "20000.0"))
-    float LowDetailRadius;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Behavior")
+    ECrowd_BehaviorType DefaultBehavior;
 
-    // Performance settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance", meta = (ClampMin = "10", ClampMax = "120"))
-    int32 TargetFPS;
+    // Pathfinding
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
+    TArray<ACrowdWaypoint*> Waypoints;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    bool bEnablePerformanceScaling;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pathfinding")
+    float PathfindingUpdateRate;
 
+    // Performance
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
     bool bEnableLODSystem;
 
-    // Spawn point management
-    UPROPERTY(BlueprintReadOnly, Category = "Spawn System")
-    TArray<class ACrowdSpawnPoint*> SpawnPoints;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float LODUpdateRate;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Spawn System")
-    TArray<class ACrowdAgent*> ActiveAgents;
+private:
+    // Internal state
+    float LastUpdateTime;
+    float LastLODUpdateTime;
+    int32 NextAgentID;
 
-    // Events
-    UPROPERTY(BlueprintAssignable, Category = "Events")
-    FOnCrowdDensityChanged OnCrowdDensityChanged;
-
-    UPROPERTY(BlueprintAssignable, Category = "Events")
-    FOnCrowdEvent OnCrowdEvent;
+    // Navigation system reference
+    UNavigationSystemV1* NavSystem;
 
 public:
-    // Core crowd management functions
+    // Core Functions
     UFUNCTION(BlueprintCallable, Category = "Crowd Management")
     void InitializeCrowdSystem();
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Management")
-    void ShutdownCrowdSystem();
+    int32 SpawnCrowdAgent(FVector Location, ECrowd_BehaviorType Behavior = ECrowd_BehaviorType::Wandering);
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Management")
-    void UpdateCrowdDensity(float NewDensity);
+    void RemoveCrowdAgent(int32 AgentID);
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Management")
-    void SetCrowdBehavior(ECrowd_BehaviorType NewBehavior);
+    void SetAgentBehavior(int32 AgentID, ECrowd_BehaviorType NewBehavior);
 
-    // Spawn point management
-    UFUNCTION(BlueprintCallable, Category = "Spawn Management")
-    void RegisterSpawnPoint(class ACrowdSpawnPoint* SpawnPoint);
+    UFUNCTION(BlueprintCallable, Category = "Crowd Management")
+    void SetAgentTarget(int32 AgentID, FVector TargetLocation);
 
-    UFUNCTION(BlueprintCallable, Category = "Spawn Management")
-    void UnregisterSpawnPoint(class ACrowdSpawnPoint* SpawnPoint);
-
-    UFUNCTION(BlueprintCallable, Category = "Spawn Management")
-    void SpawnCrowdAtPoint(class ACrowdSpawnPoint* SpawnPoint, int32 Count);
-
-    UFUNCTION(BlueprintCallable, Category = "Spawn Management")
-    void DespawnCrowdAtPoint(class ACrowdSpawnPoint* SpawnPoint, int32 Count);
-
-    // LOD management
-    UFUNCTION(BlueprintCallable, Category = "LOD Management")
-    ECrowd_LODLevel GetLODLevelForDistance(float Distance) const;
-
-    UFUNCTION(BlueprintCallable, Category = "LOD Management")
-    void UpdateAgentLOD(class ACrowdAgent* Agent, ECrowd_LODLevel NewLOD);
-
-    UFUNCTION(BlueprintCallable, Category = "LOD Management")
-    void RefreshAllAgentLODs();
-
-    // Performance monitoring
+    // LOD System
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    float GetCurrentFPS() const;
+    void UpdateLODSystem();
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    int32 GetActiveAgentCount() const;
+    ECrowd_LODLevel CalculateAgentLOD(const FCrowd_AgentData& Agent, FVector PlayerLocation);
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void AdjustPerformanceSettings();
+    // Pathfinding
+    UFUNCTION(BlueprintCallable, Category = "Pathfinding")
+    bool FindPathForAgent(int32 AgentID, FVector TargetLocation);
 
-    // Event system
-    UFUNCTION(BlueprintCallable, Category = "Events")
-    void TriggerCrowdEvent(ECrowd_EventType EventType, FVector Location, float Intensity);
+    UFUNCTION(BlueprintCallable, Category = "Pathfinding")
+    void UpdateAgentMovement(float DeltaTime);
 
-    UFUNCTION(BlueprintCallable, Category = "Events")
-    void HandlePlayerProximity(FVector PlayerLocation, float Radius);
+    // Waypoint System
+    UFUNCTION(BlueprintCallable, Category = "Waypoints")
+    void RegisterWaypoint(ACrowdWaypoint* Waypoint);
 
-    // Debug and visualization
-    UFUNCTION(BlueprintCallable, Category = "Debug", CallInEditor)
-    void DebugDrawCrowdInfo();
+    UFUNCTION(BlueprintCallable, Category = "Waypoints")
+    ACrowdWaypoint* GetNearestWaypoint(FVector Location);
+
+    UFUNCTION(BlueprintCallable, Category = "Waypoints")
+    ACrowdWaypoint* GetRandomWaypoint();
+
+    // Utility Functions
+    UFUNCTION(BlueprintCallable, Category = "Crowd Info")
+    int32 GetActiveCrowdCount() const { return ActiveAgents.Num(); }
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd Info")
+    FCrowd_AgentData GetAgentData(int32 AgentID);
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd Info")
+    TArray<FCrowd_AgentData> GetAgentsInRadius(FVector Center, float Radius);
+
+    // Debug Functions
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Debug")
+    void DebugSpawnTestCrowd();
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Debug")
+    void DebugClearAllAgents();
 
     UFUNCTION(BlueprintCallable, Category = "Debug")
-    void ToggleCrowdVisualization();
+    void DrawDebugInfo();
 
-    UFUNCTION(BlueprintPure, Category = "Debug")
-    FString GetCrowdSystemStatus() const;
+protected:
+    // Internal helper functions
+    void UpdateAgentStates(float DeltaTime);
+    void ProcessAgentBehavior(FCrowd_AgentData& Agent, float DeltaTime);
+    void HandleWanderingBehavior(FCrowd_AgentData& Agent, float DeltaTime);
+    void HandlePatrollingBehavior(FCrowd_AgentData& Agent, float DeltaTime);
+    void HandleGatheringBehavior(FCrowd_AgentData& Agent, float DeltaTime);
+    void HandleFleeingBehavior(FCrowd_AgentData& Agent, float DeltaTime);
+    void HandleFollowingBehavior(FCrowd_AgentData& Agent, float DeltaTime);
 
-private:
-    // Internal management
-    void UpdateLODSystem(float DeltaTime);
-    void UpdatePerformanceScaling(float DeltaTime);
-    void ProcessCrowdEvents(float DeltaTime);
-    void CleanupInactiveAgents();
+    // Collision avoidance
+    FVector CalculateSteeringForce(const FCrowd_AgentData& Agent);
+    FVector CalculateSeparationForce(const FCrowd_AgentData& Agent);
+    FVector CalculateAlignmentForce(const FCrowd_AgentData& Agent);
+    FVector CalculateCohesionForce(const FCrowd_AgentData& Agent);
 
-    // Performance tracking
-    float LastFPSCheck;
-    float CurrentFPS;
-    int32 FrameCounter;
-    
-    // LOD update timing
-    float LODUpdateTimer;
-    static constexpr float LODUpdateInterval = 0.5f;
-
-    // Event processing
-    TArray<FCrowd_EventData> PendingEvents;
-    float EventProcessTimer;
+    // Utility
+    bool IsValidAgentID(int32 AgentID) const;
+    int32 FindAgentIndex(int32 AgentID) const;
+    FVector GetPlayerLocation() const;
 };
+
+#include "CrowdSimulationManager.generated.h"
