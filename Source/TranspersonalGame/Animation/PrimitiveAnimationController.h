@@ -4,15 +4,13 @@
 #include "Components/ActorComponent.h"
 #include "Engine/Engine.h"
 #include "Animation/AnimInstance.h"
-#include "Animation/AnimMontage.h"
-#include "Animation/AnimSequence.h"
-#include "Animation/BlendSpace.h"
-#include "SharedTypes.h"
+#include "GameFramework/CharacterMovementComponent.h"
+#include "../SharedTypes.h"
 #include "PrimitiveAnimationController.generated.h"
 
 // Forward declarations
 class USkeletalMeshComponent;
-class UAnimInstance;
+class ACharacter;
 
 /**
  * Animation states for primitive character movement
@@ -25,42 +23,48 @@ enum class EAnim_MovementState : uint8
     Running     UMETA(DisplayName = "Running"),
     Jumping     UMETA(DisplayName = "Jumping"),
     Falling     UMETA(DisplayName = "Falling"),
-    Landing     UMETA(DisplayName = "Landing"),
-    Crouching   UMETA(DisplayName = "Crouching"),
-    Crawling    UMETA(DisplayName = "Crawling")
+    Crouching   UMETA(DisplayName = "Crouching")
 };
 
 /**
- * Animation blend data for smooth transitions
+ * Animation blend parameters for smooth transitions
  */
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAnim_BlendData
+struct TRANSPERSONALGAME_API FAnim_BlendParameters
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
-    float BlendTime = 0.2f;
+    float Speed = 0.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
-    float PlayRate = 1.0f;
+    float Direction = 0.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
-    bool bLooping = true;
+    bool bIsInAir = false;
 
-    FAnim_BlendData()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+    bool bIsCrouching = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+    float LeanAmount = 0.0f;
+
+    FAnim_BlendParameters()
     {
-        BlendTime = 0.2f;
-        PlayRate = 1.0f;
-        bLooping = true;
+        Speed = 0.0f;
+        Direction = 0.0f;
+        bIsInAir = false;
+        bIsCrouching = false;
+        LeanAmount = 0.0f;
     }
 };
 
 /**
  * Primitive Animation Controller
- * Handles basic character animations for prehistoric survival gameplay
- * Focuses on realistic human movement without magical/spiritual elements
+ * Manages basic character animations for prehistoric survival gameplay
+ * Handles movement state transitions and animation blending
  */
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+UCLASS(ClassGroup=(Animation), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UPrimitiveAnimationController : public UActorComponent
 {
     GENERATED_BODY()
@@ -70,146 +74,72 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 public:
-    // === CORE ANIMATION CONTROL ===
-    
-    /**
-     * Set the current movement state and trigger appropriate animation
-     */
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void SetMovementState(EAnim_MovementState NewState);
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    /**
-     * Get the current movement state
-     */
-    UFUNCTION(BlueprintPure, Category = "Animation")
+    // Animation state management
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void UpdateAnimationState(float DeltaTime);
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
     EAnim_MovementState GetCurrentMovementState() const { return CurrentMovementState; }
 
-    /**
-     * Update animation based on character velocity and input
-     */
     UFUNCTION(BlueprintCallable, Category = "Animation")
-    void UpdateAnimationFromMovement(const FVector& Velocity, bool bIsJumping, bool bIsCrouching);
+    FAnim_BlendParameters GetBlendParameters() const { return BlendParameters; }
 
-    /**
-     * Play a one-shot animation montage (for actions like drinking, crafting)
-     */
+    // Animation triggers
     UFUNCTION(BlueprintCallable, Category = "Animation")
-    bool PlayActionMontage(UAnimMontage* Montage, float PlayRate = 1.0f);
+    void TriggerJumpAnimation();
 
-    /**
-     * Stop any currently playing montage
-     */
     UFUNCTION(BlueprintCallable, Category = "Animation")
-    void StopCurrentMontage(float BlendOutTime = 0.25f);
+    void TriggerLandAnimation();
 
-    // === ANIMATION ASSETS ===
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void SetCrouchState(bool bShouldCrouch);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
-    TObjectPtr<UAnimSequence> IdleAnimation;
+protected:
+    // Component references
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    TObjectPtr<USkeletalMeshComponent> SkeletalMeshComponent;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
-    TObjectPtr<UAnimSequence> WalkAnimation;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    TObjectPtr<UCharacterMovementComponent> MovementComponent;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
-    TObjectPtr<UAnimSequence> RunAnimation;
+    // Animation state
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Animation State")
+    EAnim_MovementState CurrentMovementState;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
-    TObjectPtr<UAnimSequence> JumpStartAnimation;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Animation State")
+    EAnim_MovementState PreviousMovementState;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
-    TObjectPtr<UAnimSequence> JumpLoopAnimation;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Animation State")
+    FAnim_BlendParameters BlendParameters;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
-    TObjectPtr<UAnimSequence> JumpLandAnimation;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
-    TObjectPtr<UAnimSequence> CrouchIdleAnimation;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
-    TObjectPtr<UAnimSequence> CrouchWalkAnimation;
-
-    // === BLEND SPACES ===
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
-    TObjectPtr<UBlendSpace> MovementBlendSpace;
-
-    // === ANIMATION SETTINGS ===
-
+    // Animation settings
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
-    FAnim_BlendData IdleBlendData;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
-    FAnim_BlendData WalkBlendData;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
-    FAnim_BlendData RunBlendData;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
-    FAnim_BlendData JumpBlendData;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
-    float WalkSpeedThreshold = 100.0f;
+    float WalkSpeedThreshold = 50.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
     float RunSpeedThreshold = 300.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
-    float JumpVelocityThreshold = 50.0f;
+    float AnimationBlendSpeed = 5.0f;
 
-    // === DEBUGGING ===
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug")
-    bool bDebugAnimationStates = false;
-
-    UFUNCTION(BlueprintCallable, Category = "Debug")
-    void LogCurrentAnimationState();
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
+    float DirectionBlendSpeed = 8.0f;
 
 private:
-    // === INTERNAL STATE ===
+    // Internal state tracking
+    float LastGroundedTime;
+    bool bWasInAir;
+    FVector LastVelocity;
 
-    UPROPERTY()
-    EAnim_MovementState CurrentMovementState = EAnim_MovementState::Idle;
-
-    UPROPERTY()
-    EAnim_MovementState PreviousMovementState = EAnim_MovementState::Idle;
-
-    UPROPERTY()
-    TObjectPtr<USkeletalMeshComponent> SkeletalMeshComponent;
-
-    UPROPERTY()
-    TObjectPtr<UAnimInstance> AnimInstance;
-
-    // Animation transition tracking
-    float StateTransitionTimer = 0.0f;
-    bool bIsTransitioning = false;
-
-    // === INTERNAL METHODS ===
-
-    /**
-     * Find and cache the skeletal mesh component
-     */
-    void InitializeSkeletalMeshComponent();
-
-    /**
-     * Determine movement state from velocity
-     */
-    EAnim_MovementState CalculateMovementStateFromVelocity(const FVector& Velocity, bool bIsJumping, bool bIsCrouching);
-
-    /**
-     * Handle state transition logic
-     */
-    void HandleStateTransition(EAnim_MovementState NewState);
-
-    /**
-     * Apply animation for current state
-     */
-    void ApplyAnimationForState(EAnim_MovementState State);
-
-    /**
-     * Get blend data for a specific state
-     */
-    FAnim_BlendData GetBlendDataForState(EAnim_MovementState State);
+    // Helper functions
+    void InitializeComponents();
+    void CalculateMovementState();
+    void UpdateBlendParameters(float DeltaTime);
+    void SmoothBlendValues(float DeltaTime);
+    bool IsMoving() const;
+    float CalculateMovementDirection() const;
 };
