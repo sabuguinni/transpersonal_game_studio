@@ -1,107 +1,129 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/Engine.h"
+#include "GameFramework/Actor.h"
 #include "Engine/World.h"
-#include "Subsystems/GameInstanceSubsystem.h"
+#include "Components/SceneComponent.h"
 #include "../../SharedTypes.h"
 #include "EngineArchitectureCore.generated.h"
 
 /**
- * Core Engine Architecture Manager
- * Responsible for overall engine architecture coordination and system integration
- * Ensures all game systems follow architectural standards and communicate properly
+ * Engine Architecture Core - Central coordinator for all engine systems
+ * Manages system initialization, validation, and cross-system communication
+ * This is the technical backbone that ensures all game systems work together
  */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UEngineArchitectureCore : public UGameInstanceSubsystem
+class TRANSPERSONALGAME_API AEngineArchitectureCore : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UEngineArchitectureCore();
-
-    // USubsystem interface
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
-
-    // Core Architecture Management
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    void InitializeArchitecture();
-
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    void ValidateSystemIntegrity();
-
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    bool IsSystemHealthy() const { return bSystemHealthy; }
-
-    // Performance Monitoring
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    void UpdatePerformanceMetrics();
-
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    float GetCurrentFrameTime() const { return CurrentFrameTime; }
-
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    int32 GetActiveActorCount() const { return ActiveActorCount; }
-
-    // Memory Management
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    void OptimizeMemoryUsage();
-
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    float GetMemoryUsageMB() const { return MemoryUsageMB; }
-
-    // System Registration
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    void RegisterCoreSystem(const FString& SystemName, UObject* SystemObject);
-
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    void UnregisterCoreSystem(const FString& SystemName);
-
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    UObject* GetRegisteredSystem(const FString& SystemName) const;
+    AEngineArchitectureCore();
 
 protected:
-    // Core system health
-    UPROPERTY(BlueprintReadOnly, Category = "Engine Architecture")
-    bool bSystemHealthy;
+    virtual void BeginPlay() override;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
-    // Performance metrics
-    UPROPERTY(BlueprintReadOnly, Category = "Engine Architecture")
-    float CurrentFrameTime;
+public:
+    virtual void Tick(float DeltaTime) override;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Engine Architecture")
-    int32 ActiveActorCount;
+    // === SYSTEM REGISTRATION ===
+    
+    /** Register a new system with the architecture core */
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    bool RegisterSystem(const FString& SystemName, UObject* SystemInstance);
+    
+    /** Unregister a system */
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    bool UnregisterSystem(const FString& SystemName);
+    
+    /** Get a registered system by name */
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    UObject* GetSystem(const FString& SystemName);
 
-    UPROPERTY(BlueprintReadOnly, Category = "Engine Architecture")
-    float MemoryUsageMB;
+    // === SYSTEM VALIDATION ===
+    
+    /** Validate all registered systems are functioning correctly */
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture", CallInEditor)
+    bool ValidateAllSystems();
+    
+    /** Get system health status */
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    TMap<FString, bool> GetSystemHealthStatus();
 
-    // System registry
+    // === PERFORMANCE MONITORING ===
+    
+    /** Get current frame time */
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    float GetCurrentFrameTime() const;
+    
+    /** Get memory usage statistics */
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    FString GetMemoryUsageStats() const;
+
+    // === ARCHITECTURE CONFIGURATION ===
+    
+    /** Enable/disable system performance monitoring */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Engine Architecture")
+    bool bEnablePerformanceMonitoring;
+    
+    /** Enable/disable system validation checks */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Engine Architecture")
+    bool bEnableSystemValidation;
+    
+    /** Maximum allowed frame time before warning (in milliseconds) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Engine Architecture")
+    float MaxFrameTimeMs;
+    
+    /** Systems update frequency (times per second) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Engine Architecture")
+    float SystemUpdateFrequency;
+
+protected:
+    // === CORE COMPONENTS ===
+    
+    /** Root scene component */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    USceneComponent* RootSceneComponent;
+
+    // === SYSTEM REGISTRY ===
+    
+    /** Map of registered systems */
     UPROPERTY()
-    TMap<FString, TObjectPtr<UObject>> RegisteredSystems;
+    TMap<FString, UObject*> RegisteredSystems;
+    
+    /** System health status cache */
+    UPROPERTY()
+    TMap<FString, bool> SystemHealthCache;
 
-    // Architecture validation
-    UPROPERTY(BlueprintReadOnly, Category = "Engine Architecture")
-    TArray<FString> SystemWarnings;
+    // === PERFORMANCE TRACKING ===
+    
+    /** Frame time accumulator for averaging */
+    float FrameTimeAccumulator;
+    
+    /** Frame count for averaging */
+    int32 FrameCount;
+    
+    /** Last system validation time */
+    float LastValidationTime;
+    
+    /** System update timer */
+    float SystemUpdateTimer;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Engine Architecture")
-    TArray<FString> SystemErrors;
-
-private:
-    // Internal validation methods
-    void ValidateWorldPartition();
-    void ValidateActorSystems();
-    void ValidateMemoryConstraints();
-    void ValidatePerformanceTargets();
-
-    // Performance tracking
-    FDateTime LastPerformanceUpdate;
-    TArray<float> FrameTimeHistory;
-    static constexpr int32 MaxFrameTimeHistory = 60;
-
-    // System health tracking
-    bool bWorldPartitionHealthy;
-    bool bActorSystemsHealthy;
-    bool bMemoryConstraintsHealthy;
-    bool bPerformanceTargetsHealthy;
+    // === INTERNAL METHODS ===
+    
+    /** Initialize core architecture systems */
+    void InitializeCoreArchitecture();
+    
+    /** Validate individual system */
+    bool ValidateSystem(const FString& SystemName, UObject* SystemInstance);
+    
+    /** Update performance metrics */
+    void UpdatePerformanceMetrics(float DeltaTime);
+    
+    /** Log system status */
+    void LogSystemStatus();
+    
+    /** Handle system failure */
+    void HandleSystemFailure(const FString& SystemName, const FString& ErrorMessage);
 };
