@@ -3,8 +3,9 @@
 #include "CoreMinimal.h"
 #include "Engine/Engine.h"
 #include "Subsystems/GameInstanceSubsystem.h"
-#include "Sound/SoundCue.h"
 #include "Components/AudioComponent.h"
+#include "Sound/SoundCue.h"
+#include "MetasoundSource.h"
 #include "Core/SharedTypes.h"
 #include "AudioSystemManager.generated.h"
 
@@ -12,33 +13,36 @@
  * TRANSPERSONAL GAME STUDIO - AUDIO SYSTEM MANAGER
  * Audio Agent #16
  * 
- * Manages all audio systems in the prehistoric survival game:
- * - Ambient soundscapes (forest, wind, prehistoric atmosphere)
- * - Dinosaur audio (footsteps, roars, breathing)
- * - Player feedback (heartbeat, survival warnings)
- * - Dynamic music system based on danger level
- * - 3D spatial audio for immersive prehistoric world
+ * Manages all audio systems for the prehistoric survival game:
+ * - Dynamic music system with fear/tension states
+ * - 3D positioned ambient sounds (forest, wind, water)
+ * - Dinosaur audio with distance-based intensity
+ * - Player feedback sounds (heartbeat, breathing, footsteps)
+ * - Environmental audio zones with smooth transitions
  */
 
 UENUM(BlueprintType)
-enum class EAudio_SoundType : uint8
+enum class EAudio_MusicState : uint8
 {
-    Ambient = 0         UMETA(DisplayName = "Ambient"),
-    Dinosaur = 1        UMETA(DisplayName = "Dinosaur"),
-    Player = 2          UMETA(DisplayName = "Player"),
-    Environment = 3     UMETA(DisplayName = "Environment"),
-    Music = 4           UMETA(DisplayName = "Music"),
-    UI = 5              UMETA(DisplayName = "UI")
+    Calm = 0        UMETA(DisplayName = "Calm"),
+    Tension = 1     UMETA(DisplayName = "Tension"),
+    Danger = 2      UMETA(DisplayName = "Danger"),
+    Combat = 3      UMETA(DisplayName = "Combat"),
+    Victory = 4     UMETA(DisplayName = "Victory"),
+    Death = 5       UMETA(DisplayName = "Death")
 };
 
 UENUM(BlueprintType)
-enum class EAudio_DangerLevel : uint8
+enum class EAudio_AmbienceType : uint8
 {
-    Safe = 0            UMETA(DisplayName = "Safe"),
-    Cautious = 1        UMETA(DisplayName = "Cautious"),
-    Threatened = 2      UMETA(DisplayName = "Threatened"),
-    Danger = 3          UMETA(DisplayName = "Danger"),
-    Critical = 4        UMETA(DisplayName = "Critical")
+    Forest = 0      UMETA(DisplayName = "Forest"),
+    Grassland = 1   UMETA(DisplayName = "Grassland"),
+    Desert = 2      UMETA(DisplayName = "Desert"),
+    Swamp = 3       UMETA(DisplayName = "Swamp"),
+    Mountains = 4   UMETA(DisplayName = "Mountains"),
+    River = 5       UMETA(DisplayName = "River"),
+    Cave = 6        UMETA(DisplayName = "Cave"),
+    Night = 7       UMETA(DisplayName = "Night")
 };
 
 USTRUCT(BlueprintType)
@@ -47,65 +51,68 @@ struct TRANSPERSONALGAME_API FAudio_SoundSettings
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float Volume = 1.0f;
+    float MasterVolume = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float Pitch = 1.0f;
+    float MusicVolume = 0.7f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float FadeInTime = 0.5f;
+    float SFXVolume = 0.8f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float FadeOutTime = 0.5f;
+    float AmbienceVolume = 0.6f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    bool bLoop = false;
+    float VoiceVolume = 0.9f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    bool b3D = true;
+    bool bEnableDynamicRange = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float AttenuationRadius = 1000.0f;
+    float MaxAudioDistance = 5000.0f;
 
     FAudio_SoundSettings()
     {
-        Volume = 1.0f;
-        Pitch = 1.0f;
-        FadeInTime = 0.5f;
-        FadeOutTime = 0.5f;
-        bLoop = false;
-        b3D = true;
-        AttenuationRadius = 1000.0f;
+        MasterVolume = 1.0f;
+        MusicVolume = 0.7f;
+        SFXVolume = 0.8f;
+        AmbienceVolume = 0.6f;
+        VoiceVolume = 0.9f;
+        bEnableDynamicRange = true;
+        MaxAudioDistance = 5000.0f;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAudio_DynamicMusicState
+struct TRANSPERSONALGAME_API FAudio_MusicLayer
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Music")
-    EAudio_DangerLevel CurrentDangerLevel = EAudio_DangerLevel::Safe;
+    TSoftObjectPtr<USoundCue> SoundCue;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Music")
-    float IntensityLevel = 0.0f;
+    EAudio_MusicState MusicState = EAudio_MusicState::Calm;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Music")
-    float TransitionTime = 2.0f;
+    float Volume = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Music")
-    bool bInCombat = false;
+    float FadeInTime = 2.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Music")
-    float HeartRate = 60.0f;
+    float FadeOutTime = 2.0f;
 
-    FAudio_DynamicMusicState()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Music")
+    bool bIsLooping = true;
+
+    FAudio_MusicLayer()
     {
-        CurrentDangerLevel = EAudio_DangerLevel::Safe;
-        IntensityLevel = 0.0f;
-        TransitionTime = 2.0f;
-        bInCombat = false;
-        HeartRate = 60.0f;
+        MusicState = EAudio_MusicState::Calm;
+        Volume = 1.0f;
+        FadeInTime = 2.0f;
+        FadeOutTime = 2.0f;
+        bIsLooping = true;
     }
 };
 
@@ -121,134 +128,109 @@ public:
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Core Audio Management
-    UFUNCTION(BlueprintCallable, Category = "Audio System")
-    void PlaySound(USoundCue* SoundCue, FVector Location, const FAudio_SoundSettings& Settings);
+    // Music System
+    UFUNCTION(BlueprintCallable, Category = "Audio|Music")
+    void SetMusicState(EAudio_MusicState NewState, float TransitionTime = 2.0f);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio System")
-    void PlaySound2D(USoundCue* SoundCue, const FAudio_SoundSettings& Settings);
+    UFUNCTION(BlueprintCallable, Category = "Audio|Music")
+    EAudio_MusicState GetCurrentMusicState() const { return CurrentMusicState; }
 
-    UFUNCTION(BlueprintCallable, Category = "Audio System")
-    void StopSound(USoundCue* SoundCue);
+    UFUNCTION(BlueprintCallable, Category = "Audio|Music")
+    void StopAllMusic(float FadeOutTime = 2.0f);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio System")
-    void StopAllSounds();
+    // Ambience System
+    UFUNCTION(BlueprintCallable, Category = "Audio|Ambience")
+    void SetAmbienceType(EAudio_AmbienceType NewType, float TransitionTime = 3.0f);
 
-    // Ambient Audio System
-    UFUNCTION(BlueprintCallable, Category = "Ambient Audio")
-    void StartAmbientSoundscape(EEng_BiomeType BiomeType);
+    UFUNCTION(BlueprintCallable, Category = "Audio|Ambience")
+    void PlayAmbienceAtLocation(EAudio_AmbienceType AmbienceType, FVector Location, float Radius = 1000.0f);
 
-    UFUNCTION(BlueprintCallable, Category = "Ambient Audio")
-    void UpdateAmbientIntensity(float Intensity);
+    // Sound Effects
+    UFUNCTION(BlueprintCallable, Category = "Audio|SFX")
+    void PlaySoundAtLocation(USoundCue* SoundCue, FVector Location, float VolumeMultiplier = 1.0f);
 
-    UFUNCTION(BlueprintCallable, Category = "Ambient Audio")
-    void TransitionToNewBiome(EEng_BiomeType NewBiome, float TransitionTime = 3.0f);
-
-    // Dinosaur Audio System
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur Audio")
-    void PlayDinosaurFootstep(FVector Location, float DinosaurSize);
-
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur Audio")
-    void PlayDinosaurRoar(FVector Location, EAudio_DangerLevel ThreatLevel);
-
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur Audio")
-    void PlayDinosaurBreathing(FVector Location, bool bAggressive);
+    UFUNCTION(BlueprintCallable, Category = "Audio|SFX")
+    void PlayDinosaurSound(const FString& DinosaurType, FVector Location, float Intensity = 1.0f);
 
     // Player Audio Feedback
-    UFUNCTION(BlueprintCallable, Category = "Player Audio")
-    void UpdateHeartbeat(float HeartRate);
+    UFUNCTION(BlueprintCallable, Category = "Audio|Player")
+    void SetPlayerFearLevel(float FearLevel);
 
-    UFUNCTION(BlueprintCallable, Category = "Player Audio")
-    void PlaySurvivalWarning(EAudio_DangerLevel DangerLevel);
+    UFUNCTION(BlueprintCallable, Category = "Audio|Player")
+    void PlayPlayerHeartbeat(float Intensity = 1.0f);
 
-    UFUNCTION(BlueprintCallable, Category = "Player Audio")
-    void PlayPlayerFootstep(FVector Location, bool bSneaking);
+    UFUNCTION(BlueprintCallable, Category = "Audio|Player")
+    void PlayPlayerBreathing(float Intensity = 1.0f);
 
-    // Dynamic Music System
-    UFUNCTION(BlueprintCallable, Category = "Dynamic Music")
-    void UpdateMusicState(const FAudio_DynamicMusicState& NewState);
+    // Settings
+    UFUNCTION(BlueprintCallable, Category = "Audio|Settings")
+    void ApplyAudioSettings(const FAudio_SoundSettings& NewSettings);
 
-    UFUNCTION(BlueprintCallable, Category = "Dynamic Music")
-    void SetDangerLevel(EAudio_DangerLevel DangerLevel);
+    UFUNCTION(BlueprintCallable, Category = "Audio|Settings")
+    FAudio_SoundSettings GetAudioSettings() const { return AudioSettings; }
 
-    UFUNCTION(BlueprintCallable, Category = "Dynamic Music")
-    void StartCombatMusic();
+    // Distance-based Audio
+    UFUNCTION(BlueprintCallable, Category = "Audio|Distance")
+    float CalculateVolumeByDistance(FVector SourceLocation, FVector ListenerLocation, float MaxDistance = 1000.0f) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Dynamic Music")
-    void EndCombatMusic();
-
-    // Audio Settings
-    UFUNCTION(BlueprintCallable, Category = "Audio Settings")
-    void SetMasterVolume(float Volume);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio Settings")
-    void SetSFXVolume(float Volume);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio Settings")
-    void SetMusicVolume(float Volume);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio Settings")
-    void SetAmbientVolume(float Volume);
+    UFUNCTION(BlueprintCallable, Category = "Audio|Distance")
+    void UpdateListenerPosition(FVector NewPosition, FRotator NewRotation);
 
 protected:
-    // Audio Components
-    UPROPERTY(BlueprintReadOnly, Category = "Audio Components")
-    TMap<EAudio_SoundType, class UAudioComponent*> AudioComponents;
+    // Music System
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Music")
+    TArray<FAudio_MusicLayer> MusicLayers;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Audio Components")
-    class UAudioComponent* AmbientAudioComponent;
+    UPROPERTY()
+    TMap<EAudio_MusicState, UAudioComponent*> MusicComponents;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Audio Components")
-    class UAudioComponent* MusicAudioComponent;
+    UPROPERTY()
+    EAudio_MusicState CurrentMusicState = EAudio_MusicState::Calm;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Audio Components")
-    class UAudioComponent* HeartbeatAudioComponent;
+    UPROPERTY()
+    EAudio_MusicState TargetMusicState = EAudio_MusicState::Calm;
 
-    // Audio Assets
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Sound Assets")
-    TMap<EEng_BiomeType, USoundCue*> BiomeAmbientSounds;
+    // Ambience System
+    UPROPERTY()
+    TMap<EAudio_AmbienceType, UAudioComponent*> AmbienceComponents;
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Sound Assets")
-    TMap<EAudio_DangerLevel, USoundCue*> MusicTracks;
+    UPROPERTY()
+    EAudio_AmbienceType CurrentAmbienceType = EAudio_AmbienceType::Forest;
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Sound Assets")
-    USoundCue* DinosaurFootstepSound;
+    // Settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
+    FAudio_SoundSettings AudioSettings;
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Sound Assets")
-    USoundCue* DinosaurRoarSound;
+    // Player Audio
+    UPROPERTY()
+    UAudioComponent* HeartbeatComponent;
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Sound Assets")
-    USoundCue* PlayerHeartbeatSound;
+    UPROPERTY()
+    UAudioComponent* BreathingComponent;
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Sound Assets")
-    USoundCue* PlayerFootstepSound;
+    UPROPERTY()
+    float CurrentFearLevel = 0.0f;
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Sound Assets")
-    USoundCue* SurvivalWarningSound;
+    // Listener Position
+    UPROPERTY()
+    FVector ListenerPosition = FVector::ZeroVector;
 
-    // Audio State
-    UPROPERTY(BlueprintReadOnly, Category = "Audio State")
-    FAudio_DynamicMusicState CurrentMusicState;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Audio State")
-    EEng_BiomeType CurrentBiome;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Audio State")
-    float MasterVolume;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Audio State")
-    float SFXVolume;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Audio State")
-    float MusicVolume;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Audio State")
-    float AmbientVolume;
+    UPROPERTY()
+    FRotator ListenerRotation = FRotator::ZeroRotator;
 
 private:
-    // Internal Audio Management
-    void InitializeAudioComponents();
-    void UpdateAudioMixing();
-    void ProcessMusicTransition();
-    void CalculateAudioAttenuation(FVector ListenerLocation, FVector SoundLocation, float& OutVolume, float& OutPitch);
+    void InitializeMusicSystem();
+    void InitializeAmbienceSystem();
+    void InitializePlayerAudio();
+    void UpdateMusicTransition(float DeltaTime);
+    void UpdatePlayerAudioFeedback(float DeltaTime);
+
+    UPROPERTY()
+    float MusicTransitionTimer = 0.0f;
+
+    UPROPERTY()
+    float MusicTransitionDuration = 2.0f;
+
+    UPROPERTY()
+    bool bIsMusicTransitioning = false;
 };
