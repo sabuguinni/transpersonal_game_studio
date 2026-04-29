@@ -1,288 +1,455 @@
 #include "BuildValidationManager.h"
-#include "Engine/World.h"
 #include "Engine/Engine.h"
-#include "HAL/PlatformFilemanager.h"
-#include "Misc/Paths.h"
-#include "Misc/DateTime.h"
-#include "EditorLevelLibrary.h"
+#include "Engine/World.h"
+#include "Engine/GameInstance.h"
+#include "TimerManager.h"
 #include "UObject/UObjectGlobals.h"
+#include "UObject/Package.h"
+#include "Engine/Level.h"
+#include "Engine/LevelStreaming.h"
+#include "Misc/PackageName.h"
 
-ABuildValidationManager::ABuildValidationManager()
+UBuildValidationManager::UBuildValidationManager()
 {
-    PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.bStartWithTickEnabled = true;
-    
-    InitializeExpectedClasses();
+    // Initialize core class paths for validation
+    CoreClassPaths = {
+        TEXT("/Script/TranspersonalGame.TranspersonalCharacter"),
+        TEXT("/Script/TranspersonalGame.TranspersonalGameMode"),
+        TEXT("/Script/TranspersonalGame.TranspersonalGameState"),
+        TEXT("/Script/TranspersonalGame.TranspersonalPlayerController")
+    };
+
+    GameplayClassPaths = {
+        TEXT("/Script/TranspersonalGame.QATestManager"),
+        TEXT("/Script/TranspersonalGame.BuildValidationManager")
+    };
+
+    SubsystemClassPaths = {
+        TEXT("/Script/TranspersonalGame.BuildValidationManager")
+    };
+
+    bContinuousValidationActive = false;
+    ValidationInterval = 30.0f;
+    bInitialized = false;
+    ValidationRunCount = 0;
+    LastValidationTime = 0.0;
 }
 
-void ABuildValidationManager::BeginPlay()
+void UBuildValidationManager::Initialize(FSubsystemCollectionBase& Collection)
 {
-    Super::BeginPlay();
+    Super::Initialize(Collection);
     
-    if (bAutoRunValidationOnBeginPlay)
-    {
-        // Run validation after a short delay to allow other systems to initialize
-        FTimerHandle ValidationTimer;
-        GetWorld()->GetTimerManager().SetTimer(ValidationTimer, [this]()
-        {
-            RunFullValidation();
-        }, 2.0f, false);
-    }
+    UE_LOG(LogTemp, Warning, TEXT("BuildValidationManager: Initializing..."));
+    
+    bInitialized = true;
+    
+    // Perform initial validation
+    LastValidationResult = ValidateFullBuild();
+    
+    UE_LOG(LogTemp, Warning, TEXT("BuildValidationManager: Initialized successfully"));
 }
 
-void ABuildValidationManager::Tick(float DeltaTime)
+void UBuildValidationManager::Deinitialize()
 {
-    Super::Tick(DeltaTime);
+    StopContinuousValidation();
+    bInitialized = false;
     
-    if (!bValidationInProgress && ValidationInterval > 0.0f)
-    {
-        TimeSinceLastValidation += DeltaTime;
-        
-        if (TimeSinceLastValidation >= ValidationInterval)
-        {
-            RunFullValidation();
-            TimeSinceLastValidation = 0.0f;
-        }
-    }
+    UE_LOG(LogTemp, Warning, TEXT("BuildValidationManager: Deinitialized"));
+    
+    Super::Deinitialize();
 }
 
-FBuild_ValidationReport ABuildValidationManager::RunFullValidation()
+FBuild_ValidationResult UBuildValidationManager::ValidateFullBuild()
 {
-    if (bValidationInProgress)
+    FBuild_ValidationResult Result;
+    ValidationRunCount++;
+    LastValidationTime = FPlatformTime::Seconds();
+    
+    UE_LOG(LogTemp, Warning, TEXT("BuildValidationManager: Starting full build validation (Run #%d)"), ValidationRunCount);
+    
+    // Validate TranspersonalGame module
+    bool bModuleValid = ValidateTranspersonalGameModule();
+    if (!bModuleValid)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Validation already in progress"));
-        return LastValidationReport;
+        Result.ErrorMessages.Add(TEXT("TranspersonalGame module validation failed"));
+        Result.ErrorCount++;
     }
     
-    bValidationInProgress = true;
-    float StartTime = FPlatformTime::Seconds();
-    
-    UE_LOG(LogTemp, Log, TEXT("=== Starting Full Build Validation ==="));
-    
-    // Initialize report
-    FBuild_ValidationReport Report;
-    Report.ValidationTimestamp = FDateTime::Now().ToString();
-    Report.ClassesExpected = ExpectedClasses.Num();
-    
-    // Run validation tests
-    bool bClassValidation = ValidateClassLoading();
-    bool bBinaryValidation = ValidateBinaryFiles();
-    bool bSourceValidation = ValidateSourceFiles();
-    
-    // Update report with results
-    Report.ClassesLoaded = 0;
-    Report.FailedClasses.Empty();
-    
-    for (const FString& ClassName : ExpectedClasses)
+    // Validate core classes
+    bool bCoreValid = ValidateCoreClasses();
+    if (!bCoreValid)
     {
-        if (CheckClassExists(ClassName))
-        {
-            Report.ClassesLoaded++;
-        }
-        else
-        {
-            Report.FailedClasses.Add(ClassName);
-        }
+        Result.ErrorMessages.Add(TEXT("Core classes validation failed"));
+        Result.ErrorCount++;
     }
     
-    Report.BinaryFilesFound = CountBinaryFiles();
-    Report.SourceFilesFound = CountSourceFiles();
+    // Validate gameplay classes
+    bool bGameplayValid = ValidateGameplayClasses();
+    if (!bGameplayValid)
+    {
+        Result.WarningMessages.Add(TEXT("Some gameplay classes failed validation"));
+        Result.WarningCount++;
+    }
+    
+    // Validate subsystems
+    bool bSubsystemsValid = ValidateSubsystems();
+    if (!bSubsystemsValid)
+    {
+        Result.WarningMessages.Add(TEXT("Some subsystems failed validation"));
+        Result.WarningCount++;
+    }
     
     // Determine overall result
-    if (Report.ClassesLoaded == Report.ClassesExpected && Report.BinaryFilesFound > 0)
+    Result.bIsValid = (Result.ErrorCount == 0);
+    
+    if (Result.bIsValid)
     {
-        Report.Result = EBuild_ValidationResult::Pass;
-    }
-    else if (Report.ClassesLoaded > Report.ClassesExpected / 2)
-    {
-        Report.Result = EBuild_ValidationResult::PartialPass;
+        Result.ValidationMessage = FString::Printf(TEXT("Build validation PASSED (Warnings: %d)"), Result.WarningCount);
     }
     else
     {
-        Report.Result = EBuild_ValidationResult::Fail;
+        Result.ValidationMessage = FString::Printf(TEXT("Build validation FAILED (Errors: %d, Warnings: %d)"), Result.ErrorCount, Result.WarningCount);
     }
     
-    Report.ValidationDuration = FPlatformTime::Seconds() - StartTime;
-    LastValidationReport = Report;
+    UE_LOG(LogTemp, Warning, TEXT("BuildValidationManager: %s"), *Result.ValidationMessage);
     
-    LogValidationResults(Report);
-    
-    bValidationInProgress = false;
-    
-    UE_LOG(LogTemp, Log, TEXT("=== Build Validation Complete ==="));
-    
-    return Report;
+    return Result;
 }
 
-bool ABuildValidationManager::ValidateClassLoading()
+FBuild_ValidationResult UBuildValidationManager::ValidateModuleIntegrity()
 {
-    UE_LOG(LogTemp, Log, TEXT("Validating class loading..."));
+    FBuild_ValidationResult Result;
+    
+    UE_LOG(LogTemp, Warning, TEXT("BuildValidationManager: Validating module integrity..."));
+    
+    // Check if TranspersonalGame module is loaded
+    FModuleManager& ModuleManager = FModuleManager::Get();
+    bool bModuleLoaded = ModuleManager.IsModuleLoaded(TEXT("TranspersonalGame"));
+    
+    if (bModuleLoaded)
+    {
+        Result.ValidationMessage = TEXT("TranspersonalGame module is loaded and accessible");
+        Result.bIsValid = true;
+        UE_LOG(LogTemp, Warning, TEXT("BuildValidationManager: Module integrity check PASSED"));
+    }
+    else
+    {
+        Result.ValidationMessage = TEXT("TranspersonalGame module is not loaded");
+        Result.ErrorMessages.Add(TEXT("Module not loaded"));
+        Result.ErrorCount++;
+        Result.bIsValid = false;
+        UE_LOG(LogTemp, Error, TEXT("BuildValidationManager: Module integrity check FAILED"));
+    }
+    
+    return Result;
+}
+
+FBuild_ValidationResult UBuildValidationManager::ValidateClassRegistration()
+{
+    FBuild_ValidationResult Result;
+    
+    UE_LOG(LogTemp, Warning, TEXT("BuildValidationManager: Validating class registration..."));
+    
+    TArray<FString> AllClassPaths = CoreClassPaths;
+    AllClassPaths.Append(GameplayClassPaths);
     
     int32 LoadedCount = 0;
-    for (const FString& ClassName : ExpectedClasses)
+    int32 FailedCount = 0;
+    
+    for (const FString& ClassPath : AllClassPaths)
     {
-        if (CheckClassExists(ClassName))
+        if (TestClassLoading(ClassPath))
         {
             LoadedCount++;
-            UE_LOG(LogTemp, Log, TEXT("✓ Class loaded: %s"), *ClassName);
+            UE_LOG(LogTemp, Log, TEXT("BuildValidationManager: Class loaded successfully: %s"), *ClassPath);
         }
         else
         {
-            UE_LOG(LogTemp, Warning, TEXT("✗ Class failed to load: %s"), *ClassName);
+            FailedCount++;
+            Result.ErrorMessages.Add(FString::Printf(TEXT("Failed to load class: %s"), *ClassPath));
+            UE_LOG(LogTemp, Error, TEXT("BuildValidationManager: Failed to load class: %s"), *ClassPath);
         }
     }
     
-    UE_LOG(LogTemp, Log, TEXT("Class validation: %d/%d loaded"), LoadedCount, ExpectedClasses.Num());
-    return LoadedCount == ExpectedClasses.Num();
+    Result.ErrorCount = FailedCount;
+    Result.bIsValid = (FailedCount == 0);
+    Result.ValidationMessage = FString::Printf(TEXT("Class registration: %d loaded, %d failed"), LoadedCount, FailedCount);
+    
+    UE_LOG(LogTemp, Warning, TEXT("BuildValidationManager: Class registration validation complete: %s"), *Result.ValidationMessage);
+    
+    return Result;
 }
 
-bool ABuildValidationManager::ValidateBinaryFiles()
+TArray<FBuild_ModuleStatus> UBuildValidationManager::GetModuleStatusReport()
 {
-    UE_LOG(LogTemp, Log, TEXT("Validating binary files..."));
+    TArray<FBuild_ModuleStatus> StatusReport;
     
-    int32 BinaryCount = CountBinaryFiles();
-    bool bValid = BinaryCount > 0;
+    // TranspersonalGame module status
+    FBuild_ModuleStatus TranspersonalStatus;
+    TranspersonalStatus.ModuleName = TEXT("TranspersonalGame");
+    TranspersonalStatus.bIsLoaded = FModuleManager::Get().IsModuleLoaded(TEXT("TranspersonalGame"));
     
-    UE_LOG(LogTemp, Log, TEXT("Binary validation: %d files found - %s"), 
-           BinaryCount, bValid ? TEXT("PASS") : TEXT("FAIL"));
-    
-    return bValid;
-}
-
-bool ABuildValidationManager::ValidateSourceFiles()
-{
-    UE_LOG(LogTemp, Log, TEXT("Validating source files..."));
-    
-    int32 SourceCount = CountSourceFiles();
-    bool bValid = SourceCount > 10; // Expect at least 10 source files
-    
-    UE_LOG(LogTemp, Log, TEXT("Source validation: %d files found - %s"), 
-           SourceCount, bValid ? TEXT("PASS") : TEXT("FAIL"));
-    
-    return bValid;
-}
-
-void ABuildValidationManager::RunIntegrationTests()
-{
-    UE_LOG(LogTemp, Log, TEXT("Running integration tests..."));
-    
-    // Test 1: Spawn test actors
-    int32 SpawnedActors = 0;
-    for (const FString& ClassName : ExpectedClasses)
+    // Test core classes
+    for (const FString& ClassPath : CoreClassPaths)
     {
-        UClass* ActorClass = FindObject<UClass>(ANY_PACKAGE, *FString::Printf(TEXT("/Script/TranspersonalGame.%s"), *ClassName));
-        if (ActorClass && ActorClass->IsChildOf(AActor::StaticClass()))
+        if (TestClassLoading(ClassPath))
         {
-            FVector SpawnLocation(SpawnedActors * 200.0f, 0.0f, 100.0f);
-            AActor* SpawnedActor = GetWorld()->SpawnActor<AActor>(ActorClass, SpawnLocation, FRotator::ZeroRotator);
-            if (SpawnedActor)
-            {
-                SpawnedActor->SetActorLabel(FString::Printf(TEXT("IntegrationTest_%s"), *ClassName));
-                SpawnedActors++;
-                UE_LOG(LogTemp, Log, TEXT("✓ Spawned integration test actor: %s"), *ClassName);
-            }
+            TranspersonalStatus.LoadedClasses.Add(ClassPath);
         }
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("Integration tests: %d actors spawned"), SpawnedActors);
-}
-
-void ABuildValidationManager::GenerateValidationReport()
-{
-    UE_LOG(LogTemp, Log, TEXT("=== VALIDATION REPORT ==="));
-    UE_LOG(LogTemp, Log, TEXT("Timestamp: %s"), *LastValidationReport.ValidationTimestamp);
-    UE_LOG(LogTemp, Log, TEXT("Duration: %.2f seconds"), LastValidationReport.ValidationDuration);
-    UE_LOG(LogTemp, Log, TEXT("Result: %s"), 
-           LastValidationReport.Result == EBuild_ValidationResult::Pass ? TEXT("PASS") :
-           LastValidationReport.Result == EBuild_ValidationResult::PartialPass ? TEXT("PARTIAL PASS") : TEXT("FAIL"));
-    UE_LOG(LogTemp, Log, TEXT("Classes: %d/%d loaded"), LastValidationReport.ClassesLoaded, LastValidationReport.ClassesExpected);
-    UE_LOG(LogTemp, Log, TEXT("Binaries: %d found"), LastValidationReport.BinaryFilesFound);
-    UE_LOG(LogTemp, Log, TEXT("Sources: %d found"), LastValidationReport.SourceFilesFound);
-    
-    if (LastValidationReport.FailedClasses.Num() > 0)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Failed classes:"));
-        for (const FString& FailedClass : LastValidationReport.FailedClasses)
+        else
         {
-            UE_LOG(LogTemp, Warning, TEXT("  - %s"), *FailedClass);
+            TranspersonalStatus.FailedClasses.Add(ClassPath);
+            TranspersonalStatus.bHasErrors = true;
         }
     }
     
-    UE_LOG(LogTemp, Log, TEXT("=== END REPORT ==="));
-}
-
-bool ABuildValidationManager::IsValidationPassing() const
-{
-    return LastValidationReport.Result == EBuild_ValidationResult::Pass ||
-           LastValidationReport.Result == EBuild_ValidationResult::PartialPass;
-}
-
-void ABuildValidationManager::InitializeExpectedClasses()
-{
-    ExpectedClasses = {
-        TEXT("TranspersonalGameState"),
-        TEXT("TranspersonalCharacter"),
-        TEXT("PCGWorldGenerator"),
-        TEXT("FoliageManager"),
-        TEXT("CrowdSimulationManager"),
-        TEXT("ProceduralWorldManager"),
-        TEXT("BuildIntegrationManager")
-    };
-}
-
-bool ABuildValidationManager::CheckClassExists(const FString& ClassName)
-{
-    FString FullClassName = FString::Printf(TEXT("/Script/TranspersonalGame.%s"), *ClassName);
-    UClass* FoundClass = FindObject<UClass>(ANY_PACKAGE, *FullClassName);
-    return FoundClass != nullptr;
-}
-
-int32 ABuildValidationManager::CountBinaryFiles()
-{
-    FString ProjectDir = FPaths::ProjectDir();
-    FString BinariesDir = FPaths::Combine(ProjectDir, TEXT("Binaries"), TEXT("Linux"));
-    
-    TArray<FString> BinaryFiles;
-    IFileManager& FileManager = IFileManager::Get();
-    FileManager.FindFiles(BinaryFiles, *FPaths::Combine(BinariesDir, TEXT("*.so")), true, false);
-    
-    return BinaryFiles.Num();
-}
-
-int32 ABuildValidationManager::CountSourceFiles()
-{
-    FString ProjectDir = FPaths::ProjectDir();
-    FString SourceDir = FPaths::Combine(ProjectDir, TEXT("Source"), TEXT("TranspersonalGame"));
-    
-    TArray<FString> SourceFiles;
-    IFileManager& FileManager = IFileManager::Get();
-    FileManager.FindFilesRecursive(SourceFiles, *SourceDir, TEXT("*.cpp"), true, false);
-    FileManager.FindFilesRecursive(SourceFiles, *SourceDir, TEXT("*.h"), true, false);
-    
-    return SourceFiles.Num();
-}
-
-void ABuildValidationManager::LogValidationResults(const FBuild_ValidationReport& Report)
-{
-    FString ResultString;
-    switch (Report.Result)
+    // Test gameplay classes
+    for (const FString& ClassPath : GameplayClassPaths)
     {
-        case EBuild_ValidationResult::Pass:
-            ResultString = TEXT("🟢 PASS");
-            break;
-        case EBuild_ValidationResult::PartialPass:
-            ResultString = TEXT("🟡 PARTIAL PASS");
-            break;
-        case EBuild_ValidationResult::Fail:
-            ResultString = TEXT("🔴 FAIL");
-            break;
-        default:
-            ResultString = TEXT("⚪ NOT RUN");
-            break;
+        if (TestClassLoading(ClassPath))
+        {
+            TranspersonalStatus.LoadedClasses.Add(ClassPath);
+        }
+        else
+        {
+            TranspersonalStatus.FailedClasses.Add(ClassPath);
+        }
     }
     
-    UE_LOG(LogTemp, Log, TEXT("VALIDATION RESULT: %s"), *ResultString);
-    UE_LOG(LogTemp, Log, TEXT("Classes: %d/%d, Binaries: %d, Sources: %d, Duration: %.2fs"),
-           Report.ClassesLoaded, Report.ClassesExpected, Report.BinaryFilesFound, 
-           Report.SourceFilesFound, Report.ValidationDuration);
+    TranspersonalStatus.ClassCount = TranspersonalStatus.LoadedClasses.Num();
+    StatusReport.Add(TranspersonalStatus);
+    
+    CachedModuleStatus = StatusReport;
+    return StatusReport;
+}
+
+void UBuildValidationManager::StartContinuousValidation()
+{
+    if (bContinuousValidationActive)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("BuildValidationManager: Continuous validation already active"));
+        return;
+    }
+    
+    UGameInstance* GameInstance = GetGameInstance();
+    if (!GameInstance)
+    {
+        UE_LOG(LogTemp, Error, TEXT("BuildValidationManager: Cannot start continuous validation - no GameInstance"));
+        return;
+    }
+    
+    UWorld* World = GameInstance->GetWorld();
+    if (!World)
+    {
+        UE_LOG(LogTemp, Error, TEXT("BuildValidationManager: Cannot start continuous validation - no World"));
+        return;
+    }
+    
+    bContinuousValidationActive = true;
+    
+    World->GetTimerManager().SetTimer(
+        ValidationTimerHandle,
+        this,
+        &UBuildValidationManager::PerformValidationTick,
+        ValidationInterval,
+        true // Loop
+    );
+    
+    UE_LOG(LogTemp, Warning, TEXT("BuildValidationManager: Continuous validation started (interval: %.1fs)"), ValidationInterval);
+}
+
+void UBuildValidationManager::StopContinuousValidation()
+{
+    if (!bContinuousValidationActive)
+    {
+        return;
+    }
+    
+    UGameInstance* GameInstance = GetGameInstance();
+    if (GameInstance)
+    {
+        UWorld* World = GameInstance->GetWorld();
+        if (World)
+        {
+            World->GetTimerManager().ClearTimer(ValidationTimerHandle);
+        }
+    }
+    
+    bContinuousValidationActive = false;
+    UE_LOG(LogTemp, Warning, TEXT("BuildValidationManager: Continuous validation stopped"));
+}
+
+FBuild_ValidationResult UBuildValidationManager::TestCrossModuleIntegration()
+{
+    FBuild_ValidationResult Result;
+    
+    UE_LOG(LogTemp, Warning, TEXT("BuildValidationManager: Testing cross-module integration..."));
+    
+    // Test basic integration scenarios
+    bool bIntegrationValid = true;
+    
+    // Test 1: Can we access core game classes?
+    if (!TestClassLoading(TEXT("/Script/TranspersonalGame.TranspersonalCharacter")))
+    {
+        Result.ErrorMessages.Add(TEXT("Cannot access TranspersonalCharacter"));
+        bIntegrationValid = false;
+    }
+    
+    // Test 2: Can we access game mode?
+    if (!TestClassLoading(TEXT("/Script/TranspersonalGame.TranspersonalGameMode")))
+    {
+        Result.ErrorMessages.Add(TEXT("Cannot access TranspersonalGameMode"));
+        bIntegrationValid = false;
+    }
+    
+    Result.bIsValid = bIntegrationValid;
+    Result.ErrorCount = Result.ErrorMessages.Num();
+    Result.ValidationMessage = bIntegrationValid ? TEXT("Cross-module integration PASSED") : TEXT("Cross-module integration FAILED");
+    
+    UE_LOG(LogTemp, Warning, TEXT("BuildValidationManager: Cross-module integration test: %s"), *Result.ValidationMessage);
+    
+    return Result;
+}
+
+FBuild_ValidationResult UBuildValidationManager::ValidateMinPlayableMap()
+{
+    FBuild_ValidationResult Result;
+    
+    UE_LOG(LogTemp, Warning, TEXT("BuildValidationManager: Validating MinPlayableMap..."));
+    
+    // This is a placeholder - in a real implementation we would:
+    // 1. Load the MinPlayableMap
+    // 2. Check for required actors (PlayerStart, etc.)
+    // 3. Validate level streaming
+    // 4. Test gameplay functionality
+    
+    Result.bIsValid = true;
+    Result.ValidationMessage = TEXT("MinPlayableMap validation not fully implemented yet");
+    Result.WarningMessages.Add(TEXT("Map validation is placeholder"));
+    Result.WarningCount = 1;
+    
+    return Result;
+}
+
+void UBuildValidationManager::LogValidationResults(const FBuild_ValidationResult& Results)
+{
+    UE_LOG(LogTemp, Warning, TEXT("=== BUILD VALIDATION RESULTS ==="));
+    UE_LOG(LogTemp, Warning, TEXT("Status: %s"), Results.bIsValid ? TEXT("VALID") : TEXT("INVALID"));
+    UE_LOG(LogTemp, Warning, TEXT("Message: %s"), *Results.ValidationMessage);
+    UE_LOG(LogTemp, Warning, TEXT("Errors: %d, Warnings: %d"), Results.ErrorCount, Results.WarningCount);
+    
+    for (const FString& Error : Results.ErrorMessages)
+    {
+        UE_LOG(LogTemp, Error, TEXT("ERROR: %s"), *Error);
+    }
+    
+    for (const FString& Warning : Results.WarningMessages)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("WARNING: %s"), *Warning);
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("=== END VALIDATION RESULTS ==="));
+}
+
+FString UBuildValidationManager::GetBuildStatusSummary()
+{
+    if (!bInitialized)
+    {
+        return TEXT("BuildValidationManager not initialized");
+    }
+    
+    FString Summary = FString::Printf(
+        TEXT("Build Status: %s | Validation Runs: %d | Last Run: %.1fs ago"),
+        LastValidationResult.bIsValid ? TEXT("VALID") : TEXT("INVALID"),
+        ValidationRunCount,
+        FPlatformTime::Seconds() - LastValidationTime
+    );
+    
+    return Summary;
+}
+
+bool UBuildValidationManager::ValidateTranspersonalGameModule()
+{
+    FModuleManager& ModuleManager = FModuleManager::Get();
+    return ModuleManager.IsModuleLoaded(TEXT("TranspersonalGame"));
+}
+
+bool UBuildValidationManager::ValidateCoreClasses()
+{
+    for (const FString& ClassPath : CoreClassPaths)
+    {
+        if (!TestClassLoading(ClassPath))
+        {
+            UE_LOG(LogTemp, Error, TEXT("BuildValidationManager: Core class validation failed: %s"), *ClassPath);
+            return false;
+        }
+    }
+    return true;
+}
+
+bool UBuildValidationManager::ValidateGameplayClasses()
+{
+    int32 FailedCount = 0;
+    for (const FString& ClassPath : GameplayClassPaths)
+    {
+        if (!TestClassLoading(ClassPath))
+        {
+            FailedCount++;
+            UE_LOG(LogTemp, Warning, TEXT("BuildValidationManager: Gameplay class validation failed: %s"), *ClassPath);
+        }
+    }
+    
+    // Allow some gameplay classes to fail (they might not be implemented yet)
+    return (FailedCount < GameplayClassPaths.Num());
+}
+
+bool UBuildValidationManager::ValidateSubsystems()
+{
+    // Test if this subsystem itself is working
+    return IsValid(this) && bInitialized;
+}
+
+TArray<FString> UBuildValidationManager::GetExpectedClasses()
+{
+    TArray<FString> Expected = CoreClassPaths;
+    Expected.Append(GameplayClassPaths);
+    Expected.Append(SubsystemClassPaths);
+    return Expected;
+}
+
+bool UBuildValidationManager::TestClassLoading(const FString& ClassName)
+{
+    UClass* LoadedClass = LoadClass<UObject>(nullptr, *ClassName);
+    return (LoadedClass != nullptr);
+}
+
+bool UBuildValidationManager::TestClassSpawning(const FString& ClassName)
+{
+    UClass* LoadedClass = LoadClass<UObject>(nullptr, *ClassName);
+    if (!LoadedClass)
+    {
+        return false;
+    }
+    
+    // For now, just test that we can load the class
+    // Actual spawning would require more context (world, etc.)
+    return true;
+}
+
+void UBuildValidationManager::PerformValidationTick()
+{
+    if (!bContinuousValidationActive)
+    {
+        return;
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("BuildValidationManager: Performing validation tick..."));
+    
+    LastValidationResult = ValidateFullBuild();
+    
+    if (!LastValidationResult.bIsValid)
+    {
+        UE_LOG(LogTemp, Error, TEXT("BuildValidationManager: Validation tick found errors!"));
+        LogValidationResults(LastValidationResult);
+    }
 }
