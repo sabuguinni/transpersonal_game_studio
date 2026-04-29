@@ -1,137 +1,148 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Subsystems/GameInstanceSubsystem.h"
+#include "GameFramework/GameStateBase.h"
 #include "Engine/World.h"
-#include "GameFramework/Pawn.h"
-#include "CombatAITypes.h"
+#include "Components/ActorComponent.h"
+#include "../Core/SharedTypes.h"
 #include "CombatAIManager.generated.h"
 
-class UCombatAIController;
-class UBehaviorTreeComponent;
+// Combat AI tactical states
+UENUM(BlueprintType)
+enum class ECombat_TacticalState : uint8
+{
+    Idle UMETA(DisplayName = "Idle"),
+    Patrol UMETA(DisplayName = "Patrol"),
+    Alert UMETA(DisplayName = "Alert"),
+    Hunt UMETA(DisplayName = "Hunt"),
+    Attack UMETA(DisplayName = "Attack"),
+    Flee UMETA(DisplayName = "Flee"),
+    Territorial UMETA(DisplayName = "Territorial")
+};
+
+// Combat engagement range
+UENUM(BlueprintType)
+enum class ECombat_EngagementRange : uint8
+{
+    Close UMETA(DisplayName = "Close Range (0-5m)"),
+    Medium UMETA(DisplayName = "Medium Range (5-15m)"),
+    Long UMETA(DisplayName = "Long Range (15m+)")
+};
+
+// Combat AI data structure
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FCombat_AIData
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
+    ECombat_TacticalState CurrentState = ECombat_TacticalState::Idle;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
+    float AggressionLevel = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
+    float FearThreshold = 0.7f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
+    float TerritoryRadius = 1000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
+    ECombat_EngagementRange PreferredRange = ECombat_EngagementRange::Medium;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
+    bool bIsPackHunter = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
+    float AttackCooldown = 2.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
+    float LastAttackTime = 0.0f;
+};
 
 /**
- * Central manager for all combat AI coordination and tactical decision making
- * Handles pack behavior, threat assessment, and coordinated attacks
+ * Combat AI Manager - Orchestrates tactical combat behavior for dinosaurs and enemies
+ * Manages threat assessment, pack coordination, and adaptive combat tactics
  */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UCombatAIManager : public UGameInstanceSubsystem
+class TRANSPERSONALGAME_API UCombatAIManager : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
     UCombatAIManager();
 
-    // USubsystem interface
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
-
-    /** Register an AI controller with the combat manager */
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void RegisterCombatAI(UCombatAIController* AIController);
-
-    /** Unregister an AI controller from the combat manager */
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void UnregisterCombatAI(UCombatAIController* AIController);
-
-    /** Get all registered combat AI controllers */
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    TArray<UCombatAIController*> GetAllCombatAI() const;
-
-    /** Find combat AI controllers within range of a position */
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    TArray<UCombatAIController*> FindCombatAIInRange(const FVector& Position, float Range) const;
-
-    /** Assess threat level for a target */
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    ECombat_ThreatLevel AssessThreatLevel(AActor* Target, APawn* Observer) const;
-
-    /** Create or update pack coordination for a group of AI */
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void CoordinatePack(const TArray<UCombatAIController*>& PackMembers, UCombatAIController* PackLeader);
-
-    /** Execute coordinated attack on target */
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void ExecuteCoordinatedAttack(const TArray<UCombatAIController*>& Attackers, AActor* Target, ECombat_AttackPattern Pattern);
-
-    /** Update pack formation */
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void UpdatePackFormation(const TArray<UCombatAIController*>& PackMembers, ECombat_Formation Formation, const FVector& CenterPoint);
-
-    /** Calculate optimal attack pattern for given situation */
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    ECombat_AttackPattern CalculateOptimalAttackPattern(const TArray<UCombatAIController*>& Attackers, AActor* Target) const;
-
-    /** Get pack coordination data for a specific AI */
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    FCombat_PackCoordination GetPackCoordination(UCombatAIController* AIController) const;
-
-    /** Update global combat state (called by game mode) */
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void UpdateCombatState(float DeltaTime);
-
-    /** Emergency retreat signal for all AI in area */
-    UFUNCTION(BlueprintCallable, Category = "Combat AI")
-    void TriggerAreaRetreat(const FVector& DangerZone, float Radius, ECombat_ThreatLevel ThreatLevel);
-
 protected:
-    /** All registered combat AI controllers */
-    UPROPERTY()
-    TArray<UCombatAIController*> RegisteredAI;
-
-    /** Pack coordination data mapped by pack leader */
-    UPROPERTY()
-    TMap<UCombatAIController*, FCombat_PackCoordination> PackCoordinationMap;
-
-    /** Active coordinated attacks */
-    UPROPERTY()
-    TArray<FCombat_AttackData> ActiveAttacks;
-
-    /** Global combat parameters */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Settings")
-    FCombat_TacticalParams GlobalCombatParams;
-
-    /** Maximum pack size for coordination */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Settings")
-    int32 MaxPackSize;
-
-    /** Combat update frequency (seconds) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Settings")
-    float CombatUpdateFrequency;
-
-    /** Last combat update time */
-    float LastUpdateTime;
-
-private:
-    /** Calculate formation positions for pack members */
-    TArray<FVector> CalculateFormationPositions(ECombat_Formation Formation, const FVector& CenterPoint, int32 MemberCount, float Spacing = 300.0f) const;
-
-    /** Evaluate pack effectiveness */
-    float EvaluatePackEffectiveness(const TArray<UCombatAIController*>& PackMembers) const;
-
-    /** Find optimal pack leader from group */
-    UCombatAIController* FindOptimalPackLeader(const TArray<UCombatAIController*>& Candidates) const;
-
-    /** Update pack morale based on combat events */
-    void UpdatePackMorale(UCombatAIController* PackLeader, float MoraleChange);
-
-    /** Clean up invalid references */
-    void CleanupInvalidReferences();
+    virtual void BeginPlay() override;
 
 public:
-    /** Blueprint event for pack coordination changes */
-    UFUNCTION(BlueprintImplementableEvent, Category = "Combat AI Events")
-    void OnPackCoordinationChanged(const TArray<UCombatAIController*>& PackMembers, ECombat_Formation NewFormation);
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    /** Blueprint event for coordinated attack initiated */
-    UFUNCTION(BlueprintImplementableEvent, Category = "Combat AI Events")
-    void OnCoordinatedAttackInitiated(const TArray<UCombatAIController*>& Attackers, AActor* Target, ECombat_AttackPattern Pattern);
+    // Core combat AI functions
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void InitializeCombatAI(AActor* OwnerActor);
 
-    /** Blueprint event for threat level changed */
-    UFUNCTION(BlueprintImplementableEvent, Category = "Combat AI Events")
-    void OnThreatLevelChanged(AActor* Target, ECombat_ThreatLevel OldLevel, ECombat_ThreatLevel NewLevel);
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void UpdateTacticalState(float DeltaTime);
 
-    /** Blueprint event for pack morale changed */
-    UFUNCTION(BlueprintImplementableEvent, Category = "Combat AI Events")
-    void OnPackMoraleChanged(UCombatAIController* PackLeader, float NewMorale, float MoraleChange);
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    ECombat_TacticalState EvaluateThreatLevel(AActor* Target);
+
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    bool ShouldEngageTarget(AActor* Target);
+
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    FVector CalculateOptimalPosition(AActor* Target);
+
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void ExecuteAttackPattern(AActor* Target);
+
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    void CoordinatePackBehavior(TArray<AActor*> PackMembers);
+
+    // Threat assessment
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    float CalculateThreatScore(AActor* Target);
+
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    TArray<AActor*> FindNearbyThreats(float SearchRadius);
+
+    UFUNCTION(BlueprintCallable, Category = "Combat AI")
+    AActor* SelectPrimaryTarget(TArray<AActor*> PotentialTargets);
+
+    // Combat properties
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
+    FCombat_AIData CombatData;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
+    float ThreatDetectionRadius = 1500.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
+    float CombatUpdateInterval = 0.1f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
+    bool bEnablePackCoordination = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat AI")
+    int32 MaxPackSize = 5;
+
+private:
+    // Internal state
+    UPROPERTY()
+    AActor* CurrentTarget;
+
+    UPROPERTY()
+    TArray<AActor*> KnownThreats;
+
+    UPROPERTY()
+    TArray<AActor*> PackMembers;
+
+    float LastUpdateTime;
+    float StateChangeTime;
+
+    // Internal functions
+    void UpdateThreatAssessment();
+    void ProcessPackCoordination();
+    bool IsWithinTerritory(FVector Position);
+    FVector GetFleeDirection(AActor* Threat);
 };
