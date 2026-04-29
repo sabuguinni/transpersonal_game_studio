@@ -1,9 +1,9 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/GameInstanceSubsystem.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
+#include "Components/ActorComponent.h"
 #include "../Core/SharedTypes.h"
 #include "QATestManager.generated.h"
 
@@ -11,8 +11,8 @@ UENUM(BlueprintType)
 enum class EQA_TestResult : uint8
 {
     NotRun      UMETA(DisplayName = "Not Run"),
-    Pass        UMETA(DisplayName = "Pass"),
-    Fail        UMETA(DisplayName = "Fail"),
+    Passed      UMETA(DisplayName = "Passed"),
+    Failed      UMETA(DisplayName = "Failed"),
     Warning     UMETA(DisplayName = "Warning")
 };
 
@@ -55,13 +55,13 @@ struct FQA_ValidationReport
     TArray<FQA_TestCase> TestCases;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Report")
-    int32 PassCount;
+    int32 PassedTests;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Report")
-    int32 FailCount;
+    int32 FailedTests;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Report")
-    int32 WarningCount;
+    int32 WarningTests;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Report")
     float TotalExecutionTime;
@@ -71,96 +71,108 @@ struct FQA_ValidationReport
 
     FQA_ValidationReport()
     {
-        PassCount = 0;
-        FailCount = 0;
-        WarningCount = 0;
+        PassedTests = 0;
+        FailedTests = 0;
+        WarningTests = 0;
         TotalExecutionTime = 0.0f;
         ReportTimestamp = FDateTime::Now();
     }
 };
 
 /**
- * QA Test Manager - Validates game systems and reports issues
- * Runs automated tests on all game modules and components
+ * QA Test Manager - Handles automated testing and validation of game systems
+ * Validates C++ classes, actor spawning, component functionality, and integration scenarios
  */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UQATestManager : public UGameInstanceSubsystem
+class TRANSPERSONALGAME_API UQA_TestManager : public UObject
 {
     GENERATED_BODY()
 
 public:
-    UQATestManager();
+    UQA_TestManager();
 
-    // Subsystem interface
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
-
-    // Core testing functions
+    // Core validation functions
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    void RunAllTests();
+    FQA_ValidationReport RunFullValidation();
 
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    void RunModuleTests(const FString& ModuleName);
+    FQA_TestCase ValidateClassLoading(const FString& ClassName);
 
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    FQA_ValidationReport GetLastReport() const;
+    FQA_TestCase ValidateActorSpawning(UClass* ActorClass, FVector SpawnLocation);
 
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    void ClearTestResults();
-
-    // Specific test categories
-    UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    void TestCoreClasses();
+    FQA_TestCase ValidateComponentFunctionality(UActorComponent* Component);
 
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    void TestCharacterSystems();
+    FQA_TestCase ValidateMinPlayableMap();
 
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    void TestWorldGeneration();
+    FQA_TestCase ValidateCharacterMovement();
 
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    void TestAISystems();
+    FQA_TestCase ValidateDinosaurAI();
 
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    void TestCombatSystems();
+    FQA_TestCase ValidateWorldGeneration();
 
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    void TestAudioSystems();
+    FQA_TestCase ValidateAudioSystems();
 
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    void TestVFXSystems();
+    FQA_TestCase ValidateVFXSystems();
 
-    // Validation helpers
-    UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    bool ValidateActorInLevel(TSubclassOf<AActor> ActorClass, const FString& TestName);
+    // Performance testing
+    UFUNCTION(BlueprintCallable, Category = "QA Performance")
+    FQA_TestCase ValidateFrameRate();
 
-    UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    bool ValidateComponentOnActor(AActor* Actor, TSubclassOf<UActorComponent> ComponentClass, const FString& TestName);
+    UFUNCTION(BlueprintCallable, Category = "QA Performance")
+    FQA_TestCase ValidateMemoryUsage();
 
-    UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    void LogTestResult(const FString& TestName, bool bPassed, const FString& ErrorMessage = TEXT(""));
+    UFUNCTION(BlueprintCallable, Category = "QA Performance")
+    FQA_TestCase ValidateLoadTimes();
+
+    // Integration testing
+    UFUNCTION(BlueprintCallable, Category = "QA Integration")
+    FQA_TestCase ValidatePlayerCharacterIntegration();
+
+    UFUNCTION(BlueprintCallable, Category = "QA Integration")
+    FQA_TestCase ValidateWorldActorIntegration();
+
+    UFUNCTION(BlueprintCallable, Category = "QA Integration")
+    FQA_TestCase ValidateCrowdSimulationIntegration();
+
+    // Utility functions
+    UFUNCTION(BlueprintCallable, Category = "QA Utility")
+    void LogTestResult(const FQA_TestCase& TestCase);
+
+    UFUNCTION(BlueprintCallable, Category = "QA Utility")
+    void SaveValidationReport(const FQA_ValidationReport& Report, const FString& FilePath);
+
+    UFUNCTION(BlueprintCallable, Category = "QA Utility")
+    TArray<FString> GetAllTranspersonalGameClasses();
 
 protected:
-    UPROPERTY(BlueprintReadOnly, Category = "QA Testing")
+    // Internal test execution
+    FQA_TestCase ExecuteTest(const FString& TestName, TFunction<bool()> TestFunction);
+    
+    // Test result tracking
+    UPROPERTY()
     FQA_ValidationReport CurrentReport;
 
-    UPROPERTY(BlueprintReadOnly, Category = "QA Testing")
-    TArray<FQA_ValidationReport> ReportHistory;
+    // Test configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Config")
+    float TestTimeout;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Settings")
-    bool bAutoRunOnStartup;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Settings")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Config")
     bool bVerboseLogging;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Settings")
-    int32 MaxReportHistory;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Config")
+    bool bAutoSaveReports;
 
 private:
-    void AddTestCase(const FString& TestName, const FString& Description, EQA_TestResult Result, const FString& ErrorMessage = TEXT(""), float ExecutionTime = 0.0f);
-    void StartTest(const FString& TestName);
-    void FinishCurrentTest(bool bPassed, const FString& ErrorMessage = TEXT(""));
-    
-    FString CurrentTestName;
-    double TestStartTime;
+    // Helper functions
+    bool IsClassValid(UClass* Class);
+    bool CanSpawnActor(UClass* ActorClass);
+    float MeasureExecutionTime(TFunction<void()> Function);
 };
