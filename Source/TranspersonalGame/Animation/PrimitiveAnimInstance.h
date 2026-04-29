@@ -2,16 +2,15 @@
 
 #include "CoreMinimal.h"
 #include "Animation/AnimInstance.h"
-#include "Animation/AnimMontage.h"
-#include "Animation/BlendSpace.h"
-#include "Animation/BlendSpace1D.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "PrimitiveAnimationController.h"
 #include "../SharedTypes.h"
 #include "PrimitiveAnimInstance.generated.h"
 
 /**
  * Animation Blueprint instance for primitive characters
- * Handles animation logic, state machines, and blend spaces
+ * Handles real-time animation state updates and blending
  */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UPrimitiveAnimInstance : public UAnimInstance
@@ -23,126 +22,113 @@ public:
 
 protected:
     virtual void NativeInitializeAnimation() override;
-    virtual void NativeUpdateAnimation(float DeltaSeconds) override;
+    virtual void NativeUpdateAnimation(float DeltaTime) override;
 
 public:
-    // Animation state variables (exposed to Blueprint)
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Animation State")
+    // Animation state variables exposed to Blueprint
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement State")
     EAnim_MovementState MovementState;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Animation State")
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat State")
     EAnim_CombatState CombatState;
 
     // Movement parameters for blend spaces
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement")
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement Parameters")
     float Speed;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement")
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement Parameters")
     float Direction;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement")
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement Parameters")
+    float Velocity;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement Parameters")
     bool bIsInAir;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement")
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement Parameters")
     bool bIsCrouching;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement")
-    float GroundDistance;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement Parameters")
+    bool bIsMoving;
 
     // Combat parameters
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat")
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat Parameters")
     bool bIsAttacking;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat")
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat Parameters")
     bool bIsBlocking;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat")
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat Parameters")
     bool bHasWeapon;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat")
-    float AttackSpeed;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat Parameters")
+    int32 ComboIndex;
 
-    // Foot IK parameters
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Foot IK")
-    float LeftFootIKOffset;
+    // Fear and survival parameters
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Survival Parameters")
+    float FearLevel;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Foot IK")
-    float RightFootIKOffset;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Survival Parameters")
+    float HealthPercentage;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Foot IK")
-    FRotator LeftFootIKRotation;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Survival Parameters")
+    float StaminaPercentage;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Foot IK")
-    FRotator RightFootIKRotation;
+    // Environmental adaptation
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Environment Parameters")
+    bool bIsOnUnevenTerrain;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Foot IK")
-    bool bEnableFootIK;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Environment Parameters")
+    float GroundSlope;
 
-    // Animation assets (can be set in Blueprint)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
-    TObjectPtr<UBlendSpace> LocomotionBlendSpace;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Environment Parameters")
+    bool bIsInWater;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
-    TObjectPtr<UBlendSpace1D> IdleBlendSpace;
+    // Animation event functions
+    UFUNCTION(BlueprintCallable, Category = "Animation Events")
+    void OnJumpStart();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
-    TObjectPtr<UAnimSequence> JumpStartAnimation;
+    UFUNCTION(BlueprintCallable, Category = "Animation Events")
+    void OnLanding();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
-    TObjectPtr<UAnimSequence> JumpLoopAnimation;
+    UFUNCTION(BlueprintCallable, Category = "Animation Events")
+    void OnAttackStart();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
-    TObjectPtr<UAnimSequence> JumpEndAnimation;
+    UFUNCTION(BlueprintCallable, Category = "Animation Events")
+    void OnAttackEnd();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
-    TObjectPtr<UAnimSequence> CrouchIdleAnimation;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
-    TObjectPtr<UAnimSequence> CrouchWalkAnimation;
-
-    // Foot IK settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Foot IK Settings")
-    float FootIKTraceDistance = 50.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Foot IK Settings")
-    float FootIKInterpSpeed = 15.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Foot IK Settings")
-    FName LeftFootBoneName = TEXT("foot_l");
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Foot IK Settings")
-    FName RightFootBoneName = TEXT("foot_r");
+    UFUNCTION(BlueprintCallable, Category = "Animation Events")
+    void OnFearReaction();
 
 protected:
-    // Animation update functions
-    void UpdateMovementParameters();
-    void UpdateCombatParameters();
-    void UpdateFootIK();
-
-    // Foot IK helper functions
-    float CalculateFootIKOffset(const FName& FootBoneName, float& OutFootRotation);
-    FVector GetFootWorldLocation(const FName& FootBoneName) const;
-
-    // Component references
+    // Character references
     UPROPERTY()
-    TObjectPtr<UPrimitiveAnimationController> AnimationController;
+    TObjectPtr<ACharacter> OwnerCharacter;
 
     UPROPERTY()
-    TObjectPtr<class ACharacter> OwnerCharacter;
+    TObjectPtr<UCharacterMovementComponent> MovementComponent;
 
     UPROPERTY()
-    TObjectPtr<class UCharacterMovementComponent> MovementComponent;
-
-    // Cached values for smooth interpolation
-    float CachedSpeed;
-    float CachedDirection;
-    float PreviousLeftFootOffset;
-    float PreviousRightFootOffset;
-    FRotator PreviousLeftFootRotation;
-    FRotator PreviousRightFootRotation;
+    TObjectPtr<UPrimitiveAnimationController> AnimController;
 
 private:
-    // Internal timing
-    float LastUpdateTime;
-    float DeltaTimeAccumulator;
+    // Internal update functions
+    void UpdateMovementParameters();
+    void UpdateCombatParameters();
+    void UpdateSurvivalParameters();
+    void UpdateEnvironmentParameters();
+
+    // State transition helpers
+    bool ShouldTransitionToIdle() const;
+    bool ShouldTransitionToWalk() const;
+    bool ShouldTransitionToRun() const;
+    bool ShouldTransitionToJump() const;
+
+    // Smoothing parameters
+    float SpeedSmoothingRate = 5.0f;
+    float DirectionSmoothingRate = 10.0f;
+    
+    // Previous frame values for smoothing
+    float PreviousSpeed;
+    float PreviousDirection;
 };
