@@ -1,17 +1,17 @@
 #include "PrimitiveAnimationController.h"
-#include "Animation/AnimInstance.h"
-#include "Animation/AnimMontage.h"
-#include "Components/SkeletalMeshComponent.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Animation/AnimInstance.h"
+#include "Animation/AnimMontage.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
 
 UPrimitiveAnimationController::UPrimitiveAnimationController()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.bStartWithTickEnabled = true;
-    
+    PrimaryComponentTick.TickInterval = 0.016f; // 60 FPS
+
     // Initialize default states
     CurrentMovementState = EAnim_MovementState::Idle;
     CurrentCombatState = EAnim_CombatState::Unarmed;
@@ -21,69 +21,77 @@ UPrimitiveAnimationController::UPrimitiveAnimationController()
     // Initialize timing
     LastStateChangeTime = 0.0f;
     
-    // Initialize thresholds
-    WalkSpeedThreshold = 100.0f;
-    RunSpeedThreshold = 300.0f;
-    StateTransitionTime = 0.2f;
+    // Initialize animation data with defaults
+    MovementData = FAnim_MovementData();
+    CombatData = FAnim_CombatData();
+    
+    // Set default thresholds for realistic movement
+    WalkSpeedThreshold = 100.0f;   // Walking speed threshold
+    RunSpeedThreshold = 300.0f;    // Running speed threshold
+    StateTransitionTime = 0.2f;    // Smooth transition time
 }
 
 void UPrimitiveAnimationController::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Get animation instance from owner character
-    if (ACharacter* OwnerCharacter = Cast<ACharacter>(GetOwner()))
+    // Get reference to the character's animation instance
+    if (ACharacter* Character = Cast<ACharacter>(GetOwner()))
     {
-        if (USkeletalMeshComponent* MeshComp = OwnerCharacter->GetMesh())
+        if (USkeletalMeshComponent* MeshComp = Character->GetMesh())
         {
             AnimInstance = MeshComp->GetAnimInstance();
             if (AnimInstance)
             {
-                UE_LOG(LogTemp, Log, TEXT("PrimitiveAnimationController: Animation instance found"));
+                UE_LOG(LogTemp, Log, TEXT("PrimitiveAnimationController: Animation instance found and cached"));
             }
             else
             {
-                UE_LOG(LogTemp, Warning, TEXT("PrimitiveAnimationController: No animation instance found"));
+                UE_LOG(LogTemp, Warning, TEXT("PrimitiveAnimationController: No animation instance found on character mesh"));
             }
         }
     }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("PrimitiveAnimationController: Owner is not a Character class"));
+    }
     
-    UE_LOG(LogTemp, Log, TEXT("PrimitiveAnimationController: BeginPlay completed"));
+    // Initialize with idle state
+    CurrentMovementState = EAnim_MovementState::Idle;
+    CurrentCombatState = EAnim_CombatState::Unarmed;
 }
 
 void UPrimitiveAnimationController::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    if (!AnimInstance)
-    {
-        return;
-    }
-    
     // Update movement data from character
-    if (ACharacter* OwnerCharacter = Cast<ACharacter>(GetOwner()))
+    if (ACharacter* Character = Cast<ACharacter>(GetOwner()))
     {
-        if (UCharacterMovementComponent* MovementComp = OwnerCharacter->GetCharacterMovement())
+        if (UCharacterMovementComponent* MovementComp = Character->GetCharacterMovement())
         {
             // Update movement data
             FVector Velocity = MovementComp->Velocity;
-            MovementData.Speed = Velocity.Size2D();
+            MovementData.Speed = Velocity.Size();
             MovementData.Direction = FMath::Atan2(Velocity.Y, Velocity.X);
             MovementData.bIsInAir = MovementComp->IsFalling();
             MovementData.bIsCrouching = MovementComp->IsCrouching();
             
-            // Calculate ground distance for foot IK
-            FHitResult HitResult;
-            FVector StartLocation = OwnerCharacter->GetActorLocation();
-            FVector EndLocation = StartLocation - FVector(0, 0, 200.0f);
+            // Calculate ground distance for IK
+            FVector StartLocation = Character->GetActorLocation();
+            FVector EndLocation = StartLocation - FVector(0, 0, 200.0f); // Trace down 2 meters
             
-            if (GetWorld()->LineTraceSingleByChannel(HitResult, StartLocation, EndLocation, ECC_WorldStatic))
+            FHitResult HitResult;
+            FCollisionQueryParams QueryParams;
+            QueryParams.AddIgnoredActor(Character);
+            
+            if (GetWorld()->LineTraceSingleByChannel(HitResult, StartLocation, EndLocation, ECC_WorldStatic, QueryParams))
             {
                 MovementData.GroundDistance = HitResult.Distance;
             }
             else
             {
-                MovementData.GroundDistance = 200.0f; // Max distance
+                MovementData.GroundDistance = 200.0f; // Max distance if no ground found
             }
         }
     }
@@ -116,14 +124,22 @@ void UPrimitiveAnimationController::TriggerMontage(UAnimMontage* Montage, float 
         return;
     }
     
-    // Stop any currently playing montage
-    AnimInstance->StopAllMontages(0.2f);
+    // Stop any currently playing montages in the same slot
+    AnimInstance->StopAllMontagesByGroupName(Montage->GetGroupName());
     
     // Play the new montage
-    AnimInstance->Montage_Play(Montage, PlayRate);
+    float Duration = AnimInstance->Montage_Play(Montage, PlayRate);
     
-    UE_LOG(LogTemp, Log, TEXT("PrimitiveAnimationController: Playing montage %s at rate %f"), 
-           *Montage->GetName(), PlayRate);
+    if (Duration > 0.0f)
+    {
+        UE_LOG(LogTemp, Log, TEXT("PrimitiveAnimationController: Playing montage %s with duration %.2f"), 
+               *Montage->GetName(), Duration);
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("PrimitiveAnimationController: Failed to play montage %s"), 
+               *Montage->GetName());
+    }
 }
 
 void UPrimitiveAnimationController::StopAllMontages()
@@ -139,42 +155,30 @@ void UPrimitiveAnimationController::DetermineMovementState()
 {
     EAnim_MovementState NewState = CurrentMovementState;
     
-    // Priority order: Air states -> Ground states
+    // Determine new state based on movement data
     if (MovementData.bIsInAir)
     {
-        // Check if we're jumping up or falling down
-        if (ACharacter* OwnerCharacter = Cast<ACharacter>(GetOwner()))
-        {
-            float VerticalVelocity = OwnerCharacter->GetVelocity().Z;
-            if (VerticalVelocity > 0.0f)
-            {
-                NewState = EAnim_MovementState::Jumping;
-            }
-            else
-            {
-                NewState = EAnim_MovementState::Falling;
-            }
-        }
+        NewState = EAnim_MovementState::Falling;
+    }
+    else if (MovementData.bIsCrouching)
+    {
+        NewState = EAnim_MovementState::Crouching;
+    }
+    else if (MovementData.Speed < 10.0f) // Very low speed threshold for idle
+    {
+        NewState = EAnim_MovementState::Idle;
+    }
+    else if (MovementData.Speed < WalkSpeedThreshold)
+    {
+        NewState = EAnim_MovementState::Walking;
+    }
+    else if (MovementData.Speed < RunSpeedThreshold)
+    {
+        NewState = EAnim_MovementState::Running;
     }
     else
     {
-        // Ground-based movement
-        if (MovementData.bIsCrouching)
-        {
-            NewState = EAnim_MovementState::Crouching;
-        }
-        else if (MovementData.Speed < 10.0f)
-        {
-            NewState = EAnim_MovementState::Idle;
-        }
-        else if (MovementData.Speed < RunSpeedThreshold)
-        {
-            NewState = EAnim_MovementState::Walking;
-        }
-        else
-        {
-            NewState = EAnim_MovementState::Running;
-        }
+        NewState = EAnim_MovementState::Running; // Max speed is still running
     }
     
     // Update state if changed
@@ -184,8 +188,8 @@ void UPrimitiveAnimationController::DetermineMovementState()
         CurrentMovementState = NewState;
         LastStateChangeTime = GetWorld()->GetTimeSeconds();
         
-        UE_LOG(LogTemp, Log, TEXT("PrimitiveAnimationController: Movement state changed to %d"), 
-               (int32)CurrentMovementState);
+        UE_LOG(LogTemp, Log, TEXT("PrimitiveAnimationController: Movement state changed from %d to %d"), 
+               (int32)PreviousMovementState, (int32)CurrentMovementState);
     }
 }
 
@@ -193,7 +197,7 @@ void UPrimitiveAnimationController::DetermineCombatState()
 {
     EAnim_CombatState NewState = CurrentCombatState;
     
-    // Combat state logic based on combat data
+    // Determine new state based on combat data
     if (CombatData.bIsAttacking)
     {
         NewState = EAnim_CombatState::Attacking;
@@ -204,8 +208,7 @@ void UPrimitiveAnimationController::DetermineCombatState()
     }
     else if (CombatData.bHasWeapon)
     {
-        // Determine weapon type and set appropriate ready state
-        NewState = EAnim_CombatState::MeleeReady; // Default to melee for now
+        NewState = EAnim_CombatState::MeleeReady;
     }
     else
     {
@@ -219,73 +222,64 @@ void UPrimitiveAnimationController::DetermineCombatState()
         CurrentCombatState = NewState;
         LastStateChangeTime = GetWorld()->GetTimeSeconds();
         
-        UE_LOG(LogTemp, Log, TEXT("PrimitiveAnimationController: Combat state changed to %d"), 
-               (int32)CurrentCombatState);
+        UE_LOG(LogTemp, Log, TEXT("PrimitiveAnimationController: Combat state changed from %d to %d"), 
+               (int32)PreviousCombatState, (int32)CurrentCombatState);
     }
 }
 
 void UPrimitiveAnimationController::HandleStateTransitions()
 {
-    if (!AnimInstance)
-    {
-        return;
-    }
-    
     float CurrentTime = GetWorld()->GetTimeSeconds();
     float TimeSinceLastChange = CurrentTime - LastStateChangeTime;
     
-    // Only handle transitions after minimum transition time
-    if (TimeSinceLastChange < StateTransitionTime)
+    // Only handle transitions if enough time has passed for smooth blending
+    if (TimeSinceLastChange >= StateTransitionTime)
     {
-        return;
-    }
-    
-    // Play appropriate montages based on current state
-    switch (CurrentMovementState)
-    {
-        case EAnim_MovementState::Idle:
-            if (IdleMontage && PreviousMovementState != EAnim_MovementState::Idle)
+        // Trigger appropriate montages based on current states
+        switch (CurrentMovementState)
+        {
+            case EAnim_MovementState::Idle:
+                if (IdleMontage && PreviousMovementState != EAnim_MovementState::Idle)
+                {
+                    TriggerMontage(IdleMontage, 1.0f);
+                }
+                break;
+                
+            case EAnim_MovementState::Walking:
+                if (WalkMontage && PreviousMovementState != EAnim_MovementState::Walking)
+                {
+                    TriggerMontage(WalkMontage, 1.0f);
+                }
+                break;
+                
+            case EAnim_MovementState::Running:
+                if (RunMontage && PreviousMovementState != EAnim_MovementState::Running)
+                {
+                    TriggerMontage(RunMontage, 1.0f);
+                }
+                break;
+                
+            case EAnim_MovementState::Jumping:
+            case EAnim_MovementState::Falling:
+                if (JumpMontage && (PreviousMovementState != EAnim_MovementState::Jumping && 
+                                   PreviousMovementState != EAnim_MovementState::Falling))
+                {
+                    TriggerMontage(JumpMontage, 1.0f);
+                }
+                break;
+                
+            default:
+                break;
+        }
+        
+        // Handle combat state transitions
+        if (CurrentCombatState == EAnim_CombatState::Attacking && AttackMontage)
+        {
+            if (PreviousCombatState != EAnim_CombatState::Attacking)
             {
-                TriggerMontage(IdleMontage, 1.0f);
+                float AttackPlayRate = FMath::Clamp(CombatData.AttackSpeed, 0.5f, 2.0f);
+                TriggerMontage(AttackMontage, AttackPlayRate);
             }
-            break;
-            
-        case EAnim_MovementState::Walking:
-            if (WalkMontage && PreviousMovementState != EAnim_MovementState::Walking)
-            {
-                TriggerMontage(WalkMontage, 1.0f);
-            }
-            break;
-            
-        case EAnim_MovementState::Running:
-            if (RunMontage && PreviousMovementState != EAnim_MovementState::Running)
-            {
-                TriggerMontage(RunMontage, 1.0f);
-            }
-            break;
-            
-        case EAnim_MovementState::Jumping:
-            if (JumpMontage && PreviousMovementState != EAnim_MovementState::Jumping)
-            {
-                TriggerMontage(JumpMontage, 1.0f);
-            }
-            break;
-            
-        default:
-            break;
-    }
-    
-    // Handle combat state transitions
-    switch (CurrentCombatState)
-    {
-        case EAnim_CombatState::Attacking:
-            if (AttackMontage && PreviousCombatState != EAnim_CombatState::Attacking)
-            {
-                TriggerMontage(AttackMontage, CombatData.AttackSpeed);
-            }
-            break;
-            
-        default:
-            break;
+        }
     }
 }
