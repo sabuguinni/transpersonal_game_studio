@@ -5,255 +5,270 @@
 #include "Misc/DateTime.h"
 #include "Stats/Stats.h"
 
-UEngineArchitectureCore::UEngineArchitectureCore()
+AEngineArchitectureCore::AEngineArchitectureCore()
 {
-    bSystemHealthy = false;
-    CurrentFrameTime = 0.0f;
-    ActiveActorCount = 0;
-    MemoryUsageMB = 0.0f;
-    bWorldPartitionHealthy = false;
-    bActorSystemsHealthy = false;
-    bMemoryConstraintsHealthy = false;
-    bPerformanceTargetsHealthy = false;
-    LastPerformanceUpdate = FDateTime::Now();
+    PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.TickInterval = 0.1f; // Update 10 times per second
+    
+    // Create root scene component
+    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
+    RootComponent = RootSceneComponent;
+    
+    // Initialize default values
+    bEnablePerformanceMonitoring = true;
+    bEnableSystemValidation = true;
+    MaxFrameTimeMs = 16.67f; // 60 FPS target
+    SystemUpdateFrequency = 10.0f; // 10 Hz
+    
+    // Initialize performance tracking
+    FrameTimeAccumulator = 0.0f;
+    FrameCount = 0;
+    LastValidationTime = 0.0f;
+    SystemUpdateTimer = 0.0f;
 }
 
-void UEngineArchitectureCore::Initialize(FSubsystemCollectionBase& Collection)
+void AEngineArchitectureCore::BeginPlay()
 {
-    Super::Initialize(Collection);
+    Super::BeginPlay();
     
     UE_LOG(LogTemp, Warning, TEXT("EngineArchitectureCore: Initializing core architecture systems"));
     
-    InitializeArchitecture();
+    // Initialize core architecture
+    InitializeCoreArchitecture();
+    
+    // Perform initial system validation
+    if (bEnableSystemValidation)
+    {
+        ValidateAllSystems();
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("EngineArchitectureCore: Initialization complete"));
 }
 
-void UEngineArchitectureCore::Deinitialize()
+void AEngineArchitectureCore::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
     UE_LOG(LogTemp, Warning, TEXT("EngineArchitectureCore: Shutting down architecture systems"));
     
+    // Clear all registered systems
     RegisteredSystems.Empty();
-    SystemWarnings.Empty();
-    SystemErrors.Empty();
-    FrameTimeHistory.Empty();
+    SystemHealthCache.Empty();
     
-    Super::Deinitialize();
+    Super::EndPlay(EndPlayReason);
 }
 
-void UEngineArchitectureCore::InitializeArchitecture()
+void AEngineArchitectureCore::Tick(float DeltaTime)
 {
-    UE_LOG(LogTemp, Warning, TEXT("EngineArchitectureCore: Starting architecture initialization"));
+    Super::Tick(DeltaTime);
     
-    // Clear previous state
-    SystemWarnings.Empty();
-    SystemErrors.Empty();
-    
-    // Initialize core systems
-    ValidateSystemIntegrity();
-    UpdatePerformanceMetrics();
-    
-    bSystemHealthy = bWorldPartitionHealthy && bActorSystemsHealthy && 
-                     bMemoryConstraintsHealthy && bPerformanceTargetsHealthy;
-    
-    UE_LOG(LogTemp, Warning, TEXT("EngineArchitectureCore: Architecture initialization complete. System healthy: %s"), 
-           bSystemHealthy ? TEXT("YES") : TEXT("NO"));
-}
-
-void UEngineArchitectureCore::ValidateSystemIntegrity()
-{
-    UE_LOG(LogTemp, Log, TEXT("EngineArchitectureCore: Validating system integrity"));
-    
-    ValidateWorldPartition();
-    ValidateActorSystems();
-    ValidateMemoryConstraints();
-    ValidatePerformanceTargets();
-    
-    // Log validation results
-    if (SystemErrors.Num() > 0)
+    // Update performance metrics
+    if (bEnablePerformanceMonitoring)
     {
-        UE_LOG(LogTemp, Error, TEXT("EngineArchitectureCore: Found %d system errors"), SystemErrors.Num());
-        for (const FString& Error : SystemErrors)
-        {
-            UE_LOG(LogTemp, Error, TEXT("  ERROR: %s"), *Error);
-        }
+        UpdatePerformanceMetrics(DeltaTime);
     }
     
-    if (SystemWarnings.Num() > 0)
+    // Update system validation timer
+    SystemUpdateTimer += DeltaTime;
+    if (SystemUpdateTimer >= (1.0f / SystemUpdateFrequency))
     {
-        UE_LOG(LogTemp, Warning, TEXT("EngineArchitectureCore: Found %d system warnings"), SystemWarnings.Num());
-        for (const FString& Warning : SystemWarnings)
-        {
-            UE_LOG(LogTemp, Warning, TEXT("  WARNING: %s"), *Warning);
-        }
-    }
-}
-
-void UEngineArchitectureCore::UpdatePerformanceMetrics()
-{
-    FDateTime CurrentTime = FDateTime::Now();
-    float DeltaTime = (CurrentTime - LastPerformanceUpdate).GetTotalSeconds();
-    
-    if (DeltaTime >= 0.016f) // Update at ~60Hz
-    {
-        // Update frame time
-        if (GEngine && GEngine->GetWorldContexts().Num() > 0)
-        {
-            UWorld* World = GEngine->GetWorldContexts()[0].World();
-            if (World)
-            {
-                CurrentFrameTime = World->GetDeltaSeconds();
-                
-                // Track frame time history
-                FrameTimeHistory.Add(CurrentFrameTime);
-                if (FrameTimeHistory.Num() > MaxFrameTimeHistory)
-                {
-                    FrameTimeHistory.RemoveAt(0);
-                }
-                
-                // Count active actors
-                ActiveActorCount = World->GetActorCount();
-            }
-        }
+        SystemUpdateTimer = 0.0f;
         
-        // Update memory usage (simplified)
-        FPlatformMemoryStats MemStats = FPlatformMemory::GetStats();
-        MemoryUsageMB = MemStats.UsedPhysical / (1024.0f * 1024.0f);
-        
-        LastPerformanceUpdate = CurrentTime;
+        // Perform periodic system validation
+        if (bEnableSystemValidation)
+        {
+            ValidateAllSystems();
+        }
     }
 }
 
-void UEngineArchitectureCore::OptimizeMemoryUsage()
+bool AEngineArchitectureCore::RegisterSystem(const FString& SystemName, UObject* SystemInstance)
 {
-    UE_LOG(LogTemp, Log, TEXT("EngineArchitectureCore: Running memory optimization"));
-    
-    // Force garbage collection
-    if (GEngine)
+    if (SystemName.IsEmpty() || !SystemInstance)
     {
-        GEngine->ForceGarbageCollection(true);
+        UE_LOG(LogTemp, Error, TEXT("EngineArchitectureCore: Cannot register system - invalid parameters"));
+        return false;
     }
     
-    // Update memory metrics after optimization
-    UpdatePerformanceMetrics();
+    if (RegisteredSystems.Contains(SystemName))
+    {
+        UE_LOG(LogTemp, Warning, TEXT("EngineArchitectureCore: System '%s' already registered - updating reference"), *SystemName);
+    }
     
-    UE_LOG(LogTemp, Log, TEXT("EngineArchitectureCore: Memory optimization complete. Current usage: %.2f MB"), MemoryUsageMB);
+    RegisteredSystems.Add(SystemName, SystemInstance);
+    SystemHealthCache.Add(SystemName, true); // Assume healthy until proven otherwise
+    
+    UE_LOG(LogTemp, Log, TEXT("EngineArchitectureCore: Successfully registered system '%s'"), *SystemName);
+    return true;
 }
 
-void UEngineArchitectureCore::RegisterCoreSystem(const FString& SystemName, UObject* SystemObject)
+bool AEngineArchitectureCore::UnregisterSystem(const FString& SystemName)
 {
-    if (!SystemObject)
+    if (!RegisteredSystems.Contains(SystemName))
     {
-        UE_LOG(LogTemp, Error, TEXT("EngineArchitectureCore: Cannot register null system: %s"), *SystemName);
-        return;
+        UE_LOG(LogTemp, Warning, TEXT("EngineArchitectureCore: Cannot unregister system '%s' - not found"), *SystemName);
+        return false;
     }
     
-    RegisteredSystems.Add(SystemName, SystemObject);
-    UE_LOG(LogTemp, Log, TEXT("EngineArchitectureCore: Registered system: %s"), *SystemName);
+    RegisteredSystems.Remove(SystemName);
+    SystemHealthCache.Remove(SystemName);
+    
+    UE_LOG(LogTemp, Log, TEXT("EngineArchitectureCore: Successfully unregistered system '%s'"), *SystemName);
+    return true;
 }
 
-void UEngineArchitectureCore::UnregisterCoreSystem(const FString& SystemName)
+UObject* AEngineArchitectureCore::GetSystem(const FString& SystemName)
 {
-    if (RegisteredSystems.Remove(SystemName) > 0)
+    if (UObject** FoundSystem = RegisteredSystems.Find(SystemName))
     {
-        UE_LOG(LogTemp, Log, TEXT("EngineArchitectureCore: Unregistered system: %s"), *SystemName);
+        return *FoundSystem;
     }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("EngineArchitectureCore: System not found for unregistration: %s"), *SystemName);
-    }
-}
-
-UObject* UEngineArchitectureCore::GetRegisteredSystem(const FString& SystemName) const
-{
-    if (TObjectPtr<UObject> const* SystemPtr = RegisteredSystems.Find(SystemName))
-    {
-        return *SystemPtr;
-    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("EngineArchitectureCore: System '%s' not found"), *SystemName);
     return nullptr;
 }
 
-void UEngineArchitectureCore::ValidateWorldPartition()
+bool AEngineArchitectureCore::ValidateAllSystems()
 {
-    bWorldPartitionHealthy = true;
+    bool bAllSystemsHealthy = true;
     
-    if (GEngine && GEngine->GetWorldContexts().Num() > 0)
+    for (auto& SystemPair : RegisteredSystems)
     {
-        UWorld* World = GEngine->GetWorldContexts()[0].World();
-        if (World)
+        const FString& SystemName = SystemPair.Key;
+        UObject* SystemInstance = SystemPair.Value;
+        
+        bool bSystemHealthy = ValidateSystem(SystemName, SystemInstance);
+        SystemHealthCache.Add(SystemName, bSystemHealthy);
+        
+        if (!bSystemHealthy)
         {
-            // Check if world partition is enabled for large worlds
-            if (ActiveActorCount > 1000)
-            {
-                // In a real implementation, we'd check if World Partition is actually enabled
-                SystemWarnings.Add(TEXT("Large world detected - consider enabling World Partition"));
-            }
+            bAllSystemsHealthy = false;
         }
-        else
-        {
-            SystemErrors.Add(TEXT("No valid world context found"));
-            bWorldPartitionHealthy = false;
-        }
+    }
+    
+    LastValidationTime = GetWorld()->GetTimeSeconds();
+    
+    if (bAllSystemsHealthy)
+    {
+        UE_LOG(LogTemp, Log, TEXT("EngineArchitectureCore: All systems validated successfully"));
     }
     else
     {
-        SystemErrors.Add(TEXT("No world contexts available"));
-        bWorldPartitionHealthy = false;
+        UE_LOG(LogTemp, Warning, TEXT("EngineArchitectureCore: Some systems failed validation"));
+        LogSystemStatus();
+    }
+    
+    return bAllSystemsHealthy;
+}
+
+TMap<FString, bool> AEngineArchitectureCore::GetSystemHealthStatus()
+{
+    return SystemHealthCache;
+}
+
+float AEngineArchitectureCore::GetCurrentFrameTime() const
+{
+    if (FrameCount > 0)
+    {
+        return (FrameTimeAccumulator / FrameCount) * 1000.0f; // Convert to milliseconds
+    }
+    return 0.0f;
+}
+
+FString AEngineArchitectureCore::GetMemoryUsageStats() const
+{
+    FPlatformMemoryStats MemStats = FPlatformMemory::GetStats();
+    
+    return FString::Printf(TEXT("Memory - Used: %.2f MB, Available: %.2f MB, Peak: %.2f MB"),
+        MemStats.UsedPhysical / (1024.0f * 1024.0f),
+        MemStats.AvailablePhysical / (1024.0f * 1024.0f),
+        MemStats.PeakUsedPhysical / (1024.0f * 1024.0f));
+}
+
+void AEngineArchitectureCore::InitializeCoreArchitecture()
+{
+    UE_LOG(LogTemp, Log, TEXT("EngineArchitectureCore: Initializing core architecture systems"));
+    
+    // Register self as the core architecture system
+    RegisterSystem(TEXT("EngineArchitectureCore"), this);
+    
+    // Initialize performance monitoring
+    FrameTimeAccumulator = 0.0f;
+    FrameCount = 0;
+    
+    UE_LOG(LogTemp, Log, TEXT("EngineArchitectureCore: Core architecture initialization complete"));
+}
+
+bool AEngineArchitectureCore::ValidateSystem(const FString& SystemName, UObject* SystemInstance)
+{
+    if (!SystemInstance)
+    {
+        HandleSystemFailure(SystemName, TEXT("System instance is null"));
+        return false;
+    }
+    
+    if (!IsValid(SystemInstance))
+    {
+        HandleSystemFailure(SystemName, TEXT("System instance is not valid"));
+        return false;
+    }
+    
+    // Check if the system is pending kill
+    if (SystemInstance->IsPendingKill())
+    {
+        HandleSystemFailure(SystemName, TEXT("System instance is pending kill"));
+        return false;
+    }
+    
+    // System passed all basic validation checks
+    return true;
+}
+
+void AEngineArchitectureCore::UpdatePerformanceMetrics(float DeltaTime)
+{
+    FrameTimeAccumulator += DeltaTime;
+    FrameCount++;
+    
+    // Check for frame time warnings
+    float CurrentFrameTimeMs = DeltaTime * 1000.0f;
+    if (CurrentFrameTimeMs > MaxFrameTimeMs)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("EngineArchitectureCore: Frame time exceeded target - %.2f ms (target: %.2f ms)"), 
+            CurrentFrameTimeMs, MaxFrameTimeMs);
+    }
+    
+    // Reset accumulator periodically to prevent overflow
+    if (FrameCount >= 1000)
+    {
+        FrameTimeAccumulator = 0.0f;
+        FrameCount = 0;
     }
 }
 
-void UEngineArchitectureCore::ValidateActorSystems()
+void AEngineArchitectureCore::LogSystemStatus()
 {
-    bActorSystemsHealthy = true;
+    UE_LOG(LogTemp, Log, TEXT("EngineArchitectureCore: System Status Report"));
+    UE_LOG(LogTemp, Log, TEXT("========================================"));
     
-    if (ActiveActorCount > 10000)
+    for (auto& HealthPair : SystemHealthCache)
     {
-        SystemWarnings.Add(TEXT("High actor count detected - performance may be impacted"));
-    }
-    
-    if (ActiveActorCount == 0)
-    {
-        SystemWarnings.Add(TEXT("No actors found in current level"));
-    }
-}
-
-void UEngineArchitectureCore::ValidateMemoryConstraints()
-{
-    bMemoryConstraintsHealthy = true;
-    
-    // Check memory usage thresholds
-    if (MemoryUsageMB > 8192.0f) // 8GB threshold
-    {
-        SystemErrors.Add(TEXT("Memory usage exceeds 8GB threshold"));
-        bMemoryConstraintsHealthy = false;
-    }
-    else if (MemoryUsageMB > 4096.0f) // 4GB warning
-    {
-        SystemWarnings.Add(TEXT("Memory usage exceeds 4GB - monitor closely"));
-    }
-}
-
-void UEngineArchitectureCore::ValidatePerformanceTargets()
-{
-    bPerformanceTargetsHealthy = true;
-    
-    if (FrameTimeHistory.Num() > 10)
-    {
-        // Calculate average frame time
-        float TotalFrameTime = 0.0f;
-        for (float FrameTime : FrameTimeHistory)
-        {
-            TotalFrameTime += FrameTime;
-        }
-        float AverageFrameTime = TotalFrameTime / FrameTimeHistory.Num();
+        const FString& SystemName = HealthPair.Key;
+        bool bIsHealthy = HealthPair.Value;
         
-        // Check performance targets (60 FPS = 16.67ms, 30 FPS = 33.33ms)
-        if (AverageFrameTime > 0.0333f) // Worse than 30 FPS
-        {
-            SystemErrors.Add(TEXT("Performance below 30 FPS target"));
-            bPerformanceTargetsHealthy = false;
-        }
-        else if (AverageFrameTime > 0.0167f) // Worse than 60 FPS
-        {
-            SystemWarnings.Add(TEXT("Performance below 60 FPS target"));
-        }
+        FString StatusText = bIsHealthy ? TEXT("HEALTHY") : TEXT("FAILED");
+        UE_LOG(LogTemp, Log, TEXT("  %s: %s"), *SystemName, *StatusText);
     }
+    
+    UE_LOG(LogTemp, Log, TEXT("========================================"));
+    UE_LOG(LogTemp, Log, TEXT("Performance: %.2f ms/frame"), GetCurrentFrameTime());
+    UE_LOG(LogTemp, Log, TEXT("%s"), *GetMemoryUsageStats());
+}
+
+void AEngineArchitectureCore::HandleSystemFailure(const FString& SystemName, const FString& ErrorMessage)
+{
+    UE_LOG(LogTemp, Error, TEXT("EngineArchitectureCore: System '%s' failed validation - %s"), 
+        *SystemName, *ErrorMessage);
+    
+    // Mark system as unhealthy
+    SystemHealthCache.Add(SystemName, false);
+    
+    // Could implement recovery strategies here in the future
 }
