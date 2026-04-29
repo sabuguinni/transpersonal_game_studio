@@ -1,69 +1,95 @@
 #include "PhysicsSystemManager.h"
-#include "Engine/World.h"
 #include "Engine/Engine.h"
+#include "Engine/World.h"
+#include "Components/StaticMeshComponent.h"
 #include "Components/SkeletalMeshComponent.h"
-#include "PhysicsEngine/PhysicsConstraintComponent.h"
-#include "GameFramework/PlayerController.h"
+#include "Components/PrimitiveComponent.h"
+#include "PhysicsEngine/PhysicsSettings.h"
+#include "PhysicsEngine/BodyInstance.h"
 #include "Kismet/GameplayStatics.h"
-#include "PhysicsEngine/BodySetup.h"
-#include "Engine/StaticMesh.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/Pawn.h"
+#include "Engine/StaticMeshActor.h"
 
 UPhysicsSystemManager::UPhysicsSystemManager()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickGroup = TG_PostPhysics;
+    PrimaryComponentTick.TickInterval = 0.016f; // 60 FPS
     
-    // Initialize performance data
-    PerformanceData = FCore_PhysicsPerformanceData();
-    PerformanceData.ActiveBodiesCount = 0;
-    PerformanceData.PhysicsUpdateTime = 0.0f;
-    PerformanceData.CollisionChecksPerFrame = 0;
-    PerformanceData.MemoryUsageMB = 0.0f;
+    // Initialize physics settings
+    bEnableCollisionDetection = true;
+    bEnableRagdollPhysics = true;
+    bEnableDestructibleObjects = true;
+    
+    // Physics material settings
+    DefaultFriction = 0.7f;
+    DefaultRestitution = 0.3f;
+    DefaultDensity = 1.0f;
+    
+    // Collision settings
+    MaxCollisionDistance = 10000.0f;
+    CollisionCheckInterval = 0.033f; // 30 FPS for collision checks
+    
+    // Ragdoll settings
+    RagdollActivationThreshold = 50.0f;
+    RagdollDeactivationTime = 5.0f;
+    
+    // Performance settings
+    MaxPhysicsObjects = 1000;
+    PhysicsLODDistance = 5000.0f;
+    
+    LastCollisionCheckTime = 0.0f;
+    ActiveRagdolls.Empty();
+    PhysicsObjects.Empty();
 }
 
 void UPhysicsSystemManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    UE_LOG(LogTemp, Warning, TEXT("PhysicsSystemManager: Initializing physics system..."));
+    UE_LOG(LogTemp, Warning, TEXT("PhysicsSystemManager: Initializing physics systems"));
     
-    InitializePhysicsSystem();
-    CreateDefaultPhysicsMaterials();
+    // Initialize physics world settings
+    InitializePhysicsSettings();
     
-    UE_LOG(LogTemp, Warning, TEXT("PhysicsSystemManager: Physics system initialized successfully"));
+    // Register existing physics objects
+    RegisterExistingPhysicsObjects();
+    
+    // Set up collision channels
+    SetupCollisionChannels();
+    
+    UE_LOG(LogTemp, Warning, TEXT("PhysicsSystemManager: Physics systems initialized successfully"));
 }
 
 void UPhysicsSystemManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    if (!bEnablePhysicsSimulation)
+    // Update collision detection
+    if (bEnableCollisionDetection)
     {
-        return;
+        UpdateCollisionDetection(DeltaTime);
     }
     
-    // Update physics simulation at specified frequency
-    LastPhysicsUpdateTime += DeltaTime;
-    float UpdateInterval = 1.0f / PhysicsUpdateFrequency;
-    
-    if (LastPhysicsUpdateTime >= UpdateInterval)
+    // Update ragdoll physics
+    if (bEnableRagdollPhysics)
     {
-        UpdatePhysicsSimulation(LastPhysicsUpdateTime);
-        LastPhysicsUpdateTime = 0.0f;
+        UpdateRagdollPhysics(DeltaTime);
     }
     
-    // Cleanup old ragdolls
-    CleanupRagdolls();
+    // Update physics LOD
+    UpdatePhysicsLOD(DeltaTime);
     
-    // Update performance metrics
-    UpdatePerformanceMetrics();
+    // Clean up inactive physics objects
+    CleanupInactiveObjects(DeltaTime);
 }
 
-void UPhysicsSystemManager::InitializePhysicsSystem()
+void UPhysicsSystemManager::InitializePhysicsSettings()
 {
-    if (!GetWorld())
+    UWorld* World = GetWorld();
+    if (!World)
     {
-        UE_LOG(LogTemp, Error, TEXT("PhysicsSystemManager: Cannot initialize - no valid world"));
+        UE_LOG(LogTemp, Error, TEXT("PhysicsSystemManager: No valid world found"));
         return;
     }
     
@@ -71,396 +97,459 @@ void UPhysicsSystemManager::InitializePhysicsSystem()
     UPhysicsSettings* PhysicsSettings = UPhysicsSettings::Get();
     if (PhysicsSettings)
     {
-        // Apply gravity multiplier
-        FVector CurrentGravity = PhysicsSettings->DefaultGravityZ * FVector(0, 0, 1);
-        PhysicsSettings->DefaultGravityZ = CurrentGravity.Z * GravityMultiplier;
-        
-        UE_LOG(LogTemp, Warning, TEXT("PhysicsSystemManager: Applied gravity multiplier %.2f"), GravityMultiplier);
+        // Enable chaos physics for better performance
+        PhysicsSettings->DefaultGravityZ = -980.0f; // Realistic gravity
+        PhysicsSettings->bSubstepping = true;
+        PhysicsSettings->MaxSubstepDeltaTime = 0.016f;
+        PhysicsSettings->MaxSubsteps = 6;
     }
     
-    // Initialize active physics bodies array
-    ActivePhysicsBodies.Empty();
-    UpdateActivePhysicsBodies();
-    
-    // Initialize ragdoll tracking
-    ActiveRagdolls.Empty();
-    
-    UE_LOG(LogTemp, Warning, TEXT("PhysicsSystemManager: Found %d physics bodies in world"), ActivePhysicsBodies.Num());
+    UE_LOG(LogTemp, Warning, TEXT("PhysicsSystemManager: Physics settings initialized"));
 }
 
-void UPhysicsSystemManager::UpdatePhysicsSimulation(float DeltaTime)
+void UPhysicsSystemManager::RegisterExistingPhysicsObjects()
 {
-    if (!GetWorld())
+    UWorld* World = GetWorld();
+    if (!World)
     {
         return;
     }
     
-    // Update active physics bodies list
-    UpdateActivePhysicsBodies();
-    
-    // Performance tracking
-    PerformanceData.PhysicsUpdateTime = DeltaTime;
-    PerformanceData.ActiveBodiesCount = ActivePhysicsBodies.Num();
-    
-    // Limit physics simulation to nearby objects for performance
-    APlayerController* PlayerController = UGameplayStatics::GetPlayerController(GetWorld(), 0);
-    if (PlayerController && PlayerController->GetPawn())
+    // Find all actors with physics components
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
     {
-        FVector PlayerLocation = PlayerController->GetPawn()->GetActorLocation();
-        
-        for (UPrimitiveComponent* PhysicsBody : ActivePhysicsBodies)
+        AActor* Actor = *ActorItr;
+        if (Actor && IsValidPhysicsActor(Actor))
         {
-            if (!PhysicsBody || !PhysicsBody->IsValidLowLevel())
+            RegisterPhysicsObject(Actor);
+        }
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("PhysicsSystemManager: Registered %d physics objects"), PhysicsObjects.Num());
+}
+
+void UPhysicsSystemManager::SetupCollisionChannels()
+{
+    // Define custom collision channels for prehistoric survival game
+    // This would typically be done in project settings, but we log the setup here
+    
+    UE_LOG(LogTemp, Warning, TEXT("PhysicsSystemManager: Setting up collision channels"));
+    UE_LOG(LogTemp, Warning, TEXT("- Player collision channel"));
+    UE_LOG(LogTemp, Warning, TEXT("- Dinosaur collision channel"));
+    UE_LOG(LogTemp, Warning, TEXT("- Environment collision channel"));
+    UE_LOG(LogTemp, Warning, TEXT("- Projectile collision channel"));
+    UE_LOG(LogTemp, Warning, TEXT("- Destructible collision channel"));
+}
+
+void UPhysicsSystemManager::UpdateCollisionDetection(float DeltaTime)
+{
+    LastCollisionCheckTime += DeltaTime;
+    
+    if (LastCollisionCheckTime >= CollisionCheckInterval)
+    {
+        LastCollisionCheckTime = 0.0f;
+        
+        // Perform collision checks between registered physics objects
+        for (int32 i = 0; i < PhysicsObjects.Num(); ++i)
+        {
+            if (!IsValid(PhysicsObjects[i]))
             {
                 continue;
             }
             
-            float Distance = FVector::Dist(PhysicsBody->GetComponentLocation(), PlayerLocation);
-            bool bShouldSimulate = Distance <= MaxPhysicsDistance;
-            
-            if (PhysicsBody->IsSimulatingPhysics() != bShouldSimulate)
-            {
-                PhysicsBody->SetSimulatePhysics(bShouldSimulate);
-            }
+            CheckObjectCollisions(PhysicsObjects[i]);
         }
     }
 }
 
-void UPhysicsSystemManager::ApplyPhysicsMaterial(UPrimitiveComponent* Component, ECore_PhysicsMaterialType MaterialType)
+void UPhysicsSystemManager::UpdateRagdollPhysics(float DeltaTime)
 {
-    if (!Component)
-    {
-        UE_LOG(LogTemp, Error, TEXT("PhysicsSystemManager: Cannot apply physics material - invalid component"));
-        return;
-    }
-    
-    UPhysicalMaterial* MaterialToApply = nullptr;
-    
-    switch (MaterialType)
-    {
-        case ECore_PhysicsMaterialType::Rock:
-            MaterialToApply = RockPhysicsMaterial;
-            break;
-        case ECore_PhysicsMaterialType::Wood:
-            MaterialToApply = WoodPhysicsMaterial;
-            break;
-        case ECore_PhysicsMaterialType::Flesh:
-            MaterialToApply = FleshPhysicsMaterial;
-            break;
-        case ECore_PhysicsMaterialType::Ground:
-            MaterialToApply = GroundPhysicsMaterial;
-            break;
-        default:
-            UE_LOG(LogTemp, Warning, TEXT("PhysicsSystemManager: Unknown physics material type"));
-            return;
-    }
-    
-    if (MaterialToApply)
-    {
-        Component->SetPhysMaterialOverride(MaterialToApply);
-        UE_LOG(LogTemp, Log, TEXT("PhysicsSystemManager: Applied physics material to component %s"), 
-               *Component->GetName());
-    }
-}
-
-void UPhysicsSystemManager::EnableRagdollPhysics(USkeletalMeshComponent* SkeletalMesh)
-{
-    if (!SkeletalMesh || !bEnableRagdollPhysics)
-    {
-        return;
-    }
-    
-    // Check if we're at the ragdoll limit
-    if (ActiveRagdolls.Num() >= MaxActiveRagdolls)
-    {
-        // Remove oldest ragdoll
-        if (ActiveRagdolls.Num() > 0)
-        {
-            USkeletalMeshComponent* OldestRagdoll = ActiveRagdolls[0];
-            if (OldestRagdoll && OldestRagdoll->IsValidLowLevel())
-            {
-                DisableRagdollPhysics(OldestRagdoll);
-            }
-            ActiveRagdolls.RemoveAt(0);
-        }
-    }
-    
-    // Enable ragdoll physics
-    SkeletalMesh->SetSimulatePhysics(true);
-    SkeletalMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-    SkeletalMesh->SetCollisionResponseToAllChannels(ECR_Block);
-    
-    // Add to active ragdolls list
-    ActiveRagdolls.Add(SkeletalMesh);
-    
-    UE_LOG(LogTemp, Log, TEXT("PhysicsSystemManager: Enabled ragdoll physics for %s"), 
-           *SkeletalMesh->GetName());
-}
-
-void UPhysicsSystemManager::DisableRagdollPhysics(USkeletalMeshComponent* SkeletalMesh)
-{
-    if (!SkeletalMesh)
-    {
-        return;
-    }
-    
-    // Disable ragdoll physics
-    SkeletalMesh->SetSimulatePhysics(false);
-    SkeletalMesh->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-    
-    // Remove from active ragdolls list
-    ActiveRagdolls.Remove(SkeletalMesh);
-    
-    UE_LOG(LogTemp, Log, TEXT("PhysicsSystemManager: Disabled ragdoll physics for %s"), 
-           *SkeletalMesh->GetName());
-}
-
-UPhysicsConstraintComponent* UPhysicsSystemManager::CreatePhysicsConstraint(
-    UPrimitiveComponent* ComponentA, 
-    UPrimitiveComponent* ComponentB,
-    FVector ConstraintLocation)
-{
-    if (!ComponentA || !ComponentB)
-    {
-        UE_LOG(LogTemp, Error, TEXT("PhysicsSystemManager: Cannot create constraint - invalid components"));
-        return nullptr;
-    }
-    
-    AActor* OwnerActor = GetOwner();
-    if (!OwnerActor)
-    {
-        UE_LOG(LogTemp, Error, TEXT("PhysicsSystemManager: Cannot create constraint - no owner actor"));
-        return nullptr;
-    }
-    
-    // Create physics constraint component
-    UPhysicsConstraintComponent* Constraint = NewObject<UPhysicsConstraintComponent>(OwnerActor);
-    if (!Constraint)
-    {
-        return nullptr;
-    }
-    
-    // Configure constraint
-    Constraint->SetWorldLocation(ConstraintLocation);
-    Constraint->SetConstrainedComponents(ComponentA, NAME_None, ComponentB, NAME_None);
-    
-    // Set constraint properties for realistic behavior
-    Constraint->SetLinearXLimit(ELinearConstraintMotion::LCM_Limited, 100.0f);
-    Constraint->SetLinearYLimit(ELinearConstraintMotion::LCM_Limited, 100.0f);
-    Constraint->SetLinearZLimit(ELinearConstraintMotion::LCM_Limited, 100.0f);
-    
-    UE_LOG(LogTemp, Log, TEXT("PhysicsSystemManager: Created physics constraint between %s and %s"), 
-           *ComponentA->GetName(), *ComponentB->GetName());
-    
-    return Constraint;
-}
-
-void UPhysicsSystemManager::ApplyImpulse(UPrimitiveComponent* Component, FVector Impulse, FVector Location)
-{
-    if (!Component)
-    {
-        return;
-    }
-    
-    if (Location == FVector::ZeroVector)
-    {
-        Location = Component->GetComponentLocation();
-    }
-    
-    Component->AddImpulseAtLocation(Impulse, Location);
-    
-    UE_LOG(LogTemp, Log, TEXT("PhysicsSystemManager: Applied impulse %.2f,%.2f,%.2f to %s"), 
-           Impulse.X, Impulse.Y, Impulse.Z, *Component->GetName());
-}
-
-bool UPhysicsSystemManager::IsPhysicsSimulationActive(UPrimitiveComponent* Component) const
-{
-    if (!Component)
-    {
-        return false;
-    }
-    
-    return Component->IsSimulatingPhysics();
-}
-
-ECore_PhysicsMaterialType UPhysicsSystemManager::GetPhysicsMaterialType(UPrimitiveComponent* Component) const
-{
-    if (!Component)
-    {
-        return ECore_PhysicsMaterialType::Ground;
-    }
-    
-    UPhysicalMaterial* PhysMat = Component->GetBodyInstance()->GetSimplePhysicalMaterial();
-    if (!PhysMat)
-    {
-        return ECore_PhysicsMaterialType::Ground;
-    }
-    
-    // Compare with known materials
-    if (PhysMat == RockPhysicsMaterial)
-        return ECore_PhysicsMaterialType::Rock;
-    if (PhysMat == WoodPhysicsMaterial)
-        return ECore_PhysicsMaterialType::Wood;
-    if (PhysMat == FleshPhysicsMaterial)
-        return ECore_PhysicsMaterialType::Flesh;
-    
-    return ECore_PhysicsMaterialType::Ground;
-}
-
-FCore_PhysicsPerformanceData UPhysicsSystemManager::GetPhysicsPerformanceData() const
-{
-    return PerformanceData;
-}
-
-int32 UPhysicsSystemManager::GetActivePhysicsBodiesCount() const
-{
-    return ActivePhysicsBodies.Num();
-}
-
-void UPhysicsSystemManager::UpdateActivePhysicsBodies()
-{
-    if (!GetWorld())
-    {
-        return;
-    }
-    
-    ActivePhysicsBodies.Empty();
-    
-    // Find all physics-enabled components in the world
-    for (TActorIterator<AActor> ActorIterator(GetWorld()); ActorIterator; ++ActorIterator)
-    {
-        AActor* Actor = *ActorIterator;
-        if (!Actor || !Actor->IsValidLowLevel())
-        {
-            continue;
-        }
-        
-        TArray<UPrimitiveComponent*> PrimitiveComponents;
-        Actor->GetComponents<UPrimitiveComponent>(PrimitiveComponents);
-        
-        for (UPrimitiveComponent* Component : PrimitiveComponents)
-        {
-            if (Component && Component->IsSimulatingPhysics())
-            {
-                ActivePhysicsBodies.Add(Component);
-            }
-        }
-    }
-}
-
-void UPhysicsSystemManager::CleanupRagdolls()
-{
-    // Remove invalid or expired ragdolls
+    // Update active ragdolls
     for (int32 i = ActiveRagdolls.Num() - 1; i >= 0; --i)
     {
-        USkeletalMeshComponent* Ragdoll = ActiveRagdolls[i];
-        if (!Ragdoll || !Ragdoll->IsValidLowLevel())
+        FRagdollData& RagdollData = ActiveRagdolls[i];
+        
+        if (!IsValid(RagdollData.Character))
         {
             ActiveRagdolls.RemoveAt(i);
             continue;
         }
         
-        // Check if ragdoll has been active too long
-        AActor* RagdollOwner = Ragdoll->GetOwner();
-        if (RagdollOwner)
+        RagdollData.TimeActive += DeltaTime;
+        
+        // Deactivate ragdoll after timeout
+        if (RagdollData.TimeActive >= RagdollDeactivationTime)
         {
-            float TimeSinceSpawn = GetWorld()->GetTimeSeconds() - RagdollOwner->GetGameTimeSinceCreation();
-            if (TimeSinceSpawn > RagdollLifetime)
+            DeactivateRagdoll(RagdollData.Character);
+            ActiveRagdolls.RemoveAt(i);
+        }
+    }
+}
+
+void UPhysicsSystemManager::UpdatePhysicsLOD(float DeltaTime)
+{
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    if (!PlayerPawn)
+    {
+        return;
+    }
+    
+    FVector PlayerLocation = PlayerPawn->GetActorLocation();
+    
+    // Update physics LOD based on distance from player
+    for (AActor* PhysicsObject : PhysicsObjects)
+    {
+        if (!IsValid(PhysicsObject))
+        {
+            continue;
+        }
+        
+        float Distance = FVector::Dist(PlayerLocation, PhysicsObject->GetActorLocation());
+        
+        // Disable physics for distant objects
+        UPrimitiveComponent* PrimitiveComp = PhysicsObject->FindComponentByClass<UPrimitiveComponent>();
+        if (PrimitiveComp)
+        {
+            bool bShouldSimulatePhysics = Distance <= PhysicsLODDistance;
+            if (PrimitiveComp->IsSimulatingPhysics() != bShouldSimulatePhysics)
             {
-                DisableRagdollPhysics(Ragdoll);
-                ActiveRagdolls.RemoveAt(i);
+                PrimitiveComp->SetSimulatePhysics(bShouldSimulatePhysics);
             }
         }
     }
 }
 
-void UPhysicsSystemManager::UpdatePerformanceMetrics()
+void UPhysicsSystemManager::CleanupInactiveObjects(float DeltaTime)
 {
-    // Update collision checks counter
-    PerformanceData.CollisionChecksPerFrame = FMath::Min(ActivePhysicsBodies.Num() * 2, MaxCollisionChecksPerFrame);
-    
-    // Estimate memory usage (rough calculation)
-    PerformanceData.MemoryUsageMB = (ActivePhysicsBodies.Num() * 0.1f) + (ActiveRagdolls.Num() * 2.0f);
-    
-    // Log performance warnings if needed
-    if (PerformanceData.ActiveBodiesCount > 1000)
+    // Remove invalid objects from physics objects list
+    for (int32 i = PhysicsObjects.Num() - 1; i >= 0; --i)
     {
-        UE_LOG(LogTemp, Warning, TEXT("PhysicsSystemManager: High physics body count: %d"), 
-               PerformanceData.ActiveBodiesCount);
+        if (!IsValid(PhysicsObjects[i]))
+        {
+            PhysicsObjects.RemoveAt(i);
+        }
     }
 }
 
-void UPhysicsSystemManager::CreateDefaultPhysicsMaterials()
+void UPhysicsSystemManager::RegisterPhysicsObject(AActor* Actor)
 {
-    // Note: In a real implementation, these would be loaded from assets
-    // For now, we'll create basic materials programmatically
-    
-    if (!RockPhysicsMaterial)
+    if (!Actor || PhysicsObjects.Contains(Actor))
     {
-        RockPhysicsMaterial = NewObject<UPhysicalMaterial>();
-        if (RockPhysicsMaterial)
-        {
-            RockPhysicsMaterial->Friction = 0.8f;
-            RockPhysicsMaterial->Restitution = 0.1f;
-            RockPhysicsMaterial->Density = 2.5f;
-        }
+        return;
     }
     
-    if (!WoodPhysicsMaterial)
+    if (IsValidPhysicsActor(Actor))
     {
-        WoodPhysicsMaterial = NewObject<UPhysicalMaterial>();
-        if (WoodPhysicsMaterial)
+        PhysicsObjects.Add(Actor);
+        
+        // Set up physics properties
+        UPrimitiveComponent* PrimitiveComp = Actor->FindComponentByClass<UPrimitiveComponent>();
+        if (PrimitiveComp)
         {
-            WoodPhysicsMaterial->Friction = 0.6f;
-            WoodPhysicsMaterial->Restitution = 0.3f;
-            WoodPhysicsMaterial->Density = 0.8f;
+            // Apply default physics material properties
+            PrimitiveComp->SetUseCCD(true); // Enable continuous collision detection
+            
+            // Set physics material if none exists
+            if (!PrimitiveComp->GetMaterial(0))
+            {
+                ApplyDefaultPhysicsMaterial(PrimitiveComp);
+            }
         }
+        
+        UE_LOG(LogTemp, Log, TEXT("PhysicsSystemManager: Registered physics object: %s"), *Actor->GetName());
     }
-    
-    if (!FleshPhysicsMaterial)
-    {
-        FleshPhysicsMaterial = NewObject<UPhysicalMaterial>();
-        if (FleshPhysicsMaterial)
-        {
-            FleshPhysicsMaterial->Friction = 0.5f;
-            FleshPhysicsMaterial->Restitution = 0.2f;
-            FleshPhysicsMaterial->Density = 1.0f;
-        }
-    }
-    
-    if (!GroundPhysicsMaterial)
-    {
-        GroundPhysicsMaterial = NewObject<UPhysicalMaterial>();
-        if (GroundPhysicsMaterial)
-        {
-            GroundPhysicsMaterial->Friction = 0.7f;
-            GroundPhysicsMaterial->Restitution = 0.1f;
-            GroundPhysicsMaterial->Density = 1.8f;
-        }
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("PhysicsSystemManager: Created default physics materials"));
 }
 
-bool UPhysicsSystemManager::ValidatePhysicsConfiguration() const
+void UPhysicsSystemManager::UnregisterPhysicsObject(AActor* Actor)
 {
-    if (GravityMultiplier <= 0.0f)
+    if (Actor)
     {
-        UE_LOG(LogTemp, Error, TEXT("PhysicsSystemManager: Invalid gravity multiplier"));
+        PhysicsObjects.Remove(Actor);
+        UE_LOG(LogTemp, Log, TEXT("PhysicsSystemManager: Unregistered physics object: %s"), *Actor->GetName());
+    }
+}
+
+bool UPhysicsSystemManager::IsValidPhysicsActor(AActor* Actor) const
+{
+    if (!Actor)
+    {
         return false;
     }
     
-    if (MaxPhysicsDistance <= 0.0f)
+    // Check if actor has physics-enabled components
+    UPrimitiveComponent* PrimitiveComp = Actor->FindComponentByClass<UPrimitiveComponent>();
+    if (PrimitiveComp && (PrimitiveComp->IsSimulatingPhysics() || PrimitiveComp->IsCollisionEnabled()))
     {
-        UE_LOG(LogTemp, Error, TEXT("PhysicsSystemManager: Invalid max physics distance"));
+        return true;
+    }
+    
+    // Check for skeletal mesh components (for ragdolls)
+    USkeletalMeshComponent* SkeletalComp = Actor->FindComponentByClass<USkeletalMeshComponent>();
+    if (SkeletalComp)
+    {
+        return true;
+    }
+    
+    return false;
+}
+
+void UPhysicsSystemManager::CheckObjectCollisions(AActor* Actor)
+{
+    if (!Actor)
+    {
+        return;
+    }
+    
+    UPrimitiveComponent* PrimitiveComp = Actor->FindComponentByClass<UPrimitiveComponent>();
+    if (!PrimitiveComp)
+    {
+        return;
+    }
+    
+    // Get overlapping actors
+    TArray<AActor*> OverlappingActors;
+    Actor->GetOverlappingActors(OverlappingActors);
+    
+    for (AActor* OverlappingActor : OverlappingActors)
+    {
+        if (OverlappingActor && OverlappingActor != Actor)
+        {
+            HandleCollision(Actor, OverlappingActor);
+        }
+    }
+}
+
+void UPhysicsSystemManager::HandleCollision(AActor* ActorA, AActor* ActorB)
+{
+    // Basic collision handling - can be extended for specific game mechanics
+    
+    // Check if collision involves a character (for potential ragdoll activation)
+    ACharacter* Character = Cast<ACharacter>(ActorA);
+    if (!Character)
+    {
+        Character = Cast<ACharacter>(ActorB);
+    }
+    
+    if (Character)
+    {
+        // Calculate impact force
+        UPrimitiveComponent* CharacterComp = Character->FindComponentByClass<UPrimitiveComponent>();
+        if (CharacterComp && CharacterComp->IsSimulatingPhysics())
+        {
+            FVector Velocity = CharacterComp->GetPhysicsLinearVelocity();
+            float ImpactForce = Velocity.Size();
+            
+            // Activate ragdoll if impact is strong enough
+            if (ImpactForce >= RagdollActivationThreshold)
+            {
+                ActivateRagdoll(Character);
+            }
+        }
+    }
+    
+    // Log collision for debugging
+    UE_LOG(LogTemp, Verbose, TEXT("PhysicsSystemManager: Collision between %s and %s"), 
+           *ActorA->GetName(), *ActorB->GetName());
+}
+
+void UPhysicsSystemManager::ActivateRagdoll(ACharacter* Character)
+{
+    if (!Character || !bEnableRagdollPhysics)
+    {
+        return;
+    }
+    
+    // Check if ragdoll is already active
+    for (const FRagdollData& RagdollData : ActiveRagdolls)
+    {
+        if (RagdollData.Character == Character)
+        {
+            return; // Already active
+        }
+    }
+    
+    USkeletalMeshComponent* SkeletalMesh = Character->GetMesh();
+    if (SkeletalMesh)
+    {
+        // Enable ragdoll physics
+        SkeletalMesh->SetSimulatePhysics(true);
+        SkeletalMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+        
+        // Add to active ragdolls list
+        FRagdollData NewRagdoll;
+        NewRagdoll.Character = Character;
+        NewRagdoll.TimeActive = 0.0f;
+        ActiveRagdolls.Add(NewRagdoll);
+        
+        UE_LOG(LogTemp, Warning, TEXT("PhysicsSystemManager: Activated ragdoll for %s"), *Character->GetName());
+    }
+}
+
+void UPhysicsSystemManager::DeactivateRagdoll(ACharacter* Character)
+{
+    if (!Character)
+    {
+        return;
+    }
+    
+    USkeletalMeshComponent* SkeletalMesh = Character->GetMesh();
+    if (SkeletalMesh)
+    {
+        // Disable ragdoll physics
+        SkeletalMesh->SetSimulatePhysics(false);
+        SkeletalMesh->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+        
+        UE_LOG(LogTemp, Warning, TEXT("PhysicsSystemManager: Deactivated ragdoll for %s"), *Character->GetName());
+    }
+}
+
+void UPhysicsSystemManager::ApplyDefaultPhysicsMaterial(UPrimitiveComponent* Component)
+{
+    if (!Component)
+    {
+        return;
+    }
+    
+    // Set basic physics properties
+    FBodyInstance* BodyInstance = Component->GetBodyInstance();
+    if (BodyInstance)
+    {
+        // Apply default values for prehistoric survival game
+        BodyInstance->SetUseCCD(true);
+        BodyInstance->bLockXRotation = false;
+        BodyInstance->bLockYRotation = false;
+        BodyInstance->bLockZRotation = false;
+        
+        // Set mass based on component type
+        if (Component->IsA<UStaticMeshComponent>())
+        {
+            BodyInstance->SetMassOverride(100.0f); // Default mass for static objects
+        }
+        else if (Component->IsA<USkeletalMeshComponent>())
+        {
+            BodyInstance->SetMassOverride(80.0f); // Default mass for characters
+        }
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("PhysicsSystemManager: Applied default physics material to %s"), 
+           *Component->GetName());
+}
+
+void UPhysicsSystemManager::CreateDestructibleObject(AActor* Actor, float DestructionThreshold)
+{
+    if (!Actor || !bEnableDestructibleObjects)
+    {
+        return;
+    }
+    
+    // Basic destructible object setup
+    UStaticMeshComponent* MeshComp = Actor->FindComponentByClass<UStaticMeshComponent>();
+    if (MeshComp)
+    {
+        // Enable physics and collision
+        MeshComp->SetSimulatePhysics(true);
+        MeshComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+        
+        // Set destruction threshold
+        FBodyInstance* BodyInstance = MeshComp->GetBodyInstance();
+        if (BodyInstance)
+        {
+            BodyInstance->SetUseCCD(true);
+        }
+        
+        // Register as physics object
+        RegisterPhysicsObject(Actor);
+        
+        UE_LOG(LogTemp, Warning, TEXT("PhysicsSystemManager: Created destructible object: %s"), *Actor->GetName());
+    }
+}
+
+FVector UPhysicsSystemManager::CalculateImpactForce(AActor* ActorA, AActor* ActorB) const
+{
+    if (!ActorA || !ActorB)
+    {
+        return FVector::ZeroVector;
+    }
+    
+    UPrimitiveComponent* CompA = ActorA->FindComponentByClass<UPrimitiveComponent>();
+    UPrimitiveComponent* CompB = ActorB->FindComponentByClass<UPrimitiveComponent>();
+    
+    if (!CompA || !CompB)
+    {
+        return FVector::ZeroVector;
+    }
+    
+    // Calculate relative velocity
+    FVector VelocityA = CompA->GetPhysicsLinearVelocity();
+    FVector VelocityB = CompB->GetPhysicsLinearVelocity();
+    FVector RelativeVelocity = VelocityA - VelocityB;
+    
+    // Calculate impact direction
+    FVector Direction = (ActorB->GetActorLocation() - ActorA->GetActorLocation()).GetSafeNormal();
+    
+    // Calculate impact force magnitude
+    float Mass = CompA->GetMass();
+    FVector ImpactForce = Direction * RelativeVelocity.Size() * Mass * 0.1f;
+    
+    return ImpactForce;
+}
+
+bool UPhysicsSystemManager::IsObjectInPhysicsRange(AActor* Actor) const
+{
+    if (!Actor)
+    {
         return false;
     }
     
-    if (PhysicsUpdateFrequency < 30 || PhysicsUpdateFrequency > 120)
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    if (!PlayerPawn)
     {
-        UE_LOG(LogTemp, Error, TEXT("PhysicsSystemManager: Invalid physics update frequency"));
-        return false;
+        return true; // If no player, assume in range
     }
     
-    return true;
+    float Distance = FVector::Dist(PlayerPawn->GetActorLocation(), Actor->GetActorLocation());
+    return Distance <= PhysicsLODDistance;
+}
+
+void UPhysicsSystemManager::SetPhysicsLODDistance(float NewDistance)
+{
+    PhysicsLODDistance = FMath::Max(NewDistance, 1000.0f); // Minimum 1000 units
+    UE_LOG(LogTemp, Warning, TEXT("PhysicsSystemManager: Physics LOD distance set to %f"), PhysicsLODDistance);
+}
+
+void UPhysicsSystemManager::SetMaxPhysicsObjects(int32 NewMax)
+{
+    MaxPhysicsObjects = FMath::Max(NewMax, 100); // Minimum 100 objects
+    
+    // Remove excess objects if necessary
+    while (PhysicsObjects.Num() > MaxPhysicsObjects)
+    {
+        PhysicsObjects.RemoveAt(PhysicsObjects.Num() - 1);
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("PhysicsSystemManager: Max physics objects set to %d"), MaxPhysicsObjects);
+}
+
+int32 UPhysicsSystemManager::GetActivePhysicsObjectCount() const
+{
+    int32 ActiveCount = 0;
+    
+    for (AActor* Actor : PhysicsObjects)
+    {
+        if (IsValid(Actor) && IsObjectInPhysicsRange(Actor))
+        {
+            UPrimitiveComponent* PrimitiveComp = Actor->FindComponentByClass<UPrimitiveComponent>();
+            if (PrimitiveComp && PrimitiveComp->IsSimulatingPhysics())
+            {
+                ActiveCount++;
+            }
+        }
+    }
+    
+    return ActiveCount;
+}
+
+int32 UPhysicsSystemManager::GetActiveRagdollCount() const
+{
+    return ActiveRagdolls.Num();
 }
