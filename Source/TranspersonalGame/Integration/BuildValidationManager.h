@@ -1,112 +1,166 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/World.h"
-#include "GameFramework/Actor.h"
-#include "Components/ActorComponent.h"
-#include "Engine/Engine.h"
+#include "Engine/GameInstanceSubsystem.h"
+#include "SharedTypes.h"
 #include "BuildValidationManager.generated.h"
 
-UENUM(BlueprintType)
-enum class EBuild_ValidationResult : uint8
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FBuild_ValidationResult
 {
-    Pass        UMETA(DisplayName = "Pass"),
-    PartialPass UMETA(DisplayName = "Partial Pass"),
-    Fail        UMETA(DisplayName = "Fail"),
-    NotRun      UMETA(DisplayName = "Not Run")
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Build Validation")
+    bool bIsValid = false;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Build Validation")
+    FString ValidationMessage;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Build Validation")
+    int32 ErrorCount = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Build Validation")
+    int32 WarningCount = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Build Validation")
+    TArray<FString> ErrorMessages;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Build Validation")
+    TArray<FString> WarningMessages;
+
+    FBuild_ValidationResult()
+    {
+        bIsValid = false;
+        ValidationMessage = TEXT("Not validated");
+        ErrorCount = 0;
+        WarningCount = 0;
+    }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_ValidationReport
+struct TRANSPERSONALGAME_API FBuild_ModuleStatus
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    EBuild_ValidationResult Result = EBuild_ValidationResult::NotRun;
+    UPROPERTY(BlueprintReadOnly, Category = "Module Status")
+    FString ModuleName;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    int32 ClassesLoaded = 0;
+    UPROPERTY(BlueprintReadOnly, Category = "Module Status")
+    bool bIsLoaded = false;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    int32 ClassesExpected = 0;
+    UPROPERTY(BlueprintReadOnly, Category = "Module Status")
+    bool bHasErrors = false;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    int32 BinaryFilesFound = 0;
+    UPROPERTY(BlueprintReadOnly, Category = "Module Status")
+    int32 ClassCount = 0;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    int32 SourceFilesFound = 0;
+    UPROPERTY(BlueprintReadOnly, Category = "Module Status")
+    TArray<FString> LoadedClasses;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    UPROPERTY(BlueprintReadOnly, Category = "Module Status")
     TArray<FString> FailedClasses;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    FString ValidationTimestamp;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    float ValidationDuration = 0.0f;
+    FBuild_ModuleStatus()
+    {
+        ModuleName = TEXT("Unknown");
+        bIsLoaded = false;
+        bHasErrors = false;
+        ClassCount = 0;
+    }
 };
 
+/**
+ * Build Validation Manager - Integration Agent #19
+ * Validates build integrity, module loading, and class registration
+ * Provides real-time build status monitoring for the development pipeline
+ */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API ABuildValidationManager : public AActor
+class TRANSPERSONALGAME_API UBuildValidationManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
-    ABuildValidationManager();
+    UBuildValidationManager();
+
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+
+    // Build validation functions
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    FBuild_ValidationResult ValidateFullBuild();
+
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    FBuild_ValidationResult ValidateModuleIntegrity();
+
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    FBuild_ValidationResult ValidateClassRegistration();
+
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    TArray<FBuild_ModuleStatus> GetModuleStatusReport();
+
+    // Real-time monitoring
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    void StartContinuousValidation();
+
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    void StopContinuousValidation();
+
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    bool IsContinuousValidationActive() const { return bContinuousValidationActive; }
+
+    // Integration testing
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    FBuild_ValidationResult TestCrossModuleIntegration();
+
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    FBuild_ValidationResult ValidateMinPlayableMap();
+
+    // Utility functions
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    void LogValidationResults(const FBuild_ValidationResult& Results);
+
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    FString GetBuildStatusSummary();
 
 protected:
-    virtual void BeginPlay() override;
+    // Internal validation methods
+    bool ValidateTranspersonalGameModule();
+    bool ValidateCoreClasses();
+    bool ValidateGameplayClasses();
+    bool ValidateSubsystems();
+    
+    // Module testing
+    TArray<FString> GetExpectedClasses();
+    bool TestClassLoading(const FString& ClassName);
+    bool TestClassSpawning(const FString& ClassName);
 
-public:
-    virtual void Tick(float DeltaTime) override;
+    // Continuous validation
+    void PerformValidationTick();
+    
+    UPROPERTY()
+    FTimerHandle ValidationTimerHandle;
 
-    // Core validation functions
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    FBuild_ValidationReport RunFullValidation();
+    UPROPERTY(BlueprintReadOnly, Category = "Build Validation")
+    bool bContinuousValidationActive = false;
 
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    bool ValidateClassLoading();
+    UPROPERTY(BlueprintReadOnly, Category = "Build Validation")
+    float ValidationInterval = 30.0f; // seconds
 
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    bool ValidateBinaryFiles();
+    UPROPERTY(BlueprintReadOnly, Category = "Build Validation")
+    FBuild_ValidationResult LastValidationResult;
 
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    bool ValidateSourceFiles();
-
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    void RunIntegrationTests();
-
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    void GenerateValidationReport();
-
-    // Getters
-    UFUNCTION(BlueprintPure, Category = "Build Validation")
-    FBuild_ValidationReport GetLastValidationReport() const { return LastValidationReport; }
-
-    UFUNCTION(BlueprintPure, Category = "Build Validation")
-    bool IsValidationPassing() const;
-
-protected:
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    FBuild_ValidationReport LastValidationReport;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    bool bAutoRunValidationOnBeginPlay = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    float ValidationInterval = 60.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    TArray<FString> ExpectedClasses;
+    UPROPERTY(BlueprintReadOnly, Category = "Build Validation")
+    TArray<FBuild_ModuleStatus> CachedModuleStatus;
 
 private:
-    float TimeSinceLastValidation = 0.0f;
-    bool bValidationInProgress = false;
+    // Critical class paths for validation
+    TArray<FString> CoreClassPaths;
+    TArray<FString> GameplayClassPaths;
+    TArray<FString> SubsystemClassPaths;
 
-    // Helper functions
-    void InitializeExpectedClasses();
-    bool CheckClassExists(const FString& ClassName);
-    int32 CountBinaryFiles();
-    int32 CountSourceFiles();
-    void LogValidationResults(const FBuild_ValidationReport& Report);
+    // Validation state
+    bool bInitialized = false;
+    int32 ValidationRunCount = 0;
+    double LastValidationTime = 0.0;
 };
