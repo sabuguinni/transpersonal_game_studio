@@ -1,194 +1,279 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/World.h"
-#include "Components/ActorComponent.h"
-#include "Engine/Engine.h"
-#include "PhysicsEngine/PhysicsSettings.h"
-#include "Materials/MaterialInterface.h"
-#include "PhysicalMaterials/PhysicalMaterial.h"
+#include "GameFramework/Actor.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/PrimitiveComponent.h"
-#include "Engine/StaticMeshActor.h"
+#include "Engine/World.h"
+#include "PhysicsEngine/PhysicsSettings.h"
+#include "Chaos/ChaosEngineInterface.h"
 #include "../SharedTypes.h"
 #include "PhysicsSystemManager.generated.h"
 
+class UEngineArchitectureCore;
+
 /**
- * Core Physics System Manager
- * Handles all physics simulation, collision detection, and material properties
- * for the prehistoric survival game. Manages realistic physics for dinosaurs,
- * environmental objects, and player interactions.
+ * Core Physics System Manager for Transpersonal Game Studio
+ * Handles all physics simulation, collision detection, and material interactions
+ * for the prehistoric survival game environment.
+ * 
+ * Key Features:
+ * - Realistic physics simulation for dinosaurs and environment
+ * - Dynamic collision detection and response
+ * - Material-based physics properties (stone, wood, bone, flesh)
+ * - Ragdoll physics for character death states
+ * - Environmental destruction simulation
+ * - Performance-optimized physics LOD system
  */
-UCLASS(BlueprintType, Blueprintable, meta = (BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UPhysicsSystemManager : public UActorComponent
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API APhysicsSystemManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UPhysicsSystemManager();
+    APhysicsSystemManager();
 
 protected:
     virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    virtual void Tick(float DeltaTime) override;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 public:
-    // === PHYSICS CONFIGURATION ===
+    // === CORE PHYSICS MANAGEMENT ===
     
-    /** Global gravity multiplier for the game world */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Settings")
-    float GravityMultiplier = 1.0f;
-    
-    /** Maximum physics simulation distance from player */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Settings")
-    float MaxPhysicsDistance = 5000.0f;
-    
-    /** Enable/disable physics simulation globally */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Settings")
-    bool bEnablePhysicsSimulation = true;
-    
-    /** Physics update frequency (Hz) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Settings", meta = (ClampMin = "30", ClampMax = "120"))
-    int32 PhysicsUpdateFrequency = 60;
+    /**
+     * Initialize the physics system with world-specific parameters
+     * @param World - The world to initialize physics for
+     * @param bEnableAdvancedPhysics - Whether to enable advanced physics features
+     */
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void InitializePhysicsSystem(UWorld* World, bool bEnableAdvancedPhysics = true);
 
-    // === COLLISION DETECTION ===
-    
-    /** Enable advanced collision detection for dinosaurs */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision")
-    bool bEnableAdvancedCollision = true;
-    
-    /** Collision detection accuracy level */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision")
-    ECore_CollisionAccuracy CollisionAccuracy = ECore_CollisionAccuracy::High;
-    
-    /** Maximum number of collision checks per frame */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision")
-    int32 MaxCollisionChecksPerFrame = 500;
+    /**
+     * Shutdown physics system and clean up resources
+     */
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void ShutdownPhysicsSystem();
 
-    // === PHYSICS MATERIALS ===
-    
-    /** Rock physics material */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Materials")
-    TObjectPtr<UPhysicalMaterial> RockPhysicsMaterial;
-    
-    /** Wood physics material */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Materials")
-    TObjectPtr<UPhysicalMaterial> WoodPhysicsMaterial;
-    
-    /** Flesh physics material (for dinosaurs) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Materials")
-    TObjectPtr<UPhysicalMaterial> FleshPhysicsMaterial;
-    
-    /** Ground/terrain physics material */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Materials")
-    TObjectPtr<UPhysicalMaterial> GroundPhysicsMaterial;
+    /**
+     * Register an object for physics simulation
+     * @param Component - The primitive component to register
+     * @param PhysicsType - Type of physics simulation to apply
+     */
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void RegisterPhysicsObject(UPrimitiveComponent* Component, ECore_PhysicsType PhysicsType);
 
-    // === RAGDOLL PHYSICS ===
-    
-    /** Enable ragdoll physics for dead dinosaurs */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    bool bEnableRagdollPhysics = true;
-    
-    /** Ragdoll simulation time before cleanup */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    float RagdollLifetime = 30.0f;
-    
-    /** Maximum number of active ragdolls */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    int32 MaxActiveRagdolls = 10;
+    /**
+     * Unregister an object from physics simulation
+     * @param Component - The component to unregister
+     */
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void UnregisterPhysicsObject(UPrimitiveComponent* Component);
 
-    // === DESTRUCTION PHYSICS ===
+    // === COLLISION SYSTEM ===
     
-    /** Enable destructible environments */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction")
-    bool bEnableDestruction = true;
-    
-    /** Destruction force threshold */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction")
-    float DestructionThreshold = 1000.0f;
+    /**
+     * Set up collision profiles for different object types
+     */
+    UFUNCTION(BlueprintCallable, Category = "Collision System")
+    void InitializeCollisionProfiles();
 
-    // === PHYSICS FUNCTIONS ===
-    
-    /** Initialize physics system */
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
-    void InitializePhysicsSystem();
-    
-    /** Update physics simulation */
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
-    void UpdatePhysicsSimulation(float DeltaTime);
-    
-    /** Apply physics material to component */
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
-    void ApplyPhysicsMaterial(UPrimitiveComponent* Component, ECore_PhysicsMaterialType MaterialType);
-    
-    /** Enable ragdoll physics on skeletal mesh */
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
-    void EnableRagdollPhysics(class USkeletalMeshComponent* SkeletalMesh);
-    
-    /** Disable ragdoll physics */
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
-    void DisableRagdollPhysics(class USkeletalMeshComponent* SkeletalMesh);
-    
-    /** Create physics constraint between two components */
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
-    class UPhysicsConstraintComponent* CreatePhysicsConstraint(
-        UPrimitiveComponent* ComponentA, 
-        UPrimitiveComponent* ComponentB,
-        FVector ConstraintLocation
-    );
-    
-    /** Apply impulse to physics object */
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
-    void ApplyImpulse(UPrimitiveComponent* Component, FVector Impulse, FVector Location = FVector::ZeroVector);
-    
-    /** Check if physics simulation is active for component */
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Physics System")
-    bool IsPhysicsSimulationActive(UPrimitiveComponent* Component) const;
-    
-    /** Get physics material type for component */
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Physics System")
-    ECore_PhysicsMaterialType GetPhysicsMaterialType(UPrimitiveComponent* Component) const;
+    /**
+     * Handle collision between two objects
+     * @param HitComponent - The component that was hit
+     * @param OtherActor - The other actor in the collision
+     * @param OtherComponent - The other component in the collision
+     * @param HitResult - Detailed hit information
+     */
+    UFUNCTION()
+    void HandleCollisionEvent(UPrimitiveComponent* HitComponent, AActor* OtherActor, 
+                             UPrimitiveComponent* OtherComponent, const FHitResult& HitResult);
 
-    // === PERFORMANCE MONITORING ===
+    /**
+     * Apply collision response based on material types
+     * @param HitResult - The collision hit result
+     * @param ImpactForce - The force of the impact
+     */
+    UFUNCTION(BlueprintCallable, Category = "Collision System")
+    void ApplyCollisionResponse(const FHitResult& HitResult, float ImpactForce);
+
+    // === MATERIAL PHYSICS ===
     
-    /** Get current physics performance metrics */
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Physics System")
-    FCore_PhysicsPerformanceData GetPhysicsPerformanceData() const;
+    /**
+     * Get physics properties for a specific material type
+     * @param MaterialType - The type of material
+     * @return Physics properties for the material
+     */
+    UFUNCTION(BlueprintCallable, Category = "Material Physics")
+    FCore_PhysicsMaterial GetMaterialPhysicsProperties(ECore_MaterialType MaterialType);
+
+    /**
+     * Apply material-specific physics properties to a component
+     * @param Component - The component to modify
+     * @param MaterialType - The material type to apply
+     */
+    UFUNCTION(BlueprintCallable, Category = "Material Physics")
+    void ApplyMaterialPhysics(UPrimitiveComponent* Component, ECore_MaterialType MaterialType);
+
+    // === RAGDOLL SYSTEM ===
     
-    /** Get number of active physics bodies */
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Physics System")
-    int32 GetActivePhysicsBodiesCount() const;
+    /**
+     * Enable ragdoll physics on a character
+     * @param Character - The character to enable ragdoll on
+     * @param ImpactForce - Optional impact force to apply
+     */
+    UFUNCTION(BlueprintCallable, Category = "Ragdoll System")
+    void EnableRagdollPhysics(class ACharacter* Character, FVector ImpactForce = FVector::ZeroVector);
+
+    /**
+     * Disable ragdoll physics and return to animated state
+     * @param Character - The character to disable ragdoll on
+     */
+    UFUNCTION(BlueprintCallable, Category = "Ragdoll System")
+    void DisableRagdollPhysics(class ACharacter* Character);
+
+    // === DESTRUCTION SYSTEM ===
+    
+    /**
+     * Apply destruction to an object based on damage
+     * @param Target - The object to potentially destroy
+     * @param DamageAmount - Amount of damage applied
+     * @param DamageLocation - World location where damage was applied
+     * @return Whether the object was destroyed
+     */
+    UFUNCTION(BlueprintCallable, Category = "Destruction System")
+    bool ApplyDestructionDamage(AActor* Target, float DamageAmount, FVector DamageLocation);
+
+    /**
+     * Create debris from a destroyed object
+     * @param OriginalActor - The actor that was destroyed
+     * @param DestructionLocation - Where the destruction occurred
+     * @param ExplosionForce - Force to apply to debris
+     */
+    UFUNCTION(BlueprintCallable, Category = "Destruction System")
+    void CreateDebris(AActor* OriginalActor, FVector DestructionLocation, float ExplosionForce);
+
+    // === PERFORMANCE OPTIMIZATION ===
+    
+    /**
+     * Update physics LOD based on distance and importance
+     */
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void UpdatePhysicsLOD();
+
+    /**
+     * Set physics simulation quality level
+     * @param QualityLevel - 0=Low, 1=Medium, 2=High, 3=Ultra
+     */
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void SetPhysicsQuality(int32 QualityLevel);
+
+    /**
+     * Get current physics performance metrics
+     * @return Performance data structure
+     */
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    FCore_PerformanceMetrics GetPhysicsPerformanceMetrics();
+
+    // === SYSTEM INTEGRATION ===
+    
+    /**
+     * Register with the Engine Architecture Core
+     * @param ArchitectureCore - The core system to register with
+     */
+    UFUNCTION(BlueprintCallable, Category = "System Integration")
+    void RegisterWithArchitectureCore(UEngineArchitectureCore* ArchitectureCore);
+
+    /**
+     * Validate physics system health
+     * @return True if system is healthy
+     */
+    UFUNCTION(BlueprintCallable, Category = "System Integration")
+    bool ValidateSystemHealth();
+
+protected:
+    // === CORE PROPERTIES ===
+    
+    /** Reference to the world physics scene */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Physics System")
+    UWorld* PhysicsWorld;
+
+    /** Whether advanced physics features are enabled */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics System")
+    bool bAdvancedPhysicsEnabled;
+
+    /** Current physics quality level (0-3) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance", meta = (ClampMin = "0", ClampMax = "3"))
+    int32 PhysicsQualityLevel;
+
+    /** Maximum number of physics objects to simulate simultaneously */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 MaxPhysicsObjects;
+
+    /** Distance threshold for physics LOD levels */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    TArray<float> PhysicsLODDistances;
+
+    // === PHYSICS OBJECT TRACKING ===
+    
+    /** All registered physics objects */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Physics System")
+    TArray<UPrimitiveComponent*> RegisteredPhysicsObjects;
+
+    /** Physics objects organized by type */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Physics System")
+    TMap<ECore_PhysicsType, TArray<UPrimitiveComponent*>> PhysicsObjectsByType;
+
+    /** Active ragdoll characters */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ragdoll System")
+    TArray<class ACharacter*> ActiveRagdolls;
+
+    // === MATERIAL PHYSICS PROPERTIES ===
+    
+    /** Physics properties for different material types */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Material Physics")
+    TMap<ECore_MaterialType, FCore_PhysicsMaterial> MaterialPhysicsMap;
+
+    // === PERFORMANCE TRACKING ===
+    
+    /** Current frame's physics performance metrics */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Performance")
+    FCore_PerformanceMetrics CurrentPerformanceMetrics;
+
+    /** Physics simulation time budget per frame (milliseconds) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float PhysicsTimeBudget;
+
+    /** Reference to the Engine Architecture Core */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "System Integration")
+    UEngineArchitectureCore* ArchitectureCore;
 
 private:
+    // === INTERNAL METHODS ===
+    
+    /** Initialize default material physics properties */
+    void InitializeMaterialPhysicsDefaults();
+
+    /** Update performance metrics */
+    void UpdatePerformanceMetrics(float DeltaTime);
+
+    /** Clean up destroyed physics objects */
+    void CleanupDestroyedObjects();
+
+    /** Apply LOD settings to physics objects */
+    void ApplyPhysicsLOD(UPrimitiveComponent* Component, float Distance);
+
     // === INTERNAL STATE ===
     
-    /** Active ragdoll components */
-    UPROPERTY()
-    TArray<TObjectPtr<class USkeletalMeshComponent>> ActiveRagdolls;
-    
-    /** Physics performance tracking */
-    FCore_PhysicsPerformanceData PerformanceData;
-    
-    /** Last physics update time */
-    float LastPhysicsUpdateTime = 0.0f;
-    
-    /** Physics bodies within simulation range */
-    UPROPERTY()
-    TArray<TObjectPtr<UPrimitiveComponent>> ActivePhysicsBodies;
+    /** Timer for performance metric updates */
+    float PerformanceUpdateTimer;
 
-    // === INTERNAL FUNCTIONS ===
-    
-    /** Update active physics bodies list */
-    void UpdateActivePhysicsBodies();
-    
-    /** Cleanup old ragdolls */
-    void CleanupRagdolls();
-    
-    /** Update performance metrics */
-    void UpdatePerformanceMetrics();
-    
-    /** Create default physics materials */
-    void CreateDefaultPhysicsMaterials();
-    
-    /** Validate physics configuration */
-    bool ValidatePhysicsConfiguration() const;
+    /** Timer for object cleanup */
+    float CleanupTimer;
+
+    /** Whether the system is currently initialized */
+    bool bSystemInitialized;
+
+    /** Frame counter for performance tracking */
+    int32 FrameCounter;
 };
