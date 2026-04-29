@@ -1,409 +1,289 @@
 #include "BuildIntegrationManager.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Engine/GameInstance.h"
-#include "UObject/UObjectGlobals.h"
-#include "UObject/Package.h"
-#include "Misc/DateTime.h"
-#include "HAL/PlatformFilemanager.h"
-#include "Misc/Paths.h"
+#include "Components/SceneComponent.h"
+#include "Kismet/GameplayStatics.h"
+#include "TranspersonalGame/SharedTypes.h"
 
-UBuildIntegrationManager::UBuildIntegrationManager()
+ABuildIntegrationManager::ABuildIntegrationManager()
 {
-    bValidationInProgress = false;
-    BuildVersion = TEXT("1.0.0");
-    LastBuildTime = FDateTime::Now();
+    PrimaryActorTick.bCanEverTick = true;
+    
+    // Create root component
+    RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
+    
+    // Initialize build status
+    BuildStatus = EBuild_BuildStatus::Unknown;
+    LastValidationTime = 0.0f;
+    ValidationInterval = 30.0f; // Validate every 30 seconds
+    
+    // Initialize counters
+    LoadedClassCount = 0;
+    TotalClassCount = 0;
+    ActiveActorCount = 0;
+    ErrorCount = 0;
+    
+    // Initialize flags
+    bProjectLoaded = false;
+    bMapFunctional = false;
+    bCompilationArtifactsFound = false;
+    bCriticalErrorsDetected = false;
+    
+    BuildHealthScore = 0.0f;
 }
 
-void UBuildIntegrationManager::Initialize(FSubsystemCollectionBase& Collection)
+void ABuildIntegrationManager::BeginPlay()
 {
-    Super::Initialize(Collection);
+    Super::BeginPlay();
     
-    UE_LOG(LogTemp, Log, TEXT("BuildIntegrationManager: Initializing build integration system"));
+    // Perform initial validation
+    PerformBuildValidation();
     
-    // Initialize build tracking
-    LastBuildTime = FDateTime::Now();
-    BuildVersion = TEXT("1.0.0-dev");
-    
-    // Clear previous validation state
-    ValidationErrors.Empty();
-    ValidationWarnings.Empty();
-    CachedModuleStatus.Empty();
-    
-    UE_LOG(LogTemp, Log, TEXT("BuildIntegrationManager: Initialization complete"));
+    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Started with health score %.1f"), BuildHealthScore);
 }
 
-void UBuildIntegrationManager::Deinitialize()
+void ABuildIntegrationManager::Tick(float DeltaTime)
 {
-    UE_LOG(LogTemp, Log, TEXT("BuildIntegrationManager: Shutting down build integration system"));
+    Super::Tick(DeltaTime);
     
-    // Clear validation state
-    ValidationErrors.Empty();
-    ValidationWarnings.Empty();
-    CachedModuleStatus.Empty();
-    
-    Super::Deinitialize();
-}
-
-FBuild_ValidationResult UBuildIntegrationManager::ValidateModuleIntegration()
-{
-    UE_LOG(LogTemp, Log, TEXT("BuildIntegrationManager: Starting module integration validation"));
-    
-    FBuild_ValidationResult Result;
-    Result.bSuccess = true;
-    Result.ValidationMessage = TEXT("Module integration validation started");
-    
-    float StartTime = FPlatformTime::Seconds();
-    
-    // Validate core TranspersonalGame module
-    bool bCoreModuleValid = ValidateModuleClasses(TEXT("TranspersonalGame"));
-    if (!bCoreModuleValid)
+    // Periodic validation
+    LastValidationTime += DeltaTime;
+    if (LastValidationTime >= ValidationInterval)
     {
-        Result.bSuccess = false;
-        Result.Errors.Add(TEXT("Core TranspersonalGame module validation failed"));
-    }
-    
-    // Validate component registration
-    bool bComponentsValid = ValidateComponentRegistration();
-    if (!bComponentsValid)
-    {
-        Result.bSuccess = false;
-        Result.Errors.Add(TEXT("Component registration validation failed"));
-    }
-    
-    // Validate subsystem initialization
-    bool bSubsystemsValid = ValidateSubsystemInitialization();
-    if (!bSubsystemsValid)
-    {
-        Result.bSuccess = false;
-        Result.Errors.Add(TEXT("Subsystem initialization validation failed"));
-    }
-    
-    // Validate cross-module dependencies
-    bool bDependenciesValid = ValidateCrossModuleDependencies();
-    if (!bDependenciesValid)
-    {
-        Result.Warnings.Add(TEXT("Some cross-module dependencies may have issues"));
-    }
-    
-    Result.ValidationTime = FPlatformTime::Seconds() - StartTime;
-    
-    if (Result.bSuccess)
-    {
-        Result.ValidationMessage = FString::Printf(TEXT("Module integration validation completed successfully in %.2f seconds"), Result.ValidationTime);
-        UE_LOG(LogTemp, Log, TEXT("BuildIntegrationManager: %s"), *Result.ValidationMessage);
-    }
-    else
-    {
-        Result.ValidationMessage = FString::Printf(TEXT("Module integration validation failed with %d errors"), Result.Errors.Num());
-        UE_LOG(LogTemp, Error, TEXT("BuildIntegrationManager: %s"), *Result.ValidationMessage);
-    }
-    
-    LastValidationResult = Result;
-    return Result;
-}
-
-TArray<FBuild_ModuleStatus> UBuildIntegrationManager::GetModuleStatusList()
-{
-    TArray<FBuild_ModuleStatus> ModuleStatusList;
-    
-    // Check TranspersonalGame module
-    FBuild_ModuleStatus TranspersonalGameStatus;
-    TranspersonalGameStatus.ModuleName = TEXT("TranspersonalGame");
-    TranspersonalGameStatus.bIsLoaded = true; // We're running, so it's loaded
-    TranspersonalGameStatus.bHasErrors = false;
-    TranspersonalGameStatus.ClassCount = 0;
-    
-    // Try to count registered classes
-    for (TObjectIterator<UClass> ClassIt; ClassIt; ++ClassIt)
-    {
-        UClass* Class = *ClassIt;
-        if (Class && Class->GetPackage() && Class->GetPackage()->GetName().Contains(TEXT("TranspersonalGame")))
-        {
-            TranspersonalGameStatus.ClassCount++;
-        }
-    }
-    
-    ModuleStatusList.Add(TranspersonalGameStatus);
-    
-    // Cache the result
-    CachedModuleStatus = ModuleStatusList;
-    
-    UE_LOG(LogTemp, Log, TEXT("BuildIntegrationManager: Found %d modules, TranspersonalGame has %d classes"), 
-           ModuleStatusList.Num(), TranspersonalGameStatus.ClassCount);
-    
-    return ModuleStatusList;
-}
-
-bool UBuildIntegrationManager::ValidateClassRegistration(const FString& ClassName)
-{
-    FString FullClassName = FString::Printf(TEXT("/Script/TranspersonalGame.%s"), *ClassName);
-    
-    UClass* FoundClass = LoadClass<UObject>(nullptr, *FullClassName);
-    if (FoundClass)
-    {
-        UE_LOG(LogTemp, Log, TEXT("BuildIntegrationManager: Class %s is properly registered"), *ClassName);
-        return true;
-    }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Class %s not found or not registered"), *ClassName);
-        return false;
+        PerformBuildValidation();
+        LastValidationTime = 0.0f;
     }
 }
 
-bool UBuildIntegrationManager::ValidateActorSpawning(const FString& ActorClassName)
+void ABuildIntegrationManager::PerformBuildValidation()
+{
+    UE_LOG(LogTemp, Log, TEXT("BuildIntegrationManager: Starting build validation"));
+    
+    // Reset counters
+    LoadedClassCount = 0;
+    TotalClassCount = 0;
+    ActiveActorCount = 0;
+    ErrorCount = 0;
+    CriticalErrors.Empty();
+    
+    // Validate project loading
+    ValidateProjectLoading();
+    
+    // Validate core classes
+    ValidateCoreClasses();
+    
+    // Validate map functionality
+    ValidateMapFunctionality();
+    
+    // Validate compilation artifacts
+    ValidateCompilationArtifacts();
+    
+    // Calculate health score
+    CalculateBuildHealthScore();
+    
+    // Update build status
+    UpdateBuildStatus();
+    
+    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Validation complete - Health: %.1f, Status: %s"), 
+           BuildHealthScore, *UEnum::GetValueAsString(BuildStatus));
+}
+
+void ABuildIntegrationManager::ValidateProjectLoading()
 {
     UWorld* World = GetWorld();
-    if (!World)
+    if (World && World->GetGameInstance())
     {
-        UE_LOG(LogTemp, Error, TEXT("BuildIntegrationManager: No world available for actor spawning test"));
-        return false;
-    }
-    
-    FString FullClassName = FString::Printf(TEXT("/Script/TranspersonalGame.%s"), *ActorClassName);
-    UClass* ActorClass = LoadClass<AActor>(nullptr, *FullClassName);
-    
-    if (!ActorClass)
-    {
-        UE_LOG(LogTemp, Error, TEXT("BuildIntegrationManager: Actor class %s not found"), *ActorClassName);
-        return false;
-    }
-    
-    // Try to spawn the actor (and immediately destroy it)
-    FVector SpawnLocation = FVector::ZeroVector;
-    FRotator SpawnRotation = FRotator::ZeroRotator;
-    
-    AActor* TestActor = World->SpawnActor<AActor>(ActorClass, SpawnLocation, SpawnRotation);
-    if (TestActor)
-    {
-        UE_LOG(LogTemp, Log, TEXT("BuildIntegrationManager: Actor %s spawned successfully"), *ActorClassName);
-        TestActor->Destroy();
-        return true;
+        bProjectLoaded = true;
+        UE_LOG(LogTemp, Log, TEXT("BuildIntegrationManager: Project loaded successfully"));
     }
     else
     {
-        UE_LOG(LogTemp, Error, TEXT("BuildIntegrationManager: Failed to spawn actor %s"), *ActorClassName);
-        return false;
+        bProjectLoaded = false;
+        CriticalErrors.Add(TEXT("Project not properly loaded"));
+        ErrorCount++;
+        UE_LOG(LogTemp, Error, TEXT("BuildIntegrationManager: Project loading failed"));
     }
 }
 
-FBuild_ValidationResult UBuildIntegrationManager::RunIntegrationTests()
+void ABuildIntegrationManager::ValidateCoreClasses()
 {
-    UE_LOG(LogTemp, Log, TEXT("BuildIntegrationManager: Running comprehensive integration tests"));
-    
-    FBuild_ValidationResult Result;
-    Result.bSuccess = true;
-    Result.ValidationMessage = TEXT("Integration tests started");
-    
-    float StartTime = FPlatformTime::Seconds();
-    
-    // Test core classes
-    TArray<FString> CoreClasses = {
-        TEXT("TranspersonalGameMode"),
+    // List of critical classes to validate
+    TArray<FString> CriticalClasses = {
         TEXT("TranspersonalCharacter"),
-        TEXT("TranspersonalGameState")
+        TEXT("TranspersonalGameState"),
+        TEXT("TranspersonalGameMode"),
+        TEXT("PCGWorldGenerator"),
+        TEXT("FoliageManager"),
+        TEXT("CrowdSimulationManager"),
+        TEXT("ProceduralWorldManager")
     };
     
-    for (const FString& ClassName : CoreClasses)
+    TotalClassCount = CriticalClasses.Num();
+    LoadedClassCount = 0;
+    
+    for (const FString& ClassName : CriticalClasses)
     {
-        if (!ValidateClassRegistration(ClassName))
+        FString ClassPath = FString::Printf(TEXT("/Script/TranspersonalGame.%s"), *ClassName);
+        UClass* LoadedClass = LoadClass<UObject>(nullptr, *ClassPath);
+        
+        if (LoadedClass)
         {
-            Result.bSuccess = false;
-            Result.Errors.Add(FString::Printf(TEXT("Core class %s validation failed"), *ClassName));
+            LoadedClassCount++;
+            UE_LOG(LogTemp, Log, TEXT("BuildIntegrationManager: Class loaded - %s"), *ClassName);
+        }
+        else
+        {
+            CriticalErrors.Add(FString::Printf(TEXT("Missing class: %s"), *ClassName));
+            ErrorCount++;
+            UE_LOG(LogTemp, Error, TEXT("BuildIntegrationManager: Failed to load class - %s"), *ClassName);
         }
     }
     
-    // Test world generation
-    if (!ValidateWorldGeneration())
-    {
-        Result.Warnings.Add(TEXT("World generation validation had issues"));
-    }
-    
-    // Test character systems
-    if (!ValidateCharacterSystems())
-    {
-        Result.Warnings.Add(TEXT("Character systems validation had issues"));
-    }
-    
-    // Test AI systems
-    if (!ValidateAISystems())
-    {
-        Result.Warnings.Add(TEXT("AI systems validation had issues"));
-    }
-    
-    Result.ValidationTime = FPlatformTime::Seconds() - StartTime;
-    
-    if (Result.bSuccess)
-    {
-        Result.ValidationMessage = FString::Printf(TEXT("Integration tests completed successfully in %.2f seconds"), Result.ValidationTime);
-    }
-    else
-    {
-        Result.ValidationMessage = FString::Printf(TEXT("Integration tests failed with %d errors and %d warnings"), 
-                                                 Result.Errors.Num(), Result.Warnings.Num());
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("BuildIntegrationManager: %s"), *Result.ValidationMessage);
-    return Result;
+    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Core classes - %d/%d loaded"), LoadedClassCount, TotalClassCount);
 }
 
-bool UBuildIntegrationManager::ValidateWorldGeneration()
+void ABuildIntegrationManager::ValidateMapFunctionality()
 {
-    // Check if world generation classes are available
-    bool bPCGWorldGeneratorValid = ValidateClassRegistration(TEXT("PCGWorldGenerator"));
-    bool bProceduralWorldManagerValid = ValidateClassRegistration(TEXT("ProceduralWorldManager"));
-    
-    if (bPCGWorldGeneratorValid && bProceduralWorldManagerValid)
+    UWorld* World = GetWorld();
+    if (World)
     {
-        UE_LOG(LogTemp, Log, TEXT("BuildIntegrationManager: World generation systems validated"));
-        return true;
-    }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Some world generation classes not found"));
-        return false;
-    }
-}
-
-bool UBuildIntegrationManager::ValidateCharacterSystems()
-{
-    // Check character-related classes
-    bool bCharacterValid = ValidateClassRegistration(TEXT("TranspersonalCharacter"));
-    
-    if (bCharacterValid)
-    {
-        UE_LOG(LogTemp, Log, TEXT("BuildIntegrationManager: Character systems validated"));
-        return true;
-    }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Character system validation failed"));
-        return false;
-    }
-}
-
-bool UBuildIntegrationManager::ValidateAISystems()
-{
-    // Check AI-related classes
-    bool bCrowdSimValid = ValidateClassRegistration(TEXT("CrowdSimulationManager"));
-    
-    if (bCrowdSimValid)
-    {
-        UE_LOG(LogTemp, Log, TEXT("BuildIntegrationManager: AI systems validated"));
-        return true;
-    }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: AI system validation had issues"));
-        return false;
-    }
-}
-
-void UBuildIntegrationManager::GenerateBuildReport()
-{
-    UE_LOG(LogTemp, Log, TEXT("BuildIntegrationManager: Generating build report"));
-    
-    FString ReportContent = TEXT("=== TRANSPERSONAL GAME BUILD REPORT ===\n");
-    ReportContent += FString::Printf(TEXT("Build Version: %s\n"), *BuildVersion);
-    ReportContent += FString::Printf(TEXT("Build Time: %s\n"), *LastBuildTime.ToString());
-    ReportContent += TEXT("\n");
-    
-    // Add module status
-    TArray<FBuild_ModuleStatus> ModuleStatus = GetModuleStatusList();
-    ReportContent += TEXT("MODULE STATUS:\n");
-    for (const FBuild_ModuleStatus& Status : ModuleStatus)
-    {
-        ReportContent += FString::Printf(TEXT("  %s: %s (%d classes)\n"), 
-                                       *Status.ModuleName, 
-                                       Status.bIsLoaded ? TEXT("LOADED") : TEXT("NOT LOADED"),
-                                       Status.ClassCount);
-    }
-    
-    // Add validation results
-    if (LastValidationResult.bSuccess)
-    {
-        ReportContent += TEXT("\nLAST VALIDATION: PASSED\n");
-    }
-    else
-    {
-        ReportContent += FString::Printf(TEXT("\nLAST VALIDATION: FAILED (%d errors)\n"), LastValidationResult.Errors.Num());
-        for (const FString& Error : LastValidationResult.Errors)
+        // Count active actors
+        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
         {
-            ReportContent += FString::Printf(TEXT("  ERROR: %s\n"), *Error);
+            AActor* Actor = *ActorItr;
+            if (Actor && !Actor->IsPendingKill())
+            {
+                ActiveActorCount++;
+            }
+        }
+        
+        if (ActiveActorCount > 0)
+        {
+            bMapFunctional = true;
+            UE_LOG(LogTemp, Log, TEXT("BuildIntegrationManager: Map functional with %d actors"), ActiveActorCount);
+        }
+        else
+        {
+            bMapFunctional = false;
+            CriticalErrors.Add(TEXT("No active actors in scene"));
+            ErrorCount++;
         }
     }
-    
-    UE_LOG(LogTemp, Log, TEXT("BuildIntegrationManager: Build report generated:\n%s"), *ReportContent);
-}
-
-FString UBuildIntegrationManager::GetBuildVersion()
-{
-    return BuildVersion;
-}
-
-FString UBuildIntegrationManager::GetLastBuildTime()
-{
-    return LastBuildTime.ToString();
-}
-
-bool UBuildIntegrationManager::ValidateModuleClasses(const FString& ModuleName)
-{
-    int32 ClassCount = 0;
-    
-    for (TObjectIterator<UClass> ClassIt; ClassIt; ++ClassIt)
+    else
     {
-        UClass* Class = *ClassIt;
-        if (Class && Class->GetPackage() && Class->GetPackage()->GetName().Contains(*ModuleName))
-        {
-            ClassCount++;
-        }
+        bMapFunctional = false;
+        CriticalErrors.Add(TEXT("No world/map loaded"));
+        ErrorCount++;
+        UE_LOG(LogTemp, Error, TEXT("BuildIntegrationManager: No world available"));
+    }
+}
+
+void ABuildIntegrationManager::ValidateCompilationArtifacts()
+{
+    // For now, assume compilation artifacts exist if we can load classes
+    bCompilationArtifactsFound = (LoadedClassCount > 0);
+    
+    if (!bCompilationArtifactsFound)
+    {
+        CriticalErrors.Add(TEXT("No compilation artifacts found"));
+        ErrorCount++;
     }
     
-    UE_LOG(LogTemp, Log, TEXT("BuildIntegrationManager: Module %s has %d registered classes"), *ModuleName, ClassCount);
-    return ClassCount > 0;
+    UE_LOG(LogTemp, Log, TEXT("BuildIntegrationManager: Compilation artifacts - %s"), 
+           bCompilationArtifactsFound ? TEXT("Found") : TEXT("Missing"));
 }
 
-bool UBuildIntegrationManager::ValidateComponentRegistration()
+void ABuildIntegrationManager::CalculateBuildHealthScore()
 {
-    // Check if components are properly registered
-    // This is a basic check - in a real implementation, we'd check specific components
-    UE_LOG(LogTemp, Log, TEXT("BuildIntegrationManager: Component registration validation passed"));
-    return true;
-}
-
-bool UBuildIntegrationManager::ValidateSubsystemInitialization()
-{
-    // Check if this subsystem is properly initialized
-    UGameInstance* GameInstance = GetGameInstance();
-    if (GameInstance)
+    BuildHealthScore = 0.0f;
+    
+    // Project loading (20 points)
+    if (bProjectLoaded)
     {
-        UE_LOG(LogTemp, Log, TEXT("BuildIntegrationManager: Subsystem initialization validation passed"));
-        return true;
+        BuildHealthScore += 20.0f;
+    }
+    
+    // Core classes (40 points)
+    if (TotalClassCount > 0)
+    {
+        BuildHealthScore += (float(LoadedClassCount) / float(TotalClassCount)) * 40.0f;
+    }
+    
+    // Map functionality (20 points)
+    if (bMapFunctional)
+    {
+        BuildHealthScore += 20.0f;
+    }
+    
+    // Compilation artifacts (20 points)
+    if (bCompilationArtifactsFound)
+    {
+        BuildHealthScore += 20.0f;
+    }
+    
+    // Cap at 100
+    BuildHealthScore = FMath::Clamp(BuildHealthScore, 0.0f, 100.0f);
+}
+
+void ABuildIntegrationManager::UpdateBuildStatus()
+{
+    bCriticalErrorsDetected = (ErrorCount > 0);
+    
+    if (BuildHealthScore >= 80.0f)
+    {
+        BuildStatus = EBuild_BuildStatus::Healthy;
+    }
+    else if (BuildHealthScore >= 60.0f)
+    {
+        BuildStatus = EBuild_BuildStatus::Functional;
     }
     else
     {
-        UE_LOG(LogTemp, Error, TEXT("BuildIntegrationManager: No game instance found"));
-        return false;
+        BuildStatus = EBuild_BuildStatus::Critical;
     }
 }
 
-bool UBuildIntegrationManager::ValidateCrossModuleDependencies()
+FString ABuildIntegrationManager::GetBuildStatusString() const
 {
-    // Basic dependency validation
-    // In a real implementation, this would check specific module dependencies
-    UE_LOG(LogTemp, Log, TEXT("BuildIntegrationManager: Cross-module dependency validation passed"));
-    return true;
+    switch (BuildStatus)
+    {
+        case EBuild_BuildStatus::Healthy:
+            return TEXT("BUILD HEALTHY ✓");
+        case EBuild_BuildStatus::Functional:
+            return TEXT("BUILD FUNCTIONAL ⚠");
+        case EBuild_BuildStatus::Critical:
+            return TEXT("BUILD CRITICAL ✗");
+        default:
+            return TEXT("BUILD UNKNOWN");
+    }
 }
 
-void UBuildIntegrationManager::LogValidationError(const FString& ErrorMessage)
+TArray<FString> ABuildIntegrationManager::GetCriticalErrors() const
 {
-    ValidationErrors.Add(ErrorMessage);
-    UE_LOG(LogTemp, Error, TEXT("BuildIntegrationManager: VALIDATION ERROR: %s"), *ErrorMessage);
+    return CriticalErrors;
 }
 
-void UBuildIntegrationManager::LogValidationWarning(const FString& WarningMessage)
+void ABuildIntegrationManager::LogBuildReport() const
 {
-    ValidationWarnings.Add(WarningMessage);
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: VALIDATION WARNING: %s"), *WarningMessage);
+    UE_LOG(LogTemp, Warning, TEXT("=== BUILD INTEGRATION REPORT ==="));
+    UE_LOG(LogTemp, Warning, TEXT("Project Status: %s"), bProjectLoaded ? TEXT("LOADED") : TEXT("FAILED"));
+    UE_LOG(LogTemp, Warning, TEXT("Core Classes: %d/%d loaded"), LoadedClassCount, TotalClassCount);
+    UE_LOG(LogTemp, Warning, TEXT("Map Status: %s"), bMapFunctional ? TEXT("FUNCTIONAL") : TEXT("BROKEN"));
+    UE_LOG(LogTemp, Warning, TEXT("Scene Actors: %d"), ActiveActorCount);
+    UE_LOG(LogTemp, Warning, TEXT("Compilation: %s"), bCompilationArtifactsFound ? TEXT("OK") : TEXT("MISSING"));
+    UE_LOG(LogTemp, Warning, TEXT("Overall Health: %.1f/100"), BuildHealthScore);
+    UE_LOG(LogTemp, Warning, TEXT("Status: %s"), *GetBuildStatusString());
+    
+    if (bCriticalErrorsDetected)
+    {
+        UE_LOG(LogTemp, Error, TEXT("CRITICAL ERRORS (%d):"), ErrorCount);
+        for (const FString& Error : CriticalErrors)
+        {
+            UE_LOG(LogTemp, Error, TEXT("  - %s"), *Error);
+        }
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("✓ NO CRITICAL ERRORS DETECTED"));
+    }
 }
