@@ -7,109 +7,81 @@
 #include "Perception/AIPerceptionComponent.h"
 #include "Perception/AISenseConfig_Sight.h"
 #include "Perception/AISenseConfig_Hearing.h"
-#include "Perception/AISenseConfig_Damage.h"
-#include "Components/ActorComponent.h"
-#include "Engine/World.h"
+#include "../Core/SharedTypes.h"
 #include "DinosaurAIController.generated.h"
 
+// Forward declarations
 class UBehaviorTree;
-class UBlackboardData;
-class UDinosaurMemoryComponent;
-class UDinosaurSocialComponent;
+class APawn;
 
 UENUM(BlueprintType)
-enum class EDinosaurBehaviorState : uint8
+enum class ENPC_DinosaurSpecies : uint8
 {
-    Idle,
-    Foraging,
-    Drinking,
-    Resting,
-    Socializing,
-    Hunting,
-    Fleeing,
-    Territorial,
-    Mating,
-    Nesting,
-    Migrating
+    TRex = 0        UMETA(DisplayName = "T-Rex"),
+    Raptor = 1      UMETA(DisplayName = "Raptor"),
+    Triceratops = 2 UMETA(DisplayName = "Triceratops"),
+    Brachiosaurus = 3 UMETA(DisplayName = "Brachiosaurus"),
+    Stegosaurus = 4 UMETA(DisplayName = "Stegosaurus")
 };
 
 UENUM(BlueprintType)
-enum class EDinosaurPersonality : uint8
+enum class ENPC_DinosaurState : uint8
 {
-    Aggressive,
-    Defensive,
-    Curious,
-    Timid,
-    Social,
-    Solitary,
-    Territorial,
-    Nomadic
+    Idle = 0        UMETA(DisplayName = "Idle"),
+    Patrolling = 1  UMETA(DisplayName = "Patrolling"),
+    Hunting = 2     UMETA(DisplayName = "Hunting"),
+    Feeding = 3     UMETA(DisplayName = "Feeding"),
+    Fleeing = 4     UMETA(DisplayName = "Fleeing"),
+    Fighting = 5    UMETA(DisplayName = "Fighting"),
+    Sleeping = 6    UMETA(DisplayName = "Sleeping"),
+    Territorial = 7 UMETA(DisplayName = "Territorial")
 };
 
 USTRUCT(BlueprintType)
-struct FDinosaurNeeds
+struct TRANSPERSONALGAME_API FNPC_DinosaurStats
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Needs")
-    float Hunger = 50.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
+    float Health = 100.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Needs")
-    float Thirst = 50.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
+    float MaxHealth = 100.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Needs")
-    float Energy = 100.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
+    float Damage = 25.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Needs")
-    float Safety = 50.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
+    float Speed = 400.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Needs")
-    float Social = 30.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
+    float SightRange = 2000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Needs")
-    float Comfort = 50.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
+    float HearingRange = 1500.0f;
 
-    FDinosaurNeeds()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
+    float TerritoryRadius = 1000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
+    float AggressionLevel = 0.5f;
+
+    FNPC_DinosaurStats()
     {
-        Hunger = 50.0f;
-        Thirst = 50.0f;
-        Energy = 100.0f;
-        Safety = 50.0f;
-        Social = 30.0f;
-        Comfort = 50.0f;
+        Health = 100.0f;
+        MaxHealth = 100.0f;
+        Damage = 25.0f;
+        Speed = 400.0f;
+        SightRange = 2000.0f;
+        HearingRange = 1500.0f;
+        TerritoryRadius = 1000.0f;
+        AggressionLevel = 0.5f;
     }
 };
 
-USTRUCT(BlueprintType)
-struct FDinosaurRoutine
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Routine")
-    TArray<FVector> PatrolPoints;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Routine")
-    TArray<FVector> FeedingAreas;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Routine")
-    TArray<FVector> WaterSources;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Routine")
-    TArray<FVector> RestingSpots;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Routine")
-    float MorningStartTime = 6.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Routine")
-    float EveningStartTime = 18.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Routine")
-    bool bIsNocturnal = false;
-};
-
 /**
- * Advanced AI Controller for dinosaur NPCs with sophisticated behavior trees,
- * memory systems, social interactions, and daily routines
+ * AI Controller for all dinosaur species in the prehistoric world.
+ * Handles behavior trees, perception, and species-specific AI logic.
  */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API ADinosaurAIController : public AAIController
@@ -121,143 +93,119 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
-    virtual void OnPossess(APawn* InPawn) override;
+    virtual void Possess(APawn* InPawn) override;
 
-    // Core AI Components
+    // AI Components
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI")
-    class UDinosaurMemoryComponent* MemoryComponent;
+    class UBehaviorTreeComponent* BehaviorTreeComponent;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI")
-    class UDinosaurSocialComponent* SocialComponent;
+    class UBlackboardComponent* BlackboardComponent;
 
-    // Behavior Tree Assets
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI")
-    UBehaviorTree* BehaviorTree;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI")
+    class UAIPerceptionComponent* PerceptionComponent;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI")
-    UBlackboardData* BlackboardAsset;
+    // Behavior Trees for different species
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
+    class UBehaviorTree* TRexBehaviorTree;
 
-    // Dinosaur Characteristics
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
+    class UBehaviorTree* RaptorBehaviorTree;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
+    class UBehaviorTree* HerbivoreBehaviorTree;
+
+    // Dinosaur Configuration
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur")
-    EDinosaurPersonality Personality;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur")
-    FDinosaurNeeds CurrentNeeds;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur")
-    FDinosaurRoutine DailyRoutine;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur")
-    float AggressionLevel = 0.5f;
+    ENPC_DinosaurSpecies DinosaurSpecies = ENPC_DinosaurSpecies::TRex;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur")
-    float CuriosityLevel = 0.5f;
+    ENPC_DinosaurState CurrentState = ENPC_DinosaurState::Idle;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur")
-    float FearLevel = 0.3f;
+    FNPC_DinosaurStats DinosaurStats;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur")
-    float TerritorialRadius = 1000.0f;
+    // Territory and Patrol
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory")
+    FVector TerritoryCenter;
 
-    // Perception Configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Perception")
-    float SightRadius = 2000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory")
+    TArray<FVector> PatrolPoints;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Perception")
-    float HearingRadius = 1500.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Territory")
+    int32 CurrentPatrolIndex = 0;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Perception")
-    float PeripheralVisionAngleDegrees = 90.0f;
-
-    // Current State
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    EDinosaurBehaviorState CurrentBehaviorState;
-
-    UPROPERTY(BlueprintReadOnly, Category = "State")
+    // Targets and Threats
+    UPROPERTY(BlueprintReadOnly, Category = "AI")
     AActor* CurrentTarget;
 
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    FVector CurrentDestination;
+    UPROPERTY(BlueprintReadOnly, Category = "AI")
+    AActor* CurrentThreat;
 
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    float StateTimer;
+    UPROPERTY(BlueprintReadOnly, Category = "AI")
+    float LastPlayerSightTime = 0.0f;
 
 public:
-    // Behavior State Management
+    // AI State Management
     UFUNCTION(BlueprintCallable, Category = "AI")
-    void SetBehaviorState(EDinosaurBehaviorState NewState);
+    void SetDinosaurState(ENPC_DinosaurState NewState);
 
     UFUNCTION(BlueprintPure, Category = "AI")
-    EDinosaurBehaviorState GetBehaviorState() const { return CurrentBehaviorState; }
-
-    // Need Management
-    UFUNCTION(BlueprintCallable, Category = "AI")
-    void UpdateNeeds(float DeltaTime);
-
-    UFUNCTION(BlueprintPure, Category = "AI")
-    float GetHighestNeed() const;
-
-    UFUNCTION(BlueprintPure, Category = "AI")
-    bool IsNeedCritical(float Threshold = 20.0f) const;
-
-    // Routine Management
-    UFUNCTION(BlueprintCallable, Category = "AI")
-    FVector GetNearestLocationOfType(const TArray<FVector>& Locations) const;
+    ENPC_DinosaurState GetDinosaurState() const { return CurrentState; }
 
     UFUNCTION(BlueprintCallable, Category = "AI")
-    void UpdateDailyRoutine();
+    void SetTarget(AActor* NewTarget);
 
     UFUNCTION(BlueprintPure, Category = "AI")
-    bool IsTimeForActivity(float StartTime, float EndTime) const;
+    AActor* GetCurrentTarget() const { return CurrentTarget; }
 
-    // Perception Events
+    // Territory Management
+    UFUNCTION(BlueprintCallable, Category = "Territory")
+    void SetTerritoryCenter(FVector NewCenter);
+
+    UFUNCTION(BlueprintCallable, Category = "Territory")
+    void GeneratePatrolPoints(int32 NumPoints = 4);
+
+    UFUNCTION(BlueprintPure, Category = "Territory")
+    FVector GetNextPatrolPoint();
+
+    UFUNCTION(BlueprintPure, Category = "Territory")
+    bool IsInTerritory(FVector Location) const;
+
+    // Combat and Behavior
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    void AttackTarget();
+
+    UFUNCTION(BlueprintCallable, Category = "Behavior")
+    void StartHunting(AActor* Prey);
+
+    UFUNCTION(BlueprintCallable, Category = "Behavior")
+    void StartFleeing(AActor* Threat);
+
+    UFUNCTION(BlueprintPure, Category = "Behavior")
+    bool ShouldAttackPlayer() const;
+
+    UFUNCTION(BlueprintPure, Category = "Behavior")
+    bool ShouldFleeFromPlayer() const;
+
+    // Species-specific behavior
+    UFUNCTION(BlueprintCallable, Category = "Species")
+    void ConfigureForSpecies(ENPC_DinosaurSpecies Species);
+
+protected:
+    // Perception callbacks
     UFUNCTION()
     void OnPerceptionUpdated(const TArray<AActor*>& UpdatedActors);
 
     UFUNCTION()
-    void OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus);
+    void OnTargetPerceptionUpdated(AActor* Actor, struct FAIStimulus Stimulus);
 
-    // Social Behavior
-    UFUNCTION(BlueprintCallable, Category = "Social")
-    void InitiateSocialInteraction(AActor* OtherDinosaur);
-
-    UFUNCTION(BlueprintCallable, Category = "Social")
-    bool CanInteractWith(AActor* OtherActor) const;
-
-    // Memory Access
-    UFUNCTION(BlueprintPure, Category = "Memory")
-    bool HasMemoryOf(AActor* Actor) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Memory")
-    void RememberLocation(FVector Location, const FString& LocationType);
-
-    UFUNCTION(BlueprintCallable, Category = "Memory")
-    FVector RecallLocationOfType(const FString& LocationType) const;
-
-    // Debugging
-    UFUNCTION(BlueprintCallable, Category = "Debug")
-    void DebugDrawBehaviorInfo() const;
-
-protected:
-    // Internal behavior logic
-    void InitializePerception();
-    void InitializeBehaviorTree();
+    // Internal methods
+    void SetupPerception();
+    void StartBehaviorTree();
     void UpdateBlackboard();
-    void ProcessEmergentBehavior();
-    
-    // Need decay rates
-    float HungerDecayRate = 5.0f;
-    float ThirstDecayRate = 8.0f;
-    float EnergyDecayRate = 3.0f;
-    float SafetyRecoveryRate = 2.0f;
 
-    // Timers
-    float NeedUpdateTimer = 0.0f;
-    float RoutineUpdateTimer = 0.0f;
-    float PerceptionUpdateTimer = 0.0f;
-
-    // Cached references
-    class ADinosaurCharacter* DinosaurPawn;
-    class UWorld* CachedWorld;
+private:
+    float LastStateChangeTime = 0.0f;
+    float StateChangeCooldown = 2.0f;
 };
