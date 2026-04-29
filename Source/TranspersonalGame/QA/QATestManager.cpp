@@ -1,366 +1,405 @@
 #include "QATestManager.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "GameFramework/GameModeBase.h"
+#include "GameFramework/Actor.h"
 #include "GameFramework/Character.h"
 #include "Components/ActorComponent.h"
-#include "Engine/Level.h"
 #include "HAL/PlatformFilemanager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/DateTime.h"
+#include "UObject/UObjectGlobals.h"
+#include "Engine/ObjectLibrary.h"
 
-UQATestManager::UQATestManager()
+UQA_TestManager::UQA_TestManager()
 {
-    bAutoRunOnStartup = false;
+    TestTimeout = 30.0f;
     bVerboseLogging = true;
-    MaxReportHistory = 10;
-    CurrentTestName = TEXT("");
-    TestStartTime = 0.0;
+    bAutoSaveReports = true;
 }
 
-void UQATestManager::Initialize(FSubsystemCollectionBase& Collection)
+FQA_ValidationReport UQA_TestManager::RunFullValidation()
 {
-    Super::Initialize(Collection);
+    UE_LOG(LogTemp, Warning, TEXT("QA Test Manager: Starting full validation suite"));
     
-    UE_LOG(LogTemp, Log, TEXT("QA Test Manager initialized"));
-    
-    if (bAutoRunOnStartup)
-    {
-        // Delay auto-run to allow other systems to initialize
-        FTimerHandle TimerHandle;
-        GetWorld()->GetTimerManager().SetTimer(TimerHandle, this, &UQATestManager::RunAllTests, 2.0f, false);
-    }
-}
-
-void UQATestManager::Deinitialize()
-{
-    UE_LOG(LogTemp, Log, TEXT("QA Test Manager deinitialized"));
-    Super::Deinitialize();
-}
-
-void UQATestManager::RunAllTests()
-{
-    UE_LOG(LogTemp, Warning, TEXT("=== QA TEST MANAGER - RUNNING ALL TESTS ==="));
-    
-    ClearTestResults();
+    CurrentReport = FQA_ValidationReport();
     CurrentReport.ReportTimestamp = FDateTime::Now();
     
-    double StartTime = FPlatformTime::Seconds();
+    // Core class validation tests
+    TArray<FString> CoreClasses = {
+        TEXT("TranspersonalCharacter"),
+        TEXT("TranspersonalGameMode"),
+        TEXT("TranspersonalGameState"),
+        TEXT("PCGWorldGenerator"),
+        TEXT("FoliageManager"),
+        TEXT("CrowdSimulationManager"),
+        TEXT("ProceduralWorldManager"),
+        TEXT("BuildIntegrationManager")
+    };
     
-    // Run all test categories
-    TestCoreClasses();
-    TestCharacterSystems();
-    TestWorldGeneration();
-    TestAISystems();
-    TestCombatSystems();
-    TestAudioSystems();
-    TestVFXSystems();
-    
-    CurrentReport.TotalExecutionTime = FPlatformTime::Seconds() - StartTime;
-    
-    // Count results
-    CurrentReport.PassCount = 0;
-    CurrentReport.FailCount = 0;
-    CurrentReport.WarningCount = 0;
-    
-    for (const FQA_TestCase& TestCase : CurrentReport.TestCases)
+    for (const FString& ClassName : CoreClasses)
     {
-        switch (TestCase.Result)
+        FQA_TestCase TestResult = ValidateClassLoading(ClassName);
+        CurrentReport.TestCases.Add(TestResult);
+        
+        switch (TestResult.Result)
         {
-            case EQA_TestResult::Pass:
-                CurrentReport.PassCount++;
+            case EQA_TestResult::Passed:
+                CurrentReport.PassedTests++;
                 break;
-            case EQA_TestResult::Fail:
-                CurrentReport.FailCount++;
+            case EQA_TestResult::Failed:
+                CurrentReport.FailedTests++;
                 break;
             case EQA_TestResult::Warning:
-                CurrentReport.WarningCount++;
+                CurrentReport.WarningTests++;
                 break;
         }
+        
+        CurrentReport.TotalExecutionTime += TestResult.ExecutionTime;
     }
     
-    // Add to history
-    ReportHistory.Add(CurrentReport);
-    if (ReportHistory.Num() > MaxReportHistory)
+    // Map validation
+    FQA_TestCase MapTest = ValidateMinPlayableMap();
+    CurrentReport.TestCases.Add(MapTest);
+    if (MapTest.Result == EQA_TestResult::Passed) CurrentReport.PassedTests++;
+    else if (MapTest.Result == EQA_TestResult::Failed) CurrentReport.FailedTests++;
+    else CurrentReport.WarningTests++;
+    CurrentReport.TotalExecutionTime += MapTest.ExecutionTime;
+    
+    // Character movement validation
+    FQA_TestCase MovementTest = ValidateCharacterMovement();
+    CurrentReport.TestCases.Add(MovementTest);
+    if (MovementTest.Result == EQA_TestResult::Passed) CurrentReport.PassedTests++;
+    else if (MovementTest.Result == EQA_TestResult::Failed) CurrentReport.FailedTests++;
+    else CurrentReport.WarningTests++;
+    CurrentReport.TotalExecutionTime += MovementTest.ExecutionTime;
+    
+    // Performance validation
+    FQA_TestCase FrameRateTest = ValidateFrameRate();
+    CurrentReport.TestCases.Add(FrameRateTest);
+    if (FrameRateTest.Result == EQA_TestResult::Passed) CurrentReport.PassedTests++;
+    else if (FrameRateTest.Result == EQA_TestResult::Failed) CurrentReport.FailedTests++;
+    else CurrentReport.WarningTests++;
+    CurrentReport.TotalExecutionTime += FrameRateTest.ExecutionTime;
+    
+    // Integration tests
+    FQA_TestCase IntegrationTest = ValidatePlayerCharacterIntegration();
+    CurrentReport.TestCases.Add(IntegrationTest);
+    if (IntegrationTest.Result == EQA_TestResult::Passed) CurrentReport.PassedTests++;
+    else if (IntegrationTest.Result == EQA_TestResult::Failed) CurrentReport.FailedTests++;
+    else CurrentReport.WarningTests++;
+    CurrentReport.TotalExecutionTime += IntegrationTest.ExecutionTime;
+    
+    UE_LOG(LogTemp, Warning, TEXT("QA Validation Complete: %d Passed, %d Failed, %d Warnings"), 
+           CurrentReport.PassedTests, CurrentReport.FailedTests, CurrentReport.WarningTests);
+    
+    if (bAutoSaveReports)
     {
-        ReportHistory.RemoveAt(0);
+        FString ReportPath = FPaths::ProjectSavedDir() / TEXT("QA") / TEXT("ValidationReport.txt");
+        SaveValidationReport(CurrentReport, ReportPath);
     }
     
-    UE_LOG(LogTemp, Warning, TEXT("QA Tests Complete - Pass: %d, Fail: %d, Warning: %d"), 
-           CurrentReport.PassCount, CurrentReport.FailCount, CurrentReport.WarningCount);
-}
-
-void UQATestManager::RunModuleTests(const FString& ModuleName)
-{
-    UE_LOG(LogTemp, Log, TEXT("Running tests for module: %s"), *ModuleName);
-    
-    if (ModuleName == TEXT("Core"))
-    {
-        TestCoreClasses();
-    }
-    else if (ModuleName == TEXT("Characters"))
-    {
-        TestCharacterSystems();
-    }
-    else if (ModuleName == TEXT("WorldGeneration"))
-    {
-        TestWorldGeneration();
-    }
-    else if (ModuleName == TEXT("AI"))
-    {
-        TestAISystems();
-    }
-    else if (ModuleName == TEXT("Combat"))
-    {
-        TestCombatSystems();
-    }
-    else if (ModuleName == TEXT("Audio"))
-    {
-        TestAudioSystems();
-    }
-    else if (ModuleName == TEXT("VFX"))
-    {
-        TestVFXSystems();
-    }
-    else
-    {
-        LogTestResult(FString::Printf(TEXT("Module_%s"), *ModuleName), false, TEXT("Unknown module"));
-    }
-}
-
-FQA_ValidationReport UQATestManager::GetLastReport() const
-{
     return CurrentReport;
 }
 
-void UQATestManager::ClearTestResults()
+FQA_TestCase UQA_TestManager::ValidateClassLoading(const FString& ClassName)
 {
-    CurrentReport = FQA_ValidationReport();
-}
-
-void UQATestManager::TestCoreClasses()
-{
-    StartTest(TEXT("Core_GameMode"));
-    UWorld* World = GetWorld();
-    if (World && World->GetAuthGameMode())
+    return ExecuteTest(FString::Printf(TEXT("Class Loading: %s"), *ClassName), [this, ClassName]() -> bool
     {
-        FinishCurrentTest(true);
-    }
-    else
-    {
-        FinishCurrentTest(false, TEXT("No GameMode found"));
-    }
-    
-    StartTest(TEXT("Core_GameState"));
-    if (World && World->GetGameState())
-    {
-        FinishCurrentTest(true);
-    }
-    else
-    {
-        FinishCurrentTest(false, TEXT("No GameState found"));
-    }
-    
-    StartTest(TEXT("Core_PlayerController"));
-    if (World && World->GetFirstPlayerController())
-    {
-        FinishCurrentTest(true);
-    }
-    else
-    {
-        FinishCurrentTest(false, TEXT("No PlayerController found"));
-    }
-}
-
-void UQATestManager::TestCharacterSystems()
-{
-    StartTest(TEXT("Character_PlayerPawn"));
-    UWorld* World = GetWorld();
-    if (World)
-    {
-        APlayerController* PC = World->GetFirstPlayerController();
-        if (PC && PC->GetPawn())
+        FString FullClassName = FString::Printf(TEXT("/Script/TranspersonalGame.%s"), *ClassName);
+        
+        UClass* LoadedClass = LoadClass<UObject>(nullptr, *FullClassName);
+        if (!LoadedClass)
         {
-            FinishCurrentTest(true);
+            UE_LOG(LogTemp, Error, TEXT("Failed to load class: %s"), *FullClassName);
+            return false;
         }
-        else
+        
+        // Try to get class default object
+        UObject* CDO = LoadedClass->GetDefaultObject();
+        if (!CDO)
         {
-            FinishCurrentTest(false, TEXT("No player pawn found"));
+            UE_LOG(LogTemp, Warning, TEXT("Class loaded but CDO unavailable: %s"), *FullClassName);
+            return false;
         }
-    }
-    else
-    {
-        FinishCurrentTest(false, TEXT("No world context"));
-    }
-    
-    StartTest(TEXT("Character_MovementComponent"));
-    // Test character movement component exists
-    FinishCurrentTest(true, TEXT("Movement component test placeholder"));
-}
-
-void UQATestManager::TestWorldGeneration()
-{
-    StartTest(TEXT("World_LevelLoaded"));
-    UWorld* World = GetWorld();
-    if (World && World->GetCurrentLevel())
-    {
-        FinishCurrentTest(true);
-    }
-    else
-    {
-        FinishCurrentTest(false, TEXT("No level loaded"));
-    }
-    
-    StartTest(TEXT("World_ActorCount"));
-    if (World)
-    {
-        int32 ActorCount = World->GetCurrentLevel()->Actors.Num();
-        if (ActorCount > 0)
-        {
-            FinishCurrentTest(true, FString::Printf(TEXT("Found %d actors"), ActorCount));
-        }
-        else
-        {
-            FinishCurrentTest(false, TEXT("No actors in level"));
-        }
-    }
-    else
-    {
-        FinishCurrentTest(false, TEXT("No world context"));
-    }
-}
-
-void UQATestManager::TestAISystems()
-{
-    StartTest(TEXT("AI_SystemsPlaceholder"));
-    FinishCurrentTest(true, TEXT("AI systems test placeholder"));
-}
-
-void UQATestManager::TestCombatSystems()
-{
-    StartTest(TEXT("Combat_SystemsPlaceholder"));
-    FinishCurrentTest(true, TEXT("Combat systems test placeholder"));
-}
-
-void UQATestManager::TestAudioSystems()
-{
-    StartTest(TEXT("Audio_SystemsPlaceholder"));
-    FinishCurrentTest(true, TEXT("Audio systems test placeholder"));
-}
-
-void UQATestManager::TestVFXSystems()
-{
-    StartTest(TEXT("VFX_SystemsPlaceholder"));
-    FinishCurrentTest(true, TEXT("VFX systems test placeholder"));
-}
-
-bool UQATestManager::ValidateActorInLevel(TSubclassOf<AActor> ActorClass, const FString& TestName)
-{
-    UWorld* World = GetWorld();
-    if (!World || !ActorClass)
-    {
-        LogTestResult(TestName, false, TEXT("Invalid world or actor class"));
-        return false;
-    }
-    
-    for (TActorIterator<AActor> ActorItr(World, ActorClass); ActorItr; ++ActorItr)
-    {
-        AActor* Actor = *ActorItr;
-        if (Actor && IsValid(Actor))
-        {
-            LogTestResult(TestName, true, FString::Printf(TEXT("Found actor: %s"), *Actor->GetName()));
-            return true;
-        }
-    }
-    
-    LogTestResult(TestName, false, TEXT("No valid actors of specified class found"));
-    return false;
-}
-
-bool UQATestManager::ValidateComponentOnActor(AActor* Actor, TSubclassOf<UActorComponent> ComponentClass, const FString& TestName)
-{
-    if (!Actor || !ComponentClass)
-    {
-        LogTestResult(TestName, false, TEXT("Invalid actor or component class"));
-        return false;
-    }
-    
-    UActorComponent* Component = Actor->GetComponentByClass(ComponentClass);
-    if (Component && IsValid(Component))
-    {
-        LogTestResult(TestName, true, FString::Printf(TEXT("Found component: %s"), *Component->GetName()));
+        
+        UE_LOG(LogTemp, Log, TEXT("Successfully validated class: %s"), *FullClassName);
         return true;
-    }
-    
-    LogTestResult(TestName, false, TEXT("Component not found on actor"));
-    return false;
+    });
 }
 
-void UQATestManager::LogTestResult(const FString& TestName, bool bPassed, const FString& ErrorMessage)
+FQA_TestCase UQA_TestManager::ValidateActorSpawning(UClass* ActorClass, FVector SpawnLocation)
 {
-    EQA_TestResult Result = bPassed ? EQA_TestResult::Pass : EQA_TestResult::Fail;
-    AddTestCase(TestName, TEXT("Manual test result"), Result, ErrorMessage, 0.0f);
-    
-    if (bVerboseLogging)
+    if (!ActorClass)
     {
-        if (bPassed)
-        {
-            UE_LOG(LogTemp, Log, TEXT("QA TEST PASS: %s"), *TestName);
-        }
-        else
-        {
-            UE_LOG(LogTemp, Warning, TEXT("QA TEST FAIL: %s - %s"), *TestName, *ErrorMessage);
-        }
+        FQA_TestCase FailedTest;
+        FailedTest.TestName = TEXT("Actor Spawning");
+        FailedTest.Description = TEXT("Validate actor spawning capability");
+        FailedTest.Result = EQA_TestResult::Failed;
+        FailedTest.ErrorMessage = TEXT("ActorClass is null");
+        return FailedTest;
     }
+    
+    return ExecuteTest(FString::Printf(TEXT("Actor Spawning: %s"), *ActorClass->GetName()), [this, ActorClass, SpawnLocation]() -> bool
+    {
+        UWorld* World = GEngine->GetWorldFromContextObject(this, EGetWorldErrorMode::LogAndReturnNull);
+        if (!World)
+        {
+            UE_LOG(LogTemp, Error, TEXT("No valid world context for spawning"));
+            return false;
+        }
+        
+        FActorSpawnParameters SpawnParams;
+        SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+        
+        AActor* SpawnedActor = World->SpawnActor<AActor>(ActorClass, SpawnLocation, FRotator::ZeroRotator, SpawnParams);
+        if (!SpawnedActor)
+        {
+            UE_LOG(LogTemp, Error, TEXT("Failed to spawn actor of class: %s"), *ActorClass->GetName());
+            return false;
+        }
+        
+        // Clean up test actor
+        SpawnedActor->Destroy();
+        UE_LOG(LogTemp, Log, TEXT("Successfully spawned and cleaned up actor: %s"), *ActorClass->GetName());
+        return true;
+    });
 }
 
-void UQATestManager::AddTestCase(const FString& TestName, const FString& Description, EQA_TestResult Result, const FString& ErrorMessage, float ExecutionTime)
+FQA_TestCase UQA_TestManager::ValidateMinPlayableMap()
+{
+    return ExecuteTest(TEXT("MinPlayableMap Validation"), [this]() -> bool
+    {
+        UWorld* World = GEngine->GetWorldFromContextObject(this, EGetWorldErrorMode::LogAndReturnNull);
+        if (!World)
+        {
+            UE_LOG(LogTemp, Error, TEXT("No valid world context"));
+            return false;
+        }
+        
+        // Count actors in the level
+        int32 ActorCount = 0;
+        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+        {
+            ActorCount++;
+        }
+        
+        if (ActorCount < 10)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("MinPlayableMap has fewer actors than expected: %d"), ActorCount);
+            return false;
+        }
+        
+        UE_LOG(LogTemp, Log, TEXT("MinPlayableMap validation passed with %d actors"), ActorCount);
+        return true;
+    });
+}
+
+FQA_TestCase UQA_TestManager::ValidateCharacterMovement()
+{
+    return ExecuteTest(TEXT("Character Movement Validation"), [this]() -> bool
+    {
+        UClass* CharacterClass = LoadClass<ACharacter>(nullptr, TEXT("/Script/TranspersonalGame.TranspersonalCharacter"));
+        if (!CharacterClass)
+        {
+            UE_LOG(LogTemp, Error, TEXT("TranspersonalCharacter class not found"));
+            return false;
+        }
+        
+        UWorld* World = GEngine->GetWorldFromContextObject(this, EGetWorldErrorMode::LogAndReturnNull);
+        if (!World)
+        {
+            UE_LOG(LogTemp, Error, TEXT("No valid world context"));
+            return false;
+        }
+        
+        // Test character spawning
+        FActorSpawnParameters SpawnParams;
+        SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+        
+        ACharacter* TestCharacter = World->SpawnActor<ACharacter>(CharacterClass, FVector(0, 0, 100), FRotator::ZeroRotator, SpawnParams);
+        if (!TestCharacter)
+        {
+            UE_LOG(LogTemp, Error, TEXT("Failed to spawn test character"));
+            return false;
+        }
+        
+        // Validate movement component
+        if (!TestCharacter->GetCharacterMovement())
+        {
+            UE_LOG(LogTemp, Error, TEXT("Character has no movement component"));
+            TestCharacter->Destroy();
+            return false;
+        }
+        
+        // Clean up
+        TestCharacter->Destroy();
+        UE_LOG(LogTemp, Log, TEXT("Character movement validation passed"));
+        return true;
+    });
+}
+
+FQA_TestCase UQA_TestManager::ValidateFrameRate()
+{
+    return ExecuteTest(TEXT("Frame Rate Validation"), [this]() -> bool
+    {
+        // Simple frame rate check - in a real scenario we'd measure over time
+        float CurrentFPS = 1.0f / FApp::GetDeltaTime();
+        
+        if (CurrentFPS < 30.0f)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Frame rate below target: %.2f FPS"), CurrentFPS);
+            return false;
+        }
+        
+        UE_LOG(LogTemp, Log, TEXT("Frame rate validation passed: %.2f FPS"), CurrentFPS);
+        return true;
+    });
+}
+
+FQA_TestCase UQA_TestManager::ValidatePlayerCharacterIntegration()
+{
+    return ExecuteTest(TEXT("Player Character Integration"), [this]() -> bool
+    {
+        UWorld* World = GEngine->GetWorldFromContextObject(this, EGetWorldErrorMode::LogAndReturnNull);
+        if (!World)
+        {
+            return false;
+        }
+        
+        // Check if we have a valid game mode
+        AGameModeBase* GameMode = World->GetAuthGameMode();
+        if (!GameMode)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("No game mode found in world"));
+            return false;
+        }
+        
+        UE_LOG(LogTemp, Log, TEXT("Player character integration validation passed"));
+        return true;
+    });
+}
+
+FQA_TestCase UQA_TestManager::ExecuteTest(const FString& TestName, TFunction<bool()> TestFunction)
 {
     FQA_TestCase TestCase;
     TestCase.TestName = TestName;
-    TestCase.Description = Description;
-    TestCase.Result = Result;
-    TestCase.ErrorMessage = ErrorMessage;
-    TestCase.ExecutionTime = ExecutionTime;
+    TestCase.Description = FString::Printf(TEXT("Automated test: %s"), *TestName);
     
-    CurrentReport.TestCases.Add(TestCase);
-}
-
-void UQATestManager::StartTest(const FString& TestName)
-{
-    CurrentTestName = TestName;
-    TestStartTime = FPlatformTime::Seconds();
+    float StartTime = FPlatformTime::Seconds();
+    
+    try
+    {
+        bool bTestPassed = TestFunction();
+        TestCase.Result = bTestPassed ? EQA_TestResult::Passed : EQA_TestResult::Failed;
+        
+        if (!bTestPassed)
+        {
+            TestCase.ErrorMessage = TEXT("Test function returned false");
+        }
+    }
+    catch (...)
+    {
+        TestCase.Result = EQA_TestResult::Failed;
+        TestCase.ErrorMessage = TEXT("Test threw an exception");
+        UE_LOG(LogTemp, Error, TEXT("Test %s threw an exception"), *TestName);
+    }
+    
+    TestCase.ExecutionTime = FPlatformTime::Seconds() - StartTime;
     
     if (bVerboseLogging)
     {
-        UE_LOG(LogTemp, Log, TEXT("QA TEST START: %s"), *TestName);
+        LogTestResult(TestCase);
+    }
+    
+    return TestCase;
+}
+
+void UQA_TestManager::LogTestResult(const FQA_TestCase& TestCase)
+{
+    FString ResultString;
+    switch (TestCase.Result)
+    {
+        case EQA_TestResult::Passed:
+            ResultString = TEXT("PASSED");
+            break;
+        case EQA_TestResult::Failed:
+            ResultString = TEXT("FAILED");
+            break;
+        case EQA_TestResult::Warning:
+            ResultString = TEXT("WARNING");
+            break;
+        default:
+            ResultString = TEXT("NOT_RUN");
+            break;
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("QA Test [%s]: %s (%.3fs) - %s"), 
+           *ResultString, *TestCase.TestName, TestCase.ExecutionTime, 
+           TestCase.ErrorMessage.IsEmpty() ? TEXT("OK") : *TestCase.ErrorMessage);
+}
+
+void UQA_TestManager::SaveValidationReport(const FQA_ValidationReport& Report, const FString& FilePath)
+{
+    FString ReportContent;
+    ReportContent += FString::Printf(TEXT("QA Validation Report - %s\n"), *Report.ReportTimestamp.ToString());
+    ReportContent += TEXT("=====================================\n\n");
+    ReportContent += FString::Printf(TEXT("Summary: %d Passed, %d Failed, %d Warnings\n"), 
+                                   Report.PassedTests, Report.FailedTests, Report.WarningTests);
+    ReportContent += FString::Printf(TEXT("Total Execution Time: %.3f seconds\n\n"), Report.TotalExecutionTime);
+    
+    ReportContent += TEXT("Test Details:\n");
+    ReportContent += TEXT("-------------\n");
+    
+    for (const FQA_TestCase& TestCase : Report.TestCases)
+    {
+        FString ResultString;
+        switch (TestCase.Result)
+        {
+            case EQA_TestResult::Passed: ResultString = TEXT("PASSED"); break;
+            case EQA_TestResult::Failed: ResultString = TEXT("FAILED"); break;
+            case EQA_TestResult::Warning: ResultString = TEXT("WARNING"); break;
+            default: ResultString = TEXT("NOT_RUN"); break;
+        }
+        
+        ReportContent += FString::Printf(TEXT("[%s] %s (%.3fs)\n"), 
+                                       *ResultString, *TestCase.TestName, TestCase.ExecutionTime);
+        
+        if (!TestCase.ErrorMessage.IsEmpty())
+        {
+            ReportContent += FString::Printf(TEXT("    Error: %s\n"), *TestCase.ErrorMessage);
+        }
+        ReportContent += TEXT("\n");
+    }
+    
+    // Ensure directory exists
+    FString DirectoryPath = FPaths::GetPath(FilePath);
+    IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
+    if (!PlatformFile.DirectoryExists(*DirectoryPath))
+    {
+        PlatformFile.CreateDirectoryTree(*DirectoryPath);
+    }
+    
+    if (!FFileHelper::SaveStringToFile(ReportContent, *FilePath))
+    {
+        UE_LOG(LogTemp, Error, TEXT("Failed to save validation report to: %s"), *FilePath);
+    }
+    else
+    {
+        UE_LOG(LogTemp, Log, TEXT("Validation report saved to: %s"), *FilePath);
     }
 }
 
-void UQATestManager::FinishCurrentTest(bool bPassed, const FString& ErrorMessage)
-{
-    if (CurrentTestName.IsEmpty())
-    {
-        return;
-    }
-    
-    float ExecutionTime = FPlatformTime::Seconds() - TestStartTime;
-    EQA_TestResult Result = bPassed ? EQA_TestResult::Pass : EQA_TestResult::Fail;
-    
-    AddTestCase(CurrentTestName, TEXT("Automated test"), Result, ErrorMessage, ExecutionTime);
-    
-    if (bVerboseLogging)
-    {
-        if (bPassed)
-        {
-            UE_LOG(LogTemp, Log, TEXT("QA TEST PASS: %s (%.3fs)"), *CurrentTestName, ExecutionTime);
-        }
-        else
-        {
-            UE_LOG(LogTemp, Warning, TEXT("QA TEST FAIL: %s - %s (%.3fs)"), *CurrentTestName, *ErrorMessage, ExecutionTime);
-        }
-    }
-    
-    CurrentTestName = TEXT("");
-    TestStartTime = 0.0;
-}
+// Stub implementations for remaining functions
+FQA_TestCase UQA_TestManager::ValidateComponentFunctionality(UActorComponent* Component) { return FQA_TestCase(); }
+FQA_TestCase UQA_TestManager::ValidateDinosaurAI() { return FQA_TestCase(); }
+FQA_TestCase UQA_TestManager::ValidateWorldGeneration() { return FQA_TestCase(); }
+FQA_TestCase UQA_TestManager::ValidateAudioSystems() { return FQA_TestCase(); }
+FQA_TestCase UQA_TestManager::ValidateVFXSystems() { return FQA_TestCase(); }
+FQA_TestCase UQA_TestManager::ValidateMemoryUsage() { return FQA_TestCase(); }
+FQA_TestCase UQA_TestManager::ValidateLoadTimes() { return FQA_TestCase(); }
+FQA_TestCase UQA_TestManager::ValidateWorldActorIntegration() { return FQA_TestCase(); }
+FQA_TestCase UQA_TestManager::ValidateCrowdSimulationIntegration() { return FQA_TestCase(); }
+TArray<FString> UQA_TestManager::GetAllTranspersonalGameClasses() { return TArray<FString>(); }
+bool UQA_TestManager::IsClassValid(UClass* Class) { return Class != nullptr; }
+bool UQA_TestManager::CanSpawnActor(UClass* ActorClass) { return ActorClass != nullptr; }
+float UQA_TestManager::MeasureExecutionTime(TFunction<void()> Function) { return 0.0f; }
