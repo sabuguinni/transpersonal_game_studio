@@ -4,95 +4,94 @@
 #include "GameFramework/Actor.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/SceneComponent.h"
-#include "Engine/World.h"
+#include "Engine/StaticMesh.h"
+#include "Materials/MaterialInterface.h"
 #include "../SharedTypes.h"
 #include "ArchitectureManager.generated.h"
 
+// Prehistoric structure types
 UENUM(BlueprintType)
-enum class EArch_DwellingType : uint8
+enum class EArch_StructureType : uint8
 {
-    StoneCircular UMETA(DisplayName = "Stone Circular Hut"),
-    CaveInterior UMETA(DisplayName = "Cave Dwelling"),
+    None            UMETA(DisplayName = "None"),
+    CircularHut     UMETA(DisplayName = "Circular Hut"),
+    CaveDwelling    UMETA(DisplayName = "Cave Dwelling"),
+    RockShelter     UMETA(DisplayName = "Rock Shelter"),
     ElevatedPlatform UMETA(DisplayName = "Elevated Platform"),
-    CommunalLonghouse UMETA(DisplayName = "Communal Longhouse"),
-    TemporaryLeanTo UMETA(DisplayName = "Temporary Lean-To"),
-    UndergroundBurrow UMETA(DisplayName = "Underground Burrow")
+    StoragePit      UMETA(DisplayName = "Storage Pit"),
+    FirePit         UMETA(DisplayName = "Fire Pit"),
+    WaterCatchment  UMETA(DisplayName = "Water Catchment")
 };
 
+// Construction materials for prehistoric structures
 UENUM(BlueprintType)
-enum class EArch_InteriorPropType : uint8
+enum class EArch_MaterialType : uint8
 {
-    FirePit UMETA(DisplayName = "Fire Pit"),
-    SleepingArea UMETA(DisplayName = "Sleeping Area"),
-    StorageBasket UMETA(DisplayName = "Storage Basket"),
-    ToolRack UMETA(DisplayName = "Tool Rack"),
-    CookingArea UMETA(DisplayName = "Cooking Area"),
-    WorkBench UMETA(DisplayName = "Work Bench"),
-    WaterContainer UMETA(DisplayName = "Water Container"),
-    FoodStorage UMETA(DisplayName = "Food Storage")
+    Stone           UMETA(DisplayName = "Stone"),
+    Wood            UMETA(DisplayName = "Wood"),
+    Thatch          UMETA(DisplayName = "Thatch"),
+    AnimalHide      UMETA(DisplayName = "Animal Hide"),
+    Clay            UMETA(DisplayName = "Clay"),
+    Bone            UMETA(DisplayName = "Bone"),
+    Vine            UMETA(DisplayName = "Vine")
 };
 
+// Structure condition states
+UENUM(BlueprintType)
+enum class EArch_StructureCondition : uint8
+{
+    New             UMETA(DisplayName = "New"),
+    Good            UMETA(DisplayName = "Good"),
+    Weathered       UMETA(DisplayName = "Weathered"),
+    Damaged         UMETA(DisplayName = "Damaged"),
+    Ruined          UMETA(DisplayName = "Ruined"),
+    Abandoned       UMETA(DisplayName = "Abandoned")
+};
+
+// Prehistoric structure data
 USTRUCT(BlueprintType)
-struct FArch_DwellingConfig
+struct TRANSPERSONALGAME_API FArch_StructureData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dwelling")
-    EArch_DwellingType DwellingType = EArch_DwellingType::StoneCircular;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
+    EArch_StructureType StructureType = EArch_StructureType::None;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dwelling")
-    FVector Size = FVector(400.0f, 400.0f, 300.0f);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
+    EArch_MaterialType PrimaryMaterial = EArch_MaterialType::Stone;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dwelling")
-    int32 MaxOccupants = 4;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
+    EArch_StructureCondition Condition = EArch_StructureCondition::Good;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dwelling")
-    bool bHasFirePit = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
+    float StructureRadius = 300.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dwelling")
-    bool bHasStorage = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
+    float StructureHeight = 250.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dwelling")
-    float StructuralIntegrity = 100.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
+    int32 OccupantCapacity = 2;
 
-    FArch_DwellingConfig()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
+    bool bHasFirePit = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
+    bool bHasStorage = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
+    bool bIsWeatherproof = false;
+
+    FArch_StructureData()
     {
-        DwellingType = EArch_DwellingType::StoneCircular;
-        Size = FVector(400.0f, 400.0f, 300.0f);
-        MaxOccupants = 4;
+        StructureType = EArch_StructureType::CircularHut;
+        PrimaryMaterial = EArch_MaterialType::Stone;
+        Condition = EArch_StructureCondition::Good;
+        StructureRadius = 300.0f;
+        StructureHeight = 250.0f;
+        OccupantCapacity = 2;
         bHasFirePit = true;
         bHasStorage = true;
-        StructuralIntegrity = 100.0f;
-    }
-};
-
-USTRUCT(BlueprintType)
-struct FArch_InteriorProp
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
-    EArch_InteriorPropType PropType = EArch_InteriorPropType::FirePit;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
-    FVector RelativeLocation = FVector::ZeroVector;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
-    FRotator RelativeRotation = FRotator::ZeroRotator;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
-    FVector Scale = FVector::OneVector;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
-    bool bIsActive = true;
-
-    FArch_InteriorProp()
-    {
-        PropType = EArch_InteriorPropType::FirePit;
-        RelativeLocation = FVector::ZeroVector;
-        RelativeRotation = FRotator::ZeroRotator;
-        Scale = FVector::OneVector;
-        bIsActive = true;
+        bIsWeatherproof = false;
     }
 };
 
@@ -107,77 +106,104 @@ public:
 protected:
     virtual void BeginPlay() override;
 
+    // Root component
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     USceneComponent* RootSceneComponent;
 
+    // Main structure mesh
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UStaticMeshComponent* StructureMesh;
+
+    // Interior components
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UStaticMeshComponent* FirePitMesh;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UStaticMeshComponent* StorageMesh;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UStaticMeshComponent* BeddingMesh;
+
+    // Structure configuration
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    FArch_DwellingConfig DwellingConfig;
+    FArch_StructureData StructureData;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    TArray<FArch_InteriorProp> InteriorProps;
+    // Material references
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
+    UMaterialInterface* StoneMaterial;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Architecture")
-    TArray<UStaticMeshComponent*> StructuralComponents;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
+    UMaterialInterface* WoodMaterial;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Architecture")
-    TArray<UStaticMeshComponent*> InteriorComponents;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
+    UMaterialInterface* ThatchMaterial;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
+    UMaterialInterface* HideMaterial;
 
 public:
     virtual void Tick(float DeltaTime) override;
 
+    // Structure management functions
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void BuildDwelling(EArch_DwellingType DwellingType, FVector Size);
-
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void AddInteriorProp(EArch_InteriorPropType PropType, FVector Location, FRotator Rotation);
+    void SetStructureType(EArch_StructureType NewType);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void RemoveInteriorProp(int32 PropIndex);
+    void SetStructureMaterial(EArch_MaterialType NewMaterial);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void RepairStructure(float RepairAmount);
+    void SetStructureCondition(EArch_StructureCondition NewCondition);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void DamageStructure(float DamageAmount);
+    void UpdateStructureAppearance();
 
-    UFUNCTION(BlueprintPure, Category = "Architecture")
-    float GetStructuralIntegrity() const { return DwellingConfig.StructuralIntegrity; }
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    void AddInteriorElement(const FString& ElementType);
 
-    UFUNCTION(BlueprintPure, Category = "Architecture")
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    void RemoveInteriorElement(const FString& ElementType);
+
+    // Utility functions
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
     bool CanAccommodateOccupants(int32 NumOccupants) const;
 
-    UFUNCTION(BlueprintPure, Category = "Architecture")
-    FVector GetDwellingSize() const { return DwellingConfig.Size; }
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    float GetStructureIntegrity() const;
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void SetDwellingConfig(const FArch_DwellingConfig& NewConfig);
+    bool IsWeatherproof() const;
 
-protected:
-    UFUNCTION()
-    void CreateStructuralComponents();
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    FVector GetInteriorCenter() const;
 
-    UFUNCTION()
-    void CreateInteriorComponents();
+    // Construction functions
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Architecture")
+    void ConstructCircularHut();
 
-    UFUNCTION()
-    void UpdateStructuralIntegrity();
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Architecture")
+    void ConstructRockShelter();
 
-    UFUNCTION()
-    UStaticMeshComponent* CreateMeshComponent(const FString& ComponentName);
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Architecture")
+    void ConstructElevatedPlatform();
 
-    UFUNCTION()
-    void SetupStoneCircularHut();
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Architecture")
+    void AddFirePit();
 
-    UFUNCTION()
-    void SetupElevatedPlatform();
-
-    UFUNCTION()
-    void SetupCommunalLonghouse();
-
-    UFUNCTION()
-    void SetupCaveInterior();
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Architecture")
+    void AddStorageArea();
 
 private:
-    float LastIntegrityCheck;
-    bool bNeedsStructuralUpdate;
+    // Internal helper functions
+    void InitializeComponents();
+    void SetupDefaultMaterials();
+    void ApplyMaterialToStructure();
+    void UpdateInteriorLayout();
+    void CalculateStructureDimensions();
+    
+    // Interior element management
+    TArray<UStaticMeshComponent*> InteriorElements;
+    
+    // Structure integrity tracking
+    float StructureIntegrity = 1.0f;
+    float WeatheringRate = 0.001f;
 };
