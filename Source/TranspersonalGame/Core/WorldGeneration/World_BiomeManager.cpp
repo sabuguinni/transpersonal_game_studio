@@ -2,163 +2,111 @@
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "Components/StaticMeshComponent.h"
-#include "Components/AudioComponent.h"
-#include "UObject/ConstructorHelpers.h"
-#include "Engine/StaticMesh.h"
-#include "Sound/SoundCue.h"
+#include "Engine/StaticMeshActor.h"
+#include "Materials/MaterialInterface.h"
 #include "Kismet/GameplayStatics.h"
-#include "Engine/TriggerVolume.h"
+#include "Kismet/KismetMathLibrary.h"
+#include "Math/UnrealMathUtility.h"
 
-AWorld_BiomeManager::AWorld_BiomeManager()
+UWorld_BiomeManager::UWorld_BiomeManager()
 {
-    PrimaryActorTick.bCanEverTick = true;
-
-    // Create root component
-    RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
-
-    // Create biome marker mesh component
-    BiomeMarkerMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("BiomeMarkerMesh"));
-    BiomeMarkerMesh->SetupAttachment(RootComponent);
-
-    // Create audio component for biome ambient sounds
-    BiomeAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("BiomeAudioComponent"));
-    BiomeAudioComponent->SetupAttachment(RootComponent);
-    BiomeAudioComponent->bAutoActivate = false;
-
-    // Set default values
-    MaxVegetationPerBiome = 100;
-    BiomeTransitionBlendDistance = 200.0f;
-    bEnablePerformanceOptimization = true;
-    LODDistance = 5000.0f;
-
-    // Load default sphere mesh for biome markers
-    static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereMeshAsset(TEXT("/Engine/BasicShapes/Sphere"));
-    if (SphereMeshAsset.Succeeded())
-    {
-        BiomeMarkerMesh->SetStaticMesh(SphereMeshAsset.Object);
-        BiomeMarkerMesh->SetWorldScale3D(FVector(5.0f, 5.0f, 5.0f));
-    }
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 1.0f;
+    
+    RandomSeed = 12345;
+    WorldSize = 50000.0f;
+    bAutoGenerateOnBeginPlay = true;
+    
+    SetupDefaultBiomes();
 }
 
-void AWorld_BiomeManager::BeginPlay()
+void UWorld_BiomeManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    UE_LOG(LogTemp, Warning, TEXT("World_BiomeManager: BeginPlay started"));
-    
-    // Initialize biomes if not already set up
-    if (BiomeZones.Num() == 0)
+    if (bAutoGenerateOnBeginPlay)
     {
-        CreateDefaultBiomes();
-    }
-    
-    InitializeBiomes();
-    SpawnBiomeMarkers();
-    SetupAudioZones();
-    
-    UE_LOG(LogTemp, Warning, TEXT("World_BiomeManager: Initialization complete with %d biomes"), BiomeZones.Num());
-}
-
-void AWorld_BiomeManager::Tick(float DeltaTime)
-{
-    Super::Tick(DeltaTime);
-
-    if (bEnablePerformanceOptimization)
-    {
-        // Get player location for performance optimization
-        APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
-        if (PlayerPawn)
-        {
-            OptimizeBiomePerformance(PlayerPawn->GetActorLocation());
-        }
+        InitializeBiomes();
     }
 }
 
-void AWorld_BiomeManager::InitializeBiomes()
+void UWorld_BiomeManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    UE_LOG(LogTemp, Warning, TEXT("World_BiomeManager: Initializing biomes"));
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+}
+
+void UWorld_BiomeManager::InitializeBiomes()
+{
+    UE_LOG(LogTemp, Warning, TEXT("World_BiomeManager: Initializing biomes..."));
     
-    for (FWorld_BiomeData& Biome : BiomeZones)
+    // Clear any existing generated content
+    ClearAllGeneratedContent();
+    
+    // Set random seed for consistent generation
+    FMath::RandInit(RandomSeed);
+    
+    // Create the 5 biomes in strategic locations
+    CreateBiome(EWorld_BiomeType::Swampland, FVector(-15000, -15000, 0), 8000.0f);
+    CreateBiome(EWorld_BiomeType::Forest, FVector(0, 0, 0), 10000.0f);
+    CreateBiome(EWorld_BiomeType::Savanna, FVector(15000, -10000, 0), 12000.0f);
+    CreateBiome(EWorld_BiomeType::Desert, FVector(20000, 15000, 0), 9000.0f);
+    CreateBiome(EWorld_BiomeType::SnowyMountains, FVector(-10000, 20000, 1000), 7000.0f);
+    
+    // Generate river system connecting biomes
+    GenerateRiverSystem();
+    
+    UE_LOG(LogTemp, Warning, TEXT("World_BiomeManager: Biome initialization complete"));
+}
+
+void UWorld_BiomeManager::CreateBiome(EWorld_BiomeType BiomeType, FVector Location, float Radius)
+{
+    UE_LOG(LogTemp, Warning, TEXT("Creating biome %d at location %s with radius %f"), 
+           (int32)BiomeType, *Location.ToString(), Radius);
+    
+    switch (BiomeType)
     {
-        ApplyBiomeSpecificSettings(Biome.BiomeType);
-        GenerateVegetationForBiome(Biome.BiomeType);
+        case EWorld_BiomeType::Swampland:
+            CreateSwamplandBiome(Location, Radius);
+            break;
+        case EWorld_BiomeType::Forest:
+            CreateForestBiome(Location, Radius);
+            break;
+        case EWorld_BiomeType::Savanna:
+            CreateSavannaBiome(Location, Radius);
+            break;
+        case EWorld_BiomeType::Desert:
+            CreateDesertBiome(Location, Radius);
+            break;
+        case EWorld_BiomeType::SnowyMountains:
+            CreateSnowyMountainBiome(Location, Radius);
+            break;
     }
+    
+    // Place vegetation specific to this biome
+    PlaceVegetationInBiome(BiomeType, FMath::RandRange(50, 150));
 }
 
-void AWorld_BiomeManager::CreateDefaultBiomes()
+EWorld_BiomeType UWorld_BiomeManager::GetBiomeAtLocation(const FVector& Location) const
 {
-    // Forest biome
-    FWorld_BiomeData ForestBiome;
-    ForestBiome.BiomeType = EWorld_BiomeType::Forest;
-    ForestBiome.Center = FVector(2000.0f, 0.0f, 100.0f);
-    ForestBiome.Radius = 1500.0f;
-    ForestBiome.BiomeColor = FLinearColor(0.2f, 0.8f, 0.3f, 1.0f);
-    ForestBiome.VegetationDensity = 0.8f;
-    ForestBiome.TemperatureModifier = -5.0f;
-    ForestBiome.HumidityModifier = 20.0f;
-    ForestBiome.AudioZones.Add(TEXT("forest_ambient"));
-    BiomeZones.Add(ForestBiome);
-
-    // Plains biome
-    FWorld_BiomeData PlainsBiome;
-    PlainsBiome.BiomeType = EWorld_BiomeType::Plains;
-    PlainsBiome.Center = FVector(-2000.0f, 2000.0f, 50.0f);
-    PlainsBiome.Radius = 1200.0f;
-    PlainsBiome.BiomeColor = FLinearColor(0.8f, 0.8f, 0.2f, 1.0f);
-    PlainsBiome.VegetationDensity = 0.2f;
-    PlainsBiome.TemperatureModifier = 5.0f;
-    PlainsBiome.HumidityModifier = -10.0f;
-    PlainsBiome.AudioZones.Add(TEXT("plains_wind"));
-    BiomeZones.Add(PlainsBiome);
-
-    // Rocky biome
-    FWorld_BiomeData RockyBiome;
-    RockyBiome.BiomeType = EWorld_BiomeType::Rocky;
-    RockyBiome.Center = FVector(0.0f, -2500.0f, 200.0f);
-    RockyBiome.Radius = 1000.0f;
-    RockyBiome.BiomeColor = FLinearColor(0.6f, 0.4f, 0.3f, 1.0f);
-    RockyBiome.VegetationDensity = 0.1f;
-    RockyBiome.TemperatureModifier = 0.0f;
-    RockyBiome.HumidityModifier = -15.0f;
-    RockyBiome.AudioZones.Add(TEXT("rocky_echoes"));
-    BiomeZones.Add(RockyBiome);
-
-    // Wetlands biome
-    FWorld_BiomeData WetlandsBiome;
-    WetlandsBiome.BiomeType = EWorld_BiomeType::Wetlands;
-    WetlandsBiome.Center = FVector(-1500.0f, -1500.0f, 0.0f);
-    WetlandsBiome.Radius = 800.0f;
-    WetlandsBiome.BiomeColor = FLinearColor(0.3f, 0.5f, 0.8f, 1.0f);
-    WetlandsBiome.VegetationDensity = 0.4f;
-    WetlandsBiome.TemperatureModifier = -2.0f;
-    WetlandsBiome.HumidityModifier = 30.0f;
-    WetlandsBiome.AudioZones.Add(TEXT("water_sounds"));
-    BiomeZones.Add(WetlandsBiome);
-
-    UE_LOG(LogTemp, Warning, TEXT("World_BiomeManager: Created %d default biomes"), BiomeZones.Num());
-}
-
-EWorld_BiomeType AWorld_BiomeManager::GetBiomeAtLocation(const FVector& Location) const
-{
-    float MinDistance = FLT_MAX;
+    float ClosestDistance = MAX_FLT;
     EWorld_BiomeType ClosestBiome = EWorld_BiomeType::Forest;
-
-    for (const FWorld_BiomeData& Biome : BiomeZones)
+    
+    for (const FWorld_BiomeData& Biome : BiomeConfigurations)
     {
-        float Distance = FVector::Dist(Location, Biome.Center);
-        if (Distance <= Biome.Radius && Distance < MinDistance)
+        float Distance = CalculateDistanceToBiomeCenter(Location, Biome);
+        if (Distance < ClosestDistance && Distance <= Biome.Radius)
         {
-            MinDistance = Distance;
+            ClosestDistance = Distance;
             ClosestBiome = Biome.BiomeType;
         }
     }
-
+    
     return ClosestBiome;
 }
 
-FWorld_BiomeData AWorld_BiomeManager::GetBiomeData(EWorld_BiomeType BiomeType) const
+FWorld_BiomeData UWorld_BiomeManager::GetBiomeData(EWorld_BiomeType BiomeType) const
 {
-    for (const FWorld_BiomeData& Biome : BiomeZones)
+    for (const FWorld_BiomeData& Biome : BiomeConfigurations)
     {
         if (Biome.BiomeType == BiomeType)
         {
@@ -166,161 +114,256 @@ FWorld_BiomeData AWorld_BiomeManager::GetBiomeData(EWorld_BiomeType BiomeType) c
         }
     }
     
-    // Return default if not found
     return FWorld_BiomeData();
 }
 
-void AWorld_BiomeManager::SetBiomeAudio(EWorld_BiomeType BiomeType, const FString& AudioZoneName)
+void UWorld_BiomeManager::SpawnTerrainFeature(const FWorld_TerrainFeature& Feature)
 {
-    for (FWorld_BiomeData& Biome : BiomeZones)
+    if (!Feature.FeatureMesh.IsValid())
     {
-        if (Biome.BiomeType == BiomeType)
-        {
-            Biome.AudioZones.AddUnique(AudioZoneName);
-            break;
-        }
+        return;
     }
-}
-
-void AWorld_BiomeManager::GenerateVegetationForBiome(EWorld_BiomeType BiomeType)
-{
-    FWorld_BiomeData BiomeData = GetBiomeData(BiomeType);
-    if (BiomeData.VegetationDensity <= 0.0f) return;
-
-    int32 VegetationCount = FMath::RoundToInt(MaxVegetationPerBiome * BiomeData.VegetationDensity);
     
-    UE_LOG(LogTemp, Warning, TEXT("World_BiomeManager: Generating %d vegetation items for biome %d"), 
-           VegetationCount, (int32)BiomeType);
-
-    // This would spawn vegetation actors - simplified for now
-    for (int32 i = 0; i < VegetationCount; ++i)
+    UWorld* World = GetWorld();
+    if (!World)
     {
-        FVector VegLocation = GetRandomLocationInBiome(BiomeType);
-        // TODO: Spawn actual vegetation actors here
+        return;
     }
-}
-
-void AWorld_BiomeManager::CreateBiomeTransitionZone(const FVector& Location1, const FVector& Location2)
-{
-    FVector MidPoint = (Location1 + Location2) * 0.5f;
-    float Distance = FVector::Dist(Location1, Location2);
     
-    // Create transition zone logic
-    UE_LOG(LogTemp, Warning, TEXT("World_BiomeManager: Creating transition zone at %s"), 
-           *MidPoint.ToString());
-}
-
-void AWorld_BiomeManager::OptimizeBiomePerformance(const FVector& PlayerLocation)
-{
-    // Performance optimization based on distance to player
-    for (const FWorld_BiomeData& Biome : BiomeZones)
+    // Spawn static mesh actor for terrain feature
+    AStaticMeshActor* FeatureActor = World->SpawnActor<AStaticMeshActor>(
+        AStaticMeshActor::StaticClass(),
+        Feature.Location,
+        Feature.Rotation
+    );
+    
+    if (FeatureActor)
     {
-        float DistanceToPlayer = FVector::Dist(PlayerLocation, Biome.Center);
+        FeatureActor->GetStaticMeshComponent()->SetStaticMesh(Feature.FeatureMesh.LoadSynchronous());
+        FeatureActor->SetActorScale3D(Feature.Scale);
+        FeatureActor->SetActorLabel(TEXT("TerrainFeature"));
         
-        // Adjust LOD based on distance
-        if (DistanceToPlayer > LODDistance)
-        {
-            // Reduce detail for distant biomes
-        }
+        GeneratedActors.Add(FeatureActor);
     }
 }
 
-void AWorld_BiomeManager::UpdateWeatherForBiome(EWorld_BiomeType BiomeType, float Temperature, float Humidity)
+void UWorld_BiomeManager::GenerateRiverSystem()
 {
-    FWorld_BiomeData* BiomeData = nullptr;
-    for (FWorld_BiomeData& Biome : BiomeZones)
+    UE_LOG(LogTemp, Warning, TEXT("Generating river system..."));
+    
+    UWorld* World = GetWorld();
+    if (!World)
     {
-        if (Biome.BiomeType == BiomeType)
-        {
-            BiomeData = &Biome;
-            break;
-        }
+        return;
     }
-
-    if (BiomeData)
+    
+    // Create simple river connections between biomes
+    TArray<FVector> RiverPoints = {
+        FVector(-15000, -15000, -50), // Swampland
+        FVector(-5000, -5000, -30),   // Transition
+        FVector(0, 0, -20),           // Forest center
+        FVector(8000, -2000, -25),    // Toward Savanna
+        FVector(15000, -10000, -30)   // Savanna
+    };
+    
+    // Spawn water plane actors to represent rivers
+    for (int32 i = 0; i < RiverPoints.Num() - 1; ++i)
     {
-        BiomeData->TemperatureModifier = Temperature;
-        BiomeData->HumidityModifier = Humidity;
+        FVector StartPoint = RiverPoints[i];
+        FVector EndPoint = RiverPoints[i + 1];
+        FVector MidPoint = (StartPoint + EndPoint) * 0.5f;
         
-        UE_LOG(LogTemp, Warning, TEXT("World_BiomeManager: Updated weather for biome %d - Temp: %f, Humidity: %f"), 
-               (int32)BiomeType, Temperature, Humidity);
-    }
-}
-
-float AWorld_BiomeManager::GetDistanceToBiome(const FVector& Location, EWorld_BiomeType BiomeType) const
-{
-    FWorld_BiomeData BiomeData = GetBiomeData(BiomeType);
-    return FVector::Dist(Location, BiomeData.Center);
-}
-
-bool AWorld_BiomeManager::IsLocationInBiome(const FVector& Location, EWorld_BiomeType BiomeType) const
-{
-    FWorld_BiomeData BiomeData = GetBiomeData(BiomeType);
-    float Distance = FVector::Dist(Location, BiomeData.Center);
-    return Distance <= BiomeData.Radius;
-}
-
-void AWorld_BiomeManager::SpawnBiomeMarkers()
-{
-    UE_LOG(LogTemp, Warning, TEXT("World_BiomeManager: Spawning biome markers"));
-    
-    // This would spawn visual markers for each biome
-    for (const FWorld_BiomeData& Biome : BiomeZones)
-    {
-        // Biome markers would be spawned here
-        UE_LOG(LogTemp, Warning, TEXT("World_BiomeManager: Marker for biome %d at %s"), 
-               (int32)Biome.BiomeType, *Biome.Center.ToString());
-    }
-}
-
-void AWorld_BiomeManager::SetupAudioZones()
-{
-    UE_LOG(LogTemp, Warning, TEXT("World_BiomeManager: Setting up audio zones"));
-    
-    // Setup audio components and triggers for each biome
-    for (const FWorld_BiomeData& Biome : BiomeZones)
-    {
-        for (const FString& AudioZone : Biome.AudioZones)
+        // Create water plane
+        AStaticMeshActor* WaterActor = World->SpawnActor<AStaticMeshActor>(
+            AStaticMeshActor::StaticClass(),
+            MidPoint,
+            FRotator::ZeroRotator
+        );
+        
+        if (WaterActor)
         {
-            UE_LOG(LogTemp, Warning, TEXT("World_BiomeManager: Audio zone '%s' for biome %d"), 
-                   *AudioZone, (int32)Biome.BiomeType);
+            // Set scale to create river segment
+            float Distance = FVector::Dist(StartPoint, EndPoint);
+            WaterActor->SetActorScale3D(FVector(Distance / 100.0f, 2.0f, 0.1f));
+            WaterActor->SetActorLabel(FString::Printf(TEXT("River_Segment_%d"), i));
+            
+            GeneratedActors.Add(WaterActor);
         }
     }
 }
 
-FVector AWorld_BiomeManager::GetRandomLocationInBiome(EWorld_BiomeType BiomeType) const
+void UWorld_BiomeManager::PlaceVegetationInBiome(EWorld_BiomeType BiomeType, int32 Count)
 {
     FWorld_BiomeData BiomeData = GetBiomeData(BiomeType);
+    if (BiomeData.VegetationMeshes.Num() == 0)
+    {
+        return;
+    }
     
-    // Generate random point within biome radius
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return;
+    }
+    
+    for (int32 i = 0; i < Count; ++i)
+    {
+        FVector SpawnLocation = GetRandomLocationInRadius(BiomeData.CenterLocation, BiomeData.Radius);
+        
+        // Random vegetation mesh from biome configuration
+        int32 MeshIndex = FMath::RandRange(0, BiomeData.VegetationMeshes.Num() - 1);
+        TSoftObjectPtr<UStaticMesh> VegMesh = BiomeData.VegetationMeshes[MeshIndex];
+        
+        if (VegMesh.IsValid())
+        {
+            AStaticMeshActor* VegetationActor = World->SpawnActor<AStaticMeshActor>(
+                AStaticMeshActor::StaticClass(),
+                SpawnLocation,
+                FRotator(0, FMath::RandRange(0.0f, 360.0f), 0)
+            );
+            
+            if (VegetationActor)
+            {
+                VegetationActor->GetStaticMeshComponent()->SetStaticMesh(VegMesh.LoadSynchronous());
+                
+                // Random scale variation
+                float ScaleVariation = FMath::RandRange(0.8f, 1.2f);
+                VegetationActor->SetActorScale3D(FVector(ScaleVariation));
+                
+                VegetationActor->SetActorLabel(FString::Printf(TEXT("Vegetation_%s_%d"), 
+                    *UEnum::GetValueAsString(BiomeType), i));
+                
+                GeneratedActors.Add(VegetationActor);
+            }
+        }
+    }
+}
+
+void UWorld_BiomeManager::ApplyBiomeWeather(EWorld_BiomeType BiomeType)
+{
+    // Weather effects would be implemented here
+    // For now, just log the weather application
+    UE_LOG(LogTemp, Warning, TEXT("Applying weather for biome: %s"), 
+           *UEnum::GetValueAsString(BiomeType));
+}
+
+void UWorld_BiomeManager::UpdateDayNightCycle(float TimeOfDay)
+{
+    // Day/night cycle updates would be implemented here
+    // This would affect lighting, temperature, and creature behavior
+}
+
+void UWorld_BiomeManager::RegenerateAllBiomes()
+{
+    UE_LOG(LogTemp, Warning, TEXT("Regenerating all biomes..."));
+    InitializeBiomes();
+}
+
+void UWorld_BiomeManager::ClearAllGeneratedContent()
+{
+    UE_LOG(LogTemp, Warning, TEXT("Clearing all generated content..."));
+    
+    for (AActor* Actor : GeneratedActors)
+    {
+        if (IsValid(Actor))
+        {
+            Actor->Destroy();
+        }
+    }
+    
+    GeneratedActors.Empty();
+}
+
+void UWorld_BiomeManager::SetupDefaultBiomes()
+{
+    BiomeConfigurations.Empty();
+    
+    // Swampland configuration
+    FWorld_BiomeData SwampBiome;
+    SwampBiome.BiomeType = EWorld_BiomeType::Swampland;
+    SwampBiome.Temperature = 28.0f;
+    SwampBiome.Humidity = 95.0f;
+    SwampBiome.Elevation = -50.0f;
+    BiomeConfigurations.Add(SwampBiome);
+    
+    // Forest configuration
+    FWorld_BiomeData ForestBiome;
+    ForestBiome.BiomeType = EWorld_BiomeType::Forest;
+    ForestBiome.Temperature = 22.0f;
+    ForestBiome.Humidity = 70.0f;
+    ForestBiome.Elevation = 0.0f;
+    BiomeConfigurations.Add(ForestBiome);
+    
+    // Savanna configuration
+    FWorld_BiomeData SavannaBiome;
+    SavannaBiome.BiomeType = EWorld_BiomeType::Savanna;
+    SavannaBiome.Temperature = 30.0f;
+    SavannaBiome.Humidity = 40.0f;
+    SavannaBiome.Elevation = 100.0f;
+    BiomeConfigurations.Add(SavannaBiome);
+    
+    // Desert configuration
+    FWorld_BiomeData DesertBiome;
+    DesertBiome.BiomeType = EWorld_BiomeType::Desert;
+    DesertBiome.Temperature = 40.0f;
+    DesertBiome.Humidity = 15.0f;
+    DesertBiome.Elevation = 200.0f;
+    BiomeConfigurations.Add(DesertBiome);
+    
+    // Snowy Mountains configuration
+    FWorld_BiomeData MountainBiome;
+    MountainBiome.BiomeType = EWorld_BiomeType::SnowyMountains;
+    MountainBiome.Temperature = -5.0f;
+    MountainBiome.Humidity = 60.0f;
+    MountainBiome.Elevation = 1000.0f;
+    BiomeConfigurations.Add(MountainBiome);
+}
+
+void UWorld_BiomeManager::CreateSwamplandBiome(const FVector& Location, float Radius)
+{
+    UE_LOG(LogTemp, Warning, TEXT("Creating Swampland biome at %s"), *Location.ToString());
+    // Swampland-specific terrain features would be created here
+}
+
+void UWorld_BiomeManager::CreateForestBiome(const FVector& Location, float Radius)
+{
+    UE_LOG(LogTemp, Warning, TEXT("Creating Forest biome at %s"), *Location.ToString());
+    // Forest-specific terrain features would be created here
+}
+
+void UWorld_BiomeManager::CreateSavannaBiome(const FVector& Location, float Radius)
+{
+    UE_LOG(LogTemp, Warning, TEXT("Creating Savanna biome at %s"), *Location.ToString());
+    // Savanna-specific terrain features would be created here
+}
+
+void UWorld_BiomeManager::CreateDesertBiome(const FVector& Location, float Radius)
+{
+    UE_LOG(LogTemp, Warning, TEXT("Creating Desert biome at %s"), *Location.ToString());
+    // Desert-specific terrain features would be created here
+}
+
+void UWorld_BiomeManager::CreateSnowyMountainBiome(const FVector& Location, float Radius)
+{
+    UE_LOG(LogTemp, Warning, TEXT("Creating Snowy Mountain biome at %s"), *Location.ToString());
+    // Mountain-specific terrain features would be created here
+}
+
+FVector UWorld_BiomeManager::GetRandomLocationInRadius(const FVector& Center, float Radius) const
+{
     float RandomAngle = FMath::RandRange(0.0f, 2.0f * PI);
-    float RandomRadius = FMath::RandRange(0.0f, BiomeData.Radius);
+    float RandomDistance = FMath::RandRange(0.0f, Radius);
     
-    FVector RandomOffset;
-    RandomOffset.X = FMath::Cos(RandomAngle) * RandomRadius;
-    RandomOffset.Y = FMath::Sin(RandomAngle) * RandomRadius;
-    RandomOffset.Z = FMath::RandRange(-50.0f, 50.0f);
+    FVector Offset = FVector(
+        FMath::Cos(RandomAngle) * RandomDistance,
+        FMath::Sin(RandomAngle) * RandomDistance,
+        0.0f
+    );
     
-    return BiomeData.Center + RandomOffset;
+    return Center + Offset;
 }
 
-void AWorld_BiomeManager::ApplyBiomeSpecificSettings(EWorld_BiomeType BiomeType)
+float UWorld_BiomeManager::CalculateDistanceToBiomeCenter(const FVector& Location, const FWorld_BiomeData& Biome) const
 {
-    switch (BiomeType)
-    {
-        case EWorld_BiomeType::Forest:
-            UE_LOG(LogTemp, Warning, TEXT("World_BiomeManager: Applying forest settings"));
-            break;
-        case EWorld_BiomeType::Plains:
-            UE_LOG(LogTemp, Warning, TEXT("World_BiomeManager: Applying plains settings"));
-            break;
-        case EWorld_BiomeType::Rocky:
-            UE_LOG(LogTemp, Warning, TEXT("World_BiomeManager: Applying rocky settings"));
-            break;
-        case EWorld_BiomeType::Wetlands:
-            UE_LOG(LogTemp, Warning, TEXT("World_BiomeManager: Applying wetlands settings"));
-            break;
-        default:
-            break;
-    }
+    return FVector::Dist2D(Location, Biome.CenterLocation);
 }
