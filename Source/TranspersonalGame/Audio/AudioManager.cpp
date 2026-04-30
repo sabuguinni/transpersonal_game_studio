@@ -1,399 +1,416 @@
 #include "AudioManager.h"
+#include "Components/AudioComponent.h"
 #include "Engine/World.h"
-#include "Engine/GameInstance.h"
-#include "TimerManager.h"
 #include "Kismet/GameplayStatics.h"
 #include "Sound/SoundCue.h"
-#include "Components/AudioComponent.h"
+#include "Engine/Engine.h"
+#include "TimerManager.h"
 
 UAudioManager::UAudioManager()
 {
-    // Initialize default values
-    CurrentBiome = EAudio_BiomeAmbience::Forest;
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 0.1f; // 10 FPS for audio updates
+
+    // Initialize default biome configurations
+    BiomeConfigs.SetNum(5);
+    
+    // Forest biome (default)
+    BiomeConfigs[0].BiomeType = EAudio_BiomeType::Forest;
+    BiomeConfigs[0].MaxAudibleDistance = 5000.0f;
+    
+    // Swamp biome
+    BiomeConfigs[1].BiomeType = EAudio_BiomeType::Swamp;
+    BiomeConfigs[1].MaxAudibleDistance = 3000.0f;
+    
+    // Savanna biome
+    BiomeConfigs[2].BiomeType = EAudio_BiomeType::Savanna;
+    BiomeConfigs[2].MaxAudibleDistance = 8000.0f;
+    
+    // Desert biome
+    BiomeConfigs[3].BiomeType = EAudio_BiomeType::Desert;
+    BiomeConfigs[3].MaxAudibleDistance = 10000.0f;
+    
+    // Snow Mountain biome
+    BiomeConfigs[4].BiomeType = EAudio_BiomeType::SnowMountain;
+    BiomeConfigs[4].MaxAudibleDistance = 6000.0f;
+
+    // Initialize default dinosaur audio data
+    DinosaurAudioData.SetNum(3);
+    
+    // T-Rex
+    DinosaurAudioData[0].DinosaurType = TEXT("TRex");
+    DinosaurAudioData[0].ThreatRadius = 2000.0f;
+    DinosaurAudioData[0].VolumeMultiplier = 1.5f;
+    
+    // Raptor
+    DinosaurAudioData[1].DinosaurType = TEXT("Raptor");
+    DinosaurAudioData[1].ThreatRadius = 800.0f;
+    DinosaurAudioData[1].VolumeMultiplier = 1.0f;
+    
+    // Brachiosaurus
+    DinosaurAudioData[2].DinosaurType = TEXT("Brachiosaurus");
+    DinosaurAudioData[2].ThreatRadius = 1500.0f;
+    DinosaurAudioData[2].VolumeMultiplier = 1.2f;
+
+    // Set default values
+    CurrentBiome = EAudio_BiomeType::Forest;
     CurrentTension = EAudio_TensionLevel::Calm;
-    CurrentTimeOfDay = EAudio_TimeOfDay::Morning;
-    
-    MasterVolume = 1.0f;
-    AmbienceVolume = 0.8f;
-    EffectsVolume = 1.0f;
-    MusicVolume = 0.6f;
+    TargetTension = EAudio_TensionLevel::Calm;
+    ProximityCheckInterval = 0.5f;
+    TensionTransitionSpeed = 2.0f;
+    MaxHeartbeatVolume = 0.8f;
+    CurrentHeartbeatIntensity = 0.0f;
+    TimeOfDayNormalized = 0.5f;
+    ProximityCheckTimer = 0.0f;
 }
 
-void UAudioManager::Initialize(FSubsystemCollectionBase& Collection)
+void UAudioManager::BeginPlay()
 {
-    Super::Initialize(Collection);
+    Super::BeginPlay();
     
-    UE_LOG(LogTemp, Warning, TEXT("AudioManager: Initializing prehistoric audio system"));
+    CreateAudioComponents();
+    UpdateAmbientLayers();
     
-    // Create audio components
-    if (UWorld* World = GetWorld())
+    UE_LOG(LogTemp, Log, TEXT("AudioManager: Initialized with %d biome configs and %d dinosaur types"), 
+           BiomeConfigs.Num(), DinosaurAudioData.Num());
+}
+
+void UAudioManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    
+    // Update tension transition
+    UpdateTensionTransition(DeltaTime);
+    
+    // Check dinosaur proximity at intervals
+    ProximityCheckTimer += DeltaTime;
+    if (ProximityCheckTimer >= ProximityCheckInterval)
     {
-        // Create ambience component
-        AmbienceComponent = NewObject<UAudioComponent>(this);
-        if (AmbienceComponent)
-        {
-            AmbienceComponent->SetVolumeMultiplier(AmbienceVolume * MasterVolume);
-            AmbienceComponent->bAutoActivate = false;
-        }
-        
-        // Create music component
-        MusicComponent = NewObject<UAudioComponent>(this);
-        if (MusicComponent)
-        {
-            MusicComponent->SetVolumeMultiplier(MusicVolume * MasterVolume);
-            MusicComponent->bAutoActivate = false;
-        }
-        
-        // Create tension component
-        TensionComponent = NewObject<UAudioComponent>(this);
-        if (TensionComponent)
-        {
-            TensionComponent->SetVolumeMultiplier(MusicVolume * MasterVolume);
-            TensionComponent->bAutoActivate = false;
-        }
-        
-        // Setup default biome settings
-        FAudio_BiomeSettings ForestSettings;
-        ForestSettings.BiomeType = EAudio_BiomeAmbience::Forest;
-        ForestSettings.RandomElementChance = 0.15f;
-        BiomeSettings.Add(EAudio_BiomeAmbience::Forest, ForestSettings);
-        
-        FAudio_BiomeSettings SwampSettings;
-        SwampSettings.BiomeType = EAudio_BiomeAmbience::Swamp;
-        SwampSettings.RandomElementChance = 0.1f;
-        BiomeSettings.Add(EAudio_BiomeAmbience::Swamp, SwampSettings);
-        
-        // Setup tension layers with different intensity
-        FAudio_SoundLayer CalmLayer;
-        CalmLayer.Volume = 0.3f;
-        CalmLayer.FadeInTime = 5.0f;
-        CalmLayer.FadeOutTime = 3.0f;
-        TensionLayers.Add(EAudio_TensionLevel::Calm, CalmLayer);
-        
-        FAudio_SoundLayer DangerLayer;
-        DangerLayer.Volume = 0.8f;
-        DangerLayer.Pitch = 1.2f;
-        DangerLayer.FadeInTime = 1.0f;
-        DangerLayer.FadeOutTime = 2.0f;
-        TensionLayers.Add(EAudio_TensionLevel::Danger, DangerLayer);
-        
-        FAudio_SoundLayer TerrorLayer;
-        TerrorLayer.Volume = 1.0f;
-        TerrorLayer.Pitch = 1.5f;
-        TerrorLayer.FadeInTime = 0.5f;
-        TerrorLayer.FadeOutTime = 1.0f;
-        TensionLayers.Add(EAudio_TensionLevel::Terror, TerrorLayer);
-        
-        // Start with forest ambience
-        SetCurrentBiome(EAudio_BiomeAmbience::Forest);
-        
-        // Setup random element timer
-        if (FTimerManager* TimerManager = &World->GetTimerManager())
-        {
-            TimerManager->SetTimer(RandomElementTimer, this, &UAudioManager::PlayRandomAmbienceElement, 
-                                 FMath::RandRange(10.0f, 30.0f), true);
-        }
+        CheckDinosaurProximity();
+        ProximityCheckTimer = 0.0f;
     }
 }
 
-void UAudioManager::Deinitialize()
+void UAudioManager::SetCurrentBiome(EAudio_BiomeType NewBiome)
 {
-    UE_LOG(LogTemp, Warning, TEXT("AudioManager: Shutting down audio system"));
-    
-    // Clear timers
-    if (UWorld* World = GetWorld())
+    if (CurrentBiome != NewBiome)
     {
-        if (FTimerManager* TimerManager = &World->GetTimerManager())
-        {
-            TimerManager->ClearTimer(RandomElementTimer);
-            TimerManager->ClearTimer(TensionUpdateTimer);
-        }
+        CurrentBiome = NewBiome;
+        UpdateAmbientLayers();
+        
+        UE_LOG(LogTemp, Log, TEXT("AudioManager: Switched to biome %d"), (int32)NewBiome);
     }
-    
-    // Stop all audio components
-    if (AmbienceComponent && AmbienceComponent->IsPlaying())
-    {
-        AmbienceComponent->Stop();
-    }
-    
-    if (MusicComponent && MusicComponent->IsPlaying())
-    {
-        MusicComponent->Stop();
-    }
-    
-    if (TensionComponent && TensionComponent->IsPlaying())
-    {
-        TensionComponent->Stop();
-    }
-    
-    Super::Deinitialize();
-}
-
-void UAudioManager::SetCurrentBiome(EAudio_BiomeAmbience NewBiome)
-{
-    if (CurrentBiome == NewBiome)
-    {
-        return;
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("AudioManager: Changing biome from %d to %d"), 
-           (int32)CurrentBiome, (int32)NewBiome);
-    
-    CurrentBiome = NewBiome;
-    UpdateAmbienceLayer();
 }
 
 void UAudioManager::SetTensionLevel(EAudio_TensionLevel NewTension)
 {
-    if (CurrentTension == NewTension)
+    if (TargetTension != NewTension)
     {
-        return;
+        TargetTension = NewTension;
+        UE_LOG(LogTemp, Log, TEXT("AudioManager: Target tension set to %d"), (int32)NewTension);
     }
-    
-    UE_LOG(LogTemp, Warning, TEXT("AudioManager: Tension level changed from %d to %d"), 
-           (int32)CurrentTension, (int32)NewTension);
-    
-    CurrentTension = NewTension;
-    UpdateTensionLayer();
 }
 
-void UAudioManager::SetTimeOfDay(EAudio_TimeOfDay NewTime)
+void UAudioManager::UpdatePlayerPosition(const FVector& NewPlayerLocation)
 {
-    if (CurrentTimeOfDay == NewTime)
-    {
-        return;
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("AudioManager: Time of day changed to %d"), (int32)NewTime);
-    
-    CurrentTimeOfDay = NewTime;
-    UpdateAmbienceLayer();
+    PlayerLocation = NewPlayerLocation;
 }
 
-void UAudioManager::PlayDinosaurSound(const FString& DinosaurType, const FVector& Location)
+void UAudioManager::RegisterDinosaur(AActor* DinosaurActor, const FString& DinosaurType)
 {
-    UE_LOG(LogTemp, Warning, TEXT("AudioManager: Playing dinosaur sound for %s at location"), *DinosaurType);
+    if (DinosaurActor && !DinosaurType.IsEmpty())
+    {
+        RegisteredDinosaurs.Add(DinosaurActor, DinosaurType);
+        UE_LOG(LogTemp, Log, TEXT("AudioManager: Registered dinosaur %s of type %s"), 
+               *DinosaurActor->GetName(), *DinosaurType);
+    }
+}
+
+void UAudioManager::UnregisterDinosaur(AActor* DinosaurActor)
+{
+    if (DinosaurActor && RegisteredDinosaurs.Contains(DinosaurActor))
+    {
+        FString DinosaurType = RegisteredDinosaurs[DinosaurActor];
+        RegisteredDinosaurs.Remove(DinosaurActor);
+        UE_LOG(LogTemp, Log, TEXT("AudioManager: Unregistered dinosaur %s of type %s"), 
+               *DinosaurActor->GetName(), *DinosaurType);
+    }
+}
+
+void UAudioManager::CheckDinosaurProximity()
+{
+    if (RegisteredDinosaurs.Num() == 0)
+    {
+        SetTensionLevel(EAudio_TensionLevel::Calm);
+        return;
+    }
+
+    float ClosestDistance = CalculateDistanceToNearestDinosaur();
+    EAudio_TensionLevel NewTension = CalculateTensionFromProximity(ClosestDistance);
     
-    // For now, just log the request - actual sound cues would be loaded here
-    if (DinosaurType.Contains(TEXT("TRex")))
+    SetTensionLevel(NewTension);
+    
+    // Update heartbeat based on tension
+    float HeartbeatIntensity = 0.0f;
+    switch (NewTension)
     {
-        // Trigger high tension when T-Rex is nearby
-        SetTensionLevel(EAudio_TensionLevel::Terror);
+        case EAudio_TensionLevel::Calm:
+            HeartbeatIntensity = 0.0f;
+            break;
+        case EAudio_TensionLevel::Alert:
+            HeartbeatIntensity = 0.3f;
+            break;
+        case EAudio_TensionLevel::Danger:
+            HeartbeatIntensity = 0.6f;
+            break;
+        case EAudio_TensionLevel::Terror:
+            HeartbeatIntensity = 1.0f;
+            break;
     }
-    else if (DinosaurType.Contains(TEXT("Raptor")))
+    
+    PlayHeartbeat(HeartbeatIntensity);
+}
+
+void UAudioManager::PlayHeartbeat(float Intensity)
+{
+    CurrentHeartbeatIntensity = FMath::Clamp(Intensity, 0.0f, 1.0f);
+    
+    if (HeartbeatAudioComponent)
     {
-        // Raptors create danger level tension
-        SetTensionLevel(EAudio_TensionLevel::Danger);
-    }
-    else if (DinosaurType.Contains(TEXT("Brachiosaurus")))
-    {
-        // Gentle giants might actually reduce tension
-        if (CurrentTension > EAudio_TensionLevel::Cautious)
+        UActorComponent* AudioComp = HeartbeatAudioComponent;
+        if (UActorComponent* AudioComponent = Cast<UActorComponent>(AudioComp))
         {
-            SetTensionLevel(EAudio_TensionLevel::Cautious);
+            // Set volume based on intensity
+            float Volume = CurrentHeartbeatIntensity * MaxHeartbeatVolume;
+            
+            // In a real implementation, you would set the audio component's volume here
+            // For now, we'll log the action
+            UE_LOG(LogTemp, Log, TEXT("AudioManager: Heartbeat intensity set to %.2f (volume %.2f)"), 
+                   CurrentHeartbeatIntensity, Volume);
         }
     }
 }
 
-void UAudioManager::PlayFootstepSound(const FString& SurfaceType, const FVector& Location)
+void UAudioManager::StopHeartbeat()
 {
-    // Play appropriate footstep sound based on surface
-    UE_LOG(LogTemp, Log, TEXT("AudioManager: Playing footstep on %s"), *SurfaceType);
+    CurrentHeartbeatIntensity = 0.0f;
     
-    // This would play the actual footstep sound effect
-    // UGameplayStatics::PlaySoundAtLocation(GetWorld(), FootstepSound, Location);
-}
-
-void UAudioManager::PlayCraftingSound(const FString& MaterialType, const FVector& Location)
-{
-    UE_LOG(LogTemp, Log, TEXT("AudioManager: Playing crafting sound for %s"), *MaterialType);
-    
-    // Play crafting sound based on material type (stone, wood, bone, etc.)
-}
-
-void UAudioManager::OnPlayerHealthChanged(float HealthPercentage)
-{
-    // Adjust audio based on health - heartbeat intensity, etc.
-    if (HealthPercentage < 0.2f)
+    if (HeartbeatAudioComponent)
     {
-        // Critical health - increase tension
-        if (CurrentTension < EAudio_TensionLevel::Alert)
+        // Stop the heartbeat audio component
+        UE_LOG(LogTemp, Log, TEXT("AudioManager: Heartbeat stopped"));
+    }
+}
+
+void UAudioManager::PlayEnvironmentalSound(TSoftObjectPtr<USoundBase> Sound, const FVector& Location, float Volume)
+{
+    if (Sound.IsValid())
+    {
+        UGameplayStatics::PlaySoundAtLocation(GetWorld(), Sound.Get(), Location, Volume);
+        UE_LOG(LogTemp, Log, TEXT("AudioManager: Played environmental sound at location (%.1f, %.1f, %.1f)"), 
+               Location.X, Location.Y, Location.Z);
+    }
+}
+
+void UAudioManager::SetTimeOfDay(float TimeNormalized)
+{
+    TimeOfDayNormalized = FMath::Clamp(TimeNormalized, 0.0f, 1.0f);
+    
+    // Adjust ambient audio based on time of day
+    // Night time (0.0-0.2 and 0.8-1.0) should have different ambient sounds
+    bool bIsNight = (TimeOfDayNormalized < 0.2f || TimeOfDayNormalized > 0.8f);
+    
+    if (bIsNight)
+    {
+        // Increase tension slightly at night
+        if (TargetTension == EAudio_TensionLevel::Calm)
         {
             SetTensionLevel(EAudio_TensionLevel::Alert);
         }
     }
+    
+    UE_LOG(LogTemp, Log, TEXT("AudioManager: Time of day set to %.2f (Night: %s)"), 
+           TimeOfDayNormalized, bIsNight ? TEXT("Yes") : TEXT("No"));
 }
 
-void UAudioManager::OnPlayerFearChanged(float FearLevel)
+void UAudioManager::PlayVoiceLine(TSoftObjectPtr<USoundBase> VoiceSound, float Volume)
 {
-    // Adjust tension based on fear level
-    if (FearLevel > 0.8f)
+    if (VoiceSound.IsValid() && VoiceAudioComponent)
     {
-        SetTensionLevel(EAudio_TensionLevel::Terror);
+        UGameplayStatics::PlaySound2D(GetWorld(), VoiceSound.Get(), Volume);
+        UE_LOG(LogTemp, Log, TEXT("AudioManager: Played voice line with volume %.2f"), Volume);
     }
-    else if (FearLevel > 0.6f)
+}
+
+void UAudioManager::StopAllVoiceLines()
+{
+    if (VoiceAudioComponent)
     {
-        SetTensionLevel(EAudio_TensionLevel::Danger);
+        // Stop all voice audio
+        UE_LOG(LogTemp, Log, TEXT("AudioManager: Stopped all voice lines"));
     }
-    else if (FearLevel > 0.3f)
+}
+
+void UAudioManager::UpdateTensionTransition(float DeltaTime)
+{
+    if (CurrentTension != TargetTension)
     {
-        SetTensionLevel(EAudio_TensionLevel::Alert);
+        // Smooth transition between tension levels
+        float TransitionSpeed = TensionTransitionSpeed * DeltaTime;
+        int32 CurrentLevel = (int32)CurrentTension;
+        int32 TargetLevel = (int32)TargetTension;
+        
+        if (CurrentLevel < TargetLevel)
+        {
+            CurrentLevel = FMath::Min(CurrentLevel + 1, TargetLevel);
+        }
+        else if (CurrentLevel > TargetLevel)
+        {
+            CurrentLevel = FMath::Max(CurrentLevel - 1, TargetLevel);
+        }
+        
+        CurrentTension = (EAudio_TensionLevel)CurrentLevel;
+        
+        if (CurrentTension == TargetTension)
+        {
+            UpdateTensionLayers();
+            UE_LOG(LogTemp, Log, TEXT("AudioManager: Tension transition completed to level %d"), CurrentLevel);
+        }
     }
-    else if (FearLevel > 0.1f)
+}
+
+void UAudioManager::UpdateAmbientLayers()
+{
+    FAudio_BiomeAudioConfig* BiomeConfig = GetCurrentBiomeConfig();
+    if (BiomeConfig)
     {
-        SetTensionLevel(EAudio_TensionLevel::Cautious);
+        // Update ambient audio layers for current biome
+        for (const FAudio_SoundLayer& Layer : BiomeConfig->AmbientLayers)
+        {
+            if (Layer.Sound.IsValid())
+            {
+                // In a real implementation, you would configure audio components here
+                UE_LOG(LogTemp, Log, TEXT("AudioManager: Updated ambient layer with volume %.2f"), Layer.Volume);
+            }
+        }
+    }
+}
+
+void UAudioManager::UpdateTensionLayers()
+{
+    FAudio_BiomeAudioConfig* BiomeConfig = GetCurrentBiomeConfig();
+    if (BiomeConfig)
+    {
+        // Update tension audio layers based on current tension level
+        float TensionMultiplier = (float)CurrentTension / 3.0f; // Normalize to 0-1
+        
+        for (const FAudio_SoundLayer& Layer : BiomeConfig->TensionLayers)
+        {
+            if (Layer.Sound.IsValid())
+            {
+                float AdjustedVolume = Layer.Volume * TensionMultiplier;
+                // Configure tension audio component volume
+                UE_LOG(LogTemp, Log, TEXT("AudioManager: Updated tension layer with volume %.2f"), AdjustedVolume);
+            }
+        }
+    }
+}
+
+FAudio_BiomeAudioConfig* UAudioManager::GetCurrentBiomeConfig()
+{
+    for (FAudio_BiomeAudioConfig& Config : BiomeConfigs)
+    {
+        if (Config.BiomeType == CurrentBiome)
+        {
+            return &Config;
+        }
+    }
+    return nullptr;
+}
+
+FAudio_DinosaurAudioData* UAudioManager::GetDinosaurAudioData(const FString& DinosaurType)
+{
+    for (FAudio_DinosaurAudioData& Data : DinosaurAudioData)
+    {
+        if (Data.DinosaurType == DinosaurType)
+        {
+            return &Data;
+        }
+    }
+    return nullptr;
+}
+
+float UAudioManager::CalculateDistanceToNearestDinosaur()
+{
+    float MinDistance = FLT_MAX;
+    
+    for (const auto& DinosaurPair : RegisteredDinosaurs)
+    {
+        if (DinosaurPair.Key)
+        {
+            FVector DinosaurLocation = DinosaurPair.Key->GetActorLocation();
+            float Distance = FVector::Dist(PlayerLocation, DinosaurLocation);
+            MinDistance = FMath::Min(MinDistance, Distance);
+        }
+    }
+    
+    return (MinDistance == FLT_MAX) ? 10000.0f : MinDistance; // Return large distance if no dinosaurs
+}
+
+EAudio_TensionLevel UAudioManager::CalculateTensionFromProximity(float Distance)
+{
+    // Define distance thresholds for tension levels
+    const float TerrorDistance = 500.0f;
+    const float DangerDistance = 1000.0f;
+    const float AlertDistance = 2000.0f;
+    
+    if (Distance <= TerrorDistance)
+    {
+        return EAudio_TensionLevel::Terror;
+    }
+    else if (Distance <= DangerDistance)
+    {
+        return EAudio_TensionLevel::Danger;
+    }
+    else if (Distance <= AlertDistance)
+    {
+        return EAudio_TensionLevel::Alert;
     }
     else
     {
-        SetTensionLevel(EAudio_TensionLevel::Calm);
+        return EAudio_TensionLevel::Calm;
     }
 }
 
-void UAudioManager::OnDinosaurNearby(const FString& DinosaurType, float Distance)
+void UAudioManager::CreateAudioComponents()
 {
-    UE_LOG(LogTemp, Warning, TEXT("AudioManager: %s detected at distance %f"), *DinosaurType, Distance);
+    // Create audio components for different audio layers
+    AmbientAudioComponents.Empty();
     
-    // Adjust tension based on dinosaur proximity
-    if (Distance < 500.0f) // Very close
+    // Create multiple ambient audio components for layered soundscape
+    for (int32 i = 0; i < 4; ++i)
     {
-        PlayDinosaurSound(DinosaurType, FVector::ZeroVector);
-    }
-    else if (Distance < 2000.0f) // Nearby
-    {
-        if (DinosaurType.Contains(TEXT("TRex")))
+        UActorComponent* NewAudioComp = NewObject<UActorComponent>(GetOwner());
+        if (NewAudioComp)
         {
-            SetTensionLevel(EAudio_TensionLevel::Danger);
-        }
-        else if (DinosaurType.Contains(TEXT("Raptor")))
-        {
-            SetTensionLevel(EAudio_TensionLevel::Alert);
+            AmbientAudioComponents.Add(NewAudioComp);
         }
     }
-}
-
-void UAudioManager::SetMasterVolume(float Volume)
-{
-    MasterVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
     
-    // Update all component volumes
-    if (AmbienceComponent)
-    {
-        AmbienceComponent->SetVolumeMultiplier(AmbienceVolume * MasterVolume);
-    }
-    if (MusicComponent)
-    {
-        MusicComponent->SetVolumeMultiplier(MusicVolume * MasterVolume);
-    }
-    if (TensionComponent)
-    {
-        TensionComponent->SetVolumeMultiplier(MusicVolume * MasterVolume);
-    }
-}
-
-void UAudioManager::SetAmbienceVolume(float Volume)
-{
-    AmbienceVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
-    if (AmbienceComponent)
-    {
-        AmbienceComponent->SetVolumeMultiplier(AmbienceVolume * MasterVolume);
-    }
-}
-
-void UAudioManager::SetEffectsVolume(float Volume)
-{
-    EffectsVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
-    // Effects volume would be applied to individual sound effects
-}
-
-void UAudioManager::SetMusicVolume(float Volume)
-{
-    MusicVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
-    if (MusicComponent)
-    {
-        MusicComponent->SetVolumeMultiplier(MusicVolume * MasterVolume);
-    }
-    if (TensionComponent)
-    {
-        TensionComponent->SetVolumeMultiplier(MusicVolume * MasterVolume);
-    }
-}
-
-void UAudioManager::UpdateAmbienceLayer()
-{
-    UE_LOG(LogTemp, Log, TEXT("AudioManager: Updating ambience layer for biome %d"), (int32)CurrentBiome);
+    // Create heartbeat audio component
+    HeartbeatAudioComponent = NewObject<UActorComponent>(GetOwner());
     
-    // This would load and play the appropriate ambience sound for the current biome
-    // Taking into account time of day variations
+    // Create voice audio component
+    VoiceAudioComponent = NewObject<UActorComponent>(GetOwner());
     
-    if (AmbienceComponent)
-    {
-        // Stop current ambience
-        if (AmbienceComponent->IsPlaying())
-        {
-            AmbienceComponent->FadeOut(2.0f, 0.0f);
-        }
-        
-        // Start new ambience based on biome and time of day
-        // This would load the actual sound cue and start playing it
-    }
+    UE_LOG(LogTemp, Log, TEXT("AudioManager: Created %d ambient audio components"), AmbientAudioComponents.Num());
 }
 
-void UAudioManager::UpdateTensionLayer()
+void UAudioManager::CleanupAudioComponents()
 {
-    UE_LOG(LogTemp, Warning, TEXT("AudioManager: Updating tension layer to level %d"), (int32)CurrentTension);
+    AmbientAudioComponents.Empty();
+    HeartbeatAudioComponent = nullptr;
+    VoiceAudioComponent = nullptr;
     
-    if (TensionComponent)
-    {
-        if (CurrentTension == EAudio_TensionLevel::Calm)
-        {
-            // Fade out tension music
-            if (TensionComponent->IsPlaying())
-            {
-                TensionComponent->FadeOut(3.0f, 0.0f);
-            }
-        }
-        else
-        {
-            // Play appropriate tension layer
-            const FAudio_SoundLayer* TensionLayer = TensionLayers.Find(CurrentTension);
-            if (TensionLayer)
-            {
-                TensionComponent->SetVolumeMultiplier(TensionLayer->Volume * MusicVolume * MasterVolume);
-                TensionComponent->SetPitchMultiplier(TensionLayer->Pitch);
-                
-                // This would load and play the actual tension music
-                // TensionComponent->SetSound(TensionLayer->SoundCue.LoadSynchronous());
-                // TensionComponent->FadeIn(TensionLayer->FadeInTime, TensionLayer->Volume);
-            }
-        }
-    }
-}
-
-void UAudioManager::UpdateMusicLayer()
-{
-    // Update background music based on current state
-    // This would handle the main musical score
-}
-
-void UAudioManager::PlayRandomAmbienceElement()
-{
-    // Play random ambient sounds like bird calls, insect sounds, etc.
-    const FAudio_BiomeSettings* Settings = BiomeSettings.Find(CurrentBiome);
-    if (Settings && FMath::RandRange(0.0f, 1.0f) < Settings->RandomElementChance)
-    {
-        UE_LOG(LogTemp, Log, TEXT("AudioManager: Playing random ambience element for %d"), (int32)CurrentBiome);
-        
-        // This would play a random ambient sound effect
-        // based on the current biome and time of day
-    }
-    
-    // Schedule next random element
-    if (UWorld* World = GetWorld())
-    {
-        if (FTimerManager* TimerManager = &World->GetTimerManager())
-        {
-            TimerManager->SetTimer(RandomElementTimer, this, &UAudioManager::PlayRandomAmbienceElement, 
-                                 FMath::RandRange(15.0f, 45.0f), false);
-        }
-    }
+    UE_LOG(LogTemp, Log, TEXT("AudioManager: Cleaned up audio components"));
 }
