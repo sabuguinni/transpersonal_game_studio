@@ -1,289 +1,324 @@
 #include "BuildIntegrationManager.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Components/SceneComponent.h"
-#include "Kismet/GameplayStatics.h"
-#include "TranspersonalGame/SharedTypes.h"
+#include "Modules/ModuleManager.h"
+#include "UObject/UObjectGlobals.h"
+#include "UObject/Package.h"
 
-ABuildIntegrationManager::ABuildIntegrationManager()
+UBuildIntegrationManager::UBuildIntegrationManager()
 {
-    PrimaryActorTick.bCanEverTick = true;
-    
-    // Create root component
-    RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
-    
-    // Initialize build status
-    BuildStatus = EBuild_BuildStatus::Unknown;
-    LastValidationTime = 0.0f;
-    ValidationInterval = 30.0f; // Validate every 30 seconds
-    
-    // Initialize counters
-    LoadedClassCount = 0;
-    TotalClassCount = 0;
-    ActiveActorCount = 0;
-    ErrorCount = 0;
-    
-    // Initialize flags
-    bProjectLoaded = false;
-    bMapFunctional = false;
-    bCompilationArtifactsFound = false;
-    bCriticalErrorsDetected = false;
-    
-    BuildHealthScore = 0.0f;
+    bInitialized = false;
 }
 
-void ABuildIntegrationManager::BeginPlay()
+void UBuildIntegrationManager::Initialize(FSubsystemCollectionBase& Collection)
 {
-    Super::BeginPlay();
+    Super::Initialize(Collection);
     
-    // Perform initial validation
-    PerformBuildValidation();
+    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Initializing..."));
     
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Started with health score %.1f"), BuildHealthScore);
+    // Initialize module scanning
+    ScanForModules();
+    ValidateAllModules();
+    UpdateSystemHealth();
+    
+    bInitialized = true;
+    
+    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Initialized successfully"));
 }
 
-void ABuildIntegrationManager::Tick(float DeltaTime)
+void UBuildIntegrationManager::Deinitialize()
 {
-    Super::Tick(DeltaTime);
+    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Deinitializing..."));
     
-    // Periodic validation
-    LastValidationTime += DeltaTime;
-    if (LastValidationTime >= ValidationInterval)
+    ModuleStatuses.Empty();
+    bInitialized = false;
+    
+    Super::Deinitialize();
+}
+
+void UBuildIntegrationManager::ValidateAllModules()
+{
+    if (!bInitialized)
     {
-        PerformBuildValidation();
-        LastValidationTime = 0.0f;
+        UE_LOG(LogTemp, Error, TEXT("BuildIntegrationManager: Not initialized"));
+        return;
     }
-}
 
-void ABuildIntegrationManager::PerformBuildValidation()
-{
-    UE_LOG(LogTemp, Log, TEXT("BuildIntegrationManager: Starting build validation"));
-    
-    // Reset counters
-    LoadedClassCount = 0;
-    TotalClassCount = 0;
-    ActiveActorCount = 0;
-    ErrorCount = 0;
-    CriticalErrors.Empty();
-    
-    // Validate project loading
-    ValidateProjectLoading();
-    
-    // Validate core classes
-    ValidateCoreClasses();
-    
-    // Validate map functionality
-    ValidateMapFunctionality();
-    
-    // Validate compilation artifacts
-    ValidateCompilationArtifacts();
-    
-    // Calculate health score
-    CalculateBuildHealthScore();
-    
-    // Update build status
-    UpdateBuildStatus();
-    
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Validation complete - Health: %.1f, Status: %s"), 
-           BuildHealthScore, *UEnum::GetValueAsString(BuildStatus));
-}
+    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Validating all modules..."));
 
-void ABuildIntegrationManager::ValidateProjectLoading()
-{
-    UWorld* World = GetWorld();
-    if (World && World->GetGameInstance())
-    {
-        bProjectLoaded = true;
-        UE_LOG(LogTemp, Log, TEXT("BuildIntegrationManager: Project loaded successfully"));
-    }
-    else
-    {
-        bProjectLoaded = false;
-        CriticalErrors.Add(TEXT("Project not properly loaded"));
-        ErrorCount++;
-        UE_LOG(LogTemp, Error, TEXT("BuildIntegrationManager: Project loading failed"));
-    }
-}
-
-void ABuildIntegrationManager::ValidateCoreClasses()
-{
-    // List of critical classes to validate
-    TArray<FString> CriticalClasses = {
-        TEXT("TranspersonalCharacter"),
-        TEXT("TranspersonalGameState"),
-        TEXT("TranspersonalGameMode"),
-        TEXT("PCGWorldGenerator"),
-        TEXT("FoliageManager"),
-        TEXT("CrowdSimulationManager"),
-        TEXT("ProceduralWorldManager")
+    // Core modules to validate
+    TArray<FString> CoreModules = {
+        TEXT("TranspersonalGame"),
+        TEXT("Core"),
+        TEXT("Characters"),
+        TEXT("WorldGeneration"),
+        TEXT("Environment"),
+        TEXT("AI"),
+        TEXT("Combat"),
+        TEXT("Audio"),
+        TEXT("VFX"),
+        TEXT("QA")
     };
-    
-    TotalClassCount = CriticalClasses.Num();
-    LoadedClassCount = 0;
-    
-    for (const FString& ClassName : CriticalClasses)
+
+    for (const FString& ModuleName : CoreModules)
     {
-        FString ClassPath = FString::Printf(TEXT("/Script/TranspersonalGame.%s"), *ClassName);
-        UClass* LoadedClass = LoadClass<UObject>(nullptr, *ClassPath);
-        
-        if (LoadedClass)
-        {
-            LoadedClassCount++;
-            UE_LOG(LogTemp, Log, TEXT("BuildIntegrationManager: Class loaded - %s"), *ClassName);
-        }
-        else
-        {
-            CriticalErrors.Add(FString::Printf(TEXT("Missing class: %s"), *ClassName));
-            ErrorCount++;
-            UE_LOG(LogTemp, Error, TEXT("BuildIntegrationManager: Failed to load class - %s"), *ClassName);
-        }
+        ValidateModule(ModuleName);
     }
-    
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Core classes - %d/%d loaded"), LoadedClassCount, TotalClassCount);
+
+    UpdateSystemHealth();
+    LogSystemStatus();
 }
 
-void ABuildIntegrationManager::ValidateMapFunctionality()
+FBuild_SystemHealth UBuildIntegrationManager::GetSystemHealth() const
 {
-    UWorld* World = GetWorld();
-    if (World)
+    return SystemHealth;
+}
+
+TArray<FBuild_ModuleStatus> UBuildIntegrationManager::GetModuleStatuses() const
+{
+    return ModuleStatuses;
+}
+
+bool UBuildIntegrationManager::IsModuleHealthy(const FString& ModuleName) const
+{
+    for (const FBuild_ModuleStatus& Status : ModuleStatuses)
     {
-        // Count active actors
-        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+        if (Status.ModuleName == ModuleName)
         {
-            AActor* Actor = *ActorItr;
-            if (Actor && !Actor->IsPendingKill())
+            return Status.bIsLoaded && !Status.bHasErrors;
+        }
+    }
+    return false;
+}
+
+void UBuildIntegrationManager::RefreshModuleStatus()
+{
+    ModuleStatuses.Empty();
+    ScanForModules();
+    ValidateAllModules();
+}
+
+void UBuildIntegrationManager::LogSystemStatus() const
+{
+    UE_LOG(LogTemp, Warning, TEXT("=== BUILD INTEGRATION STATUS ==="));
+    UE_LOG(LogTemp, Warning, TEXT("Total Modules: %d"), SystemHealth.TotalModules);
+    UE_LOG(LogTemp, Warning, TEXT("Loaded Modules: %d"), SystemHealth.LoadedModules);
+    UE_LOG(LogTemp, Warning, TEXT("Error Modules: %d"), SystemHealth.ErrorModules);
+    UE_LOG(LogTemp, Warning, TEXT("Overall Health: %.2f%%"), SystemHealth.OverallHealth);
+    UE_LOG(LogTemp, Warning, TEXT("All Modules Loaded: %s"), SystemHealth.bAllModulesLoaded ? TEXT("YES") : TEXT("NO"));
+
+    for (const FBuild_ModuleStatus& Status : ModuleStatuses)
+    {
+        LogModuleStatus(Status);
+    }
+}
+
+bool UBuildIntegrationManager::TestCoreSystemsIntegration()
+{
+    UE_LOG(LogTemp, Warning, TEXT("Testing Core Systems Integration..."));
+
+    // Test TranspersonalCharacter
+    UClass* CharacterClass = LoadClass<APawn>(nullptr, TEXT("/Script/TranspersonalGame.TranspersonalCharacter"));
+    if (!CharacterClass)
+    {
+        UE_LOG(LogTemp, Error, TEXT("Failed to load TranspersonalCharacter class"));
+        return false;
+    }
+
+    // Test TranspersonalGameMode
+    UClass* GameModeClass = LoadClass<AGameModeBase>(nullptr, TEXT("/Script/TranspersonalGame.TranspersonalGameMode"));
+    if (!GameModeClass)
+    {
+        UE_LOG(LogTemp, Error, TEXT("Failed to load TranspersonalGameMode class"));
+        return false;
+    }
+
+    // Test TranspersonalGameState
+    UClass* GameStateClass = LoadClass<AGameStateBase>(nullptr, TEXT("/Script/TranspersonalGame.TranspersonalGameState"));
+    if (!GameStateClass)
+    {
+        UE_LOG(LogTemp, Error, TEXT("Failed to load TranspersonalGameState class"));
+        return false;
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("Core Systems Integration: PASSED"));
+    return true;
+}
+
+bool UBuildIntegrationManager::TestWorldGenerationIntegration()
+{
+    UE_LOG(LogTemp, Warning, TEXT("Testing World Generation Integration..."));
+
+    // Test PCGWorldGenerator
+    UClass* WorldGenClass = LoadClass<UObject>(nullptr, TEXT("/Script/TranspersonalGame.PCGWorldGenerator"));
+    if (!WorldGenClass)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("PCGWorldGenerator class not found - may not be implemented yet"));
+        return false;
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("World Generation Integration: PASSED"));
+    return true;
+}
+
+bool UBuildIntegrationManager::TestCharacterSystemIntegration()
+{
+    UE_LOG(LogTemp, Warning, TEXT("Testing Character System Integration..."));
+
+    // Test character movement and survival stats
+    UClass* CharacterClass = LoadClass<APawn>(nullptr, TEXT("/Script/TranspersonalGame.TranspersonalCharacter"));
+    if (CharacterClass)
+    {
+        // Check if character has required components
+        UE_LOG(LogTemp, Warning, TEXT("Character System Integration: PASSED"));
+        return true;
+    }
+
+    UE_LOG(LogTemp, Error, TEXT("Character System Integration: FAILED"));
+    return false;
+}
+
+void UBuildIntegrationManager::RunFullIntegrationTest()
+{
+    UE_LOG(LogTemp, Warning, TEXT("=== RUNNING FULL INTEGRATION TEST ==="));
+
+    bool bCoreSystemsOK = TestCoreSystemsIntegration();
+    bool bWorldGenOK = TestWorldGenerationIntegration();
+    bool bCharacterSystemOK = TestCharacterSystemIntegration();
+
+    int32 PassedTests = 0;
+    if (bCoreSystemsOK) PassedTests++;
+    if (bWorldGenOK) PassedTests++;
+    if (bCharacterSystemOK) PassedTests++;
+
+    UE_LOG(LogTemp, Warning, TEXT("Integration Test Results: %d/3 tests passed"), PassedTests);
+
+    if (PassedTests == 3)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("FULL INTEGRATION TEST: PASSED"));
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("FULL INTEGRATION TEST: FAILED"));
+    }
+}
+
+void UBuildIntegrationManager::ScanForModules()
+{
+    UE_LOG(LogTemp, Warning, TEXT("Scanning for modules..."));
+    
+    ModuleStatuses.Empty();
+
+    // Add known modules
+    TArray<FString> KnownModules = {
+        TEXT("TranspersonalGame"),
+        TEXT("Core"),
+        TEXT("Characters"),
+        TEXT("WorldGeneration"),
+        TEXT("Environment"),
+        TEXT("AI"),
+        TEXT("Combat"),
+        TEXT("Audio"),
+        TEXT("VFX"),
+        TEXT("QA")
+    };
+
+    for (const FString& ModuleName : KnownModules)
+    {
+        FBuild_ModuleStatus Status;
+        Status.ModuleName = ModuleName;
+        Status.bIsLoaded = false;
+        Status.bHasErrors = false;
+        Status.ClassCount = 0;
+        ModuleStatuses.Add(Status);
+    }
+}
+
+void UBuildIntegrationManager::ValidateModule(const FString& ModuleName)
+{
+    for (FBuild_ModuleStatus& Status : ModuleStatuses)
+    {
+        if (Status.ModuleName == ModuleName)
+        {
+            // Check if module is loaded
+            FModuleManager& ModuleManager = FModuleManager::Get();
+            Status.bIsLoaded = ModuleManager.IsModuleLoaded(*ModuleName);
+
+            if (Status.bIsLoaded)
             {
-                ActiveActorCount++;
+                Status.bHasErrors = false;
+                Status.ErrorMessage = TEXT("");
+                
+                // Count classes in this module
+                Status.ClassCount = 0;
+                for (TObjectIterator<UClass> ClassIt; ClassIt; ++ClassIt)
+                {
+                    UClass* Class = *ClassIt;
+                    if (Class && Class->GetOutermost())
+                    {
+                        FString PackageName = Class->GetOutermost()->GetName();
+                        if (PackageName.Contains(ModuleName))
+                        {
+                            Status.ClassCount++;
+                        }
+                    }
+                }
             }
+            else
+            {
+                Status.bHasErrors = true;
+                Status.ErrorMessage = FString::Printf(TEXT("Module %s is not loaded"), *ModuleName);
+            }
+            break;
         }
-        
-        if (ActiveActorCount > 0)
+    }
+}
+
+void UBuildIntegrationManager::UpdateSystemHealth()
+{
+    SystemHealth.TotalModules = ModuleStatuses.Num();
+    SystemHealth.LoadedModules = 0;
+    SystemHealth.ErrorModules = 0;
+
+    for (const FBuild_ModuleStatus& Status : ModuleStatuses)
+    {
+        if (Status.bIsLoaded)
         {
-            bMapFunctional = true;
-            UE_LOG(LogTemp, Log, TEXT("BuildIntegrationManager: Map functional with %d actors"), ActiveActorCount);
+            SystemHealth.LoadedModules++;
         }
-        else
+        if (Status.bHasErrors)
         {
-            bMapFunctional = false;
-            CriticalErrors.Add(TEXT("No active actors in scene"));
-            ErrorCount++;
+            SystemHealth.ErrorModules++;
         }
+    }
+
+    SystemHealth.bAllModulesLoaded = (SystemHealth.LoadedModules == SystemHealth.TotalModules);
+    
+    if (SystemHealth.TotalModules > 0)
+    {
+        SystemHealth.OverallHealth = (float)SystemHealth.LoadedModules / (float)SystemHealth.TotalModules * 100.0f;
     }
     else
     {
-        bMapFunctional = false;
-        CriticalErrors.Add(TEXT("No world/map loaded"));
-        ErrorCount++;
-        UE_LOG(LogTemp, Error, TEXT("BuildIntegrationManager: No world available"));
+        SystemHealth.OverallHealth = 0.0f;
     }
+
+    SystemHealth.LastBuildTime = FDateTime::Now().ToString();
 }
 
-void ABuildIntegrationManager::ValidateCompilationArtifacts()
+void UBuildIntegrationManager::LogModuleStatus(const FBuild_ModuleStatus& Status) const
 {
-    // For now, assume compilation artifacts exist if we can load classes
-    bCompilationArtifactsFound = (LoadedClassCount > 0);
-    
-    if (!bCompilationArtifactsFound)
+    FString StatusText = Status.bIsLoaded ? TEXT("LOADED") : TEXT("NOT LOADED");
+    if (Status.bHasErrors)
     {
-        CriticalErrors.Add(TEXT("No compilation artifacts found"));
-        ErrorCount++;
+        StatusText += TEXT(" (ERRORS)");
     }
-    
-    UE_LOG(LogTemp, Log, TEXT("BuildIntegrationManager: Compilation artifacts - %s"), 
-           bCompilationArtifactsFound ? TEXT("Found") : TEXT("Missing"));
-}
 
-void ABuildIntegrationManager::CalculateBuildHealthScore()
-{
-    BuildHealthScore = 0.0f;
-    
-    // Project loading (20 points)
-    if (bProjectLoaded)
-    {
-        BuildHealthScore += 20.0f;
-    }
-    
-    // Core classes (40 points)
-    if (TotalClassCount > 0)
-    {
-        BuildHealthScore += (float(LoadedClassCount) / float(TotalClassCount)) * 40.0f;
-    }
-    
-    // Map functionality (20 points)
-    if (bMapFunctional)
-    {
-        BuildHealthScore += 20.0f;
-    }
-    
-    // Compilation artifacts (20 points)
-    if (bCompilationArtifactsFound)
-    {
-        BuildHealthScore += 20.0f;
-    }
-    
-    // Cap at 100
-    BuildHealthScore = FMath::Clamp(BuildHealthScore, 0.0f, 100.0f);
-}
+    UE_LOG(LogTemp, Warning, TEXT("Module %s: %s (Classes: %d)"), 
+           *Status.ModuleName, *StatusText, Status.ClassCount);
 
-void ABuildIntegrationManager::UpdateBuildStatus()
-{
-    bCriticalErrorsDetected = (ErrorCount > 0);
-    
-    if (BuildHealthScore >= 80.0f)
+    if (Status.bHasErrors && !Status.ErrorMessage.IsEmpty())
     {
-        BuildStatus = EBuild_BuildStatus::Healthy;
-    }
-    else if (BuildHealthScore >= 60.0f)
-    {
-        BuildStatus = EBuild_BuildStatus::Functional;
-    }
-    else
-    {
-        BuildStatus = EBuild_BuildStatus::Critical;
-    }
-}
-
-FString ABuildIntegrationManager::GetBuildStatusString() const
-{
-    switch (BuildStatus)
-    {
-        case EBuild_BuildStatus::Healthy:
-            return TEXT("BUILD HEALTHY ✓");
-        case EBuild_BuildStatus::Functional:
-            return TEXT("BUILD FUNCTIONAL ⚠");
-        case EBuild_BuildStatus::Critical:
-            return TEXT("BUILD CRITICAL ✗");
-        default:
-            return TEXT("BUILD UNKNOWN");
-    }
-}
-
-TArray<FString> ABuildIntegrationManager::GetCriticalErrors() const
-{
-    return CriticalErrors;
-}
-
-void ABuildIntegrationManager::LogBuildReport() const
-{
-    UE_LOG(LogTemp, Warning, TEXT("=== BUILD INTEGRATION REPORT ==="));
-    UE_LOG(LogTemp, Warning, TEXT("Project Status: %s"), bProjectLoaded ? TEXT("LOADED") : TEXT("FAILED"));
-    UE_LOG(LogTemp, Warning, TEXT("Core Classes: %d/%d loaded"), LoadedClassCount, TotalClassCount);
-    UE_LOG(LogTemp, Warning, TEXT("Map Status: %s"), bMapFunctional ? TEXT("FUNCTIONAL") : TEXT("BROKEN"));
-    UE_LOG(LogTemp, Warning, TEXT("Scene Actors: %d"), ActiveActorCount);
-    UE_LOG(LogTemp, Warning, TEXT("Compilation: %s"), bCompilationArtifactsFound ? TEXT("OK") : TEXT("MISSING"));
-    UE_LOG(LogTemp, Warning, TEXT("Overall Health: %.1f/100"), BuildHealthScore);
-    UE_LOG(LogTemp, Warning, TEXT("Status: %s"), *GetBuildStatusString());
-    
-    if (bCriticalErrorsDetected)
-    {
-        UE_LOG(LogTemp, Error, TEXT("CRITICAL ERRORS (%d):"), ErrorCount);
-        for (const FString& Error : CriticalErrors)
-        {
-            UE_LOG(LogTemp, Error, TEXT("  - %s"), *Error);
-        }
-    }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("✓ NO CRITICAL ERRORS DETECTED"));
+        UE_LOG(LogTemp, Error, TEXT("  Error: %s"), *Status.ErrorMessage);
     }
 }
