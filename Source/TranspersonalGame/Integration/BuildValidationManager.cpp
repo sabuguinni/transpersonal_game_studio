@@ -1,455 +1,430 @@
 #include "BuildValidationManager.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Engine/GameInstance.h"
+#include "GameFramework/Actor.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/GameModeBase.h"
+#include "Components/StaticMeshComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Kismet/GameplayStatics.h"
 #include "TimerManager.h"
-#include "UObject/UObjectGlobals.h"
-#include "UObject/Package.h"
-#include "Engine/Level.h"
-#include "Engine/LevelStreaming.h"
-#include "Misc/PackageName.h"
 
 UBuildValidationManager::UBuildValidationManager()
 {
-    // Initialize core class paths for validation
-    CoreClassPaths = {
-        TEXT("/Script/TranspersonalGame.TranspersonalCharacter"),
-        TEXT("/Script/TranspersonalGame.TranspersonalGameMode"),
-        TEXT("/Script/TranspersonalGame.TranspersonalGameState"),
-        TEXT("/Script/TranspersonalGame.TranspersonalPlayerController")
-    };
-
-    GameplayClassPaths = {
-        TEXT("/Script/TranspersonalGame.QATestManager"),
-        TEXT("/Script/TranspersonalGame.BuildValidationManager")
-    };
-
-    SubsystemClassPaths = {
-        TEXT("/Script/TranspersonalGame.BuildValidationManager")
-    };
-
-    bContinuousValidationActive = false;
-    ValidationInterval = 30.0f;
-    bInitialized = false;
-    ValidationRunCount = 0;
-    LastValidationTime = 0.0;
+    bValidationInProgress = false;
+    ValidationStartTime = 0.0f;
 }
 
 void UBuildValidationManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Warning, TEXT("BuildValidationManager: Initializing..."));
+    UE_LOG(LogTemp, Log, TEXT("BuildValidationManager initialized"));
     
-    bInitialized = true;
+    // Clear any previous results
+    ClearValidationResults();
     
-    // Perform initial validation
-    LastValidationResult = ValidateFullBuild();
-    
-    UE_LOG(LogTemp, Warning, TEXT("BuildValidationManager: Initialized successfully"));
+    // Run initial quick validation
+    RunQuickValidation();
 }
 
 void UBuildValidationManager::Deinitialize()
 {
-    StopContinuousValidation();
-    bInitialized = false;
-    
-    UE_LOG(LogTemp, Warning, TEXT("BuildValidationManager: Deinitialized"));
-    
+    ClearValidationResults();
     Super::Deinitialize();
 }
 
-FBuild_ValidationResult UBuildValidationManager::ValidateFullBuild()
+void UBuildValidationManager::RunFullValidation()
 {
-    FBuild_ValidationResult Result;
-    ValidationRunCount++;
-    LastValidationTime = FPlatformTime::Seconds();
-    
-    UE_LOG(LogTemp, Warning, TEXT("BuildValidationManager: Starting full build validation (Run #%d)"), ValidationRunCount);
-    
-    // Validate TranspersonalGame module
-    bool bModuleValid = ValidateTranspersonalGameModule();
-    if (!bModuleValid)
+    if (bValidationInProgress)
     {
-        Result.ErrorMessages.Add(TEXT("TranspersonalGame module validation failed"));
-        Result.ErrorCount++;
-    }
-    
-    // Validate core classes
-    bool bCoreValid = ValidateCoreClasses();
-    if (!bCoreValid)
-    {
-        Result.ErrorMessages.Add(TEXT("Core classes validation failed"));
-        Result.ErrorCount++;
-    }
-    
-    // Validate gameplay classes
-    bool bGameplayValid = ValidateGameplayClasses();
-    if (!bGameplayValid)
-    {
-        Result.WarningMessages.Add(TEXT("Some gameplay classes failed validation"));
-        Result.WarningCount++;
-    }
-    
-    // Validate subsystems
-    bool bSubsystemsValid = ValidateSubsystems();
-    if (!bSubsystemsValid)
-    {
-        Result.WarningMessages.Add(TEXT("Some subsystems failed validation"));
-        Result.WarningCount++;
-    }
-    
-    // Determine overall result
-    Result.bIsValid = (Result.ErrorCount == 0);
-    
-    if (Result.bIsValid)
-    {
-        Result.ValidationMessage = FString::Printf(TEXT("Build validation PASSED (Warnings: %d)"), Result.WarningCount);
-    }
-    else
-    {
-        Result.ValidationMessage = FString::Printf(TEXT("Build validation FAILED (Errors: %d, Warnings: %d)"), Result.ErrorCount, Result.WarningCount);
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("BuildValidationManager: %s"), *Result.ValidationMessage);
-    
-    return Result;
-}
-
-FBuild_ValidationResult UBuildValidationManager::ValidateModuleIntegrity()
-{
-    FBuild_ValidationResult Result;
-    
-    UE_LOG(LogTemp, Warning, TEXT("BuildValidationManager: Validating module integrity..."));
-    
-    // Check if TranspersonalGame module is loaded
-    FModuleManager& ModuleManager = FModuleManager::Get();
-    bool bModuleLoaded = ModuleManager.IsModuleLoaded(TEXT("TranspersonalGame"));
-    
-    if (bModuleLoaded)
-    {
-        Result.ValidationMessage = TEXT("TranspersonalGame module is loaded and accessible");
-        Result.bIsValid = true;
-        UE_LOG(LogTemp, Warning, TEXT("BuildValidationManager: Module integrity check PASSED"));
-    }
-    else
-    {
-        Result.ValidationMessage = TEXT("TranspersonalGame module is not loaded");
-        Result.ErrorMessages.Add(TEXT("Module not loaded"));
-        Result.ErrorCount++;
-        Result.bIsValid = false;
-        UE_LOG(LogTemp, Error, TEXT("BuildValidationManager: Module integrity check FAILED"));
-    }
-    
-    return Result;
-}
-
-FBuild_ValidationResult UBuildValidationManager::ValidateClassRegistration()
-{
-    FBuild_ValidationResult Result;
-    
-    UE_LOG(LogTemp, Warning, TEXT("BuildValidationManager: Validating class registration..."));
-    
-    TArray<FString> AllClassPaths = CoreClassPaths;
-    AllClassPaths.Append(GameplayClassPaths);
-    
-    int32 LoadedCount = 0;
-    int32 FailedCount = 0;
-    
-    for (const FString& ClassPath : AllClassPaths)
-    {
-        if (TestClassLoading(ClassPath))
-        {
-            LoadedCount++;
-            UE_LOG(LogTemp, Log, TEXT("BuildValidationManager: Class loaded successfully: %s"), *ClassPath);
-        }
-        else
-        {
-            FailedCount++;
-            Result.ErrorMessages.Add(FString::Printf(TEXT("Failed to load class: %s"), *ClassPath));
-            UE_LOG(LogTemp, Error, TEXT("BuildValidationManager: Failed to load class: %s"), *ClassPath);
-        }
-    }
-    
-    Result.ErrorCount = FailedCount;
-    Result.bIsValid = (FailedCount == 0);
-    Result.ValidationMessage = FString::Printf(TEXT("Class registration: %d loaded, %d failed"), LoadedCount, FailedCount);
-    
-    UE_LOG(LogTemp, Warning, TEXT("BuildValidationManager: Class registration validation complete: %s"), *Result.ValidationMessage);
-    
-    return Result;
-}
-
-TArray<FBuild_ModuleStatus> UBuildValidationManager::GetModuleStatusReport()
-{
-    TArray<FBuild_ModuleStatus> StatusReport;
-    
-    // TranspersonalGame module status
-    FBuild_ModuleStatus TranspersonalStatus;
-    TranspersonalStatus.ModuleName = TEXT("TranspersonalGame");
-    TranspersonalStatus.bIsLoaded = FModuleManager::Get().IsModuleLoaded(TEXT("TranspersonalGame"));
-    
-    // Test core classes
-    for (const FString& ClassPath : CoreClassPaths)
-    {
-        if (TestClassLoading(ClassPath))
-        {
-            TranspersonalStatus.LoadedClasses.Add(ClassPath);
-        }
-        else
-        {
-            TranspersonalStatus.FailedClasses.Add(ClassPath);
-            TranspersonalStatus.bHasErrors = true;
-        }
-    }
-    
-    // Test gameplay classes
-    for (const FString& ClassPath : GameplayClassPaths)
-    {
-        if (TestClassLoading(ClassPath))
-        {
-            TranspersonalStatus.LoadedClasses.Add(ClassPath);
-        }
-        else
-        {
-            TranspersonalStatus.FailedClasses.Add(ClassPath);
-        }
-    }
-    
-    TranspersonalStatus.ClassCount = TranspersonalStatus.LoadedClasses.Num();
-    StatusReport.Add(TranspersonalStatus);
-    
-    CachedModuleStatus = StatusReport;
-    return StatusReport;
-}
-
-void UBuildValidationManager::StartContinuousValidation()
-{
-    if (bContinuousValidationActive)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("BuildValidationManager: Continuous validation already active"));
+        UE_LOG(LogTemp, Warning, TEXT("Validation already in progress"));
         return;
     }
+
+    UE_LOG(LogTemp, Log, TEXT("Starting full build validation"));
     
-    UGameInstance* GameInstance = GetGameInstance();
-    if (!GameInstance)
-    {
-        UE_LOG(LogTemp, Error, TEXT("BuildValidationManager: Cannot start continuous validation - no GameInstance"));
-        return;
-    }
-    
-    UWorld* World = GameInstance->GetWorld();
-    if (!World)
-    {
-        UE_LOG(LogTemp, Error, TEXT("BuildValidationManager: Cannot start continuous validation - no World"));
-        return;
-    }
-    
-    bContinuousValidationActive = true;
-    
-    World->GetTimerManager().SetTimer(
-        ValidationTimerHandle,
-        this,
-        &UBuildValidationManager::PerformValidationTick,
-        ValidationInterval,
-        true // Loop
-    );
-    
-    UE_LOG(LogTemp, Warning, TEXT("BuildValidationManager: Continuous validation started (interval: %.1fs)"), ValidationInterval);
+    bValidationInProgress = true;
+    ValidationStartTime = FPlatformTime::Seconds();
+    ClearValidationResults();
+
+    // Run all validation tests
+    ValidateCurrentLevel();
+    ValidateCoreClasses();
+    ValidateActorCounts();
+    ValidateCharacterSystem();
+    ValidateDinosaurSystem();
+    ValidateEnvironmentSystem();
+    ValidateGameModeSystem();
+    ValidatePhysicsSystem();
+
+    UpdateSystemHealth();
+    bValidationInProgress = false;
+
+    float TotalTime = FPlatformTime::Seconds() - ValidationStartTime;
+    UE_LOG(LogTemp, Log, TEXT("Full validation completed in %.2f seconds"), TotalTime);
 }
 
-void UBuildValidationManager::StopContinuousValidation()
+void UBuildValidationManager::RunQuickValidation()
 {
-    if (!bContinuousValidationActive)
+    if (bValidationInProgress)
     {
         return;
     }
-    
-    UGameInstance* GameInstance = GetGameInstance();
-    if (GameInstance)
+
+    bValidationInProgress = true;
+    ValidationStartTime = FPlatformTime::Seconds();
+    ClearValidationResults();
+
+    // Run essential tests only
+    ValidateCurrentLevel();
+    ValidateCoreClasses();
+    ValidateActorCounts();
+
+    UpdateSystemHealth();
+    bValidationInProgress = false;
+}
+
+FBuild_SystemHealth UBuildValidationManager::GetSystemHealth() const
+{
+    return CurrentSystemHealth;
+}
+
+TArray<FBuild_ValidationResult> UBuildValidationManager::GetValidationResults() const
+{
+    return ValidationResults;
+}
+
+bool UBuildValidationManager::IsSystemHealthy() const
+{
+    // System is healthy if no failed tests and core requirements met
+    for (const FBuild_ValidationResult& Result : ValidationResults)
     {
-        UWorld* World = GameInstance->GetWorld();
-        if (World)
+        if (Result.Status == EBuild_ValidationStatus::Failed)
         {
-            World->GetTimerManager().ClearTimer(ValidationTimerHandle);
-        }
-    }
-    
-    bContinuousValidationActive = false;
-    UE_LOG(LogTemp, Warning, TEXT("BuildValidationManager: Continuous validation stopped"));
-}
-
-FBuild_ValidationResult UBuildValidationManager::TestCrossModuleIntegration()
-{
-    FBuild_ValidationResult Result;
-    
-    UE_LOG(LogTemp, Warning, TEXT("BuildValidationManager: Testing cross-module integration..."));
-    
-    // Test basic integration scenarios
-    bool bIntegrationValid = true;
-    
-    // Test 1: Can we access core game classes?
-    if (!TestClassLoading(TEXT("/Script/TranspersonalGame.TranspersonalCharacter")))
-    {
-        Result.ErrorMessages.Add(TEXT("Cannot access TranspersonalCharacter"));
-        bIntegrationValid = false;
-    }
-    
-    // Test 2: Can we access game mode?
-    if (!TestClassLoading(TEXT("/Script/TranspersonalGame.TranspersonalGameMode")))
-    {
-        Result.ErrorMessages.Add(TEXT("Cannot access TranspersonalGameMode"));
-        bIntegrationValid = false;
-    }
-    
-    Result.bIsValid = bIntegrationValid;
-    Result.ErrorCount = Result.ErrorMessages.Num();
-    Result.ValidationMessage = bIntegrationValid ? TEXT("Cross-module integration PASSED") : TEXT("Cross-module integration FAILED");
-    
-    UE_LOG(LogTemp, Warning, TEXT("BuildValidationManager: Cross-module integration test: %s"), *Result.ValidationMessage);
-    
-    return Result;
-}
-
-FBuild_ValidationResult UBuildValidationManager::ValidateMinPlayableMap()
-{
-    FBuild_ValidationResult Result;
-    
-    UE_LOG(LogTemp, Warning, TEXT("BuildValidationManager: Validating MinPlayableMap..."));
-    
-    // This is a placeholder - in a real implementation we would:
-    // 1. Load the MinPlayableMap
-    // 2. Check for required actors (PlayerStart, etc.)
-    // 3. Validate level streaming
-    // 4. Test gameplay functionality
-    
-    Result.bIsValid = true;
-    Result.ValidationMessage = TEXT("MinPlayableMap validation not fully implemented yet");
-    Result.WarningMessages.Add(TEXT("Map validation is placeholder"));
-    Result.WarningCount = 1;
-    
-    return Result;
-}
-
-void UBuildValidationManager::LogValidationResults(const FBuild_ValidationResult& Results)
-{
-    UE_LOG(LogTemp, Warning, TEXT("=== BUILD VALIDATION RESULTS ==="));
-    UE_LOG(LogTemp, Warning, TEXT("Status: %s"), Results.bIsValid ? TEXT("VALID") : TEXT("INVALID"));
-    UE_LOG(LogTemp, Warning, TEXT("Message: %s"), *Results.ValidationMessage);
-    UE_LOG(LogTemp, Warning, TEXT("Errors: %d, Warnings: %d"), Results.ErrorCount, Results.WarningCount);
-    
-    for (const FString& Error : Results.ErrorMessages)
-    {
-        UE_LOG(LogTemp, Error, TEXT("ERROR: %s"), *Error);
-    }
-    
-    for (const FString& Warning : Results.WarningMessages)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("WARNING: %s"), *Warning);
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("=== END VALIDATION RESULTS ==="));
-}
-
-FString UBuildValidationManager::GetBuildStatusSummary()
-{
-    if (!bInitialized)
-    {
-        return TEXT("BuildValidationManager not initialized");
-    }
-    
-    FString Summary = FString::Printf(
-        TEXT("Build Status: %s | Validation Runs: %d | Last Run: %.1fs ago"),
-        LastValidationResult.bIsValid ? TEXT("VALID") : TEXT("INVALID"),
-        ValidationRunCount,
-        FPlatformTime::Seconds() - LastValidationTime
-    );
-    
-    return Summary;
-}
-
-bool UBuildValidationManager::ValidateTranspersonalGameModule()
-{
-    FModuleManager& ModuleManager = FModuleManager::Get();
-    return ModuleManager.IsModuleLoaded(TEXT("TranspersonalGame"));
-}
-
-bool UBuildValidationManager::ValidateCoreClasses()
-{
-    for (const FString& ClassPath : CoreClassPaths)
-    {
-        if (!TestClassLoading(ClassPath))
-        {
-            UE_LOG(LogTemp, Error, TEXT("BuildValidationManager: Core class validation failed: %s"), *ClassPath);
             return false;
         }
     }
-    return true;
+
+    return CurrentSystemHealth.bMinPlayableMapLoaded && 
+           CurrentSystemHealth.bCoreClassesLoaded &&
+           CurrentSystemHealth.TotalActors > 0;
 }
 
-bool UBuildValidationManager::ValidateGameplayClasses()
+void UBuildValidationManager::ValidateCurrentLevel()
 {
-    int32 FailedCount = 0;
-    for (const FString& ClassPath : GameplayClassPaths)
+    float StartTime = FPlatformTime::Seconds();
+    
+    UWorld* World = GetWorld();
+    if (!World)
     {
-        if (!TestClassLoading(ClassPath))
+        AddValidationResult(TEXT("Level Validation"), EBuild_ValidationStatus::Failed, 
+                          TEXT("No world loaded"), FPlatformTime::Seconds() - StartTime);
+        return;
+    }
+
+    FString LevelName = World->GetName();
+    bool bIsMinPlayableMap = LevelName.Contains(TEXT("MinPlayableMap"));
+    
+    if (bIsMinPlayableMap)
+    {
+        AddValidationResult(TEXT("Level Validation"), EBuild_ValidationStatus::Passed, 
+                          FString::Printf(TEXT("MinPlayableMap loaded: %s"), *LevelName), 
+                          FPlatformTime::Seconds() - StartTime);
+    }
+    else
+    {
+        AddValidationResult(TEXT("Level Validation"), EBuild_ValidationStatus::Warning, 
+                          FString::Printf(TEXT("Non-MinPlayableMap loaded: %s"), *LevelName), 
+                          FPlatformTime::Seconds() - StartTime);
+    }
+}
+
+void UBuildValidationManager::ValidateCoreClasses()
+{
+    float StartTime = FPlatformTime::Seconds();
+    
+    // Test core class loading
+    UClass* CharacterClass = LoadClass<AActor>(nullptr, TEXT("/Script/TranspersonalGame.TranspersonalCharacter"));
+    UClass* GameModeClass = LoadClass<AGameModeBase>(nullptr, TEXT("/Script/TranspersonalGame.TranspersonalGameMode"));
+    
+    bool bCoreClassesValid = (CharacterClass != nullptr) && (GameModeClass != nullptr);
+    
+    if (bCoreClassesValid)
+    {
+        AddValidationResult(TEXT("Core Classes"), EBuild_ValidationStatus::Passed, 
+                          TEXT("TranspersonalCharacter and TranspersonalGameMode loaded successfully"), 
+                          FPlatformTime::Seconds() - StartTime);
+    }
+    else
+    {
+        FString MissingClasses;
+        if (!CharacterClass) MissingClasses += TEXT("TranspersonalCharacter ");
+        if (!GameModeClass) MissingClasses += TEXT("TranspersonalGameMode ");
+        
+        AddValidationResult(TEXT("Core Classes"), EBuild_ValidationStatus::Failed, 
+                          FString::Printf(TEXT("Missing classes: %s"), *MissingClasses), 
+                          FPlatformTime::Seconds() - StartTime);
+    }
+}
+
+void UBuildValidationManager::ValidateActorCounts()
+{
+    float StartTime = FPlatformTime::Seconds();
+    
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        AddValidationResult(TEXT("Actor Count"), EBuild_ValidationStatus::Failed, 
+                          TEXT("No world for actor validation"), FPlatformTime::Seconds() - StartTime);
+        return;
+    }
+
+    TArray<AActor*> AllActors;
+    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
+    
+    int32 CharacterCount = 0;
+    int32 DinosaurCount = 0;
+    int32 EnvironmentCount = 0;
+    
+    for (AActor* Actor : AllActors)
+    {
+        if (!Actor) continue;
+        
+        FString ActorName = Actor->GetName();
+        if (ActorName.Contains(TEXT("Character")) || ActorName.Contains(TEXT("Player")))
         {
-            FailedCount++;
-            UE_LOG(LogTemp, Warning, TEXT("BuildValidationManager: Gameplay class validation failed: %s"), *ClassPath);
+            CharacterCount++;
+        }
+        else if (ActorName.Contains(TEXT("Dinosaur")) || ActorName.Contains(TEXT("TRex")) || 
+                 ActorName.Contains(TEXT("Raptor")) || ActorName.Contains(TEXT("Brachio")))
+        {
+            DinosaurCount++;
+        }
+        else if (ActorName.Contains(TEXT("Tree")) || ActorName.Contains(TEXT("Rock")) || 
+                 ActorName.Contains(TEXT("Terrain")) || ActorName.Contains(TEXT("Landscape")))
+        {
+            EnvironmentCount++;
         }
     }
     
-    // Allow some gameplay classes to fail (they might not be implemented yet)
-    return (FailedCount < GameplayClassPaths.Num());
-}
-
-bool UBuildValidationManager::ValidateSubsystems()
-{
-    // Test if this subsystem itself is working
-    return IsValid(this) && bInitialized;
-}
-
-TArray<FString> UBuildValidationManager::GetExpectedClasses()
-{
-    TArray<FString> Expected = CoreClassPaths;
-    Expected.Append(GameplayClassPaths);
-    Expected.Append(SubsystemClassPaths);
-    return Expected;
-}
-
-bool UBuildValidationManager::TestClassLoading(const FString& ClassName)
-{
-    UClass* LoadedClass = LoadClass<UObject>(nullptr, *ClassName);
-    return (LoadedClass != nullptr);
-}
-
-bool UBuildValidationManager::TestClassSpawning(const FString& ClassName)
-{
-    UClass* LoadedClass = LoadClass<UObject>(nullptr, *ClassName);
-    if (!LoadedClass)
-    {
-        return false;
-    }
+    // Update system health
+    CurrentSystemHealth.TotalActors = AllActors.Num();
+    CurrentSystemHealth.CharacterActors = CharacterCount;
+    CurrentSystemHealth.DinosaurActors = DinosaurCount;
+    CurrentSystemHealth.EnvironmentActors = EnvironmentCount;
     
-    // For now, just test that we can load the class
-    // Actual spawning would require more context (world, etc.)
-    return true;
+    if (AllActors.Num() > 10) // Minimum expected actors
+    {
+        AddValidationResult(TEXT("Actor Count"), EBuild_ValidationStatus::Passed, 
+                          FString::Printf(TEXT("Total: %d, Characters: %d, Dinosaurs: %d, Environment: %d"), 
+                                        AllActors.Num(), CharacterCount, DinosaurCount, EnvironmentCount), 
+                          FPlatformTime::Seconds() - StartTime);
+    }
+    else
+    {
+        AddValidationResult(TEXT("Actor Count"), EBuild_ValidationStatus::Warning, 
+                          FString::Printf(TEXT("Low actor count: %d (expected >10)"), AllActors.Num()), 
+                          FPlatformTime::Seconds() - StartTime);
+    }
 }
 
-void UBuildValidationManager::PerformValidationTick()
+void UBuildValidationManager::ValidateCharacterSystem()
 {
-    if (!bContinuousValidationActive)
+    float StartTime = FPlatformTime::Seconds();
+    
+    UWorld* World = GetWorld();
+    if (!World)
     {
+        AddValidationResult(TEXT("Character System"), EBuild_ValidationStatus::Failed, 
+                          TEXT("No world for character validation"), FPlatformTime::Seconds() - StartTime);
         return;
     }
+
+    TArray<AActor*> Characters;
+    UGameplayStatics::GetAllActorsOfClass(World, ACharacter::StaticClass(), Characters);
     
-    UE_LOG(LogTemp, Log, TEXT("BuildValidationManager: Performing validation tick..."));
-    
-    LastValidationResult = ValidateFullBuild();
-    
-    if (!LastValidationResult.bIsValid)
+    if (Characters.Num() > 0)
     {
-        UE_LOG(LogTemp, Error, TEXT("BuildValidationManager: Validation tick found errors!"));
-        LogValidationResults(LastValidationResult);
+        AddValidationResult(TEXT("Character System"), EBuild_ValidationStatus::Passed, 
+                          FString::Printf(TEXT("Found %d character actors"), Characters.Num()), 
+                          FPlatformTime::Seconds() - StartTime);
+    }
+    else
+    {
+        AddValidationResult(TEXT("Character System"), EBuild_ValidationStatus::Warning, 
+                          TEXT("No character actors found in level"), 
+                          FPlatformTime::Seconds() - StartTime);
+    }
+}
+
+void UBuildValidationManager::ValidateDinosaurSystem()
+{
+    float StartTime = FPlatformTime::Seconds();
+    
+    // For now, just check for actors with dinosaur names
+    // Later this will check actual dinosaur AI classes
+    if (CurrentSystemHealth.DinosaurActors > 0)
+    {
+        AddValidationResult(TEXT("Dinosaur System"), EBuild_ValidationStatus::Passed, 
+                          FString::Printf(TEXT("Found %d dinosaur placeholder actors"), CurrentSystemHealth.DinosaurActors), 
+                          FPlatformTime::Seconds() - StartTime);
+    }
+    else
+    {
+        AddValidationResult(TEXT("Dinosaur System"), EBuild_ValidationStatus::Warning, 
+                          TEXT("No dinosaur actors found"), 
+                          FPlatformTime::Seconds() - StartTime);
+    }
+}
+
+void UBuildValidationManager::ValidateEnvironmentSystem()
+{
+    float StartTime = FPlatformTime::Seconds();
+    
+    if (CurrentSystemHealth.EnvironmentActors > 5)
+    {
+        AddValidationResult(TEXT("Environment System"), EBuild_ValidationStatus::Passed, 
+                          FString::Printf(TEXT("Found %d environment actors"), CurrentSystemHealth.EnvironmentActors), 
+                          FPlatformTime::Seconds() - StartTime);
+    }
+    else
+    {
+        AddValidationResult(TEXT("Environment System"), EBuild_ValidationStatus::Warning, 
+                          FString::Printf(TEXT("Low environment actor count: %d"), CurrentSystemHealth.EnvironmentActors), 
+                          FPlatformTime::Seconds() - StartTime);
+    }
+}
+
+void UBuildValidationManager::ValidateGameModeSystem()
+{
+    float StartTime = FPlatformTime::Seconds();
+    
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        AddValidationResult(TEXT("GameMode System"), EBuild_ValidationStatus::Failed, 
+                          TEXT("No world for GameMode validation"), FPlatformTime::Seconds() - StartTime);
+        return;
+    }
+
+    AGameModeBase* GameMode = World->GetAuthGameMode();
+    if (GameMode)
+    {
+        FString GameModeName = GameMode->GetClass()->GetName();
+        AddValidationResult(TEXT("GameMode System"), EBuild_ValidationStatus::Passed, 
+                          FString::Printf(TEXT("GameMode active: %s"), *GameModeName), 
+                          FPlatformTime::Seconds() - StartTime);
+    }
+    else
+    {
+        AddValidationResult(TEXT("GameMode System"), EBuild_ValidationStatus::Warning, 
+                          TEXT("No GameMode found"), 
+                          FPlatformTime::Seconds() - StartTime);
+    }
+}
+
+void UBuildValidationManager::ValidatePhysicsSystem()
+{
+    float StartTime = FPlatformTime::Seconds();
+    
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        AddValidationResult(TEXT("Physics System"), EBuild_ValidationStatus::Failed, 
+                          TEXT("No world for physics validation"), FPlatformTime::Seconds() - StartTime);
+        return;
+    }
+
+    // Basic physics validation - check if physics world exists
+    if (World->GetPhysicsScene())
+    {
+        AddValidationResult(TEXT("Physics System"), EBuild_ValidationStatus::Passed, 
+                          TEXT("Physics scene active"), 
+                          FPlatformTime::Seconds() - StartTime);
+    }
+    else
+    {
+        AddValidationResult(TEXT("Physics System"), EBuild_ValidationStatus::Failed, 
+                          TEXT("No physics scene found"), 
+                          FPlatformTime::Seconds() - StartTime);
+    }
+}
+
+void UBuildValidationManager::GenerateHealthReport()
+{
+    RunFullValidation();
+    
+    UE_LOG(LogTemp, Log, TEXT("=== BUILD HEALTH REPORT ==="));
+    UE_LOG(LogTemp, Log, TEXT("System Healthy: %s"), IsSystemHealthy() ? TEXT("YES") : TEXT("NO"));
+    UE_LOG(LogTemp, Log, TEXT("Total Actors: %d"), CurrentSystemHealth.TotalActors);
+    UE_LOG(LogTemp, Log, TEXT("Character Actors: %d"), CurrentSystemHealth.CharacterActors);
+    UE_LOG(LogTemp, Log, TEXT("Dinosaur Actors: %d"), CurrentSystemHealth.DinosaurActors);
+    UE_LOG(LogTemp, Log, TEXT("Environment Actors: %d"), CurrentSystemHealth.EnvironmentActors);
+    UE_LOG(LogTemp, Log, TEXT("MinPlayableMap Loaded: %s"), CurrentSystemHealth.bMinPlayableMapLoaded ? TEXT("YES") : TEXT("NO"));
+    UE_LOG(LogTemp, Log, TEXT("Core Classes Loaded: %s"), CurrentSystemHealth.bCoreClassesLoaded ? TEXT("YES") : TEXT("NO"));
+    
+    UE_LOG(LogTemp, Log, TEXT("=== VALIDATION RESULTS ==="));
+    for (const FBuild_ValidationResult& Result : ValidationResults)
+    {
+        FString StatusStr;
+        switch (Result.Status)
+        {
+            case EBuild_ValidationStatus::Passed: StatusStr = TEXT("PASS"); break;
+            case EBuild_ValidationStatus::Failed: StatusStr = TEXT("FAIL"); break;
+            case EBuild_ValidationStatus::Warning: StatusStr = TEXT("WARN"); break;
+            default: StatusStr = TEXT("UNKNOWN"); break;
+        }
+        
+        UE_LOG(LogTemp, Log, TEXT("[%s] %s: %s (%.2fs)"), 
+               *StatusStr, *Result.TestName, *Result.Message, Result.ExecutionTime);
+    }
+}
+
+void UBuildValidationManager::AddValidationResult(const FString& TestName, EBuild_ValidationStatus Status, const FString& Message, float ExecutionTime)
+{
+    FBuild_ValidationResult Result;
+    Result.TestName = TestName;
+    Result.Status = Status;
+    Result.Message = Message;
+    Result.ExecutionTime = ExecutionTime;
+    
+    ValidationResults.Add(Result);
+    
+    // Log the result
+    FString StatusStr;
+    switch (Status)
+    {
+        case EBuild_ValidationStatus::Passed: StatusStr = TEXT("PASS"); break;
+        case EBuild_ValidationStatus::Failed: StatusStr = TEXT("FAIL"); break;
+        case EBuild_ValidationStatus::Warning: StatusStr = TEXT("WARN"); break;
+        default: StatusStr = TEXT("UNKNOWN"); break;
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Validation [%s] %s: %s"), *StatusStr, *TestName, *Message);
+}
+
+void UBuildValidationManager::ClearValidationResults()
+{
+    ValidationResults.Empty();
+    CurrentSystemHealth = FBuild_SystemHealth();
+}
+
+void UBuildValidationManager::UpdateSystemHealth()
+{
+    // Update boolean flags based on validation results
+    CurrentSystemHealth.bMinPlayableMapLoaded = false;
+    CurrentSystemHealth.bCoreClassesLoaded = false;
+    
+    for (const FBuild_ValidationResult& Result : ValidationResults)
+    {
+        if (Result.TestName == TEXT("Level Validation") && Result.Status == EBuild_ValidationStatus::Passed)
+        {
+            CurrentSystemHealth.bMinPlayableMapLoaded = true;
+        }
+        else if (Result.TestName == TEXT("Core Classes") && Result.Status == EBuild_ValidationStatus::Passed)
+        {
+            CurrentSystemHealth.bCoreClassesLoaded = true;
+        }
     }
 }
