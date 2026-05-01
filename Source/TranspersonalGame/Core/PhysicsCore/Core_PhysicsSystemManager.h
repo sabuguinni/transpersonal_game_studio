@@ -2,17 +2,92 @@
 
 #include "CoreMinimal.h"
 #include "Engine/World.h"
+#include "Subsystems/GameInstanceSubsystem.h"
+#include "PhysicsEngine/PhysicsSettings.h"
+#include "Materials/MaterialInterface.h"
+#include "PhysicalMaterials/PhysicalMaterial.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/PrimitiveComponent.h"
-#include "GameFramework/Actor.h"
-#include "Subsystems/GameInstanceSubsystem.h"
+#include "Engine/StaticMeshActor.h"
 #include "../SharedTypes.h"
 #include "Core_PhysicsSystemManager.generated.h"
 
+// Physics material configuration for different terrain types
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FCore_PhysicsMaterialConfig
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Material")
+    FString MaterialName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Material")
+    float Friction = 0.7f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Material")
+    float Restitution = 0.3f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Material")
+    float Density = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Material")
+    bool bEnableContactModification = false;
+
+    FCore_PhysicsMaterialConfig()
+    {
+        MaterialName = TEXT("DefaultPhysicsMaterial");
+    }
+};
+
+// Physics simulation quality levels for performance scaling
+UENUM(BlueprintType)
+enum class ECore_PhysicsQuality : uint8
+{
+    Low         UMETA(DisplayName = "Low Quality"),
+    Medium      UMETA(DisplayName = "Medium Quality"),
+    High        UMETA(DisplayName = "High Quality"),
+    Ultra       UMETA(DisplayName = "Ultra Quality")
+};
+
+// Physics object types for different gameplay elements
+UENUM(BlueprintType)
+enum class ECore_PhysicsObjectType : uint8
+{
+    Static      UMETA(DisplayName = "Static Object"),
+    Dynamic     UMETA(DisplayName = "Dynamic Object"),
+    Kinematic   UMETA(DisplayName = "Kinematic Object"),
+    Debris      UMETA(DisplayName = "Debris"),
+    Character   UMETA(DisplayName = "Character"),
+    Dinosaur    UMETA(DisplayName = "Dinosaur"),
+    Projectile  UMETA(DisplayName = "Projectile")
+};
+
+// Physics performance metrics for monitoring
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FCore_PhysicsMetrics
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Physics Metrics")
+    int32 ActiveRigidBodies = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Physics Metrics")
+    int32 SleepingRigidBodies = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Physics Metrics")
+    float PhysicsUpdateTime = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Physics Metrics")
+    int32 CollisionPairs = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Physics Metrics")
+    float MemoryUsageMB = 0.0f;
+};
+
 /**
- * Physics System Manager for Transpersonal Game Studio
- * Manages physics simulation, collision detection, and material properties
- * Integrates with Engine Architect's system management framework
+ * Core Physics System Manager
+ * Manages all physics simulation, materials, and performance optimization
+ * for the prehistoric survival game world
  */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UCore_PhysicsSystemManager : public UGameInstanceSubsystem
@@ -22,160 +97,128 @@ class TRANSPERSONALGAME_API UCore_PhysicsSystemManager : public UGameInstanceSub
 public:
     UCore_PhysicsSystemManager();
 
-    // Subsystem interface
+    // USubsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Physics system management
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    // Physics system initialization and management
+    UFUNCTION(BlueprintCallable, Category = "Core Physics")
     void InitializePhysicsSystem();
 
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
-    void EnablePhysicsOnActor(AActor* Actor, bool bSimulatePhysics = true);
+    UFUNCTION(BlueprintCallable, Category = "Core Physics")
+    void ShutdownPhysicsSystem();
 
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
-    void SetActorPhysicsMaterial(AActor* Actor, class UPhysicalMaterial* PhysicsMaterial);
+    UFUNCTION(BlueprintCallable, Category = "Core Physics")
+    bool IsPhysicsSystemActive() const { return bIsSystemActive; }
 
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
-    void ConfigureCollisionForActor(AActor* Actor, ECollisionEnabled::Type CollisionType);
+    // Physics quality and performance management
+    UFUNCTION(BlueprintCallable, Category = "Core Physics")
+    void SetPhysicsQuality(ECore_PhysicsQuality Quality);
 
-    // Prehistoric physics materials
-    UFUNCTION(BlueprintCallable, Category = "Physics Materials")
-    class UPhysicalMaterial* GetRockPhysicsMaterial();
+    UFUNCTION(BlueprintCallable, Category = "Core Physics")
+    ECore_PhysicsQuality GetPhysicsQuality() const { return CurrentPhysicsQuality; }
 
-    UFUNCTION(BlueprintCallable, Category = "Physics Materials")
-    class UPhysicalMaterial* GetWoodPhysicsMaterial();
+    UFUNCTION(BlueprintCallable, Category = "Core Physics")
+    void OptimizePhysicsPerformance();
 
-    UFUNCTION(BlueprintCallable, Category = "Physics Materials")
-    class UPhysicalMaterial* GetGroundPhysicsMaterial();
+    // Physics material management
+    UFUNCTION(BlueprintCallable, Category = "Core Physics")
+    UPhysicalMaterial* CreatePhysicsMaterial(const FCore_PhysicsMaterialConfig& Config);
 
-    UFUNCTION(BlueprintCallable, Category = "Physics Materials")
-    class UPhysicalMaterial* GetWaterPhysicsMaterial();
+    UFUNCTION(BlueprintCallable, Category = "Core Physics")
+    void ApplyPhysicsMaterialToActor(AActor* Actor, UPhysicalMaterial* PhysicsMaterial);
 
-    // Dinosaur-specific physics
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur Physics")
-    void ConfigureDinosaurPhysics(AActor* DinosaurActor, float Mass, float LinearDamping);
+    UFUNCTION(BlueprintCallable, Category = "Core Physics")
+    void SetupTerrainPhysics();
 
-    UFUNCTION(BlueprintCallable, Category = "Dinosaur Physics")
-    void SetDinosaurCollisionProfile(AActor* DinosaurActor, FName CollisionProfile);
+    // Object physics management
+    UFUNCTION(BlueprintCallable, Category = "Core Physics")
+    void EnablePhysicsOnActor(AActor* Actor, ECore_PhysicsObjectType ObjectType);
 
-    // Environmental physics
-    UFUNCTION(BlueprintCallable, Category = "Environmental Physics")
-    void EnableDestructiblePhysics(AActor* Actor);
+    UFUNCTION(BlueprintCallable, Category = "Core Physics")
+    void DisablePhysicsOnActor(AActor* Actor);
 
-    UFUNCTION(BlueprintCallable, Category = "Environmental Physics")
-    void ConfigureVegetationPhysics(AActor* VegetationActor);
+    UFUNCTION(BlueprintCallable, Category = "Core Physics")
+    void SetObjectPhysicsProperties(AActor* Actor, float Mass, float LinearDamping, float AngularDamping);
+
+    // Collision and interaction
+    UFUNCTION(BlueprintCallable, Category = "Core Physics")
+    void SetupCollisionChannels();
+
+    UFUNCTION(BlueprintCallable, Category = "Core Physics")
+    void ConfigureObjectCollision(AActor* Actor, ECore_PhysicsObjectType ObjectType);
+
+    // Destruction and debris system
+    UFUNCTION(BlueprintCallable, Category = "Core Physics")
+    void EnableDestructionOnActor(AActor* Actor);
+
+    UFUNCTION(BlueprintCallable, Category = "Core Physics")
+    void CreateDebrisFromActor(AActor* SourceActor, const FVector& ImpactPoint, float ImpactForce);
+
+    // Physics simulation control
+    UFUNCTION(BlueprintCallable, Category = "Core Physics")
+    void PausePhysicsSimulation();
+
+    UFUNCTION(BlueprintCallable, Category = "Core Physics")
+    void ResumePhysicsSimulation();
+
+    UFUNCTION(BlueprintCallable, Category = "Core Physics")
+    void SetPhysicsTimeScale(float TimeScale);
 
     // Performance monitoring
-    UFUNCTION(BlueprintCallable, Category = "Physics Performance")
-    int32 GetActivePhysicsBodies();
+    UFUNCTION(BlueprintCallable, Category = "Core Physics")
+    FCore_PhysicsMetrics GetPhysicsMetrics() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Physics Performance")
-    float GetPhysicsSimulationTime();
+    UFUNCTION(BlueprintCallable, Category = "Core Physics")
+    void UpdatePerformanceMetrics();
 
-    // Integration with Engine Architect systems
-    UFUNCTION(BlueprintCallable, Category = "System Integration")
-    void RegisterWithSystemManager();
+    // Debug and visualization
+    UFUNCTION(BlueprintCallable, Category = "Core Physics", CallInEditor)
+    void DebugDrawPhysicsShapes(bool bEnable);
 
-    UFUNCTION(BlueprintCallable, Category = "System Integration")
-    bool IsPhysicsSystemReady();
+    UFUNCTION(BlueprintCallable, Category = "Core Physics", CallInEditor)
+    void LogPhysicsSystemStatus();
 
 protected:
-    // Physics materials cache
-    UPROPERTY()
-    class UPhysicalMaterial* RockPhysicsMaterial;
+    // Core system state
+    UPROPERTY(BlueprintReadOnly, Category = "Core Physics")
+    bool bIsSystemActive = false;
 
-    UPROPERTY()
-    class UPhysicalMaterial* WoodPhysicsMaterial;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Core Physics")
+    ECore_PhysicsQuality CurrentPhysicsQuality = ECore_PhysicsQuality::Medium;
 
-    UPROPERTY()
-    class UPhysicalMaterial* GroundPhysicsMaterial;
+    // Physics materials for different terrain types
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Materials")
+    TMap<FString, UPhysicalMaterial*> PhysicsMaterials;
 
-    UPROPERTY()
-    class UPhysicalMaterial* WaterPhysicsMaterial;
-
-    // System state
-    UPROPERTY(BlueprintReadOnly, Category = "System State")
-    bool bIsInitialized;
-
-    UPROPERTY(BlueprintReadOnly, Category = "System State")
-    int32 ManagedActorsCount;
-
+    // Performance monitoring
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float LastFramePhysicsTime;
+    FCore_PhysicsMetrics CurrentMetrics;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float MetricsUpdateInterval = 1.0f;
+
+    // Physics simulation settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Settings")
+    float MaxPhysicsStep = 0.033f; // 30 FPS minimum
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Settings")
+    int32 MaxSubsteps = 6;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Settings")
+    float FixedTimeStep = 0.016f; // 60 FPS target
 
 private:
-    // Internal physics material creation
-    void CreatePhysicsMaterials();
-    void SetupDefaultCollisionProfiles();
+    // Internal system management
+    void CreateDefaultPhysicsMaterials();
+    void ApplyPhysicsQualitySettings(ECore_PhysicsQuality Quality);
+    void CleanupInactivePhysicsObjects();
     
-    // Performance tracking
-    void UpdatePhysicsMetrics();
+    // Performance optimization
+    void OptimizeLODSettings();
+    void ManagePhysicsObjectCulling();
     
-    // Actor management
-    TArray<TWeakObjectPtr<AActor>> ManagedActors;
-    
-    // System integration
-    bool bRegisteredWithSystemManager;
-};
-
-/**
- * Physics Configuration Data Structure
- * Stores physics settings for different object types
- */
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCore_PhysicsConfig
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    float Mass = 100.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    float LinearDamping = 0.1f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    float AngularDamping = 0.1f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    bool bEnableGravity = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    bool bSimulatePhysics = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision")
-    TEnumAsByte<ECollisionEnabled::Type> CollisionEnabled = ECollisionEnabled::QueryAndPhysics;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision")
-    FName CollisionProfileName = "BlockAll";
-
-    FCore_PhysicsConfig()
-    {
-        Mass = 100.0f;
-        LinearDamping = 0.1f;
-        AngularDamping = 0.1f;
-        bEnableGravity = true;
-        bSimulatePhysics = true;
-        CollisionEnabled = ECollisionEnabled::QueryAndPhysics;
-        CollisionProfileName = "BlockAll";
-    }
-};
-
-/**
- * Prehistoric Physics Material Types
- * Defines physics properties for different materials in the prehistoric world
- */
-UENUM(BlueprintType)
-enum class ECore_PhysicsMaterialType : uint8
-{
-    Rock        UMETA(DisplayName = "Rock"),
-    Wood        UMETA(DisplayName = "Wood"),
-    Ground      UMETA(DisplayName = "Ground"),
-    Water       UMETA(DisplayName = "Water"),
-    Bone        UMETA(DisplayName = "Bone"),
-    Flesh       UMETA(DisplayName = "Flesh"),
-    Vegetation  UMETA(DisplayName = "Vegetation"),
-    Sand        UMETA(DisplayName = "Sand"),
-    Mud         UMETA(DisplayName = "Mud"),
-    Ice         UMETA(DisplayName = "Ice")
+    // Timer handles
+    FTimerHandle MetricsUpdateTimer;
+    FTimerHandle PerformanceOptimizationTimer;
 };
