@@ -2,67 +2,15 @@
 
 #include "CoreMinimal.h"
 #include "Engine/GameInstanceSubsystem.h"
-#include "Engine/World.h"
-#include "Engine/Engine.h"
-#include "../SharedTypes.h"
+#include "SharedTypes.h"
 #include "BuildIntegrationManager.generated.h"
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_ModuleStatus
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly, Category = "Build")
-    FString ModuleName;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Build")
-    bool bIsLoaded;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Build")
-    bool bHasErrors;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Build")
-    int32 ClassCount;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Build")
-    FString LastError;
-
-    FBuild_ModuleStatus()
-    {
-        ModuleName = TEXT("");
-        bIsLoaded = false;
-        bHasErrors = false;
-        ClassCount = 0;
-        LastError = TEXT("");
-    }
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_SystemValidation
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly, Category = "Build")
-    FString SystemName;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Build")
-    bool bIsValid;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Build")
-    int32 ActorCount;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Build")
-    TArray<FString> ValidationErrors;
-
-    FBuild_SystemValidation()
-    {
-        SystemName = TEXT("");
-        bIsValid = false;
-        ActorCount = 0;
-    }
-};
-
-UCLASS(BlueprintType)
+/**
+ * Build Integration Manager - Agent #19
+ * Manages cross-module dependencies and build validation
+ * Ensures all systems integrate properly and compile successfully
+ */
+UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UBuildIntegrationManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
@@ -70,63 +18,64 @@ class TRANSPERSONALGAME_API UBuildIntegrationManager : public UGameInstanceSubsy
 public:
     UBuildIntegrationManager();
 
-    // Subsystem interface
+    // USubsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
     // Build validation functions
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool ValidateAllSystems();
+    bool ValidateAllModules();
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    TArray<FBuild_ModuleStatus> GetModuleStatuses();
+    bool TestCrossModuleDependencies();
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    TArray<FBuild_SystemValidation> GetSystemValidations();
+    void GenerateBuildReport();
+
+    // Module registration
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    void RegisterModule(const FString& ModuleName, bool bIsActive);
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool ValidateMinPlayableMap();
+    bool IsModuleActive(const FString& ModuleName) const;
+
+    // Integration testing
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    bool TestMinPlayableMapIntegration();
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    void RunIntegrationTests();
-
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    FString GetBuildReport();
-
-    // Cross-system validation
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool ValidateCharacterSystems();
-
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool ValidateWorldSystems();
-
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool ValidateAISystems();
-
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool ValidateAudioSystems();
-
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool ValidateVFXSystems();
+    void ValidateActorSpawning();
 
 protected:
+    // Module tracking
     UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
-    TArray<FBuild_ModuleStatus> ModuleStatuses;
+    TMap<FString, bool> RegisteredModules;
+
+    // Build status
+    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
+    bool bLastBuildSuccessful;
 
     UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
-    TArray<FBuild_SystemValidation> SystemValidations;
+    FString LastBuildError;
 
     UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
-    bool bLastValidationPassed;
+    int32 TotalModulesRegistered;
 
     UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
-    FString LastBuildReport;
+    int32 ActiveModulesCount;
+
+    // Integration test results
+    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
+    TArray<FString> IntegrationTestResults;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
+    float LastIntegrationTestTime;
 
 private:
-    // Internal validation helpers
-    FBuild_ModuleStatus ValidateModule(const FString& ModuleName);
-    FBuild_SystemValidation ValidateSystem(const FString& SystemName, UWorld* World);
-    bool CheckClassExists(const FString& ClassName);
-    int32 CountActorsOfType(UWorld* World, const FString& ActorType);
-    void LogValidationResult(const FString& TestName, bool bPassed, const FString& Details = TEXT(""));
+    // Internal validation functions
+    bool ValidateModuleHeaders();
+    bool ValidateModuleImplementations();
+    bool ValidateSharedTypes();
+    bool TestActorClassLoading();
+    void LogIntegrationStatus();
 };
