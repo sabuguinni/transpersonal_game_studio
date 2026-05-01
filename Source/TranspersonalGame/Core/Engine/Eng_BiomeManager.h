@@ -1,77 +1,81 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Subsystems/GameInstanceSubsystem.h"
 #include "Engine/World.h"
-#include "Subsystems/WorldSubsystem.h"
-#include "SharedTypes.h"
+#include "Components/ActorComponent.h"
+#include "../SharedTypes.h"
 #include "Eng_BiomeManager.generated.h"
 
-// Forward declarations
-class UBiomeData;
-class ABiomeZone;
-class UWeatherSystem;
-
 /**
- * Biome configuration data structure
+ * BIOME MANAGER - CORE ARCHITECTURE SYSTEM
+ * Engine Architect Agent #02
+ * 
+ * Manages biome generation, transition zones, and environmental parameters.
+ * This is the core system that defines how the prehistoric world is structured.
+ * 
+ * BIOMES SUPPORTED:
+ * - Grassland: Open plains with scattered trees
+ * - Forest: Dense vegetation, limited visibility
+ * - Desert: Arid environment, extreme temperatures
+ * - Swamp: Wetland areas, dangerous terrain
+ * - Mountains: High elevation, rocky terrain
+ * - River/Lake: Water bodies and shorelines
+ * - Coast: Ocean boundaries
  */
+
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_BiomeConfig
+struct TRANSPERSONALGAME_API FEng_BiomeParameters
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    EBiomeType BiomeType = EBiomeType::Forest;
+    EEng_BiomeType BiomeType = EEng_BiomeType::Grassland;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FString BiomeName = TEXT("Unknown");
+    float Temperature = 20.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float TemperatureMin = 15.0f;
+    float Humidity = 0.5f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float TemperatureMax = 25.0f;
+    float VegetationDensity = 0.5f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float HumidityLevel = 0.5f;
+    float RockDensity = 0.3f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    float VegetationDensity = 0.7f;
+    float WaterLevel = 0.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    TArray<TSubclassOf<class ADinosaurBase>> NativeDinosaurs;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FLinearColor FogColor = FLinearColor::White;
+    FLinearColor FogColor = FLinearColor(0.5f, 0.6f, 0.7f, 1.0f);
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
     float FogDensity = 0.02f;
 
-    FEng_BiomeConfig()
+    FEng_BiomeParameters()
     {
-        BiomeType = EBiomeType::Forest;
-        BiomeName = TEXT("Forest");
-        TemperatureMin = 15.0f;
-        TemperatureMax = 25.0f;
-        HumidityLevel = 0.7f;
-        VegetationDensity = 0.8f;
-        FogColor = FLinearColor(0.5f, 0.7f, 0.3f, 1.0f);
-        FogDensity = 0.01f;
+        BiomeType = EEng_BiomeType::Grassland;
+        Temperature = 20.0f;
+        Humidity = 0.5f;
+        VegetationDensity = 0.5f;
+        RockDensity = 0.3f;
+        WaterLevel = 0.0f;
+        FogColor = FLinearColor(0.5f, 0.6f, 0.7f, 1.0f);
+        FogDensity = 0.02f;
     }
 };
 
-/**
- * Biome transition data
- */
 USTRUCT(BlueprintType)
 struct TRANSPERSONALGAME_API FEng_BiomeTransition
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transition")
-    EBiomeType FromBiome = EBiomeType::Forest;
+    EEng_BiomeType FromBiome = EEng_BiomeType::Grassland;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transition")
-    EBiomeType ToBiome = EBiomeType::Swamp;
+    EEng_BiomeType ToBiome = EEng_BiomeType::Forest;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transition")
     float TransitionDistance = 1000.0f;
@@ -81,132 +85,98 @@ struct TRANSPERSONALGAME_API FEng_BiomeTransition
 
     FEng_BiomeTransition()
     {
-        FromBiome = EBiomeType::Forest;
-        ToBiome = EBiomeType::Swamp;
+        FromBiome = EEng_BiomeType::Grassland;
+        ToBiome = EEng_BiomeType::Forest;
         TransitionDistance = 1000.0f;
         BlendFactor = 0.5f;
     }
 };
 
 /**
- * Central biome management system for the prehistoric world
- * Manages 5 biomes: Swamp, Forest, Savanna, Desert, Snow Mountain
- * Handles biome transitions, weather, temperature, and ecosystem rules
+ * Biome Manager Subsystem
+ * Handles biome generation, environmental parameters, and transition zones
  */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UEng_BiomeManager : public UWorldSubsystem
+class TRANSPERSONALGAME_API UEng_BiomeManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
     UEng_BiomeManager();
 
-    // USubsystem interface
+    // Subsystem overrides
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Core biome functionality
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    EBiomeType GetBiomeAtLocation(const FVector& WorldLocation) const;
+    // Core biome functions
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    EEng_BiomeType GetBiomeAtLocation(const FVector& WorldLocation) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    FEng_BiomeConfig GetBiomeConfig(EBiomeType BiomeType) const;
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    FEng_BiomeParameters GetBiomeParameters(EEng_BiomeType BiomeType) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    FEng_BiomeParameters GetBlendedBiomeParameters(const FVector& WorldLocation) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    void SetBiomeParameters(EEng_BiomeType BiomeType, const FEng_BiomeParameters& Parameters);
+
+    // Transition zone management
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    bool IsInTransitionZone(const FVector& WorldLocation) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    FEng_BiomeTransition GetTransitionData(const FVector& WorldLocation) const;
+
+    // Environmental queries
+    UFUNCTION(BlueprintCallable, Category = "Biome")
     float GetTemperatureAtLocation(const FVector& WorldLocation) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
+    UFUNCTION(BlueprintCallable, Category = "Biome")
     float GetHumidityAtLocation(const FVector& WorldLocation) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    bool IsLocationInBiomeTransition(const FVector& WorldLocation) const;
+    UFUNCTION(BlueprintCallable, Category = "Biome")
+    float GetVegetationDensityAtLocation(const FVector& WorldLocation) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    FEng_BiomeTransition GetBiomeTransitionData(const FVector& WorldLocation) const;
+    // Debug and validation
+    UFUNCTION(BlueprintCallable, Category = "Biome", CallInEditor)
+    void ValidateBiomeConfiguration();
 
-    // Biome zone management
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    void RegisterBiomeZone(ABiomeZone* BiomeZone);
-
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    void UnregisterBiomeZone(ABiomeZone* BiomeZone);
-
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    TArray<ABiomeZone*> GetBiomeZonesInRadius(const FVector& Center, float Radius) const;
-
-    // Weather integration
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    void UpdateWeatherForBiome(EBiomeType BiomeType, float DeltaTime);
-
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    bool CanWeatherOccurInBiome(EWeatherType WeatherType, EBiomeType BiomeType) const;
-
-    // Ecosystem rules
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    TArray<TSubclassOf<class ADinosaurBase>> GetNativeDinosaursForBiome(EBiomeType BiomeType) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Biome System")
-    float GetDinosaurSpawnChanceInBiome(TSubclassOf<class ADinosaurBase> DinosaurClass, EBiomeType BiomeType) const;
-
-    // Debug and editor tools
-    UFUNCTION(BlueprintCallable, Category = "Debug", CallInEditor)
-    void DebugPrintBiomeInfo(const FVector& Location) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Debug", CallInEditor)
-    void ValidateBiomeConfiguration() const;
+    UFUNCTION(BlueprintCallable, Category = "Biome", CallInEditor)
+    void GenerateDebugBiomeMap();
 
 protected:
-    // Biome configuration storage
+    // Biome configuration
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    TMap<EBiomeType, FEng_BiomeConfig> BiomeConfigs;
+    TMap<EEng_BiomeType, FEng_BiomeParameters> BiomeParametersMap;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
     TArray<FEng_BiomeTransition> BiomeTransitions;
 
-    // Runtime biome zones
-    UPROPERTY()
-    TArray<ABiomeZone*> RegisteredBiomeZones;
+    // World parameters
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World")
+    float WorldSizeKm = 16.0f;
 
-    // Weather system reference
-    UPROPERTY()
-    UWeatherSystem* WeatherSystem;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World")
+    float BiomeNoiseScale = 0.001f;
 
-    // Biome world boundaries (in UE5 units)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Layout")
-    float WorldSizeX = 20000.0f; // 20km
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World")
+    float TransitionZoneSize = 500.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Layout")
-    float WorldSizeY = 20000.0f; // 20km
+    // Performance settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    bool bEnableBiomeBlending = true;
 
-    // Biome distribution settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Layout")
-    float SwampRegionSize = 4000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Layout")
-    float ForestRegionSize = 6000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Layout")
-    float SavannaRegionSize = 5000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Layout")
-    float DesertRegionSize = 3000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Layout")
-    float MountainRegionSize = 2000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float BiomeUpdateFrequency = 1.0f;
 
 private:
     // Internal helper functions
-    void InitializeBiomeConfigs();
-    void SetupBiomeTransitions();
-    EBiomeType CalculateBiomeFromWorldPosition(const FVector& WorldLocation) const;
-    float CalculateDistanceToBiomeBorder(const FVector& Location, EBiomeType BiomeType) const;
-    FEng_BiomeConfig BlendBiomeConfigs(const FEng_BiomeConfig& BiomeA, const FEng_BiomeConfig& BiomeB, float BlendFactor) const;
-
-    // Performance optimization
-    mutable TMap<FVector, EBiomeType> BiomeLocationCache;
-    mutable float LastCacheCleanupTime = 0.0f;
-    static constexpr float CACHE_CLEANUP_INTERVAL = 30.0f;
-    static constexpr int32 MAX_CACHE_ENTRIES = 1000;
-
-    void CleanupLocationCache() const;
+    float CalculateNoiseValue(const FVector& Location, float Scale) const;
+    EEng_BiomeType DetermineBiomeFromNoise(float NoiseValue, float Elevation) const;
+    FEng_BiomeParameters BlendBiomeParameters(const FEng_BiomeParameters& BiomeA, const FEng_BiomeParameters& BiomeB, float BlendFactor) const;
+    
+    // Cache for performance
+    mutable TMap<FIntPoint, EEng_BiomeType> BiomeCache;
+    mutable float LastCacheUpdate = 0.0f;
 };
