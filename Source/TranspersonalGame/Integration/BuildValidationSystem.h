@@ -1,107 +1,81 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
 #include "Engine/World.h"
+#include "GameFramework/Actor.h"
 #include "Components/SceneComponent.h"
+#include "SharedTypes.h"
 #include "BuildValidationSystem.generated.h"
 
 UENUM(BlueprintType)
-enum class EBuild_ValidationResult : uint8
+enum class EBuild_ValidationStatus : uint8
 {
-    Unknown     UMETA(DisplayName = "Unknown"),
-    Passed      UMETA(DisplayName = "Passed"),
-    Failed      UMETA(DisplayName = "Failed"),
-    Warning     UMETA(DisplayName = "Warning"),
-    InProgress  UMETA(DisplayName = "In Progress")
-};
-
-UENUM(BlueprintType)
-enum class EBuild_SystemType : uint8
-{
-    Core        UMETA(DisplayName = "Core Systems"),
-    World       UMETA(DisplayName = "World Generation"),
-    Character   UMETA(DisplayName = "Character Systems"),
-    AI          UMETA(DisplayName = "AI Systems"),
-    Audio       UMETA(DisplayName = "Audio Systems"),
-    VFX         UMETA(DisplayName = "VFX Systems"),
-    UI          UMETA(DisplayName = "UI Systems"),
-    Physics     UMETA(DisplayName = "Physics Systems"),
-    Lighting    UMETA(DisplayName = "Lighting Systems"),
-    Integration UMETA(DisplayName = "Integration Systems")
+    Unknown         UMETA(DisplayName = "Unknown"),
+    Validating      UMETA(DisplayName = "Validating"),
+    Passed          UMETA(DisplayName = "Passed"),
+    Failed          UMETA(DisplayName = "Failed"),
+    Critical        UMETA(DisplayName = "Critical")
 };
 
 USTRUCT(BlueprintType)
-struct FBuild_ValidationTest
+struct FBuild_ModuleStatus
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Build Validation")
+    FString ModuleName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Build Validation")
+    EBuild_ValidationStatus Status;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Build Validation")
+    int32 ErrorCount;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Build Validation")
+    FString LastError;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Build Validation")
+    float ValidationTime;
+
+    FBuild_ModuleStatus()
+    {
+        ModuleName = TEXT("");
+        Status = EBuild_ValidationStatus::Unknown;
+        ErrorCount = 0;
+        LastError = TEXT("");
+        ValidationTime = 0.0f;
+    }
+};
+
+USTRUCT(BlueprintType)
+struct FBuild_IntegrationTest
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
     FString TestName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation")
-    EBuild_SystemType SystemType;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
+    TArray<FString> RequiredModules;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation")
-    EBuild_ValidationResult Result;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
+    bool bTestPassed;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation")
-    FString ErrorMessage;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
+    FString TestResult;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation")
-    float ExecutionTime;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation")
-    bool bCritical;
-
-    FBuild_ValidationTest()
+    FBuild_IntegrationTest()
     {
-        TestName = TEXT("Unknown Test");
-        SystemType = EBuild_SystemType::Core;
-        Result = EBuild_ValidationResult::Unknown;
-        ErrorMessage = TEXT("");
-        ExecutionTime = 0.0f;
-        bCritical = false;
+        TestName = TEXT("");
+        bTestPassed = false;
+        TestResult = TEXT("");
     }
 };
 
-USTRUCT(BlueprintType)
-struct FBuild_SystemStatus
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System Status")
-    EBuild_SystemType SystemType;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System Status")
-    EBuild_ValidationResult OverallStatus;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System Status")
-    int32 PassedTests;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System Status")
-    int32 FailedTests;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System Status")
-    int32 WarningTests;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System Status")
-    TArray<FString> CriticalErrors;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System Status")
-    float LastValidationTime;
-
-    FBuild_SystemStatus()
-    {
-        SystemType = EBuild_SystemType::Core;
-        OverallStatus = EBuild_ValidationResult::Unknown;
-        PassedTests = 0;
-        FailedTests = 0;
-        WarningTests = 0;
-        LastValidationTime = 0.0f;
-    }
-};
-
+/**
+ * Build Validation System - Integration Agent #19
+ * Validates compilation, module dependencies, and cross-system integration
+ */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API ABuildValidationSystem : public AActor
 {
@@ -116,111 +90,77 @@ protected:
 public:
     virtual void Tick(float DeltaTime) override;
 
-    // Core validation properties
+    // Core validation functions
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    void StartFullValidation();
+
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    void ValidateModule(const FString& ModuleName);
+
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    void RunIntegrationTests();
+
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    EBuild_ValidationStatus GetOverallStatus() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    TArray<FBuild_ModuleStatus> GetModuleStatuses() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    TArray<FBuild_IntegrationTest> GetIntegrationResults() const;
+
+    // Build system integration
+    UFUNCTION(BlueprintCallable, Category = "Build System")
+    void CheckCompilationStatus();
+
+    UFUNCTION(BlueprintCallable, Category = "Build System")
+    void ValidateBinaryFiles();
+
+    UFUNCTION(BlueprintCallable, Category = "Build System")
+    void TestClassLoading();
+
+    // Cross-module dependency validation
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void ValidateAudioVFXIntegration();
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void ValidateWorldCharacterIntegration();
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void ValidateAICombatIntegration();
+
+protected:
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    USceneComponent* RootSceneComponent;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Build Validation")
-    bool bAutoValidationEnabled;
+    TArray<FBuild_ModuleStatus> ModuleStatuses;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Build Validation")
+    TArray<FBuild_IntegrationTest> IntegrationTests;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Build Validation")
+    EBuild_ValidationStatus OverallStatus;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Build Validation")
     float ValidationInterval;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Build Validation")
-    bool bLogDetailedResults;
+    bool bAutoValidation;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Build Validation")
-    bool bStopOnCriticalError;
+    int32 TotalErrors;
 
-    // Validation results
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Validation Results")
-    TArray<FBuild_ValidationTest> ValidationTests;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Validation Results")
-    TArray<FBuild_SystemStatus> SystemStatuses;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Validation Results")
-    EBuild_ValidationResult OverallBuildStatus;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Validation Results")
-    int32 TotalTestsRun;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Validation Results")
-    int32 TotalTestsPassed;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Validation Results")
-    int32 TotalTestsFailed;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Validation Results")
-    float LastFullValidationTime;
-
-    // Validation functions
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    void RunFullValidation();
-
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    void RunSystemValidation(EBuild_SystemType SystemType);
-
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    void ValidateClassLoading();
-
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    void ValidateActorSpawning();
-
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    void ValidateModuleIntegration();
-
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    void ValidateSystemInteractions();
-
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    void ClearValidationResults();
-
-    // Result query functions
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Build Validation")
-    EBuild_ValidationResult GetSystemStatus(EBuild_SystemType SystemType) const;
-
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Build Validation")
-    TArray<FString> GetCriticalErrors() const;
-
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Build Validation")
-    bool HasCriticalErrors() const;
-
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Build Validation")
-    float GetValidationProgress() const;
-
-    // Utility functions
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    void GenerateValidationReport();
-
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    void ExportValidationResults(const FString& FilePath);
-
-protected:
-    // Internal validation methods
-    void ValidateCoreClasses();
-    void ValidateWorldGeneration();
-    void ValidateCharacterSystems();
-    void ValidateAISystems();
-    void ValidateAudioSystems();
-    void ValidateVFXSystems();
-    void ValidatePhysicsSystems();
-    void ValidateLightingSystems();
-
-    // Helper methods
-    void AddValidationTest(const FString& TestName, EBuild_SystemType SystemType, 
-                          EBuild_ValidationResult Result, const FString& ErrorMessage = TEXT(""), 
-                          bool bCritical = false);
-    
-    void UpdateSystemStatus(EBuild_SystemType SystemType);
-    void CalculateOverallStatus();
-    void LogValidationResult(const FBuild_ValidationTest& Test);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Build Validation")
+    int32 TotalWarnings;
 
 private:
-    // Internal state
-    float TimeSinceLastValidation;
+    float LastValidationTime;
     bool bValidationInProgress;
-    int32 CurrentValidationStep;
-    int32 TotalValidationSteps;
 
-    // Root component
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true"))
-    USceneComponent* RootSceneComponent;
+    // Internal validation methods
+    void InitializeModuleList();
+    void UpdateValidationStatus();
+    FBuild_ModuleStatus ValidateModuleInternal(const FString& ModuleName);
+    FBuild_IntegrationTest RunIntegrationTestInternal(const FString& TestName, const TArray<FString>& RequiredModules);
 };
