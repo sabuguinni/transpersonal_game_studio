@@ -1,96 +1,97 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
-#include "Components/StaticMeshComponent.h"
-#include "Engine/Engine.h"
+#include "Engine/GameInstanceSubsystem.h"
 #include "../../SharedTypes.h"
 #include "Eng_ArchitectureManager.generated.h"
 
 /**
- * Engine Architecture Manager
- * Central system that manages the technical architecture of the game.
- * Coordinates module loading, system initialization, and performance monitoring.
+ * Core Architecture Manager - Centralized system for managing game architecture
+ * Handles module initialization, system validation, and cross-system communication
  */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AEng_ArchitectureManager : public AActor
+class TRANSPERSONALGAME_API UEng_ArchitectureManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
-    AEng_ArchitectureManager();
+    UEng_ArchitectureManager();
+
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+
+    // Core Architecture Functions
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    bool InitializeGameSystems();
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    bool ValidateSystemIntegrity();
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    void RegisterGameModule(const FString& ModuleName, int32 Priority);
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    bool IsSystemReady(const FString& SystemName) const;
+
+    // Performance Monitoring
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    float GetSystemPerformanceMetric(const FString& SystemName) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void SetPerformanceTarget(const FString& SystemName, float TargetFPS);
+
+    // Module Management
+    UFUNCTION(BlueprintCallable, Category = "Modules")
+    TArray<FString> GetLoadedModules() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Modules")
+    bool UnloadModule(const FString& ModuleName);
+
+    UFUNCTION(BlueprintCallable, Category = "Modules")
+    bool ReloadModule(const FString& ModuleName);
 
 protected:
-    virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
+    // System State Management
+    UPROPERTY(BlueprintReadOnly, Category = "State")
+    TMap<FString, bool> SystemReadyStates;
 
-    // Core architecture components
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Architecture")
-    UStaticMeshComponent* ArchitectureMesh;
+    UPROPERTY(BlueprintReadOnly, Category = "State")
+    TMap<FString, float> PerformanceMetrics;
 
-    // System status tracking
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System Status")
-    bool bIsSystemInitialized;
+    UPROPERTY(BlueprintReadOnly, Category = "State")
+    TArray<FString> LoadedModuleNames;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System Status")
-    float SystemLoadTime;
+    // Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Config")
+    bool bAutoInitializeSystems;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System Status")
-    int32 ActiveModuleCount;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Config")
+    float SystemInitializationTimeout;
 
-    // Performance metrics
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float CurrentFrameRate;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float MemoryUsageMB;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    EEng_SystemState SystemState;
-
-public:
-    // Architecture management functions
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void InitializeArchitecture();
-
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void ValidateSystemIntegrity();
-
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void RegisterModule(const FString& ModuleName);
-
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void UnregisterModule(const FString& ModuleName);
-
-    // Performance monitoring
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void UpdatePerformanceMetrics();
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    float GetSystemLoadPercentage() const;
-
-    // System state management
-    UFUNCTION(BlueprintCallable, Category = "System")
-    void SetSystemState(EEng_SystemState NewState);
-
-    UFUNCTION(BlueprintCallable, Category = "System")
-    EEng_SystemState GetSystemState() const;
-
-    // Debug and validation
-    UFUNCTION(BlueprintCallable, Category = "Debug", CallInEditor)
-    void LogSystemStatus();
-
-    UFUNCTION(BlueprintCallable, Category = "Debug", CallInEditor)
-    void RunArchitectureValidation();
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Config")
+    bool bEnablePerformanceMonitoring;
 
 private:
-    // Internal system tracking
-    TArray<FString> RegisteredModules;
-    float LastPerformanceUpdate;
-    bool bPerformanceMonitoringEnabled;
+    // Internal system management
+    void InitializeWorldGeneration();
+    void InitializeCharacterSystems();
+    void InitializeCombatSystems();
+    void InitializeAISystems();
+    void InitializeAudioSystems();
+    void InitializeVFXSystems();
 
-    // Internal helper functions
-    void SetupArchitectureVisualization();
-    void InitializePerformanceMonitoring();
-    void ValidateModuleDependencies();
+    // Performance tracking
+    void UpdatePerformanceMetrics();
+    bool ValidateSystemPerformance(const FString& SystemName) const;
+
+    // Module lifecycle
+    bool LoadGameModule(const FString& ModuleName);
+    void OnModuleLoaded(const FString& ModuleName);
+    void OnModuleUnloaded(const FString& ModuleName);
+
+    // Internal state
+    bool bSystemsInitialized;
+    float LastPerformanceUpdate;
+    TMap<FString, int32> ModulePriorities;
 };
