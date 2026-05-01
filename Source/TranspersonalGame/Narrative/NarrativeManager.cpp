@@ -1,313 +1,265 @@
 #include "NarrativeManager.h"
 #include "Engine/Engine.h"
+#include "TimerManager.h"
 #include "Engine/World.h"
 
 UNarrativeManager::UNarrativeManager()
 {
+    CurrentDialogueState = ENarr_DialogueState::Inactive;
     CurrentDialogueIndex = 0;
-    bIsInDialogue = false;
-    CurrentCharacterID = TEXT("");
+    DialogueTimer = 0.0f;
 }
 
 void UNarrativeManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Initializing narrative subsystem"));
+    UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Initializing narrative system"));
     
-    LoadStoryData();
-    LoadCharacterData();
-    
-    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Initialized with %d story beats and %d characters"), 
-           StoryBeats.Num(), CharacterProfiles.Num());
+    InitializeStoryEvents();
+    CurrentDialogueState = ENarr_DialogueState::Inactive;
+    CurrentDialogueIndex = 0;
 }
 
 void UNarrativeManager::Deinitialize()
 {
-    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Shutting down narrative subsystem"));
-    
-    StoryBeats.Empty();
-    CharacterProfiles.Empty();
-    CurrentDialogue.Empty();
-    
+    StopCurrentDialogue();
     Super::Deinitialize();
 }
 
-void UNarrativeManager::AdvanceStoryBeat(const FString& BeatID)
+void UNarrativeManager::InitializeStoryEvents()
 {
-    for (FNarr_StoryBeat& Beat : StoryBeats)
+    StoryEvents.Empty();
+
+    // First water discovery event
+    FNarr_StoryEvent WaterEvent;
+    WaterEvent.EventType = ENarr_NarrativeEvent::FirstWaterFound;
+    WaterEvent.EventDescription = TEXT("Player discovers first water source");
+    
+    FNarr_DialogueLine WaterThought;
+    WaterThought.SpeakerName = TEXT("Player");
+    WaterThought.DialogueText = TEXT("Water... finally. But I must be careful - predators hunt near water sources.");
+    WaterThought.bIsPlayerThought = true;
+    WaterThought.Duration = 4.0f;
+    WaterEvent.TriggerDialogue.Add(WaterThought);
+    
+    StoryEvents.Add(WaterEvent);
+
+    // First dinosaur encounter
+    FNarr_StoryEvent DinoEvent;
+    DinoEvent.EventType = ENarr_NarrativeEvent::FirstDinosaurEncounter;
+    DinoEvent.EventDescription = TEXT("Player's first close dinosaur encounter");
+    
+    FNarr_DialogueLine DinoThought;
+    DinoThought.SpeakerName = TEXT("Player");
+    DinoThought.DialogueText = TEXT("Magnificent... and terrifying. These creatures ruled this world long before humans existed.");
+    DinoThought.bIsPlayerThought = true;
+    DinoThought.Duration = 5.0f;
+    DinoEvent.TriggerDialogue.Add(DinoThought);
+    
+    StoryEvents.Add(DinoEvent);
+
+    // T-Rex encounter
+    FNarr_StoryEvent TRexEvent;
+    TRexEvent.EventType = ENarr_NarrativeEvent::TRexEncounter;
+    TRexEvent.EventDescription = TEXT("Player encounters the apex predator");
+    
+    FNarr_DialogueLine TRexWarning;
+    TRexWarning.SpeakerName = TEXT("Narrator");
+    TRexWarning.DialogueText = TEXT("The earth trembles. The king of predators has arrived. Stay perfectly still.");
+    TRexWarning.bIsPlayerThought = false;
+    TRexWarning.Duration = 6.0f;
+    TRexEvent.TriggerDialogue.Add(TRexWarning);
+    
+    StoryEvents.Add(TRexEvent);
+
+    // Raptor pack sighting
+    FNarr_StoryEvent RaptorEvent;
+    RaptorEvent.EventType = ENarr_NarrativeEvent::RaptorPackSighting;
+    RaptorEvent.EventDescription = TEXT("Player spots a raptor hunting pack");
+    
+    FNarr_DialogueLine RaptorWarning;
+    RaptorWarning.SpeakerName = TEXT("Narrator");
+    RaptorWarning.DialogueText = TEXT("The pack hunters move with deadly coordination. Intelligence and instinct combined.");
+    RaptorWarning.bIsPlayerThought = false;
+    RaptorWarning.Duration = 5.0f;
+    RaptorEvent.TriggerDialogue.Add(RaptorWarning);
+    
+    StoryEvents.Add(RaptorEvent);
+
+    UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Initialized %d story events"), StoryEvents.Num());
+}
+
+void UNarrativeManager::PlayDialogue(const TArray<FNarr_DialogueLine>& DialogueLines)
+{
+    if (DialogueLines.Num() == 0)
     {
-        if (Beat.BeatID == BeatID && !Beat.bIsCompleted)
+        UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Cannot play empty dialogue"));
+        return;
+    }
+
+    // Stop any current dialogue
+    StopCurrentDialogue();
+
+    CurrentDialogue = DialogueLines;
+    CurrentDialogueIndex = 0;
+    CurrentDialogueState = ENarr_DialogueState::Playing;
+
+    UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Starting dialogue with %d lines"), DialogueLines.Num());
+
+    // Start first dialogue line
+    AdvanceDialogue();
+}
+
+void UNarrativeManager::StopCurrentDialogue()
+{
+    if (CurrentDialogueState != ENarr_DialogueState::Inactive)
+    {
+        CurrentDialogueState = ENarr_DialogueState::Inactive;
+        CurrentDialogue.Empty();
+        CurrentDialogueIndex = 0;
+
+        // Clear timer
+        if (GetWorld() && DialogueTimerHandle.IsValid())
         {
-            Beat.bIsCompleted = true;
-            UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Completed story beat '%s'"), *BeatID);
-            
-            // Unlock new quests
-            for (const FString& QuestID : Beat.UnlockedQuests)
-            {
-                UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Unlocked quest '%s'"), *QuestID);
-            }
-            
-            break;
+            GetWorld()->GetTimerManager().ClearTimer(DialogueTimerHandle);
         }
+
+        UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Dialogue stopped"));
     }
 }
 
-bool UNarrativeManager::IsStoryBeatCompleted(const FString& BeatID) const
+bool UNarrativeManager::IsDialoguePlaying() const
 {
-    for (const FNarr_StoryBeat& Beat : StoryBeats)
+    return CurrentDialogueState == ENarr_DialogueState::Playing;
+}
+
+void UNarrativeManager::AdvanceDialogue()
+{
+    if (CurrentDialogueIndex >= CurrentDialogue.Num())
     {
-        if (Beat.BeatID == BeatID)
+        // Dialogue finished
+        CurrentDialogueState = ENarr_DialogueState::Completed;
+        UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Dialogue completed"));
+        StopCurrentDialogue();
+        return;
+    }
+
+    const FNarr_DialogueLine& CurrentLine = CurrentDialogue[CurrentDialogueIndex];
+    
+    UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Playing line %d: %s - %s"), 
+           CurrentDialogueIndex, *CurrentLine.SpeakerName, *CurrentLine.DialogueText);
+
+    // Set timer for next line
+    if (GetWorld())
+    {
+        GetWorld()->GetTimerManager().SetTimer(
+            DialogueTimerHandle,
+            [this]() { 
+                CurrentDialogueIndex++;
+                AdvanceDialogue();
+            },
+            CurrentLine.Duration,
+            false
+        );
+    }
+}
+
+void UNarrativeManager::TriggerNarrativeEvent(ENarr_NarrativeEvent EventType)
+{
+    FNarr_StoryEvent* Event = FindStoryEvent(EventType);
+    if (!Event)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Event type %d not found"), (int32)EventType);
+        return;
+    }
+
+    if (Event->bHasTriggered)
+    {
+        UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Event %d already triggered"), (int32)EventType);
+        return;
+    }
+
+    Event->bHasTriggered = true;
+    UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Triggering event: %s"), *Event->EventDescription);
+
+    // Play associated dialogue
+    if (Event->TriggerDialogue.Num() > 0)
+    {
+        PlayDialogue(Event->TriggerDialogue);
+    }
+}
+
+bool UNarrativeManager::HasEventTriggered(ENarr_NarrativeEvent EventType) const
+{
+    for (const FNarr_StoryEvent& Event : StoryEvents)
+    {
+        if (Event.EventType == EventType)
         {
-            return Beat.bIsCompleted;
+            return Event.bHasTriggered;
         }
     }
     return false;
 }
 
-TArray<FString> UNarrativeManager::GetAvailableQuests() const
+void UNarrativeManager::PlaySurvivalTip(const FString& TipText, const FString& AudioPath)
 {
-    TArray<FString> AvailableQuests;
+    TArray<FNarr_DialogueLine> TipDialogue;
     
-    for (const FNarr_StoryBeat& Beat : StoryBeats)
+    FNarr_DialogueLine Tip;
+    Tip.SpeakerName = TEXT("Survival Guide");
+    Tip.DialogueText = TipText;
+    Tip.AudioFilePath = AudioPath;
+    Tip.Duration = 8.0f;
+    Tip.bIsPlayerThought = false;
+    
+    TipDialogue.Add(Tip);
+    PlayDialogue(TipDialogue);
+    
+    UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Playing survival tip: %s"), *TipText);
+}
+
+void UNarrativeManager::PlayPlayerThought(const FString& ThoughtText, const FString& AudioPath)
+{
+    TArray<FNarr_DialogueLine> ThoughtDialogue;
+    
+    FNarr_DialogueLine Thought;
+    Thought.SpeakerName = TEXT("Player");
+    Thought.DialogueText = ThoughtText;
+    Thought.AudioFilePath = AudioPath;
+    Thought.Duration = 6.0f;
+    Thought.bIsPlayerThought = true;
+    
+    ThoughtDialogue.Add(Thought);
+    PlayDialogue(ThoughtDialogue);
+    
+    UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Playing player thought: %s"), *ThoughtText);
+}
+
+void UNarrativeManager::PlayEnvironmentalNarration(const FString& LocationName, const FString& NarrationText)
+{
+    TArray<FNarr_DialogueLine> EnvironmentDialogue;
+    
+    FNarr_DialogueLine Narration;
+    Narration.SpeakerName = TEXT("Environment");
+    Narration.DialogueText = FString::Printf(TEXT("%s: %s"), *LocationName, *NarrationText);
+    Narration.Duration = 7.0f;
+    Narration.bIsPlayerThought = false;
+    
+    EnvironmentDialogue.Add(Narration);
+    PlayDialogue(EnvironmentDialogue);
+    
+    UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Playing environmental narration for %s"), *LocationName);
+}
+
+FNarr_StoryEvent* UNarrativeManager::FindStoryEvent(ENarr_NarrativeEvent EventType)
+{
+    for (FNarr_StoryEvent& Event : StoryEvents)
     {
-        if (Beat.bIsCompleted)
+        if (Event.EventType == EventType)
         {
-            for (const FString& QuestID : Beat.UnlockedQuests)
-            {
-                AvailableQuests.AddUnique(QuestID);
-            }
+            return &Event;
         }
     }
-    
-    return AvailableQuests;
-}
-
-void UNarrativeManager::StartDialogue(const FString& CharacterID, const FString& DialogueID)
-{
-    if (bIsInDialogue)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Already in dialogue, ending current dialogue first"));
-        EndDialogue();
-    }
-    
-    CurrentCharacterID = CharacterID;
-    CurrentDialogueIndex = 0;
-    bIsInDialogue = true;
-    
-    // Load dialogue lines for this character/dialogue combination
-    // For now, create a sample dialogue
-    CurrentDialogue.Empty();
-    
-    FNarr_DialogueLine SampleLine;
-    SampleLine.SpeakerName = CharacterID;
-    SampleLine.DialogueText = FText::FromString(TEXT("Greetings, traveler. The spirits have guided you here."));
-    SampleLine.Duration = 4.0f;
-    SampleLine.ResponseOptions.Add(TEXT("Tell me about the spirits."));
-    SampleLine.ResponseOptions.Add(TEXT("I seek wisdom."));
-    SampleLine.ResponseOptions.Add(TEXT("Farewell."));
-    
-    CurrentDialogue.Add(SampleLine);
-    
-    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Started dialogue with %s"), *CharacterID);
-}
-
-void UNarrativeManager::EndDialogue()
-{
-    if (bIsInDialogue)
-    {
-        UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Ended dialogue with %s"), *CurrentCharacterID);
-        
-        bIsInDialogue = false;
-        CurrentCharacterID = TEXT("");
-        CurrentDialogueIndex = 0;
-        CurrentDialogue.Empty();
-    }
-}
-
-FNarr_DialogueLine UNarrativeManager::GetCurrentDialogueLine() const
-{
-    if (bIsInDialogue && CurrentDialogue.IsValidIndex(CurrentDialogueIndex))
-    {
-        return CurrentDialogue[CurrentDialogueIndex];
-    }
-    
-    return FNarr_DialogueLine();
-}
-
-void UNarrativeManager::SelectDialogueResponse(int32 ResponseIndex)
-{
-    if (!bIsInDialogue || !CurrentDialogue.IsValidIndex(CurrentDialogueIndex))
-    {
-        return;
-    }
-    
-    const FNarr_DialogueLine& CurrentLine = CurrentDialogue[CurrentDialogueIndex];
-    
-    if (CurrentLine.ResponseOptions.IsValidIndex(ResponseIndex))
-    {
-        const FString& SelectedResponse = CurrentLine.ResponseOptions[ResponseIndex];
-        UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Player selected response: %s"), *SelectedResponse);
-        
-        // Advance dialogue or end based on response
-        if (SelectedResponse.Contains(TEXT("Farewell")))
-        {
-            EndDialogue();
-        }
-        else
-        {
-            // For now, just end dialogue after any response
-            // In a full implementation, this would branch to different dialogue paths
-            EndDialogue();
-        }
-    }
-}
-
-void UNarrativeManager::ModifyRelationship(const FString& CharacterID, float DeltaValue)
-{
-    for (FNarr_CharacterProfile& Profile : CharacterProfiles)
-    {
-        if (Profile.CharacterID == CharacterID)
-        {
-            Profile.RelationshipLevel = FMath::Clamp(Profile.RelationshipLevel + DeltaValue, -100.0f, 100.0f);
-            UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Modified relationship with %s by %.1f (now %.1f)"), 
-                   *CharacterID, DeltaValue, Profile.RelationshipLevel);
-            return;
-        }
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Character %s not found for relationship modification"), *CharacterID);
-}
-
-float UNarrativeManager::GetRelationshipLevel(const FString& CharacterID) const
-{
-    for (const FNarr_CharacterProfile& Profile : CharacterProfiles)
-    {
-        if (Profile.CharacterID == CharacterID)
-        {
-            return Profile.RelationshipLevel;
-        }
-    }
-    
-    return 0.0f;
-}
-
-FNarr_CharacterProfile UNarrativeManager::GetCharacterProfile(const FString& CharacterID) const
-{
-    for (const FNarr_CharacterProfile& Profile : CharacterProfiles)
-    {
-        if (Profile.CharacterID == CharacterID)
-        {
-            return Profile;
-        }
-    }
-    
-    return FNarr_CharacterProfile();
-}
-
-void UNarrativeManager::TriggerConsciousnessEvent(const FString& EventID, float IntensityLevel)
-{
-    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Consciousness event '%s' triggered with intensity %.2f"), 
-           *EventID, IntensityLevel);
-    
-    // This would integrate with the consciousness system to trigger narrative events
-    // based on the player's consciousness level and specific events
-}
-
-void UNarrativeManager::UpdateNarrativeBasedOnConsciousness(float ConsciousnessLevel)
-{
-    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Updating narrative based on consciousness level %.2f"), 
-           ConsciousnessLevel);
-    
-    // Adjust available story beats and dialogue options based on consciousness level
-    // Higher consciousness might unlock deeper spiritual dialogues and story paths
-}
-
-void UNarrativeManager::LoadStoryData()
-{
-    // In a full implementation, this would load from data tables or JSON files
-    InitializeDefaultStoryBeats();
-}
-
-void UNarrativeManager::LoadCharacterData()
-{
-    // In a full implementation, this would load from data tables or JSON files
-    InitializeDefaultCharacters();
-}
-
-void UNarrativeManager::InitializeDefaultStoryBeats()
-{
-    StoryBeats.Empty();
-    
-    // Awakening Arc
-    FNarr_StoryBeat AwakeningBeat;
-    AwakeningBeat.BeatID = TEXT("awakening_intro");
-    AwakeningBeat.Title = FText::FromString(TEXT("The Great Awakening"));
-    AwakeningBeat.Description = FText::FromString(TEXT("The player awakens to their consciousness in the prehistoric world."));
-    AwakeningBeat.UnlockedQuests.Add(TEXT("meet_elder"));
-    AwakeningBeat.UnlockedQuests.Add(TEXT("explore_sacred_grove"));
-    AwakeningBeat.bIsCompleted = false;
-    StoryBeats.Add(AwakeningBeat);
-    
-    // Elder Meeting Arc
-    FNarr_StoryBeat ElderBeat;
-    ElderBeat.BeatID = TEXT("elder_meeting");
-    ElderBeat.Title = FText::FromString(TEXT("Wisdom of the Ancients"));
-    ElderBeat.Description = FText::FromString(TEXT("The tribal elder shares ancient wisdom about consciousness and the spirit world."));
-    ElderBeat.RequiredQuests.Add(TEXT("meet_elder"));
-    ElderBeat.UnlockedQuests.Add(TEXT("spirit_quest"));
-    ElderBeat.UnlockedQuests.Add(TEXT("beast_communication"));
-    ElderBeat.bIsCompleted = false;
-    StoryBeats.Add(ElderBeat);
-    
-    // Beast Speaker Arc
-    FNarr_StoryBeat BeastBeat;
-    BeastBeat.BeatID = TEXT("beast_communion");
-    BeastBeat.Title = FText::FromString(TEXT("Language of the Ancient Ones"));
-    BeastBeat.Description = FText::FromString(TEXT("Learning to communicate with the great beasts of the prehistoric world."));
-    BeastBeat.RequiredQuests.Add(TEXT("beast_communication"));
-    BeastBeat.UnlockedQuests.Add(TEXT("dinosaur_alliance"));
-    BeastBeat.bIsCompleted = false;
-    StoryBeats.Add(BeastBeat);
-}
-
-void UNarrativeManager::InitializeDefaultCharacters()
-{
-    CharacterProfiles.Empty();
-    
-    // Elder Shaman
-    FNarr_CharacterProfile ElderProfile;
-    ElderProfile.CharacterID = TEXT("elder_shaman");
-    ElderProfile.CharacterName = FText::FromString(TEXT("Keeper of Ancient Ways"));
-    ElderProfile.BackgroundStory = FText::FromString(TEXT("A wise elder who has spent decades studying the connection between consciousness and the natural world."));
-    ElderProfile.PersonalityTraits.Add(TEXT("Wise"));
-    ElderProfile.PersonalityTraits.Add(TEXT("Patient"));
-    ElderProfile.PersonalityTraits.Add(TEXT("Mystical"));
-    ElderProfile.VoiceActorProfile = TEXT("Elder_Shaman");
-    ElderProfile.RelationshipLevel = 10.0f;
-    CharacterProfiles.Add(ElderProfile);
-    
-    // Beast Speaker
-    FNarr_CharacterProfile BeastProfile;
-    BeastProfile.CharacterID = TEXT("beast_speaker");
-    BeastProfile.CharacterName = FText::FromString(TEXT("Voice of the Wild"));
-    BeastProfile.BackgroundStory = FText::FromString(TEXT("A tribal member with the rare gift of communicating with the great beasts."));
-    BeastProfile.PersonalityTraits.Add(TEXT("Intuitive"));
-    BeastProfile.PersonalityTraits.Add(TEXT("Brave"));
-    BeastProfile.PersonalityTraits.Add(TEXT("Empathetic"));
-    BeastProfile.VoiceActorProfile = TEXT("Beast_Speaker");
-    BeastProfile.RelationshipLevel = 0.0f;
-    CharacterProfiles.Add(BeastProfile);
-    
-    // Tribal Leader
-    FNarr_CharacterProfile LeaderProfile;
-    LeaderProfile.CharacterID = TEXT("tribal_leader");
-    LeaderProfile.CharacterName = FText::FromString(TEXT("Guardian of the People"));
-    LeaderProfile.BackgroundStory = FText::FromString(TEXT("The strong leader who guides the tribe through the challenges of the prehistoric world."));
-    LeaderProfile.PersonalityTraits.Add(TEXT("Charismatic"));
-    LeaderProfile.PersonalityTraits.Add(TEXT("Protective"));
-    LeaderProfile.PersonalityTraits.Add(TEXT("Inspiring"));
-    LeaderProfile.VoiceActorProfile = TEXT("Tribal_Leader");
-    LeaderProfile.RelationshipLevel = 5.0f;
-    CharacterProfiles.Add(LeaderProfile);
+    return nullptr;
 }
