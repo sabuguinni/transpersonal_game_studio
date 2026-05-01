@@ -3,20 +3,100 @@
 #include "CoreMinimal.h"
 #include "Engine/GameInstanceSubsystem.h"
 #include "Engine/World.h"
-#include "Subsystems/WorldSubsystem.h"
 #include "../../SharedTypes.h"
 #include "Eng_CoreArchitecture.generated.h"
 
-// Forward declarations
-class UEng_ModuleManager;
-class UEng_PerformanceMonitor;
-class UEng_SystemCoordinator;
+/**
+ * Core Architecture System - Engine Architect Agent #02
+ * Manages the fundamental technical architecture of the game
+ * Ensures all systems follow established patterns and performance requirements
+ */
+
+UENUM(BlueprintType)
+enum class EEng_SystemStatus : uint8
+{
+    Uninitialized   UMETA(DisplayName = "Uninitialized"),
+    Initializing    UMETA(DisplayName = "Initializing"),
+    Active          UMETA(DisplayName = "Active"),
+    Error           UMETA(DisplayName = "Error"),
+    Disabled        UMETA(DisplayName = "Disabled")
+};
+
+UENUM(BlueprintType)
+enum class EEng_PerformanceLevel : uint8
+{
+    Critical        UMETA(DisplayName = "Critical"),
+    Poor            UMETA(DisplayName = "Poor"),
+    Acceptable      UMETA(DisplayName = "Acceptable"),
+    Good            UMETA(DisplayName = "Good"),
+    Excellent       UMETA(DisplayName = "Excellent")
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FEng_SystemInfo
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System Info")
+    FString SystemName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System Info")
+    EEng_SystemStatus Status;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System Info")
+    float InitializationTime;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System Info")
+    int32 Priority;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System Info")
+    TArray<FString> Dependencies;
+
+    FEng_SystemInfo()
+    {
+        SystemName = TEXT("Unknown");
+        Status = EEng_SystemStatus::Uninitialized;
+        InitializationTime = 0.0f;
+        Priority = 0;
+    }
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FEng_PerformanceMetrics
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float FrameTime;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float GameThreadTime;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float RenderThreadTime;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 DrawCalls;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float MemoryUsageMB;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    EEng_PerformanceLevel OverallLevel;
+
+    FEng_PerformanceMetrics()
+    {
+        FrameTime = 0.0f;
+        GameThreadTime = 0.0f;
+        RenderThreadTime = 0.0f;
+        DrawCalls = 0;
+        MemoryUsageMB = 0.0f;
+        OverallLevel = EEng_PerformanceLevel::Acceptable;
+    }
+};
 
 /**
- * Core Architecture Subsystem
- * Central nervous system of the Transpersonal Game engine architecture.
- * Manages all major systems, coordinates module communication, and enforces architectural rules.
- * This is the foundation that all other systems build upon.
+ * Core Architecture Manager - Central system for technical architecture
  */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UEng_CoreArchitecture : public UGameInstanceSubsystem
@@ -29,181 +109,82 @@ public:
     // USubsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
-    virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
 
-    // Core Architecture Management
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    bool InitializeArchitecture();
+    // System Management
+    UFUNCTION(BlueprintCallable, Category = "Core Architecture")
+    void RegisterSystem(const FString& SystemName, int32 Priority, const TArray<FString>& Dependencies);
 
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    void ShutdownArchitecture();
+    UFUNCTION(BlueprintCallable, Category = "Core Architecture")
+    void UnregisterSystem(const FString& SystemName);
 
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    bool IsArchitectureReady() const;
+    UFUNCTION(BlueprintCallable, Category = "Core Architecture")
+    bool IsSystemRegistered(const FString& SystemName) const;
 
-    // Module Management
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    bool RegisterModule(const FString& ModuleName, const FString& ModuleType);
+    UFUNCTION(BlueprintCallable, Category = "Core Architecture")
+    EEng_SystemStatus GetSystemStatus(const FString& SystemName) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    bool UnregisterModule(const FString& ModuleName);
-
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    TArray<FString> GetRegisteredModules() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    bool IsModuleRegistered(const FString& ModuleName) const;
-
-    // System Coordination
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    void NotifySystemEvent(const FString& SystemName, const FString& EventType, const FString& EventData);
-
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    void RequestSystemShutdown(const FString& SystemName, const FString& Reason);
+    UFUNCTION(BlueprintCallable, Category = "Core Architecture")
+    void SetSystemStatus(const FString& SystemName, EEng_SystemStatus NewStatus);
 
     // Performance Monitoring
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    float GetSystemPerformanceMetric(const FString& SystemName, const FString& MetricName) const;
+    UFUNCTION(BlueprintCallable, Category = "Core Architecture")
+    void UpdatePerformanceMetrics();
 
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    void SetPerformanceThreshold(const FString& SystemName, const FString& MetricName, float Threshold);
+    UFUNCTION(BlueprintCallable, Category = "Core Architecture")
+    FEng_PerformanceMetrics GetCurrentPerformanceMetrics() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Core Architecture")
+    bool IsPerformanceAcceptable() const;
 
     // Architecture Validation
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    bool ValidateSystemIntegrity();
+    UFUNCTION(BlueprintCallable, Category = "Core Architecture")
+    bool ValidateSystemDependencies();
 
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    TArray<FString> GetArchitectureWarnings() const;
+    UFUNCTION(BlueprintCallable, Category = "Core Architecture")
+    TArray<FString> GetSystemInitializationOrder() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    TArray<FString> GetArchitectureErrors() const;
+    UFUNCTION(BlueprintCallable, Category = "Core Architecture")
+    void InitializeAllSystems();
 
-    // Debug and Development
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Engine Architecture")
-    void DumpArchitectureState();
+    // Debug and Monitoring
+    UFUNCTION(BlueprintCallable, Category = "Core Architecture")
+    void LogSystemStatus() const;
 
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Engine Architecture")
-    void RunArchitectureDiagnostics();
-
-protected:
-    // Core subsystem references
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture Components")
-    TObjectPtr<UEng_ModuleManager> ModuleManager;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture Components")
-    TObjectPtr<UEng_PerformanceMonitor> PerformanceMonitor;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture Components")
-    TObjectPtr<UEng_SystemCoordinator> SystemCoordinator;
-
-    // Architecture state
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture State")
-    bool bArchitectureInitialized;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture State")
-    bool bArchitectureReady;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture State")
-    float InitializationTime;
-
-    // Module registry
-    UPROPERTY()
-    TMap<FString, FString> RegisteredModules;
-
-    // System event tracking
-    UPROPERTY()
-    TArray<FString> SystemEvents;
-
-    UPROPERTY()
-    TArray<FString> ArchitectureWarnings;
-
-    UPROPERTY()
-    TArray<FString> ArchitectureErrors;
-
-    // Performance thresholds
-    UPROPERTY()
-    TMap<FString, float> PerformanceThresholds;
-
-private:
-    // Internal initialization methods
-    void InitializeSubsystems();
-    void SetupModuleManager();
-    void SetupPerformanceMonitor();
-    void SetupSystemCoordinator();
-
-    // Internal validation methods
-    bool ValidateSubsystems() const;
-    bool ValidateModuleIntegrity() const;
-    bool ValidatePerformanceMetrics() const;
-
-    // Event handling
-    void HandleSystemEvent(const FString& SystemName, const FString& EventType, const FString& EventData);
-    void HandlePerformanceAlert(const FString& SystemName, const FString& MetricName, float Value);
-
-    // Logging and diagnostics
-    void LogArchitectureEvent(const FString& EventMessage, bool bIsWarning = false, bool bIsError = false);
-    void UpdateArchitectureMetrics();
-
-    // Timing and performance tracking
-    double LastUpdateTime;
-    double LastDiagnosticsTime;
-    int32 UpdateFrameCounter;
-};
-
-/**
- * World-specific Architecture Coordinator
- * Manages architecture concerns specific to individual world instances.
- * Handles world loading/unloading, level streaming, and world-specific system coordination.
- */
-UCLASS(BlueprintType)
-class TRANSPERSONALGAME_API UEng_WorldArchitecture : public UWorldSubsystem
-{
-    GENERATED_BODY()
-
-public:
-    UEng_WorldArchitecture();
-
-    // USubsystem interface
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
-    virtual void OnWorldBeginPlay(UWorld& InWorld) override;
-
-    // World Architecture Management
-    UFUNCTION(BlueprintCallable, Category = "World Architecture")
-    bool InitializeWorldSystems();
-
-    UFUNCTION(BlueprintCallable, Category = "World Architecture")
-    void ShutdownWorldSystems();
-
-    UFUNCTION(BlueprintCallable, Category = "World Architecture")
-    bool IsWorldReady() const;
-
-    // Level Streaming Management
-    UFUNCTION(BlueprintCallable, Category = "World Architecture")
-    void RegisterStreamingLevel(const FString& LevelName, const FString& LevelType);
-
-    UFUNCTION(BlueprintCallable, Category = "World Architecture")
-    void UnregisterStreamingLevel(const FString& LevelName);
-
-    // World-specific System Coordination
-    UFUNCTION(BlueprintCallable, Category = "World Architecture")
-    void NotifyWorldEvent(const FString& EventType, const FString& EventData);
+    UFUNCTION(BlueprintCallable, Category = "Core Architecture")
+    TArray<FEng_SystemInfo> GetAllSystemInfo() const;
 
 protected:
-    UPROPERTY(BlueprintReadOnly, Category = "World State")
-    bool bWorldSystemsInitialized;
+    // Registered systems
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Core Architecture", meta = (AllowPrivateAccess = "true"))
+    TMap<FString, FEng_SystemInfo> RegisteredSystems;
 
-    UPROPERTY(BlueprintReadOnly, Category = "World State")
-    bool bWorldReady;
+    // Performance tracking
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Core Architecture", meta = (AllowPrivateAccess = "true"))
+    FEng_PerformanceMetrics CurrentMetrics;
 
-    UPROPERTY()
-    TMap<FString, FString> StreamingLevels;
+    // Architecture settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Core Architecture")
+    float TargetFrameTime;
 
-    UPROPERTY()
-    TArray<FString> WorldEvents;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Core Architecture")
+    int32 MaxDrawCalls;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Core Architecture")
+    float MaxMemoryUsageMB;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Core Architecture")
+    bool bEnablePerformanceMonitoring;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Core Architecture")
+    float PerformanceUpdateInterval;
 
 private:
-    void SetupWorldSystems();
-    void ValidateWorldIntegrity();
-    void HandleWorldEvent(const FString& EventType, const FString& EventData);
+    // Internal methods
+    void InitializeCoreArchitecture();
+    void RegisterCoreGameSystems();
+    bool CheckSystemDependencies(const FString& SystemName, TArray<FString>& VisitedSystems) const;
+    void CalculatePerformanceLevel();
+
+    // Timer for performance monitoring
+    FTimerHandle PerformanceTimerHandle;
 };
