@@ -2,105 +2,17 @@
 
 #include "CoreMinimal.h"
 #include "Engine/World.h"
-#include "Subsystems/GameInstanceSubsystem.h"
-#include "PhysicsEngine/PhysicsSettings.h"
-#include "Engine/StaticMeshActor.h"
 #include "Components/StaticMeshComponent.h"
-#include "Components/SkeletalMeshComponent.h"
-#include "GameFramework/Character.h"
-#include "PhysicalMaterials/PhysicalMaterial.h"
+#include "Components/PrimitiveComponent.h"
+#include "GameFramework/Actor.h"
+#include "Subsystems/GameInstanceSubsystem.h"
+#include "../SharedTypes.h"
 #include "Core_PhysicsSystemManager.generated.h"
 
-// Forward declarations
-class UPhysicalMaterial;
-class UStaticMeshComponent;
-class USkeletalMeshComponent;
-
-UENUM(BlueprintType)
-enum class ECore_PhysicsSystemStatus : uint8
-{
-    Uninitialized   UMETA(DisplayName = "Uninitialized"),
-    Initializing    UMETA(DisplayName = "Initializing"),
-    Active          UMETA(DisplayName = "Active"),
-    Error           UMETA(DisplayName = "Error"),
-    Disabled        UMETA(DisplayName = "Disabled")
-};
-
-UENUM(BlueprintType)
-enum class ECore_PhysicsMaterialType : uint8
-{
-    Stone           UMETA(DisplayName = "Stone"),
-    Wood            UMETA(DisplayName = "Wood"),
-    Flesh           UMETA(DisplayName = "Flesh"),
-    Metal           UMETA(DisplayName = "Metal"),
-    Organic         UMETA(DisplayName = "Organic"),
-    Water           UMETA(DisplayName = "Water")
-};
-
-USTRUCT(BlueprintType)
-struct FCore_PhysicsSystemMetrics
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly, Category = "Physics Metrics")
-    int32 ActivePhysicsObjects;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Physics Metrics")
-    int32 SimulatingRigidBodies;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Physics Metrics")
-    float PhysicsFrameTime;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Physics Metrics")
-    int32 CollisionPairs;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Physics Metrics")
-    float TotalPhysicsMemoryMB;
-
-    FCore_PhysicsSystemMetrics()
-    {
-        ActivePhysicsObjects = 0;
-        SimulatingRigidBodies = 0;
-        PhysicsFrameTime = 0.0f;
-        CollisionPairs = 0;
-        TotalPhysicsMemoryMB = 0.0f;
-    }
-};
-
-USTRUCT(BlueprintType)
-struct FCore_RagdollConfiguration
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    bool bEnableRagdollOnDeath;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    float RagdollLifetime;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    float BlendToRagdollTime;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    bool bApplyDeathImpulse;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    float DeathImpulseStrength;
-
-    FCore_RagdollConfiguration()
-    {
-        bEnableRagdollOnDeath = true;
-        RagdollLifetime = 30.0f;
-        BlendToRagdollTime = 0.5f;
-        bApplyDeathImpulse = true;
-        DeathImpulseStrength = 1000.0f;
-    }
-};
-
 /**
- * Core Physics System Manager
- * Manages all physics simulation, materials, and ragdoll systems
- * Integrates with Engine Architecture for performance monitoring
+ * Physics System Manager for Transpersonal Game Studio
+ * Manages physics simulation, collision detection, and material properties
+ * Integrates with Engine Architect's system management framework
  */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UCore_PhysicsSystemManager : public UGameInstanceSubsystem
@@ -110,121 +22,160 @@ class TRANSPERSONALGAME_API UCore_PhysicsSystemManager : public UGameInstanceSub
 public:
     UCore_PhysicsSystemManager();
 
-    // USubsystem interface
+    // Subsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // System Status
+    // Physics system management
     UFUNCTION(BlueprintCallable, Category = "Physics System")
-    ECore_PhysicsSystemStatus GetSystemStatus() const { return SystemStatus; }
+    void InitializePhysicsSystem();
 
     UFUNCTION(BlueprintCallable, Category = "Physics System")
-    FCore_PhysicsSystemMetrics GetPhysicsMetrics() const { return CurrentMetrics; }
+    void EnablePhysicsOnActor(AActor* Actor, bool bSimulatePhysics = true);
 
-    // Physics Materials Management
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void SetActorPhysicsMaterial(AActor* Actor, class UPhysicalMaterial* PhysicsMaterial);
+
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void ConfigureCollisionForActor(AActor* Actor, ECollisionEnabled::Type CollisionType);
+
+    // Prehistoric physics materials
     UFUNCTION(BlueprintCallable, Category = "Physics Materials")
-    UPhysicalMaterial* GetPhysicsMaterial(ECore_PhysicsMaterialType MaterialType);
+    class UPhysicalMaterial* GetRockPhysicsMaterial();
 
     UFUNCTION(BlueprintCallable, Category = "Physics Materials")
-    void ApplyPhysicsMaterialToActor(AActor* Actor, ECore_PhysicsMaterialType MaterialType);
+    class UPhysicalMaterial* GetWoodPhysicsMaterial();
 
     UFUNCTION(BlueprintCallable, Category = "Physics Materials")
-    void CreateDefaultPhysicsMaterials();
+    class UPhysicalMaterial* GetGroundPhysicsMaterial();
 
-    // Physics Object Management
-    UFUNCTION(BlueprintCallable, Category = "Physics Objects")
-    void EnablePhysicsOnActor(AActor* Actor, float Mass = 1.0f);
+    UFUNCTION(BlueprintCallable, Category = "Physics Materials")
+    class UPhysicalMaterial* GetWaterPhysicsMaterial();
 
-    UFUNCTION(BlueprintCallable, Category = "Physics Objects")
-    void DisablePhysicsOnActor(AActor* Actor);
+    // Dinosaur-specific physics
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur Physics")
+    void ConfigureDinosaurPhysics(AActor* DinosaurActor, float Mass, float LinearDamping);
 
-    UFUNCTION(BlueprintCallable, Category = "Physics Objects")
-    void SetActorMass(AActor* Actor, float NewMass);
+    UFUNCTION(BlueprintCallable, Category = "Dinosaur Physics")
+    void SetDinosaurCollisionProfile(AActor* DinosaurActor, FName CollisionProfile);
 
-    // Ragdoll System
-    UFUNCTION(BlueprintCallable, Category = "Ragdoll")
-    void EnableRagdollOnCharacter(ACharacter* Character, const FVector& ImpulseDirection = FVector::ZeroVector);
+    // Environmental physics
+    UFUNCTION(BlueprintCallable, Category = "Environmental Physics")
+    void EnableDestructiblePhysics(AActor* Actor);
 
-    UFUNCTION(BlueprintCallable, Category = "Ragdoll")
-    void DisableRagdollOnCharacter(ACharacter* Character);
+    UFUNCTION(BlueprintCallable, Category = "Environmental Physics")
+    void ConfigureVegetationPhysics(AActor* VegetationActor);
 
-    UFUNCTION(BlueprintCallable, Category = "Ragdoll")
-    void SetRagdollConfiguration(const FCore_RagdollConfiguration& NewConfig);
+    // Performance monitoring
+    UFUNCTION(BlueprintCallable, Category = "Physics Performance")
+    int32 GetActivePhysicsBodies();
 
-    UFUNCTION(BlueprintCallable, Category = "Ragdoll")
-    FCore_RagdollConfiguration GetRagdollConfiguration() const { return RagdollConfig; }
+    UFUNCTION(BlueprintCallable, Category = "Physics Performance")
+    float GetPhysicsSimulationTime();
 
-    // Performance Monitoring
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void UpdatePhysicsMetrics();
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    bool IsPhysicsPerformanceAcceptable() const;
-
-    // System Integration
+    // Integration with Engine Architect systems
     UFUNCTION(BlueprintCallable, Category = "System Integration")
-    void RegisterWithCoreArchitecture();
+    void RegisterWithSystemManager();
 
     UFUNCTION(BlueprintCallable, Category = "System Integration")
-    void ValidatePhysicsWorld();
-
-    // Debug and Testing
-    UFUNCTION(BlueprintCallable, Category = "Debug", CallInEditor = true)
-    void CreatePhysicsTestObjects();
-
-    UFUNCTION(BlueprintCallable, Category = "Debug", CallInEditor = true)
-    void RunPhysicsStressTest();
-
-    UFUNCTION(BlueprintCallable, Category = "Debug")
-    void LogPhysicsSystemStatus();
+    bool IsPhysicsSystemReady();
 
 protected:
-    // System State
-    UPROPERTY(BlueprintReadOnly, Category = "Physics System")
-    ECore_PhysicsSystemStatus SystemStatus;
+    // Physics materials cache
+    UPROPERTY()
+    class UPhysicalMaterial* RockPhysicsMaterial;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Physics System")
-    FCore_PhysicsSystemMetrics CurrentMetrics;
+    UPROPERTY()
+    class UPhysicalMaterial* WoodPhysicsMaterial;
 
-    // Physics Materials
-    UPROPERTY(BlueprintReadOnly, Category = "Physics Materials")
-    TMap<ECore_PhysicsMaterialType, TSoftObjectPtr<UPhysicalMaterial>> PhysicsMaterials;
+    UPROPERTY()
+    class UPhysicalMaterial* GroundPhysicsMaterial;
 
-    // Ragdoll Configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    FCore_RagdollConfiguration RagdollConfig;
+    UPROPERTY()
+    class UPhysicalMaterial* WaterPhysicsMaterial;
 
-    // Performance Thresholds
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float MaxAcceptablePhysicsFrameTime;
+    // System state
+    UPROPERTY(BlueprintReadOnly, Category = "System State")
+    bool bIsInitialized;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxAcceptablePhysicsObjects;
+    UPROPERTY(BlueprintReadOnly, Category = "System State")
+    int32 ManagedActorsCount;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float MaxAcceptablePhysicsMemoryMB;
-
-    // Timer Handles
-    FTimerHandle MetricsUpdateTimer;
-    FTimerHandle RagdollCleanupTimer;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float LastFramePhysicsTime;
 
 private:
-    // Internal Methods
-    void InitializePhysicsMaterials();
-    void SetupPerformanceMonitoring();
-    void CleanupRagdolls();
-    UPhysicalMaterial* CreatePhysicsMaterial(const FString& MaterialName, float Friction, float Restitution, float Density);
-    void ApplyRagdollImpulse(USkeletalMeshComponent* SkeletalMesh, const FVector& ImpulseDirection);
-    void ValidateSystemIntegrity();
+    // Internal physics material creation
+    void CreatePhysicsMaterials();
+    void SetupDefaultCollisionProfiles();
+    
+    // Performance tracking
+    void UpdatePhysicsMetrics();
+    
+    // Actor management
+    TArray<TWeakObjectPtr<AActor>> ManagedActors;
+    
+    // System integration
+    bool bRegisteredWithSystemManager;
+};
 
-    // Cached References
-    UPROPERTY()
-    TArray<TWeakObjectPtr<ACharacter>> ActiveRagdolls;
+/**
+ * Physics Configuration Data Structure
+ * Stores physics settings for different object types
+ */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FCore_PhysicsConfig
+{
+    GENERATED_BODY()
 
-    UPROPERTY()
-    TArray<TWeakObjectPtr<AActor>> PhysicsEnabledActors;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    float Mass = 100.0f;
 
-    // System Metrics
-    float LastMetricsUpdateTime;
-    int32 FramesSinceLastUpdate;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    float LinearDamping = 0.1f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    float AngularDamping = 0.1f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    bool bEnableGravity = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    bool bSimulatePhysics = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision")
+    TEnumAsByte<ECollisionEnabled::Type> CollisionEnabled = ECollisionEnabled::QueryAndPhysics;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision")
+    FName CollisionProfileName = "BlockAll";
+
+    FCore_PhysicsConfig()
+    {
+        Mass = 100.0f;
+        LinearDamping = 0.1f;
+        AngularDamping = 0.1f;
+        bEnableGravity = true;
+        bSimulatePhysics = true;
+        CollisionEnabled = ECollisionEnabled::QueryAndPhysics;
+        CollisionProfileName = "BlockAll";
+    }
+};
+
+/**
+ * Prehistoric Physics Material Types
+ * Defines physics properties for different materials in the prehistoric world
+ */
+UENUM(BlueprintType)
+enum class ECore_PhysicsMaterialType : uint8
+{
+    Rock        UMETA(DisplayName = "Rock"),
+    Wood        UMETA(DisplayName = "Wood"),
+    Ground      UMETA(DisplayName = "Ground"),
+    Water       UMETA(DisplayName = "Water"),
+    Bone        UMETA(DisplayName = "Bone"),
+    Flesh       UMETA(DisplayName = "Flesh"),
+    Vegetation  UMETA(DisplayName = "Vegetation"),
+    Sand        UMETA(DisplayName = "Sand"),
+    Mud         UMETA(DisplayName = "Mud"),
+    Ice         UMETA(DisplayName = "Ice")
 };
