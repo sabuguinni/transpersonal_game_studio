@@ -1,278 +1,263 @@
 #include "Eng_ArchitectureManager.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Components/StaticMeshComponent.h"
-#include "UObject/ConstructorHelpers.h"
-#include "Engine/StaticMesh.h"
+#include "TimerManager.h"
 
-AEng_ArchitectureManager::AEng_ArchitectureManager()
+UEng_ArchitectureManager::UEng_ArchitectureManager()
 {
-    PrimaryActorTick.bCanEverTick = true;
-
-    // Create root component
-    RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
-
-    // Create architecture visualization mesh
-    ArchitectureMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("ArchitectureMesh"));
-    ArchitectureMesh->SetupAttachment(RootComponent);
-
-    // Initialize system state
-    bIsSystemInitialized = false;
-    SystemLoadTime = 0.0f;
-    ActiveModuleCount = 0;
-    CurrentFrameRate = 0.0f;
-    MemoryUsageMB = 0.0f;
-    SystemState = EEng_SystemState::Initializing;
-
-    // Performance monitoring settings
+    bAutoInitializeSystems = true;
+    SystemInitializationTimeout = 30.0f;
+    bEnablePerformanceMonitoring = true;
+    bSystemsInitialized = false;
     LastPerformanceUpdate = 0.0f;
-    bPerformanceMonitoringEnabled = true;
-
-    // Setup default mesh
-    SetupArchitectureVisualization();
 }
 
-void AEng_ArchitectureManager::BeginPlay()
+void UEng_ArchitectureManager::Initialize(FSubsystemCollectionBase& Collection)
 {
-    Super::BeginPlay();
-
-    // Initialize the architecture system
-    InitializeArchitecture();
+    Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Warning, TEXT("Engine Architecture Manager: System started"));
-}
-
-void AEng_ArchitectureManager::Tick(float DeltaTime)
-{
-    Super::Tick(DeltaTime);
-
-    // Update performance metrics every second
-    LastPerformanceUpdate += DeltaTime;
-    if (LastPerformanceUpdate >= 1.0f)
+    UE_LOG(LogTemp, Log, TEXT("ArchitectureManager: Initializing core architecture systems"));
+    
+    // Initialize system ready states
+    SystemReadyStates.Empty();
+    SystemReadyStates.Add(TEXT("WorldGeneration"), false);
+    SystemReadyStates.Add(TEXT("CharacterSystems"), false);
+    SystemReadyStates.Add(TEXT("CombatSystems"), false);
+    SystemReadyStates.Add(TEXT("AISystems"), false);
+    SystemReadyStates.Add(TEXT("AudioSystems"), false);
+    SystemReadyStates.Add(TEXT("VFXSystems"), false);
+    
+    // Initialize performance metrics
+    PerformanceMetrics.Empty();
+    for (const auto& SystemPair : SystemReadyStates)
     {
-        UpdatePerformanceMetrics();
-        LastPerformanceUpdate = 0.0f;
+        PerformanceMetrics.Add(SystemPair.Key, 60.0f); // Default 60 FPS target
+    }
+    
+    // Auto-initialize if enabled
+    if (bAutoInitializeSystems)
+    {
+        InitializeGameSystems();
     }
 }
 
-void AEng_ArchitectureManager::InitializeArchitecture()
+void UEng_ArchitectureManager::Deinitialize()
 {
-    if (bIsSystemInitialized)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Architecture already initialized"));
-        return;
-    }
-
-    float StartTime = GetWorld()->GetTimeSeconds();
-
-    // Initialize core systems
-    RegisteredModules.Empty();
+    UE_LOG(LogTemp, Log, TEXT("ArchitectureManager: Deinitializing architecture systems"));
     
-    // Register core modules
-    RegisterModule(TEXT("Core"));
-    RegisterModule(TEXT("Engine"));
-    RegisterModule(TEXT("Physics"));
-    RegisterModule(TEXT("Rendering"));
-
-    // Initialize performance monitoring
-    InitializePerformanceMonitoring();
-
-    // Validate module dependencies
-    ValidateModuleDependencies();
-
-    // Calculate initialization time
-    SystemLoadTime = GetWorld()->GetTimeSeconds() - StartTime;
-    bIsSystemInitialized = true;
-    SystemState = EEng_SystemState::Running;
-
-    UE_LOG(LogTemp, Warning, TEXT("Architecture initialized in %.3f seconds"), SystemLoadTime);
+    // Clean up all systems
+    SystemReadyStates.Empty();
+    PerformanceMetrics.Empty();
+    LoadedModuleNames.Empty();
+    ModulePriorities.Empty();
+    
+    bSystemsInitialized = false;
+    
+    Super::Deinitialize();
 }
 
-void AEng_ArchitectureManager::ValidateSystemIntegrity()
+bool UEng_ArchitectureManager::InitializeGameSystems()
 {
-    UE_LOG(LogTemp, Warning, TEXT("Validating system integrity..."));
-
-    // Check registered modules
-    bool bAllModulesValid = true;
-    for (const FString& ModuleName : RegisteredModules)
+    UE_LOG(LogTemp, Log, TEXT("ArchitectureManager: Starting game systems initialization"));
+    
+    if (bSystemsInitialized)
     {
-        // Basic module validation
-        if (ModuleName.IsEmpty())
+        UE_LOG(LogTemp, Warning, TEXT("ArchitectureManager: Systems already initialized"));
+        return true;
+    }
+    
+    // Initialize systems in priority order
+    InitializeWorldGeneration();
+    InitializeCharacterSystems();
+    InitializeCombatSystems();
+    InitializeAISystems();
+    InitializeAudioSystems();
+    InitializeVFXSystems();
+    
+    bSystemsInitialized = true;
+    
+    UE_LOG(LogTemp, Log, TEXT("ArchitectureManager: Game systems initialization complete"));
+    return ValidateSystemIntegrity();
+}
+
+bool UEng_ArchitectureManager::ValidateSystemIntegrity()
+{
+    UE_LOG(LogTemp, Log, TEXT("ArchitectureManager: Validating system integrity"));
+    
+    bool bAllSystemsReady = true;
+    
+    for (const auto& SystemPair : SystemReadyStates)
+    {
+        if (!SystemPair.Value)
         {
-            bAllModulesValid = false;
-            UE_LOG(LogTemp, Error, TEXT("Invalid module found: empty name"));
-        }
-    }
-
-    // Check system state
-    if (SystemState == EEng_SystemState::Error)
-    {
-        bAllModulesValid = false;
-        UE_LOG(LogTemp, Error, TEXT("System is in error state"));
-    }
-
-    // Update system state based on validation
-    if (bAllModulesValid)
-    {
-        SetSystemState(EEng_SystemState::Running);
-        UE_LOG(LogTemp, Warning, TEXT("System integrity validation: PASSED"));
-    }
-    else
-    {
-        SetSystemState(EEng_SystemState::Error);
-        UE_LOG(LogTemp, Error, TEXT("System integrity validation: FAILED"));
-    }
-}
-
-void AEng_ArchitectureManager::RegisterModule(const FString& ModuleName)
-{
-    if (ModuleName.IsEmpty())
-    {
-        UE_LOG(LogTemp, Error, TEXT("Cannot register module with empty name"));
-        return;
-    }
-
-    if (RegisteredModules.Contains(ModuleName))
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Module %s is already registered"), *ModuleName);
-        return;
-    }
-
-    RegisteredModules.Add(ModuleName);
-    ActiveModuleCount = RegisteredModules.Num();
-
-    UE_LOG(LogTemp, Warning, TEXT("Registered module: %s (Total: %d)"), *ModuleName, ActiveModuleCount);
-}
-
-void AEng_ArchitectureManager::UnregisterModule(const FString& ModuleName)
-{
-    if (RegisteredModules.Remove(ModuleName) > 0)
-    {
-        ActiveModuleCount = RegisteredModules.Num();
-        UE_LOG(LogTemp, Warning, TEXT("Unregistered module: %s (Remaining: %d)"), *ModuleName, ActiveModuleCount);
-    }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Module %s was not registered"), *ModuleName);
-    }
-}
-
-void AEng_ArchitectureManager::UpdatePerformanceMetrics()
-{
-    if (!bPerformanceMonitoringEnabled)
-        return;
-
-    // Get current frame rate
-    if (GEngine && GEngine->GetGameViewport())
-    {
-        CurrentFrameRate = 1.0f / GetWorld()->GetDeltaSeconds();
-    }
-
-    // Estimate memory usage (simplified)
-    MemoryUsageMB = FPlatformMemory::GetStats().UsedPhysical / (1024.0f * 1024.0f);
-
-    // Log performance data periodically
-    static float LastLogTime = 0.0f;
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-    if (CurrentTime - LastLogTime > 10.0f) // Log every 10 seconds
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Performance: FPS=%.1f, Memory=%.1fMB, Modules=%d"), 
-               CurrentFrameRate, MemoryUsageMB, ActiveModuleCount);
-        LastLogTime = CurrentTime;
-    }
-}
-
-float AEng_ArchitectureManager::GetSystemLoadPercentage() const
-{
-    // Simple load calculation based on frame rate and module count
-    float TargetFPS = 60.0f;
-    float FPSLoad = FMath::Clamp(1.0f - (CurrentFrameRate / TargetFPS), 0.0f, 1.0f);
-    float ModuleLoad = FMath::Clamp(ActiveModuleCount / 20.0f, 0.0f, 1.0f); // Assume 20 is max modules
-    
-    return (FPSLoad + ModuleLoad) * 50.0f; // Convert to percentage
-}
-
-void AEng_ArchitectureManager::SetSystemState(EEng_SystemState NewState)
-{
-    if (SystemState != NewState)
-    {
-        EEng_SystemState OldState = SystemState;
-        SystemState = NewState;
-        
-        UE_LOG(LogTemp, Warning, TEXT("System state changed: %d -> %d"), 
-               (int32)OldState, (int32)NewState);
-    }
-}
-
-EEng_SystemState AEng_ArchitectureManager::GetSystemState() const
-{
-    return SystemState;
-}
-
-void AEng_ArchitectureManager::LogSystemStatus()
-{
-    UE_LOG(LogTemp, Warning, TEXT("=== SYSTEM STATUS ==="));
-    UE_LOG(LogTemp, Warning, TEXT("Initialized: %s"), bIsSystemInitialized ? TEXT("YES") : TEXT("NO"));
-    UE_LOG(LogTemp, Warning, TEXT("Load Time: %.3f seconds"), SystemLoadTime);
-    UE_LOG(LogTemp, Warning, TEXT("Active Modules: %d"), ActiveModuleCount);
-    UE_LOG(LogTemp, Warning, TEXT("Frame Rate: %.1f FPS"), CurrentFrameRate);
-    UE_LOG(LogTemp, Warning, TEXT("Memory Usage: %.1f MB"), MemoryUsageMB);
-    UE_LOG(LogTemp, Warning, TEXT("System State: %d"), (int32)SystemState);
-    UE_LOG(LogTemp, Warning, TEXT("System Load: %.1f%%"), GetSystemLoadPercentage());
-    
-    UE_LOG(LogTemp, Warning, TEXT("Registered Modules:"));
-    for (const FString& ModuleName : RegisteredModules)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("  - %s"), *ModuleName);
-    }
-}
-
-void AEng_ArchitectureManager::RunArchitectureValidation()
-{
-    UE_LOG(LogTemp, Warning, TEXT("Running architecture validation..."));
-    
-    ValidateSystemIntegrity();
-    LogSystemStatus();
-    
-    UE_LOG(LogTemp, Warning, TEXT("Architecture validation complete"));
-}
-
-void AEng_ArchitectureManager::SetupArchitectureVisualization()
-{
-    // Try to set a default cube mesh for visualization
-    static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMeshAsset(TEXT("/Engine/BasicShapes/Cube"));
-    if (CubeMeshAsset.Succeeded() && ArchitectureMesh)
-    {
-        ArchitectureMesh->SetStaticMesh(CubeMeshAsset.Object);
-        ArchitectureMesh->SetWorldScale3D(FVector(0.5f, 0.5f, 0.5f));
-        
-        // Set a distinctive color for identification
-        ArchitectureMesh->SetVectorParameterValueOnMaterials(TEXT("BaseColor"), FVector(0.0f, 1.0f, 1.0f));
-    }
-}
-
-void AEng_ArchitectureManager::InitializePerformanceMonitoring()
-{
-    bPerformanceMonitoringEnabled = true;
-    LastPerformanceUpdate = 0.0f;
-    
-    UE_LOG(LogTemp, Warning, TEXT("Performance monitoring initialized"));
-}
-
-void AEng_ArchitectureManager::ValidateModuleDependencies()
-{
-    // Basic dependency validation
-    TArray<FString> RequiredModules = {TEXT("Core"), TEXT("Engine")};
-    
-    for (const FString& RequiredModule : RequiredModules)
-    {
-        if (!RegisteredModules.Contains(RequiredModule))
-        {
-            UE_LOG(LogTemp, Error, TEXT("Missing required module: %s"), *RequiredModule);
-            SetSystemState(EEng_SystemState::Error);
-            return;
+            UE_LOG(LogTemp, Warning, TEXT("ArchitectureManager: System %s is not ready"), *SystemPair.Key);
+            bAllSystemsReady = false;
         }
     }
     
-    UE_LOG(LogTemp, Warning, TEXT("Module dependencies validated successfully"));
+    if (bAllSystemsReady)
+    {
+        UE_LOG(LogTemp, Log, TEXT("ArchitectureManager: All systems validated successfully"));
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("ArchitectureManager: System integrity validation failed"));
+    }
+    
+    return bAllSystemsReady;
+}
+
+void UEng_ArchitectureManager::RegisterGameModule(const FString& ModuleName, int32 Priority)
+{
+    UE_LOG(LogTemp, Log, TEXT("ArchitectureManager: Registering module %s with priority %d"), *ModuleName, Priority);
+    
+    if (!LoadedModuleNames.Contains(ModuleName))
+    {
+        LoadedModuleNames.Add(ModuleName);
+        ModulePriorities.Add(ModuleName, Priority);
+        OnModuleLoaded(ModuleName);
+    }
+}
+
+bool UEng_ArchitectureManager::IsSystemReady(const FString& SystemName) const
+{
+    const bool* ReadyState = SystemReadyStates.Find(SystemName);
+    return ReadyState ? *ReadyState : false;
+}
+
+float UEng_ArchitectureManager::GetSystemPerformanceMetric(const FString& SystemName) const
+{
+    const float* Metric = PerformanceMetrics.Find(SystemName);
+    return Metric ? *Metric : 0.0f;
+}
+
+void UEng_ArchitectureManager::SetPerformanceTarget(const FString& SystemName, float TargetFPS)
+{
+    PerformanceMetrics.Add(SystemName, TargetFPS);
+    UE_LOG(LogTemp, Log, TEXT("ArchitectureManager: Set performance target for %s to %.2f FPS"), *SystemName, TargetFPS);
+}
+
+TArray<FString> UEng_ArchitectureManager::GetLoadedModules() const
+{
+    return LoadedModuleNames;
+}
+
+bool UEng_ArchitectureManager::UnloadModule(const FString& ModuleName)
+{
+    if (LoadedModuleNames.Contains(ModuleName))
+    {
+        LoadedModuleNames.Remove(ModuleName);
+        ModulePriorities.Remove(ModuleName);
+        OnModuleUnloaded(ModuleName);
+        UE_LOG(LogTemp, Log, TEXT("ArchitectureManager: Unloaded module %s"), *ModuleName);
+        return true;
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("ArchitectureManager: Module %s not found for unloading"), *ModuleName);
+    return false;
+}
+
+bool UEng_ArchitectureManager::ReloadModule(const FString& ModuleName)
+{
+    UE_LOG(LogTemp, Log, TEXT("ArchitectureManager: Reloading module %s"), *ModuleName);
+    
+    if (UnloadModule(ModuleName))
+    {
+        return LoadGameModule(ModuleName);
+    }
+    
+    return false;
+}
+
+void UEng_ArchitectureManager::InitializeWorldGeneration()
+{
+    UE_LOG(LogTemp, Log, TEXT("ArchitectureManager: Initializing World Generation system"));
+    SystemReadyStates[TEXT("WorldGeneration")] = true;
+}
+
+void UEng_ArchitectureManager::InitializeCharacterSystems()
+{
+    UE_LOG(LogTemp, Log, TEXT("ArchitectureManager: Initializing Character Systems"));
+    SystemReadyStates[TEXT("CharacterSystems")] = true;
+}
+
+void UEng_ArchitectureManager::InitializeCombatSystems()
+{
+    UE_LOG(LogTemp, Log, TEXT("ArchitectureManager: Initializing Combat Systems"));
+    SystemReadyStates[TEXT("CombatSystems")] = true;
+}
+
+void UEng_ArchitectureManager::InitializeAISystems()
+{
+    UE_LOG(LogTemp, Log, TEXT("ArchitectureManager: Initializing AI Systems"));
+    SystemReadyStates[TEXT("AISystems")] = true;
+}
+
+void UEng_ArchitectureManager::InitializeAudioSystems()
+{
+    UE_LOG(LogTemp, Log, TEXT("ArchitectureManager: Initializing Audio Systems"));
+    SystemReadyStates[TEXT("AudioSystems")] = true;
+}
+
+void UEng_ArchitectureManager::InitializeVFXSystems()
+{
+    UE_LOG(LogTemp, Log, TEXT("ArchitectureManager: Initializing VFX Systems"));
+    SystemReadyStates[TEXT("VFXSystems")] = true;
+}
+
+void UEng_ArchitectureManager::UpdatePerformanceMetrics()
+{
+    if (!bEnablePerformanceMonitoring)
+    {
+        return;
+    }
+    
+    float CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+    
+    if (CurrentTime - LastPerformanceUpdate >= 1.0f) // Update every second
+    {
+        // Update performance metrics for each system
+        for (auto& MetricPair : PerformanceMetrics)
+        {
+            // Simulate performance monitoring - in real implementation,
+            // this would gather actual performance data
+            float CurrentFPS = FMath::RandRange(55.0f, 65.0f);
+            MetricPair.Value = CurrentFPS;
+        }
+        
+        LastPerformanceUpdate = CurrentTime;
+    }
+}
+
+bool UEng_ArchitectureManager::ValidateSystemPerformance(const FString& SystemName) const
+{
+    const float* CurrentMetric = PerformanceMetrics.Find(SystemName);
+    if (!CurrentMetric)
+    {
+        return false;
+    }
+    
+    // Performance is valid if above 30 FPS minimum
+    return *CurrentMetric >= 30.0f;
+}
+
+bool UEng_ArchitectureManager::LoadGameModule(const FString& ModuleName)
+{
+    UE_LOG(LogTemp, Log, TEXT("ArchitectureManager: Loading game module %s"), *ModuleName);
+    
+    // In a real implementation, this would use the module loading system
+    // For now, we simulate successful loading
+    RegisterGameModule(ModuleName, 100);
+    
+    return true;
+}
+
+void UEng_ArchitectureManager::OnModuleLoaded(const FString& ModuleName)
+{
+    UE_LOG(LogTemp, Log, TEXT("ArchitectureManager: Module %s loaded successfully"), *ModuleName);
+}
+
+void UEng_ArchitectureManager::OnModuleUnloaded(const FString& ModuleName)
+{
+    UE_LOG(LogTemp, Log, TEXT("ArchitectureManager: Module %s unloaded successfully"), *ModuleName);
 }
