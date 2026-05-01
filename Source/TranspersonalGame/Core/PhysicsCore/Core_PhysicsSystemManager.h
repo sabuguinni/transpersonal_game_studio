@@ -1,235 +1,152 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/World.h"
-#include "GameFramework/Actor.h"
-#include "Components/StaticMeshComponent.h"
-#include "Components/PrimitiveComponent.h"
 #include "Engine/Engine.h"
-#include "PhysicsEngine/PhysicsSettings.h"
-#include "Chaos/ChaosEngineInterface.h"
+#include "Components/StaticMeshComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "PhysicalMaterials/PhysicalMaterial.h"
+#include "Engine/World.h"
+#include "Subsystems/GameInstanceSubsystem.h"
 #include "Core_PhysicsSystemManager.generated.h"
 
-// Forward declarations
-class UEng_ArchitectureManager;
-
+/**
+ * Physics material types for different creature categories
+ * Used to define realistic physics properties for dinosaurs and environment
+ */
 UENUM(BlueprintType)
-enum class ECore_PhysicsSystemState : uint8
+enum class ECore_PhysicsMaterialType : uint8
 {
-    Uninitialized   UMETA(DisplayName = "Uninitialized"),
-    Initializing    UMETA(DisplayName = "Initializing"),
-    Running         UMETA(DisplayName = "Running"),
-    Error           UMETA(DisplayName = "Error"),
-    Disabled        UMETA(DisplayName = "Disabled")
+    TRex           UMETA(DisplayName = "T-Rex Physics"),
+    Raptor         UMETA(DisplayName = "Raptor Physics"),
+    Brachiosaurus  UMETA(DisplayName = "Brachiosaurus Physics"),
+    Rock           UMETA(DisplayName = "Rock Physics"),
+    Wood           UMETA(DisplayName = "Wood Physics"),
+    Terrain        UMETA(DisplayName = "Terrain Physics")
 };
 
+/**
+ * Ragdoll state for character physics simulation
+ * Controls when characters transition to physics-based animation
+ */
+UENUM(BlueprintType)
+enum class ECore_RagdollState : uint8
+{
+    Disabled       UMETA(DisplayName = "Ragdoll Disabled"),
+    Enabled        UMETA(DisplayName = "Ragdoll Enabled"),
+    Transitioning  UMETA(DisplayName = "Transitioning to Ragdoll")
+};
+
+/**
+ * Physics properties for different creature types
+ * Defines mass, friction, and collision behavior
+ */
 USTRUCT(BlueprintType)
-struct FCore_PhysicsMetrics
+struct TRANSPERSONALGAME_API FCore_PhysicsProperties
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Physics Metrics")
-    float PhysicsFrameTime;
+    /** Mass in kilograms */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    float MassKg = 100.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Physics Metrics")
-    int32 ActiveRigidBodies;
+    /** Surface friction coefficient */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    float Friction = 0.7f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Physics Metrics")
-    int32 CollisionChecks;
+    /** Bounce/restitution coefficient */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    float Restitution = 0.3f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Physics Metrics")
-    float MemoryUsageMB;
+    /** Material density */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    float Density = 1.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Physics Metrics")
-    bool bChaosEnabled;
+    /** Whether this object can be pushed by other physics objects */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    bool bCanBePushed = true;
 
-    FCore_PhysicsMetrics()
+    FCore_PhysicsProperties()
     {
-        PhysicsFrameTime = 0.0f;
-        ActiveRigidBodies = 0;
-        CollisionChecks = 0;
-        MemoryUsageMB = 0.0f;
-        bChaosEnabled = false;
-    }
-};
-
-USTRUCT(BlueprintType)
-struct FCore_CollisionProfile
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision")
-    FName ProfileName;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision")
-    TEnumAsByte<ECollisionEnabled::Type> CollisionEnabled;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision")
-    TEnumAsByte<ECollisionChannel> ObjectType;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision")
-    bool bBlockAll;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision")
-    bool bIgnoreAll;
-
-    FCore_CollisionProfile()
-    {
-        ProfileName = NAME_None;
-        CollisionEnabled = ECollisionEnabled::QueryAndPhysics;
-        ObjectType = ECC_WorldStatic;
-        bBlockAll = false;
-        bIgnoreAll = false;
+        MassKg = 100.0f;
+        Friction = 0.7f;
+        Restitution = 0.3f;
+        Density = 1.0f;
+        bCanBePushed = true;
     }
 };
 
 /**
  * Core Physics System Manager
- * Manages all physics-related systems including collision, rigid body dynamics,
- * destruction, and integration with the Engine Architecture Manager.
+ * Manages all physics simulation, collision detection, and ragdoll systems
+ * Handles realistic physics for dinosaurs, environment, and character death
  */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API ACore_PhysicsSystemManager : public AActor
+class TRANSPERSONALGAME_API UCore_PhysicsSystemManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
-    ACore_PhysicsSystemManager();
+    UCore_PhysicsSystemManager();
+
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+
+    /** Initialize physics materials for all creature types */
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void InitializePhysicsMaterials();
+
+    /** Apply physics properties to a specific actor */
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    bool ApplyPhysicsProperties(AActor* Actor, ECore_PhysicsMaterialType MaterialType);
+
+    /** Enable ragdoll physics on a character */
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    bool EnableRagdoll(AActor* Character);
+
+    /** Disable ragdoll physics on a character */
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    bool DisableRagdoll(AActor* Character);
+
+    /** Get physics properties for a material type */
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Physics System")
+    FCore_PhysicsProperties GetPhysicsProperties(ECore_PhysicsMaterialType MaterialType) const;
+
+    /** Set up collision channels for the game */
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void SetupCollisionChannels();
+
+    /** Test physics simulation on all objects */
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void TestPhysicsSimulation();
+
+    /** Get the current ragdoll state of a character */
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Physics System")
+    ECore_RagdollState GetRagdollState(AActor* Character) const;
 
 protected:
-    virtual void BeginPlay() override;
-    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
-    virtual void Tick(float DeltaTime) override;
+    /** Physics materials for different creature types */
+    UPROPERTY(BlueprintReadOnly, Category = "Physics Materials")
+    TMap<ECore_PhysicsMaterialType, UPhysicalMaterial*> PhysicsMaterials;
 
-public:
-    // === SYSTEM STATE MANAGEMENT ===
-    
-    UPROPERTY(BlueprintReadOnly, Category = "Physics System")
-    ECore_PhysicsSystemState SystemState;
+    /** Physics properties for each material type */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Physics Properties")
+    TMap<ECore_PhysicsMaterialType, FCore_PhysicsProperties> MaterialProperties;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Physics System")
-    FCore_PhysicsMetrics CurrentMetrics;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics System")
-    bool bEnablePhysicsDebugging;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics System")
-    bool bEnableCollisionDebugging;
-
-    // === SYSTEM INITIALIZATION ===
-    
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
-    bool InitializePhysicsSystem();
-
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
-    void ShutdownPhysicsSystem();
-
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
-    bool ValidatePhysicsConfiguration();
-
-    // === COLLISION MANAGEMENT ===
-    
-    UFUNCTION(BlueprintCallable, Category = "Collision")
-    void RegisterCollisionProfile(const FCore_CollisionProfile& Profile);
-
-    UFUNCTION(BlueprintCallable, Category = "Collision")
-    bool ApplyCollisionProfileToActor(AActor* TargetActor, const FName& ProfileName);
-
-    UFUNCTION(BlueprintCallable, Category = "Collision")
-    void SetupDinosaurCollision(AActor* DinosaurActor);
-
-    UFUNCTION(BlueprintCallable, Category = "Collision")
-    void SetupEnvironmentCollision(AActor* EnvironmentActor);
-
-    // === PHYSICS METRICS ===
-    
-    UFUNCTION(BlueprintCallable, Category = "Physics Metrics")
-    FCore_PhysicsMetrics GetCurrentPhysicsMetrics() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Physics Metrics")
-    void UpdatePhysicsMetrics();
-
-    UFUNCTION(BlueprintCallable, Category = "Physics Metrics")
-    bool IsPhysicsPerformanceAcceptable() const;
-
-    // === RIGID BODY MANAGEMENT ===
-    
-    UFUNCTION(BlueprintCallable, Category = "Rigid Body")
-    void EnableRigidBodyPhysics(UPrimitiveComponent* Component);
-
-    UFUNCTION(BlueprintCallable, Category = "Rigid Body")
-    void DisableRigidBodyPhysics(UPrimitiveComponent* Component);
-
-    UFUNCTION(BlueprintCallable, Category = "Rigid Body")
-    void SetRigidBodyMass(UPrimitiveComponent* Component, float Mass);
-
-    // === DESTRUCTION SYSTEM ===
-    
-    UFUNCTION(BlueprintCallable, Category = "Destruction")
-    void EnableDestructionForActor(AActor* TargetActor);
-
-    UFUNCTION(BlueprintCallable, Category = "Destruction")
-    void TriggerDestruction(AActor* TargetActor, const FVector& ImpactPoint, float Force);
-
-    // === ARCHITECTURE INTEGRATION ===
-    
-    UFUNCTION(BlueprintCallable, Category = "Architecture Integration")
-    void RegisterWithArchitectureManager();
-
-    UFUNCTION(BlueprintCallable, Category = "Architecture Integration")
-    void ReportSystemStatus();
-
-    // === DEBUG AND VALIDATION ===
-    
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Debug")
-    void DebugPhysicsSystem();
-
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Debug")
-    void ValidateAllPhysicsActors();
-
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Debug")
-    void ShowCollisionDebugInfo();
-
-protected:
-    // === INTERNAL SYSTEMS ===
-    
-    UPROPERTY()
-    TArray<FCore_CollisionProfile> RegisteredCollisionProfiles;
-
-    UPROPERTY()
-    TArray<TWeakObjectPtr<AActor>> ManagedPhysicsActors;
-
-    UPROPERTY()
-    TWeakObjectPtr<UEng_ArchitectureManager> ArchitectureManager;
-
-    // === INTERNAL METHODS ===
-    
-    void InitializeCollisionProfiles();
-    void SetupDefaultPhysicsSettings();
-    void RegisterPhysicsCallbacks();
-    void UnregisterPhysicsCallbacks();
-    
-    // Metrics calculation
-    void CalculatePhysicsFrameTime();
-    void CountActiveRigidBodies();
-    void CountCollisionChecks();
-    void CalculateMemoryUsage();
-
-    // Validation helpers
-    bool ValidateChaosPhysics() const;
-    bool ValidateCollisionSettings() const;
-    bool ValidatePhysicsWorldSettings() const;
+    /** Actors currently in ragdoll state */
+    UPROPERTY(BlueprintReadOnly, Category = "Ragdoll System")
+    TMap<AActor*, ECore_RagdollState> RagdollStates;
 
 private:
-    // === PERFORMANCE TRACKING ===
-    
-    float LastPhysicsUpdateTime;
-    int32 PhysicsFrameCounter;
-    float AccumulatedPhysicsTime;
-    
-    // === ERROR HANDLING ===
-    
-    FString LastErrorMessage;
-    float ErrorReportCooldown;
-    static constexpr float ERROR_REPORT_INTERVAL = 5.0f;
+    /** Create a physics material with specific properties */
+    UPhysicalMaterial* CreatePhysicsMaterial(const FString& MaterialName, const FCore_PhysicsProperties& Properties);
+
+    /** Apply collision settings to a static mesh component */
+    void ApplyCollisionSettings(UStaticMeshComponent* MeshComp, ECore_PhysicsMaterialType MaterialType);
+
+    /** Apply collision settings to a skeletal mesh component */
+    void ApplyCollisionSettings(USkeletalMeshComponent* MeshComp, ECore_PhysicsMaterialType MaterialType);
+
+    /** Initialize default physics properties */
+    void InitializeDefaultProperties();
 };
