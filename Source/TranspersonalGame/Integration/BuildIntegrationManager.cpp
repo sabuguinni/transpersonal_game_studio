@@ -1,308 +1,395 @@
 #include "BuildIntegrationManager.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Engine/GameInstance.h"
-#include "UObject/UObjectGlobals.h"
-#include "Misc/DateTime.h"
-#include "HAL/PlatformFilemanager.h"
-#include "Misc/Paths.h"
+#include "GameFramework/Actor.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
+#include "Materials/Material.h"
+#include "Kismet/GameplayStatics.h"
+#include "Engine/DirectionalLight.h"
+#include "Components/DirectionalLightComponent.h"
+#include "Engine/SkyLight.h"
+#include "Components/SkyLightComponent.h"
+#include "Engine/ExponentialHeightFog.h"
+#include "Components/ExponentialHeightFogComponent.h"
+#include "Atmosphere/AtmosphericFog.h"
+
+DEFINE_LOG_CATEGORY(LogBuildIntegration);
 
 UBuildIntegrationManager::UBuildIntegrationManager()
 {
-    bLastBuildSuccessful = false;
-    LastBuildError = TEXT("");
-    TotalModulesRegistered = 0;
-    ActiveModulesCount = 0;
-    LastIntegrationTestTime = 0.0f;
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 5.0f; // Check every 5 seconds
+    
+    bAutoCleanDuplicates = true;
+    bValidateSystemIntegration = true;
+    bLogDetailedReports = true;
+    
+    MaxAllowedDuplicates = 1;
+    ValidationCheckInterval = 10.0f;
+    LastValidationTime = 0.0f;
 }
 
-void UBuildIntegrationManager::Initialize(FSubsystemCollectionBase& Collection)
+void UBuildIntegrationManager::BeginPlay()
 {
-    Super::Initialize(Collection);
+    Super::BeginPlay();
     
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Initializing build integration system"));
+    UE_LOG(LogBuildIntegration, Log, TEXT("BuildIntegrationManager started"));
     
-    // Register core modules
-    RegisterModule(TEXT("Core"), true);
-    RegisterModule(TEXT("Characters"), true);
-    RegisterModule(TEXT("WorldGeneration"), true);
-    RegisterModule(TEXT("Environment"), true);
-    RegisterModule(TEXT("AI"), true);
-    RegisterModule(TEXT("Combat"), true);
-    RegisterModule(TEXT("Audio"), true);
-    RegisterModule(TEXT("VFX"), true);
-    RegisterModule(TEXT("QA"), true);
-    RegisterModule(TEXT("Integration"), true);
+    if (bAutoCleanDuplicates)
+    {
+        // Initial cleanup on level start
+        CleanDuplicateActors();
+    }
     
-    // Run initial validation
-    ValidateAllModules();
-    
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Initialization complete"));
+    if (bValidateSystemIntegration)
+    {
+        // Initial system validation
+        ValidateSystemIntegration();
+    }
 }
 
-void UBuildIntegrationManager::Deinitialize()
+void UBuildIntegrationManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Shutting down build integration system"));
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    // Generate final build report
-    GenerateBuildReport();
+    LastValidationTime += DeltaTime;
     
-    Super::Deinitialize();
+    if (LastValidationTime >= ValidationCheckInterval)
+    {
+        if (bAutoCleanDuplicates)
+        {
+            CleanDuplicateActors();
+        }
+        
+        if (bValidateSystemIntegration)
+        {
+            ValidateSystemIntegration();
+        }
+        
+        LastValidationTime = 0.0f;
+    }
 }
 
-bool UBuildIntegrationManager::ValidateAllModules()
+void UBuildIntegrationManager::CleanDuplicateActors()
 {
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Starting module validation"));
-    
-    bool bAllValid = true;
-    IntegrationTestResults.Empty();
-    
-    // Validate headers
-    if (!ValidateModuleHeaders())
-    {
-        bAllValid = false;
-        IntegrationTestResults.Add(TEXT("FAIL: Module headers validation failed"));
-    }
-    else
-    {
-        IntegrationTestResults.Add(TEXT("PASS: Module headers validation"));
-    }
-    
-    // Validate implementations
-    if (!ValidateModuleImplementations())
-    {
-        bAllValid = false;
-        IntegrationTestResults.Add(TEXT("FAIL: Module implementations validation failed"));
-    }
-    else
-    {
-        IntegrationTestResults.Add(TEXT("PASS: Module implementations validation"));
-    }
-    
-    // Validate shared types
-    if (!ValidateSharedTypes())
-    {
-        bAllValid = false;
-        IntegrationTestResults.Add(TEXT("FAIL: SharedTypes validation failed"));
-    }
-    else
-    {
-        IntegrationTestResults.Add(TEXT("PASS: SharedTypes validation"));
-    }
-    
-    // Test actor class loading
-    if (!TestActorClassLoading())
-    {
-        bAllValid = false;
-        IntegrationTestResults.Add(TEXT("FAIL: Actor class loading failed"));
-    }
-    else
-    {
-        IntegrationTestResults.Add(TEXT("PASS: Actor class loading"));
-    }
-    
-    bLastBuildSuccessful = bAllValid;
-    LastIntegrationTestTime = FPlatformTime::Seconds();
-    
-    LogIntegrationStatus();
-    
-    return bAllValid;
-}
-
-bool UBuildIntegrationManager::TestCrossModuleDependencies()
-{
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Testing cross-module dependencies"));
-    
-    bool bDependenciesValid = true;
-    
-    // Test Character -> Core dependency
-    UClass* CharacterClass = FindObject<UClass>(ANY_PACKAGE, TEXT("TranspersonalCharacter"));
-    if (!CharacterClass)
-    {
-        UE_LOG(LogTemp, Error, TEXT("BuildIntegrationManager: TranspersonalCharacter class not found"));
-        bDependenciesValid = false;
-    }
-    
-    // Test WorldGeneration -> Environment dependency
-    UClass* WorldGenClass = FindObject<UClass>(ANY_PACKAGE, TEXT("PCGWorldGenerator"));
-    if (!WorldGenClass)
-    {
-        UE_LOG(LogTemp, Error, TEXT("BuildIntegrationManager: PCGWorldGenerator class not found"));
-        bDependenciesValid = false;
-    }
-    
-    // Test AI -> Characters dependency
-    UClass* CrowdSimClass = FindObject<UClass>(ANY_PACKAGE, TEXT("CrowdSimulationManager"));
-    if (!CrowdSimClass)
-    {
-        UE_LOG(LogTemp, Error, TEXT("BuildIntegrationManager: CrowdSimulationManager class not found"));
-        bDependenciesValid = false;
-    }
-    
-    return bDependenciesValid;
-}
-
-void UBuildIntegrationManager::GenerateBuildReport()
-{
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Generating build report"));
-    
-    FString ReportContent = TEXT("=== BUILD INTEGRATION REPORT ===\n");
-    ReportContent += FString::Printf(TEXT("Timestamp: %s\n"), *FDateTime::Now().ToString());
-    ReportContent += FString::Printf(TEXT("Total Modules: %d\n"), TotalModulesRegistered);
-    ReportContent += FString::Printf(TEXT("Active Modules: %d\n"), ActiveModulesCount);
-    ReportContent += FString::Printf(TEXT("Last Build Status: %s\n"), bLastBuildSuccessful ? TEXT("SUCCESS") : TEXT("FAILED"));
-    
-    if (!LastBuildError.IsEmpty())
-    {
-        ReportContent += FString::Printf(TEXT("Last Error: %s\n"), *LastBuildError);
-    }
-    
-    ReportContent += TEXT("\nIntegration Test Results:\n");
-    for (const FString& Result : IntegrationTestResults)
-    {
-        ReportContent += FString::Printf(TEXT("  %s\n"), *Result);
-    }
-    
-    ReportContent += TEXT("\nRegistered Modules:\n");
-    for (const auto& Module : RegisteredModules)
-    {
-        ReportContent += FString::Printf(TEXT("  %s: %s\n"), *Module.Key, Module.Value ? TEXT("ACTIVE") : TEXT("INACTIVE"));
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Build report generated"));
-    UE_LOG(LogTemp, Warning, TEXT("%s"), *ReportContent);
-}
-
-void UBuildIntegrationManager::RegisterModule(const FString& ModuleName, bool bIsActive)
-{
-    RegisteredModules.Add(ModuleName, bIsActive);
-    TotalModulesRegistered = RegisteredModules.Num();
-    
-    if (bIsActive)
-    {
-        ActiveModulesCount++;
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("BuildIntegrationManager: Registered module %s (Active: %s)"), 
-           *ModuleName, bIsActive ? TEXT("Yes") : TEXT("No"));
-}
-
-bool UBuildIntegrationManager::IsModuleActive(const FString& ModuleName) const
-{
-    const bool* bActive = RegisteredModules.Find(ModuleName);
-    return bActive ? *bActive : false;
-}
-
-bool UBuildIntegrationManager::TestMinPlayableMapIntegration()
-{
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Testing MinPlayableMap integration"));
-    
     UWorld* World = GetWorld();
     if (!World)
     {
-        UE_LOG(LogTemp, Error, TEXT("BuildIntegrationManager: No world found for integration test"));
-        return false;
-    }
-    
-    // Count actors in the world
-    int32 ActorCount = 0;
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-    {
-        ActorCount++;
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Found %d actors in current world"), ActorCount);
-    
-    // Test should have at least basic actors (PlayerStart, lighting, etc.)
-    return ActorCount > 5;
-}
-
-void UBuildIntegrationManager::ValidateActorSpawning()
-{
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Validating actor spawning capabilities"));
-    
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        UE_LOG(LogTemp, Error, TEXT("BuildIntegrationManager: No world for actor spawning test"));
+        UE_LOG(LogBuildIntegration, Warning, TEXT("No valid world for duplicate cleanup"));
         return;
     }
     
-    // Test spawning basic actor
-    FVector SpawnLocation(0.0f, 0.0f, 200.0f);
-    FRotator SpawnRotation(0.0f, 0.0f, 0.0f);
+    // Critical lighting types that should have only one instance
+    TArray<UClass*> CriticalTypes = {
+        ADirectionalLight::StaticClass(),
+        ASkyLight::StaticClass(),
+        AExponentialHeightFog::StaticClass()
+    };
     
-    AActor* TestActor = World->SpawnActor<AActor>(AActor::StaticClass(), SpawnLocation, SpawnRotation);
-    if (TestActor)
+    int32 TotalDestroyed = 0;
+    
+    for (UClass* ActorClass : CriticalTypes)
     {
-        UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Actor spawning test PASSED"));
-        TestActor->Destroy();
+        TArray<AActor*> FoundActors;
+        UGameplayStatics::GetAllActorsOfClass(World, ActorClass, FoundActors);
+        
+        if (FoundActors.Num() > MaxAllowedDuplicates)
+        {
+            UE_LOG(LogBuildIntegration, Warning, TEXT("Found %d %s actors, keeping %d, destroying %d"), 
+                   FoundActors.Num(), *ActorClass->GetName(), MaxAllowedDuplicates, FoundActors.Num() - MaxAllowedDuplicates);
+            
+            // Keep the first N actors, destroy the rest
+            for (int32 i = MaxAllowedDuplicates; i < FoundActors.Num(); i++)
+            {
+                if (FoundActors[i] && IsValid(FoundActors[i]))
+                {
+                    FoundActors[i]->Destroy();
+                    TotalDestroyed++;
+                    
+                    UE_LOG(LogBuildIntegration, Log, TEXT("Destroyed duplicate %s #%d"), 
+                           *ActorClass->GetName(), i + 1);
+                }
+            }
+        }
+    }
+    
+    if (TotalDestroyed > 0)
+    {
+        UE_LOG(LogBuildIntegration, Log, TEXT("Cleanup complete: %d duplicate actors destroyed"), TotalDestroyed);
+        OnDuplicatesCleanedDelegate.Broadcast(TotalDestroyed);
+    }
+}
+
+void UBuildIntegrationManager::ValidateSystemIntegration()
+{
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return;
+    }
+    
+    FBuildValidationReport Report;
+    Report.ValidationTime = FDateTime::Now();
+    Report.bIsValid = true;
+    
+    // Count actors by category
+    TArray<AActor*> AllActors;
+    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
+    
+    Report.TotalActorCount = AllActors.Num();
+    
+    for (AActor* Actor : AllActors)
+    {
+        if (!Actor || !IsValid(Actor))
+        {
+            continue;
+        }
+        
+        FString ActorClassName = Actor->GetClass()->GetName();
+        FString ActorLabel = Actor->GetActorLabel();
+        
+        // Categorize actors
+        if (ActorClassName.Contains(TEXT("Light")) || ActorClassName.Contains(TEXT("Sky")) || ActorClassName.Contains(TEXT("Fog")))
+        {
+            Report.LightingActorCount++;
+        }
+        else if (ActorClassName.Contains(TEXT("Landscape")) || ActorClassName.Contains(TEXT("StaticMesh")) || 
+                 ActorLabel.Contains(TEXT("Tree")) || ActorLabel.Contains(TEXT("Rock")))
+        {
+            Report.EnvironmentActorCount++;
+        }
+        else if (ActorClassName.Contains(TEXT("Character")) || ActorClassName.Contains(TEXT("Pawn")))
+        {
+            Report.CharacterActorCount++;
+        }
+        else if (ActorLabel.Contains(TEXT("Dinosaur")) || ActorLabel.Contains(TEXT("TRex")) || 
+                 ActorLabel.Contains(TEXT("Raptor")) || ActorClassName.Contains(TEXT("AI")))
+        {
+            Report.AIActorCount++;
+        }
+        else if (ActorClassName.Contains(TEXT("Audio")) || ActorClassName.Contains(TEXT("Sound")) || 
+                 ActorClassName.Contains(TEXT("VFX")) || ActorClassName.Contains(TEXT("Niagara")))
+        {
+            Report.AudioVFXActorCount++;
+        }
+        else
+        {
+            Report.OtherActorCount++;
+        }
+    }
+    
+    // Validate critical systems
+    ValidateLightingSystem(Report);
+    ValidateCharacterSystem(Report);
+    ValidateWorldGeneration(Report);
+    ValidateAISystems(Report);
+    
+    // Store the report
+    ValidationReports.Add(Report);
+    
+    // Keep only the last 10 reports
+    if (ValidationReports.Num() > 10)
+    {
+        ValidationReports.RemoveAt(0);
+    }
+    
+    if (bLogDetailedReports)
+    {
+        LogValidationReport(Report);
+    }
+    
+    OnValidationCompleteDelegate.Broadcast(Report);
+}
+
+void UBuildIntegrationManager::ValidateLightingSystem(FBuildValidationReport& Report)
+{
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        Report.bIsValid = false;
+        Report.ValidationErrors.Add(TEXT("No valid world for lighting validation"));
+        return;
+    }
+    
+    // Check for directional light
+    TArray<AActor*> DirectionalLights;
+    UGameplayStatics::GetAllActorsOfClass(World, ADirectionalLight::StaticClass(), DirectionalLights);
+    
+    if (DirectionalLights.Num() == 0)
+    {
+        Report.ValidationErrors.Add(TEXT("No DirectionalLight found in level"));
+        Report.bIsValid = false;
+    }
+    else if (DirectionalLights.Num() > 1)
+    {
+        Report.ValidationWarnings.Add(FString::Printf(TEXT("Multiple DirectionalLights found: %d"), DirectionalLights.Num()));
+    }
+    
+    // Check for sky light
+    TArray<AActor*> SkyLights;
+    UGameplayStatics::GetAllActorsOfClass(World, ASkyLight::StaticClass(), SkyLights);
+    
+    if (SkyLights.Num() == 0)
+    {
+        Report.ValidationWarnings.Add(TEXT("No SkyLight found in level"));
+    }
+    else if (SkyLights.Num() > 1)
+    {
+        Report.ValidationWarnings.Add(FString::Printf(TEXT("Multiple SkyLights found: %d"), SkyLights.Num()));
+    }
+}
+
+void UBuildIntegrationManager::ValidateCharacterSystem(FBuildValidationReport& Report)
+{
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return;
+    }
+    
+    // Look for player character
+    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(World, 0);
+    if (!PlayerPawn)
+    {
+        Report.ValidationWarnings.Add(TEXT("No player pawn found"));
     }
     else
     {
-        UE_LOG(LogTemp, Error, TEXT("BuildIntegrationManager: Actor spawning test FAILED"));
+        FString PawnClassName = PlayerPawn->GetClass()->GetName();
+        if (PawnClassName.Contains(TEXT("TranspersonalCharacter")))
+        {
+            Report.ValidationMessages.Add(TEXT("TranspersonalCharacter system active"));
+        }
+        else
+        {
+            Report.ValidationWarnings.Add(FString::Printf(TEXT("Player pawn is not TranspersonalCharacter: %s"), *PawnClassName));
+        }
     }
 }
 
-bool UBuildIntegrationManager::ValidateModuleHeaders()
+void UBuildIntegrationManager::ValidateWorldGeneration(FBuildValidationReport& Report)
 {
-    // Check if core header files exist and are properly structured
-    UE_LOG(LogTemp, Log, TEXT("BuildIntegrationManager: Validating module headers"));
-    
-    // This would normally check file system for .h files
-    // For now, assume headers are valid if we can compile
-    return true;
-}
-
-bool UBuildIntegrationManager::ValidateModuleImplementations()
-{
-    // Check if .cpp files exist for all .h files
-    UE_LOG(LogTemp, Log, TEXT("BuildIntegrationManager: Validating module implementations"));
-    
-    // This would normally check file system for .cpp files
-    // For now, assume implementations are valid if we can compile
-    return true;
-}
-
-bool UBuildIntegrationManager::ValidateSharedTypes()
-{
-    // Check if SharedTypes.h is properly included and types are accessible
-    UE_LOG(LogTemp, Log, TEXT("BuildIntegrationManager: Validating shared types"));
-    
-    // Test if we can access shared enums/structs
-    // For now, assume shared types are valid
-    return true;
-}
-
-bool UBuildIntegrationManager::TestActorClassLoading()
-{
-    UE_LOG(LogTemp, Log, TEXT("BuildIntegrationManager: Testing actor class loading"));
-    
-    // Test loading core classes
-    UClass* CharacterClass = FindObject<UClass>(ANY_PACKAGE, TEXT("TranspersonalCharacter"));
-    UClass* GameModeClass = FindObject<UClass>(ANY_PACKAGE, TEXT("TranspersonalGameMode"));
-    UClass* GameStateClass = FindObject<UClass>(ANY_PACKAGE, TEXT("TranspersonalGameState"));
-    
-    bool bAllClassesFound = (CharacterClass != nullptr) && (GameModeClass != nullptr) && (GameStateClass != nullptr);
-    
-    UE_LOG(LogTemp, Log, TEXT("BuildIntegrationManager: Core classes found: %s"), 
-           bAllClassesFound ? TEXT("Yes") : TEXT("No"));
-    
-    return bAllClassesFound;
-}
-
-void UBuildIntegrationManager::LogIntegrationStatus()
-{
-    UE_LOG(LogTemp, Warning, TEXT("=== BUILD INTEGRATION STATUS ==="));
-    UE_LOG(LogTemp, Warning, TEXT("Build Successful: %s"), bLastBuildSuccessful ? TEXT("YES") : TEXT("NO"));
-    UE_LOG(LogTemp, Warning, TEXT("Total Modules: %d"), TotalModulesRegistered);
-    UE_LOG(LogTemp, Warning, TEXT("Active Modules: %d"), ActiveModulesCount);
-    UE_LOG(LogTemp, Warning, TEXT("Test Results: %d"), IntegrationTestResults.Num());
-    
-    for (const FString& Result : IntegrationTestResults)
+    UWorld* World = GetWorld();
+    if (!World)
     {
-        UE_LOG(LogTemp, Warning, TEXT("  %s"), *Result);
+        return;
     }
     
-    UE_LOG(LogTemp, Warning, TEXT("=== END INTEGRATION STATUS ==="));
+    // Check for landscape
+    TArray<AActor*> Landscapes;
+    UGameplayStatics::GetAllActorsOfClass(World, ALandscape::StaticClass(), Landscapes);
+    
+    if (Landscapes.Num() == 0)
+    {
+        Report.ValidationWarnings.Add(TEXT("No Landscape found in level"));
+    }
+    else
+    {
+        Report.ValidationMessages.Add(FString::Printf(TEXT("World generation: %d landscapes active"), Landscapes.Num()));
+    }
+}
+
+void UBuildIntegrationManager::ValidateAISystems(FBuildValidationReport& Report)
+{
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return;
+    }
+    
+    // Count AI-related actors
+    TArray<AActor*> AllActors;
+    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
+    
+    int32 DinosaurCount = 0;
+    for (AActor* Actor : AllActors)
+    {
+        if (Actor && IsValid(Actor))
+        {
+            FString ActorLabel = Actor->GetActorLabel();
+            if (ActorLabel.Contains(TEXT("Dinosaur")) || ActorLabel.Contains(TEXT("TRex")) || 
+                ActorLabel.Contains(TEXT("Raptor")) || ActorLabel.Contains(TEXT("Brachiosaurus")))
+            {
+                DinosaurCount++;
+            }
+        }
+    }
+    
+    if (DinosaurCount == 0)
+    {
+        Report.ValidationWarnings.Add(TEXT("No dinosaur actors found in level"));
+    }
+    else
+    {
+        Report.ValidationMessages.Add(FString::Printf(TEXT("AI systems: %d dinosaur actors active"), DinosaurCount));
+    }
+}
+
+void UBuildIntegrationManager::LogValidationReport(const FBuildValidationReport& Report)
+{
+    UE_LOG(LogBuildIntegration, Log, TEXT("=== BUILD VALIDATION REPORT ==="));
+    UE_LOG(LogBuildIntegration, Log, TEXT("Validation Time: %s"), *Report.ValidationTime.ToString());
+    UE_LOG(LogBuildIntegration, Log, TEXT("Overall Status: %s"), Report.bIsValid ? TEXT("VALID") : TEXT("INVALID"));
+    UE_LOG(LogBuildIntegration, Log, TEXT("Total Actors: %d"), Report.TotalActorCount);
+    UE_LOG(LogBuildIntegration, Log, TEXT("  Lighting: %d"), Report.LightingActorCount);
+    UE_LOG(LogBuildIntegration, Log, TEXT("  Environment: %d"), Report.EnvironmentActorCount);
+    UE_LOG(LogBuildIntegration, Log, TEXT("  Characters: %d"), Report.CharacterActorCount);
+    UE_LOG(LogBuildIntegration, Log, TEXT("  AI/Dinosaurs: %d"), Report.AIActorCount);
+    UE_LOG(LogBuildIntegration, Log, TEXT("  Audio/VFX: %d"), Report.AudioVFXActorCount);
+    UE_LOG(LogBuildIntegration, Log, TEXT("  Other: %d"), Report.OtherActorCount);
+    
+    if (Report.ValidationErrors.Num() > 0)
+    {
+        UE_LOG(LogBuildIntegration, Error, TEXT("Validation Errors:"));
+        for (const FString& Error : Report.ValidationErrors)
+        {
+            UE_LOG(LogBuildIntegration, Error, TEXT("  - %s"), *Error);
+        }
+    }
+    
+    if (Report.ValidationWarnings.Num() > 0)
+    {
+        UE_LOG(LogBuildIntegration, Warning, TEXT("Validation Warnings:"));
+        for (const FString& Warning : Report.ValidationWarnings)
+        {
+            UE_LOG(LogBuildIntegration, Warning, TEXT("  - %s"), *Warning);
+        }
+    }
+    
+    if (Report.ValidationMessages.Num() > 0)
+    {
+        UE_LOG(LogBuildIntegration, Log, TEXT("Validation Messages:"));
+        for (const FString& Message : Report.ValidationMessages)
+        {
+            UE_LOG(LogBuildIntegration, Log, TEXT("  - %s"), *Message);
+        }
+    }
+    
+    UE_LOG(LogBuildIntegration, Log, TEXT("=== END VALIDATION REPORT ==="));
+}
+
+FBuildValidationReport UBuildIntegrationManager::GetLatestValidationReport() const
+{
+    if (ValidationReports.Num() > 0)
+    {
+        return ValidationReports.Last();
+    }
+    
+    return FBuildValidationReport();
+}
+
+TArray<FBuildValidationReport> UBuildIntegrationManager::GetValidationHistory() const
+{
+    return ValidationReports;
+}
+
+void UBuildIntegrationManager::ForceValidation()
+{
+    ValidateSystemIntegration();
+}
+
+void UBuildIntegrationManager::ForceDuplicateCleanup()
+{
+    CleanDuplicateActors();
 }
