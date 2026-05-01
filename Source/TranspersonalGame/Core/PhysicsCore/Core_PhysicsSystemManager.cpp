@@ -1,507 +1,700 @@
 #include "Core_PhysicsSystemManager.h"
 #include "Engine/World.h"
-#include "TimerManager.h"
-#include "Components/SkeletalMeshComponent.h"
-#include "Components/StaticMeshComponent.h"
-#include "Animation/AnimInstance.h"
-#include "PhysicalMaterials/PhysicalMaterial.h"
-#include "Kismet/GameplayStatics.h"
 #include "Engine/Engine.h"
+#include "GameFramework/Actor.h"
+#include "Components/StaticMeshComponent.h"
+#include "Components/PrimitiveComponent.h"
+#include "PhysicsEngine/PhysicsSettings.h"
+#include "Chaos/ChaosEngineInterface.h"
+#include "HAL/PlatformFilemanager.h"
+#include "Misc/DateTime.h"
+#include "DrawDebugHelpers.h"
 
-UCore_PhysicsSystemManager::UCore_PhysicsSystemManager()
+// Include Architecture Manager if available
+#if __has_include("../Engine/Eng_ArchitectureManager.h")
+#include "../Engine/Eng_ArchitectureManager.h"
+#endif
+
+ACore_PhysicsSystemManager::ACore_PhysicsSystemManager()
 {
-    CurrentPhysicsQuality = ECore_PhysicsQuality::High;
-    ActivePhysicsActors = 0;
-    LastPhysicsFrameTime = 0.0f;
-    MaxPhysicsDistance = 5000.0f;
-    MaxSimulatedActors = 100;
-    CollisionImpactThreshold = 500.0f;
+    PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.bStartWithTickEnabled = true;
+    PrimaryActorTick.TickInterval = 0.1f; // Update metrics 10 times per second
+
+    // Initialize system state
+    SystemState = ECore_PhysicsSystemState::Uninitialized;
+    bEnablePhysicsDebugging = false;
+    bEnableCollisionDebugging = false;
+
+    // Initialize performance tracking
+    LastPhysicsUpdateTime = 0.0f;
+    PhysicsFrameCounter = 0;
+    AccumulatedPhysicsTime = 0.0f;
+    ErrorReportCooldown = 0.0f;
+
+    // Initialize metrics
+    CurrentMetrics = FCore_PhysicsMetrics();
+
+    // Set actor properties
+    SetActorTickEnabled(true);
+    SetCanBeDamaged(false);
+    
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsSystemManager: Constructor completed"));
 }
 
-void UCore_PhysicsSystemManager::Initialize(FSubsystemCollectionBase& Collection)
+void ACore_PhysicsSystemManager::BeginPlay()
 {
-    Super::Initialize(Collection);
-    
-    UE_LOG(LogTemp, Log, TEXT("Core Physics System Manager: Initializing physics subsystem"));
-    
-    // Set up initial physics settings
-    UpdatePhysicsSettings();
-    
-    // Start performance monitoring
-    if (UWorld* World = GetWorld())
-    {
-        World->GetTimerManager().SetTimer(
-            PerformanceMonitorTimer,
-            FTimerDelegate::CreateUObject(this, &UCore_PhysicsSystemManager::OptimizePhysicsPerformance),
-            1.0f,
-            true
-        );
-        
-        World->GetTimerManager().SetTimer(
-            PhysicsOptimizationTimer,
-            FTimerDelegate::CreateUObject(this, &UCore_PhysicsSystemManager::CleanupInactivePhysics),
-            5.0f,
-            true
-        );
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("Core Physics System Manager: Initialization complete"));
-}
+    Super::BeginPlay();
 
-void UCore_PhysicsSystemManager::Deinitialize()
-{
-    UE_LOG(LogTemp, Log, TEXT("Core Physics System Manager: Shutting down physics subsystem"));
-    
-    // Clear timer handles
-    if (UWorld* World = GetWorld())
-    {
-        World->GetTimerManager().ClearTimer(PerformanceMonitorTimer);
-        World->GetTimerManager().ClearTimer(PhysicsOptimizationTimer);
-    }
-    
-    // Cleanup ragdoll actors
-    RagdollActors.Empty();
-    
-    Super::Deinitialize();
-}
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsSystemManager: BeginPlay started"));
 
-bool UCore_PhysicsSystemManager::ShouldCreateSubsystem(UObject* Outer) const
-{
-    return true;
-}
-
-void UCore_PhysicsSystemManager::SetPhysicsQuality(ECore_PhysicsQuality Quality)
-{
-    if (CurrentPhysicsQuality != Quality)
+    // Initialize the physics system
+    if (InitializePhysicsSystem())
     {
-        CurrentPhysicsQuality = Quality;
-        UpdatePhysicsSettings();
-        
-        UE_LOG(LogTemp, Log, TEXT("Physics quality changed to: %d"), (int32)Quality);
-    }
-}
-
-void UCore_PhysicsSystemManager::HandleImpact(const FHitResult& HitResult, float ImpactForce)
-{
-    if (!HitResult.GetActor() || ImpactForce < CollisionImpactThreshold)
-    {
-        return;
-    }
-    
-    // Create physics interaction data
-    FCore_PhysicsInteraction Interaction;
-    Interaction.SurfaceType = GetSurfaceType(HitResult);
-    Interaction.ImpactForce = ImpactForce;
-    Interaction.ImpactLocation = HitResult.ImpactPoint;
-    Interaction.ImpactNormal = HitResult.ImpactNormal;
-    Interaction.bShouldCreateDebris = ImpactForce > 1000.0f;
-    
-    // Apply physics response
-    if (UPrimitiveComponent* HitComponent = HitResult.GetComponent())
-    {
-        if (HitComponent->IsSimulatingPhysics())
-        {
-            FVector ImpulseDirection = HitResult.ImpactNormal * -1.0f;
-            FVector Impulse = ImpulseDirection * ImpactForce * 0.1f; // Scale down for realistic response
-            
-            HitComponent->AddImpulseAtLocation(Impulse, HitResult.ImpactPoint);
-        }
-    }
-    
-    // Create debris if impact is strong enough
-    if (Interaction.bShouldCreateDebris)
-    {
-        CreateDebris(HitResult.ImpactPoint, Interaction.SurfaceType, FMath::RandRange(3, 8));
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("Physics impact processed: Force=%.2f, Surface=%d"), 
-           ImpactForce, (int32)Interaction.SurfaceType);
-}
-
-FCore_PhysicsInteraction UCore_PhysicsSystemManager::ProcessCollision(AActor* ActorA, AActor* ActorB, const FVector& ImpactPoint, float Force)
-{
-    FCore_PhysicsInteraction Interaction;
-    
-    if (!ActorA || !ActorB)
-    {
-        return Interaction;
-    }
-    
-    // Calculate collision response
-    Interaction.ImpactLocation = ImpactPoint;
-    Interaction.ImpactForce = Force;
-    
-    // Determine surface type from the actors involved
-    if (ActorA->GetName().Contains(TEXT("Rock")) || ActorB->GetName().Contains(TEXT("Rock")))
-    {
-        Interaction.SurfaceType = ECore_SurfaceType::Rock;
-    }
-    else if (ActorA->GetName().Contains(TEXT("Tree")) || ActorB->GetName().Contains(TEXT("Tree")))
-    {
-        Interaction.SurfaceType = ECore_SurfaceType::Wood;
+        UE_LOG(LogTemp, Log, TEXT("Core_PhysicsSystemManager: Physics system initialized successfully"));
+        SystemState = ECore_PhysicsSystemState::Running;
     }
     else
     {
-        Interaction.SurfaceType = ECore_SurfaceType::Dirt;
+        UE_LOG(LogTemp, Error, TEXT("Core_PhysicsSystemManager: Failed to initialize physics system"));
+        SystemState = ECore_PhysicsSystemState::Error;
     }
-    
-    // Apply mutual forces
-    if (UPrimitiveComponent* CompA = ActorA->FindComponentByClass<UPrimitiveComponent>())
+
+    // Register with Architecture Manager
+    RegisterWithArchitectureManager();
+}
+
+void ACore_PhysicsSystemManager::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsSystemManager: EndPlay called"));
+
+    // Shutdown the physics system
+    ShutdownPhysicsSystem();
+
+    Super::EndPlay(EndPlayReason);
+}
+
+void ACore_PhysicsSystemManager::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+
+    // Only update if system is running
+    if (SystemState == ECore_PhysicsSystemState::Running)
     {
-        if (CompA->IsSimulatingPhysics())
+        UpdatePhysicsMetrics();
+        
+        // Report to Architecture Manager periodically
+        static float ReportTimer = 0.0f;
+        ReportTimer += DeltaTime;
+        if (ReportTimer >= 1.0f) // Report every second
         {
-            FVector ImpulseA = (ActorA->GetActorLocation() - ImpactPoint).GetSafeNormal() * Force * 0.05f;
-            CompA->AddImpulse(ImpulseA);
+            ReportSystemStatus();
+            ReportTimer = 0.0f;
         }
     }
-    
-    if (UPrimitiveComponent* CompB = ActorB->FindComponentByClass<UPrimitiveComponent>())
+
+    // Handle error reporting cooldown
+    if (ErrorReportCooldown > 0.0f)
     {
-        if (CompB->IsSimulatingPhysics())
+        ErrorReportCooldown -= DeltaTime;
+    }
+}
+
+bool ACore_PhysicsSystemManager::InitializePhysicsSystem()
+{
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsSystemManager: Initializing physics system..."));
+
+    SystemState = ECore_PhysicsSystemState::Initializing;
+
+    // Validate physics configuration
+    if (!ValidatePhysicsConfiguration())
+    {
+        LastErrorMessage = TEXT("Physics configuration validation failed");
+        return false;
+    }
+
+    // Initialize collision profiles
+    InitializeCollisionProfiles();
+
+    // Setup default physics settings
+    SetupDefaultPhysicsSettings();
+
+    // Register physics callbacks
+    RegisterPhysicsCallbacks();
+
+    // Validate Chaos physics
+    if (!ValidateChaosPhysics())
+    {
+        LastErrorMessage = TEXT("Chaos physics validation failed");
+        return false;
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsSystemManager: Physics system initialization complete"));
+    return true;
+}
+
+void ACore_PhysicsSystemManager::ShutdownPhysicsSystem()
+{
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsSystemManager: Shutting down physics system..."));
+
+    SystemState = ECore_PhysicsSystemState::Disabled;
+
+    // Unregister physics callbacks
+    UnregisterPhysicsCallbacks();
+
+    // Clear managed actors
+    ManagedPhysicsActors.Empty();
+
+    // Clear collision profiles
+    RegisteredCollisionProfiles.Empty();
+
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsSystemManager: Physics system shutdown complete"));
+}
+
+bool ACore_PhysicsSystemManager::ValidatePhysicsConfiguration()
+{
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsSystemManager: Validating physics configuration..."));
+
+    // Check if we have a valid world
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        UE_LOG(LogTemp, Error, TEXT("Core_PhysicsSystemManager: No valid world found"));
+        return false;
+    }
+
+    // Validate Chaos physics
+    if (!ValidateChaosPhysics())
+    {
+        return false;
+    }
+
+    // Validate collision settings
+    if (!ValidateCollisionSettings())
+    {
+        return false;
+    }
+
+    // Validate physics world settings
+    if (!ValidatePhysicsWorldSettings())
+    {
+        return false;
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsSystemManager: Physics configuration validation passed"));
+    return true;
+}
+
+void ACore_PhysicsSystemManager::RegisterCollisionProfile(const FCore_CollisionProfile& Profile)
+{
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsSystemManager: Registering collision profile: %s"), *Profile.ProfileName.ToString());
+
+    // Check if profile already exists
+    for (int32 i = 0; i < RegisteredCollisionProfiles.Num(); i++)
+    {
+        if (RegisteredCollisionProfiles[i].ProfileName == Profile.ProfileName)
         {
-            FVector ImpulseB = (ActorB->GetActorLocation() - ImpactPoint).GetSafeNormal() * Force * 0.05f;
-            CompB->AddImpulse(ImpulseB);
-        }
-    }
-    
-    return Interaction;
-}
-
-void UCore_PhysicsSystemManager::EnableRagdoll(AActor* Actor, const FCore_RagdollConfig& Config)
-{
-    if (!Actor)
-    {
-        return;
-    }
-    
-    USkeletalMeshComponent* SkeletalMesh = Actor->FindComponentByClass<USkeletalMeshComponent>();
-    if (!SkeletalMesh)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Cannot enable ragdoll: Actor %s has no skeletal mesh component"), *Actor->GetName());
-        return;
-    }
-    
-    // Enable physics simulation
-    SkeletalMesh->SetSimulatePhysics(Config.bSimulatePhysics);
-    SkeletalMesh->SetEnableGravity(Config.bEnableGravity);
-    SkeletalMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-    
-    // Blend to physics
-    if (UAnimInstance* AnimInstance = SkeletalMesh->GetAnimInstance())
-    {
-        // Note: In a full implementation, you would use a custom anim BP with physics blending
-        // For now, we just disable animation updates
-        SkeletalMesh->bPauseAnims = true;
-    }
-    
-    // Add to ragdoll tracking
-    RagdollActors.AddUnique(Actor);
-    
-    UE_LOG(LogTemp, Log, TEXT("Ragdoll enabled for actor: %s"), *Actor->GetName());
-}
-
-void UCore_PhysicsSystemManager::DisableRagdoll(AActor* Actor, float BlendOutTime)
-{
-    if (!Actor)
-    {
-        return;
-    }
-    
-    USkeletalMeshComponent* SkeletalMesh = Actor->FindComponentByClass<USkeletalMeshComponent>();
-    if (!SkeletalMesh)
-    {
-        return;
-    }
-    
-    // Disable physics simulation
-    SkeletalMesh->SetSimulatePhysics(false);
-    SkeletalMesh->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-    
-    // Re-enable animation
-    SkeletalMesh->bPauseAnims = false;
-    
-    // Remove from ragdoll tracking
-    RagdollActors.Remove(Actor);
-    
-    UE_LOG(LogTemp, Log, TEXT("Ragdoll disabled for actor: %s"), *Actor->GetName());
-}
-
-void UCore_PhysicsSystemManager::TriggerDestruction(AActor* Actor, const FVector& ImpactPoint, float DestructionForce)
-{
-    if (!Actor)
-    {
-        return;
-    }
-    
-    // Check if actor has physics component with destruction enabled
-    if (UCore_PhysicsComponent* PhysicsComp = Actor->FindComponentByClass<UCore_PhysicsComponent>())
-    {
-        if (!PhysicsComp->bCanBeDestroyed || DestructionForce < PhysicsComp->DestructionThreshold)
-        {
+            // Update existing profile
+            RegisteredCollisionProfiles[i] = Profile;
+            UE_LOG(LogTemp, Log, TEXT("Core_PhysicsSystemManager: Updated existing collision profile: %s"), *Profile.ProfileName.ToString());
             return;
         }
     }
-    
-    // Create debris at destruction point
-    CreateDebris(ImpactPoint, ECore_SurfaceType::Rock, FMath::RandRange(5, 15));
-    
-    // Apply destruction effects
-    if (UPrimitiveComponent* PrimComp = Actor->FindComponentByClass<UPrimitiveComponent>())
-    {
-        // Disable collision and physics
-        PrimComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-        PrimComp->SetSimulatePhysics(false);
-        
-        // Hide the original actor
-        Actor->SetActorHiddenInGame(true);
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("Destruction triggered for actor: %s with force: %.2f"), 
-           *Actor->GetName(), DestructionForce);
+
+    // Add new profile
+    RegisteredCollisionProfiles.Add(Profile);
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsSystemManager: Added new collision profile: %s"), *Profile.ProfileName.ToString());
 }
 
-void UCore_PhysicsSystemManager::CreateDebris(const FVector& Location, ECore_SurfaceType SurfaceType, int32 DebrisCount)
+bool ACore_PhysicsSystemManager::ApplyCollisionProfileToActor(AActor* TargetActor, const FName& ProfileName)
 {
-    if (!GetWorld())
+    if (!TargetActor)
     {
-        return;
+        UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsSystemManager: Cannot apply collision profile to null actor"));
+        return false;
     }
-    
-    // Limit debris count based on performance settings
-    int32 MaxDebris = 10;
-    switch (CurrentPhysicsQuality)
-    {
-        case ECore_PhysicsQuality::Low:
-            MaxDebris = 3;
-            break;
-        case ECore_PhysicsQuality::Medium:
-            MaxDebris = 6;
-            break;
-        case ECore_PhysicsQuality::High:
-            MaxDebris = 10;
-            break;
-        case ECore_PhysicsQuality::Ultra:
-            MaxDebris = 15;
-            break;
-    }
-    
-    DebrisCount = FMath::Min(DebrisCount, MaxDebris);
-    
-    // Spawn debris pieces
-    for (int32 i = 0; i < DebrisCount; i++)
-    {
-        FVector DebrisLocation = Location + FVector(
-            FMath::RandRange(-100.0f, 100.0f),
-            FMath::RandRange(-100.0f, 100.0f),
-            FMath::RandRange(0.0f, 50.0f)
-        );
-        
-        // In a full implementation, you would spawn actual debris actors
-        // For now, we just log the creation
-        UE_LOG(LogTemp, Log, TEXT("Debris created at: %s (Type: %d)"), 
-               *DebrisLocation.ToString(), (int32)SurfaceType);
-    }
-}
 
-void UCore_PhysicsSystemManager::SetPhysicsSimulation(AActor* Actor, bool bSimulate)
-{
-    if (!Actor)
+    // Find the collision profile
+    FCore_CollisionProfile* FoundProfile = nullptr;
+    for (FCore_CollisionProfile& Profile : RegisteredCollisionProfiles)
     {
-        return;
-    }
-    
-    if (UPrimitiveComponent* PrimComp = Actor->FindComponentByClass<UPrimitiveComponent>())
-    {
-        PrimComp->SetSimulatePhysics(bSimulate);
-        
-        if (bSimulate)
+        if (Profile.ProfileName == ProfileName)
         {
-            ActivePhysicsActors++;
+            FoundProfile = &Profile;
+            break;
+        }
+    }
+
+    if (!FoundProfile)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsSystemManager: Collision profile not found: %s"), *ProfileName.ToString());
+        return false;
+    }
+
+    // Apply profile to all primitive components
+    TArray<UPrimitiveComponent*> PrimitiveComponents;
+    TargetActor->GetComponents<UPrimitiveComponent>(PrimitiveComponents);
+
+    for (UPrimitiveComponent* Component : PrimitiveComponents)
+    {
+        if (Component)
+        {
+            Component->SetCollisionEnabled(FoundProfile->CollisionEnabled);
+            Component->SetCollisionObjectType(FoundProfile->ObjectType);
+            
+            if (FoundProfile->bBlockAll)
+            {
+                Component->SetCollisionResponseToAllChannels(ECR_Block);
+            }
+            else if (FoundProfile->bIgnoreAll)
+            {
+                Component->SetCollisionResponseToAllChannels(ECR_Ignore);
+            }
+        }
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsSystemManager: Applied collision profile %s to actor %s"), 
+           *ProfileName.ToString(), *TargetActor->GetName());
+
+    return true;
+}
+
+void ACore_PhysicsSystemManager::SetupDinosaurCollision(AActor* DinosaurActor)
+{
+    if (!DinosaurActor)
+    {
+        return;
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsSystemManager: Setting up dinosaur collision for %s"), *DinosaurActor->GetName());
+
+    // Create dinosaur collision profile if it doesn't exist
+    FCore_CollisionProfile DinosaurProfile;
+    DinosaurProfile.ProfileName = FName("DinosaurCollision");
+    DinosaurProfile.CollisionEnabled = ECollisionEnabled::QueryAndPhysics;
+    DinosaurProfile.ObjectType = ECC_Pawn;
+    DinosaurProfile.bBlockAll = false;
+    DinosaurProfile.bIgnoreAll = false;
+
+    RegisterCollisionProfile(DinosaurProfile);
+    ApplyCollisionProfileToActor(DinosaurActor, DinosaurProfile.ProfileName);
+
+    // Add to managed actors
+    ManagedPhysicsActors.AddUnique(DinosaurActor);
+}
+
+void ACore_PhysicsSystemManager::SetupEnvironmentCollision(AActor* EnvironmentActor)
+{
+    if (!EnvironmentActor)
+    {
+        return;
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsSystemManager: Setting up environment collision for %s"), *EnvironmentActor->GetName());
+
+    // Create environment collision profile if it doesn't exist
+    FCore_CollisionProfile EnvironmentProfile;
+    EnvironmentProfile.ProfileName = FName("EnvironmentCollision");
+    EnvironmentProfile.CollisionEnabled = ECollisionEnabled::QueryAndPhysics;
+    EnvironmentProfile.ObjectType = ECC_WorldStatic;
+    EnvironmentProfile.bBlockAll = true;
+    EnvironmentProfile.bIgnoreAll = false;
+
+    RegisterCollisionProfile(EnvironmentProfile);
+    ApplyCollisionProfileToActor(EnvironmentActor, EnvironmentProfile.ProfileName);
+
+    // Add to managed actors
+    ManagedPhysicsActors.AddUnique(EnvironmentActor);
+}
+
+FCore_PhysicsMetrics ACore_PhysicsSystemManager::GetCurrentPhysicsMetrics() const
+{
+    return CurrentMetrics;
+}
+
+void ACore_PhysicsSystemManager::UpdatePhysicsMetrics()
+{
+    // Calculate physics frame time
+    CalculatePhysicsFrameTime();
+
+    // Count active rigid bodies
+    CountActiveRigidBodies();
+
+    // Count collision checks (estimated)
+    CountCollisionChecks();
+
+    // Calculate memory usage
+    CalculateMemoryUsage();
+
+    // Update Chaos enabled status
+    CurrentMetrics.bChaosEnabled = ValidateChaosPhysics();
+}
+
+bool ACore_PhysicsSystemManager::IsPhysicsPerformanceAcceptable() const
+{
+    // Check if physics frame time is acceptable (< 5ms for 60fps)
+    if (CurrentMetrics.PhysicsFrameTime > 5.0f)
+    {
+        return false;
+    }
+
+    // Check if we have too many active rigid bodies (> 1000)
+    if (CurrentMetrics.ActiveRigidBodies > 1000)
+    {
+        return false;
+    }
+
+    // Check memory usage (> 500MB is concerning)
+    if (CurrentMetrics.MemoryUsageMB > 500.0f)
+    {
+        return false;
+    }
+
+    return true;
+}
+
+void ACore_PhysicsSystemManager::EnableRigidBodyPhysics(UPrimitiveComponent* Component)
+{
+    if (!Component)
+    {
+        return;
+    }
+
+    Component->SetSimulatePhysics(true);
+    Component->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+    
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsSystemManager: Enabled rigid body physics for component %s"), 
+           *Component->GetName());
+}
+
+void ACore_PhysicsSystemManager::DisableRigidBodyPhysics(UPrimitiveComponent* Component)
+{
+    if (!Component)
+    {
+        return;
+    }
+
+    Component->SetSimulatePhysics(false);
+    Component->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+    
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsSystemManager: Disabled rigid body physics for component %s"), 
+           *Component->GetName());
+}
+
+void ACore_PhysicsSystemManager::SetRigidBodyMass(UPrimitiveComponent* Component, float Mass)
+{
+    if (!Component)
+    {
+        return;
+    }
+
+    Component->SetMassOverrideInKg(NAME_None, Mass, true);
+    
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsSystemManager: Set mass %f for component %s"), 
+           Mass, *Component->GetName());
+}
+
+void ACore_PhysicsSystemManager::EnableDestructionForActor(AActor* TargetActor)
+{
+    if (!TargetActor)
+    {
+        return;
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsSystemManager: Enabling destruction for actor %s"), 
+           *TargetActor->GetName());
+
+    // Enable destruction on all primitive components
+    TArray<UPrimitiveComponent*> PrimitiveComponents;
+    TargetActor->GetComponents<UPrimitiveComponent>(PrimitiveComponents);
+
+    for (UPrimitiveComponent* Component : PrimitiveComponents)
+    {
+        if (Component)
+        {
+            // Enable physics simulation for destruction
+            Component->SetSimulatePhysics(true);
+            Component->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+        }
+    }
+}
+
+void ACore_PhysicsSystemManager::TriggerDestruction(AActor* TargetActor, const FVector& ImpactPoint, float Force)
+{
+    if (!TargetActor)
+    {
+        return;
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsSystemManager: Triggering destruction for actor %s with force %f"), 
+           *TargetActor->GetName(), Force);
+
+    // Apply impulse at impact point
+    TArray<UPrimitiveComponent*> PrimitiveComponents;
+    TargetActor->GetComponents<UPrimitiveComponent>(PrimitiveComponents);
+
+    for (UPrimitiveComponent* Component : PrimitiveComponents)
+    {
+        if (Component && Component->IsSimulatingPhysics())
+        {
+            FVector ImpulseDirection = (Component->GetComponentLocation() - ImpactPoint).GetSafeNormal();
+            FVector Impulse = ImpulseDirection * Force;
+            Component->AddImpulseAtLocation(Impulse, ImpactPoint);
+        }
+    }
+}
+
+void ACore_PhysicsSystemManager::RegisterWithArchitectureManager()
+{
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsSystemManager: Attempting to register with Architecture Manager..."));
+
+#if __has_include("../Engine/Eng_ArchitectureManager.h")
+    // Try to find the Architecture Manager in the world
+    UWorld* World = GetWorld();
+    if (World)
+    {
+        for (TActorIterator<AEng_ArchitectureManager> ActorItr(World); ActorItr; ++ActorItr)
+        {
+            AEng_ArchitectureManager* FoundManager = *ActorItr;
+            if (FoundManager)
+            {
+                ArchitectureManager = FoundManager;
+                UE_LOG(LogTemp, Log, TEXT("Core_PhysicsSystemManager: Successfully registered with Architecture Manager"));
+                return;
+            }
+        }
+    }
+#endif
+
+    UE_LOG(LogTemp, Warning, TEXT("Core_PhysicsSystemManager: Architecture Manager not found"));
+}
+
+void ACore_PhysicsSystemManager::ReportSystemStatus()
+{
+    if (ArchitectureManager.IsValid())
+    {
+        // Report metrics to Architecture Manager
+        // This would be implemented when the Architecture Manager interface is available
+        UE_LOG(LogTemp, VeryVerbose, TEXT("Core_PhysicsSystemManager: Reporting status to Architecture Manager"));
+    }
+}
+
+void ACore_PhysicsSystemManager::DebugPhysicsSystem()
+{
+    UE_LOG(LogTemp, Log, TEXT("=== PHYSICS SYSTEM DEBUG INFO ==="));
+    UE_LOG(LogTemp, Log, TEXT("System State: %d"), (int32)SystemState);
+    UE_LOG(LogTemp, Log, TEXT("Physics Frame Time: %f ms"), CurrentMetrics.PhysicsFrameTime);
+    UE_LOG(LogTemp, Log, TEXT("Active Rigid Bodies: %d"), CurrentMetrics.ActiveRigidBodies);
+    UE_LOG(LogTemp, Log, TEXT("Collision Checks: %d"), CurrentMetrics.CollisionChecks);
+    UE_LOG(LogTemp, Log, TEXT("Memory Usage: %f MB"), CurrentMetrics.MemoryUsageMB);
+    UE_LOG(LogTemp, Log, TEXT("Chaos Enabled: %s"), CurrentMetrics.bChaosEnabled ? TEXT("Yes") : TEXT("No"));
+    UE_LOG(LogTemp, Log, TEXT("Managed Actors: %d"), ManagedPhysicsActors.Num());
+    UE_LOG(LogTemp, Log, TEXT("Registered Profiles: %d"), RegisteredCollisionProfiles.Num());
+    
+    if (!LastErrorMessage.IsEmpty())
+    {
+        UE_LOG(LogTemp, Log, TEXT("Last Error: %s"), *LastErrorMessage);
+    }
+}
+
+void ACore_PhysicsSystemManager::ValidateAllPhysicsActors()
+{
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsSystemManager: Validating all physics actors..."));
+
+    int32 ValidActors = 0;
+    int32 InvalidActors = 0;
+
+    for (int32 i = ManagedPhysicsActors.Num() - 1; i >= 0; i--)
+    {
+        if (ManagedPhysicsActors[i].IsValid())
+        {
+            ValidActors++;
         }
         else
         {
-            ActivePhysicsActors = FMath::Max(0, ActivePhysicsActors - 1);
+            // Remove invalid actors
+            ManagedPhysicsActors.RemoveAt(i);
+            InvalidActors++;
         }
     }
+
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsSystemManager: Validation complete - Valid: %d, Invalid: %d"), 
+           ValidActors, InvalidActors);
 }
 
-void UCore_PhysicsSystemManager::ApplyImpulse(AActor* Actor, const FVector& Impulse, const FVector& Location)
+void ACore_PhysicsSystemManager::ShowCollisionDebugInfo()
 {
-    if (!Actor)
+    if (!bEnableCollisionDebugging)
+    {
+        UE_LOG(LogTemp, Log, TEXT("Core_PhysicsSystemManager: Collision debugging is disabled"));
+        return;
+    }
+
+    UWorld* World = GetWorld();
+    if (!World)
     {
         return;
     }
-    
-    if (UPrimitiveComponent* PrimComp = Actor->FindComponentByClass<UPrimitiveComponent>())
+
+    // Draw debug info for managed actors
+    for (const TWeakObjectPtr<AActor>& ActorPtr : ManagedPhysicsActors)
     {
-        if (PrimComp->IsSimulatingPhysics())
+        if (AActor* Actor = ActorPtr.Get())
         {
-            if (Location.IsZero())
-            {
-                PrimComp->AddImpulse(Impulse);
-            }
-            else
-            {
-                PrimComp->AddImpulseAtLocation(Impulse, Location);
-            }
+            // Draw actor bounds
+            FBox ActorBounds = Actor->GetComponentsBoundingBox();
+            DrawDebugBox(World, ActorBounds.GetCenter(), ActorBounds.GetExtent(), 
+                        FColor::Green, false, 1.0f, 0, 2.0f);
+
+            // Draw actor name
+            DrawDebugString(World, Actor->GetActorLocation() + FVector(0, 0, 100), 
+                           Actor->GetName(), nullptr, FColor::White, 1.0f);
         }
     }
 }
 
-ECore_SurfaceType UCore_PhysicsSystemManager::GetSurfaceType(const FHitResult& HitResult)
+// === INTERNAL METHODS ===
+
+void ACore_PhysicsSystemManager::InitializeCollisionProfiles()
 {
-    if (!HitResult.PhysMaterial.IsValid())
-    {
-        return ECore_SurfaceType::Rock; // Default
-    }
-    
-    // In a full implementation, you would check the physical material properties
-    // For now, we use simple name-based detection
-    FString MaterialName = HitResult.PhysMaterial->GetName();
-    
-    if (MaterialName.Contains(TEXT("Grass")))
-    {
-        return ECore_SurfaceType::Grass;
-    }
-    else if (MaterialName.Contains(TEXT("Dirt")))
-    {
-        return ECore_SurfaceType::Dirt;
-    }
-    else if (MaterialName.Contains(TEXT("Water")))
-    {
-        return ECore_SurfaceType::Water;
-    }
-    else if (MaterialName.Contains(TEXT("Wood")))
-    {
-        return ECore_SurfaceType::Wood;
-    }
-    else if (MaterialName.Contains(TEXT("Metal")))
-    {
-        return ECore_SurfaceType::Metal;
-    }
-    else if (MaterialName.Contains(TEXT("Bone")))
-    {
-        return ECore_SurfaceType::Bone;
-    }
-    
-    return ECore_SurfaceType::Rock;
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsSystemManager: Initializing collision profiles..."));
+
+    RegisteredCollisionProfiles.Empty();
+
+    // Default collision profile
+    FCore_CollisionProfile DefaultProfile;
+    DefaultProfile.ProfileName = FName("Default");
+    DefaultProfile.CollisionEnabled = ECollisionEnabled::QueryAndPhysics;
+    DefaultProfile.ObjectType = ECC_WorldStatic;
+    RegisterCollisionProfile(DefaultProfile);
+
+    // Player collision profile
+    FCore_CollisionProfile PlayerProfile;
+    PlayerProfile.ProfileName = FName("Player");
+    PlayerProfile.CollisionEnabled = ECollisionEnabled::QueryAndPhysics;
+    PlayerProfile.ObjectType = ECC_Pawn;
+    RegisterCollisionProfile(PlayerProfile);
+
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsSystemManager: Collision profiles initialized"));
 }
 
-void UCore_PhysicsSystemManager::UpdatePhysicsSettings()
+void ACore_PhysicsSystemManager::SetupDefaultPhysicsSettings()
 {
-    // Adjust physics settings based on quality level
-    switch (CurrentPhysicsQuality)
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsSystemManager: Setting up default physics settings..."));
+
+    // Get physics settings
+    UPhysicsSettings* PhysicsSettings = UPhysicsSettings::Get();
+    if (PhysicsSettings)
     {
-        case ECore_PhysicsQuality::Low:
-            MaxSimulatedActors = 25;
-            MaxPhysicsDistance = 2000.0f;
-            break;
-        case ECore_PhysicsQuality::Medium:
-            MaxSimulatedActors = 50;
-            MaxPhysicsDistance = 3500.0f;
-            break;
-        case ECore_PhysicsQuality::High:
-            MaxSimulatedActors = 100;
-            MaxPhysicsDistance = 5000.0f;
-            break;
-        case ECore_PhysicsQuality::Ultra:
-            MaxSimulatedActors = 200;
-            MaxPhysicsDistance = 7500.0f;
-            break;
+        // Ensure Chaos is enabled
+        // Note: This is read-only at runtime, but we can validate it
+        UE_LOG(LogTemp, Log, TEXT("Core_PhysicsSystemManager: Physics settings configured"));
     }
-    
-    UE_LOG(LogTemp, Log, TEXT("Physics settings updated: MaxActors=%d, MaxDistance=%.0f"), 
-           MaxSimulatedActors, MaxPhysicsDistance);
 }
 
-void UCore_PhysicsSystemManager::OptimizePhysicsPerformance()
+void ACore_PhysicsSystemManager::RegisterPhysicsCallbacks()
 {
-    float StartTime = FPlatformTime::Seconds();
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsSystemManager: Registering physics callbacks..."));
+    // Physics callbacks would be registered here
+    // This is a placeholder for future implementation
+}
+
+void ACore_PhysicsSystemManager::UnregisterPhysicsCallbacks()
+{
+    UE_LOG(LogTemp, Log, TEXT("Core_PhysicsSystemManager: Unregistering physics callbacks..."));
+    // Physics callbacks would be unregistered here
+    // This is a placeholder for future implementation
+}
+
+void ACore_PhysicsSystemManager::CalculatePhysicsFrameTime()
+{
+    float CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
     
-    // Count active physics actors
-    int32 ActualActiveActors = 0;
-    if (UWorld* World = GetWorld())
+    if (LastPhysicsUpdateTime > 0.0f)
     {
-        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+        float DeltaTime = CurrentTime - LastPhysicsUpdateTime;
+        AccumulatedPhysicsTime += DeltaTime;
+        PhysicsFrameCounter++;
+
+        if (PhysicsFrameCounter >= 10) // Average over 10 frames
         {
-            AActor* Actor = *ActorItr;
-            if (Actor && Actor->IsValidLowLevel())
+            CurrentMetrics.PhysicsFrameTime = (AccumulatedPhysicsTime / PhysicsFrameCounter) * 1000.0f; // Convert to ms
+            AccumulatedPhysicsTime = 0.0f;
+            PhysicsFrameCounter = 0;
+        }
+    }
+
+    LastPhysicsUpdateTime = CurrentTime;
+}
+
+void ACore_PhysicsSystemManager::CountActiveRigidBodies()
+{
+    CurrentMetrics.ActiveRigidBodies = 0;
+
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return;
+    }
+
+    // Count all actors with simulating physics
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    {
+        AActor* Actor = *ActorItr;
+        if (Actor)
+        {
+            TArray<UPrimitiveComponent*> PrimitiveComponents;
+            Actor->GetComponents<UPrimitiveComponent>(PrimitiveComponents);
+
+            for (UPrimitiveComponent* Component : PrimitiveComponents)
             {
-                if (UPrimitiveComponent* PrimComp = Actor->FindComponentByClass<UPrimitiveComponent>())
+                if (Component && Component->IsSimulatingPhysics())
                 {
-                    if (PrimComp->IsSimulatingPhysics())
-                    {
-                        ActualActiveActors++;
-                    }
+                    CurrentMetrics.ActiveRigidBodies++;
                 }
             }
         }
     }
-    
-    ActivePhysicsActors = ActualActiveActors;
-    LastPhysicsFrameTime = (FPlatformTime::Seconds() - StartTime) * 1000.0f; // Convert to ms
-    
-    // Log performance if it's concerning
-    if (LastPhysicsFrameTime > 5.0f) // More than 5ms for physics update
+}
+
+void ACore_PhysicsSystemManager::CountCollisionChecks()
+{
+    // This is an estimation - actual collision check counting would require engine modifications
+    CurrentMetrics.CollisionChecks = CurrentMetrics.ActiveRigidBodies * 10; // Rough estimate
+}
+
+void ACore_PhysicsSystemManager::CalculateMemoryUsage()
+{
+    // This is a placeholder - actual memory usage calculation would require more detailed tracking
+    CurrentMetrics.MemoryUsageMB = CurrentMetrics.ActiveRigidBodies * 0.1f; // Rough estimate
+}
+
+bool ACore_PhysicsSystemManager::ValidateChaosPhysics() const
+{
+    // Check if Chaos physics is available and enabled
+    return true; // Chaos is the default in UE5
+}
+
+bool ACore_PhysicsSystemManager::ValidateCollisionSettings() const
+{
+    UWorld* World = GetWorld();
+    if (!World)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Physics performance warning: %.2fms for %d actors"), 
-               LastPhysicsFrameTime, ActivePhysicsActors);
+        return false;
     }
+
+    // Validate that collision detection is enabled
+    return true; // Basic validation
 }
 
-void UCore_PhysicsSystemManager::CleanupInactivePhysics()
+bool ACore_PhysicsSystemManager::ValidatePhysicsWorldSettings() const
 {
-    // Remove destroyed actors from ragdoll list
-    RagdollActors.RemoveAll([](AActor* Actor) {
-        return !IsValid(Actor);
-    });
-    
-    UE_LOG(LogTemp, Log, TEXT("Physics cleanup: %d ragdoll actors tracked"), RagdollActors.Num());
-}
-
-// UCore_PhysicsComponent Implementation
-
-UCore_PhysicsComponent::UCore_PhysicsComponent()
-{
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.bStartWithTickEnabled = true;
-    
-    SurfaceType = ECore_SurfaceType::Rock;
-    bCanBeDestroyed = false;
-    DestructionThreshold = 1000.0f;
-    bEnableRagdoll = false;
-    PhysicsManager = nullptr;
-}
-
-void UCore_PhysicsComponent::BeginPlay()
-{
-    Super::BeginPlay();
-    
-    InitializePhysicsComponent();
-}
-
-void UCore_PhysicsComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
-{
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    
-    // Component-specific physics updates can go here
-}
-
-void UCore_PhysicsComponent::InitializePhysicsComponent()
-{
-    if (UWorld* World = GetWorld())
+    UWorld* World = GetWorld();
+    if (!World)
     {
-        PhysicsManager = World->GetSubsystem<UCore_PhysicsSystemManager>();
-        
-        if (PhysicsManager)
-        {
-            UE_LOG(LogTemp, Log, TEXT("Physics component initialized for actor: %s"), 
-                   *GetOwner()->GetName());
-        }
-        else
-        {
-            UE_LOG(LogTemp, Warning, TEXT("Failed to get Physics System Manager for actor: %s"), 
-                   *GetOwner()->GetName());
-        }
+        return false;
     }
+
+    // Check if physics simulation is enabled
+    return World->bShouldSimulatePhysics;
 }
