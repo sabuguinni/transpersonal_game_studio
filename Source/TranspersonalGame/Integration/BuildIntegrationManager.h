@@ -1,197 +1,147 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/GameInstanceSubsystem.h"
 #include "Engine/World.h"
-#include "GameFramework/Actor.h"
-#include "Components/SceneComponent.h"
+#include "SharedTypes.h"
 #include "BuildIntegrationManager.generated.h"
 
 UENUM(BlueprintType)
-enum class EInteg_BuildStatus : uint8
+enum class EInteg_SystemStatus : uint8
 {
     Unknown     UMETA(DisplayName = "Unknown"),
-    Compiling   UMETA(DisplayName = "Compiling"),
-    Success     UMETA(DisplayName = "Success"),
-    Failed      UMETA(DisplayName = "Failed"),
-    Warning     UMETA(DisplayName = "Warning")
-};
-
-UENUM(BlueprintType)
-enum class EInteg_ModuleType : uint8
-{
-    Core        UMETA(DisplayName = "Core"),
-    WorldGen    UMETA(DisplayName = "World Generation"),
-    Character   UMETA(DisplayName = "Character"),
-    Audio       UMETA(DisplayName = "Audio"),
-    VFX         UMETA(DisplayName = "VFX"),
-    QA          UMETA(DisplayName = "QA"),
-    AI          UMETA(DisplayName = "AI"),
-    Combat      UMETA(DisplayName = "Combat")
+    Functional  UMETA(DisplayName = "Functional"),
+    Broken      UMETA(DisplayName = "Broken"),
+    Missing     UMETA(DisplayName = "Missing")
 };
 
 USTRUCT(BlueprintType)
-struct FInteg_ModuleStatus
+struct FInteg_SystemReport
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
-    EInteg_ModuleType ModuleType;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    FString SystemName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
-    EInteg_BuildStatus BuildStatus;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    EInteg_SystemStatus Status;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
-    FString ModuleName;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    FString ErrorMessage;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
-    FString LastError;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    float LastTestTime;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
-    float LastBuildTime;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
-    int32 ClassCount;
-
-    FInteg_ModuleStatus()
+    FInteg_SystemReport()
     {
-        ModuleType = EInteg_ModuleType::Core;
-        BuildStatus = EInteg_BuildStatus::Unknown;
-        ModuleName = TEXT("");
-        LastError = TEXT("");
-        LastBuildTime = 0.0f;
-        ClassCount = 0;
+        SystemName = TEXT("");
+        Status = EInteg_SystemStatus::Unknown;
+        ErrorMessage = TEXT("");
+        LastTestTime = 0.0f;
     }
 };
 
 USTRUCT(BlueprintType)
-struct FInteg_CrossModuleTest
+struct FInteg_BuildStatus
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
-    FString TestName;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    bool bCompilationSuccessful;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
-    TArray<EInteg_ModuleType> RequiredModules;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    int32 TotalSystems;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
-    bool bTestPassed;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    int32 FunctionalSystems;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
-    FString TestResult;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    int32 BrokenSystems;
 
-    FInteg_CrossModuleTest()
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    TArray<FInteg_SystemReport> SystemReports;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    float BuildTime;
+
+    FInteg_BuildStatus()
     {
-        TestName = TEXT("");
-        bTestPassed = false;
-        TestResult = TEXT("");
+        bCompilationSuccessful = false;
+        TotalSystems = 0;
+        FunctionalSystems = 0;
+        BrokenSystems = 0;
+        BuildTime = 0.0f;
     }
 };
 
 /**
- * Build Integration Manager - Orchestrates compilation and cross-module testing
- * Ensures all agent outputs integrate correctly into a playable build
+ * Build Integration Manager - Coordinates all game systems and validates integration
+ * Ensures all agent outputs work together cohesively
  */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API ABuildIntegrationManager : public AActor
+class TRANSPERSONALGAME_API UBuildIntegrationManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
-    ABuildIntegrationManager();
+    UBuildIntegrationManager();
+
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+
+    // Integration validation
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    FInteg_BuildStatus ValidateAllSystems();
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    bool TestSystemIntegration(const FString& SystemName);
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void RegisterSystem(const FString& SystemName, UObject* SystemObject);
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void UnregisterSystem(const FString& SystemName);
+
+    // Cross-system testing
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    bool TestVFXEnvironmentIntegration();
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    bool TestAudioCharacterIntegration();
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    bool TestAICombatIntegration();
+
+    // Build management
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void CreateBuildSnapshot();
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    bool RestoreBuildSnapshot(int32 SnapshotIndex);
+
+    // Getters
+    UFUNCTION(BlueprintPure, Category = "Integration")
+    FInteg_BuildStatus GetCurrentBuildStatus() const { return CurrentBuildStatus; }
+
+    UFUNCTION(BlueprintPure, Category = "Integration")
+    TArray<FString> GetRegisteredSystems() const;
 
 protected:
-    virtual void BeginPlay() override;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    FInteg_BuildStatus CurrentBuildStatus;
 
-public:
-    virtual void Tick(float DeltaTime) override;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    TMap<FString, TWeakObjectPtr<UObject>> RegisteredSystems;
 
-    // Module Status Tracking
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
-    TArray<FInteg_ModuleStatus> ModuleStatuses;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    TArray<FInteg_BuildStatus> BuildSnapshots;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
-    TArray<FInteg_CrossModuleTest> CrossModuleTests;
-
-    // Build Configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
-    bool bAutoValidateOnTick;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
-    float ValidationInterval;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
-    bool bEnableCrossModuleTesting;
-
-    // Integration Status
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Integration")
-    EInteg_BuildStatus OverallBuildStatus;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Integration")
-    int32 TotalModules;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Integration")
-    int32 SuccessfulModules;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Integration")
-    int32 FailedModules;
-
-    // Public Interface
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    void ValidateAllModules();
-
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    void ValidateModule(EInteg_ModuleType ModuleType);
-
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    void RunCrossModuleTests();
-
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool IsModuleReady(EInteg_ModuleType ModuleType) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    FInteg_ModuleStatus GetModuleStatus(EInteg_ModuleType ModuleType) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    void ResetIntegrationStatus();
-
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    void GenerateIntegrationReport();
-
-    // Editor Functions
-    UFUNCTION(CallInEditor, Category = "Integration")
-    void EditorValidateAllModules();
-
-    UFUNCTION(CallInEditor, Category = "Integration")
-    void EditorRunCrossModuleTests();
-
-    UFUNCTION(CallInEditor, Category = "Integration")
-    void EditorGenerateReport();
-
-protected:
-    // Internal Validation
-    void ValidateCharacterModule();
-    void ValidateWorldGenModule();
-    void ValidateAudioModule();
-    void ValidateVFXModule();
-    void ValidateQAModule();
-    void ValidateAIModule();
-    void ValidateCombatModule();
-
-    // Cross-Module Testing
-    void TestCharacterWorldGenIntegration();
-    void TestAudioVFXIntegration();
-    void TestQASystemIntegration();
-    void TestAICombatIntegration();
-
-    // Utility Functions
-    void UpdateModuleStatus(EInteg_ModuleType ModuleType, EInteg_BuildStatus Status, const FString& Error = TEXT(""));
-    void LogIntegrationStatus();
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    float LastValidationTime;
 
 private:
-    UPROPERTY()
-    USceneComponent* RootSceneComponent;
-
-    float LastValidationTime;
-    bool bValidationInProgress;
+    void ValidateSystemClass(const FString& SystemName, const FString& ClassPath, FInteg_SystemReport& OutReport);
+    void TestCrossSystemDependencies();
+    void LogIntegrationResults(const FInteg_BuildStatus& Status);
 };
