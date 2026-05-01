@@ -2,83 +2,14 @@
 
 #include "CoreMinimal.h"
 #include "Engine/World.h"
-#include "GameFramework/GameModeBase.h"
 #include "Subsystems/GameInstanceSubsystem.h"
+#include "SharedTypes.h"
 #include "BuildValidationManager.generated.h"
 
-UENUM(BlueprintType)
-enum class EBuild_ValidationStatus : uint8
-{
-    Unknown,
-    Validating,
-    Passed,
-    Failed,
-    Warning
-};
-
-USTRUCT(BlueprintType)
-struct FBuild_ValidationResult
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    FString TestName;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    EBuild_ValidationStatus Status;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    FString Message;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    float ExecutionTime;
-
-    FBuild_ValidationResult()
-    {
-        TestName = TEXT("");
-        Status = EBuild_ValidationStatus::Unknown;
-        Message = TEXT("");
-        ExecutionTime = 0.0f;
-    }
-};
-
-USTRUCT(BlueprintType)
-struct FBuild_SystemHealth
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly, Category = "Health")
-    int32 TotalActors;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Health")
-    int32 CharacterActors;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Health")
-    int32 DinosaurActors;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Health")
-    int32 EnvironmentActors;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Health")
-    bool bMinPlayableMapLoaded;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Health")
-    bool bCoreClassesLoaded;
-
-    FBuild_SystemHealth()
-    {
-        TotalActors = 0;
-        CharacterActors = 0;
-        DinosaurActors = 0;
-        EnvironmentActors = 0;
-        bMinPlayableMapLoaded = false;
-        bCoreClassesLoaded = false;
-    }
-};
-
 /**
- * Build Validation Manager - Validates system integrity and build health
- * Runs automated tests to ensure all systems are functional
+ * Build Validation Manager - Integration Agent #19
+ * Validates compilation, tests all agent systems, manages build integrity
+ * Ensures all 18 agent outputs integrate correctly into a playable game
  */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UBuildValidationManager : public UGameInstanceSubsystem
@@ -88,57 +19,129 @@ class TRANSPERSONALGAME_API UBuildValidationManager : public UGameInstanceSubsys
 public:
     UBuildValidationManager();
 
-    // USubsystem interface
+    // Subsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
+    // Build validation functions
     UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    void RunFullValidation();
-
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    void RunQuickValidation();
+    bool ValidateAllSystems();
 
     UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    FBuild_SystemHealth GetSystemHealth() const;
+    bool ValidateCompilation();
 
     UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    TArray<FBuild_ValidationResult> GetValidationResults() const;
+    bool ValidateAgentOutputs();
 
     UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    bool IsSystemHealthy() const;
+    bool CleanDuplicateActors();
 
-    UFUNCTION(BlueprintCallable, Category = "Build Validation", CallInEditor = true)
-    void ValidateCurrentLevel();
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    FString GenerateBuildReport();
 
-    UFUNCTION(BlueprintCallable, Category = "Build Validation", CallInEditor = true)
-    void ValidateCoreClasses();
+    // System validation functions
+    UFUNCTION(BlueprintCallable, Category = "System Validation")
+    bool ValidateCharacterSystem();
 
-    UFUNCTION(BlueprintCallable, Category = "Build Validation", CallInEditor = true)
-    void GenerateHealthReport();
+    UFUNCTION(BlueprintCallable, Category = "System Validation")
+    bool ValidateDinosaurSystem();
 
-protected:
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    TArray<FBuild_ValidationResult> ValidationResults;
+    UFUNCTION(BlueprintCallable, Category = "System Validation")
+    bool ValidateEnvironmentSystem();
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    FBuild_SystemHealth CurrentSystemHealth;
+    UFUNCTION(BlueprintCallable, Category = "System Validation")
+    bool ValidateAudioSystem();
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    bool bValidationInProgress;
+    UFUNCTION(BlueprintCallable, Category = "System Validation")
+    bool ValidateVFXSystem();
 
-    // Validation functions
-    void ValidateActorCounts();
-    void ValidateCharacterSystem();
-    void ValidateDinosaurSystem();
-    void ValidateEnvironmentSystem();
-    void ValidateGameModeSystem();
-    void ValidatePhysicsSystem();
+    UFUNCTION(BlueprintCallable, Category = "System Validation")
+    bool ValidateAISystem();
 
-    // Helper functions
-    void AddValidationResult(const FString& TestName, EBuild_ValidationStatus Status, const FString& Message, float ExecutionTime = 0.0f);
-    void ClearValidationResults();
-    void UpdateSystemHealth();
+    UFUNCTION(BlueprintCallable, Category = "System Validation")
+    bool ValidateQuestSystem();
+
+    UFUNCTION(BlueprintCallable, Category = "System Validation")
+    bool ValidateWorldGeneration();
+
+    // Actor management
+    UFUNCTION(BlueprintCallable, Category = "Actor Management")
+    int32 CountActorsByType(const FString& ActorTypeName);
+
+    UFUNCTION(BlueprintCallable, Category = "Actor Management")
+    TArray<AActor*> GetActorsByType(const FString& ActorTypeName);
+
+    UFUNCTION(BlueprintCallable, Category = "Actor Management")
+    bool RemoveDuplicateActors(const FString& ActorTypeName, int32 MaxAllowed = 1);
+
+    // Build status properties
+    UPROPERTY(BlueprintReadOnly, Category = "Build Status")
+    bool bCompilationValid;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Build Status")
+    bool bAllSystemsValid;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Build Status")
+    int32 TotalActorCount;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Build Status")
+    int32 DuplicateActorsRemoved;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Build Status")
+    FString LastValidationTime;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Build Status")
+    TArray<FString> ValidationErrors;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Build Status")
+    TArray<FString> ValidationWarnings;
+
+    // System status tracking
+    UPROPERTY(BlueprintReadOnly, Category = "System Status")
+    bool bCharacterSystemValid;
+
+    UPROPERTY(BlueprintReadOnly, Category = "System Status")
+    bool bDinosaurSystemValid;
+
+    UPROPERTY(BlueprintReadOnly, Category = "System Status")
+    bool bEnvironmentSystemValid;
+
+    UPROPERTY(BlueprintReadOnly, Category = "System Status")
+    bool bAudioSystemValid;
+
+    UPROPERTY(BlueprintReadOnly, Category = "System Status")
+    bool bVFXSystemValid;
+
+    UPROPERTY(BlueprintReadOnly, Category = "System Status")
+    bool bAISystemValid;
+
+    UPROPERTY(BlueprintReadOnly, Category = "System Status")
+    bool bQuestSystemValid;
+
+    UPROPERTY(BlueprintReadOnly, Category = "System Status")
+    bool bWorldGenerationValid;
 
 private:
-    float ValidationStartTime;
+    // Internal validation helpers
+    void LogValidationResult(const FString& SystemName, bool bValid);
+    void AddValidationError(const FString& ErrorMessage);
+    void AddValidationWarning(const FString& WarningMessage);
+    void ClearValidationMessages();
+
+    // Actor counting and management
+    TMap<FString, int32> ActorCounts;
+    void UpdateActorCounts();
+    bool IsActorTypeAllowed(const FString& ActorTypeName);
+
+    // Build integrity checks
+    bool CheckModuleDependencies();
+    bool CheckClassRegistration();
+    bool CheckAssetIntegrity();
+
+    // Validation timer
+    FTimerHandle ValidationTimerHandle;
+    void PeriodicValidation();
+
+    UPROPERTY()
+    float ValidationInterval;
 };
