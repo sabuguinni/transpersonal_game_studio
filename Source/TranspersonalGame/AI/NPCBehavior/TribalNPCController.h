@@ -5,142 +5,259 @@
 #include "BehaviorTree/BehaviorTreeComponent.h"
 #include "BehaviorTree/BlackboardComponent.h"
 #include "Perception/AIPerceptionComponent.h"
-#include "Perception/AISenseConfig_Sight.h"
-#include "Perception/AISenseConfig_Hearing.h"
-#include "../SharedTypes.h"
+#include "Perception/AISightConfig.h"
+#include "Perception/AIHearingConfig.h"
+#include "../NPCBehaviorTypes.h"
 #include "TribalNPCController.generated.h"
 
-class UBehaviorTree;
-class UBlackboardData;
+class UNPC_TribalNPC;
+class UNPC_SurvivalNeedsComponent;
+class UNPC_SocialBehaviorComponent;
+
+UENUM(BlueprintType)
+enum class ENPC_TribalRole : uint8
+{
+    Hunter      UMETA(DisplayName = "Hunter"),
+    Gatherer    UMETA(DisplayName = "Gatherer"),
+    Elder       UMETA(DisplayName = "Elder"),
+    Scout       UMETA(DisplayName = "Scout"),
+    Child       UMETA(DisplayName = "Child"),
+    Crafter     UMETA(DisplayName = "Crafter")
+};
+
+UENUM(BlueprintType)
+enum class ENPC_TribalBehaviorState : uint8
+{
+    Idle            UMETA(DisplayName = "Idle"),
+    Patrolling      UMETA(DisplayName = "Patrolling"),
+    Foraging        UMETA(DisplayName = "Foraging"),
+    Hunting         UMETA(DisplayName = "Hunting"),
+    Fleeing         UMETA(DisplayName = "Fleeing"),
+    Socializing     UMETA(DisplayName = "Socializing"),
+    Resting         UMETA(DisplayName = "Resting"),
+    Crafting        UMETA(DisplayName = "Crafting"),
+    AlertToThreat   UMETA(DisplayName = "Alert to Threat")
+};
+
+USTRUCT(BlueprintType)
+struct FNPC_TribalPersonality
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Courage = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Sociability = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Curiosity = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Aggression = 0.3f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Personality", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Intelligence = 0.5f;
+
+    FNPC_TribalPersonality()
+    {
+        Courage = 0.5f;
+        Sociability = 0.5f;
+        Curiosity = 0.5f;
+        Aggression = 0.3f;
+        Intelligence = 0.5f;
+    }
+};
+
+USTRUCT(BlueprintType)
+struct FNPC_ThreatMemory
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Threat")
+    AActor* ThreatActor = nullptr;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Threat")
+    FVector LastKnownLocation = FVector::ZeroVector;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Threat")
+    float ThreatLevel = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Threat")
+    float TimeSinceLastSeen = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Threat")
+    bool bIsActiveThreat = false;
+
+    FNPC_ThreatMemory()
+    {
+        ThreatActor = nullptr;
+        LastKnownLocation = FVector::ZeroVector;
+        ThreatLevel = 0.0f;
+        TimeSinceLastSeen = 0.0f;
+        bIsActiveThreat = false;
+    }
+};
 
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API ATribalNPCController : public AAIController
+class TRANSPERSONALGAME_API ANPC_TribalNPCController : public AAIController
 {
     GENERATED_BODY()
 
 public:
-    ATribalNPCController();
+    ANPC_TribalNPCController();
 
 protected:
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
-
-    // AI Behavior
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI")
-    UBehaviorTree* BehaviorTree;
-
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI")
-    UBlackboardData* BlackboardAsset;
+    virtual void OnPossess(APawn* InPawn) override;
 
     // AI Perception
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI")
-    UAIPerceptionComponent* AIPerceptionComponent;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI Perception")
+    class UAIPerceptionComponent* AIPerceptionComponent;
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI")
-    UAISenseConfig_Sight* SightConfig;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI Perception")
+    class UAISightConfig* SightConfig;
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI")
-    UAISenseConfig_Hearing* HearingConfig;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI Perception")
+    class UAIHearingConfig* HearingConfig;
 
-    // Tribal Behavior Properties
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Behavior")
-    ENPC_TribalRole TribalRole;
+    // Behavior Tree
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI Behavior")
+    class UBehaviorTree* TribalBehaviorTree;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Behavior")
-    float FearLevel;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI Behavior")
+    class UBehaviorTreeComponent* BehaviorTreeComponent;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Behavior")
-    float CourageLevel;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI Behavior")
+    class UBlackboardComponent* BlackboardComponent;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Behavior")
-    float SocialBondStrength;
+    // NPC Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Config")
+    ENPC_TribalRole TribalRole = ENPC_TribalRole::Hunter;
 
-    // Survival Instincts
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
-    float HungerLevel;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Config")
+    FNPC_TribalPersonality Personality;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
-    float ThirstLevel;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Config")
+    float SightRadius = 1500.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
-    float EnergyLevel;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Config")
+    float HearingRadius = 800.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
-    float HealthLevel;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Config")
+    float PatrolRadius = 1000.0f;
 
-    // Patrol and Territory
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory")
-    TArray<FVector> PatrolPoints;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC Config")
+    float FleeDistance = 2000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory")
-    float TerritoryRadius;
+    // Current State
+    UPROPERTY(BlueprintReadOnly, Category = "Current State")
+    ENPC_TribalBehaviorState CurrentBehaviorState = ENPC_TribalBehaviorState::Idle;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory")
-    FVector HomeLocation;
+    UPROPERTY(BlueprintReadOnly, Category = "Current State")
+    FVector HomeLocation = FVector::ZeroVector;
 
-    // Threat Detection
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Threat Detection")
-    float DinosaurDetectionRange;
+    UPROPERTY(BlueprintReadOnly, Category = "Current State")
+    TArray<FNPC_ThreatMemory> ThreatMemories;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Threat Detection")
-    float PlayerDetectionRange;
+    UPROPERTY(BlueprintReadOnly, Category = "Current State")
+    AActor* CurrentTarget = nullptr;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Threat Detection")
-    float ThreatResponseTime;
+    UPROPERTY(BlueprintReadOnly, Category = "Current State")
+    float CurrentFearLevel = 0.0f;
+
+    // Timing
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Timing")
+    float StateUpdateInterval = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Timing")
+    float ThreatMemoryDuration = 30.0f;
+
+    float LastStateUpdateTime = 0.0f;
 
 public:
-    // AI Behavior Functions
-    UFUNCTION(BlueprintCallable, Category = "AI")
-    void StartBehaviorTree();
+    // Behavior State Management
+    UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
+    void SetBehaviorState(ENPC_TribalBehaviorState NewState);
 
-    UFUNCTION(BlueprintCallable, Category = "AI")
-    void StopBehaviorTree();
+    UFUNCTION(BlueprintPure, Category = "NPC Behavior")
+    ENPC_TribalBehaviorState GetCurrentBehaviorState() const { return CurrentBehaviorState; }
 
-    UFUNCTION(BlueprintCallable, Category = "AI")
-    void SetTribalRole(ENPC_TribalRole NewRole);
+    UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
+    void UpdateBehaviorState();
 
-    // Survival Functions
-    UFUNCTION(BlueprintCallable, Category = "Survival")
-    void UpdateSurvivalNeeds(float DeltaTime);
+    // Threat Management
+    UFUNCTION(BlueprintCallable, Category = "Threat Management")
+    void RegisterThreat(AActor* ThreatActor, float ThreatLevel);
 
-    UFUNCTION(BlueprintCallable, Category = "Survival")
-    bool IsInDanger() const;
+    UFUNCTION(BlueprintCallable, Category = "Threat Management")
+    void UpdateThreatMemories(float DeltaTime);
 
-    UFUNCTION(BlueprintCallable, Category = "Survival")
-    void ReactToThreat(AActor* ThreatActor);
+    UFUNCTION(BlueprintPure, Category = "Threat Management")
+    bool HasActiveThreat() const;
 
-    // Social Functions
-    UFUNCTION(BlueprintCallable, Category = "Social")
+    UFUNCTION(BlueprintPure, Category = "Threat Management")
+    AActor* GetNearestThreat() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Threat Management")
+    void ClearThreatMemory(AActor* ThreatActor);
+
+    // Role-Specific Behavior
+    UFUNCTION(BlueprintCallable, Category = "Role Behavior")
+    void ExecuteRoleSpecificBehavior();
+
+    UFUNCTION(BlueprintCallable, Category = "Role Behavior")
+    bool ShouldFleeFromThreat(AActor* ThreatActor) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Role Behavior")
+    FVector GetOptimalFleeDirection(AActor* ThreatActor) const;
+
+    // Social Behavior
+    UFUNCTION(BlueprintCallable, Category = "Social Behavior")
     void CallForHelp();
 
-    UFUNCTION(BlueprintCallable, Category = "Social")
-    void RespondToDistressCall(ATribalNPCController* CallingNPC);
+    UFUNCTION(BlueprintCallable, Category = "Social Behavior")
+    void RespondToDistressCall(AActor* CallingNPC);
 
-    // Patrol Functions
-    UFUNCTION(BlueprintCallable, Category = "Patrol")
-    void SetPatrolPoints(const TArray<FVector>& NewPatrolPoints);
+    UFUNCTION(BlueprintPure, Category = "Social Behavior")
+    TArray<ANPC_TribalNPCController*> GetNearbyTribalNPCs(float SearchRadius = 1000.0f) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Patrol")
-    FVector GetNextPatrolPoint();
+    // Utility Functions
+    UFUNCTION(BlueprintPure, Category = "Utility")
+    float CalculateFearLevel() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Patrol")
-    void ReturnToHome();
+    UFUNCTION(BlueprintPure, Category = "Utility")
+    bool IsInHomeTerritory() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Utility")
+    void SetHomeLocation(const FVector& NewHomeLocation);
 
 protected:
-    // Perception Events
+    // AI Perception Callbacks
     UFUNCTION()
     void OnPerceptionUpdated(const TArray<AActor*>& UpdatedActors);
 
-    // Internal State
-    int32 CurrentPatrolIndex;
-    float LastThreatTime;
-    AActor* CurrentThreat;
-    bool bIsAlarmed;
-    bool bIsReturningHome;
+    UFUNCTION()
+    void OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus);
 
-private:
+    // Internal Behavior Logic
     void InitializeAIPerception();
+    void InitializeBehaviorTree();
     void UpdateBlackboardValues();
-    void ProcessThreatDetection();
-    void HandleRoleSpecificBehavior();
+    
+    bool IsDinosaur(AActor* Actor) const;
+    bool IsPlayer(AActor* Actor) const;
+    bool IsHostileNPC(AActor* Actor) const;
+    
+    float CalculateThreatLevel(AActor* ThreatActor) const;
+    void ProcessThreatDetection(AActor* DetectedActor);
+    
+    // Role-specific behavior implementations
+    void ExecuteHunterBehavior();
+    void ExecuteGathererBehavior();
+    void ExecuteElderBehavior();
+    void ExecuteScoutBehavior();
+    void ExecuteChildBehavior();
+    void ExecuteCrafterBehavior();
 };
