@@ -2,9 +2,9 @@
 
 #include "CoreMinimal.h"
 #include "Engine/World.h"
-#include "GameFramework/Actor.h"
+#include "GameFramework/GameModeBase.h"
 #include "Components/ActorComponent.h"
-#include "SharedTypes.h"
+#include "Engine/Engine.h"
 #include "Dir_ProductionManager.generated.h"
 
 /**
@@ -13,112 +13,112 @@
 UENUM(BlueprintType)
 enum class EDir_ProductionMilestone : uint8
 {
-    None                    UMETA(DisplayName = "None"),
-    CharacterMovement       UMETA(DisplayName = "Character Movement"),
-    DinosaurSpawning        UMETA(DisplayName = "Dinosaur Spawning"),
-    SurvivalHUD            UMETA(DisplayName = "Survival HUD"),
-    TerrainGeneration      UMETA(DisplayName = "Terrain Generation"),
-    BiomeSystem            UMETA(DisplayName = "Biome System"),
-    CombatSystem           UMETA(DisplayName = "Combat System"),
-    AudioSystem            UMETA(DisplayName = "Audio System"),
-    PlayablePrototype      UMETA(DisplayName = "Playable Prototype")
+    None = 0,
+    Milestone1_Playable,     // Player can walk around with visible dinosaurs
+    Milestone2_Survival,     // Basic survival mechanics functional  
+    Milestone3_AI,           // Dinosaur AI and behavior systems
+    Milestone4_World,        // Complete world generation and biomes
+    Milestone5_Polish        // Final polish and optimization
 };
 
 /**
- * Agent coordination status for production pipeline
+ * Agent execution priority levels
  */
 UENUM(BlueprintType)
-enum class EDir_AgentStatus : uint8
+enum class EDir_AgentPriority : uint8
 {
-    Idle                    UMETA(DisplayName = "Idle"),
-    Active                  UMETA(DisplayName = "Active"),
-    Blocked                 UMETA(DisplayName = "Blocked"),
-    Complete                UMETA(DisplayName = "Complete"),
-    Error                   UMETA(DisplayName = "Error")
+    Critical = 0,    // Must complete before any other agent
+    High = 1,        // High priority, blocks dependent agents
+    Medium = 2,      // Normal priority
+    Low = 3,         // Can be deferred if needed
+    Maintenance = 4  // Background tasks only
 };
 
 /**
- * Production metrics data structure
+ * Production task status tracking
  */
 USTRUCT(BlueprintType)
-struct FDir_ProductionMetrics
+struct FDir_ProductionTask
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
-    int32 TotalCppFiles = 0;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
-    int32 TotalHeaderFiles = 0;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
-    int32 ImplementedModules = 0;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
-    int32 ActiveAgents = 0;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
-    int32 CompletedMilestones = 0;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
-    float ProductionEfficiency = 0.0f;
-
-    FDir_ProductionMetrics()
-    {
-        TotalCppFiles = 0;
-        TotalHeaderFiles = 0;
-        ImplementedModules = 0;
-        ActiveAgents = 0;
-        CompletedMilestones = 0;
-        ProductionEfficiency = 0.0f;
-    }
-};
-
-/**
- * Agent task definition for production coordination
- */
-USTRUCT(BlueprintType)
-struct FDir_AgentTask
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
     FString AgentName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
-    int32 Priority = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
+    FString TaskDescription;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
-    FString CurrentTask;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
     FString ExpectedDeliverable;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
-    EDir_AgentStatus Status = EDir_AgentStatus::Idle;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
+    EDir_AgentPriority Priority;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
-    TArray<FString> Dependencies;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
+    bool bIsCompleted;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent")
-    float EstimatedCompletionTime = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
+    bool bIsBlocked;
 
-    FDir_AgentTask()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
+    FString BlockerReason;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
+    float EstimatedCycles;
+
+    FDir_ProductionTask()
     {
         AgentName = TEXT("");
-        Priority = 0;
-        CurrentTask = TEXT("");
+        TaskDescription = TEXT("");
         ExpectedDeliverable = TEXT("");
-        Status = EDir_AgentStatus::Idle;
-        EstimatedCompletionTime = 0.0f;
+        Priority = EDir_AgentPriority::Medium;
+        bIsCompleted = false;
+        bIsBlocked = false;
+        BlockerReason = TEXT("");
+        EstimatedCycles = 1.0f;
     }
 };
 
 /**
- * Production Manager Component - Coordinates agent tasks and tracks development milestones
- * Attached to GameMode to provide centralized production oversight
+ * Milestone progress tracking
  */
-UCLASS(ClassGroup=(TranspersonalGame), meta=(BlueprintSpawnableComponent))
+USTRUCT(BlueprintType)
+struct FDir_MilestoneProgress
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
+    EDir_ProductionMilestone Milestone;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
+    FString Description;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
+    TArray<FString> RequiredDeliverables;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
+    TArray<FString> CompletedDeliverables;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
+    float ProgressPercentage;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
+    bool bIsCompleted;
+
+    FDir_MilestoneProgress()
+    {
+        Milestone = EDir_ProductionMilestone::None;
+        Description = TEXT("");
+        ProgressPercentage = 0.0f;
+        bIsCompleted = false;
+    }
+};
+
+/**
+ * Studio Director's Production Management System
+ * Coordinates agent tasks, tracks milestones, and manages production pipeline
+ */
+UCLASS(BlueprintType, Blueprintable, ClassGroup=(TranspersonalGame))
 class TRANSPERSONALGAME_API UDir_ProductionManager : public UActorComponent
 {
     GENERATED_BODY()
@@ -132,70 +132,92 @@ protected:
 public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // Production Metrics
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production Metrics")
-    FDir_ProductionMetrics CurrentMetrics;
+    // Production Management Functions
+    UFUNCTION(BlueprintCallable, Category = "Production Management")
+    void InitializeProductionCycle(const FString& CycleID);
+
+    UFUNCTION(BlueprintCallable, Category = "Production Management")
+    void AddProductionTask(const FDir_ProductionTask& Task);
+
+    UFUNCTION(BlueprintCallable, Category = "Production Management")
+    void CompleteTask(const FString& AgentName, const FString& DeliverableDescription);
+
+    UFUNCTION(BlueprintCallable, Category = "Production Management")
+    void BlockTask(const FString& AgentName, const FString& BlockerReason);
+
+    UFUNCTION(BlueprintCallable, Category = "Production Management")
+    void UnblockTask(const FString& AgentName);
+
+    // Milestone Management
+    UFUNCTION(BlueprintCallable, Category = "Milestone Management")
+    void SetCurrentMilestone(EDir_ProductionMilestone NewMilestone);
+
+    UFUNCTION(BlueprintCallable, Category = "Milestone Management")
+    void UpdateMilestoneProgress();
+
+    UFUNCTION(BlueprintCallable, Category = "Milestone Management")
+    float GetMilestoneProgress(EDir_ProductionMilestone Milestone) const;
+
+    // Production Assessment
+    UFUNCTION(BlueprintCallable, Category = "Production Assessment")
+    void AssessCurrentProductionState();
+
+    UFUNCTION(BlueprintCallable, Category = "Production Assessment")
+    TArray<FDir_ProductionTask> GetBlockedTasks() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Production Assessment")
+    TArray<FDir_ProductionTask> GetHighPriorityTasks() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Production Assessment")
+    int32 GetCompletedTaskCount() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Production Assessment")
+    int32 GetTotalTaskCount() const;
 
     // Agent Coordination
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Coordination")
-    TArray<FDir_AgentTask> AgentTasks;
+    UFUNCTION(BlueprintCallable, Category = "Agent Coordination")
+    FString GetNextAgentToExecute() const;
 
-    // Milestone Tracking
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestones")
-    TArray<EDir_ProductionMilestone> CompletedMilestones;
+    UFUNCTION(BlueprintCallable, Category = "Agent Coordination")
+    bool CanAgentExecute(const FString& AgentName) const;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestones")
-    EDir_ProductionMilestone CurrentTargetMilestone = EDir_ProductionMilestone::CharacterMovement;
+    UFUNCTION(BlueprintCallable, Category = "Agent Coordination")
+    void GenerateAgentCoordinationReport();
 
-    // Production Settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    float MetricsUpdateInterval = 5.0f;
+    // Production Metrics
+    UFUNCTION(BlueprintCallable, Category = "Production Metrics")
+    void LogProductionMetrics();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    bool bEnableDebugLogging = true;
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Production Management")
+    void InitializeMilestone1Tasks();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    bool bAutoTrackProgress = true;
+protected:
+    // Current production state
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production State")
+    FString CurrentCycleID;
 
-    // Public Functions
-    UFUNCTION(BlueprintCallable, Category = "Production Management")
-    void UpdateProductionMetrics();
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production State")
+    EDir_ProductionMilestone CurrentMilestone;
 
-    UFUNCTION(BlueprintCallable, Category = "Production Management")
-    void RegisterAgentTask(const FDir_AgentTask& NewTask);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production State")
+    TArray<FDir_ProductionTask> ProductionTasks;
 
-    UFUNCTION(BlueprintCallable, Category = "Production Management")
-    void UpdateAgentStatus(const FString& AgentName, EDir_AgentStatus NewStatus);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production State")
+    TArray<FDir_MilestoneProgress> MilestoneProgress;
 
-    UFUNCTION(BlueprintCallable, Category = "Production Management")
-    void CompleteMilestone(EDir_ProductionMilestone Milestone);
+    // Production metrics
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production Metrics")
+    float CycleStartTime;
 
-    UFUNCTION(BlueprintCallable, Category = "Production Management")
-    bool IsMilestoneComplete(EDir_ProductionMilestone Milestone) const;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production Metrics")
+    int32 TasksCompletedThisCycle;
 
-    UFUNCTION(BlueprintCallable, Category = "Production Management")
-    float GetProductionEfficiency() const;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production Metrics")
+    int32 BlockersEncountered;
 
-    UFUNCTION(BlueprintCallable, Category = "Production Management")
-    TArray<FDir_AgentTask> GetActiveAgentTasks() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Production Management")
-    void GenerateProductionReport();
-
-    UFUNCTION(BlueprintCallable, Category = "Production Management", CallInEditor)
-    void ScanLevelForAssets();
-
-    UFUNCTION(BlueprintCallable, Category = "Production Management", CallInEditor)
-    void ValidateModuleImplementations();
-
-private:
-    // Internal tracking
-    float LastMetricsUpdate = 0.0f;
-    int32 CycleCount = 0;
-
-    // Helper functions
-    void InitializeAgentTasks();
-    void CalculateProductionEfficiency();
-    void LogProductionStatus();
-    bool ValidateAgentDependencies(const FDir_AgentTask& Task) const;
+    // Internal functions
+    void InitializeMilestoneData();
+    void UpdateTaskDependencies();
+    FDir_MilestoneProgress* FindMilestoneProgress(EDir_ProductionMilestone Milestone);
+    bool AreTaskDependenciesMet(const FDir_ProductionTask& Task) const;
 };
