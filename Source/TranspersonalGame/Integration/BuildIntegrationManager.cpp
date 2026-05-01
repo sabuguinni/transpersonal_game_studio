@@ -1,522 +1,293 @@
 #include "BuildIntegrationManager.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "UObject/ConstructorHelpers.h"
-#include "Components/SceneComponent.h"
+#include "Engine/Engine.h"
+#include "UObject/UObjectGlobals.h"
+#include "Kismet/GameplayStatics.h"
+#include "Engine/GameInstance.h"
 
-ABuildIntegrationManager::ABuildIntegrationManager()
+UBuildIntegrationManager::UBuildIntegrationManager()
 {
-    PrimaryActorTick.bCanEverTick = true;
-
-    // Create root component
-    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
-    RootComponent = RootSceneComponent;
-
-    // Initialize configuration
-    bAutoValidateOnTick = true;
-    ValidationInterval = 30.0f; // Validate every 30 seconds
-    bEnableCrossModuleTesting = true;
-
-    // Initialize status
-    OverallBuildStatus = EInteg_BuildStatus::Unknown;
-    TotalModules = 0;
-    SuccessfulModules = 0;
-    FailedModules = 0;
-
-    // Initialize internal state
     LastValidationTime = 0.0f;
-    bValidationInProgress = false;
-
-    // Initialize module statuses
-    ModuleStatuses.Empty();
-    
-    // Add core modules
-    FInteg_ModuleStatus CoreModule;
-    CoreModule.ModuleType = EInteg_ModuleType::Core;
-    CoreModule.ModuleName = TEXT("TranspersonalGame Core");
-    ModuleStatuses.Add(CoreModule);
-
-    FInteg_ModuleStatus WorldGenModule;
-    WorldGenModule.ModuleType = EInteg_ModuleType::WorldGen;
-    WorldGenModule.ModuleName = TEXT("World Generation");
-    ModuleStatuses.Add(WorldGenModule);
-
-    FInteg_ModuleStatus CharacterModule;
-    CharacterModule.ModuleType = EInteg_ModuleType::Character;
-    CharacterModule.ModuleName = TEXT("Character System");
-    ModuleStatuses.Add(CharacterModule);
-
-    FInteg_ModuleStatus AudioModule;
-    AudioModule.ModuleType = EInteg_ModuleType::Audio;
-    AudioModule.ModuleName = TEXT("Audio System");
-    ModuleStatuses.Add(AudioModule);
-
-    FInteg_ModuleStatus VFXModule;
-    VFXModule.ModuleType = EInteg_ModuleType::VFX;
-    VFXModule.ModuleName = TEXT("VFX System");
-    ModuleStatuses.Add(VFXModule);
-
-    FInteg_ModuleStatus QAModule;
-    QAModule.ModuleType = EInteg_ModuleType::QA;
-    QAModule.ModuleName = TEXT("QA System");
-    ModuleStatuses.Add(QAModule);
-
-    TotalModules = ModuleStatuses.Num();
-
-    // Initialize cross-module tests
-    CrossModuleTests.Empty();
-
-    FInteg_CrossModuleTest CharWorldTest;
-    CharWorldTest.TestName = TEXT("Character-WorldGen Integration");
-    CharWorldTest.RequiredModules.Add(EInteg_ModuleType::Character);
-    CharWorldTest.RequiredModules.Add(EInteg_ModuleType::WorldGen);
-    CrossModuleTests.Add(CharWorldTest);
-
-    FInteg_CrossModuleTest AudioVFXTest;
-    AudioVFXTest.TestName = TEXT("Audio-VFX Integration");
-    AudioVFXTest.RequiredModules.Add(EInteg_ModuleType::Audio);
-    AudioVFXTest.RequiredModules.Add(EInteg_ModuleType::VFX);
-    CrossModuleTests.Add(AudioVFXTest);
-
-    FInteg_CrossModuleTest QASystemTest;
-    QASystemTest.TestName = TEXT("QA System Integration");
-    QASystemTest.RequiredModules.Add(EInteg_ModuleType::QA);
-    QASystemTest.RequiredModules.Add(EInteg_ModuleType::Core);
-    CrossModuleTests.Add(QASystemTest);
 }
 
-void ABuildIntegrationManager::BeginPlay()
+void UBuildIntegrationManager::Initialize(FSubsystemCollectionBase& Collection)
 {
-    Super::BeginPlay();
-
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Starting integration validation"));
+    Super::Initialize(Collection);
     
-    // Initial validation
-    ValidateAllModules();
+    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Initializing integration system"));
     
-    if (bEnableCrossModuleTesting)
-    {
-        RunCrossModuleTests();
-    }
+    // Initialize build status
+    CurrentBuildStatus = FInteg_BuildStatus();
+    CurrentBuildStatus.bCompilationSuccessful = true;
+    
+    // Register core systems
+    RegisterSystem(TEXT("Core"), this);
+    RegisterSystem(TEXT("Integration"), this);
+    
+    // Perform initial validation
+    ValidateAllSystems();
 }
 
-void ABuildIntegrationManager::Tick(float DeltaTime)
+void UBuildIntegrationManager::Deinitialize()
 {
-    Super::Tick(DeltaTime);
+    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Shutting down integration system"));
+    
+    RegisteredSystems.Empty();
+    BuildSnapshots.Empty();
+    
+    Super::Deinitialize();
+}
 
-    if (bAutoValidateOnTick && !bValidationInProgress)
+FInteg_BuildStatus UBuildIntegrationManager::ValidateAllSystems()
+{
+    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Starting system validation"));
+    
+    CurrentBuildStatus = FInteg_BuildStatus();
+    CurrentBuildStatus.SystemReports.Empty();
+    
+    // List of systems to validate
+    TArray<TPair<FString, FString>> SystemsToValidate = {
+        {TEXT("Core"), TEXT("/Script/TranspersonalGame.TranspersonalCharacter")},
+        {TEXT("GameMode"), TEXT("/Script/TranspersonalGame.TranspersonalGameMode")},
+        {TEXT("GameState"), TEXT("/Script/TranspersonalGame.TranspersonalGameState")},
+        {TEXT("VFX"), TEXT("/Script/TranspersonalGame.VFXManager")},
+        {TEXT("Audio"), TEXT("/Script/TranspersonalGame.AudioManager")},
+        {TEXT("QA"), TEXT("/Script/TranspersonalGame.QATestManager")},
+        {TEXT("Integration"), TEXT("/Script/TranspersonalGame.BuildIntegrationManager")}
+    };
+    
+    for (const auto& SystemPair : SystemsToValidate)
     {
-        LastValidationTime += DeltaTime;
+        FInteg_SystemReport Report;
+        ValidateSystemClass(SystemPair.Key, SystemPair.Value, Report);
+        CurrentBuildStatus.SystemReports.Add(Report);
         
-        if (LastValidationTime >= ValidationInterval)
+        if (Report.Status == EInteg_SystemStatus::Functional)
         {
-            ValidateAllModules();
-            LastValidationTime = 0.0f;
-        }
-    }
-}
-
-void ABuildIntegrationManager::ValidateAllModules()
-{
-    if (bValidationInProgress)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Validation already in progress"));
-        return;
-    }
-
-    bValidationInProgress = true;
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Starting module validation"));
-
-    SuccessfulModules = 0;
-    FailedModules = 0;
-
-    // Validate each module
-    for (FInteg_ModuleStatus& ModuleStatus : ModuleStatuses)
-    {
-        ValidateModule(ModuleStatus.ModuleType);
-    }
-
-    // Update overall status
-    if (FailedModules == 0)
-    {
-        OverallBuildStatus = EInteg_BuildStatus::Success;
-    }
-    else if (SuccessfulModules > 0)
-    {
-        OverallBuildStatus = EInteg_BuildStatus::Warning;
-    }
-    else
-    {
-        OverallBuildStatus = EInteg_BuildStatus::Failed;
-    }
-
-    LogIntegrationStatus();
-    bValidationInProgress = false;
-}
-
-void ABuildIntegrationManager::ValidateModule(EInteg_ModuleType ModuleType)
-{
-    switch (ModuleType)
-    {
-        case EInteg_ModuleType::Core:
-            // Core module is always available
-            UpdateModuleStatus(ModuleType, EInteg_BuildStatus::Success);
-            break;
-            
-        case EInteg_ModuleType::Character:
-            ValidateCharacterModule();
-            break;
-            
-        case EInteg_ModuleType::WorldGen:
-            ValidateWorldGenModule();
-            break;
-            
-        case EInteg_ModuleType::Audio:
-            ValidateAudioModule();
-            break;
-            
-        case EInteg_ModuleType::VFX:
-            ValidateVFXModule();
-            break;
-            
-        case EInteg_ModuleType::QA:
-            ValidateQAModule();
-            break;
-            
-        case EInteg_ModuleType::AI:
-            ValidateAIModule();
-            break;
-            
-        case EInteg_ModuleType::Combat:
-            ValidateCombatModule();
-            break;
-            
-        default:
-            UpdateModuleStatus(ModuleType, EInteg_BuildStatus::Unknown, TEXT("Unknown module type"));
-            break;
-    }
-}
-
-void ABuildIntegrationManager::ValidateCharacterModule()
-{
-    // Try to load character classes
-    UClass* CharacterClass = LoadClass<AActor>(nullptr, TEXT("/Script/TranspersonalGame.TranspersonalCharacter"));
-    UClass* GameModeClass = LoadClass<AGameModeBase>(nullptr, TEXT("/Script/TranspersonalGame.TranspersonalGameMode"));
-    UClass* GameStateClass = LoadClass<AGameStateBase>(nullptr, TEXT("/Script/TranspersonalGame.TranspersonalGameState"));
-
-    int32 ClassCount = 0;
-    FString ErrorMsg = TEXT("");
-
-    if (CharacterClass) ClassCount++;
-    else ErrorMsg += TEXT("TranspersonalCharacter missing; ");
-
-    if (GameModeClass) ClassCount++;
-    else ErrorMsg += TEXT("TranspersonalGameMode missing; ");
-
-    if (GameStateClass) ClassCount++;
-    else ErrorMsg += TEXT("TranspersonalGameState missing; ");
-
-    EInteg_BuildStatus Status = (ClassCount >= 2) ? EInteg_BuildStatus::Success : 
-                               (ClassCount >= 1) ? EInteg_BuildStatus::Warning : EInteg_BuildStatus::Failed;
-
-    UpdateModuleStatus(EInteg_ModuleType::Character, Status, ErrorMsg);
-    
-    // Update class count
-    for (FInteg_ModuleStatus& ModuleStatus : ModuleStatuses)
-    {
-        if (ModuleStatus.ModuleType == EInteg_ModuleType::Character)
-        {
-            ModuleStatus.ClassCount = ClassCount;
-            break;
-        }
-    }
-}
-
-void ABuildIntegrationManager::ValidateWorldGenModule()
-{
-    UClass* WorldGenClass = LoadClass<AActor>(nullptr, TEXT("/Script/TranspersonalGame.PCGWorldGenerator"));
-    UClass* FoliageClass = LoadClass<AActor>(nullptr, TEXT("/Script/TranspersonalGame.FoliageManager"));
-
-    int32 ClassCount = 0;
-    FString ErrorMsg = TEXT("");
-
-    if (WorldGenClass) ClassCount++;
-    else ErrorMsg += TEXT("PCGWorldGenerator missing; ");
-
-    if (FoliageClass) ClassCount++;
-    else ErrorMsg += TEXT("FoliageManager missing; ");
-
-    EInteg_BuildStatus Status = (ClassCount >= 2) ? EInteg_BuildStatus::Success : 
-                               (ClassCount >= 1) ? EInteg_BuildStatus::Warning : EInteg_BuildStatus::Failed;
-
-    UpdateModuleStatus(EInteg_ModuleType::WorldGen, Status, ErrorMsg);
-    
-    for (FInteg_ModuleStatus& ModuleStatus : ModuleStatuses)
-    {
-        if (ModuleStatus.ModuleType == EInteg_ModuleType::WorldGen)
-        {
-            ModuleStatus.ClassCount = ClassCount;
-            break;
-        }
-    }
-}
-
-void ABuildIntegrationManager::ValidateAudioModule()
-{
-    // Check for audio manager classes
-    UClass* AudioManagerClass = LoadClass<AActor>(nullptr, TEXT("/Script/TranspersonalGame.AudioManager"));
-    UClass* EnvAudioClass = LoadClass<AActor>(nullptr, TEXT("/Script/TranspersonalGame.EnvironmentalAudioManager"));
-
-    int32 ClassCount = 0;
-    if (AudioManagerClass) ClassCount++;
-    if (EnvAudioClass) ClassCount++;
-
-    EInteg_BuildStatus Status = (ClassCount >= 1) ? EInteg_BuildStatus::Success : EInteg_BuildStatus::Warning;
-    FString ErrorMsg = (ClassCount == 0) ? TEXT("No audio classes found") : TEXT("");
-
-    UpdateModuleStatus(EInteg_ModuleType::Audio, Status, ErrorMsg);
-    
-    for (FInteg_ModuleStatus& ModuleStatus : ModuleStatuses)
-    {
-        if (ModuleStatus.ModuleType == EInteg_ModuleType::Audio)
-        {
-            ModuleStatus.ClassCount = ClassCount;
-            break;
-        }
-    }
-}
-
-void ABuildIntegrationManager::ValidateVFXModule()
-{
-    // Check for VFX manager classes
-    UClass* VFXManagerClass = LoadClass<AActor>(nullptr, TEXT("/Script/TranspersonalGame.VFXManager"));
-    UClass* EnvVFXClass = LoadClass<AActor>(nullptr, TEXT("/Script/TranspersonalGame.EnvironmentalVFXManager"));
-
-    int32 ClassCount = 0;
-    if (VFXManagerClass) ClassCount++;
-    if (EnvVFXClass) ClassCount++;
-
-    EInteg_BuildStatus Status = (ClassCount >= 1) ? EInteg_BuildStatus::Success : EInteg_BuildStatus::Warning;
-    FString ErrorMsg = (ClassCount == 0) ? TEXT("No VFX classes found") : TEXT("");
-
-    UpdateModuleStatus(EInteg_ModuleType::VFX, Status, ErrorMsg);
-    
-    for (FInteg_ModuleStatus& ModuleStatus : ModuleStatuses)
-    {
-        if (ModuleStatus.ModuleType == EInteg_ModuleType::VFX)
-        {
-            ModuleStatus.ClassCount = ClassCount;
-            break;
-        }
-    }
-}
-
-void ABuildIntegrationManager::ValidateQAModule()
-{
-    UClass* QAManagerClass = LoadClass<AActor>(nullptr, TEXT("/Script/TranspersonalGame.QATestManager"));
-
-    int32 ClassCount = QAManagerClass ? 1 : 0;
-    EInteg_BuildStatus Status = QAManagerClass ? EInteg_BuildStatus::Success : EInteg_BuildStatus::Warning;
-    FString ErrorMsg = QAManagerClass ? TEXT("") : TEXT("QATestManager missing");
-
-    UpdateModuleStatus(EInteg_ModuleType::QA, Status, ErrorMsg);
-    
-    for (FInteg_ModuleStatus& ModuleStatus : ModuleStatuses)
-    {
-        if (ModuleStatus.ModuleType == EInteg_ModuleType::QA)
-        {
-            ModuleStatus.ClassCount = ClassCount;
-            break;
-        }
-    }
-}
-
-void ABuildIntegrationManager::ValidateAIModule()
-{
-    // AI module validation - placeholder for future AI classes
-    UpdateModuleStatus(EInteg_ModuleType::AI, EInteg_BuildStatus::Warning, TEXT("AI module not yet implemented"));
-}
-
-void ABuildIntegrationManager::ValidateCombatModule()
-{
-    // Combat module validation - placeholder for future combat classes
-    UpdateModuleStatus(EInteg_ModuleType::Combat, EInteg_BuildStatus::Warning, TEXT("Combat module not yet implemented"));
-}
-
-void ABuildIntegrationManager::RunCrossModuleTests()
-{
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Running cross-module tests"));
-
-    for (FInteg_CrossModuleTest& Test : CrossModuleTests)
-    {
-        // Check if all required modules are ready
-        bool bAllModulesReady = true;
-        for (EInteg_ModuleType RequiredModule : Test.RequiredModules)
-        {
-            if (!IsModuleReady(RequiredModule))
-            {
-                bAllModulesReady = false;
-                break;
-            }
-        }
-
-        if (bAllModulesReady)
-        {
-            // Run specific integration tests
-            if (Test.TestName == TEXT("Character-WorldGen Integration"))
-            {
-                TestCharacterWorldGenIntegration();
-            }
-            else if (Test.TestName == TEXT("Audio-VFX Integration"))
-            {
-                TestAudioVFXIntegration();
-            }
-            else if (Test.TestName == TEXT("QA System Integration"))
-            {
-                TestQASystemIntegration();
-            }
-
-            Test.bTestPassed = true;
-            Test.TestResult = TEXT("Integration test passed");
+            CurrentBuildStatus.FunctionalSystems++;
         }
         else
         {
-            Test.bTestPassed = false;
-            Test.TestResult = TEXT("Required modules not ready");
+            CurrentBuildStatus.BrokenSystems++;
+            CurrentBuildStatus.bCompilationSuccessful = false;
         }
     }
+    
+    CurrentBuildStatus.TotalSystems = SystemsToValidate.Num();
+    CurrentBuildStatus.BuildTime = FPlatformTime::Seconds();
+    LastValidationTime = CurrentBuildStatus.BuildTime;
+    
+    // Test cross-system dependencies
+    TestCrossSystemDependencies();
+    
+    // Log results
+    LogIntegrationResults(CurrentBuildStatus);
+    
+    return CurrentBuildStatus;
 }
 
-void ABuildIntegrationManager::TestCharacterWorldGenIntegration()
+bool UBuildIntegrationManager::TestSystemIntegration(const FString& SystemName)
 {
-    // Test character spawning in generated world
-    UE_LOG(LogTemp, Warning, TEXT("Testing Character-WorldGen integration"));
-}
-
-void ABuildIntegrationManager::TestAudioVFXIntegration()
-{
-    // Test audio-VFX synchronization
-    UE_LOG(LogTemp, Warning, TEXT("Testing Audio-VFX integration"));
-}
-
-void ABuildIntegrationManager::TestQASystemIntegration()
-{
-    // Test QA system functionality
-    UE_LOG(LogTemp, Warning, TEXT("Testing QA System integration"));
-}
-
-void ABuildIntegrationManager::TestAICombatIntegration()
-{
-    // Test AI-Combat integration
-    UE_LOG(LogTemp, Warning, TEXT("Testing AI-Combat integration"));
-}
-
-bool ABuildIntegrationManager::IsModuleReady(EInteg_ModuleType ModuleType) const
-{
-    for (const FInteg_ModuleStatus& ModuleStatus : ModuleStatuses)
+    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Testing system integration for %s"), *SystemName);
+    
+    if (RegisteredSystems.Contains(SystemName))
     {
-        if (ModuleStatus.ModuleType == ModuleType)
+        TWeakObjectPtr<UObject> SystemPtr = RegisteredSystems[SystemName];
+        if (SystemPtr.IsValid())
         {
-            return ModuleStatus.BuildStatus == EInteg_BuildStatus::Success;
+            UE_LOG(LogTemp, Warning, TEXT("System %s is registered and valid"), *SystemName);
+            return true;
         }
     }
+    
+    UE_LOG(LogTemp, Error, TEXT("System %s integration test failed"), *SystemName);
     return false;
 }
 
-FInteg_ModuleStatus ABuildIntegrationManager::GetModuleStatus(EInteg_ModuleType ModuleType) const
+void UBuildIntegrationManager::RegisterSystem(const FString& SystemName, UObject* SystemObject)
 {
-    for (const FInteg_ModuleStatus& ModuleStatus : ModuleStatuses)
+    if (SystemObject && IsValid(SystemObject))
     {
-        if (ModuleStatus.ModuleType == ModuleType)
+        RegisteredSystems.Add(SystemName, SystemObject);
+        UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Registered system %s"), *SystemName);
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("BuildIntegrationManager: Failed to register system %s - invalid object"), *SystemName);
+    }
+}
+
+void UBuildIntegrationManager::UnregisterSystem(const FString& SystemName)
+{
+    if (RegisteredSystems.Contains(SystemName))
+    {
+        RegisteredSystems.Remove(SystemName);
+        UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Unregistered system %s"), *SystemName);
+    }
+}
+
+bool UBuildIntegrationManager::TestVFXEnvironmentIntegration()
+{
+    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Testing VFX-Environment integration"));
+    
+    // Test if VFX system can interact with environment actors
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return false;
+    }
+    
+    // Count environment actors that could have VFX
+    int32 EnvironmentActors = 0;
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    {
+        AActor* Actor = *ActorItr;
+        if (Actor && Actor->GetName().Contains(TEXT("Tree")))
         {
-            return ModuleStatus;
+            EnvironmentActors++;
         }
     }
-    return FInteg_ModuleStatus();
-}
-
-void ABuildIntegrationManager::ResetIntegrationStatus()
-{
-    for (FInteg_ModuleStatus& ModuleStatus : ModuleStatuses)
-    {
-        ModuleStatus.BuildStatus = EInteg_BuildStatus::Unknown;
-        ModuleStatus.LastError = TEXT("");
-        ModuleStatus.LastBuildTime = 0.0f;
-        ModuleStatus.ClassCount = 0;
-    }
-
-    for (FInteg_CrossModuleTest& Test : CrossModuleTests)
-    {
-        Test.bTestPassed = false;
-        Test.TestResult = TEXT("");
-    }
-
-    OverallBuildStatus = EInteg_BuildStatus::Unknown;
-    SuccessfulModules = 0;
-    FailedModules = 0;
-}
-
-void ABuildIntegrationManager::GenerateIntegrationReport()
-{
-    UE_LOG(LogTemp, Warning, TEXT("=== BUILD INTEGRATION REPORT ==="));
-    UE_LOG(LogTemp, Warning, TEXT("Overall Status: %s"), 
-           OverallBuildStatus == EInteg_BuildStatus::Success ? TEXT("SUCCESS") :
-           OverallBuildStatus == EInteg_BuildStatus::Warning ? TEXT("WARNING") :
-           OverallBuildStatus == EInteg_BuildStatus::Failed ? TEXT("FAILED") : TEXT("UNKNOWN"));
     
-    UE_LOG(LogTemp, Warning, TEXT("Modules: %d/%d successful"), SuccessfulModules, TotalModules);
+    UE_LOG(LogTemp, Warning, TEXT("Found %d environment actors for VFX integration"), EnvironmentActors);
+    return EnvironmentActors > 0;
+}
+
+bool UBuildIntegrationManager::TestAudioCharacterIntegration()
+{
+    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Testing Audio-Character integration"));
     
-    for (const FInteg_ModuleStatus& ModuleStatus : ModuleStatuses)
+    // Test if audio system can interact with character actors
+    UWorld* World = GetWorld();
+    if (!World)
     {
-        UE_LOG(LogTemp, Warning, TEXT("  %s: %s (%d classes)"), 
-               *ModuleStatus.ModuleName,
-               ModuleStatus.BuildStatus == EInteg_BuildStatus::Success ? TEXT("OK") :
-               ModuleStatus.BuildStatus == EInteg_BuildStatus::Warning ? TEXT("WARN") :
-               ModuleStatus.BuildStatus == EInteg_BuildStatus::Failed ? TEXT("FAIL") : TEXT("UNK"),
-               ModuleStatus.ClassCount);
+        return false;
     }
-}
-
-void ABuildIntegrationManager::EditorValidateAllModules()
-{
-    ValidateAllModules();
-}
-
-void ABuildIntegrationManager::EditorRunCrossModuleTests()
-{
-    RunCrossModuleTests();
-}
-
-void ABuildIntegrationManager::EditorGenerateReport()
-{
-    GenerateIntegrationReport();
-}
-
-void ABuildIntegrationManager::UpdateModuleStatus(EInteg_ModuleType ModuleType, EInteg_BuildStatus Status, const FString& Error)
-{
-    for (FInteg_ModuleStatus& ModuleStatus : ModuleStatuses)
+    
+    // Look for character actors
+    int32 CharacterActors = 0;
+    for (TActorIterator<APawn> PawnItr(World); PawnItr; ++PawnItr)
     {
-        if (ModuleStatus.ModuleType == ModuleType)
+        APawn* Pawn = *PawnItr;
+        if (Pawn)
         {
-            ModuleStatus.BuildStatus = Status;
-            ModuleStatus.LastError = Error;
-            ModuleStatus.LastBuildTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
-            
-            if (Status == EInteg_BuildStatus::Success)
-            {
-                SuccessfulModules++;
-            }
-            else if (Status == EInteg_BuildStatus::Failed)
-            {
-                FailedModules++;
-            }
-            break;
+            CharacterActors++;
         }
     }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Found %d character actors for audio integration"), CharacterActors);
+    return CharacterActors > 0;
 }
 
-void ABuildIntegrationManager::LogIntegrationStatus()
+bool UBuildIntegrationManager::TestAICombatIntegration()
 {
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Validation complete - %d/%d modules successful"), 
-           SuccessfulModules, TotalModules);
+    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Testing AI-Combat integration"));
+    
+    // Test if AI and Combat systems can work together
+    // This would test dinosaur AI with combat behaviors
+    
+    return TestSystemIntegration(TEXT("AI")) && TestSystemIntegration(TEXT("Combat"));
+}
+
+void UBuildIntegrationManager::CreateBuildSnapshot()
+{
+    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Creating build snapshot"));
+    
+    FInteg_BuildStatus Snapshot = CurrentBuildStatus;
+    Snapshot.BuildTime = FPlatformTime::Seconds();
+    
+    BuildSnapshots.Add(Snapshot);
+    
+    // Keep only last 10 snapshots
+    if (BuildSnapshots.Num() > 10)
+    {
+        BuildSnapshots.RemoveAt(0);
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Build snapshot created. Total snapshots: %d"), BuildSnapshots.Num());
+}
+
+bool UBuildIntegrationManager::RestoreBuildSnapshot(int32 SnapshotIndex)
+{
+    if (BuildSnapshots.IsValidIndex(SnapshotIndex))
+    {
+        CurrentBuildStatus = BuildSnapshots[SnapshotIndex];
+        UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Restored build snapshot %d"), SnapshotIndex);
+        return true;
+    }
+    
+    UE_LOG(LogTemp, Error, TEXT("BuildIntegrationManager: Invalid snapshot index %d"), SnapshotIndex);
+    return false;
+}
+
+TArray<FString> UBuildIntegrationManager::GetRegisteredSystems() const
+{
+    TArray<FString> SystemNames;
+    RegisteredSystems.GetKeys(SystemNames);
+    return SystemNames;
+}
+
+void UBuildIntegrationManager::ValidateSystemClass(const FString& SystemName, const FString& ClassPath, FInteg_SystemReport& OutReport)
+{
+    OutReport.SystemName = SystemName;
+    OutReport.LastTestTime = FPlatformTime::Seconds();
+    
+    // Try to load the class
+    UClass* SystemClass = LoadClass<UObject>(nullptr, *ClassPath);
+    
+    if (SystemClass)
+    {
+        OutReport.Status = EInteg_SystemStatus::Functional;
+        OutReport.ErrorMessage = TEXT("System loaded successfully");
+        UE_LOG(LogTemp, Warning, TEXT("System %s: FUNCTIONAL"), *SystemName);
+    }
+    else
+    {
+        OutReport.Status = EInteg_SystemStatus::Missing;
+        OutReport.ErrorMessage = FString::Printf(TEXT("Class not found: %s"), *ClassPath);
+        UE_LOG(LogTemp, Error, TEXT("System %s: MISSING - %s"), *SystemName, *ClassPath);
+    }
+}
+
+void UBuildIntegrationManager::TestCrossSystemDependencies()
+{
+    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Testing cross-system dependencies"));
+    
+    // Test VFX-Environment integration
+    bool VFXEnvIntegration = TestVFXEnvironmentIntegration();
+    
+    // Test Audio-Character integration
+    bool AudioCharIntegration = TestAudioCharacterIntegration();
+    
+    // Test AI-Combat integration
+    bool AICombatIntegration = TestAICombatIntegration();
+    
+    UE_LOG(LogTemp, Warning, TEXT("Cross-system integration results:"));
+    UE_LOG(LogTemp, Warning, TEXT("  VFX-Environment: %s"), VFXEnvIntegration ? TEXT("PASS") : TEXT("FAIL"));
+    UE_LOG(LogTemp, Warning, TEXT("  Audio-Character: %s"), AudioCharIntegration ? TEXT("PASS") : TEXT("FAIL"));
+    UE_LOG(LogTemp, Warning, TEXT("  AI-Combat: %s"), AICombatIntegration ? TEXT("PASS") : TEXT("FAIL"));
+}
+
+void UBuildIntegrationManager::LogIntegrationResults(const FInteg_BuildStatus& Status)
+{
+    UE_LOG(LogTemp, Warning, TEXT("=== BUILD INTEGRATION RESULTS ==="));
+    UE_LOG(LogTemp, Warning, TEXT("Compilation Successful: %s"), Status.bCompilationSuccessful ? TEXT("YES") : TEXT("NO"));
+    UE_LOG(LogTemp, Warning, TEXT("Total Systems: %d"), Status.TotalSystems);
+    UE_LOG(LogTemp, Warning, TEXT("Functional Systems: %d"), Status.FunctionalSystems);
+    UE_LOG(LogTemp, Warning, TEXT("Broken Systems: %d"), Status.BrokenSystems);
+    UE_LOG(LogTemp, Warning, TEXT("Build Time: %.2f seconds"), Status.BuildTime);
+    
+    for (const FInteg_SystemReport& Report : Status.SystemReports)
+    {
+        FString StatusStr;
+        switch (Report.Status)
+        {
+            case EInteg_SystemStatus::Functional: StatusStr = TEXT("FUNCTIONAL"); break;
+            case EInteg_SystemStatus::Broken: StatusStr = TEXT("BROKEN"); break;
+            case EInteg_SystemStatus::Missing: StatusStr = TEXT("MISSING"); break;
+            default: StatusStr = TEXT("UNKNOWN"); break;
+        }
+        
+        UE_LOG(LogTemp, Warning, TEXT("  %s: %s - %s"), *Report.SystemName, *StatusStr, *Report.ErrorMessage);
+    }
+    UE_LOG(LogTemp, Warning, TEXT("=== END INTEGRATION RESULTS ==="));
 }
