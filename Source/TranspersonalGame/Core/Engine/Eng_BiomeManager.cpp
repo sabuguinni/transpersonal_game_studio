@@ -1,437 +1,410 @@
 #include "Eng_BiomeManager.h"
 #include "Engine/World.h"
+#include "Engine/Engine.h"
 #include "Kismet/GameplayStatics.h"
 #include "Math/UnrealMathUtility.h"
-#include "DrawDebugHelpers.h"
 
 UEng_BiomeManager::UEng_BiomeManager()
 {
-    // Initialize default values
-    WorldSizeX = 20000.0f;
-    WorldSizeY = 20000.0f;
-    SwampRegionSize = 4000.0f;
-    ForestRegionSize = 6000.0f;
-    SavannaRegionSize = 5000.0f;
-    DesertRegionSize = 3000.0f;
-    MountainRegionSize = 2000.0f;
-    WeatherSystem = nullptr;
-    LastCacheCleanupTime = 0.0f;
+    // Initialize default biome parameters
+    WorldSizeKm = 16.0f;
+    BiomeNoiseScale = 0.001f;
+    TransitionZoneSize = 500.0f;
+    bEnableBiomeBlending = true;
+    BiomeUpdateFrequency = 1.0f;
+    LastCacheUpdate = 0.0f;
 }
 
 void UEng_BiomeManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Warning, TEXT("UEng_BiomeManager::Initialize - Starting biome system initialization"));
+    UE_LOG(LogTemp, Warning, TEXT("BiomeManager: Initializing biome system..."));
     
-    // Initialize biome configurations
-    InitializeBiomeConfigs();
+    // Initialize default biome parameters
+    FEng_BiomeParameters GrasslandParams;
+    GrasslandParams.BiomeType = EEng_BiomeType::Grassland;
+    GrasslandParams.Temperature = 22.0f;
+    GrasslandParams.Humidity = 0.4f;
+    GrasslandParams.VegetationDensity = 0.3f;
+    GrasslandParams.RockDensity = 0.1f;
+    GrasslandParams.WaterLevel = 0.0f;
+    GrasslandParams.FogColor = FLinearColor(0.7f, 0.8f, 0.9f, 1.0f);
+    GrasslandParams.FogDensity = 0.01f;
+    BiomeParametersMap.Add(EEng_BiomeType::Grassland, GrasslandParams);
     
-    // Setup biome transitions
-    SetupBiomeTransitions();
+    FEng_BiomeParameters ForestParams;
+    ForestParams.BiomeType = EEng_BiomeType::Forest;
+    ForestParams.Temperature = 18.0f;
+    ForestParams.Humidity = 0.8f;
+    ForestParams.VegetationDensity = 0.9f;
+    ForestParams.RockDensity = 0.2f;
+    ForestParams.WaterLevel = 0.0f;
+    ForestParams.FogColor = FLinearColor(0.4f, 0.6f, 0.5f, 1.0f);
+    ForestParams.FogDensity = 0.03f;
+    BiomeParametersMap.Add(EEng_BiomeType::Forest, ForestParams);
     
-    // Clear any existing cache
-    BiomeLocationCache.Empty();
+    FEng_BiomeParameters DesertParams;
+    DesertParams.BiomeType = EEng_BiomeType::Desert;
+    DesertParams.Temperature = 35.0f;
+    DesertParams.Humidity = 0.1f;
+    DesertParams.VegetationDensity = 0.05f;
+    DesertParams.RockDensity = 0.4f;
+    DesertParams.WaterLevel = 0.0f;
+    DesertParams.FogColor = FLinearColor(0.9f, 0.7f, 0.5f, 1.0f);
+    DesertParams.FogDensity = 0.005f;
+    BiomeParametersMap.Add(EEng_BiomeType::Desert, DesertParams);
     
-    UE_LOG(LogTemp, Warning, TEXT("UEng_BiomeManager::Initialize - Biome system initialized with %d biome configs"), BiomeConfigs.Num());
+    FEng_BiomeParameters SwampParams;
+    SwampParams.BiomeType = EEng_BiomeType::Swamp;
+    SwampParams.Temperature = 25.0f;
+    SwampParams.Humidity = 0.95f;
+    SwampParams.VegetationDensity = 0.7f;
+    SwampParams.RockDensity = 0.1f;
+    SwampParams.WaterLevel = 50.0f;
+    SwampParams.FogColor = FLinearColor(0.5f, 0.6f, 0.4f, 1.0f);
+    SwampParams.FogDensity = 0.05f;
+    BiomeParametersMap.Add(EEng_BiomeType::Swamp, SwampParams);
+    
+    FEng_BiomeParameters MountainParams;
+    MountainParams.BiomeType = EEng_BiomeType::Mountains;
+    MountainParams.Temperature = 5.0f;
+    MountainParams.Humidity = 0.3f;
+    MountainParams.VegetationDensity = 0.2f;
+    MountainParams.RockDensity = 0.8f;
+    MountainParams.WaterLevel = 0.0f;
+    MountainParams.FogColor = FLinearColor(0.6f, 0.7f, 0.8f, 1.0f);
+    MountainParams.FogDensity = 0.02f;
+    BiomeParametersMap.Add(EEng_BiomeType::Mountains, MountainParams);
+    
+    UE_LOG(LogTemp, Warning, TEXT("BiomeManager: Initialized %d biome types"), BiomeParametersMap.Num());
 }
 
 void UEng_BiomeManager::Deinitialize()
 {
-    // Clear all registered biome zones
-    RegisteredBiomeZones.Empty();
-    
-    // Clear cache
-    BiomeLocationCache.Empty();
-    
-    // Clear weather system reference
-    WeatherSystem = nullptr;
-    
-    UE_LOG(LogTemp, Warning, TEXT("UEng_BiomeManager::Deinitialize - Biome system shutdown complete"));
-    
+    UE_LOG(LogTemp, Warning, TEXT("BiomeManager: Shutting down biome system"));
+    BiomeParametersMap.Empty();
+    BiomeTransitions.Empty();
+    BiomeCache.Empty();
     Super::Deinitialize();
 }
 
-void UEng_BiomeManager::InitializeBiomeConfigs()
+EEng_BiomeType UEng_BiomeManager::GetBiomeAtLocation(const FVector& WorldLocation) const
 {
-    // Clear existing configs
-    BiomeConfigs.Empty();
+    // Convert world location to grid coordinates
+    FIntPoint GridCoord = FIntPoint(
+        FMath::FloorToInt(WorldLocation.X / 1000.0f),
+        FMath::FloorToInt(WorldLocation.Y / 1000.0f)
+    );
     
-    // SWAMP BIOME
-    FEng_BiomeConfig SwampConfig;
-    SwampConfig.BiomeType = EBiomeType::Swamp;
-    SwampConfig.BiomeName = TEXT("Prehistoric Swamp");
-    SwampConfig.TemperatureMin = 22.0f;
-    SwampConfig.TemperatureMax = 32.0f;
-    SwampConfig.HumidityLevel = 0.9f;
-    SwampConfig.VegetationDensity = 0.8f;
-    SwampConfig.FogColor = FLinearColor(0.3f, 0.5f, 0.2f, 1.0f);
-    SwampConfig.FogDensity = 0.05f;
-    BiomeConfigs.Add(EBiomeType::Swamp, SwampConfig);
-    
-    // FOREST BIOME
-    FEng_BiomeConfig ForestConfig;
-    ForestConfig.BiomeType = EBiomeType::Forest;
-    ForestConfig.BiomeName = TEXT("Dense Prehistoric Forest");
-    ForestConfig.TemperatureMin = 15.0f;
-    ForestConfig.TemperatureMax = 25.0f;
-    ForestConfig.HumidityLevel = 0.7f;
-    ForestConfig.VegetationDensity = 0.9f;
-    ForestConfig.FogColor = FLinearColor(0.4f, 0.6f, 0.3f, 1.0f);
-    ForestConfig.FogDensity = 0.02f;
-    BiomeConfigs.Add(EBiomeType::Forest, ForestConfig);
-    
-    // SAVANNA BIOME
-    FEng_BiomeConfig SavannaConfig;
-    SavannaConfig.BiomeType = EBiomeType::Savanna;
-    SavannaConfig.BiomeName = TEXT("Cretaceous Savanna");
-    SavannaConfig.TemperatureMin = 20.0f;
-    SavannaConfig.TemperatureMax = 35.0f;
-    SavannaConfig.HumidityLevel = 0.4f;
-    SavannaConfig.VegetationDensity = 0.5f;
-    SavannaConfig.FogColor = FLinearColor(0.7f, 0.6f, 0.4f, 1.0f);
-    SavannaConfig.FogDensity = 0.01f;
-    BiomeConfigs.Add(EBiomeType::Savanna, SavannaConfig);
-    
-    // DESERT BIOME
-    FEng_BiomeConfig DesertConfig;
-    DesertConfig.BiomeType = EBiomeType::Desert;
-    DesertConfig.BiomeName = TEXT("Arid Desert");
-    DesertConfig.TemperatureMin = 25.0f;
-    DesertConfig.TemperatureMax = 45.0f;
-    DesertConfig.HumidityLevel = 0.1f;
-    DesertConfig.VegetationDensity = 0.2f;
-    DesertConfig.FogColor = FLinearColor(0.8f, 0.7f, 0.5f, 1.0f);
-    DesertConfig.FogDensity = 0.005f;
-    BiomeConfigs.Add(EBiomeType::Desert, DesertConfig);
-    
-    // SNOW MOUNTAIN BIOME
-    FEng_BiomeConfig MountainConfig;
-    MountainConfig.BiomeType = EBiomeType::SnowMountain;
-    MountainConfig.BiomeName = TEXT("Snow-Capped Mountains");
-    MountainConfig.TemperatureMin = -5.0f;
-    MountainConfig.TemperatureMax = 10.0f;
-    MountainConfig.HumidityLevel = 0.6f;
-    MountainConfig.VegetationDensity = 0.3f;
-    MountainConfig.FogColor = FLinearColor(0.8f, 0.9f, 1.0f, 1.0f);
-    MountainConfig.FogDensity = 0.03f;
-    BiomeConfigs.Add(EBiomeType::SnowMountain, MountainConfig);
-    
-    UE_LOG(LogTemp, Warning, TEXT("UEng_BiomeManager::InitializeBiomeConfigs - Initialized %d biome configurations"), BiomeConfigs.Num());
-}
-
-void UEng_BiomeManager::SetupBiomeTransitions()
-{
-    BiomeTransitions.Empty();
-    
-    // Forest to Swamp transition
-    FEng_BiomeTransition ForestToSwamp;
-    ForestToSwamp.FromBiome = EBiomeType::Forest;
-    ForestToSwamp.ToBiome = EBiomeType::Swamp;
-    ForestToSwamp.TransitionDistance = 800.0f;
-    ForestToSwamp.BlendFactor = 0.5f;
-    BiomeTransitions.Add(ForestToSwamp);
-    
-    // Forest to Savanna transition
-    FEng_BiomeTransition ForestToSavanna;
-    ForestToSavanna.FromBiome = EBiomeType::Forest;
-    ForestToSavanna.ToBiome = EBiomeType::Savanna;
-    ForestToSavanna.TransitionDistance = 1200.0f;
-    ForestToSavanna.BlendFactor = 0.6f;
-    BiomeTransitions.Add(ForestToSavanna);
-    
-    // Savanna to Desert transition
-    FEng_BiomeTransition SavannaToDesert;
-    SavannaToDesert.FromBiome = EBiomeType::Savanna;
-    SavannaToDesert.ToBiome = EBiomeType::Desert;
-    SavannaToDesert.TransitionDistance = 1000.0f;
-    SavannaToDesert.BlendFactor = 0.7f;
-    BiomeTransitions.Add(SavannaToDesert);
-    
-    // Forest to Mountain transition
-    FEng_BiomeTransition ForestToMountain;
-    ForestToMountain.FromBiome = EBiomeType::Forest;
-    ForestToMountain.ToBiome = EBiomeType::SnowMountain;
-    ForestToMountain.TransitionDistance = 1500.0f;
-    ForestToMountain.BlendFactor = 0.8f;
-    BiomeTransitions.Add(ForestToMountain);
-    
-    UE_LOG(LogTemp, Warning, TEXT("UEng_BiomeManager::SetupBiomeTransitions - Setup %d biome transitions"), BiomeTransitions.Num());
-}
-
-EBiomeType UEng_BiomeManager::GetBiomeAtLocation(const FVector& WorldLocation) const
-{
-    // Check cache first for performance
-    if (BiomeLocationCache.Contains(WorldLocation))
+    // Check cache first
+    if (BiomeCache.Contains(GridCoord))
     {
-        return BiomeLocationCache[WorldLocation];
+        return BiomeCache[GridCoord];
     }
     
-    // Calculate biome based on world position
-    EBiomeType BiomeType = CalculateBiomeFromWorldPosition(WorldLocation);
+    // Calculate noise value for biome determination
+    float NoiseValue = CalculateNoiseValue(WorldLocation, BiomeNoiseScale);
+    float Elevation = WorldLocation.Z;
+    
+    EEng_BiomeType BiomeType = DetermineBiomeFromNoise(NoiseValue, Elevation);
     
     // Cache the result
-    if (BiomeLocationCache.Num() < MAX_CACHE_ENTRIES)
-    {
-        BiomeLocationCache.Add(WorldLocation, BiomeType);
-    }
+    BiomeCache.Add(GridCoord, BiomeType);
     
     return BiomeType;
 }
 
-EBiomeType UEng_BiomeManager::CalculateBiomeFromWorldPosition(const FVector& WorldLocation) const
+FEng_BiomeParameters UEng_BiomeManager::GetBiomeParameters(EEng_BiomeType BiomeType) const
 {
-    // Convert world location to normalized coordinates (0-1)
-    float NormalizedX = (WorldLocation.X + WorldSizeX * 0.5f) / WorldSizeX;
-    float NormalizedY = (WorldLocation.Y + WorldSizeY * 0.5f) / WorldSizeY;
-    
-    // Clamp to valid range
-    NormalizedX = FMath::Clamp(NormalizedX, 0.0f, 1.0f);
-    NormalizedY = FMath::Clamp(NormalizedY, 0.0f, 1.0f);
-    
-    // Simple biome distribution based on world quadrants and elevation
-    float DistanceFromCenter = FVector2D(NormalizedX - 0.5f, NormalizedY - 0.5f).Size();
-    float Elevation = WorldLocation.Z;
-    
-    // Mountain biome at high elevations
-    if (Elevation > 1500.0f)
+    if (BiomeParametersMap.Contains(BiomeType))
     {
-        return EBiomeType::SnowMountain;
+        return BiomeParametersMap[BiomeType];
     }
     
-    // Desert in the far corners
-    if (DistanceFromCenter > 0.6f && (NormalizedX > 0.7f || NormalizedX < 0.3f))
+    // Return default grassland parameters if not found
+    FEng_BiomeParameters DefaultParams;
+    return DefaultParams;
+}
+
+FEng_BiomeParameters UEng_BiomeManager::GetBlendedBiomeParameters(const FVector& WorldLocation) const
+{
+    if (!bEnableBiomeBlending)
     {
-        return EBiomeType::Desert;
+        EEng_BiomeType BiomeType = GetBiomeAtLocation(WorldLocation);
+        return GetBiomeParameters(BiomeType);
     }
     
-    // Swamp in low-lying areas near water
-    if (Elevation < 100.0f && NormalizedY < 0.4f)
+    // Sample multiple points around the location for blending
+    TArray<FVector> SamplePoints = {
+        WorldLocation,
+        WorldLocation + FVector(TransitionZoneSize, 0, 0),
+        WorldLocation + FVector(-TransitionZoneSize, 0, 0),
+        WorldLocation + FVector(0, TransitionZoneSize, 0),
+        WorldLocation + FVector(0, -TransitionZoneSize, 0)
+    };
+    
+    TMap<EEng_BiomeType, float> BiomeWeights;
+    float TotalWeight = 0.0f;
+    
+    for (const FVector& SamplePoint : SamplePoints)
     {
-        return EBiomeType::Swamp;
-    }
-    
-    // Savanna in open areas
-    if (NormalizedY > 0.6f && DistanceFromCenter > 0.3f)
-    {
-        return EBiomeType::Savanna;
-    }
-    
-    // Default to Forest
-    return EBiomeType::Forest;
-}
-
-FEng_BiomeConfig UEng_BiomeManager::GetBiomeConfig(EBiomeType BiomeType) const
-{
-    if (BiomeConfigs.Contains(BiomeType))
-    {
-        return BiomeConfigs[BiomeType];
-    }
-    
-    // Return default forest config if not found
-    FEng_BiomeConfig DefaultConfig;
-    UE_LOG(LogTemp, Warning, TEXT("UEng_BiomeManager::GetBiomeConfig - Biome type %d not found, returning default"), (int32)BiomeType);
-    return DefaultConfig;
-}
-
-float UEng_BiomeManager::GetTemperatureAtLocation(const FVector& WorldLocation) const
-{
-    EBiomeType BiomeType = GetBiomeAtLocation(WorldLocation);
-    FEng_BiomeConfig Config = GetBiomeConfig(BiomeType);
-    
-    // Add some variation based on location and time
-    float BaseTemp = (Config.TemperatureMin + Config.TemperatureMax) * 0.5f;
-    float Variation = FMath::Sin(WorldLocation.X * 0.001f) * FMath::Cos(WorldLocation.Y * 0.001f) * 3.0f;
-    
-    return BaseTemp + Variation;
-}
-
-float UEng_BiomeManager::GetHumidityAtLocation(const FVector& WorldLocation) const
-{
-    EBiomeType BiomeType = GetBiomeAtLocation(WorldLocation);
-    FEng_BiomeConfig Config = GetBiomeConfig(BiomeType);
-    
-    return Config.HumidityLevel;
-}
-
-bool UEng_BiomeManager::IsLocationInBiomeTransition(const FVector& WorldLocation) const
-{
-    // Check if location is near any biome border
-    float MinDistanceToBorder = CalculateDistanceToBiomeBorder(WorldLocation, GetBiomeAtLocation(WorldLocation));
-    
-    return MinDistanceToBorder < 1000.0f; // 1km transition zone
-}
-
-FEng_BiomeTransition UEng_BiomeManager::GetBiomeTransitionData(const FVector& WorldLocation) const
-{
-    EBiomeType CurrentBiome = GetBiomeAtLocation(WorldLocation);
-    
-    // Find the closest transition
-    for (const FEng_BiomeTransition& Transition : BiomeTransitions)
-    {
-        if (Transition.FromBiome == CurrentBiome || Transition.ToBiome == CurrentBiome)
+        EEng_BiomeType BiomeType = GetBiomeAtLocation(SamplePoint);
+        float Distance = FVector::Dist(WorldLocation, SamplePoint);
+        float Weight = FMath::Max(0.1f, 1.0f - (Distance / TransitionZoneSize));
+        
+        if (BiomeWeights.Contains(BiomeType))
         {
-            return Transition;
+            BiomeWeights[BiomeType] += Weight;
+        }
+        else
+        {
+            BiomeWeights.Add(BiomeType, Weight);
+        }
+        TotalWeight += Weight;
+    }
+    
+    // Blend parameters based on weights
+    FEng_BiomeParameters BlendedParams;
+    bool bFirstBiome = true;
+    
+    for (const auto& BiomeWeight : BiomeWeights)
+    {
+        FEng_BiomeParameters BiomeParams = GetBiomeParameters(BiomeWeight.Key);
+        float NormalizedWeight = BiomeWeight.Value / TotalWeight;
+        
+        if (bFirstBiome)
+        {
+            BlendedParams = BiomeParams;
+            BlendedParams.Temperature *= NormalizedWeight;
+            BlendedParams.Humidity *= NormalizedWeight;
+            BlendedParams.VegetationDensity *= NormalizedWeight;
+            BlendedParams.RockDensity *= NormalizedWeight;
+            BlendedParams.WaterLevel *= NormalizedWeight;
+            BlendedParams.FogDensity *= NormalizedWeight;
+            bFirstBiome = false;
+        }
+        else
+        {
+            BlendedParams.Temperature += BiomeParams.Temperature * NormalizedWeight;
+            BlendedParams.Humidity += BiomeParams.Humidity * NormalizedWeight;
+            BlendedParams.VegetationDensity += BiomeParams.VegetationDensity * NormalizedWeight;
+            BlendedParams.RockDensity += BiomeParams.RockDensity * NormalizedWeight;
+            BlendedParams.WaterLevel += BiomeParams.WaterLevel * NormalizedWeight;
+            BlendedParams.FogDensity += BiomeParams.FogDensity * NormalizedWeight;
         }
     }
     
-    // Return default transition
-    FEng_BiomeTransition DefaultTransition;
-    return DefaultTransition;
+    return BlendedParams;
 }
 
-float UEng_BiomeManager::CalculateDistanceToBiomeBorder(const FVector& Location, EBiomeType BiomeType) const
+void UEng_BiomeManager::SetBiomeParameters(EEng_BiomeType BiomeType, const FEng_BiomeParameters& Parameters)
 {
-    // Simplified calculation - in a real implementation this would be more sophisticated
-    float MinDistance = 10000.0f;
+    BiomeParametersMap.Add(BiomeType, Parameters);
+    UE_LOG(LogTemp, Warning, TEXT("BiomeManager: Updated parameters for biome type %d"), (int32)BiomeType);
+}
+
+bool UEng_BiomeManager::IsInTransitionZone(const FVector& WorldLocation) const
+{
+    // Sample nearby locations to detect biome changes
+    EEng_BiomeType CenterBiome = GetBiomeAtLocation(WorldLocation);
     
-    // Sample points around the location to find biome changes
-    for (int32 Angle = 0; Angle < 360; Angle += 45)
+    TArray<FVector> CheckPoints = {
+        WorldLocation + FVector(TransitionZoneSize * 0.5f, 0, 0),
+        WorldLocation + FVector(-TransitionZoneSize * 0.5f, 0, 0),
+        WorldLocation + FVector(0, TransitionZoneSize * 0.5f, 0),
+        WorldLocation + FVector(0, -TransitionZoneSize * 0.5f, 0)
+    };
+    
+    for (const FVector& CheckPoint : CheckPoints)
     {
-        float RadianAngle = FMath::DegreesToRadians(Angle);
-        for (float Distance = 100.0f; Distance < 2000.0f; Distance += 100.0f)
+        if (GetBiomeAtLocation(CheckPoint) != CenterBiome)
         {
-            FVector TestLocation = Location + FVector(
-                FMath::Cos(RadianAngle) * Distance,
-                FMath::Sin(RadianAngle) * Distance,
-                0.0f
-            );
+            return true;
+        }
+    }
+    
+    return false;
+}
+
+FEng_BiomeTransition UEng_BiomeManager::GetTransitionData(const FVector& WorldLocation) const
+{
+    FEng_BiomeTransition TransitionData;
+    
+    EEng_BiomeType CenterBiome = GetBiomeAtLocation(WorldLocation);
+    TransitionData.FromBiome = CenterBiome;
+    
+    // Find the nearest different biome
+    float MinDistance = FLT_MAX;
+    EEng_BiomeType NearestDifferentBiome = CenterBiome;
+    
+    for (float Angle = 0.0f; Angle < 360.0f; Angle += 45.0f)
+    {
+        FVector Direction = FVector(
+            FMath::Cos(FMath::DegreesToRadians(Angle)),
+            FMath::Sin(FMath::DegreesToRadians(Angle)),
+            0.0f
+        );
+        
+        for (float Distance = 100.0f; Distance <= TransitionZoneSize; Distance += 100.0f)
+        {
+            FVector TestLocation = WorldLocation + Direction * Distance;
+            EEng_BiomeType TestBiome = GetBiomeAtLocation(TestLocation);
             
-            if (GetBiomeAtLocation(TestLocation) != BiomeType)
+            if (TestBiome != CenterBiome && Distance < MinDistance)
             {
-                MinDistance = FMath::Min(MinDistance, Distance);
+                MinDistance = Distance;
+                NearestDifferentBiome = TestBiome;
                 break;
             }
         }
     }
     
-    return MinDistance;
-}
-
-void UEng_BiomeManager::RegisterBiomeZone(ABiomeZone* BiomeZone)
-{
-    if (BiomeZone && !RegisteredBiomeZones.Contains(BiomeZone))
-    {
-        RegisteredBiomeZones.Add(BiomeZone);
-        UE_LOG(LogTemp, Log, TEXT("UEng_BiomeManager::RegisterBiomeZone - Registered biome zone: %s"), *BiomeZone->GetName());
-    }
-}
-
-void UEng_BiomeManager::UnregisterBiomeZone(ABiomeZone* BiomeZone)
-{
-    if (BiomeZone)
-    {
-        RegisteredBiomeZones.Remove(BiomeZone);
-        UE_LOG(LogTemp, Log, TEXT("UEng_BiomeManager::UnregisterBiomeZone - Unregistered biome zone: %s"), *BiomeZone->GetName());
-    }
-}
-
-TArray<ABiomeZone*> UEng_BiomeManager::GetBiomeZonesInRadius(const FVector& Center, float Radius) const
-{
-    TArray<ABiomeZone*> ZonesInRadius;
+    TransitionData.ToBiome = NearestDifferentBiome;
+    TransitionData.TransitionDistance = MinDistance;
+    TransitionData.BlendFactor = FMath::Clamp(MinDistance / TransitionZoneSize, 0.0f, 1.0f);
     
-    for (ABiomeZone* Zone : RegisteredBiomeZones)
+    return TransitionData;
+}
+
+float UEng_BiomeManager::GetTemperatureAtLocation(const FVector& WorldLocation) const
+{
+    FEng_BiomeParameters Params = GetBlendedBiomeParameters(WorldLocation);
+    
+    // Add elevation-based temperature variation
+    float ElevationEffect = -WorldLocation.Z * 0.01f; // -1°C per 100m elevation
+    
+    return Params.Temperature + ElevationEffect;
+}
+
+float UEng_BiomeManager::GetHumidityAtLocation(const FVector& WorldLocation) const
+{
+    FEng_BiomeParameters Params = GetBlendedBiomeParameters(WorldLocation);
+    return Params.Humidity;
+}
+
+float UEng_BiomeManager::GetVegetationDensityAtLocation(const FVector& WorldLocation) const
+{
+    FEng_BiomeParameters Params = GetBlendedBiomeParameters(WorldLocation);
+    return Params.VegetationDensity;
+}
+
+void UEng_BiomeManager::ValidateBiomeConfiguration()
+{
+    UE_LOG(LogTemp, Warning, TEXT("BiomeManager: Validating biome configuration..."));
+    
+    int32 ValidBiomes = 0;
+    for (const auto& BiomeEntry : BiomeParametersMap)
     {
-        if (Zone && FVector::Dist(Zone->GetActorLocation(), Center) <= Radius)
+        const FEng_BiomeParameters& Params = BiomeEntry.Value;
+        
+        if (Params.Temperature >= -50.0f && Params.Temperature <= 50.0f &&
+            Params.Humidity >= 0.0f && Params.Humidity <= 1.0f &&
+            Params.VegetationDensity >= 0.0f && Params.VegetationDensity <= 1.0f)
         {
-            ZonesInRadius.Add(Zone);
+            ValidBiomes++;
+        }
+        else
+        {
+            UE_LOG(LogTemp, Error, TEXT("BiomeManager: Invalid parameters for biome %d"), (int32)BiomeEntry.Key);
         }
     }
     
-    return ZonesInRadius;
+    UE_LOG(LogTemp, Warning, TEXT("BiomeManager: Validation complete. %d/%d biomes valid"), ValidBiomes, BiomeParametersMap.Num());
 }
 
-void UEng_BiomeManager::UpdateWeatherForBiome(EBiomeType BiomeType, float DeltaTime)
+void UEng_BiomeManager::GenerateDebugBiomeMap()
 {
-    // Weather system integration - placeholder for now
-    if (WeatherSystem)
+    UE_LOG(LogTemp, Warning, TEXT("BiomeManager: Generating debug biome map..."));
+    
+    // Clear existing cache to force regeneration
+    BiomeCache.Empty();
+    
+    // Sample a grid of locations and log biome types
+    for (int32 X = -5; X <= 5; X++)
     {
-        // Update weather patterns based on biome characteristics
-        FEng_BiomeConfig Config = GetBiomeConfig(BiomeType);
-        // Weather system would use Config.HumidityLevel, temperature ranges, etc.
+        for (int32 Y = -5; Y <= 5; Y++)
+        {
+            FVector TestLocation = FVector(X * 1000.0f, Y * 1000.0f, 0.0f);
+            EEng_BiomeType BiomeType = GetBiomeAtLocation(TestLocation);
+            
+            UE_LOG(LogTemp, Warning, TEXT("BiomeMap: (%d,%d) = Biome %d"), X, Y, (int32)BiomeType);
+        }
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("BiomeManager: Debug map generation complete"));
+}
+
+float UEng_BiomeManager::CalculateNoiseValue(const FVector& Location, float Scale) const
+{
+    // Simple Perlin-like noise implementation
+    float X = Location.X * Scale;
+    float Y = Location.Y * Scale;
+    
+    // Basic noise function using sine waves
+    float Noise1 = FMath::Sin(X * 0.1f) * FMath::Cos(Y * 0.1f);
+    float Noise2 = FMath::Sin(X * 0.05f) * FMath::Cos(Y * 0.05f) * 0.5f;
+    float Noise3 = FMath::Sin(X * 0.02f) * FMath::Cos(Y * 0.02f) * 0.25f;
+    
+    return (Noise1 + Noise2 + Noise3) / 1.75f;
+}
+
+EEng_BiomeType UEng_BiomeManager::DetermineBiomeFromNoise(float NoiseValue, float Elevation) const
+{
+    // Elevation-based biome selection
+    if (Elevation > 500.0f)
+    {
+        return EEng_BiomeType::Mountains;
+    }
+    else if (Elevation < -50.0f)
+    {
+        return EEng_BiomeType::Swamp;
+    }
+    
+    // Noise-based biome selection for normal elevations
+    if (NoiseValue < -0.5f)
+    {
+        return EEng_BiomeType::Desert;
+    }
+    else if (NoiseValue < -0.2f)
+    {
+        return EEng_BiomeType::Grassland;
+    }
+    else if (NoiseValue < 0.2f)
+    {
+        return EEng_BiomeType::Forest;
+    }
+    else if (NoiseValue < 0.5f)
+    {
+        return EEng_BiomeType::Swamp;
+    }
+    else
+    {
+        return EEng_BiomeType::Lake;
     }
 }
 
-bool UEng_BiomeManager::CanWeatherOccurInBiome(EWeatherType WeatherType, EBiomeType BiomeType) const
+FEng_BiomeParameters UEng_BiomeManager::BlendBiomeParameters(const FEng_BiomeParameters& BiomeA, const FEng_BiomeParameters& BiomeB, float BlendFactor) const
 {
-    FEng_BiomeConfig Config = GetBiomeConfig(BiomeType);
+    FEng_BiomeParameters BlendedParams;
     
-    // Simple weather compatibility rules
-    switch (WeatherType)
-    {
-    case EWeatherType::Rain:
-        return Config.HumidityLevel > 0.3f;
-    case EWeatherType::Snow:
-        return BiomeType == EBiomeType::SnowMountain || Config.TemperatureMax < 5.0f;
-    case EWeatherType::Sandstorm:
-        return BiomeType == EBiomeType::Desert;
-    case EWeatherType::Fog:
-        return Config.HumidityLevel > 0.6f;
-    default:
-        return true;
-    }
-}
-
-TArray<TSubclassOf<class ADinosaurBase>> UEng_BiomeManager::GetNativeDinosaursForBiome(EBiomeType BiomeType) const
-{
-    FEng_BiomeConfig Config = GetBiomeConfig(BiomeType);
-    return Config.NativeDinosaurs;
-}
-
-float UEng_BiomeManager::GetDinosaurSpawnChanceInBiome(TSubclassOf<class ADinosaurBase> DinosaurClass, EBiomeType BiomeType) const
-{
-    TArray<TSubclassOf<class ADinosaurBase>> NativeDinosaurs = GetNativeDinosaursForBiome(BiomeType);
+    BlendedParams.Temperature = FMath::Lerp(BiomeA.Temperature, BiomeB.Temperature, BlendFactor);
+    BlendedParams.Humidity = FMath::Lerp(BiomeA.Humidity, BiomeB.Humidity, BlendFactor);
+    BlendedParams.VegetationDensity = FMath::Lerp(BiomeA.VegetationDensity, BiomeB.VegetationDensity, BlendFactor);
+    BlendedParams.RockDensity = FMath::Lerp(BiomeA.RockDensity, BiomeB.RockDensity, BlendFactor);
+    BlendedParams.WaterLevel = FMath::Lerp(BiomeA.WaterLevel, BiomeB.WaterLevel, BlendFactor);
+    BlendedParams.FogDensity = FMath::Lerp(BiomeA.FogDensity, BiomeB.FogDensity, BlendFactor);
     
-    if (NativeDinosaurs.Contains(DinosaurClass))
-    {
-        return 1.0f; // 100% chance for native species
-    }
+    // Blend colors
+    BlendedParams.FogColor = FLinearColor(
+        FMath::Lerp(BiomeA.FogColor.R, BiomeB.FogColor.R, BlendFactor),
+        FMath::Lerp(BiomeA.FogColor.G, BiomeB.FogColor.G, BlendFactor),
+        FMath::Lerp(BiomeA.FogColor.B, BiomeB.FogColor.B, BlendFactor),
+        FMath::Lerp(BiomeA.FogColor.A, BiomeB.FogColor.A, BlendFactor)
+    );
     
-    // Reduced chance for non-native species
-    return 0.1f; // 10% chance
-}
-
-void UEng_BiomeManager::DebugPrintBiomeInfo(const FVector& Location) const
-{
-    EBiomeType BiomeType = GetBiomeAtLocation(Location);
-    FEng_BiomeConfig Config = GetBiomeConfig(BiomeType);
-    float Temperature = GetTemperatureAtLocation(Location);
-    float Humidity = GetHumidityAtLocation(Location);
-    bool InTransition = IsLocationInBiomeTransition(Location);
+    // Choose dominant biome type
+    BlendedParams.BiomeType = (BlendFactor < 0.5f) ? BiomeA.BiomeType : BiomeB.BiomeType;
     
-    UE_LOG(LogTemp, Warning, TEXT("=== BIOME DEBUG INFO ==="));
-    UE_LOG(LogTemp, Warning, TEXT("Location: %s"), *Location.ToString());
-    UE_LOG(LogTemp, Warning, TEXT("Biome: %s"), *Config.BiomeName);
-    UE_LOG(LogTemp, Warning, TEXT("Temperature: %.1f°C"), Temperature);
-    UE_LOG(LogTemp, Warning, TEXT("Humidity: %.1f%%"), Humidity * 100.0f);
-    UE_LOG(LogTemp, Warning, TEXT("In Transition: %s"), InTransition ? TEXT("Yes") : TEXT("No"));
-    UE_LOG(LogTemp, Warning, TEXT("Vegetation Density: %.1f%%"), Config.VegetationDensity * 100.0f);
-}
-
-void UEng_BiomeManager::ValidateBiomeConfiguration() const
-{
-    UE_LOG(LogTemp, Warning, TEXT("=== BIOME SYSTEM VALIDATION ==="));
-    UE_LOG(LogTemp, Warning, TEXT("Total Biome Configs: %d"), BiomeConfigs.Num());
-    UE_LOG(LogTemp, Warning, TEXT("Total Transitions: %d"), BiomeTransitions.Num());
-    UE_LOG(LogTemp, Warning, TEXT("Registered Zones: %d"), RegisteredBiomeZones.Num());
-    UE_LOG(LogTemp, Warning, TEXT("Cache Entries: %d"), BiomeLocationCache.Num());
-    
-    // Validate each biome config
-    for (const auto& BiomePair : BiomeConfigs)
-    {
-        const FEng_BiomeConfig& Config = BiomePair.Value;
-        UE_LOG(LogTemp, Warning, TEXT("Biome %s: Temp %.1f-%.1f°C, Humidity %.1f, Vegetation %.1f"), 
-            *Config.BiomeName, Config.TemperatureMin, Config.TemperatureMax, 
-            Config.HumidityLevel, Config.VegetationDensity);
-    }
-}
-
-void UEng_BiomeManager::CleanupLocationCache() const
-{
-    if (BiomeLocationCache.Num() > MAX_CACHE_ENTRIES)
-    {
-        // Remove oldest entries (simplified - in production use LRU cache)
-        BiomeLocationCache.Empty();
-        UE_LOG(LogTemp, Log, TEXT("UEng_BiomeManager::CleanupLocationCache - Cache cleared"));
-    }
+    return BlendedParams;
 }
