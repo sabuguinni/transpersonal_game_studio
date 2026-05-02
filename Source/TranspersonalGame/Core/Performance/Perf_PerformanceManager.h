@@ -1,21 +1,23 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/GameInstanceSubsystem.h"
+#include "GameFramework/Actor.h"
 #include "Engine/World.h"
+#include "Components/ActorComponent.h"
+#include "../SharedTypes.h"
 #include "Perf_PerformanceManager.generated.h"
 
 UENUM(BlueprintType)
-enum class EPerf_PerformanceLevel : uint8
+enum class EPerf_OptimizationLevel : uint8
 {
-    Low         UMETA(DisplayName = "Low Performance"),
-    Medium      UMETA(DisplayName = "Medium Performance"),
-    High        UMETA(DisplayName = "High Performance"),
-    Ultra       UMETA(DisplayName = "Ultra Performance")
+    Low         UMETA(DisplayName = "Low"),
+    Medium      UMETA(DisplayName = "Medium"),
+    High        UMETA(DisplayName = "High"),
+    Critical    UMETA(DisplayName = "Critical")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FPerf_PerformanceMetrics
+struct FPerf_PerformanceMetrics
 {
     GENERATED_BODY()
 
@@ -23,58 +25,58 @@ struct TRANSPERSONALGAME_API FPerf_PerformanceMetrics
     float CurrentFPS;
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float FrameTime;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 DrawCalls;
+    float TargetFPS;
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
     float MemoryUsageMB;
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 VisibleActors;
+    int32 ActiveActorCount;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    EPerf_OptimizationLevel CurrentOptimizationLevel;
 
     FPerf_PerformanceMetrics()
     {
         CurrentFPS = 0.0f;
-        FrameTime = 0.0f;
-        DrawCalls = 0;
+        TargetFPS = 60.0f;
         MemoryUsageMB = 0.0f;
-        VisibleActors = 0;
+        ActiveActorCount = 0;
+        CurrentOptimizationLevel = EPerf_OptimizationLevel::Medium;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FPerf_LODSettings
+struct FPerf_OptimizationZone
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    float ViewDistanceScale;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Optimization")
+    FString ZoneName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    float FoliageLODScale;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Optimization")
+    FVector Location;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    int32 SkeletalMeshLODBias;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Optimization")
+    float Radius;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    int32 MaxShadowResolution;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Optimization")
+    float TargetFPS;
 
-    FPerf_LODSettings()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Optimization")
+    EPerf_OptimizationLevel OptimizationLevel;
+
+    FPerf_OptimizationZone()
     {
-        ViewDistanceScale = 1.0f;
-        FoliageLODScale = 1.0f;
-        SkeletalMeshLODBias = 0;
-        MaxShadowResolution = 4096;
+        ZoneName = TEXT("DefaultZone");
+        Location = FVector::ZeroVector;
+        Radius = 1000.0f;
+        TargetFPS = 60.0f;
+        OptimizationLevel = EPerf_OptimizationLevel::Medium;
     }
 };
 
-/**
- * Performance Manager Subsystem
- * Monitors and optimizes game performance to maintain 60fps on PC and 30fps on console
- */
-UCLASS(BlueprintType)
+UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UPerf_PerformanceManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
@@ -82,73 +84,81 @@ class TRANSPERSONALGAME_API UPerf_PerformanceManager : public UGameInstanceSubsy
 public:
     UPerf_PerformanceManager();
 
-    // USubsystem interface
+    // Subsystem overrides
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
     // Performance monitoring
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    FPerf_PerformanceMetrics GetCurrentMetrics() const;
+    void StartPerformanceMonitoring();
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void SetPerformanceLevel(EPerf_PerformanceLevel Level);
+    void StopPerformanceMonitoring();
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    EPerf_PerformanceLevel GetCurrentPerformanceLevel() const;
+    FPerf_PerformanceMetrics GetCurrentPerformanceMetrics() const;
+
+    // Optimization management
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void SetOptimizationLevel(EPerf_OptimizationLevel NewLevel);
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void ApplyOptimizationToActors();
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void CreateOptimizationZone(const FPerf_OptimizationZone& ZoneData);
 
     // LOD management
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void ApplyLODSettings(const FPerf_LODSettings& Settings);
+    void ApplyLODSettings();
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    FPerf_LODSettings GetCurrentLODSettings() const;
+    void SetLODDistances(float LOD0Distance, float LOD1Distance, float LOD2Distance);
 
-    // Dynamic optimization
+    // Memory optimization
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void OptimizeForCurrentConditions();
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void EnablePerformanceMonitoring(bool bEnabled);
-
-    // Performance targets
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void SetTargetFPS(float TargetFPS);
+    void OptimizeMemoryUsage();
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    float GetTargetFPS() const;
+    void ForceGarbageCollection();
+
+    // Performance testing
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void RunPerformanceBenchmark();
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    bool IsPerformanceTargetMet() const;
 
 protected:
-    // Performance monitoring
-    void UpdatePerformanceMetrics();
-    void CheckPerformanceThresholds();
-    void AdjustQualitySettings();
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    FPerf_PerformanceMetrics CurrentMetrics;
 
-    // LOD optimization
-    void OptimizeLODSettings();
-    void UpdateViewDistanceScaling();
-    void OptimizeShadowSettings();
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    TArray<FPerf_OptimizationZone> OptimizationZones;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float PerformanceUpdateInterval;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    bool bIsMonitoringActive;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float LOD0Distance;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float LOD1Distance;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float LOD2Distance;
 
 private:
-    UPROPERTY()
-    EPerf_PerformanceLevel CurrentPerformanceLevel;
+    void UpdatePerformanceMetrics();
+    void ApplyOptimizationCommands(EPerf_OptimizationLevel Level);
+    void OptimizeStaticMeshActors();
+    void OptimizeLightActors();
+    void CleanupDuplicateActors();
 
-    UPROPERTY()
-    FPerf_PerformanceMetrics CachedMetrics;
-
-    UPROPERTY()
-    FPerf_LODSettings CurrentLODSettings;
-
-    UPROPERTY()
-    float TargetFPS;
-
-    UPROPERTY()
-    bool bPerformanceMonitoringEnabled;
-
-    UPROPERTY()
-    float LastOptimizationTime;
-
-    // Performance thresholds
-    static constexpr float LOW_FPS_THRESHOLD = 25.0f;
-    static constexpr float HIGH_FPS_THRESHOLD = 55.0f;
-    static constexpr float OPTIMIZATION_INTERVAL = 5.0f;
+    FTimerHandle PerformanceUpdateTimer;
+    float LastFrameTime;
+    int32 FrameCounter;
 };
