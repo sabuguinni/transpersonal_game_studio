@@ -1,205 +1,136 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Subsystems/GameInstanceSubsystem.h"
-#include "Engine/World.h"
-#include "NiagaraSystem.h"
+#include "GameFramework/Actor.h"
+#include "Components/StaticMeshComponent.h"
 #include "NiagaraComponent.h"
-#include "Components/AudioComponent.h"
-#include "Sound/SoundBase.h"
-#include "Core/SharedTypes.h"
+#include "NiagaraSystem.h"
+#include "Engine/TriggerVolume.h"
+#include "SharedTypes.h"
 #include "VFX_SystemManager.generated.h"
-
-/**
- * VFX System Manager - Handles all visual effects in the prehistoric world
- * Manages Niagara particle systems, environmental effects, and impact VFX
- * Agent #17 - VFX Agent
- */
 
 UENUM(BlueprintType)
 enum class EVFX_EffectType : uint8
 {
-    Impact          UMETA(DisplayName = "Impact"),
-    Environmental   UMETA(DisplayName = "Environmental"),
-    Weather         UMETA(DisplayName = "Weather"),
-    Fire            UMETA(DisplayName = "Fire"),
-    Water           UMETA(DisplayName = "Water"),
-    Dust            UMETA(DisplayName = "Dust"),
-    Blood           UMETA(DisplayName = "Blood"),
-    Destruction     UMETA(DisplayName = "Destruction")
-};
-
-UENUM(BlueprintType)
-enum class EVFX_IntensityLevel : uint8
-{
-    Minimal = 0     UMETA(DisplayName = "Minimal"),
-    Low = 1         UMETA(DisplayName = "Low"),
-    Medium = 2      UMETA(DisplayName = "Medium"),
-    High = 3        UMETA(DisplayName = "High"),
-    Extreme = 4     UMETA(DisplayName = "Extreme")
+    Footstep_Small      UMETA(DisplayName = "Small Footstep"),
+    Footstep_Large      UMETA(DisplayName = "Large Footstep"),
+    Dust_Trail          UMETA(DisplayName = "Dust Trail"),
+    Atmosphere_Tension  UMETA(DisplayName = "Atmospheric Tension"),
+    Impact_Ground       UMETA(DisplayName = "Ground Impact"),
+    Danger_Zone         UMETA(DisplayName = "Danger Zone Particles"),
+    Water_Splash        UMETA(DisplayName = "Water Splash"),
+    Blood_Impact        UMETA(DisplayName = "Blood Impact")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FVFX_EffectData
+struct FVFX_EffectData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    EVFX_EffectType EffectType = EVFX_EffectType::Impact;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Effect")
+    EVFX_EffectType EffectType;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    EVFX_IntensityLevel Intensity = EVFX_IntensityLevel::Medium;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Effect")
+    TSoftObjectPtr<UNiagaraSystem> NiagaraSystem;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    FVector Location = FVector::ZeroVector;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Effect")
+    float Duration;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    FRotator Rotation = FRotator::ZeroRotator;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Effect")
+    float Intensity;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    FVector Scale = FVector::OneVector;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    float Duration = 2.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    bool bAutoDestroy = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    bool bPlaySound = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Effect")
+    bool bAutoDestroy;
 
     FVFX_EffectData()
     {
-        EffectType = EVFX_EffectType::Impact;
-        Intensity = EVFX_IntensityLevel::Medium;
-        Location = FVector::ZeroVector;
-        Rotation = FRotator::ZeroRotator;
-        Scale = FVector::OneVector;
+        EffectType = EVFX_EffectType::Footstep_Small;
         Duration = 2.0f;
+        Intensity = 1.0f;
         bAutoDestroy = true;
-        bPlaySound = true;
-    }
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FVFX_SystemSettings
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    EEng_PerformanceTier PerformanceTier = EEng_PerformanceTier::High;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxActiveEffects = 50;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float EffectCullDistance = 5000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    bool bEnableLOD = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quality")
-    float ParticleQualityMultiplier = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quality")
-    bool bEnableVolumetricFog = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quality")
-    bool bEnableDistortion = true;
-
-    FVFX_SystemSettings()
-    {
-        PerformanceTier = EEng_PerformanceTier::High;
-        MaxActiveEffects = 50;
-        EffectCullDistance = 5000.0f;
-        bEnableLOD = true;
-        ParticleQualityMultiplier = 1.0f;
-        bEnableVolumetricFog = true;
-        bEnableDistortion = true;
     }
 };
 
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UVFX_SystemManager : public UGameInstanceSubsystem
+class TRANSPERSONALGAME_API UVFX_SystemManager : public UObject
 {
     GENERATED_BODY()
 
 public:
     UVFX_SystemManager();
 
-    // Subsystem interface
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
+    // Core VFX Management
+    UFUNCTION(BlueprintCallable, Category = "VFX System")
+    void InitializeVFXSystem();
 
-    // Core VFX functions
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    class UNiagaraComponent* SpawnEffect(const FVFX_EffectData& EffectData);
+    UFUNCTION(BlueprintCallable, Category = "VFX System")
+    void SpawnEffect(EVFX_EffectType EffectType, FVector Location, FRotator Rotation = FRotator::ZeroRotator);
 
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void SpawnDinosaurFootstep(const FVector& Location, float DinosaurSize = 1.0f);
+    UFUNCTION(BlueprintCallable, Category = "VFX System")
+    void SpawnFootstepEffect(FVector Location, bool bIsLargeDinosaur = false);
 
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void SpawnCampfire(const FVector& Location, float Intensity = 1.0f);
+    UFUNCTION(BlueprintCallable, Category = "VFX System")
+    void SpawnAtmosphericTension(FVector Location, float TensionLevel = 1.0f);
 
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void SpawnImpactEffect(const FVector& Location, const FVector& Normal, EVFX_EffectType ImpactType);
+    UFUNCTION(BlueprintCallable, Category = "VFX System")
+    void SpawnDustTrail(FVector StartLocation, FVector EndLocation);
 
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void SpawnWeatherEffect(EVFX_EffectType WeatherType, float Intensity = 1.0f);
+    UFUNCTION(BlueprintCallable, Category = "VFX System")
+    void SpawnDangerZoneParticles(FVector Location, float Radius = 500.0f);
 
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void SpawnBloodEffect(const FVector& Location, const FVector& Direction, float Amount = 1.0f);
+    // Environmental VFX
+    UFUNCTION(BlueprintCallable, Category = "Environmental VFX")
+    void UpdateEnvironmentalEffects(EBiomeType BiomeType, float TimeOfDay);
 
-    // System management
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void SetPerformanceTier(EEng_PerformanceTier NewTier);
+    UFUNCTION(BlueprintCallable, Category = "Environmental VFX")
+    void SetWeatherEffects(EWeatherType WeatherType, float Intensity);
 
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void UpdateLODSettings();
+    // Combat VFX
+    UFUNCTION(BlueprintCallable, Category = "Combat VFX")
+    void SpawnImpactEffect(FVector Location, EVFX_EffectType ImpactType);
 
-    UFUNCTION(BlueprintCallable, Category = "VFX")
+    UFUNCTION(BlueprintCallable, Category = "Combat VFX")
+    void SpawnBloodEffect(FVector Location, FVector Direction);
+
+    // Performance Management
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void SetVFXQualityLevel(int32 QualityLevel);
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
     void CleanupExpiredEffects();
 
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    int32 GetActiveEffectCount() const { return ActiveEffects.Num(); }
-
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    FVFX_SystemSettings GetSystemSettings() const { return SystemSettings; }
-
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void SetSystemSettings(const FVFX_SystemSettings& NewSettings);
-
 protected:
-    // System settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    FVFX_SystemSettings SystemSettings;
+    // VFX Effect Registry
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Registry")
+    TMap<EVFX_EffectType, FVFX_EffectData> EffectRegistry;
 
-    // Effect templates
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Templates")
-    TMap<EVFX_EffectType, TSoftObjectPtr<UNiagaraSystem>> EffectTemplates;
-
-    // Sound effects
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    TMap<EVFX_EffectType, TSoftObjectPtr<USoundBase>> EffectSounds;
-
-    // Active effects tracking
-    UPROPERTY()
+    // Active Effect Tracking
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Active Effects")
     TArray<UNiagaraComponent*> ActiveEffects;
 
-    // Performance monitoring
-    UPROPERTY()
-    float LastCleanupTime = 0.0f;
+    // Performance Settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 MaxActiveEffects;
 
-    UPROPERTY()
-    float CleanupInterval = 5.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float EffectCullingDistance;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 CurrentQualityLevel;
 
 private:
-    // Internal helper functions
-    UNiagaraSystem* GetEffectTemplate(EVFX_EffectType EffectType);
-    USoundBase* GetEffectSound(EVFX_EffectType EffectType);
-    void PlayEffectSound(const FVector& Location, EVFX_EffectType EffectType, float VolumeMultiplier = 1.0f);
-    void RegisterActiveEffect(UNiagaraComponent* Effect);
-    void UnregisterActiveEffect(UNiagaraComponent* Effect);
-    FVector CalculateLODScale(const FVector& EffectLocation, float BaseScale);
-    bool ShouldCullEffect(const FVector& EffectLocation);
+    // Internal Methods
+    void LoadEffectAssets();
+    void RegisterDefaultEffects();
+    UNiagaraComponent* CreateNiagaraComponent(UNiagaraSystem* System, FVector Location, FRotator Rotation);
+    void ManageEffectPool();
+    bool ShouldCullEffect(const UNiagaraComponent* Effect, FVector PlayerLocation) const;
+
+    // Effect Pool Management
+    TArray<UNiagaraComponent*> EffectPool;
+    int32 PoolIndex;
+    
+    // Timing
+    float LastCleanupTime;
+    const float CleanupInterval = 5.0f;
 };
