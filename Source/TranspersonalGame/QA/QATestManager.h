@@ -1,17 +1,16 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/World.h"
 #include "GameFramework/Actor.h"
+#include "Components/ActorComponent.h"
 #include "Engine/Engine.h"
-#include "Components/SceneComponent.h"
-#include "Components/BoxComponent.h"
-#include "Components/SphereComponent.h"
 #include "QATestManager.generated.h"
 
 UENUM(BlueprintType)
 enum class EQA_TestResult : uint8
 {
-    NotTested   UMETA(DisplayName = "Not Tested"),
+    NotRun      UMETA(DisplayName = "Not Run"),
     Pass        UMETA(DisplayName = "Pass"),
     Fail        UMETA(DisplayName = "Fail"),
     Warning     UMETA(DisplayName = "Warning")
@@ -41,143 +40,144 @@ struct FQA_TestCase
     {
         TestName = TEXT("");
         TestDescription = TEXT("");
-        Result = EQA_TestResult::NotTested;
+        Result = EQA_TestResult::NotRun;
         ErrorMessage = TEXT("");
         ExecutionTime = 0.0f;
     }
 };
 
 USTRUCT(BlueprintType)
-struct FQA_PerformanceMetrics
+struct FQA_TestSuite
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float FrameRate;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Test Suite")
+    FString SuiteName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float GameThreadTime;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Test Suite")
+    TArray<FQA_TestCase> TestCases;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float RenderThreadTime;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Test Suite")
+    int32 PassCount;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 DrawCalls;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Test Suite")
+    int32 FailCount;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float MemoryUsage;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Test Suite")
+    int32 WarningCount;
 
-    FQA_PerformanceMetrics()
+    FQA_TestSuite()
     {
-        FrameRate = 0.0f;
-        GameThreadTime = 0.0f;
-        RenderThreadTime = 0.0f;
-        DrawCalls = 0;
-        MemoryUsage = 0.0f;
+        SuiteName = TEXT("");
+        PassCount = 0;
+        FailCount = 0;
+        WarningCount = 0;
     }
 };
 
+/**
+ * QA Test Manager - Manages automated testing and validation
+ * Ensures game quality and prevents regressions
+ */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AQATestManager : public AActor
+class TRANSPERSONALGAME_API UQATestManager : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    AQATestManager();
+    UQATestManager();
 
 protected:
     virtual void BeginPlay() override;
 
 public:
-    virtual void Tick(float DeltaTime) override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
     // Test execution functions
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
     void RunAllTests();
 
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    void RunMovementTests();
+    void RunTestSuite(const FString& SuiteName);
 
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    void RunCombatTests();
+    void RunSingleTest(const FString& TestName);
+
+    // Test validation functions
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
+    bool ValidateMapActors();
 
     UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    void RunAudioTests();
-
-    UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    void RunVFXTests();
-
-    UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    void RunAITests();
-
-    UFUNCTION(BlueprintCallable, Category = "QA Testing")
-    void RunPerformanceTests();
-
-    // Validation functions
-    UFUNCTION(BlueprintCallable, Category = "QA Validation")
-    bool ValidateDinosaurActors();
-
-    UFUNCTION(BlueprintCallable, Category = "QA Validation")
     bool ValidatePlayerCharacter();
 
-    UFUNCTION(BlueprintCallable, Category = "QA Validation")
-    bool ValidateWorldGeneration();
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
+    bool ValidateDinosaurActors();
 
-    UFUNCTION(BlueprintCallable, Category = "QA Validation")
-    bool ValidateAudioSystems();
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
+    bool ValidateLightingSetup();
 
-    UFUNCTION(BlueprintCallable, Category = "QA Validation")
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
     bool ValidateVFXSystems();
 
-    // Performance monitoring
-    UFUNCTION(BlueprintCallable, Category = "QA Performance")
-    FQA_PerformanceMetrics GetCurrentPerformanceMetrics();
+    // Performance testing
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
+    bool ValidateFrameRate();
 
-    UFUNCTION(BlueprintCallable, Category = "QA Performance")
-    void StartPerformanceMonitoring();
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
+    bool ValidateMemoryUsage();
 
-    UFUNCTION(BlueprintCallable, Category = "QA Performance")
-    void StopPerformanceMonitoring();
-
-    // Test reporting
-    UFUNCTION(BlueprintCallable, Category = "QA Reporting")
+    // Reporting functions
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
     void GenerateTestReport();
 
-    UFUNCTION(BlueprintCallable, Category = "QA Reporting")
-    void ExportTestResults();
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
+    FString GetTestSummary();
+
+    // Test result accessors
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
+    TArray<FQA_TestSuite> GetTestSuites() const { return TestSuites; }
+
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
+    int32 GetTotalPassCount() const;
+
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
+    int32 GetTotalFailCount() const;
+
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
+    int32 GetTotalWarningCount() const;
 
 protected:
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    USceneComponent* RootSceneComponent;
+    // Test data
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Testing")
+    TArray<FQA_TestSuite> TestSuites;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Testing")
-    TArray<FQA_TestCase> TestCases;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Performance")
-    FQA_PerformanceMetrics CurrentMetrics;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Settings")
     bool bAutoRunTests;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Settings")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Testing")
     float TestInterval;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Settings")
-    bool bPerformanceMonitoringEnabled;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Testing")
+    bool bGenerateDetailedLogs;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Settings")
-    float PerformanceTargetFPS;
+    // Performance thresholds
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Performance")
+    float MinFrameRate;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Settings")
-    float MaxAcceptableFrameTime;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Performance")
+    float MaxMemoryUsageMB;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Performance")
+    int32 MaxActorCount;
 
 private:
-    float LastTestTime;
-    bool bTestsRunning;
-
-    // Helper functions
-    void AddTestCase(const FString& TestName, const FString& Description);
-    void UpdateTestResult(const FString& TestName, EQA_TestResult Result, const FString& ErrorMessage = TEXT(""));
+    // Internal test functions
+    void InitializeTestSuites();
+    void AddTestCase(const FString& SuiteName, const FString& TestName, const FString& Description);
+    void UpdateTestResult(const FString& SuiteName, const FString& TestName, EQA_TestResult Result, const FString& ErrorMessage = TEXT(""));
     void LogTestResult(const FQA_TestCase& TestCase);
-    void CleanupDuplicateActors();
+
+    // Timer for auto-testing
+    float TestTimer;
+    bool bTestsInitialized;
 };
