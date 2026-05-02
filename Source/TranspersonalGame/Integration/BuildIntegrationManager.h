@@ -1,148 +1,91 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/ActorComponent.h"
+#include "Engine/World.h"
+#include "Subsystems/WorldSubsystem.h"
 #include "Engine/Engine.h"
+#include "../SharedTypes.h"
 #include "BuildIntegrationManager.generated.h"
 
-DECLARE_LOG_CATEGORY_EXTERN(LogBuildIntegration, Log, All);
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuildValidationReport
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    FDateTime ValidationTime;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    bool bIsValid = true;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    int32 TotalActorCount = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    int32 LightingActorCount = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    int32 EnvironmentActorCount = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    int32 CharacterActorCount = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    int32 AIActorCount = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    int32 AudioVFXActorCount = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    int32 OtherActorCount = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    TArray<FString> ValidationErrors;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    TArray<FString> ValidationWarnings;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    TArray<FString> ValidationMessages;
-
-    FBuildValidationReport()
-    {
-        ValidationTime = FDateTime::Now();
-        bIsValid = true;
-        TotalActorCount = 0;
-        LightingActorCount = 0;
-        EnvironmentActorCount = 0;
-        CharacterActorCount = 0;
-        AIActorCount = 0;
-        AudioVFXActorCount = 0;
-        OtherActorCount = 0;
-    }
-};
-
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDuplicatesCleaned, int32, DestroyedCount);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnValidationComplete, const FBuildValidationReport&, Report);
-
 /**
- * BuildIntegrationManager - Manages build integration, duplicate cleanup, and system validation
- * 
- * This component automatically:
- * - Cleans duplicate lighting actors (DirectionalLight, SkyLight, ExponentialHeightFog)
- * - Validates system integration across all agent outputs
- * - Provides detailed validation reports
- * - Monitors actor counts and categories
- * 
- * Critical for preventing the duplicate actor issues that cause memory problems.
+ * Integration & Build Manager - Agente #19
+ * Manages build validation, actor cleanup, and system integration
+ * Ensures all agent outputs work together cohesively
  */
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UBuildIntegrationManager : public UActorComponent
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UBuildIntegrationManager : public UWorldSubsystem
 {
     GENERATED_BODY()
 
 public:
     UBuildIntegrationManager();
 
-protected:
-    virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    // Subsystem overrides
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
 
-public:
-    // Configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration Settings")
-    bool bAutoCleanDuplicates = true;
+    // Build validation functions
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    bool ValidateAllSystems();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration Settings")
-    bool bValidateSystemIntegration = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration Settings")
-    bool bLogDetailedReports = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration Settings")
-    int32 MaxAllowedDuplicates = 1;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration Settings")
-    float ValidationCheckInterval = 10.0f;
-
-    // Events
-    UPROPERTY(BlueprintAssignable, Category = "Integration Events")
-    FOnDuplicatesCleaned OnDuplicatesCleanedDelegate;
-
-    UPROPERTY(BlueprintAssignable, Category = "Integration Events")
-    FOnValidationComplete OnValidationCompleteDelegate;
-
-    // Core Functions
     UFUNCTION(BlueprintCallable, Category = "Integration")
     void CleanDuplicateActors();
 
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    void ValidateSystemIntegration();
+    int32 GetActorCount(const FString& ActorClassName);
 
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    FBuildValidationReport GetLatestValidationReport() const;
+    TArray<FString> GetSystemValidationReport();
+
+    // Performance monitoring
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    float GetCurrentFramerate();
 
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    TArray<FBuildValidationReport> GetValidationHistory() const;
+    bool IsPerformanceAcceptable();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
-    void ForceValidation();
+    // Integration status
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    bool bAllSystemsValid;
 
-    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
-    void ForceDuplicateCleanup();
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    int32 TotalActorCount;
 
-private:
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    float LastValidationTime;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    TArray<FString> ValidationErrors;
+
+protected:
     // Internal validation functions
-    void ValidateLightingSystem(FBuildValidationReport& Report);
-    void ValidateCharacterSystem(FBuildValidationReport& Report);
-    void ValidateWorldGeneration(FBuildValidationReport& Report);
-    void ValidateAISystems(FBuildValidationReport& Report);
-    
-    void LogValidationReport(const FBuildValidationReport& Report);
+    bool ValidateCharacterSystem();
+    bool ValidateWorldGeneration();
+    bool ValidateAudioSystem();
+    bool ValidateVFXSystem();
+    bool ValidateAISystem();
 
-    // State tracking
-    float LastValidationTime = 0.0f;
+    // Actor management
+    void RemoveDuplicateLighting();
+    void ValidateActorIntegrity();
+
+    // Performance tracking
+    UPROPERTY()
+    float FramerateHistory[60]; // Last 60 frames
     
     UPROPERTY()
-    TArray<FBuildValidationReport> ValidationReports;
+    int32 FrameIndex;
+
+    UPROPERTY()
+    float AverageFramerate;
+
+private:
+    // Validation state
+    bool bInitialized;
+    float LastCleanupTime;
+    
+    // Constants
+    static constexpr float VALIDATION_INTERVAL = 5.0f;
+    static constexpr float MIN_ACCEPTABLE_FPS = 30.0f;
+    static constexpr int32 MAX_DUPLICATE_ACTORS = 3;
 };
