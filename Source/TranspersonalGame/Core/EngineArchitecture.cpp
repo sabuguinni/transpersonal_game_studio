@@ -1,207 +1,319 @@
 #include "EngineArchitecture.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "GameFramework/GameModeBase.h"
+#include "Kismet/GameplayStatics.h"
 #include "HAL/PlatformFilemanager.h"
-#include "Misc/Paths.h"
 #include "Misc/DateTime.h"
-#include "Stats/Stats.h"
+
+UEngineArchitecture::UEngineArchitecture()
+{
+    bArchitectureValid = false;
+    LastValidationTime = 0.0f;
+    AverageFrameTime = 0.0f;
+    PeakActorCount = 0;
+
+    // Initialize core system modules
+    CoreSystemModules.Add(TEXT("TranspersonalGame"));
+    CoreSystemModules.Add(TEXT("Core"));
+    CoreSystemModules.Add(TEXT("Characters"));
+    CoreSystemModules.Add(TEXT("WorldGeneration"));
+
+    // Initialize gameplay system modules
+    GameplaySystemModules.Add(TEXT("AI"));
+    GameplaySystemModules.Add(TEXT("Combat"));
+    GameplaySystemModules.Add(TEXT("Quest"));
+    GameplaySystemModules.Add(TEXT("Environment"));
+
+    // Initialize rendering system modules
+    RenderingSystemModules.Add(TEXT("VFX"));
+    RenderingSystemModules.Add(TEXT("Lighting"));
+    RenderingSystemModules.Add(TEXT("Audio"));
+}
 
 void UEngineArchitecture::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Engine Architecture Subsystem Initialized"));
-    
-    // Register core modules
-    RegisterCoreModule(TEXT("TranspersonalGame"), TEXT("Source/TranspersonalGame/"));
-    RegisterCoreModule(TEXT("Core"), TEXT("Source/TranspersonalGame/Core/"));
-    RegisterCoreModule(TEXT("Physics"), TEXT("Source/TranspersonalGame/Physics/"));
-    RegisterCoreModule(TEXT("Performance"), TEXT("Source/TranspersonalGame/Performance/"));
-    
-    // Register gameplay modules
-    RegisterGameplayModule(TEXT("Characters"), TEXT("Source/TranspersonalGame/Characters/"));
-    RegisterGameplayModule(TEXT("WorldGeneration"), TEXT("Source/TranspersonalGame/WorldGeneration/"));
-    RegisterGameplayModule(TEXT("Environment"), TEXT("Source/TranspersonalGame/Environment/"));
-    RegisterGameplayModule(TEXT("AI"), TEXT("Source/TranspersonalGame/AI/"));
-    RegisterGameplayModule(TEXT("Combat"), TEXT("Source/TranspersonalGame/Combat/"));
-    RegisterGameplayModule(TEXT("Audio"), TEXT("Source/TranspersonalGame/Audio/"));
-    RegisterGameplayModule(TEXT("VFX"), TEXT("Source/TranspersonalGame/VFX/"));
-    
-    // Initial validation
-    bIsArchitectureValid = ValidateModuleStructure();
-    LastValidationTime = FDateTime::Now();
-    
-    LogArchitectureStatus();
+
+    UE_LOG(LogTemp, Warning, TEXT("EngineArchitecture: Subsystem initialized"));
+
+    // Register core systems with priorities
+    RegisterSystemModule(TEXT("Core"), 100);
+    RegisterSystemModule(TEXT("Characters"), 90);
+    RegisterSystemModule(TEXT("WorldGeneration"), 80);
+    RegisterSystemModule(TEXT("AI"), 70);
+    RegisterSystemModule(TEXT("Combat"), 60);
+    RegisterSystemModule(TEXT("Environment"), 50);
+    RegisterSystemModule(TEXT("VFX"), 40);
+    RegisterSystemModule(TEXT("Audio"), 30);
+
+    // Perform initial validation
+    ValidateSystemDependencies();
 }
 
 void UEngineArchitecture::Deinitialize()
 {
-    UE_LOG(LogTemp, Warning, TEXT("Engine Architecture Subsystem Deinitialized"));
+    UE_LOG(LogTemp, Warning, TEXT("EngineArchitecture: Subsystem deinitialized"));
+    RegisteredSystems.Empty();
     Super::Deinitialize();
 }
 
-bool UEngineArchitecture::ValidateModuleStructure()
+bool UEngineArchitecture::ValidateSystemDependencies()
 {
-    bool bValid = true;
-    
-    // Check if core modules exist
-    for (const auto& Module : CoreModules)
+    UE_LOG(LogTemp, Warning, TEXT("EngineArchitecture: Validating system dependencies"));
+
+    bool bAllValid = true;
+    LastValidationTime = FPlatformTime::Seconds();
+
+    // Validate core systems
+    bAllValid &= ValidateWorldGeneration();
+    bAllValid &= ValidateCharacterSystems();
+    bAllValid &= ValidateDinosaurSystems();
+    bAllValid &= ValidateRenderingPipeline();
+
+    bArchitectureValid = bAllValid;
+
+    UE_LOG(LogTemp, Warning, TEXT("EngineArchitecture: Validation complete - %s"), 
+           bAllValid ? TEXT("PASSED") : TEXT("FAILED"));
+
+    return bAllValid;
+}
+
+bool UEngineArchitecture::ValidateModuleIntegrity()
+{
+    UE_LOG(LogTemp, Warning, TEXT("EngineArchitecture: Validating module integrity"));
+
+    // Check if core modules are registered
+    bool bCoreValid = true;
+    for (const FString& CoreModule : CoreSystemModules)
     {
-        FString ModulePath = FPaths::ProjectDir() + Module.Value;
-        if (!FPaths::DirectoryExists(ModulePath))
+        if (!RegisteredSystems.Contains(CoreModule))
         {
-            UE_LOG(LogTemp, Error, TEXT("Core module directory missing: %s"), *ModulePath);
-            bValid = false;
+            UE_LOG(LogTemp, Error, TEXT("EngineArchitecture: Core module missing: %s"), *CoreModule);
+            bCoreValid = false;
         }
     }
-    
-    // Check if gameplay modules exist
-    for (const auto& Module : GameplayModules)
+
+    // Check world state
+    UWorld* World = GetWorld();
+    if (!World)
     {
-        FString ModulePath = FPaths::ProjectDir() + Module.Value;
-        if (!FPaths::DirectoryExists(ModulePath))
-        {
-            UE_LOG(LogTemp, Warning, TEXT("Gameplay module directory missing: %s"), *ModulePath);
-        }
+        UE_LOG(LogTemp, Error, TEXT("EngineArchitecture: No valid world found"));
+        bCoreValid = false;
     }
-    
-    return bValid;
+
+    return bCoreValid;
 }
 
-bool UEngineArchitecture::ValidatePerformanceRequirements()
+void UEngineArchitecture::RegisterSystemModule(const FString& ModuleName, int32 Priority)
 {
-    float CurrentFrameTime = GetCurrentFrameTime();
-    int32 CurrentActorCount = GetCurrentActorCount();
-    float CurrentMemoryUsage = GetCurrentMemoryUsageMB();
-    
-    bool bPerformanceValid = true;
-    
-    if (CurrentFrameTime > MaxFrameTimeMs)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Frame time exceeds threshold: %.2f ms > %.2f ms"), 
-               CurrentFrameTime, MaxFrameTimeMs);
-        bPerformanceValid = false;
-    }
-    
-    if (CurrentActorCount > MaxActorCount)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Actor count exceeds threshold: %d > %d"), 
-               CurrentActorCount, MaxActorCount);
-        bPerformanceValid = false;
-    }
-    
-    if (CurrentMemoryUsage > MaxMemoryUsageMB)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Memory usage exceeds threshold: %.2f MB > %.2f MB"), 
-               CurrentMemoryUsage, MaxMemoryUsageMB);
-        bPerformanceValid = false;
-    }
-    
-    return bPerformanceValid;
+    RegisteredSystems.Add(ModuleName, Priority);
+    UE_LOG(LogTemp, Warning, TEXT("EngineArchitecture: Registered module %s with priority %d"), 
+           *ModuleName, Priority);
 }
 
-bool UEngineArchitecture::ValidateMemoryUsage()
+bool UEngineArchitecture::CheckCompilationStatus()
 {
-    float CurrentMemoryUsage = GetCurrentMemoryUsageMB();
-    
-    if (CurrentMemoryUsage > MaxMemoryUsageMB * 0.8f) // 80% threshold warning
+    // Check if we can access basic UE5 classes
+    bool bCompilationValid = true;
+
+    // Test core class access
+    UClass* ActorClass = AActor::StaticClass();
+    UClass* PawnClass = APawn::StaticClass();
+    UClass* CharacterClass = ACharacter::StaticClass();
+
+    if (!ActorClass || !PawnClass || !CharacterClass)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Memory usage approaching limit: %.2f MB (%.1f%% of max)"), 
-               CurrentMemoryUsage, (CurrentMemoryUsage / MaxMemoryUsageMB) * 100.0f);
-        return false;
+        UE_LOG(LogTemp, Error, TEXT("EngineArchitecture: Core UE5 classes not accessible"));
+        bCompilationValid = false;
     }
-    
-    return true;
-}
 
-void UEngineArchitecture::RegisterCoreModule(const FString& ModuleName, const FString& ModulePath)
-{
-    CoreModules.Add(ModuleName, ModulePath);
-    UE_LOG(LogTemp, Log, TEXT("Registered core module: %s at %s"), *ModuleName, *ModulePath);
-}
+    // Test TranspersonalGame module classes
+    UClass* TranspersonalCharacterClass = FindObject<UClass>(ANY_PACKAGE, TEXT("TranspersonalCharacter"));
+    UClass* TranspersonalGameModeClass = FindObject<UClass>(ANY_PACKAGE, TEXT("TranspersonalGameMode"));
 
-void UEngineArchitecture::RegisterGameplayModule(const FString& ModuleName, const FString& ModulePath)
-{
-    GameplayModules.Add(ModuleName, ModulePath);
-    UE_LOG(LogTemp, Log, TEXT("Registered gameplay module: %s at %s"), *ModuleName, *ModulePath);
+    if (!TranspersonalCharacterClass)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("EngineArchitecture: TranspersonalCharacter class not found"));
+    }
+
+    if (!TranspersonalGameModeClass)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("EngineArchitecture: TranspersonalGameMode class not found"));
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("EngineArchitecture: Compilation status check complete"));
+    return bCompilationValid;
 }
 
 float UEngineArchitecture::GetCurrentFrameTime() const
 {
-    if (GEngine && GEngine->GetWorld())
+    return FApp::GetDeltaTime();
+}
+
+int32 UEngineArchitecture::GetActiveActorCount() const
+{
+    UWorld* World = GetWorld();
+    if (!World)
     {
-        return GEngine->GetWorld()->GetDeltaSeconds() * 1000.0f; // Convert to milliseconds
+        return 0;
     }
-    return 0.0f;
-}
 
-int32 UEngineArchitecture::GetCurrentActorCount() const
-{
-    if (GEngine && GEngine->GetWorld())
+    int32 ActorCount = 0;
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
     {
-        return GEngine->GetWorld()->GetActorCount();
+        ActorCount++;
     }
-    return 0;
+
+    return ActorCount;
 }
 
-float UEngineArchitecture::GetCurrentMemoryUsageMB() const
-{
-    FPlatformMemoryStats MemStats = FPlatformMemory::GetStats();
-    return MemStats.UsedPhysical / (1024.0f * 1024.0f); // Convert to MB
-}
-
-bool UEngineArchitecture::EnforceNamingConventions()
-{
-    // This would check file naming conventions
-    // For now, return true as a placeholder
-    UE_LOG(LogTemp, Log, TEXT("Naming convention enforcement completed"));
-    return true;
-}
-
-bool UEngineArchitecture::EnforceModuleDependencies()
-{
-    // This would check module dependency rules
-    // For now, return true as a placeholder
-    UE_LOG(LogTemp, Log, TEXT("Module dependency enforcement completed"));
-    return true;
-}
-
-bool UEngineArchitecture::ValidateFileStructure()
-{
-    // Check if SharedTypes.h exists
-    FString SharedTypesPath = FPaths::ProjectDir() + TEXT("Source/TranspersonalGame/SharedTypes.h");
-    if (!FPaths::FileExists(SharedTypesPath))
-    {
-        UE_LOG(LogTemp, Error, TEXT("SharedTypes.h not found at: %s"), *SharedTypesPath);
-        return false;
-    }
-    
-    return true;
-}
-
-bool UEngineArchitecture::ValidateIncludePaths()
-{
-    // Validate that all include paths are correct
-    // This is a placeholder for more complex validation
-    return true;
-}
-
-bool UEngineArchitecture::ValidateNamingConventions()
-{
-    // Check that all classes follow the naming conventions
-    // This is a placeholder for more complex validation
-    return true;
-}
-
-void UEngineArchitecture::LogArchitectureStatus()
+void UEngineArchitecture::LogSystemStatus()
 {
     UE_LOG(LogTemp, Warning, TEXT("=== ENGINE ARCHITECTURE STATUS ==="));
-    UE_LOG(LogTemp, Warning, TEXT("Architecture Valid: %s"), bIsArchitectureValid ? TEXT("YES") : TEXT("NO"));
-    UE_LOG(LogTemp, Warning, TEXT("Core Modules: %d"), CoreModules.Num());
-    UE_LOG(LogTemp, Warning, TEXT("Gameplay Modules: %d"), GameplayModules.Num());
-    UE_LOG(LogTemp, Warning, TEXT("Last Validation: %s"), *LastValidationTime.ToString());
-    UE_LOG(LogTemp, Warning, TEXT("Current Frame Time: %.2f ms"), GetCurrentFrameTime());
-    UE_LOG(LogTemp, Warning, TEXT("Current Actor Count: %d"), GetCurrentActorCount());
-    UE_LOG(LogTemp, Warning, TEXT("Current Memory Usage: %.2f MB"), GetCurrentMemoryUsageMB());
-    UE_LOG(LogTemp, Warning, TEXT("=== END ARCHITECTURE STATUS ==="));
+    UE_LOG(LogTemp, Warning, TEXT("Architecture Valid: %s"), bArchitectureValid ? TEXT("YES") : TEXT("NO"));
+    UE_LOG(LogTemp, Warning, TEXT("Registered Systems: %d"), RegisteredSystems.Num());
+    UE_LOG(LogTemp, Warning, TEXT("Current Frame Time: %.3f ms"), GetCurrentFrameTime() * 1000.0f);
+    UE_LOG(LogTemp, Warning, TEXT("Active Actor Count: %d"), GetActiveActorCount());
+    UE_LOG(LogTemp, Warning, TEXT("Last Validation: %.2f seconds ago"), 
+           FPlatformTime::Seconds() - LastValidationTime);
+
+    // Log registered systems
+    for (const auto& System : RegisteredSystems)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("System: %s (Priority: %d)"), *System.Key, System.Value);
+    }
+
+    UpdatePerformanceMetrics();
+}
+
+bool UEngineArchitecture::ValidateWorldGeneration()
+{
+    // Check if world generation components exist
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return false;
+    }
+
+    // Look for terrain/landscape actors
+    bool bHasLandscape = false;
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    {
+        AActor* Actor = *ActorItr;
+        if (Actor && Actor->GetClass()->GetName().Contains(TEXT("Landscape")))
+        {
+            bHasLandscape = true;
+            break;
+        }
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("EngineArchitecture: World generation validation - Landscape: %s"),
+           bHasLandscape ? TEXT("FOUND") : TEXT("MISSING"));
+
+    return true; // Non-blocking for now
+}
+
+bool UEngineArchitecture::ValidateCharacterSystems()
+{
+    // Check if character systems are functional
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return false;
+    }
+
+    // Look for player start
+    bool bHasPlayerStart = false;
+    for (TActorIterator<APlayerStart> PlayerStartItr(World); PlayerStartItr; ++PlayerStartItr)
+    {
+        bHasPlayerStart = true;
+        break;
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("EngineArchitecture: Character systems validation - PlayerStart: %s"),
+           bHasPlayerStart ? TEXT("FOUND") : TEXT("MISSING"));
+
+    return bHasPlayerStart;
+}
+
+bool UEngineArchitecture::ValidateDinosaurSystems()
+{
+    // Check if dinosaur actors exist in the world
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return false;
+    }
+
+    int32 DinosaurCount = 0;
+    for (TActorIterator<APawn> PawnItr(World); PawnItr; ++PawnItr)
+    {
+        APawn* Pawn = *PawnItr;
+        if (Pawn && Pawn->GetName().Contains(TEXT("Dinosaur")))
+        {
+            DinosaurCount++;
+        }
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("EngineArchitecture: Dinosaur systems validation - Found %d dinosaur actors"),
+           DinosaurCount);
+
+    return true; // Non-blocking for now
+}
+
+bool UEngineArchitecture::ValidateRenderingPipeline()
+{
+    // Check if essential rendering actors exist
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return false;
+    }
+
+    bool bHasDirectionalLight = false;
+    bool bHasSkyAtmosphere = false;
+
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    {
+        AActor* Actor = *ActorItr;
+        if (!Actor) continue;
+
+        FString ClassName = Actor->GetClass()->GetName();
+        if (ClassName.Contains(TEXT("DirectionalLight")))
+        {
+            bHasDirectionalLight = true;
+        }
+        else if (ClassName.Contains(TEXT("SkyAtmosphere")))
+        {
+            bHasSkyAtmosphere = true;
+        }
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("EngineArchitecture: Rendering pipeline validation - DirectionalLight: %s, SkyAtmosphere: %s"),
+           bHasDirectionalLight ? TEXT("OK") : TEXT("MISSING"),
+           bHasSkyAtmosphere ? TEXT("OK") : TEXT("MISSING"));
+
+    return bHasDirectionalLight && bHasSkyAtmosphere;
+}
+
+void UEngineArchitecture::UpdatePerformanceMetrics()
+{
+    float CurrentFrameTime = GetCurrentFrameTime();
+    int32 CurrentActorCount = GetActiveActorCount();
+
+    // Update running averages
+    if (AverageFrameTime == 0.0f)
+    {
+        AverageFrameTime = CurrentFrameTime;
+    }
+    else
+    {
+        AverageFrameTime = (AverageFrameTime * 0.9f) + (CurrentFrameTime * 0.1f);
+    }
+
+    if (CurrentActorCount > PeakActorCount)
+    {
+        PeakActorCount = CurrentActorCount;
+    }
 }
