@@ -24,15 +24,7 @@ struct TRANSPERSONALGAME_API FInteg_ValidationResult
     int32 WarningCount = 0;
 
     UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    TArray<FString> DetailedErrors;
-
-    FInteg_ValidationResult()
-    {
-        bIsValid = false;
-        ErrorMessage = TEXT("");
-        ErrorCount = 0;
-        WarningCount = 0;
-    }
+    TArray<FString> Details;
 };
 
 USTRUCT(BlueprintType)
@@ -47,7 +39,7 @@ struct TRANSPERSONALGAME_API FInteg_ModuleStatus
     bool bIsLoaded = false;
 
     UPROPERTY(BlueprintReadOnly, Category = "Module")
-    bool bIsCompiled = false;
+    bool bHasErrors = false;
 
     UPROPERTY(BlueprintReadOnly, Category = "Module")
     int32 ClassCount = 0;
@@ -57,77 +49,95 @@ struct TRANSPERSONALGAME_API FInteg_ModuleStatus
 
     UPROPERTY(BlueprintReadOnly, Category = "Module")
     TArray<FString> FailedClasses;
-
-    FInteg_ModuleStatus()
-    {
-        ModuleName = TEXT("");
-        bIsLoaded = false;
-        bIsCompiled = false;
-        ClassCount = 0;
-    }
 };
 
-UCLASS(BlueprintType)
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FInteg_LevelStatus
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Level")
+    FString LevelName;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Level")
+    int32 TotalActors = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Level")
+    int32 DuplicateActors = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Level")
+    bool bHasPlayerStart = false;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Level")
+    bool bHasCharacter = false;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Level")
+    bool bHasLighting = false;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Level")
+    TMap<FString, int32> ActorCounts;
+};
+
+/**
+ * Integration Validator Subsystem
+ * Validates system integration, module loading, and level consistency
+ */
+UCLASS()
 class TRANSPERSONALGAME_API UIntegrationValidator : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
-    // Subsystem interface
+    // USubsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
     // Validation functions
-    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
-    FInteg_ValidationResult ValidateGameSystems();
-
-    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
-    FInteg_ValidationResult ValidateMapIntegrity(const FString& MapPath = TEXT("/Game/Maps/MinPlayableMap"));
-
-    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
-    TArray<FInteg_ModuleStatus> ValidateModuleStatus();
-
-    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
-    FInteg_ValidationResult ValidateActorDuplicates();
-
-    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
-    bool CleanupDuplicateActors();
-
-    UFUNCTION(BlueprintCallable, Category = "Integration", CallInEditor = true)
-    FInteg_ValidationResult ValidatePerformance();
-
-    // Utility functions
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    void LogValidationResults(const FInteg_ValidationResult& Results);
+    FInteg_ValidationResult ValidateFullSystem();
 
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool SaveValidationReport(const FString& FilePath);
+    FInteg_ModuleStatus ValidateModule(const FString& ModuleName);
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    FInteg_LevelStatus ValidateLevel(const FString& LevelPath);
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    bool CleanupDuplicateActors(const FString& LevelPath);
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    TArray<FString> GetLoadedModules();
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    bool TestClassLoading(const FString& ClassName);
+
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void GenerateIntegrationReport();
+
+    // Performance validation
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    float GetCurrentFramerate();
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    bool IsPerformanceAcceptable();
 
 protected:
     // Internal validation helpers
-    bool ValidateClassLoading(const FString& ClassName, FString& OutError);
-    bool ValidateActorSpawning(UClass* ActorClass, FString& OutError);
-    int32 CountActorsOfType(UClass* ActorClass);
-    void CleanupActorsOfType(UClass* ActorClass, int32 MaxCount = 1);
+    bool ValidateModuleClasses(const FString& ModuleName, FInteg_ModuleStatus& OutStatus);
+    bool ValidateLevelActors(UWorld* World, FInteg_LevelStatus& OutStatus);
+    void CleanupLightingDuplicates(UWorld* World);
+    void LogValidationResults(const FInteg_ValidationResult& Results);
 
 private:
-    // Validation state
     UPROPERTY()
-    TArray<FInteg_ValidationResult> ValidationHistory;
+    TArray<FString> KnownModules;
+
+    UPROPERTY()
+    TArray<FString> CriticalClasses;
 
     UPROPERTY()
     float LastValidationTime = 0.0f;
 
-    // Critical classes to validate
-    TArray<FString> CriticalClasses = {
-        TEXT("/Script/TranspersonalGame.TranspersonalCharacter"),
-        TEXT("/Script/TranspersonalGame.TranspersonalGameState"),
-        TEXT("/Script/TranspersonalGame.PCGWorldGenerator"),
-        TEXT("/Script/TranspersonalGame.FoliageManager"),
-        TEXT("/Script/TranspersonalGame.CrowdSimulationManager"),
-        TEXT("/Script/TranspersonalGame.BuildIntegrationManager")
-    };
-
-    // Lighting classes that should have max 1 instance
-    TArray<UClass*> SingletonLightingClasses;
+    UPROPERTY()
+    bool bValidationInProgress = false;
 };
