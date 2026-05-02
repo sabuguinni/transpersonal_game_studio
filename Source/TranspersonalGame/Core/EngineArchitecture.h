@@ -1,88 +1,136 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/GameInstanceSubsystem.h"
+#include "Engine/World.h"
+#include "Subsystems/GameInstanceSubsystem.h"
 #include "SharedTypes.h"
 #include "EngineArchitecture.generated.h"
 
 /**
- * Engine Architecture Subsystem
- * Defines and enforces the technical architecture rules for the entire project
- * All other agents must follow the patterns established here
+ * Engine Architecture System - Core architectural validation and management
+ * Ensures all game systems follow established architectural patterns
+ * Validates system dependencies and prevents architectural violations
  */
-UCLASS(BlueprintType)
+UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UEngineArchitecture : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
-    // Subsystem lifecycle
+    UEngineArchitecture();
+
+    // Subsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
     // Architecture validation
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    bool ValidateModuleStructure();
+    bool ValidateSystemDependencies();
 
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    bool ValidatePerformanceRequirements();
+    bool ValidateModuleIntegrity();
 
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    bool ValidateMemoryUsage();
-
-    // Module registration
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    void RegisterCoreModule(const FString& ModuleName, const FString& ModulePath);
+    void RegisterSystemModule(const FString& ModuleName, int32 Priority);
 
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    void RegisterGameplayModule(const FString& ModuleName, const FString& ModulePath);
+    bool CheckCompilationStatus();
 
     // Performance monitoring
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
     float GetCurrentFrameTime() const;
 
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    int32 GetCurrentActorCount() const;
+    int32 GetActiveActorCount() const;
 
     UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    float GetCurrentMemoryUsageMB() const;
-
-    // Architecture enforcement
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    bool EnforceNamingConventions();
-
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    bool EnforceModuleDependencies();
+    void LogSystemStatus();
 
 protected:
-    // Registered modules
+    // System registry
     UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    TMap<FString, FString> CoreModules;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    TMap<FString, FString> GameplayModules;
-
-    // Performance thresholds
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float MaxFrameTimeMs = 16.67f; // 60 FPS
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxActorCount = 10000;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float MaxMemoryUsageMB = 8192.0f; // 8GB
-
-    // Architecture state
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    bool bIsArchitectureValid = false;
+    TMap<FString, int32> RegisteredSystems;
 
     UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    FDateTime LastValidationTime;
+    bool bArchitectureValid;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
+    float LastValidationTime;
+
+    // Performance metrics
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float AverageFrameTime;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    int32 PeakActorCount;
 
 private:
     // Internal validation methods
-    bool ValidateFileStructure();
-    bool ValidateIncludePaths();
-    bool ValidateNamingConventions();
-    void LogArchitectureStatus();
+    bool ValidateWorldGeneration();
+    bool ValidateCharacterSystems();
+    bool ValidateDinosaurSystems();
+    bool ValidateRenderingPipeline();
+
+    // Performance tracking
+    void UpdatePerformanceMetrics();
+    
+    // System dependencies
+    TArray<FString> CoreSystemModules;
+    TArray<FString> GameplaySystemModules;
+    TArray<FString> RenderingSystemModules;
+};
+
+/**
+ * Architecture validation result structure
+ */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FEng_ArchitectureValidationResult
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    bool bIsValid;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    FString ValidationMessage;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    TArray<FString> FailedSystems;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    float ValidationTime;
+
+    FEng_ArchitectureValidationResult()
+    {
+        bIsValid = false;
+        ValidationTime = 0.0f;
+    }
+};
+
+/**
+ * System module registration info
+ */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FEng_SystemModuleInfo
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Module")
+    FString ModuleName;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Module")
+    int32 Priority;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Module")
+    bool bIsActive;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Module")
+    float LastUpdateTime;
+
+    FEng_SystemModuleInfo()
+    {
+        Priority = 0;
+        bIsActive = false;
+        LastUpdateTime = 0.0f;
+    }
 };
