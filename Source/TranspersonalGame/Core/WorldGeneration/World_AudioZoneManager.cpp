@@ -1,88 +1,85 @@
 #include "World_AudioZoneManager.h"
-#include "Engine/World.h"
-#include "Kismet/GameplayStatics.h"
-#include "Engine/Engine.h"
 #include "Components/AudioComponent.h"
-#include "Sound/SoundCue.h"
+#include "Engine/AudioVolume.h"
+#include "Sound/AmbientSound.h"
+#include "Engine/World.h"
+#include "GameFramework/PlayerController.h"
+#include "GameFramework/Pawn.h"
+#include "Kismet/GameplayStatics.h"
 
 AWorld_AudioZoneManager::AWorld_AudioZoneManager()
 {
     PrimaryActorTick.bCanEverTick = true;
-
+    
     // Initialize audio components
     WeatherAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("WeatherAudioComponent"));
     TimeOfDayAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("TimeOfDayAudioComponent"));
-
+    
     // Set default values
     CurrentBiomeAudio = EWorld_BiomeAudioType::Forest;
     CurrentWeatherIntensity = 0.0f;
     CurrentTimeOfDay = 12.0f; // Noon
     BiomeTransitionTime = 2.0f;
-    WeatherAudioVolume = 0.7f;
-    TimeOfDayAudioVolume = 0.3f;
-
-    // Initialize default biome zones
-    InitializeDefaultBiomeZones();
+    WeatherAudioVolume = 0.3f;
+    TimeOfDayAudioVolume = 0.2f;
 }
 
 void AWorld_AudioZoneManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Initialize biome audio zones in the world
+    // Initialize default biome zones if none are set
+    if (BiomeAudioZones.Num() == 0)
+    {
+        InitializeDefaultBiomeZones();
+    }
+    
+    // Create audio zones
     InitializeBiomeAudioZones();
 }
 
 void AWorld_AudioZoneManager::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
-
-    // Get player location and update audio zones
-    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
-    if (PlayerPawn)
+    
+    // Update player audio zone based on location
+    APlayerController* PlayerController = UGameplayStatics::GetPlayerController(this, 0);
+    if (PlayerController && PlayerController->GetPawn())
     {
-        UpdatePlayerAudioZone(PlayerPawn->GetActorLocation());
+        FVector PlayerLocation = PlayerController->GetPawn()->GetActorLocation();
+        UpdatePlayerAudioZone(PlayerLocation);
     }
-
-    // Update audio zone volumes based on distance
+    
+    // Update audio zone volumes
     UpdateAudioZoneVolumes();
 }
 
 void AWorld_AudioZoneManager::InitializeBiomeAudioZones()
 {
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("AudioZoneManager: No world found"));
-        return;
-    }
-
-    // Clear existing spawned actors
+    // Clear existing audio volumes and sounds
     for (AAudioVolume* Volume : SpawnedAudioVolumes)
     {
-        if (Volume && IsValid(Volume))
+        if (IsValid(Volume))
         {
             Volume->Destroy();
         }
     }
     SpawnedAudioVolumes.Empty();
-
+    
     for (AAmbientSound* Sound : SpawnedAmbientSounds)
     {
-        if (Sound && IsValid(Sound))
+        if (IsValid(Sound))
         {
             Sound->Destroy();
         }
     }
     SpawnedAmbientSounds.Empty();
-
+    
     // Create audio zones for each biome
-    for (const FWorld_BiomeAudioData& ZoneData : BiomeAudioZones)
+    for (const FWorld_BiomeAudioData& AudioData : BiomeAudioZones)
     {
-        CreateAudioZone(ZoneData);
+        CreateAudioZone(AudioData);
     }
-
-    UE_LOG(LogTemp, Log, TEXT("AudioZoneManager: Initialized %d biome audio zones"), BiomeAudioZones.Num());
 }
 
 void AWorld_AudioZoneManager::CreateAudioZone(const FWorld_BiomeAudioData& AudioData)
@@ -92,102 +89,66 @@ void AWorld_AudioZoneManager::CreateAudioZone(const FWorld_BiomeAudioData& Audio
     {
         return;
     }
-
-    // Spawn audio volume
-    FActorSpawnParameters SpawnParams;
-    SpawnParams.Owner = this;
     
+    // Spawn audio volume
     AAudioVolume* AudioVolume = World->SpawnActor<AAudioVolume>(
         AAudioVolume::StaticClass(),
         AudioData.ZoneLocation,
-        FRotator::ZeroRotator,
-        SpawnParams
+        FRotator::ZeroRotator
     );
-
+    
     if (AudioVolume)
     {
+        // Set volume scale
         AudioVolume->SetActorScale3D(AudioData.ZoneScale);
+        
+        // Configure audio volume properties
+        AudioVolume->Priority = 1.0f;
+        AudioVolume->bEnabled = true;
+        
         SpawnedAudioVolumes.Add(AudioVolume);
-
-        // Set audio volume label based on biome type
-        FString BiomeName;
-        switch (AudioData.BiomeType)
-        {
-            case EWorld_BiomeAudioType::Forest:
-                BiomeName = TEXT("Forest_Audio_Zone");
-                break;
-            case EWorld_BiomeAudioType::Swamp:
-                BiomeName = TEXT("Swamp_Audio_Zone");
-                break;
-            case EWorld_BiomeAudioType::Savanna:
-                BiomeName = TEXT("Savanna_Audio_Zone");
-                break;
-            case EWorld_BiomeAudioType::Desert:
-                BiomeName = TEXT("Desert_Audio_Zone");
-                break;
-            case EWorld_BiomeAudioType::Mountain:
-                BiomeName = TEXT("Mountain_Audio_Zone");
-                break;
-        }
-        AudioVolume->SetActorLabel(BiomeName);
     }
-
+    
     // Spawn ambient sound
     AAmbientSound* AmbientSound = World->SpawnActor<AAmbientSound>(
         AAmbientSound::StaticClass(),
-        AudioData.ZoneLocation + FVector(0, 0, 100),
-        FRotator::ZeroRotator,
-        SpawnParams
+        AudioData.ZoneLocation,
+        FRotator::ZeroRotator
     );
-
-    if (AmbientSound)
+    
+    if (AmbientSound && AmbientSound->GetAudioComponent())
     {
-        SpawnedAmbientSounds.Add(AmbientSound);
+        // Configure ambient sound
+        AmbientSound->GetAudioComponent()->SetVolumeMultiplier(AudioData.AmbientVolume);
+        AmbientSound->GetAudioComponent()->bAutoActivate = true;
+        AmbientSound->GetAudioComponent()->Play();
         
-        // Set ambient sound properties
-        if (AmbientSound->GetAudioComponent())
-        {
-            AmbientSound->GetAudioComponent()->SetVolumeMultiplier(AudioData.AmbientVolume);
-            AmbientSound->GetAudioComponent()->bAutoActivate = true;
-        }
-
-        FString SoundName = BiomeName.Replace(TEXT("_Zone"), TEXT("_Ambient"));
-        AmbientSound->SetActorLabel(SoundName);
+        SpawnedAmbientSounds.Add(AmbientSound);
     }
 }
 
 void AWorld_AudioZoneManager::UpdatePlayerAudioZone(const FVector& PlayerLocation)
 {
-    if (BiomeAudioZones.Num() == 0)
-    {
-        return;
-    }
-
-    // Find closest biome zone
+    EWorld_BiomeAudioType NewBiomeAudio = EWorld_BiomeAudioType::Forest;
     float ClosestDistance = FLT_MAX;
-    EWorld_BiomeAudioType ClosestBiome = CurrentBiomeAudio;
-
-    for (const FWorld_BiomeAudioData& ZoneData : BiomeAudioZones)
+    
+    // Find the closest biome audio zone
+    for (const FWorld_BiomeAudioData& AudioData : BiomeAudioZones)
     {
-        float Distance = CalculateDistanceToZone(PlayerLocation, ZoneData);
+        float Distance = CalculateDistanceToZone(PlayerLocation, AudioData);
         if (Distance < ClosestDistance)
         {
             ClosestDistance = Distance;
-            ClosestBiome = ZoneData.BiomeType;
+            NewBiomeAudio = AudioData.BiomeType;
         }
     }
-
-    // Check if biome changed
-    if (ClosestBiome != CurrentBiomeAudio)
+    
+    // Trigger biome transition if changed
+    if (NewBiomeAudio != CurrentBiomeAudio)
     {
-        EWorld_BiomeAudioType PreviousBiome = CurrentBiomeAudio;
-        CurrentBiomeAudio = ClosestBiome;
-        
-        // Trigger biome transition
-        CrossfadeBiomeAudio(CurrentBiomeAudio);
-        PlayBiomeTransitionSound(PreviousBiome, CurrentBiomeAudio);
-        
-        UE_LOG(LogTemp, Log, TEXT("AudioZoneManager: Biome audio changed to %d"), (int32)CurrentBiomeAudio);
+        PlayBiomeTransitionSound(CurrentBiomeAudio, NewBiomeAudio);
+        CrossfadeBiomeAudio(NewBiomeAudio);
+        CurrentBiomeAudio = NewBiomeAudio;
     }
 }
 
@@ -202,165 +163,171 @@ void AWorld_AudioZoneManager::SetWeatherAudio(bool bIsRaining, bool bIsStormy)
     {
         return;
     }
-
-    float TargetIntensity = 0.0f;
+    
     if (bIsStormy)
     {
-        TargetIntensity = 1.0f;
+        CurrentWeatherIntensity = 1.0f;
+        WeatherAudioComponent->SetVolumeMultiplier(WeatherAudioVolume * 1.5f);
     }
     else if (bIsRaining)
     {
-        TargetIntensity = 0.5f;
+        CurrentWeatherIntensity = 0.6f;
+        WeatherAudioComponent->SetVolumeMultiplier(WeatherAudioVolume);
     }
-
-    CurrentWeatherIntensity = TargetIntensity;
-    WeatherAudioComponent->SetVolumeMultiplier(TargetIntensity * WeatherAudioVolume);
-
-    UE_LOG(LogTemp, Log, TEXT("AudioZoneManager: Weather audio intensity set to %f"), TargetIntensity);
+    else
+    {
+        CurrentWeatherIntensity = 0.0f;
+        WeatherAudioComponent->SetVolumeMultiplier(0.0f);
+    }
 }
 
 void AWorld_AudioZoneManager::SetTimeOfDayAudio(float TimeOfDay)
 {
-    CurrentTimeOfDay = FMath::Clamp(TimeOfDay, 0.0f, 24.0f);
+    CurrentTimeOfDay = TimeOfDay;
     
     if (!TimeOfDayAudioComponent)
     {
         return;
     }
-
-    // Calculate night audio intensity (higher during night hours)
-    float NightIntensity = 0.0f;
-    if (CurrentTimeOfDay >= 20.0f || CurrentTimeOfDay <= 6.0f)
-    {
-        // Night time (8 PM to 6 AM)
-        NightIntensity = 1.0f;
-    }
-    else if (CurrentTimeOfDay >= 18.0f && CurrentTimeOfDay < 20.0f)
-    {
-        // Evening transition
-        NightIntensity = (CurrentTimeOfDay - 18.0f) / 2.0f;
-    }
-    else if (CurrentTimeOfDay > 6.0f && CurrentTimeOfDay <= 8.0f)
-    {
-        // Morning transition
-        NightIntensity = 1.0f - ((CurrentTimeOfDay - 6.0f) / 2.0f);
-    }
-
-    TimeOfDayAudioComponent->SetVolumeMultiplier(NightIntensity * TimeOfDayAudioVolume);
     
-    UE_LOG(LogTemp, Log, TEXT("AudioZoneManager: Time of day audio set for %f hours (night intensity: %f)"), 
-           CurrentTimeOfDay, NightIntensity);
+    // Adjust audio based on time of day
+    float NightVolume = 0.0f;
+    
+    if (TimeOfDay >= 20.0f || TimeOfDay <= 6.0f) // Night time
+    {
+        NightVolume = TimeOfDayAudioVolume;
+    }
+    else if (TimeOfDay >= 18.0f && TimeOfDay < 20.0f) // Evening transition
+    {
+        float TransitionFactor = (TimeOfDay - 18.0f) / 2.0f;
+        NightVolume = TimeOfDayAudioVolume * TransitionFactor;
+    }
+    else if (TimeOfDay > 6.0f && TimeOfDay <= 8.0f) // Morning transition
+    {
+        float TransitionFactor = 1.0f - ((TimeOfDay - 6.0f) / 2.0f);
+        NightVolume = TimeOfDayAudioVolume * TransitionFactor;
+    }
+    
+    TimeOfDayAudioComponent->SetVolumeMultiplier(NightVolume);
 }
 
 void AWorld_AudioZoneManager::PlayBiomeTransitionSound(EWorld_BiomeAudioType FromBiome, EWorld_BiomeAudioType ToBiome)
 {
-    // Play a transition sound effect when moving between biomes
-    UE_LOG(LogTemp, Log, TEXT("AudioZoneManager: Playing biome transition from %d to %d"), 
-           (int32)FromBiome, (int32)ToBiome);
+    // Log biome transition for debugging
+    UE_LOG(LogTemp, Log, TEXT("Biome audio transition: %d -> %d"), 
+           static_cast<int32>(FromBiome), static_cast<int32>(ToBiome));
     
-    // This would play a specific transition sound based on biome types
-    // For now, just log the transition
+    // Here you would play specific transition sounds based on biome changes
+    // For now, we'll just log the transition
 }
 
 void AWorld_AudioZoneManager::UpdateAudioZoneVolumes()
 {
-    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
-    if (!PlayerPawn)
+    // Update volumes of spawned ambient sounds based on distance and settings
+    APlayerController* PlayerController = UGameplayStatics::GetPlayerController(this, 0);
+    if (!PlayerController || !PlayerController->GetPawn())
     {
         return;
     }
-
-    FVector PlayerLocation = PlayerPawn->GetActorLocation();
-
-    // Update volume for each ambient sound based on distance
+    
+    FVector PlayerLocation = PlayerController->GetPawn()->GetActorLocation();
+    
     for (int32 i = 0; i < SpawnedAmbientSounds.Num() && i < BiomeAudioZones.Num(); ++i)
     {
         AAmbientSound* AmbientSound = SpawnedAmbientSounds[i];
-        if (!AmbientSound || !AmbientSound->GetAudioComponent())
-        {
-            continue;
-        }
-
-        const FWorld_BiomeAudioData& ZoneData = BiomeAudioZones[i];
-        float Distance = CalculateDistanceToZone(PlayerLocation, ZoneData);
+        const FWorld_BiomeAudioData& AudioData = BiomeAudioZones[i];
         
-        // Calculate volume based on distance
-        float VolumeMultiplier = 1.0f;
-        if (Distance > ZoneData.AudioFadeDistance)
+        if (IsValid(AmbientSound) && AmbientSound->GetAudioComponent())
         {
-            VolumeMultiplier = 0.0f;
+            float Distance = CalculateDistanceToZone(PlayerLocation, AudioData);
+            float VolumeMultiplier = 1.0f;
+            
+            if (Distance > AudioData.AudioFadeDistance)
+            {
+                VolumeMultiplier = 0.0f;
+            }
+            else if (Distance > AudioData.AudioFadeDistance * 0.5f)
+            {
+                float FadeRange = AudioData.AudioFadeDistance * 0.5f;
+                float FadeDistance = Distance - (AudioData.AudioFadeDistance * 0.5f);
+                VolumeMultiplier = 1.0f - (FadeDistance / FadeRange);
+            }
+            
+            float FinalVolume = AudioData.AmbientVolume * VolumeMultiplier;
+            AmbientSound->GetAudioComponent()->SetVolumeMultiplier(FinalVolume);
         }
-        else if (Distance > ZoneData.AudioFadeDistance * 0.5f)
-        {
-            float FadeRatio = (Distance - (ZoneData.AudioFadeDistance * 0.5f)) / (ZoneData.AudioFadeDistance * 0.5f);
-            VolumeMultiplier = 1.0f - FadeRatio;
-        }
-
-        VolumeMultiplier *= ZoneData.AmbientVolume;
-        AmbientSound->GetAudioComponent()->SetVolumeMultiplier(VolumeMultiplier);
     }
 }
 
 void AWorld_AudioZoneManager::CrossfadeBiomeAudio(EWorld_BiomeAudioType NewBiome)
 {
-    // Implement crossfading between biome audio
-    // This would smoothly transition between different ambient sounds
-    UE_LOG(LogTemp, Log, TEXT("AudioZoneManager: Crossfading to biome audio %d"), (int32)NewBiome);
+    // Implement crossfade logic between biome audio
+    // This would typically involve fading out old audio and fading in new audio
+    // For now, we'll implement a simple immediate transition
+    
+    CurrentBiomeAudio = NewBiome;
 }
 
 float AWorld_AudioZoneManager::CalculateDistanceToZone(const FVector& PlayerLocation, const FWorld_BiomeAudioData& ZoneData) const
 {
-    return FVector::Dist(PlayerLocation, ZoneData.ZoneLocation);
+    // Calculate distance from player to the edge of the audio zone
+    FVector ZoneMin = ZoneData.ZoneLocation - (ZoneData.ZoneScale * 50.0f); // Assuming 50 unit scale factor
+    FVector ZoneMax = ZoneData.ZoneLocation + (ZoneData.ZoneScale * 50.0f);
+    
+    FVector ClosestPoint;
+    ClosestPoint.X = FMath::Clamp(PlayerLocation.X, ZoneMin.X, ZoneMax.X);
+    ClosestPoint.Y = FMath::Clamp(PlayerLocation.Y, ZoneMin.Y, ZoneMax.Y);
+    ClosestPoint.Z = FMath::Clamp(PlayerLocation.Z, ZoneMin.Z, ZoneMax.Z);
+    
+    return FVector::Dist(PlayerLocation, ClosestPoint);
 }
 
 void AWorld_AudioZoneManager::InitializeDefaultBiomeZones()
 {
     BiomeAudioZones.Empty();
-
-    // Forest biome
+    
+    // Forest biome zone
     FWorld_BiomeAudioData ForestZone;
     ForestZone.BiomeType = EWorld_BiomeAudioType::Forest;
-    ForestZone.ZoneLocation = FVector(2000, 0, 100);
-    ForestZone.ZoneScale = FVector(20, 20, 10);
+    ForestZone.ZoneLocation = FVector(-1000.0f, 0.0f, 100.0f);
+    ForestZone.ZoneScale = FVector(20.0f, 40.0f, 10.0f);
     ForestZone.AmbientVolume = 0.6f;
     ForestZone.AudioFadeDistance = 2500.0f;
     BiomeAudioZones.Add(ForestZone);
-
-    // Swamp biome
+    
+    // Swamp biome zone
     FWorld_BiomeAudioData SwampZone;
     SwampZone.BiomeType = EWorld_BiomeAudioType::Swamp;
-    SwampZone.ZoneLocation = FVector(-2000, 2000, 50);
-    SwampZone.ZoneScale = FVector(18, 18, 8);
-    SwampZone.AmbientVolume = 0.7f;
+    SwampZone.ZoneLocation = FVector(1000.0f, -1000.0f, 0.0f);
+    SwampZone.ZoneScale = FVector(20.0f, 20.0f, 8.0f);
+    SwampZone.AmbientVolume = 0.5f;
     SwampZone.AudioFadeDistance = 2000.0f;
     BiomeAudioZones.Add(SwampZone);
-
-    // Savanna biome
+    
+    // Savanna biome zone
     FWorld_BiomeAudioData SavannaZone;
     SavannaZone.BiomeType = EWorld_BiomeAudioType::Savanna;
-    SavannaZone.ZoneLocation = FVector(0, -2000, 150);
-    SavannaZone.ZoneScale = FVector(25, 25, 12);
-    SavannaZone.AmbientVolume = 0.5f;
+    SavannaZone.ZoneLocation = FVector(1000.0f, 1000.0f, 50.0f);
+    SavannaZone.ZoneScale = FVector(20.0f, 20.0f, 5.0f);
+    SavannaZone.AmbientVolume = 0.4f;
     SavannaZone.AudioFadeDistance = 3000.0f;
     BiomeAudioZones.Add(SavannaZone);
-
-    // Desert biome
+    
+    // Desert biome zone
     FWorld_BiomeAudioData DesertZone;
     DesertZone.BiomeType = EWorld_BiomeAudioType::Desert;
-    DesertZone.ZoneLocation = FVector(3000, 3000, 200);
-    DesertZone.ZoneScale = FVector(22, 22, 15);
-    DesertZone.AmbientVolume = 0.4f;
-    DesertZone.AudioFadeDistance = 2800.0f;
+    DesertZone.ZoneLocation = FVector(-1000.0f, 1000.0f, 80.0f);
+    DesertZone.ZoneScale = FVector(20.0f, 20.0f, 8.0f);
+    DesertZone.AmbientVolume = 0.3f;
+    DesertZone.AudioFadeDistance = 2500.0f;
     BiomeAudioZones.Add(DesertZone);
-
-    // Mountain biome
+    
+    // Mountain biome zone
     FWorld_BiomeAudioData MountainZone;
     MountainZone.BiomeType = EWorld_BiomeAudioType::Mountain;
-    MountainZone.ZoneLocation = FVector(-3000, -3000, 400);
-    MountainZone.ZoneScale = FVector(20, 20, 20);
-    MountainZone.AmbientVolume = 0.5f;
-    MountainZone.AudioFadeDistance = 3500.0f;
+    MountainZone.ZoneLocation = FVector(0.0f, 0.0f, 300.0f);
+    MountainZone.ZoneScale = FVector(15.0f, 15.0f, 15.0f);
+    MountainZone.AmbientVolume = 0.4f;
+    MountainZone.AudioFadeDistance = 2000.0f;
     BiomeAudioZones.Add(MountainZone);
-
-    UE_LOG(LogTemp, Log, TEXT("AudioZoneManager: Initialized %d default biome zones"), BiomeAudioZones.Num());
 }
