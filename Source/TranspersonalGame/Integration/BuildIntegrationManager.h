@@ -1,91 +1,98 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/GameInstanceSubsystem.h"
 #include "Engine/World.h"
-#include "Subsystems/WorldSubsystem.h"
-#include "Engine/Engine.h"
 #include "../SharedTypes.h"
 #include "BuildIntegrationManager.generated.h"
 
 /**
- * Integration & Build Manager - Agente #19
- * Manages build validation, actor cleanup, and system integration
- * Ensures all agent outputs work together cohesively
+ * Build Integration Manager - Handles cross-module integration and validation
+ * Ensures all game systems work together correctly
  */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UBuildIntegrationManager : public UWorldSubsystem
+class TRANSPERSONALGAME_API UBuildIntegrationManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
     UBuildIntegrationManager();
 
-    // Subsystem overrides
+    // USubsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Build validation functions
+    // Integration validation
     UFUNCTION(BlueprintCallable, Category = "Integration")
     bool ValidateAllSystems();
 
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    void CleanDuplicateActors();
+    bool ValidateWorldState();
 
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    int32 GetActorCount(const FString& ActorClassName);
+    bool ValidateCharacterSystems();
 
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    TArray<FString> GetSystemValidationReport();
+    bool ValidateAISystems();
 
-    // Performance monitoring
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    float GetCurrentFramerate();
+    // Build management
+    UFUNCTION(BlueprintCallable, Category = "Build")
+    void GenerateBuildReport();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool IsPerformanceAcceptable();
+    UFUNCTION(BlueprintCallable, Category = "Build")
+    bool CheckModuleDependencies();
 
-    // Integration status
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    UFUNCTION(BlueprintCallable, Category = "Build")
+    void CleanupDuplicateActors();
+
+    // System status
+    UPROPERTY(BlueprintReadOnly, Category = "Status")
     bool bAllSystemsValid;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 TotalActorCount;
+    UPROPERTY(BlueprintReadOnly, Category = "Status")
+    bool bWorldStateValid;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    float LastValidationTime;
+    UPROPERTY(BlueprintReadOnly, Category = "Status")
+    bool bCharacterSystemsValid;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    TArray<FString> ValidationErrors;
+    UPROPERTY(BlueprintReadOnly, Category = "Status")
+    bool bAISystemsValid;
 
-protected:
-    // Internal validation functions
-    bool ValidateCharacterSystem();
-    bool ValidateWorldGeneration();
-    bool ValidateAudioSystem();
-    bool ValidateVFXSystem();
-    bool ValidateAISystem();
+    UPROPERTY(BlueprintReadOnly, Category = "Status")
+    int32 TotalActorsInLevel;
 
-    // Actor management
-    void RemoveDuplicateLighting();
-    void ValidateActorIntegrity();
+    UPROPERTY(BlueprintReadOnly, Category = "Status")
+    int32 DuplicateActorsFound;
 
-    // Performance tracking
-    UPROPERTY()
-    float FramerateHistory[60]; // Last 60 frames
-    
-    UPROPERTY()
-    int32 FrameIndex;
+    UPROPERTY(BlueprintReadOnly, Category = "Status")
+    FString LastValidationResult;
 
-    UPROPERTY()
-    float AverageFramerate;
+    // Integration events
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnValidationComplete, bool, bSuccess);
+    UPROPERTY(BlueprintAssignable, Category = "Events")
+    FOnValidationComplete OnValidationComplete;
+
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBuildReportGenerated, const FString&, ReportPath);
+    UPROPERTY(BlueprintAssignable, Category = "Events")
+    FOnBuildReportGenerated OnBuildReportGenerated;
 
 private:
+    // Internal validation helpers
+    bool ValidateActorCounts();
+    bool ValidateLightingSetup();
+    bool ValidateTerrainSetup();
+    bool ValidatePlayerSetup();
+    bool ValidateDinosaurSetup();
+
+    // Cleanup helpers
+    void RemoveDuplicateLightingActors();
+    void RemoveDuplicateAtmosphereActors();
+
     // Validation state
-    bool bInitialized;
-    float LastCleanupTime;
+    TArray<FString> ValidationErrors;
+    TArray<FString> ValidationWarnings;
     
-    // Constants
-    static constexpr float VALIDATION_INTERVAL = 5.0f;
-    static constexpr float MIN_ACCEPTABLE_FPS = 30.0f;
-    static constexpr int32 MAX_DUPLICATE_ACTORS = 3;
+    // Actor tracking
+    TMap<FString, int32> ActorCountsByType;
+    TArray<AActor*> DuplicateActors;
 };
