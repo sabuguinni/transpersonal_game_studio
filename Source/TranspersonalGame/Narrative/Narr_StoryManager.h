@@ -1,39 +1,40 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/World.h"
-#include "GameFramework/GameModeBase.h"
-#include "Subsystems/WorldSubsystem.h"
+#include "GameFramework/Actor.h"
+#include "Engine/TriggerBox.h"
+#include "Components/AudioComponent.h"
+#include "Sound/SoundBase.h"
 #include "../Core/SharedTypes.h"
 #include "Narr_StoryManager.generated.h"
 
 /**
  * NARRATIVE AGENT #15 - STORY MANAGER
  * 
- * Manages the overarching narrative flow of the prehistoric survival game.
- * Tracks player progress, triggers story beats, and manages narrative state.
- * Focuses on realistic survival themes - no spiritual/mystical content.
+ * Manages dynamic storytelling, dialogue triggers, and narrative progression
+ * in the prehistoric survival world. Responds to player actions and environmental
+ * events to deliver contextual story moments.
  */
 
 UENUM(BlueprintType)
-enum class ENarr_StoryPhase : uint8
+enum class ENarr_StoryState : uint8
 {
-    Arrival = 0         UMETA(DisplayName = "Arrival"),
-    FirstContact = 1    UMETA(DisplayName = "First Contact"),
-    Exploration = 2     UMETA(DisplayName = "Exploration"),
+    Introduction = 0    UMETA(DisplayName = "Introduction"),
+    Exploration = 1     UMETA(DisplayName = "Exploration"),
+    FirstContact = 2    UMETA(DisplayName = "First Contact"),
     Survival = 3        UMETA(DisplayName = "Survival"),
     Adaptation = 4      UMETA(DisplayName = "Adaptation"),
     Mastery = 5         UMETA(DisplayName = "Mastery")
 };
 
 UENUM(BlueprintType)
-enum class ENarr_ThreatLevel : uint8
+enum class ENarr_TriggerType : uint8
 {
-    Safe = 0            UMETA(DisplayName = "Safe"),
-    Cautious = 1        UMETA(DisplayName = "Cautious"),
-    Dangerous = 2       UMETA(DisplayName = "Dangerous"),
-    Deadly = 3          UMETA(DisplayName = "Deadly"),
-    Extreme = 4         UMETA(DisplayName = "Extreme")
+    Discovery = 0       UMETA(DisplayName = "Discovery"),
+    Danger = 1          UMETA(DisplayName = "Danger"),
+    Safety = 2          UMETA(DisplayName = "Safety"),
+    Achievement = 3     UMETA(DisplayName = "Achievement"),
+    Environmental = 4   UMETA(DisplayName = "Environmental")
 };
 
 USTRUCT(BlueprintType)
@@ -41,32 +42,32 @@ struct TRANSPERSONALGAME_API FNarr_StoryEvent
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Event")
     FString EventID;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    FString EventName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Event")
+    FString DialogueText;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    FString Description;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Event")
+    ENarr_TriggerType TriggerType;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    ENarr_StoryPhase RequiredPhase = ENarr_StoryPhase::Arrival;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Event")
+    float Priority;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    bool bIsCompleted = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Event")
+    bool bHasBeenTriggered;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    float Timestamp = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Event")
+    TSoftObjectPtr<USoundBase> VoiceClip;
 
     FNarr_StoryEvent()
     {
         EventID = TEXT("");
-        EventName = TEXT("");
-        Description = TEXT("");
-        RequiredPhase = ENarr_StoryPhase::Arrival;
-        bIsCompleted = false;
-        Timestamp = 0.0f;
+        DialogueText = TEXT("");
+        TriggerType = ENarr_TriggerType::Discovery;
+        Priority = 1.0f;
+        bHasBeenTriggered = false;
+        VoiceClip = nullptr;
     }
 };
 
@@ -75,104 +76,104 @@ struct TRANSPERSONALGAME_API FNarr_NarrativeContext
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    ENarr_StoryPhase CurrentPhase = ENarr_StoryPhase::Arrival;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative Context")
+    ENarr_StoryState CurrentState;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    ENarr_ThreatLevel ThreatLevel = ENarr_ThreatLevel::Safe;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative Context")
+    int32 DinosaurEncounters;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FString CurrentBiome;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative Context")
+    int32 DaysAlive;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    int32 DaysElapsed = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative Context")
+    float SurvivalScore;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    int32 DinosaurEncounters = 0;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    int32 SurvivalMilestones = 0;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative Context")
     TArray<FString> CompletedEvents;
 
     FNarr_NarrativeContext()
     {
-        CurrentPhase = ENarr_StoryPhase::Arrival;
-        ThreatLevel = ENarr_ThreatLevel::Safe;
-        CurrentBiome = TEXT("Unknown");
-        DaysElapsed = 0;
+        CurrentState = ENarr_StoryState::Introduction;
         DinosaurEncounters = 0;
-        SurvivalMilestones = 0;
+        DaysAlive = 0;
+        SurvivalScore = 0.0f;
         CompletedEvents.Empty();
     }
 };
 
-/**
- * World Subsystem that manages the narrative flow and story progression
- */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UNarr_StoryManager : public UWorldSubsystem
+class TRANSPERSONALGAME_API ANarr_StoryManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UNarr_StoryManager();
-
-    // Subsystem overrides
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
-    virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
-
-    // Story progression
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void AdvanceStoryPhase(ENarr_StoryPhase NewPhase);
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void TriggerStoryEvent(const FString& EventID);
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void UpdateThreatLevel(ENarr_ThreatLevel NewThreatLevel);
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void RecordDinosaurEncounter(const FString& DinosaurType);
-
-    // Getters
-    UFUNCTION(BlueprintPure, Category = "Narrative")
-    ENarr_StoryPhase GetCurrentStoryPhase() const { return NarrativeContext.CurrentPhase; }
-
-    UFUNCTION(BlueprintPure, Category = "Narrative")
-    ENarr_ThreatLevel GetCurrentThreatLevel() const { return NarrativeContext.ThreatLevel; }
-
-    UFUNCTION(BlueprintPure, Category = "Narrative")
-    FNarr_NarrativeContext GetNarrativeContext() const { return NarrativeContext; }
-
-    UFUNCTION(BlueprintPure, Category = "Narrative")
-    bool IsEventCompleted(const FString& EventID) const;
-
-    // Narrative triggers
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    FString GetContextualNarration() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    TArray<FString> GetAvailableDialogueOptions() const;
+    ANarr_StoryManager();
 
 protected:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
+
+    // Core narrative state
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative State")
     FNarr_NarrativeContext NarrativeContext;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    // Story events database
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story Events")
     TArray<FNarr_StoryEvent> StoryEvents;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    TMap<ENarr_StoryPhase, FString> PhaseDescriptions;
+    // Audio system
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio")
+    class UAudioComponent* AudioComponent;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    TMap<ENarr_ThreatLevel, FString> ThreatDescriptions;
+    // Trigger monitoring
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Triggers")
+    TArray<class ATriggerBox*> NarrativeTriggers;
+
+public:
+    // Story progression methods
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void TriggerStoryEvent(const FString& EventID, ENarr_TriggerType TriggerType);
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void AdvanceStoryState(ENarr_StoryState NewState);
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void RegisterDinosaurEncounter(const FString& DinosaurType);
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void UpdateSurvivalMetrics(float HealthPercent, float HungerPercent, float ThirstPercent);
+
+    // Event system
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    bool IsEventCompleted(const FString& EventID) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    FNarr_StoryEvent GetNextPendingEvent() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void PlayNarrativeAudio(const FString& EventID);
+
+    // Context queries
+    UFUNCTION(BlueprintPure, Category = "Narrative")
+    ENarr_StoryState GetCurrentStoryState() const { return NarrativeContext.CurrentState; }
+
+    UFUNCTION(BlueprintPure, Category = "Narrative")
+    int32 GetDinosaurEncounterCount() const { return NarrativeContext.DinosaurEncounters; }
+
+    UFUNCTION(BlueprintPure, Category = "Narrative")
+    float GetSurvivalScore() const { return NarrativeContext.SurvivalScore; }
 
 private:
+    // Internal story management
     void InitializeStoryEvents();
-    void InitializeDescriptions();
-    void BroadcastStoryEvent(const FNarr_StoryEvent& Event);
-    FString GenerateContextualNarration() const;
+    void CheckTriggerConditions();
+    void ProcessPendingEvents();
+    
+    // Story progression logic
+    void EvaluateStoryProgression();
+    bool ShouldAdvanceToNextState() const;
+    
+    // Timer for periodic checks
+    float StoryUpdateTimer;
+    static constexpr float StoryUpdateInterval = 2.0f;
 };
