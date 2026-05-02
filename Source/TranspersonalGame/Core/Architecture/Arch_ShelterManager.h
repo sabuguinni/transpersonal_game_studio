@@ -11,13 +11,12 @@
 UENUM(BlueprintType)
 enum class EArch_ShelterType : uint8
 {
-    None = 0,
-    Cave = 1,
-    TreePlatform = 2,
-    UndergroundBunker = 3,
-    FortifiedCamp = 4,
-    RockOverhang = 5,
-    MAX UMETA(Hidden)
+    CaveDwelling        UMETA(DisplayName = "Cave Dwelling"),
+    TreePlatform        UMETA(DisplayName = "Tree Platform"),
+    StoneCircle         UMETA(DisplayName = "Stone Circle"),
+    CliffDwelling       UMETA(DisplayName = "Cliff Dwelling"),
+    RockOverhang        UMETA(DisplayName = "Rock Overhang"),
+    TemporaryCamp       UMETA(DisplayName = "Temporary Camp")
 };
 
 USTRUCT(BlueprintType)
@@ -26,19 +25,22 @@ struct FArch_ShelterProperties
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
-    EArch_ShelterType ShelterType = EArch_ShelterType::None;
+    EArch_ShelterType ShelterType = EArch_ShelterType::CaveDwelling;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
-    float ProtectionLevel = 0.5f;
+    float ProtectionLevel = 0.8f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
-    float TemperatureBonus = 10.0f;
+    float TemperatureBonus = 15.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
-    int32 MaxOccupants = 1;
+    float WeatherProtection = 0.9f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
-    bool bHasFirePit = false;
+    int32 MaxOccupants = 2;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
+    bool bHasFirePit = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
     bool bHasStorage = false;
@@ -48,11 +50,12 @@ struct FArch_ShelterProperties
 
     FArch_ShelterProperties()
     {
-        ShelterType = EArch_ShelterType::None;
-        ProtectionLevel = 0.5f;
-        TemperatureBonus = 10.0f;
-        MaxOccupants = 1;
-        bHasFirePit = false;
+        ShelterType = EArch_ShelterType::CaveDwelling;
+        ProtectionLevel = 0.8f;
+        TemperatureBonus = 15.0f;
+        WeatherProtection = 0.9f;
+        MaxOccupants = 2;
+        bHasFirePit = true;
         bHasStorage = false;
         bIsDefensive = false;
     }
@@ -69,35 +72,44 @@ public:
 protected:
     virtual void BeginPlay() override;
 
+public:
+    virtual void Tick(float DeltaTime) override;
+
+    // Core Components
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    USceneComponent* RootSceneComponent;
+
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     UStaticMeshComponent* ShelterMesh;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     UBoxComponent* InteractionVolume;
 
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UBoxComponent* ProtectionZone;
+
+    // Shelter Configuration
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter Configuration")
     FArch_ShelterProperties ShelterProperties;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter Configuration")
-    TArray<AActor*> OccupiedBy;
+    TArray<UStaticMesh*> ShelterMeshVariants;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter Configuration")
-    float RestBonus = 25.0f;
+    UStaticMesh* FirePitMesh;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter Configuration")
-    float WeatherProtection = 0.8f;
+    TArray<FVector> StorageLocations;
 
-public:
-    virtual void Tick(float DeltaTime) override;
+    // Gameplay Functions
+    UFUNCTION(BlueprintCallable, Category = "Shelter")
+    bool CanPlayerEnter(class ATranspersonalCharacter* Player);
 
     UFUNCTION(BlueprintCallable, Category = "Shelter")
-    bool CanEnterShelter(AActor* Actor);
+    void OnPlayerEnterShelter(class ATranspersonalCharacter* Player);
 
     UFUNCTION(BlueprintCallable, Category = "Shelter")
-    bool EnterShelter(AActor* Actor);
-
-    UFUNCTION(BlueprintCallable, Category = "Shelter")
-    bool ExitShelter(AActor* Actor);
+    void OnPlayerExitShelter(class ATranspersonalCharacter* Player);
 
     UFUNCTION(BlueprintCallable, Category = "Shelter")
     float GetProtectionLevel() const;
@@ -106,25 +118,38 @@ public:
     float GetTemperatureBonus() const;
 
     UFUNCTION(BlueprintCallable, Category = "Shelter")
-    bool HasFirePit() const;
+    bool IsPlayerProtected(class ATranspersonalCharacter* Player) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Shelter")
-    bool HasStorage() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Shelter")
+    // Construction System
+    UFUNCTION(BlueprintCallable, Category = "Construction")
     void SetShelterType(EArch_ShelterType NewType);
 
-    UFUNCTION(BlueprintCallable, Category = "Shelter")
-    EArch_ShelterType GetShelterType() const;
-
-protected:
-    UFUNCTION()
-    void OnInteractionVolumeBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
-
-    UFUNCTION()
-    void OnInteractionVolumeEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
-
-    void ApplyShelterEffects(AActor* Actor);
-    void RemoveShelterEffects(AActor* Actor);
+    UFUNCTION(BlueprintCallable, Category = "Construction")
     void UpdateShelterMesh();
+
+    UFUNCTION(BlueprintCallable, Category = "Construction")
+    void PlaceFirePit(FVector Location);
+
+    UFUNCTION(BlueprintCallable, Category = "Construction")
+    void AddStorageLocation(FVector Location);
+
+    // Validation and Placement
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Editor")
+    void ValidatePlacement();
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Editor")
+    void AutoConfigureForTerrain();
+
+private:
+    // Internal state
+    TArray<class ATranspersonalCharacter*> CurrentOccupants;
+    
+    bool bIsInitialized = false;
+    float LastValidationTime = 0.0f;
+
+    // Helper functions
+    void InitializeShelterMesh();
+    void SetupCollisionVolumes();
+    EArch_ShelterType DetermineBestShelterType(FVector Location);
+    bool IsLocationSuitableForShelter(FVector Location, EArch_ShelterType ShelterType);
 };
