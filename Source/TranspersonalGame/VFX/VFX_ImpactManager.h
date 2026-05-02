@@ -2,128 +2,108 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Components/ActorComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "NiagaraComponent.h"
 #include "NiagaraSystem.h"
 #include "Engine/World.h"
-#include "TimerManager.h"
+#include "SharedTypes.h"
 #include "VFX_ImpactManager.generated.h"
 
-UENUM(BlueprintType)
-enum class EVFX_ImpactType : uint8
-{
-    DinosaurFootstep    UMETA(DisplayName = "Dinosaur Footstep"),
-    PlayerDamage        UMETA(DisplayName = "Player Damage"),
-    GroundImpact        UMETA(DisplayName = "Ground Impact"),
-    BloodSplatter       UMETA(DisplayName = "Blood Splatter"),
-    DustExplosion       UMETA(DisplayName = "Dust Explosion")
-};
-
-USTRUCT(BlueprintType)
-struct FVFX_ImpactData
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Impact")
-    EVFX_ImpactType ImpactType = EVFX_ImpactType::GroundImpact;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Impact")
-    FVector Location = FVector::ZeroVector;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Impact")
-    FVector Scale = FVector(1.0f, 1.0f, 1.0f);
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Impact")
-    float Duration = 2.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Impact")
-    float Intensity = 1.0f;
-
-    FVFX_ImpactData()
-    {
-        ImpactType = EVFX_ImpactType::GroundImpact;
-        Location = FVector::ZeroVector;
-        Scale = FVector(1.0f, 1.0f, 1.0f);
-        Duration = 2.0f;
-        Intensity = 1.0f;
-    }
-};
-
+/**
+ * VFX Impact Manager - Gere efeitos visuais de impacto para dinossauros e combate
+ * Sistemas: footsteps, blood splatter, debris, dust clouds
+ */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UVFX_ImpactManager : public UActorComponent
+class TRANSPERSONALGAME_API AVFX_ImpactManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UVFX_ImpactManager();
+    AVFX_ImpactManager();
 
 protected:
     virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
+
+    // Componentes principais
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VFX Core")
+    UStaticMeshComponent* RootMeshComponent;
+
+    // Sistemas Niagara para diferentes tipos de impacto
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Systems")
+    class UNiagaraSystem* FootstepDustSystem;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Systems")
+    class UNiagaraSystem* BloodSplatterSystem;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Systems")
+    class UNiagaraSystem* DebrisSystem;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Systems")
+    class UNiagaraSystem* RockImpactSystem;
+
+    // Configurações de impacto
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Impact Settings")
+    float FootstepIntensity;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Impact Settings")
+    float BloodIntensity;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Impact Settings")
+    float DebrisSpread;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Impact Settings")
+    bool bEnableFootstepVFX;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Impact Settings")
+    bool bEnableBloodVFX;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Impact Settings")
+    bool bEnableDebrisVFX;
 
 public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
-
-    // Trigger impact effect
+    // Métodos para triggerar efeitos VFX
     UFUNCTION(BlueprintCallable, Category = "VFX Impact")
-    void TriggerImpact(const FVFX_ImpactData& ImpactData);
+    void TriggerFootstepVFX(FVector Location, float DinosaurSize);
 
-    // Trigger dinosaur footstep
     UFUNCTION(BlueprintCallable, Category = "VFX Impact")
-    void TriggerDinosaurFootstep(FVector Location, float DinosaurSize = 1.0f);
+    void TriggerBloodSplatterVFX(FVector Location, FVector ImpactDirection);
 
-    // Trigger player damage effect
     UFUNCTION(BlueprintCallable, Category = "VFX Impact")
-    void TriggerPlayerDamage(float DamageAmount);
+    void TriggerDebrisVFX(FVector Location, FVector ExplosionDirection, float Force);
 
-    // Screen shake effect
     UFUNCTION(BlueprintCallable, Category = "VFX Impact")
-    void TriggerScreenShake(float Intensity, float Duration);
+    void TriggerRockImpactVFX(FVector Location, float ImpactForce);
 
-    // Cleanup expired effects
-    UFUNCTION(BlueprintCallable, Category = "VFX Impact")
-    void CleanupExpiredEffects();
+    // Configuração e gestão
+    UFUNCTION(BlueprintCallable, Category = "VFX Management")
+    void SetVFXIntensity(float NewIntensity);
 
-protected:
-    // Niagara systems for different effects
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Systems")
-    class UNiagaraSystem* DustParticleSystem;
+    UFUNCTION(BlueprintCallable, Category = "VFX Management")
+    void EnableAllVFX(bool bEnable);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Systems")
-    class UNiagaraSystem* BloodParticleSystem;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Systems")
-    class UNiagaraSystem* DebrisParticleSystem;
-
-    // Active particle components
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VFX Runtime")
-    TArray<class UNiagaraComponent*> ActiveParticleComponents;
-
-    // Effect timers
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VFX Runtime")
-    TArray<FTimerHandle> EffectTimers;
-
-    // Screen shake parameters
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Screen Effects")
-    float MaxScreenShakeIntensity = 2.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Screen Effects")
-    float MaxScreenShakeDuration = 3.0f;
-
-    // Damage flash parameters
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Screen Effects")
-    float DamageFlashDuration = 0.5f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Screen Effects")
-    FLinearColor DamageFlashColor = FLinearColor::Red;
+    UFUNCTION(BlueprintCallable, Category = "VFX Management")
+    void CleanupOldVFX();
 
 private:
-    // Create particle component for effect
-    UNiagaraComponent* CreateParticleEffect(UNiagaraSystem* System, const FVector& Location, const FVector& Scale);
+    // Arrays para gestão de efeitos activos
+    UPROPERTY()
+    TArray<class UNiagaraComponent*> ActiveFootstepVFX;
 
-    // Remove particle component after duration
-    void RemoveParticleEffect(UNiagaraComponent* Component);
+    UPROPERTY()
+    TArray<class UNiagaraComponent*> ActiveBloodVFX;
 
-    // Timer callback for effect cleanup
-    UFUNCTION()
-    void OnEffectExpired();
+    UPROPERTY()
+    TArray<class UNiagaraComponent*> ActiveDebrisVFX;
+
+    // Timers para cleanup
+    FTimerHandle FootstepCleanupTimer;
+    FTimerHandle BloodCleanupTimer;
+    FTimerHandle DebrisCleanupTimer;
+
+    // Métodos internos
+    void InitializeVFXSystems();
+    void SetupCleanupTimers();
+    UNiagaraComponent* SpawnVFXAtLocation(UNiagaraSystem* System, FVector Location, FRotator Rotation);
+    void CleanupVFXArray(TArray<UNiagaraComponent*>& VFXArray);
 };
