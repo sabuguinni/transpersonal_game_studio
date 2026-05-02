@@ -1,401 +1,370 @@
 #include "Narr_DialogueSystem.h"
+#include "Components/SphereComponent.h"
 #include "Components/AudioComponent.h"
-#include "Sound/SoundCue.h"
+#include "Components/StaticMeshComponent.h"
 #include "Engine/Engine.h"
+#include "Engine/World.h"
+#include "TimerManager.h"
+#include "Characters/TranspersonalCharacter.h"
+#include "Kismet/GameplayStatics.h"
 
-UNarr_DialogueSystem::UNarr_DialogueSystem()
+ANarr_DialogueSystem::ANarr_DialogueSystem()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.bStartWithTickEnabled = true;
-    
-    CurrentTree = nullptr;
-    bIsDialogueActive = false;
-    DialogueTimer = 0.0f;
-    NPCType = ENarr_NPCType::TribalElder;
-    DialogueAudioComponent = nullptr;
+    PrimaryActorTick.bCanEverTick = true;
+
+    // Create root component
+    RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
+
+    // Create interaction sphere
+    InteractionSphere = CreateDefaultSubobject<USphereComponent>(TEXT("InteractionSphere"));
+    InteractionSphere->SetupAttachment(RootComponent);
+    InteractionSphere->SetSphereRadius(300.0f);
+    InteractionSphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+    InteractionSphere->SetCollisionResponseToAllChannels(ECR_Ignore);
+    InteractionSphere->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
+
+    // Create audio component
+    AudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AudioComponent"));
+    AudioComponent->SetupAttachment(RootComponent);
+    AudioComponent->bAutoActivate = false;
+
+    // Create visual marker
+    VisualMarker = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("VisualMarker"));
+    VisualMarker->SetupAttachment(RootComponent);
+    VisualMarker->SetRelativeScale3D(FVector(2.0f, 2.0f, 2.0f));
+
+    // Initialize properties
+    CurrentDialogueIndex = 0;
+    bIsPlayingDialogue = false;
+    InteractionRange = 300.0f;
+    bPlayerInRange = false;
+    PlayerCharacter = nullptr;
 }
 
-void UNarr_DialogueSystem::BeginPlay()
+void ANarr_DialogueSystem::BeginPlay()
 {
     Super::BeginPlay();
-    
-    // Create audio component for dialogue playback
-    DialogueAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("DialogueAudioComponent"));
-    if (DialogueAudioComponent)
+
+    // Bind overlap events
+    if (InteractionSphere)
     {
-        DialogueAudioComponent->bAutoActivate = false;
-        DialogueAudioComponent->SetVolumeMultiplier(1.0f);
+        InteractionSphere->OnComponentBeginOverlap.AddDynamic(this, &ANarr_DialogueSystem::OnInteractionSphereBeginOverlap);
+        InteractionSphere->OnComponentEndOverlap.AddDynamic(this, &ANarr_DialogueSystem::OnInteractionSphereEndOverlap);
     }
-    
-    InitializeDefaultDialogueTrees();
-    
-    UE_LOG(LogTemp, Log, TEXT("Narr_DialogueSystem initialized with %d dialogue trees"), DialogueTrees.Num());
+
+    // Bind audio finished event
+    if (AudioComponent)
+    {
+        AudioComponent->OnAudioFinished.AddDynamic(this, &ANarr_DialogueSystem::OnAudioFinished);
+    }
+
+    // Initialize character profiles
+    CreateCharacterProfiles();
+    InitializeCharacters();
 }
 
-void UNarr_DialogueSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void ANarr_DialogueSystem::Tick(float DeltaTime)
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    
-    if (bIsDialogueActive && CurrentTree)
+    Super::Tick(DeltaTime);
+
+    // Check for player input when in range
+    if (bPlayerInRange && PlayerCharacter && !bIsPlayingDialogue)
     {
-        DialogueTimer += DeltaTime;
-        
-        // Auto-advance non-choice dialogue after duration
-        if (CurrentTree->CurrentNodeIndex < CurrentTree->DialogueNodes.Num())
+        // Check for interaction input (E key or gamepad button)
+        if (PlayerCharacter->GetInputComponent())
         {
-            const FNarr_DialogueNode& CurrentNode = CurrentTree->DialogueNodes[CurrentTree->CurrentNodeIndex];
-            if (!CurrentNode.bIsPlayerChoice && DialogueTimer >= CurrentNode.DisplayDuration)
+            // Auto-play dialogue when player enters range for now
+            // In a full implementation, this would check for input
+            if (CurrentCharacter.DialogueLines.Num() > 0)
             {
-                AdvanceDialogue();
+                PlayDialogueLine(CurrentDialogueIndex);
             }
         }
     }
 }
 
-void UNarr_DialogueSystem::StartDialogue(const FString& TreeName)
+void ANarr_DialogueSystem::InitializeCharacters()
 {
-    FNarr_DialogueTree* Tree = GetDialogueTree(TreeName);
-    if (Tree && Tree->DialogueNodes.Num() > 0)
+    if (Characters.Num() == 0)
     {
-        CurrentTree = Tree;
-        CurrentTree->CurrentNodeIndex = 0;
-        CurrentTree->bIsActive = true;
-        bIsDialogueActive = true;
-        DialogueTimer = 0.0f;
-        
-        // Play first node audio if available
-        const FNarr_DialogueNode& FirstNode = CurrentTree->DialogueNodes[0];
-        if (!FirstNode.AudioPath.IsEmpty())
+        CreateCharacterProfiles();
+    }
+
+    // Set first available character as current
+    for (const FNarr_CharacterProfile& Character : Characters)
+    {
+        if (Character.bIsAvailable)
         {
-            PlayDialogueAudio(FirstNode.AudioPath);
+            CurrentCharacter = Character;
+            break;
         }
-        
-        UE_LOG(LogTemp, Log, TEXT("Started dialogue tree: %s"), *TreeName);
     }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Failed to start dialogue tree: %s"), *TreeName);
-    }
+
+    UE_LOG(LogTemp, Warning, TEXT("Dialogue System initialized with %d characters"), Characters.Num());
 }
 
-void UNarr_DialogueSystem::EndDialogue()
+void ANarr_DialogueSystem::SetCurrentCharacter(const FString& CharacterName)
 {
-    if (CurrentTree)
+    for (const FNarr_CharacterProfile& Character : Characters)
     {
-        CurrentTree->bIsActive = false;
-        CurrentTree = nullptr;
-    }
-    
-    bIsDialogueActive = false;
-    DialogueTimer = 0.0f;
-    
-    StopDialogueAudio();
-    
-    UE_LOG(LogTemp, Log, TEXT("Dialogue ended"));
-}
-
-void UNarr_DialogueSystem::AdvanceDialogue(int32 ChoiceIndex)
-{
-    if (!CurrentTree || !bIsDialogueActive)
-    {
-        return;
-    }
-    
-    if (CurrentTree->CurrentNodeIndex >= CurrentTree->DialogueNodes.Num())
-    {
-        EndDialogue();
-        return;
-    }
-    
-    const FNarr_DialogueNode& CurrentNode = CurrentTree->DialogueNodes[CurrentTree->CurrentNodeIndex];
-    
-    // Determine next node
-    int32 NextNodeIndex = -1;
-    if (CurrentNode.NextNodeIndices.Num() > 0)
-    {
-        if (CurrentNode.bIsPlayerChoice && ChoiceIndex < CurrentNode.NextNodeIndices.Num())
+        if (Character.CharacterName == CharacterName && Character.bIsAvailable)
         {
-            NextNodeIndex = CurrentNode.NextNodeIndices[ChoiceIndex];
+            CurrentCharacter = Character;
+            CurrentDialogueIndex = 0;
+            UE_LOG(LogTemp, Warning, TEXT("Set current character to: %s"), *CharacterName);
+            return;
+        }
+    }
+
+    UE_LOG(LogTemp, Error, TEXT("Character not found or not available: %s"), *CharacterName);
+}
+
+void ANarr_DialogueSystem::PlayDialogueLine(int32 LineIndex)
+{
+    if (bIsPlayingDialogue)
+    {
+        return;
+    }
+
+    if (CurrentCharacter.DialogueLines.IsValidIndex(LineIndex))
+    {
+        const FNarr_DialogueLine& Line = CurrentCharacter.DialogueLines[LineIndex];
+        
+        bIsPlayingDialogue = true;
+        CurrentDialogueIndex = LineIndex;
+
+        // Display dialogue text on screen
+        if (GEngine)
+        {
+            FString DisplayText = FString::Printf(TEXT("%s: %s"), *Line.CharacterName, *Line.DialogueText);
+            GEngine->AddOnScreenDebugMessage(-1, Line.Duration, FColor::Yellow, DisplayText);
+        }
+
+        // Play audio if available
+        if (!Line.AudioURL.IsEmpty() && AudioComponent)
+        {
+            LoadAudioFromURL(Line.AudioURL);
         }
         else
         {
-            NextNodeIndex = CurrentNode.NextNodeIndices[0];
+            // If no audio, use timer to simulate duration
+            GetWorld()->GetTimerManager().SetTimer(
+                FTimerHandle(),
+                this,
+                &ANarr_DialogueSystem::OnAudioFinished,
+                Line.Duration,
+                false
+            );
         }
+
+        UE_LOG(LogTemp, Warning, TEXT("Playing dialogue: %s - %s"), *Line.CharacterName, *Line.DialogueText);
     }
-    
-    if (NextNodeIndex >= 0 && NextNodeIndex < CurrentTree->DialogueNodes.Num())
+}
+
+void ANarr_DialogueSystem::PlayNextDialogue()
+{
+    if (CurrentCharacter.DialogueLines.IsValidIndex(CurrentDialogueIndex + 1))
     {
-        CurrentTree->CurrentNodeIndex = NextNodeIndex;
-        DialogueTimer = 0.0f;
-        
-        // Play next node audio
-        const FNarr_DialogueNode& NextNode = CurrentTree->DialogueNodes[NextNodeIndex];
-        if (!NextNode.AudioPath.IsEmpty())
-        {
-            PlayDialogueAudio(NextNode.AudioPath);
-        }
-        
-        UE_LOG(LogTemp, Log, TEXT("Advanced to dialogue node %d"), NextNodeIndex);
+        PlayDialogueLine(CurrentDialogueIndex + 1);
     }
     else
     {
-        EndDialogue();
+        UE_LOG(LogTemp, Warning, TEXT("No more dialogue lines for character: %s"), *CurrentCharacter.CharacterName);
+        StopDialogue();
     }
 }
 
-bool UNarr_DialogueSystem::IsDialogueActive() const
+void ANarr_DialogueSystem::StopDialogue()
 {
-    return bIsDialogueActive;
-}
+    bIsPlayingDialogue = false;
+    CurrentDialogueIndex = 0;
 
-FNarr_DialogueNode UNarr_DialogueSystem::GetCurrentDialogueNode() const
-{
-    if (CurrentTree && CurrentTree->CurrentNodeIndex < CurrentTree->DialogueNodes.Num())
+    if (AudioComponent && AudioComponent->IsPlaying())
     {
-        return CurrentTree->DialogueNodes[CurrentTree->CurrentNodeIndex];
+        AudioComponent->Stop();
     }
-    
-    return FNarr_DialogueNode();
+
+    UE_LOG(LogTemp, Warning, TEXT("Dialogue stopped"));
 }
 
-void UNarr_DialogueSystem::AddDialogueTree(const FNarr_DialogueTree& NewTree)
+FNarr_DialogueLine ANarr_DialogueSystem::GetDialogueByContext(ESurvivalContext Context)
 {
-    DialogueTrees.Add(NewTree);
-    UE_LOG(LogTemp, Log, TEXT("Added dialogue tree: %s"), *NewTree.TreeName);
-}
-
-void UNarr_DialogueSystem::RemoveDialogueTree(const FString& TreeName)
-{
-    DialogueTrees.RemoveAll([&TreeName](const FNarr_DialogueTree& Tree)
+    for (const FNarr_DialogueLine& Line : CurrentCharacter.DialogueLines)
     {
-        return Tree.TreeName == TreeName;
-    });
-    
-    UE_LOG(LogTemp, Log, TEXT("Removed dialogue tree: %s"), *TreeName);
-}
-
-FNarr_DialogueTree* UNarr_DialogueSystem::GetDialogueTree(const FString& TreeName)
-{
-    for (FNarr_DialogueTree& Tree : DialogueTrees)
-    {
-        if (Tree.TreeName == TreeName)
+        if (Line.Context == Context)
         {
-            return &Tree;
+            return Line;
         }
     }
-    
-    return nullptr;
+
+    // Return first line if no context match
+    if (CurrentCharacter.DialogueLines.Num() > 0)
+    {
+        return CurrentCharacter.DialogueLines[0];
+    }
+
+    return FNarr_DialogueLine();
 }
 
-void UNarr_DialogueSystem::PlayDialogueAudio(const FString& AudioPath)
+TArray<FString> ANarr_DialogueSystem::GetAvailableCharacters()
 {
-    if (DialogueAudioComponent && !AudioPath.IsEmpty())
+    TArray<FString> AvailableNames;
+    
+    for (const FNarr_CharacterProfile& Character : Characters)
     {
-        // In a real implementation, you would load the audio asset from the path
-        // For now, we just log the audio path
-        UE_LOG(LogTemp, Log, TEXT("Playing dialogue audio: %s"), *AudioPath);
+        if (Character.bIsAvailable)
+        {
+            AvailableNames.Add(Character.CharacterName);
+        }
+    }
+
+    return AvailableNames;
+}
+
+void ANarr_DialogueSystem::TestDialogueSystem()
+{
+    UE_LOG(LogTemp, Warning, TEXT("Testing Dialogue System..."));
+    
+    if (Characters.Num() > 0)
+    {
+        SetCurrentCharacter(Characters[0].CharacterName);
+        PlayDialogueLine(0);
+    }
+}
+
+void ANarr_DialogueSystem::OnInteractionSphereBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
+{
+    if (ATranspersonalCharacter* Character = Cast<ATranspersonalCharacter>(OtherActor))
+    {
+        PlayerCharacter = Character;
+        bPlayerInRange = true;
         
-        // Stop current audio
-        StopDialogueAudio();
+        UE_LOG(LogTemp, Warning, TEXT("Player entered dialogue range"));
         
-        // Play new audio (placeholder implementation)
-        // DialogueAudioComponent->SetSound(LoadedSoundCue);
-        // DialogueAudioComponent->Play();
+        // Visual feedback
+        if (VisualMarker)
+        {
+            VisualMarker->SetVisibility(true);
+        }
     }
 }
 
-void UNarr_DialogueSystem::StopDialogueAudio()
+void ANarr_DialogueSystem::OnInteractionSphereEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
 {
-    if (DialogueAudioComponent && DialogueAudioComponent->IsPlaying())
+    if (ATranspersonalCharacter* Character = Cast<ATranspersonalCharacter>(OtherActor))
     {
-        DialogueAudioComponent->Stop();
+        PlayerCharacter = nullptr;
+        bPlayerInRange = false;
+        
+        UE_LOG(LogTemp, Warning, TEXT("Player left dialogue range"));
+        
+        // Stop current dialogue
+        StopDialogue();
+        
+        // Hide visual feedback
+        if (VisualMarker)
+        {
+            VisualMarker->SetVisibility(false);
+        }
     }
 }
 
-void UNarr_DialogueSystem::SetNPCType(ENarr_NPCType NewNPCType)
+void ANarr_DialogueSystem::OnAudioFinished()
 {
-    NPCType = NewNPCType;
-    UE_LOG(LogTemp, Log, TEXT("NPC type set to: %d"), (int32)NPCType);
+    bIsPlayingDialogue = false;
+    UE_LOG(LogTemp, Warning, TEXT("Audio finished, dialogue complete"));
 }
 
-ENarr_NPCType UNarr_DialogueSystem::GetNPCType() const
+void ANarr_DialogueSystem::CreateCharacterProfiles()
 {
-    return NPCType;
+    Characters.Empty();
+
+    // Predator Stalker Character
+    FNarr_CharacterProfile PredatorStalker;
+    PredatorStalker.CharacterName = TEXT("Predator Stalker");
+    PredatorStalker.BackgroundStory = TEXT("A seasoned tracker who has survived countless predator encounters. Knows the hunting patterns of the apex predators and teaches others how to avoid becoming prey.");
+    PredatorStalker.Expertise = ESurvivalSkill::Combat;
+    PredatorStalker.bIsAvailable = true;
+
+    FNarr_DialogueLine PredatorLine;
+    PredatorLine.CharacterName = PredatorStalker.CharacterName;
+    PredatorLine.DialogueText = TEXT("The ancient predator circles your camp, its massive footsteps shaking the ground beneath you. This is no ordinary hunt - it has been tracking you for hours, waiting for the perfect moment to strike.");
+    PredatorLine.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1777714373019_PredatorStalker.mp3");
+    PredatorLine.Duration = 18.0f;
+    PredatorLine.Context = ESurvivalContext::Combat;
+    PredatorStalker.DialogueLines.Add(PredatorLine);
+
+    Characters.Add(PredatorStalker);
+
+    // Tribal Elder Character
+    FNarr_CharacterProfile TribalElder;
+    TribalElder.CharacterName = TEXT("Tribal Elder");
+    TribalElder.BackgroundStory = TEXT("The oldest and wisest member of the tribe. Has observed the migration patterns of herbivores for decades and understands the ancient rhythms of the prehistoric world.");
+    TribalElder.Expertise = ESurvivalSkill::Tracking;
+    TribalElder.bIsAvailable = true;
+
+    FNarr_DialogueLine ElderLine;
+    ElderLine.CharacterName = TribalElder.CharacterName;
+    ElderLine.DialogueText = TEXT("Listen carefully, young survivor. The herbivores migrate through this valley every season, following the same ancient paths their ancestors used. If you learn to read their signs, you can predict where they'll be.");
+    ElderLine.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1777714376046_TribalElder.mp3");
+    ElderLine.Duration = 18.0f;
+    ElderLine.Context = ESurvivalContext::Exploration;
+    TribalElder.DialogueLines.Add(ElderLine);
+
+    Characters.Add(TribalElder);
+
+    // Water Scout Character
+    FNarr_CharacterProfile WaterScout;
+    WaterScout.CharacterName = TEXT("Water Scout");
+    WaterScout.BackgroundStory = TEXT("A specialist in finding and securing water sources. Understands the dangers that lurk around watering holes and has developed strategies for safe water collection.");
+    WaterScout.Expertise = ESurvivalSkill::Gathering;
+    WaterScout.bIsAvailable = true;
+
+    FNarr_DialogueLine WaterLine;
+    WaterLine.CharacterName = WaterScout.CharacterName;
+    WaterLine.DialogueText = TEXT("Water means life, but it also means danger. Every watering hole is a battlefield where predators wait in ambush. Approach slowly, watch for ripples that shouldn't be there, and always have an escape route planned.");
+    WaterLine.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1777714378354_WaterScout.mp3");
+    WaterLine.Duration = 15.0f;
+    WaterLine.Context = ESurvivalContext::ResourceGathering;
+    WaterScout.DialogueLines.Add(WaterLine);
+
+    Characters.Add(WaterScout);
+
+    // Pack Hunter Expert Character
+    FNarr_CharacterProfile PackExpert;
+    PackExpert.CharacterName = TEXT("Pack Hunter Expert");
+    PackExpert.BackgroundStory = TEXT("A survivor who has studied the pack hunting behavior of raptors and other intelligent predators. Knows their tactics and can teach others how to counter their coordinated attacks.");
+    PackExpert.Expertise = ESurvivalSkill::Combat;
+    PackExpert.bIsAvailable = true;
+
+    FNarr_DialogueLine PackLine;
+    PackLine.CharacterName = PackExpert.CharacterName;
+    PackLine.DialogueText = TEXT("The pack hunters work together with deadly precision. When you see one raptor, know that two others are already flanking you. Their intelligence rivals our own - never underestimate their ability to learn and adapt.");
+    PackLine.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1777714380429_PackHunterExpert.mp3");
+    PackLine.Duration = 15.0f;
+    PackLine.Context = ESurvivalContext::Combat;
+    PackExpert.DialogueLines.Add(PackLine);
+
+    Characters.Add(PackExpert);
+
+    UE_LOG(LogTemp, Warning, TEXT("Created %d character profiles"), Characters.Num());
 }
 
-void UNarr_DialogueSystem::TriggerQuestDialogue(EQuest_MissionType MissionType)
+void ANarr_DialogueSystem::LoadAudioFromURL(const FString& AudioURL)
 {
-    FString TreeName;
+    // For now, just log the audio URL
+    // In a full implementation, this would download and play the audio
+    UE_LOG(LogTemp, Warning, TEXT("Loading audio from URL: %s"), *AudioURL);
     
-    switch (MissionType)
+    // Simulate audio playback with timer
+    if (!AudioURL.IsEmpty())
     {
-        case EQuest_MissionType::WaterGathering:
-            TreeName = TEXT("ElderWaterQuest");
-            break;
-        case EQuest_MissionType::FoodForaging:
-            TreeName = TEXT("GathererFoodQuest");
-            break;
-        case EQuest_MissionType::ShelterBuilding:
-            TreeName = TEXT("ElderShelterQuest");
-            break;
-        case EQuest_MissionType::ToolCrafting:
-            TreeName = TEXT("HunterToolQuest");
-            break;
-        case EQuest_MissionType::TerritoryMapping:
-            TreeName = TEXT("HunterTerritoryQuest");
-            break;
-        case EQuest_MissionType::PredatorAvoidance:
-            TreeName = TEXT("ShamanDangerQuest");
-            break;
-        default:
-            TreeName = TEXT("ElderDefault");
-            break;
+        GetWorld()->GetTimerManager().SetTimer(
+            FTimerHandle(),
+            this,
+            &ANarr_DialogueSystem::OnAudioFinished,
+            CurrentCharacter.DialogueLines[CurrentDialogueIndex].Duration,
+            false
+        );
     }
-    
-    StartDialogue(TreeName);
-    UE_LOG(LogTemp, Log, TEXT("Triggered quest dialogue for mission type: %d"), (int32)MissionType);
-}
-
-void UNarr_DialogueSystem::CompleteQuestDialogue(EQuest_MissionType MissionType)
-{
-    FString CompletionTreeName = FString::Printf(TEXT("Complete_%d"), (int32)MissionType);
-    StartDialogue(CompletionTreeName);
-    UE_LOG(LogTemp, Log, TEXT("Triggered quest completion dialogue for mission type: %d"), (int32)MissionType);
-}
-
-void UNarr_DialogueSystem::InitializeDefaultDialogueTrees()
-{
-    CreateElderDialogueTree();
-    CreateHunterDialogueTree();
-    CreateGathererDialogueTree();
-    CreateShamanDialogueTree();
-}
-
-void UNarr_DialogueSystem::CreateElderDialogueTree()
-{
-    FNarr_DialogueTree ElderTree;
-    ElderTree.TreeName = TEXT("ElderDefault");
-    ElderTree.NPCType = ENarr_NPCType::TribalElder;
-    
-    // Node 0: Greeting
-    FNarr_DialogueNode GreetingNode = CreateDialogueNode(
-        TEXT("Welcome, young survivor. The wilderness tests us all, but those who learn its ways shall endure."),
-        TEXT("Tribal Elder"),
-        TEXT("TribalElder_Greeting.mp3"),
-        4.0f
-    );
-    GreetingNode.NextNodeIndices.Add(1);
-    
-    // Node 1: Wisdom
-    FNarr_DialogueNode WisdomNode = CreateDialogueNode(
-        TEXT("I have knowledge of water sources hidden in the eastern ravines. Bring me proof of your courage, and I will share this wisdom."),
-        TEXT("Tribal Elder"),
-        TEXT("TribalElder_Wisdom.mp3"),
-        5.0f
-    );
-    
-    ElderTree.DialogueNodes.Add(GreetingNode);
-    ElderTree.DialogueNodes.Add(WisdomNode);
-    
-    AddDialogueTree(ElderTree);
-    
-    // Water Quest Tree
-    FNarr_DialogueTree WaterQuestTree;
-    WaterQuestTree.TreeName = TEXT("ElderWaterQuest");
-    WaterQuestTree.NPCType = ENarr_NPCType::TribalElder;
-    
-    FNarr_DialogueNode WaterQuestNode = CreateDialogueNode(
-        TEXT("The streams run dry in the heat, but ancient springs flow beneath the stone. Find the hidden waters and return with proof."),
-        TEXT("Tribal Elder"),
-        TEXT("TribalElder_WaterQuest.mp3"),
-        4.5f
-    );
-    
-    WaterQuestTree.DialogueNodes.Add(WaterQuestNode);
-    AddDialogueTree(WaterQuestTree);
-}
-
-void UNarr_DialogueSystem::CreateHunterDialogueTree()
-{
-    FNarr_DialogueTree HunterTree;
-    HunterTree.TreeName = TEXT("HunterDefault");
-    HunterTree.NPCType = ENarr_NPCType::Hunter;
-    
-    FNarr_DialogueNode HunterGreeting = CreateDialogueNode(
-        TEXT("The hunt calls to those with steady hands and patient hearts. I've tracked the great beasts to their watering grounds."),
-        TEXT("Hunter"),
-        TEXT("Hunter_Greeting.mp3"),
-        4.0f
-    );
-    HunterGreeting.NextNodeIndices.Add(1);
-    
-    FNarr_DialogueNode HunterWisdom = CreateDialogueNode(
-        TEXT("Complete my trial of stealth and cunning, and I'll teach you the ancient ways of the silent hunter."),
-        TEXT("Hunter"),
-        TEXT("Hunter_Wisdom.mp3"),
-        4.0f
-    );
-    
-    HunterTree.DialogueNodes.Add(HunterGreeting);
-    HunterTree.DialogueNodes.Add(HunterWisdom);
-    
-    AddDialogueTree(HunterTree);
-}
-
-void UNarr_DialogueSystem::CreateGathererDialogueTree()
-{
-    FNarr_DialogueTree GathererTree;
-    GathererTree.TreeName = TEXT("GathererDefault");
-    GathererTree.NPCType = ENarr_NPCType::Gatherer;
-    
-    FNarr_DialogueNode GathererGreeting = CreateDialogueNode(
-        TEXT("The earth provides for those who know where to look. Berries, roots, healing herbs - all have their seasons and places."),
-        TEXT("Gatherer"),
-        TEXT("Gatherer_Greeting.mp3"),
-        4.5f
-    );
-    
-    GathererTree.DialogueNodes.Add(GathererGreeting);
-    AddDialogueTree(GathererTree);
-}
-
-void UNarr_DialogueSystem::CreateShamanDialogueTree()
-{
-    FNarr_DialogueTree ShamanTree;
-    ShamanTree.TreeName = TEXT("ShamanDefault");
-    ShamanTree.NPCType = ENarr_NPCType::WiseShaman;
-    
-    FNarr_DialogueNode ShamanGreeting = CreateDialogueNode(
-        TEXT("Listen well, stranger. The great lizards follow ancient patterns. When the earth trembles and birds fall silent, the tyrant king approaches."),
-        TEXT("Wise Shaman"),
-        TEXT("WiseShaman_Warning.mp3"),
-        5.0f
-    );
-    ShamanGreeting.NextNodeIndices.Add(1);
-    
-    FNarr_DialogueNode ShamanAdvice = CreateDialogueNode(
-        TEXT("Run to high ground and pray he has already fed. These lands have claimed many before you."),
-        TEXT("Wise Shaman"),
-        TEXT("WiseShaman_Advice.mp3"),
-        4.0f
-    );
-    
-    ShamanTree.DialogueNodes.Add(ShamanGreeting);
-    ShamanTree.DialogueNodes.Add(ShamanAdvice);
-    
-    AddDialogueTree(ShamanTree);
-}
-
-FNarr_DialogueNode UNarr_DialogueSystem::CreateDialogueNode(const FString& Text, const FString& Speaker, 
-                                                           const FString& AudioPath, float Duration, bool bIsChoice)
-{
-    FNarr_DialogueNode Node;
-    Node.DialogueText = Text;
-    Node.SpeakerName = Speaker;
-    Node.AudioPath = AudioPath;
-    Node.DisplayDuration = Duration;
-    Node.bIsPlayerChoice = bIsChoice;
-    Node.TriggerCondition = ENarr_DialogueTrigger::Proximity;
-    
-    return Node;
 }
