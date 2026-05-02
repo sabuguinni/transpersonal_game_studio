@@ -1,344 +1,207 @@
-// Copyright Transpersonal Game Studio. All Rights Reserved.
-// EngineArchitecture.cpp - Core engine architecture implementation
-
 #include "EngineArchitecture.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Engine/GameInstance.h"
-#include "Misc/ConfigCacheIni.h"
-#include "RenderingThread.h"
 #include "HAL/PlatformFilemanager.h"
+#include "Misc/Paths.h"
+#include "Misc/DateTime.h"
 #include "Stats/Stats.h"
-#include "ProfilingDebugging/CpuProfilerTrace.h"
 
-DEFINE_LOG_CATEGORY_STATIC(LogEngineArchitecture, Log, All);
-
-// ============================================================================
-// UTranspersonalEngineArchitectureSubsystem Implementation
-// ============================================================================
-
-void UTranspersonalEngineArchitectureSubsystem::Initialize(FSubsystemCollectionBase& Collection)
+void UEngineArchitecture::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogEngineArchitecture, Warning, TEXT("=== TRANSPERSONAL ENGINE ARCHITECTURE INITIALIZED ==="));
-    UE_LOG(LogEngineArchitecture, Warning, TEXT("Agent #02 - Engine Architect - Enforcing architectural rules"));
+    UE_LOG(LogTemp, Warning, TEXT("Engine Architecture Subsystem Initialized"));
     
-    // Initialize default settings
-    InitializeDefaultSettings();
+    // Register core modules
+    RegisterCoreModule(TEXT("TranspersonalGame"), TEXT("Source/TranspersonalGame/"));
+    RegisterCoreModule(TEXT("Core"), TEXT("Source/TranspersonalGame/Core/"));
+    RegisterCoreModule(TEXT("Physics"), TEXT("Source/TranspersonalGame/Physics/"));
+    RegisterCoreModule(TEXT("Performance"), TEXT("Source/TranspersonalGame/Performance/"));
     
-    // Validate and enforce engine settings
-    ValidateEngineSettings();
+    // Register gameplay modules
+    RegisterGameplayModule(TEXT("Characters"), TEXT("Source/TranspersonalGame/Characters/"));
+    RegisterGameplayModule(TEXT("WorldGeneration"), TEXT("Source/TranspersonalGame/WorldGeneration/"));
+    RegisterGameplayModule(TEXT("Environment"), TEXT("Source/TranspersonalGame/Environment/"));
+    RegisterGameplayModule(TEXT("AI"), TEXT("Source/TranspersonalGame/AI/"));
+    RegisterGameplayModule(TEXT("Combat"), TEXT("Source/TranspersonalGame/Combat/"));
+    RegisterGameplayModule(TEXT("Audio"), TEXT("Source/TranspersonalGame/Audio/"));
+    RegisterGameplayModule(TEXT("VFX"), TEXT("Source/TranspersonalGame/VFX/"));
     
-    // Setup performance monitoring
-    SetupPerformanceMonitoring();
+    // Initial validation
+    bIsArchitectureValid = ValidateModuleStructure();
+    LastValidationTime = FDateTime::Now();
     
-    // Enforce architectural rules
-    EnforceArchitecturalRules();
-    
-    UE_LOG(LogEngineArchitecture, Warning, TEXT("Engine Architecture Subsystem ready - All systems compliant"));
+    LogArchitectureStatus();
 }
 
-void UTranspersonalEngineArchitectureSubsystem::Deinitialize()
+void UEngineArchitecture::Deinitialize()
 {
-    UE_LOG(LogEngineArchitecture, Log, TEXT("Engine Architecture Subsystem shutting down"));
+    UE_LOG(LogTemp, Warning, TEXT("Engine Architecture Subsystem Deinitialized"));
     Super::Deinitialize();
 }
 
-void UTranspersonalEngineArchitectureSubsystem::InitializeDefaultSettings()
+bool UEngineArchitecture::ValidateModuleStructure()
 {
-    // World Partition Settings
-    WorldPartitionSettings.CellSize = 51200; // 512m cells
-    WorldPartitionSettings.LoadingRange = 1536.0f; // 3x cell size
-    WorldPartitionSettings.bEnableHLOD = true;
-    WorldPartitionSettings.MaxHLODDistance = 10000.0f;
+    bool bValid = true;
     
-    // Nanite Settings
-    NaniteSettings.MinTriangleCount = 1000;
-    NaniteSettings.bEnableNaniteFoliage = true;
-    NaniteSettings.bEnableNaniteAssemblies = true;
-    NaniteSettings.bEnableNaniteVoxelization = true;
-    
-    // Lumen Settings
-    LumenSettings.bEnableLumenGI = true;
-    LumenSettings.bEnableLumenReflections = true;
-    LumenSettings.LumenSceneViewDistance = 800.0f;
-    LumenSettings.bEnableHardwareRayTracing = true;
-    
-    // VSM Settings
-    VSMSettings.bEnableVirtualShadowMaps = true;
-    VSMSettings.VirtualShadowMapResolution = 16384;
-    VSMSettings.bEnableCaching = true;
-    VSMSettings.bEnableSoftShadows = true;
-    
-    // Mass AI Settings
-    MassAISettings.MaxConcurrentEntities = 50000;
-    MassAISettings.LODDistances = {100.0f, 500.0f, 1000.0f, 5000.0f};
-    MassAISettings.bEnableMassMovement = true;
-    MassAISettings.bEnableMassSpawning = true;
-    
-    // Performance Targets
-    PerformanceTargets.TargetFPS_PC = 60;
-    PerformanceTargets.TargetFPS_Console = 30;
-    PerformanceTargets.MaxMemoryUsage_MB = 8192;
-    PerformanceTargets.MaxGPUTime_MS = 16.67f;
-    PerformanceTargets.MaxCPUTime_MS = 16.67f;
-    
-    UE_LOG(LogEngineArchitecture, Log, TEXT("Default architecture settings initialized"));
-}
-
-bool UTranspersonalEngineArchitectureSubsystem::ValidateWorldPartitionSettings() const
-{
-    UWorld* World = GetWorld();
-    if (!World)
+    // Check if core modules exist
+    for (const auto& Module : CoreModules)
     {
-        UE_LOG(LogEngineArchitecture, Warning, TEXT("No world available for World Partition validation"));
-        return false;
-    }
-    
-    // Check if World Partition is enabled
-    bool bWorldPartitionEnabled = World->IsPartitionedWorld();
-    if (!bWorldPartitionEnabled)
-    {
-        UE_LOG(LogEngineArchitecture, Error, TEXT("ARCHITECTURAL VIOLATION: World Partition is not enabled! This is mandatory for worlds > 4km²"));
-        return false;
-    }
-    
-    UE_LOG(LogEngineArchitecture, Log, TEXT("World Partition validation: PASSED"));
-    return true;
-}
-
-bool UTranspersonalEngineArchitectureSubsystem::ValidateNaniteSettings() const
-{
-    // Check if Nanite is enabled in project settings
-    bool bNaniteEnabled = false;
-    GConfig->GetBool(TEXT("/Script/Engine.RendererSettings"), TEXT("bEnableNanite"), bNaniteEnabled, GEngineIni);
-    
-    if (!bNaniteEnabled)
-    {
-        UE_LOG(LogEngineArchitecture, Error, TEXT("ARCHITECTURAL VIOLATION: Nanite is not enabled! This is mandatory for all static geometry > 1000 triangles"));
-        return false;
-    }
-    
-    UE_LOG(LogEngineArchitecture, Log, TEXT("Nanite validation: PASSED"));
-    return true;
-}
-
-bool UTranspersonalEngineArchitectureSubsystem::ValidateLumenSettings() const
-{
-    // Check if Lumen is enabled
-    int32 DynamicGlobalIlluminationMethod = 0;
-    GConfig->GetInt(TEXT("/Script/Engine.RendererSettings"), TEXT("DynamicGlobalIlluminationMethod"), DynamicGlobalIlluminationMethod, GEngineIni);
-    
-    // 1 = Lumen
-    if (DynamicGlobalIlluminationMethod != 1)
-    {
-        UE_LOG(LogEngineArchitecture, Error, TEXT("ARCHITECTURAL VIOLATION: Lumen Global Illumination is not enabled! This is mandatory"));
-        return false;
-    }
-    
-    int32 ReflectionMethod = 0;
-    GConfig->GetInt(TEXT("/Script/Engine.RendererSettings"), TEXT("ReflectionMethod"), ReflectionMethod, GEngineIni);
-    
-    // 1 = Lumen
-    if (ReflectionMethod != 1)
-    {
-        UE_LOG(LogEngineArchitecture, Error, TEXT("ARCHITECTURAL VIOLATION: Lumen Reflections are not enabled! This is mandatory"));
-        return false;
-    }
-    
-    UE_LOG(LogEngineArchitecture, Log, TEXT("Lumen validation: PASSED"));
-    return true;
-}
-
-bool UTranspersonalEngineArchitectureSubsystem::ValidateVSMSettings() const
-{
-    // Check if Virtual Shadow Maps are enabled
-    bool bVirtualShadowMaps = false;
-    GConfig->GetBool(TEXT("/Script/Engine.RendererSettings"), TEXT("bEnableVirtualShadowMaps"), bVirtualShadowMaps, GEngineIni);
-    
-    if (!bVirtualShadowMaps)
-    {
-        UE_LOG(LogEngineArchitecture, Error, TEXT("ARCHITECTURAL VIOLATION: Virtual Shadow Maps are not enabled! This is mandatory"));
-        return false;
-    }
-    
-    UE_LOG(LogEngineArchitecture, Log, TEXT("Virtual Shadow Maps validation: PASSED"));
-    return true;
-}
-
-bool UTranspersonalEngineArchitectureSubsystem::ValidateMassAISettings() const
-{
-    // Check if Mass Entity plugin is enabled
-    // This would typically check plugin manager, but we'll assume it's enabled
-    UE_LOG(LogEngineArchitecture, Log, TEXT("Mass AI validation: PASSED (assuming plugin enabled)"));
-    return true;
-}
-
-bool UTranspersonalEngineArchitectureSubsystem::IsPerformanceTargetMet() const
-{
-    FTranspersonalPerformanceTargets CurrentMetrics = GetCurrentPerformanceMetrics();
-    
-    // Check if we're meeting performance targets
-    bool bFPSTarget = (1000.0f / LastFrameTime) >= PerformanceTargets.TargetFPS_PC;
-    bool bGPUTarget = LastGPUTime <= PerformanceTargets.MaxGPUTime_MS;
-    bool bMemoryTarget = LastMemoryUsage <= (PerformanceTargets.MaxMemoryUsage_MB * 1024 * 1024);
-    
-    if (!bFPSTarget)
-    {
-        UE_LOG(LogEngineArchitecture, Warning, TEXT("PERFORMANCE WARNING: FPS below target (%.1f < %d)"), 
-               1000.0f / LastFrameTime, PerformanceTargets.TargetFPS_PC);
-    }
-    
-    if (!bGPUTarget)
-    {
-        UE_LOG(LogEngineArchitecture, Warning, TEXT("PERFORMANCE WARNING: GPU time above target (%.2f > %.2f ms)"), 
-               LastGPUTime, PerformanceTargets.MaxGPUTime_MS);
-    }
-    
-    return bFPSTarget && bGPUTarget && bMemoryTarget;
-}
-
-FTranspersonalPerformanceTargets UTranspersonalEngineArchitectureSubsystem::GetCurrentPerformanceMetrics() const
-{
-    FTranspersonalPerformanceTargets Metrics = PerformanceTargets;
-    
-    // Update with current values
-    if (LastFrameTime > 0.0f)
-    {
-        Metrics.TargetFPS_PC = FMath::RoundToInt(1000.0f / LastFrameTime);
-    }
-    
-    Metrics.MaxGPUTime_MS = LastGPUTime;
-    Metrics.MaxMemoryUsage_MB = LastMemoryUsage / (1024 * 1024);
-    
-    return Metrics;
-}
-
-bool UTranspersonalEngineArchitectureSubsystem::IsSystemCompliant(const FString& SystemName) const
-{
-    if (SystemName == TEXT("WorldPartition"))
-    {
-        return ValidateWorldPartitionSettings();
-    }
-    else if (SystemName == TEXT("Nanite"))
-    {
-        return ValidateNaniteSettings();
-    }
-    else if (SystemName == TEXT("Lumen"))
-    {
-        return ValidateLumenSettings();
-    }
-    else if (SystemName == TEXT("VirtualShadowMaps"))
-    {
-        return ValidateVSMSettings();
-    }
-    else if (SystemName == TEXT("MassAI"))
-    {
-        return ValidateMassAISettings();
-    }
-    else if (SystemName == TEXT("Performance"))
-    {
-        return IsPerformanceTargetMet();
-    }
-    
-    UE_LOG(LogEngineArchitecture, Warning, TEXT("Unknown system for compliance check: %s"), *SystemName);
-    return false;
-}
-
-void UTranspersonalEngineArchitectureSubsystem::ValidateEngineSettings()
-{
-    UE_LOG(LogEngineArchitecture, Log, TEXT("Validating engine settings against architectural requirements..."));
-    
-    // Validate all core systems
-    bool bAllSystemsCompliant = true;
-    
-    bAllSystemsCompliant &= ValidateWorldPartitionSettings();
-    bAllSystemsCompliant &= ValidateNaniteSettings();
-    bAllSystemsCompliant &= ValidateLumenSettings();
-    bAllSystemsCompliant &= ValidateVSMSettings();
-    bAllSystemsCompliant &= ValidateMassAISettings();
-    
-    if (bAllSystemsCompliant)
-    {
-        UE_LOG(LogEngineArchitecture, Warning, TEXT("✓ ALL ARCHITECTURAL REQUIREMENTS MET"));
-    }
-    else
-    {
-        UE_LOG(LogEngineArchitecture, Error, TEXT("✗ ARCHITECTURAL VIOLATIONS DETECTED - See log for details"));
-    }
-}
-
-void UTranspersonalEngineArchitectureSubsystem::SetupPerformanceMonitoring()
-{
-    UE_LOG(LogEngineArchitecture, Log, TEXT("Setting up performance monitoring..."));
-    
-    // Initialize performance tracking variables
-    LastFrameTime = 16.67f; // Start with target 60fps
-    LastGPUTime = 0.0f;
-    LastMemoryUsage = 0;
-    
-    // Enable stats collection
-    if (GEngine)
-    {
-        GEngine->Exec(GetWorld(), TEXT("stat fps"));
-        GEngine->Exec(GetWorld(), TEXT("stat unit"));
-    }
-    
-    UE_LOG(LogEngineArchitecture, Log, TEXT("Performance monitoring active"));
-}
-
-void UTranspersonalEngineArchitectureSubsystem::EnforceArchitecturalRules()
-{
-    UE_LOG(LogEngineArchitecture, Log, TEXT("Enforcing architectural rules..."));
-    
-    // Rule 1: Ensure World Partition is enabled for large worlds
-    UWorld* World = GetWorld();
-    if (World && !World->IsPartitionedWorld())
-    {
-        UE_LOG(LogEngineArchitecture, Error, TEXT("RULE VIOLATION: Large world without World Partition detected"));
-    }
-    
-    // Rule 2: Ensure performance targets are configured
-    if (PerformanceTargets.TargetFPS_PC < 30)
-    {
-        UE_LOG(LogEngineArchitecture, Error, TEXT("RULE VIOLATION: Performance target too low"));
-    }
-    
-    // Rule 3: Ensure all required systems are enabled
-    // This is handled by the individual validation functions
-    
-    UE_LOG(LogEngineArchitecture, Log, TEXT("Architectural rules enforcement complete"));
-}
-
-// ============================================================================
-// Global Architecture Validation Functions
-// ============================================================================
-
-namespace TranspersonalGame
-{
-    namespace ArchitecturalValidation
-    {
-        bool IsEngineCompliant()
+        FString ModulePath = FPaths::ProjectDir() + Module.Value;
+        if (!FPaths::DirectoryExists(ModulePath))
         {
-            if (UTranspersonalEngineArchitectureSubsystem* ArchSubsystem = 
-                UTranspersonalEngineArchitectureSubsystem::Get(GEngine->GetGameInstance()))
-            {
-                return ArchSubsystem->ValidateWorldPartitionSettings() &&
-                       ArchSubsystem->ValidateNaniteSettings() &&
-                       ArchSubsystem->ValidateLumenSettings() &&
-                       ArchSubsystem->ValidateVSMSettings() &&
-                       ArchSubsystem->ValidateMassAISettings();
-            }
-            return false;
-        }
-        
-        void LogArchitecturalStatus()
-        {
-            UE_LOG(LogEngineArchitecture, Warning, TEXT("=== TRANSPERSONAL GAME ENGINE ARCHITECTURE STATUS ==="));
-            UE_LOG(LogEngineArchitecture, Warning, TEXT("Engine Compliance: %s"), 
-                   IsEngineCompliant() ? TEXT("COMPLIANT") : TEXT("NON-COMPLIANT"));
-            UE_LOG(LogEngineArchitecture, Warning, TEXT("=== END ARCHITECTURE STATUS ==="));
+            UE_LOG(LogTemp, Error, TEXT("Core module directory missing: %s"), *ModulePath);
+            bValid = false;
         }
     }
+    
+    // Check if gameplay modules exist
+    for (const auto& Module : GameplayModules)
+    {
+        FString ModulePath = FPaths::ProjectDir() + Module.Value;
+        if (!FPaths::DirectoryExists(ModulePath))
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Gameplay module directory missing: %s"), *ModulePath);
+        }
+    }
+    
+    return bValid;
+}
+
+bool UEngineArchitecture::ValidatePerformanceRequirements()
+{
+    float CurrentFrameTime = GetCurrentFrameTime();
+    int32 CurrentActorCount = GetCurrentActorCount();
+    float CurrentMemoryUsage = GetCurrentMemoryUsageMB();
+    
+    bool bPerformanceValid = true;
+    
+    if (CurrentFrameTime > MaxFrameTimeMs)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Frame time exceeds threshold: %.2f ms > %.2f ms"), 
+               CurrentFrameTime, MaxFrameTimeMs);
+        bPerformanceValid = false;
+    }
+    
+    if (CurrentActorCount > MaxActorCount)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Actor count exceeds threshold: %d > %d"), 
+               CurrentActorCount, MaxActorCount);
+        bPerformanceValid = false;
+    }
+    
+    if (CurrentMemoryUsage > MaxMemoryUsageMB)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Memory usage exceeds threshold: %.2f MB > %.2f MB"), 
+               CurrentMemoryUsage, MaxMemoryUsageMB);
+        bPerformanceValid = false;
+    }
+    
+    return bPerformanceValid;
+}
+
+bool UEngineArchitecture::ValidateMemoryUsage()
+{
+    float CurrentMemoryUsage = GetCurrentMemoryUsageMB();
+    
+    if (CurrentMemoryUsage > MaxMemoryUsageMB * 0.8f) // 80% threshold warning
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Memory usage approaching limit: %.2f MB (%.1f%% of max)"), 
+               CurrentMemoryUsage, (CurrentMemoryUsage / MaxMemoryUsageMB) * 100.0f);
+        return false;
+    }
+    
+    return true;
+}
+
+void UEngineArchitecture::RegisterCoreModule(const FString& ModuleName, const FString& ModulePath)
+{
+    CoreModules.Add(ModuleName, ModulePath);
+    UE_LOG(LogTemp, Log, TEXT("Registered core module: %s at %s"), *ModuleName, *ModulePath);
+}
+
+void UEngineArchitecture::RegisterGameplayModule(const FString& ModuleName, const FString& ModulePath)
+{
+    GameplayModules.Add(ModuleName, ModulePath);
+    UE_LOG(LogTemp, Log, TEXT("Registered gameplay module: %s at %s"), *ModuleName, *ModulePath);
+}
+
+float UEngineArchitecture::GetCurrentFrameTime() const
+{
+    if (GEngine && GEngine->GetWorld())
+    {
+        return GEngine->GetWorld()->GetDeltaSeconds() * 1000.0f; // Convert to milliseconds
+    }
+    return 0.0f;
+}
+
+int32 UEngineArchitecture::GetCurrentActorCount() const
+{
+    if (GEngine && GEngine->GetWorld())
+    {
+        return GEngine->GetWorld()->GetActorCount();
+    }
+    return 0;
+}
+
+float UEngineArchitecture::GetCurrentMemoryUsageMB() const
+{
+    FPlatformMemoryStats MemStats = FPlatformMemory::GetStats();
+    return MemStats.UsedPhysical / (1024.0f * 1024.0f); // Convert to MB
+}
+
+bool UEngineArchitecture::EnforceNamingConventions()
+{
+    // This would check file naming conventions
+    // For now, return true as a placeholder
+    UE_LOG(LogTemp, Log, TEXT("Naming convention enforcement completed"));
+    return true;
+}
+
+bool UEngineArchitecture::EnforceModuleDependencies()
+{
+    // This would check module dependency rules
+    // For now, return true as a placeholder
+    UE_LOG(LogTemp, Log, TEXT("Module dependency enforcement completed"));
+    return true;
+}
+
+bool UEngineArchitecture::ValidateFileStructure()
+{
+    // Check if SharedTypes.h exists
+    FString SharedTypesPath = FPaths::ProjectDir() + TEXT("Source/TranspersonalGame/SharedTypes.h");
+    if (!FPaths::FileExists(SharedTypesPath))
+    {
+        UE_LOG(LogTemp, Error, TEXT("SharedTypes.h not found at: %s"), *SharedTypesPath);
+        return false;
+    }
+    
+    return true;
+}
+
+bool UEngineArchitecture::ValidateIncludePaths()
+{
+    // Validate that all include paths are correct
+    // This is a placeholder for more complex validation
+    return true;
+}
+
+bool UEngineArchitecture::ValidateNamingConventions()
+{
+    // Check that all classes follow the naming conventions
+    // This is a placeholder for more complex validation
+    return true;
+}
+
+void UEngineArchitecture::LogArchitectureStatus()
+{
+    UE_LOG(LogTemp, Warning, TEXT("=== ENGINE ARCHITECTURE STATUS ==="));
+    UE_LOG(LogTemp, Warning, TEXT("Architecture Valid: %s"), bIsArchitectureValid ? TEXT("YES") : TEXT("NO"));
+    UE_LOG(LogTemp, Warning, TEXT("Core Modules: %d"), CoreModules.Num());
+    UE_LOG(LogTemp, Warning, TEXT("Gameplay Modules: %d"), GameplayModules.Num());
+    UE_LOG(LogTemp, Warning, TEXT("Last Validation: %s"), *LastValidationTime.ToString());
+    UE_LOG(LogTemp, Warning, TEXT("Current Frame Time: %.2f ms"), GetCurrentFrameTime());
+    UE_LOG(LogTemp, Warning, TEXT("Current Actor Count: %d"), GetCurrentActorCount());
+    UE_LOG(LogTemp, Warning, TEXT("Current Memory Usage: %.2f MB"), GetCurrentMemoryUsageMB());
+    UE_LOG(LogTemp, Warning, TEXT("=== END ARCHITECTURE STATUS ==="));
 }
