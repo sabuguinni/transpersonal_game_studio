@@ -1,216 +1,260 @@
 #include "Perf_FPSMonitor.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Components/SceneComponent.h"
-#include "HAL/PlatformFilemanager.h"
-#include "Misc/DateTime.h"
+#include "GameFramework/Actor.h"
+#include "Components/StaticMeshComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Components/PrimitiveComponent.h"
 
-APerf_FPSMonitor::APerf_FPSMonitor()
+UPerf_FPSMonitor::UPerf_FPSMonitor()
 {
-    PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.bStartWithTickEnabled = true;
-    PrimaryActorTick.TickInterval = 0.0f; // Tick every frame for accurate FPS measurement
-
-    // Create root component
-    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
-    RootComponent = RootSceneComponent;
-
-    // Initialize settings
-    bEnableMonitoring = true;
-    UpdateFrequency = 0.5f; // Update twice per second
-    SampleCount = 60; // Average over 60 samples
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 0.1f;
+    
+    MonitoringInterval = 0.1f;
+    SampleCount = 100;
+    TargetFPS = 60.0f;
+    bAutoOptimize = true;
     bLogPerformanceWarnings = true;
-    WarningFPSThreshold = 30.0f;
-
-    // Initialize performance tracking
-    CurrentSampleIndex = 0;
-    TimeSinceLastUpdate = 0.0f;
-    TotalSamples = 0;
-    PerformanceLevel = EPerf_PerformanceLevel::Good;
-
-    // Reserve space for FPS samples
+    bIsMonitoring = false;
+    
     FPSSamples.Reserve(SampleCount);
-    for (int32 i = 0; i < SampleCount; i++)
+    CurrentSampleIndex = 0;
+    TotalFPSSum = 0.0f;
+    LastUpdateTime = 0.0f;
+}
+
+void UPerf_FPSMonitor::BeginPlay()
+{
+    Super::BeginPlay();
+    
+    // Initialize metrics
+    ResetMetrics();
+    
+    // Start monitoring automatically
+    if (bAutoOptimize)
     {
-        FPSSamples.Add(60.0f); // Initialize with 60 FPS
+        StartMonitoring();
     }
 }
 
-void APerf_FPSMonitor::BeginPlay()
+void UPerf_FPSMonitor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-    Super::BeginPlay();
-
-    UE_LOG(LogTemp, Log, TEXT("Performance Monitor started - Target: 60 FPS PC / 30 FPS Console"));
-    
-    // Reset statistics on begin play
-    ResetStatistics();
+    StopMonitoring();
+    Super::EndPlay(EndPlayReason);
 }
 
-void APerf_FPSMonitor::Tick(float DeltaTime)
+void UPerf_FPSMonitor::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    Super::Tick(DeltaTime);
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    
+    if (bIsMonitoring)
+    {
+        UpdateFPSMetrics();
+    }
+}
 
-    if (!bEnableMonitoring)
+void UPerf_FPSMonitor::UpdateFPSMetrics()
+{
+    UWorld* World = GetWorld();
+    if (!World)
     {
         return;
     }
-
-    // Update metrics every frame but only process at specified frequency
-    TimeSinceLastUpdate += DeltaTime;
     
-    if (TimeSinceLastUpdate >= UpdateFrequency)
-    {
-        UpdateMetrics(DeltaTime);
-        TimeSinceLastUpdate = 0.0f;
-    }
-}
-
-void APerf_FPSMonitor::UpdateMetrics(float DeltaTime)
-{
     // Calculate current FPS
-    float CurrentFPS = (DeltaTime > 0.0f) ? (1.0f / DeltaTime) : 0.0f;
+    float DeltaTime = World->GetDeltaSeconds();
+    if (DeltaTime > 0.0f)
+    {
+        CurrentMetrics.CurrentFPS = 1.0f / DeltaTime;
+        CurrentMetrics.FrameTime = DeltaTime * 1000.0f; // Convert to milliseconds
+    }
     
-    // Store FPS sample
-    FPSSamples[CurrentSampleIndex] = CurrentFPS;
-    CurrentSampleIndex = (CurrentSampleIndex + 1) % SampleCount;
-    TotalSamples = FMath::Min(TotalSamples + 1, SampleCount);
-
-    // Update current metrics
-    CurrentMetrics.CurrentFPS = CurrentFPS;
-
-    // Calculate average FPS
-    float TotalFPS = 0.0f;
-    for (int32 i = 0; i < TotalSamples; i++)
+    // Add to samples array
+    if (FPSSamples.Num() < SampleCount)
     {
-        TotalFPS += FPSSamples[i];
-    }
-    CurrentMetrics.AverageFPS = (TotalSamples > 0) ? (TotalFPS / TotalSamples) : 0.0f;
-
-    // Update min/max FPS
-    CurrentMetrics.MinFPS = FMath::Min(CurrentMetrics.MinFPS, CurrentFPS);
-    CurrentMetrics.MaxFPS = FMath::Max(CurrentMetrics.MaxFPS, CurrentFPS);
-
-    // Get engine stats (approximate values since detailed stats require engine access)
-    CurrentMetrics.GameThreadTime = DeltaTime * 1000.0f; // Convert to milliseconds
-    CurrentMetrics.RenderThreadTime = DeltaTime * 1000.0f * 0.8f; // Estimate
-    CurrentMetrics.GPUTime = DeltaTime * 1000.0f * 0.7f; // Estimate
-
-    // Estimate draw calls and triangles based on world complexity
-    if (UWorld* World = GetWorld())
-    {
-        // Simple estimation based on actor count
-        int32 ActorCount = 0;
-        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-        {
-            ActorCount++;
-        }
-        CurrentMetrics.DrawCalls = ActorCount * 2; // Rough estimate
-        CurrentMetrics.Triangles = ActorCount * 1000; // Rough estimate
-    }
-
-    // Update performance level
-    PerformanceLevel = CalculatePerformanceLevel(CurrentMetrics.CurrentFPS);
-
-    // Check for performance warnings
-    CheckPerformanceWarnings();
-}
-
-EPerf_PerformanceLevel APerf_FPSMonitor::CalculatePerformanceLevel(float FPS) const
-{
-    if (FPS >= 60.0f)
-    {
-        return EPerf_PerformanceLevel::Excellent;
-    }
-    else if (FPS >= 45.0f)
-    {
-        return EPerf_PerformanceLevel::Good;
-    }
-    else if (FPS >= 30.0f)
-    {
-        return EPerf_PerformanceLevel::Acceptable;
-    }
-    else if (FPS >= 15.0f)
-    {
-        return EPerf_PerformanceLevel::Poor;
+        FPSSamples.Add(CurrentMetrics.CurrentFPS);
+        TotalFPSSum += CurrentMetrics.CurrentFPS;
     }
     else
     {
-        return EPerf_PerformanceLevel::Critical;
+        // Replace oldest sample
+        TotalFPSSum -= FPSSamples[CurrentSampleIndex];
+        FPSSamples[CurrentSampleIndex] = CurrentMetrics.CurrentFPS;
+        TotalFPSSum += CurrentMetrics.CurrentFPS;
+        CurrentSampleIndex = (CurrentSampleIndex + 1) % SampleCount;
     }
-}
-
-void APerf_FPSMonitor::CheckPerformanceWarnings() const
-{
-    if (bLogPerformanceWarnings && CurrentMetrics.CurrentFPS < WarningFPSThreshold)
+    
+    // Calculate statistics
+    if (FPSSamples.Num() > 0)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Performance Warning: FPS dropped to %.1f (threshold: %.1f)"), 
-               CurrentMetrics.CurrentFPS, WarningFPSThreshold);
+        CurrentMetrics.AverageFPS = TotalFPSSum / FPSSamples.Num();
         
-        // Log additional context
-        UE_LOG(LogTemp, Warning, TEXT("Performance Details - Game Thread: %.2fms, Render Thread: %.2fms, GPU: %.2fms"), 
-               CurrentMetrics.GameThreadTime, CurrentMetrics.RenderThreadTime, CurrentMetrics.GPUTime);
+        // Find min/max
+        CurrentMetrics.MinFPS = FPSSamples[0];
+        CurrentMetrics.MaxFPS = FPSSamples[0];
+        
+        for (float Sample : FPSSamples)
+        {
+            CurrentMetrics.MinFPS = FMath::Min(CurrentMetrics.MinFPS, Sample);
+            CurrentMetrics.MaxFPS = FMath::Max(CurrentMetrics.MaxFPS, Sample);
+        }
+    }
+    
+    // Update performance level
+    CalculatePerformanceLevel();
+    
+    // Count actors for performance context
+    CountActors();
+    
+    // Log warnings if needed
+    if (bLogPerformanceWarnings && CurrentMetrics.PerformanceLevel == EPerf_PerformanceLevel::Poor)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Performance Warning: FPS dropped to %.1f (Target: %.1f)"), 
+               CurrentMetrics.CurrentFPS, TargetFPS);
+    }
+    
+    // Trigger optimization if needed
+    if (bAutoOptimize && CurrentMetrics.PerformanceLevel == EPerf_PerformanceLevel::Critical)
+    {
+        TriggerOptimization();
     }
 }
 
-float APerf_FPSMonitor::GetCurrentFPS() const
+void UPerf_FPSMonitor::CalculatePerformanceLevel()
 {
-    return CurrentMetrics.CurrentFPS;
+    float FPS = CurrentMetrics.CurrentFPS;
+    
+    if (FPS >= 60.0f)
+    {
+        CurrentMetrics.PerformanceLevel = EPerf_PerformanceLevel::Excellent;
+    }
+    else if (FPS >= 45.0f)
+    {
+        CurrentMetrics.PerformanceLevel = EPerf_PerformanceLevel::Good;
+    }
+    else if (FPS >= 30.0f)
+    {
+        CurrentMetrics.PerformanceLevel = EPerf_PerformanceLevel::Fair;
+    }
+    else if (FPS >= 15.0f)
+    {
+        CurrentMetrics.PerformanceLevel = EPerf_PerformanceLevel::Poor;
+    }
+    else
+    {
+        CurrentMetrics.PerformanceLevel = EPerf_PerformanceLevel::Critical;
+    }
 }
 
-float APerf_FPSMonitor::GetAverageFPS() const
+void UPerf_FPSMonitor::CountActors()
 {
-    return CurrentMetrics.AverageFPS;
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return;
+    }
+    
+    CurrentMetrics.PhysicsActorCount = 0;
+    CurrentMetrics.VisibleActorCount = 0;
+    
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    {
+        AActor* Actor = *ActorItr;
+        if (!Actor || Actor->IsPendingKill())
+        {
+            continue;
+        }
+        
+        CurrentMetrics.VisibleActorCount++;
+        
+        // Check if actor has physics simulation
+        UPrimitiveComponent* PrimComp = Actor->FindComponentByClass<UPrimitiveComponent>();
+        if (PrimComp && PrimComp->IsSimulatingPhysics())
+        {
+            CurrentMetrics.PhysicsActorCount++;
+        }
+    }
 }
 
-EPerf_PerformanceLevel APerf_FPSMonitor::GetPerformanceLevel() const
+void UPerf_FPSMonitor::TriggerOptimization()
 {
-    return PerformanceLevel;
+    UE_LOG(LogTemp, Warning, TEXT("Performance Critical: Triggering automatic optimization"));
+    
+    // Basic optimization: Reduce physics simulation quality
+    UWorld* World = GetWorld();
+    if (World)
+    {
+        // This could be expanded to actually perform optimizations
+        UE_LOG(LogTemp, Log, TEXT("Optimization triggered - Physics actors: %d, Visible actors: %d"), 
+               CurrentMetrics.PhysicsActorCount, CurrentMetrics.VisibleActorCount);
+    }
 }
 
-void APerf_FPSMonitor::ResetStatistics()
+bool UPerf_FPSMonitor::IsPerformanceAcceptable() const
+{
+    return CurrentMetrics.PerformanceLevel != EPerf_PerformanceLevel::Critical &&
+           CurrentMetrics.PerformanceLevel != EPerf_PerformanceLevel::Poor;
+}
+
+void UPerf_FPSMonitor::ResetMetrics()
 {
     CurrentMetrics = FPerf_PerformanceMetrics();
+    FPSSamples.Empty();
+    TotalFPSSum = 0.0f;
     CurrentSampleIndex = 0;
-    TotalSamples = 0;
-    
-    // Reset FPS samples to 60 FPS
-    for (int32 i = 0; i < SampleCount; i++)
+}
+
+void UPerf_FPSMonitor::StartMonitoring()
+{
+    if (!bIsMonitoring)
     {
-        FPSSamples[i] = 60.0f;
+        bIsMonitoring = true;
+        ResetMetrics();
+        
+        UWorld* World = GetWorld();
+        if (World)
+        {
+            World->GetTimerManager().SetTimer(MonitoringTimer, this, &UPerf_FPSMonitor::MonitoringTick, 
+                                            MonitoringInterval, true);
+        }
+        
+        UE_LOG(LogTemp, Log, TEXT("FPS Monitoring started"));
     }
-    
-    UE_LOG(LogTemp, Log, TEXT("Performance statistics reset"));
 }
 
-void APerf_FPSMonitor::SetMonitoringEnabled(bool bEnabled)
+void UPerf_FPSMonitor::StopMonitoring()
 {
-    bEnableMonitoring = bEnabled;
-    UE_LOG(LogTemp, Log, TEXT("Performance monitoring %s"), bEnabled ? TEXT("enabled") : TEXT("disabled"));
+    if (bIsMonitoring)
+    {
+        bIsMonitoring = false;
+        
+        UWorld* World = GetWorld();
+        if (World)
+        {
+            World->GetTimerManager().ClearTimer(MonitoringTimer);
+        }
+        
+        UE_LOG(LogTemp, Log, TEXT("FPS Monitoring stopped"));
+    }
 }
 
-FString APerf_FPSMonitor::GetPerformanceReport() const
+void UPerf_FPSMonitor::LogCurrentMetrics()
 {
-    FString Report = FString::Printf(TEXT("=== PERFORMANCE REPORT ===\n"));
-    Report += FString::Printf(TEXT("Current FPS: %.1f\n"), CurrentMetrics.CurrentFPS);
-    Report += FString::Printf(TEXT("Average FPS: %.1f\n"), CurrentMetrics.AverageFPS);
-    Report += FString::Printf(TEXT("Min FPS: %.1f\n"), CurrentMetrics.MinFPS);
-    Report += FString::Printf(TEXT("Max FPS: %.1f\n"), CurrentMetrics.MaxFPS);
-    Report += FString::Printf(TEXT("Performance Level: %s\n"), 
-        PerformanceLevel == EPerf_PerformanceLevel::Excellent ? TEXT("Excellent") :
-        PerformanceLevel == EPerf_PerformanceLevel::Good ? TEXT("Good") :
-        PerformanceLevel == EPerf_PerformanceLevel::Acceptable ? TEXT("Acceptable") :
-        PerformanceLevel == EPerf_PerformanceLevel::Poor ? TEXT("Poor") : TEXT("Critical"));
-    Report += FString::Printf(TEXT("Game Thread: %.2fms\n"), CurrentMetrics.GameThreadTime);
-    Report += FString::Printf(TEXT("Render Thread: %.2fms\n"), CurrentMetrics.RenderThreadTime);
-    Report += FString::Printf(TEXT("GPU Time: %.2fms\n"), CurrentMetrics.GPUTime);
-    Report += FString::Printf(TEXT("Draw Calls: %d\n"), CurrentMetrics.DrawCalls);
-    Report += FString::Printf(TEXT("Triangles: %d\n"), CurrentMetrics.Triangles);
-    
-    return Report;
+    UE_LOG(LogTemp, Log, TEXT("=== PERFORMANCE METRICS ==="));
+    UE_LOG(LogTemp, Log, TEXT("Current FPS: %.1f"), CurrentMetrics.CurrentFPS);
+    UE_LOG(LogTemp, Log, TEXT("Average FPS: %.1f"), CurrentMetrics.AverageFPS);
+    UE_LOG(LogTemp, Log, TEXT("Min FPS: %.1f"), CurrentMetrics.MinFPS);
+    UE_LOG(LogTemp, Log, TEXT("Max FPS: %.1f"), CurrentMetrics.MaxFPS);
+    UE_LOG(LogTemp, Log, TEXT("Frame Time: %.2f ms"), CurrentMetrics.FrameTime);
+    UE_LOG(LogTemp, Log, TEXT("Performance Level: %d"), (int32)CurrentMetrics.PerformanceLevel);
+    UE_LOG(LogTemp, Log, TEXT("Physics Actors: %d"), CurrentMetrics.PhysicsActorCount);
+    UE_LOG(LogTemp, Log, TEXT("Visible Actors: %d"), CurrentMetrics.VisibleActorCount);
+    UE_LOG(LogTemp, Log, TEXT("========================"));
 }
 
-bool APerf_FPSMonitor::IsPerformanceCritical() const
+void UPerf_FPSMonitor::MonitoringTick()
 {
-    return PerformanceLevel == EPerf_PerformanceLevel::Critical || 
-           PerformanceLevel == EPerf_PerformanceLevel::Poor;
+    // This is called by the timer for additional monitoring tasks
+    // Currently, the main monitoring is done in TickComponent
 }
