@@ -1,113 +1,117 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/GameInstanceSubsystem.h"
 #include "Engine/World.h"
-#include "GameFramework/Actor.h"
-#include "Components/ActorComponent.h"
-#include "Engine/GameInstance.h"
-#include "Subsystems/GameInstanceSubsystem.h"
-#include "HAL/Platform.h"
-#include "Stats/Stats.h"
+#include "Components/StaticMeshComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Engine/StaticMeshActor.h"
+#include "Engine/SkeletalMeshActor.h"
 #include "Perf_PerformanceManager.generated.h"
 
-DECLARE_STATS_GROUP(TEXT("TranspersonalGame Performance"), STATGROUP_TranspersonalPerformance, STATCAT_Advanced);
-DECLARE_CYCLE_STAT(TEXT("Frame Time"), STAT_FrameTime, STATGROUP_TranspersonalPerformance);
-DECLARE_CYCLE_STAT(TEXT("Dinosaur AI"), STAT_DinosaurAI, STATGROUP_TranspersonalPerformance);
-DECLARE_CYCLE_STAT(TEXT("World Generation"), STAT_WorldGeneration, STATGROUP_TranspersonalPerformance);
-
-UENUM(BlueprintType)
-enum class EPerf_PerformanceLevel : uint8
-{
-    Ultra       UMETA(DisplayName = "Ultra (60+ FPS)"),
-    High        UMETA(DisplayName = "High (45-60 FPS)"),
-    Medium      UMETA(DisplayName = "Medium (30-45 FPS)"),
-    Low         UMETA(DisplayName = "Low (20-30 FPS)"),
-    Critical    UMETA(DisplayName = "Critical (<20 FPS)")
-};
-
-UENUM(BlueprintType)
-enum class EPerf_OptimizationTarget : uint8
-{
-    PC_HighEnd      UMETA(DisplayName = "PC High-End (60 FPS)"),
-    PC_MidRange     UMETA(DisplayName = "PC Mid-Range (45 FPS)"),
-    Console_Next    UMETA(DisplayName = "Next-Gen Console (30 FPS)"),
-    Console_Last    UMETA(DisplayName = "Last-Gen Console (30 FPS)"),
-    Mobile          UMETA(DisplayName = "Mobile (30 FPS)")
-};
-
+// Performance monitoring data structure
 USTRUCT(BlueprintType)
 struct TRANSPERSONALGAME_API FPerf_PerformanceMetrics
 {
     GENERATED_BODY()
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float CurrentFPS = 0.0f;
+    float CurrentFPS;
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float AverageFrameTime = 0.0f;
+    float AverageFPS;
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 DrawCalls = 0;
+    float MinFPS;
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 TriangleCount = 0;
+    float MaxFPS;
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float MemoryUsageMB = 0.0f;
+    int32 ActivePhysicsActors;
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float GPUMemoryUsageMB = 0.0f;
+    int32 TotalDrawCalls;
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    EPerf_PerformanceLevel PerformanceLevel = EPerf_PerformanceLevel::Medium;
+    float MemoryUsageMB;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float GPUMemoryUsageMB;
 
     FPerf_PerformanceMetrics()
     {
-        CurrentFPS = 30.0f;
-        AverageFrameTime = 33.33f;
-        DrawCalls = 0;
-        TriangleCount = 0;
+        CurrentFPS = 60.0f;
+        AverageFPS = 60.0f;
+        MinFPS = 60.0f;
+        MaxFPS = 60.0f;
+        ActivePhysicsActors = 0;
+        TotalDrawCalls = 0;
         MemoryUsageMB = 0.0f;
         GPUMemoryUsageMB = 0.0f;
-        PerformanceLevel = EPerf_PerformanceLevel::Medium;
     }
 };
 
+// LOD configuration structure
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FPerf_LODSettings
+struct TRANSPERSONALGAME_API FPerf_LODConfiguration
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    float DinosaurLODDistance = 5000.0f;
+    float LOD0Distance;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    float VegetationLODDistance = 3000.0f;
+    float LOD1Distance;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    float RockLODDistance = 2000.0f;
+    float LOD2Distance;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    float DetailObjectLODDistance = 1000.0f;
+    float CullingDistance;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    int32 MaxVisibleDinosaurs = 50;
+    bool bEnableAutomaticLOD;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    int32 MaxVisibleVegetation = 1000;
-
-    FPerf_LODSettings()
+    FPerf_LODConfiguration()
     {
-        DinosaurLODDistance = 5000.0f;
-        VegetationLODDistance = 3000.0f;
-        RockLODDistance = 2000.0f;
-        DetailObjectLODDistance = 1000.0f;
-        MaxVisibleDinosaurs = 50;
-        MaxVisibleVegetation = 1000;
+        LOD0Distance = 1000.0f;
+        LOD1Distance = 2000.0f;
+        LOD2Distance = 5000.0f;
+        CullingDistance = 10000.0f;
+        bEnableAutomaticLOD = true;
     }
 };
 
-UCLASS(BlueprintType, Blueprintable)
+// Performance optimization levels
+UENUM(BlueprintType)
+enum class EPerf_OptimizationLevel : uint8
+{
+    Ultra       UMETA(DisplayName = "Ultra Quality"),
+    High        UMETA(DisplayName = "High Quality"),
+    Medium      UMETA(DisplayName = "Medium Quality"),
+    Low         UMETA(DisplayName = "Low Quality"),
+    Potato      UMETA(DisplayName = "Potato Mode")
+};
+
+// Performance target platforms
+UENUM(BlueprintType)
+enum class EPerf_TargetPlatform : uint8
+{
+    PC_HighEnd      UMETA(DisplayName = "PC High-End"),
+    PC_MidRange     UMETA(DisplayName = "PC Mid-Range"),
+    PC_LowEnd       UMETA(DisplayName = "PC Low-End"),
+    Console_PS5     UMETA(DisplayName = "PlayStation 5"),
+    Console_XboxSX  UMETA(DisplayName = "Xbox Series X"),
+    Console_Switch  UMETA(DisplayName = "Nintendo Switch")
+};
+
+/**
+ * Performance Manager Subsystem
+ * Handles real-time performance monitoring, LOD management, and optimization
+ * Ensures 60fps on PC high-end and 30fps on consoles
+ */
+UCLASS(BlueprintType)
 class TRANSPERSONALGAME_API UPerf_PerformanceManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
@@ -115,7 +119,7 @@ class TRANSPERSONALGAME_API UPerf_PerformanceManager : public UGameInstanceSubsy
 public:
     UPerf_PerformanceManager();
 
-    // USubsystem interface
+    // Subsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
@@ -130,83 +134,109 @@ public:
     FPerf_PerformanceMetrics GetCurrentMetrics() const;
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void SetOptimizationTarget(EPerf_OptimizationTarget Target);
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void ApplyPerformanceSettings();
+    void UpdatePerformanceMetrics();
 
     // LOD management
     UFUNCTION(BlueprintCallable, Category = "LOD")
-    void SetLODSettings(const FPerf_LODSettings& NewSettings);
+    void SetLODConfiguration(const FPerf_LODConfiguration& NewConfig);
 
     UFUNCTION(BlueprintCallable, Category = "LOD")
-    FPerf_LODSettings GetLODSettings() const;
+    FPerf_LODConfiguration GetLODConfiguration() const;
 
     UFUNCTION(BlueprintCallable, Category = "LOD")
-    void UpdateLODDistances();
+    void ApplyLODToActor(AActor* Actor, float Distance);
 
-    // Performance optimization
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void OptimizeForTarget();
+    UFUNCTION(BlueprintCallable, Category = "LOD")
+    void UpdateAllActorLODs();
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void SetDynamicPerformanceScaling(bool bEnabled);
+    // Optimization controls
+    UFUNCTION(BlueprintCallable, Category = "Optimization")
+    void SetOptimizationLevel(EPerf_OptimizationLevel Level);
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    bool IsDynamicScalingEnabled() const;
+    UFUNCTION(BlueprintCallable, Category = "Optimization")
+    void SetTargetPlatform(EPerf_TargetPlatform Platform);
+
+    UFUNCTION(BlueprintCallable, Category = "Optimization")
+    void OptimizeForCurrentPlatform();
+
+    // Physics optimization
+    UFUNCTION(BlueprintCallable, Category = "Physics")
+    void OptimizePhysicsActors();
+
+    UFUNCTION(BlueprintCallable, Category = "Physics")
+    void DisableDistantPhysics(float MaxDistance = 5000.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Physics")
+    void EnablePhysicsLOD();
 
     // Memory management
     UFUNCTION(BlueprintCallable, Category = "Memory")
     void ForceGarbageCollection();
 
     UFUNCTION(BlueprintCallable, Category = "Memory")
-    float GetMemoryUsageMB() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Memory")
     void OptimizeMemoryUsage();
 
-    // Rendering optimization
-    UFUNCTION(BlueprintCallable, Category = "Rendering")
-    void SetShadowQuality(int32 Quality);
+    UFUNCTION(BlueprintCallable, Category = "Memory")
+    float GetMemoryUsageMB() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Rendering")
-    void SetTextureQuality(int32 Quality);
+    // Debug and profiling
+    UFUNCTION(BlueprintCallable, Category = "Debug")
+    void EnablePerformanceHUD(bool bEnable);
 
-    UFUNCTION(BlueprintCallable, Category = "Rendering")
-    void SetPostProcessQuality(int32 Quality);
+    UFUNCTION(BlueprintCallable, Category = "Debug")
+    void LogPerformanceReport();
+
+    UFUNCTION(BlueprintCallable, Category = "Debug")
+    void DumpPerformanceStats();
 
 protected:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance", meta = (AllowPrivateAccess = "true"))
-    EPerf_OptimizationTarget CurrentTarget;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance", meta = (AllowPrivateAccess = "true"))
+    // Performance metrics tracking
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
     FPerf_PerformanceMetrics CurrentMetrics;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD", meta = (AllowPrivateAccess = "true"))
-    FPerf_LODSettings LODSettings;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    FPerf_LODConfiguration LODConfig;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance", meta = (AllowPrivateAccess = "true"))
-    bool bMonitoringEnabled;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    EPerf_OptimizationLevel CurrentOptimizationLevel;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance", meta = (AllowPrivateAccess = "true"))
-    bool bDynamicScalingEnabled;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    EPerf_TargetPlatform CurrentTargetPlatform;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance", meta = (AllowPrivateAccess = "true"))
-    float TargetFPS;
+    // Performance monitoring state
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    bool bIsMonitoring;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance", meta = (AllowPrivateAccess = "true"))
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float MonitoringInterval;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    int32 FrameCounter;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float TotalFrameTime;
+
+    // Target performance thresholds
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float TargetFPS_PC;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float TargetFPS_Console;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
     float MinAcceptableFPS;
 
 private:
-    FTimerHandle PerformanceUpdateTimer;
-    TArray<float> FrameTimeHistory;
-    static const int32 FrameHistorySize = 60;
-
-    void UpdatePerformanceMetrics();
-    void CalculateAverageFrameTime();
-    EPerf_PerformanceLevel DeterminePerformanceLevel(float FPS) const;
-    void ApplyTargetSettings();
-    void ApplyLODSettings();
-    void ApplyRenderingSettings();
-    void ApplyMemorySettings();
+    // Internal performance tracking
+    TArray<float> FPSHistory;
+    FTimerHandle MonitoringTimerHandle;
+    
+    // Helper functions
+    void InternalUpdateMetrics();
+    void CalculateAverageFPS();
+    void CheckPerformanceThresholds();
+    void ApplyOptimizationSettings();
+    void UpdateLODDistances();
+    float CalculateActorDistance(AActor* Actor) const;
+    void SetActorLODLevel(AActor* Actor, int32 LODLevel);
 };
