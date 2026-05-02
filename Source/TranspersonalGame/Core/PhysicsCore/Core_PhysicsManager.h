@@ -2,38 +2,28 @@
 
 #include "CoreMinimal.h"
 #include "Engine/World.h"
-#include "Components/PrimitiveComponent.h"
+#include "Components/ActorComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "GameFramework/Actor.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "PhysicsEngine/PhysicsSettings.h"
-#include "PhysicsEngine/BodyInstance.h"
-#include "PhysicsEngine/PhysicsAsset.h"
-#include "Subsystems/GameInstanceSubsystem.h"
+#include "Engine/Engine.h"
+#include "Kismet/GameplayStatics.h"
 #include "Core_PhysicsManager.generated.h"
 
 UENUM(BlueprintType)
-enum class ECore_PhysicsState : uint8
+enum class ECore_PhysicsMode : uint8
 {
-    Inactive        UMETA(DisplayName = "Inactive"),
-    Active          UMETA(DisplayName = "Active"),
-    Simulating      UMETA(DisplayName = "Simulating"),
-    Ragdoll         UMETA(DisplayName = "Ragdoll"),
-    Destroyed       UMETA(DisplayName = "Destroyed")
-};
-
-UENUM(BlueprintType)
-enum class ECore_CollisionPreset : uint8
-{
-    Default         UMETA(DisplayName = "Default"),
-    Dinosaur        UMETA(DisplayName = "Dinosaur"),
-    Player          UMETA(DisplayName = "Player"),
-    Environment     UMETA(DisplayName = "Environment"),
-    Projectile      UMETA(DisplayName = "Projectile"),
-    Debris          UMETA(DisplayName = "Debris")
+    Static          UMETA(DisplayName = "Static"),
+    Kinematic       UMETA(DisplayName = "Kinematic"),
+    Simulated       UMETA(DisplayName = "Simulated"),
+    Ragdoll         UMETA(DisplayName = "Ragdoll")
 };
 
 USTRUCT(BlueprintType)
-struct FCore_PhysicsConfig
+struct FCore_PhysicsSettings
 {
     GENERATED_BODY()
 
@@ -50,161 +40,154 @@ struct FCore_PhysicsConfig
     bool bEnableGravity = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    bool bSimulatePhysics = true;
+    ECore_PhysicsMode PhysicsMode = ECore_PhysicsMode::Static;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    ECore_CollisionPreset CollisionPreset = ECore_CollisionPreset::Default;
-
-    FCore_PhysicsConfig()
+    FCore_PhysicsSettings()
     {
         Mass = 100.0f;
         LinearDamping = 0.1f;
         AngularDamping = 0.1f;
         bEnableGravity = true;
-        bSimulatePhysics = true;
-        CollisionPreset = ECore_CollisionPreset::Default;
+        PhysicsMode = ECore_PhysicsMode::Static;
     }
 };
 
 USTRUCT(BlueprintType)
-struct FCore_RagdollConfig
+struct FCore_CollisionSettings
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    float BlendTime = 0.2f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision")
+    TEnumAsByte<ECollisionEnabled::Type> CollisionEnabled = ECollisionEnabled::QueryAndPhysics;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    float LifeSpan = 10.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision")
+    TEnumAsByte<ECollisionObjectType> ObjectType = ECC_WorldStatic;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    bool bPreserveVelocity = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision")
+    TEnumAsByte<ECollisionResponse> CollisionResponse = ECR_Block;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
-    FVector ImpulseForce = FVector::ZeroVector;
-
-    FCore_RagdollConfig()
+    FCore_CollisionSettings()
     {
-        BlendTime = 0.2f;
-        LifeSpan = 10.0f;
-        bPreserveVelocity = true;
-        ImpulseForce = FVector::ZeroVector;
+        CollisionEnabled = ECollisionEnabled::QueryAndPhysics;
+        ObjectType = ECC_WorldStatic;
+        CollisionResponse = ECR_Block;
     }
 };
 
-USTRUCT(BlueprintType)
-struct FCore_DestructionConfig
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction")
-    int32 MaxFragments = 20;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction")
-    float FragmentLifeSpan = 30.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction")
-    float ExplosionForce = 1000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Destruction")
-    float ExplosionRadius = 500.0f;
-
-    FCore_DestructionConfig()
-    {
-        MaxFragments = 20;
-        FragmentLifeSpan = 30.0f;
-        ExplosionForce = 1000.0f;
-        ExplosionRadius = 500.0f;
-    }
-};
-
-/**
- * Core Physics Manager - Handles physics simulation, ragdoll, and destruction systems
- * Manages all physics-related functionality for the prehistoric survival game
- */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UCore_PhysicsManager : public UGameInstanceSubsystem
+class TRANSPERSONALGAME_API UCore_PhysicsManagerComponent : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    UCore_PhysicsManager();
-
-    // Subsystem interface
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
-
-    // Physics configuration
-    UFUNCTION(BlueprintCallable, Category = "Core Physics")
-    void ConfigurePhysicsForActor(AActor* Actor, const FCore_PhysicsConfig& Config);
-
-    UFUNCTION(BlueprintCallable, Category = "Core Physics")
-    void SetPhysicsState(AActor* Actor, ECore_PhysicsState NewState);
-
-    UFUNCTION(BlueprintCallable, Category = "Core Physics")
-    ECore_PhysicsState GetPhysicsState(AActor* Actor) const;
-
-    // Ragdoll system
-    UFUNCTION(BlueprintCallable, Category = "Core Physics")
-    void EnableRagdoll(AActor* Actor, const FCore_RagdollConfig& Config = FCore_RagdollConfig());
-
-    UFUNCTION(BlueprintCallable, Category = "Core Physics")
-    void DisableRagdoll(AActor* Actor);
-
-    UFUNCTION(BlueprintCallable, Category = "Core Physics")
-    bool IsRagdollActive(AActor* Actor) const;
-
-    // Destruction system
-    UFUNCTION(BlueprintCallable, Category = "Core Physics")
-    void DestroyWithFragments(AActor* Actor, const FCore_DestructionConfig& Config = FCore_DestructionConfig());
-
-    UFUNCTION(BlueprintCallable, Category = "Core Physics")
-    void ApplyExplosionForce(const FVector& Location, float Force, float Radius);
-
-    // Collision presets
-    UFUNCTION(BlueprintCallable, Category = "Core Physics")
-    void ApplyCollisionPreset(UPrimitiveComponent* Component, ECore_CollisionPreset Preset);
-
-    // Physics validation and debugging
-    UFUNCTION(BlueprintCallable, Category = "Core Physics", CallInEditor)
-    void ValidatePhysicsSetup();
-
-    UFUNCTION(BlueprintCallable, Category = "Core Physics")
-    void LogPhysicsStats();
+    UCore_PhysicsManagerComponent();
 
 protected:
-    // Internal physics state tracking
-    UPROPERTY()
-    TMap<AActor*, ECore_PhysicsState> PhysicsStateMap;
+    virtual void BeginPlay() override;
 
-    // Configuration storage
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Core Physics", meta = (AllowPrivateAccess = "true"))
-    FCore_PhysicsConfig DefaultPhysicsConfig;
+public:
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Core Physics", meta = (AllowPrivateAccess = "true"))
-    FCore_RagdollConfig DefaultRagdollConfig;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Settings")
+    FCore_PhysicsSettings PhysicsSettings;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Core Physics", meta = (AllowPrivateAccess = "true"))
-    FCore_DestructionConfig DefaultDestructionConfig;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision Settings")
+    FCore_CollisionSettings CollisionSettings;
 
-    // Performance monitoring
-    UPROPERTY(BlueprintReadOnly, Category = "Core Physics", meta = (AllowPrivateAccess = "true"))
-    int32 ActivePhysicsActors;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
+    bool bCanEnterRagdoll = true;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Core Physics", meta = (AllowPrivateAccess = "true"))
-    int32 ActiveRagdolls;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
+    float RagdollForceThreshold = 1000.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Core Physics", meta = (AllowPrivateAccess = "true"))
-    float LastPhysicsUpdateTime;
+    UFUNCTION(BlueprintCallable, Category = "Physics")
+    void ApplyPhysicsSettings();
+
+    UFUNCTION(BlueprintCallable, Category = "Physics")
+    void SetPhysicsMode(ECore_PhysicsMode NewMode);
+
+    UFUNCTION(BlueprintCallable, Category = "Physics")
+    void EnableRagdoll();
+
+    UFUNCTION(BlueprintCallable, Category = "Physics")
+    void DisableRagdoll();
+
+    UFUNCTION(BlueprintCallable, Category = "Physics")
+    void ApplyImpulse(FVector Impulse, FVector Location = FVector::ZeroVector);
+
+    UFUNCTION(BlueprintCallable, Category = "Physics")
+    bool IsRagdollActive() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Physics")
+    void SetMass(float NewMass);
+
+    UFUNCTION(BlueprintCallable, Category = "Physics")
+    float GetMass() const;
 
 private:
-    // Internal helper functions
-    void SetupCollisionChannels();
-    void ConfigurePhysicsAsset(USkeletalMeshComponent* SkeletalMesh, const FCore_PhysicsConfig& Config);
-    void CreateFragments(AActor* OriginalActor, const FCore_DestructionConfig& Config);
-    void CleanupExpiredRagdolls();
-    
-    // Timer handles
-    FTimerHandle RagdollCleanupTimer;
-    FTimerHandle PhysicsStatsTimer;
+    UPROPERTY()
+    UStaticMeshComponent* StaticMeshComp;
+
+    UPROPERTY()
+    USkeletalMeshComponent* SkeletalMeshComp;
+
+    bool bIsRagdollActive = false;
+
+    void FindMeshComponents();
+    void ApplySettingsToStaticMesh();
+    void ApplySettingsToSkeletalMesh();
+};
+
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API ACore_PhysicsManager : public AActor
+{
+    GENERATED_BODY()
+
+public:
+    ACore_PhysicsManager();
+
+protected:
+    virtual void BeginPlay() override;
+
+public:
+    virtual void Tick(float DeltaTime) override;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UCore_PhysicsManagerComponent* PhysicsManagerComponent;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Global Physics")
+    float GlobalGravityScale = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Global Physics")
+    float GlobalPhysicsTimestep = 0.016667f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Global Physics")
+    int32 MaxPhysicsSteps = 8;
+
+    UFUNCTION(BlueprintCallable, Category = "Physics Manager")
+    void ApplyGlobalPhysicsSettings();
+
+    UFUNCTION(BlueprintCallable, Category = "Physics Manager")
+    void RegisterPhysicsActor(AActor* Actor);
+
+    UFUNCTION(BlueprintCallable, Category = "Physics Manager")
+    void UnregisterPhysicsActor(AActor* Actor);
+
+    UFUNCTION(BlueprintCallable, Category = "Physics Manager")
+    TArray<AActor*> GetAllPhysicsActors() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Physics Manager")
+    void EnableRagdollForAllCharacters();
+
+    UFUNCTION(BlueprintCallable, Category = "Physics Manager")
+    void DisableRagdollForAllCharacters();
+
+    UFUNCTION(CallInEditor, Category = "Debug")
+    void ValidatePhysicsSetup();
+
+private:
+    UPROPERTY()
+    TArray<AActor*> RegisteredPhysicsActors;
+
+    void UpdateGlobalPhysicsSettings();
 };
