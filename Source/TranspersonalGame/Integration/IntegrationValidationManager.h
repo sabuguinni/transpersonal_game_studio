@@ -1,92 +1,113 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/GameInstanceSubsystem.h"
 #include "Engine/World.h"
+#include "GameFramework/Actor.h"
+#include "Subsystems/GameInstanceSubsystem.h"
 #include "SharedTypes.h"
 #include "IntegrationValidationManager.generated.h"
 
-/**
- * Integration Validation Manager
- * Agent #19 - Integration & Build Agent
- * 
- * Validates integration between all game systems and ensures
- * cross-agent compatibility. Monitors build health and system dependencies.
- */
-
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FInteg_SystemStatus
+struct TRANSPERSONALGAME_API FInteg_BuildValidationResult
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    FString SystemName;
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    bool bIsValid = false;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    bool bIsLoaded;
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    int32 IssueCount = 0;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    bool bIsCompiled;
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    float ValidationTimeMs = 0.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    bool bHasDependencyErrors;
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    TArray<FString> DetectedIssues;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    float HealthScore;
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    int32 ActorCount = 0;
 
-    FInteg_SystemStatus()
-    {
-        SystemName = TEXT("");
-        bIsLoaded = false;
-        bIsCompiled = false;
-        bHasDependencyErrors = false;
-        HealthScore = 0.0f;
-    }
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    int32 PlayabilityScore = 0;
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FInteg_AgentOutput
+struct TRANSPERSONALGAME_API FInteg_LightingValidation
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    FString AgentName;
+    UPROPERTY(BlueprintReadOnly, Category = "Lighting")
+    int32 DirectionalLightCount = 0;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 CycleNumber;
+    UPROPERTY(BlueprintReadOnly, Category = "Lighting")
+    int32 SkyAtmosphereCount = 0;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 FilesCreated;
+    UPROPERTY(BlueprintReadOnly, Category = "Lighting")
+    int32 SkyLightCount = 0;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 UE5CommandsExecuted;
+    UPROPERTY(BlueprintReadOnly, Category = "Lighting")
+    int32 ExponentialHeightFogCount = 0;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    bool bValidationPassed;
+    UPROPERTY(BlueprintReadOnly, Category = "Lighting")
+    bool bHasDuplicates = false;
+};
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    FString ValidationNotes;
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FInteg_GameplayValidation
+{
+    GENERATED_BODY()
 
-    FInteg_AgentOutput()
-    {
-        AgentName = TEXT("");
-        CycleNumber = 0;
-        FilesCreated = 0;
-        UE5CommandsExecuted = 0;
-        bValidationPassed = false;
-        ValidationNotes = TEXT("");
-    }
+    UPROPERTY(BlueprintReadOnly, Category = "Gameplay")
+    int32 PlayerStartCount = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Gameplay")
+    int32 CharacterCount = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Gameplay")
+    int32 DinosaurCount = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Gameplay")
+    int32 EnvironmentActorCount = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Gameplay")
+    bool bIsPlayable = false;
 };
 
 UENUM(BlueprintType)
-enum class EInteg_ValidationLevel : uint8
+enum class EInteg_ValidationSeverity : uint8
 {
-    Basic       UMETA(DisplayName = "Basic"),
-    Standard    UMETA(DisplayName = "Standard"),
-    Comprehensive UMETA(DisplayName = "Comprehensive"),
+    Info        UMETA(DisplayName = "Info"),
+    Warning     UMETA(DisplayName = "Warning"),
+    Error       UMETA(DisplayName = "Error"),
     Critical    UMETA(DisplayName = "Critical")
 };
 
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FInteg_ValidationIssue
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Issue")
+    FString Description;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Issue")
+    EInteg_ValidationSeverity Severity = EInteg_ValidationSeverity::Info;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Issue")
+    FString ActorName;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Issue")
+    FString ModuleName;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Issue")
+    float DetectionTime = 0.0f;
+};
+
+/**
+ * Integration Validation Manager
+ * Validates the overall state of the game build and integration between modules
+ * Ensures all systems work together correctly and the game remains playable
+ */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UIntegrationValidationManager : public UGameInstanceSubsystem
 {
@@ -95,102 +116,96 @@ class TRANSPERSONALGAME_API UIntegrationValidationManager : public UGameInstance
 public:
     UIntegrationValidationManager();
 
-    // Subsystem interface
+    // USubsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // System validation
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool ValidateAllSystems();
+    // Main validation functions
+    UFUNCTION(BlueprintCallable, Category = "Integration Validation")
+    FInteg_BuildValidationResult ValidateFullBuild();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    FInteg_SystemStatus ValidateSystem(const FString& SystemName);
+    UFUNCTION(BlueprintCallable, Category = "Integration Validation")
+    FInteg_LightingValidation ValidateLightingSetup();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    TArray<FInteg_SystemStatus> GetSystemStatusList();
+    UFUNCTION(BlueprintCallable, Category = "Integration Validation")
+    FInteg_GameplayValidation ValidateGameplayElements();
 
-    // Agent output validation
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool ValidateAgentOutput(const FString& AgentName, int32 CycleNumber);
+    UFUNCTION(BlueprintCallable, Category = "Integration Validation")
+    bool ValidateModuleIntegration(const FString& ModuleName);
 
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    TArray<FInteg_AgentOutput> GetAgentOutputHistory();
+    UFUNCTION(BlueprintCallable, Category = "Integration Validation")
+    TArray<FInteg_ValidationIssue> GetAllValidationIssues();
 
-    // Build validation
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool ValidateBuildIntegrity();
+    // Cleanup and maintenance
+    UFUNCTION(BlueprintCallable, Category = "Integration Validation")
+    int32 CleanupDuplicateLightingActors();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    float GetOverallHealthScore();
+    UFUNCTION(BlueprintCallable, Category = "Integration Validation")
+    bool FixCriticalIssues();
 
-    // Cross-system dependency checks
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool CheckSystemDependencies(const FString& SystemName);
+    UFUNCTION(BlueprintCallable, Category = "Integration Validation")
+    void GenerateValidationReport(const FString& OutputPath);
 
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    TArray<FString> GetMissingDependencies(const FString& SystemName);
+    // Performance monitoring
+    UFUNCTION(BlueprintCallable, Category = "Integration Validation")
+    float GetCurrentPerformanceScore();
 
-    // Level validation
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool ValidateMinPlayableMap();
+    UFUNCTION(BlueprintCallable, Category = "Integration Validation")
+    bool IsGamePlayable();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    int32 GetActorCount();
+    // Module-specific validation
+    UFUNCTION(BlueprintCallable, Category = "Integration Validation")
+    bool ValidateWorldGeneration();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    TMap<FString, int32> GetActorInventory();
+    UFUNCTION(BlueprintCallable, Category = "Integration Validation")
+    bool ValidateCharacterSystems();
 
-    // Performance validation
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool ValidatePerformanceTargets();
+    UFUNCTION(BlueprintCallable, Category = "Integration Validation")
+    bool ValidateAISystems();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    float GetCurrentFrameRate();
+    UFUNCTION(BlueprintCallable, Category = "Integration Validation")
+    bool ValidateVFXSystems();
 
-    // Compilation validation
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool TestModuleCompilation();
+    // Real-time monitoring
+    UFUNCTION(BlueprintCallable, Category = "Integration Validation")
+    void StartContinuousValidation(float IntervalSeconds = 30.0f);
 
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    TArray<FString> GetCompilationErrors();
+    UFUNCTION(BlueprintCallable, Category = "Integration Validation")
+    void StopContinuousValidation();
 
 protected:
-    // System status tracking
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    TArray<FInteg_SystemStatus> SystemStatusList;
+    // Internal validation helpers
+    void ValidateActorCounts(TArray<AActor*>& AllActors, FInteg_BuildValidationResult& Result);
+    void ValidateEssentialActors(TArray<AActor*>& AllActors, FInteg_BuildValidationResult& Result);
+    void ValidateModuleClasses(FInteg_BuildValidationResult& Result);
+    void CalculatePlayabilityScore(const FInteg_LightingValidation& Lighting, 
+                                  const FInteg_GameplayValidation& Gameplay, 
+                                  FInteg_BuildValidationResult& Result);
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    TArray<FInteg_AgentOutput> AgentOutputHistory;
+    // Issue tracking
+    void AddValidationIssue(const FString& Description, EInteg_ValidationSeverity Severity, 
+                           const FString& ActorName = TEXT(""), const FString& ModuleName = TEXT(""));
+    void ClearValidationIssues();
 
-    // Validation settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
-    EInteg_ValidationLevel ValidationLevel;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
-    float MinHealthScore;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
-    float TargetFrameRate;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
-    bool bAutoValidateOnLevelLoad;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
-    bool bLogValidationDetails;
+    // Timer for continuous validation
+    FTimerHandle ContinuousValidationTimer;
+    void PerformContinuousValidation();
 
 private:
-    // Internal validation methods
-    bool ValidateCoreClasses();
-    bool ValidateGameplayFramework();
-    bool ValidateAudioSystems();
-    bool ValidateVFXSystems();
-    bool ValidateAISystems();
-    bool ValidateWorldGeneration();
-    
-    // Helper methods
-    void LogValidationResult(const FString& SystemName, bool bPassed, const FString& Details = TEXT(""));
-    void UpdateSystemStatus(const FString& SystemName, bool bLoaded, bool bCompiled, float HealthScore);
-    void RecordAgentOutput(const FString& AgentName, int32 CycleNumber, int32 FilesCreated, int32 CommandsExecuted, bool bPassed);
-};
+    UPROPERTY()
+    TArray<FInteg_ValidationIssue> CurrentValidationIssues;
 
-#include "IntegrationValidationManager.generated.h"
+    UPROPERTY()
+    float LastValidationTime = 0.0f;
+
+    UPROPERTY()
+    bool bContinuousValidationActive = false;
+
+    // Validation thresholds
+    static constexpr int32 MAX_DIRECTIONAL_LIGHTS = 1;
+    static constexpr int32 MAX_SKY_ATMOSPHERES = 1;
+    static constexpr int32 MAX_SKY_LIGHTS = 1;
+    static constexpr int32 MAX_HEIGHT_FOGS = 1;
+    static constexpr int32 MIN_ENVIRONMENT_ACTORS = 5;
+    static constexpr float PERFORMANCE_THRESHOLD_MS = 1000.0f;
+};
