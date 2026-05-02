@@ -1,330 +1,461 @@
 #include "BuildSystemManager.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Kismet/GameplayStatics.h"
+#include "Engine/Engine.h"
 #include "Components/StaticMeshComponent.h"
 #include "Materials/MaterialInterface.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogBuildSystem, Log, All);
 
-UEng_BuildSystemManager::UEng_BuildSystemManager()
+UBuildSystemManager::UBuildSystemManager()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 1.0f;
+    PrimaryComponentTick.TickInterval = 0.1f; // 10Hz update rate
     
     // Initialize build system parameters
     MaxBuildDistance = 500.0f;
-    BuildSnapDistance = 50.0f;
-    MaxConcurrentBuilds = 5;
+    BuildGridSize = 100.0f;
+    MaxStructuresPerPlayer = 50;
     
-    // Initialize build costs
-    BuildCosts.Add(EEng_BuildableType::Shelter, 10);
-    BuildCosts.Add(EEng_BuildableType::Firepit, 5);
-    BuildCosts.Add(EEng_BuildableType::StorageBox, 8);
-    BuildCosts.Add(EEng_BuildableType::CraftingTable, 12);
-    BuildCosts.Add(EEng_BuildableType::TrapBasic, 6);
+    // Initialize material references
+    ValidBuildMaterial = nullptr;
+    InvalidBuildMaterial = nullptr;
     
-    // Initialize resource requirements
-    ResourceRequirements.Add(EEng_BuildableType::Shelter, 
-        {EEng_ResourceType::Wood, EEng_ResourceType::Stone, EEng_ResourceType::Fiber});
-    ResourceRequirements.Add(EEng_BuildableType::Firepit,
-        {EEng_ResourceType::Stone, EEng_ResourceType::Wood});
-    ResourceRequirements.Add(EEng_BuildableType::StorageBox,
-        {EEng_ResourceType::Wood, EEng_ResourceType::Fiber});
-    ResourceRequirements.Add(EEng_BuildableType::CraftingTable,
-        {EEng_ResourceType::Wood, EEng_ResourceType::Stone});
-    ResourceRequirements.Add(EEng_BuildableType::TrapBasic,
-        {EEng_ResourceType::Wood, EEng_ResourceType::Fiber});
+    // Initialize build state
+    CurrentBuildMode = EEng_BuildMode::None;
+    bIsBuildModeActive = false;
+    bCanBuildAtLocation = false;
+    
+    UE_LOG(LogBuildSystem, Log, TEXT("BuildSystemManager initialized"));
 }
 
-void UEng_BuildSystemManager::BeginPlay()
+void UBuildSystemManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    UE_LOG(LogBuildSystem, Log, TEXT("Build System Manager initialized"));
+    // Cache owner reference
+    OwnerActor = GetOwner();
+    if (!OwnerActor)
+    {
+        UE_LOG(LogBuildSystem, Error, TEXT("BuildSystemManager has no owner actor"));
+        return;
+    }
     
-    // Initialize build system state
-    ActiveBuilds.Empty();
-    bBuildModeActive = false;
-    CurrentBuildType = EEng_BuildableType::None;
+    // Initialize build grid
+    InitializeBuildGrid();
     
-    // Cache world reference
-    CachedWorld = GetWorld();
+    // Load default materials
+    LoadBuildMaterials();
+    
+    UE_LOG(LogBuildSystem, Log, TEXT("BuildSystemManager started for actor: %s"), *OwnerActor->GetName());
 }
 
-void UEng_BuildSystemManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UBuildSystemManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    // Update active builds
-    UpdateActiveBuilds(DeltaTime);
-    
-    // Update build preview if in build mode
-    if (bBuildModeActive)
+    if (bIsBuildModeActive)
     {
         UpdateBuildPreview();
+        ValidateBuildLocation();
     }
 }
 
-bool UEng_BuildSystemManager::CanBuildAt(const FVector& Location, EEng_BuildableType BuildType)
+void UBuildSystemManager::StartBuildMode(EEng_BuildMode BuildMode)
 {
-    if (!CachedWorld)
+    if (BuildMode == EEng_BuildMode::None)
     {
+        UE_LOG(LogBuildSystem, Warning, TEXT("Cannot start build mode with None type"));
+        return;
+    }
+    
+    CurrentBuildMode = BuildMode;
+    bIsBuildModeActive = true;
+    
+    // Create build preview actor
+    CreateBuildPreview();
+    
+    UE_LOG(LogBuildSystem, Log, TEXT("Build mode started: %s"), *UEnum::GetValueAsString(BuildMode));
+    
+    // Broadcast build mode change
+    OnBuildModeChanged.Broadcast(BuildMode, true);
+}
+
+void UBuildSystemManager::EndBuildMode()
+{
+    if (!bIsBuildModeActive)
+    {
+        return;
+    }
+    
+    // Destroy build preview
+    if (BuildPreviewActor)
+    {
+        BuildPreviewActor->Destroy();
+        BuildPreviewActor = nullptr;
+    }
+    
+    EEng_BuildMode PreviousMode = CurrentBuildMode;
+    CurrentBuildMode = EEng_BuildMode::None;
+    bIsBuildModeActive = false;
+    bCanBuildAtLocation = false;
+    
+    UE_LOG(LogBuildSystem, Log, TEXT("Build mode ended"));
+    
+    // Broadcast build mode change
+    OnBuildModeChanged.Broadcast(PreviousMode, false);
+}
+
+bool UBuildSystemManager::AttemptBuild()
+{
+    if (!bIsBuildModeActive || !bCanBuildAtLocation)
+    {
+        UE_LOG(LogBuildSystem, Warning, TEXT("Cannot build: mode active=%d, can build=%d"), bIsBuildModeActive, bCanBuildAtLocation);
         return false;
     }
     
-    // Check if location is within build distance
-    APawn* OwnerPawn = Cast<APawn>(GetOwner());
-    if (OwnerPawn)
+    // Get current build location
+    FVector BuildLocation = GetBuildLocation();
+    FRotator BuildRotation = GetBuildRotation();
+    
+    // Snap to grid
+    BuildLocation = SnapToGrid(BuildLocation);
+    
+    // Create the actual structure
+    AActor* NewStructure = CreateStructure(CurrentBuildMode, BuildLocation, BuildRotation);
+    if (!NewStructure)
     {
-        float Distance = FVector::Dist(OwnerPawn->GetActorLocation(), Location);
-        if (Distance > MaxBuildDistance)
+        UE_LOG(LogBuildSystem, Error, TEXT("Failed to create structure"));
+        return false;
+    }
+    
+    // Add to built structures list
+    BuiltStructures.Add(NewStructure);
+    
+    // Update grid occupancy
+    MarkGridOccupied(BuildLocation);
+    
+    UE_LOG(LogBuildSystem, Log, TEXT("Structure built successfully at location: %s"), *BuildLocation.ToString());
+    
+    // Broadcast successful build
+    OnStructureBuilt.Broadcast(NewStructure, CurrentBuildMode);
+    
+    return true;
+}
+
+void UBuildSystemManager::InitializeBuildGrid()
+{
+    // Clear existing grid
+    BuildGrid.Empty();
+    
+    // Initialize grid based on world bounds
+    // For now, use a fixed 100x100 grid centered at origin
+    const int32 GridSize = 100;
+    const float CellSize = BuildGridSize;
+    
+    for (int32 X = -GridSize/2; X < GridSize/2; X++)
+    {
+        for (int32 Y = -GridSize/2; Y < GridSize/2; Y++)
         {
-            UE_LOG(LogBuildSystem, Warning, TEXT("Build location too far: %.1f > %.1f"), Distance, MaxBuildDistance);
-            return false;
+            FVector GridPosition(X * CellSize, Y * CellSize, 0.0f);
+            BuildGrid.Add(GridPosition, false); // false = not occupied
         }
     }
     
-    // Check for overlapping structures
-    FVector BoxExtent(100.0f, 100.0f, 50.0f);
-    TArray<FOverlapResult> Overlaps;
-    FCollisionQueryParams QueryParams;
-    QueryParams.AddIgnoredActor(GetOwner());
-    
-    bool bHasOverlap = CachedWorld->OverlapMultiByChannel(
-        Overlaps,
-        Location,
-        FQuat::Identity,
-        ECollisionChannel::ECC_WorldStatic,
-        FCollisionShape::MakeBox(BoxExtent),
-        QueryParams
-    );
-    
-    if (bHasOverlap)
+    UE_LOG(LogBuildSystem, Log, TEXT("Build grid initialized with %d cells"), BuildGrid.Num());
+}
+
+void UBuildSystemManager::CreateBuildPreview()
+{
+    if (BuildPreviewActor)
     {
-        UE_LOG(LogBuildSystem, Warning, TEXT("Build location blocked by existing structures"));
-        return false;
+        BuildPreviewActor->Destroy();
+    }
+    
+    // Spawn preview actor
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return;
+    }
+    
+    BuildPreviewActor = World->SpawnActor<AActor>();
+    if (!BuildPreviewActor)
+    {
+        UE_LOG(LogBuildSystem, Error, TEXT("Failed to spawn build preview actor"));
+        return;
+    }
+    
+    // Add static mesh component for preview
+    UStaticMeshComponent* PreviewMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("PreviewMesh"));
+    if (PreviewMesh)
+    {
+        BuildPreviewActor->SetRootComponent(PreviewMesh);
+        
+        // Set preview mesh based on build mode
+        UStaticMesh* PreviewStaticMesh = GetPreviewMesh(CurrentBuildMode);
+        if (PreviewStaticMesh)
+        {
+            PreviewMesh->SetStaticMesh(PreviewStaticMesh);
+        }
+        
+        // Set preview material
+        if (ValidBuildMaterial)
+        {
+            PreviewMesh->SetMaterial(0, ValidBuildMaterial);
+        }
+        
+        // Make preview semi-transparent
+        PreviewMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    }
+    
+    BuildPreviewActor->SetActorLabel(TEXT("BuildPreview"));
+    
+    UE_LOG(LogBuildSystem, Log, TEXT("Build preview created"));
+}
+
+void UBuildSystemManager::UpdateBuildPreview()
+{
+    if (!BuildPreviewActor)
+    {
+        return;
+    }
+    
+    // Update preview position
+    FVector BuildLocation = GetBuildLocation();
+    FRotator BuildRotation = GetBuildRotation();
+    
+    // Snap to grid
+    BuildLocation = SnapToGrid(BuildLocation);
+    
+    BuildPreviewActor->SetActorLocation(BuildLocation);
+    BuildPreviewActor->SetActorRotation(BuildRotation);
+    
+    // Update preview material based on build validity
+    UStaticMeshComponent* PreviewMesh = BuildPreviewActor->FindComponentByClass<UStaticMeshComponent>();
+    if (PreviewMesh)
+    {
+        UMaterialInterface* MaterialToUse = bCanBuildAtLocation ? ValidBuildMaterial : InvalidBuildMaterial;
+        if (MaterialToUse)
+        {
+            PreviewMesh->SetMaterial(0, MaterialToUse);
+        }
+    }
+}
+
+void UBuildSystemManager::ValidateBuildLocation()
+{
+    FVector BuildLocation = GetBuildLocation();
+    BuildLocation = SnapToGrid(BuildLocation);
+    
+    // Check if location is within build distance
+    if (OwnerActor)
+    {
+        float DistanceToOwner = FVector::Dist(OwnerActor->GetActorLocation(), BuildLocation);
+        if (DistanceToOwner > MaxBuildDistance)
+        {
+            bCanBuildAtLocation = false;
+            return;
+        }
+    }
+    
+    // Check if grid cell is occupied
+    if (IsGridOccupied(BuildLocation))
+    {
+        bCanBuildAtLocation = false;
+        return;
+    }
+    
+    // Check for overlapping actors
+    if (HasOverlappingStructures(BuildLocation))
+    {
+        bCanBuildAtLocation = false;
+        return;
     }
     
     // Check terrain suitability
-    FHitResult HitResult;
-    FVector StartTrace = Location + FVector(0, 0, 100);
-    FVector EndTrace = Location - FVector(0, 0, 100);
+    if (!IsTerrainSuitable(BuildLocation))
+    {
+        bCanBuildAtLocation = false;
+        return;
+    }
     
-    bool bHitTerrain = CachedWorld->LineTraceSingleByChannel(
+    bCanBuildAtLocation = true;
+}
+
+FVector UBuildSystemManager::GetBuildLocation() const
+{
+    // For now, return a fixed location in front of the owner
+    // In a real implementation, this would be based on player camera/cursor
+    if (OwnerActor)
+    {
+        FVector ForwardVector = OwnerActor->GetActorForwardVector();
+        return OwnerActor->GetActorLocation() + (ForwardVector * 300.0f);
+    }
+    
+    return FVector::ZeroVector;
+}
+
+FRotator UBuildSystemManager::GetBuildRotation() const
+{
+    // For now, align with owner rotation
+    if (OwnerActor)
+    {
+        return OwnerActor->GetActorRotation();
+    }
+    
+    return FRotator::ZeroRotator;
+}
+
+FVector UBuildSystemManager::SnapToGrid(const FVector& Location) const
+{
+    FVector SnappedLocation = Location;
+    
+    // Snap X and Y to grid
+    SnappedLocation.X = FMath::RoundToFloat(SnappedLocation.X / BuildGridSize) * BuildGridSize;
+    SnappedLocation.Y = FMath::RoundToFloat(SnappedLocation.Y / BuildGridSize) * BuildGridSize;
+    
+    // Keep Z as-is for terrain following
+    
+    return SnappedLocation;
+}
+
+bool UBuildSystemManager::IsGridOccupied(const FVector& Location) const
+{
+    FVector GridKey = SnapToGrid(Location);
+    const bool* Occupied = BuildGrid.Find(GridKey);
+    return Occupied ? *Occupied : false;
+}
+
+void UBuildSystemManager::MarkGridOccupied(const FVector& Location)
+{
+    FVector GridKey = SnapToGrid(Location);
+    BuildGrid.Add(GridKey, true);
+}
+
+bool UBuildSystemManager::HasOverlappingStructures(const FVector& Location) const
+{
+    // Check for nearby structures
+    const float CheckRadius = BuildGridSize * 0.8f;
+    
+    for (AActor* Structure : BuiltStructures)
+    {
+        if (Structure && IsValid(Structure))
+        {
+            float Distance = FVector::Dist(Structure->GetActorLocation(), Location);
+            if (Distance < CheckRadius)
+            {
+                return true;
+            }
+        }
+    }
+    
+    return false;
+}
+
+bool UBuildSystemManager::IsTerrainSuitable(const FVector& Location) const
+{
+    // Perform a line trace to check terrain slope and material
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return false;
+    }
+    
+    FVector StartLocation = Location + FVector(0, 0, 1000.0f);
+    FVector EndLocation = Location - FVector(0, 0, 1000.0f);
+    
+    FHitResult HitResult;
+    FCollisionQueryParams QueryParams;
+    QueryParams.bTraceComplex = true;
+    
+    bool bHit = World->LineTraceSingleByChannel(
         HitResult,
-        StartTrace,
-        EndTrace,
-        ECollisionChannel::ECC_WorldStatic,
+        StartLocation,
+        EndLocation,
+        ECC_WorldStatic,
         QueryParams
     );
     
-    if (!bHitTerrain)
+    if (bHit)
     {
-        UE_LOG(LogBuildSystem, Warning, TEXT("No suitable terrain found at build location"));
-        return false;
-    }
-    
-    // Check terrain slope
-    float SlopeAngle = FMath::RadiansToDegrees(FMath::Acos(FVector::DotProduct(HitResult.Normal, FVector::UpVector)));
-    if (SlopeAngle > 30.0f) // Max 30 degree slope
-    {
-        UE_LOG(LogBuildSystem, Warning, TEXT("Terrain too steep: %.1f degrees"), SlopeAngle);
-        return false;
-    }
-    
-    return true;
-}
-
-bool UEng_BuildSystemManager::StartBuild(const FVector& Location, EEng_BuildableType BuildType)
-{
-    if (!CanBuildAt(Location, BuildType))
-    {
-        return false;
-    }
-    
-    if (ActiveBuilds.Num() >= MaxConcurrentBuilds)
-    {
-        UE_LOG(LogBuildSystem, Warning, TEXT("Maximum concurrent builds reached: %d"), MaxConcurrentBuilds);
-        return false;
-    }
-    
-    // Check resources
-    if (!HasRequiredResources(BuildType))
-    {
-        UE_LOG(LogBuildSystem, Warning, TEXT("Insufficient resources for build type: %d"), (int32)BuildType);
-        return false;
-    }
-    
-    // Create build info
-    FEng_BuildInfo BuildInfo;
-    BuildInfo.BuildType = BuildType;
-    BuildInfo.Location = Location;
-    BuildInfo.BuildProgress = 0.0f;
-    BuildInfo.BuildTime = GetBuildTime(BuildType);
-    BuildInfo.bIsCompleted = false;
-    
-    // Consume resources
-    ConsumeResources(BuildType);
-    
-    // Add to active builds
-    int32 BuildIndex = ActiveBuilds.Add(BuildInfo);
-    
-    UE_LOG(LogBuildSystem, Log, TEXT("Started build: Type=%d, Location=%s, Index=%d"), 
-        (int32)BuildType, *Location.ToString(), BuildIndex);
-    
-    return true;
-}
-
-void UEng_BuildSystemManager::UpdateActiveBuilds(float DeltaTime)
-{
-    for (int32 i = ActiveBuilds.Num() - 1; i >= 0; i--)
-    {
-        FEng_BuildInfo& BuildInfo = ActiveBuilds[i];
+        // Check slope - too steep terrain is not suitable
+        FVector SurfaceNormal = HitResult.Normal;
+        float SlopeAngle = FMath::Acos(FVector::DotProduct(SurfaceNormal, FVector::UpVector));
+        float SlopeDegrees = FMath::RadiansToDegrees(SlopeAngle);
         
-        if (BuildInfo.bIsCompleted)
+        // Max slope of 30 degrees
+        return SlopeDegrees <= 30.0f;
+    }
+    
+    return false;
+}
+
+AActor* UBuildSystemManager::CreateStructure(EEng_BuildMode BuildMode, const FVector& Location, const FRotator& Rotation)
+{
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return nullptr;
+    }
+    
+    // Spawn structure actor
+    AActor* NewStructure = World->SpawnActor<AActor>(Location, Rotation);
+    if (!NewStructure)
+    {
+        return nullptr;
+    }
+    
+    // Add static mesh component
+    UStaticMeshComponent* StructureMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("StructureMesh"));
+    if (StructureMesh)
+    {
+        NewStructure->SetRootComponent(StructureMesh);
+        
+        // Set mesh based on build mode
+        UStaticMesh* StructureStaticMesh = GetStructureMesh(BuildMode);
+        if (StructureStaticMesh)
         {
-            continue;
+            StructureMesh->SetStaticMesh(StructureStaticMesh);
         }
         
-        // Update build progress
-        BuildInfo.BuildProgress += DeltaTime / BuildInfo.BuildTime;
-        
-        if (BuildInfo.BuildProgress >= 1.0f)
-        {
-            // Complete the build
-            CompleteBuild(i);
-        }
+        // Enable collision
+        StructureMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
     }
+    
+    // Set structure label
+    FString StructureName = FString::Printf(TEXT("Structure_%s"), *UEnum::GetValueAsString(BuildMode));
+    NewStructure->SetActorLabel(StructureName);
+    
+    return NewStructure;
 }
 
-void UEng_BuildSystemManager::CompleteBuild(int32 BuildIndex)
+UStaticMesh* UBuildSystemManager::GetPreviewMesh(EEng_BuildMode BuildMode) const
 {
-    if (!ActiveBuilds.IsValidIndex(BuildIndex))
+    // Return default cube mesh for now
+    // In a real implementation, this would return specific meshes for each build mode
+    return LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
+}
+
+UStaticMesh* UBuildSystemManager::GetStructureMesh(EEng_BuildMode BuildMode) const
+{
+    // Return default cube mesh for now
+    // In a real implementation, this would return specific meshes for each build mode
+    return LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
+}
+
+void UBuildSystemManager::LoadBuildMaterials()
+{
+    // Load default materials for build preview
+    ValidBuildMaterial = LoadObject<UMaterialInterface>(nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
+    InvalidBuildMaterial = LoadObject<UMaterialInterface>(nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
+    
+    if (!ValidBuildMaterial)
     {
-        return;
+        UE_LOG(LogBuildSystem, Warning, TEXT("Failed to load valid build material"));
     }
     
-    FEng_BuildInfo& BuildInfo = ActiveBuilds[BuildIndex];
-    BuildInfo.bIsCompleted = true;
-    BuildInfo.BuildProgress = 1.0f;
-    
-    // Spawn the actual building structure
-    SpawnBuildingStructure(BuildInfo);
-    
-    UE_LOG(LogBuildSystem, Log, TEXT("Completed build: Type=%d, Location=%s"), 
-        (int32)BuildInfo.BuildType, *BuildInfo.Location.ToString());
-    
-    // Remove from active builds after a delay
-    GetWorld()->GetTimerManager().SetTimer(
-        FTimerHandle(),
-        [this, BuildIndex]() { 
-            if (ActiveBuilds.IsValidIndex(BuildIndex)) 
-            {
-                ActiveBuilds.RemoveAt(BuildIndex);
-            }
-        },
-        1.0f,
-        false
-    );
-}
-
-void UEng_BuildSystemManager::SpawnBuildingStructure(const FEng_BuildInfo& BuildInfo)
-{
-    if (!CachedWorld)
+    if (!InvalidBuildMaterial)
     {
-        return;
+        UE_LOG(LogBuildSystem, Warning, TEXT("Failed to load invalid build material"));
     }
-    
-    // For now, spawn a simple placeholder actor
-    // In a full implementation, this would spawn the appropriate building blueprint
-    FActorSpawnParameters SpawnParams;
-    SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
-    
-    AActor* BuildingActor = CachedWorld->SpawnActor<AActor>(
-        AActor::StaticClass(),
-        BuildInfo.Location,
-        FRotator::ZeroRotator,
-        SpawnParams
-    );
-    
-    if (BuildingActor)
-    {
-        // Add a static mesh component as a placeholder
-        UStaticMeshComponent* MeshComp = NewObject<UStaticMeshComponent>(BuildingActor);
-        BuildingActor->SetRootComponent(MeshComp);
-        
-        // Set a simple cube mesh as placeholder
-        UStaticMesh* CubeMesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
-        if (CubeMesh)
-        {
-            MeshComp->SetStaticMesh(CubeMesh);
-        }
-        
-        BuildingActor->SetActorLabel(FString::Printf(TEXT("Building_%s"), 
-            *UEnum::GetValueAsString(BuildInfo.BuildType)));
-        
-        UE_LOG(LogBuildSystem, Log, TEXT("Spawned building structure: %s"), *BuildingActor->GetName());
-    }
-}
-
-bool UEng_BuildSystemManager::HasRequiredResources(EEng_BuildableType BuildType)
-{
-    // Simplified resource check - in full implementation would check player inventory
-    return true;
-}
-
-void UEng_BuildSystemManager::ConsumeResources(EEng_BuildableType BuildType)
-{
-    // Simplified resource consumption - in full implementation would modify player inventory
-    UE_LOG(LogBuildSystem, Log, TEXT("Consumed resources for build type: %d"), (int32)BuildType);
-}
-
-float UEng_BuildSystemManager::GetBuildTime(EEng_BuildableType BuildType)
-{
-    switch (BuildType)
-    {
-        case EEng_BuildableType::Shelter: return 10.0f;
-        case EEng_BuildableType::Firepit: return 5.0f;
-        case EEng_BuildableType::StorageBox: return 8.0f;
-        case EEng_BuildableType::CraftingTable: return 12.0f;
-        case EEng_BuildableType::TrapBasic: return 6.0f;
-        default: return 5.0f;
-    }
-}
-
-void UEng_BuildSystemManager::UpdateBuildPreview()
-{
-    // Build preview logic would go here
-    // This would show a ghost/preview of the structure at the cursor location
-}
-
-void UEng_BuildSystemManager::EnterBuildMode(EEng_BuildableType BuildType)
-{
-    bBuildModeActive = true;
-    CurrentBuildType = BuildType;
-    
-    UE_LOG(LogBuildSystem, Log, TEXT("Entered build mode: Type=%d"), (int32)BuildType);
-}
-
-void UEng_BuildSystemManager::ExitBuildMode()
-{
-    bBuildModeActive = false;
-    CurrentBuildType = EEng_BuildableType::None;
-    
-    UE_LOG(LogBuildSystem, Log, TEXT("Exited build mode"));
-}
-
-TArray<FEng_BuildInfo> UEng_BuildSystemManager::GetActiveBuilds() const
-{
-    return ActiveBuilds;
-}
-
-float UEng_BuildSystemManager::GetBuildProgress(int32 BuildIndex) const
-{
-    if (ActiveBuilds.IsValidIndex(BuildIndex))
-    {
-        return ActiveBuilds[BuildIndex].BuildProgress;
-    }
-    return 0.0f;
 }
