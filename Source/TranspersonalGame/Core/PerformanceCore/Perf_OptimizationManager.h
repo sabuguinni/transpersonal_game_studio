@@ -1,150 +1,148 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "Components/StaticMeshComponent.h"
-#include "Engine/World.h"
+#include "Engine/TriggerBox.h"
+#include "Subsystems/GameInstanceSubsystem.h"
 #include "Perf_OptimizationManager.generated.h"
 
 UENUM(BlueprintType)
-enum class EPerf_OptimizationLevel : uint8
+enum class EPerf_PerformanceLevel : uint8
 {
-    Low         UMETA(DisplayName = "Low Performance"),
-    Medium      UMETA(DisplayName = "Medium Performance"),
     High        UMETA(DisplayName = "High Performance"),
-    Ultra       UMETA(DisplayName = "Ultra Performance")
+    Medium      UMETA(DisplayName = "Medium Performance"), 
+    Low         UMETA(DisplayName = "Low Performance"),
+    Critical    UMETA(DisplayName = "Critical Performance")
 };
 
 USTRUCT(BlueprintType)
-struct FPerf_OptimizationSettings
+struct FPerf_PerformanceZone
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD Settings")
-    float CullingDistance = 5000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD Settings")
-    int32 MaxLODLevel = 3;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shadow Settings")
-    int32 ShadowResolution = 2048;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    FVector Location;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    bool bEnableOcclusion = true;
+    FVector Bounds;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float TargetFrameRate = 60.0f;
+    EPerf_PerformanceLevel TargetLevel;
 
-    FPerf_OptimizationSettings()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    FString ZoneName;
+
+    FPerf_PerformanceZone()
     {
-        CullingDistance = 5000.0f;
-        MaxLODLevel = 3;
-        ShadowResolution = 2048;
-        bEnableOcclusion = true;
-        TargetFrameRate = 60.0f;
+        Location = FVector::ZeroVector;
+        Bounds = FVector(1000.0f, 1000.0f, 500.0f);
+        TargetLevel = EPerf_PerformanceLevel::Medium;
+        ZoneName = TEXT("DefaultZone");
     }
 };
 
 USTRUCT(BlueprintType)
-struct FPerf_PerformanceMetrics
+struct FPerf_LODSettings
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
-    float CurrentFPS = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
+    float CloseDistance;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
-    float AverageFrameTime = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
+    float MediumDistance;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
-    int32 DrawCalls = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
+    float FarDistance;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
-    float MemoryUsageMB = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
+    int32 MaxLODLevel;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
-    int32 VisibleActors = 0;
-
-    FPerf_PerformanceMetrics()
+    FPerf_LODSettings()
     {
-        CurrentFPS = 0.0f;
-        AverageFrameTime = 0.0f;
-        DrawCalls = 0;
-        MemoryUsageMB = 0.0f;
-        VisibleActors = 0;
+        CloseDistance = 1000.0f;
+        MediumDistance = 3000.0f;
+        FarDistance = 8000.0f;
+        MaxLODLevel = 3;
     }
 };
 
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API APerf_OptimizationManager : public AActor
+class TRANSPERSONALGAME_API UPerf_OptimizationManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
-    APerf_OptimizationManager();
+    UPerf_OptimizationManager();
+
+    // Subsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+
+    // Performance monitoring
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void StartPerformanceMonitoring();
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void StopPerformanceMonitoring();
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    float GetCurrentFPS() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    float GetAverageFPS() const;
+
+    // LOD management
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void ApplyLODSettings(AActor* Actor, const FPerf_LODSettings& Settings);
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void OptimizeActorsInRadius(const FVector& Center, float Radius);
+
+    // Performance zones
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void CreatePerformanceZone(const FPerf_PerformanceZone& Zone);
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void UpdatePerformanceZone(const FString& ZoneName, EPerf_PerformanceLevel NewLevel);
+
+    // Memory management
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void CleanupDuplicateActors();
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void OptimizeTextureStreaming();
+
+    // Culling optimization
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void EnableOcclusionCulling();
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void SetViewDistanceScale(float Scale);
 
 protected:
-    virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    TArray<FPerf_PerformanceZone> PerformanceZones;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UStaticMeshComponent* VisualizationMesh;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    FPerf_LODSettings DefaultLODSettings;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Optimization")
-    EPerf_OptimizationLevel OptimizationLevel;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float TargetFPS;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Optimization")
-    FPerf_OptimizationSettings OptimizationSettings;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    bool bPerformanceMonitoringEnabled;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    FPerf_PerformanceMetrics CurrentMetrics;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Monitoring")
-    bool bEnablePerformanceMonitoring;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Monitoring")
-    float MonitoringUpdateInterval;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Optimization")
-    TArray<AActor*> OptimizedActors;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float FPSSampleInterval;
 
 private:
-    float LastMonitoringUpdate;
-    float FrameTimeAccumulator;
-    int32 FrameCount;
-
-public:
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void ApplyOptimizationLevel(EPerf_OptimizationLevel NewLevel);
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void OptimizeAllStaticMeshes();
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void OptimizeActor(AActor* Actor);
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void SetCullingDistance(float Distance);
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void EnableLODSystem(bool bEnable);
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    FPerf_PerformanceMetrics GetCurrentPerformanceMetrics() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void ResetPerformanceCounters();
-
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Editor")
-    void OptimizeSceneForPerformance();
-
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Editor")
-    void ValidatePerformanceTargets();
-
-protected:
-    void UpdatePerformanceMetrics(float DeltaTime);
-    void ApplyLODSettings();
-    void ApplyCullingSettings();
-    void ApplyShadowSettings();
-    void OptimizeStaticMeshComponent(UStaticMeshComponent* MeshComponent);
+    TArray<float> FPSSamples;
+    FTimerHandle PerformanceTimer;
+    
+    void UpdatePerformanceMetrics();
+    void OptimizeActorLOD(AActor* Actor, float Distance);
+    void CleanupLightingActors();
 };
