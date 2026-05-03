@@ -1,125 +1,177 @@
 #include "Eng_CoreArchitecture.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "TimerManager.h"
-#include "Stats/Stats.h"
+#include "Engine/GameInstance.h"
 #include "HAL/PlatformFilemanager.h"
+#include "Misc/DateTime.h"
+#include "Stats/Stats.h"
+#include "Engine/StaticMeshActor.h"
 
 UEng_CoreArchitecture::UEng_CoreArchitecture()
+    : ArchitectureStatus(EEng_ArchitectureStatus::Uninitialized)
+    , bIsInitialized(false)
+    , InitializationTime(0.0f)
+    , LastPerformanceUpdate(0.0f)
+    , MaxFrameTime(33.33f)  // 30 FPS limit
+    , MaxDrawCalls(5000)
+    , MaxMemoryUsageMB(8192.0f)  // 8GB limit
 {
-    TargetFrameTime = 16.67f; // 60 FPS target
-    MaxDrawCalls = 2000;
-    MaxMemoryUsageMB = 4096.0f;
-    bEnablePerformanceMonitoring = true;
-    PerformanceUpdateInterval = 1.0f;
+    // Initialize performance metrics
+    CurrentMetrics = FEng_PerformanceMetrics();
 }
 
 void UEng_CoreArchitecture::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Warning, TEXT("Engine Architecture System Initializing..."));
+    UE_LOG(LogTemp, Log, TEXT("Engine Architecture: Initializing Core Architecture Subsystem"));
     
-    InitializeCoreArchitecture();
-    RegisterCoreGameSystems();
+    ArchitectureStatus = EEng_ArchitectureStatus::Initializing;
     
-    // Start performance monitoring
-    if (bEnablePerformanceMonitoring)
-    {
-        if (UWorld* World = GetWorld())
-        {
-            World->GetTimerManager().SetTimer(
-                PerformanceTimerHandle,
-                this,
-                &UEng_CoreArchitecture::UpdatePerformanceMetrics,
-                PerformanceUpdateInterval,
-                true
-            );
-        }
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Engine Architecture System Initialized Successfully"));
+    // Initialize core systems
+    InitializeArchitecture();
 }
 
 void UEng_CoreArchitecture::Deinitialize()
 {
-    UE_LOG(LogTemp, Warning, TEXT("Engine Architecture System Shutting Down..."));
+    UE_LOG(LogTemp, Log, TEXT("Engine Architecture: Deinitializing Core Architecture Subsystem"));
     
-    // Clear performance timer
-    if (UWorld* World = GetWorld())
-    {
-        World->GetTimerManager().ClearTimer(PerformanceTimerHandle);
-    }
-    
-    // Clear all registered systems
-    RegisteredSystems.Empty();
+    ShutdownArchitecture();
     
     Super::Deinitialize();
 }
 
-void UEng_CoreArchitecture::InitializeCoreArchitecture()
+void UEng_CoreArchitecture::InitializeArchitecture()
 {
-    // Initialize performance metrics
-    CurrentMetrics = FEng_PerformanceMetrics();
-    CurrentMetrics.OverallLevel = EEng_PerformanceLevel::Acceptable;
-    
-    UE_LOG(LogTemp, Log, TEXT("Core Architecture initialized with default settings"));
+    if (bIsInitialized)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Engine Architecture: Already initialized"));
+        return;
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("Engine Architecture: Starting architecture initialization"));
+
+    // Record initialization start time
+    InitializationTime = FPlatformTime::Seconds();
+
+    // Clear any existing data
+    RegisteredSystems.Empty();
+    SystemHealthData.Empty();
+    SystemErrors.Empty();
+
+    // Initialize performance monitoring
+    UpdatePerformanceMetrics();
+
+    // Set status to active
+    ArchitectureStatus = EEng_ArchitectureStatus::Active;
+    bIsInitialized = true;
+
+    UE_LOG(LogTemp, Log, TEXT("Engine Architecture: Core architecture initialized successfully"));
 }
 
-void UEng_CoreArchitecture::RegisterCoreGameSystems()
+void UEng_CoreArchitecture::ShutdownArchitecture()
 {
-    // Register essential game systems in priority order
-    TArray<FString> NoDependencies;
-    TArray<FString> CoreDependencies = { TEXT("CoreArchitecture") };
-    TArray<FString> WorldDependencies = { TEXT("CoreArchitecture"), TEXT("Physics") };
-    TArray<FString> GameplayDependencies = { TEXT("CoreArchitecture"), TEXT("WorldGeneration"), TEXT("Physics") };
-    
-    // Core systems (highest priority)
-    RegisterSystem(TEXT("CoreArchitecture"), 1000, NoDependencies);
-    RegisterSystem(TEXT("Physics"), 900, CoreDependencies);
-    RegisterSystem(TEXT("Rendering"), 850, CoreDependencies);
-    
-    // World systems
-    RegisterSystem(TEXT("WorldGeneration"), 800, CoreDependencies);
-    RegisterSystem(TEXT("Environment"), 750, WorldDependencies);
-    RegisterSystem(TEXT("Lighting"), 700, WorldDependencies);
-    
-    // Gameplay systems
-    RegisterSystem(TEXT("CharacterSystems"), 650, GameplayDependencies);
-    RegisterSystem(TEXT("AI"), 600, GameplayDependencies);
-    RegisterSystem(TEXT("Combat"), 550, GameplayDependencies);
-    RegisterSystem(TEXT("Audio"), 500, GameplayDependencies);
-    RegisterSystem(TEXT("VFX"), 450, GameplayDependencies);
-    
-    // Set initial status for core systems
-    SetSystemStatus(TEXT("CoreArchitecture"), EEng_SystemStatus::Active);
-    SetSystemStatus(TEXT("Physics"), EEng_SystemStatus::Active);
-    SetSystemStatus(TEXT("Rendering"), EEng_SystemStatus::Active);
-    
-    UE_LOG(LogTemp, Log, TEXT("Registered %d core game systems"), RegisteredSystems.Num());
+    if (!bIsInitialized)
+    {
+        return;
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("Engine Architecture: Shutting down architecture"));
+
+    // Cleanup systems
+    CleanupInvalidSystems();
+    RegisteredSystems.Empty();
+    SystemHealthData.Empty();
+    SystemErrors.Empty();
+
+    // Reset status
+    ArchitectureStatus = EEng_ArchitectureStatus::Uninitialized;
+    bIsInitialized = false;
+
+    UE_LOG(LogTemp, Log, TEXT("Engine Architecture: Shutdown complete"));
 }
 
-void UEng_CoreArchitecture::RegisterSystem(const FString& SystemName, int32 Priority, const TArray<FString>& Dependencies)
+bool UEng_CoreArchitecture::IsArchitectureHealthy() const
 {
-    FEng_SystemInfo SystemInfo;
-    SystemInfo.SystemName = SystemName;
-    SystemInfo.Status = EEng_SystemStatus::Uninitialized;
-    SystemInfo.Priority = Priority;
-    SystemInfo.Dependencies = Dependencies;
-    SystemInfo.InitializationTime = 0.0f;
-    
-    RegisteredSystems.Add(SystemName, SystemInfo);
-    
-    UE_LOG(LogTemp, Log, TEXT("Registered system: %s (Priority: %d)"), *SystemName, Priority);
+    if (!bIsInitialized || ArchitectureStatus != EEng_ArchitectureStatus::Active)
+    {
+        return false;
+    }
+
+    // Check if performance is within limits
+    if (!IsPerformanceWithinLimits())
+    {
+        return false;
+    }
+
+    // Check system health
+    for (const FEng_SystemHealth& Health : SystemHealthData)
+    {
+        if (Health.Status == EEng_ArchitectureStatus::Error)
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+EEng_ArchitectureStatus UEng_CoreArchitecture::GetArchitectureStatus() const
+{
+    return ArchitectureStatus;
+}
+
+void UEng_CoreArchitecture::RegisterSystem(const FString& SystemName, UObject* SystemInstance)
+{
+    if (!SystemInstance)
+    {
+        UE_LOG(LogTemp, Error, TEXT("Engine Architecture: Cannot register null system: %s"), *SystemName);
+        return;
+    }
+
+    if (RegisteredSystems.Contains(SystemName))
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Engine Architecture: System already registered: %s"), *SystemName);
+        return;
+    }
+
+    // Register the system
+    RegisteredSystems.Add(SystemName, SystemInstance);
+
+    // Create health data
+    FEng_SystemHealth NewHealth;
+    NewHealth.SystemName = SystemName;
+    NewHealth.Status = EEng_ArchitectureStatus::Active;
+    NewHealth.LastUpdateTime = FPlatformTime::Seconds();
+    NewHealth.LastError = TEXT("");
+    NewHealth.ErrorCount = 0;
+
+    SystemHealthData.Add(NewHealth);
+
+    UE_LOG(LogTemp, Log, TEXT("Engine Architecture: Registered system: %s"), *SystemName);
 }
 
 void UEng_CoreArchitecture::UnregisterSystem(const FString& SystemName)
 {
-    if (RegisteredSystems.Contains(SystemName))
+    if (!RegisteredSystems.Contains(SystemName))
     {
-        RegisteredSystems.Remove(SystemName);
-        UE_LOG(LogTemp, Log, TEXT("Unregistered system: %s"), *SystemName);
+        UE_LOG(LogTemp, Warning, TEXT("Engine Architecture: System not registered: %s"), *SystemName);
+        return;
     }
+
+    // Remove from registry
+    RegisteredSystems.Remove(SystemName);
+
+    // Remove health data
+    SystemHealthData.RemoveAll([&SystemName](const FEng_SystemHealth& Health)
+    {
+        return Health.SystemName == SystemName;
+    });
+
+    // Clear errors
+    SystemErrors.Remove(SystemName);
+
+    UE_LOG(LogTemp, Log, TEXT("Engine Architecture: Unregistered system: %s"), *SystemName);
 }
 
 bool UEng_CoreArchitecture::IsSystemRegistered(const FString& SystemName) const
@@ -127,68 +179,9 @@ bool UEng_CoreArchitecture::IsSystemRegistered(const FString& SystemName) const
     return RegisteredSystems.Contains(SystemName);
 }
 
-EEng_SystemStatus UEng_CoreArchitecture::GetSystemStatus(const FString& SystemName) const
+TArray<FEng_SystemHealth> UEng_CoreArchitecture::GetSystemHealthReport() const
 {
-    if (const FEng_SystemInfo* SystemInfo = RegisteredSystems.Find(SystemName))
-    {
-        return SystemInfo->Status;
-    }
-    return EEng_SystemStatus::Uninitialized;
-}
-
-void UEng_CoreArchitecture::SetSystemStatus(const FString& SystemName, EEng_SystemStatus NewStatus)
-{
-    if (FEng_SystemInfo* SystemInfo = RegisteredSystems.Find(SystemName))
-    {
-        SystemInfo->Status = NewStatus;
-        UE_LOG(LogTemp, Log, TEXT("System %s status changed to: %d"), *SystemName, (int32)NewStatus);
-    }
-}
-
-void UEng_CoreArchitecture::UpdatePerformanceMetrics()
-{
-    // Get current frame time
-    CurrentMetrics.FrameTime = FApp::GetDeltaTime() * 1000.0f; // Convert to milliseconds
-    
-    // Estimate thread times (simplified)
-    CurrentMetrics.GameThreadTime = CurrentMetrics.FrameTime * 0.6f;
-    CurrentMetrics.RenderThreadTime = CurrentMetrics.FrameTime * 0.4f;
-    
-    // Estimate draw calls (simplified - would need actual render stats in production)
-    CurrentMetrics.DrawCalls = FMath::RandRange(800, 1500);
-    
-    // Estimate memory usage (simplified)
-    CurrentMetrics.MemoryUsageMB = FPlatformMemory::GetStats().UsedPhysical / (1024.0f * 1024.0f);
-    
-    // Calculate overall performance level
-    CalculatePerformanceLevel();
-}
-
-void UEng_CoreArchitecture::CalculatePerformanceLevel()
-{
-    int32 Score = 0;
-    
-    // Frame time scoring (60 FPS = 16.67ms, 30 FPS = 33.33ms)
-    if (CurrentMetrics.FrameTime <= 16.67f) Score += 2;
-    else if (CurrentMetrics.FrameTime <= 33.33f) Score += 1;
-    else Score -= 1;
-    
-    // Draw calls scoring
-    if (CurrentMetrics.DrawCalls <= 1000) Score += 2;
-    else if (CurrentMetrics.DrawCalls <= 2000) Score += 1;
-    else Score -= 1;
-    
-    // Memory usage scoring
-    if (CurrentMetrics.MemoryUsageMB <= 2048.0f) Score += 2;
-    else if (CurrentMetrics.MemoryUsageMB <= 4096.0f) Score += 1;
-    else Score -= 1;
-    
-    // Determine performance level
-    if (Score >= 5) CurrentMetrics.OverallLevel = EEng_PerformanceLevel::Excellent;
-    else if (Score >= 3) CurrentMetrics.OverallLevel = EEng_PerformanceLevel::Good;
-    else if (Score >= 1) CurrentMetrics.OverallLevel = EEng_PerformanceLevel::Acceptable;
-    else if (Score >= -1) CurrentMetrics.OverallLevel = EEng_PerformanceLevel::Poor;
-    else CurrentMetrics.OverallLevel = EEng_PerformanceLevel::Critical;
+    return SystemHealthData;
 }
 
 FEng_PerformanceMetrics UEng_CoreArchitecture::GetCurrentPerformanceMetrics() const
@@ -196,184 +189,346 @@ FEng_PerformanceMetrics UEng_CoreArchitecture::GetCurrentPerformanceMetrics() co
     return CurrentMetrics;
 }
 
-bool UEng_CoreArchitecture::IsPerformanceAcceptable() const
+void UEng_CoreArchitecture::UpdatePerformanceMetrics()
 {
-    return CurrentMetrics.OverallLevel >= EEng_PerformanceLevel::Acceptable;
-}
-
-bool UEng_CoreArchitecture::ValidateSystemDependencies()
-{
-    bool bAllValid = true;
+    float CurrentTime = FPlatformTime::Seconds();
     
-    for (const auto& SystemPair : RegisteredSystems)
+    // Update frame time
+    static float LastFrameTime = CurrentTime;
+    CurrentMetrics.FrameTime = (CurrentTime - LastFrameTime) * 1000.0f; // Convert to ms
+    LastFrameTime = CurrentTime;
+
+    // Get basic engine stats
+    if (GEngine)
     {
-        const FString& SystemName = SystemPair.Key;
-        const FEng_SystemInfo& SystemInfo = SystemPair.Value;
-        
-        TArray<FString> VisitedSystems;
-        if (!CheckSystemDependencies(SystemName, VisitedSystems))
+        UWorld* World = GEngine->GetWorldFromContextObject(this, EGetWorldErrorMode::LogAndReturnNull);
+        if (World)
         {
-            UE_LOG(LogTemp, Error, TEXT("System %s has invalid dependencies"), *SystemName);
-            bAllValid = false;
+            // Count active actors
+            CurrentMetrics.ActiveActors = World->GetActorCount();
         }
     }
-    
-    return bAllValid;
+
+    // Estimate memory usage (simplified)
+    FPlatformMemoryStats MemStats = FPlatformMemory::GetStats();
+    CurrentMetrics.MemoryUsageMB = MemStats.UsedPhysical / (1024.0f * 1024.0f);
+
+    // Update render stats (simplified)
+    CurrentMetrics.GameThreadTime = CurrentMetrics.FrameTime * 0.7f; // Estimate
+    CurrentMetrics.RenderThreadTime = CurrentMetrics.FrameTime * 0.3f; // Estimate
+    CurrentMetrics.DrawCalls = FMath::Max(100, CurrentMetrics.ActiveActors * 2); // Rough estimate
+
+    LastPerformanceUpdate = CurrentTime;
 }
 
-bool UEng_CoreArchitecture::CheckSystemDependencies(const FString& SystemName, TArray<FString>& VisitedSystems) const
+bool UEng_CoreArchitecture::IsPerformanceWithinLimits() const
 {
-    // Check for circular dependencies
-    if (VisitedSystems.Contains(SystemName))
-    {
-        UE_LOG(LogTemp, Error, TEXT("Circular dependency detected involving system: %s"), *SystemName);
-        return false;
-    }
-    
-    VisitedSystems.Add(SystemName);
-    
-    const FEng_SystemInfo* SystemInfo = RegisteredSystems.Find(SystemName);
-    if (!SystemInfo)
+    if (CurrentMetrics.FrameTime > MaxFrameTime)
     {
         return false;
     }
-    
-    // Check all dependencies exist and are valid
-    for (const FString& Dependency : SystemInfo->Dependencies)
+
+    if (CurrentMetrics.DrawCalls > MaxDrawCalls)
     {
-        if (!RegisteredSystems.Contains(Dependency))
-        {
-            UE_LOG(LogTemp, Error, TEXT("System %s depends on non-existent system: %s"), *SystemName, *Dependency);
-            return false;
-        }
-        
-        if (!CheckSystemDependencies(Dependency, VisitedSystems))
-        {
-            return false;
-        }
+        return false;
     }
-    
+
+    if (CurrentMetrics.MemoryUsageMB > MaxMemoryUsageMB)
+    {
+        return false;
+    }
+
     return true;
 }
 
-TArray<FString> UEng_CoreArchitecture::GetSystemInitializationOrder() const
+void UEng_CoreArchitecture::ReportSystemError(const FString& SystemName, const FString& ErrorMessage)
 {
-    TArray<FString> InitOrder;
-    TArray<TPair<FString, int32>> SystemPriorities;
-    
-    // Collect all systems with their priorities
-    for (const auto& SystemPair : RegisteredSystems)
+    UE_LOG(LogTemp, Error, TEXT("Engine Architecture: System error in %s: %s"), *SystemName, *ErrorMessage);
+
+    // Add to error list
+    if (!SystemErrors.Contains(SystemName))
     {
-        SystemPriorities.Add(TPair<FString, int32>(SystemPair.Key, SystemPair.Value.Priority));
+        SystemErrors.Add(SystemName, TArray<FString>());
     }
-    
-    // Sort by priority (highest first)
-    SystemPriorities.Sort([](const TPair<FString, int32>& A, const TPair<FString, int32>& B)
+    SystemErrors[SystemName].Add(ErrorMessage);
+
+    // Update system health
+    FEng_SystemHealth* Health = FindSystemHealth(SystemName);
+    if (Health)
     {
-        return A.Value > B.Value;
-    });
-    
-    // Extract system names in order
-    for (const auto& SystemPriority : SystemPriorities)
-    {
-        InitOrder.Add(SystemPriority.Key);
+        Health->Status = EEng_ArchitectureStatus::Error;
+        Health->LastError = ErrorMessage;
+        Health->ErrorCount++;
+        Health->LastUpdateTime = FPlatformTime::Seconds();
     }
-    
-    return InitOrder;
 }
 
-void UEng_CoreArchitecture::InitializeAllSystems()
+void UEng_CoreArchitecture::ClearSystemErrors(const FString& SystemName)
 {
-    UE_LOG(LogTemp, Warning, TEXT("Initializing all registered systems..."));
-    
-    TArray<FString> InitOrder = GetSystemInitializationOrder();
-    
-    for (const FString& SystemName : InitOrder)
+    SystemErrors.Remove(SystemName);
+
+    // Reset system health
+    FEng_SystemHealth* Health = FindSystemHealth(SystemName);
+    if (Health)
     {
-        if (FEng_SystemInfo* SystemInfo = RegisteredSystems.Find(SystemName))
+        Health->Status = EEng_ArchitectureStatus::Active;
+        Health->LastError = TEXT("");
+        Health->ErrorCount = 0;
+        Health->LastUpdateTime = FPlatformTime::Seconds();
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("Engine Architecture: Cleared errors for system: %s"), *SystemName);
+}
+
+TArray<FString> UEng_CoreArchitecture::GetSystemErrors(const FString& SystemName) const
+{
+    if (SystemErrors.Contains(SystemName))
+    {
+        return SystemErrors[SystemName];
+    }
+    return TArray<FString>();
+}
+
+bool UEng_CoreArchitecture::ValidateArchitectureIntegrity()
+{
+    UE_LOG(LogTemp, Log, TEXT("Engine Architecture: Validating architecture integrity"));
+
+    bool bIsValid = true;
+
+    // Check if core systems are responsive
+    CleanupInvalidSystems();
+
+    // Update system health
+    UpdateSystemHealth();
+
+    // Check performance
+    UpdatePerformanceMetrics();
+    if (!IsPerformanceWithinLimits())
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Engine Architecture: Performance outside limits"));
+        bIsValid = false;
+    }
+
+    // Check for critical errors
+    for (const auto& ErrorPair : SystemErrors)
+    {
+        if (ErrorPair.Value.Num() > 10) // Too many errors
         {
-            if (SystemInfo->Status == EEng_SystemStatus::Uninitialized)
-            {
-                UE_LOG(LogTemp, Log, TEXT("Initializing system: %s"), *SystemName);
-                
-                // Mark as initializing
-                SystemInfo->Status = EEng_SystemStatus::Initializing;
-                
-                // Simulate initialization time
-                float StartTime = FPlatformTime::Seconds();
-                
-                // In a real implementation, this would call the actual system initialization
-                // For now, we'll just mark it as active
-                SystemInfo->Status = EEng_SystemStatus::Active;
-                
-                SystemInfo->InitializationTime = (FPlatformTime::Seconds() - StartTime) * 1000.0f;
-                
-                UE_LOG(LogTemp, Log, TEXT("System %s initialized in %.2fms"), *SystemName, SystemInfo->InitializationTime);
-            }
+            UE_LOG(LogTemp, Error, TEXT("Engine Architecture: System %s has too many errors (%d)"), 
+                *ErrorPair.Key, ErrorPair.Value.Num());
+            bIsValid = false;
         }
     }
-    
-    UE_LOG(LogTemp, Warning, TEXT("All systems initialization completed"));
+
+    return bIsValid;
 }
 
-void UEng_CoreArchitecture::LogSystemStatus() const
+void UEng_CoreArchitecture::RunArchitectureDiagnostics()
 {
-    UE_LOG(LogTemp, Warning, TEXT("=== ENGINE ARCHITECTURE SYSTEM STATUS ==="));
-    UE_LOG(LogTemp, Warning, TEXT("Total Registered Systems: %d"), RegisteredSystems.Num());
-    
-    TArray<FString> InitOrder = GetSystemInitializationOrder();
-    
-    for (const FString& SystemName : InitOrder)
+    UE_LOG(LogTemp, Log, TEXT("Engine Architecture: Running diagnostics"));
+
+    // Update metrics
+    UpdatePerformanceMetrics();
+
+    // Log current status
+    UE_LOG(LogTemp, Log, TEXT("Architecture Status: %s"), 
+        *UEnum::GetValueAsString(ArchitectureStatus));
+    UE_LOG(LogTemp, Log, TEXT("Registered Systems: %d"), RegisteredSystems.Num());
+    UE_LOG(LogTemp, Log, TEXT("Frame Time: %.2f ms"), CurrentMetrics.FrameTime);
+    UE_LOG(LogTemp, Log, TEXT("Active Actors: %d"), CurrentMetrics.ActiveActors);
+    UE_LOG(LogTemp, Log, TEXT("Memory Usage: %.1f MB"), CurrentMetrics.MemoryUsageMB);
+
+    // Check each system
+    for (const FEng_SystemHealth& Health : SystemHealthData)
     {
-        if (const FEng_SystemInfo* SystemInfo = RegisteredSystems.Find(SystemName))
+        UE_LOG(LogTemp, Log, TEXT("System %s: %s (Errors: %d)"), 
+            *Health.SystemName, 
+            *UEnum::GetValueAsString(Health.Status),
+            Health.ErrorCount);
+    }
+}
+
+void UEng_CoreArchitecture::UpdateSystemHealth()
+{
+    float CurrentTime = FPlatformTime::Seconds();
+
+    for (FEng_SystemHealth& Health : SystemHealthData)
+    {
+        // Check if system is still valid
+        if (RegisteredSystems.Contains(Health.SystemName))
         {
-            FString StatusString;
-            switch (SystemInfo->Status)
+            TWeakObjectPtr<UObject> SystemPtr = RegisteredSystems[Health.SystemName];
+            if (!SystemPtr.IsValid())
             {
-                case EEng_SystemStatus::Uninitialized: StatusString = TEXT("UNINITIALIZED"); break;
-                case EEng_SystemStatus::Initializing: StatusString = TEXT("INITIALIZING"); break;
-                case EEng_SystemStatus::Active: StatusString = TEXT("ACTIVE"); break;
-                case EEng_SystemStatus::Error: StatusString = TEXT("ERROR"); break;
-                case EEng_SystemStatus::Disabled: StatusString = TEXT("DISABLED"); break;
+                Health.Status = EEng_ArchitectureStatus::Error;
+                Health.LastError = TEXT("System object is no longer valid");
+                Health.ErrorCount++;
             }
-            
-            UE_LOG(LogTemp, Warning, TEXT("  %s: %s (Priority: %d, Init: %.2fms)"), 
-                   *SystemName, *StatusString, SystemInfo->Priority, SystemInfo->InitializationTime);
+            else if (Health.Status == EEng_ArchitectureStatus::Error && Health.ErrorCount == 0)
+            {
+                // Recover from error state if no errors
+                Health.Status = EEng_ArchitectureStatus::Active;
+                Health.LastError = TEXT("");
+            }
+        }
+        
+        Health.LastUpdateTime = CurrentTime;
+    }
+}
+
+void UEng_CoreArchitecture::ValidateSystemIntegrity()
+{
+    // Remove invalid systems
+    CleanupInvalidSystems();
+    
+    // Update health data
+    UpdateSystemHealth();
+}
+
+FEng_SystemHealth* UEng_CoreArchitecture::FindSystemHealth(const FString& SystemName)
+{
+    for (FEng_SystemHealth& Health : SystemHealthData)
+    {
+        if (Health.SystemName == SystemName)
+        {
+            return &Health;
         }
     }
-    
-    // Log performance metrics
-    UE_LOG(LogTemp, Warning, TEXT("=== PERFORMANCE METRICS ==="));
-    UE_LOG(LogTemp, Warning, TEXT("Frame Time: %.2fms"), CurrentMetrics.FrameTime);
-    UE_LOG(LogTemp, Warning, TEXT("Draw Calls: %d"), CurrentMetrics.DrawCalls);
-    UE_LOG(LogTemp, Warning, TEXT("Memory Usage: %.2fMB"), CurrentMetrics.MemoryUsageMB);
-    
-    FString PerfLevelString;
-    switch (CurrentMetrics.OverallLevel)
-    {
-        case EEng_PerformanceLevel::Critical: PerfLevelString = TEXT("CRITICAL"); break;
-        case EEng_PerformanceLevel::Poor: PerfLevelString = TEXT("POOR"); break;
-        case EEng_PerformanceLevel::Acceptable: PerfLevelString = TEXT("ACCEPTABLE"); break;
-        case EEng_PerformanceLevel::Good: PerfLevelString = TEXT("GOOD"); break;
-        case EEng_PerformanceLevel::Excellent: PerfLevelString = TEXT("EXCELLENT"); break;
-    }
-    UE_LOG(LogTemp, Warning, TEXT("Overall Performance: %s"), *PerfLevelString);
+    return nullptr;
 }
 
-TArray<FEng_SystemInfo> UEng_CoreArchitecture::GetAllSystemInfo() const
+void UEng_CoreArchitecture::CleanupInvalidSystems()
 {
-    TArray<FEng_SystemInfo> AllSystems;
-    
-    for (const auto& SystemPair : RegisteredSystems)
+    TArray<FString> SystemsToRemove;
+
+    for (auto& SystemPair : RegisteredSystems)
     {
-        AllSystems.Add(SystemPair.Value);
+        if (!SystemPair.Value.IsValid())
+        {
+            SystemsToRemove.Add(SystemPair.Key);
+        }
     }
-    
-    // Sort by priority
-    AllSystems.Sort([](const FEng_SystemInfo& A, const FEng_SystemInfo& B)
+
+    for (const FString& SystemName : SystemsToRemove)
     {
-        return A.Priority > B.Priority;
-    });
+        UE_LOG(LogTemp, Warning, TEXT("Engine Architecture: Removing invalid system: %s"), *SystemName);
+        UnregisterSystem(SystemName);
+    }
+}
+
+// Architecture Component Implementation
+
+UEng_ArchitectureComponent::UEng_ArchitectureComponent()
+    : ComponentSystemName(TEXT("DefaultComponent"))
+    , ComponentStatus(EEng_ArchitectureStatus::Uninitialized)
+    , bIsRegistered(false)
+    , bEnableHealthMonitoring(true)
+    , HealthCheckInterval(5.0f)
+    , LastHealthCheck(0.0f)
+{
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.bStartWithTickEnabled = true;
+}
+
+void UEng_ArchitectureComponent::BeginPlay()
+{
+    Super::BeginPlay();
+
+    // Get architecture subsystem
+    if (UGameInstance* GameInstance = GetWorld()->GetGameInstance())
+    {
+        ArchitectureSubsystem = GameInstance->GetSubsystem<UEng_CoreArchitecture>();
+    }
+
+    // Auto-register with architecture
+    if (bEnableHealthMonitoring)
+    {
+        RegisterWithArchitecture();
+    }
+
+    ComponentStatus = EEng_ArchitectureStatus::Active;
+}
+
+void UEng_ArchitectureComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+    UnregisterFromArchitecture();
     
-    return AllSystems;
+    Super::EndPlay(EndPlayReason);
+}
+
+void UEng_ArchitectureComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+    if (bEnableHealthMonitoring && bIsRegistered)
+    {
+        float CurrentTime = GetWorld()->GetTimeSeconds();
+        if (CurrentTime - LastHealthCheck >= HealthCheckInterval)
+        {
+            // Perform health check
+            ReportComponentHealth(ComponentStatus);
+            LastHealthCheck = CurrentTime;
+        }
+    }
+}
+
+void UEng_ArchitectureComponent::RegisterWithArchitecture()
+{
+    if (bIsRegistered || !ArchitectureSubsystem.IsValid())
+    {
+        return;
+    }
+
+    // Generate unique system name if needed
+    if (ComponentSystemName == TEXT("DefaultComponent"))
+    {
+        ComponentSystemName = FString::Printf(TEXT("%s_%s"), 
+            *GetOwner()->GetClass()->GetName(), 
+            *GetOwner()->GetName());
+    }
+
+    ArchitectureSubsystem->RegisterSystem(ComponentSystemName, this);
+    bIsRegistered = true;
+
+    UE_LOG(LogTemp, Log, TEXT("Architecture Component: Registered %s"), *ComponentSystemName);
+}
+
+void UEng_ArchitectureComponent::UnregisterFromArchitecture()
+{
+    if (!bIsRegistered || !ArchitectureSubsystem.IsValid())
+    {
+        return;
+    }
+
+    ArchitectureSubsystem->UnregisterSystem(ComponentSystemName);
+    bIsRegistered = false;
+
+    UE_LOG(LogTemp, Log, TEXT("Architecture Component: Unregistered %s"), *ComponentSystemName);
+}
+
+bool UEng_ArchitectureComponent::IsRegisteredWithArchitecture() const
+{
+    return bIsRegistered && ArchitectureSubsystem.IsValid();
+}
+
+void UEng_ArchitectureComponent::ReportComponentHealth(EEng_ArchitectureStatus Status, const FString& Message)
+{
+    ComponentStatus = Status;
+
+    if (bIsRegistered && ArchitectureSubsystem.IsValid())
+    {
+        if (Status == EEng_ArchitectureStatus::Error && !Message.IsEmpty())
+        {
+            ArchitectureSubsystem->ReportSystemError(ComponentSystemName, Message);
+        }
+        else if (Status == EEng_ArchitectureStatus::Active)
+        {
+            ArchitectureSubsystem->ClearSystemErrors(ComponentSystemName);
+        }
+    }
+}
+
+EEng_ArchitectureStatus UEng_ArchitectureComponent::GetComponentStatus() const
+{
+    return ComponentStatus;
 }
