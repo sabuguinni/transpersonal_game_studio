@@ -1,128 +1,163 @@
 #include "Crowd_MassLODProcessor.h"
 #include "MassEntitySubsystem.h"
 #include "MassExecutionContext.h"
-#include "MassCommonFragments.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
-#include "Crowd_SharedTypes.h"
+#include "Kismet/GameplayStatics.h"
 
 UCrowd_MassLODProcessor::UCrowd_MassLODProcessor()
 {
-    ExecutionFlags = (int32)(EProcessorExecutionFlags::All);
+    bAutoRegisterWithProcessingPhases = true;
+    ExecutionFlags = static_cast<int32>(EProcessorExecutionFlags::All);
     ExecutionOrder.ExecuteInGroup = UE::Mass::ProcessorGroupNames::LOD;
     ExecutionOrder.ExecuteAfter.Add(UE::Mass::ProcessorGroupNames::Movement);
-    
-    LODDistances.Add(500.0f);   // LOD 0 to 1
-    LODDistances.Add(1500.0f);  // LOD 1 to 2
-    LODDistances.Add(3000.0f);  // LOD 2 to 3
-    LODDistances.Add(5000.0f);  // LOD 3 to cull
 }
 
 void UCrowd_MassLODProcessor::ConfigureQueries()
 {
-    EntityQuery.AddRequirement<FMassRepresentationLODFragment>(EMassFragmentAccess::ReadWrite);
-    EntityQuery.AddRequirement<FTransformFragment>(EMassFragmentAccess::ReadOnly);
-    EntityQuery.AddRequirement<FCrowd_DinosaurFragment>(EMassFragmentAccess::ReadOnly);
+    EntityQuery.AddRequirement<FCrowd_TransformFragment>(EMassFragmentAccess::ReadOnly);
+    EntityQuery.AddRequirement<FCrowd_LODFragment>(EMassFragmentAccess::ReadWrite);
+    EntityQuery.AddRequirement<FCrowd_MovementFragment>(EMassFragmentAccess::ReadOnly);
 }
 
-void UCrowd_MassLODProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
+void UCrowd_MassLODProcessor::Execute(UMassEntitySubsystem& EntitySubsystem, FMassExecutionContext& Context)
 {
     // Get player location for distance calculations
-    FVector PlayerLocation = FVector::ZeroVector;
-    if (UWorld* World = GetWorld())
+    UWorld* World = EntitySubsystem.GetWorld();
+    if (!World)
     {
-        if (APlayerController* PC = World->GetFirstPlayerController())
-        {
-            if (APawn* PlayerPawn = PC->GetPawn())
-            {
-                PlayerLocation = PlayerPawn->GetActorLocation();
-            }
-        }
+        return;
     }
 
-    EntityQuery.ForEachEntityChunk(EntityManager, Context, [&](FMassArchetypeEntityCollection& EntityCollection)
+    APlayerController* PlayerController = UGameplayStatics::GetPlayerController(World, 0);
+    if (!PlayerController || !PlayerController->GetPawn())
+    {
+        return;
+    }
+
+    FVector PlayerLocation = PlayerController->GetPawn()->GetActorLocation();
+
+    // Process all entities with LOD fragments
+    EntityQuery.ForEachEntityChunk(EntitySubsystem, Context, [&](FMassArchetypeEntityCollection& EntityCollection)
     {
         const int32 NumEntities = EntityCollection.GetNumEntities();
-        const TArrayView<FMassRepresentationLODFragment> LODList = EntityCollection.GetMutableFragmentView<FMassRepresentationLODFragment>();
-        const TConstArrayView<FTransformFragment> TransformList = EntityCollection.GetFragmentView<FTransformFragment>();
-        const TConstArrayView<FCrowd_DinosaurFragment> DinosaurList = EntityCollection.GetFragmentView<FCrowd_DinosaurFragment>();
+        const TArrayView<FCrowd_TransformFragment> TransformList = EntityCollection.GetFragmentView<FCrowd_TransformFragment>();
+        const TArrayView<FCrowd_LODFragment> LODList = EntityCollection.GetFragmentView<FCrowd_LODFragment>();
+        const TArrayView<FCrowd_MovementFragment> MovementList = EntityCollection.GetFragmentView<FCrowd_MovementFragment>();
 
         for (int32 EntityIndex = 0; EntityIndex < NumEntities; ++EntityIndex)
         {
-            FMassRepresentationLODFragment& LODFragment = LODList[EntityIndex];
-            const FTransformFragment& TransformFragment = TransformList[EntityIndex];
-            const FCrowd_DinosaurFragment& DinosaurFragment = DinosaurList[EntityIndex];
+            const FCrowd_TransformFragment& Transform = TransformList[EntityIndex];
+            FCrowd_LODFragment& LOD = LODList[EntityIndex];
+            const FCrowd_MovementFragment& Movement = MovementList[EntityIndex];
 
             // Calculate distance to player
-            const float DistanceToPlayer = FVector::Dist(PlayerLocation, TransformFragment.GetTransform().GetLocation());
+            float DistanceToPlayer = FVector::Dist(Transform.Transform.GetLocation(), PlayerLocation);
+
+            // Determine LOD level based on distance
+            ECrowd_LODLevel NewLODLevel = ECrowd_LODLevel::High;
             
-            // Determine LOD level based on distance and dinosaur type
-            EMassLOD::Type NewLOD = CalculateLODLevel(DistanceToPlayer, DinosaurFragment.Species);
-            
-            // Update LOD if changed
-            if (LODFragment.LOD != NewLOD)
+            if (DistanceToPlayer > 10000.0f)
             {
-                LODFragment.LOD = NewLOD;
-                LODFragment.PrevLOD = LODFragment.LOD;
-                
-                // Mark for representation update
-                Context.Defer().PushCommand<FMassCommandAddFragmentInstances>(EntityCollection.GetEntity(EntityIndex), 
-                    FMassRepresentationFragment::StaticStruct());
+                NewLODLevel = ECrowd_LODLevel::Culled;
+            }
+            else if (DistanceToPlayer > 5000.0f)
+            {
+                NewLODLevel = ECrowd_LODLevel::Low;
+            }
+            else if (DistanceToPlayer > 2000.0f)
+            {
+                NewLODLevel = ECrowd_LODLevel::Medium;
+            }
+            else
+            {
+                NewLODLevel = ECrowd_LODLevel::High;
+            }
+
+            // Update LOD if changed
+            if (LOD.LODLevel != NewLODLevel)
+            {
+                LOD.LODLevel = NewLODLevel;
+                LOD.LastLODUpdateTime = World->GetTimeSeconds();
+
+                // Adjust update frequency based on LOD level
+                switch (NewLODLevel)
+                {
+                case ECrowd_LODLevel::High:
+                    LOD.UpdateFrequency = 60.0f; // 60 FPS
+                    LOD.bIsVisible = true;
+                    break;
+                case ECrowd_LODLevel::Medium:
+                    LOD.UpdateFrequency = 30.0f; // 30 FPS
+                    LOD.bIsVisible = true;
+                    break;
+                case ECrowd_LODLevel::Low:
+                    LOD.UpdateFrequency = 10.0f; // 10 FPS
+                    LOD.bIsVisible = true;
+                    break;
+                case ECrowd_LODLevel::Culled:
+                    LOD.UpdateFrequency = 1.0f;  // 1 FPS for distance checks only
+                    LOD.bIsVisible = false;
+                    break;
+                }
+            }
+
+            // Update visibility distance for rendering
+            LOD.VisibilityDistance = DistanceToPlayer;
+            
+            // Calculate screen size for additional LOD decisions
+            if (DistanceToPlayer > 0.0f)
+            {
+                // Estimate screen size based on distance (simplified calculation)
+                float EstimatedSize = 100.0f / DistanceToPlayer; // Arbitrary scale factor
+                LOD.ScreenSize = FMath::Clamp(EstimatedSize, 0.0f, 1.0f);
+            }
+            else
+            {
+                LOD.ScreenSize = 1.0f;
+            }
+
+            // Apply movement speed scaling based on LOD
+            if (Movement.Speed > 0.0f)
+            {
+                switch (LOD.LODLevel)
+                {
+                case ECrowd_LODLevel::High:
+                    LOD.MovementSpeedMultiplier = 1.0f;
+                    break;
+                case ECrowd_LODLevel::Medium:
+                    LOD.MovementSpeedMultiplier = 0.8f;
+                    break;
+                case ECrowd_LODLevel::Low:
+                    LOD.MovementSpeedMultiplier = 0.5f;
+                    break;
+                case ECrowd_LODLevel::Culled:
+                    LOD.MovementSpeedMultiplier = 0.1f; // Very slow for distant entities
+                    break;
+                }
             }
         }
     });
 }
 
-EMassLOD::Type UCrowd_MassLODProcessor::CalculateLODLevel(float Distance, ECrowd_DinosaurSpecies Species) const
+void UCrowd_MassLODProcessor::Initialize(UObject& Owner)
 {
-    // Adjust LOD distances based on dinosaur importance
-    float LODMultiplier = 1.0f;
+    Super::Initialize(Owner);
     
-    switch (Species)
-    {
-        case ECrowd_DinosaurSpecies::TRex:
-            LODMultiplier = 2.0f; // Keep T-Rex visible longer
-            break;
-        case ECrowd_DinosaurSpecies::Raptor:
-            LODMultiplier = 1.5f; // Predators stay visible longer
-            break;
-        case ECrowd_DinosaurSpecies::Triceratops:
-        case ECrowd_DinosaurSpecies::Brachiosaurus:
-            LODMultiplier = 1.2f; // Large herbivores
-            break;
-        default:
-            LODMultiplier = 1.0f;
-            break;
-    }
-
-    // Apply multiplier to distances
-    const float AdjustedDistance = Distance / LODMultiplier;
-    
-    if (AdjustedDistance < LODDistances[0])
-        return EMassLOD::High;
-    else if (AdjustedDistance < LODDistances[1])
-        return EMassLOD::Medium;
-    else if (AdjustedDistance < LODDistances[2])
-        return EMassLOD::Low;
-    else if (AdjustedDistance < LODDistances[3])
-        return EMassLOD::Off;
-    else
-        return EMassLOD::Max; // Culled
+    // Initialize LOD settings
+    LODDistances.Add(ECrowd_LODLevel::High, 2000.0f);
+    LODDistances.Add(ECrowd_LODLevel::Medium, 5000.0f);
+    LODDistances.Add(ECrowd_LODLevel::Low, 10000.0f);
+    LODDistances.Add(ECrowd_LODLevel::Culled, 20000.0f);
 }
 
-void UCrowd_MassLODProcessor::SetLODDistances(const TArray<float>& NewDistances)
+float UCrowd_MassLODProcessor::GetLODDistance(ECrowd_LODLevel LODLevel) const
 {
-    if (NewDistances.Num() >= 4)
-    {
-        LODDistances = NewDistances;
-    }
+    const float* Distance = LODDistances.Find(LODLevel);
+    return Distance ? *Distance : 10000.0f;
 }
 
-float UCrowd_MassLODProcessor::GetLODDistance(int32 LODLevel) const
+void UCrowd_MassLODProcessor::SetLODDistance(ECrowd_LODLevel LODLevel, float Distance)
 {
-    if (LODDistances.IsValidIndex(LODLevel))
-    {
-        return LODDistances[LODLevel];
-    }
-    return 1000.0f;
+    LODDistances.Add(LODLevel, Distance);
 }
