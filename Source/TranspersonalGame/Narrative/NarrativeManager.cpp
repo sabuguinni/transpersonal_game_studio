@@ -1,195 +1,461 @@
 #include "NarrativeManager.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "GameFramework/PlayerController.h"
-#include "GameFramework/Pawn.h"
+#include "Engine/GameInstance.h"
 #include "Kismet/GameplayStatics.h"
 #include "Components/AudioComponent.h"
 #include "Sound/SoundCue.h"
-#include "Engine/AssetManager.h"
+#include "TimerManager.h"
+#include "Engine/Engine.h"
 
-ANarrativeManager::ANarrativeManager()
+UNarrativeManager::UNarrativeManager()
 {
-    PrimaryActorTick.bCanEverTick = true;
-    
-    // Criar componente de áudio
-    NarrativeAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("NarrativeAudio"));
-    RootComponent = NarrativeAudioComponent;
-    
-    // Configurações padrão
-    NarrativeVolume = 0.8f;
     bNarrativeEnabled = true;
-    LastProximityCheck = 0.0f;
-    
-    // Configurar triggers padrão
-    FNarr_NarrativeTrigger SpawnTrigger;
-    SpawnTrigger.EventType = ENarr_NarrativeEvent::PlayerSpawn;
-    SpawnTrigger.NarrativeText = FText::FromString(TEXT("Welcome to the Cretaceous period. Your survival begins now."));
-    SpawnTrigger.TriggerRadius = 100.0f;
-    SpawnTrigger.bIsOneTimeEvent = true;
-    NarrativeTriggers.Add(SpawnTrigger);
-    
-    FNarr_NarrativeTrigger DinosaurTrigger;
-    DinosaurTrigger.EventType = ENarr_NarrativeEvent::FirstDinosaurSighting;
-    DinosaurTrigger.NarrativeText = FText::FromString(TEXT("Massive creatures ahead. Move carefully and avoid direct confrontation."));
-    DinosaurTrigger.TriggerRadius = 1000.0f;
-    DinosaurTrigger.bIsOneTimeEvent = true;
-    NarrativeTriggers.Add(DinosaurTrigger);
-    
-    FNarr_NarrativeTrigger ResourceTrigger;
-    ResourceTrigger.EventType = ENarr_NarrativeEvent::ResourceDiscovery;
-    ResourceTrigger.NarrativeText = FText::FromString(TEXT("Essential resources detected. Gather what you can, but stay alert."));
-    ResourceTrigger.TriggerRadius = 800.0f;
-    ResourceTrigger.bIsOneTimeEvent = false;
-    NarrativeTriggers.Add(ResourceTrigger);
+    NarrativeVolume = 0.8f;
+    GlobalNarrativeCooldown = 15.0f;
+    MaxConcurrentNarrations = 2;
+    LastNarrativeTime = 0.0f;
+    CurrentBiome = EEng_BiomeType::Savanna;
+    CurrentNarrationComponent = nullptr;
 }
 
-void ANarrativeManager::BeginPlay()
+void UNarrativeManager::Initialize(FSubsystemCollectionBase& Collection)
 {
-    Super::BeginPlay();
+    Super::Initialize(Collection);
     
-    if (NarrativeAudioComponent)
+    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Initializing dynamic narrative system"));
+    
+    // Initialize default narrative triggers
+    InitializeDefaultTriggers();
+    
+    // Set up update timers
+    if (UWorld* World = GetWorld())
     {
-        NarrativeAudioComponent->SetVolumeMultiplier(NarrativeVolume);
-        NarrativeAudioComponent->bAutoActivate = false;
-    }
-    
-    // Trigger evento inicial
-    if (bNarrativeEnabled)
-    {
-        FTimerHandle TimerHandle;
-        GetWorld()->GetTimerManager().SetTimer(TimerHandle, [this]()
-        {
-            TriggerNarrativeEvent(ENarr_NarrativeEvent::PlayerSpawn, FVector::ZeroVector);
-        }, 2.0f, false);
-    }
-}
-
-void ANarrativeManager::Tick(float DeltaTime)
-{
-    Super::Tick(DeltaTime);
-    
-    if (!bNarrativeEnabled)
-        return;
-    
-    // Check proximity triggers periodicamente
-    LastProximityCheck += DeltaTime;
-    if (LastProximityCheck >= ProximityCheckInterval)
-    {
-        LastProximityCheck = 0.0f;
+        World->GetTimerManager().SetTimer(
+            NarrativeUpdateTimer,
+            FTimerDelegate::CreateUObject(this, &UNarrativeManager::CleanupFinishedNarrations),
+            1.0f,
+            true
+        );
         
-        // Obter posição do jogador
-        APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
-        if (PC && PC->GetPawn())
+        World->GetTimerManager().SetTimer(
+            CooldownUpdateTimer,
+            FTimerDelegate::CreateUObject(this, &UNarrativeManager::UpdateNarrativeCooldowns, 1.0f),
+            1.0f,
+            true
+        );
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Initialization complete"));
+}
+
+void UNarrativeManager::Deinitialize()
+{
+    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Shutting down narrative system"));
+    
+    // Clean up timers
+    if (UWorld* World = GetWorld())
+    {
+        World->GetTimerManager().ClearTimer(NarrativeUpdateTimer);
+        World->GetTimerManager().ClearTimer(CooldownUpdateTimer);
+    }
+    
+    // Stop all active narrations
+    StopCurrentNarration();
+    
+    // Clear audio components
+    for (UAudioComponent* AudioComp : NarrativeAudioComponents)
+    {
+        if (IsValid(AudioComp))
         {
-            FVector PlayerLocation = PC->GetPawn()->GetActorLocation();
-            CheckProximityTriggers(PlayerLocation);
+            AudioComp->Stop();
+            AudioComp->DestroyComponent();
         }
     }
+    NarrativeAudioComponents.Empty();
+    CurrentNarrationComponent = nullptr;
+    
+    Super::Deinitialize();
 }
 
-void ANarrativeManager::TriggerNarrativeEvent(ENarr_NarrativeEvent EventType, const FVector& PlayerLocation)
+void UNarrativeManager::TriggerNarrativeEvent(ENarr_NarrativeEvent EventType, const FVector& Location)
 {
     if (!bNarrativeEnabled)
-        return;
-    
-    // Encontrar trigger correspondente
-    for (FNarr_NarrativeTrigger& Trigger : NarrativeTriggers)
     {
-        if (Trigger.EventType == EventType)
-        {
-            // Verificar se já foi disparado (para eventos únicos)
-            if (Trigger.bIsOneTimeEvent && Trigger.bHasBeenTriggered)
-                continue;
-            
-            // Marcar como disparado
-            Trigger.bHasBeenTriggered = true;
-            
-            // Log do evento
-            UE_LOG(LogTemp, Warning, TEXT("Narrative Event Triggered: %s"), 
-                   *Trigger.NarrativeText.ToString());
-            
-            // Reproduzir áudio se disponível
-            if (!Trigger.AudioClipPath.IsEmpty())
-            {
-                PlayNarrativeAudio(Trigger.AudioClipPath);
-            }
-            
-            // Mostrar texto na tela (placeholder)
-            if (GEngine)
-            {
-                GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow, 
-                    FString::Printf(TEXT("NARRATIVE: %s"), *Trigger.NarrativeText.ToString()));
-            }
-            
-            break;
-        }
+        return;
     }
+    
+    if (!CanTriggerNarrative(EventType))
+    {
+        UE_LOG(LogTemp, Verbose, TEXT("NarrativeManager: Event %d is on cooldown"), (int32)EventType);
+        return;
+    }
+    
+    // Find the best trigger for this event
+    FNarr_NarrativeTrigger* BestTrigger = FindBestTrigger(EventType);
+    if (!BestTrigger)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: No trigger found for event %d"), (int32)EventType);
+        return;
+    }
+    
+    // Play the narration
+    PlayNarration(*BestTrigger);
+    
+    // Update cooldowns
+    EventCooldowns.Add(EventType, GetWorld()->GetTimeSeconds());
+    LastNarrativeTime = GetWorld()->GetTimeSeconds();
+    
+    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Triggered narrative event %d at location %s"), 
+           (int32)EventType, *Location.ToString());
 }
 
-void ANarrativeManager::PlayNarrativeAudio(const FString& AudioPath)
+void UNarrativeManager::RegisterNarrativeTrigger(const FNarr_NarrativeTrigger& NewTrigger)
 {
-    if (!NarrativeAudioComponent || AudioPath.IsEmpty())
-        return;
+    RegisteredTriggers.Add(NewTrigger);
     
-    // Tentar carregar o áudio
-    USoundBase* AudioClip = LoadObject<USoundBase>(nullptr, *AudioPath);
-    if (AudioClip)
+    // Create corresponding active narrative entry
+    FNarr_ActiveNarrative ActiveNarrative;
+    ActiveNarrative.Trigger = NewTrigger;
+    ActiveNarrative.bIsActive = true;
+    ActiveNarratives.Add(ActiveNarrative);
+    
+    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Registered new narrative trigger for event %d"), 
+           (int32)NewTrigger.EventType);
+}
+
+void UNarrativeManager::PlayNarration(const FNarr_NarrativeTrigger& Trigger)
+{
+    if (!bNarrativeEnabled)
     {
-        NarrativeAudioComponent->SetSound(AudioClip);
-        NarrativeAudioComponent->Play();
-        
-        UE_LOG(LogTemp, Log, TEXT("Playing narrative audio: %s"), *AudioPath);
+        return;
+    }
+    
+    // Get available audio component
+    UAudioComponent* AudioComp = GetAvailableAudioComponent();
+    if (!AudioComp)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: No available audio component for narration"));
+        return;
+    }
+    
+    // Set audio properties
+    AudioComp->SetVolumeMultiplier(NarrativeVolume);
+    
+    // If we have an audio cue, play it
+    if (Trigger.AudioCue.IsValid())
+    {
+        USoundCue* SoundCue = Trigger.AudioCue.LoadSynchronous();
+        if (SoundCue)
+        {
+            AudioComp->SetSound(SoundCue);
+            AudioComp->Play();
+            CurrentNarrationComponent = AudioComp;
+            
+            UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Playing audio narration: %s"), 
+                   *Trigger.DialogueText);
+        }
     }
     else
     {
-        UE_LOG(LogTemp, Warning, TEXT("Failed to load narrative audio: %s"), *AudioPath);
+        // Log the text narration for debugging
+        UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Text narration: %s"), *Trigger.DialogueText);
+        
+        // Display on screen for development
+        if (GEngine)
+        {
+            FString NarratorName;
+            switch (Trigger.NarratorType)
+            {
+                case ENarr_NarratorType::TacticalNarrator:
+                    NarratorName = TEXT("Tactical");
+                    break;
+                case ENarr_NarratorType::FieldResearcher:
+                    NarratorName = TEXT("Researcher");
+                    break;
+                case ENarr_NarratorType::EmergencyNarrator:
+                    NarratorName = TEXT("Emergency");
+                    break;
+                case ENarr_NarratorType::StoryNarrator:
+                    NarratorName = TEXT("Story");
+                    break;
+                case ENarr_NarratorType::SurvivalGuide:
+                    NarratorName = TEXT("Survival");
+                    break;
+            }
+            
+            FString DisplayText = FString::Printf(TEXT("[%s] %s"), *NarratorName, *Trigger.DialogueText);
+            GEngine->AddOnScreenDebugMessage(-1, 8.0f, FColor::Cyan, DisplayText);
+        }
     }
 }
 
-void ANarrativeManager::RegisterNarrativeTrigger(const FNarr_NarrativeTrigger& NewTrigger)
-{
-    NarrativeTriggers.Add(NewTrigger);
-    UE_LOG(LogTemp, Log, TEXT("Registered new narrative trigger"));
-}
-
-void ANarrativeManager::SetNarrativeEnabled(bool bEnabled)
+void UNarrativeManager::SetNarrativeEnabled(bool bEnabled)
 {
     bNarrativeEnabled = bEnabled;
     
-    if (!bEnabled && NarrativeAudioComponent && NarrativeAudioComponent->IsPlaying())
+    if (!bEnabled)
     {
-        NarrativeAudioComponent->Stop();
+        StopCurrentNarration();
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Narrative system %s"), 
+           bEnabled ? TEXT("enabled") : TEXT("disabled"));
+}
+
+void UNarrativeManager::TriggerBiomeNarrative(EEng_BiomeType BiomeType, const FVector& PlayerLocation)
+{
+    if (CurrentBiome != BiomeType)
+    {
+        CurrentBiome = BiomeType;
+        TriggerNarrativeEvent(ENarr_NarrativeEvent::PlayerEntersBiome, PlayerLocation);
+        
+        UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Player entered biome %d"), (int32)BiomeType);
     }
 }
 
-void ANarrativeManager::CheckProximityTriggers(const FVector& PlayerLocation)
+void UNarrativeManager::TriggerDinosaurEncounter(EEng_DinosaurSpecies Species, float Distance, EEng_ThreatLevel ThreatLevel)
 {
-    // Posições conhecidas no mapa para triggers específicos
-    TMap<ENarr_NarrativeEvent, FVector> TriggerLocations;
-    TriggerLocations.Add(ENarr_NarrativeEvent::FirstDinosaurSighting, FVector(2000, 1000, 100));
-    TriggerLocations.Add(ENarr_NarrativeEvent::ResourceDiscovery, FVector(-1500, -1000, 100));
+    TriggerNarrativeEvent(ENarr_NarrativeEvent::DinosaurEncounter);
     
-    for (const auto& LocationPair : TriggerLocations)
+    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Dinosaur encounter - Species: %d, Distance: %.1f, Threat: %d"), 
+           (int32)Species, Distance, (int32)ThreatLevel);
+}
+
+void UNarrativeManager::TriggerSurvivalNarrative(EEng_SurvivalStat StatType, float StatValue)
+{
+    if (StatValue < 25.0f) // Critical survival state
     {
-        float Distance = FVector::Dist(PlayerLocation, LocationPair.Value);
-        
-        // Encontrar trigger correspondente
-        for (const FNarr_NarrativeTrigger& Trigger : NarrativeTriggers)
+        TriggerNarrativeEvent(ENarr_NarrativeEvent::SurvivalCritical);
+    }
+}
+
+void UNarrativeManager::TriggerQuestNarrative(EEng_QuestType QuestType, EEng_QuestStatus Status)
+{
+    if (Status == EEng_QuestStatus::Completed)
+    {
+        TriggerNarrativeEvent(ENarr_NarrativeEvent::QuestCompleted);
+    }
+}
+
+void UNarrativeManager::StopCurrentNarration()
+{
+    if (CurrentNarrationComponent && IsValid(CurrentNarrationComponent))
+    {
+        CurrentNarrationComponent->Stop();
+        CurrentNarrationComponent = nullptr;
+    }
+    
+    // Stop all active audio components
+    for (UAudioComponent* AudioComp : NarrativeAudioComponents)
+    {
+        if (IsValid(AudioComp) && AudioComp->IsPlaying())
         {
-            if (Trigger.EventType == LocationPair.Key && Distance <= Trigger.TriggerRadius)
+            AudioComp->Stop();
+        }
+    }
+}
+
+bool UNarrativeManager::IsNarrationPlaying() const
+{
+    if (CurrentNarrationComponent && IsValid(CurrentNarrationComponent))
+    {
+        return CurrentNarrationComponent->IsPlaying();
+    }
+    
+    // Check all audio components
+    for (UAudioComponent* AudioComp : NarrativeAudioComponents)
+    {
+        if (IsValid(AudioComp) && AudioComp->IsPlaying())
+        {
+            return true;
+        }
+    }
+    
+    return false;
+}
+
+void UNarrativeManager::SetNarrativeVolume(float NewVolume)
+{
+    NarrativeVolume = FMath::Clamp(NewVolume, 0.0f, 1.0f);
+    
+    // Update all active audio components
+    for (UAudioComponent* AudioComp : NarrativeAudioComponents)
+    {
+        if (IsValid(AudioComp))
+        {
+            AudioComp->SetVolumeMultiplier(NarrativeVolume);
+        }
+    }
+}
+
+bool UNarrativeManager::CanTriggerNarrative(ENarr_NarrativeEvent EventType) const
+{
+    if (!bNarrativeEnabled)
+    {
+        return false;
+    }
+    
+    // Check global cooldown
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    if (CurrentTime - LastNarrativeTime < GlobalNarrativeCooldown)
+    {
+        return false;
+    }
+    
+    // Check event-specific cooldown
+    if (const float* LastEventTime = EventCooldowns.Find(EventType))
+    {
+        // Find the cooldown for this event type
+        float EventCooldown = 30.0f; // Default cooldown
+        for (const FNarr_NarrativeTrigger& Trigger : RegisteredTriggers)
+        {
+            if (Trigger.EventType == EventType)
             {
-                if (!Trigger.bIsOneTimeEvent || !Trigger.bHasBeenTriggered)
+                EventCooldown = Trigger.Cooldown;
+                break;
+            }
+        }
+        
+        if (CurrentTime - *LastEventTime < EventCooldown)
+        {
+            return false;
+        }
+    }
+    
+    return true;
+}
+
+FNarr_NarrativeTrigger* UNarrativeManager::FindBestTrigger(ENarr_NarrativeEvent EventType, ENarr_NarratorType PreferredNarrator)
+{
+    FNarr_NarrativeTrigger* BestTrigger = nullptr;
+    float BestPriority = -1.0f;
+    
+    for (FNarr_NarrativeTrigger& Trigger : RegisteredTriggers)
+    {
+        if (Trigger.EventType != EventType)
+        {
+            continue;
+        }
+        
+        // Check if this trigger is still active
+        bool bTriggerActive = true;
+        for (const FNarr_ActiveNarrative& ActiveNarrative : ActiveNarratives)
+        {
+            if (ActiveNarrative.Trigger.EventType == EventType &&
+                ActiveNarrative.Trigger.NarratorType == Trigger.NarratorType)
+            {
+                if (Trigger.bIsOneShot && ActiveNarrative.TriggerCount > 0)
                 {
-                    TriggerNarrativeEvent(LocationPair.Key, PlayerLocation);
+                    bTriggerActive = false;
                     break;
                 }
             }
         }
+        
+        if (!bTriggerActive)
+        {
+            continue;
+        }
+        
+        // Calculate priority (prefer the preferred narrator)
+        float Priority = Trigger.Priority;
+        if (Trigger.NarratorType == PreferredNarrator)
+        {
+            Priority += 10.0f;
+        }
+        
+        if (Priority > BestPriority)
+        {
+            BestPriority = Priority;
+            BestTrigger = &Trigger;
+        }
+    }
+    
+    return BestTrigger;
+}
+
+void UNarrativeManager::UpdateNarrativeCooldowns(float DeltaTime)
+{
+    // This is called by timer, DeltaTime is not used but kept for consistency
+    // Actual cooldown checking is done in CanTriggerNarrative using world time
+}
+
+void UNarrativeManager::CleanupFinishedNarrations()
+{
+    // Remove finished audio components
+    for (int32 i = NarrativeAudioComponents.Num() - 1; i >= 0; i--)
+    {
+        UAudioComponent* AudioComp = NarrativeAudioComponents[i];
+        if (!IsValid(AudioComp) || !AudioComp->IsPlaying())
+        {
+            if (AudioComp == CurrentNarrationComponent)
+            {
+                CurrentNarrationComponent = nullptr;
+            }
+            NarrativeAudioComponents.RemoveAt(i);
+        }
     }
 }
 
-void ANarrativeManager::OnNarrativeAudioFinished()
+UAudioComponent* UNarrativeManager::GetAvailableAudioComponent()
 {
-    UE_LOG(LogTemp, Log, TEXT("Narrative audio playback finished"));
+    // First, try to find an existing non-playing component
+    for (UAudioComponent* AudioComp : NarrativeAudioComponents)
+    {
+        if (IsValid(AudioComp) && !AudioComp->IsPlaying())
+        {
+            return AudioComp;
+        }
+    }
+    
+    // If we haven't reached the limit, create a new one
+    if (NarrativeAudioComponents.Num() < MaxConcurrentNarrations)
+    {
+        if (UWorld* World = GetWorld())
+        {
+            UAudioComponent* NewAudioComp = UGameplayStatics::SpawnSound2D(
+                World, nullptr, NarrativeVolume, 1.0f, 0.0f, nullptr, false, false
+            );
+            
+            if (NewAudioComp)
+            {
+                NarrativeAudioComponents.Add(NewAudioComp);
+                return NewAudioComp;
+            }
+        }
+    }
+    
+    return nullptr;
+}
+
+void UNarrativeManager::InitializeDefaultTriggers()
+{
+    // Biome entry narratives
+    FNarr_NarrativeTrigger BiomeSwampTrigger;
+    BiomeSwampTrigger.EventType = ENarr_NarrativeEvent::PlayerEntersBiome;
+    BiomeSwampTrigger.NarratorType = ENarr_NarratorType::FieldResearcher;
+    BiomeSwampTrigger.DialogueText = TEXT("Entering swampland. High humidity detected. Watch for aquatic predators and unstable ground.");
+    BiomeSwampTrigger.Priority = 5.0f;
+    BiomeSwampTrigger.Cooldown = 60.0f;
+    RegisterNarrativeTrigger(BiomeSwampTrigger);
+    
+    // Dinosaur encounter narratives
+    FNarr_NarrativeTrigger TRexEncounterTrigger;
+    TRexEncounterTrigger.EventType = ENarr_NarrativeEvent::DinosaurEncounter;
+    TRexEncounterTrigger.NarratorType = ENarr_NarratorType::TacticalNarrator;
+    TRexEncounterTrigger.DialogueText = TEXT("Massive predator detected. T-Rex in your vicinity. Do not run unless you have clear escape route.");
+    TRexEncounterTrigger.Priority = 10.0f;
+    TRexEncounterTrigger.Cooldown = 45.0f;
+    RegisterNarrativeTrigger(TRexEncounterTrigger);
+    
+    // Survival critical narratives
+    FNarr_NarrativeTrigger SurvivalCriticalTrigger;
+    SurvivalCriticalTrigger.EventType = ENarr_NarrativeEvent::SurvivalCritical;
+    SurvivalCriticalTrigger.NarratorType = ENarr_NarratorType::EmergencyNarrator;
+    SurvivalCriticalTrigger.DialogueText = TEXT("Warning: Critical survival status detected. Immediate action required to prevent system failure.");
+    SurvivalCriticalTrigger.Priority = 15.0f;
+    SurvivalCriticalTrigger.Cooldown = 30.0f;
+    RegisterNarrativeTrigger(SurvivalCriticalTrigger);
+    
+    UE_LOG(LogTemp, Log, TEXT("NarrativeManager: Initialized %d default triggers"), RegisteredTriggers.Num());
 }
