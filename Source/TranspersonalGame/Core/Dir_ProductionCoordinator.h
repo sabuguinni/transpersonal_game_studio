@@ -2,154 +2,192 @@
 
 #include "CoreMinimal.h"
 #include "Engine/World.h"
-#include "GameFramework/Actor.h"
-#include "Components/SceneComponent.h"
+#include "GameFramework/GameModeBase.h"
+#include "Components/ActorComponent.h"
+#include "SharedTypes.h"
 #include "Dir_ProductionCoordinator.generated.h"
 
 /**
- * Studio Director Production Coordinator
- * Manages agent task assignments and milestone tracking
- * Ensures proper coordination between all 20 agents
+ * Estrutura para rastrear o progresso do Milestone 1
  */
-
-UENUM(BlueprintType)
-enum class EDir_AgentPriority : uint8
+USTRUCT(BlueprintType)
+struct FDir_Milestone1Progress
 {
-    Critical    UMETA(DisplayName = "Critical"),
-    High        UMETA(DisplayName = "High"), 
-    Medium      UMETA(DisplayName = "Medium"),
-    Low         UMETA(DisplayName = "Low"),
-    Blocked     UMETA(DisplayName = "Blocked")
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Milestone Progress")
+    bool bCharacterMovementWorking = false;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Milestone Progress")
+    bool bLandscapeExpanded = false;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Milestone Progress")
+    bool bDinosaursSpawned = false;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Milestone Progress")
+    bool bLightingConfigured = false;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Milestone Progress")
+    bool bBiomesDistributed = false;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Milestone Progress")
+    int32 CompletedTasks = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Milestone Progress")
+    int32 TotalTasks = 5;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Milestone Progress")
+    float ProgressPercentage = 0.0f;
+
+    FDir_Milestone1Progress()
+    {
+        bCharacterMovementWorking = false;
+        bLandscapeExpanded = false;
+        bDinosaursSpawned = false;
+        bLightingConfigured = false;
+        bBiomesDistributed = false;
+        CompletedTasks = 0;
+        TotalTasks = 5;
+        ProgressPercentage = 0.0f;
+    }
+
+    void UpdateProgress()
+    {
+        CompletedTasks = 0;
+        if (bCharacterMovementWorking) CompletedTasks++;
+        if (bLandscapeExpanded) CompletedTasks++;
+        if (bDinosaursSpawned) CompletedTasks++;
+        if (bLightingConfigured) CompletedTasks++;
+        if (bBiomesDistributed) CompletedTasks++;
+        
+        ProgressPercentage = (float)CompletedTasks / (float)TotalTasks * 100.0f;
+    }
 };
 
-UENUM(BlueprintType)
-enum class EDir_MilestoneStatus : uint8
-{
-    NotStarted  UMETA(DisplayName = "Not Started"),
-    InProgress  UMETA(DisplayName = "In Progress"),
-    Completed   UMETA(DisplayName = "Completed"),
-    Failed      UMETA(DisplayName = "Failed")
-};
-
+/**
+ * Estrutura para coordenar tarefas entre agentes
+ */
 USTRUCT(BlueprintType)
 struct FDir_AgentTask
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Task")
+    UPROPERTY(BlueprintReadOnly, Category = "Agent Task")
+    int32 AgentID = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Agent Task")
     FString AgentName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Task")
+    UPROPERTY(BlueprintReadOnly, Category = "Agent Task")
     FString TaskDescription;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Task")
-    EDir_AgentPriority Priority;
+    UPROPERTY(BlueprintReadOnly, Category = "Agent Task")
+    bool bIsCompleted = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Task")
-    float EstimatedHours;
+    UPROPERTY(BlueprintReadOnly, Category = "Agent Task")
+    bool bIsBlocked = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Task")
-    bool bIsCompleted;
+    UPROPERTY(BlueprintReadOnly, Category = "Agent Task")
+    FString BlockedReason;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Agent Task")
+    int32 Priority = 0; // 0 = baixa, 10 = crítica
 
     FDir_AgentTask()
     {
+        AgentID = 0;
         AgentName = TEXT("");
         TaskDescription = TEXT("");
-        Priority = EDir_AgentPriority::Medium;
-        EstimatedHours = 1.0f;
         bIsCompleted = false;
+        bIsBlocked = false;
+        BlockedReason = TEXT("");
+        Priority = 0;
     }
 };
 
-USTRUCT(BlueprintType)
-struct FDir_Milestone
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone")
-    FString MilestoneName;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone")
-    FString Description;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone")
-    EDir_MilestoneStatus Status;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone")
-    TArray<FDir_AgentTask> RequiredTasks;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone")
-    float CompletionPercentage;
-
-    FDir_Milestone()
-    {
-        MilestoneName = TEXT("");
-        Description = TEXT("");
-        Status = EDir_MilestoneStatus::NotStarted;
-        CompletionPercentage = 0.0f;
-    }
-};
-
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API ADir_ProductionCoordinator : public AActor
+/**
+ * Coordenador de produção que monitoriza o progresso do Milestone 1
+ * e coordena as tarefas entre os 18 agentes especializados
+ */
+UCLASS(BlueprintType, Blueprintable, ClassGroup=(TranspersonalGame))
+class TRANSPERSONALGAME_API UDir_ProductionCoordinator : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    ADir_ProductionCoordinator();
+    UDir_ProductionCoordinator();
 
 protected:
     virtual void BeginPlay() override;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    USceneComponent* RootSceneComponent;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
-    TArray<FDir_Milestone> Milestones;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
-    TArray<FDir_AgentTask> CurrentTasks;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
-    FString CurrentCycleID;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
-    float DailyBudgetUsed;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
-    float DailyBudgetLimit;
-
 public:
-    virtual void Tick(float DeltaTime) override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    UFUNCTION(BlueprintCallable, Category = "Production")
-    void InitializeMilestone1();
+    // Progresso do Milestone 1
+    UPROPERTY(BlueprintReadOnly, Category = "Production Coordinator")
+    FDir_Milestone1Progress Milestone1Progress;
 
-    UFUNCTION(BlueprintCallable, Category = "Production")
-    void AssignTaskToAgent(const FString& AgentName, const FString& TaskDescription, EDir_AgentPriority Priority);
+    // Lista de tarefas por agente
+    UPROPERTY(BlueprintReadOnly, Category = "Production Coordinator")
+    TArray<FDir_AgentTask> AgentTasks;
 
-    UFUNCTION(BlueprintCallable, Category = "Production")
-    void CompleteTask(const FString& AgentName, const FString& TaskDescription);
+    // Funções de coordenação
+    UFUNCTION(BlueprintCallable, Category = "Production Coordinator")
+    void InitializeAgentTasks();
 
-    UFUNCTION(BlueprintCallable, Category = "Production")
-    float GetMilestoneProgress(const FString& MilestoneName);
+    UFUNCTION(BlueprintCallable, Category = "Production Coordinator")
+    void UpdateMilestone1Progress();
 
-    UFUNCTION(BlueprintCallable, Category = "Production")
-    TArray<FDir_AgentTask> GetTasksByPriority(EDir_AgentPriority Priority);
+    UFUNCTION(BlueprintCallable, Category = "Production Coordinator")
+    void MarkTaskCompleted(int32 AgentID, const FString& TaskDescription);
 
-    UFUNCTION(BlueprintCallable, Category = "Production")
-    void UpdateCycleStatus(const FString& CycleID, float BudgetUsed);
+    UFUNCTION(BlueprintCallable, Category = "Production Coordinator")
+    void BlockTask(int32 AgentID, const FString& Reason);
 
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Production")
-    void GenerateProductionReport();
+    UFUNCTION(BlueprintCallable, Category = "Production Coordinator")
+    void UnblockTask(int32 AgentID);
 
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Production")
-    void CleanupDuplicateActors();
+    UFUNCTION(BlueprintCallable, Category = "Production Coordinator")
+    TArray<FDir_AgentTask> GetPendingTasks() const;
 
-protected:
-    UFUNCTION()
-    void ValidateMinPlayableMap();
+    UFUNCTION(BlueprintCallable, Category = "Production Coordinator")
+    TArray<FDir_AgentTask> GetBlockedTasks() const;
 
-    UFUNCTION()
-    void CheckAgentDependencies();
+    UFUNCTION(BlueprintCallable, Category = "Production Coordinator")
+    float GetMilestone1ProgressPercentage() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Production Coordinator")
+    bool IsMilestone1Complete() const;
+
+    // Verificações específicas do estado do jogo
+    UFUNCTION(BlueprintCallable, Category = "Production Coordinator")
+    bool VerifyCharacterMovement();
+
+    UFUNCTION(BlueprintCallable, Category = "Production Coordinator")
+    bool VerifyLandscapeExpansion();
+
+    UFUNCTION(BlueprintCallable, Category = "Production Coordinator")
+    bool VerifyDinosaurSpawns();
+
+    UFUNCTION(BlueprintCallable, Category = "Production Coordinator")
+    bool VerifyLightingConfiguration();
+
+    UFUNCTION(BlueprintCallable, Category = "Production Coordinator")
+    bool VerifyBiomeDistribution();
+
+    // Logging e debug
+    UFUNCTION(BlueprintCallable, Category = "Production Coordinator")
+    void LogProductionStatus();
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Production Coordinator")
+    void DebugPrintAllTasks();
+
+private:
+    // Timer para verificações periódicas
+    float VerificationTimer = 0.0f;
+    const float VerificationInterval = 5.0f; // Verificar a cada 5 segundos
+
+    // Funções auxiliares
+    void CreateAgentTask(int32 AgentID, const FString& AgentName, const FString& TaskDescription, int32 Priority);
+    FDir_AgentTask* FindTaskByAgent(int32 AgentID);
 };
