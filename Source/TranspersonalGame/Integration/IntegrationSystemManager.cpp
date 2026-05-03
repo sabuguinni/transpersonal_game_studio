@@ -1,554 +1,334 @@
 #include "IntegrationSystemManager.h"
-#include "Engine/World.h"
 #include "Engine/Engine.h"
-#include "EngineUtils.h"
-#include "Engine/DirectionalLight.h"
-#include "Engine/SkyLight.h"
-#include "Engine/PlayerStart.h"
-#include "Components/DirectionalLightComponent.h"
-#include "Components/SkyLightComponent.h"
-#include "Components/SkyAtmosphereComponent.h"
-#include "Components/ExponentialHeightFogComponent.h"
-#include "GameFramework/Character.h"
-#include "AIController.h"
-
-UIntegrationSystemManager::UIntegrationSystemManager()
-{
-    LastValidationTime = 0.0f;
-    ValidationInterval = 5.0f; // Validate every 5 seconds
-    bAutoCleanupEnabled = true;
-    AverageFramerate = 60.0f;
-    LastActorCount = 0;
-    LastOptimizationTime = 0.0f;
-}
+#include "Engine/World.h"
+#include "Engine/GameInstance.h"
+#include "Subsystems/SubsystemBlueprintLibrary.h"
 
 void UIntegrationSystemManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Warning, TEXT("IntegrationSystemManager: Initialized"));
+    UE_LOG(LogTemp, Log, TEXT("IntegrationSystemManager: Initializing..."));
     
-    // Initialize system statuses
-    SystemStatuses.Empty();
+    // Inicializar variáveis
+    RegisteredModules.Empty();
+    FailedModules.Empty();
+    UnsatisfiedDependencies.Empty();
+    bSystemInitialized = false;
+    LastValidationTime = FDateTime::Now();
+    TotalRegisteredModules = 0;
+    ActiveModulesCount = 0;
     
-    // Register core systems
-    FInteg_SystemStatus WorldGenStatus;
-    WorldGenStatus.SystemName = TEXT("WorldGeneration");
-    SystemStatuses.Add(TEXT("WorldGeneration"), WorldGenStatus);
-    
-    FInteg_SystemStatus CharacterStatus;
-    CharacterStatus.SystemName = TEXT("Characters");
-    SystemStatuses.Add(TEXT("Characters"), CharacterStatus);
-    
-    FInteg_SystemStatus AIStatus;
-    AIStatus.SystemName = TEXT("AI");
-    SystemStatuses.Add(TEXT("AI"), AIStatus);
-    
-    FInteg_SystemStatus LightingStatus;
-    LightingStatus.SystemName = TEXT("Lighting");
-    SystemStatuses.Add(TEXT("Lighting"), LightingStatus);
-    
-    FInteg_SystemStatus VFXStatus;
-    VFXStatus.SystemName = TEXT("VFX");
-    SystemStatuses.Add(TEXT("VFX"), VFXStatus);
-    
-    // Perform initial validation
-    ValidateAllSystems();
+    UE_LOG(LogTemp, Log, TEXT("IntegrationSystemManager: Initialized successfully"));
 }
 
 void UIntegrationSystemManager::Deinitialize()
 {
-    UE_LOG(LogTemp, Warning, TEXT("IntegrationSystemManager: Deinitializing"));
+    UE_LOG(LogTemp, Log, TEXT("IntegrationSystemManager: Shutting down..."));
+    
+    // Shutdown de todos os módulos
+    ShutdownAllModules();
+    
+    // Limpar dados
+    RegisteredModules.Empty();
+    FailedModules.Empty();
+    UnsatisfiedDependencies.Empty();
+    
     Super::Deinitialize();
 }
 
-void UIntegrationSystemManager::ValidateAllSystems()
+UIntegrationSystemManager* UIntegrationSystemManager::Get(const UObject* WorldContext)
 {
-    UWorld* World = GetWorld();
+    if (!WorldContext)
+    {
+        return nullptr;
+    }
+    
+    const UWorld* World = GEngine->GetWorldFromContextObject(WorldContext, EGetWorldErrorMode::LogAndReturnNull);
     if (!World)
     {
-        UE_LOG(LogTemp, Error, TEXT("IntegrationSystemManager: No valid world"));
+        return nullptr;
+    }
+    
+    UGameInstance* GameInstance = World->GetGameInstance();
+    if (!GameInstance)
+    {
+        return nullptr;
+    }
+    
+    return GameInstance->GetSubsystem<UIntegrationSystemManager>();
+}
+
+void UIntegrationSystemManager::RegisterModule(const FString& ModuleName, UObject* ModuleInstance)
+{
+    if (ModuleName.IsEmpty() || !ModuleInstance)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("IntegrationSystemManager: Cannot register module - invalid parameters"));
         return;
     }
     
-    float CurrentTime = World->GetTimeSeconds();
-    if (CurrentTime - LastValidationTime < ValidationInterval)
+    if (RegisteredModules.Contains(ModuleName))
     {
-        return; // Too soon for another validation
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("IntegrationSystemManager: Starting system validation"));
-    
-    // Validate all systems
-    ValidateWorldGeneration();
-    ValidateCharacterSystems();
-    ValidateAISystems();
-    ValidateLightingSystems();
-    ValidateVFXSystems();
-    
-    // Update performance metrics
-    UpdatePerformanceMetrics();
-    
-    // Auto-cleanup if enabled
-    if (bAutoCleanupEnabled)
-    {
-        CleanupDuplicateActors();
-    }
-    
-    LastValidationTime = CurrentTime;
-    
-    UE_LOG(LogTemp, Log, TEXT("IntegrationSystemManager: System validation complete"));
-}
-
-void UIntegrationSystemManager::CleanupDuplicateActors()
-{
-    UWorld* World = GetWorld();
-    if (!World)
-    {
+        UE_LOG(LogTemp, Warning, TEXT("IntegrationSystemManager: Module '%s' already registered"), *ModuleName);
         return;
     }
     
-    UE_LOG(LogTemp, Warning, TEXT("IntegrationSystemManager: Starting duplicate actor cleanup"));
-    
-    CleanupLightingActors();
-    CleanupAtmosphereActors();
-    ValidateEssentialActors();
-    
-    UE_LOG(LogTemp, Warning, TEXT("IntegrationSystemManager: Duplicate cleanup complete"));
-}
-
-FInteg_ActorInventory UIntegrationSystemManager::GetActorInventory()
-{
-    UWorld* World = GetWorld();
-    if (!World)
+    // Validar o módulo antes de registar
+    if (!ValidateModule(ModuleName, ModuleInstance))
     {
-        return FInteg_ActorInventory();
+        FailedModules.AddUnique(ModuleName);
+        UE_LOG(LogTemp, Error, TEXT("IntegrationSystemManager: Module '%s' failed validation"), *ModuleName);
+        return;
     }
     
-    FInteg_ActorInventory Inventory;
+    // Registar o módulo
+    RegisteredModules.Add(ModuleName, ModuleInstance);
+    TotalRegisteredModules = RegisteredModules.Num();
+    ActiveModulesCount++;
     
-    // Count all actors
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    UE_LOG(LogTemp, Log, TEXT("IntegrationSystemManager: Module '%s' registered successfully"), *ModuleName);
+}
+
+void UIntegrationSystemManager::UnregisterModule(const FString& ModuleName)
+{
+    if (!RegisteredModules.Contains(ModuleName))
     {
-        AActor* Actor = *ActorItr;
-        if (!Actor)
-        {
-            continue;
-        }
+        UE_LOG(LogTemp, Warning, TEXT("IntegrationSystemManager: Module '%s' not found for unregistration"), *ModuleName);
+        return;
+    }
+    
+    RegisteredModules.Remove(ModuleName);
+    TotalRegisteredModules = RegisteredModules.Num();
+    ActiveModulesCount--;
+    
+    UE_LOG(LogTemp, Log, TEXT("IntegrationSystemManager: Module '%s' unregistered"), *ModuleName);
+}
+
+bool UIntegrationSystemManager::IsModuleRegistered(const FString& ModuleName) const
+{
+    return RegisteredModules.Contains(ModuleName);
+}
+
+UObject* UIntegrationSystemManager::GetModuleInstance(const FString& ModuleName) const
+{
+    if (const UObject* const* FoundModule = RegisteredModules.Find(ModuleName))
+    {
+        return *FoundModule;
+    }
+    
+    return nullptr;
+}
+
+bool UIntegrationSystemManager::ValidateModuleDependencies()
+{
+    UE_LOG(LogTemp, Log, TEXT("IntegrationSystemManager: Validating module dependencies..."));
+    
+    UnsatisfiedDependencies.Empty();
+    bool bAllDependenciesSatisfied = true;
+    
+    // Verificar dependências para cada módulo registado
+    for (const auto& ModulePair : RegisteredModules)
+    {
+        const FString& ModuleName = ModulePair.Key;
         
-        Inventory.TotalActors++;
-        
-        // Count specific types
-        if (Actor->IsA<ADirectionalLight>())
+        if (!CheckModuleDependencies(ModuleName))
         {
-            Inventory.DirectionalLights++;
+            bAllDependenciesSatisfied = false;
+            UE_LOG(LogTemp, Warning, TEXT("IntegrationSystemManager: Module '%s' has unsatisfied dependencies"), *ModuleName);
         }
-        else if (Actor->IsA<ASkyLight>())
+    }
+    
+    LastValidationTime = FDateTime::Now();
+    
+    UE_LOG(LogTemp, Log, TEXT("IntegrationSystemManager: Dependency validation %s"), 
+           bAllDependenciesSatisfied ? TEXT("PASSED") : TEXT("FAILED"));
+    
+    return bAllDependenciesSatisfied;
+}
+
+FString UIntegrationSystemManager::GenerateSystemReport()
+{
+    FString Report;
+    Report += TEXT("=== INTEGRATION SYSTEM REPORT ===\n");
+    Report += FString::Printf(TEXT("Generated: %s\n"), *FDateTime::Now().ToString());
+    Report += FString::Printf(TEXT("Total Registered Modules: %d\n"), TotalRegisteredModules);
+    Report += FString::Printf(TEXT("Active Modules: %d\n"), ActiveModulesCount);
+    Report += FString::Printf(TEXT("Failed Modules: %d\n"), FailedModules.Num());
+    Report += FString::Printf(TEXT("System Healthy: %s\n"), IsSystemHealthy() ? TEXT("YES") : TEXT("NO"));
+    Report += TEXT("\n");
+    
+    Report += TEXT("Registered Modules:\n");
+    for (const auto& ModulePair : RegisteredModules)
+    {
+        Report += FString::Printf(TEXT("- %s: %s\n"), 
+                                 *ModulePair.Key, 
+                                 ModulePair.Value ? TEXT("ACTIVE") : TEXT("NULL"));
+    }
+    
+    if (FailedModules.Num() > 0)
+    {
+        Report += TEXT("\nFailed Modules:\n");
+        for (const FString& FailedModule : FailedModules)
         {
-            Inventory.SkyLights++;
+            Report += FString::Printf(TEXT("- %s\n"), *FailedModule);
         }
-        else if (Actor->IsA<APlayerStart>())
+    }
+    
+    if (UnsatisfiedDependencies.Num() > 0)
+    {
+        Report += TEXT("\nUnsatisfied Dependencies:\n");
+        for (const FString& Dependency : UnsatisfiedDependencies)
         {
-            Inventory.PlayerStarts++;
+            Report += FString::Printf(TEXT("- %s\n"), *Dependency);
         }
-        else if (Actor->IsA<ACharacter>())
+    }
+    
+    return Report;
+}
+
+bool UIntegrationSystemManager::IsSystemHealthy() const
+{
+    return bSystemInitialized && 
+           FailedModules.Num() == 0 && 
+           UnsatisfiedDependencies.Num() == 0 &&
+           TotalRegisteredModules > 0;
+}
+
+void UIntegrationSystemManager::InitializeAllModules()
+{
+    UE_LOG(LogTemp, Log, TEXT("IntegrationSystemManager: Initializing all modules..."));
+    
+    // Obter ordem de inicialização baseada em dependências
+    TArray<FString> InitOrder = GetModuleInitializationOrder();
+    
+    int32 InitializedCount = 0;
+    for (const FString& ModuleName : InitOrder)
+    {
+        UObject* ModuleInstance = GetModuleInstance(ModuleName);
+        if (ModuleInstance)
         {
-            // Check if it's a dinosaur (has "Dino" or "Rex" in name)
-            FString ActorName = Actor->GetName();
-            if (ActorName.Contains(TEXT("Dino")) || ActorName.Contains(TEXT("Rex")) || ActorName.Contains(TEXT("Raptor")))
+            // Tentar chamar método Initialize se existir
+            UFunction* InitFunction = ModuleInstance->GetClass()->FindFunctionByName(TEXT("Initialize"));
+            if (InitFunction)
             {
-                Inventory.DinosaurActors++;
-            }
-        }
-        
-        // Count components
-        if (Actor->FindComponentByClass<USkyAtmosphereComponent>())
-        {
-            Inventory.AtmosphereComponents++;
-        }
-        
-        if (Actor->FindComponentByClass<UExponentialHeightFogComponent>())
-        {
-            Inventory.FogComponents++;
-        }
-    }
-    
-    CachedInventory = Inventory;
-    return Inventory;
-}
-
-TArray<FInteg_SystemStatus> UIntegrationSystemManager::GetSystemStatuses()
-{
-    TArray<FInteg_SystemStatus> Statuses;
-    
-    for (auto& StatusPair : SystemStatuses)
-    {
-        Statuses.Add(StatusPair.Value);
-    }
-    
-    return Statuses;
-}
-
-bool UIntegrationSystemManager::IsSystemHealthy(const FString& SystemName)
-{
-    if (SystemStatuses.Contains(SystemName))
-    {
-        return SystemStatuses[SystemName].bIsHealthy;
-    }
-    
-    return false;
-}
-
-void UIntegrationSystemManager::ForceSystemValidation(const FString& SystemName)
-{
-    if (SystemName == TEXT("WorldGeneration"))
-    {
-        ValidateWorldGeneration();
-    }
-    else if (SystemName == TEXT("Characters"))
-    {
-        ValidateCharacterSystems();
-    }
-    else if (SystemName == TEXT("AI"))
-    {
-        ValidateAISystems();
-    }
-    else if (SystemName == TEXT("Lighting"))
-    {
-        ValidateLightingSystems();
-    }
-    else if (SystemName == TEXT("VFX"))
-    {
-        ValidateVFXSystems();
-    }
-}
-
-float UIntegrationSystemManager::GetCurrentFramerate()
-{
-    if (GEngine && GEngine->GetGameViewport())
-    {
-        return 1.0f / GEngine->GetGameViewport()->GetWorld()->GetDeltaSeconds();
-    }
-    
-    return AverageFramerate;
-}
-
-int32 UIntegrationSystemManager::GetActorCount()
-{
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return 0;
-    }
-    
-    int32 Count = 0;
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-    {
-        Count++;
-    }
-    
-    LastActorCount = Count;
-    return Count;
-}
-
-void UIntegrationSystemManager::OptimizeLevel()
-{
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return;
-    }
-    
-    float CurrentTime = World->GetTimeSeconds();
-    if (CurrentTime - LastOptimizationTime < 30.0f)
-    {
-        return; // Don't optimize too frequently
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("IntegrationSystemManager: Starting level optimization"));
-    
-    // Force garbage collection
-    GEngine->ForceGarbageCollection(true);
-    
-    // Cleanup duplicate actors
-    CleanupDuplicateActors();
-    
-    LastOptimizationTime = CurrentTime;
-    
-    UE_LOG(LogTemp, Warning, TEXT("IntegrationSystemManager: Level optimization complete"));
-}
-
-void UIntegrationSystemManager::ValidateWorldGeneration()
-{
-    FInteg_SystemStatus& Status = SystemStatuses[TEXT("WorldGeneration")];
-    Status.bIsHealthy = true;
-    Status.LastError = TEXT("");
-    Status.LastCheckTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
-    
-    // Basic world validation - check if we have terrain
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        Status.bIsHealthy = false;
-        Status.LastError = TEXT("No valid world");
-        return;
-    }
-    
-    // Check for landscape or terrain actors
-    bool bHasTerrain = false;
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-    {
-        AActor* Actor = *ActorItr;
-        if (Actor && (Actor->GetName().Contains(TEXT("Landscape")) || Actor->GetName().Contains(TEXT("Terrain"))))
-        {
-            bHasTerrain = true;
-            break;
-        }
-    }
-    
-    if (!bHasTerrain)
-    {
-        Status.bIsHealthy = false;
-        Status.LastError = TEXT("No terrain found");
-    }
-}
-
-void UIntegrationSystemManager::ValidateCharacterSystems()
-{
-    FInteg_SystemStatus& Status = SystemStatuses[TEXT("Characters")];
-    Status.bIsHealthy = true;
-    Status.LastError = TEXT("");
-    Status.LastCheckTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
-    
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        Status.bIsHealthy = false;
-        Status.LastError = TEXT("No valid world");
-        return;
-    }
-    
-    // Check for player start
-    bool bHasPlayerStart = false;
-    for (TActorIterator<APlayerStart> PlayerStartItr(World); PlayerStartItr; ++PlayerStartItr)
-    {
-        bHasPlayerStart = true;
-        break;
-    }
-    
-    if (!bHasPlayerStart)
-    {
-        Status.bIsHealthy = false;
-        Status.LastError = TEXT("No PlayerStart found");
-    }
-}
-
-void UIntegrationSystemManager::ValidateAISystems()
-{
-    FInteg_SystemStatus& Status = SystemStatuses[TEXT("AI")];
-    Status.bIsHealthy = true;
-    Status.LastError = TEXT("");
-    Status.LastCheckTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
-    
-    // AI validation - check for AI controllers
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        Status.bIsHealthy = false;
-        Status.LastError = TEXT("No valid world");
-        return;
-    }
-    
-    // Count AI controllers
-    int32 AIControllerCount = 0;
-    for (TActorIterator<AAIController> AIItr(World); AIItr; ++AIItr)
-    {
-        AIControllerCount++;
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("IntegrationSystemManager: Found %d AI controllers"), AIControllerCount);
-}
-
-void UIntegrationSystemManager::ValidateLightingSystems()
-{
-    FInteg_SystemStatus& Status = SystemStatuses[TEXT("Lighting")];
-    Status.bIsHealthy = true;
-    Status.LastError = TEXT("");
-    Status.LastCheckTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
-    
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        Status.bIsHealthy = false;
-        Status.LastError = TEXT("No valid world");
-        return;
-    }
-    
-    // Check for essential lighting
-    bool bHasDirectionalLight = false;
-    int32 DirectionalLightCount = 0;
-    
-    for (TActorIterator<ADirectionalLight> LightItr(World); LightItr; ++LightItr)
-    {
-        bHasDirectionalLight = true;
-        DirectionalLightCount++;
-    }
-    
-    if (!bHasDirectionalLight)
-    {
-        Status.bIsHealthy = false;
-        Status.LastError = TEXT("No directional light found");
-    }
-    else if (DirectionalLightCount > 1)
-    {
-        Status.bIsHealthy = false;
-        Status.LastError = FString::Printf(TEXT("Too many directional lights: %d"), DirectionalLightCount);
-    }
-}
-
-void UIntegrationSystemManager::ValidateVFXSystems()
-{
-    FInteg_SystemStatus& Status = SystemStatuses[TEXT("VFX")];
-    Status.bIsHealthy = true;
-    Status.LastError = TEXT("");
-    Status.LastCheckTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
-    
-    // VFX validation - basic check for now
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        Status.bIsHealthy = false;
-        Status.LastError = TEXT("No valid world");
-        return;
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("IntegrationSystemManager: VFX system validation complete"));
-}
-
-void UIntegrationSystemManager::CleanupLightingActors()
-{
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return;
-    }
-    
-    TArray<ADirectionalLight*> DirectionalLights;
-    
-    // Collect all directional lights
-    for (TActorIterator<ADirectionalLight> LightItr(World); LightItr; ++LightItr)
-    {
-        DirectionalLights.Add(*LightItr);
-    }
-    
-    // Keep only the first one, destroy the rest
-    if (DirectionalLights.Num() > 1)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("IntegrationSystemManager: Found %d directional lights, keeping 1"), DirectionalLights.Num());
-        
-        for (int32 i = 1; i < DirectionalLights.Num(); i++)
-        {
-            if (DirectionalLights[i])
-            {
-                DirectionalLights[i]->Destroy();
-                UE_LOG(LogTemp, Warning, TEXT("IntegrationSystemManager: Destroyed duplicate directional light"));
-            }
-        }
-    }
-}
-
-void UIntegrationSystemManager::CleanupAtmosphereActors()
-{
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return;
-    }
-    
-    TArray<AActor*> SkyLights;
-    TArray<AActor*> AtmosphereActors;
-    
-    // Collect sky lights and atmosphere actors
-    for (TActorIterator<ASkyLight> SkyLightItr(World); SkyLightItr; ++SkyLightItr)
-    {
-        SkyLights.Add(*SkyLightItr);
-    }
-    
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-    {
-        AActor* Actor = *ActorItr;
-        if (Actor && Actor->FindComponentByClass<USkyAtmosphereComponent>())
-        {
-            AtmosphereActors.Add(Actor);
-        }
-    }
-    
-    // Cleanup excess sky lights
-    if (SkyLights.Num() > 1)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("IntegrationSystemManager: Found %d sky lights, keeping 1"), SkyLights.Num());
-        
-        for (int32 i = 1; i < SkyLights.Num(); i++)
-        {
-            if (SkyLights[i])
-            {
-                SkyLights[i]->Destroy();
+                ModuleInstance->ProcessEvent(InitFunction, nullptr);
+                InitializedCount++;
+                UE_LOG(LogTemp, Log, TEXT("IntegrationSystemManager: Initialized module '%s'"), *ModuleName);
             }
         }
     }
     
-    // Cleanup excess atmosphere actors
-    if (AtmosphereActors.Num() > 1)
+    bSystemInitialized = (InitializedCount > 0);
+    UE_LOG(LogTemp, Log, TEXT("IntegrationSystemManager: Initialized %d modules"), InitializedCount);
+}
+
+void UIntegrationSystemManager::ShutdownAllModules()
+{
+    UE_LOG(LogTemp, Log, TEXT("IntegrationSystemManager: Shutting down all modules..."));
+    
+    int32 ShutdownCount = 0;
+    for (const auto& ModulePair : RegisteredModules)
     {
-        UE_LOG(LogTemp, Warning, TEXT("IntegrationSystemManager: Found %d atmosphere actors, keeping 1"), AtmosphereActors.Num());
-        
-        for (int32 i = 1; i < AtmosphereActors.Num(); i++)
+        UObject* ModuleInstance = ModulePair.Value;
+        if (ModuleInstance)
         {
-            if (AtmosphereActors[i])
+            // Tentar chamar método Shutdown se existir
+            UFunction* ShutdownFunction = ModuleInstance->GetClass()->FindFunctionByName(TEXT("Shutdown"));
+            if (ShutdownFunction)
             {
-                AtmosphereActors[i]->Destroy();
+                ModuleInstance->ProcessEvent(ShutdownFunction, nullptr);
+                ShutdownCount++;
+                UE_LOG(LogTemp, Log, TEXT("IntegrationSystemManager: Shutdown module '%s'"), *ModulePair.Key);
             }
         }
     }
+    
+    UE_LOG(LogTemp, Log, TEXT("IntegrationSystemManager: Shutdown %d modules"), ShutdownCount);
 }
 
-void UIntegrationSystemManager::ValidateEssentialActors()
+bool UIntegrationSystemManager::ValidateModule(const FString& ModuleName, UObject* ModuleInstance)
 {
-    UWorld* World = GetWorld();
-    if (!World)
+    if (!ModuleInstance)
     {
-        return;
+        return false;
     }
     
-    // Ensure we have essential actors
-    bool bHasPlayerStart = false;
-    
-    for (TActorIterator<APlayerStart> PlayerStartItr(World); PlayerStartItr; ++PlayerStartItr)
+    // Verificar se o módulo tem uma classe válida
+    UClass* ModuleClass = ModuleInstance->GetClass();
+    if (!ModuleClass)
     {
-        bHasPlayerStart = true;
-        break;
+        return false;
     }
     
-    if (!bHasPlayerStart)
+    // Verificar se o módulo não está corrompido
+    if (ModuleInstance->HasAnyFlags(RF_BeginDestroyed | RF_FinishDestroyed))
     {
-        UE_LOG(LogTemp, Error, TEXT("IntegrationSystemManager: No PlayerStart found - level may not be playable"));
+        return false;
     }
+    
+    return true;
 }
 
-void UIntegrationSystemManager::UpdatePerformanceMetrics()
+bool UIntegrationSystemManager::CheckModuleDependencies(const FString& ModuleName)
 {
-    UWorld* World = GetWorld();
-    if (!World)
+    // Definir dependências conhecidas entre módulos
+    static TMap<FString, TArray<FString>> ModuleDependencies = {
+        {TEXT("WorldGeneration"), {}},
+        {TEXT("Environment"), {TEXT("WorldGeneration")}},
+        {TEXT("Characters"), {TEXT("Environment")}},
+        {TEXT("AI"), {TEXT("Characters")}},
+        {TEXT("Combat"), {TEXT("AI"), TEXT("Characters")}},
+        {TEXT("Audio"), {TEXT("Environment")}},
+        {TEXT("VFX"), {TEXT("Environment")}},
+        {TEXT("QA"), {TEXT("Combat"), TEXT("AI"), TEXT("Audio"), TEXT("VFX")}}
+    };
+    
+    if (!ModuleDependencies.Contains(ModuleName))
     {
-        return;
+        // Módulo sem dependências conhecidas
+        return true;
     }
     
-    // Update framerate
-    float CurrentFramerate = GetCurrentFramerate();
-    AverageFramerate = (AverageFramerate * 0.9f) + (CurrentFramerate * 0.1f);
+    const TArray<FString>& Dependencies = ModuleDependencies[ModuleName];
+    for (const FString& Dependency : Dependencies)
+    {
+        if (!IsModuleRegistered(Dependency))
+        {
+            UnsatisfiedDependencies.AddUnique(FString::Printf(TEXT("%s requires %s"), *ModuleName, *Dependency));
+            return false;
+        }
+    }
     
-    // Update actor count
-    GetActorCount();
+    return true;
+}
+
+TArray<FString> UIntegrationSystemManager::GetModuleInitializationOrder()
+{
+    // Ordem de inicialização baseada em dependências
+    TArray<FString> InitOrder = {
+        TEXT("Core"),
+        TEXT("Physics"),
+        TEXT("WorldGeneration"),
+        TEXT("Environment"),
+        TEXT("Characters"),
+        TEXT("Animation"),
+        TEXT("AI"),
+        TEXT("Combat"),
+        TEXT("Audio"),
+        TEXT("VFX"),
+        TEXT("QA"),
+        TEXT("Integration")
+    };
     
-    UE_LOG(LogTemp, Log, TEXT("IntegrationSystemManager: Performance - FPS: %.1f, Actors: %d"), AverageFramerate, LastActorCount);
+    // Filtrar apenas módulos que estão registados
+    TArray<FString> FilteredOrder;
+    for (const FString& ModuleName : InitOrder)
+    {
+        if (IsModuleRegistered(ModuleName))
+        {
+            FilteredOrder.Add(ModuleName);
+        }
+    }
+    
+    return FilteredOrder;
 }
