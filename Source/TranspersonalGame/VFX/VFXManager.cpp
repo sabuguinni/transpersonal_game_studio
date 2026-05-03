@@ -1,366 +1,267 @@
 #include "VFXManager.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Kismet/GameplayStatics.h"
-#include "Components/AudioComponent.h"
-#include "Sound/SoundBase.h"
+#include "GameFramework/PlayerController.h"
+#include "GameFramework/Pawn.h"
+#include "Components/SceneComponent.h"
+#include "NiagaraFunctionLibrary.h"
 
-UVFX_Manager::UVFX_Manager()
+AVFX_Manager::AVFX_Manager()
 {
-    RainComponent = nullptr;
-    bIsRaining = false;
-}
+    PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.TickInterval = 0.1f; // Update LOD 10 times per second
 
-void UVFX_Manager::Initialize(FSubsystemCollectionBase& Collection)
-{
-    Super::Initialize(Collection);
-    
-    UE_LOG(LogTemp, Warning, TEXT("VFX Manager initialized"));
-    
-    InitializeVFXDatabase();
-}
-
-void UVFX_Manager::Deinitialize()
-{
-    // Clean up all active VFX
-    for (UNiagaraComponent* VFXComp : ActiveVFXComponents)
-    {
-        if (IsValid(VFXComp))
-        {
-            VFXComp->DestroyComponent();
-        }
-    }
-    
-    ActiveVFXComponents.Empty();
-    ActiveVFXByType.Empty();
-    
-    if (IsValid(RainComponent))
-    {
-        RainComponent->DestroyComponent();
-        RainComponent = nullptr;
-    }
-    
-    Super::Deinitialize();
-}
-
-void UVFX_Manager::InitializeVFXDatabase()
-{
-    // Initialize VFX database with realistic prehistoric effects
-    FVFX_EffectData CampfireData;
-    CampfireData.Duration = -1.0f; // Infinite duration
-    CampfireData.VolumeMultiplier = 0.8f;
-    VFXDatabase.Add(EVFX_EffectType::Fire_Campfire, CampfireData);
-    
+    // Set default VFX library entries
     FVFX_EffectData FootstepData;
     FootstepData.Duration = 2.0f;
-    FootstepData.VolumeMultiplier = 0.5f;
-    VFXDatabase.Add(EVFX_EffectType::Dust_Footstep, FootstepData);
-    
-    FVFX_EffectData RainData;
-    RainData.Duration = -1.0f; // Infinite duration
-    RainData.VolumeMultiplier = 0.7f;
-    VFXDatabase.Add(EVFX_EffectType::Water_Rain, RainData);
-    
+    FootstepData.Scale = FVector(1.0f, 1.0f, 0.5f);
+    VFXLibrary.Add(EDir_VFXType::Footstep, FootstepData);
+
+    FVFX_EffectData CampfireData;
+    CampfireData.Duration = -1.0f; // Infinite duration
+    CampfireData.bAutoDestroy = false;
+    CampfireData.Scale = FVector(1.5f, 1.5f, 2.0f);
+    VFXLibrary.Add(EDir_VFXType::Fire, CampfireData);
+
     FVFX_EffectData BloodData;
-    BloodData.Duration = 5.0f;
-    BloodData.VolumeMultiplier = 0.3f;
-    VFXDatabase.Add(EVFX_EffectType::Blood_Splatter, BloodData);
-    
-    FVFX_EffectData SmokeData;
-    SmokeData.Duration = 8.0f;
-    SmokeData.VolumeMultiplier = 0.4f;
-    VFXDatabase.Add(EVFX_EffectType::Smoke_Fire, SmokeData);
-    
-    UE_LOG(LogTemp, Warning, TEXT("VFX Database initialized with %d effects"), VFXDatabase.Num());
+    BloodData.Duration = 3.0f;
+    BloodData.Scale = FVector(0.8f, 0.8f, 0.8f);
+    VFXLibrary.Add(EDir_VFXType::Blood, BloodData);
+
+    FVFX_EffectData DustData;
+    DustData.Duration = 1.5f;
+    DustData.Scale = FVector(2.0f, 2.0f, 1.0f);
+    VFXLibrary.Add(EDir_VFXType::Dust, DustData);
 }
 
-UNiagaraComponent* UVFX_Manager::SpawnVFXAtLocation(EVFX_EffectType EffectType, const FVector& Location, const FRotator& Rotation, const FVector& Scale)
+void AVFX_Manager::BeginPlay()
 {
-    if (!VFXDatabase.Contains(EffectType))
+    Super::BeginPlay();
+    
+    UE_LOG(LogTemp, Log, TEXT("VFX Manager initialized with %d effect types"), VFXLibrary.Num());
+}
+
+void AVFX_Manager::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+
+    // Clean up finished effects
+    CleanupFinishedEffects();
+
+    // Update LOD based on player location
+    if (APlayerController* PC = GetWorld()->GetFirstPlayerController())
     {
-        UE_LOG(LogTemp, Warning, TEXT("VFX type not found in database"));
+        if (APawn* PlayerPawn = PC->GetPawn())
+        {
+            UpdateLOD(PlayerPawn->GetActorLocation());
+        }
+    }
+}
+
+UNiagaraComponent* AVFX_Manager::SpawnVFXAtLocation(EDir_VFXType VFXType, FVector Location, FRotator Rotation)
+{
+    if (!VFXLibrary.Contains(VFXType))
+    {
+        UE_LOG(LogTemp, Warning, TEXT("VFX type not found in library: %d"), (int32)VFXType);
         return nullptr;
     }
-    
-    const FVFX_EffectData& EffectData = VFXDatabase[EffectType];
+
+    // Check if we've reached the maximum number of active effects
+    if (ActiveEffects.Num() >= LODSettings.MaxActiveEffects)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Maximum active VFX effects reached (%d)"), LODSettings.MaxActiveEffects);
+        return nullptr;
+    }
+
+    const FVFX_EffectData& EffectData = VFXLibrary[VFXType];
     
     if (!EffectData.NiagaraSystem.IsValid())
     {
-        UE_LOG(LogTemp, Warning, TEXT("Niagara system not valid for effect type"));
-        return nullptr;
+        // Try to load the system if it's not loaded
+        UNiagaraSystem* LoadedSystem = EffectData.NiagaraSystem.LoadSynchronous();
+        if (!LoadedSystem)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Failed to load Niagara system for VFX type: %d"), (int32)VFXType);
+            return nullptr;
+        }
     }
-    
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return nullptr;
-    }
-    
+
     UNiagaraComponent* VFXComponent = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
-        World,
-        EffectData.NiagaraSystem.LoadSynchronous(),
+        GetWorld(),
+        EffectData.NiagaraSystem.Get(),
         Location,
         Rotation,
-        Scale,
-        true,
-        true,
-        ENCPoolMethod::None,
-        true
+        EffectData.Scale,
+        EffectData.bAutoDestroy
     );
-    
+
     if (VFXComponent)
     {
-        ActiveVFXComponents.Add(VFXComponent);
+        ActiveEffects.Add(VFXComponent);
         
-        if (!ActiveVFXByType.Contains(EffectType))
-        {
-            ActiveVFXByType.Add(EffectType, TArray<UNiagaraComponent*>());
-        }
-        ActiveVFXByType[EffectType].Add(VFXComponent);
-        
-        // Play associated sound
-        if (EffectData.Sound.IsValid())
-        {
-            PlayVFXSound(EffectData, Location);
-        }
-        
-        // Set auto-destroy timer if duration is specified
+        // Set duration if specified
         if (EffectData.Duration > 0.0f)
         {
-            FTimerHandle TimerHandle;
-            World->GetTimerManager().SetTimer(TimerHandle, [this, VFXComponent]()
-            {
-                StopVFX(VFXComponent);
-            }, EffectData.Duration, false);
+            VFXComponent->SetFloatParameter(TEXT("Duration"), EffectData.Duration);
         }
-        
+
         UE_LOG(LogTemp, Log, TEXT("Spawned VFX at location: %s"), *Location.ToString());
     }
-    
+
     return VFXComponent;
 }
 
-UNiagaraComponent* UVFX_Manager::SpawnVFXAttached(EVFX_EffectType EffectType, USceneComponent* AttachToComponent, FName AttachPointName, const FVector& Location, const FRotator& Rotation, const FVector& Scale)
+UNiagaraComponent* AVFX_Manager::SpawnVFXAttached(EDir_VFXType VFXType, USceneComponent* AttachComponent, FName SocketName)
 {
-    if (!IsValid(AttachToComponent))
+    if (!AttachComponent)
     {
+        UE_LOG(LogTemp, Warning, TEXT("Cannot spawn attached VFX: AttachComponent is null"));
         return nullptr;
     }
-    
-    if (!VFXDatabase.Contains(EffectType))
+
+    if (!VFXLibrary.Contains(VFXType))
     {
+        UE_LOG(LogTemp, Warning, TEXT("VFX type not found in library: %d"), (int32)VFXType);
         return nullptr;
     }
-    
-    const FVFX_EffectData& EffectData = VFXDatabase[EffectType];
-    
-    if (!EffectData.NiagaraSystem.IsValid())
+
+    // Check active effects limit
+    if (ActiveEffects.Num() >= LODSettings.MaxActiveEffects)
     {
+        UE_LOG(LogTemp, Warning, TEXT("Maximum active VFX effects reached (%d)"), LODSettings.MaxActiveEffects);
         return nullptr;
     }
+
+    const FVFX_EffectData& EffectData = VFXLibrary[VFXType];
     
     UNiagaraComponent* VFXComponent = UNiagaraFunctionLibrary::SpawnSystemAttached(
-        EffectData.NiagaraSystem.LoadSynchronous(),
-        AttachToComponent,
-        AttachPointName,
-        Location,
-        Rotation,
-        Scale,
+        EffectData.NiagaraSystem.Get(),
+        AttachComponent,
+        SocketName,
+        FVector::ZeroVector,
+        FRotator::ZeroRotator,
+        EffectData.Scale,
         EAttachLocation::KeepRelativeOffset,
-        true,
-        ENCPoolMethod::None,
-        true
+        EffectData.bAutoDestroy
     );
-    
+
     if (VFXComponent)
     {
-        ActiveVFXComponents.Add(VFXComponent);
+        ActiveEffects.Add(VFXComponent);
         
-        if (!ActiveVFXByType.Contains(EffectType))
+        if (EffectData.Duration > 0.0f)
         {
-            ActiveVFXByType.Add(EffectType, TArray<UNiagaraComponent*>());
+            VFXComponent->SetFloatParameter(TEXT("Duration"), EffectData.Duration);
         }
-        ActiveVFXByType[EffectType].Add(VFXComponent);
-        
-        UE_LOG(LogTemp, Log, TEXT("Spawned VFX attached to component"));
+
+        UE_LOG(LogTemp, Log, TEXT("Spawned attached VFX on component: %s"), *AttachComponent->GetName());
     }
-    
+
     return VFXComponent;
 }
 
-void UVFX_Manager::StopVFX(UNiagaraComponent* VFXComponent)
+void AVFX_Manager::StopVFX(UNiagaraComponent* VFXComponent)
 {
-    if (!IsValid(VFXComponent))
+    if (!VFXComponent)
     {
         return;
     }
-    
+
     VFXComponent->Deactivate();
-    ActiveVFXComponents.Remove(VFXComponent);
-    
-    // Remove from type tracking
-    for (auto& Pair : ActiveVFXByType)
-    {
-        Pair.Value.Remove(VFXComponent);
-    }
+    ActiveEffects.Remove(VFXComponent);
     
     UE_LOG(LogTemp, Log, TEXT("Stopped VFX component"));
 }
 
-void UVFX_Manager::StopAllVFXOfType(EVFX_EffectType EffectType)
+void AVFX_Manager::StopAllVFX()
 {
-    if (!ActiveVFXByType.Contains(EffectType))
+    for (UNiagaraComponent* Effect : ActiveEffects)
+    {
+        if (Effect && IsValid(Effect))
+        {
+            Effect->Deactivate();
+        }
+    }
+    
+    ActiveEffects.Empty();
+    UE_LOG(LogTemp, Log, TEXT("Stopped all VFX effects"));
+}
+
+int32 AVFX_Manager::GetActiveEffectCount() const
+{
+    return ActiveEffects.Num();
+}
+
+void AVFX_Manager::UpdateLOD(FVector ViewerLocation)
+{
+    for (int32 i = ActiveEffects.Num() - 1; i >= 0; --i)
+    {
+        UNiagaraComponent* Effect = ActiveEffects[i];
+        if (!Effect || !IsValid(Effect))
+        {
+            ActiveEffects.RemoveAt(i);
+            continue;
+        }
+
+        float Distance = CalculateDistanceToViewer(Effect->GetComponentLocation());
+        ApplyLODToEffect(Effect, Distance);
+    }
+}
+
+void AVFX_Manager::CleanupFinishedEffects()
+{
+    for (int32 i = ActiveEffects.Num() - 1; i >= 0; --i)
+    {
+        UNiagaraComponent* Effect = ActiveEffects[i];
+        if (!Effect || !IsValid(Effect) || !Effect->IsActive())
+        {
+            ActiveEffects.RemoveAt(i);
+        }
+    }
+}
+
+float AVFX_Manager::CalculateDistanceToViewer(FVector EffectLocation) const
+{
+    if (APlayerController* PC = GetWorld()->GetFirstPlayerController())
+    {
+        if (APawn* PlayerPawn = PC->GetPawn())
+        {
+            return FVector::Dist(PlayerPawn->GetActorLocation(), EffectLocation);
+        }
+    }
+    
+    return 0.0f;
+}
+
+void AVFX_Manager::ApplyLODToEffect(UNiagaraComponent* Effect, float Distance)
+{
+    if (!Effect)
     {
         return;
     }
-    
-    TArray<UNiagaraComponent*>& TypeComponents = ActiveVFXByType[EffectType];
-    
-    for (UNiagaraComponent* VFXComp : TypeComponents)
-    {
-        if (IsValid(VFXComp))
-        {
-            VFXComp->Deactivate();
-            ActiveVFXComponents.Remove(VFXComp);
-        }
-    }
-    
-    TypeComponents.Empty();
-    
-    UE_LOG(LogTemp, Log, TEXT("Stopped all VFX of specified type"));
-}
 
-void UVFX_Manager::StartRainEffect(float Intensity)
-{
-    if (bIsRaining)
+    // Apply LOD based on distance
+    if (Distance <= LODSettings.HighQualityDistance)
     {
-        StopRainEffect();
+        // High quality - full particles
+        Effect->SetFloatParameter(TEXT("ParticleCount"), 1.0f);
+        Effect->SetFloatParameter(TEXT("QualityLevel"), 3.0f);
     }
-    
-    UWorld* World = GetWorld();
-    if (!World)
+    else if (Distance <= LODSettings.MediumQualityDistance)
     {
-        return;
+        // Medium quality - reduced particles
+        Effect->SetFloatParameter(TEXT("ParticleCount"), 0.6f);
+        Effect->SetFloatParameter(TEXT("QualityLevel"), 2.0f);
     }
-    
-    // Spawn rain VFX above the player
-    APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(World, 0);
-    if (PlayerPawn)
+    else if (Distance <= LODSettings.LowQualityDistance)
     {
-        FVector RainLocation = PlayerPawn->GetActorLocation() + FVector(0, 0, 2000);
-        RainComponent = SpawnVFXAtLocation(EVFX_EffectType::Water_Rain, RainLocation);
-        
-        if (RainComponent)
-        {
-            // Set rain intensity parameter
-            RainComponent->SetFloatParameter(FName("Intensity"), Intensity);
-            bIsRaining = true;
-            
-            UE_LOG(LogTemp, Log, TEXT("Started rain effect with intensity: %f"), Intensity);
-        }
+        // Low quality - minimal particles
+        Effect->SetFloatParameter(TEXT("ParticleCount"), 0.3f);
+        Effect->SetFloatParameter(TEXT("QualityLevel"), 1.0f);
     }
-}
-
-void UVFX_Manager::StopRainEffect()
-{
-    if (IsValid(RainComponent))
+    else
     {
-        StopVFX(RainComponent);
-        RainComponent = nullptr;
+        // Too far - deactivate
+        Effect->Deactivate();
     }
-    
-    bIsRaining = false;
-    UE_LOG(LogTemp, Log, TEXT("Stopped rain effect"));
-}
-
-void UVFX_Manager::CreateFootstepDust(const FVector& Location, float Intensity)
-{
-    UNiagaraComponent* DustVFX = SpawnVFXAtLocation(EVFX_EffectType::Dust_Footstep, Location);
-    
-    if (DustVFX)
-    {
-        DustVFX->SetFloatParameter(FName("Intensity"), Intensity);
-        UE_LOG(LogTemp, Log, TEXT("Created footstep dust at: %s"), *Location.ToString());
-    }
-}
-
-void UVFX_Manager::CreateBloodSplatter(const FVector& Location, const FVector& Direction, float Amount)
-{
-    UNiagaraComponent* BloodVFX = SpawnVFXAtLocation(EVFX_EffectType::Blood_Splatter, Location);
-    
-    if (BloodVFX)
-    {
-        BloodVFX->SetVectorParameter(FName("Direction"), Direction);
-        BloodVFX->SetFloatParameter(FName("Amount"), Amount);
-        UE_LOG(LogTemp, Log, TEXT("Created blood splatter at: %s"), *Location.ToString());
-    }
-}
-
-UNiagaraComponent* UVFX_Manager::CreateCampfire(const FVector& Location)
-{
-    UNiagaraComponent* FireVFX = SpawnVFXAtLocation(EVFX_EffectType::Fire_Campfire, Location);
-    
-    if (FireVFX)
-    {
-        UE_LOG(LogTemp, Log, TEXT("Created campfire at: %s"), *Location.ToString());
-    }
-    
-    return FireVFX;
-}
-
-void UVFX_Manager::ExtinguishFire(UNiagaraComponent* FireComponent)
-{
-    if (IsValid(FireComponent))
-    {
-        // Gradually reduce fire intensity before stopping
-        FireComponent->SetFloatParameter(FName("Intensity"), 0.0f);
-        
-        // Stop after a brief delay to show extinguishing effect
-        UWorld* World = GetWorld();
-        if (World)
-        {
-            FTimerHandle TimerHandle;
-            World->GetTimerManager().SetTimer(TimerHandle, [this, FireComponent]()
-            {
-                StopVFX(FireComponent);
-            }, 2.0f, false);
-        }
-        
-        UE_LOG(LogTemp, Log, TEXT("Extinguishing fire"));
-    }
-}
-
-void UVFX_Manager::CleanupInactiveVFX()
-{
-    ActiveVFXComponents.RemoveAll([](UNiagaraComponent* VFXComp)
-    {
-        return !IsValid(VFXComp) || !VFXComp->IsActive();
-    });
-    
-    for (auto& Pair : ActiveVFXByType)
-    {
-        Pair.Value.RemoveAll([](UNiagaraComponent* VFXComp)
-        {
-            return !IsValid(VFXComp) || !VFXComp->IsActive();
-        });
-    }
-}
-
-UAudioComponent* UVFX_Manager::PlayVFXSound(const FVFX_EffectData& EffectData, const FVector& Location)
-{
-    UWorld* World = GetWorld();
-    if (!World || !EffectData.Sound.IsValid())
-    {
-        return nullptr;
-    }
-    
-    UAudioComponent* AudioComp = UGameplayStatics::SpawnSoundAtLocation(
-        World,
-        EffectData.Sound.LoadSynchronous(),
-        Location,
-        FRotator::ZeroRotator,
-        EffectData.VolumeMultiplier
-    );
-    
-    return AudioComp;
 }
