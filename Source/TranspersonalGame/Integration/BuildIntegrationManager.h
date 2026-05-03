@@ -1,98 +1,99 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/GameInstanceSubsystem.h"
+#include "Components/ActorComponent.h"
 #include "Engine/World.h"
-#include "../SharedTypes.h"
 #include "BuildIntegrationManager.generated.h"
 
 /**
- * Build Integration Manager - Handles cross-module integration and validation
- * Ensures all game systems work together correctly
+ * Build Integration Manager
+ * Responsável por validar o estado de integração do projecto:
+ * - Verificar se todos os módulos C++ compilam correctamente
+ * - Validar o estado do MinPlayableMap
+ * - Detectar duplicados de actores de lighting
+ * - Gerar relatórios de integração
+ * - Limpar problemas de integração automaticamente
  */
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UBuildIntegrationManager : public UGameInstanceSubsystem
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UBuildIntegrationManager : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
     UBuildIntegrationManager();
 
-    // USubsystem interface
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
+protected:
+    virtual void BeginPlay() override;
 
-    // Integration validation
+public:
+    /** Validar o estado actual do mapa */
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool ValidateAllSystems();
-
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool ValidateWorldState();
-
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool ValidateCharacterSystems();
-
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool ValidateAISystems();
-
-    // Build management
-    UFUNCTION(BlueprintCallable, Category = "Build")
-    void GenerateBuildReport();
-
-    UFUNCTION(BlueprintCallable, Category = "Build")
-    bool CheckModuleDependencies();
-
-    UFUNCTION(BlueprintCallable, Category = "Build")
-    void CleanupDuplicateActors();
-
-    // System status
-    UPROPERTY(BlueprintReadOnly, Category = "Status")
-    bool bAllSystemsValid;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Status")
-    bool bWorldStateValid;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Status")
-    bool bCharacterSystemsValid;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Status")
-    bool bAISystemsValid;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Status")
-    int32 TotalActorsInLevel;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Status")
-    int32 DuplicateActorsFound;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Status")
-    FString LastValidationResult;
-
-    // Integration events
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnValidationComplete, bool, bSuccess);
-    UPROPERTY(BlueprintAssignable, Category = "Events")
-    FOnValidationComplete OnValidationComplete;
-
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBuildReportGenerated, const FString&, ReportPath);
-    UPROPERTY(BlueprintAssignable, Category = "Events")
-    FOnBuildReportGenerated OnBuildReportGenerated;
-
-private:
-    // Internal validation helpers
-    bool ValidateActorCounts();
-    bool ValidateLightingSetup();
-    bool ValidateTerrainSetup();
-    bool ValidatePlayerSetup();
-    bool ValidateDinosaurSetup();
-
-    // Cleanup helpers
-    void RemoveDuplicateLightingActors();
-    void RemoveDuplicateAtmosphereActors();
-
-    // Validation state
-    TArray<FString> ValidationErrors;
-    TArray<FString> ValidationWarnings;
+    void ValidateMapState();
     
-    // Actor tracking
-    TMap<FString, int32> ActorCountsByType;
-    TArray<AActor*> DuplicateActors;
+    /** Validar se os módulos C++ estão carregados correctamente */
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void ValidateCppModules();
+    
+    /** Gerar relatório completo de integração */
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void GenerateIntegrationReport();
+    
+    /** Verificar se a integração está saudável */
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Integration")
+    bool IsIntegrationHealthy() const;
+    
+    /** Limpar duplicados de lighting automaticamente */
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void CleanupDuplicateLighting();
+    
+    /** Obter status de integração como string */
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Integration")
+    FString GetIntegrationStatus() const;
+
+protected:
+    /** Validar actores de lighting no mundo */
+    void ValidateLightingActors(UWorld* World);
+    
+    /** Validar actores C++ no mapa */
+    void ValidateCppActors(const TArray<AActor*>& AllActors);
+    
+    /** Validar GameMode */
+    void ValidateGameMode(UWorld* World);
+
+public:
+    /** Total de actores no mapa */
+    UPROPERTY(BlueprintReadOnly, Category = "Integration Stats")
+    int32 TotalActorsInMap;
+    
+    /** Número de actores C++ no mapa */
+    UPROPERTY(BlueprintReadOnly, Category = "Integration Stats")
+    int32 CppActorsCount;
+    
+    /** Número de actores de lighting */
+    UPROPERTY(BlueprintReadOnly, Category = "Integration Stats")
+    int32 LightingActorsCount;
+    
+    /** Se a compilação foi bem-sucedida */
+    UPROPERTY(BlueprintReadOnly, Category = "Integration Stats")
+    bool bCompilationSuccess;
+    
+    /** Se a validação do mapa passou */
+    UPROPERTY(BlueprintReadOnly, Category = "Integration Stats")
+    bool bMapValidationPassed;
+    
+    /** Lista de classes C++ carregadas com sucesso */
+    UPROPERTY(BlueprintReadOnly, Category = "Integration Stats")
+    TArray<FString> LoadedCppClasses;
+    
+    /** Lista de classes C++ que falharam ao carregar */
+    UPROPERTY(BlueprintReadOnly, Category = "Integration Stats")
+    TArray<FString> FailedCppClasses;
+    
+    /** Lista de duplicados de lighting encontrados */
+    UPROPERTY(BlueprintReadOnly, Category = "Integration Stats")
+    TArray<FString> DuplicateLightingActors;
+    
+    /** Lista de erros de validação */
+    UPROPERTY(BlueprintReadOnly, Category = "Integration Stats")
+    TArray<FString> ValidationErrors;
 };
