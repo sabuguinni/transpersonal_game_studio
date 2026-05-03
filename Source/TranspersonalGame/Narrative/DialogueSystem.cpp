@@ -1,394 +1,391 @@
 #include "DialogueSystem.h"
+#include "Components/AudioComponent.h"
+#include "Sound/SoundWave.h"
 #include "Engine/Engine.h"
-#include "Engine/World.h"
-#include "GameFramework/Actor.h"
-#include "../Quest/QuestManager.h"
+#include "Kismet/GameplayStatics.h"
+#include "TranspersonalGameState.h"
 
-// UDialogueDataAsset Implementation
-FNarr_DialogueTree UDialogueDataAsset::GetDialogueTree(const FString& DialogueID) const
+ANarr_DialogueSystem::ANarr_DialogueSystem()
 {
-    for (const FNarr_DialogueTree& Tree : DialogueTrees)
-    {
-        if (Tree.DialogueID == DialogueID)
-        {
-            return Tree;
-        }
-    }
-    return FNarr_DialogueTree();
+    PrimaryActorTick.bCanEverTick = true;
+
+    // Create audio component for dialogue playback
+    DialogueAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("DialogueAudioComponent"));
+    RootComponent = DialogueAudioComponent;
+
+    // Initialize dialogue state
+    bIsPlayingDialogue = false;
+    CurrentDialogueTime = 0.0f;
+    LastKnownBiome = EEng_BiomeType::Forest;
+    LastKnownWeather = EEng_WeatherType::Clear;
+    LastKnownTimeOfDay = EEng_TimeOfDay::Morning;
+
+    // Configure audio component
+    DialogueAudioComponent->bAutoActivate = false;
+    DialogueAudioComponent->SetVolumeMultiplier(0.8f);
 }
 
-bool UDialogueDataAsset::HasDialogueTree(const FString& DialogueID) const
+void ANarr_DialogueSystem::BeginPlay()
 {
-    for (const FNarr_DialogueTree& Tree : DialogueTrees)
-    {
-        if (Tree.DialogueID == DialogueID)
-        {
-            return true;
-        }
-    }
-    return false;
-}
-
-// UDialogueComponent Implementation
-UDialogueComponent::UDialogueComponent()
-{
-    PrimaryComponentTick.bCanEverTick = false;
+    Super::BeginPlay();
     
-    DialogueData = nullptr;
-    DefaultDialogueID = TEXT("default_greeting");
-    NPCType = ENarr_NPCType::Tribal_Elder;
-    InteractionRange = 300.0f;
-    
-    bIsDialogueActive = false;
-    CurrentPlayer = nullptr;
-    CurrentDialogueID = TEXT("");
-    CurrentNodeID = TEXT("");
-}
-
-bool UDialogueComponent::StartDialogue(const FString& DialogueID, AActor* PlayerActor)
-{
-    if (!DialogueData || !PlayerActor)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("DialogueComponent: Cannot start dialogue - missing data or player"));
-        return false;
-    }
-
-    if (bIsDialogueActive)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("DialogueComponent: Dialogue already active"));
-        return false;
-    }
-
-    FNarr_DialogueTree DialogueTree = DialogueData->GetDialogueTree(DialogueID);
-    if (DialogueTree.DialogueID.IsEmpty())
-    {
-        UE_LOG(LogTemp, Warning, TEXT("DialogueComponent: Dialogue tree not found: %s"), *DialogueID);
-        return false;
-    }
-
-    CurrentDialogueID = DialogueID;
-    CurrentNodeID = DialogueTree.StartNodeID;
-    CurrentPlayer = PlayerActor;
-    bIsDialogueActive = true;
-
-    // Notify dialogue manager
-    if (UDialogueManager* DialogueManager = GetWorld()->GetGameInstance()->GetSubsystem<UDialogueManager>())
-    {
-        DialogueManager->OnDialogueStarted.Broadcast(DialogueID);
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("DialogueComponent: Started dialogue %s"), *DialogueID);
-    return true;
-}
-
-bool UDialogueComponent::EndDialogue()
-{
-    if (!bIsDialogueActive)
-    {
-        return false;
-    }
-
-    FString EndedDialogueID = CurrentDialogueID;
-    
-    CurrentDialogueID = TEXT("");
-    CurrentNodeID = TEXT("");
-    CurrentPlayer = nullptr;
-    bIsDialogueActive = false;
-
-    // Notify dialogue manager
-    if (UDialogueManager* DialogueManager = GetWorld()->GetGameInstance()->GetSubsystem<UDialogueManager>())
-    {
-        DialogueManager->OnDialogueEnded.Broadcast(EndedDialogueID);
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("DialogueComponent: Ended dialogue %s"), *EndedDialogueID);
-    return true;
-}
-
-bool UDialogueComponent::SelectChoice(int32 ChoiceIndex)
-{
-    if (!bIsDialogueActive || !DialogueData)
-    {
-        return false;
-    }
-
-    FNarr_DialogueNode CurrentNode = GetCurrentNode();
-    if (CurrentNode.NodeID.IsEmpty())
-    {
-        UE_LOG(LogTemp, Warning, TEXT("DialogueComponent: Current node not found"));
-        return false;
-    }
-
-    if (!CurrentNode.Choices.IsValidIndex(ChoiceIndex))
-    {
-        UE_LOG(LogTemp, Warning, TEXT("DialogueComponent: Invalid choice index %d"), ChoiceIndex);
-        return false;
-    }
-
-    const FNarr_DialogueChoice& SelectedChoice = CurrentNode.Choices[ChoiceIndex];
-    
-    // Check if choice is available
-    if (!IsChoiceAvailable(SelectedChoice))
-    {
-        UE_LOG(LogTemp, Warning, TEXT("DialogueComponent: Choice not available"));
-        return false;
-    }
-
-    // Notify dialogue manager
-    if (UDialogueManager* DialogueManager = GetWorld()->GetGameInstance()->GetSubsystem<UDialogueManager>())
-    {
-        DialogueManager->OnDialogueChoiceSelected.Broadcast(CurrentDialogueID, ChoiceIndex);
-    }
-
-    // Move to next node or end dialogue
-    if (SelectedChoice.NextNodeID.IsEmpty())
-    {
-        return EndDialogue();
-    }
-    else
-    {
-        CurrentNodeID = SelectedChoice.NextNodeID;
-        
-        // Check if new node is an end node
-        FNarr_DialogueNode NextNode = FindNodeByID(CurrentNodeID);
-        if (NextNode.bIsEndNode)
-        {
-            return EndDialogue();
-        }
-    }
-
-    return true;
-}
-
-FNarr_DialogueNode UDialogueComponent::GetCurrentNode() const
-{
-    if (!DialogueData || CurrentNodeID.IsEmpty())
-    {
-        return FNarr_DialogueNode();
-    }
-
-    return FindNodeByID(CurrentNodeID);
-}
-
-bool UDialogueComponent::IsInDialogue() const
-{
-    return bIsDialogueActive;
-}
-
-bool UDialogueComponent::CanInteract(AActor* PlayerActor) const
-{
-    if (!PlayerActor || !GetOwner())
-    {
-        return false;
-    }
-
-    float Distance = FVector::Dist(GetOwner()->GetActorLocation(), PlayerActor->GetActorLocation());
-    return Distance <= InteractionRange;
-}
-
-bool UDialogueComponent::IsChoiceAvailable(const FNarr_DialogueChoice& Choice) const
-{
-    if (!CurrentPlayer)
-    {
-        return false;
-    }
-
-    // Check quest requirements
-    if (Choice.RequiredQuests.Num() > 0)
-    {
-        if (UQuestManager* QuestManager = GetWorld()->GetGameInstance()->GetSubsystem<UQuestManager>())
-        {
-            for (const FString& QuestID : Choice.RequiredQuests)
-            {
-                if (!QuestManager->IsQuestCompleted(QuestID))
-                {
-                    return false;
-                }
-            }
-        }
-    }
-
-    // Check item requirements
-    if (Choice.bRequiresItem && !Choice.RequiredItemType.IsEmpty())
-    {
-        // TODO: Implement inventory system check
-        // For now, assume item is available
-    }
-
-    return true;
-}
-
-FNarr_DialogueNode UDialogueComponent::FindNodeByID(const FString& NodeID) const
-{
-    if (!DialogueData)
-    {
-        return FNarr_DialogueNode();
-    }
-
-    FNarr_DialogueTree DialogueTree = DialogueData->GetDialogueTree(CurrentDialogueID);
-    for (const FNarr_DialogueNode& Node : DialogueTree.Nodes)
-    {
-        if (Node.NodeID == NodeID)
-        {
-            return Node;
-        }
-    }
-
-    return FNarr_DialogueNode();
-}
-
-// UDialogueManager Implementation
-UDialogueManager::UDialogueManager()
-{
-}
-
-void UDialogueManager::Initialize(FSubsystemCollectionBase& Collection)
-{
-    Super::Initialize(Collection);
-    
+    // Initialize default dialogues and load database
     InitializeDefaultDialogues();
+    LoadDialogueDatabase();
     
-    UE_LOG(LogTemp, Log, TEXT("DialogueManager: Initialized with %d dialogue data assets"), DialogueDataAssets.Num());
+    UE_LOG(LogTemp, Log, TEXT("DialogueSystem: Initialized with %d dialogue entries"), DialogueDatabase.Num());
 }
 
-void UDialogueManager::Deinitialize()
+void ANarr_DialogueSystem::Tick(float DeltaTime)
 {
-    DialogueDataAssets.Empty();
+    Super::Tick(DeltaTime);
     
-    Super::Deinitialize();
-}
-
-void UDialogueManager::RegisterDialogueData(UDialogueDataAsset* DialogueData)
-{
-    if (!DialogueData)
+    // Update dialogue cooldowns
+    UpdateCooldowns(DeltaTime);
+    
+    // Track current dialogue time
+    if (bIsPlayingDialogue)
     {
-        UE_LOG(LogTemp, Warning, TEXT("DialogueManager: Cannot register null dialogue data"));
+        CurrentDialogueTime += DeltaTime;
+        
+        // Check if current dialogue should finish
+        if (CurrentDialogueTime >= CurrentDialogue.Duration)
+        {
+            OnDialogueFinished();
+        }
+    }
+}
+
+void ANarr_DialogueSystem::TriggerDialogue(const FString& DialogueID)
+{
+    if (!CanPlayDialogue(DialogueID))
+    {
         return;
     }
 
-    FString AssetName = DialogueData->GetName();
-    DialogueDataAssets.Add(AssetName, DialogueData);
+    FNarr_DialogueEntry FoundDialogue = GetDialogueEntry(DialogueID);
+    if (FoundDialogue.DialogueID.IsEmpty())
+    {
+        UE_LOG(LogTemp, Warning, TEXT("DialogueSystem: Dialogue ID '%s' not found"), *DialogueID);
+        return;
+    }
+
+    // Stop current dialogue if playing
+    if (bIsPlayingDialogue)
+    {
+        StopCurrentDialogue();
+    }
+
+    // Start new dialogue
+    CurrentDialogue = FoundDialogue;
+    bIsPlayingDialogue = true;
+    CurrentDialogueTime = 0.0f;
+
+    // Play audio if available
+    if (!CurrentDialogue.AudioFilePath.IsEmpty())
+    {
+        PlayDialogueAudio(CurrentDialogue.AudioFilePath);
+    }
+
+    // Set cooldown
+    DialogueCooldowns.Add(DialogueID, CurrentDialogue.RepeatCooldown);
+
+    UE_LOG(LogTemp, Log, TEXT("DialogueSystem: Playing dialogue '%s' by %s"), 
+           *CurrentDialogue.DialogueID, *CurrentDialogue.SpeakerName);
+}
+
+void ANarr_DialogueSystem::TriggerDialogueByType(ENarr_DialogueType DialogueType, EEng_BiomeType CurrentBiome)
+{
+    TArray<FNarr_DialogueEntry> CandidateDialogues;
     
-    UE_LOG(LogTemp, Log, TEXT("DialogueManager: Registered dialogue data asset: %s"), *AssetName);
-}
-
-UDialogueDataAsset* UDialogueManager::GetDialogueData(const FString& DataAssetName) const
-{
-    if (UDialogueDataAsset* const* FoundData = DialogueDataAssets.Find(DataAssetName))
+    // Find dialogues matching type and biome
+    for (const FNarr_DialogueEntry& Entry : DialogueDatabase)
     {
-        return *FoundData;
-    }
-    return nullptr;
-}
-
-void UDialogueManager::CreateSurvivalDialogue(const FString& DialogueID, ENarr_NPCType NPCType, const FString& QuestID)
-{
-    // Create a basic survival dialogue tree
-    FNarr_DialogueTree NewDialogue;
-    NewDialogue.DialogueID = DialogueID;
-    NewDialogue.NPCType = NPCType;
-    NewDialogue.bRepeatable = true;
-    NewDialogue.StartNodeID = TEXT("greeting");
-
-    // Create greeting node
-    FNarr_DialogueNode GreetingNode;
-    GreetingNode.NodeID = TEXT("greeting");
-    GreetingNode.bIsEndNode = false;
-
-    switch (NPCType)
-    {
-        case ENarr_NPCType::Tribal_Elder:
-            GreetingNode.SpeakerName = FText::FromString(TEXT("Tribal Elder"));
-            GreetingNode.DialogueText = FText::FromString(TEXT("Young one, the wilderness tests us all. What wisdom do you seek?"));
-            NewDialogue.DialogueTitle = FText::FromString(TEXT("Elder's Wisdom"));
-            break;
-            
-        case ENarr_NPCType::Experienced_Hunter:
-            GreetingNode.SpeakerName = FText::FromString(TEXT("Hunter"));
-            GreetingNode.DialogueText = FText::FromString(TEXT("The hunt calls, survivor. Are you ready to face the beasts?"));
-            NewDialogue.DialogueTitle = FText::FromString(TEXT("Hunter's Challenge"));
-            break;
-            
-        case ENarr_NPCType::Wise_Explorer:
-            GreetingNode.SpeakerName = FText::FromString(TEXT("Explorer"));
-            GreetingNode.DialogueText = FText::FromString(TEXT("The paths ahead are treacherous. Let me share what I have learned."));
-            NewDialogue.DialogueTitle = FText::FromString(TEXT("Explorer's Knowledge"));
-            break;
-            
-        default:
-            GreetingNode.SpeakerName = FText::FromString(TEXT("Survivor"));
-            GreetingNode.DialogueText = FText::FromString(TEXT("Stay strong. The world is harsh, but we endure."));
-            NewDialogue.DialogueTitle = FText::FromString(TEXT("Survivor's Words"));
-            break;
+        if (Entry.DialogueType == DialogueType && 
+            (Entry.RequiredBiome == CurrentBiome || Entry.RequiredBiome == EEng_BiomeType::Forest) &&
+            CanPlayDialogue(Entry.DialogueID))
+        {
+            CandidateDialogues.Add(Entry);
+        }
     }
 
-    // Add choices
-    FNarr_DialogueChoice LearnChoice;
-    LearnChoice.ChoiceText = FText::FromString(TEXT("Tell me about the dangers here."));
-    LearnChoice.NextNodeID = TEXT("dangers");
-
-    FNarr_DialogueChoice QuestChoice;
-    QuestChoice.ChoiceText = FText::FromString(TEXT("Do you have work for me?"));
-    QuestChoice.NextNodeID = TEXT("quest_offer");
-
-    FNarr_DialogueChoice FarewellChoice;
-    FarewellChoice.ChoiceText = FText::FromString(TEXT("I must go."));
-    FarewellChoice.NextNodeID = TEXT("");
-
-    GreetingNode.Choices.Add(LearnChoice);
-    GreetingNode.Choices.Add(QuestChoice);
-    GreetingNode.Choices.Add(FarewellChoice);
-
-    NewDialogue.Nodes.Add(GreetingNode);
-
-    // Create dangers node
-    FNarr_DialogueNode DangersNode;
-    DangersNode.NodeID = TEXT("dangers");
-    DangersNode.SpeakerName = GreetingNode.SpeakerName;
-    DangersNode.DialogueText = FText::FromString(TEXT("The great beasts rule these lands. Thunder Walkers in the valleys, Swift Death in the forests, and the Gentle Giants on the plains. Each has their territory and their ways."));
-    DangersNode.bIsEndNode = true;
-
-    NewDialogue.Nodes.Add(DangersNode);
-
-    // Create quest offer node
-    FNarr_DialogueNode QuestNode;
-    QuestNode.NodeID = TEXT("quest_offer");
-    QuestNode.SpeakerName = GreetingNode.SpeakerName;
-    QuestNode.DialogueText = FText::FromString(TEXT("There is always work for those brave enough. Prove yourself, and greater challenges await."));
-    QuestNode.bIsEndNode = true;
-
-    NewDialogue.Nodes.Add(QuestNode);
-
-    UE_LOG(LogTemp, Log, TEXT("DialogueManager: Created survival dialogue %s for NPC type %d"), *DialogueID, (int32)NPCType);
+    if (CandidateDialogues.Num() > 0)
+    {
+        FNarr_DialogueEntry SelectedDialogue = SelectBestDialogue(CandidateDialogues);
+        TriggerDialogue(SelectedDialogue.DialogueID);
+    }
 }
 
-void UDialogueManager::CreateQuestDialogue(const FString& DialogueID, const FString& QuestID, ENarr_NPCType NPCType)
+void ANarr_DialogueSystem::TriggerDinosaurDialogue(EEng_DinosaurSpecies DinosaurSpecies, float Distance)
 {
-    CreateSurvivalDialogue(DialogueID, NPCType, QuestID);
-    UE_LOG(LogTemp, Log, TEXT("DialogueManager: Created quest dialogue %s for quest %s"), *DialogueID, *QuestID);
+    TArray<FNarr_DialogueEntry> CandidateDialogues;
+    
+    // Find dialogues related to this dinosaur species
+    for (const FNarr_DialogueEntry& Entry : DialogueDatabase)
+    {
+        if (Entry.RelatedDinosaur == DinosaurSpecies && 
+            Distance <= Entry.TriggerRadius &&
+            CanPlayDialogue(Entry.DialogueID))
+        {
+            CandidateDialogues.Add(Entry);
+        }
+    }
+
+    if (CandidateDialogues.Num() > 0)
+    {
+        FNarr_DialogueEntry SelectedDialogue = SelectBestDialogue(CandidateDialogues);
+        TriggerDialogue(SelectedDialogue.DialogueID);
+    }
 }
 
-void UDialogueManager::InitializeDefaultDialogues()
+void ANarr_DialogueSystem::StopCurrentDialogue()
 {
-    CreateElderDialogues();
-    CreateHunterDialogues();
-    CreateExplorerDialogues();
+    if (bIsPlayingDialogue)
+    {
+        bIsPlayingDialogue = false;
+        CurrentDialogueTime = 0.0f;
+        DialogueAudioComponent->Stop();
+        
+        UE_LOG(LogTemp, Log, TEXT("DialogueSystem: Stopped dialogue '%s'"), *CurrentDialogue.DialogueID);
+    }
 }
 
-void UDialogueManager::CreateElderDialogues()
+bool ANarr_DialogueSystem::IsDialoguePlaying() const
 {
-    CreateSurvivalDialogue(TEXT("elder_default"), ENarr_NPCType::Tribal_Elder);
-    CreateQuestDialogue(TEXT("elder_gathering_quest"), TEXT("gather_basic_materials"), ENarr_NPCType::Tribal_Elder);
+    return bIsPlayingDialogue;
 }
 
-void UDialogueManager::CreateHunterDialogues()
+void ANarr_DialogueSystem::LoadDialogueDatabase()
 {
-    CreateSurvivalDialogue(TEXT("hunter_default"), ENarr_NPCType::Experienced_Hunter);
-    CreateQuestDialogue(TEXT("hunter_combat_quest"), TEXT("hunt_small_prey"), ENarr_NPCType::Experienced_Hunter);
+    // In a full implementation, this would load from a data table or external file
+    // For now, we use the initialized default dialogues
+    UE_LOG(LogTemp, Log, TEXT("DialogueSystem: Database loaded with %d entries"), DialogueDatabase.Num());
 }
 
-void UDialogueManager::CreateExplorerDialogues()
+void ANarr_DialogueSystem::AddDialogueEntry(const FNarr_DialogueEntry& NewEntry)
 {
-    CreateSurvivalDialogue(TEXT("explorer_default"), ENarr_NPCType::Wise_Explorer);
-    CreateQuestDialogue(TEXT("explorer_territory_quest"), TEXT("explore_safe_territory"), ENarr_NPCType::Wise_Explorer);
+    DialogueDatabase.Add(NewEntry);
+    UE_LOG(LogTemp, Log, TEXT("DialogueSystem: Added dialogue entry '%s'"), *NewEntry.DialogueID);
+}
+
+FNarr_DialogueEntry ANarr_DialogueSystem::GetDialogueEntry(const FString& DialogueID)
+{
+    for (const FNarr_DialogueEntry& Entry : DialogueDatabase)
+    {
+        if (Entry.DialogueID == DialogueID)
+        {
+            return Entry;
+        }
+    }
+    
+    // Return empty entry if not found
+    return FNarr_DialogueEntry();
+}
+
+void ANarr_DialogueSystem::CheckProximityTriggers(const FVector& PlayerLocation)
+{
+    // This would be called by the game state or player controller
+    // to check for proximity-based dialogue triggers
+    
+    // Implementation would check distance to known threat locations,
+    // dinosaur positions, resource nodes, etc.
+}
+
+void ANarr_DialogueSystem::OnBiomeChanged(EEng_BiomeType NewBiome)
+{
+    if (NewBiome != LastKnownBiome)
+    {
+        LastKnownBiome = NewBiome;
+        TriggerDialogueByType(ENarr_DialogueType::EnvironmentalAlert, NewBiome);
+    }
+}
+
+void ANarr_DialogueSystem::OnDinosaurDetected(EEng_DinosaurSpecies Species, float Distance, const FVector& DinosaurLocation)
+{
+    // Trigger appropriate warning or observation dialogue
+    TriggerDinosaurDialogue(Species, Distance);
+}
+
+void ANarr_DialogueSystem::OnWeatherChanged(EEng_WeatherType NewWeather)
+{
+    if (NewWeather != LastKnownWeather)
+    {
+        LastKnownWeather = NewWeather;
+        TriggerDialogueByType(ENarr_DialogueType::EnvironmentalAlert, LastKnownBiome);
+    }
+}
+
+void ANarr_DialogueSystem::OnTimeOfDayChanged(EEng_TimeOfDay NewTimeOfDay)
+{
+    if (NewTimeOfDay != LastKnownTimeOfDay)
+    {
+        LastKnownTimeOfDay = NewTimeOfDay;
+        
+        // Trigger time-specific dialogues (dawn warnings, night safety tips, etc.)
+        if (NewTimeOfDay == EEng_TimeOfDay::Dusk || NewTimeOfDay == EEng_TimeOfDay::Night)
+        {
+            TriggerDialogueByType(ENarr_DialogueType::SafetyProtocol, LastKnownBiome);
+        }
+    }
+}
+
+void ANarr_DialogueSystem::OnHealthCritical(float HealthPercentage)
+{
+    if (HealthPercentage <= 25.0f)
+    {
+        TriggerDialogueByType(ENarr_DialogueType::SurvivalTip, LastKnownBiome);
+    }
+}
+
+void ANarr_DialogueSystem::PlayDialogueAudio(const FString& AudioFilePath)
+{
+    // In a full implementation, this would load and play the audio file
+    // For now, we just simulate audio playback
+    DialogueAudioComponent->Play();
+    
+    UE_LOG(LogTemp, Log, TEXT("DialogueSystem: Playing audio '%s'"), *AudioFilePath);
+}
+
+void ANarr_DialogueSystem::OnDialogueFinished()
+{
+    bIsPlayingDialogue = false;
+    CurrentDialogueTime = 0.0f;
+    DialogueAudioComponent->Stop();
+    
+    UE_LOG(LogTemp, Log, TEXT("DialogueSystem: Finished dialogue '%s'"), *CurrentDialogue.DialogueID);
+}
+
+bool ANarr_DialogueSystem::CanPlayDialogue(const FString& DialogueID)
+{
+    // Check if dialogue is on cooldown
+    if (DialogueCooldowns.Contains(DialogueID))
+    {
+        float* CooldownTime = DialogueCooldowns.Find(DialogueID);
+        if (CooldownTime && *CooldownTime > 0.0f)
+        {
+            return false;
+        }
+    }
+    
+    // Don't interrupt high-priority dialogues
+    if (bIsPlayingDialogue && CurrentDialogue.Priority >= 5)
+    {
+        return false;
+    }
+    
+    return true;
+}
+
+void ANarr_DialogueSystem::UpdateCooldowns(float DeltaTime)
+{
+    TArray<FString> KeysToRemove;
+    
+    for (auto& CooldownPair : DialogueCooldowns)
+    {
+        CooldownPair.Value -= DeltaTime;
+        if (CooldownPair.Value <= 0.0f)
+        {
+            KeysToRemove.Add(CooldownPair.Key);
+        }
+    }
+    
+    // Remove expired cooldowns
+    for (const FString& Key : KeysToRemove)
+    {
+        DialogueCooldowns.Remove(Key);
+    }
+}
+
+FNarr_DialogueEntry ANarr_DialogueSystem::SelectBestDialogue(const TArray<FNarr_DialogueEntry>& CandidateDialogues)
+{
+    if (CandidateDialogues.Num() == 0)
+    {
+        return FNarr_DialogueEntry();
+    }
+    
+    // Sort by priority (higher priority first)
+    TArray<FNarr_DialogueEntry> SortedDialogues = CandidateDialogues;
+    SortedDialogues.Sort([](const FNarr_DialogueEntry& A, const FNarr_DialogueEntry& B) {
+        return A.Priority > B.Priority;
+    });
+    
+    return SortedDialogues[0];
+}
+
+void ANarr_DialogueSystem::InitializeDefaultDialogues()
+{
+    // Initialize with practical survival-focused dialogues
+    
+    // T-Rex warnings
+    FNarr_DialogueEntry TRexWarning;
+    TRexWarning.DialogueID = "TREX_PROXIMITY_WARNING";
+    TRexWarning.DialogueType = ENarr_DialogueType::TacticalWarning;
+    TRexWarning.SpeakerName = "Tactical Narrator";
+    TRexWarning.DialogueText = "Attention, survivor. You've entered a critical zone. The large predator ahead is a T-Rex - apex hunter of this territory. Stay low, move slowly, and avoid direct eye contact.";
+    TRexWarning.Duration = 15.0f;
+    TRexWarning.TriggerType = ENarr_DialogueTrigger::DinosaurSighting;
+    TRexWarning.RelatedDinosaur = EEng_DinosaurSpecies::TRex;
+    TRexWarning.TriggerRadius = 2000.0f;
+    TRexWarning.Priority = 10;
+    TRexWarning.bCanRepeat = true;
+    TRexWarning.RepeatCooldown = 600.0f; // 10 minutes
+    DialogueDatabase.Add(TRexWarning);
+    
+    // Raptor pack warning
+    FNarr_DialogueEntry RaptorWarning;
+    RaptorWarning.DialogueID = "RAPTOR_PACK_WARNING";
+    RaptorWarning.DialogueType = ENarr_DialogueType::TacticalWarning;
+    RaptorWarning.SpeakerName = "Field Researcher";
+    RaptorWarning.DialogueText = "Field research log, day 127. The pack dynamics I'm observing are extremely sophisticated. Velociraptors use coordinated flanking maneuvers. If you see one, assume there are others nearby.";
+    RaptorWarning.Duration = 16.0f;
+    RaptorWarning.TriggerType = ENarr_DialogueTrigger::DinosaurSighting;
+    RaptorWarning.RelatedDinosaur = EEng_DinosaurSpecies::Raptor;
+    RaptorWarning.TriggerRadius = 1500.0f;
+    RaptorWarning.Priority = 8;
+    RaptorWarning.bCanRepeat = true;
+    RaptorWarning.RepeatCooldown = 450.0f;
+    DialogueDatabase.Add(RaptorWarning);
+    
+    // Herbivore migration alert
+    FNarr_DialogueEntry HerbivoreAlert;
+    HerbivoreAlert.DialogueID = "HERBIVORE_MIGRATION_ALERT";
+    HerbivoreAlert.DialogueType = ENarr_DialogueType::SafetyProtocol;
+    HerbivoreAlert.SpeakerName = "Safety Protocol";
+    HerbivoreAlert.DialogueText = "Critical alert! Detected movement of herbivore herd heading towards your position. Brachiosaurus in seasonal migration. Despite being peaceful, their size poses trampling danger. Seek elevated shelter immediately.";
+    HerbivoreAlert.Duration = 18.0f;
+    HerbivoreAlert.TriggerType = ENarr_DialogueTrigger::DinosaurSighting;
+    HerbivoreAlert.RelatedDinosaur = EEng_DinosaurSpecies::Brachiosaurus;
+    HerbivoreAlert.TriggerRadius = 3000.0f;
+    HerbivoreAlert.Priority = 7;
+    HerbivoreAlert.bCanRepeat = true;
+    HerbivoreAlert.RepeatCooldown = 800.0f;
+    DialogueDatabase.Add(HerbivoreAlert);
+    
+    // Biome entry - Swamp
+    FNarr_DialogueEntry SwampEntry;
+    SwampEntry.DialogueID = "SWAMP_BIOME_ENTRY";
+    SwampEntry.DialogueType = ENarr_DialogueType::EnvironmentalAlert;
+    SwampEntry.SpeakerName = "Environmental Monitor";
+    SwampEntry.DialogueText = "Environmental alert: Entering swampland territory. High humidity detected. Watch for unstable ground, stagnant water, and increased insect activity. Visibility is reduced - predators use this to their advantage.";
+    SwampEntry.Duration = 14.0f;
+    SwampEntry.TriggerType = ENarr_DialogueTrigger::BiomeEntry;
+    SwampEntry.RequiredBiome = EEng_BiomeType::Swamp;
+    SwampEntry.Priority = 5;
+    SwampEntry.bCanRepeat = false;
+    DialogueDatabase.Add(SwampEntry);
+    
+    // Night safety protocol
+    FNarr_DialogueEntry NightSafety;
+    NightSafety.DialogueID = "NIGHT_SAFETY_PROTOCOL";
+    NightSafety.DialogueType = ENarr_DialogueType::SafetyProtocol;
+    NightSafety.SpeakerName = "Survival Instructor";
+    NightSafety.DialogueText = "Night protocol activated. Nocturnal predators are now active. Find secure shelter, maintain fire if possible, and avoid unnecessary movement. Your survival depends on staying hidden until dawn.";
+    NightSafety.Duration = 13.0f;
+    NightSafety.TriggerType = ENarr_DialogueTrigger::TimeOfDay;
+    NightSafety.Priority = 6;
+    NightSafety.bCanRepeat = true;
+    NightSafety.RepeatCooldown = 1200.0f; // 20 minutes
+    DialogueDatabase.Add(NightSafety);
+    
+    UE_LOG(LogTemp, Log, TEXT("DialogueSystem: Initialized %d default dialogues"), DialogueDatabase.Num());
 }
