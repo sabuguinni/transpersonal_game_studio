@@ -1,252 +1,318 @@
 #include "BuildIntegrationManager.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "HAL/PlatformFilemanager.h"
+#include "HAL/FileManager.h"
 #include "Misc/Paths.h"
-#include "Misc/FileHelper.h"
 #include "Misc/DateTime.h"
-#include "SharedTypes.h"
+#include "Engine/GameInstance.h"
+#include "TranspersonalGame/SharedTypes.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogBuildIntegration, Log, All);
 
 UBuildIntegrationManager::UBuildIntegrationManager()
 {
     PrimaryComponentTick.bCanEverTick = false;
+    bWantsInitializeComponent = true;
     
-    // Inicializar estado de integração
-    IntegrationState = EBuild_IntegrationState::Idle;
-    LastValidationTime = FDateTime::MinValue();
-    ValidationIntervalSeconds = 300.0f; // 5 minutos
+    // Configuração inicial
+    BuildVersion = TEXT("1.0.0");
+    LastBuildTime = FDateTime::Now();
+    bIsValidBuild = false;
     
-    // Configurar validações críticas
-    CriticalValidations.Add(TEXT("ModuleCompilation"));
-    CriticalValidations.Add(TEXT("ActorSpawning"));
-    CriticalValidations.Add(TEXT("BiomeDistribution"));
-    CriticalValidations.Add(TEXT("LightingSetup"));
+    // Inicializar contadores
+    TotalModules = 0;
+    CompiledModules = 0;
+    FailedModules = 0;
     
-    UE_LOG(LogBuildIntegration, Log, TEXT("BuildIntegrationManager inicializado"));
+    // Configurar validação
+    bValidateOnStartup = true;
+    bAutoFixErrors = false;
+    MaxValidationTime = 30.0f;
+}
+
+void UBuildIntegrationManager::InitializeComponent()
+{
+    Super::InitializeComponent();
+    
+    UE_LOG(LogBuildIntegration, Log, TEXT("BuildIntegrationManager initialized"));
+    
+    if (bValidateOnStartup)
+    {
+        // Agendar validação para próximo tick
+        GetWorld()->GetTimerManager().SetTimerForNextTick(this, &UBuildIntegrationManager::ValidateBuildIntegrity);
+    }
 }
 
 void UBuildIntegrationManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Executar validação inicial
-    PerformIntegrationValidation();
+    // Registar este manager globalmente
+    if (UGameInstance* GameInstance = GetWorld()->GetGameInstance())
+    {
+        // Guardar referência no GameInstance para acesso global
+        GameInstance->GetSubsystem<UBuildIntegrationManager>();
+    }
+    
+    UE_LOG(LogBuildIntegration, Log, TEXT("BuildIntegrationManager started - Version: %s"), *BuildVersion);
 }
 
-bool UBuildIntegrationManager::ValidateModuleIntegrity()
+bool UBuildIntegrationManager::ValidateBuildIntegrity()
 {
-    UE_LOG(LogBuildIntegration, Log, TEXT("Validando integridade dos módulos..."));
+    UE_LOG(LogBuildIntegration, Log, TEXT("Starting build integrity validation..."));
     
-    // Verificar se classes críticas estão carregadas
-    TArray<FString> CriticalClasses = {
-        TEXT("/Script/TranspersonalGame.TranspersonalCharacter"),
-        TEXT("/Script/TranspersonalGame.TranspersonalGameState"),
-        TEXT("/Script/TranspersonalGame.PCGWorldGenerator"),
-        TEXT("/Script/TranspersonalGame.FoliageManager")
+    float StartTime = FPlatformTime::Seconds();
+    bool bValidationSuccess = true;
+    
+    // Reset contadores
+    TotalModules = 0;
+    CompiledModules = 0;
+    FailedModules = 0;
+    ValidationErrors.Empty();
+    
+    // 1. Verificar módulos core
+    bValidationSuccess &= ValidateCoreModules();
+    
+    // 2. Verificar dependências
+    bValidationSuccess &= ValidateModuleDependencies();
+    
+    // 3. Verificar assets críticos
+    bValidationSuccess &= ValidateCriticalAssets();
+    
+    // 4. Verificar configurações
+    bValidationSuccess &= ValidateGameConfiguration();
+    
+    float EndTime = FPlatformTime::Seconds();
+    float ValidationTime = EndTime - StartTime;
+    
+    bIsValidBuild = bValidationSuccess;
+    LastValidationTime = ValidationTime;
+    
+    UE_LOG(LogBuildIntegration, Log, TEXT("Build validation completed in %.2fs - Success: %s"), 
+           ValidationTime, bValidationSuccess ? TEXT("YES") : TEXT("NO"));
+    
+    if (!bValidationSuccess)
+    {
+        UE_LOG(LogBuildIntegration, Error, TEXT("Build validation failed with %d errors"), ValidationErrors.Num());
+        for (const FString& Error : ValidationErrors)
+        {
+            UE_LOG(LogBuildIntegration, Error, TEXT("  - %s"), *Error);
+        }
+        
+        if (bAutoFixErrors)
+        {
+            AttemptAutoFix();
+        }
+    }
+    
+    // Broadcast resultado
+    OnBuildValidationComplete.Broadcast(bValidationSuccess, ValidationErrors);
+    
+    return bValidationSuccess;
+}
+
+bool UBuildIntegrationManager::ValidateCoreModules()
+{
+    UE_LOG(LogBuildIntegration, Log, TEXT("Validating core modules..."));
+    
+    bool bSuccess = true;
+    TotalModules = 0;
+    CompiledModules = 0;
+    
+    // Lista de módulos críticos que devem existir
+    TArray<FString> CoreModules = {
+        TEXT("TranspersonalGame"),
+        TEXT("Engine"),
+        TEXT("Core"),
+        TEXT("CoreUObject"),
+        TEXT("UnrealEd")
     };
     
-    int32 LoadedClasses = 0;
-    for (const FString& ClassName : CriticalClasses)
+    for (const FString& ModuleName : CoreModules)
     {
-        UClass* LoadedClass = LoadClass<UObject>(nullptr, *ClassName);
-        if (LoadedClass)
+        TotalModules++;
+        
+        // Verificar se módulo está carregado
+        if (FModuleManager::Get().IsModuleLoaded(*ModuleName))
         {
-            LoadedClasses++;
-            UE_LOG(LogBuildIntegration, Log, TEXT("✅ Classe carregada: %s"), *ClassName);
+            CompiledModules++;
+            UE_LOG(LogBuildIntegration, Verbose, TEXT("Module loaded: %s"), *ModuleName);
         }
         else
         {
-            UE_LOG(LogBuildIntegration, Error, TEXT("❌ Falha ao carregar: %s"), *ClassName);
+            FailedModules++;
+            FString Error = FString::Printf(TEXT("Core module not loaded: %s"), *ModuleName);
+            ValidationErrors.Add(Error);
+            bSuccess = false;
+            UE_LOG(LogBuildIntegration, Error, TEXT("%s"), *Error);
         }
     }
     
-    bool bModulesValid = (LoadedClasses == CriticalClasses.Num());
-    UE_LOG(LogBuildIntegration, Log, TEXT("Módulos válidos: %d/%d"), LoadedClasses, CriticalClasses.Num());
-    
-    return bModulesValid;
+    return bSuccess;
 }
 
-bool UBuildIntegrationManager::ValidateMapActors()
+bool UBuildIntegrationManager::ValidateModuleDependencies()
 {
-    UE_LOG(LogBuildIntegration, Log, TEXT("Validando actores do MinPlayableMap..."));
+    UE_LOG(LogBuildIntegration, Log, TEXT("Validating module dependencies..."));
     
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        UE_LOG(LogBuildIntegration, Error, TEXT("Mundo não encontrado"));
-        return false;
-    }
+    bool bSuccess = true;
     
-    // Contar actores por tipo
-    int32 LightingActors = 0;
-    int32 TerrainActors = 0;
-    int32 DinosaurActors = 0;
-    int32 PlayerStarts = 0;
-    
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-    {
-        AActor* Actor = *ActorItr;
-        if (!Actor) continue;
-        
-        FString ActorClass = Actor->GetClass()->GetName();
-        
-        if (ActorClass.Contains(TEXT("Light")) || ActorClass.Contains(TEXT("Sky")))
-        {
-            LightingActors++;
-        }
-        else if (ActorClass.Contains(TEXT("Landscape")) || ActorClass.Contains(TEXT("Terrain")))
-        {
-            TerrainActors++;
-        }
-        else if (ActorClass.Contains(TEXT("Dinosaur")) || ActorClass.Contains(TEXT("Pawn")))
-        {
-            DinosaurActors++;
-        }
-        else if (ActorClass.Contains(TEXT("PlayerStart")))
-        {
-            PlayerStarts++;
-        }
-    }
-    
-    UE_LOG(LogBuildIntegration, Log, TEXT("Actores de iluminação: %d"), LightingActors);
-    UE_LOG(LogBuildIntegration, Log, TEXT("Actores de terreno: %d"), TerrainActors);
-    UE_LOG(LogBuildIntegration, Log, TEXT("Dinossauros: %d"), DinosaurActors);
-    UE_LOG(LogBuildIntegration, Log, TEXT("PlayerStarts: %d"), PlayerStarts);
-    
-    // Validar requisitos mínimos
-    bool bMapValid = (LightingActors > 0 && TerrainActors > 0 && PlayerStarts > 0);
-    
-    if (bMapValid)
-    {
-        UE_LOG(LogBuildIntegration, Log, TEXT("✅ MinPlayableMap válido"));
-    }
-    else
-    {
-        UE_LOG(LogBuildIntegration, Error, TEXT("❌ MinPlayableMap inválido - faltam actores críticos"));
-    }
-    
-    return bMapValid;
-}
-
-bool UBuildIntegrationManager::ValidateBiomeDistribution()
-{
-    UE_LOG(LogBuildIntegration, Log, TEXT("Validando distribuição de biomas..."));
-    
-    // Coordenadas dos 5 biomas conforme memória crítica
-    TArray<FBuild_BiomeZone> BiomeZones = {
-        {TEXT("Pantano"), FVector(-50000, -45000, 0), FVector2D(-77500, -25000), FVector2D(-76500, -15000)},
-        {TEXT("Floresta"), FVector(-45000, 40000, 0), FVector2D(-77500, -15000), FVector2D(15000, 76500)},
-        {TEXT("Savana"), FVector(0, 0, 0), FVector2D(-20000, 20000), FVector2D(-20000, 20000)},
-        {TEXT("Deserto"), FVector(55000, 0, 0), FVector2D(25000, 79500), FVector2D(-30000, 30000)},
-        {TEXT("Montanha"), FVector(40000, 50000, 500), FVector2D(15000, 79500), FVector2D(20000, 76500)}
+    // Verificar dependências críticas do TranspersonalGame
+    TArray<FString> RequiredDependencies = {
+        TEXT("Engine"),
+        TEXT("CoreUObject"),
+        TEXT("Slate"),
+        TEXT("SlateCore"),
+        TEXT("UMG"),
+        TEXT("AIModule"),
+        TEXT("NavigationSystem"),
+        TEXT("Niagara"),
+        TEXT("Chaos")
     };
     
-    UWorld* World = GetWorld();
-    if (!World) return false;
-    
-    // Verificar se existem actores em cada bioma
-    int32 ValidBiomes = 0;
-    
-    for (const FBuild_BiomeZone& Biome : BiomeZones)
+    for (const FString& Dependency : RequiredDependencies)
     {
-        int32 ActorsInBiome = 0;
-        
-        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+        if (!FModuleManager::Get().IsModuleLoaded(*Dependency))
         {
-            AActor* Actor = *ActorItr;
-            if (!Actor) continue;
-            
-            FVector ActorLocation = Actor->GetActorLocation();
-            
-            // Verificar se actor está dentro da zona do bioma
-            if (ActorLocation.X >= Biome.XRange.X && ActorLocation.X <= Biome.XRange.Y &&
-                ActorLocation.Y >= Biome.YRange.X && ActorLocation.Y <= Biome.YRange.Y)
-            {
-                ActorsInBiome++;
-            }
-        }
-        
-        if (ActorsInBiome > 0)
-        {
-            ValidBiomes++;
-            UE_LOG(LogBuildIntegration, Log, TEXT("✅ Bioma %s: %d actores"), *Biome.Name, ActorsInBiome);
-        }
-        else
-        {
-            UE_LOG(LogBuildIntegration, Warning, TEXT("⚠️ Bioma %s: sem actores"), *Biome.Name);
+            FString Error = FString::Printf(TEXT("Required dependency not loaded: %s"), *Dependency);
+            ValidationErrors.Add(Error);
+            bSuccess = false;
         }
     }
     
-    bool bBiomesValid = (ValidBiomes >= 3); // Pelo menos 3 biomas devem ter actores
-    UE_LOG(LogBuildIntegration, Log, TEXT("Biomas válidos: %d/5"), ValidBiomes);
-    
-    return bBiomesValid;
+    return bSuccess;
 }
 
-void UBuildIntegrationManager::PerformIntegrationValidation()
+bool UBuildIntegrationManager::ValidateCriticalAssets()
 {
-    UE_LOG(LogBuildIntegration, Log, TEXT("=== VALIDAÇÃO DE INTEGRAÇÃO INICIADA ==="));
+    UE_LOG(LogBuildIntegration, Log, TEXT("Validating critical assets..."));
     
-    IntegrationState = EBuild_IntegrationState::Validating;
+    bool bSuccess = true;
     
-    // Executar todas as validações críticas
-    bool bModulesValid = ValidateModuleIntegrity();
-    bool bMapValid = ValidateMapActors();
-    bool bBiomesValid = ValidateBiomeDistribution();
-    
-    // Determinar estado final
-    if (bModulesValid && bMapValid && bBiomesValid)
+    // Verificar se MinPlayableMap existe
+    FString MapPath = TEXT("/Game/Maps/MinPlayableMap");
+    if (!FPaths::FileExists(FPaths::ProjectContentDir() + TEXT("Maps/MinPlayableMap.umap")))
     {
-        IntegrationState = EBuild_IntegrationState::Healthy;
-        UE_LOG(LogBuildIntegration, Log, TEXT("✅ INTEGRAÇÃO SAUDÁVEL - Todas as validações passaram"));
-    }
-    else
-    {
-        IntegrationState = EBuild_IntegrationState::Error;
-        UE_LOG(LogBuildIntegration, Error, TEXT("❌ INTEGRAÇÃO COM PROBLEMAS"));
-        
-        if (!bModulesValid) UE_LOG(LogBuildIntegration, Error, TEXT("  - Módulos com problemas"));
-        if (!bMapValid) UE_LOG(LogBuildIntegration, Error, TEXT("  - Mapa com problemas"));
-        if (!bBiomesValid) UE_LOG(LogBuildIntegration, Error, TEXT("  - Biomas com problemas"));
+        FString Error = TEXT("Critical asset missing: MinPlayableMap");
+        ValidationErrors.Add(Error);
+        bSuccess = false;
     }
     
-    LastValidationTime = FDateTime::Now();
+    // Verificar GameMode
+    UClass* GameModeClass = LoadClass<AGameModeBase>(nullptr, TEXT("/Script/TranspersonalGame.TranspersonalGameMode"));
+    if (!GameModeClass)
+    {
+        FString Error = TEXT("Critical class missing: TranspersonalGameMode");
+        ValidationErrors.Add(Error);
+        bSuccess = false;
+    }
     
-    // Gerar relatório de integração
-    GenerateIntegrationReport();
+    // Verificar Character
+    UClass* CharacterClass = LoadClass<APawn>(nullptr, TEXT("/Script/TranspersonalGame.TranspersonalCharacter"));
+    if (!CharacterClass)
+    {
+        FString Error = TEXT("Critical class missing: TranspersonalCharacter");
+        ValidationErrors.Add(Error);
+        bSuccess = false;
+    }
     
-    UE_LOG(LogBuildIntegration, Log, TEXT("=== VALIDAÇÃO DE INTEGRAÇÃO CONCLUÍDA ==="));
+    return bSuccess;
 }
 
-void UBuildIntegrationManager::GenerateIntegrationReport()
+bool UBuildIntegrationManager::ValidateGameConfiguration()
 {
-    FString ReportContent = TEXT("=== RELATÓRIO DE INTEGRAÇÃO ===\n");
-    ReportContent += FString::Printf(TEXT("Data: %s\n"), *FDateTime::Now().ToString());
-    ReportContent += FString::Printf(TEXT("Estado: %s\n"), 
-        IntegrationState == EBuild_IntegrationState::Healthy ? TEXT("SAUDÁVEL") : TEXT("COM PROBLEMAS"));
+    UE_LOG(LogBuildIntegration, Log, TEXT("Validating game configuration..."));
     
-    ReportContent += TEXT("\nValidações executadas:\n");
-    for (const FString& Validation : CriticalValidations)
+    bool bSuccess = true;
+    
+    // Verificar configurações básicas do projecto
+    if (GetWorld())
     {
-        ReportContent += FString::Printf(TEXT("- %s\n"), *Validation);
+        AGameModeBase* GameMode = GetWorld()->GetAuthGameMode();
+        if (!GameMode)
+        {
+            FString Error = TEXT("No GameMode set for current world");
+            ValidationErrors.Add(Error);
+            bSuccess = false;
+        }
     }
     
-    // Guardar relatório em ficheiro
-    FString ReportPath = FPaths::ProjectLogDir() / TEXT("IntegrationReport.txt");
+    return bSuccess;
+}
+
+void UBuildIntegrationManager::AttemptAutoFix()
+{
+    UE_LOG(LogBuildIntegration, Log, TEXT("Attempting auto-fix of validation errors..."));
+    
+    // Por agora, apenas log dos erros
+    // Auto-fix pode ser implementado no futuro
+    for (const FString& Error : ValidationErrors)
+    {
+        UE_LOG(LogBuildIntegration, Warning, TEXT("Auto-fix needed for: %s"), *Error);
+    }
+}
+
+void UBuildIntegrationManager::GenerateBuildReport()
+{
+    UE_LOG(LogBuildIntegration, Log, TEXT("Generating build report..."));
+    
+    FString ReportContent;
+    ReportContent += FString::Printf(TEXT("=== BUILD INTEGRATION REPORT ===\n"));
+    ReportContent += FString::Printf(TEXT("Build Version: %s\n"), *BuildVersion);
+    ReportContent += FString::Printf(TEXT("Build Time: %s\n"), *LastBuildTime.ToString());
+    ReportContent += FString::Printf(TEXT("Validation Time: %.2fs\n"), LastValidationTime);
+    ReportContent += FString::Printf(TEXT("Build Valid: %s\n"), bIsValidBuild ? TEXT("YES") : TEXT("NO"));
+    ReportContent += FString::Printf(TEXT("\n"));
+    
+    ReportContent += FString::Printf(TEXT("=== MODULE STATUS ===\n"));
+    ReportContent += FString::Printf(TEXT("Total Modules: %d\n"), TotalModules);
+    ReportContent += FString::Printf(TEXT("Compiled Modules: %d\n"), CompiledModules);
+    ReportContent += FString::Printf(TEXT("Failed Modules: %d\n"), FailedModules);
+    ReportContent += FString::Printf(TEXT("\n"));
+    
+    if (ValidationErrors.Num() > 0)
+    {
+        ReportContent += FString::Printf(TEXT("=== VALIDATION ERRORS ===\n"));
+        for (int32 i = 0; i < ValidationErrors.Num(); i++)
+        {
+            ReportContent += FString::Printf(TEXT("%d. %s\n"), i + 1, *ValidationErrors[i]);
+        }
+    }
+    
+    // Guardar relatório
+    FString ReportPath = FPaths::ProjectLogDir() + TEXT("BuildIntegrationReport.txt");
     FFileHelper::SaveStringToFile(ReportContent, *ReportPath);
     
-    UE_LOG(LogBuildIntegration, Log, TEXT("Relatório guardado em: %s"), *ReportPath);
+    UE_LOG(LogBuildIntegration, Log, TEXT("Build report saved to: %s"), *ReportPath);
 }
 
-EBuild_IntegrationState UBuildIntegrationManager::GetIntegrationState() const
+FString UBuildIntegrationManager::GetBuildStatus() const
 {
-    return IntegrationState;
+    if (bIsValidBuild)
+    {
+        return FString::Printf(TEXT("VALID - %d/%d modules OK"), CompiledModules, TotalModules);
+    }
+    else
+    {
+        return FString::Printf(TEXT("INVALID - %d errors, %d failed modules"), ValidationErrors.Num(), FailedModules);
+    }
 }
 
-bool UBuildIntegrationManager::IsValidationRequired() const
+void UBuildIntegrationManager::SetBuildVersion(const FString& NewVersion)
 {
-    FTimespan TimeSinceValidation = FDateTime::Now() - LastValidationTime;
-    return TimeSinceValidation.GetTotalSeconds() > ValidationIntervalSeconds;
+    BuildVersion = NewVersion;
+    LastBuildTime = FDateTime::Now();
+    
+    UE_LOG(LogBuildIntegration, Log, TEXT("Build version updated to: %s"), *BuildVersion);
+}
+
+bool UBuildIntegrationManager::IsModuleLoaded(const FString& ModuleName) const
+{
+    return FModuleManager::Get().IsModuleLoaded(*ModuleName);
+}
+
+void UBuildIntegrationManager::ForceRevalidation()
+{
+    UE_LOG(LogBuildIntegration, Log, TEXT("Forcing build revalidation..."));
+    ValidateBuildIntegrity();
 }
