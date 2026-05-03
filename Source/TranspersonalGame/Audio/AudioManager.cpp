@@ -1,499 +1,377 @@
 #include "AudioManager.h"
-#include "Engine/Engine.h"
-#include "Components/AudioComponent.h"
-#include "Sound/SoundCue.h"
-#include "Kismet/GameplayStatics.h"
 #include "Engine/World.h"
-#include "TimerManager.h"
+#include "Components/AudioComponent.h"
+#include "Kismet/GameplayStatics.h"
+#include "Sound/SoundCue.h"
+#include "AudioDevice.h"
 
-AAudioManager::AAudioManager()
+UAudioManager::UAudioManager()
 {
-    PrimaryActorTick.bCanEverTick = true;
-
-    // Create audio components
-    EnvironmentAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("EnvironmentAudio"));
-    RootComponent = EnvironmentAudioComponent;
-
-    MusicAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("MusicAudio"));
-    MusicAudioComponent->SetupAttachment(RootComponent);
-
-    NarrativeAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("NarrativeAudio"));
-    NarrativeAudioComponent->SetupAttachment(RootComponent);
-
-    // Initialize default settings
-    CurrentEnvironmentSettings = FAudio_EnvironmentSettings();
-    CurrentIntensity = EAudio_IntensityLevel::Ambient;
+    CurrentBiome = EAudio_BiomeAmbience::Savanna;
+    CurrentThreatLevel = EAudio_ThreatLevel::Safe;
+    ListenerLocation = FVector::ZeroVector;
     MasterVolume = 1.0f;
-    MusicVolume = 0.7f;
+    AmbienceVolume = 0.7f;
     SFXVolume = 0.8f;
-    NarrativeVolume = 0.9f;
-
-    // Initialize dinosaur sound profiles
-    DinosaurSoundProfiles.Empty();
-
-    // T-Rex profile
-    FAudio_DinosaurSoundProfile TRexProfile;
-    TRexProfile.DinosaurType = EAudio_DinosaurType::TRex;
-    TRexProfile.FootstepVolume = 1.0f;
-    TRexProfile.VocalizationVolume = 1.0f;
-    TRexProfile.FootstepRange = 3000.0f;
-    TRexProfile.VocalizationRange = 8000.0f;
-    TRexProfile.bCausesGroundShake = true;
-    DinosaurSoundProfiles.Add(TRexProfile);
-
-    // Raptor profile
-    FAudio_DinosaurSoundProfile RaptorProfile;
-    RaptorProfile.DinosaurType = EAudio_DinosaurType::Raptor;
-    RaptorProfile.FootstepVolume = 0.4f;
-    RaptorProfile.VocalizationVolume = 0.6f;
-    RaptorProfile.FootstepRange = 800.0f;
-    RaptorProfile.VocalizationRange = 2000.0f;
-    RaptorProfile.bCausesGroundShake = false;
-    DinosaurSoundProfiles.Add(RaptorProfile);
-
-    // Brachiosaurus profile
-    FAudio_DinosaurSoundProfile BrachiosaurusProfile;
-    BrachiosaurusProfile.DinosaurType = EAudio_DinosaurType::Brachiosaurus;
-    BrachiosaurusProfile.FootstepVolume = 0.9f;
-    BrachiosaurusProfile.VocalizationVolume = 0.8f;
-    BrachiosaurusProfile.FootstepRange = 2500.0f;
-    BrachiosaurusProfile.VocalizationRange = 6000.0f;
-    BrachiosaurusProfile.bCausesGroundShake = true;
-    DinosaurSoundProfiles.Add(BrachiosaurusProfile);
-
-    bIsInitialized = false;
 }
 
-void AAudioManager::BeginPlay()
-{
-    Super::BeginPlay();
-    
-    InitializeAudioSystem();
-
-    // Register with subsystem
-    if (UWorld* World = GetWorld())
-    {
-        if (UAudioWorldSubsystem* AudioSubsystem = World->GetSubsystem<UAudioWorldSubsystem>())
-        {
-            AudioSubsystem->RegisterAudioManager(this);
-        }
-    }
-
-    UE_LOG(LogTemp, Warning, TEXT("AudioManager: BeginPlay completed"));
-}
-
-void AAudioManager::Tick(float DeltaTime)
-{
-    Super::Tick(DeltaTime);
-
-    if (bIsInitialized)
-    {
-        UpdateMusicFade(DeltaTime);
-    }
-}
-
-void AAudioManager::InitializeAudioSystem()
-{
-    if (bIsInitialized)
-    {
-        return;
-    }
-
-    // Configure audio components
-    if (EnvironmentAudioComponent)
-    {
-        EnvironmentAudioComponent->bAutoActivate = true;
-        EnvironmentAudioComponent->SetVolumeMultiplier(MasterVolume * SFXVolume);
-    }
-
-    if (MusicAudioComponent)
-    {
-        MusicAudioComponent->bAutoActivate = false;
-        MusicAudioComponent->SetVolumeMultiplier(MasterVolume * MusicVolume);
-    }
-
-    if (NarrativeAudioComponent)
-    {
-        NarrativeAudioComponent->bAutoActivate = false;
-        NarrativeAudioComponent->SetVolumeMultiplier(MasterVolume * NarrativeVolume);
-    }
-
-    // Set initial environment
-    SetEnvironmentType(EAudio_EnvironmentType::Forest);
-    SetIntensityLevel(EAudio_IntensityLevel::Ambient);
-
-    bIsInitialized = true;
-    UE_LOG(LogTemp, Warning, TEXT("AudioManager: System initialized"));
-}
-
-void AAudioManager::ShutdownAudioSystem()
-{
-    if (!bIsInitialized)
-    {
-        return;
-    }
-
-    // Stop all audio
-    if (EnvironmentAudioComponent && EnvironmentAudioComponent->IsPlaying())
-    {
-        EnvironmentAudioComponent->Stop();
-    }
-
-    if (MusicAudioComponent && MusicAudioComponent->IsPlaying())
-    {
-        MusicAudioComponent->Stop();
-    }
-
-    if (NarrativeAudioComponent && NarrativeAudioComponent->IsPlaying())
-    {
-        NarrativeAudioComponent->Stop();
-    }
-
-    bIsInitialized = false;
-    UE_LOG(LogTemp, Warning, TEXT("AudioManager: System shutdown"));
-}
-
-void AAudioManager::SetEnvironmentType(EAudio_EnvironmentType NewEnvironment)
-{
-    CurrentEnvironmentSettings.EnvironmentType = NewEnvironment;
-    UpdateEnvironmentAudio();
-
-    UE_LOG(LogTemp, Warning, TEXT("AudioManager: Environment changed to %d"), (int32)NewEnvironment);
-}
-
-void AAudioManager::SetIntensityLevel(EAudio_IntensityLevel NewIntensity)
-{
-    CurrentIntensity = NewIntensity;
-    
-    // Adjust music based on intensity
-    switch (NewIntensity)
-    {
-        case EAudio_IntensityLevel::Calm:
-        case EAudio_IntensityLevel::Ambient:
-            if (BackgroundMusicCalm)
-            {
-                TransitionToMusic(BackgroundMusicCalm, 3.0f);
-            }
-            break;
-        case EAudio_IntensityLevel::Tense:
-        case EAudio_IntensityLevel::Danger:
-        case EAudio_IntensityLevel::Combat:
-            if (BackgroundMusicTense)
-            {
-                TransitionToMusic(BackgroundMusicTense, 1.5f);
-            }
-            break;
-    }
-
-    UE_LOG(LogTemp, Warning, TEXT("AudioManager: Intensity changed to %d"), (int32)NewIntensity);
-}
-
-void AAudioManager::UpdateEnvironmentAudio()
-{
-    if (!EnvironmentAudioComponent)
-    {
-        return;
-    }
-
-    USoundCue* TargetSound = nullptr;
-
-    // Select ambient sound based on environment
-    switch (CurrentEnvironmentSettings.EnvironmentType)
-    {
-        case EAudio_EnvironmentType::Forest:
-            TargetSound = ForestAmbientSound;
-            break;
-        case EAudio_EnvironmentType::Swamp:
-            TargetSound = SwampAmbientSound;
-            break;
-        case EAudio_EnvironmentType::Grassland:
-            TargetSound = GrasslandAmbientSound;
-            break;
-        default:
-            TargetSound = ForestAmbientSound; // Default fallback
-            break;
-    }
-
-    if (TargetSound && TargetSound != EnvironmentAudioComponent->GetSound())
-    {
-        EnvironmentAudioComponent->SetSound(TargetSound);
-        EnvironmentAudioComponent->SetVolumeMultiplier(MasterVolume * SFXVolume * CurrentEnvironmentSettings.AmbientVolume);
-        
-        if (!EnvironmentAudioComponent->IsPlaying())
-        {
-            EnvironmentAudioComponent->Play();
-        }
-    }
-}
-
-void AAudioManager::PlayDinosaurFootstep(EAudio_DinosaurType DinosaurType, FVector Location)
-{
-    FAudio_DinosaurSoundProfile Profile = GetDinosaurProfile(DinosaurType);
-    
-    USoundCue* FootstepSound = nullptr;
-    switch (DinosaurType)
-    {
-        case EAudio_DinosaurType::TRex:
-            FootstepSound = TRexFootstepSound;
-            break;
-        // Add other dinosaur footstep sounds when available
-        default:
-            FootstepSound = TRexFootstepSound; // Fallback
-            break;
-    }
-
-    if (FootstepSound)
-    {
-        UGameplayStatics::PlaySoundAtLocation(
-            GetWorld(),
-            FootstepSound,
-            Location,
-            MasterVolume * SFXVolume * Profile.FootstepVolume
-        );
-
-        // Trigger ground shake for large dinosaurs
-        if (Profile.bCausesGroundShake)
-        {
-            TriggerGroundShake(Location, Profile.FootstepVolume);
-        }
-
-        UE_LOG(LogTemp, Warning, TEXT("AudioManager: Played footstep for dinosaur %d at location %s"), 
-               (int32)DinosaurType, *Location.ToString());
-    }
-}
-
-void AAudioManager::PlayDinosaurVocalization(EAudio_DinosaurType DinosaurType, FVector Location)
-{
-    FAudio_DinosaurSoundProfile Profile = GetDinosaurProfile(DinosaurType);
-    
-    USoundCue* VocalizationSound = nullptr;
-    switch (DinosaurType)
-    {
-        case EAudio_DinosaurType::TRex:
-            VocalizationSound = TRexRoarSound;
-            break;
-        // Add other dinosaur vocalizations when available
-        default:
-            VocalizationSound = TRexRoarSound; // Fallback
-            break;
-    }
-
-    if (VocalizationSound)
-    {
-        UGameplayStatics::PlaySoundAtLocation(
-            GetWorld(),
-            VocalizationSound,
-            Location,
-            MasterVolume * SFXVolume * Profile.VocalizationVolume
-        );
-
-        // Increase intensity when dangerous dinosaurs vocalize
-        if (DinosaurType == EAudio_DinosaurType::TRex && CurrentIntensity < EAudio_IntensityLevel::Danger)
-        {
-            SetIntensityLevel(EAudio_IntensityLevel::Danger);
-        }
-
-        UE_LOG(LogTemp, Warning, TEXT("AudioManager: Played vocalization for dinosaur %d at location %s"), 
-               (int32)DinosaurType, *Location.ToString());
-    }
-}
-
-void AAudioManager::TriggerGroundShake(FVector Location, float Intensity)
-{
-    // This would integrate with camera shake system
-    // For now, just log the event
-    UE_LOG(LogTemp, Warning, TEXT("AudioManager: Ground shake triggered at %s with intensity %f"), 
-           *Location.ToString(), Intensity);
-}
-
-void AAudioManager::PlayNarrativeLine(const FString& AudioPath, FVector Location)
-{
-    if (!NarrativeAudioComponent)
-    {
-        return;
-    }
-
-    // Stop current narrative if playing
-    if (NarrativeAudioComponent->IsPlaying())
-    {
-        NarrativeAudioComponent->Stop();
-    }
-
-    // Load and play the narrative audio
-    // Note: In a real implementation, you'd load the audio asset from the path
-    // For now, we'll just log the request
-    UE_LOG(LogTemp, Warning, TEXT("AudioManager: Playing narrative line: %s at location %s"), 
-           *AudioPath, *Location.ToString());
-
-    // Set volume and play
-    NarrativeAudioComponent->SetVolumeMultiplier(MasterVolume * NarrativeVolume);
-    // NarrativeAudioComponent->Play(); // Uncomment when actual audio asset is loaded
-}
-
-void AAudioManager::StopNarrativeAudio()
-{
-    if (NarrativeAudioComponent && NarrativeAudioComponent->IsPlaying())
-    {
-        NarrativeAudioComponent->Stop();
-        UE_LOG(LogTemp, Warning, TEXT("AudioManager: Narrative audio stopped"));
-    }
-}
-
-bool AAudioManager::IsNarrativeAudioPlaying() const
-{
-    return NarrativeAudioComponent && NarrativeAudioComponent->IsPlaying();
-}
-
-void AAudioManager::TransitionToMusic(USoundCue* NewMusic, float FadeTime)
-{
-    if (!MusicAudioComponent || NewMusic == CurrentMusic)
-    {
-        return;
-    }
-
-    PendingMusic = NewMusic;
-    MusicFadeDuration = FadeTime;
-    MusicFadeTimer = 0.0f;
-
-    UE_LOG(LogTemp, Warning, TEXT("AudioManager: Starting music transition (fade time: %f)"), FadeTime);
-}
-
-void AAudioManager::UpdateMusicFade(float DeltaTime)
-{
-    if (!PendingMusic || MusicFadeDuration <= 0.0f)
-    {
-        return;
-    }
-
-    MusicFadeTimer += DeltaTime;
-    float FadeProgress = FMath::Clamp(MusicFadeTimer / MusicFadeDuration, 0.0f, 1.0f);
-
-    if (MusicAudioComponent)
-    {
-        // Fade out current music
-        if (CurrentMusic && FadeProgress < 0.5f)
-        {
-            float FadeOutVolume = (1.0f - (FadeProgress * 2.0f)) * MasterVolume * MusicVolume;
-            MusicAudioComponent->SetVolumeMultiplier(FadeOutVolume);
-        }
-        // Switch to new music and fade in
-        else if (FadeProgress >= 0.5f)
-        {
-            if (CurrentMusic != PendingMusic)
-            {
-                MusicAudioComponent->SetSound(PendingMusic);
-                CurrentMusic = PendingMusic;
-                if (!MusicAudioComponent->IsPlaying())
-                {
-                    MusicAudioComponent->Play();
-                }
-            }
-
-            float FadeInVolume = ((FadeProgress - 0.5f) * 2.0f) * MasterVolume * MusicVolume;
-            MusicAudioComponent->SetVolumeMultiplier(FadeInVolume);
-        }
-
-        // Complete transition
-        if (FadeProgress >= 1.0f)
-        {
-            MusicAudioComponent->SetVolumeMultiplier(MasterVolume * MusicVolume);
-            PendingMusic = nullptr;
-            MusicFadeTimer = 0.0f;
-            MusicFadeDuration = 0.0f;
-        }
-    }
-}
-
-void AAudioManager::SetMusicVolume(float Volume)
-{
-    MusicVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
-    ApplyVolumeSettings();
-}
-
-void AAudioManager::SetMasterVolume(float Volume)
-{
-    MasterVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
-    ApplyVolumeSettings();
-}
-
-void AAudioManager::SetSFXVolume(float Volume)
-{
-    SFXVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
-    ApplyVolumeSettings();
-}
-
-void AAudioManager::SetNarrativeVolume(float Volume)
-{
-    NarrativeVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
-    ApplyVolumeSettings();
-}
-
-void AAudioManager::ApplyVolumeSettings()
-{
-    if (EnvironmentAudioComponent)
-    {
-        EnvironmentAudioComponent->SetVolumeMultiplier(MasterVolume * SFXVolume * CurrentEnvironmentSettings.AmbientVolume);
-    }
-
-    if (MusicAudioComponent)
-    {
-        MusicAudioComponent->SetVolumeMultiplier(MasterVolume * MusicVolume);
-    }
-
-    if (NarrativeAudioComponent)
-    {
-        NarrativeAudioComponent->SetVolumeMultiplier(MasterVolume * NarrativeVolume);
-    }
-}
-
-void AAudioManager::PlaySpatialSound(USoundCue* Sound, FVector Location, float Volume)
-{
-    if (Sound)
-    {
-        UGameplayStatics::PlaySoundAtLocation(
-            GetWorld(),
-            Sound,
-            Location,
-            MasterVolume * SFXVolume * Volume
-        );
-    }
-}
-
-FAudio_DinosaurSoundProfile AAudioManager::GetDinosaurProfile(EAudio_DinosaurType DinosaurType)
-{
-    for (const FAudio_DinosaurSoundProfile& Profile : DinosaurSoundProfiles)
-    {
-        if (Profile.DinosaurType == DinosaurType)
-        {
-            return Profile;
-        }
-    }
-
-    // Return default profile if not found
-    return FAudio_DinosaurSoundProfile();
-}
-
-// Audio World Subsystem Implementation
-void UAudioWorldSubsystem::Initialize(FSubsystemCollectionBase& Collection)
+void UAudioManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
-    UE_LOG(LogTemp, Warning, TEXT("AudioWorldSubsystem: Initialized"));
+    
+    UE_LOG(LogTemp, Log, TEXT("AudioManager: Inicialização do sistema de áudio"));
+    
+    // Inicializar configurações de biomas
+    InitializeBiomeSettings();
+    
+    // Inicializar configurações de threat levels
+    InitializeThreatSettings();
+    
+    UE_LOG(LogTemp, Log, TEXT("AudioManager: Sistema de áudio inicializado com sucesso"));
 }
 
-void UAudioWorldSubsystem::Deinitialize()
+void UAudioManager::Deinitialize()
 {
-    AudioManagerInstance = nullptr;
+    // Limpar componentes de áudio
+    if (AmbienceAudioComponent && IsValid(AmbienceAudioComponent))
+    {
+        AmbienceAudioComponent->Stop();
+        AmbienceAudioComponent = nullptr;
+    }
+    
+    if (MusicAudioComponent && IsValid(MusicAudioComponent))
+    {
+        MusicAudioComponent->Stop();
+        MusicAudioComponent = nullptr;
+    }
+    
+    if (HeartbeatAudioComponent && IsValid(HeartbeatAudioComponent))
+    {
+        HeartbeatAudioComponent->Stop();
+        HeartbeatAudioComponent = nullptr;
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("AudioManager: Sistema de áudio desligado"));
+    
     Super::Deinitialize();
-    UE_LOG(LogTemp, Warning, TEXT("AudioWorldSubsystem: Deinitialized"));
 }
 
-AAudioManager* UAudioWorldSubsystem::GetAudioManager()
+// ═══════════════════════════════════════════════════════════════
+// BIOME AUDIO MANAGEMENT
+// ═══════════════════════════════════════════════════════════════
+
+void UAudioManager::SetCurrentBiome(EAudio_BiomeAmbience NewBiome)
 {
-    return AudioManagerInstance;
+    if (CurrentBiome != NewBiome)
+    {
+        UE_LOG(LogTemp, Log, TEXT("AudioManager: Transição de bioma de %d para %d"), 
+               (int32)CurrentBiome, (int32)NewBiome);
+        
+        TransitionToNewBiome(NewBiome);
+        CurrentBiome = NewBiome;
+    }
 }
 
-void UAudioWorldSubsystem::RegisterAudioManager(AAudioManager* Manager)
+void UAudioManager::UpdateBiomeAmbience(const FVector& PlayerLocation)
 {
-    AudioManagerInstance = Manager;
-    UE_LOG(LogTemp, Warning, TEXT("AudioWorldSubsystem: AudioManager registered"));
+    // Determinar bioma baseado na localização
+    EAudio_BiomeAmbience DetectedBiome = DetermineBiomeFromLocation(PlayerLocation);
+    
+    // Actualizar se mudou
+    if (DetectedBiome != CurrentBiome)
+    {
+        SetCurrentBiome(DetectedBiome);
+    }
+    
+    // Actualizar posição do listener
+    SetListenerLocation(PlayerLocation);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// THREAT LEVEL AUDIO
+// ═══════════════════════════════════════════════════════════════
+
+void UAudioManager::SetThreatLevel(EAudio_ThreatLevel NewThreatLevel)
+{
+    if (CurrentThreatLevel != NewThreatLevel)
+    {
+        UE_LOG(LogTemp, Log, TEXT("AudioManager: Threat level mudou para %d"), (int32)NewThreatLevel);
+        
+        CurrentThreatLevel = NewThreatLevel;
+        
+        // Aplicar configurações de áudio para o novo threat level
+        if (ThreatAudioSettings.IsValidIndex((int32)NewThreatLevel))
+        {
+            const FAudio_ThreatAudio& ThreatSettings = ThreatAudioSettings[(int32)NewThreatLevel];
+            
+            // Actualizar música de tensão
+            if (MusicAudioComponent && ThreatSettings.ThreatMusic.IsValid())
+            {
+                MusicAudioComponent->SetVolumeMultiplier(ThreatSettings.MusicVolume * MasterVolume);
+            }
+            
+            // Actualizar heartbeat
+            if (HeartbeatAudioComponent)
+            {
+                HeartbeatAudioComponent->SetVolumeMultiplier(ThreatSettings.HeartbeatIntensity * MasterVolume);
+            }
+        }
+    }
+}
+
+void UAudioManager::PlayDinosaurFootsteps(const FVector& DinosaurLocation, float DinosaurMass)
+{
+    // Calcular volume baseado na massa e distância
+    float Distance = FVector::Dist(ListenerLocation, DinosaurLocation);
+    float VolumeMultiplier = FMath::Clamp(DinosaurMass / 5000.0f, 0.1f, 2.0f); // Normalizar massa
+    float DistanceAttenuation = FMath::Clamp(1.0f - (Distance / 10000.0f), 0.0f, 1.0f);
+    
+    float FinalVolume = VolumeMultiplier * DistanceAttenuation * SFXVolume * MasterVolume;
+    
+    if (FinalVolume > 0.05f) // Só tocar se audível
+    {
+        UE_LOG(LogTemp, Log, TEXT("AudioManager: Footsteps de dinossauro (massa=%.1f) a %.1f metros, volume=%.2f"), 
+               DinosaurMass, Distance, FinalVolume);
+        
+        // TODO: Carregar e tocar som de footsteps baseado no tipo de terreno
+        // PlaySpatialSound(FootstepsSound, DinosaurLocation, FinalVolume);
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SPATIAL AUDIO
+// ═══════════════════════════════════════════════════════════════
+
+void UAudioManager::PlaySpatialSound(USoundCue* Sound, const FVector& Location, float VolumeMultiplier)
+{
+    if (!Sound)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("AudioManager: Tentativa de tocar som nulo"));
+        return;
+    }
+    
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("AudioManager: Mundo não encontrado"));
+        return;
+    }
+    
+    // Tocar som espacial
+    UGameplayStatics::PlaySoundAtLocation(
+        World,
+        Sound,
+        Location,
+        VolumeMultiplier * SFXVolume * MasterVolume,
+        1.0f, // Pitch
+        0.0f, // Start time
+        nullptr, // Attenuation settings (usar default)
+        nullptr, // Concurrency settings
+        nullptr  // Owner
+    );
+    
+    UE_LOG(LogTemp, Log, TEXT("AudioManager: Som espacial tocado em (%s) com volume %.2f"), 
+           *Location.ToString(), VolumeMultiplier);
+}
+
+void UAudioManager::SetListenerLocation(const FVector& Location)
+{
+    ListenerLocation = Location;
+    
+    // Actualizar posição do listener no audio device
+    UWorld* World = GetWorld();
+    if (World && World->GetAudioDeviceRaw())
+    {
+        // O UE5 actualiza automaticamente a posição do listener baseado na câmara
+        // Mas podemos usar esta informação para cálculos de distância
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// MASTER VOLUME CONTROLS
+// ═══════════════════════════════════════════════════════════════
+
+void UAudioManager::SetMasterVolume(float Volume)
+{
+    MasterVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
+    
+    // Actualizar todos os componentes de áudio
+    if (AmbienceAudioComponent)
+    {
+        AmbienceAudioComponent->SetVolumeMultiplier(AmbienceVolume * MasterVolume);
+    }
+    
+    if (MusicAudioComponent)
+    {
+        MusicAudioComponent->SetVolumeMultiplier(MasterVolume);
+    }
+    
+    if (HeartbeatAudioComponent)
+    {
+        HeartbeatAudioComponent->SetVolumeMultiplier(MasterVolume);
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("AudioManager: Master volume definido para %.2f"), MasterVolume);
+}
+
+void UAudioManager::SetAmbienceVolume(float Volume)
+{
+    AmbienceVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
+    
+    if (AmbienceAudioComponent)
+    {
+        AmbienceAudioComponent->SetVolumeMultiplier(AmbienceVolume * MasterVolume);
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("AudioManager: Ambience volume definido para %.2f"), AmbienceVolume);
+}
+
+void UAudioManager::SetSFXVolume(float Volume)
+{
+    SFXVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
+    UE_LOG(LogTemp, Log, TEXT("AudioManager: SFX volume definido para %.2f"), SFXVolume);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// INTERNAL METHODS
+// ═══════════════════════════════════════════════════════════════
+
+void UAudioManager::InitializeBiomeSettings()
+{
+    BiomeSettings.Empty();
+    BiomeSettings.SetNum(5); // 5 biomas
+    
+    // Pantano
+    BiomeSettings[0].BiomeType = EAudio_BiomeAmbience::Swamp;
+    BiomeSettings[0].ReverbWetness = 0.8f;
+    BiomeSettings[0].ReverbDecayTime = 4.0f;
+    BiomeSettings[0].WindIntensity = 0.2f;
+    
+    // Floresta
+    BiomeSettings[1].BiomeType = EAudio_BiomeAmbience::Forest;
+    BiomeSettings[1].ReverbWetness = 0.6f;
+    BiomeSettings[1].ReverbDecayTime = 3.0f;
+    BiomeSettings[1].WindIntensity = 0.4f;
+    
+    // Savana
+    BiomeSettings[2].BiomeType = EAudio_BiomeAmbience::Savanna;
+    BiomeSettings[2].ReverbWetness = 0.2f;
+    BiomeSettings[2].ReverbDecayTime = 1.5f;
+    BiomeSettings[2].WindIntensity = 0.7f;
+    
+    // Deserto
+    BiomeSettings[3].BiomeType = EAudio_BiomeAmbience::Desert;
+    BiomeSettings[3].ReverbWetness = 0.1f;
+    BiomeSettings[3].ReverbDecayTime = 0.8f;
+    BiomeSettings[3].WindIntensity = 0.9f;
+    
+    // Montanha
+    BiomeSettings[4].BiomeType = EAudio_BiomeAmbience::Mountain;
+    BiomeSettings[4].ReverbWetness = 0.3f;
+    BiomeSettings[4].ReverbDecayTime = 6.0f;
+    BiomeSettings[4].WindIntensity = 1.0f;
+    
+    UE_LOG(LogTemp, Log, TEXT("AudioManager: Configurações de bioma inicializadas"));
+}
+
+void UAudioManager::InitializeThreatSettings()
+{
+    ThreatAudioSettings.Empty();
+    ThreatAudioSettings.SetNum(4); // 4 threat levels
+    
+    // Safe
+    ThreatAudioSettings[0].ThreatLevel = EAudio_ThreatLevel::Safe;
+    ThreatAudioSettings[0].HeartbeatIntensity = 0.0f;
+    ThreatAudioSettings[0].MusicVolume = 0.3f;
+    
+    // Caution
+    ThreatAudioSettings[1].ThreatLevel = EAudio_ThreatLevel::Caution;
+    ThreatAudioSettings[1].HeartbeatIntensity = 0.2f;
+    ThreatAudioSettings[1].MusicVolume = 0.5f;
+    
+    // Danger
+    ThreatAudioSettings[2].ThreatLevel = EAudio_ThreatLevel::Danger;
+    ThreatAudioSettings[2].HeartbeatIntensity = 0.6f;
+    ThreatAudioSettings[2].MusicVolume = 0.8f;
+    
+    // Critical
+    ThreatAudioSettings[3].ThreatLevel = EAudio_ThreatLevel::Critical;
+    ThreatAudioSettings[3].HeartbeatIntensity = 1.0f;
+    ThreatAudioSettings[3].MusicVolume = 1.0f;
+    
+    UE_LOG(LogTemp, Log, TEXT("AudioManager: Configurações de threat level inicializadas"));
+}
+
+void UAudioManager::TransitionToNewBiome(EAudio_BiomeAmbience NewBiome)
+{
+    if (!BiomeSettings.IsValidIndex((int32)NewBiome))
+    {
+        UE_LOG(LogTemp, Warning, TEXT("AudioManager: Bioma inválido %d"), (int32)NewBiome);
+        return;
+    }
+    
+    const FAudio_BiomeSettings& Settings = BiomeSettings[(int32)NewBiome];
+    
+    // Actualizar configurações de reverb
+    UpdateReverbSettings(Settings);
+    
+    // TODO: Carregar e tocar nova música de ambiente
+    // TODO: Fade out da música anterior e fade in da nova
+    
+    UE_LOG(LogTemp, Log, TEXT("AudioManager: Transição para bioma %d concluída"), (int32)NewBiome);
+}
+
+void UAudioManager::UpdateReverbSettings(const FAudio_BiomeSettings& Settings)
+{
+    // TODO: Actualizar configurações de reverb do audio engine
+    // Isto requer acesso ao audio device e configuração de reverb zones
+    
+    UE_LOG(LogTemp, Log, TEXT("AudioManager: Reverb actualizado - Wetness=%.2f, Decay=%.2f"), 
+           Settings.ReverbWetness, Settings.ReverbDecayTime);
+}
+
+EAudio_BiomeAmbience UAudioManager::DetermineBiomeFromLocation(const FVector& Location)
+{
+    // Coordenadas dos biomas (do brain memory)
+    // Pantano: Centro(-50000, -45000, 0), Zona X(-77500 a -25000), Y(-76500 a -15000)
+    // Floresta: Centro(-45000, 40000, 0), Zona X(-77500 a -15000), Y(15000 a 76500)
+    // Savana: Centro(0, 0, 0), Zona X(-20000 a 20000), Y(-20000 a 20000)
+    // Deserto: Centro(55000, 0, 0), Zona X(25000 a 79500), Y(-30000 a 30000)
+    // Montanha: Centro(40000, 50000, 500), Zona X(15000 a 79500), Y(20000 a 76500)
+    
+    float X = Location.X;
+    float Y = Location.Y;
+    
+    // Verificar Pantano
+    if (X >= -77500 && X <= -25000 && Y >= -76500 && Y <= -15000)
+    {
+        return EAudio_BiomeAmbience::Swamp;
+    }
+    
+    // Verificar Floresta
+    if (X >= -77500 && X <= -15000 && Y >= 15000 && Y <= 76500)
+    {
+        return EAudio_BiomeAmbience::Forest;
+    }
+    
+    // Verificar Savana (centro)
+    if (X >= -20000 && X <= 20000 && Y >= -20000 && Y <= 20000)
+    {
+        return EAudio_BiomeAmbience::Savanna;
+    }
+    
+    // Verificar Deserto
+    if (X >= 25000 && X <= 79500 && Y >= -30000 && Y <= 30000)
+    {
+        return EAudio_BiomeAmbience::Desert;
+    }
+    
+    // Verificar Montanha
+    if (X >= 15000 && X <= 79500 && Y >= 20000 && Y <= 76500)
+    {
+        return EAudio_BiomeAmbience::Mountain;
+    }
+    
+    // Default para Savana se não estiver em nenhuma zona específica
+    return EAudio_BiomeAmbience::Savanna;
 }
