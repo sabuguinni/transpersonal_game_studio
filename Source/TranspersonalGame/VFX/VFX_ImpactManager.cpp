@@ -1,293 +1,241 @@
 #include "VFX_ImpactManager.h"
-#include "Components/StaticMeshComponent.h"
-#include "NiagaraComponent.h"
 #include "NiagaraFunctionLibrary.h"
-#include "Engine/World.h"
-#include "TimerManager.h"
+#include "Components/SceneComponent.h"
 #include "Engine/Engine.h"
+#include "Kismet/GameplayStatics.h"
 
-AVFX_ImpactManager::AVFX_ImpactManager()
+UVFX_ImpactManager::UVFX_ImpactManager()
 {
-    PrimaryActorTick.bCanEverTick = true;
-
-    // Criar componente root
-    RootMeshComponent = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("RootMeshComponent"));
-    RootComponent = RootMeshComponent;
-
-    // Configurações padrão
-    FootstepIntensity = 1.0f;
-    BloodIntensity = 1.0f;
-    DebrisSpread = 100.0f;
-    bEnableFootstepVFX = true;
-    bEnableBloodVFX = true;
-    bEnableDebrisVFX = true;
-
-    // Inicializar arrays
-    ActiveFootstepVFX.Empty();
-    ActiveBloodVFX.Empty();
-    ActiveDebrisVFX.Empty();
+    PrimaryActorTick.bCanEverTick = false;
+    
+    // Configurar root component
+    RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
+    
+    // Configurar valores padrão
+    MaxActiveEffects = 20.0f;
+    bDebugMode = false;
+    
+    // Inicializar array de efeitos de impacto
+    ImpactEffects.SetNum(5);
+    
+    // Configurar efeito de pegada de dinossauro
+    ImpactEffects[0].ImpactType = EVFX_ImpactType::DinosaurFootstep;
+    ImpactEffects[0].Scale = FVector(2.0f, 2.0f, 1.0f);
+    ImpactEffects[0].Duration = 3.0f;
+    ImpactEffects[0].bAttachToActor = false;
+    
+    // Configurar efeito de impacto de arma
+    ImpactEffects[1].ImpactType = EVFX_ImpactType::WeaponHit;
+    ImpactEffects[1].Scale = FVector(0.5f, 0.5f, 0.5f);
+    ImpactEffects[1].Duration = 1.5f;
+    ImpactEffects[1].bAttachToActor = false;
+    
+    // Configurar efeito de impacto de rocha
+    ImpactEffects[2].ImpactType = EVFX_ImpactType::RockImpact;
+    ImpactEffects[2].Scale = FVector(1.0f, 1.0f, 1.0f);
+    ImpactEffects[2].Duration = 2.0f;
+    ImpactEffects[2].bAttachToActor = false;
+    
+    // Configurar efeito de sangue
+    ImpactEffects[3].ImpactType = EVFX_ImpactType::BloodSplatter;
+    ImpactEffects[3].Scale = FVector(1.0f, 1.0f, 1.0f);
+    ImpactEffects[3].Duration = 4.0f;
+    ImpactEffects[3].bAttachToActor = true;
+    
+    // Configurar efeito de nuvem de poeira
+    ImpactEffects[4].ImpactType = EVFX_ImpactType::DustCloud;
+    ImpactEffects[4].Scale = FVector(3.0f, 3.0f, 2.0f);
+    ImpactEffects[4].Duration = 5.0f;
+    ImpactEffects[4].bAttachToActor = false;
 }
 
-void AVFX_ImpactManager::BeginPlay()
+void UVFX_ImpactManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    InitializeVFXSystems();
-    SetupCleanupTimers();
+    if (bDebugMode)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("VFX_ImpactManager: BeginPlay - Manager initialized with %d impact effects"), ImpactEffects.Num());
+    }
     
-    UE_LOG(LogTemp, Log, TEXT("VFX_ImpactManager: Inicializado com sucesso"));
+    // Limpar array de efeitos activos
+    ActiveEffects.Empty();
 }
 
-void AVFX_ImpactManager::Tick(float DeltaTime)
+void UVFX_ImpactManager::SpawnImpactEffect(EVFX_ImpactType ImpactType, FVector Location, FRotator Rotation, AActor* AttachActor)
 {
-    Super::Tick(DeltaTime);
-    
-    // Verificar se há VFX que precisam ser limpos
-    // (Lógica de cleanup automático baseada em tempo)
-}
-
-void AVFX_ImpactManager::InitializeVFXSystems()
-{
-    // Tentar carregar sistemas Niagara do projeto
-    // Se não existirem, usar sistemas padrão do Engine
-    
-    if (!FootstepDustSystem)
+    // Verificar limite de efeitos activos
+    if (ActiveEffects.Num() >= MaxActiveEffects)
     {
-        // Tentar carregar sistema personalizado primeiro
-        FootstepDustSystem = LoadObject<UNiagaraSystem>(nullptr, TEXT("/Game/VFX/NS_FootstepDust"));
+        CleanupExpiredEffects();
         
-        if (!FootstepDustSystem)
+        // Se ainda estamos no limite, remover o efeito mais antigo
+        if (ActiveEffects.Num() >= MaxActiveEffects && ActiveEffects.Num() > 0)
         {
-            // Fallback para sistema do Engine se disponível
-            UE_LOG(LogTemp, Warning, TEXT("VFX_ImpactManager: Sistema de footstep personalizado não encontrado"));
+            UNiagaraComponent* OldestEffect = ActiveEffects[0];
+            if (IsValid(OldestEffect))
+            {
+                OldestEffect->DestroyComponent();
+            }
+            ActiveEffects.RemoveAt(0);
         }
     }
     
-    if (!BloodSplatterSystem)
+    // Encontrar dados do efeito
+    FVFX_ImpactData* EffectData = nullptr;
+    for (FVFX_ImpactData& Data : ImpactEffects)
     {
-        BloodSplatterSystem = LoadObject<UNiagaraSystem>(nullptr, TEXT("/Game/VFX/NS_BloodSplatter"));
-        
-        if (!BloodSplatterSystem)
+        if (Data.ImpactType == ImpactType)
         {
-            UE_LOG(LogTemp, Warning, TEXT("VFX_ImpactManager: Sistema de blood splatter não encontrado"));
+            EffectData = &Data;
+            break;
         }
     }
     
-    if (!DebrisSystem)
+    if (!EffectData)
     {
-        DebrisSystem = LoadObject<UNiagaraSystem>(nullptr, TEXT("/Game/VFX/NS_Debris"));
-        
-        if (!DebrisSystem)
+        if (bDebugMode)
         {
-            UE_LOG(LogTemp, Warning, TEXT("VFX_ImpactManager: Sistema de debris não encontrado"));
+            UE_LOG(LogTemp, Warning, TEXT("VFX_ImpactManager: No effect data found for impact type"));
         }
+        return;
     }
     
-    if (!RockImpactSystem)
+    // Verificar se temos sistema Niagara válido
+    UNiagaraSystem* NiagaraSystem = EffectData->NiagaraSystem.LoadSynchronous();
+    if (!NiagaraSystem)
     {
-        RockImpactSystem = LoadObject<UNiagaraSystem>(nullptr, TEXT("/Game/VFX/NS_RockImpact"));
-        
-        if (!RockImpactSystem)
+        // Tentar usar sistema padrão de partículas se disponível
+        if (bDebugMode)
         {
-            UE_LOG(LogTemp, Warning, TEXT("VFX_ImpactManager: Sistema de rock impact não encontrado"));
+            UE_LOG(LogTemp, Warning, TEXT("VFX_ImpactManager: No Niagara system assigned, using fallback"));
         }
+        
+        // Criar efeito visual simples como fallback
+        SpawnDustCloud(Location, 1.0f);
+        return;
     }
-}
-
-void AVFX_ImpactManager::SetupCleanupTimers()
-{
-    // Configurar timers para limpeza automática de VFX antigos
-    if (UWorld* World = GetWorld())
+    
+    // Spawnar efeito Niagara
+    UNiagaraComponent* EffectComponent = nullptr;
+    
+    if (EffectData->bAttachToActor && AttachActor)
     {
-        World->GetTimerManager().SetTimer(
-            FootstepCleanupTimer,
-            this,
-            &AVFX_ImpactManager::CleanupOldVFX,
-            5.0f,  // Cleanup a cada 5 segundos
-            true   // Repetir
+        EffectComponent = UNiagaraFunctionLibrary::SpawnSystemAttached(
+            NiagaraSystem,
+            AttachActor->GetRootComponent(),
+            NAME_None,
+            Location,
+            Rotation,
+            EffectData->Scale,
+            EAttachLocation::KeepWorldPosition,
+            true
         );
     }
-}
-
-void AVFX_ImpactManager::TriggerFootstepVFX(FVector Location, float DinosaurSize)
-{
-    if (!bEnableFootstepVFX || !FootstepDustSystem)
+    else
     {
-        return;
+        EffectComponent = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+            GetWorld(),
+            NiagaraSystem,
+            Location,
+            Rotation,
+            EffectData->Scale,
+            true
+        );
     }
     
-    // Ajustar intensidade baseada no tamanho do dinossauro
-    float ScaledIntensity = FootstepIntensity * DinosaurSize;
-    
-    // Spawnar efeito VFX
-    UNiagaraComponent* FootstepVFX = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
-        GetWorld(),
-        FootstepDustSystem,
-        Location,
-        FRotator::ZeroRotator,
-        FVector(ScaledIntensity),  // Scale baseado na intensidade
-        true,  // Auto destroy
-        true,  // Auto activate
-        ENCPoolMethod::None,
-        true   // Pre cull check
-    );
-    
-    if (FootstepVFX)
+    if (EffectComponent)
     {
-        // Configurar parâmetros específicos do footstep
-        FootstepVFX->SetFloatParameter(TEXT("DustAmount"), ScaledIntensity);
-        FootstepVFX->SetFloatParameter(TEXT("ParticleSize"), DinosaurSize * 0.5f);
+        RegisterImpactEffect(EffectComponent);
         
-        ActiveFootstepVFX.Add(FootstepVFX);
+        // Configurar timer para limpeza automática
+        FTimerHandle CleanupTimer;
+        GetWorld()->GetTimerManager().SetTimer(
+            CleanupTimer,
+            [this, EffectComponent]()
+            {
+                if (IsValid(EffectComponent))
+                {
+                    UnregisterImpactEffect(EffectComponent);
+                    EffectComponent->DestroyComponent();
+                }
+            },
+            EffectData->Duration,
+            false
+        );
         
-        UE_LOG(LogTemp, Log, TEXT("VFX_ImpactManager: Footstep VFX triggered at %s"), *Location.ToString());
+        if (bDebugMode)
+        {
+            UE_LOG(LogTemp, Log, TEXT("VFX_ImpactManager: Spawned effect at location %s"), *Location.ToString());
+        }
     }
 }
 
-void AVFX_ImpactManager::TriggerBloodSplatterVFX(FVector Location, FVector ImpactDirection)
+void UVFX_ImpactManager::SpawnDinosaurFootstep(FVector Location, float DinosaurSize)
 {
-    if (!bEnableBloodVFX || !BloodSplatterSystem)
+    // Ajustar localização para o chão
+    FVector GroundLocation = Location;
+    GroundLocation.Z -= 50.0f; // Offset para garantir que está no chão
+    
+    // Ajustar rotação para apontar para cima
+    FRotator UpwardRotation = FRotator(-90.0f, 0.0f, 0.0f);
+    
+    SpawnImpactEffect(EVFX_ImpactType::DinosaurFootstep, GroundLocation, UpwardRotation);
+    
+    // Adicionar nuvem de poeira adicional para dinossauros grandes
+    if (DinosaurSize > 2.0f)
     {
-        return;
-    }
-    
-    // Calcular rotação baseada na direção do impacto
-    FRotator ImpactRotation = ImpactDirection.Rotation();
-    
-    UNiagaraComponent* BloodVFX = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
-        GetWorld(),
-        BloodSplatterSystem,
-        Location,
-        ImpactRotation,
-        FVector(BloodIntensity),
-        true,  // Auto destroy
-        true,  // Auto activate
-        ENCPoolMethod::None,
-        true   // Pre cull check
-    );
-    
-    if (BloodVFX)
-    {
-        // Configurar parâmetros do blood splatter
-        BloodVFX->SetVectorParameter(TEXT("ImpactDirection"), ImpactDirection);
-        BloodVFX->SetFloatParameter(TEXT("SplatterIntensity"), BloodIntensity);
-        
-        ActiveBloodVFX.Add(BloodVFX);
-        
-        UE_LOG(LogTemp, Log, TEXT("VFX_ImpactManager: Blood splatter VFX triggered"));
+        SpawnDustCloud(GroundLocation, DinosaurSize * 0.5f);
     }
 }
 
-void AVFX_ImpactManager::TriggerDebrisVFX(FVector Location, FVector ExplosionDirection, float Force)
+void UVFX_ImpactManager::SpawnBloodEffect(FVector Location, FVector Direction)
 {
-    if (!bEnableDebrisVFX || !DebrisSystem)
-    {
-        return;
-    }
+    // Calcular rotação baseada na direcção
+    FRotator BloodRotation = Direction.Rotation();
     
-    FRotator ExplosionRotation = ExplosionDirection.Rotation();
-    
-    UNiagaraComponent* DebrisVFX = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
-        GetWorld(),
-        DebrisSystem,
-        Location,
-        ExplosionRotation,
-        FVector(Force * 0.01f),  // Scale baseado na força
-        true,  // Auto destroy
-        true,  // Auto activate
-        ENCPoolMethod::None,
-        true   // Pre cull check
-    );
-    
-    if (DebrisVFX)
-    {
-        // Configurar parâmetros do debris
-        DebrisVFX->SetVectorParameter(TEXT("ExplosionDirection"), ExplosionDirection);
-        DebrisVFX->SetFloatParameter(TEXT("ExplosionForce"), Force);
-        DebrisVFX->SetFloatParameter(TEXT("DebrisSpread"), DebrisSpread);
-        
-        ActiveDebrisVFX.Add(DebrisVFX);
-        
-        UE_LOG(LogTemp, Log, TEXT("VFX_ImpactManager: Debris VFX triggered with force %f"), Force);
-    }
+    SpawnImpactEffect(EVFX_ImpactType::BloodSplatter, Location, BloodRotation);
 }
 
-void AVFX_ImpactManager::TriggerRockImpactVFX(FVector Location, float ImpactForce)
+void UVFX_ImpactManager::SpawnDustCloud(FVector Location, float Intensity)
 {
-    if (!RockImpactSystem)
-    {
-        return;
-    }
+    FVector DustLocation = Location;
+    DustLocation.Z += 10.0f; // Elevar ligeiramente do chão
     
-    UNiagaraComponent* RockVFX = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
-        GetWorld(),
-        RockImpactSystem,
-        Location,
-        FRotator::ZeroRotator,
-        FVector(ImpactForce * 0.01f),
-        true,  // Auto destroy
-        true,  // Auto activate
-        ENCPoolMethod::None,
-        true   // Pre cull check
-    );
-    
-    if (RockVFX)
-    {
-        RockVFX->SetFloatParameter(TEXT("ImpactForce"), ImpactForce);
-        
-        UE_LOG(LogTemp, Log, TEXT("VFX_ImpactManager: Rock impact VFX triggered"));
-    }
+    // Criar efeito de poeira simples usando spawn de partículas
+    SpawnImpactEffect(EVFX_ImpactType::DustCloud, DustLocation);
 }
 
-void AVFX_ImpactManager::SetVFXIntensity(float NewIntensity)
+void UVFX_ImpactManager::CleanupExpiredEffects()
 {
-    FootstepIntensity = FMath::Clamp(NewIntensity, 0.1f, 5.0f);
-    BloodIntensity = FootstepIntensity;
-    
-    UE_LOG(LogTemp, Log, TEXT("VFX_ImpactManager: Intensidade VFX alterada para %f"), NewIntensity);
-}
-
-void AVFX_ImpactManager::EnableAllVFX(bool bEnable)
-{
-    bEnableFootstepVFX = bEnable;
-    bEnableBloodVFX = bEnable;
-    bEnableDebrisVFX = bEnable;
-    
-    UE_LOG(LogTemp, Log, TEXT("VFX_ImpactManager: Todos os VFX %s"), bEnable ? TEXT("activados") : TEXT("desactivados"));
-}
-
-void AVFX_ImpactManager::CleanupOldVFX()
-{
-    CleanupVFXArray(ActiveFootstepVFX);
-    CleanupVFXArray(ActiveBloodVFX);
-    CleanupVFXArray(ActiveDebrisVFX);
-}
-
-UNiagaraComponent* AVFX_ImpactManager::SpawnVFXAtLocation(UNiagaraSystem* System, FVector Location, FRotator Rotation)
-{
-    if (!System || !GetWorld())
-    {
-        return nullptr;
-    }
-    
-    return UNiagaraFunctionLibrary::SpawnSystemAtLocation(
-        GetWorld(),
-        System,
-        Location,
-        Rotation,
-        FVector::OneVector,
-        true,  // Auto destroy
-        true,  // Auto activate
-        ENCPoolMethod::None,
-        true   // Pre cull check
-    );
-}
-
-void AVFX_ImpactManager::CleanupVFXArray(TArray<UNiagaraComponent*>& VFXArray)
-{
-    // Remover componentes que já não são válidos ou terminaram
-    VFXArray.RemoveAll([](UNiagaraComponent* Component)
+    // Remover componentes inválidos ou destruídos
+    ActiveEffects.RemoveAll([](UNiagaraComponent* Component)
     {
         return !IsValid(Component) || !Component->IsActive();
     });
+}
+
+void UVFX_ImpactManager::OnEffectFinished(UNiagaraComponent* FinishedComponent)
+{
+    if (IsValid(FinishedComponent))
+    {
+        UnregisterImpactEffect(FinishedComponent);
+        FinishedComponent->DestroyComponent();
+    }
+}
+
+void UVFX_ImpactManager::RegisterImpactEffect(UNiagaraComponent* Effect)
+{
+    if (IsValid(Effect))
+    {
+        ActiveEffects.Add(Effect);
+    }
+}
+
+void UVFX_ImpactManager::UnregisterImpactEffect(UNiagaraComponent* Effect)
+{
+    if (IsValid(Effect))
+    {
+        ActiveEffects.Remove(Effect);
+    }
 }
