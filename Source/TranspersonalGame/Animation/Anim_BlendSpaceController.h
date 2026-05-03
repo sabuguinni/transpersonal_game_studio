@@ -1,193 +1,152 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Components/ActorComponent.h"
 #include "Engine/Engine.h"
-#include "Animation/AnimInstance.h"
 #include "Animation/BlendSpace.h"
 #include "Animation/BlendSpace1D.h"
+#include "Animation/AnimInstance.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
-#include "Components/SkeletalMeshComponent.h"
+#include "../SharedTypes.h"
 #include "Anim_BlendSpaceController.generated.h"
 
 UENUM(BlueprintType)
-enum class EAnim_MovementState : uint8
+enum class EAnim_BlendSpaceType : uint8
 {
-    Idle        UMETA(DisplayName = "Idle"),
-    Walking     UMETA(DisplayName = "Walking"),
-    Running     UMETA(DisplayName = "Running"),
-    Sprinting   UMETA(DisplayName = "Sprinting"),
-    Crouching   UMETA(DisplayName = "Crouching"),
-    Jumping     UMETA(DisplayName = "Jumping"),
-    Falling     UMETA(DisplayName = "Falling"),
-    Landing     UMETA(DisplayName = "Landing")
-};
-
-UENUM(BlueprintType)
-enum class EAnim_SurvivalState : uint8
-{
-    Normal      UMETA(DisplayName = "Normal"),
-    Tired       UMETA(DisplayName = "Tired"),
-    Injured     UMETA(DisplayName = "Injured"),
-    Hungry      UMETA(DisplayName = "Hungry"),
-    Thirsty     UMETA(DisplayName = "Thirsty"),
-    Afraid      UMETA(DisplayName = "Afraid"),
-    Cautious    UMETA(DisplayName = "Cautious")
+    Locomotion      UMETA(DisplayName = "Locomotion"),
+    Combat          UMETA(DisplayName = "Combat"),
+    Crafting        UMETA(DisplayName = "Crafting"),
+    Gathering       UMETA(DisplayName = "Gathering"),
+    Injured         UMETA(DisplayName = "Injured"),
+    Exhausted       UMETA(DisplayName = "Exhausted"),
+    Afraid          UMETA(DisplayName = "Afraid")
 };
 
 USTRUCT(BlueprintType)
-struct FAnim_BlendSpaceData
+struct TRANSPERSONALGAME_API FAnim_BlendSpaceData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
-    float Speed;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blend Space")
+    EAnim_BlendSpaceType BlendSpaceType;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
-    float Direction;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blend Space")
+    class UBlendSpace* BlendSpaceAsset;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
-    float SlopeAngle;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blend Space")
+    class UBlendSpace1D* BlendSpace1DAsset;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
-    float TurnRate;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blend Space")
+    float XAxisValue;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
-    bool bIsMoving;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blend Space")
+    float YAxisValue;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
-    bool bIsInAir;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blend Space")
+    float BlendWeight;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blend Space")
+    bool bIsActive;
 
     FAnim_BlendSpaceData()
     {
-        Speed = 0.0f;
-        Direction = 0.0f;
-        SlopeAngle = 0.0f;
-        TurnRate = 0.0f;
-        bIsMoving = false;
-        bIsInAir = false;
+        BlendSpaceType = EAnim_BlendSpaceType::Locomotion;
+        BlendSpaceAsset = nullptr;
+        BlendSpace1DAsset = nullptr;
+        XAxisValue = 0.0f;
+        YAxisValue = 0.0f;
+        BlendWeight = 1.0f;
+        bIsActive = false;
     }
 };
 
-UCLASS(Blueprintable, BlueprintType)
-class TRANSPERSONALGAME_API UAnim_BlendSpaceController : public UAnimInstance
+UCLASS(ClassGroup=(Animation), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UAnim_BlendSpaceController : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
     UAnim_BlendSpaceController();
 
-    virtual void NativeInitializeAnimation() override;
-    virtual void NativeUpdateAnimation(float DeltaTimeX) override;
-
 protected:
-    // Character reference
-    UPROPERTY(BlueprintReadOnly, Category = "Character")
-    class ACharacter* OwnerCharacter;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Character")
-    class UCharacterMovementComponent* MovementComponent;
-
-    // Movement data for blend spaces
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Movement")
-    FAnim_BlendSpaceData MovementData;
-
-    // Current states
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|State")
-    EAnim_MovementState CurrentMovementState;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|State")
-    EAnim_SurvivalState CurrentSurvivalState;
-
-    // Blend space assets
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|BlendSpaces")
-    class UBlendSpace* IdleWalkRunBlendSpace;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|BlendSpaces")
-    class UBlendSpace1D* TurnInPlaceBlendSpace;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation|BlendSpaces")
-    class UBlendSpace* SlopeMovementBlendSpace;
-
-    // Animation parameters
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Parameters")
-    float Speed;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Parameters")
-    float Direction;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Parameters")
-    float SlopeAngle;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Parameters")
-    float TurnRate;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Parameters")
-    bool bIsMoving;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Parameters")
-    bool bIsInAir;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Parameters")
-    bool bIsCrouching;
-
-    // Survival parameters
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Survival")
-    float HealthPercent;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Survival")
-    float StaminaPercent;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Survival")
-    float FearLevel;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Survival")
-    float HungerLevel;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Animation|Survival")
-    float ThirstLevel;
-
-private:
-    // Update functions
-    void UpdateMovementData(float DeltaTime);
-    void UpdateMovementState();
-    void UpdateSurvivalState();
-    void CalculateDirection();
-    void CalculateSlopeAngle();
-    void CalculateTurnRate(float DeltaTime);
-
-    // Previous frame data for calculations
-    FVector PreviousVelocity;
-    FRotator PreviousRotation;
-    float PreviousYaw;
-
-    // Smoothing parameters
-    UPROPERTY(EditAnywhere, Category = "Animation|Smoothing", meta = (AllowPrivateAccess = "true"))
-    float SpeedSmoothingRate;
-
-    UPROPERTY(EditAnywhere, Category = "Animation|Smoothing", meta = (AllowPrivateAccess = "true"))
-    float DirectionSmoothingRate;
-
-    UPROPERTY(EditAnywhere, Category = "Animation|Smoothing", meta = (AllowPrivateAccess = "true"))
-    float TurnRateSmoothingRate;
+    virtual void BeginPlay() override;
 
 public:
-    // Blueprint callable functions
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void SetMovementState(EAnim_MovementState NewState);
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void SetSurvivalState(EAnim_SurvivalState NewState);
+    // Blend space data array
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blend Spaces")
+    TArray<FAnim_BlendSpaceData> BlendSpaces;
 
-    UFUNCTION(BlueprintPure, Category = "Animation")
-    FAnim_BlendSpaceData GetMovementData() const { return MovementData; }
+    // Current active blend space
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Blend Spaces")
+    int32 ActiveBlendSpaceIndex;
 
-    UFUNCTION(BlueprintPure, Category = "Animation")
-    bool ShouldPlayIdleAnimation() const;
+    // Blend space control functions
+    UFUNCTION(BlueprintCallable, Category = "Blend Space")
+    void SetActiveBlendSpace(EAnim_BlendSpaceType BlendSpaceType);
 
-    UFUNCTION(BlueprintPure, Category = "Animation")
-    bool ShouldPlayMovementAnimation() const;
+    UFUNCTION(BlueprintCallable, Category = "Blend Space")
+    void UpdateBlendSpaceParameters(float XValue, float YValue);
 
-    UFUNCTION(BlueprintPure, Category = "Animation")
-    bool ShouldPlayTurnInPlaceAnimation() const;
+    UFUNCTION(BlueprintCallable, Category = "Blend Space")
+    void SetBlendSpaceWeight(EAnim_BlendSpaceType BlendSpaceType, float Weight);
+
+    UFUNCTION(BlueprintCallable, Category = "Blend Space")
+    FAnim_BlendSpaceData GetActiveBlendSpaceData() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Blend Space")
+    bool IsBlendSpaceActive(EAnim_BlendSpaceType BlendSpaceType) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Blend Space")
+    void AddBlendSpace(EAnim_BlendSpaceType BlendSpaceType, class UBlendSpace* BlendSpaceAsset);
+
+    UFUNCTION(BlueprintCallable, Category = "Blend Space")
+    void AddBlendSpace1D(EAnim_BlendSpaceType BlendSpaceType, class UBlendSpace1D* BlendSpace1DAsset);
+
+    UFUNCTION(BlueprintCallable, Category = "Blend Space")
+    void RemoveBlendSpace(EAnim_BlendSpaceType BlendSpaceType);
+
+    // Automatic parameter calculation
+    UFUNCTION(BlueprintCallable, Category = "Blend Space")
+    void CalculateLocomotionParameters();
+
+    UFUNCTION(BlueprintCallable, Category = "Blend Space")
+    void CalculateCombatParameters();
+
+    UFUNCTION(BlueprintCallable, Category = "Blend Space")
+    void CalculateEmotionalParameters(float FearLevel, float HealthPercentage, float StaminaPercentage);
+
+    // Blueprint events
+    UFUNCTION(BlueprintImplementableEvent, Category = "Blend Space Events")
+    void OnBlendSpaceChanged(EAnim_BlendSpaceType OldType, EAnim_BlendSpaceType NewType);
+
+    UFUNCTION(BlueprintImplementableEvent, Category = "Blend Space Events")
+    void OnBlendSpaceParametersUpdated(float XValue, float YValue);
+
+private:
+    // Cached references
+    UPROPERTY()
+    class ACharacter* OwnerCharacter;
+
+    UPROPERTY()
+    class UCharacterMovementComponent* MovementComponent;
+
+    UPROPERTY()
+    class UAnimInstance* AnimInstance;
+
+    // Internal state
+    float SmoothingSpeed;
+    float ParameterSmoothingTime;
+    FVector2D PreviousParameters;
+    FVector2D TargetParameters;
+
+    // Helper functions
+    void CacheComponents();
+    int32 FindBlendSpaceIndex(EAnim_BlendSpaceType BlendSpaceType) const;
+    void SmoothBlendSpaceParameters(float DeltaTime);
+    FVector2D CalculateDirectionalMovement() const;
+    float CalculateMovementSpeed() const;
+    void InitializeDefaultBlendSpaces();
 };
