@@ -1,352 +1,291 @@
 #include "BuildIntegrationManager.h"
-#include "Engine/World.h"
 #include "Engine/Engine.h"
-#include "Engine/DirectionalLight.h"
-#include "Engine/SkyLight.h"
-#include "Engine/ExponentialHeightFog.h"
-#include "Components/SkyAtmosphereComponent.h"
-#include "Landscape/Landscape.h"
-#include "GameFramework/Character.h"
-#include "GameFramework/PlayerStart.h"
+#include "Engine/World.h"
+#include "GameFramework/GameModeBase.h"
 #include "Kismet/GameplayStatics.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMeshActor.h"
+#include "Engine/DirectionalLight.h"
+#include "Components/DirectionalLightComponent.h"
+#include "Atmosphere/AtmosphericFog.h"
+#include "Components/SkyLightComponent.h"
+#include "Components/ExponentialHeightFogComponent.h"
+
+DEFINE_LOG_CATEGORY_STATIC(LogBuildIntegration, Log, All);
 
 UBuildIntegrationManager::UBuildIntegrationManager()
 {
-    bAllSystemsValid = false;
-    bWorldStateValid = false;
-    bCharacterSystemsValid = false;
-    bAISystemsValid = false;
-    TotalActorsInLevel = 0;
-    DuplicateActorsFound = 0;
-    LastValidationResult = TEXT("Not validated");
-}
-
-void UBuildIntegrationManager::Initialize(FSubsystemCollectionBase& Collection)
-{
-    Super::Initialize(Collection);
+    PrimaryComponentTick.bCanEverTick = false;
     
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager initialized"));
+    // Inicializar contadores
+    TotalActorsInMap = 0;
+    CppActorsCount = 0;
+    LightingActorsCount = 0;
+    bCompilationSuccess = false;
+    bMapValidationPassed = false;
     
-    // Perform initial validation
-    ValidateAllSystems();
-}
-
-void UBuildIntegrationManager::Deinitialize()
-{
+    // Inicializar arrays
+    LoadedCppClasses.Empty();
+    FailedCppClasses.Empty();
+    DuplicateLightingActors.Empty();
     ValidationErrors.Empty();
-    ValidationWarnings.Empty();
-    ActorCountsByType.Empty();
-    DuplicateActors.Empty();
-    
-    Super::Deinitialize();
 }
 
-bool UBuildIntegrationManager::ValidateAllSystems()
+void UBuildIntegrationManager::BeginPlay()
 {
-    ValidationErrors.Empty();
-    ValidationWarnings.Empty();
+    Super::BeginPlay();
     
-    UE_LOG(LogTemp, Warning, TEXT("Starting comprehensive system validation"));
+    UE_LOG(LogBuildIntegration, Log, TEXT("BuildIntegrationManager iniciado"));
     
-    // Validate each subsystem
-    bWorldStateValid = ValidateWorldState();
-    bCharacterSystemsValid = ValidateCharacterSystems();
-    bAISystemsValid = ValidateAISystems();
-    
-    // Overall validation result
-    bAllSystemsValid = bWorldStateValid && bCharacterSystemsValid && bAISystemsValid;
-    
-    // Generate validation report
-    if (bAllSystemsValid)
-    {
-        LastValidationResult = TEXT("All systems valid");
-        UE_LOG(LogTemp, Warning, TEXT("✓ All systems validation PASSED"));
-    }
-    else
-    {
-        LastValidationResult = FString::Printf(TEXT("Validation failed: %d errors, %d warnings"), 
-            ValidationErrors.Num(), ValidationWarnings.Num());
-        UE_LOG(LogTemp, Error, TEXT("✗ System validation FAILED: %s"), *LastValidationResult);
-    }
-    
-    // Broadcast validation complete
-    OnValidationComplete.Broadcast(bAllSystemsValid);
-    
-    return bAllSystemsValid;
+    // Executar validação inicial
+    ValidateMapState();
+    ValidateCppModules();
+    GenerateIntegrationReport();
 }
 
-bool UBuildIntegrationManager::ValidateWorldState()
+void UBuildIntegrationManager::ValidateMapState()
 {
     UWorld* World = GetWorld();
     if (!World)
     {
-        ValidationErrors.Add(TEXT("No valid world found"));
-        return false;
-    }
-    
-    bool bWorldValid = true;
-    
-    // Validate actor counts
-    if (!ValidateActorCounts())
-    {
-        bWorldValid = false;
-    }
-    
-    // Validate lighting setup
-    if (!ValidateLightingSetup())
-    {
-        bWorldValid = false;
-    }
-    
-    // Validate terrain
-    if (!ValidateTerrainSetup())
-    {
-        bWorldValid = false;
-    }
-    
-    // Validate player setup
-    if (!ValidatePlayerSetup())
-    {
-        bWorldValid = false;
-    }
-    
-    return bWorldValid;
-}
-
-bool UBuildIntegrationManager::ValidateCharacterSystems()
-{
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return false;
-    }
-    
-    // Check for player character class
-    TArray<AActor*> Characters;
-    UGameplayStatics::GetAllActorsOfClass(World, ACharacter::StaticClass(), Characters);
-    
-    if (Characters.Num() == 0)
-    {
-        ValidationWarnings.Add(TEXT("No character actors found in level"));
-        return false;
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Character systems validation: %d characters found"), Characters.Num());
-    return true;
-}
-
-bool UBuildIntegrationManager::ValidateAISystems()
-{
-    // AI systems validation - placeholder for now
-    UE_LOG(LogTemp, Warning, TEXT("AI systems validation: Basic check passed"));
-    return true;
-}
-
-bool UBuildIntegrationManager::ValidateActorCounts()
-{
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return false;
-    }
-    
-    ActorCountsByType.Empty();
-    DuplicateActors.Empty();
-    
-    // Get all actors and count by type
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-    {
-        AActor* Actor = *ActorItr;
-        if (Actor)
-        {
-            FString ActorClassName = Actor->GetClass()->GetName();
-            int32* Count = ActorCountsByType.Find(ActorClassName);
-            if (Count)
-            {
-                (*Count)++;
-                
-                // Mark as duplicate if it's a lighting actor
-                if (ActorClassName.Contains(TEXT("DirectionalLight")) ||
-                    ActorClassName.Contains(TEXT("SkyLight")) ||
-                    ActorClassName.Contains(TEXT("ExponentialHeightFog")) ||
-                    ActorClassName.Contains(TEXT("SkyAtmosphere")))
-                {
-                    DuplicateActors.Add(Actor);
-                }
-            }
-            else
-            {
-                ActorCountsByType.Add(ActorClassName, 1);
-            }
-        }
-    }
-    
-    TotalActorsInLevel = 0;
-    for (auto& Pair : ActorCountsByType)
-    {
-        TotalActorsInLevel += Pair.Value;
-    }
-    
-    DuplicateActorsFound = DuplicateActors.Num();
-    
-    UE_LOG(LogTemp, Warning, TEXT("Actor validation: %d total actors, %d duplicates found"), 
-        TotalActorsInLevel, DuplicateActorsFound);
-    
-    return DuplicateActorsFound == 0;
-}
-
-bool UBuildIntegrationManager::ValidateLightingSetup()
-{
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return false;
-    }
-    
-    // Check for essential lighting actors
-    TArray<AActor*> DirectionalLights;
-    UGameplayStatics::GetAllActorsOfClass(World, ADirectionalLight::StaticClass(), DirectionalLights);
-    
-    TArray<AActor*> SkyLights;
-    UGameplayStatics::GetAllActorsOfClass(World, ASkyLight::StaticClass(), SkyLights);
-    
-    if (DirectionalLights.Num() == 0)
-    {
-        ValidationErrors.Add(TEXT("No DirectionalLight found"));
-        return false;
-    }
-    
-    if (DirectionalLights.Num() > 1)
-    {
-        ValidationWarnings.Add(FString::Printf(TEXT("Multiple DirectionalLights found: %d"), DirectionalLights.Num()));
-    }
-    
-    if (SkyLights.Num() > 1)
-    {
-        ValidationWarnings.Add(FString::Printf(TEXT("Multiple SkyLights found: %d"), SkyLights.Num()));
-    }
-    
-    return true;
-}
-
-bool UBuildIntegrationManager::ValidateTerrainSetup()
-{
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return false;
-    }
-    
-    // Check for landscape
-    TArray<AActor*> Landscapes;
-    UGameplayStatics::GetAllActorsOfClass(World, ALandscape::StaticClass(), Landscapes);
-    
-    if (Landscapes.Num() == 0)
-    {
-        ValidationWarnings.Add(TEXT("No Landscape found - using basic terrain"));
-    }
-    
-    return true;
-}
-
-bool UBuildIntegrationManager::ValidatePlayerSetup()
-{
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return false;
-    }
-    
-    // Check for PlayerStart
-    TArray<AActor*> PlayerStarts;
-    UGameplayStatics::GetAllActorsOfClass(World, APlayerStart::StaticClass(), PlayerStarts);
-    
-    if (PlayerStarts.Num() == 0)
-    {
-        ValidationErrors.Add(TEXT("No PlayerStart found"));
-        return false;
-    }
-    
-    return true;
-}
-
-void UBuildIntegrationManager::GenerateBuildReport()
-{
-    FString ReportPath = FPaths::ProjectLogDir() / TEXT("BuildIntegrationReport.txt");
-    
-    FString Report = TEXT("=== TRANSPERSONAL GAME BUILD INTEGRATION REPORT ===\n");
-    Report += FString::Printf(TEXT("Generated: %s\n\n"), *FDateTime::Now().ToString());
-    
-    Report += FString::Printf(TEXT("Overall Status: %s\n"), bAllSystemsValid ? TEXT("VALID") : TEXT("ISSUES DETECTED"));
-    Report += FString::Printf(TEXT("World State: %s\n"), bWorldStateValid ? TEXT("VALID") : TEXT("INVALID"));
-    Report += FString::Printf(TEXT("Character Systems: %s\n"), bCharacterSystemsValid ? TEXT("VALID") : TEXT("INVALID"));
-    Report += FString::Printf(TEXT("AI Systems: %s\n\n"), bAISystemsValid ? TEXT("VALID") : TEXT("INVALID"));
-    
-    Report += FString::Printf(TEXT("Total Actors: %d\n"), TotalActorsInLevel);
-    Report += FString::Printf(TEXT("Duplicate Actors: %d\n\n"), DuplicateActorsFound);
-    
-    if (ValidationErrors.Num() > 0)
-    {
-        Report += TEXT("ERRORS:\n");
-        for (const FString& Error : ValidationErrors)
-        {
-            Report += FString::Printf(TEXT("  - %s\n"), *Error);
-        }
-        Report += TEXT("\n");
-    }
-    
-    if (ValidationWarnings.Num() > 0)
-    {
-        Report += TEXT("WARNINGS:\n");
-        for (const FString& Warning : ValidationWarnings)
-        {
-            Report += FString::Printf(TEXT("  - %s\n"), *Warning);
-        }
-        Report += TEXT("\n");
-    }
-    
-    Report += TEXT("ACTOR COUNTS BY TYPE:\n");
-    for (auto& Pair : ActorCountsByType)
-    {
-        Report += FString::Printf(TEXT("  %s: %d\n"), *Pair.Key, Pair.Value);
-    }
-    
-    // Write report to file
-    FFileHelper::SaveStringToFile(Report, *ReportPath);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Build integration report generated: %s"), *ReportPath);
-    OnBuildReportGenerated.Broadcast(ReportPath);
-}
-
-bool UBuildIntegrationManager::CheckModuleDependencies()
-{
-    // Module dependency validation - placeholder
-    UE_LOG(LogTemp, Warning, TEXT("Module dependency check: Basic validation passed"));
-    return true;
-}
-
-void UBuildIntegrationManager::CleanupDuplicateActors()
-{
-    if (DuplicateActors.Num() == 0)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("No duplicate actors to clean up"));
+        UE_LOG(LogBuildIntegration, Error, TEXT("Mundo não encontrado"));
+        ValidationErrors.Add(TEXT("World not found"));
         return;
     }
     
-    UE_LOG(LogTemp, Warning, TEXT("Cleaning up %d duplicate actors"), DuplicateActors.Num());
+    // Contar todos os actores
+    TArray<AActor*> AllActors;
+    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
+    TotalActorsInMap = AllActors.Num();
     
-    for (AActor* Actor : DuplicateActors)
+    UE_LOG(LogBuildIntegration, Log, TEXT("Total de actores no mapa: %d"), TotalActorsInMap);
+    
+    // Verificar actores de lighting
+    ValidateLightingActors(World);
+    
+    // Verificar actores C++
+    ValidateCppActors(AllActors);
+    
+    // Verificar GameMode
+    ValidateGameMode(World);
+    
+    bMapValidationPassed = ValidationErrors.Num() == 0;
+}
+
+void UBuildIntegrationManager::ValidateLightingActors(UWorld* World)
+{
+    if (!World) return;
+    
+    // Verificar DirectionalLight
+    TArray<AActor*> DirectionalLights;
+    UGameplayStatics::GetAllActorsOfClass(World, ADirectionalLight::StaticClass(), DirectionalLights);
+    
+    if (DirectionalLights.Num() > 1)
     {
-        if (Actor && IsValid(Actor))
+        DuplicateLightingActors.Add(FString::Printf(TEXT("DirectionalLight: %d instances"), DirectionalLights.Num()));
+        UE_LOG(LogBuildIntegration, Warning, TEXT("Múltiplos DirectionalLights encontrados: %d"), DirectionalLights.Num());
+    }
+    else if (DirectionalLights.Num() == 0)
+    {
+        ValidationErrors.Add(TEXT("No DirectionalLight found in map"));
+        UE_LOG(LogBuildIntegration, Error, TEXT("Nenhum DirectionalLight encontrado"));
+    }
+    
+    LightingActorsCount = DirectionalLights.Num();
+    
+    // Verificar SkyLight
+    TArray<AActor*> SkyLights;
+    UGameplayStatics::GetAllActorsOfClass(World, ASkyLight::StaticClass(), SkyLights);
+    
+    if (SkyLights.Num() > 1)
+    {
+        DuplicateLightingActors.Add(FString::Printf(TEXT("SkyLight: %d instances"), SkyLights.Num()));
+    }
+    
+    LightingActorsCount += SkyLights.Num();
+}
+
+void UBuildIntegrationManager::ValidateCppActors(const TArray<AActor*>& AllActors)
+{
+    CppActorsCount = 0;
+    
+    for (AActor* Actor : AllActors)
+    {
+        if (!Actor) continue;
+        
+        FString ClassName = Actor->GetClass()->GetName();
+        
+        // Verificar se é uma classe C++ do nosso módulo
+        if (ClassName.Contains(TEXT("Transpersonal")) || 
+            ClassName.Contains(TEXT("PCG")) || 
+            ClassName.Contains(TEXT("Foliage")) || 
+            ClassName.Contains(TEXT("Crowd")))
         {
-            UE_LOG(LogTemp, Warning, TEXT("Destroying duplicate actor: %s"), *Actor->GetName());
-            Actor->Destroy();
+            CppActorsCount++;
+            UE_LOG(LogBuildIntegration, Log, TEXT("Actor C++ encontrado: %s (%s)"), 
+                   *Actor->GetName(), *ClassName);
         }
     }
     
-    DuplicateActors.Empty();
-    DuplicateActorsFound = 0;
+    UE_LOG(LogBuildIntegration, Log, TEXT("Total de actores C++ no mapa: %d"), CppActorsCount);
+}
+
+void UBuildIntegrationManager::ValidateGameMode(UWorld* World)
+{
+    if (!World) return;
     
-    // Re-validate after cleanup
-    ValidateActorCounts();
+    AGameModeBase* GameMode = World->GetAuthGameMode();
+    if (!GameMode)
+    {
+        ValidationErrors.Add(TEXT("No GameMode found"));
+        UE_LOG(LogBuildIntegration, Error, TEXT("Nenhum GameMode encontrado"));
+        return;
+    }
+    
+    FString GameModeClass = GameMode->GetClass()->GetName();
+    UE_LOG(LogBuildIntegration, Log, TEXT("GameMode actual: %s"), *GameModeClass);
+    
+    if (!GameModeClass.Contains(TEXT("Transpersonal")))
+    {
+        ValidationErrors.Add(FString::Printf(TEXT("GameMode is not TranspersonalGameMode: %s"), *GameModeClass));
+    }
+}
+
+void UBuildIntegrationManager::ValidateCppModules()
+{
+    // Lista de classes C++ que devem estar carregadas
+    TArray<FString> ExpectedClasses = {
+        TEXT("TranspersonalCharacter"),
+        TEXT("TranspersonalGameMode"),
+        TEXT("TranspersonalGameState"),
+        TEXT("PCGWorldGenerator"),
+        TEXT("FoliageManager"),
+        TEXT("CrowdSimulationManager"),
+        TEXT("ProceduralWorldManager"),
+        TEXT("BuildIntegrationManager")
+    };
+    
+    LoadedCppClasses.Empty();
+    FailedCppClasses.Empty();
+    
+    for (const FString& ClassName : ExpectedClasses)
+    {
+        FString ClassPath = FString::Printf(TEXT("/Script/TranspersonalGame.%s"), *ClassName);
+        
+        UClass* LoadedClass = LoadClass<UObject>(nullptr, *ClassPath);
+        if (LoadedClass)
+        {
+            LoadedCppClasses.Add(ClassName);
+            UE_LOG(LogBuildIntegration, Log, TEXT("Classe C++ carregada: %s"), *ClassName);
+        }
+        else
+        {
+            FailedCppClasses.Add(ClassName);
+            UE_LOG(LogBuildIntegration, Error, TEXT("Falha ao carregar classe C++: %s"), *ClassName);
+        }
+    }
+    
+    bCompilationSuccess = FailedCppClasses.Num() == 0;
+    
+    UE_LOG(LogBuildIntegration, Log, TEXT("Classes carregadas: %d, Falharam: %d"), 
+           LoadedCppClasses.Num(), FailedCppClasses.Num());
+}
+
+void UBuildIntegrationManager::GenerateIntegrationReport()
+{
+    UE_LOG(LogBuildIntegration, Log, TEXT("=== RELATÓRIO DE INTEGRAÇÃO ==="));
+    UE_LOG(LogBuildIntegration, Log, TEXT("Total de actores: %d"), TotalActorsInMap);
+    UE_LOG(LogBuildIntegration, Log, TEXT("Actores C++: %d"), CppActorsCount);
+    UE_LOG(LogBuildIntegration, Log, TEXT("Actores de lighting: %d"), LightingActorsCount);
+    UE_LOG(LogBuildIntegration, Log, TEXT("Compilação bem-sucedida: %s"), bCompilationSuccess ? TEXT("SIM") : TEXT("NÃO"));
+    UE_LOG(LogBuildIntegration, Log, TEXT("Validação do mapa: %s"), bMapValidationPassed ? TEXT("PASSOU") : TEXT("FALHOU"));
+    
+    if (DuplicateLightingActors.Num() > 0)
+    {
+        UE_LOG(LogBuildIntegration, Warning, TEXT("Duplicados de lighting encontrados:"));
+        for (const FString& Duplicate : DuplicateLightingActors)
+        {
+            UE_LOG(LogBuildIntegration, Warning, TEXT("  %s"), *Duplicate);
+        }
+    }
+    
+    if (ValidationErrors.Num() > 0)
+    {
+        UE_LOG(LogBuildIntegration, Error, TEXT("Erros de validação encontrados:"));
+        for (const FString& Error : ValidationErrors)
+        {
+            UE_LOG(LogBuildIntegration, Error, TEXT("  %s"), *Error);
+        }
+    }
+    
+    UE_LOG(LogBuildIntegration, Log, TEXT("=== FIM DO RELATÓRIO ==="));
+}
+
+bool UBuildIntegrationManager::IsIntegrationHealthy() const
+{
+    return bCompilationSuccess && bMapValidationPassed && ValidationErrors.Num() == 0;
+}
+
+void UBuildIntegrationManager::CleanupDuplicateLighting()
+{
+    UWorld* World = GetWorld();
+    if (!World) return;
+    
+    UE_LOG(LogBuildIntegration, Log, TEXT("Iniciando limpeza de duplicados de lighting"));
+    
+    // Limpar DirectionalLights duplicados
+    TArray<AActor*> DirectionalLights;
+    UGameplayStatics::GetAllActorsOfClass(World, ADirectionalLight::StaticClass(), DirectionalLights);
+    
+    if (DirectionalLights.Num() > 1)
+    {
+        UE_LOG(LogBuildIntegration, Warning, TEXT("Removendo %d DirectionalLights duplicados"), DirectionalLights.Num() - 1);
+        
+        for (int32 i = 1; i < DirectionalLights.Num(); i++)
+        {
+            if (DirectionalLights[i])
+            {
+                DirectionalLights[i]->Destroy();
+            }
+        }
+    }
+    
+    // Limpar SkyLights duplicados
+    TArray<AActor*> SkyLights;
+    UGameplayStatics::GetAllActorsOfClass(World, ASkyLight::StaticClass(), SkyLights);
+    
+    if (SkyLights.Num() > 1)
+    {
+        UE_LOG(LogBuildIntegration, Warning, TEXT("Removendo %d SkyLights duplicados"), SkyLights.Num() - 1);
+        
+        for (int32 i = 1; i < SkyLights.Num(); i++)
+        {
+            if (SkyLights[i])
+            {
+                SkyLights[i]->Destroy();
+            }
+        }
+    }
+    
+    UE_LOG(LogBuildIntegration, Log, TEXT("Limpeza de duplicados concluída"));
+}
+
+FString UBuildIntegrationManager::GetIntegrationStatus() const
+{
+    if (IsIntegrationHealthy())
+    {
+        return TEXT("HEALTHY");
+    }
+    else if (bCompilationSuccess && !bMapValidationPassed)
+    {
+        return TEXT("COMPILATION_OK_MAP_ISSUES");
+    }
+    else if (!bCompilationSuccess && bMapValidationPassed)
+    {
+        return TEXT("MAP_OK_COMPILATION_ISSUES");
+    }
+    else
+    {
+        return TEXT("CRITICAL_ISSUES");
+    }
 }
