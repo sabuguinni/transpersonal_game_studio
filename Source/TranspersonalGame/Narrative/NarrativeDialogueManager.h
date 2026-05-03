@@ -3,34 +3,35 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Components/AudioComponent.h"
-#include "Sound/SoundCue.h"
-#include "Engine/DataTable.h"
+#include "Components/TextRenderComponent.h"
+#include "Engine/World.h"
+#include "SharedTypes.h"
 #include "NarrativeDialogueManager.generated.h"
 
 UENUM(BlueprintType)
 enum class ENarr_DialogueType : uint8
 {
-    Research        UMETA(DisplayName = "Research Log"),
-    Safety          UMETA(DisplayName = "Safety Warning"),
-    Discovery       UMETA(DisplayName = "Discovery"),
-    Story           UMETA(DisplayName = "Story Narration"),
-    Tutorial        UMETA(DisplayName = "Tutorial"),
-    Environmental   UMETA(DisplayName = "Environmental")
+    TacticalWarning UMETA(DisplayName = "Tactical Warning"),
+    FieldResearch UMETA(DisplayName = "Field Research"),
+    SafetyAlert UMETA(DisplayName = "Safety Alert"),
+    TribalWisdom UMETA(DisplayName = "Tribal Wisdom"),
+    EnvironmentalInfo UMETA(DisplayName = "Environmental Info"),
+    CombatGuidance UMETA(DisplayName = "Combat Guidance")
 };
 
 UENUM(BlueprintType)
-enum class ENarr_TriggerCondition : uint8
+enum class ENarr_DialogueTrigger : uint8
 {
-    PlayerProximity     UMETA(DisplayName = "Player Proximity"),
-    DinosaurSighting    UMETA(DisplayName = "Dinosaur Sighting"),
-    ResourceDiscovery   UMETA(DisplayName = "Resource Discovery"),
-    DangerDetected      UMETA(DisplayName = "Danger Detected"),
-    QuestProgress       UMETA(DisplayName = "Quest Progress"),
-    TimeOfDay           UMETA(DisplayName = "Time of Day")
+    PlayerProximity UMETA(DisplayName = "Player Proximity"),
+    DinosaurSighting UMETA(DisplayName = "Dinosaur Sighting"),
+    DangerZone UMETA(DisplayName = "Danger Zone"),
+    QuestProgress UMETA(DisplayName = "Quest Progress"),
+    EnvironmentalChange UMETA(DisplayName = "Environmental Change"),
+    ManualTrigger UMETA(DisplayName = "Manual Trigger")
 };
 
 USTRUCT(BlueprintType)
-struct FNarr_DialogueEntry : public FTableRowBase
+struct TRANSPERSONALGAME_API FNarr_DialogueEntry
 {
     GENERATED_BODY()
 
@@ -38,16 +39,19 @@ struct FNarr_DialogueEntry : public FTableRowBase
     FString DialogueID;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FText DialogueText;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
     ENarr_DialogueType DialogueType;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    ENarr_TriggerCondition TriggerCondition;
+    ENarr_DialogueTrigger TriggerType;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    TSoftObjectPtr<USoundCue> AudioClip;
+    FString DialogueText;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    FString AudioURL;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    FString CharacterName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
     float Duration;
@@ -56,61 +60,26 @@ struct FNarr_DialogueEntry : public FTableRowBase
     int32 Priority;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    bool bCanRepeat;
+    bool bIsRepeatable;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    float CooldownTime;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FVector TriggerLocation;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    float TriggerRadius;
+    bool bHasBeenPlayed;
 
     FNarr_DialogueEntry()
     {
-        DialogueID = TEXT("DefaultDialogue");
-        DialogueText = FText::FromString(TEXT("Default dialogue text"));
-        DialogueType = ENarr_DialogueType::Story;
-        TriggerCondition = ENarr_TriggerCondition::PlayerProximity;
-        Duration = 5.0f;
+        DialogueID = TEXT("");
+        DialogueType = ENarr_DialogueType::TacticalWarning;
+        TriggerType = ENarr_DialogueTrigger::PlayerProximity;
+        DialogueText = TEXT("");
+        AudioURL = TEXT("");
+        CharacterName = TEXT("");
+        Duration = 0.0f;
         Priority = 1;
-        bCanRepeat = false;
-        CooldownTime = 30.0f;
-        TriggerLocation = FVector::ZeroVector;
-        TriggerRadius = 500.0f;
+        bIsRepeatable = false;
+        bHasBeenPlayed = false;
     }
 };
 
-USTRUCT(BlueprintType)
-struct FNarr_ActiveDialogue
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly, Category = "Active Dialogue")
-    FNarr_DialogueEntry DialogueData;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Active Dialogue")
-    float TimeRemaining;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Active Dialogue")
-    bool bIsPlaying;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Active Dialogue")
-    float LastPlayedTime;
-
-    FNarr_ActiveDialogue()
-    {
-        TimeRemaining = 0.0f;
-        bIsPlaying = false;
-        LastPlayedTime = 0.0f;
-    }
-};
-
-/**
- * Gestor central de diálogos e narrativa dinâmica
- * Controla reprodução de áudio contextual baseado em eventos do jogo
- */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API ANarrativeDialogueManager : public AActor
 {
@@ -121,113 +90,77 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
 
-    // Componentes
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    USceneComponent* RootSceneComponent;
+
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     UAudioComponent* DialogueAudioComponent;
 
-    // Configuração
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative Settings")
-    UDataTable* DialogueDataTable;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UTextRenderComponent* SubtitleText;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative Settings")
-    float MaxDialogueDistance;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue System")
+    TArray<FNarr_DialogueEntry> DialogueDatabase;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative Settings")
-    float VolumeMultiplier;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue System")
+    FNarr_DialogueEntry CurrentDialogue;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative Settings")
-    bool bAutoTriggerDialogues;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue System")
+    bool bIsPlayingDialogue;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative Settings")
-    int32 MaxConcurrentDialogues;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue System")
+    float DialogueVolume;
 
-    // Estado do sistema
-    UPROPERTY(BlueprintReadOnly, Category = "Narrative State")
-    TArray<FNarr_ActiveDialogue> ActiveDialogues;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Narrative State")
-    TArray<FString> PlayedDialogueIDs;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Narrative State")
-    FNarr_ActiveDialogue CurrentDialogue;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Narrative State")
-    bool bIsDialoguePlaying;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue System")
+    float SubtitleDisplayTime;
 
 public:
-    // Funções públicas
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    bool PlayDialogue(const FString& DialogueID);
+    virtual void Tick(float DeltaTime) override;
 
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    UFUNCTION(BlueprintCallable, Category = "Dialogue System")
+    void InitializeDialogueDatabase();
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue System")
+    void PlayDialogue(const FString& DialogueID);
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue System")
+    void PlayDialogueByType(ENarr_DialogueType DialogueType);
+
+    UFUNCTION(BlueprintCallable, Category = "Dialogue System")
     void StopCurrentDialogue();
 
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void TriggerDialogueByCondition(ENarr_TriggerCondition Condition, const FVector& Location = FVector::ZeroVector);
+    UFUNCTION(BlueprintCallable, Category = "Dialogue System")
+    bool TriggerDialogue(ENarr_DialogueTrigger TriggerType, const FVector& TriggerLocation);
 
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void RegisterDialogueCompletion(const FString& DialogueID);
+    UFUNCTION(BlueprintCallable, Category = "Dialogue System")
+    void AddDialogueEntry(const FNarr_DialogueEntry& NewEntry);
 
-    UFUNCTION(BlueprintPure, Category = "Narrative")
-    bool IsDialogueAvailable(const FString& DialogueID) const;
+    UFUNCTION(BlueprintCallable, Category = "Dialogue System")
+    TArray<FNarr_DialogueEntry> GetDialoguesByType(ENarr_DialogueType DialogueType);
 
-    UFUNCTION(BlueprintPure, Category = "Narrative")
-    TArray<FNarr_DialogueEntry> GetDialoguesByType(ENarr_DialogueType DialogueType) const;
+    UFUNCTION(BlueprintCallable, Category = "Dialogue System")
+    FNarr_DialogueEntry GetHighestPriorityDialogue(ENarr_DialogueTrigger TriggerType);
 
-    UFUNCTION(BlueprintPure, Category = "Narrative")
-    float GetDialogueProgress() const;
+    UFUNCTION(BlueprintCallable, Category = "Dialogue System")
+    void SetSubtitleVisibility(bool bVisible);
 
-    // Eventos
-    UFUNCTION(BlueprintImplementableEvent, Category = "Narrative Events")
-    void OnDialogueStarted(const FNarr_DialogueEntry& DialogueData);
-
-    UFUNCTION(BlueprintImplementableEvent, Category = "Narrative Events")
-    void OnDialogueCompleted(const FNarr_DialogueEntry& DialogueData);
-
-    UFUNCTION(BlueprintImplementableEvent, Category = "Narrative Events")
-    void OnDialogueInterrupted(const FNarr_DialogueEntry& DialogueData);
+    UFUNCTION(BlueprintCallable, Category = "Dialogue System")
+    bool IsDialoguePlaying() const;
 
 protected:
-    // Funções internas
-    void UpdateActiveDialogues(float DeltaTime);
-    void CheckTriggerConditions();
-    void ProcessDialogueQueue();
-    
-    FNarr_DialogueEntry* FindDialogueByID(const FString& DialogueID);
-    TArray<FNarr_DialogueEntry> GetTriggeredDialogues(ENarr_TriggerCondition Condition, const FVector& Location);
-    
-    bool CanPlayDialogue(const FNarr_DialogueEntry& DialogueData) const;
-    void StartDialoguePlayback(const FNarr_DialogueEntry& DialogueData);
-    void CompleteDialogue();
-
-    // Detecção de contexto
-    void CheckPlayerProximity();
-    void CheckDinosaurSightings();
-    void CheckResourceDiscoveries();
-    void CheckDangerSituations();
-
-    // Utilitários
-    APawn* GetPlayerPawn() const;
-    float GetDistanceToPlayer(const FVector& Location) const;
-    bool IsLocationVisible(const FVector& Location) const;
+    UFUNCTION()
+    void OnDialogueFinished();
 
 private:
-    // Cache
+    void CreateDefaultDialogueEntries();
+    void UpdateSubtitleDisplay();
+    void LoadAudioFromURL(const FString& AudioURL);
+
     UPROPERTY()
-    APawn* CachedPlayer;
+    class ATranspersonalCharacter* PlayerCharacter;
 
-    // Timers
-    float ProximityCheckTimer;
-    float ContextCheckTimer;
-    
-    static constexpr float ProximityCheckInterval = 0.5f;
-    static constexpr float ContextCheckInterval = 1.0f;
-
-    // Queue de diálogos
-    TArray<FNarr_DialogueEntry> DialogueQueue;
-    
-    // Cooldowns
-    TMap<FString, float> DialogueCooldowns;
+    float DialogueStartTime;
+    FTimerHandle DialogueTimer;
+    FTimerHandle SubtitleTimer;
 };
