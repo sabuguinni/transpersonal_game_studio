@@ -1,364 +1,447 @@
 #include "ProductionCoordinator.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Kismet/GameplayStatics.h"
-#include "Engine/GameInstance.h"
+#include "HAL/FileManager.h"
+#include "Misc/DateTime.h"
+#include "Misc/Paths.h"
 
 UProductionCoordinator::UProductionCoordinator()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 1.0f; // Check every second
-    
-    // Initialize production metrics
-    CurrentCycle = 28;
-    TotalAgents = 19;
-    ActiveAgents = 0;
-    CompletedTasks = 0;
-    PendingTasks = 0;
-    CriticalIssues = 0;
-    
-    // Initialize agent status tracking
-    AgentStatus.Empty();
-    TaskQueue.Empty();
-    ProductionMetrics.Empty();
-    
-    bIsProductionActive = false;
-    bDebugMode = true;
+    // Initialize milestone data
+    Milestone1Data.MilestoneName = TEXT("Milestone 1 - Walk Around");
+    Milestone1Data.Description = TEXT("Player can walk around with dinosaurs visible in the world");
+    Milestone1Data.Status = EDir_MilestoneStatus::InProgress;
+    Milestone1Data.TargetDate = FDateTime::Now() + FTimespan::FromDays(2);
 }
 
-void UProductionCoordinator::BeginPlay()
+void UProductionCoordinator::Initialize(FSubsystemCollectionBase& Collection)
 {
-    Super::BeginPlay();
+    Super::Initialize(Collection);
     
-    // Initialize production coordination
-    InitializeProductionCycle();
+    UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Initializing..."));
     
-    if (bDebugMode)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Cycle %d initialized with %d agents"), 
-               CurrentCycle, TotalAgents);
-    }
+    InitializeMilestone1();
+    SetupAgentTasks();
+    
+    UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Initialized with %d agent tasks"), AgentTasks.Num());
 }
 
-void UProductionCoordinator::TickComponent(float DeltaTime, ELevelTick TickType, 
-                                          FActorComponentTickFunction* ThisTickFunction)
+void UProductionCoordinator::Deinitialize()
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    
-    if (bIsProductionActive)
-    {
-        UpdateProductionMetrics();
-        CheckAgentStatus();
-        ProcessTaskQueue();
-    }
+    UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Deinitializing..."));
+    Super::Deinitialize();
 }
 
-void UProductionCoordinator::InitializeProductionCycle()
+void UProductionCoordinator::InitializeMilestone1()
 {
-    // Clear previous cycle data
-    AgentStatus.Empty();
-    TaskQueue.Empty();
+    Milestone1Data.Tasks.Empty();
     
-    // Initialize agent tracking
-    TArray<FString> AgentNames = {
-        TEXT("Studio_Director"),
-        TEXT("Engine_Architect"), 
-        TEXT("Core_Systems"),
-        TEXT("Performance_Optimizer"),
-        TEXT("World_Generator"),
-        TEXT("Environment_Artist"),
-        TEXT("Architecture_Interior"),
-        TEXT("Lighting_Atmosphere"),
-        TEXT("Character_Artist"),
-        TEXT("Animation_Agent"),
-        TEXT("NPC_Behavior"),
-        TEXT("Combat_Enemy_AI"),
-        TEXT("Crowd_Traffic"),
-        TEXT("Quest_Mission"),
-        TEXT("Narrative_Dialogue"),
-        TEXT("Audio_Agent"),
-        TEXT("VFX_Agent"),
-        TEXT("QA_Testing"),
-        TEXT("Integration_Build")
+    // Define critical tasks for Milestone 1
+    TArray<FString> CriticalTasks = {
+        TEXT("ThirdPersonCharacter with WASD movement"),
+        TEXT("Camera boom + follow camera"),
+        TEXT("Landscape with basic terrain"),
+        TEXT("Player can walk, run, jump"),
+        TEXT("3-5 static dinosaur meshes in world"),
+        TEXT("Directional light + sky atmosphere + fog")
     };
     
-    for (const FString& AgentName : AgentNames)
+    for (const FString& TaskDesc : CriticalTasks)
     {
-        FDir_AgentStatus NewStatus;
-        NewStatus.AgentName = AgentName;
-        NewStatus.Status = EDir_AgentState::Idle;
-        NewStatus.CurrentTask = TEXT("Awaiting Assignment");
-        NewStatus.Progress = 0.0f;
-        NewStatus.LastUpdate = FDateTime::Now();
-        NewStatus.Priority = EDir_TaskPriority::Medium;
-        
-        AgentStatus.Add(AgentName, NewStatus);
+        FDir_AgentTask NewTask;
+        NewTask.TaskDescription = TaskDesc;
+        NewTask.Status = EDir_MilestoneStatus::InProgress;
+        NewTask.Priority = 10.0f; // High priority
+        Milestone1Data.Tasks.Add(NewTask);
     }
     
-    // Set critical agents for this cycle
-    SetAgentPriority(TEXT("Core_Systems"), EDir_TaskPriority::Critical);
-    SetAgentPriority(TEXT("World_Generator"), EDir_TaskPriority::High);
-    SetAgentPriority(TEXT("Character_Artist"), EDir_TaskPriority::Critical);
-    SetAgentPriority(TEXT("Combat_Enemy_AI"), EDir_TaskPriority::High);
-    
-    bIsProductionActive = true;
-    
-    if (bDebugMode)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Production cycle initialized"));
-    }
+    Milestone1Data.Status = EDir_MilestoneStatus::InProgress;
+    Milestone1Data.LastUpdate = FDateTime::Now();
 }
 
-void UProductionCoordinator::AssignTask(const FString& AgentName, const FString& TaskDescription, 
-                                       EDir_TaskPriority Priority, float EstimatedDuration)
+void UProductionCoordinator::SetupAgentTasks()
 {
-    if (!AgentStatus.Contains(AgentName))
-    {
-        UE_LOG(LogTemp, Error, TEXT("ProductionCoordinator: Unknown agent %s"), *AgentName);
-        return;
-    }
+    AgentTasks.Empty();
     
-    // Create new task
-    FDir_ProductionTask NewTask;
-    NewTask.TaskID = FGuid::NewGuid().ToString();
-    NewTask.AgentName = AgentName;
-    NewTask.Description = TaskDescription;
-    NewTask.Priority = Priority;
-    NewTask.Status = EDir_TaskStatus::Pending;
-    NewTask.EstimatedDuration = EstimatedDuration;
-    NewTask.ActualDuration = 0.0f;
-    NewTask.CreatedTime = FDateTime::Now();
-    NewTask.Dependencies.Empty();
+    // Agent #02 - Engine Architect
+    FDir_AgentTask Task02;
+    Task02.AgentID = 2;
+    Task02.AgentName = TEXT("Engine Architect");
+    Task02.TaskDescription = TEXT("Define core architecture and compilation rules");
+    Task02.Status = EDir_MilestoneStatus::InProgress;
+    Task02.Priority = 10.0f;
+    Task02.Deliverables.Add(TEXT("EngineArchitecture.h"));
+    Task02.Deliverables.Add(TEXT("EngineArchitecture.cpp"));
+    AgentTasks.Add(Task02);
     
-    // Add to task queue
-    TaskQueue.Add(NewTask);
+    // Agent #03 - Core Systems
+    FDir_AgentTask Task03;
+    Task03.AgentID = 3;
+    Task03.AgentName = TEXT("Core Systems Programmer");
+    Task03.TaskDescription = TEXT("Implement physics, collision, and movement systems");
+    Task03.Status = EDir_MilestoneStatus::NotStarted;
+    Task03.Priority = 9.0f;
+    Task03.Dependencies.Add(TEXT("Agent02"));
+    Task03.Deliverables.Add(TEXT("PhysicsCore.cpp"));
+    Task03.Deliverables.Add(TEXT("CollisionSystem.cpp"));
+    AgentTasks.Add(Task03);
     
-    // Update agent status
-    FDir_AgentStatus* Agent = AgentStatus.Find(AgentName);
-    if (Agent)
-    {
-        Agent->Status = EDir_AgentState::Assigned;
-        Agent->CurrentTask = TaskDescription;
-        Agent->Priority = Priority;
-        Agent->LastUpdate = FDateTime::Now();
-    }
+    // Agent #05 - World Generator
+    FDir_AgentTask Task05;
+    Task05.AgentID = 5;
+    Task05.AgentName = TEXT("Procedural World Generator");
+    Task05.TaskDescription = TEXT("Expand landscape to 200km2 with 5 biomes");
+    Task05.Status = EDir_MilestoneStatus::InProgress;
+    Task05.Priority = 8.0f;
+    Task05.Deliverables.Add(TEXT("LandscapeGenerator.cpp"));
+    Task05.Deliverables.Add(TEXT("BiomeSystem.cpp"));
+    AgentTasks.Add(Task05);
     
-    PendingTasks++;
+    // Agent #09 - Character Artist
+    FDir_AgentTask Task09;
+    Task09.AgentID = 9;
+    Task09.AgentName = TEXT("Character Artist");
+    Task09.TaskDescription = TEXT("Create TranspersonalCharacter with movement"));
+    Task09.Status = EDir_MilestoneStatus::InProgress;
+    Task09.Priority = 10.0f;
+    Task09.Deliverables.Add(TEXT("TranspersonalCharacter.cpp"));
+    Task09.Deliverables.Add(TEXT("PlayerController.cpp"));
+    AgentTasks.Add(Task09);
     
-    if (bDebugMode)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Task assigned to %s: %s"), 
-               *AgentName, *TaskDescription);
-    }
+    // Agent #10 - Animation
+    FDir_AgentTask Task10;
+    Task10.AgentID = 10;
+    Task10.AgentName = TEXT("Animation Agent");
+    Task10.TaskDescription = TEXT("Add character animations and IK"));
+    Task10.Status = EDir_MilestoneStatus::NotStarted;
+    Task10.Priority = 7.0f;
+    Task10.Dependencies.Add(TEXT("Agent09"));
+    Task10.Deliverables.Add(TEXT("CharacterAnimations.cpp"));
+    AgentTasks.Add(Task10);
+    
+    // Agent #12 - Combat & Enemy AI
+    FDir_AgentTask Task12;
+    Task12.AgentID = 12;
+    Task12.AgentName = TEXT("Combat & Enemy AI"));
+    Task12.TaskDescription = TEXT("Create dinosaur actors with basic AI"));
+    Task12.Status = EDir_MilestoneStatus::InProgress;
+    Task12.Priority = 8.0f;
+    Task12.Deliverables.Add(TEXT("DinosaurActor.cpp"));
+    Task12.Deliverables.Add(TEXT("DinosaurAI.cpp"));
+    AgentTasks.Add(Task12);
+    
+    // Agent #20 - Build Manager
+    FDir_AgentTask Task20;
+    Task20.AgentID = 20;
+    Task20.AgentName = TEXT("Build Manager");
+    Task20.TaskDescription = TEXT("Clean 122 phantom headers and compile project"));
+    Task20.Status = EDir_MilestoneStatus::Blocked;
+    Task20.Priority = 10.0f;
+    Task20.Deliverables.Add(TEXT("Compilation Success"));
+    Task20.Deliverables.Add(TEXT("Header Cleanup Report"));
+    AgentTasks.Add(Task20);
+    
+    UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Setup %d agent tasks"), AgentTasks.Num());
 }
 
-void UProductionCoordinator::UpdateAgentStatus(const FString& AgentName, EDir_AgentState NewStatus, 
-                                              float Progress, const FString& StatusMessage)
+void UProductionCoordinator::UpdateAgentTask(int32 AgentID, const FString& TaskDescription, EDir_MilestoneStatus Status, const TArray<FString>& Deliverables)
 {
-    FDir_AgentStatus* Agent = AgentStatus.Find(AgentName);
-    if (!Agent)
+    for (FDir_AgentTask& Task : AgentTasks)
     {
-        UE_LOG(LogTemp, Error, TEXT("ProductionCoordinator: Unknown agent %s"), *AgentName);
-        return;
-    }
-    
-    EDir_AgentState PreviousStatus = Agent->Status;
-    Agent->Status = NewStatus;
-    Agent->Progress = FMath::Clamp(Progress, 0.0f, 100.0f);
-    Agent->StatusMessage = StatusMessage;
-    Agent->LastUpdate = FDateTime::Now();
-    
-    // Update task status if agent completed work
-    if (NewStatus == EDir_AgentState::Completed && PreviousStatus != EDir_AgentState::Completed)
-    {
-        CompleteAgentTask(AgentName);
-    }
-    else if (NewStatus == EDir_AgentState::Error)
-    {
-        CriticalIssues++;
-        UE_LOG(LogTemp, Error, TEXT("ProductionCoordinator: Agent %s reported error: %s"), 
-               *AgentName, *StatusMessage);
-    }
-    
-    if (bDebugMode)
-    {
-        UE_LOG(LogTemp, Log, TEXT("ProductionCoordinator: %s status updated to %d (%.1f%%)"), 
-               *AgentName, (int32)NewStatus, Progress);
-    }
-}
-
-void UProductionCoordinator::CompleteAgentTask(const FString& AgentName)
-{
-    // Find and complete the agent's current task
-    for (FDir_ProductionTask& Task : TaskQueue)
-    {
-        if (Task.AgentName == AgentName && Task.Status == EDir_TaskStatus::InProgress)
+        if (Task.AgentID == AgentID)
         {
-            Task.Status = EDir_TaskStatus::Completed;
-            Task.CompletedTime = FDateTime::Now();
-            Task.ActualDuration = (Task.CompletedTime - Task.CreatedTime).GetTotalSeconds();
+            Task.TaskDescription = TaskDescription;
+            Task.Status = Status;
+            Task.Deliverables = Deliverables;
+            Task.LastUpdate = FDateTime::Now();
             
+            UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Updated Agent %d - %s"), AgentID, *TaskDescription);
+            
+            CalculateMilestoneProgress();
+            UpdateCriticalPath();
+            return;
+        }
+    }
+    
+    // If agent not found, create new task
+    FDir_AgentTask NewTask;
+    NewTask.AgentID = AgentID;
+    NewTask.AgentName = GetAgentName(AgentID);
+    NewTask.TaskDescription = TaskDescription;
+    NewTask.Status = Status;
+    NewTask.Deliverables = Deliverables;
+    NewTask.LastUpdate = FDateTime::Now();
+    AgentTasks.Add(NewTask);
+    
+    CalculateMilestoneProgress();
+}
+
+float UProductionCoordinator::GetMilestone1Progress() const
+{
+    if (AgentTasks.Num() == 0)
+    {
+        return 0.0f;
+    }
+    
+    int32 CompletedTasks = 0;
+    for (const FDir_AgentTask& Task : AgentTasks)
+    {
+        if (Task.Status == EDir_MilestoneStatus::Completed)
+        {
             CompletedTasks++;
-            PendingTasks = FMath::Max(0, PendingTasks - 1);
-            
-            if (bDebugMode)
-            {
-                UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Task completed by %s in %.1f seconds"), 
-                       *AgentName, Task.ActualDuration);
-            }
-            break;
+        }
+    }
+    
+    return (float)CompletedTasks / (float)AgentTasks.Num() * 100.0f;
+}
+
+TArray<FDir_AgentTask> UProductionCoordinator::GetBlockedTasks() const
+{
+    TArray<FDir_AgentTask> BlockedTasks;
+    
+    for (const FDir_AgentTask& Task : AgentTasks)
+    {
+        if (Task.Status == EDir_MilestoneStatus::Blocked)
+        {
+            BlockedTasks.Add(Task);
+        }
+    }
+    
+    return BlockedTasks;
+}
+
+TArray<FDir_AgentTask> UProductionCoordinator::GetHighPriorityTasks() const
+{
+    TArray<FDir_AgentTask> HighPriorityTasks;
+    
+    for (const FDir_AgentTask& Task : AgentTasks)
+    {
+        if (Task.Priority >= 8.0f && Task.Status != EDir_MilestoneStatus::Completed)
+        {
+            HighPriorityTasks.Add(Task);
+        }
+    }
+    
+    return HighPriorityTasks;
+}
+
+FString UProductionCoordinator::GenerateProductionReport() const
+{
+    FString Report = TEXT("=== PRODUCTION REPORT - MILESTONE 1 ===\n");
+    Report += FString::Printf(TEXT("Progress: %.1f%%\n"), GetMilestone1Progress());
+    Report += FString::Printf(TEXT("Total Tasks: %d\n"), AgentTasks.Num());
+    
+    int32 CompletedCount = 0;
+    int32 InProgressCount = 0;
+    int32 BlockedCount = 0;
+    
+    for (const FDir_AgentTask& Task : AgentTasks)
+    {
+        switch (Task.Status)
+        {
+            case EDir_MilestoneStatus::Completed:
+                CompletedCount++;
+                break;
+            case EDir_MilestoneStatus::InProgress:
+                InProgressCount++;
+                break;
+            case EDir_MilestoneStatus::Blocked:
+                BlockedCount++;
+                break;
+        }
+    }
+    
+    Report += FString::Printf(TEXT("Completed: %d | In Progress: %d | Blocked: %d\n"), CompletedCount, InProgressCount, BlockedCount);
+    
+    Report += TEXT("\n=== HIGH PRIORITY TASKS ===\n");
+    TArray<FDir_AgentTask> HighPriority = GetHighPriorityTasks();
+    for (const FDir_AgentTask& Task : HighPriority)
+    {
+        Report += FString::Printf(TEXT("Agent %d (%s): %s [Priority: %.1f]\n"), 
+            Task.AgentID, *Task.AgentName, *Task.TaskDescription, Task.Priority);
+    }
+    
+    Report += TEXT("\n=== BLOCKED TASKS ===\n");
+    TArray<FDir_AgentTask> Blocked = GetBlockedTasks();
+    for (const FDir_AgentTask& Task : Blocked)
+    {
+        Report += FString::Printf(TEXT("Agent %d (%s): %s\n"), 
+            Task.AgentID, *Task.AgentName, *Task.TaskDescription);
+    }
+    
+    return Report;
+}
+
+bool UProductionCoordinator::IsAgentReady(int32 AgentID) const
+{
+    return CheckAgentDependencies(AgentID);
+}
+
+TArray<int32> UProductionCoordinator::GetNextAgentsToExecute() const
+{
+    TArray<int32> ReadyAgents;
+    
+    // Priority order based on critical path
+    TArray<int32> PriorityOrder = {20, 2, 3, 5, 9, 12, 10, 8, 15, 14};
+    
+    for (int32 AgentID : PriorityOrder)
+    {
+        if (IsAgentReady(AgentID) && !CompletedAgents.Contains(AgentID))
+        {
+            ReadyAgents.Add(AgentID);
+        }
+    }
+    
+    return ReadyAgents;
+}
+
+void UProductionCoordinator::MarkAgentCompleted(int32 AgentID, const TArray<FString>& OutputFiles)
+{
+    CompletedAgents.AddUnique(AgentID);
+    
+    UpdateAgentTask(AgentID, TEXT("Completed"), EDir_MilestoneStatus::Completed, OutputFiles);
+    
+    UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Agent %d marked as completed with %d output files"), AgentID, OutputFiles.Num());
+}
+
+TArray<FString> UProductionCoordinator::GetCriticalPath() const
+{
+    TArray<FString> CriticalPath;
+    CriticalPath.Add(TEXT("Agent #20: Clean headers + Compile"));
+    CriticalPath.Add(TEXT("Agent #02: Engine Architecture"));
+    CriticalPath.Add(TEXT("Agent #03: Core Systems"));
+    CriticalPath.Add(TEXT("Agent #09: Character Movement"));
+    CriticalPath.Add(TEXT("Agent #05: Landscape Expansion"));
+    CriticalPath.Add(TEXT("Agent #12: Dinosaur Actors"));
+    
+    return CriticalPath;
+}
+
+bool UProductionCoordinator::HasCriticalBlockers() const
+{
+    TArray<FDir_AgentTask> BlockedTasks = GetBlockedTasks();
+    
+    for (const FDir_AgentTask& Task : BlockedTasks)
+    {
+        if (Task.Priority >= 9.0f)
+        {
+            return true;
+        }
+    }
+    
+    return false;
+}
+
+void UProductionCoordinator::ValidateCurrentState()
+{
+    UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Validating current state..."));
+    
+    FString ValidationReport = GenerateProductionReport();
+    UE_LOG(LogTemp, Warning, TEXT("%s"), *ValidationReport);
+    
+    // Check for critical blockers
+    if (HasCriticalBlockers())
+    {
+        UE_LOG(LogTemp, Error, TEXT("ProductionCoordinator: CRITICAL BLOCKERS DETECTED!"));
+    }
+    
+    // Update milestone progress
+    CalculateMilestoneProgress();
+    
+    UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Validation complete - Progress: %.1f%%"), GetMilestone1Progress());
+}
+
+void UProductionCoordinator::GenerateAgentInstructions()
+{
+    UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Generating agent instructions..."));
+    
+    TArray<int32> NextAgents = GetNextAgentsToExecute();
+    
+    for (int32 AgentID : NextAgents)
+    {
+        FString AgentName = GetAgentName(AgentID);
+        UE_LOG(LogTemp, Warning, TEXT("NEXT AGENT: #%d (%s) - READY FOR EXECUTION"), AgentID, *AgentName);
+    }
+    
+    if (NextAgents.Num() == 0)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: No agents ready - check dependencies"));
+    }
+}
+
+void UProductionCoordinator::CalculateMilestoneProgress()
+{
+    float Progress = GetMilestone1Progress();
+    Milestone1Data.CompletionPercentage = Progress;
+    Milestone1Data.LastUpdate = FDateTime::Now();
+    
+    if (Progress >= 100.0f)
+    {
+        Milestone1Data.Status = EDir_MilestoneStatus::Completed;
+    }
+    else if (Progress > 0.0f)
+    {
+        Milestone1Data.Status = EDir_MilestoneStatus::InProgress;
+    }
+}
+
+void UProductionCoordinator::UpdateCriticalPath()
+{
+    CriticalBlockers.Empty();
+    
+    TArray<FDir_AgentTask> BlockedTasks = GetBlockedTasks();
+    for (const FDir_AgentTask& Task : BlockedTasks)
+    {
+        if (Task.Priority >= 9.0f)
+        {
+            CriticalBlockers.Add(FString::Printf(TEXT("Agent %d: %s"), Task.AgentID, *Task.TaskDescription));
         }
     }
 }
 
-FDir_ProductionMetrics UProductionCoordinator::GetProductionMetrics() const
+FString UProductionCoordinator::GetAgentName(int32 AgentID) const
 {
-    FDir_ProductionMetrics Metrics;
-    Metrics.CurrentCycle = CurrentCycle;
-    Metrics.TotalAgents = TotalAgents;
-    Metrics.ActiveAgents = ActiveAgents;
-    Metrics.CompletedTasks = CompletedTasks;
-    Metrics.PendingTasks = PendingTasks;
-    Metrics.CriticalIssues = CriticalIssues;
-    
-    // Calculate efficiency
-    int32 TotalTasks = CompletedTasks + PendingTasks;
-    Metrics.EfficiencyRating = TotalTasks > 0 ? (float)CompletedTasks / TotalTasks * 100.0f : 0.0f;
-    
-    return Metrics;
-}
-
-TArray<FDir_AgentStatus> UProductionCoordinator::GetAgentStatusList() const
-{
-    TArray<FDir_AgentStatus> StatusList;
-    AgentStatus.GenerateValueArray(StatusList);
-    return StatusList;
-}
-
-TArray<FDir_ProductionTask> UProductionCoordinator::GetTaskQueue() const
-{
-    return TaskQueue;
-}
-
-void UProductionCoordinator::SetAgentPriority(const FString& AgentName, EDir_TaskPriority Priority)
-{
-    FDir_AgentStatus* Agent = AgentStatus.Find(AgentName);
-    if (Agent)
+    switch (AgentID)
     {
-        Agent->Priority = Priority;
-        
-        if (bDebugMode)
-        {
-            UE_LOG(LogTemp, Log, TEXT("ProductionCoordinator: %s priority set to %d"), 
-                   *AgentName, (int32)Priority);
-        }
+        case 2: return TEXT("Engine Architect");
+        case 3: return TEXT("Core Systems Programmer");
+        case 5: return TEXT("Procedural World Generator");
+        case 9: return TEXT("Character Artist");
+        case 10: return TEXT("Animation Agent");
+        case 12: return TEXT("Combat & Enemy AI");
+        case 20: return TEXT("Build Manager");
+        default: return FString::Printf(TEXT("Agent #%d"), AgentID);
     }
 }
 
-void UProductionCoordinator::UpdateProductionMetrics()
+bool UProductionCoordinator::CheckAgentDependencies(int32 AgentID) const
 {
-    ActiveAgents = 0;
-    
-    // Count active agents
-    for (const auto& StatusPair : AgentStatus)
+    for (const FDir_AgentTask& Task : AgentTasks)
     {
-        if (StatusPair.Value.Status == EDir_AgentState::Working || 
-            StatusPair.Value.Status == EDir_AgentState::Assigned)
+        if (Task.AgentID == AgentID)
         {
-            ActiveAgents++;
-        }
-    }
-    
-    // Update task statuses
-    for (FDir_ProductionTask& Task : TaskQueue)
-    {
-        if (Task.Status == EDir_TaskStatus::Pending)
-        {
-            // Check if agent is ready to start
-            FDir_AgentStatus* Agent = AgentStatus.Find(Task.AgentName);
-            if (Agent && Agent->Status == EDir_AgentState::Assigned)
-            {
-                Task.Status = EDir_TaskStatus::InProgress;
-                Agent->Status = EDir_AgentState::Working;
-            }
-        }
-    }
-}
-
-void UProductionCoordinator::CheckAgentStatus()
-{
-    FDateTime CurrentTime = FDateTime::Now();
-    
-    for (auto& StatusPair : AgentStatus)
-    {
-        FDir_AgentStatus& Agent = StatusPair.Value;
-        
-        // Check for stalled agents (no update in 5 minutes)
-        double TimeSinceUpdate = (CurrentTime - Agent.LastUpdate).GetTotalMinutes();
-        if (TimeSinceUpdate > 5.0 && Agent.Status == EDir_AgentState::Working)
-        {
-            Agent.Status = EDir_AgentState::Stalled;
-            
-            if (bDebugMode)
-            {
-                UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Agent %s appears stalled"), 
-                       *Agent.AgentName);
-            }
-        }
-    }
-}
-
-void UProductionCoordinator::ProcessTaskQueue()
-{
-    // Sort tasks by priority and process high-priority tasks first
-    TaskQueue.Sort([](const FDir_ProductionTask& A, const FDir_ProductionTask& B) {
-        return (int32)A.Priority > (int32)B.Priority;
-    });
-    
-    // Process pending tasks
-    for (FDir_ProductionTask& Task : TaskQueue)
-    {
-        if (Task.Status == EDir_TaskStatus::Pending)
-        {
-            // Check dependencies
-            bool CanStart = true;
             for (const FString& Dependency : Task.Dependencies)
             {
-                // Find dependency task
-                bool DependencyCompleted = false;
-                for (const FDir_ProductionTask& DepTask : TaskQueue)
+                // Check if dependency is completed
+                bool DependencyMet = false;
+                for (const FDir_AgentTask& DepTask : AgentTasks)
                 {
-                    if (DepTask.TaskID == Dependency && DepTask.Status == EDir_TaskStatus::Completed)
+                    if (DepTask.AgentName == Dependency && DepTask.Status == EDir_MilestoneStatus::Completed)
                     {
-                        DependencyCompleted = true;
+                        DependencyMet = true;
                         break;
                     }
                 }
                 
-                if (!DependencyCompleted)
+                if (!DependencyMet)
                 {
-                    CanStart = false;
-                    break;
+                    return false;
                 }
             }
-            
-            if (CanStart)
-            {
-                // Start the task
-                FDir_AgentStatus* Agent = AgentStatus.Find(Task.AgentName);
-                if (Agent && Agent->Status == EDir_AgentState::Assigned)
-                {
-                    Task.Status = EDir_TaskStatus::InProgress;
-                    Agent->Status = EDir_AgentState::Working;
-                    Agent->Progress = 0.0f;
-                    
-                    if (bDebugMode)
-                    {
-                        UE_LOG(LogTemp, Log, TEXT("ProductionCoordinator: Started task for %s"), 
-                               *Task.AgentName);
-                    }
-                }
-            }
+            return true;
         }
     }
+    
+    // If agent not found in tasks, assume ready
+    return true;
 }
