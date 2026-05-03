@@ -1,232 +1,344 @@
 #include "DinosaurAIController.h"
 #include "BehaviorTree/BehaviorTree.h"
+#include "BehaviorTree/BlackboardData.h"
+#include "BehaviorTree/BehaviorTreeComponent.h"
 #include "BehaviorTree/BlackboardComponent.h"
 #include "Perception/AIPerceptionComponent.h"
 #include "Perception/AISightConfig.h"
-#include "GameFramework/Character.h"
-#include "GameFramework/PlayerController.h"
+#include "Engine/Engine.h"
+#include "GameFramework/Pawn.h"
 #include "Kismet/GameplayStatics.h"
-#include "Engine/World.h"
-#include "TimerManager.h"
 
-ADinosaurAIController::ADinosaurAIController()
+ANPC_DinosaurAIController::ANPC_DinosaurAIController()
 {
     PrimaryActorTick.bCanEverTick = true;
 
-    // Criar componente de percepção
+    // Criar componentes de IA
+    BehaviorTreeComponent = CreateDefaultSubobject<UBehaviorTreeComponent>(TEXT("BehaviorTreeComponent"));
+    BlackboardComponent = CreateDefaultSubobject<UBlackboardComponent>(TEXT("BlackboardComponent"));
     AIPerceptionComponent = CreateDefaultSubobject<UAIPerceptionComponent>(TEXT("AIPerceptionComponent"));
-    
-    // Configurar visão
-    SightConfig = CreateDefaultSubobject<UAISightConfig>(TEXT("SightConfig"));
+
+    // Configurar percepção visual
+    UAISightConfig* SightConfig = CreateDefaultSubobject<UAISightConfig>(TEXT("SightConfig"));
     if (SightConfig)
     {
         SightConfig->SightRadius = 3000.0f;
         SightConfig->LoseSightRadius = 3500.0f;
-        SightConfig->PeripheralVisionAngleDegrees = 90.0f;
-        SightConfig->SetMaxAge(5.0f);
-        SightConfig->AutoSuccessRangeFromLastSeenLocation = 500.0f;
-        
-        // Detectar jogadores
+        SightConfig->PeripheralVisionAngleDegrees = 120.0f;
+        SightConfig->SetMaxAge(10.0f);
         SightConfig->DetectionByAffiliation.bDetectNeutrals = true;
         SightConfig->DetectionByAffiliation.bDetectFriendlies = true;
         SightConfig->DetectionByAffiliation.bDetectEnemies = true;
-        
-        AIPerceptionComponent->SetDominantSense(*SightConfig->GetSenseImplementation());
+
         AIPerceptionComponent->ConfigureSense(*SightConfig);
+        AIPerceptionComponent->SetDominantSense(SightConfig->GetSenseImplementation());
     }
 
-    // Configurar Blackboard
-    BlackboardComponent = CreateDefaultSubobject<UBlackboardComponent>(TEXT("BlackboardComponent"));
-    
-    // Valores padrão
-    PatrolRadius = 5000.0f;
-    MovementSpeed = 300.0f;
-    PlayerDetectionRange = 3000.0f;
-    bIsChasing = false;
-    bIsPatrolling = false;
+    // Configurar stats padrão
+    DinosaurStats.Health = 100.0f;
+    DinosaurStats.MaxHealth = 100.0f;
+    DinosaurStats.AttackDamage = 25.0f;
+    DinosaurStats.MovementSpeed = 400.0f;
+    DinosaurStats.SightRange = 3000.0f;
+    DinosaurStats.AttackRange = 200.0f;
+    DinosaurStats.PatrolRadius = 1500.0f;
+
+    // Estado inicial
+    CurrentState = ENPC_DinosaurState::Idle;
     CurrentTarget = nullptr;
 }
 
-void ADinosaurAIController::BeginPlay()
+void ANPC_DinosaurAIController::BeginPlay()
 {
     Super::BeginPlay();
-    
-    // Bind perception events
-    if (AIPerceptionComponent)
-    {
-        AIPerceptionComponent->OnPerceptionUpdated.AddDynamic(this, &ADinosaurAIController::OnPerceptionUpdated);
-    }
-    
+
     // Guardar posição inicial
     if (GetPawn())
     {
         HomeLocation = GetPawn()->GetActorLocation();
     }
-    
-    // Iniciar patrulha
-    StartPatrolling();
-}
 
-void ADinosaurAIController::OnPossess(APawn* InPawn)
-{
-    Super::OnPossess(InPawn);
-    
-    // Iniciar Behavior Tree se definido
-    if (BehaviorTree && BlackboardComponent)
+    // Configurar blackboard
+    if (BlackboardAsset && BlackboardComponent)
+    {
+        UseBlackboard(BlackboardAsset);
+    }
+
+    // Iniciar behavior tree
+    if (BehaviorTree && BehaviorTreeComponent)
     {
         RunBehaviorTree(BehaviorTree);
+    }
+
+    // Conectar callback de percepção
+    if (AIPerceptionComponent)
+    {
+        AIPerceptionComponent->OnPerceptionUpdated.AddDynamic(this, &ANPC_DinosaurAIController::OnPerceptionUpdated);
+    }
+
+    // Estado inicial de patrulha
+    SetDinosaurState(ENPC_DinosaurState::Patrol);
+}
+
+void ANPC_DinosaurAIController::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+
+    if (IsAlive())
+    {
+        UpdateBehavior(DeltaTime);
+    }
+}
+
+void ANPC_DinosaurAIController::SetDinosaurState(ENPC_DinosaurState NewState)
+{
+    if (CurrentState != NewState)
+    {
+        CurrentState = NewState;
         
-        // Configurar valores iniciais no Blackboard
-        BlackboardComponent->SetValueAsVector(TEXT("HomeLocation"), HomeLocation);
-        BlackboardComponent->SetValueAsFloat(TEXT("PatrolRadius"), PatrolRadius);
-        BlackboardComponent->SetValueAsBool(TEXT("IsChasing"), false);
+        // Actualizar blackboard
+        if (BlackboardComponent)
+        {
+            BlackboardComponent->SetValueAsEnum(TEXT("DinosaurState"), static_cast<uint8>(NewState));
+        }
+
+        UE_LOG(LogTemp, Log, TEXT("Dinosaur %s mudou para estado: %d"), 
+               GetPawn() ? *GetPawn()->GetName() : TEXT("Unknown"), 
+               static_cast<int32>(NewState));
     }
 }
 
-void ADinosaurAIController::StartChasing(AActor* Target)
+void ANPC_DinosaurAIController::SetTarget(AActor* NewTarget)
 {
-    if (!Target)
-        return;
-        
-    CurrentTarget = Target;
-    bIsChasing = true;
-    bIsPatrolling = false;
-    
-    // Parar timer de patrulha
-    if (GetWorld())
-    {
-        GetWorld()->GetTimerManager().ClearTimer(PatrolTimerHandle);
-    }
-    
-    // Actualizar Blackboard
-    if (BlackboardComponent)
-    {
-        BlackboardComponent->SetValueAsObject(TEXT("TargetActor"), Target);
-        BlackboardComponent->SetValueAsBool(TEXT("IsChasing"), true);
-        BlackboardComponent->SetValueAsBool(TEXT("IsPatrolling"), false);
-    }
-    
-    // Mover para o target
-    MoveToActor(Target, 100.0f);
-}
-
-void ADinosaurAIController::StopChasing()
-{
-    CurrentTarget = nullptr;
-    bIsChasing = false;
-    
-    // Actualizar Blackboard
-    if (BlackboardComponent)
-    {
-        BlackboardComponent->SetValueAsObject(TEXT("TargetActor"), nullptr);
-        BlackboardComponent->SetValueAsBool(TEXT("IsChasing"), false);
-    }
-    
-    // Voltar à patrulha
-    StartPatrolling();
-}
-
-void ADinosaurAIController::SetPatrolLocation(FVector NewLocation)
-{
-    HomeLocation = NewLocation;
+    CurrentTarget = NewTarget;
     
     if (BlackboardComponent)
     {
-        BlackboardComponent->SetValueAsVector(TEXT("HomeLocation"), HomeLocation);
+        BlackboardComponent->SetValueAsObject(TEXT("TargetActor"), NewTarget);
     }
 }
 
-void ADinosaurAIController::StartPatrolling()
+void ANPC_DinosaurAIController::TakeDamage(float DamageAmount)
 {
-    if (bIsChasing)
-        return;
-        
-    bIsPatrolling = true;
+    DinosaurStats.Health = FMath::Max(0.0f, DinosaurStats.Health - DamageAmount);
     
-    // Actualizar Blackboard
-    if (BlackboardComponent)
+    if (DinosaurStats.Health <= 0.0f)
     {
-        BlackboardComponent->SetValueAsBool(TEXT("IsPatrolling"), true);
-        BlackboardComponent->SetValueAsBool(TEXT("IsChasing"), false);
+        SetDinosaurState(ENPC_DinosaurState::Dead);
     }
-    
-    // Iniciar timer de patrulha
-    if (GetWorld())
+    else if (DinosaurStats.Health < DinosaurStats.MaxHealth * 0.3f)
     {
-        GetWorld()->GetTimerManager().SetTimer(PatrolTimerHandle, this, &ADinosaurAIController::PatrolTick, 5.0f, true);
+        // Fugir se a saúde estiver baixa
+        SetDinosaurState(ENPC_DinosaurState::Flee);
     }
 }
 
-void ADinosaurAIController::OnPerceptionUpdated(const TArray<AActor*>& UpdatedActors)
+float ANPC_DinosaurAIController::GetHealthPercentage() const
+{
+    if (DinosaurStats.MaxHealth > 0.0f)
+    {
+        return DinosaurStats.Health / DinosaurStats.MaxHealth;
+    }
+    return 0.0f;
+}
+
+void ANPC_DinosaurAIController::OnPerceptionUpdated(const TArray<AActor*>& UpdatedActors)
 {
     for (AActor* Actor : UpdatedActors)
     {
-        if (!Actor)
-            continue;
-            
-        // Verificar se é o jogador
-        if (Actor->IsA<ACharacter>())
+        if (Actor && Actor->IsA<APawn>())
         {
-            APlayerController* PC = Cast<APlayerController>(Actor->GetInstigatorController());
-            if (PC)
+            // Verificar se é o jogador
+            if (Actor->GetName().Contains(TEXT("Character")) || Actor->GetName().Contains(TEXT("Player")))
             {
-                // Jogador detectado - iniciar perseguição
-                float Distance = FVector::Dist(GetPawn()->GetActorLocation(), Actor->GetActorLocation());
+                float Distance = GetDistanceToTarget(Actor);
                 
-                if (Distance <= PlayerDetectionRange)
+                if (Distance <= DinosaurStats.SightRange)
                 {
-                    StartChasing(Actor);
+                    SetTarget(Actor);
+                    
+                    if (Distance <= DinosaurStats.AttackRange)
+                    {
+                        SetDinosaurState(ENPC_DinosaurState::Attack);
+                    }
+                    else
+                    {
+                        SetDinosaurState(ENPC_DinosaurState::Hunt);
+                    }
+                    break;
                 }
             }
         }
     }
 }
 
-void ADinosaurAIController::PatrolTick()
+void ANPC_DinosaurAIController::UpdateBehavior(float DeltaTime)
 {
-    if (bIsChasing || !GetPawn())
-        return;
-        
-    // Gerar posição aleatória dentro do raio de patrulha
-    FVector RandomDirection = FVector(
-        FMath::RandRange(-1.0f, 1.0f),
-        FMath::RandRange(-1.0f, 1.0f),
-        0.0f
-    ).GetSafeNormal();
-    
-    float RandomDistance = FMath::RandRange(PatrolRadius * 0.3f, PatrolRadius);
-    FVector PatrolTarget = HomeLocation + (RandomDirection * RandomDistance);
-    
-    // Actualizar Blackboard
-    if (BlackboardComponent)
+    switch (CurrentState)
     {
-        BlackboardComponent->SetValueAsVector(TEXT("PatrolTarget"), PatrolTarget);
+        case ENPC_DinosaurState::Idle:
+            HandleIdleState();
+            break;
+        case ENPC_DinosaurState::Patrol:
+            HandlePatrolState();
+            break;
+        case ENPC_DinosaurState::Hunt:
+            HandleHuntState();
+            break;
+        case ENPC_DinosaurState::Attack:
+            HandleAttackState();
+            break;
+        case ENPC_DinosaurState::Flee:
+            HandleFleeState();
+            break;
+        case ENPC_DinosaurState::Dead:
+            // Não fazer nada quando morto
+            break;
     }
-    
-    // Mover para posição de patrulha
-    MoveToLocation(PatrolTarget, 100.0f);
 }
 
-void ADinosaurAIController::CheckPlayerDistance()
+void ANPC_DinosaurAIController::HandleIdleState()
 {
-    if (!GetPawn())
-        return;
-        
-    // Encontrar jogador
-    ACharacter* Player = UGameplayStatics::GetPlayerCharacter(GetWorld(), 0);
-    if (!Player)
-        return;
-        
-    float Distance = FVector::Dist(GetPawn()->GetActorLocation(), Player->GetActorLocation());
+    // Transição para patrulha após alguns segundos
+    static float IdleTimer = 0.0f;
+    IdleTimer += GetWorld()->GetDeltaSeconds();
     
-    if (Distance <= PlayerDetectionRange && !bIsChasing)
+    if (IdleTimer >= 3.0f)
     {
-        // Iniciar perseguição
-        StartChasing(Player);
+        SetDinosaurState(ENPC_DinosaurState::Patrol);
+        IdleTimer = 0.0f;
     }
-    else if (Distance > PlayerDetectionRange * 1.5f && bIsChasing)
+}
+
+void ANPC_DinosaurAIController::HandlePatrolState()
+{
+    if (!GetPawn()) return;
+
+    // Verificar se chegou ao destino de patrulha
+    FVector CurrentLocation = GetPawn()->GetActorLocation();
+    float DistanceToHome = FVector::Dist(CurrentLocation, HomeLocation);
+    
+    if (DistanceToHome > DinosaurStats.PatrolRadius)
     {
-        // Parar perseguição se muito longe
-        StopChasing();
+        // Voltar para casa
+        MoveToLocation(HomeLocation);
     }
+    else
+    {
+        // Mover para ponto aleatório de patrulha
+        FVector PatrolPoint = GetRandomPatrolPoint();
+        MoveToLocation(PatrolPoint);
+    }
+}
+
+void ANPC_DinosaurAIController::HandleHuntState()
+{
+    if (CurrentTarget && IsValid(CurrentTarget))
+    {
+        float Distance = GetDistanceToTarget(CurrentTarget);
+        
+        if (Distance <= DinosaurStats.AttackRange)
+        {
+            SetDinosaurState(ENPC_DinosaurState::Attack);
+        }
+        else if (Distance <= DinosaurStats.SightRange)
+        {
+            // Perseguir o alvo
+            MoveToActor(CurrentTarget);
+        }
+        else
+        {
+            // Perdeu o alvo
+            SetTarget(nullptr);
+            SetDinosaurState(ENPC_DinosaurState::Patrol);
+        }
+    }
+    else
+    {
+        SetDinosaurState(ENPC_DinosaurState::Patrol);
+    }
+}
+
+void ANPC_DinosaurAIController::HandleAttackState()
+{
+    if (CurrentTarget && IsValid(CurrentTarget))
+    {
+        float Distance = GetDistanceToTarget(CurrentTarget);
+        
+        if (Distance <= DinosaurStats.AttackRange)
+        {
+            // Executar ataque (placeholder)
+            UE_LOG(LogTemp, Warning, TEXT("Dinosaur %s atacou %s!"), 
+                   GetPawn() ? *GetPawn()->GetName() : TEXT("Unknown"),
+                   *CurrentTarget->GetName());
+            
+            // Voltar para caça após ataque
+            SetDinosaurState(ENPC_DinosaurState::Hunt);
+        }
+        else
+        {
+            SetDinosaurState(ENPC_DinosaurState::Hunt);
+        }
+    }
+    else
+    {
+        SetDinosaurState(ENPC_DinosaurState::Patrol);
+    }
+}
+
+void ANPC_DinosaurAIController::HandleFleeState()
+{
+    if (!GetPawn()) return;
+
+    // Fugir na direcção oposta ao alvo
+    if (CurrentTarget && IsValid(CurrentTarget))
+    {
+        FVector FleeDirection = GetPawn()->GetActorLocation() - CurrentTarget->GetActorLocation();
+        FleeDirection.Normalize();
+        
+        FVector FleeLocation = GetPawn()->GetActorLocation() + (FleeDirection * 2000.0f);
+        MoveToLocation(FleeLocation);
+    }
+    else
+    {
+        // Voltar para casa se não há alvo
+        MoveToLocation(HomeLocation);
+        SetDinosaurState(ENPC_DinosaurState::Patrol);
+    }
+}
+
+bool ANPC_DinosaurAIController::CanSeeTarget(AActor* Target) const
+{
+    if (!Target || !GetPawn()) return false;
+
+    FVector Start = GetPawn()->GetActorLocation();
+    FVector End = Target->GetActorLocation();
+    
+    FHitResult HitResult;
+    FCollisionQueryParams QueryParams;
+    QueryParams.AddIgnoredActor(GetPawn());
+    
+    bool bHit = GetWorld()->LineTraceSingleByChannel(
+        HitResult, Start, End, ECC_Visibility, QueryParams
+    );
+    
+    return !bHit || HitResult.GetActor() == Target;
+}
+
+float ANPC_DinosaurAIController::GetDistanceToTarget(AActor* Target) const
+{
+    if (!Target || !GetPawn()) return FLT_MAX;
+    
+    return FVector::Dist(GetPawn()->GetActorLocation(), Target->GetActorLocation());
+}
+
+FVector ANPC_DinosaurAIController::GetRandomPatrolPoint() const
+{
+    FVector RandomDirection = FMath::VRand();
+    RandomDirection.Z = 0.0f; // Manter no plano horizontal
+    RandomDirection.Normalize();
+    
+    float RandomDistance = FMath::RandRange(500.0f, DinosaurStats.PatrolRadius);
+    
+    return HomeLocation + (RandomDirection * RandomDistance);
 }
