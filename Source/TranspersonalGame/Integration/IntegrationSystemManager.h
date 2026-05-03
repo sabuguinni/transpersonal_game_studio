@@ -1,159 +1,105 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Subsystems/GameInstanceSubsystem.h"
 #include "Engine/World.h"
-#include "Subsystems/WorldSubsystem.h"
-#include "Engine/DirectionalLight.h"
-#include "Engine/SkyLight.h"
-#include "Components/SkyAtmosphereComponent.h"
-#include "Components/ExponentialHeightFogComponent.h"
-#include "../SharedTypes.h"
 #include "IntegrationSystemManager.generated.h"
 
-USTRUCT(BlueprintType)
-struct FInteg_SystemStatus
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    bool bIsHealthy = false;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    FString SystemName;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    FString LastError;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    float LastCheckTime = 0.0f;
-
-    FInteg_SystemStatus()
-    {
-        bIsHealthy = false;
-        SystemName = TEXT("Unknown");
-        LastError = TEXT("");
-        LastCheckTime = 0.0f;
-    }
-};
-
-USTRUCT(BlueprintType)
-struct FInteg_ActorInventory
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 TotalActors = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 DirectionalLights = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 SkyLights = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 AtmosphereComponents = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 FogComponents = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 DinosaurActors = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 PlayerStarts = 0;
-
-    FInteg_ActorInventory()
-    {
-        TotalActors = 0;
-        DirectionalLights = 0;
-        SkyLights = 0;
-        AtmosphereComponents = 0;
-        FogComponents = 0;
-        DinosaurActors = 0;
-        PlayerStarts = 0;
-    }
-};
-
-UCLASS(BlueprintType)
-class TRANSPERSONALGAME_API UIntegrationSystemManager : public UWorldSubsystem
+/**
+ * Integration System Manager
+ * Subsistema global que coordena a integração entre todos os módulos do jogo.
+ * Responsável por:
+ * - Monitorizar o estado de todos os sistemas
+ * - Detectar conflitos entre módulos
+ * - Validar dependências entre sistemas
+ * - Gerar relatórios de saúde do sistema
+ * - Coordenar a inicialização ordenada dos módulos
+ */
+UCLASS()
+class TRANSPERSONALGAME_API UIntegrationSystemManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
-    UIntegrationSystemManager();
-
-    // USubsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Core integration functions
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    void ValidateAllSystems();
+    /** Obter a instância singleton */
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Integration")
+    static UIntegrationSystemManager* Get(const UObject* WorldContext);
 
+    /** Registar um módulo no sistema de integração */
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    void CleanupDuplicateActors();
+    void RegisterModule(const FString& ModuleName, UObject* ModuleInstance);
 
+    /** Desregistar um módulo */
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    FInteg_ActorInventory GetActorInventory();
+    void UnregisterModule(const FString& ModuleName);
 
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    TArray<FInteg_SystemStatus> GetSystemStatuses();
+    /** Verificar se um módulo está registado */
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Integration")
+    bool IsModuleRegistered(const FString& ModuleName) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool IsSystemHealthy(const FString& SystemName);
+    /** Obter instância de um módulo registado */
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Integration")
+    UObject* GetModuleInstance(const FString& ModuleName) const;
 
+    /** Validar todas as dependências entre módulos */
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    void ForceSystemValidation(const FString& SystemName);
+    bool ValidateModuleDependencies();
 
-    // Performance monitoring
+    /** Gerar relatório completo do sistema */
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    float GetCurrentFramerate();
+    FString GenerateSystemReport();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    int32 GetActorCount();
+    /** Verificar se o sistema está saudável */
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Integration")
+    bool IsSystemHealthy() const;
 
+    /** Inicializar todos os módulos na ordem correcta */
     UFUNCTION(BlueprintCallable, Category = "Integration")
-    void OptimizeLevel();
+    void InitializeAllModules();
+
+    /** Shutdown de todos os módulos */
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void ShutdownAllModules();
 
 protected:
-    // System validation
-    void ValidateWorldGeneration();
-    void ValidateCharacterSystems();
-    void ValidateAISystems();
-    void ValidateLightingSystems();
-    void ValidateVFXSystems();
+    /** Validar um módulo específico */
+    bool ValidateModule(const FString& ModuleName, UObject* ModuleInstance);
 
-    // Actor management
-    void CleanupLightingActors();
-    void CleanupAtmosphereActors();
-    void ValidateEssentialActors();
+    /** Verificar dependências de um módulo */
+    bool CheckModuleDependencies(const FString& ModuleName);
 
-    // Performance tracking
-    void UpdatePerformanceMetrics();
+    /** Ordenar módulos por dependências */
+    TArray<FString> GetModuleInitializationOrder();
 
-private:
-    UPROPERTY()
-    TMap<FString, FInteg_SystemStatus> SystemStatuses;
+public:
+    /** Mapa de módulos registados */
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    TMap<FString, UObject*> RegisteredModules;
 
-    UPROPERTY()
-    FInteg_ActorInventory CachedInventory;
+    /** Lista de módulos que falharam a validação */
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    TArray<FString> FailedModules;
 
-    UPROPERTY()
-    float LastValidationTime;
+    /** Lista de dependências não satisfeitas */
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    TArray<FString> UnsatisfiedDependencies;
 
-    UPROPERTY()
-    float ValidationInterval;
+    /** Se o sistema foi inicializado com sucesso */
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    bool bSystemInitialized;
 
-    UPROPERTY()
-    bool bAutoCleanupEnabled;
+    /** Timestamp da última validação */
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    FDateTime LastValidationTime;
 
-    // Performance metrics
-    UPROPERTY()
-    float AverageFramerate;
+    /** Número total de módulos registados */
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    int32 TotalRegisteredModules;
 
-    UPROPERTY()
-    int32 LastActorCount;
-
-    UPROPERTY()
-    float LastOptimizationTime;
+    /** Número de módulos activos */
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    int32 ActiveModulesCount;
 };
