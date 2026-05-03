@@ -1,413 +1,368 @@
 #include "EngineArchitectureManager.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Misc/DateTime.h"
-#include "HAL/PlatformFilemanager.h"
+#include "Engine/DirectionalLight.h"
+#include "Atmosphere/AtmosphericFog.h"
+#include "Components/ExponentialHeightFogComponent.h"
+#include "Engine/StaticMesh.h"
+#include "UObject/ConstructorHelpers.h"
+#include "Engine/StaticMeshActor.h"
+#include "GameFramework/Character.h"
+#include "Kismet/GameplayStatics.h"
 
-UEngineArchitectureManager::UEngineArchitectureManager()
+AEngineArchitectureManager::AEngineArchitectureManager()
 {
-    bInitialized = false;
-    LastValidation = FDateTime::Now();
-}
+    PrimaryActorTick.bCanEverTick = true;
 
-void UEngineArchitectureManager::Initialize(FSubsystemCollectionBase& Collection)
-{
-    Super::Initialize(Collection);
-    
-    UE_LOG(LogTemp, Warning, TEXT("EngineArchitectureManager: Initializing..."));
-    
-    // Setup default compilation rules
-    SetupDefaultCompilationRules();
-    
-    // Register core systems
-    RegisterSystem(TEXT("TranspersonalGameMode"), EEng_ModuleType::Core, 10);
-    RegisterSystem(TEXT("TranspersonalCharacter"), EEng_ModuleType::Gameplay, 9);
-    RegisterSystem(TEXT("StudioDirectorSystem"), EEng_ModuleType::Core, 8);
-    RegisterSystem(TEXT("WorldGeneration"), EEng_ModuleType::Gameplay, 7);
-    RegisterSystem(TEXT("DinosaurAI"), EEng_ModuleType::AI, 6);
-    
-    bInitialized = true;
-    UE_LOG(LogTemp, Warning, TEXT("EngineArchitectureManager: Initialization complete"));
-}
+    // Create root component
+    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
+    RootComponent = RootSceneComponent;
 
-void UEngineArchitectureManager::Deinitialize()
-{
-    UE_LOG(LogTemp, Warning, TEXT("EngineArchitectureManager: Deinitializing..."));
-    RegisteredSystems.Empty();
-    CompilationRules.Empty();
-    bInitialized = false;
-    Super::Deinitialize();
-}
+    // Create visualization component
+    ArchitectureVisualization = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("ArchitectureVisualization"));
+    ArchitectureVisualization->SetupAttachment(RootComponent);
 
-void UEngineArchitectureManager::RegisterSystem(const FString& SystemName, EEng_ModuleType ModuleType, int32 Priority)
-{
-    FEng_SystemInfo SystemInfo;
-    SystemInfo.SystemName = SystemName;
-    SystemInfo.ModuleType = ModuleType;
-    SystemInfo.Priority = Priority;
-    SystemInfo.Status = EEng_SystemStatus::Initializing;
-    SystemInfo.PerformanceImpact = 0.0f;
-    SystemInfo.LastUpdate = FDateTime::Now();
-    
-    RegisteredSystems.Add(SystemName, SystemInfo);
-    
-    UE_LOG(LogTemp, Log, TEXT("EngineArchitectureManager: Registered system '%s' with priority %d"), *SystemName, Priority);
-}
+    // Create status display
+    StatusDisplay = CreateDefaultSubobject<UTextRenderComponent>(TEXT("StatusDisplay"));
+    StatusDisplay->SetupAttachment(RootComponent);
+    StatusDisplay->SetRelativeLocation(FVector(0.0f, 0.0f, 100.0f));
+    StatusDisplay->SetWorldSize(50.0f);
+    StatusDisplay->SetText(FText::FromString("ENGINE ARCHITECT - INITIALIZING"));
 
-void UEngineArchitectureManager::UnregisterSystem(const FString& SystemName)
-{
-    if (RegisteredSystems.Contains(SystemName))
+    // Set default values
+    bPerformArchitectureValidation = true;
+    ValidationInterval = 5.0f;
+    bArchitectureValid = false;
+    TotalActorsInLevel = 0;
+    DuplicateActorsFound = 0;
+    CompilationErrors = 0;
+    ActiveCppClasses = 0;
+    CurrentFrameRate = 0.0f;
+    MemoryUsageMB = 0.0f;
+    DrawCalls = 0;
+    
+    // Milestone 1 validation
+    bCharacterMovementValid = false;
+    bCameraSystemValid = false;
+    bTerrainValid = false;
+    bLightingValid = false;
+    bDinosaurActorsValid = false;
+    DinosaurCount = 0;
+    
+    LastValidationTime = 0.0f;
+    CurrentStatusText = "INITIALIZING";
+
+    // Try to load a basic cube mesh for visualization
+    static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMeshAsset(TEXT("/Engine/BasicShapes/Cube"));
+    if (CubeMeshAsset.Succeeded())
     {
-        RegisteredSystems.Remove(SystemName);
-        UE_LOG(LogTemp, Log, TEXT("EngineArchitectureManager: Unregistered system '%s'"), *SystemName);
+        ArchitectureVisualization->SetStaticMesh(CubeMeshAsset.Object);
+        ArchitectureVisualization->SetRelativeScale3D(FVector(2.0f, 2.0f, 0.1f));
     }
 }
 
-void UEngineArchitectureManager::UpdateSystemStatus(const FString& SystemName, EEng_SystemStatus NewStatus, const FString& ErrorMessage)
+void AEngineArchitectureManager::BeginPlay()
 {
-    if (FEng_SystemInfo* SystemInfo = RegisteredSystems.Find(SystemName))
+    Super::BeginPlay();
+    
+    UE_LOG(LogTemp, Warning, TEXT("EngineArchitectureManager: BeginPlay - Starting architecture validation"));
+    
+    // Perform initial validation
+    ValidateArchitecture();
+    RefreshModuleList();
+    CheckMilestone1Requirements();
+    
+    CurrentStatusText = "ARCHITECTURE MANAGER ACTIVE";
+    UpdateStatusDisplay();
+}
+
+void AEngineArchitectureManager::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+
+    if (bPerformArchitectureValidation)
     {
-        SystemInfo->Status = NewStatus;
-        SystemInfo->ErrorMessage = ErrorMessage;
-        SystemInfo->LastUpdate = FDateTime::Now();
+        LastValidationTime += DeltaTime;
         
-        FString StatusString = TEXT("Unknown");
-        switch (NewStatus)
+        if (LastValidationTime >= ValidationInterval)
         {
-            case EEng_SystemStatus::Active: StatusString = TEXT("Active"); break;
-            case EEng_SystemStatus::Warning: StatusString = TEXT("Warning"); break;
-            case EEng_SystemStatus::Error: StatusString = TEXT("Error"); break;
-            case EEng_SystemStatus::Disabled: StatusString = TEXT("Disabled"); break;
-            case EEng_SystemStatus::Initializing: StatusString = TEXT("Initializing"); break;
-        }
-        
-        UE_LOG(LogTemp, Log, TEXT("EngineArchitectureManager: System '%s' status updated to '%s'"), *SystemName, *StatusString);
-        
-        if (!ErrorMessage.IsEmpty())
-        {
-            UE_LOG(LogTemp, Warning, TEXT("EngineArchitectureManager: System '%s' error: %s"), *SystemName, *ErrorMessage);
+            ValidateArchitecture();
+            UpdatePerformanceMetrics();
+            CheckMilestone1Requirements();
+            UpdateStatusDisplay();
+            LastValidationTime = 0.0f;
         }
     }
 }
 
-TArray<FEng_SystemInfo> UEngineArchitectureManager::GetAllSystems() const
+void AEngineArchitectureManager::ValidateArchitecture()
 {
-    TArray<FEng_SystemInfo> Systems;
-    for (const auto& SystemPair : RegisteredSystems)
-    {
-        Systems.Add(SystemPair.Value);
-    }
+    UE_LOG(LogTemp, Log, TEXT("EngineArchitectureManager: Validating architecture..."));
     
-    // Sort by priority (higher priority first)
-    Systems.Sort([](const FEng_SystemInfo& A, const FEng_SystemInfo& B) {
-        return A.Priority > B.Priority;
-    });
+    ValidateActorCounts();
+    ValidateSystemIntegrity();
     
-    return Systems;
+    // Overall validation result
+    bArchitectureValid = (DuplicateActorsFound == 0 && CompilationErrors == 0);
+    
+    UE_LOG(LogTemp, Warning, TEXT("Architecture validation complete. Valid: %s"), 
+           bArchitectureValid ? TEXT("TRUE") : TEXT("FALSE"));
 }
 
-FEng_SystemInfo UEngineArchitectureManager::GetSystemInfo(const FString& SystemName) const
+void AEngineArchitectureManager::ValidateActorCounts()
 {
-    if (const FEng_SystemInfo* SystemInfo = RegisteredSystems.Find(SystemName))
-    {
-        return *SystemInfo;
-    }
-    
-    return FEng_SystemInfo(); // Return default if not found
-}
+    UWorld* World = GetWorld();
+    if (!World) return;
 
-TArray<FEng_SystemInfo> UEngineArchitectureManager::GetSystemsByType(EEng_ModuleType ModuleType) const
-{
-    TArray<FEng_SystemInfo> FilteredSystems;
-    for (const auto& SystemPair : RegisteredSystems)
+    TArray<AActor*> AllActors;
+    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
+    TotalActorsInLevel = AllActors.Num();
+
+    // Count duplicate lighting actors
+    TArray<AActor*> DirectionalLights;
+    UGameplayStatics::GetAllActorsOfClass(World, ADirectionalLight::StaticClass(), DirectionalLights);
+    
+    TArray<AActor*> FogActors;
+    for (AActor* Actor : AllActors)
     {
-        if (SystemPair.Value.ModuleType == ModuleType)
+        if (Actor && Actor->FindComponentByClass<UExponentialHeightFogComponent>())
         {
-            FilteredSystems.Add(SystemPair.Value);
+            FogActors.Add(Actor);
         }
     }
-    return FilteredSystems;
+
+    // Calculate duplicates (should be max 1 of each lighting type)
+    DuplicateActorsFound = 0;
+    if (DirectionalLights.Num() > 1) DuplicateActorsFound += DirectionalLights.Num() - 1;
+    if (FogActors.Num() > 1) DuplicateActorsFound += FogActors.Num() - 1;
+
+    UE_LOG(LogTemp, Log, TEXT("Actor validation: Total=%d, DirectionalLights=%d, FogActors=%d, Duplicates=%d"),
+           TotalActorsInLevel, DirectionalLights.Num(), FogActors.Num(), DuplicateActorsFound);
 }
 
-TArray<FEng_SystemInfo> UEngineArchitectureManager::GetSystemsByStatus(EEng_SystemStatus Status) const
+void AEngineArchitectureManager::ValidateSystemIntegrity()
 {
-    TArray<FEng_SystemInfo> FilteredSystems;
-    for (const auto& SystemPair : RegisteredSystems)
-    {
-        if (SystemPair.Value.Status == Status)
-        {
-            FilteredSystems.Add(SystemPair.Value);
-        }
-    }
-    return FilteredSystems;
-}
-
-void UEngineArchitectureManager::UpdateSystemPerformance(const FString& SystemName, float PerformanceImpact)
-{
-    if (FEng_SystemInfo* SystemInfo = RegisteredSystems.Find(SystemName))
-    {
-        SystemInfo->PerformanceImpact = PerformanceImpact;
-        SystemInfo->LastUpdate = FDateTime::Now();
-        
-        UE_LOG(LogTemp, Log, TEXT("EngineArchitectureManager: System '%s' performance impact updated to %.2f"), *SystemName, PerformanceImpact);
-    }
-}
-
-float UEngineArchitectureManager::GetTotalPerformanceImpact() const
-{
-    float TotalImpact = 0.0f;
-    for (const auto& SystemPair : RegisteredSystems)
-    {
-        TotalImpact += SystemPair.Value.PerformanceImpact;
-    }
-    return TotalImpact;
-}
-
-TArray<FEng_SystemInfo> UEngineArchitectureManager::GetHighPerformanceImpactSystems(float Threshold) const
-{
-    TArray<FEng_SystemInfo> HighImpactSystems;
-    for (const auto& SystemPair : RegisteredSystems)
-    {
-        if (SystemPair.Value.PerformanceImpact >= Threshold)
-        {
-            HighImpactSystems.Add(SystemPair.Value);
-        }
-    }
-    return HighImpactSystems;
-}
-
-void UEngineArchitectureManager::AddCompilationRule(const FString& RuleName, const FString& Description, bool bMandatory)
-{
-    FEng_CompilationRule Rule;
-    Rule.RuleName = RuleName;
-    Rule.Description = Description;
-    Rule.bMandatory = bMandatory;
+    // Reset error count
+    CompilationErrors = 0;
     
-    CompilationRules.Add(Rule);
+    // Try to load core classes to verify compilation
+    LoadedModules.Empty();
+    FailedModules.Empty();
     
-    UE_LOG(LogTemp, Log, TEXT("EngineArchitectureManager: Added compilation rule '%s'"), *RuleName);
-}
-
-TArray<FEng_CompilationRule> UEngineArchitectureManager::GetCompilationRules() const
-{
-    return CompilationRules;
-}
-
-bool UEngineArchitectureManager::ValidateCompilationRules(TArray<FString>& OutViolations) const
-{
-    OutViolations.Empty();
-    bool bAllRulesValid = true;
+    // Test TranspersonalGame module classes
+    TArray<FString> CoreClasses = {
+        TEXT("/Script/TranspersonalGame.TranspersonalCharacter"),
+        TEXT("/Script/TranspersonalGame.TranspersonalGameState"),
+        TEXT("/Script/TranspersonalGame.ProductionDirector")
+    };
     
-    // Check for common violations
-    for (const FEng_CompilationRule& Rule : CompilationRules)
+    for (const FString& ClassName : CoreClasses)
     {
-        if (Rule.RuleName == TEXT("USTRUCT_GLOBAL_SCOPE"))
+        UClass* LoadedClass = LoadClass<UObject>(nullptr, *ClassName);
+        if (LoadedClass)
         {
-            // This would require actual file parsing to validate
-            // For now, we assume it's valid
+            LoadedModules.Add(ClassName);
+            ActiveCppClasses++;
         }
-        else if (Rule.RuleName == TEXT("UNIQUE_TYPE_NAMES"))
+        else
         {
-            // This would require checking all registered types
-            // For now, we assume it's valid
-        }
-        else if (Rule.RuleName == TEXT("GENERATED_H_LAST"))
-        {
-            // This would require file parsing
-            // For now, we assume it's valid
+            FailedModules.Add(ClassName);
+            CompilationErrors++;
         }
     }
     
-    return bAllRulesValid;
+    UE_LOG(LogTemp, Log, TEXT("System integrity: Loaded=%d, Failed=%d, Errors=%d"),
+           LoadedModules.Num(), FailedModules.Num(), CompilationErrors);
 }
 
-bool UEngineArchitectureManager::IsSystemHealthy() const
+void AEngineArchitectureManager::CheckMilestone1Requirements()
 {
-    for (const auto& SystemPair : RegisteredSystems)
+    UWorld* World = GetWorld();
+    if (!World) return;
+
+    // Check character movement system
+    TArray<AActor*> Characters;
+    UGameplayStatics::GetAllActorsOfClass(World, ACharacter::StaticClass(), Characters);
+    bCharacterMovementValid = Characters.Num() > 0;
+
+    // Check terrain (landscape or static mesh terrain)
+    TArray<AActor*> TerrainActors;
+    UGameplayStatics::GetAllActorsOfClass(World, AStaticMeshActor::StaticClass(), TerrainActors);
+    bTerrainValid = TerrainActors.Num() > 0;
+
+    // Check lighting system
+    TArray<AActor*> LightActors;
+    UGameplayStatics::GetAllActorsOfClass(World, ADirectionalLight::StaticClass(), LightActors);
+    bLightingValid = LightActors.Num() > 0;
+
+    // Check camera system (implied by character)
+    bCameraSystemValid = bCharacterMovementValid;
+
+    // Count dinosaur actors (placeholder - will be refined by other agents)
+    DinosaurCount = 0;
+    for (AActor* Actor : TerrainActors)
     {
-        if (SystemPair.Value.Status == EEng_SystemStatus::Error)
+        if (Actor && Actor->GetName().Contains(TEXT("Dinosaur")))
         {
-            return false;
+            DinosaurCount++;
         }
     }
-    return true;
+    bDinosaurActorsValid = DinosaurCount >= 3; // Minimum 3 dinosaurs for Milestone 1
+
+    UE_LOG(LogTemp, Log, TEXT("Milestone 1 check: Character=%s, Camera=%s, Terrain=%s, Lighting=%s, Dinosaurs=%d"),
+           bCharacterMovementValid ? TEXT("OK") : TEXT("FAIL"),
+           bCameraSystemValid ? TEXT("OK") : TEXT("FAIL"),
+           bTerrainValid ? TEXT("OK") : TEXT("FAIL"),
+           bLightingValid ? TEXT("OK") : TEXT("FAIL"),
+           DinosaurCount);
 }
 
-int32 UEngineArchitectureManager::GetErrorCount() const
+void AEngineArchitectureManager::UpdatePerformanceMetrics()
 {
-    int32 ErrorCount = 0;
-    for (const auto& SystemPair : RegisteredSystems)
+    // Get basic performance metrics
+    CurrentFrameRate = 1.0f / GetWorld()->GetDeltaSeconds();
+    
+    // Memory usage (basic estimation)
+    MemoryUsageMB = FPlatformMemory::GetStats().UsedPhysical / (1024.0f * 1024.0f);
+    
+    // Draw calls (placeholder - would need render thread access for real value)
+    DrawCalls = TotalActorsInLevel * 2; // Rough estimation
+}
+
+void AEngineArchitectureManager::UpdateStatusDisplay()
+{
+    FString StatusText = FString::Printf(TEXT("ENGINE ARCHITECT\n"
+                                              "Architecture: %s\n"
+                                              "Actors: %d\n"
+                                              "Duplicates: %d\n"
+                                              "Modules: %d/%d\n"
+                                              "FPS: %.1f\n"
+                                              "Memory: %.1f MB\n"
+                                              "Milestone 1: %s"),
+                                         bArchitectureValid ? TEXT("VALID") : TEXT("INVALID"),
+                                         TotalActorsInLevel,
+                                         DuplicateActorsFound,
+                                         LoadedModules.Num(),
+                                         LoadedModules.Num() + FailedModules.Num(),
+                                         CurrentFrameRate,
+                                         MemoryUsageMB,
+                                         (bCharacterMovementValid && bCameraSystemValid && bTerrainValid && bLightingValid) ? TEXT("READY") : TEXT("PENDING"));
+
+    StatusDisplay->SetText(FText::FromString(StatusText));
+}
+
+void AEngineArchitectureManager::CleanupDuplicateActors()
+{
+    UWorld* World = GetWorld();
+    if (!World) return;
+
+    UE_LOG(LogTemp, Warning, TEXT("EngineArchitectureManager: Cleaning up duplicate actors..."));
+
+    // Clean up duplicate directional lights (keep only first one)
+    TArray<AActor*> DirectionalLights;
+    UGameplayStatics::GetAllActorsOfClass(World, ADirectionalLight::StaticClass(), DirectionalLights);
+    
+    for (int32 i = 1; i < DirectionalLights.Num(); i++)
     {
-        if (SystemPair.Value.Status == EEng_SystemStatus::Error)
+        if (DirectionalLights[i])
         {
-            ErrorCount++;
+            DirectionalLights[i]->Destroy();
+            UE_LOG(LogTemp, Log, TEXT("Destroyed duplicate DirectionalLight: %s"), *DirectionalLights[i]->GetName());
         }
     }
-    return ErrorCount;
-}
 
-int32 UEngineArchitectureManager::GetWarningCount() const
-{
-    int32 WarningCount = 0;
-    for (const auto& SystemPair : RegisteredSystems)
+    // Clean up duplicate fog actors
+    TArray<AActor*> AllActors;
+    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
+    
+    TArray<AActor*> FogActors;
+    for (AActor* Actor : AllActors)
     {
-        if (SystemPair.Value.Status == EEng_SystemStatus::Warning)
+        if (Actor && Actor->FindComponentByClass<UExponentialHeightFogComponent>())
         {
-            WarningCount++;
-        }
-    }
-    return WarningCount;
-}
-
-FString UEngineArchitectureManager::GenerateSystemReport() const
-{
-    FString Report = TEXT("=== ENGINE ARCHITECTURE SYSTEM REPORT ===\n\n");
-    
-    Report += FString::Printf(TEXT("Total Systems: %d\n"), RegisteredSystems.Num());
-    Report += FString::Printf(TEXT("Errors: %d\n"), GetErrorCount());
-    Report += FString::Printf(TEXT("Warnings: %d\n"), GetWarningCount());
-    Report += FString::Printf(TEXT("Total Performance Impact: %.2f\n"), GetTotalPerformanceImpact());
-    Report += FString::Printf(TEXT("System Health: %s\n\n"), IsSystemHealthy() ? TEXT("HEALTHY") : TEXT("UNHEALTHY"));
-    
-    Report += TEXT("=== REGISTERED SYSTEMS ===\n");
-    TArray<FEng_SystemInfo> AllSystems = GetAllSystems();
-    for (const FEng_SystemInfo& System : AllSystems)
-    {
-        FString StatusString = TEXT("Unknown");
-        switch (System.Status)
-        {
-            case EEng_SystemStatus::Active: StatusString = TEXT("Active"); break;
-            case EEng_SystemStatus::Warning: StatusString = TEXT("Warning"); break;
-            case EEng_SystemStatus::Error: StatusString = TEXT("Error"); break;
-            case EEng_SystemStatus::Disabled: StatusString = TEXT("Disabled"); break;
-            case EEng_SystemStatus::Initializing: StatusString = TEXT("Initializing"); break;
-        }
-        
-        Report += FString::Printf(TEXT("- %s [%s] Priority: %d, Performance: %.2f\n"), 
-            *System.SystemName, *StatusString, System.Priority, System.PerformanceImpact);
-        
-        if (!System.ErrorMessage.IsEmpty())
-        {
-            Report += FString::Printf(TEXT("  Error: %s\n"), *System.ErrorMessage);
-        }
-    }
-    
-    Report += TEXT("\n=== COMPILATION RULES ===\n");
-    for (const FEng_CompilationRule& Rule : CompilationRules)
-    {
-        Report += FString::Printf(TEXT("- %s: %s [%s]\n"), 
-            *Rule.RuleName, *Rule.Description, Rule.bMandatory ? TEXT("MANDATORY") : TEXT("OPTIONAL"));
-    }
-    
-    return Report;
-}
-
-void UEngineArchitectureManager::LogSystemStatus() const
-{
-    UE_LOG(LogTemp, Warning, TEXT("=== ENGINE ARCHITECTURE STATUS ==="));
-    UE_LOG(LogTemp, Warning, TEXT("Total Systems: %d"), RegisteredSystems.Num());
-    UE_LOG(LogTemp, Warning, TEXT("Errors: %d"), GetErrorCount());
-    UE_LOG(LogTemp, Warning, TEXT("Warnings: %d"), GetWarningCount());
-    UE_LOG(LogTemp, Warning, TEXT("System Health: %s"), IsSystemHealthy() ? TEXT("HEALTHY") : TEXT("UNHEALTHY"));
-    
-    for (const auto& SystemPair : RegisteredSystems)
-    {
-        const FEng_SystemInfo& System = SystemPair.Value;
-        UE_LOG(LogTemp, Log, TEXT("System: %s, Status: %d, Priority: %d"), 
-            *System.SystemName, (int32)System.Status, System.Priority);
-    }
-}
-
-void UEngineArchitectureManager::ValidateArchitecture()
-{
-    UE_LOG(LogTemp, Warning, TEXT("EngineArchitectureManager: Running architecture validation..."));
-    
-    LastValidation = FDateTime::Now();
-    
-    // Validate system dependencies
-    ValidateSystemDependencies();
-    
-    // Check performance constraints
-    CheckPerformanceConstraints();
-    
-    // Validate compilation rules
-    TArray<FString> Violations;
-    bool bRulesValid = ValidateCompilationRules(Violations);
-    
-    if (!bRulesValid)
-    {
-        UE_LOG(LogTemp, Error, TEXT("EngineArchitectureManager: Compilation rule violations found:"));
-        for (const FString& Violation : Violations)
-        {
-            UE_LOG(LogTemp, Error, TEXT("  - %s"), *Violation);
+            FogActors.Add(Actor);
         }
     }
     
-    // Log final status
-    LogSystemStatus();
-    
-    UE_LOG(LogTemp, Warning, TEXT("EngineArchitectureManager: Architecture validation complete"));
-}
-
-void UEngineArchitectureManager::SetupDefaultCompilationRules()
-{
-    AddCompilationRule(TEXT("USTRUCT_GLOBAL_SCOPE"), 
-        TEXT("USTRUCT and UENUM must be declared at global scope only"), true);
-    
-    AddCompilationRule(TEXT("UNIQUE_TYPE_NAMES"), 
-        TEXT("Every USTRUCT, UENUM, and UCLASS name must be unique across the project"), true);
-    
-    AddCompilationRule(TEXT("GENERATED_H_LAST"), 
-        TEXT(".generated.h must be the last include in header files"), true);
-    
-    AddCompilationRule(TEXT("NO_ESCAPED_QUOTES"), 
-        TEXT("Use normal quotes in UPROPERTY/UFUNCTION macros"), true);
-    
-    AddCompilationRule(TEXT("NO_SPACES_IN_IDENTIFIERS"), 
-        TEXT("Variable and function names cannot contain spaces"), true);
-    
-    AddCompilationRule(TEXT("COMPLETE_FILES_ONLY"), 
-        TEXT("Every .h must have a matching .cpp with complete implementations"), true);
-    
-    AddCompilationRule(TEXT("FORWARD_DECLARE_CROSS_MODULE"), 
-        TEXT("Use forward declarations for cross-module types"), true);
-    
-    AddCompilationRule(TEXT("CORRECT_BASE_CLASSES"), 
-        TEXT("Use correct UE5 base classes (A* for Actor, U* for UObject)"), true);
-}
-
-void UEngineArchitectureManager::ValidateSystemDependencies()
-{
-    // Check for circular dependencies and missing dependencies
-    for (const auto& SystemPair : RegisteredSystems)
+    for (int32 i = 1; i < FogActors.Num(); i++)
     {
-        const FEng_SystemInfo& System = SystemPair.Value;
-        
-        // For now, just mark all systems as active if they're initializing
-        if (System.Status == EEng_SystemStatus::Initializing)
+        if (FogActors[i])
         {
-            // This would be where we check actual dependencies
-            // For now, we'll assume all systems are valid
+            FogActors[i]->Destroy();
+            UE_LOG(LogTemp, Log, TEXT("Destroyed duplicate Fog actor: %s"), *FogActors[i]->GetName());
         }
     }
+
+    // Revalidate after cleanup
+    ValidateArchitecture();
 }
 
-void UEngineArchitectureManager::CheckPerformanceConstraints()
+void AEngineArchitectureManager::ValidateModuleIntegrity()
 {
-    float TotalImpact = GetTotalPerformanceImpact();
-    const float MaxAllowedImpact = 100.0f; // Maximum allowed total performance impact
-    
-    if (TotalImpact > MaxAllowedImpact)
+    RefreshModuleList();
+    ValidateSystemIntegrity();
+}
+
+bool AEngineArchitectureManager::IsModuleLoaded(const FString& ModuleName)
+{
+    return LoadedModules.Contains(ModuleName);
+}
+
+void AEngineArchitectureManager::RefreshModuleList()
+{
+    ValidateSystemIntegrity();
+}
+
+FString AEngineArchitectureManager::GetArchitectureReport()
+{
+    return FString::Printf(TEXT("ARCHITECTURE REPORT\n"
+                               "==================\n"
+                               "Overall Status: %s\n"
+                               "Total Actors: %d\n"
+                               "Duplicate Actors: %d\n"
+                               "Compilation Errors: %d\n"
+                               "Loaded Modules: %d\n"
+                               "Failed Modules: %d\n"
+                               "Active C++ Classes: %d\n"
+                               "Current FPS: %.1f\n"
+                               "Memory Usage: %.1f MB\n"
+                               "\nMILESTONE 1 STATUS\n"
+                               "Character Movement: %s\n"
+                               "Camera System: %s\n"
+                               "Terrain: %s\n"
+                               "Lighting: %s\n"
+                               "Dinosaur Actors: %s (%d found)\n"),
+                           bArchitectureValid ? TEXT("VALID") : TEXT("INVALID"),
+                           TotalActorsInLevel,
+                           DuplicateActorsFound,
+                           CompilationErrors,
+                           LoadedModules.Num(),
+                           FailedModules.Num(),
+                           ActiveCppClasses,
+                           CurrentFrameRate,
+                           MemoryUsageMB,
+                           bCharacterMovementValid ? TEXT("OK") : TEXT("FAIL"),
+                           bCameraSystemValid ? TEXT("OK") : TEXT("FAIL"),
+                           bTerrainValid ? TEXT("OK") : TEXT("FAIL"),
+                           bLightingValid ? TEXT("OK") : TEXT("FAIL"),
+                           bDinosaurActorsValid ? TEXT("OK") : TEXT("FAIL"),
+                           DinosaurCount);
+}
+
+void AEngineArchitectureManager::LogArchitectureStatus()
+{
+    FString Report = GetArchitectureReport();
+    UE_LOG(LogTemp, Warning, TEXT("%s"), *Report);
+}
+
+void AEngineArchitectureManager::SetArchitectureVisualizationVisible(bool bVisible)
+{
+    if (ArchitectureVisualization)
     {
-        UE_LOG(LogTemp, Warning, TEXT("EngineArchitectureManager: Total performance impact (%.2f) exceeds threshold (%.2f)"), 
-            TotalImpact, MaxAllowedImpact);
-        
-        // Log high-impact systems
-        TArray<FEng_SystemInfo> HighImpactSystems = GetHighPerformanceImpactSystems(10.0f);
-        for (const FEng_SystemInfo& System : HighImpactSystems)
-        {
-            UE_LOG(LogTemp, Warning, TEXT("  High impact system: %s (%.2f)"), 
-                *System.SystemName, System.PerformanceImpact);
-        }
+        ArchitectureVisualization->SetVisibility(bVisible);
+    }
+    if (StatusDisplay)
+    {
+        StatusDisplay->SetVisibility(bVisible);
     }
 }
