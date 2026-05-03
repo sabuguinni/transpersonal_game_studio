@@ -1,93 +1,122 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/GameInstanceSubsystem.h"
+#include "Engine/World.h"
+#include "Subsystems/WorldSubsystem.h"
 #include "SharedTypes.h"
 #include "Eng_ArchitectureManager.generated.h"
 
 /**
- * Engine Architecture Manager - Central authority for technical architecture decisions
- * Enforces coding standards, module dependencies, and system integration rules
- * This is the technical backbone that ensures all agent outputs follow architectural principles
+ * ENGINE ARCHITECT CORE SYSTEM
+ * Manages the technical architecture and enforces design patterns across all systems.
+ * This is the central authority for architectural decisions and system coordination.
  */
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UEng_ArchitectureManager : public UGameInstanceSubsystem
+UCLASS(BlueprintType)
+class TRANSPERSONALGAME_API UEng_ArchitectureManager : public UWorldSubsystem
 {
     GENERATED_BODY()
 
 public:
-    UEng_ArchitectureManager();
-
     // USubsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
+    virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
 
     // Architecture Validation
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool ValidateModuleDependencies();
+    bool ValidateSystemArchitecture();
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool ValidateClassNamingConventions();
+    bool ValidateMilestone1Requirements();
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool ValidateSystemIntegration();
+    void EnforceArchitecturalRules();
 
-    // Module Management
+    // System Registration
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void RegisterModuleSystem(const FString& ModuleName, const FString& SystemClass);
+    void RegisterCoreSystem(const FString& SystemName, UObject* SystemInstance);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    TArray<FString> GetRegisteredModules() const;
+    UObject* GetCoreSystem(const FString& SystemName);
 
     // Performance Monitoring
     UFUNCTION(BlueprintCallable, Category = "Architecture")
+    void MonitorSystemPerformance();
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
     float GetSystemPerformanceMetric(const FString& SystemName);
 
+    // Biome Architecture
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void SetPerformanceBudget(const FString& SystemName, float MaxFrameTimeMs);
-
-    // Agent Coordination
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool ValidateAgentOutput(int32 AgentID, const FString& OutputType);
+    bool ValidateBiomeDistribution();
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void SetAgentConstraints(int32 AgentID, const TArray<FString>& AllowedSystems);
+    FVector GetBiomeCenterLocation(EEng_BiomeType BiomeType);
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    bool IsLocationInBiome(const FVector& Location, EEng_BiomeType BiomeType);
+
+    // Character System Architecture
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    bool ValidateCharacterSystem();
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    void SetupDefaultCharacterController();
+
+    // Dinosaur System Architecture
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    bool ValidateDinosaurSystem();
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    void SpawnDinosaurPlaceholders();
+
+    // World Generation Architecture
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    bool ValidateWorldGenerationSystem();
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    void InitializeWorldPartition();
+
+    // Compilation and Build Architecture
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    bool ValidateCompilationStatus();
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    TArray<FString> GetMissingImplementations();
 
 protected:
-    // Module Registry
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    TMap<FString, FString> RegisteredModules;
+    // Core system registry
+    UPROPERTY()
+    TMap<FString, UObject*> RegisteredSystems;
 
-    // Performance Budgets
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    TMap<FString, float> PerformanceBudgets;
+    // Performance metrics
+    UPROPERTY()
+    TMap<FString, float> SystemPerformanceMetrics;
 
-    // Agent Constraints
+    // Architecture validation state
     UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    TMap<int32, TArray<FString>> AgentSystemConstraints;
-
-    // Architecture Rules
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    TArray<FString> MandatoryIncludePaths;
+    bool bArchitectureValid;
 
     UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    TArray<FString> ForbiddenDependencies;
+    bool bMilestone1Ready;
 
-    // System Health
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    TMap<FString, float> SystemHealthMetrics;
+    // Biome configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biomes")
+    TMap<EEng_BiomeType, FEng_BiomeData> BiomeConfigurations;
+
+    // System requirements
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Requirements")
+    TArray<FString> RequiredSystems;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Requirements")
+    TArray<FString> OptionalSystems;
 
 private:
     // Internal validation methods
-    bool ValidateIncludePaths();
-    bool ValidateCircularDependencies();
+    bool ValidateSystemDependencies();
     bool ValidateMemoryUsage();
-    
-    // Performance tracking
-    void UpdateSystemMetrics();
-    void CheckPerformanceBudgets();
-    
-    // Agent coordination
-    void InitializeAgentConstraints();
-    void ValidateAgentCompliance();
+    bool ValidateRenderingPipeline();
+    void InitializeBiomeConfigurations();
+    void SetupPerformanceMonitoring();
+    void ValidateActorDistribution();
 };
