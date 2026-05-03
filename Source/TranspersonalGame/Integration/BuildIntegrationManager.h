@@ -1,122 +1,168 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/ActorComponent.h"
-#include "Engine/Engine.h"
-#include "TranspersonalGame/SharedTypes.h"
+#include "Engine/World.h"
+#include "Subsystems/WorldSubsystem.h"
+#include "SharedTypes.h"
 #include "BuildIntegrationManager.generated.h"
 
-/**
- * Estrutura para resultados de validação de build
- */
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuildValidationResult
+struct TRANSPERSONALGAME_API FBuild_CompilationResult
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
-    FString ValidationName;
+    UPROPERTY(BlueprintReadOnly, Category = "Build")
+    bool bCompilationSuccessful = false;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
-    bool bPassed = false;
+    UPROPERTY(BlueprintReadOnly, Category = "Build")
+    int32 ErrorCount = 0;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
+    UPROPERTY(BlueprintReadOnly, Category = "Build")
+    int32 WarningCount = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Build")
     TArray<FString> ErrorMessages;
 
-    FBuildValidationResult()
-    {
-        ValidationName = TEXT("");
-        bPassed = false;
-        ErrorMessages.Empty();
-    }
+    UPROPERTY(BlueprintReadOnly, Category = "Build")
+    FString BuildTimestamp;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Build")
+    float BuildDurationSeconds = 0.0f;
 };
 
-/**
- * Estados de integração do build
- */
-UENUM(BlueprintType)
-enum class EBuildIntegrationState : uint8
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FBuild_ModuleStatus
 {
-    Idle        UMETA(DisplayName = "Idle"),
-    Validating  UMETA(DisplayName = "Validating"),
-    Healthy     UMETA(DisplayName = "Healthy"),
-    Warning     UMETA(DisplayName = "Warning"),
-    Critical    UMETA(DisplayName = "Critical")
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Module")
+    FString ModuleName;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Module")
+    bool bIsLoaded = false;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Module")
+    int32 HeaderCount = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Module")
+    int32 ImplementationCount = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Module")
+    TArray<FString> OrphanHeaders;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Module")
+    FString LastCompileTime;
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FBuild_IntegrationReport
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    FBuild_CompilationResult CompilationResult;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    TArray<FBuild_ModuleStatus> ModuleStatuses;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    int32 TotalActorsInMap = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    int32 DuplicateLightingActors = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    TArray<FString> CriticalIssues;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    FString ReportTimestamp;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    bool bMapPlayable = false;
 };
 
 /**
- * Manager responsável pela integração e validação de builds
- * Garante que todos os sistemas estão funcionais e integrados correctamente
+ * Build Integration Manager - Coordena a integração e validação de todos os sistemas
+ * Responsável por verificar compilação, detectar conflitos, e manter a estabilidade do build
  */
-UCLASS(ClassGroup=(TranspersonalGame), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UBuildIntegrationManager : public UActorComponent
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UBuildIntegrationManager : public UWorldSubsystem
 {
     GENERATED_BODY()
 
 public:
     UBuildIntegrationManager();
 
-protected:
-    virtual void BeginPlay() override;
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
 
-    /** Estado actual da integração */
-    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
-    EBuildIntegrationState IntegrationState;
-
-    /** Resultados das validações */
-    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
-    TArray<FBuildValidationResult> ValidationResults;
-
-    /** Tempo da última validação */
-    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
-    FDateTime LastValidationTime;
-
-    /** Intervalo entre validações automáticas (segundos) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Build Integration")
-    float ValidationInterval;
-
-    /** Lista de validações críticas que devem passar */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Build Integration")
-    TArray<FString> CriticalValidations;
-
-public:
-    /** Executa validação completa de integração */
+    // Build Integration Functions
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    void ExecuteIntegrationValidation();
+    FBuild_IntegrationReport GenerateIntegrationReport();
 
-    /** Verifica se a integração está saudável */
-    UFUNCTION(BlueprintPure, Category = "Build Integration")
-    bool IsIntegrationHealthy() const;
-
-    /** Obtém relatório detalhado de integração */
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    FString GetIntegrationReport() const;
+    bool ValidateModuleIntegrity();
 
-    /** Força uma nova validação */
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    void ForceValidation();
+    void CleanupDuplicateActors();
 
-    /** Obtém estado actual da integração */
-    UFUNCTION(BlueprintPure, Category = "Build Integration")
-    EBuildIntegrationState GetIntegrationState() const { return IntegrationState; }
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    bool VerifyMapPlayability();
 
-    /** Obtém resultados das validações */
-    UFUNCTION(BlueprintPure, Category = "Build Integration")
-    const TArray<FBuildValidationResult>& GetValidationResults() const { return ValidationResults; }
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    TArray<FString> GetOrphanHeaders();
+
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    bool TriggerCompilationTest();
+
+    // Actor Management
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    void RemoveDuplicateLightingActors();
+
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    int32 CountActorsByClass(const FString& ClassName);
+
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    void ValidateActorDistribution();
+
+    // Module Validation
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    FBuild_ModuleStatus AnalyzeModule(const FString& ModuleName);
+
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    bool CheckHeaderImplementationPairs();
+
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    void LogCriticalIssues(const TArray<FString>& Issues);
 
 protected:
-    /** Valida compilação de módulos */
-    void ValidateModuleCompilation();
+    // Internal state
+    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
+    FBuild_IntegrationReport LastReport;
 
-    /** Valida spawning de actores */
-    void ValidateActorSpawning();
+    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
+    bool bIntegrationActive = false;
 
-    /** Valida registo de componentes */
-    void ValidateComponentRegistration();
+    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
+    float LastValidationTime = 0.0f;
 
-    /** Valida carregamento de assets */
-    void ValidateAssetLoading();
+    // Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Build Integration")
+    float ValidationIntervalSeconds = 60.0f;
 
-    /** Processa resultados das validações */
-    void ProcessValidationResults();
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Build Integration")
+    bool bAutoCleanupDuplicates = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Build Integration")
+    bool bLogVerboseOutput = false;
+
+private:
+    // Internal validation functions
+    void PerformPeriodicValidation();
+    bool ValidateActorIntegrity();
+    bool ValidateSystemDependencies();
+    void GenerateCompilationReport(FBuild_CompilationResult& OutResult);
+    void ScanForOrphanHeaders(TArray<FString>& OutOrphanHeaders);
+    void ValidateBiomeActorDistribution();
 };
