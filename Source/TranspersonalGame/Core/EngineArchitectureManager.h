@@ -1,14 +1,21 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
 #include "Engine/World.h"
-#include "Components/SceneComponent.h"
+#include "GameFramework/Actor.h"
 #include "Components/StaticMeshComponent.h"
-#include "Components/TextRenderComponent.h"
+#include "Components/SceneComponent.h"
+#include "Engine/Engine.h"
 #include "../SharedTypes.h"
 #include "EngineArchitectureManager.generated.h"
 
+/**
+ * Engine Architecture Manager - Central system that enforces architectural rules
+ * and coordinates technical systems for Milestone 1 implementation.
+ * 
+ * This actor ensures all technical systems follow UE5 best practices and
+ * maintains performance standards for the dinosaur survival game.
+ */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API AEngineArchitectureManager : public AActor
 {
@@ -22,72 +29,57 @@ protected:
     virtual void Tick(float DeltaTime) override;
 
     // Core Components
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Architecture")
     USceneComponent* RootSceneComponent;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UStaticMeshComponent* ArchitectureVisualization;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Architecture")
+    UStaticMeshComponent* VisualizationMesh;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UTextRenderComponent* StatusDisplay;
-
-    // Architecture Validation
+    // Architecture Validation System
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    bool bPerformArchitectureValidation;
+    bool bEnableArchitectureValidation;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
     float ValidationInterval;
 
     UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    bool bArchitectureValid;
+    float LastValidationTime;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    int32 TotalActorsInLevel;
+    // Performance Monitoring
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 MaxActorCount;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    int32 DuplicateActorsFound;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float TargetFrameRate;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
-    int32 CompilationErrors;
-
-    // Module System Tracking
-    UPROPERTY(BlueprintReadOnly, Category = "Modules")
-    TArray<FString> LoadedModules;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Modules")
-    TArray<FString> FailedModules;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Modules")
-    int32 ActiveCppClasses;
-
-    // Performance Metrics
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
     float CurrentFrameRate;
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float MemoryUsageMB;
+    int32 CurrentActorCount;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 DrawCalls;
+    // Milestone 1 Technical Requirements
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone1")
+    bool bEnforceTerrainLimits;
 
-    // Milestone 1 Architecture Requirements
-    UPROPERTY(BlueprintReadOnly, Category = "Milestone1")
-    bool bCharacterMovementValid;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone1")
+    float MaxTerrainSize;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Milestone1")
-    bool bCameraSystemValid;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone1")
+    int32 MaxDinosaurCount;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Milestone1")
-    bool bTerrainValid;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone1")
+    bool bRequireNavMesh;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Milestone1")
-    bool bLightingValid;
+    // System Status Tracking
+    UPROPERTY(BlueprintReadOnly, Category = "Status")
+    TArray<FString> ValidationErrors;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Milestone1")
-    bool bDinosaurActorsValid;
+    UPROPERTY(BlueprintReadOnly, Category = "Status")
+    TArray<FString> PerformanceWarnings;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Milestone1")
-    int32 DinosaurCount;
+    UPROPERTY(BlueprintReadOnly, Category = "Status")
+    bool bArchitectureHealthy;
 
 public:
     // Architecture Validation Functions
@@ -95,40 +87,72 @@ public:
     void ValidateArchitecture();
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void CleanupDuplicateActors();
+    bool CheckLightingSetup();
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void ValidateModuleIntegrity();
+    bool CheckTerrainCompliance();
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void CheckMilestone1Requirements();
+    bool CheckCharacterSystem();
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
+    bool CheckDinosaurSystem();
+
+    // Performance Monitoring Functions
+    UFUNCTION(BlueprintCallable, Category = "Performance")
     void UpdatePerformanceMetrics();
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    FString GetArchitectureReport();
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void CheckActorCount();
 
-    // Module Management
-    UFUNCTION(BlueprintCallable, Category = "Modules")
-    bool IsModuleLoaded(const FString& ModuleName);
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void CheckFrameRate();
 
-    UFUNCTION(BlueprintCallable, Category = "Modules")
-    void RefreshModuleList();
+    // Milestone 1 Enforcement Functions
+    UFUNCTION(BlueprintCallable, Category = "Milestone1")
+    void EnforceMilestone1Rules();
 
-    // Utility Functions
-    UFUNCTION(BlueprintCallable, Category = "Utility")
-    void LogArchitectureStatus();
+    UFUNCTION(BlueprintCallable, Category = "Milestone1")
+    bool ValidateMinimumViablePrototype();
 
-    UFUNCTION(BlueprintCallable, Category = "Utility")
-    void SetArchitectureVisualizationVisible(bool bVisible);
+    UFUNCTION(BlueprintCallable, Category = "Milestone1")
+    void ReportArchitectureStatus();
+
+    // System Coordination Functions
+    UFUNCTION(BlueprintCallable, Category = "Coordination")
+    void NotifySystemReady(const FString& SystemName);
+
+    UFUNCTION(BlueprintCallable, Category = "Coordination")
+    void NotifySystemError(const FString& SystemName, const FString& ErrorMessage);
+
+    UFUNCTION(BlueprintCallable, Category = "Coordination")
+    TArray<FString> GetSystemReadinessReport();
+
+    // Debug and Visualization
+    UFUNCTION(BlueprintCallable, Category = "Debug", CallInEditor)
+    void LogArchitectureReport();
+
+    UFUNCTION(BlueprintCallable, Category = "Debug", CallInEditor)
+    void VisualizeSystemBounds();
+
+    UFUNCTION(BlueprintCallable, Category = "Debug", CallInEditor)
+    void ClearValidationErrors();
 
 private:
     // Internal validation helpers
-    void ValidateActorCounts();
-    void ValidateSystemIntegrity();
-    void UpdateStatusDisplay();
+    void ValidateLightingActors();
+    void ValidateTerrainActors();
+    void ValidateCharacterActors();
+    void ValidateDinosaurActors();
+    void ValidateNavigationSystem();
     
-    float LastValidationTime;
-    FString CurrentStatusText;
+    // Performance helpers
+    void CalculateFrameRate(float DeltaTime);
+    void CountWorldActors();
+    
+    // System status tracking
+    TMap<FString, bool> SystemReadiness;
+    TArray<float> FrameTimeHistory;
+    float FrameTimeAccumulator;
+    int32 FrameTimeCount;
 };
