@@ -1,456 +1,252 @@
 #include "BuildIntegrationManager.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Engine/DirectionalLight.h"
-#include "Components/SkyAtmosphereComponent.h"
-#include "Components/SkyLightComponent.h"
-#include "Components/ExponentialHeightFogComponent.h"
-#include "Engine/StaticMeshActor.h"
-#include "Landscape/Landscape.h"
-#include "GameFramework/PlayerStart.h"
-#include "HAL/FileManager.h"
+#include "HAL/PlatformFilemanager.h"
 #include "Misc/Paths.h"
+#include "Misc/FileHelper.h"
 #include "Misc/DateTime.h"
-#include "Engine/LevelStreaming.h"
+#include "SharedTypes.h"
+
+DEFINE_LOG_CATEGORY_STATIC(LogBuildIntegration, Log, All);
 
 UBuildIntegrationManager::UBuildIntegrationManager()
 {
-    bIntegrationActive = false;
-    LastValidationTime = 0.0f;
-    ValidationIntervalSeconds = 60.0f;
-    bAutoCleanupDuplicates = true;
-    bLogVerboseOutput = false;
+    PrimaryComponentTick.bCanEverTick = false;
+    
+    // Inicializar estado de integração
+    IntegrationState = EBuild_IntegrationState::Idle;
+    LastValidationTime = FDateTime::MinValue();
+    ValidationIntervalSeconds = 300.0f; // 5 minutos
+    
+    // Configurar validações críticas
+    CriticalValidations.Add(TEXT("ModuleCompilation"));
+    CriticalValidations.Add(TEXT("ActorSpawning"));
+    CriticalValidations.Add(TEXT("BiomeDistribution"));
+    CriticalValidations.Add(TEXT("LightingSetup"));
+    
+    UE_LOG(LogBuildIntegration, Log, TEXT("BuildIntegrationManager inicializado"));
 }
 
-void UBuildIntegrationManager::Initialize(FSubsystemCollectionBase& Collection)
+void UBuildIntegrationManager::BeginPlay()
 {
-    Super::Initialize(Collection);
-    
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Initialized"));
-    bIntegrationActive = true;
+    Super::BeginPlay();
     
     // Executar validação inicial
-    FTimerHandle ValidationTimer;
-    GetWorld()->GetTimerManager().SetTimer(ValidationTimer, 
-        FTimerDelegate::CreateUObject(this, &UBuildIntegrationManager::PerformPeriodicValidation),
-        ValidationIntervalSeconds, true);
-}
-
-void UBuildIntegrationManager::Deinitialize()
-{
-    bIntegrationActive = false;
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Deinitialized"));
-    Super::Deinitialize();
-}
-
-FBuild_IntegrationReport UBuildIntegrationManager::GenerateIntegrationReport()
-{
-    FBuild_IntegrationReport Report;
-    Report.ReportTimestamp = FDateTime::Now().ToString();
-    
-    // Gerar relatório de compilação
-    GenerateCompilationReport(Report.CompilationResult);
-    
-    // Analisar módulos
-    TArray<FString> ModuleNames = {TEXT("TranspersonalGame"), TEXT("Core"), TEXT("Engine")};
-    for (const FString& ModuleName : ModuleNames)
-    {
-        FBuild_ModuleStatus ModuleStatus = AnalyzeModule(ModuleName);
-        Report.ModuleStatuses.Add(ModuleStatus);
-    }
-    
-    // Contar actores no mapa
-    if (UWorld* World = GetWorld())
-    {
-        TArray<AActor*> AllActors;
-        UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
-        Report.TotalActorsInMap = AllActors.Num();
-        
-        // Contar duplicados de lighting
-        int32 DirectionalLights = CountActorsByClass(TEXT("DirectionalLight"));
-        int32 SkyLights = CountActorsByClass(TEXT("SkyLight"));
-        int32 HeightFogs = CountActorsByClass(TEXT("ExponentialHeightFog"));
-        
-        Report.DuplicateLightingActors = FMath::Max(0, DirectionalLights - 1) + 
-                                        FMath::Max(0, SkyLights - 1) + 
-                                        FMath::Max(0, HeightFogs - 1);
-    }
-    
-    // Verificar se o mapa é jogável
-    Report.bMapPlayable = VerifyMapPlayability();
-    
-    // Identificar problemas críticos
-    if (Report.CompilationResult.ErrorCount > 0)
-    {
-        Report.CriticalIssues.Add(FString::Printf(TEXT("Compilation errors: %d"), Report.CompilationResult.ErrorCount));
-    }
-    
-    if (Report.DuplicateLightingActors > 0)
-    {
-        Report.CriticalIssues.Add(FString::Printf(TEXT("Duplicate lighting actors: %d"), Report.DuplicateLightingActors));
-    }
-    
-    TArray<FString> OrphanHeaders = GetOrphanHeaders();
-    if (OrphanHeaders.Num() > 0)
-    {
-        Report.CriticalIssues.Add(FString::Printf(TEXT("Orphan headers: %d"), OrphanHeaders.Num()));
-    }
-    
-    LastReport = Report;
-    
-    if (bLogVerboseOutput)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Integration Report Generated:"));
-        UE_LOG(LogTemp, Warning, TEXT("- Total Actors: %d"), Report.TotalActorsInMap);
-        UE_LOG(LogTemp, Warning, TEXT("- Duplicate Lighting: %d"), Report.DuplicateLightingActors);
-        UE_LOG(LogTemp, Warning, TEXT("- Critical Issues: %d"), Report.CriticalIssues.Num());
-        UE_LOG(LogTemp, Warning, TEXT("- Map Playable: %s"), Report.bMapPlayable ? TEXT("Yes") : TEXT("No"));
-    }
-    
-    return Report;
+    PerformIntegrationValidation();
 }
 
 bool UBuildIntegrationManager::ValidateModuleIntegrity()
 {
-    bool bIntegrityValid = true;
+    UE_LOG(LogBuildIntegration, Log, TEXT("Validando integridade dos módulos..."));
     
-    // Verificar pares header/implementation
-    if (!CheckHeaderImplementationPairs())
+    // Verificar se classes críticas estão carregadas
+    TArray<FString> CriticalClasses = {
+        TEXT("/Script/TranspersonalGame.TranspersonalCharacter"),
+        TEXT("/Script/TranspersonalGame.TranspersonalGameState"),
+        TEXT("/Script/TranspersonalGame.PCGWorldGenerator"),
+        TEXT("/Script/TranspersonalGame.FoliageManager")
+    };
+    
+    int32 LoadedClasses = 0;
+    for (const FString& ClassName : CriticalClasses)
     {
-        bIntegrityValid = false;
-        UE_LOG(LogTemp, Error, TEXT("Module integrity check failed: Missing implementations"));
+        UClass* LoadedClass = LoadClass<UObject>(nullptr, *ClassName);
+        if (LoadedClass)
+        {
+            LoadedClasses++;
+            UE_LOG(LogBuildIntegration, Log, TEXT("✅ Classe carregada: %s"), *ClassName);
+        }
+        else
+        {
+            UE_LOG(LogBuildIntegration, Error, TEXT("❌ Falha ao carregar: %s"), *ClassName);
+        }
     }
     
-    // Verificar dependências de sistema
-    if (!ValidateSystemDependencies())
-    {
-        bIntegrityValid = false;
-        UE_LOG(LogTemp, Error, TEXT("Module integrity check failed: System dependencies"));
-    }
+    bool bModulesValid = (LoadedClasses == CriticalClasses.Num());
+    UE_LOG(LogBuildIntegration, Log, TEXT("Módulos válidos: %d/%d"), LoadedClasses, CriticalClasses.Num());
     
-    return bIntegrityValid;
+    return bModulesValid;
 }
 
-void UBuildIntegrationManager::CleanupDuplicateActors()
+bool UBuildIntegrationManager::ValidateMapActors()
 {
-    if (!bAutoCleanupDuplicates)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Auto cleanup disabled, skipping duplicate removal"));
-        return;
-    }
+    UE_LOG(LogBuildIntegration, Log, TEXT("Validando actores do MinPlayableMap..."));
     
-    RemoveDuplicateLightingActors();
-    
-    UE_LOG(LogTemp, Warning, TEXT("Duplicate actor cleanup completed"));
-}
-
-bool UBuildIntegrationManager::VerifyMapPlayability()
-{
     UWorld* World = GetWorld();
     if (!World)
     {
+        UE_LOG(LogBuildIntegration, Error, TEXT("Mundo não encontrado"));
         return false;
     }
     
-    bool bPlayable = true;
+    // Contar actores por tipo
+    int32 LightingActors = 0;
+    int32 TerrainActors = 0;
+    int32 DinosaurActors = 0;
+    int32 PlayerStarts = 0;
     
-    // Verificar se existe PlayerStart
-    TArray<AActor*> PlayerStarts;
-    UGameplayStatics::GetAllActorsOfClass(World, APlayerStart::StaticClass(), PlayerStarts);
-    if (PlayerStarts.Num() == 0)
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
     {
-        bPlayable = false;
-        UE_LOG(LogTemp, Error, TEXT("Map playability check failed: No PlayerStart found"));
-    }
-    
-    // Verificar se existe terreno
-    TArray<AActor*> Landscapes;
-    UGameplayStatics::GetAllActorsOfClass(World, ALandscape::StaticClass(), Landscapes);
-    if (Landscapes.Num() == 0)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Map playability warning: No Landscape found"));
-    }
-    
-    // Verificar iluminação básica
-    int32 DirectionalLights = CountActorsByClass(TEXT("DirectionalLight"));
-    if (DirectionalLights == 0)
-    {
-        bPlayable = false;
-        UE_LOG(LogTemp, Error, TEXT("Map playability check failed: No DirectionalLight found"));
-    }
-    
-    return bPlayable;
-}
-
-TArray<FString> UBuildIntegrationManager::GetOrphanHeaders()
-{
-    TArray<FString> OrphanHeaders;
-    ScanForOrphanHeaders(OrphanHeaders);
-    return OrphanHeaders;
-}
-
-bool UBuildIntegrationManager::TriggerCompilationTest()
-{
-    // Esta função seria usada para triggerar uma compilação externa
-    // Por agora, apenas simula o teste
-    UE_LOG(LogTemp, Warning, TEXT("Compilation test triggered (simulated)"));
-    return true;
-}
-
-void UBuildIntegrationManager::RemoveDuplicateLightingActors()
-{
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return;
-    }
-    
-    // Remover DirectionalLights duplicados (manter apenas 1)
-    TArray<AActor*> DirectionalLights;
-    UGameplayStatics::GetAllActorsOfClass(World, ADirectionalLight::StaticClass(), DirectionalLights);
-    for (int32 i = 1; i < DirectionalLights.Num(); ++i)
-    {
-        if (DirectionalLights[i])
+        AActor* Actor = *ActorItr;
+        if (!Actor) continue;
+        
+        FString ActorClass = Actor->GetClass()->GetName();
+        
+        if (ActorClass.Contains(TEXT("Light")) || ActorClass.Contains(TEXT("Sky")))
         {
-            DirectionalLights[i]->Destroy();
-            UE_LOG(LogTemp, Warning, TEXT("Removed duplicate DirectionalLight"));
+            LightingActors++;
+        }
+        else if (ActorClass.Contains(TEXT("Landscape")) || ActorClass.Contains(TEXT("Terrain")))
+        {
+            TerrainActors++;
+        }
+        else if (ActorClass.Contains(TEXT("Dinosaur")) || ActorClass.Contains(TEXT("Pawn")))
+        {
+            DinosaurActors++;
+        }
+        else if (ActorClass.Contains(TEXT("PlayerStart")))
+        {
+            PlayerStarts++;
         }
     }
     
-    // Remover SkyLights duplicados
-    TArray<AActor*> SkyLights;
-    UGameplayStatics::GetAllActorsOfClass(World, ASkyLight::StaticClass(), SkyLights);
-    for (int32 i = 1; i < SkyLights.Num(); ++i)
+    UE_LOG(LogBuildIntegration, Log, TEXT("Actores de iluminação: %d"), LightingActors);
+    UE_LOG(LogBuildIntegration, Log, TEXT("Actores de terreno: %d"), TerrainActors);
+    UE_LOG(LogBuildIntegration, Log, TEXT("Dinossauros: %d"), DinosaurActors);
+    UE_LOG(LogBuildIntegration, Log, TEXT("PlayerStarts: %d"), PlayerStarts);
+    
+    // Validar requisitos mínimos
+    bool bMapValid = (LightingActors > 0 && TerrainActors > 0 && PlayerStarts > 0);
+    
+    if (bMapValid)
     {
-        if (SkyLights[i])
-        {
-            SkyLights[i]->Destroy();
-            UE_LOG(LogTemp, Warning, TEXT("Removed duplicate SkyLight"));
-        }
-    }
-    
-    // Nota: ExponentialHeightFog requer uma abordagem diferente pois é um componente
-    TArray<AActor*> AllActors;
-    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
-    
-    TArray<AActor*> FogActors;
-    for (AActor* Actor : AllActors)
-    {
-        if (Actor && Actor->FindComponentByClass<UExponentialHeightFogComponent>())
-        {
-            FogActors.Add(Actor);
-        }
-    }
-    
-    for (int32 i = 1; i < FogActors.Num(); ++i)
-    {
-        if (FogActors[i])
-        {
-            FogActors[i]->Destroy();
-            UE_LOG(LogTemp, Warning, TEXT("Removed duplicate ExponentialHeightFog"));
-        }
-    }
-}
-
-int32 UBuildIntegrationManager::CountActorsByClass(const FString& ClassName)
-{
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return 0;
-    }
-    
-    TArray<AActor*> AllActors;
-    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
-    
-    int32 Count = 0;
-    for (AActor* Actor : AllActors)
-    {
-        if (Actor && Actor->GetClass()->GetName().Contains(ClassName))
-        {
-            Count++;
-        }
-    }
-    
-    return Count;
-}
-
-void UBuildIntegrationManager::ValidateActorDistribution()
-{
-    ValidateBiomeActorDistribution();
-}
-
-FBuild_ModuleStatus UBuildIntegrationManager::AnalyzeModule(const FString& ModuleName)
-{
-    FBuild_ModuleStatus Status;
-    Status.ModuleName = ModuleName;
-    Status.bIsLoaded = FModuleManager::Get().IsModuleLoaded(*ModuleName);
-    Status.LastCompileTime = FDateTime::Now().ToString();
-    
-    // Simular contagem de headers e implementações
-    // Em implementação real, isto faria scan do filesystem
-    Status.HeaderCount = 25; // Placeholder
-    Status.ImplementationCount = 18; // Placeholder
-    
-    return Status;
-}
-
-bool UBuildIntegrationManager::CheckHeaderImplementationPairs()
-{
-    // Implementação simplificada - em produção faria scan real do filesystem
-    TArray<FString> OrphanHeaders;
-    ScanForOrphanHeaders(OrphanHeaders);
-    
-    if (OrphanHeaders.Num() > 0)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Found %d orphan headers"), OrphanHeaders.Num());
-        return false;
-    }
-    
-    return true;
-}
-
-void UBuildIntegrationManager::LogCriticalIssues(const TArray<FString>& Issues)
-{
-    for (const FString& Issue : Issues)
-    {
-        UE_LOG(LogTemp, Error, TEXT("CRITICAL ISSUE: %s"), *Issue);
-    }
-}
-
-void UBuildIntegrationManager::PerformPeriodicValidation()
-{
-    if (!bIntegrationActive)
-    {
-        return;
-    }
-    
-    LastValidationTime = GetWorld()->GetTimeSeconds();
-    
-    // Executar validações periódicas
-    ValidateModuleIntegrity();
-    
-    if (bAutoCleanupDuplicates)
-    {
-        CleanupDuplicateActors();
-    }
-    
-    // Gerar relatório
-    FBuild_IntegrationReport Report = GenerateIntegrationReport();
-    
-    if (Report.CriticalIssues.Num() > 0)
-    {
-        LogCriticalIssues(Report.CriticalIssues);
-    }
-}
-
-bool UBuildIntegrationManager::ValidateActorIntegrity()
-{
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return false;
-    }
-    
-    TArray<AActor*> AllActors;
-    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
-    
-    for (AActor* Actor : AllActors)
-    {
-        if (!Actor || !IsValid(Actor))
-        {
-            UE_LOG(LogTemp, Error, TEXT("Found invalid actor in world"));
-            return false;
-        }
-    }
-    
-    return true;
-}
-
-bool UBuildIntegrationManager::ValidateSystemDependencies()
-{
-    // Verificar se sistemas críticos estão disponíveis
-    bool bDependenciesValid = true;
-    
-    // Verificar GameMode
-    if (!GetWorld()->GetAuthGameMode())
-    {
-        UE_LOG(LogTemp, Warning, TEXT("No GameMode set for current world"));
-        bDependenciesValid = false;
-    }
-    
-    return bDependenciesValid;
-}
-
-void UBuildIntegrationManager::GenerateCompilationReport(FBuild_CompilationResult& OutResult)
-{
-    OutResult.bCompilationSuccessful = true; // Assumir sucesso se o módulo está carregado
-    OutResult.ErrorCount = 0;
-    OutResult.WarningCount = 0;
-    OutResult.BuildTimestamp = FDateTime::Now().ToString();
-    OutResult.BuildDurationSeconds = 0.0f;
-    
-    // Em implementação real, isto leria logs de compilação
-    if (FModuleManager::Get().IsModuleLoaded(TEXT("TranspersonalGame")))
-    {
-        OutResult.bCompilationSuccessful = true;
+        UE_LOG(LogBuildIntegration, Log, TEXT("✅ MinPlayableMap válido"));
     }
     else
     {
-        OutResult.bCompilationSuccessful = false;
-        OutResult.ErrorCount = 1;
-        OutResult.ErrorMessages.Add(TEXT("TranspersonalGame module not loaded"));
+        UE_LOG(LogBuildIntegration, Error, TEXT("❌ MinPlayableMap inválido - faltam actores críticos"));
     }
-}
-
-void UBuildIntegrationManager::ScanForOrphanHeaders(TArray<FString>& OutOrphanHeaders)
-{
-    // Implementação simplificada - em produção faria scan real do filesystem
-    // Por agora, simular alguns headers órfãos conhecidos
-    OutOrphanHeaders.Empty();
     
-    // Estes seriam detectados por scan real do Source/TranspersonalGame
-    OutOrphanHeaders.Add(TEXT("SomeOrphanHeader.h"));
-    OutOrphanHeaders.Add(TEXT("AnotherOrphanHeader.h"));
+    return bMapValid;
 }
 
-void UBuildIntegrationManager::ValidateBiomeActorDistribution()
+bool UBuildIntegrationManager::ValidateBiomeDistribution()
 {
+    UE_LOG(LogBuildIntegration, Log, TEXT("Validando distribuição de biomas..."));
+    
+    // Coordenadas dos 5 biomas conforme memória crítica
+    TArray<FBuild_BiomeZone> BiomeZones = {
+        {TEXT("Pantano"), FVector(-50000, -45000, 0), FVector2D(-77500, -25000), FVector2D(-76500, -15000)},
+        {TEXT("Floresta"), FVector(-45000, 40000, 0), FVector2D(-77500, -15000), FVector2D(15000, 76500)},
+        {TEXT("Savana"), FVector(0, 0, 0), FVector2D(-20000, 20000), FVector2D(-20000, 20000)},
+        {TEXT("Deserto"), FVector(55000, 0, 0), FVector2D(25000, 79500), FVector2D(-30000, 30000)},
+        {TEXT("Montanha"), FVector(40000, 50000, 500), FVector2D(15000, 79500), FVector2D(20000, 76500)}
+    };
+    
     UWorld* World = GetWorld();
-    if (!World)
+    if (!World) return false;
+    
+    // Verificar se existem actores em cada bioma
+    int32 ValidBiomes = 0;
+    
+    for (const FBuild_BiomeZone& Biome : BiomeZones)
     {
-        return;
-    }
-    
-    // Verificar se actores estão distribuídos correctamente pelos biomas
-    TArray<AActor*> AllActors;
-    UGameplayStatics::GetAllActorsOfClass(World, AStaticMeshActor::StaticClass(), AllActors);
-    
-    int32 ActorsInCenter = 0;
-    int32 ActorsOutsideMap = 0;
-    
-    for (AActor* Actor : AllActors)
-    {
-        if (!Actor) continue;
+        int32 ActorsInBiome = 0;
         
-        FVector Location = Actor->GetActorLocation();
-        
-        // Verificar se está dentro dos limites do mapa
-        if (FMath::Abs(Location.X) > 79500.0f || FMath::Abs(Location.Y) > 76500.0f)
+        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
         {
-            ActorsOutsideMap++;
+            AActor* Actor = *ActorItr;
+            if (!Actor) continue;
+            
+            FVector ActorLocation = Actor->GetActorLocation();
+            
+            // Verificar se actor está dentro da zona do bioma
+            if (ActorLocation.X >= Biome.XRange.X && ActorLocation.X <= Biome.XRange.Y &&
+                ActorLocation.Y >= Biome.YRange.X && ActorLocation.Y <= Biome.YRange.Y)
+            {
+                ActorsInBiome++;
+            }
         }
         
-        // Verificar se está no centro (savana)
-        if (FMath::Abs(Location.X) < 20000.0f && FMath::Abs(Location.Y) < 20000.0f)
+        if (ActorsInBiome > 0)
         {
-            ActorsInCenter++;
+            ValidBiomes++;
+            UE_LOG(LogBuildIntegration, Log, TEXT("✅ Bioma %s: %d actores"), *Biome.Name, ActorsInBiome);
+        }
+        else
+        {
+            UE_LOG(LogBuildIntegration, Warning, TEXT("⚠️ Bioma %s: sem actores"), *Biome.Name);
         }
     }
     
-    if (bLogVerboseOutput)
+    bool bBiomesValid = (ValidBiomes >= 3); // Pelo menos 3 biomas devem ter actores
+    UE_LOG(LogBuildIntegration, Log, TEXT("Biomas válidos: %d/5"), ValidBiomes);
+    
+    return bBiomesValid;
+}
+
+void UBuildIntegrationManager::PerformIntegrationValidation()
+{
+    UE_LOG(LogBuildIntegration, Log, TEXT("=== VALIDAÇÃO DE INTEGRAÇÃO INICIADA ==="));
+    
+    IntegrationState = EBuild_IntegrationState::Validating;
+    
+    // Executar todas as validações críticas
+    bool bModulesValid = ValidateModuleIntegrity();
+    bool bMapValid = ValidateMapActors();
+    bool bBiomesValid = ValidateBiomeDistribution();
+    
+    // Determinar estado final
+    if (bModulesValid && bMapValid && bBiomesValid)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Biome Distribution - Center: %d, Outside Map: %d"), 
-               ActorsInCenter, ActorsOutsideMap);
+        IntegrationState = EBuild_IntegrationState::Healthy;
+        UE_LOG(LogBuildIntegration, Log, TEXT("✅ INTEGRAÇÃO SAUDÁVEL - Todas as validações passaram"));
     }
+    else
+    {
+        IntegrationState = EBuild_IntegrationState::Error;
+        UE_LOG(LogBuildIntegration, Error, TEXT("❌ INTEGRAÇÃO COM PROBLEMAS"));
+        
+        if (!bModulesValid) UE_LOG(LogBuildIntegration, Error, TEXT("  - Módulos com problemas"));
+        if (!bMapValid) UE_LOG(LogBuildIntegration, Error, TEXT("  - Mapa com problemas"));
+        if (!bBiomesValid) UE_LOG(LogBuildIntegration, Error, TEXT("  - Biomas com problemas"));
+    }
+    
+    LastValidationTime = FDateTime::Now();
+    
+    // Gerar relatório de integração
+    GenerateIntegrationReport();
+    
+    UE_LOG(LogBuildIntegration, Log, TEXT("=== VALIDAÇÃO DE INTEGRAÇÃO CONCLUÍDA ==="));
+}
+
+void UBuildIntegrationManager::GenerateIntegrationReport()
+{
+    FString ReportContent = TEXT("=== RELATÓRIO DE INTEGRAÇÃO ===\n");
+    ReportContent += FString::Printf(TEXT("Data: %s\n"), *FDateTime::Now().ToString());
+    ReportContent += FString::Printf(TEXT("Estado: %s\n"), 
+        IntegrationState == EBuild_IntegrationState::Healthy ? TEXT("SAUDÁVEL") : TEXT("COM PROBLEMAS"));
+    
+    ReportContent += TEXT("\nValidações executadas:\n");
+    for (const FString& Validation : CriticalValidations)
+    {
+        ReportContent += FString::Printf(TEXT("- %s\n"), *Validation);
+    }
+    
+    // Guardar relatório em ficheiro
+    FString ReportPath = FPaths::ProjectLogDir() / TEXT("IntegrationReport.txt");
+    FFileHelper::SaveStringToFile(ReportContent, *ReportPath);
+    
+    UE_LOG(LogBuildIntegration, Log, TEXT("Relatório guardado em: %s"), *ReportPath);
+}
+
+EBuild_IntegrationState UBuildIntegrationManager::GetIntegrationState() const
+{
+    return IntegrationState;
+}
+
+bool UBuildIntegrationManager::IsValidationRequired() const
+{
+    FTimespan TimeSinceValidation = FDateTime::Now() - LastValidationTime;
+    return TimeSinceValidation.GetTotalSeconds() > ValidationIntervalSeconds;
 }
