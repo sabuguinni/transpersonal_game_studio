@@ -1,370 +1,302 @@
 #include "Narr_DialogueSystem.h"
-#include "Components/SphereComponent.h"
-#include "Components/AudioComponent.h"
-#include "Components/StaticMeshComponent.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "TimerManager.h"
-#include "Characters/TranspersonalCharacter.h"
+#include "GameFramework/PlayerController.h"
+#include "GameFramework/Pawn.h"
 #include "Kismet/GameplayStatics.h"
+#include "Components/AudioComponent.h"
+#include "Sound/SoundCue.h"
 
-ANarr_DialogueSystem::ANarr_DialogueSystem()
+UNarr_DialogueSystem::UNarr_DialogueSystem()
 {
-    PrimaryActorTick.bCanEverTick = true;
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = UpdateInterval;
 
-    // Create root component
-    RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
-
-    // Create interaction sphere
-    InteractionSphere = CreateDefaultSubobject<USphereComponent>(TEXT("InteractionSphere"));
-    InteractionSphere->SetupAttachment(RootComponent);
-    InteractionSphere->SetSphereRadius(300.0f);
-    InteractionSphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-    InteractionSphere->SetCollisionResponseToAllChannels(ECR_Ignore);
-    InteractionSphere->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
-
-    // Create audio component
-    AudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AudioComponent"));
-    AudioComponent->SetupAttachment(RootComponent);
-    AudioComponent->bAutoActivate = false;
-
-    // Create visual marker
-    VisualMarker = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("VisualMarker"));
-    VisualMarker->SetupAttachment(RootComponent);
-    VisualMarker->SetRelativeScale3D(FVector(2.0f, 2.0f, 2.0f));
-
-    // Initialize properties
-    CurrentDialogueIndex = 0;
+    // Criar componente de áudio
+    AudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("DialogueAudioComponent"));
+    
+    // Configurações padrão
+    UpdateInterval = 1.0f;
+    MaxDialogueDistance = 2000.0f;
+    bEnableContextualDialogue = true;
     bIsPlayingDialogue = false;
-    InteractionRange = 300.0f;
-    bPlayerInRange = false;
-    PlayerCharacter = nullptr;
+    DialogueTimer = 0.0f;
+    CurrentContext = ENarr_NarrativeContext::Safe;
+    CurrentZone = TEXT("");
 }
 
-void ANarr_DialogueSystem::BeginPlay()
+void UNarr_DialogueSystem::BeginPlay()
 {
     Super::BeginPlay();
 
-    // Bind overlap events
-    if (InteractionSphere)
-    {
-        InteractionSphere->OnComponentBeginOverlap.AddDynamic(this, &ANarr_DialogueSystem::OnInteractionSphereBeginOverlap);
-        InteractionSphere->OnComponentEndOverlap.AddDynamic(this, &ANarr_DialogueSystem::OnInteractionSphereEndOverlap);
-    }
+    // Inicializar zonas narrativas padrão
+    FNarr_NarrativeZone TutorialZone;
+    TutorialZone.ZoneName = TEXT("Tutorial");
+    TutorialZone.Context = ENarr_NarrativeContext::Safe;
+    TutorialZone.ZoneCenter = FVector(0, 0, 0);
+    TutorialZone.ZoneRadius = 800.0f;
+    
+    FNarr_DialogueEntry TutorialDialogue;
+    TutorialDialogue.DialogueType = ENarr_DialogueType::Tutorial;
+    TutorialDialogue.DialogueText = TEXT("Welcome to the Cretaceous period. Your survival depends on understanding this prehistoric world.");
+    TutorialDialogue.Duration = 8.0f;
+    TutorialDialogue.Priority = 10;
+    TutorialDialogue.bCanRepeat = false;
+    TutorialDialogue.CooldownTime = 0.0f;
+    
+    TutorialZone.AvailableDialogue.Add(TutorialDialogue);
+    NarrativeZones.Add(TutorialZone);
 
-    // Bind audio finished event
-    if (AudioComponent)
-    {
-        AudioComponent->OnAudioFinished.AddDynamic(this, &ANarr_DialogueSystem::OnAudioFinished);
-    }
+    // Zona de perigo com dinossauros
+    FNarr_NarrativeZone DangerZone;
+    DangerZone.ZoneName = TEXT("DinosaurTerritory");
+    DangerZone.Context = ENarr_NarrativeContext::Danger;
+    DangerZone.ZoneCenter = FVector(2000, 1000, 0);
+    DangerZone.ZoneRadius = 1200.0f;
+    
+    FNarr_DialogueEntry DangerDialogue;
+    DangerDialogue.DialogueType = ENarr_DialogueType::Warning;
+    DangerDialogue.DialogueText = TEXT("Large predator detected in your vicinity. Maintain distance and avoid sudden movements.");
+    DangerDialogue.Duration = 6.0f;
+    DangerDialogue.Priority = 8;
+    DangerDialogue.bCanRepeat = true;
+    DangerDialogue.CooldownTime = 45.0f;
+    
+    DangerZone.AvailableDialogue.Add(DangerDialogue);
+    NarrativeZones.Add(DangerZone);
 
-    // Initialize character profiles
-    CreateCharacterProfiles();
-    InitializeCharacters();
+    // Zona de descoberta
+    FNarr_NarrativeZone DiscoveryZone;
+    DiscoveryZone.ZoneName = TEXT("ResourceArea");
+    DiscoveryZone.Context = ENarr_NarrativeContext::Discovery;
+    DiscoveryZone.ZoneCenter = FVector(-1500, 2000, 0);
+    DiscoveryZone.ZoneRadius = 900.0f;
+    
+    FNarr_DialogueEntry DiscoveryDialogue;
+    DiscoveryDialogue.DialogueType = ENarr_DialogueType::Discovery;
+    DiscoveryDialogue.DialogueText = TEXT("Interesting geological formations detected. This area may contain valuable resources.");
+    DiscoveryDialogue.Duration = 7.0f;
+    DiscoveryDialogue.Priority = 5;
+    DiscoveryDialogue.bCanRepeat = true;
+    DiscoveryDialogue.CooldownTime = 60.0f;
+    
+    DiscoveryZone.AvailableDialogue.Add(DiscoveryDialogue);
+    NarrativeZones.Add(DiscoveryZone);
+
+    UE_LOG(LogTemp, Warning, TEXT("Narrative Dialogue System initialized with %d zones"), NarrativeZones.Num());
 }
 
-void ANarr_DialogueSystem::Tick(float DeltaTime)
+void UNarr_DialogueSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    Super::Tick(DeltaTime);
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-    // Check for player input when in range
-    if (bPlayerInRange && PlayerCharacter && !bIsPlayingDialogue)
+    if (!bEnableContextualDialogue)
+        return;
+
+    // Actualizar timer do diálogo actual
+    if (bIsPlayingDialogue)
     {
-        // Check for interaction input (E key or gamepad button)
-        if (PlayerCharacter->GetInputComponent())
+        DialogueTimer += DeltaTime;
+        if (DialogueTimer >= CurrentDialogue.Duration)
         {
-            // Auto-play dialogue when player enters range for now
-            // In a full implementation, this would check for input
-            if (CurrentCharacter.DialogueLines.Num() > 0)
+            StopCurrentDialogue();
+        }
+    }
+
+    // Actualizar contexto narrativo
+    LastUpdateTime += DeltaTime;
+    if (LastUpdateTime >= UpdateInterval)
+    {
+        UpdateNarrativeContext();
+        ProcessDialogueQueue();
+        LastUpdateTime = 0.0f;
+    }
+
+    // Actualizar cooldowns
+    for (auto& Cooldown : DialogueCooldowns)
+    {
+        Cooldown.Value -= DeltaTime;
+    }
+}
+
+void UNarr_DialogueSystem::UpdateNarrativeContext()
+{
+    UWorld* World = GetWorld();
+    if (!World)
+        return;
+
+    APlayerController* PlayerController = World->GetFirstPlayerController();
+    if (!PlayerController || !PlayerController->GetPawn())
+        return;
+
+    FVector PlayerLocation = PlayerController->GetPawn()->GetActorLocation();
+    FString ZoneName;
+    
+    if (IsInNarrativeZone(PlayerLocation, ZoneName))
+    {
+        // Encontrar a zona correspondente
+        for (const FNarr_NarrativeZone& Zone : NarrativeZones)
+        {
+            if (Zone.ZoneName == ZoneName && Zone.bIsActive)
             {
-                PlayDialogueLine(CurrentDialogueIndex);
+                if (CurrentZone != ZoneName)
+                {
+                    CurrentZone = ZoneName;
+                    CurrentContext = Zone.Context;
+                    UE_LOG(LogTemp, Log, TEXT("Player entered narrative zone: %s"), *ZoneName);
+                }
+                break;
             }
         }
     }
+    else
+    {
+        if (!CurrentZone.IsEmpty())
+        {
+            CurrentZone = TEXT("");
+            CurrentContext = ENarr_NarrativeContext::Safe;
+            UE_LOG(LogTemp, Log, TEXT("Player left narrative zones"));
+        }
+    }
 }
 
-void ANarr_DialogueSystem::InitializeCharacters()
+void UNarr_DialogueSystem::ProcessDialogueQueue()
 {
-    if (Characters.Num() == 0)
-    {
-        CreateCharacterProfiles();
-    }
+    if (bIsPlayingDialogue || CurrentZone.IsEmpty())
+        return;
 
-    // Set first available character as current
-    for (const FNarr_CharacterProfile& Character : Characters)
+    // Encontrar a zona actual
+    for (const FNarr_NarrativeZone& Zone : NarrativeZones)
     {
-        if (Character.bIsAvailable)
+        if (Zone.ZoneName == CurrentZone && Zone.bIsActive)
         {
-            CurrentCharacter = Character;
+            FNarr_DialogueEntry BestDialogue = SelectBestDialogue(Zone);
+            
+            if (!BestDialogue.DialogueText.IsEmpty() && ShouldPlayDialogue(BestDialogue))
+            {
+                TriggerDialogue(BestDialogue.DialogueType, Zone.ZoneName);
+                CurrentDialogue = BestDialogue;
+            }
             break;
         }
     }
-
-    UE_LOG(LogTemp, Warning, TEXT("Dialogue System initialized with %d characters"), Characters.Num());
 }
 
-void ANarr_DialogueSystem::SetCurrentCharacter(const FString& CharacterName)
+FNarr_DialogueEntry UNarr_DialogueSystem::SelectBestDialogue(const FNarr_NarrativeZone& Zone)
 {
-    for (const FNarr_CharacterProfile& Character : Characters)
+    FNarr_DialogueEntry BestDialogue;
+    int32 HighestPriority = -1;
+
+    for (const FNarr_DialogueEntry& Dialogue : Zone.AvailableDialogue)
     {
-        if (Character.CharacterName == CharacterName && Character.bIsAvailable)
+        if (ShouldPlayDialogue(Dialogue) && Dialogue.Priority > HighestPriority)
         {
-            CurrentCharacter = Character;
-            CurrentDialogueIndex = 0;
-            UE_LOG(LogTemp, Warning, TEXT("Set current character to: %s"), *CharacterName);
-            return;
+            BestDialogue = Dialogue;
+            HighestPriority = Dialogue.Priority;
         }
     }
 
-    UE_LOG(LogTemp, Error, TEXT("Character not found or not available: %s"), *CharacterName);
+    return BestDialogue;
 }
 
-void ANarr_DialogueSystem::PlayDialogueLine(int32 LineIndex)
+bool UNarr_DialogueSystem::ShouldPlayDialogue(const FNarr_DialogueEntry& Dialogue)
+{
+    // Verificar se não está em cooldown
+    FString DialogueKey = CurrentZone + TEXT("_") + UEnum::GetValueAsString(Dialogue.DialogueType);
+    
+    if (DialogueCooldowns.Contains(DialogueKey))
+    {
+        if (DialogueCooldowns[DialogueKey] > 0.0f)
+        {
+            return false;
+        }
+    }
+
+    // Verificar se pode repetir
+    if (!Dialogue.bCanRepeat && DialogueCooldowns.Contains(DialogueKey))
+    {
+        return false;
+    }
+
+    return true;
+}
+
+void UNarr_DialogueSystem::TriggerDialogue(ENarr_DialogueType DialogueType, const FString& ZoneName)
 {
     if (bIsPlayingDialogue)
     {
-        return;
+        StopCurrentDialogue();
     }
 
-    if (CurrentCharacter.DialogueLines.IsValidIndex(LineIndex))
+    bIsPlayingDialogue = true;
+    DialogueTimer = 0.0f;
+
+    // Reproduzir áudio se disponível
+    if (AudioComponent && CurrentDialogue.AudioClip.IsValid())
     {
-        const FNarr_DialogueLine& Line = CurrentCharacter.DialogueLines[LineIndex];
-        
-        bIsPlayingDialogue = true;
-        CurrentDialogueIndex = LineIndex;
-
-        // Display dialogue text on screen
-        if (GEngine)
+        USoundCue* SoundCue = CurrentDialogue.AudioClip.LoadSynchronous();
+        if (SoundCue)
         {
-            FString DisplayText = FString::Printf(TEXT("%s: %s"), *Line.CharacterName, *Line.DialogueText);
-            GEngine->AddOnScreenDebugMessage(-1, Line.Duration, FColor::Yellow, DisplayText);
+            AudioComponent->SetSound(SoundCue);
+            AudioComponent->Play();
         }
-
-        // Play audio if available
-        if (!Line.AudioURL.IsEmpty() && AudioComponent)
-        {
-            LoadAudioFromURL(Line.AudioURL);
-        }
-        else
-        {
-            // If no audio, use timer to simulate duration
-            GetWorld()->GetTimerManager().SetTimer(
-                FTimerHandle(),
-                this,
-                &ANarr_DialogueSystem::OnAudioFinished,
-                Line.Duration,
-                false
-            );
-        }
-
-        UE_LOG(LogTemp, Warning, TEXT("Playing dialogue: %s - %s"), *Line.CharacterName, *Line.DialogueText);
     }
+
+    // Adicionar cooldown
+    FString DialogueKey = ZoneName + TEXT("_") + UEnum::GetValueAsString(DialogueType);
+    DialogueCooldowns.Add(DialogueKey, CurrentDialogue.CooldownTime);
+
+    UE_LOG(LogTemp, Warning, TEXT("Triggered dialogue: %s in zone %s"), 
+           *UEnum::GetValueAsString(DialogueType), *ZoneName);
 }
 
-void ANarr_DialogueSystem::PlayNextDialogue()
-{
-    if (CurrentCharacter.DialogueLines.IsValidIndex(CurrentDialogueIndex + 1))
-    {
-        PlayDialogueLine(CurrentDialogueIndex + 1);
-    }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("No more dialogue lines for character: %s"), *CurrentCharacter.CharacterName);
-        StopDialogue();
-    }
-}
-
-void ANarr_DialogueSystem::StopDialogue()
+void UNarr_DialogueSystem::StopCurrentDialogue()
 {
     bIsPlayingDialogue = false;
-    CurrentDialogueIndex = 0;
-
+    DialogueTimer = 0.0f;
+    
     if (AudioComponent && AudioComponent->IsPlaying())
     {
         AudioComponent->Stop();
     }
 
-    UE_LOG(LogTemp, Warning, TEXT("Dialogue stopped"));
+    CurrentDialogue = FNarr_DialogueEntry();
 }
 
-FNarr_DialogueLine ANarr_DialogueSystem::GetDialogueByContext(ESurvivalContext Context)
+bool UNarr_DialogueSystem::IsInNarrativeZone(const FVector& PlayerLocation, FString& OutZoneName)
 {
-    for (const FNarr_DialogueLine& Line : CurrentCharacter.DialogueLines)
+    for (const FNarr_NarrativeZone& Zone : NarrativeZones)
     {
-        if (Line.Context == Context)
+        if (!Zone.bIsActive)
+            continue;
+
+        float Distance = FVector::Dist(PlayerLocation, Zone.ZoneCenter);
+        if (Distance <= Zone.ZoneRadius)
         {
-            return Line;
+            OutZoneName = Zone.ZoneName;
+            return true;
         }
     }
 
-    // Return first line if no context match
-    if (CurrentCharacter.DialogueLines.Num() > 0)
+    OutZoneName = TEXT("");
+    return false;
+}
+
+void UNarr_DialogueSystem::AddNarrativeZone(const FNarr_NarrativeZone& NewZone)
+{
+    NarrativeZones.Add(NewZone);
+    UE_LOG(LogTemp, Log, TEXT("Added narrative zone: %s"), *NewZone.ZoneName);
+}
+
+void UNarr_DialogueSystem::RemoveNarrativeZone(const FString& ZoneName)
+{
+    NarrativeZones.RemoveAll([ZoneName](const FNarr_NarrativeZone& Zone)
     {
-        return CurrentCharacter.DialogueLines[0];
-    }
-
-    return FNarr_DialogueLine();
+        return Zone.ZoneName == ZoneName;
+    });
+    UE_LOG(LogTemp, Log, TEXT("Removed narrative zone: %s"), *ZoneName);
 }
 
-TArray<FString> ANarr_DialogueSystem::GetAvailableCharacters()
+ENarr_NarrativeContext UNarr_DialogueSystem::GetCurrentContext() const
 {
-    TArray<FString> AvailableNames;
-    
-    for (const FNarr_CharacterProfile& Character : Characters)
-    {
-        if (Character.bIsAvailable)
-        {
-            AvailableNames.Add(Character.CharacterName);
-        }
-    }
-
-    return AvailableNames;
-}
-
-void ANarr_DialogueSystem::TestDialogueSystem()
-{
-    UE_LOG(LogTemp, Warning, TEXT("Testing Dialogue System..."));
-    
-    if (Characters.Num() > 0)
-    {
-        SetCurrentCharacter(Characters[0].CharacterName);
-        PlayDialogueLine(0);
-    }
-}
-
-void ANarr_DialogueSystem::OnInteractionSphereBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
-{
-    if (ATranspersonalCharacter* Character = Cast<ATranspersonalCharacter>(OtherActor))
-    {
-        PlayerCharacter = Character;
-        bPlayerInRange = true;
-        
-        UE_LOG(LogTemp, Warning, TEXT("Player entered dialogue range"));
-        
-        // Visual feedback
-        if (VisualMarker)
-        {
-            VisualMarker->SetVisibility(true);
-        }
-    }
-}
-
-void ANarr_DialogueSystem::OnInteractionSphereEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
-{
-    if (ATranspersonalCharacter* Character = Cast<ATranspersonalCharacter>(OtherActor))
-    {
-        PlayerCharacter = nullptr;
-        bPlayerInRange = false;
-        
-        UE_LOG(LogTemp, Warning, TEXT("Player left dialogue range"));
-        
-        // Stop current dialogue
-        StopDialogue();
-        
-        // Hide visual feedback
-        if (VisualMarker)
-        {
-            VisualMarker->SetVisibility(false);
-        }
-    }
-}
-
-void ANarr_DialogueSystem::OnAudioFinished()
-{
-    bIsPlayingDialogue = false;
-    UE_LOG(LogTemp, Warning, TEXT("Audio finished, dialogue complete"));
-}
-
-void ANarr_DialogueSystem::CreateCharacterProfiles()
-{
-    Characters.Empty();
-
-    // Predator Stalker Character
-    FNarr_CharacterProfile PredatorStalker;
-    PredatorStalker.CharacterName = TEXT("Predator Stalker");
-    PredatorStalker.BackgroundStory = TEXT("A seasoned tracker who has survived countless predator encounters. Knows the hunting patterns of the apex predators and teaches others how to avoid becoming prey.");
-    PredatorStalker.Expertise = ESurvivalSkill::Combat;
-    PredatorStalker.bIsAvailable = true;
-
-    FNarr_DialogueLine PredatorLine;
-    PredatorLine.CharacterName = PredatorStalker.CharacterName;
-    PredatorLine.DialogueText = TEXT("The ancient predator circles your camp, its massive footsteps shaking the ground beneath you. This is no ordinary hunt - it has been tracking you for hours, waiting for the perfect moment to strike.");
-    PredatorLine.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1777714373019_PredatorStalker.mp3");
-    PredatorLine.Duration = 18.0f;
-    PredatorLine.Context = ESurvivalContext::Combat;
-    PredatorStalker.DialogueLines.Add(PredatorLine);
-
-    Characters.Add(PredatorStalker);
-
-    // Tribal Elder Character
-    FNarr_CharacterProfile TribalElder;
-    TribalElder.CharacterName = TEXT("Tribal Elder");
-    TribalElder.BackgroundStory = TEXT("The oldest and wisest member of the tribe. Has observed the migration patterns of herbivores for decades and understands the ancient rhythms of the prehistoric world.");
-    TribalElder.Expertise = ESurvivalSkill::Tracking;
-    TribalElder.bIsAvailable = true;
-
-    FNarr_DialogueLine ElderLine;
-    ElderLine.CharacterName = TribalElder.CharacterName;
-    ElderLine.DialogueText = TEXT("Listen carefully, young survivor. The herbivores migrate through this valley every season, following the same ancient paths their ancestors used. If you learn to read their signs, you can predict where they'll be.");
-    ElderLine.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1777714376046_TribalElder.mp3");
-    ElderLine.Duration = 18.0f;
-    ElderLine.Context = ESurvivalContext::Exploration;
-    TribalElder.DialogueLines.Add(ElderLine);
-
-    Characters.Add(TribalElder);
-
-    // Water Scout Character
-    FNarr_CharacterProfile WaterScout;
-    WaterScout.CharacterName = TEXT("Water Scout");
-    WaterScout.BackgroundStory = TEXT("A specialist in finding and securing water sources. Understands the dangers that lurk around watering holes and has developed strategies for safe water collection.");
-    WaterScout.Expertise = ESurvivalSkill::Gathering;
-    WaterScout.bIsAvailable = true;
-
-    FNarr_DialogueLine WaterLine;
-    WaterLine.CharacterName = WaterScout.CharacterName;
-    WaterLine.DialogueText = TEXT("Water means life, but it also means danger. Every watering hole is a battlefield where predators wait in ambush. Approach slowly, watch for ripples that shouldn't be there, and always have an escape route planned.");
-    WaterLine.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1777714378354_WaterScout.mp3");
-    WaterLine.Duration = 15.0f;
-    WaterLine.Context = ESurvivalContext::ResourceGathering;
-    WaterScout.DialogueLines.Add(WaterLine);
-
-    Characters.Add(WaterScout);
-
-    // Pack Hunter Expert Character
-    FNarr_CharacterProfile PackExpert;
-    PackExpert.CharacterName = TEXT("Pack Hunter Expert");
-    PackExpert.BackgroundStory = TEXT("A survivor who has studied the pack hunting behavior of raptors and other intelligent predators. Knows their tactics and can teach others how to counter their coordinated attacks.");
-    PackExpert.Expertise = ESurvivalSkill::Combat;
-    PackExpert.bIsAvailable = true;
-
-    FNarr_DialogueLine PackLine;
-    PackLine.CharacterName = PackExpert.CharacterName;
-    PackLine.DialogueText = TEXT("The pack hunters work together with deadly precision. When you see one raptor, know that two others are already flanking you. Their intelligence rivals our own - never underestimate their ability to learn and adapt.");
-    PackLine.AudioURL = TEXT("https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1777714380429_PackHunterExpert.mp3");
-    PackLine.Duration = 15.0f;
-    PackLine.Context = ESurvivalContext::Combat;
-    PackExpert.DialogueLines.Add(PackLine);
-
-    Characters.Add(PackExpert);
-
-    UE_LOG(LogTemp, Warning, TEXT("Created %d character profiles"), Characters.Num());
-}
-
-void ANarr_DialogueSystem::LoadAudioFromURL(const FString& AudioURL)
-{
-    // For now, just log the audio URL
-    // In a full implementation, this would download and play the audio
-    UE_LOG(LogTemp, Warning, TEXT("Loading audio from URL: %s"), *AudioURL);
-    
-    // Simulate audio playback with timer
-    if (!AudioURL.IsEmpty())
-    {
-        GetWorld()->GetTimerManager().SetTimer(
-            FTimerHandle(),
-            this,
-            &ANarr_DialogueSystem::OnAudioFinished,
-            CurrentCharacter.DialogueLines[CurrentDialogueIndex].Duration,
-            false
-        );
-    }
+    return CurrentContext;
 }
