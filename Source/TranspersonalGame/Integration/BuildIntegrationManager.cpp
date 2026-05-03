@@ -1,234 +1,291 @@
 #include "BuildIntegrationManager.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "GameFramework/Actor.h"
-#include "Components/SceneComponent.h"
-#include "UObject/ConstructorHelpers.h"
+#include "HAL/FileManager.h"
+#include "Misc/Paths.h"
+#include "Misc/DateTime.h"
+#include "Engine/GameInstance.h"
+#include "TranspersonalGame/SharedTypes.h"
 
-DEFINE_LOG_CATEGORY(LogBuildIntegration);
+DEFINE_LOG_CATEGORY_STATIC(LogBuildIntegration, Log, All);
 
-ABuildIntegrationManager::ABuildIntegrationManager()
+UBuildIntegrationManager::UBuildIntegrationManager()
 {
-    PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.bStartWithTickEnabled = true;
+    PrimaryComponentTick.bCanEverTick = false;
     
-    // Criar componente raiz
-    RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
+    // Inicializar estado de integração
+    IntegrationState = EBuildIntegrationState::Idle;
+    LastValidationTime = FDateTime::Now();
+    ValidationInterval = 300.0f; // 5 minutos
     
-    // Inicializar propriedades
-    bIsActive = true;
-    bValidationEnabled = true;
-    bAutoCleanup = true;
-    ValidationInterval = 30.0f;
-    LastValidationTime = 0.0f;
+    // Configurar validações críticas
+    CriticalValidations.Add(TEXT("ModuleCompilation"));
+    CriticalValidations.Add(TEXT("ActorSpawning"));
+    CriticalValidations.Add(TEXT("ComponentRegistration"));
+    CriticalValidations.Add(TEXT("AssetLoading"));
     
-    // Inicializar contadores
-    TotalHeaderFiles = 0;
-    TotalCppFiles = 0;
-    OrphanHeaders = 0;
-    CompilationErrors = 0;
-    
-    // Inicializar arrays
-    CriticalSystems.Empty();
-    DuplicateSystems.Empty();
-    ValidationResults.Empty();
-    
-    // Adicionar sistemas críticos conhecidos
-    CriticalSystems.Add(TEXT("TranspersonalCharacter"));
-    CriticalSystems.Add(TEXT("TranspersonalGameMode"));
-    CriticalSystems.Add(TEXT("BiomeManager"));
-    CriticalSystems.Add(TEXT("DinosaurBase"));
+    UE_LOG(LogBuildIntegration, Log, TEXT("BuildIntegrationManager inicializado"));
 }
 
-void ABuildIntegrationManager::BeginPlay()
+void UBuildIntegrationManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    UE_LOG(LogBuildIntegration, Warning, TEXT("BuildIntegrationManager iniciado"));
-    
-    if (bIsActive)
-    {
-        // Executar validação inicial
-        PerformBuildValidation();
-    }
+    // Executar validação inicial
+    ExecuteIntegrationValidation();
 }
 
-void ABuildIntegrationManager::Tick(float DeltaTime)
+void UBuildIntegrationManager::ExecuteIntegrationValidation()
 {
-    Super::Tick(DeltaTime);
+    UE_LOG(LogBuildIntegration, Log, TEXT("Iniciando validação de integração crítica"));
     
-    if (!bIsActive || !bValidationEnabled)
+    IntegrationState = EBuildIntegrationState::Validating;
+    ValidationResults.Empty();
+    
+    // Validar compilação de módulos
+    ValidateModuleCompilation();
+    
+    // Validar spawning de actores
+    ValidateActorSpawning();
+    
+    // Validar registo de componentes
+    ValidateComponentRegistration();
+    
+    // Validar carregamento de assets
+    ValidateAssetLoading();
+    
+    // Processar resultados
+    ProcessValidationResults();
+    
+    LastValidationTime = FDateTime::Now();
+    IntegrationState = EBuildIntegrationState::Idle;
+    
+    UE_LOG(LogBuildIntegration, Log, TEXT("Validação de integração concluída"));
+}
+
+void UBuildIntegrationManager::ValidateModuleCompilation()
+{
+    FBuildValidationResult Result;
+    Result.ValidationName = TEXT("ModuleCompilation");
+    Result.bPassed = true;
+    Result.ErrorMessages.Empty();
+    
+    // Verificar se o módulo TranspersonalGame está carregado
+    if (!FModuleManager::Get().IsModuleLoaded(TEXT("TranspersonalGame")))
     {
+        Result.bPassed = false;
+        Result.ErrorMessages.Add(TEXT("Módulo TranspersonalGame não está carregado"));
+    }
+    
+    // Verificar classes críticas
+    TArray<FString> CriticalClasses = {
+        TEXT("/Script/TranspersonalGame.TranspersonalCharacter"),
+        TEXT("/Script/TranspersonalGame.TranspersonalGameMode"),
+        TEXT("/Script/TranspersonalGame.BuildIntegrationManager")
+    };
+    
+    for (const FString& ClassName : CriticalClasses)
+    {
+        UClass* LoadedClass = LoadClass<UObject>(nullptr, *ClassName);
+        if (!LoadedClass)
+        {
+            Result.bPassed = false;
+            Result.ErrorMessages.Add(FString::Printf(TEXT("Classe crítica não encontrada: %s"), *ClassName));
+        }
+    }
+    
+    ValidationResults.Add(Result);
+    
+    UE_LOG(LogBuildIntegration, Log, TEXT("Validação de compilação: %s"), 
+           Result.bPassed ? TEXT("PASSOU") : TEXT("FALHOU"));
+}
+
+void UBuildIntegrationManager::ValidateActorSpawning()
+{
+    FBuildValidationResult Result;
+    Result.ValidationName = TEXT("ActorSpawning");
+    Result.bPassed = true;
+    Result.ErrorMessages.Empty();
+    
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        Result.bPassed = false;
+        Result.ErrorMessages.Add(TEXT("World não disponível para teste de spawning"));
+        ValidationResults.Add(Result);
         return;
     }
     
-    // Verificar se é hora de executar validação
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-    if (CurrentTime - LastValidationTime >= ValidationInterval)
+    // Testar spawning de actor básico
+    FVector TestLocation(0.0f, 0.0f, 1000.0f);
+    FRotator TestRotation = FRotator::ZeroRotator;
+    
+    AActor* TestActor = World->SpawnActor<AActor>(AActor::StaticClass(), TestLocation, TestRotation);
+    if (TestActor)
     {
-        PerformBuildValidation();
-        LastValidationTime = CurrentTime;
+        // Limpar actor de teste
+        TestActor->Destroy();
+        UE_LOG(LogBuildIntegration, Log, TEXT("Teste de spawning básico: SUCESSO"));
     }
-}
-
-void ABuildIntegrationManager::PerformBuildValidation()
-{
-    UE_LOG(LogBuildIntegration, Log, TEXT("Executando validação de build..."));
-    
-    // Limpar resultados anteriores
-    ValidationResults.Empty();
-    
-    // Validar classes críticas
-    ValidateCriticalSystems();
-    
-    // Validar actores no mapa
-    ValidateMapActors();
-    
-    // Detectar sistemas duplicados
-    DetectDuplicateSystems();
-    
-    // Executar limpeza automática se habilitada
-    if (bAutoCleanup)
+    else
     {
-        PerformAutoCleanup();
+        Result.bPassed = false;
+        Result.ErrorMessages.Add(TEXT("Falha ao spawnar actor de teste"));
     }
     
-    // Log dos resultados
-    LogValidationResults();
+    ValidationResults.Add(Result);
 }
 
-void ABuildIntegrationManager::ValidateCriticalSystems()
+void UBuildIntegrationManager::ValidateComponentRegistration()
 {
-    UE_LOG(LogBuildIntegration, Log, TEXT("Validando sistemas críticos..."));
+    FBuildValidationResult Result;
+    Result.ValidationName = TEXT("ComponentRegistration");
+    Result.bPassed = true;
+    Result.ErrorMessages.Empty();
     
-    for (const FString& SystemName : CriticalSystems)
+    // Verificar se este componente está registado correctamente
+    AActor* Owner = GetOwner();
+    if (Owner)
     {
-        FBuild_ValidationResult Result;
-        Result.SystemName = SystemName;
-        Result.bIsValid = false;
-        Result.ErrorMessage = TEXT("");
-        
-        // Tentar carregar a classe
-        FString ClassPath = FString::Printf(TEXT("/Script/TranspersonalGame.%s"), *SystemName);
-        UClass* SystemClass = LoadClass<UObject>(nullptr, *ClassPath);
-        
-        if (SystemClass)
+        UBuildIntegrationManager* FoundComponent = Owner->FindComponentByClass<UBuildIntegrationManager>();
+        if (!FoundComponent)
         {
-            Result.bIsValid = true;
-            Result.ErrorMessage = TEXT("Sistema carregado com sucesso");
-            UE_LOG(LogBuildIntegration, Log, TEXT("✓ %s - OK"), *SystemName);
+            Result.bPassed = false;
+            Result.ErrorMessages.Add(TEXT("BuildIntegrationManager não encontrado no owner"));
+        }
+    }
+    else
+    {
+        Result.bPassed = false;
+        Result.ErrorMessages.Add(TEXT("Owner não definido para BuildIntegrationManager"));
+    }
+    
+    ValidationResults.Add(Result);
+    
+    UE_LOG(LogBuildIntegration, Log, TEXT("Validação de componentes: %s"), 
+           Result.bPassed ? TEXT("PASSOU") : TEXT("FALHOU"));
+}
+
+void UBuildIntegrationManager::ValidateAssetLoading()
+{
+    FBuildValidationResult Result;
+    Result.ValidationName = TEXT("AssetLoading");
+    Result.bPassed = true;
+    Result.ErrorMessages.Empty();
+    
+    // Testar carregamento de assets básicos do Engine
+    TArray<FString> TestAssets = {
+        TEXT("/Engine/BasicShapes/Cube"),
+        TEXT("/Engine/BasicShapes/Sphere"),
+        TEXT("/Engine/EngineMaterials/DefaultMaterial")
+    };
+    
+    for (const FString& AssetPath : TestAssets)
+    {
+        UObject* LoadedAsset = LoadObject<UObject>(nullptr, *AssetPath);
+        if (!LoadedAsset)
+        {
+            Result.bPassed = false;
+            Result.ErrorMessages.Add(FString::Printf(TEXT("Falha ao carregar asset: %s"), *AssetPath));
+        }
+    }
+    
+    ValidationResults.Add(Result);
+    
+    UE_LOG(LogBuildIntegration, Log, TEXT("Validação de assets: %s"), 
+           Result.bPassed ? TEXT("PASSOU") : TEXT("FALHOU"));
+}
+
+void UBuildIntegrationManager::ProcessValidationResults()
+{
+    int32 PassedValidations = 0;
+    int32 TotalValidations = ValidationResults.Num();
+    
+    for (const FBuildValidationResult& Result : ValidationResults)
+    {
+        if (Result.bPassed)
+        {
+            PassedValidations++;
         }
         else
         {
-            Result.bIsValid = false;
-            Result.ErrorMessage = TEXT("Classe não encontrada ou não compilada");
-            UE_LOG(LogBuildIntegration, Warning, TEXT("✗ %s - FALHA"), *SystemName);
+            UE_LOG(LogBuildIntegration, Error, TEXT("Validação FALHOU: %s"), *Result.ValidationName);
+            for (const FString& Error : Result.ErrorMessages)
+            {
+                UE_LOG(LogBuildIntegration, Error, TEXT("  - %s"), *Error);
+            }
         }
+    }
+    
+    float SuccessRate = TotalValidations > 0 ? (float)PassedValidations / TotalValidations * 100.0f : 0.0f;
+    
+    UE_LOG(LogBuildIntegration, Log, TEXT("Resultados de Integração: %d/%d validações passaram (%.1f%%)"), 
+           PassedValidations, TotalValidations, SuccessRate);
+    
+    // Determinar estado final
+    if (PassedValidations == TotalValidations)
+    {
+        IntegrationState = EBuildIntegrationState::Healthy;
+        UE_LOG(LogBuildIntegration, Log, TEXT("✅ INTEGRAÇÃO SAUDÁVEL - Todas as validações passaram"));
+    }
+    else if (PassedValidations >= TotalValidations * 0.8f) // 80% ou mais
+    {
+        IntegrationState = EBuildIntegrationState::Warning;
+        UE_LOG(LogBuildIntegration, Warning, TEXT("⚠️ INTEGRAÇÃO COM AVISOS - Algumas validações falharam"));
+    }
+    else
+    {
+        IntegrationState = EBuildIntegrationState::Critical;
+        UE_LOG(LogBuildIntegration, Error, TEXT("❌ INTEGRAÇÃO CRÍTICA - Muitas validações falharam"));
+    }
+}
+
+bool UBuildIntegrationManager::IsIntegrationHealthy() const
+{
+    return IntegrationState == EBuildIntegrationState::Healthy;
+}
+
+FString UBuildIntegrationManager::GetIntegrationReport() const
+{
+    FString Report = TEXT("=== RELATÓRIO DE INTEGRAÇÃO ===\n");
+    
+    Report += FString::Printf(TEXT("Estado: %s\n"), 
+                             IntegrationState == EBuildIntegrationState::Healthy ? TEXT("SAUDÁVEL") :
+                             IntegrationState == EBuildIntegrationState::Warning ? TEXT("AVISO") :
+                             IntegrationState == EBuildIntegrationState::Critical ? TEXT("CRÍTICO") : TEXT("DESCONHECIDO"));
+    
+    Report += FString::Printf(TEXT("Última Validação: %s\n"), *LastValidationTime.ToString());
+    Report += FString::Printf(TEXT("Total de Validações: %d\n"), ValidationResults.Num());
+    
+    int32 PassedCount = 0;
+    for (const FBuildValidationResult& Result : ValidationResults)
+    {
+        if (Result.bPassed) PassedCount++;
+    }
+    
+    Report += FString::Printf(TEXT("Validações Passaram: %d/%d\n"), PassedCount, ValidationResults.Num());
+    
+    Report += TEXT("\nDetalhes das Validações:\n");
+    for (const FBuildValidationResult& Result : ValidationResults)
+    {
+        Report += FString::Printf(TEXT("- %s: %s\n"), 
+                                 *Result.ValidationName, 
+                                 Result.bPassed ? TEXT("PASSOU") : TEXT("FALHOU"));
         
-        ValidationResults.Add(Result);
-    }
-}
-
-void ABuildIntegrationManager::ValidateMapActors()
-{
-    UE_LOG(LogBuildIntegration, Log, TEXT("Validando actores do mapa..."));
-    
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        UE_LOG(LogBuildIntegration, Error, TEXT("Mundo não disponível para validação"));
-        return;
-    }
-    
-    // Contar actores por tipo
-    TMap<FString, int32> ActorCounts;
-    
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-    {
-        AActor* Actor = *ActorItr;
-        if (Actor)
+        if (!Result.bPassed)
         {
-            FString ActorClassName = Actor->GetClass()->GetName();
-            ActorCounts.FindOrAdd(ActorClassName)++;
+            for (const FString& Error : Result.ErrorMessages)
+            {
+                Report += FString::Printf(TEXT("  * %s\n"), *Error);
+            }
         }
     }
     
-    // Log da distribuição
-    UE_LOG(LogBuildIntegration, Log, TEXT("Distribuição de actores:"));
-    for (const auto& Pair : ActorCounts)
-    {
-        UE_LOG(LogBuildIntegration, Log, TEXT("  %s: %d"), *Pair.Key, Pair.Value);
-    }
+    return Report;
 }
 
-void ABuildIntegrationManager::DetectDuplicateSystems()
+void UBuildIntegrationManager::ForceValidation()
 {
-    UE_LOG(LogBuildIntegration, Log, TEXT("Detectando sistemas duplicados..."));
-    
-    // Lista de padrões conhecidos de duplicação
-    TArray<FString> DuplicatePatterns = {
-        TEXT("Crowd"),
-        TEXT("NPC"),
-        TEXT("Architecture"),
-        TEXT("Performance")
-    };
-    
-    DuplicateSystems.Empty();
-    
-    for (const FString& Pattern : DuplicatePatterns)
-    {
-        // Simular detecção de duplicados
-        // Em implementação real, faria scan do filesystem
-        FBuild_DuplicateSystem Duplicate;
-        Duplicate.SystemType = Pattern;
-        Duplicate.DuplicateCount = 2; // Placeholder
-        Duplicate.bRequiresCleanup = true;
-        
-        DuplicateSystems.Add(Duplicate);
-    }
-}
-
-void ABuildIntegrationManager::PerformAutoCleanup()
-{
-    UE_LOG(LogBuildIntegration, Log, TEXT("Executando limpeza automática..."));
-    
-    // Implementar limpeza de actores duplicados
-    CleanupDuplicateActors();
-}
-
-void ABuildIntegrationManager::CleanupDuplicateActors()
-{
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return;
-    }
-    
-    // Limpar DirectionalLights duplicados (manter apenas 1)
-    TArray<AActor*> DirectionalLights;
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-    {
-        AActor* Actor = *ActorItr;
-        if (Actor && Actor->GetClass()->GetName().Contains(TEXT("DirectionalLight")))
-        {
-            DirectionalLights.Add(Actor);
-        }
-    }
-    
-    // Manter apenas o primeiro, remover os restantes
-    for (int32 i = 1; i < DirectionalLights.Num(); i++)
-    {
-        DirectionalLights[i]->Destroy();
-        UE_LOG(LogBuildIntegration, Log, TEXT("Removido DirectionalLight duplicado"));
-    }
-}
-
-void ABuildIntegrationManager::LogValidationResults()
-{
-    UE_LOG(LogBuildIntegration, Warning, TEXT("=== RESULTADOS DA VALIDAÇÃO ==="));
-    UE_LOG(LogBuildIntegration, Warning, TEXT("Headers: %d | CPP: %d | Órfãos: %d"), 
-           TotalHeaderFiles, TotalCppFiles, OrphanHeaders);
-    UE_LOG(LogBuildIntegration, Warning, TEXT("Erros de compilação: %d"), CompilationErrors);
-    UE_LOG(LogBuildIntegration, Warning, TEXT("Sistemas duplicados: %d"), DuplicateSystems.Num());
-    UE_LOG(LogBuildIntegration, Warning, TEXT("================================"));
+    UE_LOG(LogBuildIntegration, Log, TEXT("Validação forçada solicitada"));
+    ExecuteIntegrationValidation();
 }
