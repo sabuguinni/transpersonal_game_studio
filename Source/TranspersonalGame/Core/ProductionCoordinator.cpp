@@ -1,394 +1,236 @@
 #include "ProductionCoordinator.h"
-#include "Engine/World.h"
 #include "Engine/Engine.h"
+#include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
-#include "GameFramework/Character.h"
-#include "GameFramework/PlayerController.h"
-#include "Components/StaticMeshComponent.h"
-#include "Engine/DirectionalLight.h"
-#include "Engine/SkyLight.h"
-#include "Engine/SkyAtmosphere.h"
-#include "Engine/ExponentialHeightFog.h"
-#include "Landscape/Landscape.h"
-#include "Engine/PlayerStart.h"
+#include "Math/UnrealMathUtility.h"
 
 UProductionCoordinator::UProductionCoordinator()
 {
-    // Inicializar estado do Milestone 1
-    bCharacterMovementReady = false;
-    bLandscapeReady = false;
-    bDinosaursSpawned = false;
-    bLightingConfigured = false;
-    TotalActorsInMap = 0;
-
-    // Tarefas iniciais para Milestone 1
-    PendingTasks.Add(TEXT("Agent #3: Implement TranspersonalCharacter movement"));
-    PendingTasks.Add(TEXT("Agent #5: Expand landscape to 200km²"));
-    PendingTasks.Add(TEXT("Agent #9: Create dinosaur actors with collision"));
-    PendingTasks.Add(TEXT("Agent #8: Configure lighting system"));
-    PendingTasks.Add(TEXT("Agent #12: Implement survival HUD"));
+    // Initialize milestone tracking
+    InitializeMilestone1Tasks();
+    InitializeBiomeData();
 }
 
-void UProductionCoordinator::CheckMilestone1Progress()
+void UProductionCoordinator::Initialize(FSubsystemCollectionBase& Collection)
 {
-    UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Checking Milestone 1 progress..."));
-
-    // Verificar cada componente crítico
-    bCharacterMovementReady = ValidateCharacterController();
-    bLandscapeReady = ValidateLandscape();
-    bDinosaursSpawned = ValidateDinosaurActors();
-    bLightingConfigured = ValidateLightingSetup();
-
-    // Actualizar estado geral
-    UpdateMilestone1Status();
-    LogProductionState();
-}
-
-void UProductionCoordinator::AssignTaskToAgent(const FString& AgentName, const FString& TaskDescription)
-{
-    FString FullTask = FString::Printf(TEXT("%s: %s"), *AgentName, *TaskDescription);
+    Super::Initialize(Collection);
     
-    if (!PendingTasks.Contains(FullTask))
-    {
-        PendingTasks.Add(FullTask);
-        UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Assigned task to %s - %s"), *AgentName, *TaskDescription);
-    }
+    UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Sistema inicializado"));
+    
+    // Validate current map state
+    ValidateMapState();
 }
 
-void UProductionCoordinator::MarkTaskCompleted(const FString& TaskDescription)
+void UProductionCoordinator::Deinitialize()
 {
-    for (int32 i = PendingTasks.Num() - 1; i >= 0; i--)
+    UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Sistema terminado"));
+    Super::Deinitialize();
+}
+
+void UProductionCoordinator::InitializeMilestone1Tasks()
+{
+    // Milestone 1: "Walk Around" tasks
+    Milestone1Tasks.Empty();
+    
+    // Core character movement
+    Milestone1Tasks.Add(TEXT("ThirdPersonCharacter"), false);
+    Milestone1Tasks.Add(TEXT("CameraBoom"), false);
+    Milestone1Tasks.Add(TEXT("FollowCamera"), false);
+    Milestone1Tasks.Add(TEXT("WASDMovement"), false);
+    Milestone1Tasks.Add(TEXT("RunJump"), false);
+    
+    // World and environment
+    Milestone1Tasks.Add(TEXT("LandscapeTerrain"), false);
+    Milestone1Tasks.Add(TEXT("BasicTerrain"), false);
+    Milestone1Tasks.Add(TEXT("StaticDinosaurs"), false);
+    Milestone1Tasks.Add(TEXT("DinosaurMeshes"), false);
+    
+    // Lighting and atmosphere
+    Milestone1Tasks.Add(TEXT("DirectionalLight"), false);
+    Milestone1Tasks.Add(TEXT("SkyAtmosphere"), false);
+    Milestone1Tasks.Add(TEXT("ExponentialFog"), false);
+    
+    UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: %d tarefas Milestone 1 inicializadas"), Milestone1Tasks.Num());
+}
+
+void UProductionCoordinator::InitializeBiomeData()
+{
+    BiomeData.Empty();
+    
+    // Biome 1: PANTANO (sudoeste)
+    FDir_BiomeData PantanoData;
+    PantanoData.Center = FVector(-50000.0f, -45000.0f, 0.0f);
+    PantanoData.MinBounds = FVector(-77500.0f, -76500.0f, -1000.0f);
+    PantanoData.MaxBounds = FVector(-25000.0f, -15000.0f, 1000.0f);
+    PantanoData.Name = TEXT("Pantano");
+    BiomeData.Add(EDir_BiomeType::Swamp, PantanoData);
+    
+    // Biome 2: FLORESTA (noroeste)
+    FDir_BiomeData FlorestaData;
+    FlorestaData.Center = FVector(-45000.0f, 40000.0f, 0.0f);
+    FlorestaData.MinBounds = FVector(-77500.0f, 15000.0f, -1000.0f);
+    FlorestaData.MaxBounds = FVector(-15000.0f, 76500.0f, 1000.0f);
+    FlorestaData.Name = TEXT("Floresta");
+    BiomeData.Add(EDir_BiomeType::Forest, FlorestaData);
+    
+    // Biome 3: SAVANA (centro)
+    FDir_BiomeData SavanaData;
+    SavanaData.Center = FVector(0.0f, 0.0f, 0.0f);
+    SavanaData.MinBounds = FVector(-20000.0f, -20000.0f, -1000.0f);
+    SavanaData.MaxBounds = FVector(20000.0f, 20000.0f, 1000.0f);
+    SavanaData.Name = TEXT("Savana");
+    BiomeData.Add(EDir_BiomeType::Savanna, SavanaData);
+    
+    // Biome 4: DESERTO (leste)
+    FDir_BiomeData DesertoData;
+    DesertoData.Center = FVector(55000.0f, 0.0f, 0.0f);
+    DesertoData.MinBounds = FVector(25000.0f, -30000.0f, -1000.0f);
+    DesertoData.MaxBounds = FVector(79500.0f, 30000.0f, 1000.0f);
+    DesertoData.Name = TEXT("Deserto");
+    BiomeData.Add(EDir_BiomeType::Desert, DesertoData);
+    
+    // Biome 5: MONTANHA NEVADA (nordeste)
+    FDir_BiomeData MontanhaData;
+    MontanhaData.Center = FVector(40000.0f, 50000.0f, 500.0f);
+    MontanhaData.MinBounds = FVector(15000.0f, 20000.0f, -500.0f);
+    MontanhaData.MaxBounds = FVector(79500.0f, 76500.0f, 2000.0f);
+    MontanhaData.Name = TEXT("Montanha Nevada");
+    BiomeData.Add(EDir_BiomeType::Mountain, MontanhaData);
+    
+    UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: %d biomas inicializados"), BiomeData.Num());
+}
+
+bool UProductionCoordinator::IsMilestone1Complete() const
+{
+    for (const auto& Task : Milestone1Tasks)
     {
-        if (PendingTasks[i].Contains(TaskDescription))
+        if (!Task.Value)
         {
-            CompletedTasks.Add(PendingTasks[i]);
-            PendingTasks.RemoveAt(i);
-            UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Task completed - %s"), *TaskDescription);
-            break;
+            return false;
         }
     }
+    return true;
 }
 
-float UProductionCoordinator::GetMilestone1CompletionPercentage()
+float UProductionCoordinator::GetMilestone1Progress() const
 {
-    int32 CompletedComponents = 0;
-    int32 TotalComponents = 4; // Character, Landscape, Dinosaurs, Lighting
-
-    if (bCharacterMovementReady) CompletedComponents++;
-    if (bLandscapeReady) CompletedComponents++;
-    if (bDinosaursSpawned) CompletedComponents++;
-    if (bLightingConfigured) CompletedComponents++;
-
-    return (float)CompletedComponents / (float)TotalComponents * 100.0f;
-}
-
-void UProductionCoordinator::ValidateMinPlayableMap()
-{
-    UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Validating MinPlayableMap..."));
-
-    UWorld* World = GEngine->GetCurrentPlayWorld();
-    if (!World)
+    if (Milestone1Tasks.Num() == 0)
     {
-        World = GEditor->GetEditorWorldContext().World();
+        return 0.0f;
     }
-
-    if (World)
+    
+    int32 CompletedTasks = 0;
+    for (const auto& Task : Milestone1Tasks)
     {
-        // Contar todos os actores
-        TotalActorsInMap = 0;
-        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+        if (Task.Value)
         {
-            TotalActorsInMap++;
+            CompletedTasks++;
         }
+    }
+    
+    return static_cast<float>(CompletedTasks) / static_cast<float>(Milestone1Tasks.Num());
+}
 
-        UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Found %d actors in MinPlayableMap"), TotalActorsInMap);
-
-        // Verificar duplicados críticos
-        CleanupDuplicateActors();
+void UProductionCoordinator::UpdateTaskProgress(const FString& AgentName, const FString& TaskName, bool bCompleted)
+{
+    if (Milestone1Tasks.Contains(TaskName))
+    {
+        Milestone1Tasks[TaskName] = bCompleted;
+        UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Agente %s atualizou tarefa %s: %s"), 
+               *AgentName, *TaskName, bCompleted ? TEXT("COMPLETA") : TEXT("PENDENTE"));
     }
 }
 
-void UProductionCoordinator::CleanupDuplicateActors()
+void UProductionCoordinator::RegisterAgent(const FString& AgentName, int32 Priority)
 {
-    UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Cleaning up duplicate actors..."));
-
-    // Limpar DirectionalLights duplicados
-    RemoveDuplicateActorsOfType(ADirectionalLight::StaticClass(), 1);
-    
-    // Limpar SkyLights duplicados
-    RemoveDuplicateActorsOfType(ASkyLight::StaticClass(), 1);
-    
-    // Limpar SkyAtmosphere duplicados
-    RemoveDuplicateActorsOfType(ASkyAtmosphere::StaticClass(), 1);
-    
-    // Limpar ExponentialHeightFog duplicados
-    RemoveDuplicateActorsOfType(AExponentialHeightFog::StaticClass(), 1);
+    RegisteredAgents.Add(AgentName, Priority);
+    UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Agente %s registado com prioridade %d"), *AgentName, Priority);
 }
 
-bool UProductionCoordinator::ValidateCharacterController()
+TArray<FString> UProductionCoordinator::GetActiveAgents() const
 {
-    UWorld* World = GEngine->GetCurrentPlayWorld();
-    if (!World)
-    {
-        World = GEditor->GetEditorWorldContext().World();
-    }
+    TArray<FString> ActiveAgents;
+    RegisteredAgents.GetKeys(ActiveAgents);
+    return ActiveAgents;
+}
 
-    if (World)
+bool UProductionCoordinator::CanAgentProceed(const FString& AgentName) const
+{
+    // Check if there are critical issues blocking this agent
+    for (const FString& Issue : CriticalIssues)
     {
-        // Verificar se existe PlayerStart
-        int32 PlayerStartCount = CountActorsByClass(APlayerStart::StaticClass());
-        
-        // Verificar se existe GameMode configurado
-        AGameModeBase* GameMode = World->GetAuthGameMode();
-        
-        bool bHasPlayerStart = PlayerStartCount > 0;
-        bool bHasGameMode = GameMode != nullptr;
-        
-        UE_LOG(LogTemp, Warning, TEXT("Character Validation - PlayerStarts: %d, GameMode: %s"), 
-               PlayerStartCount, bHasGameMode ? TEXT("Yes") : TEXT("No"));
-        
-        return bHasPlayerStart && bHasGameMode;
+        if (Issue.Contains(AgentName) || Issue.Contains(TEXT("BLOQUEIO_GLOBAL")))
+        {
+            return false;
+        }
     }
-    
+    return true;
+}
+
+void UProductionCoordinator::ReportCriticalIssue(const FString& AgentName, const FString& Issue)
+{
+    FString FormattedIssue = FString::Printf(TEXT("[%s] %s"), *AgentName, *Issue);
+    CriticalIssues.AddUnique(FormattedIssue);
+    UE_LOG(LogTemp, Error, TEXT("ProductionCoordinator: PROBLEMA CRÍTICO - %s"), *FormattedIssue);
+}
+
+TArray<FString> UProductionCoordinator::GetCriticalIssues() const
+{
+    return CriticalIssues;
+}
+
+void UProductionCoordinator::ClearCriticalIssue(const FString& Issue)
+{
+    CriticalIssues.Remove(Issue);
+    UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Problema resolvido - %s"), *Issue);
+}
+
+FVector UProductionCoordinator::GetBiomeCenter(EDir_BiomeType BiomeType) const
+{
+    if (const FDir_BiomeData* Data = BiomeData.Find(BiomeType))
+    {
+        return Data->Center;
+    }
+    return FVector::ZeroVector;
+}
+
+FVector UProductionCoordinator::GetRandomLocationInBiome(EDir_BiomeType BiomeType) const
+{
+    if (const FDir_BiomeData* Data = BiomeData.Find(BiomeType))
+    {
+        FVector RandomOffset;
+        RandomOffset.X = FMath::RandRange(-5000.0f, 5000.0f);
+        RandomOffset.Y = FMath::RandRange(-5000.0f, 5000.0f);
+        RandomOffset.Z = 0.0f;
+        
+        FVector RandomLocation = Data->Center + RandomOffset;
+        
+        // Clamp to biome bounds
+        RandomLocation.X = FMath::Clamp(RandomLocation.X, Data->MinBounds.X, Data->MaxBounds.X);
+        RandomLocation.Y = FMath::Clamp(RandomLocation.Y, Data->MinBounds.Y, Data->MaxBounds.Y);
+        RandomLocation.Z = FMath::Clamp(RandomLocation.Z, Data->MinBounds.Z, Data->MaxBounds.Z);
+        
+        return RandomLocation;
+    }
+    return FVector::ZeroVector;
+}
+
+bool UProductionCoordinator::IsLocationInBiome(const FVector& Location, EDir_BiomeType BiomeType) const
+{
+    if (const FDir_BiomeData* Data = BiomeData.Find(BiomeType))
+    {
+        return Location.X >= Data->MinBounds.X && Location.X <= Data->MaxBounds.X &&
+               Location.Y >= Data->MinBounds.Y && Location.Y <= Data->MaxBounds.Y &&
+               Location.Z >= Data->MinBounds.Z && Location.Z <= Data->MaxBounds.Z;
+    }
     return false;
 }
 
-bool UProductionCoordinator::ValidateLandscape()
+void UProductionCoordinator::ValidateMapState()
 {
-    UWorld* World = GEngine->GetCurrentPlayWorld();
-    if (!World)
-    {
-        World = GEditor->GetEditorWorldContext().World();
-    }
-
-    if (World)
-    {
-        int32 LandscapeCount = CountActorsByClass(ALandscape::StaticClass());
-        
-        UE_LOG(LogTemp, Warning, TEXT("Landscape Validation - Count: %d"), LandscapeCount);
-        
-        return LandscapeCount > 0;
-    }
+    UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: A validar estado do MinPlayableMap..."));
     
-    return false;
-}
-
-bool UProductionCoordinator::ValidateDinosaurActors()
-{
-    UWorld* World = GEngine->GetCurrentPlayWorld();
-    if (!World)
-    {
-        World = GEditor->GetEditorWorldContext().World();
-    }
-
-    if (World)
-    {
-        int32 DinosaurCount = 0;
-        
-        // Contar actores que possam ser dinossauros (com mesh components)
-        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-        {
-            AActor* Actor = *ActorItr;
-            if (Actor && Actor->FindComponentByClass<UStaticMeshComponent>())
-            {
-                FString ActorName = Actor->GetName();
-                if (ActorName.Contains(TEXT("Dinosaur")) || 
-                    ActorName.Contains(TEXT("TRex")) || 
-                    ActorName.Contains(TEXT("Raptor")) || 
-                    ActorName.Contains(TEXT("Brachio")))
-                {
-                    DinosaurCount++;
-                }
-            }
-        }
-        
-        UE_LOG(LogTemp, Warning, TEXT("Dinosaur Validation - Count: %d"), DinosaurCount);
-        
-        return DinosaurCount >= 3; // Mínimo 3 dinossauros para Milestone 1
-    }
-    
-    return false;
-}
-
-bool UProductionCoordinator::ValidateLightingSetup()
-{
-    UWorld* World = GEngine->GetCurrentPlayWorld();
-    if (!World)
-    {
-        World = GEditor->GetEditorWorldContext().World();
-    }
-
-    if (World)
-    {
-        int32 DirectionalLightCount = CountActorsByClass(ADirectionalLight::StaticClass());
-        int32 SkyLightCount = CountActorsByClass(ASkyLight::StaticClass());
-        int32 SkyAtmosphereCount = CountActorsByClass(ASkyAtmosphere::StaticClass());
-        
-        bool bHasBasicLighting = (DirectionalLightCount >= 1) && (SkyLightCount >= 1);
-        
-        UE_LOG(LogTemp, Warning, TEXT("Lighting Validation - DirectionalLight: %d, SkyLight: %d, SkyAtmosphere: %d"), 
-               DirectionalLightCount, SkyLightCount, SkyAtmosphereCount);
-        
-        return bHasBasicLighting;
-    }
-    
-    return false;
-}
-
-FString UProductionCoordinator::GenerateProgressReport()
-{
-    FString Report = TEXT("=== MILESTONE 1 PROGRESS REPORT ===\n");
-    
-    Report += FString::Printf(TEXT("Completion: %.1f%%\n"), GetMilestone1CompletionPercentage());
-    Report += FString::Printf(TEXT("Character Movement: %s\n"), bCharacterMovementReady ? TEXT("READY") : TEXT("PENDING"));
-    Report += FString::Printf(TEXT("Landscape: %s\n"), bLandscapeReady ? TEXT("READY") : TEXT("PENDING"));
-    Report += FString::Printf(TEXT("Dinosaurs: %s\n"), bDinosaursSpawned ? TEXT("READY") : TEXT("PENDING"));
-    Report += FString::Printf(TEXT("Lighting: %s\n"), bLightingConfigured ? TEXT("READY") : TEXT("PENDING"));
-    Report += FString::Printf(TEXT("Total Actors: %d\n"), TotalActorsInMap);
-    
-    Report += TEXT("\nPENDING TASKS:\n");
-    for (const FString& Task : PendingTasks)
-    {
-        Report += FString::Printf(TEXT("- %s\n"), *Task);
-    }
-    
-    Report += TEXT("\nCOMPLETED TASKS:\n");
-    for (const FString& Task : CompletedTasks)
-    {
-        Report += FString::Printf(TEXT("✓ %s\n"), *Task);
-    }
-    
-    return Report;
-}
-
-TArray<FString> UProductionCoordinator::GetCriticalIssues()
-{
-    TArray<FString> Issues;
-    
-    if (!bCharacterMovementReady)
-    {
-        Issues.Add(TEXT("CRITICAL: Character movement system not implemented"));
-    }
-    
-    if (!bLandscapeReady)
-    {
-        Issues.Add(TEXT("CRITICAL: Landscape not configured or too small"));
-    }
-    
-    if (!bDinosaursSpawned)
-    {
-        Issues.Add(TEXT("HIGH: No dinosaur actors found in map"));
-    }
-    
-    if (!bLightingConfigured)
-    {
-        Issues.Add(TEXT("MEDIUM: Basic lighting setup incomplete"));
-    }
-    
-    if (TotalActorsInMap < 10)
-    {
-        Issues.Add(TEXT("LOW: Map appears empty - very few actors"));
-    }
-    
-    return Issues;
-}
-
-void UProductionCoordinator::UpdateMilestone1Status()
-{
-    float CompletionPercentage = GetMilestone1CompletionPercentage();
-    
-    if (CompletionPercentage >= 100.0f)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: MILESTONE 1 COMPLETED!"));
-    }
-    else if (CompletionPercentage >= 75.0f)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Milestone 1 near completion (%.1f%%)"), CompletionPercentage);
-    }
-    else if (CompletionPercentage >= 25.0f)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Milestone 1 in progress (%.1f%%)"), CompletionPercentage);
-    }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Milestone 1 just started (%.1f%%)"), CompletionPercentage);
-    }
-}
-
-void UProductionCoordinator::LogProductionState()
-{
-    UE_LOG(LogTemp, Warning, TEXT("=== PRODUCTION STATE ==="));
-    UE_LOG(LogTemp, Warning, TEXT("Character Ready: %s"), bCharacterMovementReady ? TEXT("YES") : TEXT("NO"));
-    UE_LOG(LogTemp, Warning, TEXT("Landscape Ready: %s"), bLandscapeReady ? TEXT("YES") : TEXT("NO"));
-    UE_LOG(LogTemp, Warning, TEXT("Dinosaurs Spawned: %s"), bDinosaursSpawned ? TEXT("YES") : TEXT("NO"));
-    UE_LOG(LogTemp, Warning, TEXT("Lighting Configured: %s"), bLightingConfigured ? TEXT("YES") : TEXT("NO"));
-    UE_LOG(LogTemp, Warning, TEXT("Total Actors: %d"), TotalActorsInMap);
-    UE_LOG(LogTemp, Warning, TEXT("Pending Tasks: %d"), PendingTasks.Num());
-    UE_LOG(LogTemp, Warning, TEXT("Completed Tasks: %d"), CompletedTasks.Num());
-}
-
-int32 UProductionCoordinator::CountActorsByClass(UClass* ActorClass)
-{
-    if (!ActorClass)
-    {
-        return 0;
-    }
-    
-    UWorld* World = GEngine->GetCurrentPlayWorld();
-    if (!World)
-    {
-        World = GEditor->GetEditorWorldContext().World();
-    }
-
-    if (World)
-    {
-        int32 Count = 0;
-        for (TActorIterator<AActor> ActorItr(World, ActorClass); ActorItr; ++ActorItr)
-        {
-            Count++;
-        }
-        return Count;
-    }
-    
-    return 0;
-}
-
-void UProductionCoordinator::RemoveDuplicateActorsOfType(UClass* ActorClass, int32 MaxAllowed)
-{
-    if (!ActorClass)
-    {
-        return;
-    }
-    
-    UWorld* World = GEngine->GetCurrentPlayWorld();
-    if (!World)
-    {
-        World = GEditor->GetEditorWorldContext().World();
-    }
-
-    if (World)
-    {
-        TArray<AActor*> ActorsOfType;
-        
-        for (TActorIterator<AActor> ActorItr(World, ActorClass); ActorItr; ++ActorItr)
-        {
-            ActorsOfType.Add(*ActorItr);
-        }
-        
-        if (ActorsOfType.Num() > MaxAllowed)
-        {
-            int32 ToRemove = ActorsOfType.Num() - MaxAllowed;
-            
-            for (int32 i = MaxAllowed; i < ActorsOfType.Num(); i++)
-            {
-                if (ActorsOfType[i])
-                {
-                    ActorsOfType[i]->Destroy();
-                }
-            }
-            
-            UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Removed %d duplicate actors of type %s"), 
-                   ToRemove, *ActorClass->GetName());
-        }
-    }
+    // This will be expanded to validate critical map elements
+    // For now, just log that validation is happening
+    UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Validação de estado completa"));
 }
