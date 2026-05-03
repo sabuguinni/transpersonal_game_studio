@@ -1,115 +1,90 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/Actor.h"
+#include "GameFramework/Actor.h"
+#include "Engine/Engine.h"
 #include "Components/StaticMeshComponent.h"
-#include "Components/TextRenderComponent.h"
-#include "Engine/World.h"
+#include "Components/SceneComponent.h"
 #include "ProductionDirector.generated.h"
 
 /**
- * Studio Director's Production Coordinator Actor
- * Tracks Milestone 1 progress in real-time within MinPlayableMap
- * Coordinates agent deliverables and ensures gameplay-first development
+ * Production Director - Central coordination actor for Milestone 1 implementation
+ * Monitors and coordinates the development of the playable prototype
+ * Ensures all agents work towards the same goal: WALK AROUND gameplay
  */
-
-UENUM(BlueprintType)
-enum class EDir_MilestoneStatus : uint8
-{
-    NotStarted      UMETA(DisplayName = "Not Started"),
-    InProgress      UMETA(DisplayName = "In Progress"),
-    Completed       UMETA(DisplayName = "Completed"),
-    Blocked         UMETA(DisplayName = "Blocked")
-};
-
-USTRUCT(BlueprintType)
-struct FDir_MilestoneTask
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone")
-    FString TaskName;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone")
-    EDir_MilestoneStatus Status;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone")
-    int32 Priority;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone")
-    FString AssignedAgent;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone")
-    float CompletionPercentage;
-
-    FDir_MilestoneTask()
-    {
-        TaskName = TEXT("");
-        Status = EDir_MilestoneStatus::NotStarted;
-        Priority = 1;
-        AssignedAgent = TEXT("");
-        CompletionPercentage = 0.0f;
-    }
-};
-
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API ADir_ProductionDirector : public AActor
+class TRANSPERSONALGAME_API AProductionDirector : public AActor
 {
-    GENERATED_BODY()
+	GENERATED_BODY()
 
 public:
-    ADir_ProductionDirector();
+	AProductionDirector();
 
 protected:
-    virtual void BeginPlay() override;
+	virtual void BeginPlay() override;
+	virtual void Tick(float DeltaTime) override;
+
+	// Visual representation in editor
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	UStaticMeshComponent* DirectorMesh;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	USceneComponent* RootSceneComponent;
 
 public:
-    virtual void Tick(float DeltaTime) override;
+	// Milestone 1 tracking
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone 1")
+	bool bTerrainComplete = false;
 
-    // Core Components
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UStaticMeshComponent* DirectorMesh;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone 1")
+	bool bCharacterMovementComplete = false;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UTextRenderComponent* StatusDisplay;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone 1")
+	bool bDinosaursPlaced = false;
 
-    // Milestone 1 Tasks
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone 1")
-    TArray<FDir_MilestoneTask> Milestone1Tasks;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone 1")
+	bool bLightingComplete = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone 1")
-    float OverallProgress;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone 1")
+	bool bSurvivalHUDComplete = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone 1")
-    bool bMilestone1Complete;
+	// Progress tracking
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Progress")
+	float Milestone1Progress = 0.0f;
 
-    // Production Tracking
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
-    int32 CurrentCycle;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Progress")
+	FString CurrentFocus = TEXT("Terrain Generation");
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
-    FString CurrentPhase;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Progress")
+	TArray<FString> CompletedTasks;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
-    TArray<FString> AgentDeliverables;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Progress")
+	TArray<FString> PendingTasks;
 
-    // Functions
-    UFUNCTION(BlueprintCallable, Category = "Production")
-    void UpdateTaskStatus(const FString& TaskName, EDir_MilestoneStatus NewStatus);
+	// Coordination functions
+	UFUNCTION(BlueprintCallable, Category = "Coordination")
+	void UpdateMilestoneProgress();
 
-    UFUNCTION(BlueprintCallable, Category = "Production")
-    void RecalculateProgress();
+	UFUNCTION(BlueprintCallable, Category = "Coordination")
+	void MarkTaskComplete(const FString& TaskName);
 
-    UFUNCTION(BlueprintCallable, Category = "Production")
-    void LogProductionStatus();
+	UFUNCTION(BlueprintCallable, Category = "Coordination")
+	void AddPendingTask(const FString& TaskName);
 
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Production")
-    void InitializeMilestone1Tasks();
+	UFUNCTION(BlueprintCallable, Category = "Coordination")
+	FString GetNextPriorityTask();
 
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Production")
-    void CheckMilestone1Completion();
+	UFUNCTION(BlueprintCallable, Category = "Coordination")
+	bool IsMilestone1Complete();
+
+	// Agent coordination
+	UFUNCTION(BlueprintCallable, Category = "Agent Coordination")
+	void NotifyAgentProgress(const FString& AgentName, const FString& TaskCompleted);
+
+	UFUNCTION(BlueprintCallable, Category = "Agent Coordination")
+	FString GetTaskForAgent(const FString& AgentName);
 
 private:
-    void UpdateStatusDisplay();
-    void SetupDefaultTasks();
+	void InitializeMilestone1Tasks();
+	void LogProgressToConsole();
 };
