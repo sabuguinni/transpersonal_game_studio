@@ -1,316 +1,291 @@
 #include "ProductionCoordinator.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Engine/StaticMesh.h"
-#include "Components/StaticMeshComponent.h"
-#include "UObject/ConstructorHelpers.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/PlayerStart.h"
+#include "Components/DirectionalLightComponent.h"
+#include "Components/SkyLightComponent.h"
+#include "Components/ExponentialHeightFogComponent.h"
+#include "Engine/DirectionalLight.h"
+#include "Engine/SkyLight.h"
+#include "Engine/ExponentialHeightFog.h"
 #include "Kismet/GameplayStatics.h"
 
 ADir_ProductionCoordinator::ADir_ProductionCoordinator()
 {
     PrimaryActorTick.bCanEverTick = true;
 
-    // Create coordination mesh component
-    CoordinationMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("CoordinationMesh"));
-    RootComponent = CoordinationMesh;
+    // Create root component
+    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
+    RootComponent = RootSceneComponent;
 
-    // Set default mesh to cube for visualization
-    static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMeshAsset(TEXT("/Engine/BasicShapes/Cube"));
-    if (CubeMeshAsset.Succeeded())
-    {
-        CoordinationMesh->SetStaticMesh(CubeMeshAsset.Object);
-        CoordinationMesh->SetWorldScale3D(FVector(2.0f, 2.0f, 0.5f));
-    }
+    // Initialize milestone tracking
+    bTerrainGenerated = false;
+    bCharacterMovementWorking = false;
+    bDinosaursSpawned = false;
+    bLightingSetup = false;
+    bSurvivalHUDActive = false;
 
-    // Initialize agent list
-    ActiveAgents = {
-        "Agent02_EngineArchitect",
-        "Agent03_CoreSystems", 
-        "Agent05_WorldGen",
-        "Agent06_EnvironmentArt",
-        "Agent09_CharacterArt",
-        "Agent10_Animation",
-        "Agent11_NPCBehavior",
-        "Agent12_CombatAI"
-    };
+    CurrentCycle = 0;
+    LastVerificationTime = 0.0f;
+    bInitialized = false;
 
-    // Initialize pending tasks for Milestone 1
-    PendingTasks = {
-        "Agent02: Core architecture review and stability",
-        "Agent03: Physics collision and ragdoll systems",
-        "Agent05: Terrain enhancement with height variation",
-        "Agent06: Environment population with props",
-        "Agent09: Character model and movement refinement",
-        "Agent10: Animation system and movement blending",
-        "Agent11: Basic NPC behavior patterns",
-        "Agent12: Dinosaur AI and territorial behavior"
-    };
+    // Initialize task arrays
+    PendingTasks.Empty();
+    CompletedTasks.Empty();
 }
 
 void ADir_ProductionCoordinator::BeginPlay()
 {
     Super::BeginPlay();
+
+    // Initialize production coordination
+    UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Initializing Milestone 1 tracking"));
     
-    UE_LOG(LogTemp, Warning, TEXT("Studio Director Production Coordinator initialized for Cycle %s"), *CurrentCycleID);
-    
-    // Initialize production cycle
-    InitializeProductionCycle();
+    // Perform initial verification
+    CheckMilestone1Progress();
+    bInitialized = true;
 }
 
 void ADir_ProductionCoordinator::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
-    
-    ProductionTimer += DeltaTime;
-    
-    // Update production metrics every 5 seconds
-    if (FMath::Fmod(ProductionTimer, 5.0f) < DeltaTime)
+
+    // Verify milestone progress every 10 seconds
+    LastVerificationTime += DeltaTime;
+    if (LastVerificationTime >= 10.0f)
     {
-        UpdateProductionMetrics();
+        CheckMilestone1Progress();
+        LastVerificationTime = 0.0f;
     }
 }
 
-void ADir_ProductionCoordinator::InitializeProductionCycle()
+bool ADir_ProductionCoordinator::CheckMilestone1Progress()
 {
-    UE_LOG(LogTemp, Warning, TEXT("Initializing Production Cycle %s"), *CurrentCycleID);
-    
-    // Clean up any duplicate actors first
-    CleanupDuplicateActors();
-    
-    // Dispatch tasks to agents
-    DispatchAgentTasks();
-    
-    // Validate current milestone progress
-    ValidateMilestone1Progress();
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return false;
+    }
+
+    // Verify terrain (landscape actors)
+    TArray<AActor*> LandscapeActors;
+    UGameplayStatics::GetAllActorsOfClass(World, ALandscape::StaticClass(), LandscapeActors);
+    bTerrainGenerated = LandscapeActors.Num() > 0;
+
+    // Verify character movement
+    VerifyCharacterMovement();
+
+    // Verify dinosaur actors
+    VerifyDinosaurActors();
+
+    // Verify lighting setup
+    VerifyLightingSetup();
+
+    // Log current status
+    LogProductionStatus();
+
+    return GetMilestone1Completion() >= 0.8f; // 80% completion threshold
 }
 
-void ADir_ProductionCoordinator::DispatchAgentTasks()
+void ADir_ProductionCoordinator::VerifyCharacterMovement()
 {
-    UE_LOG(LogTemp, Warning, TEXT("Dispatching tasks to %d active agents"), ActiveAgents.Num());
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        bCharacterMovementWorking = false;
+        return;
+    }
+
+    // Find TranspersonalCharacter or any character
+    TArray<AActor*> CharacterActors;
+    UGameplayStatics::GetAllActorsOfClass(World, ACharacter::StaticClass(), CharacterActors);
     
-    // Assign specific tasks for Milestone 1
-    AssignTaskToAgent("Agent02_EngineArchitect", "Review and stabilize core architecture");
-    AssignTaskToAgent("Agent03_CoreSystems", "Implement physics collision and ragdoll");
-    AssignTaskToAgent("Agent05_WorldGen", "Enhance terrain with realistic height variation");
-    AssignTaskToAgent("Agent06_EnvironmentArt", "Populate world with vegetation and props");
-    AssignTaskToAgent("Agent09_CharacterArt", "Refine character model and movement");
-    AssignTaskToAgent("Agent10_Animation", "Implement movement animations and blending");
-    AssignTaskToAgent("Agent11_NPCBehavior", "Create basic NPC behavior patterns");
-    AssignTaskToAgent("Agent12_CombatAI", "Implement dinosaur AI and territorial behavior");
+    bCharacterMovementWorking = false;
+    for (AActor* Actor : CharacterActors)
+    {
+        ACharacter* Character = Cast<ACharacter>(Actor);
+        if (Character && Character->GetMovementComponent())
+        {
+            bCharacterMovementWorking = true;
+            UE_LOG(LogTemp, Log, TEXT("ProductionCoordinator: Character movement verified - %s"), *Character->GetName());
+            break;
+        }
+    }
+
+    if (!bCharacterMovementWorking)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: No functional character found"));
+    }
 }
 
-void ADir_ProductionCoordinator::ValidateMilestone1Progress()
+void ADir_ProductionCoordinator::VerifyDinosaurActors()
 {
-    UE_LOG(LogTemp, Warning, TEXT("Validating Milestone 1 progress"));
-    
-    // Check for character movement system
-    TArray<AActor*> Characters;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), APawn::StaticClass(), Characters);
-    bCharacterMovementReady = Characters.Num() > 0;
-    
-    // Check for terrain
-    TArray<AActor*> Landscapes;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), Landscapes);
-    bTerrainComplete = Landscapes.Num() > 10; // Basic check for populated world
-    
-    // Check for dinosaurs
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        bDinosaursSpawned = false;
+        return;
+    }
+
+    // Count actors with "dinosaur" or specific dinosaur names in their class or name
     TArray<AActor*> AllActors;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), AllActors);
+    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
+
     int32 DinosaurCount = 0;
     for (AActor* Actor : AllActors)
     {
         FString ActorName = Actor->GetName().ToLower();
-        if (ActorName.Contains("dinosaur") || ActorName.Contains("trex") || ActorName.Contains("raptor"))
+        FString ClassName = Actor->GetClass()->GetName().ToLower();
+        
+        if (ActorName.Contains(TEXT("trex")) || ActorName.Contains(TEXT("raptor")) || 
+            ActorName.Contains(TEXT("brachio")) || ActorName.Contains(TEXT("dinosaur")) ||
+            ClassName.Contains(TEXT("dinosaur")))
         {
             DinosaurCount++;
         }
     }
-    bDinosaursPlaced = DinosaurCount >= 3;
-    
-    // Check for lighting
-    TArray<AActor*> Lights;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), Lights);
-    int32 LightCount = 0;
-    for (AActor* Actor : Lights)
+
+    bDinosaursSpawned = DinosaurCount >= 3; // Minimum 3 dinosaurs for milestone
+    UE_LOG(LogTemp, Log, TEXT("ProductionCoordinator: Found %d dinosaur actors"), DinosaurCount);
+}
+
+void ADir_ProductionCoordinator::VerifyLightingSetup()
+{
+    UWorld* World = GetWorld();
+    if (!World)
     {
-        if (Actor->GetClass()->GetName().Contains("Light"))
-        {
-            LightCount++;
-        }
+        bLightingSetup = false;
+        return;
     }
-    bLightingSetup = LightCount > 0;
-    
-    // Camera system is assumed ready if character exists
-    bCameraSystemReady = bCharacterMovementReady;
-    
-    UE_LOG(LogTemp, Warning, TEXT("Milestone 1 Progress: Character=%d, Terrain=%d, Dinosaurs=%d, Lighting=%d, Camera=%d"), 
-           bCharacterMovementReady, bTerrainComplete, bDinosaursPlaced, bLightingSetup, bCameraSystemReady);
-}
 
-bool ADir_ProductionCoordinator::CheckPlayablePrototypeReady()
-{
-    return bCharacterMovementReady && bTerrainComplete && bDinosaursPlaced && bLightingSetup && bCameraSystemReady;
-}
-
-void ADir_ProductionCoordinator::CleanupDuplicateActors()
-{
-    UE_LOG(LogTemp, Warning, TEXT("Cleaning up duplicate actors"));
-    
-    TArray<AActor*> AllActors;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), AllActors);
-    
-    // Track lighting actors for cleanup
+    // Check for essential lighting components
     TArray<AActor*> DirectionalLights;
+    UGameplayStatics::GetAllActorsOfClass(World, ADirectionalLight::StaticClass(), DirectionalLights);
+
     TArray<AActor*> SkyLights;
-    TArray<AActor*> SkyAtmospheres;
-    TArray<AActor*> ExponentialFogs;
+    UGameplayStatics::GetAllActorsOfClass(World, ASkyLight::StaticClass(), SkyLights);
+
+    // Basic lighting setup requires at least one directional light
+    bLightingSetup = DirectionalLights.Num() >= 1;
     
-    for (AActor* Actor : AllActors)
+    UE_LOG(LogTemp, Log, TEXT("ProductionCoordinator: Lighting - DirectionalLights: %d, SkyLights: %d"), 
+           DirectionalLights.Num(), SkyLights.Num());
+}
+
+void ADir_ProductionCoordinator::VerifyTerrainQuality()
+{
+    // This will be expanded by Agent #5 (Procedural World Generator)
+    UE_LOG(LogTemp, Log, TEXT("ProductionCoordinator: Terrain quality check - delegated to Agent #5"));
+}
+
+float ADir_ProductionCoordinator::GetMilestone1Completion()
+{
+    int32 CompletedItems = 0;
+    int32 TotalItems = 5;
+
+    if (bTerrainGenerated) CompletedItems++;
+    if (bCharacterMovementWorking) CompletedItems++;
+    if (bDinosaursSpawned) CompletedItems++;
+    if (bLightingSetup) CompletedItems++;
+    if (bSurvivalHUDActive) CompletedItems++;
+
+    return static_cast<float>(CompletedItems) / static_cast<float>(TotalItems);
+}
+
+void ADir_ProductionCoordinator::LogProductionStatus()
+{
+    float Completion = GetMilestone1Completion() * 100.0f;
+    
+    UE_LOG(LogTemp, Warning, TEXT("=== MILESTONE 1 PROGRESS: %.1f%% ==="), Completion);
+    UE_LOG(LogTemp, Warning, TEXT("Terrain Generated: %s"), bTerrainGenerated ? TEXT("YES") : TEXT("NO"));
+    UE_LOG(LogTemp, Warning, TEXT("Character Movement: %s"), bCharacterMovementWorking ? TEXT("YES") : TEXT("NO"));
+    UE_LOG(LogTemp, Warning, TEXT("Dinosaurs Spawned: %s"), bDinosaursSpawned ? TEXT("YES") : TEXT("NO"));
+    UE_LOG(LogTemp, Warning, TEXT("Lighting Setup: %s"), bLightingSetup ? TEXT("YES") : TEXT("NO"));
+    UE_LOG(LogTemp, Warning, TEXT("Survival HUD: %s"), bSurvivalHUDActive ? TEXT("YES") : TEXT("NO"));
+    UE_LOG(LogTemp, Warning, TEXT("Pending Tasks: %d"), PendingTasks.Num());
+    UE_LOG(LogTemp, Warning, TEXT("Completed Tasks: %d"), CompletedTasks.Num());
+}
+
+void ADir_ProductionCoordinator::AssignAgentTask(const FString& AgentName, const FString& TaskDescription)
+{
+    FString FullTask = FString::Printf(TEXT("[%s] %s"), *AgentName, *TaskDescription);
+    PendingTasks.AddUnique(FullTask);
+    
+    UE_LOG(LogTemp, Log, TEXT("ProductionCoordinator: Assigned task to %s: %s"), *AgentName, *TaskDescription);
+}
+
+void ADir_ProductionCoordinator::CompleteAgentTask(const FString& TaskDescription)
+{
+    // Move from pending to completed
+    for (int32 i = PendingTasks.Num() - 1; i >= 0; i--)
     {
-        FString ClassName = Actor->GetClass()->GetName();
+        if (PendingTasks[i].Contains(TaskDescription))
+        {
+            CompletedTasks.Add(PendingTasks[i]);
+            PendingTasks.RemoveAt(i);
+            UE_LOG(LogTemp, Log, TEXT("ProductionCoordinator: Task completed: %s"), *TaskDescription);
+            break;
+        }
+    }
+}
+
+void ADir_ProductionCoordinator::InitializeCycle(int32 CycleNumber)
+{
+    CurrentCycle = CycleNumber;
+    UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Initializing Cycle %d"), CycleNumber);
+    
+    // Clear old pending tasks and set new priorities
+    PendingTasks.Empty();
+    
+    // Define cycle-specific priorities based on Milestone 1 needs
+    if (CurrentCycle >= 5)
+    {
+        if (!bTerrainGenerated)
+        {
+            AssignAgentTask(TEXT("Agent #5"), TEXT("Generate realistic terrain with hills and valleys"));
+        }
         
-        if (ClassName == "DirectionalLight")
+        if (!bCharacterMovementWorking)
         {
-            DirectionalLights.Add(Actor);
+            AssignAgentTask(TEXT("Agent #9"), TEXT("Implement functional character movement and input"));
         }
-        else if (ClassName == "SkyLight")
+        
+        if (!bDinosaursSpawned)
         {
-            SkyLights.Add(Actor);
+            AssignAgentTask(TEXT("Agent #10"), TEXT("Spawn 5 dinosaur actors with basic collision"));
         }
-        else if (ClassName == "SkyAtmosphere")
+        
+        if (!bLightingSetup)
         {
-            SkyAtmospheres.Add(Actor);
+            AssignAgentTask(TEXT("Agent #8"), TEXT("Setup proper day/night lighting cycle"));
         }
-        else if (ClassName == "ExponentialHeightFog")
+        
+        if (!bSurvivalHUDActive)
         {
-            ExponentialFogs.Add(Actor);
+            AssignAgentTask(TEXT("Agent #12"), TEXT("Create survival HUD with health/hunger/thirst bars"));
         }
-    }
-    
-    // Keep only one of each lighting type
-    int32 CleanupCount = 0;
-    
-    // Remove duplicate DirectionalLights (keep first)
-    for (int32 i = 1; i < DirectionalLights.Num(); i++)
-    {
-        DirectionalLights[i]->Destroy();
-        CleanupCount++;
-    }
-    
-    // Remove duplicate SkyLights (keep first)
-    for (int32 i = 1; i < SkyLights.Num(); i++)
-    {
-        SkyLights[i]->Destroy();
-        CleanupCount++;
-    }
-    
-    // Remove duplicate SkyAtmospheres (keep first)
-    for (int32 i = 1; i < SkyAtmospheres.Num(); i++)
-    {
-        SkyAtmospheres[i]->Destroy();
-        CleanupCount++;
-    }
-    
-    // Remove duplicate ExponentialFogs (keep first)
-    for (int32 i = 1; i < ExponentialFogs.Num(); i++)
-    {
-        ExponentialFogs[i]->Destroy();
-        CleanupCount++;
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Cleaned up %d duplicate actors"), CleanupCount);
-}
-
-FString ADir_ProductionCoordinator::GetProductionStatusReport()
-{
-    FString Report = FString::Printf(TEXT("Production Status Report - Cycle %s\n"), *CurrentCycleID);
-    Report += FString::Printf(TEXT("Budget: $%.2f / $%.2f\n"), BudgetUsedToday, BudgetLimitDaily);
-    Report += FString::Printf(TEXT("Active Agents: %d\n"), ActiveAgents.Num());
-    Report += FString::Printf(TEXT("Pending Tasks: %d\n"), PendingTasks.Num());
-    Report += FString::Printf(TEXT("Completed Tasks: %d\n"), CompletedTasks.Num());
-    
-    Report += TEXT("\nMilestone 1 Progress:\n");
-    Report += FString::Printf(TEXT("- Character Movement: %s\n"), bCharacterMovementReady ? TEXT("READY") : TEXT("PENDING"));
-    Report += FString::Printf(TEXT("- Terrain: %s\n"), bTerrainComplete ? TEXT("READY") : TEXT("PENDING"));
-    Report += FString::Printf(TEXT("- Dinosaurs: %s\n"), bDinosaursPlaced ? TEXT("READY") : TEXT("PENDING"));
-    Report += FString::Printf(TEXT("- Lighting: %s\n"), bLightingSetup ? TEXT("READY") : TEXT("PENDING"));
-    Report += FString::Printf(TEXT("- Camera: %s\n"), bCameraSystemReady ? TEXT("READY") : TEXT("PENDING"));
-    
-    bool bPrototypeReady = CheckPlayablePrototypeReady();
-    Report += FString::Printf(TEXT("\nPlayable Prototype: %s\n"), bPrototypeReady ? TEXT("READY") : TEXT("IN PROGRESS"));
-    
-    return Report;
-}
-
-void ADir_ProductionCoordinator::AssignTaskToAgent(const FString& AgentName, const FString& TaskDescription)
-{
-    FString TaskEntry = FString::Printf(TEXT("%s: %s"), *AgentName, *TaskDescription);
-    if (!PendingTasks.Contains(TaskEntry))
-    {
-        PendingTasks.Add(TaskEntry);
-        UE_LOG(LogTemp, Log, TEXT("Assigned task to %s: %s"), *AgentName, *TaskDescription);
     }
 }
 
-void ADir_ProductionCoordinator::MarkTaskCompleted(const FString& AgentName, const FString& TaskDescription)
+TArray<FString> ADir_ProductionCoordinator::GetNextAgentPriorities()
 {
-    FString TaskEntry = FString::Printf(TEXT("%s: %s"), *AgentName, *TaskDescription);
+    TArray<FString> Priorities;
     
-    if (PendingTasks.Contains(TaskEntry))
-    {
-        PendingTasks.Remove(TaskEntry);
-        CompletedTasks.Add(TaskEntry);
-        UE_LOG(LogTemp, Log, TEXT("Task completed by %s: %s"), *AgentName, *TaskDescription);
-    }
-}
-
-TArray<FString> ADir_ProductionCoordinator::GetPendingTasksForAgent(const FString& AgentName)
-{
-    TArray<FString> AgentTasks;
-    
+    // Return current pending tasks as priorities
     for (const FString& Task : PendingTasks)
     {
-        if (Task.StartsWith(AgentName))
-        {
-            AgentTasks.Add(Task);
-        }
+        Priorities.Add(Task);
     }
     
-    return AgentTasks;
-}
-
-void ADir_ProductionCoordinator::UpdateProductionMetrics()
-{
-    // Update production timer and metrics
-    ValidateMilestone1Progress();
-    
-    // Log periodic status
-    if (FMath::Fmod(ProductionTimer, 30.0f) < 1.0f) // Every 30 seconds
+    // If no pending tasks, generate default priorities
+    if (Priorities.Num() == 0)
     {
-        FString StatusReport = GetProductionStatusReport();
-        UE_LOG(LogTemp, Warning, TEXT("Production Update:\n%s"), *StatusReport);
-    }
-}
-
-void ADir_ProductionCoordinator::CheckAgentDeliverables()
-{
-    // Check if agents have produced their required deliverables
-    // This would integrate with the actual agent system in a full implementation
-    UE_LOG(LogTemp, Log, TEXT("Checking agent deliverables for cycle %s"), *CurrentCycleID);
-}
-
-void ADir_ProductionCoordinator::EnsureMinimalPlayableElements()
-{
-    // Ensure the minimal elements for a playable prototype exist
-    // This is a safety check to maintain the playable state
-    
-    TArray<AActor*> PlayerStarts;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), APlayerStart::StaticClass(), PlayerStarts);
-    
-    if (PlayerStarts.Num() == 0)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("No PlayerStart found - playable prototype may not work"));
+        Priorities.Add(TEXT("Focus on Milestone 1: Playable prototype"));
+        Priorities.Add(TEXT("Ensure character can walk around terrain"));
+        Priorities.Add(TEXT("Place visible dinosaurs in the world"));
+        Priorities.Add(TEXT("Verify lighting and atmosphere"));
     }
     
-    // Additional checks could be added here for other essential elements
+    return Priorities;
 }
