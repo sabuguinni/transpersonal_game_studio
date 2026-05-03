@@ -1,302 +1,311 @@
 #include "Narr_DialogueSystem.h"
-#include "Engine/World.h"
-#include "GameFramework/PlayerController.h"
-#include "GameFramework/Pawn.h"
+#include "Engine/Engine.h"
+#include "TimerManager.h"
 #include "Kismet/GameplayStatics.h"
-#include "Components/AudioComponent.h"
-#include "Sound/SoundCue.h"
 
 UNarr_DialogueSystem::UNarr_DialogueSystem()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = UpdateInterval;
-
-    // Criar componente de áudio
-    AudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("DialogueAudioComponent"));
-    
-    // Configurações padrão
-    UpdateInterval = 1.0f;
-    MaxDialogueDistance = 2000.0f;
-    bEnableContextualDialogue = true;
-    bIsPlayingDialogue = false;
+    bIsDialoguePlaying = false;
     DialogueTimer = 0.0f;
-    CurrentContext = ENarr_NarrativeContext::Safe;
-    CurrentZone = TEXT("");
 }
 
 void UNarr_DialogueSystem::BeginPlay()
 {
     Super::BeginPlay();
-
-    // Inicializar zonas narrativas padrão
-    FNarr_NarrativeZone TutorialZone;
-    TutorialZone.ZoneName = TEXT("Tutorial");
-    TutorialZone.Context = ENarr_NarrativeContext::Safe;
-    TutorialZone.ZoneCenter = FVector(0, 0, 0);
-    TutorialZone.ZoneRadius = 800.0f;
     
-    FNarr_DialogueEntry TutorialDialogue;
-    TutorialDialogue.DialogueType = ENarr_DialogueType::Tutorial;
-    TutorialDialogue.DialogueText = TEXT("Welcome to the Cretaceous period. Your survival depends on understanding this prehistoric world.");
-    TutorialDialogue.Duration = 8.0f;
-    TutorialDialogue.Priority = 10;
-    TutorialDialogue.bCanRepeat = false;
-    TutorialDialogue.CooldownTime = 0.0f;
+    InitializeDefaultDialogue();
     
-    TutorialZone.AvailableDialogue.Add(TutorialDialogue);
-    NarrativeZones.Add(TutorialZone);
-
-    // Zona de perigo com dinossauros
-    FNarr_NarrativeZone DangerZone;
-    DangerZone.ZoneName = TEXT("DinosaurTerritory");
-    DangerZone.Context = ENarr_NarrativeContext::Danger;
-    DangerZone.ZoneCenter = FVector(2000, 1000, 0);
-    DangerZone.ZoneRadius = 1200.0f;
-    
-    FNarr_DialogueEntry DangerDialogue;
-    DangerDialogue.DialogueType = ENarr_DialogueType::Warning;
-    DangerDialogue.DialogueText = TEXT("Large predator detected in your vicinity. Maintain distance and avoid sudden movements.");
-    DangerDialogue.Duration = 6.0f;
-    DangerDialogue.Priority = 8;
-    DangerDialogue.bCanRepeat = true;
-    DangerDialogue.CooldownTime = 45.0f;
-    
-    DangerZone.AvailableDialogue.Add(DangerDialogue);
-    NarrativeZones.Add(DangerZone);
-
-    // Zona de descoberta
-    FNarr_NarrativeZone DiscoveryZone;
-    DiscoveryZone.ZoneName = TEXT("ResourceArea");
-    DiscoveryZone.Context = ENarr_NarrativeContext::Discovery;
-    DiscoveryZone.ZoneCenter = FVector(-1500, 2000, 0);
-    DiscoveryZone.ZoneRadius = 900.0f;
-    
-    FNarr_DialogueEntry DiscoveryDialogue;
-    DiscoveryDialogue.DialogueType = ENarr_DialogueType::Discovery;
-    DiscoveryDialogue.DialogueText = TEXT("Interesting geological formations detected. This area may contain valuable resources.");
-    DiscoveryDialogue.Duration = 7.0f;
-    DiscoveryDialogue.Priority = 5;
-    DiscoveryDialogue.bCanRepeat = true;
-    DiscoveryDialogue.CooldownTime = 60.0f;
-    
-    DiscoveryZone.AvailableDialogue.Add(DiscoveryDialogue);
-    NarrativeZones.Add(DiscoveryZone);
-
-    UE_LOG(LogTemp, Warning, TEXT("Narrative Dialogue System initialized with %d zones"), NarrativeZones.Num());
+    UE_LOG(LogTemp, Log, TEXT("Narrative Dialogue System initialized with %d dialogue lines"), DialogueDatabase.Num());
 }
 
 void UNarr_DialogueSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
-    if (!bEnableContextualDialogue)
-        return;
-
-    // Actualizar timer do diálogo actual
-    if (bIsPlayingDialogue)
-    {
-        DialogueTimer += DeltaTime;
-        if (DialogueTimer >= CurrentDialogue.Duration)
-        {
-            StopCurrentDialogue();
-        }
-    }
-
-    // Actualizar contexto narrativo
-    LastUpdateTime += DeltaTime;
-    if (LastUpdateTime >= UpdateInterval)
-    {
-        UpdateNarrativeContext();
-        ProcessDialogueQueue();
-        LastUpdateTime = 0.0f;
-    }
-
-    // Actualizar cooldowns
-    for (auto& Cooldown : DialogueCooldowns)
-    {
-        Cooldown.Value -= DeltaTime;
-    }
-}
-
-void UNarr_DialogueSystem::UpdateNarrativeContext()
-{
-    UWorld* World = GetWorld();
-    if (!World)
-        return;
-
-    APlayerController* PlayerController = World->GetFirstPlayerController();
-    if (!PlayerController || !PlayerController->GetPawn())
-        return;
-
-    FVector PlayerLocation = PlayerController->GetPawn()->GetActorLocation();
-    FString ZoneName;
     
-    if (IsInNarrativeZone(PlayerLocation, ZoneName))
+    if (bIsDialoguePlaying)
     {
-        // Encontrar a zona correspondente
-        for (const FNarr_NarrativeZone& Zone : NarrativeZones)
-        {
-            if (Zone.ZoneName == ZoneName && Zone.bIsActive)
-            {
-                if (CurrentZone != ZoneName)
-                {
-                    CurrentZone = ZoneName;
-                    CurrentContext = Zone.Context;
-                    UE_LOG(LogTemp, Log, TEXT("Player entered narrative zone: %s"), *ZoneName);
-                }
-                break;
-            }
-        }
-    }
-    else
-    {
-        if (!CurrentZone.IsEmpty())
-        {
-            CurrentZone = TEXT("");
-            CurrentContext = ENarr_NarrativeContext::Safe;
-            UE_LOG(LogTemp, Log, TEXT("Player left narrative zones"));
-        }
+        UpdateDialogueTimer(DeltaTime);
     }
 }
 
-void UNarr_DialogueSystem::ProcessDialogueQueue()
+void UNarr_DialogueSystem::PlayDialogue(const FNarr_DialogueLine& DialogueLine)
 {
-    if (bIsPlayingDialogue || CurrentZone.IsEmpty())
-        return;
-
-    // Encontrar a zona actual
-    for (const FNarr_NarrativeZone& Zone : NarrativeZones)
+    if (bIsDialoguePlaying)
     {
-        if (Zone.ZoneName == CurrentZone && Zone.bIsActive)
+        StopDialogue();
+    }
+    
+    CurrentDialogue = DialogueLine;
+    bIsDialoguePlaying = true;
+    DialogueTimer = DialogueLine.Duration;
+    
+    // Broadcast dialogue started event
+    OnDialogueStarted.Broadcast(DialogueLine);
+    
+    // Log dialogue for debugging
+    UE_LOG(LogTemp, Log, TEXT("Playing dialogue: %s - %s"), *DialogueLine.SpeakerName, *DialogueLine.DialogueText);
+    
+    // Display on screen for testing
+    if (GEngine)
+    {
+        FString DisplayText = FString::Printf(TEXT("[%s]: %s"), *DialogueLine.SpeakerName, *DialogueLine.DialogueText);
+        GEngine->AddOnScreenDebugMessage(-1, DialogueLine.Duration, FColor::Green, DisplayText);
+    }
+}
+
+void UNarr_DialogueSystem::StopDialogue()
+{
+    if (bIsDialoguePlaying)
+    {
+        bIsDialoguePlaying = false;
+        DialogueTimer = 0.0f;
+        OnDialogueEnded.Broadcast();
+        
+        UE_LOG(LogTemp, Log, TEXT("Dialogue stopped"));
+    }
+}
+
+void UNarr_DialogueSystem::TriggerNarrativeEvent(const FString& EventID)
+{
+    for (FNarr_NarrativeEvent& Event : NarrativeEvents)
+    {
+        if (Event.EventID == EventID && !Event.bHasBeenTriggered)
         {
-            FNarr_DialogueEntry BestDialogue = SelectBestDialogue(Zone);
+            Event.bHasBeenTriggered = true;
             
-            if (!BestDialogue.DialogueText.IsEmpty() && ShouldPlayDialogue(BestDialogue))
+            // Play first dialogue line from the event
+            if (Event.DialogueLines.Num() > 0)
             {
-                TriggerDialogue(BestDialogue.DialogueType, Zone.ZoneName);
-                CurrentDialogue = BestDialogue;
+                PlayDialogue(Event.DialogueLines[0]);
             }
+            
+            OnNarrativeEventTriggered.Broadcast(EventID);
+            UE_LOG(LogTemp, Log, TEXT("Triggered narrative event: %s"), *EventID);
             break;
         }
     }
 }
 
-FNarr_DialogueEntry UNarr_DialogueSystem::SelectBestDialogue(const FNarr_NarrativeZone& Zone)
+void UNarr_DialogueSystem::TriggerBiomeDialogue(EEng_BiomeType BiomeType)
 {
-    FNarr_DialogueEntry BestDialogue;
-    int32 HighestPriority = -1;
-
-    for (const FNarr_DialogueEntry& Dialogue : Zone.AvailableDialogue)
+    FNarr_DialogueLine BiomeDialogue = GetRandomDialogueByType(BiomeType);
+    if (!BiomeDialogue.DialogueText.IsEmpty())
     {
-        if (ShouldPlayDialogue(Dialogue) && Dialogue.Priority > HighestPriority)
-        {
-            BestDialogue = Dialogue;
-            HighestPriority = Dialogue.Priority;
-        }
+        PlayDialogue(BiomeDialogue);
     }
-
-    return BestDialogue;
 }
 
-bool UNarr_DialogueSystem::ShouldPlayDialogue(const FNarr_DialogueEntry& Dialogue)
+void UNarr_DialogueSystem::TriggerSurvivalDialogue(EEng_SurvivalStat StatType, float StatValue)
 {
-    // Verificar se não está em cooldown
-    FString DialogueKey = CurrentZone + TEXT("_") + UEnum::GetValueAsString(Dialogue.DialogueType);
+    FNarr_DialogueLine SurvivalDialogue;
+    SurvivalDialogue.SpeakerName = "Survival Guide";
+    SurvivalDialogue.Duration = 8.0f;
+    SurvivalDialogue.bIsContextual = true;
     
-    if (DialogueCooldowns.Contains(DialogueKey))
+    switch (StatType)
     {
-        if (DialogueCooldowns[DialogueKey] > 0.0f)
-        {
-            return false;
-        }
+        case EEng_SurvivalStat::Health:
+            if (StatValue < 30.0f)
+            {
+                SurvivalDialogue.DialogueText = "Warning! Your health is critically low. Seek shelter and rest immediately.";
+            }
+            break;
+            
+        case EEng_SurvivalStat::Hunger:
+            if (StatValue < 25.0f)
+            {
+                SurvivalDialogue.DialogueText = "You're starving. Find food sources quickly - berries, small game, or fish.";
+            }
+            break;
+            
+        case EEng_SurvivalStat::Thirst:
+            if (StatValue < 20.0f)
+            {
+                SurvivalDialogue.DialogueText = "Severe dehydration detected. Locate fresh water immediately or risk collapse.";
+            }
+            break;
+            
+        case EEng_SurvivalStat::Fear:
+            if (StatValue > 80.0f)
+            {
+                SurvivalDialogue.DialogueText = "Your fear levels are dangerously high. Find a safe location and calm yourself.";
+            }
+            break;
+            
+        default:
+            return;
     }
-
-    // Verificar se pode repetir
-    if (!Dialogue.bCanRepeat && DialogueCooldowns.Contains(DialogueKey))
-    {
-        return false;
-    }
-
-    return true;
-}
-
-void UNarr_DialogueSystem::TriggerDialogue(ENarr_DialogueType DialogueType, const FString& ZoneName)
-{
-    if (bIsPlayingDialogue)
-    {
-        StopCurrentDialogue();
-    }
-
-    bIsPlayingDialogue = true;
-    DialogueTimer = 0.0f;
-
-    // Reproduzir áudio se disponível
-    if (AudioComponent && CurrentDialogue.AudioClip.IsValid())
-    {
-        USoundCue* SoundCue = CurrentDialogue.AudioClip.LoadSynchronous();
-        if (SoundCue)
-        {
-            AudioComponent->SetSound(SoundCue);
-            AudioComponent->Play();
-        }
-    }
-
-    // Adicionar cooldown
-    FString DialogueKey = ZoneName + TEXT("_") + UEnum::GetValueAsString(DialogueType);
-    DialogueCooldowns.Add(DialogueKey, CurrentDialogue.CooldownTime);
-
-    UE_LOG(LogTemp, Warning, TEXT("Triggered dialogue: %s in zone %s"), 
-           *UEnum::GetValueAsString(DialogueType), *ZoneName);
-}
-
-void UNarr_DialogueSystem::StopCurrentDialogue()
-{
-    bIsPlayingDialogue = false;
-    DialogueTimer = 0.0f;
     
-    if (AudioComponent && AudioComponent->IsPlaying())
+    if (!SurvivalDialogue.DialogueText.IsEmpty())
     {
-        AudioComponent->Stop();
+        PlayDialogue(SurvivalDialogue);
     }
-
-    CurrentDialogue = FNarr_DialogueEntry();
 }
 
-bool UNarr_DialogueSystem::IsInNarrativeZone(const FVector& PlayerLocation, FString& OutZoneName)
+void UNarr_DialogueSystem::TriggerDinosaurEncounterDialogue(EEng_DinosaurSpecies Species, float Distance)
 {
-    for (const FNarr_NarrativeZone& Zone : NarrativeZones)
+    FNarr_DialogueLine EncounterDialogue;
+    EncounterDialogue.SpeakerName = "Field Researcher";
+    EncounterDialogue.Duration = 10.0f;
+    EncounterDialogue.bIsContextual = true;
+    
+    FString SpeciesName;
+    switch (Species)
     {
-        if (!Zone.bIsActive)
-            continue;
+        case EEng_DinosaurSpecies::TRex:
+            SpeciesName = "Tyrannosaurus Rex";
+            if (Distance < 5000.0f)
+            {
+                EncounterDialogue.DialogueText = "Massive T-Rex detected nearby! Remain absolutely still and avoid eye contact.";
+            }
+            else
+            {
+                EncounterDialogue.DialogueText = "T-Rex spotted in the distance. Magnificent apex predator - observe from safe range.";
+            }
+            break;
+            
+        case EEng_DinosaurSpecies::Raptor:
+            SpeciesName = "Velociraptor";
+            if (Distance < 3000.0f)
+            {
+                EncounterDialogue.DialogueText = "Raptor pack detected! They hunt in coordinated groups. Seek high ground immediately.";
+            }
+            else
+            {
+                EncounterDialogue.DialogueText = "Velociraptors in the area. Intelligent hunters with pack tactics. Stay alert.";
+            }
+            break;
+            
+        case EEng_DinosaurSpecies::Brachiosaurus:
+            SpeciesName = "Brachiosaurus";
+            EncounterDialogue.DialogueText = "Gentle giant Brachiosaurus ahead. Peaceful herbivore, but mind the massive feet.";
+            break;
+            
+        case EEng_DinosaurSpecies::Triceratops:
+            SpeciesName = "Triceratops";
+            EncounterDialogue.DialogueText = "Triceratops herd spotted. Defensive herbivores with dangerous horns when threatened.";
+            break;
+            
+        default:
+            EncounterDialogue.DialogueText = "Unknown dinosaur species detected. Proceed with extreme caution.";
+            break;
+    }
+    
+    PlayDialogue(EncounterDialogue);
+}
 
-        float Distance = FVector::Dist(PlayerLocation, Zone.ZoneCenter);
-        if (Distance <= Zone.ZoneRadius)
+void UNarr_DialogueSystem::LoadDialogueFromDataTable(UDataTable* DialogueTable)
+{
+    if (!DialogueTable)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Dialogue table is null"));
+        return;
+    }
+    
+    // Clear existing dialogue
+    DialogueDatabase.Empty();
+    
+    // Load from data table (implementation would depend on table structure)
+    UE_LOG(LogTemp, Log, TEXT("Loading dialogue from data table"));
+}
+
+void UNarr_DialogueSystem::AddDialogueToDatabase(const FNarr_DialogueLine& NewDialogue)
+{
+    DialogueDatabase.Add(NewDialogue);
+    UE_LOG(LogTemp, Log, TEXT("Added dialogue to database: %s"), *NewDialogue.SpeakerName);
+}
+
+TArray<FNarr_DialogueLine> UNarr_DialogueSystem::GetDialogueByBiome(EEng_BiomeType BiomeType)
+{
+    TArray<FNarr_DialogueLine> BiomeDialogues;
+    
+    for (const FNarr_DialogueLine& Dialogue : DialogueDatabase)
+    {
+        if (Dialogue.TriggerBiome == BiomeType)
         {
-            OutZoneName = Zone.ZoneName;
-            return true;
+            BiomeDialogues.Add(Dialogue);
         }
     }
-
-    OutZoneName = TEXT("");
-    return false;
+    
+    return BiomeDialogues;
 }
 
-void UNarr_DialogueSystem::AddNarrativeZone(const FNarr_NarrativeZone& NewZone)
+void UNarr_DialogueSystem::InitializeDefaultDialogue()
 {
-    NarrativeZones.Add(NewZone);
-    UE_LOG(LogTemp, Log, TEXT("Added narrative zone: %s"), *NewZone.ZoneName);
+    // Initialize default biome-specific dialogues
+    FNarr_DialogueLine SwampDialogue;
+    SwampDialogue.SpeakerName = "Field Narrator";
+    SwampDialogue.DialogueText = "Welcome to the prehistoric swamplands. Watch for crocodilians and toxic plants.";
+    SwampDialogue.TriggerBiome = EEng_BiomeType::Swamp;
+    SwampDialogue.Duration = 8.0f;
+    DialogueDatabase.Add(SwampDialogue);
+    
+    FNarr_DialogueLine ForestDialogue;
+    ForestDialogue.SpeakerName = "Field Narrator";
+    ForestDialogue.DialogueText = "Dense prehistoric forest detected. Visibility is limited - predators may be lurking.";
+    ForestDialogue.TriggerBiome = EEng_BiomeType::Forest;
+    ForestDialogue.Duration = 8.0f;
+    DialogueDatabase.Add(ForestDialogue);
+    
+    FNarr_DialogueLine SavannaDialogue;
+    SavannaDialogue.SpeakerName = "Field Narrator";
+    SavannaDialogue.DialogueText = "Open savanna plains ahead. Good visibility but little cover from predators.";
+    SavannaDialogue.TriggerBiome = EEng_BiomeType::Savanna;
+    SavannaDialogue.Duration = 8.0f;
+    DialogueDatabase.Add(SavannaDialogue);
+    
+    FNarr_DialogueLine DesertDialogue;
+    DesertDialogue.SpeakerName = "Field Narrator";
+    DesertDialogue.DialogueText = "Arid desert environment. Monitor temperature and water levels carefully.";
+    DesertDialogue.TriggerBiome = EEng_BiomeType::Desert;
+    DesertDialogue.Duration = 8.0f;
+    DialogueDatabase.Add(DesertDialogue);
+    
+    FNarr_DialogueLine MountainDialogue;
+    MountainDialogue.SpeakerName = "Field Narrator";
+    MountainDialogue.DialogueText = "High altitude snowy peaks. Cold temperatures and treacherous terrain ahead.";
+    MountainDialogue.TriggerBiome = EEng_BiomeType::SnowyMountain;
+    MountainDialogue.Duration = 8.0f;
+    DialogueDatabase.Add(MountainDialogue);
+    
+    // Create default narrative events
+    FNarr_NarrativeEvent FirstExploration;
+    FirstExploration.EventID = "FirstExploration";
+    FirstExploration.EventDescription = "Player's first exploration of the prehistoric world";
+    FirstExploration.RelatedQuestType = EEng_QuestType::Exploration;
+    
+    FNarr_DialogueLine IntroDialogue;
+    IntroDialogue.SpeakerName = "Research Lead";
+    IntroDialogue.DialogueText = "Welcome to the Cretaceous period. Your survival depends on understanding this ancient ecosystem.";
+    IntroDialogue.Duration = 10.0f;
+    FirstExploration.DialogueLines.Add(IntroDialogue);
+    
+    NarrativeEvents.Add(FirstExploration);
 }
 
-void UNarr_DialogueSystem::RemoveNarrativeZone(const FString& ZoneName)
+void UNarr_DialogueSystem::UpdateDialogueTimer(float DeltaTime)
 {
-    NarrativeZones.RemoveAll([ZoneName](const FNarr_NarrativeZone& Zone)
+    if (DialogueTimer > 0.0f)
     {
-        return Zone.ZoneName == ZoneName;
-    });
-    UE_LOG(LogTemp, Log, TEXT("Removed narrative zone: %s"), *ZoneName);
+        DialogueTimer -= DeltaTime;
+        
+        if (DialogueTimer <= 0.0f)
+        {
+            StopDialogue();
+        }
+    }
 }
 
-ENarr_NarrativeContext UNarr_DialogueSystem::GetCurrentContext() const
+FNarr_DialogueLine UNarr_DialogueSystem::GetRandomDialogueByType(EEng_BiomeType BiomeType)
 {
-    return CurrentContext;
+    TArray<FNarr_DialogueLine> BiomeDialogues = GetDialogueByBiome(BiomeType);
+    
+    if (BiomeDialogues.Num() > 0)
+    {
+        int32 RandomIndex = FMath::RandRange(0, BiomeDialogues.Num() - 1);
+        return BiomeDialogues[RandomIndex];
+    }
+    
+    return FNarr_DialogueLine();
 }
