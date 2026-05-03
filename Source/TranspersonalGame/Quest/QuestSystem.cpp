@@ -1,500 +1,548 @@
 #include "QuestSystem.h"
+#include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "TimerManager.h"
-#include "GameplayTagsManager.h"
-#include "Engine/DataTable.h"
-#include "Kismet/GameplayStatics.h"
+#include "GameFramework/PlayerController.h"
+#include "GameFramework/Pawn.h"
+#include "Components/StaticMeshComponent.h"
+#include "Components/SphereComponent.h"
+#include "Engine/StaticMesh.h"
+#include "UObject/ConstructorHelpers.h"
+
+// UQuestSystem Implementation
+UQuestSystem::UQuestSystem()
+{
+    bIsInitialized = false;
+    LastUpdateTime = 0.0f;
+}
 
 void UQuestSystem::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    // Inicializar timer para verificações periódicas
+    UE_LOG(LogTemp, Warning, TEXT("QuestSystem: Initializing Quest System"));
+    
+    bIsInitialized = true;
+    LastUpdateTime = 0.0f;
+    
+    // Initialize default quests after a short delay to ensure world is ready
+    FTimerHandle InitTimer;
     if (UWorld* World = GetWorld())
     {
-        World->GetTimerManager().SetTimer(QuestUpdateTimer, 
-            FTimerDelegate::CreateUObject(this, &UQuestSystem::CheckQuestTimeouts), 
-            5.0f, true);
+        World->GetTimerManager().SetTimer(InitTimer, this, &UQuestSystem::InitializeDefaultQuests, 2.0f, false);
     }
-    
-    UE_LOG(LogTemp, Log, TEXT("Quest System initialized"));
 }
 
 void UQuestSystem::Deinitialize()
 {
-    if (UWorld* World = GetWorld())
-    {
-        World->GetTimerManager().ClearTimer(QuestUpdateTimer);
-    }
+    UE_LOG(LogTemp, Warning, TEXT("QuestSystem: Deinitializing Quest System"));
+    
+    AllQuests.Empty();
+    ActiveQuestIDs.Empty();
+    bIsInitialized = false;
     
     Super::Deinitialize();
 }
 
-bool UQuestSystem::StartQuest(FName QuestID)
+void UQuestSystem::StartQuest(const FString& QuestID)
 {
-    if (!QuestDatabase.Contains(QuestID))
+    if (!bIsInitialized)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Quest %s not found in database"), *QuestID.ToString());
-        return false;
+        UE_LOG(LogTemp, Error, TEXT("QuestSystem: Cannot start quest - system not initialized"));
+        return;
     }
 
-    const FQuestData& QuestData = QuestDatabase[QuestID];
-    
-    // Verificar pré-requisitos
-    // TODO: Implementar verificação de gameplay tags do jogador
-    
-    // Inicializar quest
-    QuestStatuses.Add(QuestID, EQuestStatus::Active);
-    QuestStartTimes.Add(QuestID, GetWorld()->GetTimeSeconds());
-    
-    // Inicializar progresso dos objetivos
-    TArray<int32> InitialProgress;
-    for (int32 i = 0; i < QuestData.Objectives.Num(); i++)
+    if (FQuest_Data* QuestData = AllQuests.Find(QuestID))
     {
-        InitialProgress.Add(0);
-    }
-    ObjectiveProgress.Add(QuestID, InitialProgress);
-    
-    NotifyQuestStatusChange(QuestID, EQuestStatus::Active);
-    
-    UE_LOG(LogTemp, Log, TEXT("Started quest: %s"), *QuestData.QuestName.ToString());
-    return true;
-}
-
-bool UQuestSystem::CompleteQuest(FName QuestID)
-{
-    if (!QuestStatuses.Contains(QuestID) || QuestStatuses[QuestID] != EQuestStatus::Active)
-    {
-        return false;
-    }
-
-    QuestStatuses[QuestID] = EQuestStatus::Completed;
-    
-    // Aplicar recompensas
-    const FQuestData& QuestData = QuestDatabase[QuestID];
-    // TODO: Implementar sistema de recompensas
-    
-    NotifyQuestStatusChange(QuestID, EQuestStatus::Completed);
-    
-    UE_LOG(LogTemp, Log, TEXT("Completed quest: %s"), *QuestData.QuestName.ToString());
-    return true;
-}
-
-bool UQuestSystem::FailQuest(FName QuestID)
-{
-    if (!QuestStatuses.Contains(QuestID) || QuestStatuses[QuestID] != EQuestStatus::Active)
-    {
-        return false;
-    }
-
-    QuestStatuses[QuestID] = EQuestStatus::Failed;
-    NotifyQuestStatusChange(QuestID, EQuestStatus::Failed);
-    
-    UE_LOG(LogTemp, Log, TEXT("Failed quest: %s"), *QuestID.ToString());
-    return true;
-}
-
-bool UQuestSystem::AbandonQuest(FName QuestID)
-{
-    if (!QuestStatuses.Contains(QuestID) || QuestStatuses[QuestID] != EQuestStatus::Active)
-    {
-        return false;
-    }
-
-    QuestStatuses[QuestID] = EQuestStatus::Abandoned;
-    NotifyQuestStatusChange(QuestID, EQuestStatus::Abandoned);
-    
-    UE_LOG(LogTemp, Log, TEXT("Abandoned quest: %s"), *QuestID.ToString());
-    return true;
-}
-
-EQuestStatus UQuestSystem::GetQuestStatus(FName QuestID) const
-{
-    if (QuestStatuses.Contains(QuestID))
-    {
-        return QuestStatuses[QuestID];
-    }
-    return EQuestStatus::NotStarted;
-}
-
-TArray<FName> UQuestSystem::GetActiveQuests() const
-{
-    TArray<FName> ActiveQuests;
-    for (const auto& QuestPair : QuestStatuses)
-    {
-        if (QuestPair.Value == EQuestStatus::Active)
+        if (QuestData->Status == EQuest_Status::NotStarted)
         {
-            ActiveQuests.Add(QuestPair.Key);
-        }
-    }
-    return ActiveQuests;
-}
-
-TArray<FName> UQuestSystem::GetAvailableQuests() const
-{
-    TArray<FName> AvailableQuests;
-    for (const auto& QuestPair : QuestDatabase)
-    {
-        FName QuestID = QuestPair.Key;
-        if (!QuestStatuses.Contains(QuestID) || QuestStatuses[QuestID] == EQuestStatus::NotStarted)
-        {
-            // TODO: Verificar pré-requisitos
-            AvailableQuests.Add(QuestID);
-        }
-    }
-    return AvailableQuests;
-}
-
-bool UQuestSystem::UpdateObjectiveProgress(FName QuestID, int32 ObjectiveIndex, int32 Progress)
-{
-    if (!ObjectiveProgress.Contains(QuestID) || 
-        !ObjectiveProgress[QuestID].IsValidIndex(ObjectiveIndex))
-    {
-        return false;
-    }
-
-    const FQuestData& QuestData = QuestDatabase[QuestID];
-    if (!QuestData.Objectives.IsValidIndex(ObjectiveIndex))
-    {
-        return false;
-    }
-
-    TArray<int32>& Progress_Array = ObjectiveProgress[QuestID];
-    Progress_Array[ObjectiveIndex] = FMath::Min(Progress_Array[ObjectiveIndex] + Progress, 
-                                               QuestData.Objectives[ObjectiveIndex].TargetCount);
-
-    OnObjectiveUpdated.Broadcast(QuestID, ObjectiveIndex, Progress_Array[ObjectiveIndex]);
-
-    // Verificar se o objetivo foi completado
-    if (Progress_Array[ObjectiveIndex] >= QuestData.Objectives[ObjectiveIndex].TargetCount)
-    {
-        CompleteObjective(QuestID, ObjectiveIndex);
-    }
-
-    return true;
-}
-
-bool UQuestSystem::CompleteObjective(FName QuestID, int32 ObjectiveIndex)
-{
-    if (!ObjectiveProgress.Contains(QuestID))
-    {
-        return false;
-    }
-
-    const FQuestData& QuestData = QuestDatabase[QuestID];
-    
-    // Verificar se todos os objetivos obrigatórios foram completados
-    bool AllRequiredObjectivesComplete = true;
-    for (int32 i = 0; i < QuestData.Objectives.Num(); i++)
-    {
-        if (!QuestData.Objectives[i].bOptional)
-        {
-            int32 CurrentProgress = ObjectiveProgress[QuestID][i];
-            if (CurrentProgress < QuestData.Objectives[i].TargetCount)
+            QuestData->Status = EQuest_Status::Active;
+            QuestData->StartTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+            
+            // Activate all objectives
+            for (FQuest_Objective& Objective : QuestData->Objectives)
             {
-                AllRequiredObjectivesComplete = false;
+                if (Objective.Status == EQuest_Status::NotStarted)
+                {
+                    Objective.Status = EQuest_Status::Active;
+                }
+            }
+            
+            ActiveQuestIDs.AddUnique(QuestID);
+            
+            UE_LOG(LogTemp, Warning, TEXT("QuestSystem: Started quest '%s'"), *QuestData->Title);
+        }
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("QuestSystem: Quest '%s' not found"), *QuestID);
+    }
+}
+
+void UQuestSystem::CompleteQuest(const FString& QuestID)
+{
+    if (FQuest_Data* QuestData = AllQuests.Find(QuestID))
+    {
+        QuestData->Status = EQuest_Status::Completed;
+        ActiveQuestIDs.Remove(QuestID);
+        
+        UE_LOG(LogTemp, Warning, TEXT("QuestSystem: Completed quest '%s'"), *QuestData->Title);
+    }
+}
+
+void UQuestSystem::FailQuest(const FString& QuestID)
+{
+    if (FQuest_Data* QuestData = AllQuests.Find(QuestID))
+    {
+        QuestData->Status = EQuest_Status::Failed;
+        ActiveQuestIDs.Remove(QuestID);
+        
+        UE_LOG(LogTemp, Warning, TEXT("QuestSystem: Failed quest '%s'"), *QuestData->Title);
+    }
+}
+
+void UQuestSystem::UpdateObjectiveProgress(const FString& QuestID, const FString& ObjectiveID, int32 Progress)
+{
+    if (FQuest_Data* QuestData = AllQuests.Find(QuestID))
+    {
+        for (FQuest_Objective& Objective : QuestData->Objectives)
+        {
+            if (Objective.ObjectiveID == ObjectiveID)
+            {
+                Objective.CurrentProgress = FMath::Min(Progress, Objective.RequiredCount);
+                
+                if (Objective.CurrentProgress >= Objective.RequiredCount && Objective.Status == EQuest_Status::Active)
+                {
+                    OnObjectiveCompleted(QuestID, ObjectiveID);
+                }
                 break;
             }
         }
     }
-
-    if (AllRequiredObjectivesComplete)
-    {
-        CompleteQuest(QuestID);
-    }
-
-    return true;
 }
 
-int32 UQuestSystem::GetObjectiveProgress(FName QuestID, int32 ObjectiveIndex) const
+bool UQuestSystem::IsQuestActive(const FString& QuestID) const
 {
-    if (ObjectiveProgress.Contains(QuestID) && 
-        ObjectiveProgress[QuestID].IsValidIndex(ObjectiveIndex))
-    {
-        return ObjectiveProgress[QuestID][ObjectiveIndex];
-    }
-    return 0;
+    return ActiveQuestIDs.Contains(QuestID);
 }
 
-FName UQuestSystem::GenerateDynamicQuest(EQuestType QuestType, const FGameplayTagContainer& ContextTags)
+TArray<FQuest_Data> UQuestSystem::GetActiveQuests() const
 {
-    switch (QuestType)
-    {
-        case EQuestType::Survival:
-            return GenerateSurvivalQuest(ContextTags);
-        case EQuestType::Observation:
-            return GenerateObservationQuest(ContextTags);
-        case EQuestType::Discovery:
-            return GenerateDiscoveryQuest(ContextTags);
-        case EQuestType::Domestication:
-            return GenerateDomesticationQuest(ContextTags);
-        case EQuestType::Emergency:
-            return GenerateEmergencyQuest(ContextTags);
-        default:
-            return NAME_None;
-    }
-}
-
-void UQuestSystem::ProcessEcosystemEvents(const FGameplayTagContainer& EventTags, FVector Location)
-{
-    // Gerar missões dinâmicas baseadas em eventos do ecossistema
+    TArray<FQuest_Data> ActiveQuests;
     
-    if (EventTags.HasTag(FGameplayTag::RequestGameplayTag("Ecosystem.PredatorHunt")))
+    for (const FString& QuestID : ActiveQuestIDs)
     {
-        // Gerar missão de observação de caça
-        FGameplayTagContainer ObservationTags;
-        ObservationTags.AddTag(FGameplayTag::RequestGameplayTag("Behavior.Hunting"));
-        ObservationTags.AddTag(FGameplayTag::RequestGameplayTag("Location.Specific"));
-        GenerateDynamicQuest(EQuestType::Observation, ObservationTags);
-    }
-    
-    if (EventTags.HasTag(FGameplayTag::RequestGameplayTag("Ecosystem.HerbivoreGrazing")))
-    {
-        // Gerar missão de domesticação
-        FGameplayTagContainer DomesticationTags;
-        DomesticationTags.AddTag(FGameplayTag::RequestGameplayTag("Species.Herbivore"));
-        DomesticationTags.AddTag(FGameplayTag::RequestGameplayTag("Behavior.Peaceful"));
-        GenerateDynamicQuest(EQuestType::Domestication, DomesticationTags);
-    }
-    
-    if (EventTags.HasTag(FGameplayTag::RequestGameplayTag("Ecosystem.ResourceDepletion")))
-    {
-        // Gerar missão de sobrevivência
-        FGameplayTagContainer SurvivalTags;
-        SurvivalTags.AddTag(FGameplayTag::RequestGameplayTag("Resource.Food"));
-        SurvivalTags.AddTag(FGameplayTag::RequestGameplayTag("Urgency.High"));
-        GenerateDynamicQuest(EQuestType::Survival, SurvivalTags);
-    }
-}
-
-FQuestData UQuestSystem::GetQuestData(FName QuestID) const
-{
-    if (QuestDatabase.Contains(QuestID))
-    {
-        return QuestDatabase[QuestID];
-    }
-    return FQuestData();
-}
-
-void UQuestSystem::LoadQuestDatabase(UDataTable* QuestTable)
-{
-    if (!QuestTable)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Quest table is null"));
-        return;
-    }
-
-    QuestDatabase.Empty();
-    
-    TArray<FQuestData*> AllQuests;
-    QuestTable->GetAllRows<FQuestData>("", AllQuests);
-    
-    for (FQuestData* Quest : AllQuests)
-    {
-        if (Quest)
+        if (const FQuest_Data* QuestData = AllQuests.Find(QuestID))
         {
-            FName QuestID(*Quest->QuestName.ToString());
-            QuestDatabase.Add(QuestID, *Quest);
+            ActiveQuests.Add(*QuestData);
         }
     }
     
-    UE_LOG(LogTemp, Log, TEXT("Loaded %d quests from database"), QuestDatabase.Num());
+    return ActiveQuests;
 }
 
-FName UQuestSystem::GenerateSurvivalQuest(const FGameplayTagContainer& ContextTags)
+FQuest_Data UQuestSystem::GetQuestData(const FString& QuestID) const
 {
-    FQuestData NewQuest;
-    FName QuestID = FName(*FString::Printf(TEXT("DynamicSurvival_%d"), ++DynamicQuestCounter));
-    
-    NewQuest.QuestName = FText::FromString("Sobrevivência Urgente");
-    NewQuest.QuestDescription = FText::FromString("Os recursos estão escassos. Encontre comida e água antes que seja tarde demais.");
-    NewQuest.QuestType = EQuestType::Survival;
-    NewQuest.Priority = 8;
-    NewQuest.TimeLimit = 1800.0f; // 30 minutos
-    
-    // Objetivo: Coletar comida
-    FQuestObjectiveData FoodObjective;
-    FoodObjective.ObjectiveText = FText::FromString("Colete 5 unidades de comida");
-    FoodObjective.ObjectiveType = EObjectiveType::Collect;
-    FoodObjective.TargetCount = 5;
-    FoodObjective.RequiredTags.AddTag(FGameplayTag::RequestGameplayTag("Item.Food"));
-    
-    // Objetivo: Encontrar água
-    FQuestObjectiveData WaterObjective;
-    WaterObjective.ObjectiveText = FText::FromString("Encontre uma fonte de água");
-    WaterObjective.ObjectiveType = EObjectiveType::Discover;
-    WaterObjective.TargetCount = 1;
-    WaterObjective.RequiredTags.AddTag(FGameplayTag::RequestGameplayTag("Location.Water"));
-    
-    NewQuest.Objectives.Add(FoodObjective);
-    NewQuest.Objectives.Add(WaterObjective);
-    
-    // Recompensa
-    NewQuest.Reward.Experience = 100;
-    NewQuest.Reward.RewardDescription = FText::FromString("Sobreviveu à escassez de recursos");
-    
-    QuestDatabase.Add(QuestID, NewQuest);
-    
-    UE_LOG(LogTemp, Log, TEXT("Generated dynamic survival quest: %s"), *QuestID.ToString());
-    return QuestID;
-}
-
-FName UQuestSystem::GenerateObservationQuest(const FGameplayTagContainer& ContextTags)
-{
-    FQuestData NewQuest;
-    FName QuestID = FName(*FString::Printf(TEXT("DynamicObservation_%d"), ++DynamicQuestCounter));
-    
-    NewQuest.QuestName = FText::FromString("Observação Comportamental");
-    NewQuest.QuestDescription = FText::FromString("Observe o comportamento natural dos dinossauros sem ser detectado.");
-    NewQuest.QuestType = EQuestType::Observation;
-    NewQuest.Priority = 5;
-    
-    // Objetivo: Observar por tempo determinado
-    FQuestObjectiveData ObservationObjective;
-    ObservationObjective.ObjectiveText = FText::FromString("Observe dinossauros por 300 segundos sem ser detectado");
-    ObservationObjective.ObjectiveType = EObjectiveType::Observe;
-    ObservationObjective.TargetCount = 300; // segundos
-    ObservationObjective.RequiredTags.AddTag(FGameplayTag::RequestGameplayTag("Behavior.Natural"));
-    
-    NewQuest.Objectives.Add(ObservationObjective);
-    
-    // Recompensa
-    NewQuest.Reward.Experience = 150;
-    NewQuest.Reward.UnlockTags.AddTag(FGameplayTag::RequestGameplayTag("Knowledge.Behavior"));
-    NewQuest.Reward.RewardDescription = FText::FromString("Conhecimento sobre comportamento dos dinossauros");
-    
-    QuestDatabase.Add(QuestID, NewQuest);
-    
-    UE_LOG(LogTemp, Log, TEXT("Generated dynamic observation quest: %s"), *QuestID.ToString());
-    return QuestID;
-}
-
-FName UQuestSystem::GenerateDiscoveryQuest(const FGameplayTagContainer& ContextTags)
-{
-    FQuestData NewQuest;
-    FName QuestID = FName(*FString::Printf(TEXT("DynamicDiscovery_%d"), ++DynamicQuestCounter));
-    
-    NewQuest.QuestName = FText::FromString("Exploração Territorial");
-    NewQuest.QuestDescription = FText::FromString("Explore áreas desconhecidas e mapeie o território.");
-    NewQuest.QuestType = EQuestType::Discovery;
-    NewQuest.Priority = 4;
-    
-    // Objetivo: Descobrir locais
-    FQuestObjectiveData DiscoveryObjective;
-    DiscoveryObjective.ObjectiveText = FText::FromString("Descubra 3 novos pontos de interesse");
-    DiscoveryObjective.ObjectiveType = EObjectiveType::Discover;
-    DiscoveryObjective.TargetCount = 3;
-    DiscoveryObjective.RequiredTags.AddTag(FGameplayTag::RequestGameplayTag("Location.PointOfInterest"));
-    
-    NewQuest.Objectives.Add(DiscoveryObjective);
-    
-    // Recompensa
-    NewQuest.Reward.Experience = 200;
-    NewQuest.Reward.UnlockTags.AddTag(FGameplayTag::RequestGameplayTag("Map.Expanded"));
-    NewQuest.Reward.RewardDescription = FText::FromString("Mapa expandido com novos locais");
-    
-    QuestDatabase.Add(QuestID, NewQuest);
-    
-    UE_LOG(LogTemp, Log, TEXT("Generated dynamic discovery quest: %s"), *QuestID.ToString());
-    return QuestID;
-}
-
-FName UQuestSystem::GenerateDomesticationQuest(const FGameplayTagContainer& ContextTags)
-{
-    FQuestData NewQuest;
-    FName QuestID = FName(*FString::Printf(TEXT("DynamicDomestication_%d"), ++DynamicQuestCounter));
-    
-    NewQuest.QuestName = FText::FromString("Primeira Domesticação");
-    NewQuest.QuestDescription = FText::FromString("Tente estabelecer confiança com um dinossauro herbívoro pequeno.");
-    NewQuest.QuestType = EQuestType::Domestication;
-    NewQuest.Priority = 6;
-    
-    // Objetivo: Domesticar
-    FQuestObjectiveData DomesticationObjective;
-    DomesticationObjective.ObjectiveText = FText::FromString("Ganhe a confiança de um dinossauro herbívoro");
-    DomesticationObjective.ObjectiveType = EObjectiveType::Domesticate;
-    DomesticationObjective.TargetCount = 1;
-    DomesticationObjective.RequiredTags.AddTag(FGameplayTag::RequestGameplayTag("Species.Herbivore.Small"));
-    
-    NewQuest.Objectives.Add(DomesticationObjective);
-    
-    // Recompensa
-    NewQuest.Reward.Experience = 300;
-    NewQuest.Reward.UnlockTags.AddTag(FGameplayTag::RequestGameplayTag("Skill.Domestication"));
-    NewQuest.Reward.RewardDescription = FText::FromString("Habilidade de domesticação desbloqueada");
-    
-    QuestDatabase.Add(QuestID, NewQuest);
-    
-    UE_LOG(LogTemp, Log, TEXT("Generated dynamic domestication quest: %s"), *QuestID.ToString());
-    return QuestID;
-}
-
-FName UQuestSystem::GenerateEmergencyQuest(const FGameplayTagContainer& ContextTags)
-{
-    FQuestData NewQuest;
-    FName QuestID = FName(*FString::Printf(TEXT("DynamicEmergency_%d"), ++DynamicQuestCounter));
-    
-    NewQuest.QuestName = FText::FromString("Situação de Emergência");
-    NewQuest.QuestDescription = FText::FromString("Um predador perigoso foi avistado na área. Encontre abrigo imediatamente!");
-    NewQuest.QuestType = EQuestType::Emergency;
-    NewQuest.Priority = 10;
-    NewQuest.TimeLimit = 300.0f; // 5 minutos
-    
-    // Objetivo: Encontrar abrigo
-    FQuestObjectiveData ShelterObjective;
-    ShelterObjective.ObjectiveText = FText::FromString("Encontre abrigo seguro");
-    ShelterObjective.ObjectiveType = EObjectiveType::Reach;
-    ShelterObjective.TargetCount = 1;
-    ShelterObjective.RequiredTags.AddTag(FGameplayTag::RequestGameplayTag("Location.Shelter"));
-    
-    NewQuest.Objectives.Add(ShelterObjective);
-    
-    // Recompensa
-    NewQuest.Reward.Experience = 50;
-    NewQuest.Reward.RewardDescription = FText::FromString("Sobreviveu ao perigo");
-    
-    QuestDatabase.Add(QuestID, NewQuest);
-    
-    UE_LOG(LogTemp, Log, TEXT("Generated dynamic emergency quest: %s"), *QuestID.ToString());
-    return QuestID;
-}
-
-void UQuestSystem::CheckQuestPrerequisites()
-{
-    // TODO: Implementar verificação de pré-requisitos para auto-start de quests
-}
-
-void UQuestSystem::CheckQuestTimeouts()
-{
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-    
-    TArray<FName> QuestsToFail;
-    
-    for (const auto& QuestPair : QuestStatuses)
+    if (const FQuest_Data* QuestData = AllQuests.Find(QuestID))
     {
-        if (QuestPair.Value == EQuestStatus::Active)
+        return *QuestData;
+    }
+    
+    return FQuest_Data();
+}
+
+void UQuestSystem::CheckLocationObjectives(const FVector& PlayerLocation)
+{
+    for (const FString& QuestID : ActiveQuestIDs)
+    {
+        if (FQuest_Data* QuestData = AllQuests.Find(QuestID))
         {
-            FName QuestID = QuestPair.Key;
-            const FQuestData& QuestData = QuestDatabase[QuestID];
-            
-            if (QuestData.TimeLimit > 0.0f && QuestStartTimes.Contains(QuestID))
+            for (FQuest_Objective& Objective : QuestData->Objectives)
             {
-                float ElapsedTime = CurrentTime - QuestStartTimes[QuestID];
-                if (ElapsedTime >= QuestData.TimeLimit)
+                if (Objective.Status == EQuest_Status::Active)
                 {
-                    QuestsToFail.Add(QuestID);
+                    if (CheckObjectiveCompletion(Objective, PlayerLocation))
+                    {
+                        OnObjectiveCompleted(QuestID, Objective.ObjectiveID);
+                    }
                 }
             }
         }
     }
-    
-    for (FName QuestID : QuestsToFail)
+}
+
+void UQuestSystem::OnResourceGathered(const FString& ResourceType, int32 Amount)
+{
+    for (const FString& QuestID : ActiveQuestIDs)
     {
-        FailQuest(QuestID);
+        if (FQuest_Data* QuestData = AllQuests.Find(QuestID))
+        {
+            for (FQuest_Objective& Objective : QuestData->Objectives)
+            {
+                if (Objective.Status == EQuest_Status::Active && 
+                    Objective.Type == EQuest_ObjectiveType::Gather_Resources &&
+                    Objective.TargetActorClass == ResourceType)
+                {
+                    Objective.CurrentProgress += Amount;
+                    if (Objective.CurrentProgress >= Objective.RequiredCount)
+                    {
+                        OnObjectiveCompleted(QuestID, Objective.ObjectiveID);
+                    }
+                }
+            }
+        }
     }
 }
 
-void UQuestSystem::NotifyQuestStatusChange(FName QuestID, EQuestStatus NewStatus)
+void UQuestSystem::OnDinosaurKilled(const FString& DinosaurType)
 {
-    OnQuestStatusChanged.Broadcast(QuestID, NewStatus);
+    for (const FString& QuestID : ActiveQuestIDs)
+    {
+        if (FQuest_Data* QuestData = AllQuests.Find(QuestID))
+        {
+            for (FQuest_Objective& Objective : QuestData->Objectives)
+            {
+                if (Objective.Status == EQuest_Status::Active && 
+                    Objective.Type == EQuest_ObjectiveType::Hunt_Dinosaur &&
+                    (Objective.TargetActorClass.IsEmpty() || Objective.TargetActorClass == DinosaurType))
+                {
+                    Objective.CurrentProgress++;
+                    if (Objective.CurrentProgress >= Objective.RequiredCount)
+                    {
+                        OnObjectiveCompleted(QuestID, Objective.ObjectiveID);
+                    }
+                }
+            }
+        }
+    }
+}
+
+void UQuestSystem::OnItemCrafted(const FString& ItemType)
+{
+    for (const FString& QuestID : ActiveQuestIDs)
+    {
+        if (FQuest_Data* QuestData = AllQuests.Find(QuestID))
+        {
+            for (FQuest_Objective& Objective : QuestData->Objectives)
+            {
+                if (Objective.Status == EQuest_Status::Active && 
+                    Objective.Type == EQuest_ObjectiveType::Craft_Item &&
+                    Objective.TargetActorClass == ItemType)
+                {
+                    Objective.CurrentProgress++;
+                    if (Objective.CurrentProgress >= Objective.RequiredCount)
+                    {
+                        OnObjectiveCompleted(QuestID, Objective.ObjectiveID);
+                    }
+                }
+            }
+        }
+    }
+}
+
+void UQuestSystem::InitializeDefaultQuests()
+{
+    UE_LOG(LogTemp, Warning, TEXT("QuestSystem: Creating default survival quests"));
+    
+    CreateExplorationQuests();
+    CreateSurvivalQuests();
+    CreateHuntingQuests();
+    CreateCraftingQuests();
+    
+    UE_LOG(LogTemp, Warning, TEXT("QuestSystem: Created %d default quests"), AllQuests.Num());
+}
+
+void UQuestSystem::CreateExplorationQuests()
+{
+    // Main exploration quest - discover all biomes
+    FQuest_Data ExploreAllBiomes;
+    ExploreAllBiomes.QuestID = "EXPLORE_ALL_BIOMES";
+    ExploreAllBiomes.Title = "Explorer of the Prehistoric World";
+    ExploreAllBiomes.Description = "Discover all five biomes of this prehistoric world to understand the diverse ecosystems.";
+    ExploreAllBiomes.Status = EQuest_Status::NotStarted;
+    ExploreAllBiomes.bIsMainQuest = true;
+    
+    // Biome exploration objectives
+    TArray<FString> BiomeNames = {"Swamp", "Forest", "Savanna", "Desert", "Snow Mountain"};
+    TArray<FVector> BiomeCenters = {
+        FVector(-50000, -45000, 0),    // Swamp
+        FVector(-45000, 40000, 0),     // Forest
+        FVector(0, 0, 0),              // Savanna
+        FVector(55000, 0, 0),          // Desert
+        FVector(40000, 50000, 500)     // Snow Mountain
+    };
+    
+    for (int32 i = 0; i < BiomeNames.Num(); i++)
+    {
+        FQuest_Objective BiomeObjective;
+        BiomeObjective.ObjectiveID = FString::Printf(TEXT("EXPLORE_%s"), *BiomeNames[i].ToUpper());
+        BiomeObjective.Description = FString::Printf(TEXT("Explore the %s biome"), *BiomeNames[i]);
+        BiomeObjective.Type = EQuest_ObjectiveType::Explore_Biome;
+        BiomeObjective.Status = EQuest_Status::NotStarted;
+        BiomeObjective.TargetLocation = BiomeCenters[i];
+        BiomeObjective.RequiredDistance = 5000.0f;
+        BiomeObjective.RequiredCount = 1;
+        BiomeObjective.CurrentProgress = 0;
+        
+        ExploreAllBiomes.Objectives.Add(BiomeObjective);
+    }
+    
+    AllQuests.Add(ExploreAllBiomes.QuestID, ExploreAllBiomes);
+}
+
+void UQuestSystem::CreateSurvivalQuests()
+{
+    // Basic survival quest
+    FQuest_Data SurvivalBasics;
+    SurvivalBasics.QuestID = "SURVIVAL_BASICS";
+    SurvivalBasics.Title = "Survival Basics";
+    SurvivalBasics.Description = "Learn the fundamentals of survival in this dangerous prehistoric world.";
+    SurvivalBasics.Status = EQuest_Status::NotStarted;
+    SurvivalBasics.bIsMainQuest = false;
+    
+    // Survive for 10 minutes objective
+    FQuest_Objective SurviveTime;
+    SurviveTime.ObjectiveID = "SURVIVE_10_MINUTES";
+    SurviveTime.Description = "Survive for 10 minutes without dying";
+    SurviveTime.Type = EQuest_ObjectiveType::Survive_Duration;
+    SurviveTime.Status = EQuest_Status::NotStarted;
+    SurviveTime.RequiredCount = 600; // 10 minutes in seconds
+    SurviveTime.CurrentProgress = 0;
+    
+    SurvivalBasics.Objectives.Add(SurviveTime);
+    AllQuests.Add(SurvivalBasics.QuestID, SurvivalBasics);
+}
+
+void UQuestSystem::CreateHuntingQuests()
+{
+    // First hunt quest
+    FQuest_Data FirstHunt;
+    FirstHunt.QuestID = "FIRST_HUNT";
+    FirstHunt.Title = "First Hunt";
+    FirstHunt.Description = "Prove your hunting skills by taking down your first dinosaur.";
+    FirstHunt.Status = EQuest_Status::NotStarted;
+    FirstHunt.bIsMainQuest = false;
+    
+    FQuest_Objective HuntObjective;
+    HuntObjective.ObjectiveID = "KILL_ANY_DINOSAUR";
+    HuntObjective.Description = "Kill any dinosaur";
+    HuntObjective.Type = EQuest_ObjectiveType::Hunt_Dinosaur;
+    HuntObjective.Status = EQuest_Status::NotStarted;
+    HuntObjective.TargetActorClass = ""; // Any dinosaur
+    HuntObjective.RequiredCount = 1;
+    HuntObjective.CurrentProgress = 0;
+    
+    FirstHunt.Objectives.Add(HuntObjective);
+    AllQuests.Add(FirstHunt.QuestID, FirstHunt);
+    
+    // Raptor pack quest
+    FQuest_Data RaptorHunt;
+    RaptorHunt.QuestID = "RAPTOR_PACK_HUNT";
+    RaptorHunt.Title = "Raptor Pack Hunter";
+    RaptorHunt.Description = "Eliminate a pack of raptors to secure a safe area.";
+    RaptorHunt.Status = EQuest_Status::NotStarted;
+    RaptorHunt.bIsMainQuest = false;
+    
+    FQuest_Objective RaptorObjective;
+    RaptorObjective.ObjectiveID = "KILL_3_RAPTORS";
+    RaptorObjective.Description = "Kill 3 raptors";
+    RaptorObjective.Type = EQuest_ObjectiveType::Hunt_Dinosaur;
+    RaptorObjective.Status = EQuest_Status::NotStarted;
+    RaptorObjective.TargetActorClass = "Raptor";
+    RaptorObjective.RequiredCount = 3;
+    RaptorObjective.CurrentProgress = 0;
+    
+    RaptorHunt.Objectives.Add(RaptorObjective);
+    AllQuests.Add(RaptorHunt.QuestID, RaptorHunt);
+}
+
+void UQuestSystem::CreateCraftingQuests()
+{
+    // Basic crafting quest
+    FQuest_Data BasicCrafting;
+    BasicCrafting.QuestID = "BASIC_CRAFTING";
+    BasicCrafting.Title = "Tool Maker";
+    BasicCrafting.Description = "Craft your first tools to improve your chances of survival.";
+    BasicCrafting.Status = EQuest_Status::NotStarted;
+    BasicCrafting.bIsMainQuest = false;
+    
+    FQuest_Objective CraftAxe;
+    CraftAxe.ObjectiveID = "CRAFT_STONE_AXE";
+    CraftAxe.Description = "Craft a stone axe";
+    CraftAxe.Type = EQuest_ObjectiveType::Craft_Item;
+    CraftAxe.Status = EQuest_Status::NotStarted;
+    CraftAxe.TargetActorClass = "StoneAxe";
+    CraftAxe.RequiredCount = 1;
+    CraftAxe.CurrentProgress = 0;
+    
+    BasicCrafting.Objectives.Add(CraftAxe);
+    AllQuests.Add(BasicCrafting.QuestID, BasicCrafting);
+}
+
+bool UQuestSystem::CheckObjectiveCompletion(FQuest_Objective& Objective, const FVector& PlayerLocation)
+{
+    switch (Objective.Type)
+    {
+        case EQuest_ObjectiveType::Explore_Biome:
+        case EQuest_ObjectiveType::Reach_Location:
+        {
+            float Distance = FVector::Dist(PlayerLocation, Objective.TargetLocation);
+            if (Distance <= Objective.RequiredDistance)
+            {
+                Objective.CurrentProgress = Objective.RequiredCount;
+                return true;
+            }
+            break;
+        }
+        case EQuest_ObjectiveType::Survive_Duration:
+        {
+            if (UWorld* World = GetWorld())
+            {
+                float CurrentTime = World->GetTimeSeconds();
+                Objective.CurrentProgress = FMath::FloorToInt(CurrentTime - LastUpdateTime);
+                if (Objective.CurrentProgress >= Objective.RequiredCount)
+                {
+                    return true;
+                }
+            }
+            break;
+        }
+        default:
+            // Other objective types are handled by specific event functions
+            break;
+    }
+    
+    return false;
+}
+
+void UQuestSystem::OnObjectiveCompleted(const FString& QuestID, const FString& ObjectiveID)
+{
+    if (FQuest_Data* QuestData = AllQuests.Find(QuestID))
+    {
+        for (FQuest_Objective& Objective : QuestData->Objectives)
+        {
+            if (Objective.ObjectiveID == ObjectiveID)
+            {
+                Objective.Status = EQuest_Status::Completed;
+                UE_LOG(LogTemp, Warning, TEXT("QuestSystem: Completed objective '%s' in quest '%s'"), *ObjectiveID, *QuestData->Title);
+                break;
+            }
+        }
+        
+        CheckQuestCompletion(QuestID);
+    }
+}
+
+void UQuestSystem::CheckQuestCompletion(const FString& QuestID)
+{
+    if (FQuest_Data* QuestData = AllQuests.Find(QuestID))
+    {
+        bool bAllObjectivesComplete = true;
+        
+        for (const FQuest_Objective& Objective : QuestData->Objectives)
+        {
+            if (Objective.Status != EQuest_Status::Completed)
+            {
+                bAllObjectivesComplete = false;
+                break;
+            }
+        }
+        
+        if (bAllObjectivesComplete && QuestData->Status == EQuest_Status::Active)
+        {
+            CompleteQuest(QuestID);
+        }
+    }
+}
+
+// AQuest_Marker Implementation
+AQuest_Marker::AQuest_Marker()
+{
+    PrimaryActorTick.bCanEverTick = true;
+    
+    // Create components
+    MarkerMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("MarkerMesh"));
+    RootComponent = MarkerMesh;
+    
+    TriggerSphere = CreateDefaultSubobject<USphereComponent>(TEXT("TriggerSphere"));
+    TriggerSphere->SetupAttachment(RootComponent);
+    TriggerSphere->SetSphereRadius(500.0f);
+    
+    // Initialize properties
+    AssociatedQuestID = "";
+    AssociatedObjectiveID = "";
+    MarkerType = EQuest_ObjectiveType::Explore_Biome;
+    bIsActive = true;
+    
+    // Set up trigger events
+    TriggerSphere->OnComponentBeginOverlap.AddDynamic(this, &AQuest_Marker::OnTriggerEnter);
+    
+    // Load default mesh (cube for now)
+    static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMeshAsset(TEXT("/Engine/BasicShapes/Cube"));
+    if (CubeMeshAsset.Succeeded())
+    {
+        MarkerMesh->SetStaticMesh(CubeMeshAsset.Object);
+    }
+    
+    // Set scale and material
+    SetActorScale3D(FVector(2.0f, 2.0f, 2.0f));
+}
+
+void AQuest_Marker::BeginPlay()
+{
+    Super::BeginPlay();
+    
+    UE_LOG(LogTemp, Warning, TEXT("Quest Marker spawned: %s"), *GetName());
+}
+
+void AQuest_Marker::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+    
+    // Simple floating animation
+    if (bIsActive)
+    {
+        FVector CurrentLocation = GetActorLocation();
+        float FloatOffset = FMath::Sin(GetWorld()->GetTimeSeconds() * 2.0f) * 50.0f;
+        SetActorLocation(FVector(CurrentLocation.X, CurrentLocation.Y, CurrentLocation.Z + FloatOffset * DeltaTime));
+    }
+}
+
+void AQuest_Marker::OnTriggerEnter(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
+{
+    if (!bIsActive || AssociatedQuestID.IsEmpty() || AssociatedObjectiveID.IsEmpty())
+    {
+        return;
+    }
+    
+    // Check if it's the player character
+    if (OtherActor && OtherActor->IsA<APawn>())
+    {
+        if (UQuestSystem* QuestSystem = GetGameInstance()->GetSubsystem<UQuestSystem>())
+        {
+            if (QuestSystem->IsQuestActive(AssociatedQuestID))
+            {
+                // Update objective progress
+                QuestSystem->UpdateObjectiveProgress(AssociatedQuestID, AssociatedObjectiveID, 1);
+                
+                // Deactivate marker
+                SetMarkerActive(false);
+                
+                UE_LOG(LogTemp, Warning, TEXT("Quest Marker triggered by player: %s"), *AssociatedObjectiveID);
+            }
+        }
+    }
+}
+
+void AQuest_Marker::SetMarkerActive(bool bActive)
+{
+    bIsActive = bActive;
+    SetActorHiddenInGame(!bActive);
+    SetActorEnableCollision(bActive);
+}
+
+void AQuest_Marker::SetMarkerData(const FString& QuestID, const FString& ObjectiveID, EQuest_ObjectiveType Type)
+{
+    AssociatedQuestID = QuestID;
+    AssociatedObjectiveID = ObjectiveID;
+    MarkerType = Type;
 }
