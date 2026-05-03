@@ -1,110 +1,141 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
+#include "Engine/World.h"
+#include "Components/ActorComponent.h"
 #include "NiagaraComponent.h"
 #include "NiagaraSystem.h"
-#include "../Core/SharedTypes.h"
+#include "SharedTypes.h"
 #include "VFXManager.generated.h"
 
+// VFX Categories for prehistoric survival game
+UENUM(BlueprintType)
+enum class EVFX_EffectType : uint8
+{
+    None = 0,
+    DinosaurFootstep,
+    DinosaurBreath,
+    DinosaurImpact,
+    CampfireFire,
+    CampfireSmoke,
+    WeatherRain,
+    WeatherSnow,
+    WeatherFog,
+    CombatBlood,
+    CombatImpact,
+    EnvironmentDust,
+    EnvironmentWater,
+    CraftingSparks
+};
+
+// VFX Effect Data
 USTRUCT(BlueprintType)
 struct TRANSPERSONALGAME_API FVFX_EffectData
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    EVFX_EffectType EffectType = EVFX_EffectType::None;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
     TSoftObjectPtr<UNiagaraSystem> NiagaraSystem;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    FVector Scale;
+    FVector SpawnLocation = FVector::ZeroVector;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    float Duration;
+    FRotator SpawnRotation = FRotator::ZeroRotator;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    bool bAutoDestroy;
+    FVector Scale = FVector::OneVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    float Duration = 5.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    bool bAutoDestroy = true;
 
     FVFX_EffectData()
     {
-        Scale = FVector(1.0f, 1.0f, 1.0f);
+        EffectType = EVFX_EffectType::None;
+        SpawnLocation = FVector::ZeroVector;
+        SpawnRotation = FRotator::ZeroRotator;
+        Scale = FVector::OneVector;
         Duration = 5.0f;
         bAutoDestroy = true;
     }
 };
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FVFX_LODSettings
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float HighQualityDistance;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float MediumQualityDistance;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float LowQualityDistance;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxActiveEffects;
-
-    FVFX_LODSettings()
-    {
-        HighQualityDistance = 500.0f;
-        MediumQualityDistance = 1000.0f;
-        LowQualityDistance = 2000.0f;
-        MaxActiveEffects = 50;
-    }
-};
-
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AVFX_Manager : public AActor
+/**
+ * VFX Manager - Handles all visual effects for prehistoric survival game
+ * Manages Niagara particle systems for dinosaur impacts, weather, fire, combat
+ */
+UCLASS(ClassGroup=(VFX), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UVFX_Manager : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    AVFX_Manager();
+    UVFX_Manager();
 
 protected:
     virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Systems")
-    TMap<EDir_VFXType, FVFX_EffectData> VFXLibrary;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    FVFX_LODSettings LODSettings;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Runtime")
-    TArray<UNiagaraComponent*> ActiveEffects;
 
 public:
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    UNiagaraComponent* SpawnVFXAtLocation(EDir_VFXType VFXType, FVector Location, FRotator Rotation = FRotator::ZeroRotator);
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
+    // Core VFX Functions
     UFUNCTION(BlueprintCallable, Category = "VFX")
-    UNiagaraComponent* SpawnVFXAttached(EDir_VFXType VFXType, USceneComponent* AttachComponent, FName SocketName = NAME_None);
-
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void StopVFX(UNiagaraComponent* VFXComponent);
+    class UNiagaraComponent* SpawnVFXEffect(EVFX_EffectType EffectType, FVector Location, FRotator Rotation = FRotator::ZeroRotator, FVector Scale = FVector::OneVector);
 
     UFUNCTION(BlueprintCallable, Category = "VFX")
-    void StopAllVFX();
+    void SpawnDinosaurFootstepEffect(FVector Location, float DinosaurSize = 1.0f);
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    int32 GetActiveEffectCount() const;
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void SpawnDinosaurBreathEffect(FVector Location, FRotator Direction);
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void UpdateLOD(FVector ViewerLocation);
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void SpawnCampfireEffect(FVector Location);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void SpawnCombatImpactEffect(FVector Location, FVector ImpactDirection);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void SpawnWeatherEffect(EVFX_EffectType WeatherType, FVector Location, float Intensity = 1.0f);
+
+    // VFX Management
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void StopAllVFXEffects();
+
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void StopVFXEffectsByType(EVFX_EffectType EffectType);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    int32 GetActiveVFXCount() const;
 
 protected:
-    UFUNCTION()
-    void CleanupFinishedEffects();
+    // VFX System Registry
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Systems")
+    TMap<EVFX_EffectType, TSoftObjectPtr<UNiagaraSystem>> VFXSystems;
 
-    UFUNCTION()
-    float CalculateDistanceToViewer(FVector EffectLocation) const;
+    // Active VFX Components
+    UPROPERTY()
+    TArray<UNiagaraComponent*> ActiveVFXComponents;
 
-    UFUNCTION()
-    void ApplyLODToEffect(UNiagaraComponent* Effect, float Distance);
+    // VFX Settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
+    int32 MaxActiveVFXEffects = 50;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
+    float VFXCullDistance = 10000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
+    bool bEnableVFXLOD = true;
+
+private:
+    // Internal functions
+    void InitializeVFXSystems();
+    void CleanupFinishedVFX();
+    UNiagaraSystem* GetVFXSystemForType(EVFX_EffectType EffectType);
+    bool ShouldCullVFXAtLocation(FVector Location);
 };
