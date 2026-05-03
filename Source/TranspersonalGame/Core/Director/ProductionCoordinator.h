@@ -3,14 +3,13 @@
 #include "CoreMinimal.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
-#include "Components/StaticMeshComponent.h"
+#include "Components/SceneComponent.h"
 #include "../../SharedTypes.h"
 #include "ProductionCoordinator.generated.h"
 
 /**
- * Studio Director's Production Coordinator
- * Manages agent task dispatch and milestone tracking for the development pipeline
- * Ensures each agent produces concrete deliverables toward Milestone 1
+ * Production Coordinator - Studio Director's central coordination system
+ * Manages agent task distribution and milestone tracking for Milestone 1
  */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API ADir_ProductionCoordinator : public AActor
@@ -22,89 +21,80 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-
-public:
     virtual void Tick(float DeltaTime) override;
 
-    // Production milestone tracking
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
-    int32 CurrentMilestone = 1;
+    // Core coordination components
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Production")
+    USceneComponent* RootSceneComponent;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
-    FString CurrentCycleID = "PROD_CYCLE_AUTO_20260502_004";
+    // Milestone 1 tracking
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone 1")
+    bool bTerrainGenerated;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
-    float BudgetUsedToday = 28.63f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone 1")
+    bool bCharacterMovementWorking;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
-    float BudgetLimitDaily = 150.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone 1")
+    bool bDinosaursSpawned;
 
-    // Agent coordination
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Coordination")
-    TArray<FString> ActiveAgents;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone 1")
+    bool bLightingSetup;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Coordination")
-    TArray<FString> CompletedTasks;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone 1")
+    bool bSurvivalHUDActive;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Coordination")
+    // Agent task assignments
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Tasks")
     TArray<FString> PendingTasks;
 
-    // Milestone 1 requirements tracking
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone 1")
-    bool bCharacterMovementReady = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Tasks")
+    TArray<FString> CompletedTasks;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone 1")
-    bool bTerrainComplete = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Tasks")
+    int32 CurrentCycle;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone 1")
-    bool bDinosaursPlaced = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone 1")
-    bool bLightingSetup = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone 1")
-    bool bCameraSystemReady = false;
-
-    // Production coordination functions
+public:
+    // Milestone verification functions
     UFUNCTION(BlueprintCallable, Category = "Production")
-    void InitializeProductionCycle();
+    bool CheckMilestone1Progress();
 
     UFUNCTION(BlueprintCallable, Category = "Production")
-    void DispatchAgentTasks();
+    void AssignAgentTask(const FString& AgentName, const FString& TaskDescription);
 
     UFUNCTION(BlueprintCallable, Category = "Production")
-    void ValidateMilestone1Progress();
+    void CompleteAgentTask(const FString& TaskDescription);
 
     UFUNCTION(BlueprintCallable, Category = "Production")
-    bool CheckPlayablePrototypeReady();
+    float GetMilestone1Completion();
 
     UFUNCTION(BlueprintCallable, Category = "Production")
-    void CleanupDuplicateActors();
+    void LogProductionStatus();
+
+    // Critical system checks
+    UFUNCTION(BlueprintCallable, Category = "Production")
+    void VerifyCharacterMovement();
 
     UFUNCTION(BlueprintCallable, Category = "Production")
-    FString GetProductionStatusReport();
+    void VerifyDinosaurActors();
 
-    // Agent task management
-    UFUNCTION(BlueprintCallable, Category = "Agent Management")
-    void AssignTaskToAgent(const FString& AgentName, const FString& TaskDescription);
+    UFUNCTION(BlueprintCallable, Category = "Production")
+    void VerifyTerrainQuality();
 
-    UFUNCTION(BlueprintCallable, Category = "Agent Management")
-    void MarkTaskCompleted(const FString& AgentName, const FString& TaskDescription);
+    UFUNCTION(BlueprintCallable, Category = "Production")
+    void VerifyLightingSetup();
 
-    UFUNCTION(BlueprintCallable, Category = "Agent Management")
-    TArray<FString> GetPendingTasksForAgent(const FString& AgentName);
+    // Agent coordination
+    UFUNCTION(BlueprintCallable, Category = "Production")
+    void InitializeCycle(int32 CycleNumber);
+
+    UFUNCTION(BlueprintCallable, Category = "Production")
+    TArray<FString> GetNextAgentPriorities();
 
 protected:
-    // Internal coordination mesh for visualization
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UStaticMeshComponent* CoordinationMesh;
+    // Internal tracking
+    UPROPERTY()
+    float LastVerificationTime;
 
-    // Production timer
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
-    float ProductionTimer = 0.0f;
-
-    // Internal functions
-    void UpdateProductionMetrics();
-    void CheckAgentDeliverables();
-    void EnsureMinimalPlayableElements();
+    UPROPERTY()
+    bool bInitialized;
 };
