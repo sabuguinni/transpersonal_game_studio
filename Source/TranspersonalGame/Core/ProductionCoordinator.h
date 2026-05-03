@@ -1,136 +1,85 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/World.h"
-#include "GameFramework/GameModeBase.h"
-#include "Engine/Engine.h"
+#include "Engine/GameInstanceSubsystem.h"
 #include "SharedTypes.h"
 #include "ProductionCoordinator.generated.h"
 
 /**
- * Coordenador de Produção para Milestone 1 - "Walk Around"
- * Monitoriza o progresso crítico do jogo e coordena tarefas entre agentes
+ * Coordenador de produção que monitoriza o progresso do Milestone 1
+ * e coordena tarefas entre os 18 agentes especializados
  */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UProductionCoordinator : public UObject
+class TRANSPERSONALGAME_API UProductionCoordinator : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
     UProductionCoordinator();
 
-    // Estado do Milestone 1
-    UPROPERTY(BlueprintReadOnly, Category = "Milestone 1")
-    bool bCharacterMovementReady;
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Milestone 1")
-    bool bLandscapeReady;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Milestone 1")
-    bool bDinosaursSpawned;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Milestone 1")
-    bool bLightingConfigured;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Milestone 1")
-    int32 TotalActorsInMap;
-
-    // Coordenação de agentes
-    UPROPERTY(BlueprintReadOnly, Category = "Agent Coordination")
-    TArray<FString> PendingTasks;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Agent Coordination")
-    TArray<FString> CompletedTasks;
-
-    // Funções principais
+    // Milestone 1 tracking
     UFUNCTION(BlueprintCallable, Category = "Production")
-    void CheckMilestone1Progress();
+    bool IsMilestone1Complete() const;
 
     UFUNCTION(BlueprintCallable, Category = "Production")
-    void AssignTaskToAgent(const FString& AgentName, const FString& TaskDescription);
+    float GetMilestone1Progress() const;
 
     UFUNCTION(BlueprintCallable, Category = "Production")
-    void MarkTaskCompleted(const FString& TaskDescription);
+    void UpdateTaskProgress(const FString& AgentName, const FString& TaskName, bool bCompleted);
+
+    // Agent coordination
+    UFUNCTION(BlueprintCallable, Category = "Production")
+    void RegisterAgent(const FString& AgentName, int32 Priority);
 
     UFUNCTION(BlueprintCallable, Category = "Production")
-    float GetMilestone1CompletionPercentage();
+    TArray<FString> GetActiveAgents() const;
 
     UFUNCTION(BlueprintCallable, Category = "Production")
-    void ValidateMinPlayableMap();
+    bool CanAgentProceed(const FString& AgentName) const;
+
+    // Critical state management
+    UFUNCTION(BlueprintCallable, Category = "Production")
+    void ReportCriticalIssue(const FString& AgentName, const FString& Issue);
 
     UFUNCTION(BlueprintCallable, Category = "Production")
-    void CleanupDuplicateActors();
+    TArray<FString> GetCriticalIssues() const;
 
-    // Verificações específicas
-    UFUNCTION(BlueprintCallable, Category = "Validation")
-    bool ValidateCharacterController();
+    UFUNCTION(BlueprintCallable, Category = "Production")
+    void ClearCriticalIssue(const FString& Issue);
 
-    UFUNCTION(BlueprintCallable, Category = "Validation")
-    bool ValidateLandscape();
+    // Biome coordination
+    UFUNCTION(BlueprintCallable, Category = "Production")
+    FVector GetBiomeCenter(EDir_BiomeType BiomeType) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Validation")
-    bool ValidateDinosaurActors();
+    UFUNCTION(BlueprintCallable, Category = "Production")
+    FVector GetRandomLocationInBiome(EDir_BiomeType BiomeType) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Validation")
-    bool ValidateLightingSetup();
+    UFUNCTION(BlueprintCallable, Category = "Production")
+    bool IsLocationInBiome(const FVector& Location, EDir_BiomeType BiomeType) const;
 
-    // Relatórios
-    UFUNCTION(BlueprintCallable, Category = "Reports")
-    FString GenerateProgressReport();
+protected:
+    // Milestone 1 tasks tracking
+    UPROPERTY(BlueprintReadOnly, Category = "Production")
+    TMap<FString, bool> Milestone1Tasks;
 
-    UFUNCTION(BlueprintCallable, Category = "Reports")
-    TArray<FString> GetCriticalIssues();
+    // Agent registry
+    UPROPERTY(BlueprintReadOnly, Category = "Production")
+    TMap<FString, int32> RegisteredAgents;
+
+    // Critical issues
+    UPROPERTY(BlueprintReadOnly, Category = "Production")
+    TArray<FString> CriticalIssues;
+
+    // Biome definitions
+    UPROPERTY(BlueprintReadOnly, Category = "Production")
+    TMap<EDir_BiomeType, FDir_BiomeData> BiomeData;
 
 private:
-    // Helpers internos
-    void UpdateMilestone1Status();
-    void LogProductionState();
-    int32 CountActorsByClass(UClass* ActorClass);
-    void RemoveDuplicateActorsOfType(UClass* ActorClass, int32 MaxAllowed = 1);
-};
-
-/**
- * Estrutura para tarefas de produção
- */
-USTRUCT(BlueprintType)
-struct FDir_ProductionTask
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadWrite, Category = "Task")
-    FString AgentName;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Task")
-    FString TaskDescription;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Task")
-    int32 Priority;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Task")
-    bool bCompleted;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Task")
-    FDateTime AssignedTime;
-
-    FDir_ProductionTask()
-    {
-        AgentName = TEXT("");
-        TaskDescription = TEXT("");
-        Priority = 0;
-        bCompleted = false;
-        AssignedTime = FDateTime::Now();
-    }
-};
-
-/**
- * Enum para estado do Milestone 1
- */
-UENUM(BlueprintType)
-enum class EDir_Milestone1State : uint8
-{
-    NotStarted      UMETA(DisplayName = "Not Started"),
-    InProgress      UMETA(DisplayName = "In Progress"),
-    NearCompletion  UMETA(DisplayName = "Near Completion"),
-    Completed       UMETA(DisplayName = "Completed"),
-    Failed          UMETA(DisplayName = "Failed")
+    void InitializeMilestone1Tasks();
+    void InitializeBiomeData();
+    void ValidateMapState();
 };
