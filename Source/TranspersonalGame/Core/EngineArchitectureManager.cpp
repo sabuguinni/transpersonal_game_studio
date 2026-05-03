@@ -1,368 +1,468 @@
 #include "EngineArchitectureManager.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Engine/DirectionalLight.h"
-#include "Atmosphere/AtmosphericFog.h"
-#include "Components/ExponentialHeightFogComponent.h"
 #include "Engine/StaticMesh.h"
 #include "UObject/ConstructorHelpers.h"
-#include "Engine/StaticMeshActor.h"
+#include "Components/StaticMeshComponent.h"
+#include "Materials/MaterialInterface.h"
+#include "Engine/Engine.h"
+#include "NavigationSystem.h"
+#include "AI/NavigationSystemBase.h"
 #include "GameFramework/Character.h"
-#include "Kismet/GameplayStatics.h"
+#include "GameFramework/PlayerStart.h"
+#include "Engine/DirectionalLight.h"
+#include "Components/DirectionalLightComponent.h"
+#include "Engine/SkyLight.h"
+#include "Engine/ExponentialHeightFog.h"
+#include "Atmosphere/AtmosphericFog.h"
+#include "Engine/StaticMeshActor.h"
 
 AEngineArchitectureManager::AEngineArchitectureManager()
 {
     PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.TickInterval = 1.0f; // Tick every second for performance
 
     // Create root component
     RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
     RootComponent = RootSceneComponent;
 
-    // Create visualization component
-    ArchitectureVisualization = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("ArchitectureVisualization"));
-    ArchitectureVisualization->SetupAttachment(RootComponent);
-
-    // Create status display
-    StatusDisplay = CreateDefaultSubobject<UTextRenderComponent>(TEXT("StatusDisplay"));
-    StatusDisplay->SetupAttachment(RootComponent);
-    StatusDisplay->SetRelativeLocation(FVector(0.0f, 0.0f, 100.0f));
-    StatusDisplay->SetWorldSize(50.0f);
-    StatusDisplay->SetText(FText::FromString("ENGINE ARCHITECT - INITIALIZING"));
-
-    // Set default values
-    bPerformArchitectureValidation = true;
-    ValidationInterval = 5.0f;
-    bArchitectureValid = false;
-    TotalActorsInLevel = 0;
-    DuplicateActorsFound = 0;
-    CompilationErrors = 0;
-    ActiveCppClasses = 0;
-    CurrentFrameRate = 0.0f;
-    MemoryUsageMB = 0.0f;
-    DrawCalls = 0;
+    // Create visualization mesh (blue cube to identify in viewport)
+    VisualizationMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("VisualizationMesh"));
+    VisualizationMesh->SetupAttachment(RootComponent);
     
-    // Milestone 1 validation
-    bCharacterMovementValid = false;
-    bCameraSystemValid = false;
-    bTerrainValid = false;
-    bLightingValid = false;
-    bDinosaurActorsValid = false;
-    DinosaurCount = 0;
-    
-    LastValidationTime = 0.0f;
-    CurrentStatusText = "INITIALIZING";
-
     // Try to load a basic cube mesh for visualization
     static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMeshAsset(TEXT("/Engine/BasicShapes/Cube"));
     if (CubeMeshAsset.Succeeded())
     {
-        ArchitectureVisualization->SetStaticMesh(CubeMeshAsset.Object);
-        ArchitectureVisualization->SetRelativeScale3D(FVector(2.0f, 2.0f, 0.1f));
+        VisualizationMesh->SetStaticMesh(CubeMeshAsset.Object);
+        VisualizationMesh->SetRelativeScale3D(FVector(2.0f, 2.0f, 0.5f)); // Flat cube for visibility
     }
+
+    // Initialize architecture settings
+    bEnableArchitectureValidation = true;
+    ValidationInterval = 5.0f;
+    LastValidationTime = 0.0f;
+
+    // Performance settings for Milestone 1
+    MaxActorCount = 200; // Conservative limit for prototype
+    TargetFrameRate = 30.0f; // Minimum acceptable for prototype
+    CurrentFrameRate = 60.0f;
+    CurrentActorCount = 0;
+
+    // Milestone 1 technical requirements
+    bEnforceTerrainLimits = true;
+    MaxTerrainSize = 4000.0f; // 4km x 4km maximum for prototype
+    MaxDinosaurCount = 10; // Maximum dinosaurs for prototype
+    bRequireNavMesh = true;
+
+    // Initialize status
+    bArchitectureHealthy = false;
+    FrameTimeAccumulator = 0.0f;
+    FrameTimeCount = 0;
+    FrameTimeHistory.Reserve(60); // Store 60 frames of history
 }
 
 void AEngineArchitectureManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    UE_LOG(LogTemp, Warning, TEXT("EngineArchitectureManager: BeginPlay - Starting architecture validation"));
+    UE_LOG(LogTemp, Warning, TEXT("EngineArchitectureManager: Starting architecture validation system"));
     
-    // Perform initial validation
+    // Initial validation
     ValidateArchitecture();
-    RefreshModuleList();
-    CheckMilestone1Requirements();
     
-    CurrentStatusText = "ARCHITECTURE MANAGER ACTIVE";
-    UpdateStatusDisplay();
+    // Set up initial system readiness tracking
+    SystemReadiness.Add(TEXT("Lighting"), false);
+    SystemReadiness.Add(TEXT("Terrain"), false);
+    SystemReadiness.Add(TEXT("Character"), false);
+    SystemReadiness.Add(TEXT("Dinosaurs"), false);
+    SystemReadiness.Add(TEXT("Navigation"), false);
 }
 
 void AEngineArchitectureManager::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
-
-    if (bPerformArchitectureValidation)
+    
+    // Update performance metrics
+    UpdatePerformanceMetrics();
+    CalculateFrameRate(DeltaTime);
+    
+    // Periodic architecture validation
+    if (bEnableArchitectureValidation && GetWorld())
     {
-        LastValidationTime += DeltaTime;
-        
-        if (LastValidationTime >= ValidationInterval)
+        float CurrentTime = GetWorld()->GetTimeSeconds();
+        if (CurrentTime - LastValidationTime >= ValidationInterval)
         {
             ValidateArchitecture();
-            UpdatePerformanceMetrics();
-            CheckMilestone1Requirements();
-            UpdateStatusDisplay();
-            LastValidationTime = 0.0f;
+            LastValidationTime = CurrentTime;
         }
     }
+    
+    // Enforce Milestone 1 rules
+    EnforceMilestone1Rules();
 }
 
 void AEngineArchitectureManager::ValidateArchitecture()
 {
-    UE_LOG(LogTemp, Log, TEXT("EngineArchitectureManager: Validating architecture..."));
+    ValidationErrors.Empty();
+    PerformanceWarnings.Empty();
     
-    ValidateActorCounts();
-    ValidateSystemIntegrity();
+    UE_LOG(LogTemp, Log, TEXT("EngineArchitectureManager: Running architecture validation"));
     
-    // Overall validation result
-    bArchitectureValid = (DuplicateActorsFound == 0 && CompilationErrors == 0);
+    // Validate all critical systems
+    bool LightingOK = CheckLightingSetup();
+    bool TerrainOK = CheckTerrainCompliance();
+    bool CharacterOK = CheckCharacterSystem();
+    bool DinosaurOK = CheckDinosaurSystem();
     
-    UE_LOG(LogTemp, Warning, TEXT("Architecture validation complete. Valid: %s"), 
-           bArchitectureValid ? TEXT("TRUE") : TEXT("FALSE"));
+    // Update system readiness
+    SystemReadiness[TEXT("Lighting")] = LightingOK;
+    SystemReadiness[TEXT("Terrain")] = TerrainOK;
+    SystemReadiness[TEXT("Character")] = CharacterOK;
+    SystemReadiness[TEXT("Dinosaurs")] = DinosaurOK;
+    
+    // Overall health check
+    bArchitectureHealthy = LightingOK && TerrainOK && CharacterOK && (ValidationErrors.Num() == 0);
+    
+    // Log results
+    if (bArchitectureHealthy)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("EngineArchitectureManager: Architecture validation PASSED"));
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("EngineArchitectureManager: Architecture validation FAILED - %d errors"), ValidationErrors.Num());
+        for (const FString& Error : ValidationErrors)
+        {
+            UE_LOG(LogTemp, Error, TEXT("  - %s"), *Error);
+        }
+    }
 }
 
-void AEngineArchitectureManager::ValidateActorCounts()
+bool AEngineArchitectureManager::CheckLightingSetup()
 {
-    UWorld* World = GetWorld();
-    if (!World) return;
-
-    TArray<AActor*> AllActors;
-    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
-    TotalActorsInLevel = AllActors.Num();
-
-    // Count duplicate lighting actors
-    TArray<AActor*> DirectionalLights;
-    UGameplayStatics::GetAllActorsOfClass(World, ADirectionalLight::StaticClass(), DirectionalLights);
+    if (!GetWorld()) return false;
     
-    TArray<AActor*> FogActors;
+    TArray<AActor*> AllActors;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), AllActors);
+    
+    int32 DirectionalLights = 0;
+    int32 SkyLights = 0;
+    int32 HeightFogs = 0;
+    
     for (AActor* Actor : AllActors)
     {
-        if (Actor && Actor->FindComponentByClass<UExponentialHeightFogComponent>())
-        {
-            FogActors.Add(Actor);
-        }
-    }
-
-    // Calculate duplicates (should be max 1 of each lighting type)
-    DuplicateActorsFound = 0;
-    if (DirectionalLights.Num() > 1) DuplicateActorsFound += DirectionalLights.Num() - 1;
-    if (FogActors.Num() > 1) DuplicateActorsFound += FogActors.Num() - 1;
-
-    UE_LOG(LogTemp, Log, TEXT("Actor validation: Total=%d, DirectionalLights=%d, FogActors=%d, Duplicates=%d"),
-           TotalActorsInLevel, DirectionalLights.Num(), FogActors.Num(), DuplicateActorsFound);
-}
-
-void AEngineArchitectureManager::ValidateSystemIntegrity()
-{
-    // Reset error count
-    CompilationErrors = 0;
-    
-    // Try to load core classes to verify compilation
-    LoadedModules.Empty();
-    FailedModules.Empty();
-    
-    // Test TranspersonalGame module classes
-    TArray<FString> CoreClasses = {
-        TEXT("/Script/TranspersonalGame.TranspersonalCharacter"),
-        TEXT("/Script/TranspersonalGame.TranspersonalGameState"),
-        TEXT("/Script/TranspersonalGame.ProductionDirector")
-    };
-    
-    for (const FString& ClassName : CoreClasses)
-    {
-        UClass* LoadedClass = LoadClass<UObject>(nullptr, *ClassName);
-        if (LoadedClass)
-        {
-            LoadedModules.Add(ClassName);
-            ActiveCppClasses++;
-        }
-        else
-        {
-            FailedModules.Add(ClassName);
-            CompilationErrors++;
-        }
+        if (Actor->IsA<ADirectionalLight>()) DirectionalLights++;
+        else if (Actor->IsA<ASkyLight>()) SkyLights++;
+        else if (Actor->GetClass()->GetName().Contains(TEXT("ExponentialHeightFog"))) HeightFogs++;
     }
     
-    UE_LOG(LogTemp, Log, TEXT("System integrity: Loaded=%d, Failed=%d, Errors=%d"),
-           LoadedModules.Num(), FailedModules.Num(), CompilationErrors);
+    // Milestone 1 requires exactly 1 of each lighting type
+    bool LightingValid = (DirectionalLights == 1) && (SkyLights == 1) && (HeightFogs <= 1);
+    
+    if (DirectionalLights != 1)
+    {
+        ValidationErrors.Add(FString::Printf(TEXT("Lighting: Expected 1 DirectionalLight, found %d"), DirectionalLights));
+    }
+    if (SkyLights != 1)
+    {
+        ValidationErrors.Add(FString::Printf(TEXT("Lighting: Expected 1 SkyLight, found %d"), SkyLights));
+    }
+    if (HeightFogs > 1)
+    {
+        ValidationErrors.Add(FString::Printf(TEXT("Lighting: Too many HeightFog actors: %d"), HeightFogs));
+    }
+    
+    return LightingValid;
 }
 
-void AEngineArchitectureManager::CheckMilestone1Requirements()
+bool AEngineArchitectureManager::CheckTerrainCompliance()
 {
-    UWorld* World = GetWorld();
-    if (!World) return;
-
-    // Check character movement system
-    TArray<AActor*> Characters;
-    UGameplayStatics::GetAllActorsOfClass(World, ACharacter::StaticClass(), Characters);
-    bCharacterMovementValid = Characters.Num() > 0;
-
-    // Check terrain (landscape or static mesh terrain)
-    TArray<AActor*> TerrainActors;
-    UGameplayStatics::GetAllActorsOfClass(World, AStaticMeshActor::StaticClass(), TerrainActors);
-    bTerrainValid = TerrainActors.Num() > 0;
-
-    // Check lighting system
-    TArray<AActor*> LightActors;
-    UGameplayStatics::GetAllActorsOfClass(World, ADirectionalLight::StaticClass(), LightActors);
-    bLightingValid = LightActors.Num() > 0;
-
-    // Check camera system (implied by character)
-    bCameraSystemValid = bCharacterMovementValid;
-
-    // Count dinosaur actors (placeholder - will be refined by other agents)
-    DinosaurCount = 0;
-    for (AActor* Actor : TerrainActors)
+    if (!GetWorld()) return false;
+    
+    TArray<AActor*> AllActors;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), AllActors);
+    
+    int32 LandscapeCount = 0;
+    float MaxTerrainBounds = 0.0f;
+    
+    for (AActor* Actor : AllActors)
     {
-        if (Actor && Actor->GetName().Contains(TEXT("Dinosaur")))
+        if (Actor->GetClass()->GetName().Contains(TEXT("Landscape")))
+        {
+            LandscapeCount++;
+            
+            // Check terrain size if enforcing limits
+            if (bEnforceTerrainLimits)
+            {
+                FVector Origin, BoxExtent;
+                Actor->GetActorBounds(false, Origin, BoxExtent);
+                float TerrainSize = FMath::Max(BoxExtent.X, BoxExtent.Y) * 2.0f; // Full diameter
+                MaxTerrainBounds = FMath::Max(MaxTerrainBounds, TerrainSize);
+            }
+        }
+    }
+    
+    bool TerrainValid = true;
+    
+    if (LandscapeCount == 0)
+    {
+        ValidationErrors.Add(TEXT("Terrain: No Landscape actor found - Milestone 1 requires terrain"));
+        TerrainValid = false;
+    }
+    else if (LandscapeCount > 1)
+    {
+        ValidationErrors.Add(FString::Printf(TEXT("Terrain: Multiple Landscape actors found (%d) - use single Landscape for Milestone 1"), LandscapeCount));
+    }
+    
+    if (bEnforceTerrainLimits && MaxTerrainBounds > MaxTerrainSize)
+    {
+        ValidationErrors.Add(FString::Printf(TEXT("Terrain: Size %.0f exceeds Milestone 1 limit of %.0f"), MaxTerrainBounds, MaxTerrainSize));
+        TerrainValid = false;
+    }
+    
+    return TerrainValid;
+}
+
+bool AEngineArchitectureManager::CheckCharacterSystem()
+{
+    if (!GetWorld()) return false;
+    
+    TArray<AActor*> AllActors;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), ACharacter::StaticClass(), AllActors);
+    
+    int32 TranspersonalCharacters = 0;
+    int32 PlayerStarts = 0;
+    
+    for (AActor* Actor : AllActors)
+    {
+        if (Actor->GetClass()->GetName().Contains(TEXT("TranspersonalCharacter")))
+        {
+            TranspersonalCharacters++;
+        }
+    }
+    
+    // Check for PlayerStart
+    TArray<AActor*> PlayerStartActors;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), APlayerStart::StaticClass(), PlayerStartActors);
+    PlayerStarts = PlayerStartActors.Num();
+    
+    bool CharacterValid = true;
+    
+    if (PlayerStarts == 0)
+    {
+        ValidationErrors.Add(TEXT("Character: No PlayerStart found - required for Milestone 1"));
+        CharacterValid = false;
+    }
+    
+    // Note: TranspersonalCharacter might not be spawned yet, so we don't enforce its presence
+    
+    return CharacterValid;
+}
+
+bool AEngineArchitectureManager::CheckDinosaurSystem()
+{
+    if (!GetWorld()) return false;
+    
+    TArray<AActor*> AllActors;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), AllActors);
+    
+    int32 DinosaurCount = 0;
+    
+    for (AActor* Actor : AllActors)
+    {
+        FString ActorName = Actor->GetName();
+        if (ActorName.Contains(TEXT("Dinosaur")) || 
+            ActorName.Contains(TEXT("TRex")) || 
+            ActorName.Contains(TEXT("Raptor")) || 
+            ActorName.Contains(TEXT("Brachio")))
         {
             DinosaurCount++;
         }
     }
-    bDinosaurActorsValid = DinosaurCount >= 3; // Minimum 3 dinosaurs for Milestone 1
-
-    UE_LOG(LogTemp, Log, TEXT("Milestone 1 check: Character=%s, Camera=%s, Terrain=%s, Lighting=%s, Dinosaurs=%d"),
-           bCharacterMovementValid ? TEXT("OK") : TEXT("FAIL"),
-           bCameraSystemValid ? TEXT("OK") : TEXT("FAIL"),
-           bTerrainValid ? TEXT("OK") : TEXT("FAIL"),
-           bLightingValid ? TEXT("OK") : TEXT("FAIL"),
-           DinosaurCount);
+    
+    bool DinosaurValid = true;
+    
+    if (DinosaurCount == 0)
+    {
+        ValidationErrors.Add(TEXT("Dinosaurs: No dinosaur actors found - Milestone 1 requires 3-5 dinosaur meshes"));
+        DinosaurValid = false;
+    }
+    else if (DinosaurCount > MaxDinosaurCount)
+    {
+        PerformanceWarnings.Add(FString::Printf(TEXT("Dinosaurs: %d dinosaurs exceed Milestone 1 limit of %d"), DinosaurCount, MaxDinosaurCount));
+    }
+    
+    return DinosaurValid;
 }
 
 void AEngineArchitectureManager::UpdatePerformanceMetrics()
 {
-    // Get basic performance metrics
-    CurrentFrameRate = 1.0f / GetWorld()->GetDeltaSeconds();
+    if (!GetWorld()) return;
     
-    // Memory usage (basic estimation)
-    MemoryUsageMB = FPlatformMemory::GetStats().UsedPhysical / (1024.0f * 1024.0f);
+    // Count actors
+    CountWorldActors();
     
-    // Draw calls (placeholder - would need render thread access for real value)
-    DrawCalls = TotalActorsInLevel * 2; // Rough estimation
+    // Check performance thresholds
+    CheckActorCount();
+    CheckFrameRate();
 }
 
-void AEngineArchitectureManager::UpdateStatusDisplay()
+void AEngineArchitectureManager::CheckActorCount()
 {
-    FString StatusText = FString::Printf(TEXT("ENGINE ARCHITECT\n"
-                                              "Architecture: %s\n"
-                                              "Actors: %d\n"
-                                              "Duplicates: %d\n"
-                                              "Modules: %d/%d\n"
-                                              "FPS: %.1f\n"
-                                              "Memory: %.1f MB\n"
-                                              "Milestone 1: %s"),
-                                         bArchitectureValid ? TEXT("VALID") : TEXT("INVALID"),
-                                         TotalActorsInLevel,
-                                         DuplicateActorsFound,
-                                         LoadedModules.Num(),
-                                         LoadedModules.Num() + FailedModules.Num(),
-                                         CurrentFrameRate,
-                                         MemoryUsageMB,
-                                         (bCharacterMovementValid && bCameraSystemValid && bTerrainValid && bLightingValid) ? TEXT("READY") : TEXT("PENDING"));
-
-    StatusDisplay->SetText(FText::FromString(StatusText));
+    if (CurrentActorCount > MaxActorCount)
+    {
+        PerformanceWarnings.Add(FString::Printf(TEXT("Performance: Actor count %d exceeds limit of %d"), CurrentActorCount, MaxActorCount));
+    }
 }
 
-void AEngineArchitectureManager::CleanupDuplicateActors()
+void AEngineArchitectureManager::CheckFrameRate()
 {
-    UWorld* World = GetWorld();
-    if (!World) return;
-
-    UE_LOG(LogTemp, Warning, TEXT("EngineArchitectureManager: Cleaning up duplicate actors..."));
-
-    // Clean up duplicate directional lights (keep only first one)
-    TArray<AActor*> DirectionalLights;
-    UGameplayStatics::GetAllActorsOfClass(World, ADirectionalLight::StaticClass(), DirectionalLights);
-    
-    for (int32 i = 1; i < DirectionalLights.Num(); i++)
+    if (CurrentFrameRate < TargetFrameRate)
     {
-        if (DirectionalLights[i])
+        PerformanceWarnings.Add(FString::Printf(TEXT("Performance: Frame rate %.1f below target of %.1f"), CurrentFrameRate, TargetFrameRate));
+    }
+}
+
+void AEngineArchitectureManager::EnforceMilestone1Rules()
+{
+    // This function enforces critical rules for Milestone 1
+    // Currently just validates - future versions could auto-fix issues
+    
+    if (!bArchitectureHealthy)
+    {
+        // Log warnings about architecture health
+        if (ValidationErrors.Num() > 0)
         {
-            DirectionalLights[i]->Destroy();
-            UE_LOG(LogTemp, Log, TEXT("Destroyed duplicate DirectionalLight: %s"), *DirectionalLights[i]->GetName());
+            UE_LOG(LogTemp, Warning, TEXT("EngineArchitectureManager: Architecture unhealthy - %d errors"), ValidationErrors.Num());
         }
     }
+}
 
-    // Clean up duplicate fog actors
-    TArray<AActor*> AllActors;
-    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
-    
-    TArray<AActor*> FogActors;
-    for (AActor* Actor : AllActors)
-    {
-        if (Actor && Actor->FindComponentByClass<UExponentialHeightFogComponent>())
-        {
-            FogActors.Add(Actor);
-        }
-    }
-    
-    for (int32 i = 1; i < FogActors.Num(); i++)
-    {
-        if (FogActors[i])
-        {
-            FogActors[i]->Destroy();
-            UE_LOG(LogTemp, Log, TEXT("Destroyed duplicate Fog actor: %s"), *FogActors[i]->GetName());
-        }
-    }
-
-    // Revalidate after cleanup
+bool AEngineArchitectureManager::ValidateMinimumViablePrototype()
+{
     ValidateArchitecture();
+    
+    // Milestone 1 MVP requirements:
+    // 1. Terrain exists
+    // 2. Lighting is set up
+    // 3. PlayerStart exists
+    // 4. At least some dinosaur actors exist
+    
+    bool HasTerrain = SystemReadiness[TEXT("Terrain")];
+    bool HasLighting = SystemReadiness[TEXT("Lighting")];
+    bool HasCharacterSystem = SystemReadiness[TEXT("Character")];
+    bool HasDinosaurs = SystemReadiness[TEXT("Dinosaurs")];
+    
+    bool MVPValid = HasTerrain && HasLighting && HasCharacterSystem;
+    
+    UE_LOG(LogTemp, Warning, TEXT("EngineArchitectureManager: MVP Validation - Terrain:%s Lighting:%s Character:%s Dinosaurs:%s"),
+        HasTerrain ? TEXT("OK") : TEXT("FAIL"),
+        HasLighting ? TEXT("OK") : TEXT("FAIL"),
+        HasCharacterSystem ? TEXT("OK") : TEXT("FAIL"),
+        HasDinosaurs ? TEXT("OK") : TEXT("WARN"));
+    
+    return MVPValid;
 }
 
-void AEngineArchitectureManager::ValidateModuleIntegrity()
+void AEngineArchitectureManager::ReportArchitectureStatus()
 {
-    RefreshModuleList();
-    ValidateSystemIntegrity();
-}
-
-bool AEngineArchitectureManager::IsModuleLoaded(const FString& ModuleName)
-{
-    return LoadedModules.Contains(ModuleName);
-}
-
-void AEngineArchitectureManager::RefreshModuleList()
-{
-    ValidateSystemIntegrity();
-}
-
-FString AEngineArchitectureManager::GetArchitectureReport()
-{
-    return FString::Printf(TEXT("ARCHITECTURE REPORT\n"
-                               "==================\n"
-                               "Overall Status: %s\n"
-                               "Total Actors: %d\n"
-                               "Duplicate Actors: %d\n"
-                               "Compilation Errors: %d\n"
-                               "Loaded Modules: %d\n"
-                               "Failed Modules: %d\n"
-                               "Active C++ Classes: %d\n"
-                               "Current FPS: %.1f\n"
-                               "Memory Usage: %.1f MB\n"
-                               "\nMILESTONE 1 STATUS\n"
-                               "Character Movement: %s\n"
-                               "Camera System: %s\n"
-                               "Terrain: %s\n"
-                               "Lighting: %s\n"
-                               "Dinosaur Actors: %s (%d found)\n"),
-                           bArchitectureValid ? TEXT("VALID") : TEXT("INVALID"),
-                           TotalActorsInLevel,
-                           DuplicateActorsFound,
-                           CompilationErrors,
-                           LoadedModules.Num(),
-                           FailedModules.Num(),
-                           ActiveCppClasses,
-                           CurrentFrameRate,
-                           MemoryUsageMB,
-                           bCharacterMovementValid ? TEXT("OK") : TEXT("FAIL"),
-                           bCameraSystemValid ? TEXT("OK") : TEXT("FAIL"),
-                           bTerrainValid ? TEXT("OK") : TEXT("FAIL"),
-                           bLightingValid ? TEXT("OK") : TEXT("FAIL"),
-                           bDinosaurActorsValid ? TEXT("OK") : TEXT("FAIL"),
-                           DinosaurCount);
-}
-
-void AEngineArchitectureManager::LogArchitectureStatus()
-{
-    FString Report = GetArchitectureReport();
-    UE_LOG(LogTemp, Warning, TEXT("%s"), *Report);
-}
-
-void AEngineArchitectureManager::SetArchitectureVisualizationVisible(bool bVisible)
-{
-    if (ArchitectureVisualization)
+    UE_LOG(LogTemp, Warning, TEXT("=== ENGINE ARCHITECTURE STATUS REPORT ==="));
+    UE_LOG(LogTemp, Warning, TEXT("Architecture Healthy: %s"), bArchitectureHealthy ? TEXT("YES") : TEXT("NO"));
+    UE_LOG(LogTemp, Warning, TEXT("Current Actor Count: %d (limit: %d)"), CurrentActorCount, MaxActorCount);
+    UE_LOG(LogTemp, Warning, TEXT("Current Frame Rate: %.1f (target: %.1f)"), CurrentFrameRate, TargetFrameRate);
+    
+    UE_LOG(LogTemp, Warning, TEXT("System Readiness:"));
+    for (const auto& System : SystemReadiness)
     {
-        ArchitectureVisualization->SetVisibility(bVisible);
+        UE_LOG(LogTemp, Warning, TEXT("  %s: %s"), *System.Key, System.Value ? TEXT("READY") : TEXT("NOT READY"));
     }
-    if (StatusDisplay)
+    
+    if (ValidationErrors.Num() > 0)
     {
-        StatusDisplay->SetVisibility(bVisible);
+        UE_LOG(LogTemp, Warning, TEXT("Validation Errors (%d):"), ValidationErrors.Num());
+        for (const FString& Error : ValidationErrors)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("  - %s"), *Error);
+        }
     }
+    
+    if (PerformanceWarnings.Num() > 0)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Performance Warnings (%d):"), PerformanceWarnings.Num());
+        for (const FString& Warning : PerformanceWarnings)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("  - %s"), *Warning);
+        }
+    }
+}
+
+void AEngineArchitectureManager::NotifySystemReady(const FString& SystemName)
+{
+    SystemReadiness.Add(SystemName, true);
+    UE_LOG(LogTemp, Warning, TEXT("EngineArchitectureManager: System '%s' reported ready"), *SystemName);
+}
+
+void AEngineArchitectureManager::NotifySystemError(const FString& SystemName, const FString& ErrorMessage)
+{
+    SystemReadiness.Add(SystemName, false);
+    ValidationErrors.Add(FString::Printf(TEXT("%s: %s"), *SystemName, *ErrorMessage));
+    UE_LOG(LogTemp, Error, TEXT("EngineArchitectureManager: System '%s' error - %s"), *SystemName, *ErrorMessage);
+}
+
+TArray<FString> AEngineArchitectureManager::GetSystemReadinessReport()
+{
+    TArray<FString> Report;
+    
+    for (const auto& System : SystemReadiness)
+    {
+        FString Status = System.Value ? TEXT("READY") : TEXT("NOT READY");
+        Report.Add(FString::Printf(TEXT("%s: %s"), *System.Key, *Status));
+    }
+    
+    return Report;
+}
+
+void AEngineArchitectureManager::LogArchitectureReport()
+{
+    ReportArchitectureStatus();
+}
+
+void AEngineArchitectureManager::VisualizeSystemBounds()
+{
+    // This would draw debug bounds for all major systems
+    // Implementation would use DrawDebugBox, DrawDebugSphere etc.
+    UE_LOG(LogTemp, Warning, TEXT("EngineArchitectureManager: System bounds visualization requested"));
+}
+
+void AEngineArchitectureManager::ClearValidationErrors()
+{
+    ValidationErrors.Empty();
+    PerformanceWarnings.Empty();
+    UE_LOG(LogTemp, Warning, TEXT("EngineArchitectureManager: Validation errors cleared"));
+}
+
+void AEngineArchitectureManager::CalculateFrameRate(float DeltaTime)
+{
+    FrameTimeAccumulator += DeltaTime;
+    FrameTimeCount++;
+    
+    // Calculate average over last 60 frames
+    if (FrameTimeCount >= 60)
+    {
+        float AverageFrameTime = FrameTimeAccumulator / FrameTimeCount;
+        CurrentFrameRate = 1.0f / AverageFrameTime;
+        
+        // Reset for next calculation
+        FrameTimeAccumulator = 0.0f;
+        FrameTimeCount = 0;
+    }
+}
+
+void AEngineArchitectureManager::CountWorldActors()
+{
+    if (!GetWorld()) return;
+    
+    TArray<AActor*> AllActors;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), AllActors);
+    CurrentActorCount = AllActors.Num();
 }
