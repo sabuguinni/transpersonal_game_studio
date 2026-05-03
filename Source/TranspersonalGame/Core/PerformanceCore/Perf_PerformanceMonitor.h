@@ -1,25 +1,23 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/Engine.h"
 #include "GameFramework/Actor.h"
-#include "Components/ActorComponent.h"
+#include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "HAL/Platform.h"
+#include "Components/StaticMeshComponent.h"
 #include "Perf_PerformanceMonitor.generated.h"
 
 UENUM(BlueprintType)
 enum class EPerf_PerformanceLevel : uint8
 {
-    Excellent   UMETA(DisplayName = "Excellent (60+ FPS)"),
-    Good        UMETA(DisplayName = "Good (45-60 FPS)"),
-    Fair        UMETA(DisplayName = "Fair (30-45 FPS)"),
-    Poor        UMETA(DisplayName = "Poor (15-30 FPS)"),
-    Critical    UMETA(DisplayName = "Critical (<15 FPS)")
+    High        UMETA(DisplayName = "High Performance"),
+    Medium      UMETA(DisplayName = "Medium Performance"),
+    Low         UMETA(DisplayName = "Low Performance"),
+    Critical    UMETA(DisplayName = "Critical Performance")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FPerf_PerformanceMetrics
+struct FPerf_PerformanceMetrics
 {
     GENERATED_BODY()
 
@@ -30,37 +28,25 @@ struct TRANSPERSONALGAME_API FPerf_PerformanceMetrics
     float AverageFPS;
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float MinFPS;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float MaxFPS;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float FrameTime;
+    float MemoryUsageMB;
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
     int32 DrawCalls;
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 Triangles;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float MemoryUsageMB;
+    int32 VisibleActors;
 
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
     EPerf_PerformanceLevel PerformanceLevel;
 
     FPerf_PerformanceMetrics()
     {
-        CurrentFPS = 0.0f;
-        AverageFPS = 0.0f;
-        MinFPS = 0.0f;
-        MaxFPS = 0.0f;
-        FrameTime = 0.0f;
-        DrawCalls = 0;
-        Triangles = 0;
+        CurrentFPS = 60.0f;
+        AverageFPS = 60.0f;
         MemoryUsageMB = 0.0f;
-        PerformanceLevel = EPerf_PerformanceLevel::Good;
+        DrawCalls = 0;
+        VisibleActors = 0;
+        PerformanceLevel = EPerf_PerformanceLevel::High;
     }
 };
 
@@ -80,57 +66,39 @@ public:
     UPROPERTY(BlueprintReadOnly, Category = "Performance")
     FPerf_PerformanceMetrics CurrentMetrics;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Settings")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
     float MonitoringInterval;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Settings")
-    bool bEnablePerformanceLogging;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    bool bEnableAutoLOD;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Settings")
-    bool bEnableAutoOptimization;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Targets")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
     float TargetFPS;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance Targets")
-    float MinAcceptableFPS;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float CriticalFPSThreshold;
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void StartMonitoring();
+    void UpdatePerformanceMetrics();
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void StopMonitoring();
+    void OptimizeScene();
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    FPerf_PerformanceMetrics GetCurrentMetrics() const;
+    void SetLODLevel(int32 LODLevel);
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void ResetMetrics();
+    EPerf_PerformanceLevel GetCurrentPerformanceLevel() const;
 
     UFUNCTION(BlueprintCallable, Category = "Performance")
-    void LogPerformanceReport();
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void ApplyPerformanceOptimizations();
+    void EnablePerformanceStats(bool bEnable);
 
 private:
-    void UpdatePerformanceMetrics();
-    void CalculateAverages();
-    EPerf_PerformanceLevel DeterminePerformanceLevel(float FPS) const;
-    void CheckPerformanceThresholds();
-
-    UPROPERTY()
-    bool bIsMonitoring;
-
-    UPROPERTY()
-    float MonitoringTimer;
-
-    UPROPERTY()
+    float TimeSinceLastUpdate;
     TArray<float> FPSHistory;
+    int32 MaxFPSHistorySize;
 
-    UPROPERTY()
-    int32 MaxHistorySize;
-
-    UPROPERTY()
-    float LastLogTime;
+    void CalculateAverageFPS();
+    void UpdateLODBasedOnPerformance();
+    void LogPerformanceWarnings();
 };
