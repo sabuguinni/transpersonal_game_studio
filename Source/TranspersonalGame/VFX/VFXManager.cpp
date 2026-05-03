@@ -1,390 +1,344 @@
 #include "VFXManager.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Components/SceneComponent.h"
-#include "NiagaraComponent.h"
+#include "Engine/Engine.h"
 #include "NiagaraSystem.h"
+#include "NiagaraComponent.h"
 #include "NiagaraFunctionLibrary.h"
-#include "Kismet/GameplayStatics.h"
-#include "TimerManager.h"
+#include "Components/SceneComponent.h"
+#include "GameFramework/Actor.h"
 
-AVFX_Manager::AVFX_Manager()
+void UVFX_Manager::Initialize(FSubsystemCollectionBase& Collection)
 {
-    PrimaryActorTick.bCanEverTick = true;
-    
-    // Create root component
-    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
-    RootComponent = RootSceneComponent;
-    
-    // Initialize default values
-    EffectUpdateInterval = 0.1f;
-    LastUpdateTime = 0.0f;
-    CurrentBiome = EBiomeType::Savana;
-    
-    // Initialize biome effects configurations
-    BiomeEffectsConfig.Empty();
-    
-    // Pantano (Swamp) configuration
-    FVFX_BiomeEffects SwampConfig;
-    SwampConfig.BiomeType = EBiomeType::Pantano;
-    SwampConfig.WindIntensity = 0.3f;
-    SwampConfig.DustColor = FLinearColor(0.4f, 0.5f, 0.3f, 0.8f); // Greenish mist
-    BiomeEffectsConfig.Add(SwampConfig);
-    
-    // Floresta (Forest) configuration  
-    FVFX_BiomeEffects ForestConfig;
-    ForestConfig.BiomeType = EBiomeType::Floresta;
-    ForestConfig.WindIntensity = 0.6f;
-    ForestConfig.DustColor = FLinearColor(0.6f, 0.4f, 0.2f, 0.6f); // Brown leaves
-    BiomeEffectsConfig.Add(ForestConfig);
-    
-    // Savana configuration
-    FVFX_BiomeEffects SavanaConfig;
-    SavanaConfig.BiomeType = EBiomeType::Savana;
-    SavanaConfig.WindIntensity = 0.8f;
-    SavanaConfig.DustColor = FLinearColor(0.8f, 0.6f, 0.4f, 1.0f); // Tan dust
-    BiomeEffectsConfig.Add(SavanaConfig);
-    
-    // Deserto (Desert) configuration
-    FVFX_BiomeEffects DesertConfig;
-    DesertConfig.BiomeType = EBiomeType::Deserto;
-    DesertConfig.WindIntensity = 1.0f;
-    DesertConfig.DustColor = FLinearColor(0.9f, 0.7f, 0.5f, 1.0f); // Sandy
-    BiomeEffectsConfig.Add(DesertConfig);
-    
-    // Montanha (Mountain) configuration
-    FVFX_BiomeEffects MountainConfig;
-    MountainConfig.BiomeType = EBiomeType::Montanha;
-    MountainConfig.WindIntensity = 1.2f;
-    MountainConfig.DustColor = FLinearColor(0.9f, 0.9f, 1.0f, 0.8f); // Snow/ice
-    BiomeEffectsConfig.Add(MountainConfig);
+    Super::Initialize(Collection);
+
+    UE_LOG(LogTemp, Warning, TEXT("VFX Manager - Inicializando sistema de efeitos visuais"));
+
+    // Inicializar dados de configuração
+    InitializeFootstepData();
+    InitializeWeatherData();
+    InitializeCombatData();
+
+    // Limpar arrays
+    ActiveEffects.Empty();
+    CurrentWeatherEffect = nullptr;
+    CurrentCampfireEffect = nullptr;
+
+    UE_LOG(LogTemp, Warning, TEXT("VFX Manager - Sistema inicializado com sucesso"));
 }
 
-void AVFX_Manager::BeginPlay()
+void UVFX_Manager::Deinitialize()
 {
-    Super::BeginPlay();
-    
-    UE_LOG(LogTemp, Warning, TEXT("VFX Manager: BeginPlay started"));
-    
-    // Initialize effect systems
-    InitializeEffectSystems();
-    
-    // Detect initial biome
-    if (APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0))
-    {
-        FVector PlayerLocation = PlayerPawn->GetActorLocation();
-        CurrentBiome = DetectBiomeFromLocation(PlayerLocation);
-        UpdateBiomeEffects(CurrentBiome);
-        
-        UE_LOG(LogTemp, Warning, TEXT("VFX Manager: Initial biome detected: %d"), (int32)CurrentBiome);
-    }
-}
+    UE_LOG(LogTemp, Warning, TEXT("VFX Manager - Desinicializando sistema"));
 
-void AVFX_Manager::Tick(float DeltaTime)
-{
-    Super::Tick(DeltaTime);
-    
-    LastUpdateTime += DeltaTime;
-    
-    if (LastUpdateTime >= EffectUpdateInterval)
+    // Parar todos os efeitos activos
+    StopWeatherEffect();
+    StopCampfireEffect();
+
+    // Limpar todos os efeitos activos
+    for (UNiagaraComponent* Effect : ActiveEffects)
     {
-        UpdateActiveEffects(DeltaTime);
-        CleanupExpiredEffects();
-        LastUpdateTime = 0.0f;
-        
-        // Check for biome changes
-        if (APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0))
+        if (IsValid(Effect))
         {
-            FVector PlayerLocation = PlayerPawn->GetActorLocation();
-            EBiomeType DetectedBiome = DetectBiomeFromLocation(PlayerLocation);
-            
-            if (DetectedBiome != CurrentBiome)
-            {
-                CurrentBiome = DetectedBiome;
-                UpdateBiomeEffects(CurrentBiome);
-                UE_LOG(LogTemp, Warning, TEXT("VFX Manager: Biome changed to: %d"), (int32)CurrentBiome);
-            }
+            Effect->DestroyComponent();
         }
     }
+    ActiveEffects.Empty();
+
+    Super::Deinitialize();
 }
 
-void AVFX_Manager::SpawnEffect(EVFX_EffectType EffectType, FVector Location, FRotator Rotation, FVFX_EffectConfig Config)
+void UVFX_Manager::InitializeFootstepData()
 {
-    UNiagaraSystem** FoundSystem = EffectSystems.Find(EffectType);
-    if (!FoundSystem || !*FoundSystem)
+    // Configurar dados de pegadas por espécie de dinossauro
+    FVFX_FootstepData TRexData;
+    TRexData.ImpactIntensity = 3.0f;
+    TRexData.EffectDuration = 4.0f;
+    TRexData.ParticleRadius = 300.0f;
+    DinosaurFootstepData.Add(EDinosaurSpecies::TRex, TRexData);
+
+    FVFX_FootstepData RaptorData;
+    RaptorData.ImpactIntensity = 1.0f;
+    RaptorData.EffectDuration = 2.0f;
+    RaptorData.ParticleRadius = 80.0f;
+    DinosaurFootstepData.Add(EDinosaurSpecies::Velociraptor, RaptorData);
+
+    FVFX_FootstepData BrachioData;
+    BrachioData.ImpactIntensity = 5.0f;
+    BrachioData.EffectDuration = 6.0f;
+    BrachioData.ParticleRadius = 500.0f;
+    DinosaurFootstepData.Add(EDinosaurSpecies::Brachiosaurus, BrachioData);
+
+    FVFX_FootstepData TriceratopsData;
+    TriceratopsData.ImpactIntensity = 2.5f;
+    TriceratopsData.EffectDuration = 3.5f;
+    TriceratopsData.ParticleRadius = 200.0f;
+    DinosaurFootstepData.Add(EDinosaurSpecies::Triceratops, TriceratopsData);
+
+    // Configurar dados de pegadas por bioma
+    FVFX_FootstepData SwampData;
+    SwampData.ImpactIntensity = 0.8f; // Menos poeira na lama
+    SwampData.ParticleRadius = 120.0f;
+    BiomeFootstepData.Add(EBiomeType::Swamp, SwampData);
+
+    FVFX_FootstepData ForestData;
+    ForestData.ImpactIntensity = 0.6f; // Solo macio da floresta
+    ForestData.ParticleRadius = 100.0f;
+    BiomeFootstepData.Add(EBiomeType::Forest, ForestData);
+
+    FVFX_FootstepData SavannaData;
+    SavannaData.ImpactIntensity = 1.2f; // Terra seca levanta mais poeira
+    SavannaData.ParticleRadius = 150.0f;
+    BiomeFootstepData.Add(EBiomeType::Savanna, SavannaData);
+
+    FVFX_FootstepData DesertData;
+    DesertData.ImpactIntensity = 1.5f; // Areia levanta muito pó
+    DesertData.ParticleRadius = 200.0f;
+    BiomeFootstepData.Add(EBiomeType::Desert, DesertData);
+
+    FVFX_FootstepData MountainData;
+    MountainData.ImpactIntensity = 0.4f; // Rocha produz menos partículas
+    MountainData.ParticleRadius = 80.0f;
+    BiomeFootstepData.Add(EBiomeType::SnowyMountain, MountainData);
+
+    UE_LOG(LogTemp, Warning, TEXT("VFX Manager - Dados de pegadas inicializados para %d espécies e %d biomas"), 
+           DinosaurFootstepData.Num(), BiomeFootstepData.Num());
+}
+
+void UVFX_Manager::InitializeWeatherData()
+{
+    // Configurar sistemas de tempo
+    // Nota: Os caminhos dos assets Niagara serão definidos quando os sistemas forem criados
+    WeatherData.WeatherIntensity = 0.5f;
+
+    UE_LOG(LogTemp, Warning, TEXT("VFX Manager - Dados de tempo inicializados"));
+}
+
+void UVFX_Manager::InitializeCombatData()
+{
+    // Configurar sistemas de combate
+    // Nota: Os caminhos dos assets Niagara serão definidos quando os sistemas forem criados
+
+    UE_LOG(LogTemp, Warning, TEXT("VFX Manager - Dados de combate inicializados"));
+}
+
+void UVFX_Manager::PlayFootstepEffect(const FVector& Location, EDinosaurSpecies Species, EBiomeType BiomeType)
+{
+    // Obter dados de configuração
+    FVFX_FootstepData* SpeciesData = DinosaurFootstepData.Find(Species);
+    FVFX_FootstepData* BiomeData = BiomeFootstepData.Find(BiomeType);
+
+    if (!SpeciesData || !BiomeData)
     {
-        UE_LOG(LogTemp, Warning, TEXT("VFX Manager: Effect system not found for type: %d"), (int32)EffectType);
+        UE_LOG(LogTemp, Warning, TEXT("VFX Manager - Dados de pegadas não encontrados para espécie %d ou bioma %d"), 
+               (int32)Species, (int32)BiomeType);
         return;
     }
-    
-    UNiagaraComponent* NewEffect = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
-        GetWorld(),
-        *FoundSystem,
-        Location,
-        Rotation
-    );
-    
-    if (NewEffect)
+
+    // Calcular intensidade combinada
+    float CombinedIntensity = SpeciesData->ImpactIntensity * BiomeData->ImpactIntensity;
+    float CombinedRadius = FMath::Max(SpeciesData->ParticleRadius, BiomeData->ParticleRadius);
+    float CombinedDuration = SpeciesData->EffectDuration;
+
+    UE_LOG(LogTemp, Warning, TEXT("VFX Manager - Reproduzir efeito de pegada em %s com intensidade %.2f e raio %.1f"), 
+           *Location.ToString(), CombinedIntensity, CombinedRadius);
+
+    // TODO: Quando os sistemas Niagara estiverem criados, spawnar o efeito aqui
+    // UNiagaraComponent* Effect = SpawnNiagaraEffect(FootstepSystem, Location);
+    // if (Effect)
+    // {
+    //     Effect->SetFloatParameter(TEXT("Intensity"), CombinedIntensity);
+    //     Effect->SetFloatParameter(TEXT("Radius"), CombinedRadius);
+    //     RegisterActiveEffect(Effect);
+    // }
+}
+
+void UVFX_Manager::PlayPlayerFootstepEffect(const FVector& Location, EBiomeType BiomeType)
+{
+    // Usar dados de pegadas humanas (mais leves que dinossauros)
+    FVFX_FootstepData* BiomeData = BiomeFootstepData.Find(BiomeType);
+
+    if (!BiomeData)
     {
-        // Apply configuration
-        NewEffect->SetFloatParameter(TEXT("Intensity"), Config.Intensity);
-        NewEffect->SetVectorParameter(TEXT("Scale"), Config.Scale);
-        NewEffect->SetColorParameter(TEXT("Color"), Config.Color);
-        
-        ActiveEffects.Add(NewEffect);
-        
-        UE_LOG(LogTemp, Log, TEXT("VFX Manager: Spawned effect type %d at location %s"), 
-               (int32)EffectType, *Location.ToString());
-    }
-}
-
-void AVFX_Manager::SpawnDinosaurFootstep(FVector Location, float DinosaurSize)
-{
-    FVFX_EffectConfig Config;
-    Config.EffectType = EVFX_EffectType::DinosaurFootstep;
-    Config.Duration = 3.0f;
-    Config.Intensity = DinosaurSize;
-    Config.Scale = FVector(DinosaurSize, DinosaurSize, 1.0f);
-    
-    // Get biome-specific dust color
-    FVFX_BiomeEffects* BiomeConfig = GetBiomeConfig(CurrentBiome);
-    if (BiomeConfig)
-    {
-        Config.Color = BiomeConfig->DustColor;
-    }
-    
-    SpawnEffect(EVFX_EffectType::DinosaurFootstep, Location, FRotator::ZeroRotator, Config);
-    SpawnEffect(EVFX_EffectType::DustCloud, Location, FRotator::ZeroRotator, Config);
-    
-    UE_LOG(LogTemp, Log, TEXT("VFX Manager: Spawned dinosaur footstep at %s, size: %f"), 
-           *Location.ToString(), DinosaurSize);
-}
-
-void AVFX_Manager::SpawnCampfire(FVector Location)
-{
-    FVFX_EffectConfig FlameConfig;
-    FlameConfig.EffectType = EVFX_EffectType::CampfireFlames;
-    FlameConfig.Duration = -1.0f; // Persistent
-    FlameConfig.Intensity = 1.0f;
-    FlameConfig.Color = FLinearColor(1.0f, 0.6f, 0.2f, 1.0f); // Orange flames
-    
-    FVFX_EffectConfig SmokeConfig;
-    SmokeConfig.EffectType = EVFX_EffectType::Smoke;
-    SmokeConfig.Duration = -1.0f; // Persistent
-    SmokeConfig.Intensity = 0.7f;
-    SmokeConfig.Color = FLinearColor(0.8f, 0.8f, 0.8f, 0.6f); // Gray smoke
-    
-    SpawnEffect(EVFX_EffectType::CampfireFlames, Location, FRotator::ZeroRotator, FlameConfig);
-    SpawnEffect(EVFX_EffectType::Smoke, Location + FVector(0, 0, 50), FRotator::ZeroRotator, SmokeConfig);
-    SpawnEffect(EVFX_EffectType::Sparks, Location, FRotator::ZeroRotator, FlameConfig);
-    
-    UE_LOG(LogTemp, Log, TEXT("VFX Manager: Spawned campfire at %s"), *Location.ToString());
-}
-
-void AVFX_Manager::SpawnBloodSplatter(FVector Location, FVector Direction)
-{
-    FVFX_EffectConfig Config;
-    Config.EffectType = EVFX_EffectType::BloodSplatter;
-    Config.Duration = 5.0f;
-    Config.Intensity = 1.0f;
-    Config.Color = FLinearColor(0.8f, 0.1f, 0.1f, 1.0f); // Dark red
-    
-    FRotator DirectionRotation = Direction.Rotation();
-    SpawnEffect(EVFX_EffectType::BloodSplatter, Location, DirectionRotation, Config);
-    
-    UE_LOG(LogTemp, Log, TEXT("VFX Manager: Spawned blood splatter at %s"), *Location.ToString());
-}
-
-void AVFX_Manager::UpdateBiomeEffects(EBiomeType NewBiome)
-{
-    CurrentBiome = NewBiome;
-    
-    FVFX_BiomeEffects* BiomeConfig = GetBiomeConfig(NewBiome);
-    if (!BiomeConfig)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("VFX Manager: No config found for biome: %d"), (int32)NewBiome);
+        UE_LOG(LogTemp, Warning, TEXT("VFX Manager - Dados de bioma não encontrados para %d"), (int32)BiomeType);
         return;
     }
-    
-    // Spawn biome-specific ambient effects
-    if (APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0))
-    {
-        FVector PlayerLocation = PlayerPawn->GetActorLocation();
-        
-        switch (NewBiome)
-        {
-            case EBiomeType::Pantano:
-                SpawnSwampMist(PlayerLocation);
-                break;
-            case EBiomeType::Floresta:
-                SpawnForestParticles(PlayerLocation);
-                break;
-            case EBiomeType::Deserto:
-                SpawnDesertDust(PlayerLocation);
-                break;
-            case EBiomeType::Montanha:
-                SpawnSnowfall(PlayerLocation);
-                break;
-            default:
-                break;
-        }
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("VFX Manager: Updated biome effects for biome: %d"), (int32)NewBiome);
+
+    // Reduzir intensidade para pegadas humanas
+    float PlayerIntensity = BiomeData->ImpactIntensity * 0.2f;
+    float PlayerRadius = BiomeData->ParticleRadius * 0.3f;
+
+    UE_LOG(LogTemp, Warning, TEXT("VFX Manager - Reproduzir efeito de pegada do jogador em %s"), *Location.ToString());
+
+    // TODO: Spawnar efeito de pegada do jogador
 }
 
-void AVFX_Manager::CleanupExpiredEffects()
+void UVFX_Manager::StartWeatherEffect(EWeatherType WeatherType, float Intensity)
 {
+    // Parar efeito anterior se existir
+    StopWeatherEffect();
+
+    UE_LOG(LogTemp, Warning, TEXT("VFX Manager - Iniciar efeito de tempo %d com intensidade %.2f"), 
+           (int32)WeatherType, Intensity);
+
+    // TODO: Spawnar sistema de tempo baseado no tipo
+    // switch (WeatherType)
+    // {
+    // case EWeatherType::Rain:
+    //     CurrentWeatherEffect = SpawnNiagaraEffect(WeatherData.RainSystem.LoadSynchronous(), FVector::ZeroVector);
+    //     break;
+    // case EWeatherType::Snow:
+    //     CurrentWeatherEffect = SpawnNiagaraEffect(WeatherData.SnowSystem.LoadSynchronous(), FVector::ZeroVector);
+    //     break;
+    // }
+
+    WeatherData.WeatherIntensity = Intensity;
+}
+
+void UVFX_Manager::StopWeatherEffect()
+{
+    if (IsValid(CurrentWeatherEffect))
+    {
+        UE_LOG(LogTemp, Warning, TEXT("VFX Manager - Parar efeito de tempo"));
+        
+        UnregisterActiveEffect(CurrentWeatherEffect);
+        CurrentWeatherEffect->DestroyComponent();
+        CurrentWeatherEffect = nullptr;
+    }
+}
+
+void UVFX_Manager::UpdateWeatherIntensity(float NewIntensity)
+{
+    WeatherData.WeatherIntensity = FMath::Clamp(NewIntensity, 0.0f, 1.0f);
+
+    if (IsValid(CurrentWeatherEffect))
+    {
+        CurrentWeatherEffect->SetFloatParameter(TEXT("Intensity"), WeatherData.WeatherIntensity);
+        UE_LOG(LogTemp, Warning, TEXT("VFX Manager - Actualizar intensidade do tempo para %.2f"), WeatherData.WeatherIntensity);
+    }
+}
+
+void UVFX_Manager::PlayBloodSplatterEffect(const FVector& Location, const FVector& ImpactDirection)
+{
+    UE_LOG(LogTemp, Warning, TEXT("VFX Manager - Reproduzir efeito de sangue em %s"), *Location.ToString());
+
+    // TODO: Spawnar efeito de sangue
+    // UNiagaraComponent* Effect = SpawnNiagaraEffect(CombatData.BloodSplatterSystem.LoadSynchronous(), Location);
+    // if (Effect)
+    // {
+    //     Effect->SetVectorParameter(TEXT("ImpactDirection"), ImpactDirection);
+    //     RegisterActiveEffect(Effect);
+    // }
+}
+
+void UVFX_Manager::PlayWeaponImpactEffect(const FVector& Location, const FVector& ImpactDirection)
+{
+    UE_LOG(LogTemp, Warning, TEXT("VFX Manager - Reproduzir efeito de impacto de arma em %s"), *Location.ToString());
+
+    // TODO: Spawnar efeito de impacto de arma
+}
+
+void UVFX_Manager::PlayCampfireEffect(const FVector& Location)
+{
+    // Parar fogueira anterior se existir
+    StopCampfireEffect();
+
+    UE_LOG(LogTemp, Warning, TEXT("VFX Manager - Iniciar efeito de fogueira em %s"), *Location.ToString());
+
+    // TODO: Spawnar efeito de fogueira
+    // CurrentCampfireEffect = SpawnNiagaraEffect(CampfireSystem, Location);
+    // if (CurrentCampfireEffect)
+    // {
+    //     RegisterActiveEffect(CurrentCampfireEffect);
+    // }
+}
+
+void UVFX_Manager::StopCampfireEffect()
+{
+    if (IsValid(CurrentCampfireEffect))
+    {
+        UE_LOG(LogTemp, Warning, TEXT("VFX Manager - Parar efeito de fogueira"));
+        
+        UnregisterActiveEffect(CurrentCampfireEffect);
+        CurrentCampfireEffect->DestroyComponent();
+        CurrentCampfireEffect = nullptr;
+    }
+}
+
+void UVFX_Manager::CleanupExpiredEffects()
+{
+    int32 RemovedCount = 0;
+    
     for (int32 i = ActiveEffects.Num() - 1; i >= 0; i--)
     {
         UNiagaraComponent* Effect = ActiveEffects[i];
-        if (!Effect || !Effect->IsActive())
+        
+        if (!IsValid(Effect) || !Effect->IsActive())
         {
-            ActiveEffects.RemoveAt(i);
-        }
-    }
-}
-
-EBiomeType AVFX_Manager::DetectBiomeFromLocation(FVector Location)
-{
-    // Based on biome coordinates from brain memory
-    float X = Location.X;
-    float Y = Location.Y;
-    
-    // Pantano (sudoeste): X(-77500 a -25000), Y(-76500 a -15000)
-    if (X >= -77500 && X <= -25000 && Y >= -76500 && Y <= -15000)
-    {
-        return EBiomeType::Pantano;
-    }
-    
-    // Floresta (noroeste): X(-77500 a -15000), Y(15000 a 76500)
-    if (X >= -77500 && X <= -15000 && Y >= 15000 && Y <= 76500)
-    {
-        return EBiomeType::Floresta;
-    }
-    
-    // Deserto (leste): X(25000 a 79500), Y(-30000 a 30000)
-    if (X >= 25000 && X <= 79500 && Y >= -30000 && Y <= 30000)
-    {
-        return EBiomeType::Deserto;
-    }
-    
-    // Montanha (nordeste): X(15000 a 79500), Y(20000 a 76500)
-    if (X >= 15000 && X <= 79500 && Y >= 20000 && Y <= 76500)
-    {
-        return EBiomeType::Montanha;
-    }
-    
-    // Savana (centro) - default
-    return EBiomeType::Savana;
-}
-
-void AVFX_Manager::InitializeEffectSystems()
-{
-    // Note: In a real implementation, these would load actual Niagara systems
-    // For now, we initialize the map structure
-    EffectSystems.Empty();
-    
-    UE_LOG(LogTemp, Warning, TEXT("VFX Manager: Effect systems initialized"));
-}
-
-void AVFX_Manager::SetGlobalVFXQuality(int32 QualityLevel)
-{
-    // Adjust effect quality based on performance settings
-    float QualityMultiplier = FMath::Clamp(QualityLevel / 3.0f, 0.5f, 2.0f);
-    
-    for (UNiagaraComponent* Effect : ActiveEffects)
-    {
-        if (Effect)
-        {
-            Effect->SetFloatParameter(TEXT("QualityMultiplier"), QualityMultiplier);
-        }
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("VFX Manager: Set global VFX quality to level: %d"), QualityLevel);
-}
-
-void AVFX_Manager::SpawnSwampMist(FVector Location)
-{
-    FVFX_EffectConfig Config;
-    Config.EffectType = EVFX_EffectType::Smoke;
-    Config.Duration = 10.0f;
-    Config.Intensity = 0.5f;
-    Config.Color = FLinearColor(0.4f, 0.5f, 0.3f, 0.3f); // Greenish mist
-    Config.Scale = FVector(3.0f, 3.0f, 1.0f);
-    
-    SpawnEffect(EVFX_EffectType::Smoke, Location, FRotator::ZeroRotator, Config);
-}
-
-void AVFX_Manager::SpawnDesertDust(FVector Location)
-{
-    FVFX_EffectConfig Config;
-    Config.EffectType = EVFX_EffectType::DustCloud;
-    Config.Duration = 8.0f;
-    Config.Intensity = 1.0f;
-    Config.Color = FLinearColor(0.9f, 0.7f, 0.5f, 0.8f); // Sandy
-    Config.Scale = FVector(2.0f, 2.0f, 1.0f);
-    
-    SpawnEffect(EVFX_EffectType::DustCloud, Location, FRotator::ZeroRotator, Config);
-    SpawnEffect(EVFX_EffectType::WindParticles, Location, FRotator::ZeroRotator, Config);
-}
-
-void AVFX_Manager::SpawnSnowfall(FVector Location)
-{
-    FVFX_EffectConfig Config;
-    Config.EffectType = EVFX_EffectType::WindParticles;
-    Config.Duration = 15.0f;
-    Config.Intensity = 0.8f;
-    Config.Color = FLinearColor(1.0f, 1.0f, 1.0f, 0.9f); // White snow
-    Config.Scale = FVector(4.0f, 4.0f, 2.0f);
-    
-    SpawnEffect(EVFX_EffectType::WindParticles, Location, FRotator::ZeroRotator, Config);
-}
-
-void AVFX_Manager::SpawnForestParticles(FVector Location)
-{
-    FVFX_EffectConfig Config;
-    Config.EffectType = EVFX_EffectType::WindParticles;
-    Config.Duration = 12.0f;
-    Config.Intensity = 0.6f;
-    Config.Color = FLinearColor(0.6f, 0.4f, 0.2f, 0.7f); // Brown leaves
-    Config.Scale = FVector(2.5f, 2.5f, 1.5f);
-    
-    SpawnEffect(EVFX_EffectType::WindParticles, Location, FRotator::ZeroRotator, Config);
-}
-
-void AVFX_Manager::UpdateActiveEffects(float DeltaTime)
-{
-    // Update any time-based effect parameters
-    for (UNiagaraComponent* Effect : ActiveEffects)
-    {
-        if (Effect && Effect->IsActive())
-        {
-            // Update wind effects based on current biome
-            FVFX_BiomeEffects* BiomeConfig = GetBiomeConfig(CurrentBiome);
-            if (BiomeConfig)
+            if (IsValid(Effect))
             {
-                Effect->SetFloatParameter(TEXT("WindIntensity"), BiomeConfig->WindIntensity);
+                Effect->DestroyComponent();
             }
+            ActiveEffects.RemoveAt(i);
+            RemovedCount++;
         }
     }
-}
 
-void AVFX_Manager::LoadEffectSystems()
-{
-    // This would load actual Niagara systems from content
-    // Implementation depends on available Niagara assets
-    UE_LOG(LogTemp, Warning, TEXT("VFX Manager: Loading effect systems..."));
-}
-
-FVFX_BiomeEffects* AVFX_Manager::GetBiomeConfig(EBiomeType BiomeType)
-{
-    for (FVFX_BiomeEffects& Config : BiomeEffectsConfig)
+    if (RemovedCount > 0)
     {
-        if (Config.BiomeType == BiomeType)
-        {
-            return &Config;
-        }
+        UE_LOG(LogTemp, Warning, TEXT("VFX Manager - Limpeza removeu %d efeitos expirados"), RemovedCount);
     }
-    return nullptr;
+}
+
+int32 UVFX_Manager::GetActiveEffectCount() const
+{
+    return ActiveEffects.Num();
+}
+
+UNiagaraComponent* UVFX_Manager::SpawnNiagaraEffect(UNiagaraSystem* System, const FVector& Location, const FRotator& Rotation)
+{
+    if (!System)
+    {
+        UE_LOG(LogTemp, Error, TEXT("VFX Manager - Sistema Niagara nulo fornecido"));
+        return nullptr;
+    }
+
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        UE_LOG(LogTemp, Error, TEXT("VFX Manager - Mundo não encontrado"));
+        return nullptr;
+    }
+
+    // Spawnar componente Niagara
+    UNiagaraComponent* NiagaraComponent = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+        World, System, Location, Rotation);
+
+    if (NiagaraComponent)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("VFX Manager - Sistema Niagara spawnado com sucesso em %s"), *Location.ToString());
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("VFX Manager - Falha ao spawnar sistema Niagara"));
+    }
+
+    return NiagaraComponent;
+}
+
+void UVFX_Manager::RegisterActiveEffect(UNiagaraComponent* Effect)
+{
+    if (IsValid(Effect))
+    {
+        ActiveEffects.Add(Effect);
+        UE_LOG(LogTemp, Warning, TEXT("VFX Manager - Efeito registado. Total activos: %d"), ActiveEffects.Num());
+    }
+}
+
+void UVFX_Manager::UnregisterActiveEffect(UNiagaraComponent* Effect)
+{
+    if (ActiveEffects.Contains(Effect))
+    {
+        ActiveEffects.Remove(Effect);
+        UE_LOG(LogTemp, Warning, TEXT("VFX Manager - Efeito removido. Total activos: %d"), ActiveEffects.Num());
+    }
 }
