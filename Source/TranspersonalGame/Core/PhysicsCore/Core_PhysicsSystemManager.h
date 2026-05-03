@@ -2,25 +2,101 @@
 
 #include "CoreMinimal.h"
 #include "Engine/World.h"
-#include "Subsystems/WorldSubsystem.h"
+#include "GameFramework/GameModeBase.h"
 #include "Components/ActorComponent.h"
+#include "PhysicsEngine/PhysicsSettings.h"
 #include "Engine/Engine.h"
 #include "Core_PhysicsSystemManager.generated.h"
 
-// Forward declarations
-class UCore_TerrainInteractionSystem;
-class UCore_SurvivalSystem;
-class ATranspersonalCharacter;
+UENUM(BlueprintType)
+enum class ECore_PhysicsMode : uint8
+{
+    Realistic       UMETA(DisplayName = "Realistic Physics"),
+    Arcade          UMETA(DisplayName = "Arcade Physics"), 
+    Cinematic       UMETA(DisplayName = "Cinematic Physics"),
+    Survival        UMETA(DisplayName = "Survival Physics")
+};
+
+UENUM(BlueprintType)
+enum class ECore_CollisionPreset : uint8
+{
+    Default         UMETA(DisplayName = "Default"),
+    Character       UMETA(DisplayName = "Character"),
+    Dinosaur        UMETA(DisplayName = "Dinosaur"),
+    Environment     UMETA(DisplayName = "Environment"),
+    Projectile      UMETA(DisplayName = "Projectile"),
+    Debris          UMETA(DisplayName = "Debris")
+};
+
+USTRUCT(BlueprintType)
+struct FCore_PhysicsSettings
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    float GravityScale = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    float LinearDamping = 0.01f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    float AngularDamping = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    float Restitution = 0.3f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    float Friction = 0.7f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    bool bEnableRagdoll = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    bool bEnableDestruction = true;
+
+    FCore_PhysicsSettings()
+    {
+        GravityScale = 1.0f;
+        LinearDamping = 0.01f;
+        AngularDamping = 0.0f;
+        Restitution = 0.3f;
+        Friction = 0.7f;
+        bEnableRagdoll = true;
+        bEnableDestruction = true;
+    }
+};
+
+USTRUCT(BlueprintType)
+struct FCore_RagdollSettings
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
+    float BlendTime = 0.2f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
+    float RecoveryTime = 2.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
+    float ImpactThreshold = 500.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ragdoll")
+    bool bAutoRecover = true;
+
+    FCore_RagdollSettings()
+    {
+        BlendTime = 0.2f;
+        RecoveryTime = 2.0f;
+        ImpactThreshold = 500.0f;
+        bAutoRecover = true;
+    }
+};
 
 /**
- * Core Physics System Manager
- * Manages all physics-related systems in the game including terrain interaction,
- * survival mechanics, and character physics integration.
- * 
- * This is the central hub for all physics calculations and ensures proper
- * coordination between different physics subsystems.
+ * Core Physics System Manager - Handles all physics simulation, collision, ragdoll, and destruction
+ * This is the central authority for physics behavior in the prehistoric survival world
  */
-UCLASS(BlueprintType, Blueprintable, meta = (BlueprintSpawnableComponent))
+UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UCore_PhysicsSystemManager : public UActorComponent
 {
     GENERATED_BODY()
@@ -33,93 +109,96 @@ protected:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 public:
-    /**
-     * Initialize all physics systems
-     * Called during BeginPlay to set up all subsystems
-     */
-    UFUNCTION(BlueprintCallable, Category = "Core Physics")
-    void InitializePhysicsSystems();
+    // Physics Mode Management
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void SetPhysicsMode(ECore_PhysicsMode NewMode);
 
-    /**
-     * Update all physics systems
-     * Called every tick to update physics calculations
-     */
-    UFUNCTION(BlueprintCallable, Category = "Core Physics")
-    void UpdatePhysicsSystems(float DeltaTime);
+    UFUNCTION(BlueprintPure, Category = "Physics System")
+    ECore_PhysicsMode GetCurrentPhysicsMode() const { return CurrentPhysicsMode; }
 
-    /**
-     * Register a character with the physics system
-     * Allows the physics system to track and manage character physics
-     */
-    UFUNCTION(BlueprintCallable, Category = "Core Physics")
-    void RegisterCharacter(ATranspersonalCharacter* Character);
+    // Physics Settings
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void ApplyPhysicsSettings(const FCore_PhysicsSettings& Settings);
 
-    /**
-     * Unregister a character from the physics system
-     */
-    UFUNCTION(BlueprintCallable, Category = "Core Physics")
-    void UnregisterCharacter(ATranspersonalCharacter* Character);
+    UFUNCTION(BlueprintPure, Category = "Physics System")
+    FCore_PhysicsSettings GetPhysicsSettings() const { return PhysicsSettings; }
 
-    /**
-     * Get the terrain interaction system
-     */
-    UFUNCTION(BlueprintCallable, Category = "Core Physics")
-    UCore_TerrainInteractionSystem* GetTerrainInteractionSystem() const { return TerrainInteractionSystem; }
+    // Collision Management
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void SetCollisionPreset(AActor* Actor, ECore_CollisionPreset Preset);
 
-    /**
-     * Get the survival system
-     */
-    UFUNCTION(BlueprintCallable, Category = "Core Physics")
-    UCore_SurvivalSystem* GetSurvivalSystem() const { return SurvivalSystem; }
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void EnablePhysicsSimulation(AActor* Actor, bool bEnable = true);
 
-    /**
-     * Check if physics systems are initialized
-     */
-    UFUNCTION(BlueprintCallable, Category = "Core Physics")
-    bool ArePhysicsSystemsInitialized() const { return bPhysicsSystemsInitialized; }
+    // Ragdoll System
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void EnableRagdoll(AActor* Character, const FCore_RagdollSettings& Settings);
 
-    /**
-     * Enable/disable physics system updates
-     */
-    UFUNCTION(BlueprintCallable, Category = "Core Physics")
-    void SetPhysicsSystemsEnabled(bool bEnabled) { bPhysicsSystemsEnabled = bEnabled; }
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void DisableRagdoll(AActor* Character);
+
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    bool IsRagdollActive(AActor* Character) const;
+
+    // Destruction System
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void TriggerDestruction(AActor* Actor, FVector ImpactLocation, float ImpactForce);
+
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void SetDestructible(AActor* Actor, bool bDestructible = true);
+
+    // Force Application
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void ApplyForceAtLocation(AActor* Actor, FVector Force, FVector Location);
+
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void ApplyImpulse(AActor* Actor, FVector Impulse);
+
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void ApplyRadialForce(FVector Origin, float Radius, float Strength, bool bVelChange = false);
+
+    // Physics Queries
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    bool LineTrace(FVector Start, FVector End, FHitResult& HitResult, bool bTraceComplex = false);
+
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    bool SphereTrace(FVector Start, FVector End, float Radius, FHitResult& HitResult);
+
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    TArray<AActor*> GetActorsInRadius(FVector Center, float Radius);
+
+    // System Validation
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Physics System")
+    void ValidatePhysicsSystem();
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Physics System")
+    void RunPhysicsTests();
 
 protected:
-    /** Terrain interaction system component */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Physics Systems", meta = (AllowPrivateAccess = "true"))
-    UCore_TerrainInteractionSystem* TerrainInteractionSystem;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Physics System")
+    ECore_PhysicsMode CurrentPhysicsMode;
 
-    /** Survival system component */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Physics Systems", meta = (AllowPrivateAccess = "true"))
-    UCore_SurvivalSystem* SurvivalSystem;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Physics System")
+    FCore_PhysicsSettings PhysicsSettings;
 
-    /** List of registered characters */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Physics Systems", meta = (AllowPrivateAccess = "true"))
-    TArray<ATranspersonalCharacter*> RegisteredCharacters;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Physics System")
+    FCore_RagdollSettings RagdollSettings;
 
-    /** Whether physics systems are initialized */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Physics Systems", meta = (AllowPrivateAccess = "true"))
-    bool bPhysicsSystemsInitialized;
+    UPROPERTY(BlueprintReadOnly, Category = "Physics System")
+    TArray<AActor*> RagdollActors;
 
-    /** Whether physics systems are enabled */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Systems", meta = (AllowPrivateAccess = "true"))
-    bool bPhysicsSystemsEnabled;
-
-    /** Physics update frequency (times per second) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Systems", meta = (AllowPrivateAccess = "true"))
-    float PhysicsUpdateFrequency;
-
-    /** Time accumulator for physics updates */
-    float PhysicsTimeAccumulator;
+    UPROPERTY(BlueprintReadOnly, Category = "Physics System")
+    TArray<AActor*> DestructibleActors;
 
 private:
-    /**
-     * Create and initialize subsystem components
-     */
-    void CreateSubsystems();
-
-    /**
-     * Validate that all required systems are present
-     */
-    bool ValidatePhysicsSystems() const;
+    void InitializePhysicsSettings();
+    void UpdatePhysicsSimulation(float DeltaTime);
+    void ProcessRagdollActors(float DeltaTime);
+    void ProcessDestructibleActors(float DeltaTime);
+    
+    // Physics mode implementations
+    void ApplyRealisticPhysics();
+    void ApplyArcadePhysics();
+    void ApplyCinematicPhysics();
+    void ApplySurvivalPhysics();
 };
