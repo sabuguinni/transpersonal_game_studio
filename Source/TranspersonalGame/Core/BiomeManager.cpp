@@ -1,435 +1,408 @@
 #include "BiomeManager.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "DrawDebugHelpers.h"
-#include "Math/UnrealMathUtility.h"
+#include "Kismet/GameplayStatics.h"
+#include "Components/StaticMeshComponent.h"
+#include "Landscape/Landscape.h"
+#include "LandscapeProxy.h"
+#include "LandscapeInfo.h"
 
-UEng_BiomeManager::UEng_BiomeManager()
+ABiomeManager::ABiomeManager()
 {
-    // Initialize grid parameters
-    GridSizeX = 100;
-    GridSizeY = 100;
-    CellSize = 1000.0f;
-    WorldOrigin = FVector::ZeroVector;
+    PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.bStartWithTickEnabled = true;
+    
+    // Initialize runtime state
+    LastValidationTime = 0.0f;
+    
+    // Create root component for editor visibility
+    USceneComponent* RootComp = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
+    RootComponent = RootComp;
 }
 
-void UEng_BiomeManager::Initialize(FSubsystemCollectionBase& Collection)
+void ABiomeManager::BeginPlay()
 {
-    Super::Initialize(Collection);
+    Super::BeginPlay();
     
-    UE_LOG(LogTemp, Log, TEXT("BiomeManager: Initializing biome system"));
+    // Initialize biome system
+    InitializeBiomeBoundaries();
+    InitializeBiomeConditions();
     
-    // Initialize default biome data
-    InitializeDefaultBiomeData();
+    UE_LOG(LogTemp, Warning, TEXT("BiomeManager: Initialized with 5 biomes on 157km x 153km map"));
     
-    // Setup biome transitions
-    SetupBiomeTransitions();
-    
-    // Generate initial biome map
-    GenerateBiomeMap(GridSizeX, GridSizeY, 1);
-    
-    UE_LOG(LogTemp, Log, TEXT("BiomeManager: Initialization complete"));
+    // Validate current actor placement
+    ValidateActorBiomePlacement();
 }
 
-void UEng_BiomeManager::Deinitialize()
+void ABiomeManager::Tick(float DeltaTime)
 {
-    UE_LOG(LogTemp, Log, TEXT("BiomeManager: Shutting down biome system"));
+    Super::Tick(DeltaTime);
     
-    // Clear biome grid
-    BiomeGrid.Empty();
-    BiomeDataMap.Empty();
-    BiomeTransitions.Empty();
-    
-    Super::Deinitialize();
-}
-
-EEng_BiomeType UEng_BiomeManager::GetBiomeAtLocation(const FVector& WorldLocation) const
-{
-    FIntPoint GridCoords = WorldLocationToGridCoords(WorldLocation);
-    
-    if (!IsValidGridCoords(GridCoords))
+    // Periodic validation every 30 seconds
+    if (GetWorld()->GetTimeSeconds() - LastValidationTime > 30.0f)
     {
-        return EEng_BiomeType::Forest; // Default fallback
-    }
-    
-    return BiomeGrid[GridCoords.X][GridCoords.Y];
-}
-
-FEng_BiomeData UEng_BiomeManager::GetBiomeData(EEng_BiomeType BiomeType) const
-{
-    if (const FEng_BiomeData* FoundData = BiomeDataMap.Find(BiomeType))
-    {
-        return *FoundData;
-    }
-    
-    // Return default forest biome if not found
-    FEng_BiomeData DefaultData;
-    DefaultData.BiomeType = EEng_BiomeType::Forest;
-    DefaultData.BiomeName = TEXT("Default Forest");
-    return DefaultData;
-}
-
-void UEng_BiomeManager::SetBiomeAtLocation(const FVector& WorldLocation, EEng_BiomeType BiomeType)
-{
-    FIntPoint GridCoords = WorldLocationToGridCoords(WorldLocation);
-    
-    if (IsValidGridCoords(GridCoords))
-    {
-        BiomeGrid[GridCoords.X][GridCoords.Y] = BiomeType;
+        ValidateActorBiomePlacement();
+        LastValidationTime = GetWorld()->GetTimeSeconds();
     }
 }
 
-TArray<EEng_BiomeType> UEng_BiomeManager::GetNearbyBiomes(const FVector& WorldLocation, float Radius) const
+void ABiomeManager::InitializeBiomeBoundaries()
 {
-    TArray<EEng_BiomeType> NearbyBiomes;
-    TSet<EEng_BiomeType> UniqueBiomes;
+    // Based on brain memory coordinates: 157,000 x 153,000 UU map
+    // X range: -77,500 to +79,500 | Y range: -76,500 to +76,500
     
-    FIntPoint CenterCoords = WorldLocationToGridCoords(WorldLocation);
-    int32 GridRadius = FMath::CeilToInt(Radius / CellSize);
+    FEng_BiomeBounds SwampBounds;
+    SwampBounds.Center = FVector(-50000.0f, -45000.0f, 0.0f);
+    SwampBounds.MinBounds = FVector(-77500.0f, -76500.0f, -1000.0f);
+    SwampBounds.MaxBounds = FVector(-25000.0f, -15000.0f, 1000.0f);
+    BiomeBoundaries.Add(EEng_BiomeType::Swamp, SwampBounds);
     
-    for (int32 X = CenterCoords.X - GridRadius; X <= CenterCoords.X + GridRadius; X++)
+    FEng_BiomeBounds ForestBounds;
+    ForestBounds.Center = FVector(-45000.0f, 40000.0f, 0.0f);
+    ForestBounds.MinBounds = FVector(-77500.0f, 15000.0f, -500.0f);
+    ForestBounds.MaxBounds = FVector(-15000.0f, 76500.0f, 1500.0f);
+    BiomeBoundaries.Add(EEng_BiomeType::Forest, ForestBounds);
+    
+    FEng_BiomeBounds SavannaBounds;
+    SavannaBounds.Center = FVector(0.0f, 0.0f, 0.0f);
+    SavannaBounds.MinBounds = FVector(-20000.0f, -20000.0f, -200.0f);
+    SavannaBounds.MaxBounds = FVector(20000.0f, 20000.0f, 800.0f);
+    BiomeBoundaries.Add(EEng_BiomeType::Savanna, SavannaBounds);
+    
+    FEng_BiomeBounds DesertBounds;
+    DesertBounds.Center = FVector(55000.0f, 0.0f, 0.0f);
+    DesertBounds.MinBounds = FVector(25000.0f, -30000.0f, -100.0f);
+    DesertBounds.MaxBounds = FVector(79500.0f, 30000.0f, 600.0f);
+    BiomeBoundaries.Add(EEng_BiomeType::Desert, DesertBounds);
+    
+    FEng_BiomeBounds MountainBounds;
+    MountainBounds.Center = FVector(40000.0f, 50000.0f, 500.0f);
+    MountainBounds.MinBounds = FVector(15000.0f, 20000.0f, 0.0f);
+    MountainBounds.MaxBounds = FVector(79500.0f, 76500.0f, 2000.0f);
+    BiomeBoundaries.Add(EEng_BiomeType::Mountain, MountainBounds);
+    
+    UE_LOG(LogTemp, Warning, TEXT("BiomeManager: Initialized 5 biome boundaries"));
+}
+
+void ABiomeManager::InitializeBiomeConditions()
+{
+    // Swamp conditions
+    FEng_BiomeConditions SwampConditions;
+    SwampConditions.Temperature = 28.0f;
+    SwampConditions.Humidity = 95.0f;
+    SwampConditions.WindSpeed = 5.0f;
+    SwampConditions.Visibility = 0.3f;
+    SwampConditions.DangerLevel = 0.8f;
+    BiomeConditions.Add(EEng_BiomeType::Swamp, SwampConditions);
+    
+    // Forest conditions
+    FEng_BiomeConditions ForestConditions;
+    ForestConditions.Temperature = 22.0f;
+    ForestConditions.Humidity = 75.0f;
+    ForestConditions.WindSpeed = 8.0f;
+    ForestConditions.Visibility = 0.5f;
+    ForestConditions.DangerLevel = 0.6f;
+    BiomeConditions.Add(EEng_BiomeType::Forest, ForestConditions);
+    
+    // Savanna conditions
+    FEng_BiomeConditions SavannaConditions;
+    SavannaConditions.Temperature = 32.0f;
+    SavannaConditions.Humidity = 45.0f;
+    SavannaConditions.WindSpeed = 12.0f;
+    SavannaConditions.Visibility = 0.9f;
+    SavannaConditions.DangerLevel = 0.7f;
+    BiomeConditions.Add(EEng_BiomeType::Savanna, SavannaConditions);
+    
+    // Desert conditions
+    FEng_BiomeConditions DesertConditions;
+    DesertConditions.Temperature = 45.0f;
+    DesertConditions.Humidity = 15.0f;
+    DesertConditions.WindSpeed = 15.0f;
+    DesertConditions.Visibility = 0.7f;
+    DesertConditions.DangerLevel = 0.9f;
+    BiomeConditions.Add(EEng_BiomeType::Desert, DesertConditions);
+    
+    // Mountain conditions
+    FEng_BiomeConditions MountainConditions;
+    MountainConditions.Temperature = 5.0f;
+    MountainConditions.Humidity = 60.0f;
+    MountainConditions.WindSpeed = 25.0f;
+    MountainConditions.Visibility = 0.8f;
+    MountainConditions.DangerLevel = 0.5f;
+    BiomeConditions.Add(EEng_BiomeType::Mountain, MountainConditions);
+}
+
+EEng_BiomeType ABiomeManager::GetBiomeAtLocation(const FVector& WorldLocation) const
+{
+    for (const auto& BiomePair : BiomeBoundaries)
     {
-        for (int32 Y = CenterCoords.Y - GridRadius; Y <= CenterCoords.Y + GridRadius; Y++)
+        const FEng_BiomeBounds& Bounds = BiomePair.Value;
+        
+        if (WorldLocation.X >= Bounds.MinBounds.X && WorldLocation.X <= Bounds.MaxBounds.X &&
+            WorldLocation.Y >= Bounds.MinBounds.Y && WorldLocation.Y <= Bounds.MaxBounds.Y)
         {
-            FIntPoint CheckCoords(X, Y);
-            if (IsValidGridCoords(CheckCoords))
-            {
-                EEng_BiomeType BiomeType = BiomeGrid[X][Y];
-                UniqueBiomes.Add(BiomeType);
-            }
+            return BiomePair.Key;
         }
     }
     
-    return UniqueBiomes.Array();
+    // Default to Savanna if outside all bounds
+    return EEng_BiomeType::Savanna;
 }
 
-float UEng_BiomeManager::GetTemperatureAtLocation(const FVector& WorldLocation) const
+FVector ABiomeManager::GetRandomSpawnLocationInBiome(EEng_BiomeType BiomeType) const
 {
-    EEng_BiomeType BiomeType = GetBiomeAtLocation(WorldLocation);
-    FEng_BiomeData BiomeData = GetBiomeData(BiomeType);
-    
-    // Add some variation based on location
-    float BaseTemp = BiomeData.TemperatureRange;
-    float NoiseVariation = GenerateBiomeNoise(WorldLocation.X * 0.001f, WorldLocation.Y * 0.001f, 2) * 10.0f;
-    
-    return BaseTemp + NoiseVariation;
-}
-
-float UEng_BiomeManager::GetHumidityAtLocation(const FVector& WorldLocation) const
-{
-    EEng_BiomeType BiomeType = GetBiomeAtLocation(WorldLocation);
-    FEng_BiomeData BiomeData = GetBiomeData(BiomeType);
-    
-    // Add some variation based on location
-    float BaseHumidity = BiomeData.HumidityLevel;
-    float NoiseVariation = GenerateBiomeNoise(WorldLocation.X * 0.0005f, WorldLocation.Y * 0.0005f, 3) * 0.2f;
-    
-    return FMath::Clamp(BaseHumidity + NoiseVariation, 0.0f, 1.0f);
-}
-
-float UEng_BiomeManager::GetVegetationDensityAtLocation(const FVector& WorldLocation) const
-{
-    EEng_BiomeType BiomeType = GetBiomeAtLocation(WorldLocation);
-    FEng_BiomeData BiomeData = GetBiomeData(BiomeType);
-    
-    return BiomeData.VegetationDensity;
-}
-
-bool UEng_BiomeManager::IsInTransitionZone(const FVector& WorldLocation) const
-{
-    EEng_BiomeType CurrentBiome = GetBiomeAtLocation(WorldLocation);
-    
-    // Check nearby cells for different biomes
-    TArray<EEng_BiomeType> NearbyBiomes = GetNearbyBiomes(WorldLocation, CellSize * 2.0f);
-    
-    for (EEng_BiomeType NearbyBiome : NearbyBiomes)
+    if (!BiomeBoundaries.Contains(BiomeType))
     {
-        if (NearbyBiome != CurrentBiome)
-        {
-            return true;
-        }
+        UE_LOG(LogTemp, Error, TEXT("BiomeManager: Invalid biome type for spawn"));
+        return FVector::ZeroVector;
     }
     
-    return false;
+    const FEng_BiomeBounds& Bounds = BiomeBoundaries[BiomeType];
+    return GetRandomLocationInBounds(Bounds);
 }
 
-FEng_BiomeTransition UEng_BiomeManager::GetTransitionData(const FVector& WorldLocation) const
+bool ABiomeManager::IsLocationInBiome(const FVector& WorldLocation, EEng_BiomeType BiomeType) const
 {
-    // Find the most relevant transition for this location
-    EEng_BiomeType CurrentBiome = GetBiomeAtLocation(WorldLocation);
-    TArray<EEng_BiomeType> NearbyBiomes = GetNearbyBiomes(WorldLocation, CellSize * 3.0f);
-    
-    for (const FEng_BiomeTransition& Transition : BiomeTransitions)
+    return GetBiomeAtLocation(WorldLocation) == BiomeType;
+}
+
+FVector ABiomeManager::GetBiomeCenterLocation(EEng_BiomeType BiomeType) const
+{
+    if (BiomeBoundaries.Contains(BiomeType))
     {
-        if (Transition.FromBiome == CurrentBiome && NearbyBiomes.Contains(Transition.ToBiome))
-        {
-            return Transition;
-        }
+        return BiomeBoundaries[BiomeType].Center;
     }
     
-    // Return default transition
-    FEng_BiomeTransition DefaultTransition;
-    DefaultTransition.FromBiome = CurrentBiome;
-    DefaultTransition.ToBiome = CurrentBiome;
-    DefaultTransition.TransitionWidth = 500.0f;
-    DefaultTransition.BlendFactor = 0.5f;
-    return DefaultTransition;
+    return FVector::ZeroVector;
 }
 
-void UEng_BiomeManager::GenerateBiomeMap(int32 WorldSizeX, int32 WorldSizeY, int32 BiomeResolution)
+FEng_BiomeConditions ABiomeManager::GetBiomeConditions(EEng_BiomeType BiomeType) const
 {
-    UE_LOG(LogTemp, Log, TEXT("BiomeManager: Generating biome map %dx%d"), WorldSizeX, WorldSizeY);
-    
-    GridSizeX = WorldSizeX;
-    GridSizeY = WorldSizeY;
-    
-    // Initialize the grid
-    BiomeGrid.SetNum(GridSizeX);
-    for (int32 X = 0; X < GridSizeX; X++)
+    if (BiomeConditions.Contains(BiomeType))
     {
-        BiomeGrid[X].SetNum(GridSizeY);
+        return BiomeConditions[BiomeType];
     }
     
-    // Generate biomes using noise
-    for (int32 X = 0; X < GridSizeX; X++)
-    {
-        for (int32 Y = 0; Y < GridSizeY; Y++)
-        {
-            float NoiseX = X * 0.05f;
-            float NoiseY = Y * 0.05f;
-            
-            float BiomeNoise = GenerateBiomeNoise(NoiseX, NoiseY, 4);
-            float ElevationNoise = GenerateBiomeNoise(NoiseX * 0.5f, NoiseY * 0.5f, 3);
-            
-            EEng_BiomeType GeneratedBiome = DetermineBiomeFromNoise(BiomeNoise, ElevationNoise);
-            BiomeGrid[X][Y] = GeneratedBiome;
-        }
-    }
+    // Return default conditions
+    FEng_BiomeConditions DefaultConditions;
+    DefaultConditions.Temperature = 25.0f;
+    DefaultConditions.Humidity = 50.0f;
+    DefaultConditions.WindSpeed = 10.0f;
+    DefaultConditions.Visibility = 1.0f;
+    DefaultConditions.DangerLevel = 0.5f;
     
-    UE_LOG(LogTemp, Log, TEXT("BiomeManager: Biome map generation complete"));
+    return DefaultConditions;
 }
 
-void UEng_BiomeManager::ApplyBiomeEffectsToTerrain(const FVector& Location, float Radius)
-{
-    EEng_BiomeType BiomeType = GetBiomeAtLocation(Location);
-    FEng_BiomeData BiomeData = GetBiomeData(BiomeType);
-    
-    UE_LOG(LogTemp, Log, TEXT("BiomeManager: Applying %s biome effects at location %s"), 
-           *BiomeData.BiomeName, *Location.ToString());
-    
-    // This would integrate with terrain generation systems
-    // For now, just log the operation
-}
-
-void UEng_BiomeManager::DebugDrawBiomeMap()
+void ABiomeManager::DistributeActorsAcrossBiomes()
 {
     UWorld* World = GetWorld();
     if (!World)
     {
+        UE_LOG(LogTemp, Error, TEXT("BiomeManager: No world for actor distribution"));
         return;
     }
     
-    UE_LOG(LogTemp, Log, TEXT("BiomeManager: Drawing debug biome map"));
+    // Get all actors in the level
+    TArray<AActor*> AllActors;
+    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
     
-    // Draw biome grid with different colors
-    for (int32 X = 0; X < GridSizeX; X += 5) // Sample every 5th cell for performance
+    int32 RedistributedCount = 0;
+    
+    for (AActor* Actor : AllActors)
     {
-        for (int32 Y = 0; Y < GridSizeY; Y += 5)
+        if (!Actor || Actor == this)
+            continue;
+            
+        FVector CurrentLocation = Actor->GetActorLocation();
+        
+        // Skip actors that are already properly placed
+        if (FMath::Abs(CurrentLocation.X) > 1000 || FMath::Abs(CurrentLocation.Y) > 1000)
+            continue;
+            
+        // Determine appropriate biome for this actor type
+        EEng_BiomeType TargetBiome = EEng_BiomeType::Savanna; // Default
+        
+        FString ActorName = Actor->GetClass()->GetName();
+        if (ActorName.Contains("Tree") || ActorName.Contains("Foliage"))
         {
-            FVector WorldPos = GridCoordsToWorldLocation(FIntPoint(X, Y));
-            EEng_BiomeType BiomeType = BiomeGrid[X][Y];
+            TargetBiome = EEng_BiomeType::Forest;
+        }
+        else if (ActorName.Contains("Rock") || ActorName.Contains("Stone"))
+        {
+            TargetBiome = EEng_BiomeType::Mountain;
+        }
+        else if (ActorName.Contains("Dinosaur") || ActorName.Contains("TRex") || ActorName.Contains("Raptor"))
+        {
+            TargetBiome = EEng_BiomeType::Savanna;
+        }
+        
+        // Get new spawn location
+        FVector NewLocation = GetRandomSpawnLocationInBiome(TargetBiome);
+        
+        if (NewLocation != FVector::ZeroVector)
+        {
+            Actor->SetActorLocation(NewLocation);
+            RedistributedCount++;
             
-            FColor BiomeColor = FColor::Green; // Default
-            switch (BiomeType)
-            {
-                case EEng_BiomeType::Swamp: BiomeColor = FColor::Blue; break;
-                case EEng_BiomeType::Forest: BiomeColor = FColor::Green; break;
-                case EEng_BiomeType::Savanna: BiomeColor = FColor::Yellow; break;
-                case EEng_BiomeType::Desert: BiomeColor = FColor::Orange; break;
-                case EEng_BiomeType::SnowyMountain: BiomeColor = FColor::White; break;
-            }
-            
-            DrawDebugBox(World, WorldPos + FVector(0, 0, 100), FVector(CellSize * 0.4f), BiomeColor, false, 30.0f);
+            UE_LOG(LogTemp, Warning, TEXT("BiomeManager: Moved %s to %s biome"), 
+                   *ActorName, *UEnum::GetValueAsString(TargetBiome));
         }
     }
+    
+    UE_LOG(LogTemp, Warning, TEXT("BiomeManager: Redistributed %d actors across biomes"), RedistributedCount);
 }
 
-void UEng_BiomeManager::ValidateBiomeConfiguration()
+void ABiomeManager::FixOriginSpawnsAndRedistribute()
 {
-    UE_LOG(LogTemp, Log, TEXT("BiomeManager: Validating biome configuration"));
+    UWorld* World = GetWorld();
+    if (!World)
+        return;
     
-    bool bIsValid = true;
+    TArray<AActor*> AllActors;
+    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
     
-    // Check if all biome types have data
-    for (int32 i = 0; i < static_cast<int32>(EEng_BiomeType::Count); i++)
+    MisplacedActors.Empty();
+    
+    // Find actors at or near origin
+    for (AActor* Actor : AllActors)
     {
-        EEng_BiomeType BiomeType = static_cast<EEng_BiomeType>(i);
-        if (!BiomeDataMap.Contains(BiomeType))
+        if (!Actor || Actor == this)
+            continue;
+            
+        FVector Location = Actor->GetActorLocation();
+        if (FMath::Abs(Location.X) < 100 && FMath::Abs(Location.Y) < 100)
         {
-            UE_LOG(LogTemp, Error, TEXT("BiomeManager: Missing data for biome type %d"), i);
-            bIsValid = false;
+            MisplacedActors.Add(Actor);
         }
     }
     
-    UE_LOG(LogTemp, Log, TEXT("BiomeManager: Configuration validation %s"), 
-           bIsValid ? TEXT("PASSED") : TEXT("FAILED"));
+    UE_LOG(LogTemp, Warning, TEXT("BiomeManager: Found %d actors at origin to redistribute"), MisplacedActors.Num());
+    
+    // Redistribute them
+    DistributeActorsAcrossBiomes();
 }
 
-// Private helper functions
-
-FIntPoint UEng_BiomeManager::WorldLocationToGridCoords(const FVector& WorldLocation) const
+void ABiomeManager::ValidateActorBiomePlacement()
 {
-    FVector RelativeLocation = WorldLocation - WorldOrigin;
-    int32 GridX = FMath::FloorToInt(RelativeLocation.X / CellSize);
-    int32 GridY = FMath::FloorToInt(RelativeLocation.Y / CellSize);
+    UWorld* World = GetWorld();
+    if (!World)
+        return;
     
-    return FIntPoint(GridX, GridY);
-}
-
-FVector UEng_BiomeManager::GridCoordsToWorldLocation(const FIntPoint& GridCoords) const
-{
-    float WorldX = GridCoords.X * CellSize + (CellSize * 0.5f);
-    float WorldY = GridCoords.Y * CellSize + (CellSize * 0.5f);
+    TArray<AActor*> AllActors;
+    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
     
-    return WorldOrigin + FVector(WorldX, WorldY, 0);
-}
-
-bool UEng_BiomeManager::IsValidGridCoords(const FIntPoint& GridCoords) const
-{
-    return GridCoords.X >= 0 && GridCoords.X < GridSizeX && 
-           GridCoords.Y >= 0 && GridCoords.Y < GridSizeY;
-}
-
-void UEng_BiomeManager::InitializeDefaultBiomeData()
-{
-    // Swamp biome
-    FEng_BiomeData SwampData;
-    SwampData.BiomeType = EEng_BiomeType::Swamp;
-    SwampData.BiomeName = TEXT("Swamp");
-    SwampData.TemperatureRange = 28.0f;
-    SwampData.HumidityLevel = 0.9f;
-    SwampData.VegetationDensity = 0.8f;
-    SwampData.DinosaurSpecies = {TEXT("Spinosaurus"), TEXT("Parasaurolophus"), TEXT("Dracorex")};
-    BiomeDataMap.Add(EEng_BiomeType::Swamp, SwampData);
-    
-    // Forest biome
-    FEng_BiomeData ForestData;
-    ForestData.BiomeType = EEng_BiomeType::Forest;
-    ForestData.BiomeName = TEXT("Forest");
-    ForestData.TemperatureRange = 22.0f;
-    ForestData.HumidityLevel = 0.7f;
-    ForestData.VegetationDensity = 0.9f;
-    ForestData.DinosaurSpecies = {TEXT("Triceratops"), TEXT("Stegosaurus"), TEXT("Compsognathus")};
-    BiomeDataMap.Add(EEng_BiomeType::Forest, ForestData);
-    
-    // Savanna biome
-    FEng_BiomeData SavannaData;
-    SavannaData.BiomeType = EEng_BiomeType::Savanna;
-    SavannaData.BiomeName = TEXT("Savanna");
-    SavannaData.TemperatureRange = 30.0f;
-    SavannaData.HumidityLevel = 0.4f;
-    SavannaData.VegetationDensity = 0.3f;
-    SavannaData.DinosaurSpecies = {TEXT("Brachiosaurus"), TEXT("Allosaurus"), TEXT("Gallimimus")};
-    BiomeDataMap.Add(EEng_BiomeType::Savanna, SavannaData);
-    
-    // Desert biome
-    FEng_BiomeData DesertData;
-    DesertData.BiomeType = EEng_BiomeType::Desert;
-    DesertData.BiomeName = TEXT("Desert");
-    DesertData.TemperatureRange = 40.0f;
-    DesertData.HumidityLevel = 0.1f;
-    DesertData.VegetationDensity = 0.1f;
-    DesertData.DinosaurSpecies = {TEXT("Carnotaurus"), TEXT("Dilophosaurus"), TEXT("Ouranosaurus")};
-    BiomeDataMap.Add(EEng_BiomeType::Desert, DesertData);
-    
-    // Snowy Mountain biome
-    FEng_BiomeData MountainData;
-    MountainData.BiomeType = EEng_BiomeType::SnowyMountain;
-    MountainData.BiomeName = TEXT("Snowy Mountain");
-    MountainData.TemperatureRange = -5.0f;
-    MountainData.HumidityLevel = 0.6f;
-    MountainData.VegetationDensity = 0.2f;
-    MountainData.DinosaurSpecies = {TEXT("Utahraptor"), TEXT("Therizinosaurus"), TEXT("Cryolophosaurus")};
-    BiomeDataMap.Add(EEng_BiomeType::SnowyMountain, MountainData);
-}
-
-void UEng_BiomeManager::SetupBiomeTransitions()
-{
-    // Forest to Savanna
-    FEng_BiomeTransition ForestToSavanna;
-    ForestToSavanna.FromBiome = EEng_BiomeType::Forest;
-    ForestToSavanna.ToBiome = EEng_BiomeType::Savanna;
-    ForestToSavanna.TransitionWidth = 1500.0f;
-    ForestToSavanna.BlendFactor = 0.6f;
-    BiomeTransitions.Add(ForestToSavanna);
-    
-    // Savanna to Desert
-    FEng_BiomeTransition SavannaToDesert;
-    SavannaToDesert.FromBiome = EEng_BiomeType::Savanna;
-    SavannaToDesert.ToBiome = EEng_BiomeType::Desert;
-    SavannaToDesert.TransitionWidth = 2000.0f;
-    SavannaToDesert.BlendFactor = 0.7f;
-    BiomeTransitions.Add(SavannaToDesert);
-    
-    // Forest to Swamp
-    FEng_BiomeTransition ForestToSwamp;
-    ForestToSwamp.FromBiome = EEng_BiomeType::Forest;
-    ForestToSwamp.ToBiome = EEng_BiomeType::Swamp;
-    ForestToSwamp.TransitionWidth = 1000.0f;
-    ForestToSwamp.BlendFactor = 0.5f;
-    BiomeTransitions.Add(ForestToSwamp);
-    
-    // Forest to Mountain
-    FEng_BiomeTransition ForestToMountain;
-    ForestToMountain.FromBiome = EEng_BiomeType::Forest;
-    ForestToMountain.ToBiome = EEng_BiomeType::SnowyMountain;
-    ForestToMountain.TransitionWidth = 2500.0f;
-    ForestToMountain.BlendFactor = 0.8f;
-    BiomeTransitions.Add(ForestToMountain);
-}
-
-float UEng_BiomeManager::GenerateBiomeNoise(float X, float Y, int32 Octaves) const
-{
-    float Value = 0.0f;
-    float Amplitude = 1.0f;
-    float Frequency = 1.0f;
-    float MaxValue = 0.0f;
-    
-    for (int32 i = 0; i < Octaves; i++)
+    // Reset counts
+    CurrentActorCounts.Empty();
+    for (int32 i = 0; i < (int32)EEng_BiomeType::Count; i++)
     {
-        Value += FMath::PerlinNoise2D(FVector2D(X * Frequency, Y * Frequency)) * Amplitude;
-        MaxValue += Amplitude;
-        Amplitude *= 0.5f;
-        Frequency *= 2.0f;
+        CurrentActorCounts.Add((EEng_BiomeType)i, 0);
     }
     
-    return Value / MaxValue;
+    // Count actors per biome
+    for (AActor* Actor : AllActors)
+    {
+        if (!Actor || Actor == this)
+            continue;
+            
+        FVector Location = Actor->GetActorLocation();
+        EEng_BiomeType Biome = GetBiomeAtLocation(Location);
+        
+        if (CurrentActorCounts.Contains(Biome))
+        {
+            CurrentActorCounts[Biome]++;
+        }
+    }
+    
+    // Log results
+    UE_LOG(LogTemp, Warning, TEXT("=== BIOME ACTOR DISTRIBUTION ==="));
+    for (const auto& CountPair : CurrentActorCounts)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("%s: %d actors"), 
+               *UEnum::GetValueAsString(CountPair.Key), CountPair.Value);
+    }
 }
 
-EEng_BiomeType UEng_BiomeManager::DetermineBiomeFromNoise(float NoiseValue, float Elevation) const
+void ABiomeManager::GenerateBiomeReport()
 {
-    // Normalize noise value to 0-1 range
-    float NormalizedNoise = (NoiseValue + 1.0f) * 0.5f;
+    ValidateActorBiomePlacement();
     
-    // Use elevation to influence biome selection
-    if (Elevation > 0.7f)
+    UE_LOG(LogTemp, Warning, TEXT("=== BIOME SYSTEM REPORT ==="));
+    UE_LOG(LogTemp, Warning, TEXT("Map Size: 157,000 x 153,000 UU"));
+    UE_LOG(LogTemp, Warning, TEXT("Total Biomes: 5"));
+    UE_LOG(LogTemp, Warning, TEXT("Misplaced Actors: %d"), MisplacedActors.Num());
+    
+    for (const auto& BiomePair : BiomeBoundaries)
     {
-        return EEng_BiomeType::SnowyMountain;
+        const FEng_BiomeBounds& Bounds = BiomePair.Value;
+        const FEng_BiomeConditions& Conditions = BiomeConditions[BiomePair.Key];
+        int32 ActorCount = CurrentActorCounts.Contains(BiomePair.Key) ? CurrentActorCounts[BiomePair.Key] : 0;
+        
+        UE_LOG(LogTemp, Warning, TEXT("--- %s ---"), *UEnum::GetValueAsString(BiomePair.Key));
+        UE_LOG(LogTemp, Warning, TEXT("  Center: (%.0f, %.0f, %.0f)"), 
+               Bounds.Center.X, Bounds.Center.Y, Bounds.Center.Z);
+        UE_LOG(LogTemp, Warning, TEXT("  Actors: %d"), ActorCount);
+        UE_LOG(LogTemp, Warning, TEXT("  Temp: %.1f°C, Humidity: %.1f%%"), 
+               Conditions.Temperature, Conditions.Humidity);
     }
-    else if (Elevation < -0.3f)
+}
+
+FVector ABiomeManager::GetRandomLocationInBounds(const FEng_BiomeBounds& Bounds) const
+{
+    float RandomX = FMath::RandRange(Bounds.MinBounds.X, Bounds.MaxBounds.X);
+    float RandomY = FMath::RandRange(Bounds.MinBounds.Y, Bounds.MaxBounds.Y);
+    float TerrainZ = SampleTerrainHeight(FVector(RandomX, RandomY, 0.0f));
+    
+    return FVector(RandomX, RandomY, TerrainZ + 100.0f); // 100cm above terrain
+}
+
+float ABiomeManager::SampleTerrainHeight(const FVector& Location) const
+{
+    UWorld* World = GetWorld();
+    if (!World)
+        return 0.0f;
+    
+    // Simple terrain height sampling
+    FHitResult HitResult;
+    FVector StartLocation = Location + FVector(0, 0, 5000.0f);
+    FVector EndLocation = Location - FVector(0, 0, 5000.0f);
+    
+    FCollisionQueryParams QueryParams;
+    QueryParams.bTraceComplex = false;
+    
+    if (World->LineTraceSingleByChannel(HitResult, StartLocation, EndLocation, ECC_WorldStatic, QueryParams))
     {
-        return EEng_BiomeType::Swamp;
+        return HitResult.Location.Z;
     }
-    else if (NormalizedNoise < 0.3f)
+    
+    return 0.0f; // Default ground level
+}
+
+bool ABiomeManager::IsActorTypeValidForBiome(AActor* Actor, EEng_BiomeType BiomeType) const
+{
+    if (!Actor)
+        return false;
+    
+    FString ActorName = Actor->GetClass()->GetName();
+    
+    switch (BiomeType)
     {
-        return EEng_BiomeType::Desert;
-    }
-    else if (NormalizedNoise < 0.6f)
-    {
-        return EEng_BiomeType::Savanna;
-    }
-    else
-    {
-        return EEng_BiomeType::Forest;
+        case EEng_BiomeType::Swamp:
+            return ActorName.Contains("Water") || ActorName.Contains("Mud") || ActorName.Contains("Swamp");
+            
+        case EEng_BiomeType::Forest:
+            return ActorName.Contains("Tree") || ActorName.Contains("Foliage") || ActorName.Contains("Forest");
+            
+        case EEng_BiomeType::Savanna:
+            return ActorName.Contains("Grass") || ActorName.Contains("Dinosaur") || ActorName.Contains("Rock");
+            
+        case EEng_BiomeType::Desert:
+            return ActorName.Contains("Sand") || ActorName.Contains("Dune") || ActorName.Contains("Cactus");
+            
+        case EEng_BiomeType::Mountain:
+            return ActorName.Contains("Rock") || ActorName.Contains("Stone") || ActorName.Contains("Mountain");
+            
+        default:
+            return true;
     }
 }
