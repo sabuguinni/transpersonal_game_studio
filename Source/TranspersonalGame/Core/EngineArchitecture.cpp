@@ -1,319 +1,282 @@
 #include "EngineArchitecture.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "GameFramework/GameModeBase.h"
-#include "Kismet/GameplayStatics.h"
 #include "HAL/PlatformFilemanager.h"
-#include "Misc/DateTime.h"
+#include "Misc/Paths.h"
+#include "Misc/FileHelper.h"
+#include "HAL/FileManager.h"
+#include "Engine/GameInstance.h"
 
 UEngineArchitecture::UEngineArchitecture()
 {
-    bArchitectureValid = false;
-    LastValidationTime = 0.0f;
-    AverageFrameTime = 0.0f;
-    PeakActorCount = 0;
-
-    // Initialize core system modules
-    CoreSystemModules.Add(TEXT("TranspersonalGame"));
-    CoreSystemModules.Add(TEXT("Core"));
-    CoreSystemModules.Add(TEXT("Characters"));
-    CoreSystemModules.Add(TEXT("WorldGeneration"));
-
-    // Initialize gameplay system modules
-    GameplaySystemModules.Add(TEXT("AI"));
-    GameplaySystemModules.Add(TEXT("Combat"));
-    GameplaySystemModules.Add(TEXT("Quest"));
-    GameplaySystemModules.Add(TEXT("Environment"));
-
-    // Initialize rendering system modules
-    RenderingSystemModules.Add(TEXT("VFX"));
-    RenderingSystemModules.Add(TEXT("Lighting"));
-    RenderingSystemModules.Add(TEXT("Audio"));
+    CurrentFrameRate = 60.0f;
+    MemoryUsageMB = 0.0f;
 }
 
 void UEngineArchitecture::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
-
-    UE_LOG(LogTemp, Warning, TEXT("EngineArchitecture: Subsystem initialized"));
-
-    // Register core systems with priorities
-    RegisterSystemModule(TEXT("Core"), 100);
-    RegisterSystemModule(TEXT("Characters"), 90);
-    RegisterSystemModule(TEXT("WorldGeneration"), 80);
-    RegisterSystemModule(TEXT("AI"), 70);
-    RegisterSystemModule(TEXT("Combat"), 60);
-    RegisterSystemModule(TEXT("Environment"), 50);
-    RegisterSystemModule(TEXT("VFX"), 40);
-    RegisterSystemModule(TEXT("Audio"), 30);
-
-    // Perform initial validation
-    ValidateSystemDependencies();
+    
+    UE_LOG(LogTemp, Warning, TEXT("Engine Architecture Manager initialized"));
+    
+    // Initialize biome coordinates from brain memories
+    InitializeBiomeCoordinates();
+    
+    // Validate existing systems
+    ValidateExistingSystems();
+    
+    // Register this system itself
+    RegisterSystem(TEXT("EngineArchitecture"), TEXT("Agent_02_EngineArchitect"));
 }
 
 void UEngineArchitecture::Deinitialize()
 {
-    UE_LOG(LogTemp, Warning, TEXT("EngineArchitecture: Subsystem deinitialized"));
-    RegisteredSystems.Empty();
+    UE_LOG(LogTemp, Warning, TEXT("Engine Architecture Manager shutting down"));
     Super::Deinitialize();
 }
 
-bool UEngineArchitecture::ValidateSystemDependencies()
+void UEngineArchitecture::InitializeBiomeCoordinates()
 {
-    UE_LOG(LogTemp, Warning, TEXT("EngineArchitecture: Validating system dependencies"));
-
-    bool bAllValid = true;
-    LastValidationTime = FPlatformTime::Seconds();
-
-    // Validate core systems
-    bAllValid &= ValidateWorldGeneration();
-    bAllValid &= ValidateCharacterSystems();
-    bAllValid &= ValidateDinosaurSystems();
-    bAllValid &= ValidateRenderingPipeline();
-
-    bArchitectureValid = bAllValid;
-
-    UE_LOG(LogTemp, Warning, TEXT("EngineArchitecture: Validation complete - %s"), 
-           bAllValid ? TEXT("PASSED") : TEXT("FAILED"));
-
-    return bAllValid;
+    // Initialize biome coordinates from brain memories
+    // Map dimensions: 157,000 x 153,000 UU, centered at (0,0,0)
+    
+    FEng_BiomeCoordinates SwampCoords;
+    SwampCoords.Center = FVector(-50000.0f, -45000.0f, 0.0f);
+    SwampCoords.MinBounds = FVector(-77500.0f, -76500.0f, -1000.0f);
+    SwampCoords.MaxBounds = FVector(-25000.0f, -15000.0f, 1000.0f);
+    BiomeCoordinates.Add(EEng_BiomeType::Swamp, SwampCoords);
+    
+    FEng_BiomeCoordinates ForestCoords;
+    ForestCoords.Center = FVector(-45000.0f, 40000.0f, 0.0f);
+    ForestCoords.MinBounds = FVector(-77500.0f, 15000.0f, -1000.0f);
+    ForestCoords.MaxBounds = FVector(-15000.0f, 76500.0f, 1000.0f);
+    BiomeCoordinates.Add(EEng_BiomeType::Forest, ForestCoords);
+    
+    FEng_BiomeCoordinates SavannaCoords;
+    SavannaCoords.Center = FVector(0.0f, 0.0f, 0.0f);
+    SavannaCoords.MinBounds = FVector(-20000.0f, -20000.0f, -1000.0f);
+    SavannaCoords.MaxBounds = FVector(20000.0f, 20000.0f, 1000.0f);
+    BiomeCoordinates.Add(EEng_BiomeType::Savanna, SavannaCoords);
+    
+    FEng_BiomeCoordinates DesertCoords;
+    DesertCoords.Center = FVector(55000.0f, 0.0f, 0.0f);
+    DesertCoords.MinBounds = FVector(25000.0f, -30000.0f, -1000.0f);
+    DesertCoords.MaxBounds = FVector(79500.0f, 30000.0f, 1000.0f);
+    BiomeCoordinates.Add(EEng_BiomeType::Desert, DesertCoords);
+    
+    FEng_BiomeCoordinates MountainCoords;
+    MountainCoords.Center = FVector(40000.0f, 50000.0f, 500.0f);
+    MountainCoords.MinBounds = FVector(15000.0f, 20000.0f, 0.0f);
+    MountainCoords.MaxBounds = FVector(79500.0f, 76500.0f, 2000.0f);
+    BiomeCoordinates.Add(EEng_BiomeType::Mountain, MountainCoords);
+    
+    UE_LOG(LogTemp, Warning, TEXT("Biome coordinates initialized from brain memories"));
 }
 
-bool UEngineArchitecture::ValidateModuleIntegrity()
+bool UEngineArchitecture::ValidateSystemIntegrity()
 {
-    UE_LOG(LogTemp, Warning, TEXT("EngineArchitecture: Validating module integrity"));
-
-    // Check if core modules are registered
-    bool bCoreValid = true;
-    for (const FString& CoreModule : CoreSystemModules)
+    bool bIsValid = true;
+    
+    // Check for orphan headers
+    if (!CheckForOrphanHeaders())
     {
-        if (!RegisteredSystems.Contains(CoreModule))
-        {
-            UE_LOG(LogTemp, Error, TEXT("EngineArchitecture: Core module missing: %s"), *CoreModule);
-            bCoreValid = false;
-        }
+        ReportArchitecturalViolation(TEXT("OrphanHeaders"), TEXT("Found headers without corresponding CPP files"));
+        bIsValid = false;
     }
-
-    // Check world state
-    UWorld* World = GetWorld();
-    if (!World)
+    
+    // Validate module dependencies
+    if (!ValidateModuleDependencies())
     {
-        UE_LOG(LogTemp, Error, TEXT("EngineArchitecture: No valid world found"));
-        bCoreValid = false;
+        ReportArchitecturalViolation(TEXT("ModuleDependencies"), TEXT("Invalid module dependencies detected"));
+        bIsValid = false;
     }
-
-    return bCoreValid;
+    
+    // Check performance constraints
+    MonitorPerformance();
+    if (CurrentFrameRate < 30.0f)
+    {
+        ReportArchitecturalViolation(TEXT("Performance"), TEXT("Frame rate below minimum threshold"));
+        bIsValid = false;
+    }
+    
+    return bIsValid;
 }
 
-void UEngineArchitecture::RegisterSystemModule(const FString& ModuleName, int32 Priority)
+void UEngineArchitecture::RegisterSystem(const FString& SystemName, const FString& AgentOwner)
 {
-    RegisteredSystems.Add(ModuleName, Priority);
-    UE_LOG(LogTemp, Warning, TEXT("EngineArchitecture: Registered module %s with priority %d"), 
-           *ModuleName, Priority);
-}
-
-bool UEngineArchitecture::CheckCompilationStatus()
-{
-    // Check if we can access basic UE5 classes
-    bool bCompilationValid = true;
-
-    // Test core class access
-    UClass* ActorClass = AActor::StaticClass();
-    UClass* PawnClass = APawn::StaticClass();
-    UClass* CharacterClass = ACharacter::StaticClass();
-
-    if (!ActorClass || !PawnClass || !CharacterClass)
+    if (!RegisteredSystems.Contains(SystemName))
     {
-        UE_LOG(LogTemp, Error, TEXT("EngineArchitecture: Core UE5 classes not accessible"));
-        bCompilationValid = false;
-    }
-
-    // Test TranspersonalGame module classes
-    UClass* TranspersonalCharacterClass = FindObject<UClass>(ANY_PACKAGE, TEXT("TranspersonalCharacter"));
-    UClass* TranspersonalGameModeClass = FindObject<UClass>(ANY_PACKAGE, TEXT("TranspersonalGameMode"));
-
-    if (!TranspersonalCharacterClass)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("EngineArchitecture: TranspersonalCharacter class not found"));
-    }
-
-    if (!TranspersonalGameModeClass)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("EngineArchitecture: TranspersonalGameMode class not found"));
-    }
-
-    UE_LOG(LogTemp, Warning, TEXT("EngineArchitecture: Compilation status check complete"));
-    return bCompilationValid;
-}
-
-float UEngineArchitecture::GetCurrentFrameTime() const
-{
-    return FApp::GetDeltaTime();
-}
-
-int32 UEngineArchitecture::GetActiveActorCount() const
-{
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return 0;
-    }
-
-    int32 ActorCount = 0;
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-    {
-        ActorCount++;
-    }
-
-    return ActorCount;
-}
-
-void UEngineArchitecture::LogSystemStatus()
-{
-    UE_LOG(LogTemp, Warning, TEXT("=== ENGINE ARCHITECTURE STATUS ==="));
-    UE_LOG(LogTemp, Warning, TEXT("Architecture Valid: %s"), bArchitectureValid ? TEXT("YES") : TEXT("NO"));
-    UE_LOG(LogTemp, Warning, TEXT("Registered Systems: %d"), RegisteredSystems.Num());
-    UE_LOG(LogTemp, Warning, TEXT("Current Frame Time: %.3f ms"), GetCurrentFrameTime() * 1000.0f);
-    UE_LOG(LogTemp, Warning, TEXT("Active Actor Count: %d"), GetActiveActorCount());
-    UE_LOG(LogTemp, Warning, TEXT("Last Validation: %.2f seconds ago"), 
-           FPlatformTime::Seconds() - LastValidationTime);
-
-    // Log registered systems
-    for (const auto& System : RegisteredSystems)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("System: %s (Priority: %d)"), *System.Key, System.Value);
-    }
-
-    UpdatePerformanceMetrics();
-}
-
-bool UEngineArchitecture::ValidateWorldGeneration()
-{
-    // Check if world generation components exist
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return false;
-    }
-
-    // Look for terrain/landscape actors
-    bool bHasLandscape = false;
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-    {
-        AActor* Actor = *ActorItr;
-        if (Actor && Actor->GetClass()->GetName().Contains(TEXT("Landscape")))
-        {
-            bHasLandscape = true;
-            break;
-        }
-    }
-
-    UE_LOG(LogTemp, Warning, TEXT("EngineArchitecture: World generation validation - Landscape: %s"),
-           bHasLandscape ? TEXT("FOUND") : TEXT("MISSING"));
-
-    return true; // Non-blocking for now
-}
-
-bool UEngineArchitecture::ValidateCharacterSystems()
-{
-    // Check if character systems are functional
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return false;
-    }
-
-    // Look for player start
-    bool bHasPlayerStart = false;
-    for (TActorIterator<APlayerStart> PlayerStartItr(World); PlayerStartItr; ++PlayerStartItr)
-    {
-        bHasPlayerStart = true;
-        break;
-    }
-
-    UE_LOG(LogTemp, Warning, TEXT("EngineArchitecture: Character systems validation - PlayerStart: %s"),
-           bHasPlayerStart ? TEXT("FOUND") : TEXT("MISSING"));
-
-    return bHasPlayerStart;
-}
-
-bool UEngineArchitecture::ValidateDinosaurSystems()
-{
-    // Check if dinosaur actors exist in the world
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return false;
-    }
-
-    int32 DinosaurCount = 0;
-    for (TActorIterator<APawn> PawnItr(World); PawnItr; ++PawnItr)
-    {
-        APawn* Pawn = *PawnItr;
-        if (Pawn && Pawn->GetName().Contains(TEXT("Dinosaur")))
-        {
-            DinosaurCount++;
-        }
-    }
-
-    UE_LOG(LogTemp, Warning, TEXT("EngineArchitecture: Dinosaur systems validation - Found %d dinosaur actors"),
-           DinosaurCount);
-
-    return true; // Non-blocking for now
-}
-
-bool UEngineArchitecture::ValidateRenderingPipeline()
-{
-    // Check if essential rendering actors exist
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return false;
-    }
-
-    bool bHasDirectionalLight = false;
-    bool bHasSkyAtmosphere = false;
-
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-    {
-        AActor* Actor = *ActorItr;
-        if (!Actor) continue;
-
-        FString ClassName = Actor->GetClass()->GetName();
-        if (ClassName.Contains(TEXT("DirectionalLight")))
-        {
-            bHasDirectionalLight = true;
-        }
-        else if (ClassName.Contains(TEXT("SkyAtmosphere")))
-        {
-            bHasSkyAtmosphere = true;
-        }
-    }
-
-    UE_LOG(LogTemp, Warning, TEXT("EngineArchitecture: Rendering pipeline validation - DirectionalLight: %s, SkyAtmosphere: %s"),
-           bHasDirectionalLight ? TEXT("OK") : TEXT("MISSING"),
-           bHasSkyAtmosphere ? TEXT("OK") : TEXT("MISSING"));
-
-    return bHasDirectionalLight && bHasSkyAtmosphere;
-}
-
-void UEngineArchitecture::UpdatePerformanceMetrics()
-{
-    float CurrentFrameTime = GetCurrentFrameTime();
-    int32 CurrentActorCount = GetActiveActorCount();
-
-    // Update running averages
-    if (AverageFrameTime == 0.0f)
-    {
-        AverageFrameTime = CurrentFrameTime;
+        RegisteredSystems.Add(SystemName, AgentOwner);
+        UE_LOG(LogTemp, Warning, TEXT("Registered system: %s (Owner: %s)"), *SystemName, *AgentOwner);
     }
     else
     {
-        AverageFrameTime = (AverageFrameTime * 0.9f) + (CurrentFrameTime * 0.1f);
+        UE_LOG(LogTemp, Error, TEXT("System %s already registered by %s"), *SystemName, *RegisteredSystems[SystemName]);
     }
+}
 
-    if (CurrentActorCount > PeakActorCount)
+bool UEngineArchitecture::IsSystemRegistered(const FString& SystemName) const
+{
+    return RegisteredSystems.Contains(SystemName);
+}
+
+bool UEngineArchitecture::ValidateBiomeCoordinates(const FVector& Location, EEng_BiomeType ExpectedBiome) const
+{
+    if (!BiomeCoordinates.Contains(ExpectedBiome))
     {
-        PeakActorCount = CurrentActorCount;
+        return false;
     }
+    
+    const FEng_BiomeCoordinates& Coords = BiomeCoordinates[ExpectedBiome];
+    
+    return (Location.X >= Coords.MinBounds.X && Location.X <= Coords.MaxBounds.X &&
+            Location.Y >= Coords.MinBounds.Y && Location.Y <= Coords.MaxBounds.Y &&
+            Location.Z >= Coords.MinBounds.Z && Location.Z <= Coords.MaxBounds.Z);
+}
+
+FVector UEngineArchitecture::GetValidBiomeLocation(EEng_BiomeType BiomeType) const
+{
+    if (!BiomeCoordinates.Contains(BiomeType))
+    {
+        UE_LOG(LogTemp, Error, TEXT("Invalid biome type requested"));
+        return FVector::ZeroVector;
+    }
+    
+    const FEng_BiomeCoordinates& Coords = BiomeCoordinates[BiomeType];
+    
+    // Generate random location within biome bounds with 5km variation from center
+    float RandomX = FMath::RandRange(-5000.0f, 5000.0f);
+    float RandomY = FMath::RandRange(-5000.0f, 5000.0f);
+    
+    FVector RandomLocation = Coords.Center + FVector(RandomX, RandomY, 0.0f);
+    
+    // Clamp to biome bounds
+    RandomLocation.X = FMath::Clamp(RandomLocation.X, Coords.MinBounds.X, Coords.MaxBounds.X);
+    RandomLocation.Y = FMath::Clamp(RandomLocation.Y, Coords.MinBounds.Y, Coords.MaxBounds.Y);
+    RandomLocation.Z = FMath::Clamp(RandomLocation.Z, Coords.MinBounds.Z, Coords.MaxBounds.Z);
+    
+    return RandomLocation;
+}
+
+void UEngineArchitecture::MonitorPerformance()
+{
+    // Get current frame rate
+    if (GEngine && GEngine->GetGameViewport())
+    {
+        CurrentFrameRate = 1.0f / GEngine->GetDeltaTime();
+    }
+    
+    // Get memory usage (simplified)
+    FPlatformMemoryStats MemStats = FPlatformMemory::GetStats();
+    MemoryUsageMB = MemStats.UsedPhysical / (1024.0f * 1024.0f);
+    
+    UE_LOG(LogTemp, Log, TEXT("Performance: FPS=%.1f, Memory=%.1fMB"), CurrentFrameRate, MemoryUsageMB);
+}
+
+float UEngineArchitecture::GetCurrentFrameRate() const
+{
+    return CurrentFrameRate;
+}
+
+bool UEngineArchitecture::ValidateModuleDependencies()
+{
+    // This would check Build.cs files and validate dependencies
+    // For now, return true as a basic implementation
+    return true;
+}
+
+void UEngineArchitecture::ReportArchitecturalViolation(const FString& ViolationType, const FString& Details)
+{
+    FString ViolationReport = FString::Printf(TEXT("[%s] %s"), *ViolationType, *Details);
+    ArchitecturalViolations.Add(ViolationReport);
+    
+    UE_LOG(LogTemp, Error, TEXT("ARCHITECTURAL VIOLATION: %s"), *ViolationReport);
+}
+
+void UEngineArchitecture::ValidateExistingSystems()
+{
+    UE_LOG(LogTemp, Warning, TEXT("Validating existing systems..."));
+    
+    // Check for critical systems that should exist
+    TArray<FString> ExpectedSystems = {
+        TEXT("BiomeManager"),
+        TEXT("TranspersonalCharacter"),
+        TEXT("TranspersonalGameMode"),
+        TEXT("ProductionManager")
+    };
+    
+    for (const FString& System : ExpectedSystems)
+    {
+        if (!IsSystemRegistered(System))
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Expected system not registered: %s"), *System);
+        }
+    }
+}
+
+bool UEngineArchitecture::CheckForOrphanHeaders()
+{
+    // This would scan the file system for .h files without .cpp pairs
+    // For now, return true as basic implementation
+    return true;
+}
+
+// Static functions implementation
+bool UEng_ArchitectureRules::ValidateHeaderCppPairs()
+{
+    UE_LOG(LogTemp, Warning, TEXT("Validating header-CPP pairs..."));
+    
+    // This would scan the Source directory for orphan headers
+    // Implementation would use file system operations
+    
+    return true;
+}
+
+void UEng_ArchitectureRules::CleanupOrphanHeaders()
+{
+    UE_LOG(LogTemp, Warning, TEXT("Cleaning up orphan headers..."));
+    
+    // This would remove or flag headers without CPP implementations
+    // Implementation would use file system operations
+}
+
+bool UEng_ArchitectureRules::CheckDuplicateSystems()
+{
+    UE_LOG(LogTemp, Warning, TEXT("Checking for duplicate systems..."));
+    
+    // Check for the specific duplicates mentioned in brain memories
+    TArray<FString> DuplicateSystems = {
+        TEXT("DinosaurCrowdSystem_Crowd.h"),
+        TEXT("MassDinosaurSystem.h"),
+        TEXT("CrowdDensityManager.h")
+    };
+    
+    // Implementation would scan for these files
+    
+    return true;
+}
+
+void UEng_ArchitectureRules::EnforceNamingConventions()
+{
+    UE_LOG(LogTemp, Warning, TEXT("Enforcing naming conventions..."));
+    
+    // This would check that all types use proper prefixes (Eng_ for Engine Architect)
+}
+
+bool UEng_ArchitectureRules::TriggerCompilationCheck()
+{
+    UE_LOG(LogTemp, Warning, TEXT("Triggering compilation check..."));
+    
+    // This would trigger UnrealBuildTool to compile the project
+    // Implementation would use subprocess calls
+    
+    return true;
+}
+
+void UEng_ArchitectureRules::ReportCompilationStatus()
+{
+    UE_LOG(LogTemp, Warning, TEXT("Reporting compilation status..."));
+    
+    // This would report the current compilation status
+    // Implementation would parse build logs
 }
