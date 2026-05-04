@@ -2,206 +2,209 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Components/ActorComponent.h"
 #include "Engine/World.h"
-#include "Components/StaticMeshComponent.h"
-#include "Components/SkeletalMeshComponent.h"
-#include "Components/PrimitiveComponent.h"
-#include "PhysicsEngine/PhysicsSettings.h"
-#include "../../SharedTypes.h"
+#include "Components/ActorComponent.h"
+#include "SharedTypes.h"
 #include "Core_PhysicsSystemManager.generated.h"
 
-class UCore_CollisionManager;
-class UCore_DestructionSystem;
-class UCore_RagdollManager;
+UENUM(BlueprintType)
+enum class ECore_PhysicsMode : uint8
+{
+    Realistic       UMETA(DisplayName = "Realistic Physics"),
+    Arcade         UMETA(DisplayName = "Arcade Physics"),
+    Cinematic      UMETA(DisplayName = "Cinematic Physics"),
+    Disabled       UMETA(DisplayName = "Physics Disabled")
+};
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCore_PhysicsSettings
+struct FCore_PhysicsSettings
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    float GlobalGravityScale = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Settings")
+    float GravityScale = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    float DefaultMass = 100.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Settings")
+    float LinearDamping = 0.01f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    float DefaultFriction = 0.7f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Settings")
+    float AngularDamping = 0.01f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    float DefaultRestitution = 0.3f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Settings")
+    float MaxPhysicsStepDeltaTime = 0.05f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    bool bEnableAdvancedPhysics = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Settings")
+    int32 MaxSubsteps = 6;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Settings")
+    bool bEnableCCD = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Settings")
+    bool bEnableAsyncScene = true;
 
     FCore_PhysicsSettings()
     {
-        GlobalGravityScale = 1.0f;
-        DefaultMass = 100.0f;
-        DefaultFriction = 0.7f;
-        DefaultRestitution = 0.3f;
-        bEnableAdvancedPhysics = true;
+        GravityScale = 1.0f;
+        LinearDamping = 0.01f;
+        AngularDamping = 0.01f;
+        MaxPhysicsStepDeltaTime = 0.05f;
+        MaxSubsteps = 6;
+        bEnableCCD = true;
+        bEnableAsyncScene = true;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCore_PhysicsObjectData
+struct FCore_PhysicsPerformanceMetrics
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    AActor* PhysicsActor = nullptr;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float PhysicsStepTime = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    UPrimitiveComponent* PhysicsComponent = nullptr;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    int32 ActiveRigidBodies = 0;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    float Mass = 100.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    int32 SleepingRigidBodies = 0;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    bool bSimulatePhysics = true;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    int32 ActiveConstraints = 0;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    ECore_BiomeType BiomeLocation = ECore_BiomeType::Savanna;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float MemoryUsageMB = 0.0f;
 
-    FCore_PhysicsObjectData()
+    FCore_PhysicsPerformanceMetrics()
     {
-        PhysicsActor = nullptr;
-        PhysicsComponent = nullptr;
-        Mass = 100.0f;
-        bSimulatePhysics = true;
-        BiomeLocation = ECore_BiomeType::Savanna;
+        PhysicsStepTime = 0.0f;
+        ActiveRigidBodies = 0;
+        SleepingRigidBodies = 0;
+        ActiveConstraints = 0;
+        MemoryUsageMB = 0.0f;
     }
 };
 
 /**
- * Core Physics System Manager - Coordinates all physics systems in the prehistoric survival game
- * Manages collision detection, destruction, ragdoll physics, and environmental interactions
- * Integrates with BiomeManager for location-based physics properties
+ * Core Physics System Manager
+ * Manages all physics systems in the game including collision, ragdoll, destruction
+ * Provides centralized physics configuration and performance monitoring
  */
-UCLASS(BlueprintType, Blueprintable, meta = (BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UCore_PhysicsSystemManager : public UActorComponent
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API ACore_PhysicsSystemManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UCore_PhysicsSystemManager();
+    ACore_PhysicsSystemManager();
 
 protected:
     virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
-public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    // Physics Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Configuration")
+    ECore_PhysicsMode PhysicsMode = ECore_PhysicsMode::Realistic;
 
-    // Core Physics Management
-    UFUNCTION(BlueprintCallable, Category = "Physics")
-    void InitializePhysicsSystem();
-
-    UFUNCTION(BlueprintCallable, Category = "Physics")
-    void ShutdownPhysicsSystem();
-
-    UFUNCTION(BlueprintCallable, Category = "Physics")
-    bool EnablePhysicsOnActor(AActor* Actor, float Mass = 100.0f);
-
-    UFUNCTION(BlueprintCallable, Category = "Physics")
-    bool DisablePhysicsOnActor(AActor* Actor);
-
-    // Physics Object Registration
-    UFUNCTION(BlueprintCallable, Category = "Physics")
-    void RegisterPhysicsObject(AActor* Actor, const FCore_PhysicsObjectData& PhysicsData);
-
-    UFUNCTION(BlueprintCallable, Category = "Physics")
-    void UnregisterPhysicsObject(AActor* Actor);
-
-    UFUNCTION(BlueprintCallable, Category = "Physics")
-    TArray<FCore_PhysicsObjectData> GetAllPhysicsObjects() const;
-
-    // Environmental Physics
-    UFUNCTION(BlueprintCallable, Category = "Physics")
-    void ApplyBiomePhysicsProperties(AActor* Actor, ECore_BiomeType BiomeType);
-
-    UFUNCTION(BlueprintCallable, Category = "Physics")
-    void ApplyEnvironmentalForces(AActor* Actor, const FVector& Force, const FVector& Location);
-
-    // Collision Management
-    UFUNCTION(BlueprintCallable, Category = "Physics")
-    void SetupCollisionForActor(AActor* Actor, ECore_CollisionType CollisionType);
-
-    UFUNCTION(BlueprintCallable, Category = "Physics")
-    bool CheckCollisionBetweenActors(AActor* ActorA, AActor* ActorB);
-
-    // Destruction System Integration
-    UFUNCTION(BlueprintCallable, Category = "Physics")
-    void TriggerDestruction(AActor* Actor, const FVector& ImpactPoint, float ImpactForce);
-
-    UFUNCTION(BlueprintCallable, Category = "Physics")
-    void CreateDestructionFragments(AActor* Actor, int32 FragmentCount = 5);
-
-    // Ragdoll System Integration
-    UFUNCTION(BlueprintCallable, Category = "Physics")
-    void EnableRagdollPhysics(AActor* Character);
-
-    UFUNCTION(BlueprintCallable, Category = "Physics")
-    void DisableRagdollPhysics(AActor* Character);
-
-    // Physics Simulation Control
-    UFUNCTION(BlueprintCallable, Category = "Physics")
-    void SetGlobalPhysicsSettings(const FCore_PhysicsSettings& NewSettings);
-
-    UFUNCTION(BlueprintCallable, Category = "Physics")
-    FCore_PhysicsSettings GetGlobalPhysicsSettings() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Physics")
-    void PausePhysicsSimulation();
-
-    UFUNCTION(BlueprintCallable, Category = "Physics")
-    void ResumePhysicsSimulation();
-
-    // Performance Monitoring
-    UFUNCTION(BlueprintCallable, Category = "Physics")
-    int32 GetActivePhysicsObjectCount() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Physics")
-    float GetPhysicsPerformanceMetrics() const;
-
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Physics")
-    void ValidatePhysicsSystem();
-
-protected:
-    // Physics Settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics", meta = (AllowPrivateAccess = "true"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Configuration")
     FCore_PhysicsSettings PhysicsSettings;
 
-    // Subsystem References
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Physics", meta = (AllowPrivateAccess = "true"))
-    UCore_CollisionManager* CollisionManager;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Configuration")
+    bool bEnablePhysicsDebugDraw = false;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Physics", meta = (AllowPrivateAccess = "true"))
-    UCore_DestructionSystem* DestructionSystem;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Configuration")
+    bool bEnablePerformanceMonitoring = true;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Physics", meta = (AllowPrivateAccess = "true"))
-    UCore_RagdollManager* RagdollManager;
-
-    // Physics Object Tracking
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Physics", meta = (AllowPrivateAccess = "true"))
-    TArray<FCore_PhysicsObjectData> RegisteredPhysicsObjects;
+    // Biome-specific physics settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Physics")
+    TMap<EBiomeType, FCore_PhysicsSettings> BiomePhysicsSettings;
 
     // Performance Monitoring
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Physics", meta = (AllowPrivateAccess = "true"))
-    int32 ActivePhysicsObjectCount = 0;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    FCore_PhysicsPerformanceMetrics CurrentMetrics;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Physics", meta = (AllowPrivateAccess = "true"))
-    float LastFramePhysicsTime = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float MetricsUpdateInterval = 1.0f;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Physics", meta = (AllowPrivateAccess = "true"))
-    bool bPhysicsSystemInitialized = false;
+    // Component References
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class UCore_CollisionManagerComponent* CollisionManager;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class UCore_RagdollManagerComponent* RagdollManager;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class UCore_DestructionManagerComponent* DestructionManager;
 
 private:
-    // Internal helper functions
-    void InitializeSubsystems();
-    void CleanupSubsystems();
-    UPrimitiveComponent* GetPrimaryPhysicsComponent(AActor* Actor);
-    void UpdatePhysicsPerformanceMetrics(float DeltaTime);
+    // Internal state
+    float MetricsTimer = 0.0f;
+    bool bIsInitialized = false;
+
+    // Physics world references
+    UPROPERTY()
+    UWorld* CachedWorld;
+
+public:
+    // Physics System Interface
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void InitializePhysicsSystem();
+
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void ShutdownPhysicsSystem();
+
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void SetPhysicsMode(ECore_PhysicsMode NewMode);
+
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void ApplyPhysicsSettings(const FCore_PhysicsSettings& NewSettings);
+
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void SetBiomePhysicsSettings(EBiomeType BiomeType, const FCore_PhysicsSettings& Settings);
+
+    // Performance Monitoring
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void UpdatePerformanceMetrics();
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    FCore_PhysicsPerformanceMetrics GetCurrentMetrics() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    bool IsPerformanceAcceptable() const;
+
+    // Debug Functions
+    UFUNCTION(BlueprintCallable, Category = "Debug", CallInEditor)
+    void TogglePhysicsDebugDraw();
+
+    UFUNCTION(BlueprintCallable, Category = "Debug", CallInEditor)
+    void LogPhysicsStatus();
+
+    UFUNCTION(BlueprintCallable, Category = "Debug", CallInEditor)
+    void ValidatePhysicsSetup();
+
+    // Utility Functions
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    FCore_PhysicsSettings GetBiomePhysicsSettings(EBiomeType BiomeType) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void RegisterPhysicsActor(AActor* Actor);
+
+    UFUNCTION(BlueprintCallable, Category = "Physics System")
+    void UnregisterPhysicsActor(AActor* Actor);
+
+    // Static Access
+    UFUNCTION(BlueprintCallable, Category = "Physics System", meta = (CallInEditor = "true"))
+    static ACore_PhysicsSystemManager* GetPhysicsSystemManager(UWorld* World);
+
+private:
+    // Internal implementation
+    void InitializeComponents();
+    void ConfigureWorldPhysics();
+    void UpdatePhysicsSettings();
+    void CollectPerformanceData();
+    void ValidateConfiguration();
+
+    // Registered actors for physics management
+    UPROPERTY()
+    TArray<AActor*> RegisteredPhysicsActors;
 };
