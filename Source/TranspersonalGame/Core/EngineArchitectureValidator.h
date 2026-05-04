@@ -1,101 +1,16 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Subsystems/GameInstanceSubsystem.h"
-#include "Engine/Engine.h"
-#include "Engine/World.h"
+#include "Engine/GameInstanceSubsystem.h"
+#include "SharedTypes.h"
 #include "EngineArchitectureValidator.generated.h"
 
-UENUM(BlueprintType)
-enum class EArchitectureValidationResult : uint8
-{
-    Valid,
-    Warning,
-    Error,
-    Critical
-};
-
-USTRUCT(BlueprintType)
-struct FArchitectureValidation
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly)
-    FString SystemName;
-
-    UPROPERTY(BlueprintReadOnly)
-    EArchitectureValidationResult Result;
-
-    UPROPERTY(BlueprintReadOnly)
-    FString Message;
-
-    UPROPERTY(BlueprintReadOnly)
-    FString Recommendation;
-
-    FArchitectureValidation()
-    {
-        Result = EArchitectureValidationResult::Valid;
-    }
-
-    FArchitectureValidation(const FString& InSystemName, EArchitectureValidationResult InResult, 
-                           const FString& InMessage, const FString& InRecommendation = TEXT(""))
-        : SystemName(InSystemName), Result(InResult), Message(InMessage), Recommendation(InRecommendation)
-    {
-    }
-};
-
-USTRUCT(BlueprintType)
-struct FEngineRequirements
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly)
-    bool bRequiresWorldPartition;
-
-    UPROPERTY(BlueprintReadOnly)
-    bool bRequiresNanite;
-
-    UPROPERTY(BlueprintReadOnly)
-    bool bRequiresLumen;
-
-    UPROPERTY(BlueprintReadOnly)
-    bool bRequiresVirtualShadowMaps;
-
-    UPROPERTY(BlueprintReadOnly)
-    bool bRequiresMassEntity;
-
-    UPROPERTY(BlueprintReadOnly)
-    bool bRequiresPCG;
-
-    UPROPERTY(BlueprintReadOnly)
-    int32 MinimumWorldSize;
-
-    UPROPERTY(BlueprintReadOnly)
-    int32 TargetFrameRate;
-
-    UPROPERTY(BlueprintReadOnly)
-    FString TargetPlatform;
-
-    FEngineRequirements()
-    {
-        bRequiresWorldPartition = true;
-        bRequiresNanite = true;
-        bRequiresLumen = true;
-        bRequiresVirtualShadowMaps = true;
-        bRequiresMassEntity = true;
-        bRequiresPCG = true;
-        MinimumWorldSize = 4000; // 4km x 4km minimum
-        TargetFrameRate = 60;
-        TargetPlatform = TEXT("PC/Console");
-    }
-};
-
 /**
- * Engine Architecture Validator
- * Validates that UE5 systems meet the requirements for Transpersonal Game
- * Ensures all required features are available and properly configured
+ * Engine Architecture Validator - Critical System Validation
+ * Enforces architectural rules and validates system integrity
+ * Agent #2 (Engine Architect) responsibility
  */
-UCLASS(BlueprintType, Blueprintable)
+UCLASS()
 class TRANSPERSONALGAME_API UEngineArchitectureValidator : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
@@ -103,74 +18,71 @@ class TRANSPERSONALGAME_API UEngineArchitectureValidator : public UGameInstanceS
 public:
     UEngineArchitectureValidator();
 
-    // USubsystem interface
+    // Subsystem overrides
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
 
-    // Core Validation Functions
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    TArray<FArchitectureValidation> ValidateEngineArchitecture();
+    // Core validation methods
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    bool ValidateSystemIntegrity();
 
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    FArchitectureValidation ValidateWorldPartition();
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    bool ValidateBiomeCoordinates();
 
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    FArchitectureValidation ValidateNaniteSupport();
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    bool ValidateModuleDependencies();
 
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    FArchitectureValidation ValidateLumenSupport();
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    void LogSystemStatus();
 
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    FArchitectureValidation ValidateVirtualShadowMaps();
+    // Biome coordinate validation (from brain memories)
+    UFUNCTION(BlueprintCallable, Category = "Biomes")
+    bool IsLocationInValidBiome(FVector Location, EBiomeType BiomeType);
 
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    FArchitectureValidation ValidateMassEntitySystem();
+    UFUNCTION(BlueprintCallable, Category = "Biomes")
+    EBiomeType GetBiomeAtLocation(FVector Location);
 
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    FArchitectureValidation ValidatePCGSystem();
+    // Performance validation
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    bool ValidatePerformanceTargets();
 
-    // Performance Validation
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    FArchitectureValidation ValidatePerformanceTargets();
+    // Module validation
+    UFUNCTION(BlueprintCallable, Category = "Modules")
+    TArray<FString> GetMissingCppFiles();
 
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    FArchitectureValidation ValidateMemoryRequirements();
-
-    // Project Configuration Validation
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    FArchitectureValidation ValidateProjectSettings();
-
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    FArchitectureValidation ValidateRenderingSettings();
-
-    // Utility Functions
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Engine Architecture")
-    FEngineRequirements GetEngineRequirements() const { return Requirements; }
-
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    bool IsArchitectureValid();
-
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    void GenerateArchitectureReport();
-
-    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
-    void ApplyRecommendedSettings();
+    UFUNCTION(BlueprintCallable, Category = "Modules")
+    TArray<FString> GetOrphanedHeaders();
 
 protected:
-    UPROPERTY()
-    FEngineRequirements Requirements;
+    // Biome boundaries (from brain memories)
+    UPROPERTY(BlueprintReadOnly, Category = "Biomes")
+    TMap<EBiomeType, FBiomeBounds> BiomeBoundaries;
 
-    UPROPERTY()
-    TArray<FArchitectureValidation> LastValidationResults;
+    // System validation flags
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    bool bSystemIntegrityValid;
 
-    // Internal validation helpers
-    bool CheckFeatureAvailability(const FString& FeatureName, UClass* RequiredClass);
-    bool CheckProjectSetting(const FString& SettingPath, const FString& ExpectedValue);
-    bool CheckRenderingFeature(const FString& FeatureName);
-    void LogValidationResult(const FArchitectureValidation& Result);
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    bool bBiomeCoordinatesValid;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    bool bModuleDependenciesValid;
+
+    // Performance metrics
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float LastFrameTime;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    int32 ActiveActorCount;
 
 private:
-    // Cache for validation results
-    bool bValidationCacheValid;
-    float LastValidationTime;
-    static constexpr float ValidationCacheTimeout = 30.0f; // 30 seconds
+    // Internal validation helpers
+    void InitializeBiomeBoundaries();
+    bool ValidateFileStructure();
+    bool ValidateClassHierarchy();
+    void LogValidationResults();
+
+    // Validation timers
+    FTimerHandle ValidationTimerHandle;
+    void PerformPeriodicValidation();
 };
