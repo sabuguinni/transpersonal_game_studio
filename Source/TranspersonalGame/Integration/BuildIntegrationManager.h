@@ -1,197 +1,125 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/GameInstanceSubsystem.h"
-#include "Engine/World.h"
-#include "SharedTypes.h"
+#include "Components/ActorComponent.h"
+#include "Engine/Engine.h"
+#include "TranspersonalGame/SharedTypes.h"
 #include "BuildIntegrationManager.generated.h"
 
-DECLARE_LOG_CATEGORY_EXTERN(LogBuildIntegration, Log, All);
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_CompilationStatus
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly, Category = "Build")
-    bool bIsCompiled = false;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Build")
-    int32 ErrorCount = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Build")
-    int32 WarningCount = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Build")
-    FString LastBuildTime;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Build")
-    TArray<FString> ErrorMessages;
-
-    FBuild_CompilationStatus()
-    {
-        bIsCompiled = false;
-        ErrorCount = 0;
-        WarningCount = 0;
-        LastBuildTime = TEXT("Never");
-    }
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_ModuleStatus
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly, Category = "Module")
-    FString ModuleName;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Module")
-    bool bIsLoaded = false;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Module")
-    int32 ClassCount = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Module")
-    TArray<FString> LoadedClasses;
-
-    FBuild_ModuleStatus()
-    {
-        ModuleName = TEXT("Unknown");
-        bIsLoaded = false;
-        ClassCount = 0;
-    }
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_ActorInventory
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly, Category = "Actors")
-    FString ActorClass;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Actors")
-    int32 Count = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Actors")
-    bool bHasDuplicates = false;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Actors")
-    TArray<FString> ActorNames;
-
-    FBuild_ActorInventory()
-    {
-        ActorClass = TEXT("Unknown");
-        Count = 0;
-        bHasDuplicates = false;
-    }
-};
-
 /**
- * Build Integration Manager - Coordena integração entre todos os sistemas
- * Responsável por validação de compilação, limpeza de duplicados, e orquestração
+ * Sistema de integração e validação de builds
+ * Responsável por validar a integridade do projeto e coordenar sistemas
  */
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UBuildIntegrationManager : public UGameInstanceSubsystem
+UCLASS(ClassGroup=(TranspersonalGame), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UBuildIntegrationManager : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
     UBuildIntegrationManager();
 
-    // USubsystem interface
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
+protected:
+    virtual void BeginPlay() override;
 
-    // Compilation Status
+public:
+    /** Iniciar validação completa de integração */
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    FBuild_CompilationStatus GetCompilationStatus() const;
+    void StartIntegrationValidation();
 
+    /** Validar estrutura de ficheiros do projeto */
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    void RefreshCompilationStatus();
+    bool ValidateFileStructure();
 
-    UFUNCTION(BlueprintCallable, Category = "Build Integration", CallInEditor = true)
-    bool ValidateAllModules();
-
-    // Module Management
+    /** Validar dependências de módulos */
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    TArray<FBuild_ModuleStatus> GetModuleStatuses() const;
+    bool ValidateModuleDependencies();
 
+    /** Validar actores no mapa actual */
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool IsModuleLoaded(const FString& ModuleName) const;
+    bool ValidateMapActors();
 
+    /** Validar sistemas críticos */
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    TArray<FString> GetLoadedClasses(const FString& ModuleName) const;
+    bool ValidateCriticalSystems();
 
-    // Actor Management
+    /** Gerar relatório completo de integração */
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    TArray<FBuild_ActorInventory> GetActorInventory() const;
+    FBuild_IntegrationReport GenerateIntegrationReport();
 
-    UFUNCTION(BlueprintCallable, Category = "Build Integration", CallInEditor = true)
-    int32 CleanupDuplicateActors();
-
+    /** Configurar intervalo de validação automática */
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool HasDuplicateLightingActors() const;
+    void SetValidationInterval(float NewInterval);
 
-    // Integration Validation
-    UFUNCTION(BlueprintCallable, Category = "Build Integration", CallInEditor = true)
-    bool ValidateSystemIntegration();
-
+    /** Activar/desactivar integração contínua */
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    TArray<FString> GetIntegrationErrors() const;
+    void EnableContinuousIntegration(bool bEnable);
 
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool CanSystemsIntegrate(const FString& SystemA, const FString& SystemB) const;
-
-    // Build Orchestration
-    UFUNCTION(BlueprintCallable, Category = "Build Integration", CallInEditor = true)
-    void TriggerFullBuildValidation();
-
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    float GetBuildProgress() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    FString GetCurrentBuildPhase() const;
+    /** Verificar se a integração está saudável */
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Build Integration")
+    bool IsIntegrationHealthy() const;
 
 protected:
-    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
-    FBuild_CompilationStatus CurrentCompilationStatus;
+    /** Estado actual da integração */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Integration State")
+    EBuild_IntegrationState IntegrationState;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
-    TArray<FBuild_ModuleStatus> ModuleStatuses;
+    /** Última vez que a validação foi executada */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Integration State")
+    FDateTime LastValidationTime;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
-    TArray<FBuild_ActorInventory> ActorInventories;
+    /** Intervalo entre validações automáticas (segundos) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration Settings", meta = (ClampMin = "30.0"))
+    float ValidationInterval;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
-    TArray<FString> IntegrationErrors;
+    /** Se a validação automática está activada */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration Settings")
+    bool bAutoValidationEnabled;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
-    float BuildProgress = 0.0f;
+    /** Se a integração contínua está activada */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration Settings")
+    bool bContinuousIntegration;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
-    FString CurrentBuildPhase = TEXT("Idle");
-
-private:
-    void ScanForModules();
-    void ScanForActors();
-    void ValidateClassLoading();
-    void CheckForDuplicates();
-    void UpdateBuildProgress(float Progress, const FString& Phase);
-
-    // Critical system dependencies
-    TArray<FString> CriticalClasses = {
-        TEXT("TranspersonalCharacter"),
-        TEXT("TranspersonalGameState"),
-        TEXT("PCGWorldGenerator"),
-        TEXT("FoliageManager"),
-        TEXT("CrowdSimulationManager")
-    };
-
-    TArray<FString> LightingActorTypes = {
-        TEXT("DirectionalLight"),
-        TEXT("SkyAtmosphere"),
-        TEXT("SkyLight"),
-        TEXT("ExponentialHeightFog")
-    };
+    /** Número máximo de erros antes de parar a build */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration Settings", meta = (ClampMin = "1"))
+    int32 MaxErrorsBeforeHalt;
 };
+
+/**
+ * Actor de gestão de integração de builds
+ * Pode ser colocado no mapa para monitorização contínua
+ */
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API ABuildIntegrationActor : public AActor
+{
+    GENERATED_BODY()
+
+public:
+    ABuildIntegrationActor();
+
+protected:
+    virtual void BeginPlay() override;
+
+public:
+    /** Componente de gestão de integração */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class UBuildIntegrationManager* IntegrationManager;
+
+    /** Executar validação manual */
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Build Integration")
+    void RunManualValidation();
+
+    /** Obter estado da integração */
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Build Integration")
+    EBuild_IntegrationState GetIntegrationState() const;
+
+    /** Obter último relatório de integração */
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    FBuild_IntegrationReport GetLastIntegrationReport() const;
+
+protected:
+    /** Último relatório gerado */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Integration State")
+    FBuild_IntegrationReport LastReport;
+};
+
+#include "BuildIntegrationManager.generated.h"
