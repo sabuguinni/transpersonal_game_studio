@@ -1,226 +1,231 @@
 #include "BuildIntegrationManager.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "HAL/PlatformFilemanager.h"
-#include "Misc/FileHelper.h"
+#include "HAL/FileManager.h"
 #include "Misc/Paths.h"
-#include "UObject/UObjectGlobals.h"
-#include "Engine/GameInstance.h"
-
-DEFINE_LOG_CATEGORY(LogBuildIntegration);
+#include "Misc/DateTime.h"
+#include "Engine/GameViewportClient.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMeshActor.h"
+#include "Landscape/Landscape.h"
+#include "Components/DirectionalLightComponent.h"
+#include "Engine/DirectionalLight.h"
+#include "Atmosphere/AtmosphericFog.h"
+#include "Components/SkyAtmosphereComponent.h"
+#include "Engine/SkyLight.h"
+#include "Components/ExponentialHeightFogComponent.h"
+#include "Engine/ExponentialHeightFog.h"
 
 UBuildIntegrationManager::UBuildIntegrationManager()
 {
-    bAutoValidateOnStartup = true;
-    bEnableCompilationChecks = true;
-    bEnableModuleValidation = true;
-    ValidationIntervalSeconds = 30.0f;
-    MaxValidationErrors = 50;
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 5.0f; // Verificar a cada 5 segundos
     
     // Inicializar contadores
-    TotalModulesFound = 0;
-    ValidModulesCount = 0;
-    OrphanHeadersCount = 0;
-    CompilationErrorsCount = 0;
-    LastValidationTime = 0.0f;
+    LastActorCount = 0;
+    LastCompilationCheck = 0.0f;
+    CompilationCheckInterval = 30.0f; // Verificar compilação a cada 30 segundos
+    
+    // Configurar tipos críticos que devem ter apenas 1 instância
+    CriticalSingletonTypes.Add(TEXT("DirectionalLight"));
+    CriticalSingletonTypes.Add(TEXT("SkyAtmosphere"));
+    CriticalSingletonTypes.Add(TEXT("SkyLight"));
+    CriticalSingletonTypes.Add(TEXT("ExponentialHeightFog"));
+    
+    // Configurar tipos que devem existir no mapa
+    RequiredActorTypes.Add(TEXT("PlayerStart"));
+    RequiredActorTypes.Add(TEXT("Landscape"));
+    RequiredActorTypes.Add(TEXT("DirectionalLight"));
+    
+    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Inicializado"));
 }
 
-void UBuildIntegrationManager::Initialize(FSubsystemCollectionBase& Collection)
+void UBuildIntegrationManager::BeginPlay()
 {
-    Super::Initialize(Collection);
+    Super::BeginPlay();
     
-    UE_LOG(LogBuildIntegration, Warning, TEXT("BuildIntegrationManager initialized"));
+    // Executar verificação inicial
+    PerformIntegrationCheck();
     
-    if (bAutoValidateOnStartup)
+    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: BeginPlay executado"));
+}
+
+void UBuildIntegrationManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    
+    // Verificar se é hora de fazer uma verificação de integração
+    LastCompilationCheck += DeltaTime;
+    if (LastCompilationCheck >= CompilationCheckInterval)
     {
-        // Agendar validação inicial após 5 segundos
-        GetWorld()->GetTimerManager().SetTimer(
-            ValidationTimerHandle,
-            this,
-            &UBuildIntegrationManager::PerformFullValidation,
-            5.0f,
-            false
-        );
+        PerformIntegrationCheck();
+        LastCompilationCheck = 0.0f;
     }
 }
 
-void UBuildIntegrationManager::Deinitialize()
+void UBuildIntegrationManager::PerformIntegrationCheck()
 {
-    if (GetWorld() && ValidationTimerHandle.IsValid())
+    if (!GetWorld())
     {
-        GetWorld()->GetTimerManager().ClearTimer(ValidationTimerHandle);
-    }
-    
-    Super::Deinitialize();
-}
-
-void UBuildIntegrationManager::PerformFullValidation()
-{
-    UE_LOG(LogBuildIntegration, Warning, TEXT("Starting full build validation..."));
-    
-    LastValidationTime = GetWorld()->GetTimeSeconds();
-    
-    // Reset contadores
-    TotalModulesFound = 0;
-    ValidModulesCount = 0;
-    OrphanHeadersCount = 0;
-    CompilationErrorsCount = 0;
-    ValidationErrors.Empty();
-    
-    // Validar estrutura de módulos
-    ValidateModuleStructure();
-    
-    // Validar headers órfãos
-    ValidateOrphanHeaders();
-    
-    // Validar dependências
-    ValidateModuleDependencies();
-    
-    // Agendar próxima validação
-    if (bEnableCompilationChecks && ValidationIntervalSeconds > 0.0f)
-    {
-        GetWorld()->GetTimerManager().SetTimer(
-            ValidationTimerHandle,
-            this,
-            &UBuildIntegrationManager::PerformFullValidation,
-            ValidationIntervalSeconds,
-            false
-        );
-    }
-    
-    // Log resultado
-    UE_LOG(LogBuildIntegration, Warning, TEXT("Validation complete: %d modules, %d valid, %d orphan headers, %d errors"),
-        TotalModulesFound, ValidModulesCount, OrphanHeadersCount, ValidationErrors.Num());
-}
-
-void UBuildIntegrationManager::ValidateModuleStructure()
-{
-    FString ProjectDir = FPaths::ProjectDir();
-    FString SourceDir = FPaths::Combine(ProjectDir, TEXT("Source"), TEXT("TranspersonalGame"));
-    
-    TArray<FString> HeaderFiles;
-    TArray<FString> CppFiles;
-    
-    // Encontrar todos os ficheiros .h e .cpp
-    IFileManager& FileManager = IFileManager::Get();
-    FileManager.FindFilesRecursive(HeaderFiles, *SourceDir, TEXT("*.h"), true, false);
-    FileManager.FindFilesRecursive(CppFiles, *SourceDir, TEXT("*.cpp"), true, false);
-    
-    TotalModulesFound = HeaderFiles.Num();
-    
-    UE_LOG(LogBuildIntegration, Log, TEXT("Found %d header files and %d cpp files"), 
-        HeaderFiles.Num(), CppFiles.Num());
-    
-    // Verificar pares .h/.cpp
-    for (const FString& HeaderFile : HeaderFiles)
-    {
-        FString BaseName = FPaths::GetBaseFilename(HeaderFile);
-        FString ExpectedCppFile = FPaths::Combine(FPaths::GetPath(HeaderFile), BaseName + TEXT(".cpp"));
-        
-        if (FileManager.FileExists(*ExpectedCppFile))
-        {
-            ValidModulesCount++;
-        }
-        else
-        {
-            OrphanHeadersCount++;
-            AddValidationError(FString::Printf(TEXT("Orphan header: %s (missing %s)"), 
-                *FPaths::GetCleanFilename(HeaderFile), 
-                *FPaths::GetCleanFilename(ExpectedCppFile)));
-        }
-    }
-}
-
-void UBuildIntegrationManager::ValidateOrphanHeaders()
-{
-    // Esta validação já foi feita em ValidateModuleStructure
-    // Aqui podemos adicionar validações mais específicas se necessário
-    
-    if (OrphanHeadersCount > 0)
-    {
-        UE_LOG(LogBuildIntegration, Warning, TEXT("Found %d orphan headers - these will cause compilation issues"), 
-            OrphanHeadersCount);
-    }
-}
-
-void UBuildIntegrationManager::ValidateModuleDependencies()
-{
-    // Validar dependências básicas do módulo
-    FString BuildCsPath = FPaths::Combine(FPaths::ProjectDir(), TEXT("Source"), TEXT("TranspersonalGame"), TEXT("TranspersonalGame.Build.cs"));
-    
-    if (!IFileManager::Get().FileExists(*BuildCsPath))
-    {
-        AddValidationError(TEXT("Missing TranspersonalGame.Build.cs file"));
+        UE_LOG(LogTemp, Error, TEXT("BuildIntegrationManager: Mundo não disponível"));
         return;
     }
     
-    FString BuildCsContent;
-    if (FFileHelper::LoadFileToString(BuildCsContent, *BuildCsPath))
+    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Executando verificação de integração"));
+    
+    // Verificar actores no mundo
+    CheckWorldActors();
+    
+    // Verificar duplicados críticos
+    CheckCriticalDuplicates();
+    
+    // Verificar actores obrigatórios
+    CheckRequiredActors();
+    
+    // Gerar relatório
+    GenerateIntegrationReport();
+}
+
+void UBuildIntegrationManager::CheckWorldActors()
+{
+    TArray<AActor*> AllActors;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), AllActors);
+    
+    int32 CurrentActorCount = AllActors.Num();
+    
+    if (CurrentActorCount != LastActorCount)
     {
-        // Verificar dependências essenciais
-        TArray<FString> RequiredDependencies = {
-            TEXT("Core"),
-            TEXT("CoreUObject"),
-            TEXT("Engine"),
-            TEXT("UnrealEd")
-        };
-        
-        for (const FString& Dependency : RequiredDependencies)
+        UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Contagem de actores mudou de %d para %d"), 
+               LastActorCount, CurrentActorCount);
+        LastActorCount = CurrentActorCount;
+    }
+    
+    // Contar por tipo
+    ActorTypeCounts.Empty();
+    for (AActor* Actor : AllActors)
+    {
+        if (Actor)
         {
-            if (!BuildCsContent.Contains(Dependency))
+            FString ActorType = Actor->GetClass()->GetName();
+            int32* Count = ActorTypeCounts.Find(ActorType);
+            if (Count)
             {
-                AddValidationError(FString::Printf(TEXT("Missing required dependency: %s"), *Dependency));
+                (*Count)++;
+            }
+            else
+            {
+                ActorTypeCounts.Add(ActorType, 1);
             }
         }
     }
+}
+
+void UBuildIntegrationManager::CheckCriticalDuplicates()
+{
+    TArray<FString> ProblemsFound;
+    
+    for (const FString& CriticalType : CriticalSingletonTypes)
+    {
+        int32* Count = ActorTypeCounts.Find(CriticalType);
+        if (Count && *Count > 1)
+        {
+            FString Problem = FString::Printf(TEXT("DUPLICADO CRÍTICO: %s tem %d instâncias (deveria ter 1)"), 
+                                            *CriticalType, *Count);
+            ProblemsFound.Add(Problem);
+            UE_LOG(LogTemp, Error, TEXT("BuildIntegrationManager: %s"), *Problem);
+        }
+    }
+    
+    // Armazenar problemas encontrados
+    CriticalProblems = ProblemsFound;
+}
+
+void UBuildIntegrationManager::CheckRequiredActors()
+{
+    TArray<FString> MissingActors;
+    
+    for (const FString& RequiredType : RequiredActorTypes)
+    {
+        int32* Count = ActorTypeCounts.Find(RequiredType);
+        if (!Count || *Count == 0)
+        {
+            FString Missing = FString::Printf(TEXT("ACTOR OBRIGATÓRIO AUSENTE: %s"), *RequiredType);
+            MissingActors.Add(Missing);
+            UE_LOG(LogTemp, Error, TEXT("BuildIntegrationManager: %s"), *Missing);
+        }
+    }
+    
+    // Armazenar actores em falta
+    MissingRequiredActors = MissingActors;
+}
+
+void UBuildIntegrationManager::GenerateIntegrationReport()
+{
+    FString Report = TEXT("=== RELATÓRIO DE INTEGRAÇÃO ===\n");
+    Report += FString::Printf(TEXT("Timestamp: %s\n"), *FDateTime::Now().ToString());
+    Report += FString::Printf(TEXT("Total de actores: %d\n\n"), LastActorCount);
+    
+    // Adicionar contagem por tipo
+    Report += TEXT("CONTAGEM POR TIPO:\n");
+    for (const auto& Pair : ActorTypeCounts)
+    {
+        Report += FString::Printf(TEXT("  %s: %d\n"), *Pair.Key, Pair.Value);
+    }
+    
+    // Adicionar problemas críticos
+    if (CriticalProblems.Num() > 0)
+    {
+        Report += TEXT("\nPROBLEMAS CRÍTICOS:\n");
+        for (const FString& Problem : CriticalProblems)
+        {
+            Report += FString::Printf(TEXT("  ❌ %s\n"), *Problem);
+        }
+    }
+    
+    // Adicionar actores em falta
+    if (MissingRequiredActors.Num() > 0)
+    {
+        Report += TEXT("\nACTORES OBRIGATÓRIOS EM FALTA:\n");
+        for (const FString& Missing : MissingRequiredActors)
+        {
+            Report += FString::Printf(TEXT("  ⚠️ %s\n"), *Missing);
+        }
+    }
+    
+    // Status geral
+    bool HasCriticalIssues = (CriticalProblems.Num() > 0) || (MissingRequiredActors.Num() > 0);
+    if (HasCriticalIssues)
+    {
+        Report += TEXT("\n🔴 STATUS: PROBLEMAS CRÍTICOS DETECTADOS\n");
+    }
     else
     {
-        AddValidationError(TEXT("Failed to read TranspersonalGame.Build.cs"));
+        Report += TEXT("\n🟢 STATUS: INTEGRAÇÃO OK\n");
     }
-}
-
-void UBuildIntegrationManager::AddValidationError(const FString& ErrorMessage)
-{
-    if (ValidationErrors.Num() < MaxValidationErrors)
-    {
-        ValidationErrors.Add(ErrorMessage);
-        CompilationErrorsCount++;
-        
-        UE_LOG(LogBuildIntegration, Error, TEXT("Validation Error: %s"), *ErrorMessage);
-    }
-}
-
-bool UBuildIntegrationManager::IsValidationPassing() const
-{
-    return ValidationErrors.Num() == 0 && OrphanHeadersCount == 0;
-}
-
-FString UBuildIntegrationManager::GetValidationSummary() const
-{
-    return FString::Printf(TEXT("Modules: %d/%d valid, Orphan Headers: %d, Errors: %d"),
-        ValidModulesCount, TotalModulesFound, OrphanHeadersCount, ValidationErrors.Num());
-}
-
-TArray<FString> UBuildIntegrationManager::GetValidationErrors() const
-{
-    return ValidationErrors;
-}
-
-void UBuildIntegrationManager::ForceValidation()
-{
-    PerformFullValidation();
-}
-
-void UBuildIntegrationManager::SetValidationEnabled(bool bEnabled)
-{
-    bEnableCompilationChecks = bEnabled;
     
-    if (!bEnabled && ValidationTimerHandle.IsValid())
-    {
-        GetWorld()->GetTimerManager().ClearTimer(ValidationTimerHandle);
-    }
-    else if (bEnabled)
-    {
-        PerformFullValidation();
-    }
+    // Log do relatório
+    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager Report:\n%s"), *Report);
+    
+    // Armazenar relatório
+    LastIntegrationReport = Report;
+}
+
+FString UBuildIntegrationManager::GetLastIntegrationReport() const
+{
+    return LastIntegrationReport;
+}
+
+bool UBuildIntegrationManager::HasCriticalIssues() const
+{
+    return (CriticalProblems.Num() > 0) || (MissingRequiredActors.Num() > 0);
+}
+
+void UBuildIntegrationManager::ForceIntegrationCheck()
+{
+    PerformIntegrationCheck();
+}
+
+TMap<FString, int32> UBuildIntegrationManager::GetActorTypeCounts() const
+{
+    return ActorTypeCounts;
 }
