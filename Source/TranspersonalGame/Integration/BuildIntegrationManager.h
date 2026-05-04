@@ -1,113 +1,124 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Subsystems/GameInstanceSubsystem.h"
-#include "Engine/TimerHandle.h"
+#include "GameFramework/Actor.h"
+#include "Engine/Engine.h"
+#include "Engine/World.h"
+#include "UObject/ConstructorHelpers.h"
+#include "../SharedTypes.h"
 #include "BuildIntegrationManager.generated.h"
-
-DECLARE_LOG_CATEGORY_EXTERN(LogBuildIntegration, Log, All);
 
 /**
  * Build Integration Manager - Agente #19
- * 
- * Sistema responsável por:
- * - Validar integridade de módulos C++
- * - Detectar headers órfãos (sem .cpp correspondente)
- * - Monitorizar dependências entre módulos
- * - Reportar erros de compilação
- * - Garantir que o build está sempre funcional
+ * Responsável por integrar outputs de todos os agentes numa build coerente
+ * Valida compilação, resolve conflitos, mantém builds funcionais
  */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UBuildIntegrationManager : public UGameInstanceSubsystem
+class TRANSPERSONALGAME_API ABuildIntegrationManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UBuildIntegrationManager();
-
-    // USubsystem interface
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
-
-    /** Executar validação completa do build */
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    void PerformFullValidation();
-
-    /** Forçar validação imediata */
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    void ForceValidation();
-
-    /** Verificar se a validação está a passar */
-    UFUNCTION(BlueprintPure, Category = "Build Integration")
-    bool IsValidationPassing() const;
-
-    /** Obter resumo da validação */
-    UFUNCTION(BlueprintPure, Category = "Build Integration")
-    FString GetValidationSummary() const;
-
-    /** Obter lista de erros de validação */
-    UFUNCTION(BlueprintPure, Category = "Build Integration")
-    TArray<FString> GetValidationErrors() const;
-
-    /** Activar/desactivar validação automática */
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    void SetValidationEnabled(bool bEnabled);
+    ABuildIntegrationManager();
 
 protected:
-    /** Validar estrutura de módulos */
-    void ValidateModuleStructure();
-
-    /** Validar headers órfãos */
-    void ValidateOrphanHeaders();
-
-    /** Validar dependências entre módulos */
-    void ValidateModuleDependencies();
-
-    /** Adicionar erro de validação */
-    void AddValidationError(const FString& ErrorMessage);
-
-private:
-    /** Timer para validação periódica */
-    FTimerHandle ValidationTimerHandle;
-
-    /** Lista de erros encontrados */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Validation", meta = (AllowPrivateAccess = "true"))
-    TArray<FString> ValidationErrors;
+    virtual void BeginPlay() override;
 
 public:
-    /** Executar validação automática no startup */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Build Integration")
-    bool bAutoValidateOnStartup;
+    virtual void Tick(float DeltaTime) override;
 
-    /** Activar verificações de compilação */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Build Integration")
-    bool bEnableCompilationChecks;
+    // === VALIDATION SYSTEM ===
+    
+    /** Validar estado de compilação do projeto */
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Build Integration")
+    bool ValidateCompilationState();
+    
+    /** Verificar headers órfãos (sem .cpp correspondente) */
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Build Integration")
+    int32 CheckOrphanHeaders();
+    
+    /** Validar integridade do MinPlayableMap */
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Build Integration")
+    bool ValidateMapIntegrity();
+    
+    /** Limpar actores duplicados de lighting */
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Build Integration")
+    void CleanDuplicateLightingActors();
 
-    /** Activar validação de módulos */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Build Integration")
-    bool bEnableModuleValidation;
+    // === BUILD MANAGEMENT ===
+    
+    /** Executar build completo via UnrealBuildTool */
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Build Integration")
+    bool ExecuteFullBuild();
+    
+    /** Criar backup da build actual */
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Build Integration")
+    bool CreateBuildBackup();
+    
+    /** Restaurar última build funcional */
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Build Integration")
+    bool RestoreLastWorkingBuild();
 
-    /** Intervalo entre validações (segundos) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Build Integration", meta = (ClampMin = "10.0", ClampMax = "300.0"))
-    float ValidationIntervalSeconds;
+    // === INTEGRATION VALIDATION ===
+    
+    /** Verificar compatibilidade entre sistemas */
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Build Integration")
+    bool ValidateSystemCompatibility();
+    
+    /** Resolver conflitos de dependências */
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Build Integration")
+    bool ResolveDependencyConflicts();
+    
+    /** Gerar relatório de integração */
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Build Integration")
+    FString GenerateIntegrationReport();
 
-    /** Máximo de erros a reportar */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Build Integration", meta = (ClampMin = "10", ClampMax = "100"))
-    int32 MaxValidationErrors;
+protected:
+    // === PROPERTIES ===
+    
+    /** Estado actual da build */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Build State")
+    EBuildState CurrentBuildState;
+    
+    /** Número de headers órfãos detectados */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Build State")
+    int32 OrphanHeaderCount;
+    
+    /** Número de erros de compilação */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Build State")
+    int32 CompilationErrorCount;
+    
+    /** Timestamp da última validação */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Build State")
+    FDateTime LastValidationTime;
+    
+    /** Lista de sistemas críticos a validar */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
+    TArray<FString> CriticalSystems;
+    
+    /** Directório de backups */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
+    FString BackupDirectory;
+    
+    /** Máximo de backups a manter */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration", meta = (ClampMin = "1", ClampMax = "20"))
+    int32 MaxBackupsToKeep;
 
-    /** Estatísticas de validação */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Statistics")
-    int32 TotalModulesFound;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Statistics")
-    int32 ValidModulesCount;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Statistics")
-    int32 OrphanHeadersCount;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Statistics")
-    int32 CompilationErrorsCount;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Statistics")
-    float LastValidationTime;
+private:
+    // === INTERNAL METHODS ===
+    
+    /** Verificar se uma classe C++ existe e é carregável */
+    bool ValidateClass(const FString& ClassName);
+    
+    /** Contar ficheiros por extensão numa directoria */
+    int32 CountFilesByExtension(const FString& Directory, const FString& Extension);
+    
+    /** Executar comando de sistema e capturar output */
+    bool ExecuteSystemCommand(const FString& Command, FString& Output);
+    
+    /** Limpar ficheiros temporários de build */
+    void CleanTemporaryBuildFiles();
+    
+    /** Validar estrutura de directorias do projeto */
+    bool ValidateProjectStructure();
 };
