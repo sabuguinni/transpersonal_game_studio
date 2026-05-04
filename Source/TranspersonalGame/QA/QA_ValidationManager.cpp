@@ -1,303 +1,388 @@
 #include "QA_ValidationManager.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "GameFramework/PlayerStart.h"
+#include "Engine/Engine.h"
+#include "EngineUtils.h"
 #include "Engine/DirectionalLight.h"
 #include "Components/SkyAtmosphereComponent.h"
 #include "Components/SkyLightComponent.h"
 #include "Components/ExponentialHeightFogComponent.h"
-#include "Landscape/Landscape.h"
-#include "Engine/StaticMeshActor.h"
-#include "UObject/UObjectGlobals.h"
+#include "GameFramework/PlayerStart.h"
+#include "Misc/DateTime.h"
 #include "HAL/PlatformFilemanager.h"
 #include "Misc/FileHelper.h"
-#include "Misc/DateTime.h"
 
-UQA_ValidationManager::UQA_ValidationManager()
+AQA_ValidationManager::AQA_ValidationManager()
 {
-    PrimaryComponentTick.bCanEverTick = false;
-    bAutoRunOnBeginPlay = false;
-    bLogDetailedResults = true;
-    ValidationTimeoutSeconds = 30.0f;
+    PrimaryActorTick.bCanEverTick = true;
     
-    InitializeDefaultSettings();
+    bAutoRunOnBeginPlay = false;
+    ValidationInterval = 60.0f; // 1 minuto
+    bLogToConsole = true;
+    bLogToFile = true;
+    LastValidationTime = 0.0f;
 }
 
-void UQA_ValidationManager::BeginPlay()
+void AQA_ValidationManager::BeginPlay()
 {
     Super::BeginPlay();
     
     if (bAutoRunOnBeginPlay)
     {
-        FQA_ValidationSuite ValidationResults = RunFullValidationSuite();
-        LogValidationResults(ValidationResults);
+        // Delay inicial para permitir que outros sistemas inicializem
+        GetWorld()->GetTimerManager().SetTimer(
+            FTimerHandle(),
+            this,
+            &AQA_ValidationManager::RunAllValidationTests,
+            2.0f,
+            false
+        );
     }
 }
 
-void UQA_ValidationManager::InitializeDefaultSettings()
+void AQA_ValidationManager::Tick(float DeltaTime)
 {
-    // Classes críticas que devem estar sempre carregáveis
-    CriticalClassPaths.Empty();
-    CriticalClassPaths.Add(TEXT("/Script/TranspersonalGame.TranspersonalCharacter"));
-    CriticalClassPaths.Add(TEXT("/Script/TranspersonalGame.TranspersonalGameMode"));
-    CriticalClassPaths.Add(TEXT("/Script/TranspersonalGame.VFX_ImpactManager"));
+    Super::Tick(DeltaTime);
     
-    // Tipos de actores essenciais e quantidades mínimas
-    EssentialActorTypes.Empty();
-    EssentialActorTypes.Add(TEXT("PlayerStart"), 1);
-    EssentialActorTypes.Add(TEXT("DirectionalLight"), 1);
-    EssentialActorTypes.Add(TEXT("SkyAtmosphere"), 1);
-    EssentialActorTypes.Add(TEXT("Landscape"), 1);
+    if (ValidationInterval > 0.0f)
+    {
+        LastValidationTime += DeltaTime;
+        if (LastValidationTime >= ValidationInterval)
+        {
+            RunAllValidationTests();
+            LastValidationTime = 0.0f;
+        }
+    }
 }
 
-FQA_ValidationSuite UQA_ValidationManager::RunFullValidationSuite()
+void AQA_ValidationManager::RunAllValidationTests()
 {
-    FQA_ValidationSuite ValidationSuite;
-    ValidationSuite.ExecutionTime = FDateTime::Now();
+    UE_LOG(LogTemp, Warning, TEXT("QA_ValidationManager: Iniciando testes de validação completos"));
     
-    UE_LOG(LogTemp, Warning, TEXT("QA Validation Suite: Starting full validation..."));
+    ClearValidationReports();
+    
+    float StartTime = FPlatformTime::Seconds();
     
     // Executar todos os testes
-    ValidationSuite.TestResults.Add(ValidateEssentialActors());
-    ValidationSuite.TestResults.Add(ValidateClassLoading());
-    ValidationSuite.TestResults.Add(ValidateLightingSetup());
-    ValidationSuite.TestResults.Add(ValidateVFXSystems());
-    ValidationSuite.TestResults.Add(ValidateCharacterSystems());
+    ValidateMapStructure();
+    ValidateLightingSetup();
+    ValidatePlayerSystems();
+    ValidateVFXSystems();
+    ValidateBiomeDistribution();
     
-    // Calcular estatísticas
-    ValidationSuite.TotalTests = ValidationSuite.TestResults.Num();
-    ValidationSuite.PassedTests = 0;
+    float TotalTime = FPlatformTime::Seconds() - StartTime;
     
-    for (const FQA_ValidationResult& Result : ValidationSuite.TestResults)
+    // Resumo final
+    int32 PassCount = 0;
+    int32 WarningCount = 0;
+    int32 FailCount = 0;
+    int32 CriticalCount = 0;
+    
+    for (const FQA_ValidationReport& Report : ValidationReports)
     {
-        if (Result.bPassed)
+        switch (Report.Result)
         {
-            ValidationSuite.PassedTests++;
+            case EQA_ValidationResult::Pass: PassCount++; break;
+            case EQA_ValidationResult::Warning: WarningCount++; break;
+            case EQA_ValidationResult::Fail: FailCount++; break;
+            case EQA_ValidationResult::Critical: CriticalCount++; break;
         }
     }
     
-    ValidationSuite.OverallScore = ValidationSuite.TotalTests > 0 ? 
-        (float(ValidationSuite.PassedTests) / float(ValidationSuite.TotalTests)) * 100.0f : 0.0f;
+    FString SummaryMessage = FString::Printf(
+        TEXT("Validação completa: %d PASS, %d WARNING, %d FAIL, %d CRITICAL (%.2fs)"),
+        PassCount, WarningCount, FailCount, CriticalCount, TotalTime
+    );
     
-    UE_LOG(LogTemp, Warning, TEXT("QA Validation Suite: Completed with score %.1f%% (%d/%d tests passed)"), 
-        ValidationSuite.OverallScore, ValidationSuite.PassedTests, ValidationSuite.TotalTests);
+    AddValidationReport(TEXT("SUMMARY"), 
+        CriticalCount > 0 ? EQA_ValidationResult::Critical : 
+        FailCount > 0 ? EQA_ValidationResult::Fail :
+        WarningCount > 0 ? EQA_ValidationResult::Warning : EQA_ValidationResult::Pass,
+        SummaryMessage, TotalTime);
     
-    return ValidationSuite;
+    if (bLogToFile)
+    {
+        ExportReportsToFile();
+    }
 }
 
-FQA_ValidationResult UQA_ValidationManager::ValidateEssentialActors()
+void AQA_ValidationManager::ValidateMapStructure()
 {
     float StartTime = FPlatformTime::Seconds();
     
     UWorld* World = GetWorld();
     if (!World)
     {
-        return CreateTestResult(TEXT("Essential Actors"), false, TEXT("No valid world found"), 0.0f);
+        AddValidationReport(TEXT("MapStructure"), EQA_ValidationResult::Critical, 
+            TEXT("Mundo não encontrado"), FPlatformTime::Seconds() - StartTime);
+        return;
     }
     
-    TArray<FString> MissingActors;
-    
-    for (const auto& ActorTypePair : EssentialActorTypes)
+    // Contar todos os actores
+    int32 TotalActors = 0;
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
     {
-        FString ActorType = ActorTypePair.Key;
-        int32 RequiredCount = ActorTypePair.Value;
+        TotalActors++;
+    }
+    
+    if (TotalActors < 10)
+    {
+        AddValidationReport(TEXT("MapStructure"), EQA_ValidationResult::Fail,
+            FString::Printf(TEXT("Poucos actores no mapa: %d (mínimo esperado: 10)"), TotalActors),
+            FPlatformTime::Seconds() - StartTime);
+    }
+    else if (TotalActors > 1000)
+    {
+        AddValidationReport(TEXT("MapStructure"), EQA_ValidationResult::Warning,
+            FString::Printf(TEXT("Muitos actores no mapa: %d (pode afectar performance)"), TotalActors),
+            FPlatformTime::Seconds() - StartTime);
+    }
+    else
+    {
+        AddValidationReport(TEXT("MapStructure"), EQA_ValidationResult::Pass,
+            FString::Printf(TEXT("Número adequado de actores: %d"), TotalActors),
+            FPlatformTime::Seconds() - StartTime);
+    }
+}
+
+void AQA_ValidationManager::ValidateLightingSetup()
+{
+    float StartTime = FPlatformTime::Seconds();
+    
+    // Validar DirectionalLights
+    if (!ValidateActorCount(ADirectionalLight::StaticClass(), 1, 1, TEXT("DirectionalLight")))
+    {
+        AddValidationReport(TEXT("Lighting"), EQA_ValidationResult::Fail,
+            TEXT("DirectionalLight: deve existir exactamente 1"), FPlatformTime::Seconds() - StartTime);
+        return;
+    }
+    
+    // Validar SkyLight (através de componente)
+    int32 SkyLightCount = 0;
+    for (TActorIterator<AActor> ActorItr(GetWorld()); ActorItr; ++ActorItr)
+    {
+        if (ActorItr->FindComponentByClass<USkyLightComponent>())
+        {
+            SkyLightCount++;
+        }
+    }
+    
+    if (SkyLightCount != 1)
+    {
+        AddValidationReport(TEXT("Lighting"), EQA_ValidationResult::Warning,
+            FString::Printf(TEXT("SkyLight: encontrados %d, esperado 1"), SkyLightCount),
+            FPlatformTime::Seconds() - StartTime);
+    }
+    
+    // Validar ExponentialHeightFog
+    int32 FogCount = 0;
+    for (TActorIterator<AActor> ActorItr(GetWorld()); ActorItr; ++ActorItr)
+    {
+        if (ActorItr->FindComponentByClass<UExponentialHeightFogComponent>())
+        {
+            FogCount++;
+        }
+    }
+    
+    if (FogCount > 1)
+    {
+        AddValidationReport(TEXT("Lighting"), EQA_ValidationResult::Warning,
+            FString::Printf(TEXT("ExponentialHeightFog: encontrados %d, esperado 1"), FogCount),
+            FPlatformTime::Seconds() - StartTime);
+    }
+    else
+    {
+        AddValidationReport(TEXT("Lighting"), EQA_ValidationResult::Pass,
+            TEXT("Setup de iluminação validado"), FPlatformTime::Seconds() - StartTime);
+    }
+}
+
+void AQA_ValidationManager::ValidatePlayerSystems()
+{
+    float StartTime = FPlatformTime::Seconds();
+    
+    // Validar PlayerStart
+    if (!ValidateActorCount(APlayerStart::StaticClass(), 1, 5, TEXT("PlayerStart")))
+    {
+        AddValidationReport(TEXT("PlayerSystems"), EQA_ValidationResult::Fail,
+            TEXT("PlayerStart: deve existir pelo menos 1"), FPlatformTime::Seconds() - StartTime);
+        return;
+    }
+    
+    AddValidationReport(TEXT("PlayerSystems"), EQA_ValidationResult::Pass,
+        TEXT("Sistemas de jogador validados"), FPlatformTime::Seconds() - StartTime);
+}
+
+void AQA_ValidationManager::ValidateVFXSystems()
+{
+    float StartTime = FPlatformTime::Seconds();
+    
+    // Procurar actores VFX
+    int32 VFXActorCount = 0;
+    for (TActorIterator<AActor> ActorItr(GetWorld()); ActorItr; ++ActorItr)
+    {
+        FString ClassName = ActorItr->GetClass()->GetName();
+        if (ClassName.Contains(TEXT("VFX")))
+        {
+            VFXActorCount++;
+        }
+    }
+    
+    if (VFXActorCount == 0)
+    {
+        AddValidationReport(TEXT("VFXSystems"), EQA_ValidationResult::Warning,
+            TEXT("Nenhum actor VFX encontrado no mapa"), FPlatformTime::Seconds() - StartTime);
+    }
+    else
+    {
+        AddValidationReport(TEXT("VFXSystems"), EQA_ValidationResult::Pass,
+            FString::Printf(TEXT("Encontrados %d actores VFX"), VFXActorCount),
+            FPlatformTime::Seconds() - StartTime);
+    }
+}
+
+void AQA_ValidationManager::ValidateBiomeDistribution()
+{
+    float StartTime = FPlatformTime::Seconds();
+    
+    // Definir zonas dos biomas (conforme especificação)
+    struct FBiomeZone
+    {
+        FString Name;
+        FVector Center;
+        FVector MinBounds;
+        FVector MaxBounds;
+        int32 ActorCount;
+    };
+    
+    TArray<FBiomeZone> Biomes = {
+        {TEXT("Pantano"), FVector(-50000, -45000, 0), FVector(-77500, -76500, -1000), FVector(-25000, -15000, 1000), 0},
+        {TEXT("Floresta"), FVector(-45000, 40000, 0), FVector(-77500, 15000, -1000), FVector(-15000, 76500, 1000), 0},
+        {TEXT("Savana"), FVector(0, 0, 0), FVector(-20000, -20000, -1000), FVector(20000, 20000, 1000), 0},
+        {TEXT("Deserto"), FVector(55000, 0, 0), FVector(25000, -30000, -1000), FVector(79500, 30000, 1000), 0},
+        {TEXT("Montanha"), FVector(40000, 50000, 500), FVector(15000, 20000, -1000), FVector(79500, 76500, 2000), 0}
+    };
+    
+    // Contar actores em cada bioma
+    for (TActorIterator<AActor> ActorItr(GetWorld()); ActorItr; ++ActorItr)
+    {
+        FVector ActorLocation = ActorItr->GetActorLocation();
         
-        TArray<AActor*> FoundActors = GetActorsOfType(ActorType);
-        
-        if (FoundActors.Num() < RequiredCount)
+        for (FBiomeZone& Biome : Biomes)
         {
-            MissingActors.Add(FString::Printf(TEXT("%s (found %d, required %d)"), 
-                *ActorType, FoundActors.Num(), RequiredCount));
-        }
-    }
-    
-    float ExecutionTime = (FPlatformTime::Seconds() - StartTime) * 1000.0f;
-    
-    if (MissingActors.Num() > 0)
-    {
-        FString ErrorMsg = TEXT("Missing essential actors: ") + FString::Join(MissingActors, TEXT(", "));
-        return CreateTestResult(TEXT("Essential Actors"), false, ErrorMsg, ExecutionTime);
-    }
-    
-    return CreateTestResult(TEXT("Essential Actors"), true, TEXT("All essential actors present"), ExecutionTime);
-}
-
-FQA_ValidationResult UQA_ValidationManager::ValidateClassLoading()
-{
-    float StartTime = FPlatformTime::Seconds();
-    
-    TArray<FString> FailedClasses;
-    
-    for (const FString& ClassPath : CriticalClassPaths)
-    {
-        if (!IsClassLoadable(ClassPath))
-        {
-            FailedClasses.Add(ClassPath);
-        }
-    }
-    
-    float ExecutionTime = (FPlatformTime::Seconds() - StartTime) * 1000.0f;
-    
-    if (FailedClasses.Num() > 0)
-    {
-        FString ErrorMsg = TEXT("Failed to load classes: ") + FString::Join(FailedClasses, TEXT(", "));
-        return CreateTestResult(TEXT("Class Loading"), false, ErrorMsg, ExecutionTime);
-    }
-    
-    return CreateTestResult(TEXT("Class Loading"), true, TEXT("All critical classes loaded successfully"), ExecutionTime);
-}
-
-FQA_ValidationResult UQA_ValidationManager::ValidateLightingSetup()
-{
-    float StartTime = FPlatformTime::Seconds();
-    
-    TArray<FString> LightingIssues;
-    
-    // Verificar duplicados de lighting
-    TArray<FString> LightingTypes = {TEXT("DirectionalLight"), TEXT("SkyAtmosphere"), TEXT("SkyLight"), TEXT("ExponentialHeightFog")};
-    
-    for (const FString& LightingType : LightingTypes)
-    {
-        TArray<AActor*> LightingActors = GetActorsOfType(LightingType);
-        if (LightingActors.Num() > 1)
-        {
-            LightingIssues.Add(FString::Printf(TEXT("%s has %d instances (should be 1)"), 
-                *LightingType, LightingActors.Num()));
-        }
-    }
-    
-    float ExecutionTime = (FPlatformTime::Seconds() - StartTime) * 1000.0f;
-    
-    if (LightingIssues.Num() > 0)
-    {
-        FString ErrorMsg = TEXT("Lighting issues: ") + FString::Join(LightingIssues, TEXT(", "));
-        return CreateTestResult(TEXT("Lighting Setup"), false, ErrorMsg, ExecutionTime);
-    }
-    
-    return CreateTestResult(TEXT("Lighting Setup"), true, TEXT("Lighting setup is correct"), ExecutionTime);
-}
-
-FQA_ValidationResult UQA_ValidationManager::ValidateVFXSystems()
-{
-    float StartTime = FPlatformTime::Seconds();
-    
-    // Verificar se a classe VFX_ImpactManager está carregável
-    bool bVFXManagerLoadable = IsClassLoadable(TEXT("/Script/TranspersonalGame.VFX_ImpactManager"));
-    
-    float ExecutionTime = (FPlatformTime::Seconds() - StartTime) * 1000.0f;
-    
-    if (!bVFXManagerLoadable)
-    {
-        return CreateTestResult(TEXT("VFX Systems"), false, TEXT("VFX_ImpactManager class not loadable"), ExecutionTime);
-    }
-    
-    return CreateTestResult(TEXT("VFX Systems"), true, TEXT("VFX systems functional"), ExecutionTime);
-}
-
-FQA_ValidationResult UQA_ValidationManager::ValidateCharacterSystems()
-{
-    float StartTime = FPlatformTime::Seconds();
-    
-    // Verificar se TranspersonalCharacter está carregável
-    bool bCharacterLoadable = IsClassLoadable(TEXT("/Script/TranspersonalGame.TranspersonalCharacter"));
-    
-    // Verificar se existe PlayerStart
-    TArray<AActor*> PlayerStarts = GetActorsOfType(TEXT("PlayerStart"));
-    
-    float ExecutionTime = (FPlatformTime::Seconds() - StartTime) * 1000.0f;
-    
-    if (!bCharacterLoadable)
-    {
-        return CreateTestResult(TEXT("Character Systems"), false, TEXT("TranspersonalCharacter class not loadable"), ExecutionTime);
-    }
-    
-    if (PlayerStarts.Num() == 0)
-    {
-        return CreateTestResult(TEXT("Character Systems"), false, TEXT("No PlayerStart found in level"), ExecutionTime);
-    }
-    
-    return CreateTestResult(TEXT("Character Systems"), true, TEXT("Character systems functional"), ExecutionTime);
-}
-
-void UQA_ValidationManager::LogValidationResults(const FQA_ValidationSuite& ValidationSuite)
-{
-    UE_LOG(LogTemp, Warning, TEXT("=== QA VALIDATION RESULTS ==="));
-    UE_LOG(LogTemp, Warning, TEXT("Overall Score: %.1f%% (%d/%d tests passed)"), 
-        ValidationSuite.OverallScore, ValidationSuite.PassedTests, ValidationSuite.TotalTests);
-    
-    if (bLogDetailedResults)
-    {
-        for (const FQA_ValidationResult& Result : ValidationSuite.TestResults)
-        {
-            FString Status = Result.bPassed ? TEXT("PASS") : TEXT("FAIL");
-            UE_LOG(LogTemp, Warning, TEXT("%s: %s (%.1fms)"), *Result.TestName, *Status, Result.ExecutionTimeMs);
-            
-            if (!Result.bPassed && !Result.ErrorMessage.IsEmpty())
+            if (ActorLocation.X >= Biome.MinBounds.X && ActorLocation.X <= Biome.MaxBounds.X &&
+                ActorLocation.Y >= Biome.MinBounds.Y && ActorLocation.Y <= Biome.MaxBounds.Y &&
+                ActorLocation.Z >= Biome.MinBounds.Z && ActorLocation.Z <= Biome.MaxBounds.Z)
             {
-                UE_LOG(LogTemp, Error, TEXT("  Error: %s"), *Result.ErrorMessage);
+                Biome.ActorCount++;
+                break;
             }
         }
     }
+    
+    // Validar distribuição
+    bool bDistributionOK = true;
+    for (const FBiomeZone& Biome : Biomes)
+    {
+        if (Biome.ActorCount == 0)
+        {
+            AddValidationReport(TEXT("BiomeDistribution"), EQA_ValidationResult::Warning,
+                FString::Printf(TEXT("Bioma %s vazio (0 actores)"), *Biome.Name),
+                FPlatformTime::Seconds() - StartTime);
+            bDistributionOK = false;
+        }
+    }
+    
+    if (bDistributionOK)
+    {
+        AddValidationReport(TEXT("BiomeDistribution"), EQA_ValidationResult::Pass,
+            TEXT("Distribuição de biomas validada"), FPlatformTime::Seconds() - StartTime);
+    }
 }
 
-bool UQA_ValidationManager::SaveValidationReport(const FQA_ValidationSuite& ValidationSuite, const FString& FilePath)
+TArray<FQA_ValidationReport> AQA_ValidationManager::GetValidationReports() const
 {
-    FString ReportContent;
-    ReportContent += TEXT("QA VALIDATION REPORT\n");
-    ReportContent += TEXT("====================\n\n");
-    ReportContent += FString::Printf(TEXT("Execution Time: %s\n"), *ValidationSuite.ExecutionTime.ToString());
-    ReportContent += FString::Printf(TEXT("Overall Score: %.1f%%\n"), ValidationSuite.OverallScore);
-    ReportContent += FString::Printf(TEXT("Tests Passed: %d/%d\n\n"), ValidationSuite.PassedTests, ValidationSuite.TotalTests);
+    return ValidationReports;
+}
+
+void AQA_ValidationManager::ClearValidationReports()
+{
+    ValidationReports.Empty();
+}
+
+void AQA_ValidationManager::ExportReportsToFile()
+{
+    FString ReportContent = TEXT("=== QA VALIDATION REPORT ===\n");
+    ReportContent += FString::Printf(TEXT("Generated: %s\n\n"), *FDateTime::Now().ToString());
     
-    ReportContent += TEXT("DETAILED RESULTS:\n");
-    for (const FQA_ValidationResult& Result : ValidationSuite.TestResults)
+    for (const FQA_ValidationReport& Report : ValidationReports)
     {
-        FString Status = Result.bPassed ? TEXT("PASS") : TEXT("FAIL");
-        ReportContent += FString::Printf(TEXT("- %s: %s (%.1fms)\n"), *Result.TestName, *Status, Result.ExecutionTimeMs);
+        FString ResultString;
+        switch (Report.Result)
+        {
+            case EQA_ValidationResult::Pass: ResultString = TEXT("PASS"); break;
+            case EQA_ValidationResult::Warning: ResultString = TEXT("WARNING"); break;
+            case EQA_ValidationResult::Fail: ResultString = TEXT("FAIL"); break;
+            case EQA_ValidationResult::Critical: ResultString = TEXT("CRITICAL"); break;
+        }
         
-        if (!Result.bPassed && !Result.ErrorMessage.IsEmpty())
-        {
-            ReportContent += FString::Printf(TEXT("  Error: %s\n"), *Result.ErrorMessage);
-        }
+        ReportContent += FString::Printf(TEXT("[%s] %s: %s (%.3fs)\n"),
+            *ResultString, *Report.TestName, *Report.Message, Report.ExecutionTime);
     }
     
-    return FFileHelper::SaveStringToFile(ReportContent, *FilePath);
-}
-
-FQA_ValidationResult UQA_ValidationManager::CreateTestResult(const FString& TestName, bool bPassed, const FString& ErrorMessage, float ExecutionTime)
-{
-    FQA_ValidationResult Result;
-    Result.TestName = TestName;
-    Result.bPassed = bPassed;
-    Result.ErrorMessage = ErrorMessage;
-    Result.ExecutionTimeMs = ExecutionTime;
-    return Result;
-}
-
-TArray<AActor*> UQA_ValidationManager::GetActorsOfType(const FString& ActorTypeName)
-{
-    TArray<AActor*> FoundActors;
-    UWorld* World = GetWorld();
+    FString FilePath = FPaths::ProjectLogDir() / TEXT("QA_ValidationReport.txt");
+    FFileHelper::SaveStringToFile(ReportContent, *FilePath);
     
-    if (!World)
+    UE_LOG(LogTemp, Warning, TEXT("QA Report exportado para: %s"), *FilePath);
+}
+
+void AQA_ValidationManager::AddValidationReport(const FString& TestName, EQA_ValidationResult Result, const FString& Message, float ExecutionTime)
+{
+    FQA_ValidationReport Report;
+    Report.TestName = TestName;
+    Report.Result = Result;
+    Report.Message = Message;
+    Report.ExecutionTime = ExecutionTime;
+    
+    ValidationReports.Add(Report);
+    
+    if (bLogToConsole)
     {
-        return FoundActors;
+        LogValidationResult(Report);
     }
-    
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-    {
-        AActor* Actor = *ActorItr;
-        if (Actor && Actor->GetClass()->GetName() == ActorTypeName)
-        {
-            FoundActors.Add(Actor);
-        }
-    }
-    
-    return FoundActors;
 }
 
-bool UQA_ValidationManager::IsClassLoadable(const FString& ClassPath)
+void AQA_ValidationManager::LogValidationResult(const FQA_ValidationReport& Report)
 {
-    UClass* LoadedClass = LoadClass<UObject>(nullptr, *ClassPath);
-    return LoadedClass != nullptr;
+    FString ResultString;
+    switch (Report.Result)
+    {
+        case EQA_ValidationResult::Pass: 
+            UE_LOG(LogTemp, Log, TEXT("QA PASS [%s]: %s"), *Report.TestName, *Report.Message);
+            break;
+        case EQA_ValidationResult::Warning:
+            UE_LOG(LogTemp, Warning, TEXT("QA WARNING [%s]: %s"), *Report.TestName, *Report.Message);
+            break;
+        case EQA_ValidationResult::Fail:
+            UE_LOG(LogTemp, Error, TEXT("QA FAIL [%s]: %s"), *Report.TestName, *Report.Message);
+            break;
+        case EQA_ValidationResult::Critical:
+            UE_LOG(LogTemp, Fatal, TEXT("QA CRITICAL [%s]: %s"), *Report.TestName, *Report.Message);
+            break;
+    }
+}
+
+int32 AQA_ValidationManager::CountActorsOfClass(UClass* ActorClass)
+{
+    int32 Count = 0;
+    for (TActorIterator<AActor> ActorItr(GetWorld(), ActorClass); ActorItr; ++ActorItr)
+    {
+        Count++;
+    }
+    return Count;
+}
+
+bool AQA_ValidationManager::ValidateActorCount(UClass* ActorClass, int32 ExpectedMin, int32 ExpectedMax, const FString& ActorTypeName)
+{
+    int32 ActualCount = CountActorsOfClass(ActorClass);
+    return ActualCount >= ExpectedMin && ActualCount <= ExpectedMax;
 }
