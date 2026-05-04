@@ -1,479 +1,343 @@
 #include "Audio_SpatialAudioManager.h"
-#include "Engine/World.h"
-#include "GameFramework/PlayerController.h"
-#include "GameFramework/Pawn.h"
-#include "Kismet/GameplayStatics.h"
-#include "Components/AudioComponent.h"
-#include "Sound/SoundCue.h"
 #include "Engine/Engine.h"
+#include "GameFramework/PlayerController.h"
+#include "Components/SceneComponent.h"
+#include "Sound/SoundCue.h"
 
 AAudio_SpatialAudioManager::AAudio_SpatialAudioManager()
 {
     PrimaryActorTick.bCanEverTick = true;
 
-    // Initialize audio components
-    ForestAmbientComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("ForestAmbientComponent"));
-    PlainsAmbientComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("PlainsAmbientComponent"));
-    RiverAmbientComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("RiverAmbientComponent"));
-    DangerAmbientComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("DangerAmbientComponent"));
-
-    // Set root component
+    // Criar componente raiz
     RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
 
-    // Attach audio components
-    if (ForestAmbientComponent)
-    {
-        ForestAmbientComponent->SetupAttachment(RootComponent);
-        ForestAmbientComponent->bAutoActivate = false;
-    }
+    // Criar componentes de áudio
+    MasterAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("MasterAudioComponent"));
+    MasterAudioComponent->SetupAttachment(RootComponent);
+    MasterAudioComponent->bAutoActivate = false;
 
-    if (PlainsAmbientComponent)
-    {
-        PlainsAmbientComponent->SetupAttachment(RootComponent);
-        PlainsAmbientComponent->bAutoActivate = false;
-    }
+    AmbientAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("AmbientAudioComponent"));
+    AmbientAudioComponent->SetupAttachment(RootComponent);
+    AmbientAudioComponent->bAutoActivate = false;
 
-    if (RiverAmbientComponent)
-    {
-        RiverAmbientComponent->SetupAttachment(RootComponent);
-        RiverAmbientComponent->bAutoActivate = false;
-    }
+    MusicAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("MusicAudioComponent"));
+    MusicAudioComponent->SetupAttachment(RootComponent);
+    MusicAudioComponent->bAutoActivate = false;
 
-    if (DangerAmbientComponent)
-    {
-        DangerAmbientComponent->SetupAttachment(RootComponent);
-        DangerAmbientComponent->bAutoActivate = false;
-    }
+    EffectsAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("EffectsAudioComponent"));
+    EffectsAudioComponent->SetupAttachment(RootComponent);
+    EffectsAudioComponent->bAutoActivate = false;
 
-    // Initialize default values
-    MasterVolume = 1.0f;
-    AmbientVolume = 0.8f;
-    EffectsVolume = 1.0f;
-    VoiceVolume = 0.9f;
-    
-    CurrentZone = EAudio_ZoneType::Forest;
-    PreviousZone = EAudio_ZoneType::Forest;
-    ZoneTransitionTime = 0.0f;
-    ZoneTransitionDuration = 2.0f;
-
+    // Inicializar variáveis
     PlayerPawn = nullptr;
+    CurrentBiome = TEXT("Savana");
+    CurrentThreatLevel = 0.0f;
+    RandomSoundTimer = 0.0f;
 }
 
 void AAudio_SpatialAudioManager::BeginPlay()
 {
     Super::BeginPlay();
 
-    // Get player pawn reference
-    if (UWorld* World = GetWorld())
+    // Encontrar referência do jogador
+    UpdatePlayerReference();
+
+    // Inicializar configurações de áudio dos biomas
+    InitializeBiomeAudioSettings();
+
+    // Configurar componentes de áudio
+    if (AmbientAudioComponent)
     {
-        if (APlayerController* PC = World->GetFirstPlayerController())
-        {
-            PlayerPawn = PC->GetPawn();
-        }
+        AmbientAudioComponent->SetVolumeMultiplier(0.7f);
+        AmbientAudioComponent->bAutoActivate = true;
     }
 
-    // Initialize audio zones and setup default sounds
-    InitializeAudioZones();
-    SetupDefaultAmbientSounds();
+    if (MusicAudioComponent)
+    {
+        MusicAudioComponent->SetVolumeMultiplier(0.5f);
+        MusicAudioComponent->bAutoActivate = true;
+    }
 
-    UE_LOG(LogTemp, Warning, TEXT("Audio_SpatialAudioManager: BeginPlay completed"));
+    if (EffectsAudioComponent)
+    {
+        EffectsAudioComponent->SetVolumeMultiplier(1.0f);
+        EffectsAudioComponent->bAutoActivate = true;
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("Audio_SpatialAudioManager: Sistema de áudio espacial inicializado"));
 }
 
 void AAudio_SpatialAudioManager::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    // Update audio mixing based on player position and game state
-    UpdateAudioMixing(DeltaTime);
-    
-    // Update emitter volumes based on distance
-    UpdateEmitterVolumes();
-    
-    // Update player proximity audio
-    UpdatePlayerProximityAudio();
-    
-    // Handle zone transitions
-    UpdateZoneTransitions(DeltaTime);
-}
-
-void AAudio_SpatialAudioManager::InitializeAudioZones()
-{
-    // Clear existing zones
-    AudioZones.Empty();
-
-    // Forest zone
-    FAudio_ZoneSettings ForestZone;
-    ForestZone.ZoneType = EAudio_ZoneType::Forest;
-    ForestZone.BaseVolume = 0.7f;
-    ForestZone.FadeDistance = 800.0f;
-    ForestZone.MaxDistance = 1500.0f;
-    AudioZones.Add(ForestZone);
-
-    // Plains zone
-    FAudio_ZoneSettings PlainsZone;
-    PlainsZone.ZoneType = EAudio_ZoneType::Plains;
-    PlainsZone.BaseVolume = 0.6f;
-    PlainsZone.FadeDistance = 1200.0f;
-    PlainsZone.MaxDistance = 2000.0f;
-    AudioZones.Add(PlainsZone);
-
-    // River zone
-    FAudio_ZoneSettings RiverZone;
-    RiverZone.ZoneType = EAudio_ZoneType::River;
-    RiverZone.BaseVolume = 0.8f;
-    RiverZone.FadeDistance = 600.0f;
-    RiverZone.MaxDistance = 1000.0f;
-    AudioZones.Add(RiverZone);
-
-    // Danger zone
-    FAudio_ZoneSettings DangerZone;
-    DangerZone.ZoneType = EAudio_ZoneType::Danger;
-    DangerZone.BaseVolume = 0.9f;
-    DangerZone.FadeDistance = 500.0f;
-    DangerZone.MaxDistance = 800.0f;
-    AudioZones.Add(DangerZone);
-
-    UE_LOG(LogTemp, Warning, TEXT("Audio_SpatialAudioManager: Initialized %d audio zones"), AudioZones.Num());
-}
-
-void AAudio_SpatialAudioManager::SetupDefaultAmbientSounds()
-{
-    // Setup forest ambient sounds
-    if (ForestAmbientComponent)
+    if (PlayerPawn)
     {
-        ForestAmbientComponent->SetVolumeMultiplier(AmbientVolume * 0.7f);
-        ForestAmbientComponent->bOverrideAttenuation = true;
-    }
+        // Actualizar áudio espacial baseado na posição do jogador
+        UpdateSpatialAudio();
 
-    // Setup plains ambient sounds
-    if (PlainsAmbientComponent)
-    {
-        PlainsAmbientComponent->SetVolumeMultiplier(AmbientVolume * 0.6f);
-        PlainsAmbientComponent->bOverrideAttenuation = true;
-    }
+        // Actualizar áudio do bioma
+        UpdateBiomeAudio();
 
-    // Setup river ambient sounds
-    if (RiverAmbientComponent)
-    {
-        RiverAmbientComponent->SetVolumeMultiplier(AmbientVolume * 0.8f);
-        RiverAmbientComponent->bOverrideAttenuation = true;
-    }
+        // Processar sons aleatórios
+        ProcessRandomSounds(DeltaTime);
 
-    // Setup danger ambient sounds
-    if (DangerAmbientComponent)
-    {
-        DangerAmbientComponent->SetVolumeMultiplier(AmbientVolume * 0.9f);
-        DangerAmbientComponent->bOverrideAttenuation = true;
-    }
-
-    UE_LOG(LogTemp, Warning, TEXT("Audio_SpatialAudioManager: Default ambient sounds configured"));
-}
-
-void AAudio_SpatialAudioManager::RegisterAudioZone(EAudio_ZoneType ZoneType, FVector Location, float Radius)
-{
-    FAudio_ZoneSettings NewZone;
-    NewZone.ZoneType = ZoneType;
-    NewZone.BaseVolume = 0.7f;
-    NewZone.FadeDistance = Radius * 0.8f;
-    NewZone.MaxDistance = Radius;
-    NewZone.bIs3D = true;
-    NewZone.bAutoActivate = true;
-
-    AudioZones.Add(NewZone);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Audio_SpatialAudioManager: Registered audio zone type %d at location %s"), 
-           (int32)ZoneType, *Location.ToString());
-}
-
-void AAudio_SpatialAudioManager::UnregisterAudioZone(EAudio_ZoneType ZoneType)
-{
-    AudioZones.RemoveAll([ZoneType](const FAudio_ZoneSettings& Zone)
-    {
-        return Zone.ZoneType == ZoneType;
-    });
-
-    UE_LOG(LogTemp, Warning, TEXT("Audio_SpatialAudioManager: Unregistered audio zone type %d"), (int32)ZoneType);
-}
-
-void AAudio_SpatialAudioManager::UpdateAudioMixing(float DeltaTime)
-{
-    if (!PlayerPawn)
-    {
-        return;
-    }
-
-    // Determine current player zone
-    EAudio_ZoneType NewZone = GetCurrentPlayerZone();
-    
-    if (NewZone != CurrentZone)
-    {
-        OnPlayerExitZone(CurrentZone);
-        OnPlayerEnterZone(NewZone);
-        PreviousZone = CurrentZone;
-        CurrentZone = NewZone;
-        ZoneTransitionTime = 0.0f;
-    }
-
-    // Update component volumes based on current zone
-    float ForestVolume = (CurrentZone == EAudio_ZoneType::Forest) ? AmbientVolume : AmbientVolume * 0.3f;
-    float PlainsVolume = (CurrentZone == EAudio_ZoneType::Plains) ? AmbientVolume : AmbientVolume * 0.3f;
-    float RiverVolume = (CurrentZone == EAudio_ZoneType::River) ? AmbientVolume : AmbientVolume * 0.3f;
-
-    if (ForestAmbientComponent)
-    {
-        ForestAmbientComponent->SetVolumeMultiplier(ForestVolume * MasterVolume);
-    }
-    
-    if (PlainsAmbientComponent)
-    {
-        PlainsAmbientComponent->SetVolumeMultiplier(PlainsVolume * MasterVolume);
-    }
-    
-    if (RiverAmbientComponent)
-    {
-        RiverAmbientComponent->SetVolumeMultiplier(RiverVolume * MasterVolume);
+        // Limpar sons terminados
+        CleanupFinishedSounds();
     }
 }
 
-void AAudio_SpatialAudioManager::AddAudioEmitter(FVector Location, EAudio_Priority Priority, const FString& AudioURL)
+void AAudio_SpatialAudioManager::PlaySpatialSound(const FAudio_SpatialSoundData& SoundData)
 {
-    FAudio_EmitterData NewEmitter;
-    NewEmitter.Location = Location;
-    NewEmitter.Priority = Priority;
-    NewEmitter.AudioURL = AudioURL;
-    NewEmitter.bIsActive = true;
-    NewEmitter.Volume = 1.0f;
-    NewEmitter.Pitch = 1.0f;
-
-    AudioEmitters.Add(NewEmitter);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Audio_SpatialAudioManager: Added audio emitter at %s with URL: %s"), 
-           *Location.ToString(), *AudioURL);
-}
-
-void AAudio_SpatialAudioManager::RemoveAudioEmitter(FVector Location)
-{
-    AudioEmitters.RemoveAll([Location](const FAudio_EmitterData& Emitter)
+    if (!SoundData.SoundCue.IsNull())
     {
-        return FVector::Dist(Emitter.Location, Location) < 100.0f;
-    });
+        // Adicionar à lista de sons espaciais activos
+        ActiveSpatialSounds.Add(SoundData);
 
-    UE_LOG(LogTemp, Warning, TEXT("Audio_SpatialAudioManager: Removed audio emitter at %s"), *Location.ToString());
-}
+        // Calcular volume baseado na distância
+        if (PlayerPawn)
+        {
+            FVector PlayerLocation = PlayerPawn->GetActorLocation();
+            float Distance = FVector::Dist(PlayerLocation, SoundData.WorldLocation);
+            float Volume = CalculateVolumeFromDistance(SoundData.WorldLocation, PlayerLocation, SoundData.MaxAudibleDistance);
 
-void AAudio_SpatialAudioManager::UpdateEmitterVolumes()
-{
-    if (!PlayerPawn)
-    {
-        return;
+            if (Volume > 0.01f)
+            {
+                // Tocar o som com volume calculado
+                if (EffectsAudioComponent && !EffectsAudioComponent->IsPlaying())
+                {
+                    USoundCue* LoadedSound = SoundData.SoundCue.LoadSynchronous();
+                    if (LoadedSound)
+                    {
+                        EffectsAudioComponent->SetSound(LoadedSound);
+                        EffectsAudioComponent->SetVolumeMultiplier(Volume * SoundData.VolumeMultiplier);
+                        EffectsAudioComponent->SetWorldLocation(SoundData.WorldLocation);
+                        EffectsAudioComponent->Play();
+
+                        UE_LOG(LogTemp, Log, TEXT("Audio_SpatialAudioManager: Som espacial reproduzido em %s com volume %f"), 
+                               *SoundData.WorldLocation.ToString(), Volume);
+                    }
+                }
+            }
+        }
     }
+}
+
+void AAudio_SpatialAudioManager::StopSpatialSound(FVector Location, float Tolerance)
+{
+    for (int32 i = ActiveSpatialSounds.Num() - 1; i >= 0; i--)
+    {
+        if (FVector::Dist(ActiveSpatialSounds[i].WorldLocation, Location) <= Tolerance)
+        {
+            ActiveSpatialSounds.RemoveAt(i);
+            UE_LOG(LogTemp, Log, TEXT("Audio_SpatialAudioManager: Som espacial removido em %s"), *Location.ToString());
+        }
+    }
+}
+
+void AAudio_SpatialAudioManager::SetCurrentBiome(const FString& BiomeName)
+{
+    if (CurrentBiome != BiomeName)
+    {
+        CurrentBiome = BiomeName;
+        UE_LOG(LogTemp, Warning, TEXT("Audio_SpatialAudioManager: Bioma alterado para %s"), *BiomeName);
+
+        // Actualizar áudio do bioma imediatamente
+        UpdateBiomeAudio();
+    }
+}
+
+void AAudio_SpatialAudioManager::SetThreatLevel(float ThreatLevel)
+{
+    CurrentThreatLevel = FMath::Clamp(ThreatLevel, 0.0f, 1.0f);
+    
+    // Ajustar volumes baseado no nível de ameaça
+    if (AmbientAudioComponent)
+    {
+        float AmbientVolume = FMath::Lerp(0.7f, 0.3f, CurrentThreatLevel);
+        AmbientAudioComponent->SetVolumeMultiplier(AmbientVolume);
+    }
+
+    if (MusicAudioComponent)
+    {
+        float MusicVolume = FMath::Lerp(0.5f, 0.8f, CurrentThreatLevel);
+        MusicAudioComponent->SetVolumeMultiplier(MusicVolume);
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("Audio_SpatialAudioManager: Nível de ameaça definido para %f"), CurrentThreatLevel);
+}
+
+void AAudio_SpatialAudioManager::UpdatePlayerReference()
+{
+    if (UWorld* World = GetWorld())
+    {
+        if (APlayerController* PC = World->GetFirstPlayerController())
+        {
+            PlayerPawn = PC->GetPawn();
+            if (PlayerPawn)
+            {
+                UE_LOG(LogTemp, Log, TEXT("Audio_SpatialAudioManager: Referência do jogador actualizada"));
+            }
+        }
+    }
+}
+
+void AAudio_SpatialAudioManager::InitializeBiomeAudioSettings()
+{
+    // Configurações para Savana
+    FAudio_BiomeAudioSettings SavanaSettings;
+    SavanaSettings.AmbientVolume = 0.6f;
+    SavanaSettings.MusicVolume = 0.4f;
+    SavanaSettings.RandomSoundFrequency = 20.0f;
+    BiomeAudioSettings.Add(TEXT("Savana"), SavanaSettings);
+
+    // Configurações para Floresta
+    FAudio_BiomeAudioSettings FlorestaSettings;
+    FlorestaSettings.AmbientVolume = 0.8f;
+    FlorestaSettings.MusicVolume = 0.3f;
+    FlorestaSettings.RandomSoundFrequency = 12.0f;
+    BiomeAudioSettings.Add(TEXT("Floresta"), FlorestaSettings);
+
+    // Configurações para Pântano
+    FAudio_BiomeAudioSettings PantanoSettings;
+    PantanoSettings.AmbientVolume = 0.7f;
+    PantanoSettings.MusicVolume = 0.6f;
+    PantanoSettings.RandomSoundFrequency = 25.0f;
+    BiomeAudioSettings.Add(TEXT("Pantano"), PantanoSettings);
+
+    // Configurações para Deserto
+    FAudio_BiomeAudioSettings DesertoSettings;
+    DesertoSettings.AmbientVolume = 0.4f;
+    DesertoSettings.MusicVolume = 0.5f;
+    DesertoSettings.RandomSoundFrequency = 30.0f;
+    BiomeAudioSettings.Add(TEXT("Deserto"), DesertoSettings);
+
+    // Configurações para Montanha Nevada
+    FAudio_BiomeAudioSettings MontanhaSettings;
+    MontanhaSettings.AmbientVolume = 0.5f;
+    MontanhaSettings.MusicVolume = 0.4f;
+    MontanhaSettings.RandomSoundFrequency = 35.0f;
+    BiomeAudioSettings.Add(TEXT("Montanha"), MontanhaSettings);
+
+    UE_LOG(LogTemp, Warning, TEXT("Audio_SpatialAudioManager: Configurações de áudio dos biomas inicializadas"));
+}
+
+FString AAudio_SpatialAudioManager::DetectCurrentBiome(FVector PlayerLocation)
+{
+    // Coordenadas dos biomas baseadas na memória do Hugo
+    float X = PlayerLocation.X;
+    float Y = PlayerLocation.Y;
+
+    // Pântano (sudoeste): X(-77500 a -25000), Y(-76500 a -15000)
+    if (X >= -77500 && X <= -25000 && Y >= -76500 && Y <= -15000)
+    {
+        return TEXT("Pantano");
+    }
+    // Floresta (noroeste): X(-77500 a -15000), Y(15000 a 76500)
+    else if (X >= -77500 && X <= -15000 && Y >= 15000 && Y <= 76500)
+    {
+        return TEXT("Floresta");
+    }
+    // Savana (centro): X(-20000 a 20000), Y(-20000 a 20000)
+    else if (X >= -20000 && X <= 20000 && Y >= -20000 && Y <= 20000)
+    {
+        return TEXT("Savana");
+    }
+    // Deserto (leste): X(25000 a 79500), Y(-30000 a 30000)
+    else if (X >= 25000 && X <= 79500 && Y >= -30000 && Y <= 30000)
+    {
+        return TEXT("Deserto");
+    }
+    // Montanha Nevada (nordeste): X(15000 a 79500), Y(20000 a 76500)
+    else if (X >= 15000 && X <= 79500 && Y >= 20000 && Y <= 76500)
+    {
+        return TEXT("Montanha");
+    }
+
+    // Default para Savana se não detectar bioma específico
+    return TEXT("Savana");
+}
+
+void AAudio_SpatialAudioManager::UpdateSpatialAudio()
+{
+    if (!PlayerPawn) return;
 
     FVector PlayerLocation = PlayerPawn->GetActorLocation();
 
-    for (FAudio_EmitterData& Emitter : AudioEmitters)
+    // Detectar bioma actual
+    FString DetectedBiome = DetectCurrentBiome(PlayerLocation);
+    if (DetectedBiome != CurrentBiome)
     {
-        if (!Emitter.bIsActive)
-        {
-            continue;
-        }
+        SetCurrentBiome(DetectedBiome);
+    }
 
-        float Distance = FVector::Dist(PlayerLocation, Emitter.Location);
-        float Attenuation = CalculateDistanceAttenuation(Emitter.Location, 1000.0f);
-        
-        // Adjust volume based on priority and distance
-        float PriorityMultiplier = 1.0f;
-        switch (Emitter.Priority)
-        {
-            case EAudio_Priority::Emergency:
-                PriorityMultiplier = 1.5f;
-                break;
-            case EAudio_Priority::Critical:
-                PriorityMultiplier = 1.3f;
-                break;
-            case EAudio_Priority::Gameplay:
-                PriorityMultiplier = 1.1f;
-                break;
-            case EAudio_Priority::Ambient:
-                PriorityMultiplier = 0.8f;
-                break;
-            case EAudio_Priority::Background:
-                PriorityMultiplier = 0.6f;
-                break;
-        }
-
-        Emitter.Volume = Attenuation * PriorityMultiplier * EffectsVolume * MasterVolume;
+    // Actualizar volume dos sons espaciais baseado na distância
+    for (FAudio_SpatialSoundData& SpatialSound : ActiveSpatialSounds)
+    {
+        float Volume = CalculateVolumeFromDistance(SpatialSound.WorldLocation, PlayerLocation, SpatialSound.MaxAudibleDistance);
+        SpatialSound.VolumeMultiplier = Volume;
     }
 }
 
-void AAudio_SpatialAudioManager::UpdatePlayerProximityAudio()
+void AAudio_SpatialAudioManager::UpdateBiomeAudio()
 {
-    if (!PlayerPawn)
+    if (BiomeAudioSettings.Contains(CurrentBiome))
     {
-        return;
-    }
+        const FAudio_BiomeAudioSettings& Settings = BiomeAudioSettings[CurrentBiome];
 
-    // This would integrate with dinosaur AI system to trigger proximity audio
-    // For now, we'll just log the player's current zone
-    static float LogTimer = 0.0f;
-    LogTimer += GetWorld()->GetDeltaSeconds();
-    
-    if (LogTimer >= 5.0f) // Log every 5 seconds
-    {
-        UE_LOG(LogTemp, Log, TEXT("Audio_SpatialAudioManager: Player in zone %d, %d active emitters"), 
-               (int32)CurrentZone, AudioEmitters.Num());
-        LogTimer = 0.0f;
+        // Actualizar volumes dos componentes de áudio
+        if (AmbientAudioComponent)
+        {
+            AmbientAudioComponent->SetVolumeMultiplier(Settings.AmbientVolume * (1.0f - CurrentThreatLevel * 0.5f));
+        }
+
+        if (MusicAudioComponent)
+        {
+            MusicAudioComponent->SetVolumeMultiplier(Settings.MusicVolume * (1.0f + CurrentThreatLevel * 0.5f));
+        }
     }
 }
 
-float AAudio_SpatialAudioManager::CalculateDistanceAttenuation(FVector EmitterLocation, float MaxDistance)
+void AAudio_SpatialAudioManager::ProcessRandomSounds(float DeltaTime)
 {
-    if (!PlayerPawn)
-    {
-        return 0.0f;
-    }
+    RandomSoundTimer += DeltaTime;
 
-    FVector PlayerLocation = PlayerPawn->GetActorLocation();
-    float Distance = FVector::Dist(PlayerLocation, EmitterLocation);
+    if (BiomeAudioSettings.Contains(CurrentBiome))
+    {
+        const FAudio_BiomeAudioSettings& Settings = BiomeAudioSettings[CurrentBiome];
+
+        if (RandomSoundTimer >= Settings.RandomSoundFrequency)
+        {
+            RandomSoundTimer = 0.0f;
+
+            // Reproduzir som aleatório do bioma (implementação futura com assets)
+            UE_LOG(LogTemp, Log, TEXT("Audio_SpatialAudioManager: Tempo para som aleatório do bioma %s"), *CurrentBiome);
+        }
+    }
+}
+
+void AAudio_SpatialAudioManager::CleanupFinishedSounds()
+{
+    // Remover sons espaciais que já terminaram (implementação futura)
+    for (int32 i = ActiveSpatialSounds.Num() - 1; i >= 0; i--)
+    {
+        // Lógica para verificar se o som terminou
+        // Por agora, manter todos os sons activos
+    }
+}
+
+float AAudio_SpatialAudioManager::CalculateVolumeFromDistance(FVector SoundLocation, FVector ListenerLocation, float MaxDistance)
+{
+    float Distance = FVector::Dist(SoundLocation, ListenerLocation);
     
     if (Distance >= MaxDistance)
     {
         return 0.0f;
     }
+
+    // Curva de atenuação logarítmica
+    float DistanceRatio = Distance / MaxDistance;
+    float Volume = 1.0f - (DistanceRatio * DistanceRatio);
     
-    // Linear falloff for now - could be made more sophisticated
-    return FMath::Clamp(1.0f - (Distance / MaxDistance), 0.0f, 1.0f);
-}
-
-EAudio_ZoneType AAudio_SpatialAudioManager::GetCurrentPlayerZone()
-{
-    if (!PlayerPawn)
-    {
-        return EAudio_ZoneType::Forest;
-    }
-
-    FVector PlayerLocation = PlayerPawn->GetActorLocation();
-    
-    // Simple zone detection based on player position
-    // This would be more sophisticated in a real implementation
-    if (PlayerLocation.X < -200.0f && PlayerLocation.Y < -200.0f)
-    {
-        return EAudio_ZoneType::Forest;
-    }
-    else if (PlayerLocation.X > 600.0f && FMath::Abs(PlayerLocation.Y) < 400.0f)
-    {
-        return EAudio_ZoneType::River;
-    }
-    else if (PlayerLocation.Y > 600.0f)
-    {
-        return EAudio_ZoneType::Plains;
-    }
-    
-    return EAudio_ZoneType::Forest; // Default
-}
-
-void AAudio_SpatialAudioManager::OnPlayerEnterZone(EAudio_ZoneType NewZone)
-{
-    UE_LOG(LogTemp, Warning, TEXT("Audio_SpatialAudioManager: Player entered zone %d"), (int32)NewZone);
-    
-    // Activate appropriate ambient component
-    switch (NewZone)
-    {
-        case EAudio_ZoneType::Forest:
-            if (ForestAmbientComponent && !ForestAmbientComponent->IsPlaying())
-            {
-                ForestAmbientComponent->Play();
-            }
-            break;
-        case EAudio_ZoneType::Plains:
-            if (PlainsAmbientComponent && !PlainsAmbientComponent->IsPlaying())
-            {
-                PlainsAmbientComponent->Play();
-            }
-            break;
-        case EAudio_ZoneType::River:
-            if (RiverAmbientComponent && !RiverAmbientComponent->IsPlaying())
-            {
-                RiverAmbientComponent->Play();
-            }
-            break;
-        case EAudio_ZoneType::Danger:
-            if (DangerAmbientComponent && !DangerAmbientComponent->IsPlaying())
-            {
-                DangerAmbientComponent->Play();
-            }
-            break;
-    }
-}
-
-void AAudio_SpatialAudioManager::OnPlayerExitZone(EAudio_ZoneType OldZone)
-{
-    UE_LOG(LogTemp, Warning, TEXT("Audio_SpatialAudioManager: Player exited zone %d"), (int32)OldZone);
-    
-    // Don't immediately stop ambient sounds - let them fade out naturally
-}
-
-void AAudio_SpatialAudioManager::PlayAudioFromURL(const FString& AudioURL, FVector Location, float Volume)
-{
-    // This would integrate with a URL-based audio loading system
-    // For now, we'll add it as an emitter
-    AddAudioEmitter(Location, EAudio_Priority::Gameplay, AudioURL);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Audio_SpatialAudioManager: Playing audio from URL %s at location %s"), 
-           *AudioURL, *Location.ToString());
-}
-
-void AAudio_SpatialAudioManager::StopAudioFromURL(const FString& AudioURL)
-{
-    // Remove emitters with matching URL
-    AudioEmitters.RemoveAll([AudioURL](const FAudio_EmitterData& Emitter)
-    {
-        return Emitter.AudioURL == AudioURL;
-    });
-    
-    UE_LOG(LogTemp, Warning, TEXT("Audio_SpatialAudioManager: Stopped audio from URL %s"), *AudioURL);
-}
-
-void AAudio_SpatialAudioManager::SetMasterVolume(float NewVolume)
-{
-    MasterVolume = FMath::Clamp(NewVolume, 0.0f, 1.0f);
-    UE_LOG(LogTemp, Warning, TEXT("Audio_SpatialAudioManager: Master volume set to %f"), MasterVolume);
-}
-
-void AAudio_SpatialAudioManager::SetAmbientVolume(float NewVolume)
-{
-    AmbientVolume = FMath::Clamp(NewVolume, 0.0f, 1.0f);
-    UE_LOG(LogTemp, Warning, TEXT("Audio_SpatialAudioManager: Ambient volume set to %f"), AmbientVolume);
-}
-
-void AAudio_SpatialAudioManager::SetEffectsVolume(float NewVolume)
-{
-    EffectsVolume = FMath::Clamp(NewVolume, 0.0f, 1.0f);
-    UE_LOG(LogTemp, Warning, TEXT("Audio_SpatialAudioManager: Effects volume set to %f"), EffectsVolume);
-}
-
-void AAudio_SpatialAudioManager::SetVoiceVolume(float NewVolume)
-{
-    VoiceVolume = FMath::Clamp(NewVolume, 0.0f, 1.0f);
-    UE_LOG(LogTemp, Warning, TEXT("Audio_SpatialAudioManager: Voice volume set to %f"), VoiceVolume);
-}
-
-void AAudio_SpatialAudioManager::UpdateZoneTransitions(float DeltaTime)
-{
-    if (CurrentZone != PreviousZone)
-    {
-        ZoneTransitionTime += DeltaTime;
-        
-        if (ZoneTransitionTime >= ZoneTransitionDuration)
-        {
-            // Transition complete
-            PreviousZone = CurrentZone;
-            ZoneTransitionTime = 0.0f;
-        }
-        else
-        {
-            // Smooth transition between zones
-            float TransitionAlpha = ZoneTransitionTime / ZoneTransitionDuration;
-            // Apply transition effects here
-        }
-    }
+    return FMath::Clamp(Volume, 0.0f, 1.0f);
 }
