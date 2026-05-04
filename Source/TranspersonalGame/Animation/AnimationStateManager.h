@@ -9,29 +9,16 @@
 #include "../SharedTypes.h"
 #include "AnimationStateManager.generated.h"
 
-// Forward declarations
-class USkeletalMeshComponent;
-class UAnimSequence;
-class UBlendSpace1D;
-class UBlendSpace;
-
 UENUM(BlueprintType)
 enum class EAnim_MovementState : uint8
 {
     Idle        UMETA(DisplayName = "Idle"),
     Walking     UMETA(DisplayName = "Walking"),
     Running     UMETA(DisplayName = "Running"),
-    Sprinting   UMETA(DisplayName = "Sprinting"),
     Jumping     UMETA(DisplayName = "Jumping"),
-    Falling     UMETA(DisplayName = "Falling"),
-    Landing     UMETA(DisplayName = "Landing"),
     Crouching   UMETA(DisplayName = "Crouching"),
-    Crawling    UMETA(DisplayName = "Crawling"),
     Swimming    UMETA(DisplayName = "Swimming"),
-    Climbing    UMETA(DisplayName = "Climbing"),
-    Combat      UMETA(DisplayName = "Combat"),
-    Injured     UMETA(DisplayName = "Injured"),
-    Dead        UMETA(DisplayName = "Dead")
+    Climbing    UMETA(DisplayName = "Climbing")
 };
 
 UENUM(BlueprintType)
@@ -40,19 +27,15 @@ enum class EAnim_ActionState : uint8
     None            UMETA(DisplayName = "None"),
     Gathering       UMETA(DisplayName = "Gathering"),
     Crafting        UMETA(DisplayName = "Crafting"),
+    Combat          UMETA(DisplayName = "Combat"),
     Eating          UMETA(DisplayName = "Eating"),
     Drinking        UMETA(DisplayName = "Drinking"),
     Sleeping        UMETA(DisplayName = "Sleeping"),
-    Attacking       UMETA(DisplayName = "Attacking"),
-    Blocking        UMETA(DisplayName = "Blocking"),
-    Dodging         UMETA(DisplayName = "Dodging"),
-    Interacting     UMETA(DisplayName = "Interacting"),
-    Carrying        UMETA(DisplayName = "Carrying"),
-    Throwing        UMETA(DisplayName = "Throwing")
+    Interacting     UMETA(DisplayName = "Interacting")
 };
 
 USTRUCT(BlueprintType)
-struct FAnim_StateTransition
+struct TRANSPERSONALGAME_API FAnim_StateTransition
 {
     GENERATED_BODY()
 
@@ -66,19 +49,19 @@ struct FAnim_StateTransition
     float TransitionDuration;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
-    bool bCanInterrupt;
+    class UAnimMontage* TransitionMontage;
 
     FAnim_StateTransition()
     {
         FromState = EAnim_MovementState::Idle;
         ToState = EAnim_MovementState::Walking;
         TransitionDuration = 0.2f;
-        bCanInterrupt = true;
+        TransitionMontage = nullptr;
     }
 };
 
 USTRUCT(BlueprintType)
-struct FAnim_MovementData
+struct TRANSPERSONALGAME_API FAnim_MovementData
 {
     GENERATED_BODY()
 
@@ -92,22 +75,18 @@ struct FAnim_MovementData
     bool bIsInAir;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
-    bool bIsMoving;
+    bool bIsCrouching;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
     float GroundDistance;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
-    FVector Velocity;
 
     FAnim_MovementData()
     {
         Speed = 0.0f;
         Direction = 0.0f;
         bIsInAir = false;
-        bIsMoving = false;
+        bIsCrouching = false;
         GroundDistance = 0.0f;
-        Velocity = FVector::ZeroVector;
     }
 };
 
@@ -121,96 +100,69 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 public:
-    // State management
-    UFUNCTION(BlueprintCallable, Category = "Animation State")
-    void SetMovementState(EAnim_MovementState NewState);
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    UFUNCTION(BlueprintCallable, Category = "Animation State")
-    void SetActionState(EAnim_ActionState NewState);
-
-    UFUNCTION(BlueprintPure, Category = "Animation State")
-    EAnim_MovementState GetCurrentMovementState() const { return CurrentMovementState; }
-
-    UFUNCTION(BlueprintPure, Category = "Animation State")
-    EAnim_ActionState GetCurrentActionState() const { return CurrentActionState; }
-
-    UFUNCTION(BlueprintPure, Category = "Animation State")
-    FAnim_MovementData GetMovementData() const { return MovementData; }
-
-    // Animation control
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void PlayMontage(UAnimMontage* Montage, float PlayRate = 1.0f);
-
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void StopMontage(UAnimMontage* Montage = nullptr);
-
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    bool IsPlayingMontage() const;
-
-    // Movement data update
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void UpdateMovementData(float Speed, float Direction, bool bInAir, const FVector& Velocity);
-
-    // Terrain adaptation
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void SetGroundDistance(float Distance);
-
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void EnableTerrainAdaptation(bool bEnable);
-
-protected:
-    // Current states
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "State")
+    // Estado actual do movimento
+    UPROPERTY(BlueprintReadOnly, Category = "Animation State")
     EAnim_MovementState CurrentMovementState;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "State")
+    // Estado actual da acção
+    UPROPERTY(BlueprintReadOnly, Category = "Animation State")
     EAnim_ActionState CurrentActionState;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "State")
-    EAnim_MovementState PreviousMovementState;
-
-    // Movement data
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement")
+    // Dados de movimento para animação
+    UPROPERTY(BlueprintReadOnly, Category = "Animation Data")
     FAnim_MovementData MovementData;
 
-    // State transitions
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+    // Transições configuradas
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Config")
     TArray<FAnim_StateTransition> StateTransitions;
 
-    // Animation assets
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
-    TMap<EAnim_MovementState, UAnimSequence*> MovementAnimations;
+    // Montagens de acção
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
+    TMap<EAnim_ActionState, class UAnimMontage*> ActionMontages;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
-    TMap<EAnim_ActionState, UAnimMontage*> ActionMontages;
+    // Blend spaces para movimento
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
+    class UBlendSpace* MovementBlendSpace;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
-    UBlendSpace1D* MovementBlendSpace;
+    // Funções públicas para controlo de estado
+    UFUNCTION(BlueprintCallable, Category = "Animation Control")
+    void SetMovementState(EAnim_MovementState NewState);
 
-    // Component references
-    UPROPERTY()
-    USkeletalMeshComponent* SkeletalMeshComponent;
+    UFUNCTION(BlueprintCallable, Category = "Animation Control")
+    void SetActionState(EAnim_ActionState NewState);
 
-    // Terrain adaptation
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Adaptation")
-    bool bTerrainAdaptationEnabled;
+    UFUNCTION(BlueprintCallable, Category = "Animation Control")
+    void PlayActionMontage(EAnim_ActionState ActionType);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Adaptation")
-    float MaxGroundDistance;
+    UFUNCTION(BlueprintCallable, Category = "Animation Control")
+    void StopCurrentAction();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain Adaptation")
-    float TerrainAdaptationSpeed;
+    UFUNCTION(BlueprintCallable, Category = "Animation Data")
+    void UpdateMovementData(float Speed, float Direction, bool bInAir, bool bCrouching);
+
+    UFUNCTION(BlueprintPure, Category = "Animation Query")
+    bool CanTransitionTo(EAnim_MovementState TargetState) const;
+
+    UFUNCTION(BlueprintPure, Category = "Animation Query")
+    float GetTransitionDuration(EAnim_MovementState FromState, EAnim_MovementState ToState) const;
 
 private:
-    // Internal state management
-    bool CanTransitionToState(EAnim_MovementState NewState) const;
-    void InitializeDefaultTransitions();
-    void UpdateAnimationBlending(float DeltaTime);
+    // Referência para o componente de animação
+    UPROPERTY()
+    class USkeletalMeshComponent* OwnerMeshComponent;
 
-    // Transition timing
-    float StateTransitionTimer;
+    // Timer para transições
+    float TransitionTimer;
     bool bIsTransitioning;
+    EAnim_MovementState PendingState;
+
+    // Funções internas
+    void InitializeDefaultTransitions();
+    void ProcessStateTransition(float DeltaTime);
+    void UpdateAnimationInstance();
+    FAnim_StateTransition* FindTransition(EAnim_MovementState From, EAnim_MovementState To);
 };
