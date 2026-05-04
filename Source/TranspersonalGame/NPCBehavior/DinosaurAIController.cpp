@@ -1,16 +1,11 @@
 #include "DinosaurAIController.h"
 #include "BehaviorTree/BehaviorTree.h"
 #include "BehaviorTree/BlackboardData.h"
-#include "BehaviorTree/Blackboard/BlackboardKeyType_Object.h"
-#include "BehaviorTree/Blackboard/BlackboardKeyType_Vector.h"
-#include "BehaviorTree/Blackboard/BlackboardKeyType_Bool.h"
-#include "BehaviorTree/Blackboard/BlackboardKeyType_Float.h"
-#include "Perception/AIPerceptionComponent.h"
-#include "Perception/AISenseConfig_Sight.h"
-#include "Perception/AISenseConfig_Hearing.h"
-#include "Engine/World.h"
+#include "Perception/AISightConfig.h"
+#include "Perception/AIHearingConfig.h"
 #include "GameFramework/Pawn.h"
-#include "Kismet/KismetMathLibrary.h"
+#include "Engine/World.h"
+#include "Kismet/GameplayStatics.h"
 
 ADinosaurAIController::ADinosaurAIController()
 {
@@ -21,17 +16,20 @@ ADinosaurAIController::ADinosaurAIController()
     BlackboardComponent = CreateDefaultSubobject<UBlackboardComponent>(TEXT("BlackboardComponent"));
     AIPerceptionComponent = CreateDefaultSubobject<UAIPerceptionComponent>(TEXT("AIPerceptionComponent"));
 
-    // Configuração inicial
-    DinosaurSpecies = ENPCDinosaurSpecies::Generic;
-    PatrolRadius = 2500.0f;
-    AggressionLevel = 0.5f;
-    MovementSpeed = 250.0f;
-    DetectionRange = 1500.0f;
-    AttackRange = 300.0f;
-    CurrentBehaviorState = ENPCBehaviorState::Idle;
-    CurrentTarget = nullptr;
-    PatrolCenter = FVector::ZeroVector;
-    CurrentPatrolIndex = 0;
+    // Configurações padrão
+    SightRadius = 3000.0f;
+    LoseSightRadius = 3500.0f;
+    PeripheralVisionAngleDegrees = 90.0f;
+    HearingRange = 2000.0f;
+
+    // Personalidade padrão (neutro)
+    Aggressiveness = 0.5f;
+    Curiosity = 0.3f;
+    Sociability = 0.4f;
+
+    // Estado inicial
+    CurrentBehaviorState = ENPC_DinosaurBehaviorState::Idle;
+    DinosaurSpecies = ENPC_DinosaurSpecies::TRex;
 
     SetupPerception();
 }
@@ -40,37 +38,41 @@ void ADinosaurAIController::BeginPlay()
 {
     Super::BeginPlay();
     
-    SetupBehaviorTree();
-    ConfigureForSpecies();
-    GeneratePatrolPoints();
+    if (BlackboardAsset && BlackboardComponent)
+    {
+        BlackboardComponent->InitializeBlackboard(*BlackboardAsset);
+    }
+
+    // Configurar baseado na espécie
+    ConfigureForSpecies(DinosaurSpecies);
+    
+    // Iniciar behavior tree
+    StartBehaviorTree();
 }
 
 void ADinosaurAIController::OnPossess(APawn* InPawn)
 {
     Super::OnPossess(InPawn);
-
+    
     if (InPawn)
     {
-        PatrolCenter = InPawn->GetActorLocation();
+        // Detectar espécie baseado no nome do pawn
+        FString PawnName = InPawn->GetName().ToLower();
+        if (PawnName.Contains(TEXT("trex")))
+        {
+            DinosaurSpecies = ENPC_DinosaurSpecies::TRex;
+        }
+        else if (PawnName.Contains(TEXT("raptor")))
+        {
+            DinosaurSpecies = ENPC_DinosaurSpecies::Raptor;
+        }
+        else if (PawnName.Contains(TEXT("brachio")))
+        {
+            DinosaurSpecies = ENPC_DinosaurSpecies::Brachiosaurus;
+        }
         
-        // Configurar blackboard
-        if (BlackboardComponent && BlackboardAsset)
-        {
-            BlackboardComponent->InitializeBlackboard(*BlackboardAsset);
-            
-            // Definir valores iniciais
-            BlackboardComponent->SetValueAsVector(TEXT("PatrolCenter"), PatrolCenter);
-            BlackboardComponent->SetValueAsFloat(TEXT("PatrolRadius"), PatrolRadius);
-            BlackboardComponent->SetValueAsFloat(TEXT("AggressionLevel"), AggressionLevel);
-            BlackboardComponent->SetValueAsFloat(TEXT("MovementSpeed"), MovementSpeed);
-            BlackboardComponent->SetValueAsEnum(TEXT("BehaviorState"), static_cast<uint8>(CurrentBehaviorState));
-        }
-
-        // Iniciar behavior tree
-        if (BehaviorTree)
-        {
-            RunBehaviorTree(BehaviorTree);
-        }
+        ConfigureForSpecies(DinosaurSpecies);
+        UpdateBlackboard();
     }
 }
 
@@ -86,284 +88,314 @@ void ADinosaurAIController::OnUnPossess()
 
 void ADinosaurAIController::SetupPerception()
 {
+    if (!AIPerceptionComponent)
+        return;
+
     // Configurar visão
-    SightConfig = CreateDefaultSubobject<UAISenseConfig_Sight>(TEXT("SightConfig"));
+    UAISightConfig* SightConfig = CreateDefaultSubobject<UAISightConfig>(TEXT("SightConfig"));
     if (SightConfig)
     {
-        SightConfig->SightRadius = DetectionRange;
-        SightConfig->LoseSightRadius = DetectionRange * 1.2f;
-        SightConfig->PeripheralVisionAngleDegrees = 120.0f;
-        SightConfig->SetMaxAge(3.0f);
-        SightConfig->AutoSuccessRangeFromLastSeenLocation = 500.0f;
+        SightConfig->SightRadius = SightRadius;
+        SightConfig->LoseSightRadius = LoseSightRadius;
+        SightConfig->PeripheralVisionAngleDegrees = PeripheralVisionAngleDegrees;
+        SightConfig->SetMaxAge(5.0f);
         SightConfig->DetectionByAffiliation.bDetectNeutrals = true;
-        SightConfig->DetectionByAffiliation.bDetectFriendlies = false;
+        SightConfig->DetectionByAffiliation.bDetectFriendlies = true;
         SightConfig->DetectionByAffiliation.bDetectEnemies = true;
 
         AIPerceptionComponent->ConfigureSense(*SightConfig);
     }
 
     // Configurar audição
-    HearingConfig = CreateDefaultSubobject<UAISenseConfig_Hearing>(TEXT("HearingConfig"));
+    UAIHearingConfig* HearingConfig = CreateDefaultSubobject<UAIHearingConfig>(TEXT("HearingConfig"));
     if (HearingConfig)
     {
-        HearingConfig->HearingRange = DetectionRange * 0.8f;
-        HearingConfig->SetMaxAge(2.0f);
+        HearingConfig->HearingRange = HearingRange;
+        HearingConfig->SetMaxAge(3.0f);
         HearingConfig->DetectionByAffiliation.bDetectNeutrals = true;
-        HearingConfig->DetectionByAffiliation.bDetectFriendlies = false;
+        HearingConfig->DetectionByAffiliation.bDetectFriendlies = true;
         HearingConfig->DetectionByAffiliation.bDetectEnemies = true;
 
         AIPerceptionComponent->ConfigureSense(*HearingConfig);
     }
 
-    // Definir sentido dominante
+    // Configurar sentido dominante
     AIPerceptionComponent->SetDominantSense(SightConfig->GetSenseImplementation());
 
-    // Bind callbacks
-    AIPerceptionComponent->OnPerceptionUpdated.AddDynamic(this, &ADinosaurAIController::OnPerceptionUpdated);
+    // Bind do evento de percepção
     AIPerceptionComponent->OnTargetPerceptionUpdated.AddDynamic(this, &ADinosaurAIController::OnTargetPerceptionUpdated);
 }
 
-void ADinosaurAIController::SetupBehaviorTree()
+void ADinosaurAIController::StartBehaviorTree()
 {
-    // Por agora, usar behavior tree genérico
-    // TODO: Carregar behavior trees específicos por espécie
-    if (!BehaviorTree)
+    if (BehaviorTree && BehaviorTreeComponent)
     {
-        // Tentar carregar behavior tree padrão
-        BehaviorTree = LoadObject<UBehaviorTree>(nullptr, TEXT("/Game/AI/BT_DinosaurBase"));
-        if (!BehaviorTree)
-        {
-            UE_LOG(LogTemp, Warning, TEXT("Behavior Tree não encontrado para dinossauro"));
-        }
-    }
-
-    if (!BlackboardAsset)
-    {
-        // Tentar carregar blackboard padrão
-        BlackboardAsset = LoadObject<UBlackboardData>(nullptr, TEXT("/Game/AI/BB_DinosaurBase"));
-        if (!BlackboardAsset)
-        {
-            UE_LOG(LogTemp, Warning, TEXT("Blackboard não encontrado para dinossauro"));
-        }
+        BehaviorTreeComponent->StartTree(*BehaviorTree);
     }
 }
 
-void ADinosaurAIController::ConfigureForSpecies()
+void ADinosaurAIController::UpdateBlackboard()
 {
-    switch (DinosaurSpecies)
+    if (!BlackboardComponent)
+        return;
+
+    // Atualizar valores do blackboard
+    BlackboardComponent->SetValueAsEnum(TEXT("BehaviorState"), static_cast<uint8>(CurrentBehaviorState));
+    BlackboardComponent->SetValueAsEnum(TEXT("Species"), static_cast<uint8>(DinosaurSpecies));
+    BlackboardComponent->SetValueAsFloat(TEXT("Aggressiveness"), Aggressiveness);
+    BlackboardComponent->SetValueAsFloat(TEXT("Curiosity"), Curiosity);
+    BlackboardComponent->SetValueAsFloat(TEXT("Sociability"), Sociability);
+
+    if (GetPawn())
     {
-        case ENPCDinosaurSpecies::TRex:
-            PatrolRadius = 5000.0f;
-            AggressionLevel = 0.9f;
-            MovementSpeed = 300.0f;
-            DetectionRange = 2000.0f;
-            AttackRange = 500.0f;
-            break;
-
-        case ENPCDinosaurSpecies::Raptor:
-            PatrolRadius = 3000.0f;
-            AggressionLevel = 0.8f;
-            MovementSpeed = 500.0f;
-            DetectionRange = 1800.0f;
-            AttackRange = 200.0f;
-            break;
-
-        case ENPCDinosaurSpecies::Brachiosaurus:
-            PatrolRadius = 2000.0f;
-            AggressionLevel = 0.1f;
-            MovementSpeed = 150.0f;
-            DetectionRange = 1200.0f;
-            AttackRange = 400.0f;
-            break;
-
-        case ENPCDinosaurSpecies::Triceratops:
-            PatrolRadius = 2500.0f;
-            AggressionLevel = 0.6f;
-            MovementSpeed = 200.0f;
-            DetectionRange = 1500.0f;
-            AttackRange = 350.0f;
-            break;
-
-        default:
-            // Manter valores padrão
-            break;
-    }
-
-    // Atualizar configuração de percepção
-    if (SightConfig)
-    {
-        SightConfig->SightRadius = DetectionRange;
-        SightConfig->LoseSightRadius = DetectionRange * 1.2f;
-    }
-
-    if (HearingConfig)
-    {
-        HearingConfig->HearingRange = DetectionRange * 0.8f;
+        BlackboardComponent->SetValueAsVector(TEXT("HomeLocation"), GetPawn()->GetActorLocation());
     }
 }
 
-void ADinosaurAIController::SetBehaviorState(ENPCBehaviorState NewState)
+void ADinosaurAIController::SetBehaviorState(ENPC_DinosaurBehaviorState NewState)
 {
     if (CurrentBehaviorState != NewState)
     {
         CurrentBehaviorState = NewState;
+        UpdateBlackboard();
         
-        if (BlackboardComponent)
-        {
-            BlackboardComponent->SetValueAsEnum(TEXT("BehaviorState"), static_cast<uint8>(NewState));
-        }
-
-        UE_LOG(LogTemp, Log, TEXT("Dinossauro mudou estado para: %d"), static_cast<int32>(NewState));
+        // Log da mudança de estado
+        UE_LOG(LogTemp, Log, TEXT("Dinosaur %s changed state to %d"), 
+               GetPawn() ? *GetPawn()->GetName() : TEXT("Unknown"), 
+               static_cast<int32>(NewState));
     }
 }
 
-void ADinosaurAIController::SetTarget(AActor* NewTarget)
+void ADinosaurAIController::StartHunting(AActor* Target)
 {
-    CurrentTarget = NewTarget;
+    if (!Target || !BlackboardComponent)
+        return;
+
+    SetBehaviorState(ENPC_DinosaurBehaviorState::Hunting);
+    BlackboardComponent->SetValueAsObject(TEXT("TargetActor"), Target);
+    
+    UE_LOG(LogTemp, Log, TEXT("Dinosaur %s started hunting %s"), 
+           GetPawn() ? *GetPawn()->GetName() : TEXT("Unknown"),
+           *Target->GetName());
+}
+
+void ADinosaurAIController::StartFleeing(AActor* Threat)
+{
+    if (!Threat || !BlackboardComponent)
+        return;
+
+    SetBehaviorState(ENPC_DinosaurBehaviorState::Fleeing);
+    BlackboardComponent->SetValueAsObject(TEXT("ThreatActor"), Threat);
+    
+    // Calcular direção de fuga (oposta ao threat)
+    if (GetPawn())
+    {
+        FVector FleeDirection = GetPawn()->GetActorLocation() - Threat->GetActorLocation();
+        FleeDirection.Normalize();
+        FVector FleeLocation = GetPawn()->GetActorLocation() + FleeDirection * 5000.0f;
+        BlackboardComponent->SetValueAsVector(TEXT("FleeLocation"), FleeLocation);
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Dinosaur %s started fleeing from %s"), 
+           GetPawn() ? *GetPawn()->GetName() : TEXT("Unknown"),
+           *Threat->GetName());
+}
+
+void ADinosaurAIController::ReturnToPatrol()
+{
+    SetBehaviorState(ENPC_DinosaurBehaviorState::Patrolling);
     
     if (BlackboardComponent)
     {
-        BlackboardComponent->SetValueAsObject(TEXT("TargetActor"), NewTarget);
+        BlackboardComponent->ClearValue(TEXT("TargetActor"));
+        BlackboardComponent->ClearValue(TEXT("ThreatActor"));
     }
+    
+    UE_LOG(LogTemp, Log, TEXT("Dinosaur %s returned to patrol"), 
+           GetPawn() ? *GetPawn()->GetName() : TEXT("Unknown"));
+}
 
-    if (NewTarget)
+void ADinosaurAIController::OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus)
+{
+    if (!Actor || !GetPawn())
+        return;
+
+    bool bIsPlayer = Actor->IsA<APawn>() && Actor != GetPawn();
+    
+    if (Stimulus.WasSuccessfullySensed())
     {
-        SetBehaviorState(ENPCBehaviorState::Chasing);
-        UE_LOG(LogTemp, Log, TEXT("Dinossauro definiu novo alvo: %s"), *NewTarget->GetName());
+        // Detectou algo
+        float Distance = GetDistanceToActor(Actor);
+        
+        if (bIsPlayer)
+        {
+            // Reação baseada na espécie e personalidade
+            switch (DinosaurSpecies)
+            {
+                case ENPC_DinosaurSpecies::TRex:
+                    if (Aggressiveness > 0.6f && Distance < 2000.0f)
+                    {
+                        StartHunting(Actor);
+                    }
+                    break;
+                    
+                case ENPC_DinosaurSpecies::Raptor:
+                    if (Aggressiveness > 0.4f && Distance < 1500.0f)
+                    {
+                        StartHunting(Actor);
+                    }
+                    break;
+                    
+                case ENPC_DinosaurSpecies::Brachiosaurus:
+                    if (Distance < 1000.0f)
+                    {
+                        StartFleeing(Actor);
+                    }
+                    break;
+            }
+        }
+        
+        UE_LOG(LogTemp, Log, TEXT("Dinosaur %s detected %s at distance %.1f"), 
+               *GetPawn()->GetName(), *Actor->GetName(), Distance);
     }
     else
     {
-        SetBehaviorState(ENPCBehaviorState::Patrolling);
-    }
-}
-
-void ADinosaurAIController::GeneratePatrolPoints()
-{
-    PatrolPoints.Empty();
-
-    if (PatrolCenter.IsZero() && GetPawn())
-    {
-        PatrolCenter = GetPawn()->GetActorLocation();
-    }
-
-    // Gerar 4-6 pontos de patrulha em círculo
-    int32 NumPoints = FMath::RandRange(4, 6);
-    float AngleStep = 360.0f / NumPoints;
-
-    for (int32 i = 0; i < NumPoints; i++)
-    {
-        float Angle = AngleStep * i;
-        float RadiusVariation = FMath::RandRange(0.5f, 1.0f) * PatrolRadius;
-        
-        FVector Offset = FVector(
-            FMath::Cos(FMath::DegreesToRadians(Angle)) * RadiusVariation,
-            FMath::Sin(FMath::DegreesToRadians(Angle)) * RadiusVariation,
-            0.0f
-        );
-
-        FVector PatrolPoint = PatrolCenter + Offset;
-        PatrolPoints.Add(PatrolPoint);
-    }
-
-    CurrentPatrolIndex = 0;
-
-    if (BlackboardComponent && PatrolPoints.Num() > 0)
-    {
-        BlackboardComponent->SetValueAsVector(TEXT("PatrolPoint"), PatrolPoints[0]);
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("Gerados %d pontos de patrulha para dinossauro"), PatrolPoints.Num());
-}
-
-FVector ADinosaurAIController::GetNextPatrolPoint()
-{
-    if (PatrolPoints.Num() == 0)
-    {
-        GeneratePatrolPoints();
-    }
-
-    if (PatrolPoints.Num() > 0)
-    {
-        CurrentPatrolIndex = (CurrentPatrolIndex + 1) % PatrolPoints.Num();
-        FVector NextPoint = PatrolPoints[CurrentPatrolIndex];
-
-        if (BlackboardComponent)
+        // Perdeu de vista
+        if (CurrentBehaviorState == ENPC_DinosaurBehaviorState::Hunting && BlackboardComponent)
         {
-            BlackboardComponent->SetValueAsVector(TEXT("PatrolPoint"), NextPoint);
-        }
-
-        return NextPoint;
-    }
-
-    return PatrolCenter;
-}
-
-bool ADinosaurAIController::CanSeeTarget(AActor* Target) const
-{
-    if (!Target || !AIPerceptionComponent)
-    {
-        return false;
-    }
-
-    FActorPerceptionBlueprintInfo Info;
-    AIPerceptionComponent->GetActorsPerception(Target, Info);
-    
-    return Info.LastSensedStimuli.Num() > 0 && Info.LastSensedStimuli[0].WasSuccessfullySensed();
-}
-
-float ADinosaurAIController::GetDistanceToTarget(AActor* Target) const
-{
-    if (!Target || !GetPawn())
-    {
-        return -1.0f;
-    }
-
-    return FVector::Dist(GetPawn()->GetActorLocation(), Target->GetActorLocation());
-}
-
-void ADinosaurAIController::OnPerceptionUpdated(const TArray<AActor*>& UpdatedActors)
-{
-    for (AActor* Actor : UpdatedActors)
-    {
-        if (Actor && Actor->IsA<APawn>())
-        {
-            float Distance = GetDistanceToTarget(Actor);
-            
-            if (Distance <= DetectionRange && CanSeeTarget(Actor))
+            AActor* CurrentTarget = Cast<AActor>(BlackboardComponent->GetValueAsObject(TEXT("TargetActor")));
+            if (CurrentTarget == Actor)
             {
-                // Decidir se deve perseguir baseado na agressividade
-                float ChaseChance = AggressionLevel * 0.8f + FMath::RandRange(0.0f, 0.2f);
-                
-                if (FMath::RandRange(0.0f, 1.0f) < ChaseChance)
-                {
-                    SetTarget(Actor);
-                }
+                ReturnToPatrol();
             }
         }
     }
 }
 
-void ADinosaurAIController::OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus)
+bool ADinosaurAIController::CanSeeActor(AActor* Actor) const
 {
-    if (!Actor)
-    {
-        return;
-    }
+    if (!AIPerceptionComponent || !Actor)
+        return false;
 
-    if (Stimulus.WasSuccessfullySensed())
+    FActorPerceptionBlueprintInfo Info;
+    AIPerceptionComponent->GetActorsPerception(Actor, Info);
+    
+    return Info.LastSensedStimuli.Num() > 0 && Info.LastSensedStimuli[0].WasSuccessfullySensed();
+}
+
+float ADinosaurAIController::GetDistanceToActor(AActor* Actor) const
+{
+    if (!Actor || !GetPawn())
+        return -1.0f;
+
+    return FVector::Dist(GetPawn()->GetActorLocation(), Actor->GetActorLocation());
+}
+
+void ADinosaurAIController::ConfigureForSpecies(ENPC_DinosaurSpecies Species)
+{
+    DinosaurSpecies = Species;
+    
+    switch (Species)
     {
-        // Alvo detectado
-        if (Actor == CurrentTarget || !CurrentTarget)
+        case ENPC_DinosaurSpecies::TRex:
+            Aggressiveness = 0.8f;
+            Curiosity = 0.3f;
+            Sociability = 0.1f;
+            SightRadius = 4000.0f;
+            HearingRange = 3000.0f;
+            break;
+            
+        case ENPC_DinosaurSpecies::Raptor:
+            Aggressiveness = 0.7f;
+            Curiosity = 0.6f;
+            Sociability = 0.8f;
+            SightRadius = 3000.0f;
+            HearingRange = 2500.0f;
+            break;
+            
+        case ENPC_DinosaurSpecies::Brachiosaurus:
+            Aggressiveness = 0.1f;
+            Curiosity = 0.4f;
+            Sociability = 0.6f;
+            SightRadius = 2500.0f;
+            HearingRange = 2000.0f;
+            break;
+            
+        case ENPC_DinosaurSpecies::Triceratops:
+            Aggressiveness = 0.5f;
+            Curiosity = 0.3f;
+            Sociability = 0.7f;
+            SightRadius = 2800.0f;
+            HearingRange = 2200.0f;
+            break;
+            
+        case ENPC_DinosaurSpecies::Pteranodon:
+            Aggressiveness = 0.3f;
+            Curiosity = 0.8f;
+            Sociability = 0.5f;
+            SightRadius = 5000.0f;
+            HearingRange = 1500.0f;
+            break;
+    }
+    
+    UpdateBlackboard();
+}
+
+AActor* ADinosaurAIController::FindNearestThreat() const
+{
+    // Implementação básica - procurar por players próximos
+    if (!GetPawn())
+        return nullptr;
+
+    TArray<AActor*> FoundActors;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), APawn::StaticClass(), FoundActors);
+    
+    AActor* NearestThreat = nullptr;
+    float NearestDistance = FLT_MAX;
+    
+    for (AActor* Actor : FoundActors)
+    {
+        if (Actor != GetPawn() && CanSeeActor(Actor))
         {
-            SetTarget(Actor);
+            float Distance = GetDistanceToActor(Actor);
+            if (Distance < NearestDistance && Distance < SightRadius)
+            {
+                NearestDistance = Distance;
+                NearestThreat = Actor;
+            }
         }
     }
-    else
+    
+    return NearestThreat;
+}
+
+AActor* ADinosaurAIController::FindNearestPrey() const
+{
+    // Implementação similar ao FindNearestThreat
+    return FindNearestThreat();
+}
+
+TArray<AActor*> ADinosaurAIController::FindNearbyAllies() const
+{
+    TArray<AActor*> Allies;
+    
+    if (!GetPawn())
+        return Allies;
+
+    TArray<AActor*> FoundActors;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), GetPawn()->GetClass(), FoundActors);
+    
+    for (AActor* Actor : FoundActors)
     {
-        // Alvo perdido
-        if (Actor == CurrentTarget)
+        if (Actor != GetPawn())
         {
-            SetTarget(nullptr);
+            float Distance = GetDistanceToActor(Actor);
+            if (Distance < SightRadius * 0.5f) // Aliados dentro de metade do range de visão
+            {
+                Allies.Add(Actor);
+            }
         }
     }
+    
+    return Allies;
 }
