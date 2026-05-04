@@ -1,118 +1,118 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/ActorComponent.h"
-#include "Engine/Engine.h"
+#include "Engine/World.h"
+#include "Subsystems/GameInstanceSubsystem.h"
+#include "SharedTypes.h"
 #include "EngineArchitecture.generated.h"
 
-UENUM(BlueprintType)
-enum class EEng_SystemStatus : uint8
-{
-    Unknown     UMETA(DisplayName = "Unknown"),
-    Initializing UMETA(DisplayName = "Initializing"),
-    Operational UMETA(DisplayName = "Operational"),
-    Warning     UMETA(DisplayName = "Warning"),
-    Error       UMETA(DisplayName = "Error"),
-    Critical    UMETA(DisplayName = "Critical")
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_SystemValidation
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation")
-    FString SystemName;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation")
-    EEng_SystemStatus Status = EEng_SystemStatus::Unknown;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation")
-    FString LastError;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation")
-    float LastValidationTime = 0.0f;
-
-    FEng_SystemValidation()
-    {
-        SystemName = TEXT("Unknown");
-        Status = EEng_SystemStatus::Unknown;
-        LastError = TEXT("");
-        LastValidationTime = 0.0f;
-    }
-};
-
 /**
- * EngineArchitecture - Core architecture validation and management system
- * Ensures all systems follow the technical architecture defined by Engine Architect
- * Validates module dependencies, performance constraints, and system integration
- * Critical for maintaining code quality and preventing technical debt
+ * Engine Architecture Manager - Central system that enforces architectural rules
+ * and manages the technical foundation of the Transpersonal Game Studio project.
+ * 
+ * CRITICAL RESPONSIBILITIES:
+ * - Enforce compilation rules and prevent orphan headers
+ * - Manage module dependencies and cross-system communication
+ * - Validate biome coordinate usage across all systems
+ * - Monitor performance constraints and memory usage
+ * - Coordinate between different agent-created systems
  */
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UEngineArchitecture : public UActorComponent
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UEngineArchitecture : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
     UEngineArchitecture();
 
-protected:
-    virtual void BeginPlay() override;
+    // Subsystem overrides
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
 
-public:
-    // System validation registry
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    TMap<FString, FEng_SystemValidation> SystemValidations;
+    // Architecture validation
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    bool ValidateSystemIntegrity();
 
-    // Performance constraints
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float MaxMemoryUsageGB = 8.0f;
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    void RegisterSystem(const FString& SystemName, const FString& AgentOwner);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float MinTargetFPS = 30.0f;
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    bool IsSystemRegistered(const FString& SystemName) const;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxActiveActors = 10000;
+    // Biome coordinate validation (enforces brain memory rules)
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    bool ValidateBiomeCoordinates(const FVector& Location, EEng_BiomeType ExpectedBiome) const;
 
-    // Architecture validation functions
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void ValidateCoreArchitecture();
-
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool ValidateSystemIntegration(const FString& SystemName);
-
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void ReportArchitectureStatus();
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    FVector GetValidBiomeLocation(EEng_BiomeType BiomeType) const;
 
     // Performance monitoring
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    float GetCurrentMemoryUsageGB() const;
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    void MonitorPerformance();
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    float GetCurrentFPS() const;
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    float GetCurrentFrameRate() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    bool IsPerformanceWithinLimits() const;
+    // Module dependency management
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    bool ValidateModuleDependencies();
 
-    // System registration for other agents
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void RegisterSystem(const FString& SystemName, EEng_SystemStatus InitialStatus);
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    void ReportArchitecturalViolation(const FString& ViolationType, const FString& Details);
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void UpdateSystemStatus(const FString& SystemName, EEng_SystemStatus NewStatus, const FString& ErrorMessage = TEXT(""));
+protected:
+    // Registered systems tracking
+    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
+    TMap<FString, FString> RegisteredSystems;
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    EEng_SystemStatus GetSystemStatus(const FString& SystemName) const;
+    // Performance metrics
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float CurrentFrameRate;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float MemoryUsageMB;
+
+    // Architecture violations log
+    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
+    TArray<FString> ArchitecturalViolations;
+
+    // Biome coordinate definitions (from brain memories)
+    UPROPERTY(BlueprintReadOnly, Category = "Biomes")
+    TMap<EEng_BiomeType, FEng_BiomeCoordinates> BiomeCoordinates;
 
 private:
-    // Internal validation functions
-    void ValidateModuleSystems();
-    void ValidatePerformanceConstraints();
-    void ValidateMemoryUsage();
-    void ValidateFrameRate();
-    
-    // Architecture enforcement
-    bool EnforceModuleDependencies();
-    bool EnforceNamingConventions();
-    bool EnforceCodeStandards();
+    void InitializeBiomeCoordinates();
+    void ValidateExistingSystems();
+    bool CheckForOrphanHeaders();
+    void EnforceCompilationRules();
+};
+
+/**
+ * Architecture Rule Enforcer - Static utility class for compile-time validation
+ */
+UCLASS(BlueprintType, NotBlueprintable)
+class TRANSPERSONALGAME_API UEng_ArchitectureRules : public UObject
+{
+    GENERATED_BODY()
+
+public:
+    // Static validation functions
+    UFUNCTION(BlueprintCallable, Category = "Architecture Rules", CallInEditor = true)
+    static bool ValidateHeaderCppPairs();
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture Rules", CallInEditor = true)
+    static void CleanupOrphanHeaders();
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture Rules", CallInEditor = true)
+    static bool CheckDuplicateSystems();
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture Rules", CallInEditor = true)
+    static void EnforceNamingConventions();
+
+    // Compilation enforcement
+    UFUNCTION(BlueprintCallable, Category = "Architecture Rules", CallInEditor = true)
+    static bool TriggerCompilationCheck();
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture Rules", CallInEditor = true)
+    static void ReportCompilationStatus();
 };
