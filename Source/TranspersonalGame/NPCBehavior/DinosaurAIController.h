@@ -5,14 +5,18 @@
 #include "BehaviorTree/BehaviorTreeComponent.h"
 #include "BehaviorTree/BlackboardComponent.h"
 #include "Perception/AIPerceptionComponent.h"
-#include "Perception/AISenseConfig_Sight.h"
-#include "Perception/AISenseConfig_Hearing.h"
+#include "Perception/AISightConfig.h"
+#include "Perception/AIHearingConfig.h"
 #include "../SharedTypes.h"
 #include "DinosaurAIController.generated.h"
 
 class UBehaviorTree;
 class UBlackboardData;
 
+/**
+ * AI Controller para dinossauros com comportamento baseado em Behavior Trees
+ * Implementa percepção visual e auditiva, estados de comportamento e reações a estímulos
+ */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API ADinosaurAIController : public AAIController
 {
@@ -26,88 +30,94 @@ protected:
     virtual void OnPossess(APawn* InPawn) override;
     virtual void OnUnPossess() override;
 
-    // Behavior Tree
+    // Behavior Tree e Blackboard
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI")
     UBehaviorTree* BehaviorTree;
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI")
     UBlackboardData* BlackboardAsset;
 
-    // AI Perception
+    // Componente de percepção
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI")
     UAIPerceptionComponent* AIPerceptionComponent;
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI")
-    UAISenseConfig_Sight* SightConfig;
+    // Configurações de visão
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Sight")
+    float SightRadius;
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI")
-    UAISenseConfig_Hearing* HearingConfig;
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Sight")
+    float LoseSightRadius;
 
-    // Comportamento
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    ENPCDinosaurSpecies DinosaurSpecies;
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Sight")
+    float PeripheralVisionAngleDegrees;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    float PatrolRadius;
+    // Configurações de audição
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Hearing")
+    float HearingRange;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    float AggressionLevel;
+    // Estado atual do dinossauro
+    UPROPERTY(BlueprintReadOnly, Category = "AI|State")
+    ENPC_DinosaurBehaviorState CurrentBehaviorState;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    float MovementSpeed;
+    // Tipo de dinossauro
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Type")
+    ENPC_DinosaurSpecies DinosaurSpecies;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    float DetectionRange;
+    // Agressividade (0.0 = pacífico, 1.0 = muito agressivo)
+    UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "AI|Personality", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Aggressiveness;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    float AttackRange;
+    // Curiosidade (0.0 = ignora estímulos, 1.0 = investiga tudo)
+    UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "AI|Personality", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Curiosity;
 
-    // Estado actual
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    ENPCBehaviorState CurrentBehaviorState;
-
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    AActor* CurrentTarget;
-
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    FVector PatrolCenter;
-
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    TArray<FVector> PatrolPoints;
-
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    int32 CurrentPatrolIndex;
+    // Sociabilidade (0.0 = solitário, 1.0 = sempre em grupo)
+    UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "AI|Personality", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Sociability;
 
 public:
-    // Funções públicas
+    // Funções públicas para comportamento
     UFUNCTION(BlueprintCallable, Category = "AI")
-    void SetBehaviorState(ENPCBehaviorState NewState);
-
-    UFUNCTION(BlueprintCallable, Category = "AI")
-    void SetTarget(AActor* NewTarget);
+    void SetBehaviorState(ENPC_DinosaurBehaviorState NewState);
 
     UFUNCTION(BlueprintCallable, Category = "AI")
-    void GeneratePatrolPoints();
+    ENPC_DinosaurBehaviorState GetBehaviorState() const { return CurrentBehaviorState; }
 
     UFUNCTION(BlueprintCallable, Category = "AI")
-    FVector GetNextPatrolPoint();
+    void StartHunting(AActor* Target);
 
     UFUNCTION(BlueprintCallable, Category = "AI")
-    bool CanSeeTarget(AActor* Target) const;
+    void StartFleeing(AActor* Threat);
 
     UFUNCTION(BlueprintCallable, Category = "AI")
-    float GetDistanceToTarget(AActor* Target) const;
+    void ReturnToPatrol();
 
-protected:
-    // Callbacks de percepção
-    UFUNCTION()
-    void OnPerceptionUpdated(const TArray<AActor*>& UpdatedActors);
-
+    // Funções de percepção
     UFUNCTION()
     void OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus);
 
-    // Configuração inicial
+    UFUNCTION(BlueprintCallable, Category = "AI")
+    bool CanSeeActor(AActor* Actor) const;
+
+    UFUNCTION(BlueprintCallable, Category = "AI")
+    float GetDistanceToActor(AActor* Actor) const;
+
+    // Configuração específica por espécie
+    UFUNCTION(BlueprintCallable, Category = "AI")
+    void ConfigureForSpecies(ENPC_DinosaurSpecies Species);
+
+protected:
+    // Configuração de percepção
     void SetupPerception();
-    void SetupBehaviorTree();
-    void ConfigureForSpecies();
+    
+    // Configuração de Behavior Tree
+    void StartBehaviorTree();
+
+    // Atualização de blackboard
+    void UpdateBlackboard();
+
+    // Funções auxiliares
+    AActor* FindNearestThreat() const;
+    AActor* FindNearestPrey() const;
+    TArray<AActor*> FindNearbyAllies() const;
 };
