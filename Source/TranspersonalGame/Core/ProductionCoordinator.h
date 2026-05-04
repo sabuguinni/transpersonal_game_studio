@@ -1,85 +1,95 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/GameInstanceSubsystem.h"
+#include "Engine/Actor.h"
+#include "Components/StaticMeshComponent.h"
+#include "Components/TextRenderComponent.h"
 #include "SharedTypes.h"
 #include "ProductionCoordinator.generated.h"
 
 /**
- * Coordenador de produção que monitoriza o progresso do Milestone 1
- * e coordena tarefas entre os 18 agentes especializados
+ * Production Coordinator Actor
+ * Manages and tracks Milestone 1 progress across all production agents
+ * Provides real-time status updates and coordinates task dependencies
  */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UProductionCoordinator : public UGameInstanceSubsystem
+class TRANSPERSONALGAME_API AProductionCoordinator : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UProductionCoordinator();
-
-    // USubsystem interface
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
-
-    // Milestone 1 tracking
-    UFUNCTION(BlueprintCallable, Category = "Production")
-    bool IsMilestone1Complete() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Production")
-    float GetMilestone1Progress() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Production")
-    void UpdateTaskProgress(const FString& AgentName, const FString& TaskName, bool bCompleted);
-
-    // Agent coordination
-    UFUNCTION(BlueprintCallable, Category = "Production")
-    void RegisterAgent(const FString& AgentName, int32 Priority);
-
-    UFUNCTION(BlueprintCallable, Category = "Production")
-    TArray<FString> GetActiveAgents() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Production")
-    bool CanAgentProceed(const FString& AgentName) const;
-
-    // Critical state management
-    UFUNCTION(BlueprintCallable, Category = "Production")
-    void ReportCriticalIssue(const FString& AgentName, const FString& Issue);
-
-    UFUNCTION(BlueprintCallable, Category = "Production")
-    TArray<FString> GetCriticalIssues() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Production")
-    void ClearCriticalIssue(const FString& Issue);
-
-    // Biome coordination
-    UFUNCTION(BlueprintCallable, Category = "Production")
-    FVector GetBiomeCenter(EDir_BiomeType BiomeType) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Production")
-    FVector GetRandomLocationInBiome(EDir_BiomeType BiomeType) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Production")
-    bool IsLocationInBiome(const FVector& Location, EDir_BiomeType BiomeType) const;
+    AProductionCoordinator();
 
 protected:
-    // Milestone 1 tasks tracking
-    UPROPERTY(BlueprintReadOnly, Category = "Production")
-    TMap<FString, bool> Milestone1Tasks;
+    virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
 
-    // Agent registry
-    UPROPERTY(BlueprintReadOnly, Category = "Production")
-    TMap<FString, int32> RegisteredAgents;
+    // Visual components
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UStaticMeshComponent* CoordinatorMesh;
 
-    // Critical issues
-    UPROPERTY(BlueprintReadOnly, Category = "Production")
-    TArray<FString> CriticalIssues;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UTextRenderComponent* StatusDisplay;
 
-    // Biome definitions
-    UPROPERTY(BlueprintReadOnly, Category = "Production")
-    TMap<EDir_BiomeType, FDir_BiomeData> BiomeData;
+    // Milestone 1 tracking
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone 1")
+    bool bCharacterMovementComplete;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone 1")
+    bool bTerrainExpanded;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone 1")
+    bool bDinosaurSpawnsComplete;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone 1")
+    bool bLightingFixed;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone 1")
+    bool bHUDImplemented;
+
+    // Agent task assignments
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Coordination")
+    TArray<FString> PendingTasks;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Coordination")
+    TArray<FString> CompletedTasks;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Coordination")
+    TArray<FString> BlockedTasks;
+
+public:
+    // Task management functions
+    UFUNCTION(BlueprintCallable, Category = "Production")
+    void UpdateTaskStatus(const FString& TaskName, bool bCompleted);
+
+    UFUNCTION(BlueprintCallable, Category = "Production")
+    void AddPendingTask(const FString& TaskName, int32 AgentID);
+
+    UFUNCTION(BlueprintCallable, Category = "Production")
+    bool IsTaskComplete(const FString& TaskName);
+
+    UFUNCTION(BlueprintCallable, Category = "Production")
+    float GetMilestone1Progress();
+
+    UFUNCTION(BlueprintCallable, Category = "Production")
+    FString GetCurrentPriorityTask();
+
+    UFUNCTION(BlueprintCallable, Category = "Production")
+    void LogProductionStatus();
+
+    // Agent coordination
+    UFUNCTION(BlueprintCallable, Category = "Agent Coordination")
+    TArray<FString> GetTasksForAgent(int32 AgentID);
+
+    UFUNCTION(BlueprintCallable, Category = "Agent Coordination")
+    void ReportAgentProgress(int32 AgentID, const FString& TaskName, float Progress);
 
 private:
-    void InitializeMilestone1Tasks();
-    void InitializeBiomeData();
-    void ValidateMapState();
+    void UpdateStatusDisplay();
+    void CheckMilestoneCompletion();
+    
+    // Internal tracking
+    float LastUpdateTime;
+    int32 TotalMilestoneTasks;
+    int32 CompletedMilestoneTasks;
 };
