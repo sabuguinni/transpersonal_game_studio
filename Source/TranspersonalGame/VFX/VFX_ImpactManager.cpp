@@ -1,215 +1,185 @@
 #include "VFX_ImpactManager.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "NiagaraFunctionLibrary.h"
-#include "Components/AudioComponent.h"
+#include "Engine/StaticMeshActor.h"
+#include "Components/StaticMeshComponent.h"
 #include "Kismet/GameplayStatics.h"
-#include "PhysicalMaterials/PhysicalMaterial.h"
+#include "TimerManager.h"
 
 UVFX_ImpactManager::UVFX_ImpactManager()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f; // Tick every 100ms for cleanup
-    
-    // Initialize default settings
-    GlobalVFXScale = 1.0f;
-    GlobalAudioVolume = 1.0f;
-    bEnableVFX = true;
-    bEnableAudio = true;
-    MinTimeBetweenEffects = 0.05f; // 50ms minimum between effects
-    MaxActiveEffects = 20;
-    LastEffectTime = 0.0f;
+    PrimaryComponentTick.TickInterval = 0.1f; // Tick a cada 0.1 segundos
+
+    ParticleLifetime = 3.0f;
+    MaxParticleDistance = 5000.0f;
+    MaxActiveParticles = 50;
+    CurrentActiveParticles = 0;
+    LastCleanupTime = 0.0f;
 }
 
 void UVFX_ImpactManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    InitializeDefaultEffects();
+    UE_LOG(LogTemp, Warning, TEXT("VFX_ImpactManager: Sistema de VFX iniciado"));
+    
+    // Reservar espaço para array de partículas
+    ActiveParticleActors.Reserve(MaxActiveParticles);
 }
 
 void UVFX_ImpactManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    
-    CleanupFinishedEffects();
+
+    // Limpeza periódica de partículas antigas (a cada 2 segundos)
+    LastCleanupTime += DeltaTime;
+    if (LastCleanupTime >= 2.0f)
+    {
+        CleanupOldParticles();
+        LastCleanupTime = 0.0f;
+    }
 }
 
-void UVFX_ImpactManager::SpawnImpactEffect(EVFX_ImpactType ImpactType, const FVector& Location, const FVector& Normal, float Scale)
+void UVFX_ImpactManager::TriggerImpact(const FVFX_ImpactData& ImpactData)
 {
-    if (!CanSpawnNewEffect())
+    if (!IsLocationValid(ImpactData.ImpactLocation))
+    {
+        UE_LOG(LogTemp, Warning, TEXT("VFX_ImpactManager: Localização inválida para VFX"));
+        return;
+    }
+
+    if (CurrentActiveParticles >= MaxActiveParticles)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("VFX_ImpactManager: Máximo de partículas atingido"));
+        CleanupOldParticles();
+        return;
+    }
+
+    SpawnParticleSystem(ImpactData.ImpactLocation, ImpactData.ImpactType);
+}
+
+void UVFX_ImpactManager::CreateFootstepVFX(FVector Location, float DinosaurSize)
+{
+    FVFX_ImpactData ImpactData;
+    ImpactData.ImpactType = EVFX_ImpactType::DinosaurFootstep;
+    ImpactData.ImpactLocation = Location;
+    ImpactData.ImpactForce = DinosaurSize * 2.0f; // Força baseada no tamanho
+    ImpactData.ImpactNormal = FVector::UpVector;
+
+    TriggerImpact(ImpactData);
+}
+
+void UVFX_ImpactManager::CreateBloodVFX(FVector Location, FVector Direction)
+{
+    FVFX_ImpactData ImpactData;
+    ImpactData.ImpactType = EVFX_ImpactType::BloodSplatter;
+    ImpactData.ImpactLocation = Location;
+    ImpactData.ImpactForce = 1.5f;
+    ImpactData.ImpactNormal = Direction.GetSafeNormal();
+
+    TriggerImpact(ImpactData);
+}
+
+void UVFX_ImpactManager::CreateDustCloudVFX(FVector Location, float Intensity)
+{
+    FVFX_ImpactData ImpactData;
+    ImpactData.ImpactType = EVFX_ImpactType::DustCloud;
+    ImpactData.ImpactLocation = Location;
+    ImpactData.ImpactForce = Intensity;
+    ImpactData.ImpactNormal = FVector::UpVector;
+
+    TriggerImpact(ImpactData);
+}
+
+void UVFX_ImpactManager::SpawnParticleSystem(FVector Location, EVFX_ImpactType Type)
+{
+    UWorld* World = GetWorld();
+    if (!World)
     {
         return;
     }
 
-    const FVFX_ImpactData* ImpactData = ImpactEffects.Find(ImpactType);
-    if (!ImpactData)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("VFX_ImpactManager: No impact data found for type %d"), (int32)ImpactType);
-        return;
-    }
+    // Por agora, usar StaticMeshActor como placeholder visual
+    // Em produção, isto seria substituído por NiagaraActor
+    FActorSpawnParameters SpawnParams;
+    SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 
-    float FinalScale = Scale * ImpactData->EffectScale * GlobalVFXScale;
+    AStaticMeshActor* ParticleActor = World->SpawnActor<AStaticMeshActor>(Location, FRotator::ZeroRotator, SpawnParams);
     
-    // Spawn particle effect
-    if (bEnableVFX && ImpactData->ParticleEffect)
+    if (ParticleActor)
     {
-        UNiagaraComponent* ParticleComp = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
-            GetWorld(),
-            ImpactData->ParticleEffect,
-            Location,
-            Normal.Rotation(),
-            FVector(FinalScale)
-        );
-        
-        if (ParticleComp)
+        // Configurar o placeholder baseado no tipo
+        FString ActorName;
+        switch (Type)
         {
-            ActiveParticleComponents.Add(ParticleComp);
-            
-            // Remove from tracking when finished (auto-cleanup)
-            ParticleComp->SetAutoDestroy(true);
+            case EVFX_ImpactType::DinosaurFootstep:
+                ActorName = TEXT("VFX_Footstep_Particle");
+                break;
+            case EVFX_ImpactType::BloodSplatter:
+                ActorName = TEXT("VFX_Blood_Particle");
+                break;
+            case EVFX_ImpactType::DustCloud:
+                ActorName = TEXT("VFX_Dust_Particle");
+                break;
+            default:
+                ActorName = TEXT("VFX_Generic_Particle");
+                break;
         }
-    }
 
-    // Play impact sound
-    if (bEnableAudio && ImpactData->ImpactSound)
-    {
-        float FinalVolume = ImpactData->VolumeMultiplier * GlobalAudioVolume;
+        ParticleActor->SetActorLabel(ActorName);
+        ParticleActor->Tags.Add(TEXT("VFXParticle"));
         
-        UAudioComponent* AudioComp = UGameplayStatics::SpawnSoundAtLocation(
-            GetWorld(),
-            ImpactData->ImpactSound,
-            Location,
-            FRotator::ZeroRotator,
-            FinalVolume
-        );
-        
-        if (AudioComp)
+        // Adicionar ao array de partículas activas
+        ActiveParticleActors.Add(ParticleActor);
+        CurrentActiveParticles++;
+
+        // Programar destruição automática
+        FTimerHandle TimerHandle;
+        World->GetTimerManager().SetTimer(TimerHandle, [this, ParticleActor]()
         {
-            ActiveAudioComponents.Add(AudioComp);
-        }
+            if (IsValid(ParticleActor))
+            {
+                ActiveParticleActors.Remove(ParticleActor);
+                CurrentActiveParticles--;
+                ParticleActor->Destroy();
+            }
+        }, ParticleLifetime, false);
+
+        UE_LOG(LogTemp, Warning, TEXT("VFX_ImpactManager: Criada partícula %s em %s"), *ActorName, *Location.ToString());
     }
-
-    LastEffectTime = GetWorld()->GetTimeSeconds();
 }
 
-void UVFX_ImpactManager::SpawnDinosaurFootstep(const FVector& Location, float DinosaurSize, ESurfaceType SurfaceType)
+void UVFX_ImpactManager::CleanupOldParticles()
 {
-    EVFX_ImpactType ImpactType = EVFX_ImpactType::DinosaurFootstep;
-    
-    // Adjust scale based on dinosaur size
-    float Scale = FMath::Clamp(DinosaurSize, 0.5f, 3.0f);
-    
-    // Different effects based on surface type
-    switch (SurfaceType)
+    // Remover partículas inválidas do array
+    ActiveParticleActors.RemoveAll([](AActor* Actor)
     {
-        case ESurfaceType::Grass:
-        case ESurfaceType::Dirt:
-            ImpactType = EVFX_ImpactType::DinosaurFootstep;
-            break;
-        case ESurfaceType::Water:
-            ImpactType = EVFX_ImpactType::WaterSplash;
-            Scale *= 1.5f; // Bigger splash
-            break;
-        case ESurfaceType::Rock:
-            ImpactType = EVFX_ImpactType::RockImpact;
-            break;
-        default:
-            ImpactType = EVFX_ImpactType::DinosaurFootstep;
-            break;
-    }
-    
-    SpawnImpactEffect(ImpactType, Location, FVector::UpVector, Scale);
-}
-
-void UVFX_ImpactManager::SpawnWeaponImpact(const FVector& Location, const FVector& Normal, float Damage)
-{
-    float Scale = FMath::Clamp(Damage / 50.0f, 0.3f, 2.0f); // Scale based on damage
-    SpawnImpactEffect(EVFX_ImpactType::WeaponHit, Location, Normal, Scale);
-}
-
-void UVFX_ImpactManager::SetImpactData(EVFX_ImpactType ImpactType, const FVFX_ImpactData& NewData)
-{
-    ImpactEffects.Add(ImpactType, NewData);
-}
-
-FVFX_ImpactData UVFX_ImpactManager::GetImpactData(EVFX_ImpactType ImpactType) const
-{
-    const FVFX_ImpactData* FoundData = ImpactEffects.Find(ImpactType);
-    return FoundData ? *FoundData : FVFX_ImpactData();
-}
-
-void UVFX_ImpactManager::CleanupFinishedEffects()
-{
-    // Remove null or finished particle components
-    ActiveParticleComponents.RemoveAll([](UNiagaraComponent* Comp)
-    {
-        return !IsValid(Comp) || !Comp->IsActive();
+        return !IsValid(Actor);
     });
-    
-    // Remove null or finished audio components
-    ActiveAudioComponents.RemoveAll([](UAudioComponent* Comp)
-    {
-        return !IsValid(Comp) || !Comp->IsPlaying();
-    });
+
+    // Actualizar contador
+    CurrentActiveParticles = ActiveParticleActors.Num();
+
+    UE_LOG(LogTemp, Log, TEXT("VFX_ImpactManager: Limpeza concluída. Partículas activas: %d"), CurrentActiveParticles);
 }
 
-bool UVFX_ImpactManager::CanSpawnNewEffect() const
+bool UVFX_ImpactManager::IsLocationValid(FVector Location) const
 {
-    if (!GetWorld())
+    // Verificar se a localização está dentro dos limites do mapa
+    // Mapa: 157.000 x 153.000 UU, centrado em (0,0,0)
+    const float MapHalfX = 78500.0f;  // 157.000 / 2
+    const float MapHalfY = 76500.0f;  // 153.000 / 2
+
+    if (FMath::Abs(Location.X) > MapHalfX || FMath::Abs(Location.Y) > MapHalfY)
     {
         return false;
     }
-    
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-    
-    // Check time limit
-    if (CurrentTime - LastEffectTime < MinTimeBetweenEffects)
+
+    // Verificar se não está muito alto ou muito baixo
+    if (Location.Z < -1000.0f || Location.Z > 5000.0f)
     {
         return false;
     }
-    
-    // Check active effect limit
-    if (ActiveParticleComponents.Num() + ActiveAudioComponents.Num() >= MaxActiveEffects)
-    {
-        return false;
-    }
-    
+
     return true;
-}
-
-void UVFX_ImpactManager::InitializeDefaultEffects()
-{
-    // Initialize with placeholder data - these will be replaced with actual assets
-    FVFX_ImpactData FootstepData;
-    FootstepData.EffectScale = 1.0f;
-    FootstepData.VolumeMultiplier = 0.8f;
-    ImpactEffects.Add(EVFX_ImpactType::DinosaurFootstep, FootstepData);
-    
-    FVFX_ImpactData LandingData;
-    LandingData.EffectScale = 2.0f;
-    LandingData.VolumeMultiplier = 1.2f;
-    ImpactEffects.Add(EVFX_ImpactType::DinosaurLanding, LandingData);
-    
-    FVFX_ImpactData WeaponData;
-    WeaponData.EffectScale = 0.5f;
-    WeaponData.VolumeMultiplier = 1.0f;
-    ImpactEffects.Add(EVFX_ImpactType::WeaponHit, WeaponData);
-    
-    FVFX_ImpactData RockData;
-    RockData.EffectScale = 0.8f;
-    RockData.VolumeMultiplier = 0.9f;
-    ImpactEffects.Add(EVFX_ImpactType::RockImpact, RockData);
-    
-    FVFX_ImpactData TreeData;
-    TreeData.EffectScale = 3.0f;
-    TreeData.VolumeMultiplier = 1.5f;
-    ImpactEffects.Add(EVFX_ImpactType::TreeFall, TreeData);
-    
-    FVFX_ImpactData WaterData;
-    WaterData.EffectScale = 1.5f;
-    WaterData.VolumeMultiplier = 0.7f;
-    ImpactEffects.Add(EVFX_ImpactType::WaterSplash, WaterData);
-    
-    UE_LOG(LogTemp, Log, TEXT("VFX_ImpactManager: Initialized %d default impact effects"), ImpactEffects.Num());
 }
