@@ -1,195 +1,154 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
-#include "Components/AudioComponent.h"
-#include "Components/SceneComponent.h"
-#include "../SharedTypes.h"
+#include "Components/ActorComponent.h"
+#include "Engine/Engine.h"
+#include "SharedTypes.h"
 #include "Narr_DialogueSystem.generated.h"
 
-UENUM(BlueprintType)
-enum class ENarr_DialogueType : uint8
-{
-    Discovery       UMETA(DisplayName = "Discovery"),
-    Warning         UMETA(DisplayName = "Warning"),
-    Tutorial        UMETA(DisplayName = "Tutorial"),
-    Emergency       UMETA(DisplayName = "Emergency"),
-    Observation     UMETA(DisplayName = "Observation"),
-    Achievement     UMETA(DisplayName = "Achievement")
-};
-
-UENUM(BlueprintType)
-enum class ENarr_SpeakerRole : uint8
-{
-    FieldPaleontologist     UMETA(DisplayName = "Field Paleontologist"),
-    ExplorationGuide        UMETA(DisplayName = "Exploration Guide"),
-    SeniorPaleontologist    UMETA(DisplayName = "Senior Paleontologist"),
-    SafetyCoordinator       UMETA(DisplayName = "Safety Coordinator"),
-    ResearchDirector        UMETA(DisplayName = "Research Director"),
-    SurvivalExpert          UMETA(DisplayName = "Survival Expert")
-};
+// Forward declarations
+class USoundBase;
+class UWidget;
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_DialogueEntry
+struct TRANSPERSONALGAME_API FNarr_DialogueLine
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FString DialogueText;
+    FString SpeakerName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    ENarr_SpeakerRole Speaker;
+    FText DialogueText;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    ENarr_DialogueType DialogueType;
+    USoundBase* VoiceClip;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
     float Duration;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FString AudioURL;
+    bool bIsPlayerChoice;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    EEng_BiomeType RelevantBiome;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    EEng_DinosaurSpecies RelevantDinosaur;
-
-    FNarr_DialogueEntry()
+    FNarr_DialogueLine()
     {
-        DialogueText = "";
-        Speaker = ENarr_SpeakerRole::FieldPaleontologist;
-        DialogueType = ENarr_DialogueType::Observation;
-        Duration = 0.0f;
-        AudioURL = "";
-        RelevantBiome = EEng_BiomeType::Savanna;
-        RelevantDinosaur = EEng_DinosaurSpecies::TRex;
+        SpeakerName = "Unknown";
+        DialogueText = FText::FromString("...");
+        VoiceClip = nullptr;
+        Duration = 3.0f;
+        bIsPlayerChoice = false;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_NarrativeContext
+struct TRANSPERSONALGAME_API FNarr_DialogueSequence
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Context")
-    EEng_BiomeType CurrentBiome;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    FString SequenceID;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Context")
-    TArray<EEng_DinosaurSpecies> NearbyDinosaurs;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    TArray<FNarr_DialogueLine> DialogueLines;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Context")
-    EEng_ThreatLevel ThreatLevel;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    bool bIsRepeatable;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Context")
-    EEng_TimeOfDay TimeOfDay;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    bool bHasBeenPlayed;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Context")
-    EEng_WeatherType Weather;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Context")
-    bool bInEmergency;
-
-    FNarr_NarrativeContext()
+    FNarr_DialogueSequence()
     {
-        CurrentBiome = EEng_BiomeType::Savanna;
-        ThreatLevel = EEng_ThreatLevel::Safe;
-        TimeOfDay = EEng_TimeOfDay::Morning;
-        Weather = EEng_WeatherType::Clear;
-        bInEmergency = false;
+        SequenceID = "DefaultSequence";
+        bIsRepeatable = false;
+        bHasBeenPlayed = false;
     }
 };
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API ANarr_DialogueSystem : public AActor
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UNarr_DialogueSystem : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    ANarr_DialogueSystem();
+    UNarr_DialogueSystem();
 
 protected:
     virtual void BeginPlay() override;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    USceneComponent* RootSceneComponent;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UAudioComponent* AudioComponent;
-
-    // Dialogue Database
+    // Dialogue sequences for this NPC/trigger
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue System")
-    TArray<FNarr_DialogueEntry> DialogueDatabase;
+    TArray<FNarr_DialogueSequence> DialogueSequences;
 
-    // Current Context
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative Context")
-    FNarr_NarrativeContext CurrentContext;
+    // Current active dialogue
+    UPROPERTY(BlueprintReadOnly, Category = "Dialogue System")
+    FNarr_DialogueSequence* CurrentSequence;
 
-    // System Settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    float DialogueCooldown;
+    UPROPERTY(BlueprintReadOnly, Category = "Dialogue System")
+    int32 CurrentLineIndex;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    float ContextUpdateInterval;
+    UPROPERTY(BlueprintReadOnly, Category = "Dialogue System")
+    bool bIsDialogueActive;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    bool bAutoTriggerDialogue;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    float MaxDialogueDistance;
-
-private:
-    FTimerHandle ContextUpdateTimer;
-    FTimerHandle DialogueCooldownTimer;
-    bool bDialogueOnCooldown;
+    // Audio component for voice playback
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio")
+    class UAudioComponent* VoiceAudioComponent;
 
 public:
-    virtual void Tick(float DeltaTime) override;
-
-    // Core Functions
+    // Main dialogue functions
     UFUNCTION(BlueprintCallable, Category = "Dialogue System")
-    void TriggerDialogue(ENarr_DialogueType DialogueType, EEng_DinosaurSpecies RelevantDinosaur = EEng_DinosaurSpecies::TRex);
+    bool StartDialogueSequence(const FString& SequenceID);
 
     UFUNCTION(BlueprintCallable, Category = "Dialogue System")
-    void UpdateNarrativeContext();
+    void NextDialogueLine();
 
     UFUNCTION(BlueprintCallable, Category = "Dialogue System")
-    FNarr_DialogueEntry GetRelevantDialogue(ENarr_DialogueType DialogueType, EEng_BiomeType Biome, EEng_DinosaurSpecies Dinosaur);
+    void EndDialogue();
 
     UFUNCTION(BlueprintCallable, Category = "Dialogue System")
-    void PlayDialogue(const FNarr_DialogueEntry& DialogueEntry);
+    bool IsDialogueActive() const;
 
     UFUNCTION(BlueprintCallable, Category = "Dialogue System")
-    void InitializeDialogueDatabase();
+    FNarr_DialogueLine GetCurrentDialogueLine() const;
 
-    // Context Detection
-    UFUNCTION(BlueprintCallable, Category = "Context Detection")
-    EEng_BiomeType DetectCurrentBiome();
+    // Sequence management
+    UFUNCTION(BlueprintCallable, Category = "Dialogue System")
+    void AddDialogueSequence(const FNarr_DialogueSequence& NewSequence);
 
-    UFUNCTION(BlueprintCallable, Category = "Context Detection")
-    TArray<EEng_DinosaurSpecies> DetectNearbyDinosaurs();
+    UFUNCTION(BlueprintCallable, Category = "Dialogue System")
+    bool HasSequence(const FString& SequenceID) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Context Detection")
-    EEng_ThreatLevel CalculateThreatLevel();
+    UFUNCTION(BlueprintCallable, Category = "Dialogue System")
+    TArray<FString> GetAvailableSequenceIDs() const;
 
-    // Emergency Integration
-    UFUNCTION(BlueprintCallable, Category = "Emergency Integration")
-    void OnEmergencyTriggered(const FString& EmergencyType);
+    // Audio playback
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void PlayVoiceLine(USoundBase* VoiceClip);
 
-    UFUNCTION(BlueprintCallable, Category = "Emergency Integration")
-    void OnMissionCompleted(const FString& MissionType);
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void StopVoicePlayback();
 
-    // Utility Functions
-    UFUNCTION(BlueprintCallable, Category = "Utility")
-    void AddCustomDialogue(const FNarr_DialogueEntry& NewDialogue);
+    // Events for Blueprint integration
+    UFUNCTION(BlueprintImplementableEvent, Category = "Dialogue Events")
+    void OnDialogueStarted(const FString& SequenceID);
 
-    UFUNCTION(BlueprintCallable, Category = "Utility")
-    void ClearDialogueDatabase();
+    UFUNCTION(BlueprintImplementableEvent, Category = "Dialogue Events")
+    void OnDialogueLineChanged(const FNarr_DialogueLine& DialogueLine);
+
+    UFUNCTION(BlueprintImplementableEvent, Category = "Dialogue Events")
+    void OnDialogueEnded();
+
+    UFUNCTION(BlueprintImplementableEvent, Category = "Dialogue Events")
+    void OnPlayerChoiceRequired(const TArray<FNarr_DialogueLine>& Choices);
 
 private:
-    void OnContextUpdate();
-    void OnDialogueCooldownEnd();
-    bool IsPlayerNearby();
-    FString GetBiomeName(EEng_BiomeType BiomeType);
-    FString GetDinosaurName(EEng_DinosaurSpecies Species);
+    // Internal helper functions
+    void InitializeAudioComponent();
+    FNarr_DialogueSequence* FindSequenceByID(const FString& SequenceID);
+    void ProcessCurrentLine();
+
+    // Timer handle for auto-advancing dialogue
+    FTimerHandle DialogueTimerHandle;
+
+    void AutoAdvanceDialogue();
 };
