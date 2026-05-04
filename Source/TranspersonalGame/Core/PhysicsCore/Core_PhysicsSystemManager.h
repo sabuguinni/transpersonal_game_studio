@@ -4,17 +4,16 @@
 #include "GameFramework/Actor.h"
 #include "Components/ActorComponent.h"
 #include "Engine/World.h"
+#include "Components/StaticMeshComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Components/PrimitiveComponent.h"
 #include "PhysicsEngine/PhysicsSettings.h"
+#include "../../SharedTypes.h"
 #include "Core_PhysicsSystemManager.generated.h"
 
-UENUM(BlueprintType)
-enum class ECore_PhysicsMode : uint8
-{
-    Realistic       UMETA(DisplayName = "Realistic Physics"),
-    Arcade         UMETA(DisplayName = "Arcade Physics"),
-    Survival       UMETA(DisplayName = "Survival Physics"),
-    Cinematic      UMETA(DisplayName = "Cinematic Physics")
-};
+class UCore_CollisionManager;
+class UCore_DestructionSystem;
+class UCore_RagdollManager;
 
 USTRUCT(BlueprintType)
 struct TRANSPERSONALGAME_API FCore_PhysicsSettings
@@ -22,103 +21,187 @@ struct TRANSPERSONALGAME_API FCore_PhysicsSettings
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    float GravityScale = 1.0f;
+    float GlobalGravityScale = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    float LinearDamping = 0.01f;
+    float DefaultMass = 100.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    float AngularDamping = 0.0f;
+    float DefaultFriction = 0.7f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    float MaxAngularVelocity = 3600.0f;
+    float DefaultRestitution = 0.3f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    bool bEnableGravity = true;
+    bool bEnableAdvancedPhysics = true;
+
+    FCore_PhysicsSettings()
+    {
+        GlobalGravityScale = 1.0f;
+        DefaultMass = 100.0f;
+        DefaultFriction = 0.7f;
+        DefaultRestitution = 0.3f;
+        bEnableAdvancedPhysics = true;
+    }
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FCore_PhysicsObjectData
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    AActor* PhysicsActor = nullptr;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    UPrimitiveComponent* PhysicsComponent = nullptr;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    float Mass = 100.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
     bool bSimulatePhysics = true;
 
-    FCore_PhysicsSettings()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    ECore_BiomeType BiomeLocation = ECore_BiomeType::Savanna;
+
+    FCore_PhysicsObjectData()
     {
-        GravityScale = 1.0f;
-        LinearDamping = 0.01f;
-        AngularDamping = 0.0f;
-        MaxAngularVelocity = 3600.0f;
-        bEnableGravity = true;
+        PhysicsActor = nullptr;
+        PhysicsComponent = nullptr;
+        Mass = 100.0f;
         bSimulatePhysics = true;
+        BiomeLocation = ECore_BiomeType::Savanna;
     }
 };
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API ACore_PhysicsSystemManager : public AActor
+/**
+ * Core Physics System Manager - Coordinates all physics systems in the prehistoric survival game
+ * Manages collision detection, destruction, ragdoll physics, and environmental interactions
+ * Integrates with BiomeManager for location-based physics properties
+ */
+UCLASS(BlueprintType, Blueprintable, meta = (BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UCore_PhysicsSystemManager : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    ACore_PhysicsSystemManager();
+    UCore_PhysicsSystemManager();
 
 protected:
     virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 public:
-    // Physics mode control
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics System")
-    ECore_PhysicsMode CurrentPhysicsMode = ECore_PhysicsMode::Realistic;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // Physics settings for different modes
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics System")
-    FCore_PhysicsSettings RealisticSettings;
+    // Core Physics Management
+    UFUNCTION(BlueprintCallable, Category = "Physics")
+    void InitializePhysicsSystem();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics System")
-    FCore_PhysicsSettings ArcadeSettings;
+    UFUNCTION(BlueprintCallable, Category = "Physics")
+    void ShutdownPhysicsSystem();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics System")
-    FCore_PhysicsSettings SurvivalSettings;
+    UFUNCTION(BlueprintCallable, Category = "Physics")
+    bool EnablePhysicsOnActor(AActor* Actor, float Mass = 100.0f);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics System")
-    FCore_PhysicsSettings CinematicSettings;
+    UFUNCTION(BlueprintCallable, Category = "Physics")
+    bool DisablePhysicsOnActor(AActor* Actor);
 
-    // Performance monitoring
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Performance")
-    int32 ActivePhysicsObjects = 0;
+    // Physics Object Registration
+    UFUNCTION(BlueprintCallable, Category = "Physics")
+    void RegisterPhysicsObject(AActor* Actor, const FCore_PhysicsObjectData& PhysicsData);
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Performance")
-    float PhysicsFrameTime = 0.0f;
+    UFUNCTION(BlueprintCallable, Category = "Physics")
+    void UnregisterPhysicsObject(AActor* Actor);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxPhysicsObjects = 1000;
+    UFUNCTION(BlueprintCallable, Category = "Physics")
+    TArray<FCore_PhysicsObjectData> GetAllPhysicsObjects() const;
 
-    // Blueprint callable functions
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
-    void SetPhysicsMode(ECore_PhysicsMode NewMode);
+    // Environmental Physics
+    UFUNCTION(BlueprintCallable, Category = "Physics")
+    void ApplyBiomePhysicsProperties(AActor* Actor, ECore_BiomeType BiomeType);
 
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
-    void ApplyPhysicsSettingsToActor(AActor* Actor, const FCore_PhysicsSettings& Settings);
+    UFUNCTION(BlueprintCallable, Category = "Physics")
+    void ApplyEnvironmentalForces(AActor* Actor, const FVector& Force, const FVector& Location);
 
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
-    void OptimizePhysicsPerformance();
+    // Collision Management
+    UFUNCTION(BlueprintCallable, Category = "Physics")
+    void SetupCollisionForActor(AActor* Actor, ECore_CollisionType CollisionType);
 
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
-    FCore_PhysicsSettings GetCurrentPhysicsSettings() const;
+    UFUNCTION(BlueprintCallable, Category = "Physics")
+    bool CheckCollisionBetweenActors(AActor* ActorA, AActor* ActorB);
 
-    UFUNCTION(BlueprintCallable, Category = "Physics System")
-    void UpdatePhysicsStatistics();
+    // Destruction System Integration
+    UFUNCTION(BlueprintCallable, Category = "Physics")
+    void TriggerDestruction(AActor* Actor, const FVector& ImpactPoint, float ImpactForce);
 
-    // Editor functions
-    UFUNCTION(CallInEditor, Category = "Physics System")
-    void TestPhysicsSystem();
+    UFUNCTION(BlueprintCallable, Category = "Physics")
+    void CreateDestructionFragments(AActor* Actor, int32 FragmentCount = 5);
 
-    UFUNCTION(CallInEditor, Category = "Physics System")
-    void ResetPhysicsSettings();
+    // Ragdoll System Integration
+    UFUNCTION(BlueprintCallable, Category = "Physics")
+    void EnableRagdollPhysics(AActor* Character);
+
+    UFUNCTION(BlueprintCallable, Category = "Physics")
+    void DisableRagdollPhysics(AActor* Character);
+
+    // Physics Simulation Control
+    UFUNCTION(BlueprintCallable, Category = "Physics")
+    void SetGlobalPhysicsSettings(const FCore_PhysicsSettings& NewSettings);
+
+    UFUNCTION(BlueprintCallable, Category = "Physics")
+    FCore_PhysicsSettings GetGlobalPhysicsSettings() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Physics")
+    void PausePhysicsSimulation();
+
+    UFUNCTION(BlueprintCallable, Category = "Physics")
+    void ResumePhysicsSimulation();
+
+    // Performance Monitoring
+    UFUNCTION(BlueprintCallable, Category = "Physics")
+    int32 GetActivePhysicsObjectCount() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Physics")
+    float GetPhysicsPerformanceMetrics() const;
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Physics")
+    void ValidatePhysicsSystem();
+
+protected:
+    // Physics Settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics", meta = (AllowPrivateAccess = "true"))
+    FCore_PhysicsSettings PhysicsSettings;
+
+    // Subsystem References
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Physics", meta = (AllowPrivateAccess = "true"))
+    UCore_CollisionManager* CollisionManager;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Physics", meta = (AllowPrivateAccess = "true"))
+    UCore_DestructionSystem* DestructionSystem;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Physics", meta = (AllowPrivateAccess = "true"))
+    UCore_RagdollManager* RagdollManager;
+
+    // Physics Object Tracking
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Physics", meta = (AllowPrivateAccess = "true"))
+    TArray<FCore_PhysicsObjectData> RegisteredPhysicsObjects;
+
+    // Performance Monitoring
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Physics", meta = (AllowPrivateAccess = "true"))
+    int32 ActivePhysicsObjectCount = 0;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Physics", meta = (AllowPrivateAccess = "true"))
+    float LastFramePhysicsTime = 0.0f;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Physics", meta = (AllowPrivateAccess = "true"))
+    bool bPhysicsSystemInitialized = false;
 
 private:
-    void InitializePhysicsSettings();
-    void ApplyGlobalPhysicsSettings(const FCore_PhysicsSettings& Settings);
-    void MonitorPhysicsPerformance();
-
-    // Internal state
-    float LastPerformanceCheck = 0.0f;
-    float PerformanceCheckInterval = 1.0f;
+    // Internal helper functions
+    void InitializeSubsystems();
+    void CleanupSubsystems();
+    UPrimitiveComponent* GetPrimaryPhysicsComponent(AActor* Actor);
+    void UpdatePhysicsPerformanceMetrics(float DeltaTime);
 };
