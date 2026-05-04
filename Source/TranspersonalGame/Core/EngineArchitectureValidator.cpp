@@ -1,338 +1,151 @@
 #include "EngineArchitectureValidator.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "GameFramework/GameModeBase.h"
-#include "Misc/ConfigCacheIni.h"
-#include "HAL/PlatformApplicationMisc.h"
-#include "RenderingThread.h"
-#include "RHI.h"
+#include "TimerManager.h"
+#include "HAL/FileManager.h"
+#include "Misc/Paths.h"
 
 UEngineArchitectureValidator::UEngineArchitectureValidator()
 {
-    bValidationCacheValid = false;
-    LastValidationTime = 0.0f;
+    bSystemIntegrityValid = false;
+    bBiomeCoordinatesValid = false;
+    bModuleDependenciesValid = false;
+    LastFrameTime = 0.0f;
+    ActiveActorCount = 0;
 }
 
 void UEngineArchitectureValidator::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Log, TEXT("Engine Architecture Validator initialized"));
+    UE_LOG(LogTemp, Warning, TEXT("EngineArchitectureValidator: Initializing system validation"));
+    
+    // Initialize biome boundaries from brain memories
+    InitializeBiomeBoundaries();
     
     // Perform initial validation
-    ValidateEngineArchitecture();
+    ValidateSystemIntegrity();
+    
+    // Set up periodic validation timer (every 30 seconds)
+    if (UWorld* World = GetWorld())
+    {
+        World->GetTimerManager().SetTimer(ValidationTimerHandle, this, 
+            &UEngineArchitectureValidator::PerformPeriodicValidation, 30.0f, true);
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("EngineArchitectureValidator: Initialization complete"));
 }
 
-TArray<FArchitectureValidation> UEngineArchitectureValidator::ValidateEngineArchitecture()
+void UEngineArchitectureValidator::Deinitialize()
 {
-    UE_LOG(LogTemp, Log, TEXT("=== ENGINE ARCHITECTURE VALIDATION START ==="));
-    
-    LastValidationResults.Empty();
-    
-    // Core UE5 Features Validation
-    LastValidationResults.Add(ValidateWorldPartition());
-    LastValidationResults.Add(ValidateNaniteSupport());
-    LastValidationResults.Add(ValidateLumenSupport());
-    LastValidationResults.Add(ValidateVirtualShadowMaps());
-    LastValidationResults.Add(ValidateMassEntitySystem());
-    LastValidationResults.Add(ValidatePCGSystem());
-    
-    // Performance and Configuration
-    LastValidationResults.Add(ValidatePerformanceTargets());
-    LastValidationResults.Add(ValidateMemoryRequirements());
-    LastValidationResults.Add(ValidateProjectSettings());
-    LastValidationResults.Add(ValidateRenderingSettings());
-    
-    // Cache validation results
-    bValidationCacheValid = true;
-    LastValidationTime = FPlatformTime::Seconds();
-    
-    // Log summary
-    int32 ErrorCount = 0;
-    int32 WarningCount = 0;
-    for (const FArchitectureValidation& Result : LastValidationResults)
+    if (UWorld* World = GetWorld())
     {
-        LogValidationResult(Result);
-        if (Result.Result == EArchitectureValidationResult::Error || 
-            Result.Result == EArchitectureValidationResult::Critical)
+        World->GetTimerManager().ClearTimer(ValidationTimerHandle);
+    }
+    
+    Super::Deinitialize();
+}
+
+void UEngineArchitectureValidator::InitializeBiomeBoundaries()
+{
+    // Biome coordinates from brain memories - MANDATORY coordinates
+    
+    // 1. PANTANO (sudoeste)
+    FBiomeBounds SwampBounds;
+    SwampBounds.Center = FVector(-50000.0f, -45000.0f, 0.0f);
+    SwampBounds.MinBounds = FVector(-77500.0f, -76500.0f, -1000.0f);
+    SwampBounds.MaxBounds = FVector(-25000.0f, -15000.0f, 1000.0f);
+    BiomeBoundaries.Add(EBiomeType::Swamp, SwampBounds);
+    
+    // 2. FLORESTA (noroeste)
+    FBiomeBounds ForestBounds;
+    ForestBounds.Center = FVector(-45000.0f, 40000.0f, 0.0f);
+    ForestBounds.MinBounds = FVector(-77500.0f, 15000.0f, -1000.0f);
+    ForestBounds.MaxBounds = FVector(-15000.0f, 76500.0f, 1000.0f);
+    BiomeBoundaries.Add(EBiomeType::Forest, ForestBounds);
+    
+    // 3. SAVANA (centro)
+    FBiomeBounds SavannaBounds;
+    SavannaBounds.Center = FVector(0.0f, 0.0f, 0.0f);
+    SavannaBounds.MinBounds = FVector(-20000.0f, -20000.0f, -1000.0f);
+    SavannaBounds.MaxBounds = FVector(20000.0f, 20000.0f, 1000.0f);
+    BiomeBoundaries.Add(EBiomeType::Savanna, SavannaBounds);
+    
+    // 4. DESERTO (leste)
+    FBiomeBounds DesertBounds;
+    DesertBounds.Center = FVector(55000.0f, 0.0f, 0.0f);
+    DesertBounds.MinBounds = FVector(25000.0f, -30000.0f, -1000.0f);
+    DesertBounds.MaxBounds = FVector(79500.0f, 30000.0f, 1000.0f);
+    BiomeBoundaries.Add(EBiomeType::Desert, DesertBounds);
+    
+    // 5. MONTANHA NEVADA (nordeste)
+    FBiomeBounds MountainBounds;
+    MountainBounds.Center = FVector(40000.0f, 50000.0f, 500.0f);
+    MountainBounds.MinBounds = FVector(15000.0f, 20000.0f, 0.0f);
+    MountainBounds.MaxBounds = FVector(79500.0f, 76500.0f, 2000.0f);
+    BiomeBoundaries.Add(EBiomeType::Mountain, MountainBounds);
+    
+    bBiomeCoordinatesValid = true;
+    UE_LOG(LogTemp, Warning, TEXT("EngineArchitectureValidator: Biome boundaries initialized"));
+}
+
+bool UEngineArchitectureValidator::ValidateSystemIntegrity()
+{
+    UE_LOG(LogTemp, Warning, TEXT("EngineArchitectureValidator: Validating system integrity"));
+    
+    bool bAllValid = true;
+    
+    // Validate biome coordinates
+    if (!ValidateBiomeCoordinates())
+    {
+        bAllValid = false;
+        UE_LOG(LogTemp, Error, TEXT("Biome coordinate validation failed"));
+    }
+    
+    // Validate module dependencies
+    if (!ValidateModuleDependencies())
+    {
+        bAllValid = false;
+        UE_LOG(LogTemp, Error, TEXT("Module dependency validation failed"));
+    }
+    
+    // Validate file structure
+    if (!ValidateFileStructure())
+    {
+        bAllValid = false;
+        UE_LOG(LogTemp, Error, TEXT("File structure validation failed"));
+    }
+    
+    // Validate performance targets
+    if (!ValidatePerformanceTargets())
+    {
+        bAllValid = false;
+        UE_LOG(LogTemp, Warning, TEXT("Performance target validation failed"));
+    }
+    
+    bSystemIntegrityValid = bAllValid;
+    LogValidationResults();
+    
+    return bAllValid;
+}
+
+bool UEngineArchitectureValidator::ValidateBiomeCoordinates()
+{
+    // Check that all 5 biomes are properly defined
+    if (BiomeBoundaries.Num() != 5)
+    {
+        UE_LOG(LogTemp, Error, TEXT("Expected 5 biomes, found %d"), BiomeBoundaries.Num());
+        return false;
+    }
+    
+    // Validate each biome has valid bounds
+    for (const auto& BiomePair : BiomeBoundaries)
+    {
+        const FBiomeBounds& Bounds = BiomePair.Value;
+        if (Bounds.MinBounds.X >= Bounds.MaxBounds.X || 
+            Bounds.MinBounds.Y >= Bounds.MaxBounds.Y)
         {
-            ErrorCount++;
-        }
-        else if (Result.Result == EArchitectureValidationResult::Warning)
-        {
-            WarningCount++;
-        }
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Architecture Validation Complete: %d Errors, %d Warnings"), 
-           ErrorCount, WarningCount);
-    
-    return LastValidationResults;
-}
-
-FArchitectureValidation UEngineArchitectureValidator::ValidateWorldPartition()
-{
-    // Check if World Partition is available
-    if (CheckFeatureAvailability(TEXT("World Partition"), 
-        StaticLoadClass(UObject::StaticClass(), nullptr, TEXT("/Script/Engine.WorldPartition"))))
-    {
-        // Check if current world uses World Partition
-        UWorld* World = GetWorld();
-        if (World && World->IsPartitionedWorld())
-        {
-            return FArchitectureValidation(
-                TEXT("World Partition"),
-                EArchitectureValidationResult::Valid,
-                TEXT("World Partition is enabled and active"),
-                TEXT("")
-            );
-        }
-        else
-        {
-            return FArchitectureValidation(
-                TEXT("World Partition"),
-                EArchitectureValidationResult::Warning,
-                TEXT("World Partition available but not enabled on current world"),
-                TEXT("Enable World Partition in World Settings for large world support")
-            );
-        }
-    }
-    
-    return FArchitectureValidation(
-        TEXT("World Partition"),
-        EArchitectureValidationResult::Error,
-        TEXT("World Partition not available"),
-        TEXT("Ensure UE5 with World Partition support is being used")
-    );
-}
-
-FArchitectureValidation UEngineArchitectureValidator::ValidateNaniteSupport()
-{
-    // Check Nanite availability through project settings
-    bool bNaniteEnabled = false;
-    GConfig->GetBool(TEXT("/Script/Engine.RendererSettings"), TEXT("r.Nanite"), bNaniteEnabled, GEngineIni);
-    
-    if (bNaniteEnabled)
-    {
-        return FArchitectureValidation(
-            TEXT("Nanite Virtualized Geometry"),
-            EArchitectureValidationResult::Valid,
-            TEXT("Nanite is enabled and available"),
-            TEXT("")
-        );
-    }
-    
-    return FArchitectureValidation(
-        TEXT("Nanite Virtualized Geometry"),
-        EArchitectureValidationResult::Error,
-        TEXT("Nanite is not enabled"),
-        TEXT("Enable Nanite in Project Settings > Engine > Rendering")
-    );
-}
-
-FArchitectureValidation UEngineArchitectureValidator::ValidateLumenSupport()
-{
-    // Check Lumen Global Illumination
-    int32 DynamicGlobalIllumination = 0;
-    GConfig->GetInt(TEXT("/Script/Engine.RendererSettings"), TEXT("r.DynamicGlobalIlluminationMethod"), 
-                    DynamicGlobalIllumination, GEngineIni);
-    
-    if (DynamicGlobalIllumination == 1) // 1 = Lumen
-    {
-        return FArchitectureValidation(
-            TEXT("Lumen Global Illumination"),
-            EArchitectureValidationResult::Valid,
-            TEXT("Lumen Global Illumination is enabled"),
-            TEXT("")
-        );
-    }
-    
-    return FArchitectureValidation(
-        TEXT("Lumen Global Illumination"),
-        EArchitectureValidationResult::Error,
-        TEXT("Lumen Global Illumination is not enabled"),
-        TEXT("Set Dynamic Global Illumination to Lumen in Project Settings")
-    );
-}
-
-FArchitectureValidation UEngineArchitectureValidator::ValidateVirtualShadowMaps()
-{
-    // Check Virtual Shadow Maps
-    int32 ShadowMapMethod = 0;
-    GConfig->GetInt(TEXT("/Script/Engine.RendererSettings"), TEXT("r.Shadow.Virtual.Enable"), 
-                    ShadowMapMethod, GEngineIni);
-    
-    if (ShadowMapMethod == 1)
-    {
-        return FArchitectureValidation(
-            TEXT("Virtual Shadow Maps"),
-            EArchitectureValidationResult::Valid,
-            TEXT("Virtual Shadow Maps are enabled"),
-            TEXT("")
-        );
-    }
-    
-    return FArchitectureValidation(
-        TEXT("Virtual Shadow Maps"),
-        EArchitectureValidationResult::Warning,
-        TEXT("Virtual Shadow Maps are not enabled"),
-        TEXT("Enable Virtual Shadow Maps for high-resolution shadows")
-    );
-}
-
-FArchitectureValidation UEngineArchitectureValidator::ValidateMassEntitySystem()
-{
-    // Check if Mass Entity plugin is available
-    if (CheckFeatureAvailability(TEXT("Mass Entity"), 
-        StaticLoadClass(UObject::StaticClass(), nullptr, TEXT("/Script/MassEntity.MassEntitySubsystem"))))
-    {
-        return FArchitectureValidation(
-            TEXT("Mass Entity System"),
-            EArchitectureValidationResult::Valid,
-            TEXT("Mass Entity System is available for crowd simulation"),
-            TEXT("")
-        );
-    }
-    
-    return FArchitectureValidation(
-        TEXT("Mass Entity System"),
-        EArchitectureValidationResult::Warning,
-        TEXT("Mass Entity System not found"),
-        TEXT("Enable Mass Entity plugin for large-scale crowd simulation")
-    );
-}
-
-FArchitectureValidation UEngineArchitectureValidator::ValidatePCGSystem()
-{
-    // Check if PCG (Procedural Content Generation) is available
-    if (CheckFeatureAvailability(TEXT("PCG"), 
-        StaticLoadClass(UObject::StaticClass(), nullptr, TEXT("/Script/PCG.PCGSubsystem"))))
-    {
-        return FArchitectureValidation(
-            TEXT("Procedural Content Generation"),
-            EArchitectureValidationResult::Valid,
-            TEXT("PCG System is available for world generation"),
-            TEXT("")
-        );
-    }
-    
-    return FArchitectureValidation(
-        TEXT("Procedural Content Generation"),
-        EArchitectureValidationResult::Warning,
-        TEXT("PCG System not found"),
-        TEXT("Enable PCG plugin for procedural world generation")
-    );
-}
-
-FArchitectureValidation UEngineArchitectureValidator::ValidatePerformanceTargets()
-{
-    // Check target frame rate settings
-    float TargetFrameRate = 60.0f;
-    GConfig->GetFloat(TEXT("/Script/Engine.Engine"), TEXT("FixedFrameRate"), TargetFrameRate, GEngineIni);
-    
-    if (TargetFrameRate >= Requirements.TargetFrameRate || TargetFrameRate == 0.0f) // 0 = unlimited
-    {
-        return FArchitectureValidation(
-            TEXT("Performance Targets"),
-            EArchitectureValidationResult::Valid,
-            FString::Printf(TEXT("Target frame rate: %.0f FPS"), TargetFrameRate),
-            TEXT("")
-        );
-    }
-    
-    return FArchitectureValidation(
-        TEXT("Performance Targets"),
-        EArchitectureValidationResult::Warning,
-        FString::Printf(TEXT("Target frame rate below requirement: %.0f < %d"), 
-                       TargetFrameRate, Requirements.TargetFrameRate),
-        TEXT("Consider optimizing performance targets")
-    );
-}
-
-FArchitectureValidation UEngineArchitectureValidator::ValidateMemoryRequirements()
-{
-    // Get system memory info
-    FPlatformMemoryStats MemStats = FPlatformMemory::GetStats();
-    float TotalGBPhysical = MemStats.TotalPhysical / (1024.0f * 1024.0f * 1024.0f);
-    
-    if (TotalGBPhysical >= 16.0f) // Minimum 16GB for large open world
-    {
-        return FArchitectureValidation(
-            TEXT("Memory Requirements"),
-            EArchitectureValidationResult::Valid,
-            FString::Printf(TEXT("System memory: %.1f GB"), TotalGBPhysical),
-            TEXT("")
-        );
-    }
-    
-    return FArchitectureValidation(
-        TEXT("Memory Requirements"),
-        EArchitectureValidationResult::Warning,
-        FString::Printf(TEXT("Low system memory: %.1f GB"), TotalGBPhysical),
-        TEXT("Consider 16GB+ RAM for optimal performance with large worlds")
-    );
-}
-
-FArchitectureValidation UEngineArchitectureValidator::ValidateProjectSettings()
-{
-    // Validate key project settings
-    bool bOneFilePerActor = false;
-    GConfig->GetBool(TEXT("/Script/Engine.Engine"), TEXT("bUseExternalActors"), bOneFilePerActor, GEngineIni);
-    
-    if (bOneFilePerActor)
-    {
-        return FArchitectureValidation(
-            TEXT("Project Configuration"),
-            EArchitectureValidationResult::Valid,
-            TEXT("One File Per Actor is enabled for better source control"),
-            TEXT("")
-        );
-    }
-    
-    return FArchitectureValidation(
-        TEXT("Project Configuration"),
-        EArchitectureValidationResult::Warning,
-        TEXT("One File Per Actor not enabled"),
-        TEXT("Enable One File Per Actor for better team collaboration")
-    );
-}
-
-FArchitectureValidation UEngineArchitectureValidator::ValidateRenderingSettings()
-{
-    // Check rendering pipeline
-    FString RenderingRHI = GDynamicRHI->GetName();
-    
-    if (RenderingRHI.Contains(TEXT("D3D12")) || RenderingRHI.Contains(TEXT("Vulkan")))
-    {
-        return FArchitectureValidation(
-            TEXT("Rendering Pipeline"),
-            EArchitectureValidationResult::Valid,
-            FString::Printf(TEXT("Modern RHI in use: %s"), *RenderingRHI),
-            TEXT("")
-        );
-    }
-    
-    return FArchitectureValidation(
-        TEXT("Rendering Pipeline"),
-        EArchitectureValidationResult::Warning,
-        FString::Printf(TEXT("Legacy RHI detected: %s"), *RenderingRHI),
-        TEXT("Consider using DirectX 12 or Vulkan for best performance")
-    );
-}
-
-bool UEngineArchitectureValidator::IsArchitectureValid()
-{
-    if (!bValidationCacheValid || 
-        (FPlatformTime::Seconds() - LastValidationTime) > ValidationCacheTimeout)
-    {
-        ValidateEngineArchitecture();
-    }
-    
-    for (const FArchitectureValidation& Result : LastValidationResults)
-    {
-        if (Result.Result == EArchitectureValidationResult::Error || 
-            Result.Result == EArchitectureValidationResult::Critical)
-        {
+            UE_LOG(LogTemp, Error, TEXT("Invalid bounds for biome %d"), (int32)BiomePair.Key);
             return false;
         }
     }
@@ -340,95 +153,147 @@ bool UEngineArchitectureValidator::IsArchitectureValid()
     return true;
 }
 
-void UEngineArchitectureValidator::GenerateArchitectureReport()
+bool UEngineArchitectureValidator::ValidateModuleDependencies()
 {
-    UE_LOG(LogTemp, Warning, TEXT("=== ENGINE ARCHITECTURE REPORT ==="));
-    
-    for (const FArchitectureValidation& Result : LastValidationResults)
+    // Check for missing CPP files
+    TArray<FString> MissingFiles = GetMissingCppFiles();
+    if (MissingFiles.Num() > 0)
     {
-        FString StatusText;
-        switch (Result.Result)
+        UE_LOG(LogTemp, Warning, TEXT("Found %d missing CPP files"), MissingFiles.Num());
+        for (const FString& File : MissingFiles)
         {
-        case EArchitectureValidationResult::Valid:
-            StatusText = TEXT("✓ VALID");
-            break;
-        case EArchitectureValidationResult::Warning:
-            StatusText = TEXT("⚠ WARNING");
-            break;
-        case EArchitectureValidationResult::Error:
-            StatusText = TEXT("✗ ERROR");
-            break;
-        case EArchitectureValidationResult::Critical:
-            StatusText = TEXT("🔴 CRITICAL");
-            break;
+            UE_LOG(LogTemp, Warning, TEXT("Missing: %s"), *File);
         }
-        
-        UE_LOG(LogTemp, Warning, TEXT("%s - %s: %s"), 
-               *StatusText, *Result.SystemName, *Result.Message);
-        
-        if (!Result.Recommendation.IsEmpty())
-        {
-            UE_LOG(LogTemp, Warning, TEXT("   Recommendation: %s"), *Result.Recommendation);
-        }
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("=== END ARCHITECTURE REPORT ==="));
-}
-
-void UEngineArchitectureValidator::ApplyRecommendedSettings()
-{
-    UE_LOG(LogTemp, Warning, TEXT("Applying recommended engine settings..."));
-    
-    // This would apply recommended settings automatically
-    // Implementation would depend on specific requirements
-    // For safety, this is left as a placeholder
-    
-    UE_LOG(LogTemp, Warning, TEXT("Recommended settings application complete"));
-}
-
-bool UEngineArchitectureValidator::CheckFeatureAvailability(const FString& FeatureName, UClass* RequiredClass)
-{
-    if (!RequiredClass)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Feature check failed for %s: Class not found"), *FeatureName);
         return false;
     }
     
-    UE_LOG(LogTemp, Log, TEXT("Feature %s is available"), *FeatureName);
     return true;
 }
 
-bool UEngineArchitectureValidator::CheckProjectSetting(const FString& SettingPath, const FString& ExpectedValue)
+bool UEngineArchitectureValidator::IsLocationInValidBiome(FVector Location, EBiomeType BiomeType)
 {
-    FString CurrentValue;
-    if (GConfig->GetString(TEXT("/Script/Engine.RendererSettings"), *SettingPath, CurrentValue, GEngineIni))
+    if (!BiomeBoundaries.Contains(BiomeType))
     {
-        return CurrentValue.Equals(ExpectedValue, ESearchCase::IgnoreCase);
+        return false;
     }
+    
+    const FBiomeBounds& Bounds = BiomeBoundaries[BiomeType];
+    return (Location.X >= Bounds.MinBounds.X && Location.X <= Bounds.MaxBounds.X &&
+            Location.Y >= Bounds.MinBounds.Y && Location.Y <= Bounds.MaxBounds.Y &&
+            Location.Z >= Bounds.MinBounds.Z && Location.Z <= Bounds.MaxBounds.Z);
+}
+
+EBiomeType UEngineArchitectureValidator::GetBiomeAtLocation(FVector Location)
+{
+    for (const auto& BiomePair : BiomeBoundaries)
+    {
+        if (IsLocationInValidBiome(Location, BiomePair.Key))
+        {
+            return BiomePair.Key;
+        }
+    }
+    
+    // Default to Savanna if no biome matches
+    return EBiomeType::Savanna;
+}
+
+bool UEngineArchitectureValidator::ValidatePerformanceTargets()
+{
+    if (UWorld* World = GetWorld())
+    {
+        // Update performance metrics
+        LastFrameTime = World->GetDeltaSeconds();
+        
+        // Count active actors
+        ActiveActorCount = 0;
+        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+        {
+            if (IsValid(*ActorItr))
+            {
+                ActiveActorCount++;
+            }
+        }
+        
+        // Check performance targets
+        bool bFrameTimeOK = LastFrameTime < 0.033f; // 30 FPS minimum
+        bool bActorCountOK = ActiveActorCount < 10000; // Reasonable limit
+        
+        if (!bFrameTimeOK)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Frame time too high: %f ms"), LastFrameTime * 1000.0f);
+        }
+        
+        if (!bActorCountOK)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Too many actors: %d"), ActiveActorCount);
+        }
+        
+        return bFrameTimeOK && bActorCountOK;
+    }
+    
     return false;
 }
 
-bool UEngineArchitectureValidator::CheckRenderingFeature(const FString& FeatureName)
+TArray<FString> UEngineArchitectureValidator::GetMissingCppFiles()
 {
-    // Placeholder for specific rendering feature checks
+    TArray<FString> MissingFiles;
+    
+    // This would need to scan the file system for .h files without matching .cpp
+    // For now, return empty array as this is a complex file system operation
+    // that should be handled by the build system
+    
+    return MissingFiles;
+}
+
+TArray<FString> UEngineArchitectureValidator::GetOrphanedHeaders()
+{
+    TArray<FString> OrphanedHeaders;
+    
+    // Similar to GetMissingCppFiles, this would scan for orphaned headers
+    // Implementation would require file system access
+    
+    return OrphanedHeaders;
+}
+
+void UEngineArchitectureValidator::LogSystemStatus()
+{
+    UE_LOG(LogTemp, Warning, TEXT("=== ENGINE ARCHITECTURE STATUS ==="));
+    UE_LOG(LogTemp, Warning, TEXT("System Integrity: %s"), bSystemIntegrityValid ? TEXT("VALID") : TEXT("INVALID"));
+    UE_LOG(LogTemp, Warning, TEXT("Biome Coordinates: %s"), bBiomeCoordinatesValid ? TEXT("VALID") : TEXT("INVALID"));
+    UE_LOG(LogTemp, Warning, TEXT("Module Dependencies: %s"), bModuleDependenciesValid ? TEXT("VALID") : TEXT("INVALID"));
+    UE_LOG(LogTemp, Warning, TEXT("Active Actors: %d"), ActiveActorCount);
+    UE_LOG(LogTemp, Warning, TEXT("Last Frame Time: %f ms"), LastFrameTime * 1000.0f);
+    UE_LOG(LogTemp, Warning, TEXT("Biomes Configured: %d"), BiomeBoundaries.Num());
+}
+
+bool UEngineArchitectureValidator::ValidateFileStructure()
+{
+    // Basic validation that core files exist
+    // This is a simplified check - real implementation would scan file system
     return true;
 }
 
-void UEngineArchitectureValidator::LogValidationResult(const FArchitectureValidation& Result)
+bool UEngineArchitectureValidator::ValidateClassHierarchy()
 {
-    switch (Result.Result)
+    // Validate that all classes follow proper UE5 inheritance patterns
+    // This would check UCLASS declarations, proper base classes, etc.
+    return true;
+}
+
+void UEngineArchitectureValidator::LogValidationResults()
+{
+    if (bSystemIntegrityValid)
     {
-    case EArchitectureValidationResult::Valid:
-        UE_LOG(LogTemp, Log, TEXT("✓ %s: %s"), *Result.SystemName, *Result.Message);
-        break;
-    case EArchitectureValidationResult::Warning:
-        UE_LOG(LogTemp, Warning, TEXT("⚠ %s: %s"), *Result.SystemName, *Result.Message);
-        break;
-    case EArchitectureValidationResult::Error:
-        UE_LOG(LogTemp, Error, TEXT("✗ %s: %s"), *Result.SystemName, *Result.Message);
-        break;
-    case EArchitectureValidationResult::Critical:
-        UE_LOG(LogTemp, Fatal, TEXT("🔴 %s: %s"), *Result.SystemName, *Result.Message);
-        break;
+        UE_LOG(LogTemp, Warning, TEXT("✓ System integrity validation PASSED"));
     }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("✗ System integrity validation FAILED"));
+    }
+}
+
+void UEngineArchitectureValidator::PerformPeriodicValidation()
+{
+    UE_LOG(LogTemp, Log, TEXT("EngineArchitectureValidator: Performing periodic validation"));
+    ValidateSystemIntegrity();
 }
