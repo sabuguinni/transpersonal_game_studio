@@ -1,24 +1,34 @@
 #include "Narr_DialogueSystem.h"
 #include "Components/AudioComponent.h"
-#include "Sound/SoundBase.h"
-#include "Engine/World.h"
-#include "TimerManager.h"
+#include "Sound/SoundWave.h"
 #include "Engine/Engine.h"
+#include "Kismet/GameplayStatics.h"
 
 UNarr_DialogueSystem::UNarr_DialogueSystem()
 {
-    PrimaryComponentTick.bCanEverTick = false;
+    PrimaryComponentTick.bCanEverTick = true;
     
-    CurrentSequence = nullptr;
-    CurrentLineIndex = 0;
-    bIsDialogueActive = false;
+    // Initialize default values
+    bIsPlaying = false;
+    bIsPaused = false;
+    CurrentDialogueID = "";
+    CurrentPlaybackTime = 0.0f;
+    TotalDialogueDuration = 0.0f;
+    DialogueVolume = 1.0f;
+    bSubtitlesEnabled = true;
+    bAutoPlayContextualDialogue = true;
     
-    // Create audio component for voice playback
-    VoiceAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("VoiceAudioComponent"));
-    if (VoiceAudioComponent)
+    CurrentQueueIndex = 0;
+    SequenceTimer = 0.0f;
+    DelayTimer = 0.0f;
+    bProcessingSequence = false;
+    
+    // Create audio component
+    AudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("DialogueAudioComponent"));
+    if (AudioComponent)
     {
-        VoiceAudioComponent->bAutoActivate = false;
-        VoiceAudioComponent->SetVolumeMultiplier(0.8f);
+        AudioComponent->bAutoActivate = false;
+        AudioComponent->SetVolumeMultiplier(DialogueVolume);
     }
 }
 
@@ -26,258 +36,406 @@ void UNarr_DialogueSystem::BeginPlay()
 {
     Super::BeginPlay();
     
-    InitializeAudioComponent();
+    // Initialize default dialogue entries for survival scenarios
+    InitializeDefaultDialogues();
     
-    UE_LOG(LogTemp, Log, TEXT("Dialogue System initialized for %s"), 
-           GetOwner() ? *GetOwner()->GetName() : TEXT("Unknown"));
+    UE_LOG(LogTemp, Log, TEXT("Narr_DialogueSystem: Sistema de diálogo inicializado com %d entradas"), DialogueDatabase.Num());
 }
 
-void UNarr_DialogueSystem::InitializeAudioComponent()
+void UNarr_DialogueSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    if (VoiceAudioComponent && GetOwner())
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    
+    if (bProcessingSequence)
     {
-        VoiceAudioComponent->AttachToComponent(
-            GetOwner()->GetRootComponent(),
-            FAttachmentTransformRules::KeepWorldTransform
-        );
+        ProcessDialogueQueue();
+    }
+    
+    if (bIsPlaying && !bIsPaused)
+    {
+        CurrentPlaybackTime += DeltaTime;
+        
+        // Check if current dialogue has finished
+        if (CurrentPlaybackTime >= TotalDialogueDuration)
+        {
+            OnDialogueFinished();
+        }
     }
 }
 
-bool UNarr_DialogueSystem::StartDialogueSequence(const FString& SequenceID)
+void UNarr_DialogueSystem::PlayDialogue(const FString& DialogueID)
 {
-    if (bIsDialogueActive)
+    if (DialogueDatabase.Contains(DialogueID))
     {
-        UE_LOG(LogTemp, Warning, TEXT("Cannot start dialogue - another sequence is active"));
-        return false;
+        const FNarr_DialogueEntry& DialogueEntry = DialogueDatabase[DialogueID];
+        
+        // Stop current dialogue if playing
+        if (bIsPlaying)
+        {
+            StopCurrentDialogue();
+        }
+        
+        // Set current dialogue state
+        CurrentDialogueID = DialogueID;
+        CurrentPlaybackTime = 0.0f;
+        TotalDialogueDuration = DialogueEntry.Duration;
+        bIsPlaying = true;
+        bIsPaused = false;
+        
+        // Load and play audio if available
+        if (!DialogueEntry.AudioFilePath.IsEmpty())
+        {
+            LoadDialogueAudio(DialogueEntry.AudioFilePath);
+        }
+        
+        // Display subtitles if enabled
+        if (bSubtitlesEnabled)
+        {
+            if (GEngine)
+            {
+                FString SubtitleText = FString::Printf(TEXT("[%s]: %s"), 
+                    *UEnum::GetValueAsString(DialogueEntry.Speaker), 
+                    *DialogueEntry.DialogueText);
+                GEngine->AddOnScreenDebugMessage(-1, TotalDialogueDuration, FColor::White, SubtitleText);
+            }
+        }
+        
+        UE_LOG(LogTemp, Log, TEXT("Narr_DialogueSystem: A reproduzir diálogo '%s'"), *DialogueID);
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Narr_DialogueSystem: Diálogo '%s' não encontrado na base de dados"), *DialogueID);
+    }
+}
+
+void UNarr_DialogueSystem::PlayDialogueSequence(const FString& SequenceID)
+{
+    if (SequenceDatabase.Contains(SequenceID))
+    {
+        const FNarr_DialogueSequence& Sequence = SequenceDatabase[SequenceID];
+        
+        // Stop current playback
+        StopCurrentDialogue();
+        
+        // Setup sequence playback
+        DialogueQueue = Sequence.DialogueEntries;
+        CurrentQueueIndex = 0;
+        DelayTimer = 0.0f;
+        bProcessingSequence = true;
+        
+        // Start first dialogue if auto-play is enabled
+        if (Sequence.bAutoPlay && DialogueQueue.Num() > 0)
+        {
+            PlayDialogue(DialogueQueue[0].DialogueID);
+        }
+        
+        UE_LOG(LogTemp, Log, TEXT("Narr_DialogueSystem: A iniciar sequência '%s' com %d diálogos"), *SequenceID, DialogueQueue.Num());
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Narr_DialogueSystem: Sequência '%s' não encontrada"), *SequenceID);
+    }
+}
+
+void UNarr_DialogueSystem::StopCurrentDialogue()
+{
+    if (bIsPlaying)
+    {
+        bIsPlaying = false;
+        bIsPaused = false;
+        bProcessingSequence = false;
+        CurrentDialogueID = "";
+        CurrentPlaybackTime = 0.0f;
+        TotalDialogueDuration = 0.0f;
+        
+        if (AudioComponent && AudioComponent->IsPlaying())
+        {
+            AudioComponent->Stop();
+        }
+        
+        DialogueQueue.Empty();
+        CurrentQueueIndex = 0;
+        
+        UE_LOG(LogTemp, Log, TEXT("Narr_DialogueSystem: Diálogo parado"));
+    }
+}
+
+void UNarr_DialogueSystem::PauseDialogue()
+{
+    if (bIsPlaying && !bIsPaused)
+    {
+        bIsPaused = true;
+        
+        if (AudioComponent && AudioComponent->IsPlaying())
+        {
+            AudioComponent->SetPaused(true);
+        }
+        
+        UE_LOG(LogTemp, Log, TEXT("Narr_DialogueSystem: Diálogo pausado"));
+    }
+}
+
+void UNarr_DialogueSystem::ResumeDialogue()
+{
+    if (bIsPlaying && bIsPaused)
+    {
+        bIsPaused = false;
+        
+        if (AudioComponent)
+        {
+            AudioComponent->SetPaused(false);
+        }
+        
+        UE_LOG(LogTemp, Log, TEXT("Narr_DialogueSystem: Diálogo retomado"));
+    }
+}
+
+void UNarr_DialogueSystem::TriggerBiomeDialogue(EEng_BiomeType BiomeType)
+{
+    if (!bAutoPlayContextualDialogue) return;
+    
+    // Find appropriate biome dialogue
+    for (const auto& DialoguePair : DialogueDatabase)
+    {
+        const FNarr_DialogueEntry& Entry = DialoguePair.Value;
+        if (Entry.DialogueType == ENarr_DialogueType::BiomeDescription && 
+            Entry.RelevantBiome == BiomeType)
+        {
+            PlayDialogue(Entry.DialogueID);
+            break;
+        }
+    }
+}
+
+void UNarr_DialogueSystem::TriggerThreatDialogue(EEng_ThreatLevel ThreatLevel, EEng_DinosaurSpecies DinosaurSpecies)
+{
+    if (!bAutoPlayContextualDialogue) return;
+    
+    // Find appropriate threat dialogue based on urgency
+    for (const auto& DialoguePair : DialogueDatabase)
+    {
+        const FNarr_DialogueEntry& Entry = DialoguePair.Value;
+        if (Entry.DialogueType == ENarr_DialogueType::ThreatAlert && 
+            Entry.UrgencyLevel == ThreatLevel)
+        {
+            PlayDialogue(Entry.DialogueID);
+            break;
+        }
+    }
+}
+
+void UNarr_DialogueSystem::TriggerWeatherDialogue(EEng_WeatherType WeatherType)
+{
+    if (!bAutoPlayContextualDialogue) return;
+    
+    // Find weather-related dialogue
+    for (const auto& DialoguePair : DialogueDatabase)
+    {
+        const FNarr_DialogueEntry& Entry = DialoguePair.Value;
+        if (Entry.DialogueType == ENarr_DialogueType::WeatherWarning)
+        {
+            // Check if this weather dialogue is relevant
+            bool bRelevant = false;
+            for (const FString& Condition : Entry.TriggerConditions)
+            {
+                if (Condition.Contains(UEnum::GetValueAsString(WeatherType)))
+                {
+                    bRelevant = true;
+                    break;
+                }
+            }
+            
+            if (bRelevant)
+            {
+                PlayDialogue(Entry.DialogueID);
+                break;
+            }
+        }
+    }
+}
+
+void UNarr_DialogueSystem::TriggerDiscoveryDialogue(const FString& DiscoveryType)
+{
+    if (!bAutoPlayContextualDialogue) return;
+    
+    // Find discovery dialogue
+    for (const auto& DialoguePair : DialogueDatabase)
+    {
+        const FNarr_DialogueEntry& Entry = DialoguePair.Value;
+        if (Entry.DialogueType == ENarr_DialogueType::Discovery)
+        {
+            for (const FString& Condition : Entry.TriggerConditions)
+            {
+                if (Condition.Contains(DiscoveryType))
+                {
+                    PlayDialogue(Entry.DialogueID);
+                    return;
+                }
+            }
+        }
+    }
+}
+
+void UNarr_DialogueSystem::RegisterDialogueEntry(const FNarr_DialogueEntry& DialogueEntry)
+{
+    DialogueDatabase.Add(DialogueEntry.DialogueID, DialogueEntry);
+    UE_LOG(LogTemp, Log, TEXT("Narr_DialogueSystem: Diálogo '%s' registado"), *DialogueEntry.DialogueID);
+}
+
+void UNarr_DialogueSystem::RegisterDialogueSequence(const FNarr_DialogueSequence& DialogueSequence)
+{
+    SequenceDatabase.Add(DialogueSequence.SequenceID, DialogueSequence);
+    UE_LOG(LogTemp, Log, TEXT("Narr_DialogueSystem: Sequência '%s' registada"), *DialogueSequence.SequenceID);
+}
+
+bool UNarr_DialogueSystem::IsDialoguePlaying() const
+{
+    return bIsPlaying;
+}
+
+FString UNarr_DialogueSystem::GetCurrentDialogueID() const
+{
+    return CurrentDialogueID;
+}
+
+void UNarr_DialogueSystem::SetAudioVolume(float Volume)
+{
+    DialogueVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
+    
+    if (AudioComponent)
+    {
+        AudioComponent->SetVolumeMultiplier(DialogueVolume);
+    }
+}
+
+void UNarr_DialogueSystem::SetSubtitlesEnabled(bool bEnabled)
+{
+    bSubtitlesEnabled = bEnabled;
+}
+
+void UNarr_DialogueSystem::ProcessDialogueQueue()
+{
+    if (DialogueQueue.Num() == 0 || CurrentQueueIndex >= DialogueQueue.Num())
+    {
+        bProcessingSequence = false;
+        return;
     }
     
-    FNarr_DialogueSequence* Sequence = FindSequenceByID(SequenceID);
-    if (!Sequence)
+    // Wait for current dialogue to finish before starting next
+    if (bIsPlaying)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Dialogue sequence not found: %s"), *SequenceID);
-        return false;
+        return;
     }
     
-    if (Sequence->bHasBeenPlayed && !Sequence->bIsRepeatable)
+    // Handle delay between dialogues
+    if (DelayTimer > 0.0f)
     {
-        UE_LOG(LogTemp, Log, TEXT("Dialogue sequence already played and not repeatable: %s"), *SequenceID);
-        return false;
+        DelayTimer -= GetWorld()->GetDeltaSeconds();
+        return;
     }
     
-    CurrentSequence = Sequence;
-    CurrentLineIndex = 0;
-    bIsDialogueActive = true;
+    // Play next dialogue in queue
+    const FNarr_DialogueEntry& NextDialogue = DialogueQueue[CurrentQueueIndex];
+    PlayDialogue(NextDialogue.DialogueID);
     
-    // Mark as played
-    Sequence->bHasBeenPlayed = true;
+    CurrentQueueIndex++;
     
-    // Trigger Blueprint event
-    OnDialogueStarted(SequenceID);
+    // Set delay for next dialogue if there are more in queue
+    if (CurrentQueueIndex < DialogueQueue.Num())
+    {
+        DelayTimer = 2.0f; // Default delay between dialogues
+    }
+    else
+    {
+        bProcessingSequence = false;
+    }
+}
+
+void UNarr_DialogueSystem::OnDialogueFinished()
+{
+    bIsPlaying = false;
+    CurrentDialogueID = "";
+    CurrentPlaybackTime = 0.0f;
+    TotalDialogueDuration = 0.0f;
     
-    // Start first line
-    ProcessCurrentLine();
-    
-    UE_LOG(LogTemp, Log, TEXT("Started dialogue sequence: %s"), *SequenceID);
+    if (AudioComponent && AudioComponent->IsPlaying())
+    {
+        AudioComponent->Stop();
+    }
+}
+
+bool UNarr_DialogueSystem::CheckDialogueTriggerConditions(const FNarr_DialogueEntry& DialogueEntry)
+{
+    // Simple condition checking - can be expanded for more complex logic
     return true;
 }
 
-void UNarr_DialogueSystem::NextDialogueLine()
+void UNarr_DialogueSystem::LoadDialogueAudio(const FString& AudioFilePath)
 {
-    if (!bIsDialogueActive || !CurrentSequence)
+    if (AudioComponent && !AudioFilePath.IsEmpty())
     {
-        return;
-    }
-    
-    CurrentLineIndex++;
-    
-    if (CurrentLineIndex >= CurrentSequence->DialogueLines.Num())
-    {
-        // End of sequence
-        EndDialogue();
-        return;
-    }
-    
-    ProcessCurrentLine();
-}
-
-void UNarr_DialogueSystem::EndDialogue()
-{
-    if (!bIsDialogueActive)
-    {
-        return;
-    }
-    
-    // Stop any playing audio
-    StopVoicePlayback();
-    
-    // Clear timer
-    if (GetWorld())
-    {
-        GetWorld()->GetTimerManager().ClearTimer(DialogueTimerHandle);
-    }
-    
-    bIsDialogueActive = false;
-    CurrentSequence = nullptr;
-    CurrentLineIndex = 0;
-    
-    // Trigger Blueprint event
-    OnDialogueEnded();
-    
-    UE_LOG(LogTemp, Log, TEXT("Dialogue ended"));
-}
-
-bool UNarr_DialogueSystem::IsDialogueActive() const
-{
-    return bIsDialogueActive;
-}
-
-FNarr_DialogueLine UNarr_DialogueSystem::GetCurrentDialogueLine() const
-{
-    if (bIsDialogueActive && CurrentSequence && 
-        CurrentLineIndex >= 0 && CurrentLineIndex < CurrentSequence->DialogueLines.Num())
-    {
-        return CurrentSequence->DialogueLines[CurrentLineIndex];
-    }
-    
-    return FNarr_DialogueLine();
-}
-
-void UNarr_DialogueSystem::AddDialogueSequence(const FNarr_DialogueSequence& NewSequence)
-{
-    // Check if sequence already exists
-    for (int32 i = 0; i < DialogueSequences.Num(); i++)
-    {
-        if (DialogueSequences[i].SequenceID == NewSequence.SequenceID)
+        // Try to load sound wave from path
+        USoundWave* SoundWave = LoadObject<USoundWave>(nullptr, *AudioFilePath);
+        if (SoundWave)
         {
-            // Replace existing sequence
-            DialogueSequences[i] = NewSequence;
-            UE_LOG(LogTemp, Log, TEXT("Replaced dialogue sequence: %s"), *NewSequence.SequenceID);
-            return;
+            AudioComponent->SetSound(SoundWave);
+            AudioComponent->Play();
+            UE_LOG(LogTemp, Log, TEXT("Narr_DialogueSystem: Áudio carregado: %s"), *AudioFilePath);
+        }
+        else
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Narr_DialogueSystem: Falha ao carregar áudio: %s"), *AudioFilePath);
         }
     }
-    
-    // Add new sequence
-    DialogueSequences.Add(NewSequence);
-    UE_LOG(LogTemp, Log, TEXT("Added dialogue sequence: %s"), *NewSequence.SequenceID);
 }
 
-bool UNarr_DialogueSystem::HasSequence(const FString& SequenceID) const
+void UNarr_DialogueSystem::InitializeDefaultDialogues()
 {
-    return FindSequenceByID(SequenceID) != nullptr;
-}
-
-TArray<FString> UNarr_DialogueSystem::GetAvailableSequenceIDs() const
-{
-    TArray<FString> SequenceIDs;
-    for (const FNarr_DialogueSequence& Sequence : DialogueSequences)
-    {
-        if (!Sequence.bHasBeenPlayed || Sequence.bIsRepeatable)
-        {
-            SequenceIDs.Add(Sequence.SequenceID);
-        }
-    }
-    return SequenceIDs;
-}
-
-void UNarr_DialogueSystem::PlayVoiceLine(USoundBase* VoiceClip)
-{
-    if (!VoiceClip || !VoiceAudioComponent)
-    {
-        return;
-    }
+    // Create default survival-focused dialogue entries
     
-    VoiceAudioComponent->SetSound(VoiceClip);
-    VoiceAudioComponent->Play();
+    // Field Notes
+    FNarr_DialogueEntry FieldNote1;
+    FieldNote1.DialogueID = "FieldNote_RaptorBehavior";
+    FieldNote1.DialogueType = ENarr_DialogueType::FieldNotes;
+    FieldNote1.Speaker = ENarr_SpeakerType::Paleontologist;
+    FieldNote1.DialogueText = "Registo de campo: Os Raptors desta região demonstram comportamento de caça coordenada excepcional.";
+    FieldNote1.Duration = 8.0f;
+    FieldNote1.UrgencyLevel = EEng_ThreatLevel::Safe;
+    RegisterDialogueEntry(FieldNote1);
     
-    UE_LOG(LogTemp, Log, TEXT("Playing voice clip"));
-}
-
-void UNarr_DialogueSystem::StopVoicePlayback()
-{
-    if (VoiceAudioComponent && VoiceAudioComponent->IsPlaying())
-    {
-        VoiceAudioComponent->Stop();
-    }
-}
-
-FNarr_DialogueSequence* UNarr_DialogueSystem::FindSequenceByID(const FString& SequenceID)
-{
-    for (FNarr_DialogueSequence& Sequence : DialogueSequences)
-    {
-        if (Sequence.SequenceID == SequenceID)
-        {
-            return &Sequence;
-        }
-    }
-    return nullptr;
-}
-
-const FNarr_DialogueSequence* UNarr_DialogueSystem::FindSequenceByID(const FString& SequenceID) const
-{
-    for (const FNarr_DialogueSequence& Sequence : DialogueSequences)
-    {
-        if (Sequence.SequenceID == SequenceID)
-        {
-            return &Sequence;
-        }
-    }
-    return nullptr;
-}
-
-void UNarr_DialogueSystem::ProcessCurrentLine()
-{
-    if (!CurrentSequence || CurrentLineIndex < 0 || 
-        CurrentLineIndex >= CurrentSequence->DialogueLines.Num())
-    {
-        return;
-    }
+    // Safety Alerts
+    FNarr_DialogueEntry SafetyAlert1;
+    SafetyAlert1.DialogueID = "Safety_TRexProximity";
+    SafetyAlert1.DialogueType = ENarr_DialogueType::SafetyAlert;
+    SafetyAlert1.Speaker = ENarr_SpeakerType::SafetyOfficer;
+    SafetyAlert1.DialogueText = "Alerta de segurança: Tyrannosaurus Rex detectado na área. Manter distância segura.";
+    SafetyAlert1.Duration = 6.0f;
+    SafetyAlert1.UrgencyLevel = EEng_ThreatLevel::Deadly;
+    RegisterDialogueEntry(SafetyAlert1);
     
-    const FNarr_DialogueLine& CurrentLine = CurrentSequence->DialogueLines[CurrentLineIndex];
+    // Weather Warnings
+    FNarr_DialogueEntry WeatherWarning1;
+    WeatherWarning1.DialogueID = "Weather_StormApproaching";
+    WeatherWarning1.DialogueType = ENarr_DialogueType::WeatherWarning;
+    WeatherWarning1.Speaker = ENarr_SpeakerType::WeatherStation;
+    WeatherWarning1.DialogueText = "Aviso meteorológico: Tempestade tropical aproxima-se. Procurar abrigo imediatamente.";
+    WeatherWarning1.Duration = 7.0f;
+    WeatherWarning1.UrgencyLevel = EEng_ThreatLevel::Dangerous;
+    WeatherWarning1.TriggerConditions.Add("Storm");
+    WeatherWarning1.TriggerConditions.Add("Rain");
+    RegisterDialogueEntry(WeatherWarning1);
     
-    // Play voice clip if available
-    if (CurrentLine.VoiceClip)
-    {
-        PlayVoiceLine(CurrentLine.VoiceClip);
-    }
+    // Discovery Dialogues
+    FNarr_DialogueEntry Discovery1;
+    Discovery1.DialogueID = "Discovery_DinosaurNest";
+    Discovery1.DialogueType = ENarr_DialogueType::Discovery;
+    Discovery1.Speaker = ENarr_SpeakerType::Paleontologist;
+    Discovery1.DialogueText = "Descoberta extraordinária: Ninho de dinossauro intacto com evidências de comportamento parental.";
+    Discovery1.Duration = 9.0f;
+    Discovery1.UrgencyLevel = EEng_ThreatLevel::Safe;
+    Discovery1.TriggerConditions.Add("Nest");
+    Discovery1.TriggerConditions.Add("Eggs");
+    RegisterDialogueEntry(Discovery1);
     
-    // Trigger Blueprint event
-    OnDialogueLineChanged(CurrentLine);
-    
-    // Check if this is a player choice
-    if (CurrentLine.bIsPlayerChoice)
-    {
-        // Collect all consecutive player choice lines
-        TArray<FNarr_DialogueLine> Choices;
-        int32 ChoiceIndex = CurrentLineIndex;
-        
-        while (ChoiceIndex < CurrentSequence->DialogueLines.Num() && 
-               CurrentSequence->DialogueLines[ChoiceIndex].bIsPlayerChoice)
-        {
-            Choices.Add(CurrentSequence->DialogueLines[ChoiceIndex]);
-            ChoiceIndex++;
-        }
-        
-        OnPlayerChoiceRequired(Choices);
-        return; // Don't auto-advance for player choices
-    }
-    
-    // Set timer for auto-advance if not a player choice
-    if (GetWorld() && CurrentLine.Duration > 0.0f)
-    {
-        GetWorld()->GetTimerManager().SetTimer(
-            DialogueTimerHandle,
-            this,
-            &UNarr_DialogueSystem::AutoAdvanceDialogue,
-            CurrentLine.Duration,
-            false
-        );
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("Processing dialogue line: %s - %s"), 
-           *CurrentLine.SpeakerName, *CurrentLine.DialogueText.ToString());
-}
-
-void UNarr_DialogueSystem::AutoAdvanceDialogue()
-{
-    NextDialogueLine();
+    UE_LOG(LogTemp, Log, TEXT("Narr_DialogueSystem: %d diálogos padrão inicializados"), DialogueDatabase.Num());
 }
