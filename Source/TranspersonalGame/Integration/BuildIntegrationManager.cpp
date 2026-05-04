@@ -1,418 +1,247 @@
 #include "BuildIntegrationManager.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Engine/Level.h"
-#include "EditorLevelLibrary.h"
-#include "Modules/ModuleManager.h"
-#include "UObject/UObjectIterator.h"
-#include "HAL/PlatformFilemanager.h"
+#include "HAL/FileManager.h"
 #include "Misc/Paths.h"
 #include "Misc/DateTime.h"
+#include "Engine/GameInstance.h"
+#include "TranspersonalGame/SharedTypes.h"
 
-DEFINE_LOG_CATEGORY(LogBuildIntegration);
+DEFINE_LOG_CATEGORY_STATIC(LogBuildIntegration, Log, All);
 
 UBuildIntegrationManager::UBuildIntegrationManager()
 {
-    BuildProgress = 0.0f;
-    CurrentBuildPhase = TEXT("Initializing");
-}
-
-void UBuildIntegrationManager::Initialize(FSubsystemCollectionBase& Collection)
-{
-    Super::Initialize(Collection);
+    PrimaryComponentTick.bCanEverTick = false;
+    
+    // Inicializar estado de integração
+    IntegrationState = EBuild_IntegrationState::Initializing;
+    LastValidationTime = FDateTime::Now();
+    ValidationInterval = 300.0f; // 5 minutos
+    
+    // Configurar validação automática
+    bAutoValidationEnabled = true;
+    bContinuousIntegration = true;
+    MaxErrorsBeforeHalt = 10;
     
     UE_LOG(LogBuildIntegration, Log, TEXT("BuildIntegrationManager initialized"));
-    
-    // Inicializar estado de compilação
-    RefreshCompilationStatus();
-    
-    // Scan inicial de módulos e actores
-    ScanForModules();
-    ScanForActors();
-    
-    UpdateBuildProgress(100.0f, TEXT("Ready"));
 }
 
-void UBuildIntegrationManager::Deinitialize()
+void UBuildIntegrationManager::BeginPlay()
 {
-    UE_LOG(LogBuildIntegration, Log, TEXT("BuildIntegrationManager deinitialized"));
-    Super::Deinitialize();
-}
-
-FBuild_CompilationStatus UBuildIntegrationManager::GetCompilationStatus() const
-{
-    return CurrentCompilationStatus;
-}
-
-void UBuildIntegrationManager::RefreshCompilationStatus()
-{
-    UpdateBuildProgress(10.0f, TEXT("Checking Compilation"));
+    Super::BeginPlay();
     
-    CurrentCompilationStatus = FBuild_CompilationStatus();
-    CurrentCompilationStatus.LastBuildTime = FDateTime::Now().ToString();
-    
-    // Verificar se classes críticas estão carregadas
-    int32 LoadedClasses = 0;
-    for (const FString& ClassName : CriticalClasses)
+    // Iniciar validação automática
+    if (bAutoValidationEnabled)
     {
-        FString ClassPath = FString::Printf(TEXT("/Script/TranspersonalGame.%s"), *ClassName);
-        UClass* LoadedClass = LoadClass<UObject>(nullptr, *ClassPath);
-        if (LoadedClass)
-        {
-            LoadedClasses++;
-            UE_LOG(LogBuildIntegration, Log, TEXT("Class loaded: %s"), *ClassName);
-        }
-        else
-        {
-            CurrentCompilationStatus.ErrorMessages.Add(FString::Printf(TEXT("Failed to load class: %s"), *ClassName));
-            CurrentCompilationStatus.ErrorCount++;
-            UE_LOG(LogBuildIntegration, Warning, TEXT("Failed to load class: %s"), *ClassName);
-        }
+        StartIntegrationValidation();
     }
-    
-    CurrentCompilationStatus.bIsCompiled = (LoadedClasses == CriticalClasses.Num());
-    
-    UE_LOG(LogBuildIntegration, Log, TEXT("Compilation Status: %s (%d/%d classes loaded)"), 
-           CurrentCompilationStatus.bIsCompiled ? TEXT("SUCCESS") : TEXT("FAILED"),
-           LoadedClasses, CriticalClasses.Num());
-    
-    UpdateBuildProgress(30.0f, TEXT("Compilation Check Complete"));
 }
 
-bool UBuildIntegrationManager::ValidateAllModules()
+void UBuildIntegrationManager::StartIntegrationValidation()
 {
-    UpdateBuildProgress(40.0f, TEXT("Validating Modules"));
+    UE_LOG(LogBuildIntegration, Log, TEXT("Starting integration validation"));
     
-    ScanForModules();
-    ValidateClassLoading();
+    IntegrationState = EBuild_IntegrationState::Validating;
     
-    bool bAllValid = true;
-    for (const FBuild_ModuleStatus& ModuleStatus : ModuleStatuses)
+    // Validar estrutura de ficheiros
+    ValidateFileStructure();
+    
+    // Validar dependências de módulos
+    ValidateModuleDependencies();
+    
+    // Validar actores no mapa
+    ValidateMapActors();
+    
+    // Validar sistemas críticos
+    ValidateCriticalSystems();
+    
+    IntegrationState = EBuild_IntegrationState::Completed;
+    LastValidationTime = FDateTime::Now();
+    
+    UE_LOG(LogBuildIntegration, Log, TEXT("Integration validation completed"));
+}
+
+bool UBuildIntegrationManager::ValidateFileStructure()
+{
+    UE_LOG(LogBuildIntegration, Log, TEXT("Validating file structure"));
+    
+    TArray<FString> RequiredDirectories = {
+        TEXT("Source/TranspersonalGame/Core"),
+        TEXT("Source/TranspersonalGame/Characters"),
+        TEXT("Source/TranspersonalGame/World"),
+        TEXT("Source/TranspersonalGame/AI"),
+        TEXT("Source/TranspersonalGame/Environment")
+    };
+    
+    FString ProjectDir = FPaths::ProjectDir();
+    bool bAllDirectoriesExist = true;
+    
+    for (const FString& Directory : RequiredDirectories)
     {
-        if (!ModuleStatus.bIsLoaded)
+        FString FullPath = FPaths::Combine(ProjectDir, Directory);
+        if (!IFileManager::Get().DirectoryExists(*FullPath))
         {
-            bAllValid = false;
-            UE_LOG(LogBuildIntegration, Error, TEXT("Module not loaded: %s"), *ModuleStatus.ModuleName);
+            UE_LOG(LogBuildIntegration, Warning, TEXT("Missing required directory: %s"), *Directory);
+            bAllDirectoriesExist = false;
         }
     }
     
-    UpdateBuildProgress(60.0f, TEXT("Module Validation Complete"));
-    return bAllValid;
-}
-
-TArray<FBuild_ModuleStatus> UBuildIntegrationManager::GetModuleStatuses() const
-{
-    return ModuleStatuses;
-}
-
-bool UBuildIntegrationManager::IsModuleLoaded(const FString& ModuleName) const
-{
-    for (const FBuild_ModuleStatus& Status : ModuleStatuses)
-    {
-        if (Status.ModuleName == ModuleName)
-        {
-            return Status.bIsLoaded;
-        }
-    }
-    return false;
-}
-
-TArray<FString> UBuildIntegrationManager::GetLoadedClasses(const FString& ModuleName) const
-{
-    for (const FBuild_ModuleStatus& Status : ModuleStatuses)
-    {
-        if (Status.ModuleName == ModuleName)
-        {
-            return Status.LoadedClasses;
-        }
-    }
-    return TArray<FString>();
-}
-
-TArray<FBuild_ActorInventory> UBuildIntegrationManager::GetActorInventory() const
-{
-    return ActorInventories;
-}
-
-int32 UBuildIntegrationManager::CleanupDuplicateActors()
-{
-    UpdateBuildProgress(70.0f, TEXT("Cleaning Duplicates"));
+    // Verificar ficheiros críticos
+    TArray<FString> CriticalFiles = {
+        TEXT("Source/TranspersonalGame/TranspersonalGame.cpp"),
+        TEXT("Source/TranspersonalGame/SharedTypes.h"),
+        TEXT("Source/TranspersonalGame/TranspersonalGame.Build.cs")
+    };
     
-    int32 ActorsDestroyed = 0;
-    
-    if (UWorld* World = GetWorld())
+    for (const FString& File : CriticalFiles)
     {
-        // Agrupar actores de lighting por tipo
-        TMap<FString, TArray<AActor*>> LightingGroups;
-        
-        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+        FString FullPath = FPaths::Combine(ProjectDir, File);
+        if (!IFileManager::Get().FileExists(*FullPath))
         {
-            AActor* Actor = *ActorItr;
-            if (Actor)
-            {
-                FString ClassName = Actor->GetClass()->GetName();
-                if (LightingActorTypes.Contains(ClassName))
-                {
-                    if (!LightingGroups.Contains(ClassName))
-                    {
-                        LightingGroups.Add(ClassName, TArray<AActor*>());
-                    }
-                    LightingGroups[ClassName].Add(Actor);
-                }
-            }
-        }
-        
-        // Remover duplicados - manter apenas o primeiro de cada tipo
-        for (auto& Group : LightingGroups)
-        {
-            TArray<AActor*>& Actors = Group.Value;
-            if (Actors.Num() > 1)
-            {
-                UE_LOG(LogBuildIntegration, Warning, TEXT("Found %d %s actors - keeping only 1"), 
-                       Actors.Num(), *Group.Key);
-                
-                // Destruir todos excepto o primeiro
-                for (int32 i = 1; i < Actors.Num(); i++)
-                {
-                    if (Actors[i])
-                    {
-                        Actors[i]->Destroy();
-                        ActorsDestroyed++;
-                        UE_LOG(LogBuildIntegration, Log, TEXT("Destroyed duplicate %s #%d"), *Group.Key, i);
-                    }
-                }
-            }
+            UE_LOG(LogBuildIntegration, Error, TEXT("Missing critical file: %s"), *File);
+            bAllDirectoriesExist = false;
         }
     }
     
-    // Actualizar inventário após limpeza
-    ScanForActors();
-    
-    UpdateBuildProgress(90.0f, TEXT("Cleanup Complete"));
-    
-    UE_LOG(LogBuildIntegration, Log, TEXT("Cleanup complete: %d duplicate actors destroyed"), ActorsDestroyed);
-    return ActorsDestroyed;
+    return bAllDirectoriesExist;
 }
 
-bool UBuildIntegrationManager::HasDuplicateLightingActors() const
+bool UBuildIntegrationManager::ValidateModuleDependencies()
 {
-    for (const FBuild_ActorInventory& Inventory : ActorInventories)
+    UE_LOG(LogBuildIntegration, Log, TEXT("Validating module dependencies"));
+    
+    // Verificar se todos os módulos necessários estão carregados
+    TArray<FString> RequiredModules = {
+        TEXT("Core"),
+        TEXT("CoreUObject"),
+        TEXT("Engine"),
+        TEXT("UnrealEd"),
+        TEXT("TranspersonalGame")
+    };
+    
+    bool bAllModulesLoaded = true;
+    
+    for (const FString& ModuleName : RequiredModules)
     {
-        if (LightingActorTypes.Contains(Inventory.ActorClass) && Inventory.bHasDuplicates)
+        if (!FModuleManager::Get().IsModuleLoaded(*ModuleName))
         {
-            return true;
-        }
-    }
-    return false;
-}
-
-bool UBuildIntegrationManager::ValidateSystemIntegration()
-{
-    UpdateBuildProgress(50.0f, TEXT("Validating Integration"));
-    
-    IntegrationErrors.Empty();
-    
-    // Verificar dependências críticas
-    bool bWorldGenLoaded = IsModuleLoaded(TEXT("PCGWorldGenerator"));
-    bool bFoliageLoaded = IsModuleLoaded(TEXT("FoliageManager"));
-    bool bCrowdLoaded = IsModuleLoaded(TEXT("CrowdSimulationManager"));
-    
-    if (!bWorldGenLoaded)
-    {
-        IntegrationErrors.Add(TEXT("PCGWorldGenerator not loaded - world generation unavailable"));
-    }
-    
-    if (!bFoliageLoaded)
-    {
-        IntegrationErrors.Add(TEXT("FoliageManager not loaded - vegetation system unavailable"));
-    }
-    
-    if (!bCrowdLoaded)
-    {
-        IntegrationErrors.Add(TEXT("CrowdSimulationManager not loaded - crowd AI unavailable"));
-    }
-    
-    // Verificar se há duplicados críticos
-    if (HasDuplicateLightingActors())
-    {
-        IntegrationErrors.Add(TEXT("Duplicate lighting actors detected - may cause rendering issues"));
-    }
-    
-    bool bIntegrationValid = IntegrationErrors.Num() == 0;
-    
-    UE_LOG(LogBuildIntegration, Log, TEXT("System integration validation: %s (%d errors)"), 
-           bIntegrationValid ? TEXT("PASS") : TEXT("FAIL"), IntegrationErrors.Num());
-    
-    return bIntegrationValid;
-}
-
-TArray<FString> UBuildIntegrationManager::GetIntegrationErrors() const
-{
-    return IntegrationErrors;
-}
-
-bool UBuildIntegrationManager::CanSystemsIntegrate(const FString& SystemA, const FString& SystemB) const
-{
-    // Verificar compatibilidade entre sistemas
-    // Por exemplo: WorldGen deve carregar antes de Foliage
-    if (SystemA == TEXT("PCGWorldGenerator") && SystemB == TEXT("FoliageManager"))
-    {
-        return IsModuleLoaded(TEXT("PCGWorldGenerator"));
-    }
-    
-    if (SystemA == TEXT("FoliageManager") && SystemB == TEXT("CrowdSimulationManager"))
-    {
-        return IsModuleLoaded(TEXT("FoliageManager"));
-    }
-    
-    return true; // Por defeito, assumir compatibilidade
-}
-
-void UBuildIntegrationManager::TriggerFullBuildValidation()
-{
-    UE_LOG(LogBuildIntegration, Log, TEXT("Starting full build validation"));
-    
-    UpdateBuildProgress(0.0f, TEXT("Starting Validation"));
-    
-    // 1. Verificar compilação
-    RefreshCompilationStatus();
-    
-    // 2. Validar módulos
-    ValidateAllModules();
-    
-    // 3. Limpar duplicados
-    CleanupDuplicateActors();
-    
-    // 4. Validar integração
-    ValidateSystemIntegration();
-    
-    UpdateBuildProgress(100.0f, TEXT("Validation Complete"));
-    
-    UE_LOG(LogBuildIntegration, Log, TEXT("Full build validation complete"));
-}
-
-float UBuildIntegrationManager::GetBuildProgress() const
-{
-    return BuildProgress;
-}
-
-FString UBuildIntegrationManager::GetCurrentBuildPhase() const
-{
-    return CurrentBuildPhase;
-}
-
-void UBuildIntegrationManager::ScanForModules()
-{
-    ModuleStatuses.Empty();
-    
-    // Verificar módulo principal TranspersonalGame
-    FBuild_ModuleStatus MainModule;
-    MainModule.ModuleName = TEXT("TranspersonalGame");
-    MainModule.bIsLoaded = FModuleManager::Get().IsModuleLoaded("TranspersonalGame");
-    
-    if (MainModule.bIsLoaded)
-    {
-        // Contar classes carregadas
-        for (const FString& ClassName : CriticalClasses)
-        {
-            FString ClassPath = FString::Printf(TEXT("/Script/TranspersonalGame.%s"), *ClassName);
-            UClass* LoadedClass = LoadClass<UObject>(nullptr, *ClassPath);
-            if (LoadedClass)
-            {
-                MainModule.LoadedClasses.Add(ClassName);
-                MainModule.ClassCount++;
-            }
+            UE_LOG(LogBuildIntegration, Warning, TEXT("Module not loaded: %s"), *ModuleName);
+            bAllModulesLoaded = false;
         }
     }
     
-    ModuleStatuses.Add(MainModule);
+    return bAllModulesLoaded;
 }
 
-void UBuildIntegrationManager::ScanForActors()
+bool UBuildIntegrationManager::ValidateMapActors()
 {
-    ActorInventories.Empty();
+    UE_LOG(LogBuildIntegration, Log, TEXT("Validating map actors"));
     
-    if (UWorld* World = GetWorld())
+    UWorld* World = GetWorld();
+    if (!World)
     {
-        TMap<FString, FBuild_ActorInventory> ActorCounts;
-        
-        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-        {
-            AActor* Actor = *ActorItr;
-            if (Actor)
-            {
-                FString ClassName = Actor->GetClass()->GetName();
-                
-                if (!ActorCounts.Contains(ClassName))
-                {
-                    FBuild_ActorInventory NewInventory;
-                    NewInventory.ActorClass = ClassName;
-                    ActorCounts.Add(ClassName, NewInventory);
-                }
-                
-                ActorCounts[ClassName].Count++;
-                ActorCounts[ClassName].ActorNames.Add(Actor->GetName());
-                
-                // Marcar como duplicado se for actor de lighting com mais de 1 instância
-                if (LightingActorTypes.Contains(ClassName) && ActorCounts[ClassName].Count > 1)
-                {
-                    ActorCounts[ClassName].bHasDuplicates = true;
-                }
-            }
-        }
-        
-        // Converter para array
-        for (auto& Pair : ActorCounts)
-        {
-            ActorInventories.Add(Pair.Value);
-        }
+        UE_LOG(LogBuildIntegration, Error, TEXT("No world available for validation"));
+        return false;
     }
-}
-
-void UBuildIntegrationManager::ValidateClassLoading()
-{
-    for (FBuild_ModuleStatus& ModuleStatus : ModuleStatuses)
-    {
-        if (ModuleStatus.bIsLoaded)
-        {
-            // Verificar se as classes críticas estão realmente acessíveis
-            int32 ValidClasses = 0;
-            for (const FString& ClassName : ModuleStatus.LoadedClasses)
-            {
-                FString ClassPath = FString::Printf(TEXT("/Script/TranspersonalGame.%s"), *ClassName);
-                UClass* LoadedClass = LoadClass<UObject>(nullptr, *ClassPath);
-                if (LoadedClass)
-                {
-                    ValidClasses++;
-                }
-            }
-            
-            if (ValidClasses != ModuleStatus.LoadedClasses.Num())
-            {
-                UE_LOG(LogBuildIntegration, Warning, TEXT("Module %s: %d/%d classes accessible"), 
-                       *ModuleStatus.ModuleName, ValidClasses, ModuleStatus.LoadedClasses.Num());
-            }
-        }
-    }
-}
-
-void UBuildIntegrationManager::CheckForDuplicates()
-{
-    for (FBuild_ActorInventory& Inventory : ActorInventories)
-    {
-        if (LightingActorTypes.Contains(Inventory.ActorClass) && Inventory.Count > 1)
-        {
-            Inventory.bHasDuplicates = true;
-            UE_LOG(LogBuildIntegration, Warning, TEXT("Duplicate %s detected: %d instances"), 
-                   *Inventory.ActorClass, Inventory.Count);
-        }
-    }
-}
-
-void UBuildIntegrationManager::UpdateBuildProgress(float Progress, const FString& Phase)
-{
-    BuildProgress = FMath::Clamp(Progress, 0.0f, 100.0f);
-    CurrentBuildPhase = Phase;
     
-    UE_LOG(LogBuildIntegration, Log, TEXT("Build Progress: %.1f%% - %s"), BuildProgress, *CurrentBuildPhase);
+    // Contar actores por tipo
+    TMap<FString, int32> ActorCounts;
+    
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    {
+        AActor* Actor = *ActorItr;
+        if (Actor)
+        {
+            FString ClassName = Actor->GetClass()->GetName();
+            ActorCounts.FindOrAdd(ClassName)++;
+        }
+    }
+    
+    UE_LOG(LogBuildIntegration, Log, TEXT("Actor distribution:"));
+    for (const auto& Pair : ActorCounts)
+    {
+        UE_LOG(LogBuildIntegration, Log, TEXT("  %s: %d"), *Pair.Key, Pair.Value);
+    }
+    
+    // Verificar actores críticos
+    bool bHasPlayerStart = ActorCounts.Contains(TEXT("PlayerStart"));
+    bool bHasLighting = ActorCounts.Contains(TEXT("DirectionalLight"));
+    
+    if (!bHasPlayerStart)
+    {
+        UE_LOG(LogBuildIntegration, Error, TEXT("No PlayerStart found in map"));
+    }
+    
+    if (!bHasLighting)
+    {
+        UE_LOG(LogBuildIntegration, Error, TEXT("No DirectionalLight found in map"));
+    }
+    
+    return bHasPlayerStart && bHasLighting;
+}
+
+bool UBuildIntegrationManager::ValidateCriticalSystems()
+{
+    UE_LOG(LogBuildIntegration, Log, TEXT("Validating critical systems"));
+    
+    UGameInstance* GameInstance = GetGameInstance();
+    if (!GameInstance)
+    {
+        UE_LOG(LogBuildIntegration, Error, TEXT("No GameInstance available"));
+        return false;
+    }
+    
+    // Verificar subsistemas críticos
+    bool bAllSystemsValid = true;
+    
+    // Aqui podemos adicionar validações específicas para subsistemas
+    // quando forem implementados pelos outros agentes
+    
+    UE_LOG(LogBuildIntegration, Log, TEXT("Critical systems validation completed"));
+    
+    return bAllSystemsValid;
+}
+
+FBuild_IntegrationReport UBuildIntegrationManager::GenerateIntegrationReport()
+{
+    FBuild_IntegrationReport Report;
+    
+    Report.Timestamp = FDateTime::Now();
+    Report.IntegrationState = IntegrationState;
+    Report.bFileStructureValid = ValidateFileStructure();
+    Report.bModuleDependenciesValid = ValidateModuleDependencies();
+    Report.bMapActorsValid = ValidateMapActors();
+    Report.bCriticalSystemsValid = ValidateCriticalSystems();
+    
+    // Calcular score geral
+    int32 ValidSystems = 0;
+    if (Report.bFileStructureValid) ValidSystems++;
+    if (Report.bModuleDependenciesValid) ValidSystems++;
+    if (Report.bMapActorsValid) ValidSystems++;
+    if (Report.bCriticalSystemsValid) ValidSystems++;
+    
+    Report.OverallScore = (float)ValidSystems / 4.0f;
+    
+    UE_LOG(LogBuildIntegration, Log, TEXT("Integration report generated - Score: %.2f"), Report.OverallScore);
+    
+    return Report;
+}
+
+void UBuildIntegrationManager::SetValidationInterval(float NewInterval)
+{
+    ValidationInterval = FMath::Max(30.0f, NewInterval); // Mínimo 30 segundos
+    UE_LOG(LogBuildIntegration, Log, TEXT("Validation interval set to %.1f seconds"), ValidationInterval);
+}
+
+void UBuildIntegrationManager::EnableContinuousIntegration(bool bEnable)
+{
+    bContinuousIntegration = bEnable;
+    UE_LOG(LogBuildIntegration, Log, TEXT("Continuous integration %s"), 
+           bEnable ? TEXT("enabled") : TEXT("disabled"));
+}
+
+bool UBuildIntegrationManager::IsIntegrationHealthy() const
+{
+    FBuild_IntegrationReport Report = const_cast<UBuildIntegrationManager*>(this)->GenerateIntegrationReport();
+    return Report.OverallScore >= 0.75f; // 75% ou mais é considerado saudável
 }
