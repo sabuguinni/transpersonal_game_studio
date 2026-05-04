@@ -1,125 +1,113 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/ActorComponent.h"
-#include "Engine/Engine.h"
-#include "TranspersonalGame/SharedTypes.h"
+#include "Subsystems/GameInstanceSubsystem.h"
+#include "Engine/TimerHandle.h"
 #include "BuildIntegrationManager.generated.h"
 
+DECLARE_LOG_CATEGORY_EXTERN(LogBuildIntegration, Log, All);
+
 /**
- * Sistema de integração e validação de builds
- * Responsável por validar a integridade do projeto e coordenar sistemas
+ * Build Integration Manager - Agente #19
+ * 
+ * Sistema responsável por:
+ * - Validar integridade de módulos C++
+ * - Detectar headers órfãos (sem .cpp correspondente)
+ * - Monitorizar dependências entre módulos
+ * - Reportar erros de compilação
+ * - Garantir que o build está sempre funcional
  */
-UCLASS(ClassGroup=(TranspersonalGame), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UBuildIntegrationManager : public UActorComponent
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UBuildIntegrationManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
     UBuildIntegrationManager();
 
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+
+    /** Executar validação completa do build */
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    void PerformFullValidation();
+
+    /** Forçar validação imediata */
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    void ForceValidation();
+
+    /** Verificar se a validação está a passar */
+    UFUNCTION(BlueprintPure, Category = "Build Integration")
+    bool IsValidationPassing() const;
+
+    /** Obter resumo da validação */
+    UFUNCTION(BlueprintPure, Category = "Build Integration")
+    FString GetValidationSummary() const;
+
+    /** Obter lista de erros de validação */
+    UFUNCTION(BlueprintPure, Category = "Build Integration")
+    TArray<FString> GetValidationErrors() const;
+
+    /** Activar/desactivar validação automática */
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    void SetValidationEnabled(bool bEnabled);
+
 protected:
-    virtual void BeginPlay() override;
+    /** Validar estrutura de módulos */
+    void ValidateModuleStructure();
+
+    /** Validar headers órfãos */
+    void ValidateOrphanHeaders();
+
+    /** Validar dependências entre módulos */
+    void ValidateModuleDependencies();
+
+    /** Adicionar erro de validação */
+    void AddValidationError(const FString& ErrorMessage);
+
+private:
+    /** Timer para validação periódica */
+    FTimerHandle ValidationTimerHandle;
+
+    /** Lista de erros encontrados */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Validation", meta = (AllowPrivateAccess = "true"))
+    TArray<FString> ValidationErrors;
 
 public:
-    /** Iniciar validação completa de integração */
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    void StartIntegrationValidation();
+    /** Executar validação automática no startup */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Build Integration")
+    bool bAutoValidateOnStartup;
 
-    /** Validar estrutura de ficheiros do projeto */
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool ValidateFileStructure();
+    /** Activar verificações de compilação */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Build Integration")
+    bool bEnableCompilationChecks;
 
-    /** Validar dependências de módulos */
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool ValidateModuleDependencies();
+    /** Activar validação de módulos */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Build Integration")
+    bool bEnableModuleValidation;
 
-    /** Validar actores no mapa actual */
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool ValidateMapActors();
+    /** Intervalo entre validações (segundos) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Build Integration", meta = (ClampMin = "10.0", ClampMax = "300.0"))
+    float ValidationIntervalSeconds;
 
-    /** Validar sistemas críticos */
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool ValidateCriticalSystems();
+    /** Máximo de erros a reportar */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Build Integration", meta = (ClampMin = "10", ClampMax = "100"))
+    int32 MaxValidationErrors;
 
-    /** Gerar relatório completo de integração */
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    FBuild_IntegrationReport GenerateIntegrationReport();
+    /** Estatísticas de validação */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Statistics")
+    int32 TotalModulesFound;
 
-    /** Configurar intervalo de validação automática */
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    void SetValidationInterval(float NewInterval);
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Statistics")
+    int32 ValidModulesCount;
 
-    /** Activar/desactivar integração contínua */
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    void EnableContinuousIntegration(bool bEnable);
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Statistics")
+    int32 OrphanHeadersCount;
 
-    /** Verificar se a integração está saudável */
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Build Integration")
-    bool IsIntegrationHealthy() const;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Statistics")
+    int32 CompilationErrorsCount;
 
-protected:
-    /** Estado actual da integração */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Integration State")
-    EBuild_IntegrationState IntegrationState;
-
-    /** Última vez que a validação foi executada */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Integration State")
-    FDateTime LastValidationTime;
-
-    /** Intervalo entre validações automáticas (segundos) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration Settings", meta = (ClampMin = "30.0"))
-    float ValidationInterval;
-
-    /** Se a validação automática está activada */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration Settings")
-    bool bAutoValidationEnabled;
-
-    /** Se a integração contínua está activada */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration Settings")
-    bool bContinuousIntegration;
-
-    /** Número máximo de erros antes de parar a build */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration Settings", meta = (ClampMin = "1"))
-    int32 MaxErrorsBeforeHalt;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Statistics")
+    float LastValidationTime;
 };
-
-/**
- * Actor de gestão de integração de builds
- * Pode ser colocado no mapa para monitorização contínua
- */
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API ABuildIntegrationActor : public AActor
-{
-    GENERATED_BODY()
-
-public:
-    ABuildIntegrationActor();
-
-protected:
-    virtual void BeginPlay() override;
-
-public:
-    /** Componente de gestão de integração */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class UBuildIntegrationManager* IntegrationManager;
-
-    /** Executar validação manual */
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Build Integration")
-    void RunManualValidation();
-
-    /** Obter estado da integração */
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Build Integration")
-    EBuild_IntegrationState GetIntegrationState() const;
-
-    /** Obter último relatório de integração */
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    FBuild_IntegrationReport GetLastIntegrationReport() const;
-
-protected:
-    /** Último relatório gerado */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Integration State")
-    FBuild_IntegrationReport LastReport;
-};
-
-#include "BuildIntegrationManager.generated.h"
