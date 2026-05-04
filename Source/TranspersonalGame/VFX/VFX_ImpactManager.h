@@ -1,21 +1,24 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
-#include "Components/StaticMeshComponent.h"
+#include "Components/ActorComponent.h"
+#include "Engine/World.h"
 #include "NiagaraComponent.h"
 #include "NiagaraSystem.h"
-#include "Engine/World.h"
+#include "Sound/SoundCue.h"
+#include "Components/AudioComponent.h"
+#include "SharedTypes.h"
 #include "VFX_ImpactManager.generated.h"
 
 UENUM(BlueprintType)
 enum class EVFX_ImpactType : uint8
 {
     DinosaurFootstep    UMETA(DisplayName = "Dinosaur Footstep"),
-    WeaponHit          UMETA(DisplayName = "Weapon Hit"),
-    RockImpact         UMETA(DisplayName = "Rock Impact"),
-    BloodSplatter      UMETA(DisplayName = "Blood Splatter"),
-    DustCloud          UMETA(DisplayName = "Dust Cloud")
+    DinosaurLanding     UMETA(DisplayName = "Dinosaur Landing"),
+    WeaponHit           UMETA(DisplayName = "Weapon Hit"),
+    RockImpact          UMETA(DisplayName = "Rock Impact"),
+    TreeFall            UMETA(DisplayName = "Tree Fall"),
+    WaterSplash         UMETA(DisplayName = "Water Splash")
 };
 
 USTRUCT(BlueprintType)
@@ -24,31 +27,31 @@ struct FVFX_ImpactData
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    EVFX_ImpactType ImpactType = EVFX_ImpactType::DinosaurFootstep;
+    class UNiagaraSystem* ParticleEffect;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    TSoftObjectPtr<UNiagaraSystem> NiagaraSystem;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    class USoundCue* ImpactSound;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    FVector Scale = FVector(1.0f, 1.0f, 1.0f);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
+    float EffectScale;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    float Duration = 2.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    bool bAttachToActor = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
+    float VolumeMultiplier;
 
     FVFX_ImpactData()
     {
-        ImpactType = EVFX_ImpactType::DinosaurFootstep;
-        Scale = FVector(1.0f, 1.0f, 1.0f);
-        Duration = 2.0f;
-        bAttachToActor = false;
+        ParticleEffect = nullptr;
+        ImpactSound = nullptr;
+        EffectScale = 1.0f;
+        VolumeMultiplier = 1.0f;
     }
 };
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UVFX_ImpactManager : public AActor
+/**
+ * Manages impact VFX and audio for dinosaur footsteps, weapon hits, and environmental interactions
+ */
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UVFX_ImpactManager : public UActorComponent
 {
     GENERATED_BODY()
 
@@ -58,42 +61,60 @@ public:
 protected:
     virtual void BeginPlay() override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Impact")
-    TArray<FVFX_ImpactData> ImpactEffects;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Impact")
-    float MaxActiveEffects = 20.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Impact")
-    bool bDebugMode = false;
-
-private:
-    UPROPERTY()
-    TArray<UNiagaraComponent*> ActiveEffects;
-
 public:
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
+    // Impact effect spawning
     UFUNCTION(BlueprintCallable, Category = "VFX Impact")
-    void SpawnImpactEffect(EVFX_ImpactType ImpactType, FVector Location, FRotator Rotation = FRotator::ZeroRotator, AActor* AttachActor = nullptr);
+    void SpawnImpactEffect(EVFX_ImpactType ImpactType, const FVector& Location, const FVector& Normal = FVector::UpVector, float Scale = 1.0f);
 
     UFUNCTION(BlueprintCallable, Category = "VFX Impact")
-    void SpawnDinosaurFootstep(FVector Location, float DinosaurSize = 1.0f);
+    void SpawnDinosaurFootstep(const FVector& Location, float DinosaurSize = 1.0f, ESurfaceType SurfaceType = ESurfaceType::Grass);
 
     UFUNCTION(BlueprintCallable, Category = "VFX Impact")
-    void SpawnBloodEffect(FVector Location, FVector Direction);
+    void SpawnWeaponImpact(const FVector& Location, const FVector& Normal, float Damage = 1.0f);
+
+    // Configuration
+    UFUNCTION(BlueprintCallable, Category = "VFX Impact")
+    void SetImpactData(EVFX_ImpactType ImpactType, const FVFX_ImpactData& NewData);
 
     UFUNCTION(BlueprintCallable, Category = "VFX Impact")
-    void SpawnDustCloud(FVector Location, float Intensity = 1.0f);
-
-    UFUNCTION(BlueprintCallable, Category = "VFX Impact")
-    void CleanupExpiredEffects();
-
-    UFUNCTION(BlueprintCallable, Category = "VFX Impact")
-    int32 GetActiveEffectCount() const { return ActiveEffects.Num(); }
+    FVFX_ImpactData GetImpactData(EVFX_ImpactType ImpactType) const;
 
 protected:
-    UFUNCTION()
-    void OnEffectFinished(UNiagaraComponent* FinishedComponent);
+    // Impact effect data for each type
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Impact Data")
+    TMap<EVFX_ImpactType, FVFX_ImpactData> ImpactEffects;
 
-    void RegisterImpactEffect(UNiagaraComponent* Effect);
-    void UnregisterImpactEffect(UNiagaraComponent* Effect);
+    // Global settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
+    float GlobalVFXScale;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
+    float GlobalAudioVolume;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
+    bool bEnableVFX;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
+    bool bEnableAudio;
+
+    // Performance settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float MinTimeBetweenEffects;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 MaxActiveEffects;
+
+private:
+    // Active effect tracking
+    TArray<class UNiagaraComponent*> ActiveParticleComponents;
+    TArray<class UAudioComponent*> ActiveAudioComponents;
+    
+    float LastEffectTime;
+
+    // Helper functions
+    void CleanupFinishedEffects();
+    bool CanSpawnNewEffect() const;
+    void InitializeDefaultEffects();
 };
