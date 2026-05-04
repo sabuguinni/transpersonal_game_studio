@@ -1,236 +1,297 @@
 #include "ProductionCoordinator.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Kismet/GameplayStatics.h"
-#include "Math/UnrealMathUtility.h"
+#include "Components/StaticMeshComponent.h"
+#include "Components/TextRenderComponent.h"
+#include "Engine/StaticMesh.h"
+#include "Materials/MaterialInterface.h"
+#include "UObject/ConstructorHelpers.h"
 
-UProductionCoordinator::UProductionCoordinator()
+AProductionCoordinator::AProductionCoordinator()
 {
+    PrimaryActorTick.bCanEverTick = true;
+
     // Initialize milestone tracking
-    InitializeMilestone1Tasks();
-    InitializeBiomeData();
-}
+    bCharacterMovementComplete = false;
+    bTerrainExpanded = false;
+    bDinosaurSpawnsComplete = false;
+    bLightingFixed = false;
+    bHUDImplemented = false;
 
-void UProductionCoordinator::Initialize(FSubsystemCollectionBase& Collection)
-{
-    Super::Initialize(Collection);
-    
-    UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Sistema inicializado"));
-    
-    // Validate current map state
-    ValidateMapState();
-}
+    TotalMilestoneTasks = 5;
+    CompletedMilestoneTasks = 0;
+    LastUpdateTime = 0.0f;
 
-void UProductionCoordinator::Deinitialize()
-{
-    UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Sistema terminado"));
-    Super::Deinitialize();
-}
+    // Create root component
+    RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
 
-void UProductionCoordinator::InitializeMilestone1Tasks()
-{
-    // Milestone 1: "Walk Around" tasks
-    Milestone1Tasks.Empty();
-    
-    // Core character movement
-    Milestone1Tasks.Add(TEXT("ThirdPersonCharacter"), false);
-    Milestone1Tasks.Add(TEXT("CameraBoom"), false);
-    Milestone1Tasks.Add(TEXT("FollowCamera"), false);
-    Milestone1Tasks.Add(TEXT("WASDMovement"), false);
-    Milestone1Tasks.Add(TEXT("RunJump"), false);
-    
-    // World and environment
-    Milestone1Tasks.Add(TEXT("LandscapeTerrain"), false);
-    Milestone1Tasks.Add(TEXT("BasicTerrain"), false);
-    Milestone1Tasks.Add(TEXT("StaticDinosaurs"), false);
-    Milestone1Tasks.Add(TEXT("DinosaurMeshes"), false);
-    
-    // Lighting and atmosphere
-    Milestone1Tasks.Add(TEXT("DirectionalLight"), false);
-    Milestone1Tasks.Add(TEXT("SkyAtmosphere"), false);
-    Milestone1Tasks.Add(TEXT("ExponentialFog"), false);
-    
-    UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: %d tarefas Milestone 1 inicializadas"), Milestone1Tasks.Num());
-}
+    // Create visual mesh component
+    CoordinatorMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("CoordinatorMesh"));
+    CoordinatorMesh->SetupAttachment(RootComponent);
 
-void UProductionCoordinator::InitializeBiomeData()
-{
-    BiomeData.Empty();
-    
-    // Biome 1: PANTANO (sudoeste)
-    FDir_BiomeData PantanoData;
-    PantanoData.Center = FVector(-50000.0f, -45000.0f, 0.0f);
-    PantanoData.MinBounds = FVector(-77500.0f, -76500.0f, -1000.0f);
-    PantanoData.MaxBounds = FVector(-25000.0f, -15000.0f, 1000.0f);
-    PantanoData.Name = TEXT("Pantano");
-    BiomeData.Add(EDir_BiomeType::Swamp, PantanoData);
-    
-    // Biome 2: FLORESTA (noroeste)
-    FDir_BiomeData FlorestaData;
-    FlorestaData.Center = FVector(-45000.0f, 40000.0f, 0.0f);
-    FlorestaData.MinBounds = FVector(-77500.0f, 15000.0f, -1000.0f);
-    FlorestaData.MaxBounds = FVector(-15000.0f, 76500.0f, 1000.0f);
-    FlorestaData.Name = TEXT("Floresta");
-    BiomeData.Add(EDir_BiomeType::Forest, FlorestaData);
-    
-    // Biome 3: SAVANA (centro)
-    FDir_BiomeData SavanaData;
-    SavanaData.Center = FVector(0.0f, 0.0f, 0.0f);
-    SavanaData.MinBounds = FVector(-20000.0f, -20000.0f, -1000.0f);
-    SavanaData.MaxBounds = FVector(20000.0f, 20000.0f, 1000.0f);
-    SavanaData.Name = TEXT("Savana");
-    BiomeData.Add(EDir_BiomeType::Savanna, SavanaData);
-    
-    // Biome 4: DESERTO (leste)
-    FDir_BiomeData DesertoData;
-    DesertoData.Center = FVector(55000.0f, 0.0f, 0.0f);
-    DesertoData.MinBounds = FVector(25000.0f, -30000.0f, -1000.0f);
-    DesertoData.MaxBounds = FVector(79500.0f, 30000.0f, 1000.0f);
-    DesertoData.Name = TEXT("Deserto");
-    BiomeData.Add(EDir_BiomeType::Desert, DesertoData);
-    
-    // Biome 5: MONTANHA NEVADA (nordeste)
-    FDir_BiomeData MontanhaData;
-    MontanhaData.Center = FVector(40000.0f, 50000.0f, 500.0f);
-    MontanhaData.MinBounds = FVector(15000.0f, 20000.0f, -500.0f);
-    MontanhaData.MaxBounds = FVector(79500.0f, 76500.0f, 2000.0f);
-    MontanhaData.Name = TEXT("Montanha Nevada");
-    BiomeData.Add(EDir_BiomeType::Mountain, MontanhaData);
-    
-    UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: %d biomas inicializados"), BiomeData.Num());
-}
-
-bool UProductionCoordinator::IsMilestone1Complete() const
-{
-    for (const auto& Task : Milestone1Tasks)
+    // Load cube mesh
+    static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMeshAsset(TEXT("/Engine/BasicShapes/Cube"));
+    if (CubeMeshAsset.Succeeded())
     {
-        if (!Task.Value)
+        CoordinatorMesh->SetStaticMesh(CubeMeshAsset.Object);
+        CoordinatorMesh->SetWorldScale3D(FVector(2.0f, 2.0f, 0.1f)); // Flat platform
+    }
+
+    // Create status display
+    StatusDisplay = CreateDefaultSubobject<UTextRenderComponent>(TEXT("StatusDisplay"));
+    StatusDisplay->SetupAttachment(RootComponent);
+    StatusDisplay->SetRelativeLocation(FVector(0.0f, 0.0f, 150.0f));
+    StatusDisplay->SetText(FText::FromString(TEXT("Production Coordinator\nMilestone 1: 0%")));
+    StatusDisplay->SetTextRenderColor(FColor::Green);
+    StatusDisplay->SetWorldSize(100.0f);
+
+    // Initialize task arrays
+    PendingTasks.Empty();
+    CompletedTasks.Empty();
+    BlockedTasks.Empty();
+
+    // Add initial Milestone 1 tasks
+    PendingTasks.Add(TEXT("Character Movement System"));
+    PendingTasks.Add(TEXT("Terrain Expansion to 200km²"));
+    PendingTasks.Add(TEXT("Dinosaur Spawn Distribution"));
+    PendingTasks.Add(TEXT("Lighting System Cleanup"));
+    PendingTasks.Add(TEXT("Survival HUD Implementation"));
+}
+
+void AProductionCoordinator::BeginPlay()
+{
+    Super::BeginPlay();
+    
+    UE_LOG(LogTemp, Warning, TEXT("Production Coordinator initialized for Milestone 1"));
+    LogProductionStatus();
+    UpdateStatusDisplay();
+}
+
+void AProductionCoordinator::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+
+    LastUpdateTime += DeltaTime;
+    
+    // Update status every 5 seconds
+    if (LastUpdateTime >= 5.0f)
+    {
+        CheckMilestoneCompletion();
+        UpdateStatusDisplay();
+        LastUpdateTime = 0.0f;
+    }
+}
+
+void AProductionCoordinator::UpdateTaskStatus(const FString& TaskName, bool bCompleted)
+{
+    if (bCompleted)
+    {
+        // Move from pending to completed
+        if (PendingTasks.Contains(TaskName))
         {
-            return false;
+            PendingTasks.Remove(TaskName);
+            CompletedTasks.AddUnique(TaskName);
+            
+            UE_LOG(LogTemp, Warning, TEXT("Task completed: %s"), *TaskName);
+            
+            // Update milestone flags
+            if (TaskName.Contains(TEXT("Character Movement")))
+            {
+                bCharacterMovementComplete = true;
+            }
+            else if (TaskName.Contains(TEXT("Terrain Expansion")))
+            {
+                bTerrainExpanded = true;
+            }
+            else if (TaskName.Contains(TEXT("Dinosaur Spawn")))
+            {
+                bDinosaurSpawnsComplete = true;
+            }
+            else if (TaskName.Contains(TEXT("Lighting")))
+            {
+                bLightingFixed = true;
+            }
+            else if (TaskName.Contains(TEXT("HUD")))
+            {
+                bHUDImplemented = true;
+            }
         }
     }
-    return true;
-}
-
-float UProductionCoordinator::GetMilestone1Progress() const
-{
-    if (Milestone1Tasks.Num() == 0)
+    else
     {
-        return 0.0f;
-    }
-    
-    int32 CompletedTasks = 0;
-    for (const auto& Task : Milestone1Tasks)
-    {
-        if (Task.Value)
+        // Move from completed back to pending (rollback)
+        if (CompletedTasks.Contains(TaskName))
         {
-            CompletedTasks++;
+            CompletedTasks.Remove(TaskName);
+            PendingTasks.AddUnique(TaskName);
         }
     }
     
-    return static_cast<float>(CompletedTasks) / static_cast<float>(Milestone1Tasks.Num());
+    CheckMilestoneCompletion();
+    UpdateStatusDisplay();
 }
 
-void UProductionCoordinator::UpdateTaskProgress(const FString& AgentName, const FString& TaskName, bool bCompleted)
+void AProductionCoordinator::AddPendingTask(const FString& TaskName, int32 AgentID)
 {
-    if (Milestone1Tasks.Contains(TaskName))
+    FString FormattedTask = FString::Printf(TEXT("[Agent %d] %s"), AgentID, *TaskName);
+    PendingTasks.AddUnique(FormattedTask);
+    
+    UE_LOG(LogTemp, Log, TEXT("Added task for Agent %d: %s"), AgentID, *TaskName);
+    UpdateStatusDisplay();
+}
+
+bool AProductionCoordinator::IsTaskComplete(const FString& TaskName)
+{
+    return CompletedTasks.Contains(TaskName);
+}
+
+float AProductionCoordinator::GetMilestone1Progress()
+{
+    CompletedMilestoneTasks = 0;
+    
+    if (bCharacterMovementComplete) CompletedMilestoneTasks++;
+    if (bTerrainExpanded) CompletedMilestoneTasks++;
+    if (bDinosaurSpawnsComplete) CompletedMilestoneTasks++;
+    if (bLightingFixed) CompletedMilestoneTasks++;
+    if (bHUDImplemented) CompletedMilestoneTasks++;
+    
+    return (float)CompletedMilestoneTasks / (float)TotalMilestoneTasks;
+}
+
+FString AProductionCoordinator::GetCurrentPriorityTask()
+{
+    // Return highest priority pending task
+    if (PendingTasks.Num() > 0)
     {
-        Milestone1Tasks[TaskName] = bCompleted;
-        UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Agente %s atualizou tarefa %s: %s"), 
-               *AgentName, *TaskName, bCompleted ? TEXT("COMPLETA") : TEXT("PENDENTE"));
-    }
-}
-
-void UProductionCoordinator::RegisterAgent(const FString& AgentName, int32 Priority)
-{
-    RegisteredAgents.Add(AgentName, Priority);
-    UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Agente %s registado com prioridade %d"), *AgentName, Priority);
-}
-
-TArray<FString> UProductionCoordinator::GetActiveAgents() const
-{
-    TArray<FString> ActiveAgents;
-    RegisteredAgents.GetKeys(ActiveAgents);
-    return ActiveAgents;
-}
-
-bool UProductionCoordinator::CanAgentProceed(const FString& AgentName) const
-{
-    // Check if there are critical issues blocking this agent
-    for (const FString& Issue : CriticalIssues)
-    {
-        if (Issue.Contains(AgentName) || Issue.Contains(TEXT("BLOQUEIO_GLOBAL")))
+        // Prioritize character movement first
+        for (const FString& Task : PendingTasks)
         {
-            return false;
+            if (Task.Contains(TEXT("Character Movement")))
+            {
+                return Task;
+            }
+        }
+        
+        // Then terrain expansion
+        for (const FString& Task : PendingTasks)
+        {
+            if (Task.Contains(TEXT("Terrain")))
+            {
+                return Task;
+            }
+        }
+        
+        // Return first pending task
+        return PendingTasks[0];
+    }
+    
+    return TEXT("No pending tasks");
+}
+
+void AProductionCoordinator::LogProductionStatus()
+{
+    UE_LOG(LogTemp, Warning, TEXT("=== PRODUCTION STATUS REPORT ==="));
+    UE_LOG(LogTemp, Warning, TEXT("Milestone 1 Progress: %.1f%%"), GetMilestone1Progress() * 100.0f);
+    
+    UE_LOG(LogTemp, Warning, TEXT("Completed Tasks (%d):"), CompletedTasks.Num());
+    for (const FString& Task : CompletedTasks)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("  ✓ %s"), *Task);
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Pending Tasks (%d):"), PendingTasks.Num());
+    for (const FString& Task : PendingTasks)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("  ○ %s"), *Task);
+    }
+    
+    if (BlockedTasks.Num() > 0)
+    {
+        UE_LOG(LogTemp, Error, TEXT("Blocked Tasks (%d):"), BlockedTasks.Num());
+        for (const FString& Task : BlockedTasks)
+        {
+            UE_LOG(LogTemp, Error, TEXT("  ✗ %s"), *Task);
         }
     }
-    return true;
-}
-
-void UProductionCoordinator::ReportCriticalIssue(const FString& AgentName, const FString& Issue)
-{
-    FString FormattedIssue = FString::Printf(TEXT("[%s] %s"), *AgentName, *Issue);
-    CriticalIssues.AddUnique(FormattedIssue);
-    UE_LOG(LogTemp, Error, TEXT("ProductionCoordinator: PROBLEMA CRÍTICO - %s"), *FormattedIssue);
-}
-
-TArray<FString> UProductionCoordinator::GetCriticalIssues() const
-{
-    return CriticalIssues;
-}
-
-void UProductionCoordinator::ClearCriticalIssue(const FString& Issue)
-{
-    CriticalIssues.Remove(Issue);
-    UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Problema resolvido - %s"), *Issue);
-}
-
-FVector UProductionCoordinator::GetBiomeCenter(EDir_BiomeType BiomeType) const
-{
-    if (const FDir_BiomeData* Data = BiomeData.Find(BiomeType))
-    {
-        return Data->Center;
-    }
-    return FVector::ZeroVector;
-}
-
-FVector UProductionCoordinator::GetRandomLocationInBiome(EDir_BiomeType BiomeType) const
-{
-    if (const FDir_BiomeData* Data = BiomeData.Find(BiomeType))
-    {
-        FVector RandomOffset;
-        RandomOffset.X = FMath::RandRange(-5000.0f, 5000.0f);
-        RandomOffset.Y = FMath::RandRange(-5000.0f, 5000.0f);
-        RandomOffset.Z = 0.0f;
-        
-        FVector RandomLocation = Data->Center + RandomOffset;
-        
-        // Clamp to biome bounds
-        RandomLocation.X = FMath::Clamp(RandomLocation.X, Data->MinBounds.X, Data->MaxBounds.X);
-        RandomLocation.Y = FMath::Clamp(RandomLocation.Y, Data->MinBounds.Y, Data->MaxBounds.Y);
-        RandomLocation.Z = FMath::Clamp(RandomLocation.Z, Data->MinBounds.Z, Data->MaxBounds.Z);
-        
-        return RandomLocation;
-    }
-    return FVector::ZeroVector;
-}
-
-bool UProductionCoordinator::IsLocationInBiome(const FVector& Location, EDir_BiomeType BiomeType) const
-{
-    if (const FDir_BiomeData* Data = BiomeData.Find(BiomeType))
-    {
-        return Location.X >= Data->MinBounds.X && Location.X <= Data->MaxBounds.X &&
-               Location.Y >= Data->MinBounds.Y && Location.Y <= Data->MaxBounds.Y &&
-               Location.Z >= Data->MinBounds.Z && Location.Z <= Data->MaxBounds.Z;
-    }
-    return false;
-}
-
-void UProductionCoordinator::ValidateMapState()
-{
-    UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: A validar estado do MinPlayableMap..."));
     
-    // This will be expanded to validate critical map elements
-    // For now, just log that validation is happening
-    UE_LOG(LogTemp, Warning, TEXT("ProductionCoordinator: Validação de estado completa"));
+    UE_LOG(LogTemp, Warning, TEXT("Current Priority: %s"), *GetCurrentPriorityTask());
+}
+
+TArray<FString> AProductionCoordinator::GetTasksForAgent(int32 AgentID)
+{
+    TArray<FString> AgentTasks;
+    
+    // Filter tasks assigned to specific agent
+    for (const FString& Task : PendingTasks)
+    {
+        if (Task.Contains(FString::Printf(TEXT("[Agent %d]"), AgentID)))
+        {
+            AgentTasks.Add(Task);
+        }
+    }
+    
+    return AgentTasks;
+}
+
+void AProductionCoordinator::ReportAgentProgress(int32 AgentID, const FString& TaskName, float Progress)
+{
+    UE_LOG(LogTemp, Log, TEXT("Agent %d progress on '%s': %.1f%%"), AgentID, *TaskName, Progress * 100.0f);
+    
+    // If progress is 100%, mark task as complete
+    if (Progress >= 1.0f)
+    {
+        UpdateTaskStatus(TaskName, true);
+    }
+}
+
+void AProductionCoordinator::UpdateStatusDisplay()
+{
+    float Progress = GetMilestone1Progress();
+    int32 PendingCount = PendingTasks.Num();
+    int32 CompletedCount = CompletedTasks.Num();
+    
+    FString StatusText = FString::Printf(
+        TEXT("Production Coordinator\nMilestone 1: %.0f%%\nCompleted: %d | Pending: %d\nPriority: %s"),
+        Progress * 100.0f,
+        CompletedCount,
+        PendingCount,
+        *GetCurrentPriorityTask()
+    );
+    
+    if (StatusDisplay)
+    {
+        StatusDisplay->SetText(FText::FromString(StatusText));
+        
+        // Change color based on progress
+        if (Progress >= 1.0f)
+        {
+            StatusDisplay->SetTextRenderColor(FColor::Green);
+        }
+        else if (Progress >= 0.5f)
+        {
+            StatusDisplay->SetTextRenderColor(FColor::Yellow);
+        }
+        else
+        {
+            StatusDisplay->SetTextRenderColor(FColor::Red);
+        }
+    }
+}
+
+void AProductionCoordinator::CheckMilestoneCompletion()
+{
+    float Progress = GetMilestone1Progress();
+    
+    if (Progress >= 1.0f)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("🎉 MILESTONE 1 COMPLETED! 🎉"));
+        UE_LOG(LogTemp, Warning, TEXT("All core systems are ready for playable prototype"));
+        
+        // Trigger celebration or next milestone setup
+        if (GEngine)
+        {
+            GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Green, 
+                TEXT("MILESTONE 1 COMPLETE - Playable Prototype Ready!"));
+        }
+    }
 }
