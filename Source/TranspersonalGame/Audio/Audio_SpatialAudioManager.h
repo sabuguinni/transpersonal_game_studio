@@ -3,117 +3,76 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Components/AudioComponent.h"
-#include "Engine/TriggerBox.h"
 #include "Sound/SoundCue.h"
-#include "Sound/SoundBase.h"
-#include "Core/SharedTypes.h"
+#include "Engine/World.h"
+#include "Kismet/GameplayStatics.h"
 #include "Audio_SpatialAudioManager.generated.h"
 
-/**
- * AUDIO AGENT #16 - SPATIAL AUDIO MANAGER
- * 
- * Manages 3D spatial audio throughout the prehistoric world.
- * Handles ambient zones, dynamic audio mixing, and environmental audio.
- * 
- * Features:
- * - Biome-specific ambient audio zones
- * - Distance-based audio attenuation
- * - Dynamic audio mixing based on player location
- * - Dinosaur proximity audio cues
- * - Environmental audio triggers
- */
-
-UENUM(BlueprintType)
-enum class EAudio_ZoneType : uint8
-{
-    Forest = 0      UMETA(DisplayName = "Forest"),
-    Plains = 1      UMETA(DisplayName = "Plains"),
-    River = 2       UMETA(DisplayName = "River"),
-    Swamp = 3       UMETA(DisplayName = "Swamp"),
-    Mountains = 4   UMETA(DisplayName = "Mountains"),
-    Cave = 5        UMETA(DisplayName = "Cave"),
-    Danger = 6      UMETA(DisplayName = "Danger")
-};
-
-UENUM(BlueprintType)
-enum class EAudio_Priority : uint8
-{
-    Background = 0  UMETA(DisplayName = "Background"),
-    Ambient = 1     UMETA(DisplayName = "Ambient"),
-    Gameplay = 2    UMETA(DisplayName = "Gameplay"),
-    Critical = 3    UMETA(DisplayName = "Critical"),
-    Emergency = 4   UMETA(DisplayName = "Emergency")
-};
-
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAudio_ZoneSettings
+struct TRANSPERSONALGAME_API FAudio_SpatialSoundData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
-    EAudio_ZoneType ZoneType = EAudio_ZoneType::Forest;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spatial Audio")
+    TSoftObjectPtr<USoundCue> SoundCue;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
-    float BaseVolume = 0.7f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spatial Audio")
+    FVector WorldLocation;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
-    float FadeDistance = 1000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spatial Audio")
+    float MaxAudibleDistance;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
-    float MaxDistance = 2000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spatial Audio")
+    float VolumeMultiplier;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
-    bool bIs3D = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spatial Audio")
+    bool bIsLooping;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zone")
-    bool bAutoActivate = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spatial Audio")
+    bool bIs3D;
 
-    FAudio_ZoneSettings()
+    FAudio_SpatialSoundData()
     {
-        ZoneType = EAudio_ZoneType::Forest;
-        BaseVolume = 0.7f;
-        FadeDistance = 1000.0f;
-        MaxDistance = 2000.0f;
+        WorldLocation = FVector::ZeroVector;
+        MaxAudibleDistance = 2000.0f;
+        VolumeMultiplier = 1.0f;
+        bIsLooping = false;
         bIs3D = true;
-        bAutoActivate = true;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAudio_EmitterData
+struct TRANSPERSONALGAME_API FAudio_BiomeAudioSettings
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Emitter")
-    FVector Location = FVector::ZeroVector;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Audio")
+    TSoftObjectPtr<USoundCue> AmbientLoop;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Emitter")
-    EAudio_Priority Priority = EAudio_Priority::Ambient;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Audio")
+    TSoftObjectPtr<USoundCue> MusicTrack;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Emitter")
-    float Volume = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Audio")
+    TArray<TSoftObjectPtr<USoundCue>> RandomSounds;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Emitter")
-    float Pitch = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Audio")
+    float AmbientVolume;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Emitter")
-    bool bIsActive = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Audio")
+    float MusicVolume;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Emitter")
-    FString AudioURL;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Audio")
+    float RandomSoundFrequency;
 
-    FAudio_EmitterData()
+    FAudio_BiomeAudioSettings()
     {
-        Location = FVector::ZeroVector;
-        Priority = EAudio_Priority::Ambient;
-        Volume = 1.0f;
-        Pitch = 1.0f;
-        bIsActive = true;
-        AudioURL = TEXT("");
+        AmbientVolume = 0.7f;
+        MusicVolume = 0.5f;
+        RandomSoundFrequency = 15.0f;
     }
 };
 
-UCLASS(BlueprintType, Blueprintable)
+UCLASS(Blueprintable, BlueprintType)
 class TRANSPERSONALGAME_API AAudio_SpatialAudioManager : public AActor
 {
     GENERATED_BODY()
@@ -125,111 +84,71 @@ protected:
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
 
-    // Core audio zones
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Zones")
-    TArray<FAudio_ZoneSettings> AudioZones;
+    // Componente de áudio principal
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Components")
+    UAudioComponent* MasterAudioComponent;
 
-    // Active audio emitters
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Emitters")
-    TArray<FAudio_EmitterData> AudioEmitters;
+    // Componentes de áudio para diferentes canais
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Components")
+    UAudioComponent* AmbientAudioComponent;
 
-    // Audio components for different zones
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UAudioComponent* ForestAmbientComponent;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Components")
+    UAudioComponent* MusicAudioComponent;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UAudioComponent* PlainsAmbientComponent;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio Components")
+    UAudioComponent* EffectsAudioComponent;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UAudioComponent* RiverAmbientComponent;
+    // Configurações de áudio por bioma
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Audio")
+    TMap<FString, FAudio_BiomeAudioSettings> BiomeAudioSettings;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UAudioComponent* DangerAmbientComponent;
+    // Sons espaciais activos
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spatial Audio")
+    TArray<FAudio_SpatialSoundData> ActiveSpatialSounds;
 
-    // Player reference for distance calculations
-    UPROPERTY(BlueprintReadOnly, Category = "Player")
+    // Referência ao jogador
+    UPROPERTY(BlueprintReadOnly, Category = "Audio System")
     APawn* PlayerPawn;
 
-    // Audio mixing settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Mixing")
-    float MasterVolume = 1.0f;
+    // Estado actual do sistema
+    UPROPERTY(BlueprintReadOnly, Category = "Audio System")
+    FString CurrentBiome;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Mixing")
-    float AmbientVolume = 0.8f;
+    UPROPERTY(BlueprintReadOnly, Category = "Audio System")
+    float CurrentThreatLevel;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Mixing")
-    float EffectsVolume = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Mixing")
-    float VoiceVolume = 0.9f;
+    // Timers para sons aleatórios
+    UPROPERTY(BlueprintReadOnly, Category = "Audio System")
+    float RandomSoundTimer;
 
 public:
-    // Audio zone management
-    UFUNCTION(BlueprintCallable, Category = "Audio Management")
-    void RegisterAudioZone(EAudio_ZoneType ZoneType, FVector Location, float Radius);
+    // Métodos principais
+    UFUNCTION(BlueprintCallable, Category = "Spatial Audio")
+    void PlaySpatialSound(const FAudio_SpatialSoundData& SoundData);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio Management")
-    void UnregisterAudioZone(EAudio_ZoneType ZoneType);
+    UFUNCTION(BlueprintCallable, Category = "Spatial Audio")
+    void StopSpatialSound(FVector Location, float Tolerance = 100.0f);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio Management")
-    void UpdateAudioMixing(float DeltaTime);
+    UFUNCTION(BlueprintCallable, Category = "Biome Audio")
+    void SetCurrentBiome(const FString& BiomeName);
 
-    // Audio emitter management
-    UFUNCTION(BlueprintCallable, Category = "Audio Emitters")
-    void AddAudioEmitter(FVector Location, EAudio_Priority Priority, const FString& AudioURL);
+    UFUNCTION(BlueprintCallable, Category = "Biome Audio")
+    void SetThreatLevel(float ThreatLevel);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio Emitters")
-    void RemoveAudioEmitter(FVector Location);
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void UpdatePlayerReference();
 
-    UFUNCTION(BlueprintCallable, Category = "Audio Emitters")
-    void UpdateEmitterVolumes();
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void InitializeBiomeAudioSettings();
 
-    // Player proximity audio
-    UFUNCTION(BlueprintCallable, Category = "Player Audio")
-    void UpdatePlayerProximityAudio();
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    FString DetectCurrentBiome(FVector PlayerLocation);
 
-    UFUNCTION(BlueprintCallable, Category = "Player Audio")
-    float CalculateDistanceAttenuation(FVector EmitterLocation, float MaxDistance);
-
-    // Zone detection
-    UFUNCTION(BlueprintCallable, Category = "Zone Detection")
-    EAudio_ZoneType GetCurrentPlayerZone();
-
-    UFUNCTION(BlueprintCallable, Category = "Zone Detection")
-    void OnPlayerEnterZone(EAudio_ZoneType NewZone);
-
-    UFUNCTION(BlueprintCallable, Category = "Zone Detection")
-    void OnPlayerExitZone(EAudio_ZoneType OldZone);
-
-    // Audio URL integration
-    UFUNCTION(BlueprintCallable, Category = "Audio URLs")
-    void PlayAudioFromURL(const FString& AudioURL, FVector Location, float Volume = 1.0f);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio URLs")
-    void StopAudioFromURL(const FString& AudioURL);
-
-    // Volume control
-    UFUNCTION(BlueprintCallable, Category = "Volume Control")
-    void SetMasterVolume(float NewVolume);
-
-    UFUNCTION(BlueprintCallable, Category = "Volume Control")
-    void SetAmbientVolume(float NewVolume);
-
-    UFUNCTION(BlueprintCallable, Category = "Volume Control")
-    void SetEffectsVolume(float NewVolume);
-
-    UFUNCTION(BlueprintCallable, Category = "Volume Control")
-    void SetVoiceVolume(float NewVolume);
-
-private:
-    // Internal audio management
-    void InitializeAudioZones();
-    void SetupDefaultAmbientSounds();
-    void UpdateZoneTransitions(float DeltaTime);
-    
-    // Current zone tracking
-    EAudio_ZoneType CurrentZone;
-    EAudio_ZoneType PreviousZone;
-    float ZoneTransitionTime;
-    float ZoneTransitionDuration;
+protected:
+    // Métodos internos
+    void UpdateSpatialAudio();
+    void UpdateBiomeAudio();
+    void ProcessRandomSounds(float DeltaTime);
+    void CleanupFinishedSounds();
+    float CalculateVolumeFromDistance(FVector SoundLocation, FVector ListenerLocation, float MaxDistance);
 };
