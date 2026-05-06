@@ -1,162 +1,123 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
 #include "Engine/World.h"
+#include "GameFramework/Actor.h"
 #include "Components/SceneComponent.h"
-#include "../SharedTypes.h"
+#include "SharedTypes.h"
 #include "StudioDirector.generated.h"
 
 /**
- * Studio Director - Central coordination system for the 19-agent production pipeline
- * Manages Milestone 1 execution: playable prototype with character movement and dinosaurs
- * Tracks production state across all agents and ensures deliverable completion
+ * Studio Director - Agent #1
+ * Coordinates the entire production pipeline and manages agent task distribution.
+ * Ensures all agents follow the gameplay-first directive and milestone targets.
  */
-
-USTRUCT(BlueprintType)
-struct FDir_AgentTask
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Task")
-    int32 AgentID = 0;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Task")
-    FString AgentName;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Task")
-    FString TaskDescription;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Task")
-    bool bIsCompleted = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Task")
-    float Priority = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Task")
-    TArray<FString> Dependencies;
-
-    FDir_AgentTask()
-    {
-        AgentID = 0;
-        AgentName = TEXT("");
-        TaskDescription = TEXT("");
-        bIsCompleted = false;
-        Priority = 1.0f;
-    }
-};
-
-USTRUCT(BlueprintType)
-struct FDir_MilestoneProgress
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone")
-    FString MilestoneName;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone")
-    TArray<FDir_AgentTask> RequiredTasks;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone")
-    int32 CompletedTasks = 0;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone")
-    float CompletionPercentage = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone")
-    bool bIsMilestoneComplete = false;
-
-    FDir_MilestoneProgress()
-    {
-        MilestoneName = TEXT("");
-        CompletedTasks = 0;
-        CompletionPercentage = 0.0f;
-        bIsMilestoneComplete = false;
-    }
-};
-
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API ADir_StudioDirector : public AActor
+class TRANSPERSONALGAME_API AStudioDirector : public AActor
 {
     GENERATED_BODY()
 
 public:
-    ADir_StudioDirector();
+    AStudioDirector();
 
 protected:
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    USceneComponent* RootSceneComponent;
+    // Core production management
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Production")
+    class USceneComponent* RootSceneComponent;
 
-    // Milestone 1 tracking
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
-    FDir_MilestoneProgress Milestone1Progress;
+    // Agent coordination system
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Coordination")
+    TArray<FString> ActiveAgents;
 
-    // Current production cycle
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
-    FString CurrentCycleID;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Coordination")
+    TArray<FString> CompletedTasks;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
-    int32 CurrentAgentID = 1;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Coordination")
+    TArray<FString> BlockedTasks;
 
-    // Production state
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
-    bool bProductionActive = true;
+    // Milestone tracking
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestones")
+    bool bMilestone1_WalkAround;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
-    float BudgetUsed = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestones")
+    bool bCharacterMovementReady;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
-    float BudgetLimit = 150.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestones")
+    bool bLandscapeReady;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestones")
+    bool bDinosaursPlaced;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestones")
+    bool bLightingSetup;
+
+    // Production metrics
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Metrics")
+    int32 TotalHeaderFiles;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Metrics")
+    int32 TotalCppFiles;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Metrics")
+    int32 PhantomHeaders;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Metrics")
+    float CompilationStatus;
 
 public:
-    // Core coordination functions
+    // Agent task management
     UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    void InitializeMilestone1Tasks();
-
-    UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    void UpdateTaskProgress(int32 AgentID, const FString& TaskName, bool bCompleted);
+    void AssignTaskToAgent(const FString& AgentName, const FString& TaskDescription);
 
     UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    void CalculateMilestoneProgress();
+    void MarkTaskCompleted(const FString& AgentName, const FString& TaskDescription);
 
     UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    bool CanAgentProceed(int32 AgentID) const;
+    void BlockTask(const FString& AgentName, const FString& Reason);
+
+    // Milestone validation
+    UFUNCTION(BlueprintCallable, Category = "Studio Director")
+    bool ValidateMilestone1();
 
     UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    TArray<FDir_AgentTask> GetPendingTasks() const;
+    void CheckProductionHealth();
+
+    // Agent coordination
+    UFUNCTION(BlueprintCallable, Category = "Studio Director")
+    void CoordinateAgentPipeline();
 
     UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    FDir_AgentTask GetNextCriticalTask() const;
+    FString GetNextPriorityTask();
 
-    // Map state verification
+    // Production oversight
     UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    void VerifyMinPlayableMapState();
-
-    UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    bool IsPlayablePrototypeReady() const;
-
-    // Production pipeline control
-    UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    void StartProductionCycle(const FString& CycleID);
+    void EnforceGameplayFirstDirective();
 
     UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    void CompleteProductionCycle();
+    void ValidateAgentOutputs();
+
+    // Critical system checks
+    UFUNCTION(BlueprintCallable, Category = "Studio Director")
+    void CheckForDuplicateActors();
 
     UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    void EmergencyStop(const FString& Reason);
+    void ValidateBiomeDistribution();
 
-    // Debug and monitoring
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Debug")
-    void LogProductionState();
-
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Debug")
-    void ResetMilestone1Progress();
+    UFUNCTION(BlueprintCallable, Category = "Studio Director")
+    void AssessCompilationStatus();
 
 private:
-    void SetupMilestone1Requirements();
-    void ValidateAgentDependencies();
-    bool CheckCriticalPath() const;
+    // Internal production tracking
+    float LastProductionCheck;
+    TArray<FString> CriticalIssues;
+    TMap<FString, float> AgentPerformanceMetrics;
+
+    // Helper functions
+    void LogProductionStatus();
+    void UpdateMilestoneProgress();
+    bool IsAgentOutputValid(const FString& AgentName);
+    void EscalateCriticalIssue(const FString& Issue);
 };
