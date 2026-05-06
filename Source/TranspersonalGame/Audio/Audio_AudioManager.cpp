@@ -1,394 +1,441 @@
 #include "Audio_AudioManager.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Kismet/GameplayStatics.h"
 #include "Components/AudioComponent.h"
 #include "Sound/SoundCue.h"
+#include "Kismet/GameplayStatics.h"
+#include "Engine/GameInstance.h"
 
 UAudio_AudioManager::UAudio_AudioManager()
 {
-	CurrentBiome = EAudio_BiomeType::None;
-	CurrentThreatLevel = EAudio_ThreatLevel::Safe;
-	MasterVolume = 1.0f;
-	AmbientVolume = 0.7f;
-	EffectsVolume = 0.8f;
+    // Initialize default values
+    CurrentBiome = EAudio_BiomeType::Savanna;
+    CurrentTemperature = 25.0f;
+    CurrentHumidity = 60.0f;
+    
+    bProximityAlertActive = false;
+    
+    MasterVolume = 1.0f;
+    AmbientVolume = 0.7f;
+    MusicVolume = 0.5f;
+    AlertVolume = 0.9f;
+    
+    WindStrength = 0.0f;
+    RainIntensity = 0.0f;
+    TimeOfDay = 12.0f; // Noon
+    
+    bTransitioningBiome = false;
+    BiomeTransitionTime = 0.0f;
+    TargetBiome = EAudio_BiomeType::Savanna;
 }
 
 void UAudio_AudioManager::Initialize(FSubsystemCollectionBase& Collection)
 {
-	Super::Initialize(Collection);
-	
-	UE_LOG(LogTemp, Log, TEXT("Audio_AudioManager: Sistema de áudio inicializado"));
-	
-	InitializeBiomeAudioSettings();
-	InitializeThreatAudioSettings();
+    Super::Initialize(Collection);
+    
+    UE_LOG(LogTemp, Warning, TEXT("Audio_AudioManager: Initializing adaptive audio system"));
+    
+    InitializeBiomeProfiles();
+    InitializeAudioComponents();
+    InitializeAudioSystem();
 }
 
 void UAudio_AudioManager::Deinitialize()
 {
-	StopAllAmbientSounds();
-	
-	ActiveAmbientComponents.Empty();
-	ActiveEffectComponents.Empty();
-	RegisteredDinosaurs.Empty();
-	
-	Super::Deinitialize();
-	
-	UE_LOG(LogTemp, Log, TEXT("Audio_AudioManager: Sistema de áudio desinicializado"));
+    UE_LOG(LogTemp, Warning, TEXT("Audio_AudioManager: Deinitializing audio system"));
+    
+    // Clean up audio components
+    if (AmbientAudioComponent && IsValid(AmbientAudioComponent))
+    {
+        AmbientAudioComponent->Stop();
+        AmbientAudioComponent = nullptr;
+    }
+    
+    if (MusicAudioComponent && IsValid(MusicAudioComponent))
+    {
+        MusicAudioComponent->Stop();
+        MusicAudioComponent = nullptr;
+    }
+    
+    if (AlertAudioComponent && IsValid(AlertAudioComponent))
+    {
+        AlertAudioComponent->Stop();
+        AlertAudioComponent = nullptr;
+    }
+    
+    if (TTSAudioComponent && IsValid(TTSAudioComponent))
+    {
+        TTSAudioComponent->Stop();
+        TTSAudioComponent = nullptr;
+    }
+    
+    Super::Deinitialize();
+}
+
+void UAudio_AudioManager::InitializeAudioSystem()
+{
+    UE_LOG(LogTemp, Warning, TEXT("Audio_AudioManager: Audio system initialized for Cretaceous survival"));
+    
+    // Set initial biome to Savanna (center of map)
+    SetCurrentBiome(EAudio_BiomeType::Savanna);
+    
+    // Initialize environmental conditions
+    UpdateBiomeAudio(25.0f, 60.0f); // Typical savanna conditions
+}
+
+void UAudio_AudioManager::UpdateAudioSystem(float DeltaTime)
+{
+    if (bTransitioningBiome)
+    {
+        UpdateBiomeTransition(DeltaTime);
+    }
+    
+    if (bProximityAlertActive)
+    {
+        UpdateProximityAlertAudio(DeltaTime);
+    }
+    
+    CalculateVolumeModifiers();
 }
 
 void UAudio_AudioManager::SetCurrentBiome(EAudio_BiomeType NewBiome)
 {
-	if (CurrentBiome != NewBiome)
-	{
-		EAudio_BiomeType OldBiome = CurrentBiome;
-		CurrentBiome = NewBiome;
-		
-		UE_LOG(LogTemp, Log, TEXT("Audio_AudioManager: Transição de bioma de %d para %d"), 
-			   (int32)OldBiome, (int32)NewBiome);
-		
-		TransitionBiomeAudio(OldBiome, NewBiome);
-	}
+    if (CurrentBiome != NewBiome)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Audio_AudioManager: Transitioning from %d to %d"), 
+               (int32)CurrentBiome, (int32)NewBiome);
+        
+        TargetBiome = NewBiome;
+        bTransitioningBiome = true;
+        BiomeTransitionTime = 0.0f;
+    }
 }
 
-void UAudio_AudioManager::UpdateBiomeAudio(const FVector& PlayerLocation)
+void UAudio_AudioManager::UpdateBiomeAudio(float Temperature, float Humidity)
 {
-	EAudio_BiomeType DetectedBiome = DetermineBiomeFromLocation(PlayerLocation);
-	SetCurrentBiome(DetectedBiome);
+    CurrentTemperature = Temperature;
+    CurrentHumidity = Humidity;
+    
+    // Find current biome profile
+    if (BiomeProfiles.Contains(CurrentBiome))
+    {
+        FAudio_BiomeProfile& Profile = BiomeProfiles[CurrentBiome];
+        
+        // Apply temperature and humidity modifiers
+        float TempModifier = FMath::Clamp(Temperature / 30.0f, 0.5f, 1.5f);
+        float HumidityModifier = FMath::Clamp(Humidity / 100.0f, 0.3f, 1.2f);
+        
+        Profile.TemperatureModifier = TempModifier;
+        Profile.HumidityModifier = HumidityModifier;
+        
+        UE_LOG(LogTemp, Log, TEXT("Audio_AudioManager: Updated biome audio - Temp: %.1f, Humidity: %.1f"), 
+               Temperature, Humidity);
+    }
 }
 
-void UAudio_AudioManager::SetThreatLevel(EAudio_ThreatLevel NewThreatLevel)
+void UAudio_AudioManager::TriggerProximityAlert(const FString& CreatureName, float Distance, EAudio_AlertLevel AlertLevel)
 {
-	if (CurrentThreatLevel != NewThreatLevel)
-	{
-		EAudio_ThreatLevel OldThreatLevel = CurrentThreatLevel;
-		CurrentThreatLevel = NewThreatLevel;
-		
-		UE_LOG(LogTemp, Log, TEXT("Audio_AudioManager: Nível de ameaça mudou de %d para %d"), 
-			   (int32)OldThreatLevel, (int32)NewThreatLevel);
-		
-		// Tocar áudio de ameaça se necessário
-		if (NewThreatLevel > EAudio_ThreatLevel::Safe)
-		{
-			PlayThreatAudio(NewThreatLevel, FVector::ZeroVector);
-		}
-	}
+    CurrentProximityAlert.CreatureName = CreatureName;
+    CurrentProximityAlert.Distance = Distance;
+    CurrentProximityAlert.AlertLevel = AlertLevel;
+    
+    // Calculate volume based on distance and alert level
+    float DistanceVolume = FMath::Clamp(1.0f - (Distance / 1000.0f), 0.1f, 1.0f);
+    float AlertMultiplier = 1.0f;
+    
+    switch (AlertLevel)
+    {
+        case EAudio_AlertLevel::Caution:
+            AlertMultiplier = 0.7f;
+            break;
+        case EAudio_AlertLevel::Danger:
+            AlertMultiplier = 0.9f;
+            break;
+        case EAudio_AlertLevel::Critical:
+            AlertMultiplier = 1.2f;
+            break;
+        default:
+            AlertMultiplier = 0.5f;
+            break;
+    }
+    
+    CurrentProximityAlert.Volume = DistanceVolume * AlertMultiplier * AlertVolume;
+    bProximityAlertActive = true;
+    
+    UE_LOG(LogTemp, Warning, TEXT("Audio_AudioManager: Proximity alert triggered - %s at %.1fm, Level: %d"), 
+           *CreatureName, Distance, (int32)AlertLevel);
+    
+    // Play alert sound if available
+    if (AlertAudioComponent && IsValid(AlertAudioComponent))
+    {
+        AlertAudioComponent->SetVolumeMultiplier(CurrentProximityAlert.Volume);
+        // AlertAudioComponent->Play(); // Would play if we had the sound asset
+    }
 }
 
-void UAudio_AudioManager::PlayThreatAudio(EAudio_ThreatLevel ThreatLevel, const FVector& ThreatLocation)
+void UAudio_AudioManager::ClearProximityAlert()
 {
-	if (ThreatAudioSettings.Contains(ThreatLevel))
-	{
-		const FAudio_ThreatAudioData& ThreatData = ThreatAudioSettings[ThreatLevel];
-		
-		if (ThreatData.ThreatSound.IsValid())
-		{
-			USoundCue* SoundToPlay = ThreatData.ThreatSound.LoadSynchronous();
-			if (SoundToPlay)
-			{
-				UAudioComponent* AudioComp = PlaySoundAtLocation(
-					SoundToPlay, 
-					ThreatLocation, 
-					ThreatData.Volume * EffectsVolume * MasterVolume
-				);
-				
-				if (AudioComp && ThreatData.bLooping)
-				{
-					ActiveEffectComponents.Add(AudioComp);
-				}
-				
-				UE_LOG(LogTemp, Log, TEXT("Audio_AudioManager: Áudio de ameaça reproduzido (nível %d)"), 
-					   (int32)ThreatLevel);
-			}
-		}
-	}
+    bProximityAlertActive = false;
+    CurrentProximityAlert = FAudio_ProximityAlert();
+    
+    if (AlertAudioComponent && IsValid(AlertAudioComponent))
+    {
+        AlertAudioComponent->Stop();
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Audio_AudioManager: Proximity alert cleared"));
 }
 
-void UAudio_AudioManager::RegisterDinosaurActor(AActor* DinosaurActor, const FString& DinosaurType)
+void UAudio_AudioManager::PlayTTSNarration(const FString& NarrationText, float Volume)
 {
-	if (DinosaurActor)
-	{
-		RegisteredDinosaurs.Add(DinosaurActor, DinosaurType);
-		UE_LOG(LogTemp, Log, TEXT("Audio_AudioManager: Dinossauro registado - %s (%s)"), 
-			   *DinosaurActor->GetName(), *DinosaurType);
-	}
+    UE_LOG(LogTemp, Warning, TEXT("Audio_AudioManager: Playing TTS narration - %s"), *NarrationText);
+    
+    if (TTSAudioComponent && IsValid(TTSAudioComponent))
+    {
+        TTSAudioComponent->SetVolumeMultiplier(Volume * MasterVolume);
+        // TTSAudioComponent->Play(); // Would play TTS audio if loaded
+    }
 }
 
-void UAudio_AudioManager::UpdateDinosaurProximityAudio(const FVector& PlayerLocation)
+void UAudio_AudioManager::PlaySystemAlert(const FString& AlertText, EAudio_AlertLevel AlertLevel)
 {
-	// Limpar dinossauros inválidos
-	TArray<AActor*> InvalidActors;
-	for (auto& DinosaurPair : RegisteredDinosaurs)
-	{
-		if (!IsValid(DinosaurPair.Key))
-		{
-			InvalidActors.Add(DinosaurPair.Key);
-		}
-	}
-	
-	for (AActor* InvalidActor : InvalidActors)
-	{
-		RegisteredDinosaurs.Remove(InvalidActor);
-	}
-	
-	// Verificar proximidade dos dinossauros válidos
-	EAudio_ThreatLevel HighestThreat = EAudio_ThreatLevel::Safe;
-	
-	for (const auto& DinosaurPair : RegisteredDinosaurs)
-	{
-		AActor* DinosaurActor = DinosaurPair.Key;
-		const FString& DinosaurType = DinosaurPair.Value;
-		
-		if (IsValid(DinosaurActor))
-		{
-			float Distance = FVector::Dist(PlayerLocation, DinosaurActor->GetActorLocation());
-			
-			// Determinar nível de ameaça baseado na distância e tipo de dinossauro
-			EAudio_ThreatLevel ThreatLevel = EAudio_ThreatLevel::Safe;
-			
-			if (DinosaurType.Contains(TEXT("TRex")) || DinosaurType.Contains(TEXT("Tyrannosaurus")))
-			{
-				if (Distance < 500.0f) ThreatLevel = EAudio_ThreatLevel::Critical;
-				else if (Distance < 1000.0f) ThreatLevel = EAudio_ThreatLevel::High;
-				else if (Distance < 2000.0f) ThreatLevel = EAudio_ThreatLevel::Medium;
-			}
-			else if (DinosaurType.Contains(TEXT("Raptor")))
-			{
-				if (Distance < 300.0f) ThreatLevel = EAudio_ThreatLevel::High;
-				else if (Distance < 800.0f) ThreatLevel = EAudio_ThreatLevel::Medium;
-				else if (Distance < 1500.0f) ThreatLevel = EAudio_ThreatLevel::Low;
-			}
-			else // Herbívoros
-			{
-				if (Distance < 200.0f) ThreatLevel = EAudio_ThreatLevel::Medium;
-				else if (Distance < 500.0f) ThreatLevel = EAudio_ThreatLevel::Low;
-			}
-			
-			if (ThreatLevel > HighestThreat)
-			{
-				HighestThreat = ThreatLevel;
-			}
-		}
-	}
-	
-	SetThreatLevel(HighestThreat);
+    UE_LOG(LogTemp, Warning, TEXT("Audio_AudioManager: System alert - %s (Level: %d)"), 
+           *AlertText, (int32)AlertLevel);
+    
+    float AlertVolumeMultiplier = 1.0f;
+    switch (AlertLevel)
+    {
+        case EAudio_AlertLevel::Critical:
+            AlertVolumeMultiplier = 1.5f;
+            break;
+        case EAudio_AlertLevel::Danger:
+            AlertVolumeMultiplier = 1.2f;
+            break;
+        case EAudio_AlertLevel::Caution:
+            AlertVolumeMultiplier = 0.8f;
+            break;
+        default:
+            AlertVolumeMultiplier = 0.6f;
+            break;
+    }
+    
+    if (AlertAudioComponent && IsValid(AlertAudioComponent))
+    {
+        AlertAudioComponent->SetVolumeMultiplier(AlertVolumeMultiplier * AlertVolume * MasterVolume);
+    }
 }
 
 void UAudio_AudioManager::SetMasterVolume(float Volume)
 {
-	MasterVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
-	
-	// Actualizar volume de todos os componentes activos
-	for (UAudioComponent* AudioComp : ActiveAmbientComponents)
-	{
-		if (IsValid(AudioComp))
-		{
-			AudioComp->SetVolumeMultiplier(AudioComp->VolumeMultiplier * MasterVolume);
-		}
-	}
-	
-	for (UAudioComponent* AudioComp : ActiveEffectComponents)
-	{
-		if (IsValid(AudioComp))
-		{
-			AudioComp->SetVolumeMultiplier(AudioComp->VolumeMultiplier * MasterVolume);
-		}
-	}
+    MasterVolume = FMath::Clamp(Volume, 0.0f, 2.0f);
+    UE_LOG(LogTemp, Log, TEXT("Audio_AudioManager: Master volume set to %.2f"), MasterVolume);
 }
 
 void UAudio_AudioManager::SetAmbientVolume(float Volume)
 {
-	AmbientVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
-	
-	// Actualizar volume dos componentes ambientais
-	for (UAudioComponent* AudioComp : ActiveAmbientComponents)
-	{
-		if (IsValid(AudioComp))
-		{
-			AudioComp->SetVolumeMultiplier(AmbientVolume * MasterVolume);
-		}
-	}
+    AmbientVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
+    if (AmbientAudioComponent && IsValid(AmbientAudioComponent))
+    {
+        AmbientAudioComponent->SetVolumeMultiplier(AmbientVolume * MasterVolume);
+    }
 }
 
-void UAudio_AudioManager::SetEffectsVolume(float Volume)
+void UAudio_AudioManager::SetMusicVolume(float Volume)
 {
-	EffectsVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
-	
-	// Actualizar volume dos componentes de efeitos
-	for (UAudioComponent* AudioComp : ActiveEffectComponents)
-	{
-		if (IsValid(AudioComp))
-		{
-			AudioComp->SetVolumeMultiplier(EffectsVolume * MasterVolume);
-		}
-	}
+    MusicVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
+    if (MusicAudioComponent && IsValid(MusicAudioComponent))
+    {
+        MusicAudioComponent->SetVolumeMultiplier(MusicVolume * MasterVolume);
+    }
 }
 
-UAudioComponent* UAudio_AudioManager::PlaySoundAtLocation(USoundCue* Sound, const FVector& Location, float Volume)
+void UAudio_AudioManager::SetAlertVolume(float Volume)
 {
-	if (!Sound)
-	{
-		return nullptr;
-	}
-	
-	UWorld* World = GetWorld();
-	if (!World)
-	{
-		return nullptr;
-	}
-	
-	UAudioComponent* AudioComp = UGameplayStatics::SpawnSoundAtLocation(
-		World, 
-		Sound, 
-		Location, 
-		FRotator::ZeroRotator, 
-		Volume
-	);
-	
-	return AudioComp;
+    AlertVolume = FMath::Clamp(Volume, 0.0f, 2.0f);
+    if (AlertAudioComponent && IsValid(AlertAudioComponent))
+    {
+        AlertAudioComponent->SetVolumeMultiplier(AlertVolume * MasterVolume);
+    }
 }
 
-void UAudio_AudioManager::StopAllAmbientSounds()
+void UAudio_AudioManager::UpdateWeatherAudio(float WindStrength, float RainIntensity)
 {
-	for (UAudioComponent* AudioComp : ActiveAmbientComponents)
-	{
-		if (IsValid(AudioComp))
-		{
-			AudioComp->Stop();
-		}
-	}
-	
-	ActiveAmbientComponents.Empty();
-	
-	UE_LOG(LogTemp, Log, TEXT("Audio_AudioManager: Todos os sons ambientais parados"));
+    this->WindStrength = FMath::Clamp(WindStrength, 0.0f, 1.0f);
+    this->RainIntensity = FMath::Clamp(RainIntensity, 0.0f, 1.0f);
+    
+    UE_LOG(LogTemp, Log, TEXT("Audio_AudioManager: Weather updated - Wind: %.2f, Rain: %.2f"), 
+           WindStrength, RainIntensity);
+    
+    // Adjust ambient volume based on weather
+    float WeatherModifier = 1.0f + (WindStrength * 0.3f) + (RainIntensity * 0.5f);
+    if (AmbientAudioComponent && IsValid(AmbientAudioComponent))
+    {
+        AmbientAudioComponent->SetVolumeMultiplier(AmbientVolume * WeatherModifier * MasterVolume);
+    }
 }
 
-void UAudio_AudioManager::InitializeBiomeAudioSettings()
+void UAudio_AudioManager::UpdateTimeOfDayAudio(float TimeOfDay)
 {
-	// Configurações de áudio por bioma
-	FAudio_BiomeAudioSettings SwampSettings;
-	SwampSettings.BaseVolume = 0.6f;
-	SwampSettings.AttenuationRadius = 8000.0f;
-	BiomeAudioSettings.Add(EAudio_BiomeType::Swamp, SwampSettings);
-	
-	FAudio_BiomeAudioSettings ForestSettings;
-	ForestSettings.BaseVolume = 0.7f;
-	ForestSettings.AttenuationRadius = 6000.0f;
-	BiomeAudioSettings.Add(EAudio_BiomeType::Forest, ForestSettings);
-	
-	FAudio_BiomeAudioSettings SavannaSettings;
-	SavannaSettings.BaseVolume = 0.8f;
-	SavannaSettings.AttenuationRadius = 10000.0f;
-	BiomeAudioSettings.Add(EAudio_BiomeType::Savanna, SavannaSettings);
-	
-	FAudio_BiomeAudioSettings DesertSettings;
-	DesertSettings.BaseVolume = 0.5f;
-	DesertSettings.AttenuationRadius = 12000.0f;
-	BiomeAudioSettings.Add(EAudio_BiomeType::Desert, DesertSettings);
-	
-	FAudio_BiomeAudioSettings MountainSettings;
-	MountainSettings.BaseVolume = 0.4f;
-	MountainSettings.AttenuationRadius = 15000.0f;
-	BiomeAudioSettings.Add(EAudio_BiomeType::Mountain, MountainSettings);
-	
-	UE_LOG(LogTemp, Log, TEXT("Audio_AudioManager: Configurações de áudio por bioma inicializadas"));
+    this->TimeOfDay = FMath::Clamp(TimeOfDay, 0.0f, 24.0f);
+    
+    // Calculate day/night audio modifiers
+    bool bIsNight = (TimeOfDay < 6.0f || TimeOfDay > 20.0f);
+    float TimeModifier = bIsNight ? 0.7f : 1.0f; // Quieter at night
+    
+    if (AmbientAudioComponent && IsValid(AmbientAudioComponent))
+    {
+        AmbientAudioComponent->SetVolumeMultiplier(AmbientVolume * TimeModifier * MasterVolume);
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Audio_AudioManager: Time of day updated - %.1f (Night: %s)"), 
+           TimeOfDay, bIsNight ? TEXT("Yes") : TEXT("No"));
 }
 
-void UAudio_AudioManager::InitializeThreatAudioSettings()
+void UAudio_AudioManager::InitializeBiomeProfiles()
 {
-	// Configurações de áudio por nível de ameaça
-	FAudio_ThreatAudioData SafeData;
-	SafeData.Volume = 0.0f;
-	ThreatAudioSettings.Add(EAudio_ThreatLevel::Safe, SafeData);
-	
-	FAudio_ThreatAudioData LowData;
-	LowData.Volume = 0.3f;
-	LowData.TriggerDistance = 1500.0f;
-	ThreatAudioSettings.Add(EAudio_ThreatLevel::Low, LowData);
-	
-	FAudio_ThreatAudioData MediumData;
-	MediumData.Volume = 0.6f;
-	MediumData.TriggerDistance = 1000.0f;
-	ThreatAudioSettings.Add(EAudio_ThreatLevel::Medium, MediumData);
-	
-	FAudio_ThreatAudioData HighData;
-	HighData.Volume = 0.8f;
-	HighData.TriggerDistance = 500.0f;
-	ThreatAudioSettings.Add(EAudio_ThreatLevel::High, HighData);
-	
-	FAudio_ThreatAudioData CriticalData;
-	CriticalData.Volume = 1.0f;
-	CriticalData.TriggerDistance = 200.0f;
-	CriticalData.bLooping = true;
-	ThreatAudioSettings.Add(EAudio_ThreatLevel::Critical, CriticalData);
-	
-	UE_LOG(LogTemp, Log, TEXT("Audio_AudioManager: Configurações de áudio de ameaça inicializadas"));
+    // Initialize biome profiles with default settings
+    FAudio_BiomeProfile SwampProfile;
+    SwampProfile.BiomeType = EAudio_BiomeType::Swamp;
+    SwampProfile.BaseVolume = 0.8f;
+    BiomeProfiles.Add(EAudio_BiomeType::Swamp, SwampProfile);
+    
+    FAudio_BiomeProfile ForestProfile;
+    ForestProfile.BiomeType = EAudio_BiomeType::Forest;
+    ForestProfile.BaseVolume = 0.9f;
+    BiomeProfiles.Add(EAudio_BiomeType::Forest, ForestProfile);
+    
+    FAudio_BiomeProfile SavannaProfile;
+    SavannaProfile.BiomeType = EAudio_BiomeType::Savanna;
+    SavannaProfile.BaseVolume = 0.7f;
+    BiomeProfiles.Add(EAudio_BiomeType::Savanna, SavannaProfile);
+    
+    FAudio_BiomeProfile DesertProfile;
+    DesertProfile.BiomeType = EAudio_BiomeType::Desert;
+    DesertProfile.BaseVolume = 0.5f;
+    BiomeProfiles.Add(EAudio_BiomeType::Desert, DesertProfile);
+    
+    FAudio_BiomeProfile MountainProfile;
+    MountainProfile.BiomeType = EAudio_BiomeType::Mountain;
+    MountainProfile.BaseVolume = 0.6f;
+    BiomeProfiles.Add(EAudio_BiomeType::Mountain, MountainProfile);
+    
+    UE_LOG(LogTemp, Warning, TEXT("Audio_AudioManager: Initialized %d biome profiles"), BiomeProfiles.Num());
 }
 
-EAudio_BiomeType UAudio_AudioManager::DetermineBiomeFromLocation(const FVector& Location)
+void UAudio_AudioManager::InitializeAudioComponents()
 {
-	// Coordenadas dos biomas (baseado no brain memory)
-	float X = Location.X;
-	float Y = Location.Y;
-	
-	// Pantano (sudoeste)
-	if (X >= -77500.0f && X <= -25000.0f && Y >= -76500.0f && Y <= -15000.0f)
-	{
-		return EAudio_BiomeType::Swamp;
-	}
-	
-	// Floresta (noroeste)
-	if (X >= -77500.0f && X <= -15000.0f && Y >= 15000.0f && Y <= 76500.0f)
-	{
-		return EAudio_BiomeType::Forest;
-	}
-	
-	// Savana (centro)
-	if (X >= -20000.0f && X <= 20000.0f && Y >= -20000.0f && Y <= 20000.0f)
-	{
-		return EAudio_BiomeType::Savanna;
-	}
-	
-	// Deserto (leste)
-	if (X >= 25000.0f && X <= 79500.0f && Y >= -30000.0f && Y <= 30000.0f)
-	{
-		return EAudio_BiomeType::Desert;
-	}
-	
-	// Montanha Nevada (nordeste)
-	if (X >= 15000.0f && X <= 79500.0f && Y >= 20000.0f && Y <= 76500.0f)
-	{
-		return EAudio_BiomeType::Mountain;
-	}
-	
-	return EAudio_BiomeType::None;
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        UE_LOG(LogTemp, Error, TEXT("Audio_AudioManager: Cannot initialize audio components - no world"));
+        return;
+    }
+    
+    // Create audio components
+    AmbientAudioComponent = NewObject<UAudioComponent>(this);
+    if (AmbientAudioComponent)
+    {
+        AmbientAudioComponent->SetVolumeMultiplier(AmbientVolume * MasterVolume);
+        AmbientAudioComponent->bAutoActivate = false;
+    }
+    
+    MusicAudioComponent = NewObject<UAudioComponent>(this);
+    if (MusicAudioComponent)
+    {
+        MusicAudioComponent->SetVolumeMultiplier(MusicVolume * MasterVolume);
+        MusicAudioComponent->bAutoActivate = false;
+    }
+    
+    AlertAudioComponent = NewObject<UAudioComponent>(this);
+    if (AlertAudioComponent)
+    {
+        AlertAudioComponent->SetVolumeMultiplier(AlertVolume * MasterVolume);
+        AlertAudioComponent->bAutoActivate = false;
+    }
+    
+    TTSAudioComponent = NewObject<UAudioComponent>(this);
+    if (TTSAudioComponent)
+    {
+        TTSAudioComponent->SetVolumeMultiplier(MasterVolume);
+        TTSAudioComponent->bAutoActivate = false;
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Audio_AudioManager: Audio components initialized"));
 }
 
-void UAudio_AudioManager::TransitionBiomeAudio(EAudio_BiomeType FromBiome, EAudio_BiomeType ToBiome)
+void UAudio_AudioManager::UpdateBiomeTransition(float DeltaTime)
 {
-	// Parar áudio do bioma anterior
-	StopAllAmbientSounds();
-	
-	// Iniciar áudio do novo bioma
-	if (BiomeAudioSettings.Contains(ToBiome))
-	{
-		const FAudio_BiomeAudioSettings& NewBiomeSettings = BiomeAudioSettings[ToBiome];
-		
-		// Aqui seria onde carregaríamos e reproduziríamos o som ambiental do novo bioma
-		// Por agora, apenas logamos a transição
-		UE_LOG(LogTemp, Log, TEXT("Audio_AudioManager: Transição de áudio de bioma %d para %d"), 
-			   (int32)FromBiome, (int32)ToBiome);
-	}
+    BiomeTransitionTime += DeltaTime;
+    
+    // Transition duration: 3 seconds
+    const float TransitionDuration = 3.0f;
+    
+    if (BiomeTransitionTime >= TransitionDuration)
+    {
+        CurrentBiome = TargetBiome;
+        bTransitioningBiome = false;
+        BiomeTransitionTime = 0.0f;
+        
+        UE_LOG(LogTemp, Warning, TEXT("Audio_AudioManager: Biome transition completed to %d"), (int32)CurrentBiome);
+    }
+    else
+    {
+        // Calculate transition progress
+        float TransitionProgress = BiomeTransitionTime / TransitionDuration;
+        
+        // Apply crossfade between biome audio profiles
+        if (AmbientAudioComponent && IsValid(AmbientAudioComponent))
+        {
+            float CrossfadeVolume = FMath::Lerp(1.0f, 0.5f, TransitionProgress);
+            AmbientAudioComponent->SetVolumeMultiplier(AmbientVolume * CrossfadeVolume * MasterVolume);
+        }
+    }
 }
 
-void UAudio_AudioManager::CleanupInactiveAudioComponents()
+void UAudio_AudioManager::UpdateProximityAlertAudio(float DeltaTime)
 {
-	// Remover componentes de áudio inválidos ou parados
-	ActiveAmbientComponents.RemoveAll([](UAudioComponent* AudioComp) {
-		return !IsValid(AudioComp) || !AudioComp->IsPlaying();
-	});
-	
-	ActiveEffectComponents.RemoveAll([](UAudioComponent* AudioComp) {
-		return !IsValid(AudioComp) || !AudioComp->IsPlaying();
-	});
+    // Update proximity alert audio based on current state
+    if (AlertAudioComponent && IsValid(AlertAudioComponent))
+    {
+        // Pulse effect for critical alerts
+        if (CurrentProximityAlert.AlertLevel == EAudio_AlertLevel::Critical)
+        {
+            float PulseValue = FMath::Sin(GetWorld()->GetTimeSeconds() * 4.0f) * 0.2f + 0.8f;
+            AlertAudioComponent->SetVolumeMultiplier(CurrentProximityAlert.Volume * PulseValue);
+        }
+    }
+}
+
+void UAudio_AudioManager::CalculateVolumeModifiers()
+{
+    // Apply environmental modifiers to all audio components
+    float EnvironmentalModifier = 1.0f;
+    
+    // Weather effects
+    EnvironmentalModifier += (WindStrength * 0.2f);
+    EnvironmentalModifier += (RainIntensity * 0.3f);
+    
+    // Time of day effects
+    bool bIsNight = (TimeOfDay < 6.0f || TimeOfDay > 20.0f);
+    if (bIsNight)
+    {
+        EnvironmentalModifier *= 0.8f; // Quieter at night
+    }
+    
+    // Temperature effects
+    if (CurrentTemperature > 35.0f) // Very hot
+    {
+        EnvironmentalModifier *= 0.9f; // Slightly quieter in extreme heat
+    }
+    else if (CurrentTemperature < 5.0f) // Very cold
+    {
+        EnvironmentalModifier *= 1.1f; // Sound carries better in cold
+    }
+    
+    // Apply modifiers to ambient audio
+    if (AmbientAudioComponent && IsValid(AmbientAudioComponent))
+    {
+        float FinalVolume = AmbientVolume * EnvironmentalModifier * MasterVolume;
+        AmbientAudioComponent->SetVolumeMultiplier(FMath::Clamp(FinalVolume, 0.0f, 2.0f));
+    }
 }
