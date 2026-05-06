@@ -4,183 +4,228 @@
 #include "Engine/GameInstanceSubsystem.h"
 #include "Components/AudioComponent.h"
 #include "Sound/SoundCue.h"
-#include "Sound/SoundAttenuation.h"
-#include "SharedTypes.h"
+#include "Engine/World.h"
+#include "../SharedTypes.h"
 #include "Audio_AudioManager.generated.h"
 
 UENUM(BlueprintType)
 enum class EAudio_BiomeType : uint8
 {
-	None = 0,
-	Swamp = 1,
-	Forest = 2,
-	Savanna = 3,
-	Desert = 4,
-	Mountain = 5
+    Swamp       UMETA(DisplayName = "Pântano"),
+    Forest      UMETA(DisplayName = "Floresta"),  
+    Savanna     UMETA(DisplayName = "Savana"),
+    Desert      UMETA(DisplayName = "Deserto"),
+    Mountain    UMETA(DisplayName = "Montanha Nevada")
 };
 
 UENUM(BlueprintType)
-enum class EAudio_ThreatLevel : uint8
+enum class EAudio_AlertLevel : uint8
 {
-	Safe = 0,
-	Low = 1,
-	Medium = 2,
-	High = 3,
-	Critical = 4
+    Calm        UMETA(DisplayName = "Calmo"),
+    Caution     UMETA(DisplayName = "Precaução"),
+    Danger      UMETA(DisplayName = "Perigo"),
+    Critical    UMETA(DisplayName = "Crítico")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAudio_BiomeAudioSettings
+struct TRANSPERSONALGAME_API FAudio_BiomeProfile
 {
-	GENERATED_BODY()
+    GENERATED_BODY()
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-	TSoftObjectPtr<USoundCue> AmbientSound;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    EAudio_BiomeType BiomeType = EAudio_BiomeType::Savanna;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-	float BaseVolume = 0.7f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    TSoftObjectPtr<USoundCue> AmbientSound;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-	float AttenuationRadius = 5000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    TSoftObjectPtr<USoundCue> MusicTrack;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-	bool bUse3DAttenuation = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    float BaseVolume = 0.7f;
 
-	FAudio_BiomeAudioSettings()
-	{
-		BaseVolume = 0.7f;
-		AttenuationRadius = 5000.0f;
-		bUse3DAttenuation = true;
-	}
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    float TemperatureModifier = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    float HumidityModifier = 1.0f;
+
+    FAudio_BiomeProfile()
+    {
+        BiomeType = EAudio_BiomeType::Savanna;
+        BaseVolume = 0.7f;
+        TemperatureModifier = 1.0f;
+        HumidityModifier = 1.0f;
+    }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAudio_ThreatAudioData
+struct TRANSPERSONALGAME_API FAudio_ProximityAlert
 {
-	GENERATED_BODY()
+    GENERATED_BODY()
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-	TSoftObjectPtr<USoundCue> ThreatSound;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    FString CreatureName;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-	float TriggerDistance = 1000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    float Distance = 0.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-	float Volume = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    EAudio_AlertLevel AlertLevel = EAudio_AlertLevel::Calm;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-	bool bLooping = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    TSoftObjectPtr<USoundCue> AlertSound;
 
-	FAudio_ThreatAudioData()
-	{
-		TriggerDistance = 1000.0f;
-		Volume = 1.0f;
-		bLooping = false;
-	}
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    float Volume = 1.0f;
+
+    FAudio_ProximityAlert()
+    {
+        CreatureName = TEXT("Unknown");
+        Distance = 0.0f;
+        AlertLevel = EAudio_AlertLevel::Calm;
+        Volume = 1.0f;
+    }
 };
 
 /**
- * Sistema de áudio adaptativo que gere música e efeitos sonoros baseados no bioma,
- * proximidade de dinossauros, e estado de ameaça do jogador.
+ * Sistema de áudio adaptativo para o mundo pré-histórico
+ * Gere música dinâmica, efeitos ambientais e alertas de proximidade
  */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UAudio_AudioManager : public UGameInstanceSubsystem
 {
-	GENERATED_BODY()
+    GENERATED_BODY()
 
 public:
-	UAudio_AudioManager();
+    UAudio_AudioManager();
 
-	// USubsystem interface
-	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-	virtual void Deinitialize() override;
+    // Subsystem overrides
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
 
-	// Biome Audio Management
-	UFUNCTION(BlueprintCallable, Category = "Audio")
-	void SetCurrentBiome(EAudio_BiomeType NewBiome);
+    // Audio system management
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void InitializeAudioSystem();
 
-	UFUNCTION(BlueprintCallable, Category = "Audio")
-	EAudio_BiomeType GetCurrentBiome() const { return CurrentBiome; }
+    UFUNCTION(BlueprintCallable, Category = "Audio System")
+    void UpdateAudioSystem(float DeltaTime);
 
-	UFUNCTION(BlueprintCallable, Category = "Audio")
-	void UpdateBiomeAudio(const FVector& PlayerLocation);
+    // Biome audio management
+    UFUNCTION(BlueprintCallable, Category = "Biome Audio")
+    void SetCurrentBiome(EAudio_BiomeType NewBiome);
 
-	// Threat Audio System
-	UFUNCTION(BlueprintCallable, Category = "Audio")
-	void SetThreatLevel(EAudio_ThreatLevel NewThreatLevel);
+    UFUNCTION(BlueprintCallable, Category = "Biome Audio")
+    void UpdateBiomeAudio(float Temperature, float Humidity);
 
-	UFUNCTION(BlueprintCallable, Category = "Audio")
-	EAudio_ThreatLevel GetCurrentThreatLevel() const { return CurrentThreatLevel; }
+    UFUNCTION(BlueprintPure, Category = "Biome Audio")
+    EAudio_BiomeType GetCurrentBiome() const { return CurrentBiome; }
 
-	UFUNCTION(BlueprintCallable, Category = "Audio")
-	void PlayThreatAudio(EAudio_ThreatLevel ThreatLevel, const FVector& ThreatLocation);
+    // Proximity alert system
+    UFUNCTION(BlueprintCallable, Category = "Proximity Audio")
+    void TriggerProximityAlert(const FString& CreatureName, float Distance, EAudio_AlertLevel AlertLevel);
 
-	// Dinosaur Proximity Audio
-	UFUNCTION(BlueprintCallable, Category = "Audio")
-	void RegisterDinosaurActor(AActor* DinosaurActor, const FString& DinosaurType);
+    UFUNCTION(BlueprintCallable, Category = "Proximity Audio")
+    void ClearProximityAlert();
 
-	UFUNCTION(BlueprintCallable, Category = "Audio")
-	void UpdateDinosaurProximityAudio(const FVector& PlayerLocation);
+    UFUNCTION(BlueprintCallable, Category = "Proximity Audio")
+    bool IsProximityAlertActive() const { return bProximityAlertActive; }
 
-	// Master Audio Controls
-	UFUNCTION(BlueprintCallable, Category = "Audio")
-	void SetMasterVolume(float Volume);
+    // TTS integration
+    UFUNCTION(BlueprintCallable, Category = "TTS Audio")
+    void PlayTTSNarration(const FString& NarrationText, float Volume = 1.0f);
 
-	UFUNCTION(BlueprintCallable, Category = "Audio")
-	void SetAmbientVolume(float Volume);
+    UFUNCTION(BlueprintCallable, Category = "TTS Audio")
+    void PlaySystemAlert(const FString& AlertText, EAudio_AlertLevel AlertLevel);
 
-	UFUNCTION(BlueprintCallable, Category = "Audio")
-	void SetEffectsVolume(float Volume);
+    // Audio component management
+    UFUNCTION(BlueprintCallable, Category = "Audio Components")
+    void SetMasterVolume(float Volume);
 
-	// Audio Component Management
-	UFUNCTION(BlueprintCallable, Category = "Audio")
-	UAudioComponent* PlaySoundAtLocation(USoundCue* Sound, const FVector& Location, float Volume = 1.0f);
+    UFUNCTION(BlueprintCallable, Category = "Audio Components")
+    void SetAmbientVolume(float Volume);
 
-	UFUNCTION(BlueprintCallable, Category = "Audio")
-	void StopAllAmbientSounds();
+    UFUNCTION(BlueprintCallable, Category = "Audio Components")
+    void SetMusicVolume(float Volume);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio Components")
+    void SetAlertVolume(float Volume);
+
+    // Environmental audio
+    UFUNCTION(BlueprintCallable, Category = "Environmental Audio")
+    void UpdateWeatherAudio(float WindStrength, float RainIntensity);
+
+    UFUNCTION(BlueprintCallable, Category = "Environmental Audio")
+    void UpdateTimeOfDayAudio(float TimeOfDay);
 
 protected:
-	// Current audio state
-	UPROPERTY(BlueprintReadOnly, Category = "Audio")
-	EAudio_BiomeType CurrentBiome;
+    // Current biome state
+    UPROPERTY(BlueprintReadOnly, Category = "Audio State")
+    EAudio_BiomeType CurrentBiome;
 
-	UPROPERTY(BlueprintReadOnly, Category = "Audio")
-	EAudio_ThreatLevel CurrentThreatLevel;
+    UPROPERTY(BlueprintReadOnly, Category = "Audio State")
+    float CurrentTemperature;
 
-	// Audio settings per biome
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-	TMap<EAudio_BiomeType, FAudio_BiomeAudioSettings> BiomeAudioSettings;
+    UPROPERTY(BlueprintReadOnly, Category = "Audio State")
+    float CurrentHumidity;
 
-	// Threat audio settings
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-	TMap<EAudio_ThreatLevel, FAudio_ThreatAudioData> ThreatAudioSettings;
+    // Biome profiles
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Profiles")
+    TMap<EAudio_BiomeType, FAudio_BiomeProfile> BiomeProfiles;
 
-	// Volume controls
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float MasterVolume;
+    // Audio components
+    UPROPERTY(BlueprintReadOnly, Category = "Audio Components")
+    TObjectPtr<UAudioComponent> AmbientAudioComponent;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float AmbientVolume;
+    UPROPERTY(BlueprintReadOnly, Category = "Audio Components")
+    TObjectPtr<UAudioComponent> MusicAudioComponent;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float EffectsVolume;
+    UPROPERTY(BlueprintReadOnly, Category = "Audio Components")
+    TObjectPtr<UAudioComponent> AlertAudioComponent;
 
-	// Active audio components
-	UPROPERTY()
-	TArray<UAudioComponent*> ActiveAmbientComponents;
+    UPROPERTY(BlueprintReadOnly, Category = "Audio Components")
+    TObjectPtr<UAudioComponent> TTSAudioComponent;
 
-	UPROPERTY()
-	TArray<UAudioComponent*> ActiveEffectComponents;
+    // Proximity alert state
+    UPROPERTY(BlueprintReadOnly, Category = "Proximity State")
+    bool bProximityAlertActive;
 
-	// Registered dinosaurs for proximity audio
-	UPROPERTY()
-	TMap<AActor*, FString> RegisteredDinosaurs;
+    UPROPERTY(BlueprintReadOnly, Category = "Proximity State")
+    FAudio_ProximityAlert CurrentProximityAlert;
+
+    // Volume settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volume Settings")
+    float MasterVolume;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volume Settings")
+    float AmbientVolume;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volume Settings")
+    float MusicVolume;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volume Settings")
+    float AlertVolume;
+
+    // Environmental state
+    UPROPERTY(BlueprintReadOnly, Category = "Environmental State")
+    float WindStrength;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Environmental State")
+    float RainIntensity;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Environmental State")
+    float TimeOfDay;
 
 private:
-	// Internal methods
-	void InitializeBiomeAudioSettings();
-	void InitializeThreatAudioSettings();
-	EAudio_BiomeType DetermineBiomeFromLocation(const FVector& Location);
-	void TransitionBiomeAudio(EAudio_BiomeType FromBiome, EAudio_BiomeType ToBiome);
-	void CleanupInactiveAudioComponents();
+    // Internal methods
+    void InitializeBiomeProfiles();
+    void InitializeAudioComponents();
+    void UpdateBiomeTransition(float DeltaTime);
+    void UpdateProximityAlertAudio(float DeltaTime);
+    void CalculateVolumeModifiers();
+
+    // Transition state
+    bool bTransitioningBiome;
+    float BiomeTransitionTime;
+    EAudio_BiomeType TargetBiome;
 };
