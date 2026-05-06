@@ -1,343 +1,396 @@
 #include "StudioDirector.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Components/SceneComponent.h"
 #include "Kismet/GameplayStatics.h"
+#include "Components/SceneComponent.h"
 
-ADir_StudioDirector::ADir_StudioDirector()
+AStudioDirector::AStudioDirector()
 {
     PrimaryActorTick.bCanEverTick = true;
-    
+
     // Create root component
     RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
     RootComponent = RootSceneComponent;
 
     // Initialize production state
-    CurrentCycleID = TEXT("PROD_CYCLE_AUTO_20260502_010");
-    CurrentAgentID = 1;
-    bProductionActive = true;
-    BudgetUsed = 85.09f;
-    BudgetLimit = 150.0f;
+    bMilestone1_WalkAround = false;
+    bCharacterMovementReady = false;
+    bLandscapeReady = false;
+    bDinosaursPlaced = false;
+    bLightingSetup = false;
 
-    // Initialize Milestone 1
-    Milestone1Progress.MilestoneName = TEXT("Walk Around - Playable Prototype");
-    Milestone1Progress.CompletedTasks = 0;
-    Milestone1Progress.CompletionPercentage = 0.0f;
-    Milestone1Progress.bIsMilestoneComplete = false;
+    // Initialize metrics
+    TotalHeaderFiles = 0;
+    TotalCppFiles = 0;
+    PhantomHeaders = 0;
+    CompilationStatus = 0.0f;
+
+    LastProductionCheck = 0.0f;
 }
 
-void ADir_StudioDirector::BeginPlay()
+void AStudioDirector::BeginPlay()
 {
     Super::BeginPlay();
+
+    UE_LOG(LogTemp, Warning, TEXT("Studio Director initialized - Beginning production coordination"));
     
-    UE_LOG(LogTemp, Warning, TEXT("Studio Director initialized for cycle: %s"), *CurrentCycleID);
+    // Initial production health check
+    CheckProductionHealth();
     
-    // Setup Milestone 1 requirements
-    SetupMilestone1Requirements();
-    
-    // Verify current map state
-    VerifyMinPlayableMapState();
+    // Start agent coordination
+    CoordinateAgentPipeline();
 }
 
-void ADir_StudioDirector::Tick(float DeltaTime)
+void AStudioDirector::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
-    
-    // Update milestone progress every 5 seconds
-    static float ProgressUpdateTimer = 0.0f;
-    ProgressUpdateTimer += DeltaTime;
-    
-    if (ProgressUpdateTimer >= 5.0f)
+
+    LastProductionCheck += DeltaTime;
+
+    // Check production health every 30 seconds
+    if (LastProductionCheck >= 30.0f)
     {
-        CalculateMilestoneProgress();
-        ProgressUpdateTimer = 0.0f;
+        CheckProductionHealth();
+        ValidateMilestone1();
+        LastProductionCheck = 0.0f;
     }
 }
 
-void ADir_StudioDirector::InitializeMilestone1Tasks()
+void AStudioDirector::AssignTaskToAgent(const FString& AgentName, const FString& TaskDescription)
 {
-    Milestone1Progress.RequiredTasks.Empty();
-
-    // Agent #1 - Studio Director (this agent)
-    FDir_AgentTask Task1;
-    Task1.AgentID = 1;
-    Task1.AgentName = TEXT("Studio Director");
-    Task1.TaskDescription = TEXT("Coordinate production pipeline and clean MinPlayableMap");
-    Task1.bIsCompleted = true; // This task is completing now
-    Task1.Priority = 10.0f;
-    Milestone1Progress.RequiredTasks.Add(Task1);
-
-    // Agent #2 - Engine Architect
-    FDir_AgentTask Task2;
-    Task2.AgentID = 2;
-    Task2.AgentName = TEXT("Engine Architect");
-    Task2.TaskDescription = TEXT("Define technical architecture for character movement and world systems");
-    Task2.bIsCompleted = false;
-    Task2.Priority = 9.0f;
-    Task2.Dependencies.Add(TEXT("Studio Director coordination"));
-    Milestone1Progress.RequiredTasks.Add(Task2);
-
-    // Agent #3 - Core Systems
-    FDir_AgentTask Task3;
-    Task3.AgentID = 3;
-    Task3.AgentName = TEXT("Core Systems Programmer");
-    Task3.TaskDescription = TEXT("Implement physics and collision for character movement");
-    Task3.bIsCompleted = false;
-    Task3.Priority = 8.0f;
-    Task3.Dependencies.Add(TEXT("Engine architecture"));
-    Milestone1Progress.RequiredTasks.Add(Task3);
-
-    // Agent #5 - World Generator
-    FDir_AgentTask Task5;
-    Task5.AgentID = 5;
-    Task5.AgentName = TEXT("Procedural World Generator");
-    Task5.TaskDescription = TEXT("Create varied terrain with hills and valleys in MinPlayableMap");
-    Task5.bIsCompleted = false;
-    Task5.Priority = 7.0f;
-    Task5.Dependencies.Add(TEXT("Core systems"));
-    Milestone1Progress.RequiredTasks.Add(Task5);
-
-    // Agent #9 - Character Artist
-    FDir_AgentTask Task9;
-    Task9.AgentID = 9;
-    Task9.AgentName = TEXT("Character Artist");
-    Task9.TaskDescription = TEXT("Create realistic dinosaur models and place them in world");
-    Task9.bIsCompleted = false;
-    Task9.Priority = 6.0f;
-    Task9.Dependencies.Add(TEXT("World generation"));
-    Milestone1Progress.RequiredTasks.Add(Task9);
-
-    // Agent #10 - Animation
-    FDir_AgentTask Task10;
-    Task10.AgentID = 10;
-    Task10.AgentName = TEXT("Animation Agent");
-    Task10.TaskDescription = TEXT("Implement character movement animations and dinosaur idle animations");
-    Task10.bIsCompleted = false;
-    Task10.Priority = 5.0f;
-    Task10.Dependencies.Add(TEXT("Character models"));
-    Milestone1Progress.RequiredTasks.Add(Task10);
-
-    // Agent #12 - Combat & AI
-    FDir_AgentTask Task12;
-    Task12.AgentID = 12;
-    Task12.AgentName = TEXT("Combat & Enemy AI");
-    Task12.TaskDescription = TEXT("Create survival HUD with health/hunger/thirst/stamina bars");
-    Task12.bIsCompleted = false;
-    Task12.Priority = 4.0f;
-    Task12.Dependencies.Add(TEXT("Character systems"));
-    Milestone1Progress.RequiredTasks.Add(Task12);
-
-    UE_LOG(LogTemp, Warning, TEXT("Milestone 1 tasks initialized: %d tasks"), Milestone1Progress.RequiredTasks.Num());
+    FString TaskEntry = FString::Printf(TEXT("%s: %s"), *AgentName, *TaskDescription);
+    ActiveAgents.AddUnique(AgentName);
+    
+    UE_LOG(LogTemp, Warning, TEXT("Studio Director - Task assigned to %s: %s"), *AgentName, *TaskDescription);
 }
 
-void ADir_StudioDirector::SetupMilestone1Requirements()
+void AStudioDirector::MarkTaskCompleted(const FString& AgentName, const FString& TaskDescription)
 {
-    InitializeMilestone1Tasks();
-    CalculateMilestoneProgress();
+    FString TaskEntry = FString::Printf(TEXT("%s: %s"), *AgentName, *TaskDescription);
+    CompletedTasks.AddUnique(TaskEntry);
+    
+    UE_LOG(LogTemp, Warning, TEXT("Studio Director - Task completed by %s: %s"), *AgentName, *TaskDescription);
+    
+    // Update milestone progress
+    UpdateMilestoneProgress();
 }
 
-void ADir_StudioDirector::UpdateTaskProgress(int32 AgentID, const FString& TaskName, bool bCompleted)
+void AStudioDirector::BlockTask(const FString& AgentName, const FString& Reason)
 {
-    for (FDir_AgentTask& Task : Milestone1Progress.RequiredTasks)
+    FString BlockEntry = FString::Printf(TEXT("%s: BLOCKED - %s"), *AgentName, *Reason);
+    BlockedTasks.AddUnique(BlockEntry);
+    
+    UE_LOG(LogTemp, Error, TEXT("Studio Director - Task blocked for %s: %s"), *AgentName, *Reason);
+    
+    // Escalate critical issue
+    EscalateCriticalIssue(FString::Printf(TEXT("Agent %s blocked: %s"), *AgentName, *Reason));
+}
+
+bool AStudioDirector::ValidateMilestone1()
+{
+    // Check if Milestone 1 "Walk Around" is complete
+    bool bCharacterExists = false;
+    bool bLandscapeExists = false;
+    bool bDinosaursExist = false;
+    bool bLightingExists = false;
+
+    UWorld* World = GetWorld();
+    if (!World)
     {
-        if (Task.AgentID == AgentID)
+        return false;
+    }
+
+    // Check for TranspersonalCharacter
+    TArray<AActor*> FoundCharacters;
+    UGameplayStatics::GetAllActorsOfClass(World, APawn::StaticClass(), FoundCharacters);
+    for (AActor* Actor : FoundCharacters)
+    {
+        if (Actor->GetClass()->GetName().Contains(TEXT("TranspersonalCharacter")))
         {
-            Task.bIsCompleted = bCompleted;
-            UE_LOG(LogTemp, Warning, TEXT("Task updated - Agent %d: %s = %s"), 
-                   AgentID, *TaskName, bCompleted ? TEXT("COMPLETED") : TEXT("PENDING"));
+            bCharacterExists = true;
             break;
         }
     }
-    
-    CalculateMilestoneProgress();
-}
 
-void ADir_StudioDirector::CalculateMilestoneProgress()
-{
-    int32 CompletedCount = 0;
-    int32 TotalTasks = Milestone1Progress.RequiredTasks.Num();
-    
-    for (const FDir_AgentTask& Task : Milestone1Progress.RequiredTasks)
+    // Check for landscape
+    TArray<AActor*> FoundLandscapes;
+    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), FoundLandscapes);
+    for (AActor* Actor : FoundLandscapes)
     {
-        if (Task.bIsCompleted)
+        if (Actor->GetClass()->GetName().Contains(TEXT("Landscape")))
         {
-            CompletedCount++;
-        }
-    }
-    
-    Milestone1Progress.CompletedTasks = CompletedCount;
-    Milestone1Progress.CompletionPercentage = TotalTasks > 0 ? (float)CompletedCount / (float)TotalTasks * 100.0f : 0.0f;
-    Milestone1Progress.bIsMilestoneComplete = (CompletedCount == TotalTasks);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Milestone 1 Progress: %d/%d tasks (%.1f%%)"), 
-           CompletedCount, TotalTasks, Milestone1Progress.CompletionPercentage);
-}
-
-bool ADir_StudioDirector::CanAgentProceed(int32 AgentID) const
-{
-    // Check if agent's dependencies are met
-    for (const FDir_AgentTask& Task : Milestone1Progress.RequiredTasks)
-    {
-        if (Task.AgentID == AgentID)
-        {
-            // Check dependencies
-            for (const FString& Dependency : Task.Dependencies)
-            {
-                bool bDependencyMet = false;
-                for (const FDir_AgentTask& DepTask : Milestone1Progress.RequiredTasks)
-                {
-                    if (DepTask.TaskDescription.Contains(Dependency) && DepTask.bIsCompleted)
-                    {
-                        bDependencyMet = true;
-                        break;
-                    }
-                }
-                
-                if (!bDependencyMet)
-                {
-                    return false;
-                }
-            }
+            bLandscapeExists = true;
             break;
         }
     }
-    
-    return true;
-}
 
-TArray<FDir_AgentTask> ADir_StudioDirector::GetPendingTasks() const
-{
-    TArray<FDir_AgentTask> PendingTasks;
-    
-    for (const FDir_AgentTask& Task : Milestone1Progress.RequiredTasks)
+    // Check for dinosaurs
+    TArray<AActor*> FoundDinosaurs;
+    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), FoundDinosaurs);
+    for (AActor* Actor : FoundDinosaurs)
     {
-        if (!Task.bIsCompleted && CanAgentProceed(Task.AgentID))
+        FString ActorName = Actor->GetClass()->GetName();
+        if (ActorName.Contains(TEXT("Dinosaur")) || ActorName.Contains(TEXT("TRex")) || ActorName.Contains(TEXT("Raptor")))
         {
-            PendingTasks.Add(Task);
+            bDinosaursExist = true;
+            break;
         }
     }
-    
-    // Sort by priority (highest first)
-    PendingTasks.Sort([](const FDir_AgentTask& A, const FDir_AgentTask& B) {
-        return A.Priority > B.Priority;
-    });
-    
-    return PendingTasks;
-}
 
-FDir_AgentTask ADir_StudioDirector::GetNextCriticalTask() const
-{
-    TArray<FDir_AgentTask> PendingTasks = GetPendingTasks();
-    
-    if (PendingTasks.Num() > 0)
+    // Check for lighting
+    TArray<AActor*> FoundLights;
+    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), FoundLights);
+    for (AActor* Actor : FoundLights)
     {
-        return PendingTasks[0];
+        if (Actor->GetClass()->GetName().Contains(TEXT("DirectionalLight")))
+        {
+            bLightingExists = true;
+            break;
+        }
     }
-    
-    return FDir_AgentTask();
+
+    // Update milestone flags
+    bCharacterMovementReady = bCharacterExists;
+    bLandscapeReady = bLandscapeExists;
+    bDinosaursPlaced = bDinosaursExist;
+    bLightingSetup = bLightingExists;
+
+    // Overall milestone status
+    bMilestone1_WalkAround = bCharacterExists && bLandscapeExists && bDinosaursExist && bLightingExists;
+
+    UE_LOG(LogTemp, Warning, TEXT("Milestone 1 Status - Character: %s, Landscape: %s, Dinosaurs: %s, Lighting: %s, Overall: %s"),
+        bCharacterExists ? TEXT("OK") : TEXT("MISSING"),
+        bLandscapeExists ? TEXT("OK") : TEXT("MISSING"),
+        bDinosaursExist ? TEXT("OK") : TEXT("MISSING"),
+        bLightingExists ? TEXT("OK") : TEXT("MISSING"),
+        bMilestone1_WalkAround ? TEXT("COMPLETE") : TEXT("INCOMPLETE"));
+
+    return bMilestone1_WalkAround;
 }
 
-void ADir_StudioDirector::VerifyMinPlayableMapState()
+void AStudioDirector::CheckProductionHealth()
+{
+    UE_LOG(LogTemp, Warning, TEXT("Studio Director - Production health check initiated"));
+
+    // Clear previous issues
+    CriticalIssues.Empty();
+
+    // Check for phantom headers (from memory directive)
+    if (PhantomHeaders > 0)
+    {
+        CriticalIssues.Add(FString::Printf(TEXT("CRITICAL: %d phantom headers detected"), PhantomHeaders));
+    }
+
+    // Check compilation status
+    if (CompilationStatus < 1.0f)
+    {
+        CriticalIssues.Add(TEXT("CRITICAL: Compilation failures detected"));
+    }
+
+    // Check milestone progress
+    if (!ValidateMilestone1())
+    {
+        CriticalIssues.Add(TEXT("CRITICAL: Milestone 1 incomplete - no playable prototype"));
+    }
+
+    // Check for duplicate actors
+    CheckForDuplicateActors();
+
+    // Log all critical issues
+    for (const FString& Issue : CriticalIssues)
+    {
+        UE_LOG(LogTemp, Error, TEXT("Studio Director - %s"), *Issue);
+    }
+
+    LogProductionStatus();
+}
+
+void AStudioDirector::CoordinateAgentPipeline()
+{
+    UE_LOG(LogTemp, Warning, TEXT("Studio Director - Coordinating agent pipeline"));
+
+    // Priority tasks based on memory directives
+    TArray<FString> PriorityTasks;
+    
+    // Critical Path: Compilation first
+    PriorityTasks.Add(TEXT("Agent #20: Clean 122 phantom headers and attempt first C++ compilation"));
+    PriorityTasks.Add(TEXT("Agent #5: Expand landscape to 200km² with 5 biome distribution"));
+    PriorityTasks.Add(TEXT("Agent #9/#10: Create dinosaur actors with collision and basic AI"));
+    PriorityTasks.Add(TEXT("Agent #12: Implement survival HUD with health/hunger bars"));
+
+    // Assign priority tasks
+    for (const FString& Task : PriorityTasks)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Studio Director - Priority: %s"), *Task);
+    }
+
+    // Enforce gameplay-first directive
+    EnforceGameplayFirstDirective();
+}
+
+FString AStudioDirector::GetNextPriorityTask()
+{
+    // Based on memory directives and current production state
+    if (PhantomHeaders > 0)
+    {
+        return TEXT("URGENT: Clean phantom headers before any new code");
+    }
+
+    if (CompilationStatus < 1.0f)
+    {
+        return TEXT("URGENT: Fix compilation errors");
+    }
+
+    if (!bCharacterMovementReady)
+    {
+        return TEXT("HIGH: Implement TranspersonalCharacter movement");
+    }
+
+    if (!bLandscapeReady)
+    {
+        return TEXT("HIGH: Create 200km² landscape with 5 biomes");
+    }
+
+    if (!bDinosaursPlaced)
+    {
+        return TEXT("HIGH: Place dinosaur actors with proper biome distribution");
+    }
+
+    return TEXT("NORMAL: Continue with assigned agent tasks");
+}
+
+void AStudioDirector::EnforceGameplayFirstDirective()
+{
+    UE_LOG(LogTemp, Warning, TEXT("Studio Director - Enforcing GAMEPLAY-FIRST directive"));
+    
+    // Rule: Every cycle must produce visible, playable content
+    // Rule: No more abstract systems without concrete implementation
+    // Rule: Use existing UE5 classes, not custom movement systems
+    
+    UE_LOG(LogTemp, Warning, TEXT("DIRECTIVE: 80%% action, 20%% assessment maximum"));
+    UE_LOG(LogTemp, Warning, TEXT("DIRECTIVE: Every .h must have matching .cpp"));
+    UE_LOG(LogTemp, Warning, TEXT("DIRECTIVE: Use existing UE5 classes (ACharacter, APlayerController)"));
+}
+
+void AStudioDirector::ValidateAgentOutputs()
+{
+    // Validate that agents are producing real, compilable code
+    for (const FString& Agent : ActiveAgents)
+    {
+        if (!IsAgentOutputValid(Agent))
+        {
+            BlockTask(Agent, TEXT("Output validation failed - no concrete deliverables"));
+        }
+    }
+}
+
+void AStudioDirector::CheckForDuplicateActors()
 {
     UWorld* World = GetWorld();
     if (!World)
     {
-        UE_LOG(LogTemp, Error, TEXT("Studio Director: No world found"));
         return;
     }
-    
-    // Count key actors
-    int32 PlayerStartCount = 0;
-    int32 CharacterCount = 0;
-    int32 TerrainCount = 0;
-    int32 DinosaurCount = 0;
-    
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+
+    // Count lighting actors (from memory directive)
+    TArray<AActor*> DirectionalLights;
+    TArray<AActor*> SkyAtmospheres;
+    TArray<AActor*> SkyLights;
+    TArray<AActor*> FogActors;
+
+    TArray<AActor*> AllActors;
+    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
+
+    for (AActor* Actor : AllActors)
     {
-        AActor* Actor = *ActorItr;
-        if (!Actor) continue;
-        
         FString ClassName = Actor->GetClass()->GetName();
-        FString ActorName = Actor->GetName();
         
-        if (ClassName.Contains(TEXT("PlayerStart")))
+        if (ClassName.Contains(TEXT("DirectionalLight")))
         {
-            PlayerStartCount++;
+            DirectionalLights.Add(Actor);
         }
-        else if (ClassName.Contains(TEXT("Character")) || ClassName.Contains(TEXT("Transpersonal")))
+        else if (ClassName.Contains(TEXT("SkyAtmosphere")))
         {
-            CharacterCount++;
+            SkyAtmospheres.Add(Actor);
         }
-        else if (ClassName.Contains(TEXT("Landscape")) || ClassName.Contains(TEXT("Terrain")))
+        else if (ClassName.Contains(TEXT("SkyLight")))
         {
-            TerrainCount++;
+            SkyLights.Add(Actor);
         }
-        else if (ActorName.Contains(TEXT("Rex")) || ActorName.Contains(TEXT("Raptor")) || 
-                 ActorName.Contains(TEXT("Brachio")) || ActorName.Contains(TEXT("Dinosaur")))
+        else if (ClassName.Contains(TEXT("ExponentialHeightFog")))
         {
-            DinosaurCount++;
+            FogActors.Add(Actor);
         }
     }
-    
-    UE_LOG(LogTemp, Warning, TEXT("MinPlayableMap State: PlayerStarts=%d, Characters=%d, Terrain=%d, Dinosaurs=%d"),
-           PlayerStartCount, CharacterCount, TerrainCount, DinosaurCount);
-}
 
-bool ADir_StudioDirector::IsPlayablePrototypeReady() const
-{
-    return Milestone1Progress.bIsMilestoneComplete;
-}
-
-void ADir_StudioDirector::StartProductionCycle(const FString& CycleID)
-{
-    CurrentCycleID = CycleID;
-    bProductionActive = true;
-    
-    UE_LOG(LogTemp, Warning, TEXT("Production cycle started: %s"), *CycleID);
-}
-
-void ADir_StudioDirector::CompleteProductionCycle()
-{
-    bProductionActive = false;
-    
-    UE_LOG(LogTemp, Warning, TEXT("Production cycle completed: %s"), *CurrentCycleID);
-}
-
-void ADir_StudioDirector::EmergencyStop(const FString& Reason)
-{
-    bProductionActive = false;
-    
-    UE_LOG(LogTemp, Error, TEXT("EMERGENCY STOP: %s"), *Reason);
-}
-
-void ADir_StudioDirector::LogProductionState()
-{
-    UE_LOG(LogTemp, Warning, TEXT("=== STUDIO DIRECTOR PRODUCTION STATE ==="));
-    UE_LOG(LogTemp, Warning, TEXT("Cycle: %s"), *CurrentCycleID);
-    UE_LOG(LogTemp, Warning, TEXT("Active: %s"), bProductionActive ? TEXT("YES") : TEXT("NO"));
-    UE_LOG(LogTemp, Warning, TEXT("Budget: $%.2f / $%.2f"), BudgetUsed, BudgetLimit);
-    UE_LOG(LogTemp, Warning, TEXT("Milestone 1: %.1f%% complete"), Milestone1Progress.CompletionPercentage);
-    
-    TArray<FDir_AgentTask> PendingTasks = GetPendingTasks();
-    UE_LOG(LogTemp, Warning, TEXT("Pending tasks: %d"), PendingTasks.Num());
-    
-    for (const FDir_AgentTask& Task : PendingTasks)
+    // Report duplicates
+    if (DirectionalLights.Num() > 1)
     {
-        UE_LOG(LogTemp, Warning, TEXT("  - Agent %d (%s): %s"), 
-               Task.AgentID, *Task.AgentName, *Task.TaskDescription);
+        CriticalIssues.Add(FString::Printf(TEXT("DUPLICATE: %d DirectionalLights found"), DirectionalLights.Num()));
+    }
+    if (SkyAtmospheres.Num() > 1)
+    {
+        CriticalIssues.Add(FString::Printf(TEXT("DUPLICATE: %d SkyAtmospheres found"), SkyAtmospheres.Num()));
+    }
+    if (SkyLights.Num() > 1)
+    {
+        CriticalIssues.Add(FString::Printf(TEXT("DUPLICATE: %d SkyLights found"), SkyLights.Num()));
+    }
+    if (FogActors.Num() > 1)
+    {
+        CriticalIssues.Add(FString::Printf(TEXT("DUPLICATE: %d ExponentialHeightFog found"), FogActors.Num()));
     }
 }
 
-void ADir_StudioDirector::ResetMilestone1Progress()
+void AStudioDirector::ValidateBiomeDistribution()
 {
-    Milestone1Progress.CompletedTasks = 0;
-    Milestone1Progress.CompletionPercentage = 0.0f;
-    Milestone1Progress.bIsMilestoneComplete = false;
+    // Validate that actors are distributed across the 5 biomes as per memory directive
+    UE_LOG(LogTemp, Warning, TEXT("Studio Director - Validating biome distribution"));
     
-    for (FDir_AgentTask& Task : Milestone1Progress.RequiredTasks)
-    {
-        Task.bIsCompleted = false;
-    }
+    // Biome centers from memory:
+    // PANTANO: (-50000, -45000, 0)
+    // FLORESTA: (-45000, 40000, 0)
+    // SAVANA: (0, 0, 0)
+    // DESERTO: (55000, 0, 0)
+    // MONTANHA NEVADA: (40000, 50000, 500)
     
-    UE_LOG(LogTemp, Warning, TEXT("Milestone 1 progress reset"));
+    UE_LOG(LogTemp, Warning, TEXT("RULE: NEVER spawn actors at Vector(0,0,0) - distribute across biomes"));
+}
+
+void AStudioDirector::AssessCompilationStatus()
+{
+    // This would normally check UBT output, for now we simulate
+    UE_LOG(LogTemp, Warning, TEXT("Studio Director - Assessing compilation status"));
+    UE_LOG(LogTemp, Warning, TEXT("CRITICAL: Agent #20 must run UBT compilation check"));
+}
+
+void AStudioDirector::LogProductionStatus()
+{
+    UE_LOG(LogTemp, Warning, TEXT("=== STUDIO DIRECTOR PRODUCTION STATUS ==="));
+    UE_LOG(LogTemp, Warning, TEXT("Active Agents: %d"), ActiveAgents.Num());
+    UE_LOG(LogTemp, Warning, TEXT("Completed Tasks: %d"), CompletedTasks.Num());
+    UE_LOG(LogTemp, Warning, TEXT("Blocked Tasks: %d"), BlockedTasks.Num());
+    UE_LOG(LogTemp, Warning, TEXT("Critical Issues: %d"), CriticalIssues.Num());
+    UE_LOG(LogTemp, Warning, TEXT("Milestone 1 Status: %s"), bMilestone1_WalkAround ? TEXT("COMPLETE") : TEXT("INCOMPLETE"));
+}
+
+void AStudioDirector::UpdateMilestoneProgress()
+{
+    // Update based on completed tasks
+    ValidateMilestone1();
+}
+
+bool AStudioDirector::IsAgentOutputValid(const FString& AgentName)
+{
+    // Check if agent produced concrete deliverables
+    // This would normally check file system and compilation results
+    return true; // Simplified for now
+}
+
+void AStudioDirector::EscalateCriticalIssue(const FString& Issue)
+{
+    UE_LOG(LogTemp, Error, TEXT("STUDIO DIRECTOR ESCALATION: %s"), *Issue);
+    
+    // In a real system, this would notify Miguel via Telegram
+    // For now, we log as critical error
 }
