@@ -1,183 +1,98 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Subsystems/GameInstanceSubsystem.h"
+#include "Components/ActorComponent.h"
 #include "Engine/TimerHandle.h"
-#include "SharedTypes.h"
+#include "TranspersonalGame/SharedTypes.h"
 #include "BuildIntegrationManager.generated.h"
 
 DECLARE_LOG_CATEGORY_EXTERN(LogBuildIntegration, Log, All);
 
 /**
- * Resultado de compilação
+ * Sistema de gestão de integração e build do projeto
+ * Responsável por validar a integridade do código, detectar problemas
+ * e garantir que todos os sistemas estão funcionais
  */
-UENUM(BlueprintType)
-enum class EBuild_CompilationResult : uint8
-{
-    Unknown     UMETA(DisplayName = "Desconhecido"),
-    Success     UMETA(DisplayName = "Sucesso"),
-    Failed      UMETA(DisplayName = "Falhado"),
-    InProgress  UMETA(DisplayName = "Em Progresso")
-};
-
-/**
- * Relatório de validação do build
- */
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_ValidationReport
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly, Category = "Build Validation")
-    FDateTime ValidationTime;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Build Validation")
-    int32 TotalHeaderFiles = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Build Validation")
-    int32 TotalCppFiles = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Build Validation")
-    int32 OrphanHeaders = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Build Validation")
-    TArray<FString> OrphanHeadersList;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Build Validation")
-    EBuild_CompilationResult CompilationResult = EBuild_CompilationResult::Unknown;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Build Validation")
-    int32 CompilationErrors = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Build Validation")
-    FDateTime LastCompilationTime;
-
-    FBuild_ValidationReport()
-    {
-        ValidationTime = FDateTime::MinValue();
-        LastCompilationTime = FDateTime::MinValue();
-    }
-};
-
-/**
- * Gestor de integração e build do projecto
- * Responsável por validar a estrutura do código, detectar problemas de compilação
- * e manter a integridade do build entre ciclos de desenvolvimento
- */
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UBuildIntegrationManager : public UGameInstanceSubsystem
+UCLASS(ClassGroup=(TranspersonalGame), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UBuildIntegrationManager : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
     UBuildIntegrationManager();
 
-    // USubsystem interface
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
+protected:
+    virtual void BeginPlay() override;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
-    /**
-     * Valida a estrutura do projecto
-     * Verifica se todos os .h têm .cpp correspondente
-     * @return true se a estrutura está válida
-     */
+public:
+    /** Executar validação completa de integração */
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool ValidateProjectStructure();
-
-    /**
-     * Testa a compilação do projecto
-     * @return true se a compilação foi bem-sucedida
-     */
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool TestCompilation();
-
-    /**
-     * Obtém o relatório de validação actual
-     * @return Relatório com estado detalhado
-     */
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    FBuild_ValidationReport GetValidationReport() const;
-
-    /**
-     * Activa/desactiva a validação automática
-     * @param bEnabled Se true, activa validação periódica
-     */
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    void SetValidationEnabled(bool bEnabled);
-
-    /**
-     * Força uma validação manual imediata
-     */
+    void PerformIntegrationValidation();
+    
+    /** Forçar validação imediata */
     UFUNCTION(BlueprintCallable, Category = "Build Integration", CallInEditor)
     void ForceValidation();
-
-    /**
-     * Obtém lista de headers órfãos
-     * @return Array com caminhos dos ficheiros .h sem .cpp
-     */
+    
+    /** Obter relatório detalhado do estado de integração */
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    TArray<FString> GetOrphanHeaders() const;
-
-    /**
-     * Obtém número de headers órfãos
-     * @return Número de ficheiros .h sem .cpp correspondente
-     */
+    FString GetIntegrationReport() const;
+    
+    /** Configurar intervalo entre validações automáticas */
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    int32 GetOrphanHeaderCount() const;
+    void SetValidationInterval(float NewInterval);
 
-    /**
-     * Obtém resultado da última compilação
-     * @return Estado da última tentativa de compilação
-     */
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    EBuild_CompilationResult GetLastCompilationResult() const;
-
-    /**
-     * Obtém número de erros de compilação
-     * @return Número de erros encontrados na última compilação
-     */
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    int32 GetCompilationErrorCount() const;
-
-protected:
-    /**
-     * Validação periódica executada por timer
-     */
-    void PeriodicValidation();
+    // Propriedades de estado (somente leitura via Blueprint)
+    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
+    EBuild_IntegrationState IntegrationState;
+    
+    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
+    int32 TotalModulesLoaded;
+    
+    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
+    int32 FailedModulesCount;
+    
+    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
+    int32 OrphanHeadersCount;
+    
+    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
+    int32 DuplicateActorsCount;
+    
+    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
+    float LastValidationTime;
 
 private:
-    /** Se a validação automática está activa */
-    UPROPERTY(EditAnywhere, Category = "Build Integration", meta = (AllowPrivateAccess = "true"))
-    bool bIsEnabled;
+    /** Validar módulos C++ carregados */
+    void ValidateLoadedModules();
+    
+    /** Verificar headers sem implementação .cpp */
+    void CheckOrphanHeaders();
+    
+    /** Verificar actores duplicados no mapa */
+    void CheckDuplicateActors();
+    
+    /** Validar dependências entre sistemas */
+    void ValidateSystemDependencies();
+    
+    /** Validar sistema de geração de mundo */
+    bool ValidateWorldGeneration();
+    
+    /** Validar sistema de personagem */
+    bool ValidateCharacterSystem();
+    
+    /** Validar GameMode */
+    bool ValidateGameMode();
+    
+    /** Atualizar estado de integração baseado nos resultados */
+    void UpdateIntegrationState();
 
-    /** Intervalo entre validações automáticas (segundos) */
-    UPROPERTY(EditAnywhere, Category = "Build Integration", meta = (AllowPrivateAccess = "true"))
-    float ValidationIntervalSeconds;
-
-    /** Timer para validações periódicas */
+    // Configuração
+    UPROPERTY(EditAnywhere, Category = "Build Integration", meta = (ClampMin = "10.0", ClampMax = "300.0"))
+    float ValidationInterval;
+    
+    // Timer para validações automáticas
     FTimerHandle ValidationTimerHandle;
-
-    /** Timestamp da última validação */
-    FDateTime LastValidationTime;
-
-    /** Número total de ficheiros .h encontrados */
-    int32 TotalHeaderFiles;
-
-    /** Número total de ficheiros .cpp encontrados */
-    int32 TotalCppFiles;
-
-    /** Número de headers órfãos (.h sem .cpp) */
-    int32 OrphanHeaders;
-
-    /** Lista de caminhos dos headers órfãos */
-    TArray<FString> OrphanHeadersList;
-
-    /** Resultado da última compilação */
-    EBuild_CompilationResult LastCompilationResult;
-
-    /** Número de erros de compilação */
-    int32 CompilationErrors;
-
-    /** Timestamp da última compilação */
-    FDateTime LastCompilationTime;
+    
+    // Resultados da validação de sistemas
+    TMap<FString, bool> SystemValidationResults;
 };
