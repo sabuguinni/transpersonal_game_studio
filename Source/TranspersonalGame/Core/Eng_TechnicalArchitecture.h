@@ -1,258 +1,192 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/GameInstanceSubsystem.h"
 #include "Engine/World.h"
-#include "GameFramework/Actor.h"
-#include "Components/ActorComponent.h"
 #include "SharedTypes.h"
 #include "Eng_TechnicalArchitecture.generated.h"
 
 /**
- * Technical Architecture Manager - Engine Architect Agent #2
- * Defines and enforces the core technical architecture for the entire game
- * Ensures all 19 agents follow consistent patterns and standards
+ * Engine Architecture Technical Rules and Validation System
+ * 
+ * CRITICAL RESPONSIBILITIES:
+ * 1. Enforce compilation rules across all agents
+ * 2. Validate biome coordinate system
+ * 3. Manage module dependencies and header structure
+ * 4. Prevent duplicate type definitions
+ * 5. Ensure .h/.cpp pairing compliance
+ * 
+ * This system is the technical foundation that all other agents must follow.
  */
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_SystemRequirements
+struct TRANSPERSONALGAME_API FEng_BiomeValidationData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System Requirements")
-    FString SystemName;
+    UPROPERTY(BlueprintReadOnly, Category = "Biome")
+    FVector Center;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System Requirements")
-    int32 MinMemoryMB;
+    UPROPERTY(BlueprintReadOnly, Category = "Biome")
+    FVector MinBounds;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System Requirements")
-    float MaxCPUUsagePercent;
+    UPROPERTY(BlueprintReadOnly, Category = "Biome")
+    FVector MaxBounds;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System Requirements")
-    int32 MaxDrawCalls;
+    UPROPERTY(BlueprintReadOnly, Category = "Biome")
+    EBiomeType BiomeType;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System Requirements")
-    bool bRequiresWorldPartition;
+    UPROPERTY(BlueprintReadOnly, Category = "Biome")
+    FString BiomeName;
 
-    FEng_SystemRequirements()
+    FEng_BiomeValidationData()
     {
-        SystemName = TEXT("Unknown");
-        MinMemoryMB = 512;
-        MaxCPUUsagePercent = 10.0f;
-        MaxDrawCalls = 1000;
-        bRequiresWorldPartition = false;
+        Center = FVector::ZeroVector;
+        MinBounds = FVector::ZeroVector;
+        MaxBounds = FVector::ZeroVector;
+        BiomeType = EBiomeType::Savanna;
+        BiomeName = TEXT("Unknown");
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_ArchitectureRule
+struct TRANSPERSONALGAME_API FEng_CompilationRule
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture Rule")
+    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
     FString RuleName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture Rule")
+    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
     FString Description;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture Rule")
-    EDir_Priority Priority;
+    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
+    bool bIsCritical;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture Rule")
-    bool bMandatory;
+    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
+    int32 ViolationCount;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture Rule")
-    TArray<FString> AffectedAgents;
-
-    FEng_ArchitectureRule()
+    FEng_CompilationRule()
     {
-        RuleName = TEXT("Default Rule");
+        RuleName = TEXT("Unknown");
         Description = TEXT("No description");
-        Priority = EDir_Priority::Medium;
-        bMandatory = false;
+        bIsCritical = false;
+        ViolationCount = 0;
     }
 };
 
 UENUM(BlueprintType)
-enum class EEng_ArchitectureLayer : uint8
+enum class EEng_ArchitectureStatus : uint8
 {
-    Core            UMETA(DisplayName = "Core Systems"),
-    Gameplay        UMETA(DisplayName = "Gameplay Systems"),
-    Presentation    UMETA(DisplayName = "Presentation Layer"),
-    Platform        UMETA(DisplayName = "Platform Layer"),
-    Tools           UMETA(DisplayName = "Tools & Pipeline")
+    Unknown         UMETA(DisplayName = "Unknown"),
+    Validating      UMETA(DisplayName = "Validating"),
+    Valid           UMETA(DisplayName = "Valid"),
+    HasWarnings     UMETA(DisplayName = "Has Warnings"),
+    HasErrors       UMETA(DisplayName = "Has Errors"),
+    Critical        UMETA(DisplayName = "Critical Failure")
 };
 
-UENUM(BlueprintType)
-enum class EEng_SystemCategory : uint8
-{
-    Physics         UMETA(DisplayName = "Physics & Collision"),
-    Rendering       UMETA(DisplayName = "Rendering & Graphics"),
-    Audio           UMETA(DisplayName = "Audio & Sound"),
-    AI              UMETA(DisplayName = "AI & Behavior"),
-    Networking      UMETA(DisplayName = "Networking"),
-    Input           UMETA(DisplayName = "Input & Controls"),
-    UI              UMETA(DisplayName = "User Interface"),
-    World           UMETA(DisplayName = "World Generation"),
-    Character       UMETA(DisplayName = "Character Systems"),
-    Combat          UMETA(DisplayName = "Combat & Interaction")
-};
-
+/**
+ * Technical Architecture Manager - Core System
+ * 
+ * This subsystem enforces all technical rules and validates the codebase structure.
+ * It runs continuously and blocks problematic code from being integrated.
+ */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UEng_TechnicalArchitecture : public UActorComponent
+class TRANSPERSONALGAME_API UEng_TechnicalArchitecture : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
     UEng_TechnicalArchitecture();
 
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+
+    /**
+     * BIOME COORDINATE VALIDATION
+     * All agents MUST use these functions for spawn validation
+     */
+    UFUNCTION(BlueprintCallable, Category = "Architecture|Biome")
+    bool IsValidBiomeLocation(const FVector& Location, EBiomeType BiomeType) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture|Biome")
+    EBiomeType GetBiomeAtLocation(const FVector& Location) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture|Biome")
+    FVector GetRandomLocationInBiome(EBiomeType BiomeType) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture|Biome")
+    FEng_BiomeValidationData GetBiomeData(EBiomeType BiomeType) const;
+
+    /**
+     * COMPILATION RULE ENFORCEMENT
+     */
+    UFUNCTION(BlueprintCallable, Category = "Architecture|Compilation")
+    bool ValidateHeaderCppPairing(const FString& HeaderPath) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture|Compilation")
+    bool ValidateTypeUniqueness(const FString& TypeName) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture|Compilation")
+    TArray<FEng_CompilationRule> GetActiveRules() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture|Compilation")
+    EEng_ArchitectureStatus GetSystemStatus() const;
+
+    /**
+     * MODULE DEPENDENCY VALIDATION
+     */
+    UFUNCTION(BlueprintCallable, Category = "Architecture|Modules")
+    bool ValidateModuleDependency(const FString& FromModule, const FString& ToModule) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture|Modules")
+    TArray<FString> GetRequiredModules() const;
+
+    /**
+     * AGENT COORDINATION
+     */
+    UFUNCTION(BlueprintCallable, Category = "Architecture|Agents")
+    bool CanAgentProceed(int32 AgentID, const FString& TaskType) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture|Agents")
+    void RegisterAgentTask(int32 AgentID, const FString& TaskType, const FString& Description);
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture|Agents")
+    void ReportAgentCompletion(int32 AgentID, bool bSuccess, const FString& Result);
+
 protected:
-    virtual void BeginPlay() override;
+    /**
+     * BIOME DEFINITIONS
+     * These coordinates are MANDATORY and come from brain memories
+     */
+    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
+    TMap<EBiomeType, FEng_BiomeValidationData> BiomeDefinitions;
 
-    // Core Architecture Rules
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture Rules")
-    TArray<FEng_ArchitectureRule> CoreRules;
+    /**
+     * COMPILATION RULES
+     */
+    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
+    TArray<FEng_CompilationRule> CompilationRules;
 
-    // System Requirements
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System Requirements")
-    TArray<FEng_SystemRequirements> SystemRequirements;
+    /**
+     * SYSTEM STATUS
+     */
+    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
+    EEng_ArchitectureStatus CurrentStatus;
 
-    // Performance Targets
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 TargetFPS_PC;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 TargetFPS_Console;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxMemoryUsageMB;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float MaxFrameTimeMS;
-
-    // World Partition Settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Partition")
-    bool bEnforceWorldPartition;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Partition")
-    float WorldPartitionCellSize;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World Partition")
-    int32 MaxLoadedCells;
-
-    // Lumen Settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lumen")
-    bool bEnableLumen;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lumen")
-    float LumenSceneDetailLevel;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lumen")
-    int32 LumenMaxTraceDistance;
-
-    // Nanite Settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Nanite")
-    bool bEnableNanite;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Nanite")
-    int32 NaniteMaxTriangles;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Nanite")
-    float NaniteLODBias;
-
-public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
-
-    // Architecture Validation Functions
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool ValidateSystemCompliance(const FString& SystemName);
-
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void EnforceArchitectureRules();
-
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    FEng_SystemRequirements GetSystemRequirements(const FString& SystemName);
-
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void RegisterNewSystem(const FString& SystemName, EEng_SystemCategory Category, const FEng_SystemRequirements& Requirements);
-
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    TArray<FString> GetNonCompliantSystems();
-
-    // Performance Monitoring
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    bool CheckPerformanceTargets();
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    float GetCurrentFrameTime();
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    int32 GetCurrentMemoryUsage();
-
-    // Milestone 1 Validation
-    UFUNCTION(BlueprintCallable, Category = "Milestone")
-    bool ValidateMilestone1Requirements();
-
-    UFUNCTION(BlueprintCallable, Category = "Milestone")
-    int32 GetMilestone1Progress();
-
-    UFUNCTION(BlueprintCallable, Category = "Milestone")
-    TArray<FString> GetMissingMilestone1Requirements();
-
-    // Agent Coordination
-    UFUNCTION(BlueprintCallable, Category = "Coordination")
-    void NotifyAgentProgress(int32 AgentID, const FString& TaskCompleted);
-
-    UFUNCTION(BlueprintCallable, Category = "Coordination")
-    bool IsAgentReadyForWork(int32 AgentID);
-
-    UFUNCTION(BlueprintCallable, Category = "Coordination")
-    TArray<FString> GetBlockedAgents();
+    /**
+     * AGENT TRACKING
+     */
+    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
+    TMap<int32, FString> ActiveAgentTasks;
 
 private:
-    // Internal tracking
-    TMap<FString, bool> SystemComplianceStatus;
-    TMap<int32, FString> AgentLastTask;
-    TMap<int32, float> AgentLastUpdateTime;
-
-    // Architecture enforcement
-    void ValidateWorldPartitionSetup();
-    void ValidateLumenConfiguration();
-    void ValidateNaniteSettings();
-    void CheckSystemDependencies();
+    void InitializeBiomeDefinitions();
+    void InitializeCompilationRules();
+    void ValidateCurrentCodebase();
     
-    // Performance monitoring
-    float LastFrameTime;
-    int32 LastMemoryUsage;
-    TArray<float> FrameTimeHistory;
-    
-    // Milestone tracking
-    bool bMilestone1CharacterMovement;
-    bool bMilestone1TerrainVariation;
-    bool bMilestone1DinosaurMeshes;
-    bool bMilestone1LightingSystem;
-    bool bMilestone1PlayerInteraction;
-};
-
-/**
- * Technical Architecture Actor - Spawnable in levels for architecture management
- */
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AEng_TechnicalArchitectureActor : public AActor
-{
-    GENERATED_BODY()
-
-public:
-    AEng_TechnicalArchitectureActor();
-
-protected:
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class UEng_TechnicalArchitecture* ArchitectureComponent;
-
-    virtual void BeginPlay() override;
-
-public:
-    virtual void Tick(float DeltaTime) override;
-
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    UEng_TechnicalArchitecture* GetArchitectureComponent() const { return ArchitectureComponent; }
+    bool ValidateActorSpawnLocation(const FVector& Location) const;
+    void LogArchitectureViolation(const FString& Violation, bool bIsCritical = false) const;
 };
