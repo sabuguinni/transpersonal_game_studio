@@ -1,116 +1,63 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/GameInstanceSubsystem.h"
-#include "Engine/Engine.h"
-#include "Sound/SoundBase.h"
-#include "Components/AudioComponent.h"
-#include "../SharedTypes.h"
+#include "Subsystems/GameInstanceSubsystem.h"
+#include "Engine/TriggerBox.h"
+#include "SharedTypes.h"
 #include "NarrativeManager.generated.h"
 
-// Narrative Event Types
-UENUM(BlueprintType)
-enum class ENarr_EventType : uint8
-{
-    DinosaurSighting    UMETA(DisplayName = "Dinosaur Sighting"),
-    FossilDiscovery     UMETA(DisplayName = "Fossil Discovery"),
-    ThreatDetection     UMETA(DisplayName = "Threat Detection"),
-    BiomeTransition     UMETA(DisplayName = "Biome Transition"),
-    SafetyWarning       UMETA(DisplayName = "Safety Warning"),
-    ResearchUpdate      UMETA(DisplayName = "Research Update")
-};
+// Forward declarations
+class UNarr_DialogueComponent;
+class ANarr_NarrativeTrigger;
 
 UENUM(BlueprintType)
-enum class ENarr_NarratorType : uint8
+enum class ENarr_NarrativeEvent : uint8
 {
-    TacticalNarrator        UMETA(DisplayName = "Tactical Narrator"),
-    FieldResearcher         UMETA(DisplayName = "Field Researcher"),
-    SafetyGuide            UMETA(DisplayName = "Safety Guide"),
-    PaleontologyNarrator   UMETA(DisplayName = "Paleontology Narrator")
+    Discovery           UMETA(DisplayName = "Discovery"),
+    Danger             UMETA(DisplayName = "Danger"),
+    Weather            UMETA(DisplayName = "Weather"),
+    DinosaurEncounter  UMETA(DisplayName = "Dinosaur Encounter"),
+    BiomeTransition    UMETA(DisplayName = "Biome Transition"),
+    QuestUpdate        UMETA(DisplayName = "Quest Update")
 };
 
-// Narrative Event Structure
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_NarrativeEvent
+struct TRANSPERSONALGAME_API FNarr_NarrativeData
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    ENarr_EventType EventType;
+    ENarr_NarrativeEvent EventType;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    ENarr_NarratorType NarratorType;
+    FString NarrativeText;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FString EventText;
+    FString AudioPath;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FString AudioAssetPath;
+    float Duration;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    float Priority;
+    bool bIsUrgent;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    float Cooldown;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    EEng_BiomeType TriggerBiome;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    EEng_DinosaurSpecies TriggerDinosaur;
-
-    FNarr_NarrativeEvent()
+    FNarr_NarrativeData()
     {
-        EventType = ENarr_EventType::DinosaurSighting;
-        NarratorType = ENarr_NarratorType::TacticalNarrator;
-        EventText = "Default narrative event";
-        AudioAssetPath = "";
-        Priority = 1.0f;
-        Cooldown = 30.0f;
-        TriggerBiome = EEng_BiomeType::Savanna;
-        TriggerDinosaur = EEng_DinosaurSpecies::TRex;
+        EventType = ENarr_NarrativeEvent::Discovery;
+        NarrativeText = "";
+        AudioPath = "";
+        Duration = 5.0f;
+        bIsUrgent = false;
     }
 };
 
-// Point of Interest Structure
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_PointOfInterest
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "POI")
-    FString Name;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "POI")
-    FVector Location;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "POI")
-    EEng_BiomeType Biome;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "POI")
-    float InteractionRadius;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "POI")
-    bool bIsDiscovered;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "POI")
-    TArray<FNarr_NarrativeEvent> AssociatedEvents;
-
-    FNarr_PointOfInterest()
-    {
-        Name = "Unknown POI";
-        Location = FVector::ZeroVector;
-        Biome = EEng_BiomeType::Savanna;
-        InteractionRadius = 1000.0f;
-        bIsDiscovered = false;
-    }
-};
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnNarrativeEvent, const FNarr_NarrativeData&, NarrativeData);
 
 /**
- * Narrative Manager - Handles dynamic storytelling and contextual narration
- * Triggers appropriate voice lines based on player actions, discoveries, and environmental context
+ * Sistema de gestão narrativa para o jogo de sobrevivência pré-histórico
+ * Gere diálogos, narrações e eventos narrativos baseados em contexto
  */
-UCLASS(BlueprintType, Blueprintable)
+UCLASS()
 class TRANSPERSONALGAME_API UNarrativeManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
@@ -118,77 +65,75 @@ class TRANSPERSONALGAME_API UNarrativeManager : public UGameInstanceSubsystem
 public:
     UNarrativeManager();
 
-    // Subsystem Interface
+    // Subsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Core Narrative Functions
+    // Narrative event system
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void TriggerNarrativeEvent(ENarr_EventType EventType, EEng_DinosaurSpecies DinosaurSpecies = EEng_DinosaurSpecies::TRex);
+    void TriggerNarrativeEvent(ENarr_NarrativeEvent EventType, const FString& Context = "");
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void PlayNarration(const FNarr_NarrativeEvent& Event);
+    void PlayNarration(const FNarr_NarrativeData& NarrativeData);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void RegisterPointOfInterest(const FNarr_PointOfInterest& POI);
+    void RegisterNarrativeTrigger(ANarr_NarrativeTrigger* Trigger);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void CheckProximityToPoints(const FVector& PlayerLocation);
+    void UnregisterNarrativeTrigger(ANarr_NarrativeTrigger* Trigger);
+
+    // Context-based narrative
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void UpdateNarrativeContext(EEng_BiomeType CurrentBiome, EEng_WeatherType Weather, EEng_ThreatLevel ThreatLevel);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void OnBiomeTransition(EEng_BiomeType FromBiome, EEng_BiomeType ToBiome);
+    FNarr_NarrativeData GetContextualNarrative(ENarr_NarrativeEvent EventType);
+
+    // Dinosaur encounter narratives
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    void TriggerDinosaurEncounter(EEng_DinosaurSpecies Species, float Distance, bool bIsHostile);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void OnDinosaurEncounter(EEng_DinosaurSpecies Species, float Distance, bool bIsHostile);
+    void TriggerWeatherWarning(EEng_WeatherType IncomingWeather, float TimeToArrival);
 
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void OnFossilDiscovery(EEng_DinosaurSpecies Species, const FVector& Location);
-
-    // Configuration Functions
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void LoadNarrativeEvents();
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void SetNarrationVolume(float Volume);
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    bool IsNarrationPlaying() const;
+    // Event delegates
+    UPROPERTY(BlueprintAssignable, Category = "Narrative")
+    FOnNarrativeEvent OnNarrativeEvent;
 
 protected:
-    // Narrative Event Database
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative Database")
-    TArray<FNarr_NarrativeEvent> NarrativeEvents;
+    // Current narrative context
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
+    EEng_BiomeType CurrentBiome;
 
-    // Points of Interest
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "POI System")
-    TArray<FNarr_PointOfInterest> PointsOfInterest;
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
+    EEng_WeatherType CurrentWeather;
 
-    // Audio System
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio")
-    class UAudioComponent* NarrationAudioComponent;
+    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
+    EEng_ThreatLevel CurrentThreatLevel;
 
-    // Cooldown Management
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Cooldown")
-    TMap<ENarr_EventType, float> EventCooldowns;
+    // Registered narrative triggers
+    UPROPERTY()
+    TArray<ANarr_NarrativeTrigger*> NarrativeTriggers;
 
-    // Settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    float NarrationVolume;
+    // Narrative data library
+    UPROPERTY(EditDefaultsOnly, Category = "Narrative")
+    TMap<ENarr_NarrativeEvent, TArray<FNarr_NarrativeData>> NarrativeLibrary;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    float ProximityCheckInterval;
+    // Audio URLs for generated voice samples
+    UPROPERTY(EditDefaultsOnly, Category = "Audio")
+    FString PaleontologistFieldNotesURL;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    bool bEnableContextualNarration;
+    UPROPERTY(EditDefaultsOnly, Category = "Audio")
+    FString EmergencyAlertURL;
+
+    UPROPERTY(EditDefaultsOnly, Category = "Audio")
+    FString DiscoveryNarrationURL;
+
+    UPROPERTY(EditDefaultsOnly, Category = "Audio")
+    FString WeatherWarningURL;
 
 private:
-    // Internal Functions
-    void InitializeNarrativeDatabase();
-    void InitializePointsOfInterest();
-    bool CanTriggerEvent(ENarr_EventType EventType) const;
-    void UpdateEventCooldown(ENarr_EventType EventType, float CooldownTime);
-    FNarr_NarrativeEvent* FindEventByType(ENarr_EventType EventType, ENarr_NarratorType PreferredNarrator = ENarr_NarratorType::TacticalNarrator);
-
-    // Timer Handles
-    FTimerHandle ProximityCheckTimer;
+    void InitializeNarrativeLibrary();
+    FNarr_NarrativeData CreateNarrativeData(ENarr_NarrativeEvent EventType, const FString& Text, const FString& AudioURL, float Duration, bool bUrgent = false);
+    void LogNarrativeEvent(const FNarr_NarrativeData& Data);
 };
