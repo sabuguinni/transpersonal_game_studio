@@ -3,204 +3,299 @@
 #include "Engine/World.h"
 #include "HAL/FileManager.h"
 #include "Misc/Paths.h"
-#include "Misc/DateTime.h"
+#include "Misc/FileHelper.h"
 #include "Engine/GameInstance.h"
-#include "TranspersonalGame.h"
+#include "TranspersonalGame/SharedTypes.h"
 
 DEFINE_LOG_CATEGORY(LogBuildIntegration);
 
 UBuildIntegrationManager::UBuildIntegrationManager()
 {
-    bIsEnabled = true;
-    LastValidationTime = FDateTime::MinValue();
-    ValidationIntervalSeconds = 300.0f; // 5 minutos
+    PrimaryComponentTick.bCanEverTick = false;
     
-    // Inicializar contadores
-    TotalHeaderFiles = 0;
-    TotalCppFiles = 0;
-    OrphanHeaders = 0;
-    CompilationErrors = 0;
+    // Inicializar estado de integração
+    IntegrationState = EBuild_IntegrationState::Initializing;
+    LastValidationTime = 0.0f;
+    ValidationInterval = 30.0f; // Validar a cada 30 segundos
     
-    // Inicializar estado de compilação
-    LastCompilationResult = EBuild_CompilationResult::Unknown;
-    LastCompilationTime = FDateTime::MinValue();
+    // Configurar contadores
+    TotalModulesLoaded = 0;
+    FailedModulesCount = 0;
+    OrphanHeadersCount = 0;
+    DuplicateActorsCount = 0;
 }
 
-void UBuildIntegrationManager::Initialize(FSubsystemCollectionBase& Collection)
+void UBuildIntegrationManager::BeginPlay()
 {
-    Super::Initialize(Collection);
+    Super::BeginPlay();
     
-    UE_LOG(LogBuildIntegration, Warning, TEXT("BuildIntegrationManager inicializado"));
+    UE_LOG(LogBuildIntegration, Warning, TEXT("BuildIntegrationManager iniciado"));
     
     // Executar validação inicial
-    ValidateProjectStructure();
+    PerformIntegrationValidation();
     
     // Configurar timer para validações periódicas
-    if (UWorld* World = GetWorld())
-    {
-        World->GetTimerManager().SetTimer(
-            ValidationTimerHandle,
-            this,
-            &UBuildIntegrationManager::PeriodicValidation,
-            ValidationIntervalSeconds,
-            true
-        );
-    }
+    GetWorld()->GetTimerManager().SetTimer(
+        ValidationTimerHandle,
+        this,
+        &UBuildIntegrationManager::PerformIntegrationValidation,
+        ValidationInterval,
+        true
+    );
 }
 
-void UBuildIntegrationManager::Deinitialize()
+void UBuildIntegrationManager::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
     // Limpar timer
-    if (UWorld* World = GetWorld())
+    if (GetWorld())
     {
-        World->GetTimerManager().ClearTimer(ValidationTimerHandle);
+        GetWorld()->GetTimerManager().ClearTimer(ValidationTimerHandle);
     }
     
-    Super::Deinitialize();
+    Super::EndPlay(EndPlayReason);
 }
 
-bool UBuildIntegrationManager::ValidateProjectStructure()
+void UBuildIntegrationManager::PerformIntegrationValidation()
 {
-    UE_LOG(LogBuildIntegration, Warning, TEXT("Iniciando validação da estrutura do projecto"));
+    UE_LOG(LogBuildIntegration, Log, TEXT("Executando validação de integração..."));
     
-    // Reset contadores
-    TotalHeaderFiles = 0;
-    TotalCppFiles = 0;
-    OrphanHeaders = 0;
-    OrphanHeadersList.Empty();
+    IntegrationState = EBuild_IntegrationState::Validating;
     
-    // Obter directório do projecto
-    FString ProjectDir = FPaths::ProjectDir();
-    FString SourceDir = FPaths::Combine(ProjectDir, TEXT("Source"), TEXT("TranspersonalGame"));
+    // 1. Validar módulos C++ carregados
+    ValidateLoadedModules();
     
-    // Verificar se o directório existe
-    if (!IFileManager::Get().DirectoryExists(*SourceDir))
+    // 2. Verificar headers órfãos
+    CheckOrphanHeaders();
+    
+    // 3. Verificar actores duplicados
+    CheckDuplicateActors();
+    
+    // 4. Validar dependências entre sistemas
+    ValidateSystemDependencies();
+    
+    // 5. Atualizar estado final
+    UpdateIntegrationState();
+    
+    LastValidationTime = GetWorld()->GetTimeSeconds();
+    
+    UE_LOG(LogBuildIntegration, Warning, TEXT("Validação concluída - Estado: %s"), 
+           *UEnum::GetValueAsString(IntegrationState));
+}
+
+void UBuildIntegrationManager::ValidateLoadedModules()
+{
+    TotalModulesLoaded = 0;
+    FailedModulesCount = 0;
+    
+    // Lista de classes críticas que devem estar carregadas
+    TArray<FString> CriticalClasses = {
+        TEXT("/Script/TranspersonalGame.TranspersonalCharacter"),
+        TEXT("/Script/TranspersonalGame.TranspersonalGameMode"),
+        TEXT("/Script/TranspersonalGame.TranspersonalGameState"),
+        TEXT("/Script/TranspersonalGame.PCGWorldGenerator"),
+        TEXT("/Script/TranspersonalGame.FoliageManager"),
+        TEXT("/Script/TranspersonalGame.CrowdSimulationManager")
+    };
+    
+    for (const FString& ClassName : CriticalClasses)
     {
-        UE_LOG(LogBuildIntegration, Error, TEXT("Directório Source não encontrado: %s"), *SourceDir);
-        return false;
-    }
-    
-    // Procurar ficheiros .h e .cpp
-    TArray<FString> HeaderFiles;
-    TArray<FString> CppFiles;
-    
-    IFileManager::Get().FindFilesRecursive(HeaderFiles, *SourceDir, TEXT("*.h"), true, false);
-    IFileManager::Get().FindFilesRecursive(CppFiles, *SourceDir, TEXT("*.cpp"), true, false);
-    
-    TotalHeaderFiles = HeaderFiles.Num();
-    TotalCppFiles = CppFiles.Num();
-    
-    UE_LOG(LogBuildIntegration, Warning, TEXT("Encontrados %d ficheiros .h e %d ficheiros .cpp"), 
-           TotalHeaderFiles, TotalCppFiles);
-    
-    // Verificar headers órfãos
-    for (const FString& HeaderFile : HeaderFiles)
-    {
-        FString BaseName = FPaths::GetBaseFilename(HeaderFile);
-        FString HeaderDir = FPaths::GetPath(HeaderFile);
-        FString ExpectedCppFile = FPaths::Combine(HeaderDir, BaseName + TEXT(".cpp"));
-        
-        if (!IFileManager::Get().FileExists(*ExpectedCppFile))
+        UClass* LoadedClass = LoadClass<UObject>(nullptr, *ClassName);
+        if (LoadedClass)
         {
-            OrphanHeaders++;
-            OrphanHeadersList.Add(HeaderFile);
-            
-            UE_LOG(LogBuildIntegration, Warning, TEXT("Header órfão encontrado: %s"), *HeaderFile);
+            TotalModulesLoaded++;
+            UE_LOG(LogBuildIntegration, Log, TEXT("Módulo carregado: %s"), *ClassName);
+        }
+        else
+        {
+            FailedModulesCount++;
+            UE_LOG(LogBuildIntegration, Error, TEXT("Falha ao carregar módulo: %s"), *ClassName);
         }
     }
     
-    // Actualizar timestamp
-    LastValidationTime = FDateTime::Now();
-    
-    UE_LOG(LogBuildIntegration, Warning, TEXT("Validação concluída: %d headers órfãos de %d totais"), 
-           OrphanHeaders, TotalHeaderFiles);
-    
-    return OrphanHeaders == 0;
+    UE_LOG(LogBuildIntegration, Warning, TEXT("Módulos: %d carregados, %d falharam"), 
+           TotalModulesLoaded, FailedModulesCount);
 }
 
-bool UBuildIntegrationManager::TestCompilation()
+void UBuildIntegrationManager::CheckOrphanHeaders()
 {
-    UE_LOG(LogBuildIntegration, Warning, TEXT("Iniciando teste de compilação"));
+    OrphanHeadersCount = 0;
     
-    LastCompilationTime = FDateTime::Now();
-    LastCompilationResult = EBuild_CompilationResult::InProgress;
+    // Obter caminho do projeto
+    FString ProjectPath = FPaths::ProjectDir();
+    FString SourcePath = FPaths::Combine(ProjectPath, TEXT("Source"), TEXT("TranspersonalGame"));
     
-    // Simular teste de compilação (em produção seria chamada ao UBT)
-    // Por agora, assumir sucesso se não há headers órfãos
-    if (OrphanHeaders == 0)
+    // Encontrar todos os ficheiros .h
+    TArray<FString> HeaderFiles;
+    IFileManager::Get().FindFilesRecursive(HeaderFiles, *SourcePath, TEXT("*.h"), true, false);
+    
+    // Verificar se cada .h tem .cpp correspondente
+    for (const FString& HeaderFile : HeaderFiles)
     {
-        LastCompilationResult = EBuild_CompilationResult::Success;
-        CompilationErrors = 0;
-        UE_LOG(LogBuildIntegration, Warning, TEXT("✅ Compilação simulada: SUCESSO"));
-        return true;
+        FString CppFile = HeaderFile;
+        CppFile = CppFile.Replace(TEXT(".h"), TEXT(".cpp"));
+        
+        if (!IFileManager::Get().FileExists(*CppFile))
+        {
+            OrphanHeadersCount++;
+            FString RelativePath = HeaderFile;
+            FPaths::MakePathRelativeTo(RelativePath, *ProjectPath);
+            UE_LOG(LogBuildIntegration, Warning, TEXT("Header órfão: %s"), *RelativePath);
+        }
     }
-    else
-    {
-        LastCompilationResult = EBuild_CompilationResult::Failed;
-        CompilationErrors = OrphanHeaders; // Simplificação
-        UE_LOG(LogBuildIntegration, Error, TEXT("❌ Compilação simulada: FALHOU (%d erros)"), CompilationErrors);
-        return false;
-    }
+    
+    UE_LOG(LogBuildIntegration, Warning, TEXT("Headers órfãos encontrados: %d"), OrphanHeadersCount);
 }
 
-void UBuildIntegrationManager::PeriodicValidation()
+void UBuildIntegrationManager::CheckDuplicateActors()
 {
-    if (!bIsEnabled)
+    DuplicateActorsCount = 0;
+    
+    if (!GetWorld())
     {
         return;
     }
     
-    UE_LOG(LogBuildIntegration, Log, TEXT("Executando validação periódica"));
+    // Contar actores de lighting duplicados
+    TArray<AActor*> DirectionalLights;
+    TArray<AActor*> SkyLights;
+    TArray<AActor*> SkyAtmospheres;
+    TArray<AActor*> HeightFogs;
     
-    ValidateProjectStructure();
-    TestCompilation();
+    for (TActorIterator<AActor> ActorItr(GetWorld()); ActorItr; ++ActorItr)
+    {
+        AActor* Actor = *ActorItr;
+        FString ClassName = Actor->GetClass()->GetName();
+        
+        if (ClassName.Contains(TEXT("DirectionalLight")))
+        {
+            DirectionalLights.Add(Actor);
+        }
+        else if (ClassName.Contains(TEXT("SkyLight")))
+        {
+            SkyLights.Add(Actor);
+        }
+        else if (ClassName.Contains(TEXT("SkyAtmosphere")))
+        {
+            SkyAtmospheres.Add(Actor);
+        }
+        else if (ClassName.Contains(TEXT("ExponentialHeightFog")))
+        {
+            HeightFogs.Add(Actor);
+        }
+    }
+    
+    // Contar duplicados (deveria haver apenas 1 de cada)
+    if (DirectionalLights.Num() > 1) DuplicateActorsCount += DirectionalLights.Num() - 1;
+    if (SkyLights.Num() > 1) DuplicateActorsCount += SkyLights.Num() - 1;
+    if (SkyAtmospheres.Num() > 1) DuplicateActorsCount += SkyAtmospheres.Num() - 1;
+    if (HeightFogs.Num() > 1) DuplicateActorsCount += HeightFogs.Num() - 1;
+    
+    UE_LOG(LogBuildIntegration, Warning, TEXT("Actores duplicados: %d"), DuplicateActorsCount);
 }
 
-FBuild_ValidationReport UBuildIntegrationManager::GetValidationReport() const
+void UBuildIntegrationManager::ValidateSystemDependencies()
 {
-    FBuild_ValidationReport Report;
+    // Verificar se sistemas críticos estão funcionais
+    bool bWorldGenValid = ValidateWorldGeneration();
+    bool bCharacterValid = ValidateCharacterSystem();
+    bool bGameModeValid = ValidateGameMode();
     
-    Report.ValidationTime = LastValidationTime;
-    Report.TotalHeaderFiles = TotalHeaderFiles;
-    Report.TotalCppFiles = TotalCppFiles;
-    Report.OrphanHeaders = OrphanHeaders;
-    Report.OrphanHeadersList = OrphanHeadersList;
-    Report.CompilationResult = LastCompilationResult;
-    Report.CompilationErrors = CompilationErrors;
-    Report.LastCompilationTime = LastCompilationTime;
+    SystemValidationResults.Empty();
+    SystemValidationResults.Add(TEXT("WorldGeneration"), bWorldGenValid);
+    SystemValidationResults.Add(TEXT("Character"), bCharacterValid);
+    SystemValidationResults.Add(TEXT("GameMode"), bGameModeValid);
+    
+    UE_LOG(LogBuildIntegration, Log, TEXT("Validação de sistemas:"));
+    UE_LOG(LogBuildIntegration, Log, TEXT("- WorldGeneration: %s"), bWorldGenValid ? TEXT("OK") : TEXT("FAIL"));
+    UE_LOG(LogBuildIntegration, Log, TEXT("- Character: %s"), bCharacterValid ? TEXT("OK") : TEXT("FAIL"));
+    UE_LOG(LogBuildIntegration, Log, TEXT("- GameMode: %s"), bGameModeValid ? TEXT("OK") : TEXT("FAIL"));
+}
+
+bool UBuildIntegrationManager::ValidateWorldGeneration()
+{
+    // Verificar se PCGWorldGenerator está carregado
+    UClass* WorldGenClass = LoadClass<UObject>(nullptr, TEXT("/Script/TranspersonalGame.PCGWorldGenerator"));
+    return WorldGenClass != nullptr;
+}
+
+bool UBuildIntegrationManager::ValidateCharacterSystem()
+{
+    // Verificar se TranspersonalCharacter está carregado
+    UClass* CharacterClass = LoadClass<UObject>(nullptr, TEXT("/Script/TranspersonalGame.TranspersonalCharacter"));
+    return CharacterClass != nullptr;
+}
+
+bool UBuildIntegrationManager::ValidateGameMode()
+{
+    // Verificar se TranspersonalGameMode está carregado
+    UClass* GameModeClass = LoadClass<UObject>(nullptr, TEXT("/Script/TranspersonalGame.TranspersonalGameMode"));
+    return GameModeClass != nullptr;
+}
+
+void UBuildIntegrationManager::UpdateIntegrationState()
+{
+    // Determinar estado baseado nos resultados da validação
+    if (FailedModulesCount > 0)
+    {
+        IntegrationState = EBuild_IntegrationState::Failed;
+    }
+    else if (OrphanHeadersCount > 50) // Limite crítico de headers órfãos
+    {
+        IntegrationState = EBuild_IntegrationState::Warning;
+    }
+    else if (DuplicateActorsCount > 10) // Limite crítico de duplicados
+    {
+        IntegrationState = EBuild_IntegrationState::Warning;
+    }
+    else
+    {
+        IntegrationState = EBuild_IntegrationState::Healthy;
+    }
+}
+
+FString UBuildIntegrationManager::GetIntegrationReport() const
+{
+    FString Report = TEXT("=== BUILD INTEGRATION REPORT ===\n");
+    Report += FString::Printf(TEXT("Estado: %s\n"), *UEnum::GetValueAsString(IntegrationState));
+    Report += FString::Printf(TEXT("Módulos carregados: %d\n"), TotalModulesLoaded);
+    Report += FString::Printf(TEXT("Módulos falharam: %d\n"), FailedModulesCount);
+    Report += FString::Printf(TEXT("Headers órfãos: %d\n"), OrphanHeadersCount);
+    Report += FString::Printf(TEXT("Actores duplicados: %d\n"), DuplicateActorsCount);
+    Report += FString::Printf(TEXT("Última validação: %.2f segundos atrás\n"), 
+              GetWorld() ? GetWorld()->GetTimeSeconds() - LastValidationTime : 0.0f);
+    
+    Report += TEXT("\nSistemas validados:\n");
+    for (const auto& Result : SystemValidationResults)
+    {
+        Report += FString::Printf(TEXT("- %s: %s\n"), 
+                  *Result.Key, Result.Value ? TEXT("OK") : TEXT("FAIL"));
+    }
     
     return Report;
 }
 
-void UBuildIntegrationManager::SetValidationEnabled(bool bEnabled)
-{
-    bIsEnabled = bEnabled;
-    UE_LOG(LogBuildIntegration, Warning, TEXT("Validação %s"), bEnabled ? TEXT("activada") : TEXT("desactivada"));
-}
-
 void UBuildIntegrationManager::ForceValidation()
 {
-    UE_LOG(LogBuildIntegration, Warning, TEXT("Forçando validação manual"));
-    ValidateProjectStructure();
-    TestCompilation();
+    UE_LOG(LogBuildIntegration, Warning, TEXT("Validação forçada pelo utilizador"));
+    PerformIntegrationValidation();
 }
 
-TArray<FString> UBuildIntegrationManager::GetOrphanHeaders() const
+void UBuildIntegrationManager::SetValidationInterval(float NewInterval)
 {
-    return OrphanHeadersList;
-}
-
-int32 UBuildIntegrationManager::GetOrphanHeaderCount() const
-{
-    return OrphanHeaders;
-}
-
-EBuild_CompilationResult UBuildIntegrationManager::GetLastCompilationResult() const
-{
-    return LastCompilationResult;
-}
-
-int32 UBuildIntegrationManager::GetCompilationErrorCount() const
-{
-    return CompilationErrors;
+    ValidationInterval = FMath::Clamp(NewInterval, 10.0f, 300.0f); // Entre 10s e 5min
+    
+    // Reiniciar timer com novo intervalo
+    if (GetWorld())
+    {
+        GetWorld()->GetTimerManager().ClearTimer(ValidationTimerHandle);
+        GetWorld()->GetTimerManager().SetTimer(
+            ValidationTimerHandle,
+            this,
+            &UBuildIntegrationManager::PerformIntegrationValidation,
+            ValidationInterval,
+            true
+        );
+    }
+    
+    UE_LOG(LogBuildIntegration, Log, TEXT("Intervalo de validação alterado para %.1f segundos"), ValidationInterval);
 }
