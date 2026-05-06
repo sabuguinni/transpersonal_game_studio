@@ -1,294 +1,273 @@
 #include "PrehistoricAnimInstance.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
-#include "Engine/World.h"
+#include "Components/CapsuleComponent.h"
 #include "Kismet/KismetMathLibrary.h"
+#include "Engine/Engine.h"
 
 UPrehistoricAnimInstance::UPrehistoricAnimInstance()
 {
-    // Initialize default values
-    Speed = 0.0f;
-    Direction = 0.0f;
-    LeanAmount = 0.0f;
-    bIsInAir = false;
-    bIsCrouching = false;
-    bIsMoving = false;
-    
-    // Survival states
-    bIsHunting = false;
-    bIsGathering = false;
-    bIsCrafting = false;
-    bIsResting = false;
-    
-    // Combat states
-    bIsInCombat = false;
-    bIsBlocking = false;
-    bIsAttacking = false;
-    bIsDodging = false;
-    
-    // Animation settings
-    IdleBreakChance = 0.1f;
-    IdleBreakMinInterval = 5.0f;
-    LookAroundChance = 0.05f;
-    
-    // Internal state
-    LastIdleBreakTime = 0.0f;
-    LastLookAroundTime = 0.0f;
-    bWasMoving = false;
-    
-    MovementState = EAnim_MovementState::Idle;
+    CurrentMovementState = EAnim_MovementState::Idle;
+    CurrentActionState = EAnim_ActionState::None;
+    WalkRunBlend = 0.0f;
+    FearIntensity = 0.0f;
+    FatigueLevel = 0.0f;
+    InjuryLevel = 0.0f;
+    OwnerCharacter = nullptr;
+    MovementComponent = nullptr;
 }
 
 void UPrehistoricAnimInstance::NativeInitializeAnimation()
 {
     Super::NativeInitializeAnimation();
-    
-    // Get character reference
-    OwningCharacter = Cast<ACharacter>(GetOwningActor());
-    if (!OwningCharacter)
+
+    // Get character and movement component references
+    OwnerCharacter = Cast<ACharacter>(GetOwningActor());
+    if (OwnerCharacter)
     {
-        UE_LOG(LogTemp, Warning, TEXT("PrehistoricAnimInstance: Failed to get owning character"));
-        return;
+        MovementComponent = OwnerCharacter->GetCharacterMovement();
     }
-    
-    // Get movement component
-    CharacterMovement = OwningCharacter->GetCharacterMovement();
-    if (!CharacterMovement)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("PrehistoricAnimInstance: Failed to get character movement component"));
-        return;
-    }
-    
-    // Get animation controller
-    AnimationController = OwningCharacter->FindComponentByClass<UPrimitiveAnimationController>();
-    if (!AnimationController)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("PrehistoricAnimInstance: No PrimitiveAnimationController found on character"));
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("PrehistoricAnimInstance: Initialized successfully"));
+
+    // Initialize default values
+    MovementData = FAnim_MovementData();
+    SurvivalData = FAnim_SurvivalData();
 }
 
 void UPrehistoricAnimInstance::NativeUpdateAnimation(float DeltaTimeX)
 {
     Super::NativeUpdateAnimation(DeltaTimeX);
-    
-    if (!OwningCharacter || !CharacterMovement)
+
+    if (!OwnerCharacter || !MovementComponent)
     {
         return;
     }
-    
-    // Update movement variables
-    UpdateMovementVariables();
-    
-    // Update survival and combat states
-    UpdateSurvivalStates();
-    UpdateCombatStates();
-    
-    // Check for idle animations
-    CheckIdleAnimations();
+
+    // Update all animation data
+    UpdateMovementData();
+    UpdateSurvivalData();
+    UpdateMovementState();
+    UpdateActionState();
+    UpdateBlendingParameters();
 }
 
-void UPrehistoricAnimInstance::UpdateMovementVariables()
+void UPrehistoricAnimInstance::UpdateMovementData()
 {
-    if (!CharacterMovement)
+    if (!OwnerCharacter || !MovementComponent)
     {
         return;
     }
-    
-    // Get data from animation controller if available
-    if (AnimationController)
+
+    // Get velocity and speed
+    MovementData.Velocity = MovementComponent->Velocity;
+    MovementData.Speed = MovementData.Velocity.Size();
+    MovementData.GroundSpeed = MovementData.Velocity.Size2D();
+
+    // Calculate movement direction relative to character rotation
+    if (MovementData.GroundSpeed > 0.1f)
     {
-        MovementState = AnimationController->GetCurrentMovementState();
-        BlendParams = AnimationController->GetBlendParameters();
+        FVector ForwardVector = OwnerCharacter->GetActorForwardVector();
+        FVector VelocityNormalized = MovementData.Velocity.GetSafeNormal2D();
+        MovementData.Direction = FMath::RadiansToDegrees(FMath::Acos(FVector::DotProduct(ForwardVector, VelocityNormalized)));
         
-        Speed = BlendParams.Speed;
-        Direction = BlendParams.Direction;
-        LeanAmount = BlendParams.LeanAmount;
-        bIsInAir = BlendParams.bIsInAir;
-        bIsCrouching = BlendParams.bIsCrouching;
+        // Determine if moving left or right
+        FVector RightVector = OwnerCharacter->GetActorRightVector();
+        float RightDot = FVector::DotProduct(RightVector, VelocityNormalized);
+        if (RightDot < 0.0f)
+        {
+            MovementData.Direction *= -1.0f;
+        }
     }
     else
     {
-        // Fallback calculation if no animation controller
-        FVector Velocity = CharacterMovement->Velocity;
-        Velocity.Z = 0.0f;
-        Speed = Velocity.Size();
-        
-        bIsInAir = CharacterMovement->IsFalling();
-        bIsCrouching = CharacterMovement->IsCrouching();
-        
-        // Simple direction calculation
-        if (Speed > 10.0f)
+        MovementData.Direction = 0.0f;
+    }
+
+    // Update air and crouch states
+    MovementData.bIsInAir = MovementComponent->IsFalling();
+    MovementData.bIsCrouching = MovementComponent->IsCrouching();
+}
+
+void UPrehistoricAnimInstance::UpdateSurvivalData()
+{
+    // In a real implementation, this would get data from a survival component
+    // For now, we'll simulate some basic values
+    
+    // Simulate stamina drain during movement
+    if (MovementData.GroundSpeed > 400.0f) // Running
+    {
+        SurvivalData.Stamina = FMath::Max(0.0f, SurvivalData.Stamina - 0.1f);
+    }
+    else if (MovementData.GroundSpeed > 0.1f) // Walking
+    {
+        SurvivalData.Stamina = FMath::Min(100.0f, SurvivalData.Stamina + 0.05f);
+    }
+    else // Idle
+    {
+        SurvivalData.Stamina = FMath::Min(100.0f, SurvivalData.Stamina + 0.1f);
+    }
+
+    // Simulate fear based on proximity to threats (placeholder)
+    SurvivalData.Fear = FMath::Max(0.0f, SurvivalData.Fear - 0.5f);
+
+    // Health regeneration when not in combat
+    if (CurrentActionState != EAnim_ActionState::Combat)
+    {
+        SurvivalData.Health = FMath::Min(100.0f, SurvivalData.Health + 0.01f);
+    }
+}
+
+void UPrehistoricAnimInstance::UpdateMovementState()
+{
+    EAnim_MovementState NewState = CurrentMovementState;
+
+    if (MovementData.bIsInAir)
+    {
+        if (MovementData.Velocity.Z > 0.1f)
         {
-            FVector Forward = OwningCharacter->GetActorForwardVector();
-            Forward.Z = 0.0f;
-            Forward.Normalize();
-            
-            Velocity.Normalize();
-            float DotProduct = FVector::DotProduct(Forward, Velocity);
-            float CrossProduct = FVector::CrossProduct(Forward, Velocity).Z;
-            Direction = FMath::Atan2(CrossProduct, DotProduct) * (180.0f / PI);
+            NewState = EAnim_MovementState::Jumping;
         }
         else
         {
-            Direction = 0.0f;
+            NewState = EAnim_MovementState::Falling;
         }
     }
-    
-    // Update movement flag
-    bWasMoving = bIsMoving;
-    bIsMoving = Speed > 50.0f;
-}
-
-void UPrehistoricAnimInstance::UpdateSurvivalStates()
-{
-    // These would be updated based on gameplay systems
-    // For now, we'll leave them as placeholders that can be set by other systems
-    
-    // Example: Check if character is near crafting station
-    // bIsCrafting = CheckNearCraftingStation();
-    
-    // Example: Check if character is in hunting mode
-    // bIsHunting = CheckHuntingMode();
-    
-    // Example: Check if character is gathering resources
-    // bIsGathering = CheckGatheringMode();
-    
-    // Example: Check if character is resting
-    // bIsResting = CheckRestingMode();
-}
-
-void UPrehistoricAnimInstance::UpdateCombatStates()
-{
-    // These would be updated based on combat system
-    // For now, we'll leave them as placeholders
-    
-    // Example: Check if character is in combat
-    // bIsInCombat = CheckCombatState();
-    
-    // Example: Check if character is blocking
-    // bIsBlocking = CheckBlockingState();
-    
-    // Example: Check if character is attacking
-    // bIsAttacking = CheckAttackingState();
-    
-    // Example: Check if character is dodging
-    // bIsDodging = CheckDodgingState();
-}
-
-void UPrehistoricAnimInstance::CheckIdleAnimations()
-{
-    if (!IsIdleState() || bIsMoving)
+    else if (MovementData.bIsCrouching)
     {
-        return;
+        NewState = EAnim_MovementState::Crouching;
     }
-    
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-    
-    // Check for idle break animations
-    if (ShouldPlayIdleBreak())
+    else if (MovementData.GroundSpeed > 400.0f)
     {
-        LastIdleBreakTime = CurrentTime;
-        // Trigger idle break animation
-        UE_LOG(LogTemp, Log, TEXT("Triggering idle break animation"));
+        NewState = EAnim_MovementState::Running;
     }
-    
-    // Check for look around animations
-    if (ShouldLookAround())
+    else if (MovementData.GroundSpeed > 50.0f)
     {
-        LastLookAroundTime = CurrentTime;
-        // Trigger look around animation
-        UE_LOG(LogTemp, Log, TEXT("Triggering look around animation"));
+        NewState = EAnim_MovementState::Walking;
     }
-}
-
-bool UPrehistoricAnimInstance::ShouldPlayIdleBreak() const
-{
-    if (!GetWorld())
+    else
     {
-        return false;
+        NewState = EAnim_MovementState::Idle;
     }
-    
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-    float TimeSinceLastBreak = CurrentTime - LastIdleBreakTime;
-    
-    return TimeSinceLastBreak > IdleBreakMinInterval && 
-           FMath::RandRange(0.0f, 1.0f) < IdleBreakChance;
+
+    CurrentMovementState = NewState;
 }
 
-bool UPrehistoricAnimInstance::ShouldLookAround() const
+void UPrehistoricAnimInstance::UpdateActionState()
 {
-    if (!GetWorld())
+    // Action states are typically set by external systems
+    // This function handles automatic transitions or timeouts
+    
+    // Auto-return to None state after certain actions complete
+    // This would be expanded with proper action duration tracking
+}
+
+void UPrehistoricAnimInstance::UpdateBlendingParameters()
+{
+    // Walk/Run blend based on speed
+    float MaxWalkSpeed = 300.0f;
+    float MaxRunSpeed = 600.0f;
+    
+    if (MovementData.GroundSpeed <= MaxWalkSpeed)
     {
-        return false;
+        WalkRunBlend = MovementData.GroundSpeed / MaxWalkSpeed;
     }
-    
-    return FMath::RandRange(0.0f, 1.0f) < LookAroundChance;
-}
-
-// Animation event functions
-void UPrehistoricAnimInstance::OnJumpStart()
-{
-    UE_LOG(LogTemp, Log, TEXT("Animation Event: Jump Start"));
-}
-
-void UPrehistoricAnimInstance::OnLanded()
-{
-    UE_LOG(LogTemp, Log, TEXT("Animation Event: Landed"));
-}
-
-void UPrehistoricAnimInstance::OnCombatStart()
-{
-    bIsInCombat = true;
-    UE_LOG(LogTemp, Log, TEXT("Animation Event: Combat Start"));
-}
-
-void UPrehistoricAnimInstance::OnCombatEnd()
-{
-    bIsInCombat = false;
-    bIsBlocking = false;
-    bIsAttacking = false;
-    bIsDodging = false;
-    UE_LOG(LogTemp, Log, TEXT("Animation Event: Combat End"));
-}
-
-void UPrehistoricAnimInstance::OnSurvivalActionStart(ESurvivalAction Action)
-{
-    // Reset all survival states
-    bIsHunting = false;
-    bIsGathering = false;
-    bIsCrafting = false;
-    bIsResting = false;
-    
-    // Set the appropriate state
-    switch (Action)
+    else
     {
-        case ESurvivalAction::Hunting:
-            bIsHunting = true;
-            break;
-        case ESurvivalAction::Gathering:
-            bIsGathering = true;
-            break;
-        case ESurvivalAction::Crafting:
-            bIsCrafting = true;
-            break;
-        case ESurvivalAction::Resting:
-            bIsResting = true;
-            break;
-        default:
-            break;
+        WalkRunBlend = 1.0f + ((MovementData.GroundSpeed - MaxWalkSpeed) / (MaxRunSpeed - MaxWalkSpeed));
     }
-    
-    UE_LOG(LogTemp, Log, TEXT("Animation Event: Survival Action Start - %d"), (int32)Action);
+    WalkRunBlend = FMath::Clamp(WalkRunBlend, 0.0f, 2.0f);
+
+    // Fear intensity based on fear level
+    FearIntensity = SurvivalData.Fear / 100.0f;
+
+    // Fatigue level based on stamina
+    FatigueLevel = 1.0f - (SurvivalData.Stamina / 100.0f);
+
+    // Injury level based on health
+    InjuryLevel = 1.0f - (SurvivalData.Health / 100.0f);
 }
 
-void UPrehistoricAnimInstance::OnSurvivalActionEnd()
+bool UPrehistoricAnimInstance::ShouldTransitionToRunning() const
 {
-    bIsHunting = false;
-    bIsGathering = false;
-    bIsCrafting = false;
-    bIsResting = false;
-    
-    UE_LOG(LogTemp, Log, TEXT("Animation Event: Survival Action End"));
+    return MovementData.GroundSpeed > 400.0f && !MovementData.bIsInAir && !MovementData.bIsCrouching;
+}
+
+bool UPrehistoricAnimInstance::ShouldTransitionToWalking() const
+{
+    return MovementData.GroundSpeed > 50.0f && MovementData.GroundSpeed <= 400.0f && !MovementData.bIsInAir && !MovementData.bIsCrouching;
+}
+
+bool UPrehistoricAnimInstance::ShouldTransitionToIdle() const
+{
+    return MovementData.GroundSpeed <= 50.0f && !MovementData.bIsInAir && !MovementData.bIsCrouching;
+}
+
+bool UPrehistoricAnimInstance::ShouldTransitionToJumping() const
+{
+    return MovementData.bIsInAir && MovementData.Velocity.Z > 0.1f;
+}
+
+bool UPrehistoricAnimInstance::ShouldTransitionToFalling() const
+{
+    return MovementData.bIsInAir && MovementData.Velocity.Z <= 0.1f;
+}
+
+void UPrehistoricAnimInstance::TriggerGatheringAnimation()
+{
+    SetActionState(EAnim_ActionState::Gathering);
+}
+
+void UPrehistoricAnimInstance::TriggerCraftingAnimation()
+{
+    SetActionState(EAnim_ActionState::Crafting);
+}
+
+void UPrehistoricAnimInstance::TriggerCombatAnimation()
+{
+    SetActionState(EAnim_ActionState::Combat);
+}
+
+void UPrehistoricAnimInstance::TriggerEatingAnimation()
+{
+    SetActionState(EAnim_ActionState::Eating);
+}
+
+void UPrehistoricAnimInstance::TriggerDrinkingAnimation()
+{
+    SetActionState(EAnim_ActionState::Drinking);
+}
+
+void UPrehistoricAnimInstance::SetActionState(EAnim_ActionState NewActionState)
+{
+    CurrentActionState = NewActionState;
+}
+
+bool UPrehistoricAnimInstance::IsPerformingAction() const
+{
+    return CurrentActionState != EAnim_ActionState::None;
+}
+
+float UPrehistoricAnimInstance::GetMovementSpeedRatio() const
+{
+    if (!MovementComponent)
+    {
+        return 0.0f;
+    }
+
+    float MaxSpeed = MovementComponent->GetMaxSpeed();
+    if (MaxSpeed > 0.0f)
+    {
+        return MovementData.GroundSpeed / MaxSpeed;
+    }
+
+    return 0.0f;
+}
+
+bool UPrehistoricAnimInstance::ShouldPlayFearAnimation() const
+{
+    return SurvivalData.Fear > 50.0f;
+}
+
+bool UPrehistoricAnimInstance::ShouldPlayFatigueAnimation() const
+{
+    return SurvivalData.Stamina < 20.0f;
 }
