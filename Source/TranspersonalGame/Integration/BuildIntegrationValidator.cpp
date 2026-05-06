@@ -1,479 +1,431 @@
 #include "BuildIntegrationValidator.h"
 #include "Engine/World.h"
-#include "Engine/DirectionalLight.h"
-#include "Components/SkyAtmosphereComponent.h"
-#include "Components/SkyLightComponent.h"
-#include "Components/ExponentialHeightFogComponent.h"
-#include "GameFramework/PlayerStart.h"
 #include "Engine/Engine.h"
-#include "UObject/UObjectGlobals.h"
-#include "UObject/Package.h"
+#include "TimerManager.h"
+#include "HAL/PlatformFilemanager.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
+#include "Misc/DateTime.h"
+#include "EditorLevelLibrary.h"
+#include "Engine/DirectionalLight.h"
+#include "Engine/SkyLight.h"
+#include "Engine/ExponentialHeightFog.h"
+#include "Components/SkyAtmosphereComponent.h"
 
-UBuildIntegrationValidator::UBuildIntegrationValidator()
+ABuildIntegrationValidator::ABuildIntegrationValidator()
 {
-    TotalActorCount = 0;
-    DuplicatesRemoved = 0;
-    bMapIsValid = false;
+    PrimaryActorTick.bCanEverTick = false;
+    
+    bAutoValidateOnBeginPlay = true;
+    ValidationInterval = 300.0f; // 5 minutes
+    bCleanupDuplicatesAutomatically = false;
+    
+    // Initialize validation report
+    LastValidationReport = FBuild_ValidationReport();
 }
 
-bool UBuildIntegrationValidator::ValidateMapIntegrity(UWorld* World)
+void ABuildIntegrationValidator::BeginPlay()
 {
-    if (!World)
+    Super::BeginPlay();
+    
+    if (bAutoValidateOnBeginPlay)
     {
-        AddValidationError("World is null - cannot validate map integrity");
-        return false;
+        // Delay initial validation by 2 seconds to allow world to fully load
+        GetWorld()->GetTimerManager().SetTimer(ValidationTimerHandle, 
+            FTimerDelegate::CreateUObject(this, &ABuildIntegrationValidator::PerformPeriodicValidation),
+            2.0f, false);
     }
+}
 
-    ClearValidationResults();
-
-    // Count all actors
-    TArray<AActor*> AllActors;
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+FBuild_ValidationReport ABuildIntegrationValidator::ValidateProjectStructure()
+{
+    double StartTime = FPlatformTime::Seconds();
+    ClearValidationIssues();
+    
+    UE_LOG(LogTemp, Warning, TEXT("=== BUILD INTEGRATION VALIDATION STARTED ==="));
+    
+    // 1. Detect orphan headers
+    int32 OrphanCount = DetectOrphanHeaders();
+    LastValidationReport.OrphanHeaders = OrphanCount;
+    
+    // 2. Detect duplicate actors
+    int32 DuplicateCount = DetectDuplicateActors();
+    LastValidationReport.DuplicateActors = DuplicateCount;
+    
+    // 3. Check misplaced files
+    TArray<FString> MisplacedFiles = GetMisplacedFiles();
+    for (const FString& File : MisplacedFiles)
     {
-        AllActors.Add(*ActorItr);
+        AddValidationIssue(EBuild_ValidationResult::Warning, TEXT("File Structure"), 
+                          FString::Printf(TEXT("File outside Source/ directory: %s"), *File), File);
     }
     
-    TotalActorCount = AllActors.Num();
-
-    // Validate lighting setup
-    bool bLightingValid = ValidateLightingSetup(World);
+    // 4. Validate module dependencies
+    bool bModulesValid = ValidateModuleDependencies();
+    if (!bModulesValid)
+    {
+        AddValidationIssue(EBuild_ValidationResult::Error, TEXT("Module Dependencies"), 
+                          TEXT("Module dependency validation failed"));
+    }
     
-    // Validate gameplay actors
-    bool bGameplayValid = ValidateGameplayActors(World);
+    // 5. Count total files
+    FString SourcePath = GetProjectSourcePath();
+    TArray<FString> HeaderFiles = FindFilesRecursive(SourcePath, TEXT("*.h"));
+    TArray<FString> CppFiles = FindFilesRecursive(SourcePath, TEXT("*.cpp"));
     
-    // Validate PlayerStart
-    bool bPlayerStartValid = ValidatePlayerStart(World);
-
-    bMapIsValid = bLightingValid && bGameplayValid && bPlayerStartValid;
+    LastValidationReport.TotalHeaderFiles = HeaderFiles.Num();
+    LastValidationReport.TotalCppFiles = CppFiles.Num();
     
-    if (bMapIsValid)
-    {
-        UE_LOG(LogTemp, Log, TEXT("Map integrity validation PASSED"));
-    }
-    else
-    {
-        UE_LOG(LogTemp, Error, TEXT("Map integrity validation FAILED"));
-    }
-
-    return bMapIsValid;
-}
-
-bool UBuildIntegrationValidator::ValidateLightingSetup(UWorld* World)
-{
-    if (!World)
-    {
-        return false;
-    }
-
-    // Count lighting actors
-    int32 DirectionalLightCount = 0;
-    int32 SkyAtmosphereCount = 0;
-    int32 SkyLightCount = 0;
-    int32 HeightFogCount = 0;
-
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-    {
-        AActor* Actor = *ActorItr;
-        FString ClassName = Actor->GetClass()->GetName();
-
-        if (ClassName == "DirectionalLight")
-        {
-            DirectionalLightCount++;
-        }
-        else if (ClassName == "SkyAtmosphere")
-        {
-            SkyAtmosphereCount++;
-        }
-        else if (ClassName == "SkyLight")
-        {
-            SkyLightCount++;
-        }
-        else if (ClassName == "ExponentialHeightFog")
-        {
-            HeightFogCount++;
-        }
-    }
-
-    // Validate counts
-    bool bValid = true;
-
-    if (DirectionalLightCount == 0)
-    {
-        AddValidationError("No DirectionalLight found in scene");
-        bValid = false;
-    }
-    else if (DirectionalLightCount > 1)
-    {
-        AddValidationWarning(FString::Printf(TEXT("Multiple DirectionalLights found: %d (should be 1)"), DirectionalLightCount));
-    }
-
-    if (SkyAtmosphereCount > 1)
-    {
-        AddValidationWarning(FString::Printf(TEXT("Multiple SkyAtmospheres found: %d (should be 1)"), SkyAtmosphereCount));
-    }
-
-    if (SkyLightCount > 1)
-    {
-        AddValidationWarning(FString::Printf(TEXT("Multiple SkyLights found: %d (should be 1)"), SkyLightCount));
-    }
-
-    if (HeightFogCount > 1)
-    {
-        AddValidationWarning(FString::Printf(TEXT("Multiple ExponentialHeightFogs found: %d (should be 1)"), HeightFogCount));
-    }
-
-    return bValid;
-}
-
-bool UBuildIntegrationValidator::ValidateGameplayActors(UWorld* World)
-{
-    if (!World)
-    {
-        return false;
-    }
-
-    int32 TranspersonalActorCount = 0;
-
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-    {
-        AActor* Actor = *ActorItr;
-        FString ClassName = Actor->GetClass()->GetName();
-
-        if (ClassName.Contains("Transpersonal"))
-        {
-            TranspersonalActorCount++;
-            UE_LOG(LogTemp, Log, TEXT("Found TranspersonalGame actor: %s"), *ClassName);
-        }
-    }
-
-    if (TranspersonalActorCount == 0)
-    {
-        AddValidationWarning("No TranspersonalGame actors found in scene");
-        return false;
-    }
-
-    return true;
-}
-
-bool UBuildIntegrationValidator::ValidateModuleIntegration()
-{
-    // Validate that core TranspersonalGame classes can be loaded
-    bool bValid = ValidateTranspersonalGameClasses();
+    // Calculate validation time
+    double EndTime = FPlatformTime::Seconds();
+    LastValidationReport.ValidationTime = EndTime - StartTime;
+    LastValidationReport.Timestamp = FDateTime::Now();
     
-    // Check for missing implementations
-    TArray<FString> MissingImpls = GetMissingImplementations();
-    if (MissingImpls.Num() > 0)
+    // Log summary
+    LogValidationSummary();
+    
+    // Auto-cleanup if enabled
+    if (bCleanupDuplicatesAutomatically && DuplicateCount > 0)
     {
-        for (const FString& Missing : MissingImpls)
-        {
-            AddValidationError(FString::Printf(TEXT("Missing implementation: %s"), *Missing));
-        }
-        bValid = false;
+        CleanupDuplicateActors();
     }
-
-    return bValid;
+    
+    UE_LOG(LogTemp, Warning, TEXT("=== BUILD INTEGRATION VALIDATION COMPLETED ==="));
+    
+    return LastValidationReport;
 }
 
-bool UBuildIntegrationValidator::CleanDuplicateActors(UWorld* World)
+int32 ABuildIntegrationValidator::DetectOrphanHeaders()
 {
-    if (!World)
+    FString SourcePath = GetProjectSourcePath();
+    TArray<FString> HeaderFiles = FindFilesRecursive(SourcePath, TEXT("*.h"));
+    
+    int32 OrphanCount = 0;
+    
+    for (const FString& HeaderFile : HeaderFiles)
     {
-        return false;
-    }
-
-    DuplicatesRemoved = 0;
-
-    // Find and remove duplicate lighting actors
-    TArray<AActor*> DirectionalLights;
-    TArray<AActor*> SkyAtmospheres;
-    TArray<AActor*> SkyLights;
-    TArray<AActor*> HeightFogs;
-
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-    {
-        AActor* Actor = *ActorItr;
-        FString ClassName = Actor->GetClass()->GetName();
-
-        if (ClassName == "DirectionalLight")
-        {
-            DirectionalLights.Add(Actor);
-        }
-        else if (ClassName == "SkyAtmosphere")
-        {
-            SkyAtmospheres.Add(Actor);
-        }
-        else if (ClassName == "SkyLight")
-        {
-            SkyLights.Add(Actor);
-        }
-        else if (ClassName == "ExponentialHeightFog")
-        {
-            HeightFogs.Add(Actor);
-        }
-    }
-
-    // Keep only the first of each type
-    for (int32 i = 1; i < DirectionalLights.Num(); i++)
-    {
-        DirectionalLights[i]->Destroy();
-        DuplicatesRemoved++;
-    }
-
-    for (int32 i = 1; i < SkyAtmospheres.Num(); i++)
-    {
-        SkyAtmospheres[i]->Destroy();
-        DuplicatesRemoved++;
-    }
-
-    for (int32 i = 1; i < SkyLights.Num(); i++)
-    {
-        SkyLights[i]->Destroy();
-        DuplicatesRemoved++;
-    }
-
-    for (int32 i = 1; i < HeightFogs.Num(); i++)
-    {
-        HeightFogs[i]->Destroy();
-        DuplicatesRemoved++;
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("Cleaned %d duplicate lighting actors"), DuplicatesRemoved);
-    return true;
-}
-
-TMap<FString, int32> UBuildIntegrationValidator::GetActorCountsByClass(UWorld* World)
-{
-    TMap<FString, int32> ActorCounts;
-
-    if (!World)
-    {
-        return ActorCounts;
-    }
-
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-    {
-        AActor* Actor = *ActorItr;
-        FString ClassName = Actor->GetClass()->GetName();
+        FString CppFile = HeaderFile;
+        CppFile = CppFile.Replace(TEXT(".h"), TEXT(".cpp"));
         
-        if (ActorCounts.Contains(ClassName))
+        if (!FPlatformFileManager::Get().GetPlatformFile().FileExists(*CppFile))
         {
-            ActorCounts[ClassName]++;
+            // Skip certain files that don't need .cpp counterparts
+            FString FileName = FPaths::GetCleanFilename(HeaderFile);
+            if (FileName.Contains(TEXT("generated")) || 
+                FileName.Contains(TEXT("Types")) ||
+                FileName.Equals(TEXT("TranspersonalGame.h")) ||
+                FileName.Contains(TEXT("Module")))
+            {
+                continue;
+            }
+            
+            OrphanCount++;
+            FString RelativePath = HeaderFile;
+            FPaths::MakePathRelativeTo(RelativePath, *SourcePath);
+            
+            AddValidationIssue(EBuild_ValidationResult::Warning, TEXT("Orphan Header"), 
+                              FString::Printf(TEXT("Header without .cpp implementation: %s"), *RelativePath), 
+                              RelativePath);
+        }
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Detected %d orphan headers"), OrphanCount);
+    return OrphanCount;
+}
+
+int32 ABuildIntegrationValidator::DetectDuplicateActors()
+{
+    if (!GetWorld())
+    {
+        return 0;
+    }
+    
+    TMap<FString, int32> ActorCounts;
+    int32 TotalDuplicates = 0;
+    
+    // Get all actors in the level
+    for (TActorIterator<AActor> ActorItr(GetWorld()); ActorItr; ++ActorItr)
+    {
+        AActor* Actor = *ActorItr;
+        if (Actor)
+        {
+            FString ClassName = Actor->GetClass()->GetName();
+            ActorCounts.FindOrAdd(ClassName)++;
+        }
+    }
+    
+    // Check for critical duplicates
+    TArray<FString> CriticalTypes = {
+        TEXT("DirectionalLight"),
+        TEXT("SkyLight"), 
+        TEXT("ExponentialHeightFog"),
+        TEXT("SkyAtmosphere")
+    };
+    
+    for (const FString& CriticalType : CriticalTypes)
+    {
+        if (int32* Count = ActorCounts.Find(CriticalType))
+        {
+            if (*Count > 1)
+            {
+                TotalDuplicates += (*Count - 1);
+                AddValidationIssue(EBuild_ValidationResult::Error, TEXT("Duplicate Actors"), 
+                                  FString::Printf(TEXT("Found %d instances of %s (should be 1)"), 
+                                  *Count, *CriticalType));
+            }
+        }
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Detected %d duplicate critical actors"), TotalDuplicates);
+    return TotalDuplicates;
+}
+
+bool ABuildIntegrationValidator::CleanupDuplicateActors()
+{
+    if (!GetWorld())
+    {
+        return false;
+    }
+    
+    int32 CleanedCount = 0;
+    
+    // Clean DirectionalLights
+    TArray<ADirectionalLight*> DirectionalLights;
+    for (TActorIterator<ADirectionalLight> ActorItr(GetWorld()); ActorItr; ++ActorItr)
+    {
+        DirectionalLights.Add(*ActorItr);
+    }
+    
+    if (DirectionalLights.Num() > 1)
+    {
+        for (int32 i = 1; i < DirectionalLights.Num(); i++)
+        {
+            DirectionalLights[i]->Destroy();
+            CleanedCount++;
+        }
+    }
+    
+    // Clean SkyLights
+    TArray<ASkyLight*> SkyLights;
+    for (TActorIterator<ASkyLight> ActorItr(GetWorld()); ActorItr; ++ActorItr)
+    {
+        SkyLights.Add(*ActorItr);
+    }
+    
+    if (SkyLights.Num() > 1)
+    {
+        for (int32 i = 1; i < SkyLights.Num(); i++)
+        {
+            SkyLights[i]->Destroy();
+            CleanedCount++;
+        }
+    }
+    
+    // Clean ExponentialHeightFog
+    TArray<AExponentialHeightFog*> HeightFogs;
+    for (TActorIterator<AExponentialHeightFog> ActorItr(GetWorld()); ActorItr; ++ActorItr)
+    {
+        HeightFogs.Add(*ActorItr);
+    }
+    
+    if (HeightFogs.Num() > 1)
+    {
+        for (int32 i = 1; i < HeightFogs.Num(); i++)
+        {
+            HeightFogs[i]->Destroy();
+            CleanedCount++;
+        }
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Cleaned up %d duplicate actors"), CleanedCount);
+    
+    // Save level after cleanup
+    #if WITH_EDITOR
+    if (CleanedCount > 0)
+    {
+        UEditorLevelLibrary::SaveCurrentLevel();
+    }
+    #endif
+    
+    return CleanedCount > 0;
+}
+
+TArray<FString> ABuildIntegrationValidator::GetMisplacedFiles()
+{
+    TArray<FString> MisplacedFiles;
+    
+    FString ProjectPath = FPaths::ProjectDir();
+    
+    // Check for files that should be in Source/ but aren't
+    TArray<FString> CheckPaths = {
+        FPaths::Combine(ProjectPath, TEXT("Audio/AdaptiveMusicController.cpp")),
+        FPaths::Combine(ProjectPath, TEXT("Content/Lighting/LightingMasterController.cpp")),
+        FPaths::Combine(ProjectPath, TEXT("Integration/BuildManager.cpp"))
+    };
+    
+    for (const FString& CheckPath : CheckPaths)
+    {
+        if (FPlatformFileManager::Get().GetPlatformFile().FileExists(*CheckPath))
+        {
+            FString RelativePath = CheckPath;
+            FPaths::MakePathRelativeTo(RelativePath, *ProjectPath);
+            MisplacedFiles.Add(RelativePath);
+        }
+    }
+    
+    return MisplacedFiles;
+}
+
+bool ABuildIntegrationValidator::ValidateModuleDependencies()
+{
+    FString BuildFilePath = FPaths::Combine(GetProjectSourcePath(), TEXT("TranspersonalGame.Build.cs"));
+    
+    if (!FPlatformFileManager::Get().GetPlatformFile().FileExists(*BuildFilePath))
+    {
+        AddValidationIssue(EBuild_ValidationResult::Critical, TEXT("Module Dependencies"), 
+                          TEXT("TranspersonalGame.Build.cs not found"));
+        return false;
+    }
+    
+    FString BuildFileContent;
+    if (!FFileHelper::LoadFileToString(BuildFileContent, *BuildFilePath))
+    {
+        AddValidationIssue(EBuild_ValidationResult::Error, TEXT("Module Dependencies"), 
+                          TEXT("Failed to read TranspersonalGame.Build.cs"));
+        return false;
+    }
+    
+    // Check for required dependencies
+    TArray<FString> RequiredModules = {
+        TEXT("Core"),
+        TEXT("CoreUObject"),
+        TEXT("Engine"),
+        TEXT("UnrealEd"),
+        TEXT("EditorStyle"),
+        TEXT("EditorWidgets"),
+        TEXT("ToolMenus")
+    };
+    
+    for (const FString& Module : RequiredModules)
+    {
+        if (!BuildFileContent.Contains(Module))
+        {
+            AddValidationIssue(EBuild_ValidationResult::Warning, TEXT("Module Dependencies"), 
+                              FString::Printf(TEXT("Missing module dependency: %s"), *Module));
+        }
+    }
+    
+    return true;
+}
+
+void ABuildIntegrationValidator::ExportValidationReport(const FString& FilePath)
+{
+    FString ReportContent;
+    ReportContent += FString::Printf(TEXT("=== BUILD INTEGRATION VALIDATION REPORT ===\n"));
+    ReportContent += FString::Printf(TEXT("Timestamp: %s\n"), *LastValidationReport.Timestamp.ToString());
+    ReportContent += FString::Printf(TEXT("Validation Time: %.3f seconds\n"), LastValidationReport.ValidationTime);
+    ReportContent += FString::Printf(TEXT("Total Header Files: %d\n"), LastValidationReport.TotalHeaderFiles);
+    ReportContent += FString::Printf(TEXT("Total CPP Files: %d\n"), LastValidationReport.TotalCppFiles);
+    ReportContent += FString::Printf(TEXT("Orphan Headers: %d\n"), LastValidationReport.OrphanHeaders);
+    ReportContent += FString::Printf(TEXT("Duplicate Actors: %d\n"), LastValidationReport.DuplicateActors);
+    ReportContent += TEXT("\n=== ISSUES ===\n");
+    
+    for (const FBuild_ValidationIssue& Issue : LastValidationReport.Issues)
+    {
+        FString SeverityStr;
+        switch (Issue.Severity)
+        {
+            case EBuild_ValidationResult::Success: SeverityStr = TEXT("SUCCESS"); break;
+            case EBuild_ValidationResult::Warning: SeverityStr = TEXT("WARNING"); break;
+            case EBuild_ValidationResult::Error: SeverityStr = TEXT("ERROR"); break;
+            case EBuild_ValidationResult::Critical: SeverityStr = TEXT("CRITICAL"); break;
+        }
+        
+        ReportContent += FString::Printf(TEXT("[%s] %s: %s\n"), 
+                                        *SeverityStr, *Issue.Category, *Issue.Description);
+        if (!Issue.FilePath.IsEmpty())
+        {
+            ReportContent += FString::Printf(TEXT("  File: %s\n"), *Issue.FilePath);
+        }
+    }
+    
+    FFileHelper::SaveStringToFile(ReportContent, *FilePath);
+    UE_LOG(LogTemp, Warning, TEXT("Validation report exported to: %s"), *FilePath);
+}
+
+void ABuildIntegrationValidator::LogValidationSummary()
+{
+    UE_LOG(LogTemp, Warning, TEXT("=== VALIDATION SUMMARY ==="));
+    UE_LOG(LogTemp, Warning, TEXT("Header Files: %d"), LastValidationReport.TotalHeaderFiles);
+    UE_LOG(LogTemp, Warning, TEXT("CPP Files: %d"), LastValidationReport.TotalCppFiles);
+    UE_LOG(LogTemp, Warning, TEXT("Orphan Headers: %d"), LastValidationReport.OrphanHeaders);
+    UE_LOG(LogTemp, Warning, TEXT("Duplicate Actors: %d"), LastValidationReport.DuplicateActors);
+    UE_LOG(LogTemp, Warning, TEXT("Total Issues: %d"), LastValidationReport.Issues.Num());
+    UE_LOG(LogTemp, Warning, TEXT("Validation Time: %.3f seconds"), LastValidationReport.ValidationTime);
+}
+
+void ABuildIntegrationValidator::SetAutoValidation(bool bEnabled, float IntervalSeconds)
+{
+    bAutoValidateOnBeginPlay = bEnabled;
+    ValidationInterval = IntervalSeconds;
+    
+    if (GetWorld())
+    {
+        if (bEnabled)
+        {
+            GetWorld()->GetTimerManager().SetTimer(ValidationTimerHandle, 
+                FTimerDelegate::CreateUObject(this, &ABuildIntegrationValidator::PerformPeriodicValidation),
+                ValidationInterval, true);
         }
         else
         {
-            ActorCounts.Add(ClassName, 1);
+            GetWorld()->GetTimerManager().ClearTimer(ValidationTimerHandle);
         }
     }
-
-    return ActorCounts;
 }
 
-TArray<AActor*> UBuildIntegrationValidator::FindDuplicateLightingActors(UWorld* World)
+void ABuildIntegrationValidator::PerformPeriodicValidation()
 {
-    TArray<AActor*> Duplicates;
-
-    if (!World)
-    {
-        return Duplicates;
-    }
-
-    TMap<FString, int32> LightingCounts;
-    TMap<FString, TArray<AActor*>> LightingActors;
-
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-    {
-        AActor* Actor = *ActorItr;
-        FString ClassName = Actor->GetClass()->GetName();
-
-        if (ClassName == "DirectionalLight" || ClassName == "SkyAtmosphere" || 
-            ClassName == "SkyLight" || ClassName == "ExponentialHeightFog")
-        {
-            if (!LightingActors.Contains(ClassName))
-            {
-                LightingActors.Add(ClassName, TArray<AActor*>());
-            }
-            LightingActors[ClassName].Add(Actor);
-        }
-    }
-
-    // Add duplicates (keep first, mark rest as duplicates)
-    for (auto& Pair : LightingActors)
-    {
-        if (Pair.Value.Num() > 1)
-        {
-            for (int32 i = 1; i < Pair.Value.Num(); i++)
-            {
-                Duplicates.Add(Pair.Value[i]);
-            }
-        }
-    }
-
-    return Duplicates;
-}
-
-bool UBuildIntegrationValidator::ValidatePlayerStart(UWorld* World)
-{
-    if (!World)
-    {
-        return false;
-    }
-
-    int32 PlayerStartCount = 0;
-    for (TActorIterator<APlayerStart> PlayerStartItr(World); PlayerStartItr; ++PlayerStartItr)
-    {
-        PlayerStartCount++;
-    }
-
-    if (PlayerStartCount == 0)
-    {
-        AddValidationError("No PlayerStart found in level");
-        return false;
-    }
-    else if (PlayerStartCount > 1)
-    {
-        AddValidationWarning(FString::Printf(TEXT("Multiple PlayerStarts found: %d"), PlayerStartCount));
-    }
-
-    return true;
-}
-
-bool UBuildIntegrationValidator::ValidateTranspersonalGameClasses()
-{
-    // Try to find core TranspersonalGame classes
-    UClass* CharacterClass = FindObject<UClass>(ANY_PACKAGE, TEXT("TranspersonalCharacter"));
-    UClass* GameModeClass = FindObject<UClass>(ANY_PACKAGE, TEXT("TranspersonalGameMode"));
-    UClass* GameStateClass = FindObject<UClass>(ANY_PACKAGE, TEXT("TranspersonalGameState"));
-
-    bool bValid = true;
-
-    if (!CharacterClass)
-    {
-        AddValidationError("TranspersonalCharacter class not found");
-        bValid = false;
-    }
-
-    if (!GameModeClass)
-    {
-        AddValidationError("TranspersonalGameMode class not found");
-        bValid = false;
-    }
-
-    if (!GameStateClass)
-    {
-        AddValidationError("TranspersonalGameState class not found");
-        bValid = false;
-    }
-
-    return bValid;
-}
-
-bool UBuildIntegrationValidator::ValidateModuleCompilation()
-{
-    // This would typically check compilation logs or try to load modules
-    // For now, we validate that core classes exist
-    return ValidateTranspersonalGameClasses();
-}
-
-TArray<FString> UBuildIntegrationValidator::GetMissingImplementations()
-{
-    TArray<FString> MissingImplementations;
-
-    // This would scan for .h files without corresponding .cpp files
-    // For now, return empty array as this requires file system access
+    ValidateProjectStructure();
     
-    return MissingImplementations;
+    // Schedule next validation
+    if (bAutoValidateOnBeginPlay && GetWorld())
+    {
+        GetWorld()->GetTimerManager().SetTimer(ValidationTimerHandle, 
+            FTimerDelegate::CreateUObject(this, &ABuildIntegrationValidator::PerformPeriodicValidation),
+            ValidationInterval, false);
+    }
 }
 
-bool UBuildIntegrationValidator::ValidateCrossModuleDependencies()
+void ABuildIntegrationValidator::AddValidationIssue(EBuild_ValidationResult Severity, const FString& Category, 
+                                                   const FString& Description, const FString& FilePath, int32 LineNumber)
 {
-    // Validate that modules can reference each other correctly
-    // For now, return true as this requires deeper module analysis
-    return true;
-}
-
-FString UBuildIntegrationValidator::GenerateValidationReport()
-{
-    FString Report;
-    Report += "=== BUILD INTEGRATION VALIDATION REPORT ===\n";
-    Report += FString::Printf(TEXT("Total Actors: %d\n"), TotalActorCount);
-    Report += FString::Printf(TEXT("Duplicates Removed: %d\n"), DuplicatesRemoved);
-    Report += FString::Printf(TEXT("Map Valid: %s\n"), bMapIsValid ? TEXT("YES") : TEXT("NO"));
+    FBuild_ValidationIssue Issue;
+    Issue.Severity = Severity;
+    Issue.Category = Category;
+    Issue.Description = Description;
+    Issue.FilePath = FilePath;
+    Issue.LineNumber = LineNumber;
     
-    Report += "\nErrors:\n";
-    for (const FString& Error : ValidationErrors)
-    {
-        Report += FString::Printf(TEXT("  - %s\n"), *Error);
-    }
+    LastValidationReport.Issues.Add(Issue);
+}
+
+void ABuildIntegrationValidator::ClearValidationIssues()
+{
+    LastValidationReport.Issues.Empty();
+}
+
+FString ABuildIntegrationValidator::GetProjectSourcePath() const
+{
+    return FPaths::Combine(FPaths::ProjectDir(), TEXT("Source/TranspersonalGame"));
+}
+
+TArray<FString> ABuildIntegrationValidator::FindFilesRecursive(const FString& Directory, const FString& Extension) const
+{
+    TArray<FString> FoundFiles;
     
-    Report += "\nWarnings:\n";
-    for (const FString& Warning : ValidationWarnings)
-    {
-        Report += FString::Printf(TEXT("  - %s\n"), *Warning);
-    }
-
-    return Report;
-}
-
-void UBuildIntegrationValidator::LogValidationResults()
-{
-    UE_LOG(LogTemp, Log, TEXT("=== BUILD INTEGRATION VALIDATION RESULTS ==="));
-    UE_LOG(LogTemp, Log, TEXT("Total Actors: %d"), TotalActorCount);
-    UE_LOG(LogTemp, Log, TEXT("Duplicates Removed: %d"), DuplicatesRemoved);
-    UE_LOG(LogTemp, Log, TEXT("Map Valid: %s"), bMapIsValid ? TEXT("YES") : TEXT("NO"));
+    IFileManager& FileManager = IFileManager::Get();
+    FileManager.FindFilesRecursive(FoundFiles, *Directory, *Extension, true, false);
     
-    for (const FString& Error : ValidationErrors)
-    {
-        UE_LOG(LogTemp, Error, TEXT("Validation Error: %s"), *Error);
-    }
-    
-    for (const FString& Warning : ValidationWarnings)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Validation Warning: %s"), *Warning);
-    }
-}
-
-bool UBuildIntegrationValidator::ValidateActorClass(const FString& ClassName)
-{
-    UClass* ActorClass = FindObject<UClass>(ANY_PACKAGE, *ClassName);
-    return ActorClass != nullptr;
-}
-
-bool UBuildIntegrationValidator::CheckForDuplicateTypes(UWorld* World, const FString& ActorType)
-{
-    if (!World)
-    {
-        return false;
-    }
-
-    int32 Count = 0;
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-    {
-        if (ActorItr->GetClass()->GetName() == ActorType)
-        {
-            Count++;
-        }
-    }
-
-    return Count > 1;
-}
-
-void UBuildIntegrationValidator::AddValidationError(const FString& Error)
-{
-    ValidationErrors.Add(Error);
-    UE_LOG(LogTemp, Error, TEXT("Validation Error: %s"), *Error);
-}
-
-void UBuildIntegrationValidator::AddValidationWarning(const FString& Warning)
-{
-    ValidationWarnings.Add(Warning);
-    UE_LOG(LogTemp, Warning, TEXT("Validation Warning: %s"), *Warning);
-}
-
-void UBuildIntegrationValidator::ClearValidationResults()
-{
-    ValidationErrors.Empty();
-    ValidationWarnings.Empty();
-    TotalActorCount = 0;
-    DuplicatesRemoved = 0;
-    bMapIsValid = false;
+    return FoundFiles;
 }
