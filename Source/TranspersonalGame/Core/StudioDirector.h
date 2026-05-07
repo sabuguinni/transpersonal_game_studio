@@ -2,277 +2,130 @@
 
 #include "CoreMinimal.h"
 #include "Engine/World.h"
-#include "UObject/NoExportTypes.h"
+#include "GameFramework/GameModeBase.h"
+#include "Components/ActorComponent.h"
 #include "Engine/Engine.h"
+#include "SharedTypes.h"
 #include "StudioDirector.generated.h"
 
-// Forward declarations
-class UTranspersonalGameInstance;
-
 /**
- * Production priority levels for agent task coordination
+ * Studio Director Component - Coordinates all game systems and agent outputs
+ * Manages the integration of work from all 19 specialized agents
  */
-UENUM(BlueprintType)
-enum class EDir_ProductionPriority : uint8
-{
-    Critical    UMETA(DisplayName = "Critical - Blocks all other work"),
-    High        UMETA(DisplayName = "High - Must complete this cycle"),
-    Medium      UMETA(DisplayName = "Medium - Complete if time allows"),
-    Low         UMETA(DisplayName = "Low - Future cycle priority")
-};
-
-/**
- * Milestone tracking for production cycles
- */
-UENUM(BlueprintType)
-enum class EDir_MilestoneStatus : uint8
-{
-    NotStarted  UMETA(DisplayName = "Not Started"),
-    InProgress  UMETA(DisplayName = "In Progress"),
-    Blocked     UMETA(DisplayName = "Blocked - Waiting for dependency"),
-    Complete    UMETA(DisplayName = "Complete"),
-    Failed      UMETA(DisplayName = "Failed - Needs rework")
-};
-
-/**
- * Agent task assignment structure
- */
-USTRUCT(BlueprintType)
-struct FDir_AgentTask
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Task")
-    FString AgentID;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Task")
-    EDir_ProductionPriority Priority;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Task")
-    FString TaskDescription;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Task")
-    TArray<FString> Deliverables;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Task")
-    FString Dependencies;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Task")
-    float EstimatedCycleTime;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Task")
-    EDir_MilestoneStatus Status;
-
-    FDir_AgentTask()
-    {
-        Priority = EDir_ProductionPriority::Medium;
-        EstimatedCycleTime = 1.0f;
-        Status = EDir_MilestoneStatus::NotStarted;
-    }
-};
-
-/**
- * Production milestone tracking
- */
-USTRUCT(BlueprintType)
-struct FDir_ProductionMilestone
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone")
-    FString MilestoneName;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone")
-    FString Description;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone")
-    TArray<FString> SuccessCriteria;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone")
-    TArray<FDir_AgentTask> RequiredTasks;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone")
-    EDir_MilestoneStatus Status;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone")
-    float CompletionPercentage;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone")
-    FDateTime TargetDate;
-
-    FDir_ProductionMilestone()
-    {
-        Status = EDir_MilestoneStatus::NotStarted;
-        CompletionPercentage = 0.0f;
-    }
-};
-
-/**
- * Studio Director - Production coordination and agent management system
- * 
- * The Studio Director acts as the central coordination hub for all 19 agents,
- * translating creative vision into technical tasks, tracking milestone progress,
- * and ensuring the production pipeline flows smoothly from concept to playable game.
- * 
- * Key responsibilities:
- * - Receive creative direction from Miguel and translate to agent tasks
- * - Coordinate agent dependencies and resolve conflicts
- * - Track milestone progress and identify blockers
- * - Maintain production quality standards
- * - Report final results back to creative leadership
- */
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UStudioDirector : public UObject
+UCLASS(BlueprintType, Blueprintable, ClassGroup=(TranspersonalGame), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UStudioDirectorComponent : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    UStudioDirector();
-
-    // === CORE COORDINATION FUNCTIONS ===
-
-    /**
-     * Initialize a new production cycle with creative direction
-     * @param CycleID Unique identifier for this production cycle
-     * @param CreativeDirection High-level creative goals from Miguel
-     */
-    UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    void InitializeProductionCycle(const FString& CycleID, const FString& CreativeDirection);
-
-    /**
-     * Assign tasks to specific agents based on current milestone needs
-     * @param AgentID Target agent identifier (e.g., "Agent_02_Engine_Architect")
-     * @param Task Task specification with priority and deliverables
-     */
-    UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    void AssignAgentTask(const FString& AgentID, const FDir_AgentTask& Task);
-
-    /**
-     * Update milestone progress based on agent completions
-     * @param MilestoneName Name of the milestone to update
-     * @param CompletedTasks List of completed task IDs
-     */
-    UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    void UpdateMilestoneProgress(const FString& MilestoneName, const TArray<FString>& CompletedTasks);
-
-    /**
-     * Validate current production state and identify blockers
-     * @return Array of critical issues that must be resolved
-     */
-    UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    TArray<FString> ValidateProductionState();
-
-    /**
-     * Generate final production report for Miguel
-     * @return Comprehensive status of all milestones and agent outputs
-     */
-    UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    FString GenerateProductionReport();
-
-    // === MILESTONE MANAGEMENT ===
-
-    /**
-     * Define a new production milestone
-     * @param Milestone Complete milestone specification
-     */
-    UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    void DefineMilestone(const FDir_ProductionMilestone& Milestone);
-
-    /**
-     * Get current milestone progress
-     * @param MilestoneName Name of milestone to query
-     * @return Current milestone status and completion percentage
-     */
-    UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    FDir_ProductionMilestone GetMilestoneStatus(const FString& MilestoneName);
-
-    /**
-     * Check if milestone is blocked by dependencies
-     * @param MilestoneName Milestone to check
-     * @return True if milestone is blocked and cannot proceed
-     */
-    UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    bool IsMilestoneBlocked(const FString& MilestoneName);
-
-    // === AGENT COORDINATION ===
-
-    /**
-     * Get next agent in the production chain
-     * @param CurrentAgentID Current agent completing work
-     * @return ID of next agent to receive tasks
-     */
-    UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    FString GetNextAgent(const FString& CurrentAgentID);
-
-    /**
-     * Resolve conflicts between agents
-     * @param ConflictDescription Description of the conflict
-     * @param InvolvedAgents List of agents involved in conflict
-     * @return Resolution decision and instructions
-     */
-    UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    FString ResolveAgentConflict(const FString& ConflictDescription, const TArray<FString>& InvolvedAgents);
-
-    // === QUALITY ASSURANCE ===
-
-    /**
-     * Validate that agent output meets quality standards
-     * @param AgentID Agent that produced the output
-     * @param OutputDescription Description of what was produced
-     * @return True if output meets standards, false if rework needed
-     */
-    UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    bool ValidateAgentOutput(const FString& AgentID, const FString& OutputDescription);
+    UStudioDirectorComponent();
 
 protected:
-    // === PRODUCTION STATE ===
+    virtual void BeginPlay() override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production State")
-    FString CurrentCycleID;
+public:
+    // Agent Coordination
+    UFUNCTION(BlueprintCallable, Category = "Studio Director")
+    void InitializeAgentCoordination();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production State")
-    FString CreativeDirection;
+    UFUNCTION(BlueprintCallable, Category = "Studio Director")
+    void ValidateGameSystems();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production State")
-    TArray<FDir_ProductionMilestone> ActiveMilestones;
+    UFUNCTION(BlueprintCallable, Category = "Studio Director")
+    void GenerateProductionReport();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production State")
-    TMap<FString, FDir_AgentTask> AgentTasks;
+    // Biome Management
+    UFUNCTION(BlueprintCallable, Category = "Studio Director")
+    void SetupBiomeCoordinators();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production State")
-    TArray<FString> ProductionBlockers;
+    UFUNCTION(BlueprintCallable, Category = "Studio Director")
+    FVector GetBiomeCenter(EDir_BiomeType BiomeType);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production State")
-    FDateTime CycleStartTime;
+    // Agent Task Distribution
+    UFUNCTION(BlueprintCallable, Category = "Studio Director")
+    void AssignAgentTasks();
 
-    // === AGENT CHAIN CONFIGURATION ===
+    UFUNCTION(BlueprintCallable, Category = "Studio Director")
+    bool ValidateAgentDeliverables();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Chain")
-    TArray<FString> AgentExecutionOrder;
+protected:
+    // Agent Status Tracking
+    UPROPERTY(BlueprintReadOnly, Category = "Studio Director", meta = (AllowPrivateAccess = "true"))
+    TMap<FString, bool> AgentCompletionStatus;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Agent Chain")
-    TMap<FString, FString> AgentDependencies;
+    UPROPERTY(BlueprintReadOnly, Category = "Studio Director", meta = (AllowPrivateAccess = "true"))
+    TMap<FString, FString> AgentCurrentTasks;
 
-    // === QUALITY METRICS ===
+    // Biome Coordination
+    UPROPERTY(BlueprintReadOnly, Category = "Studio Director", meta = (AllowPrivateAccess = "true"))
+    TMap<EDir_BiomeType, FVector> BiomeCenters;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quality Metrics")
-    int32 CompilationErrors;
+    UPROPERTY(BlueprintReadOnly, Category = "Studio Director", meta = (AllowPrivateAccess = "true"))
+    TArray<AActor*> BiomeCoordinatorActors;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quality Metrics")
-    int32 MissingImplementations;
+    // Production Metrics
+    UPROPERTY(BlueprintReadOnly, Category = "Studio Director", meta = (AllowPrivateAccess = "true"))
+    int32 TotalActorsInLevel;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quality Metrics")
-    float PerformanceFPS;
+    UPROPERTY(BlueprintReadOnly, Category = "Studio Director", meta = (AllowPrivateAccess = "true"))
+    int32 CompilationErrorCount;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quality Metrics")
-    int32 PlayableFeatures;
+    UPROPERTY(BlueprintReadOnly, Category = "Studio Director", meta = (AllowPrivateAccess = "true"))
+    float ProductionEfficiencyScore;
+
+    // Critical System Flags
+    UPROPERTY(BlueprintReadOnly, Category = "Studio Director", meta = (AllowPrivateAccess = "true"))
+    bool bLandscapeExpanded;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Studio Director", meta = (AllowPrivateAccess = "true"))
+    bool bDinosaurActorsSpawned;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Studio Director", meta = (AllowPrivateAccess = "true"))
+    bool bSurvivalHUDActive;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Studio Director", meta = (AllowPrivateAccess = "true"))
+    bool bCompilationClean;
 
 private:
-    // === INTERNAL COORDINATION LOGIC ===
+    // Internal coordination helpers
+    void UpdateProductionMetrics();
+    void CheckCriticalSystems();
+    void LogAgentProgress();
+};
 
-    void InitializeAgentChain();
-    void SetupMilestone1();
-    bool ValidateCompilationState();
-    void CleanupDuplicateActors();
-    FString GenerateAgentInstructions(const FString& AgentID, const FDir_AgentTask& Task);
+/**
+ * Studio Director Game Mode - Manages overall game coordination
+ */
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API AStudioDirectorGameMode : public AGameModeBase
+{
+    GENERATED_BODY()
+
+public:
+    AStudioDirectorGameMode();
+
+protected:
+    virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
+
+public:
+    UFUNCTION(BlueprintCallable, Category = "Studio Director")
+    void InitializeProductionPipeline();
+
+    UFUNCTION(BlueprintCallable, Category = "Studio Director")
+    void ExecuteProductionCycle();
+
+    UFUNCTION(BlueprintCallable, Category = "Studio Director")
+    bool ValidateMinimumViablePrototype();
+
+protected:
+    UPROPERTY(BlueprintReadOnly, Category = "Studio Director", meta = (AllowPrivateAccess = "true"))
+    UStudioDirectorComponent* DirectorComponent;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Studio Director", meta = (AllowPrivateAccess = "true"))
+    int32 CurrentProductionCycle;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Studio Director", meta = (AllowPrivateAccess = "true"))
+    bool bMinimumViablePrototypeReached;
 };
