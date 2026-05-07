@@ -1,235 +1,260 @@
 #include "Narr_VoicelineDatabase.h"
 #include "Engine/Engine.h"
-#include "UObject/ConstructorHelpers.h"
+#include "Engine/World.h"
+#include "Kismet/GameplayStatics.h"
 
 UNarr_VoicelineDatabase::UNarr_VoicelineDatabase()
 {
-    // Initialize default voiceline categories
+    PrimaryComponentTick.bCanEverTick = false;
+    
+    // Initialize with survival-focused voicelines
     InitializeDefaultVoicelines();
+}
+
+void UNarr_VoicelineDatabase::BeginPlay()
+{
+    Super::BeginPlay();
+    
+    // Cache frequently used voicelines for performance
+    CacheFrequentVoicelines();
 }
 
 void UNarr_VoicelineDatabase::InitializeDefaultVoicelines()
 {
-    // Clear existing data
-    VoicelineCategories.Empty();
+    VoicelineDatabase.Empty();
     
-    // SURVIVAL OBSERVATIONS
-    FNarr_VoicelineCategory SurvivalCategory;
-    SurvivalCategory.CategoryName = "Survival";
-    SurvivalCategory.Description = "Field observations and survival commentary";
+    // Survival discovery voicelines
+    FNarr_VoicelineEntry DiscoveryEntry;
+    DiscoveryEntry.VoicelineID = "DISCOVERY_CAVE_PAINTINGS";
+    DiscoveryEntry.AudioURL = "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1778153176470_DiscoveryNarrator.mp3";
+    DiscoveryEntry.TranscriptText = "Discovery log, day 115. Found ancient cave paintings in the limestone caverns near the waterfall. The markings suggest previous human inhabitants understood dinosaur behavior patterns.";
+    DiscoveryEntry.Duration = 28.0f;
+    DiscoveryEntry.Category = ENarr_VoicelineCategory::Discovery;
+    DiscoveryEntry.Priority = ENarr_VoicelinePriority::Medium;
+    DiscoveryEntry.TriggerConditions.Add("PlayerNearCavePaintings");
+    DiscoveryEntry.TriggerConditions.Add("FirstTimeDiscovery");
+    VoicelineDatabase.Add(DiscoveryEntry.VoicelineID, DiscoveryEntry);
     
-    // Field researcher voicelines
-    FNarr_VoicelineEntry FieldEntry1;
-    FieldEntry1.VoicelineID = "FIELD_RAPTOR_PACK";
-    FieldEntry1.CharacterName = "Field Researcher";
-    FieldEntry1.DialogueText = "Day 47 in the wilderness. The pack of Velociraptors has been tracking me for three days now. They're intelligent, coordinated hunters.";
-    FieldEntry1.AudioURL = "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1778122289175_FieldResearcher.mp3";
-    FieldEntry1.Duration = 28.0f;
-    FieldEntry1.TriggerConditions.Add("NearRaptorPack");
-    FieldEntry1.EmotionalTone = ENarr_EmotionalTone::Tense;
-    FieldEntry1.Priority = ENarr_VoicelinePriority::High;
-    SurvivalCategory.Voicelines.Add(FieldEntry1);
+    // Emergency alert voicelines
+    FNarr_VoicelineEntry EmergencyEntry;
+    EmergencyEntry.VoicelineID = "EMERGENCY_TRICERATOPS_HERD";
+    EmergencyEntry.AudioURL = "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1778153167141_EmergencyBroadcast.mp3";
+    EmergencyEntry.TranscriptText = "Critical alert! Massive Triceratops herd detected approaching from the northwest. Count exceeds fifty individuals, including juveniles.";
+    EmergencyEntry.Duration = 27.0f;
+    EmergencyEntry.Category = ENarr_VoicelineCategory::Emergency;
+    EmergencyEntry.Priority = ENarr_VoicelinePriority::Critical;
+    EmergencyEntry.TriggerConditions.Add("LargeHerbivoreHerdDetected");
+    EmergencyEntry.TriggerConditions.Add("PlayerInDangerZone");
+    VoicelineDatabase.Add(EmergencyEntry.VoicelineID, EmergencyEntry);
     
-    VoicelineCategories.Add("Survival", SurvivalCategory);
+    // Tactical advice voicelines
+    FNarr_VoicelineEntry TacticalEntry;
+    TacticalEntry.VoicelineID = "TACTICAL_ALLOSAURUS_WARNING";
+    TacticalEntry.AudioURL = "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1778153187235_TacticalAdvisor.mp3";
+    TacticalEntry.TranscriptText = "Danger assessment update. The Allosaurus pack has established new territorial boundaries extending into the southern marsh region.";
+    TacticalEntry.Duration = 30.0f;
+    TacticalEntry.Category = ENarr_VoicelineCategory::Tactical;
+    TacticalEntry.Priority = ENarr_VoicelinePriority::High;
+    TacticalEntry.TriggerConditions.Add("PredatorTerritoryDetected");
+    TacticalEntry.TriggerConditions.Add("PlayerApproachingDanger");
+    VoicelineDatabase.Add(TacticalEntry.VoicelineID, TacticalEntry);
     
-    // SAFETY ALERTS
-    FNarr_VoicelineCategory SafetyCategory;
-    SafetyCategory.CategoryName = "Safety";
-    SafetyCategory.Description = "Emergency alerts and safety warnings";
-    
-    // Brachiosaurus alert
-    FNarr_VoicelineEntry SafetyEntry1;
-    SafetyEntry1.VoicelineID = "SAFETY_BRACHIO_ALERT";
-    SafetyEntry1.CharacterName = "Safety Coordinator";
-    SafetyEntry1.DialogueText = "Alert! Massive footsteps detected approaching from the north. Seismic readings indicate a Brachiosaurus herd moving through the forest canopy.";
-    SafetyEntry1.AudioURL = "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1778122297329_SafetyCoordinator.mp3";
-    SafetyEntry1.Duration = 25.0f;
-    SafetyEntry1.TriggerConditions.Add("BrachiosaurusNearby");
-    SafetyEntry1.EmotionalTone = ENarr_EmotionalTone::Alert;
-    SafetyEntry1.Priority = ENarr_VoicelinePriority::Critical;
-    SafetyCategory.Voicelines.Add(SafetyEntry1);
-    
-    // T-Rex warning
-    FNarr_VoicelineEntry SafetyEntry2;
-    SafetyEntry2.VoicelineID = "SAFETY_TREX_WARNING";
-    SafetyEntry2.CharacterName = "Emergency Dispatcher";
-    SafetyEntry2.DialogueText = "Warning! Tyrannosaurus Rex detected in sector 7. This apex predator is over 12 meters long and weighs approximately 8 tons.";
-    SafetyEntry2.AudioURL = "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1778122315533_EmergencyDispatcher.mp3";
-    SafetyEntry2.Duration = 24.0f;
-    SafetyEntry2.TriggerConditions.Add("TRexDetected");
-    SafetyEntry2.EmotionalTone = ENarr_EmotionalTone::Urgent;
-    SafetyEntry2.Priority = ENarr_VoicelinePriority::Critical;
-    SafetyCategory.Voicelines.Add(SafetyEntry2);
-    
-    VoicelineCategories.Add("Safety", SafetyCategory);
-    
-    // EDUCATIONAL CONTENT
-    FNarr_VoicelineCategory EducationCategory;
-    EducationCategory.CategoryName = "Education";
-    EducationCategory.Description = "Educational content about dinosaur behavior";
-    
-    // Triceratops behavior
-    FNarr_VoicelineEntry EduEntry1;
-    EduEntry1.VoicelineID = "EDU_TRICERATOPS_BEHAVIOR";
-    EduEntry1.CharacterName = "Naturalist Guide";
-    EduEntry1.DialogueText = "The Triceratops herd has established a defensive formation around the water source. Three adults form a protective triangle while the juveniles drink safely.";
-    EduEntry1.AudioURL = "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1778122307036_NaturalistGuide.mp3";
-    EduEntry1.Duration = 24.0f;
-    EduEntry1.TriggerConditions.Add("TriceratopsHerd");
-    EduEntry1.EmotionalTone = ENarr_EmotionalTone::Informative;
-    EduEntry1.Priority = ENarr_VoicelinePriority::Medium;
-    EducationCategory.Voicelines.Add(EduEntry1);
-    
-    VoicelineCategories.Add("Education", EducationCategory);
-    
-    UE_LOG(LogTemp, Log, TEXT("VoicelineDatabase: Initialized with %d categories"), VoicelineCategories.Num());
+    // Survival narration voicelines
+    FNarr_VoicelineEntry SurvivalEntry;
+    SurvivalEntry.VoicelineID = "SURVIVAL_PACK_DYNAMICS";
+    SurvivalEntry.AudioURL = "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1778153158274_SurvivalNarrator.mp3";
+    SurvivalEntry.TranscriptText = "Day 112 in the wilderness. The pack dynamics have shifted dramatically since the volcanic eruption. The alpha Raptor has been challenged by a younger male.";
+    SurvivalEntry.Duration = 29.0f;
+    SurvivalEntry.Category = ENarr_VoicelineCategory::Narration;
+    SurvivalEntry.Priority = ENarr_VoicelinePriority::Medium;
+    SurvivalEntry.TriggerConditions.Add("DailyNarrationTime");
+    SurvivalEntry.TriggerConditions.Add("PackBehaviorObserved");
+    VoicelineDatabase.Add(SurvivalEntry.VoicelineID, SurvivalEntry);
 }
 
-FNarr_VoicelineEntry* UNarr_VoicelineDatabase::GetVoicelineByID(const FString& VoicelineID)
+void UNarr_VoicelineDatabase::CacheFrequentVoicelines()
 {
-    for (auto& CategoryPair : VoicelineCategories)
-    {
-        for (FNarr_VoicelineEntry& Entry : CategoryPair.Value.Voicelines)
-        {
-            if (Entry.VoicelineID == VoicelineID)
-            {
-                return &Entry;
-            }
-        }
-    }
-    return nullptr;
-}
-
-TArray<FNarr_VoicelineEntry*> UNarr_VoicelineDatabase::GetVoicelinesByCategory(const FString& CategoryName)
-{
-    TArray<FNarr_VoicelineEntry*> Result;
+    CachedVoicelines.Empty();
     
-    if (FNarr_VoicelineCategory* Category = VoicelineCategories.Find(CategoryName))
+    // Cache high-priority and frequently triggered voicelines
+    for (const auto& VoicelinePair : VoicelineDatabase)
     {
-        for (FNarr_VoicelineEntry& Entry : Category->Voicelines)
+        const FNarr_VoicelineEntry& Entry = VoicelinePair.Value;
+        if (Entry.Priority == ENarr_VoicelinePriority::Critical || 
+            Entry.Priority == ENarr_VoicelinePriority::High)
         {
-            Result.Add(&Entry);
+            CachedVoicelines.Add(Entry.VoicelineID, Entry);
         }
     }
     
-    return Result;
+    UE_LOG(LogTemp, Log, TEXT("Cached %d high-priority voicelines"), CachedVoicelines.Num());
 }
 
-TArray<FNarr_VoicelineEntry*> UNarr_VoicelineDatabase::GetVoicelinesByTrigger(const FString& TriggerCondition)
+FNarr_VoicelineEntry UNarr_VoicelineDatabase::GetVoicelineByID(const FString& VoicelineID) const
 {
-    TArray<FNarr_VoicelineEntry*> Result;
-    
-    for (auto& CategoryPair : VoicelineCategories)
+    // Check cache first for performance
+    if (CachedVoicelines.Contains(VoicelineID))
     {
-        for (FNarr_VoicelineEntry& Entry : CategoryPair.Value.Voicelines)
+        return CachedVoicelines[VoicelineID];
+    }
+    
+    // Fall back to main database
+    if (VoicelineDatabase.Contains(VoicelineID))
+    {
+        return VoicelineDatabase[VoicelineID];
+    }
+    
+    // Return empty entry if not found
+    return FNarr_VoicelineEntry();
+}
+
+TArray<FNarr_VoicelineEntry> UNarr_VoicelineDatabase::GetVoicelinesByCategory(ENarr_VoicelineCategory Category) const
+{
+    TArray<FNarr_VoicelineEntry> CategoryVoicelines;
+    
+    for (const auto& VoicelinePair : VoicelineDatabase)
+    {
+        if (VoicelinePair.Value.Category == Category)
         {
-            if (Entry.TriggerConditions.Contains(TriggerCondition))
-            {
-                Result.Add(&Entry);
-            }
+            CategoryVoicelines.Add(VoicelinePair.Value);
         }
     }
     
-    return Result;
+    // Sort by priority (Critical first, then High, Medium, Low)
+    CategoryVoicelines.Sort([](const FNarr_VoicelineEntry& A, const FNarr_VoicelineEntry& B)
+    {
+        return static_cast<int32>(A.Priority) > static_cast<int32>(B.Priority);
+    });
+    
+    return CategoryVoicelines;
 }
 
-TArray<FNarr_VoicelineEntry*> UNarr_VoicelineDatabase::GetVoicelinesByPriority(ENarr_VoicelinePriority Priority)
+TArray<FNarr_VoicelineEntry> UNarr_VoicelineDatabase::GetVoicelinesByPriority(ENarr_VoicelinePriority Priority) const
 {
-    TArray<FNarr_VoicelineEntry*> Result;
+    TArray<FNarr_VoicelineEntry> PriorityVoicelines;
     
-    for (auto& CategoryPair : VoicelineCategories)
+    for (const auto& VoicelinePair : VoicelineDatabase)
     {
-        for (FNarr_VoicelineEntry& Entry : CategoryPair.Value.Voicelines)
+        if (VoicelinePair.Value.Priority == Priority)
         {
-            if (Entry.Priority == Priority)
-            {
-                Result.Add(&Entry);
-            }
+            PriorityVoicelines.Add(VoicelinePair.Value);
         }
     }
     
-    return Result;
+    return PriorityVoicelines;
 }
 
-bool UNarr_VoicelineDatabase::AddVoiceline(const FString& CategoryName, const FNarr_VoicelineEntry& NewVoiceline)
+bool UNarr_VoicelineDatabase::AddVoiceline(const FNarr_VoicelineEntry& NewVoiceline)
 {
-    if (!VoicelineCategories.Contains(CategoryName))
+    if (NewVoiceline.VoicelineID.IsEmpty())
     {
-        // Create new category if it doesn't exist
-        FNarr_VoicelineCategory NewCategory;
-        NewCategory.CategoryName = CategoryName;
-        NewCategory.Description = FString::Printf(TEXT("Auto-created category: %s"), *CategoryName);
-        VoicelineCategories.Add(CategoryName, NewCategory);
-    }
-    
-    // Check for duplicate IDs
-    if (GetVoicelineByID(NewVoiceline.VoicelineID) != nullptr)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("VoicelineDatabase: Duplicate ID %s"), *NewVoiceline.VoicelineID);
+        UE_LOG(LogTemp, Warning, TEXT("Cannot add voiceline with empty ID"));
         return false;
     }
     
-    VoicelineCategories[CategoryName].Voicelines.Add(NewVoiceline);
-    UE_LOG(LogTemp, Log, TEXT("VoicelineDatabase: Added voiceline %s to category %s"), 
-           *NewVoiceline.VoicelineID, *CategoryName);
+    if (VoicelineDatabase.Contains(NewVoiceline.VoicelineID))
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Voiceline ID already exists: %s"), *NewVoiceline.VoicelineID);
+        return false;
+    }
     
+    VoicelineDatabase.Add(NewVoiceline.VoicelineID, NewVoiceline);
+    
+    // Add to cache if high priority
+    if (NewVoiceline.Priority == ENarr_VoicelinePriority::Critical || 
+        NewVoiceline.Priority == ENarr_VoicelinePriority::High)
+    {
+        CachedVoicelines.Add(NewVoiceline.VoicelineID, NewVoiceline);
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Added voiceline: %s"), *NewVoiceline.VoicelineID);
     return true;
 }
 
 bool UNarr_VoicelineDatabase::RemoveVoiceline(const FString& VoicelineID)
 {
-    for (auto& CategoryPair : VoicelineCategories)
+    if (!VoicelineDatabase.Contains(VoicelineID))
     {
-        for (int32 i = CategoryPair.Value.Voicelines.Num() - 1; i >= 0; i--)
+        UE_LOG(LogTemp, Warning, TEXT("Voiceline not found for removal: %s"), *VoicelineID);
+        return false;
+    }
+    
+    VoicelineDatabase.Remove(VoicelineID);
+    CachedVoicelines.Remove(VoicelineID);
+    
+    UE_LOG(LogTemp, Log, TEXT("Removed voiceline: %s"), *VoicelineID);
+    return true;
+}
+
+bool UNarr_VoicelineDatabase::UpdateVoiceline(const FString& VoicelineID, const FNarr_VoicelineEntry& UpdatedVoiceline)
+{
+    if (!VoicelineDatabase.Contains(VoicelineID))
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Voiceline not found for update: %s"), *VoicelineID);
+        return false;
+    }
+    
+    VoicelineDatabase[VoicelineID] = UpdatedVoiceline;
+    
+    // Update cache if applicable
+    if (CachedVoicelines.Contains(VoicelineID))
+    {
+        if (UpdatedVoiceline.Priority == ENarr_VoicelinePriority::Critical || 
+            UpdatedVoiceline.Priority == ENarr_VoicelinePriority::High)
         {
-            if (CategoryPair.Value.Voicelines[i].VoicelineID == VoicelineID)
-            {
-                CategoryPair.Value.Voicelines.RemoveAt(i);
-                UE_LOG(LogTemp, Log, TEXT("VoicelineDatabase: Removed voiceline %s"), *VoicelineID);
-                return true;
-            }
+            CachedVoicelines[VoicelineID] = UpdatedVoiceline;
+        }
+        else
+        {
+            CachedVoicelines.Remove(VoicelineID);
         }
     }
     
-    UE_LOG(LogTemp, Warning, TEXT("VoicelineDatabase: Voiceline %s not found"), *VoicelineID);
-    return false;
+    UE_LOG(LogTemp, Log, TEXT("Updated voiceline: %s"), *VoicelineID);
+    return true;
+}
+
+TArray<FString> UNarr_VoicelineDatabase::GetAllVoicelineIDs() const
+{
+    TArray<FString> VoicelineIDs;
+    VoicelineDatabase.GetKeys(VoicelineIDs);
+    return VoicelineIDs;
+}
+
+int32 UNarr_VoicelineDatabase::GetVoicelineCount() const
+{
+    return VoicelineDatabase.Num();
 }
 
 void UNarr_VoicelineDatabase::ClearAllVoicelines()
 {
-    VoicelineCategories.Empty();
-    UE_LOG(LogTemp, Log, TEXT("VoicelineDatabase: Cleared all voicelines"));
+    VoicelineDatabase.Empty();
+    CachedVoicelines.Empty();
+    UE_LOG(LogTemp, Log, TEXT("Cleared all voicelines from database"));
 }
 
-int32 UNarr_VoicelineDatabase::GetTotalVoicelineCount() const
+bool UNarr_VoicelineDatabase::IsVoicelineValid(const FString& VoicelineID) const
 {
-    int32 Total = 0;
-    for (const auto& CategoryPair : VoicelineCategories)
+    if (!VoicelineDatabase.Contains(VoicelineID))
     {
-        Total += CategoryPair.Value.Voicelines.Num();
-    }
-    return Total;
-}
-
-TArray<FString> UNarr_VoicelineDatabase::GetAllCategoryNames() const
-{
-    TArray<FString> CategoryNames;
-    VoicelineCategories.GetKeys(CategoryNames);
-    return CategoryNames;
-}
-
-FString UNarr_VoicelineDatabase::GetDatabaseStats() const
-{
-    FString Stats = FString::Printf(TEXT("Voiceline Database Stats:\n"));
-    Stats += FString::Printf(TEXT("Total Categories: %d\n"), VoicelineCategories.Num());
-    Stats += FString::Printf(TEXT("Total Voicelines: %d\n\n"), GetTotalVoicelineCount());
-    
-    for (const auto& CategoryPair : VoicelineCategories)
-    {
-        Stats += FString::Printf(TEXT("Category '%s': %d voicelines\n"), 
-                                *CategoryPair.Key, 
-                                CategoryPair.Value.Voicelines.Num());
+        return false;
     }
     
-    return Stats;
+    const FNarr_VoicelineEntry& Entry = VoicelineDatabase[VoicelineID];
+    return !Entry.VoicelineID.IsEmpty() && 
+           !Entry.AudioURL.IsEmpty() && 
+           Entry.Duration > 0.0f;
+}
+
+FNarr_VoicelineEntry UNarr_VoicelineDatabase::GetRandomVoicelineByCategory(ENarr_VoicelineCategory Category) const
+{
+    TArray<FNarr_VoicelineEntry> CategoryVoicelines = GetVoicelinesByCategory(Category);
+    
+    if (CategoryVoicelines.Num() == 0)
+    {
+        return FNarr_VoicelineEntry();
+    }
+    
+    int32 RandomIndex = FMath::RandRange(0, CategoryVoicelines.Num() - 1);
+    return CategoryVoicelines[RandomIndex];
 }
