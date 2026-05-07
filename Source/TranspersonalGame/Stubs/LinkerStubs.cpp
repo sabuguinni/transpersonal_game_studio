@@ -2994,22 +2994,6 @@ void AJurassicBiomeManagerV2::BeginPlay() {}
 // DISABLED_STUB: void UChaosPhysicsManager::Deinitialize() {}
 
 
-// UE5 Engine Launch globals - required for standalone game build
-#include "CoreMinimal.h"
-// REMOVED: #include "HAL/UnrealMemory.h"
-
-// Engine global variables
-TCHAR GInternalProjectName[64] = TEXT("TranspersonalGame");
-bool GIsGameAgnosticExe = false;
-const TCHAR* GForeignEngineDir = TEXT("");
-
-// FMemory stubs - needed for Game target, conflicts with Editor target
-#if !WITH_EDITOR
-void* FMemory_Malloc(unsigned long Count, unsigned long Alignment) { return FMemory::Malloc(Count, Alignment); }
-void* FMemory_Realloc(void* Original, unsigned long Count, unsigned long Alignment) { return FMemory::Realloc(Original, Count, Alignment); }
-void FMemory_Free(void* Original) { FMemory::Free(Original); }
-#endif // !WITH_EDITOR
-
 // Editor-only stubs (needed for TranspersonalGameEditor target)
 #if WITH_EDITOR
 void APrehistoricArchitectureManager::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) { Super::PostEditChangeProperty(PropertyChangedEvent); }
@@ -3019,7 +3003,9 @@ void UPCGBiomeDataAssetV43::ValidateBiomeData() {}
 #endif // WITH_EDITOR
 
 // PCG Architecture stubs
+#if WITH_EDITOR
 FText UPCG_ArchitectureGeneratorSettings::GetDefaultNodeTitle() const { return FText::GetEmpty(); }
 FText UPCG_ArchitectureGeneratorSettings::GetNodeTooltipText() const { return FText::GetEmpty(); }
 FLinearColor UPCG_ArchitectureGeneratorSettings::GetNodeTitleColor() const { return FLinearColor::White; }
 FText UPCGArchitectureSettings::GetNodeTooltipText() const { return FText::GetEmpty(); }
+#endif // WITH_EDITOR
