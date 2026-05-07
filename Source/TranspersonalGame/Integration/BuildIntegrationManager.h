@@ -1,98 +1,115 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/ActorComponent.h"
-#include "Engine/TimerHandle.h"
-#include "TranspersonalGame/SharedTypes.h"
+#include "Engine/GameInstanceSubsystem.h"
+#include "SharedTypes.h"
 #include "BuildIntegrationManager.generated.h"
 
-DECLARE_LOG_CATEGORY_EXTERN(LogBuildIntegration, Log, All);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBuildValidationComplete, bool, bSuccess);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnModuleStatusChanged, FString, ModuleName, EBuild_ModuleStatus, Status);
 
 /**
- * Sistema de gestão de integração e build do projeto
- * Responsável por validar a integridade do código, detectar problemas
- * e garantir que todos os sistemas estão funcionais
+ * Build Integration Manager - Agente #19
+ * Gerencia integração contínua, validação de builds e estado dos módulos
  */
-UCLASS(ClassGroup=(TranspersonalGame), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UBuildIntegrationManager : public UActorComponent
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UBuildIntegrationManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
     UBuildIntegrationManager();
 
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+
+    // Build Validation
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    void ValidateProjectBuild();
+
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    void ValidateModuleIntegrity(const FString& ModuleName);
+
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    bool CheckHeaderCppPairs();
+
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    void CleanOrphanedHeaders();
+
+    // Module Management
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    void RegisterModule(const FString& ModuleName, EBuild_ModuleStatus Status);
+
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    EBuild_ModuleStatus GetModuleStatus(const FString& ModuleName) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    TArray<FString> GetFailedModules() const;
+
+    // Actor Validation
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    void ValidateMapActors(const FString& MapPath);
+
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    void ValidateBiomeDistribution();
+
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    int32 GetActorCountByType(const FString& ActorType) const;
+
+    // Compilation Testing
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    void TestCompilation();
+
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    bool IsProjectCompiling() const;
+
+    // Integration Reports
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    FBuild_IntegrationReport GenerateIntegrationReport();
+
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    void SaveBuildReport(const FBuild_IntegrationReport& Report);
+
+    // Events
+    UPROPERTY(BlueprintAssignable, Category = "Build Integration")
+    FOnBuildValidationComplete OnBuildValidationComplete;
+
+    UPROPERTY(BlueprintAssignable, Category = "Build Integration")
+    FOnModuleStatusChanged OnModuleStatusChanged;
+
 protected:
-    virtual void BeginPlay() override;
-    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+    // Module tracking
+    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
+    TMap<FString, EBuild_ModuleStatus> ModuleStatusMap;
 
-public:
-    /** Executar validação completa de integração */
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    void PerformIntegrationValidation();
-    
-    /** Forçar validação imediata */
-    UFUNCTION(BlueprintCallable, Category = "Build Integration", CallInEditor)
-    void ForceValidation();
-    
-    /** Obter relatório detalhado do estado de integração */
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    FString GetIntegrationReport() const;
-    
-    /** Configurar intervalo entre validações automáticas */
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    void SetValidationInterval(float NewInterval);
+    // Actor tracking
+    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
+    TMap<FString, int32> ActorCountByType;
 
-    // Propriedades de estado (somente leitura via Blueprint)
+    // Build state
     UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
-    EBuild_IntegrationState IntegrationState;
-    
+    bool bIsCompiling;
+
     UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
-    int32 TotalModulesLoaded;
-    
+    bool bLastBuildSuccessful;
+
     UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
-    int32 FailedModulesCount;
-    
+    FDateTime LastBuildTime;
+
+    // Critical modules that must exist
     UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
-    int32 OrphanHeadersCount;
-    
+    TArray<FString> CriticalModules;
+
+    // Biome data for validation
     UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
-    int32 DuplicateActorsCount;
-    
-    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
-    float LastValidationTime;
+    TMap<FString, FBuild_BiomeData> BiomeMap;
 
 private:
-    /** Validar módulos C++ carregados */
-    void ValidateLoadedModules();
-    
-    /** Verificar headers sem implementação .cpp */
-    void CheckOrphanHeaders();
-    
-    /** Verificar actores duplicados no mapa */
-    void CheckDuplicateActors();
-    
-    /** Validar dependências entre sistemas */
-    void ValidateSystemDependencies();
-    
-    /** Validar sistema de geração de mundo */
-    bool ValidateWorldGeneration();
-    
-    /** Validar sistema de personagem */
-    bool ValidateCharacterSystem();
-    
-    /** Validar GameMode */
-    bool ValidateGameMode();
-    
-    /** Atualizar estado de integração baseado nos resultados */
-    void UpdateIntegrationState();
-
-    // Configuração
-    UPROPERTY(EditAnywhere, Category = "Build Integration", meta = (ClampMin = "10.0", ClampMax = "300.0"))
-    float ValidationInterval;
-    
-    // Timer para validações automáticas
-    FTimerHandle ValidationTimerHandle;
-    
-    // Resultados da validação de sistemas
-    TMap<FString, bool> SystemValidationResults;
+    void InitializeCriticalModules();
+    void InitializeBiomeMap();
+    void ValidateActorPlacement(AActor* Actor);
+    FString GetBiomeForLocation(const FVector& Location) const;
+    void LogBuildError(const FString& Error);
+    void LogBuildWarning(const FString& Warning);
 };
