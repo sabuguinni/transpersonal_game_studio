@@ -2,15 +2,17 @@
 
 #include "CoreMinimal.h"
 #include "Engine/GameInstanceSubsystem.h"
-#include "SharedTypes.h"
+#include "Engine/World.h"
+#include "UObject/ObjectMacros.h"
+#include "../SharedTypes.h"
 #include "BuildIntegrationManager.generated.h"
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBuildValidationComplete, bool, bSuccess);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnModuleStatusChanged, FString, ModuleName, EBuild_ModuleStatus, Status);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBuildStatusChanged, EBuildStatus, NewStatus);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnModuleValidated, FString, ModuleName, bool, bIsValid);
 
 /**
- * Build Integration Manager - Agente #19
- * Gerencia integração contínua, validação de builds e estado dos módulos
+ * Build Integration Manager - Manages compilation, validation and integration of all game modules
+ * Responsible for ensuring all agent outputs work together as a cohesive game
  */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UBuildIntegrationManager : public UGameInstanceSubsystem
@@ -24,92 +26,86 @@ public:
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Build Validation
+    // Build Management
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    void ValidateProjectBuild();
+    void StartBuildValidation();
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    void ValidateModuleIntegrity(const FString& ModuleName);
+    void ValidateModule(const FString& ModuleName);
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool CheckHeaderCppPairs();
+    bool IsModuleValid(const FString& ModuleName) const;
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    void CleanOrphanedHeaders();
+    EBuildStatus GetCurrentBuildStatus() const { return CurrentBuildStatus; }
 
-    // Module Management
+    // Integration Testing
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    void RegisterModule(const FString& ModuleName, EBuild_ModuleStatus Status);
-
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    EBuild_ModuleStatus GetModuleStatus(const FString& ModuleName) const;
+    void RunIntegrationTests();
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    TArray<FString> GetFailedModules() const;
-
-    // Actor Validation
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    void ValidateMapActors(const FString& MapPath);
+    void ValidateActorSpawning();
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    void ValidateBiomeDistribution();
+    void ValidateSystemInteractions();
+
+    // Cleanup Operations
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    void CleanupOrphanedHeaders();
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    int32 GetActorCountByType(const FString& ActorType) const;
-
-    // Compilation Testing
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    void TestCompilation();
+    void RemoveDuplicateActors();
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool IsProjectCompiling() const;
-
-    // Integration Reports
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    FBuild_IntegrationReport GenerateIntegrationReport();
-
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    void SaveBuildReport(const FBuild_IntegrationReport& Report);
+    void OptimizeMapPerformance();
 
     // Events
     UPROPERTY(BlueprintAssignable, Category = "Build Integration")
-    FOnBuildValidationComplete OnBuildValidationComplete;
+    FOnBuildStatusChanged OnBuildStatusChanged;
 
     UPROPERTY(BlueprintAssignable, Category = "Build Integration")
-    FOnModuleStatusChanged OnModuleStatusChanged;
+    FOnModuleValidated OnModuleValidated;
 
 protected:
-    // Module tracking
+    // Build Status
     UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
-    TMap<FString, EBuild_ModuleStatus> ModuleStatusMap;
-
-    // Actor tracking
-    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
-    TMap<FString, int32> ActorCountByType;
-
-    // Build state
-    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
-    bool bIsCompiling;
+    EBuildStatus CurrentBuildStatus;
 
     UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
-    bool bLastBuildSuccessful;
+    TMap<FString, bool> ModuleValidationStatus;
 
     UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
-    FDateTime LastBuildTime;
+    TArray<FString> ValidationErrors;
 
-    // Critical modules that must exist
     UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
-    TArray<FString> CriticalModules;
+    int32 TotalActorsInMap;
 
-    // Biome data for validation
     UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
-    TMap<FString, FBuild_BiomeData> BiomeMap;
+    int32 ValidatedModules;
+
+    // Integration Settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Build Integration")
+    bool bAutoValidateOnStartup;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Build Integration")
+    bool bCleanupOrphansOnValidation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Build Integration")
+    float ValidationTimeout;
 
 private:
-    void InitializeCriticalModules();
-    void InitializeBiomeMap();
-    void ValidateActorPlacement(AActor* Actor);
-    FString GetBiomeForLocation(const FVector& Location) const;
-    void LogBuildError(const FString& Error);
-    void LogBuildWarning(const FString& Warning);
+    // Internal validation methods
+    void ValidateClassLoading();
+    void ValidateActorIntegrity();
+    void ValidateSystemDependencies();
+    void UpdateBuildStatus(EBuildStatus NewStatus);
+    
+    // Cleanup helpers
+    void IdentifyOrphanedFiles();
+    void RemoveInvalidActors();
+    void ConsolidateDuplicateSystems();
+
+    // Timer handles
+    FTimerHandle ValidationTimerHandle;
+    FTimerHandle CleanupTimerHandle;
 };
