@@ -1,15 +1,16 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/GameInstanceSubsystem.h"
 #include "Engine/World.h"
+#include "GameFramework/GameModeBase.h"
+#include "Subsystems/WorldSubsystem.h"
 #include "../../SharedTypes.h"
 #include "StudioDirector.generated.h"
 
 /**
- * Studio Director System - Central coordination for all game systems
- * Manages agent task distribution, production priorities, and quality assurance
- * Ensures all agents work toward unified game vision
+ * Studio Director - Production Coordination System
+ * Manages agent task assignments and production tracking
+ * Ensures coordination between all 19 specialized agents
  */
 
 USTRUCT(BlueprintType)
@@ -17,32 +18,26 @@ struct FDir_AgentTask
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Task")
+    UPROPERTY(BlueprintReadWrite, Category = "Agent Task")
     FString AgentName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Task") 
-    FString TaskDescription;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Task")
+    UPROPERTY(BlueprintReadWrite, Category = "Agent Task")
     EDir_Priority Priority;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Task")
-    float EstimatedTime;
+    UPROPERTY(BlueprintReadWrite, Category = "Agent Task")
+    TArray<FString> TaskList;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Task")
-    bool bIsBlocking;
+    UPROPERTY(BlueprintReadWrite, Category = "Agent Task")
+    FString ExpectedDeliverables;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Task")
-    FString ExpectedDeliverable;
+    UPROPERTY(BlueprintReadWrite, Category = "Agent Task")
+    bool bCompleted;
 
     FDir_AgentTask()
     {
         AgentName = TEXT("");
-        TaskDescription = TEXT("");
         Priority = EDir_Priority::Medium;
-        EstimatedTime = 60.0f;
-        bIsBlocking = false;
-        ExpectedDeliverable = TEXT("");
+        bCompleted = false;
     }
 };
 
@@ -51,116 +46,118 @@ struct FDir_ProductionStatus
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
-    int32 TotalActorsInMap;
+    UPROPERTY(BlueprintReadWrite, Category = "Production")
+    FString CycleID;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
-    int32 CompilationErrors;
+    UPROPERTY(BlueprintReadWrite, Category = "Production")
+    TArray<FString> CriticalBlockers;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
-    int32 HeadersWithoutCpp;
+    UPROPERTY(BlueprintReadWrite, Category = "Production")
+    TArray<FDir_AgentTask> AgentTasks;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
-    bool bCanPlaytest;
+    UPROPERTY(BlueprintReadWrite, Category = "Production")
+    bool bPlayablePrototype;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
-    FString BlockingIssues;
+    UPROPERTY(BlueprintReadWrite, Category = "Production")
+    bool bCharacterMovement;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
-    float OverallProgress;
+    UPROPERTY(BlueprintReadWrite, Category = "Production")
+    bool bDinosaurEncounters;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Production")
+    bool bSurvivalMechanics;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Production")
+    bool bBiomeDiversity;
 
     FDir_ProductionStatus()
     {
-        TotalActorsInMap = 0;
-        CompilationErrors = 0;
-        HeadersWithoutCpp = 0;
-        bCanPlaytest = false;
-        BlockingIssues = TEXT("");
-        OverallProgress = 0.0f;
+        CycleID = TEXT("");
+        bPlayablePrototype = false;
+        bCharacterMovement = false;
+        bDinosaurEncounters = false;
+        bSurvivalMechanics = false;
+        bBiomeDiversity = false;
     }
 };
 
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UStudioDirector : public UGameInstanceSubsystem
+class TRANSPERSONALGAME_API UStudioDirectorSubsystem : public UWorldSubsystem
 {
     GENERATED_BODY()
 
 public:
-    UStudioDirector();
-
-    // Subsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Task Management
+    // Production Coordination
     UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    void AssignTaskToAgent(const FString& AgentName, const FString& TaskDescription, EDir_Priority Priority, bool bIsBlocking = false);
+    void InitializeProductionCycle(const FString& CycleID);
 
     UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    TArray<FDir_AgentTask> GetTasksForAgent(const FString& AgentName) const;
+    void AssignTaskToAgent(const FString& AgentName, const FDir_AgentTask& Task);
 
     UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    void CompleteTask(const FString& AgentName, const FString& TaskDescription);
+    void MarkTaskCompleted(const FString& AgentName, bool bSuccess);
 
-    // Production Monitoring
     UFUNCTION(BlueprintCallable, Category = "Studio Director")
     FDir_ProductionStatus GetProductionStatus() const;
 
+    // Critical System Checks
     UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    void UpdateProductionMetrics();
-
-    UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    bool CanAgentProceed(const FString& AgentName) const;
-
-    // Quality Assurance
-    UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    void ReportCompilationError(const FString& ErrorMessage, const FString& FileName);
+    bool CheckPlayablePrototypeStatus();
 
     UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    void ValidateGameplayReadiness();
+    TArray<FString> GetCriticalBlockers();
 
-    // Coordination
-    UFUNCTION(BlueprintCallable, Category = "Studio Director", CallInEditor)
-    void CoordinateAgents();
+    UFUNCTION(BlueprintCallable, Category = "Studio Director")
+    void UpdateSuccessMetrics();
 
-    UFUNCTION(BlueprintCallable, Category = "Studio Director", CallInEditor)
-    void GenerateProductionReport();
+    // Biome Coordination
+    UFUNCTION(BlueprintCallable, Category = "Studio Director")
+    FVector GetBiomeCenter(EDir_BiomeType BiomeType);
+
+    UFUNCTION(BlueprintCallable, Category = "Studio Director")
+    TArray<FVector> GetBiomeSpawnPoints(EDir_BiomeType BiomeType, int32 NumPoints);
 
 protected:
-    // Task tracking
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Tasks")
-    TArray<FDir_AgentTask> ActiveTasks;
+    UPROPERTY(BlueprintReadOnly, Category = "Production")
+    FDir_ProductionStatus CurrentProductionStatus;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Tasks")
-    TArray<FDir_AgentTask> CompletedTasks;
+    UPROPERTY(BlueprintReadOnly, Category = "Production")
+    TMap<FString, FDir_AgentTask> AgentTaskMap;
 
-    // Production metrics
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Production")
-    FDir_ProductionStatus CurrentStatus;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Production")
-    TArray<FString> BlockingIssues;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Production")
-    TArray<FString> CompilationErrors;
-
-    // Configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    bool bEnableAutoCoordination;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    float CoordinationInterval;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    int32 MaxConcurrentTasks;
+    // Biome coordinate data
+    UPROPERTY(BlueprintReadOnly, Category = "Biomes")
+    TMap<EDir_BiomeType, FVector> BiomeCenters;
 
 private:
-    // Internal methods
-    void ScanForCompilationIssues();
-    void AssessGameplayReadiness();
-    void PrioritizeTasks();
-    void LogProductionMetrics() const;
+    void InitializeBiomeCoordinates();
+    void CheckCompilationStatus();
+    void AssessWorldState();
+};
 
-    // Timer handles
-    FTimerHandle CoordinationTimerHandle;
+UCLASS(BlueprintType)
+class TRANSPERSONALGAME_API AStudioDirectorActor : public AActor
+{
+    GENERATED_BODY()
+
+public:
+    AStudioDirectorActor();
+
+protected:
+    virtual void BeginPlay() override;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Studio Director")
+    class UStaticMeshComponent* DirectorConsole;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Studio Director")
+    class UWidgetComponent* ProductionDisplay;
+
+public:
+    UFUNCTION(BlueprintCallable, Category = "Studio Director")
+    void DisplayProductionStatus();
+
+    UFUNCTION(BlueprintCallable, Category = "Studio Director")
+    void TriggerAgentCoordination();
 };
