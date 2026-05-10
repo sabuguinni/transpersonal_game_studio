@@ -1,9 +1,10 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/GameInstanceSubsystem.h"
 #include "Engine/World.h"
-#include "Subsystems/GameInstanceSubsystem.h"
-#include "SharedTypes.h"
+#include "Subsystems/WorldSubsystem.h"
+#include "../SharedTypes.h"
 #include "BuildIntegrationManager.generated.h"
 
 USTRUCT(BlueprintType)
@@ -15,10 +16,10 @@ struct TRANSPERSONALGAME_API FBuild_ModuleStatus
     FString ModuleName;
 
     UPROPERTY(BlueprintReadOnly, Category = "Build")
-    bool bIsLoaded;
+    bool bIsCompiled;
 
     UPROPERTY(BlueprintReadOnly, Category = "Build")
-    bool bHasErrors;
+    bool bHasImplementation;
 
     UPROPERTY(BlueprintReadOnly, Category = "Build")
     int32 ClassCount;
@@ -29,8 +30,8 @@ struct TRANSPERSONALGAME_API FBuild_ModuleStatus
     FBuild_ModuleStatus()
     {
         ModuleName = TEXT("");
-        bIsLoaded = false;
-        bHasErrors = false;
+        bIsCompiled = false;
+        bHasImplementation = false;
         ClassCount = 0;
         LastError = TEXT("");
     }
@@ -42,29 +43,26 @@ struct TRANSPERSONALGAME_API FBuild_ValidationResult
     GENERATED_BODY()
 
     UPROPERTY(BlueprintReadOnly, Category = "Build")
-    bool bCompilationSuccess;
+    bool bBuildSuccess;
 
     UPROPERTY(BlueprintReadOnly, Category = "Build")
-    int32 ErrorCount;
+    int32 TotalModules;
 
     UPROPERTY(BlueprintReadOnly, Category = "Build")
-    int32 WarningCount;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Build")
-    TArray<FString> ErrorMessages;
+    int32 CompiledModules;
 
     UPROPERTY(BlueprintReadOnly, Category = "Build")
     TArray<FBuild_ModuleStatus> ModuleStatuses;
 
     UPROPERTY(BlueprintReadOnly, Category = "Build")
-    float ValidationTime;
+    FString BuildTimestamp;
 
     FBuild_ValidationResult()
     {
-        bCompilationSuccess = false;
-        ErrorCount = 0;
-        WarningCount = 0;
-        ValidationTime = 0.0f;
+        bBuildSuccess = false;
+        TotalModules = 0;
+        CompiledModules = 0;
+        BuildTimestamp = TEXT("");
     }
 };
 
@@ -80,62 +78,37 @@ public:
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Build validation functions
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
     FBuild_ValidationResult ValidateCurrentBuild();
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool CheckModuleIntegrity(const FString& ModuleName);
+    bool CheckModuleCompilation(const FString& ModuleName);
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
     TArray<FString> GetOrphanedHeaders();
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool ValidateClassDependencies();
+    bool ValidateSharedTypes();
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    void GenerateIntegrationReport();
-
-    // Module management
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    TArray<FBuild_ModuleStatus> GetAllModuleStatuses();
+    void GenerateBuildReport();
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool ReloadModule(const FString& ModuleName);
-
-    // Error tracking
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    void LogBuildError(const FString& ErrorMessage, const FString& SourceFile);
-
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    TArray<FString> GetRecentErrors();
-
-    // Integration testing
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool TestCrossModuleIntegration();
-
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool ValidateGameplayFlow();
+    bool FixCommonBuildErrors();
 
 protected:
     UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
-    TArray<FString> RecentErrors;
+    FBuild_ValidationResult LastValidationResult;
 
     UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
-    TArray<FBuild_ModuleStatus> CachedModuleStatuses;
+    TArray<FString> KnownModules;
 
     UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
-    float LastValidationTime;
+    bool bIntegrationActive;
 
-    // Timer handle for periodic validation
-    FTimerHandle ValidationTimerHandle;
-
-    // Internal validation functions
-    bool ValidateSourceStructure();
-    bool CheckForCircularDependencies();
-    bool ValidateUPropertyExposure();
-    void UpdateModuleStatuses();
-    void CacheValidationResults(const FBuild_ValidationResult& Result);
+private:
+    void ScanForModules();
+    void ValidateModuleStructure(const FString& ModuleName, FBuild_ModuleStatus& OutStatus);
+    bool CheckHeaderImplementationPair(const FString& HeaderPath);
+    void LogBuildStatus(const FString& Message, bool bIsError = false);
 };
-
-#include "BuildIntegrationManager.generated.h"
