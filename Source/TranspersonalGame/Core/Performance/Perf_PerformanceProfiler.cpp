@@ -1,425 +1,450 @@
 #include "Perf_PerformanceProfiler.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "HAL/IConsoleManager.h"
-#include "Stats/Stats.h"
-#include "RenderingThread.h"
-#include "RHI.h"
-#include "Misc/DateTime.h"
+#include "HAL/FileManager.h"
 #include "Misc/FileHelper.h"
-#include "HAL/PlatformFilemanager.h"
+#include "Misc/DateTime.h"
+#include "Stats/StatsHierarchical.h"
 
-DEFINE_LOG_CATEGORY_STATIC(LogPerformanceProfiler, Log, All);
-
-APerf_PerformanceProfiler::APerf_PerformanceProfiler()
+UPerf_PerformanceProfiler::UPerf_PerformanceProfiler()
 {
-    PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 0.1f; // Update 10 times per second
-    
-    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
-    RootComponent = RootSceneComponent;
-    
-    // Initialize profiling settings
-    ProfilingSettings.MaxProfileDuration = 300.0f; // 5 minutes max
-    ProfilingSettings.SampleInterval = 0.1f;
-    ProfilingSettings.MaxSamples = 3000;
-    ProfilingSettings.bAutoSaveResults = true;
-    ProfilingSettings.bEnableGPUProfiling = true;
-    ProfilingSettings.bEnableCPUProfiling = true;
-    ProfilingSettings.bEnableMemoryProfiling = true;
-    
-    bIsCurrentlyProfiling = false;
-    ProfilingStartTime = 0.0f;
-    LastSampleTime = 0.0f;
-    CurrentSampleIndex = 0;
-    
-    // Pre-allocate sample arrays
-    FrameTimeSamples.Reserve(ProfilingSettings.MaxSamples);
-    GPUTimeSamples.Reserve(ProfilingSettings.MaxSamples);
-    CPUTimeSamples.Reserve(ProfilingSettings.MaxSamples);
-    MemorySamples.Reserve(ProfilingSettings.MaxSamples);
-    DrawCallSamples.Reserve(ProfilingSettings.MaxSamples);
-    
-    // Initialize console commands
-    RegisterConsoleCommands();
+    bIsProfilingActive = false;
+    bIsPaused = false;
+    MaxSampleCount = 10000;
+    ProfilingDuration = 60.0f;
+    bAutoExportReports = false;
+    ReportExportPath = TEXT("Saved/Profiling/");
 }
 
-void APerf_PerformanceProfiler::BeginPlay()
+void UPerf_PerformanceProfiler::Initialize(FSubsystemCollectionBase& Collection)
 {
-    Super::BeginPlay();
+    Super::Initialize(Collection);
     
-    UE_LOG(LogPerformanceProfiler, Log, TEXT("Performance Profiler initialized"));
+    InitializeCategorySettings();
+    ProfileSamples.Reserve(MaxSampleCount);
     
-    // Auto-start profiling if enabled
-    if (ProfilingSettings.bAutoStartProfiling)
-    {
-        StartProfiling();
-    }
+    UE_LOG(LogTemp, Log, TEXT("Performance Profiler initialized with max samples: %d"), MaxSampleCount);
 }
 
-void APerf_PerformanceProfiler::EndPlay(const EEndPlayReason::Type EndPlayReason)
+void UPerf_PerformanceProfiler::Deinitialize()
 {
-    if (bIsCurrentlyProfiling)
+    if (bIsProfilingActive)
     {
-        StopProfiling();
-        
-        if (ProfilingSettings.bAutoSaveResults)
-        {
-            SaveProfilingResults();
-        }
-    }
-    
-    UnregisterConsoleCommands();
-    Super::EndPlay(EndPlayReason);
-}
-
-void APerf_PerformanceProfiler::Tick(float DeltaTime)
-{
-    Super::Tick(DeltaTime);
-    
-    if (bIsCurrentlyProfiling)
-    {
-        UpdateProfiling(DeltaTime);
-    }
-}
-
-void APerf_PerformanceProfiler::StartProfiling()
-{
-    if (bIsCurrentlyProfiling)
-    {
-        UE_LOG(LogPerformanceProfiler, Warning, TEXT("Profiling already in progress"));
-        return;
-    }
-    
-    // Clear previous data
-    ClearProfilingData();
-    
-    bIsCurrentlyProfiling = true;
-    ProfilingStartTime = GetWorld()->GetTimeSeconds();
-    LastSampleTime = ProfilingStartTime;
-    CurrentSampleIndex = 0;
-    
-    UE_LOG(LogPerformanceProfiler, Log, TEXT("Started performance profiling"));
-    
-    // Enable detailed stats
-    if (ProfilingSettings.bEnableCPUProfiling)
-    {
-        GEngine->Exec(GetWorld(), TEXT("stat startfile"));
-    }
-    
-    if (ProfilingSettings.bEnableGPUProfiling)
-    {
-        GEngine->Exec(GetWorld(), TEXT("stat gpu"));
-    }
-}
-
-void APerf_PerformanceProfiler::StopProfiling()
-{
-    if (!bIsCurrentlyProfiling)
-    {
-        UE_LOG(LogPerformanceProfiler, Warning, TEXT("No profiling session in progress"));
-        return;
-    }
-    
-    bIsCurrentlyProfiling = false;
-    
-    float TotalDuration = GetWorld()->GetTimeSeconds() - ProfilingStartTime;
-    
-    UE_LOG(LogPerformanceProfiler, Log, TEXT("Stopped performance profiling. Duration: %.2f seconds, Samples: %d"), 
-           TotalDuration, CurrentSampleIndex);
-    
-    // Disable detailed stats
-    GEngine->Exec(GetWorld(), TEXT("stat stopfile"));
-    GEngine->Exec(GetWorld(), TEXT("stat none"));
-    
-    // Generate profiling report
-    GenerateProfilingReport();
-}
-
-void APerf_PerformanceProfiler::UpdateProfiling(float DeltaTime)
-{
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-    
-    // Check if we should take a sample
-    if (CurrentTime - LastSampleTime >= ProfilingSettings.SampleInterval)
-    {
-        TakeSample();
-        LastSampleTime = CurrentTime;
-    }
-    
-    // Check if we've exceeded maximum duration
-    if (CurrentTime - ProfilingStartTime >= ProfilingSettings.MaxProfileDuration)
-    {
-        UE_LOG(LogPerformanceProfiler, Warning, TEXT("Maximum profiling duration reached, stopping profiling"));
         StopProfiling();
     }
     
-    // Check if we've exceeded maximum samples
-    if (CurrentSampleIndex >= ProfilingSettings.MaxSamples)
+    ProfileSamples.Empty();
+    ActiveSamples.Empty();
+    
+    Super::Deinitialize();
+}
+
+void UPerf_PerformanceProfiler::StartProfiling()
+{
+    if (bIsProfilingActive)
     {
-        UE_LOG(LogPerformanceProfiler, Warning, TEXT("Maximum sample count reached, stopping profiling"));
+        UE_LOG(LogTemp, Warning, TEXT("Profiling already active"));
+        return;
+    }
+    
+    bIsProfilingActive = true;
+    bIsPaused = false;
+    ProfilingStartTime = FPlatformTime::Seconds();
+    LastReportTime = ProfilingStartTime;
+    
+    ClearSamples();
+    
+    UE_LOG(LogTemp, Log, TEXT("Performance profiling started"));
+    
+    if (GEngine)
+    {
+        GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Green, TEXT("Performance Profiling Started"));
+    }
+}
+
+void UPerf_PerformanceProfiler::StopProfiling()
+{
+    if (!bIsProfilingActive)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Profiling not active"));
+        return;
+    }
+    
+    bIsProfilingActive = false;
+    bIsPaused = false;
+    
+    // Generate final report
+    FPerf_ProfilerReport FinalReport = GenerateReport();
+    LogProfilingResults();
+    
+    if (bAutoExportReports)
+    {
+        FString ReportPath = FString::Printf(TEXT("%sProfileReport_%s.txt"), 
+            *ReportExportPath, 
+            *FDateTime::Now().ToString());
+        ExportReportToFile(ReportPath);
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Performance profiling stopped. Total samples: %d"), ProfileSamples.Num());
+    
+    if (GEngine)
+    {
+        GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Red, 
+            FString::Printf(TEXT("Profiling Stopped - %d samples collected"), ProfileSamples.Num()));
+    }
+}
+
+void UPerf_PerformanceProfiler::PauseProfiling()
+{
+    if (!bIsProfilingActive)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Cannot pause - profiling not active"));
+        return;
+    }
+    
+    bIsPaused = true;
+    UE_LOG(LogTemp, Log, TEXT("Performance profiling paused"));
+}
+
+void UPerf_PerformanceProfiler::ResumeProfiling()
+{
+    if (!bIsProfilingActive)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Cannot resume - profiling not active"));
+        return;
+    }
+    
+    bIsPaused = false;
+    UE_LOG(LogTemp, Log, TEXT("Performance profiling resumed"));
+}
+
+void UPerf_PerformanceProfiler::RecordSample(const FString& SampleName, float ExecutionTime, EPerf_ProfilerCategory Category)
+{
+    if (!bIsProfilingActive || bIsPaused)
+    {
+        return;
+    }
+    
+    // Check if category is enabled
+    if (CategoryEnabled.Contains(Category) && !CategoryEnabled[Category])
+    {
+        return;
+    }
+    
+    // Check profiling duration
+    float CurrentTime = FPlatformTime::Seconds();
+    if (ProfilingDuration > 0.0f && (CurrentTime - ProfilingStartTime) > ProfilingDuration)
+    {
         StopProfiling();
+        return;
+    }
+    
+    // Create new sample
+    FPerf_ProfilerSample NewSample(SampleName, ExecutionTime, Category);
+    NewSample.Timestamp = CurrentTime;
+    
+    // Add to samples array
+    ProfileSamples.Add(NewSample);
+    
+    // Clean up if we exceed max samples
+    if (ProfileSamples.Num() > MaxSampleCount)
+    {
+        CleanupOldSamples();
+    }
+    
+    // Log significant performance issues
+    if (ExecutionTime > 16.67f) // More than one frame at 60fps
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Performance spike detected: %s took %.2fms"), *SampleName, ExecutionTime);
     }
 }
 
-void APerf_PerformanceProfiler::TakeSample()
+void UPerf_PerformanceProfiler::BeginSample(const FString& SampleName, EPerf_ProfilerCategory Category)
 {
-    if (!bIsCurrentlyProfiling || CurrentSampleIndex >= ProfilingSettings.MaxSamples)
+    if (!bIsProfilingActive || bIsPaused)
     {
         return;
     }
     
-    FPerf_PerformanceSample Sample;
-    Sample.Timestamp = GetWorld()->GetTimeSeconds() - ProfilingStartTime;
-    
-    // Get frame time
-    Sample.FrameTime = FApp::GetDeltaTime() * 1000.0f; // Convert to milliseconds
-    
-    // Get FPS
-    Sample.FPS = 1.0f / FMath::Max(FApp::GetDeltaTime(), 0.001f);
-    
-    // Get GPU time (approximate)
-    Sample.GPUTime = GetGPUFrameTime();
-    
-    // Get CPU time (approximate)
-    Sample.CPUTime = GetCPUFrameTime();
-    
-    // Get memory usage
-    Sample.MemoryUsageMB = GetMemoryUsageMB();
-    
-    // Get draw calls (approximate)
-    Sample.DrawCalls = GetDrawCallCount();
-    
-    // Get visible actors
-    Sample.VisibleActors = GetVisibleActorCount();
-    
-    // Store samples
-    FrameTimeSamples.Add(Sample.FrameTime);
-    GPUTimeSamples.Add(Sample.GPUTime);
-    CPUTimeSamples.Add(Sample.CPUTime);
-    MemorySamples.Add(Sample.MemoryUsageMB);
-    DrawCallSamples.Add(Sample.DrawCalls);
-    
-    CurrentSampleIndex++;
-    
-    // Log critical performance issues
-    if (Sample.FPS < 20.0f)
+    // Check if category is enabled
+    if (CategoryEnabled.Contains(Category) && !CategoryEnabled[Category])
     {
-        UE_LOG(LogPerformanceProfiler, Warning, TEXT("Critical FPS drop detected: %.1f FPS at %.2fs"), 
-               Sample.FPS, Sample.Timestamp);
-    }
-    
-    if (Sample.FrameTime > 50.0f) // 50ms = 20 FPS
-    {
-        UE_LOG(LogPerformanceProfiler, Warning, TEXT("High frame time detected: %.2fms at %.2fs"), 
-               Sample.FrameTime, Sample.Timestamp);
-    }
-}
-
-float APerf_PerformanceProfiler::GetGPUFrameTime() const
-{
-    // This is an approximation - in a real implementation you'd use RenderDoc or similar
-    return FMath::RandRange(5.0f, 15.0f);
-}
-
-float APerf_PerformanceProfiler::GetCPUFrameTime() const
-{
-    // This is an approximation - in a real implementation you'd use detailed CPU profiling
-    return FApp::GetDeltaTime() * 1000.0f * 0.8f; // Assume CPU is 80% of frame time
-}
-
-float APerf_PerformanceProfiler::GetMemoryUsageMB() const
-{
-    FPlatformMemoryStats MemStats = FPlatformMemory::GetStats();
-    return MemStats.UsedPhysical / (1024.0f * 1024.0f);
-}
-
-int32 APerf_PerformanceProfiler::GetDrawCallCount() const
-{
-    // This is an approximation - real implementation would query rendering stats
-    return FMath::RandRange(100, 2000);
-}
-
-int32 APerf_PerformanceProfiler::GetVisibleActorCount() const
-{
-    if (!GetWorld())
-    {
-        return 0;
-    }
-    
-    int32 VisibleCount = 0;
-    for (TActorIterator<AActor> ActorIterator(GetWorld()); ActorIterator; ++ActorIterator)
-    {
-        AActor* Actor = *ActorIterator;
-        if (Actor && !Actor->IsHidden())
-        {
-            VisibleCount++;
-        }
-    }
-    
-    return VisibleCount;
-}
-
-void APerf_PerformanceProfiler::GenerateProfilingReport()
-{
-    if (FrameTimeSamples.Num() == 0)
-    {
-        UE_LOG(LogPerformanceProfiler, Warning, TEXT("No samples available for report generation"));
         return;
     }
     
-    FPerf_ProfilingReport Report;
-    
-    // Calculate statistics
-    Report.TotalSamples = FrameTimeSamples.Num();
-    Report.ProfilingDuration = GetWorld()->GetTimeSeconds() - ProfilingStartTime;
-    
-    // Frame time statistics
-    FrameTimeSamples.Sort();
-    Report.AverageFrameTime = CalculateAverage(FrameTimeSamples);
-    Report.MinFrameTime = FrameTimeSamples[0];
-    Report.MaxFrameTime = FrameTimeSamples.Last();
-    Report.MedianFrameTime = FrameTimeSamples[FrameTimeSamples.Num() / 2];
-    Report.Percentile95FrameTime = FrameTimeSamples[FMath::FloorToInt(FrameTimeSamples.Num() * 0.95f)];
-    Report.Percentile99FrameTime = FrameTimeSamples[FMath::FloorToInt(FrameTimeSamples.Num() * 0.99f)];
-    
-    // FPS statistics
-    Report.AverageFPS = 1000.0f / Report.AverageFrameTime;
-    Report.MinFPS = 1000.0f / Report.MaxFrameTime;
-    Report.MaxFPS = 1000.0f / Report.MinFrameTime;
-    
-    // GPU statistics
-    Report.AverageGPUTime = CalculateAverage(GPUTimeSamples);
-    Report.MaxGPUTime = *FMath::MaxElement(GPUTimeSamples);
-    
-    // CPU statistics
-    Report.AverageCPUTime = CalculateAverage(CPUTimeSamples);
-    Report.MaxCPUTime = *FMath::MaxElement(CPUTimeSamples);
-    
-    // Memory statistics
-    Report.AverageMemoryUsage = CalculateAverage(MemorySamples);
-    Report.MaxMemoryUsage = *FMath::MaxElement(MemorySamples);
-    
-    // Draw call statistics
-    Report.AverageDrawCalls = FMath::FloorToInt(CalculateAverage(DrawCallSamples));
-    Report.MaxDrawCalls = *FMath::MaxElement(DrawCallSamples);
-    
-    // Performance issues
-    Report.FrameDropCount = 0;
-    for (float FrameTime : FrameTimeSamples)
+    double CurrentTime = FPlatformTime::Seconds();
+    ActiveSamples.Add(SampleName, CurrentTime);
+}
+
+void UPerf_PerformanceProfiler::EndSample(const FString& SampleName)
+{
+    if (!bIsProfilingActive || bIsPaused)
     {
-        if (FrameTime > 33.33f) // Worse than 30 FPS
+        return;
+    }
+    
+    double* StartTime = ActiveSamples.Find(SampleName);
+    if (!StartTime)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("EndSample called for unknown sample: %s"), *SampleName);
+        return;
+    }
+    
+    double CurrentTime = FPlatformTime::Seconds();
+    float ExecutionTime = (CurrentTime - *StartTime) * 1000.0f; // Convert to milliseconds
+    
+    // Determine category based on sample name (simple heuristic)
+    EPerf_ProfilerCategory Category = EPerf_ProfilerCategory::Gameplay;
+    if (SampleName.Contains(TEXT("Render")) || SampleName.Contains(TEXT("Draw")))
+    {
+        Category = EPerf_ProfilerCategory::Rendering;
+    }
+    else if (SampleName.Contains(TEXT("Physics")) || SampleName.Contains(TEXT("Collision")))
+    {
+        Category = EPerf_ProfilerCategory::Physics;
+    }
+    else if (SampleName.Contains(TEXT("AI")) || SampleName.Contains(TEXT("Behavior")))
+    {
+        Category = EPerf_ProfilerCategory::AI;
+    }
+    else if (SampleName.Contains(TEXT("Anim")))
+    {
+        Category = EPerf_ProfilerCategory::Animation;
+    }
+    else if (SampleName.Contains(TEXT("Audio")) || SampleName.Contains(TEXT("Sound")))
+    {
+        Category = EPerf_ProfilerCategory::Audio;
+    }
+    
+    RecordSample(SampleName, ExecutionTime, Category);
+    ActiveSamples.Remove(SampleName);
+}
+
+FPerf_ProfilerReport UPerf_PerformanceProfiler::GenerateReport()
+{
+    FPerf_ProfilerReport Report;
+    
+    if (ProfileSamples.Num() == 0)
+    {
+        return Report;
+    }
+    
+    Report.Samples = ProfileSamples;
+    Report.TotalSamples = ProfileSamples.Num();
+    
+    // Calculate total frame time and average FPS
+    float TotalTime = 0.0f;
+    for (const FPerf_ProfilerSample& Sample : ProfileSamples)
+    {
+        TotalTime += Sample.ExecutionTimeMS;
+    }
+    
+    Report.TotalFrameTime = TotalTime;
+    Report.ReportDuration = FPlatformTime::Seconds() - ProfilingStartTime;
+    
+    if (Report.ReportDuration > 0.0f)
+    {
+        Report.AverageFPS = ProfileSamples.Num() / Report.ReportDuration;
+    }
+    
+    return Report;
+}
+
+void UPerf_PerformanceProfiler::ClearSamples()
+{
+    ProfileSamples.Empty();
+    ActiveSamples.Empty();
+    ProfilingStartTime = FPlatformTime::Seconds();
+    
+    UE_LOG(LogTemp, Log, TEXT("Performance profiler samples cleared"));
+}
+
+void UPerf_PerformanceProfiler::ExportReportToFile(const FString& FilePath)
+{
+    FPerf_ProfilerReport Report = GenerateReport();
+    FString ReportString = GenerateReportString(Report);
+    
+    // Ensure directory exists
+    FString Directory = FPaths::GetPath(FilePath);
+    IFileManager::Get().MakeDirectory(*Directory, true);
+    
+    // Write to file
+    if (FFileHelper::SaveStringToFile(ReportString, *FilePath))
+    {
+        UE_LOG(LogTemp, Log, TEXT("Performance report exported to: %s"), *FilePath);
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("Failed to export performance report to: %s"), *FilePath);
+    }
+}
+
+TArray<FPerf_ProfilerSample> UPerf_PerformanceProfiler::GetSamplesByCategory(EPerf_ProfilerCategory Category)
+{
+    TArray<FPerf_ProfilerSample> FilteredSamples;
+    
+    for (const FPerf_ProfilerSample& Sample : ProfileSamples)
+    {
+        if (Sample.Category == Category)
         {
-            Report.FrameDropCount++;
+            FilteredSamples.Add(Sample);
         }
     }
     
-    Report.PercentageFrameDrops = (float)Report.FrameDropCount / (float)Report.TotalSamples * 100.0f;
-    
-    // Store the report
-    LastProfilingReport = Report;
-    
-    // Log summary
-    UE_LOG(LogPerformanceProfiler, Log, TEXT("=== PERFORMANCE PROFILING REPORT ==="));
-    UE_LOG(LogPerformanceProfiler, Log, TEXT("Duration: %.2fs, Samples: %d"), Report.ProfilingDuration, Report.TotalSamples);
-    UE_LOG(LogPerformanceProfiler, Log, TEXT("Average FPS: %.1f (Min: %.1f, Max: %.1f)"), Report.AverageFPS, Report.MinFPS, Report.MaxFPS);
-    UE_LOG(LogPerformanceProfiler, Log, TEXT("Average Frame Time: %.2fms (95th: %.2fms, 99th: %.2fms)"), 
-           Report.AverageFrameTime, Report.Percentile95FrameTime, Report.Percentile99FrameTime);
-    UE_LOG(LogPerformanceProfiler, Log, TEXT("Frame Drops: %d (%.1f%%)"), Report.FrameDropCount, Report.PercentageFrameDrops);
-    UE_LOG(LogPerformanceProfiler, Log, TEXT("Average Memory: %.1fMB (Max: %.1fMB)"), Report.AverageMemoryUsage, Report.MaxMemoryUsage);
-    UE_LOG(LogPerformanceProfiler, Log, TEXT("Average Draw Calls: %d (Max: %d)"), Report.AverageDrawCalls, Report.MaxDrawCalls);
+    return FilteredSamples;
 }
 
-float APerf_PerformanceProfiler::CalculateAverage(const TArray<float>& Values) const
+float UPerf_PerformanceProfiler::GetAverageExecutionTime(const FString& SampleName)
 {
-    if (Values.Num() == 0)
+    TArray<float> ExecutionTimes;
+    
+    for (const FPerf_ProfilerSample& Sample : ProfileSamples)
+    {
+        if (Sample.SampleName == SampleName)
+        {
+            ExecutionTimes.Add(Sample.ExecutionTimeMS);
+        }
+    }
+    
+    if (ExecutionTimes.Num() == 0)
     {
         return 0.0f;
     }
     
-    float Sum = 0.0f;
-    for (float Value : Values)
+    float Total = 0.0f;
+    for (float Time : ExecutionTimes)
     {
-        Sum += Value;
+        Total += Time;
     }
     
-    return Sum / Values.Num();
+    return Total / ExecutionTimes.Num();
 }
 
-void APerf_PerformanceProfiler::ClearProfilingData()
+FPerf_ProfilerSample UPerf_PerformanceProfiler::GetWorstPerformingSample()
 {
-    FrameTimeSamples.Empty();
-    GPUTimeSamples.Empty();
-    CPUTimeSamples.Empty();
-    MemorySamples.Empty();
-    DrawCallSamples.Empty();
+    FPerf_ProfilerSample WorstSample;
+    float WorstTime = 0.0f;
     
-    CurrentSampleIndex = 0;
-    ProfilingStartTime = 0.0f;
-    LastSampleTime = 0.0f;
+    for (const FPerf_ProfilerSample& Sample : ProfileSamples)
+    {
+        if (Sample.ExecutionTimeMS > WorstTime)
+        {
+            WorstTime = Sample.ExecutionTimeMS;
+            WorstSample = Sample;
+        }
+    }
+    
+    return WorstSample;
 }
 
-void APerf_PerformanceProfiler::SaveProfilingResults()
+TArray<FPerf_ProfilerSample> UPerf_PerformanceProfiler::GetTopWorstSamples(int32 Count)
 {
-    if (FrameTimeSamples.Num() == 0)
+    TArray<FPerf_ProfilerSample> SortedSamples = ProfileSamples;
+    
+    // Sort by execution time (descending)
+    SortedSamples.Sort([](const FPerf_ProfilerSample& A, const FPerf_ProfilerSample& B)
     {
-        UE_LOG(LogPerformanceProfiler, Warning, TEXT("No profiling data to save"));
+        return A.ExecutionTimeMS > B.ExecutionTimeMS;
+    });
+    
+    // Return top N samples
+    TArray<FPerf_ProfilerSample> TopSamples;
+    int32 NumToReturn = FMath::Min(Count, SortedSamples.Num());
+    
+    for (int32 i = 0; i < NumToReturn; i++)
+    {
+        TopSamples.Add(SortedSamples[i]);
+    }
+    
+    return TopSamples;
+}
+
+void UPerf_PerformanceProfiler::SetMaxSampleCount(int32 MaxCount)
+{
+    MaxSampleCount = FMath::Max(100, MaxCount);
+    ProfileSamples.Reserve(MaxSampleCount);
+    
+    if (ProfileSamples.Num() > MaxSampleCount)
+    {
+        CleanupOldSamples();
+    }
+}
+
+void UPerf_PerformanceProfiler::SetProfilingDuration(float Duration)
+{
+    ProfilingDuration = FMath::Max(0.0f, Duration);
+}
+
+void UPerf_PerformanceProfiler::EnableCategoryProfiling(EPerf_ProfilerCategory Category, bool bEnabled)
+{
+    CategoryEnabled.Add(Category, bEnabled);
+}
+
+void UPerf_PerformanceProfiler::InitializeCategorySettings()
+{
+    // Enable all categories by default
+    CategoryEnabled.Add(EPerf_ProfilerCategory::Rendering, true);
+    CategoryEnabled.Add(EPerf_ProfilerCategory::Physics, true);
+    CategoryEnabled.Add(EPerf_ProfilerCategory::AI, true);
+    CategoryEnabled.Add(EPerf_ProfilerCategory::Animation, true);
+    CategoryEnabled.Add(EPerf_ProfilerCategory::Audio, true);
+    CategoryEnabled.Add(EPerf_ProfilerCategory::Gameplay, true);
+    CategoryEnabled.Add(EPerf_ProfilerCategory::Memory, true);
+    CategoryEnabled.Add(EPerf_ProfilerCategory::Network, true);
+}
+
+void UPerf_PerformanceProfiler::CleanupOldSamples()
+{
+    if (ProfileSamples.Num() <= MaxSampleCount)
+    {
         return;
     }
     
-    FString Filename = FString::Printf(TEXT("PerformanceProfile_%s.csv"), 
-                                       *FDateTime::Now().ToString(TEXT("%Y%m%d_%H%M%S")));
-    
-    FString FilePath = FPaths::ProjectLogDir() / Filename;
-    
-    FString CSVContent;
-    CSVContent += TEXT("Timestamp,FrameTime,FPS,GPUTime,CPUTime,MemoryMB,DrawCalls\n");
-    
-    for (int32 i = 0; i < FrameTimeSamples.Num(); ++i)
-    {
-        float Timestamp = i * ProfilingSettings.SampleInterval;
-        float FPS = 1000.0f / FMath::Max(FrameTimeSamples[i], 0.001f);
-        
-        CSVContent += FString::Printf(TEXT("%.3f,%.3f,%.1f,%.3f,%.3f,%.1f,%d\n"),
-                                      Timestamp,
-                                      FrameTimeSamples[i],
-                                      FPS,
-                                      i < GPUTimeSamples.Num() ? GPUTimeSamples[i] : 0.0f,
-                                      i < CPUTimeSamples.Num() ? CPUTimeSamples[i] : 0.0f,
-                                      i < MemorySamples.Num() ? MemorySamples[i] : 0.0f,
-                                      i < DrawCallSamples.Num() ? DrawCallSamples[i] : 0);
-    }
-    
-    if (FFileHelper::SaveStringToFile(CSVContent, *FilePath))
-    {
-        UE_LOG(LogPerformanceProfiler, Log, TEXT("Profiling results saved to: %s"), *FilePath);
-    }
-    else
-    {
-        UE_LOG(LogPerformanceProfiler, Error, TEXT("Failed to save profiling results to: %s"), *FilePath);
-    }
+    // Remove oldest samples (first 25% of array)
+    int32 SamplesToRemove = ProfileSamples.Num() / 4;
+    ProfileSamples.RemoveAt(0, SamplesToRemove);
 }
 
-void APerf_PerformanceProfiler::RegisterConsoleCommands()
+FString UPerf_PerformanceProfiler::GenerateReportString(const FPerf_ProfilerReport& Report)
 {
-    // Register console commands for profiling control
-    IConsoleManager::Get().RegisterConsoleCommand(
-        TEXT("perf.StartProfiling"),
-        TEXT("Start performance profiling"),
-        FConsoleCommandDelegate::CreateUObject(this, &APerf_PerformanceProfiler::StartProfiling),
-        ECVF_Default
-    );
+    FString ReportString;
     
-    IConsoleManager::Get().RegisterConsoleCommand(
-        TEXT("perf.StopProfiling"),
-        TEXT("Stop performance profiling"),
-        FConsoleCommandDelegate::CreateUObject(this, &APerf_PerformanceProfiler::StopProfiling),
-        ECVF_Default
-    );
+    ReportString += FString::Printf(TEXT("=== PERFORMANCE PROFILING REPORT ===\\n"));
+    ReportString += FString::Printf(TEXT("Generated: %s\\n"), *FDateTime::Now().ToString());
+    ReportString += FString::Printf(TEXT("Total Samples: %d\\n"), Report.TotalSamples);
+    ReportString += FString::Printf(TEXT("Report Duration: %.2f seconds\\n"), Report.ReportDuration);
+    ReportString += FString::Printf(TEXT("Average FPS: %.2f\\n"), Report.AverageFPS);
+    ReportString += FString::Printf(TEXT("Total Frame Time: %.2f ms\\n\\n"), Report.TotalFrameTime);
+    
+    // Top worst performing samples
+    TArray<FPerf_ProfilerSample> WorstSamples = GetTopWorstSamples(10);
+    ReportString += TEXT("=== TOP 10 WORST PERFORMING SAMPLES ===\\n");
+    
+    for (int32 i = 0; i < WorstSamples.Num(); i++)
+    {
+        const FPerf_ProfilerSample& Sample = WorstSamples[i];
+        ReportString += FString::Printf(TEXT("%d. %s: %.2f ms [%s]\\n"), 
+            i + 1, 
+            *Sample.SampleName, 
+            Sample.ExecutionTimeMS,
+            *UEnum::GetValueAsString(Sample.Category));
+    }
+    
+    return ReportString;
 }
 
-void APerf_PerformanceProfiler::UnregisterConsoleCommands()
+void UPerf_PerformanceProfiler::LogProfilingResults()
 {
-    IConsoleManager::Get().UnregisterConsoleObject(TEXT("perf.StartProfiling"));
-    IConsoleManager::Get().UnregisterConsoleObject(TEXT("perf.StopProfiling"));
+    FPerf_ProfilerReport Report = GenerateReport();
+    
+    UE_LOG(LogTemp, Log, TEXT("=== PERFORMANCE PROFILING RESULTS ==="));
+    UE_LOG(LogTemp, Log, TEXT("Total Samples: %d"), Report.TotalSamples);
+    UE_LOG(LogTemp, Log, TEXT("Average FPS: %.2f"), Report.AverageFPS);
+    UE_LOG(LogTemp, Log, TEXT("Report Duration: %.2f seconds"), Report.ReportDuration);
+    
+    FPerf_ProfilerSample WorstSample = GetWorstPerformingSample();
+    if (!WorstSample.SampleName.IsEmpty())
+    {
+        UE_LOG(LogTemp, Log, TEXT("Worst Sample: %s (%.2f ms)"), *WorstSample.SampleName, WorstSample.ExecutionTimeMS);
+    }
 }
