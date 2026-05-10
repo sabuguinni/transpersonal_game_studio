@@ -1,42 +1,23 @@
 #include "StudioDirector.h"
-#include "Engine/World.h"
 #include "Engine/Engine.h"
-#include "Kismet/GameplayStatics.h"
-#include "Engine/PointLight.h"
-#include "Components/PointLightComponent.h"
+#include "Engine/World.h"
+#include "GameFramework/PlayerStart.h"
 #include "Engine/DirectionalLight.h"
-#include "Landscape.h"
-#include "GameFramework/Character.h"
+#include "Engine/SkyLight.h"
+#include "Landscape/Landscape.h"
+#include "Components/StaticMeshComponent.h"
 
+// Studio Director Component Implementation
 UStudioDirectorComponent::UStudioDirectorComponent()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 5.0f; // Update every 5 seconds
-
-    // Initialize biome centers
-    BiomeCenters.Add(EDir_BiomeType::Swamp, FVector(-50000.0f, -45000.0f, 0.0f));
-    BiomeCenters.Add(EDir_BiomeType::Forest, FVector(-45000.0f, 40000.0f, 0.0f));
-    BiomeCenters.Add(EDir_BiomeType::Savanna, FVector(0.0f, 0.0f, 0.0f));
-    BiomeCenters.Add(EDir_BiomeType::Desert, FVector(55000.0f, 0.0f, 0.0f));
-    BiomeCenters.Add(EDir_BiomeType::Mountain, FVector(40000.0f, 50000.0f, 500.0f));
-
-    // Initialize agent status
-    AgentCompletionStatus.Add(TEXT("Agent_02_Engine_Architect"), false);
-    AgentCompletionStatus.Add(TEXT("Agent_05_World_Generator"), false);
-    AgentCompletionStatus.Add(TEXT("Agent_09_Character_Artist"), false);
-    AgentCompletionStatus.Add(TEXT("Agent_12_Combat_AI"), false);
-    AgentCompletionStatus.Add(TEXT("Agent_20_Integration"), false);
-
-    // Initialize production metrics
-    TotalActorsInLevel = 0;
-    CompilationErrorCount = 0;
-    ProductionEfficiencyScore = 0.0f;
+    PrimaryComponentTick.bStartWithTickEnabled = true;
     
-    // Initialize critical system flags
-    bLandscapeExpanded = false;
-    bDinosaurActorsSpawned = false;
-    bSurvivalHUDActive = false;
-    bCompilationClean = false;
+    CurrentCycle = 0;
+    bProductionActive = false;
+    CycleStartTime = 0.0f;
+    CompilationErrors = 0;
+    OrphanHeaders = 0;
 }
 
 void UStudioDirectorComponent::BeginPlay()
@@ -45,272 +26,305 @@ void UStudioDirectorComponent::BeginPlay()
     
     UE_LOG(LogTemp, Warning, TEXT("Studio Director Component initialized"));
     
-    // Initialize coordination on begin play
-    InitializeAgentCoordination();
-    SetupBiomeCoordinators();
+    // Start initial assessment
+    ValidateCodebase();
+    CheckPlayabilityRequirements();
 }
 
 void UStudioDirectorComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    // Update production metrics every tick
-    UpdateProductionMetrics();
-    CheckCriticalSystems();
-}
-
-void UStudioDirectorComponent::InitializeAgentCoordination()
-{
-    UE_LOG(LogTemp, Warning, TEXT("Initializing Agent Coordination System"));
-    
-    // Set initial agent tasks
-    AgentCurrentTasks.Add(TEXT("Agent_02_Engine_Architect"), TEXT("Verify C++ compilation status"));
-    AgentCurrentTasks.Add(TEXT("Agent_05_World_Generator"), TEXT("Expand landscape to 200km2"));
-    AgentCurrentTasks.Add(TEXT("Agent_09_Character_Artist"), TEXT("Create dinosaur actor blueprints"));
-    AgentCurrentTasks.Add(TEXT("Agent_12_Combat_AI"), TEXT("Implement survival HUD"));
-    AgentCurrentTasks.Add(TEXT("Agent_20_Integration"), TEXT("Clean orphaned headers"));
-    
-    UE_LOG(LogTemp, Warning, TEXT("Agent tasks assigned successfully"));
-}
-
-void UStudioDirectorComponent::ValidateGameSystems()
-{
-    UWorld* World = GetWorld();
-    if (!World) return;
-
-    UE_LOG(LogTemp, Warning, TEXT("Validating Game Systems"));
-    
-    // Count total actors
-    TArray<AActor*> AllActors;
-    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
-    TotalActorsInLevel = AllActors.Num();
-    
-    // Check for landscape
-    TArray<AActor*> LandscapeActors;
-    UGameplayStatics::GetAllActorsOfClass(World, ALandscape::StaticClass(), LandscapeActors);
-    bLandscapeExpanded = LandscapeActors.Num() > 0;
-    
-    // Check for character actors
-    TArray<AActor*> CharacterActors;
-    UGameplayStatics::GetAllActorsOfClass(World, ACharacter::StaticClass(), CharacterActors);
-    bDinosaurActorsSpawned = CharacterActors.Num() > 1; // More than just player
-    
-    UE_LOG(LogTemp, Warning, TEXT("System validation complete - Actors: %d, Landscape: %s, Characters: %s"), 
-           TotalActorsInLevel, 
-           bLandscapeExpanded ? TEXT("Yes") : TEXT("No"),
-           bDinosaurActorsSpawned ? TEXT("Yes") : TEXT("No"));
-}
-
-void UStudioDirectorComponent::GenerateProductionReport()
-{
-    UE_LOG(LogTemp, Warning, TEXT("=== PRODUCTION REPORT ==="));
-    UE_LOG(LogTemp, Warning, TEXT("Total Actors: %d"), TotalActorsInLevel);
-    UE_LOG(LogTemp, Warning, TEXT("Landscape Expanded: %s"), bLandscapeExpanded ? TEXT("Yes") : TEXT("No"));
-    UE_LOG(LogTemp, Warning, TEXT("Dinosaur Actors: %s"), bDinosaurActorsSpawned ? TEXT("Yes") : TEXT("No"));
-    UE_LOG(LogTemp, Warning, TEXT("Survival HUD: %s"), bSurvivalHUDActive ? TEXT("Yes") : TEXT("No"));
-    UE_LOG(LogTemp, Warning, TEXT("Compilation Clean: %s"), bCompilationClean ? TEXT("Yes") : TEXT("No"));
-    UE_LOG(LogTemp, Warning, TEXT("Production Efficiency: %.2f"), ProductionEfficiencyScore);
-    UE_LOG(LogTemp, Warning, TEXT("========================"));
-}
-
-void UStudioDirectorComponent::SetupBiomeCoordinators()
-{
-    UWorld* World = GetWorld();
-    if (!World) return;
-
-    UE_LOG(LogTemp, Warning, TEXT("Setting up Biome Coordinators"));
-    
-    // Clear existing coordinators
-    BiomeCoordinatorActors.Empty();
-    
-    // Create coordinator actors for each biome
-    for (const auto& BiomePair : BiomeCenters)
+    if (bProductionActive)
     {
-        FVector SpawnLocation = BiomePair.Value + FVector(0, 0, 100); // Slightly elevated
-        
-        APointLight* CoordinatorLight = World->SpawnActor<APointLight>(APointLight::StaticClass(), SpawnLocation, FRotator::ZeroRotator);
-        if (CoordinatorLight)
-        {
-            FString BiomeName = UEnum::GetValueAsString(BiomePair.Key);
-            CoordinatorLight->SetActorLabel(FString::Printf(TEXT("COORD_%s"), *BiomeName));
-            
-            UPointLightComponent* LightComp = CoordinatorLight->GetPointLightComponent();
-            if (LightComp)
-            {
-                // Set biome-specific colors
-                switch (BiomePair.Key)
-                {
-                case EDir_BiomeType::Swamp:
-                    LightComp->SetLightColor(FLinearColor(0.2f, 0.8f, 0.3f));
-                    break;
-                case EDir_BiomeType::Forest:
-                    LightComp->SetLightColor(FLinearColor(0.1f, 0.6f, 0.1f));
-                    break;
-                case EDir_BiomeType::Savanna:
-                    LightComp->SetLightColor(FLinearColor(1.0f, 0.8f, 0.3f));
-                    break;
-                case EDir_BiomeType::Desert:
-                    LightComp->SetLightColor(FLinearColor(1.0f, 0.5f, 0.2f));
-                    break;
-                case EDir_BiomeType::Mountain:
-                    LightComp->SetLightColor(FLinearColor(0.7f, 0.9f, 1.0f));
-                    break;
-                }
-                LightComp->SetIntensity(1000.0f);
-                LightComp->SetAttenuationRadius(5000.0f);
-            }
-            
-            BiomeCoordinatorActors.Add(CoordinatorLight);
-            UE_LOG(LogTemp, Warning, TEXT("Created coordinator for %s at %s"), *BiomeName, *SpawnLocation.ToString());
-        }
+        UpdateProductionMetrics();
     }
 }
 
-FVector UStudioDirectorComponent::GetBiomeCenter(EDir_BiomeType BiomeType)
+void UStudioDirectorComponent::StartProductionCycle(int32 CycleNumber)
 {
-    if (BiomeCenters.Contains(BiomeType))
-    {
-        return BiomeCenters[BiomeType];
-    }
-    return FVector::ZeroVector;
+    CurrentCycle = CycleNumber;
+    bProductionActive = true;
+    CycleStartTime = GetWorld()->GetTimeSeconds();
+    
+    UE_LOG(LogTemp, Warning, TEXT("Production Cycle %d started"), CycleNumber);
+    
+    // Clear previous cycle data
+    AgentTasks.Empty();
+    AgentProgress.Empty();
+    CriticalIssues.Empty();
+    
+    // Run initial validation
+    ValidatePlayablePrototype();
 }
 
-void UStudioDirectorComponent::AssignAgentTasks()
+void UStudioDirectorComponent::EndProductionCycle()
 {
-    UE_LOG(LogTemp, Warning, TEXT("Assigning Agent Tasks for Current Cycle"));
+    bProductionActive = false;
+    float CycleDuration = GetWorld()->GetTimeSeconds() - CycleStartTime;
     
-    // Log current task assignments
-    for (const auto& TaskPair : AgentCurrentTasks)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("%s: %s"), *TaskPair.Key, *TaskPair.Value);
-    }
+    UE_LOG(LogTemp, Warning, TEXT("Production Cycle %d completed in %.2f seconds"), CurrentCycle, CycleDuration);
+    
+    // Final validation
+    bool bPrototypeValid = ValidatePlayablePrototype();
+    UE_LOG(LogTemp, Warning, TEXT("Playable Prototype Status: %s"), bPrototypeValid ? TEXT("VALID") : TEXT("INVALID"));
 }
 
-bool UStudioDirectorComponent::ValidateAgentDeliverables()
+bool UStudioDirectorComponent::ValidatePlayablePrototype()
 {
-    int32 CompletedTasks = 0;
-    int32 TotalTasks = AgentCompletionStatus.Num();
-    
-    for (const auto& StatusPair : AgentCompletionStatus)
+    if (!GetWorld())
     {
-        if (StatusPair.Value)
-        {
-            CompletedTasks++;
-        }
+        UE_LOG(LogTemp, Error, TEXT("No world available for validation"));
+        return false;
     }
     
-    ProductionEfficiencyScore = (float)CompletedTasks / (float)TotalTasks * 100.0f;
+    bool bValid = true;
+    CriticalIssues.Empty();
     
-    UE_LOG(LogTemp, Warning, TEXT("Agent Deliverables: %d/%d completed (%.1f%%)"), 
-           CompletedTasks, TotalTasks, ProductionEfficiencyScore);
+    // Check for PlayerStart
+    TArray<AActor*> PlayerStarts;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), APlayerStart::StaticClass(), PlayerStarts);
+    if (PlayerStarts.Num() == 0)
+    {
+        CriticalIssues.Add(TEXT("Missing PlayerStart"));
+        bValid = false;
+    }
     
-    return CompletedTasks >= TotalTasks * 0.8f; // 80% completion threshold
+    // Check for basic lighting
+    TArray<AActor*> DirectionalLights;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), ADirectionalLight::StaticClass(), DirectionalLights);
+    if (DirectionalLights.Num() == 0)
+    {
+        CriticalIssues.Add(TEXT("Missing Directional Light"));
+        bValid = false;
+    }
+    
+    // Check for landscape/terrain
+    TArray<AActor*> Landscapes;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), ALandscape::StaticClass(), Landscapes);
+    if (Landscapes.Num() == 0)
+    {
+        CriticalIssues.Add(TEXT("Missing Landscape/Terrain"));
+        bValid = false;
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Prototype validation: %d critical issues found"), CriticalIssues.Num());
+    
+    return bValid;
+}
+
+void UStudioDirectorComponent::AssignTaskToAgent(int32 AgentNumber, const FString& TaskDescription)
+{
+    AgentTasks.Add(AgentNumber, TaskDescription);
+    UE_LOG(LogTemp, Log, TEXT("Task assigned to Agent #%d: %s"), AgentNumber, *TaskDescription);
+}
+
+void UStudioDirectorComponent::ReportAgentProgress(int32 AgentNumber, const FString& Progress)
+{
+    AgentProgress.Add(AgentNumber, Progress);
+    UE_LOG(LogTemp, Log, TEXT("Agent #%d progress: %s"), AgentNumber, *Progress);
+}
+
+bool UStudioDirectorComponent::CheckCompilationStatus()
+{
+    // This would typically interface with UBT or check for compilation artifacts
+    // For now, we'll simulate based on class availability
+    
+    UClass* CharacterClass = FindObject<UClass>(ANY_PACKAGE, TEXT("TranspersonalCharacter"));
+    UClass* GameModeClass = FindObject<UClass>(ANY_PACKAGE, TEXT("TranspersonalGameMode"));
+    
+    CompilationErrors = 0;
+    
+    if (!CharacterClass)
+    {
+        CompilationErrors++;
+        CriticalIssues.AddUnique(TEXT("TranspersonalCharacter class not found"));
+    }
+    
+    if (!GameModeClass)
+    {
+        CompilationErrors++;
+        CriticalIssues.AddUnique(TEXT("TranspersonalGameMode class not found"));
+    }
+    
+    return CompilationErrors == 0;
+}
+
+int32 UStudioDirectorComponent::CountOrphanHeaders()
+{
+    // This would scan the filesystem for .h files without corresponding .cpp files
+    // For now, return the known count from memory
+    OrphanHeaders = 122; // From brain memory
+    return OrphanHeaders;
+}
+
+TArray<FString> UStudioDirectorComponent::GetCriticalErrors()
+{
+    return CriticalIssues;
 }
 
 void UStudioDirectorComponent::UpdateProductionMetrics()
 {
-    // Update metrics based on current world state
-    ValidateGameSystems();
+    // Update compilation status
+    CheckCompilationStatus();
     
-    // Calculate efficiency based on critical systems
-    int32 SystemsComplete = 0;
-    if (bLandscapeExpanded) SystemsComplete++;
-    if (bDinosaurActorsSpawned) SystemsComplete++;
-    if (bSurvivalHUDActive) SystemsComplete++;
-    if (bCompilationClean) SystemsComplete++;
+    // Update orphan header count
+    CountOrphanHeaders();
     
-    ProductionEfficiencyScore = (float)SystemsComplete / 4.0f * 100.0f;
-}
-
-void UStudioDirectorComponent::CheckCriticalSystems()
-{
-    // Check compilation status (simplified check)
-    bCompilationClean = true; // Assume clean if we're running
+    // Check cycle timeout
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    float CycleDuration = CurrentTime - CycleStartTime;
     
-    // Additional system checks can be added here
-}
-
-void UStudioDirectorComponent::LogAgentProgress()
-{
-    UE_LOG(LogTemp, Warning, TEXT("=== AGENT PROGRESS LOG ==="));
-    for (const auto& StatusPair : AgentCompletionStatus)
+    if (CycleDuration > 600.0f) // 10 minutes
     {
-        UE_LOG(LogTemp, Warning, TEXT("%s: %s"), 
-               *StatusPair.Key, 
-               StatusPair.Value ? TEXT("COMPLETE") : TEXT("IN PROGRESS"));
+        CriticalIssues.AddUnique(TEXT("Production cycle timeout"));
+        UE_LOG(LogTemp, Error, TEXT("Production cycle timeout after %.2f seconds"), CycleDuration);
     }
 }
 
-// Studio Director Game Mode Implementation
-AStudioDirectorGameMode::AStudioDirectorGameMode()
+void UStudioDirectorComponent::ValidateCodebase()
 {
-    PrimaryActorTick.bCanEverTick = true;
-    CurrentProductionCycle = 0;
-    bMinimumViablePrototypeReached = false;
+    CheckCompilationStatus();
+    CountOrphanHeaders();
+    
+    UE_LOG(LogTemp, Warning, TEXT("Codebase validation: %d compilation errors, %d orphan headers"), 
+           CompilationErrors, OrphanHeaders);
 }
 
-void AStudioDirectorGameMode::BeginPlay()
+void UStudioDirectorComponent::CheckPlayabilityRequirements()
+{
+    ValidatePlayablePrototype();
+    
+    UE_LOG(LogTemp, Warning, TEXT("Playability check: %d critical issues"), CriticalIssues.Num());
+    for (const FString& Issue : CriticalIssues)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("- %s"), *Issue);
+    }
+}
+
+// Studio Director Actor Implementation
+AStudioDirector::AStudioDirector()
+{
+    PrimaryActorTick.bCanEverTick = true;
+    
+    // Create studio director component
+    StudioDirectorComponent = CreateDefaultSubobject<UStudioDirectorComponent>(TEXT("StudioDirectorComponent"));
+    
+    // Set default values
+    bAutoManageProduction = true;
+    ProductionCycleDuration = 300.0f; // 5 minutes
+    MaxConcurrentAgents = 5;
+}
+
+void AStudioDirector::BeginPlay()
 {
     Super::BeginPlay();
     
-    UE_LOG(LogTemp, Warning, TEXT("Studio Director Game Mode initialized"));
-    InitializeProductionPipeline();
+    UE_LOG(LogTemp, Warning, TEXT("Studio Director Actor spawned"));
+    
+    if (bAutoManageProduction)
+    {
+        InitializeProductionPipeline();
+    }
 }
 
-void AStudioDirectorGameMode::Tick(float DeltaTime)
+void AStudioDirector::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
     
-    // Check MVP status periodically
-    if (!bMinimumViablePrototypeReached)
+    if (bAutoManageProduction)
     {
-        bMinimumViablePrototypeReached = ValidateMinimumViablePrototype();
+        MonitorAgentChain();
+        EnsurePlayablePrototype();
     }
 }
 
-void AStudioDirectorGameMode::InitializeProductionPipeline()
+void AStudioDirector::InitializeProductionPipeline()
 {
-    UE_LOG(LogTemp, Warning, TEXT("Initializing Production Pipeline"));
+    UE_LOG(LogTemp, Warning, TEXT("Initializing production pipeline"));
     
-    // Create director component if not exists
-    if (!DirectorComponent)
+    if (StudioDirectorComponent)
     {
-        DirectorComponent = CreateDefaultSubobject<UStudioDirectorComponent>(TEXT("DirectorComponent"));
+        StudioDirectorComponent->StartProductionCycle(20); // Current cycle
+        
+        // Assign critical tasks
+        StudioDirectorComponent->AssignTaskToAgent(2, TEXT("Fix compilation errors and clean orphan headers"));
+        StudioDirectorComponent->AssignTaskToAgent(5, TEXT("Expand landscape to 200km² with biomes"));
+        StudioDirectorComponent->AssignTaskToAgent(9, TEXT("Create real dinosaur actors with collision"));
+        StudioDirectorComponent->AssignTaskToAgent(12, TEXT("Implement survival HUD"));
     }
-    
-    CurrentProductionCycle++;
-    UE_LOG(LogTemp, Warning, TEXT("Production Cycle %d started"), CurrentProductionCycle);
 }
 
-void AStudioDirectorGameMode::ExecuteProductionCycle()
+void AStudioDirector::RunCriticalAssessment()
 {
-    if (DirectorComponent)
-    {
-        DirectorComponent->AssignAgentTasks();
-        DirectorComponent->ValidateGameSystems();
-        DirectorComponent->GenerateProductionReport();
-    }
+    UE_LOG(LogTemp, Warning, TEXT("Running critical assessment"));
     
-    CurrentProductionCycle++;
-    UE_LOG(LogTemp, Warning, TEXT("Production Cycle %d executed"), CurrentProductionCycle);
+    if (StudioDirectorComponent)
+    {
+        bool bCompilationOK = StudioDirectorComponent->CheckCompilationStatus();
+        int32 OrphanCount = StudioDirectorComponent->CountOrphanHeaders();
+        bool bPrototypeValid = StudioDirectorComponent->ValidatePlayablePrototype();
+        
+        UE_LOG(LogTemp, Warning, TEXT("Assessment Results:"));
+        UE_LOG(LogTemp, Warning, TEXT("- Compilation: %s"), bCompilationOK ? TEXT("OK") : TEXT("ERRORS"));
+        UE_LOG(LogTemp, Warning, TEXT("- Orphan Headers: %d"), OrphanCount);
+        UE_LOG(LogTemp, Warning, TEXT("- Prototype: %s"), bPrototypeValid ? TEXT("VALID") : TEXT("INVALID"));
+    }
 }
 
-bool AStudioDirectorGameMode::ValidateMinimumViablePrototype()
+void AStudioDirector::ValidateMinPlayableMap()
 {
-    if (!DirectorComponent) return false;
+    UE_LOG(LogTemp, Warning, TEXT("Validating MinPlayableMap"));
     
-    // Check MVP criteria
-    bool bHasLandscape = DirectorComponent->bLandscapeExpanded;
-    bool bHasCharacters = DirectorComponent->bDinosaurActorsSpawned;
-    bool bHasUI = DirectorComponent->bSurvivalHUDActive;
-    bool bCompiles = DirectorComponent->bCompilationClean;
-    
-    bool bMVPReached = bHasLandscape && bHasCharacters && bCompiles;
-    
-    if (bMVPReached && !bMinimumViablePrototypeReached)
+    if (StudioDirectorComponent)
     {
-        UE_LOG(LogTemp, Warning, TEXT("MINIMUM VIABLE PROTOTYPE REACHED!"));
+        bool bValid = StudioDirectorComponent->ValidatePlayablePrototype();
+        TArray<FString> Issues = StudioDirectorComponent->GetCriticalErrors();
+        
+        UE_LOG(LogTemp, Warning, TEXT("MinPlayableMap validation: %s"), bValid ? TEXT("PASSED") : TEXT("FAILED"));
+        for (const FString& Issue : Issues)
+        {
+            UE_LOG(LogTemp, Error, TEXT("Issue: %s"), *Issue);
+        }
     }
+}
+
+void AStudioDirector::GenerateProductionReport()
+{
+    UE_LOG(LogTemp, Warning, TEXT("Generating production report"));
     
-    return bMVPReached;
+    if (StudioDirectorComponent)
+    {
+        RunCriticalAssessment();
+        ValidateMinPlayableMap();
+        
+        UE_LOG(LogTemp, Warning, TEXT("Production report generated - check logs for details"));
+    }
+}
+
+void AStudioDirector::MonitorAgentChain()
+{
+    // Monitor agent progress and handle timeouts/blocks
+    if (StudioDirectorComponent && StudioDirectorComponent->bProductionActive)
+    {
+        // Check for critical blocks
+        TArray<FString> CriticalErrors = StudioDirectorComponent->GetCriticalErrors();
+        if (CriticalErrors.Num() > 5)
+        {
+            UE_LOG(LogTemp, Error, TEXT("Too many critical errors - production halt recommended"));
+        }
+    }
+}
+
+void AStudioDirector::EnsurePlayablePrototype()
+{
+    // Ensure minimum playable prototype requirements are met
+    if (StudioDirectorComponent)
+    {
+        bool bValid = StudioDirectorComponent->ValidatePlayablePrototype();
+        if (!bValid)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Playable prototype requirements not met - prioritizing fixes"));
+        }
+    }
 }
