@@ -2,114 +2,79 @@
 
 #include "CoreMinimal.h"
 #include "Engine/World.h"
+#include "GameFramework/Character.h"
 #include "GameFramework/GameModeBase.h"
-#include "Subsystems/WorldSubsystem.h"
-#include "Components/ActorComponent.h"
+#include "UObject/NoExportTypes.h"
 #include "Eng_PlayablePrototypeManager.generated.h"
 
 /**
- * Engine Architect's Playable Prototype Manager
- * Ensures the game has a minimum viable playable prototype with character movement,
- * terrain, lighting, and basic dinosaur placement
+ * Playable Prototype Manager - Engine Architect Cycle 002
+ * Ensures the minimum viable playable prototype is functional
+ * Creates a working character that can walk around with WASD movement
  */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UEng_PlayablePrototypeManager : public UWorldSubsystem
+class TRANSPERSONALGAME_API UEng_PlayablePrototypeManager : public UObject
 {
     GENERATED_BODY()
 
 public:
     UEng_PlayablePrototypeManager();
 
-    // Subsystem interface
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void OnWorldBeginPlay(UWorld& InWorld) override;
+    // Playable prototype creation methods
+    UFUNCTION(BlueprintCallable, Category = "Playable Prototype")
+    bool CreateMinimumViablePrototype();
 
-    // Prototype validation and setup
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Playable Prototype")
-    void ValidateMinimumPlayableState();
+    UFUNCTION(BlueprintCallable, Category = "Playable Prototype")
+    bool SetupPlayerCharacter();
 
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Playable Prototype")
-    void SetupBasicTerrain();
+    UFUNCTION(BlueprintCallable, Category = "Playable Prototype")
+    bool SetupBasicTerrain();
 
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Playable Prototype")
-    void SetupPlayerCharacter();
+    UFUNCTION(BlueprintCallable, Category = "Playable Prototype")
+    bool SetupBasicLighting();
 
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Playable Prototype")
-    void SetupBasicLighting();
+    UFUNCTION(BlueprintCallable, Category = "Playable Prototype")
+    bool PlaceDinosaurPlaceholders();
 
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Playable Prototype")
-    void PlaceDinosaurPlaceholders();
+    // Prototype validation methods
+    UFUNCTION(BlueprintCallable, Category = "Playable Prototype")
+    bool ValidatePrototypeReadiness();
 
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Playable Prototype")
-    void ValidatePlayerMovement();
+    UFUNCTION(BlueprintCallable, Category = "Playable Prototype")
+    bool TestPlayerMovement();
 
-    // Quick prototype generation
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Playable Prototype")
-    void CreateMinimumViablePrototype();
+    UFUNCTION(BlueprintCallable, Category = "Playable Prototype")
+    bool TestCameraControls();
 
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Playable Prototype")
-    bool IsPrototypePlayable();
+    // Biome coordinate system (from brain memories)
+    UFUNCTION(BlueprintCallable, Category = "Biome System")
+    FVector GetBiomeCenter(const FString& BiomeName);
+
+    UFUNCTION(BlueprintCallable, Category = "Biome System")
+    FVector GetRandomLocationInBiome(const FString& BiomeName);
 
 protected:
-    // Internal setup functions
-    void EnsurePlayerStart();
-    void EnsureGameMode();
-    void EnsureBasicGeometry();
-    void EnsureEnvironmentalLighting();
-    void EnsureDinosaurPresence();
-    
-    // Validation functions
-    bool ValidateCharacterMovement();
-    bool ValidateTerrainNavigation();
-    bool ValidateCameraSystem();
-    bool ValidateBasicInteraction();
+    // Prototype status tracking
+    UPROPERTY(BlueprintReadOnly, Category = "Prototype Status")
+    bool bCharacterSetup;
 
-private:
-    // Prototype state tracking
-    UPROPERTY()
+    UPROPERTY(BlueprintReadOnly, Category = "Prototype Status")
     bool bTerrainSetup;
 
-    UPROPERTY()
-    bool bPlayerCharacterSetup;
-
-    UPROPERTY()
+    UPROPERTY(BlueprintReadOnly, Category = "Prototype Status")
     bool bLightingSetup;
 
-    UPROPERTY()
+    UPROPERTY(BlueprintReadOnly, Category = "Prototype Status")
     bool bDinosaursPlaced;
 
-    UPROPERTY()
-    bool bMovementValidated;
+    UPROPERTY(BlueprintReadOnly, Category = "Prototype Status")
+    bool bPrototypeReady;
 
-    UPROPERTY()
-    bool bPrototypeComplete;
+    // Biome coordinates (from brain memories)
+    UPROPERTY(BlueprintReadOnly, Category = "Biome System")
+    TMap<FString, FVector> BiomeCenters;
 
-    // Configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Prototype Settings", meta = (AllowPrivateAccess = "true"))
-    bool bAutoSetupOnWorldStart;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Prototype Settings", meta = (AllowPrivateAccess = "true"))
-    bool bValidateOnEveryPlay;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Prototype Settings", meta = (AllowPrivateAccess = "true"))
-    int32 MinimumDinosaurCount;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Prototype Settings", meta = (AllowPrivateAccess = "true"))
-    float TerrainSize;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Prototype Settings", meta = (AllowPrivateAccess = "true"))
-    float PlayerSpawnHeight;
-
-    // References to key prototype actors
-    UPROPERTY()
-    class APlayerStart* PlayerStartRef;
-
-    UPROPERTY()
-    class ADirectionalLight* SunLightRef;
-
-    UPROPERTY()
-    class ALandscape* TerrainRef;
-
-    UPROPERTY()
-    TArray<class APawn*> DinosaurRefs;
+private:
+    void InitializeBiomeCoordinates();
+    bool SpawnActorInBiome(UClass* ActorClass, const FString& BiomeName, const FString& ActorLabel);
 };
