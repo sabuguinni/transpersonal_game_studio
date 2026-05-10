@@ -1,336 +1,348 @@
 #include "NPC_TribalBehaviorComponent.h"
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
-#include "GameFramework/PlayerController.h"
+#include "GameFramework/Actor.h"
 #include "Kismet/GameplayStatics.h"
-#include "DrawDebugHelpers.h"
+#include "Kismet/KismetMathLibrary.h"
+#include "Components/PrimitiveComponent.h"
 #include "Engine/Engine.h"
 
 UNPC_TribalBehaviorComponent::UNPC_TribalBehaviorComponent()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f; // Update 10 times per second
+    PrimaryComponentTick.TickInterval = 0.1f;
 
-    // Valores padrão
-    CurrentState = ENPC_TribalState::Idle;
-    DetectionRadius = 1500.0f;
-    FleeRadius = 800.0f;
-    PatrolRadius = 2000.0f;
-    MovementSpeed = 300.0f;
-    CurrentPatrolIndex = 0;
-    StateTimer = 0.0f;
-    LastBehaviorUpdate = 0.0f;
+    // Default tribal role and activity
+    TribalRole = ENPC_TribalRole::Gatherer;
+    CurrentActivity = ENPC_TribalActivity::Idle;
+    
+    // Default tribe settings
+    TribeName = TEXT("DefaultTribe");
+    SocialRadius = 1000.0f;
+    PatrolRadius = 1500.0f;
+    FleeRadius = 500.0f;
 
-    // Personalidade padrão
-    Personality.Courage = FMath::RandRange(0.3f, 0.8f);
-    Personality.Curiosity = FMath::RandRange(0.2f, 0.7f);
-    Personality.Sociability = FMath::RandRange(0.4f, 0.9f);
-    Personality.Aggression = FMath::RandRange(0.1f, 0.4f);
+    // Memory and decision settings
+    MemoryRetentionTime = 300.0f; // 5 minutes
+    DecisionUpdateInterval = 2.0f; // 2 seconds
+
+    // Default personality traits
+    Courage = 0.5f;
+    Curiosity = 0.6f;
+    Sociability = 0.7f;
+    Aggression = 0.3f;
+
+    // Initialize state
+    CurrentTarget = nullptr;
+    CurrentDestination = FVector::ZeroVector;
+    bIsInDanger = false;
+    CurrentFear = 0.0f;
+    
+    LastDecisionTime = 0.0f;
+    LastMemoryUpdate = 0.0f;
 }
 
 void UNPC_TribalBehaviorComponent::BeginPlay()
 {
     Super::BeginPlay();
 
-    // Configurar pontos de patrulha iniciais ao redor da posição inicial
-    if (GetOwner())
+    // Initialize tribal memory
+    TribalMemory = FNPC_TribalMemory();
+    
+    // Set up timers for AI updates
+    if (UWorld* World = GetWorld())
     {
-        FVector StartLocation = GetOwner()->GetActorLocation();
-        
-        // Criar 4 pontos de patrulha em cruz
-        PatrolPoints.Empty();
-        PatrolPoints.Add(StartLocation + FVector(PatrolRadius, 0, 0));
-        PatrolPoints.Add(StartLocation + FVector(0, PatrolRadius, 0));
-        PatrolPoints.Add(StartLocation + FVector(-PatrolRadius, 0, 0));
-        PatrolPoints.Add(StartLocation + FVector(0, -PatrolRadius, 0));
-        
-        CurrentPatrolIndex = 0;
-        
-        UE_LOG(LogTemp, Warning, TEXT("TribalBehavior: %s iniciado com %d pontos de patrulha"), 
-               *GetOwner()->GetName(), PatrolPoints.Num());
+        World->GetTimerManager().SetTimer(
+            DecisionTimerHandle,
+            this,
+            &UNPC_TribalBehaviorComponent::OnDecisionUpdate,
+            DecisionUpdateInterval,
+            true
+        );
+
+        World->GetTimerManager().SetTimer(
+            MemoryUpdateHandle,
+            this,
+            &UNPC_TribalBehaviorComponent::OnMemoryUpdate,
+            1.0f,
+            true
+        );
     }
+
+    // Find initial tribe members
+    FindNearbyTribeMembers();
+    
+    UE_LOG(LogTemp, Log, TEXT("TribalBehaviorComponent initialized for %s with role %d"), 
+           *GetOwner()->GetName(), (int32)TribalRole);
 }
 
 void UNPC_TribalBehaviorComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
-    StateTimer += DeltaTime;
     
-    // Atualizar comportamento a cada 0.1 segundos
-    if (GetWorld()->GetTimeSeconds() - LastBehaviorUpdate >= 0.1f)
-    {
-        UpdateBehavior(DeltaTime);
-        LastBehaviorUpdate = GetWorld()->GetTimeSeconds();
-    }
-
-    // Atualizar memória do tempo
-    Memory.TimeSincePlayerSeen += DeltaTime;
-    Memory.LastMealTime += DeltaTime;
+    UpdateTribalBehavior(DeltaTime);
 }
 
-void UNPC_TribalBehaviorComponent::UpdateBehavior(float DeltaTime)
+void UNPC_TribalBehaviorComponent::UpdateTribalBehavior(float DeltaTime)
 {
-    APawn* Player = FindNearestPlayer();
-    if (Player)
+    if (!GetOwner())
     {
-        float DistanceToPlayer = GetDistanceToPlayer();
-        bool bPlayerVisible = IsPlayerVisible(Player);
-        
-        // Atualizar memória se o jogador está visível
-        if (bPlayerVisible)
-        {
-            UpdateMemory(Player->GetActorLocation(), true);
-        }
-
-        // Lógica de mudança de estado baseada na distância e personalidade
-        if (DistanceToPlayer < FleeRadius && ShouldFlee())
-        {
-            SetState(ENPC_TribalState::Fleeing);
-        }
-        else if (DistanceToPlayer < DetectionRadius && ShouldApproachPlayer())
-        {
-            SetState(ENPC_TribalState::Socializing);
-        }
-        else if (CurrentState == ENPC_TribalState::Idle && StateTimer > 5.0f)
-        {
-            // Mudar para patrulha após 5 segundos de inatividade
-            SetState(ENPC_TribalState::Patrolling);
-        }
+        return;
     }
 
-    // Executar comportamento baseado no estado atual
-    switch (CurrentState)
+    // Update fear level based on threats
+    if (bIsInDanger)
     {
-        case ENPC_TribalState::Idle:
-            HandleIdleState(DeltaTime);
+        CurrentFear = FMath::FInterpTo(CurrentFear, 1.0f, DeltaTime, 2.0f);
+    }
+    else
+    {
+        CurrentFear = FMath::FInterpTo(CurrentFear, 0.0f, DeltaTime, 1.0f);
+    }
+
+    // Update current activity based on role and situation
+    switch (TribalRole)
+    {
+        case ENPC_TribalRole::Scout:
+            if (CurrentActivity == ENPC_TribalActivity::Idle)
+            {
+                SetCurrentActivity(ENPC_TribalActivity::Patrolling);
+            }
             break;
-        case ENPC_TribalState::Patrolling:
-            HandlePatrollingState(DeltaTime);
+            
+        case ENPC_TribalRole::Hunter:
+            if (CurrentActivity == ENPC_TribalActivity::Idle && FMath::RandRange(0.0f, 1.0f) < 0.3f)
+            {
+                SetCurrentActivity(ENPC_TribalActivity::Hunting);
+            }
             break;
-        case ENPC_TribalState::Fleeing:
-            HandleFleeingState(DeltaTime);
+            
+        case ENPC_TribalRole::Gatherer:
+            if (CurrentActivity == ENPC_TribalActivity::Idle && FMath::RandRange(0.0f, 1.0f) < 0.4f)
+            {
+                SetCurrentActivity(ENPC_TribalActivity::Gathering);
+            }
             break;
-        case ENPC_TribalState::Gathering:
-            HandleGatheringState(DeltaTime);
+            
+        default:
             break;
+    }
+
+    // Handle danger response
+    if (bIsInDanger)
+    {
+        if (ShouldFlee())
+        {
+            SetCurrentActivity(ENPC_TribalActivity::Fleeing);
+        }
+        else if (ShouldFight())
+        {
+            SetCurrentActivity(ENPC_TribalActivity::Fighting);
+        }
+    }
+}
+
+void UNPC_TribalBehaviorComponent::SetTribalRole(ENPC_TribalRole NewRole)
+{
+    TribalRole = NewRole;
+    
+    // Adjust personality based on role
+    switch (NewRole)
+    {
+        case ENPC_TribalRole::Scout:
+            Curiosity = FMath::Clamp(Curiosity + 0.2f, 0.0f, 1.0f);
+            break;
+        case ENPC_TribalRole::Hunter:
+            Aggression = FMath::Clamp(Aggression + 0.3f, 0.0f, 1.0f);
+            Courage = FMath::Clamp(Courage + 0.2f, 0.0f, 1.0f);
+            break;
+        case ENPC_TribalRole::Warrior:
+            Courage = FMath::Clamp(Courage + 0.4f, 0.0f, 1.0f);
+            Aggression = FMath::Clamp(Aggression + 0.3f, 0.0f, 1.0f);
+            break;
+        case ENPC_TribalRole::Elder:
+            Sociability = FMath::Clamp(Sociability + 0.3f, 0.0f, 1.0f);
+            break;
+        default:
+            break;
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("%s assigned tribal role: %d"), *GetOwner()->GetName(), (int32)NewRole);
+}
+
+void UNPC_TribalBehaviorComponent::SetCurrentActivity(ENPC_TribalActivity NewActivity)
+{
+    if (CurrentActivity != NewActivity)
+    {
+        CurrentActivity = NewActivity;
+        UE_LOG(LogTemp, Log, TEXT("%s changed activity to: %d"), *GetOwner()->GetName(), (int32)NewActivity);
+        
+        // Set appropriate destination based on activity
+        switch (NewActivity)
+        {
+            case ENPC_TribalActivity::Patrolling:
+                CurrentDestination = GetPatrolDestination();
+                break;
+            case ENPC_TribalActivity::Fleeing:
+                // Move away from threat
+                if (TribalMemory.LastKnownThreatLocation != FVector::ZeroVector)
+                {
+                    FVector FleeDirection = (GetOwner()->GetActorLocation() - TribalMemory.LastKnownThreatLocation).GetSafeNormal();
+                    CurrentDestination = GetOwner()->GetActorLocation() + FleeDirection * FleeRadius;
+                }
+                break;
+            default:
+                break;
+        }
+    }
+}
+
+void UNPC_TribalBehaviorComponent::DetectThreat(AActor* ThreatActor, float ThreatLevel)
+{
+    if (!ThreatActor)
+    {
+        return;
+    }
+
+    TribalMemory.LastKnownThreatLocation = ThreatActor->GetActorLocation();
+    TribalMemory.ThreatLevel = ThreatLevel;
+    TribalMemory.LastSeenThreatTime = GetWorld()->GetTimeSeconds();
+    
+    bIsInDanger = true;
+    CurrentTarget = ThreatActor;
+    
+    // Share threat information with nearby tribe members
+    ShareThreatInformation(TribalMemory.LastKnownThreatLocation, ThreatLevel);
+    
+    UE_LOG(LogTemp, Warning, TEXT("%s detected threat: %s (Level: %.1f)"), 
+           *GetOwner()->GetName(), *ThreatActor->GetName(), ThreatLevel);
+}
+
+void UNPC_TribalBehaviorComponent::ShareThreatInformation(const FVector& ThreatLocation, float ThreatLevel)
+{
+    for (AActor* TribeMember : NearbyTribeMembers)
+    {
+        if (TribeMember && TribeMember != GetOwner())
+        {
+            if (UNPC_TribalBehaviorComponent* OtherTribal = TribeMember->FindComponentByClass<UNPC_TribalBehaviorComponent>())
+            {
+                OtherTribal->TribalMemory.LastKnownThreatLocation = ThreatLocation;
+                OtherTribal->TribalMemory.ThreatLevel = ThreatLevel * 0.8f; // Slightly reduced for shared info
+                OtherTribal->TribalMemory.LastSeenThreatTime = GetWorld()->GetTimeSeconds();
+                OtherTribal->bIsInDanger = true;
+            }
+        }
+    }
+}
+
+void UNPC_TribalBehaviorComponent::FindNearbyTribeMembers()
+{
+    NearbyTribeMembers.Empty();
+    
+    if (!GetOwner())
+    {
+        return;
+    }
+
+    TArray<AActor*> FoundActors;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), APawn::StaticClass(), FoundActors);
+    
+    for (AActor* Actor : FoundActors)
+    {
+        if (Actor != GetOwner())
+        {
+            if (UNPC_TribalBehaviorComponent* OtherTribal = Actor->FindComponentByClass<UNPC_TribalBehaviorComponent>())
+            {
+                float Distance = FVector::Dist(GetOwner()->GetActorLocation(), Actor->GetActorLocation());
+                if (Distance <= SocialRadius && OtherTribal->TribeName == TribeName)
+                {
+                    NearbyTribeMembers.Add(Actor);
+                }
+            }
+        }
+    }
+}
+
+FVector UNPC_TribalBehaviorComponent::GetPatrolDestination()
+{
+    FVector OwnerLocation = GetOwner()->GetActorLocation();
+    
+    // Generate random patrol point within patrol radius
+    float RandomAngle = FMath::RandRange(0.0f, 360.0f);
+    float RandomDistance = FMath::RandRange(PatrolRadius * 0.5f, PatrolRadius);
+    
+    FVector PatrolOffset = FVector(
+        FMath::Cos(FMath::DegreesToRadians(RandomAngle)) * RandomDistance,
+        FMath::Sin(FMath::DegreesToRadians(RandomAngle)) * RandomDistance,
+        0.0f
+    );
+    
+    return OwnerLocation + PatrolOffset;
+}
+
+bool UNPC_TribalBehaviorComponent::ShouldFlee()
+{
+    float FleeThreshold = 1.0f - Courage;
+    return CurrentFear > FleeThreshold && TribalMemory.ThreatLevel > 0.6f;
+}
+
+bool UNPC_TribalBehaviorComponent::ShouldFight()
+{
+    float FightThreshold = Courage + Aggression * 0.5f;
+    return CurrentFear < 0.5f && FightThreshold > 0.7f && NearbyTribeMembers.Num() >= 2;
+}
+
+void UNPC_TribalBehaviorComponent::UpdateMemory(float DeltaTime)
+{
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    
+    // Fade threat memory over time
+    if (CurrentTime - TribalMemory.LastSeenThreatTime > MemoryRetentionTime)
+    {
+        TribalMemory.ThreatLevel = FMath::FInterpTo(TribalMemory.ThreatLevel, 0.0f, DeltaTime, 0.5f);
+        if (TribalMemory.ThreatLevel < 0.1f)
+        {
+            bIsInDanger = false;
+            CurrentTarget = nullptr;
+        }
+    }
+}
+
+void UNPC_TribalBehaviorComponent::MakeDecision()
+{
+    // Update tribe member awareness
+    FindNearbyTribeMembers();
+    
+    // Make role-based decisions
+    switch (TribalRole)
+    {
+        case ENPC_TribalRole::Scout:
+            if (CurrentActivity == ENPC_TribalActivity::Idle)
+            {
+                SetCurrentActivity(ENPC_TribalActivity::Patrolling);
+            }
+            break;
+            
+        case ENPC_TribalRole::Elder:
+            if (NearbyTribeMembers.Num() > 0 && CurrentActivity != ENPC_TribalActivity::Socializing)
+            {
+                SetCurrentActivity(ENPC_TribalActivity::Socializing);
+            }
+            break;
+            
         default:
             break;
     }
 }
 
-void UNPC_TribalBehaviorComponent::HandleIdleState(float DeltaTime)
+void UNPC_TribalBehaviorComponent::OnDecisionUpdate()
 {
-    // No estado idle, ocasionalmente olhar ao redor
-    if (StateTimer > 3.0f)
-    {
-        // Transição para patrulha
-        SetState(ENPC_TribalState::Patrolling);
-    }
+    MakeDecision();
+    LastDecisionTime = GetWorld()->GetTimeSeconds();
 }
 
-void UNPC_TribalBehaviorComponent::HandlePatrollingState(float DeltaTime)
+void UNPC_TribalBehaviorComponent::OnMemoryUpdate()
 {
-    if (PatrolPoints.Num() == 0) return;
-
-    APawn* OwnerPawn = GetOwnerPawn();
-    if (!OwnerPawn) return;
-
-    FVector CurrentLocation = OwnerPawn->GetActorLocation();
-    FVector TargetPoint = GetNextPatrolPoint();
-    
-    float DistanceToTarget = FVector::Dist(CurrentLocation, TargetPoint);
-    
-    if (DistanceToTarget < 200.0f)
-    {
-        // Chegou ao ponto, ir para o próximo
-        CurrentPatrolIndex = (CurrentPatrolIndex + 1) % PatrolPoints.Num();
-        
-        // Parar um pouco no ponto
-        SetState(ENPC_TribalState::Idle);
-    }
-    else
-    {
-        // Mover em direção ao ponto de patrulha
-        FVector Direction = (TargetPoint - CurrentLocation).GetSafeNormal();
-        FVector NewLocation = CurrentLocation + Direction * MovementSpeed * DeltaTime;
-        OwnerPawn->SetActorLocation(NewLocation);
-        
-        // Rodar para a direção de movimento
-        FRotator NewRotation = Direction.Rotation();
-        OwnerPawn->SetActorRotation(NewRotation);
-    }
-}
-
-void UNPC_TribalBehaviorComponent::HandleFleeingState(float DeltaTime)
-{
-    APawn* OwnerPawn = GetOwnerPawn();
-    if (!OwnerPawn) return;
-
-    FVector FleeDirection = GetFleeDirection();
-    FVector CurrentLocation = OwnerPawn->GetActorLocation();
-    FVector NewLocation = CurrentLocation + FleeDirection * MovementSpeed * 1.5f * DeltaTime; // Correr mais rápido
-
-    OwnerPawn->SetActorLocation(NewLocation);
-    OwnerPawn->SetActorRotation(FleeDirection.Rotation());
-
-    // Parar de fugir após algum tempo
-    if (StateTimer > 5.0f)
-    {
-        SetState(ENPC_TribalState::Idle);
-    }
-}
-
-void UNPC_TribalBehaviorComponent::HandleGatheringState(float DeltaTime)
-{
-    // Simular coleta de recursos
-    if (StateTimer > 10.0f)
-    {
-        Memory.LastMealTime = 0.0f; // "Comeu"
-        SetState(ENPC_TribalState::Idle);
-    }
-}
-
-void UNPC_TribalBehaviorComponent::SetState(ENPC_TribalState NewState)
-{
-    if (CurrentState != NewState)
-    {
-        UE_LOG(LogTemp, Log, TEXT("TribalBehavior: %s mudou estado de %d para %d"), 
-               *GetOwner()->GetName(), (int32)CurrentState, (int32)NewState);
-        
-        CurrentState = NewState;
-        StateTimer = 0.0f;
-    }
-}
-
-void UNPC_TribalBehaviorComponent::UpdateMemory(const FVector& PlayerLocation, bool bPlayerVisible)
-{
-    if (bPlayerVisible)
-    {
-        Memory.LastKnownPlayerLocation = PlayerLocation;
-        Memory.TimeSincePlayerSeen = 0.0f;
-    }
-}
-
-void UNPC_TribalBehaviorComponent::AddDangerousLocation(const FVector& Location)
-{
-    Memory.DangerousLocations.AddUnique(Location);
-    
-    // Limitar a 10 localizações perigosas
-    if (Memory.DangerousLocations.Num() > 10)
-    {
-        Memory.DangerousLocations.RemoveAt(0);
-    }
-}
-
-void UNPC_TribalBehaviorComponent::AddSafeLocation(const FVector& Location)
-{
-    Memory.SafeLocations.AddUnique(Location);
-    
-    // Limitar a 10 localizações seguras
-    if (Memory.SafeLocations.Num() > 10)
-    {
-        Memory.SafeLocations.RemoveAt(0);
-    }
-}
-
-FVector UNPC_TribalBehaviorComponent::GetNextPatrolPoint()
-{
-    if (PatrolPoints.Num() == 0)
-    {
-        return GetOwner()->GetActorLocation();
-    }
-    
-    return PatrolPoints[CurrentPatrolIndex];
-}
-
-bool UNPC_TribalBehaviorComponent::ShouldFlee() const
-{
-    // Fugir baseado na coragem e se viu dinossauros
-    float FleeThreshold = 1.0f - Personality.Courage;
-    if (Memory.bHasSeenDinosaur)
-    {
-        FleeThreshold += 0.3f; // Mais propenso a fugir se já viu dinossauros
-    }
-    
-    return FMath::RandRange(0.0f, 1.0f) < FleeThreshold;
-}
-
-bool UNPC_TribalBehaviorComponent::ShouldApproachPlayer() const
-{
-    // Aproximar baseado na sociabilidade e curiosidade
-    float ApproachThreshold = (Personality.Sociability + Personality.Curiosity) * 0.5f;
-    
-    // Menos provável se viu o jogador recentemente
-    if (Memory.TimeSincePlayerSeen < 30.0f)
-    {
-        ApproachThreshold *= 0.5f;
-    }
-    
-    return FMath::RandRange(0.0f, 1.0f) < ApproachThreshold;
-}
-
-FVector UNPC_TribalBehaviorComponent::GetFleeDirection() const
-{
-    APawn* Player = FindNearestPlayer();
-    if (Player && GetOwner())
-    {
-        FVector ToPlayer = Player->GetActorLocation() - GetOwner()->GetActorLocation();
-        return -ToPlayer.GetSafeNormal(); // Direção oposta ao jogador
-    }
-    
-    // Direção aleatória se não há jogador
-    return FVector(FMath::RandRange(-1.0f, 1.0f), FMath::RandRange(-1.0f, 1.0f), 0.0f).GetSafeNormal();
-}
-
-APawn* UNPC_TribalBehaviorComponent::GetOwnerPawn() const
-{
-    return Cast<APawn>(GetOwner());
-}
-
-APawn* UNPC_TribalBehaviorComponent::FindNearestPlayer() const
-{
-    if (!GetWorld()) return nullptr;
-    
-    APlayerController* PC = GetWorld()->GetFirstPlayerController();
-    if (PC)
-    {
-        return PC->GetPawn();
-    }
-    
-    return nullptr;
-}
-
-bool UNPC_TribalBehaviorComponent::IsPlayerVisible(APawn* Player) const
-{
-    if (!Player || !GetOwner()) return false;
-    
-    FVector Start = GetOwner()->GetActorLocation();
-    FVector End = Player->GetActorLocation();
-    
-    FHitResult HitResult;
-    FCollisionQueryParams QueryParams;
-    QueryParams.AddIgnoredActor(GetOwner());
-    QueryParams.AddIgnoredActor(Player);
-    
-    bool bHit = GetWorld()->LineTraceSingleByChannel(
-        HitResult,
-        Start,
-        End,
-        ECollisionChannel::ECC_Visibility,
-        QueryParams
-    );
-    
-    return !bHit; // Se não bateu em nada, o jogador está visível
-}
-
-float UNPC_TribalBehaviorComponent::GetDistanceToPlayer() const
-{
-    APawn* Player = FindNearestPlayer();
-    if (Player && GetOwner())
-    {
-        return FVector::Dist(GetOwner()->GetActorLocation(), Player->GetActorLocation());
-    }
-    
-    return 999999.0f;
+    UpdateMemory(1.0f);
+    LastMemoryUpdate = GetWorld()->GetTimeSeconds();
 }
