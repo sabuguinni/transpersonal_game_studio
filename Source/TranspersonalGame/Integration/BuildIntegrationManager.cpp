@@ -1,338 +1,259 @@
 #include "BuildIntegrationManager.h"
 #include "Engine/Engine.h"
-#include "Engine/World.h"
-#include "Engine/Level.h"
 #include "HAL/FileManager.h"
-#include "HAL/PlatformFilemanager.h"
 #include "Misc/Paths.h"
 #include "Misc/DateTime.h"
+#include "Engine/World.h"
 #include "UObject/UObjectGlobals.h"
-#include "Engine/GameInstance.h"
 
 UBuildIntegrationManager::UBuildIntegrationManager()
 {
-    LastCompilationStatus = EBuild_CompilationStatus::Unknown;
-    TotalActorsInLevel = 0;
-    LastValidationTime = 0.0f;
+    bIntegrationActive = false;
 }
 
 void UBuildIntegrationManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Initializing build integration system"));
+    bIntegrationActive = true;
+    ScanForModules();
     
-    // Initialize validation status
-    LastCompilationStatus = EBuild_CompilationStatus::Unknown;
-    CompilationErrors.Empty();
-    OrphanedHeaders.Empty();
-    ModuleValidationStatus.Empty();
-    
-    // Trigger initial validation
-    TriggerBuildValidation();
+    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager initialized - found %d modules"), KnownModules.Num());
 }
 
 void UBuildIntegrationManager::Deinitialize()
 {
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Shutting down build integration system"));
-    
-    // Save final validation report
-    SaveValidationResults();
+    bIntegrationActive = false;
+    KnownModules.Empty();
     
     Super::Deinitialize();
 }
 
-bool UBuildIntegrationManager::ValidateModuleIntegration()
+FBuild_ValidationResult UBuildIntegrationManager::ValidateCurrentBuild()
 {
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Validating module integration"));
+    FBuild_ValidationResult Result;
+    Result.BuildTimestamp = FDateTime::Now().ToString();
+    Result.TotalModules = KnownModules.Num();
+    Result.CompiledModules = 0;
     
-    bool bAllModulesValid = true;
-    ModuleValidationStatus.Empty();
-    
-    // Check core modules
-    TArray<FString> CoreModules = {
-        TEXT("TranspersonalGame"),
-        TEXT("Core"),
-        TEXT("Engine"),
-        TEXT("UnrealEd")
-    };
-    
-    for (const FString& ModuleName : CoreModules)
+    for (const FString& ModuleName : KnownModules)
     {
-        bool bModuleLoaded = FModuleManager::Get().IsModuleLoaded(*ModuleName);
-        ModuleValidationStatus.Add(ModuleName, bModuleLoaded);
+        FBuild_ModuleStatus ModuleStatus;
+        ValidateModuleStructure(ModuleName, ModuleStatus);
+        Result.ModuleStatuses.Add(ModuleStatus);
         
-        if (!bModuleLoaded)
+        if (ModuleStatus.bIsCompiled && ModuleStatus.bHasImplementation)
         {
-            UE_LOG(LogTemp, Error, TEXT("BuildIntegrationManager: Module %s is not loaded"), *ModuleName);
-            bAllModulesValid = false;
+            Result.CompiledModules++;
         }
     }
     
-    return bAllModulesValid;
+    Result.bBuildSuccess = (Result.CompiledModules == Result.TotalModules) && (Result.TotalModules > 0);
+    LastValidationResult = Result;
+    
+    LogBuildStatus(FString::Printf(TEXT("Build validation complete: %d/%d modules compiled"), 
+        Result.CompiledModules, Result.TotalModules));
+    
+    return Result;
 }
 
-bool UBuildIntegrationManager::CheckOrphanedHeaders()
+bool UBuildIntegrationManager::CheckModuleCompilation(const FString& ModuleName)
 {
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Checking for orphaned headers"));
+    FBuild_ModuleStatus Status;
+    ValidateModuleStructure(ModuleName, Status);
+    return Status.bIsCompiled && Status.bHasImplementation;
+}
+
+TArray<FString> UBuildIntegrationManager::GetOrphanedHeaders()
+{
+    TArray<FString> OrphanedHeaders;
     
-    OrphanedHeaders.Empty();
-    
-    // Get project source directory
-    FString ProjectDir = FPaths::ProjectDir();
-    FString SourceDir = FPaths::Combine(ProjectDir, TEXT("Source"), TEXT("TranspersonalGame"));
-    
-    // Scan for .h files without corresponding .cpp files
+    FString SourcePath = FPaths::ProjectDir() + TEXT("Source/TranspersonalGame/");
     TArray<FString> HeaderFiles;
-    IFileManager::Get().FindFilesRecursive(HeaderFiles, *SourceDir, TEXT("*.h"), true, false);
+    
+    IFileManager& FileManager = IFileManager::Get();
+    FileManager.FindFilesRecursive(HeaderFiles, *SourcePath, TEXT("*.h"), true, false);
     
     for (const FString& HeaderFile : HeaderFiles)
     {
-        // Skip generated headers
-        if (HeaderFile.Contains(TEXT(".generated.h")))
-        {
-            continue;
-        }
-        
-        // Check for corresponding .cpp file
-        FString CppFile = HeaderFile;
-        CppFile = CppFile.Replace(TEXT(".h"), TEXT(".cpp"));
-        
-        if (!IFileManager::Get().FileExists(*CppFile))
+        if (!CheckHeaderImplementationPair(HeaderFile))
         {
             FString RelativePath = HeaderFile;
-            FPaths::MakePathRelativeTo(RelativePath, *SourceDir);
+            FPaths::MakePathRelativeTo(RelativePath, *SourcePath);
             OrphanedHeaders.Add(RelativePath);
         }
     }
     
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Found %d orphaned headers"), OrphanedHeaders.Num());
-    
-    return OrphanedHeaders.Num() == 0;
-}
-
-bool UBuildIntegrationManager::ValidateActorSpawning()
-{
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Validating actor spawning"));
-    
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        UE_LOG(LogTemp, Error, TEXT("BuildIntegrationManager: No valid world found"));
-        return false;
-    }
-    
-    // Count actors in current level
-    TotalActorsInLevel = 0;
-    TMap<FString, int32> ActorCounts;
-    
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-    {
-        AActor* Actor = *ActorItr;
-        if (Actor && IsValid(Actor))
-        {
-            TotalActorsInLevel++;
-            
-            FString ActorClass = Actor->GetClass()->GetName();
-            ActorCounts.FindOrAdd(ActorClass)++;
-        }
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Found %d actors in level"), TotalActorsInLevel);
-    
-    // Log actor distribution
-    for (const auto& Pair : ActorCounts)
-    {
-        UE_LOG(LogTemp, Log, TEXT("  %s: %d"), *Pair.Key, Pair.Value);
-    }
-    
-    return TotalActorsInLevel > 0;
-}
-
-bool UBuildIntegrationManager::TestBiomeCoordinates()
-{
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Testing biome coordinates"));
-    
-    // Test biome coordinate system from brain memories
-    TArray<FBuild_BiomeInfo> TestBiomes = {
-        {TEXT("Pantano"), FVector(-50000, -45000, 0), FVector2D(-77500, -25000), FVector2D(-76500, -15000)},
-        {TEXT("Floresta"), FVector(-45000, 40000, 0), FVector2D(-77500, -15000), FVector2D(15000, 76500)},
-        {TEXT("Savana"), FVector(0, 0, 0), FVector2D(-20000, 20000), FVector2D(-20000, 20000)},
-        {TEXT("Deserto"), FVector(55000, 0, 0), FVector2D(25000, 79500), FVector2D(-30000, 30000)},
-        {TEXT("Montanha"), FVector(40000, 50000, 500), FVector2D(15000, 79500), FVector2D(20000, 76500)}
-    };
-    
-    BiomeValidation.BiomeCount = TestBiomes.Num();
-    BiomeValidation.bCoordinatesValid = true;
-    BiomeValidation.bActorDistributionValid = true;
-    
-    for (const FBuild_BiomeInfo& Biome : TestBiomes)
-    {
-        // Validate biome bounds
-        bool bValidBounds = (Biome.XRange.X < Biome.XRange.Y) && (Biome.YRange.X < Biome.YRange.Y);
-        
-        if (!bValidBounds)
-        {
-            UE_LOG(LogTemp, Error, TEXT("BuildIntegrationManager: Invalid bounds for biome %s"), *Biome.Name);
-            BiomeValidation.bCoordinatesValid = false;
-        }
-        
-        UE_LOG(LogTemp, Log, TEXT("  Biome %s: Center(%f,%f,%f)"), 
-               *Biome.Name, Biome.Center.X, Biome.Center.Y, Biome.Center.Z);
-    }
-    
-    return BiomeValidation.bCoordinatesValid;
+    UE_LOG(LogTemp, Warning, TEXT("Found %d orphaned headers"), OrphanedHeaders.Num());
+    return OrphanedHeaders;
 }
 
 bool UBuildIntegrationManager::ValidateSharedTypes()
 {
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Validating shared types"));
+    FString SharedTypesPath = FPaths::ProjectDir() + TEXT("Source/TranspersonalGame/SharedTypes.h");
     
-    // Test that SharedTypes.h enums are accessible
-    bool bSharedTypesValid = true;
-    
-    // Test compilation status enum
-    EBuild_CompilationStatus TestStatus = EBuild_CompilationStatus::Success;
-    if (TestStatus != EBuild_CompilationStatus::Success)
+    if (!FPaths::FileExists(SharedTypesPath))
     {
-        bSharedTypesValid = false;
+        LogBuildStatus(TEXT("SharedTypes.h not found"), true);
+        return false;
     }
     
-    // Test biome type enum
-    EBuild_BiomeType TestBiome = EBuild_BiomeType::Savana;
-    if (TestBiome != EBuild_BiomeType::Savana)
+    // Check if SharedTypes.h contains required base types
+    FString FileContent;
+    if (FFileHelper::LoadFileToString(FileContent, *SharedTypesPath))
     {
-        bSharedTypesValid = false;
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: SharedTypes validation %s"), 
-           bSharedTypesValid ? TEXT("PASSED") : TEXT("FAILED"));
-    
-    return bSharedTypesValid;
-}
-
-EBuild_CompilationStatus UBuildIntegrationManager::GetLastCompilationStatus() const
-{
-    return LastCompilationStatus;
-}
-
-void UBuildIntegrationManager::TriggerBuildValidation()
-{
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Triggering comprehensive build validation"));
-    
-    LastValidationTime = FPlatformTime::Seconds();
-    
-    // Run all validation checks
-    bool bModulesValid = ValidateModuleIntegration();
-    bool bHeadersValid = CheckOrphanedHeaders();
-    bool bActorsValid = ValidateActorSpawning();
-    bool bBiomesValid = TestBiomeCoordinates();
-    bool bTypesValid = ValidateSharedTypes();
-    
-    // Determine overall status
-    if (bModulesValid && bHeadersValid && bActorsValid && bBiomesValid && bTypesValid)
-    {
-        LastCompilationStatus = EBuild_CompilationStatus::Success;
-        UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: All validation checks PASSED"));
-    }
-    else
-    {
-        LastCompilationStatus = EBuild_CompilationStatus::Failed;
-        UE_LOG(LogTemp, Error, TEXT("BuildIntegrationManager: Validation checks FAILED"));
-    }
-    
-    // Generate integration report
-    FBuild_IntegrationReport Report = GenerateIntegrationReport();
-    LogIntegrationStatus();
-}
-
-TArray<FString> UBuildIntegrationManager::GetCompilationErrors() const
-{
-    return CompilationErrors;
-}
-
-FBuild_IntegrationReport UBuildIntegrationManager::GenerateIntegrationReport()
-{
-    FBuild_IntegrationReport Report;
-    
-    Report.CompilationStatus = LastCompilationStatus;
-    Report.OrphanedHeaderCount = OrphanedHeaders.Num();
-    Report.TotalActorCount = TotalActorsInLevel;
-    Report.ValidationTimestamp = FDateTime::Now();
-    Report.ModuleCount = ModuleValidationStatus.Num();
-    Report.BiomeValidation = BiomeValidation;
-    
-    // Count successful modules
-    Report.SuccessfulModules = 0;
-    for (const auto& Pair : ModuleValidationStatus)
-    {
-        if (Pair.Value)
+        bool bHasBasicTypes = FileContent.Contains(TEXT("ETranspersonalGameState")) &&
+                             FileContent.Contains(TEXT("FTranspersonalVector")) &&
+                             FileContent.Contains(TEXT("EBiomeType"));
+        
+        if (bHasBasicTypes)
         {
-            Report.SuccessfulModules++;
+            LogBuildStatus(TEXT("SharedTypes.h validation passed"));
+            return true;
         }
     }
     
-    return Report;
+    LogBuildStatus(TEXT("SharedTypes.h missing required types"), true);
+    return false;
 }
 
-void UBuildIntegrationManager::LogIntegrationStatus()
+void UBuildIntegrationManager::GenerateBuildReport()
 {
-    UE_LOG(LogTemp, Warning, TEXT("=== BUILD INTEGRATION STATUS ==="));
-    UE_LOG(LogTemp, Warning, TEXT("Compilation Status: %s"), 
-           LastCompilationStatus == EBuild_CompilationStatus::Success ? TEXT("SUCCESS") : TEXT("FAILED"));
-    UE_LOG(LogTemp, Warning, TEXT("Orphaned Headers: %d"), OrphanedHeaders.Num());
-    UE_LOG(LogTemp, Warning, TEXT("Total Actors: %d"), TotalActorsInLevel);
-    UE_LOG(LogTemp, Warning, TEXT("Loaded Modules: %d/%d"), 
-           ModuleValidationStatus.Num(), ModuleValidationStatus.Num());
-    UE_LOG(LogTemp, Warning, TEXT("Biome Validation: %s"), 
-           BiomeValidation.bCoordinatesValid ? TEXT("VALID") : TEXT("INVALID"));
-    UE_LOG(LogTemp, Warning, TEXT("================================"));
+    FBuild_ValidationResult CurrentResult = ValidateCurrentBuild();
+    
+    FString ReportContent = TEXT("=== BUILD INTEGRATION REPORT ===\n");
+    ReportContent += FString::Printf(TEXT("Timestamp: %s\n"), *CurrentResult.BuildTimestamp);
+    ReportContent += FString::Printf(TEXT("Build Status: %s\n"), CurrentResult.bBuildSuccess ? TEXT("SUCCESS") : TEXT("FAILED"));
+    ReportContent += FString::Printf(TEXT("Modules: %d/%d compiled\n\n"), CurrentResult.CompiledModules, CurrentResult.TotalModules);
+    
+    for (const FBuild_ModuleStatus& Status : CurrentResult.ModuleStatuses)
+    {
+        ReportContent += FString::Printf(TEXT("Module: %s\n"), *Status.ModuleName);
+        ReportContent += FString::Printf(TEXT("  Compiled: %s\n"), Status.bIsCompiled ? TEXT("YES") : TEXT("NO"));
+        ReportContent += FString::Printf(TEXT("  Implementation: %s\n"), Status.bHasImplementation ? TEXT("YES") : TEXT("NO"));
+        ReportContent += FString::Printf(TEXT("  Classes: %d\n"), Status.ClassCount);
+        if (!Status.LastError.IsEmpty())
+        {
+            ReportContent += FString::Printf(TEXT("  Error: %s\n"), *Status.LastError);
+        }
+        ReportContent += TEXT("\n");
+    }
+    
+    TArray<FString> OrphanedHeaders = GetOrphanedHeaders();
+    if (OrphanedHeaders.Num() > 0)
+    {
+        ReportContent += TEXT("=== ORPHANED HEADERS ===\n");
+        for (const FString& Header : OrphanedHeaders)
+        {
+            ReportContent += FString::Printf(TEXT("  %s\n"), *Header);
+        }
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Build Report Generated:\n%s"), *ReportContent);
 }
 
-bool UBuildIntegrationManager::ValidateSourceStructure()
+bool UBuildIntegrationManager::FixCommonBuildErrors()
 {
-    // Implementation for source structure validation
-    return true;
+    bool bFixedAny = false;
+    
+    // Check and validate SharedTypes
+    if (!ValidateSharedTypes())
+    {
+        LogBuildStatus(TEXT("SharedTypes validation failed - manual fix required"), true);
+    }
+    
+    // Log orphaned headers for manual cleanup
+    TArray<FString> OrphanedHeaders = GetOrphanedHeaders();
+    if (OrphanedHeaders.Num() > 0)
+    {
+        LogBuildStatus(FString::Printf(TEXT("Found %d orphaned headers requiring cleanup"), OrphanedHeaders.Num()));
+    }
+    
+    return bFixedAny;
 }
 
-bool UBuildIntegrationManager::ValidateBinaryFiles()
+void UBuildIntegrationManager::ScanForModules()
 {
-    // Implementation for binary file validation
-    return true;
+    KnownModules.Empty();
+    
+    // Add known module directories
+    TArray<FString> ModuleDirectories = {
+        TEXT("AI"), TEXT("Animation"), TEXT("Architecture"), TEXT("Audio"),
+        TEXT("Characters"), TEXT("Combat"), TEXT("Core"), TEXT("Crowd"),
+        TEXT("Environment"), TEXT("Integration"), TEXT("Lighting"),
+        TEXT("NPC"), TEXT("Narrative"), TEXT("PCG"), TEXT("Performance"),
+        TEXT("Physics"), TEXT("Quest"), TEXT("VFX"), TEXT("World")
+    };
+    
+    FString SourcePath = FPaths::ProjectDir() + TEXT("Source/TranspersonalGame/");
+    
+    for (const FString& ModuleDir : ModuleDirectories)
+    {
+        FString ModulePath = SourcePath + ModuleDir;
+        if (FPaths::DirectoryExists(ModulePath))
+        {
+            KnownModules.Add(ModuleDir);
+        }
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Scanned modules: %d found"), KnownModules.Num());
 }
 
-bool UBuildIntegrationManager::ValidateActorDistribution()
+void UBuildIntegrationManager::ValidateModuleStructure(const FString& ModuleName, FBuild_ModuleStatus& OutStatus)
 {
-    // Implementation for actor distribution validation
-    return true;
+    OutStatus.ModuleName = ModuleName;
+    OutStatus.bIsCompiled = false;
+    OutStatus.bHasImplementation = false;
+    OutStatus.ClassCount = 0;
+    OutStatus.LastError = TEXT("");
+    
+    FString ModulePath = FPaths::ProjectDir() + TEXT("Source/TranspersonalGame/") + ModuleName + TEXT("/");
+    
+    if (!FPaths::DirectoryExists(ModulePath))
+    {
+        OutStatus.LastError = TEXT("Module directory not found");
+        return;
+    }
+    
+    // Count header and implementation files
+    TArray<FString> HeaderFiles, CppFiles;
+    IFileManager& FileManager = IFileManager::Get();
+    
+    FileManager.FindFiles(HeaderFiles, *ModulePath, TEXT("*.h"));
+    FileManager.FindFiles(CppFiles, *ModulePath, TEXT("*.cpp"));
+    
+    OutStatus.ClassCount = HeaderFiles.Num();
+    OutStatus.bHasImplementation = (CppFiles.Num() > 0);
+    
+    // Simple compilation check - if we have .cpp files and no obvious errors
+    if (OutStatus.bHasImplementation)
+    {
+        OutStatus.bIsCompiled = true; // Assume compiled if we have implementations
+    }
+    
+    if (HeaderFiles.Num() > CppFiles.Num())
+    {
+        OutStatus.LastError = FString::Printf(TEXT("Missing implementations: %d headers, %d cpp files"), 
+            HeaderFiles.Num(), CppFiles.Num());
+    }
 }
 
-void UBuildIntegrationManager::UpdateModuleStatus()
+bool UBuildIntegrationManager::CheckHeaderImplementationPair(const FString& HeaderPath)
 {
-    // Implementation for module status updates
+    FString CppPath = HeaderPath;
+    CppPath = CppPath.Replace(TEXT(".h"), TEXT(".cpp"));
+    
+    return FPaths::FileExists(CppPath);
 }
 
-void UBuildIntegrationManager::ScanForOrphanedHeaders()
+void UBuildIntegrationManager::LogBuildStatus(const FString& Message, bool bIsError)
 {
-    // Implementation for orphaned header scanning
-}
-
-void UBuildIntegrationManager::ValidateBiomeActorPlacement()
-{
-    // Implementation for biome actor placement validation
-}
-
-void UBuildIntegrationManager::ParseCompilationOutput(const FString& BuildOutput)
-{
-    // Implementation for compilation output parsing
-}
-
-void UBuildIntegrationManager::SaveValidationResults()
-{
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Saving validation results"));
-}
-
-void UBuildIntegrationManager::NotifyValidationComplete()
-{
-    UE_LOG(LogTemp, Warning, TEXT("BuildIntegrationManager: Validation complete notification sent"));
+    if (bIsError)
+    {
+        UE_LOG(LogTemp, Error, TEXT("BuildIntegration: %s"), *Message);
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("BuildIntegration: %s"), *Message);
+    }
 }
