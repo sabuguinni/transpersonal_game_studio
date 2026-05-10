@@ -1,0 +1,258 @@
+#include "Eng_OrphanHeaderCleaner.h"
+#include "Engine/Engine.h"
+#include "Misc/FileHelper.h"
+#include "HAL/PlatformFilemanager.h"
+#include "Misc/Paths.h"
+
+UEng_OrphanHeaderCleaner::UEng_OrphanHeaderCleaner()
+{
+    // Initialize critical system headers that must have implementations
+    InitializeCriticalHeaders();
+}
+
+void UEng_OrphanHeaderCleaner::Initialize(FSubsystemCollectionBase& Collection)
+{
+    Super::Initialize(Collection);
+    
+    UE_LOG(LogTemp, Warning, TEXT("Engine Architect - Orphan Header Cleaner initialized"));
+    
+    // Perform initial scan on startup
+    TArray<FEng_OrphanHeaderInfo> OrphanHeaders = ScanForOrphanHeaders();
+    UE_LOG(LogTemp, Warning, TEXT("Found %d orphan headers requiring attention"), OrphanHeaders.Num());
+}
+
+void UEng_OrphanHeaderCleaner::Deinitialize()
+{
+    OrphanHeaderCache.Empty();
+    Super::Deinitialize();
+}
+
+void UEng_OrphanHeaderCleaner::InitializeCriticalHeaders()
+{
+    CriticalSystemHeaders.Empty();
+    
+    // Core gameplay systems that must have implementations
+    CriticalSystemHeaders.Add(TEXT("TranspersonalCharacter.h"));
+    CriticalSystemHeaders.Add(TEXT("TranspersonalGameMode.h"));
+    CriticalSystemHeaders.Add(TEXT("TranspersonalGameState.h"));
+    CriticalSystemHeaders.Add(TEXT("DinosaurBase.h"));
+    CriticalSystemHeaders.Add(TEXT("BiomeManager.h"));
+    CriticalSystemHeaders.Add(TEXT("StudioDirector.h"));
+    
+    // Physics and movement systems
+    CriticalSystemHeaders.Add(TEXT("Core_PhysicsManager.h"));
+    CriticalSystemHeaders.Add(TEXT("Core_MovementIntegration.h"));
+    CriticalSystemHeaders.Add(TEXT("Core_CollisionSystem.h"));
+    
+    // World generation systems
+    CriticalSystemHeaders.Add(TEXT("PCGWorldGenerator.h"));
+    CriticalSystemHeaders.Add(TEXT("FoliageManager.h"));
+    CriticalSystemHeaders.Add(TEXT("ProceduralWorldManager.h"));
+    
+    UE_LOG(LogTemp, Log, TEXT("Initialized %d critical system headers"), CriticalSystemHeaders.Num());
+}
+
+TArray<FEng_OrphanHeaderInfo> UEng_OrphanHeaderCleaner::ScanForOrphanHeaders()
+{
+    TArray<FEng_OrphanHeaderInfo> OrphanHeaders;
+    OrphanHeaderCache.Empty();
+    
+    // Get project source directory
+    FString SourceDir = FPaths::ProjectDir() + TEXT("Source/TranspersonalGame/");
+    
+    // Recursively find all .h files
+    TArray<FString> HeaderFiles;
+    IFileManager& FileManager = IFileManager::Get();
+    FileManager.FindFilesRecursive(HeaderFiles, *SourceDir, TEXT("*.h"), true, false);
+    
+    UE_LOG(LogTemp, Log, TEXT("Scanning %d header files for orphans..."), HeaderFiles.Num());
+    
+    for (const FString& HeaderPath : HeaderFiles)
+    {
+        // Skip generated headers
+        if (HeaderPath.Contains(TEXT(".generated.h")))
+        {
+            continue;
+        }
+        
+        // Get expected .cpp path
+        FString CppPath = HeaderPath;
+        CppPath = CppPath.Replace(TEXT(".h"), TEXT(".cpp"));
+        
+        // Check if .cpp exists
+        bool bHasCpp = FileExists(CppPath);
+        
+        if (!bHasCpp)
+        {
+            FEng_OrphanHeaderInfo OrphanInfo;
+            OrphanInfo.HeaderPath = HeaderPath;
+            OrphanInfo.ExpectedCppPath = CppPath;
+            OrphanInfo.bHasCppFile = false;
+            OrphanInfo.bIsSystemCritical = IsSystemCriticalHeader(HeaderPath);
+            OrphanInfo.ModuleName = TEXT("TranspersonalGame");
+            
+            OrphanHeaders.Add(OrphanInfo);
+            
+            UE_LOG(LogTemp, Warning, TEXT("Orphan header found: %s"), *HeaderPath);
+        }
+    }
+    
+    OrphanHeaderCache = OrphanHeaders;
+    UE_LOG(LogTemp, Error, TEXT("CRITICAL: Found %d orphan headers blocking compilation"), OrphanHeaders.Num());
+    
+    return OrphanHeaders;
+}
+
+bool UEng_OrphanHeaderCleaner::ValidateHeaderImplementation(const FString& HeaderPath)
+{
+    FString CppPath = HeaderPath;
+    CppPath = CppPath.Replace(TEXT(".h"), TEXT(".cpp"));
+    
+    return FileExists(CppPath);
+}
+
+EEng_CleanupAction UEng_OrphanHeaderCleaner::GetRecommendedAction(const FEng_OrphanHeaderInfo& HeaderInfo)
+{
+    // Critical system headers need manual implementation
+    if (HeaderInfo.bIsSystemCritical)
+    {
+        return EEng_CleanupAction::SystemCritical;
+    }
+    
+    // Check if header contains UCLASS, USTRUCT, or UENUM
+    if (HeaderRequiresImplementation(HeaderInfo.HeaderPath))
+    {
+        return EEng_CleanupAction::RequiresManual;
+    }
+    
+    // Simple headers can have stub implementations
+    return EEng_CleanupAction::CreateStub;
+}
+
+bool UEng_OrphanHeaderCleaner::CreateStubImplementation(const FEng_OrphanHeaderInfo& HeaderInfo)
+{
+    FString HeaderFileName = FPaths::GetCleanFilename(HeaderInfo.HeaderPath);
+    
+    // Generate basic stub implementation
+    FString StubContent = FString::Printf(TEXT(
+        "#include \"%s\"\n"
+        "#include \"Engine/Engine.h\"\n"
+        "\n"
+        "// STUB IMPLEMENTATION - Generated by Engine Architect Orphan Header Cleaner\n"
+        "// This file was created to resolve compilation issues caused by orphan headers\n"
+        "// TODO: Implement actual functionality as required\n"
+        "\n"
+        "// Constructor stubs and basic implementations go here\n"
+        "// Remove this comment block when real implementation is added\n"
+    ), *HeaderFileName);
+    
+    // Write stub file
+    bool bSuccess = FFileHelper::SaveStringToFile(StubContent, *HeaderInfo.ExpectedCppPath);
+    
+    if (bSuccess)
+    {
+        UE_LOG(LogTemp, Log, TEXT("Created stub implementation: %s"), *HeaderInfo.ExpectedCppPath);
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("Failed to create stub: %s"), *HeaderInfo.ExpectedCppPath);
+    }
+    
+    return bSuccess;
+}
+
+bool UEng_OrphanHeaderCleaner::IsSystemCriticalHeader(const FString& HeaderPath)
+{
+    FString HeaderFileName = FPaths::GetCleanFilename(HeaderPath);
+    
+    for (const FString& CriticalHeader : CriticalSystemHeaders)
+    {
+        if (HeaderFileName == CriticalHeader)
+        {
+            return true;
+        }
+    }
+    
+    return false;
+}
+
+int32 UEng_OrphanHeaderCleaner::GetOrphanHeaderCount()
+{
+    if (OrphanHeaderCache.Num() == 0)
+    {
+        ScanForOrphanHeaders();
+    }
+    
+    return OrphanHeaderCache.Num();
+}
+
+FString UEng_OrphanHeaderCleaner::GenerateCleanupReport()
+{
+    TArray<FEng_OrphanHeaderInfo> OrphanHeaders = ScanForOrphanHeaders();
+    
+    FString Report = TEXT("=== ENGINE ARCHITECT ORPHAN HEADER CLEANUP REPORT ===\n\n");
+    Report += FString::Printf(TEXT("Total Orphan Headers: %d\n\n"), OrphanHeaders.Num());
+    
+    int32 CriticalCount = 0;
+    int32 RequiresManualCount = 0;
+    int32 CanStubCount = 0;
+    
+    Report += TEXT("CRITICAL SYSTEM HEADERS (Priority 1):\n");
+    for (const FEng_OrphanHeaderInfo& Header : OrphanHeaders)
+    {
+        if (Header.bIsSystemCritical)
+        {
+            Report += FString::Printf(TEXT("- %s\n"), *FPaths::GetCleanFilename(Header.HeaderPath));
+            CriticalCount++;
+        }
+    }
+    
+    Report += TEXT("\nREQUIRES MANUAL IMPLEMENTATION (Priority 2):\n");
+    for (const FEng_OrphanHeaderInfo& Header : OrphanHeaders)
+    {
+        if (!Header.bIsSystemCritical && HeaderRequiresImplementation(Header.HeaderPath))
+        {
+            Report += FString::Printf(TEXT("- %s\n"), *FPaths::GetCleanFilename(Header.HeaderPath));
+            RequiresManualCount++;
+        }
+    }
+    
+    Report += TEXT("\nCAN CREATE STUBS (Priority 3):\n");
+    for (const FEng_OrphanHeaderInfo& Header : OrphanHeaders)
+    {
+        if (!Header.bIsSystemCritical && !HeaderRequiresImplementation(Header.HeaderPath))
+        {
+            Report += FString::Printf(TEXT("- %s\n"), *FPaths::GetCleanFilename(Header.HeaderPath));
+            CanStubCount++;
+        }
+    }
+    
+    Report += FString::Printf(TEXT("\nSUMMARY:\n"));
+    Report += FString::Printf(TEXT("Critical: %d | Manual: %d | Stub: %d\n"), 
+                             CriticalCount, RequiresManualCount, CanStubCount);
+    Report += TEXT("\nRECOMMENDATION: Fix critical headers first, then create stubs for simple headers.\n");
+    
+    return Report;
+}
+
+bool UEng_OrphanHeaderCleaner::HeaderRequiresImplementation(const FString& HeaderPath)
+{
+    FString HeaderContent;
+    if (!FFileHelper::LoadFileToString(HeaderContent, *HeaderPath))
+    {
+        return false;
+    }
+    
+    // Check for UE5 macros that require implementation
+    bool bHasUClass = HeaderContent.Contains(TEXT("UCLASS"));
+    bool bHasUStruct = HeaderContent.Contains(TEXT("USTRUCT"));
+    bool bHasUFunction = HeaderContent.Contains(TEXT("UFUNCTION"));
+    bool bHasGeneratedBody = HeaderContent.Contains(TEXT("GENERATED_BODY"));
+    
+    return bHasUClass || bHasUStruct || bHasUFunction || bHasGeneratedBody;
+}
+
+bool UEng_OrphanHeaderCleaner::FileExists(const FString& FilePath)
+{
+    return FPaths::FileExists(FilePath);
+}
