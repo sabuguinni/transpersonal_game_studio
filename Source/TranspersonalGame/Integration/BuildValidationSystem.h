@@ -1,192 +1,206 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
+#include "Engine/Engine.h"
+#include "Subsystems/GameInstanceSubsystem.h"
 #include "Engine/World.h"
-#include "Components/ActorComponent.h"
+#include "UObject/Class.h"
 #include "SharedTypes.h"
 #include "BuildValidationSystem.generated.h"
 
-UENUM(BlueprintType)
-enum class EBuild_ValidationResult : uint8
-{
-    Success         UMETA(DisplayName = "Success"),
-    Warning         UMETA(DisplayName = "Warning"),
-    Error           UMETA(DisplayName = "Error"),
-    CriticalError   UMETA(DisplayName = "Critical Error")
-};
-
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_ValidationIssue
+struct TRANSPERSONALGAME_API FBuild_ValidationResult
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    EBuild_ValidationResult Severity;
+    UPROPERTY(BlueprintReadOnly, Category = "Build Validation")
+    bool bIsValid = false;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    FString Category;
+    UPROPERTY(BlueprintReadOnly, Category = "Build Validation")
+    FString ModuleName;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    FString Description;
+    UPROPERTY(BlueprintReadOnly, Category = "Build Validation")
+    FString ErrorMessage;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    FString ActorName;
+    UPROPERTY(BlueprintReadOnly, Category = "Build Validation")
+    int32 ClassCount = 0;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    FVector Location;
+    UPROPERTY(BlueprintReadOnly, Category = "Build Validation")
+    int32 FunctionCount = 0;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    float Timestamp;
+    UPROPERTY(BlueprintReadOnly, Category = "Build Validation")
+    float ValidationTime = 0.0f;
 
-    FBuild_ValidationIssue()
+    FBuild_ValidationResult()
     {
-        Severity = EBuild_ValidationResult::Success;
-        Category = TEXT("");
-        Description = TEXT("");
-        ActorName = TEXT("");
-        Location = FVector::ZeroVector;
-        Timestamp = 0.0f;
+        bIsValid = false;
+        ModuleName = TEXT("");
+        ErrorMessage = TEXT("");
+        ClassCount = 0;
+        FunctionCount = 0;
+        ValidationTime = 0.0f;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_ValidationReport
+struct TRANSPERSONALGAME_API FBuild_ModuleStatus
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    TArray<FBuild_ValidationIssue> Issues;
+    UPROPERTY(BlueprintReadOnly, Category = "Module Status")
+    FString ModuleName;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    int32 TotalActors;
+    UPROPERTY(BlueprintReadOnly, Category = "Module Status")
+    bool bIsLoaded = false;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    int32 ErrorCount;
+    UPROPERTY(BlueprintReadOnly, Category = "Module Status")
+    bool bHasErrors = false;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    int32 WarningCount;
+    UPROPERTY(BlueprintReadOnly, Category = "Module Status")
+    int32 ClassCount = 0;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    float ValidationDuration;
+    UPROPERTY(BlueprintReadOnly, Category = "Module Status")
+    TArray<FString> LoadedClasses;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    FString ReportTimestamp;
+    UPROPERTY(BlueprintReadOnly, Category = "Module Status")
+    TArray<FString> ErrorMessages;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    bool bHasCriticalErrors;
-
-    FBuild_ValidationReport()
+    FBuild_ModuleStatus()
     {
-        TotalActors = 0;
-        ErrorCount = 0;
-        WarningCount = 0;
-        ValidationDuration = 0.0f;
-        ReportTimestamp = TEXT("");
-        bHasCriticalErrors = false;
+        ModuleName = TEXT("");
+        bIsLoaded = false;
+        bHasErrors = false;
+        ClassCount = 0;
+        LoadedClasses.Empty();
+        ErrorMessages.Empty();
+    }
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FBuild_CompilationReport
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
+    bool bCompilationSuccessful = false;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
+    FDateTime CompilationTime;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
+    int32 TotalModules = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
+    int32 SuccessfulModules = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
+    int32 FailedModules = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
+    TArray<FBuild_ModuleStatus> ModuleStatuses;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
+    TArray<FString> CompilationErrors;
+
+    FBuild_CompilationReport()
+    {
+        bCompilationSuccessful = false;
+        CompilationTime = FDateTime::Now();
+        TotalModules = 0;
+        SuccessfulModules = 0;
+        FailedModules = 0;
+        ModuleStatuses.Empty();
+        CompilationErrors.Empty();
     }
 };
 
 /**
- * Sistema de validação de build que verifica a integridade do mundo e dos actores
- * Detecta problemas de integração, duplicados críticos e dependências em falta
+ * Build Validation System - Integration Agent #19
+ * Validates compilation status, module loading, and cross-system integration
+ * Provides comprehensive build health monitoring for the Transpersonal Game project
  */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API ABuild_ValidationSystem : public AActor
+class TRANSPERSONALGAME_API UBuildValidationSystem : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
-    ABuild_ValidationSystem();
+    UBuildValidationSystem();
+
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+
+    // Core validation functions
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    FBuild_ValidationResult ValidateModule(const FString& ModuleName);
+
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    FBuild_CompilationReport GenerateCompilationReport();
+
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    bool ValidateAllModules();
+
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    TArray<FString> GetOrphanedHeaders();
+
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    TArray<FString> GetMissingImplementations();
+
+    // Class and function validation
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    bool ValidateClassLoading(const FString& ClassName);
+
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    int32 CountLoadedClasses();
+
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    TArray<FString> GetAllLoadedClasses();
+
+    // Integration testing
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    bool TestCrossSystemIntegration();
+
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    bool ValidateActorSpawning();
+
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    bool TestComponentRegistration();
+
+    // Reporting and logging
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    void LogValidationResults(const FBuild_ValidationResult& Result);
+
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    void SaveValidationReport(const FBuild_CompilationReport& Report);
+
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    FString GetLastValidationReport();
+
+    // Performance monitoring
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    float GetValidationPerformanceMetrics();
+
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    void ResetValidationMetrics();
 
 protected:
-    virtual void BeginPlay() override;
+    // Internal validation state
+    UPROPERTY(BlueprintReadOnly, Category = "Internal State")
+    FBuild_CompilationReport LastCompilationReport;
 
-public:
-    virtual void Tick(float DeltaTime) override;
+    UPROPERTY(BlueprintReadOnly, Category = "Internal State")
+    TArray<FBuild_ValidationResult> ValidationHistory;
 
-    // Executar validação completa do mundo
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    FBuild_ValidationReport RunFullValidation();
+    UPROPERTY(BlueprintReadOnly, Category = "Internal State")
+    float TotalValidationTime;
 
-    // Validar tipos de actores críticos
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    void ValidateCriticalActorTypes();
+    UPROPERTY(BlueprintReadOnly, Category = "Internal State")
+    int32 ValidationCount;
 
-    // Validar dependências entre sistemas
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    void ValidateSystemDependencies();
-
-    // Validar configuração de lighting
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    void ValidateLightingSetup();
-
-    // Validar distribuição de actores por biomas
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    void ValidateBiomeDistribution();
-
-    // Validar performance e contagem de actores
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    void ValidatePerformanceMetrics();
-
-    // Obter último relatório de validação
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    FBuild_ValidationReport GetLastValidationReport() const;
-
-    // Verificar se existem erros críticos
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    bool HasCriticalErrors() const;
-
-    // Gerar relatório detalhado em texto
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    FString GenerateDetailedReport() const;
-
-protected:
-    // Configuração de validação
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation Config")
-    bool bAutoValidateOnTick;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation Config")
-    float ValidationInterval;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation Config")
-    int32 MaxActorsPerBiome;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation Config")
-    int32 MaxTotalActors;
-
-    // Tipos críticos que devem ter apenas 1 instância
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation Config")
-    TArray<FString> SingletonActorTypes;
-
-    // Tipos obrigatórios que devem existir
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation Config")
-    TArray<FString> RequiredActorTypes;
-
-    // Relatório atual
-    UPROPERTY(BlueprintReadOnly, Category = "Validation State")
-    FBuild_ValidationReport CurrentReport;
-
-    // Estado interno
-    UPROPERTY()
-    float LastValidationTime;
-
-    UPROPERTY()
-    TMap<FString, int32> ActorTypeCountCache;
-
-private:
-    // Métodos auxiliares de validação
-    void AddValidationIssue(EBuild_ValidationResult Severity, const FString& Category, 
-                           const FString& Description, const FString& ActorName = TEXT(""), 
-                           const FVector& Location = FVector::ZeroVector);
-
-    void ValidateActorCount(const FString& ActorType, int32 ExpectedCount, bool bExactMatch = true);
-    void ValidateActorExists(const FString& ActorType);
-    void ValidateNoDuplicates(const FString& ActorType);
-    void ValidateBiomeCoordinates();
-    void ValidateActorDistribution();
-    
-    bool IsLocationInBiome(const FVector& Location, EBiomeType BiomeType) const;
-    FString GetBiomeNameFromType(EBiomeType BiomeType) const;
-    EBiomeType GetBiomeFromLocation(const FVector& Location) const;
+    // Internal helper functions
+    FBuild_ModuleStatus ValidateModuleInternal(const FString& ModuleName);
+    bool CheckHeaderImplementationPairs();
+    void UpdateValidationMetrics(float ValidationTime);
+    void LogModuleStatus(const FBuild_ModuleStatus& Status);
 };
