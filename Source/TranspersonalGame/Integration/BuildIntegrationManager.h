@@ -1,17 +1,74 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/GameInstanceSubsystem.h"
 #include "Engine/World.h"
+#include "Subsystems/GameInstanceSubsystem.h"
 #include "SharedTypes.h"
 #include "BuildIntegrationManager.generated.h"
 
-/**
- * Build Integration Manager - Agent #19
- * Manages build validation, system integration, and compilation health
- * Ensures all agent outputs integrate correctly into a playable build
- */
-UCLASS(BlueprintType, Blueprintable)
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FBuild_ModuleStatus
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Build")
+    FString ModuleName;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Build")
+    bool bIsLoaded;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Build")
+    bool bHasErrors;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Build")
+    int32 ClassCount;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Build")
+    FString LastError;
+
+    FBuild_ModuleStatus()
+    {
+        ModuleName = TEXT("");
+        bIsLoaded = false;
+        bHasErrors = false;
+        ClassCount = 0;
+        LastError = TEXT("");
+    }
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FBuild_ValidationResult
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Build")
+    bool bCompilationSuccess;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Build")
+    int32 ErrorCount;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Build")
+    int32 WarningCount;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Build")
+    TArray<FString> ErrorMessages;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Build")
+    TArray<FBuild_ModuleStatus> ModuleStatuses;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Build")
+    float ValidationTime;
+
+    FBuild_ValidationResult()
+    {
+        bCompilationSuccess = false;
+        ErrorCount = 0;
+        WarningCount = 0;
+        ValidationTime = 0.0f;
+    }
+};
+
+UCLASS(BlueprintType)
 class TRANSPERSONALGAME_API UBuildIntegrationManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
@@ -25,97 +82,60 @@ public:
 
     // Build validation functions
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool ValidateSystemIntegration();
+    FBuild_ValidationResult ValidateCurrentBuild();
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool CheckCompilationHealth();
+    bool CheckModuleIntegrity(const FString& ModuleName);
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    int32 GetOrphanedHeaderCount();
+    TArray<FString> GetOrphanedHeaders();
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    TArray<FString> GetCriticalMissingImplementations();
-
-    // System status checks
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool IsCharacterSystemOperational();
+    bool ValidateClassDependencies();
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool IsGameModeSystemOperational();
+    void GenerateIntegrationReport();
+
+    // Module management
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    TArray<FBuild_ModuleStatus> GetAllModuleStatuses();
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool IsWorldGenSystemOperational();
+    bool ReloadModule(const FString& ModuleName);
+
+    // Error tracking
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    void LogBuildError(const FString& ErrorMessage, const FString& SourceFile);
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool IsLevelSystemOperational();
+    TArray<FString> GetRecentErrors();
 
-    // Integration reporting
+    // Integration testing
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    FString GenerateIntegrationReport();
-
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    float GetSystemHealthPercentage();
+    bool TestCrossModuleIntegration();
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    EBuild_IntegrationStatus GetBuildStatus();
-
-    // Build management
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    void SaveBuildSnapshot(const FString& SnapshotName);
-
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool RestoreBuildSnapshot(const FString& SnapshotName);
-
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    TArray<FString> GetAvailableSnapshots();
+    bool ValidateGameplayFlow();
 
 protected:
-    // Internal validation functions
-    bool ValidateModuleDependencies();
-    bool ValidateClassLoading();
-    bool ValidateActorSpawning();
-    bool ValidateLevelContent();
-
-    // System health tracking
     UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
-    TMap<FString, bool> SystemHealthStatus;
+    TArray<FString> RecentErrors;
 
     UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
-    int32 TotalSystemsCount;
+    TArray<FBuild_ModuleStatus> CachedModuleStatuses;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
-    int32 OperationalSystemsCount;
-
-    // Build snapshots
-    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
-    TArray<FString> BuildSnapshots;
-
-    // Integration metrics
     UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
     float LastValidationTime;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
-    int32 OrphanedHeadersCount;
+    // Timer handle for periodic validation
+    FTimerHandle ValidationTimerHandle;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
-    TArray<FString> CriticalMissingFiles;
-
-    // Event delegates
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnIntegrationStatusChanged, EBuild_IntegrationStatus, NewStatus);
-    UPROPERTY(BlueprintAssignable, Category = "Build Integration")
-    FOnIntegrationStatusChanged OnIntegrationStatusChanged;
-
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnSystemHealthChanged, float, HealthPercentage);
-    UPROPERTY(BlueprintAssignable, Category = "Build Integration")
-    FOnSystemHealthChanged OnSystemHealthChanged;
-
-private:
-    // Internal state
-    EBuild_IntegrationStatus CurrentBuildStatus;
-    float LastHealthPercentage;
-    
-    // Validation cache
-    bool bValidationCacheValid;
-    double LastValidationTimestamp;
-    static constexpr double ValidationCacheTimeout = 30.0; // 30 seconds
+    // Internal validation functions
+    bool ValidateSourceStructure();
+    bool CheckForCircularDependencies();
+    bool ValidateUPropertyExposure();
+    void UpdateModuleStatuses();
+    void CacheValidationResults(const FBuild_ValidationResult& Result);
 };
+
+#include "BuildIntegrationManager.generated.h"
