@@ -2,17 +2,15 @@
 
 #include "CoreMinimal.h"
 #include "Engine/World.h"
-#include "GameFramework/GameModeBase.h"
+#include "GameFramework/Actor.h"
 #include "Components/ActorComponent.h"
-#include "Engine/Engine.h"
-#include "SharedTypes.h"
 #include "StudioDirector.generated.h"
 
 /**
- * Studio Director Component - Coordinates all game systems and agent outputs
- * Manages the integration of work from all 19 specialized agents
+ * Studio Director Component - Coordinates development workflow and agent communication
+ * Manages production cycles, task delegation, and quality assurance
  */
-UCLASS(BlueprintType, Blueprintable, ClassGroup=(TranspersonalGame), meta=(BlueprintSpawnableComponent))
+UCLASS(BlueprintType, Blueprintable, meta = (BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UStudioDirectorComponent : public UActorComponent
 {
     GENERATED_BODY()
@@ -22,110 +20,117 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 public:
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
+    // Production Cycle Management
+    UFUNCTION(BlueprintCallable, Category = "Studio Director")
+    void StartProductionCycle(int32 CycleNumber);
+
+    UFUNCTION(BlueprintCallable, Category = "Studio Director")
+    void EndProductionCycle();
+
+    UFUNCTION(BlueprintCallable, Category = "Studio Director")
+    bool ValidatePlayablePrototype();
+
     // Agent Coordination
     UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    void InitializeAgentCoordination();
+    void AssignTaskToAgent(int32 AgentNumber, const FString& TaskDescription);
 
     UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    void ValidateGameSystems();
+    void ReportAgentProgress(int32 AgentNumber, const FString& Progress);
+
+    // Quality Assurance
+    UFUNCTION(BlueprintCallable, Category = "Studio Director")
+    bool CheckCompilationStatus();
 
     UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    void GenerateProductionReport();
-
-    // Biome Management
-    UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    void SetupBiomeCoordinators();
+    int32 CountOrphanHeaders();
 
     UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    FVector GetBiomeCenter(EDir_BiomeType BiomeType);
-
-    // Agent Task Distribution
-    UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    void AssignAgentTasks();
-
-    UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    bool ValidateAgentDeliverables();
+    TArray<FString> GetCriticalErrors();
 
 protected:
-    // Agent Status Tracking
-    UPROPERTY(BlueprintReadOnly, Category = "Studio Director", meta = (AllowPrivateAccess = "true"))
-    TMap<FString, bool> AgentCompletionStatus;
+    // Production tracking
+    UPROPERTY(BlueprintReadOnly, Category = "Production")
+    int32 CurrentCycle;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Studio Director", meta = (AllowPrivateAccess = "true"))
-    TMap<FString, FString> AgentCurrentTasks;
+    UPROPERTY(BlueprintReadOnly, Category = "Production")
+    bool bProductionActive;
 
-    // Biome Coordination
-    UPROPERTY(BlueprintReadOnly, Category = "Studio Director", meta = (AllowPrivateAccess = "true"))
-    TMap<EDir_BiomeType, FVector> BiomeCenters;
+    UPROPERTY(BlueprintReadOnly, Category = "Production")
+    float CycleStartTime;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Studio Director", meta = (AllowPrivateAccess = "true"))
-    TArray<AActor*> BiomeCoordinatorActors;
+    // Agent status tracking
+    UPROPERTY(BlueprintReadOnly, Category = "Agents")
+    TMap<int32, FString> AgentTasks;
 
-    // Production Metrics
-    UPROPERTY(BlueprintReadOnly, Category = "Studio Director", meta = (AllowPrivateAccess = "true"))
-    int32 TotalActorsInLevel;
+    UPROPERTY(BlueprintReadOnly, Category = "Agents")
+    TMap<int32, FString> AgentProgress;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Studio Director", meta = (AllowPrivateAccess = "true"))
-    int32 CompilationErrorCount;
+    // Quality metrics
+    UPROPERTY(BlueprintReadOnly, Category = "Quality")
+    int32 CompilationErrors;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Studio Director", meta = (AllowPrivateAccess = "true"))
-    float ProductionEfficiencyScore;
+    UPROPERTY(BlueprintReadOnly, Category = "Quality")
+    int32 OrphanHeaders;
 
-    // Critical System Flags
-    UPROPERTY(BlueprintReadOnly, Category = "Studio Director", meta = (AllowPrivateAccess = "true"))
-    bool bLandscapeExpanded;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Studio Director", meta = (AllowPrivateAccess = "true"))
-    bool bDinosaurActorsSpawned;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Studio Director", meta = (AllowPrivateAccess = "true"))
-    bool bSurvivalHUDActive;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Studio Director", meta = (AllowPrivateAccess = "true"))
-    bool bCompilationClean;
+    UPROPERTY(BlueprintReadOnly, Category = "Quality")
+    TArray<FString> CriticalIssues;
 
 private:
-    // Internal coordination helpers
     void UpdateProductionMetrics();
-    void CheckCriticalSystems();
-    void LogAgentProgress();
+    void ValidateCodebase();
+    void CheckPlayabilityRequirements();
 };
 
 /**
- * Studio Director Game Mode - Manages overall game coordination
+ * Studio Director Actor - Main coordinator for development workflow
  */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AStudioDirectorGameMode : public AGameModeBase
+class TRANSPERSONALGAME_API AStudioDirector : public AActor
 {
     GENERATED_BODY()
 
 public:
-    AStudioDirectorGameMode();
+    AStudioDirector();
 
 protected:
     virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
 
 public:
-    UFUNCTION(BlueprintCallable, Category = "Studio Director")
+    virtual void Tick(float DeltaTime) override;
+
+    // Core studio director component
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class UStudioDirectorComponent* StudioDirectorComponent;
+
+    // Development workflow management
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Development")
     void InitializeProductionPipeline();
 
-    UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    void ExecuteProductionCycle();
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Development")
+    void RunCriticalAssessment();
 
-    UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    bool ValidateMinimumViablePrototype();
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Development")
+    void ValidateMinPlayableMap();
+
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Development")
+    void GenerateProductionReport();
 
 protected:
-    UPROPERTY(BlueprintReadOnly, Category = "Studio Director", meta = (AllowPrivateAccess = "true"))
-    UStudioDirectorComponent* DirectorComponent;
+    // Production state
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
+    bool bAutoManageProduction;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Studio Director", meta = (AllowPrivateAccess = "true"))
-    int32 CurrentProductionCycle;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
+    float ProductionCycleDuration;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Studio Director", meta = (AllowPrivateAccess = "true"))
-    bool bMinimumViablePrototypeReached;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Production")
+    int32 MaxConcurrentAgents;
+
+private:
+    void MonitorAgentChain();
+    void EnsurePlayablePrototype();
 };
