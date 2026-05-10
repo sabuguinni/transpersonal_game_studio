@@ -2,17 +2,13 @@
 
 #include "CoreMinimal.h"
 #include "Engine/GameInstanceSubsystem.h"
-#include "Engine/World.h"
-#include "UObject/ObjectMacros.h"
-#include "../SharedTypes.h"
+#include "SharedTypes.h"
 #include "BuildIntegrationManager.generated.h"
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBuildStatusChanged, EBuildStatus, NewStatus);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnModuleValidated, FString, ModuleName, bool, bIsValid);
-
 /**
- * Build Integration Manager - Manages compilation, validation and integration of all game modules
- * Responsible for ensuring all agent outputs work together as a cohesive game
+ * Build Integration Manager - Agent #19
+ * Manages build validation, module integration, and compilation status
+ * Ensures all agent outputs integrate correctly into a playable build
  */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UBuildIntegrationManager : public UGameInstanceSubsystem
@@ -26,86 +22,77 @@ public:
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Build Management
+    // Build validation functions
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    void StartBuildValidation();
-
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    void ValidateModule(const FString& ModuleName);
+    bool ValidateModuleIntegration();
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    bool IsModuleValid(const FString& ModuleName) const;
+    bool CheckOrphanedHeaders();
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    EBuildStatus GetCurrentBuildStatus() const { return CurrentBuildStatus; }
-
-    // Integration Testing
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    void RunIntegrationTests();
+    bool ValidateActorSpawning();
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    void ValidateActorSpawning();
+    bool TestBiomeCoordinates();
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    void ValidateSystemInteractions();
+    bool ValidateSharedTypes();
 
-    // Cleanup Operations
+    // Compilation status
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    void CleanupOrphanedHeaders();
-
-    UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    void RemoveDuplicateActors();
+    EBuild_CompilationStatus GetLastCompilationStatus() const;
 
     UFUNCTION(BlueprintCallable, Category = "Build Integration")
-    void OptimizeMapPerformance();
+    void TriggerBuildValidation();
 
-    // Events
-    UPROPERTY(BlueprintAssignable, Category = "Build Integration")
-    FOnBuildStatusChanged OnBuildStatusChanged;
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    TArray<FString> GetCompilationErrors() const;
 
-    UPROPERTY(BlueprintAssignable, Category = "Build Integration")
-    FOnModuleValidated OnModuleValidated;
+    // Integration reporting
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    FBuild_IntegrationReport GenerateIntegrationReport();
+
+    UFUNCTION(BlueprintCallable, Category = "Build Integration")
+    void LogIntegrationStatus();
 
 protected:
-    // Build Status
-    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
-    EBuildStatus CurrentBuildStatus;
+    // Build status tracking
+    UPROPERTY(BlueprintReadOnly, Category = "Build Status")
+    EBuild_CompilationStatus LastCompilationStatus;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
+    UPROPERTY(BlueprintReadOnly, Category = "Build Status")
+    TArray<FString> CompilationErrors;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Build Status")
+    TArray<FString> OrphanedHeaders;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Build Status")
+    int32 TotalActorsInLevel;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Build Status")
+    float LastValidationTime;
+
+    // Integration validation
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
     TMap<FString, bool> ModuleValidationStatus;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
-    TArray<FString> ValidationErrors;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    TArray<FBuild_ModuleInfo> LoadedModules;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
-    int32 TotalActorsInMap;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Build Integration")
-    int32 ValidatedModules;
-
-    // Integration Settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Build Integration")
-    bool bAutoValidateOnStartup;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Build Integration")
-    bool bCleanupOrphansOnValidation;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Build Integration")
-    float ValidationTimeout;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration")
+    FBuild_BiomeValidation BiomeValidation;
 
 private:
-    // Internal validation methods
-    void ValidateClassLoading();
-    void ValidateActorIntegrity();
-    void ValidateSystemDependencies();
-    void UpdateBuildStatus(EBuildStatus NewStatus);
+    // Internal validation functions
+    bool ValidateSourceStructure();
+    bool ValidateBinaryFiles();
+    bool ValidateActorDistribution();
+    void UpdateModuleStatus();
+    void ScanForOrphanedHeaders();
+    void ValidateBiomeActorPlacement();
     
-    // Cleanup helpers
-    void IdentifyOrphanedFiles();
-    void RemoveInvalidActors();
-    void ConsolidateDuplicateSystems();
-
-    // Timer handles
-    FTimerHandle ValidationTimerHandle;
-    FTimerHandle CleanupTimerHandle;
+    // Compilation helpers
+    void ParseCompilationOutput(const FString& BuildOutput);
+    void SaveValidationResults();
+    void NotifyValidationComplete();
 };
