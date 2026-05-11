@@ -1,74 +1,96 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Character.h"
-#include "Components/ActorComponent.h"
+#include "UObject/NoExportTypes.h"
+#include "Engine/Engine.h"
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
-#include "Animation/BlendSpace1D.h"
-#include "Engine/Engine.h"
-#include "Components/SkeletalMeshComponent.h"
+#include "Animation/BlendSpace.h"
+#include "Components/ActorComponent.h"
+#include "GameFramework/Character.h"
 #include "Anim_TribalCharacterSystem.generated.h"
 
-// Tribal character states for animation
+// Tribal character animation states
 UENUM(BlueprintType)
 enum class EAnim_TribalState : uint8
 {
     Idle            UMETA(DisplayName = "Idle"),
     Walking         UMETA(DisplayName = "Walking"),
     Running         UMETA(DisplayName = "Running"),
-    Gathering       UMETA(DisplayName = "Gathering"),
-    Crafting        UMETA(DisplayName = "Crafting"),
+    Crouching       UMETA(DisplayName = "Crouching"),
     Hunting         UMETA(DisplayName = "Hunting"),
-    Communicating   UMETA(DisplayName = "Communicating"),
+    Crafting        UMETA(DisplayName = "Crafting"),
+    Gathering       UMETA(DisplayName = "Gathering"),
+    Ritual          UMETA(DisplayName = "Ritual"),
     Combat          UMETA(DisplayName = "Combat"),
     Injured         UMETA(DisplayName = "Injured"),
     Sleeping        UMETA(DisplayName = "Sleeping")
 };
 
+// Tribal character types with unique animation sets
+UENUM(BlueprintType)
+enum class EAnim_TribalType : uint8
+{
+    Elder           UMETA(DisplayName = "Elder"),
+    Warrior         UMETA(DisplayName = "Warrior"),
+    Scout           UMETA(DisplayName = "Scout"),
+    Healer          UMETA(DisplayName = "Healer"),
+    Child           UMETA(DisplayName = "Child"),
+    Hunter          UMETA(DisplayName = "Hunter"),
+    Crafter         UMETA(DisplayName = "Crafter")
+};
+
 // Tribal animation data structure
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAnim_TribalAnimationData
+struct TRANSPERSONALGAME_API FAnim_TribalAnimationSet
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Animation")
-    EAnim_TribalState CurrentState;
+    class UAnimMontage* IdleMontage;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Animation")
-    float MovementSpeed;
+    class UAnimMontage* WalkMontage;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Animation")
-    float StaminaLevel;
+    class UAnimMontage* RunMontage;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Animation")
-    bool bIsCarryingObject;
+    class UAnimMontage* CombatMontage;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Animation")
-    bool bIsInjured;
+    class UAnimMontage* CraftingMontage;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Animation")
-    float EmotionalState; // 0.0 = fearful, 0.5 = neutral, 1.0 = confident
+    class UAnimMontage* RitualMontage;
 
-    FAnim_TribalAnimationData()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Animation")
+    class UBlendSpace* LocomotionBlendSpace;
+
+    FAnim_TribalAnimationSet()
     {
-        CurrentState = EAnim_TribalState::Idle;
-        MovementSpeed = 0.0f;
-        StaminaLevel = 1.0f;
-        bIsCarryingObject = false;
-        bIsInjured = false;
-        EmotionalState = 0.5f;
+        IdleMontage = nullptr;
+        WalkMontage = nullptr;
+        RunMontage = nullptr;
+        CombatMontage = nullptr;
+        CraftingMontage = nullptr;
+        RitualMontage = nullptr;
+        LocomotionBlendSpace = nullptr;
     }
 };
 
-// Tribal character animation controller component
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UAnim_TribalCharacterController : public UActorComponent
+/**
+ * Tribal Character Animation System
+ * Manages animation sets for different tribal character types
+ * Each tribal type has unique movement patterns and cultural animations
+ */
+UCLASS(BlueprintType, Blueprintable, ClassGroup=(Animation))
+class TRANSPERSONALGAME_API UAnim_TribalCharacterSystem : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    UAnim_TribalCharacterController();
+    UAnim_TribalCharacterSystem();
 
 protected:
     virtual void BeginPlay() override;
@@ -76,157 +98,168 @@ protected:
 public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // Animation montages for tribal actions
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Montages")
-    UAnimMontage* GatheringMontage;
+    // Tribal character configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Character")
+    EAnim_TribalType TribalType;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Montages")
-    UAnimMontage* CraftingMontage;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Character")
+    EAnim_TribalState CurrentState;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Montages")
-    UAnimMontage* HuntingMontage;
+    // Animation sets for each tribal type
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Sets")
+    TMap<EAnim_TribalType, FAnim_TribalAnimationSet> TribalAnimationSets;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Montages")
-    UAnimMontage* CommunicationMontage;
+    // Current animation properties
+    UPROPERTY(BlueprintReadOnly, Category = "Animation State")
+    float MovementSpeed;
 
-    // Blend spaces for movement
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Blend Spaces")
-    UBlendSpace1D* LocomotionBlendSpace;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation State")
+    float MovementDirection;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Blend Spaces")
-    UBlendSpace1D* CombatBlendSpace;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation State")
+    bool bIsInCombat;
 
-    // Current animation data
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Tribal Animation")
-    FAnim_TribalAnimationData AnimationData;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation State")
+    bool bIsCrafting;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Animation State")
+    bool bIsPerformingRitual;
 
     // Animation control functions
+    UFUNCTION(BlueprintCallable, Category = "Tribal Animation")
+    void SetTribalType(EAnim_TribalType NewType);
+
     UFUNCTION(BlueprintCallable, Category = "Tribal Animation")
     void SetTribalState(EAnim_TribalState NewState);
 
     UFUNCTION(BlueprintCallable, Category = "Tribal Animation")
-    void PlayGatheringAnimation();
+    void PlayTribalMontage(EAnim_TribalState StateType);
 
     UFUNCTION(BlueprintCallable, Category = "Tribal Animation")
-    void PlayCraftingAnimation();
+    void StopCurrentMontage();
 
     UFUNCTION(BlueprintCallable, Category = "Tribal Animation")
-    void PlayHuntingAnimation();
+    FAnim_TribalAnimationSet GetCurrentAnimationSet() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Tribal Animation")
-    void PlayCommunicationAnimation();
+    // Cultural animation functions
+    UFUNCTION(BlueprintCallable, Category = "Cultural Animation")
+    void PlayElderWisdomGesture();
 
-    UFUNCTION(BlueprintCallable, Category = "Tribal Animation")
-    void UpdateMovementSpeed(float Speed);
+    UFUNCTION(BlueprintCallable, Category = "Cultural Animation")
+    void PlayWarriorBattleCry();
 
-    UFUNCTION(BlueprintCallable, Category = "Tribal Animation")
-    void SetCarryingObject(bool bCarrying);
+    UFUNCTION(BlueprintCallable, Category = "Cultural Animation")
+    void PlayHealerRitual();
 
-    UFUNCTION(BlueprintCallable, Category = "Tribal Animation")
-    void SetInjuredState(bool bInjured);
+    UFUNCTION(BlueprintCallable, Category = "Cultural Animation")
+    void PlayScoutAlert();
 
-    UFUNCTION(BlueprintCallable, Category = "Tribal Animation")
-    void SetEmotionalState(float EmotionLevel);
+    UFUNCTION(BlueprintCallable, Category = "Cultural Animation")
+    void PlayChildCuriosity();
 
-    UFUNCTION(BlueprintPure, Category = "Tribal Animation")
-    EAnim_TribalState GetCurrentTribalState() const;
+    // Animation blending functions
+    UFUNCTION(BlueprintCallable, Category = "Animation Blending")
+    void UpdateLocomotionBlending(float Speed, float Direction);
 
-    UFUNCTION(BlueprintPure, Category = "Tribal Animation")
-    bool IsPlayingActionMontage() const;
+    UFUNCTION(BlueprintCallable, Category = "Animation Blending")
+    void BlendToState(EAnim_TribalState TargetState, float BlendTime = 0.25f);
 
 protected:
-    // Internal state management
-    void UpdateAnimationState(float DeltaTime);
+    // Internal animation management
+    void InitializeTribalAnimationSets();
+    void UpdateAnimationState();
     void HandleStateTransition(EAnim_TribalState NewState);
-    void ApplyMovementBlending();
 
-    // Character reference
+    // Reference to the character's anim instance
     UPROPERTY()
-    ACharacter* OwnerCharacter;
+    class UAnimInstance* CharacterAnimInstance;
 
-    // Animation instance reference
+    // Current montage tracking
     UPROPERTY()
-    UAnimInstance* AnimInstance;
+    class UAnimMontage* CurrentMontage;
 
-    // State transition timing
-    float StateTransitionTimer;
-    float StateTransitionDuration;
+    // Blend timing
+    UPROPERTY(EditAnywhere, Category = "Animation Timing")
+    float DefaultBlendTime;
 
-    // Movement blending parameters
-    float CurrentBlendValue;
-    float TargetBlendValue;
-    float BlendTransitionSpeed;
+    // Cultural animation timing
+    UPROPERTY(EditAnywhere, Category = "Cultural Timing")
+    float RitualDuration;
 
-    // Action montage tracking
-    bool bIsPlayingActionMontage;
-    UAnimMontage* CurrentActionMontage;
+    UPROPERTY(EditAnywhere, Category = "Cultural Timing")
+    float CraftingCycleDuration;
+
+private:
+    // Internal state tracking
+    EAnim_TribalState PreviousState;
+    float StateTransitionTime;
+    bool bIsTransitioning;
 };
 
-// Tribal character animation instance
-UCLASS()
-class TRANSPERSONALGAME_API UAnim_TribalAnimInstance : public UAnimInstance
+/**
+ * Tribal Character Animation Instance
+ * Custom AnimInstance for tribal characters with cultural behaviors
+ */
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UAnim_TribalCharacterAnimInstance : public UAnimInstance
 {
     GENERATED_BODY()
 
 public:
-    UAnim_TribalAnimInstance();
+    UAnim_TribalCharacterAnimInstance();
 
-protected:
     virtual void NativeInitializeAnimation() override;
     virtual void NativeUpdateAnimation(float DeltaTimeX) override;
 
-public:
     // Animation properties exposed to Blueprint
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Tribal Animation")
-    FAnim_TribalAnimationData TribalData;
+    UPROPERTY(BlueprintReadOnly, Category = "Tribal Animation")
+    EAnim_TribalType TribalType;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement")
+    UPROPERTY(BlueprintReadOnly, Category = "Tribal Animation")
+    EAnim_TribalState AnimationState;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Movement")
     float Speed;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement")
+    UPROPERTY(BlueprintReadOnly, Category = "Movement")
     float Direction;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement")
-    bool bIsInAir;
+    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    bool bIsMoving;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement")
-    bool bIsAccelerating;
+    UPROPERTY(BlueprintReadOnly, Category = "Combat")
+    bool bIsInCombat;
 
-    // Tribal-specific animation states
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Tribal States")
-    bool bIsGathering;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Tribal States")
+    UPROPERTY(BlueprintReadOnly, Category = "Activities")
     bool bIsCrafting;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Tribal States")
-    bool bIsHunting;
+    UPROPERTY(BlueprintReadOnly, Category = "Activities")
+    bool bIsPerformingRitual;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Tribal States")
-    bool bIsCommunicating;
+    UPROPERTY(BlueprintReadOnly, Category = "Activities")
+    bool bIsGathering;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Tribal States")
-    bool bIsCarryingLoad;
+    // Cultural animation triggers
+    UPROPERTY(BlueprintReadOnly, Category = "Cultural")
+    bool bShouldPlayWisdomGesture;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Tribal States")
-    float EmotionalIntensity;
+    UPROPERTY(BlueprintReadOnly, Category = "Cultural")
+    bool bShouldPlayBattleCry;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Cultural")
+    bool bShouldPlayHealingRitual;
 
 protected:
+    // Reference to tribal character system
+    UPROPERTY()
+    UAnim_TribalCharacterSystem* TribalSystem;
+
     // Character reference
     UPROPERTY()
-    ACharacter* Character;
+    class ACharacter* OwningCharacter;
 
-    // Tribal controller reference
-    UPROPERTY()
-    UAnim_TribalCharacterController* TribalController;
-
-    // Update functions
-    void UpdateMovementValues();
-    void UpdateTribalStates();
-    void UpdateEmotionalBlending();
-
-    // Cached movement values
-    FVector Velocity;
-    FRotator CharacterRotation;
-    FRotator LastFrameRotation;
+private:
+    void UpdateTribalAnimationProperties();
+    void UpdateMovementProperties();
+    void UpdateCulturalProperties();
 };
