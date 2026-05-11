@@ -2,70 +2,76 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Components/SphereComponent.h"
+#include "Engine/TriggerBox.h"
 #include "Components/StaticMeshComponent.h"
-#include "Engine/TriggerVolume.h"
+#include "Components/SphereComponent.h"
+#include "../SharedTypes.h"
 #include "Quest_SurvivalMissionController.generated.h"
 
-UENUM(BlueprintType)
-enum class EQuest_SurvivalMissionType : uint8
-{
-    WaterGathering     UMETA(DisplayName = "Water Gathering"),
-    FoodForaging      UMETA(DisplayName = "Food Foraging"),
-    ShelterBuilding   UMETA(DisplayName = "Shelter Building"),
-    ToolCrafting      UMETA(DisplayName = "Tool Crafting"),
-    TerritoryMapping  UMETA(DisplayName = "Territory Mapping"),
-    PredatorAvoidance UMETA(DisplayName = "Predator Avoidance")
-};
-
-UENUM(BlueprintType)
-enum class EQuest_MissionPriority : uint8
-{
-    Critical    UMETA(DisplayName = "Critical - Life Threatening"),
-    High        UMETA(DisplayName = "High - Survival Essential"),
-    Medium      UMETA(DisplayName = "Medium - Quality of Life"),
-    Low         UMETA(DisplayName = "Low - Optional")
-};
-
 USTRUCT(BlueprintType)
-struct FQuest_SurvivalObjective
+struct TRANSPERSONALGAME_API FQuest_SurvivalMission
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
-    FString ObjectiveDescription;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission")
+    FString MissionName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
-    EQuest_SurvivalMissionType MissionType;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission")
+    FString Description;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
-    EQuest_MissionPriority Priority;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission")
+    ESurvivalNeed RequiredNeed;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission")
+    int32 TargetAmount;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission")
     float TimeLimit;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission")
     bool bIsCompleted;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
-    FVector TargetLocation;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission")
+    float DifficultyLevel;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
-    float CompletionRadius;
-
-    FQuest_SurvivalObjective()
+    FQuest_SurvivalMission()
     {
-        ObjectiveDescription = TEXT("Survive");
-        MissionType = EQuest_SurvivalMissionType::WaterGathering;
-        Priority = EQuest_MissionPriority::Medium;
+        MissionName = TEXT("Survival Mission");
+        Description = TEXT("Complete survival objective");
+        RequiredNeed = ESurvivalNeed::Food;
+        TargetAmount = 1;
         TimeLimit = 300.0f;
         bIsCompleted = false;
-        TargetLocation = FVector::ZeroVector;
-        CompletionRadius = 200.0f;
+        DifficultyLevel = 1.0f;
     }
 };
 
-UCLASS(BlueprintType, Blueprintable)
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FQuest_MissionReward
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reward")
+    int32 ExperiencePoints;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reward")
+    TArray<FString> ItemRewards;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reward")
+    float HealthBonus;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reward")
+    float StaminaBonus;
+
+    FQuest_MissionReward()
+    {
+        ExperiencePoints = 100;
+        HealthBonus = 0.0f;
+        StaminaBonus = 0.0f;
+    }
+};
+
+UCLASS(Blueprintable)
 class TRANSPERSONALGAME_API AQuest_SurvivalMissionController : public AActor
 {
     GENERATED_BODY()
@@ -77,77 +83,67 @@ protected:
     virtual void BeginPlay() override;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class USphereComponent* DetectionSphere;
+    UStaticMeshComponent* MissionMarker;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class UStaticMeshComponent* MissionMarker;
+    USphereComponent* InteractionSphere;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission")
-    TArray<FQuest_SurvivalObjective> ActiveObjectives;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission System")
+    TArray<FQuest_SurvivalMission> ActiveMissions;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission")
-    EQuest_SurvivalMissionType CurrentMissionType;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission System")
+    TArray<FQuest_SurvivalMission> CompletedMissions;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission")
-    float MissionRadius;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission System")
+    int32 MaxActiveMissions;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission")
-    bool bMissionActive;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission System")
+    float MissionGenerationInterval;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission")
-    FString MissionTitle;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission")
-    FString MissionDescription;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    FString VoiceLineURL;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission System")
+    bool bAutoGenerateMissions;
 
 public:
     virtual void Tick(float DeltaTime) override;
 
-    UFUNCTION(BlueprintCallable, Category = "Mission")
-    void StartMission(EQuest_SurvivalMissionType MissionType);
+    UFUNCTION(BlueprintCallable, Category = "Mission Control")
+    void GenerateNewMission();
 
-    UFUNCTION(BlueprintCallable, Category = "Mission")
-    void CompleteMission();
+    UFUNCTION(BlueprintCallable, Category = "Mission Control")
+    void CompleteMission(const FString& MissionName);
 
-    UFUNCTION(BlueprintCallable, Category = "Mission")
-    void AddObjective(const FQuest_SurvivalObjective& NewObjective);
+    UFUNCTION(BlueprintCallable, Category = "Mission Control")
+    bool CheckMissionProgress(const FString& MissionName, int32 CurrentProgress);
 
-    UFUNCTION(BlueprintCallable, Category = "Mission")
-    void CompleteObjective(int32 ObjectiveIndex);
+    UFUNCTION(BlueprintCallable, Category = "Mission Control")
+    TArray<FQuest_SurvivalMission> GetActiveMissions() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Mission")
-    bool CheckObjectiveCompletion(const FQuest_SurvivalObjective& Objective, const FVector& PlayerLocation);
+    UFUNCTION(BlueprintCallable, Category = "Mission Control")
+    FQuest_MissionReward CalculateReward(const FQuest_SurvivalMission& Mission);
 
-    UFUNCTION(BlueprintCallable, Category = "Mission")
-    void UpdateMissionProgress();
+    UFUNCTION(BlueprintCallable, Category = "Mission Control")
+    void StartEmergencyMission(ESurvivalNeed CriticalNeed);
 
-    UFUNCTION(BlueprintCallable, Category = "Mission")
-    float GetMissionCompletionPercentage() const;
+    UFUNCTION(BlueprintCallable, Category = "Mission Control")
+    void UpdateMissionDifficulty(float PlayerLevel);
 
-    UFUNCTION(BlueprintImplementableEvent, Category = "Mission")
-    void OnMissionStarted(EQuest_SurvivalMissionType MissionType);
+    UFUNCTION(BlueprintCallable, Category = "Mission Control")
+    bool CanAcceptNewMission() const;
 
-    UFUNCTION(BlueprintImplementableEvent, Category = "Mission")
-    void OnMissionCompleted();
-
-    UFUNCTION(BlueprintImplementableEvent, Category = "Mission")
-    void OnObjectiveCompleted(int32 ObjectiveIndex);
+    UFUNCTION(BlueprintCallable, Category = "Mission Control")
+    void ProcessMissionTimeout(float DeltaTime);
 
 protected:
     UFUNCTION()
-    void OnDetectionSphereBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
-
-    void InitializeWaterGatheringMission();
-    void InitializeFoodForagingMission();
-    void InitializeShelterBuildingMission();
-    void InitializeToolCraftingMission();
-    void InitializeTerritoryMappingMission();
-    void InitializePredatorAvoidanceMission();
+    void OnInteractionSphereBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
 
 private:
-    float MissionStartTime;
-    bool bPlayerInRange;
+    FQuest_SurvivalMission CreateHuntingMission();
+    FQuest_SurvivalMission CreateGatheringMission();
+    FQuest_SurvivalMission CreateCraftingMission();
+    FQuest_SurvivalMission CreateExplorationMission();
+    FQuest_SurvivalMission CreateSurvivalMission();
+
+    float LastMissionGenerationTime;
+    int32 MissionIdCounter;
 };
