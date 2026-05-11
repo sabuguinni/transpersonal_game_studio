@@ -1,403 +1,395 @@
 #include "Anim_TribalCharacterSystem.h"
+#include "Animation/AnimInstance.h"
+#include "Animation/AnimMontage.h"
+#include "Animation/BlendSpace.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Components/SkeletalMeshComponent.h"
-#include "Animation/AnimInstance.h"
-#include "Kismet/KismetMathLibrary.h"
-#include "Engine/World.h"
+#include "Engine/Engine.h"
 
-// UAnim_TribalCharacterController Implementation
-UAnim_TribalCharacterController::UAnim_TribalCharacterController()
+UAnim_TribalCharacterSystem::UAnim_TribalCharacterSystem()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickGroup = TG_PrePhysics;
-
-    // Initialize animation data
-    AnimationData = FAnim_TribalAnimationData();
-
-    // Initialize montage references
-    GatheringMontage = nullptr;
-    CraftingMontage = nullptr;
-    HuntingMontage = nullptr;
-    CommunicationMontage = nullptr;
-
-    // Initialize blend space references
-    LocomotionBlendSpace = nullptr;
-    CombatBlendSpace = nullptr;
-
-    // Initialize state management
-    StateTransitionTimer = 0.0f;
-    StateTransitionDuration = 0.5f;
-    CurrentBlendValue = 0.0f;
-    TargetBlendValue = 0.0f;
-    BlendTransitionSpeed = 2.0f;
-
-    // Initialize action montage tracking
-    bIsPlayingActionMontage = false;
-    CurrentActionMontage = nullptr;
-
-    // Initialize references
-    OwnerCharacter = nullptr;
-    AnimInstance = nullptr;
+    
+    // Initialize default values
+    TribalType = EAnim_TribalType::Hunter;
+    CurrentState = EAnim_TribalState::Idle;
+    PreviousState = EAnim_TribalState::Idle;
+    
+    MovementSpeed = 0.0f;
+    MovementDirection = 0.0f;
+    bIsInCombat = false;
+    bIsCrafting = false;
+    bIsPerformingRitual = false;
+    
+    CharacterAnimInstance = nullptr;
+    CurrentMontage = nullptr;
+    
+    DefaultBlendTime = 0.25f;
+    RitualDuration = 5.0f;
+    CraftingCycleDuration = 3.0f;
+    
+    StateTransitionTime = 0.0f;
+    bIsTransitioning = false;
 }
 
-void UAnim_TribalCharacterController::BeginPlay()
+void UAnim_TribalCharacterSystem::BeginPlay()
 {
     Super::BeginPlay();
-
-    // Get owner character reference
-    OwnerCharacter = Cast<ACharacter>(GetOwner());
-    if (OwnerCharacter)
+    
+    // Get reference to character and anim instance
+    if (ACharacter* Character = Cast<ACharacter>(GetOwner()))
     {
-        // Get animation instance reference
-        if (OwnerCharacter->GetMesh())
+        if (USkeletalMeshComponent* MeshComp = Character->GetMesh())
         {
-            AnimInstance = OwnerCharacter->GetMesh()->GetAnimInstance();
+            CharacterAnimInstance = MeshComp->GetAnimInstance();
         }
     }
-
-    // Load default animation assets if not set
-    if (!GatheringMontage)
-    {
-        GatheringMontage = LoadObject<UAnimMontage>(nullptr, TEXT("/Game/TranspersonalGame/Animation/Montages/AM_TribalGathering"));
-    }
-    if (!CraftingMontage)
-    {
-        CraftingMontage = LoadObject<UAnimMontage>(nullptr, TEXT("/Game/TranspersonalGame/Animation/Montages/AM_TribalCrafting"));
-    }
-    if (!HuntingMontage)
-    {
-        HuntingMontage = LoadObject<UAnimMontage>(nullptr, TEXT("/Game/TranspersonalGame/Animation/Montages/AM_TribalHunting"));
-    }
-    if (!CommunicationMontage)
-    {
-        CommunicationMontage = LoadObject<UAnimMontage>(nullptr, TEXT("/Game/TranspersonalGame/Animation/Montages/AM_TribalCommunication"));
-    }
-
-    // Load blend spaces
-    if (!LocomotionBlendSpace)
-    {
-        LocomotionBlendSpace = LoadObject<UBlendSpace1D>(nullptr, TEXT("/Game/TranspersonalGame/Animation/BlendSpaces/BS_TribalLocomotion"));
-    }
-    if (!CombatBlendSpace)
-    {
-        CombatBlendSpace = LoadObject<UBlendSpace1D>(nullptr, TEXT("/Game/TranspersonalGame/Animation/BlendSpaces/BS_TribalCombat"));
-    }
+    
+    // Initialize tribal animation sets
+    InitializeTribalAnimationSets();
+    
+    UE_LOG(LogTemp, Log, TEXT("Tribal Character Animation System initialized for type: %d"), (int32)TribalType);
 }
 
-void UAnim_TribalCharacterController::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UAnim_TribalCharacterSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
-    UpdateAnimationState(DeltaTime);
+    
+    // Update animation state based on character movement
+    UpdateAnimationState();
+    
+    // Handle state transitions
+    if (bIsTransitioning)
+    {
+        StateTransitionTime += DeltaTime;
+        if (StateTransitionTime >= DefaultBlendTime)
+        {
+            bIsTransitioning = false;
+            StateTransitionTime = 0.0f;
+        }
+    }
 }
 
-void UAnim_TribalCharacterController::SetTribalState(EAnim_TribalState NewState)
+void UAnim_TribalCharacterSystem::SetTribalType(EAnim_TribalType NewType)
 {
-    if (AnimationData.CurrentState != NewState)
+    if (TribalType != NewType)
+    {
+        TribalType = NewType;
+        UE_LOG(LogTemp, Log, TEXT("Tribal type changed to: %d"), (int32)TribalType);
+        
+        // Reinitialize animation sets for new type
+        InitializeTribalAnimationSets();
+    }
+}
+
+void UAnim_TribalCharacterSystem::SetTribalState(EAnim_TribalState NewState)
+{
+    if (CurrentState != NewState)
     {
         HandleStateTransition(NewState);
-        AnimationData.CurrentState = NewState;
     }
 }
 
-void UAnim_TribalCharacterController::PlayGatheringAnimation()
+void UAnim_TribalCharacterSystem::PlayTribalMontage(EAnim_TribalState StateType)
 {
-    if (GatheringMontage && AnimInstance && !bIsPlayingActionMontage)
+    if (!CharacterAnimInstance)
     {
-        AnimInstance->Montage_Play(GatheringMontage);
-        bIsPlayingActionMontage = true;
-        CurrentActionMontage = GatheringMontage;
-        SetTribalState(EAnim_TribalState::Gathering);
+        UE_LOG(LogTemp, Warning, TEXT("No anim instance found for tribal montage"));
+        return;
+    }
+    
+    FAnim_TribalAnimationSet* AnimSet = TribalAnimationSets.Find(TribalType);
+    if (!AnimSet)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("No animation set found for tribal type: %d"), (int32)TribalType);
+        return;
+    }
+    
+    UAnimMontage* MontageToPlay = nullptr;
+    
+    switch (StateType)
+    {
+        case EAnim_TribalState::Idle:
+            MontageToPlay = AnimSet->IdleMontage;
+            break;
+        case EAnim_TribalState::Walking:
+            MontageToPlay = AnimSet->WalkMontage;
+            break;
+        case EAnim_TribalState::Running:
+            MontageToPlay = AnimSet->RunMontage;
+            break;
+        case EAnim_TribalState::Combat:
+            MontageToPlay = AnimSet->CombatMontage;
+            bIsInCombat = true;
+            break;
+        case EAnim_TribalState::Crafting:
+            MontageToPlay = AnimSet->CraftingMontage;
+            bIsCrafting = true;
+            break;
+        case EAnim_TribalState::Ritual:
+            MontageToPlay = AnimSet->RitualMontage;
+            bIsPerformingRitual = true;
+            break;
+        default:
+            break;
+    }
+    
+    if (MontageToPlay)
+    {
+        CurrentMontage = MontageToPlay;
+        CharacterAnimInstance->Montage_Play(MontageToPlay);
+        UE_LOG(LogTemp, Log, TEXT("Playing tribal montage for state: %d"), (int32)StateType);
     }
 }
 
-void UAnim_TribalCharacterController::PlayCraftingAnimation()
+void UAnim_TribalCharacterSystem::StopCurrentMontage()
 {
-    if (CraftingMontage && AnimInstance && !bIsPlayingActionMontage)
+    if (CharacterAnimInstance && CurrentMontage)
     {
-        AnimInstance->Montage_Play(CraftingMontage);
-        bIsPlayingActionMontage = true;
-        CurrentActionMontage = CraftingMontage;
-        SetTribalState(EAnim_TribalState::Crafting);
+        CharacterAnimInstance->Montage_Stop(DefaultBlendTime, CurrentMontage);
+        CurrentMontage = nullptr;
+        
+        // Reset activity flags
+        bIsInCombat = false;
+        bIsCrafting = false;
+        bIsPerformingRitual = false;
+        
+        UE_LOG(LogTemp, Log, TEXT("Stopped current tribal montage"));
     }
 }
 
-void UAnim_TribalCharacterController::PlayHuntingAnimation()
+FAnim_TribalAnimationSet UAnim_TribalCharacterSystem::GetCurrentAnimationSet() const
 {
-    if (HuntingMontage && AnimInstance && !bIsPlayingActionMontage)
+    const FAnim_TribalAnimationSet* AnimSet = TribalAnimationSets.Find(TribalType);
+    return AnimSet ? *AnimSet : FAnim_TribalAnimationSet();
+}
+
+void UAnim_TribalCharacterSystem::PlayElderWisdomGesture()
+{
+    if (TribalType == EAnim_TribalType::Elder)
     {
-        AnimInstance->Montage_Play(HuntingMontage);
-        bIsPlayingActionMontage = true;
-        CurrentActionMontage = HuntingMontage;
+        SetTribalState(EAnim_TribalState::Ritual);
+        PlayTribalMontage(EAnim_TribalState::Ritual);
+        UE_LOG(LogTemp, Log, TEXT("Elder performing wisdom gesture"));
+    }
+}
+
+void UAnim_TribalCharacterSystem::PlayWarriorBattleCry()
+{
+    if (TribalType == EAnim_TribalType::Warrior)
+    {
+        SetTribalState(EAnim_TribalState::Combat);
+        PlayTribalMontage(EAnim_TribalState::Combat);
+        UE_LOG(LogTemp, Log, TEXT("Warrior performing battle cry"));
+    }
+}
+
+void UAnim_TribalCharacterSystem::PlayHealerRitual()
+{
+    if (TribalType == EAnim_TribalType::Healer)
+    {
+        SetTribalState(EAnim_TribalState::Ritual);
+        PlayTribalMontage(EAnim_TribalState::Ritual);
+        UE_LOG(LogTemp, Log, TEXT("Healer performing healing ritual"));
+    }
+}
+
+void UAnim_TribalCharacterSystem::PlayScoutAlert()
+{
+    if (TribalType == EAnim_TribalType::Scout)
+    {
         SetTribalState(EAnim_TribalState::Hunting);
+        PlayTribalMontage(EAnim_TribalState::Combat); // Use combat montage for alert stance
+        UE_LOG(LogTemp, Log, TEXT("Scout performing alert scan"));
     }
 }
 
-void UAnim_TribalCharacterController::PlayCommunicationAnimation()
+void UAnim_TribalCharacterSystem::PlayChildCuriosity()
 {
-    if (CommunicationMontage && AnimInstance && !bIsPlayingActionMontage)
+    if (TribalType == EAnim_TribalType::Child)
     {
-        AnimInstance->Montage_Play(CommunicationMontage);
-        bIsPlayingActionMontage = true;
-        CurrentActionMontage = CommunicationMontage;
-        SetTribalState(EAnim_TribalState::Communicating);
+        SetTribalState(EAnim_TribalState::Gathering);
+        PlayTribalMontage(EAnim_TribalState::Idle); // Use idle montage for curious behavior
+        UE_LOG(LogTemp, Log, TEXT("Child showing curiosity"));
     }
 }
 
-void UAnim_TribalCharacterController::UpdateMovementSpeed(float Speed)
+void UAnim_TribalCharacterSystem::UpdateLocomotionBlending(float Speed, float Direction)
 {
-    AnimationData.MovementSpeed = Speed;
-
-    // Update target blend value based on speed
-    if (Speed > 0.1f)
+    MovementSpeed = Speed;
+    MovementDirection = Direction;
+    
+    // Update animation state based on speed
+    if (Speed < 1.0f)
     {
-        if (Speed > 300.0f) // Running threshold
-        {
-            TargetBlendValue = 1.0f;
-            if (AnimationData.CurrentState == EAnim_TribalState::Idle || AnimationData.CurrentState == EAnim_TribalState::Walking)
-            {
-                SetTribalState(EAnim_TribalState::Running);
-            }
-        }
-        else // Walking
-        {
-            TargetBlendValue = Speed / 300.0f;
-            if (AnimationData.CurrentState == EAnim_TribalState::Idle)
-            {
-                SetTribalState(EAnim_TribalState::Walking);
-            }
-        }
+        SetTribalState(EAnim_TribalState::Idle);
+    }
+    else if (Speed < 300.0f)
+    {
+        SetTribalState(EAnim_TribalState::Walking);
     }
     else
     {
-        TargetBlendValue = 0.0f;
-        if (AnimationData.CurrentState == EAnim_TribalState::Walking || AnimationData.CurrentState == EAnim_TribalState::Running)
+        SetTribalState(EAnim_TribalState::Running);
+    }
+}
+
+void UAnim_TribalCharacterSystem::BlendToState(EAnim_TribalState TargetState, float BlendTime)
+{
+    if (CurrentState != TargetState)
+    {
+        DefaultBlendTime = BlendTime;
+        SetTribalState(TargetState);
+    }
+}
+
+void UAnim_TribalCharacterSystem::InitializeTribalAnimationSets()
+{
+    // Initialize animation sets for each tribal type
+    // In a full implementation, these would load actual animation assets
+    
+    for (int32 TypeIndex = 0; TypeIndex < (int32)EAnim_TribalType::Crafter + 1; TypeIndex++)
+    {
+        EAnim_TribalType Type = (EAnim_TribalType)TypeIndex;
+        FAnim_TribalAnimationSet AnimSet;
+        
+        // Set default values - in production these would be loaded from assets
+        AnimSet.IdleMontage = nullptr;
+        AnimSet.WalkMontage = nullptr;
+        AnimSet.RunMontage = nullptr;
+        AnimSet.CombatMontage = nullptr;
+        AnimSet.CraftingMontage = nullptr;
+        AnimSet.RitualMontage = nullptr;
+        AnimSet.LocomotionBlendSpace = nullptr;
+        
+        TribalAnimationSets.Add(Type, AnimSet);
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Initialized tribal animation sets for %d types"), TribalAnimationSets.Num());
+}
+
+void UAnim_TribalCharacterSystem::UpdateAnimationState()
+{
+    if (ACharacter* Character = Cast<ACharacter>(GetOwner()))
+    {
+        if (UCharacterMovementComponent* MovementComp = Character->GetCharacterMovement())
         {
-            SetTribalState(EAnim_TribalState::Idle);
+            float CurrentSpeed = MovementComp->Velocity.Size();
+            UpdateLocomotionBlending(CurrentSpeed, 0.0f); // Direction calculation would be more complex
         }
     }
 }
 
-void UAnim_TribalCharacterController::SetCarryingObject(bool bCarrying)
+void UAnim_TribalCharacterSystem::HandleStateTransition(EAnim_TribalState NewState)
 {
-    AnimationData.bIsCarryingObject = bCarrying;
+    PreviousState = CurrentState;
+    CurrentState = NewState;
+    bIsTransitioning = true;
+    StateTransitionTime = 0.0f;
+    
+    // Play appropriate montage for new state
+    PlayTribalMontage(NewState);
+    
+    UE_LOG(LogTemp, Log, TEXT("Tribal state transition: %d -> %d"), (int32)PreviousState, (int32)CurrentState);
 }
 
-void UAnim_TribalCharacterController::SetInjuredState(bool bInjured)
+// UAnim_TribalCharacterAnimInstance Implementation
+
+UAnim_TribalCharacterAnimInstance::UAnim_TribalCharacterAnimInstance()
 {
-    AnimationData.bIsInjured = bInjured;
-    if (bInjured)
+    TribalType = EAnim_TribalType::Hunter;
+    AnimationState = EAnim_TribalState::Idle;
+    
+    Speed = 0.0f;
+    Direction = 0.0f;
+    bIsMoving = false;
+    bIsInCombat = false;
+    bIsCrafting = false;
+    bIsPerformingRitual = false;
+    bIsGathering = false;
+    
+    bShouldPlayWisdomGesture = false;
+    bShouldPlayBattleCry = false;
+    bShouldPlayHealingRitual = false;
+    
+    TribalSystem = nullptr;
+    OwningCharacter = nullptr;
+}
+
+void UAnim_TribalCharacterAnimInstance::NativeInitializeAnimation()
+{
+    Super::NativeInitializeAnimation();
+    
+    // Get references to character and tribal system
+    OwningCharacter = Cast<ACharacter>(GetOwningActor());
+    if (OwningCharacter)
     {
-        SetTribalState(EAnim_TribalState::Injured);
+        TribalSystem = OwningCharacter->FindComponentByClass<UAnim_TribalCharacterSystem>();
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Tribal Character AnimInstance initialized"));
+}
+
+void UAnim_TribalCharacterAnimInstance::NativeUpdateAnimation(float DeltaTimeX)
+{
+    Super::NativeUpdateAnimation(DeltaTimeX);
+    
+    if (!OwningCharacter)
+    {
+        return;
+    }
+    
+    // Update animation properties
+    UpdateMovementProperties();
+    UpdateTribalAnimationProperties();
+    UpdateCulturalProperties();
+}
+
+void UAnim_TribalCharacterAnimInstance::UpdateTribalAnimationProperties()
+{
+    if (TribalSystem)
+    {
+        TribalType = TribalSystem->TribalType;
+        AnimationState = TribalSystem->CurrentState;
+        bIsInCombat = TribalSystem->bIsInCombat;
+        bIsCrafting = TribalSystem->bIsCrafting;
+        bIsPerformingRitual = TribalSystem->bIsPerformingRitual;
     }
 }
 
-void UAnim_TribalCharacterController::SetEmotionalState(float EmotionLevel)
+void UAnim_TribalCharacterAnimInstance::UpdateMovementProperties()
 {
-    AnimationData.EmotionalState = FMath::Clamp(EmotionLevel, 0.0f, 1.0f);
-}
-
-EAnim_TribalState UAnim_TribalCharacterController::GetCurrentTribalState() const
-{
-    return AnimationData.CurrentState;
-}
-
-bool UAnim_TribalCharacterController::IsPlayingActionMontage() const
-{
-    return bIsPlayingActionMontage;
-}
-
-void UAnim_TribalCharacterController::UpdateAnimationState(float DeltaTime)
-{
-    // Update state transition timer
-    if (StateTransitionTimer > 0.0f)
+    if (OwningCharacter)
     {
-        StateTransitionTimer -= DeltaTime;
-    }
-
-    // Update movement blending
-    ApplyMovementBlending();
-
-    // Check if action montage is still playing
-    if (bIsPlayingActionMontage && AnimInstance && CurrentActionMontage)
-    {
-        if (!AnimInstance->Montage_IsPlaying(CurrentActionMontage))
+        if (UCharacterMovementComponent* MovementComp = OwningCharacter->GetCharacterMovement())
         {
-            bIsPlayingActionMontage = false;
-            CurrentActionMontage = nullptr;
+            FVector Velocity = MovementComp->Velocity;
+            Speed = Velocity.Size();
+            bIsMoving = Speed > 1.0f;
             
-            // Return to appropriate idle/movement state
-            if (AnimationData.MovementSpeed > 0.1f)
+            // Calculate movement direction relative to character forward
+            if (bIsMoving)
             {
-                SetTribalState(AnimationData.MovementSpeed > 300.0f ? EAnim_TribalState::Running : EAnim_TribalState::Walking);
+                FVector ForwardVector = OwningCharacter->GetActorForwardVector();
+                FVector NormalizedVelocity = Velocity.GetSafeNormal();
+                Direction = FVector::DotProduct(ForwardVector, NormalizedVelocity);
             }
             else
             {
-                SetTribalState(EAnim_TribalState::Idle);
+                Direction = 0.0f;
             }
         }
     }
-
-    // Update character movement speed if we have a character reference
-    if (OwnerCharacter && OwnerCharacter->GetCharacterMovement())
-    {
-        FVector Velocity = OwnerCharacter->GetCharacterMovement()->Velocity;
-        float CurrentSpeed = Velocity.Size();
-        UpdateMovementSpeed(CurrentSpeed);
-    }
 }
 
-void UAnim_TribalCharacterController::HandleStateTransition(EAnim_TribalState NewState)
+void UAnim_TribalCharacterAnimInstance::UpdateCulturalProperties()
 {
-    StateTransitionTimer = StateTransitionDuration;
+    // Update cultural animation triggers based on tribal type and state
+    bShouldPlayWisdomGesture = (TribalType == EAnim_TribalType::Elder && AnimationState == EAnim_TribalState::Ritual);
+    bShouldPlayBattleCry = (TribalType == EAnim_TribalType::Warrior && AnimationState == EAnim_TribalState::Combat);
+    bShouldPlayHealingRitual = (TribalType == EAnim_TribalType::Healer && AnimationState == EAnim_TribalState::Ritual);
     
-    // Handle specific state transitions
-    switch (NewState)
-    {
-        case EAnim_TribalState::Combat:
-            // Switch to combat blend space
-            break;
-        case EAnim_TribalState::Injured:
-            // Apply injury modifiers
-            BlendTransitionSpeed = 1.0f; // Slower transitions when injured
-            break;
-        default:
-            BlendTransitionSpeed = 2.0f; // Normal transition speed
-            break;
-    }
-}
-
-void UAnim_TribalCharacterController::ApplyMovementBlending()
-{
-    // Smooth blend value transition
-    CurrentBlendValue = FMath::FInterpTo(CurrentBlendValue, TargetBlendValue, GetWorld()->GetDeltaSeconds(), BlendTransitionSpeed);
-}
-
-// UAnim_TribalAnimInstance Implementation
-UAnim_TribalAnimInstance::UAnim_TribalAnimInstance()
-{
-    // Initialize animation properties
-    Speed = 0.0f;
-    Direction = 0.0f;
-    bIsInAir = false;
-    bIsAccelerating = false;
-
-    // Initialize tribal states
-    bIsGathering = false;
-    bIsCrafting = false;
-    bIsHunting = false;
-    bIsCommunicating = false;
-    bIsCarryingLoad = false;
-    EmotionalIntensity = 0.5f;
-
-    // Initialize references
-    Character = nullptr;
-    TribalController = nullptr;
-
-    // Initialize cached values
-    Velocity = FVector::ZeroVector;
-    CharacterRotation = FRotator::ZeroRotator;
-    LastFrameRotation = FRotator::ZeroRotator;
-}
-
-void UAnim_TribalAnimInstance::NativeInitializeAnimation()
-{
-    Super::NativeInitializeAnimation();
-
-    // Get character reference
-    Character = Cast<ACharacter>(GetOwningActor());
-    if (Character)
-    {
-        // Get tribal controller component
-        TribalController = Character->FindComponentByClass<UAnim_TribalCharacterController>();
-    }
-}
-
-void UAnim_TribalAnimInstance::NativeUpdateAnimation(float DeltaTimeX)
-{
-    Super::NativeUpdateAnimation(DeltaTimeX);
-
-    if (Character)
-    {
-        UpdateMovementValues();
-        UpdateTribalStates();
-        UpdateEmotionalBlending();
-    }
-}
-
-void UAnim_TribalAnimInstance::UpdateMovementValues()
-{
-    if (!Character) return;
-
-    // Get movement component
-    UCharacterMovementComponent* MovementComponent = Character->GetCharacterMovement();
-    if (!MovementComponent) return;
-
-    // Update velocity and speed
-    Velocity = MovementComponent->Velocity;
-    Speed = Velocity.Size();
-
-    // Calculate direction relative to character rotation
-    CharacterRotation = Character->GetActorRotation();
-    if (Speed > 0.1f)
-    {
-        FVector ForwardVector = Character->GetActorForwardVector();
-        FVector VelocityDirection = Velocity.GetSafeNormal();
-        Direction = FMath::RadiansToDegrees(FMath::Acos(FVector::DotProduct(ForwardVector, VelocityDirection)));
-        
-        // Determine if direction is left or right
-        FVector RightVector = Character->GetActorRightVector();
-        if (FVector::DotProduct(RightVector, VelocityDirection) < 0.0f)
-        {
-            Direction *= -1.0f;
-        }
-    }
-    else
-    {
-        Direction = 0.0f;
-    }
-
-    // Check if character is in air
-    bIsInAir = MovementComponent->IsFalling();
-
-    // Check if character is accelerating
-    FVector Acceleration = MovementComponent->GetCurrentAcceleration();
-    bIsAccelerating = Acceleration.SizeSquared() > 0.1f;
-
-    // Store rotation for next frame
-    LastFrameRotation = CharacterRotation;
-}
-
-void UAnim_TribalAnimInstance::UpdateTribalStates()
-{
-    if (!TribalController) return;
-
-    // Get current tribal data
-    TribalData = TribalController->AnimationData;
-
-    // Update tribal state booleans
-    bIsGathering = (TribalData.CurrentState == EAnim_TribalState::Gathering);
-    bIsCrafting = (TribalData.CurrentState == EAnim_TribalState::Crafting);
-    bIsHunting = (TribalData.CurrentState == EAnim_TribalState::Hunting);
-    bIsCommunicating = (TribalData.CurrentState == EAnim_TribalState::Communicating);
-    bIsCarryingLoad = TribalData.bIsCarryingObject;
-}
-
-void UAnim_TribalAnimInstance::UpdateEmotionalBlending()
-{
-    if (!TribalController) return;
-
-    // Update emotional intensity for animation blending
-    EmotionalIntensity = TribalData.EmotionalState;
-
-    // Apply emotional state to movement speed modifiers
-    if (EmotionalIntensity < 0.3f) // Fearful state
-    {
-        // Character moves more cautiously, slower transitions
-    }
-    else if (EmotionalIntensity > 0.7f) // Confident state
-    {
-        // Character moves more boldly, faster transitions
-    }
+    // Set gathering flag for appropriate activities
+    bIsGathering = (AnimationState == EAnim_TribalState::Gathering);
 }
