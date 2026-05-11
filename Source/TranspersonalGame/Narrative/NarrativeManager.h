@@ -1,63 +1,101 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Subsystems/GameInstanceSubsystem.h"
-#include "Engine/TriggerBox.h"
-#include "SharedTypes.h"
+#include "Engine/GameInstanceSubsystem.h"
+#include "Engine/DataTable.h"
+#include "Sound/SoundBase.h"
+#include "../SharedTypes.h"
 #include "NarrativeManager.generated.h"
 
-// Forward declarations
-class UNarr_DialogueComponent;
-class ANarr_NarrativeTrigger;
-
-UENUM(BlueprintType)
-enum class ENarr_NarrativeEvent : uint8
-{
-    Discovery           UMETA(DisplayName = "Discovery"),
-    Danger             UMETA(DisplayName = "Danger"),
-    Weather            UMETA(DisplayName = "Weather"),
-    DinosaurEncounter  UMETA(DisplayName = "Dinosaur Encounter"),
-    BiomeTransition    UMETA(DisplayName = "Biome Transition"),
-    QuestUpdate        UMETA(DisplayName = "Quest Update")
-};
+class UDialogueComponent;
+class ATranspersonalCharacter;
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_NarrativeData
+struct TRANSPERSONALGAME_API FNarr_DialogueLine
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    ENarr_NarrativeEvent EventType;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    FString SpeakerName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FString NarrativeText;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    FText DialogueText;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    FString AudioPath;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    TSoftObjectPtr<USoundBase> VoiceClip;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
     float Duration;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
-    bool bIsUrgent;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    bool bIsPlayerChoice;
 
-    FNarr_NarrativeData()
+    FNarr_DialogueLine()
     {
-        EventType = ENarr_NarrativeEvent::Discovery;
-        NarrativeText = "";
-        AudioPath = "";
-        Duration = 5.0f;
-        bIsUrgent = false;
+        SpeakerName = TEXT("Unknown");
+        DialogueText = FText::GetEmpty();
+        Duration = 3.0f;
+        bIsPlayerChoice = false;
     }
 };
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnNarrativeEvent, const FNarr_NarrativeData&, NarrativeData);
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FNarr_QuestDialogue
+{
+    GENERATED_BODY()
 
-/**
- * Sistema de gestão narrativa para o jogo de sobrevivência pré-histórico
- * Gere diálogos, narrações e eventos narrativos baseados em contexto
- */
-UCLASS()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    FString QuestID;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    TArray<FNarr_DialogueLine> IntroLines;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    TArray<FNarr_DialogueLine> ProgressLines;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    TArray<FNarr_DialogueLine> CompletionLines;
+
+    FNarr_QuestDialogue()
+    {
+        QuestID = TEXT("DefaultQuest");
+    }
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FNarr_StoryCheckpoint
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    FString CheckpointID;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    FText NarrativeText;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    TSoftObjectPtr<USoundBase> NarrationClip;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    bool bTriggerAutomatically;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    FVector TriggerLocation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    float TriggerRadius;
+
+    FNarr_StoryCheckpoint()
+    {
+        CheckpointID = TEXT("Checkpoint_001");
+        NarrativeText = FText::GetEmpty();
+        bTriggerAutomatically = true;
+        TriggerLocation = FVector::ZeroVector;
+        TriggerRadius = 500.0f;
+    }
+};
+
+UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UNarrativeManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
@@ -65,75 +103,79 @@ class TRANSPERSONALGAME_API UNarrativeManager : public UGameInstanceSubsystem
 public:
     UNarrativeManager();
 
-    // Subsystem interface
+    // USubsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Narrative event system
+    // Core narrative functions
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void TriggerNarrativeEvent(ENarr_NarrativeEvent EventType, const FString& Context = "");
+    void StartDialogue(const FString& DialogueID, ATranspersonalCharacter* Player);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void PlayNarration(const FNarr_NarrativeData& NarrativeData);
+    void TriggerNarration(const FString& CheckpointID);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void RegisterNarrativeTrigger(ANarr_NarrativeTrigger* Trigger);
+    void RegisterQuestDialogue(const FString& QuestID, const FNarr_QuestDialogue& DialogueData);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void UnregisterNarrativeTrigger(ANarr_NarrativeTrigger* Trigger);
-
-    // Context-based narrative
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void UpdateNarrativeContext(EEng_BiomeType CurrentBiome, EEng_WeatherType Weather, EEng_ThreatLevel ThreatLevel);
+    bool IsStoryCheckpointReached(const FString& CheckpointID) const;
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    FNarr_NarrativeData GetContextualNarrative(ENarr_NarrativeEvent EventType);
+    void MarkCheckpointReached(const FString& CheckpointID);
 
-    // Dinosaur encounter narratives
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void TriggerDinosaurEncounter(EEng_DinosaurSpecies Species, float Distance, bool bIsHostile);
+    // Dialogue system
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void PlayDialogueLine(const FNarr_DialogueLine& DialogueLine);
 
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void TriggerWeatherWarning(EEng_WeatherType IncomingWeather, float TimeToArrival);
+    UFUNCTION(BlueprintCallable, Category = "Dialogue")
+    void EndCurrentDialogue();
 
-    // Event delegates
-    UPROPERTY(BlueprintAssignable, Category = "Narrative")
-    FOnNarrativeEvent OnNarrativeEvent;
+    // Story progression
+    UFUNCTION(BlueprintCallable, Category = "Story")
+    void CheckLocationTriggers(const FVector& PlayerLocation);
+
+    UFUNCTION(BlueprintCallable, Category = "Story")
+    float GetStoryProgress() const;
 
 protected:
-    // Current narrative context
-    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
-    EEng_BiomeType CurrentBiome;
+    // Narrative data
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    TMap<FString, FNarr_QuestDialogue> QuestDialogues;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
-    EEng_WeatherType CurrentWeather;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    TArray<FNarr_StoryCheckpoint> StoryCheckpoints;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
-    EEng_ThreatLevel CurrentThreatLevel;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Narrative")
+    TSet<FString> ReachedCheckpoints;
 
-    // Registered narrative triggers
-    UPROPERTY()
-    TArray<ANarr_NarrativeTrigger*> NarrativeTriggers;
+    // Current dialogue state
+    UPROPERTY(BlueprintReadOnly, Category = "Dialogue")
+    bool bDialogueActive;
 
-    // Narrative data library
-    UPROPERTY(EditDefaultsOnly, Category = "Narrative")
-    TMap<ENarr_NarrativeEvent, TArray<FNarr_NarrativeData>> NarrativeLibrary;
+    UPROPERTY(BlueprintReadOnly, Category = "Dialogue")
+    FString CurrentDialogueID;
 
-    // Audio URLs for generated voice samples
-    UPROPERTY(EditDefaultsOnly, Category = "Audio")
-    FString PaleontologistFieldNotesURL;
+    UPROPERTY(BlueprintReadOnly, Category = "Dialogue")
+    int32 CurrentLineIndex;
 
-    UPROPERTY(EditDefaultsOnly, Category = "Audio")
-    FString EmergencyAlertURL;
+    UPROPERTY(BlueprintReadOnly, Category = "Dialogue")
+    TArray<FNarr_DialogueLine> CurrentDialogueLines;
 
-    UPROPERTY(EditDefaultsOnly, Category = "Audio")
-    FString DiscoveryNarrationURL;
+    // Audio management
+    UPROPERTY(BlueprintReadOnly, Category = "Audio")
+    class UAudioComponent* NarrationAudioComponent;
 
-    UPROPERTY(EditDefaultsOnly, Category = "Audio")
-    FString WeatherWarningURL;
+    // Timing
+    UPROPERTY(BlueprintReadOnly, Category = "Timing")
+    float DialogueTimer;
 
 private:
-    void InitializeNarrativeLibrary();
-    FNarr_NarrativeData CreateNarrativeData(ENarr_NarrativeEvent EventType, const FString& Text, const FString& AudioURL, float Duration, bool bUrgent = false);
-    void LogNarrativeEvent(const FNarr_NarrativeData& Data);
+    void InitializeStoryCheckpoints();
+    void LoadQuestDialogues();
+    void UpdateDialogueTimer(float DeltaTime);
+    void ProcessNextDialogueLine();
+    
+    // Story checkpoint helpers
+    bool IsPlayerNearCheckpoint(const FNarr_StoryCheckpoint& Checkpoint, const FVector& PlayerLocation) const;
+    void TriggerCheckpointNarration(const FNarr_StoryCheckpoint& Checkpoint);
 };
