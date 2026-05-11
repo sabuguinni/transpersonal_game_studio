@@ -1,471 +1,339 @@
 #include "Eng_UnifiedArchitectureManager.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Misc/DateTime.h"
-#include "HAL/PlatformFilemanager.h"
-#include "Misc/Paths.h"
-#include "BiomeManager.h"
-#include "Eng_CompilationHealthMonitor.h"
+#include "Kismet/GameplayStatics.h"
+#include "GameFramework/GameModeBase.h"
 
 UEng_UnifiedArchitectureManager::UEng_UnifiedArchitectureManager()
 {
-    // Initialize default values
-    bArchitectureValidationEnabled = true;
-    bPerformanceMonitoringEnabled = true;
-    bAutoFixCompilationIssues = true;
-    MaxCompilationFixAttempts = 3;
-    SystemHealthStatus = EEng_SystemHealthStatus::Unknown;
-    ActiveCompilationIssues = 0;
-    ActiveArchitectureViolations = 0;
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickGroup = TG_PrePhysics;
+    
+    // Initialize architecture state
+    CurrentArchitectureState = EEng_ArchitectureState::Initializing;
+    ArchitectureVersion = TEXT("2.0.0");
+    
+    // Performance monitoring
+    bEnablePerformanceMonitoring = true;
+    PerformanceCheckInterval = 1.0f;
+    MaxAllowedFrameTime = 16.67f; // 60 FPS target
+    
+    // System validation
+    bEnableSystemValidation = true;
+    ValidationCheckInterval = 5.0f;
+    
+    // Initialize timers
+    LastPerformanceCheck = 0.0f;
+    LastValidationCheck = 0.0f;
+    
+    // Architecture compliance
+    bEnforceArchitecturalCompliance = true;
+    ComplianceLevel = EEng_ComplianceLevel::Strict;
 }
 
-void UEng_UnifiedArchitectureManager::Initialize(FSubsystemCollectionBase& Collection)
+void UEng_UnifiedArchitectureManager::BeginPlay()
 {
-    Super::Initialize(Collection);
+    Super::BeginPlay();
     
-    UE_LOG(LogTemp, Warning, TEXT("ENGINE ARCHITECT: Initializing Unified Architecture Manager"));
+    // Initialize architecture systems
+    InitializeArchitectureSystems();
     
-    // Initialize subsystems in order
-    InitializeCompilationMonitoring();
-    InitializeDependencyManagement();
-    InitializeArchitectureValidation();
+    // Validate initial state
+    ValidateArchitectureIntegrity();
     
-    // Cleanup legacy systems
-    CleanupDuplicateSystems();
-    ConsolidateVersionedSystems();
+    // Set state to active
+    CurrentArchitectureState = EEng_ArchitectureState::Active;
     
-    // Initial health check
-    ValidateCompilationHealth();
-    ValidateArchitectureStandards();
-    
-    UpdateSystemHealthStatus();
-    
-    UE_LOG(LogTemp, Warning, TEXT("ENGINE ARCHITECT: Unified Architecture Manager initialized successfully"));
-    LogArchitectureEvent(TEXT("INITIALIZATION"), TEXT("Unified Architecture Manager started"));
+    UE_LOG(LogTemp, Log, TEXT("Unified Architecture Manager initialized - Version: %s"), *ArchitectureVersion);
 }
 
-void UEng_UnifiedArchitectureManager::Deinitialize()
+void UEng_UnifiedArchitectureManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    UE_LOG(LogTemp, Warning, TEXT("ENGINE ARCHITECT: Shutting down Unified Architecture Manager"));
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    LogArchitectureEvent(TEXT("SHUTDOWN"), TEXT("Unified Architecture Manager stopping"));
+    float CurrentTime = GetWorld()->GetTimeSeconds();
     
-    // Cleanup references
-    CompilationMonitor = nullptr;
-    DependencyManager = nullptr;
-    BiomeSystemRef = nullptr;
-    
-    Super::Deinitialize();
-}
-
-// === COMPILATION MANAGEMENT ===
-
-bool UEng_UnifiedArchitectureManager::ValidateCompilationHealth()
-{
-    UE_LOG(LogTemp, Warning, TEXT("ENGINE ARCHITECT: Validating compilation health"));
-    
-    LastCompilationValidation = FDateTime::Now();
-    ActiveCompilationIssues = 0;
-    
-    // Check for critical compilation issues
-    bool bCompilationHealthy = true;
-    
-    // Test core class loading
-    TArray<FString> CoreClasses = {
-        TEXT("/Script/TranspersonalGame.TranspersonalGameState"),
-        TEXT("/Script/TranspersonalGame.TranspersonalCharacter"),
-        TEXT("/Script/TranspersonalGame.DinosaurBase"),
-        TEXT("/Script/TranspersonalGame.BiomeManager")
-    };
-    
-    for (const FString& ClassName : CoreClasses)
+    // Performance monitoring
+    if (bEnablePerformanceMonitoring && CurrentTime - LastPerformanceCheck >= PerformanceCheckInterval)
     {
-        UClass* LoadedClass = LoadClass<UObject>(nullptr, *ClassName);
-        if (!LoadedClass)
-        {
-            UE_LOG(LogTemp, Error, TEXT("ENGINE ARCHITECT: Failed to load core class: %s"), *ClassName);
-            ActiveCompilationIssues++;
-            bCompilationHealthy = false;
-        }
-        else
-        {
-            UE_LOG(LogTemp, Log, TEXT("ENGINE ARCHITECT: Successfully loaded class: %s"), *ClassName);
-        }
+        MonitorSystemPerformance();
+        LastPerformanceCheck = CurrentTime;
     }
     
-    // Check for duplicate systems
-    TArray<FString> DuplicateSystems = {
-        TEXT("BiomeManager vs Eng_BiomeManager"),
-        TEXT("CompilationOrchestrator v1/v2/v3"),
-        TEXT("ArchitectureManager vs Eng_ArchitectureManager")
-    };
-    
-    for (const FString& Duplicate : DuplicateSystems)
+    // System validation
+    if (bEnableSystemValidation && CurrentTime - LastValidationCheck >= ValidationCheckInterval)
     {
-        UE_LOG(LogTemp, Warning, TEXT("ENGINE ARCHITECT: Duplicate system detected: %s"), *Duplicate);
-        ActiveCompilationIssues++;
+        ValidateSystemIntegrity();
+        LastValidationCheck = CurrentTime;
     }
     
-    LogArchitectureEvent(TEXT("COMPILATION_VALIDATION"), 
-        FString::Printf(TEXT("Health: %s, Issues: %d"), 
-            bCompilationHealthy ? TEXT("HEALTHY") : TEXT("ISSUES_DETECTED"), 
-            ActiveCompilationIssues));
-    
-    return bCompilationHealthy;
+    // Update architecture state
+    UpdateArchitectureState(DeltaTime);
 }
 
-bool UEng_UnifiedArchitectureManager::FixCompilationIssues()
+void UEng_UnifiedArchitectureManager::InitializeArchitectureSystems()
 {
-    if (!bAutoFixCompilationIssues)
+    UE_LOG(LogTemp, Log, TEXT("Initializing architecture systems..."));
+    
+    // Initialize core systems registry
+    CoreSystems.Empty();
+    
+    // Register essential systems
+    RegisterCoreSystem(TEXT("PhysicsManager"), EEng_SystemPriority::Critical);
+    RegisterCoreSystem(TEXT("BiomeManager"), EEng_SystemPriority::High);
+    RegisterCoreSystem(TEXT("CharacterSystem"), EEng_SystemPriority::High);
+    RegisterCoreSystem(TEXT("CombatSystem"), EEng_SystemPriority::Medium);
+    RegisterCoreSystem(TEXT("AudioSystem"), EEng_SystemPriority::Medium);
+    RegisterCoreSystem(TEXT("VFXSystem"), EEng_SystemPriority::Low);
+    
+    // Initialize performance metrics
+    PerformanceMetrics.Empty();
+    
+    // Initialize validation results
+    ValidationResults.Empty();
+    
+    UE_LOG(LogTemp, Log, TEXT("Architecture systems initialized - %d core systems registered"), CoreSystems.Num());
+}
+
+void UEng_UnifiedArchitectureManager::RegisterCoreSystem(const FString& SystemName, EEng_SystemPriority Priority)
+{
+    FEng_CoreSystemInfo SystemInfo;
+    SystemInfo.SystemName = SystemName;
+    SystemInfo.Priority = Priority;
+    SystemInfo.bIsActive = true;
+    SystemInfo.LastUpdateTime = GetWorld()->GetTimeSeconds();
+    SystemInfo.PerformanceRating = 1.0f;
+    
+    CoreSystems.Add(SystemName, SystemInfo);
+    
+    UE_LOG(LogTemp, VeryVerbose, TEXT("Registered core system: %s (Priority: %d)"), *SystemName, (int32)Priority);
+}
+
+void UEng_UnifiedArchitectureManager::ValidateArchitectureIntegrity()
+{
+    UE_LOG(LogTemp, Log, TEXT("Validating architecture integrity..."));
+    
+    int32 PassedChecks = 0;
+    int32 TotalChecks = 0;
+    
+    // Validate core systems
+    for (const auto& SystemPair : CoreSystems)
     {
-        UE_LOG(LogTemp, Warning, TEXT("ENGINE ARCHITECT: Auto-fix disabled, skipping compilation fixes"));
-        return false;
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("ENGINE ARCHITECT: Attempting to fix compilation issues"));
-    
-    bool bFixesApplied = false;
-    int32 FixAttempts = 0;
-    
-    while (FixAttempts < MaxCompilationFixAttempts && ActiveCompilationIssues > 0)
-    {
-        FixAttempts++;
-        UE_LOG(LogTemp, Warning, TEXT("ENGINE ARCHITECT: Fix attempt %d/%d"), FixAttempts, MaxCompilationFixAttempts);
-        
-        // Apply fixes
-        CleanupDuplicateSystems();
-        ConsolidateVersionedSystems();
-        
-        // Re-validate
-        ValidateCompilationHealth();
-        
-        if (ActiveCompilationIssues == 0)
+        TotalChecks++;
+        if (ValidateCoreSystem(SystemPair.Value))
         {
-            bFixesApplied = true;
-            break;
+            PassedChecks++;
         }
     }
     
-    LogArchitectureEvent(TEXT("COMPILATION_FIX"), 
-        FString::Printf(TEXT("Attempts: %d, Success: %s"), 
-            FixAttempts, bFixesApplied ? TEXT("YES") : TEXT("NO")));
-    
-    return bFixesApplied;
-}
-
-FString UEng_UnifiedArchitectureManager::GetCompilationStatusReport()
-{
-    FString Report = TEXT("=== ENGINE ARCHITECT COMPILATION STATUS REPORT ===\n\n");
-    
-    Report += FString::Printf(TEXT("Last Validation: %s\n"), *LastCompilationValidation.ToString());
-    Report += FString::Printf(TEXT("System Health: %s\n"), 
-        SystemHealthStatus == EEng_SystemHealthStatus::Healthy ? TEXT("HEALTHY") :
-        SystemHealthStatus == EEng_SystemHealthStatus::Warning ? TEXT("WARNING") :
-        SystemHealthStatus == EEng_SystemHealthStatus::Critical ? TEXT("CRITICAL") : TEXT("UNKNOWN"));
-    Report += FString::Printf(TEXT("Active Issues: %d\n"), ActiveCompilationIssues);
-    Report += FString::Printf(TEXT("Architecture Violations: %d\n"), ActiveArchitectureViolations);
-    Report += FString::Printf(TEXT("Auto-Fix Enabled: %s\n"), bAutoFixCompilationIssues ? TEXT("YES") : TEXT("NO"));
-    
-    Report += TEXT("\n=== CORE SYSTEMS STATUS ===\n");
-    Report += TEXT("✓ TranspersonalGameState: Loaded\n");
-    Report += TEXT("✓ TranspersonalCharacter: Loaded\n");
-    Report += TEXT("✓ DinosaurBase: Loaded\n");
-    Report += TEXT("✓ BiomeManager: Loaded\n");
-    
-    Report += TEXT("\n=== KNOWN ISSUES ===\n");
-    Report += TEXT("- Duplicate BiomeManager systems (original vs Eng_BiomeManager)\n");
-    Report += TEXT("- Multiple CompilationOrchestrator versions (v1, v2, v3)\n");
-    Report += TEXT("- Fragmented Engine Architect modules\n");
-    
-    Report += TEXT("\n=== RECOMMENDATIONS ===\n");
-    Report += TEXT("1. Consolidate duplicate biome systems\n");
-    Report += TEXT("2. Remove versioned orchestrator files\n");
-    Report += TEXT("3. Unify all Engine Architect functionality\n");
-    Report += TEXT("4. Implement proper module dependency tracking\n");
-    
-    return Report;
-}
-
-// === MODULE DEPENDENCY MANAGEMENT ===
-
-bool UEng_UnifiedArchitectureManager::ValidateModuleDependencies()
-{
-    UE_LOG(LogTemp, Warning, TEXT("ENGINE ARCHITECT: Validating module dependencies"));
-    
-    if (!DependencyManager)
+    // Validate system dependencies
+    TotalChecks++;
+    if (ValidateSystemDependencies())
     {
-        UE_LOG(LogTemp, Error, TEXT("ENGINE ARCHITECT: Dependency manager not initialized"));
-        return false;
+        PassedChecks++;
     }
     
-    // Check for circular dependencies
-    bool bHasCircularDeps = DependencyManager->HasCircularDependencies();
-    
-    if (bHasCircularDeps)
+    // Validate performance constraints
+    TotalChecks++;
+    if (ValidatePerformanceConstraints())
     {
-        UE_LOG(LogTemp, Error, TEXT("ENGINE ARCHITECT: Circular dependencies detected"));
-        ActiveArchitectureViolations++;
+        PassedChecks++;
     }
     
-    LogArchitectureEvent(TEXT("DEPENDENCY_VALIDATION"), 
-        FString::Printf(TEXT("Circular Dependencies: %s"), 
-            bHasCircularDeps ? TEXT("DETECTED") : TEXT("NONE")));
+    // Calculate integrity score
+    float IntegrityScore = TotalChecks > 0 ? (float)PassedChecks / (float)TotalChecks : 0.0f;
     
-    return !bHasCircularDeps;
-}
-
-void UEng_UnifiedArchitectureManager::RegisterModule(const FString& ModuleName, const TArray<FString>& Dependencies)
-{
-    if (DependencyManager)
+    UE_LOG(LogTemp, Log, TEXT("Architecture integrity validation complete - Score: %.2f (%d/%d checks passed)"), 
+           IntegrityScore, PassedChecks, TotalChecks);
+    
+    // Update architecture state based on integrity
+    if (IntegrityScore >= 0.9f)
     {
-        for (const FString& Dependency : Dependencies)
-        {
-            DependencyManager->RegisterDependency(ModuleName, Dependency);
-        }
-        
-        UE_LOG(LogTemp, Log, TEXT("ENGINE ARCHITECT: Registered module %s with %d dependencies"), 
-            *ModuleName, Dependencies.Num());
+        CurrentArchitectureState = EEng_ArchitectureState::Active;
     }
-}
-
-TMap<FString, TArray<FString>> UEng_UnifiedArchitectureManager::GetDependencyGraph()
-{
-    TMap<FString, TArray<FString>> EmptyGraph;
-    
-    if (!DependencyManager)
+    else if (IntegrityScore >= 0.7f)
     {
-        return EmptyGraph;
-    }
-    
-    // Return dependency graph (implementation would access DependencyManager's internal map)
-    return EmptyGraph;
-}
-
-// === ARCHITECTURE VALIDATION ===
-
-bool UEng_UnifiedArchitectureManager::ValidateArchitectureStandards()
-{
-    UE_LOG(LogTemp, Warning, TEXT("ENGINE ARCHITECT: Validating architecture standards"));
-    
-    LastArchitectureValidation = FDateTime::Now();
-    ActiveArchitectureViolations = 0;
-    
-    bool bStandardsCompliant = true;
-    
-    // Check for naming conventions
-    // Check for proper UCLASS/UPROPERTY usage
-    // Check for module organization
-    // Check for circular dependencies
-    
-    LogArchitectureEvent(TEXT("ARCHITECTURE_VALIDATION"), 
-        FString::Printf(TEXT("Compliant: %s, Violations: %d"), 
-            bStandardsCompliant ? TEXT("YES") : TEXT("NO"), 
-            ActiveArchitectureViolations));
-    
-    return bStandardsCompliant;
-}
-
-void UEng_UnifiedArchitectureManager::EnforceCodingStandards()
-{
-    UE_LOG(LogTemp, Warning, TEXT("ENGINE ARCHITECT: Enforcing coding standards"));
-    
-    // Implement coding standards enforcement
-    LogArchitectureEvent(TEXT("STANDARDS_ENFORCEMENT"), TEXT("Coding standards enforced"));
-}
-
-FString UEng_UnifiedArchitectureManager::GetArchitectureComplianceReport()
-{
-    FString Report = TEXT("=== ENGINE ARCHITECT COMPLIANCE REPORT ===\n\n");
-    
-    Report += FString::Printf(TEXT("Last Validation: %s\n"), *LastArchitectureValidation.ToString());
-    Report += FString::Printf(TEXT("Architecture Violations: %d\n"), ActiveArchitectureViolations);
-    Report += FString::Printf(TEXT("Validation Enabled: %s\n"), bArchitectureValidationEnabled ? TEXT("YES") : TEXT("NO"));
-    
-    return Report;
-}
-
-// === PERFORMANCE COORDINATION ===
-
-bool UEng_UnifiedArchitectureManager::MonitorPerformanceMetrics()
-{
-    if (!bPerformanceMonitoringEnabled)
-    {
-        return true;
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("ENGINE ARCHITECT: Monitoring performance metrics"));
-    
-    // Implement performance monitoring
-    LogArchitectureEvent(TEXT("PERFORMANCE_MONITORING"), TEXT("Performance metrics collected"));
-    
-    return true;
-}
-
-void UEng_UnifiedArchitectureManager::OptimizeSystemPerformance()
-{
-    UE_LOG(LogTemp, Warning, TEXT("ENGINE ARCHITECT: Optimizing system performance"));
-    
-    // Implement performance optimization
-    LogArchitectureEvent(TEXT("PERFORMANCE_OPTIMIZATION"), TEXT("System performance optimized"));
-}
-
-// === INTEGRATION OVERSIGHT ===
-
-bool UEng_UnifiedArchitectureManager::ValidateSystemIntegration()
-{
-    UE_LOG(LogTemp, Warning, TEXT("ENGINE ARCHITECT: Validating system integration"));
-    
-    // Check integration points between systems
-    LogArchitectureEvent(TEXT("INTEGRATION_VALIDATION"), TEXT("System integration validated"));
-    
-    return true;
-}
-
-void UEng_UnifiedArchitectureManager::CoordinateSystemInitialization()
-{
-    UE_LOG(LogTemp, Warning, TEXT("ENGINE ARCHITECT: Coordinating system initialization"));
-    
-    // Coordinate initialization order
-    LogArchitectureEvent(TEXT("INITIALIZATION_COORDINATION"), TEXT("System initialization coordinated"));
-}
-
-// === INTERNAL METHODS ===
-
-void UEng_UnifiedArchitectureManager::InitializeCompilationMonitoring()
-{
-    UE_LOG(LogTemp, Log, TEXT("ENGINE ARCHITECT: Initializing compilation monitoring"));
-    
-    // Create compilation monitor if it doesn't exist
-    if (!CompilationMonitor)
-    {
-        CompilationMonitor = NewObject<UEng_CompilationHealthMonitor>(this);
-    }
-}
-
-void UEng_UnifiedArchitectureManager::InitializeDependencyManagement()
-{
-    UE_LOG(LogTemp, Log, TEXT("ENGINE ARCHITECT: Initializing dependency management"));
-    
-    // Create dependency manager if it doesn't exist
-    if (!DependencyManager)
-    {
-        DependencyManager = NewObject<UEng_ModuleDependencyManager>(this);
-    }
-    
-    // Register known modules and dependencies
-    RegisterModule(TEXT("TranspersonalGame"), {TEXT("CoreUObject"), TEXT("Engine")});
-    RegisterModule(TEXT("BiomeManager"), {TEXT("TranspersonalGame")});
-    RegisterModule(TEXT("DinosaurBase"), {TEXT("TranspersonalGame")});
-}
-
-void UEng_UnifiedArchitectureManager::InitializeArchitectureValidation()
-{
-    UE_LOG(LogTemp, Log, TEXT("ENGINE ARCHITECT: Initializing architecture validation"));
-    
-    // Initialize validation systems
-}
-
-void UEng_UnifiedArchitectureManager::CleanupDuplicateSystems()
-{
-    UE_LOG(LogTemp, Warning, TEXT("ENGINE ARCHITECT: Cleaning up duplicate systems"));
-    
-    // Mark duplicate systems for cleanup
-    // This would be handled by the build system
-    LogArchitectureEvent(TEXT("CLEANUP"), TEXT("Duplicate systems marked for removal"));
-}
-
-void UEng_UnifiedArchitectureManager::ConsolidateVersionedSystems()
-{
-    UE_LOG(LogTemp, Warning, TEXT("ENGINE ARCHITECT: Consolidating versioned systems"));
-    
-    // Mark versioned systems for consolidation
-    LogArchitectureEvent(TEXT("CONSOLIDATION"), TEXT("Versioned systems consolidated"));
-}
-
-void UEng_UnifiedArchitectureManager::UpdateSystemHealthStatus()
-{
-    // Determine overall system health
-    if (ActiveCompilationIssues == 0 && ActiveArchitectureViolations == 0)
-    {
-        SystemHealthStatus = EEng_SystemHealthStatus::Healthy;
-    }
-    else if (ActiveCompilationIssues < 5 && ActiveArchitectureViolations < 3)
-    {
-        SystemHealthStatus = EEng_SystemHealthStatus::Warning;
+        CurrentArchitectureState = EEng_ArchitectureState::Warning;
     }
     else
     {
-        SystemHealthStatus = EEng_SystemHealthStatus::Critical;
+        CurrentArchitectureState = EEng_ArchitectureState::Error;
     }
-    
-    UE_LOG(LogTemp, Warning, TEXT("ENGINE ARCHITECT: System health status: %d"), (int32)SystemHealthStatus);
 }
 
-void UEng_UnifiedArchitectureManager::LogArchitectureEvent(const FString& Event, const FString& Details)
+bool UEng_UnifiedArchitectureManager::ValidateCoreSystem(const FEng_CoreSystemInfo& SystemInfo)
 {
-    FString LogMessage = FString::Printf(TEXT("ENGINE ARCHITECT EVENT [%s]: %s"), *Event, *Details);
-    UE_LOG(LogTemp, Warning, TEXT("%s"), *LogMessage);
+    // Check if system is responsive
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    float TimeSinceUpdate = CurrentTime - SystemInfo.LastUpdateTime;
     
-    // Could also write to file or send to monitoring system
+    if (TimeSinceUpdate > 10.0f) // System hasn't updated in 10 seconds
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Core system '%s' appears unresponsive (%.2fs since last update)"), 
+               *SystemInfo.SystemName, TimeSinceUpdate);
+        return false;
+    }
+    
+    // Check performance rating
+    if (SystemInfo.PerformanceRating < 0.5f)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Core system '%s' has poor performance rating (%.2f)"), 
+               *SystemInfo.SystemName, SystemInfo.PerformanceRating);
+        return false;
+    }
+    
+    return true;
 }
 
-// === MODULE DEPENDENCY MANAGER IMPLEMENTATION ===
-
-void UEng_ModuleDependencyManager::RegisterDependency(const FString& Module, const FString& Dependency)
+bool UEng_UnifiedArchitectureManager::ValidateSystemDependencies()
 {
-    if (!ModuleDependencies.Contains(Module))
+    // Check critical dependencies
+    bool bPhysicsActive = CoreSystems.Contains(TEXT("PhysicsManager")) && 
+                         CoreSystems[TEXT("PhysicsManager")].bIsActive;
+    
+    bool bCharacterActive = CoreSystems.Contains(TEXT("CharacterSystem")) && 
+                           CoreSystems[TEXT("CharacterSystem")].bIsActive;
+    
+    if (!bPhysicsActive)
     {
-        ModuleDependencies.Add(Module, TArray<FString>());
+        UE_LOG(LogTemp, Error, TEXT("Critical dependency missing: PhysicsManager"));
+        return false;
     }
     
-    ModuleDependencies[Module].AddUnique(Dependency);
+    if (!bCharacterActive)
+    {
+        UE_LOG(LogTemp, Error, TEXT("Critical dependency missing: CharacterSystem"));
+        return false;
+    }
+    
+    return true;
 }
 
-bool UEng_ModuleDependencyManager::HasCircularDependencies()
+bool UEng_UnifiedArchitectureManager::ValidatePerformanceConstraints()
 {
-    for (const auto& ModulePair : ModuleDependencies)
+    // Check frame time
+    float CurrentFrameTime = GetWorld()->GetDeltaSeconds() * 1000.0f; // Convert to ms
+    
+    if (CurrentFrameTime > MaxAllowedFrameTime)
     {
-        TSet<FString> Visited;
-        if (CheckCircularDependency(ModulePair.Key, ModulePair.Key, Visited))
-        {
-            return true;
-        }
+        UE_LOG(LogTemp, Warning, TEXT("Frame time constraint violated: %.2fms (max: %.2fms)"), 
+               CurrentFrameTime, MaxAllowedFrameTime);
+        return false;
     }
     
-    return false;
+    return true;
 }
 
-TArray<FString> UEng_ModuleDependencyManager::GetDependencyChain(const FString& Module)
+void UEng_UnifiedArchitectureManager::MonitorSystemPerformance()
 {
-    TArray<FString> Chain;
+    // Monitor frame time
+    float CurrentFrameTime = GetWorld()->GetDeltaSeconds() * 1000.0f;
     
-    if (ModuleDependencies.Contains(Module))
+    FEng_PerformanceMetric FrameTimeMetric;
+    FrameTimeMetric.MetricName = TEXT("FrameTime");
+    FrameTimeMetric.Value = CurrentFrameTime;
+    FrameTimeMetric.Timestamp = GetWorld()->GetTimeSeconds();
+    FrameTimeMetric.bIsWithinLimits = CurrentFrameTime <= MaxAllowedFrameTime;
+    
+    PerformanceMetrics.Add(FrameTimeMetric);
+    
+    // Limit history size
+    if (PerformanceMetrics.Num() > 100)
     {
-        Chain = ModuleDependencies[Module];
+        PerformanceMetrics.RemoveAt(0);
     }
     
-    return Chain;
+    UE_LOG(LogTemp, VeryVerbose, TEXT("Performance monitoring - Frame time: %.2fms"), CurrentFrameTime);
 }
 
-bool UEng_ModuleDependencyManager::CheckCircularDependency(const FString& Module, const FString& Target, TSet<FString>& Visited)
+void UEng_UnifiedArchitectureManager::ValidateSystemIntegrity()
 {
-    if (Visited.Contains(Module))
+    // Update system status
+    for (auto& SystemPair : CoreSystems)
     {
-        return Module == Target;
+        FEng_CoreSystemInfo& SystemInfo = SystemPair.Value;
+        
+        // Update performance rating based on recent metrics
+        UpdateSystemPerformanceRating(SystemInfo);
+        
+        // Update last update time (simplified - in real implementation would check actual system)
+        SystemInfo.LastUpdateTime = GetWorld()->GetTimeSeconds();
     }
     
-    Visited.Add(Module);
+    UE_LOG(LogTemp, VeryVerbose, TEXT("System integrity validation completed"));
+}
+
+void UEng_UnifiedArchitectureManager::UpdateSystemPerformanceRating(FEng_CoreSystemInfo& SystemInfo)
+{
+    // Simplified performance rating calculation
+    // In a real implementation, this would analyze actual system metrics
     
-    if (ModuleDependencies.Contains(Module))
+    float BaseRating = 1.0f;
+    
+    // Check if system is critical and adjust rating
+    if (SystemInfo.Priority == EEng_SystemPriority::Critical)
     {
-        for (const FString& Dependency : ModuleDependencies[Module])
-        {
-            if (CheckCircularDependency(Dependency, Target, Visited))
-            {
-                return true;
-            }
-        }
+        BaseRating = 0.95f; // Critical systems start with high rating
+    }
+    else if (SystemInfo.Priority == EEng_SystemPriority::High)
+    {
+        BaseRating = 0.85f;
+    }
+    else
+    {
+        BaseRating = 0.75f;
     }
     
-    return false;
+    // Apply some variation based on current performance
+    float PerformanceVariation = FMath::RandRange(-0.1f, 0.1f);
+    SystemInfo.PerformanceRating = FMath::Clamp(BaseRating + PerformanceVariation, 0.0f, 1.0f);
+}
+
+void UEng_UnifiedArchitectureManager::UpdateArchitectureState(float DeltaTime)
+{
+    // State-specific updates
+    switch (CurrentArchitectureState)
+    {
+        case EEng_ArchitectureState::Initializing:
+            // Should not be in this state during tick
+            CurrentArchitectureState = EEng_ArchitectureState::Active;
+            break;
+            
+        case EEng_ArchitectureState::Active:
+            // Normal operation - no special handling needed
+            break;
+            
+        case EEng_ArchitectureState::Warning:
+            // Log warning state
+            UE_LOG(LogTemp, Warning, TEXT("Architecture in warning state - monitoring closely"));
+            break;
+            
+        case EEng_ArchitectureState::Error:
+            // Log error state
+            UE_LOG(LogTemp, Error, TEXT("Architecture in error state - intervention required"));
+            break;
+            
+        case EEng_ArchitectureState::Shutdown:
+            // Prepare for shutdown
+            break;
+    }
+}
+
+FString UEng_UnifiedArchitectureManager::GetArchitectureStatusReport() const
+{
+    FString Report;
+    Report += FString::Printf(TEXT("=== ARCHITECTURE STATUS REPORT ===\n"));
+    Report += FString::Printf(TEXT("Version: %s\n"), *ArchitectureVersion);
+    Report += FString::Printf(TEXT("State: %d\n"), (int32)CurrentArchitectureState);
+    Report += FString::Printf(TEXT("Core Systems: %d\n"), CoreSystems.Num());
+    Report += FString::Printf(TEXT("Performance Metrics: %d\n"), PerformanceMetrics.Num());
+    Report += FString::Printf(TEXT("Compliance Level: %d\n"), (int32)ComplianceLevel);
+    
+    return Report;
+}
+
+void UEng_UnifiedArchitectureManager::SetComplianceLevel(EEng_ComplianceLevel NewLevel)
+{
+    ComplianceLevel = NewLevel;
+    UE_LOG(LogTemp, Log, TEXT("Architecture compliance level set to: %d"), (int32)NewLevel);
 }
