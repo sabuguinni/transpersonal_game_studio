@@ -1,241 +1,296 @@
 #include "NarrativeManager.h"
-#include "NarrativeTrigger.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
-#include "Kismet/GameplayStatics.h"
 #include "Components/AudioComponent.h"
+#include "Sound/SoundBase.h"
+#include "Kismet/GameplayStatics.h"
+#include "../Character/TranspersonalCharacter.h"
+#include "../TranspersonalGameState.h"
 
 UNarrativeManager::UNarrativeManager()
 {
-    CurrentBiome = EEng_BiomeType::Forest;
-    CurrentWeather = EEng_WeatherType::Clear;
-    CurrentThreatLevel = EEng_ThreatLevel::Safe;
-
-    // Initialize audio URLs from generated TTS samples
-    PaleontologistFieldNotesURL = "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1778073748639_PaleontologistFieldNotes.mp3";
-    EmergencyAlertURL = "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1778073761060_EmergencyAlert.mp3";
-    DiscoveryNarrationURL = "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1778073771201_DiscoveryNarration.mp3";
-    WeatherWarningURL = "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1778073780906_WeatherWarning.mp3";
+    bDialogueActive = false;
+    CurrentDialogueID = TEXT("");
+    CurrentLineIndex = 0;
+    DialogueTimer = 0.0f;
+    NarrationAudioComponent = nullptr;
 }
 
 void UNarrativeManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    InitializeNarrativeLibrary();
+    UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Initializing narrative system"));
     
-    UE_LOG(LogTemp, Log, TEXT("NarrativeManager initialized with %d narrative types"), NarrativeLibrary.Num());
+    InitializeStoryCheckpoints();
+    LoadQuestDialogues();
+    
+    // Create audio component for narration
+    if (UWorld* World = GetWorld())
+    {
+        if (AActor* WorldActor = World->GetFirstPlayerController())
+        {
+            NarrationAudioComponent = WorldActor->CreateDefaultSubobject<UAudioComponent>(TEXT("NarrationAudio"));
+            if (NarrationAudioComponent)
+            {
+                NarrationAudioComponent->bAutoActivate = false;
+                UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Audio component created"));
+            }
+        }
+    }
 }
 
 void UNarrativeManager::Deinitialize()
 {
-    NarrativeTriggers.Empty();
-    NarrativeLibrary.Empty();
+    EndCurrentDialogue();
+    
+    if (NarrationAudioComponent)
+    {
+        NarrationAudioComponent->Stop();
+        NarrationAudioComponent = nullptr;
+    }
     
     Super::Deinitialize();
 }
 
-void UNarrativeManager::InitializeNarrativeLibrary()
+void UNarrativeManager::StartDialogue(const FString& DialogueID, ATranspersonalCharacter* Player)
 {
-    // Discovery narratives
-    TArray<FNarr_NarrativeData> DiscoveryNarratives;
-    DiscoveryNarratives.Add(CreateNarrativeData(
-        ENarr_NarrativeEvent::Discovery,
-        "Descoberta extraordinária! Encontrei um ninho de Triceratops abandonado com três ovos intactos.",
-        DiscoveryNarrationURL,
-        26.0f
-    ));
-    DiscoveryNarratives.Add(CreateNarrativeData(
-        ENarr_NarrativeEvent::Discovery,
-        "Registo de campo: Observei três Raptors a desenvolver estratégias de caça coordenada.",
-        PaleontologistFieldNotesURL,
-        26.0f
-    ));
-    NarrativeLibrary.Add(ENarr_NarrativeEvent::Discovery, DiscoveryNarratives);
-
-    // Danger narratives
-    TArray<FNarr_NarrativeData> DangerNarratives;
-    DangerNarratives.Add(CreateNarrativeData(
-        ENarr_NarrativeEvent::Danger,
-        "Alerta de emergência! Detectei pegadas frescas de Tyrannosaurus Rex a menos de 500 metros!",
-        EmergencyAlertURL,
-        25.0f,
-        true
-    ));
-    NarrativeLibrary.Add(ENarr_NarrativeEvent::Danger, DangerNarratives);
-
-    // Weather narratives
-    TArray<FNarr_NarrativeData> WeatherNarratives;
-    WeatherNarratives.Add(CreateNarrativeData(
-        ENarr_NarrativeEvent::Weather,
-        "Atenção sobrevivente! Tempestade tropical severa aproxima-se. Procurai abrigo imediatamente!",
-        WeatherWarningURL,
-        26.0f,
-        true
-    ));
-    NarrativeLibrary.Add(ENarr_NarrativeEvent::Weather, WeatherNarratives);
-
-    // Dinosaur encounter narratives
-    TArray<FNarr_NarrativeData> DinosaurNarratives;
-    DinosaurNarratives.Add(CreateNarrativeData(
-        ENarr_NarrativeEvent::DinosaurEncounter,
-        "Movimento detectado! Um grande predador aproxima-se da vossa posição.",
-        "",
-        8.0f,
-        true
-    ));
-    DinosaurNarratives.Add(CreateNarrativeData(
-        ENarr_NarrativeEvent::DinosaurEncounter,
-        "Herbívoro pacífico avistado. Mantende distância respeitosa para observação.",
-        "",
-        6.0f
-    ));
-    NarrativeLibrary.Add(ENarr_NarrativeEvent::DinosaurEncounter, DinosaurNarratives);
-}
-
-FNarr_NarrativeData UNarrativeManager::CreateNarrativeData(ENarr_NarrativeEvent EventType, const FString& Text, const FString& AudioURL, float Duration, bool bUrgent)
-{
-    FNarr_NarrativeData Data;
-    Data.EventType = EventType;
-    Data.NarrativeText = Text;
-    Data.AudioPath = AudioURL;
-    Data.Duration = Duration;
-    Data.bIsUrgent = bUrgent;
-    return Data;
-}
-
-void UNarrativeManager::TriggerNarrativeEvent(ENarr_NarrativeEvent EventType, const FString& Context)
-{
-    FNarr_NarrativeData NarrativeData = GetContextualNarrative(EventType);
-    
-    if (!Context.IsEmpty())
+    if (bDialogueActive)
     {
-        NarrativeData.NarrativeText = FString::Printf(TEXT("%s %s"), *NarrativeData.NarrativeText, *Context);
+        UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Cannot start dialogue - another dialogue is active"));
+        return;
     }
-    
-    PlayNarration(NarrativeData);
-    LogNarrativeEvent(NarrativeData);
-}
 
-void UNarrativeManager::PlayNarration(const FNarr_NarrativeData& NarrativeData)
-{
-    // Broadcast to UI and audio systems
-    OnNarrativeEvent.Broadcast(NarrativeData);
-    
-    // Log for debugging
-    UE_LOG(LogTemp, Log, TEXT("Playing narration: %s"), *NarrativeData.NarrativeText);
-    
-    // TODO: Integrate with audio system to play actual audio files
-    if (!NarrativeData.AudioPath.IsEmpty())
+    if (!QuestDialogues.Contains(DialogueID))
     {
-        UE_LOG(LogTemp, Log, TEXT("Audio URL: %s"), *NarrativeData.AudioPath);
+        UE_LOG(LogTemp, Error, TEXT("NarrativeManager: Dialogue ID not found: %s"), *DialogueID);
+        return;
+    }
+
+    const FNarr_QuestDialogue& QuestDialogue = QuestDialogues[DialogueID];
+    
+    bDialogueActive = true;
+    CurrentDialogueID = DialogueID;
+    CurrentLineIndex = 0;
+    DialogueTimer = 0.0f;
+    
+    // Start with intro lines
+    CurrentDialogueLines = QuestDialogue.IntroLines;
+    
+    if (CurrentDialogueLines.Num() > 0)
+    {
+        PlayDialogueLine(CurrentDialogueLines[0]);
+        UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Started dialogue: %s"), *DialogueID);
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: No dialogue lines found for: %s"), *DialogueID);
+        EndCurrentDialogue();
     }
 }
 
-void UNarrativeManager::RegisterNarrativeTrigger(ANarr_NarrativeTrigger* Trigger)
+void UNarrativeManager::TriggerNarration(const FString& CheckpointID)
 {
-    if (Trigger && !NarrativeTriggers.Contains(Trigger))
+    for (const FNarr_StoryCheckpoint& Checkpoint : StoryCheckpoints)
     {
-        NarrativeTriggers.Add(Trigger);
-        UE_LOG(LogTemp, Log, TEXT("Registered narrative trigger: %s"), *Trigger->GetName());
-    }
-}
-
-void UNarrativeManager::UnregisterNarrativeTrigger(ANarr_NarrativeTrigger* Trigger)
-{
-    if (Trigger)
-    {
-        NarrativeTriggers.Remove(Trigger);
-        UE_LOG(LogTemp, Log, TEXT("Unregistered narrative trigger: %s"), *Trigger->GetName());
-    }
-}
-
-void UNarrativeManager::UpdateNarrativeContext(EEng_BiomeType CurrentBiome, EEng_WeatherType Weather, EEng_ThreatLevel ThreatLevel)
-{
-    this->CurrentBiome = CurrentBiome;
-    this->CurrentWeather = Weather;
-    this->CurrentThreatLevel = ThreatLevel;
-    
-    UE_LOG(LogTemp, Log, TEXT("Narrative context updated - Biome: %d, Weather: %d, Threat: %d"), 
-           (int32)CurrentBiome, (int32)Weather, (int32)ThreatLevel);
-}
-
-FNarr_NarrativeData UNarrativeManager::GetContextualNarrative(ENarr_NarrativeEvent EventType)
-{
-    if (NarrativeLibrary.Contains(EventType))
-    {
-        const TArray<FNarr_NarrativeData>& Narratives = NarrativeLibrary[EventType];
-        if (Narratives.Num() > 0)
+        if (Checkpoint.CheckpointID == CheckpointID)
         {
-            // Select narrative based on context or randomly
-            int32 Index = FMath::RandRange(0, Narratives.Num() - 1);
-            return Narratives[Index];
+            TriggerCheckpointNarration(Checkpoint);
+            MarkCheckpointReached(CheckpointID);
+            break;
+        }
+    }
+}
+
+void UNarrativeManager::RegisterQuestDialogue(const FString& QuestID, const FNarr_QuestDialogue& DialogueData)
+{
+    QuestDialogues.Add(QuestID, DialogueData);
+    UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Registered dialogue for quest: %s"), *QuestID);
+}
+
+bool UNarrativeManager::IsStoryCheckpointReached(const FString& CheckpointID) const
+{
+    return ReachedCheckpoints.Contains(CheckpointID);
+}
+
+void UNarrativeManager::MarkCheckpointReached(const FString& CheckpointID)
+{
+    if (!ReachedCheckpoints.Contains(CheckpointID))
+    {
+        ReachedCheckpoints.Add(CheckpointID);
+        UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Checkpoint reached: %s"), *CheckpointID);
+    }
+}
+
+void UNarrativeManager::PlayDialogueLine(const FNarr_DialogueLine& DialogueLine)
+{
+    // Display text (in a real implementation, this would update UI)
+    UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: %s: %s"), *DialogueLine.SpeakerName, *DialogueLine.DialogueText.ToString());
+    
+    // Play voice clip if available
+    if (DialogueLine.VoiceClip.IsValid() && NarrationAudioComponent)
+    {
+        if (USoundBase* Sound = DialogueLine.VoiceClip.LoadSynchronous())
+        {
+            NarrationAudioComponent->SetSound(Sound);
+            NarrationAudioComponent->Play();
         }
     }
     
-    // Fallback narrative
-    FNarr_NarrativeData Fallback;
-    Fallback.EventType = EventType;
-    Fallback.NarrativeText = "Algo interessante aconteceu nesta região pré-histórica.";
-    Fallback.Duration = 3.0f;
-    return Fallback;
+    // Set timer for next line
+    DialogueTimer = DialogueLine.Duration;
 }
 
-void UNarrativeManager::TriggerDinosaurEncounter(EEng_DinosaurSpecies Species, float Distance, bool bIsHostile)
+void UNarrativeManager::EndCurrentDialogue()
 {
-    FString SpeciesName;
-    switch (Species)
+    if (!bDialogueActive)
+        return;
+        
+    bDialogueActive = false;
+    CurrentDialogueID = TEXT("");
+    CurrentLineIndex = 0;
+    DialogueTimer = 0.0f;
+    CurrentDialogueLines.Empty();
+    
+    if (NarrationAudioComponent)
     {
-        case EEng_DinosaurSpecies::TRex:
-            SpeciesName = "Tyrannosaurus Rex";
-            break;
-        case EEng_DinosaurSpecies::Raptor:
-            SpeciesName = "Velociraptor";
-            break;
-        case EEng_DinosaurSpecies::Triceratops:
-            SpeciesName = "Triceratops";
-            break;
-        case EEng_DinosaurSpecies::Brachiosaurus:
-            SpeciesName = "Brachiosaurus";
-            break;
-        default:
-            SpeciesName = "Dinossauro desconhecido";
-            break;
+        NarrationAudioComponent->Stop();
     }
     
-    FString Context = FString::Printf(TEXT("%s detectado a %.0f metros. %s"), 
-                                     *SpeciesName, 
-                                     Distance,
-                                     bIsHostile ? TEXT("Comportamento hostil!") : TEXT("Comportamento neutro."));
-    
-    TriggerNarrativeEvent(ENarr_NarrativeEvent::DinosaurEncounter, Context);
+    UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Dialogue ended"));
 }
 
-void UNarrativeManager::TriggerWeatherWarning(EEng_WeatherType IncomingWeather, float TimeToArrival)
+void UNarrativeManager::CheckLocationTriggers(const FVector& PlayerLocation)
 {
-    FString WeatherName;
-    switch (IncomingWeather)
+    for (const FNarr_StoryCheckpoint& Checkpoint : StoryCheckpoints)
     {
-        case EEng_WeatherType::Storm:
-            WeatherName = "tempestade";
-            break;
-        case EEng_WeatherType::Rain:
-            WeatherName = "chuva intensa";
-            break;
-        case EEng_WeatherType::Snow:
-            WeatherName = "nevasca";
-            break;
-        default:
-            WeatherName = "mudança meteorológica";
-            break;
+        if (Checkpoint.bTriggerAutomatically && 
+            !IsStoryCheckpointReached(Checkpoint.CheckpointID) &&
+            IsPlayerNearCheckpoint(Checkpoint, PlayerLocation))
+        {
+            TriggerNarration(Checkpoint.CheckpointID);
+        }
+    }
+}
+
+float UNarrativeManager::GetStoryProgress() const
+{
+    if (StoryCheckpoints.Num() == 0)
+        return 0.0f;
+        
+    return static_cast<float>(ReachedCheckpoints.Num()) / static_cast<float>(StoryCheckpoints.Num());
+}
+
+void UNarrativeManager::InitializeStoryCheckpoints()
+{
+    // Initialize basic story checkpoints
+    FNarr_StoryCheckpoint IntroCheckpoint;
+    IntroCheckpoint.CheckpointID = TEXT("Intro_001");
+    IntroCheckpoint.NarrativeText = FText::FromString(TEXT("Day 233 in the Cretaceous wilderness. The morning reveals disturbing signs..."));
+    IntroCheckpoint.TriggerLocation = FVector(0, 0, 100);
+    IntroCheckpoint.TriggerRadius = 1000.0f;
+    IntroCheckpoint.bTriggerAutomatically = true;
+    StoryCheckpoints.Add(IntroCheckpoint);
+    
+    FNarr_StoryCheckpoint ThreatCheckpoint;
+    ThreatCheckpoint.CheckpointID = TEXT("Threat_001");
+    ThreatCheckpoint.NarrativeText = FText::FromString(TEXT("Critical threat assessment! Massive Carnotaurus pack detected..."));
+    ThreatCheckpoint.TriggerLocation = FVector(2000, 0, 100);
+    ThreatCheckpoint.TriggerRadius = 800.0f;
+    ThreatCheckpoint.bTriggerAutomatically = true;
+    StoryCheckpoints.Add(ThreatCheckpoint);
+    
+    FNarr_StoryCheckpoint GuideCheckpoint;
+    GuideCheckpoint.CheckpointID = TEXT("Guide_001");
+    GuideCheckpoint.NarrativeText = FText::FromString(TEXT("The ancient river crossing holds secrets of survival..."));
+    GuideCheckpoint.TriggerLocation = FVector(1000, 1500, 50);
+    GuideCheckpoint.TriggerRadius = 600.0f;
+    GuideCheckpoint.bTriggerAutomatically = true;
+    StoryCheckpoints.Add(GuideCheckpoint);
+    
+    UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Initialized %d story checkpoints"), StoryCheckpoints.Num());
+}
+
+void UNarrativeManager::LoadQuestDialogues()
+{
+    // Create sample quest dialogue
+    FNarr_QuestDialogue SurvivalQuest;
+    SurvivalQuest.QuestID = TEXT("Survival_001");
+    
+    // Intro lines
+    FNarr_DialogueLine IntroLine1;
+    IntroLine1.SpeakerName = TEXT("Survival Guide");
+    IntroLine1.DialogueText = FText::FromString(TEXT("Welcome to the Cretaceous period. Your survival depends on understanding this dangerous world."));
+    IntroLine1.Duration = 4.0f;
+    SurvivalQuest.IntroLines.Add(IntroLine1);
+    
+    FNarr_DialogueLine IntroLine2;
+    IntroLine2.SpeakerName = TEXT("Survival Guide");
+    IntroLine2.DialogueText = FText::FromString(TEXT("Find shelter, gather resources, and avoid the apex predators. Your journey begins now."));
+    IntroLine2.Duration = 4.0f;
+    SurvivalQuest.IntroLines.Add(IntroLine2);
+    
+    // Progress lines
+    FNarr_DialogueLine ProgressLine;
+    ProgressLine.SpeakerName = TEXT("Survival Guide");
+    ProgressLine.DialogueText = FText::FromString(TEXT("Good progress. You're learning to read the signs of this ancient world."));
+    ProgressLine.Duration = 3.0f;
+    SurvivalQuest.ProgressLines.Add(ProgressLine);
+    
+    // Completion lines
+    FNarr_DialogueLine CompletionLine;
+    CompletionLine.SpeakerName = TEXT("Survival Guide");
+    CompletionLine.DialogueText = FText::FromString(TEXT("Excellent work, survivor. You've taken your first steps toward mastering this prehistoric realm."));
+    CompletionLine.Duration = 4.0f;
+    SurvivalQuest.CompletionLines.Add(CompletionLine);
+    
+    RegisterQuestDialogue(TEXT("Survival_001"), SurvivalQuest);
+}
+
+void UNarrativeManager::UpdateDialogueTimer(float DeltaTime)
+{
+    if (!bDialogueActive)
+        return;
+        
+    DialogueTimer -= DeltaTime;
+    
+    if (DialogueTimer <= 0.0f)
+    {
+        ProcessNextDialogueLine();
+    }
+}
+
+void UNarrativeManager::ProcessNextDialogueLine()
+{
+    CurrentLineIndex++;
+    
+    if (CurrentLineIndex >= CurrentDialogueLines.Num())
+    {
+        EndCurrentDialogue();
+        return;
     }
     
-    FString Context = FString::Printf(TEXT("Aproxima-se %s em %.1f minutos."), *WeatherName, TimeToArrival);
-    TriggerNarrativeEvent(ENarr_NarrativeEvent::Weather, Context);
+    PlayDialogueLine(CurrentDialogueLines[CurrentLineIndex]);
 }
 
-void UNarrativeManager::LogNarrativeEvent(const FNarr_NarrativeData& Data)
+bool UNarrativeManager::IsPlayerNearCheckpoint(const FNarr_StoryCheckpoint& Checkpoint, const FVector& PlayerLocation) const
 {
-    FString UrgencyText = Data.bIsUrgent ? TEXT("[URGENT]") : TEXT("[INFO]");
-    UE_LOG(LogTemp, Warning, TEXT("%s Narrative Event: %s"), *UrgencyText, *Data.NarrativeText);
+    float Distance = FVector::Dist(PlayerLocation, Checkpoint.TriggerLocation);
+    return Distance <= Checkpoint.TriggerRadius;
+}
+
+void UNarrativeManager::TriggerCheckpointNarration(const FNarr_StoryCheckpoint& Checkpoint)
+{
+    UE_LOG(LogTemp, Warning, TEXT("NarrativeManager: Triggered checkpoint: %s"), *Checkpoint.CheckpointID);
+    UE_LOG(LogTemp, Warning, TEXT("Narration: %s"), *Checkpoint.NarrativeText.ToString());
+    
+    // Play narration audio if available
+    if (Checkpoint.NarrationClip.IsValid() && NarrationAudioComponent)
+    {
+        if (USoundBase* Sound = Checkpoint.NarrationClip.LoadSynchronous())
+        {
+            NarrationAudioComponent->SetSound(Sound);
+            NarrationAudioComponent->Play();
+        }
+    }
 }
