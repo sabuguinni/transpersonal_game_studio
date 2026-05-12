@@ -2,40 +2,56 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "Engine/Engine.h"
+#include "Engine/World.h"
+#include "Particles/ParticleSystem.h"
 #include "NiagaraSystem.h"
 #include "NiagaraComponent.h"
-#include "NiagaraFunctionLibrary.h"
-#include "Components/AudioComponent.h"
 #include "Sound/SoundCue.h"
-#include "../SharedTypes.h"
 #include "VFX_ImpactManager.generated.h"
 
+UENUM(BlueprintType)
+enum class EVFX_ImpactType : uint8
+{
+    Light_Footstep      UMETA(DisplayName = "Light Footstep"),
+    Medium_Footstep     UMETA(DisplayName = "Medium Footstep"), 
+    Heavy_Footstep      UMETA(DisplayName = "Heavy Footstep"),
+    Massive_Footstep    UMETA(DisplayName = "Massive Footstep"),
+    Weapon_Impact       UMETA(DisplayName = "Weapon Impact"),
+    Fall_Impact         UMETA(DisplayName = "Fall Impact"),
+    Rock_Impact         UMETA(DisplayName = "Rock Impact")
+};
+
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FVFX_ImpactData
+struct FVFX_ImpactData
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    TSoftObjectPtr<UNiagaraSystem> ParticleEffect;
+    UNiagaraSystem* DustEffect;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    TSoftObjectPtr<USoundCue> ImpactSound;
+    UNiagaraSystem* DebrisEffect;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    FVector EffectScale;
+    USoundCue* ImpactSound;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    float ParticleScale;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
     float EffectDuration;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    bool bAttachToSurface;
+    float SpawnRadius;
 
     FVFX_ImpactData()
     {
-        EffectScale = FVector(1.0f, 1.0f, 1.0f);
-        EffectDuration = 3.0f;
-        bAttachToSurface = false;
+        DustEffect = nullptr;
+        DebrisEffect = nullptr;
+        ImpactSound = nullptr;
+        ParticleScale = 1.0f;
+        EffectDuration = 2.0f;
+        SpawnRadius = 100.0f;
     }
 };
 
@@ -50,73 +66,38 @@ public:
 protected:
     virtual void BeginPlay() override;
 
-public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Impact VFX")
+    TMap<EVFX_ImpactType, FVFX_ImpactData> ImpactEffects;
 
-    // Impact effect mapping by surface type
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Impact")
-    TMap<TEnumAsByte<EPhysicalSurface>, FVFX_ImpactData> SurfaceImpacts;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Impact VFX")
+    float MinTimeBetweenEffects;
 
-    // Dinosaur-specific impact effects
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Dinosaur")
-    FVFX_ImpactData FootstepEffect;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Impact VFX")
+    bool bUseGroundMaterialDetection;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Dinosaur")
-    FVFX_ImpactData TailSwipeEffect;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Dinosaur")
-    FVFX_ImpactData BiteEffect;
-
-    // Combat impact effects
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Combat")
-    FVFX_ImpactData BloodSplatterEffect;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Combat")
-    FVFX_ImpactData WeaponImpactEffect;
-
-    // Environmental effects
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Environment")
-    FVFX_ImpactData RockFallEffect;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Environment")
-    FVFX_ImpactData TreeFallEffect;
-
-    // Public interface functions
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void PlayImpactEffect(const FVector& Location, const FVector& Normal, EPhysicalSurface SurfaceType, float ImpactForce = 1.0f);
-
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void PlayFootstepEffect(const FVector& Location, const FVector& Normal, float DinosaurSize = 1.0f);
-
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void PlayBloodEffect(const FVector& Location, const FVector& Direction, float BloodAmount = 1.0f);
-
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void PlayWeaponImpact(const FVector& Location, const FVector& Normal, EPhysicalSurface SurfaceType);
-
-    UFUNCTION(BlueprintCallable, Category = "VFX")
-    void PlayEnvironmentalEffect(const FVector& Location, bool bIsRockFall = false);
-
-protected:
-    // Internal helper functions
-    void SpawnParticleEffect(const FVFX_ImpactData& EffectData, const FVector& Location, const FRotator& Rotation, float ScaleMultiplier = 1.0f);
-    
-    void PlayImpactSound(const FVFX_ImpactData& EffectData, const FVector& Location, float VolumeMultiplier = 1.0f);
-
-    FRotator CalculateEffectRotation(const FVector& Normal);
-
-private:
-    // Active effect tracking
-    UPROPERTY()
-    TArray<UNiagaraComponent*> ActiveEffects;
-
-    // Performance optimization
-    UPROPERTY(EditAnywhere, Category = "Performance")
-    int32 MaxConcurrentEffects;
-
-    UPROPERTY(EditAnywhere, Category = "Performance")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Impact VFX")
     float EffectCullDistance;
 
-    void CleanupFinishedEffects();
-    bool ShouldCullEffect(const FVector& EffectLocation) const;
+private:
+    float LastEffectTime;
+    UWorld* CachedWorld;
+
+public:
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void TriggerImpactEffect(EVFX_ImpactType ImpactType, FVector Location, FVector Normal = FVector::UpVector, float IntensityMultiplier = 1.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void TriggerFootstepEffect(float DinosaurMass, FVector Location, FVector Normal = FVector::UpVector);
+
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    void SetupDefaultEffects();
+
+    UFUNCTION(BlueprintCallable, Category = "VFX")
+    EVFX_ImpactType GetImpactTypeFromMass(float Mass);
+
+private:
+    bool ShouldSpawnEffect(FVector Location);
+    void SpawnDustEffect(UNiagaraSystem* Effect, FVector Location, FVector Normal, float Scale);
+    void SpawnDebrisEffect(UNiagaraSystem* Effect, FVector Location, FVector Normal, float Scale);
+    void PlayImpactSound(USoundCue* Sound, FVector Location, float VolumeMultiplier);
 };
