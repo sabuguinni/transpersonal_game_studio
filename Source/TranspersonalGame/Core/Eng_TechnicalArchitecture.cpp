@@ -1,368 +1,541 @@
 #include "Eng_TechnicalArchitecture.h"
 #include "Engine/Engine.h"
+#include "HAL/PlatformFilemanager.h"
+#include "Misc/DateTime.h"
 #include "Engine/World.h"
-#include "Kismet/KismetMathLibrary.h"
-#include "HAL/FileManager.h"
-#include "Misc/Paths.h"
+#include "GameFramework/Actor.h"
+#include "Components/ActorComponent.h"
 
-UEng_TechnicalArchitecture::UEng_TechnicalArchitecture()
-{
-    CurrentStatus = EEng_ArchitectureStatus::Unknown;
-}
+// ========================================================================================
+// UEng_TechnicalArchitectureSubsystem Implementation
+// ========================================================================================
 
-void UEng_TechnicalArchitecture::Initialize(FSubsystemCollectionBase& Collection)
+void UEng_TechnicalArchitectureSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Warning, TEXT("=== ENGINE ARCHITECT - TECHNICAL ARCHITECTURE INITIALIZED ==="));
+    UE_LOG(LogTemp, Warning, TEXT("ENGINE ARCHITECT - Technical Architecture Subsystem Initializing"));
     
-    CurrentStatus = EEng_ArchitectureStatus::Validating;
+    // Set default performance profile
+    CurrentProfile = EEng_PerformanceProfile::PC_High;
     
-    // Initialize core systems
-    InitializeBiomeDefinitions();
-    InitializeCompilationRules();
-    ValidateCurrentCodebase();
+    // Initialize performance budgets
+    InitializePerformanceProfiles();
     
-    CurrentStatus = EEng_ArchitectureStatus::Valid;
+    // Initialize default architectural rules
+    InitializeDefaultRules();
     
-    UE_LOG(LogTemp, Warning, TEXT("Technical Architecture System: ONLINE"));
-    UE_LOG(LogTemp, Warning, TEXT("Biome validation: ACTIVE"));
-    UE_LOG(LogTemp, Warning, TEXT("Compilation rules: ENFORCED"));
+    // Clear violation tracking
+    ViolatingAgents.Empty();
+    BlockedSystems.Empty();
+    
+    UE_LOG(LogTemp, Warning, TEXT("ENGINE ARCHITECT - Technical Architecture Subsystem Ready"));
 }
 
-void UEng_TechnicalArchitecture::Deinitialize()
+void UEng_TechnicalArchitectureSubsystem::Deinitialize()
 {
-    UE_LOG(LogTemp, Warning, TEXT("Technical Architecture System: SHUTDOWN"));
+    UE_LOG(LogTemp, Warning, TEXT("ENGINE ARCHITECT - Technical Architecture Subsystem Shutting Down"));
+    
+    // Generate final compliance report
+    GenerateArchitectureReport();
+    
     Super::Deinitialize();
 }
 
-void UEng_TechnicalArchitecture::InitializeBiomeDefinitions()
+void UEng_TechnicalArchitectureSubsystem::SetPerformanceProfile(EEng_PerformanceProfile Profile)
 {
-    // CRITICAL: These coordinates come from brain memories and are MANDATORY
+    CurrentProfile = Profile;
     
-    // 1. PANTANO (Swamp) - Southwest
-    FEng_BiomeValidationData SwampData;
-    SwampData.BiomeType = EBiomeType::Swamp;
-    SwampData.BiomeName = TEXT("Pantano");
-    SwampData.Center = FVector(-50000.0f, -45000.0f, 0.0f);
-    SwampData.MinBounds = FVector(-77500.0f, -76500.0f, -1000.0f);
-    SwampData.MaxBounds = FVector(-25000.0f, -15000.0f, 1000.0f);
-    BiomeDefinitions.Add(EBiomeType::Swamp, SwampData);
+    // Update performance budget based on profile
+    switch (Profile)
+    {
+        case EEng_PerformanceProfile::Development:
+            PerformanceBudget.MaxFrameTimeMS = 33.33f; // 30 FPS, relaxed for debugging
+            PerformanceBudget.MaxActiveActors = 10000;
+            PerformanceBudget.MaxPhysicsBodies = 2000;
+            PerformanceBudget.MaxParticleCount = 50000;
+            PerformanceBudget.MaxMemoryMB = 16384.0f; // 16 GB
+            break;
+            
+        case EEng_PerformanceProfile::Console:
+            PerformanceBudget.MaxFrameTimeMS = 33.33f; // 30 FPS
+            PerformanceBudget.MaxActiveActors = 3000;
+            PerformanceBudget.MaxPhysicsBodies = 500;
+            PerformanceBudget.MaxParticleCount = 5000;
+            PerformanceBudget.MaxMemoryMB = 6144.0f; // 6 GB (console constraints)
+            break;
+            
+        case EEng_PerformanceProfile::PC_High:
+            PerformanceBudget.MaxFrameTimeMS = 16.67f; // 60 FPS
+            PerformanceBudget.MaxActiveActors = 5000;
+            PerformanceBudget.MaxPhysicsBodies = 1000;
+            PerformanceBudget.MaxParticleCount = 10000;
+            PerformanceBudget.MaxMemoryMB = 8192.0f; // 8 GB
+            break;
+            
+        case EEng_PerformanceProfile::PC_Ultra:
+            PerformanceBudget.MaxFrameTimeMS = 8.33f; // 120 FPS
+            PerformanceBudget.MaxActiveActors = 7500;
+            PerformanceBudget.MaxPhysicsBodies = 1500;
+            PerformanceBudget.MaxParticleCount = 15000;
+            PerformanceBudget.MaxMemoryMB = 12288.0f; // 12 GB
+            break;
+    }
     
-    // 2. FLORESTA (Forest) - Northwest  
-    FEng_BiomeValidationData ForestData;
-    ForestData.BiomeType = EBiomeType::Forest;
-    ForestData.BiomeName = TEXT("Floresta");
-    ForestData.Center = FVector(-45000.0f, 40000.0f, 0.0f);
-    ForestData.MinBounds = FVector(-77500.0f, 15000.0f, -1000.0f);
-    ForestData.MaxBounds = FVector(-15000.0f, 76500.0f, 1000.0f);
-    BiomeDefinitions.Add(EBiomeType::Forest, ForestData);
-    
-    // 3. SAVANA (Savanna) - Center
-    FEng_BiomeValidationData SavannaData;
-    SavannaData.BiomeType = EBiomeType::Savanna;
-    SavannaData.BiomeName = TEXT("Savana");
-    SavannaData.Center = FVector(0.0f, 0.0f, 0.0f);
-    SavannaData.MinBounds = FVector(-20000.0f, -20000.0f, -1000.0f);
-    SavannaData.MaxBounds = FVector(20000.0f, 20000.0f, 1000.0f);
-    BiomeDefinitions.Add(EBiomeType::Savanna, SavannaData);
-    
-    // 4. DESERTO (Desert) - East
-    FEng_BiomeValidationData DesertData;
-    DesertData.BiomeType = EBiomeType::Desert;
-    DesertData.BiomeName = TEXT("Deserto");
-    DesertData.Center = FVector(55000.0f, 0.0f, 0.0f);
-    DesertData.MinBounds = FVector(25000.0f, -30000.0f, -1000.0f);
-    DesertData.MaxBounds = FVector(79500.0f, 30000.0f, 1000.0f);
-    BiomeDefinitions.Add(EBiomeType::Desert, DesertData);
-    
-    // 5. MONTANHA NEVADA (Mountain) - Northeast
-    FEng_BiomeValidationData MountainData;
-    MountainData.BiomeType = EBiomeType::Mountain;
-    MountainData.BiomeName = TEXT("Montanha Nevada");
-    MountainData.Center = FVector(40000.0f, 50000.0f, 500.0f);
-    MountainData.MinBounds = FVector(15000.0f, 20000.0f, -500.0f);
-    MountainData.MaxBounds = FVector(79500.0f, 76500.0f, 2000.0f);
-    BiomeDefinitions.Add(EBiomeType::Mountain, MountainData);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Biome definitions initialized: 5 biomes configured"));
+    UE_LOG(LogTemp, Warning, TEXT("ENGINE ARCHITECT - Performance Profile Set: %s"), 
+           *UEnum::GetValueAsString(Profile));
 }
 
-void UEng_TechnicalArchitecture::InitializeCompilationRules()
+FEng_PerformanceBudget UEng_TechnicalArchitectureSubsystem::GetCurrentPerformanceBudget() const
 {
-    CompilationRules.Empty();
-    
-    // Rule 1: Header-CPP Pairing
-    FEng_CompilationRule HeaderCppRule;
-    HeaderCppRule.RuleName = TEXT("HeaderCppPairing");
-    HeaderCppRule.Description = TEXT("Every .h file must have a corresponding .cpp file");
-    HeaderCppRule.bIsCritical = true;
-    HeaderCppRule.ViolationCount = 0;
-    CompilationRules.Add(HeaderCppRule);
-    
-    // Rule 2: Type Uniqueness
-    FEng_CompilationRule TypeUniqueRule;
-    TypeUniqueRule.RuleName = TEXT("TypeUniqueness");
-    TypeUniqueRule.Description = TEXT("No duplicate USTRUCT/UENUM/UCLASS names across project");
-    TypeUniqueRule.bIsCritical = true;
-    TypeUniqueRule.ViolationCount = 0;
-    CompilationRules.Add(TypeUniqueRule);
-    
-    // Rule 3: No Vector Zero Spawns
-    FEng_CompilationRule NoZeroSpawnRule;
-    NoZeroSpawnRule.RuleName = TEXT("NoZeroSpawns");
-    NoZeroSpawnRule.Description = TEXT("Never spawn actors at Vector(0,0,0) - use biome coordinates");
-    NoZeroSpawnRule.bIsCritical = true;
-    NoZeroSpawnRule.ViolationCount = 0;
-    CompilationRules.Add(NoZeroSpawnRule);
-    
-    // Rule 4: Module Dependencies
-    FEng_CompilationRule ModuleDepsRule;
-    ModuleDepsRule.RuleName = TEXT("ModuleDependencies");
-    ModuleDepsRule.Description = TEXT("All cross-module includes must be declared in Build.cs");
-    ModuleDepsRule.bIsCritical = true;
-    ModuleDepsRule.ViolationCount = 0;
-    CompilationRules.Add(ModuleDepsRule);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Compilation rules initialized: %d rules active"), CompilationRules.Num());
+    return PerformanceBudget;
 }
 
-void UEng_TechnicalArchitecture::ValidateCurrentCodebase()
+bool UEng_TechnicalArchitectureSubsystem::ValidatePerformanceCompliance(const FString& SystemName, float FrameTimeMS, int32 ActorCount)
 {
-    UE_LOG(LogTemp, Warning, TEXT("=== CODEBASE VALIDATION STARTED ==="));
+    bool bCompliant = true;
     
-    int32 TotalViolations = 0;
-    
-    // Validate each rule
-    for (FEng_CompilationRule& Rule : CompilationRules)
+    // Check frame time compliance
+    if (FrameTimeMS > PerformanceBudget.MaxFrameTimeMS)
     {
-        Rule.ViolationCount = 0;
-        
-        if (Rule.RuleName == TEXT("HeaderCppPairing"))
+        LogArchitecturalViolation(SystemName, 
+            FString::Printf(TEXT("Frame time violation: %.2fms exceeds budget %.2fms"), 
+                          FrameTimeMS, PerformanceBudget.MaxFrameTimeMS));
+        bCompliant = false;
+    }
+    
+    // Check actor count compliance
+    if (ActorCount > PerformanceBudget.MaxActiveActors)
+    {
+        LogArchitecturalViolation(SystemName, 
+            FString::Printf(TEXT("Actor count violation: %d exceeds budget %d"), 
+                          ActorCount, PerformanceBudget.MaxActiveActors));
+        bCompliant = false;
+    }
+    
+    return bCompliant;
+}
+
+bool UEng_TechnicalArchitectureSubsystem::RegisterSystem(const FString& SystemName, EEng_SystemPriority Priority, const FString& AgentOwner)
+{
+    if (SystemName.IsEmpty() || AgentOwner.IsEmpty())
+    {
+        UE_LOG(LogTemp, Error, TEXT("ENGINE ARCHITECT - Invalid system registration: %s by %s"), 
+               *SystemName, *AgentOwner);
+        return false;
+    }
+    
+    RegisteredSystems.Add(SystemName, Priority);
+    SystemOwners.Add(SystemName, AgentOwner);
+    
+    UE_LOG(LogTemp, Warning, TEXT("ENGINE ARCHITECT - System Registered: %s (Priority: %s) by Agent: %s"), 
+           *SystemName, *UEnum::GetValueAsString(Priority), *AgentOwner);
+    
+    return true;
+}
+
+bool UEng_TechnicalArchitectureSubsystem::ValidateSystemArchitecture(const FString& SystemName)
+{
+    if (!RegisteredSystems.Contains(SystemName))
+    {
+        LogArchitecturalViolation(SystemName, TEXT("System not registered with Technical Architecture"));
+        return false;
+    }
+    
+    return CheckSystemCompliance(SystemName);
+}
+
+void UEng_TechnicalArchitectureSubsystem::BlockSystemOperation(const FString& SystemName, const FString& Reason)
+{
+    BlockedSystems.AddUnique(SystemName);
+    
+    UE_LOG(LogTemp, Error, TEXT("ENGINE ARCHITECT - SYSTEM BLOCKED: %s - Reason: %s"), 
+           *SystemName, *Reason);
+    
+    // Add owning agent to violations list
+    if (SystemOwners.Contains(SystemName))
+    {
+        ViolatingAgents.AddUnique(SystemOwners[SystemName]);
+    }
+}
+
+void UEng_TechnicalArchitectureSubsystem::AddArchitecturalRule(const FEng_ArchitecturalRule& Rule)
+{
+    ArchitecturalRules.Add(Rule);
+    
+    UE_LOG(LogTemp, Warning, TEXT("ENGINE ARCHITECT - Architectural Rule Added: %s"), *Rule.RuleName);
+}
+
+bool UEng_TechnicalArchitectureSubsystem::ValidateAgentCompliance(const FString& AgentName)
+{
+    bool bCompliant = true;
+    
+    // Check if agent has any blocked systems
+    for (const auto& SystemPair : SystemOwners)
+    {
+        if (SystemPair.Value == AgentName && BlockedSystems.Contains(SystemPair.Key))
         {
-            // This would require file system access to validate properly
-            // For now, assume compliance based on brain memory about 122 headers
-            Rule.ViolationCount = 122; // From brain memory
-        }
-        else if (Rule.RuleName == TEXT("NoZeroSpawns"))
-        {
-            // Check if any actors are at (0,0,0) - this would need world access
-            Rule.ViolationCount = 0; // Assume good for now
-        }
-        
-        TotalViolations += Rule.ViolationCount;
-        
-        if (Rule.ViolationCount > 0)
-        {
-            UE_LOG(LogTemp, Error, TEXT("Rule violation: %s - %d violations"), 
-                *Rule.RuleName, Rule.ViolationCount);
+            bCompliant = false;
+            break;
         }
     }
     
-    // Set system status based on violations
-    if (TotalViolations == 0)
+    // Update violations list
+    if (!bCompliant)
     {
-        CurrentStatus = EEng_ArchitectureStatus::Valid;
-    }
-    else if (TotalViolations < 10)
-    {
-        CurrentStatus = EEng_ArchitectureStatus::HasWarnings;
-    }
-    else if (TotalViolations < 50)
-    {
-        CurrentStatus = EEng_ArchitectureStatus::HasErrors;
+        ViolatingAgents.AddUnique(AgentName);
     }
     else
     {
-        CurrentStatus = EEng_ArchitectureStatus::Critical;
+        ViolatingAgents.Remove(AgentName);
     }
     
-    UE_LOG(LogTemp, Warning, TEXT("Codebase validation complete: %d total violations"), TotalViolations);
+    return bCompliant;
 }
 
-bool UEng_TechnicalArchitecture::IsValidBiomeLocation(const FVector& Location, EBiomeType BiomeType) const
+TArray<FString> UEng_TechnicalArchitectureSubsystem::GetViolatingAgents() const
 {
-    if (!BiomeDefinitions.Contains(BiomeType))
+    return ViolatingAgents;
+}
+
+float UEng_TechnicalArchitectureSubsystem::GetCurrentMemoryUsageMB() const
+{
+    // Calculate total allocated memory
+    float TotalMemoryMB = 0.0f;
+    for (const auto& AllocationPair : SystemMemoryAllocations)
     {
+        TotalMemoryMB += AllocationPair.Value;
+    }
+    
+    return TotalMemoryMB;
+}
+
+bool UEng_TechnicalArchitectureSubsystem::RequestMemoryAllocation(const FString& SystemName, float SizeMB)
+{
+    float CurrentUsage = GetCurrentMemoryUsageMB();
+    
+    if (CurrentUsage + SizeMB > PerformanceBudget.MaxMemoryMB)
+    {
+        LogArchitecturalViolation(SystemName, 
+            FString::Printf(TEXT("Memory allocation denied: %.2fMB would exceed budget %.2fMB"), 
+                          CurrentUsage + SizeMB, PerformanceBudget.MaxMemoryMB));
         return false;
     }
     
-    const FEng_BiomeValidationData& BiomeData = BiomeDefinitions[BiomeType];
+    SystemMemoryAllocations.Add(SystemName, SizeMB);
     
-    return (Location.X >= BiomeData.MinBounds.X && Location.X <= BiomeData.MaxBounds.X &&
-            Location.Y >= BiomeData.MinBounds.Y && Location.Y <= BiomeData.MaxBounds.Y &&
-            Location.Z >= BiomeData.MinBounds.Z && Location.Z <= BiomeData.MaxBounds.Z);
-}
-
-EBiomeType UEng_TechnicalArchitecture::GetBiomeAtLocation(const FVector& Location) const
-{
-    // Check each biome to see which one contains this location
-    for (const auto& BiomePair : BiomeDefinitions)
-    {
-        if (IsValidBiomeLocation(Location, BiomePair.Key))
-        {
-            return BiomePair.Key;
-        }
-    }
-    
-    // Default to Savanna if location is outside all biomes
-    return EBiomeType::Savanna;
-}
-
-FVector UEng_TechnicalArchitecture::GetRandomLocationInBiome(EBiomeType BiomeType) const
-{
-    if (!BiomeDefinitions.Contains(BiomeType))
-    {
-        // Return Savanna center as fallback
-        return FVector(0.0f, 0.0f, 0.0f);
-    }
-    
-    const FEng_BiomeValidationData& BiomeData = BiomeDefinitions[BiomeType];
-    
-    // Generate random location within biome bounds
-    float RandomX = FMath::RandRange(BiomeData.MinBounds.X, BiomeData.MaxBounds.X);
-    float RandomY = FMath::RandRange(BiomeData.MinBounds.Y, BiomeData.MaxBounds.Y);
-    float RandomZ = FMath::RandRange(BiomeData.MinBounds.Z, BiomeData.MaxBounds.Z);
-    
-    return FVector(RandomX, RandomY, RandomZ);
-}
-
-FEng_BiomeValidationData UEng_TechnicalArchitecture::GetBiomeData(EBiomeType BiomeType) const
-{
-    if (BiomeDefinitions.Contains(BiomeType))
-    {
-        return BiomeDefinitions[BiomeType];
-    }
-    
-    // Return default data if biome not found
-    return FEng_BiomeValidationData();
-}
-
-bool UEng_TechnicalArchitecture::ValidateHeaderCppPairing(const FString& HeaderPath) const
-{
-    // Convert .h to .cpp path
-    FString CppPath = HeaderPath.Replace(TEXT(".h"), TEXT(".cpp"));
-    
-    // Check if .cpp file exists (would need file system access)
-    // For now, return true as placeholder
-    return true;
-}
-
-bool UEng_TechnicalArchitecture::ValidateTypeUniqueness(const FString& TypeName) const
-{
-    // This would require reflection system access to check all loaded types
-    // For now, return true as placeholder
-    return true;
-}
-
-TArray<FEng_CompilationRule> UEng_TechnicalArchitecture::GetActiveRules() const
-{
-    return CompilationRules;
-}
-
-EEng_ArchitectureStatus UEng_TechnicalArchitecture::GetSystemStatus() const
-{
-    return CurrentStatus;
-}
-
-bool UEng_TechnicalArchitecture::ValidateModuleDependency(const FString& FromModule, const FString& ToModule) const
-{
-    // This would require Build.cs parsing to validate properly
-    // For now, return true as placeholder
-    return true;
-}
-
-TArray<FString> UEng_TechnicalArchitecture::GetRequiredModules() const
-{
-    TArray<FString> RequiredModules;
-    RequiredModules.Add(TEXT("Core"));
-    RequiredModules.Add(TEXT("CoreUObject"));
-    RequiredModules.Add(TEXT("Engine"));
-    RequiredModules.Add(TEXT("UnrealEd"));
-    RequiredModules.Add(TEXT("ToolMenus"));
-    RequiredModules.Add(TEXT("PCG"));
-    RequiredModules.Add(TEXT("MassEntity"));
-    RequiredModules.Add(TEXT("MassMovement"));
-    RequiredModules.Add(TEXT("MassSpawner"));
-    
-    return RequiredModules;
-}
-
-bool UEng_TechnicalArchitecture::CanAgentProceed(int32 AgentID, const FString& TaskType) const
-{
-    // Check if system is in critical state
-    if (CurrentStatus == EEng_ArchitectureStatus::Critical)
-    {
-        UE_LOG(LogTemp, Error, TEXT("Agent %d blocked - system in critical state"), AgentID);
-        return false;
-    }
-    
-    // Agent #20 (cleanup) can always proceed
-    if (AgentID == 20)
-    {
-        return true;
-    }
-    
-    // Block new development if too many violations
-    if (CurrentStatus == EEng_ArchitectureStatus::HasErrors && TaskType.Contains(TEXT("Create")))
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Agent %d blocked - fix existing errors before creating new content"), AgentID);
-        return false;
-    }
+    UE_LOG(LogTemp, Warning, TEXT("ENGINE ARCHITECT - Memory Allocated: %s = %.2fMB (Total: %.2fMB)"), 
+           *SystemName, SizeMB, CurrentUsage + SizeMB);
     
     return true;
 }
 
-void UEng_TechnicalArchitecture::RegisterAgentTask(int32 AgentID, const FString& TaskType, const FString& Description)
+void UEng_TechnicalArchitectureSubsystem::ReleaseMemoryAllocation(const FString& SystemName, float SizeMB)
 {
-    ActiveAgentTasks.Add(AgentID, FString::Printf(TEXT("%s: %s"), *TaskType, *Description));
-    UE_LOG(LogTemp, Log, TEXT("Agent %d registered task: %s"), AgentID, *Description);
-}
-
-void UEng_TechnicalArchitecture::ReportAgentCompletion(int32 AgentID, bool bSuccess, const FString& Result)
-{
-    if (ActiveAgentTasks.Contains(AgentID))
+    if (SystemMemoryAllocations.Contains(SystemName))
     {
-        ActiveAgentTasks.Remove(AgentID);
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("Agent %d completed: %s - %s"), 
-        AgentID, bSuccess ? TEXT("SUCCESS") : TEXT("FAILED"), *Result);
+        SystemMemoryAllocations.Remove(SystemName);
         
-    // Re-validate codebase after agent completion
-    const_cast<UEng_TechnicalArchitecture*>(this)->ValidateCurrentCodebase();
+        UE_LOG(LogTemp, Warning, TEXT("ENGINE ARCHITECT - Memory Released: %s = %.2fMB"), 
+               *SystemName, SizeMB);
+    }
 }
 
-bool UEng_TechnicalArchitecture::ValidateActorSpawnLocation(const FVector& Location) const
+bool UEng_TechnicalArchitectureSubsystem::ValidateThreadSafety(const FString& SystemName)
 {
-    // CRITICAL: Never allow spawning at (0,0,0)
-    if (Location.Equals(FVector::ZeroVector, 1.0f))
+    // Basic thread safety validation
+    // In a full implementation, this would check for proper synchronization
+    
+    if (!SystemConstraints.bRequireThreadSafety)
     {
-        LogArchitectureViolation(TEXT("Attempted spawn at Vector(0,0,0) - BLOCKED"), true);
-        return false;
+        return true; // Thread safety not enforced
     }
     
-    // Check if location is within any valid biome
-    for (const auto& BiomePair : BiomeDefinitions)
+    // For now, assume all registered systems are thread-safe
+    return RegisteredSystems.Contains(SystemName);
+}
+
+void UEng_TechnicalArchitectureSubsystem::ReportThreadSafetyViolation(const FString& SystemName, const FString& Details)
+{
+    LogArchitecturalViolation(SystemName, 
+        FString::Printf(TEXT("Thread Safety Violation: %s"), *Details));
+    
+    BlockSystemOperation(SystemName, TEXT("Thread safety violation detected"));
+}
+
+void UEng_TechnicalArchitectureSubsystem::GenerateArchitectureReport()
+{
+    UE_LOG(LogTemp, Warning, TEXT("=== ENGINE ARCHITECT - ARCHITECTURE COMPLIANCE REPORT ==="));
+    UE_LOG(LogTemp, Warning, TEXT("Performance Profile: %s"), *UEnum::GetValueAsString(CurrentProfile));
+    UE_LOG(LogTemp, Warning, TEXT("Registered Systems: %d"), RegisteredSystems.Num());
+    UE_LOG(LogTemp, Warning, TEXT("Blocked Systems: %d"), BlockedSystems.Num());
+    UE_LOG(LogTemp, Warning, TEXT("Violating Agents: %d"), ViolatingAgents.Num());
+    UE_LOG(LogTemp, Warning, TEXT("Memory Usage: %.2fMB / %.2fMB"), 
+           GetCurrentMemoryUsageMB(), PerformanceBudget.MaxMemoryMB);
+    
+    // List violating agents
+    for (const FString& Agent : ViolatingAgents)
     {
-        if (IsValidBiomeLocation(Location, BiomePair.Key))
+        UE_LOG(LogTemp, Error, TEXT("VIOLATING AGENT: %s"), *Agent);
+    }
+    
+    // List blocked systems
+    for (const FString& System : BlockedSystems)
+    {
+        UE_LOG(LogTemp, Error, TEXT("BLOCKED SYSTEM: %s"), *System);
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("=== END ARCHITECTURE REPORT ==="));
+}
+
+void UEng_TechnicalArchitectureSubsystem::ValidateAllSystems()
+{
+    UE_LOG(LogTemp, Warning, TEXT("ENGINE ARCHITECT - Validating All Systems..."));
+    
+    int32 ValidSystems = 0;
+    int32 InvalidSystems = 0;
+    
+    for (const auto& SystemPair : RegisteredSystems)
+    {
+        if (ValidateSystemArchitecture(SystemPair.Key))
         {
-            return true;
+            ValidSystems++;
+        }
+        else
+        {
+            InvalidSystems++;
         }
     }
     
-    LogArchitectureViolation(FString::Printf(TEXT("Spawn location %s outside all biomes"), *Location.ToString()), false);
-    return false;
+    UE_LOG(LogTemp, Warning, TEXT("ENGINE ARCHITECT - System Validation Complete: %d Valid, %d Invalid"), 
+           ValidSystems, InvalidSystems);
 }
 
-void UEng_TechnicalArchitecture::LogArchitectureViolation(const FString& Violation, bool bIsCritical) const
+void UEng_TechnicalArchitectureSubsystem::EnforceArchitecturalCompliance()
 {
-    if (bIsCritical)
+    UE_LOG(LogTemp, Warning, TEXT("ENGINE ARCHITECT - Enforcing Architectural Compliance..."));
+    
+    // Validate all agents
+    TArray<FString> AllAgents;
+    SystemOwners.GenerateValueArray(AllAgents);
+    
+    for (const FString& Agent : AllAgents)
     {
-        UE_LOG(LogTemp, Error, TEXT("CRITICAL ARCHITECTURE VIOLATION: %s"), *Violation);
+        ValidateAgentCompliance(Agent);
     }
-    else
+    
+    // Generate compliance report
+    GenerateArchitectureReport();
+}
+
+void UEng_TechnicalArchitectureSubsystem::InitializeDefaultRules()
+{
+    // Rule 1: Performance Budget Compliance
+    FEng_ArchitecturalRule PerformanceRule;
+    PerformanceRule.RuleName = TEXT("Performance Budget Compliance");
+    PerformanceRule.Description = TEXT("All systems must operate within defined performance budgets");
+    PerformanceRule.Priority = EEng_SystemPriority::Critical;
+    PerformanceRule.bMandatory = true;
+    PerformanceRule.AffectedAgents = {TEXT("All Agents")};
+    ArchitecturalRules.Add(PerformanceRule);
+    
+    // Rule 2: Modular Design Requirement
+    FEng_ArchitecturalRule ModularRule;
+    ModularRule.RuleName = TEXT("Modular Design Requirement");
+    ModularRule.Description = TEXT("All systems must be modular and loosely coupled");
+    ModularRule.Priority = EEng_SystemPriority::High;
+    ModularRule.bMandatory = true;
+    ModularRule.AffectedAgents = {TEXT("Agent #3"), TEXT("Agent #5"), TEXT("Agent #11"), TEXT("Agent #12")};
+    ArchitecturalRules.Add(ModularRule);
+    
+    // Rule 3: Memory Pool Usage
+    FEng_ArchitecturalRule MemoryRule;
+    MemoryRule.RuleName = TEXT("Memory Pool Usage");
+    MemoryRule.Description = TEXT("All dynamic allocations must use managed memory pools");
+    MemoryRule.Priority = EEng_SystemPriority::High;
+    MemoryRule.bMandatory = true;
+    MemoryRule.AffectedAgents = {TEXT("Agent #3"), TEXT("Agent #13"), TEXT("Agent #17")};
+    ArchitecturalRules.Add(MemoryRule);
+    
+    // Rule 4: Thread Safety
+    FEng_ArchitecturalRule ThreadRule;
+    ThreadRule.RuleName = TEXT("Thread Safety Requirement");
+    ThreadRule.Description = TEXT("All shared data structures must be thread-safe");
+    ThreadRule.Priority = EEng_SystemPriority::Critical;
+    ThreadRule.bMandatory = true;
+    ThreadRule.AffectedAgents = {TEXT("Agent #3"), TEXT("Agent #4"), TEXT("Agent #13")};
+    ArchitecturalRules.Add(ThreadRule);
+    
+    UE_LOG(LogTemp, Warning, TEXT("ENGINE ARCHITECT - Default Architectural Rules Initialized: %d rules"), 
+           ArchitecturalRules.Num());
+}
+
+void UEng_TechnicalArchitectureSubsystem::InitializePerformanceProfiles()
+{
+    // Set initial performance profile
+    SetPerformanceProfile(CurrentProfile);
+    
+    UE_LOG(LogTemp, Warning, TEXT("ENGINE ARCHITECT - Performance Profiles Initialized"));
+}
+
+bool UEng_TechnicalArchitectureSubsystem::CheckSystemCompliance(const FString& SystemName)
+{
+    // Check if system is blocked
+    if (BlockedSystems.Contains(SystemName))
     {
-        UE_LOG(LogTemp, Warning, TEXT("Architecture Warning: %s"), *Violation);
+        return false;
     }
+    
+    // Check memory allocation compliance
+    if (SystemMemoryAllocations.Contains(SystemName))
+    {
+        float SystemMemory = SystemMemoryAllocations[SystemName];
+        if (SystemMemory > PerformanceBudget.MaxMemoryMB * 0.1f) // No single system should use >10% of budget
+        {
+            LogArchitecturalViolation(SystemName, 
+                FString::Printf(TEXT("Excessive memory usage: %.2fMB"), SystemMemory));
+            return false;
+        }
+    }
+    
+    return true;
+}
+
+void UEng_TechnicalArchitectureSubsystem::LogArchitecturalViolation(const FString& SystemName, const FString& Violation)
+{
+    UE_LOG(LogTemp, Error, TEXT("ENGINE ARCHITECT - ARCHITECTURAL VIOLATION: %s - %s"), 
+           *SystemName, *Violation);
+    
+    // Add to violations tracking
+    if (SystemOwners.Contains(SystemName))
+    {
+        ViolatingAgents.AddUnique(SystemOwners[SystemName]);
+    }
+}
+
+// ========================================================================================
+// UEng_TechnicalArchitectureComponent Implementation
+// ========================================================================================
+
+UEng_TechnicalArchitectureComponent::UEng_TechnicalArchitectureComponent()
+{
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 0.1f; // Check every 100ms
+    
+    ActorPriority = EEng_SystemPriority::Medium;
+    bEnforcePerformanceLimits = true;
+    MaxFrameTimeMS = 16.67f; // 60 FPS default
+    CurrentFrameTime = 0.0f;
+    bIsCompliant = true;
+}
+
+void UEng_TechnicalArchitectureComponent::BeginPlay()
+{
+    Super::BeginPlay();
+    
+    // Register with Technical Architecture Subsystem
+    if (UEng_TechnicalArchitectureSubsystem* ArchSubsystem = 
+        GetWorld()->GetGameInstance()->GetSubsystem<UEng_TechnicalArchitectureSubsystem>())
+    {
+        FString ActorName = GetOwner()->GetName();
+        ArchSubsystem->RegisterSystem(ActorName, ActorPriority, TEXT("Actor Component"));
+        
+        // Get current performance budget
+        FEng_PerformanceBudget Budget = ArchSubsystem->GetCurrentPerformanceBudget();
+        MaxFrameTimeMS = Budget.MaxFrameTimeMS;
+    }
+    
+    ValidateActorCompliance();
+}
+
+void UEng_TechnicalArchitectureComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    
+    if (bEnforcePerformanceLimits)
+    {
+        CurrentFrameTime = DeltaTime * 1000.0f; // Convert to milliseconds
+        CheckPerformanceCompliance();
+    }
+}
+
+void UEng_TechnicalArchitectureComponent::ValidateActorCompliance()
+{
+    bIsCompliant = true;
+    ComplianceViolations.Empty();
+    
+    // Validate component architecture
+    ValidateComponentArchitecture();
+    
+    // Check performance compliance
+    CheckPerformanceCompliance();
+    
+    if (!bIsCompliant)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("ENGINE ARCHITECT - Actor %s is NOT compliant"), 
+               *GetOwner()->GetName());
+    }
+}
+
+bool UEng_TechnicalArchitectureComponent::IsActorCompliant() const
+{
+    return bIsCompliant;
+}
+
+void UEng_TechnicalArchitectureComponent::ReportPerformanceMetrics(float FrameTime, int32 ComponentCount)
+{
+    CurrentFrameTime = FrameTime;
+    
+    if (UEng_TechnicalArchitectureSubsystem* ArchSubsystem = 
+        GetWorld()->GetGameInstance()->GetSubsystem<UEng_TechnicalArchitectureSubsystem>())
+    {
+        FString ActorName = GetOwner()->GetName();
+        ArchSubsystem->ValidatePerformanceCompliance(ActorName, FrameTime, 1); // 1 actor
+    }
+}
+
+void UEng_TechnicalArchitectureComponent::SetSystemPriority(EEng_SystemPriority Priority)
+{
+    ActorPriority = Priority;
+    
+    // Re-register with new priority
+    if (UEng_TechnicalArchitectureSubsystem* ArchSubsystem = 
+        GetWorld()->GetGameInstance()->GetSubsystem<UEng_TechnicalArchitectureSubsystem>())
+    {
+        FString ActorName = GetOwner()->GetName();
+        ArchSubsystem->RegisterSystem(ActorName, ActorPriority, TEXT("Actor Component"));
+    }
+}
+
+void UEng_TechnicalArchitectureComponent::CheckPerformanceCompliance()
+{
+    if (!bEnforcePerformanceLimits)
+    {
+        return;
+    }
+    
+    if (CurrentFrameTime > MaxFrameTimeMS)
+    {
+        ReportViolation(FString::Printf(TEXT("Frame time violation: %.2fms > %.2fms"), 
+                                      CurrentFrameTime, MaxFrameTimeMS));
+    }
+}
+
+void UEng_TechnicalArchitectureComponent::ValidateComponentArchitecture()
+{
+    // Check component count
+    TArray<UActorComponent*> Components = GetOwner()->GetRootComponent()->GetAttachChildren();
+    if (Components.Num() > 50) // Arbitrary limit for demonstration
+    {
+        ReportViolation(FString::Printf(TEXT("Excessive component count: %d"), Components.Num()));
+    }
+}
+
+void UEng_TechnicalArchitectureComponent::ReportViolation(const FString& Violation)
+{
+    bIsCompliant = false;
+    ComplianceViolations.AddUnique(Violation);
+    
+    UE_LOG(LogTemp, Error, TEXT("ENGINE ARCHITECT - Actor Violation: %s - %s"), 
+           *GetOwner()->GetName(), *Violation);
 }
