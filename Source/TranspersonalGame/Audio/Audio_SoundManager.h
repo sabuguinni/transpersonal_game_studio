@@ -1,129 +1,155 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/GameInstanceSubsystem.h"
-#include "Sound/SoundCue.h"
+#include "Engine/World.h"
 #include "Components/AudioComponent.h"
-#include "../SharedTypes.h"
+#include "Sound/SoundCue.h"
+#include "Sound/SoundWave.h"
+#include "Subsystems/WorldSubsystem.h"
+#include "SharedTypes.h"
 #include "Audio_SoundManager.generated.h"
 
-UENUM(BlueprintType)
-enum class EAudio_BiomeType : uint8
-{
-    Swamp       UMETA(DisplayName = "Pântano"),
-    Forest      UMETA(DisplayName = "Floresta"),
-    Savanna     UMETA(DisplayName = "Savana"),
-    Desert      UMETA(DisplayName = "Deserto"),
-    Mountain    UMETA(DisplayName = "Montanha Nevada")
-};
-
-UENUM(BlueprintType)
-enum class EAudio_WeatherType : uint8
-{
-    Clear       UMETA(DisplayName = "Céu Limpo"),
-    Cloudy      UMETA(DisplayName = "Nublado"),
-    Rain        UMETA(DisplayName = "Chuva"),
-    Storm       UMETA(DisplayName = "Tempestade"),
-    Fog         UMETA(DisplayName = "Nevoeiro")
-};
-
-UENUM(BlueprintType)
-enum class EAudio_TimeOfDay : uint8
-{
-    Dawn        UMETA(DisplayName = "Amanhecer"),
-    Morning     UMETA(DisplayName = "Manhã"),
-    Noon        UMETA(DisplayName = "Meio-dia"),
-    Afternoon   UMETA(DisplayName = "Tarde"),
-    Dusk        UMETA(DisplayName = "Entardecer"),
-    Night       UMETA(DisplayName = "Noite")
-};
-
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAudio_AmbientProfile
+struct TRANSPERSONALGAME_API FAudio_SoundConfig
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Profile")
-    EAudio_BiomeType BiomeType;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    TSoftObjectPtr<USoundCue> SoundCue;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Profile")
-    EAudio_WeatherType WeatherType;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    float Volume = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Profile")
-    EAudio_TimeOfDay TimeOfDay;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    float Pitch = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Profile")
-    float BaseVolume;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    float FadeInTime = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Profile")
-    float WindIntensity;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    float FadeOutTime = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Profile")
-    TSoftObjectPtr<USoundCue> AmbientSound;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    bool bLoop = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Profile")
-    TSoftObjectPtr<USoundCue> MusicTrack;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
+    float MaxDistance = 5000.0f;
 
-    FAudio_AmbientProfile()
+    FAudio_SoundConfig()
     {
-        BiomeType = EAudio_BiomeType::Savanna;
-        WeatherType = EAudio_WeatherType::Clear;
-        TimeOfDay = EAudio_TimeOfDay::Morning;
-        BaseVolume = 0.7f;
-        WindIntensity = 0.3f;
+        Volume = 1.0f;
+        Pitch = 1.0f;
+        FadeInTime = 0.0f;
+        FadeOutTime = 0.0f;
+        bLoop = false;
+        MaxDistance = 5000.0f;
     }
 };
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UAudio_SoundManager : public UGameInstanceSubsystem
+UENUM(BlueprintType)
+enum class EAudio_SoundCategory : uint8
+{
+    None = 0,
+    Ambient,
+    Music,
+    SFX,
+    Voice,
+    UI,
+    Footsteps,
+    Combat,
+    Environment,
+    Dinosaur
+};
+
+UCLASS(BlueprintType)
+class TRANSPERSONALGAME_API UAudio_SoundManager : public UWorldSubsystem
 {
     GENERATED_BODY()
 
 public:
     UAudio_SoundManager();
 
+    // USubsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    UFUNCTION(BlueprintCallable, Category = "Audio Manager")
-    void UpdateAmbientProfile(EAudio_BiomeType NewBiome, EAudio_WeatherType NewWeather, EAudio_TimeOfDay NewTime);
+    // Core sound playback functions
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    UAudioComponent* PlaySoundAtLocation(const FAudio_SoundConfig& SoundConfig, const FVector& Location, EAudio_SoundCategory Category = EAudio_SoundCategory::SFX);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio Manager")
-    void PlayDinosaurSound(const FString& DinosaurType, const FVector& Location, float Volume = 1.0f);
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    UAudioComponent* PlaySound2D(const FAudio_SoundConfig& SoundConfig, EAudio_SoundCategory Category = EAudio_SoundCategory::SFX);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio Manager")
-    void PlayFootstepSound(const FVector& Location, float Intensity = 1.0f);
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void StopAllSoundsInCategory(EAudio_SoundCategory Category);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio Manager")
-    void SetMasterVolume(float Volume);
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void SetCategoryVolume(EAudio_SoundCategory Category, float Volume);
 
-    UFUNCTION(BlueprintCallable, Category = "Audio Manager")
-    void FadeToNewAmbient(const FAudio_AmbientProfile& NewProfile, float FadeTime = 2.0f);
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    float GetCategoryVolume(EAudio_SoundCategory Category) const;
 
-    UFUNCTION(BlueprintPure, Category = "Audio Manager")
-    FAudio_AmbientProfile GetCurrentProfile() const { return CurrentProfile; }
+    // Ambient audio management
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void PlayAmbientLoop(const FAudio_SoundConfig& SoundConfig);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void StopAmbientLoop();
+
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void CrossfadeAmbient(const FAudio_SoundConfig& NewSoundConfig, float CrossfadeTime = 2.0f);
+
+    // Dinosaur-specific audio
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void PlayDinosaurFootstep(EDinosaurSpecies Species, const FVector& Location, float Intensity = 1.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void PlayDinosaurVocalization(EDinosaurSpecies Species, const FVector& Location, ECreatureEmotionalState EmotionalState = ECreatureEmotionalState::Neutral);
+
+    // Screen shake audio integration
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void PlayScreenShakeAudio(const FVector& SourceLocation, float Intensity, float Duration);
+
+    // Audio occlusion and environmental effects
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void UpdateAudioOcclusion();
+
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void SetEnvironmentalReverb(float ReverbAmount, float DecayTime);
 
 protected:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
-    TMap<EAudio_BiomeType, FAudio_AmbientProfile> BiomeProfiles;
+    // Category volume controls
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio", meta = (AllowPrivateAccess = "true"))
+    TMap<EAudio_SoundCategory, float> CategoryVolumes;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
-    float MasterVolume;
+    // Active audio components by category
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio", meta = (AllowPrivateAccess = "true"))
+    TMap<EAudio_SoundCategory, TArray<UAudioComponent*>> ActiveAudioComponents;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
-    float MaxAudioDistance;
+    // Current ambient loop
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio", meta = (AllowPrivateAccess = "true"))
+    UAudioComponent* CurrentAmbientLoop;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Audio State")
-    FAudio_AmbientProfile CurrentProfile;
+    // Dinosaur sound libraries
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio", meta = (AllowPrivateAccess = "true"))
+    TMap<EDinosaurSpecies, TArray<FAudio_SoundConfig>> DinosaurFootstepSounds;
 
-    UPROPERTY()
-    UAudioComponent* AmbientAudioComponent;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio", meta = (AllowPrivateAccess = "true"))
+    TMap<EDinosaurSpecies, TArray<FAudio_SoundConfig>> DinosaurVocalizationSounds;
 
-    UPROPERTY()
-    UAudioComponent* MusicAudioComponent;
+    // Environmental audio settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio", meta = (AllowPrivateAccess = "true"))
+    float GlobalReverbAmount;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio", meta = (AllowPrivateAccess = "true"))
+    float GlobalDecayTime;
 
 private:
-    void InitializeBiomeProfiles();
-    void UpdateAmbientAudio();
-    float CalculateVolumeByDistance(const FVector& SoundLocation, const FVector& ListenerLocation) const;
+    void InitializeDefaultVolumes();
+    void CleanupFinishedAudioComponents();
+    UAudioComponent* CreateAudioComponent(const FAudio_SoundConfig& SoundConfig, const FVector& Location, bool bIs2D = false);
+    void ApplyCategoryVolume(UAudioComponent* AudioComponent, EAudio_SoundCategory Category);
+
+    // Timer for cleanup
+    FTimerHandle CleanupTimerHandle;
 };
