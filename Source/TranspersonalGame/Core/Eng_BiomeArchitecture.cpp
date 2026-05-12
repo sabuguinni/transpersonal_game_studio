@@ -1,215 +1,476 @@
 #include "Eng_BiomeArchitecture.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "EngineUtils.h"
+#include "Engine/GameInstance.h"
 
-UEng_BiomeArchitecture::UEng_BiomeArchitecture()
-{
-    // Initialize biome zones on construction
-}
+// Static instance for event dispatcher
+UEng_BiomeEventDispatcher* UEng_BiomeEventDispatcher::Instance = nullptr;
 
-void UEng_BiomeArchitecture::Initialize(FSubsystemCollectionBase& Collection)
+//=============================================================================
+// UEng_BiomeArchitectureSubsystem Implementation
+//=============================================================================
+
+void UEng_BiomeArchitectureSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    InitializeBiomeZones();
-    LogBiomeConfiguration();
+    UE_LOG(LogTemp, Warning, TEXT("Biome Architecture Subsystem Initialized"));
     
-    UE_LOG(LogTemp, Warning, TEXT("Engine Architect: Biome Architecture System Initialized"));
+    InitializeDefaultConfigurations();
+    
+    // Set default global performance profile
+    GlobalPerformanceProfile = FEng_BiomePerformanceProfile();
 }
 
-void UEng_BiomeArchitecture::InitializeBiomeZones()
+void UEng_BiomeArchitectureSubsystem::Deinitialize()
 {
-    // Clear existing zones
-    BiomeZones.Empty();
-    
-    // PANTANO (sudoeste)
-    FEng_BiomeZone SwampZone;
-    SwampZone.BiomeName = TEXT("Pantano");
-    SwampZone.CenterLocation = FVector(-50000.0f, -45000.0f, 0.0f);
-    SwampZone.MinBounds = FVector(-77500.0f, -76500.0f, -100.0f);
-    SwampZone.MaxBounds = FVector(-25000.0f, -15000.0f, 200.0f);
-    SwampZone.Temperature = 28.0f;
-    SwampZone.Humidity = 0.9f;
-    BiomeZones.Add(EEng_BiomeType::Swamp, SwampZone);
-    
-    // FLORESTA (noroeste)
-    FEng_BiomeZone ForestZone;
-    ForestZone.BiomeName = TEXT("Floresta");
-    ForestZone.CenterLocation = FVector(-45000.0f, 40000.0f, 0.0f);
-    ForestZone.MinBounds = FVector(-77500.0f, 15000.0f, -50.0f);
-    ForestZone.MaxBounds = FVector(-15000.0f, 76500.0f, 300.0f);
-    ForestZone.Temperature = 22.0f;
-    ForestZone.Humidity = 0.8f;
-    BiomeZones.Add(EEng_BiomeType::Forest, ForestZone);
-    
-    // SAVANA (centro)
-    FEng_BiomeZone SavannaZone;
-    SavannaZone.BiomeName = TEXT("Savana");
-    SavannaZone.CenterLocation = FVector(0.0f, 0.0f, 0.0f);
-    SavannaZone.MinBounds = FVector(-20000.0f, -20000.0f, -50.0f);
-    SavannaZone.MaxBounds = FVector(20000.0f, 20000.0f, 150.0f);
-    SavannaZone.Temperature = 30.0f;
-    SavannaZone.Humidity = 0.4f;
-    BiomeZones.Add(EEng_BiomeType::Savanna, SavannaZone);
-    
-    // DESERTO (leste)
-    FEng_BiomeZone DesertZone;
-    DesertZone.BiomeName = TEXT("Deserto");
-    DesertZone.CenterLocation = FVector(55000.0f, 0.0f, 0.0f);
-    DesertZone.MinBounds = FVector(25000.0f, -30000.0f, -50.0f);
-    DesertZone.MaxBounds = FVector(79500.0f, 30000.0f, 200.0f);
-    DesertZone.Temperature = 40.0f;
-    DesertZone.Humidity = 0.1f;
-    BiomeZones.Add(EEng_BiomeType::Desert, DesertZone);
-    
-    // MONTANHA NEVADA (nordeste)
-    FEng_BiomeZone MountainZone;
-    MountainZone.BiomeName = TEXT("Montanha Nevada");
-    MountainZone.CenterLocation = FVector(40000.0f, 50000.0f, 500.0f);
-    MountainZone.MinBounds = FVector(15000.0f, 20000.0f, 200.0f);
-    MountainZone.MaxBounds = FVector(79500.0f, 76500.0f, 1000.0f);
-    MountainZone.Temperature = -5.0f;
-    MountainZone.Humidity = 0.7f;
-    BiomeZones.Add(EEng_BiomeType::Mountain, MountainZone);
+    BiomeConfigurations.Empty();
+    Super::Deinitialize();
 }
 
-FEng_BiomeZone UEng_BiomeArchitecture::GetBiomeZone(EEng_BiomeType BiomeType) const
+bool UEng_BiomeArchitectureSubsystem::RegisterBiomeConfiguration(EEng_BiomeType BiomeType, const FEng_ExtendedBiomeConfig& Config)
 {
-    if (const FEng_BiomeZone* Zone = BiomeZones.Find(BiomeType))
+    if (!ValidateBiomeConfiguration(Config))
     {
-        return *Zone;
-    }
-    
-    // Return default zone if not found
-    FEng_BiomeZone DefaultZone;
-    DefaultZone.BiomeName = TEXT("Invalid");
-    return DefaultZone;
-}
-
-EEng_BiomeType UEng_BiomeArchitecture::GetBiomeTypeAtLocation(const FVector& Location) const
-{
-    for (const auto& BiomePair : BiomeZones)
-    {
-        const FEng_BiomeZone& Zone = BiomePair.Value;
-        if (Location.X >= Zone.MinBounds.X && Location.X <= Zone.MaxBounds.X &&
-            Location.Y >= Zone.MinBounds.Y && Location.Y <= Zone.MaxBounds.Y)
-        {
-            return BiomePair.Key;
-        }
-    }
-    
-    // Default to Savanna if outside all zones
-    return EEng_BiomeType::Savanna;
-}
-
-FVector UEng_BiomeArchitecture::GetRandomLocationInBiome(EEng_BiomeType BiomeType) const
-{
-    const FEng_BiomeZone Zone = GetBiomeZone(BiomeType);
-    
-    if (Zone.BiomeName == TEXT("Invalid"))
-    {
-        return FVector::ZeroVector;
-    }
-    
-    // Generate random location within biome bounds
-    float RandomX = FMath::RandRange(Zone.MinBounds.X, Zone.MaxBounds.X);
-    float RandomY = FMath::RandRange(Zone.MinBounds.Y, Zone.MaxBounds.Y);
-    float RandomZ = FMath::RandRange(Zone.MinBounds.Z, Zone.MaxBounds.Z);
-    
-    return FVector(RandomX, RandomY, RandomZ);
-}
-
-bool UEng_BiomeArchitecture::IsLocationInBiome(const FVector& Location, EEng_BiomeType BiomeType) const
-{
-    const FEng_BiomeZone Zone = GetBiomeZone(BiomeType);
-    
-    return (Location.X >= Zone.MinBounds.X && Location.X <= Zone.MaxBounds.X &&
-            Location.Y >= Zone.MinBounds.Y && Location.Y <= Zone.MaxBounds.Y &&
-            Location.Z >= Zone.MinBounds.Z && Location.Z <= Zone.MaxBounds.Z);
-}
-
-TArray<FEng_BiomeZone> UEng_BiomeArchitecture::GetAllBiomeZones() const
-{
-    TArray<FEng_BiomeZone> AllZones;
-    for (const auto& BiomePair : BiomeZones)
-    {
-        AllZones.Add(BiomePair.Value);
-    }
-    return AllZones;
-}
-
-bool UEng_BiomeArchitecture::ValidateSpawnLocation(const FVector& Location, const FString& ActorType) const
-{
-    // Check if location is at origin (forbidden)
-    if (Location.Equals(FVector::ZeroVector, 1.0f))
-    {
-        UE_LOG(LogTemp, Error, TEXT("Engine Architect: FORBIDDEN spawn at origin (0,0,0) for %s"), *ActorType);
+        UE_LOG(LogTemp, Error, TEXT("Failed to register biome configuration - validation failed"));
         return false;
     }
     
-    // Check if location is within any biome
-    EEng_BiomeType BiomeType = GetBiomeTypeAtLocation(Location);
-    const FEng_BiomeZone Zone = GetBiomeZone(BiomeType);
+    BiomeConfigurations.Add(BiomeType, Config);
+    UE_LOG(LogTemp, Log, TEXT("Registered biome configuration for type: %d"), (int32)BiomeType);
+    return true;
+}
+
+FEng_ExtendedBiomeConfig UEng_BiomeArchitectureSubsystem::GetBiomeConfiguration(EEng_BiomeType BiomeType) const
+{
+    if (const FEng_ExtendedBiomeConfig* Config = BiomeConfigurations.Find(BiomeType))
+    {
+        return *Config;
+    }
     
-    UE_LOG(LogTemp, Log, TEXT("Engine Architect: %s spawning at %s in biome %s"), 
-           *ActorType, *Location.ToString(), *Zone.BiomeName);
+    // Return default configuration if not found
+    FEng_ExtendedBiomeConfig DefaultConfig;
+    DefaultConfig.BaseData.BiomeType = BiomeType;
+    return DefaultConfig;
+}
+
+TArray<EEng_BiomeType> UEng_BiomeArchitectureSubsystem::GetAllRegisteredBiomes() const
+{
+    TArray<EEng_BiomeType> RegisteredBiomes;
+    BiomeConfigurations.GetKeys(RegisteredBiomes);
+    return RegisteredBiomes;
+}
+
+void UEng_BiomeArchitectureSubsystem::SetGlobalPerformanceProfile(const FEng_BiomePerformanceProfile& Profile)
+{
+    if (ValidatePerformanceProfile(Profile))
+    {
+        GlobalPerformanceProfile = Profile;
+        UE_LOG(LogTemp, Log, TEXT("Global performance profile updated"));
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("Invalid performance profile - not applied"));
+    }
+}
+
+FEng_BiomePerformanceProfile UEng_BiomeArchitectureSubsystem::GetGlobalPerformanceProfile() const
+{
+    return GlobalPerformanceProfile;
+}
+
+bool UEng_BiomeArchitectureSubsystem::ValidateBiomeConfiguration(const FEng_ExtendedBiomeConfig& Config) const
+{
+    // Validate performance profile
+    if (!ValidatePerformanceProfile(Config.PerformanceProfile))
+    {
+        return false;
+    }
+    
+    // Validate transition config
+    if (!ValidateTransitionConfig(Config.TransitionConfig))
+    {
+        return false;
+    }
+    
+    // Validate biome data
+    if (Config.BaseData.Temperature < -50.0f || Config.BaseData.Temperature > 60.0f)
+    {
+        return false;
+    }
+    
+    if (Config.BaseData.Humidity < 0.0f || Config.BaseData.Humidity > 100.0f)
+    {
+        return false;
+    }
+    
+    // Validate dinosaur spawn probabilities
+    float TotalProbability = 0.0f;
+    for (const auto& SpawnPair : Config.DinosaurSpawnProbabilities)
+    {
+        if (SpawnPair.Value < 0.0f || SpawnPair.Value > 1.0f)
+        {
+            return false;
+        }
+        TotalProbability += SpawnPair.Value;
+    }
+    
+    if (TotalProbability > 1.0f)
+    {
+        return false;
+    }
     
     return true;
 }
 
-void UEng_BiomeArchitecture::ValidateAllActorsInMap()
+TArray<FString> UEng_BiomeArchitectureSubsystem::GetConfigurationErrors(const FEng_ExtendedBiomeConfig& Config) const
 {
-    UWorld* World = GetWorld();
-    if (!World)
+    TArray<FString> Errors;
+    
+    // Check performance profile
+    if (!ValidatePerformanceProfile(Config.PerformanceProfile))
     {
-        UE_LOG(LogTemp, Error, TEXT("Engine Architect: No world found for validation"));
-        return;
+        Errors.Add(TEXT("Invalid performance profile settings"));
     }
     
-    int32 ValidActors = 0;
-    int32 InvalidActors = 0;
-    
-    for (TActorIterator<AActor> ActorIterator(World); ActorIterator; ++ActorIterator)
+    // Check transition config
+    if (!ValidateTransitionConfig(Config.TransitionConfig))
     {
-        AActor* Actor = *ActorIterator;
-        if (Actor && !Actor->IsA<AWorldSettings>())
+        Errors.Add(TEXT("Invalid transition configuration"));
+    }
+    
+    // Check temperature range
+    if (Config.BaseData.Temperature < -50.0f || Config.BaseData.Temperature > 60.0f)
+    {
+        Errors.Add(FString::Printf(TEXT("Temperature out of range: %.1f (valid: -50 to 60)"), Config.BaseData.Temperature));
+    }
+    
+    // Check humidity range
+    if (Config.BaseData.Humidity < 0.0f || Config.BaseData.Humidity > 100.0f)
+    {
+        Errors.Add(FString::Printf(TEXT("Humidity out of range: %.1f (valid: 0 to 100)"), Config.BaseData.Humidity));
+    }
+    
+    // Check spawn probabilities
+    float TotalProbability = 0.0f;
+    for (const auto& SpawnPair : Config.DinosaurSpawnProbabilities)
+    {
+        if (SpawnPair.Value < 0.0f || SpawnPair.Value > 1.0f)
         {
-            FVector ActorLocation = Actor->GetActorLocation();
-            FString ActorName = Actor->GetClass()->GetName();
-            
-            if (ValidateSpawnLocation(ActorLocation, ActorName))
+            Errors.Add(FString::Printf(TEXT("Invalid spawn probability for dinosaur %d: %.2f"), (int32)SpawnPair.Key, SpawnPair.Value));
+        }
+        TotalProbability += SpawnPair.Value;
+    }
+    
+    if (TotalProbability > 1.0f)
+    {
+        Errors.Add(FString::Printf(TEXT("Total spawn probabilities exceed 1.0: %.2f"), TotalProbability));
+    }
+    
+    return Errors;
+}
+
+void UEng_BiomeArchitectureSubsystem::InitializeDefaultConfigurations()
+{
+    // Forest Biome
+    FEng_ExtendedBiomeConfig ForestConfig;
+    ForestConfig.BaseData.BiomeType = EEng_BiomeType::Forest;
+    ForestConfig.BaseData.BiomeName = TEXT("Dense Forest");
+    ForestConfig.BaseData.Temperature = 22.0f;
+    ForestConfig.BaseData.Humidity = 75.0f;
+    ForestConfig.BaseData.ThreatLevel = EEng_ThreatLevel::Cautious;
+    ForestConfig.BaseData.NativeDinosaurs = {EEng_DinosaurSpecies::Raptor, EEng_DinosaurSpecies::Dilophosaurus, EEng_DinosaurSpecies::Triceratops};
+    ForestConfig.AllowedWeatherTypes = {EEng_WeatherType::Clear, EEng_WeatherType::Cloudy, EEng_WeatherType::Rain, EEng_WeatherType::Fog};
+    ForestConfig.DinosaurSpawnProbabilities.Add(EEng_DinosaurSpecies::Raptor, 0.3f);
+    ForestConfig.DinosaurSpawnProbabilities.Add(EEng_DinosaurSpecies::Dilophosaurus, 0.2f);
+    ForestConfig.DinosaurSpawnProbabilities.Add(EEng_DinosaurSpecies::Triceratops, 0.4f);
+    RegisterBiomeConfiguration(EEng_BiomeType::Forest, ForestConfig);
+    
+    // Savanna Biome
+    FEng_ExtendedBiomeConfig SavannaConfig;
+    SavannaConfig.BaseData.BiomeType = EEng_BiomeType::Savanna;
+    SavannaConfig.BaseData.BiomeName = TEXT("Open Savanna");
+    SavannaConfig.BaseData.Temperature = 28.0f;
+    SavannaConfig.BaseData.Humidity = 45.0f;
+    SavannaConfig.BaseData.ThreatLevel = EEng_ThreatLevel::Dangerous;
+    SavannaConfig.BaseData.NativeDinosaurs = {EEng_DinosaurSpecies::TRex, EEng_DinosaurSpecies::Brachiosaurus, EEng_DinosaurSpecies::Stegosaurus};
+    SavannaConfig.AllowedWeatherTypes = {EEng_WeatherType::Clear, EEng_WeatherType::Cloudy, EEng_WeatherType::Storm};
+    SavannaConfig.DinosaurSpawnProbabilities.Add(EEng_DinosaurSpecies::TRex, 0.1f);
+    SavannaConfig.DinosaurSpawnProbabilities.Add(EEng_DinosaurSpecies::Brachiosaurus, 0.3f);
+    SavannaConfig.DinosaurSpawnProbabilities.Add(EEng_DinosaurSpecies::Stegosaurus, 0.4f);
+    RegisterBiomeConfiguration(EEng_BiomeType::Savanna, SavannaConfig);
+    
+    // Swamp Biome
+    FEng_ExtendedBiomeConfig SwampConfig;
+    SwampConfig.BaseData.BiomeType = EEng_BiomeType::Swamp;
+    SwampConfig.BaseData.BiomeName = TEXT("Murky Swamp");
+    SwampConfig.BaseData.Temperature = 26.0f;
+    SwampConfig.BaseData.Humidity = 90.0f;
+    SwampConfig.BaseData.ThreatLevel = EEng_ThreatLevel::Deadly;
+    SwampConfig.BaseData.NativeDinosaurs = {EEng_DinosaurSpecies::Dilophosaurus, EEng_DinosaurSpecies::Ankylosaurus};
+    SwampConfig.AllowedWeatherTypes = {EEng_WeatherType::Cloudy, EEng_WeatherType::Rain, EEng_WeatherType::Fog};
+    SwampConfig.DinosaurSpawnProbabilities.Add(EEng_DinosaurSpecies::Dilophosaurus, 0.4f);
+    SwampConfig.DinosaurSpawnProbabilities.Add(EEng_DinosaurSpecies::Ankylosaurus, 0.3f);
+    RegisterBiomeConfiguration(EEng_BiomeType::Swamp, SwampConfig);
+    
+    UE_LOG(LogTemp, Log, TEXT("Default biome configurations initialized"));
+}
+
+bool UEng_BiomeArchitectureSubsystem::ValidatePerformanceProfile(const FEng_BiomePerformanceProfile& Profile) const
+{
+    if (Profile.MaxVegetationActors < 0 || Profile.MaxVegetationActors > 10000)
+        return false;
+        
+    if (Profile.MaxDinosaurActors < 0 || Profile.MaxDinosaurActors > 500)
+        return false;
+        
+    if (Profile.LODDistanceMultiplier < 0.1f || Profile.LODDistanceMultiplier > 10.0f)
+        return false;
+        
+    if (Profile.WeatherUpdateFrequency < 0.1f || Profile.WeatherUpdateFrequency > 60.0f)
+        return false;
+        
+    return true;
+}
+
+bool UEng_BiomeArchitectureSubsystem::ValidateTransitionConfig(const FEng_BiomeTransitionConfig& Config) const
+{
+    if (Config.TransitionDistance < 0.0f || Config.TransitionDistance > 5000.0f)
+        return false;
+        
+    if (Config.BlendRadius < 0.0f || Config.BlendRadius > Config.TransitionDistance)
+        return false;
+        
+    if (Config.WeatherTransitionTime < 0.0f || Config.WeatherTransitionTime > 300.0f)
+        return false;
+        
+    return true;
+}
+
+//=============================================================================
+// UEng_WorldBiomeManager Implementation
+//=============================================================================
+
+void UEng_WorldBiomeManager::Initialize(FSubsystemCollectionBase& Collection)
+{
+    Super::Initialize(Collection);
+    
+    UE_LOG(LogTemp, Warning, TEXT("World Biome Manager Initialized"));
+    
+    // Get reference to architecture subsystem
+    if (UGameInstance* GameInstance = GetWorld()->GetGameInstance())
+    {
+        ArchitectureSubsystem = GameInstance->GetSubsystem<UEng_BiomeArchitectureSubsystem>();
+    }
+    
+    InitializeWorldBiomes();
+}
+
+void UEng_WorldBiomeManager::Deinitialize()
+{
+    ActiveBiomes.Empty();
+    ArchitectureSubsystem = nullptr;
+    Super::Deinitialize();
+}
+
+bool UEng_WorldBiomeManager::ShouldCreateSubsystem(UObject* Outer) const
+{
+    // Only create in game worlds, not in editor preview worlds
+    if (UWorld* World = Cast<UWorld>(Outer))
+    {
+        return World->IsGameWorld();
+    }
+    return false;
+}
+
+void UEng_WorldBiomeManager::RegisterActiveBiome(FVector Location, EEng_BiomeType BiomeType, float Radius)
+{
+    FActiveBiomeData NewBiome;
+    NewBiome.Location = Location;
+    NewBiome.BiomeType = BiomeType;
+    NewBiome.Radius = Radius;
+    NewBiome.CurrentWeather = EEng_WeatherType::Clear;
+    
+    ActiveBiomes.Add(NewBiome);
+    
+    UE_LOG(LogTemp, Log, TEXT("Registered active biome at location: %s"), *Location.ToString());
+}
+
+EEng_BiomeType UEng_WorldBiomeManager::GetBiomeAtLocation(FVector Location) const
+{
+    FActiveBiomeData* ClosestBiome = const_cast<UEng_WorldBiomeManager*>(this)->FindClosestBiome(Location);
+    
+    if (ClosestBiome && IsLocationInBiome(Location, *ClosestBiome))
+    {
+        return ClosestBiome->BiomeType;
+    }
+    
+    // Default to forest if no biome found
+    return EEng_BiomeType::Forest;
+}
+
+TArray<EEng_BiomeType> UEng_WorldBiomeManager::GetNearbyBiomes(FVector Location, float SearchRadius) const
+{
+    TArray<EEng_BiomeType> NearbyBiomes;
+    
+    for (const FActiveBiomeData& BiomeData : ActiveBiomes)
+    {
+        float Distance = FVector::Dist(Location, BiomeData.Location);
+        if (Distance <= SearchRadius + BiomeData.Radius)
+        {
+            NearbyBiomes.AddUnique(BiomeData.BiomeType);
+        }
+    }
+    
+    return NearbyBiomes;
+}
+
+bool UEng_WorldBiomeManager::IsInBiomeTransitionZone(FVector Location) const
+{
+    int32 BiomesInRange = 0;
+    
+    for (const FActiveBiomeData& BiomeData : ActiveBiomes)
+    {
+        float Distance = FVector::Dist(Location, BiomeData.Location);
+        if (Distance <= BiomeData.Radius * 1.2f) // 20% buffer for transition zone
+        {
+            BiomesInRange++;
+            if (BiomesInRange > 1)
             {
-                ValidActors++;
-            }
-            else
-            {
-                InvalidActors++;
-                UE_LOG(LogTemp, Warning, TEXT("Engine Architect: Invalid actor %s at %s"), 
-                       *ActorName, *ActorLocation.ToString());
+                return true;
             }
         }
     }
     
-    UE_LOG(LogTemp, Warning, TEXT("Engine Architect: Map validation complete - %d valid, %d invalid actors"), 
-           ValidActors, InvalidActors);
+    return false;
 }
 
-void UEng_BiomeArchitecture::LogBiomeConfiguration() const
+EEng_WeatherType UEng_WorldBiomeManager::GetCurrentWeather(FVector Location) const
 {
-    UE_LOG(LogTemp, Warning, TEXT("=== ENGINE ARCHITECT - BIOME CONFIGURATION ==="));
+    FActiveBiomeData* ClosestBiome = const_cast<UEng_WorldBiomeManager*>(this)->FindClosestBiome(Location);
     
-    for (const auto& BiomePair : BiomeZones)
+    if (ClosestBiome)
     {
-        const FEng_BiomeZone& Zone = BiomePair.Value;
-        UE_LOG(LogTemp, Warning, TEXT("Biome: %s | Center: %s | Bounds: %s to %s | Temp: %.1f°C | Humidity: %.1f"), 
-               *Zone.BiomeName, 
-               *Zone.CenterLocation.ToString(),
-               *Zone.MinBounds.ToString(),
-               *Zone.MaxBounds.ToString(),
-               Zone.Temperature,
-               Zone.Humidity);
+        return ClosestBiome->CurrentWeather;
     }
     
-    UE_LOG(LogTemp, Warning, TEXT("=== BIOME CONFIGURATION COMPLETE ==="));
+    return EEng_WeatherType::Clear;
+}
+
+void UEng_WorldBiomeManager::SetWeatherForBiome(EEng_BiomeType BiomeType, EEng_WeatherType WeatherType)
+{
+    for (FActiveBiomeData& BiomeData : ActiveBiomes)
+    {
+        if (BiomeData.BiomeType == BiomeType)
+        {
+            EEng_WeatherType OldWeather = BiomeData.CurrentWeather;
+            BiomeData.CurrentWeather = WeatherType;
+            
+            // Broadcast weather change event
+            if (UEng_BiomeEventDispatcher* EventDispatcher = UEng_BiomeEventDispatcher::GetBiomeEventDispatcher(this))
+            {
+                EventDispatcher->BroadcastWeatherChanged(OldWeather, WeatherType);
+            }
+        }
+    }
+}
+
+int32 UEng_WorldBiomeManager::GetActiveBiomeCount() const
+{
+    return ActiveBiomes.Num();
+}
+
+float UEng_WorldBiomeManager::GetBiomeSystemPerformanceMetric() const
+{
+    // Simple performance metric based on active biomes and their settings
+    float PerformanceScore = 1.0f;
+    
+    if (ArchitectureSubsystem)
+    {
+        FEng_BiomePerformanceProfile GlobalProfile = ArchitectureSubsystem->GetGlobalPerformanceProfile();
+        
+        // Reduce score based on number of active biomes
+        PerformanceScore -= (ActiveBiomes.Num() * 0.1f);
+        
+        // Factor in vegetation and dinosaur limits
+        PerformanceScore -= (GlobalProfile.MaxVegetationActors / 10000.0f) * 0.3f;
+        PerformanceScore -= (GlobalProfile.MaxDinosaurActors / 500.0f) * 0.2f;
+    }
+    
+    return FMath::Clamp(PerformanceScore, 0.0f, 1.0f);
+}
+
+void UEng_WorldBiomeManager::InitializeWorldBiomes()
+{
+    // Register default biomes for the world
+    RegisterActiveBiome(FVector(0, 0, 0), EEng_BiomeType::Forest, 2000.0f);
+    RegisterActiveBiome(FVector(5000, 0, 0), EEng_BiomeType::Savanna, 3000.0f);
+    RegisterActiveBiome(FVector(-3000, 3000, 0), EEng_BiomeType::Swamp, 1500.0f);
+    
+    UE_LOG(LogTemp, Log, TEXT("World biomes initialized with %d active biomes"), ActiveBiomes.Num());
+}
+
+FEng_WorldBiomeManager::FActiveBiomeData* UEng_WorldBiomeManager::FindClosestBiome(FVector Location)
+{
+    FActiveBiomeData* ClosestBiome = nullptr;
+    float ClosestDistance = MAX_FLT;
+    
+    for (FActiveBiomeData& BiomeData : ActiveBiomes)
+    {
+        float Distance = FVector::Dist(Location, BiomeData.Location);
+        if (Distance < ClosestDistance)
+        {
+            ClosestDistance = Distance;
+            ClosestBiome = &BiomeData;
+        }
+    }
+    
+    return ClosestBiome;
+}
+
+bool UEng_WorldBiomeManager::IsLocationInBiome(FVector Location, const FActiveBiomeData& BiomeData) const
+{
+    float Distance = FVector::Dist(Location, BiomeData.Location);
+    return Distance <= BiomeData.Radius;
+}
+
+//=============================================================================
+// UEng_BiomeEventDispatcher Implementation
+//=============================================================================
+
+void UEng_BiomeEventDispatcher::BroadcastBiomeChanged(EEng_BiomeType OldBiome, EEng_BiomeType NewBiome)
+{
+    OnBiomeChanged.Broadcast(OldBiome, NewBiome);
+    UE_LOG(LogTemp, Log, TEXT("Biome changed from %d to %d"), (int32)OldBiome, (int32)NewBiome);
+}
+
+void UEng_BiomeEventDispatcher::BroadcastWeatherChanged(EEng_WeatherType OldWeather, EEng_WeatherType NewWeather)
+{
+    OnWeatherChanged.Broadcast(OldWeather, NewWeather);
+    UE_LOG(LogTemp, Log, TEXT("Weather changed from %d to %d"), (int32)OldWeather, (int32)NewWeather);
+}
+
+void UEng_BiomeEventDispatcher::BroadcastTransitionStarted(EEng_BiomeType TargetBiome)
+{
+    OnBiomeTransitionStarted.Broadcast(TargetBiome);
+    UE_LOG(LogTemp, Log, TEXT("Biome transition started to %d"), (int32)TargetBiome);
+}
+
+void UEng_BiomeEventDispatcher::BroadcastTransitionCompleted()
+{
+    OnBiomeTransitionCompleted.Broadcast();
+    UE_LOG(LogTemp, Log, TEXT("Biome transition completed"));
+}
+
+UEng_BiomeEventDispatcher* UEng_BiomeEventDispatcher::GetBiomeEventDispatcher(const UObject* WorldContext)
+{
+    if (!Instance)
+    {
+        if (const UWorld* World = GEngine->GetWorldFromContextObject(WorldContext, EGetWorldErrorMode::LogAndReturnNull))
+        {
+            Instance = NewObject<UEng_BiomeEventDispatcher>();
+            Instance->AddToRoot(); // Prevent garbage collection
+        }
+    }
+    
+    return Instance;
 }
