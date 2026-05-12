@@ -2,90 +2,13 @@
 
 #include "CoreMinimal.h"
 #include "Animation/AnimInstance.h"
-#include "Engine/Engine.h"
-#include "GameFramework/Character.h"
-#include "GameFramework/CharacterMovementComponent.h"
-#include "Components/SkeletalMeshComponent.h"
-#include "Animation/AnimMontage.h"
-#include "Animation/BlendSpace.h"
-#include "Kismet/KismetMathLibrary.h"
+#include "Animation/AnimInstanceProxy.h"
+#include "Anim_CharacterMovementController.h"
 #include "Anim_PrehistoricAnimInstance.generated.h"
 
-UENUM(BlueprintType)
-enum class EAnim_PrehistoricMovementState : uint8
-{
-    Idle        UMETA(DisplayName = "Idle"),
-    Walking     UMETA(DisplayName = "Walking"), 
-    Running     UMETA(DisplayName = "Running"),
-    Jumping     UMETA(DisplayName = "Jumping"),
-    Falling     UMETA(DisplayName = "Falling"),
-    Crouching   UMETA(DisplayName = "Crouching"),
-    Swimming    UMETA(DisplayName = "Swimming"),
-    Climbing    UMETA(DisplayName = "Climbing")
-};
-
-UENUM(BlueprintType)
-enum class EAnim_PrehistoricActionState : uint8
-{
-    None            UMETA(DisplayName = "None"),
-    Gathering       UMETA(DisplayName = "Gathering"),
-    Crafting        UMETA(DisplayName = "Crafting"),
-    Combat          UMETA(DisplayName = "Combat"),
-    Eating          UMETA(DisplayName = "Eating"),
-    Drinking        UMETA(DisplayName = "Drinking"),
-    Sleeping        UMETA(DisplayName = "Sleeping"),
-    Hiding          UMETA(DisplayName = "Hiding")
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAnim_PrehistoricAnimData
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    float Speed;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    float Direction;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    bool bIsInAir;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    bool bIsCrouching;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    EAnim_PrehistoricMovementState MovementState;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Action")
-    EAnim_PrehistoricActionState ActionState;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Survival")
-    float HealthPercentage;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Survival")
-    float StaminaPercentage;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Survival")
-    float FearLevel;
-
-    FAnim_PrehistoricAnimData()
-    {
-        Speed = 0.0f;
-        Direction = 0.0f;
-        bIsInAir = false;
-        bIsCrouching = false;
-        MovementState = EAnim_PrehistoricMovementState::Idle;
-        ActionState = EAnim_PrehistoricActionState::None;
-        HealthPercentage = 1.0f;
-        StaminaPercentage = 1.0f;
-        FearLevel = 0.0f;
-    }
-};
-
 /**
- * Animation Instance para personagens pré-históricos
- * Gere estados de movimento, ações de sobrevivência e reações emocionais
+ * Custom Animation Instance for prehistoric survival characters
+ * Handles locomotion, survival states, and contextual animations
  */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UAnim_PrehistoricAnimInstance : public UAnimInstance
@@ -97,84 +20,177 @@ public:
 
 protected:
     virtual void NativeInitializeAnimation() override;
-    virtual void NativeUpdateAnimation(float DeltaTimeX) override;
-
-    // === DADOS DE ANIMAÇÃO ===
-    UPROPERTY(BlueprintReadOnly, Category = "Animation Data", meta = (AllowPrivateAccess = "true"))
-    FAnim_PrehistoricAnimData AnimData;
-
-    // === REFERÊNCIAS ===
-    UPROPERTY(BlueprintReadOnly, Category = "References", meta = (AllowPrivateAccess = "true"))
-    ACharacter* OwnerCharacter;
-
-    UPROPERTY(BlueprintReadOnly, Category = "References", meta = (AllowPrivateAccess = "true"))
-    UCharacterMovementComponent* MovementComponent;
-
-    // === CONFIGURAÇÕES DE MOVIMENTO ===
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement Settings")
-    float WalkSpeedThreshold;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement Settings")
-    float RunSpeedThreshold;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement Settings")
-    float DirectionSmoothingSpeed;
-
-    // === BLEND SPACES ===
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
-    UBlendSpace* LocomotionBlendSpace;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
-    UBlendSpace* CrouchBlendSpace;
-
-    // === MONTAGES ===
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
-    UAnimMontage* JumpMontage;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
-    UAnimMontage* GatherMontage;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
-    UAnimMontage* CraftMontage;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
-    UAnimMontage* EatMontage;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Assets")
-    UAnimMontage* DrinkMontage;
+    virtual void NativeUpdateAnimation(float DeltaTime) override;
 
 public:
-    // === FUNÇÕES PÚBLICAS ===
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void PlayActionMontage(EAnim_PrehistoricActionState ActionType);
+    // Movement data from controller
+    UPROPERTY(BlueprintReadOnly, Category = "Movement Data")
+    FAnim_MovementData MovementData;
 
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void StopActionMontage();
+    // Cached movement values for animation
+    UPROPERTY(BlueprintReadOnly, Category = "Locomotion")
+    float Speed;
 
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void SetFearLevel(float NewFearLevel);
+    UPROPERTY(BlueprintReadOnly, Category = "Locomotion")
+    float Direction;
 
-    UFUNCTION(BlueprintPure, Category = "Animation")
-    float GetCurrentSpeed() const { return AnimData.Speed; }
+    UPROPERTY(BlueprintReadOnly, Category = "Locomotion")
+    bool bIsMoving;
 
-    UFUNCTION(BlueprintPure, Category = "Animation")
-    EAnim_PrehistoricMovementState GetMovementState() const { return AnimData.MovementState; }
+    UPROPERTY(BlueprintReadOnly, Category = "Locomotion")
+    bool bIsInAir;
 
-    UFUNCTION(BlueprintPure, Category = "Animation")
-    EAnim_PrehistoricActionState GetActionState() const { return AnimData.ActionState; }
+    UPROPERTY(BlueprintReadOnly, Category = "Locomotion")
+    bool bIsCrouching;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Locomotion")
+    bool bIsSwimming;
+
+    // Survival state flags
+    UPROPERTY(BlueprintReadOnly, Category = "Survival")
+    bool bIsExhausted;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Survival")
+    bool bIsInjured;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Survival")
+    bool bIsFearful;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Survival")
+    bool bIsHungry;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Survival")
+    bool bIsThirsty;
+
+    // Survival values
+    UPROPERTY(BlueprintReadOnly, Category = "Survival")
+    float HealthPercentage;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Survival")
+    float StaminaPercentage;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Survival")
+    float FearLevel;
+
+    // Animation state machine states
+    UPROPERTY(BlueprintReadOnly, Category = "State Machine")
+    EAnim_MovementState CurrentMovementState;
+
+    UPROPERTY(BlueprintReadOnly, Category = "State Machine")
+    EAnim_SurvivalState CurrentSurvivalState;
+
+    // Transition conditions
+    UPROPERTY(BlueprintReadOnly, Category = "Transitions")
+    bool bCanTransitionToIdle;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Transitions")
+    bool bCanTransitionToWalk;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Transitions")
+    bool bCanTransitionToRun;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Transitions")
+    bool bCanTransitionToJump;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Transitions")
+    bool bCanTransitionToCrouch;
+
+    // Contextual animation triggers
+    UPROPERTY(BlueprintReadOnly, Category = "Contextual")
+    bool bShouldPlayFearReaction;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Contextual")
+    bool bShouldPlayInjuryReaction;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Contextual")
+    bool bShouldPlayExhaustionIdle;
+
+    // Animation blending weights
+    UPROPERTY(BlueprintReadOnly, Category = "Blending")
+    float LocomotionWeight;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Blending")
+    float SurvivalWeight;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Blending")
+    float FearWeight;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Blending")
+    float InjuryWeight;
+
+    // Animation event handlers
+    UFUNCTION(BlueprintCallable, Category = "Animation Events")
+    void OnJumpStart();
+
+    UFUNCTION(BlueprintCallable, Category = "Animation Events")
+    void OnLanded();
+
+    UFUNCTION(BlueprintCallable, Category = "Animation Events")
+    void OnFearTriggered(float Intensity);
+
+    UFUNCTION(BlueprintCallable, Category = "Animation Events")
+    void OnInjuryReceived();
+
+    UFUNCTION(BlueprintCallable, Category = "Animation Events")
+    void OnStaminaDepleted();
+
+protected:
+    // Cached references
+    UPROPERTY()
+    class ACharacter* OwnerCharacter;
+
+    UPROPERTY()
+    class UAnim_CharacterMovementController* MovementController;
+
+    UPROPERTY()
+    class UCharacterMovementComponent* CharacterMovement;
+
+    // Internal state tracking
+    UPROPERTY()
+    EAnim_MovementState PreviousMovementState;
+
+    UPROPERTY()
+    EAnim_SurvivalState PreviousSurvivalState;
+
+    UPROPERTY()
+    float StateChangeTimer;
+
+    UPROPERTY()
+    float MinStateTime;
+
+    // Animation update methods
+    void UpdateMovementData();
+    void UpdateSurvivalFlags();
+    void UpdateTransitionConditions();
+    void UpdateBlendingWeights();
+    void UpdateContextualTriggers();
+
+    // State transition helpers
+    bool CanTransitionFromState(EAnim_MovementState FromState, EAnim_MovementState ToState);
+    bool HasBeenInStateForMinTime();
+    void OnMovementStateChanged(EAnim_MovementState NewState);
+    void OnSurvivalStateChanged(EAnim_SurvivalState NewState);
+
+    // Animation curve helpers
+    UFUNCTION(BlueprintCallable, Category = "Animation Curves")
+    float GetAnimationCurveValue(FName CurveName);
+
+    UFUNCTION(BlueprintCallable, Category = "Animation Curves")
+    void SetAnimationCurveValue(FName CurveName, float Value);
 
 private:
-    // === FUNÇÕES PRIVADAS ===
-    void UpdateMovementData(float DeltaTime);
-    void UpdateMovementState();
-    void UpdateActionState();
-    void UpdateSurvivalData();
-    EAnim_PrehistoricMovementState CalculateMovementState() const;
-    UAnimMontage* GetMontageForAction(EAnim_PrehistoricActionState ActionType) const;
-
-    // === VARIÁVEIS DE CONTROLO ===
-    float LastDirection;
-    float DirectionChangeSpeed;
-    bool bWasInAir;
-    float TimeInCurrentState;
+    // Animation smoothing
+    float SmoothSpeed;
+    float SmoothDirection;
+    float SpeedInterpRate;
+    float DirectionInterpRate;
+    
+    // State timing
+    float TimeSinceLastStateChange;
+    
+    // Event flags (reset each frame)
+    bool bJumpEventTriggered;
+    bool bLandEventTriggered;
+    bool bFearEventTriggered;
+    bool bInjuryEventTriggered;
 };
