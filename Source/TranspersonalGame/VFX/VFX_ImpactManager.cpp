@@ -1,236 +1,222 @@
 #include "VFX_ImpactManager.h"
-#include "Engine/World.h"
-#include "Engine/Engine.h"
-#include "Kismet/GameplayStatics.h"
 #include "NiagaraFunctionLibrary.h"
-#include "Components/AudioComponent.h"
-#include "Engine/HitResult.h"
-#include "PhysicalMaterials/PhysicalMaterial.h"
-#include "Camera/PlayerCameraManager.h"
+#include "Engine/Engine.h"
+#include "TimerManager.h"
+#include "Components/SceneComponent.h"
 
-UVFX_ImpactManager::UVFX_ImpactManager()
+AVFX_ImpactManager::AVFX_ImpactManager()
 {
-    PrimaryComponentTick.bCanEverTick = false;
-    MinTimeBetweenEffects = 0.1f;
-    bUseGroundMaterialDetection = true;
-    EffectCullDistance = 2000.0f;
-    LastEffectTime = 0.0f;
-    CachedWorld = nullptr;
+    PrimaryActorTick.bCanEverTick = false;
+
+    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
+    RootComponent = RootSceneComponent;
+
+    MaxImpactDistance = 5000.0f;
+    MaxActiveEffects = 50;
+    CleanupInterval = 5.0f;
 }
 
-void UVFX_ImpactManager::BeginPlay()
+void AVFX_ImpactManager::BeginPlay()
 {
     Super::BeginPlay();
-    CachedWorld = GetWorld();
-    SetupDefaultEffects();
+    
+    InitializeDefaultEffects();
+    
+    // Start cleanup timer
+    GetWorldTimerManager().SetTimer(CleanupTimerHandle, this, &AVFX_ImpactManager::CleanupOldEffects, CleanupInterval, true);
 }
 
-void UVFX_ImpactManager::SetupDefaultEffects()
+void AVFX_ImpactManager::InitializeDefaultEffects()
 {
-    // Light Footstep (Small dinosaurs, humans)
-    FVFX_ImpactData LightData;
-    LightData.ParticleScale = 0.5f;
-    LightData.EffectDuration = 1.0f;
-    LightData.SpawnRadius = 50.0f;
-    ImpactEffects.Add(EVFX_ImpactType::Light_Footstep, LightData);
+    // Initialize default impact effects data
+    FVFX_ImpactData DirtFootstep;
+    DirtFootstep.ParticleScale = FVector(1.0f, 1.0f, 0.8f);
+    DirtFootstep.Duration = 1.5f;
+    DirtFootstep.bAttachToSurface = false;
+    ImpactEffects.Add(EVFX_ImpactType::FootstepDirt, DirtFootstep);
 
-    // Medium Footstep (Medium dinosaurs)
-    FVFX_ImpactData MediumData;
-    MediumData.ParticleScale = 1.0f;
-    MediumData.EffectDuration = 1.5f;
-    MediumData.SpawnRadius = 100.0f;
-    ImpactEffects.Add(EVFX_ImpactType::Medium_Footstep, MediumData);
+    FVFX_ImpactData RockFootstep;
+    RockFootstep.ParticleScale = FVector(0.7f, 0.7f, 0.5f);
+    RockFootstep.Duration = 1.0f;
+    RockFootstep.bAttachToSurface = false;
+    ImpactEffects.Add(EVFX_ImpactType::FootstepRock, RockFootstep);
 
-    // Heavy Footstep (Large theropods)
-    FVFX_ImpactData HeavyData;
-    HeavyData.ParticleScale = 2.0f;
-    HeavyData.EffectDuration = 2.0f;
-    HeavyData.SpawnRadius = 150.0f;
-    ImpactEffects.Add(EVFX_ImpactType::Heavy_Footstep, HeavyData);
+    FVFX_ImpactData WaterFootstep;
+    WaterFootstep.ParticleScale = FVector(1.2f, 1.2f, 0.6f);
+    WaterFootstep.Duration = 2.0f;
+    WaterFootstep.bAttachToSurface = false;
+    ImpactEffects.Add(EVFX_ImpactType::FootstepWater, WaterFootstep);
 
-    // Massive Footstep (T-Rex, Brachiosaurus)
-    FVFX_ImpactData MassiveData;
-    MassiveData.ParticleScale = 3.0f;
-    MassiveData.EffectDuration = 3.0f;
-    MassiveData.SpawnRadius = 250.0f;
-    ImpactEffects.Add(EVFX_ImpactType::Massive_Footstep, MassiveData);
+    FVFX_ImpactData BloodHit;
+    BloodHit.ParticleScale = FVector(0.8f, 0.8f, 0.8f);
+    BloodHit.Duration = 3.0f;
+    BloodHit.bAttachToSurface = true;
+    ImpactEffects.Add(EVFX_ImpactType::BloodSplatter, BloodHit);
 
-    // Weapon Impact
-    FVFX_ImpactData WeaponData;
-    WeaponData.ParticleScale = 0.8f;
-    WeaponData.EffectDuration = 1.2f;
-    WeaponData.SpawnRadius = 75.0f;
-    ImpactEffects.Add(EVFX_ImpactType::Weapon_Impact, WeaponData);
+    FVFX_ImpactData WeaponFlesh;
+    WeaponFlesh.ParticleScale = FVector(0.6f, 0.6f, 0.6f);
+    WeaponFlesh.Duration = 1.5f;
+    WeaponFlesh.bAttachToSurface = false;
+    ImpactEffects.Add(EVFX_ImpactType::WeaponHitFlesh, WeaponFlesh);
 
-    // Fall Impact
-    FVFX_ImpactData FallData;
-    FallData.ParticleScale = 1.5f;
-    FallData.EffectDuration = 2.5f;
-    FallData.SpawnRadius = 120.0f;
-    ImpactEffects.Add(EVFX_ImpactType::Fall_Impact, FallData);
-
-    // Rock Impact
-    FVFX_ImpactData RockData;
-    RockData.ParticleScale = 0.6f;
-    RockData.EffectDuration = 1.0f;
-    RockData.SpawnRadius = 60.0f;
-    ImpactEffects.Add(EVFX_ImpactType::Rock_Impact, RockData);
+    FVFX_ImpactData FallDamage;
+    FallDamage.ParticleScale = FVector(1.5f, 1.5f, 1.0f);
+    FallDamage.Duration = 2.5f;
+    FallDamage.bAttachToSurface = false;
+    ImpactEffects.Add(EVFX_ImpactType::FallImpact, FallDamage);
 }
 
-void UVFX_ImpactManager::TriggerImpactEffect(EVFX_ImpactType ImpactType, FVector Location, FVector Normal, float IntensityMultiplier)
+void AVFX_ImpactManager::PlayImpactEffect(EVFX_ImpactType ImpactType, FVector Location, FVector Normal, float Scale)
 {
-    if (!CachedWorld || !ShouldSpawnEffect(Location))
+    if (!ImpactEffects.Contains(ImpactType))
     {
+        UE_LOG(LogTemp, Warning, TEXT("VFX_ImpactManager: No effect data for impact type"));
         return;
     }
 
-    const FVFX_ImpactData* EffectData = ImpactEffects.Find(ImpactType);
-    if (!EffectData)
+    const FVFX_ImpactData& EffectData = ImpactEffects[ImpactType];
+    
+    // Check if we have a valid particle system
+    if (!EffectData.ParticleSystem.IsValid())
     {
-        UE_LOG(LogTemp, Warning, TEXT("VFX_ImpactManager: No effect data found for impact type"));
+        UE_LOG(LogTemp, Warning, TEXT("VFX_ImpactManager: No particle system assigned for impact type"));
         return;
     }
 
-    float ScaledIntensity = EffectData->ParticleScale * IntensityMultiplier;
-
-    // Spawn dust effect
-    if (EffectData->DustEffect)
+    // Calculate rotation from normal
+    FRotator Rotation = FRotationMatrix::MakeFromZ(Normal).Rotator();
+    
+    // Apply scale
+    FVector FinalScale = EffectData.ParticleScale * Scale;
+    
+    // Spawn the effect
+    UNiagaraComponent* EffectComponent = SpawnEffectAtLocation(EffectData.ParticleSystem.Get(), Location, Rotation, FinalScale);
+    
+    if (EffectComponent)
     {
-        SpawnDustEffect(EffectData->DustEffect, Location, Normal, ScaledIntensity);
-    }
-
-    // Spawn debris effect
-    if (EffectData->DebrisEffect)
-    {
-        SpawnDebrisEffect(EffectData->DebrisEffect, Location, Normal, ScaledIntensity);
-    }
-
-    // Play impact sound
-    if (EffectData->ImpactSound)
-    {
-        PlayImpactSound(EffectData->ImpactSound, Location, IntensityMultiplier);
-    }
-
-    LastEffectTime = CachedWorld->GetTimeSeconds();
-}
-
-void UVFX_ImpactManager::TriggerFootstepEffect(float DinosaurMass, FVector Location, FVector Normal)
-{
-    EVFX_ImpactType ImpactType = GetImpactTypeFromMass(DinosaurMass);
-    float IntensityMultiplier = FMath::Clamp(DinosaurMass / 1000.0f, 0.5f, 3.0f); // Scale based on mass
-    TriggerImpactEffect(ImpactType, Location, Normal, IntensityMultiplier);
-}
-
-EVFX_ImpactType UVFX_ImpactManager::GetImpactTypeFromMass(float Mass)
-{
-    if (Mass < 100.0f) // Small dinosaurs, humans
-    {
-        return EVFX_ImpactType::Light_Footstep;
-    }
-    else if (Mass < 500.0f) // Medium dinosaurs
-    {
-        return EVFX_ImpactType::Medium_Footstep;
-    }
-    else if (Mass < 2000.0f) // Large theropods
-    {
-        return EVFX_ImpactType::Heavy_Footstep;
-    }
-    else // T-Rex, Sauropods
-    {
-        return EVFX_ImpactType::Massive_Footstep;
-    }
-}
-
-bool UVFX_ImpactManager::ShouldSpawnEffect(FVector Location)
-{
-    if (!CachedWorld)
-    {
-        return false;
-    }
-
-    // Check cooldown
-    float CurrentTime = CachedWorld->GetTimeSeconds();
-    if (CurrentTime - LastEffectTime < MinTimeBetweenEffects)
-    {
-        return false;
-    }
-
-    // Check distance to player camera
-    APlayerCameraManager* CameraManager = UGameplayStatics::GetPlayerCameraManager(CachedWorld, 0);
-    if (CameraManager)
-    {
-        float DistanceToCamera = FVector::Dist(Location, CameraManager->GetCameraLocation());
-        if (DistanceToCamera > EffectCullDistance)
+        ActiveEffects.Add(EffectComponent);
+        
+        // Clean up if we have too many effects
+        if (ActiveEffects.Num() > MaxActiveEffects)
         {
-            return false;
+            CleanupOldEffects();
         }
     }
-
-    return true;
 }
 
-void UVFX_ImpactManager::SpawnDustEffect(UNiagaraSystem* Effect, FVector Location, FVector Normal, float Scale)
+void AVFX_ImpactManager::PlayFootstepEffect(EDinosaurSpecies Species, FVector Location, ESurfaceType SurfaceType)
 {
-    if (!Effect || !CachedWorld)
+    EVFX_ImpactType ImpactType = GetImpactTypeForSurface(SurfaceType);
+    
+    // Scale based on dinosaur species
+    float Scale = 1.0f;
+    switch (Species)
     {
-        return;
+        case EDinosaurSpecies::TRex:
+            Scale = 3.0f;
+            break;
+        case EDinosaurSpecies::Brachiosaurus:
+            Scale = 4.0f;
+            break;
+        case EDinosaurSpecies::Raptor:
+            Scale = 0.8f;
+            break;
+        case EDinosaurSpecies::Triceratops:
+            Scale = 2.5f;
+            break;
+        case EDinosaurSpecies::Pteranodon:
+            Scale = 0.4f;
+            break;
+        default:
+            Scale = 1.0f;
+            break;
     }
-
-    FRotator EffectRotation = Normal.Rotation();
-    UNiagaraComponent* NiagaraComp = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
-        CachedWorld, 
-        Effect, 
-        Location, 
-        EffectRotation
-    );
-
-    if (NiagaraComp)
-    {
-        NiagaraComp->SetFloatParameter(FName("Scale"), Scale);
-        NiagaraComp->SetVectorParameter(FName("ImpactNormal"), Normal);
-        NiagaraComp->SetFloatParameter(FName("Intensity"), Scale);
-    }
+    
+    PlayImpactEffect(ImpactType, Location, FVector::UpVector, Scale);
 }
 
-void UVFX_ImpactManager::SpawnDebrisEffect(UNiagaraSystem* Effect, FVector Location, FVector Normal, float Scale)
+void AVFX_ImpactManager::PlayCombatImpact(FVector Location, float Damage, bool bIsBloodHit)
 {
-    if (!Effect || !CachedWorld)
-    {
-        return;
-    }
-
-    FRotator EffectRotation = Normal.Rotation();
-    UNiagaraComponent* NiagaraComp = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
-        CachedWorld, 
-        Effect, 
-        Location, 
-        EffectRotation
-    );
-
-    if (NiagaraComp)
-    {
-        NiagaraComp->SetFloatParameter(FName("DebrisScale"), Scale);
-        NiagaraComp->SetVectorParameter(FName("ImpactDirection"), Normal);
-        NiagaraComp->SetFloatParameter(FName("SpreadRadius"), Scale * 50.0f);
-    }
+    EVFX_ImpactType ImpactType = bIsBloodHit ? EVFX_ImpactType::BloodSplatter : EVFX_ImpactType::WeaponHitFlesh;
+    
+    // Scale effect based on damage
+    float Scale = FMath::Clamp(Damage / 50.0f, 0.5f, 2.0f);
+    
+    PlayImpactEffect(ImpactType, Location, FVector::UpVector, Scale);
 }
 
-void UVFX_ImpactManager::PlayImpactSound(USoundCue* Sound, FVector Location, float VolumeMultiplier)
+UNiagaraComponent* AVFX_ImpactManager::SpawnEffectAtLocation(UNiagaraSystem* System, FVector Location, FRotator Rotation, FVector Scale)
 {
-    if (!Sound || !CachedWorld)
+    if (!System || !GetWorld())
     {
-        return;
+        return nullptr;
     }
 
-    UGameplayStatics::PlaySoundAtLocation(
-        CachedWorld,
-        Sound,
+    UNiagaraComponent* NiagaraComponent = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+        GetWorld(),
+        System,
         Location,
-        VolumeMultiplier,
-        1.0f, // Pitch
-        0.0f, // Start time
-        nullptr, // Attenuation override
-        nullptr, // Concurrency settings
-        GetOwner() // Owner for spatialization
+        Rotation,
+        Scale,
+        true,  // bAutoDestroy
+        true,  // bAutoActivate
+        ENCPoolMethod::None,
+        true   // bPreCullCheck
     );
+
+    return NiagaraComponent;
+}
+
+void AVFX_ImpactManager::CleanupOldEffects()
+{
+    RemoveFinishedEffects();
+    
+    // If we still have too many, remove oldest ones
+    while (ActiveEffects.Num() > MaxActiveEffects)
+    {
+        if (ActiveEffects.Num() > 0 && IsValid(ActiveEffects[0]))
+        {
+            ActiveEffects[0]->DestroyComponent();
+        }
+        ActiveEffects.RemoveAt(0);
+    }
+}
+
+void AVFX_ImpactManager::RemoveFinishedEffects()
+{
+    for (int32 i = ActiveEffects.Num() - 1; i >= 0; i--)
+    {
+        if (!IsValid(ActiveEffects[i]) || !ActiveEffects[i]->IsActive())
+        {
+            ActiveEffects.RemoveAt(i);
+        }
+    }
+}
+
+void AVFX_ImpactManager::SetMaxActiveEffects(int32 NewMax)
+{
+    MaxActiveEffects = FMath::Max(NewMax, 10);
+    CleanupOldEffects();
+}
+
+EVFX_ImpactType AVFX_ImpactManager::GetImpactTypeForSurface(ESurfaceType SurfaceType)
+{
+    switch (SurfaceType)
+    {
+        case ESurfaceType::Dirt:
+        case ESurfaceType::Grass:
+        case ESurfaceType::Sand:
+            return EVFX_ImpactType::FootstepDirt;
+            
+        case ESurfaceType::Rock:
+        case ESurfaceType::Stone:
+            return EVFX_ImpactType::FootstepRock;
+            
+        case ESurfaceType::Water:
+        case ESurfaceType::Mud:
+            return EVFX_ImpactType::FootstepWater;
+            
+        default:
+            return EVFX_ImpactType::FootstepDirt;
+    }
 }
