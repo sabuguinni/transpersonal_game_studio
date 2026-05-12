@@ -1,283 +1,236 @@
 #include "VFX_ImpactManager.h"
 #include "Engine/World.h"
-#include "Kismet/GameplayStatics.h"
-#include "Components/SceneComponent.h"
 #include "Engine/Engine.h"
+#include "Kismet/GameplayStatics.h"
+#include "NiagaraFunctionLibrary.h"
+#include "Components/AudioComponent.h"
+#include "Engine/HitResult.h"
+#include "PhysicalMaterials/PhysicalMaterial.h"
+#include "Camera/PlayerCameraManager.h"
 
 UVFX_ImpactManager::UVFX_ImpactManager()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f; // Tick every 100ms for cleanup
-    
-    MaxConcurrentEffects = 20;
-    EffectCullDistance = 5000.0f;
-
-    // Initialize default footstep effect
-    FootstepEffect.EffectScale = FVector(1.5f, 1.5f, 1.0f);
-    FootstepEffect.EffectDuration = 2.0f;
-    FootstepEffect.bAttachToSurface = false;
-
-    // Initialize default blood effect
-    BloodSplatterEffect.EffectScale = FVector(1.0f, 1.0f, 1.0f);
-    BloodSplatterEffect.EffectDuration = 5.0f;
-    BloodSplatterEffect.bAttachToSurface = true;
-
-    // Initialize weapon impact effect
-    WeaponImpactEffect.EffectScale = FVector(0.8f, 0.8f, 0.8f);
-    WeaponImpactEffect.EffectDuration = 1.5f;
-    WeaponImpactEffect.bAttachToSurface = false;
-
-    // Initialize environmental effects
-    RockFallEffect.EffectScale = FVector(2.0f, 2.0f, 2.0f);
-    RockFallEffect.EffectDuration = 4.0f;
-    RockFallEffect.bAttachToSurface = false;
-
-    TreeFallEffect.EffectScale = FVector(3.0f, 3.0f, 1.5f);
-    TreeFallEffect.EffectDuration = 6.0f;
-    TreeFallEffect.bAttachToSurface = false;
-
-    // Initialize bite and tail swipe effects
-    BiteEffect.EffectScale = FVector(1.2f, 1.2f, 1.2f);
-    BiteEffect.EffectDuration = 2.5f;
-    BiteEffect.bAttachToSurface = false;
-
-    TailSwipeEffect.EffectScale = FVector(2.5f, 2.5f, 1.0f);
-    TailSwipeEffect.EffectDuration = 3.0f;
-    TailSwipeEffect.bAttachToSurface = false;
+    PrimaryComponentTick.bCanEverTick = false;
+    MinTimeBetweenEffects = 0.1f;
+    bUseGroundMaterialDetection = true;
+    EffectCullDistance = 2000.0f;
+    LastEffectTime = 0.0f;
+    CachedWorld = nullptr;
 }
 
 void UVFX_ImpactManager::BeginPlay()
 {
     Super::BeginPlay();
-    
-    // Reserve space for active effects array
-    ActiveEffects.Reserve(MaxConcurrentEffects);
-    
-    UE_LOG(LogTemp, Log, TEXT("VFX Impact Manager initialized for actor: %s"), 
-           GetOwner() ? *GetOwner()->GetName() : TEXT("Unknown"));
+    CachedWorld = GetWorld();
+    SetupDefaultEffects();
 }
 
-void UVFX_ImpactManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UVFX_ImpactManager::SetupDefaultEffects()
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    
-    // Clean up finished effects periodically
-    CleanupFinishedEffects();
+    // Light Footstep (Small dinosaurs, humans)
+    FVFX_ImpactData LightData;
+    LightData.ParticleScale = 0.5f;
+    LightData.EffectDuration = 1.0f;
+    LightData.SpawnRadius = 50.0f;
+    ImpactEffects.Add(EVFX_ImpactType::Light_Footstep, LightData);
+
+    // Medium Footstep (Medium dinosaurs)
+    FVFX_ImpactData MediumData;
+    MediumData.ParticleScale = 1.0f;
+    MediumData.EffectDuration = 1.5f;
+    MediumData.SpawnRadius = 100.0f;
+    ImpactEffects.Add(EVFX_ImpactType::Medium_Footstep, MediumData);
+
+    // Heavy Footstep (Large theropods)
+    FVFX_ImpactData HeavyData;
+    HeavyData.ParticleScale = 2.0f;
+    HeavyData.EffectDuration = 2.0f;
+    HeavyData.SpawnRadius = 150.0f;
+    ImpactEffects.Add(EVFX_ImpactType::Heavy_Footstep, HeavyData);
+
+    // Massive Footstep (T-Rex, Brachiosaurus)
+    FVFX_ImpactData MassiveData;
+    MassiveData.ParticleScale = 3.0f;
+    MassiveData.EffectDuration = 3.0f;
+    MassiveData.SpawnRadius = 250.0f;
+    ImpactEffects.Add(EVFX_ImpactType::Massive_Footstep, MassiveData);
+
+    // Weapon Impact
+    FVFX_ImpactData WeaponData;
+    WeaponData.ParticleScale = 0.8f;
+    WeaponData.EffectDuration = 1.2f;
+    WeaponData.SpawnRadius = 75.0f;
+    ImpactEffects.Add(EVFX_ImpactType::Weapon_Impact, WeaponData);
+
+    // Fall Impact
+    FVFX_ImpactData FallData;
+    FallData.ParticleScale = 1.5f;
+    FallData.EffectDuration = 2.5f;
+    FallData.SpawnRadius = 120.0f;
+    ImpactEffects.Add(EVFX_ImpactType::Fall_Impact, FallData);
+
+    // Rock Impact
+    FVFX_ImpactData RockData;
+    RockData.ParticleScale = 0.6f;
+    RockData.EffectDuration = 1.0f;
+    RockData.SpawnRadius = 60.0f;
+    ImpactEffects.Add(EVFX_ImpactType::Rock_Impact, RockData);
 }
 
-void UVFX_ImpactManager::PlayImpactEffect(const FVector& Location, const FVector& Normal, EPhysicalSurface SurfaceType, float ImpactForce)
+void UVFX_ImpactManager::TriggerImpactEffect(EVFX_ImpactType ImpactType, FVector Location, FVector Normal, float IntensityMultiplier)
 {
-    if (ShouldCullEffect(Location))
+    if (!CachedWorld || !ShouldSpawnEffect(Location))
     {
         return;
     }
 
-    // Find appropriate effect for surface type
-    FVFX_ImpactData* EffectData = SurfaceImpacts.Find(SurfaceType);
+    const FVFX_ImpactData* EffectData = ImpactEffects.Find(ImpactType);
     if (!EffectData)
     {
-        // Use default dirt/ground effect
-        EffectData = &FootstepEffect;
+        UE_LOG(LogTemp, Warning, TEXT("VFX_ImpactManager: No effect data found for impact type"));
+        return;
     }
 
-    FRotator EffectRotation = CalculateEffectRotation(Normal);
-    float ScaleMultiplier = FMath::Clamp(ImpactForce, 0.5f, 3.0f);
-    
-    SpawnParticleEffect(*EffectData, Location, EffectRotation, ScaleMultiplier);
-    PlayImpactSound(*EffectData, Location, ScaleMultiplier);
+    float ScaledIntensity = EffectData->ParticleScale * IntensityMultiplier;
+
+    // Spawn dust effect
+    if (EffectData->DustEffect)
+    {
+        SpawnDustEffect(EffectData->DustEffect, Location, Normal, ScaledIntensity);
+    }
+
+    // Spawn debris effect
+    if (EffectData->DebrisEffect)
+    {
+        SpawnDebrisEffect(EffectData->DebrisEffect, Location, Normal, ScaledIntensity);
+    }
+
+    // Play impact sound
+    if (EffectData->ImpactSound)
+    {
+        PlayImpactSound(EffectData->ImpactSound, Location, IntensityMultiplier);
+    }
+
+    LastEffectTime = CachedWorld->GetTimeSeconds();
 }
 
-void UVFX_ImpactManager::PlayFootstepEffect(const FVector& Location, const FVector& Normal, float DinosaurSize)
+void UVFX_ImpactManager::TriggerFootstepEffect(float DinosaurMass, FVector Location, FVector Normal)
 {
-    if (ShouldCullEffect(Location))
-    {
-        return;
-    }
-
-    FRotator EffectRotation = CalculateEffectRotation(Normal);
-    float ScaleMultiplier = FMath::Clamp(DinosaurSize, 0.3f, 5.0f);
-    
-    SpawnParticleEffect(FootstepEffect, Location, EffectRotation, ScaleMultiplier);
-    PlayImpactSound(FootstepEffect, Location, ScaleMultiplier * 0.8f);
-
-    UE_LOG(LogTemp, VeryVerbose, TEXT("Played footstep effect at location: %s, size: %f"), 
-           *Location.ToString(), DinosaurSize);
+    EVFX_ImpactType ImpactType = GetImpactTypeFromMass(DinosaurMass);
+    float IntensityMultiplier = FMath::Clamp(DinosaurMass / 1000.0f, 0.5f, 3.0f); // Scale based on mass
+    TriggerImpactEffect(ImpactType, Location, Normal, IntensityMultiplier);
 }
 
-void UVFX_ImpactManager::PlayBloodEffect(const FVector& Location, const FVector& Direction, float BloodAmount)
+EVFX_ImpactType UVFX_ImpactManager::GetImpactTypeFromMass(float Mass)
 {
-    if (ShouldCullEffect(Location))
+    if (Mass < 100.0f) // Small dinosaurs, humans
     {
-        return;
+        return EVFX_ImpactType::Light_Footstep;
     }
-
-    FRotator EffectRotation = Direction.Rotation();
-    float ScaleMultiplier = FMath::Clamp(BloodAmount, 0.5f, 2.0f);
-    
-    SpawnParticleEffect(BloodSplatterEffect, Location, EffectRotation, ScaleMultiplier);
-    PlayImpactSound(BloodSplatterEffect, Location, ScaleMultiplier);
+    else if (Mass < 500.0f) // Medium dinosaurs
+    {
+        return EVFX_ImpactType::Medium_Footstep;
+    }
+    else if (Mass < 2000.0f) // Large theropods
+    {
+        return EVFX_ImpactType::Heavy_Footstep;
+    }
+    else // T-Rex, Sauropods
+    {
+        return EVFX_ImpactType::Massive_Footstep;
+    }
 }
 
-void UVFX_ImpactManager::PlayWeaponImpact(const FVector& Location, const FVector& Normal, EPhysicalSurface SurfaceType)
+bool UVFX_ImpactManager::ShouldSpawnEffect(FVector Location)
 {
-    if (ShouldCullEffect(Location))
+    if (!CachedWorld)
     {
-        return;
+        return false;
     }
 
-    FRotator EffectRotation = CalculateEffectRotation(Normal);
-    
-    SpawnParticleEffect(WeaponImpactEffect, Location, EffectRotation);
-    PlayImpactSound(WeaponImpactEffect, Location);
+    // Check cooldown
+    float CurrentTime = CachedWorld->GetTimeSeconds();
+    if (CurrentTime - LastEffectTime < MinTimeBetweenEffects)
+    {
+        return false;
+    }
 
-    // Also play surface-specific effect if available
-    PlayImpactEffect(Location, Normal, SurfaceType, 0.8f);
+    // Check distance to player camera
+    APlayerCameraManager* CameraManager = UGameplayStatics::GetPlayerCameraManager(CachedWorld, 0);
+    if (CameraManager)
+    {
+        float DistanceToCamera = FVector::Dist(Location, CameraManager->GetCameraLocation());
+        if (DistanceToCamera > EffectCullDistance)
+        {
+            return false;
+        }
+    }
+
+    return true;
 }
 
-void UVFX_ImpactManager::PlayEnvironmentalEffect(const FVector& Location, bool bIsRockFall)
+void UVFX_ImpactManager::SpawnDustEffect(UNiagaraSystem* Effect, FVector Location, FVector Normal, float Scale)
 {
-    if (ShouldCullEffect(Location))
+    if (!Effect || !CachedWorld)
     {
         return;
     }
 
-    const FVFX_ImpactData& EffectData = bIsRockFall ? RockFallEffect : TreeFallEffect;
-    FRotator EffectRotation = FRotator::ZeroRotator;
-    
-    SpawnParticleEffect(EffectData, Location, EffectRotation);
-    PlayImpactSound(EffectData, Location, 1.5f);
-}
-
-void UVFX_ImpactManager::SpawnParticleEffect(const FVFX_ImpactData& EffectData, const FVector& Location, const FRotator& Rotation, float ScaleMultiplier)
-{
-    if (!EffectData.ParticleEffect.IsValid())
-    {
-        return;
-    }
-
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return;
-    }
-
-    // Load the Niagara system if needed
-    UNiagaraSystem* NiagaraSystem = EffectData.ParticleEffect.LoadSynchronous();
-    if (!NiagaraSystem)
-    {
-        return;
-    }
-
-    // Calculate final scale
-    FVector FinalScale = EffectData.EffectScale * ScaleMultiplier;
-
-    // Spawn the effect
-    UNiagaraComponent* SpawnedEffect = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
-        World,
-        NiagaraSystem,
-        Location,
-        Rotation,
-        FinalScale,
-        true, // Auto destroy
-        true, // Auto activate
-        ENCPoolMethod::None
+    FRotator EffectRotation = Normal.Rotation();
+    UNiagaraComponent* NiagaraComp = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+        CachedWorld, 
+        Effect, 
+        Location, 
+        EffectRotation
     );
 
-    if (SpawnedEffect)
+    if (NiagaraComp)
     {
-        // Track the effect for cleanup
-        ActiveEffects.Add(SpawnedEffect);
-        
-        // Set custom duration if specified
-        if (EffectData.EffectDuration > 0.0f)
-        {
-            SpawnedEffect->SetNiagaraVariableFloat(TEXT("User.LifeTime"), EffectData.EffectDuration);
-        }
-
-        UE_LOG(LogTemp, VeryVerbose, TEXT("Spawned VFX effect at: %s"), *Location.ToString());
+        NiagaraComp->SetFloatParameter(FName("Scale"), Scale);
+        NiagaraComp->SetVectorParameter(FName("ImpactNormal"), Normal);
+        NiagaraComp->SetFloatParameter(FName("Intensity"), Scale);
     }
 }
 
-void UVFX_ImpactManager::PlayImpactSound(const FVFX_ImpactData& EffectData, const FVector& Location, float VolumeMultiplier)
+void UVFX_ImpactManager::SpawnDebrisEffect(UNiagaraSystem* Effect, FVector Location, FVector Normal, float Scale)
 {
-    if (!EffectData.ImpactSound.IsValid())
+    if (!Effect || !CachedWorld)
     {
         return;
     }
 
-    USoundCue* SoundCue = EffectData.ImpactSound.LoadSynchronous();
-    if (!SoundCue)
+    FRotator EffectRotation = Normal.Rotation();
+    UNiagaraComponent* NiagaraComp = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+        CachedWorld, 
+        Effect, 
+        Location, 
+        EffectRotation
+    );
+
+    if (NiagaraComp)
+    {
+        NiagaraComp->SetFloatParameter(FName("DebrisScale"), Scale);
+        NiagaraComp->SetVectorParameter(FName("ImpactDirection"), Normal);
+        NiagaraComp->SetFloatParameter(FName("SpreadRadius"), Scale * 50.0f);
+    }
+}
+
+void UVFX_ImpactManager::PlayImpactSound(USoundCue* Sound, FVector Location, float VolumeMultiplier)
+{
+    if (!Sound || !CachedWorld)
     {
         return;
     }
 
     UGameplayStatics::PlaySoundAtLocation(
-        GetWorld(),
-        SoundCue,
+        CachedWorld,
+        Sound,
         Location,
         VolumeMultiplier,
         1.0f, // Pitch
         0.0f, // Start time
         nullptr, // Attenuation override
-        nullptr, // Concurrency override
-        GetOwner() // Owner
+        nullptr, // Concurrency settings
+        GetOwner() // Owner for spatialization
     );
-}
-
-FRotator UVFX_ImpactManager::CalculateEffectRotation(const FVector& Normal)
-{
-    // Calculate rotation to align effect with surface normal
-    FVector UpVector = FVector::UpVector;
-    FVector ForwardVector = FVector::CrossProduct(Normal, UpVector);
-    
-    if (ForwardVector.IsNearlyZero())
-    {
-        // Normal is parallel to up vector, use a different reference
-        ForwardVector = FVector::CrossProduct(Normal, FVector::ForwardVector);
-    }
-    
-    ForwardVector.Normalize();
-    FVector RightVector = FVector::CrossProduct(Normal, ForwardVector);
-    
-    return FRotationMatrix::MakeFromXZ(ForwardVector, Normal).Rotator();
-}
-
-void UVFX_ImpactManager::CleanupFinishedEffects()
-{
-    // Remove null or finished effects
-    ActiveEffects.RemoveAll([](UNiagaraComponent* Effect)
-    {
-        return !IsValid(Effect) || !Effect->IsActive();
-    });
-
-    // If we have too many effects, remove the oldest ones
-    while (ActiveEffects.Num() > MaxConcurrentEffects)
-    {
-        UNiagaraComponent* OldestEffect = ActiveEffects[0];
-        if (IsValid(OldestEffect))
-        {
-            OldestEffect->DestroyComponent();
-        }
-        ActiveEffects.RemoveAt(0);
-    }
-}
-
-bool UVFX_ImpactManager::ShouldCullEffect(const FVector& EffectLocation) const
-{
-    if (!GetOwner())
-    {
-        return true;
-    }
-
-    // Get player camera location for distance culling
-    APlayerController* PC = GetWorld()->GetFirstPlayerController();
-    if (!PC || !PC->GetPawn())
-    {
-        return false; // Don't cull if we can't find player
-    }
-
-    FVector PlayerLocation = PC->GetPawn()->GetActorLocation();
-    float DistanceSquared = FVector::DistSquared(PlayerLocation, EffectLocation);
-    
-    return DistanceSquared > (EffectCullDistance * EffectCullDistance);
 }
