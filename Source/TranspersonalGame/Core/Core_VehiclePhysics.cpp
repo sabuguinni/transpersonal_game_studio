@@ -1,479 +1,453 @@
 #include "Core_VehiclePhysics.h"
 #include "Engine/World.h"
-#include "Components/StaticMeshComponent.h"
 #include "Components/PrimitiveComponent.h"
 #include "Engine/Engine.h"
+#include "DrawDebugHelpers.h"
 #include "Kismet/GameplayStatics.h"
 #include "PhysicsEngine/PhysicsSettings.h"
-#include "Engine/HitResult.h"
-#include "CollisionQueryParams.h"
 
-UCore_VehiclePhysics::UCore_VehiclePhysics()
+ACore_VehiclePhysics::ACore_VehiclePhysics()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickGroup = TG_PrePhysics;
-    
-    // Initialize default stats
-    VehicleStats = FCore_VehicleStats();
-    CurrentDurability = VehicleStats.Durability;
-    CurrentState = ECore_VehicleState::Idle;
+    PrimaryActorTick.bCanEverTick = true;
+
+    // Create vehicle body mesh component
+    VehicleBodyMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("VehicleBodyMesh"));
+    RootComponent = VehicleBodyMesh;
+
+    // Configure physics
+    VehicleBodyMesh->SetSimulatePhysics(true);
+    VehicleBodyMesh->SetMassOverrideInKg(NAME_None, VehicleMass);
+    VehicleBodyMesh->SetCenterOfMass(CenterOfMassOffset);
+    VehicleBodyMesh->SetLinearDamping(0.1f);
+    VehicleBodyMesh->SetAngularDamping(0.3f);
+
+    // Initialize wheel configurations (default 4-wheel setup)
+    WheelConfigurations.SetNum(4);
+    for (int32 i = 0; i < 4; i++)
+    {
+        WheelConfigurations[i] = FCore_WheelConfiguration();
+    }
+
+    // Initialize arrays
+    WheelContactPoints.SetNum(4);
+    WheelContactNormals.SetNum(4);
+    WheelCompressionRatios.SetNum(4);
+
+    // Reset input states
+    CurrentThrottle = 0.0f;
+    CurrentBrake = 0.0f;
+    CurrentSteering = 0.0f;
 }
 
-void UCore_VehiclePhysics::BeginPlay()
+void ACore_VehiclePhysics::BeginPlay()
 {
     Super::BeginPlay();
-    
-    // Find vehicle body component if not set
-    if (!VehicleBody)
+
+    // Apply initial vehicle mass
+    if (VehicleBodyMesh)
     {
-        AActor* Owner = GetOwner();
-        if (Owner)
+        VehicleBodyMesh->SetMassOverrideInKg(NAME_None, VehicleMass);
+        VehicleBodyMesh->SetCenterOfMass(CenterOfMassOffset);
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("Core Vehicle Physics initialized with mass: %f kg"), VehicleMass);
+}
+
+void ACore_VehiclePhysics::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+
+    if (!VehicleBodyMesh || !VehicleBodyMesh->IsSimulatingPhysics())
+    {
+        return;
+    }
+
+    // Calculate wheel contacts with ground
+    CalculateWheelContacts();
+
+    // Calculate and apply suspension forces
+    CalculateSuspensionForces();
+
+    // Apply engine force based on throttle input
+    ApplyEngineForce(DeltaTime);
+
+    // Apply aerodynamic drag
+    ApplyAerodynamicDrag(DeltaTime);
+
+    // Apply wheel forces (traction, braking)
+    ApplyWheelForces(DeltaTime);
+
+    // Update vehicle statistics
+    UpdateVehicleStats(DeltaTime);
+}
+
+void ACore_VehiclePhysics::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
+{
+    Super::SetupPlayerInputComponent(PlayerInputComponent);
+
+    // Bind input actions
+    PlayerInputComponent->BindAction("Throttle", IE_Pressed, this, &ACore_VehiclePhysics::ThrottlePressed);
+    PlayerInputComponent->BindAction("Throttle", IE_Released, this, &ACore_VehiclePhysics::ThrottleReleased);
+    PlayerInputComponent->BindAction("Brake", IE_Pressed, this, &ACore_VehiclePhysics::BrakePressed);
+    PlayerInputComponent->BindAction("Brake", IE_Released, this, &ACore_VehiclePhysics::BrakeReleased);
+
+    // Bind input axes
+    PlayerInputComponent->BindAxis("Steering", this, &ACore_VehiclePhysics::ApplySteering);
+}
+
+void ACore_VehiclePhysics::ApplyThrottle(float ThrottleValue)
+{
+    CurrentThrottle = FMath::Clamp(ThrottleValue, 0.0f, 1.0f);
+}
+
+void ACore_VehiclePhysics::ApplyBrake(float BrakeValue)
+{
+    CurrentBrake = FMath::Clamp(BrakeValue, 0.0f, 1.0f);
+}
+
+void ACore_VehiclePhysics::ApplySteering(float SteeringValue)
+{
+    CurrentSteering = FMath::Clamp(SteeringValue, -1.0f, 1.0f);
+}
+
+bool ACore_VehiclePhysics::IsOnGround() const
+{
+    // Check if any wheel is in contact with ground
+    for (float CompressionRatio : WheelCompressionRatios)
+    {
+        if (CompressionRatio > 0.0f)
         {
-            VehicleBody = Owner->FindComponentByClass<UPrimitiveComponent>();
-            if (VehicleBody)
+            return true;
+        }
+    }
+    return false;
+}
+
+float ACore_VehiclePhysics::GetTerrainTraction() const
+{
+    if (!IsOnGround())
+    {
+        return 0.0f;
+    }
+
+    // Perform line trace to determine surface material
+    FVector StartLocation = GetActorLocation();
+    FVector EndLocation = StartLocation - FVector(0, 0, 200.0f);
+
+    FHitResult HitResult;
+    FCollisionQueryParams QueryParams;
+    QueryParams.AddIgnoredActor(this);
+
+    bool bHit = GetWorld()->LineTraceSingleByChannel(
+        HitResult,
+        StartLocation,
+        EndLocation,
+        ECollisionChannel::ECC_WorldStatic,
+        QueryParams
+    );
+
+    if (bHit)
+    {
+        // Determine traction based on surface material
+        if (HitResult.GetComponent())
+        {
+            FString SurfaceName = HitResult.GetComponent()->GetName();
+            
+            // Basic surface traction mapping
+            if (SurfaceName.Contains("Grass") || SurfaceName.Contains("Dirt"))
             {
-                UE_LOG(LogTemp, Log, TEXT("Core_VehiclePhysics: Auto-detected vehicle body component"));
+                return 0.7f;
+            }
+            else if (SurfaceName.Contains("Rock") || SurfaceName.Contains("Stone"))
+            {
+                return 0.9f;
+            }
+            else if (SurfaceName.Contains("Mud") || SurfaceName.Contains("Swamp"))
+            {
+                return 0.3f;
+            }
+            else if (SurfaceName.Contains("Ice") || SurfaceName.Contains("Snow"))
+            {
+                return 0.2f;
             }
         }
     }
-    
-    // Initialize vehicle based on type
-    InitializeVehicle(VehicleType);
-    
-    LastPosition = GetOwner() ? GetOwner()->GetActorLocation() : FVector::ZeroVector;
-    LastUpdateTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+
+    // Default traction for unknown surfaces
+    return 0.6f;
 }
 
-void UCore_VehiclePhysics::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void ACore_VehiclePhysics::CalculateSuspensionForces()
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    
-    if (!VehicleBody || !GetOwner())
+    if (!VehicleBodyMesh)
     {
         return;
     }
-    
-    // Update vehicle physics
-    CheckTerrainType();
-    ApplyForces(DeltaTime);
-    UpdateVehicleState();
-    HandleTerrainInteraction();
-    
-    if (bIsInWater)
-    {
-        HandleWaterPhysics();
-    }
-    
-    UpdateDurability(DeltaTime);
-    
-    // Update velocity tracking
-    FVector CurrentPosition = GetOwner()->GetActorLocation();
-    if (DeltaTime > 0.0f)
-    {
-        Velocity = (CurrentPosition - LastPosition) / DeltaTime;
-        CurrentSpeed = Velocity.Size();
-    }
-    LastPosition = CurrentPosition;
-}
 
-void UCore_VehiclePhysics::SetThrottleInput(float InThrottle)
-{
-    ThrottleInput = FMath::Clamp(InThrottle, -1.0f, 1.0f);
-}
-
-void UCore_VehiclePhysics::SetSteeringInput(float InSteering)
-{
-    SteeringInput = FMath::Clamp(InSteering, -1.0f, 1.0f);
-}
-
-void UCore_VehiclePhysics::SetBrakeInput(bool bInBrake)
-{
-    bBrakeInput = bInBrake;
-}
-
-void UCore_VehiclePhysics::ApplyForces(float DeltaTime)
-{
-    if (!VehicleBody || DeltaTime <= 0.0f)
+    for (int32 WheelIndex = 0; WheelIndex < WheelConfigurations.Num(); WheelIndex++)
     {
-        return;
-    }
-    
-    CalculateMovementForces(DeltaTime);
-    ApplyFriction(DeltaTime);
-    ApplyAirResistance(DeltaTime);
-    
-    if (bIsInWater)
-    {
-        ApplyWaterResistance(DeltaTime);
-    }
-    
-    UpdateWheelPhysics(DeltaTime);
-}
-
-void UCore_VehiclePhysics::CalculateMovementForces(float DeltaTime)
-{
-    if (!VehicleBody)
-    {
-        return;
-    }
-    
-    // Calculate forward force from throttle input
-    FVector ForwardVector = GetOwner()->GetActorForwardVector();
-    float EffectiveAcceleration = VehicleStats.Acceleration;
-    
-    // Adjust for terrain and load
-    if (bIsOnRoughTerrain)
-    {
-        EffectiveAcceleration *= (1.0f - TerrainRoughness * 0.5f);
-    }
-    
-    float LoadFactor = 1.0f - (CurrentLoad / VehicleStats.CarryCapacity) * 0.3f;
-    EffectiveAcceleration *= FMath::Clamp(LoadFactor, 0.1f, 1.0f);
-    
-    // Apply throttle force
-    FVector ThrottleForce = ForwardVector * ThrottleInput * EffectiveAcceleration * VehicleBody->GetMass();
-    VehicleBody->AddForce(ThrottleForce);
-    
-    // Apply steering torque
-    if (FMath::Abs(SteeringInput) > 0.01f && CurrentSpeed > 10.0f)
-    {
-        float TurnTorque = SteeringInput * VehicleStats.TurnRate * VehicleBody->GetMass();
-        FVector TurnAxis = GetOwner()->GetActorUpVector();
-        VehicleBody->AddTorqueInRadians(TurnAxis * TurnTorque);
-    }
-    
-    // Apply braking force
-    if (bBrakeInput)
-    {
-        FVector BrakeForce = -Velocity.GetSafeNormal() * VehicleStats.BrakingForce * VehicleBody->GetMass();
-        VehicleBody->AddForce(BrakeForce);
-    }
-}
-
-void UCore_VehiclePhysics::ApplyFriction(float DeltaTime)
-{
-    if (!VehicleBody)
-    {
-        return;
-    }
-    
-    float FrictionCoefficient = 0.1f;
-    
-    // Adjust friction based on terrain
-    if (bIsOnRoughTerrain)
-    {
-        FrictionCoefficient += TerrainRoughness * 0.3f;
-    }
-    
-    // Adjust friction based on vehicle type
-    switch (VehicleType)
-    {
-        case ECore_VehicleType::Raft:
-            FrictionCoefficient = bIsInWater ? 0.05f : 0.8f;
-            break;
-        case ECore_VehicleType::Sled:
-            FrictionCoefficient = 0.15f;
-            break;
-        case ECore_VehicleType::Cart:
-            FrictionCoefficient = 0.2f;
-            break;
-        case ECore_VehicleType::Boat:
-            FrictionCoefficient = bIsInWater ? 0.08f : 1.0f;
-            break;
-        case ECore_VehicleType::RidingMount:
-            FrictionCoefficient = 0.05f; // Animals have natural movement
-            break;
-    }
-    
-    FVector FrictionForce = -Velocity * FrictionCoefficient * VehicleBody->GetMass();
-    VehicleBody->AddForce(FrictionForce);
-}
-
-void UCore_VehiclePhysics::ApplyAirResistance(float DeltaTime)
-{
-    if (!VehicleBody || CurrentSpeed < 50.0f)
-    {
-        return;
-    }
-    
-    float AirDensity = 1.225f; // kg/m³ at sea level
-    float DragCoefficient = 0.8f; // Primitive vehicles have poor aerodynamics
-    float FrontalArea = 4.0f; // Estimated frontal area in m²
-    
-    float DragForce = 0.5f * AirDensity * DragCoefficient * FrontalArea * CurrentSpeed * CurrentSpeed;
-    FVector DragVector = -Velocity.GetSafeNormal() * DragForce;
-    
-    VehicleBody->AddForce(DragVector);
-}
-
-void UCore_VehiclePhysics::ApplyWaterResistance(float DeltaTime)
-{
-    if (!VehicleBody || !bIsInWater)
-    {
-        return;
-    }
-    
-    float WaterDensity = 1000.0f; // kg/m³
-    float DragCoefficient = 1.2f; // Higher drag in water
-    float SubmergedArea = FMath::Min(WaterDepth / 100.0f, 1.0f) * 6.0f; // Estimated submerged area
-    
-    float WaterDrag = 0.5f * WaterDensity * DragCoefficient * SubmergedArea * CurrentSpeed * CurrentSpeed * 0.01f;
-    FVector DragVector = -Velocity.GetSafeNormal() * WaterDrag;
-    
-    VehicleBody->AddForce(DragVector);
-    
-    // Add buoyancy for water vehicles
-    if (VehicleType == ECore_VehicleType::Raft || VehicleType == ECore_VehicleType::Boat)
-    {
-        float BuoyancyForce = WaterDensity * 9.81f * SubmergedArea * 100.0f; // Convert to UE units
-        FVector BuoyancyVector = FVector(0, 0, BuoyancyForce);
-        VehicleBody->AddForce(BuoyancyVector);
-    }
-}
-
-void UCore_VehiclePhysics::UpdateWheelPhysics(float DeltaTime)
-{
-    // Update wheel components if they exist (for carts and sleds)
-    for (UPrimitiveComponent* Wheel : WheelComponents)
-    {
-        if (Wheel && CurrentSpeed > 10.0f)
+        if (WheelIndex >= WheelCompressionRatios.Num())
         {
-            // Rotate wheels based on vehicle speed
-            float RotationSpeed = CurrentSpeed / 50.0f; // Adjust wheel rotation rate
-            FRotator WheelRotation = FRotator(RotationSpeed * DeltaTime * 180.0f, 0, 0);
-            Wheel->AddRelativeRotation(WheelRotation);
+            continue;
         }
+
+        float CompressionRatio = WheelCompressionRatios[WheelIndex];
+        if (CompressionRatio <= 0.0f)
+        {
+            continue;
+        }
+
+        const FCore_WheelConfiguration& WheelConfig = WheelConfigurations[WheelIndex];
+        
+        // Calculate spring force
+        float SpringForce = WheelConfig.SpringStiffness * CompressionRatio * WheelConfig.SuspensionTravel;
+        
+        // Calculate damping force
+        FVector WheelVelocity = VehicleBodyMesh->GetPhysicsLinearVelocityAtPoint(WheelContactPoints[WheelIndex]);
+        float DampingForce = WheelConfig.DampingCoefficient * FVector::DotProduct(WheelVelocity, WheelContactNormals[WheelIndex]);
+        
+        // Total suspension force
+        float TotalForce = SpringForce - DampingForce;
+        FVector SuspensionForce = WheelContactNormals[WheelIndex] * TotalForce;
+        
+        // Apply force at wheel contact point
+        VehicleBodyMesh->AddForceAtLocation(SuspensionForce, WheelContactPoints[WheelIndex]);
     }
 }
 
-void UCore_VehiclePhysics::UpdateVehicleState()
+void ACore_VehiclePhysics::ApplyEngineForce(float DeltaTime)
 {
-    ECore_VehicleState NewState = ECore_VehicleState::Idle;
+    if (!VehicleBodyMesh || CurrentThrottle <= 0.0f)
+    {
+        return;
+    }
+
+    // Calculate engine output based on current RPM
+    float EngineOutput = CalculateEngineOutput(VehicleStats.EngineRPM);
     
-    if (CurrentSpeed > 50.0f)
-    {
-        if (FMath::Abs(SteeringInput) > 0.3f)
-        {
-            NewState = ECore_VehicleState::Turning;
-        }
-        else
-        {
-            NewState = ECore_VehicleState::Moving;
-        }
-    }
-    else if (bBrakeInput)
-    {
-        NewState = ECore_VehicleState::Braking;
-    }
-    else if (CurrentSpeed < 10.0f && FMath::Abs(ThrottleInput) > 0.1f)
-    {
-        NewState = ECore_VehicleState::Stuck;
-    }
+    // Apply throttle modifier
+    float TotalForce = EngineOutput * CurrentThrottle * MaxEnginePower * 100.0f; // Convert to Newtons
     
-    if (CurrentDurability < 20.0f)
-    {
-        NewState = ECore_VehicleState::Damaged;
-    }
+    // Apply force in forward direction
+    FVector ForwardDirection = GetActorForwardVector();
+    FVector EngineForce = ForwardDirection * TotalForce;
     
-    CurrentState = NewState;
+    VehicleBodyMesh->AddForce(EngineForce);
 }
 
-void UCore_VehiclePhysics::HandleTerrainInteraction()
+void ACore_VehiclePhysics::ApplyAerodynamicDrag(float DeltaTime)
 {
-    // Apply terrain-based damage and performance changes
-    if (bIsOnRoughTerrain && CurrentSpeed > 200.0f)
+    if (!VehicleBodyMesh)
     {
-        float DamageRate = TerrainRoughness * CurrentSpeed * 0.001f;
-        ApplyDamage(DamageRate * GetWorld()->GetDeltaSeconds());
+        return;
+    }
+
+    FVector Velocity = VehicleBodyMesh->GetPhysicsLinearVelocity();
+    float Speed = Velocity.Size();
+    
+    if (Speed > 0.1f)
+    {
+        // Calculate drag force: F = 0.5 * ρ * Cd * A * v²
+        float AirDensity = 1.225f; // kg/m³ at sea level
+        float DragForce = 0.5f * AirDensity * DragCoefficient * FrontalArea * Speed * Speed;
+        
+        // Apply drag in opposite direction of velocity
+        FVector DragDirection = -Velocity.GetSafeNormal();
+        FVector TotalDrag = DragDirection * DragForce;
+        
+        VehicleBodyMesh->AddForce(TotalDrag);
     }
 }
 
-void UCore_VehiclePhysics::HandleWaterPhysics()
+void ACore_VehiclePhysics::UpdateVehicleStats(float DeltaTime)
 {
-    // Special handling for water-based vehicles
-    if (VehicleType == ECore_VehicleType::Raft || VehicleType == ECore_VehicleType::Boat)
+    if (!VehicleBodyMesh)
     {
-        // Water vehicles are more stable in water
-        if (VehicleBody)
-        {
-            FVector AngularVelocity = VehicleBody->GetPhysicsAngularVelocityInRadians();
-            FVector StabilizingTorque = -AngularVelocity * VehicleBody->GetMass() * 0.5f;
-            VehicleBody->AddTorqueInRadians(StabilizingTorque);
-        }
+        return;
+    }
+
+    // Update speed (convert cm/s to km/h)
+    FVector Velocity = VehicleBodyMesh->GetPhysicsLinearVelocity();
+    VehicleStats.CurrentSpeed = Velocity.Size() * 0.036f;
+    
+    // Update engine RPM based on speed and throttle
+    float TargetRPM = 800.0f + (VehicleStats.CurrentSpeed * 50.0f) + (CurrentThrottle * 2000.0f);
+    VehicleStats.EngineRPM = FMath::FInterpTo(VehicleStats.EngineRPM, TargetRPM, DeltaTime, 5.0f);
+    
+    // Consume fuel based on throttle input
+    if (CurrentThrottle > 0.0f)
+    {
+        float FuelConsumption = CurrentThrottle * 2.0f * DeltaTime; // 2% per second at full throttle
+        VehicleStats.FuelLevel = FMath::Max(0.0f, VehicleStats.FuelLevel - FuelConsumption);
+    }
+    
+    // Update gear based on speed (simple automatic transmission)
+    if (VehicleStats.CurrentSpeed < 20.0f)
+    {
+        VehicleStats.CurrentGear = 1;
+    }
+    else if (VehicleStats.CurrentSpeed < 40.0f)
+    {
+        VehicleStats.CurrentGear = 2;
+    }
+    else if (VehicleStats.CurrentSpeed < 60.0f)
+    {
+        VehicleStats.CurrentGear = 3;
     }
     else
     {
-        // Land vehicles struggle in water
-        float WaterPenalty = FMath::Min(WaterDepth / 50.0f, 1.0f);
-        ApplyDamage(WaterPenalty * 2.0f * GetWorld()->GetDeltaSeconds());
+        VehicleStats.CurrentGear = 4;
     }
 }
 
-void UCore_VehiclePhysics::CheckTerrainType()
+void ACore_VehiclePhysics::CalculateWheelContacts()
 {
-    if (!GetOwner())
+    if (!VehicleBodyMesh)
     {
         return;
     }
-    
-    FVector StartLocation = GetOwner()->GetActorLocation();
-    FVector EndLocation = StartLocation - FVector(0, 0, 1000.0f);
-    
-    FHitResult HitResult;
-    FCollisionQueryParams QueryParams;
-    QueryParams.AddIgnoredActor(GetOwner());
-    
-    UWorld* World = GetWorld();
-    if (World && World->LineTraceSingleByChannel(HitResult, StartLocation, EndLocation, ECC_WorldStatic, QueryParams))
+
+    // Define wheel positions relative to vehicle center
+    TArray<FVector> WheelOffsets = {
+        FVector(120.0f, -80.0f, -50.0f),   // Front Left
+        FVector(120.0f, 80.0f, -50.0f),    // Front Right
+        FVector(-120.0f, -80.0f, -50.0f),  // Rear Left
+        FVector(-120.0f, 80.0f, -50.0f)    // Rear Right
+    };
+
+    for (int32 WheelIndex = 0; WheelIndex < WheelOffsets.Num() && WheelIndex < WheelConfigurations.Num(); WheelIndex++)
     {
-        // Check for water
-        if (HitResult.GetActor() && HitResult.GetActor()->GetName().Contains(TEXT("Water")))
+        FVector WheelWorldPosition = GetActorLocation() + GetActorRotation().RotateVector(WheelOffsets[WheelIndex]);
+        FVector TraceStart = WheelWorldPosition + FVector(0, 0, WheelConfigurations[WheelIndex].WheelRadius);
+        FVector TraceEnd = WheelWorldPosition - FVector(0, 0, WheelConfigurations[WheelIndex].SuspensionTravel + WheelConfigurations[WheelIndex].WheelRadius);
+
+        FHitResult HitResult;
+        FCollisionQueryParams QueryParams;
+        QueryParams.AddIgnoredActor(this);
+
+        bool bHit = GetWorld()->LineTraceSingleByChannel(
+            HitResult,
+            TraceStart,
+            TraceEnd,
+            ECollisionChannel::ECC_WorldStatic,
+            QueryParams
+        );
+
+        if (bHit)
         {
-            bIsInWater = true;
-            WaterDepth = FMath::Abs(HitResult.Location.Z - StartLocation.Z);
+            WheelContactPoints[WheelIndex] = HitResult.ImpactPoint;
+            WheelContactNormals[WheelIndex] = HitResult.ImpactNormal;
+            
+            float ContactDistance = FVector::Dist(TraceStart, HitResult.ImpactPoint);
+            float MaxDistance = WheelConfigurations[WheelIndex].SuspensionTravel + WheelConfigurations[WheelIndex].WheelRadius;
+            WheelCompressionRatios[WheelIndex] = FMath::Clamp((MaxDistance - ContactDistance) / WheelConfigurations[WheelIndex].SuspensionTravel, 0.0f, 1.0f);
         }
         else
         {
-            bIsInWater = false;
-            WaterDepth = 0.0f;
+            WheelContactPoints[WheelIndex] = TraceEnd;
+            WheelContactNormals[WheelIndex] = FVector::UpVector;
+            WheelCompressionRatios[WheelIndex] = 0.0f;
+        }
+    }
+}
+
+void ACore_VehiclePhysics::ApplyWheelForces(float DeltaTime)
+{
+    if (!VehicleBodyMesh)
+    {
+        return;
+    }
+
+    float TerrainTraction = GetTerrainTraction();
+    
+    for (int32 WheelIndex = 0; WheelIndex < WheelConfigurations.Num(); WheelIndex++)
+    {
+        if (WheelCompressionRatios[WheelIndex] <= 0.0f)
+        {
+            continue;
+        }
+
+        const FCore_WheelConfiguration& WheelConfig = WheelConfigurations[WheelIndex];
+        FVector WheelPosition = WheelContactPoints[WheelIndex];
+        
+        // Calculate wheel velocity
+        FVector WheelVelocity = VehicleBodyMesh->GetPhysicsLinearVelocityAtPoint(WheelPosition);
+        
+        // Apply braking force
+        if (CurrentBrake > 0.0f)
+        {
+            FVector BrakeForce = -WheelVelocity.GetSafeNormal() * CurrentBrake * 5000.0f * TerrainTraction;
+            VehicleBodyMesh->AddForceAtLocation(BrakeForce, WheelPosition);
         }
         
-        // Determine terrain roughness based on surface normal
-        FVector SurfaceNormal = HitResult.Normal;
-        float SlopeAngle = FMath::Acos(FVector::DotProduct(SurfaceNormal, FVector::UpVector));
-        TerrainRoughness = FMath::Clamp(SlopeAngle / (PI * 0.25f), 0.0f, 1.0f);
-        bIsOnRoughTerrain = TerrainRoughness > 0.3f;
+        // Apply steering force (front wheels only)
+        if (WheelIndex < 2 && FMath::Abs(CurrentSteering) > 0.01f)
+        {
+            FVector RightVector = GetActorRightVector();
+            FVector SteeringForce = RightVector * CurrentSteering * 2000.0f * TerrainTraction;
+            VehicleBodyMesh->AddForceAtLocation(SteeringForce, WheelPosition);
+        }
+        
+        // Apply lateral friction
+        FVector LateralVelocity = FVector::VectorPlaneProject(WheelVelocity, WheelContactNormals[WheelIndex]);
+        FVector RightVector = GetActorRightVector();
+        float LateralSpeed = FVector::DotProduct(LateralVelocity, RightVector);
+        
+        if (FMath::Abs(LateralSpeed) > 0.1f)
+        {
+            FVector LateralFriction = -RightVector * LateralSpeed * WheelConfig.FrictionCoefficient * 3000.0f * TerrainTraction;
+            VehicleBodyMesh->AddForceAtLocation(LateralFriction, WheelPosition);
+        }
     }
 }
 
-void UCore_VehiclePhysics::UpdateDurability(float DeltaTime)
+float ACore_VehiclePhysics::CalculateEngineOutput(float RPM) const
 {
-    // Natural wear and tear
-    float WearRate = 0.1f * DeltaTime;
+    // Simple torque curve simulation
+    float OptimalRPM = 3000.0f;
+    float MaxRPM = 6000.0f;
     
-    // Increased wear based on usage
-    if (CurrentSpeed > 100.0f)
+    if (RPM <= OptimalRPM)
     {
-        WearRate += (CurrentSpeed / 1000.0f) * DeltaTime;
+        return FMath::Lerp(0.5f, 1.0f, RPM / OptimalRPM);
     }
-    
-    // Increased wear on rough terrain
-    if (bIsOnRoughTerrain)
+    else
     {
-        WearRate += TerrainRoughness * DeltaTime;
-    }
-    
-    CurrentDurability = FMath::Clamp(CurrentDurability - WearRate, 0.0f, VehicleStats.Durability);
-}
-
-void UCore_VehiclePhysics::ApplyDamage(float DamageAmount)
-{
-    CurrentDurability = FMath::Clamp(CurrentDurability - DamageAmount, 0.0f, VehicleStats.Durability);
-    
-    if (CurrentDurability <= 0.0f)
-    {
-        CurrentState = ECore_VehicleState::Damaged;
-        // Disable vehicle movement
-        ThrottleInput = 0.0f;
-        SteeringInput = 0.0f;
+        return FMath::Lerp(1.0f, 0.3f, (RPM - OptimalRPM) / (MaxRPM - OptimalRPM));
     }
 }
 
-void UCore_VehiclePhysics::RepairVehicle(float RepairAmount)
+void ACore_VehiclePhysics::ThrottlePressed()
 {
-    CurrentDurability = FMath::Clamp(CurrentDurability + RepairAmount, 0.0f, VehicleStats.Durability);
+    ApplyThrottle(1.0f);
 }
 
-bool UCore_VehiclePhysics::CanCarryLoad(float AdditionalWeight) const
+void ACore_VehiclePhysics::ThrottleReleased()
 {
-    return (CurrentLoad + AdditionalWeight) <= VehicleStats.CarryCapacity;
+    ApplyThrottle(0.0f);
 }
 
-void UCore_VehiclePhysics::AddLoad(float Weight)
+void ACore_VehiclePhysics::BrakePressed()
 {
-    if (CanCarryLoad(Weight))
-    {
-        CurrentLoad += Weight;
-    }
+    ApplyBrake(1.0f);
 }
 
-void UCore_VehiclePhysics::RemoveLoad(float Weight)
+void ACore_VehiclePhysics::BrakeReleased()
 {
-    CurrentLoad = FMath::Max(0.0f, CurrentLoad - Weight);
+    ApplyBrake(0.0f);
 }
 
-float UCore_VehiclePhysics::GetSpeedKmh() const
+void ACore_VehiclePhysics::SteerLeft()
 {
-    return CurrentSpeed * 0.036f; // Convert cm/s to km/h
+    ApplySteering(-1.0f);
 }
 
-float UCore_VehiclePhysics::GetDurabilityPercentage() const
+void ACore_VehiclePhysics::SteerRight()
 {
-    return (CurrentDurability / VehicleStats.Durability) * 100.0f;
+    ApplySteering(1.0f);
 }
 
-float UCore_VehiclePhysics::GetLoadPercentage() const
+void ACore_VehiclePhysics::SteerStop()
 {
-    return (CurrentLoad / VehicleStats.CarryCapacity) * 100.0f;
-}
-
-bool UCore_VehiclePhysics::IsInWater() const
-{
-    return bIsInWater;
-}
-
-bool UCore_VehiclePhysics::IsOnRoughTerrain() const
-{
-    return bIsOnRoughTerrain;
-}
-
-void UCore_VehiclePhysics::InitializeVehicle(ECore_VehicleType InVehicleType)
-{
-    VehicleType = InVehicleType;
-    
-    // Configure vehicle stats based on type
-    switch (VehicleType)
-    {
-        case ECore_VehicleType::Raft:
-            VehicleStats.MaxSpeed = 300.0f;
-            VehicleStats.Acceleration = 200.0f;
-            VehicleStats.TurnRate = 45.0f;
-            VehicleStats.WaterResistance = 0.2f;
-            VehicleStats.CarryCapacity = 800.0f;
-            break;
-            
-        case ECore_VehicleType::Sled:
-            VehicleStats.MaxSpeed = 600.0f;
-            VehicleStats.Acceleration = 400.0f;
-            VehicleStats.TurnRate = 60.0f;
-            VehicleStats.TerrainAdaptation = 0.8f;
-            VehicleStats.CarryCapacity = 400.0f;
-            break;
-            
-        case ECore_VehicleType::Cart:
-            VehicleStats.MaxSpeed = 500.0f;
-            VehicleStats.Acceleration = 300.0f;
-            VehicleStats.TurnRate = 75.0f;
-            VehicleStats.CarryCapacity = 1000.0f;
-            break;
-            
-        case ECore_VehicleType::Boat:
-            VehicleStats.MaxSpeed = 400.0f;
-            VehicleStats.Acceleration = 250.0f;
-            VehicleStats.TurnRate = 30.0f;
-            VehicleStats.WaterResistance = 0.1f;
-            VehicleStats.CarryCapacity = 1200.0f;
-            break;
-            
-        case ECore_VehicleType::RidingMount:
-            VehicleStats.MaxSpeed = 1200.0f;
-            VehicleStats.Acceleration = 800.0f;
-            VehicleStats.TurnRate = 120.0f;
-            VehicleStats.TerrainAdaptation = 1.5f;
-            VehicleStats.CarryCapacity = 200.0f;
-            break;
-    }
-    
-    CurrentDurability = VehicleStats.Durability;
-    CurrentLoad = 0.0f;
+    ApplySteering(0.0f);
 }
