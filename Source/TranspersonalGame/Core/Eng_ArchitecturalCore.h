@@ -2,96 +2,17 @@
 
 #include "CoreMinimal.h"
 #include "Engine/GameInstanceSubsystem.h"
-#include "Engine/World.h"
-#include "Subsystems/WorldSubsystem.h"
 #include "SharedTypes.h"
 #include "Eng_ArchitecturalCore.generated.h"
 
-// Forward declarations
 class UEng_SystemsRegistry;
 class UBiomeManager;
 class UCore_PhysicsManager;
 
 /**
- * ARCHITECTURAL CORE SYSTEM
- * Central hub for all engine architecture management
- * Ensures proper initialization order and system dependencies
- * Provides unified access point for all architectural systems
- */
-
-UENUM(BlueprintType)
-enum class EEng_SystemPriority : uint8
-{
-    Critical = 0,    // Physics, Core Systems
-    High = 1,        // World Generation, Character Systems
-    Medium = 2,      // AI, Combat, Audio
-    Low = 3,         // UI, VFX, Analytics
-    Background = 4   // Logging, Debugging
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_SystemInfo
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly, Category = "System Info")
-    FString SystemName;
-
-    UPROPERTY(BlueprintReadOnly, Category = "System Info")
-    EEng_SystemPriority Priority;
-
-    UPROPERTY(BlueprintReadOnly, Category = "System Info")
-    bool bIsInitialized;
-
-    UPROPERTY(BlueprintReadOnly, Category = "System Info")
-    bool bIsActive;
-
-    UPROPERTY(BlueprintReadOnly, Category = "System Info")
-    float InitializationTime;
-
-    FEng_SystemInfo()
-    {
-        SystemName = TEXT("Unknown");
-        Priority = EEng_SystemPriority::Medium;
-        bIsInitialized = false;
-        bIsActive = false;
-        InitializationTime = 0.0f;
-    }
-};
-
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_ArchitecturalConfig
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture Config")
-    bool bEnablePerformanceMonitoring;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture Config")
-    bool bEnableSystemValidation;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture Config")
-    bool bEnableDebugLogging;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture Config")
-    float SystemTimeoutThreshold;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture Config")
-    int32 MaxConcurrentSystems;
-
-    FEng_ArchitecturalConfig()
-    {
-        bEnablePerformanceMonitoring = true;
-        bEnableSystemValidation = true;
-        bEnableDebugLogging = false;
-        SystemTimeoutThreshold = 5.0f;
-        MaxConcurrentSystems = 32;
-    }
-};
-
-/**
- * Game Instance Subsystem for architectural core management
- * Persists across level changes and manages global architecture state
+ * Core Architectural System - Central hub for all engine architecture validation and coordination
+ * Manages system dependencies, initialization order, and cross-agent compliance
+ * Ensures all agents follow the established architectural patterns
  */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UEng_ArchitecturalCore : public UGameInstanceSubsystem
@@ -105,154 +26,79 @@ public:
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Core architectural functions
-    UFUNCTION(BlueprintCallable, Category = "Architectural Core")
-    bool InitializeArchitecture();
+    // Core Architecture Management
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    bool ValidateSystemArchitecture();
 
-    UFUNCTION(BlueprintCallable, Category = "Architectural Core")
-    bool RegisterSystem(const FString& SystemName, EEng_SystemPriority Priority);
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture") 
+    bool InitializeCoreSystems();
 
-    UFUNCTION(BlueprintCallable, Category = "Architectural Core")
-    bool UnregisterSystem(const FString& SystemName);
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    bool ValidateAgentCompliance(const FString& AgentName, const FString& SystemName);
 
-    UFUNCTION(BlueprintCallable, Category = "Architectural Core")
-    bool IsSystemRegistered(const FString& SystemName) const;
+    // System Registration and Dependencies
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    bool RegisterCoreSystem(const FString& SystemName, int32 Priority);
 
-    UFUNCTION(BlueprintCallable, Category = "Architectural Core")
-    bool IsSystemInitialized(const FString& SystemName) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Architectural Core")
-    TArray<FEng_SystemInfo> GetAllSystemInfo() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Architectural Core")
-    FEng_SystemInfo GetSystemInfo(const FString& SystemName) const;
-
-    // System lifecycle management
-    UFUNCTION(BlueprintCallable, Category = "Architectural Core")
-    bool StartSystem(const FString& SystemName);
-
-    UFUNCTION(BlueprintCallable, Category = "Architectural Core")
-    bool StopSystem(const FString& SystemName);
-
-    UFUNCTION(BlueprintCallable, Category = "Architectural Core")
-    bool RestartSystem(const FString& SystemName);
-
-    // Performance monitoring
-    UFUNCTION(BlueprintCallable, Category = "Architectural Core")
-    float GetSystemPerformanceMetric(const FString& SystemName) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Architectural Core")
-    void EnablePerformanceMonitoring(bool bEnable);
-
-    // Configuration management
-    UFUNCTION(BlueprintCallable, Category = "Architectural Core")
-    void SetArchitecturalConfig(const FEng_ArchitecturalConfig& NewConfig);
-
-    UFUNCTION(BlueprintCallable, Category = "Architectural Core")
-    FEng_ArchitecturalConfig GetArchitecturalConfig() const;
-
-    // System validation
-    UFUNCTION(BlueprintCallable, Category = "Architectural Core")
-    bool ValidateSystemIntegrity();
-
-    UFUNCTION(BlueprintCallable, Category = "Architectural Core")
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
     bool ValidateSystemDependencies();
 
-    // Debug and diagnostics
-    UFUNCTION(BlueprintCallable, Category = "Architectural Core")
-    void PrintSystemStatus() const;
+    // Performance and Quality Gates
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    bool ValidatePerformanceRequirements();
 
-    UFUNCTION(BlueprintCallable, Category = "Architectural Core")
-    void GenerateArchitecturalReport() const;
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    FString GetArchitecturalStatus();
 
-    // Static access
-    UFUNCTION(BlueprintCallable, Category = "Architectural Core", meta = (CallInEditor = true))
-    static UEng_ArchitecturalCore* GetArchitecturalCore(const UObject* WorldContext);
+    // Cross-Agent Coordination
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    bool CoordinateAgentSystems();
+
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    TArray<FString> GetSystemInitializationOrder();
 
 protected:
-    // Internal system management
-    void InitializeSystemsByPriority();
-    void ShutdownAllSystems();
-    bool ValidateSystemConfiguration() const;
-    void UpdateSystemMetrics();
+    // Core system references
+    UPROPERTY(BlueprintReadOnly, Category = "Architecture", meta = (AllowPrivateAccess = "true"))
+    UEng_SystemsRegistry* SystemsRegistry;
 
-    // System registry
-    UPROPERTY()
-    TMap<FString, FEng_SystemInfo> RegisteredSystems;
+    UPROPERTY(BlueprintReadOnly, Category = "Architecture", meta = (AllowPrivateAccess = "true"))
+    UBiomeManager* BiomeManager;
 
-    // Configuration
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Configuration", meta = (AllowPrivateAccess = "true"))
-    FEng_ArchitecturalConfig ArchitecturalConfig;
+    UPROPERTY(BlueprintReadOnly, Category = "Architecture", meta = (AllowPrivateAccess = "true"))
+    UCore_PhysicsManager* PhysicsManager;
 
-    // Performance tracking
-    UPROPERTY()
-    TMap<FString, float> SystemPerformanceMetrics;
+    // Architecture validation state
+    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
+    bool bArchitectureValidated;
 
-    // Initialization state
-    UPROPERTY(BlueprintReadOnly, Category = "State", meta = (AllowPrivateAccess = "true"))
-    bool bIsArchitectureInitialized;
+    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
+    bool bCoreSystemsInitialized;
 
-    UPROPERTY(BlueprintReadOnly, Category = "State", meta = (AllowPrivateAccess = "true"))
-    float TotalInitializationTime;
+    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
+    TArray<FString> RegisteredSystems;
 
-    // System references (cached for performance)
-    UPROPERTY()
-    TWeakObjectPtr<UEng_SystemsRegistry> SystemsRegistry;
-
-    UPROPERTY()
-    TWeakObjectPtr<UBiomeManager> BiomeManager;
-
-    UPROPERTY()
-    TWeakObjectPtr<UCore_PhysicsManager> PhysicsManager;
+    UPROPERTY(BlueprintReadOnly, Category = "Architecture")
+    TMap<FString, int32> SystemPriorities;
 
 private:
-    // Internal helpers
-    void LogSystemEvent(const FString& SystemName, const FString& Event) const;
-    bool IsValidSystemName(const FString& SystemName) const;
-    void CleanupInvalidSystems();
+    // Internal validation methods
+    bool ValidatePhysicsArchitecture();
+    bool ValidateWorldGenerationArchitecture();
+    bool ValidateBiomeArchitecture();
+    bool ValidateCharacterArchitecture();
+    bool ValidateAIArchitecture();
 
-    // Performance monitoring timer
-    FTimerHandle PerformanceMonitoringTimer;
-    void OnPerformanceMonitoringTick();
+    // System coordination
+    void InitializeSystemsRegistry();
+    void EstablishSystemDependencies();
+    void ValidateAgentInterfaces();
 
-    // Validation timer
-    FTimerHandle ValidationTimer;
-    void OnValidationTick();
+    // Performance monitoring
+    void MonitorSystemPerformance();
+    void EnforceArchitecturalStandards();
+
+    // Logging and diagnostics
+    void LogArchitecturalStatus();
+    void ReportComplianceViolations(const FString& AgentName, const FString& Violation);
 };
-
-/**
- * World Subsystem for per-level architectural management
- * Handles level-specific architecture concerns
- */
-UCLASS(BlueprintType)
-class TRANSPERSONALGAME_API UEng_ArchitecturalWorldSubsystem : public UWorldSubsystem
-{
-    GENERATED_BODY()
-
-public:
-    UEng_ArchitecturalWorldSubsystem();
-
-    // USubsystem interface
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
-
-    // World-specific architectural functions
-    UFUNCTION(BlueprintCallable, Category = "World Architecture")
-    bool InitializeWorldArchitecture();
-
-    UFUNCTION(BlueprintCallable, Category = "World Architecture")
-    bool ValidateWorldSystems();
-
-    UFUNCTION(BlueprintCallable, Category = "World Architecture")
-    void CleanupWorldSystems();
-
-protected:
-    UPROPERTY(BlueprintReadOnly, Category = "State", meta = (AllowPrivateAccess = "true"))
-    bool bIsWorldArchitectureInitialized;
-
-    // Reference to global architectural core
-    UPROPERTY()
-    TWeakObjectPtr<UEng_ArchitecturalCore> ArchitecturalCore;
-};
-
-#include "Eng_ArchitecturalCore.generated.h"
