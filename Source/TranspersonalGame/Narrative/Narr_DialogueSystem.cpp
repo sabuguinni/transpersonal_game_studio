@@ -1,441 +1,401 @@
 #include "Narr_DialogueSystem.h"
-#include "Components/AudioComponent.h"
-#include "Sound/SoundWave.h"
 #include "Engine/Engine.h"
+#include "Engine/World.h"
+#include "Components/AudioComponent.h"
 #include "Kismet/GameplayStatics.h"
+#include "Sound/SoundCue.h"
 
 UNarr_DialogueSystem::UNarr_DialogueSystem()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    
-    // Initialize default values
-    bIsPlaying = false;
-    bIsPaused = false;
-    CurrentDialogueID = "";
-    CurrentPlaybackTime = 0.0f;
-    TotalDialogueDuration = 0.0f;
-    DialogueVolume = 1.0f;
-    bSubtitlesEnabled = true;
-    bAutoPlayContextualDialogue = true;
-    
-    CurrentQueueIndex = 0;
-    SequenceTimer = 0.0f;
-    DelayTimer = 0.0f;
-    bProcessingSequence = false;
-    
-    // Create audio component
-    AudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("DialogueAudioComponent"));
-    if (AudioComponent)
-    {
-        AudioComponent->bAutoActivate = false;
-        AudioComponent->SetVolumeMultiplier(DialogueVolume);
-    }
+    GlobalDialogueRange = 1000.0f;
+    DialogueCooldownTime = 5.0f;
+    bEnableProximityDialogues = true;
 }
 
-void UNarr_DialogueSystem::BeginPlay()
+void UNarr_DialogueSystem::Initialize(FSubsystemCollectionBase& Collection)
 {
-    Super::BeginPlay();
+    Super::Initialize(Collection);
     
-    // Initialize default dialogue entries for survival scenarios
-    InitializeDefaultDialogues();
+    UE_LOG(LogTemp, Warning, TEXT("Narrative Dialogue System initialized"));
     
-    UE_LOG(LogTemp, Log, TEXT("Narr_DialogueSystem: Sistema de diálogo inicializado com %d entradas"), DialogueDatabase.Num());
+    // Initialize default character profiles
+    LoadDialogueData();
 }
 
-void UNarr_DialogueSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UNarr_DialogueSystem::Deinitialize()
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    // Save progress before shutdown
+    SaveDialogueProgress();
     
-    if (bProcessingSequence)
-    {
-        ProcessDialogueQueue();
-    }
+    // Clear data
+    RegisteredCharacters.Empty();
+    DialogueHistory.Empty();
+    LoadedVoiceLines.Empty();
     
-    if (bIsPlaying && !bIsPaused)
-    {
-        CurrentPlaybackTime += DeltaTime;
-        
-        // Check if current dialogue has finished
-        if (CurrentPlaybackTime >= TotalDialogueDuration)
-        {
-            OnDialogueFinished();
-        }
-    }
+    Super::Deinitialize();
 }
 
-void UNarr_DialogueSystem::PlayDialogue(const FString& DialogueID)
+void UNarr_DialogueSystem::RegisterCharacter(const FString& CharacterID, const FNarr_CharacterProfile& Profile)
 {
-    if (DialogueDatabase.Contains(DialogueID))
+    if (CharacterID.IsEmpty())
     {
-        const FNarr_DialogueEntry& DialogueEntry = DialogueDatabase[DialogueID];
+        UE_LOG(LogTemp, Warning, TEXT("Cannot register character with empty ID"));
+        return;
+    }
+    
+    RegisteredCharacters.Add(CharacterID, Profile);
+    DialogueHistory.Add(CharacterID, TArray<FString>());
+    
+    UE_LOG(LogTemp, Log, TEXT("Registered character: %s with personality: %d"), 
+           *CharacterID, (int32)Profile.PersonalityType);
+}
+
+bool UNarr_DialogueSystem::GetCharacterProfile(const FString& CharacterID, FNarr_CharacterProfile& OutProfile)
+{
+    if (FNarr_CharacterProfile* Profile = RegisteredCharacters.Find(CharacterID))
+    {
+        OutProfile = *Profile;
+        return true;
+    }
+    return false;
+}
+
+TArray<FString> UNarr_DialogueSystem::GetAllCharacterIDs()
+{
+    TArray<FString> CharacterIDs;
+    RegisteredCharacters.GetKeys(CharacterIDs);
+    return CharacterIDs;
+}
+
+bool UNarr_DialogueSystem::TriggerDialogue(const FString& CharacterID, ENarr_DialogueType DialogueType, AActor* Player, AActor* NPC)
+{
+    if (!Player || !NPC)
+    {
+        return false;
+    }
+    
+    if (!CanTriggerDialogue(CharacterID, DialogueType))
+    {
+        return false;
+    }
+    
+    float Distance = FVector::Dist(Player->GetActorLocation(), NPC->GetActorLocation());
+    FNarr_DialogueLine BestDialogue = GetBestDialogue(CharacterID, DialogueType, Distance);
+    
+    if (!BestDialogue.DialogueText.IsEmpty())
+    {
+        // Play the dialogue
+        PlayVoiceLine(BestDialogue, NPC);
         
-        // Stop current dialogue if playing
-        if (bIsPlaying)
+        // Update history
+        UpdateDialogueHistory(CharacterID, BestDialogue.DialogueText);
+        
+        UE_LOG(LogTemp, Log, TEXT("Triggered dialogue: %s from %s"), 
+               *BestDialogue.DialogueText, *CharacterID);
+        return true;
+    }
+    
+    return false;
+}
+
+FNarr_DialogueLine UNarr_DialogueSystem::GetBestDialogue(const FString& CharacterID, ENarr_DialogueType DialogueType, float Distance)
+{
+    FNarr_DialogueLine BestDialogue;
+    float BestPriority = -1.0f;
+    
+    if (FNarr_CharacterProfile* Profile = RegisteredCharacters.Find(CharacterID))
+    {
+        for (const FNarr_DialogueLine& Dialogue : Profile->AvailableDialogues)
         {
-            StopCurrentDialogue();
-        }
-        
-        // Set current dialogue state
-        CurrentDialogueID = DialogueID;
-        CurrentPlaybackTime = 0.0f;
-        TotalDialogueDuration = DialogueEntry.Duration;
-        bIsPlaying = true;
-        bIsPaused = false;
-        
-        // Load and play audio if available
-        if (!DialogueEntry.AudioFilePath.IsEmpty())
-        {
-            LoadDialogueAudio(DialogueEntry.AudioFilePath);
-        }
-        
-        // Display subtitles if enabled
-        if (bSubtitlesEnabled)
-        {
-            if (GEngine)
+            if (Dialogue.DialogueType == DialogueType || DialogueType == ENarr_DialogueType::Information)
             {
-                FString SubtitleText = FString::Printf(TEXT("[%s]: %s"), 
-                    *UEnum::GetValueAsString(DialogueEntry.Speaker), 
-                    *DialogueEntry.DialogueText);
-                GEngine->AddOnScreenDebugMessage(-1, TotalDialogueDuration, FColor::White, SubtitleText);
+                if (Distance <= Dialogue.TriggerDistance)
+                {
+                    float Priority = CalculateDialoguePriority(Dialogue, Distance, DialogueType);
+                    if (Priority > BestPriority)
+                    {
+                        BestPriority = Priority;
+                        BestDialogue = Dialogue;
+                    }
+                }
             }
         }
-        
-        UE_LOG(LogTemp, Log, TEXT("Narr_DialogueSystem: A reproduzir diálogo '%s'"), *DialogueID);
     }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Narr_DialogueSystem: Diálogo '%s' não encontrado na base de dados"), *DialogueID);
-    }
-}
-
-void UNarr_DialogueSystem::PlayDialogueSequence(const FString& SequenceID)
-{
-    if (SequenceDatabase.Contains(SequenceID))
-    {
-        const FNarr_DialogueSequence& Sequence = SequenceDatabase[SequenceID];
-        
-        // Stop current playback
-        StopCurrentDialogue();
-        
-        // Setup sequence playback
-        DialogueQueue = Sequence.DialogueEntries;
-        CurrentQueueIndex = 0;
-        DelayTimer = 0.0f;
-        bProcessingSequence = true;
-        
-        // Start first dialogue if auto-play is enabled
-        if (Sequence.bAutoPlay && DialogueQueue.Num() > 0)
-        {
-            PlayDialogue(DialogueQueue[0].DialogueID);
-        }
-        
-        UE_LOG(LogTemp, Log, TEXT("Narr_DialogueSystem: A iniciar sequência '%s' com %d diálogos"), *SequenceID, DialogueQueue.Num());
-    }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Narr_DialogueSystem: Sequência '%s' não encontrada"), *SequenceID);
-    }
-}
-
-void UNarr_DialogueSystem::StopCurrentDialogue()
-{
-    if (bIsPlaying)
-    {
-        bIsPlaying = false;
-        bIsPaused = false;
-        bProcessingSequence = false;
-        CurrentDialogueID = "";
-        CurrentPlaybackTime = 0.0f;
-        TotalDialogueDuration = 0.0f;
-        
-        if (AudioComponent && AudioComponent->IsPlaying())
-        {
-            AudioComponent->Stop();
-        }
-        
-        DialogueQueue.Empty();
-        CurrentQueueIndex = 0;
-        
-        UE_LOG(LogTemp, Log, TEXT("Narr_DialogueSystem: Diálogo parado"));
-    }
-}
-
-void UNarr_DialogueSystem::PauseDialogue()
-{
-    if (bIsPlaying && !bIsPaused)
-    {
-        bIsPaused = true;
-        
-        if (AudioComponent && AudioComponent->IsPlaying())
-        {
-            AudioComponent->SetPaused(true);
-        }
-        
-        UE_LOG(LogTemp, Log, TEXT("Narr_DialogueSystem: Diálogo pausado"));
-    }
-}
-
-void UNarr_DialogueSystem::ResumeDialogue()
-{
-    if (bIsPlaying && bIsPaused)
-    {
-        bIsPaused = false;
-        
-        if (AudioComponent)
-        {
-            AudioComponent->SetPaused(false);
-        }
-        
-        UE_LOG(LogTemp, Log, TEXT("Narr_DialogueSystem: Diálogo retomado"));
-    }
-}
-
-void UNarr_DialogueSystem::TriggerBiomeDialogue(EEng_BiomeType BiomeType)
-{
-    if (!bAutoPlayContextualDialogue) return;
     
-    // Find appropriate biome dialogue
-    for (const auto& DialoguePair : DialogueDatabase)
+    return BestDialogue;
+}
+
+void UNarr_DialogueSystem::PlayVoiceLine(const FNarr_DialogueLine& DialogueLine, AActor* SourceActor)
+{
+    if (!SourceActor)
     {
-        const FNarr_DialogueEntry& Entry = DialoguePair.Value;
-        if (Entry.DialogueType == ENarr_DialogueType::BiomeDescription && 
-            Entry.RelevantBiome == BiomeType)
+        return;
+    }
+    
+    // Log the dialogue text
+    UE_LOG(LogTemp, Warning, TEXT("[%s]: %s"), *DialogueLine.CharacterName, *DialogueLine.DialogueText);
+    
+    // Try to play audio if available
+    if (DialogueLine.VoiceLine.IsValid())
+    {
+        USoundCue* SoundCue = DialogueLine.VoiceLine.LoadSynchronous();
+        if (SoundCue)
         {
-            PlayDialogue(Entry.DialogueID);
-            break;
+            UGameplayStatics::PlaySoundAtLocation(
+                SourceActor->GetWorld(),
+                SoundCue,
+                SourceActor->GetActorLocation(),
+                1.0f,
+                1.0f,
+                0.0f
+            );
         }
+    }
+    
+    // Display on screen for debugging
+    if (GEngine)
+    {
+        FString DisplayText = FString::Printf(TEXT("%s: %s"), 
+                                            *DialogueLine.CharacterName, 
+                                            *DialogueLine.DialogueText);
+        GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow, DisplayText);
     }
 }
 
-void UNarr_DialogueSystem::TriggerThreatDialogue(EEng_ThreatLevel ThreatLevel, EEng_DinosaurSpecies DinosaurSpecies)
+void UNarr_DialogueSystem::CheckProximityDialogues(AActor* Player, const TArray<AActor*>& NPCs)
 {
-    if (!bAutoPlayContextualDialogue) return;
-    
-    // Find appropriate threat dialogue based on urgency
-    for (const auto& DialoguePair : DialogueDatabase)
+    if (!Player || !bEnableProximityDialogues)
     {
-        const FNarr_DialogueEntry& Entry = DialoguePair.Value;
-        if (Entry.DialogueType == ENarr_DialogueType::ThreatAlert && 
-            Entry.UrgencyLevel == ThreatLevel)
-        {
-            PlayDialogue(Entry.DialogueID);
-            break;
-        }
+        return;
     }
-}
-
-void UNarr_DialogueSystem::TriggerWeatherDialogue(EEng_WeatherType WeatherType)
-{
-    if (!bAutoPlayContextualDialogue) return;
     
-    // Find weather-related dialogue
-    for (const auto& DialoguePair : DialogueDatabase)
+    for (AActor* NPC : NPCs)
     {
-        const FNarr_DialogueEntry& Entry = DialoguePair.Value;
-        if (Entry.DialogueType == ENarr_DialogueType::WeatherWarning)
+        if (!NPC)
         {
-            // Check if this weather dialogue is relevant
-            bool bRelevant = false;
-            for (const FString& Condition : Entry.TriggerConditions)
+            continue;
+        }
+        
+        FString NPCName = NPC->GetName();
+        float Distance = FVector::Dist(Player->GetActorLocation(), NPC->GetActorLocation());
+        
+        if (Distance <= GlobalDialogueRange)
+        {
+            // Check if this NPC has registered dialogues
+            for (const auto& CharacterPair : RegisteredCharacters)
             {
-                if (Condition.Contains(UEnum::GetValueAsString(WeatherType)))
+                if (CharacterPair.Key.Contains(NPCName) || NPCName.Contains(CharacterPair.Key))
                 {
-                    bRelevant = true;
+                    // Try to trigger a greeting or information dialogue
+                    TriggerDialogue(CharacterPair.Key, ENarr_DialogueType::Greeting, Player, NPC);
                     break;
                 }
             }
-            
-            if (bRelevant)
-            {
-                PlayDialogue(Entry.DialogueID);
-                break;
-            }
         }
     }
 }
 
-void UNarr_DialogueSystem::TriggerDiscoveryDialogue(const FString& DiscoveryType)
+void UNarr_DialogueSystem::BroadcastEmergencyWarning(const FString& WarningText, const FVector& DangerLocation)
 {
-    if (!bAutoPlayContextualDialogue) return;
+    UE_LOG(LogTemp, Error, TEXT("EMERGENCY WARNING: %s at location %s"), 
+           *WarningText, *DangerLocation.ToString());
     
-    // Find discovery dialogue
-    for (const auto& DialoguePair : DialogueDatabase)
+    if (GEngine)
     {
-        const FNarr_DialogueEntry& Entry = DialoguePair.Value;
-        if (Entry.DialogueType == ENarr_DialogueType::Discovery)
+        FString DisplayText = FString::Printf(TEXT("EMERGENCY: %s"), *WarningText);
+        GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Red, DisplayText);
+    }
+    
+    // Find all scout characters and trigger emergency dialogues
+    for (const auto& CharacterPair : RegisteredCharacters)
+    {
+        if (CharacterPair.Value.PersonalityType == ENarr_NPCPersonality::Scout_Alert)
         {
-            for (const FString& Condition : Entry.TriggerConditions)
+            // Create emergency dialogue line
+            FNarr_DialogueLine EmergencyLine;
+            EmergencyLine.DialogueText = WarningText;
+            EmergencyLine.DialogueType = ENarr_DialogueType::Emergency;
+            EmergencyLine.CharacterName = CharacterPair.Value.CharacterName;
+            EmergencyLine.Priority = 10; // Maximum priority
+            
+            // This would need an NPC actor reference in a real implementation
+            UE_LOG(LogTemp, Warning, TEXT("Emergency broadcast from %s: %s"), 
+                   *CharacterPair.Value.CharacterName, *WarningText);
+        }
+    }
+}
+
+void UNarr_DialogueSystem::TriggerStorytellingSequence(const FString& CharacterID, const FString& StoryTheme)
+{
+    if (FNarr_CharacterProfile* Profile = RegisteredCharacters.Find(CharacterID))
+    {
+        if (Profile->PersonalityType == ENarr_NPCPersonality::Elder_Wise)
+        {
+            // Find storytelling dialogues
+            for (const FNarr_DialogueLine& Dialogue : Profile->AvailableDialogues)
             {
-                if (Condition.Contains(DiscoveryType))
+                if (Dialogue.DialogueType == ENarr_DialogueType::Storytelling)
                 {
-                    PlayDialogue(Entry.DialogueID);
-                    return;
+                    UE_LOG(LogTemp, Log, TEXT("Elder %s begins storytelling: %s"), 
+                           *Profile->CharacterName, *Dialogue.DialogueText);
+                    
+                    if (GEngine)
+                    {
+                        FString DisplayText = FString::Printf(TEXT("[Story] %s: %s"), 
+                                                            *Profile->CharacterName, 
+                                                            *Dialogue.DialogueText);
+                        GEngine->AddOnScreenDebugMessage(-1, 8.0f, FColor::Cyan, DisplayText);
+                    }
+                    break;
                 }
             }
         }
     }
 }
 
-void UNarr_DialogueSystem::RegisterDialogueEntry(const FNarr_DialogueEntry& DialogueEntry)
+void UNarr_DialogueSystem::LoadDialogueData()
 {
-    DialogueDatabase.Add(DialogueEntry.DialogueID, DialogueEntry);
-    UE_LOG(LogTemp, Log, TEXT("Narr_DialogueSystem: Diálogo '%s' registado"), *DialogueEntry.DialogueID);
-}
-
-void UNarr_DialogueSystem::RegisterDialogueSequence(const FNarr_DialogueSequence& DialogueSequence)
-{
-    SequenceDatabase.Add(DialogueSequence.SequenceID, DialogueSequence);
-    UE_LOG(LogTemp, Log, TEXT("Narr_DialogueSystem: Sequência '%s' registada"), *DialogueSequence.SequenceID);
-}
-
-bool UNarr_DialogueSystem::IsDialoguePlaying() const
-{
-    return bIsPlaying;
-}
-
-FString UNarr_DialogueSystem::GetCurrentDialogueID() const
-{
-    return CurrentDialogueID;
-}
-
-void UNarr_DialogueSystem::SetAudioVolume(float Volume)
-{
-    DialogueVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
+    // Create default character profiles
     
-    if (AudioComponent)
+    // Elder Storyteller
+    FNarr_CharacterProfile ElderProfile;
+    ElderProfile.CharacterName = TEXT("Elder Storyteller");
+    ElderProfile.PersonalityType = ENarr_NPCPersonality::Elder_Wise;
+    ElderProfile.BackgroundStory = TEXT("An ancient survivor who has seen many seasons pass. Keeper of tribal knowledge and stories.");
+    ElderProfile.SpecialtyKnowledge.Add(TEXT("Ancient History"));
+    ElderProfile.SpecialtyKnowledge.Add(TEXT("Dinosaur Behavior"));
+    ElderProfile.SpecialtyKnowledge.Add(TEXT("Survival Wisdom"));
+    
+    FNarr_DialogueLine StoryLine;
+    StoryLine.DialogueText = TEXT("The ancient stories speak of the time before time, when the great lizards ruled the earth...");
+    StoryLine.DialogueType = ENarr_DialogueType::Storytelling;
+    StoryLine.CharacterName = ElderProfile.CharacterName;
+    StoryLine.PersonalityType = ENarr_NPCPersonality::Elder_Wise;
+    StoryLine.Priority = 5;
+    ElderProfile.AvailableDialogues.Add(StoryLine);
+    
+    RegisterCharacter(TEXT("Elder_001"), ElderProfile);
+    
+    // Scout Marcus
+    FNarr_CharacterProfile ScoutProfile;
+    ScoutProfile.CharacterName = TEXT("Scout Marcus");
+    ScoutProfile.PersonalityType = ENarr_NPCPersonality::Scout_Alert;
+    ScoutProfile.BackgroundStory = TEXT("A keen-eyed scout who watches for predator movements and dangers.");
+    ScoutProfile.SpecialtyKnowledge.Add(TEXT("Predator Tracking"));
+    ScoutProfile.SpecialtyKnowledge.Add(TEXT("Territory Mapping"));
+    
+    FNarr_DialogueLine WarningLine;
+    WarningLine.DialogueText = TEXT("Warning! Massive predator approaching from the north ridge!");
+    WarningLine.DialogueType = ENarr_DialogueType::Emergency;
+    WarningLine.CharacterName = ScoutProfile.CharacterName;
+    WarningLine.PersonalityType = ENarr_NPCPersonality::Scout_Alert;
+    WarningLine.Priority = 10;
+    ScoutProfile.AvailableDialogues.Add(WarningLine);
+    
+    RegisterCharacter(TEXT("Scout_001"), ScoutProfile);
+    
+    // Tracker Elena
+    FNarr_CharacterProfile TrackerProfile;
+    TrackerProfile.CharacterName = TEXT("Tracker Elena");
+    TrackerProfile.PersonalityType = ENarr_NPCPersonality::Tracker_Analytical;
+    TrackerProfile.BackgroundStory = TEXT("An analytical tracker who studies migration patterns and animal behavior.");
+    TrackerProfile.SpecialtyKnowledge.Add(TEXT("Migration Patterns"));
+    TrackerProfile.SpecialtyKnowledge.Add(TEXT("Herbivore Behavior"));
+    
+    FNarr_DialogueLine InfoLine;
+    InfoLine.DialogueText = TEXT("The herbivore migration patterns have shifted again this season...");
+    InfoLine.DialogueType = ENarr_DialogueType::Information;
+    InfoLine.CharacterName = TrackerProfile.CharacterName;
+    InfoLine.PersonalityType = ENarr_NPCPersonality::Tracker_Analytical;
+    InfoLine.Priority = 3;
+    TrackerProfile.AvailableDialogues.Add(InfoLine);
+    
+    RegisterCharacter(TEXT("Tracker_001"), TrackerProfile);
+    
+    // Veteran Hunter
+    FNarr_CharacterProfile HunterProfile;
+    HunterProfile.CharacterName = TEXT("Veteran Hunter");
+    HunterProfile.PersonalityType = ENarr_NPCPersonality::Veteran_Cautious;
+    HunterProfile.BackgroundStory = TEXT("A seasoned hunter with years of experience facing the deadliest predators.");
+    HunterProfile.SpecialtyKnowledge.Add(TEXT("Combat Tactics"));
+    HunterProfile.SpecialtyKnowledge.Add(TEXT("Predator Weaknesses"));
+    
+    FNarr_DialogueLine TeachingLine;
+    TeachingLine.DialogueText = TEXT("Listen to me, rookie. In this world, knowledge is survival...");
+    TeachingLine.DialogueType = ENarr_DialogueType::Information;
+    TeachingLine.CharacterName = HunterProfile.CharacterName;
+    TeachingLine.PersonalityType = ENarr_NPCPersonality::Veteran_Cautious;
+    TeachingLine.Priority = 4;
+    HunterProfile.AvailableDialogues.Add(TeachingLine);
+    
+    RegisterCharacter(TEXT("Hunter_001"), HunterProfile);
+    
+    UE_LOG(LogTemp, Warning, TEXT("Loaded %d character profiles with dialogue data"), RegisteredCharacters.Num());
+}
+
+void UNarr_DialogueSystem::SaveDialogueProgress()
+{
+    // In a full implementation, this would save to a file or database
+    UE_LOG(LogTemp, Log, TEXT("Saving dialogue progress for %d characters"), RegisteredCharacters.Num());
+    
+    for (const auto& HistoryPair : DialogueHistory)
     {
-        AudioComponent->SetVolumeMultiplier(DialogueVolume);
+        UE_LOG(LogTemp, Log, TEXT("Character %s has %d dialogue entries"), 
+               *HistoryPair.Key, HistoryPair.Value.Num());
     }
 }
 
-void UNarr_DialogueSystem::SetSubtitlesEnabled(bool bEnabled)
+bool UNarr_DialogueSystem::CanTriggerDialogue(const FString& CharacterID, ENarr_DialogueType DialogueType)
 {
-    bSubtitlesEnabled = bEnabled;
-}
-
-void UNarr_DialogueSystem::ProcessDialogueQueue()
-{
-    if (DialogueQueue.Num() == 0 || CurrentQueueIndex >= DialogueQueue.Num())
+    // Check if character exists
+    if (!RegisteredCharacters.Contains(CharacterID))
     {
-        bProcessingSequence = false;
-        return;
+        return false;
     }
     
-    // Wait for current dialogue to finish before starting next
-    if (bIsPlaying)
+    // Emergency dialogues always allowed
+    if (DialogueType == ENarr_DialogueType::Emergency)
     {
-        return;
+        return true;
     }
     
-    // Handle delay between dialogues
-    if (DelayTimer > 0.0f)
-    {
-        DelayTimer -= GetWorld()->GetDeltaSeconds();
-        return;
-    }
-    
-    // Play next dialogue in queue
-    const FNarr_DialogueEntry& NextDialogue = DialogueQueue[CurrentQueueIndex];
-    PlayDialogue(NextDialogue.DialogueID);
-    
-    CurrentQueueIndex++;
-    
-    // Set delay for next dialogue if there are more in queue
-    if (CurrentQueueIndex < DialogueQueue.Num())
-    {
-        DelayTimer = 2.0f; // Default delay between dialogues
-    }
-    else
-    {
-        bProcessingSequence = false;
-    }
-}
-
-void UNarr_DialogueSystem::OnDialogueFinished()
-{
-    bIsPlaying = false;
-    CurrentDialogueID = "";
-    CurrentPlaybackTime = 0.0f;
-    TotalDialogueDuration = 0.0f;
-    
-    if (AudioComponent && AudioComponent->IsPlaying())
-    {
-        AudioComponent->Stop();
-    }
-}
-
-bool UNarr_DialogueSystem::CheckDialogueTriggerConditions(const FNarr_DialogueEntry& DialogueEntry)
-{
-    // Simple condition checking - can be expanded for more complex logic
+    // Check cooldown (simplified - in full implementation would track per-character cooldowns)
     return true;
 }
 
-void UNarr_DialogueSystem::LoadDialogueAudio(const FString& AudioFilePath)
+void UNarr_DialogueSystem::UpdateDialogueHistory(const FString& CharacterID, const FString& DialogueText)
 {
-    if (AudioComponent && !AudioFilePath.IsEmpty())
+    if (TArray<FString>* History = DialogueHistory.Find(CharacterID))
     {
-        // Try to load sound wave from path
-        USoundWave* SoundWave = LoadObject<USoundWave>(nullptr, *AudioFilePath);
-        if (SoundWave)
+        History->Add(DialogueText);
+        
+        // Keep only last 10 dialogues per character
+        if (History->Num() > 10)
         {
-            AudioComponent->SetSound(SoundWave);
-            AudioComponent->Play();
-            UE_LOG(LogTemp, Log, TEXT("Narr_DialogueSystem: Áudio carregado: %s"), *AudioFilePath);
-        }
-        else
-        {
-            UE_LOG(LogTemp, Warning, TEXT("Narr_DialogueSystem: Falha ao carregar áudio: %s"), *AudioFilePath);
+            History->RemoveAt(0);
         }
     }
 }
 
-void UNarr_DialogueSystem::InitializeDefaultDialogues()
+float UNarr_DialogueSystem::CalculateDialoguePriority(const FNarr_DialogueLine& DialogueLine, float Distance, ENarr_DialogueType RequestedType)
 {
-    // Create default survival-focused dialogue entries
+    float Priority = DialogueLine.Priority;
     
-    // Field Notes
-    FNarr_DialogueEntry FieldNote1;
-    FieldNote1.DialogueID = "FieldNote_RaptorBehavior";
-    FieldNote1.DialogueType = ENarr_DialogueType::FieldNotes;
-    FieldNote1.Speaker = ENarr_SpeakerType::Paleontologist;
-    FieldNote1.DialogueText = "Registo de campo: Os Raptors desta região demonstram comportamento de caça coordenada excepcional.";
-    FieldNote1.Duration = 8.0f;
-    FieldNote1.UrgencyLevel = EEng_ThreatLevel::Safe;
-    RegisterDialogueEntry(FieldNote1);
+    // Distance factor (closer = higher priority)
+    float DistanceFactor = FMath::Clamp(1.0f - (Distance / DialogueLine.TriggerDistance), 0.1f, 1.0f);
+    Priority *= DistanceFactor;
     
-    // Safety Alerts
-    FNarr_DialogueEntry SafetyAlert1;
-    SafetyAlert1.DialogueID = "Safety_TRexProximity";
-    SafetyAlert1.DialogueType = ENarr_DialogueType::SafetyAlert;
-    SafetyAlert1.Speaker = ENarr_SpeakerType::SafetyOfficer;
-    SafetyAlert1.DialogueText = "Alerta de segurança: Tyrannosaurus Rex detectado na área. Manter distância segura.";
-    SafetyAlert1.Duration = 6.0f;
-    SafetyAlert1.UrgencyLevel = EEng_ThreatLevel::Deadly;
-    RegisterDialogueEntry(SafetyAlert1);
+    // Type match bonus
+    if (DialogueLine.DialogueType == RequestedType)
+    {
+        Priority *= 1.5f;
+    }
     
-    // Weather Warnings
-    FNarr_DialogueEntry WeatherWarning1;
-    WeatherWarning1.DialogueID = "Weather_StormApproaching";
-    WeatherWarning1.DialogueType = ENarr_DialogueType::WeatherWarning;
-    WeatherWarning1.Speaker = ENarr_SpeakerType::WeatherStation;
-    WeatherWarning1.DialogueText = "Aviso meteorológico: Tempestade tropical aproxima-se. Procurar abrigo imediatamente.";
-    WeatherWarning1.Duration = 7.0f;
-    WeatherWarning1.UrgencyLevel = EEng_ThreatLevel::Dangerous;
-    WeatherWarning1.TriggerConditions.Add("Storm");
-    WeatherWarning1.TriggerConditions.Add("Rain");
-    RegisterDialogueEntry(WeatherWarning1);
+    // Emergency dialogues get massive priority boost
+    if (DialogueLine.DialogueType == ENarr_DialogueType::Emergency)
+    {
+        Priority *= 3.0f;
+    }
     
-    // Discovery Dialogues
-    FNarr_DialogueEntry Discovery1;
-    Discovery1.DialogueID = "Discovery_DinosaurNest";
-    Discovery1.DialogueType = ENarr_DialogueType::Discovery;
-    Discovery1.Speaker = ENarr_SpeakerType::Paleontologist;
-    Discovery1.DialogueText = "Descoberta extraordinária: Ninho de dinossauro intacto com evidências de comportamento parental.";
-    Discovery1.Duration = 9.0f;
-    Discovery1.UrgencyLevel = EEng_ThreatLevel::Safe;
-    Discovery1.TriggerConditions.Add("Nest");
-    Discovery1.TriggerConditions.Add("Eggs");
-    RegisterDialogueEntry(Discovery1);
-    
-    UE_LOG(LogTemp, Log, TEXT("Narr_DialogueSystem: %d diálogos padrão inicializados"), DialogueDatabase.Num());
+    return Priority;
 }
