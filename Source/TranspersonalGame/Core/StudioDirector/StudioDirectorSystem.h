@@ -2,158 +2,111 @@
 
 #include "CoreMinimal.h"
 #include "Engine/World.h"
-#include "GameFramework/Actor.h"
-#include "Components/StaticMeshComponent.h"
-#include "Engine/StaticMeshActor.h"
+#include "GameFramework/GameModeBase.h"
 #include "Subsystems/WorldSubsystem.h"
+#include "Engine/Engine.h"
 #include "StudioDirectorSystem.generated.h"
 
 /**
- * Studio Director System - Central coordination hub for the 19-agent development pipeline
- * Manages task assignment, milestone tracking, and production coordination
+ * Studio Director System - Central coordination and oversight for all game systems
+ * Manages agent task distribution, production pipeline coordination, and milestone tracking
+ * This is the master control system that ensures all 18 agents work in harmony
  */
+
+UENUM(BlueprintType)
+enum class EDir_ProductionPhase : uint8
+{
+    PreProduction,
+    PrototypeDevelopment,
+    VerticalSlice,
+    FullProduction,
+    Polish,
+    GoldMaster
+};
 
 UENUM(BlueprintType)
 enum class EDir_AgentStatus : uint8
 {
-    Idle            UMETA(DisplayName = "Idle"),
-    Working         UMETA(DisplayName = "Working"),
-    Completed       UMETA(DisplayName = "Completed"),
-    Blocked         UMETA(DisplayName = "Blocked"),
-    Failed          UMETA(DisplayName = "Failed")
-};
-
-UENUM(BlueprintType)
-enum class EDir_MilestoneType : uint8
-{
-    WalkAround      UMETA(DisplayName = "Walk Around"),
-    BasicSurvival   UMETA(DisplayName = "Basic Survival"),
-    DinosaurAI      UMETA(DisplayName = "Dinosaur AI"),
-    FullGameplay    UMETA(DisplayName = "Full Gameplay"),
-    Polish          UMETA(DisplayName = "Polish")
-};
-
-UENUM(BlueprintType)
-enum class EDir_Priority : uint8
-{
-    Critical        UMETA(DisplayName = "Critical"),
-    High            UMETA(DisplayName = "High"),
-    Medium          UMETA(DisplayName = "Medium"),
-    Low             UMETA(DisplayName = "Low")
+    Idle,
+    Working,
+    Completed,
+    Blocked,
+    Failed
 };
 
 USTRUCT(BlueprintType)
-struct FDir_AgentTask
+struct FDir_AgentTaskInfo
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Task")
-    int32 AgentID;
+    UPROPERTY(BlueprintReadOnly, Category = "Agent Task")
+    int32 AgentID = 0;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Task")
-    FString TaskDescription;
+    UPROPERTY(BlueprintReadOnly, Category = "Agent Task")
+    FString AgentName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Task")
-    EDir_Priority Priority;
+    UPROPERTY(BlueprintReadOnly, Category = "Agent Task")
+    FString CurrentTask;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Task")
-    EDir_AgentStatus Status;
+    UPROPERTY(BlueprintReadOnly, Category = "Agent Task")
+    EDir_AgentStatus Status = EDir_AgentStatus::Idle;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Task")
-    float EstimatedDuration;
+    UPROPERTY(BlueprintReadOnly, Category = "Agent Task")
+    float ProgressPercentage = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Task")
-    float ActualDuration;
+    UPROPERTY(BlueprintReadOnly, Category = "Agent Task")
+    FDateTime LastUpdateTime;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Task")
-    TArray<FString> Dependencies;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Task")
-    TArray<FString> Deliverables;
-
-    FDir_AgentTask()
+    FDir_AgentTaskInfo()
     {
         AgentID = 0;
-        TaskDescription = TEXT("");
-        Priority = EDir_Priority::Medium;
+        AgentName = TEXT("");
+        CurrentTask = TEXT("");
         Status = EDir_AgentStatus::Idle;
-        EstimatedDuration = 0.0f;
-        ActualDuration = 0.0f;
+        ProgressPercentage = 0.0f;
+        LastUpdateTime = FDateTime::Now();
     }
 };
 
 USTRUCT(BlueprintType)
-struct FDir_ProductionMilestone
+struct FDir_ProductionMetrics
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone")
-    EDir_MilestoneType Type;
+    UPROPERTY(BlueprintReadOnly, Category = "Production Metrics")
+    int32 TotalFilesCreated = 0;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone")
-    FString Description;
+    UPROPERTY(BlueprintReadOnly, Category = "Production Metrics")
+    int32 TotalLinesOfCode = 0;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone")
-    TArray<int32> RequiredAgents;
+    UPROPERTY(BlueprintReadOnly, Category = "Production Metrics")
+    int32 CompilationErrors = 0;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone")
-    float CompletionPercentage;
+    UPROPERTY(BlueprintReadOnly, Category = "Production Metrics")
+    int32 ActiveAgents = 0;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone")
-    bool bIsCompleted;
+    UPROPERTY(BlueprintReadOnly, Category = "Production Metrics")
+    float OverallProgress = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone")
-    FDateTime TargetDate;
+    UPROPERTY(BlueprintReadOnly, Category = "Production Metrics")
+    FDateTime CycleStartTime;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Milestone")
-    FDateTime ActualCompletionDate;
-
-    FDir_ProductionMilestone()
+    FDir_ProductionMetrics()
     {
-        Type = EDir_MilestoneType::WalkAround;
-        Description = TEXT("");
-        CompletionPercentage = 0.0f;
-        bIsCompleted = false;
-    }
-};
-
-USTRUCT(BlueprintType)
-struct FDir_CriticalPath
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Critical Path")
-    FString PathName;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Critical Path")
-    TArray<int32> AgentSequence;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Critical Path")
-    float TotalEstimatedTime;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Critical Path")
-    float CurrentProgress;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Critical Path")
-    bool bIsBlocked;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Critical Path")
-    FString BlockingReason;
-
-    FDir_CriticalPath()
-    {
-        PathName = TEXT("");
-        TotalEstimatedTime = 0.0f;
-        CurrentProgress = 0.0f;
-        bIsBlocked = false;
-        BlockingReason = TEXT("");
+        TotalFilesCreated = 0;
+        TotalLinesOfCode = 0;
+        CompilationErrors = 0;
+        ActiveAgents = 0;
+        OverallProgress = 0.0f;
+        CycleStartTime = FDateTime::Now();
     }
 };
 
 /**
- * Studio Director Subsystem - Manages the entire development pipeline
+ * Studio Director World Subsystem
+ * Manages the entire production pipeline and coordinates all agent activities
  */
-UCLASS()
+UCLASS(BlueprintType)
 class TRANSPERSONALGAME_API UStudioDirectorSubsystem : public UWorldSubsystem
 {
     GENERATED_BODY()
@@ -162,162 +115,118 @@ public:
     // USubsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
+    virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
 
-    // Task Management
+    // Production Management
     UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    void AssignTaskToAgent(int32 AgentID, const FString& TaskDescription, EDir_Priority Priority);
-
-    UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    void UpdateAgentStatus(int32 AgentID, EDir_AgentStatus NewStatus);
+    void StartProductionCycle(int32 CycleNumber);
 
     UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    void CompleteAgentTask(int32 AgentID, const TArray<FString>& Deliverables);
+    void EndProductionCycle();
 
     UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    TArray<FDir_AgentTask> GetAllAgentTasks() const;
+    void UpdateAgentStatus(int32 AgentID, const FString& TaskDescription, EDir_AgentStatus NewStatus, float Progress);
 
     UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    FDir_AgentTask GetAgentTask(int32 AgentID) const;
+    FDir_ProductionMetrics GetProductionMetrics() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Studio Director")
+    TArray<FDir_AgentTaskInfo> GetAllAgentStatuses() const;
 
     // Milestone Management
     UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    void CreateMilestone(EDir_MilestoneType Type, const FString& Description, const TArray<int32>& RequiredAgents);
+    void SetProductionPhase(EDir_ProductionPhase NewPhase);
 
     UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    void UpdateMilestoneProgress(EDir_MilestoneType Type, float NewProgress);
+    EDir_ProductionPhase GetCurrentProductionPhase() const;
 
     UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    void CompleteMilestone(EDir_MilestoneType Type);
+    bool IsMilestoneComplete(const FString& MilestoneName) const;
+
+    // Quality Assurance
+    UFUNCTION(BlueprintCallable, Category = "Studio Director")
+    void ReportCompilationError(const FString& ErrorMessage, const FString& SourceFile);
 
     UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    TArray<FDir_ProductionMilestone> GetAllMilestones() const;
-
-    // Critical Path Management
-    UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    void CreateCriticalPath(const FString& PathName, const TArray<int32>& AgentSequence);
+    void ClearCompilationErrors();
 
     UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    void UpdateCriticalPathProgress(const FString& PathName, float NewProgress);
+    int32 GetCompilationErrorCount() const;
+
+    // Agent Coordination
+    UFUNCTION(BlueprintCallable, Category = "Studio Director")
+    void DispatchTaskToAgent(int32 AgentID, const FString& TaskDescription, int32 Priority = 1);
 
     UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    void BlockCriticalPath(const FString& PathName, const FString& Reason);
+    bool IsAgentBlocked(int32 AgentID) const;
 
     UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    void UnblockCriticalPath(const FString& PathName);
-
-    UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    TArray<FDir_CriticalPath> GetAllCriticalPaths() const;
-
-    // Production Analytics
-    UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    float GetOverallProductionProgress() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    TArray<int32> GetBlockedAgents() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    TArray<int32> GetCriticalPathAgents() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    FString GenerateProductionReport() const;
-
-    // Emergency Management
-    UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    void TriggerEmergencyMode(const FString& Reason);
-
-    UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    void ExitEmergencyMode();
-
-    UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    bool IsInEmergencyMode() const;
+    void UnblockAgent(int32 AgentID);
 
 protected:
+    // Production State
     UPROPERTY()
-    TArray<FDir_AgentTask> AgentTasks;
+    EDir_ProductionPhase CurrentPhase;
 
     UPROPERTY()
-    TArray<FDir_ProductionMilestone> ProductionMilestones;
+    int32 CurrentCycleNumber;
 
     UPROPERTY()
-    TArray<FDir_CriticalPath> CriticalPaths;
+    FDir_ProductionMetrics CurrentMetrics;
 
     UPROPERTY()
-    bool bEmergencyMode;
+    TArray<FDir_AgentTaskInfo> AgentStatuses;
 
     UPROPERTY()
-    FString EmergencyReason;
+    TArray<FString> CompilationErrors;
 
     UPROPERTY()
-    FDateTime ProductionStartTime;
+    TMap<FString, bool> MilestoneCompletionStatus;
 
 private:
-    void InitializeAgentTasks();
-    void InitializeProductionMilestones();
-    void InitializeCriticalPaths();
-    void UpdateDependencies();
-    float CalculateMilestoneProgress(const FDir_ProductionMilestone& Milestone) const;
+    void InitializeAgentStatuses();
+    void UpdateProductionMetrics();
+    void LogProductionStatus() const;
 };
 
 /**
- * Studio Director Actor - Visual representation in the world
+ * Studio Director Component
+ * Can be attached to GameMode or other actors for direct production oversight
  */
-UCLASS()
-class TRANSPERSONALGAME_API AStudioDirectorActor : public AActor
+UCLASS(BlueprintType, Blueprintable, ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UStudioDirectorComponent : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    AStudioDirectorActor();
+    UStudioDirectorComponent();
 
 protected:
     virtual void BeginPlay() override;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class UStaticMeshComponent* HubMeshComponent;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class USceneComponent* AgentIndicatorRoot;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Studio Director")
-    TArray<class AStaticMeshActor*> AgentStatusActors;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Studio Director")
-    TArray<class AStaticMeshActor*> MilestoneActors;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Studio Director")
-    TArray<class AStaticMeshActor*> CriticalPathActors;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 public:
-    virtual void Tick(float DeltaTime) override;
+    // Production Monitoring
+    UFUNCTION(BlueprintCallable, Category = "Studio Director")
+    void MonitorProductionHealth();
 
     UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    void UpdateVisualStatus();
+    void GenerateProductionReport();
 
     UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    void CreateAgentStatusIndicators();
-
-    UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    void CreateMilestoneMarkers();
-
-    UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    void CreateCriticalPathIndicators();
+    void CheckSystemIntegrity();
 
 protected:
-    UFUNCTION()
-    void UpdateAgentIndicatorColors();
+    UPROPERTY(BlueprintReadOnly, Category = "Studio Director")
+    UStudioDirectorSubsystem* DirectorSubsystem;
 
-    UFUNCTION()
-    void UpdateMilestoneProgress();
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Studio Director")
+    float MonitoringInterval = 30.0f;
 
-    UFUNCTION()
-    void UpdateCriticalPathStatus();
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Studio Director")
+    bool bAutoGenerateReports = true;
 
 private:
-    UPROPERTY()
-    class UStudioDirectorSubsystem* DirectorSubsystem;
-
-    float LastUpdateTime;
-    static constexpr float UpdateInterval = 1.0f;
+    float LastMonitoringTime;
+    void InitializeDirectorSubsystem();
 };
-
-#include "StudioDirectorSystem.generated.h"
