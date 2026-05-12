@@ -1,330 +1,446 @@
 #include "StudioDirector.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "GameFramework/PlayerStart.h"
-#include "Engine/DirectionalLight.h"
-#include "Engine/SkyLight.h"
-#include "Landscape/Landscape.h"
+#include "Components/TextRenderComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "UObject/ConstructorHelpers.h"
+#include "Engine/StaticMesh.h"
+#include "Materials/Material.h"
 
-// Studio Director Component Implementation
-UStudioDirectorComponent::UStudioDirectorComponent()
-{
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.bStartWithTickEnabled = true;
-    
-    CurrentCycle = 0;
-    bProductionActive = false;
-    CycleStartTime = 0.0f;
-    CompilationErrors = 0;
-    OrphanHeaders = 0;
-}
-
-void UStudioDirectorComponent::BeginPlay()
-{
-    Super::BeginPlay();
-    
-    UE_LOG(LogTemp, Warning, TEXT("Studio Director Component initialized"));
-    
-    // Start initial assessment
-    ValidateCodebase();
-    CheckPlayabilityRequirements();
-}
-
-void UStudioDirectorComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
-{
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    
-    if (bProductionActive)
-    {
-        UpdateProductionMetrics();
-    }
-}
-
-void UStudioDirectorComponent::StartProductionCycle(int32 CycleNumber)
-{
-    CurrentCycle = CycleNumber;
-    bProductionActive = true;
-    CycleStartTime = GetWorld()->GetTimeSeconds();
-    
-    UE_LOG(LogTemp, Warning, TEXT("Production Cycle %d started"), CycleNumber);
-    
-    // Clear previous cycle data
-    AgentTasks.Empty();
-    AgentProgress.Empty();
-    CriticalIssues.Empty();
-    
-    // Run initial validation
-    ValidatePlayablePrototype();
-}
-
-void UStudioDirectorComponent::EndProductionCycle()
-{
-    bProductionActive = false;
-    float CycleDuration = GetWorld()->GetTimeSeconds() - CycleStartTime;
-    
-    UE_LOG(LogTemp, Warning, TEXT("Production Cycle %d completed in %.2f seconds"), CurrentCycle, CycleDuration);
-    
-    // Final validation
-    bool bPrototypeValid = ValidatePlayablePrototype();
-    UE_LOG(LogTemp, Warning, TEXT("Playable Prototype Status: %s"), bPrototypeValid ? TEXT("VALID") : TEXT("INVALID"));
-}
-
-bool UStudioDirectorComponent::ValidatePlayablePrototype()
-{
-    if (!GetWorld())
-    {
-        UE_LOG(LogTemp, Error, TEXT("No world available for validation"));
-        return false;
-    }
-    
-    bool bValid = true;
-    CriticalIssues.Empty();
-    
-    // Check for PlayerStart
-    TArray<AActor*> PlayerStarts;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), APlayerStart::StaticClass(), PlayerStarts);
-    if (PlayerStarts.Num() == 0)
-    {
-        CriticalIssues.Add(TEXT("Missing PlayerStart"));
-        bValid = false;
-    }
-    
-    // Check for basic lighting
-    TArray<AActor*> DirectionalLights;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), ADirectionalLight::StaticClass(), DirectionalLights);
-    if (DirectionalLights.Num() == 0)
-    {
-        CriticalIssues.Add(TEXT("Missing Directional Light"));
-        bValid = false;
-    }
-    
-    // Check for landscape/terrain
-    TArray<AActor*> Landscapes;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), ALandscape::StaticClass(), Landscapes);
-    if (Landscapes.Num() == 0)
-    {
-        CriticalIssues.Add(TEXT("Missing Landscape/Terrain"));
-        bValid = false;
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Prototype validation: %d critical issues found"), CriticalIssues.Num());
-    
-    return bValid;
-}
-
-void UStudioDirectorComponent::AssignTaskToAgent(int32 AgentNumber, const FString& TaskDescription)
-{
-    AgentTasks.Add(AgentNumber, TaskDescription);
-    UE_LOG(LogTemp, Log, TEXT("Task assigned to Agent #%d: %s"), AgentNumber, *TaskDescription);
-}
-
-void UStudioDirectorComponent::ReportAgentProgress(int32 AgentNumber, const FString& Progress)
-{
-    AgentProgress.Add(AgentNumber, Progress);
-    UE_LOG(LogTemp, Log, TEXT("Agent #%d progress: %s"), AgentNumber, *Progress);
-}
-
-bool UStudioDirectorComponent::CheckCompilationStatus()
-{
-    // This would typically interface with UBT or check for compilation artifacts
-    // For now, we'll simulate based on class availability
-    
-    UClass* CharacterClass = FindObject<UClass>(ANY_PACKAGE, TEXT("TranspersonalCharacter"));
-    UClass* GameModeClass = FindObject<UClass>(ANY_PACKAGE, TEXT("TranspersonalGameMode"));
-    
-    CompilationErrors = 0;
-    
-    if (!CharacterClass)
-    {
-        CompilationErrors++;
-        CriticalIssues.AddUnique(TEXT("TranspersonalCharacter class not found"));
-    }
-    
-    if (!GameModeClass)
-    {
-        CompilationErrors++;
-        CriticalIssues.AddUnique(TEXT("TranspersonalGameMode class not found"));
-    }
-    
-    return CompilationErrors == 0;
-}
-
-int32 UStudioDirectorComponent::CountOrphanHeaders()
-{
-    // This would scan the filesystem for .h files without corresponding .cpp files
-    // For now, return the known count from memory
-    OrphanHeaders = 122; // From brain memory
-    return OrphanHeaders;
-}
-
-TArray<FString> UStudioDirectorComponent::GetCriticalErrors()
-{
-    return CriticalIssues;
-}
-
-void UStudioDirectorComponent::UpdateProductionMetrics()
-{
-    // Update compilation status
-    CheckCompilationStatus();
-    
-    // Update orphan header count
-    CountOrphanHeaders();
-    
-    // Check cycle timeout
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-    float CycleDuration = CurrentTime - CycleStartTime;
-    
-    if (CycleDuration > 600.0f) // 10 minutes
-    {
-        CriticalIssues.AddUnique(TEXT("Production cycle timeout"));
-        UE_LOG(LogTemp, Error, TEXT("Production cycle timeout after %.2f seconds"), CycleDuration);
-    }
-}
-
-void UStudioDirectorComponent::ValidateCodebase()
-{
-    CheckCompilationStatus();
-    CountOrphanHeaders();
-    
-    UE_LOG(LogTemp, Warning, TEXT("Codebase validation: %d compilation errors, %d orphan headers"), 
-           CompilationErrors, OrphanHeaders);
-}
-
-void UStudioDirectorComponent::CheckPlayabilityRequirements()
-{
-    ValidatePlayablePrototype();
-    
-    UE_LOG(LogTemp, Warning, TEXT("Playability check: %d critical issues"), CriticalIssues.Num());
-    for (const FString& Issue : CriticalIssues)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("- %s"), *Issue);
-    }
-}
-
-// Studio Director Actor Implementation
 AStudioDirector::AStudioDirector()
 {
     PrimaryActorTick.bCanEverTick = true;
-    
-    // Create studio director component
-    StudioDirectorComponent = CreateDefaultSubobject<UStudioDirectorComponent>(TEXT("StudioDirectorComponent"));
-    
-    // Set default values
-    bAutoManageProduction = true;
-    ProductionCycleDuration = 300.0f; // 5 minutes
-    MaxConcurrentAgents = 5;
+
+    // Create root component
+    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
+    RootComponent = RootSceneComponent;
+
+    // Create task board mesh
+    TaskBoardMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("TaskBoardMesh"));
+    TaskBoardMesh->SetupAttachment(RootComponent);
+
+    // Create status display
+    StatusDisplay = CreateDefaultSubobject<UTextRenderComponent>(TEXT("StatusDisplay"));
+    StatusDisplay->SetupAttachment(RootComponent);
+    StatusDisplay->SetRelativeLocation(FVector(0, 0, 100));
+    StatusDisplay->SetRelativeRotation(FRotator(0, 180, 0));
+    StatusDisplay->SetText(FText::FromString(TEXT("STUDIO DIRECTOR - INITIALIZING")));
+    StatusDisplay->SetTextRenderColor(FColor::Green);
+    StatusDisplay->SetWorldSize(50.0f);
+
+    // Initialize production settings
+    CurrentPhase = EDir_ProductionPhase::Planning;
+    CycleTimeLimit = 1800.0f; // 30 minutes
+    CurrentCycleNumber = 0;
+    bProductionActive = false;
 }
 
 void AStudioDirector::BeginPlay()
 {
     Super::BeginPlay();
     
-    UE_LOG(LogTemp, Warning, TEXT("Studio Director Actor spawned"));
+    InitializeAgentPipeline();
+    UpdateStatusDisplay();
     
-    if (bAutoManageProduction)
-    {
-        InitializeProductionPipeline();
-    }
+    UE_LOG(LogTemp, Warning, TEXT("Studio Director initialized - Production pipeline ready"));
 }
 
 void AStudioDirector::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
     
-    if (bAutoManageProduction)
+    if (bProductionActive)
     {
-        MonitorAgentChain();
-        EnsurePlayablePrototype();
+        CheckAgentTimeouts();
+        ProcessAgentDependencies();
+        UpdateStatusDisplay();
     }
 }
 
-void AStudioDirector::InitializeProductionPipeline()
+void AStudioDirector::InitializeAgentPipeline()
 {
-    UE_LOG(LogTemp, Warning, TEXT("Initializing production pipeline"));
+    AgentTasks.Empty();
     
-    if (StudioDirectorComponent)
+    // Initialize all 18 agents
+    TArray<FString> AgentNames = {
+        TEXT("Studio Director"),
+        TEXT("Engine Architect"),
+        TEXT("Core Systems Programmer"),
+        TEXT("Performance Optimizer"),
+        TEXT("Procedural World Generator"),
+        TEXT("Environment Artist"),
+        TEXT("Architecture & Interior Agent"),
+        TEXT("Lighting & Atmosphere Agent"),
+        TEXT("Character Artist Agent"),
+        TEXT("Animation Agent"),
+        TEXT("NPC Behavior Agent"),
+        TEXT("Combat & Enemy AI Agent"),
+        TEXT("Crowd & Traffic Simulation"),
+        TEXT("Quest & Mission Designer"),
+        TEXT("Narrative & Dialogue Agent"),
+        TEXT("Audio Agent"),
+        TEXT("VFX Agent"),
+        TEXT("QA & Testing Agent"),
+        TEXT("Integration & Build Agent")
+    };
+
+    for (int32 i = 0; i < AgentNames.Num(); i++)
     {
-        StudioDirectorComponent->StartProductionCycle(20); // Current cycle
+        FDir_AgentTask NewTask;
+        NewTask.AgentNumber = i + 1;
+        NewTask.AgentName = AgentNames[i];
+        NewTask.CurrentTask = TEXT("Awaiting Assignment");
+        NewTask.Status = EDir_AgentStatus::Idle;
+        NewTask.ProgressPercentage = 0.0f;
+        NewTask.Dependencies = TEXT("");
+        NewTask.LastUpdate = FDateTime::Now();
         
-        // Assign critical tasks
-        StudioDirectorComponent->AssignTaskToAgent(2, TEXT("Fix compilation errors and clean orphan headers"));
-        StudioDirectorComponent->AssignTaskToAgent(5, TEXT("Expand landscape to 200km² with biomes"));
-        StudioDirectorComponent->AssignTaskToAgent(9, TEXT("Create real dinosaur actors with collision"));
-        StudioDirectorComponent->AssignTaskToAgent(12, TEXT("Implement survival HUD"));
+        AgentTasks.Add(NewTask);
     }
+
+    // Create initial milestones
+    CreateMilestone(TEXT("MILESTONE_1_WALKABLE"), 
+                   TEXT("Player can walk around with WASD movement"), 
+                   {2, 3, 5, 9, 10});
+                   
+    CreateMilestone(TEXT("COMPILATION_COMPLETE"), 
+                   TEXT("All C++ modules compile without errors"), 
+                   {2, 3, 4});
+                   
+    CreateMilestone(TEXT("BASIC_WORLD"), 
+                   TEXT("Landscape with terrain and basic lighting"), 
+                   {5, 6, 8});
+
+    UE_LOG(LogTemp, Warning, TEXT("Agent pipeline initialized with %d agents"), AgentTasks.Num());
 }
 
-void AStudioDirector::RunCriticalAssessment()
+void AStudioDirector::UpdateAgentStatus(int32 AgentNumber, EDir_AgentStatus NewStatus, const FString& TaskDescription)
 {
-    UE_LOG(LogTemp, Warning, TEXT("Running critical assessment"));
-    
-    if (StudioDirectorComponent)
+    if (AgentNumber < 1 || AgentNumber > AgentTasks.Num())
     {
-        bool bCompilationOK = StudioDirectorComponent->CheckCompilationStatus();
-        int32 OrphanCount = StudioDirectorComponent->CountOrphanHeaders();
-        bool bPrototypeValid = StudioDirectorComponent->ValidatePlayablePrototype();
-        
-        UE_LOG(LogTemp, Warning, TEXT("Assessment Results:"));
-        UE_LOG(LogTemp, Warning, TEXT("- Compilation: %s"), bCompilationOK ? TEXT("OK") : TEXT("ERRORS"));
-        UE_LOG(LogTemp, Warning, TEXT("- Orphan Headers: %d"), OrphanCount);
-        UE_LOG(LogTemp, Warning, TEXT("- Prototype: %s"), bPrototypeValid ? TEXT("VALID") : TEXT("INVALID"));
+        UE_LOG(LogTemp, Error, TEXT("Invalid agent number: %d"), AgentNumber);
+        return;
     }
+
+    FDir_AgentTask& Task = AgentTasks[AgentNumber - 1];
+    Task.Status = NewStatus;
+    Task.CurrentTask = TaskDescription;
+    Task.LastUpdate = FDateTime::Now();
+
+    // Update progress based on status
+    switch (NewStatus)
+    {
+        case EDir_AgentStatus::Working:
+            Task.ProgressPercentage = 50.0f;
+            break;
+        case EDir_AgentStatus::Complete:
+            Task.ProgressPercentage = 100.0f;
+            break;
+        case EDir_AgentStatus::Error:
+        case EDir_AgentStatus::Blocked:
+            Task.ProgressPercentage = 0.0f;
+            break;
+        default:
+            break;
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("Agent #%d (%s) status updated: %s"), 
+           AgentNumber, *Task.AgentName, *TaskDescription);
 }
 
-void AStudioDirector::ValidateMinPlayableMap()
+void AStudioDirector::StartProductionCycle()
 {
-    UE_LOG(LogTemp, Warning, TEXT("Validating MinPlayableMap"));
+    CurrentCycleNumber++;
+    bProductionActive = true;
     
-    if (StudioDirectorComponent)
+    // Reset all agent statuses to idle
+    for (FDir_AgentTask& Task : AgentTasks)
     {
-        bool bValid = StudioDirectorComponent->ValidatePlayablePrototype();
-        TArray<FString> Issues = StudioDirectorComponent->GetCriticalErrors();
-        
-        UE_LOG(LogTemp, Warning, TEXT("MinPlayableMap validation: %s"), bValid ? TEXT("PASSED") : TEXT("FAILED"));
-        for (const FString& Issue : Issues)
+        if (Task.Status != EDir_AgentStatus::Complete)
         {
-            UE_LOG(LogTemp, Error, TEXT("Issue: %s"), *Issue);
+            Task.Status = EDir_AgentStatus::Idle;
+            Task.ProgressPercentage = 0.0f;
+        }
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("Production Cycle #%d started"), CurrentCycleNumber);
+}
+
+void AStudioDirector::CompleteProductionCycle()
+{
+    bProductionActive = false;
+    
+    // Count completed tasks
+    int32 CompletedTasks = 0;
+    for (const FDir_AgentTask& Task : AgentTasks)
+    {
+        if (Task.Status == EDir_AgentStatus::Complete)
+        {
+            CompletedTasks++;
+        }
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("Production Cycle #%d completed - %d/%d tasks finished"), 
+           CurrentCycleNumber, CompletedTasks, AgentTasks.Num());
+}
+
+bool AStudioDirector::CheckMilestoneCompletion(const FString& MilestoneName)
+{
+    for (FDir_ProductionMilestone& Milestone : Milestones)
+    {
+        if (Milestone.MilestoneName == MilestoneName && !Milestone.bIsComplete)
+        {
+            // Check if all required agents are complete
+            bool bAllComplete = true;
+            for (int32 AgentNum : Milestone.RequiredAgents)
+            {
+                if (AgentNum <= AgentTasks.Num())
+                {
+                    if (AgentTasks[AgentNum - 1].Status != EDir_AgentStatus::Complete)
+                    {
+                        bAllComplete = false;
+                        break;
+                    }
+                }
+            }
+
+            if (bAllComplete)
+            {
+                Milestone.bIsComplete = true;
+                Milestone.CompletionDate = FDateTime::Now();
+                UE_LOG(LogTemp, Warning, TEXT("Milestone completed: %s"), *MilestoneName);
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+void AStudioDirector::SetProductionPhase(EDir_ProductionPhase NewPhase)
+{
+    CurrentPhase = NewPhase;
+    UE_LOG(LogTemp, Warning, TEXT("Production phase changed to: %d"), (int32)NewPhase);
+}
+
+void AStudioDirector::AssignTaskToAgent(int32 AgentNumber, const FString& TaskDescription, const FString& Dependencies)
+{
+    if (AgentNumber < 1 || AgentNumber > AgentTasks.Num())
+    {
+        return;
+    }
+
+    FDir_AgentTask& Task = AgentTasks[AgentNumber - 1];
+    Task.CurrentTask = TaskDescription;
+    Task.Dependencies = Dependencies;
+    Task.Status = EDir_AgentStatus::Working;
+    Task.LastUpdate = FDateTime::Now();
+}
+
+TArray<FDir_AgentTask> AStudioDirector::GetBlockedAgents()
+{
+    TArray<FDir_AgentTask> BlockedAgents;
+    
+    for (const FDir_AgentTask& Task : AgentTasks)
+    {
+        if (Task.Status == EDir_AgentStatus::Blocked)
+        {
+            BlockedAgents.Add(Task);
+        }
+    }
+    
+    return BlockedAgents;
+}
+
+void AStudioDirector::ResolveAgentDependency(int32 AgentNumber)
+{
+    if (AgentNumber < 1 || AgentNumber > AgentTasks.Num())
+    {
+        return;
+    }
+
+    FDir_AgentTask& Task = AgentTasks[AgentNumber - 1];
+    if (Task.Status == EDir_AgentStatus::Blocked)
+    {
+        Task.Status = EDir_AgentStatus::Idle;
+        Task.Dependencies = TEXT("");
+    }
+}
+
+void AStudioDirector::CreateMilestone(const FString& Name, const FString& Description, const TArray<int32>& RequiredAgents)
+{
+    FDir_ProductionMilestone NewMilestone;
+    NewMilestone.MilestoneName = Name;
+    NewMilestone.Description = Description;
+    NewMilestone.RequiredAgents = RequiredAgents;
+    NewMilestone.bIsComplete = false;
+    NewMilestone.TargetDate = FDateTime::Now() + FTimespan::FromDays(1);
+    
+    Milestones.Add(NewMilestone);
+}
+
+void AStudioDirector::CompleteMilestone(const FString& MilestoneName)
+{
+    for (FDir_ProductionMilestone& Milestone : Milestones)
+    {
+        if (Milestone.MilestoneName == MilestoneName)
+        {
+            Milestone.bIsComplete = true;
+            Milestone.CompletionDate = FDateTime::Now();
+            break;
         }
     }
 }
 
-void AStudioDirector::GenerateProductionReport()
+float AStudioDirector::GetOverallProgress()
 {
-    UE_LOG(LogTemp, Warning, TEXT("Generating production report"));
+    if (AgentTasks.Num() == 0)
+    {
+        return 0.0f;
+    }
+
+    float TotalProgress = 0.0f;
+    for (const FDir_AgentTask& Task : AgentTasks)
+    {
+        TotalProgress += Task.ProgressPercentage;
+    }
+
+    return TotalProgress / AgentTasks.Num();
+}
+
+FString AStudioDirector::GetProductionStatusReport()
+{
+    FString Report = FString::Printf(TEXT("=== STUDIO DIRECTOR STATUS REPORT ===\n"));
+    Report += FString::Printf(TEXT("Cycle: #%d | Phase: %d | Active: %s\n"), 
+                             CurrentCycleNumber, (int32)CurrentPhase, bProductionActive ? TEXT("YES") : TEXT("NO"));
     
-    if (StudioDirectorComponent)
+    Report += TEXT("\nAGENT STATUS:\n");
+    for (const FDir_AgentTask& Task : AgentTasks)
     {
-        RunCriticalAssessment();
-        ValidateMinPlayableMap();
+        FString StatusStr;
+        switch (Task.Status)
+        {
+            case EDir_AgentStatus::Idle: StatusStr = TEXT("IDLE"); break;
+            case EDir_AgentStatus::Working: StatusStr = TEXT("WORK"); break;
+            case EDir_AgentStatus::Complete: StatusStr = TEXT("DONE"); break;
+            case EDir_AgentStatus::Blocked: StatusStr = TEXT("BLOCK"); break;
+            case EDir_AgentStatus::Error: StatusStr = TEXT("ERROR"); break;
+        }
         
-        UE_LOG(LogTemp, Warning, TEXT("Production report generated - check logs for details"));
+        Report += FString::Printf(TEXT("#%02d %s [%s] %.0f%% - %s\n"), 
+                                 Task.AgentNumber, *StatusStr, *Task.AgentName, 
+                                 Task.ProgressPercentage, *Task.CurrentTask);
+    }
+
+    Report += TEXT("\nMILESTONES:\n");
+    for (const FDir_ProductionMilestone& Milestone : Milestones)
+    {
+        Report += FString::Printf(TEXT("%s: %s - %s\n"), 
+                                 Milestone.bIsComplete ? TEXT("[DONE]") : TEXT("[PEND]"),
+                                 *Milestone.MilestoneName, *Milestone.Description);
+    }
+
+    return Report;
+}
+
+void AStudioDirector::EmergencyStopProduction()
+{
+    bProductionActive = false;
+    
+    for (FDir_AgentTask& Task : AgentTasks)
+    {
+        if (Task.Status == EDir_AgentStatus::Working)
+        {
+            Task.Status = EDir_AgentStatus::Error;
+        }
+    }
+    
+    UE_LOG(LogTemp, Error, TEXT("EMERGENCY STOP - Production halted"));
+}
+
+void AStudioDirector::EditorRefreshTaskBoard()
+{
+    UpdateStatusDisplay();
+    UE_LOG(LogTemp, Warning, TEXT("Task board refreshed in editor"));
+}
+
+void AStudioDirector::EditorGenerateStatusReport()
+{
+    FString Report = GetProductionStatusReport();
+    UE_LOG(LogTemp, Warning, TEXT("%s"), *Report);
+}
+
+void AStudioDirector::UpdateStatusDisplay()
+{
+    if (StatusDisplay)
+    {
+        FString DisplayText = FormatStatusText();
+        StatusDisplay->SetText(FText::FromString(DisplayText));
     }
 }
 
-void AStudioDirector::MonitorAgentChain()
+void AStudioDirector::CheckAgentTimeouts()
 {
-    // Monitor agent progress and handle timeouts/blocks
-    if (StudioDirectorComponent && StudioDirectorComponent->bProductionActive)
+    FDateTime CurrentTime = FDateTime::Now();
+    FTimespan TimeoutLimit = FTimespan::FromMinutes(30);
+
+    for (FDir_AgentTask& Task : AgentTasks)
     {
-        // Check for critical blocks
-        TArray<FString> CriticalErrors = StudioDirectorComponent->GetCriticalErrors();
-        if (CriticalErrors.Num() > 5)
+        if (Task.Status == EDir_AgentStatus::Working)
         {
-            UE_LOG(LogTemp, Error, TEXT("Too many critical errors - production halt recommended"));
+            FTimespan TimeSinceUpdate = CurrentTime - Task.LastUpdate;
+            if (TimeSinceUpdate > TimeoutLimit)
+            {
+                Task.Status = EDir_AgentStatus::Error;
+                UE_LOG(LogTemp, Error, TEXT("Agent #%d timed out"), Task.AgentNumber);
+            }
         }
     }
 }
 
-void AStudioDirector::EnsurePlayablePrototype()
+void AStudioDirector::ProcessAgentDependencies()
 {
-    // Ensure minimum playable prototype requirements are met
-    if (StudioDirectorComponent)
+    // Check if blocked agents can be unblocked
+    for (FDir_AgentTask& Task : AgentTasks)
     {
-        bool bValid = StudioDirectorComponent->ValidatePlayablePrototype();
-        if (!bValid)
+        if (Task.Status == EDir_AgentStatus::Blocked && !Task.Dependencies.IsEmpty())
         {
-            UE_LOG(LogTemp, Warning, TEXT("Playable prototype requirements not met - prioritizing fixes"));
+            // Simple dependency resolution - check if dependency agent is complete
+            // This could be expanded for more complex dependency parsing
+            bool bCanUnblock = true; // Simplified for now
+            
+            if (bCanUnblock)
+            {
+                Task.Status = EDir_AgentStatus::Idle;
+                Task.Dependencies = TEXT("");
+            }
         }
     }
+}
+
+FString AStudioDirector::FormatStatusText()
+{
+    FString StatusText = FString::Printf(TEXT("STUDIO DIRECTOR\nCycle #%d | %s\n"), 
+                                        CurrentCycleNumber, 
+                                        bProductionActive ? TEXT("ACTIVE") : TEXT("IDLE"));
+    
+    StatusText += FString::Printf(TEXT("Progress: %.1f%%\n"), GetOverallProgress());
+    
+    // Show first 5 agents status
+    for (int32 i = 0; i < FMath::Min(5, AgentTasks.Num()); i++)
+    {
+        const FDir_AgentTask& Task = AgentTasks[i];
+        FString StatusStr;
+        switch (Task.Status)
+        {
+            case EDir_AgentStatus::Idle: StatusStr = TEXT("IDLE"); break;
+            case EDir_AgentStatus::Working: StatusStr = TEXT("WORK"); break;
+            case EDir_AgentStatus::Complete: StatusStr = TEXT("DONE"); break;
+            case EDir_AgentStatus::Blocked: StatusStr = TEXT("BLOCK"); break;
+            case EDir_AgentStatus::Error: StatusStr = TEXT("ERROR"); break;
+        }
+        
+        StatusText += FString::Printf(TEXT("#%d %s\n"), Task.AgentNumber, *StatusStr);
+    }
+    
+    return StatusText;
 }
