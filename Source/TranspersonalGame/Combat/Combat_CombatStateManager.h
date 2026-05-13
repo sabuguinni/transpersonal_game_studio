@@ -1,157 +1,167 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/ActorComponent.h"
+#include "Engine/World.h"
+#include "Subsystems/WorldSubsystem.h"
 #include "Engine/Engine.h"
-#include "CombatAITypes.h"
+#include "SharedTypes.h"
 #include "Combat_CombatStateManager.generated.h"
 
-UENUM(BlueprintType)
-enum class ECombat_CombatPhase : uint8
-{
-    PreCombat       UMETA(DisplayName = "Pre-Combat"),
-    Engagement      UMETA(DisplayName = "Engagement"),
-    ActiveCombat    UMETA(DisplayName = "Active Combat"),
-    Retreat         UMETA(DisplayName = "Retreat"),
-    PostCombat      UMETA(DisplayName = "Post-Combat"),
-    Victory         UMETA(DisplayName = "Victory"),
-    Defeat          UMETA(DisplayName = "Defeat")
-};
-
-UENUM(BlueprintType)
-enum class ECombat_ThreatLevel : uint8
-{
-    None           UMETA(DisplayName = "None"),
-    Low            UMETA(DisplayName = "Low"),
-    Medium         UMETA(DisplayName = "Medium"),
-    High           UMETA(DisplayName = "High"),
-    Critical       UMETA(DisplayName = "Critical"),
-    Overwhelming   UMETA(DisplayName = "Overwhelming")
-};
+class ACombat_CombatManager;
+class ATranspersonalCharacter;
 
 USTRUCT(BlueprintType)
-struct FCombat_CombatState
+struct TRANSPERSONALGAME_API FCombat_CombatEvent
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat State")
-    ECombat_CombatPhase CurrentPhase;
+    UPROPERTY(BlueprintReadOnly)
+    AActor* Instigator;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat State")
-    ECombat_ThreatLevel ThreatLevel;
+    UPROPERTY(BlueprintReadOnly)
+    AActor* Target;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat State")
-    float CombatIntensity;
+    UPROPERTY(BlueprintReadOnly)
+    float Damage;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat State")
-    float TimeInCombat;
+    UPROPERTY(BlueprintReadOnly)
+    FVector Location;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat State")
-    int32 EnemiesInRange;
+    UPROPERTY(BlueprintReadOnly)
+    float Timestamp;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat State")
-    bool bIsPlayerInvolved;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat State")
-    bool bIsPackCombat;
-
-    FCombat_CombatState()
+    FCombat_CombatEvent()
     {
-        CurrentPhase = ECombat_CombatPhase::PreCombat;
-        ThreatLevel = ECombat_ThreatLevel::None;
-        CombatIntensity = 0.0f;
-        TimeInCombat = 0.0f;
-        EnemiesInRange = 0;
-        bIsPlayerInvolved = false;
-        bIsPackCombat = false;
+        Instigator = nullptr;
+        Target = nullptr;
+        Damage = 0.0f;
+        Location = FVector::ZeroVector;
+        Timestamp = 0.0f;
     }
 };
 
-UCLASS(ClassGroup=(Combat), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UCombat_CombatStateManager : public UActorComponent
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FCombat_ThreatData
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly)
+    AActor* ThreatActor;
+
+    UPROPERTY(BlueprintReadOnly)
+    float ThreatLevel;
+
+    UPROPERTY(BlueprintReadOnly)
+    float LastSeenTime;
+
+    UPROPERTY(BlueprintReadOnly)
+    FVector LastKnownPosition;
+
+    UPROPERTY(BlueprintReadOnly)
+    bool bIsActive;
+
+    FCombat_ThreatData()
+    {
+        ThreatActor = nullptr;
+        ThreatLevel = 0.0f;
+        LastSeenTime = 0.0f;
+        LastKnownPosition = FVector::ZeroVector;
+        bIsActive = false;
+    }
+};
+
+UCLASS(BlueprintType)
+class TRANSPERSONALGAME_API UCombat_CombatStateManager : public UWorldSubsystem
 {
     GENERATED_BODY()
 
 public:
     UCombat_CombatStateManager();
 
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+
+    // Combat state management
+    UFUNCTION(BlueprintCallable, Category = "Combat State")
+    void RegisterCombatActor(AActor* Actor, float CombatRadius = 1000.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Combat State")
+    void UnregisterCombatActor(AActor* Actor);
+
+    UFUNCTION(BlueprintCallable, Category = "Combat State")
+    bool IsActorInCombat(AActor* Actor) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Combat State")
+    void StartCombat(AActor* Instigator, AActor* Target);
+
+    UFUNCTION(BlueprintCallable, Category = "Combat State")
+    void EndCombat(AActor* Actor);
+
+    UFUNCTION(BlueprintCallable, Category = "Combat State")
+    void ProcessCombatEvent(const FCombat_CombatEvent& CombatEvent);
+
+    // Threat tracking
+    UFUNCTION(BlueprintCallable, Category = "Threat System")
+    void AddThreat(AActor* ThreatActor, AActor* TargetActor, float ThreatAmount);
+
+    UFUNCTION(BlueprintCallable, Category = "Threat System")
+    void RemoveThreat(AActor* ThreatActor, AActor* TargetActor);
+
+    UFUNCTION(BlueprintCallable, Category = "Threat System")
+    float GetThreatLevel(AActor* ThreatActor, AActor* TargetActor) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Threat System")
+    TArray<FCombat_ThreatData> GetThreatsForActor(AActor* Actor) const;
+
+    // Combat queries
+    UFUNCTION(BlueprintCallable, Category = "Combat Queries")
+    TArray<AActor*> GetNearbyEnemies(AActor* Actor, float Radius = 2000.0f) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Combat Queries")
+    AActor* GetNearestEnemy(AActor* Actor, float MaxRange = 1500.0f) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Combat Queries")
+    bool IsLocationSafe(const FVector& Location, float SafetyRadius = 500.0f) const;
+
+    // Combat statistics
+    UFUNCTION(BlueprintCallable, Category = "Combat Stats")
+    int32 GetActiveCombatCount() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Combat Stats")
+    float GetAverageCombatDuration() const;
+
 protected:
-    virtual void BeginPlay() override;
-
-public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
-
-    // Combat State Management
-    UFUNCTION(BlueprintCallable, Category = "Combat State")
-    void InitiateCombat(AActor* Target, ECombat_ThreatLevel InitialThreatLevel);
-
-    UFUNCTION(BlueprintCallable, Category = "Combat State")
-    void EndCombat(bool bVictory);
-
-    UFUNCTION(BlueprintCallable, Category = "Combat State")
-    void UpdateCombatPhase(ECombat_CombatPhase NewPhase);
-
-    UFUNCTION(BlueprintCallable, Category = "Combat State")
-    void UpdateThreatLevel(ECombat_ThreatLevel NewThreatLevel);
-
-    UFUNCTION(BlueprintCallable, Category = "Combat State")
-    void AddEnemyToRange(AActor* Enemy);
-
-    UFUNCTION(BlueprintCallable, Category = "Combat State")
-    void RemoveEnemyFromRange(AActor* Enemy);
-
-    // State Queries
-    UFUNCTION(BlueprintPure, Category = "Combat State")
-    bool IsInCombat() const;
-
-    UFUNCTION(BlueprintPure, Category = "Combat State")
-    ECombat_CombatPhase GetCurrentPhase() const { return CombatState.CurrentPhase; }
-
-    UFUNCTION(BlueprintPure, Category = "Combat State")
-    ECombat_ThreatLevel GetThreatLevel() const { return CombatState.ThreatLevel; }
-
-    UFUNCTION(BlueprintPure, Category = "Combat State")
-    float GetCombatIntensity() const { return CombatState.CombatIntensity; }
-
-    UFUNCTION(BlueprintPure, Category = "Combat State")
-    int32 GetEnemyCount() const { return CombatState.EnemiesInRange; }
-
-    // Combat Analytics
-    UFUNCTION(BlueprintCallable, Category = "Combat Analytics")
-    void LogCombatEvent(const FString& EventDescription);
-
-    UFUNCTION(BlueprintCallable, Category = "Combat Analytics")
-    void RecordCombatMetrics();
-
-protected:
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat State")
-    FCombat_CombatState CombatState;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Settings")
-    float CombatTimeoutDuration;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Settings")
-    float IntensityDecayRate;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Settings")
-    float MaxCombatRange;
-
     // Internal tracking
     UPROPERTY()
-    TArray<AActor*> EnemiesInCombat;
+    TMap<AActor*, float> CombatActors;
 
     UPROPERTY()
-    AActor* PrimaryTarget;
+    TMap<AActor*, TArray<FCombat_ThreatData>> ThreatMap;
 
     UPROPERTY()
-    float LastCombatActivity;
+    TArray<FCombat_CombatEvent> RecentCombatEvents;
 
-    // Combat intensity calculation
-    void UpdateCombatIntensity(float DeltaTime);
-    void CalculateThreatLevel();
-    void CheckCombatTimeout(float DeltaTime);
+    UPROPERTY()
+    TMap<AActor*, float> CombatStartTimes;
 
-    // Event handling
-    void OnCombatPhaseChanged(ECombat_CombatPhase OldPhase, ECombat_CombatPhase NewPhase);
-    void OnThreatLevelChanged(ECombat_ThreatLevel OldLevel, ECombat_ThreatLevel NewLevel);
+    // Combat parameters
+    UPROPERTY(EditDefaultsOnly, Category = "Combat Settings")
+    float CombatTimeoutDuration;
+
+    UPROPERTY(EditDefaultsOnly, Category = "Combat Settings")
+    float ThreatDecayRate;
+
+    UPROPERTY(EditDefaultsOnly, Category = "Combat Settings")
+    float MaxThreatDistance;
+
+    UPROPERTY(EditDefaultsOnly, Category = "Combat Settings")
+    int32 MaxCombatEventsHistory;
+
+private:
+    void UpdateCombatStates();
+    void DecayThreats();
+    void CleanupOldEvents();
+
+    FTimerHandle CombatUpdateTimer;
 };
