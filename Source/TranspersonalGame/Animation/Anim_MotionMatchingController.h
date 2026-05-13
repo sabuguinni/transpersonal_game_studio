@@ -2,58 +2,85 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "Engine/Engine.h"
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
 #include "Animation/BlendSpace.h"
-#include "GameFramework/CharacterMovementComponent.h"
+#include "Engine/DataTable.h"
+#include "SharedTypes.h"
 #include "Anim_MotionMatchingController.generated.h"
 
-UENUM(BlueprintType)
-enum class EAnim_MotionState : uint8
-{
-    Idle        UMETA(DisplayName = "Idle"),
-    Walking     UMETA(DisplayName = "Walking"), 
-    Running     UMETA(DisplayName = "Running"),
-    Jumping     UMETA(DisplayName = "Jumping"),
-    Falling     UMETA(DisplayName = "Falling"),
-    Landing     UMETA(DisplayName = "Landing"),
-    Crouching   UMETA(DisplayName = "Crouching"),
-    Climbing    UMETA(DisplayName = "Climbing"),
-    Swimming    UMETA(DisplayName = "Swimming")
-};
+class UAnimSequence;
+class UBlendSpace1D;
+class UBlendSpace;
 
 USTRUCT(BlueprintType)
-struct FAnim_MotionData
+struct TRANSPERSONALGAME_API FAnim_MotionFeature
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion")
-    float Speed = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    FVector Velocity;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion")
-    float Direction = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    FVector Acceleration;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion")
-    FVector Velocity = FVector::ZeroVector;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    float Speed;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion")
-    bool bIsOnGround = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    float Direction;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion")
-    bool bIsMoving = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    bool bIsMoving;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion")
-    EAnim_MotionState CurrentState = EAnim_MotionState::Idle;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    bool bIsInAir;
 
-    FAnim_MotionData()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    bool bIsCrouching;
+
+    FAnim_MotionFeature()
     {
+        Velocity = FVector::ZeroVector;
+        Acceleration = FVector::ZeroVector;
         Speed = 0.0f;
         Direction = 0.0f;
-        Velocity = FVector::ZeroVector;
-        bIsOnGround = true;
         bIsMoving = false;
-        CurrentState = EAnim_MotionState::Idle;
+        bIsInAir = false;
+        bIsCrouching = false;
+    }
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FAnim_MotionClip
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    UAnimSequence* AnimSequence;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    float StartTime;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    float EndTime;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    FAnim_MotionFeature MotionFeature;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    float Quality;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    EAnim_MovementState MovementState;
+
+    FAnim_MotionClip()
+    {
+        AnimSequence = nullptr;
+        StartTime = 0.0f;
+        EndTime = 0.0f;
+        Quality = 1.0f;
+        MovementState = EAnim_MovementState::Idle;
     }
 };
 
@@ -71,73 +98,92 @@ protected:
 public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // Motion Matching Functions
-    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    void UpdateMotionData();
+    // Motion Matching Database
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching")
+    TArray<FAnim_MotionClip> MotionDatabase;
 
-    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    EAnim_MotionState DetermineMotionState();
+    // Current Motion State
+    UPROPERTY(BlueprintReadOnly, Category = "Motion Matching")
+    FAnim_MotionFeature CurrentMotionFeature;
 
-    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    void TransitionToState(EAnim_MotionState NewState);
+    UPROPERTY(BlueprintReadOnly, Category = "Motion Matching")
+    FAnim_MotionClip CurrentMotionClip;
 
-    UFUNCTION(BlueprintPure, Category = "Motion Matching")
-    FAnim_MotionData GetCurrentMotionData() const { return CurrentMotionData; }
+    UPROPERTY(BlueprintReadOnly, Category = "Motion Matching")
+    float CurrentPlayTime;
 
-    UFUNCTION(BlueprintPure, Category = "Motion Matching")
-    float GetMovementSpeed() const;
+    // Motion Matching Settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching|Settings")
+    float FeatureMatchThreshold;
 
-    UFUNCTION(BlueprintPure, Category = "Motion Matching")
-    float GetMovementDirection() const;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching|Settings")
+    float VelocityWeight;
 
-    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
-    void SetMotionState(EAnim_MotionState NewState);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching|Settings")
+    float AccelerationWeight;
 
-protected:
-    // Current motion data
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Motion Data")
-    FAnim_MotionData CurrentMotionData;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching|Settings")
+    float DirectionWeight;
 
-    // Previous motion data for smooth transitions
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Motion Data")
-    FAnim_MotionData PreviousMotionData;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching|Settings")
+    float MinClipDuration;
 
-    // Movement thresholds
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Thresholds")
-    float WalkSpeedThreshold = 150.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Matching|Settings")
+    bool bEnableMotionMatching;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Thresholds")
-    float RunSpeedThreshold = 400.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Thresholds")
-    float IdleSpeedThreshold = 10.0f;
-
-    // State transition delays
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Timing")
-    float StateTransitionDelay = 0.1f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion Timing")
-    float MotionSmoothingFactor = 5.0f;
-
-    // Cached references
-    UPROPERTY()
-    class ACharacter* OwnerCharacter;
-
-    UPROPERTY()
+    // Character Movement Reference
+    UPROPERTY(BlueprintReadOnly, Category = "Motion Matching")
     class UCharacterMovementComponent* MovementComponent;
 
-    UPROPERTY()
+    UPROPERTY(BlueprintReadOnly, Category = "Motion Matching")
     class USkeletalMeshComponent* MeshComponent;
 
+    // Motion Matching Functions
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    void UpdateMotionFeature(float DeltaTime);
+
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    FAnim_MotionClip FindBestMotionMatch(const FAnim_MotionFeature& TargetFeature);
+
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    float CalculateMotionDistance(const FAnim_MotionFeature& FeatureA, const FAnim_MotionFeature& FeatureB);
+
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    void TransitionToMotionClip(const FAnim_MotionClip& NewClip);
+
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    void AddMotionClipToDatabase(UAnimSequence* AnimSequence, float StartTime, float EndTime, const FAnim_MotionFeature& Feature, EAnim_MovementState MovementState);
+
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    void BuildMotionDatabase();
+
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    void ClearMotionDatabase();
+
+    // Animation Blending
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    void SetBlendWeight(float Weight);
+
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching")
+    float GetCurrentBlendWeight() const;
+
+    // Debug Functions
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching|Debug")
+    void DebugDrawMotionFeature(const FAnim_MotionFeature& Feature, FVector WorldLocation);
+
+    UFUNCTION(BlueprintCallable, Category = "Motion Matching|Debug")
+    void PrintMotionDatabaseInfo();
+
 private:
-    // Internal state tracking
-    float StateTransitionTimer = 0.0f;
-    EAnim_MotionState PendingState = EAnim_MotionState::Idle;
-    bool bHasPendingTransition = false;
+    // Internal state
+    float BlendWeight;
+    float LastUpdateTime;
+    FVector PreviousVelocity;
+    bool bIsInitialized;
 
     // Helper functions
-    void CacheComponentReferences();
-    void SmoothMotionData(float DeltaTime);
-    bool ShouldTransitionToState(EAnim_MotionState NewState);
-    void ProcessStateTransition(float DeltaTime);
+    void InitializeComponents();
+    void ValidateMotionDatabase();
+    bool IsValidMotionClip(const FAnim_MotionClip& Clip) const;
+    void SmoothMotionFeature(FAnim_MotionFeature& Feature, float SmoothingFactor);
 };
