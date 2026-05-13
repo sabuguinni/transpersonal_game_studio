@@ -2,295 +2,218 @@
 
 #include "CoreMinimal.h"
 #include "Engine/World.h"
-#include "GameFramework/Actor.h"
-#include "Components/StaticMeshComponent.h"
-#include "Components/SceneComponent.h"
-#include "Engine/Engine.h"
+#include "Subsystems/WorldSubsystem.h"
+#include "SharedTypes.h"
 #include "Eng_CompilationValidator.generated.h"
 
 /**
- * Engine Architect's Compilation Validation System
- * Monitors C++ compilation status, module loading, and critical system functionality
- * Provides real-time feedback on build health and identifies compilation issues
+ * ENGINE ARCHITECT CYCLE 004 - COMPILATION VALIDATOR
+ * 
+ * This system ensures that all C++ code follows UE5 compilation rules
+ * and prevents common compilation errors that break the build.
+ * 
+ * CRITICAL FUNCTIONS:
+ * 1. Validates USTRUCT/UENUM placement (must be global scope)
+ * 2. Checks for unique type names across the project
+ * 3. Validates .generated.h include order
+ * 4. Ensures all .h files have matching .cpp files
+ * 5. Validates UPROPERTY/UFUNCTION macro usage
  */
 
+// Compilation Error Types
 UENUM(BlueprintType)
-enum class EEng_CompilationStatus : uint8
+enum class EEng_CompilationErrorType : uint8
 {
-    Unknown         UMETA(DisplayName = "Unknown"),
-    Compiling       UMETA(DisplayName = "Compiling"),
-    Success         UMETA(DisplayName = "Success"),
-    Failed          UMETA(DisplayName = "Failed"),
-    PartialSuccess  UMETA(DisplayName = "Partial Success"),
-    ModuleError     UMETA(DisplayName = "Module Error")
+    None                    UMETA(DisplayName = "None"),
+    MissingCppFile         UMETA(DisplayName = "Missing Cpp File"),
+    InvalidIncludeOrder    UMETA(DisplayName = "Invalid Include Order"),
+    DuplicateTypeName      UMETA(DisplayName = "Duplicate Type Name"),
+    InvalidMacroUsage      UMETA(DisplayName = "Invalid Macro Usage"),
+    MissingGeneratedBody   UMETA(DisplayName = "Missing Generated Body"),
+    InvalidStructPlacement UMETA(DisplayName = "Invalid Struct Placement"),
+    ModuleDependencyError  UMETA(DisplayName = "Module Dependency Error")
 };
 
-UENUM(BlueprintType)
-enum class EEng_ModuleStatus : uint8
-{
-    NotLoaded       UMETA(DisplayName = "Not Loaded"),
-    Loading         UMETA(DisplayName = "Loading"),
-    Loaded          UMETA(DisplayName = "Loaded"),
-    Failed          UMETA(DisplayName = "Failed"),
-    Unloading       UMETA(DisplayName = "Unloading")
-};
-
+// Compilation Validation Result
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_ClassValidationResult
+struct TRANSPERSONALGAME_API FEng_CompilationValidationResult
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    FString ClassName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation")
+    FString FileName;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    bool bIsLoaded;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation")
+    EEng_CompilationErrorType ErrorType;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    bool bHasCppFile;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    bool bHasHeaderFile;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation")
     FString ErrorMessage;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    float LastValidationTime;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation")
+    int32 LineNumber;
 
-    FEng_ClassValidationResult()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation")
+    bool bIsError;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation")
+    FDateTime ValidationTime;
+
+    FEng_CompilationValidationResult()
     {
-        ClassName = TEXT("");
-        bIsLoaded = false;
-        bHasCppFile = false;
-        bHasHeaderFile = false;
+        FileName = TEXT("");
+        ErrorType = EEng_CompilationErrorType::None;
         ErrorMessage = TEXT("");
-        LastValidationTime = 0.0f;
+        LineNumber = 0;
+        bIsError = false;
+        ValidationTime = FDateTime::Now();
     }
 };
 
+// File Validation Status
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_ModuleValidationResult
+struct TRANSPERSONALGAME_API FEng_FileValidationStatus
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Module")
-    FString ModuleName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "File")
+    FString HeaderFile;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Module")
-    EEng_ModuleStatus Status;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "File")
+    FString CppFile;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Module")
-    int32 LoadedClassCount;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "File")
+    bool bHasMatchingCpp;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Module")
-    int32 FailedClassCount;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "File")
+    bool bHasValidIncludes;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Module")
-    TArray<FString> DependencyModules;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "File")
+    bool bHasValidMacros;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Module")
-    float LoadTime;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "File")
+    TArray<FString> TypesDeclarated;
 
-    FEng_ModuleValidationResult()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "File")
+    TArray<FEng_CompilationValidationResult> ValidationErrors;
+
+    FEng_FileValidationStatus()
     {
-        ModuleName = TEXT("");
-        Status = EEng_ModuleStatus::NotLoaded;
-        LoadedClassCount = 0;
-        FailedClassCount = 0;
-        LoadTime = 0.0f;
+        HeaderFile = TEXT("");
+        CppFile = TEXT("");
+        bHasMatchingCpp = false;
+        bHasValidIncludes = false;
+        bHasValidMacros = false;
     }
 };
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_CompilationReport
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
-    EEng_CompilationStatus OverallStatus;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
-    int32 TotalClasses;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
-    int32 LoadedClasses;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
-    int32 FailedClasses;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
-    int32 MissingCppFiles;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
-    TArray<FEng_ClassValidationResult> ClassResults;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
-    TArray<FEng_ModuleValidationResult> ModuleResults;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
-    FString LastCompilationTime;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Compilation")
-    float ValidationDuration;
-
-    FEng_CompilationReport()
-    {
-        OverallStatus = EEng_CompilationStatus::Unknown;
-        TotalClasses = 0;
-        LoadedClasses = 0;
-        FailedClasses = 0;
-        MissingCppFiles = 0;
-        LastCompilationTime = TEXT("");
-        ValidationDuration = 0.0f;
-    }
-};
-
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AEng_CompilationValidator : public AActor
+/**
+ * COMPILATION VALIDATOR SUBSYSTEM
+ * 
+ * Validates all C++ files in the project to ensure they follow
+ * UE5 compilation rules and prevent build errors.
+ */
+UCLASS(BlueprintType)
+class TRANSPERSONALGAME_API UEng_CompilationValidator : public UWorldSubsystem
 {
     GENERATED_BODY()
 
 public:
-    AEng_CompilationValidator();
+    // Subsystem Interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+
+    // Validation Methods
+    UFUNCTION(BlueprintCallable, Category = "Compilation")
+    bool ValidateAllSourceFiles();
+
+    UFUNCTION(BlueprintCallable, Category = "Compilation")
+    bool ValidateHeaderFile(const FString& HeaderPath);
+
+    UFUNCTION(BlueprintCallable, Category = "Compilation")
+    bool ValidateCppFile(const FString& CppPath);
+
+    UFUNCTION(BlueprintCallable, Category = "Compilation")
+    TArray<FEng_FileValidationStatus> GetAllFileValidationStatus();
+
+    // Specific Validation Rules
+    UFUNCTION(BlueprintCallable, Category = "Compilation")
+    bool ValidateIncludeOrder(const FString& FilePath);
+
+    UFUNCTION(BlueprintCallable, Category = "Compilation")
+    bool ValidateTypeNames(const FString& FilePath);
+
+    UFUNCTION(BlueprintCallable, Category = "Compilation")
+    bool ValidateMacroUsage(const FString& FilePath);
+
+    UFUNCTION(BlueprintCallable, Category = "Compilation")
+    bool ValidateModuleDependencies(const FString& FilePath);
+
+    // Error Reporting
+    UFUNCTION(BlueprintCallable, Category = "Compilation")
+    TArray<FEng_CompilationValidationResult> GetValidationErrors();
+
+    UFUNCTION(BlueprintCallable, Category = "Compilation")
+    int32 GetErrorCount();
+
+    UFUNCTION(BlueprintCallable, Category = "Compilation")
+    int32 GetWarningCount();
+
+    // File Management
+    UFUNCTION(BlueprintCallable, Category = "Compilation")
+    TArray<FString> FindOrphanedHeaders();
+
+    UFUNCTION(BlueprintCallable, Category = "Compilation")
+    TArray<FString> FindMissingCppFiles();
+
+    UFUNCTION(BlueprintCallable, Category = "Compilation")
+    bool CreateMissingCppStub(const FString& HeaderPath);
+
+    // Type Registry Validation
+    UFUNCTION(BlueprintCallable, Category = "Compilation")
+    bool ValidateUniqueTypeNames();
+
+    UFUNCTION(BlueprintCallable, Category = "Compilation")
+    TArray<FString> FindDuplicateTypeNames();
+
+    UFUNCTION(BlueprintCallable, Category = "Compilation")
+    bool ValidateSharedTypesUsage();
 
 protected:
-    virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
+    // Internal validation data
+    UPROPERTY()
+    TArray<FEng_FileValidationStatus> FileValidationStatuses;
 
-    // Core Components
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    USceneComponent* RootSceneComponent;
+    UPROPERTY()
+    TArray<FEng_CompilationValidationResult> ValidationErrors;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UStaticMeshComponent* ValidatorMesh;
+    UPROPERTY()
+    TMap<FString, FString> TypeNameRegistry;
 
-    // Validation Settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation Settings")
+    // Validation settings
+    UPROPERTY(EditAnywhere, Category = "Validation")
+    bool bAutoValidateOnStartup;
+
+    UPROPERTY(EditAnywhere, Category = "Validation")
+    bool bTreatWarningsAsErrors;
+
+    UPROPERTY(EditAnywhere, Category = "Validation")
     float ValidationInterval;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation Settings")
-    bool bAutoValidateOnStart;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation Settings")
-    bool bLogDetailedResults;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation Settings")
-    TArray<FString> CriticalClassNames;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation Settings")
-    TArray<FString> RequiredModules;
-
-    // Current Status
-    UPROPERTY(BlueprintReadOnly, Category = "Status")
-    FEng_CompilationReport CurrentReport;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Status")
-    bool bIsValidating;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Status")
-    float LastValidationTime;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Status")
-    int32 ValidationCount;
-
-public:
-    // Main Validation Functions
-    UFUNCTION(BlueprintCallable, Category = "Validation", CallInEditor)
-    void RunFullValidation();
-
-    UFUNCTION(BlueprintCallable, Category = "Validation")
-    void ValidateClasses();
-
-    UFUNCTION(BlueprintCallable, Category = "Validation")
-    void ValidateModules();
-
-    UFUNCTION(BlueprintCallable, Category = "Validation")
-    void ValidateCriticalSystems();
-
-    // Class Validation
-    UFUNCTION(BlueprintCallable, Category = "Class Validation")
-    FEng_ClassValidationResult ValidateClass(const FString& ClassName);
-
-    UFUNCTION(BlueprintCallable, Category = "Class Validation")
-    bool IsClassLoaded(const FString& ClassName);
-
-    UFUNCTION(BlueprintCallable, Category = "Class Validation")
-    TArray<FString> GetLoadedClasses();
-
-    UFUNCTION(BlueprintCallable, Category = "Class Validation")
-    TArray<FString> GetFailedClasses();
-
-    // Module Validation
-    UFUNCTION(BlueprintCallable, Category = "Module Validation")
-    FEng_ModuleValidationResult ValidateModule(const FString& ModuleName);
-
-    UFUNCTION(BlueprintCallable, Category = "Module Validation")
-    bool IsModuleLoaded(const FString& ModuleName);
-
-    UFUNCTION(BlueprintCallable, Category = "Module Validation")
-    void RefreshModule(const FString& ModuleName);
-
-    // Compilation Health
-    UFUNCTION(BlueprintCallable, Category = "Health Check")
-    EEng_CompilationStatus GetCompilationHealth();
-
-    UFUNCTION(BlueprintCallable, Category = "Health Check")
-    float GetCompilationScore();
-
-    UFUNCTION(BlueprintCallable, Category = "Health Check")
-    bool HasCriticalErrors();
-
-    UFUNCTION(BlueprintCallable, Category = "Health Check")
-    TArray<FString> GetCriticalErrors();
-
-    // Reporting
-    UFUNCTION(BlueprintCallable, Category = "Reporting")
-    FString GenerateValidationReport();
-
-    UFUNCTION(BlueprintCallable, Category = "Reporting")
-    void LogValidationResults();
-
-    UFUNCTION(BlueprintCallable, Category = "Reporting")
-    void SaveValidationReport(const FString& FilePath);
-
-    // Auto-Validation
-    UFUNCTION(BlueprintCallable, Category = "Auto Validation")
-    void StartAutoValidation();
-
-    UFUNCTION(BlueprintCallable, Category = "Auto Validation")
-    void StopAutoValidation();
-
-    UFUNCTION(BlueprintCallable, Category = "Auto Validation")
-    void SetValidationInterval(float NewInterval);
-
-    // Cleanup and Repair
-    UFUNCTION(BlueprintCallable, Category = "Cleanup", CallInEditor)
-    void CleanupOrphanedHeaders();
-
-    UFUNCTION(BlueprintCallable, Category = "Cleanup", CallInEditor)
-    void IdentifyMissingCppFiles();
-
-    UFUNCTION(BlueprintCallable, Category = "Cleanup")
-    void RepairBrokenDependencies();
+    // Internal methods
+    void ScanSourceDirectory(const FString& DirectoryPath);
+    bool ValidateFileContent(const FString& FilePath, FEng_FileValidationStatus& OutStatus);
+    void AddValidationError(const FString& FileName, EEng_CompilationErrorType ErrorType, 
+                          const FString& Message, int32 LineNumber = 0);
+    bool IsValidHeaderFile(const FString& FilePath);
+    bool IsValidCppFile(const FString& FilePath);
+    FString GetCorrespondingCppFile(const FString& HeaderPath);
+    FString GetCorrespondingHeaderFile(const FString& CppPath);
 
 private:
-    // Internal validation logic
-    void PerformValidationTick();
-    void UpdateValidationStatus();
-    void ProcessValidationResults();
+    // Validation timer
+    FTimerHandle ValidationTimer;
     
-    // Helper functions
-    bool CheckFileExists(const FString& FilePath);
-    FString GetClassPath(const FString& ClassName);
-    void LogValidationError(const FString& Message);
-    void LogValidationWarning(const FString& Message);
-    
-    // Timer handle for auto-validation
-    FTimerHandle ValidationTimerHandle;
-    
-    // Internal state
-    bool bValidationInProgress;
-    float ValidationStartTime;
-    TArray<FString> PendingValidations;
+    // Project paths
+    FString ProjectSourcePath;
+    FString TranspersonalGamePath;
 };
