@@ -1,326 +1,308 @@
 #include "Narr_DialogueManager.h"
-#include "../TranspersonalCharacter.h"
-#include "Engine/World.h"
-#include "Kismet/GameplayStatics.h"
 #include "Components/AudioComponent.h"
-#include "Sound/SoundBase.h"
+#include "Sound/SoundCue.h"
+#include "Engine/Engine.h"
+#include "Kismet/GameplayStatics.h"
 
-UNarr_DialogueManager::UNarr_DialogueManager()
+ANarr_DialogueManager::ANarr_DialogueManager()
 {
-    bDialogueActive = false;
-    CurrentPlayer = nullptr;
-    CurrentSpeaker = nullptr;
-    DialogueDataTable = nullptr;
+    PrimaryActorTick.bCanEverTick = true;
+
+    // Initialize dialogue state
+    CurrentState = ENarr_DialogueState::Idle;
+    CurrentSequenceID = TEXT("");
+    CurrentLineIndex = 0;
+    CurrentLineTimer = 0.0f;
+    CurrentStoryBeat = 0;
+
+    // Create audio component
+    DialogueAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("DialogueAudio"));
+    DialogueAudioComponent->bAutoActivate = false;
 }
 
-void UNarr_DialogueManager::Initialize(FSubsystemCollectionBase& Collection)
+void ANarr_DialogueManager::BeginPlay()
 {
-    Super::Initialize(Collection);
+    Super::BeginPlay();
     
-    UE_LOG(LogTemp, Warning, TEXT("DialogueManager: Initializing narrative system"));
-    
-    // Initialize default dialogues for survival game
     InitializeDefaultDialogues();
     
-    UE_LOG(LogTemp, Warning, TEXT("DialogueManager: Survival dialogue system ready"));
+    UE_LOG(LogTemp, Warning, TEXT("DialogueManager: Initialized with %d dialogue sequences"), DialogueSequences.Num());
 }
 
-void UNarr_DialogueManager::Deinitialize()
+void ANarr_DialogueManager::Tick(float DeltaTime)
 {
-    EndDialogue();
-    CompletedStoryEvents.Empty();
-    
-    Super::Deinitialize();
+    Super::Tick(DeltaTime);
+
+    if (CurrentState == ENarr_DialogueState::Playing)
+    {
+        CurrentLineTimer += DeltaTime;
+        ProcessCurrentDialogueLine();
+    }
 }
 
-bool UNarr_DialogueManager::StartDialogue(const FString& DialogueID, ATranspersonalCharacter* Player, AActor* Speaker)
+void ANarr_DialogueManager::StartDialogueSequence(const FString& SequenceID)
 {
-    if (!Player || !Speaker)
+    if (!DialogueSequences.Contains(SequenceID))
     {
-        UE_LOG(LogTemp, Warning, TEXT("DialogueManager: Invalid player or speaker for dialogue %s"), *DialogueID);
-        return false;
-    }
-
-    // End any existing dialogue
-    if (bDialogueActive)
-    {
-        EndDialogue();
-    }
-
-    // Get dialogue data
-    FNarr_DialogueData DialogueData = GetDialogueData(DialogueID);
-    if (DialogueData.DialogueID.IsEmpty() || DialogueData.DialogueID == "default_dialogue")
-    {
-        UE_LOG(LogTemp, Warning, TEXT("DialogueManager: Dialogue %s not found, using default"), *DialogueID);
-    }
-
-    // Set current dialogue state
-    bDialogueActive = true;
-    CurrentDialogueID = DialogueID;
-    CurrentPlayer = Player;
-    CurrentSpeaker = Speaker;
-    CurrentDialogueData = DialogueData;
-    CurrentSpeakerName = DialogueData.SpeakerName;
-
-    // Play opening audio if available
-    if (!DialogueData.AudioAssetPath.IsEmpty())
-    {
-        PlayDialogueAudio(DialogueData.AudioAssetPath);
-    }
-
-    UE_LOG(LogTemp, Warning, TEXT("DialogueManager: Started dialogue %s with %s"), *DialogueID, *DialogueData.SpeakerName);
-    return true;
-}
-
-void UNarr_DialogueManager::EndDialogue()
-{
-    if (!bDialogueActive)
-    {
+        UE_LOG(LogTemp, Warning, TEXT("DialogueManager: Sequence '%s' not found"), *SequenceID);
         return;
     }
 
-    UE_LOG(LogTemp, Warning, TEXT("DialogueManager: Ending dialogue %s"), *CurrentDialogueID);
-
-    bDialogueActive = false;
-    CurrentDialogueID.Empty();
-    CurrentSpeakerName.Empty();
-    CurrentPlayer = nullptr;
-    CurrentSpeaker = nullptr;
-    CurrentDialogueData = FNarr_DialogueData();
-}
-
-bool UNarr_DialogueManager::SelectDialogueOption(int32 OptionIndex)
-{
-    if (!bDialogueActive || !CurrentDialogueData.DialogueOptions.IsValidIndex(OptionIndex))
-    {
-        UE_LOG(LogTemp, Warning, TEXT("DialogueManager: Invalid dialogue option %d"), OptionIndex);
-        return false;
-    }
-
-    const FNarr_DialogueOption& SelectedOption = CurrentDialogueData.DialogueOptions[OptionIndex];
-
-    // Check if player meets condition for this option
-    if (!CheckDialogueCondition(SelectedOption.RequiredCondition, SelectedOption.RequiredValue, CurrentPlayer))
-    {
-        UE_LOG(LogTemp, Warning, TEXT("DialogueManager: Player doesn't meet condition for option %d"), OptionIndex);
-        return false;
-    }
-
-    UE_LOG(LogTemp, Warning, TEXT("DialogueManager: Player selected option: %s"), *SelectedOption.OptionText.ToString());
-
-    // End dialogue if this option terminates it
-    if (SelectedOption.bEndsDialogue)
-    {
-        EndDialogue();
-    }
-
-    return true;
-}
-
-FNarr_DialogueData UNarr_DialogueManager::GetDialogueData(const FString& DialogueID)
-{
-    // For now, return hardcoded survival dialogues
-    // In production, this would query the DataTable
+    const FNarr_DialogueSequence& Sequence = DialogueSequences[SequenceID];
     
-    if (DialogueID == "tribal_elder_greeting")
+    if (!CanPlaySequence(Sequence))
     {
-        FNarr_DialogueData Data;
-        Data.DialogueID = DialogueID;
-        Data.SpeakerName = "Tribal Elder";
-        Data.DialogueType = ENarr_DialogueType::Story;
-        Data.OpeningText = FText::FromString("The ancient stories speak of survival through unity. When the earth shook and the great beasts ruled, our ancestors learned that knowledge shared is survival earned.");
-        
-        FNarr_DialogueOption Option1;
-        Option1.OptionText = FText::FromString("Tell me about the ancient ways.");
-        Option1.ResponseText = FText::FromString("Long ago, our people learned to read the signs - the way raptors hunt, how herbivores protect their young, where to find shelter when the storms come.");
-        Option1.bEndsDialogue = false;
-        
-        FNarr_DialogueOption Option2;
-        Option2.OptionText = FText::FromString("What dangers should I know about?");
-        Option2.ResponseText = FText::FromString("The pack hunters are clever - they test your resolve before striking. Never show fear, but never show aggression without cause. Respect earns you passage.");
-        Option2.bEndsDialogue = true;
-        
-        Data.DialogueOptions.Add(Option1);
-        Data.DialogueOptions.Add(Option2);
-        Data.bRepeatable = true;
-        
-        return Data;
-    }
-    else if (DialogueID == "scout_guide_warning")
-    {
-        FNarr_DialogueData Data;
-        Data.DialogueID = DialogueID;
-        Data.SpeakerName = "Scout Guide";
-        Data.DialogueType = ENarr_DialogueType::Warning;
-        Data.OpeningText = FText::FromString("Stay close and move quietly. The forest has eyes - Triceratops ahead, grazing peacefully. See how they position themselves? Always one watching while others feed.");
-        
-        FNarr_DialogueOption Option1;
-        Option1.OptionText = FText::FromString("How do I approach them safely?");
-        Option1.ResponseText = FText::FromString("Slow movements, no sudden gestures. They're peaceful unless threatened. But hear that distant roar? That's a predator marking territory. We go around, not through.");
-        Option1.bEndsDialogue = true;
-        
-        Data.DialogueOptions.Add(Option1);
-        Data.bRepeatable = false;
-        
-        return Data;
-    }
-    else if (DialogueID == "veteran_hunter_advice")
-    {
-        FNarr_DialogueData Data;
-        Data.DialogueID = DialogueID;
-        Data.SpeakerName = "Veteran Hunter";
-        Data.DialogueType = ENarr_DialogueType::Information;
-        Data.OpeningText = FText::FromString("The wounded raptor limps toward the river - injured prey becomes desperate, unpredictable. This is when they're most dangerous.");
-        
-        FNarr_DialogueOption Option1;
-        Option1.OptionText = FText::FromString("Should we pursue it?");
-        Option1.ResponseText = FText::FromString("Keep your spear ready, but remember - even a dying predator can take you with it. Sometimes the wisest hunt is the one you abandon.");
-        Option1.RequiredCondition = ENarr_DialogueCondition::SurvivalLevel;
-        Option1.RequiredValue = 3;
-        Option1.bEndsDialogue = true;
-        
-        Data.DialogueOptions.Add(Option1);
-        Data.bRepeatable = true;
-        
-        return Data;
-    }
-
-    // Default dialogue for unknown IDs
-    FNarr_DialogueData DefaultData;
-    DefaultData.DialogueID = "default_dialogue";
-    DefaultData.SpeakerName = "Survivor";
-    DefaultData.DialogueType = ENarr_DialogueType::Greeting;
-    DefaultData.OpeningText = FText::FromString("Stay alert out there. The wilderness shows no mercy to the unprepared.");
-    
-    FNarr_DialogueOption DefaultOption;
-    DefaultOption.OptionText = FText::FromString("I understand.");
-    DefaultOption.ResponseText = FText::FromString("Good. Survival depends on it.");
-    DefaultOption.bEndsDialogue = true;
-    
-    DefaultData.DialogueOptions.Add(DefaultOption);
-    DefaultData.bRepeatable = true;
-    
-    return DefaultData;
-}
-
-TArray<FNarr_DialogueOption> UNarr_DialogueManager::GetCurrentDialogueOptions()
-{
-    if (!bDialogueActive)
-    {
-        return TArray<FNarr_DialogueOption>();
-    }
-
-    TArray<FNarr_DialogueOption> AvailableOptions;
-    
-    for (const FNarr_DialogueOption& Option : CurrentDialogueData.DialogueOptions)
-    {
-        if (CheckDialogueCondition(Option.RequiredCondition, Option.RequiredValue, CurrentPlayer))
-        {
-            AvailableOptions.Add(Option);
-        }
-    }
-
-    return AvailableOptions;
-}
-
-bool UNarr_DialogueManager::CheckDialogueCondition(ENarr_DialogueCondition Condition, int32 RequiredValue, ATranspersonalCharacter* Player)
-{
-    if (!Player)
-    {
-        return false;
-    }
-
-    switch (Condition)
-    {
-        case ENarr_DialogueCondition::None:
-            return true;
-
-        case ENarr_DialogueCondition::SurvivalLevel:
-            return Player->GetSurvivalLevel() >= RequiredValue;
-
-        case ENarr_DialogueCondition::PlayerHealth:
-            return Player->GetCurrentHealth() >= RequiredValue;
-
-        case ENarr_DialogueCondition::TimeOfDay:
-        {
-            // Get current time of day (0-24 hours)
-            UWorld* World = Player->GetWorld();
-            if (World)
-            {
-                float TimeOfDay = World->GetTimeSeconds() / 3600.0f; // Convert to hours
-                int32 CurrentHour = FMath::FloorToInt(FMath::Fmod(TimeOfDay, 24.0f));
-                return CurrentHour >= RequiredValue;
-            }
-            return true;
-        }
-
-        case ENarr_DialogueCondition::QuestCompleted:
-            // This would check quest completion status
-            // For now, always return true
-            return true;
-
-        case ENarr_DialogueCondition::ItemInInventory:
-            // This would check player inventory
-            // For now, always return true
-            return true;
-
-        default:
-            return true;
-    }
-}
-
-void UNarr_DialogueManager::MarkStoryEvent(const FString& EventID)
-{
-    CompletedStoryEvents.Add(EventID);
-    UE_LOG(LogTemp, Warning, TEXT("DialogueManager: Story event marked: %s"), *EventID);
-}
-
-bool UNarr_DialogueManager::HasStoryEventOccurred(const FString& EventID)
-{
-    return CompletedStoryEvents.Contains(EventID);
-}
-
-void UNarr_DialogueManager::PlayDialogueAudio(const FString& AudioPath)
-{
-    if (AudioPath.IsEmpty() || !CurrentSpeaker)
-    {
+        UE_LOG(LogTemp, Warning, TEXT("DialogueManager: Cannot play sequence '%s' - requirements not met"), *SequenceID);
         return;
     }
 
-    // Try to load and play the audio asset
-    USoundBase* AudioAsset = LoadObject<USoundBase>(nullptr, *AudioPath);
-    if (AudioAsset)
+    // Stop any current dialogue
+    StopCurrentDialogue();
+
+    // Start new sequence
+    CurrentSequenceID = SequenceID;
+    CurrentLineIndex = 0;
+    CurrentLineTimer = 0.0f;
+    CurrentState = ENarr_DialogueState::Playing;
+
+    UE_LOG(LogTemp, Log, TEXT("DialogueManager: Started sequence '%s' with %d lines"), 
+           *SequenceID, Sequence.DialogueLines.Num());
+
+    ProcessCurrentDialogueLine();
+}
+
+void ANarr_DialogueManager::StopCurrentDialogue()
+{
+    if (CurrentState != ENarr_DialogueState::Idle)
     {
-        UGameplayStatics::PlaySoundAtLocation(CurrentSpeaker->GetWorld(), AudioAsset, CurrentSpeaker->GetActorLocation());
-        UE_LOG(LogTemp, Warning, TEXT("DialogueManager: Playing audio %s"), *AudioPath);
+        StopDialogueAudio();
+        CurrentState = ENarr_DialogueState::Idle;
+        CurrentSequenceID = TEXT("");
+        CurrentLineIndex = 0;
+        CurrentLineTimer = 0.0f;
+
+        UE_LOG(LogTemp, Log, TEXT("DialogueManager: Stopped current dialogue"));
+    }
+}
+
+void ANarr_DialogueManager::AdvanceDialogue()
+{
+    if (CurrentState == ENarr_DialogueState::WaitingForResponse || 
+        CurrentState == ENarr_DialogueState::Playing)
+    {
+        OnDialogueLineCompleted();
+    }
+}
+
+bool ANarr_DialogueManager::IsDialoguePlaying() const
+{
+    return CurrentState != ENarr_DialogueState::Idle;
+}
+
+void ANarr_DialogueManager::RegisterDialogueSequence(const FNarr_DialogueSequence& Sequence)
+{
+    DialogueSequences.Add(Sequence.SequenceID, Sequence);
+    UE_LOG(LogTemp, Log, TEXT("DialogueManager: Registered sequence '%s'"), *Sequence.SequenceID);
+}
+
+bool ANarr_DialogueManager::HasDialogueSequence(const FString& SequenceID) const
+{
+    return DialogueSequences.Contains(SequenceID);
+}
+
+void ANarr_DialogueManager::TriggerCharacterDialogue(const FString& CharacterName, const FString& Context)
+{
+    FString SequenceID = FString::Printf(TEXT("%s_%s"), *CharacterName, *Context);
+    
+    if (HasDialogueSequence(SequenceID))
+    {
+        StartDialogueSequence(SequenceID);
     }
     else
     {
-        UE_LOG(LogTemp, Warning, TEXT("DialogueManager: Failed to load audio %s"), *AudioPath);
+        // Try generic character dialogue
+        FString GenericID = FString::Printf(TEXT("%s_Generic"), *CharacterName);
+        if (HasDialogueSequence(GenericID))
+        {
+            StartDialogueSequence(GenericID);
+        }
+        else
+        {
+            UE_LOG(LogTemp, Warning, TEXT("DialogueManager: No dialogue found for character '%s' in context '%s'"), 
+                   *CharacterName, *Context);
+        }
     }
 }
 
-void UNarr_DialogueManager::InitializeDefaultDialogues()
+void ANarr_DialogueManager::SetCharacterVoiceProfile(const FString& CharacterName, USoundCue* VoiceProfile)
 {
-    CreateSurvivalDialogues();
-    CreateQuestDialogues();
-    
-    UE_LOG(LogTemp, Warning, TEXT("DialogueManager: Default survival dialogues initialized"));
+    if (VoiceProfile)
+    {
+        CharacterVoiceProfiles.Add(CharacterName, VoiceProfile);
+        UE_LOG(LogTemp, Log, TEXT("DialogueManager: Set voice profile for character '%s'"), *CharacterName);
+    }
 }
 
-void UNarr_DialogueManager::CreateSurvivalDialogues()
+void ANarr_DialogueManager::UpdateStoryProgress(int32 NewStoryBeat)
 {
-    // Mark initial story events
-    MarkStoryEvent("game_started");
-    MarkStoryEvent("first_dialogue_system_ready");
-    
-    UE_LOG(LogTemp, Warning, TEXT("DialogueManager: Survival dialogue templates created"));
+    CurrentStoryBeat = NewStoryBeat;
+    UE_LOG(LogTemp, Log, TEXT("DialogueManager: Updated story progress to beat %d"), NewStoryBeat);
 }
 
-void UNarr_DialogueManager::CreateQuestDialogues()
+TArray<FString> ANarr_DialogueManager::GetAvailableDialogueSequences() const
 {
-    // Initialize quest-related dialogue hooks
-    MarkStoryEvent("quest_system_integrated");
+    TArray<FString> AvailableSequences;
     
-    UE_LOG(LogTemp, Warning, TEXT("DialogueManager: Quest dialogue integration ready"));
+    for (const auto& Pair : DialogueSequences)
+    {
+        if (CanPlaySequence(Pair.Value))
+        {
+            AvailableSequences.Add(Pair.Key);
+        }
+    }
+    
+    return AvailableSequences;
+}
+
+void ANarr_DialogueManager::PlayDialogueAudio(USoundCue* AudioClip)
+{
+    if (AudioClip && DialogueAudioComponent)
+    {
+        DialogueAudioComponent->SetSound(AudioClip);
+        DialogueAudioComponent->Play();
+    }
+}
+
+void ANarr_DialogueManager::StopDialogueAudio()
+{
+    if (DialogueAudioComponent && DialogueAudioComponent->IsPlaying())
+    {
+        DialogueAudioComponent->Stop();
+    }
+}
+
+void ANarr_DialogueManager::InitializeDefaultDialogues()
+{
+    // Elder Kael - Wisdom dialogue
+    FNarr_DialogueSequence ElderWisdom;
+    ElderWisdom.SequenceID = TEXT("Elder_Kael_Wisdom");
+    ElderWisdom.bIsRepeatable = true;
+    ElderWisdom.RequiredStoryBeat = 0;
+
+    FNarr_DialogueLine WisdomLine;
+    WisdomLine.SpeakerName = TEXT("Elder Kael");
+    WisdomLine.DialogueText = TEXT("Listen carefully, young survivor. The elders speak of ancient wisdom passed down through countless seasons.");
+    WisdomLine.DisplayDuration = 5.0f;
+    WisdomLine.bRequiresPlayerResponse = false;
+
+    ElderWisdom.DialogueLines.Add(WisdomLine);
+    RegisterDialogueSequence(ElderWisdom);
+
+    // Scout Vera - Danger warning
+    FNarr_DialogueSequence ScoutWarning;
+    ScoutWarning.SequenceID = TEXT("Scout_Vera_Warning");
+    ScoutWarning.bIsRepeatable = true;
+    ScoutWarning.RequiredStoryBeat = 1;
+
+    FNarr_DialogueLine WarningLine;
+    WarningLine.SpeakerName = TEXT("Scout Vera");
+    WarningLine.DialogueText = TEXT("The pack moves as one through the dense undergrowth. Stay low, stay quiet, and don't run until I give the signal.");
+    WarningLine.DisplayDuration = 4.0f;
+    WarningLine.bRequiresPlayerResponse = false;
+
+    ScoutWarning.DialogueLines.Add(WarningLine);
+    RegisterDialogueSequence(ScoutWarning);
+
+    // Hunt Leader Thane - Battle cry
+    FNarr_DialogueSequence HuntBattle;
+    HuntBattle.SequenceID = TEXT("Hunt_Leader_Thane_Battle");
+    HuntBattle.bIsRepeatable = true;
+    HuntBattle.RequiredStoryBeat = 2;
+
+    FNarr_DialogueLine BattleLine;
+    BattleLine.SpeakerName = TEXT("Hunt Leader Thane");
+    BattleLine.DialogueText = TEXT("The great thunder-foot approaches! All hunters to defensive positions! Show courage, show skill!");
+    BattleLine.DisplayDuration = 4.5f;
+    BattleLine.bRequiresPlayerResponse = false;
+
+    HuntBattle.DialogueLines.Add(BattleLine);
+    RegisterDialogueSequence(HuntBattle);
+
+    // Shaman Aria - Spiritual guidance
+    FNarr_DialogueSequence ShamanGuidance;
+    ShamanGuidance.SequenceID = TEXT("Shaman_Aria_Guidance");
+    ShamanGuidance.bIsRepeatable = true;
+    ShamanGuidance.RequiredStoryBeat = 3;
+
+    FNarr_DialogueLine GuidanceLine;
+    GuidanceLine.SpeakerName = TEXT("Shaman Aria");
+    GuidanceLine.DialogueText = TEXT("The sacred fire burns low tonight, and change comes to our lands. We must choose our path carefully.");
+    GuidanceLine.DisplayDuration = 4.0f;
+    GuidanceLine.bRequiresPlayerResponse = true;
+
+    ShamanGuidance.DialogueLines.Add(GuidanceLine);
+    RegisterDialogueSequence(ShamanGuidance);
+}
+
+void ANarr_DialogueManager::ProcessCurrentDialogueLine()
+{
+    if (!DialogueSequences.Contains(CurrentSequenceID))
+    {
+        StopCurrentDialogue();
+        return;
+    }
+
+    const FNarr_DialogueSequence& Sequence = DialogueSequences[CurrentSequenceID];
+    
+    if (CurrentLineIndex >= Sequence.DialogueLines.Num())
+    {
+        // Sequence completed
+        CurrentState = ENarr_DialogueState::Completed;
+        StopCurrentDialogue();
+        return;
+    }
+
+    const FNarr_DialogueLine& CurrentLine = Sequence.DialogueLines[CurrentLineIndex];
+
+    // Check if we need to wait for player response
+    if (CurrentLine.bRequiresPlayerResponse)
+    {
+        CurrentState = ENarr_DialogueState::WaitingForResponse;
+        return;
+    }
+
+    // Check if line duration has elapsed
+    if (CurrentLineTimer >= CurrentLine.DisplayDuration)
+    {
+        OnDialogueLineCompleted();
+    }
+}
+
+bool ANarr_DialogueManager::CanPlaySequence(const FNarr_DialogueSequence& Sequence) const
+{
+    return CurrentStoryBeat >= Sequence.RequiredStoryBeat;
+}
+
+void ANarr_DialogueManager::OnDialogueLineCompleted()
+{
+    CurrentLineIndex++;
+    CurrentLineTimer = 0.0f;
+    CurrentState = ENarr_DialogueState::Playing;
+
+    if (DialogueSequences.Contains(CurrentSequenceID))
+    {
+        const FNarr_DialogueSequence& Sequence = DialogueSequences[CurrentSequenceID];
+        
+        if (CurrentLineIndex >= Sequence.DialogueLines.Num())
+        {
+            // Sequence completed
+            UE_LOG(LogTemp, Log, TEXT("DialogueManager: Completed sequence '%s'"), *CurrentSequenceID);
+            StopCurrentDialogue();
+        }
+        else
+        {
+            // Continue to next line
+            ProcessCurrentDialogueLine();
+        }
+    }
 }
