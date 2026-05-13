@@ -2,163 +2,155 @@
 
 #include "CoreMinimal.h"
 #include "Engine/World.h"
-#include "GameFramework/Actor.h"
-#include "Components/ActorComponent.h"
-#include "Engine/Engine.h"
+#include "GameFramework/GameModeBase.h"
+#include "Subsystems/GameInstanceSubsystem.h"
 #include "SharedTypes.h"
 #include "BuildIntegrationValidator.generated.h"
 
-UENUM(BlueprintType)
-enum class EBuild_ValidationResult : uint8
-{
-    Success         UMETA(DisplayName = "Success"),
-    Warning         UMETA(DisplayName = "Warning"),
-    Error           UMETA(DisplayName = "Error"),
-    Critical        UMETA(DisplayName = "Critical")
-};
-
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_ValidationIssue
+struct TRANSPERSONALGAME_API FBuild_ValidationResult
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    EBuild_ValidationResult Severity;
+    UPROPERTY(BlueprintReadOnly, Category = "Build Validation")
+    bool bIsValid = false;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    FString Category;
+    UPROPERTY(BlueprintReadOnly, Category = "Build Validation")
+    int32 LoadedClasses = 0;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    FString Description;
+    UPROPERTY(BlueprintReadOnly, Category = "Build Validation")
+    int32 TotalClasses = 0;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    FString FilePath;
+    UPROPERTY(BlueprintReadOnly, Category = "Build Validation")
+    TArray<FString> FailedClasses;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    int32 LineNumber;
+    UPROPERTY(BlueprintReadOnly, Category = "Build Validation")
+    FString ValidationMessage;
 
-    FBuild_ValidationIssue()
-    {
-        Severity = EBuild_ValidationResult::Success;
-        Category = TEXT("");
-        Description = TEXT("");
-        FilePath = TEXT("");
-        LineNumber = 0;
-    }
+    UPROPERTY(BlueprintReadOnly, Category = "Build Validation")
+    float ValidationTime = 0.0f;
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_ValidationReport
+struct TRANSPERSONALGAME_API FBuild_ModuleStatus
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    TArray<FBuild_ValidationIssue> Issues;
+    UPROPERTY(BlueprintReadOnly, Category = "Module Status")
+    FString ModuleName;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    int32 TotalHeaderFiles;
+    UPROPERTY(BlueprintReadOnly, Category = "Module Status")
+    bool bIsLoaded = false;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    int32 TotalCppFiles;
+    UPROPERTY(BlueprintReadOnly, Category = "Module Status")
+    int32 ClassCount = 0;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    int32 OrphanHeaders;
+    UPROPERTY(BlueprintReadOnly, Category = "Module Status")
+    TArray<FString> LoadedClasses;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    int32 DuplicateActors;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    float ValidationTime;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Validation")
-    FDateTime Timestamp;
-
-    FBuild_ValidationReport()
-    {
-        TotalHeaderFiles = 0;
-        TotalCppFiles = 0;
-        OrphanHeaders = 0;
-        DuplicateActors = 0;
-        ValidationTime = 0.0f;
-        Timestamp = FDateTime::Now();
-    }
+    UPROPERTY(BlueprintReadOnly, Category = "Module Status")
+    FString LastError;
 };
 
 /**
- * Build Integration Validator - Validates project structure and compilation readiness
- * Detects orphan headers, duplicate actors, missing implementations
+ * Build Integration Validator - Validates module loading, class registration, and system integration
+ * Ensures all C++ classes are properly compiled and accessible to the UE5 reflection system
  */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API ABuildIntegrationValidator : public AActor
+class TRANSPERSONALGAME_API UBuildIntegrationValidator : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
-    ABuildIntegrationValidator();
+    UBuildIntegrationValidator();
+
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+
+    /**
+     * Validates all core game modules and classes
+     * @return Validation result with detailed status
+     */
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    FBuild_ValidationResult ValidateAllModules();
+
+    /**
+     * Validates a specific module by name
+     * @param ModuleName Name of the module to validate
+     * @return Module status with loading information
+     */
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    FBuild_ModuleStatus ValidateModule(const FString& ModuleName);
+
+    /**
+     * Validates core game classes are properly loaded
+     * @return True if all core classes are accessible
+     */
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    bool ValidateCoreClasses();
+
+    /**
+     * Validates world state and actor spawning capabilities
+     * @param World World context for validation
+     * @return True if world state is valid for gameplay
+     */
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    bool ValidateWorldState(UWorld* World);
+
+    /**
+     * Runs comprehensive integration tests
+     * @return Detailed validation result
+     */
+    UFUNCTION(BlueprintCallable, Category = "Build Validation")
+    FBuild_ValidationResult RunIntegrationTests();
+
+    /**
+     * Gets the last validation result
+     * @return Cached validation result
+     */
+    UFUNCTION(BlueprintPure, Category = "Build Validation")
+    FBuild_ValidationResult GetLastValidationResult() const { return LastValidationResult; }
+
+    /**
+     * Checks if the build is in a valid state for gameplay
+     * @return True if build is ready for gameplay testing
+     */
+    UFUNCTION(BlueprintPure, Category = "Build Validation")
+    bool IsBuildValid() const { return LastValidationResult.bIsValid; }
 
 protected:
-    virtual void BeginPlay() override;
+    /**
+     * Validates a single class by path
+     * @param ClassPath Full path to the class (e.g., "/Script/TranspersonalGame.TranspersonalCharacter")
+     * @return True if class loads successfully
+     */
+    bool ValidateClass(const FString& ClassPath);
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation", meta = (AllowPrivateAccess = "true"))
-    FBuild_ValidationReport LastValidationReport;
+    /**
+     * Gets list of core classes that must be validated
+     * @return Array of class paths for validation
+     */
+    TArray<FString> GetCoreClassPaths() const;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Validation", meta = (AllowPrivateAccess = "true"))
-    bool bAutoValidateOnBeginPlay;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Validation", meta = (AllowPrivateAccess = "true"))
-    float ValidationInterval;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Validation", meta = (AllowPrivateAccess = "true"))
-    bool bCleanupDuplicatesAutomatically;
-
-private:
-    FTimerHandle ValidationTimerHandle;
-
-public:
-    // Validation Methods
-    UFUNCTION(BlueprintCallable, Category = "Build Validation", CallInEditor)
-    FBuild_ValidationReport ValidateProjectStructure();
-
-    UFUNCTION(BlueprintCallable, Category = "Build Validation", CallInEditor)
-    int32 DetectOrphanHeaders();
-
-    UFUNCTION(BlueprintCallable, Category = "Build Validation", CallInEditor)
-    int32 DetectDuplicateActors();
-
-    UFUNCTION(BlueprintCallable, Category = "Build Validation", CallInEditor)
-    bool CleanupDuplicateActors();
-
-    UFUNCTION(BlueprintCallable, Category = "Build Validation", CallInEditor)
-    TArray<FString> GetMisplacedFiles();
-
-    UFUNCTION(BlueprintCallable, Category = "Build Validation", CallInEditor)
-    bool ValidateModuleDependencies();
-
-    // Report Methods
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    FBuild_ValidationReport GetLastValidationReport() const { return LastValidationReport; }
-
-    UFUNCTION(BlueprintCallable, Category = "Build Validation", CallInEditor)
-    void ExportValidationReport(const FString& FilePath);
-
-    UFUNCTION(BlueprintCallable, Category = "Build Validation", CallInEditor)
-    void LogValidationSummary();
-
-    // Configuration
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    void SetAutoValidation(bool bEnabled, float IntervalSeconds = 300.0f);
-
-    UFUNCTION(BlueprintCallable, Category = "Build Validation")
-    void SetCleanupMode(bool bAutoCleanup) { bCleanupDuplicatesAutomatically = bAutoCleanup; }
+    /**
+     * Logs validation results to console and file
+     * @param Result Validation result to log
+     */
+    void LogValidationResult(const FBuild_ValidationResult& Result);
 
 private:
-    void PerformPeriodicValidation();
-    void AddValidationIssue(EBuild_ValidationResult Severity, const FString& Category, 
-                           const FString& Description, const FString& FilePath = TEXT(""), 
-                           int32 LineNumber = 0);
-    void ClearValidationIssues();
-    FString GetProjectSourcePath() const;
-    TArray<FString> FindFilesRecursive(const FString& Directory, const FString& Extension) const;
+    /** Cached last validation result */
+    UPROPERTY()
+    FBuild_ValidationResult LastValidationResult;
+
+    /** Module status cache */
+    UPROPERTY()
+    TArray<FBuild_ModuleStatus> ModuleStatusCache;
+
+    /** Validation start time for performance tracking */
+    double ValidationStartTime = 0.0;
+
+    /** Core class paths for validation */
+    TArray<FString> CoreClassPaths;
 };
-
-#include "BuildIntegrationValidator.generated.h"
