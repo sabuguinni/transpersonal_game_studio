@@ -3,102 +3,76 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "Engine/Engine.h"
+#include "Animation/AnimInstance.h"
 #include "Animation/BlendSpace.h"
 #include "Animation/BlendSpace1D.h"
-#include "Animation/AnimInstance.h"
-#include "GameFramework/CharacterMovementComponent.h"
+#include "../SharedTypes.h"
 #include "Anim_BlendSpaceController.generated.h"
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAnim_MovementData
+struct TRANSPERSONALGAME_API FAnim_BlendSpaceData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blend Space")
+    UBlendSpace* MovementBlendSpace;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blend Space")
+    UBlendSpace1D* SpeedBlendSpace;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blend Space")
     float Speed;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blend Space")
     float Direction;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
-    float Velocity;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blend Space")
+    float Lean;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
-    bool bIsMoving;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
-    bool bIsInAir;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
-    bool bIsCrouching;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
-    float LeanAngle;
-
-    FAnim_MovementData()
+    FAnim_BlendSpaceData()
     {
+        MovementBlendSpace = nullptr;
+        SpeedBlendSpace = nullptr;
         Speed = 0.0f;
         Direction = 0.0f;
-        Velocity = 0.0f;
-        bIsMoving = false;
-        bIsInAir = false;
-        bIsCrouching = false;
-        LeanAngle = 0.0f;
+        Lean = 0.0f;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAnim_BlendSpaceSettings
+struct TRANSPERSONALGAME_API FAnim_LocomotionParameters
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blend Space")
-    float SpeedThreshold;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Locomotion")
+    float Velocity;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blend Space")
-    float DirectionSmoothness;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Locomotion")
+    float DirectionAngle;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blend Space")
-    float VelocityInterpSpeed;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Locomotion")
+    float LeanAmount;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blend Space")
-    bool bUseAcceleration;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Locomotion")
+    bool bIsMoving;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blend Space")
-    float MaxWalkSpeed;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Locomotion")
+    bool bIsRunning;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blend Space")
-    float MaxRunSpeed;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Locomotion")
+    bool bIsInAir;
 
-    FAnim_BlendSpaceSettings()
+    FAnim_LocomotionParameters()
     {
-        SpeedThreshold = 10.0f;
-        DirectionSmoothness = 5.0f;
-        VelocityInterpSpeed = 8.0f;
-        bUseAcceleration = true;
-        MaxWalkSpeed = 200.0f;
-        MaxRunSpeed = 600.0f;
+        Velocity = 0.0f;
+        DirectionAngle = 0.0f;
+        LeanAmount = 0.0f;
+        bIsMoving = false;
+        bIsRunning = false;
+        bIsInAir = false;
     }
 };
 
-UENUM(BlueprintType)
-enum class EAnim_MovementState : uint8
-{
-    Idle        UMETA(DisplayName = "Idle"),
-    Walking     UMETA(DisplayName = "Walking"),
-    Running     UMETA(DisplayName = "Running"),
-    Sprinting   UMETA(DisplayName = "Sprinting"),
-    Crouching   UMETA(DisplayName = "Crouching"),
-    Jumping     UMETA(DisplayName = "Jumping"),
-    Falling     UMETA(DisplayName = "Falling"),
-    Landing     UMETA(DisplayName = "Landing")
-};
-
-/**
- * Advanced Blend Space Controller for Prehistoric Character Movement
- * Manages smooth transitions between movement animations using blend spaces
- * Handles directional movement, speed variations, and terrain adaptation
- */
 UCLASS(ClassGroup=(Animation), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UAnim_BlendSpaceController : public UActorComponent
 {
@@ -109,114 +83,82 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 public:
-    // Core Blend Space Functions
-    UFUNCTION(BlueprintCallable, Category = "Blend Space Controller")
-    void UpdateMovementData(float DeltaTime);
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    UFUNCTION(BlueprintCallable, Category = "Blend Space Controller")
-    void SetBlendSpaceParameters();
+    // Core blend space management
+    UFUNCTION(BlueprintCallable, Category = "Animation|Blend Space")
+    void UpdateBlendSpaceParameters(float Speed, float Direction, float Lean);
 
-    UFUNCTION(BlueprintCallable, Category = "Blend Space Controller")
-    void UpdateMovementState();
+    UFUNCTION(BlueprintCallable, Category = "Animation|Blend Space")
+    void SetMovementBlendSpace(UBlendSpace* NewBlendSpace);
 
-    // Movement State Management
-    UFUNCTION(BlueprintCallable, Category = "Movement State")
-    void SetMovementState(EAnim_MovementState NewState);
+    UFUNCTION(BlueprintCallable, Category = "Animation|Blend Space")
+    void SetSpeedBlendSpace(UBlendSpace1D* NewBlendSpace);
 
-    UFUNCTION(BlueprintPure, Category = "Movement State")
-    EAnim_MovementState GetMovementState() const { return CurrentMovementState; }
+    // Locomotion parameter calculation
+    UFUNCTION(BlueprintCallable, Category = "Animation|Locomotion")
+    FAnim_LocomotionParameters CalculateLocomotionParameters(const FVector& Velocity, const FRotator& ActorRotation);
 
-    UFUNCTION(BlueprintCallable, Category = "Movement State")
-    bool CanTransitionToState(EAnim_MovementState TargetState);
+    UFUNCTION(BlueprintCallable, Category = "Animation|Locomotion")
+    float CalculateDirectionAngle(const FVector& Velocity, const FRotator& ActorRotation);
 
-    // Blend Space Asset Management
-    UFUNCTION(BlueprintCallable, Category = "Blend Space Assets")
-    void SetLocomotionBlendSpace(UBlendSpace* NewBlendSpace);
+    UFUNCTION(BlueprintCallable, Category = "Animation|Locomotion")
+    float CalculateLeanAmount(const FVector& Velocity, float DeltaTime);
 
-    UFUNCTION(BlueprintCallable, Category = "Blend Space Assets")
-    void SetCrouchBlendSpace(UBlendSpace* NewBlendSpace);
+    // Blend space evaluation
+    UFUNCTION(BlueprintCallable, Category = "Animation|Blend Space")
+    void EvaluateBlendSpace(UBlendSpace* BlendSpace, float XValue, float YValue, TArray<FBlendSampleData>& OutSampleData);
 
-    UFUNCTION(BlueprintCallable, Category = "Blend Space Assets")
-    void SetSprintBlendSpace(UBlendSpace1D* NewBlendSpace);
+    UFUNCTION(BlueprintCallable, Category = "Animation|Blend Space")
+    void EvaluateBlendSpace1D(UBlendSpace1D* BlendSpace, float Value, TArray<FBlendSampleData>& OutSampleData);
 
-    // Getters for Animation Blueprint
-    UFUNCTION(BlueprintPure, Category = "Movement Data")
-    FAnim_MovementData GetMovementData() const { return MovementData; }
+    // Smoothing and interpolation
+    UFUNCTION(BlueprintCallable, Category = "Animation|Smoothing")
+    float SmoothParameter(float CurrentValue, float TargetValue, float SmoothingSpeed, float DeltaTime);
 
-    UFUNCTION(BlueprintPure, Category = "Movement Data")
-    float GetSpeed() const { return MovementData.Speed; }
+    UFUNCTION(BlueprintCallable, Category = "Animation|Smoothing")
+    void SmoothAllParameters(float DeltaTime);
 
-    UFUNCTION(BlueprintPure, Category = "Movement Data")
-    float GetDirection() const { return MovementData.Direction; }
+    // Getters
+    UFUNCTION(BlueprintPure, Category = "Animation|Blend Space")
+    FAnim_BlendSpaceData GetBlendSpaceData() const { return BlendSpaceData; }
 
-    UFUNCTION(BlueprintPure, Category = "Movement Data")
-    float getVelocity() const { return MovementData.Velocity; }
-
-    UFUNCTION(BlueprintPure, Category = "Movement Data")
-    bool IsMoving() const { return MovementData.bIsMoving; }
-
-    UFUNCTION(BlueprintPure, Category = "Movement Data")
-    bool IsInAir() const { return MovementData.bIsInAir; }
-
-    UFUNCTION(BlueprintPure, Category = "Movement Data")
-    bool IsCrouching() const { return MovementData.bIsCrouching; }
-
-    // Settings
-    UFUNCTION(BlueprintCallable, Category = "Settings")
-    void SetBlendSpaceSettings(const FAnim_BlendSpaceSettings& NewSettings);
-
-    UFUNCTION(BlueprintPure, Category = "Settings")
-    FAnim_BlendSpaceSettings GetBlendSpaceSettings() const { return BlendSpaceSettings; }
+    UFUNCTION(BlueprintPure, Category = "Animation|Locomotion")
+    FAnim_LocomotionParameters GetLocomotionParameters() const { return LocomotionParams; }
 
 protected:
-    // Movement Data
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement Data")
-    FAnim_MovementData MovementData;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blend Space", meta = (AllowPrivateAccess = "true"))
+    FAnim_BlendSpaceData BlendSpaceData;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement Data")
-    EAnim_MovementState CurrentMovementState;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Locomotion", meta = (AllowPrivateAccess = "true"))
+    FAnim_LocomotionParameters LocomotionParams;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement Data")
-    EAnim_MovementState PreviousMovementState;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Smoothing", meta = (AllowPrivateAccess = "true"))
+    float SpeedSmoothingRate;
 
-    // Settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    FAnim_BlendSpaceSettings BlendSpaceSettings;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Smoothing", meta = (AllowPrivateAccess = "true"))
+    float DirectionSmoothingRate;
 
-    // Blend Space Assets
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blend Space Assets")
-    UBlendSpace* LocomotionBlendSpace;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Smoothing", meta = (AllowPrivateAccess = "true"))
+    float LeanSmoothingRate;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blend Space Assets")
-    UBlendSpace* CrouchBlendSpace;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Thresholds", meta = (AllowPrivateAccess = "true"))
+    float MovementThreshold;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blend Space Assets")
-    UBlendSpace1D* SprintBlendSpace;
-
-    // Component References
-    UPROPERTY()
-    UCharacterMovementComponent* MovementComponent;
-
-    UPROPERTY()
-    UAnimInstance* AnimInstance;
-
-    // Internal State
-    FVector LastVelocity;
-    float LastSpeed;
-    float LastDirection;
-    float StateTransitionTime;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Thresholds", meta = (AllowPrivateAccess = "true"))
+    float RunningThreshold;
 
 private:
-    // Helper Functions
-    void InitializeComponent();
-    void CacheComponentReferences();
-    float CalculateDirection(const FVector& Velocity, const FRotator& ActorRotation);
-    float CalculateSpeed(const FVector& Velocity);
-    void SmoothMovementData(float DeltaTime);
-    bool ShouldUpdateMovementState();
-    void HandleStateTransition(EAnim_MovementState NewState);
-    float GetSpeedRatio() const;
+    // Cached values for smoothing
+    float PreviousSpeed;
+    float PreviousDirection;
+    float PreviousLean;
+    
+    // Reference to owner character
+    class ACharacter* OwnerCharacter;
+    
+    void CacheOwnerCharacter();
+    void UpdateLocomotionFromCharacter();
 };
