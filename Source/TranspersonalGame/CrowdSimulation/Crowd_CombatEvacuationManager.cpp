@@ -1,213 +1,161 @@
 #include "Crowd_CombatEvacuationManager.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "GameFramework/Actor.h"
-#include "GameFramework/Pawn.h"
-#include "Components/StaticMeshComponent.h"
+#include "Engine/Engine.h"
 #include "Kismet/GameplayStatics.h"
-#include "DrawDebugHelpers.h"
+#include "MassEntitySubsystem.h"
+#include "MassExecutionContext.h"
+#include "MassCommonFragments.h"
+#include "MassMovementFragments.h"
+#include "MassRepresentationFragments.h"
+#include "Combat/Combat_CombatStateManager.h"
+
+UCrowd_CombatEvacuationProcessor::UCrowd_CombatEvacuationProcessor()
+{
+    ProcessingPhase = EMassProcessingPhase::PrePhysics;
+    ExecutionFlags = (int32)EProcessorExecutionFlags::All;
+    PanicSpreadRadius = 1000.0f;
+    PanicSpreadRate = 0.5f;
+    MaxEvacuationDistance = 5000.0f;
+}
+
+void UCrowd_CombatEvacuationProcessor::ConfigureQueries()
+{
+    EntityQuery.AddRequirement<FMassTransformFragment>(EMassFragmentAccess::ReadWrite);
+    EntityQuery.AddRequirement<FMassVelocityFragment>(EMassFragmentAccess::ReadWrite);
+    EntityQuery.AddRequirement<FCrowd_CombatEvacuationFragment>(EMassFragmentAccess::ReadWrite);
+    EntityQuery.AddRequirement<FMassRepresentationFragment>(EMassFragmentAccess::ReadOnly);
+}
+
+void UCrowd_CombatEvacuationProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
+{
+    if (!GetWorld())
+    {
+        return;
+    }
+
+    UCrowd_CombatEvacuationManager* EvacuationManager = GetWorld()->GetSubsystem<UCrowd_CombatEvacuationManager>();
+    if (!EvacuationManager)
+    {
+        return;
+    }
+
+    const float DeltaTime = GetWorld()->GetDeltaSeconds();
+
+    EntityQuery.ForEachEntityChunk(EntityManager, Context, [&](FMassArchetypeEntityCollection& EntityCollection)
+    {
+        const int32 NumEntities = EntityCollection.GetNumEntities();
+        const TArrayView<FMassTransformFragment> TransformList = EntityCollection.GetMutableFragmentView<FMassTransformFragment>();
+        const TArrayView<FMassVelocityFragment> VelocityList = EntityCollection.GetMutableFragmentView<FMassVelocityFragment>();
+        const TArrayView<FCrowd_CombatEvacuationFragment> EvacuationList = EntityCollection.GetMutableFragmentView<FCrowd_CombatEvacuationFragment>();
+
+        for (int32 EntityIndex = 0; EntityIndex < NumEntities; ++EntityIndex)
+        {
+            FMassTransformFragment& Transform = TransformList[EntityIndex];
+            FMassVelocityFragment& Velocity = VelocityList[EntityIndex];
+            FCrowd_CombatEvacuationFragment& Evacuation = EvacuationList[EntityIndex];
+
+            // Update panic behavior
+            if (Evacuation.PanicBehavior.bInPanic)
+            {
+                // Calculate flee direction if not set
+                if (Evacuation.PanicBehavior.FleeDirection.IsNearlyZero())
+                {
+                    FVector FleeDir;
+                    EvacuationManager->CalculateFleeDirection(Transform.GetTransform().GetLocation(), 
+                        Evacuation.LastKnownThreatLocation, FleeDir);
+                    Evacuation.PanicBehavior.FleeDirection = FleeDir;
+                }
+
+                // Apply panic movement
+                const FVector DesiredVelocity = Evacuation.PanicBehavior.FleeDirection * Evacuation.PanicBehavior.FleeSpeed;
+                Velocity.Value = FMath::VInterpTo(Velocity.Value, DesiredVelocity, DeltaTime, 5.0f);
+
+                // Decay panic over time
+                Evacuation.PanicBehavior.PanicLevel = FMath::Max(0.0f, 
+                    Evacuation.PanicBehavior.PanicLevel - Evacuation.PanicBehavior.PanicDecayRate * DeltaTime);
+
+                if (Evacuation.PanicBehavior.PanicLevel <= 0.1f)
+                {
+                    Evacuation.PanicBehavior.bInPanic = false;
+                    Evacuation.PanicBehavior.FleeDirection = FVector::ZeroVector;
+                }
+            }
+
+            // Check if entity reached safe zone
+            if (Evacuation.AssignedEvacuationZone >= 0)
+            {
+                float DistanceToSafeZone;
+                FVector SafeZoneLocation = EvacuationManager->GetNearestSafeZone(Transform.GetTransform().GetLocation(), DistanceToSafeZone);
+                
+                if (DistanceToSafeZone < 500.0f) // Reached safe zone
+                {
+                    Evacuation.PanicBehavior.PanicLevel = FMath::Max(0.0f, Evacuation.PanicBehavior.PanicLevel - 0.5f * DeltaTime);
+                    Velocity.Value *= 0.5f; // Slow down in safe zone
+                }
+            }
+
+            // Update threat awareness
+            Evacuation.ThreatAwareness = FMath::Max(0.0f, Evacuation.ThreatAwareness - 0.1f * DeltaTime);
+        }
+    });
+}
 
 UCrowd_CombatEvacuationManager::UCrowd_CombatEvacuationManager()
 {
-    MaxEvacuationDistance = 2000.0f;
-    PanicDecayRate = 0.5f;
-    EvacuationSpeedMultiplier = 2.0f;
-    CrowdDensityThreshold = 10.0f;
+    GlobalPanicThreshold = 0.6f;
+    PanicDecayRate = 0.05f;
+    MaxEvacuationSpeed = 800.0f;
+    MaxSimultaneousEvacuees = 1000;
+    LastUpdateTime = 0.0f;
+    bSystemInitialized = false;
+    CombatStateManager = nullptr;
 }
 
 void UCrowd_CombatEvacuationManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Warning, TEXT("UCrowd_CombatEvacuationManager initialized"));
+    UE_LOG(LogTemp, Warning, TEXT("Crowd Combat Evacuation Manager initialized"));
     
-    // Create default evacuation zones
-    CreateEvacuationZone(FVector(0, 0, 0), 1500.0f);
-    CreateEvacuationZone(FVector(3000, 0, 0), 1200.0f);
-    CreateEvacuationZone(FVector(-3000, 0, 0), 1200.0f);
-    CreateEvacuationZone(FVector(0, 3000, 0), 1000.0f);
-    CreateEvacuationZone(FVector(0, -3000, 0), 1000.0f);
+    // Initialize default evacuation zones
+    InitializeDefaultEvacuationZones();
+    
+    // Get reference to combat state manager
+    if (GetWorld())
+    {
+        CombatStateManager = GetWorld()->GetSubsystem<UCombat_CombatStateManager>();
+    }
+    
+    bSystemInitialized = true;
 }
 
 void UCrowd_CombatEvacuationManager::Deinitialize()
 {
-    ResetAllEvacuations();
     EvacuationZones.Empty();
-    RegisteredNPCs.Empty();
+    RegisteredEntities.Empty();
+    CombatStateManager = nullptr;
+    bSystemInitialized = false;
+    
+    UE_LOG(LogTemp, Warning, TEXT("Crowd Combat Evacuation Manager deinitialized"));
     
     Super::Deinitialize();
 }
 
-void UCrowd_CombatEvacuationManager::TriggerEvacuation(FVector CombatLocation, float ThreatRadius, float ThreatLevel)
-{
-    UE_LOG(LogTemp, Warning, TEXT("Triggering evacuation at location: %s, Radius: %f, Threat: %f"), 
-           *CombatLocation.ToString(), ThreatRadius, ThreatLevel);
-
-    // Find all NPCs within threat radius
-    TArray<AActor*> NPCsInDanger = GetNPCsInRadius(CombatLocation, ThreatRadius);
-    
-    for (AActor* NPC : NPCsInDanger)
-    {
-        if (NPC)
-        {
-            // Set panic level based on distance to threat
-            float Distance = FVector::Dist(NPC->GetActorLocation(), CombatLocation);
-            float PanicLevel = FMath::Clamp(1.0f - (Distance / ThreatRadius), 0.2f, 1.0f);
-            PanicLevel *= ThreatLevel;
-            
-            SetNPCPanicLevel(NPC, PanicLevel);
-            
-            // Calculate evacuation target
-            FVector EvacuationTarget = CalculateEvacuationTarget(NPC, CombatLocation);
-            
-            // Update or add NPC evacuation data
-            bool bFound = false;
-            for (FCrowd_NPCEvacuationData& NPCData : RegisteredNPCs)
-            {
-                if (NPCData.NPCActor == NPC)
-                {
-                    NPCData.EvacuationTarget = EvacuationTarget;
-                    NPCData.PanicLevel = PanicLevel;
-                    NPCData.bIsEvacuating = true;
-                    NPCData.EvacuationSpeed = 600.0f * (1.0f + PanicLevel);
-                    bFound = true;
-                    break;
-                }
-            }
-            
-            if (!bFound)
-            {
-                FCrowd_NPCEvacuationData NewNPCData;
-                NewNPCData.NPCActor = NPC;
-                NewNPCData.OriginalPosition = NPC->GetActorLocation();
-                NewNPCData.EvacuationTarget = EvacuationTarget;
-                NewNPCData.PanicLevel = PanicLevel;
-                NewNPCData.bIsEvacuating = true;
-                NewNPCData.EvacuationSpeed = 600.0f * (1.0f + PanicLevel);
-                RegisteredNPCs.Add(NewNPCData);
-            }
-        }
-    }
-    
-    // Update evacuation zones
-    for (FCrowd_EvacuationZone& Zone : EvacuationZones)
-    {
-        float DistanceToThreat = FVector::Dist(Zone.Center, CombatLocation);
-        if (DistanceToThreat <= (Zone.Radius + ThreatRadius))
-        {
-            Zone.ThreatLevel = FMath::Max(Zone.ThreatLevel, ThreatLevel * (1.0f - DistanceToThreat / (Zone.Radius + ThreatRadius)));
-            
-            if (Zone.ThreatLevel > 0.8f)
-            {
-                Zone.CurrentState = ECrowd_EvacuationState::Panic;
-            }
-            else if (Zone.ThreatLevel > 0.5f)
-            {
-                Zone.CurrentState = ECrowd_EvacuationState::Evacuation;
-            }
-            else if (Zone.ThreatLevel > 0.2f)
-            {
-                Zone.CurrentState = ECrowd_EvacuationState::Alert;
-            }
-        }
-    }
-}
-
-void UCrowd_CombatEvacuationManager::UpdateEvacuationZones(float DeltaTime)
-{
-    for (FCrowd_EvacuationZone& Zone : EvacuationZones)
-    {
-        // Decay threat level over time
-        Zone.ThreatLevel = FMath::Max(0.0f, Zone.ThreatLevel - (PanicDecayRate * DeltaTime));
-        
-        // Update zone state based on threat level
-        if (Zone.ThreatLevel <= 0.1f)
-        {
-            Zone.CurrentState = ECrowd_EvacuationState::Normal;
-        }
-        else if (Zone.ThreatLevel <= 0.3f)
-        {
-            Zone.CurrentState = ECrowd_EvacuationState::Alert;
-        }
-        else if (Zone.ThreatLevel <= 0.7f)
-        {
-            Zone.CurrentState = ECrowd_EvacuationState::Evacuation;
-        }
-        else
-        {
-            Zone.CurrentState = ECrowd_EvacuationState::Panic;
-        }
-        
-        // Update NPCs in zone
-        Zone.NPCsInZone.Empty();
-        for (const FCrowd_NPCEvacuationData& NPCData : RegisteredNPCs)
-        {
-            if (NPCData.NPCActor && IsNPCInEvacuationZone(NPCData.NPCActor, Zone))
-            {
-                Zone.NPCsInZone.Add(NPCData.NPCActor);
-            }
-        }
-        
-        CalculateZoneThreatLevel(Zone);
-    }
-    
-    // Update NPC evacuations
-    for (FCrowd_NPCEvacuationData& NPCData : RegisteredNPCs)
-    {
-        if (NPCData.bIsEvacuating)
-        {
-            UpdateNPCEvacuation(NPCData, DeltaTime);
-        }
-    }
-}
-
-void UCrowd_CombatEvacuationManager::RegisterNPCForEvacuation(AActor* NPCActor)
-{
-    if (!NPCActor) return;
-    
-    // Check if already registered
-    for (const FCrowd_NPCEvacuationData& NPCData : RegisteredNPCs)
-    {
-        if (NPCData.NPCActor == NPCActor)
-        {
-            return; // Already registered
-        }
-    }
-    
-    FCrowd_NPCEvacuationData NewNPCData;
-    NewNPCData.NPCActor = NPCActor;
-    NewNPCData.OriginalPosition = NPCActor->GetActorLocation();
-    RegisteredNPCs.Add(NewNPCData);
-    
-    UE_LOG(LogTemp, Log, TEXT("Registered NPC for evacuation: %s"), *NPCActor->GetName());
-}
-
-void UCrowd_CombatEvacuationManager::UnregisterNPCFromEvacuation(AActor* NPCActor)
-{
-    if (!NPCActor) return;
-    
-    for (int32 i = RegisteredNPCs.Num() - 1; i >= 0; --i)
-    {
-        if (RegisteredNPCs[i].NPCActor == NPCActor)
-        {
-            RegisteredNPCs.RemoveAt(i);
-            UE_LOG(LogTemp, Log, TEXT("Unregistered NPC from evacuation: %s"), *NPCActor->GetName());
-            break;
-        }
-    }
-}
-
-void UCrowd_CombatEvacuationManager::CreateEvacuationZone(FVector Center, float Radius)
+int32 UCrowd_CombatEvacuationManager::CreateEvacuationZone(const FVector& Center, float Radius, int32 MaxCapacity)
 {
     FCrowd_EvacuationZone NewZone;
-    NewZone.Center = Center;
-    NewZone.Radius = Radius;
-    NewZone.CurrentState = ECrowd_EvacuationState::Normal;
-    NewZone.ThreatLevel = 0.0f;
+    NewZone.SafeZoneCenter = Center;
+    NewZone.SafeZoneRadius = Radius;
+    NewZone.MaxCapacity = MaxCapacity;
+    NewZone.CurrentOccupancy = 0;
+    NewZone.bIsActive = true;
     
-    EvacuationZones.Add(NewZone);
+    int32 ZoneIndex = EvacuationZones.Add(NewZone);
     
-    UE_LOG(LogTemp, Log, TEXT("Created evacuation zone at %s with radius %f"), *Center.ToString(), Radius);
+    UE_LOG(LogTemp, Log, TEXT("Created evacuation zone %d at location %s with radius %.2f"), 
+        ZoneIndex, *Center.ToString(), Radius);
+    
+    return ZoneIndex;
 }
 
 void UCrowd_CombatEvacuationManager::RemoveEvacuationZone(int32 ZoneIndex)
@@ -215,276 +163,398 @@ void UCrowd_CombatEvacuationManager::RemoveEvacuationZone(int32 ZoneIndex)
     if (EvacuationZones.IsValidIndex(ZoneIndex))
     {
         EvacuationZones.RemoveAt(ZoneIndex);
+        UE_LOG(LogTemp, Log, TEXT("Removed evacuation zone %d"), ZoneIndex);
     }
 }
 
-FCrowd_EvacuationZone UCrowd_CombatEvacuationManager::GetEvacuationZone(int32 ZoneIndex)
+void UCrowd_CombatEvacuationManager::ActivateEvacuationZone(int32 ZoneIndex, bool bActivate)
 {
     if (EvacuationZones.IsValidIndex(ZoneIndex))
     {
-        return EvacuationZones[ZoneIndex];
-    }
-    return FCrowd_EvacuationZone();
-}
-
-void UCrowd_CombatEvacuationManager::SetNPCPanicLevel(AActor* NPCActor, float PanicLevel)
-{
-    if (!NPCActor) return;
-    
-    for (FCrowd_NPCEvacuationData& NPCData : RegisteredNPCs)
-    {
-        if (NPCData.NPCActor == NPCActor)
-        {
-            NPCData.PanicLevel = FMath::Clamp(PanicLevel, 0.0f, 1.0f);
-            NPCData.EvacuationSpeed = 600.0f * (1.0f + NPCData.PanicLevel);
-            break;
-        }
+        EvacuationZones[ZoneIndex].bIsActive = bActivate;
+        UE_LOG(LogTemp, Log, TEXT("Evacuation zone %d %s"), ZoneIndex, bActivate ? TEXT("activated") : TEXT("deactivated"));
     }
 }
 
-FVector UCrowd_CombatEvacuationManager::CalculateEvacuationTarget(AActor* NPCActor, FVector ThreatLocation)
+FVector UCrowd_CombatEvacuationManager::GetNearestSafeZone(const FVector& Location, float& OutDistance)
 {
-    if (!NPCActor) return FVector::ZeroVector;
+    OutDistance = FLT_MAX;
+    FVector NearestZoneCenter = Location;
     
-    FVector NPCLocation = NPCActor->GetActorLocation();
-    FVector DirectionAwayFromThreat = (NPCLocation - ThreatLocation).GetSafeNormal();
-    
-    // Find the safest evacuation point
-    FVector BestTarget = NPCLocation + (DirectionAwayFromThreat * MaxEvacuationDistance);
-    
-    // Try to find a safe zone
     for (const FCrowd_EvacuationZone& Zone : EvacuationZones)
     {
-        if (Zone.ThreatLevel < 0.2f && Zone.CurrentState == ECrowd_EvacuationState::Normal)
+        if (!Zone.bIsActive || Zone.CurrentOccupancy >= Zone.MaxCapacity)
         {
-            float DistanceToZone = FVector::Dist(NPCLocation, Zone.Center);
-            if (DistanceToZone < MaxEvacuationDistance)
+            continue;
+        }
+        
+        float Distance = FVector::Dist(Location, Zone.SafeZoneCenter);
+        if (Distance < OutDistance)
+        {
+            OutDistance = Distance;
+            NearestZoneCenter = Zone.SafeZoneCenter;
+        }
+    }
+    
+    return NearestZoneCenter;
+}
+
+void UCrowd_CombatEvacuationManager::TriggerMassEvacuation(const FVector& ThreatLocation, float ThreatRadius, float PanicLevel)
+{
+    UE_LOG(LogTemp, Warning, TEXT("MASS EVACUATION TRIGGERED at %s, radius %.2f, panic level %.2f"), 
+        *ThreatLocation.ToString(), ThreatRadius, PanicLevel);
+    
+    // Spread panic to all registered entities within threat radius
+    SpreadPanic(ThreatLocation, ThreatRadius, PanicLevel);
+    
+    // Assign entities to evacuation zones
+    for (auto& EntityPair : RegisteredEntities)
+    {
+        FCrowd_CombatEvacuationFragment& EvacuationData = EntityPair.Value;
+        
+        // Calculate distance from threat
+        float ThreatDistance = FVector::Dist(ThreatLocation, EvacuationData.LastKnownThreatLocation);
+        
+        if (ThreatDistance <= ThreatRadius)
+        {
+            // Entity is in danger zone
+            EvacuationData.PanicBehavior.bInPanic = true;
+            EvacuationData.PanicBehavior.PanicLevel = FMath::Max(EvacuationData.PanicBehavior.PanicLevel, PanicLevel);
+            EvacuationData.ThreatAwareness = 1.0f;
+            EvacuationData.LastKnownThreatLocation = ThreatLocation;
+            
+            // Assign to nearest evacuation zone
+            int32 BestZone = FindBestEvacuationZone(ThreatLocation);
+            if (BestZone >= 0)
             {
-                BestTarget = Zone.Center + (FMath::VRand() * Zone.Radius * 0.5f);
-                break;
+                AssignEntityToEvacuationZone(EntityPair.Key, BestZone);
+            }
+        }
+    }
+}
+
+void UCrowd_CombatEvacuationManager::ProcessCombatThreat(const FVector& ThreatLocation, float ThreatLevel, float AffectedRadius)
+{
+    // Integrate with combat state manager if available
+    if (CombatStateManager)
+    {
+        // Query combat state for additional threat information
+        // This would normally call CombatStateManager methods
+    }
+    
+    // Process threat based on level
+    if (ThreatLevel >= 0.8f)
+    {
+        TriggerMassEvacuation(ThreatLocation, AffectedRadius, ThreatLevel);
+    }
+    else if (ThreatLevel >= 0.5f)
+    {
+        SpreadPanic(ThreatLocation, AffectedRadius * 0.7f, ThreatLevel * 0.8f);
+    }
+    else
+    {
+        // Low level threat - just increase awareness
+        for (auto& EntityPair : RegisteredEntities)
+        {
+            FCrowd_CombatEvacuationFragment& EvacuationData = EntityPair.Value;
+            float Distance = FVector::Dist(ThreatLocation, EvacuationData.LastKnownThreatLocation);
+            
+            if (Distance <= AffectedRadius)
+            {
+                EvacuationData.ThreatAwareness = FMath::Min(1.0f, EvacuationData.ThreatAwareness + ThreatLevel * 0.3f);
+            }
+        }
+    }
+}
+
+void UCrowd_CombatEvacuationManager::UpdateEvacuationBehavior(float DeltaTime)
+{
+    if (!bSystemInitialized)
+    {
+        return;
+    }
+    
+    LastUpdateTime += DeltaTime;
+    
+    UpdatePanicSpread(DeltaTime);
+    ProcessEvacuationMovement(DeltaTime);
+    ValidateEvacuationZones();
+}
+
+void UCrowd_CombatEvacuationManager::RegisterMassEntity(FMassEntityHandle EntityHandle, const FVector& Location)
+{
+    FCrowd_CombatEvacuationFragment NewEvacuationData;
+    NewEvacuationData.LastKnownThreatLocation = Location;
+    
+    RegisteredEntities.Add(EntityHandle, NewEvacuationData);
+    
+    UE_LOG(LogTemp, VeryVerbose, TEXT("Registered mass entity for evacuation tracking"));
+}
+
+void UCrowd_CombatEvacuationManager::UnregisterMassEntity(FMassEntityHandle EntityHandle)
+{
+    RegisteredEntities.Remove(EntityHandle);
+}
+
+void UCrowd_CombatEvacuationManager::AssignEntityToEvacuationZone(FMassEntityHandle EntityHandle, int32 ZoneIndex)
+{
+    if (RegisteredEntities.Contains(EntityHandle) && EvacuationZones.IsValidIndex(ZoneIndex))
+    {
+        FCrowd_CombatEvacuationFragment& EvacuationData = RegisteredEntities[EntityHandle];
+        
+        // Remove from previous zone
+        if (EvacuationData.AssignedEvacuationZone >= 0 && EvacuationZones.IsValidIndex(EvacuationData.AssignedEvacuationZone))
+        {
+            EvacuationZones[EvacuationData.AssignedEvacuationZone].CurrentOccupancy--;
+        }
+        
+        // Assign to new zone
+        EvacuationData.AssignedEvacuationZone = ZoneIndex;
+        EvacuationZones[ZoneIndex].CurrentOccupancy++;
+        
+        UE_LOG(LogTemp, VeryVerbose, TEXT("Assigned entity to evacuation zone %d"), ZoneIndex);
+    }
+}
+
+void UCrowd_CombatEvacuationManager::SpreadPanic(const FVector& PanicSource, float PanicRadius, float PanicIntensity)
+{
+    for (auto& EntityPair : RegisteredEntities)
+    {
+        FCrowd_CombatEvacuationFragment& EvacuationData = EntityPair.Value;
+        
+        float Distance = FVector::Dist(PanicSource, EvacuationData.LastKnownThreatLocation);
+        
+        if (Distance <= PanicRadius)
+        {
+            float DistanceFactor = 1.0f - (Distance / PanicRadius);
+            float PanicIncrease = PanicIntensity * DistanceFactor;
+            
+            EvacuationData.PanicBehavior.PanicLevel = FMath::Min(1.0f, 
+                EvacuationData.PanicBehavior.PanicLevel + PanicIncrease);
+            
+            if (EvacuationData.PanicBehavior.PanicLevel >= GlobalPanicThreshold)
+            {
+                EvacuationData.PanicBehavior.bInPanic = true;
+                EvacuationData.LastKnownThreatLocation = PanicSource;
             }
         }
     }
     
-    return BestTarget;
+    UE_LOG(LogTemp, Log, TEXT("Panic spread from %s affecting radius %.2f with intensity %.2f"), 
+        *PanicSource.ToString(), PanicRadius, PanicIntensity);
 }
 
-void UCrowd_CombatEvacuationManager::ExecuteEvacuationMovement(AActor* NPCActor, float DeltaTime)
+void UCrowd_CombatEvacuationManager::CalculateFleeDirection(const FVector& EntityLocation, const FVector& ThreatLocation, FVector& OutFleeDirection)
 {
-    if (!NPCActor) return;
+    // Calculate basic flee direction (away from threat)
+    FVector FleeDirection = (EntityLocation - ThreatLocation).GetSafeNormal();
     
-    for (FCrowd_NPCEvacuationData& NPCData : RegisteredNPCs)
+    // Find nearest safe zone and adjust direction
+    float DistanceToSafeZone;
+    FVector SafeZoneLocation = GetNearestSafeZone(EntityLocation, DistanceToSafeZone);
+    
+    if (DistanceToSafeZone < 10000.0f) // If there's a reasonable safe zone
     {
-        if (NPCData.NPCActor == NPCActor && NPCData.bIsEvacuating)
-        {
-            FVector CurrentLocation = NPCActor->GetActorLocation();
-            FVector Direction = (NPCData.EvacuationTarget - CurrentLocation).GetSafeNormal();
-            FVector NewLocation = CurrentLocation + (Direction * NPCData.EvacuationSpeed * DeltaTime);
-            
-            NPCActor->SetActorLocation(NewLocation);
-            
-            // Check if reached evacuation target
-            float DistanceToTarget = FVector::Dist(CurrentLocation, NPCData.EvacuationTarget);
-            if (DistanceToTarget < 100.0f)
-            {
-                NPCData.bIsEvacuating = false;
-                NPCData.PanicLevel = FMath::Max(0.0f, NPCData.PanicLevel - 0.5f);
-            }
-            break;
-        }
+        FVector ToSafeZone = (SafeZoneLocation - EntityLocation).GetSafeNormal();
+        
+        // Blend flee direction with safe zone direction
+        OutFleeDirection = (FleeDirection * 0.6f + ToSafeZone * 0.4f).GetSafeNormal();
+    }
+    else
+    {
+        OutFleeDirection = FleeDirection;
     }
 }
 
-void UCrowd_CombatEvacuationManager::OnCombatStarted(FVector CombatLocation, float ThreatLevel)
-{
-    UE_LOG(LogTemp, Warning, TEXT("Combat started at %s with threat level %f"), *CombatLocation.ToString(), ThreatLevel);
-    TriggerEvacuation(CombatLocation, 1500.0f, ThreatLevel);
-}
-
-void UCrowd_CombatEvacuationManager::OnCombatEnded(FVector CombatLocation)
-{
-    UE_LOG(LogTemp, Log, TEXT("Combat ended at %s"), *CombatLocation.ToString());
-    
-    // Gradually reduce panic levels
-    for (FCrowd_NPCEvacuationData& NPCData : RegisteredNPCs)
-    {
-        NPCData.PanicLevel = FMath::Max(0.0f, NPCData.PanicLevel - 0.3f);
-        if (NPCData.PanicLevel <= 0.1f)
-        {
-            NPCData.bIsEvacuating = false;
-        }
-    }
-}
-
-void UCrowd_CombatEvacuationManager::OnDinosaurSpotted(AActor* DinosaurActor, FVector Location)
-{
-    if (!DinosaurActor) return;
-    
-    UE_LOG(LogTemp, Warning, TEXT("Dinosaur spotted: %s at %s"), *DinosaurActor->GetName(), *Location.ToString());
-    
-    float ThreatLevel = 0.8f; // High threat for dinosaur sighting
-    if (DinosaurActor->GetName().Contains(TEXT("TRex")))
-    {
-        ThreatLevel = 1.0f; // Maximum threat for T-Rex
-    }
-    else if (DinosaurActor->GetName().Contains(TEXT("Raptor")))
-    {
-        ThreatLevel = 0.9f; // Very high threat for raptors
-    }
-    
-    TriggerEvacuation(Location, 2000.0f, ThreatLevel);
-}
-
-float UCrowd_CombatEvacuationManager::GetCrowdDensityAtLocation(FVector Location, float Radius)
-{
-    TArray<AActor*> NPCsInArea = GetNPCsInRadius(Location, Radius);
-    float Area = PI * Radius * Radius;
-    return NPCsInArea.Num() / (Area / 10000.0f); // NPCs per 100x100 unit area
-}
-
-void UCrowd_CombatEvacuationManager::AdjustCrowdDensityForCombat(FVector CombatLocation, float Radius)
-{
-    float CurrentDensity = GetCrowdDensityAtLocation(CombatLocation, Radius);
-    
-    if (CurrentDensity > CrowdDensityThreshold)
-    {
-        // Force evacuation to reduce density
-        TriggerEvacuation(CombatLocation, Radius, 0.7f);
-    }
-}
-
-bool UCrowd_CombatEvacuationManager::IsLocationSafe(FVector Location)
+bool UCrowd_CombatEvacuationManager::IsLocationSafe(const FVector& Location, float SafetyRadius)
 {
     for (const FCrowd_EvacuationZone& Zone : EvacuationZones)
     {
-        float Distance = FVector::Dist(Location, Zone.Center);
-        if (Distance <= Zone.Radius && Zone.ThreatLevel > 0.3f)
+        if (!Zone.bIsActive)
         {
-            return false;
+            continue;
+        }
+        
+        float Distance = FVector::Dist(Location, Zone.SafeZoneCenter);
+        if (Distance <= Zone.SafeZoneRadius + SafetyRadius)
+        {
+            return true;
         }
     }
-    return true;
+    
+    return false;
 }
 
-TArray<AActor*> UCrowd_CombatEvacuationManager::GetNPCsInRadius(FVector Center, float Radius)
+int32 UCrowd_CombatEvacuationManager::GetTotalEvacuatingEntities() const
 {
-    TArray<AActor*> NPCsInRadius;
-    
-    for (const FCrowd_NPCEvacuationData& NPCData : RegisteredNPCs)
+    int32 Count = 0;
+    for (const auto& EntityPair : RegisteredEntities)
     {
-        if (NPCData.NPCActor)
+        if (EntityPair.Value.PanicBehavior.bInPanic)
         {
-            float Distance = FVector::Dist(NPCData.NPCActor->GetActorLocation(), Center);
-            if (Distance <= Radius)
+            Count++;
+        }
+    }
+    return Count;
+}
+
+float UCrowd_CombatEvacuationManager::GetAveragePanicLevel() const
+{
+    if (RegisteredEntities.Num() == 0)
+    {
+        return 0.0f;
+    }
+    
+    float TotalPanic = 0.0f;
+    for (const auto& EntityPair : RegisteredEntities)
+    {
+        TotalPanic += EntityPair.Value.PanicBehavior.PanicLevel;
+    }
+    
+    return TotalPanic / RegisteredEntities.Num();
+}
+
+void UCrowd_CombatEvacuationManager::GetEvacuationStatistics(int32& OutActiveZones, int32& OutEvacuatingEntities, float& OutAveragePanic)
+{
+    OutActiveZones = 0;
+    for (const FCrowd_EvacuationZone& Zone : EvacuationZones)
+    {
+        if (Zone.bIsActive)
+        {
+            OutActiveZones++;
+        }
+    }
+    
+    OutEvacuatingEntities = GetTotalEvacuatingEntities();
+    OutAveragePanic = GetAveragePanicLevel();
+}
+
+void UCrowd_CombatEvacuationManager::InitializeDefaultEvacuationZones()
+{
+    // Create default evacuation zones around the map
+    CreateEvacuationZone(FVector(5000.0f, 5000.0f, 100.0f), 2000.0f, 500);   // Northeast safe zone
+    CreateEvacuationZone(FVector(-5000.0f, 5000.0f, 100.0f), 2000.0f, 500);  // Northwest safe zone
+    CreateEvacuationZone(FVector(5000.0f, -5000.0f, 100.0f), 2000.0f, 500);  // Southeast safe zone
+    CreateEvacuationZone(FVector(-5000.0f, -5000.0f, 100.0f), 2000.0f, 500); // Southwest safe zone
+    CreateEvacuationZone(FVector(0.0f, 0.0f, 1000.0f), 1500.0f, 300);        // Central elevated safe zone
+    
+    UE_LOG(LogTemp, Log, TEXT("Initialized %d default evacuation zones"), EvacuationZones.Num());
+}
+
+void UCrowd_CombatEvacuationManager::UpdatePanicSpread(float DeltaTime)
+{
+    // Process panic contagion between nearby entities
+    TArray<FMassEntityHandle> PanickedEntities;
+    
+    for (const auto& EntityPair : RegisteredEntities)
+    {
+        if (EntityPair.Value.PanicBehavior.bInPanic)
+        {
+            PanickedEntities.Add(EntityPair.Key);
+        }
+    }
+    
+    // Spread panic from panicked entities to nearby calm entities
+    for (FMassEntityHandle PanickedEntity : PanickedEntities)
+    {
+        if (!RegisteredEntities.Contains(PanickedEntity))
+        {
+            continue;
+        }
+        
+        const FCrowd_CombatEvacuationFragment& PanickedData = RegisteredEntities[PanickedEntity];
+        
+        for (auto& EntityPair : RegisteredEntities)
+        {
+            if (EntityPair.Key == PanickedEntity || EntityPair.Value.PanicBehavior.bInPanic)
             {
-                NPCsInRadius.Add(NPCData.NPCActor);
+                continue;
+            }
+            
+            // Calculate distance between entities (simplified - would need actual positions)
+            float Distance = 500.0f; // Placeholder distance
+            
+            if (Distance <= 1000.0f) // Panic spread radius
+            {
+                float PanicSpread = 0.1f * DeltaTime * (1.0f - Distance / 1000.0f);
+                EntityPair.Value.PanicBehavior.PanicLevel += PanicSpread;
+                
+                if (EntityPair.Value.PanicBehavior.PanicLevel >= GlobalPanicThreshold)
+                {
+                    EntityPair.Value.PanicBehavior.bInPanic = true;
+                }
             }
         }
     }
-    
-    return NPCsInRadius;
 }
 
-void UCrowd_CombatEvacuationManager::ResetAllEvacuations()
+void UCrowd_CombatEvacuationManager::ProcessEvacuationMovement(float DeltaTime)
 {
-    for (FCrowd_NPCEvacuationData& NPCData : RegisteredNPCs)
-    {
-        NPCData.bIsEvacuating = false;
-        NPCData.PanicLevel = 0.0f;
-    }
-    
+    // Update evacuation zone occupancy
     for (FCrowd_EvacuationZone& Zone : EvacuationZones)
     {
-        Zone.ThreatLevel = 0.0f;
-        Zone.CurrentState = ECrowd_EvacuationState::Normal;
-        Zone.NPCsInZone.Empty();
+        Zone.CurrentOccupancy = 0;
     }
     
-    UE_LOG(LogTemp, Log, TEXT("Reset all evacuations"));
-}
-
-void UCrowd_CombatEvacuationManager::UpdateNPCEvacuation(FCrowd_NPCEvacuationData& NPCData, float DeltaTime)
-{
-    if (!NPCData.NPCActor) return;
-    
-    // Decay panic level over time
-    NPCData.PanicLevel = FMath::Max(0.0f, NPCData.PanicLevel - (PanicDecayRate * DeltaTime));
-    
-    // Update evacuation speed based on panic level
-    NPCData.EvacuationSpeed = 600.0f * (1.0f + NPCData.PanicLevel * EvacuationSpeedMultiplier);
-    
-    // Move towards evacuation target
-    FVector CurrentLocation = NPCData.NPCActor->GetActorLocation();
-    FVector Direction = (NPCData.EvacuationTarget - CurrentLocation).GetSafeNormal();
-    FVector NewLocation = CurrentLocation + (Direction * NPCData.EvacuationSpeed * DeltaTime);
-    
-    NPCData.NPCActor->SetActorLocation(NewLocation);
-    
-    // Check if reached evacuation target or panic level is too low
-    float DistanceToTarget = FVector::Dist(CurrentLocation, NPCData.EvacuationTarget);
-    if (DistanceToTarget < 100.0f || NPCData.PanicLevel <= 0.1f)
+    for (const auto& EntityPair : RegisteredEntities)
     {
-        NPCData.bIsEvacuating = false;
-    }
-}
-
-void UCrowd_CombatEvacuationManager::CalculateZoneThreatLevel(FCrowd_EvacuationZone& Zone)
-{
-    // Threat level is influenced by number of NPCs and their panic levels
-    float TotalPanic = 0.0f;
-    int32 PanickedNPCs = 0;
-    
-    for (AActor* NPC : Zone.NPCsInZone)
-    {
-        for (const FCrowd_NPCEvacuationData& NPCData : RegisteredNPCs)
+        const FCrowd_CombatEvacuationFragment& EvacuationData = EntityPair.Value;
+        
+        if (EvacuationData.AssignedEvacuationZone >= 0 && EvacuationZones.IsValidIndex(EvacuationData.AssignedEvacuationZone))
         {
-            if (NPCData.NPCActor == NPC && NPCData.PanicLevel > 0.2f)
-            {
-                TotalPanic += NPCData.PanicLevel;
-                PanickedNPCs++;
-            }
+            EvacuationZones[EvacuationData.AssignedEvacuationZone].CurrentOccupancy++;
+        }
+    }
+}
+
+int32 UCrowd_CombatEvacuationManager::FindBestEvacuationZone(const FVector& Location)
+{
+    int32 BestZone = -1;
+    float BestScore = -1.0f;
+    
+    for (int32 i = 0; i < EvacuationZones.Num(); i++)
+    {
+        const FCrowd_EvacuationZone& Zone = EvacuationZones[i];
+        
+        if (!Zone.bIsActive || Zone.CurrentOccupancy >= Zone.MaxCapacity)
+        {
+            continue;
+        }
+        
+        float Distance = FVector::Dist(Location, Zone.SafeZoneCenter);
+        float CapacityFactor = 1.0f - (float)Zone.CurrentOccupancy / Zone.MaxCapacity;
+        float DistanceFactor = 1.0f / (1.0f + Distance / 1000.0f);
+        
+        float Score = CapacityFactor * 0.6f + DistanceFactor * 0.4f;
+        
+        if (Score > BestScore)
+        {
+            BestScore = Score;
+            BestZone = i;
         }
     }
     
-    if (PanickedNPCs > 0)
-    {
-        float AveragePanic = TotalPanic / PanickedNPCs;
-        Zone.ThreatLevel = FMath::Max(Zone.ThreatLevel, AveragePanic * 0.5f);
-    }
+    return BestZone;
 }
 
-FVector UCrowd_CombatEvacuationManager::FindSafeEvacuationPoint(FVector StartLocation, FVector ThreatLocation)
+void UCrowd_CombatEvacuationManager::ValidateEvacuationZones()
 {
-    FVector DirectionAway = (StartLocation - ThreatLocation).GetSafeNormal();
-    FVector SafePoint = StartLocation + (DirectionAway * MaxEvacuationDistance);
-    
-    // Try to find the safest zone
-    float BestSafety = 0.0f;
-    FVector BestPoint = SafePoint;
-    
-    for (const FCrowd_EvacuationZone& Zone : EvacuationZones)
+    // Remove invalid or overcrowded zones
+    for (int32 i = EvacuationZones.Num() - 1; i >= 0; i--)
     {
-        if (Zone.ThreatLevel < 0.3f)
+        FCrowd_EvacuationZone& Zone = EvacuationZones[i];
+        
+        // Reset occupancy if it becomes negative
+        if (Zone.CurrentOccupancy < 0)
         {
-            float Safety = 1.0f - Zone.ThreatLevel;
-            float Distance = FVector::Dist(StartLocation, Zone.Center);
-            Safety *= (1.0f - FMath::Clamp(Distance / MaxEvacuationDistance, 0.0f, 1.0f));
-            
-            if (Safety > BestSafety)
-            {
-                BestSafety = Safety;
-                BestPoint = Zone.Center + (FMath::VRand() * Zone.Radius * 0.3f);
-            }
+            Zone.CurrentOccupancy = 0;
+        }
+        
+        // Deactivate zones that are consistently over capacity
+        if (Zone.CurrentOccupancy > Zone.MaxCapacity * 1.2f)
+        {
+            Zone.bIsActive = false;
+            UE_LOG(LogTemp, Warning, TEXT("Deactivated evacuation zone %d due to overcrowding"), i);
         }
     }
-    
-    return BestPoint;
-}
-
-bool UCrowd_CombatEvacuationManager::IsNPCInEvacuationZone(AActor* NPCActor, const FCrowd_EvacuationZone& Zone)
-{
-    if (!NPCActor) return false;
-    
-    float Distance = FVector::Dist(NPCActor->GetActorLocation(), Zone.Center);
-    return Distance <= Zone.Radius;
 }
