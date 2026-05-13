@@ -1,54 +1,78 @@
 #include "Anim_IKFootPlacement.h"
 #include "GameFramework/Character.h"
-#include "Components/SkeletalMeshComponent.h"
+#include "Components/CapsuleComponent.h"
 #include "Engine/World.h"
-#include "Engine/Engine.h"
-#include "DrawDebugHelpers.h"
-#include "Kismet/KismetMathLibrary.h"
-#include "CollisionQueryParams.h"
 
 UAnim_IKFootPlacement::UAnim_IKFootPlacement()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickGroup = TG_PostPhysics;
+    PrimaryComponentTick.bStartWithTickEnabled = true;
     
     // Initialize default settings
-    IKSettings.TraceDistance = 50.0f;
-    IKSettings.InterpSpeed = 15.0f;
-    IKSettings.FootHeight = 5.0f;
-    IKSettings.bEnableFootRotation = true;
-    IKSettings.MaxFootRotationAngle = 45.0f;
-    IKSettings.LeftFootBoneName = TEXT("foot_l");
-    IKSettings.RightFootBoneName = TEXT("foot_r");
-    IKSettings.LeftFootIKBoneName = TEXT("ik_foot_l");
-    IKSettings.RightFootIKBoneName = TEXT("ik_foot_r");
+    IKSettings = FAnim_IKSettings();
+    bIKEnabled = true;
     
-    bEnableIK = true;
-    IKUpdateRate = 60.0f;
+    // Default bone names (can be overridden in Blueprint)
+    LeftFootBoneName = FName("foot_l");
+    RightFootBoneName = FName("foot_r");
+    PelvisBoneName = FName("pelvis");
+    
+    // Initialize IK data
+    LeftFootIK = FAnim_FootIKData();
+    RightFootIK = FAnim_FootIKData();
+    PelvisOffset = 0.0f;
+    
+    // Internal state
     LastUpdateTime = 0.0f;
+    LastOwnerLocation = FVector::ZeroVector;
+    bNeedsUpdate = true;
     
-    // Initialize foot data
-    LeftFootData = FAnim_FootIKData();
-    RightFootData = FAnim_FootIKData();
-    PreviousLeftFootData = FAnim_FootIKData();
-    PreviousRightFootData = FAnim_FootIKData();
+    OwnerMesh = nullptr;
+    AnimInstance = nullptr;
 }
 
 void UAnim_IKFootPlacement::BeginPlay()
 {
     Super::BeginPlay();
+    InitializeComponent();
+}
+
+void UAnim_IKFootPlacement::InitializeComponent()
+{
+    CacheComponentReferences();
     
-    // Get component references
-    OwnerCharacter = Cast<ACharacter>(GetOwner());
-    if (OwnerCharacter)
+    if (OwnerMesh && AnimInstance)
     {
-        SkeletalMeshComponent = OwnerCharacter->GetMesh();
-        UE_LOG(LogTemp, Log, TEXT("Foot IK Component initialized for character: %s"), 
-               *OwnerCharacter->GetName());
+        UE_LOG(LogTemp, Log, TEXT("IK Foot Placement initialized successfully"));
     }
     else
     {
-        UE_LOG(LogTemp, Warning, TEXT("Foot IK Component: Failed to get character reference"));
+        UE_LOG(LogTemp, Warning, TEXT("IK Foot Placement failed to initialize - missing mesh or anim instance"));
+    }
+}
+
+void UAnim_IKFootPlacement::CacheComponentReferences()
+{
+    AActor* Owner = GetOwner();
+    if (!Owner)
+    {
+        return;
+    }
+    
+    // Try to get skeletal mesh component
+    OwnerMesh = Owner->FindComponentByClass<USkeletalMeshComponent>();
+    if (!OwnerMesh)
+    {
+        // If owner is a character, get the mesh component
+        if (ACharacter* Character = Cast<ACharacter>(Owner))
+        {
+            OwnerMesh = Character->GetMesh();
+        }
+    }
+    
+    if (OwnerMesh)
+    {
+        AnimInstance = OwnerMesh->GetAnimInstance();
     }
 }
 
@@ -56,115 +80,95 @@ void UAnim_IKFootPlacement::TickComponent(float DeltaTime, ELevelTick TickType, 
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    if (!bEnableIK || !OwnerCharacter || !SkeletalMeshComponent)
+    if (bIKEnabled && OwnerMesh && AnimInstance)
     {
-        return;
-    }
-    
-    // Update rate limiting
-    LastUpdateTime += DeltaTime;
-    float UpdateInterval = 1.0f / IKUpdateRate;
-    
-    if (LastUpdateTime >= UpdateInterval)
-    {
-        // Update foot IK
-        UpdateFootIK(LeftFootData, IKSettings.LeftFootBoneName, DeltaTime);
-        UpdateFootIK(RightFootData, IKSettings.RightFootBoneName, DeltaTime);
-        
-        LastUpdateTime = 0.0f;
-    }
-    else
-    {
-        // Interpolate between updates
-        InterpolateFootData(LeftFootData, PreviousLeftFootData, DeltaTime);
-        InterpolateFootData(RightFootData, PreviousRightFootData, DeltaTime);
+        UpdateFootIK(DeltaTime);
     }
 }
 
-void UAnim_IKFootPlacement::UpdateFootIK(FAnim_FootIKData& FootData, const FName& FootBoneName, float DeltaTime)
+void UAnim_IKFootPlacement::UpdateFootIK(float DeltaTime)
 {
-    if (!SkeletalMeshComponent)
+    if (!OwnerMesh || !AnimInstance)
     {
         return;
     }
     
-    // Store previous data for interpolation
-    if (FootBoneName == IKSettings.LeftFootBoneName)
+    // Check if we need to update (performance optimization)
+    FVector CurrentLocation = GetOwner()->GetActorLocation();
+    float DistanceMoved = FVector::Dist(CurrentLocation, LastOwnerLocation);
+    
+    if (DistanceMoved < 1.0f && (GetWorld()->GetTimeSeconds() - LastUpdateTime) < 0.1f)
     {
-        PreviousLeftFootData = LeftFootData;
-    }
-    else
-    {
-        PreviousRightFootData = RightFootData;
+        return; // Skip update if character hasn't moved much
     }
     
-    // Get foot world location
-    FVector FootWorldLocation = GetFootWorldLocation(FootBoneName);
-    if (FootWorldLocation == FVector::ZeroVector)
+    LastOwnerLocation = CurrentLocation;
+    LastUpdateTime = GetWorld()->GetTimeSeconds();
+    
+    // Get foot socket locations
+    FVector LeftFootLocation = GetSocketLocation(LeftFootBoneName);
+    FVector RightFootLocation = GetSocketLocation(RightFootBoneName);
+    
+    // Calculate IK data for both feet
+    FAnim_FootIKData TargetLeftIK = GetFootIKData(LeftFootBoneName, LeftFootLocation);
+    FAnim_FootIKData TargetRightIK = GetFootIKData(RightFootBoneName, RightFootLocation);
+    
+    // Interpolate to target values
+    InterpolateIKData(LeftFootIK, TargetLeftIK, DeltaTime);
+    InterpolateIKData(RightFootIK, TargetRightIK, DeltaTime);
+    
+    // Update pelvis offset
+    UpdatePelvisOffset();
+    
+    // Debug drawing
+    if (IKSettings.bEnableDebugDraw)
     {
-        FootData.bIsGrounded = false;
-        FootData.IKAlpha = 0.0f;
-        return;
+        DrawDebugInfo();
+    }
+}
+
+FAnim_FootIKData UAnim_IKFootPlacement::GetFootIKData(const FName& FootBoneName, const FVector& FootSocketLocation)
+{
+    FAnim_FootIKData IKData;
+    
+    if (!OwnerMesh)
+    {
+        return IKData;
     }
     
-    // Trace for ground
+    // Perform ground trace
     FVector HitLocation;
     FVector HitNormal;
-    bool bHitGround = TraceForGround(FootWorldLocation, HitLocation, HitNormal);
+    bool bHitGround = TraceForGround(FootSocketLocation, HitLocation, HitNormal);
     
     if (bHitGround)
     {
-        // Calculate distance from ground
-        FootData.DistanceFromGround = FootWorldLocation.Z - HitLocation.Z;
-        FootData.bIsGrounded = true;
+        // Calculate foot offset
+        float FootOffset = CalculateFootOffset(FootSocketLocation, HitLocation);
+        FootOffset = FMath::Clamp(FootOffset, -IKSettings.MaxFootOffset, IKSettings.MaxFootOffset);
         
-        // Calculate IK alpha based on distance
-        float MaxIKDistance = IKSettings.TraceDistance;
-        FootData.IKAlpha = FMath::Clamp(1.0f - (FMath::Abs(FootData.DistanceFromGround) / MaxIKDistance), 0.0f, 1.0f);
+        // Calculate foot rotation based on ground normal
+        FRotator CurrentFootRotation = OwnerMesh->GetSocketRotation(FootBoneName);
+        FRotator TargetFootRotation = CalculateFootRotation(HitNormal, CurrentFootRotation);
         
-        // Calculate foot location adjustment
-        FVector TargetLocation = FootWorldLocation;
-        TargetLocation.Z = HitLocation.Z + IKSettings.FootHeight;
-        FootData.FootLocation = FMath::VInterpTo(FootData.FootLocation, TargetLocation, DeltaTime, IKSettings.InterpSpeed);
-        
-        // Calculate foot rotation
-        if (IKSettings.bEnableFootRotation)
-        {
-            FRotator TargetRotation = CalculateFootRotation(HitNormal);
-            FootData.FootRotation = FMath::RInterpTo(FootData.FootRotation, TargetRotation, DeltaTime, IKSettings.InterpSpeed);
-        }
-        else
-        {
-            FootData.FootRotation = FRotator::ZeroRotator;
-        }
+        // Set IK data
+        IKData.FootLocation = HitLocation;
+        IKData.FootRotation = TargetFootRotation;
+        IKData.FootOffset = FootOffset;
+        IKData.IKAlpha = 1.0f;
+        IKData.bIsGrounded = true;
     }
     else
     {
-        // No ground hit - fade out IK
-        FootData.bIsGrounded = false;
-        FootData.IKAlpha = FMath::FInterpTo(FootData.IKAlpha, 0.0f, DeltaTime, IKSettings.InterpSpeed);
-        FootData.DistanceFromGround = IKSettings.TraceDistance;
-    }
-}
-
-FVector UAnim_IKFootPlacement::GetFootWorldLocation(const FName& FootBoneName) const
-{
-    if (!SkeletalMeshComponent)
-    {
-        return FVector::ZeroVector;
+        // No ground hit - disable IK for this foot
+        IKData.IKAlpha = 0.0f;
+        IKData.bIsGrounded = false;
     }
     
-    int32 BoneIndex = SkeletalMeshComponent->GetBoneIndex(FootBoneName);
-    if (BoneIndex == INDEX_NONE)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Foot IK: Bone '%s' not found"), *FootBoneName.ToString());
-        return FVector::ZeroVector;
-    }
-    
-    return SkeletalMeshComponent->GetBoneLocation(FootBoneName, EBoneSpaces::WorldSpace);
+    return IKData;
 }
 
-bool UAnim_IKFootPlacement::TraceForGround(const FVector& StartLocation, FVector& HitLocation, FVector& HitNormal) const
+bool UAnim_IKFootPlacement::TraceForGround(const FVector& StartLocation, FVector& OutHitLocation, FVector& OutHitNormal)
 {
     if (!GetWorld())
     {
@@ -172,96 +176,136 @@ bool UAnim_IKFootPlacement::TraceForGround(const FVector& StartLocation, FVector
     }
     
     // Setup trace parameters
-    FVector TraceStart = StartLocation + FVector(0.0f, 0.0f, IKSettings.TraceDistance * 0.5f);
-    FVector TraceEnd = StartLocation - FVector(0.0f, 0.0f, IKSettings.TraceDistance);
+    FVector TraceStart = StartLocation + FVector(0, 0, 50.0f); // Start slightly above
+    FVector TraceEnd = StartLocation - FVector(0, 0, IKSettings.TraceDistance);
     
     FCollisionQueryParams QueryParams;
-    QueryParams.AddIgnoredActor(OwnerCharacter);
-    QueryParams.bTraceComplex = true;
+    QueryParams.bTraceComplex = false;
+    QueryParams.AddIgnoredActor(GetOwner());
     
     FHitResult HitResult;
     bool bHit = GetWorld()->LineTraceSingleByChannel(
         HitResult,
         TraceStart,
         TraceEnd,
-        ECC_Visibility,
+        IKSettings.TraceChannel,
         QueryParams
     );
     
     if (bHit)
     {
-        HitLocation = HitResult.Location;
-        HitNormal = HitResult.Normal;
-        
-        // Debug drawing
-        if (CVarShowDebugAnimation.GetValueOnGameThread())
-        {
-            DrawDebugLine(GetWorld(), TraceStart, HitLocation, FColor::Green, false, 0.1f, 0, 1.0f);
-            DrawDebugSphere(GetWorld(), HitLocation, 2.0f, 8, FColor::Red, false, 0.1f);
-        }
-        
+        OutHitLocation = HitResult.Location;
+        OutHitNormal = HitResult.Normal;
         return true;
-    }
-    
-    // Debug drawing for failed trace
-    if (CVarShowDebugAnimation.GetValueOnGameThread())
-    {
-        DrawDebugLine(GetWorld(), TraceStart, TraceEnd, FColor::Red, false, 0.1f, 0, 1.0f);
     }
     
     return false;
 }
 
-FRotator UAnim_IKFootPlacement::CalculateFootRotation(const FVector& HitNormal) const
+float UAnim_IKFootPlacement::CalculateFootOffset(const FVector& FootLocation, const FVector& HitLocation)
 {
-    // Calculate rotation to align foot with surface normal
-    FVector UpVector = FVector::UpVector;
-    FVector RightVector = FVector::CrossProduct(UpVector, HitNormal).GetSafeNormal();
-    FVector ForwardVector = FVector::CrossProduct(HitNormal, RightVector).GetSafeNormal();
-    
-    FRotator SurfaceRotation = UKismetMathLibrary::MakeRotationFromAxes(ForwardVector, RightVector, HitNormal);
-    
-    // Clamp rotation to max angle
-    FRotator ClampedRotation = SurfaceRotation;
-    ClampedRotation.Pitch = FMath::Clamp(ClampedRotation.Pitch, -IKSettings.MaxFootRotationAngle, IKSettings.MaxFootRotationAngle);
-    ClampedRotation.Roll = FMath::Clamp(ClampedRotation.Roll, -IKSettings.MaxFootRotationAngle, IKSettings.MaxFootRotationAngle);
-    
-    return ClampedRotation;
+    float Offset = HitLocation.Z - FootLocation.Z + IKSettings.FootHeight;
+    return FMath::Clamp(Offset, -IKSettings.MaxFootOffset, IKSettings.MaxFootOffset);
 }
 
-void UAnim_IKFootPlacement::InterpolateFootData(FAnim_FootIKData& CurrentData, const FAnim_FootIKData& TargetData, float DeltaTime)
+FRotator UAnim_IKFootPlacement::CalculateFootRotation(const FVector& HitNormal, const FRotator& CurrentRotation)
 {
-    CurrentData.FootLocation = FMath::VInterpTo(CurrentData.FootLocation, TargetData.FootLocation, DeltaTime, IKSettings.InterpSpeed);
-    CurrentData.FootRotation = FMath::RInterpTo(CurrentData.FootRotation, TargetData.FootRotation, DeltaTime, IKSettings.InterpSpeed);
-    CurrentData.IKAlpha = FMath::FInterpTo(CurrentData.IKAlpha, TargetData.IKAlpha, DeltaTime, IKSettings.InterpSpeed);
-}
-
-void UAnim_IKFootPlacement::GetFootIKTransforms(FTransform& LeftFootTransform, FTransform& RightFootTransform, float& LeftIKAlpha, float& RightIKAlpha) const
-{
-    // Left foot transform
-    LeftFootTransform.SetLocation(LeftFootData.FootLocation);
-    LeftFootTransform.SetRotation(LeftFootData.FootRotation.Quaternion());
-    LeftFootTransform.SetScale3D(FVector::OneVector);
-    LeftIKAlpha = LeftFootData.IKAlpha;
+    // Calculate the rotation needed to align foot with ground normal
+    FVector ForwardVector = CurrentRotation.Vector();
+    FVector RightVector = FVector::CrossProduct(HitNormal, ForwardVector).GetSafeNormal();
+    ForwardVector = FVector::CrossProduct(RightVector, HitNormal).GetSafeNormal();
     
-    // Right foot transform
-    RightFootTransform.SetLocation(RightFootData.FootLocation);
-    RightFootTransform.SetRotation(RightFootData.FootRotation.Quaternion());
-    RightFootTransform.SetScale3D(FVector::OneVector);
-    RightIKAlpha = RightFootData.IKAlpha;
+    FRotator TargetRotation = UKismetMathLibrary::MakeRotationFromAxes(ForwardVector, RightVector, HitNormal);
+    
+    // Limit rotation to prevent extreme angles
+    FRotator DeltaRotation = TargetRotation - CurrentRotation;
+    DeltaRotation.Pitch = FMath::Clamp(DeltaRotation.Pitch, -45.0f, 45.0f);
+    DeltaRotation.Roll = FMath::Clamp(DeltaRotation.Roll, -45.0f, 45.0f);
+    
+    return CurrentRotation + DeltaRotation;
 }
 
-void UAnim_IKFootPlacement::ForceUpdateIK()
+void UAnim_IKFootPlacement::UpdatePelvisOffset()
 {
-    if (!bEnableIK || !OwnerCharacter || !SkeletalMeshComponent)
+    // Calculate pelvis offset based on foot offsets
+    float LeftOffset = LeftFootIK.FootOffset;
+    float RightOffset = RightFootIK.FootOffset;
+    
+    // Use the higher foot as reference (lower offset value)
+    float TargetPelvisOffset = FMath::Min(LeftOffset, RightOffset);
+    
+    // Smooth interpolation
+    PelvisOffset = FMath::FInterpTo(PelvisOffset, TargetPelvisOffset, GetWorld()->GetDeltaSeconds(), IKSettings.InterpSpeed);
+}
+
+void UAnim_IKFootPlacement::InterpolateIKData(FAnim_FootIKData& CurrentData, const FAnim_FootIKData& TargetData, float DeltaTime)
+{
+    float InterpSpeed = IKSettings.InterpSpeed;
+    
+    CurrentData.FootOffset = FMath::FInterpTo(CurrentData.FootOffset, TargetData.FootOffset, DeltaTime, InterpSpeed);
+    CurrentData.IKAlpha = FMath::FInterpTo(CurrentData.IKAlpha, TargetData.IKAlpha, DeltaTime, InterpSpeed * 2.0f);
+    CurrentData.FootLocation = FMath::VInterpTo(CurrentData.FootLocation, TargetData.FootLocation, DeltaTime, InterpSpeed);
+    CurrentData.FootRotation = FMath::RInterpTo(CurrentData.FootRotation, TargetData.FootRotation, DeltaTime, InterpSpeed);
+    CurrentData.bIsGrounded = TargetData.bIsGrounded;
+}
+
+FVector UAnim_IKFootPlacement::GetSocketLocation(const FName& SocketName)
+{
+    if (OwnerMesh && OwnerMesh->DoesSocketExist(SocketName))
+    {
+        return OwnerMesh->GetSocketLocation(SocketName);
+    }
+    
+    return GetOwner()->GetActorLocation();
+}
+
+void UAnim_IKFootPlacement::DrawDebugInfo()
+{
+    if (!GetWorld())
     {
         return;
     }
     
-    float DeltaTime = GetWorld() ? GetWorld()->GetDeltaSeconds() : 0.016f;
+    // Draw foot trace lines
+    FVector LeftFootLoc = GetSocketLocation(LeftFootBoneName);
+    FVector RightFootLoc = GetSocketLocation(RightFootBoneName);
     
-    UpdateFootIK(LeftFootData, IKSettings.LeftFootBoneName, DeltaTime);
-    UpdateFootIK(RightFootData, IKSettings.RightFootBoneName, DeltaTime);
+    DrawDebugLine(GetWorld(), LeftFootLoc + FVector(0, 0, 50), LeftFootLoc - FVector(0, 0, IKSettings.TraceDistance), 
+                  LeftFootIK.bIsGrounded ? FColor::Green : FColor::Red, false, 0.1f, 0, 2.0f);
     
-    UE_LOG(LogTemp, Log, TEXT("Foot IK force updated"));
+    DrawDebugLine(GetWorld(), RightFootLoc + FVector(0, 0, 50), RightFootLoc - FVector(0, 0, IKSettings.TraceDistance), 
+                  RightFootIK.bIsGrounded ? FColor::Green : FColor::Red, false, 0.1f, 0, 2.0f);
+    
+    // Draw foot positions
+    if (LeftFootIK.bIsGrounded)
+    {
+        DrawDebugSphere(GetWorld(), LeftFootIK.FootLocation, 5.0f, 12, FColor::Blue, false, 0.1f);
+    }
+    
+    if (RightFootIK.bIsGrounded)
+    {
+        DrawDebugSphere(GetWorld(), RightFootIK.FootLocation, 5.0f, 12, FColor::Blue, false, 0.1f);
+    }
+}
+
+void UAnim_IKFootPlacement::SetIKSettings(const FAnim_IKSettings& NewSettings)
+{
+    IKSettings = NewSettings;
+}
+
+void UAnim_IKFootPlacement::EnableIK(bool bEnable)
+{
+    bIKEnabled = bEnable;
+    
+    if (!bIKEnabled)
+    {
+        ResetIK();
+    }
+}
+
+void UAnim_IKFootPlacement::ResetIK()
+{
+    LeftFootIK = FAnim_FootIKData();
+    RightFootIK = FAnim_FootIKData();
+    PelvisOffset = 0.0f;
 }
