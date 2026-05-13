@@ -1,119 +1,151 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "GameFramework/Actor.h"
 #include "Engine/World.h"
-#include "Components/ActorComponent.h"
-#include "Engine/Engine.h"
+#include "Components/StaticMeshComponent.h"
+#include "Particles/ParticleSystemComponent.h"
+#include "Sound/SoundCue.h"
+#include "../SharedTypes.h"
 #include "QA_VFXIntegrationValidator.generated.h"
 
-UENUM(BlueprintType)
-enum class EQA_VFXValidationResult : uint8
-{
-    Pass        UMETA(DisplayName = "Pass"),
-    Warning     UMETA(DisplayName = "Warning"),
-    Fail        UMETA(DisplayName = "Fail"),
-    Critical    UMETA(DisplayName = "Critical")
-};
-
 USTRUCT(BlueprintType)
-struct FQA_VFXTestResult
+struct TRANSPERSONALGAME_API FQA_VFXTestResult
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "QA")
+    UPROPERTY(BlueprintReadOnly, Category = "QA Testing")
+    bool bTestPassed = false;
+
+    UPROPERTY(BlueprintReadOnly, Category = "QA Testing")
     FString TestName;
 
-    UPROPERTY(BlueprintReadOnly, Category = "QA")
-    EQA_VFXValidationResult Result;
+    UPROPERTY(BlueprintReadOnly, Category = "QA Testing")
+    FString ErrorMessage;
 
-    UPROPERTY(BlueprintReadOnly, Category = "QA")
-    FString Details;
+    UPROPERTY(BlueprintReadOnly, Category = "QA Testing")
+    float PerformanceScore = 0.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "QA")
-    float ExecutionTime;
+    UPROPERTY(BlueprintReadOnly, Category = "QA Testing")
+    int32 ParticleCount = 0;
 
     FQA_VFXTestResult()
     {
-        TestName = TEXT("");
-        Result = EQA_VFXValidationResult::Pass;
-        Details = TEXT("");
-        ExecutionTime = 0.0f;
+        bTestPassed = false;
+        TestName = TEXT("Unknown Test");
+        ErrorMessage = TEXT("");
+        PerformanceScore = 0.0f;
+        ParticleCount = 0;
     }
 };
 
-/**
- * QA Validator for VFX systems integration and performance
- * Validates VFX Impact Manager, Niagara systems, and environmental effects
- */
-UCLASS(BlueprintType, Blueprintable, meta = (BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UQA_VFXIntegrationValidator : public UActorComponent
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FQA_DinosaurVFXProfile
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Dinosaur VFX")
+    EDinosaurSpecies Species = EDinosaurSpecies::TRex;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Dinosaur VFX")
+    float ExpectedDustIntensity = 1.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Dinosaur VFX")
+    float ExpectedParticleSize = 100.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Dinosaur VFX")
+    float MassKg = 7000.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Dinosaur VFX")
+    bool bShouldCreateGroundCracks = true;
+
+    FQA_DinosaurVFXProfile()
+    {
+        Species = EDinosaurSpecies::TRex;
+        ExpectedDustIntensity = 1.0f;
+        ExpectedParticleSize = 100.0f;
+        MassKg = 7000.0f;
+        bShouldCreateGroundCracks = true;
+    }
+};
+
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API AQA_VFXIntegrationValidator : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UQA_VFXIntegrationValidator();
+    AQA_VFXIntegrationValidator();
 
 protected:
     virtual void BeginPlay() override;
 
 public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    virtual void Tick(float DeltaTime) override;
 
-    // Core validation functions
-    UFUNCTION(BlueprintCallable, Category = "QA|VFX")
-    FQA_VFXTestResult ValidateVFXImpactManager();
+    // VFX System Validation Methods
+    UFUNCTION(BlueprintCallable, Category = "QA Testing", CallInEditor = true)
+    FQA_VFXTestResult ValidateFootstepVFXSystem();
 
-    UFUNCTION(BlueprintCallable, Category = "QA|VFX")
-    FQA_VFXTestResult ValidateNiagaraSystems();
+    UFUNCTION(BlueprintCallable, Category = "QA Testing", CallInEditor = true)
+    FQA_VFXTestResult ValidateCampfireVFXSystem();
 
-    UFUNCTION(BlueprintCallable, Category = "QA|VFX")
-    FQA_VFXTestResult ValidateEnvironmentalEffects();
+    UFUNCTION(BlueprintCallable, Category = "QA Testing", CallInEditor = true)
+    FQA_VFXTestResult ValidateEnvironmentalVFX();
 
-    UFUNCTION(BlueprintCallable, Category = "QA|VFX")
-    FQA_VFXTestResult ValidateParticlePerformance();
+    UFUNCTION(BlueprintCallable, Category = "QA Testing", CallInEditor = true)
+    FQA_VFXTestResult ValidateVFXPerformance();
 
-    UFUNCTION(BlueprintCallable, Category = "QA|VFX")
+    UFUNCTION(BlueprintCallable, Category = "QA Testing", CallInEditor = true)
     TArray<FQA_VFXTestResult> RunFullVFXValidationSuite();
 
+    // Dinosaur-specific VFX validation
+    UFUNCTION(BlueprintCallable, Category = "QA Testing", CallInEditor = true)
+    FQA_VFXTestResult ValidateDinosaurVFXProfile(EDinosaurSpecies Species);
+
+    UFUNCTION(BlueprintCallable, Category = "QA Testing", CallInEditor = true)
+    bool TestFootstepVFXForAllSpecies();
+
     // Performance monitoring
-    UFUNCTION(BlueprintCallable, Category = "QA|Performance")
-    float GetVFXFrameTime();
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
+    float GetCurrentVFXPerformanceScore();
 
-    UFUNCTION(BlueprintCallable, Category = "QA|Performance")
-    int32 GetActiveParticleCount();
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
+    int32 GetActiveParticleSystemCount();
 
-    UFUNCTION(BlueprintCallable, Category = "QA|Performance")
-    bool IsVFXPerformanceAcceptable();
-
-    // Reporting
-    UFUNCTION(BlueprintCallable, Category = "QA|Reporting")
-    void GenerateVFXValidationReport();
-
-    UFUNCTION(BlueprintCallable, Category = "QA|Reporting")
-    void LogVFXSystemStatus();
+    UFUNCTION(BlueprintCallable, Category = "QA Testing")
+    bool IsVFXSystemWithinPerformanceBudget();
 
 protected:
-    UPROPERTY(BlueprintReadOnly, Category = "QA")
-    TArray<FQA_VFXTestResult> LastValidationResults;
+    // Test configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Config")
+    float MaxAllowedFrameTime = 16.67f; // 60 FPS target
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA|Settings")
-    float MaxAcceptableFrameTime;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Config")
+    int32 MaxParticleSystemsAllowed = 50;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA|Settings")
-    int32 MaxAcceptableParticleCount;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA Config")
+    float VFXTestRadius = 2000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA|Settings")
-    bool bAutoRunValidation;
+    // Test results storage
+    UPROPERTY(BlueprintReadOnly, Category = "QA Results")
+    TArray<FQA_VFXTestResult> LastTestResults;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QA|Settings")
-    float ValidationInterval;
+    UPROPERTY(BlueprintReadOnly, Category = "QA Results")
+    float LastPerformanceScore = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "QA Results")
+    bool bAllTestsPassed = false;
+
+    // Dinosaur VFX profiles for validation
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur Testing")
+    TArray<FQA_DinosaurVFXProfile> DinosaurVFXProfiles;
 
 private:
-    float LastValidationTime;
-    bool bValidationInProgress;
-
-    // Helper functions
-    bool ValidateClassExists(const FString& ClassName);
-    bool ValidateAssetExists(const FString& AssetPath);
-    float MeasureExecutionTime(TFunction<void()> TestFunction);
+    // Internal validation helpers
+    bool ValidateParticleSystemComponent(UParticleSystemComponent* ParticleComp);
+    float CalculateVFXPerformanceImpact(AActor* VFXActor);
+    bool CheckVFXAudioSynchronization(AActor* VFXActor);
+    void InitializeDinosaurVFXProfiles();
+    FQA_VFXTestResult CreateTestResult(const FString& TestName, bool bPassed, const FString& ErrorMsg = TEXT(""));
 };
