@@ -1,161 +1,193 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "Components/AudioComponent.h"
 #include "Sound/SoundCue.h"
-#include "Engine/World.h"
-#include "../SharedTypes.h"
+#include "Sound/SoundWave.h"
+#include "Engine/Engine.h"
+#include "TimerManager.h"
+#include "Math/Vector.h"
 #include "Audio_SpatialAudioManager.generated.h"
 
 UENUM(BlueprintType)
-enum class EAudio_BiomeAudioType : uint8
+enum class EAudio_SpatialAudioType : uint8
 {
-    Forest      UMETA(DisplayName = "Forest"),
-    Swamp       UMETA(DisplayName = "Swamp"), 
-    Savanna     UMETA(DisplayName = "Savanna"),
-    Desert      UMETA(DisplayName = "Desert"),
-    Mountain    UMETA(DisplayName = "Mountain")
-};
-
-UENUM(BlueprintType)
-enum class EAudio_ThreatLevel : uint8
-{
-    Safe        UMETA(DisplayName = "Safe"),
-    Caution     UMETA(DisplayName = "Caution"),
-    Danger      UMETA(DisplayName = "Danger"),
-    Critical    UMETA(DisplayName = "Critical")
+    RadioTransmission   UMETA(DisplayName = "Radio Transmission"),
+    EnvironmentalAmbient UMETA(DisplayName = "Environmental Ambient"),
+    DinosaurVocalization UMETA(DisplayName = "Dinosaur Vocalization"),
+    ExpeditionChatter   UMETA(DisplayName = "Expedition Chatter"),
+    EmergencyAlert      UMETA(DisplayName = "Emergency Alert")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAudio_BiomeAudioConfig
+struct TRANSPERSONALGAME_API FAudio_SpatialAudioSource
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    TSoftObjectPtr<USoundCue> AmbientSound;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spatial Audio")
+    FVector Location;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float BaseVolume = 0.7f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spatial Audio")
+    float MaxRange;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float AttenuationRadius = 5000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spatial Audio")
+    float Volume;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    bool bUseReverb = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spatial Audio")
+    EAudio_SpatialAudioType AudioType;
 
-    FAudio_BiomeAudioConfig()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spatial Audio")
+    FString AudioURL;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spatial Audio")
+    bool bIsLooping;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spatial Audio")
+    bool bIsActive;
+
+    FAudio_SpatialAudioSource()
     {
-        BaseVolume = 0.7f;
-        AttenuationRadius = 5000.0f;
-        bUseReverb = true;
+        Location = FVector::ZeroVector;
+        MaxRange = 5000.0f;
+        Volume = 1.0f;
+        AudioType = EAudio_SpatialAudioType::EnvironmentalAmbient;
+        AudioURL = "";
+        bIsLooping = false;
+        bIsActive = true;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAudio_ThreatAudioConfig
+struct TRANSPERSONALGAME_API FAudio_RadioStationData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    TSoftObjectPtr<USoundCue> ThreatSound;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Radio Station")
+    FString StationName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float ThreatVolume = 0.5f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Radio Station")
+    FVector StationLocation;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio")
-    float TriggerDistance = 2000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Radio Station")
+    float TransmissionRange;
 
-    FAudio_ThreatAudioConfig()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Radio Station")
+    TArray<FString> VoiceAssetURLs;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Radio Station")
+    float TransmissionInterval;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Radio Station")
+    bool bIsOperational;
+
+    FAudio_RadioStationData()
     {
-        ThreatVolume = 0.5f;
-        TriggerDistance = 2000.0f;
+        StationName = "Unknown Station";
+        StationLocation = FVector::ZeroVector;
+        TransmissionRange = 8000.0f;
+        TransmissionInterval = 300.0f; // 5 minutes
+        bIsOperational = true;
     }
 };
 
+/**
+ * Spatial Audio Manager for 3D positioned audio sources, radio transmissions, and environmental audio
+ * Integrates with the narrative radio communication system for immersive expedition team broadcasts
+ */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AAudio_SpatialAudioManager : public AActor
+class TRANSPERSONALGAME_API UAudio_SpatialAudioManager : public UObject
 {
     GENERATED_BODY()
 
 public:
-    AAudio_SpatialAudioManager();
+    UAudio_SpatialAudioManager();
+
+    // Core spatial audio management
+    UFUNCTION(BlueprintCallable, Category = "Spatial Audio")
+    void InitializeSpatialAudio(UWorld* World);
+
+    UFUNCTION(BlueprintCallable, Category = "Spatial Audio")
+    void UpdatePlayerPosition(const FVector& PlayerLocation);
+
+    UFUNCTION(BlueprintCallable, Category = "Spatial Audio")
+    int32 AddSpatialAudioSource(const FAudio_SpatialAudioSource& AudioSource);
+
+    UFUNCTION(BlueprintCallable, Category = "Spatial Audio")
+    void RemoveSpatialAudioSource(int32 SourceID);
+
+    UFUNCTION(BlueprintCallable, Category = "Spatial Audio")
+    void UpdateSpatialAudioSource(int32 SourceID, const FAudio_SpatialAudioSource& UpdatedSource);
+
+    // Radio station management
+    UFUNCTION(BlueprintCallable, Category = "Radio System")
+    void RegisterRadioStation(const FAudio_RadioStationData& StationData);
+
+    UFUNCTION(BlueprintCallable, Category = "Radio System")
+    void PlayRadioTransmission(const FString& StationName, const FString& AudioURL);
+
+    UFUNCTION(BlueprintCallable, Category = "Radio System")
+    void SetRadioStationOperational(const FString& StationName, bool bOperational);
+
+    // Environmental audio
+    UFUNCTION(BlueprintCallable, Category = "Environmental Audio")
+    void SetBiomeAmbientAudio(const FVector& Location, float Radius, const FString& AudioURL);
+
+    UFUNCTION(BlueprintCallable, Category = "Environmental Audio")
+    void TriggerDinosaurVocalization(const FVector& Location, const FString& DinosaurType, float Intensity);
+
+    // Distance-based audio processing
+    UFUNCTION(BlueprintCallable, Category = "Audio Processing")
+    float CalculateAudioVolume(const FVector& SourceLocation, const FVector& ListenerLocation, float MaxRange) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Audio Processing")
+    bool IsAudioSourceInRange(const FVector& SourceLocation, const FVector& ListenerLocation, float MaxRange) const;
+
+    // Integration with narrative system
+    UFUNCTION(BlueprintCallable, Category = "Narrative Integration")
+    void IntegrateWithRadioCommunicationSystem();
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative Integration")
+    void ProcessExpeditionBroadcast(const FString& Message, const FVector& OriginLocation);
 
 protected:
-    virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Spatial Audio")
+    TArray<FAudio_SpatialAudioSource> ActiveAudioSources;
 
-    // Audio Components
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class UAudioComponent* BiomeAudioComponent;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Radio System")
+    TArray<FAudio_RadioStationData> RadioStations;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class UAudioComponent* ThreatAudioComponent;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio State")
+    FVector CurrentPlayerLocation;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class UAudioComponent* WeatherAudioComponent;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
+    float GlobalAudioVolume;
 
-    // Biome Audio Configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Audio")
-    TMap<EAudio_BiomeAudioType, FAudio_BiomeAudioConfig> BiomeAudioConfigs;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
+    float RadioStaticVolume;
 
-    // Threat Audio Configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Threat Audio")
-    TMap<EAudio_ThreatLevel, FAudio_ThreatAudioConfig> ThreatAudioConfigs;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
+    float EnvironmentalAudioVolume;
 
-    // Current State
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    EAudio_BiomeAudioType CurrentBiome;
-
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    EAudio_ThreatLevel CurrentThreatLevel;
-
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    float BiomeTransitionProgress;
-
-    // Audio Update Settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    float UpdateInterval = 0.5f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    float BiomeTransitionSpeed = 2.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    float ThreatDetectionRadius = 3000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
+    float MaxAudioDistance;
 
 private:
-    float LastUpdateTime;
-    class APawn* PlayerPawn;
+    UPROPERTY()
+    UWorld* WorldContext;
 
-public:
-    // Public Interface
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    void UpdateSpatialAudio();
+    UPROPERTY()
+    TMap<int32, class UAudioComponent*> AudioComponents;
 
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    EAudio_BiomeAudioType DetectCurrentBiome(const FVector& Location);
+    int32 NextSourceID;
 
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    EAudio_ThreatLevel DetectThreatLevel(const FVector& Location);
+    // Timer handles for periodic transmissions
+    FTimerHandle RadioTransmissionTimer;
 
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    void TransitionToBiome(EAudio_BiomeAudioType NewBiome);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    void SetThreatLevel(EAudio_ThreatLevel NewThreatLevel);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    void PlayWeatherAudio(TSoftObjectPtr<USoundCue> WeatherSound, float Volume = 0.6f);
-
-    UFUNCTION(BlueprintCallable, Category = "Audio")
-    void StopWeatherAudio();
-
-protected:
-    void InitializeAudioConfigs();
-    void UpdateBiomeAudio(float DeltaTime);
-    void UpdateThreatAudio();
-    void UpdateWeatherAudio();
-    
-    float CalculateDistanceToNearestThreat(const FVector& Location);
-    TArray<class APawn*> GetNearbyDinosaurs(const FVector& Location, float Radius);
+    // Internal audio processing
+    void UpdateAudioSources();
+    void ProcessRadioTransmissions();
+    UAudioComponent* CreateAudioComponent(const FAudio_SpatialAudioSource& AudioSource);
+    void CleanupInactiveAudioSources();
 };
