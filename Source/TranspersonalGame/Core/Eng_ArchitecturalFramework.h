@@ -1,333 +1,216 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/GameInstanceSubsystem.h"
 #include "Engine/World.h"
+#include "Engine/GameInstance.h"
+#include "Subsystems/GameInstanceSubsystem.h"
 #include "Subsystems/WorldSubsystem.h"
-#include "../SharedTypes.h"
+#include "SharedTypes.h"
 #include "Eng_ArchitecturalFramework.generated.h"
 
 /**
- * ENGINE ARCHITECT - CYCLE 009 ARCHITECTURAL FRAMEWORK
+ * ENGINE ARCHITECT CYCLE 003 - ARCHITECTURAL FRAMEWORK
  * 
- * CRITICAL SYSTEM: Central architectural enforcement and coordination framework
- * Ensures all 18 agents follow mandatory architectural patterns and performance rules
+ * This is the foundational architectural framework that defines:
+ * 1. System registration and lifecycle management
+ * 2. Cross-system communication protocols
+ * 3. Performance monitoring and validation
+ * 4. Module dependency resolution
+ * 5. Compilation safety and type management
  * 
- * RESPONSIBILITIES:
- * - Enforce architectural compliance across all agent outputs
- * - Validate system integration points and dependencies
- * - Monitor performance baselines (60fps PC / 30fps Console)
- * - Coordinate module initialization and shutdown sequences
- * - Provide architectural guidance to all technical agents
+ * ALL OTHER AGENTS MUST FOLLOW THESE ARCHITECTURAL RULES
  */
 
-// Architectural Compliance Levels
+// Architecture Validation Levels
 UENUM(BlueprintType)
-enum class EEng_ComplianceLevel : uint8
+enum class EEng_ArchValidationLevel : uint8
 {
-    Critical        UMETA(DisplayName = "Critical - Must Fix"),
-    Warning         UMETA(DisplayName = "Warning - Should Fix"),
-    Advisory        UMETA(DisplayName = "Advisory - Consider Fix"),
-    Compliant       UMETA(DisplayName = "Compliant - No Issues")
+    None            UMETA(DisplayName = "None"),
+    Basic           UMETA(DisplayName = "Basic"),
+    Standard        UMETA(DisplayName = "Standard"),
+    Strict          UMETA(DisplayName = "Strict"),
+    Maximum         UMETA(DisplayName = "Maximum")
 };
 
-// Performance Profile Types
-UENUM(BlueprintType)
-enum class EEng_PerformanceProfile : uint8
-{
-    Development     UMETA(DisplayName = "Development - Debug Mode"),
-    Console         UMETA(DisplayName = "Console - 30fps Target"),
-    PC_High         UMETA(DisplayName = "PC High - 60fps Target"),
-    PC_Ultra        UMETA(DisplayName = "PC Ultra - 120fps Target")
-};
-
-// System Integration Status
+// System Registration Status
 UENUM(BlueprintType)
 enum class EEng_SystemStatus : uint8
 {
-    Uninitialized   UMETA(DisplayName = "Uninitialized"),
+    Unregistered    UMETA(DisplayName = "Unregistered"),
+    Registered      UMETA(DisplayName = "Registered"),
     Initializing    UMETA(DisplayName = "Initializing"),
     Active          UMETA(DisplayName = "Active"),
     Error           UMETA(DisplayName = "Error"),
-    Shutdown        UMETA(DisplayName = "Shutdown")
+    Disabled        UMETA(DisplayName = "Disabled")
 };
 
-// Architectural Rule Violation Data
+// Module Dependencies
+UENUM(BlueprintType)
+enum class EEng_ModuleDependency : uint8
+{
+    Core            UMETA(DisplayName = "Core"),
+    Physics         UMETA(DisplayName = "Physics"),
+    World           UMETA(DisplayName = "World"),
+    AI              UMETA(DisplayName = "AI"),
+    Character       UMETA(DisplayName = "Character"),
+    Combat          UMETA(DisplayName = "Combat"),
+    Quest           UMETA(DisplayName = "Quest"),
+    Audio           UMETA(DisplayName = "Audio"),
+    VFX             UMETA(DisplayName = "VFX"),
+    UI              UMETA(DisplayName = "UI")
+};
+
+// System Registration Data
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_ArchitecturalViolation
+struct TRANSPERSONALGAME_API FEng_SystemRegistration
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    FString ViolationType;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System")
+    FString SystemName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    FString Description;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System")
+    EEng_SystemStatus Status;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    EEng_ComplianceLevel Severity;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System")
+    TArray<EEng_ModuleDependency> Dependencies;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    FString SourceModule;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System")
+    float InitializationTime;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    FString RecommendedFix;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System")
+    FDateTime LastValidation;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    float DetectionTimestamp;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System")
+    int32 ValidationErrors;
 
-    FEng_ArchitecturalViolation()
+    FEng_SystemRegistration()
     {
-        ViolationType = "Unknown";
-        Description = "No description provided";
-        Severity = EEng_ComplianceLevel::Advisory;
-        SourceModule = "Unknown";
-        RecommendedFix = "Review architectural guidelines";
-        DetectionTimestamp = 0.0f;
+        SystemName = "Unknown System";
+        Status = EEng_SystemStatus::Unregistered;
+        InitializationTime = 0.0f;
+        LastValidation = FDateTime::Now();
+        ValidationErrors = 0;
     }
 };
 
-// Performance Metrics Data
+// Performance Metrics
 USTRUCT(BlueprintType)
 struct TRANSPERSONALGAME_API FEng_PerformanceMetrics
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float CurrentFPS;
+    float FrameTime;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float TargetFPS;
+    float GameThreadTime;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float RenderThreadTime;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 ActiveActors;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    int32 PhysicsBodies;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
     float MemoryUsageMB;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float CPUUsagePercent;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float GPUUsagePercent;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 ActiveActorCount;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 PhysicsObjectCount;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    bool bPerformanceTargetMet;
-
     FEng_PerformanceMetrics()
     {
-        CurrentFPS = 0.0f;
-        TargetFPS = 60.0f;
+        FrameTime = 16.67f; // Target 60fps
+        GameThreadTime = 0.0f;
+        RenderThreadTime = 0.0f;
+        ActiveActors = 0;
+        PhysicsBodies = 0;
         MemoryUsageMB = 0.0f;
-        CPUUsagePercent = 0.0f;
-        GPUUsagePercent = 0.0f;
-        ActiveActorCount = 0;
-        PhysicsObjectCount = 0;
-        bPerformanceTargetMet = false;
-    }
-};
-
-// System Module Registration Data
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_SystemModule
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System")
-    FString ModuleName;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System")
-    FString AgentOwner;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System")
-    EEng_SystemStatus Status;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System")
-    TArray<FString> Dependencies;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System")
-    float InitializationTime;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System")
-    float LastUpdateTime;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System")
-    bool bCriticalSystem;
-
-    FEng_SystemModule()
-    {
-        ModuleName = "Unknown";
-        AgentOwner = "Unknown";
-        Status = EEng_SystemStatus::Uninitialized;
-        InitializationTime = 0.0f;
-        LastUpdateTime = 0.0f;
-        bCriticalSystem = false;
     }
 };
 
 /**
  * ARCHITECTURAL FRAMEWORK SUBSYSTEM
  * 
- * Game Instance Subsystem that provides architectural oversight for the entire game
- * Validates all systems follow Engine Architect rules and performance requirements
+ * This is the central authority for all architectural decisions.
+ * All systems must register here and follow the established patterns.
  */
-UCLASS(BlueprintType, Blueprintable)
+UCLASS(BlueprintType)
 class TRANSPERSONALGAME_API UEng_ArchitecturalFramework : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
-    UEng_ArchitecturalFramework();
-
-    // USubsystem Interface
+    // Subsystem Interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // ARCHITECTURAL COMPLIANCE SYSTEM
+    // System Registration
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void ValidateSystemCompliance(const FString& SystemName);
-
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void RegisterArchitecturalViolation(const FEng_ArchitecturalViolation& Violation);
+    bool RegisterSystem(const FString& SystemName, const TArray<EEng_ModuleDependency>& Dependencies);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    TArray<FEng_ArchitecturalViolation> GetActiveViolations() const;
+    bool UnregisterSystem(const FString& SystemName);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool IsSystemCompliant(const FString& SystemName) const;
-
-    // PERFORMANCE MONITORING SYSTEM
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void SetPerformanceProfile(EEng_PerformanceProfile Profile);
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    FEng_PerformanceMetrics GetCurrentPerformanceMetrics() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    bool IsPerformanceTargetMet() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void UpdatePerformanceMetrics();
-
-    // SYSTEM MODULE MANAGEMENT
-    UFUNCTION(BlueprintCallable, Category = "System Management")
-    void RegisterSystemModule(const FEng_SystemModule& Module);
-
-    UFUNCTION(BlueprintCallable, Category = "System Management")
-    void UpdateSystemStatus(const FString& ModuleName, EEng_SystemStatus NewStatus);
-
-    UFUNCTION(BlueprintCallable, Category = "System Management")
-    TArray<FEng_SystemModule> GetRegisteredModules() const;
-
-    UFUNCTION(BlueprintCallable, Category = "System Management")
-    bool ValidateSystemDependencies(const FString& ModuleName) const;
-
-    // ARCHITECTURAL GUIDANCE SYSTEM
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    FString GetArchitecturalGuidance(const FString& AgentName) const;
+    EEng_SystemStatus GetSystemStatus(const FString& SystemName);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool ValidateModuleIntegration(const FString& ModuleA, const FString& ModuleB) const;
+    TArray<FEng_SystemRegistration> GetAllSystems();
 
-    // EMERGENCY SYSTEMS
-    UFUNCTION(BlueprintCallable, Category = "Emergency")
-    void TriggerEmergencyShutdown(const FString& Reason);
+    // Validation
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    bool ValidateSystemIntegrity();
 
-    UFUNCTION(BlueprintCallable, Category = "Emergency")
-    void InitializeRecoveryMode();
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    bool ValidateModuleDependencies();
 
-    // DEBUG AND MONITORING
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Debug")
-    void LogArchitecturalStatus();
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    int32 GetValidationErrorCount();
 
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Debug")
-    void GenerateComplianceReport();
+    // Performance Monitoring
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    FEng_PerformanceMetrics GetCurrentPerformanceMetrics();
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    bool IsPerformanceWithinLimits();
+
+    // Compilation Safety
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    bool ValidateTypeRegistry();
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    TArray<FString> GetCompilationErrors();
 
 protected:
-    // ARCHITECTURAL DATA
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Architecture")
-    TArray<FEng_ArchitecturalViolation> ActiveViolations;
+    // Internal system registry
+    UPROPERTY()
+    TMap<FString, FEng_SystemRegistration> RegisteredSystems;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Architecture")
-    TArray<FEng_SystemModule> RegisteredModules;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance")
+    // Performance tracking
+    UPROPERTY()
     FEng_PerformanceMetrics CurrentMetrics;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance")
-    EEng_PerformanceProfile ActiveProfile;
+    // Validation settings
+    UPROPERTY(EditAnywhere, Category = "Architecture")
+    EEng_ArchValidationLevel ValidationLevel;
 
-    // CONFIGURATION
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    bool bEnableRealTimeValidation;
+    UPROPERTY(EditAnywhere, Category = "Architecture")
+    float PerformanceValidationInterval;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    float ValidationInterval;
+    UPROPERTY(EditAnywhere, Category = "Architecture")
+    bool bEnableRuntimeValidation;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    bool bStrictComplianceMode;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    bool bEmergencyModeActive;
+    // Internal methods
+    void UpdatePerformanceMetrics();
+    void ValidateSystemDependencies();
+    void LogArchitecturalEvent(const FString& Event, const FString& Details);
 
 private:
-    // Internal validation methods
-    void ValidatePerformanceCompliance();
-    void ValidateMemoryUsage();
-    void ValidateSystemIntegrity();
-    void UpdateSystemMetrics();
+    // Validation timer
+    FTimerHandle ValidationTimer;
     
-    // Timer handles
-    FTimerHandle ValidationTimerHandle;
-    FTimerHandle MetricsTimerHandle;
-};
-
-/**
- * WORLD ARCHITECTURAL COORDINATOR
- * 
- * World Subsystem that coordinates architectural compliance within specific world contexts
- * Handles level-specific architectural requirements and validations
- */
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UEng_WorldArchitecturalCoordinator : public UWorldSubsystem
-{
-    GENERATED_BODY()
-
-public:
-    UEng_WorldArchitecturalCoordinator();
-
-    // USubsystem Interface
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
-
-    // WORLD-SPECIFIC VALIDATION
-    UFUNCTION(BlueprintCallable, Category = "World Architecture")
-    void ValidateWorldCompliance();
-
-    UFUNCTION(BlueprintCallable, Category = "World Architecture")
-    void RegisterWorldSystem(const FString& SystemName, AActor* SystemActor);
-
-    UFUNCTION(BlueprintCallable, Category = "World Architecture")
-    bool IsWorldArchitecturallySound() const;
-
-    // LEVEL INTEGRATION
-    UFUNCTION(BlueprintCallable, Category = "Level Integration")
-    void OnLevelLoaded();
-
-    UFUNCTION(BlueprintCallable, Category = "Level Integration")
-    void OnLevelUnloaded();
-
-protected:
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "World Systems")
-    TMap<FString, AActor*> WorldSystems;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "World Validation")
-    bool bWorldValidationComplete;
-
-private:
-    void ValidateActorCompliance();
-    void ValidateSystemIntegration();
+    // Error tracking
+    TArray<FString> CompilationErrors;
+    int32 TotalValidationErrors;
 };
