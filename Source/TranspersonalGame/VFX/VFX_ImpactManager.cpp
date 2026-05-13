@@ -1,217 +1,191 @@
 #include "VFX_ImpactManager.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Components/SceneComponent.h"
-#include "NiagaraFunctionLibrary.h"
+#include "TimerManager.h"
 #include "Kismet/GameplayStatics.h"
+#include "Components/SceneComponent.h"
 
-AVFX_ImpactManager::AVFX_ImpactManager()
+UVFX_ImpactManager::UVFX_ImpactManager()
 {
-    PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 0.5f; // Cleanup every 0.5 seconds
-
-    // Create root component
-    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
-    RootComponent = RootSceneComponent;
-
-    // Initialize default settings
-    GlobalVFXScale = 1.0f;
-    bEnableVFX = true;
+    PrimaryComponentTick.bCanEverTick = false;
+    bWantsInitializeComponent = true;
+    
     MaxActiveEffects = 20;
+    EffectCullDistance = 5000.0f;
+    MinTimeBetweenEffects = 0.1f;
+}
 
-    // Initialize default effects data
+void UVFX_ImpactManager::BeginPlay()
+{
+    Super::BeginPlay();
     InitializeDefaultEffects();
 }
 
-void AVFX_ImpactManager::BeginPlay()
+void UVFX_ImpactManager::InitializeDefaultEffects()
 {
-    Super::BeginPlay();
-    
-    UE_LOG(LogTemp, Warning, TEXT("VFX Impact Manager initialized - Cretaceous period effects ready"));
+    // Initialize default VFX data for prehistoric impact effects
+    FVFX_ImpactData FootstepData;
+    FootstepData.Scale = FVector(2.0f, 2.0f, 1.0f);
+    FootstepData.Duration = 2.0f;
+    FootstepData.bAttachToGround = true;
+    ImpactEffects.Add(EVFX_ImpactType::FootstepDust, FootstepData);
+
+    FVFX_ImpactData BloodData;
+    BloodData.Scale = FVector(1.0f);
+    BloodData.Duration = 5.0f;
+    BloodData.bAttachToGround = false;
+    ImpactEffects.Add(EVFX_ImpactType::BloodSplatter, BloodData);
+
+    FVFX_ImpactData RockData;
+    RockData.Scale = FVector(1.5f);
+    RockData.Duration = 3.0f;
+    RockData.bAttachToGround = true;
+    ImpactEffects.Add(EVFX_ImpactType::RockDebris, RockData);
+
+    FVFX_ImpactData WaterData;
+    WaterData.Scale = FVector(1.2f, 1.2f, 2.0f);
+    WaterData.Duration = 1.5f;
+    WaterData.bAttachToGround = false;
+    ImpactEffects.Add(EVFX_ImpactType::WaterSplash, WaterData);
+
+    FVFX_ImpactData CrackData;
+    CrackData.Scale = FVector(3.0f, 3.0f, 0.1f);
+    CrackData.Duration = 8.0f;
+    CrackData.bAttachToGround = true;
+    ImpactEffects.Add(EVFX_ImpactType::GroundCrack, CrackData);
+
+    FVFX_ImpactData VegData;
+    VegData.Scale = FVector(1.0f);
+    VegData.Duration = 1.0f;
+    VegData.bAttachToGround = false;
+    ImpactEffects.Add(EVFX_ImpactType::VegetationRustle, VegData);
 }
 
-void AVFX_ImpactManager::Tick(float DeltaTime)
+void UVFX_ImpactManager::SpawnImpactEffect(EVFX_ImpactType ImpactType, const FVector& Location, const FRotator& Rotation, float ScaleMultiplier)
 {
-    Super::Tick(DeltaTime);
-    
-    // Cleanup finished effects periodically
-    CleanupFinishedEffects();
-}
-
-void AVFX_ImpactManager::TriggerImpactEffect(EVFX_ImpactType ImpactType, FVector Location, FRotator Rotation)
-{
-    if (!bEnableVFX)
+    if (!CanSpawnEffect())
     {
         return;
     }
 
-    // Check if we have too many active effects
-    if (ActiveEffects.Num() >= MaxActiveEffects)
+    FVFX_ImpactData* EffectData = ImpactEffects.Find(ImpactType);
+    if (!EffectData)
     {
-        UE_LOG(LogTemp, Warning, TEXT("VFX Impact Manager: Maximum active effects reached, skipping new effect"));
+        UE_LOG(LogTemp, Warning, TEXT("VFX_ImpactManager: No effect data found for impact type"));
         return;
     }
 
-    // Find effect data for this impact type
-    if (FVFX_ImpactData* EffectData = ImpactEffects.Find(ImpactType))
+    // Check distance culling
+    if (AActor* Owner = GetOwner())
     {
-        if (EffectData->NiagaraEffect.IsValid())
+        if (FVector::Dist(Owner->GetActorLocation(), Location) > EffectCullDistance)
         {
-            UNiagaraSystem* NiagaraSystem = EffectData->NiagaraEffect.LoadSynchronous();
-            if (NiagaraSystem)
+            return;
+        }
+    }
+
+    // Load and spawn Niagara system if available
+    if (EffectData->NiagaraSystem.IsValid())
+    {
+        UNiagaraSystem* NiagaraSystem = EffectData->NiagaraSystem.LoadSynchronous();
+        if (NiagaraSystem)
+        {
+            FVector FinalScale = EffectData->Scale * ScaleMultiplier;
+            
+            UNiagaraComponent* SpawnedEffect = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+                GetWorld(),
+                NiagaraSystem,
+                Location,
+                Rotation,
+                FinalScale,
+                true,
+                true,
+                ENCPoolMethod::None,
+                true
+            );
+
+            if (SpawnedEffect)
             {
-                FVector ScaledEffectScale = EffectData->EffectScale * GlobalVFXScale;
-                UNiagaraComponent* NewEffect = SpawnNiagaraEffect(NiagaraSystem, Location, Rotation, ScaledEffectScale);
-                
-                if (NewEffect)
-                {
-                    ActiveEffects.Add(NewEffect);
-                    UE_LOG(LogTemp, Log, TEXT("VFX Impact: Triggered %s effect at location %s"), 
-                           *UEnum::GetValueAsString(ImpactType), *Location.ToString());
-                }
+                ActiveEffects.Add(SpawnedEffect);
+                LastEffectTime = GetWorld()->GetTimeSeconds();
+
+                // Schedule cleanup
+                FTimerHandle CleanupTimer;
+                GetWorld()->GetTimerManager().SetTimer(
+                    CleanupTimer,
+                    [this, SpawnedEffect]()
+                    {
+                        RemoveExpiredEffect(SpawnedEffect);
+                    },
+                    EffectData->Duration,
+                    false
+                );
             }
         }
-        else
-        {
-            // Fallback: Create basic particle effect using engine defaults
-            UE_LOG(LogTemp, Warning, TEXT("VFX Impact: No Niagara system assigned for impact type %s, using fallback"), 
-                   *UEnum::GetValueAsString(ImpactType));
-        }
+    }
+
+    // Cleanup if we exceed max effects
+    if (ActiveEffects.Num() > MaxActiveEffects)
+    {
+        CleanupExpiredEffects();
     }
 }
 
-void AVFX_ImpactManager::TriggerDinosaurFootstep(FVector Location, float DinosaurSize)
+void UVFX_ImpactManager::SpawnFootstepEffect(const FVector& FootLocation, float DinosaurSize)
 {
-    // Adjust effect scale based on dinosaur size
-    float OriginalScale = GlobalVFXScale;
-    GlobalVFXScale *= DinosaurSize;
+    float SizeScale = FMath::Clamp(DinosaurSize, 0.5f, 5.0f);
+    SpawnImpactEffect(EVFX_ImpactType::FootstepDust, FootLocation, FRotator::ZeroRotator, SizeScale);
     
-    TriggerImpactEffect(EVFX_ImpactType::DinosaurFootstep, Location);
-    
-    // Restore original scale
-    GlobalVFXScale = OriginalScale;
-    
-    UE_LOG(LogTemp, Log, TEXT("VFX: Dinosaur footstep effect triggered (size: %.2f) at %s"), 
-           DinosaurSize, *Location.ToString());
+    // For very large dinosaurs, also spawn ground crack effect
+    if (DinosaurSize > 3.0f)
+    {
+        SpawnImpactEffect(EVFX_ImpactType::GroundCrack, FootLocation, FRotator::ZeroRotator, SizeScale * 0.8f);
+    }
 }
 
-void AVFX_ImpactManager::TriggerWaterSplash(FVector Location, float SplashIntensity)
+void UVFX_ImpactManager::SpawnBloodEffect(const FVector& ImpactLocation, const FVector& ImpactDirection)
 {
-    // Adjust effect scale based on splash intensity
-    float OriginalScale = GlobalVFXScale;
-    GlobalVFXScale *= SplashIntensity;
-    
-    TriggerImpactEffect(EVFX_ImpactType::WaterSplash, Location);
-    
-    // Restore original scale
-    GlobalVFXScale = OriginalScale;
-    
-    UE_LOG(LogTemp, Log, TEXT("VFX: Water splash effect triggered (intensity: %.2f) at %s"), 
-           SplashIntensity, *Location.ToString());
+    FRotator BloodRotation = ImpactDirection.Rotation();
+    SpawnImpactEffect(EVFX_ImpactType::BloodSplatter, ImpactLocation, BloodRotation, 1.0f);
 }
 
-void AVFX_ImpactManager::TriggerDustCloud(FVector Location, float CloudSize)
+void UVFX_ImpactManager::CleanupExpiredEffects()
 {
-    // Adjust effect scale based on cloud size
-    float OriginalScale = GlobalVFXScale;
-    GlobalVFXScale *= CloudSize;
-    
-    TriggerImpactEffect(EVFX_ImpactType::DustCloud, Location);
-    
-    // Restore original scale
-    GlobalVFXScale = OriginalScale;
-    
-    UE_LOG(LogTemp, Log, TEXT("VFX: Dust cloud effect triggered (size: %.2f) at %s"), 
-           CloudSize, *Location.ToString());
-}
-
-void AVFX_ImpactManager::CleanupFinishedEffects()
-{
-    // Remove null or finished effects from active list
-    ActiveEffects.RemoveAll([](UNiagaraComponent* Effect) {
-        if (!IsValid(Effect))
-        {
-            return true; // Remove null effects
-        }
-        
-        // Check if effect is still active
-        if (Effect->GetAsset() == nullptr || !Effect->IsActive())
-        {
-            Effect->DestroyComponent();
-            return true; // Remove finished effects
-        }
-        
-        return false; // Keep active effects
+    ActiveEffects.RemoveAll([](UNiagaraComponent* Effect)
+    {
+        return !IsValid(Effect) || !Effect->IsActive();
     });
 }
 
-UNiagaraComponent* AVFX_ImpactManager::SpawnNiagaraEffect(UNiagaraSystem* NiagaraSystem, FVector Location, FRotator Rotation, FVector Scale)
+void UVFX_ImpactManager::SetMaxActiveEffects(int32 NewMax)
 {
-    if (!NiagaraSystem || !GetWorld())
+    MaxActiveEffects = FMath::Max(1, NewMax);
+    if (ActiveEffects.Num() > MaxActiveEffects)
     {
-        return nullptr;
+        CleanupExpiredEffects();
     }
-
-    // Spawn Niagara component at location
-    UNiagaraComponent* NiagaraComponent = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
-        GetWorld(),
-        NiagaraSystem,
-        Location,
-        Rotation,
-        Scale,
-        true,  // Auto destroy
-        true,  // Auto activate
-        ENCPoolMethod::None,
-        true   // Pre cull check
-    );
-
-    return NiagaraComponent;
 }
 
-void AVFX_ImpactManager::InitializeDefaultEffects()
+bool UVFX_ImpactManager::CanSpawnEffect() const
 {
-    // Initialize default impact effects data
-    FVFX_ImpactData DinosaurFootstepData;
-    DinosaurFootstepData.ImpactType = EVFX_ImpactType::DinosaurFootstep;
-    DinosaurFootstepData.EffectScale = FVector(2.0f, 2.0f, 1.0f);
-    DinosaurFootstepData.EffectDuration = 4.0f;
-    DinosaurFootstepData.bAttachToGround = true;
-    ImpactEffects.Add(EVFX_ImpactType::DinosaurFootstep, DinosaurFootstepData);
+    if (!GetWorld())
+    {
+        return false;
+    }
 
-    FVFX_ImpactData PlayerFootstepData;
-    PlayerFootstepData.ImpactType = EVFX_ImpactType::PlayerFootstep;
-    PlayerFootstepData.EffectScale = FVector(0.5f, 0.5f, 0.3f);
-    PlayerFootstepData.EffectDuration = 2.0f;
-    PlayerFootstepData.bAttachToGround = true;
-    ImpactEffects.Add(EVFX_ImpactType::PlayerFootstep, PlayerFootstepData);
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    if (CurrentTime - LastEffectTime < MinTimeBetweenEffects)
+    {
+        return false;
+    }
 
-    FVFX_ImpactData WaterSplashData;
-    WaterSplashData.ImpactType = EVFX_ImpactType::WaterSplash;
-    WaterSplashData.EffectScale = FVector(1.5f, 1.5f, 2.0f);
-    WaterSplashData.EffectDuration = 3.0f;
-    WaterSplashData.bAttachToGround = false;
-    ImpactEffects.Add(EVFX_ImpactType::WaterSplash, WaterSplashData);
+    return ActiveEffects.Num() < MaxActiveEffects;
+}
 
-    FVFX_ImpactData DustCloudData;
-    DustCloudData.ImpactType = EVFX_ImpactType::DustCloud;
-    DustCloudData.EffectScale = FVector(3.0f, 3.0f, 1.5f);
-    DustCloudData.EffectDuration = 5.0f;
-    DustCloudData.bAttachToGround = false;
-    ImpactEffects.Add(EVFX_ImpactType::DustCloud, DustCloudData);
-
-    FVFX_ImpactData RockImpactData;
-    RockImpactData.ImpactType = EVFX_ImpactType::RockImpact;
-    RockImpactData.EffectScale = FVector(1.0f, 1.0f, 1.0f);
-    RockImpactData.EffectDuration = 2.5f;
-    RockImpactData.bAttachToGround = true;
-    ImpactEffects.Add(EVFX_ImpactType::RockImpact, RockImpactData);
-
-    FVFX_ImpactData BloodSprayData;
-    BloodSprayData.ImpactType = EVFX_ImpactType::BloodSpray;
-    BloodSprayData.EffectScale = FVector(1.2f, 1.2f, 1.0f);
-    BloodSprayData.EffectDuration = 3.5f;
-    BloodSprayData.bAttachToGround = false;
-    ImpactEffects.Add(EVFX_ImpactType::BloodSpray, BloodSprayData);
-
-    UE_LOG(LogTemp, Log, TEXT("VFX Impact Manager: Default Cretaceous period effects initialized"));
+void UVFX_ImpactManager::RemoveExpiredEffect(UNiagaraComponent* Effect)
+{
+    if (IsValid(Effect))
+    {
+        ActiveEffects.Remove(Effect);
+        Effect->DestroyComponent();
+    }
 }
