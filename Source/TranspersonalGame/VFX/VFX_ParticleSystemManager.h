@@ -3,143 +3,113 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Components/StaticMeshComponent.h"
+#include "Engine/World.h"
 #include "Particles/ParticleSystemComponent.h"
 #include "NiagaraComponent.h"
 #include "NiagaraSystem.h"
-#include "Engine/World.h"
 #include "SharedTypes.h"
 #include "VFX_ParticleSystemManager.generated.h"
 
 UENUM(BlueprintType)
-enum class EVFX_EnvironmentalType : uint8
+enum class EVFX_ParticleType : uint8
 {
-    DustCloud       UMETA(DisplayName = "Dust Cloud"),
-    WaterSplash     UMETA(DisplayName = "Water Splash"),
-    FootstepImpact  UMETA(DisplayName = "Footstep Impact"),
-    RainDroplets    UMETA(DisplayName = "Rain Droplets"),
-    VolcanicAsh     UMETA(DisplayName = "Volcanic Ash"),
-    WindParticles   UMETA(DisplayName = "Wind Particles")
+    FootstepDust        UMETA(DisplayName = "Footstep Dust"),
+    BloodImpact         UMETA(DisplayName = "Blood Impact"),
+    FireSmoke           UMETA(DisplayName = "Fire Smoke"),
+    EnvironmentalDust   UMETA(DisplayName = "Environmental Dust"),
+    WaterSplash         UMETA(DisplayName = "Water Splash"),
+    RockDebris          UMETA(DisplayName = "Rock Debris")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FVFX_EffectData
+struct FVFX_ParticleSettings
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    EVFX_EnvironmentalType EffectType = EVFX_EnvironmentalType::DustCloud;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
+    float ParticleScale = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
     float Duration = 2.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    float Intensity = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
+    int32 ParticleCount = 50;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    FVector Scale = FVector(1.0f, 1.0f, 1.0f);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
+    FVector VelocityRange = FVector(100, 100, 200);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
-    FLinearColor Color = FLinearColor::White;
-
-    FVFX_EffectData()
-    {
-        EffectType = EVFX_EnvironmentalType::DustCloud;
-        Duration = 2.0f;
-        Intensity = 1.0f;
-        Scale = FVector(1.0f, 1.0f, 1.0f);
-        Color = FLinearColor::White;
-    }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
+    FLinearColor ParticleColor = FLinearColor::White;
 };
 
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UVFX_ParticleSystemManager : public UActorComponent
+class TRANSPERSONALGAME_API AVFX_ParticleSystemManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UVFX_ParticleSystemManager();
+    AVFX_ParticleSystemManager();
 
 protected:
     virtual void BeginPlay() override;
 
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VFX Components")
+    USceneComponent* RootSceneComponent;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VFX Components")
+    UNiagaraComponent* MainParticleComponent;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Settings")
+    TMap<EVFX_ParticleType, FVFX_ParticleSettings> ParticleTypeSettings;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Assets")
+    TSoftObjectPtr<UNiagaraSystem> FootstepDustSystem;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Assets")
+    TSoftObjectPtr<UNiagaraSystem> BloodImpactSystem;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Assets")
+    TSoftObjectPtr<UNiagaraSystem> FireSmokeSystem;
+
 public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    virtual void Tick(float DeltaTime) override;
 
-    // Environmental VFX Methods
-    UFUNCTION(BlueprintCallable, Category = "VFX|Environmental")
-    void SpawnDustCloud(const FVector& Location, float Intensity = 1.0f);
+    UFUNCTION(BlueprintCallable, Category = "VFX Control")
+    void SpawnParticleEffect(EVFX_ParticleType ParticleType, FVector Location, FRotator Rotation = FRotator::ZeroRotator);
 
-    UFUNCTION(BlueprintCallable, Category = "VFX|Environmental") 
-    void SpawnWaterSplash(const FVector& Location, float Scale = 1.0f);
+    UFUNCTION(BlueprintCallable, Category = "VFX Control")
+    void SpawnFootstepEffect(FVector Location, float DinosaurMass = 1000.0f);
 
-    UFUNCTION(BlueprintCallable, Category = "VFX|Environmental")
-    void SpawnFootstepImpact(const FVector& Location, const FVector& ImpactNormal);
+    UFUNCTION(BlueprintCallable, Category = "VFX Control")
+    void SpawnBloodImpact(FVector Location, FVector ImpactNormal);
 
-    UFUNCTION(BlueprintCallable, Category = "VFX|Environmental")
-    void SpawnRainEffect(const FVector& Location, float Intensity = 1.0f);
+    UFUNCTION(BlueprintCallable, Category = "VFX Control")
+    void SpawnEnvironmentalDust(FVector Location, float WindStrength = 1.0f);
 
-    UFUNCTION(BlueprintCallable, Category = "VFX|Environmental")
-    void SpawnVolcanicAsh(const FVector& Location, const FVector& WindDirection);
+    UFUNCTION(BlueprintCallable, Category = "VFX Control")
+    void SetParticleSettings(EVFX_ParticleType ParticleType, FVFX_ParticleSettings NewSettings);
 
-    UFUNCTION(BlueprintCallable, Category = "VFX|Environmental")
-    void SpawnWindParticles(const FVector& Location, const FVector& WindDirection, float Strength = 1.0f);
+    UFUNCTION(BlueprintCallable, Category = "VFX Control")
+    FVFX_ParticleSettings GetParticleSettings(EVFX_ParticleType ParticleType) const;
 
-    // Generic effect spawner
-    UFUNCTION(BlueprintCallable, Category = "VFX|Core")
-    void SpawnEnvironmentalEffect(const FVFX_EffectData& EffectData, const FVector& Location);
+    UFUNCTION(BlueprintCallable, Category = "VFX Debug")
+    void TestAllParticleTypes();
 
-    // Effect management
-    UFUNCTION(BlueprintCallable, Category = "VFX|Management")
-    void StopAllEffects();
-
-    UFUNCTION(BlueprintCallable, Category = "VFX|Management")
-    void SetGlobalVFXIntensity(float NewIntensity);
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "VFX Debug")
+    void DebugSpawnTestEffects();
 
 protected:
-    // Niagara system references
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Systems")
-    class UNiagaraSystem* DustCloudSystem;
+    UFUNCTION()
+    void InitializeParticleSettings();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Systems")
-    class UNiagaraSystem* WaterSplashSystem;
+    UFUNCTION()
+    UNiagaraComponent* CreateParticleComponent(EVFX_ParticleType ParticleType, FVector Location);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Systems")
-    class UNiagaraSystem* FootstepSystem;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Performance")
+    int32 MaxActiveParticles = 100;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Systems")
-    class UNiagaraSystem* RainSystem;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX Performance")
+    float ParticleLifetime = 5.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Systems")
-    class UNiagaraSystem* VolcanicAshSystem;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Systems")
-    class UNiagaraSystem* WindParticleSystem;
-
-    // Active effect components
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VFX|Components")
-    TArray<class UNiagaraComponent*> ActiveEffects;
-
-    // VFX settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Settings")
-    float GlobalIntensityMultiplier = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Settings")
-    int32 MaxActiveEffects = 50;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Settings")
-    bool bEnableVFXLOD = true;
-
-    // Performance settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Performance")
-    float LODDistanceNear = 1000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX|Performance")
-    float LODDistanceFar = 5000.0f;
-
-private:
-    // Internal helper methods
-    void CleanupExpiredEffects();
-    float CalculateLODScale(const FVector& EffectLocation) const;
-    bool ShouldSpawnEffect(const FVector& Location) const;
-    void InitializeNiagaraSystems();
+    TArray<UNiagaraComponent*> ActiveParticleComponents;
 };
