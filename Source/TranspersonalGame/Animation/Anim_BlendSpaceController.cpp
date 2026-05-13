@@ -3,8 +3,6 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Animation/AnimInstance.h"
-#include "Animation/BlendSpace.h"
-#include "Animation/BlendSpace1D.h"
 #include "Engine/World.h"
 #include "Kismet/KismetMathLibrary.h"
 
@@ -13,338 +11,207 @@ UAnim_BlendSpaceController::UAnim_BlendSpaceController()
     PrimaryComponentTick.bCanEverTick = true;
     PrimaryComponentTick.bStartWithTickEnabled = true;
     
-    ActiveBlendSpaceIndex = -1;
-    SmoothingSpeed = 5.0f;
-    ParameterSmoothingTime = 0.1f;
-    PreviousParameters = FVector2D::ZeroVector;
-    TargetParameters = FVector2D::ZeroVector;
+    // Initialize smoothing rates
+    SpeedSmoothingRate = 5.0f;
+    DirectionSmoothingRate = 8.0f;
+    LeanSmoothingRate = 3.0f;
+    
+    // Initialize thresholds
+    MovementThreshold = 10.0f;
+    RunningThreshold = 300.0f;
+    
+    // Initialize cached values
+    PreviousSpeed = 0.0f;
+    PreviousDirection = 0.0f;
+    PreviousLean = 0.0f;
+    
+    OwnerCharacter = nullptr;
 }
 
 void UAnim_BlendSpaceController::BeginPlay()
 {
     Super::BeginPlay();
-    
-    CacheComponents();
-    InitializeDefaultBlendSpaces();
-    
-    // Set locomotion as default active blend space
-    SetActiveBlendSpace(EAnim_BlendSpaceType::Locomotion);
+    CacheOwnerCharacter();
 }
 
 void UAnim_BlendSpaceController::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    if (!OwnerCharacter || !MovementComponent)
-    {
-        return;
-    }
-    
-    // Update blend space parameters based on current state
-    if (ActiveBlendSpaceIndex >= 0 && ActiveBlendSpaceIndex < BlendSpaces.Num())
-    {
-        FAnim_BlendSpaceData& ActiveBlendSpace = BlendSpaces[ActiveBlendSpaceIndex];
-        
-        switch (ActiveBlendSpace.BlendSpaceType)
-        {
-            case EAnim_BlendSpaceType::Locomotion:
-                CalculateLocomotionParameters();
-                break;
-                
-            case EAnim_BlendSpaceType::Combat:
-                CalculateCombatParameters();
-                break;
-                
-            default:
-                break;
-        }
-    }
-    
-    // Smooth parameter transitions
-    SmoothBlendSpaceParameters(DeltaTime);
-}
-
-void UAnim_BlendSpaceController::CacheComponents()
-{
-    OwnerCharacter = Cast<ACharacter>(GetOwner());
-    if (OwnerCharacter)
-    {
-        MovementComponent = OwnerCharacter->GetCharacterMovement();
-        
-        USkeletalMeshComponent* MeshComp = OwnerCharacter->GetMesh();
-        if (MeshComp)
-        {
-            AnimInstance = MeshComp->GetAnimInstance();
-        }
-    }
-}
-
-void UAnim_BlendSpaceController::InitializeDefaultBlendSpaces()
-{
-    // Initialize with default blend space entries
-    BlendSpaces.Empty();
-    
-    // Add locomotion blend space
-    FAnim_BlendSpaceData LocomotionData;
-    LocomotionData.BlendSpaceType = EAnim_BlendSpaceType::Locomotion;
-    LocomotionData.bIsActive = true;
-    BlendSpaces.Add(LocomotionData);
-    
-    // Add combat blend space
-    FAnim_BlendSpaceData CombatData;
-    CombatData.BlendSpaceType = EAnim_BlendSpaceType::Combat;
-    CombatData.bIsActive = false;
-    BlendSpaces.Add(CombatData);
-    
-    // Add emotional state blend spaces
-    FAnim_BlendSpaceData InjuredData;
-    InjuredData.BlendSpaceType = EAnim_BlendSpaceType::Injured;
-    InjuredData.bIsActive = false;
-    BlendSpaces.Add(InjuredData);
-    
-    FAnim_BlendSpaceData ExhaustedData;
-    ExhaustedData.BlendSpaceType = EAnim_BlendSpaceType::Exhausted;
-    ExhaustedData.bIsActive = false;
-    BlendSpaces.Add(ExhaustedData);
-    
-    FAnim_BlendSpaceData AfraidData;
-    AfraidData.BlendSpaceType = EAnim_BlendSpaceType::Afraid;
-    AfraidData.bIsActive = false;
-    BlendSpaces.Add(AfraidData);
-}
-
-void UAnim_BlendSpaceController::SetActiveBlendSpace(EAnim_BlendSpaceType BlendSpaceType)
-{
-    int32 OldIndex = ActiveBlendSpaceIndex;
-    int32 NewIndex = FindBlendSpaceIndex(BlendSpaceType);
-    
-    if (NewIndex != -1 && NewIndex != ActiveBlendSpaceIndex)
-    {
-        // Deactivate old blend space
-        if (ActiveBlendSpaceIndex >= 0 && ActiveBlendSpaceIndex < BlendSpaces.Num())
-        {
-            BlendSpaces[ActiveBlendSpaceIndex].bIsActive = false;
-        }
-        
-        // Activate new blend space
-        ActiveBlendSpaceIndex = NewIndex;
-        BlendSpaces[ActiveBlendSpaceIndex].bIsActive = true;
-        
-        // Trigger blueprint event
-        EAnim_BlendSpaceType OldType = (OldIndex >= 0 && OldIndex < BlendSpaces.Num()) ? 
-            BlendSpaces[OldIndex].BlendSpaceType : EAnim_BlendSpaceType::Locomotion;
-        OnBlendSpaceChanged(OldType, BlendSpaceType);
-        
-        UE_LOG(LogTemp, Log, TEXT("BlendSpaceController: Changed active blend space to %s"), 
-            *UEnum::GetValueAsString(BlendSpaceType));
-    }
-}
-
-void UAnim_BlendSpaceController::UpdateBlendSpaceParameters(float XValue, float YValue)
-{
-    if (ActiveBlendSpaceIndex >= 0 && ActiveBlendSpaceIndex < BlendSpaces.Num())
-    {
-        TargetParameters = FVector2D(XValue, YValue);
-        OnBlendSpaceParametersUpdated(XValue, YValue);
-    }
-}
-
-void UAnim_BlendSpaceController::SetBlendSpaceWeight(EAnim_BlendSpaceType BlendSpaceType, float Weight)
-{
-    int32 Index = FindBlendSpaceIndex(BlendSpaceType);
-    if (Index != -1)
-    {
-        BlendSpaces[Index].BlendWeight = FMath::Clamp(Weight, 0.0f, 1.0f);
-    }
-}
-
-FAnim_BlendSpaceData UAnim_BlendSpaceController::GetActiveBlendSpaceData() const
-{
-    if (ActiveBlendSpaceIndex >= 0 && ActiveBlendSpaceIndex < BlendSpaces.Num())
-    {
-        return BlendSpaces[ActiveBlendSpaceIndex];
-    }
-    
-    return FAnim_BlendSpaceData();
-}
-
-bool UAnim_BlendSpaceController::IsBlendSpaceActive(EAnim_BlendSpaceType BlendSpaceType) const
-{
-    int32 Index = FindBlendSpaceIndex(BlendSpaceType);
-    return Index != -1 && BlendSpaces[Index].bIsActive;
-}
-
-void UAnim_BlendSpaceController::AddBlendSpace(EAnim_BlendSpaceType BlendSpaceType, UBlendSpace* BlendSpaceAsset)
-{
-    int32 Index = FindBlendSpaceIndex(BlendSpaceType);
-    if (Index != -1)
-    {
-        BlendSpaces[Index].BlendSpaceAsset = BlendSpaceAsset;
-    }
-    else
-    {
-        FAnim_BlendSpaceData NewData;
-        NewData.BlendSpaceType = BlendSpaceType;
-        NewData.BlendSpaceAsset = BlendSpaceAsset;
-        BlendSpaces.Add(NewData);
-    }
-}
-
-void UAnim_BlendSpaceController::AddBlendSpace1D(EAnim_BlendSpaceType BlendSpaceType, UBlendSpace1D* BlendSpace1DAsset)
-{
-    int32 Index = FindBlendSpaceIndex(BlendSpaceType);
-    if (Index != -1)
-    {
-        BlendSpaces[Index].BlendSpace1DAsset = BlendSpace1DAsset;
-    }
-    else
-    {
-        FAnim_BlendSpaceData NewData;
-        NewData.BlendSpaceType = BlendSpaceType;
-        NewData.BlendSpace1DAsset = BlendSpace1DAsset;
-        BlendSpaces.Add(NewData);
-    }
-}
-
-void UAnim_BlendSpaceController::RemoveBlendSpace(EAnim_BlendSpaceType BlendSpaceType)
-{
-    int32 Index = FindBlendSpaceIndex(BlendSpaceType);
-    if (Index != -1)
-    {
-        if (Index == ActiveBlendSpaceIndex)
-        {
-            ActiveBlendSpaceIndex = -1;
-        }
-        BlendSpaces.RemoveAt(Index);
-    }
-}
-
-void UAnim_BlendSpaceController::CalculateLocomotionParameters()
-{
-    if (!MovementComponent)
-    {
-        return;
-    }
-    
-    FVector2D MovementDirection = CalculateDirectionalMovement();
-    float MovementSpeed = CalculateMovementSpeed();
-    
-    // X-axis: Forward/Backward movement (-1 to 1)
-    // Y-axis: Left/Right movement (-1 to 1) 
-    float XValue = MovementDirection.X * MovementSpeed;
-    float YValue = MovementDirection.Y * MovementSpeed;
-    
-    UpdateBlendSpaceParameters(XValue, YValue);
-}
-
-void UAnim_BlendSpaceController::CalculateCombatParameters()
-{
     if (!OwnerCharacter)
     {
+        CacheOwnerCharacter();
         return;
     }
     
-    // Combat blend space parameters could be based on:
-    // X-axis: Attack intensity (0 to 1)
-    // Y-axis: Defense stance (-1 to 1)
-    
-    // For now, use basic movement but with different scaling
-    FVector2D MovementDirection = CalculateDirectionalMovement();
-    float MovementSpeed = CalculateMovementSpeed() * 0.5f; // Slower in combat
-    
-    float XValue = MovementSpeed; // Attack readiness
-    float YValue = MovementDirection.Y * 0.7f; // Defensive positioning
-    
-    UpdateBlendSpaceParameters(XValue, YValue);
+    UpdateLocomotionFromCharacter();
+    SmoothAllParameters(DeltaTime);
 }
 
-void UAnim_BlendSpaceController::CalculateEmotionalParameters(float FearLevel, float HealthPercentage, float StaminaPercentage)
+void UAnim_BlendSpaceController::UpdateBlendSpaceParameters(float Speed, float Direction, float Lean)
 {
-    // Emotional state affects movement parameters
-    // X-axis: Urgency (based on fear and health)
-    // Y-axis: Stability (based on stamina and health)
-    
-    float Urgency = FMath::Clamp(FearLevel + (1.0f - HealthPercentage), 0.0f, 1.0f);
-    float Stability = FMath::Clamp((HealthPercentage + StaminaPercentage) * 0.5f, 0.0f, 1.0f);
-    
-    UpdateBlendSpaceParameters(Urgency, Stability);
+    BlendSpaceData.Speed = Speed;
+    BlendSpaceData.Direction = Direction;
+    BlendSpaceData.Lean = Lean;
 }
 
-int32 UAnim_BlendSpaceController::FindBlendSpaceIndex(EAnim_BlendSpaceType BlendSpaceType) const
+void UAnim_BlendSpaceController::SetMovementBlendSpace(UBlendSpace* NewBlendSpace)
 {
-    for (int32 i = 0; i < BlendSpaces.Num(); i++)
-    {
-        if (BlendSpaces[i].BlendSpaceType == BlendSpaceType)
-        {
-            return i;
-        }
-    }
-    return -1;
+    BlendSpaceData.MovementBlendSpace = NewBlendSpace;
 }
 
-void UAnim_BlendSpaceController::SmoothBlendSpaceParameters(float DeltaTime)
+void UAnim_BlendSpaceController::SetSpeedBlendSpace(UBlendSpace1D* NewBlendSpace)
 {
-    if (ActiveBlendSpaceIndex >= 0 && ActiveBlendSpaceIndex < BlendSpaces.Num())
-    {
-        FAnim_BlendSpaceData& ActiveBlendSpace = BlendSpaces[ActiveBlendSpaceIndex];
-        
-        // Smooth interpolation towards target parameters
-        PreviousParameters = FMath::Vector2DInterpTo(
-            PreviousParameters, 
-            TargetParameters, 
-            DeltaTime, 
-            SmoothingSpeed
-        );
-        
-        // Update the blend space data
-        ActiveBlendSpace.XAxisValue = PreviousParameters.X;
-        ActiveBlendSpace.YAxisValue = PreviousParameters.Y;
-    }
+    BlendSpaceData.SpeedBlendSpace = NewBlendSpace;
 }
 
-FVector2D UAnim_BlendSpaceController::CalculateDirectionalMovement() const
+FAnim_LocomotionParameters UAnim_BlendSpaceController::CalculateLocomotionParameters(const FVector& Velocity, const FRotator& ActorRotation)
 {
-    if (!OwnerCharacter || !MovementComponent)
-    {
-        return FVector2D::ZeroVector;
-    }
+    FAnim_LocomotionParameters Params;
     
-    FVector Velocity = MovementComponent->Velocity;
-    FVector ForwardVector = OwnerCharacter->GetActorForwardVector();
-    FVector RightVector = OwnerCharacter->GetActorRightVector();
+    // Calculate velocity magnitude
+    Params.Velocity = Velocity.Size();
     
-    // Project velocity onto character's local axes
-    float ForwardSpeed = FVector::DotProduct(Velocity, ForwardVector);
-    float RightSpeed = FVector::DotProduct(Velocity, RightVector);
+    // Determine movement states
+    Params.bIsMoving = Params.Velocity > MovementThreshold;
+    Params.bIsRunning = Params.Velocity > RunningThreshold;
+    Params.bIsInAir = false; // Will be set by character movement component
     
-    // Normalize to -1 to 1 range
-    float MaxSpeed = MovementComponent->MaxWalkSpeed;
-    if (MaxSpeed > 0.0f)
-    {
-        ForwardSpeed /= MaxSpeed;
-        RightSpeed /= MaxSpeed;
-    }
+    // Calculate direction angle
+    Params.DirectionAngle = CalculateDirectionAngle(Velocity, ActorRotation);
     
-    return FVector2D(
-        FMath::Clamp(ForwardSpeed, -1.0f, 1.0f),
-        FMath::Clamp(RightSpeed, -1.0f, 1.0f)
-    );
+    // Calculate lean amount based on velocity change
+    Params.LeanAmount = CalculateLeanAmount(Velocity, GetWorld()->GetDeltaSeconds());
+    
+    return Params;
 }
 
-float UAnim_BlendSpaceController::CalculateMovementSpeed() const
+float UAnim_BlendSpaceController::CalculateDirectionAngle(const FVector& Velocity, const FRotator& ActorRotation)
 {
-    if (!MovementComponent)
+    if (Velocity.SizeSquared() < MovementThreshold * MovementThreshold)
     {
         return 0.0f;
     }
     
-    float CurrentSpeed = MovementComponent->Velocity.Size2D();
-    float MaxSpeed = MovementComponent->MaxWalkSpeed;
+    // Get velocity direction in world space
+    FVector VelocityDirection = Velocity.GetSafeNormal();
     
-    if (MaxSpeed > 0.0f)
+    // Get actor forward vector
+    FVector ActorForward = ActorRotation.Vector();
+    
+    // Calculate angle between velocity and forward vector
+    float DotProduct = FVector::DotProduct(VelocityDirection, ActorForward);
+    float CrossProduct = FVector::CrossProduct(VelocityDirection, ActorForward).Z;
+    
+    // Convert to angle in degrees
+    float Angle = FMath::RadiansToDegrees(FMath::Atan2(CrossProduct, DotProduct));
+    
+    // Normalize to -180 to 180 range
+    return FMath::ClampAngle(Angle, -180.0f, 180.0f);
+}
+
+float UAnim_BlendSpaceController::CalculateLeanAmount(const FVector& Velocity, float DeltaTime)
+{
+    if (DeltaTime <= 0.0f)
     {
-        return FMath::Clamp(CurrentSpeed / MaxSpeed, 0.0f, 1.0f);
+        return 0.0f;
     }
     
-    return 0.0f;
+    // Calculate acceleration based on velocity change
+    static FVector PreviousVelocity = FVector::ZeroVector;
+    FVector Acceleration = (Velocity - PreviousVelocity) / DeltaTime;
+    PreviousVelocity = Velocity;
+    
+    // Calculate lean based on lateral acceleration
+    float LateralAcceleration = FVector::CrossProduct(Acceleration, FVector::UpVector).Size();
+    
+    // Scale and clamp lean amount
+    float LeanAmount = LateralAcceleration / 1000.0f; // Scale factor
+    return FMath::Clamp(LeanAmount, -1.0f, 1.0f);
+}
+
+void UAnim_BlendSpaceController::EvaluateBlendSpace(UBlendSpace* BlendSpace, float XValue, float YValue, TArray<FBlendSampleData>& OutSampleData)
+{
+    if (!BlendSpace)
+    {
+        OutSampleData.Empty();
+        return;
+    }
+    
+    // Create blend input
+    FVector BlendInput(XValue, YValue, 0.0f);
+    
+    // Evaluate blend space
+    BlendSpace->GetSamplesFromBlendInput(BlendInput, OutSampleData);
+}
+
+void UAnim_BlendSpaceController::EvaluateBlendSpace1D(UBlendSpace1D* BlendSpace, float Value, TArray<FBlendSampleData>& OutSampleData)
+{
+    if (!BlendSpace)
+    {
+        OutSampleData.Empty();
+        return;
+    }
+    
+    // Create blend input for 1D blend space
+    FVector BlendInput(Value, 0.0f, 0.0f);
+    
+    // Evaluate 1D blend space
+    BlendSpace->GetSamplesFromBlendInput(BlendInput, OutSampleData);
+}
+
+float UAnim_BlendSpaceController::SmoothParameter(float CurrentValue, float TargetValue, float SmoothingSpeed, float DeltaTime)
+{
+    if (SmoothingSpeed <= 0.0f)
+    {
+        return TargetValue;
+    }
+    
+    return FMath::FInterpTo(CurrentValue, TargetValue, DeltaTime, SmoothingSpeed);
+}
+
+void UAnim_BlendSpaceController::SmoothAllParameters(float DeltaTime)
+{
+    // Smooth speed
+    float TargetSpeed = LocomotionParams.Velocity;
+    BlendSpaceData.Speed = SmoothParameter(BlendSpaceData.Speed, TargetSpeed, SpeedSmoothingRate, DeltaTime);
+    PreviousSpeed = BlendSpaceData.Speed;
+    
+    // Smooth direction
+    float TargetDirection = LocomotionParams.DirectionAngle;
+    BlendSpaceData.Direction = SmoothParameter(BlendSpaceData.Direction, TargetDirection, DirectionSmoothingRate, DeltaTime);
+    PreviousDirection = BlendSpaceData.Direction;
+    
+    // Smooth lean
+    float TargetLean = LocomotionParams.LeanAmount;
+    BlendSpaceData.Lean = SmoothParameter(BlendSpaceData.Lean, TargetLean, LeanSmoothingRate, DeltaTime);
+    PreviousLean = BlendSpaceData.Lean;
+}
+
+void UAnim_BlendSpaceController::CacheOwnerCharacter()
+{
+    OwnerCharacter = Cast<ACharacter>(GetOwner());
+}
+
+void UAnim_BlendSpaceController::UpdateLocomotionFromCharacter()
+{
+    if (!OwnerCharacter || !OwnerCharacter->GetCharacterMovement())
+    {
+        return;
+    }
+    
+    UCharacterMovementComponent* MovementComp = OwnerCharacter->GetCharacterMovement();
+    
+    // Get current velocity and rotation
+    FVector CurrentVelocity = MovementComp->Velocity;
+    FRotator CurrentRotation = OwnerCharacter->GetActorRotation();
+    
+    // Update locomotion parameters
+    LocomotionParams = CalculateLocomotionParameters(CurrentVelocity, CurrentRotation);
+    
+    // Update air state from movement component
+    LocomotionParams.bIsInAir = MovementComp->IsFalling();
+    
+    // Update blend space parameters with raw values
+    UpdateBlendSpaceParameters(LocomotionParams.Velocity, LocomotionParams.DirectionAngle, LocomotionParams.LeanAmount);
 }
