@@ -4,173 +4,134 @@
 #include "Engine/DataTable.h"
 #include "CharacterTypes.generated.h"
 
-/**
- * Character archetype definitions for prehistoric tribal survivors
- */
 UENUM(BlueprintType)
-enum class EChar_TribalArchetype : uint8
+enum class EChar_TribalRole : uint8
 {
     Hunter      UMETA(DisplayName = "Hunter"),
+    Gatherer    UMETA(DisplayName = "Gatherer"),
     Warrior     UMETA(DisplayName = "Warrior"),
     Elder       UMETA(DisplayName = "Elder"),
     Child       UMETA(DisplayName = "Child"),
-    Scout       UMETA(DisplayName = "Scout"),
-    Gatherer    UMETA(DisplayName = "Gatherer")
+    Shaman      UMETA(DisplayName = "Shaman"),
+    Crafter     UMETA(DisplayName = "Crafter")
 };
 
-/**
- * Physical build types for character variation
- */
 UENUM(BlueprintType)
-enum class EChar_PhysicalBuild : uint8
+enum class EChar_BodyType : uint8
 {
     Lean        UMETA(DisplayName = "Lean"),
+    Athletic    UMETA(DisplayName = "Athletic"),
     Muscular    UMETA(DisplayName = "Muscular"),
     Stocky      UMETA(DisplayName = "Stocky"),
-    Tall        UMETA(DisplayName = "Tall"),
-    Short       UMETA(DisplayName = "Short")
+    Elder       UMETA(DisplayName = "Elder")
 };
 
-/**
- * Age categories for character generation
- */
 UENUM(BlueprintType)
-enum class EChar_AgeCategory : uint8
+enum class EChar_SkinTone : uint8
 {
-    Child       UMETA(DisplayName = "Child (8-15)"),
-    YoungAdult  UMETA(DisplayName = "Young Adult (16-25)"),
-    Adult       UMETA(DisplayName = "Adult (26-40)"),
-    MiddleAged  UMETA(DisplayName = "Middle Aged (41-55)"),
-    Elder       UMETA(DisplayName = "Elder (56+)")
+    Fair        UMETA(DisplayName = "Fair"),
+    Olive       UMETA(DisplayName = "Olive"),
+    Tan         UMETA(DisplayName = "Tan"),
+    Dark        UMETA(DisplayName = "Dark"),
+    Weathered   UMETA(DisplayName = "Weathered")
 };
 
-/**
- * Clothing and equipment styles
- */
-UENUM(BlueprintType)
-enum class EChar_ClothingStyle : uint8
-{
-    BasicHides      UMETA(DisplayName = "Basic Animal Hides"),
-    LeatherArmor    UMETA(DisplayName = "Leather Armor"),
-    FurCloak        UMETA(DisplayName = "Fur Cloak"),
-    BoneDecorated   UMETA(DisplayName = "Bone Decorated"),
-    TribalRobes     UMETA(DisplayName = "Tribal Robes"),
-    HunterGear      UMETA(DisplayName = "Hunter Gear")
-};
-
-/**
- * Character appearance data structure for procedural generation
- */
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FChar_AppearanceData : public FTableRowBase
+struct TRANSPERSONALGAME_API FChar_TribalAppearance
 {
     GENERATED_BODY()
 
-    FChar_AppearanceData()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
+    EChar_TribalRole Role = EChar_TribalRole::Hunter;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
+    EChar_BodyType BodyType = EChar_BodyType::Athletic;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
+    EChar_SkinTone SkinTone = EChar_SkinTone::Tan;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
+    FString HairStyle = TEXT("Braided");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
+    FString FacialHair = TEXT("None");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
+    TArray<FString> Scars;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
+    TArray<FString> Tattoos;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
+    FString ClothingStyle = TEXT("Leather_Basic");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
+    TArray<FString> Accessories;
+
+    FChar_TribalAppearance()
     {
-        Archetype = EChar_TribalArchetype::Hunter;
-        PhysicalBuild = EChar_PhysicalBuild::Muscular;
-        AgeCategory = EChar_AgeCategory::Adult;
-        ClothingStyle = EChar_ClothingStyle::BasicHides;
-        Height = 175.0f;
-        Weight = 70.0f;
-        SkinTone = FLinearColor(0.8f, 0.6f, 0.4f, 1.0f);
-        HairColor = FLinearColor(0.2f, 0.1f, 0.05f, 1.0f);
-        bHasScars = false;
-        bHasTattoos = false;
-        bHasFacePaint = false;
+        Scars.Add(TEXT("Face_Scar_01"));
+        Tattoos.Add(TEXT("Tribal_Marks_Basic"));
+        Accessories.Add(TEXT("Bone_Necklace"));
     }
-
-    /** Character archetype */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
-    EChar_TribalArchetype Archetype;
-
-    /** Physical build type */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
-    EChar_PhysicalBuild PhysicalBuild;
-
-    /** Age category */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
-    EChar_AgeCategory AgeCategory;
-
-    /** Clothing and equipment style */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
-    EChar_ClothingStyle ClothingStyle;
-
-    /** Character height in cm */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical", meta = (ClampMin = "120.0", ClampMax = "220.0"))
-    float Height;
-
-    /** Character weight in kg */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical", meta = (ClampMin = "30.0", ClampMax = "150.0"))
-    float Weight;
-
-    /** Skin tone color */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    FLinearColor SkinTone;
-
-    /** Hair color */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    FLinearColor HairColor;
-
-    /** Has visible scars */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Details")
-    bool bHasScars;
-
-    /** Has tribal tattoos */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Details")
-    bool bHasTattoos;
-
-    /** Has face paint */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Details")
-    bool bHasFacePaint;
-
-    /** Character name */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Identity")
-    FString CharacterName;
-
-    /** Brief background description */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Identity")
-    FString BackgroundDescription;
 };
 
-/**
- * Equipment loadout for different character types
- */
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FChar_EquipmentLoadout
+struct TRANSPERSONALGAME_API FChar_MetaHumanConfig : public FTableRowBase
 {
     GENERATED_BODY()
 
-    FChar_EquipmentLoadout()
-    {
-        PrimaryWeapon = TEXT("Stone Spear");
-        SecondaryWeapon = TEXT("Stone Knife");
-        bHasShield = false;
-        bHasBag = true;
-    }
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
+    FString MetaHumanAssetPath;
 
-    /** Primary weapon */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Equipment")
-    FString PrimaryWeapon;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
+    FChar_TribalAppearance Appearance;
 
-    /** Secondary weapon or tool */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Equipment")
-    FString SecondaryWeapon;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
+    float Height = 175.0f;
 
-    /** Has shield or protective gear */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Equipment")
-    bool bHasShield;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
+    float Weight = 70.0f;
 
-    /** Has carrying bag or pouch */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Equipment")
-    bool bHasBag;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
+    int32 Age = 25;
 
-    /** List of tools carried */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Equipment")
-    TArray<FString> Tools;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
+    bool bIsMale = true;
 
-    /** List of consumables carried */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Equipment")
-    TArray<FString> Consumables;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
+    FString CharacterName = TEXT("Tribal_Hunter");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MetaHuman")
+    FString Biography = TEXT("A skilled hunter who has survived the dangers of the Cretaceous period.");
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FChar_ClothingSet
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clothing")
+    FString SetName = TEXT("Basic_Leather");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clothing")
+    FString ChestPiece = TEXT("Leather_Vest");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clothing")
+    FString LegPiece = TEXT("Leather_Pants");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clothing")
+    FString FootPiece = TEXT("Fur_Boots");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clothing")
+    FString HeadPiece = TEXT("None");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clothing")
+    TArray<FString> Accessories;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clothing")
+    FLinearColor PrimaryColor = FLinearColor(0.4f, 0.3f, 0.2f, 1.0f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Clothing")
+    FLinearColor SecondaryColor = FLinearColor(0.2f, 0.15f, 0.1f, 1.0f);
 };
