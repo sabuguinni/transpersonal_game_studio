@@ -1,401 +1,321 @@
 #include "Narr_DialogueSystem.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Components/AudioComponent.h"
-#include "Kismet/GameplayStatics.h"
-#include "Sound/SoundCue.h"
+#include "GameFramework/Actor.h"
+#include "Components/ActorComponent.h"
 
-UNarr_DialogueSystem::UNarr_DialogueSystem()
+// UNarr_DialogueNode Implementation
+UNarr_DialogueNode::UNarr_DialogueNode()
 {
-    GlobalDialogueRange = 1000.0f;
-    DialogueCooldownTime = 5.0f;
-    bEnableProximityDialogues = true;
+    NodeID = 0;
+    bIsQuestNode = false;
+    QuestID = TEXT("");
 }
 
-void UNarr_DialogueSystem::Initialize(FSubsystemCollectionBase& Collection)
+bool UNarr_DialogueNode::HasValidChoices() const
 {
-    Super::Initialize(Collection);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Narrative Dialogue System initialized"));
-    
-    // Initialize default character profiles
-    LoadDialogueData();
+    return PlayerChoices.Num() > 0;
 }
 
-void UNarr_DialogueSystem::Deinitialize()
+FNarr_DialogueChoice UNarr_DialogueNode::GetChoiceByIndex(int32 Index) const
 {
-    // Save progress before shutdown
-    SaveDialogueProgress();
-    
-    // Clear data
-    RegisteredCharacters.Empty();
-    DialogueHistory.Empty();
-    LoadedVoiceLines.Empty();
-    
-    Super::Deinitialize();
-}
-
-void UNarr_DialogueSystem::RegisterCharacter(const FString& CharacterID, const FNarr_CharacterProfile& Profile)
-{
-    if (CharacterID.IsEmpty())
+    if (PlayerChoices.IsValidIndex(Index))
     {
-        UE_LOG(LogTemp, Warning, TEXT("Cannot register character with empty ID"));
-        return;
+        return PlayerChoices[Index];
     }
-    
-    RegisteredCharacters.Add(CharacterID, Profile);
-    DialogueHistory.Add(CharacterID, TArray<FString>());
-    
-    UE_LOG(LogTemp, Log, TEXT("Registered character: %s with personality: %d"), 
-           *CharacterID, (int32)Profile.PersonalityType);
+    return FNarr_DialogueChoice();
 }
 
-bool UNarr_DialogueSystem::GetCharacterProfile(const FString& CharacterID, FNarr_CharacterProfile& OutProfile)
+// UNarr_CharacterProfile Implementation
+UNarr_CharacterProfile::UNarr_CharacterProfile()
 {
-    if (FNarr_CharacterProfile* Profile = RegisteredCharacters.Find(CharacterID))
+    CharacterName = TEXT("Unknown Survivor");
+    Role = ENarr_CharacterRole::Survivor;
+    CharacterDescription = FText::FromString(TEXT("A survivor in the prehistoric world"));
+    DefaultGreeting = TEXT("Greetings, fellow survivor.");
+}
+
+// UNarr_DialogueComponent Implementation
+UNarr_DialogueComponent::UNarr_DialogueComponent()
+{
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.bStartWithTickEnabled = false;
+    
+    CharacterProfile = nullptr;
+    CurrentState = ENarr_DialogueState::Inactive;
+    CurrentNodeID = -1;
+    InteractionRange = 300.0f;
+    bCanRepeatDialogues = true;
+}
+
+void UNarr_DialogueComponent::BeginPlay()
+{
+    Super::BeginPlay();
+    
+    if (CharacterProfile)
     {
-        OutProfile = *Profile;
-        return true;
+        UE_LOG(LogTemp, Log, TEXT("Dialogue Component initialized for character: %s"), *CharacterProfile->CharacterName);
     }
-    return false;
 }
 
-TArray<FString> UNarr_DialogueSystem::GetAllCharacterIDs()
+void UNarr_DialogueComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    TArray<FString> CharacterIDs;
-    RegisteredCharacters.GetKeys(CharacterIDs);
-    return CharacterIDs;
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    
+    if (CurrentState == ENarr_DialogueState::Playing)
+    {
+        ProcessCurrentNode();
+    }
 }
 
-bool UNarr_DialogueSystem::TriggerDialogue(const FString& CharacterID, ENarr_DialogueType DialogueType, AActor* Player, AActor* NPC)
+bool UNarr_DialogueComponent::StartDialogue(int32 NodeID)
 {
-    if (!Player || !NPC)
+    if (CurrentState != ENarr_DialogueState::Inactive && !bCanRepeatDialogues)
     {
         return false;
     }
-    
-    if (!CanTriggerDialogue(CharacterID, DialogueType))
+
+    UNarr_DialogueNode* StartNode = FindNodeByID(NodeID);
+    if (!StartNode)
     {
+        UE_LOG(LogTemp, Warning, TEXT("Cannot start dialogue: Node %d not found"), NodeID);
         return false;
     }
-    
-    float Distance = FVector::Dist(Player->GetActorLocation(), NPC->GetActorLocation());
-    FNarr_DialogueLine BestDialogue = GetBestDialogue(CharacterID, DialogueType, Distance);
-    
-    if (!BestDialogue.DialogueText.IsEmpty())
-    {
-        // Play the dialogue
-        PlayVoiceLine(BestDialogue, NPC);
-        
-        // Update history
-        UpdateDialogueHistory(CharacterID, BestDialogue.DialogueText);
-        
-        UE_LOG(LogTemp, Log, TEXT("Triggered dialogue: %s from %s"), 
-               *BestDialogue.DialogueText, *CharacterID);
-        return true;
-    }
-    
-    return false;
-}
 
-FNarr_DialogueLine UNarr_DialogueSystem::GetBestDialogue(const FString& CharacterID, ENarr_DialogueType DialogueType, float Distance)
-{
-    FNarr_DialogueLine BestDialogue;
-    float BestPriority = -1.0f;
+    CurrentNodeID = NodeID;
+    CurrentState = ENarr_DialogueState::Playing;
     
-    if (FNarr_CharacterProfile* Profile = RegisteredCharacters.Find(CharacterID))
-    {
-        for (const FNarr_DialogueLine& Dialogue : Profile->AvailableDialogues)
-        {
-            if (Dialogue.DialogueType == DialogueType || DialogueType == ENarr_DialogueType::Information)
-            {
-                if (Distance <= Dialogue.TriggerDistance)
-                {
-                    float Priority = CalculateDialoguePriority(Dialogue, Distance, DialogueType);
-                    if (Priority > BestPriority)
-                    {
-                        BestPriority = Priority;
-                        BestDialogue = Dialogue;
-                    }
-                }
-            }
-        }
-    }
+    SetComponentTickEnabled(true);
     
-    return BestDialogue;
-}
-
-void UNarr_DialogueSystem::PlayVoiceLine(const FNarr_DialogueLine& DialogueLine, AActor* SourceActor)
-{
-    if (!SourceActor)
-    {
-        return;
-    }
+    OnDialogueStarted(StartNode->DialogueLine);
     
-    // Log the dialogue text
-    UE_LOG(LogTemp, Warning, TEXT("[%s]: %s"), *DialogueLine.CharacterName, *DialogueLine.DialogueText);
+    UE_LOG(LogTemp, Log, TEXT("Started dialogue with %s at node %d"), 
+           CharacterProfile ? *CharacterProfile->CharacterName : TEXT("Unknown"), NodeID);
     
-    // Try to play audio if available
-    if (DialogueLine.VoiceLine.IsValid())
-    {
-        USoundCue* SoundCue = DialogueLine.VoiceLine.LoadSynchronous();
-        if (SoundCue)
-        {
-            UGameplayStatics::PlaySoundAtLocation(
-                SourceActor->GetWorld(),
-                SoundCue,
-                SourceActor->GetActorLocation(),
-                1.0f,
-                1.0f,
-                0.0f
-            );
-        }
-    }
-    
-    // Display on screen for debugging
-    if (GEngine)
-    {
-        FString DisplayText = FString::Printf(TEXT("%s: %s"), 
-                                            *DialogueLine.CharacterName, 
-                                            *DialogueLine.DialogueText);
-        GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow, DisplayText);
-    }
-}
-
-void UNarr_DialogueSystem::CheckProximityDialogues(AActor* Player, const TArray<AActor*>& NPCs)
-{
-    if (!Player || !bEnableProximityDialogues)
-    {
-        return;
-    }
-    
-    for (AActor* NPC : NPCs)
-    {
-        if (!NPC)
-        {
-            continue;
-        }
-        
-        FString NPCName = NPC->GetName();
-        float Distance = FVector::Dist(Player->GetActorLocation(), NPC->GetActorLocation());
-        
-        if (Distance <= GlobalDialogueRange)
-        {
-            // Check if this NPC has registered dialogues
-            for (const auto& CharacterPair : RegisteredCharacters)
-            {
-                if (CharacterPair.Key.Contains(NPCName) || NPCName.Contains(CharacterPair.Key))
-                {
-                    // Try to trigger a greeting or information dialogue
-                    TriggerDialogue(CharacterPair.Key, ENarr_DialogueType::Greeting, Player, NPC);
-                    break;
-                }
-            }
-        }
-    }
-}
-
-void UNarr_DialogueSystem::BroadcastEmergencyWarning(const FString& WarningText, const FVector& DangerLocation)
-{
-    UE_LOG(LogTemp, Error, TEXT("EMERGENCY WARNING: %s at location %s"), 
-           *WarningText, *DangerLocation.ToString());
-    
-    if (GEngine)
-    {
-        FString DisplayText = FString::Printf(TEXT("EMERGENCY: %s"), *WarningText);
-        GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Red, DisplayText);
-    }
-    
-    // Find all scout characters and trigger emergency dialogues
-    for (const auto& CharacterPair : RegisteredCharacters)
-    {
-        if (CharacterPair.Value.PersonalityType == ENarr_NPCPersonality::Scout_Alert)
-        {
-            // Create emergency dialogue line
-            FNarr_DialogueLine EmergencyLine;
-            EmergencyLine.DialogueText = WarningText;
-            EmergencyLine.DialogueType = ENarr_DialogueType::Emergency;
-            EmergencyLine.CharacterName = CharacterPair.Value.CharacterName;
-            EmergencyLine.Priority = 10; // Maximum priority
-            
-            // This would need an NPC actor reference in a real implementation
-            UE_LOG(LogTemp, Warning, TEXT("Emergency broadcast from %s: %s"), 
-                   *CharacterPair.Value.CharacterName, *WarningText);
-        }
-    }
-}
-
-void UNarr_DialogueSystem::TriggerStorytellingSequence(const FString& CharacterID, const FString& StoryTheme)
-{
-    if (FNarr_CharacterProfile* Profile = RegisteredCharacters.Find(CharacterID))
-    {
-        if (Profile->PersonalityType == ENarr_NPCPersonality::Elder_Wise)
-        {
-            // Find storytelling dialogues
-            for (const FNarr_DialogueLine& Dialogue : Profile->AvailableDialogues)
-            {
-                if (Dialogue.DialogueType == ENarr_DialogueType::Storytelling)
-                {
-                    UE_LOG(LogTemp, Log, TEXT("Elder %s begins storytelling: %s"), 
-                           *Profile->CharacterName, *Dialogue.DialogueText);
-                    
-                    if (GEngine)
-                    {
-                        FString DisplayText = FString::Printf(TEXT("[Story] %s: %s"), 
-                                                            *Profile->CharacterName, 
-                                                            *Dialogue.DialogueText);
-                        GEngine->AddOnScreenDebugMessage(-1, 8.0f, FColor::Cyan, DisplayText);
-                    }
-                    break;
-                }
-            }
-        }
-    }
-}
-
-void UNarr_DialogueSystem::LoadDialogueData()
-{
-    // Create default character profiles
-    
-    // Elder Storyteller
-    FNarr_CharacterProfile ElderProfile;
-    ElderProfile.CharacterName = TEXT("Elder Storyteller");
-    ElderProfile.PersonalityType = ENarr_NPCPersonality::Elder_Wise;
-    ElderProfile.BackgroundStory = TEXT("An ancient survivor who has seen many seasons pass. Keeper of tribal knowledge and stories.");
-    ElderProfile.SpecialtyKnowledge.Add(TEXT("Ancient History"));
-    ElderProfile.SpecialtyKnowledge.Add(TEXT("Dinosaur Behavior"));
-    ElderProfile.SpecialtyKnowledge.Add(TEXT("Survival Wisdom"));
-    
-    FNarr_DialogueLine StoryLine;
-    StoryLine.DialogueText = TEXT("The ancient stories speak of the time before time, when the great lizards ruled the earth...");
-    StoryLine.DialogueType = ENarr_DialogueType::Storytelling;
-    StoryLine.CharacterName = ElderProfile.CharacterName;
-    StoryLine.PersonalityType = ENarr_NPCPersonality::Elder_Wise;
-    StoryLine.Priority = 5;
-    ElderProfile.AvailableDialogues.Add(StoryLine);
-    
-    RegisterCharacter(TEXT("Elder_001"), ElderProfile);
-    
-    // Scout Marcus
-    FNarr_CharacterProfile ScoutProfile;
-    ScoutProfile.CharacterName = TEXT("Scout Marcus");
-    ScoutProfile.PersonalityType = ENarr_NPCPersonality::Scout_Alert;
-    ScoutProfile.BackgroundStory = TEXT("A keen-eyed scout who watches for predator movements and dangers.");
-    ScoutProfile.SpecialtyKnowledge.Add(TEXT("Predator Tracking"));
-    ScoutProfile.SpecialtyKnowledge.Add(TEXT("Territory Mapping"));
-    
-    FNarr_DialogueLine WarningLine;
-    WarningLine.DialogueText = TEXT("Warning! Massive predator approaching from the north ridge!");
-    WarningLine.DialogueType = ENarr_DialogueType::Emergency;
-    WarningLine.CharacterName = ScoutProfile.CharacterName;
-    WarningLine.PersonalityType = ENarr_NPCPersonality::Scout_Alert;
-    WarningLine.Priority = 10;
-    ScoutProfile.AvailableDialogues.Add(WarningLine);
-    
-    RegisterCharacter(TEXT("Scout_001"), ScoutProfile);
-    
-    // Tracker Elena
-    FNarr_CharacterProfile TrackerProfile;
-    TrackerProfile.CharacterName = TEXT("Tracker Elena");
-    TrackerProfile.PersonalityType = ENarr_NPCPersonality::Tracker_Analytical;
-    TrackerProfile.BackgroundStory = TEXT("An analytical tracker who studies migration patterns and animal behavior.");
-    TrackerProfile.SpecialtyKnowledge.Add(TEXT("Migration Patterns"));
-    TrackerProfile.SpecialtyKnowledge.Add(TEXT("Herbivore Behavior"));
-    
-    FNarr_DialogueLine InfoLine;
-    InfoLine.DialogueText = TEXT("The herbivore migration patterns have shifted again this season...");
-    InfoLine.DialogueType = ENarr_DialogueType::Information;
-    InfoLine.CharacterName = TrackerProfile.CharacterName;
-    InfoLine.PersonalityType = ENarr_NPCPersonality::Tracker_Analytical;
-    InfoLine.Priority = 3;
-    TrackerProfile.AvailableDialogues.Add(InfoLine);
-    
-    RegisterCharacter(TEXT("Tracker_001"), TrackerProfile);
-    
-    // Veteran Hunter
-    FNarr_CharacterProfile HunterProfile;
-    HunterProfile.CharacterName = TEXT("Veteran Hunter");
-    HunterProfile.PersonalityType = ENarr_NPCPersonality::Veteran_Cautious;
-    HunterProfile.BackgroundStory = TEXT("A seasoned hunter with years of experience facing the deadliest predators.");
-    HunterProfile.SpecialtyKnowledge.Add(TEXT("Combat Tactics"));
-    HunterProfile.SpecialtyKnowledge.Add(TEXT("Predator Weaknesses"));
-    
-    FNarr_DialogueLine TeachingLine;
-    TeachingLine.DialogueText = TEXT("Listen to me, rookie. In this world, knowledge is survival...");
-    TeachingLine.DialogueType = ENarr_DialogueType::Information;
-    TeachingLine.CharacterName = HunterProfile.CharacterName;
-    TeachingLine.PersonalityType = ENarr_NPCPersonality::Veteran_Cautious;
-    TeachingLine.Priority = 4;
-    HunterProfile.AvailableDialogues.Add(TeachingLine);
-    
-    RegisterCharacter(TEXT("Hunter_001"), HunterProfile);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Loaded %d character profiles with dialogue data"), RegisteredCharacters.Num());
-}
-
-void UNarr_DialogueSystem::SaveDialogueProgress()
-{
-    // In a full implementation, this would save to a file or database
-    UE_LOG(LogTemp, Log, TEXT("Saving dialogue progress for %d characters"), RegisteredCharacters.Num());
-    
-    for (const auto& HistoryPair : DialogueHistory)
-    {
-        UE_LOG(LogTemp, Log, TEXT("Character %s has %d dialogue entries"), 
-               *HistoryPair.Key, HistoryPair.Value.Num());
-    }
-}
-
-bool UNarr_DialogueSystem::CanTriggerDialogue(const FString& CharacterID, ENarr_DialogueType DialogueType)
-{
-    // Check if character exists
-    if (!RegisteredCharacters.Contains(CharacterID))
-    {
-        return false;
-    }
-    
-    // Emergency dialogues always allowed
-    if (DialogueType == ENarr_DialogueType::Emergency)
-    {
-        return true;
-    }
-    
-    // Check cooldown (simplified - in full implementation would track per-character cooldowns)
     return true;
 }
 
-void UNarr_DialogueSystem::UpdateDialogueHistory(const FString& CharacterID, const FString& DialogueText)
+void UNarr_DialogueComponent::EndDialogue()
 {
-    if (TArray<FString>* History = DialogueHistory.Find(CharacterID))
+    CurrentState = ENarr_DialogueState::Completed;
+    CurrentNodeID = -1;
+    
+    SetComponentTickEnabled(false);
+    
+    OnDialogueEnded();
+    
+    UE_LOG(LogTemp, Log, TEXT("Dialogue ended"));
+}
+
+bool UNarr_DialogueComponent::SelectChoice(int32 ChoiceIndex)
+{
+    UNarr_DialogueNode* CurrentNode = GetCurrentNode();
+    if (!CurrentNode || !CurrentNode->HasValidChoices())
     {
-        History->Add(DialogueText);
-        
-        // Keep only last 10 dialogues per character
-        if (History->Num() > 10)
+        return false;
+    }
+
+    if (!CurrentNode->PlayerChoices.IsValidIndex(ChoiceIndex))
+    {
+        return false;
+    }
+
+    FNarr_DialogueChoice SelectedChoice = CurrentNode->PlayerChoices[ChoiceIndex];
+    
+    // Check if choice requires an item
+    if (SelectedChoice.bRequiresItem)
+    {
+        // TODO: Implement item checking when inventory system is available
+        UE_LOG(LogTemp, Log, TEXT("Choice requires item: %s"), *SelectedChoice.RequiredItemName);
+    }
+    
+    // Move to next node
+    if (SelectedChoice.NextNodeID >= 0)
+    {
+        CurrentNodeID = SelectedChoice.NextNodeID;
+        UNarr_DialogueNode* NextNode = FindNodeByID(CurrentNodeID);
+        if (NextNode)
         {
-            History->RemoveAt(0);
+            OnDialogueStarted(NextNode->DialogueLine);
+        }
+    }
+    else
+    {
+        EndDialogue();
+    }
+    
+    return true;
+}
+
+UNarr_DialogueNode* UNarr_DialogueComponent::GetCurrentNode() const
+{
+    return FindNodeByID(CurrentNodeID);
+}
+
+bool UNarr_DialogueComponent::IsInRange(AActor* Player) const
+{
+    if (!Player || !GetOwner())
+    {
+        return false;
+    }
+    
+    float Distance = FVector::Dist(GetOwner()->GetActorLocation(), Player->GetActorLocation());
+    return Distance <= InteractionRange;
+}
+
+void UNarr_DialogueComponent::ProcessCurrentNode()
+{
+    UNarr_DialogueNode* CurrentNode = GetCurrentNode();
+    if (!CurrentNode)
+    {
+        EndDialogue();
+        return;
+    }
+    
+    if (CurrentNode->HasValidChoices())
+    {
+        CurrentState = ENarr_DialogueState::WaitingForInput;
+        OnChoicesPresented(CurrentNode->PlayerChoices);
+    }
+    else
+    {
+        // Auto-advance after duration if no choices
+        static float Timer = 0.0f;
+        Timer += GetWorld()->GetDeltaSeconds();
+        
+        if (Timer >= CurrentNode->DialogueLine.Duration)
+        {
+            Timer = 0.0f;
+            EndDialogue();
         }
     }
 }
 
-float UNarr_DialogueSystem::CalculateDialoguePriority(const FNarr_DialogueLine& DialogueLine, float Distance, ENarr_DialogueType RequestedType)
+UNarr_DialogueNode* UNarr_DialogueComponent::FindNodeByID(int32 NodeID) const
 {
-    float Priority = DialogueLine.Priority;
-    
-    // Distance factor (closer = higher priority)
-    float DistanceFactor = FMath::Clamp(1.0f - (Distance / DialogueLine.TriggerDistance), 0.1f, 1.0f);
-    Priority *= DistanceFactor;
-    
-    // Type match bonus
-    if (DialogueLine.DialogueType == RequestedType)
+    for (UNarr_DialogueNode* Node : DialogueNodes)
     {
-        Priority *= 1.5f;
+        if (Node && Node->NodeID == NodeID)
+        {
+            return Node;
+        }
+    }
+    return nullptr;
+}
+
+// UNarr_DialogueSubsystem Implementation
+void UNarr_DialogueSubsystem::Initialize(FSubsystemCollectionBase& Collection)
+{
+    Super::Initialize(Collection);
+    
+    InitializeDefaultCharacters();
+    
+    UE_LOG(LogTemp, Log, TEXT("Dialogue Subsystem initialized with %d characters"), RegisteredCharacters.Num());
+}
+
+void UNarr_DialogueSubsystem::Deinitialize()
+{
+    RegisteredCharacters.Empty();
+    Super::Deinitialize();
+}
+
+void UNarr_DialogueSubsystem::RegisterCharacter(UNarr_CharacterProfile* Character)
+{
+    if (Character && !RegisteredCharacters.Contains(Character))
+    {
+        RegisteredCharacters.Add(Character);
+        UE_LOG(LogTemp, Log, TEXT("Registered character: %s"), *Character->CharacterName);
+    }
+}
+
+UNarr_CharacterProfile* UNarr_DialogueSubsystem::GetCharacterByName(const FString& Name) const
+{
+    for (UNarr_CharacterProfile* Character : RegisteredCharacters)
+    {
+        if (Character && Character->CharacterName == Name)
+        {
+            return Character;
+        }
+    }
+    return nullptr;
+}
+
+TArray<UNarr_CharacterProfile*> UNarr_DialogueSubsystem::GetCharactersByRole(ENarr_CharacterRole Role) const
+{
+    TArray<UNarr_CharacterProfile*> Result;
+    
+    for (UNarr_CharacterProfile* Character : RegisteredCharacters)
+    {
+        if (Character && Character->Role == Role)
+        {
+            Result.Add(Character);
+        }
     }
     
-    // Emergency dialogues get massive priority boost
-    if (DialogueLine.DialogueType == ENarr_DialogueType::Emergency)
-    {
-        Priority *= 3.0f;
-    }
+    return Result;
+}
+
+void UNarr_DialogueSubsystem::InitializeDefaultCharacters()
+{
+    CreateElderKarak();
+    CreateScoutZara();
+    CreateTrackerJoren();
+    CreateFireKeeperMira();
+}
+
+void UNarr_DialogueSubsystem::CreateElderKarak()
+{
+    UNarr_CharacterProfile* Elder = NewObject<UNarr_CharacterProfile>();
+    Elder->CharacterName = TEXT("Elder Karak");
+    Elder->Role = ENarr_CharacterRole::Elder;
+    Elder->CharacterDescription = FText::FromString(TEXT("Wise leader who guides the tribe through ancient knowledge and survival wisdom"));
+    Elder->DefaultGreeting = TEXT("Listen carefully, young hunter. The elders speak of ancient wisdom passed down through countless seasons.");
+    Elder->VoiceLinePaths.Add(TEXT("/Game/Audio/Characters/Elder_Karak_Wisdom.wav"));
+    Elder->AvailableDialogueNodes.Add(0);
+    Elder->AvailableDialogueNodes.Add(1);
+    Elder->AvailableDialogueNodes.Add(2);
     
-    return Priority;
+    RegisterCharacter(Elder);
+}
+
+void UNarr_DialogueSubsystem::CreateScoutZara()
+{
+    UNarr_CharacterProfile* Scout = NewObject<UNarr_CharacterProfile>();
+    Scout->CharacterName = TEXT("Scout Zara");
+    Scout->Role = ENarr_CharacterRole::Scout;
+    Scout->CharacterDescription = FText::FromString(TEXT("Alert reconnaissance specialist who monitors predator movements and safe passages"));
+    Scout->DefaultGreeting = TEXT("Scout report from the northern ridge. Stay alert, stay alive.");
+    Scout->VoiceLinePaths.Add(TEXT("/Game/Audio/Characters/Scout_Zara_Report.wav"));
+    Scout->AvailableDialogueNodes.Add(10);
+    Scout->AvailableDialogueNodes.Add(11);
+    
+    RegisterCharacter(Scout);
+}
+
+void UNarr_DialogueSubsystem::CreateTrackerJoren()
+{
+    UNarr_CharacterProfile* Tracker = NewObject<UNarr_CharacterProfile>();
+    Tracker->CharacterName = TEXT("Tracker Joren");
+    Tracker->Role = ENarr_CharacterRole::Tracker;
+    Tracker->CharacterDescription = FText::FromString(TEXT("Expert hunter who understands migration patterns and animal behavior"));
+    Tracker->DefaultGreeting = TEXT("The great migration has begun. This is our chance, but we must be careful.");
+    Tracker->VoiceLinePaths.Add(TEXT("/Game/Audio/Characters/Tracker_Joren_Migration.wav"));
+    Tracker->AvailableDialogueNodes.Add(20);
+    Tracker->AvailableDialogueNodes.Add(21);
+    
+    RegisterCharacter(Tracker);
+}
+
+void UNarr_DialogueSubsystem::CreateFireKeeperMira()
+{
+    UNarr_CharacterProfile* FireKeeper = NewObject<UNarr_CharacterProfile>();
+    FireKeeper->CharacterName = TEXT("Fire Keeper Mira");
+    FireKeeper->Role = ENarr_CharacterRole::FireKeeper;
+    FireKeeper->CharacterDescription = FText::FromString(TEXT("Guardian of the sacred flames who protects the tribe from night terrors"));
+    FireKeeper->DefaultGreeting = TEXT("Fire keeper's warning - the sacred flames grow weak. We need your help.");
+    FireKeeper->VoiceLinePaths.Add(TEXT("/Game/Audio/Characters/Fire_Keeper_Mira_Warning.wav"));
+    FireKeeper->AvailableDialogueNodes.Add(30);
+    FireKeeper->AvailableDialogueNodes.Add(31);
+    
+    RegisterCharacter(FireKeeper);
 }
