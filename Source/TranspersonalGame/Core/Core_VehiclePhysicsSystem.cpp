@@ -1,428 +1,467 @@
 #include "Core_VehiclePhysicsSystem.h"
 #include "Engine/World.h"
-#include "Components/StaticMeshComponent.h"
-#include "Components/SkeletalMeshComponent.h"
 #include "GameFramework/Actor.h"
+#include "Components/PrimitiveComponent.h"
 #include "Engine/Engine.h"
 #include "DrawDebugHelpers.h"
-#include "Kismet/KismetMathLibrary.h"
+#include "Vehicles/WheeledVehicle.h"
+#include "Vehicles/WheeledVehicleMovementComponent.h"
 #include "PhysicsEngine/PhysicsSettings.h"
+#include "Chaos/ChaosEngineInterface.h"
 
 UCore_VehiclePhysicsSystem::UCore_VehiclePhysicsSystem()
 {
     PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.bStartWithTickEnabled = true;
     PrimaryComponentTick.TickGroup = TG_PrePhysics;
-    
-    // Initialize default values
+
+    // Initialize default physics configuration
     PhysicsConfig = FCore_VehiclePhysicsConfig();
-    CurrentState = FCore_VehicleState();
-    
-    VehicleBody = nullptr;
-    GravityScale = 1.0f;
-    AirResistance = 0.02f;
-    WaterResistance = 0.8f;
-    GroundFriction = 0.7f;
-    
-    bPerformanceMonitoring = false;
-    AverageFrameTime = 0.0f;
-    PhysicsCalculationsPerSecond = 0;
-    
-    AccumulatedForces = FVector::ZeroVector;
-    LastFrameTime = 0.0f;
-    FrameCounter = 0;
-    PerformanceTimer = 0.0f;
+    CurrentState = FCore_VehiclePhysicsState();
+
+    // Performance tracking
+    LastUpdateTime = 0.0f;
+    PhysicsUpdateCount = 0;
+    AverageUpdateTime = 0.0f;
+
+    // Initialize pointers
+    OwnerVehicle = nullptr;
+    MovementComponent = nullptr;
+    VehicleRootComponent = nullptr;
 }
 
 void UCore_VehiclePhysicsSystem::BeginPlay()
 {
     Super::BeginPlay();
-    
-    // Find the vehicle body component
-    AActor* Owner = GetOwner();
-    if (Owner)
+
+    // Get owner vehicle reference
+    OwnerVehicle = Cast<AWheeledVehicle>(GetOwner());
+    if (!OwnerVehicle)
     {
-        // Try to find a primitive component for physics
-        VehicleBody = Owner->FindComponentByClass<UStaticMeshComponent>();
-        if (!VehicleBody)
-        {
-            VehicleBody = Owner->FindComponentByClass<USkeletalMeshComponent>();
-        }
-        if (!VehicleBody)
-        {
-            VehicleBody = Owner->GetRootComponent();
-        }
-        
-        if (VehicleBody)
-        {
-            // Enable physics simulation
-            VehicleBody->SetSimulatePhysics(true);
-            VehicleBody->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-            VehicleBody->SetCollisionObjectType(ECollisionChannel::ECC_Vehicle);
-            
-            UE_LOG(LogTemp, Log, TEXT("Vehicle Physics System initialized for %s"), *Owner->GetName());
-        }
-        else
-        {
-            UE_LOG(LogTemp, Warning, TEXT("No suitable primitive component found for vehicle physics on %s"), *Owner->GetName());
-        }
+        UE_LOG(LogTemp, Warning, TEXT("Core_VehiclePhysicsSystem: Owner is not a WheeledVehicle"));
+        return;
     }
+
+    // Get movement component
+    MovementComponent = OwnerVehicle->GetVehicleMovementComponent();
+    if (!MovementComponent)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Core_VehiclePhysicsSystem: No WheeledVehicleMovementComponent found"));
+        return;
+    }
+
+    // Get root component
+    VehicleRootComponent = OwnerVehicle->GetRootComponent();
+
+    // Initialize vehicle physics
+    InitializeVehiclePhysics();
+
+    UE_LOG(LogTemp, Log, TEXT("Core_VehiclePhysicsSystem: Initialized successfully"));
 }
 
 void UCore_VehiclePhysicsSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    
-    if (bPerformanceMonitoring)
-    {
-        UpdatePerformanceMetrics(DeltaTime);
-    }
-    
-    // Apply vehicle physics
-    ApplyVehiclePhysics(DeltaTime);
-}
 
-void UCore_VehiclePhysicsSystem::InitializeVehicle(ECore_VehicleType InVehicleType, float InMass)
-{
-    PhysicsConfig.VehicleType = InVehicleType;
-    PhysicsConfig.Mass = InMass;
-    
-    // Configure physics based on vehicle type
-    switch (InVehicleType)
-    {
-        case ECore_VehicleType::Raft:
-            PhysicsConfig.MaxSpeed = 300.0f;
-            PhysicsConfig.Acceleration = 400.0f;
-            PhysicsConfig.TurningRadius = 500.0f;
-            PhysicsConfig.StabilityFactor = 0.9f;
-            PhysicsConfig.TerrainAdaptation = 0.3f;
-            WaterResistance = 0.5f;
-            break;
-            
-        case ECore_VehicleType::Sled:
-            PhysicsConfig.MaxSpeed = 600.0f;
-            PhysicsConfig.Acceleration = 600.0f;
-            PhysicsConfig.TurningRadius = 200.0f;
-            PhysicsConfig.StabilityFactor = 0.7f;
-            PhysicsConfig.TerrainAdaptation = 0.8f;
-            GroundFriction = 0.3f;
-            break;
-            
-        case ECore_VehicleType::Cart:
-            PhysicsConfig.MaxSpeed = 800.0f;
-            PhysicsConfig.Acceleration = 700.0f;
-            PhysicsConfig.TurningRadius = 300.0f;
-            PhysicsConfig.StabilityFactor = 0.8f;
-            PhysicsConfig.TerrainAdaptation = 0.6f;
-            GroundFriction = 0.6f;
-            break;
-            
-        case ECore_VehicleType::Mount:
-            PhysicsConfig.MaxSpeed = 1200.0f;
-            PhysicsConfig.Acceleration = 1000.0f;
-            PhysicsConfig.TurningRadius = 150.0f;
-            PhysicsConfig.StabilityFactor = 0.9f;
-            PhysicsConfig.TerrainAdaptation = 0.9f;
-            GroundFriction = 0.8f;
-            break;
-            
-        default:
-            break;
-    }
-    
-    // Apply mass to physics body
-    if (VehicleBody)
-    {
-        VehicleBody->SetMassOverrideInKg(NAME_None, PhysicsConfig.Mass, true);
-        UE_LOG(LogTemp, Log, TEXT("Vehicle initialized: Type=%d, Mass=%.1f"), (int32)InVehicleType, InMass);
-    }
-}
-
-void UCore_VehiclePhysicsSystem::SetVehicleInput(float Throttle, float Steering)
-{
-    CurrentState.ThrottleInput = FMath::Clamp(Throttle, -1.0f, 1.0f);
-    CurrentState.SteeringInput = FMath::Clamp(Steering, -1.0f, 1.0f);
-}
-
-void UCore_VehiclePhysicsSystem::ApplyVehiclePhysics(float DeltaTime)
-{
-    if (!VehicleBody || PhysicsConfig.VehicleType == ECore_VehicleType::None)
+    if (!OwnerVehicle || !MovementComponent)
     {
         return;
     }
-    
-    // Update terrain interaction
-    UpdateTerrainInteraction();
-    
-    // Calculate movement forces
-    CalculateMovementForces(DeltaTime);
-    
-    // Apply environmental forces
-    ApplyEnvironmentalForces(DeltaTime);
-    
-    // Handle specific physics based on environment
-    if (CurrentState.bIsInWater)
+
+    // Update vehicle physics
+    UpdateVehiclePhysics(DeltaTime);
+
+    // Update performance tracking
+    PhysicsUpdateCount++;
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    if (LastUpdateTime > 0.0f)
     {
-        HandleWaterPhysics(DeltaTime);
+        float UpdateTime = CurrentTime - LastUpdateTime;
+        AverageUpdateTime = (AverageUpdateTime * (PhysicsUpdateCount - 1) + UpdateTime) / PhysicsUpdateCount;
     }
-    else if (CurrentState.bIsGrounded)
+    LastUpdateTime = CurrentTime;
+}
+
+void UCore_VehiclePhysicsSystem::InitializeVehiclePhysics()
+{
+    if (!MovementComponent)
     {
-        HandleGroundPhysics(DeltaTime);
+        return;
     }
+
+    // Apply physics configuration to movement component
+    MovementComponent->Mass = PhysicsConfig.Mass;
+    MovementComponent->MaxEngineForce = PhysicsConfig.MaxEngineForce;
+    MovementComponent->MaxBrakingForce = PhysicsConfig.MaxBrakingForce;
+
+    // Initialize suspension settings
+    AdjustSuspensionStiffness(PhysicsConfig.SuspensionStiffness);
+    AdjustSuspensionDamping(PhysicsConfig.SuspensionDamping);
+
+    // Initialize tire settings
+    SetTireFriction(PhysicsConfig.TireFriction);
+
+    // Reset vehicle state
+    ResetVehiclePhysics();
+
+    UE_LOG(LogTemp, Log, TEXT("Core_VehiclePhysicsSystem: Vehicle physics initialized with Mass=%.1f, MaxEngineForce=%.1f"), 
+           PhysicsConfig.Mass, PhysicsConfig.MaxEngineForce);
+}
+
+void UCore_VehiclePhysicsSystem::UpdateVehiclePhysics(float DeltaTime)
+{
+    if (!MovementComponent || !VehicleRootComponent)
+    {
+        return;
+    }
+
+    // Update vehicle state
+    UpdateVehicleState(DeltaTime);
+
+    // Calculate and apply physics forces
+    CalculateEngineForces(DeltaTime);
+    CalculateSuspensionForces(DeltaTime);
+    CalculateTireForces(DeltaTime);
+
+    // Handle terrain interaction
+    HandleTerrainInteraction();
+
+    // Update suspension system
+    UpdateSuspensionSystem(DeltaTime);
+
+    // Update tire physics
+    UpdateTirePhysics(DeltaTime);
+}
+
+void UCore_VehiclePhysicsSystem::ApplyEngineForce(float Force)
+{
+    if (!MovementComponent)
+    {
+        return;
+    }
+
+    // Clamp force to maximum engine force
+    float ClampedForce = FMath::Clamp(Force, -PhysicsConfig.MaxEngineForce, PhysicsConfig.MaxEngineForce);
     
-    // Update vehicle orientation
-    UpdateVehicleOrientation(DeltaTime);
-    
-    // Check for collisions
-    CheckCollisions();
-    
+    // Apply throttle input
+    float ThrottleInput = ClampedForce / PhysicsConfig.MaxEngineForce;
+    MovementComponent->SetThrottleInput(ThrottleInput);
+
     // Update current state
-    if (VehicleBody)
-    {
-        CurrentState.Velocity = VehicleBody->GetPhysicsLinearVelocity();
-        CurrentState.CurrentSpeed = CurrentState.Velocity.Size();
-    }
+    CurrentState.ThrottleInput = ThrottleInput;
+    CurrentState.EngineRPM = FMath::Abs(ThrottleInput) * 6000.0f; // Simulate RPM
+
+    UE_LOG(LogTemp, VeryVerbose, TEXT("Core_VehiclePhysicsSystem: Applied engine force %.1f (throttle %.2f)"), 
+           ClampedForce, ThrottleInput);
 }
 
-void UCore_VehiclePhysicsSystem::UpdateTerrainInteraction()
+void UCore_VehiclePhysicsSystem::ApplyBrakingForce(float Force)
 {
-    if (!VehicleBody)
+    if (!MovementComponent)
     {
         return;
     }
+
+    // Clamp force to maximum braking force
+    float ClampedForce = FMath::Clamp(Force, 0.0f, PhysicsConfig.MaxBrakingForce);
     
-    FVector VehicleLocation = VehicleBody->GetComponentLocation();
+    // Apply brake input
+    float BrakeInput = ClampedForce / PhysicsConfig.MaxBrakingForce;
+    MovementComponent->SetBrakeInput(BrakeInput);
+
+    // Update current state
+    CurrentState.BrakeInput = BrakeInput;
+
+    UE_LOG(LogTemp, VeryVerbose, TEXT("Core_VehiclePhysicsSystem: Applied braking force %.1f (brake %.2f)"), 
+           ClampedForce, BrakeInput);
+}
+
+void UCore_VehiclePhysicsSystem::ApplySteeringInput(float SteeringInput)
+{
+    if (!MovementComponent)
+    {
+        return;
+    }
+
+    // Clamp steering input
+    float ClampedSteering = FMath::Clamp(SteeringInput, -1.0f, 1.0f);
+    MovementComponent->SetSteeringInput(ClampedSteering);
+
+    // Update current state
+    CurrentState.SteeringAngle = ClampedSteering * PhysicsConfig.MaxSteeringAngle;
+
+    UE_LOG(LogTemp, VeryVerbose, TEXT("Core_VehiclePhysicsSystem: Applied steering input %.2f (angle %.1f)"), 
+           ClampedSteering, CurrentState.SteeringAngle);
+}
+
+void UCore_VehiclePhysicsSystem::SetVehiclePhysicsConfig(const FCore_VehiclePhysicsConfig& NewConfig)
+{
+    PhysicsConfig = NewConfig;
     
-    // Trace down to check terrain
+    // Re-initialize physics with new configuration
+    InitializeVehiclePhysics();
+
+    UE_LOG(LogTemp, Log, TEXT("Core_VehiclePhysicsSystem: Physics configuration updated"));
+}
+
+FCore_VehiclePhysicsState UCore_VehiclePhysicsSystem::GetVehiclePhysicsState() const
+{
+    return CurrentState;
+}
+
+void UCore_VehiclePhysicsSystem::UpdateSuspensionSystem(float DeltaTime)
+{
+    if (!MovementComponent)
+    {
+        return;
+    }
+
+    // Update suspension based on terrain and vehicle state
+    float SpeedFactor = FMath::Clamp(CurrentState.CurrentSpeed / 1000.0f, 0.1f, 1.0f);
+    float DynamicStiffness = PhysicsConfig.SuspensionStiffness * SpeedFactor;
+    float DynamicDamping = PhysicsConfig.SuspensionDamping * (2.0f - SpeedFactor);
+
+    // Apply dynamic suspension adjustments
+    AdjustSuspensionStiffness(DynamicStiffness);
+    AdjustSuspensionDamping(DynamicDamping);
+}
+
+void UCore_VehiclePhysicsSystem::AdjustSuspensionStiffness(float NewStiffness)
+{
+    PhysicsConfig.SuspensionStiffness = FMath::Clamp(NewStiffness, 0.1f, 20.0f);
+    
+    // Apply to movement component if available
+    if (MovementComponent)
+    {
+        // Note: Specific suspension adjustment would depend on UE5 vehicle system API
+        UE_LOG(LogTemp, VeryVerbose, TEXT("Core_VehiclePhysicsSystem: Suspension stiffness adjusted to %.2f"), 
+               PhysicsConfig.SuspensionStiffness);
+    }
+}
+
+void UCore_VehiclePhysicsSystem::AdjustSuspensionDamping(float NewDamping)
+{
+    PhysicsConfig.SuspensionDamping = FMath::Clamp(NewDamping, 0.1f, 5.0f);
+    
+    // Apply to movement component if available
+    if (MovementComponent)
+    {
+        // Note: Specific suspension adjustment would depend on UE5 vehicle system API
+        UE_LOG(LogTemp, VeryVerbose, TEXT("Core_VehiclePhysicsSystem: Suspension damping adjusted to %.2f"), 
+               PhysicsConfig.SuspensionDamping);
+    }
+}
+
+void UCore_VehiclePhysicsSystem::UpdateTirePhysics(float DeltaTime)
+{
+    if (!MovementComponent || !VehicleRootComponent)
+    {
+        return;
+    }
+
+    // Check for skidding based on lateral forces
+    FVector Velocity = VehicleRootComponent->GetComponentVelocity();
+    FVector ForwardVector = OwnerVehicle->GetActorForwardVector();
+    
+    float LateralVelocity = FVector::DotProduct(Velocity, OwnerVehicle->GetActorRightVector());
+    float ForwardVelocity = FVector::DotProduct(Velocity, ForwardVector);
+    
+    // Determine if vehicle is skidding
+    float SkidThreshold = 200.0f; // cm/s
+    CurrentState.bIsSkidding = FMath::Abs(LateralVelocity) > SkidThreshold;
+
+    // Adjust tire friction based on terrain
+    float TerrainFrictionMultiplier = GetTerrainFrictionMultiplier();
+    float EffectiveTireFriction = PhysicsConfig.TireFriction * TerrainFrictionMultiplier;
+    
+    SetTireFriction(EffectiveTireFriction);
+}
+
+void UCore_VehiclePhysicsSystem::SetTireFriction(float NewFriction)
+{
+    PhysicsConfig.TireFriction = FMath::Clamp(NewFriction, 0.1f, 5.0f);
+    
+    // Apply to movement component if available
+    if (MovementComponent)
+    {
+        // Note: Specific tire friction adjustment would depend on UE5 vehicle system API
+        UE_LOG(LogTemp, VeryVerbose, TEXT("Core_VehiclePhysicsSystem: Tire friction set to %.2f"), 
+               PhysicsConfig.TireFriction);
+    }
+}
+
+bool UCore_VehiclePhysicsSystem::IsVehicleSkidding() const
+{
+    return CurrentState.bIsSkidding;
+}
+
+void UCore_VehiclePhysicsSystem::HandleTerrainInteraction()
+{
+    if (!OwnerVehicle || !VehicleRootComponent)
+    {
+        return;
+    }
+
+    // Perform line trace to detect ground
+    FVector StartLocation = OwnerVehicle->GetActorLocation();
+    FVector EndLocation = StartLocation - FVector(0, 0, 200.0f); // 2m down
+
     FHitResult HitResult;
-    FVector TraceStart = VehicleLocation;
-    FVector TraceEnd = VehicleLocation - FVector(0, 0, 200.0f);
-    
     FCollisionQueryParams QueryParams;
-    QueryParams.AddIgnoredActor(GetOwner());
-    
-    UWorld* World = GetWorld();
-    if (World && World->LineTraceSingleByChannel(HitResult, TraceStart, TraceEnd, ECC_WorldStatic, QueryParams))
+    QueryParams.AddIgnoredActor(OwnerVehicle);
+
+    bool bHit = GetWorld()->LineTraceSingleByChannel(
+        HitResult,
+        StartLocation,
+        EndLocation,
+        ECC_WorldStatic,
+        QueryParams
+    );
+
+    CurrentState.bIsOnGround = bHit && (HitResult.Distance < 150.0f); // Within 1.5m of ground
+
+    if (bHit)
     {
-        CurrentState.bIsGrounded = true;
-        CurrentState.TerrainGrip = CalculateTerrainGrip(HitResult.Location);
-        
-        // Check if we're in water
-        if (HitResult.GetComponent() && HitResult.GetComponent()->ComponentHasTag("Water"))
+        // Adjust physics based on surface type
+        UPhysicalMaterial* SurfaceMaterial = HitResult.PhysMaterial.Get();
+        if (SurfaceMaterial)
         {
-            CurrentState.bIsInWater = true;
-            CurrentState.bIsGrounded = false;
-        }
-        else
-        {
-            CurrentState.bIsInWater = false;
-        }
-    }
-    else
-    {
-        CurrentState.bIsGrounded = false;
-        CurrentState.bIsInWater = false;
-        CurrentState.TerrainGrip = 0.0f;
-    }
-}
-
-void UCore_VehiclePhysicsSystem::HandleWaterPhysics(float DeltaTime)
-{
-    if (!VehicleBody || PhysicsConfig.VehicleType != ECore_VehicleType::Raft)
-    {
-        return;
-    }
-    
-    // Apply buoyancy
-    FVector BuoyancyForce = FVector(0, 0, PhysicsConfig.Mass * 980.0f * 1.2f); // Slight positive buoyancy
-    VehicleBody->AddForce(BuoyancyForce);
-    
-    // Apply water resistance
-    FVector Velocity = VehicleBody->GetPhysicsLinearVelocity();
-    FVector WaterDrag = -Velocity * WaterResistance * PhysicsConfig.Mass;
-    VehicleBody->AddForce(WaterDrag);
-    
-    // Apply movement force if throttle input
-    if (FMath::Abs(CurrentState.ThrottleInput) > 0.1f)
-    {
-        FVector ForwardVector = VehicleBody->GetForwardVector();
-        FVector MovementForce = ForwardVector * CurrentState.ThrottleInput * PhysicsConfig.Acceleration * PhysicsConfig.Mass;
-        VehicleBody->AddForce(MovementForce);
-    }
-}
-
-void UCore_VehiclePhysicsSystem::HandleGroundPhysics(float DeltaTime)
-{
-    if (!VehicleBody)
-    {
-        return;
-    }
-    
-    // Apply movement force
-    if (FMath::Abs(CurrentState.ThrottleInput) > 0.1f)
-    {
-        FVector ForwardVector = VehicleBody->GetForwardVector();
-        float EffectiveAcceleration = PhysicsConfig.Acceleration * CurrentState.TerrainGrip * PhysicsConfig.TerrainAdaptation;
-        FVector MovementForce = ForwardVector * CurrentState.ThrottleInput * EffectiveAcceleration * PhysicsConfig.Mass;
-        VehicleBody->AddForce(MovementForce);
-    }
-    
-    // Apply ground friction
-    FVector Velocity = VehicleBody->GetPhysicsLinearVelocity();
-    FVector HorizontalVelocity = FVector(Velocity.X, Velocity.Y, 0);
-    FVector FrictionForce = -HorizontalVelocity * GroundFriction * CurrentState.TerrainGrip * PhysicsConfig.Mass;
-    VehicleBody->AddForce(FrictionForce);
-    
-    // Apply steering torque
-    if (FMath::Abs(CurrentState.SteeringInput) > 0.1f && CurrentState.CurrentSpeed > 50.0f)
-    {
-        float SteeringTorque = CurrentState.SteeringInput * PhysicsConfig.Mass * 1000.0f;
-        SteeringTorque *= FMath::Clamp(CurrentState.CurrentSpeed / PhysicsConfig.MaxSpeed, 0.1f, 1.0f);
-        VehicleBody->AddTorqueInRadians(FVector(0, 0, SteeringTorque));
-    }
-}
-
-float UCore_VehiclePhysicsSystem::CalculateTerrainGrip(const FVector& Location)
-{
-    // Base grip calculation - can be enhanced with terrain material system
-    float BaseGrip = 1.0f;
-    
-    // Adjust based on vehicle type
-    switch (PhysicsConfig.VehicleType)
-    {
-        case ECore_VehicleType::Raft:
-            BaseGrip = 0.0f; // No terrain grip for rafts
-            break;
-        case ECore_VehicleType::Sled:
-            BaseGrip = 0.8f; // Good on snow/ice, poor on rough terrain
-            break;
-        case ECore_VehicleType::Cart:
-            BaseGrip = 0.7f; // Moderate grip with wheels
-            break;
-        case ECore_VehicleType::Mount:
-            BaseGrip = 0.9f; // Excellent grip with animal feet
-            break;
-        default:
-            break;
-    }
-    
-    return BaseGrip * PhysicsConfig.TerrainAdaptation;
-}
-
-void UCore_VehiclePhysicsSystem::HandleTerrainDamage(float DamageAmount)
-{
-    CurrentState.DamageLevel += DamageAmount;
-    CurrentState.DamageLevel = FMath::Clamp(CurrentState.DamageLevel, 0.0f, 100.0f);
-    
-    // Reduce performance based on damage
-    if (CurrentState.DamageLevel > 50.0f)
-    {
-        PhysicsConfig.MaxSpeed *= 0.8f;
-        PhysicsConfig.Acceleration *= 0.7f;
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Vehicle damage: %.1f%%"), CurrentState.DamageLevel);
-}
-
-bool UCore_VehiclePhysicsSystem::IsVehicleOperational() const
-{
-    return CurrentState.DamageLevel < 90.0f && PhysicsConfig.VehicleType != ECore_VehicleType::None;
-}
-
-void UCore_VehiclePhysicsSystem::RepairVehicle(float RepairAmount)
-{
-    CurrentState.DamageLevel -= RepairAmount;
-    CurrentState.DamageLevel = FMath::Clamp(CurrentState.DamageLevel, 0.0f, 100.0f);
-    
-    UE_LOG(LogTemp, Log, TEXT("Vehicle repaired: %.1f%% damage remaining"), CurrentState.DamageLevel);
-}
-
-void UCore_VehiclePhysicsSystem::EnablePerformanceMonitoring(bool bEnable)
-{
-    bPerformanceMonitoring = bEnable;
-    if (bEnable)
-    {
-        FrameCounter = 0;
-        PerformanceTimer = 0.0f;
-        AverageFrameTime = 0.0f;
-    }
-}
-
-FString UCore_VehiclePhysicsSystem::GetPerformanceReport() const
-{
-    return FString::Printf(TEXT("Vehicle Physics Performance: Avg Frame: %.2fms, Calc/sec: %d, Speed: %.1f/%.1f"), 
-        AverageFrameTime * 1000.0f, PhysicsCalculationsPerSecond, CurrentState.CurrentSpeed, PhysicsConfig.MaxSpeed);
-}
-
-void UCore_VehiclePhysicsSystem::CalculateMovementForces(float DeltaTime)
-{
-    AccumulatedForces = FVector::ZeroVector;
-    
-    // Gravity
-    AccumulatedForces += FVector(0, 0, -980.0f * PhysicsConfig.Mass * GravityScale);
-    
-    // Air resistance
-    if (VehicleBody)
-    {
-        FVector Velocity = VehicleBody->GetPhysicsLinearVelocity();
-        FVector AirDrag = -Velocity * AirResistance * PhysicsConfig.Mass;
-        AccumulatedForces += AirDrag;
-    }
-}
-
-void UCore_VehiclePhysicsSystem::ApplyEnvironmentalForces(float DeltaTime)
-{
-    if (VehicleBody && AccumulatedForces.SizeSquared() > 0.1f)
-    {
-        VehicleBody->AddForce(AccumulatedForces);
-    }
-}
-
-void UCore_VehiclePhysicsSystem::UpdateVehicleOrientation(float DeltaTime)
-{
-    if (!VehicleBody || !CurrentState.bIsGrounded)
-    {
-        return;
-    }
-    
-    // Stabilize vehicle orientation based on terrain
-    FRotator CurrentRotation = VehicleBody->GetComponentRotation();
-    FRotator TargetRotation = CurrentRotation;
-    
-    // Apply stability factor to reduce unwanted rotation
-    float StabilityStrength = PhysicsConfig.StabilityFactor * 1000.0f;
-    FVector AngularVelocity = VehicleBody->GetPhysicsAngularVelocityInRadians();
-    FVector StabilizingTorque = -AngularVelocity * StabilityStrength * PhysicsConfig.Mass;
-    
-    VehicleBody->AddTorqueInRadians(StabilizingTorque);
-}
-
-void UCore_VehiclePhysicsSystem::CheckCollisions()
-{
-    // Collision handling can be expanded here
-    // For now, basic damage on high-speed impacts
-    if (CurrentState.CurrentSpeed > PhysicsConfig.MaxSpeed * 0.8f)
-    {
-        // Check for potential collision damage
-        float DamageRisk = (CurrentState.CurrentSpeed / PhysicsConfig.MaxSpeed) * 0.1f;
-        if (FMath::RandRange(0.0f, 1.0f) < DamageRisk)
-        {
-            HandleTerrainDamage(FMath::RandRange(1.0f, 5.0f));
+            // Adjust friction based on surface material
+            float SurfaceFriction = SurfaceMaterial->Friction;
+            float AdjustedFriction = PhysicsConfig.TireFriction * SurfaceFriction;
+            SetTireFriction(AdjustedFriction);
         }
     }
 }
 
-void UCore_VehiclePhysicsSystem::UpdatePerformanceMetrics(float DeltaTime)
+float UCore_VehiclePhysicsSystem::GetTerrainFrictionMultiplier() const
 {
-    FrameCounter++;
-    PerformanceTimer += DeltaTime;
-    LastFrameTime = DeltaTime;
-    
-    if (PerformanceTimer >= 1.0f)
+    // Base friction multiplier
+    float FrictionMultiplier = 1.0f;
+
+    // Adjust based on vehicle state
+    if (CurrentState.bIsSkidding)
     {
-        AverageFrameTime = PerformanceTimer / FrameCounter;
-        PhysicsCalculationsPerSecond = FrameCounter;
-        
-        FrameCounter = 0;
-        PerformanceTimer = 0.0f;
+        FrictionMultiplier *= 0.7f; // Reduced friction when skidding
     }
+
+    if (!CurrentState.bIsOnGround)
+    {
+        FrictionMultiplier *= 0.1f; // Minimal friction when airborne
+    }
+
+    // Adjust based on speed
+    float SpeedFactor = FMath::Clamp(CurrentState.CurrentSpeed / 2000.0f, 0.5f, 1.2f);
+    FrictionMultiplier *= SpeedFactor;
+
+    return FMath::Clamp(FrictionMultiplier, 0.1f, 2.0f);
+}
+
+void UCore_VehiclePhysicsSystem::LogVehiclePhysicsPerformance() const
+{
+    UE_LOG(LogTemp, Log, TEXT("=== Core_VehiclePhysicsSystem Performance ==="));
+    UE_LOG(LogTemp, Log, TEXT("Physics Updates: %d"), PhysicsUpdateCount);
+    UE_LOG(LogTemp, Log, TEXT("Average Update Time: %.4f ms"), AverageUpdateTime * 1000.0f);
+    UE_LOG(LogTemp, Log, TEXT("Current Speed: %.1f cm/s"), CurrentState.CurrentSpeed);
+    UE_LOG(LogTemp, Log, TEXT("Engine RPM: %.1f"), CurrentState.EngineRPM);
+    UE_LOG(LogTemp, Log, TEXT("Is On Ground: %s"), CurrentState.bIsOnGround ? TEXT("Yes") : TEXT("No"));
+    UE_LOG(LogTemp, Log, TEXT("Is Skidding: %s"), CurrentState.bIsSkidding ? TEXT("Yes") : TEXT("No"));
+    UE_LOG(LogTemp, Log, TEXT("Tire Friction: %.2f"), PhysicsConfig.TireFriction);
+    UE_LOG(LogTemp, Log, TEXT("==========================================="));
+}
+
+void UCore_VehiclePhysicsSystem::ResetVehiclePhysics()
+{
+    // Reset current state
+    CurrentState = FCore_VehiclePhysicsState();
+
+    // Reset movement component inputs
+    if (MovementComponent)
+    {
+        MovementComponent->SetThrottleInput(0.0f);
+        MovementComponent->SetBrakeInput(0.0f);
+        MovementComponent->SetSteeringInput(0.0f);
+    }
+
+    // Reset performance tracking
+    PhysicsUpdateCount = 0;
+    AverageUpdateTime = 0.0f;
+    LastUpdateTime = 0.0f;
+
+    UE_LOG(LogTemp, Log, TEXT("Core_VehiclePhysicsSystem: Physics reset"));
+}
+
+// Private implementation methods
+
+void UCore_VehiclePhysicsSystem::CalculateEngineForces(float DeltaTime)
+{
+    if (!MovementComponent)
+    {
+        return;
+    }
+
+    // Calculate engine force based on throttle input and RPM
+    float EngineEfficiency = FMath::Clamp(CurrentState.EngineRPM / 4000.0f, 0.3f, 1.0f);
+    float EffectiveEngineForce = PhysicsConfig.MaxEngineForce * CurrentState.ThrottleInput * EngineEfficiency;
+
+    // Apply roll resistance
+    float RollResistanceForce = CurrentState.CurrentSpeed * PhysicsConfig.RollResistance;
+    EffectiveEngineForce -= RollResistanceForce;
+
+    // Update engine force (this would be applied through the movement component)
+    UE_LOG(LogTemp, VeryVerbose, TEXT("Core_VehiclePhysicsSystem: Engine force calculated: %.1f N"), 
+           EffectiveEngineForce);
+}
+
+void UCore_VehiclePhysicsSystem::CalculateSuspensionForces(float DeltaTime)
+{
+    if (!VehicleRootComponent)
+    {
+        return;
+    }
+
+    // Calculate suspension compression based on vehicle position and ground distance
+    // This is a simplified calculation - real implementation would check each wheel individually
+    
+    float SuspensionCompression = CurrentState.bIsOnGround ? 0.5f : 0.0f; // 50% compression when on ground
+    float SuspensionForce = SuspensionCompression * PhysicsConfig.SuspensionStiffness * PhysicsConfig.Mass;
+    
+    UE_LOG(LogTemp, VeryVerbose, TEXT("Core_VehiclePhysicsSystem: Suspension force: %.1f N"), SuspensionForce);
+}
+
+void UCore_VehiclePhysicsSystem::CalculateTireForces(float DeltaTime)
+{
+    if (!VehicleRootComponent)
+    {
+        return;
+    }
+
+    // Calculate tire forces based on current velocity and steering
+    FVector CurrentVelocity = VehicleRootComponent->GetComponentVelocity();
+    float LateralForce = CurrentState.SteeringAngle * PhysicsConfig.TireFriction * PhysicsConfig.Mass;
+    float LongitudinalForce = CurrentState.ThrottleInput * PhysicsConfig.TireFriction * PhysicsConfig.Mass;
+
+    UE_LOG(LogTemp, VeryVerbose, TEXT("Core_VehiclePhysicsSystem: Tire forces - Lateral: %.1f, Longitudinal: %.1f"), 
+           LateralForce, LongitudinalForce);
+}
+
+void UCore_VehiclePhysicsSystem::UpdateVehicleState(float DeltaTime)
+{
+    if (!VehicleRootComponent)
+    {
+        return;
+    }
+
+    // Update velocity and speed
+    CurrentState.Velocity = VehicleRootComponent->GetComponentVelocity();
+    CurrentState.CurrentSpeed = CurrentState.Velocity.Size();
+
+    // Update angular velocity
+    CurrentState.AngularVelocity = VehicleRootComponent->GetPhysicsAngularVelocityInDegrees();
+
+    // Update ground contact
+    HandleTerrainInteraction();
+
+    UE_LOG(LogTemp, VeryVerbose, TEXT("Core_VehiclePhysicsSystem: State updated - Speed: %.1f cm/s"), 
+           CurrentState.CurrentSpeed);
 }
