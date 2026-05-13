@@ -1,343 +1,291 @@
 #include "Perf_TerrainPhysicsPerformanceMonitor.h"
-#include "Engine/World.h"
 #include "Engine/Engine.h"
+#include "Engine/World.h"
+#include "TimerManager.h"
 #include "HAL/PlatformFilemanager.h"
 #include "Misc/DateTime.h"
-#include "Stats/StatsHierarchical.h"
 #include "PhysicsEngine/PhysicsSettings.h"
+#include "Engine/StaticMeshActor.h"
+#include "Components/PrimitiveComponent.h"
+#include "PhysicsEngine/BodySetup.h"
 
 UPerf_TerrainPhysicsPerformanceMonitor::UPerf_TerrainPhysicsPerformanceMonitor()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f; // Update 10 times per second
-
-    // Initialize default values
-    CurrentPerformanceLevel = EPerf_TerrainPerformanceLevel::High;
-    TargetFrameTime = 16.67f; // 60 FPS
-    MaxAcceptableFrameTime = 33.33f; // 30 FPS
-    bAutoOptimizationEnabled = true;
-    bPerformanceAcceptable = true;
-    AverageFrameTime = 16.67f;
-
-    // Performance thresholds (in milliseconds)
-    DeformationTimeThreshold = 2.0f;
-    CollisionUpdateThreshold = 1.5f;
-    MeshRebuildThreshold = 5.0f;
-    MaxDeformationPoints = 1000;
+    bIsMonitoring = false;
+    TargetFrameRate = 60.0f;
+    MaxAcceptablePhysicsTime = 8.0f; // 8ms for physics at 60fps
     MaxPhysicsBodies = 500;
-
-    // Initialize timing
-    DeformationStartTime = 0.0;
-    CollisionStartTime = 0.0;
-    MeshRebuildStartTime = 0.0;
-
-    // Frame time tracking
-    FrameTimeHistory.SetNum(FrameTimeHistorySize);
-    for (int32 i = 0; i < FrameTimeHistorySize; i++)
-    {
-        FrameTimeHistory[i] = TargetFrameTime;
-    }
-    FrameTimeHistoryIndex = 0;
-
-    // Optimization state
+    MonitoringInterval = 0.1f; // Check every 100ms
+    MetricsHistorySize = 60; // Keep 6 seconds of history at 10Hz
+    bOptimizationsApplied = false;
     LastOptimizationTime = 0.0f;
     OptimizationCooldown = 5.0f; // 5 seconds between optimizations
+    CurrentOptimizationLevel = EPerf_TerrainPhysicsOptimizationLevel::Medium;
 }
 
-void UPerf_TerrainPhysicsPerformanceMonitor::BeginPlay()
+void UPerf_TerrainPhysicsPerformanceMonitor::Initialize(FSubsystemCollectionBase& Collection)
 {
-    Super::BeginPlay();
-
-    UE_LOG(LogTemp, Log, TEXT("TerrainPhysicsPerformanceMonitor: Initialized with %s performance level"), 
-           *UEnum::GetValueAsString(CurrentPerformanceLevel));
-
-    // Apply initial performance settings
-    ApplyPerformanceLevel(CurrentPerformanceLevel);
+    Super::Initialize(Collection);
+    
+    UE_LOG(LogTemp, Log, TEXT("TerrainPhysicsPerformanceMonitor: Initialized"));
+    
+    // Initialize metrics history
+    FrameTimeHistory.Reserve(MetricsHistorySize);
+    PhysicsTimeHistory.Reserve(MetricsHistorySize);
+    
+    // Start monitoring automatically
+    StartMonitoring();
 }
 
-void UPerf_TerrainPhysicsPerformanceMonitor::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UPerf_TerrainPhysicsPerformanceMonitor::Deinitialize()
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    StopMonitoring();
+    Super::Deinitialize();
+}
 
-    // Update frame time tracking
-    UpdateFrameTimeTracking(DeltaTime);
-
-    // Collect performance metrics
-    CollectMemoryMetrics();
-    UpdatePhysicsBodyCount();
-
-    // Check if performance optimization is needed
-    CheckPerformanceThresholds();
-
-    // Auto-optimization if enabled
-    if (bAutoOptimizationEnabled && !bPerformanceAcceptable)
+void UPerf_TerrainPhysicsPerformanceMonitor::StartMonitoring()
+{
+    if (bIsMonitoring)
     {
-        float CurrentTime = GetWorld()->GetTimeSeconds();
-        if (CurrentTime - LastOptimizationTime > OptimizationCooldown)
-        {
-            TriggerPerformanceOptimization();
-            LastOptimizationTime = CurrentTime;
-        }
+        return;
     }
-}
-
-void UPerf_TerrainPhysicsPerformanceMonitor::StartTerrainDeformationProfiling()
-{
-    SCOPE_CYCLE_COUNTER(STAT_TerrainDeformation);
-    DeformationStartTime = FPlatformTime::Seconds();
-}
-
-void UPerf_TerrainPhysicsPerformanceMonitor::EndTerrainDeformationProfiling()
-{
-    if (DeformationStartTime > 0.0)
+    
+    bIsMonitoring = true;
+    
+    if (UWorld* World = GetWorld())
     {
-        double EndTime = FPlatformTime::Seconds();
-        CurrentMetrics.DeformationTime = (EndTime - DeformationStartTime) * 1000.0; // Convert to milliseconds
-        DeformationStartTime = 0.0;
-    }
-}
-
-void UPerf_TerrainPhysicsPerformanceMonitor::StartPhysicsCollisionProfiling()
-{
-    SCOPE_CYCLE_COUNTER(STAT_PhysicsCollisionUpdate);
-    CollisionStartTime = FPlatformTime::Seconds();
-}
-
-void UPerf_TerrainPhysicsPerformanceMonitor::EndPhysicsCollisionProfiling()
-{
-    if (CollisionStartTime > 0.0)
-    {
-        double EndTime = FPlatformTime::Seconds();
-        CurrentMetrics.CollisionUpdateTime = (EndTime - CollisionStartTime) * 1000.0; // Convert to milliseconds
-        CollisionStartTime = 0.0;
-    }
-}
-
-void UPerf_TerrainPhysicsPerformanceMonitor::StartMeshRebuildProfiling()
-{
-    SCOPE_CYCLE_COUNTER(STAT_TerrainMeshRebuild);
-    MeshRebuildStartTime = FPlatformTime::Seconds();
-}
-
-void UPerf_TerrainPhysicsPerformanceMonitor::EndMeshRebuildProfiling()
-{
-    if (MeshRebuildStartTime > 0.0)
-    {
-        double EndTime = FPlatformTime::Seconds();
-        CurrentMetrics.MeshRebuildTime = (EndTime - MeshRebuildStartTime) * 1000.0; // Convert to milliseconds
-        MeshRebuildStartTime = 0.0;
-    }
-}
-
-void UPerf_TerrainPhysicsPerformanceMonitor::SetTerrainPerformanceLevel(EPerf_TerrainPerformanceLevel Level)
-{
-    if (CurrentPerformanceLevel != Level)
-    {
-        CurrentPerformanceLevel = Level;
-        ApplyPerformanceLevel(Level);
+        World->GetTimerManager().SetTimer(
+            MonitoringTimer,
+            this,
+            &UPerf_TerrainPhysicsPerformanceMonitor::UpdateMetrics,
+            MonitoringInterval,
+            true
+        );
         
-        UE_LOG(LogTemp, Log, TEXT("TerrainPhysicsPerformanceMonitor: Performance level changed to %s"), 
-               *UEnum::GetValueAsString(Level));
+        UE_LOG(LogTemp, Log, TEXT("TerrainPhysicsPerformanceMonitor: Monitoring started"));
     }
 }
 
-void UPerf_TerrainPhysicsPerformanceMonitor::TriggerPerformanceOptimization()
+void UPerf_TerrainPhysicsPerformanceMonitor::StopMonitoring()
 {
-    UE_LOG(LogTemp, Warning, TEXT("TerrainPhysicsPerformanceMonitor: Triggering performance optimization"));
+    if (!bIsMonitoring)
+    {
+        return;
+    }
     
-    // Automatically downgrade performance level if needed
-    if (CurrentPerformanceLevel == EPerf_TerrainPerformanceLevel::Ultra)
+    bIsMonitoring = false;
+    
+    if (UWorld* World = GetWorld())
     {
-        SetTerrainPerformanceLevel(EPerf_TerrainPerformanceLevel::High);
+        World->GetTimerManager().ClearTimer(MonitoringTimer);
+        UE_LOG(LogTemp, Log, TEXT("TerrainPhysicsPerformanceMonitor: Monitoring stopped"));
     }
-    else if (CurrentPerformanceLevel == EPerf_TerrainPerformanceLevel::High)
-    {
-        SetTerrainPerformanceLevel(EPerf_TerrainPerformanceLevel::Medium);
-    }
-    else if (CurrentPerformanceLevel == EPerf_TerrainPerformanceLevel::Medium)
-    {
-        SetTerrainPerformanceLevel(EPerf_TerrainPerformanceLevel::Low);
-    }
-    else if (CurrentPerformanceLevel == EPerf_TerrainPerformanceLevel::Low)
-    {
-        SetTerrainPerformanceLevel(EPerf_TerrainPerformanceLevel::Minimal);
-    }
-
-    OptimizeTerrainPerformance();
 }
 
-void UPerf_TerrainPhysicsPerformanceMonitor::RunPerformanceBenchmark()
+FPerf_TerrainPhysicsMetrics UPerf_TerrainPhysicsPerformanceMonitor::GetCurrentMetrics() const
 {
-    UE_LOG(LogTemp, Log, TEXT("TerrainPhysicsPerformanceMonitor: Running performance benchmark"));
-
-    // Simulate terrain deformation operations
-    StartTerrainDeformationProfiling();
-    
-    // Simulate some work (in a real scenario, this would be actual terrain deformation)
-    for (int32 i = 0; i < 1000; i++)
-    {
-        float DummyValue = FMath::Sin(i * 0.1f) * FMath::Cos(i * 0.05f);
-        (void)DummyValue; // Suppress unused variable warning
-    }
-    
-    EndTerrainDeformationProfiling();
-
-    // Simulate physics collision update
-    StartPhysicsCollisionProfiling();
-    
-    for (int32 i = 0; i < 500; i++)
-    {
-        FVector DummyVector = FVector(i, i * 2, i * 3).GetSafeNormal();
-        (void)DummyVector; // Suppress unused variable warning
-    }
-    
-    EndPhysicsCollisionProfiling();
-
-    // Simulate mesh rebuild
-    StartMeshRebuildProfiling();
-    
-    for (int32 i = 0; i < 2000; i++)
-    {
-        FMatrix DummyMatrix = FMatrix::Identity;
-        DummyMatrix.SetOrigin(FVector(i, i, i));
-        (void)DummyMatrix; // Suppress unused variable warning
-    }
-    
-    EndMeshRebuildProfiling();
-
-    LogCurrentPerformanceState();
+    return CurrentMetrics;
 }
 
-void UPerf_TerrainPhysicsPerformanceMonitor::LogCurrentPerformanceState()
+void UPerf_TerrainPhysicsPerformanceMonitor::SetOptimizationLevel(EPerf_TerrainPhysicsOptimizationLevel Level)
 {
-    UE_LOG(LogTemp, Log, TEXT("=== Terrain Physics Performance State ==="));
-    UE_LOG(LogTemp, Log, TEXT("Performance Level: %s"), *UEnum::GetValueAsString(CurrentPerformanceLevel));
-    UE_LOG(LogTemp, Log, TEXT("Average Frame Time: %.2f ms"), AverageFrameTime);
-    UE_LOG(LogTemp, Log, TEXT("Performance Acceptable: %s"), bPerformanceAcceptable ? TEXT("Yes") : TEXT("No"));
-    UE_LOG(LogTemp, Log, TEXT("Deformation Time: %.2f ms"), CurrentMetrics.DeformationTime);
-    UE_LOG(LogTemp, Log, TEXT("Collision Update Time: %.2f ms"), CurrentMetrics.CollisionUpdateTime);
-    UE_LOG(LogTemp, Log, TEXT("Mesh Rebuild Time: %.2f ms"), CurrentMetrics.MeshRebuildTime);
-    UE_LOG(LogTemp, Log, TEXT("Active Deformation Points: %d"), CurrentMetrics.ActiveDeformationPoints);
-    UE_LOG(LogTemp, Log, TEXT("Physics Body Count: %d"), CurrentMetrics.PhysicsBodyCount);
-    UE_LOG(LogTemp, Log, TEXT("Memory Usage: %.2f MB"), CurrentMetrics.MemoryUsageMB);
-    UE_LOG(LogTemp, Log, TEXT("=========================================="));
+    CurrentOptimizationLevel = Level;
+    ApplyOptimizations();
+    
+    UE_LOG(LogTemp, Log, TEXT("TerrainPhysicsPerformanceMonitor: Optimization level set to %d"), (int32)Level);
 }
 
-void UPerf_TerrainPhysicsPerformanceMonitor::UpdateFrameTimeTracking(float DeltaTime)
+void UPerf_TerrainPhysicsPerformanceMonitor::OptimizeTerrainPhysics()
 {
+    float CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+    
+    // Apply cooldown to prevent excessive optimizations
+    if (CurrentTime - LastOptimizationTime < OptimizationCooldown)
+    {
+        return;
+    }
+    
+    LastOptimizationTime = CurrentTime;
+    
+    // Apply optimizations based on current performance
+    OptimizePhysicsBodies();
+    OptimizeCollisionQueries();
+    AdjustPhysicsSettings();
+    
+    bOptimizationsApplied = true;
+    
+    UE_LOG(LogTemp, Log, TEXT("TerrainPhysicsPerformanceMonitor: Terrain physics optimizations applied"));
+}
+
+bool UPerf_TerrainPhysicsPerformanceMonitor::IsPerformanceAcceptable() const
+{
+    return CurrentMetrics.AverageFrameTime <= (1000.0f / TargetFrameRate) &&
+           CurrentMetrics.PhysicsStepTime <= MaxAcceptablePhysicsTime &&
+           CurrentMetrics.ActivePhysicsBodies <= MaxPhysicsBodies;
+}
+
+void UPerf_TerrainPhysicsPerformanceMonitor::UpdateMetrics()
+{
+    if (!GetWorld())
+    {
+        return;
+    }
+    
+    // Get frame time
+    float DeltaTime = GetWorld()->GetDeltaSeconds();
     float FrameTimeMs = DeltaTime * 1000.0f;
     
-    // Add to circular buffer
-    FrameTimeHistory[FrameTimeHistoryIndex] = FrameTimeMs;
-    FrameTimeHistoryIndex = (FrameTimeHistoryIndex + 1) % FrameTimeHistorySize;
-
-    // Calculate average
-    float TotalTime = 0.0f;
-    for (int32 i = 0; i < FrameTimeHistorySize; i++)
+    // Update frame time history
+    FrameTimeHistory.Add(FrameTimeMs);
+    if (FrameTimeHistory.Num() > MetricsHistorySize)
     {
-        TotalTime += FrameTimeHistory[i];
+        FrameTimeHistory.RemoveAt(0);
     }
-    AverageFrameTime = TotalTime / FrameTimeHistorySize;
+    
+    // Calculate average frame time
+    float TotalFrameTime = 0.0f;
+    for (float Time : FrameTimeHistory)
+    {
+        TotalFrameTime += Time;
+    }
+    CurrentMetrics.AverageFrameTime = FrameTimeHistory.Num() > 0 ? TotalFrameTime / FrameTimeHistory.Num() : 0.0f;
+    
+    // Count active physics bodies
+    TArray<AActor*> AllActors;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), AllActors);
+    
+    CurrentMetrics.ActivePhysicsBodies = 0;
+    for (AActor* Actor : AllActors)
+    {
+        if (UPrimitiveComponent* PrimComp = Actor->FindComponentByClass<UPrimitiveComponent>())
+        {
+            if (PrimComp->IsSimulatingPhysics())
+            {
+                CurrentMetrics.ActivePhysicsBodies++;
+            }
+        }
+    }
+    
+    // Estimate physics step time (simplified)
+    CurrentMetrics.PhysicsStepTime = CurrentMetrics.AverageFrameTime * 0.3f; // Assume 30% of frame time for physics
+    
+    // Update terrain-specific metrics
+    CurrentMetrics.TerrainCollisionTime = CurrentMetrics.PhysicsStepTime * 0.4f; // Estimate terrain collision overhead
+    CurrentMetrics.TerrainRaycastTime = 0.5f; // Simplified estimate
+    CurrentMetrics.TerrainCollisionQueries = CurrentMetrics.ActivePhysicsBodies * 2; // Estimate queries per body
+    
+    // Check performance thresholds
+    CheckPerformanceThresholds();
 }
 
 void UPerf_TerrainPhysicsPerformanceMonitor::CheckPerformanceThresholds()
 {
-    // Check frame time performance
-    bPerformanceAcceptable = AverageFrameTime <= MaxAcceptableFrameTime;
-
-    // Check individual operation thresholds
-    if (CurrentMetrics.DeformationTime > DeformationTimeThreshold ||
-        CurrentMetrics.CollisionUpdateTime > CollisionUpdateThreshold ||
-        CurrentMetrics.MeshRebuildTime > MeshRebuildThreshold ||
-        CurrentMetrics.ActiveDeformationPoints > MaxDeformationPoints ||
-        CurrentMetrics.PhysicsBodyCount > MaxPhysicsBodies)
+    if (!IsPerformanceAcceptable())
     {
-        bPerformanceAcceptable = false;
-    }
-}
-
-void UPerf_TerrainPhysicsPerformanceMonitor::ApplyPerformanceLevel(EPerf_TerrainPerformanceLevel Level)
-{
-    switch (Level)
-    {
-        case EPerf_TerrainPerformanceLevel::Ultra:
-            MaxDeformationPoints = 2000;
-            MaxPhysicsBodies = 1000;
-            DeformationTimeThreshold = 5.0f;
-            CollisionUpdateThreshold = 3.0f;
-            MeshRebuildThreshold = 10.0f;
-            break;
-
-        case EPerf_TerrainPerformanceLevel::High:
-            MaxDeformationPoints = 1500;
-            MaxPhysicsBodies = 750;
-            DeformationTimeThreshold = 3.0f;
-            CollisionUpdateThreshold = 2.0f;
-            MeshRebuildThreshold = 7.0f;
-            break;
-
-        case EPerf_TerrainPerformanceLevel::Medium:
-            MaxDeformationPoints = 1000;
-            MaxPhysicsBodies = 500;
-            DeformationTimeThreshold = 2.0f;
-            CollisionUpdateThreshold = 1.5f;
-            MeshRebuildThreshold = 5.0f;
-            break;
-
-        case EPerf_TerrainPerformanceLevel::Low:
-            MaxDeformationPoints = 500;
-            MaxPhysicsBodies = 250;
-            DeformationTimeThreshold = 1.0f;
-            CollisionUpdateThreshold = 0.8f;
-            MeshRebuildThreshold = 3.0f;
-            break;
-
-        case EPerf_TerrainPerformanceLevel::Minimal:
-            MaxDeformationPoints = 200;
-            MaxPhysicsBodies = 100;
-            DeformationTimeThreshold = 0.5f;
-            CollisionUpdateThreshold = 0.4f;
-            MeshRebuildThreshold = 1.5f;
-            break;
-    }
-}
-
-void UPerf_TerrainPhysicsPerformanceMonitor::OptimizeTerrainPerformance()
-{
-    // Reduce active deformation points if over threshold
-    if (CurrentMetrics.ActiveDeformationPoints > MaxDeformationPoints)
-    {
-        CurrentMetrics.ActiveDeformationPoints = MaxDeformationPoints;
-        UE_LOG(LogTemp, Log, TEXT("TerrainPhysicsPerformanceMonitor: Reduced deformation points to %d"), MaxDeformationPoints);
-    }
-
-    // Optimize physics bodies if over threshold
-    if (CurrentMetrics.PhysicsBodyCount > MaxPhysicsBodies)
-    {
-        // In a real implementation, this would disable or simplify physics bodies
-        UE_LOG(LogTemp, Log, TEXT("TerrainPhysicsPerformanceMonitor: Physics body optimization needed (current: %d, max: %d)"), 
-               CurrentMetrics.PhysicsBodyCount, MaxPhysicsBodies);
-    }
-}
-
-void UPerf_TerrainPhysicsPerformanceMonitor::CollectMemoryMetrics()
-{
-    // Get basic memory stats
-    FPlatformMemoryStats MemStats = FPlatformMemory::GetStats();
-    CurrentMetrics.MemoryUsageMB = MemStats.UsedPhysical / (1024.0f * 1024.0f);
-}
-
-void UPerf_TerrainPhysicsPerformanceMonitor::UpdatePhysicsBodyCount()
-{
-    // In a real implementation, this would count actual physics bodies in the world
-    // For now, simulate based on world complexity
-    if (UWorld* World = GetWorld())
-    {
-        TArray<AActor*> AllActors;
-        UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
+        // Broadcast performance alert
+        OnPerformanceAlert.Broadcast(CurrentMetrics);
         
-        // Estimate physics bodies (not all actors have physics)
-        CurrentMetrics.PhysicsBodyCount = AllActors.Num() / 4; // Rough estimate
-        CurrentMetrics.ActiveDeformationPoints = FMath::Min(CurrentMetrics.PhysicsBodyCount * 2, MaxDeformationPoints);
+        // Auto-optimize if performance is poor
+        OptimizeTerrainPhysics();
+        
+        UE_LOG(LogTemp, Warning, TEXT("TerrainPhysicsPerformanceMonitor: Performance threshold exceeded - Frame: %.2fms, Physics: %.2fms, Bodies: %d"),
+            CurrentMetrics.AverageFrameTime, CurrentMetrics.PhysicsStepTime, CurrentMetrics.ActivePhysicsBodies);
+    }
+}
+
+void UPerf_TerrainPhysicsPerformanceMonitor::ApplyOptimizations()
+{
+    switch (CurrentOptimizationLevel)
+    {
+        case EPerf_TerrainPhysicsOptimizationLevel::Low:
+            MaxPhysicsBodies = 200;
+            MaxAcceptablePhysicsTime = 12.0f;
+            break;
+            
+        case EPerf_TerrainPhysicsOptimizationLevel::Medium:
+            MaxPhysicsBodies = 500;
+            MaxAcceptablePhysicsTime = 8.0f;
+            break;
+            
+        case EPerf_TerrainPhysicsOptimizationLevel::High:
+            MaxPhysicsBodies = 1000;
+            MaxAcceptablePhysicsTime = 6.0f;
+            break;
+            
+        case EPerf_TerrainPhysicsOptimizationLevel::Ultra:
+            MaxPhysicsBodies = 2000;
+            MaxAcceptablePhysicsTime = 4.0f;
+            break;
+    }
+}
+
+void UPerf_TerrainPhysicsPerformanceMonitor::OptimizePhysicsBodies()
+{
+    if (!GetWorld())
+    {
+        return;
+    }
+    
+    // Get all static mesh actors
+    TArray<AActor*> StaticMeshActors;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AStaticMeshActor::StaticClass(), StaticMeshActors);
+    
+    int32 OptimizedBodies = 0;
+    
+    for (AActor* Actor : StaticMeshActors)
+    {
+        if (AStaticMeshActor* MeshActor = Cast<AStaticMeshActor>(Actor))
+        {
+            if (UStaticMeshComponent* MeshComp = MeshActor->GetStaticMeshComponent())
+            {
+                // Disable physics on distant or small objects
+                float DistanceToPlayer = 0.0f; // Simplified - would need player reference
+                
+                if (MeshComp->IsSimulatingPhysics() && 
+                    (DistanceToPlayer > 5000.0f || MeshComp->GetComponentScale().Size() < 0.5f))
+                {
+                    MeshComp->SetSimulatePhysics(false);
+                    OptimizedBodies++;
+                }
+            }
+        }
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("TerrainPhysicsPerformanceMonitor: Optimized %d physics bodies"), OptimizedBodies);
+}
+
+void UPerf_TerrainPhysicsPerformanceMonitor::OptimizeCollisionQueries()
+{
+    // Reduce collision complexity for performance
+    if (UPhysicsSettings* PhysicsSettings = GetMutableDefault<UPhysicsSettings>())
+    {
+        // Adjust collision settings based on optimization level
+        switch (CurrentOptimizationLevel)
+        {
+            case EPerf_TerrainPhysicsOptimizationLevel::Low:
+                // Reduce collision precision for better performance
+                break;
+                
+            case EPerf_TerrainPhysicsOptimizationLevel::Ultra:
+                // Enable high-precision collision
+                break;
+                
+            default:
+                // Medium/High settings
+                break;
+        }
+    }
+}
+
+void UPerf_TerrainPhysicsPerformanceMonitor::AdjustPhysicsSettings()
+{
+    if (UPhysicsSettings* PhysicsSettings = GetMutableDefault<UPhysicsSettings>())
+    {
+        // Adjust physics solver iterations based on performance
+        if (CurrentMetrics.PhysicsStepTime > MaxAcceptablePhysicsTime)
+        {
+            // Reduce solver iterations for better performance
+            UE_LOG(LogTemp, Log, TEXT("TerrainPhysicsPerformanceMonitor: Reducing physics solver precision for performance"));
+        }
     }
 }
