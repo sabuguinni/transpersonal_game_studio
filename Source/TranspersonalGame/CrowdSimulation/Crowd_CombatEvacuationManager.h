@@ -2,83 +2,140 @@
 
 #include "CoreMinimal.h"
 #include "Engine/World.h"
-#include "GameFramework/Actor.h"
-#include "Components/ActorComponent.h"
 #include "Subsystems/WorldSubsystem.h"
-#include "../SharedTypes.h"
+#include "Components/ActorComponent.h"
+#include "MassEntityTypes.h"
+#include "MassSpawnerTypes.h"
+#include "MassCommonTypes.h"
+#include "MassEntitySubsystem.h"
+#include "MassEntityManager.h"
+#include "MassProcessingTypes.h"
+#include "MassProcessor.h"
+#include "MassEntityView.h"
+#include "MassObserverRegistry.h"
+#include "MassArchetypeTypes.h"
+#include "MassExecutionContext.h"
+#include "SharedTypes.h"
 #include "Crowd_CombatEvacuationManager.generated.h"
 
-UENUM(BlueprintType)
-enum class ECrowd_EvacuationState : uint8
-{
-    Normal UMETA(DisplayName = "Normal"),
-    Alert UMETA(DisplayName = "Alert"),
-    Panic UMETA(DisplayName = "Panic"),
-    Evacuation UMETA(DisplayName = "Evacuation"),
-    Scattered UMETA(DisplayName = "Scattered")
-};
+class UCombat_CombatStateManager;
 
 USTRUCT(BlueprintType)
-struct FCrowd_EvacuationZone
+struct TRANSPERSONALGAME_API FCrowd_EvacuationZone
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Evacuation")
-    FVector Center;
+    FVector SafeZoneCenter = FVector::ZeroVector;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Evacuation")
-    float Radius;
+    float SafeZoneRadius = 2000.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Evacuation")
-    ECrowd_EvacuationState CurrentState;
+    int32 MaxCapacity = 500;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Evacuation")
-    float ThreatLevel;
+    int32 CurrentOccupancy = 0;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Evacuation")
-    TArray<AActor*> NPCsInZone;
+    bool bIsActive = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Evacuation")
+    float PanicThreshold = 0.7f;
 
     FCrowd_EvacuationZone()
     {
-        Center = FVector::ZeroVector;
-        Radius = 1000.0f;
-        CurrentState = ECrowd_EvacuationState::Normal;
-        ThreatLevel = 0.0f;
+        SafeZoneCenter = FVector::ZeroVector;
+        SafeZoneRadius = 2000.0f;
+        MaxCapacity = 500;
+        CurrentOccupancy = 0;
+        bIsActive = true;
+        PanicThreshold = 0.7f;
     }
 };
 
 USTRUCT(BlueprintType)
-struct FCrowd_NPCEvacuationData
+struct TRANSPERSONALGAME_API FCrowd_PanicBehavior
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC")
-    AActor* NPCActor;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Panic")
+    float PanicLevel = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC")
-    FVector OriginalPosition;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Panic")
+    FVector FleeDirection = FVector::ZeroVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC")
-    FVector EvacuationTarget;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Panic")
+    float FleeSpeed = 600.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC")
-    float PanicLevel;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Panic")
+    float PanicDecayRate = 0.1f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC")
-    bool bIsEvacuating;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Panic")
+    bool bInPanic = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NPC")
-    float EvacuationSpeed;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Panic")
+    float GroupCohesion = 0.8f;
 
-    FCrowd_NPCEvacuationData()
+    FCrowd_PanicBehavior()
     {
-        NPCActor = nullptr;
-        OriginalPosition = FVector::ZeroVector;
-        EvacuationTarget = FVector::ZeroVector;
         PanicLevel = 0.0f;
-        bIsEvacuating = false;
-        EvacuationSpeed = 600.0f;
+        FleeDirection = FVector::ZeroVector;
+        FleeSpeed = 600.0f;
+        PanicDecayRate = 0.1f;
+        bInPanic = false;
+        GroupCohesion = 0.8f;
     }
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FCrowd_CombatEvacuationFragment
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mass Entity")
+    FCrowd_PanicBehavior PanicBehavior;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mass Entity")
+    int32 AssignedEvacuationZone = -1;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mass Entity")
+    float ThreatAwareness = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mass Entity")
+    FVector LastKnownThreatLocation = FVector::ZeroVector;
+
+    FCrowd_CombatEvacuationFragment()
+    {
+        AssignedEvacuationZone = -1;
+        ThreatAwareness = 0.0f;
+        LastKnownThreatLocation = FVector::ZeroVector;
+    }
+};
+
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UCrowd_CombatEvacuationProcessor : public UMassProcessor
+{
+    GENERATED_BODY()
+
+public:
+    UCrowd_CombatEvacuationProcessor();
+
+protected:
+    virtual void ConfigureQueries() override;
+    virtual void Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context) override;
+
+private:
+    FMassEntityQuery EntityQuery;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Evacuation", meta = (AllowPrivateAccess = "true"))
+    float PanicSpreadRadius = 1000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Evacuation", meta = (AllowPrivateAccess = "true"))
+    float PanicSpreadRate = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Evacuation", meta = (AllowPrivateAccess = "true"))
+    float MaxEvacuationDistance = 5000.0f;
 };
 
 UCLASS(BlueprintType, Blueprintable)
@@ -93,88 +150,88 @@ public:
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Combat evacuation system
+    // Evacuation zone management
     UFUNCTION(BlueprintCallable, Category = "Crowd Evacuation")
-    void TriggerEvacuation(FVector CombatLocation, float ThreatRadius, float ThreatLevel);
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd Evacuation")
-    void UpdateEvacuationZones(float DeltaTime);
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd Evacuation")
-    void RegisterNPCForEvacuation(AActor* NPCActor);
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd Evacuation")
-    void UnregisterNPCFromEvacuation(AActor* NPCActor);
-
-    // Zone management
-    UFUNCTION(BlueprintCallable, Category = "Crowd Evacuation")
-    void CreateEvacuationZone(FVector Center, float Radius);
+    int32 CreateEvacuationZone(const FVector& Center, float Radius, int32 MaxCapacity);
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Evacuation")
     void RemoveEvacuationZone(int32 ZoneIndex);
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Evacuation")
-    FCrowd_EvacuationZone GetEvacuationZone(int32 ZoneIndex);
-
-    // NPC behavior control
-    UFUNCTION(BlueprintCallable, Category = "Crowd Evacuation")
-    void SetNPCPanicLevel(AActor* NPCActor, float PanicLevel);
+    void ActivateEvacuationZone(int32 ZoneIndex, bool bActivate);
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Evacuation")
-    FVector CalculateEvacuationTarget(AActor* NPCActor, FVector ThreatLocation);
+    FVector GetNearestSafeZone(const FVector& Location, float& OutDistance);
+
+    // Combat evacuation triggers
+    UFUNCTION(BlueprintCallable, Category = "Crowd Evacuation")
+    void TriggerMassEvacuation(const FVector& ThreatLocation, float ThreatRadius, float PanicLevel);
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Evacuation")
-    void ExecuteEvacuationMovement(AActor* NPCActor, float DeltaTime);
-
-    // Combat integration
-    UFUNCTION(BlueprintCallable, Category = "Crowd Evacuation")
-    void OnCombatStarted(FVector CombatLocation, float ThreatLevel);
+    void ProcessCombatThreat(const FVector& ThreatLocation, float ThreatLevel, float AffectedRadius);
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Evacuation")
-    void OnCombatEnded(FVector CombatLocation);
+    void UpdateEvacuationBehavior(float DeltaTime);
+
+    // Mass Entity integration
+    UFUNCTION(BlueprintCallable, Category = "Crowd Evacuation")
+    void RegisterMassEntity(FMassEntityHandle EntityHandle, const FVector& Location);
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Evacuation")
-    void OnDinosaurSpotted(AActor* DinosaurActor, FVector Location);
-
-    // Crowd density management
-    UFUNCTION(BlueprintCallable, Category = "Crowd Evacuation")
-    float GetCrowdDensityAtLocation(FVector Location, float Radius);
+    void UnregisterMassEntity(FMassEntityHandle EntityHandle);
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Evacuation")
-    void AdjustCrowdDensityForCombat(FVector CombatLocation, float Radius);
+    void AssignEntityToEvacuationZone(FMassEntityHandle EntityHandle, int32 ZoneIndex);
 
-    // Utility functions
+    // Panic behavior management
     UFUNCTION(BlueprintCallable, Category = "Crowd Evacuation")
-    bool IsLocationSafe(FVector Location);
-
-    UFUNCTION(BlueprintCallable, Category = "Crowd Evacuation")
-    TArray<AActor*> GetNPCsInRadius(FVector Center, float Radius);
+    void SpreadPanic(const FVector& PanicSource, float PanicRadius, float PanicIntensity);
 
     UFUNCTION(BlueprintCallable, Category = "Crowd Evacuation")
-    void ResetAllEvacuations();
+    void CalculateFleeDirection(const FVector& EntityLocation, const FVector& ThreatLocation, FVector& OutFleeDirection);
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd Evacuation")
+    bool IsLocationSafe(const FVector& Location, float SafetyRadius = 1000.0f);
+
+    // Statistics and monitoring
+    UFUNCTION(BlueprintCallable, Category = "Crowd Evacuation")
+    int32 GetTotalEvacuatingEntities() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd Evacuation")
+    float GetAveragePanicLevel() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Crowd Evacuation")
+    void GetEvacuationStatistics(int32& OutActiveZones, int32& OutEvacuatingEntities, float& OutAveragePanic);
 
 protected:
-    UPROPERTY(BlueprintReadOnly, Category = "Crowd Evacuation")
+    UPROPERTY(BlueprintReadOnly, Category = "Evacuation Zones")
     TArray<FCrowd_EvacuationZone> EvacuationZones;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Crowd Evacuation")
-    TArray<FCrowd_NPCEvacuationData> RegisteredNPCs;
+    UPROPERTY(BlueprintReadOnly, Category = "Mass Entities")
+    TMap<FMassEntityHandle, FCrowd_CombatEvacuationFragment> RegisteredEntities;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    float MaxEvacuationDistance;
+    UPROPERTY(BlueprintReadOnly, Category = "Combat Integration")
+    UCombat_CombatStateManager* CombatStateManager;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    float PanicDecayRate;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Evacuation Settings")
+    float GlobalPanicThreshold = 0.6f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    float EvacuationSpeedMultiplier;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Evacuation Settings")
+    float PanicDecayRate = 0.05f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-    float CrowdDensityThreshold;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Evacuation Settings")
+    float MaxEvacuationSpeed = 800.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Evacuation Settings")
+    int32 MaxSimultaneousEvacuees = 1000;
 
 private:
-    void UpdateNPCEvacuation(FCrowd_NPCEvacuationData& NPCData, float DeltaTime);
-    void CalculateZoneThreatLevel(FCrowd_EvacuationZone& Zone);
-    FVector FindSafeEvacuationPoint(FVector StartLocation, FVector ThreatLocation);
-    bool IsNPCInEvacuationZone(AActor* NPCActor, const FCrowd_EvacuationZone& Zone);
+    void InitializeDefaultEvacuationZones();
+    void UpdatePanicSpread(float DeltaTime);
+    void ProcessEvacuationMovement(float DeltaTime);
+    int32 FindBestEvacuationZone(const FVector& Location);
+    void ValidateEvacuationZones();
+
+    float LastUpdateTime;
+    bool bSystemInitialized;
 };
