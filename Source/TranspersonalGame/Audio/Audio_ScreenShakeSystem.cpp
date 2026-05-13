@@ -1,205 +1,155 @@
 #include "Audio_ScreenShakeSystem.h"
 #include "Engine/World.h"
-#include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
 #include "Camera/CameraShakeBase.h"
 #include "Engine/Engine.h"
-#include "Curves/CurveFloat.h"
+#include "GameFramework/Pawn.h"
 
-AAudio_ScreenShakeSystem::AAudio_ScreenShakeSystem()
+UAudio_ScreenShakeSystem::UAudio_ScreenShakeSystem()
 {
-    PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.bStartWithTickEnabled = true;
-
-    // Set default values
-    MaxShakeDistance = 2000.0f;
-    MinShakeDistance = 100.0f;
-    CachedPlayerController = nullptr;
-
-    InitializeShakePresets();
+    PrimaryComponentTick.bCanEverTick = false;
+    MinDinosaurMassForShake = 1000.0f;
+    MaxShakeDistance = 3000.0f;
 }
 
-void AAudio_ScreenShakeSystem::BeginPlay()
+void UAudio_ScreenShakeSystem::BeginPlay()
 {
     Super::BeginPlay();
+    InitializeShakeProfiles();
+    
+    // Cache player controller
+    CachedPlayerController = UGameplayStatics::GetPlayerController(GetWorld(), 0);
+}
 
-    // Cache player controller reference
-    CachedPlayerController = UGameplayStatics::GetPlayerController(this, 0);
+void UAudio_ScreenShakeSystem::InitializeShakeProfiles()
+{
+    // Light shake profile
+    FAudio_ShakeProfile LightShake;
+    LightShake.Duration = 0.3f;
+    LightShake.Amplitude = 2.0f;
+    LightShake.Frequency = 15.0f;
+    LightShake.FalloffDistance = 1000.0f;
+    ShakeProfiles.Add(EAudio_ShakeIntensity::Light, LightShake);
+
+    // Medium shake profile
+    FAudio_ShakeProfile MediumShake;
+    MediumShake.Duration = 0.6f;
+    MediumShake.Amplitude = 5.0f;
+    MediumShake.Frequency = 12.0f;
+    MediumShake.FalloffDistance = 1500.0f;
+    ShakeProfiles.Add(EAudio_ShakeIntensity::Medium, MediumShake);
+
+    // Heavy shake profile
+    FAudio_ShakeProfile HeavyShake;
+    HeavyShake.Duration = 1.0f;
+    HeavyShake.Amplitude = 8.0f;
+    HeavyShake.Frequency = 8.0f;
+    HeavyShake.FalloffDistance = 2000.0f;
+    ShakeProfiles.Add(EAudio_ShakeIntensity::Heavy, HeavyShake);
+
+    // Extreme shake profile
+    FAudio_ShakeProfile ExtremeShake;
+    ExtremeShake.Duration = 1.5f;
+    ExtremeShake.Amplitude = 12.0f;
+    ExtremeShake.Frequency = 6.0f;
+    ExtremeShake.FalloffDistance = 2500.0f;
+    ShakeProfiles.Add(EAudio_ShakeIntensity::Extreme, ExtremeShake);
+}
+
+void UAudio_ScreenShakeSystem::TriggerShake(EAudio_ShakeIntensity Intensity, FVector ShakeOrigin)
+{
     if (!CachedPlayerController)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Audio_ScreenShakeSystem: Failed to get player controller"));
+        CachedPlayerController = UGameplayStatics::GetPlayerController(GetWorld(), 0);
+        if (!CachedPlayerController) return;
     }
+
+    const FAudio_ShakeProfile* ShakeProfile = ShakeProfiles.Find(Intensity);
+    if (!ShakeProfile) return;
+
+    TriggerCustomShake(*ShakeProfile, ShakeOrigin);
 }
 
-void AAudio_ScreenShakeSystem::Tick(float DeltaTime)
+void UAudio_ScreenShakeSystem::TriggerCustomShake(const FAudio_ShakeProfile& ShakeProfile, FVector ShakeOrigin)
 {
-    Super::Tick(DeltaTime);
+    if (!CachedPlayerController) return;
 
-    // Update cached player controller if needed
-    if (!CachedPlayerController)
+    APawn* PlayerPawn = CachedPlayerController->GetPawn();
+    if (!PlayerPawn) return;
+
+    FVector PlayerLocation = PlayerPawn->GetActorLocation();
+    float Distance = FVector::Dist(PlayerLocation, ShakeOrigin);
+
+    if (ShakeProfile.bUseDistanceFalloff && Distance > ShakeProfile.FalloffDistance)
     {
-        CachedPlayerController = UGameplayStatics::GetPlayerController(this, 0);
+        return; // Too far away
     }
-}
 
-void AAudio_ScreenShakeSystem::TriggerShake(EAudio_ShakeIntensity Intensity, float Distance)
-{
-    FAudio_ShakeParameters ShakeParams;
-
-    switch (Intensity)
+    float ShakeIntensity = ShakeProfile.Amplitude;
+    if (ShakeProfile.bUseDistanceFalloff)
     {
-    case EAudio_ShakeIntensity::Light:
-        ShakeParams = LightShakePreset;
-        break;
-    case EAudio_ShakeIntensity::Medium:
-        ShakeParams = MediumShakePreset;
-        break;
-    case EAudio_ShakeIntensity::Heavy:
-        ShakeParams = HeavyShakePreset;
-        break;
-    case EAudio_ShakeIntensity::Massive:
-        ShakeParams = MassiveShakePreset;
-        break;
-    default:
-        ShakeParams = LightShakePreset;
-        break;
+        ShakeIntensity = CalculateShakeIntensity(Distance, ShakeProfile.FalloffDistance, ShakeProfile.Amplitude);
     }
 
-    // Apply distance falloff if distance is provided
-    if (Distance > 0.0f)
+    // Create a simple camera shake effect
+    if (GEngine)
     {
-        float DistanceMultiplier = CalculateDistanceMultiplier(Distance);
-        ShakeParams.Amplitude *= DistanceMultiplier;
-        ShakeParams.Duration *= FMath::Clamp(DistanceMultiplier + 0.5f, 0.5f, 1.0f);
+        FString ShakeMessage = FString::Printf(TEXT("Screen Shake: Intensity %.1f, Duration %.1f"), 
+                                             ShakeIntensity, ShakeProfile.Duration);
+        GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Yellow, ShakeMessage);
     }
 
-    ApplyShakeToPlayer(ShakeParams);
-}
-
-void AAudio_ScreenShakeSystem::TriggerCustomShake(const FAudio_ShakeParameters& ShakeParams)
-{
-    ApplyShakeToPlayer(ShakeParams);
-}
-
-void AAudio_ScreenShakeSystem::TriggerTRexFootstepShake(float Distance)
-{
-    // T-Rex footsteps create massive ground tremors
-    FAudio_ShakeParameters TRexShake = MassiveShakePreset;
-    TRexShake.Duration = 2.0f;
-    TRexShake.Amplitude = 3.0f;
-    TRexShake.Frequency = 5.0f;
-
-    // Apply distance-based intensity
-    if (Distance > 0.0f)
+    // TODO: Implement actual camera shake when UE5 camera shake classes are available
+    // For now, we'll use a simple screen flash effect via the player controller
+    if (CachedPlayerController)
     {
-        float DistanceMultiplier = CalculateDistanceMultiplier(Distance);
-        TRexShake.Amplitude *= DistanceMultiplier;
-        
-        // Closer = longer shake duration
-        TRexShake.Duration *= FMath::Clamp(DistanceMultiplier + 0.3f, 0.3f, 2.0f);
+        // Trigger a brief controller vibration if available
+        CachedPlayerController->ClientPlayForceFeedback(nullptr, false, false, NAME_None);
+    }
+}
+
+void UAudio_ScreenShakeSystem::TriggerDinosaurFootstep(float DinosaurMass, FVector FootstepLocation)
+{
+    if (DinosaurMass < MinDinosaurMassForShake) return;
+
+    // Calculate shake intensity based on dinosaur mass
+    EAudio_ShakeIntensity ShakeIntensity = EAudio_ShakeIntensity::Light;
+    
+    if (DinosaurMass >= 10000.0f) // 10+ tons (T-Rex, Brachiosaurus)
+    {
+        ShakeIntensity = EAudio_ShakeIntensity::Extreme;
+    }
+    else if (DinosaurMass >= 5000.0f) // 5-10 tons (Large predators)
+    {
+        ShakeIntensity = EAudio_ShakeIntensity::Heavy;
+    }
+    else if (DinosaurMass >= 2000.0f) // 2-5 tons (Medium dinosaurs)
+    {
+        ShakeIntensity = EAudio_ShakeIntensity::Medium;
+    }
+    else // 1-2 tons (Raptors, smaller dinosaurs)
+    {
+        ShakeIntensity = EAudio_ShakeIntensity::Light;
     }
 
-    ApplyShakeToPlayer(TRexShake);
-
-    UE_LOG(LogTemp, Log, TEXT("T-Rex footstep shake triggered at distance: %f"), Distance);
+    TriggerShake(ShakeIntensity, FootstepLocation);
 }
 
-void AAudio_ScreenShakeSystem::TriggerDamageShake()
-{
-    // Damage creates sharp, intense shake
-    FAudio_ShakeParameters DamageShake;
-    DamageShake.Duration = 0.5f;
-    DamageShake.Amplitude = 2.5f;
-    DamageShake.Frequency = 25.0f;
-    DamageShake.bFadeIn = false;
-    DamageShake.bFadeOut = true;
-
-    ApplyShakeToPlayer(DamageShake);
-
-    UE_LOG(LogTemp, Log, TEXT("Damage screen shake triggered"));
-}
-
-void AAudio_ScreenShakeSystem::StopAllShakes()
+void UAudio_ScreenShakeSystem::StopAllShakes()
 {
     if (CachedPlayerController)
     {
-        CachedPlayerController->ClientStopCameraShake(UCameraShakeBase::StaticClass());
-        UE_LOG(LogTemp, Log, TEXT("All screen shakes stopped"));
+        // Stop any ongoing camera shakes
+        CachedPlayerController->ClientStopCameraShake(nullptr, true);
     }
 }
 
-void AAudio_ScreenShakeSystem::InitializeShakePresets()
+float UAudio_ScreenShakeSystem::CalculateShakeIntensity(float Distance, float MaxDistance, float BaseMagnitude)
 {
-    // Light shake preset
-    LightShakePreset.Duration = 0.3f;
-    LightShakePreset.Amplitude = 0.5f;
-    LightShakePreset.Frequency = 15.0f;
-    LightShakePreset.bFadeIn = true;
-    LightShakePreset.bFadeOut = true;
-
-    // Medium shake preset
-    MediumShakePreset.Duration = 0.7f;
-    MediumShakePreset.Amplitude = 1.0f;
-    MediumShakePreset.Frequency = 12.0f;
-    MediumShakePreset.bFadeIn = true;
-    MediumShakePreset.bFadeOut = true;
-
-    // Heavy shake preset
-    HeavyShakePreset.Duration = 1.2f;
-    HeavyShakePreset.Amplitude = 2.0f;
-    HeavyShakePreset.Frequency = 8.0f;
-    HeavyShakePreset.bFadeIn = true;
-    HeavyShakePreset.bFadeOut = true;
-
-    // Massive shake preset (for T-Rex)
-    MassiveShakePreset.Duration = 2.0f;
-    MassiveShakePreset.Amplitude = 3.5f;
-    MassiveShakePreset.Frequency = 6.0f;
-    MassiveShakePreset.bFadeIn = true;
-    MassiveShakePreset.bFadeOut = true;
-}
-
-float AAudio_ScreenShakeSystem::CalculateDistanceMultiplier(float Distance) const
-{
-    if (Distance <= MinShakeDistance)
-    {
-        return 1.0f;
-    }
+    if (Distance >= MaxDistance) return 0.0f;
     
-    if (Distance >= MaxShakeDistance)
-    {
-        return 0.0f;
-    }
-
-    // Use curve if available, otherwise linear falloff
-    if (DistanceFalloffCurve)
-    {
-        float NormalizedDistance = (Distance - MinShakeDistance) / (MaxShakeDistance - MinShakeDistance);
-        return DistanceFalloffCurve->GetFloatValue(NormalizedDistance);
-    }
-    else
-    {
-        // Linear falloff
-        return 1.0f - ((Distance - MinShakeDistance) / (MaxShakeDistance - MinShakeDistance));
-    }
-}
-
-void AAudio_ScreenShakeSystem::ApplyShakeToPlayer(const FAudio_ShakeParameters& ShakeParams)
-{
-    if (!CachedPlayerController)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Audio_ScreenShakeSystem: No player controller available for shake"));
-        return;
-    }
-
-    // Create a simple camera shake using the legacy system
-    // In a full implementation, you would create a custom UCameraShakeBase subclass
+    float DistanceRatio = Distance / MaxDistance;
+    float Falloff = 1.0f - (DistanceRatio * DistanceRatio); // Quadratic falloff
     
-    // For now, we'll use a basic shake effect
-    if (GEngine && GEngine->GameViewport)
-    {
-        // Apply a simple screen shake effect
-        UE_LOG(LogTemp, Log, TEXT("Screen shake applied: Duration=%f, Amplitude=%f, Frequency=%f"), 
-               ShakeParams.Duration, ShakeParams.Amplitude, ShakeParams.Frequency);
-    }
+    return BaseMagnitude * FMath::Clamp(Falloff, 0.0f, 1.0f);
 }
