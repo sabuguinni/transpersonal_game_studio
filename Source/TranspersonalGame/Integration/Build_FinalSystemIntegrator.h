@@ -1,88 +1,74 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/GameInstanceSubsystem.h"
 #include "Engine/World.h"
-#include "GameFramework/GameModeBase.h"
-#include "Subsystems/GameInstanceSubsystem.h"
-#include "SharedTypes.h"
+#include "Components/ActorComponent.h"
+#include "GameFramework/Actor.h"
+#include "Subsystems/WorldSubsystem.h"
 #include "Build_FinalSystemIntegrator.generated.h"
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_SystemIntegrationStatus
+UENUM(BlueprintType)
+enum class EBuild_IntegrationPhase : uint8
 {
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    bool bCoreSystemsLoaded = false;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    bool bWorldGenerationReady = false;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    bool bCharacterSystemReady = false;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    bool bAISystemsReady = false;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    bool bVFXSystemsReady = false;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    bool bAudioSystemsReady = false;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 TotalActorsInLevel = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    int32 CriticalActorsCount = 0;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    float IntegrationScore = 0.0f;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    FString LastValidationTimestamp;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    TArray<FString> SystemErrors;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Integration")
-    TArray<FString> SystemWarnings;
+    PreValidation,
+    SystemDiscovery,
+    DependencyMapping,
+    CrossSystemValidation,
+    PerformanceValidation,
+    FinalIntegration,
+    PostIntegrationTest,
+    Complete
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_CycleCompletionMetrics
+struct FBuild_SystemIntegrationMetrics
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
-    int32 CycleNumber = 0;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration Metrics")
+    int32 TotalSystemsDiscovered = 0;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
-    int32 AgentsCompleted = 0;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration Metrics")
+    int32 SystemsValidated = 0;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
-    int32 FilesCreated = 0;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration Metrics")
+    int32 CrossSystemConnections = 0;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
-    int32 UE5CommandsExecuted = 0;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration Metrics")
+    int32 PerformanceIssuesFound = 0;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
-    float TotalExecutionTime = 0.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration Metrics")
+    float TotalIntegrationTime = 0.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
-    bool bBuildSuccessful = false;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration Metrics")
+    bool bIntegrationComplete = false;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
-    bool bAllSystemsIntegrated = false;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
-    FString CycleCompletionStatus;
+    UPROPERTY(BlueprintReadOnly, Category = "Integration Metrics")
+    FString LastIntegrationError;
 };
 
-/**
- * Final System Integrator - Orchestrates all game systems into a cohesive whole
- * This is the master integration class that ensures all agent outputs work together
- */
+USTRUCT(BlueprintType)
+struct FBuild_SystemDependency
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "System Dependency")
+    FString SystemName;
+
+    UPROPERTY(BlueprintReadOnly, Category = "System Dependency")
+    TArray<FString> Dependencies;
+
+    UPROPERTY(BlueprintReadOnly, Category = "System Dependency")
+    int32 Priority = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "System Dependency")
+    bool bIsCore = false;
+
+    UPROPERTY(BlueprintReadOnly, Category = "System Dependency")
+    bool bValidated = false;
+};
+
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UBuild_FinalSystemIntegrator : public UGameInstanceSubsystem
 {
@@ -91,94 +77,80 @@ class TRANSPERSONALGAME_API UBuild_FinalSystemIntegrator : public UGameInstanceS
 public:
     UBuild_FinalSystemIntegrator();
 
-    // USubsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Core Integration Functions
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool ValidateAllSystems();
+    UFUNCTION(BlueprintCallable, Category = "System Integration")
+    void StartFinalIntegration();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool IntegrateCoreSystems();
+    UFUNCTION(BlueprintCallable, Category = "System Integration")
+    void ValidateAllSystems();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool ValidateWorldGeneration();
+    UFUNCTION(BlueprintCallable, Category = "System Integration")
+    void PerformCrossSystemValidation();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool ValidateCharacterSystems();
+    UFUNCTION(BlueprintCallable, Category = "System Integration")
+    void RunPerformanceValidation();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool ValidateAISystems();
+    UFUNCTION(BlueprintCallable, Category = "System Integration")
+    void CompleteIntegration();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool ValidateVFXSystems();
+    UFUNCTION(BlueprintCallable, Category = "System Integration")
+    FBuild_SystemIntegrationMetrics GetIntegrationMetrics() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Integration")
-    bool ValidateAudioSystems();
+    UFUNCTION(BlueprintCallable, Category = "System Integration")
+    bool IsIntegrationComplete() const;
 
-    // Cycle Management
-    UFUNCTION(BlueprintCallable, Category = "Cycle Management")
-    void CompleteCycle(int32 CycleNumber);
+    UFUNCTION(BlueprintCallable, Category = "System Integration")
+    void ResetIntegration();
 
-    UFUNCTION(BlueprintCallable, Category = "Cycle Management")
-    FBuild_CycleCompletionMetrics GetCycleMetrics() const;
+    UFUNCTION(BlueprintCallable, Category = "System Integration")
+    void DiscoverAllSystems();
 
-    UFUNCTION(BlueprintCallable, Category = "Cycle Management")
-    void GenerateIntegrationReport();
+    UFUNCTION(BlueprintCallable, Category = "System Integration")
+    void MapSystemDependencies();
 
-    // System Status
-    UFUNCTION(BlueprintCallable, Category = "Status")
-    FBuild_SystemIntegrationStatus GetSystemStatus() const;
+    UFUNCTION(BlueprintCallable, Category = "System Integration")
+    TArray<FBuild_SystemDependency> GetSystemDependencies() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Status")
-    float CalculateIntegrationScore();
+    UFUNCTION(BlueprintCallable, Category = "System Integration")
+    void ValidateSystemDependency(const FString& SystemName);
 
-    UFUNCTION(BlueprintCallable, Category = "Status")
-    bool IsGamePlayable() const;
-
-    // Error Handling
-    UFUNCTION(BlueprintCallable, Category = "Error Handling")
-    void ReportSystemError(const FString& SystemName, const FString& ErrorMessage);
-
-    UFUNCTION(BlueprintCallable, Category = "Error Handling")
-    void ReportSystemWarning(const FString& SystemName, const FString& WarningMessage);
-
-    UFUNCTION(BlueprintCallable, Category = "Error Handling")
-    void ClearSystemErrors();
-
-    // Level Validation
-    UFUNCTION(BlueprintCallable, Category = "Level Validation")
-    bool ValidateCurrentLevel();
-
-    UFUNCTION(BlueprintCallable, Category = "Level Validation")
-    int32 CountActorsByType(const FString& ActorTypeName);
-
-    UFUNCTION(BlueprintCallable, Category = "Level Validation")
-    bool HasCriticalActors();
+    UFUNCTION(BlueprintCallable, Category = "System Integration")
+    void LogIntegrationStatus();
 
 protected:
-    // Internal validation functions
-    bool ValidateClassLoading();
-    bool ValidateActorCounts();
-    bool ValidateSystemDependencies();
-    void UpdateIntegrationMetrics();
+    UPROPERTY(BlueprintReadOnly, Category = "Integration State")
+    EBuild_IntegrationPhase CurrentPhase;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration State")
+    FBuild_SystemIntegrationMetrics IntegrationMetrics;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration State")
+    TArray<FBuild_SystemDependency> SystemDependencies;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration State")
+    TArray<FString> DiscoveredSystems;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration State")
+    TArray<FString> ValidatedSystems;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration State")
+    TArray<FString> FailedSystems;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration State")
+    float IntegrationStartTime;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Integration State")
+    bool bIntegrationInProgress;
 
 private:
-    UPROPERTY()
-    FBuild_SystemIntegrationStatus CurrentStatus;
-
-    UPROPERTY()
-    FBuild_CycleCompletionMetrics CycleMetrics;
-
-    UPROPERTY()
-    TArray<FString> LoadedSystemClasses;
-
-    UPROPERTY()
-    TMap<FString, int32> ActorTypeCounts;
-
-    // Integration thresholds
-    static constexpr float MIN_INTEGRATION_SCORE = 75.0f;
-    static constexpr int32 MIN_CRITICAL_ACTORS = 5;
-    static constexpr int32 MIN_TOTAL_ACTORS = 20;
+    void AdvanceToNextPhase();
+    void ProcessCurrentPhase();
+    void ValidateIndividualSystem(const FString& SystemName);
+    void CheckSystemPerformance(const FString& SystemName);
+    void LogSystemStatus(const FString& SystemName, bool bSuccess);
+    void UpdateIntegrationMetrics();
+    void HandleIntegrationError(const FString& ErrorMessage);
+    void FinalizeIntegration();
 };
