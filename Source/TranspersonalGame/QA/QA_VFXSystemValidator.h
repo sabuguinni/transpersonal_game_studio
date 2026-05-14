@@ -3,95 +3,79 @@
 #include "CoreMinimal.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
-#include "Components/ActorComponent.h"
+#include "Components/SceneComponent.h"
+#include "Engine/Engine.h"
 #include "QA_VFXSystemValidator.generated.h"
 
-UENUM(BlueprintType)
-enum class EQA_VFXValidationResult : uint8
-{
-    NotTested       UMETA(DisplayName = "Not Tested"),
-    Pass           UMETA(DisplayName = "Pass"),
-    Fail           UMETA(DisplayName = "Fail"),
-    Critical       UMETA(DisplayName = "Critical Failure")
-};
-
-USTRUCT(BlueprintType)
-struct FQA_VFXTestResult
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadOnly, Category = "QA")
-    FString TestName;
-
-    UPROPERTY(BlueprintReadOnly, Category = "QA")
-    EQA_VFXValidationResult Result;
-
-    UPROPERTY(BlueprintReadOnly, Category = "QA")
-    FString ErrorMessage;
-
-    UPROPERTY(BlueprintReadOnly, Category = "QA")
-    float ExecutionTime;
-
-    FQA_VFXTestResult()
-    {
-        TestName = TEXT("");
-        Result = EQA_VFXValidationResult::NotTested;
-        ErrorMessage = TEXT("");
-        ExecutionTime = 0.0f;
-    }
-};
-
+/**
+ * QA Validator for VFX System Integration
+ * Validates VFX managers, particle systems, and impact effects
+ * Ensures proper integration with character and world systems
+ */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UQA_VFXSystemValidator : public UActorComponent
+class TRANSPERSONALGAME_API AQA_VFXSystemValidator : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UQA_VFXSystemValidator();
+    AQA_VFXSystemValidator();
 
 protected:
     virtual void BeginPlay() override;
 
 public:
-    // Core validation functions
-    UFUNCTION(BlueprintCallable, Category = "QA|VFX")
-    bool ValidateVFXImpactManager();
+    virtual void Tick(float DeltaTime) override;
 
-    UFUNCTION(BlueprintCallable, Category = "QA|VFX")
-    bool ValidateNiagaraIntegration();
+    /** Root component for the validator */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "QA Validation")
+    class USceneComponent* RootSceneComponent;
 
-    UFUNCTION(BlueprintCallable, Category = "QA|VFX")
-    bool ValidateParticleSystemPerformance();
+    /** Validation status flags */
+    UPROPERTY(BlueprintReadOnly, Category = "QA Results")
+    bool bVFXManagerValidated;
 
-    UFUNCTION(BlueprintCallable, Category = "QA|VFX")
-    bool ValidateEnvironmentalVFX();
+    UPROPERTY(BlueprintReadOnly, Category = "QA Results")
+    bool bImpactEffectsValidated;
 
-    UFUNCTION(BlueprintCallable, Category = "QA|VFX")
-    void RunFullVFXValidationSuite();
+    UPROPERTY(BlueprintReadOnly, Category = "QA Results")
+    bool bParticleSystemsValidated;
 
-    // Test result access
-    UFUNCTION(BlueprintCallable, Category = "QA|VFX")
-    TArray<FQA_VFXTestResult> GetValidationResults() const { return ValidationResults; }
+    UPROPERTY(BlueprintReadOnly, Category = "QA Results")
+    bool bCharacterIntegrationValidated;
 
-    UFUNCTION(BlueprintCallable, Category = "QA|VFX")
-    bool HasCriticalFailures() const;
+    /** Validation test functions */
+    UFUNCTION(BlueprintCallable, Category = "QA Validation")
+    bool ValidateVFXManagers();
 
-    UFUNCTION(BlueprintCallable, Category = "QA|VFX")
-    FString GenerateValidationReport() const;
+    UFUNCTION(BlueprintCallable, Category = "QA Validation")
+    bool ValidateImpactEffects();
+
+    UFUNCTION(BlueprintCallable, Category = "QA Validation")
+    bool ValidateParticleSystems();
+
+    UFUNCTION(BlueprintCallable, Category = "QA Validation")
+    bool ValidateCharacterIntegration();
+
+    /** Run complete VFX system validation suite */
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "QA Validation")
+    void RunCompleteVFXValidation();
+
+    /** Get validation summary report */
+    UFUNCTION(BlueprintCallable, Category = "QA Validation")
+    FString GetValidationReport();
 
 protected:
-    UPROPERTY(BlueprintReadOnly, Category = "QA")
-    TArray<FQA_VFXTestResult> ValidationResults;
+    /** Internal validation helpers */
+    bool CheckVFXManagerClasses();
+    bool CheckImpactEffectComponents();
+    bool CheckParticleSystemAssets();
+    bool CheckCharacterVFXIntegration();
 
-    UPROPERTY(BlueprintReadOnly, Category = "QA")
+    /** Validation timer */
+    float ValidationTimer;
     bool bValidationComplete;
 
-    UPROPERTY(BlueprintReadOnly, Category = "QA")
-    float TotalValidationTime;
-
-private:
-    void AddTestResult(const FString& TestName, EQA_VFXValidationResult Result, const FString& ErrorMessage = TEXT(""), float ExecutionTime = 0.0f);
-    bool TestClassLoading(const FString& ClassName);
-    bool TestActorSpawning(UClass* ActorClass, const FVector& Location);
-    bool TestComponentFunctionality(AActor* TestActor);
+    /** Test results storage */
+    TArray<FString> ValidationResults;
+    TArray<FString> ValidationErrors;
 };
