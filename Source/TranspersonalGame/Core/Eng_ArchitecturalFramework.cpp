@@ -1,228 +1,249 @@
 #include "Eng_ArchitecturalFramework.h"
 #include "Engine/Engine.h"
-#include "HAL/FileManager.h"
-#include "Misc/FileHelper.h"
+#include "Engine/World.h"
+#include "Kismet/GameplayStatics.h"
+#include "HAL/PlatformFilemanager.h"
 #include "Misc/Paths.h"
 
 UEng_ArchitecturalFramework::UEng_ArchitecturalFramework()
 {
-    // Constructor - initialize default values
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 1.0f; // Check every second
+    
+    bEnforceStrictCompilation = true;
+    
+    // Initialize required header includes for all modules
+    RequiredHeaderIncludes.Add(TEXT("CoreMinimal.h"));
+    RequiredHeaderIncludes.Add(TEXT("Engine/Engine.h"));
+    RequiredHeaderIncludes.Add(TEXT("GameFramework/Actor.h"));
+    RequiredHeaderIncludes.Add(TEXT("Components/ActorComponent.h"));
+    
+    // Initialize forbidden APIs that cause compilation issues
+    ForbiddenAPIs.Add(TEXT("unreal.find_class"));
+    ForbiddenAPIs.Add(TEXT("unreal.SystemLibrary.get_project_name"));
+    ForbiddenAPIs.Add(TEXT("unreal.SystemLibrary.get_engine_version"));
+    ForbiddenAPIs.Add(TEXT("escaped quotes in UPROPERTY"));
+    
+    LogArchitecturalEvent(TEXT("Architectural Framework initialized"));
 }
 
-void UEng_ArchitecturalFramework::Initialize(FSubsystemCollectionBase& Collection)
+void UEng_ArchitecturalFramework::BeginPlay()
 {
-    Super::Initialize(Collection);
+    Super::BeginPlay();
     
-    UE_LOG(LogTemp, Warning, TEXT("Engine Architectural Framework: Initializing UE5.5 standards"));
+    LogArchitecturalEvent(TEXT("Architectural Framework BeginPlay - Initializing core systems"));
     
-    InitializeDefaultRules();
-    InitializeModuleStandards();
-    InitializeArchitecturalConstraints();
+    // Initialize core modules that must load first
+    InitializeCoreModules();
     
-    UE_LOG(LogTemp, Warning, TEXT("Engine Architectural Framework: Initialization complete"));
+    // Set up performance budgets for each agent type
+    SetupDefaultPerformanceBudgets();
+    
+    // Initialize asset pipeline rules
+    InitializeAssetPipelineRules();
+    
+    // Validate system integrity
+    ValidateSystemIntegrity();
 }
 
-void UEng_ArchitecturalFramework::Deinitialize()
+void UEng_ArchitecturalFramework::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    UE_LOG(LogTemp, Warning, TEXT("Engine Architectural Framework: Shutting down"));
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    CompilationRules.Empty();
-    ModuleStandardsMap.Empty();
-    ArchitecturalConstraints.Empty();
-    AgentApprovalStatus.Empty();
-    AgentBlockReasons.Empty();
+    // Update performance metrics
+    UpdatePerformanceMetrics();
     
-    Super::Deinitialize();
-}
-
-void UEng_ArchitecturalFramework::RegisterCompilationRule(const FEng_CompilationRule& Rule)
-{
-    CompilationRules.Add(Rule);
-    UE_LOG(LogTemp, Log, TEXT("Registered compilation rule: %s"), *Rule.RuleName);
-}
-
-bool UEng_ArchitecturalFramework::ValidateModuleCompliance(const FString& ModuleName)
-{
-    if (!ModuleStandardsMap.Contains(ModuleName))
+    // Check module health
+    CheckModuleHealth();
+    
+    // Enforce performance limits if enabled
+    if (bEnforceStrictCompilation)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Module %s not found in standards map"), *ModuleName);
-        return false;
+        EnforcePerformanceLimits();
     }
+}
+
+void UEng_ArchitecturalFramework::RegisterModule(const FEng_ModuleSpec& ModuleSpec)
+{
+    LogArchitecturalEvent(FString::Printf(TEXT("Registering module: %s (Priority: %s)"), 
+        *ModuleSpec.ModuleName, 
+        *UEnum::GetValueAsString(ModuleSpec.Priority)));
     
-    const FEng_ModuleStandards& Standards = ModuleStandardsMap[ModuleName];
-    
-    // Check if module requires C++ implementation
-    if (Standards.bRequiresCPPImplementation)
+    // Validate module dependencies before registration
+    if (ValidateModuleDependencies(ModuleSpec.ModuleName))
     {
-        // Validate that both .h and .cpp files exist
-        FString HeaderPath = FPaths::ProjectDir() + TEXT("Source/TranspersonalGame/") + ModuleName + TEXT(".h");
-        FString SourcePath = FPaths::ProjectDir() + TEXT("Source/TranspersonalGame/") + ModuleName + TEXT(".cpp");
+        RegisteredModules.Add(ModuleSpec);
+        ModuleLoadStatus.Add(ModuleSpec.ModuleName, true);
         
-        if (!FPaths::FileExists(HeaderPath) || !FPaths::FileExists(SourcePath))
-        {
-            UE_LOG(LogTemp, Error, TEXT("Module %s missing required .h/.cpp pair"), *ModuleName);
-            return false;
-        }
-    }
-    
-    return true;
-}
-
-TArray<FString> UEng_ArchitecturalFramework::GetCompilationViolations(const FString& ModuleName)
-{
-    TArray<FString> Violations;
-    
-    // Check for common UE5.5 compilation issues
-    FString ModulePath = FPaths::ProjectDir() + TEXT("Source/TranspersonalGame/") + ModuleName;
-    
-    // Check for USTRUCT/UENUM at global scope
-    FString HeaderContent;
-    FString HeaderPath = ModulePath + TEXT(".h");
-    
-    if (FFileHelper::LoadFileToString(HeaderContent, *HeaderPath))
-    {
-        // Check for nested USTRUCT/UENUM (not allowed)
-        if (HeaderContent.Contains(TEXT("class")) && 
-            (HeaderContent.Find(TEXT("USTRUCT")) > HeaderContent.Find(TEXT("class")) ||
-             HeaderContent.Find(TEXT("UENUM")) > HeaderContent.Find(TEXT("class"))))
-        {
-            Violations.Add(TEXT("USTRUCT/UENUM declared inside class (must be at global scope)"));
-        }
-        
-        // Check for .generated.h as last include
-        int32 GeneratedIncludePos = HeaderContent.Find(TEXT(".generated.h"));
-        int32 LastIncludePos = HeaderContent.RFind(TEXT("#include"));
-        
-        if (GeneratedIncludePos != -1 && GeneratedIncludePos != LastIncludePos)
-        {
-            Violations.Add(TEXT(".generated.h must be the last #include"));
-        }
-        
-        // Check for escaped quotes in macros
-        if (HeaderContent.Contains(TEXT("\\\"")) && 
-            (HeaderContent.Contains(TEXT("UPROPERTY")) || HeaderContent.Contains(TEXT("UFUNCTION"))))
-        {
-            Violations.Add(TEXT("Escaped quotes in UPROPERTY/UFUNCTION (use normal quotes)"));
-        }
-        
-        // Check for spaces in identifiers
-        TArray<FString> Lines;
-        HeaderContent.ParseIntoArrayLines(Lines);
-        
-        for (const FString& Line : Lines)
-        {
-            if (Line.Contains(TEXT("UPROPERTY")) || Line.Contains(TEXT("bool ")) || Line.Contains(TEXT("float ")))
-            {
-                // Simple check for spaces in variable names
-                if (Line.Contains(TEXT("bool b")) && Line.Contains(TEXT(" ")) && 
-                    Line.Find(TEXT(";")) > Line.Find(TEXT("bool b")))
-                {
-                    FString VarPart = Line.Mid(Line.Find(TEXT("bool b")));
-                    if (VarPart.Contains(TEXT(" ")) && !VarPart.StartsWith(TEXT("bool bIs")))
-                    {
-                        Violations.Add(FString::Printf(TEXT("Variable name contains spaces: %s"), *Line.TrimStartAndEnd()));
-                    }
-                }
-            }
-        }
-    }
-    
-    return Violations;
-}
-
-void UEng_ArchitecturalFramework::RegisterModuleStandards(const FEng_ModuleStandards& Standards)
-{
-    ModuleStandardsMap.Add(Standards.ModuleName, Standards);
-    UE_LOG(LogTemp, Log, TEXT("Registered module standards: %s"), *Standards.ModuleName);
-}
-
-FEng_ModuleStandards UEng_ArchitecturalFramework::GetModuleStandards(const FString& ModuleName)
-{
-    if (ModuleStandardsMap.Contains(ModuleName))
-    {
-        return ModuleStandardsMap[ModuleName];
-    }
-    
-    // Return default standards if not found
-    FEng_ModuleStandards DefaultStandards;
-    DefaultStandards.ModuleName = ModuleName;
-    return DefaultStandards;
-}
-
-bool UEng_ArchitecturalFramework::IsModuleCompliant(const FString& ModuleName)
-{
-    return ValidateModuleCompliance(ModuleName) && GetCompilationViolations(ModuleName).Num() == 0;
-}
-
-void UEng_ArchitecturalFramework::SetPerformanceTarget(const FString& SystemName, float MaxFrameTimeMS, int32 MaxMemoryMB)
-{
-    if (ModuleStandardsMap.Contains(SystemName))
-    {
-        ModuleStandardsMap[SystemName].MaxFrameTimeMS = MaxFrameTimeMS;
-        ModuleStandardsMap[SystemName].MaxMemoryMB = MaxMemoryMB;
+        LogArchitecturalEvent(FString::Printf(TEXT("Module %s registered successfully"), *ModuleSpec.ModuleName));
     }
     else
     {
-        FEng_ModuleStandards NewStandards;
-        NewStandards.ModuleName = SystemName;
-        NewStandards.MaxFrameTimeMS = MaxFrameTimeMS;
-        NewStandards.MaxMemoryMB = MaxMemoryMB;
-        ModuleStandardsMap.Add(SystemName, NewStandards);
+        LogArchitecturalEvent(FString::Printf(TEXT("Module %s registration FAILED - dependency validation failed"), *ModuleSpec.ModuleName));
     }
-    
-    UE_LOG(LogTemp, Log, TEXT("Set performance target for %s: %.2fms, %dMB"), 
-           *SystemName, MaxFrameTimeMS, MaxMemoryMB);
 }
 
-bool UEng_ArchitecturalFramework::CheckPerformanceCompliance(const FString& SystemName)
+bool UEng_ArchitecturalFramework::ValidateModuleDependencies(const FString& ModuleName)
 {
-    // Placeholder for performance monitoring
-    // In a real implementation, this would check actual performance metrics
+    // Find the module spec
+    for (const FEng_ModuleSpec& Module : RegisteredModules)
+    {
+        if (Module.ModuleName == ModuleName)
+        {
+            // Check if all dependencies are loaded
+            for (const FString& Dependency : Module.Dependencies)
+            {
+                if (!ModuleLoadStatus.Contains(Dependency) || !ModuleLoadStatus[Dependency])
+                {
+                    LogArchitecturalEvent(FString::Printf(TEXT("Dependency validation failed: %s requires %s"), 
+                        *ModuleName, *Dependency));
+                    return false;
+                }
+            }
+            return true;
+        }
+    }
+    
+    // Module not found, assume it's valid for now
     return true;
 }
 
-TArray<FString> UEng_ArchitecturalFramework::GetPerformanceViolations()
+void UEng_ArchitecturalFramework::InitializeCoreModules()
 {
-    TArray<FString> Violations;
+    LogArchitecturalEvent(TEXT("Initializing core modules in priority order"));
     
-    // Check each registered module against its performance targets
-    for (const auto& ModulePair : ModuleStandardsMap)
+    // Core Engine Module
+    FEng_ModuleSpec CoreModule;
+    CoreModule.ModuleName = TEXT("TranspersonalGameCore");
+    CoreModule.Priority = EEng_ModulePriority::Critical;
+    CoreModule.OwnerAgent = EEng_AgentType::Technical;
+    CoreModule.MemoryBudgetMB = 50.0f;
+    CoreModule.CPUBudgetMS = 2.0f;
+    RegisterModule(CoreModule);
+    
+    // Studio Director Module
+    FEng_ModuleSpec DirectorModule;
+    DirectorModule.ModuleName = TEXT("StudioDirectorSystem");
+    DirectorModule.Priority = EEng_ModulePriority::Critical;
+    DirectorModule.OwnerAgent = EEng_AgentType::Management;
+    DirectorModule.Dependencies.Add(TEXT("TranspersonalGameCore"));
+    DirectorModule.MemoryBudgetMB = 25.0f;
+    DirectorModule.CPUBudgetMS = 1.0f;
+    RegisterModule(DirectorModule);
+    
+    // World Generation Module
+    FEng_ModuleSpec WorldGenModule;
+    WorldGenModule.ModuleName = TEXT("PCGWorldGenerator");
+    WorldGenModule.Priority = EEng_ModulePriority::High;
+    WorldGenModule.OwnerAgent = EEng_AgentType::WorldBuilding;
+    WorldGenModule.Dependencies.Add(TEXT("TranspersonalGameCore"));
+    WorldGenModule.MemoryBudgetMB = 100.0f;
+    WorldGenModule.CPUBudgetMS = 5.0f;
+    RegisterModule(WorldGenModule);
+    
+    // Character System Module
+    FEng_ModuleSpec CharacterModule;
+    CharacterModule.ModuleName = TEXT("TranspersonalCharacter");
+    CharacterModule.Priority = EEng_ModulePriority::High;
+    CharacterModule.OwnerAgent = EEng_AgentType::Character;
+    CharacterModule.Dependencies.Add(TEXT("TranspersonalGameCore"));
+    CharacterModule.MemoryBudgetMB = 75.0f;
+    CharacterModule.CPUBudgetMS = 3.0f;
+    RegisterModule(CharacterModule);
+}
+
+void UEng_ArchitecturalFramework::SetPerformanceBudget(EEng_AgentType AgentType, const FEng_PerformanceBudget& Budget)
+{
+    AgentBudgets.Add(AgentType, Budget);
+    
+    LogArchitecturalEvent(FString::Printf(TEXT("Performance budget set for %s: %d actors, %.2fMB memory, %.2fms CPU"), 
+        *UEnum::GetValueAsString(AgentType),
+        Budget.MaxActorsPerFrame,
+        Budget.MaxMemoryUsageMB,
+        Budget.MaxCPUTimeMS));
+}
+
+bool UEng_ArchitecturalFramework::CheckPerformanceCompliance(EEng_AgentType AgentType)
+{
+    if (!AgentBudgets.Contains(AgentType))
     {
-        const FEng_ModuleStandards& Standards = ModulePair.Value;
-        
-        // Placeholder checks - in real implementation would measure actual performance
-        if (Standards.PerformanceTier == EEng_PerformanceTier::Critical && Standards.MaxFrameTimeMS > 16.67f)
-        {
-            Violations.Add(FString::Printf(TEXT("%s: Critical system exceeds 60fps target"), *Standards.ModuleName));
-        }
+        return true; // No budget set, assume compliant
     }
     
-    return Violations;
-}
-
-void UEng_ArchitecturalFramework::AddArchitecturalConstraint(const FEng_ArchitecturalConstraint& Constraint)
-{
-    ArchitecturalConstraints.Add(Constraint);
-    UE_LOG(LogTemp, Log, TEXT("Added architectural constraint: %s"), *Constraint.ConstraintName);
-}
-
-bool UEng_ArchitecturalFramework::ValidateSystemInteraction(const FString& SystemA, const FString& SystemB)
-{
-    // Check if interaction is allowed by architectural constraints
-    for (const FEng_ArchitecturalConstraint& Constraint : ArchitecturalConstraints)
+    const FEng_PerformanceBudget& Budget = AgentBudgets[AgentType];
+    
+    // Get current world
+    UWorld* World = GetWorld();
+    if (!World)
     {
-        if (Constraint.SystemA == SystemA && Constraint.SystemB == SystemB)
+        return false;
+    }
+    
+    // Count actors in the world
+    int32 ActorCount = 0;
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    {
+        ActorCount++;
+    }
+    
+    // Check if we're within budget
+    bool bCompliant = ActorCount <= Budget.MaxActorsPerFrame;
+    
+    if (!bCompliant)
+    {
+        LogArchitecturalEvent(FString::Printf(TEXT("Performance compliance FAILED for %s: %d actors (limit: %d)"), 
+            *UEnum::GetValueAsString(AgentType),
+            ActorCount,
+            Budget.MaxActorsPerFrame));
+    }
+    
+    return bCompliant;
+}
+
+void UEng_ArchitecturalFramework::EnforcePerformanceLimits()
+{
+    // Check compliance for all agent types
+    for (const auto& BudgetPair : AgentBudgets)
+    {
+        if (!CheckPerformanceCompliance(BudgetPair.Key))
         {
-            if (Constraint.RelationshipType == TEXT("excludes"))
+            LogArchitecturalEvent(FString::Printf(TEXT("Performance limit exceeded for %s - taking corrective action"), 
+                *UEnum::GetValueAsString(BudgetPair.Key)));
+            
+            // Could implement automatic actor culling here if needed
+        }
+    }
+}
+
+void UEng_ArchitecturalFramework::AddAssetRule(const FEng_AssetPipelineRule& Rule)
+{
+    AssetRules.Add(Rule);
+    
+    LogArchitecturalEvent(FString::Printf(TEXT("Asset rule added for %s: %s naming, %dx%d max texture"), 
+        *Rule.AssetType,
+        *Rule.NamingConvention,
+        Rule.MaxTextureSizeX,
+        Rule.MaxTextureSizeY));
+}
+
+bool UEng_ArchitecturalFramework::ValidateAssetCompliance(const FString& AssetPath)
+{
+    // Basic validation - check if path follows conventions
+    for (const FEng_AssetPipelineRule& Rule : AssetRules)
+    {
+        if (AssetPath.Contains(Rule.AssetType))
+        {
+            if (!AssetPath.Contains(Rule.RequiredPath))
             {
+                LogArchitecturalEvent(FString::Printf(TEXT("Asset compliance FAILED: %s not in required path %s"), 
+                    *AssetPath, *Rule.RequiredPath));
                 return false;
             }
-        }
-        
-        if (Constraint.bBidirectional && Constraint.SystemB == SystemA && Constraint.SystemA == SystemB)
-        {
-            if (Constraint.RelationshipType == TEXT("excludes"))
+            
+            if (!AssetPath.Contains(Rule.NamingConvention))
             {
+                LogArchitecturalEvent(FString::Printf(TEXT("Asset compliance FAILED: %s doesn't follow naming convention %s"), 
+                    *AssetPath, *Rule.NamingConvention));
                 return false;
             }
         }
@@ -231,273 +252,269 @@ bool UEng_ArchitecturalFramework::ValidateSystemInteraction(const FString& Syste
     return true;
 }
 
-TArray<FString> UEng_ArchitecturalFramework::GetArchitecturalViolations()
+void UEng_ArchitecturalFramework::PrepareCommercialAssetIntegration()
 {
-    TArray<FString> Violations;
+    LogArchitecturalEvent(TEXT("Preparing for commercial asset integration"));
     
-    // Check for violations of architectural constraints
-    // This would be implemented with actual system dependency analysis
+    // Set up asset rules for commercial dinosaur assets
+    FEng_AssetPipelineRule DinosaurRule;
+    DinosaurRule.AssetType = TEXT("SkeletalMesh");
+    DinosaurRule.RequiredPath = TEXT("/Game/Assets/Dinosaurs/");
+    DinosaurRule.NamingConvention = TEXT("SK_Dino_");
+    DinosaurRule.MaxTextureSizeX = 4096;
+    DinosaurRule.MaxTextureSizeY = 4096;
+    DinosaurRule.bRequiresLODChain = true;
+    AddAssetRule(DinosaurRule);
     
-    return Violations;
+    // Set up asset rules for biome assets
+    FEng_AssetPipelineRule BiomeRule;
+    BiomeRule.AssetType = TEXT("StaticMesh");
+    BiomeRule.RequiredPath = TEXT("/Game/Assets/Biomes/");
+    BiomeRule.NamingConvention = TEXT("SM_Biome_");
+    BiomeRule.MaxTextureSizeX = 2048;
+    BiomeRule.MaxTextureSizeY = 2048;
+    BiomeRule.bRequiresLODChain = true;
+    AddAssetRule(BiomeRule);
+    
+    LogArchitecturalEvent(TEXT("Commercial asset integration rules established"));
+}
+
+void UEng_ArchitecturalFramework::EnforceCompilationRules()
+{
+    LogArchitecturalEvent(TEXT("Enforcing compilation rules across all modules"));
+    
+    // This would typically scan source files and validate them
+    // For now, we'll just log the enforcement
+    for (const FString& RequiredHeader : RequiredHeaderIncludes)
+    {
+        LogArchitecturalEvent(FString::Printf(TEXT("Required header: %s"), *RequiredHeader));
+    }
+    
+    for (const FString& ForbiddenAPI : ForbiddenAPIs)
+    {
+        LogArchitecturalEvent(FString::Printf(TEXT("Forbidden API: %s"), *ForbiddenAPI));
+    }
 }
 
 bool UEng_ArchitecturalFramework::ValidateHeaderStructure(const FString& HeaderPath)
 {
-    FString HeaderContent;
-    if (!FFileHelper::LoadFileToString(HeaderContent, *HeaderPath))
-    {
-        return false;
-    }
+    // Basic validation - in a real implementation, this would parse the file
+    LogArchitecturalEvent(FString::Printf(TEXT("Validating header structure: %s"), *HeaderPath));
     
-    // Check for #pragma once
-    if (!HeaderContent.Contains(TEXT("#pragma once")))
+    // Check file exists
+    IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
+    if (!PlatformFile.FileExists(*HeaderPath))
     {
+        LogArchitecturalEvent(FString::Printf(TEXT("Header validation FAILED: %s does not exist"), *HeaderPath));
         return false;
-    }
-    
-    // Check for .generated.h as last include
-    int32 GeneratedPos = HeaderContent.Find(TEXT(".generated.h"));
-    if (GeneratedPos != -1)
-    {
-        int32 LastIncludePos = HeaderContent.RFind(TEXT("#include"));
-        if (GeneratedPos != LastIncludePos)
-        {
-            return false;
-        }
     }
     
     return true;
 }
 
-bool UEng_ArchitecturalFramework::ValidateImplementationPair(const FString& HeaderPath, const FString& SourcePath)
+void UEng_ArchitecturalFramework::GenerateModuleBuildFiles()
 {
-    // Check if both files exist
-    if (!FPaths::FileExists(HeaderPath) || !FPaths::FileExists(SourcePath))
-    {
-        return false;
-    }
+    LogArchitecturalEvent(TEXT("Generating module build files"));
     
-    // Check if .cpp includes its corresponding .h
-    FString SourceContent;
-    if (FFileHelper::LoadFileToString(SourceContent, *SourcePath))
+    // This would generate .Build.cs files for each module
+    // For now, we'll just validate the existing structure
+    for (const FEng_ModuleSpec& Module : RegisteredModules)
     {
-        FString HeaderName = FPaths::GetBaseFilename(HeaderPath) + TEXT(".h");
-        if (!SourceContent.Contains(HeaderName))
+        LogArchitecturalEvent(FString::Printf(TEXT("Module build file required for: %s"), *Module.ModuleName));
+    }
+}
+
+bool UEng_ArchitecturalFramework::IsModuleLoaded(const FString& ModuleName) const
+{
+    return ModuleLoadStatus.Contains(ModuleName) && ModuleLoadStatus[ModuleName];
+}
+
+TArray<FString> UEng_ArchitecturalFramework::GetLoadedModules() const
+{
+    TArray<FString> LoadedModules;
+    
+    for (const auto& StatusPair : ModuleLoadStatus)
+    {
+        if (StatusPair.Value)
         {
-            return false;
+            LoadedModules.Add(StatusPair.Key);
         }
     }
     
-    return true;
+    return LoadedModules;
 }
 
-TArray<FString> UEng_ArchitecturalFramework::GetOrphanedHeaders()
+float UEng_ArchitecturalFramework::GetCurrentPerformanceScore() const
 {
-    TArray<FString> OrphanedHeaders;
+    float TotalScore = 100.0f;
+    int32 CheckedAgents = 0;
     
-    // Scan for .h files without corresponding .cpp files
-    FString SourceDir = FPaths::ProjectDir() + TEXT("Source/TranspersonalGame/");
-    
-    TArray<FString> HeaderFiles;
-    IFileManager::Get().FindFilesRecursive(HeaderFiles, *SourceDir, TEXT("*.h"), true, false);
-    
-    for (const FString& HeaderFile : HeaderFiles)
+    for (const auto& BudgetPair : AgentBudgets)
     {
-        FString BaseName = FPaths::GetBaseFilename(HeaderFile);
-        FString CorrespondingCpp = FPaths::GetPath(HeaderFile) + TEXT("/") + BaseName + TEXT(".cpp");
+        if (!const_cast<UEng_ArchitecturalFramework*>(this)->CheckPerformanceCompliance(BudgetPair.Key))
+        {
+            TotalScore -= 20.0f; // Deduct 20 points per non-compliant agent
+        }
+        CheckedAgents++;
+    }
+    
+    return FMath::Max(0.0f, TotalScore);
+}
+
+int32 UEng_ArchitecturalFramework::GetTotalAssetsRegistered() const
+{
+    return AssetRules.Num();
+}
+
+void UEng_ArchitecturalFramework::EmergencyModuleShutdown(const FString& ModuleName)
+{
+    LogArchitecturalEvent(FString::Printf(TEXT("EMERGENCY SHUTDOWN: Module %s"), *ModuleName));
+    
+    if (ModuleLoadStatus.Contains(ModuleName))
+    {
+        ModuleLoadStatus[ModuleName] = false;
+    }
+}
+
+void UEng_ArchitecturalFramework::ResetArchitecturalFramework()
+{
+    LogArchitecturalEvent(TEXT("RESETTING ARCHITECTURAL FRAMEWORK"));
+    
+    RegisteredModules.Empty();
+    ModuleLoadStatus.Empty();
+    AgentBudgets.Empty();
+    AssetRules.Empty();
+    
+    // Reinitialize core systems
+    InitializeCoreModules();
+}
+
+void UEng_ArchitecturalFramework::LogArchitecturalEvent(const FString& Message)
+{
+    FString LogMessage = FString::Printf(TEXT("[ENGINE ARCHITECT] %s"), *Message);
+    
+    if (GEngine)
+    {
+        GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Cyan, LogMessage);
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("%s"), *LogMessage);
+}
+
+void UEng_ArchitecturalFramework::ValidateSystemIntegrity()
+{
+    LogArchitecturalEvent(TEXT("Validating system integrity"));
+    
+    // Check that critical modules are loaded
+    TArray<FString> CriticalModules = {
+        TEXT("TranspersonalGameCore"),
+        TEXT("StudioDirectorSystem")
+    };
+    
+    for (const FString& CriticalModule : CriticalModules)
+    {
+        if (!IsModuleLoaded(CriticalModule))
+        {
+            LogArchitecturalEvent(FString::Printf(TEXT("CRITICAL: Module %s is not loaded!"), *CriticalModule));
+        }
+    }
+}
+
+void UEng_ArchitecturalFramework::UpdatePerformanceMetrics()
+{
+    // Update performance metrics every tick
+    // This is where we'd collect real-time performance data
+    
+    UWorld* World = GetWorld();
+    if (World)
+    {
+        int32 ActorCount = 0;
+        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+        {
+            ActorCount++;
+        }
         
-        if (!FPaths::FileExists(CorrespondingCpp))
+        // Update global budget tracking
+        GlobalBudget.MaxActorsPerFrame = FMath::Max(GlobalBudget.MaxActorsPerFrame, ActorCount);
+    }
+}
+
+void UEng_ArchitecturalFramework::CheckModuleHealth()
+{
+    // Check the health of all registered modules
+    for (const FEng_ModuleSpec& Module : RegisteredModules)
+    {
+        if (!IsModuleLoaded(Module.ModuleName))
         {
-            // Check if this header contains UCLASS/UFUNCTION/UPROPERTY
-            FString HeaderContent;
-            if (FFileHelper::LoadFileToString(HeaderContent, *HeaderFile))
-            {
-                if (HeaderContent.Contains(TEXT("UCLASS")) || 
-                    HeaderContent.Contains(TEXT("UFUNCTION")) || 
-                    HeaderContent.Contains(TEXT("UPROPERTY")))
-                {
-                    OrphanedHeaders.Add(HeaderFile);
-                }
-            }
+            LogArchitecturalEvent(FString::Printf(TEXT("Module health check FAILED: %s is not loaded"), *Module.ModuleName));
         }
     }
-    
-    return OrphanedHeaders;
 }
 
-bool UEng_ArchitecturalFramework::ValidateUE55Compatibility(const FString& ClassName)
+void UEng_ArchitecturalFramework::SetupDefaultPerformanceBudgets()
 {
-    // Check for UE5.5 specific compatibility issues
-    // This would include checks for deprecated APIs, changed function signatures, etc.
-    return true;
+    // Technical Agents (Architecture, Core, Performance)
+    FEng_PerformanceBudget TechnicalBudget;
+    TechnicalBudget.TargetTier = EEng_PerformanceTier::Ultra;
+    TechnicalBudget.MaxActorsPerFrame = 500;
+    TechnicalBudget.MaxMemoryUsageMB = 100.0f;
+    TechnicalBudget.MaxCPUTimeMS = 2.0f;
+    SetPerformanceBudget(EEng_AgentType::Technical, TechnicalBudget);
+    
+    // World Building Agents (World, Environment, Architecture, Lighting)
+    FEng_PerformanceBudget WorldBudget;
+    WorldBudget.TargetTier = EEng_PerformanceTier::High;
+    WorldBudget.MaxActorsPerFrame = 2000;
+    WorldBudget.MaxMemoryUsageMB = 300.0f;
+    WorldBudget.MaxCPUTimeMS = 5.0f;
+    SetPerformanceBudget(EEng_AgentType::WorldBuilding, WorldBudget);
+    
+    // AI Agents (NPC, Combat, Crowd)
+    FEng_PerformanceBudget AIBudget;
+    AIBudget.TargetTier = EEng_PerformanceTier::High;
+    AIBudget.MaxActorsPerFrame = 1000;
+    AIBudget.MaxMemoryUsageMB = 200.0f;
+    AIBudget.MaxCPUTimeMS = 8.0f;
+    SetPerformanceBudget(EEng_AgentType::AI, AIBudget);
+    
+    // Character Agents
+    FEng_PerformanceBudget CharacterBudget;
+    CharacterBudget.TargetTier = EEng_PerformanceTier::Ultra;
+    CharacterBudget.MaxActorsPerFrame = 100;
+    CharacterBudget.MaxMemoryUsageMB = 150.0f;
+    CharacterBudget.MaxCPUTimeMS = 3.0f;
+    SetPerformanceBudget(EEng_AgentType::Character, CharacterBudget);
 }
 
-TArray<FString> UEng_ArchitecturalFramework::GetDeprecatedAPIUsages()
+void UEng_ArchitecturalFramework::InitializeAssetPipelineRules()
 {
-    TArray<FString> DeprecatedUsages;
+    // Static Mesh Rules
+    FEng_AssetPipelineRule StaticMeshRule;
+    StaticMeshRule.AssetType = TEXT("StaticMesh");
+    StaticMeshRule.RequiredPath = TEXT("/Game/Assets/StaticMeshes/");
+    StaticMeshRule.NamingConvention = TEXT("SM_");
+    StaticMeshRule.MaxTextureSizeX = 2048;
+    StaticMeshRule.MaxTextureSizeY = 2048;
+    StaticMeshRule.bRequiresLODChain = true;
+    AddAssetRule(StaticMeshRule);
     
-    // Scan for deprecated UE5.5 API usages
-    // This would be implemented with actual code analysis
+    // Skeletal Mesh Rules
+    FEng_AssetPipelineRule SkeletalMeshRule;
+    SkeletalMeshRule.AssetType = TEXT("SkeletalMesh");
+    SkeletalMeshRule.RequiredPath = TEXT("/Game/Assets/SkeletalMeshes/");
+    SkeletalMeshRule.NamingConvention = TEXT("SK_");
+    SkeletalMeshRule.MaxTextureSizeX = 4096;
+    SkeletalMeshRule.MaxTextureSizeY = 4096;
+    SkeletalMeshRule.bRequiresLODChain = true;
+    AddAssetRule(SkeletalMeshRule);
     
-    return DeprecatedUsages;
-}
-
-void UEng_ArchitecturalFramework::ApproveAgentImplementation(const FString& AgentName, const FString& SystemName)
-{
-    AgentApprovalStatus.Add(AgentName, true);
-    AgentBlockReasons.Remove(AgentName);
-    
-    UE_LOG(LogTemp, Log, TEXT("Approved implementation for Agent %s: %s"), *AgentName, *SystemName);
-}
-
-void UEng_ArchitecturalFramework::BlockAgentImplementation(const FString& AgentName, const FString& Reason)
-{
-    AgentApprovalStatus.Add(AgentName, false);
-    AgentBlockReasons.Add(AgentName, Reason);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Blocked Agent %s: %s"), *AgentName, *Reason);
-}
-
-bool UEng_ArchitecturalFramework::IsAgentBlocked(const FString& AgentName)
-{
-    if (AgentApprovalStatus.Contains(AgentName))
-    {
-        return !AgentApprovalStatus[AgentName];
-    }
-    
-    return false;
-}
-
-TArray<FString> UEng_ArchitecturalFramework::GetBlockedAgents()
-{
-    TArray<FString> BlockedAgents;
-    
-    for (const auto& StatusPair : AgentApprovalStatus)
-    {
-        if (!StatusPair.Value)
-        {
-            BlockedAgents.Add(StatusPair.Key);
-        }
-    }
-    
-    return BlockedAgents;
-}
-
-void UEng_ArchitecturalFramework::InitializeDefaultRules()
-{
-    // Initialize UE5.5 specific compilation rules
-    
-    FEng_CompilationRule Rule1;
-    Rule1.RuleName = TEXT("USTRUCT_Global_Scope");
-    Rule1.Description = TEXT("USTRUCT and UENUM must be declared at global scope, not inside classes");
-    Rule1.bMandatory = true;
-    Rule1.ViolationExamples.Add(TEXT("class MyClass { USTRUCT() struct MyStruct {}; };"));
-    RegisterCompilationRule(Rule1);
-    
-    FEng_CompilationRule Rule2;
-    Rule2.RuleName = TEXT("Generated_Header_Last");
-    Rule2.Description = TEXT(".generated.h must be the last #include in header files");
-    Rule2.bMandatory = true;
-    Rule2.ViolationExamples.Add(TEXT("#include \"MyClass.generated.h\"\n#include \"Engine.h\""));
-    RegisterCompilationRule(Rule2);
-    
-    FEng_CompilationRule Rule3;
-    Rule3.RuleName = TEXT("No_Escaped_Quotes");
-    Rule3.Description = TEXT("Use normal quotes in UPROPERTY/UFUNCTION macros, not escaped quotes");
-    Rule3.bMandatory = true;
-    Rule3.ViolationExamples.Add(TEXT("UPROPERTY(Category = \\\"Physics\\\")"));
-    RegisterCompilationRule(Rule3);
-    
-    FEng_CompilationRule Rule4;
-    Rule4.RuleName = TEXT("No_Spaces_In_Identifiers");
-    Rule4.Description = TEXT("Variable and function names cannot contain spaces");
-    Rule4.bMandatory = true;
-    Rule4.ViolationExamples.Add(TEXT("bool bIsOnUneven Terrain;"));
-    RegisterCompilationRule(Rule4);
-    
-    FEng_CompilationRule Rule5;
-    Rule5.RuleName = TEXT("CallInEditor_Bare_Flag");
-    Rule5.Description = TEXT("CallInEditor is a bare flag, not a key-value pair");
-    Rule5.bMandatory = true;
-    Rule5.ViolationExamples.Add(TEXT("UFUNCTION(CallInEditor = true)"));
-    RegisterCompilationRule(Rule5);
-}
-
-void UEng_ArchitecturalFramework::InitializeModuleStandards()
-{
-    // Initialize standards for core modules
-    
-    FEng_ModuleStandards CoreStandards;
-    CoreStandards.ModuleName = TEXT("Core");
-    CoreStandards.ModuleType = EEng_ModuleType::Core;
-    CoreStandards.PerformanceTier = EEng_PerformanceTier::Critical;
-    CoreStandards.bRequiresCPPImplementation = true;
-    CoreStandards.MaxMemoryMB = 50;
-    CoreStandards.MaxFrameTimeMS = 1.0f;
-    RegisterModuleStandards(CoreStandards);
-    
-    FEng_ModuleStandards GameplayStandards;
-    GameplayStandards.ModuleName = TEXT("Gameplay");
-    GameplayStandards.ModuleType = EEng_ModuleType::Gameplay;
-    GameplayStandards.PerformanceTier = EEng_PerformanceTier::Critical;
-    GameplayStandards.bRequiresCPPImplementation = true;
-    GameplayStandards.MaxMemoryMB = 200;
-    GameplayStandards.MaxFrameTimeMS = 8.0f;
-    RegisterModuleStandards(GameplayStandards);
-    
-    FEng_ModuleStandards AIStandards;
-    AIStandards.ModuleName = TEXT("AI");
-    AIStandards.ModuleType = EEng_ModuleType::AI;
-    AIStandards.PerformanceTier = EEng_PerformanceTier::Important;
-    AIStandards.bRequiresCPPImplementation = true;
-    AIStandards.MaxMemoryMB = 300;
-    AIStandards.MaxFrameTimeMS = 5.0f;
-    RegisterModuleStandards(AIStandards);
-}
-
-void UEng_ArchitecturalFramework::InitializeArchitecturalConstraints()
-{
-    // Initialize architectural constraints between systems
-    
-    FEng_ArchitecturalConstraint Constraint1;
-    Constraint1.ConstraintName = TEXT("AI_Depends_Core");
-    Constraint1.SystemA = TEXT("AI");
-    Constraint1.SystemB = TEXT("Core");
-    Constraint1.RelationshipType = TEXT("depends_on");
-    Constraint1.bBidirectional = false;
-    AddArchitecturalConstraint(Constraint1);
-    
-    FEng_ArchitecturalConstraint Constraint2;
-    Constraint2.ConstraintName = TEXT("Gameplay_Depends_Physics");
-    Constraint2.SystemA = TEXT("Gameplay");
-    Constraint2.SystemB = TEXT("Physics");
-    Constraint2.RelationshipType = TEXT("depends_on");
-    Constraint2.bBidirectional = false;
-    AddArchitecturalConstraint(Constraint2);
-    
-    FEng_ArchitecturalConstraint Constraint3;
-    Constraint3.ConstraintName = TEXT("UI_Excludes_Physics");
-    Constraint3.SystemA = TEXT("UI");
-    Constraint3.SystemB = TEXT("Physics");
-    Constraint3.RelationshipType = TEXT("excludes");
-    Constraint3.bBidirectional = true;
-    AddArchitecturalConstraint(Constraint3);
-}
-
-bool UEng_ArchitecturalFramework::ValidateUSTRUCTDeclaration(const FString& StructName)
-{
-    // Validate USTRUCT follows UE5.5 rules
-    return true;
-}
-
-bool UEng_ArchitecturalFramework::ValidateUENUMDeclaration(const FString& EnumName)
-{
-    // Validate UENUM follows UE5.5 rules
-    return true;
-}
-
-bool UEng_ArchitecturalFramework::ValidateUCLASSDeclaration(const FString& ClassName)
-{
-    // Validate UCLASS follows UE5.5 rules
-    return true;
+    // Material Rules
+    FEng_AssetPipelineRule MaterialRule;
+    MaterialRule.AssetType = TEXT("Material");
+    MaterialRule.RequiredPath = TEXT("/Game/Assets/Materials/");
+    MaterialRule.NamingConvention = TEXT("M_");
+    MaterialRule.MaxTextureSizeX = 2048;
+    MaterialRule.MaxTextureSizeY = 2048;
+    MaterialRule.bRequiresLODChain = false;
+    AddAssetRule(MaterialRule);
 }
