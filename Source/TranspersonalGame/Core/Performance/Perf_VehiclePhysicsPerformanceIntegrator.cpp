@@ -1,97 +1,194 @@
 #include "Perf_VehiclePhysicsPerformanceIntegrator.h"
-#include "../Core_VehiclePhysicsSystem.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "GameFramework/Actor.h"
 #include "HAL/PlatformFilemanager.h"
-#include "Misc/DateTime.h"
-#include "Stats/Stats.h"
+#include "HAL/PlatformMemory.h"
+#include "Stats/StatsHierarchical.h"
+#include "ProfilingDebugging/CpuProfilerTrace.h"
+#include "Async/AsyncWork.h"
+#include "Kismet/GameplayStatics.h"
+
+DEFINE_STAT(STAT_VehiclePhysicsUpdate);
+DEFINE_STAT(STAT_VehicleSurfaceDetection);
+DEFINE_STAT(STAT_VehicleDamageCalculation);
+DEFINE_STAT(STAT_VehicleMemoryUsage);
 
 UPerf_VehiclePhysicsPerformanceIntegrator::UPerf_VehiclePhysicsPerformanceIntegrator()
+    : bIsMonitoringActive(false)
+    , bDebugEnabled(false)
+    , LastOptimizationTime(0.0f)
+    , OptimizationInterval(PERFORMANCE_UPDATE_INTERVAL)
+    , AccumulatedPhysicsTime(0.0f)
+    , AccumulatedFrameTime(0.0f)
+    , SampleCount(0)
 {
-    CurrentOptimizationLevel = EPerf_VehiclePhysicsOptimizationLevel::High;
-    bIsMonitoringActive = false;
-    bAdaptiveOptimizationEnabled = true;
+    // Initialize default optimization settings
+    OptimizationSettings = FPerf_VehicleOptimizationSettings();
     
-    // Performance Thresholds
-    TargetVehiclePhysicsFrameTime = 2.0f; // 2ms target for vehicle physics
-    MaxVehicleSimulationCost = 5.0f; // 5ms max simulation cost
-    MaxActiveVehicles = 20; // Maximum 20 active vehicles
+    // Initialize metrics
+    CurrentMetrics = FPerf_VehiclePhysicsMetrics();
     
-    // Internal State
-    LastFrameTime = 0.0f;
-    AccumulatedFrameTime = 0.0f;
-    FrameCount = 0;
-    bOptimizationInProgress = false;
-    LastOptimizationTime = 0.0f;
+    // Reserve space for performance history
+    FrameTimeHistory.Reserve(MAX_FRAME_HISTORY);
+    PhysicsTimeHistory.Reserve(MAX_FRAME_HISTORY);
 }
 
 void UPerf_VehiclePhysicsPerformanceIntegrator::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Log, TEXT("Vehicle Physics Performance Integrator initialized"));
+    UE_LOG(LogTemp, Log, TEXT("VehiclePhysicsPerformanceIntegrator: Initializing vehicle physics performance monitoring"));
     
-    // Start monitoring automatically
-    StartVehiclePhysicsMonitoring();
+    // Initialize performance monitoring
+    InitializeVehiclePerformanceMonitoring();
+    
+    // Set up optimization timer
+    if (UWorld* World = GetWorld())
+    {
+        World->GetTimerManager().SetTimer(
+            FTimerHandle(),
+            this,
+            &UPerf_VehiclePhysicsPerformanceIntegrator::UpdateVehiclePerformanceMetrics,
+            OptimizationInterval,
+            true
+        );
+    }
 }
 
 void UPerf_VehiclePhysicsPerformanceIntegrator::Deinitialize()
 {
-    StopVehiclePhysicsMonitoring();
-    RegisteredVehicleSystems.Empty();
+    UE_LOG(LogTemp, Log, TEXT("VehiclePhysicsPerformanceIntegrator: Deinitializing vehicle physics performance monitoring"));
+    
+    bIsMonitoringActive = false;
+    TrackedVehicles.Empty();
     
     Super::Deinitialize();
 }
 
-void UPerf_VehiclePhysicsPerformanceIntegrator::StartVehiclePhysicsMonitoring()
+void UPerf_VehiclePhysicsPerformanceIntegrator::InitializeVehiclePerformanceMonitoring()
 {
-    if (bIsMonitoringActive)
+    SCOPE_CYCLE_COUNTER(STAT_VehiclePhysicsUpdate);
+    
+    UE_LOG(LogTemp, Log, TEXT("VehiclePhysicsPerformanceIntegrator: Starting vehicle physics performance monitoring"));
+    
+    // Clear previous tracking data
+    TrackedVehicles.Empty();
+    FrameTimeHistory.Empty();
+    PhysicsTimeHistory.Empty();
+    
+    // Reset metrics
+    CurrentMetrics = FPerf_VehiclePhysicsMetrics();
+    AccumulatedPhysicsTime = 0.0f;
+    AccumulatedFrameTime = 0.0f;
+    SampleCount = 0;
+    
+    // Find all vehicle physics actors in the world
+    if (UWorld* World = GetWorld())
     {
-        return;
+        for (TActorIterator<AActor> ActorIterator(World); ActorIterator; ++ActorIterator)
+        {
+            AActor* Actor = *ActorIterator;
+            if (Actor && Actor->GetName().Contains(TEXT("Vehicle")))
+            {
+                TrackedVehicles.Add(Actor);
+                UE_LOG(LogTemp, Log, TEXT("VehiclePhysicsPerformanceIntegrator: Tracking vehicle actor: %s"), *Actor->GetName());
+            }
+        }
     }
     
     bIsMonitoringActive = true;
+    LastOptimizationTime = FPlatformTime::Seconds();
     
-    if (UWorld* World = GetWorld())
-    {
-        // Start monitoring timer (60 FPS monitoring)
-        World->GetTimerManager().SetTimer(
-            MonitoringTimerHandle,
-            this,
-            &UPerf_VehiclePhysicsPerformanceIntegrator::UpdateVehiclePhysicsMetrics,
-            1.0f / 60.0f,
-            true
-        );
-        
-        // Start optimization timer (10 FPS optimization checks)
-        World->GetTimerManager().SetTimer(
-            OptimizationTimerHandle,
-            this,
-            &UPerf_VehiclePhysicsPerformanceIntegrator::CheckAdaptiveOptimization,
-            0.1f,
-            true
-        );
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("Vehicle Physics Performance monitoring started"));
+    UE_LOG(LogTemp, Log, TEXT("VehiclePhysicsPerformanceIntegrator: Monitoring %d vehicle actors"), TrackedVehicles.Num());
 }
 
-void UPerf_VehiclePhysicsPerformanceIntegrator::StopVehiclePhysicsMonitoring()
+void UPerf_VehiclePhysicsPerformanceIntegrator::UpdateVehiclePerformanceMetrics()
 {
     if (!bIsMonitoringActive)
     {
         return;
     }
     
-    bIsMonitoringActive = false;
+    SCOPE_CYCLE_COUNTER(STAT_VehiclePhysicsUpdate);
     
-    if (UWorld* World = GetWorld())
+    const float CurrentTime = FPlatformTime::Seconds();
+    const float DeltaTime = CurrentTime - LastOptimizationTime;
+    
+    // Update frame time tracking
+    const float CurrentFrameTime = FApp::GetDeltaTime() * 1000.0f; // Convert to milliseconds
+    FrameTimeHistory.Add(CurrentFrameTime);
+    if (FrameTimeHistory.Num() > MAX_FRAME_HISTORY)
     {
-        World->GetTimerManager().ClearTimer(MonitoringTimerHandle);
-        World->GetTimerManager().ClearTimer(OptimizationTimerHandle);
+        FrameTimeHistory.RemoveAt(0);
     }
     
-    UE_LOG(LogTemp, Log, TEXT("Vehicle Physics Performance monitoring stopped"));
+    // Calculate average frame time
+    float TotalFrameTime = 0.0f;
+    for (float FrameTime : FrameTimeHistory)
+    {
+        TotalFrameTime += FrameTime;
+    }
+    CurrentMetrics.AverageFrameTime = FrameTimeHistory.Num() > 0 ? TotalFrameTime / FrameTimeHistory.Num() : 0.0f;
+    
+    // Update vehicle count and physics metrics
+    int32 ActiveVehicles = 0;
+    float TotalPhysicsTime = 0.0f;
+    float TotalSurfaceDetectionTime = 0.0f;
+    float TotalDamageTime = 0.0f;
+    float TotalSuspensionTime = 0.0f;
+    float TotalTireTime = 0.0f;
+    
+    // Clean up invalid weak pointers
+    TrackedVehicles.RemoveAll([](const TWeakObjectPtr<AActor>& WeakPtr) {
+        return !WeakPtr.IsValid();
+    });
+    
+    // Update metrics for each tracked vehicle
+    for (const TWeakObjectPtr<AActor>& WeakVehicle : TrackedVehicles)
+    {
+        if (AActor* Vehicle = WeakVehicle.Get())
+        {
+            ActiveVehicles++;
+            
+            // Simulate physics timing measurements
+            TotalPhysicsTime += 0.5f + FMath::RandRange(-0.2f, 0.2f);
+            TotalSurfaceDetectionTime += 0.1f + FMath::RandRange(-0.05f, 0.05f);
+            TotalDamageTime += 0.05f + FMath::RandRange(-0.02f, 0.02f);
+            TotalSuspensionTime += 0.3f + FMath::RandRange(-0.1f, 0.1f);
+            TotalTireTime += 0.2f + FMath::RandRange(-0.08f, 0.08f);
+        }
+    }
+    
+    // Update current metrics
+    CurrentMetrics.ActiveVehicleCount = ActiveVehicles;
+    CurrentMetrics.PhysicsUpdateTime = TotalPhysicsTime;
+    CurrentMetrics.SurfaceDetectionTime = TotalSurfaceDetectionTime;
+    CurrentMetrics.DamageCalculationTime = TotalDamageTime;
+    CurrentMetrics.SuspensionUpdateTime = TotalSuspensionTime;
+    CurrentMetrics.TirePhysicsTime = TotalTireTime;
+    
+    // Monitor memory usage
+    MonitorVehicleMemoryUsage();
+    
+    // Check performance targets
+    const float TargetFrameTime = (OptimizationSettings.PerformanceLevel == EPerf_VehiclePerformanceLevel::Ultra) ? 
+        TARGET_60FPS_FRAME_TIME : TARGET_30FPS_FRAME_TIME;
+    CurrentMetrics.bPerformanceTargetMet = CurrentMetrics.AverageFrameTime <= TargetFrameTime;
+    
+    // Apply optimizations if needed
+    if (DeltaTime >= OptimizationInterval)
+    {
+        OptimizeVehiclePhysicsPerformance();
+        LastOptimizationTime = CurrentTime;
+    }
+    
+    // Debug logging
+    if (bDebugEnabled)
+    {
+        UE_LOG(LogTemp, Log, TEXT("VehiclePhysicsPerformanceIntegrator: Active Vehicles: %d, Avg Frame Time: %.2fms, Physics Time: %.2fms"), 
+            CurrentMetrics.ActiveVehicleCount, CurrentMetrics.AverageFrameTime, CurrentMetrics.PhysicsUpdateTime);
+    }
 }
 
 FPerf_VehiclePhysicsMetrics UPerf_VehiclePhysicsPerformanceIntegrator::GetVehiclePhysicsMetrics() const
@@ -99,327 +196,261 @@ FPerf_VehiclePhysicsMetrics UPerf_VehiclePhysicsPerformanceIntegrator::GetVehicl
     return CurrentMetrics;
 }
 
-void UPerf_VehiclePhysicsPerformanceIntegrator::SetVehiclePhysicsOptimizationLevel(EPerf_VehiclePhysicsOptimizationLevel Level)
+void UPerf_VehiclePhysicsPerformanceIntegrator::SetVehicleOptimizationSettings(const FPerf_VehicleOptimizationSettings& Settings)
 {
-    if (CurrentOptimizationLevel == Level)
-    {
-        return;
-    }
+    OptimizationSettings = Settings;
+    UE_LOG(LogTemp, Log, TEXT("VehiclePhysicsPerformanceIntegrator: Updated optimization settings - Performance Level: %d"), 
+        static_cast<int32>(Settings.PerformanceLevel));
     
-    CurrentOptimizationLevel = Level;
-    ApplyVehiclePhysicsOptimizations();
-    
-    UE_LOG(LogTemp, Log, TEXT("Vehicle Physics optimization level set to: %d"), (int32)Level);
+    // Apply new settings immediately
+    ApplyPerformanceOptimizations();
+}
+
+FPerf_VehicleOptimizationSettings UPerf_VehiclePhysicsPerformanceIntegrator::GetOptimizationSettings() const
+{
+    return OptimizationSettings;
 }
 
 void UPerf_VehiclePhysicsPerformanceIntegrator::OptimizeVehiclePhysicsPerformance()
 {
-    if (bOptimizationInProgress)
+    SCOPE_CYCLE_COUNTER(STAT_VehiclePhysicsUpdate);
+    
+    if (!CurrentMetrics.bPerformanceTargetMet)
     {
-        return;
-    }
-    
-    bOptimizationInProgress = true;
-    
-    // Apply optimizations based on current level
-    ApplyVehiclePhysicsOptimizations();
-    
-    // Update optimization state
-    CurrentMetrics.bVehiclePhysicsOptimizationActive = true;
-    LastOptimizationTime = GetWorld()->GetTimeSeconds();
-    
-    bOptimizationInProgress = false;
-    
-    UE_LOG(LogTemp, Log, TEXT("Vehicle Physics performance optimization completed"));
-}
-
-void UPerf_VehiclePhysicsPerformanceIntegrator::EnableAdaptiveVehiclePhysicsOptimization(bool bEnable)
-{
-    bAdaptiveOptimizationEnabled = bEnable;
-    
-    UE_LOG(LogTemp, Log, TEXT("Adaptive Vehicle Physics optimization: %s"), 
-           bEnable ? TEXT("Enabled") : TEXT("Disabled"));
-}
-
-void UPerf_VehiclePhysicsPerformanceIntegrator::RegisterVehiclePhysicsSystem(ACore_VehiclePhysicsSystem* VehicleSystem)
-{
-    if (!VehicleSystem || RegisteredVehicleSystems.Contains(VehicleSystem))
-    {
-        return;
-    }
-    
-    RegisteredVehicleSystems.Add(VehicleSystem);
-    
-    UE_LOG(LogTemp, Log, TEXT("Vehicle Physics System registered: %s"), 
-           *VehicleSystem->GetName());
-}
-
-void UPerf_VehiclePhysicsPerformanceIntegrator::UnregisterVehiclePhysicsSystem(ACore_VehiclePhysicsSystem* VehicleSystem)
-{
-    if (!VehicleSystem)
-    {
-        return;
-    }
-    
-    RegisteredVehicleSystems.Remove(VehicleSystem);
-    
-    UE_LOG(LogTemp, Log, TEXT("Vehicle Physics System unregistered: %s"), 
-           *VehicleSystem->GetName());
-}
-
-void UPerf_VehiclePhysicsPerformanceIntegrator::AnalyzeVehiclePhysicsPerformance()
-{
-    // Comprehensive performance analysis
-    float TotalVehiclePhysicsCost = CurrentMetrics.VehicleCollisionCost + 
-                                   CurrentMetrics.VehicleWheelPhysicsCost + 
-                                   CurrentMetrics.VehicleEngineSimulationCost + 
-                                   CurrentMetrics.VehicleSuspensionCost;
-    
-    // Performance assessment
-    bool bPerformanceOptimal = (CurrentMetrics.VehiclePhysicsFrameTime <= TargetVehiclePhysicsFrameTime) &&
-                              (TotalVehiclePhysicsCost <= MaxVehicleSimulationCost) &&
-                              (CurrentMetrics.ActiveVehicleCount <= MaxActiveVehicles);
-    
-    // Log analysis results
-    UE_LOG(LogTemp, Warning, TEXT("=== Vehicle Physics Performance Analysis ==="));
-    UE_LOG(LogTemp, Warning, TEXT("Frame Time: %.2fms (Target: %.2fms)"), 
-           CurrentMetrics.VehiclePhysicsFrameTime, TargetVehiclePhysicsFrameTime);
-    UE_LOG(LogTemp, Warning, TEXT("Total Physics Cost: %.2fms (Max: %.2fms)"), 
-           TotalVehiclePhysicsCost, MaxVehicleSimulationCost);
-    UE_LOG(LogTemp, Warning, TEXT("Active Vehicles: %d (Max: %d)"), 
-           CurrentMetrics.ActiveVehicleCount, MaxActiveVehicles);
-    UE_LOG(LogTemp, Warning, TEXT("Performance Optimal: %s"), 
-           bPerformanceOptimal ? TEXT("YES") : TEXT("NO"));
-    
-    // Recommend optimizations if needed
-    if (!bPerformanceOptimal)
-    {
-        if (CurrentMetrics.VehiclePhysicsFrameTime > TargetVehiclePhysicsFrameTime)
-        {
-            UE_LOG(LogTemp, Warning, TEXT("RECOMMENDATION: Reduce vehicle physics quality"));
-        }
-        if (CurrentMetrics.ActiveVehicleCount > MaxActiveVehicles)
-        {
-            UE_LOG(LogTemp, Warning, TEXT("RECOMMENDATION: Implement vehicle culling"));
-        }
-    }
-}
-
-bool UPerf_VehiclePhysicsPerformanceIntegrator::IsVehiclePhysicsPerformanceOptimal() const
-{
-    return (CurrentMetrics.VehiclePhysicsFrameTime <= TargetVehiclePhysicsFrameTime) &&
-           (CurrentMetrics.VehicleSimulationCost <= MaxVehicleSimulationCost) &&
-           (CurrentMetrics.ActiveVehicleCount <= MaxActiveVehicles);
-}
-
-void UPerf_VehiclePhysicsPerformanceIntegrator::RunVehiclePhysicsPerformanceTest()
-{
-    UE_LOG(LogTemp, Warning, TEXT("=== Vehicle Physics Performance Test Started ==="));
-    
-    // Simulate performance test
-    float TestStartTime = GetWorld()->GetTimeSeconds();
-    
-    // Test vehicle physics systems
-    for (ACore_VehiclePhysicsSystem* VehicleSystem : RegisteredVehicleSystems)
-    {
-        if (VehicleSystem)
-        {
-            UE_LOG(LogTemp, Log, TEXT("Testing Vehicle System: %s"), *VehicleSystem->GetName());
-            // Vehicle system would have test methods here
-        }
-    }
-    
-    float TestDuration = GetWorld()->GetTimeSeconds() - TestStartTime;
-    
-    UE_LOG(LogTemp, Warning, TEXT("Vehicle Physics Performance Test completed in %.2fms"), 
-           TestDuration * 1000.0f);
-    
-    // Run analysis after test
-    AnalyzeVehiclePhysicsPerformance();
-}
-
-void UPerf_VehiclePhysicsPerformanceIntegrator::LogVehiclePhysicsPerformanceReport()
-{
-    UE_LOG(LogTemp, Warning, TEXT("=== Vehicle Physics Performance Report ==="));
-    UE_LOG(LogTemp, Warning, TEXT("Timestamp: %s"), *FDateTime::Now().ToString());
-    UE_LOG(LogTemp, Warning, TEXT("Optimization Level: %d"), (int32)CurrentOptimizationLevel);
-    UE_LOG(LogTemp, Warning, TEXT("Monitoring Active: %s"), bIsMonitoringActive ? TEXT("YES") : TEXT("NO"));
-    UE_LOG(LogTemp, Warning, TEXT("Adaptive Optimization: %s"), bAdaptiveOptimizationEnabled ? TEXT("YES") : TEXT("NO"));
-    UE_LOG(LogTemp, Warning, TEXT("Registered Vehicle Systems: %d"), RegisteredVehicleSystems.Num());
-    
-    // Current metrics
-    UE_LOG(LogTemp, Warning, TEXT("--- Current Metrics ---"));
-    UE_LOG(LogTemp, Warning, TEXT("Frame Time: %.2fms"), CurrentMetrics.VehiclePhysicsFrameTime);
-    UE_LOG(LogTemp, Warning, TEXT("Simulation Cost: %.2fms"), CurrentMetrics.VehicleSimulationCost);
-    UE_LOG(LogTemp, Warning, TEXT("Active Vehicles: %d"), CurrentMetrics.ActiveVehicleCount);
-    UE_LOG(LogTemp, Warning, TEXT("Memory Usage: %.2fMB"), CurrentMetrics.VehiclePhysicsMemoryUsage);
-    UE_LOG(LogTemp, Warning, TEXT("Quality Scale: %.2f"), CurrentMetrics.VehiclePhysicsQualityScale);
-}
-
-void UPerf_VehiclePhysicsPerformanceIntegrator::UpdateVehiclePhysicsMetrics()
-{
-    if (!bIsMonitoringActive)
-    {
-        return;
-    }
-    
-    // Update frame time tracking
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-    float DeltaTime = CurrentTime - LastFrameTime;
-    LastFrameTime = CurrentTime;
-    
-    AccumulatedFrameTime += DeltaTime;
-    FrameCount++;
-    
-    // Calculate average frame time over last second
-    if (AccumulatedFrameTime >= 1.0f)
-    {
-        CurrentMetrics.VehiclePhysicsFrameTime = (AccumulatedFrameTime / FrameCount) * 1000.0f; // Convert to ms
-        AccumulatedFrameTime = 0.0f;
-        FrameCount = 0;
-    }
-    
-    // Update active vehicle count
-    CurrentMetrics.ActiveVehicleCount = RegisteredVehicleSystems.Num();
-    
-    // Simulate physics costs (would be real measurements in production)
-    CurrentMetrics.VehicleCollisionCost = FMath::RandRange(0.5f, 2.0f);
-    CurrentMetrics.VehicleWheelPhysicsCost = FMath::RandRange(0.3f, 1.5f);
-    CurrentMetrics.VehicleEngineSimulationCost = FMath::RandRange(0.2f, 1.0f);
-    CurrentMetrics.VehicleSuspensionCost = FMath::RandRange(0.1f, 0.8f);
-    
-    CurrentMetrics.VehicleSimulationCost = CurrentMetrics.VehicleCollisionCost + 
-                                          CurrentMetrics.VehicleWheelPhysicsCost + 
-                                          CurrentMetrics.VehicleEngineSimulationCost + 
-                                          CurrentMetrics.VehicleSuspensionCost;
-    
-    // Update memory usage (simulated)
-    CurrentMetrics.VehiclePhysicsMemoryUsage = CurrentMetrics.ActiveVehicleCount * 2.5f; // 2.5MB per vehicle
-    
-    // Update quality scale based on optimization level
-    switch (CurrentOptimizationLevel)
-    {
-        case EPerf_VehiclePhysicsOptimizationLevel::Ultra:
-            CurrentMetrics.VehiclePhysicsQualityScale = 1.0f;
-            break;
-        case EPerf_VehiclePhysicsOptimizationLevel::High:
-            CurrentMetrics.VehiclePhysicsQualityScale = 0.85f;
-            break;
-        case EPerf_VehiclePhysicsOptimizationLevel::Medium:
-            CurrentMetrics.VehiclePhysicsQualityScale = 0.7f;
-            break;
-        case EPerf_VehiclePhysicsOptimizationLevel::Low:
-            CurrentMetrics.VehiclePhysicsQualityScale = 0.5f;
-            break;
-        case EPerf_VehiclePhysicsOptimizationLevel::Minimal:
-            CurrentMetrics.VehiclePhysicsQualityScale = 0.3f;
-            break;
-    }
-}
-
-void UPerf_VehiclePhysicsPerformanceIntegrator::ApplyVehiclePhysicsOptimizations()
-{
-    // Apply optimizations based on current level
-    OptimizeVehicleCollisionSettings();
-    OptimizeVehicleWheelPhysics();
-    OptimizeVehicleEngineSimulation();
-    OptimizeVehicleSuspensionSettings();
-    
-    UE_LOG(LogTemp, Log, TEXT("Vehicle Physics optimizations applied for level: %d"), 
-           (int32)CurrentOptimizationLevel);
-}
-
-void UPerf_VehiclePhysicsPerformanceIntegrator::CheckAdaptiveOptimization()
-{
-    if (!bAdaptiveOptimizationEnabled || bOptimizationInProgress)
-    {
-        return;
-    }
-    
-    // Check if optimization is needed
-    bool bNeedsOptimization = (CurrentMetrics.VehiclePhysicsFrameTime > TargetVehiclePhysicsFrameTime * 1.2f) ||
-                             (CurrentMetrics.VehicleSimulationCost > MaxVehicleSimulationCost * 1.1f);
-    
-    if (bNeedsOptimization)
-    {
-        // Automatically reduce optimization level
-        EPerf_VehiclePhysicsOptimizationLevel NewLevel = CurrentOptimizationLevel;
+        UE_LOG(LogTemp, Warning, TEXT("VehiclePhysicsPerformanceIntegrator: Performance target not met, applying optimizations"));
         
-        switch (CurrentOptimizationLevel)
+        // Automatically adjust performance level if targets are not met
+        if (CurrentMetrics.AverageFrameTime > TARGET_60FPS_FRAME_TIME * 1.5f)
         {
-            case EPerf_VehiclePhysicsOptimizationLevel::Ultra:
-                NewLevel = EPerf_VehiclePhysicsOptimizationLevel::High;
-                break;
-            case EPerf_VehiclePhysicsOptimizationLevel::High:
-                NewLevel = EPerf_VehiclePhysicsOptimizationLevel::Medium;
-                break;
-            case EPerf_VehiclePhysicsOptimizationLevel::Medium:
-                NewLevel = EPerf_VehiclePhysicsOptimizationLevel::Low;
-                break;
-            case EPerf_VehiclePhysicsOptimizationLevel::Low:
-                NewLevel = EPerf_VehiclePhysicsOptimizationLevel::Minimal;
-                break;
-            case EPerf_VehiclePhysicsOptimizationLevel::Minimal:
-                // Already at minimum
-                break;
+            // Significant performance issues - reduce to Low
+            if (OptimizationSettings.PerformanceLevel > EPerf_VehiclePerformanceLevel::Low)
+            {
+                OptimizationSettings.PerformanceLevel = EPerf_VehiclePerformanceLevel::Low;
+                UE_LOG(LogTemp, Warning, TEXT("VehiclePhysicsPerformanceIntegrator: Auto-reducing to Low performance level"));
+            }
+        }
+        else if (CurrentMetrics.AverageFrameTime > TARGET_60FPS_FRAME_TIME * 1.2f)
+        {
+            // Moderate performance issues - reduce to Medium
+            if (OptimizationSettings.PerformanceLevel > EPerf_VehiclePerformanceLevel::Medium)
+            {
+                OptimizationSettings.PerformanceLevel = EPerf_VehiclePerformanceLevel::Medium;
+                UE_LOG(LogTemp, Warning, TEXT("VehiclePhysicsPerformanceIntegrator: Auto-reducing to Medium performance level"));
+            }
+        }
+    }
+    else if (CurrentMetrics.AverageFrameTime < TARGET_60FPS_FRAME_TIME * 0.8f)
+    {
+        // Performance is good - can potentially increase quality
+        if (OptimizationSettings.PerformanceLevel < EPerf_VehiclePerformanceLevel::Ultra)
+        {
+            OptimizationSettings.PerformanceLevel = static_cast<EPerf_VehiclePerformanceLevel>(
+                static_cast<int32>(OptimizationSettings.PerformanceLevel) + 1);
+            UE_LOG(LogTemp, Log, TEXT("VehiclePhysicsPerformanceIntegrator: Auto-increasing performance level"));
+        }
+    }
+    
+    ApplyPerformanceOptimizations();
+}
+
+void UPerf_VehiclePhysicsPerformanceIntegrator::SetPerformanceLevel(EPerf_VehiclePerformanceLevel Level)
+{
+    OptimizationSettings.PerformanceLevel = Level;
+    UE_LOG(LogTemp, Log, TEXT("VehiclePhysicsPerformanceIntegrator: Performance level set to %d"), static_cast<int32>(Level));
+    
+    ApplyPerformanceOptimizations();
+}
+
+bool UPerf_VehiclePhysicsPerformanceIntegrator::ArePerformanceTargetsMet() const
+{
+    return CurrentMetrics.bPerformanceTargetMet;
+}
+
+TArray<FString> UPerf_VehiclePhysicsPerformanceIntegrator::GetPerformanceRecommendations() const
+{
+    TArray<FString> Recommendations;
+    
+    if (CurrentMetrics.AverageFrameTime > TARGET_60FPS_FRAME_TIME)
+    {
+        Recommendations.Add(TEXT("Consider reducing vehicle physics update frequency"));
+        
+        if (CurrentMetrics.ActiveVehicleCount > OptimizationSettings.MaxConcurrentVehicles)
+        {
+            Recommendations.Add(FString::Printf(TEXT("Too many active vehicles (%d). Consider reducing to %d"), 
+                CurrentMetrics.ActiveVehicleCount, OptimizationSettings.MaxConcurrentVehicles));
         }
         
-        if (NewLevel != CurrentOptimizationLevel)
+        if (CurrentMetrics.PhysicsUpdateTime > 2.0f)
         {
-            SetVehiclePhysicsOptimizationLevel(NewLevel);
-            UE_LOG(LogTemp, Warning, TEXT("Adaptive optimization: Reduced to level %d"), (int32)NewLevel);
+            Recommendations.Add(TEXT("Physics update time is high. Enable async physics processing"));
+        }
+        
+        if (CurrentMetrics.SurfaceDetectionTime > 0.5f)
+        {
+            Recommendations.Add(TEXT("Surface detection is expensive. Increase LOD distance"));
+        }
+        
+        if (CurrentMetrics.MemoryUsageMB > 100.0f)
+        {
+            Recommendations.Add(TEXT("High memory usage detected. Consider reducing vehicle detail levels"));
+        }
+    }
+    
+    if (Recommendations.Num() == 0)
+    {
+        Recommendations.Add(TEXT("Performance is optimal"));
+    }
+    
+    return Recommendations;
+}
+
+void UPerf_VehiclePhysicsPerformanceIntegrator::SetVehiclePhysicsDebugging(bool bEnabled)
+{
+    bDebugEnabled = bEnabled;
+    UE_LOG(LogTemp, Log, TEXT("VehiclePhysicsPerformanceIntegrator: Debug mode %s"), bEnabled ? TEXT("enabled") : TEXT("disabled"));
+}
+
+FString UPerf_VehiclePhysicsPerformanceIntegrator::GetVehiclePhysicsDebugInfo() const
+{
+    FString DebugInfo = FString::Printf(TEXT("Vehicle Physics Performance Debug Info:\n"));
+    DebugInfo += FString::Printf(TEXT("Active Vehicles: %d\n"), CurrentMetrics.ActiveVehicleCount);
+    DebugInfo += FString::Printf(TEXT("Average Frame Time: %.2fms\n"), CurrentMetrics.AverageFrameTime);
+    DebugInfo += FString::Printf(TEXT("Physics Update Time: %.2fms\n"), CurrentMetrics.PhysicsUpdateTime);
+    DebugInfo += FString::Printf(TEXT("Surface Detection Time: %.2fms\n"), CurrentMetrics.SurfaceDetectionTime);
+    DebugInfo += FString::Printf(TEXT("Damage Calculation Time: %.2fms\n"), CurrentMetrics.DamageCalculationTime);
+    DebugInfo += FString::Printf(TEXT("Memory Usage: %.2fMB\n"), CurrentMetrics.MemoryUsageMB);
+    DebugInfo += FString::Printf(TEXT("Performance Target Met: %s\n"), CurrentMetrics.bPerformanceTargetMet ? TEXT("Yes") : TEXT("No"));
+    DebugInfo += FString::Printf(TEXT("Performance Level: %d\n"), static_cast<int32>(OptimizationSettings.PerformanceLevel));
+    
+    return DebugInfo;
+}
+
+void UPerf_VehiclePhysicsPerformanceIntegrator::UpdateVehiclePhysicsLOD()
+{
+    // Update LOD based on distance and performance level
+    float LODDistance = OptimizationSettings.SurfaceDetectionLODDistance;
+    
+    switch (OptimizationSettings.PerformanceLevel)
+    {
+        case EPerf_VehiclePerformanceLevel::Ultra:
+            LODDistance *= 1.5f;
+            break;
+        case EPerf_VehiclePerformanceLevel::High:
+            LODDistance *= 1.2f;
+            break;
+        case EPerf_VehiclePerformanceLevel::Medium:
+            LODDistance *= 1.0f;
+            break;
+        case EPerf_VehiclePerformanceLevel::Low:
+            LODDistance *= 0.7f;
+            break;
+        case EPerf_VehiclePerformanceLevel::Minimal:
+            LODDistance *= 0.5f;
+            break;
+    }
+    
+    // Apply LOD settings to tracked vehicles
+    for (const TWeakObjectPtr<AActor>& WeakVehicle : TrackedVehicles)
+    {
+        if (AActor* Vehicle = WeakVehicle.Get())
+        {
+            // Apply LOD distance settings to vehicle components
+            // This would integrate with the actual vehicle physics system
         }
     }
 }
 
-void UPerf_VehiclePhysicsPerformanceIntegrator::OptimizeVehicleCollisionSettings()
+void UPerf_VehiclePhysicsPerformanceIntegrator::MonitorVehicleMemoryUsage()
 {
-    // Optimize collision settings based on optimization level
-    for (ACore_VehiclePhysicsSystem* VehicleSystem : RegisteredVehicleSystems)
+    SCOPE_CYCLE_COUNTER(STAT_VehicleMemoryUsage);
+    
+    // Get current memory statistics
+    FPlatformMemoryStats MemStats = FPlatformMemory::GetStats();
+    
+    // Estimate vehicle physics memory usage (simplified calculation)
+    const float BaseMemoryPerVehicle = 2.0f; // MB per vehicle
+    const float EstimatedVehicleMemory = CurrentMetrics.ActiveVehicleCount * BaseMemoryPerVehicle;
+    
+    CurrentMetrics.MemoryUsageMB = EstimatedVehicleMemory;
+    
+    // Log memory warnings if usage is high
+    if (CurrentMetrics.MemoryUsageMB > 50.0f && bDebugEnabled)
     {
-        if (VehicleSystem)
-        {
-            // Vehicle system would have collision optimization methods
-            UE_LOG(LogTemp, Verbose, TEXT("Optimizing collision for vehicle: %s"), *VehicleSystem->GetName());
-        }
+        UE_LOG(LogTemp, Warning, TEXT("VehiclePhysicsPerformanceIntegrator: High vehicle memory usage: %.2fMB"), CurrentMetrics.MemoryUsageMB);
     }
 }
 
-void UPerf_VehiclePhysicsPerformanceIntegrator::OptimizeVehicleWheelPhysics()
+void UPerf_VehiclePhysicsPerformanceIntegrator::ApplyPerformanceOptimizations()
 {
-    // Optimize wheel physics based on optimization level
-    for (ACore_VehiclePhysicsSystem* VehicleSystem : RegisteredVehicleSystems)
+    UE_LOG(LogTemp, Log, TEXT("VehiclePhysicsPerformanceIntegrator: Applying performance optimizations for level %d"), 
+        static_cast<int32>(OptimizationSettings.PerformanceLevel));
+    
+    // Update physics LOD
+    UpdateVehiclePhysicsLOD();
+    
+    // Update async physics settings
+    UpdateAsyncPhysicsSettings();
+    
+    // Adjust concurrent vehicle limits
+    switch (OptimizationSettings.PerformanceLevel)
     {
-        if (VehicleSystem)
-        {
-            // Vehicle system would have wheel physics optimization methods
-            UE_LOG(LogTemp, Verbose, TEXT("Optimizing wheel physics for vehicle: %s"), *VehicleSystem->GetName());
-        }
+        case EPerf_VehiclePerformanceLevel::Ultra:
+            OptimizationSettings.MaxConcurrentVehicles = 20;
+            OptimizationSettings.bEnableDamageSimulation = true;
+            break;
+        case EPerf_VehiclePerformanceLevel::High:
+            OptimizationSettings.MaxConcurrentVehicles = 15;
+            OptimizationSettings.bEnableDamageSimulation = true;
+            break;
+        case EPerf_VehiclePerformanceLevel::Medium:
+            OptimizationSettings.MaxConcurrentVehicles = 10;
+            OptimizationSettings.bEnableDamageSimulation = true;
+            break;
+        case EPerf_VehiclePerformanceLevel::Low:
+            OptimizationSettings.MaxConcurrentVehicles = 6;
+            OptimizationSettings.bEnableDamageSimulation = false;
+            break;
+        case EPerf_VehiclePerformanceLevel::Minimal:
+            OptimizationSettings.MaxConcurrentVehicles = 3;
+            OptimizationSettings.bEnableDamageSimulation = false;
+            break;
     }
 }
 
-void UPerf_VehiclePhysicsPerformanceIntegrator::OptimizeVehicleEngineSimulation()
+float UPerf_VehiclePhysicsPerformanceIntegrator::CalculateVehiclePerformanceScore() const
 {
-    // Optimize engine simulation based on optimization level
-    for (ACore_VehiclePhysicsSystem* VehicleSystem : RegisteredVehicleSystems)
+    float Score = 100.0f;
+    
+    // Penalize for high frame times
+    if (CurrentMetrics.AverageFrameTime > TARGET_60FPS_FRAME_TIME)
     {
-        if (VehicleSystem)
-        {
-            // Vehicle system would have engine simulation optimization methods
-            UE_LOG(LogTemp, Verbose, TEXT("Optimizing engine simulation for vehicle: %s"), *VehicleSystem->GetName());
-        }
+        Score -= (CurrentMetrics.AverageFrameTime - TARGET_60FPS_FRAME_TIME) * 2.0f;
     }
+    
+    // Penalize for high physics times
+    if (CurrentMetrics.PhysicsUpdateTime > 1.0f)
+    {
+        Score -= (CurrentMetrics.PhysicsUpdateTime - 1.0f) * 10.0f;
+    }
+    
+    // Penalize for high memory usage
+    if (CurrentMetrics.MemoryUsageMB > 30.0f)
+    {
+        Score -= (CurrentMetrics.MemoryUsageMB - 30.0f) * 0.5f;
+    }
+    
+    return FMath::Clamp(Score, 0.0f, 100.0f);
 }
 
-void UPerf_VehiclePhysicsPerformanceIntegrator::OptimizeVehicleSuspensionSettings()
+void UPerf_VehiclePhysicsPerformanceIntegrator::UpdateAsyncPhysicsSettings()
 {
-    // Optimize suspension settings based on optimization level
-    for (ACore_VehiclePhysicsSystem* VehicleSystem : RegisteredVehicleSystems)
+    // Enable async physics based on performance level and current metrics
+    bool bShouldUseAsync = OptimizationSettings.bEnableAsyncPhysics && 
+                          (OptimizationSettings.PerformanceLevel >= EPerf_VehiclePerformanceLevel::Medium);
+    
+    if (bShouldUseAsync && CurrentMetrics.PhysicsUpdateTime > 1.0f)
     {
-        if (VehicleSystem)
-        {
-            // Vehicle system would have suspension optimization methods
-            UE_LOG(LogTemp, Verbose, TEXT("Optimizing suspension for vehicle: %s"), *VehicleSystem->GetName());
-        }
+        UE_LOG(LogTemp, Log, TEXT("VehiclePhysicsPerformanceIntegrator: Enabling async physics for better performance"));
+        // This would integrate with the actual vehicle physics system to enable async processing
     }
 }
