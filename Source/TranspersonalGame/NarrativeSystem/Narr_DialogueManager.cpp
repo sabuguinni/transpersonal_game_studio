@@ -1,306 +1,298 @@
 #include "Narr_DialogueManager.h"
 #include "Engine/Engine.h"
+#include "Kismet/GameplayStatics.h"
 
 UNarr_DialogueManager::UNarr_DialogueManager()
 {
-    CurrentDialogueCharacter = TEXT("");
-    CurrentContext = ENarr_DialogueContext::Information;
+    bIsDialogueActive = false;
+    CurrentDialogueIndex = 0;
+    CurrentNPCActor = nullptr;
 }
 
 void UNarr_DialogueManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Warning, TEXT("Narr_DialogueManager: Initializing narrative dialogue system"));
+    UE_LOG(LogTemp, Warning, TEXT("Narrative Dialogue Manager initialized"));
     
-    // Initialize default dialogues and story beats
     InitializeDefaultDialogues();
-    CreateSurvivalStoryBeats();
-    
-    UE_LOG(LogTemp, Warning, TEXT("Narr_DialogueManager: Initialized with %d dialogue lines and %d story beats"), 
-           DialogueDatabase.Num(), StoryBeats.Num());
+    InitializeCharacterVoices();
 }
 
 void UNarr_DialogueManager::Deinitialize()
 {
-    DialogueDatabase.Empty();
-    StoryBeats.Empty();
-    NarrativeContext.Empty();
+    EndDialogue();
+    DialogueSequences.Empty();
+    CharacterVoiceMap.Empty();
     
     Super::Deinitialize();
 }
 
-void UNarr_DialogueManager::StartDialogue(const FString& CharacterName, ENarr_CharacterType CharacterType, ENarr_DialogueContext Context)
+void UNarr_DialogueManager::StartDialogue(const FString& SequenceID, AActor* NPCActor)
 {
-    CurrentDialogueCharacter = CharacterName;
-    CurrentContext = Context;
-    
-    FNarr_DialogueLine DialogueLine = GetDialogueLine(CharacterName, Context);
-    
-    if (!DialogueLine.DialogueText.IsEmpty())
+    if (!HasDialogueSequence(SequenceID))
     {
-        UE_LOG(LogTemp, Warning, TEXT("Narr_DialogueManager: Starting dialogue with %s: %s"), 
-               *CharacterName, *DialogueLine.DialogueText);
+        UE_LOG(LogTemp, Warning, TEXT("Dialogue sequence not found: %s"), *SequenceID);
+        return;
+    }
+
+    if (bIsDialogueActive)
+    {
+        EndDialogue();
+    }
+
+    CurrentSequenceID = SequenceID;
+    CurrentNPCActor = NPCActor;
+    CurrentDialogueIndex = 0;
+    bIsDialogueActive = true;
+
+    UE_LOG(LogTemp, Warning, TEXT("Started dialogue sequence: %s"), *SequenceID);
+    
+    // Pause game for dialogue
+    if (UWorld* World = GetWorld())
+    {
+        UGameplayStatics::SetGamePaused(World, true);
+    }
+}
+
+void UNarr_DialogueManager::EndDialogue()
+{
+    if (!bIsDialogueActive)
+    {
+        return;
+    }
+
+    bIsDialogueActive = false;
+    CurrentSequenceID = "";
+    CurrentDialogueIndex = 0;
+    CurrentNPCActor = nullptr;
+
+    // Unpause game
+    if (UWorld* World = GetWorld())
+    {
+        UGameplayStatics::SetGamePaused(World, false);
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("Ended dialogue"));
+}
+
+void UNarr_DialogueManager::AdvanceDialogue()
+{
+    if (!bIsDialogueActive || !HasDialogueSequence(CurrentSequenceID))
+    {
+        return;
+    }
+
+    FNarr_DialogueSequence& Sequence = DialogueSequences[CurrentSequenceID];
+    
+    CurrentDialogueIndex++;
+    
+    if (CurrentDialogueIndex >= Sequence.DialogueLines.Num())
+    {
+        EndDialogue();
+        return;
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("Advanced to dialogue line %d"), CurrentDialogueIndex);
+}
+
+void UNarr_DialogueManager::SelectPlayerResponse(int32 ResponseIndex)
+{
+    if (!bIsDialogueActive)
+    {
+        return;
+    }
+
+    FNarr_DialogueLine CurrentLine = GetCurrentDialogueLine();
+    
+    if (ResponseIndex >= 0 && ResponseIndex < CurrentLine.PlayerResponses.Num())
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Player selected response %d: %s"), 
+               ResponseIndex, *CurrentLine.PlayerResponses[ResponseIndex].ToString());
         
-        // Set narrative context for this interaction
-        SetNarrativeContext(TEXT("LastSpeaker"), CharacterName);
-        SetNarrativeContext(TEXT("LastContext"), UEnum::GetValueAsString(Context));
+        AdvanceDialogue();
     }
 }
 
-FNarr_DialogueLine UNarr_DialogueManager::GetDialogueLine(const FString& CharacterName, ENarr_DialogueContext Context)
+void UNarr_DialogueManager::RegisterDialogueSequence(const FNarr_DialogueSequence& Sequence)
 {
-    // Find dialogue line matching character and context
-    for (const FNarr_DialogueLine& Dialogue : DialogueDatabase)
+    DialogueSequences.Add(Sequence.SequenceID, Sequence);
+    UE_LOG(LogTemp, Warning, TEXT("Registered dialogue sequence: %s"), *Sequence.SequenceID);
+}
+
+FNarr_DialogueSequence UNarr_DialogueManager::GetDialogueSequence(const FString& SequenceID)
+{
+    if (HasDialogueSequence(SequenceID))
     {
-        if (Dialogue.SpeakerName == CharacterName && Dialogue.Context == Context)
-        {
-            return Dialogue;
-        }
+        return DialogueSequences[SequenceID];
     }
     
-    // Find any dialogue line matching context for this character type
-    for (const FNarr_DialogueLine& Dialogue : DialogueDatabase)
+    return FNarr_DialogueSequence();
+}
+
+bool UNarr_DialogueManager::HasDialogueSequence(const FString& SequenceID)
+{
+    return DialogueSequences.Contains(SequenceID);
+}
+
+FString UNarr_DialogueManager::GetCharacterVoiceURL(ENarr_CharacterType CharacterType, const FString& DialogueKey)
+{
+    FString VoiceKey = GenerateVoiceKey(CharacterType, DialogueKey);
+    
+    if (CharacterVoiceMap.Contains(VoiceKey))
     {
-        if (Dialogue.Context == Context)
-        {
-            return Dialogue;
-        }
+        return CharacterVoiceMap[VoiceKey];
     }
     
-    // Return empty dialogue if nothing found
+    return "";
+}
+
+void UNarr_DialogueManager::RegisterCharacterVoice(ENarr_CharacterType CharacterType, const FString& DialogueKey, const FString& AudioURL)
+{
+    FString VoiceKey = GenerateVoiceKey(CharacterType, DialogueKey);
+    CharacterVoiceMap.Add(VoiceKey, AudioURL);
+    
+    UE_LOG(LogTemp, Warning, TEXT("Registered voice for %s: %s"), *VoiceKey, *AudioURL);
+}
+
+FNarr_DialogueLine UNarr_DialogueManager::GetCurrentDialogueLine() const
+{
+    if (!bIsDialogueActive || !DialogueSequences.Contains(CurrentSequenceID))
+    {
+        return FNarr_DialogueLine();
+    }
+
+    const FNarr_DialogueSequence& Sequence = DialogueSequences[CurrentSequenceID];
+    
+    if (CurrentDialogueIndex >= 0 && CurrentDialogueIndex < Sequence.DialogueLines.Num())
+    {
+        return Sequence.DialogueLines[CurrentDialogueIndex];
+    }
+    
     return FNarr_DialogueLine();
-}
-
-void UNarr_DialogueManager::AddDialogueLine(const FNarr_DialogueLine& NewDialogue)
-{
-    DialogueDatabase.Add(NewDialogue);
-    UE_LOG(LogTemp, Warning, TEXT("Narr_DialogueManager: Added dialogue line for %s"), *NewDialogue.SpeakerName);
-}
-
-TArray<FNarr_DialogueLine> UNarr_DialogueManager::GetDialoguesByCharacterType(ENarr_CharacterType CharacterType)
-{
-    TArray<FNarr_DialogueLine> FilteredDialogues;
-    
-    for (const FNarr_DialogueLine& Dialogue : DialogueDatabase)
-    {
-        if (Dialogue.CharacterType == CharacterType)
-        {
-            FilteredDialogues.Add(Dialogue);
-        }
-    }
-    
-    return FilteredDialogues;
-}
-
-void UNarr_DialogueManager::TriggerStoryBeat(const FString& BeatID)
-{
-    for (FNarr_StoryBeat& Beat : StoryBeats)
-    {
-        if (Beat.BeatID == BeatID)
-        {
-            UE_LOG(LogTemp, Warning, TEXT("Narr_DialogueManager: Triggered story beat: %s - %s"), 
-                   *Beat.BeatID, *Beat.Title);
-            
-            SetNarrativeContext(TEXT("CurrentStoryBeat"), BeatID);
-            SetNarrativeContext(TEXT("StoryBeatTriggered"), TEXT("true"));
-            break;
-        }
-    }
-}
-
-void UNarr_DialogueManager::CompleteStoryBeat(const FString& BeatID)
-{
-    for (FNarr_StoryBeat& Beat : StoryBeats)
-    {
-        if (Beat.BeatID == BeatID)
-        {
-            Beat.bIsCompleted = true;
-            UE_LOG(LogTemp, Warning, TEXT("Narr_DialogueManager: Completed story beat: %s"), *Beat.Title);
-            
-            SetNarrativeContext(TEXT("LastCompletedBeat"), BeatID);
-            break;
-        }
-    }
-}
-
-bool UNarr_DialogueManager::IsStoryBeatCompleted(const FString& BeatID)
-{
-    for (const FNarr_StoryBeat& Beat : StoryBeats)
-    {
-        if (Beat.BeatID == BeatID)
-        {
-            return Beat.bIsCompleted;
-        }
-    }
-    return false;
-}
-
-TArray<FNarr_StoryBeat> UNarr_DialogueManager::GetAvailableStoryBeats()
-{
-    TArray<FNarr_StoryBeat> AvailableBeats;
-    
-    for (const FNarr_StoryBeat& Beat : StoryBeats)
-    {
-        if (!Beat.bIsCompleted)
-        {
-            // Check if all required quests are completed
-            bool bCanTrigger = true;
-            for (const FString& RequiredQuest : Beat.RequiredQuests)
-            {
-                // This would integrate with the quest system
-                // For now, assume all requirements are met
-            }
-            
-            if (bCanTrigger)
-            {
-                AvailableBeats.Add(Beat);
-            }
-        }
-    }
-    
-    return AvailableBeats;
-}
-
-void UNarr_DialogueManager::SetNarrativeContext(const FString& ContextKey, const FString& ContextValue)
-{
-    NarrativeContext.Add(ContextKey, ContextValue);
-}
-
-FString UNarr_DialogueManager::GetNarrativeContext(const FString& ContextKey)
-{
-    if (NarrativeContext.Contains(ContextKey))
-    {
-        return NarrativeContext[ContextKey];
-    }
-    return TEXT("");
 }
 
 void UNarr_DialogueManager::InitializeDefaultDialogues()
 {
-    CreateTribalElderDialogues();
-    CreateTribalScoutDialogues();
-    CreateTribalShamanDialogues();
-    CreateTribalGuideDialogues();
-}
-
-void UNarr_DialogueManager::CreateTribalElderDialogues()
-{
-    FNarr_DialogueLine ElderWelcome;
-    ElderWelcome.SpeakerName = TEXT("Tribal Elder");
-    ElderWelcome.CharacterType = ENarr_CharacterType::TribalElder;
-    ElderWelcome.Context = ENarr_DialogueContext::FirstMeeting;
-    ElderWelcome.DialogueText = TEXT("Welcome, young one. I have seen many seasons pass in these dangerous lands. Listen well to my words if you wish to survive the trials ahead.");
-    ElderWelcome.Duration = 8.0f;
-    ElderWelcome.PlayerResponses.Add(TEXT("I will listen, Elder."));
-    ElderWelcome.PlayerResponses.Add(TEXT("What dangers should I know about?"));
-    DialogueDatabase.Add(ElderWelcome);
-
-    FNarr_DialogueLine ElderWisdom;
-    ElderWisdom.SpeakerName = TEXT("Tribal Elder");
-    ElderWisdom.CharacterType = ENarr_CharacterType::TribalElder;
-    ElderWisdom.Context = ENarr_DialogueContext::Information;
-    ElderWisdom.DialogueText = TEXT("The great herds move with the changing seasons. When the Thunder Lizards migrate north, it means the rains will come soon. Watch for their massive footprints in the mud.");
-    ElderWisdom.Duration = 12.0f;
-    DialogueDatabase.Add(ElderWisdom);
-
-    FNarr_DialogueLine ElderQuest;
-    ElderQuest.SpeakerName = TEXT("Tribal Elder");
-    ElderQuest.CharacterType = ENarr_CharacterType::TribalElder;
-    ElderQuest.Context = ENarr_DialogueContext::QuestGiving;
-    ElderQuest.DialogueText = TEXT("Prove your worth to our tribe. Survive alone in the wilderness for ten sunrises. Return to us, and you will be welcomed as one of our own.");
-    ElderQuest.Duration = 10.0f;
-    DialogueDatabase.Add(ElderQuest);
-}
-
-void UNarr_DialogueManager::CreateTribalScoutDialogues()
-{
-    FNarr_DialogueLine ScoutWarning;
-    ScoutWarning.SpeakerName = TEXT("Tribal Scout");
-    ScoutWarning.CharacterType = ENarr_CharacterType::TribalScout;
-    ScoutWarning.Context = ENarr_DialogueContext::Warning;
-    ScoutWarning.DialogueText = TEXT("Pack hunters spotted near the eastern cliffs! Three, maybe four raptors moving in formation. They hunt at dusk when the shadows grow long. Stay close to the fire tonight.");
-    ScoutWarning.Duration = 11.0f;
-    DialogueDatabase.Add(ScoutWarning);
-
-    FNarr_DialogueLine ScoutInfo;
-    ScoutInfo.SpeakerName = TEXT("Tribal Scout");
-    ScoutInfo.CharacterType = ENarr_CharacterType::TribalScout;
-    ScoutInfo.Context = ENarr_DialogueContext::Information;
-    ScoutInfo.DialogueText = TEXT("I know these lands like the back of my hand. The safe paths, the hidden water sources, the places where death lurks in the shadows. Knowledge is survival out here.");
-    ScoutInfo.Duration = 9.0f;
-    DialogueDatabase.Add(ScoutInfo);
-}
-
-void UNarr_DialogueManager::CreateTribalShamanDialogues()
-{
-    FNarr_DialogueLine ShamanLore;
-    ShamanLore.SpeakerName = TEXT("Tribal Shaman");
-    ShamanLore.CharacterType = ENarr_CharacterType::TribalShaman;
-    ShamanLore.Context = ENarr_DialogueContext::Information;
-    ShamanLore.DialogueText = TEXT("The bones tell a story of survival. This skeleton belonged to a young hunter who ventured too far from the tribe. Learn from their mistake - the wilderness shows no mercy to the unprepared.");
-    ShamanLore.Duration = 13.0f;
-    DialogueDatabase.Add(ShamanLore);
-
-    FNarr_DialogueLine ShamanHealing;
-    ShamanHealing.SpeakerName = TEXT("Tribal Shaman");
-    ShamanHealing.CharacterType = ENarr_CharacterType::TribalShaman;
-    ShamanLore.Context = ENarr_DialogueContext::Trading;
-    ShamanHealing.DialogueText = TEXT("These healing herbs will mend your wounds and restore your strength. But use them wisely - they grow only in the most dangerous places, where the great beasts roam.");
-    ShamanHealing.Duration = 10.0f;
-    DialogueDatabase.Add(ShamanHealing);
-}
-
-void UNarr_DialogueManager::CreateTribalGuideDialogues()
-{
-    FNarr_DialogueLine GuideWater;
-    GuideWater.SpeakerName = TEXT("Tribal Guide");
-    GuideWater.CharacterType = ENarr_CharacterType::TribalGuide;
-    GuideWater.Context = ENarr_DialogueContext::Information;
-    GuideWater.DialogueText = TEXT("Fresh water flows from the northern springs, but beware the giant crocodiles that lurk beneath the surface. Fill your waterskins quickly and quietly.");
-    GuideWater.Duration = 9.0f;
-    DialogueDatabase.Add(GuideWater);
-
-    FNarr_DialogueLine GuidePath;
-    GuidePath.SpeakerName = TEXT("Tribal Guide");
-    GuidePath.CharacterType = ENarr_CharacterType::TribalGuide;
-    GuidePath.Context = ENarr_DialogueContext::QuestProgress;
-    GuidePath.DialogueText = TEXT("Follow the river south until you reach the great fallen tree. From there, head east toward the smoking mountain. That path will lead you to the hunting grounds.");
-    GuidePath.Duration = 11.0f;
-    DialogueDatabase.Add(GuidePath);
-}
-
-void UNarr_DialogueManager::CreateSurvivalStoryBeats()
-{
-    FNarr_StoryBeat IntroductionBeat;
-    IntroductionBeat.BeatID = TEXT("introduction");
-    IntroductionBeat.Title = TEXT("Arrival in the Prehistoric World");
-    IntroductionBeat.Description = TEXT("The player awakens in a dangerous prehistoric world and must learn to survive among the dinosaurs.");
-    IntroductionBeat.bIsCompleted = false;
+    // Tribal Elder Welcome Sequence
+    FNarr_DialogueSequence ElderWelcome;
+    ElderWelcome.SequenceID = "TribalElder_Welcome";
+    ElderWelcome.bIsRepeatable = false;
     
-    FNarr_DialogueLine IntroDialogue;
-    IntroDialogue.SpeakerName = TEXT("Narrator");
-    IntroDialogue.CharacterType = ENarr_CharacterType::Survivor;
-    IntroDialogue.Context = ENarr_DialogueContext::Information;
-    IntroDialogue.DialogueText = TEXT("You awaken on unfamiliar ground. The air is thick and humid, filled with sounds you've never heard before. In the distance, massive shapes move through the mist. This is not your world.");
-    IntroDialogue.Duration = 15.0f;
-    IntroductionBeat.DialogueLines.Add(IntroDialogue);
+    FNarr_DialogueLine ElderLine1;
+    ElderLine1.DialogueText = FText::FromString("Welcome, survivor. The tribal camp needs your help. Our hunters have not returned from the eastern plains.");
+    ElderLine1.SpeakerType = ENarr_CharacterType::TribalElder;
+    ElderLine1.Context = ENarr_DialogueContext::FirstMeeting;
+    ElderLine1.DisplayDuration = 6.0f;
+    ElderLine1.PlayerResponses.Add(FText::FromString("What happened to the hunters?"));
+    ElderLine1.PlayerResponses.Add(FText::FromString("I'll help if I can."));
+    ElderWelcome.DialogueLines.Add(ElderLine1);
     
-    StoryBeats.Add(IntroductionBeat);
+    FNarr_DialogueLine ElderLine2;
+    ElderLine2.DialogueText = FText::FromString("The gathering parties report strange sounds from the forest. Will you join us in our time of need?");
+    ElderLine2.SpeakerType = ENarr_CharacterType::TribalElder;
+    ElderLine2.Context = ENarr_DialogueContext::QuestGiving;
+    ElderLine2.DisplayDuration = 5.0f;
+    ElderLine2.PlayerResponses.Add(FText::FromString("Yes, I'll investigate."));
+    ElderLine2.PlayerResponses.Add(FText::FromString("I need to prepare first."));
+    ElderWelcome.DialogueLines.Add(ElderLine2);
+    
+    RegisterDialogueSequence(ElderWelcome);
 
-    FNarr_StoryBeat FirstEncounterBeat;
-    FirstEncounterBeat.BeatID = TEXT("first_encounter");
-    FirstEncounterBeat.Title = TEXT("First Dinosaur Encounter");
-    FirstEncounterBeat.Description = TEXT("The player encounters their first dinosaur and learns about the dangers of this world.");
-    FirstEncounterBeat.RequiredQuests.Add(TEXT("survival_10min"));
-    FirstEncounterBeat.bIsCompleted = false;
-    StoryBeats.Add(FirstEncounterBeat);
+    // Scout Warning Sequence
+    FNarr_DialogueSequence ScoutWarning;
+    ScoutWarning.SequenceID = "TribalScout_Warning";
+    ScoutWarning.bIsRepeatable = true;
+    
+    FNarr_DialogueLine ScoutLine1;
+    ScoutLine1.DialogueText = FText::FromString("Pack hunters spotted near the eastern cliffs! Three, maybe four raptors moving in formation.");
+    ScoutLine1.SpeakerType = ENarr_CharacterType::TribalScout;
+    ScoutLine1.Context = ENarr_DialogueContext::Warning;
+    ScoutLine1.DisplayDuration = 5.0f;
+    ScoutLine1.PlayerResponses.Add(FText::FromString("How dangerous are they?"));
+    ScoutLine1.PlayerResponses.Add(FText::FromString("Thanks for the warning."));
+    ScoutWarning.DialogueLines.Add(ScoutLine1);
+    
+    FNarr_DialogueLine ScoutLine2;
+    ScoutLine2.DialogueText = FText::FromString("They hunt as one mind, one deadly purpose. Stay low, move quiet, and never turn your back on them.");
+    ScoutLine2.SpeakerType = ENarr_CharacterType::TribalScout;
+    ScoutLine2.Context = ENarr_DialogueContext::Teaching;
+    ScoutLine2.DisplayDuration = 5.0f;
+    ScoutWarning.DialogueLines.Add(ScoutLine2);
+    
+    RegisterDialogueSequence(ScoutWarning);
 
-    FNarr_StoryBeat TribalContactBeat;
-    TribalContactBeat.BeatID = TEXT("tribal_contact");
-    TribalContactBeat.Title = TEXT("Meeting the Tribe");
-    TribalContactBeat.Description = TEXT("The player makes contact with a primitive human tribe and begins to learn their ways.");
-    TribalContactBeat.RequiredQuests.Add(TEXT("hunt_raptor"));
-    TribalContactBeat.bIsCompleted = false;
-    StoryBeats.Add(TribalContactBeat);
+    // Shaman Lore Sequence
+    FNarr_DialogueSequence ShamanLore;
+    ShamanLore.SequenceID = "TribalShaman_Lore";
+    ShamanLore.bIsRepeatable = true;
+    
+    FNarr_DialogueLine ShamanLine1;
+    ShamanLine1.DialogueText = FText::FromString("The bones tell stories. This skull belonged to a young Thunder Walker, killed by claw marks deep in the bone.");
+    ShamanLine1.SpeakerType = ENarr_CharacterType::TribalShaman;
+    ShamanLine1.Context = ENarr_DialogueContext::Teaching;
+    ShamanLine1.DisplayDuration = 6.0f;
+    ShamanLine1.PlayerResponses.Add(FText::FromString("What killed it?"));
+    ShamanLine1.PlayerResponses.Add(FText::FromString("How can you tell?"));
+    ShamanLore.DialogueLines.Add(ShamanLine1);
+    
+    FNarr_DialogueLine ShamanLine2;
+    ShamanLine2.DialogueText = FText::FromString("The pack that did this... they are still out there, still hunting. We must be ready.");
+    ShamanLine2.SpeakerType = ENarr_CharacterType::TribalShaman;
+    ShamanLine2.Context = ENarr_DialogueContext::Warning;
+    ShamanLine2.DisplayDuration = 4.0f;
+    ShamanLore.DialogueLines.Add(ShamanLine2);
+    
+    RegisterDialogueSequence(ShamanLore);
+
+    UE_LOG(LogTemp, Warning, TEXT("Initialized %d default dialogue sequences"), DialogueSequences.Num());
+}
+
+void UNarr_DialogueManager::InitializeCharacterVoices()
+{
+    // Register voice URLs from generated audio
+    RegisterCharacterVoice(ENarr_CharacterType::TribalElder, "Welcome", 
+        "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1778766459096_TribalElder.mp3");
+    
+    RegisterCharacterVoice(ENarr_CharacterType::TribalScout, "Warning", 
+        "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1778766538780_TribalScout.mp3");
+    
+    RegisterCharacterVoice(ENarr_CharacterType::TribalShaman, "Lore", 
+        "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1778766544296_TribalShaman.mp3");
+    
+    RegisterCharacterVoice(ENarr_CharacterType::TribalMentor, "Teaching", 
+        "https://thdlkizjbpwdndtggleb.supabase.co/storage/v1/object/public/game-assets/tts/1778766549466_TribalMentor.mp3");
+
+    UE_LOG(LogTemp, Warning, TEXT("Initialized character voice mappings"));
+}
+
+FString UNarr_DialogueManager::GenerateVoiceKey(ENarr_CharacterType CharacterType, const FString& DialogueKey)
+{
+    FString CharacterName;
+    switch (CharacterType)
+    {
+        case ENarr_CharacterType::TribalElder:
+            CharacterName = "TribalElder";
+            break;
+        case ENarr_CharacterType::TribalScout:
+            CharacterName = "TribalScout";
+            break;
+        case ENarr_CharacterType::TribalShaman:
+            CharacterName = "TribalShaman";
+            break;
+        case ENarr_CharacterType::TribalMentor:
+            CharacterName = "TribalMentor";
+            break;
+        case ENarr_CharacterType::TribalHunter:
+            CharacterName = "TribalHunter";
+            break;
+        case ENarr_CharacterType::TribalCrafter:
+            CharacterName = "TribalCrafter";
+            break;
+        default:
+            CharacterName = "Unknown";
+            break;
+    }
+    
+    return FString::Printf(TEXT("%s_%s"), *CharacterName, *DialogueKey);
 }
