@@ -1,265 +1,359 @@
 #include "Combat_DamageSystem.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "GameFramework/Actor.h"
-#include "Components/SphereComponent.h"
-#include "Components/StaticMeshComponent.h"
-#include "Engine/TriggerSphere.h"
-#include "../Characters/TranspersonalCharacter.h"
-#include "Kismet/GameplayStatics.h"
+#include "TimerManager.h"
+#include "GameFramework/Character.h"
+#include "Components/PrimitiveComponent.h"
 
 UCombat_DamageSystem::UCombat_DamageSystem()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f; // Check damage every 100ms
+    PrimaryComponentTick.TickInterval = 0.1f; // Tick 10 times per second for status effects
     
-    // Default damage values
-    BaseDamagePerSecond = 10.0f;
-    DamageRadius = 300.0f;
-    bIsActive = true;
-    bCanDealDamage = true;
+    MaxHealth = 100.0f;
+    CurrentHealth = MaxHealth;
+    HealthRegenRate = 1.0f;
+    HealthRegenDelay = 5.0f;
     
-    // Damage scaling by dinosaur type
-    TRexDamageMultiplier = 3.0f;
-    RaptorDamageMultiplier = 1.5f;
-    BrachiosaurusDamageMultiplier = 0.5f; // Herbivore, less aggressive
+    bIsBleeding = false;
+    bIsPoisoned = false;
+    bIsOnFire = false;
+    bIsDead = false;
     
     LastDamageTime = 0.0f;
-    DamageCooldown = 1.0f; // 1 second between damage applications
+    BleedingTimer = 0.0f;
+    BleedingDPS = 0.0f;
+    PoisonTimer = 0.0f;
+    PoisonDPS = 0.0f;
+    BurningTimer = 0.0f;
+    BurningDPS = 0.0f;
 }
 
 void UCombat_DamageSystem::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Initialize damage system
-    SetupDamageTrigger();
+    CurrentHealth = MaxHealth;
+    LastDamageTime = GetWorld()->GetTimeSeconds();
     
-    // Determine dinosaur type from owner name
-    if (AActor* Owner = GetOwner())
-    {
-        FString OwnerName = Owner->GetName().ToLower();
-        
-        if (OwnerName.Contains(TEXT("rex")))
-        {
-            DinosaurType = ECombat_DinosaurType::TRex;
-            DamageRadius = 500.0f;
-            BaseDamagePerSecond = BaseDamagePerSecond * TRexDamageMultiplier;
-        }
-        else if (OwnerName.Contains(TEXT("raptor")))
-        {
-            DinosaurType = ECombat_DinosaurType::Raptor;
-            DamageRadius = 300.0f;
-            BaseDamagePerSecond = BaseDamagePerSecond * RaptorDamageMultiplier;
-        }
-        else if (OwnerName.Contains(TEXT("brachio")))
-        {
-            DinosaurType = ECombat_DinosaurType::Brachiosaurus;
-            DamageRadius = 400.0f;
-            BaseDamagePerSecond = BaseDamagePerSecond * BrachiosaurusDamageMultiplier;
-        }
-        else
-        {
-            DinosaurType = ECombat_DinosaurType::Generic;
-        }
-        
-        UE_LOG(LogTemp, Warning, TEXT("Combat_DamageSystem: Initialized for %s with damage %.1f"), 
-               *Owner->GetName(), BaseDamagePerSecond);
-    }
+    UE_LOG(LogTemp, Log, TEXT("Combat_DamageSystem initialized for %s with %f max health"), 
+           *GetOwner()->GetName(), MaxHealth);
 }
 
 void UCombat_DamageSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    if (!bIsActive || !bCanDealDamage)
+    if (bIsDead)
     {
         return;
     }
     
-    // Check for nearby players and apply damage
-    CheckAndApplyDamage(DeltaTime);
+    ProcessStatusEffects(DeltaTime);
+    ProcessHealthRegeneration(DeltaTime);
 }
 
-void UCombat_DamageSystem::SetupDamageTrigger()
+float UCombat_DamageSystem::TakeDamage(const FCombat_DamageInfo& DamageInfo)
 {
-    if (!GetOwner())
+    if (bIsDead)
     {
-        return;
+        return 0.0f;
     }
     
-    // Create a sphere trigger component for damage detection
-    DamageTrigger = NewObject<USphereComponent>(GetOwner(), TEXT("DamageTrigger"));
-    if (DamageTrigger)
+    float FinalDamage = CalculateFinalDamage(DamageInfo);
+    
+    CurrentHealth = FMath::Max(0.0f, CurrentHealth - FinalDamage);
+    LastDamageTime = GetWorld()->GetTimeSeconds();
+    
+    // Broadcast events
+    OnDamageTaken.Broadcast(FinalDamage, DamageInfo);
+    OnHealthChanged.Broadcast(CurrentHealth);
+    
+    // Check for death
+    if (CurrentHealth <= 0.0f && !bIsDead)
     {
-        DamageTrigger->SetSphereRadius(DamageRadius);
-        DamageTrigger->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-        DamageTrigger->SetCollisionResponseToAllChannels(ECR_Ignore);
-        DamageTrigger->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
-        
-        // Attach to owner's root component
-        if (USceneComponent* RootComp = GetOwner()->GetRootComponent())
-        {
-            DamageTrigger->AttachToComponent(RootComp, FAttachmentTransformRules::KeepWorldTransform);
-        }
-        
-        // Bind overlap events
-        DamageTrigger->OnComponentBeginOverlap.AddDynamic(this, &UCombat_DamageSystem::OnDamageTriggerBeginOverlap);
-        DamageTrigger->OnComponentEndOverlap.AddDynamic(this, &UCombat_DamageSystem::OnDamageTriggerEndOverlap);
-        
-        UE_LOG(LogTemp, Log, TEXT("Combat_DamageSystem: Damage trigger created with radius %.1f"), DamageRadius);
-    }
-}
-
-void UCombat_DamageSystem::CheckAndApplyDamage(float DeltaTime)
-{
-    if (!GetOwner() || !GetWorld())
-    {
-        return;
+        Die();
     }
     
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-    
-    // Check cooldown
-    if (CurrentTime - LastDamageTime < DamageCooldown)
+    // Apply status effects based on damage type
+    switch (DamageInfo.DamageType)
     {
-        return;
-    }
-    
-    // Find all players within damage radius
-    TArray<AActor*> OverlappingActors;
-    if (DamageTrigger)
-    {
-        DamageTrigger->GetOverlappingActors(OverlappingActors, ATranspersonalCharacter::StaticClass());
-    }
-    
-    for (AActor* Actor : OverlappingActors)
-    {
-        if (ATranspersonalCharacter* Player = Cast<ATranspersonalCharacter>(Actor))
-        {
-            ApplyDamageToPlayer(Player, DeltaTime);
-            LastDamageTime = CurrentTime;
-        }
-    }
-}
-
-void UCombat_DamageSystem::ApplyDamageToPlayer(ATranspersonalCharacter* Player, float DeltaTime)
-{
-    if (!Player || !GetOwner())
-    {
-        return;
-    }
-    
-    // Calculate distance-based damage
-    float Distance = FVector::Dist(GetOwner()->GetActorLocation(), Player->GetActorLocation());
-    float DamageMultiplier = FMath::Clamp(1.0f - (Distance / DamageRadius), 0.1f, 1.0f);
-    
-    float FinalDamage = BaseDamagePerSecond * DamageMultiplier * DamageCooldown;
-    
-    // Apply damage
-    Player->TakeDamage(FinalDamage, FDamageEvent(), nullptr, GetOwner());
-    
-    // Increase fear based on dinosaur type
-    float FearIncrease = 0.0f;
-    switch (DinosaurType)
-    {
-        case ECombat_DinosaurType::TRex:
-            FearIncrease = 25.0f;
+        case EDamageType::Bleeding:
+            ApplyBleeding(3.0f, FinalDamage * 0.1f);
             break;
-        case ECombat_DinosaurType::Raptor:
-            FearIncrease = 15.0f;
+        case EDamageType::Poison:
+            ApplyPoison(5.0f, FinalDamage * 0.05f);
             break;
-        case ECombat_DinosaurType::Brachiosaurus:
-            FearIncrease = 5.0f;
+        case EDamageType::Fire:
+            ApplyBurning(4.0f, FinalDamage * 0.15f);
             break;
         default:
-            FearIncrease = 10.0f;
             break;
     }
     
-    // Apply fear (assuming TranspersonalCharacter has fear system)
-    // Player->ModifyFear(FearIncrease);
+    UE_LOG(LogTemp, Warning, TEXT("%s took %f damage from %s. Health: %f/%f"), 
+           *GetOwner()->GetName(), FinalDamage, 
+           DamageInfo.DamageSource ? *DamageInfo.DamageSource->GetName() : TEXT("Unknown"),
+           CurrentHealth, MaxHealth);
     
-    UE_LOG(LogTemp, Warning, TEXT("Combat_DamageSystem: Applied %.1f damage to %s (distance: %.1f)"), 
-           FinalDamage, *Player->GetName(), Distance);
-    
-    // Broadcast damage event
-    OnDamageApplied.Broadcast(Player, FinalDamage, GetOwner());
+    return FinalDamage;
 }
 
-void UCombat_DamageSystem::OnDamageTriggerBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
+void UCombat_DamageSystem::DealDamageToTarget(AActor* Target, const FCombat_DamageInfo& DamageInfo)
 {
-    if (ATranspersonalCharacter* Player = Cast<ATranspersonalCharacter>(OtherActor))
+    if (!Target)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Combat_DamageSystem: Player entered danger zone of %s"), 
-               GetOwner() ? *GetOwner()->GetName() : TEXT("Unknown"));
+        return;
+    }
+    
+    UCombat_DamageSystem* TargetDamageSystem = Target->FindComponentByClass<UCombat_DamageSystem>();
+    if (TargetDamageSystem)
+    {
+        float DamageDealt = TargetDamageSystem->TakeDamage(DamageInfo);
+        OnDamageDealt.Broadcast(Target, DamageInfo);
         
-        // Broadcast player entered danger zone
-        OnPlayerEnteredDangerZone.Broadcast(Player, GetOwner());
+        UE_LOG(LogTemp, Log, TEXT("%s dealt %f damage to %s"), 
+               *GetOwner()->GetName(), DamageDealt, *Target->GetName());
     }
 }
 
-void UCombat_DamageSystem::OnDamageTriggerEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
+void UCombat_DamageSystem::Heal(float HealAmount)
 {
-    if (ATranspersonalCharacter* Player = Cast<ATranspersonalCharacter>(OtherActor))
+    if (bIsDead)
     {
-        UE_LOG(LogTemp, Log, TEXT("Combat_DamageSystem: Player left danger zone of %s"), 
-               GetOwner() ? *GetOwner()->GetName() : TEXT("Unknown"));
+        return;
+    }
+    
+    float OldHealth = CurrentHealth;
+    CurrentHealth = FMath::Min(MaxHealth, CurrentHealth + HealAmount);
+    
+    if (CurrentHealth != OldHealth)
+    {
+        OnHealthChanged.Broadcast(CurrentHealth);
         
-        // Broadcast player left danger zone
-        OnPlayerLeftDangerZone.Broadcast(Player, GetOwner());
+        UE_LOG(LogTemp, Log, TEXT("%s healed for %f. Health: %f/%f"), 
+               *GetOwner()->GetName(), HealAmount, CurrentHealth, MaxHealth);
     }
 }
 
-void UCombat_DamageSystem::SetDamageActive(bool bActive)
+void UCombat_DamageSystem::SetMaxHealth(float NewMaxHealth)
 {
-    bIsActive = bActive;
-    bCanDealDamage = bActive;
+    float HealthRatio = MaxHealth > 0.0f ? CurrentHealth / MaxHealth : 1.0f;
+    MaxHealth = FMath::Max(1.0f, NewMaxHealth);
+    CurrentHealth = MaxHealth * HealthRatio;
     
-    if (DamageTrigger)
+    OnHealthChanged.Broadcast(CurrentHealth);
+}
+
+float UCombat_DamageSystem::GetHealthPercentage() const
+{
+    return MaxHealth > 0.0f ? CurrentHealth / MaxHealth : 0.0f;
+}
+
+bool UCombat_DamageSystem::IsAlive() const
+{
+    return !bIsDead && CurrentHealth > 0.0f;
+}
+
+void UCombat_DamageSystem::ApplyBleeding(float Duration, float DamagePerSecond)
+{
+    bIsBleeding = true;
+    BleedingTimer = Duration;
+    BleedingDPS = DamagePerSecond;
+    
+    UE_LOG(LogTemp, Warning, TEXT("%s is bleeding! %f DPS for %f seconds"), 
+           *GetOwner()->GetName(), DamagePerSecond, Duration);
+}
+
+void UCombat_DamageSystem::ApplyPoison(float Duration, float DamagePerSecond)
+{
+    bIsPoisoned = true;
+    PoisonTimer = Duration;
+    PoisonDPS = DamagePerSecond;
+    
+    UE_LOG(LogTemp, Warning, TEXT("%s is poisoned! %f DPS for %f seconds"), 
+           *GetOwner()->GetName(), DamagePerSecond, Duration);
+}
+
+void UCombat_DamageSystem::ApplyBurning(float Duration, float DamagePerSecond)
+{
+    bIsOnFire = true;
+    BurningTimer = Duration;
+    BurningDPS = DamagePerSecond;
+    
+    UE_LOG(LogTemp, Warning, TEXT("%s is burning! %f DPS for %f seconds"), 
+           *GetOwner()->GetName(), DamagePerSecond, Duration);
+}
+
+void UCombat_DamageSystem::ClearAllStatusEffects()
+{
+    bIsBleeding = false;
+    bIsPoisoned = false;
+    bIsOnFire = false;
+    BleedingTimer = 0.0f;
+    PoisonTimer = 0.0f;
+    BurningTimer = 0.0f;
+    
+    UE_LOG(LogTemp, Log, TEXT("%s cleared all status effects"), *GetOwner()->GetName());
+}
+
+float UCombat_DamageSystem::CalculateDamageReduction(EDamageType DamageType) const
+{
+    switch (DamageType)
     {
-        DamageTrigger->SetCollisionEnabled(bActive ? ECollisionEnabled::QueryOnly : ECollisionEnabled::NoCollision);
+        case EDamageType::Physical:
+            return ResistanceData.PhysicalResistance;
+        case EDamageType::Fire:
+            return ResistanceData.FireResistance;
+        case EDamageType::Poison:
+            return ResistanceData.PoisonResistance;
+        case EDamageType::Bleeding:
+            return ResistanceData.BleedingResistance;
+        default:
+            return 0.0f;
     }
-    
-    UE_LOG(LogTemp, Log, TEXT("Combat_DamageSystem: Damage system %s"), 
-           bActive ? TEXT("activated") : TEXT("deactivated"));
 }
 
-void UCombat_DamageSystem::SetDamageRadius(float NewRadius)
+void UCombat_DamageSystem::ModifyResistance(EDamageType DamageType, float ResistanceChange)
 {
-    DamageRadius = FMath::Clamp(NewRadius, 50.0f, 1000.0f);
-    
-    if (DamageTrigger)
+    switch (DamageType)
     {
-        DamageTrigger->SetSphereRadius(DamageRadius);
+        case EDamageType::Physical:
+            ResistanceData.PhysicalResistance = FMath::Clamp(ResistanceData.PhysicalResistance + ResistanceChange, 0.0f, 0.95f);
+            break;
+        case EDamageType::Fire:
+            ResistanceData.FireResistance = FMath::Clamp(ResistanceData.FireResistance + ResistanceChange, 0.0f, 0.95f);
+            break;
+        case EDamageType::Poison:
+            ResistanceData.PoisonResistance = FMath::Clamp(ResistanceData.PoisonResistance + ResistanceChange, 0.0f, 0.95f);
+            break;
+        case EDamageType::Bleeding:
+            ResistanceData.BleedingResistance = FMath::Clamp(ResistanceData.BleedingResistance + ResistanceChange, 0.0f, 0.95f);
+            break;
     }
-    
-    UE_LOG(LogTemp, Log, TEXT("Combat_DamageSystem: Damage radius set to %.1f"), DamageRadius);
 }
 
-void UCombat_DamageSystem::SetBaseDamage(float NewDamage)
+void UCombat_DamageSystem::ProcessStatusEffects(float DeltaTime)
 {
-    BaseDamagePerSecond = FMath::Clamp(NewDamage, 1.0f, 100.0f);
-    UE_LOG(LogTemp, Log, TEXT("Combat_DamageSystem: Base damage set to %.1f"), BaseDamagePerSecond);
-}
-
-float UCombat_DamageSystem::GetDamageRadius() const
-{
-    return DamageRadius;
-}
-
-float UCombat_DamageSystem::GetBaseDamage() const
-{
-    return BaseDamagePerSecond;
-}
-
-bool UCombat_DamageSystem::IsPlayerInDangerZone(ATranspersonalCharacter* Player) const
-{
-    if (!Player || !GetOwner())
+    // Process bleeding
+    if (bIsBleeding && BleedingTimer > 0.0f)
     {
-        return false;
+        BleedingTimer -= DeltaTime;
+        
+        FCombat_DamageInfo BleedDamage;
+        BleedDamage.BaseDamage = BleedingDPS * DeltaTime;
+        BleedDamage.DamageType = EDamageType::Bleeding;
+        BleedDamage.DamageSource = GetOwner();
+        
+        TakeDamage(BleedDamage);
+        
+        if (BleedingTimer <= 0.0f)
+        {
+            bIsBleeding = false;
+            UE_LOG(LogTemp, Log, TEXT("%s stopped bleeding"), *GetOwner()->GetName());
+        }
     }
     
-    float Distance = FVector::Dist(GetOwner()->GetActorLocation(), Player->GetActorLocation());
-    return Distance <= DamageRadius;
+    // Process poison
+    if (bIsPoisoned && PoisonTimer > 0.0f)
+    {
+        PoisonTimer -= DeltaTime;
+        
+        FCombat_DamageInfo PoisonDamage;
+        PoisonDamage.BaseDamage = PoisonDPS * DeltaTime;
+        PoisonDamage.DamageType = EDamageType::Poison;
+        PoisonDamage.DamageSource = GetOwner();
+        
+        TakeDamage(PoisonDamage);
+        
+        if (PoisonTimer <= 0.0f)
+        {
+            bIsPoisoned = false;
+            UE_LOG(LogTemp, Log, TEXT("%s recovered from poison"), *GetOwner()->GetName());
+        }
+    }
+    
+    // Process burning
+    if (bIsOnFire && BurningTimer > 0.0f)
+    {
+        BurningTimer -= DeltaTime;
+        
+        FCombat_DamageInfo BurnDamage;
+        BurnDamage.BaseDamage = BurningDPS * DeltaTime;
+        BurnDamage.DamageType = EDamageType::Fire;
+        BurnDamage.DamageSource = GetOwner();
+        
+        TakeDamage(BurnDamage);
+        
+        if (BurningTimer <= 0.0f)
+        {
+            bIsOnFire = false;
+            UE_LOG(LogTemp, Log, TEXT("%s stopped burning"), *GetOwner()->GetName());
+        }
+    }
+}
+
+void UCombat_DamageSystem::ProcessHealthRegeneration(float DeltaTime)
+{
+    if (CurrentHealth < MaxHealth && HealthRegenRate > 0.0f)
+    {
+        float TimeSinceLastDamage = GetWorld()->GetTimeSeconds() - LastDamageTime;
+        
+        if (TimeSinceLastDamage >= HealthRegenDelay)
+        {
+            Heal(HealthRegenRate * DeltaTime);
+        }
+    }
+}
+
+void UCombat_DamageSystem::Die()
+{
+    if (bIsDead)
+    {
+        return;
+    }
+    
+    bIsDead = true;
+    CurrentHealth = 0.0f;
+    
+    // Clear all status effects on death
+    ClearAllStatusEffects();
+    
+    // Broadcast death event
+    OnDeath.Broadcast();
+    
+    UE_LOG(LogTemp, Warning, TEXT("%s has died!"), *GetOwner()->GetName());
+    
+    // Disable collision and physics for the actor
+    if (APawn* OwnerPawn = Cast<APawn>(GetOwner()))
+    {
+        OwnerPawn->SetActorEnableCollision(false);
+        
+        if (UPrimitiveComponent* RootComp = Cast<UPrimitiveComponent>(OwnerPawn->GetRootComponent()))
+        {
+            RootComp->SetSimulatePhysics(false);
+        }
+    }
+}
+
+float UCombat_DamageSystem::CalculateFinalDamage(const FCombat_DamageInfo& DamageInfo) const
+{
+    float BaseDamage = DamageInfo.BaseDamage;
+    
+    // Apply critical hit multiplier
+    if (DamageInfo.bIsCriticalHit || ShouldBeCriticalHit(DamageInfo))
+    {
+        BaseDamage *= DamageInfo.CriticalMultiplier;
+    }
+    
+    // Apply resistance
+    float Resistance = CalculateDamageReduction(DamageInfo.DamageType);
+    float FinalDamage = BaseDamage * (1.0f - Resistance);
+    
+    return FMath::Max(0.0f, FinalDamage);
+}
+
+bool UCombat_DamageSystem::ShouldBeCriticalHit(const FCombat_DamageInfo& DamageInfo) const
+{
+    // 5% base critical hit chance
+    return FMath::RandRange(0.0f, 1.0f) <= 0.05f;
 }
