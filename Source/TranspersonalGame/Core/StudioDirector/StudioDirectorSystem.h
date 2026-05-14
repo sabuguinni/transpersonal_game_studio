@@ -1,162 +1,161 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/GameInstanceSubsystem.h"
 #include "Engine/World.h"
-#include "GameFramework/Actor.h"
+#include "GameFramework/GameModeBase.h"
 #include "Components/ActorComponent.h"
 #include "StudioDirectorSystem.generated.h"
 
-UENUM(BlueprintType)
-enum class EDir_AgentStatus : uint8
-{
-    Idle,
-    Working,
-    Completed,
-    Failed,
-    Blocked
-};
-
-UENUM(BlueprintType)
-enum class EDir_SystemPriority : uint8
-{
-    Critical,
-    High,
-    Medium,
-    Low
-};
+/**
+ * Studio Director System - Coordinates all game systems and agent outputs
+ * Manages the integration of 19 specialized agent outputs into cohesive gameplay
+ */
 
 USTRUCT(BlueprintType)
-struct FDir_AgentInfo
+struct FDir_AgentStatus
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Agent")
+    UPROPERTY(BlueprintReadOnly, Category = "Agent Status")
     FString AgentName;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Agent")
-    int32 AgentID;
+    UPROPERTY(BlueprintReadOnly, Category = "Agent Status")
+    bool bIsActive;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Agent")
-    EDir_AgentStatus Status;
+    UPROPERTY(BlueprintReadOnly, Category = "Agent Status")
+    float LastUpdateTime;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Agent")
+    UPROPERTY(BlueprintReadOnly, Category = "Agent Status")
     FString CurrentTask;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Agent")
-    float ProgressPercent;
+    UPROPERTY(BlueprintReadOnly, Category = "Agent Status")
+    int32 CompletedCycles;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Agent")
-    FDateTime LastUpdate;
-
-    FDir_AgentInfo()
+    FDir_AgentStatus()
     {
-        AgentName = TEXT("");
-        AgentID = 0;
-        Status = EDir_AgentStatus::Idle;
-        CurrentTask = TEXT("");
-        ProgressPercent = 0.0f;
-        LastUpdate = FDateTime::Now();
+        AgentName = TEXT("Unknown");
+        bIsActive = false;
+        LastUpdateTime = 0.0f;
+        CurrentTask = TEXT("Idle");
+        CompletedCycles = 0;
     }
 };
 
 USTRUCT(BlueprintType)
-struct FDir_SystemMetrics
+struct FDir_BiomeCoordination
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
-    int32 TotalActors;
+    UPROPERTY(BlueprintReadOnly, Category = "Biome")
+    FString BiomeName;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
-    int32 CharacterActors;
+    UPROPERTY(BlueprintReadOnly, Category = "Biome")
+    FVector CenterLocation;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
-    int32 DinosaurActors;
+    UPROPERTY(BlueprintReadOnly, Category = "Biome")
+    float Radius;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
-    int32 EnvironmentActors;
+    UPROPERTY(BlueprintReadOnly, Category = "Biome")
+    TArray<FString> AssignedAgents;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
-    float FrameRate;
+    UPROPERTY(BlueprintReadOnly, Category = "Biome")
+    bool bIsReady;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
-    float MemoryUsageMB;
-
-    FDir_SystemMetrics()
+    FDir_BiomeCoordination()
     {
-        TotalActors = 0;
-        CharacterActors = 0;
-        DinosaurActors = 0;
-        EnvironmentActors = 0;
-        FrameRate = 0.0f;
-        MemoryUsageMB = 0.0f;
+        BiomeName = TEXT("Unknown");
+        CenterLocation = FVector::ZeroVector;
+        Radius = 5000.0f;
+        bIsReady = false;
     }
 };
 
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UStudioDirectorSystem : public UGameInstanceSubsystem
+class TRANSPERSONALGAME_API UStudioDirectorComponent : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    UStudioDirectorSystem();
+    UStudioDirectorComponent();
 
-    // USubsystem interface
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
+protected:
+    virtual void BeginPlay() override;
+
+public:
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
     // Agent Management
+    UPROPERTY(BlueprintReadOnly, Category = "Studio Director")
+    TArray<FDir_AgentStatus> AgentStatuses;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Studio Director")
+    TArray<FDir_BiomeCoordination> BiomeCoordinations;
+
+    // Core coordination functions
     UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    void RegisterAgent(int32 AgentID, const FString& AgentName);
-
-    UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    void UpdateAgentStatus(int32 AgentID, EDir_AgentStatus Status, const FString& Task, float Progress);
-
-    UFUNCTION(BlueprintPure, Category = "Studio Director")
-    FDir_AgentInfo GetAgentInfo(int32 AgentID) const;
-
-    UFUNCTION(BlueprintPure, Category = "Studio Director")
-    TArray<FDir_AgentInfo> GetAllAgents() const;
-
-    // System Monitoring
-    UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    void UpdateSystemMetrics();
-
-    UFUNCTION(BlueprintPure, Category = "Studio Director")
-    FDir_SystemMetrics GetSystemMetrics() const;
-
-    // Task Coordination
-    UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    void QueueTaskForAgent(int32 AgentID, const FString& TaskDescription, EDir_SystemPriority Priority);
+    void InitializeAgentCoordination();
 
     UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    void CompleteAgentTask(int32 AgentID, bool bSuccess);
+    void UpdateAgentStatus(const FString& AgentName, const FString& Task, bool bActive);
 
-    // Development Pipeline
     UFUNCTION(BlueprintCallable, Category = "Studio Director")
-    void InitializeMinPlayableMap();
+    void RegisterBiome(const FString& BiomeName, FVector Location, float BiomeRadius);
 
     UFUNCTION(BlueprintCallable, Category = "Studio Director")
     bool ValidateGameplayReadiness();
 
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Studio Director")
-    void RunSystemDiagnostics();
+    UFUNCTION(BlueprintCallable, Category = "Studio Director")
+    void CoordinateAgentTasks();
 
-protected:
-    UPROPERTY(BlueprintReadOnly, Category = "Studio Director")
-    TMap<int32, FDir_AgentInfo> RegisteredAgents;
+    // Asset pipeline coordination
+    UFUNCTION(BlueprintCallable, Category = "Studio Director")
+    void ValidateAssetPipeline();
 
-    UPROPERTY(BlueprintReadOnly, Category = "Studio Director")
-    FDir_SystemMetrics CurrentMetrics;
+    UFUNCTION(BlueprintCallable, Category = "Studio Director")
+    void CheckBiomeReadiness();
 
-    UPROPERTY(BlueprintReadOnly, Category = "Studio Director")
-    bool bSystemInitialized;
+    // Debug and monitoring
+    UFUNCTION(BlueprintCallable, Category = "Studio Director", CallInEditor)
+    void DebugPrintAgentStatuses();
+
+    UFUNCTION(BlueprintCallable, Category = "Studio Director", CallInEditor)
+    void ValidateMinPlayableMap();
 
 private:
-    void InitializeAgentChain();
-    void ValidateWorldState();
-    void CheckCriticalSystems();
+    // Internal coordination state
+    float LastCoordinationUpdate;
+    bool bSystemInitialized;
+
+    // Helper functions
+    void SetupDefaultAgents();
+    void SetupDefaultBiomes();
+    FDir_AgentStatus* FindAgentStatus(const FString& AgentName);
+    FDir_BiomeCoordination* FindBiome(const FString& BiomeName);
+};
+
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API AStudioDirectorActor : public AActor
+{
+    GENERATED_BODY()
+
+public:
+    AStudioDirectorActor();
+
+protected:
+    virtual void BeginPlay() override;
+
+public:
+    virtual void Tick(float DeltaTime) override;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Studio Director")
+    UStudioDirectorComponent* DirectorComponent;
+
+    // Command and control interface
+    UFUNCTION(BlueprintCallable, Category = "Studio Director")
+    void ExecuteAgentCoordination();
+
+    UFUNCTION(BlueprintCallable, Category = "Studio Director")
+    void MonitorGameplayState();
 };
 
 #include "StudioDirectorSystem.generated.h"
