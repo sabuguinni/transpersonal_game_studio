@@ -1,438 +1,390 @@
 #include "Quest_CrowdInteractionManager.h"
-#include "../CrowdSimulation/Crowd_PathfindingManager.h"
-#include "../Character/TranspersonalCharacter.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "DrawDebugHelpers.h"
+#include "Engine/Engine.h"
 #include "Kismet/GameplayStatics.h"
-#include "Components/PrimitiveComponent.h"
-#include "GameFramework/PlayerController.h"
+#include "TranspersonalCharacter.h"
+#include "Crowd/Crowd_MassSimulationManager.h"
 
 UQuest_CrowdInteractionManager::UQuest_CrowdInteractionManager()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f;
-    
-    ObjectiveCheckInterval = 1.0f;
-    MaxInfluenceDistance = 2000.0f;
-    MaxSimultaneousMissions = 5;
-    bEnableDebugVisualization = false;
-    
-    LastObjectiveCheck = 0.0f;
-    LastInfluenceUpdate = 0.0f;
-    
-    CrowdPathfindingManager = nullptr;
-    PlayerCharacter = nullptr;
+    MissionUpdateInterval = 1.0f;
+    MaxActiveMissions = 5;
 }
 
-void UQuest_CrowdInteractionManager::BeginPlay()
+void UQuest_CrowdInteractionManager::Initialize(FSubsystemCollectionBase& Collection)
 {
-    Super::BeginPlay();
+    Super::Initialize(Collection);
     
-    // Find crowd pathfinding manager
+    UE_LOG(LogTemp, Log, TEXT("Quest_CrowdInteractionManager initialized"));
+    
+    // Initialize default missions after a short delay
     if (UWorld* World = GetWorld())
     {
-        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-        {
-            if (UCrowd_PathfindingManager* FoundManager = ActorItr->FindComponentByClass<UCrowd_PathfindingManager>())
-            {
-                CrowdPathfindingManager = FoundManager;
-                break;
-            }
-        }
-        
-        // Find player character
-        if (APlayerController* PC = World->GetFirstPlayerController())
-        {
-            PlayerCharacter = Cast<ATranspersonalCharacter>(PC->GetPawn());
-        }
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Quest_CrowdInteractionManager initialized - CrowdManager: %s, Player: %s"), 
-           CrowdPathfindingManager ? TEXT("Found") : TEXT("Not Found"),
-           PlayerCharacter ? TEXT("Found") : TEXT("Not Found"));
-}
-
-void UQuest_CrowdInteractionManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
-{
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-    
-    // Update crowd objectives
-    if (CurrentTime - LastObjectiveCheck >= ObjectiveCheckInterval)
-    {
-        UpdateCrowdObjectives(DeltaTime);
-        LastObjectiveCheck = CurrentTime;
-    }
-    
-    // Update player influence
-    if (CurrentPlayerInfluence.bIsActive)
-    {
-        UpdatePlayerInfluence(DeltaTime);
-    }
-    
-    // Debug visualization
-    if (bEnableDebugVisualization)
-    {
-        DrawDebugInfo();
+        FTimerHandle TimerHandle;
+        World->GetTimerManager().SetTimer(TimerHandle, this, &UQuest_CrowdInteractionManager::InitializeDefaultMissions, 2.0f, false);
     }
 }
 
-void UQuest_CrowdInteractionManager::StartCrowdMission(const FString& MissionID, const TArray<FQuest_CrowdMissionObjective>& Objectives)
+void UQuest_CrowdInteractionManager::Deinitialize()
 {
-    if (ActiveCrowdMissions.Num() >= MaxSimultaneousMissions)
+    ActiveMissions.Empty();
+    CompletedMissions.Empty();
+    CrowdManagers.Empty();
+    
+    Super::Deinitialize();
+}
+
+bool UQuest_CrowdInteractionManager::StartTribalMission(const FString& MissionID)
+{
+    if (ActiveMissions.Num() >= MaxActiveMissions)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Cannot start mission %s - maximum concurrent missions reached"), *MissionID);
-        return;
+        UE_LOG(LogTemp, Warning, TEXT("Cannot start mission %s: Maximum active missions reached"), *MissionID);
+        return false;
     }
-    
-    if (ActiveCrowdMissions.Contains(MissionID))
+
+    // Check if mission is already active
+    for (const FQuest_TribalMission& Mission : ActiveMissions)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Mission %s is already active"), *MissionID);
-        return;
-    }
-    
-    ActiveCrowdMissions.Add(MissionID, Objectives);
-    MissionStartTimes.Add(MissionID, GetWorld()->GetTimeSeconds());
-    
-    UE_LOG(LogTemp, Log, TEXT("Started crowd mission: %s with %d objectives"), *MissionID, Objectives.Num());
-    
-    // Initialize crowd pathfinding for mission objectives
-    if (CrowdPathfindingManager)
-    {
-        for (const FQuest_CrowdMissionObjective& Objective : Objectives)
+        if (Mission.MissionID == MissionID)
         {
-            if (Objective.ObjectiveType == EQuestObjectiveType::Escort || 
-                Objective.ObjectiveType == EQuestObjectiveType::Gather)
-            {
-                CrowdPathfindingManager->AddPathfindingTarget(Objective.TargetLocation, Objective.CompletionRadius);
-            }
+            UE_LOG(LogTemp, Warning, TEXT("Mission %s is already active"), *MissionID);
+            return false;
         }
     }
+
+    // Find mission template and activate it
+    FQuest_TribalMission NewMission;
+    if (MissionID.Contains(TEXT("TribalCamp")))
+    {
+        NewMission = CreateTribalCampMission();
+    }
+    else if (MissionID.Contains(TEXT("HuntingParty")))
+    {
+        NewMission = CreateHuntingPartyMission();
+    }
+    else if (MissionID.Contains(TEXT("Gathering")))
+    {
+        NewMission = CreateGatheringMission();
+    }
+    else if (MissionID.Contains(TEXT("Watchtower")))
+    {
+        NewMission = CreateWatchtowerMission();
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("Unknown mission type: %s"), *MissionID);
+        return false;
+    }
+
+    NewMission.bIsActive = true;
+    NewMission.MissionStartTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+    
+    ActiveMissions.Add(NewMission);
+    
+    UE_LOG(LogTemp, Log, TEXT("Started tribal mission: %s"), *NewMission.MissionName);
+    return true;
 }
 
-void UQuest_CrowdInteractionManager::EndCrowdMission(const FString& MissionID, bool bSuccess)
+bool UQuest_CrowdInteractionManager::CompleteTribalMission(const FString& MissionID)
 {
-    if (!ActiveCrowdMissions.Contains(MissionID))
+    for (int32 i = 0; i < ActiveMissions.Num(); i++)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Cannot end mission %s - mission not found"), *MissionID);
-        return;
-    }
-    
-    ActiveCrowdMissions.Remove(MissionID);
-    MissionStartTimes.Remove(MissionID);
-    
-    UE_LOG(LogTemp, Log, TEXT("Ended crowd mission: %s (Success: %s)"), *MissionID, bSuccess ? TEXT("Yes") : TEXT("No"));
-    
-    // Clean up pathfinding targets
-    if (CrowdPathfindingManager)
-    {
-        CrowdPathfindingManager->ClearAllTargets();
-    }
-}
-
-bool UQuest_CrowdInteractionManager::IsCrowdMissionActive(const FString& MissionID) const
-{
-    return ActiveCrowdMissions.Contains(MissionID);
-}
-
-float UQuest_CrowdInteractionManager::GetCrowdMissionProgress(const FString& MissionID) const
-{
-    if (!ActiveCrowdMissions.Contains(MissionID))
-    {
-        return 0.0f;
-    }
-    
-    const TArray<FQuest_CrowdMissionObjective>& Objectives = ActiveCrowdMissions[MissionID];
-    if (Objectives.Num() == 0)
-    {
-        return 0.0f;
-    }
-    
-    int32 CompletedObjectives = 0;
-    for (const FQuest_CrowdMissionObjective& Objective : Objectives)
-    {
-        if (Objective.bIsCompleted)
+        if (ActiveMissions[i].MissionID == MissionID)
         {
-            CompletedObjectives++;
+            FQuest_TribalMission CompletedMission = ActiveMissions[i];
+            CompletedMission.bIsCompleted = true;
+            CompletedMission.bIsActive = false;
+            
+            CompletedMissions.Add(CompletedMission);
+            ActiveMissions.RemoveAt(i);
+            
+            NotifyMissionCompletion(CompletedMission);
+            
+            UE_LOG(LogTemp, Log, TEXT("Completed tribal mission: %s"), *CompletedMission.MissionName);
+            return true;
         }
     }
     
-    return static_cast<float>(CompletedObjectives) / static_cast<float>(Objectives.Num());
-}
-
-void UQuest_CrowdInteractionManager::SetPlayerCrowdInfluence(const FQuest_CrowdInfluenceData& InfluenceData)
-{
-    CurrentPlayerInfluence = InfluenceData;
-    CurrentPlayerInfluence.bIsActive = true;
-    
-    if (PlayerCharacter)
-    {
-        CurrentPlayerInfluence.InfluenceDirection = PlayerCharacter->GetActorLocation();
-    }
-    
-    OnCrowdInfluenceChanged.Broadcast(CurrentPlayerInfluence.InfluenceDirection, 
-                                     CurrentPlayerInfluence.InfluenceRadius, 
-                                     CurrentPlayerInfluence.InfluenceStrength);
-    
-    UE_LOG(LogTemp, Log, TEXT("Player crowd influence activated - Radius: %.1f, Strength: %.2f"), 
-           InfluenceData.InfluenceRadius, InfluenceData.InfluenceStrength);
-}
-
-void UQuest_CrowdInteractionManager::UpdatePlayerInfluenceLocation(FVector NewLocation)
-{
-    if (CurrentPlayerInfluence.bIsActive)
-    {
-        CurrentPlayerInfluence.InfluenceDirection = NewLocation;
-        OnCrowdInfluenceChanged.Broadcast(NewLocation, CurrentPlayerInfluence.InfluenceRadius, CurrentPlayerInfluence.InfluenceStrength);
-    }
-}
-
-void UQuest_CrowdInteractionManager::DisablePlayerCrowdInfluence()
-{
-    CurrentPlayerInfluence.bIsActive = false;
-    OnCrowdInfluenceChanged.Broadcast(FVector::ZeroVector, 0.0f, 0.0f);
-    UE_LOG(LogTemp, Log, TEXT("Player crowd influence disabled"));
-}
-
-void UQuest_CrowdInteractionManager::AddCrowdObjective(const FString& MissionID, const FQuest_CrowdMissionObjective& Objective)
-{
-    if (TArray<FQuest_CrowdMissionObjective>* Objectives = ActiveCrowdMissions.Find(MissionID))
-    {
-        Objectives->Add(Objective);
-        UE_LOG(LogTemp, Log, TEXT("Added objective %s to mission %s"), *Objective.ObjectiveID, *MissionID);
-    }
-}
-
-void UQuest_CrowdInteractionManager::RemoveCrowdObjective(const FString& MissionID, const FString& ObjectiveID)
-{
-    if (TArray<FQuest_CrowdMissionObjective>* Objectives = ActiveCrowdMissions.Find(MissionID))
-    {
-        Objectives->RemoveAll([&ObjectiveID](const FQuest_CrowdMissionObjective& Obj) {
-            return Obj.ObjectiveID == ObjectiveID;
-        });
-        UE_LOG(LogTemp, Log, TEXT("Removed objective %s from mission %s"), *ObjectiveID, *MissionID);
-    }
-}
-
-bool UQuest_CrowdInteractionManager::IsObjectiveCompleted(const FString& MissionID, const FString& ObjectiveID) const
-{
-    if (const TArray<FQuest_CrowdMissionObjective>* Objectives = ActiveCrowdMissions.Find(MissionID))
-    {
-        for (const FQuest_CrowdMissionObjective& Objective : *Objectives)
-        {
-            if (Objective.ObjectiveID == ObjectiveID)
-            {
-                return Objective.bIsCompleted;
-            }
-        }
-    }
+    UE_LOG(LogTemp, Warning, TEXT("Mission %s not found in active missions"), *MissionID);
     return false;
 }
 
-int32 UQuest_CrowdInteractionManager::GetCrowdCountInArea(FVector Center, float Radius) const
+void UQuest_CrowdInteractionManager::UpdateMissionProgress(const FString& MissionID, float DeltaTime)
 {
-    if (!CrowdPathfindingManager)
+    for (FQuest_TribalMission& Mission : ActiveMissions)
     {
-        return 0;
-    }
-    
-    // Use crowd pathfinding manager to get agent count in area
-    return CrowdPathfindingManager->GetAgentCountInRadius(Center, Radius);
-}
-
-TArray<FVector> UQuest_CrowdInteractionManager::GetCrowdPositionsInArea(FVector Center, float Radius) const
-{
-    TArray<FVector> Positions;
-    
-    if (CrowdPathfindingManager)
-    {
-        Positions = CrowdPathfindingManager->GetAgentPositionsInRadius(Center, Radius);
-    }
-    
-    return Positions;
-}
-
-void UQuest_CrowdInteractionManager::GuideCrowdToLocation(FVector TargetLocation, float InfluenceRadius)
-{
-    if (CrowdPathfindingManager)
-    {
-        CrowdPathfindingManager->AddPathfindingTarget(TargetLocation, InfluenceRadius);
-        CrowdPathfindingManager->UpdateFlowField(TargetLocation);
-        
-        UE_LOG(LogTemp, Log, TEXT("Guiding crowd to location: %s (Radius: %.1f)"), 
-               *TargetLocation.ToString(), InfluenceRadius);
-    }
-}
-
-void UQuest_CrowdInteractionManager::TriggerCrowdEvacuation(FVector DangerZone, float DangerRadius, FVector SafeZone)
-{
-    if (CrowdPathfindingManager)
-    {
-        // Add danger zone as obstacle
-        CrowdPathfindingManager->RegisterDynamicObstacle(DangerZone, DangerRadius);
-        
-        // Set safe zone as primary target
-        CrowdPathfindingManager->AddPathfindingTarget(SafeZone, 1000.0f);
-        CrowdPathfindingManager->UpdateFlowField(SafeZone);
-        
-        UE_LOG(LogTemp, Warning, TEXT("EVACUATION TRIGGERED - Danger: %s (R:%.1f), Safe: %s"), 
-               *DangerZone.ToString(), DangerRadius, *SafeZone.ToString());
-    }
-}
-
-void UQuest_CrowdInteractionManager::CreateCrowdGatheringPoint(FVector Location, float Radius, int32 TargetCount)
-{
-    if (CrowdPathfindingManager)
-    {
-        CrowdPathfindingManager->AddPathfindingTarget(Location, Radius);
-        CrowdPathfindingManager->UpdateFlowField(Location);
-        
-        UE_LOG(LogTemp, Log, TEXT("Created gathering point at %s (R:%.1f, Target:%d)"), 
-               *Location.ToString(), Radius, TargetCount);
-    }
-}
-
-void UQuest_CrowdInteractionManager::DisperseCrowdFromArea(FVector Center, float Radius)
-{
-    if (CrowdPathfindingManager)
-    {
-        CrowdPathfindingManager->RegisterDynamicObstacle(Center, Radius);
-        UE_LOG(LogTemp, Log, TEXT("Dispersing crowd from area: %s (R:%.1f)"), *Center.ToString(), Radius);
-    }
-}
-
-void UQuest_CrowdInteractionManager::UpdateCrowdObjectives(float DeltaTime)
-{
-    for (auto& MissionPair : ActiveCrowdMissions)
-    {
-        const FString& MissionID = MissionPair.Key;
-        TArray<FQuest_CrowdMissionObjective>& Objectives = MissionPair.Value;
-        
-        for (FQuest_CrowdMissionObjective& Objective : Objectives)
+        if (Mission.MissionID == MissionID)
         {
-            if (!Objective.bIsCompleted)
+            float ElapsedTime = GetWorld() ? GetWorld()->GetTimeSeconds() - Mission.MissionStartTime : 0.0f;
+            
+            // Check for mission timeout
+            if (ElapsedTime > Mission.MissionTimeLimit)
             {
-                CheckObjectiveCompletion(MissionID, Objective);
+                UE_LOG(LogTemp, Warning, TEXT("Mission %s timed out"), *Mission.MissionName);
+                Mission.bIsActive = false;
+                return;
             }
-        }
-    }
-}
 
-void UQuest_CrowdInteractionManager::CheckObjectiveCompletion(const FString& MissionID, FQuest_CrowdMissionObjective& Objective)
-{
-    bool bWasCompleted = false;
-    
-    switch (Objective.ObjectiveType)
-    {
-        case EQuestObjectiveType::Gather:
-        {
-            int32 CrowdCount = GetCrowdCountInArea(Objective.TargetLocation, Objective.CompletionRadius);
-            if (CrowdCount >= Objective.RequiredCrowdCount)
+            // Update interaction progress
+            for (FQuest_CrowdInteraction& Interaction : Mission.RequiredInteractions)
             {
-                Objective.bIsCompleted = true;
-                bWasCompleted = true;
+                if (!Interaction.bIsCompleted)
+                {
+                    Interaction.CompletionTime += DeltaTime;
+                }
             }
             
-            float Progress = FMath::Clamp(static_cast<float>(CrowdCount) / static_cast<float>(Objective.RequiredCrowdCount), 0.0f, 1.0f);
-            OnCrowdObjectiveProgress.Broadcast(Objective.ObjectiveID, Progress);
-            break;
-        }
-        
-        case EQuestObjectiveType::Escort:
-        {
-            // Check if enough NPCs have reached the target location
-            int32 CrowdCount = GetCrowdCountInArea(Objective.TargetLocation, Objective.CompletionRadius);
-            if (CrowdCount >= Objective.RequiredCrowdCount)
+            // Check if all interactions are completed
+            bool bAllCompleted = true;
+            for (const FQuest_CrowdInteraction& Interaction : Mission.RequiredInteractions)
             {
-                Objective.bIsCompleted = true;
-                bWasCompleted = true;
+                if (!Interaction.bIsCompleted)
+                {
+                    bAllCompleted = false;
+                    break;
+                }
             }
-            break;
-        }
-        
-        case EQuestObjectiveType::Defend:
-        {
-            // Check if crowd is still present in the area (not dispersed)
-            int32 CrowdCount = GetCrowdCountInArea(Objective.TargetLocation, Objective.CompletionRadius);
-            if (CrowdCount >= Objective.RequiredCrowdCount)
+            
+            if (bAllCompleted)
             {
-                Objective.bIsCompleted = true;
-                bWasCompleted = true;
+                CompleteTribalMission(MissionID);
             }
+            
             break;
-        }
-    }
-    
-    // Check time limit
-    if (!Objective.bIsCompleted && Objective.TimeLimit > 0.0f)
-    {
-        float* StartTime = MissionStartTimes.Find(MissionID);
-        if (StartTime && (GetWorld()->GetTimeSeconds() - *StartTime) >= Objective.TimeLimit)
-        {
-            UE_LOG(LogTemp, Warning, TEXT("Objective %s timed out"), *Objective.ObjectiveID);
-        }
-    }
-    
-    if (bWasCompleted)
-    {
-        OnCrowdObjectiveCompleted.Broadcast(Objective.ObjectiveID);
-        UE_LOG(LogTemp, Log, TEXT("Objective completed: %s"), *Objective.ObjectiveID);
-    }
-}
-
-void UQuest_CrowdInteractionManager::UpdatePlayerInfluence(float DeltaTime)
-{
-    if (PlayerCharacter && CurrentPlayerInfluence.bIsActive)
-    {
-        FVector PlayerLocation = PlayerCharacter->GetActorLocation();
-        UpdatePlayerInfluenceLocation(PlayerLocation);
-        
-        // Apply influence to nearby crowd agents through pathfinding manager
-        if (CrowdPathfindingManager)
-        {
-            CrowdPathfindingManager->ApplyPlayerInfluence(PlayerLocation, 
-                                                         CurrentPlayerInfluence.InfluenceRadius, 
-                                                         CurrentPlayerInfluence.InfluenceStrength);
         }
     }
 }
 
-void UQuest_CrowdInteractionManager::DrawDebugInfo() const
+TArray<FQuest_TribalMission> UQuest_CrowdInteractionManager::GetActiveMissions() const
 {
-    if (!GetWorld())
+    return ActiveMissions;
+}
+
+FQuest_TribalMission UQuest_CrowdInteractionManager::GetMissionByID(const FString& MissionID) const
+{
+    for (const FQuest_TribalMission& Mission : ActiveMissions)
+    {
+        if (Mission.MissionID == MissionID)
+        {
+            return Mission;
+        }
+    }
+    
+    return FQuest_TribalMission(); // Return empty mission if not found
+}
+
+bool UQuest_CrowdInteractionManager::CheckCrowdInteraction(ATranspersonalCharacter* Player, ECrowdZoneType ZoneType, float InteractionRadius)
+{
+    if (!Player)
+    {
+        return false;
+    }
+
+    ACrowd_MassSimulationManager* CrowdManager = GetCrowdManagerForZone(ZoneType);
+    if (!CrowdManager)
+    {
+        return false;
+    }
+
+    FVector PlayerLocation = Player->GetActorLocation();
+    FVector CrowdLocation = CrowdManager->GetActorLocation();
+    
+    float Distance = FVector::Dist(PlayerLocation, CrowdLocation);
+    
+    // Check if player is within interaction range
+    if (Distance <= InteractionRadius)
+    {
+        // Update relevant mission interactions
+        for (FQuest_TribalMission& Mission : ActiveMissions)
+        {
+            if (Mission.TargetZone == ZoneType && Mission.bIsActive)
+            {
+                for (FQuest_CrowdInteraction& Interaction : Mission.RequiredInteractions)
+                {
+                    if (Interaction.ZoneType == ZoneType && !Interaction.bIsCompleted)
+                    {
+                        Interaction.bIsCompleted = true;
+                        UE_LOG(LogTemp, Log, TEXT("Crowd interaction completed: %s"), *Interaction.InteractionID);
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    
+    return false;
+}
+
+void UQuest_CrowdInteractionManager::RegisterCrowdManager(ACrowd_MassSimulationManager* CrowdManager)
+{
+    if (!CrowdManager)
     {
         return;
     }
+
+    ECrowdZoneType ZoneType = CrowdManager->GetZoneType();
+    CrowdManagers.Add(ZoneType, CrowdManager);
     
-    // Draw active objectives
-    for (const auto& MissionPair : ActiveCrowdMissions)
+    UE_LOG(LogTemp, Log, TEXT("Registered crowd manager for zone: %d"), (int32)ZoneType);
+}
+
+ACrowd_MassSimulationManager* UQuest_CrowdInteractionManager::GetCrowdManagerForZone(ECrowdZoneType ZoneType) const
+{
+    if (CrowdManagers.Contains(ZoneType))
     {
-        const TArray<FQuest_CrowdMissionObjective>& Objectives = MissionPair.Value;
+        return CrowdManagers[ZoneType];
+    }
+    
+    return nullptr;
+}
+
+FQuest_TribalMission UQuest_CrowdInteractionManager::CreateTribalCampMission()
+{
+    FQuest_TribalMission Mission;
+    Mission.MissionID = TEXT("TribalCamp_001");
+    Mission.MissionName = TEXT("Visit the Tribal Camp");
+    Mission.MissionDescription = TEXT("Approach the tribal camp and interact with the community members to learn about their way of life.");
+    Mission.TargetZone = ECrowdZoneType::TribalCamp;
+    Mission.MissionTimeLimit = 600.0f; // 10 minutes
+    
+    FQuest_CrowdInteraction Interaction;
+    Interaction.InteractionID = TEXT("TribalCamp_Approach");
+    Interaction.ZoneType = ECrowdZoneType::TribalCamp;
+    Interaction.RequiredAgentCount = 3;
+    Interaction.InteractionRadius = 800.0f;
+    
+    Mission.RequiredInteractions.Add(Interaction);
+    
+    return Mission;
+}
+
+FQuest_TribalMission UQuest_CrowdInteractionManager::CreateHuntingPartyMission()
+{
+    FQuest_TribalMission Mission;
+    Mission.MissionID = TEXT("HuntingParty_001");
+    Mission.MissionName = TEXT("Join the Hunting Party");
+    Mission.MissionDescription = TEXT("Coordinate with the hunting party to track and hunt prehistoric creatures.");
+    Mission.TargetZone = ECrowdZoneType::HuntingParty;
+    Mission.MissionTimeLimit = 900.0f; // 15 minutes
+    
+    FQuest_CrowdInteraction Interaction;
+    Interaction.InteractionID = TEXT("HuntingParty_Coordination");
+    Interaction.ZoneType = ECrowdZoneType::HuntingParty;
+    Interaction.RequiredAgentCount = 5;
+    Interaction.InteractionRadius = 600.0f;
+    
+    Mission.RequiredInteractions.Add(Interaction);
+    
+    return Mission;
+}
+
+FQuest_TribalMission UQuest_CrowdInteractionManager::CreateGatheringMission()
+{
+    FQuest_TribalMission Mission;
+    Mission.MissionID = TEXT("Gathering_001");
+    Mission.MissionName = TEXT("Resource Gathering");
+    Mission.MissionDescription = TEXT("Help the tribe gather essential resources like berries, herbs, and materials.");
+    Mission.TargetZone = ECrowdZoneType::Gathering;
+    Mission.MissionTimeLimit = 480.0f; // 8 minutes
+    
+    FQuest_CrowdInteraction Interaction;
+    Interaction.InteractionID = TEXT("Gathering_Collection");
+    Interaction.ZoneType = ECrowdZoneType::Gathering;
+    Interaction.RequiredAgentCount = 4;
+    Interaction.InteractionRadius = 700.0f;
+    
+    Mission.RequiredInteractions.Add(Interaction);
+    
+    return Mission;
+}
+
+FQuest_TribalMission UQuest_CrowdInteractionManager::CreateWatchtowerMission()
+{
+    FQuest_TribalMission Mission;
+    Mission.MissionID = TEXT("Watchtower_001");
+    Mission.MissionName = TEXT("Guard Duty");
+    Mission.MissionDescription = TEXT("Take your position at the watchtower and help protect the tribe from threats.");
+    Mission.TargetZone = ECrowdZoneType::Watchtower;
+    Mission.MissionTimeLimit = 720.0f; // 12 minutes
+    
+    FQuest_CrowdInteraction Interaction;
+    Interaction.InteractionID = TEXT("Watchtower_Guard");
+    Interaction.ZoneType = ECrowdZoneType::Watchtower;
+    Interaction.RequiredAgentCount = 2;
+    Interaction.InteractionRadius = 400.0f;
+    
+    Mission.RequiredInteractions.Add(Interaction);
+    
+    return Mission;
+}
+
+void UQuest_CrowdInteractionManager::InitializeDefaultMissions()
+{
+    UE_LOG(LogTemp, Log, TEXT("Initializing default tribal missions"));
+    
+    // Start one mission of each type for testing
+    StartTribalMission(TEXT("TribalCamp_001"));
+    StartTribalMission(TEXT("Gathering_001"));
+    
+    UE_LOG(LogTemp, Log, TEXT("Default missions initialized: %d active missions"), ActiveMissions.Num());
+}
+
+void UQuest_CrowdInteractionManager::DebugPrintActiveMissions()
+{
+    UE_LOG(LogTemp, Log, TEXT("=== ACTIVE TRIBAL MISSIONS ==="));
+    for (const FQuest_TribalMission& Mission : ActiveMissions)
+    {
+        UE_LOG(LogTemp, Log, TEXT("Mission: %s | Zone: %d | Active: %s"), 
+            *Mission.MissionName, 
+            (int32)Mission.TargetZone,
+            Mission.bIsActive ? TEXT("Yes") : TEXT("No"));
+    }
+    UE_LOG(LogTemp, Log, TEXT("=== END MISSIONS ==="));
+}
+
+void UQuest_CrowdInteractionManager::CleanupExpiredMissions()
+{
+    for (int32 i = ActiveMissions.Num() - 1; i >= 0; i--)
+    {
+        const FQuest_TribalMission& Mission = ActiveMissions[i];
+        float ElapsedTime = GetWorld() ? GetWorld()->GetTimeSeconds() - Mission.MissionStartTime : 0.0f;
         
-        for (const FQuest_CrowdMissionObjective& Objective : Objectives)
+        if (ElapsedTime > Mission.MissionTimeLimit)
         {
-            FColor DebugColor = Objective.bIsCompleted ? FColor::Green : FColor::Yellow;
-            
-            DrawDebugSphere(GetWorld(), Objective.TargetLocation, Objective.CompletionRadius, 
-                           16, DebugColor, false, -1.0f, 0, 5.0f);
-            
-            DrawDebugString(GetWorld(), Objective.TargetLocation + FVector(0, 0, 200), 
-                           FString::Printf(TEXT("%s\n%s\nCount: %d/%d"), 
-                                         *Objective.ObjectiveID, 
-                                         *Objective.Description,
-                                         GetCrowdCountInArea(Objective.TargetLocation, Objective.CompletionRadius),
-                                         Objective.RequiredCrowdCount), 
-                           nullptr, DebugColor, 0.0f);
+            UE_LOG(LogTemp, Warning, TEXT("Removing expired mission: %s"), *Mission.MissionName);
+            ActiveMissions.RemoveAt(i);
+        }
+    }
+}
+
+bool UQuest_CrowdInteractionManager::ValidateMissionRequirements(const FQuest_TribalMission& Mission) const
+{
+    // Check if required crowd manager exists
+    if (!CrowdManagers.Contains(Mission.TargetZone))
+    {
+        return false;
+    }
+    
+    // Validate interaction requirements
+    for (const FQuest_CrowdInteraction& Interaction : Mission.RequiredInteractions)
+    {
+        if (Interaction.RequiredAgentCount <= 0 || Interaction.InteractionRadius <= 0.0f)
+        {
+            return false;
         }
     }
     
-    // Draw player influence
-    if (CurrentPlayerInfluence.bIsActive && PlayerCharacter)
+    return true;
+}
+
+void UQuest_CrowdInteractionManager::NotifyMissionCompletion(const FQuest_TribalMission& Mission)
+{
+    UE_LOG(LogTemp, Log, TEXT("MISSION COMPLETED: %s"), *Mission.MissionName);
+    
+    // Here you could trigger rewards, notifications, or other systems
+    if (GEngine)
     {
-        FVector PlayerLocation = PlayerCharacter->GetActorLocation();
-        DrawDebugSphere(GetWorld(), PlayerLocation, CurrentPlayerInfluence.InfluenceRadius, 
-                       32, FColor::Blue, false, -1.0f, 0, 3.0f);
+        FString CompletionMessage = FString::Printf(TEXT("Mission Completed: %s"), *Mission.MissionName);
+        GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green, CompletionMessage);
     }
 }
