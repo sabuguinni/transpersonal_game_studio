@@ -2,271 +2,338 @@
 
 #include "CoreMinimal.h"
 #include "Engine/Engine.h"
-#include "Components/ActorComponent.h"
-#include "GameFramework/Actor.h"
 #include "SharedTypes.generated.h"
 
-/**
- * TRANSPERSONAL GAME STUDIO - SHARED ARCHITECTURE TYPES
- * Engine Architect Agent #02
- * 
- * This file contains ALL shared types used across the entire project.
- * ALL agents must check this file before creating new structs/enums.
- * 
- * NAMING CONVENTION: All types use "Eng_" prefix to avoid conflicts.
- */
-
-// ═══════════════════════════════════════════════════════════════
-// CORE SYSTEM ENUMS
-// ═══════════════════════════════════════════════════════════════
+// === NARRATIVE & DIALOGUE ENUMS ===
 
 UENUM(BlueprintType)
-enum class EEng_SystemPriority : uint8
+enum class ENarr_DialogueType : uint8
 {
-    Critical = 0    UMETA(DisplayName = "Critical"),
-    High = 1        UMETA(DisplayName = "High"),
-    Normal = 2      UMETA(DisplayName = "Normal"),
-    Low = 3         UMETA(DisplayName = "Low"),
-    Background = 4  UMETA(DisplayName = "Background")
+    Information     UMETA(DisplayName = "Information"),
+    Warning         UMETA(DisplayName = "Warning"),
+    Combat          UMETA(DisplayName = "Combat"),
+    Exploration     UMETA(DisplayName = "Exploration"),
+    Trading         UMETA(DisplayName = "Trading"),
+    Storytelling    UMETA(DisplayName = "Storytelling")
 };
 
 UENUM(BlueprintType)
-enum class EEng_SystemState : uint8
+enum class ENarr_CharacterRole : uint8
 {
-    Uninitialized = 0   UMETA(DisplayName = "Uninitialized"),
-    Initializing = 1    UMETA(DisplayName = "Initializing"),
-    Running = 2         UMETA(DisplayName = "Running"),
-    Paused = 3          UMETA(DisplayName = "Paused"),
-    Error = 4           UMETA(DisplayName = "Error"),
-    Shutdown = 5        UMETA(DisplayName = "Shutdown")
+    Elder           UMETA(DisplayName = "Tribal Elder"),
+    Scout           UMETA(DisplayName = "Scout"),
+    Warrior         UMETA(DisplayName = "Warrior"),
+    Shaman          UMETA(DisplayName = "Shaman"),
+    Hunter          UMETA(DisplayName = "Hunter"),
+    Crafter         UMETA(DisplayName = "Crafter")
 };
 
 UENUM(BlueprintType)
-enum class EEng_PerformanceTier : uint8
+enum class ENarr_StoryArc : uint8
 {
-    Ultra = 0       UMETA(DisplayName = "Ultra"),
-    High = 1        UMETA(DisplayName = "High"),
-    Medium = 2      UMETA(DisplayName = "Medium"),
-    Low = 3         UMETA(DisplayName = "Low"),
-    Potato = 4      UMETA(DisplayName = "Potato")
+    Introduction    UMETA(DisplayName = "Introduction"),
+    FirstContact    UMETA(DisplayName = "First Contact"),
+    Learning        UMETA(DisplayName = "Learning Phase"),
+    Challenge       UMETA(DisplayName = "Major Challenge"),
+    Growth          UMETA(DisplayName = "Character Growth"),
+    Mastery         UMETA(DisplayName = "Mastery Phase"),
+    Leadership      UMETA(DisplayName = "Leadership Role")
 };
 
-// ═══════════════════════════════════════════════════════════════
-// PHYSICS SYSTEM TYPES
-// ═══════════════════════════════════════════════════════════════
-
-UENUM(BlueprintType)
-enum class EEng_PhysicsLayer : uint8
-{
-    Default = 0         UMETA(DisplayName = "Default"),
-    Terrain = 1         UMETA(DisplayName = "Terrain"),
-    Vegetation = 2      UMETA(DisplayName = "Vegetation"),
-    Characters = 3      UMETA(DisplayName = "Characters"),
-    Dinosaurs = 4       UMETA(DisplayName = "Dinosaurs"),
-    Structures = 5      UMETA(DisplayName = "Structures"),
-    Projectiles = 6     UMETA(DisplayName = "Projectiles"),
-    Triggers = 7        UMETA(DisplayName = "Triggers")
-};
+// === EXISTING ENUMS (from other agents) ===
 
 UENUM(BlueprintType)
-enum class EEng_DestructionLevel : uint8
+enum class EBiomeType : uint8
 {
-    Indestructible = 0  UMETA(DisplayName = "Indestructible"),
-    Minor = 1           UMETA(DisplayName = "Minor"),
-    Moderate = 2        UMETA(DisplayName = "Moderate"),
-    Major = 3           UMETA(DisplayName = "Major"),
-    Complete = 4        UMETA(DisplayName = "Complete")
+    Swamp           UMETA(DisplayName = "Swamp"),
+    Forest          UMETA(DisplayName = "Forest"), 
+    Savanna         UMETA(DisplayName = "Savanna"),
+    Desert          UMETA(DisplayName = "Desert"),
+    Mountain        UMETA(DisplayName = "Mountain"),
+    River           UMETA(DisplayName = "River"),
+    Lake            UMETA(DisplayName = "Lake"),
+    Canyon          UMETA(DisplayName = "Canyon")
 };
+
+UENUM(BlueprintType)
+enum class EDinosaurSpecies : uint8
+{
+    TRex            UMETA(DisplayName = "Tyrannosaurus Rex"),
+    Velociraptor    UMETA(DisplayName = "Velociraptor"),
+    Triceratops     UMETA(DisplayName = "Triceratops"),
+    Brachiosaurus   UMETA(DisplayName = "Brachiosaurus"),
+    Stegosaurus     UMETA(DisplayName = "Stegosaurus"),
+    Parasaurolophus UMETA(DisplayName = "Parasaurolophus"),
+    Ankylosaurus    UMETA(DisplayName = "Ankylosaurus"),
+    Compsognathus   UMETA(DisplayName = "Compsognathus")
+};
+
+UENUM(BlueprintType)
+enum class EDinosaurBehaviorState : uint8
+{
+    Idle            UMETA(DisplayName = "Idle"),
+    Patrol          UMETA(DisplayName = "Patrol"),
+    Hunt            UMETA(DisplayName = "Hunt"),
+    Flee            UMETA(DisplayName = "Flee"),
+    Feed            UMETA(DisplayName = "Feed"),
+    Sleep           UMETA(DisplayName = "Sleep"),
+    Aggressive      UMETA(DisplayName = "Aggressive"),
+    Territorial     UMETA(DisplayName = "Territorial")
+};
+
+UENUM(BlueprintType)
+enum class ESurvivalNeed : uint8
+{
+    Health          UMETA(DisplayName = "Health"),
+    Hunger          UMETA(DisplayName = "Hunger"),
+    Thirst          UMETA(DisplayName = "Thirst"),
+    Stamina         UMETA(DisplayName = "Stamina"),
+    Warmth          UMETA(DisplayName = "Warmth"),
+    Safety          UMETA(DisplayName = "Safety"),
+    Rest            UMETA(DisplayName = "Rest")
+};
+
+UENUM(BlueprintType)
+enum class EWeatherType : uint8
+{
+    Clear           UMETA(DisplayName = "Clear"),
+    Cloudy          UMETA(DisplayName = "Cloudy"),
+    Rain            UMETA(DisplayName = "Rain"),
+    Storm           UMETA(DisplayName = "Storm"),
+    Fog             UMETA(DisplayName = "Fog"),
+    Drought         UMETA(DisplayName = "Drought")
+};
+
+UENUM(BlueprintType)
+enum class ETimeOfDay : uint8
+{
+    Dawn            UMETA(DisplayName = "Dawn"),
+    Morning         UMETA(DisplayName = "Morning"),
+    Midday          UMETA(DisplayName = "Midday"),
+    Afternoon       UMETA(DisplayName = "Afternoon"),
+    Dusk            UMETA(DisplayName = "Dusk"),
+    Night           UMETA(DisplayName = "Night"),
+    Midnight        UMETA(DisplayName = "Midnight")
+};
+
+UENUM(BlueprintType)
+enum class EQuestType : uint8
+{
+    Survival        UMETA(DisplayName = "Survival"),
+    Exploration     UMETA(DisplayName = "Exploration"),
+    Hunting         UMETA(DisplayName = "Hunting"),
+    Gathering       UMETA(DisplayName = "Gathering"),
+    Crafting        UMETA(DisplayName = "Crafting"),
+    Social          UMETA(DisplayName = "Social"),
+    Discovery       UMETA(DisplayName = "Discovery"),
+    Territory       UMETA(DisplayName = "Territory")
+};
+
+UENUM(BlueprintType)
+enum class EQuestStatus : uint8
+{
+    NotStarted      UMETA(DisplayName = "Not Started"),
+    Active          UMETA(DisplayName = "Active"),
+    Completed       UMETA(DisplayName = "Completed"),
+    Failed          UMETA(DisplayName = "Failed"),
+    Abandoned       UMETA(DisplayName = "Abandoned")
+};
+
+// === NARRATIVE STRUCTS ===
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_PhysicsSettings
+struct TRANSPERSONALGAME_API FNarr_CharacterProfile
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    float Gravity = -980.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    FString CharacterName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    float LinearDamping = 0.01f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    ENarr_CharacterRole Role;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    float AngularDamping = 0.05f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    FString BackgroundStory;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    bool bEnableRagdoll = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    TArray<FString> PersonalityTraits;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
-    EEng_DestructionLevel MaxDestructionLevel = EEng_DestructionLevel::Moderate;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+    int32 ExperienceLevel;
 
-    FEng_PhysicsSettings()
+    FNarr_CharacterProfile()
     {
-        Gravity = -980.0f;
-        LinearDamping = 0.01f;
-        AngularDamping = 0.05f;
-        bEnableRagdoll = true;
-        MaxDestructionLevel = EEng_DestructionLevel::Moderate;
+        CharacterName = TEXT("");
+        Role = ENarr_CharacterRole::Hunter;
+        BackgroundStory = TEXT("");
+        ExperienceLevel = 1;
     }
 };
 
-// ═══════════════════════════════════════════════════════════════
-// WORLD GENERATION TYPES
-// ═══════════════════════════════════════════════════════════════
-
-UENUM(BlueprintType)
-enum class EEng_BiomeType : uint8
-{
-    Grassland = 0       UMETA(DisplayName = "Grassland"),
-    Forest = 1          UMETA(DisplayName = "Forest"),
-    Desert = 2          UMETA(DisplayName = "Desert"),
-    Swamp = 3           UMETA(DisplayName = "Swamp"),
-    Mountains = 4       UMETA(DisplayName = "Mountains"),
-    River = 5           UMETA(DisplayName = "River"),
-    Lake = 6            UMETA(DisplayName = "Lake"),
-    Coast = 7           UMETA(DisplayName = "Coast")
-};
-
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_WorldCell
+struct TRANSPERSONALGAME_API FNarr_StoryEvent
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World")
-    int32 X = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    FString EventName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World")
-    int32 Y = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    ENarr_StoryArc StoryArc;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World")
-    EEng_BiomeType BiomeType = EEng_BiomeType::Grassland;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    FString EventDescription;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World")
-    float Elevation = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    TArray<FString> RequiredConditions;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World")
-    float Temperature = 20.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    bool bIsTriggered;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World")
-    float Humidity = 0.5f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "World")
-    bool bIsLoaded = false;
-
-    FEng_WorldCell()
+    FNarr_StoryEvent()
     {
-        X = 0;
-        Y = 0;
-        BiomeType = EEng_BiomeType::Grassland;
-        Elevation = 0.0f;
-        Temperature = 20.0f;
-        Humidity = 0.5f;
-        bIsLoaded = false;
+        EventName = TEXT("");
+        StoryArc = ENarr_StoryArc::Introduction;
+        EventDescription = TEXT("");
+        bIsTriggered = false;
     }
 };
 
-// ═══════════════════════════════════════════════════════════════
-// CONSCIOUSNESS SYSTEM TYPES
-// ═══════════════════════════════════════════════════════════════
-
-UENUM(BlueprintType)
-enum class EEng_ConsciousnessState : uint8
-{
-    Awake = 0           UMETA(DisplayName = "Awake"),
-    Dreaming = 1        UMETA(DisplayName = "Dreaming"),
-    Meditation = 2      UMETA(DisplayName = "Meditation"),
-    Unconscious = 3     UMETA(DisplayName = "Unconscious"),
-    Transcendent = 4    UMETA(DisplayName = "Transcendent")
-};
+// === EXISTING STRUCTS (from other agents) ===
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_ConsciousnessData
+struct TRANSPERSONALGAME_API FSurvivalStats
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Consciousness")
-    EEng_ConsciousnessState State = EEng_ConsciousnessState::Awake;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
+    float Health;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Consciousness")
-    float Awareness = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
+    float Hunger;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Consciousness")
-    float Coherence = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
+    float Thirst;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Consciousness")
-    float Resonance = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
+    float Stamina;
 
-    FEng_ConsciousnessData()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Survival")
+    float Fear;
+
+    FSurvivalStats()
     {
-        State = EEng_ConsciousnessState::Awake;
-        Awareness = 1.0f;
-        Coherence = 1.0f;
-        Resonance = 0.0f;
+        Health = 100.0f;
+        Hunger = 100.0f;
+        Thirst = 100.0f;
+        Stamina = 100.0f;
+        Fear = 0.0f;
     }
 };
 
-// ═══════════════════════════════════════════════════════════════
-// PERFORMANCE MONITORING TYPES
-// ═══════════════════════════════════════════════════════════════
-
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_PerformanceMetrics
+struct TRANSPERSONALGAME_API FBiomeData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float FrameRate = 60.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    EBiomeType BiomeType;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float MemoryUsageMB = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    FVector2D BiomeCenter;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 DrawCalls = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    float BiomeRadius;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 TriangleCount = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    TArray<EDinosaurSpecies> NativeDinosaurs;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    EEng_PerformanceTier CurrentTier = EEng_PerformanceTier::High;
-
-    FEng_PerformanceMetrics()
+    FBiomeData()
     {
-        FrameRate = 60.0f;
-        MemoryUsageMB = 0.0f;
-        DrawCalls = 0;
-        TriangleCount = 0;
-        CurrentTier = EEng_PerformanceTier::High;
+        BiomeType = EBiomeType::Forest;
+        BiomeCenter = FVector2D::ZeroVector;
+        BiomeRadius = 1000.0f;
     }
 };
 
-// ═══════════════════════════════════════════════════════════════
-// SYSTEM COMMUNICATION TYPES
-// ═══════════════════════════════════════════════════════════════
-
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_SystemMessage
+struct TRANSPERSONALGAME_API FDinosaurData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System")
-    FString SystemName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur")
+    EDinosaurSpecies Species;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System")
-    FString MessageType;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur")
+    EDinosaurBehaviorState BehaviorState;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System")
-    FString Data;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur")
+    float AggressionLevel;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System")
-    EEng_SystemPriority Priority = EEng_SystemPriority::Normal;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur")
+    float DetectionRange;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "System")
-    float Timestamp = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dinosaur")
+    bool bIsPackHunter;
 
-    FEng_SystemMessage()
+    FDinosaurData()
     {
-        SystemName = TEXT("");
-        MessageType = TEXT("");
-        Data = TEXT("");
-        Priority = EEng_SystemPriority::Normal;
-        Timestamp = 0.0f;
+        Species = EDinosaurSpecies::Compsognathus;
+        BehaviorState = EDinosaurBehaviorState::Idle;
+        AggressionLevel = 50.0f;
+        DetectionRange = 500.0f;
+        bIsPackHunter = false;
+    }
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FWeatherData
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
+    EWeatherType CurrentWeather;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
+    float Temperature;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
+    float Humidity;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
+    float WindSpeed;
+
+    FWeatherData()
+    {
+        CurrentWeather = EWeatherType::Clear;
+        Temperature = 25.0f;
+        Humidity = 60.0f;
+        WindSpeed = 5.0f;
+    }
+};
+
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FQuestObjective
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    FString ObjectiveText;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    bool bIsCompleted;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    int32 CurrentProgress;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    int32 RequiredProgress;
+
+    FQuestObjective()
+    {
+        ObjectiveText = TEXT("");
+        bIsCompleted = false;
+        CurrentProgress = 0;
+        RequiredProgress = 1;
     }
 };
