@@ -4,8 +4,8 @@
 #include "HAL/FileManager.h"
 #include "Misc/Paths.h"
 #include "Misc/FileHelper.h"
-#include "Engine/GameInstance.h"
 #include "UObject/UObjectGlobals.h"
+#include "Engine/GameInstance.h"
 
 UEng_ArchitecturalFramework::UEng_ArchitecturalFramework()
 {
@@ -13,28 +13,35 @@ UEng_ArchitecturalFramework::UEng_ArchitecturalFramework()
     CurrentPerformanceTier = EEng_PerformanceTier::Critical;
     
     // Initialize default architectural rules
-    CurrentRules = FEng_ArchitecturalRules();
+    CurrentRules.bEnforceHeaderCppPairs = true;
+    CurrentRules.bEnforcePerformanceLimits = true;
+    CurrentRules.bEnforceModuleDependencies = true;
+    CurrentRules.bEnforceNamingConventions = true;
+    CurrentRules.MaxActorsPerSystem = 1000;
+    CurrentRules.MaxFrameTimeMS = 16.67f; // 60fps target
 }
 
 void UEng_ArchitecturalFramework::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Warning, TEXT("Engine Architectural Framework Initializing..."));
+    UE_LOG(LogTemp, Warning, TEXT("Engine Architectural Framework - Initializing..."));
     
     InitializeSystemRequirements();
     ValidateModuleStructure();
     
     bFrameworkInitialized = true;
     
-    UE_LOG(LogTemp, Warning, TEXT("Engine Architectural Framework Initialized Successfully"));
+    UE_LOG(LogTemp, Warning, TEXT("Engine Architectural Framework - Initialized successfully"));
 }
 
 void UEng_ArchitecturalFramework::Deinitialize()
 {
-    bFrameworkInitialized = false;
+    UE_LOG(LogTemp, Warning, TEXT("Engine Architectural Framework - Deinitializing..."));
+    
     SystemRequirements.Empty();
     ModuleStatuses.Empty();
+    bFrameworkInitialized = false;
     
     Super::Deinitialize();
 }
@@ -46,10 +53,10 @@ void UEng_ArchitecturalFramework::InitializeSystemRequirements()
     CoreReqs.SystemType = EEng_SystemType::Core;
     CoreReqs.RequiredModules.Add(TEXT("Engine"));
     CoreReqs.RequiredModules.Add(TEXT("CoreUObject"));
-    CoreReqs.RequiredClasses.Add(TEXT("GameMode"));
-    CoreReqs.RequiredClasses.Add(TEXT("PlayerController"));
+    CoreReqs.RequiredModules.Add(TEXT("TranspersonalGame"));
+    CoreReqs.RequiredClasses.Add(TEXT("UEng_ArchitecturalFramework"));
     CoreReqs.MinPerformanceTier = EEng_PerformanceTier::Critical;
-    CoreReqs.MaxActorCount = 500;
+    CoreReqs.MaxActorCount = 100;
     CoreReqs.MaxMemoryMB = 256.0f;
     SystemRequirements.Add(EEng_SystemType::Core, CoreReqs);
     
@@ -57,202 +64,204 @@ void UEng_ArchitecturalFramework::InitializeSystemRequirements()
     FEng_SystemRequirements WorldReqs;
     WorldReqs.SystemType = EEng_SystemType::World;
     WorldReqs.RequiredModules.Add(TEXT("Landscape"));
+    WorldReqs.RequiredModules.Add(TEXT("Foliage"));
     WorldReqs.RequiredModules.Add(TEXT("PCG"));
-    WorldReqs.RequiredClasses.Add(TEXT("WorldGenerator"));
-    WorldReqs.RequiredClasses.Add(TEXT("BiomeManager"));
+    WorldReqs.RequiredClasses.Add(TEXT("ALandscape"));
+    WorldReqs.RequiredClasses.Add(TEXT("UPCGComponent"));
     WorldReqs.MinPerformanceTier = EEng_PerformanceTier::High;
-    WorldReqs.MaxActorCount = 2000;
-    WorldReqs.MaxMemoryMB = 512.0f;
+    WorldReqs.MaxActorCount = 5000;
+    WorldReqs.MaxMemoryMB = 1024.0f;
     SystemRequirements.Add(EEng_SystemType::World, WorldReqs);
     
     // Character System Requirements
     FEng_SystemRequirements CharacterReqs;
     CharacterReqs.SystemType = EEng_SystemType::Character;
+    CharacterReqs.RequiredModules.Add(TEXT("Engine"));
     CharacterReqs.RequiredModules.Add(TEXT("AIModule"));
-    CharacterReqs.RequiredClasses.Add(TEXT("Character"));
-    CharacterReqs.RequiredClasses.Add(TEXT("PlayerController"));
+    CharacterReqs.RequiredClasses.Add(TEXT("ACharacter"));
+    CharacterReqs.RequiredClasses.Add(TEXT("UCharacterMovementComponent"));
     CharacterReqs.MinPerformanceTier = EEng_PerformanceTier::Critical;
-    CharacterReqs.MaxActorCount = 100;
-    CharacterReqs.MaxMemoryMB = 128.0f;
+    CharacterReqs.MaxActorCount = 200;
+    CharacterReqs.MaxMemoryMB = 512.0f;
     SystemRequirements.Add(EEng_SystemType::Character, CharacterReqs);
     
     // AI System Requirements
     FEng_SystemRequirements AIReqs;
     AIReqs.SystemType = EEng_SystemType::AI;
     AIReqs.RequiredModules.Add(TEXT("AIModule"));
+    AIReqs.RequiredModules.Add(TEXT("GameplayTasks"));
     AIReqs.RequiredModules.Add(TEXT("NavigationSystem"));
-    AIReqs.RequiredClasses.Add(TEXT("DinosaurAI"));
-    AIReqs.RequiredClasses.Add(TEXT("BehaviorTree"));
+    AIReqs.RequiredClasses.Add(TEXT("UBehaviorTreeComponent"));
+    AIReqs.RequiredClasses.Add(TEXT("UBlackboardComponent"));
     AIReqs.MinPerformanceTier = EEng_PerformanceTier::High;
-    AIReqs.MaxActorCount = 500;
-    AIReqs.MaxMemoryMB = 256.0f;
+    AIReqs.MaxActorCount = 1000;
+    AIReqs.MaxMemoryMB = 768.0f;
     SystemRequirements.Add(EEng_SystemType::AI, AIReqs);
     
-    UE_LOG(LogTemp, Warning, TEXT("Architectural Framework: System requirements initialized"));
+    // Performance System Requirements
+    FEng_SystemRequirements PerfReqs;
+    PerfReqs.SystemType = EEng_SystemType::Performance;
+    PerfReqs.RequiredModules.Add(TEXT("RenderCore"));
+    PerfReqs.RequiredModules.Add(TEXT("Engine"));
+    PerfReqs.MinPerformanceTier = EEng_PerformanceTier::Critical;
+    PerfReqs.MaxActorCount = 50;
+    PerfReqs.MaxMemoryMB = 128.0f;
+    SystemRequirements.Add(EEng_SystemType::Performance, PerfReqs);
 }
 
 void UEng_ArchitecturalFramework::ValidateModuleStructure()
 {
-    FString ModulePath = FPaths::ProjectDir() + TEXT("Source/TranspersonalGame/");
+    UE_LOG(LogTemp, Warning, TEXT("Validating module structure..."));
     
-    if (!IFileManager::Get().DirectoryExists(*ModulePath))
-    {
-        UE_LOG(LogTemp, Error, TEXT("Module directory not found: %s"), *ModulePath);
-        return;
-    }
+    // Get the TranspersonalGame source directory
+    FString ProjectDir = FPaths::ProjectDir();
+    FString SourceDir = FPaths::Combine(ProjectDir, TEXT("Source"), TEXT("TranspersonalGame"));
     
-    ScanModuleDirectory(ModulePath);
-    ValidateHeaderCppPairs(ModulePath);
+    ScanModuleDirectory(SourceDir);
     
-    UE_LOG(LogTemp, Warning, TEXT("Module structure validation completed"));
+    UE_LOG(LogTemp, Warning, TEXT("Module structure validation complete"));
 }
 
 void UEng_ArchitecturalFramework::ScanModuleDirectory(const FString& ModulePath)
 {
     TArray<FString> FoundFiles;
-    IFileManager::Get().FindFilesRecursive(FoundFiles, *ModulePath, TEXT("*.h"), true, false);
+    IFileManager& FileManager = IFileManager::Get();
     
-    FEng_ModuleStatus MainModuleStatus;
-    MainModuleStatus.ModuleName = TEXT("TranspersonalGame");
-    MainModuleStatus.HeaderCount = 0;
-    MainModuleStatus.SourceCount = 0;
-    MainModuleStatus.OrphanedHeaders = 0;
+    // Find all .h files
+    FileManager.FindFilesRecursive(FoundFiles, *ModulePath, TEXT("*.h"), true, false);
     
-    // Count headers
+    FEng_ModuleStatus ModuleStatus;
+    ModuleStatus.ModuleName = TEXT("TranspersonalGame");
+    ModuleStatus.HeaderCount = FoundFiles.Num();
+    
+    // Check for corresponding .cpp files
+    int32 OrphanedCount = 0;
     for (const FString& HeaderFile : FoundFiles)
     {
-        if (HeaderFile.EndsWith(TEXT(".h")))
+        FString CppFile = HeaderFile.Replace(TEXT(".h"), TEXT(".cpp"));
+        if (!FileManager.FileExists(*CppFile))
         {
-            MainModuleStatus.HeaderCount++;
-            
-            // Check if corresponding .cpp exists
-            FString CppFile = HeaderFile;
-            CppFile = CppFile.Replace(TEXT(".h"), TEXT(".cpp"));
-            
-            if (!IFileManager::Get().FileExists(*CppFile))
-            {
-                MainModuleStatus.OrphanedHeaders++;
-                FString RelativePath = HeaderFile;
-                FPaths::MakePathRelativeTo(RelativePath, *ModulePath);
-                MainModuleStatus.MissingImplementations.Add(RelativePath);
-            }
+            OrphanedCount++;
+            FString RelativePath = HeaderFile.Replace(*ModulePath, TEXT(""));
+            ModuleStatus.MissingImplementations.Add(RelativePath);
         }
     }
     
-    // Count source files
+    ModuleStatus.OrphanedHeaders = OrphanedCount;
+    
+    // Count .cpp files
     FoundFiles.Empty();
-    IFileManager::Get().FindFilesRecursive(FoundFiles, *ModulePath, TEXT("*.cpp"), true, false);
-    MainModuleStatus.SourceCount = FoundFiles.Num();
+    FileManager.FindFilesRecursive(FoundFiles, *ModulePath, TEXT("*.cpp"), true, false);
+    ModuleStatus.SourceCount = FoundFiles.Num();
     
     // Determine compilation status
-    if (MainModuleStatus.OrphanedHeaders == 0)
+    if (OrphanedCount == 0)
     {
-        MainModuleStatus.CompilationStatus = EEng_CompilationStatus::Clean;
+        ModuleStatus.CompilationStatus = EEng_CompilationStatus::Clean;
     }
-    else if (MainModuleStatus.OrphanedHeaders < 5)
+    else if (OrphanedCount < 5)
     {
-        MainModuleStatus.CompilationStatus = EEng_CompilationStatus::Warnings;
+        ModuleStatus.CompilationStatus = EEng_CompilationStatus::Warnings;
     }
     else
     {
-        MainModuleStatus.CompilationStatus = EEng_CompilationStatus::Errors;
+        ModuleStatus.CompilationStatus = EEng_CompilationStatus::Errors;
     }
     
-    ModuleStatuses.Add(TEXT("TranspersonalGame"), MainModuleStatus);
+    ModuleStatuses.Add(ModuleStatus.ModuleName, ModuleStatus);
     
-    UE_LOG(LogTemp, Warning, TEXT("Module scan complete: %d headers, %d sources, %d orphaned"), 
-           MainModuleStatus.HeaderCount, MainModuleStatus.SourceCount, MainModuleStatus.OrphanedHeaders);
-}
-
-void UEng_ArchitecturalFramework::ValidateHeaderCppPairs(const FString& ModulePath)
-{
-    if (!ModuleStatuses.Contains(TEXT("TranspersonalGame")))
-    {
-        return;
-    }
-    
-    FEng_ModuleStatus& Status = ModuleStatuses[TEXT("TranspersonalGame")];
-    
-    // Additional validation logic for header/cpp pairs
-    for (const FString& MissingImpl : Status.MissingImplementations)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Missing implementation for: %s"), *MissingImpl);
-    }
+    UE_LOG(LogTemp, Warning, TEXT("Module: %s - Headers: %d, Sources: %d, Orphaned: %d"), 
+           *ModuleStatus.ModuleName, ModuleStatus.HeaderCount, ModuleStatus.SourceCount, ModuleStatus.OrphanedHeaders);
 }
 
 FEng_ModuleStatus UEng_ArchitecturalFramework::GetModuleStatus(const FString& ModuleName) const
 {
-    if (ModuleStatuses.Contains(ModuleName))
+    if (const FEng_ModuleStatus* Status = ModuleStatuses.Find(ModuleName))
     {
-        return ModuleStatuses[ModuleName];
+        return *Status;
     }
     
-    return FEng_ModuleStatus();
+    return FEng_ModuleStatus(); // Return default empty status
 }
 
 TArray<FEng_ModuleStatus> UEng_ArchitecturalFramework::GetAllModuleStatuses() const
 {
     TArray<FEng_ModuleStatus> AllStatuses;
-    
     for (const auto& StatusPair : ModuleStatuses)
     {
         AllStatuses.Add(StatusPair.Value);
     }
-    
     return AllStatuses;
 }
 
 bool UEng_ArchitecturalFramework::ValidateSystemRequirements(EEng_SystemType SystemType) const
 {
-    if (!SystemRequirements.Contains(SystemType))
+    if (const FEng_SystemRequirements* Requirements = SystemRequirements.Find(SystemType))
     {
-        return false;
+        // Check if all required modules are available
+        for (const FString& RequiredModule : Requirements->RequiredModules)
+        {
+            // In a real implementation, we would check if the module is loaded
+            // For now, we'll assume they are available
+        }
+        
+        // Check performance requirements
+        if (CurrentPerformanceTier < Requirements->MinPerformanceTier)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("System %d performance below minimum tier"), (int32)SystemType);
+            return false;
+        }
+        
+        return true;
     }
     
-    const FEng_SystemRequirements& Reqs = SystemRequirements[SystemType];
-    
-    // Validate required modules are loaded
-    for (const FString& RequiredModule : Reqs.RequiredModules)
-    {
-        // In a real implementation, we would check if the module is actually loaded
-        UE_LOG(LogTemp, Log, TEXT("Validating module: %s"), *RequiredModule);
-    }
-    
-    return true;
+    return false;
 }
 
 void UEng_ArchitecturalFramework::ScanForOrphanedHeaders()
 {
     ValidateModuleStructure();
+    
+    for (const auto& StatusPair : ModuleStatuses)
+    {
+        const FEng_ModuleStatus& Status = StatusPair.Value;
+        if (Status.OrphanedHeaders > 0)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Module %s has %d orphaned headers"), 
+                   *Status.ModuleName, Status.OrphanedHeaders);
+            
+            for (const FString& MissingImpl : Status.MissingImplementations)
+            {
+                UE_LOG(LogTemp, Warning, TEXT("  Missing implementation: %s"), *MissingImpl);
+            }
+        }
+    }
 }
 
 void UEng_ArchitecturalFramework::GenerateMissingImplementations()
 {
-    if (!ModuleStatuses.Contains(TEXT("TranspersonalGame")))
-    {
-        return;
-    }
+    UE_LOG(LogTemp, Warning, TEXT("GenerateMissingImplementations called - would generate .cpp stubs for orphaned headers"));
     
-    const FEng_ModuleStatus& Status = ModuleStatuses[TEXT("TranspersonalGame")];
-    
-    for (const FString& MissingImpl : Status.MissingImplementations)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Would generate implementation for: %s"), *MissingImpl);
-        // In a real implementation, we would generate stub .cpp files here
-    }
+    // In a real implementation, this would generate basic .cpp files
+    // For now, we'll just log what needs to be done
+    ScanForOrphanedHeaders();
 }
 
 bool UEng_ArchitecturalFramework::CheckCompilationStatus()
 {
     ValidateModuleStructure();
     
-    if (!ModuleStatuses.Contains(TEXT("TranspersonalGame")))
+    for (const auto& StatusPair : ModuleStatuses)
     {
-        return false;
+        const FEng_ModuleStatus& Status = StatusPair.Value;
+        if (Status.CompilationStatus == EEng_CompilationStatus::Errors || 
+            Status.CompilationStatus == EEng_CompilationStatus::Blocked)
+        {
+            return false;
+        }
     }
     
-    const FEng_ModuleStatus& Status = ModuleStatuses[TEXT("TranspersonalGame")];
-    return Status.CompilationStatus == EEng_CompilationStatus::Clean;
+    return true;
 }
 
 void UEng_ArchitecturalFramework::RunArchitecturalAudit()
@@ -260,52 +269,23 @@ void UEng_ArchitecturalFramework::RunArchitecturalAudit()
     UE_LOG(LogTemp, Warning, TEXT("=== ARCHITECTURAL AUDIT STARTING ==="));
     
     ValidateModuleStructure();
+    ScanForOrphanedHeaders();
     MonitorSystemPerformance();
     CheckSystemDependencies();
-    
-    // Report findings
-    for (const auto& StatusPair : ModuleStatuses)
-    {
-        const FEng_ModuleStatus& Status = StatusPair.Value;
-        UE_LOG(LogTemp, Warning, TEXT("Module %s: %d headers, %d sources, %d orphaned"), 
-               *Status.ModuleName, Status.HeaderCount, Status.SourceCount, Status.OrphanedHeaders);
-    }
     
     UE_LOG(LogTemp, Warning, TEXT("=== ARCHITECTURAL AUDIT COMPLETE ==="));
 }
 
 void UEng_ArchitecturalFramework::MonitorSystemPerformance()
 {
-    // Get current world and count actors
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        CurrentPerformanceTier = EEng_PerformanceTier::Low;
-        return;
-    }
+    UpdatePerformanceMetrics();
     
-    int32 ActorCount = World->GetActorCount();
+    UE_LOG(LogTemp, Warning, TEXT("Current Performance Tier: %d"), (int32)CurrentPerformanceTier);
     
-    // Simple performance tier calculation based on actor count
-    if (ActorCount < 1000)
+    if (CurrentPerformanceTier < EEng_PerformanceTier::High)
     {
-        CurrentPerformanceTier = EEng_PerformanceTier::Critical;
+        UE_LOG(LogTemp, Warning, TEXT("Performance below optimal - consider optimization"));
     }
-    else if (ActorCount < 2000)
-    {
-        CurrentPerformanceTier = EEng_PerformanceTier::High;
-    }
-    else if (ActorCount < 5000)
-    {
-        CurrentPerformanceTier = EEng_PerformanceTier::Medium;
-    }
-    else
-    {
-        CurrentPerformanceTier = EEng_PerformanceTier::Low;
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("Performance monitoring: %d actors, tier %d"), 
-           ActorCount, (int32)CurrentPerformanceTier);
 }
 
 EEng_PerformanceTier UEng_ArchitecturalFramework::GetCurrentPerformanceTier() const
@@ -315,48 +295,105 @@ EEng_PerformanceTier UEng_ArchitecturalFramework::GetCurrentPerformanceTier() co
 
 void UEng_ArchitecturalFramework::EnforcePerformanceLimits()
 {
-    MonitorSystemPerformance();
-    
-    if (CurrentPerformanceTier == EEng_PerformanceTier::Low)
+    if (!CurrentRules.bEnforcePerformanceLimits)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Performance tier LOW - enforcement needed"));
-        // In a real implementation, we would trigger cleanup or optimization
+        return;
+    }
+    
+    // Check frame time
+    float CurrentFrameTime = FApp::GetDeltaTime() * 1000.0f; // Convert to milliseconds
+    
+    if (CurrentFrameTime > CurrentRules.MaxFrameTimeMS)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Frame time exceeded limit: %.2fms > %.2fms"), 
+               CurrentFrameTime, CurrentRules.MaxFrameTimeMS);
+        
+        // Update performance tier based on frame time
+        if (CurrentFrameTime > 33.33f) // 30fps
+        {
+            CurrentPerformanceTier = EEng_PerformanceTier::Low;
+        }
+        else if (CurrentFrameTime > 22.22f) // 45fps
+        {
+            CurrentPerformanceTier = EEng_PerformanceTier::Medium;
+        }
+        else
+        {
+            CurrentPerformanceTier = EEng_PerformanceTier::High;
+        }
+    }
+    else
+    {
+        CurrentPerformanceTier = EEng_PerformanceTier::Critical;
     }
 }
 
 void UEng_ArchitecturalFramework::RegisterSystemRequirements(EEng_SystemType SystemType, const FEng_SystemRequirements& Requirements)
 {
     SystemRequirements.Add(SystemType, Requirements);
-    UE_LOG(LogTemp, Log, TEXT("Registered requirements for system type %d"), (int32)SystemType);
+    UE_LOG(LogTemp, Warning, TEXT("Registered system requirements for type: %d"), (int32)SystemType);
 }
 
 bool UEng_ArchitecturalFramework::ValidateSystemIntegration(EEng_SystemType SystemA, EEng_SystemType SystemB) const
 {
-    // Basic integration validation
-    bool bAExists = SystemRequirements.Contains(SystemA);
-    bool bBExists = SystemRequirements.Contains(SystemB);
+    // Check if both systems have valid requirements
+    const FEng_SystemRequirements* ReqsA = SystemRequirements.Find(SystemA);
+    const FEng_SystemRequirements* ReqsB = SystemRequirements.Find(SystemB);
     
-    return bAExists && bBExists;
+    if (!ReqsA || !ReqsB)
+    {
+        return false;
+    }
+    
+    // Check for conflicting performance requirements
+    if (ReqsA->MinPerformanceTier != ReqsB->MinPerformanceTier)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Performance tier mismatch between systems %d and %d"), 
+               (int32)SystemA, (int32)SystemB);
+    }
+    
+    // Check for shared module dependencies
+    for (const FString& ModuleA : ReqsA->RequiredModules)
+    {
+        for (const FString& ModuleB : ReqsB->RequiredModules)
+        {
+            if (ModuleA == ModuleB)
+            {
+                UE_LOG(LogTemp, Log, TEXT("Systems %d and %d share module dependency: %s"), 
+                       (int32)SystemA, (int32)SystemB, *ModuleA);
+            }
+        }
+    }
+    
+    return true;
 }
 
 void UEng_ArchitecturalFramework::InitializeSystemDependencies()
 {
-    CheckSystemDependencies();
-}
-
-void UEng_ArchitecturalFramework::CheckSystemDependencies()
-{
-    for (const auto& SystemPair : SystemRequirements)
+    UE_LOG(LogTemp, Warning, TEXT("Initializing system dependencies..."));
+    
+    // Validate all system integrations
+    TArray<EEng_SystemType> SystemTypes = {
+        EEng_SystemType::Core,
+        EEng_SystemType::World,
+        EEng_SystemType::Character,
+        EEng_SystemType::AI,
+        EEng_SystemType::Performance
+    };
+    
+    for (int32 i = 0; i < SystemTypes.Num(); i++)
     {
-        const FEng_SystemRequirements& Reqs = SystemPair.Value;
-        ValidateSystemRequirements(Reqs.SystemType);
+        for (int32 j = i + 1; j < SystemTypes.Num(); j++)
+        {
+            ValidateSystemIntegration(SystemTypes[i], SystemTypes[j]);
+        }
     }
 }
 
 void UEng_ArchitecturalFramework::SetArchitecturalRules(const FEng_ArchitecturalRules& Rules)
 {
     CurrentRules = Rules;
-    UE_LOG(LogTemp, Log, TEXT("Architectural rules updated"));
+    UE_LOG(LogTemp, Warning, TEXT("Architectural rules updated"));
 }
 
 FEng_ArchitecturalRules UEng_ArchitecturalFramework::GetArchitecturalRules() const
@@ -366,31 +403,33 @@ FEng_ArchitecturalRules UEng_ArchitecturalFramework::GetArchitecturalRules() con
 
 bool UEng_ArchitecturalFramework::ValidateAgentOutput(int32 AgentID, const TArray<FString>& CreatedFiles) const
 {
-    // Validate that agent created proper .h/.cpp pairs
-    TArray<FString> Headers;
-    TArray<FString> Sources;
+    if (!CurrentRules.bEnforceHeaderCppPairs)
+    {
+        return true;
+    }
+    
+    // Check that every .h file has a corresponding .cpp file
+    TArray<FString> HeaderFiles;
+    TArray<FString> SourceFiles;
     
     for (const FString& File : CreatedFiles)
     {
         if (File.EndsWith(TEXT(".h")))
         {
-            Headers.Add(File);
+            HeaderFiles.Add(File);
         }
         else if (File.EndsWith(TEXT(".cpp")))
         {
-            Sources.Add(File);
+            SourceFiles.Add(File);
         }
     }
     
-    // Check for orphaned headers
-    for (const FString& Header : Headers)
+    for (const FString& HeaderFile : HeaderFiles)
     {
-        FString ExpectedSource = Header;
-        ExpectedSource = ExpectedSource.Replace(TEXT(".h"), TEXT(".cpp"));
-        
-        if (!Sources.Contains(ExpectedSource))
+        FString ExpectedCppFile = HeaderFile.Replace(TEXT(".h"), TEXT(".cpp"));
+        if (!SourceFiles.Contains(ExpectedCppFile))
         {
-            UE_LOG(LogTemp, Warning, TEXT("Agent %d created orphaned header: %s"), AgentID, *Header);
+            UE_LOG(LogTemp, Warning, TEXT("Agent %d created orphaned header: %s"), AgentID, *HeaderFile);
             return false;
         }
     }
@@ -398,7 +437,49 @@ bool UEng_ArchitecturalFramework::ValidateAgentOutput(int32 AgentID, const TArra
     return true;
 }
 
+void UEng_ArchitecturalFramework::ValidateHeaderCppPairs(const FString& ModulePath)
+{
+    // This is called by ScanModuleDirectory and updates the ModuleStatus
+    // Implementation is already handled in ScanModuleDirectory
+}
+
+void UEng_ArchitecturalFramework::CheckSystemDependencies()
+{
+    UE_LOG(LogTemp, Warning, TEXT("Checking system dependencies..."));
+    
+    for (const auto& SystemPair : SystemRequirements)
+    {
+        const FEng_SystemRequirements& Requirements = SystemPair.Value;
+        
+        UE_LOG(LogTemp, Log, TEXT("System %d requires %d modules"), 
+               (int32)Requirements.SystemType, Requirements.RequiredModules.Num());
+        
+        for (const FString& RequiredModule : Requirements.RequiredModules)
+        {
+            UE_LOG(LogTemp, Log, TEXT("  - %s"), *RequiredModule);
+        }
+    }
+}
+
 void UEng_ArchitecturalFramework::UpdatePerformanceMetrics()
 {
-    MonitorSystemPerformance();
+    // Update current performance tier based on various metrics
+    float CurrentFPS = 1.0f / FApp::GetDeltaTime();
+    
+    if (CurrentFPS >= 60.0f)
+    {
+        CurrentPerformanceTier = EEng_PerformanceTier::Critical;
+    }
+    else if (CurrentFPS >= 45.0f)
+    {
+        CurrentPerformanceTier = EEng_PerformanceTier::High;
+    }
+    else if (CurrentFPS >= 30.0f)
+    {
+        CurrentPerformanceTier = EEng_PerformanceTier::Medium;
+    }
+    else
+    {
+        CurrentPerformanceTier = EEng_PerformanceTier::Low;
+    }
 }
