@@ -1,82 +1,119 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/GameInstanceSubsystem.h"
+#include "UObject/NoExportTypes.h"
+#include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "Components/ActorComponent.h"
-#include "TimerManager.h"
-#include "../SharedTypes.h"
+#include "Subsystems/GameInstanceSubsystem.h"
+#include "HAL/Platform.h"
+#include "Stats/Stats.h"
+#include "Engine/EngineTypes.h"
 #include "Perf_VehiclePhysicsPerformanceIntegrator.generated.h"
 
-// Vehicle Physics Performance Metrics Structure
+// Forward declarations
+class UCore_VehiclePhysicsSystem;
+class AActor;
+class UWorld;
+
+UENUM(BlueprintType)
+enum class EPerf_VehiclePerformanceLevel : uint8
+{
+    Ultra       UMETA(DisplayName = "Ultra"),
+    High        UMETA(DisplayName = "High"), 
+    Medium      UMETA(DisplayName = "Medium"),
+    Low         UMETA(DisplayName = "Low"),
+    Minimal     UMETA(DisplayName = "Minimal")
+};
+
 USTRUCT(BlueprintType)
 struct TRANSPERSONALGAME_API FPerf_VehiclePhysicsMetrics
 {
     GENERATED_BODY()
 
-    // Core Performance Metrics
-    UPROPERTY(BlueprintReadOnly, Category = "Vehicle Physics Performance")
-    float VehiclePhysicsFrameTime;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float PhysicsUpdateTime;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Vehicle Physics Performance")
-    float VehicleSimulationCost;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float SurfaceDetectionTime;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Vehicle Physics Performance")
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float DamageCalculationTime;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float SuspensionUpdateTime;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float TirePhysicsTime;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
     int32 ActiveVehicleCount;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Vehicle Physics Performance")
-    float VehiclePhysicsMemoryUsage;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float MemoryUsageMB;
 
-    // Advanced Metrics
-    UPROPERTY(BlueprintReadOnly, Category = "Vehicle Physics Performance")
-    float VehicleCollisionCost;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    float AverageFrameTime;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Vehicle Physics Performance")
-    float VehicleWheelPhysicsCost;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Vehicle Physics Performance")
-    float VehicleEngineSimulationCost;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Vehicle Physics Performance")
-    float VehicleSuspensionCost;
-
-    // Quality Scaling Metrics
-    UPROPERTY(BlueprintReadOnly, Category = "Vehicle Physics Performance")
-    float VehiclePhysicsQualityScale;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Vehicle Physics Performance")
-    bool bVehiclePhysicsOptimizationActive;
+    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    bool bPerformanceTargetMet;
 
     FPerf_VehiclePhysicsMetrics()
+        : PhysicsUpdateTime(0.0f)
+        , SurfaceDetectionTime(0.0f)
+        , DamageCalculationTime(0.0f)
+        , SuspensionUpdateTime(0.0f)
+        , TirePhysicsTime(0.0f)
+        , ActiveVehicleCount(0)
+        , MemoryUsageMB(0.0f)
+        , AverageFrameTime(0.0f)
+        , bPerformanceTargetMet(true)
     {
-        VehiclePhysicsFrameTime = 0.0f;
-        VehicleSimulationCost = 0.0f;
-        ActiveVehicleCount = 0;
-        VehiclePhysicsMemoryUsage = 0.0f;
-        VehicleCollisionCost = 0.0f;
-        VehicleWheelPhysicsCost = 0.0f;
-        VehicleEngineSimulationCost = 0.0f;
-        VehicleSuspensionCost = 0.0f;
-        VehiclePhysicsQualityScale = 1.0f;
-        bVehiclePhysicsOptimizationActive = false;
     }
 };
 
-// Vehicle Physics Optimization Level
-UENUM(BlueprintType)
-enum class EPerf_VehiclePhysicsOptimizationLevel : uint8
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FPerf_VehicleOptimizationSettings
 {
-    Ultra       UMETA(DisplayName = "Ultra Quality"),
-    High        UMETA(DisplayName = "High Quality"),
-    Medium      UMETA(DisplayName = "Medium Quality"),
-    Low         UMETA(DisplayName = "Low Quality"),
-    Minimal     UMETA(DisplayName = "Minimal Quality")
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Optimization")
+    float MaxPhysicsUpdateDistance;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Optimization")
+    float SurfaceDetectionLODDistance;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Optimization")
+    int32 MaxConcurrentVehicles;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Optimization")
+    bool bEnableAsyncPhysics;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Optimization")
+    bool bEnableDamageSimulation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Optimization")
+    float TargetFrameTime;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Optimization")
+    EPerf_VehiclePerformanceLevel PerformanceLevel;
+
+    FPerf_VehicleOptimizationSettings()
+        : MaxPhysicsUpdateDistance(5000.0f)
+        , SurfaceDetectionLODDistance(2000.0f)
+        , MaxConcurrentVehicles(10)
+        , bEnableAsyncPhysics(true)
+        , bEnableDamageSimulation(true)
+        , TargetFrameTime(16.67f)
+        , PerformanceLevel(EPerf_VehiclePerformanceLevel::High)
+    {
+    }
 };
 
 /**
- * Vehicle Physics Performance Integrator
- * Monitors and optimizes vehicle physics performance in real-time
- * Integrates with Core Systems Programmer's Vehicle Physics System
+ * Advanced Vehicle Physics Performance Integration System
+ * Monitors and optimizes vehicle physics performance for prehistoric transportation
+ * Integrates with Core_VehiclePhysicsSystem for comprehensive performance management
  */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UPerf_VehiclePhysicsPerformanceIntegrator : public UGameInstanceSubsystem
@@ -86,99 +123,134 @@ class TRANSPERSONALGAME_API UPerf_VehiclePhysicsPerformanceIntegrator : public U
 public:
     UPerf_VehiclePhysicsPerformanceIntegrator();
 
-    // Subsystem Interface
+    // USubsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Performance Monitoring
-    UFUNCTION(BlueprintCallable, Category = "Vehicle Physics Performance")
-    void StartVehiclePhysicsMonitoring();
+    /**
+     * Initialize vehicle physics performance monitoring
+     */
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void InitializeVehiclePerformanceMonitoring();
 
-    UFUNCTION(BlueprintCallable, Category = "Vehicle Physics Performance")
-    void StopVehiclePhysicsMonitoring();
+    /**
+     * Update performance metrics for all active vehicles
+     */
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void UpdateVehiclePerformanceMetrics();
 
-    UFUNCTION(BlueprintCallable, Category = "Vehicle Physics Performance")
+    /**
+     * Get current vehicle physics performance metrics
+     */
+    UFUNCTION(BlueprintCallable, Category = "Performance")
     FPerf_VehiclePhysicsMetrics GetVehiclePhysicsMetrics() const;
 
-    // Optimization Control
-    UFUNCTION(BlueprintCallable, Category = "Vehicle Physics Performance")
-    void SetVehiclePhysicsOptimizationLevel(EPerf_VehiclePhysicsOptimizationLevel Level);
+    /**
+     * Set vehicle optimization settings
+     */
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void SetVehicleOptimizationSettings(const FPerf_VehicleOptimizationSettings& Settings);
 
-    UFUNCTION(BlueprintCallable, Category = "Vehicle Physics Performance")
+    /**
+     * Get current optimization settings
+     */
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    FPerf_VehicleOptimizationSettings GetOptimizationSettings() const;
+
+    /**
+     * Optimize vehicle physics performance based on current metrics
+     */
+    UFUNCTION(BlueprintCallable, Category = "Performance")
     void OptimizeVehiclePhysicsPerformance();
 
-    UFUNCTION(BlueprintCallable, Category = "Vehicle Physics Performance")
-    void EnableAdaptiveVehiclePhysicsOptimization(bool bEnable);
+    /**
+     * Set performance level for adaptive optimization
+     */
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void SetPerformanceLevel(EPerf_VehiclePerformanceLevel Level);
 
-    // Integration with Vehicle Physics System
-    UFUNCTION(BlueprintCallable, Category = "Vehicle Physics Performance")
-    void RegisterVehiclePhysicsSystem(class ACore_VehiclePhysicsSystem* VehicleSystem);
+    /**
+     * Check if performance targets are being met
+     */
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    bool ArePerformanceTargetsMet() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Vehicle Physics Performance")
-    void UnregisterVehiclePhysicsSystem(class ACore_VehiclePhysicsSystem* VehicleSystem);
+    /**
+     * Get performance optimization recommendations
+     */
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    TArray<FString> GetPerformanceRecommendations() const;
 
-    // Performance Analysis
-    UFUNCTION(BlueprintCallable, Category = "Vehicle Physics Performance")
-    void AnalyzeVehiclePhysicsPerformance();
+    /**
+     * Enable/disable vehicle physics debugging
+     */
+    UFUNCTION(BlueprintCallable, Category = "Debug")
+    void SetVehiclePhysicsDebugging(bool bEnabled);
 
-    UFUNCTION(BlueprintCallable, Category = "Vehicle Physics Performance")
-    bool IsVehiclePhysicsPerformanceOptimal() const;
-
-    // Debug and Diagnostics
-    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Vehicle Physics Performance")
-    void RunVehiclePhysicsPerformanceTest();
-
-    UFUNCTION(BlueprintCallable, Category = "Vehicle Physics Performance")
-    void LogVehiclePhysicsPerformanceReport();
+    /**
+     * Get debug information for vehicle physics performance
+     */
+    UFUNCTION(BlueprintCallable, Category = "Debug")
+    FString GetVehiclePhysicsDebugInfo() const;
 
 protected:
-    // Core Properties
-    UPROPERTY(BlueprintReadOnly, Category = "Vehicle Physics Performance")
-    FPerf_VehiclePhysicsMetrics CurrentMetrics;
+    /**
+     * Update vehicle physics LOD based on distance and performance
+     */
+    void UpdateVehiclePhysicsLOD();
 
-    UPROPERTY(BlueprintReadOnly, Category = "Vehicle Physics Performance")
-    EPerf_VehiclePhysicsOptimizationLevel CurrentOptimizationLevel;
+    /**
+     * Monitor vehicle physics memory usage
+     */
+    void MonitorVehicleMemoryUsage();
 
-    UPROPERTY(BlueprintReadOnly, Category = "Vehicle Physics Performance")
-    bool bIsMonitoringActive;
+    /**
+     * Apply performance optimizations based on current metrics
+     */
+    void ApplyPerformanceOptimizations();
 
-    UPROPERTY(BlueprintReadOnly, Category = "Vehicle Physics Performance")
-    bool bAdaptiveOptimizationEnabled;
+    /**
+     * Calculate vehicle physics performance score
+     */
+    float CalculateVehiclePerformanceScore() const;
 
-    // Performance Thresholds
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicle Physics Performance", meta = (AllowPrivateAccess = "true"))
-    float TargetVehiclePhysicsFrameTime;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicle Physics Performance", meta = (AllowPrivateAccess = "true"))
-    float MaxVehicleSimulationCost;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicle Physics Performance", meta = (AllowPrivateAccess = "true"))
-    int32 MaxActiveVehicles;
-
-    // Registered Vehicle Systems
-    UPROPERTY()
-    TArray<class ACore_VehiclePhysicsSystem*> RegisteredVehicleSystems;
-
-    // Timer Handles
-    FTimerHandle MonitoringTimerHandle;
-    FTimerHandle OptimizationTimerHandle;
+    /**
+     * Update async physics settings for vehicles
+     */
+    void UpdateAsyncPhysicsSettings();
 
 private:
-    // Internal Methods
-    void UpdateVehiclePhysicsMetrics();
-    void ApplyVehiclePhysicsOptimizations();
-    void CheckAdaptiveOptimization();
-    void OptimizeVehicleCollisionSettings();
-    void OptimizeVehicleWheelPhysics();
-    void OptimizeVehicleEngineSimulation();
-    void OptimizeVehicleSuspensionSettings();
-    
-    // Performance Tracking
-    float LastFrameTime;
-    float AccumulatedFrameTime;
-    int32 FrameCount;
-    
-    // Optimization State
-    bool bOptimizationInProgress;
+    UPROPERTY()
+    FPerf_VehiclePhysicsMetrics CurrentMetrics;
+
+    UPROPERTY()
+    FPerf_VehicleOptimizationSettings OptimizationSettings;
+
+    UPROPERTY()
+    TArray<TWeakObjectPtr<AActor>> TrackedVehicles;
+
+    UPROPERTY()
+    bool bIsMonitoringActive;
+
+    UPROPERTY()
+    bool bDebugEnabled;
+
+    UPROPERTY()
     float LastOptimizationTime;
+
+    UPROPERTY()
+    float OptimizationInterval;
+
+    // Performance tracking
+    TArray<float> FrameTimeHistory;
+    TArray<float> PhysicsTimeHistory;
+    float AccumulatedPhysicsTime;
+    float AccumulatedFrameTime;
+    int32 SampleCount;
+
+    // Constants
+    static constexpr float PERFORMANCE_UPDATE_INTERVAL = 1.0f;
+    static constexpr int32 MAX_FRAME_HISTORY = 60;
+    static constexpr float TARGET_60FPS_FRAME_TIME = 16.67f;
+    static constexpr float TARGET_30FPS_FRAME_TIME = 33.33f;
 };
