@@ -1,265 +1,297 @@
 #include "ArchitectureManager.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "DrawDebugHelpers.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMeshActor.h"
+#include "Materials/MaterialInterface.h"
 #include "Kismet/GameplayStatics.h"
 
 UArchitectureManager::UArchitectureManager()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 2.0f;
+    PrimaryComponentTick.TickInterval = 5.0f;
     
-    MaxShelterDistance = 5000.0f;
-    MaxSheltersPerArea = 3;
-    
-    RegisteredShelters.Empty();
+    StructureSpawnRadius = 5000.0f;
+    MaxStructuresPerBiome = 8;
+    bAutoGenerateStructures = false;
 }
 
 void UArchitectureManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    InitializeDefaultShelters();
+    UE_LOG(LogTemp, Warning, TEXT("ArchitectureManager: Initialized for prehistoric structure management"));
     
-    UE_LOG(LogTemp, Warning, TEXT("ArchitectureManager: Initialized with %d default shelters"), RegisteredShelters.Num());
+    if (bAutoGenerateStructures)
+    {
+        GenerateTestStructures();
+    }
 }
 
 void UArchitectureManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    // Debug draw registered shelters
-    if (GetWorld() && GetWorld()->IsGameWorld())
+    // Update structural integrity over time
+    for (FArch_StructureData& Structure : RegisteredStructures)
     {
-        for (const FArch_ShelterData& Shelter : RegisteredShelters)
+        if (Structure.StructuralIntegrity > 0.0f)
         {
-            FColor DebugColor = FColor::Green;
-            switch (Shelter.ShelterType)
+            // Natural decay - structures deteriorate slowly over time
+            Structure.StructuralIntegrity -= DeltaTime * 0.1f;
+            Structure.StructuralIntegrity = FMath::Max(0.0f, Structure.StructuralIntegrity);
+        }
+    }
+}
+
+void UArchitectureManager::RegisterStructure(const FArch_StructureData& StructureData)
+{
+    if (RegisteredStructures.Num() >= MaxStructuresPerBiome * 5) // 5 biomes
+    {
+        UE_LOG(LogTemp, Warning, TEXT("ArchitectureManager: Maximum structure limit reached"));
+        return;
+    }
+    
+    RegisteredStructures.Add(StructureData);
+    UE_LOG(LogTemp, Log, TEXT("ArchitectureManager: Registered structure at location %s"), 
+           *StructureData.Location.ToString());
+}
+
+void UArchitectureManager::RemoveStructure(const FVector& Location, float Radius)
+{
+    for (int32 i = RegisteredStructures.Num() - 1; i >= 0; i--)
+    {
+        if (FVector::Dist(RegisteredStructures[i].Location, Location) <= Radius)
+        {
+            RegisteredStructures.RemoveAt(i);
+            UE_LOG(LogTemp, Log, TEXT("ArchitectureManager: Removed structure near %s"), *Location.ToString());
+        }
+    }
+}
+
+TArray<FArch_StructureData> UArchitectureManager::GetStructuresInRadius(const FVector& Center, float Radius) const
+{
+    TArray<FArch_StructureData> NearbyStructures;
+    
+    for (const FArch_StructureData& Structure : RegisteredStructures)
+    {
+        if (FVector::Dist(Structure.Location, Center) <= Radius)
+        {
+            NearbyStructures.Add(Structure);
+        }
+    }
+    
+    return NearbyStructures;
+}
+
+void UArchitectureManager::GenerateCaveDwelling(const FVector& Location, const FRotator& Rotation)
+{
+    if (!ValidateStructurePlacement(Location, EArch_StructureType::CaveDwelling))
+    {
+        return;
+    }
+    
+    FArch_StructureData CaveData;
+    CaveData.StructureType = EArch_StructureType::CaveDwelling;
+    CaveData.Location = Location;
+    CaveData.Rotation = Rotation;
+    CaveData.StructuralIntegrity = 95.0f;
+    CaveData.Materials = {EArch_ConstructionMaterial::Stone};
+    CaveData.bIsHabitable = true;
+    CaveData.MaxOccupants = 3;
+    CaveData.DefenseRating = 8.0f;
+    
+    RegisterStructure(CaveData);
+    
+    // Spawn visual representation
+    UWorld* World = GetWorld();
+    if (World)
+    {
+        AStaticMeshActor* CaveActor = World->SpawnActor<AStaticMeshActor>(Location, Rotation);
+        if (CaveActor)
+        {
+            CaveActor->SetActorLabel(TEXT("CaveDwelling"));
+            UE_LOG(LogTemp, Log, TEXT("ArchitectureManager: Generated cave dwelling at %s"), *Location.ToString());
+        }
+    }
+}
+
+void UArchitectureManager::GenerateWoodenShelter(const FVector& Location, const FRotator& Rotation)
+{
+    if (!ValidateStructurePlacement(Location, EArch_StructureType::WoodenShelter))
+    {
+        return;
+    }
+    
+    FArch_StructureData ShelterData;
+    ShelterData.StructureType = EArch_StructureType::WoodenShelter;
+    ShelterData.Location = Location;
+    ShelterData.Rotation = Rotation;
+    ShelterData.StructuralIntegrity = 70.0f;
+    ShelterData.Materials = {EArch_ConstructionMaterial::Wood, EArch_ConstructionMaterial::Vine};
+    ShelterData.bIsHabitable = true;
+    ShelterData.MaxOccupants = 2;
+    ShelterData.DefenseRating = 4.0f;
+    
+    RegisterStructure(ShelterData);
+    
+    // Spawn visual representation
+    UWorld* World = GetWorld();
+    if (World)
+    {
+        AStaticMeshActor* ShelterActor = World->SpawnActor<AStaticMeshActor>(Location, Rotation);
+        if (ShelterActor)
+        {
+            ShelterActor->SetActorLabel(TEXT("WoodenShelter"));
+            UE_LOG(LogTemp, Log, TEXT("ArchitectureManager: Generated wooden shelter at %s"), *Location.ToString());
+        }
+    }
+}
+
+void UArchitectureManager::GenerateStoneSite(const FVector& Location, const FRotator& Rotation)
+{
+    if (!ValidateStructurePlacement(Location, EArch_StructureType::StoneSite))
+    {
+        return;
+    }
+    
+    FArch_StructureData SiteData;
+    SiteData.StructureType = EArch_StructureType::StoneSite;
+    SiteData.Location = Location;
+    SiteData.Rotation = Rotation;
+    SiteData.StructuralIntegrity = 100.0f;
+    SiteData.Materials = {EArch_ConstructionMaterial::Stone};
+    SiteData.bIsHabitable = false;
+    SiteData.MaxOccupants = 0;
+    SiteData.DefenseRating = 2.0f;
+    
+    RegisterStructure(SiteData);
+    
+    // Spawn visual representation
+    UWorld* World = GetWorld();
+    if (World)
+    {
+        AStaticMeshActor* SiteActor = World->SpawnActor<AStaticMeshActor>(Location, Rotation);
+        if (SiteActor)
+        {
+            SiteActor->SetActorLabel(TEXT("StoneSite"));
+            UE_LOG(LogTemp, Log, TEXT("ArchitectureManager: Generated stone site at %s"), *Location.ToString());
+        }
+    }
+}
+
+void UArchitectureManager::GenerateCliffDwelling(const FVector& Location, const FRotator& Rotation)
+{
+    if (!ValidateStructurePlacement(Location, EArch_StructureType::CliffDwelling))
+    {
+        return;
+    }
+    
+    FArch_StructureData CliffData;
+    CliffData.StructureType = EArch_StructureType::CliffDwelling;
+    CliffData.Location = Location;
+    CliffData.Rotation = Rotation;
+    CliffData.StructuralIntegrity = 85.0f;
+    CliffData.Materials = {EArch_ConstructionMaterial::Stone, EArch_ConstructionMaterial::Wood};
+    CliffData.bIsHabitable = true;
+    CliffData.MaxOccupants = 4;
+    CliffData.DefenseRating = 9.0f;
+    
+    RegisterStructure(CliffData);
+    
+    // Spawn visual representation
+    UWorld* World = GetWorld();
+    if (World)
+    {
+        AStaticMeshActor* CliffActor = World->SpawnActor<AStaticMeshActor>(Location, Rotation);
+        if (CliffActor)
+        {
+            CliffActor->SetActorLabel(TEXT("CliffDwelling"));
+            UE_LOG(LogTemp, Log, TEXT("ArchitectureManager: Generated cliff dwelling at %s"), *Location.ToString());
+        }
+    }
+}
+
+bool UArchitectureManager::ValidateStructurePlacement(const FVector& Location, EArch_StructureType StructureType) const
+{
+    // Check minimum distance from existing structures
+    float MinDistance = 500.0f;
+    for (const FArch_StructureData& ExistingStructure : RegisteredStructures)
+    {
+        if (FVector::Dist(ExistingStructure.Location, Location) < MinDistance)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("ArchitectureManager: Structure too close to existing structure"));
+            return false;
+        }
+    }
+    
+    // Validate terrain suitability based on structure type
+    switch (StructureType)
+    {
+        case EArch_StructureType::CaveDwelling:
+            // Caves need elevated terrain or cliff faces
+            if (Location.Z < 200.0f)
             {
-                case EArch_ShelterType::Cave:
-                    DebugColor = FColor::Blue;
-                    break;
-                case EArch_ShelterType::ElevatedPlatform:
-                    DebugColor = FColor::Yellow;
-                    break;
-                case EArch_ShelterType::CliffDwelling:
-                    DebugColor = FColor::Red;
-                    break;
-                case EArch_ShelterType::RockOverhang:
-                    DebugColor = FColor::Orange;
-                    break;
-                default:
-                    DebugColor = FColor::White;
-                    break;
+                UE_LOG(LogTemp, Warning, TEXT("ArchitectureManager: Cave dwelling needs elevated terrain"));
+                return false;
             }
+            break;
             
-            DrawDebugSphere(GetWorld(), Shelter.Location, 100.0f, 12, DebugColor, false, 2.5f);
-        }
+        case EArch_StructureType::CliffDwelling:
+            // Cliff dwellings need very high elevation
+            if (Location.Z < 400.0f)
+            {
+                UE_LOG(LogTemp, Warning, TEXT("ArchitectureManager: Cliff dwelling needs high elevation"));
+                return false;
+            }
+            break;
+            
+        case EArch_StructureType::WoodenShelter:
+        case EArch_StructureType::StoneSite:
+            // These can be placed on most terrain
+            break;
     }
+    
+    return true;
 }
 
-void UArchitectureManager::RegisterShelter(const FArch_ShelterData& ShelterData)
+void UArchitectureManager::UpdateStructuralIntegrity(const FVector& Location, float IntegrityChange)
 {
-    if (ShelterData.ShelterType == EArch_ShelterType::None)
+    for (FArch_StructureData& Structure : RegisteredStructures)
     {
-        UE_LOG(LogTemp, Warning, TEXT("ArchitectureManager: Cannot register shelter with None type"));
-        return;
-    }
-    
-    // Check if we already have too many shelters in this area
-    TArray<FArch_ShelterData> NearbyShelters = FindNearbyShelters(ShelterData.Location, 1000.0f);
-    if (NearbyShelters.Num() >= MaxSheltersPerArea)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("ArchitectureManager: Too many shelters in area, cannot register new one"));
-        return;
-    }
-    
-    RegisteredShelters.Add(ShelterData);
-    UE_LOG(LogTemp, Log, TEXT("ArchitectureManager: Registered new shelter at location %s"), *ShelterData.Location.ToString());
-}
-
-TArray<FArch_ShelterData> UArchitectureManager::FindNearbyShelters(FVector PlayerLocation, float SearchRadius)
-{
-    TArray<FArch_ShelterData> NearbyShelters;
-    
-    for (const FArch_ShelterData& Shelter : RegisteredShelters)
-    {
-        float Distance = FVector::Dist(PlayerLocation, Shelter.Location);
-        if (Distance <= SearchRadius)
+        if (FVector::Dist(Structure.Location, Location) <= 100.0f)
         {
-            NearbyShelters.Add(Shelter);
+            Structure.StructuralIntegrity += IntegrityChange;
+            Structure.StructuralIntegrity = FMath::Clamp(Structure.StructuralIntegrity, 0.0f, 100.0f);
+            
+            UE_LOG(LogTemp, Log, TEXT("ArchitectureManager: Updated structure integrity to %f"), 
+                   Structure.StructuralIntegrity);
+            break;
         }
     }
-    
-    return NearbyShelters;
 }
 
-FArch_ShelterData UArchitectureManager::GetBestShelterForLocation(FVector Location, float SearchRadius)
+void UArchitectureManager::GenerateTestStructures()
 {
-    TArray<FArch_ShelterData> NearbyShelters = FindNearbyShelters(Location, SearchRadius);
+    UE_LOG(LogTemp, Warning, TEXT("ArchitectureManager: Generating test prehistoric structures"));
     
-    FArch_ShelterData BestShelter;
-    float BestScore = -1.0f;
+    // Generate cave dwelling in mountainous area
+    GenerateCaveDwelling(FVector(2000.0f, 1000.0f, 500.0f));
     
-    for (const FArch_ShelterData& Shelter : NearbyShelters)
-    {
-        float Distance = FVector::Dist(Location, Shelter.Location);
-        float DistanceScore = 1.0f - (Distance / SearchRadius);
-        float TotalScore = (Shelter.SafetyRating * 0.6f) + (DistanceScore * 0.4f);
-        
-        if (TotalScore > BestScore)
-        {
-            BestScore = TotalScore;
-            BestShelter = Shelter;
-        }
-    }
+    // Generate wooden shelter in forest area
+    GenerateWoodenShelter(FVector(-1500.0f, 2000.0f, 150.0f));
     
-    return BestShelter;
+    // Generate stone site in open area
+    GenerateStoneSite(FVector(0.0f, -2000.0f, 100.0f));
+    
+    // Generate cliff dwelling on high terrain
+    GenerateCliffDwelling(FVector(3000.0f, -1000.0f, 800.0f));
+    
+    UE_LOG(LogTemp, Warning, TEXT("ArchitectureManager: Generated %d test structures"), RegisteredStructures.Num());
 }
 
-bool UArchitectureManager::CanBuildShelterAt(FVector Location, EArch_ShelterType ShelterType)
+void UArchitectureManager::ClearAllStructures()
 {
-    // Check terrain suitability
-    float TerrainSuitability = CalculateTerrainSuitability(Location, ShelterType);
-    if (TerrainSuitability < 0.3f)
-    {
-        return false;
-    }
-    
-    // Check distance from existing shelters
-    TArray<FArch_ShelterData> NearbyShelters = FindNearbyShelters(Location, 500.0f);
-    if (NearbyShelters.Num() > 0)
-    {
-        return false; // Too close to existing shelter
-    }
-    
-    return IsLocationSuitable(Location, ShelterType);
-}
-
-void UArchitectureManager::SpawnShelterActor(const FArch_ShelterData& ShelterData)
-{
-    if (!GetWorld())
-    {
-        return;
-    }
-    
-    // This would spawn actual shelter actors in the world
-    // For now, just register the shelter data
-    RegisterShelter(ShelterData);
-    
-    UE_LOG(LogTemp, Log, TEXT("ArchitectureManager: Spawned shelter actor of type %d at %s"), 
-           (int32)ShelterData.ShelterType, *ShelterData.Location.ToString());
-}
-
-float UArchitectureManager::CalculateShelterSafety(const FArch_ShelterData& ShelterData, FVector ThreatLocation)
-{
-    float Distance = FVector::Dist(ShelterData.Location, ThreatLocation);
-    float BaseSafety = ShelterData.SafetyRating;
-    
-    // Distance bonus - farther from threat is safer
-    float DistanceBonus = FMath::Clamp(Distance / 1000.0f, 0.0f, 0.5f);
-    
-    // Shelter type bonus
-    float TypeBonus = 0.0f;
-    switch (ShelterData.ShelterType)
-    {
-        case EArch_ShelterType::Cave:
-            TypeBonus = 0.3f; // Caves are very safe
-            break;
-        case EArch_ShelterType::CliffDwelling:
-            TypeBonus = 0.25f; // High ground advantage
-            break;
-        case EArch_ShelterType::ElevatedPlatform:
-            TypeBonus = 0.2f; // Height advantage
-            break;
-        case EArch_ShelterType::RockOverhang:
-            TypeBonus = 0.15f; // Some protection
-            break;
-        default:
-            TypeBonus = 0.0f;
-            break;
-    }
-    
-    return FMath::Clamp(BaseSafety + DistanceBonus + TypeBonus, 0.0f, 1.0f);
-}
-
-void UArchitectureManager::InitializeDefaultShelters()
-{
-    // Create some default shelters for testing
-    FArch_ShelterData CaveShelter;
-    CaveShelter.ShelterType = EArch_ShelterType::Cave;
-    CaveShelter.Location = FVector(2000.0f, 1500.0f, 200.0f);
-    CaveShelter.SafetyRating = 0.8f;
-    CaveShelter.CapacityPersons = 4.0f;
-    CaveShelter.bHasFirePit = true;
-    CaveShelter.bHasWaterAccess = false;
-    CaveShelter.Materials.Add(EArch_ConstructionMaterial::Stone);
-    RegisteredShelters.Add(CaveShelter);
-    
-    FArch_ShelterData RockShelter;
-    RockShelter.ShelterType = EArch_ShelterType::RockOverhang;
-    RockShelter.Location = FVector(-1500.0f, 2000.0f, 150.0f);
-    RockShelter.SafetyRating = 0.6f;
-    RockShelter.CapacityPersons = 2.0f;
-    RockShelter.bHasFirePit = true;
-    RockShelter.bHasWaterAccess = true;
-    RockShelter.Materials.Add(EArch_ConstructionMaterial::Stone);
-    RockShelter.Materials.Add(EArch_ConstructionMaterial::AnimalHide);
-    RegisteredShelters.Add(RockShelter);
-    
-    FArch_ShelterData TreeShelter;
-    TreeShelter.ShelterType = EArch_ShelterType::ElevatedPlatform;
-    TreeShelter.Location = FVector(0.0f, -2500.0f, 800.0f);
-    TreeShelter.SafetyRating = 0.7f;
-    TreeShelter.CapacityPersons = 3.0f;
-    TreeShelter.bHasFirePit = false;
-    TreeShelter.bHasWaterAccess = false;
-    TreeShelter.Materials.Add(EArch_ConstructionMaterial::Wood);
-    TreeShelter.Materials.Add(EArch_ConstructionMaterial::Vine);
-    RegisteredShelters.Add(TreeShelter);
-}
-
-bool UArchitectureManager::IsLocationSuitable(FVector Location, EArch_ShelterType ShelterType)
-{
-    // Basic terrain checks
-    switch (ShelterType)
-    {
-        case EArch_ShelterType::Cave:
-            return Location.Z > 100.0f; // Caves need some elevation
-        case EArch_ShelterType::ElevatedPlatform:
-            return Location.Z > 500.0f; // Need height for tree platforms
-        case EArch_ShelterType::CliffDwelling:
-            return Location.Z > 300.0f; // Need cliff face
-        case EArch_ShelterType::RockOverhang:
-            return true; // Can be built almost anywhere
-        default:
-            return true;
-    }
-}
-
-float UArchitectureManager::CalculateTerrainSuitability(FVector Location, EArch_ShelterType ShelterType)
-{
-    // Simple terrain suitability calculation
-    // In a real implementation, this would check actual terrain data
-    
-    float BaseSuitability = 0.5f;
-    
-    // Height-based suitability
-    if (ShelterType == EArch_ShelterType::ElevatedPlatform && Location.Z > 500.0f)
-    {
-        BaseSuitability += 0.3f;
-    }
-    else if (ShelterType == EArch_ShelterType::Cave && Location.Z > 200.0f)
-    {
-        BaseSuitability += 0.2f;
-    }
-    
-    // Distance from origin (assuming safer areas are further from spawn)
-    float DistanceFromOrigin = FVector::Dist(Location, FVector::ZeroVector);
-    if (DistanceFromOrigin > 1000.0f)
-    {
-        BaseSuitability += 0.1f;
-    }
-    
-    return FMath::Clamp(BaseSuitability, 0.0f, 1.0f);
+    RegisteredStructures.Empty();
+    UE_LOG(LogTemp, Warning, TEXT("ArchitectureManager: Cleared all registered structures"));
 }
