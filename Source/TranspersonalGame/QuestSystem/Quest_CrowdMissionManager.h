@@ -1,175 +1,199 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/ActorComponent.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
-#include "../CrowdSimulation/Crowd_FlockingBehavior.h"
-#include "../SharedTypes.h"
+#include "Components/ActorComponent.h"
+#include "Engine/Engine.h"
+#include "SharedTypes.h"
 #include "Quest_CrowdMissionManager.generated.h"
 
+class ACrowdSimulationManager;
+class ATranspersonalCharacter;
+
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FQuest_CrowdMissionData
+struct TRANSPERSONALGAME_API FQuest_CrowdMissionObjective
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission Data")
-    FString MissionName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
+    FString ObjectiveDescription;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission Data")
-    FString Description;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
+    EQuest_ObjectiveType ObjectiveType;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission Data")
-    int32 RequiredCrowdSize;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
+    int32 RequiredCrowdCount;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission Data")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
     FVector TargetLocation;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission Data")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
     float CompletionRadius;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission Data")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
     float TimeLimit;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission Data")
-    bool bIsEvacuationMission;
+    UPROPERTY(BlueprintReadOnly, Category = "Status")
+    bool bIsCompleted;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission Data")
-    bool bRequiresPlayerGuidance;
+    UPROPERTY(BlueprintReadOnly, Category = "Status")
+    float ElapsedTime;
 
-    FQuest_CrowdMissionData()
+    FQuest_CrowdMissionObjective()
     {
-        MissionName = TEXT("Unnamed Mission");
-        Description = TEXT("No description");
-        RequiredCrowdSize = 10;
+        ObjectiveDescription = TEXT("Default Objective");
+        ObjectiveType = EQuest_ObjectiveType::Gather;
+        RequiredCrowdCount = 10;
         TargetLocation = FVector::ZeroVector;
         CompletionRadius = 500.0f;
         TimeLimit = 300.0f;
-        bIsEvacuationMission = false;
-        bRequiresPlayerGuidance = true;
+        bIsCompleted = false;
+        ElapsedTime = 0.0f;
     }
 };
 
-UENUM(BlueprintType)
-enum class EQuest_CrowdMissionStatus : uint8
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FQuest_CrowdMission
 {
-    NotStarted      UMETA(DisplayName = "Not Started"),
-    InProgress      UMETA(DisplayName = "In Progress"),
-    Completed       UMETA(DisplayName = "Completed"),
-    Failed          UMETA(DisplayName = "Failed"),
-    Abandoned       UMETA(DisplayName = "Abandoned")
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission")
+    FString MissionName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission")
+    FString MissionDescription;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission")
+    EQuest_MissionType MissionType;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission")
+    TArray<FQuest_CrowdMissionObjective> Objectives;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission")
+    int32 RewardExperience;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission")
+    TArray<FString> RewardItems;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Status")
+    EQuest_MissionStatus MissionStatus;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Status")
+    float MissionStartTime;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Status")
+    int32 CompletedObjectives;
+
+    FQuest_CrowdMission()
+    {
+        MissionName = TEXT("Default Mission");
+        MissionDescription = TEXT("A crowd-based survival mission");
+        MissionType = EQuest_MissionType::Survival;
+        RewardExperience = 100;
+        MissionStatus = EQuest_MissionStatus::NotStarted;
+        MissionStartTime = 0.0f;
+        CompletedObjectives = 0;
+    }
 };
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FQuest_OnCrowdMissionStatusChanged, int32, MissionID, EQuest_CrowdMissionStatus, NewStatus);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FQuest_OnCrowdProgress, int32, MissionID, int32, CurrentCrowdSize, float, ProgressPercentage);
-
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent), BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UQuest_CrowdMissionManager : public UActorComponent
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API AQuest_CrowdMissionManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    UQuest_CrowdMissionManager();
+    AQuest_CrowdMissionManager();
 
 protected:
     virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission System")
+    TArray<FQuest_CrowdMission> ActiveMissions;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission System")
+    TArray<FQuest_CrowdMission> CompletedMissions;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission System")
+    int32 MaxActiveMissions;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Integration")
+    ACrowdSimulationManager* CrowdManager;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player")
+    ATranspersonalCharacter* PlayerCharacter;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission Types")
+    bool bEnableEvacuationMissions;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission Types")
+    bool bEnableHuntingMissions;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission Types")
+    bool bEnableGatheringMissions;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission Types")
+    bool bEnableDefenseMissions;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawning")
+    TArray<FVector> MissionSpawnLocations;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawning")
+    float MissionSpawnRadius;
 
 public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    UFUNCTION(BlueprintCallable, Category = "Mission Management")
+    bool StartMission(const FQuest_CrowdMission& Mission);
 
-    // Mission Management
-    UFUNCTION(BlueprintCallable, Category = "Crowd Missions")
-    int32 CreateCrowdMission(const FQuest_CrowdMissionData& MissionData);
+    UFUNCTION(BlueprintCallable, Category = "Mission Management")
+    bool CompleteMission(int32 MissionIndex);
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd Missions")
-    bool StartCrowdMission(int32 MissionID);
+    UFUNCTION(BlueprintCallable, Category = "Mission Management")
+    void UpdateMissionProgress(float DeltaTime);
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd Missions")
-    bool CompleteCrowdMission(int32 MissionID);
+    UFUNCTION(BlueprintCallable, Category = "Mission Management")
+    FQuest_CrowdMission CreateEvacuationMission(FVector DangerLocation, FVector SafeLocation);
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd Missions")
-    bool FailCrowdMission(int32 MissionID);
+    UFUNCTION(BlueprintCallable, Category = "Mission Management")
+    FQuest_CrowdMission CreateHuntingMission(FVector HuntLocation, int32 RequiredHunters);
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd Missions")
-    void AbandonCrowdMission(int32 MissionID);
+    UFUNCTION(BlueprintCallable, Category = "Mission Management")
+    FQuest_CrowdMission CreateGatheringMission(FVector ResourceLocation, int32 RequiredGatherers);
 
-    // Crowd Interaction
-    UFUNCTION(BlueprintCallable, Category = "Crowd Missions")
-    void RegisterCrowdActor(AActor* CrowdActor, int32 MissionID);
+    UFUNCTION(BlueprintCallable, Category = "Mission Management")
+    FQuest_CrowdMission CreateDefenseMission(FVector DefenseLocation, float DefenseRadius);
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd Missions")
-    void UnregisterCrowdActor(AActor* CrowdActor, int32 MissionID);
+    UFUNCTION(BlueprintCallable, Category = "Crowd Integration")
+    int32 GetCrowdCountAtLocation(FVector Location, float Radius);
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd Missions")
-    int32 GetActiveCrowdCount(int32 MissionID) const;
+    UFUNCTION(BlueprintCallable, Category = "Crowd Integration")
+    bool DirectCrowdToLocation(FVector SourceLocation, FVector TargetLocation, int32 CrowdCount);
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd Missions")
-    float GetMissionProgress(int32 MissionID) const;
+    UFUNCTION(BlueprintCallable, Category = "Mission Status")
+    TArray<FQuest_CrowdMission> GetActiveMissions() const;
 
-    // Player Guidance
-    UFUNCTION(BlueprintCallable, Category = "Crowd Missions")
-    void SetPlayerGuidanceTarget(int32 MissionID, const FVector& TargetLocation);
+    UFUNCTION(BlueprintCallable, Category = "Mission Status")
+    int32 GetActiveMissionCount() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd Missions")
-    void EnablePlayerInfluence(int32 MissionID, float InfluenceRadius);
+    UFUNCTION(BlueprintCallable, Category = "Mission Status")
+    bool HasActiveMissionOfType(EQuest_MissionType MissionType) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Crowd Missions")
-    void DisablePlayerInfluence(int32 MissionID);
+    UFUNCTION(BlueprintCallable, Category = "Player Interaction")
+    void OnPlayerNearMissionArea(FVector PlayerLocation);
 
-    // Mission Queries
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Crowd Missions")
-    EQuest_CrowdMissionStatus GetMissionStatus(int32 MissionID) const;
-
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Crowd Missions")
-    bool IsMissionActive(int32 MissionID) const;
-
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Crowd Missions")
-    FQuest_CrowdMissionData GetMissionData(int32 MissionID) const;
-
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Crowd Missions")
-    TArray<int32> GetActiveMissionIDs() const;
-
-    // Events
-    UPROPERTY(BlueprintAssignable, Category = "Crowd Mission Events")
-    FQuest_OnCrowdMissionStatusChanged OnMissionStatusChanged;
-
-    UPROPERTY(BlueprintAssignable, Category = "Crowd Mission Events")
-    FQuest_OnCrowdProgress OnCrowdProgress;
-
-protected:
-    // Mission Data Storage
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mission Data")
-    TMap<int32, FQuest_CrowdMissionData> ActiveMissions;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mission Data")
-    TMap<int32, EQuest_CrowdMissionStatus> MissionStatuses;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mission Data")
-    TMap<int32, TArray<AActor*>> MissionCrowdActors;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mission Data")
-    TMap<int32, float> MissionTimers;
-
-    // Configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    float UpdateFrequency;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    float PlayerInfluenceStrength;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    bool bEnableDebugVisualization;
+    UFUNCTION(BlueprintCallable, Category = "Player Interaction")
+    void OnPlayerInfluenceCrowd(FVector InfluenceLocation, float InfluenceRadius);
 
 private:
-    int32 NextMissionID;
-    float UpdateTimer;
+    void CheckObjectiveCompletion(FQuest_CrowdMissionObjective& Objective);
+    void SpawnMissionMarkers(const FQuest_CrowdMission& Mission);
+    void CleanupMissionMarkers(int32 MissionIndex);
+    void NotifyPlayerMissionUpdate(const FString& Message);
 
-    // Internal Methods
-    void UpdateMissionProgress(float DeltaTime);
-    void CheckMissionCompletion(int32 MissionID);
-    void CheckMissionFailure(int32 MissionID);
-    void UpdatePlayerInfluence(int32 MissionID);
-    void DrawDebugInfo(int32 MissionID);
-    bool IsLocationInRadius(const FVector& Location, const FVector& Target, float Radius) const;
-    void CleanupMission(int32 MissionID);
+    UPROPERTY()
+    TArray<AActor*> MissionMarkers;
+
+    float LastMissionSpawnTime;
+    float MissionSpawnCooldown;
 };
