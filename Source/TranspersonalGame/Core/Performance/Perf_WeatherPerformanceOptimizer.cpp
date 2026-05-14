@@ -1,412 +1,390 @@
 #include "Perf_WeatherPerformanceOptimizer.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
-#include "GameFramework/PlayerController.h"
-#include "GameFramework/Pawn.h"
-#include "Kismet/GameplayStatics.h"
+#include "Particles/ParticleSystem.h"
+#include "Particles/ParticleSystemComponent.h"
 #include "Components/StaticMeshComponent.h"
-#include "Materials/MaterialParameterCollectionInstance.h"
-#include "Niagara/Public/NiagaraComponent.h"
-#include "Niagara/Public/NiagaraFunctionLibrary.h"
+#include "Materials/MaterialInterface.h"
+#include "Materials/MaterialInstanceDynamic.h"
 
 UPerf_WeatherPerformanceOptimizer::UPerf_WeatherPerformanceOptimizer()
 {
     PrimaryComponentTick.bCanEverTick = true;
     PrimaryComponentTick.TickInterval = 0.1f; // Update 10 times per second
     
-    CurrentPerformanceLevel = EPerf_WeatherPerformanceLevel::High;
-    PerformanceUpdateInterval = 1.0f;
-    LastPerformanceUpdate = 0.0f;
-    WeatherPerformanceBudget = 5.0f; // 5ms budget for weather effects
-    bAutoAdjustQuality = true;
+    OptimizationLevel = EPerf_WeatherOptimizationLevel::High;
+    TargetFrameRate = 60.0f;
+    WeatherPerformanceBudget = 5.0f; // 5ms budget for weather systems
     
-    InitializePerformanceSettings();
+    LastOptimizationTime = 0.0f;
+    OptimizationUpdateInterval = 1.0f; // Optimize every second
+    bIsOptimizationActive = true;
 }
 
 void UPerf_WeatherPerformanceOptimizer::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Initialize performance monitoring
-    UpdatePerformanceMetrics();
+    ApplyOptimizationSettings();
     
-    // Find and register existing weather components
-    if (UWorld* World = GetWorld())
-    {
-        for (TActorIterator<AActor> ActorIterator(World); ActorIterator; ++ActorIterator)
-        {
-            AActor* Actor = *ActorIterator;
-            if (Actor)
-            {
-                TArray<UNiagaraComponent*> NiagaraComponents;
-                Actor->GetComponents<UNiagaraComponent>(NiagaraComponents);
-                
-                for (UNiagaraComponent* Component : NiagaraComponents)
-                {
-                    if (Component && Component->GetAsset())
-                    {
-                        FString AssetName = Component->GetAsset()->GetName();
-                        if (AssetName.Contains("Rain") || AssetName.Contains("Snow") || 
-                            AssetName.Contains("Fog") || AssetName.Contains("Weather"))
-                        {
-                            RegisterWeatherComponent(Component);
-                        }
-                    }
-                }
-            }
-        }
-    }
+    UE_LOG(LogTemp, Log, TEXT("Weather Performance Optimizer initialized - Level: %d"), 
+           static_cast<int32>(OptimizationLevel));
 }
 
 void UPerf_WeatherPerformanceOptimizer::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    LastPerformanceUpdate += DeltaTime;
-    
-    if (LastPerformanceUpdate >= PerformanceUpdateInterval)
-    {
-        UpdatePerformanceMetrics();
-        
-        if (bAutoAdjustQuality)
-        {
-            float CurrentFrameTime = FApp::GetDeltaTime() * 1000.0f; // Convert to milliseconds
-            AdjustWeatherQuality(CurrentFrameTime);
-        }
-        
-        OptimizeWeatherEffects();
-        CullDistantWeatherEffects();
-        CleanupInvalidComponents();
-        
-        LastPerformanceUpdate = 0.0f;
-    }
-}
-
-void UPerf_WeatherPerformanceOptimizer::OptimizeWeatherEffects()
-{
-    for (int32 i = TrackedWeatherComponents.Num() - 1; i >= 0; --i)
-    {
-        if (TrackedWeatherComponents[i].IsValid())
-        {
-            UNiagaraComponent* Component = TrackedWeatherComponents[i].Get();
-            OptimizeRainSystem(Component);
-            
-            // Update LOD based on distance to player
-            if (APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0))
-            {
-                if (APawn* PlayerPawn = PC->GetPawn())
-                {
-                    float Distance = FVector::Dist(Component->GetComponentLocation(), PlayerPawn->GetActorLocation());
-                    UpdateWeatherLOD(Distance);
-                }
-            }
-        }
-        else
-        {
-            TrackedWeatherComponents.RemoveAt(i);
-        }
-    }
-}
-
-void UPerf_WeatherPerformanceOptimizer::SetWeatherPerformanceLevel(EPerf_WeatherPerformanceLevel Level)
-{
-    CurrentPerformanceLevel = Level;
-    PerformanceSettings = GetSettingsForLevel(Level);
-    ApplyPerformanceSettings(PerformanceSettings);
-    
-    UE_LOG(LogTemp, Log, TEXT("Weather Performance Level set to: %d"), (int32)Level);
-}
-
-void UPerf_WeatherPerformanceOptimizer::UpdateWeatherLOD(float DistanceToPlayer)
-{
-    for (TWeakObjectPtr<UNiagaraComponent>& ComponentPtr : TrackedWeatherComponents)
-    {
-        if (ComponentPtr.IsValid())
-        {
-            UNiagaraComponent* Component = ComponentPtr.Get();
-            
-            // Adjust particle count based on distance
-            float LODScale = 1.0f;
-            if (DistanceToPlayer > 10000.0f)
-            {
-                LODScale = 0.25f; // 25% particles at long distance
-            }
-            else if (DistanceToPlayer > 5000.0f)
-            {
-                LODScale = 0.5f; // 50% particles at medium distance
-            }
-            else if (DistanceToPlayer > 2000.0f)
-            {
-                LODScale = 0.75f; // 75% particles at close distance
-            }
-            
-            // Apply LOD scaling
-            Component->SetFloatParameter("LODScale", LODScale);
-            
-            // Disable component if too far
-            if (DistanceToPlayer > PerformanceSettings.MaxWeatherDrawDistance)
-            {
-                Component->SetVisibility(false);
-            }
-            else
-            {
-                Component->SetVisibility(true);
-            }
-        }
-    }
-}
-
-void UPerf_WeatherPerformanceOptimizer::OptimizeRainSystem(UNiagaraComponent* RainComponent)
-{
-    if (!RainComponent || !RainComponent->GetAsset())
-    {
+    if (!bIsOptimizationActive)
         return;
+    
+    UpdatePerformanceMetrics();
+    
+    // Check if we need to apply dynamic optimization
+    float CurrentFrameTime = FApp::GetDeltaTime() * 1000.0f; // Convert to milliseconds
+    if (CurrentFrameTime > (1000.0f / TargetFrameRate) * 1.2f) // 20% tolerance
+    {
+        ApplyDynamicWeatherOptimization(CurrentFrameTime);
     }
     
-    // Adjust particle count based on performance settings
-    int32 ParticleCount = FMath::Min(PerformanceSettings.MaxRainParticles, 10000);
-    RainComponent->SetIntParameter("MaxParticles", ParticleCount);
+    // Periodic optimization update
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    if (CurrentTime - LastOptimizationTime >= OptimizationUpdateInterval)
+    {
+        OptimizeWeatherSystems();
+        LastOptimizationTime = CurrentTime;
+    }
+}
+
+void UPerf_WeatherPerformanceOptimizer::OptimizeWeatherSystems()
+{
+    OptimizeRainSystem();
+    OptimizeFogSystem();
+    OptimizeCloudSystem();
+    OptimizeLightningSystem();
+    OptimizeWeatherTransitions();
     
-    // Adjust update frequency
-    RainComponent->SetFloatParameter("UpdateFrequency", PerformanceSettings.WeatherUpdateFrequency);
+    CullDistantWeatherEffects();
+    AdjustParticleSystemLOD();
+    OptimizeWeatherShaders();
     
-    // Enable/disable expensive features
-    RainComponent->SetBoolParameter("EnableCollision", CurrentPerformanceLevel >= EPerf_WeatherPerformanceLevel::High);
-    RainComponent->SetBoolParameter("EnableShadows", PerformanceSettings.bEnableWeatherShadows);
+    UE_LOG(LogTemp, Log, TEXT("Weather systems optimized - Rain particles: %.0f, Fog density: %.2f"), 
+           CurrentMetrics.RainParticleCount, CurrentMetrics.FogDensity);
+}
+
+void UPerf_WeatherPerformanceOptimizer::SetOptimizationLevel(EPerf_WeatherOptimizationLevel NewLevel)
+{
+    OptimizationLevel = NewLevel;
+    ApplyOptimizationSettings();
+    
+    UE_LOG(LogTemp, Log, TEXT("Weather optimization level changed to: %d"), static_cast<int32>(NewLevel));
+}
+
+void UPerf_WeatherPerformanceOptimizer::OptimizeRainSystem()
+{
+    UWorld* World = GetWorld();
+    if (!World) return;
+    
+    // Find all rain particle systems in the world
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    {
+        AActor* Actor = *ActorItr;
+        if (!Actor) continue;
+        
+        // Look for particle system components that might be rain
+        TArray<UParticleSystemComponent*> ParticleComponents;
+        Actor->GetComponents<UParticleSystemComponent>(ParticleComponents);
+        
+        for (UParticleSystemComponent* PSC : ParticleComponents)
+        {
+            if (PSC && PSC->GetName().Contains(TEXT("Rain")))
+            {
+                // Apply rain optimization based on level
+                switch (OptimizationLevel)
+                {
+                    case EPerf_WeatherOptimizationLevel::Ultra:
+                        PSC->SetFloatParameter(TEXT("ParticleCount"), OptimizationSettings.MaxRainParticles);
+                        break;
+                    case EPerf_WeatherOptimizationLevel::High:
+                        PSC->SetFloatParameter(TEXT("ParticleCount"), OptimizationSettings.MaxRainParticles * 0.8f);
+                        break;
+                    case EPerf_WeatherOptimizationLevel::Medium:
+                        PSC->SetFloatParameter(TEXT("ParticleCount"), OptimizationSettings.MaxRainParticles * 0.6f);
+                        break;
+                    case EPerf_WeatherOptimizationLevel::Low:
+                        PSC->SetFloatParameter(TEXT("ParticleCount"), OptimizationSettings.MaxRainParticles * 0.4f);
+                        break;
+                    case EPerf_WeatherOptimizationLevel::Potato:
+                        PSC->SetFloatParameter(TEXT("ParticleCount"), OptimizationSettings.MaxRainParticles * 0.2f);
+                        break;
+                }
+                
+                // Set particle lifetime
+                PSC->SetFloatParameter(TEXT("Lifetime"), OptimizationSettings.RainParticleLifetime);
+            }
+        }
+    }
+    
+    CurrentMetrics.RainParticleCount = OptimizationSettings.MaxRainParticles * GetOptimizationMultiplier();
 }
 
 void UPerf_WeatherPerformanceOptimizer::OptimizeFogSystem()
 {
-    if (UWorld* World = GetWorld())
+    UWorld* World = GetWorld();
+    if (!World) return;
+    
+    // Find exponential height fog actors
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
     {
-        // Find and optimize fog volumes
-        int32 FogVolumeCount = 0;
+        AActor* Actor = *ActorItr;
+        if (!Actor || !Actor->GetName().Contains(TEXT("Fog"))) continue;
         
-        for (TActorIterator<AActor> ActorIterator(World); ActorIterator; ++ActorIterator)
+        // Apply fog optimization
+        float FogMultiplier = GetOptimizationMultiplier();
+        
+        // Adjust fog density and distance based on optimization level
+        if (UStaticMeshComponent* MeshComp = Actor->FindComponentByClass<UStaticMeshComponent>())
         {
-            AActor* Actor = *ActorIterator;
-            if (Actor && Actor->GetClass()->GetName().Contains("Fog"))
+            if (UMaterialInstanceDynamic* DynMaterial = MeshComp->CreateAndSetMaterialInstanceDynamic(0))
             {
-                FogVolumeCount++;
-                
-                // Disable fog volumes beyond the limit
-                if (FogVolumeCount > PerformanceSettings.MaxFogVolumes)
-                {
-                    Actor->SetActorHiddenInGame(true);
-                }
-                else
-                {
-                    Actor->SetActorHiddenInGame(false);
-                    
-                    // Adjust fog quality
-                    if (UStaticMeshComponent* MeshComp = Actor->FindComponentByClass<UStaticMeshComponent>())
-                    {
-                        if (UMaterialInterface* Material = MeshComp->GetMaterial(0))
-                        {
-                            // Adjust volumetric fog settings based on performance level
-                            bool bEnableVolumetric = PerformanceSettings.bEnableVolumetricFog && 
-                                                   (CurrentPerformanceLevel >= EPerf_WeatherPerformanceLevel::Medium);
-                            
-                            // This would typically set material parameters
-                            // MeshComp->SetScalarParameterValueOnMaterials("VolumetricFogEnabled", bEnableVolumetric ? 1.0f : 0.0f);
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-float UPerf_WeatherPerformanceOptimizer::GetWeatherPerformanceImpact() const
-{
-    float TotalImpact = 0.0f;
-    
-    for (const TWeakObjectPtr<UNiagaraComponent>& ComponentPtr : TrackedWeatherComponents)
-    {
-        if (ComponentPtr.IsValid())
-        {
-            UNiagaraComponent* Component = ComponentPtr.Get();
-            if (Component->IsActive())
-            {
-                // Estimate performance impact based on particle count and complexity
-                int32 ParticleCount = 1000; // Default estimate
-                Component->GetIntParameter("MaxParticles", ParticleCount);
-                
-                // Simple heuristic: 1ms per 1000 particles
-                TotalImpact += ParticleCount / 1000.0f;
+                DynMaterial->SetScalarParameterValue(TEXT("FogDensity"), 0.1f * FogMultiplier);
+                DynMaterial->SetScalarParameterValue(TEXT("MaxDistance"), OptimizationSettings.MaxFogDistance);
             }
         }
     }
     
-    return TotalImpact;
+    CurrentMetrics.FogDensity = 0.1f * GetOptimizationMultiplier();
 }
 
-void UPerf_WeatherPerformanceOptimizer::CullDistantWeatherEffects()
+void UPerf_WeatherPerformanceOptimizer::OptimizeCloudSystem()
 {
-    if (APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0))
+    // Cloud optimization - reduce complexity based on optimization level
+    float CloudMultiplier = GetOptimizationMultiplier();
+    int32 ActiveCloudLayers = FMath::RoundToInt(OptimizationSettings.MaxCloudLayers * CloudMultiplier);
+    
+    CurrentMetrics.CloudComplexity = ActiveCloudLayers;
+    
+    UE_LOG(LogTemp, Log, TEXT("Cloud system optimized - Active layers: %d"), ActiveCloudLayers);
+}
+
+void UPerf_WeatherPerformanceOptimizer::OptimizeLightningSystem()
+{
+    UWorld* World = GetWorld();
+    if (!World) return;
+    
+    // Find lightning effect actors and optimize them
+    int32 ActiveLightningCount = 0;
+    
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
     {
-        if (APawn* PlayerPawn = PC->GetPawn())
+        AActor* Actor = *ActorItr;
+        if (!Actor || !Actor->GetName().Contains(TEXT("Lightning"))) continue;
+        
+        // Check distance from player for culling
+        if (APawn* PlayerPawn = World->GetFirstPlayerController()->GetPawn())
         {
-            FVector PlayerLocation = PlayerPawn->GetActorLocation();
+            float Distance = FVector::Dist(Actor->GetActorLocation(), PlayerPawn->GetActorLocation());
             
-            for (TWeakObjectPtr<UNiagaraComponent>& ComponentPtr : TrackedWeatherComponents)
+            if (Distance > OptimizationSettings.LightningCullingDistance)
             {
-                if (ComponentPtr.IsValid())
-                {
-                    UNiagaraComponent* Component = ComponentPtr.Get();
-                    float Distance = FVector::Dist(Component->GetComponentLocation(), PlayerLocation);
-                    
-                    // Cull effects beyond draw distance
-                    if (Distance > PerformanceSettings.MaxWeatherDrawDistance)
-                    {
-                        Component->SetVisibility(false);
-                        Component->Deactivate();
-                    }
-                    else if (!Component->IsVisible())
-                    {
-                        Component->SetVisibility(true);
-                        Component->Activate();
-                    }
-                }
+                Actor->SetActorHiddenInGame(true);
+            }
+            else if (ActiveLightningCount < OptimizationSettings.MaxSimultaneousLightning)
+            {
+                Actor->SetActorHiddenInGame(false);
+                ActiveLightningCount++;
+            }
+            else
+            {
+                Actor->SetActorHiddenInGame(true);
             }
         }
     }
-}
-
-void UPerf_WeatherPerformanceOptimizer::AdjustWeatherQuality(float FrameTime)
-{
-    // Target frame times: 16.67ms (60fps), 33.33ms (30fps)
-    float TargetFrameTime = 16.67f; // 60fps target
     
-    if (FrameTime > TargetFrameTime + 5.0f) // If we're 5ms over budget
-    {
-        // Reduce quality
-        if (CurrentPerformanceLevel > EPerf_WeatherPerformanceLevel::Minimal)
-        {
-            EPerf_WeatherPerformanceLevel NewLevel = (EPerf_WeatherPerformanceLevel)((int32)CurrentPerformanceLevel - 1);
-            SetWeatherPerformanceLevel(NewLevel);
-        }
-    }
-    else if (FrameTime < TargetFrameTime - 5.0f) // If we have 5ms headroom
-    {
-        // Increase quality
-        if (CurrentPerformanceLevel < EPerf_WeatherPerformanceLevel::Ultra)
-        {
-            EPerf_WeatherPerformanceLevel NewLevel = (EPerf_WeatherPerformanceLevel)((int32)CurrentPerformanceLevel + 1);
-            SetWeatherPerformanceLevel(NewLevel);
-        }
-    }
+    CurrentMetrics.LightningEffectCost = ActiveLightningCount * 0.5f; // Estimate 0.5ms per lightning effect
 }
 
-void UPerf_WeatherPerformanceOptimizer::InitializePerformanceSettings()
+void UPerf_WeatherPerformanceOptimizer::OptimizeWeatherTransitions()
 {
-    PerformanceSettings = GetSettingsForLevel(CurrentPerformanceLevel);
+    // Optimize weather transition effects
+    float TransitionCost = 0.0f;
+    
+    // Reduce transition complexity based on optimization level
+    switch (OptimizationLevel)
+    {
+        case EPerf_WeatherOptimizationLevel::Ultra:
+            TransitionCost = 2.0f;
+            break;
+        case EPerf_WeatherOptimizationLevel::High:
+            TransitionCost = 1.5f;
+            break;
+        case EPerf_WeatherOptimizationLevel::Medium:
+            TransitionCost = 1.0f;
+            break;
+        case EPerf_WeatherOptimizationLevel::Low:
+            TransitionCost = 0.5f;
+            break;
+        case EPerf_WeatherOptimizationLevel::Potato:
+            TransitionCost = 0.2f;
+            break;
+    }
+    
+    CurrentMetrics.WeatherTransitionCost = TransitionCost;
+}
+
+FPerf_WeatherPerformanceMetrics UPerf_WeatherPerformanceOptimizer::GetWeatherPerformanceMetrics() const
+{
+    return CurrentMetrics;
+}
+
+bool UPerf_WeatherPerformanceOptimizer::IsWeatherPerformanceWithinBudget() const
+{
+    float TotalCost = CurrentMetrics.RainParticleCount * 0.001f + // 0.001ms per particle
+                      CurrentMetrics.FogDensity * 10.0f + // Fog cost
+                      CurrentMetrics.CloudComplexity * 0.5f + // Cloud cost
+                      CurrentMetrics.LightningEffectCost + // Lightning cost
+                      CurrentMetrics.WeatherTransitionCost; // Transition cost
+    
+    return TotalCost <= WeatherPerformanceBudget;
+}
+
+void UPerf_WeatherPerformanceOptimizer::ApplyDynamicWeatherOptimization(float CurrentFrameTime)
+{
+    if (CurrentFrameTime > (1000.0f / TargetFrameRate) * 1.5f) // 50% over target
+    {
+        // Emergency optimization - reduce to Low quality
+        if (OptimizationLevel != EPerf_WeatherOptimizationLevel::Low)
+        {
+            SetOptimizationLevel(EPerf_WeatherOptimizationLevel::Low);
+            UE_LOG(LogTemp, Warning, TEXT("Emergency weather optimization applied - switched to Low quality"));
+        }
+    }
+    else if (CurrentFrameTime > (1000.0f / TargetFrameRate) * 1.3f) // 30% over target
+    {
+        // Moderate optimization - reduce one level
+        if (OptimizationLevel == EPerf_WeatherOptimizationLevel::Ultra)
+        {
+            SetOptimizationLevel(EPerf_WeatherOptimizationLevel::High);
+        }
+        else if (OptimizationLevel == EPerf_WeatherOptimizationLevel::High)
+        {
+            SetOptimizationLevel(EPerf_WeatherOptimizationLevel::Medium);
+        }
+    }
 }
 
 void UPerf_WeatherPerformanceOptimizer::UpdatePerformanceMetrics()
 {
-    // Update internal performance tracking
-    float CurrentImpact = GetWeatherPerformanceImpact();
-    
-    if (CurrentImpact > WeatherPerformanceBudget)
+    // Update metrics based on current weather state
+    // This would typically query actual weather systems
+    // For now, we use the optimization settings as base values
+}
+
+void UPerf_WeatherPerformanceOptimizer::ApplyOptimizationSettings()
+{
+    // Apply settings based on current optimization level
+    switch (OptimizationLevel)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Weather performance impact (%.2fms) exceeds budget (%.2fms)"), 
-               CurrentImpact, WeatherPerformanceBudget);
+        case EPerf_WeatherOptimizationLevel::Ultra:
+            OptimizationSettings.MaxRainParticles = 8000;
+            OptimizationSettings.MaxCloudLayers = 5;
+            OptimizationSettings.MaxSimultaneousLightning = 3;
+            break;
+        case EPerf_WeatherOptimizationLevel::High:
+            OptimizationSettings.MaxRainParticles = 5000;
+            OptimizationSettings.MaxCloudLayers = 3;
+            OptimizationSettings.MaxSimultaneousLightning = 2;
+            break;
+        case EPerf_WeatherOptimizationLevel::Medium:
+            OptimizationSettings.MaxRainParticles = 3000;
+            OptimizationSettings.MaxCloudLayers = 2;
+            OptimizationSettings.MaxSimultaneousLightning = 1;
+            break;
+        case EPerf_WeatherOptimizationLevel::Low:
+            OptimizationSettings.MaxRainParticles = 1500;
+            OptimizationSettings.MaxCloudLayers = 1;
+            OptimizationSettings.MaxSimultaneousLightning = 1;
+            break;
+        case EPerf_WeatherOptimizationLevel::Potato:
+            OptimizationSettings.MaxRainParticles = 500;
+            OptimizationSettings.MaxCloudLayers = 1;
+            OptimizationSettings.MaxSimultaneousLightning = 0;
+            break;
     }
 }
 
-FPerf_WeatherPerformanceSettings UPerf_WeatherPerformanceOptimizer::GetSettingsForLevel(EPerf_WeatherPerformanceLevel Level)
+void UPerf_WeatherPerformanceOptimizer::CullDistantWeatherEffects()
 {
-    FPerf_WeatherPerformanceSettings Settings;
+    UWorld* World = GetWorld();
+    if (!World) return;
     
-    switch (Level)
+    APawn* PlayerPawn = World->GetFirstPlayerController()->GetPawn();
+    if (!PlayerPawn) return;
+    
+    FVector PlayerLocation = PlayerPawn->GetActorLocation();
+    
+    // Cull weather effects beyond certain distances
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
     {
-        case EPerf_WeatherPerformanceLevel::Ultra:
-            Settings.MaxRainParticles = 20000;
-            Settings.MaxFogVolumes = 10;
-            Settings.WeatherUpdateFrequency = 2.0f;
-            Settings.bEnableVolumetricFog = true;
-            Settings.bEnableWeatherShadows = true;
-            Settings.MaxWeatherDrawDistance = 100000.0f;
-            break;
-            
-        case EPerf_WeatherPerformanceLevel::High:
-            Settings.MaxRainParticles = 15000;
-            Settings.MaxFogVolumes = 8;
-            Settings.WeatherUpdateFrequency = 1.5f;
-            Settings.bEnableVolumetricFog = true;
-            Settings.bEnableWeatherShadows = true;
-            Settings.MaxWeatherDrawDistance = 75000.0f;
-            break;
-            
-        case EPerf_WeatherPerformanceLevel::Medium:
-            Settings.MaxRainParticles = 10000;
-            Settings.MaxFogVolumes = 5;
-            Settings.WeatherUpdateFrequency = 1.0f;
-            Settings.bEnableVolumetricFog = true;
-            Settings.bEnableWeatherShadows = false;
-            Settings.MaxWeatherDrawDistance = 50000.0f;
-            break;
-            
-        case EPerf_WeatherPerformanceLevel::Low:
-            Settings.MaxRainParticles = 5000;
-            Settings.MaxFogVolumes = 3;
-            Settings.WeatherUpdateFrequency = 0.5f;
-            Settings.bEnableVolumetricFog = false;
-            Settings.bEnableWeatherShadows = false;
-            Settings.MaxWeatherDrawDistance = 25000.0f;
-            break;
-            
-        case EPerf_WeatherPerformanceLevel::Minimal:
-            Settings.MaxRainParticles = 1000;
-            Settings.MaxFogVolumes = 1;
-            Settings.WeatherUpdateFrequency = 0.25f;
-            Settings.bEnableVolumetricFog = false;
-            Settings.bEnableWeatherShadows = false;
-            Settings.MaxWeatherDrawDistance = 10000.0f;
-            break;
-    }
-    
-    return Settings;
-}
-
-void UPerf_WeatherPerformanceOptimizer::ApplyPerformanceSettings(const FPerf_WeatherPerformanceSettings& Settings)
-{
-    PerformanceSettings = Settings;
-    
-    // Apply settings to all tracked components
-    for (TWeakObjectPtr<UNiagaraComponent>& ComponentPtr : TrackedWeatherComponents)
-    {
-        if (ComponentPtr.IsValid())
+        AActor* Actor = *ActorItr;
+        if (!Actor) continue;
+        
+        FString ActorName = Actor->GetName();
+        if (ActorName.Contains(TEXT("Weather")) || ActorName.Contains(TEXT("Rain")) || 
+            ActorName.Contains(TEXT("Fog")) || ActorName.Contains(TEXT("Cloud")))
         {
-            OptimizeRainSystem(ComponentPtr.Get());
+            float Distance = FVector::Dist(Actor->GetActorLocation(), PlayerLocation);
+            float CullingDistance = 15000.0f * GetOptimizationMultiplier();
+            
+            Actor->SetActorHiddenInGame(Distance > CullingDistance);
         }
     }
-    
-    OptimizeFogSystem();
 }
 
-void UPerf_WeatherPerformanceOptimizer::RegisterWeatherComponent(UNiagaraComponent* Component)
+void UPerf_WeatherPerformanceOptimizer::AdjustParticleSystemLOD()
 {
-    if (Component && !TrackedWeatherComponents.Contains(Component))
+    UWorld* World = GetWorld();
+    if (!World) return;
+    
+    // Adjust LOD for all particle systems based on distance and optimization level
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
     {
-        TrackedWeatherComponents.Add(Component);
-        OptimizeRainSystem(Component);
+        AActor* Actor = *ActorItr;
+        if (!Actor) continue;
+        
+        TArray<UParticleSystemComponent*> ParticleComponents;
+        Actor->GetComponents<UParticleSystemComponent>(ParticleComponents);
+        
+        for (UParticleSystemComponent* PSC : ParticleComponents)
+        {
+            if (PSC)
+            {
+                int32 LODLevel = static_cast<int32>(OptimizationLevel);
+                PSC->SetLODLevel(LODLevel);
+            }
+        }
     }
 }
 
-void UPerf_WeatherPerformanceOptimizer::UnregisterWeatherComponent(UNiagaraComponent* Component)
+void UPerf_WeatherPerformanceOptimizer::OptimizeWeatherShaders()
 {
-    TrackedWeatherComponents.RemoveAll([Component](const TWeakObjectPtr<UNiagaraComponent>& Ptr)
-    {
-        return Ptr.Get() == Component;
-    });
+    // Optimize weather-related shaders and materials
+    // This would typically involve switching to simpler shader variants
+    // based on the optimization level
+    
+    UE_LOG(LogTemp, Log, TEXT("Weather shaders optimized for level: %d"), 
+           static_cast<int32>(OptimizationLevel));
 }
 
-void UPerf_WeatherPerformanceOptimizer::CleanupInvalidComponents()
+float UPerf_WeatherPerformanceOptimizer::GetOptimizationMultiplier() const
 {
-    TrackedWeatherComponents.RemoveAll([](const TWeakObjectPtr<UNiagaraComponent>& Ptr)
+    switch (OptimizationLevel)
     {
-        return !Ptr.IsValid();
-    });
+        case EPerf_WeatherOptimizationLevel::Ultra: return 1.0f;
+        case EPerf_WeatherOptimizationLevel::High: return 0.8f;
+        case EPerf_WeatherOptimizationLevel::Medium: return 0.6f;
+        case EPerf_WeatherOptimizationLevel::Low: return 0.4f;
+        case EPerf_WeatherOptimizationLevel::Potato: return 0.2f;
+        default: return 0.8f;
+    }
 }
