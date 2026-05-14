@@ -1,472 +1,571 @@
 #include "NPC_BehaviorTreeManager.h"
-#include "BehaviorTree/BehaviorTreeComponent.h"
-#include "BehaviorTree/BlackboardComponent.h"
-#include "BehaviorTree/Blackboard/BlackboardKeyType_Float.h"
-#include "BehaviorTree/Blackboard/BlackboardKeyType_Bool.h"
-#include "BehaviorTree/Blackboard/BlackboardKeyType_Vector.h"
-#include "BehaviorTree/Blackboard/BlackboardKeyType_Object.h"
-#include "AIController.h"
-#include "GameFramework/Character.h"
+#include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "TimerManager.h"
+#include "DrawDebugHelpers.h"
+#include "Kismet/GameplayStatics.h"
+#include "NavigationSystem.h"
+#include "AI/NavigationSystemBase.h"
+#include "BehaviorTree/BlackboardComponent.h"
+#include "Perception/AIPerceptionComponent.h"
 
 UNPC_BehaviorTreeManager::UNPC_BehaviorTreeManager()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f;
+    SetupDefaultBehaviorRules();
+    InitializeSpeciesBehaviorTrees();
+}
 
-    // Initialize components
-    BehaviorTreeComponent = nullptr;
-    BlackboardComponent = nullptr;
-    CurrentBehaviorTree = nullptr;
-    bIsPaused = false;
-    LastTransitionTime = 0.0f;
-    CurrentPriority = ENPC_BehaviorPriority::Normal;
-    CurrentBehaviorName = TEXT("");
+void UNPC_BehaviorTreeManager::InitializeBehaviorTree(AAIController* AIController, ENPC_DinosaurSpecies Species)
+{
+    if (!AIController)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("NPC_BehaviorTreeManager: Invalid AIController"));
+        return;
+    }
 
     // Initialize behavior context
-    BehaviorContext = FNPC_BehaviorTreeConfig();
-}
-
-void UNPC_BehaviorTreeManager::BeginPlay()
-{
-    Super::BeginPlay();
-
-    // Initialize behavior tree components
-    InitializeBehaviorTreeComponent();
-    InitializeBlackboardComponent();
-
-    // Auto-start default behavior if configured
-    if (bAutoStartDefaultBehavior && !DefaultBehaviorName.IsEmpty())
+    FNPC_BehaviorContext NewContext;
+    NewContext.Species = Species;
+    NewContext.CurrentState = ENPC_DinosaurState::Idle;
+    
+    // Set species-specific defaults
+    switch (Species)
     {
-        ActivateBehaviorByName(DefaultBehaviorName);
+        case ENPC_DinosaurSpecies::TRex:
+            NewContext.AggressionLevel = 0.8f;
+            NewContext.TerritoryRadius = 8000.0f;
+            NewContext.bIsPackLeader = true;
+            break;
+        case ENPC_DinosaurSpecies::Raptor:
+            NewContext.AggressionLevel = 0.7f;
+            NewContext.TerritoryRadius = 4000.0f;
+            NewContext.bIsPackLeader = false;
+            break;
+        case ENPC_DinosaurSpecies::Brachiosaurus:
+            NewContext.AggressionLevel = 0.2f;
+            NewContext.TerritoryRadius = 6000.0f;
+            NewContext.bIsPackLeader = false;
+            break;
+        case ENPC_DinosaurSpecies::Triceratops:
+            NewContext.AggressionLevel = 0.5f;
+            NewContext.TerritoryRadius = 5000.0f;
+            NewContext.bIsPackLeader = false;
+            break;
+        default:
+            NewContext.AggressionLevel = 0.5f;
+            NewContext.TerritoryRadius = 5000.0f;
+            NewContext.bIsPackLeader = false;
+            break;
+    }
+
+    // Set territory center to current location
+    if (AIController->GetPawn())
+    {
+        NewContext.TerritoryCenter = AIController->GetPawn()->GetActorLocation();
+    }
+
+    BehaviorContexts.Add(AIController, NewContext);
+
+    // Start behavior tree if available
+    if (UBehaviorTree** FoundTree = SpeciesBehaviorTrees.Find(Species))
+    {
+        if (*FoundTree)
+        {
+            AIController->RunBehaviorTree(*FoundTree);
+            UE_LOG(LogTemp, Log, TEXT("Started behavior tree for species %d"), (int32)Species);
+        }
+    }
+
+    // Initialize blackboard values
+    if (UBlackboardComponent* BlackboardComp = AIController->GetBlackboardComponent())
+    {
+        BlackboardComp->SetValueAsEnum(TEXT("CurrentState"), (uint8)NewContext.CurrentState);
+        BlackboardComp->SetValueAsFloat(TEXT("AggressionLevel"), NewContext.AggressionLevel);
+        BlackboardComp->SetValueAsVector(TEXT("TerritoryCenter"), NewContext.TerritoryCenter);
+        BlackboardComp->SetValueAsFloat(TEXT("TerritoryRadius"), NewContext.TerritoryRadius);
+        BlackboardComp->SetValueAsBool(TEXT("IsPackLeader"), NewContext.bIsPackLeader);
     }
 }
 
-void UNPC_BehaviorTreeManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UNPC_BehaviorTreeManager::UpdateBehaviorContext(AAIController* AIController, const FNPC_BehaviorContext& NewContext)
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
-    // Update behavior context
-    UpdateBehaviorContext(DeltaTime);
-
-    // Update blackboard values from context
-    if (BlackboardComponent)
-    {
-        // Update float values
-        for (const auto& FloatPair : BehaviorContext.BlackboardFloats)
-        {
-            BlackboardComponent->SetValueAsFloat(FName(*FloatPair.Key), FloatPair.Value);
-        }
-
-        // Update bool values
-        for (const auto& BoolPair : BehaviorContext.BlackboardBools)
-        {
-            BlackboardComponent->SetValueAsBool(FName(*BoolPair.Key), BoolPair.Value);
-        }
-
-        // Update vector values
-        for (const auto& VectorPair : BehaviorContext.BlackboardVectors)
-        {
-            BlackboardComponent->SetValueAsVector(FName(*VectorPair.Key), VectorPair.Value);
-        }
-    }
-}
-
-void UNPC_BehaviorTreeManager::InitializeBehaviorTreeComponent()
-{
-    AActor* Owner = GetOwner();
-    if (!Owner)
+    if (!AIController)
     {
         return;
     }
 
-    // Try to get existing behavior tree component from AI controller
-    if (APawn* OwnerPawn = Cast<APawn>(Owner))
+    if (FNPC_BehaviorContext* ExistingContext = BehaviorContexts.Find(AIController))
     {
-        if (AAIController* AIController = Cast<AAIController>(OwnerPawn->GetController()))
-        {
-            BehaviorTreeComponent = AIController->GetBehaviorTreeComponent();
-        }
-    }
+        *ExistingContext = NewContext;
 
-    // If no existing component, create one
-    if (!BehaviorTreeComponent)
-    {
-        BehaviorTreeComponent = NewObject<UBehaviorTreeComponent>(Owner);
-        if (BehaviorTreeComponent)
+        // Update blackboard
+        if (UBlackboardComponent* BlackboardComp = AIController->GetBlackboardComponent())
         {
-            BehaviorTreeComponent->RegisterComponent();
-        }
-    }
-}
-
-void UNPC_BehaviorTreeManager::InitializeBlackboardComponent()
-{
-    AActor* Owner = GetOwner();
-    if (!Owner)
-    {
-        return;
-    }
-
-    // Try to get existing blackboard component from AI controller
-    if (APawn* OwnerPawn = Cast<APawn>(Owner))
-    {
-        if (AAIController* AIController = Cast<AAIController>(OwnerPawn->GetController()))
-        {
-            BlackboardComponent = AIController->GetBlackboardComponent();
-        }
-    }
-
-    // If no existing component, create one
-    if (!BlackboardComponent)
-    {
-        BlackboardComponent = NewObject<UBlackboardComponent>(Owner);
-        if (BlackboardComponent)
-        {
-            BlackboardComponent->RegisterComponent();
+            BlackboardComp->SetValueAsEnum(TEXT("CurrentState"), (uint8)NewContext.CurrentState);
+            BlackboardComp->SetValueAsFloat(TEXT("AggressionLevel"), NewContext.AggressionLevel);
+            BlackboardComp->SetValueAsFloat(TEXT("FearLevel"), NewContext.FearLevel);
+            BlackboardComp->SetValueAsFloat(TEXT("HungerLevel"), NewContext.HungerLevel);
+            BlackboardComp->SetValueAsVector(TEXT("TerritoryCenter"), NewContext.TerritoryCenter);
+            BlackboardComp->SetValueAsFloat(TEXT("TerritoryRadius"), NewContext.TerritoryRadius);
+            BlackboardComp->SetValueAsObject(TEXT("CurrentTarget"), NewContext.CurrentTarget);
+            BlackboardComp->SetValueAsBool(TEXT("IsPackLeader"), NewContext.bIsPackLeader);
         }
     }
 }
 
-bool UNPC_BehaviorTreeManager::StartBehaviorTree(UBehaviorTree* BehaviorTree)
+ENPC_DinosaurState UNPC_BehaviorTreeManager::EvaluateStateTransition(const FNPC_BehaviorContext& Context)
 {
-    if (!IsValidBehaviorTree(BehaviorTree) || !BehaviorTreeComponent)
+    // Find the best matching behavior rule
+    FNPC_BehaviorRule BestRule = GetBestMatchingRule(Context);
+    
+    // Check if we should transition
+    if (BestRule.TriggerState == Context.CurrentState)
     {
-        return false;
-    }
-
-    // Stop current behavior tree if running
-    if (IsBehaviorTreeRunning())
-    {
-        StopBehaviorTree();
-    }
-
-    // Start new behavior tree
-    CurrentBehaviorTree = BehaviorTree;
-    BehaviorTreeComponent->StartTree(*BehaviorTree);
-
-    // Initialize blackboard if the behavior tree has one
-    if (BehaviorTree->BlackboardAsset && BlackboardComponent)
-    {
-        BlackboardComponent->InitializeBlackboard(*BehaviorTree->BlackboardAsset);
-    }
-
-    return true;
-}
-
-void UNPC_BehaviorTreeManager::StopBehaviorTree()
-{
-    if (BehaviorTreeComponent && IsBehaviorTreeRunning())
-    {
-        BehaviorTreeComponent->StopTree();
-        CurrentBehaviorTree = nullptr;
-        CurrentBehaviorName = TEXT("");
-    }
-}
-
-void UNPC_BehaviorTreeManager::PauseBehaviorTree()
-{
-    if (BehaviorTreeComponent && IsBehaviorTreeRunning() && !bIsPaused)
-    {
-        BehaviorTreeComponent->PauseLogic(TEXT("Manual Pause"));
-        bIsPaused = true;
-    }
-}
-
-void UNPC_BehaviorTreeManager::ResumeBehaviorTree()
-{
-    if (BehaviorTreeComponent && IsBehaviorTreeRunning() && bIsPaused)
-    {
-        BehaviorTreeComponent->ResumeLogic(TEXT("Manual Resume"));
-        bIsPaused = false;
-    }
-}
-
-bool UNPC_BehaviorTreeManager::SwitchBehaviorTree(UBehaviorTree* NewBehaviorTree, ENPC_BehaviorPriority Priority)
-{
-    if (!IsValidBehaviorTree(NewBehaviorTree))
-    {
-        return false;
-    }
-
-    // Check if we can switch based on priority
-    if (Priority < CurrentPriority && IsBehaviorTreeRunning())
-    {
-        return false; // Cannot interrupt higher priority behavior
-    }
-
-    // Check transition cooldown
-    float CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
-    if (CurrentTime - LastTransitionTime < StateTransitionCooldown)
-    {
-        return false;
-    }
-
-    // Perform the switch
-    bool bSuccess = StartBehaviorTree(NewBehaviorTree);
-    if (bSuccess)
-    {
-        CurrentPriority = Priority;
-        LastTransitionTime = CurrentTime;
-    }
-
-    return bSuccess;
-}
-
-void UNPC_BehaviorTreeManager::SetBehaviorState(ENPC_BehaviorState NewState)
-{
-    if (CanTransitionToState(NewState))
-    {
-        ENPC_BehaviorState OldState = BehaviorContext.CurrentState;
-        BehaviorContext.CurrentState = NewState;
-        BehaviorContext.LastStateChangeTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
-        BehaviorContext.StateTimer = 0.0f;
-
-        // Update blackboard with new state
-        if (BlackboardComponent)
+        // Additional checks based on context
+        if (Context.CurrentTarget && Context.AggressionLevel > 0.6f)
         {
-            BlackboardComponent->SetValueAsEnum(TEXT("BehaviorState"), static_cast<uint8>(NewState));
+            return ENPC_DinosaurState::Chasing;
         }
-    }
-}
-
-bool UNPC_BehaviorTreeManager::CanTransitionToState(ENPC_BehaviorState NewState) const
-{
-    // Check transition cooldown
-    float CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
-    if (CurrentTime - BehaviorContext.LastStateChangeTime < StateTransitionCooldown)
-    {
-        return false;
-    }
-
-    // Validate state transition logic
-    return ValidateStateTransition(BehaviorContext.CurrentState, NewState);
-}
-
-float UNPC_BehaviorTreeManager::GetTimeInCurrentState() const
-{
-    return BehaviorContext.StateTimer;
-}
-
-void UNPC_BehaviorTreeManager::SetBlackboardValueAsFloat(const FString& KeyName, float Value)
-{
-    BehaviorContext.BlackboardFloats.Add(KeyName, Value);
-    
-    if (BlackboardComponent)
-    {
-        BlackboardComponent->SetValueAsFloat(FName(*KeyName), Value);
-    }
-}
-
-void UNPC_BehaviorTreeManager::SetBlackboardValueAsBool(const FString& KeyName, bool Value)
-{
-    BehaviorContext.BlackboardBools.Add(KeyName, Value);
-    
-    if (BlackboardComponent)
-    {
-        BlackboardComponent->SetValueAsBool(FName(*KeyName), Value);
-    }
-}
-
-void UNPC_BehaviorTreeManager::SetBlackboardValueAsVector(const FString& KeyName, FVector Value)
-{
-    BehaviorContext.BlackboardVectors.Add(KeyName, Value);
-    
-    if (BlackboardComponent)
-    {
-        BlackboardComponent->SetValueAsVector(FName(*KeyName), Value);
-    }
-}
-
-void UNPC_BehaviorTreeManager::SetBlackboardValueAsObject(const FString& KeyName, UObject* Value)
-{
-    if (BlackboardComponent)
-    {
-        BlackboardComponent->SetValueAsObject(FName(*KeyName), Value);
-    }
-}
-
-float UNPC_BehaviorTreeManager::GetBlackboardValueAsFloat(const FString& KeyName) const
-{
-    if (BehaviorContext.BlackboardFloats.Contains(KeyName))
-    {
-        return BehaviorContext.BlackboardFloats[KeyName];
-    }
-    
-    if (BlackboardComponent)
-    {
-        return BlackboardComponent->GetValueAsFloat(FName(*KeyName));
-    }
-    
-    return 0.0f;
-}
-
-bool UNPC_BehaviorTreeManager::GetBlackboardValueAsBool(const FString& KeyName) const
-{
-    if (BehaviorContext.BlackboardBools.Contains(KeyName))
-    {
-        return BehaviorContext.BlackboardBools[KeyName];
-    }
-    
-    if (BlackboardComponent)
-    {
-        return BlackboardComponent->GetValueAsBool(FName(*KeyName));
-    }
-    
-    return false;
-}
-
-FVector UNPC_BehaviorTreeManager::GetBlackboardValueAsVector(const FString& KeyName) const
-{
-    if (BehaviorContext.BlackboardVectors.Contains(KeyName))
-    {
-        return BehaviorContext.BlackboardVectors[KeyName];
-    }
-    
-    if (BlackboardComponent)
-    {
-        return BlackboardComponent->GetValueAsVector(FName(*KeyName));
-    }
-    
-    return FVector::ZeroVector;
-}
-
-void UNPC_BehaviorTreeManager::RegisterBehaviorTree(const FString& BehaviorName, const FNPC_BehaviorTreeConfig& Config)
-{
-    RegisteredBehaviors.Add(BehaviorName, Config);
-}
-
-bool UNPC_BehaviorTreeManager::ActivateBehaviorByName(const FString& BehaviorName)
-{
-    if (!RegisteredBehaviors.Contains(BehaviorName))
-    {
-        return false;
-    }
-
-    const FNPC_BehaviorTreeConfig& Config = RegisteredBehaviors[BehaviorName];
-    UBehaviorTree* BehaviorTree = Config.BehaviorTreeAsset.LoadSynchronous();
-    
-    if (!BehaviorTree)
-    {
-        return false;
-    }
-
-    bool bSuccess = SwitchBehaviorTree(BehaviorTree, Config.Priority);
-    if (bSuccess)
-    {
-        CurrentBehaviorName = BehaviorName;
-    }
-
-    return bSuccess;
-}
-
-void UNPC_BehaviorTreeManager::SetBehaviorPriority(const FString& BehaviorName, ENPC_BehaviorPriority Priority)
-{
-    if (RegisteredBehaviors.Contains(BehaviorName))
-    {
-        RegisteredBehaviors[BehaviorName].Priority = Priority;
         
-        // Update current priority if this is the active behavior
-        if (CurrentBehaviorName == BehaviorName)
+        if (Context.HungerLevel > 0.7f)
         {
-            CurrentPriority = Priority;
+            return ENPC_DinosaurState::Hunting;
+        }
+        
+        if (Context.FearLevel > 0.5f)
+        {
+            return ENPC_DinosaurState::Fleeing;
+        }
+        
+        return BestRule.TargetState;
+    }
+    
+    return Context.CurrentState;
+}
+
+void UNPC_BehaviorTreeManager::ExecuteStateChange(AAIController* AIController, ENPC_DinosaurState NewState)
+{
+    if (!AIController)
+    {
+        return;
+    }
+
+    FNPC_BehaviorContext* Context = BehaviorContexts.Find(AIController);
+    if (!Context)
+    {
+        return;
+    }
+
+    ENPC_DinosaurState OldState = Context->CurrentState;
+    Context->CurrentState = NewState;
+
+    // Update blackboard
+    if (UBlackboardComponent* BlackboardComp = AIController->GetBlackboardComponent())
+    {
+        BlackboardComp->SetValueAsEnum(TEXT("CurrentState"), (uint8)NewState);
+    }
+
+    // State-specific logic
+    switch (NewState)
+    {
+        case ENPC_DinosaurState::Patrolling:
+            {
+                FVector PatrolPoint = GetRandomPatrolPoint(Context->TerritoryCenter, Context->TerritoryRadius);
+                if (UBlackboardComponent* BlackboardComp = AIController->GetBlackboardComponent())
+                {
+                    BlackboardComp->SetValueAsVector(TEXT("PatrolTarget"), PatrolPoint);
+                }
+            }
+            break;
+        case ENPC_DinosaurState::Chasing:
+            if (Context->CurrentTarget)
+            {
+                if (UBlackboardComponent* BlackboardComp = AIController->GetBlackboardComponent())
+                {
+                    BlackboardComp->SetValueAsObject(TEXT("TargetActor"), Context->CurrentTarget);
+                }
+            }
+            break;
+        case ENPC_DinosaurState::Hunting:
+            // Look for prey in the area
+            break;
+        case ENPC_DinosaurState::Fleeing:
+            // Find escape route
+            break;
+        default:
+            break;
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("State transition: %s -> %s"), 
+           *GetBehaviorStateString(OldState), 
+           *GetBehaviorStateString(NewState));
+}
+
+void UNPC_BehaviorTreeManager::RegisterPackMember(AActor* PackLeader, AActor* PackMember)
+{
+    if (!PackLeader || !PackMember)
+    {
+        return;
+    }
+
+    TArray<AActor*>& Pack = PackMemberships.FindOrAdd(PackLeader);
+    Pack.AddUnique(PackMember);
+    
+    UE_LOG(LogTemp, Log, TEXT("Registered pack member %s to leader %s"), 
+           *PackMember->GetName(), *PackLeader->GetName());
+}
+
+void UNPC_BehaviorTreeManager::RemovePackMember(AActor* PackLeader, AActor* PackMember)
+{
+    if (!PackLeader || !PackMember)
+    {
+        return;
+    }
+
+    if (TArray<AActor*>* Pack = PackMemberships.Find(PackLeader))
+    {
+        Pack->Remove(PackMember);
+        UE_LOG(LogTemp, Log, TEXT("Removed pack member %s from leader %s"), 
+               *PackMember->GetName(), *PackLeader->GetName());
+    }
+}
+
+TArray<AActor*> UNPC_BehaviorTreeManager::GetPackMembers(AActor* PackLeader)
+{
+    if (TArray<AActor*>* Pack = PackMemberships.Find(PackLeader))
+    {
+        return *Pack;
+    }
+    return TArray<AActor*>();
+}
+
+void UNPC_BehaviorTreeManager::CoordinatePackBehavior(AActor* PackLeader, ENPC_DinosaurState TargetState)
+{
+    TArray<AActor*> PackMembers = GetPackMembers(PackLeader);
+    
+    for (AActor* Member : PackMembers)
+    {
+        if (APawn* MemberPawn = Cast<APawn>(Member))
+        {
+            if (AAIController* MemberAI = Cast<AAIController>(MemberPawn->GetController()))
+            {
+                ExecuteStateChange(MemberAI, TargetState);
+            }
         }
     }
 }
 
-void UNPC_BehaviorTreeManager::UpdateBehaviorContext(const FNPC_BehaviorContext& NewContext)
+bool UNPC_BehaviorTreeManager::IsWithinTerritory(const FVector& Position, const FVector& TerritoryCenter, float TerritoryRadius)
 {
-    BehaviorContext = NewContext;
+    float Distance = FVector::Dist(Position, TerritoryCenter);
+    return Distance <= TerritoryRadius;
 }
 
-void UNPC_BehaviorTreeManager::SetTargetActor(AActor* Target)
+FVector UNPC_BehaviorTreeManager::GetRandomPatrolPoint(const FVector& TerritoryCenter, float TerritoryRadius)
 {
-    BehaviorContext.TargetActor = Target;
+    // Generate random point within territory
+    float RandomAngle = FMath::RandRange(0.0f, 2.0f * PI);
+    float RandomDistance = FMath::RandRange(TerritoryRadius * 0.3f, TerritoryRadius * 0.8f);
     
-    if (BlackboardComponent)
-    {
-        BlackboardComponent->SetValueAsObject(TEXT("TargetActor"), Target);
-    }
-}
-
-void UNPC_BehaviorTreeManager::SetTargetLocation(FVector Location)
-{
-    BehaviorContext.TargetLocation = Location;
+    FVector RandomOffset = FVector(
+        FMath::Cos(RandomAngle) * RandomDistance,
+        FMath::Sin(RandomAngle) * RandomDistance,
+        0.0f
+    );
     
-    if (BlackboardComponent)
+    return TerritoryCenter + RandomOffset;
+}
+
+void UNPC_BehaviorTreeManager::DefendTerritory(AAIController* AIController, AActor* Intruder)
+{
+    if (!AIController || !Intruder)
     {
-        BlackboardComponent->SetValueAsVector(TEXT("TargetLocation"), Location);
+        return;
+    }
+
+    FNPC_BehaviorContext* Context = BehaviorContexts.Find(AIController);
+    if (!Context)
+    {
+        return;
+    }
+
+    // Set intruder as target and switch to aggressive state
+    Context->CurrentTarget = Intruder;
+    Context->AggressionLevel = FMath::Min(Context->AggressionLevel + 0.3f, 1.0f);
+    
+    ExecuteStateChange(AIController, ENPC_DinosaurState::Chasing);
+    
+    // Coordinate pack if this is a pack leader
+    if (Context->bIsPackLeader)
+    {
+        CoordinatePackBehavior(AIController->GetPawn(), ENPC_DinosaurState::Chasing);
     }
 }
 
-bool UNPC_BehaviorTreeManager::IsValidBehaviorTree(UBehaviorTree* BehaviorTree) const
+void UNPC_BehaviorTreeManager::OnPlayerDetected(AAIController* AIController, AActor* Player, float Distance)
 {
-    return BehaviorTree != nullptr && IsValid(BehaviorTree);
-}
-
-bool UNPC_BehaviorTreeManager::IsBehaviorTreeRunning() const
-{
-    return BehaviorTreeComponent && BehaviorTreeComponent->GetCurrentTree() != nullptr;
-}
-
-UBehaviorTree* UNPC_BehaviorTreeManager::GetCurrentBehaviorTree() const
-{
-    return CurrentBehaviorTree;
-}
-
-void UNPC_BehaviorTreeManager::LogBehaviorState() const
-{
-    UE_LOG(LogTemp, Warning, TEXT("NPC Behavior State: %s, Time in State: %.2f, Current Behavior: %s"),
-        *UEnum::GetValueAsString(BehaviorContext.CurrentState),
-        BehaviorContext.StateTimer,
-        *CurrentBehaviorName);
-}
-
-void UNPC_BehaviorTreeManager::UpdateBehaviorContext(float DeltaTime)
-{
-    // Update state timer
-    BehaviorContext.StateTimer += DeltaTime;
-
-    // Update target location if we have a target actor
-    if (BehaviorContext.TargetActor && IsValid(BehaviorContext.TargetActor))
+    if (!AIController || !Player)
     {
-        BehaviorContext.TargetLocation = BehaviorContext.TargetActor->GetActorLocation();
+        return;
+    }
+
+    FNPC_BehaviorContext* Context = BehaviorContexts.Find(AIController);
+    if (!Context)
+    {
+        return;
+    }
+
+    Context->LastPlayerInteractionTime = GetWorld()->GetTimeSeconds();
+    
+    // Determine reaction based on species and distance
+    if (ShouldAttackPlayer(*Context, Distance))
+    {
+        Context->CurrentTarget = Player;
+        ExecuteStateChange(AIController, ENPC_DinosaurState::Chasing);
+    }
+    else if (Context->Species == ENPC_DinosaurSpecies::Brachiosaurus)
+    {
+        // Herbivores might flee
+        if (Distance < 2000.0f)
+        {
+            Context->FearLevel += 0.2f;
+            ExecuteStateChange(AIController, ENPC_DinosaurState::Fleeing);
+        }
     }
 }
 
-bool UNPC_BehaviorTreeManager::ValidateStateTransition(ENPC_BehaviorState FromState, ENPC_BehaviorState ToState) const
+void UNPC_BehaviorTreeManager::OnPlayerLost(AAIController* AIController, AActor* Player)
 {
-    // Basic state transition validation
-    // Critical states like Fleeing can interrupt most other states
-    if (ToState == ENPC_BehaviorState::Fleeing)
+    if (!AIController)
     {
-        return true;
+        return;
     }
 
-    // Feeding can be interrupted by territorial or hunting behavior
-    if (FromState == ENPC_BehaviorState::Feeding)
+    FNPC_BehaviorContext* Context = BehaviorContexts.Find(AIController);
+    if (!Context)
     {
-        return (ToState == ENPC_BehaviorState::Territorial || 
-                ToState == ENPC_BehaviorState::Hunting ||
-                ToState == ENPC_BehaviorState::Fleeing);
+        return;
     }
 
-    // Resting can be interrupted by most active behaviors
-    if (FromState == ENPC_BehaviorState::Resting)
+    if (Context->CurrentTarget == Player)
     {
-        return (ToState != ENPC_BehaviorState::Socializing);
+        Context->CurrentTarget = nullptr;
+        ExecuteStateChange(AIController, ENPC_DinosaurState::Patrolling);
     }
-
-    // Default: allow most transitions
-    return true;
 }
 
-void UNPC_BehaviorTreeManager::OnBehaviorTreeFinished()
+bool UNPC_BehaviorTreeManager::ShouldAttackPlayer(const FNPC_BehaviorContext& Context, float PlayerDistance)
 {
-    // Reset to default behavior when current behavior finishes
-    if (!DefaultBehaviorName.IsEmpty() && CurrentBehaviorName != DefaultBehaviorName)
+    // Carnivores are more likely to attack
+    bool bIsCarnivore = (Context.Species == ENPC_DinosaurSpecies::TRex || 
+                        Context.Species == ENPC_DinosaurSpecies::Raptor);
+    
+    if (!bIsCarnivore)
     {
-        ActivateBehaviorByName(DefaultBehaviorName);
+        return false;
+    }
+    
+    // Attack if player is close and aggression is high
+    float AttackThreshold = 3000.0f;
+    if (Context.Species == ENPC_DinosaurSpecies::TRex)
+    {
+        AttackThreshold = 4000.0f;
+    }
+    
+    return (PlayerDistance < AttackThreshold && Context.AggressionLevel > 0.5f);
+}
+
+void UNPC_BehaviorTreeManager::AddBehaviorRule(const FNPC_BehaviorRule& Rule)
+{
+    BehaviorRules.Add(Rule);
+}
+
+void UNPC_BehaviorTreeManager::RemoveBehaviorRule(ENPC_DinosaurState TriggerState, ENPC_DinosaurState TargetState)
+{
+    BehaviorRules.RemoveAll([TriggerState, TargetState](const FNPC_BehaviorRule& Rule)
+    {
+        return Rule.TriggerState == TriggerState && Rule.TargetState == TargetState;
+    });
+}
+
+FNPC_BehaviorRule UNPC_BehaviorTreeManager::GetBestMatchingRule(const FNPC_BehaviorContext& Context)
+{
+    FNPC_BehaviorRule BestRule;
+    float BestPriority = -1.0f;
+    
+    for (const FNPC_BehaviorRule& Rule : BehaviorRules)
+    {
+        if (Rule.TriggerState == Context.CurrentState &&
+            Context.AggressionLevel >= Rule.MinAggressionLevel &&
+            Context.AggressionLevel <= Rule.MaxAggressionLevel &&
+            Rule.Priority > BestPriority)
+        {
+            BestRule = Rule;
+            BestPriority = Rule.Priority;
+        }
+    }
+    
+    return BestRule;
+}
+
+void UNPC_BehaviorTreeManager::DebugDrawBehaviorInfo(AActor* DinosaurActor, const FNPC_BehaviorContext& Context)
+{
+    if (!DinosaurActor || !GetWorld())
+    {
+        return;
+    }
+
+    FVector ActorLocation = DinosaurActor->GetActorLocation();
+    
+    // Draw territory circle
+    DrawDebugCircle(GetWorld(), Context.TerritoryCenter, Context.TerritoryRadius, 
+                   32, FColor::Blue, false, 1.0f, 0, 50.0f, FVector(0, 1, 0), FVector(1, 0, 0));
+    
+    // Draw state text
+    FString StateText = FString::Printf(TEXT("State: %s\nAggression: %.2f\nFear: %.2f"), 
+                                       *GetBehaviorStateString(Context.CurrentState),
+                                       Context.AggressionLevel,
+                                       Context.FearLevel);
+    
+    DrawDebugString(GetWorld(), ActorLocation + FVector(0, 0, 200), StateText, 
+                   nullptr, FColor::White, 1.0f);
+}
+
+FString UNPC_BehaviorTreeManager::GetBehaviorStateString(ENPC_DinosaurState State)
+{
+    switch (State)
+    {
+        case ENPC_DinosaurState::Idle: return TEXT("Idle");
+        case ENPC_DinosaurState::Patrolling: return TEXT("Patrolling");
+        case ENPC_DinosaurState::Hunting: return TEXT("Hunting");
+        case ENPC_DinosaurState::Chasing: return TEXT("Chasing");
+        case ENPC_DinosaurState::Fleeing: return TEXT("Fleeing");
+        case ENPC_DinosaurState::Feeding: return TEXT("Feeding");
+        case ENPC_DinosaurState::Resting: return TEXT("Resting");
+        case ENPC_DinosaurState::Territorial: return TEXT("Territorial");
+        default: return TEXT("Unknown");
+    }
+}
+
+void UNPC_BehaviorTreeManager::SetupDefaultBehaviorRules()
+{
+    BehaviorRules.Empty();
+    
+    // Idle to Patrolling
+    FNPC_BehaviorRule IdleToPatrol;
+    IdleToPatrol.TriggerState = ENPC_DinosaurState::Idle;
+    IdleToPatrol.TargetState = ENPC_DinosaurState::Patrolling;
+    IdleToPatrol.Priority = 1.0f;
+    BehaviorRules.Add(IdleToPatrol);
+    
+    // Patrolling to Hunting (when hungry)
+    FNPC_BehaviorRule PatrolToHunt;
+    PatrolToHunt.TriggerState = ENPC_DinosaurState::Patrolling;
+    PatrolToHunt.TargetState = ENPC_DinosaurState::Hunting;
+    PatrolToHunt.MinAggressionLevel = 0.4f;
+    PatrolToHunt.Priority = 2.0f;
+    BehaviorRules.Add(PatrolToHunt);
+    
+    // Any state to Chasing (when target detected)
+    FNPC_BehaviorRule AnyToChase;
+    AnyToChase.TriggerState = ENPC_DinosaurState::Patrolling;
+    AnyToChase.TargetState = ENPC_DinosaurState::Chasing;
+    AnyToChase.MinAggressionLevel = 0.6f;
+    AnyToChase.Priority = 3.0f;
+    BehaviorRules.Add(AnyToChase);
+}
+
+void UNPC_BehaviorTreeManager::InitializeSpeciesBehaviorTrees()
+{
+    // Behavior trees would be loaded from assets in a real implementation
+    // For now, we'll leave this empty and rely on the AI controller setup
+}
+
+bool UNPC_BehaviorTreeManager::CheckLineOfSight(AActor* Observer, AActor* Target)
+{
+    if (!Observer || !Target || !GetWorld())
+    {
+        return false;
+    }
+
+    FVector Start = Observer->GetActorLocation();
+    FVector End = Target->GetActorLocation();
+    
+    FHitResult HitResult;
+    FCollisionQueryParams QueryParams;
+    QueryParams.AddIgnoredActor(Observer);
+    QueryParams.AddIgnoredActor(Target);
+    
+    bool bHit = GetWorld()->LineTraceSingleByChannel(HitResult, Start, End, 
+                                                    ECC_Visibility, QueryParams);
+    
+    return !bHit;
+}
+
+float UNPC_BehaviorTreeManager::CalculateAggressionModifier(ENPC_DinosaurSpecies Species, const FNPC_BehaviorContext& Context)
+{
+    float Modifier = 1.0f;
+    
+    // Species-based modifiers
+    switch (Species)
+    {
+        case ENPC_DinosaurSpecies::TRex:
+            Modifier = 1.5f;
+            break;
+        case ENPC_DinosaurSpecies::Raptor:
+            Modifier = 1.2f;
+            break;
+        case ENPC_DinosaurSpecies::Brachiosaurus:
+            Modifier = 0.3f;
+            break;
+        case ENPC_DinosaurSpecies::Triceratops:
+            Modifier = 0.8f;
+            break;
+    }
+    
+    // Hunger increases aggression for carnivores
+    if (Species == ENPC_DinosaurSpecies::TRex || Species == ENPC_DinosaurSpecies::Raptor)
+    {
+        Modifier += Context.HungerLevel * 0.5f;
+    }
+    
+    return Modifier;
+}
+
+void UNPC_BehaviorTreeManager::UpdatePackCoordination(AActor* PackLeader)
+{
+    if (!PackLeader)
+    {
+        return;
+    }
+
+    TArray<AActor*> PackMembers = GetPackMembers(PackLeader);
+    
+    // Simple pack coordination - members follow leader's behavior
+    if (APawn* LeaderPawn = Cast<APawn>(PackLeader))
+    {
+        if (AAIController* LeaderAI = Cast<AAIController>(LeaderPawn->GetController()))
+        {
+            if (FNPC_BehaviorContext* LeaderContext = BehaviorContexts.Find(LeaderAI))
+            {
+                for (AActor* Member : PackMembers)
+                {
+                    if (APawn* MemberPawn = Cast<APawn>(Member))
+                    {
+                        if (AAIController* MemberAI = Cast<AAIController>(MemberPawn->GetController()))
+                        {
+                            if (FNPC_BehaviorContext* MemberContext = BehaviorContexts.Find(MemberAI))
+                            {
+                                // Sync some behaviors
+                                if (LeaderContext->CurrentState == ENPC_DinosaurState::Chasing)
+                                {
+                                    MemberContext->CurrentTarget = LeaderContext->CurrentTarget;
+                                    ExecuteStateChange(MemberAI, ENPC_DinosaurState::Chasing);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
