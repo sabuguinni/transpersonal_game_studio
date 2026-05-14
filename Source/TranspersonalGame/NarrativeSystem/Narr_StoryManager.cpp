@@ -1,293 +1,261 @@
 #include "Narr_StoryManager.h"
+#include "Narr_DialogueManager.h"
 #include "Engine/Engine.h"
-#include "Engine/World.h"
+
+UNarr_StoryManager::UNarr_StoryManager()
+{
+    CurrentProgress = FNarr_StoryProgress();
+}
 
 void UNarr_StoryManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    CurrentPhase = ENarr_StoryPhase::Awakening;
-    StoryProgressionScore = 0.0f;
+    InitializePhaseDescriptions();
+    InitializeStoryTriggers();
     
-    // Get dialogue system reference
-    DialogueSystem = GetGameInstance()->GetSubsystem<UNarr_DialogueSystem>();
-    
-    CreatePrehistoricStoryNodes();
-    CreateCharacterArcs();
-    
-    UE_LOG(LogTemp, Log, TEXT("Narrative Story Manager initialized with %d story nodes"), StoryNodes.Num());
+    UE_LOG(LogTemp, Log, TEXT("Narrative Story Manager initialized"));
 }
 
-void UNarr_StoryManager::Deinitialize()
+void UNarr_StoryManager::TriggerStoryEvent(ENarr_StoryEvent Event)
 {
-    StoryNodes.Empty();
-    CharacterArcs.Empty();
-    CompletedEvents.Empty();
-    
-    Super::Deinitialize();
-}
-
-void UNarr_StoryManager::TriggerStoryEvent(ENarr_StoryEvent Event, const FString& EventData)
-{
-    FString EventString;
-    switch (Event)
+    if (!HasCompletedEvent(Event))
     {
-        case ENarr_StoryEvent::PlayerSpawn:
-            EventString = TEXT("PlayerSpawn");
-            break;
-        case ENarr_StoryEvent::FirstDinosaurEncounter:
-            EventString = TEXT("FirstDinosaurEncounter");
-            break;
-        case ENarr_StoryEvent::FirstKill:
-            EventString = TEXT("FirstKill");
-            break;
-        case ENarr_StoryEvent::DiscoverWater:
-            EventString = TEXT("DiscoverWater");
-            break;
-        case ENarr_StoryEvent::MeetNPC:
-            EventString = TEXT("MeetNPC");
-            break;
-        case ENarr_StoryEvent::CompleteQuest:
-            EventString = TEXT("CompleteQuest");
-            break;
-        case ENarr_StoryEvent::DinosaurDeath:
-            EventString = TEXT("DinosaurDeath");
-            break;
-        case ENarr_StoryEvent::PlayerDeath:
-            EventString = TEXT("PlayerDeath");
-            break;
-    }
-    
-    if (!EventString.IsEmpty())
-    {
-        CompletedEvents.AddUnique(EventString);
-        UE_LOG(LogTemp, Log, TEXT("Story event triggered: %s"), *EventString);
+        CurrentProgress.CompletedEvents.Add(Event);
         
-        CheckStoryProgression();
+        // Process any story triggers for this event
+        for (FNarr_StoryTrigger& Trigger : StoryTriggers)
+        {
+            if (Trigger.TriggerEvent == Event && 
+                !Trigger.bTriggered && 
+                CurrentProgress.CurrentPhase >= Trigger.RequiredPhase)
+            {
+                ProcessStoryTrigger(Trigger);
+                if (Trigger.bOnlyOnce)
+                {
+                    Trigger.bTriggered = true;
+                }
+            }
+        }
+        
+        CheckPhaseAdvancement();
+        
+        UE_LOG(LogTemp, Log, TEXT("Story event triggered: %d"), (int32)Event);
     }
 }
 
 void UNarr_StoryManager::AdvanceStoryPhase(ENarr_StoryPhase NewPhase)
 {
-    if (NewPhase != CurrentPhase)
+    if (NewPhase > CurrentProgress.CurrentPhase)
     {
-        CurrentPhase = NewPhase;
-        UE_LOG(LogTemp, Log, TEXT("Story phase advanced to: %d"), (int32)NewPhase);
+        CurrentProgress.CurrentPhase = NewPhase;
         
-        CheckStoryProgression();
-    }
-}
-
-TArray<FNarr_StoryNode> UNarr_StoryManager::GetActiveStoryNodes()
-{
-    TArray<FNarr_StoryNode> ActiveNodes;
-    
-    for (const auto& NodePair : StoryNodes)
-    {
-        const FNarr_StoryNode& Node = NodePair.Value;
-        if (!Node.bIsCompleted && Node.Phase == CurrentPhase && AreRequirementsMet(Node))
+        FString PhaseDesc = GetCurrentPhaseDescription();
+        if (GEngine)
         {
-            ActiveNodes.Add(Node);
+            GEngine->AddOnScreenDebugMessage(-1, 8.0f, FColor::Yellow, 
+                FString::Printf(TEXT("Story Phase: %s"), *PhaseDesc));
         }
-    }
-    
-    // Sort by priority
-    ActiveNodes.Sort([](const FNarr_StoryNode& A, const FNarr_StoryNode& B) {
-        return A.Priority > B.Priority;
-    });
-    
-    return ActiveNodes;
-}
-
-void UNarr_StoryManager::RegisterCharacterArc(const FNarr_CharacterArc& CharacterArc)
-{
-    CharacterArcs.Add(CharacterArc.CharacterName, CharacterArc);
-    UE_LOG(LogTemp, Log, TEXT("Registered character arc: %s"), *CharacterArc.CharacterName);
-}
-
-FNarr_CharacterArc UNarr_StoryManager::GetCharacterArc(const FString& CharacterName)
-{
-    if (CharacterArcs.Contains(CharacterName))
-    {
-        return CharacterArcs[CharacterName];
-    }
-    
-    return FNarr_CharacterArc();
-}
-
-void UNarr_StoryManager::UpdateCharacterRelationship(const FString& CharacterName, float RelationshipDelta)
-{
-    if (CharacterArcs.Contains(CharacterName))
-    {
-        CharacterArcs[CharacterName].RelationshipWithPlayer += RelationshipDelta;
-        CharacterArcs[CharacterName].RelationshipWithPlayer = FMath::Clamp(
-            CharacterArcs[CharacterName].RelationshipWithPlayer, -100.0f, 100.0f
-        );
         
-        UE_LOG(LogTemp, Log, TEXT("Updated relationship with %s: %f"), 
-               *CharacterName, CharacterArcs[CharacterName].RelationshipWithPlayer);
+        UE_LOG(LogTemp, Log, TEXT("Advanced to story phase: %s"), *PhaseDesc);
     }
 }
 
-void UNarr_StoryManager::InitializePrehistoricStory()
+ENarr_StoryPhase UNarr_StoryManager::GetCurrentStoryPhase() const
 {
-    CreatePrehistoricStoryNodes();
-    CreateCharacterArcs();
+    return CurrentProgress.CurrentPhase;
 }
 
-FString UNarr_StoryManager::GetCurrentNarrativeContext()
+bool UNarr_StoryManager::HasCompletedEvent(ENarr_StoryEvent Event) const
 {
-    FString Context = FString::Printf(TEXT("Phase: %d, Events: %d, Characters: %d"), 
-                                     (int32)CurrentPhase, CompletedEvents.Num(), CharacterArcs.Num());
-    return Context;
+    return CurrentProgress.CompletedEvents.Contains(Event);
 }
 
-void UNarr_StoryManager::CreatePrehistoricStoryNodes()
+void UNarr_StoryManager::IncrementDinosaurKills()
 {
-    // Awakening Phase - Player's first moments
-    FNarr_StoryNode AwakeningNode;
-    AwakeningNode.NodeID = TEXT("Awakening_Introduction");
-    AwakeningNode.Phase = ENarr_StoryPhase::Awakening;
-    AwakeningNode.Title = FText::FromString(TEXT("The Awakening"));
-    AwakeningNode.Description = FText::FromString(TEXT("You awaken in a world ruled by giants. The ancient storytellers speak of survival."));
-    AwakeningNode.RequiredEvents.Add(TEXT("PlayerSpawn"));
-    AwakeningNode.DialogueSequences.Add(TEXT("AncientStoryteller_Intro"));
-    AwakeningNode.Priority = 10;
-    StoryNodes.Add(AwakeningNode.NodeID, AwakeningNode);
+    CurrentProgress.DinosaurKills++;
     
-    // First Hunt Phase
-    FNarr_StoryNode FirstHuntNode;
-    FirstHuntNode.NodeID = TEXT("FirstHunt_Preparation");
-    FirstHuntNode.Phase = ENarr_StoryPhase::FirstHunt;
-    FirstHuntNode.Title = FText::FromString(TEXT("The First Hunt"));
-    FirstHuntNode.Description = FText::FromString(TEXT("The hunt chief speaks of courage and sacrifice in the face of razor-claws."));
-    FirstHuntNode.RequiredEvents.Add(TEXT("FirstDinosaurEncounter"));
-    FirstHuntNode.DialogueSequences.Add(TEXT("HuntChief_PostBattle"));
-    FirstHuntNode.Priority = 8;
-    StoryNodes.Add(FirstHuntNode.NodeID, FirstHuntNode);
-    
-    // Tribal Contact Phase
-    FNarr_StoryNode TribalContactNode;
-    TribalContactNode.NodeID = TEXT("TribalContact_Warning");
-    TribalContactNode.Phase = ENarr_StoryPhase::TribalContact;
-    TribalContactNode.Title = FText::FromString(TEXT("Tribal Warnings"));
-    TribalContactNode.Description = FText::FromString(TEXT("Scouts bring word of approaching danger from the eastern ridge."));
-    TribalContactNode.RequiredEvents.Add(TEXT("MeetNPC"));
-    TribalContactNode.DialogueSequences.Add(TEXT("TribalScout_DangerWarning"));
-    TribalContactNode.Priority = 7;
-    StoryNodes.Add(TribalContactNode.NodeID, TribalContactNode);
-    
-    // Territory Establishment Phase
-    FNarr_StoryNode TerritoryNode;
-    TerritoryNode.NodeID = TEXT("Territory_ResourceGuide");
-    TerritoryNode.Phase = ENarr_StoryPhase::TerritoryEstablishment;
-    TerritoryNode.Title = FText::FromString(TEXT("Claiming Territory"));
-    TerritoryNode.Description = FText::FromString(TEXT("Water guides share knowledge of resources and territorial dangers."));
-    TerritoryNode.RequiredEvents.Add(TEXT("DiscoverWater"));
-    TerritoryNode.DialogueSequences.Add(TEXT("WaterGuide_ResourceInfo"));
-    TerritoryNode.Priority = 6;
-    StoryNodes.Add(TerritoryNode.NodeID, TerritoryNode);
-    
-    UE_LOG(LogTemp, Log, TEXT("Created %d prehistoric story nodes"), StoryNodes.Num());
-}
-
-void UNarr_StoryManager::CreateCharacterArcs()
-{
-    // Ancient Storyteller
-    FNarr_CharacterArc StorytellerArc;
-    StorytellerArc.CharacterName = TEXT("Ancient Storyteller");
-    StorytellerArc.CharacterType = ENarr_CharacterType::TribalElder;
-    StorytellerArc.BackgroundStory = FText::FromString(TEXT("The keeper of ancient wisdom, who remembers the old ways of survival."));
-    StorytellerArc.PersonalityTraits.Add(TEXT("Wise"));
-    StorytellerArc.PersonalityTraits.Add(TEXT("Patient"));
-    StorytellerArc.PersonalityTraits.Add(TEXT("Protective"));
-    StorytellerArc.RelatedStoryNodes.Add(TEXT("Awakening_Introduction"));
-    StorytellerArc.RelationshipWithPlayer = 25.0f;
-    RegisterCharacterArc(StorytellerArc);
-    
-    // Tribal Scout
-    FNarr_CharacterArc ScoutArc;
-    ScoutArc.CharacterName = TEXT("Tribal Scout");
-    ScoutArc.CharacterType = ENarr_CharacterType::Scout;
-    ScoutArc.BackgroundStory = FText::FromString(TEXT("A vigilant watcher who monitors the movements of great beasts."));
-    ScoutArc.PersonalityTraits.Add(TEXT("Alert"));
-    ScoutArc.PersonalityTraits.Add(TEXT("Brave"));
-    ScoutArc.PersonalityTraits.Add(TEXT("Quick"));
-    ScoutArc.RelatedStoryNodes.Add(TEXT("TribalContact_Warning"));
-    ScoutArc.RelationshipWithPlayer = 10.0f;
-    RegisterCharacterArc(ScoutArc);
-    
-    // Hunt Chief
-    FNarr_CharacterArc HuntChiefArc;
-    HuntChiefArc.CharacterName = TEXT("Hunt Chief");
-    HuntChiefArc.CharacterType = ENarr_CharacterType::HuntLeader;
-    HuntChiefArc.BackgroundStory = FText::FromString(TEXT("A battle-hardened leader who has faced the razor-claws and lived."));
-    HuntChiefArc.PersonalityTraits.Add(TEXT("Courageous"));
-    HuntChiefArc.PersonalityTraits.Add(TEXT("Tactical"));
-    HuntChiefArc.PersonalityTraits.Add(TEXT("Honorable"));
-    HuntChiefArc.RelatedStoryNodes.Add(TEXT("FirstHunt_Preparation"));
-    HuntChiefArc.RelationshipWithPlayer = 15.0f;
-    RegisterCharacterArc(HuntChiefArc);
-    
-    // Water Guide
-    FNarr_CharacterArc WaterGuideArc;
-    WaterGuideArc.CharacterName = TEXT("Water Guide");
-    WaterGuideArc.CharacterType = ENarr_CharacterType::Scout;
-    WaterGuideArc.BackgroundStory = FText::FromString(TEXT("An expert navigator who knows the safe paths to vital resources."));
-    WaterGuideArc.PersonalityTraits.Add(TEXT("Knowledgeable"));
-    WaterGuideArc.PersonalityTraits.Add(TEXT("Cautious"));
-    WaterGuideArc.PersonalityTraits.Add(TEXT("Resourceful"));
-    WaterGuideArc.RelatedStoryNodes.Add(TEXT("Territory_ResourceGuide"));
-    WaterGuideArc.RelationshipWithPlayer = 20.0f;
-    RegisterCharacterArc(WaterGuideArc);
-}
-
-void UNarr_StoryManager::CheckStoryProgression()
-{
-    TArray<FNarr_StoryNode> ActiveNodes = GetActiveStoryNodes();
-    
-    for (const FNarr_StoryNode& Node : ActiveNodes)
+    if (CurrentProgress.DinosaurKills == 1)
     {
-        if (!Node.bIsCompleted && AreRequirementsMet(Node))
+        TriggerStoryEvent(ENarr_StoryEvent::FirstKill);
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Dinosaur kills: %d"), CurrentProgress.DinosaurKills);
+}
+
+void UNarr_StoryManager::IncrementTerritoriesDiscovered()
+{
+    CurrentProgress.TerritoriesDiscovered++;
+    
+    if (CurrentProgress.TerritoriesDiscovered == 1)
+    {
+        TriggerStoryEvent(ENarr_StoryEvent::TerritoryDiscovered);
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Territories discovered: %d"), CurrentProgress.TerritoriesDiscovered);
+}
+
+void UNarr_StoryManager::UpdateSurvivalTime(float DeltaTime)
+{
+    CurrentProgress.SurvivalTime += DeltaTime;
+}
+
+FNarr_StoryProgress UNarr_StoryManager::GetStoryProgress() const
+{
+    return CurrentProgress;
+}
+
+void UNarr_StoryManager::SetTribalContact(bool bContactMade)
+{
+    if (bContactMade && !CurrentProgress.bTribalContactMade)
+    {
+        CurrentProgress.bTribalContactMade = true;
+        TriggerStoryEvent(ENarr_StoryEvent::TribalMeeting);
+    }
+}
+
+void UNarr_StoryManager::SetAlphaDefeated(bool bDefeated)
+{
+    if (bDefeated && !CurrentProgress.bAlphaDefeated)
+    {
+        CurrentProgress.bAlphaDefeated = true;
+        TriggerStoryEvent(ENarr_StoryEvent::AlphaDefeated);
+    }
+}
+
+FString UNarr_StoryManager::GetCurrentPhaseDescription() const
+{
+    if (PhaseDescriptions.Contains(CurrentProgress.CurrentPhase))
+    {
+        return PhaseDescriptions[CurrentProgress.CurrentPhase];
+    }
+    return TEXT("Unknown Phase");
+}
+
+void UNarr_StoryManager::RegisterStoryTrigger(const FNarr_StoryTrigger& Trigger)
+{
+    StoryTriggers.Add(Trigger);
+}
+
+void UNarr_StoryManager::InitializeStoryTriggers()
+{
+    // Player Spawned trigger
+    FNarr_StoryTrigger SpawnTrigger;
+    SpawnTrigger.TriggerEvent = ENarr_StoryEvent::PlayerSpawned;
+    SpawnTrigger.DialogueSequenceName = TEXT("TribalWelcome");
+    SpawnTrigger.NarrativeText = TEXT("You awaken in the ancient valley, surrounded by the sounds of a prehistoric world.");
+    SpawnTrigger.RequiredPhase = ENarr_StoryPhase::Awakening;
+    SpawnTrigger.bOnlyOnce = true;
+    RegisterStoryTrigger(SpawnTrigger);
+    
+    // First Dinosaur Sighted trigger
+    FNarr_StoryTrigger SightTrigger;
+    SightTrigger.TriggerEvent = ENarr_StoryEvent::FirstDinosaurSighted;
+    SightTrigger.DialogueSequenceName = TEXT("HuntWarning");
+    SightTrigger.NarrativeText = TEXT("A massive creature moves through the undergrowth. Your survival instincts awaken.");
+    SightTrigger.RequiredPhase = ENarr_StoryPhase::Awakening;
+    SightTrigger.bOnlyOnce = true;
+    RegisterStoryTrigger(SightTrigger);
+    
+    // First Kill trigger
+    FNarr_StoryTrigger KillTrigger;
+    KillTrigger.TriggerEvent = ENarr_StoryEvent::FirstKill;
+    KillTrigger.DialogueSequenceName = TEXT("AncientWisdom");
+    KillTrigger.NarrativeText = TEXT("Your first victory against the ancient beasts. You are becoming a true hunter.");
+    KillTrigger.RequiredPhase = ENarr_StoryPhase::Awakening;
+    KillTrigger.bOnlyOnce = true;
+    RegisterStoryTrigger(KillTrigger);
+    
+    // Tribal Meeting trigger
+    FNarr_StoryTrigger TribalTrigger;
+    TribalTrigger.TriggerEvent = ENarr_StoryEvent::TribalMeeting;
+    TribalTrigger.DialogueSequenceName = TEXT("TribalWelcome");
+    TribalTrigger.NarrativeText = TEXT("You encounter other survivors. Perhaps you are not alone in this world.");
+    TribalTrigger.RequiredPhase = ENarr_StoryPhase::FirstHunt;
+    TribalTrigger.bOnlyOnce = true;
+    RegisterStoryTrigger(TribalTrigger);
+    
+    UE_LOG(LogTemp, Log, TEXT("Initialized %d story triggers"), StoryTriggers.Num());
+}
+
+void UNarr_StoryManager::InitializePhaseDescriptions()
+{
+    PhaseDescriptions.Add(ENarr_StoryPhase::Awakening, TEXT("The Awakening - Learning to survive"));
+    PhaseDescriptions.Add(ENarr_StoryPhase::FirstHunt, TEXT("First Hunt - Proving your skills"));
+    PhaseDescriptions.Add(ENarr_StoryPhase::TribalContact, TEXT("Tribal Contact - Meeting other survivors"));
+    PhaseDescriptions.Add(ENarr_StoryPhase::TerritoryExploration, TEXT("Territory Exploration - Mapping the valley"));
+    PhaseDescriptions.Add(ENarr_StoryPhase::AlphaEncounter, TEXT("Alpha Encounter - Facing the apex predators"));
+    PhaseDescriptions.Add(ENarr_StoryPhase::PackLeadership, TEXT("Pack Leadership - Leading the tribe"));
+    PhaseDescriptions.Add(ENarr_StoryPhase::ValleyMastery, TEXT("Valley Mastery - Mastering the prehistoric world"));
+}
+
+void UNarr_StoryManager::ProcessStoryTrigger(const FNarr_StoryTrigger& Trigger)
+{
+    // Display narrative text
+    if (!Trigger.NarrativeText.IsEmpty() && GEngine)
+    {
+        GEngine->AddOnScreenDebugMessage(-1, 6.0f, FColor::Cyan, Trigger.NarrativeText);
+    }
+    
+    // Trigger dialogue sequence if specified
+    if (!Trigger.DialogueSequenceName.IsEmpty())
+    {
+        if (UNarr_DialogueManager* DialogueManager = GetGameInstance()->GetSubsystem<UNarr_DialogueManager>())
         {
-            TriggerNarrativeSequence(Node.NodeID);
-        }
-    }
-}
-
-bool UNarr_StoryManager::AreRequirementsMet(const FNarr_StoryNode& Node)
-{
-    for (const FString& RequiredEvent : Node.RequiredEvents)
-    {
-        if (!CompletedEvents.Contains(RequiredEvent))
-        {
-            return false;
-        }
-    }
-    return true;
-}
-
-void UNarr_StoryManager::TriggerNarrativeSequence(const FString& NodeID)
-{
-    if (!StoryNodes.Contains(NodeID))
-    {
-        return;
-    }
-    
-    FNarr_StoryNode& Node = StoryNodes[NodeID];
-    
-    // Trigger associated dialogue sequences
-    if (DialogueSystem)
-    {
-        for (const FString& DialogueID : Node.DialogueSequences)
-        {
-            DialogueSystem->PlayDialogue(DialogueID);
+            DialogueManager->PlayDialogueSequence(Trigger.DialogueSequenceName);
         }
     }
     
-    // Mark node as completed
-    Node.bIsCompleted = true;
-    StoryProgressionScore += Node.Priority;
-    
-    UE_LOG(LogTemp, Log, TEXT("Triggered narrative sequence: %s"), *NodeID);
+    UE_LOG(LogTemp, Log, TEXT("Processed story trigger: %s"), *Trigger.NarrativeText);
+}
+
+void UNarr_StoryManager::CheckPhaseAdvancement()
+{
+    switch (CurrentProgress.CurrentPhase)
+    {
+        case ENarr_StoryPhase::Awakening:
+            if (HasCompletedEvent(ENarr_StoryEvent::FirstKill))
+            {
+                AdvanceStoryPhase(ENarr_StoryPhase::FirstHunt);
+            }
+            break;
+            
+        case ENarr_StoryPhase::FirstHunt:
+            if (CurrentProgress.DinosaurKills >= 3)
+            {
+                AdvanceStoryPhase(ENarr_StoryPhase::TribalContact);
+            }
+            break;
+            
+        case ENarr_StoryPhase::TribalContact:
+            if (CurrentProgress.bTribalContactMade && CurrentProgress.TerritoriesDiscovered >= 2)
+            {
+                AdvanceStoryPhase(ENarr_StoryPhase::TerritoryExploration);
+            }
+            break;
+            
+        case ENarr_StoryPhase::TerritoryExploration:
+            if (CurrentProgress.DinosaurKills >= 10 && CurrentProgress.TerritoriesDiscovered >= 5)
+            {
+                AdvanceStoryPhase(ENarr_StoryPhase::AlphaEncounter);
+            }
+            break;
+            
+        case ENarr_StoryPhase::AlphaEncounter:
+            if (CurrentProgress.bAlphaDefeated)
+            {
+                AdvanceStoryPhase(ENarr_StoryPhase::PackLeadership);
+            }
+            break;
+            
+        case ENarr_StoryPhase::PackLeadership:
+            if (CurrentProgress.DinosaurKills >= 25 && CurrentProgress.TerritoriesDiscovered >= 10)
+            {
+                AdvanceStoryPhase(ENarr_StoryPhase::ValleyMastery);
+            }
+            break;
+            
+        default:
+            break;
+    }
 }
