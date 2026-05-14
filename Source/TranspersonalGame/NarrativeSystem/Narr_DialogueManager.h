@@ -1,34 +1,32 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Subsystems/GameInstanceSubsystem.h"
+#include "Engine/GameInstanceSubsystem.h"
 #include "Engine/DataTable.h"
 #include "Narr_DialogueManager.generated.h"
 
 UENUM(BlueprintType)
 enum class ENarr_CharacterType : uint8
 {
-    TribalElder         UMETA(DisplayName = "Tribal Elder"),
-    TribalScout         UMETA(DisplayName = "Tribal Scout"), 
-    TribalShaman        UMETA(DisplayName = "Tribal Shaman"),
-    TribalGuide         UMETA(DisplayName = "Tribal Guide"),
-    TribalHunter        UMETA(DisplayName = "Tribal Hunter"),
-    TribalCrafter       UMETA(DisplayName = "Tribal Crafter"),
-    Survivor            UMETA(DisplayName = "Survivor"),
-    Stranger            UMETA(DisplayName = "Stranger")
+    TribalElder     UMETA(DisplayName = "Tribal Elder"),
+    TribalScout     UMETA(DisplayName = "Tribal Scout"),
+    TribalShaman    UMETA(DisplayName = "Tribal Shaman"),
+    TribalMentor    UMETA(DisplayName = "Tribal Mentor"),
+    TribalHunter    UMETA(DisplayName = "Tribal Hunter"),
+    TribalCrafter   UMETA(DisplayName = "Tribal Crafter")
 };
 
 UENUM(BlueprintType)
 enum class ENarr_DialogueContext : uint8
 {
-    FirstMeeting        UMETA(DisplayName = "First Meeting"),
-    QuestGiving         UMETA(DisplayName = "Quest Giving"),
-    QuestProgress       UMETA(DisplayName = "Quest Progress"),
-    QuestComplete       UMETA(DisplayName = "Quest Complete"),
-    Warning             UMETA(DisplayName = "Warning"),
-    Information         UMETA(DisplayName = "Information"),
-    Trading             UMETA(DisplayName = "Trading"),
-    Farewell            UMETA(DisplayName = "Farewell")
+    FirstMeeting    UMETA(DisplayName = "First Meeting"),
+    QuestGiving     UMETA(DisplayName = "Quest Giving"),
+    QuestProgress   UMETA(DisplayName = "Quest Progress"),
+    QuestComplete   UMETA(DisplayName = "Quest Complete"),
+    Warning         UMETA(DisplayName = "Warning"),
+    Teaching        UMETA(DisplayName = "Teaching"),
+    Trading         UMETA(DisplayName = "Trading"),
+    Casual          UMETA(DisplayName = "Casual")
 };
 
 USTRUCT(BlueprintType)
@@ -37,66 +35,52 @@ struct TRANSPERSONALGAME_API FNarr_DialogueLine
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FString SpeakerName;
+    FText DialogueText;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    ENarr_CharacterType CharacterType;
+    ENarr_CharacterType SpeakerType;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
     ENarr_DialogueContext Context;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FString DialogueText;
+    FString AudioURL;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    FString AudioFilePath;
+    float DisplayDuration;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    float Duration;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-    TArray<FString> PlayerResponses;
+    TArray<FText> PlayerResponses;
 
     FNarr_DialogueLine()
     {
-        SpeakerName = TEXT("");
-        CharacterType = ENarr_CharacterType::Survivor;
-        Context = ENarr_DialogueContext::Information;
-        DialogueText = TEXT("");
-        AudioFilePath = TEXT("");
-        Duration = 0.0f;
+        SpeakerType = ENarr_CharacterType::TribalElder;
+        Context = ENarr_DialogueContext::Casual;
+        DisplayDuration = 5.0f;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FNarr_StoryBeat
+struct TRANSPERSONALGAME_API FNarr_DialogueSequence
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    FString BeatID;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    FString SequenceID;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    FString Title;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    FString Description;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    TArray<FString> RequiredQuests;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
     TArray<FNarr_DialogueLine> DialogueLines;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Story")
-    bool bIsCompleted;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    bool bIsRepeatable;
 
-    FNarr_StoryBeat()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+    bool bRequiresQuestCompletion;
+
+    FNarr_DialogueSequence()
     {
-        BeatID = TEXT("");
-        Title = TEXT("");
-        Description = TEXT("");
-        bIsCompleted = false;
+        bIsRepeatable = true;
+        bRequiresQuestCompletion = false;
     }
 };
 
@@ -112,62 +96,69 @@ public:
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // Dialogue system functions
+    // Dialogue management
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void StartDialogue(const FString& CharacterName, ENarr_CharacterType CharacterType, ENarr_DialogueContext Context);
+    void StartDialogue(const FString& SequenceID, AActor* NPCActor);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    FNarr_DialogueLine GetDialogueLine(const FString& CharacterName, ENarr_DialogueContext Context);
+    void EndDialogue();
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void AddDialogueLine(const FNarr_DialogueLine& NewDialogue);
+    void AdvanceDialogue();
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    TArray<FNarr_DialogueLine> GetDialoguesByCharacterType(ENarr_CharacterType CharacterType);
+    void SelectPlayerResponse(int32 ResponseIndex);
 
-    // Story progression functions
+    // Dialogue data management
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void TriggerStoryBeat(const FString& BeatID);
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void CompleteStoryBeat(const FString& BeatID);
+    void RegisterDialogueSequence(const FNarr_DialogueSequence& Sequence);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    bool IsStoryBeatCompleted(const FString& BeatID);
+    FNarr_DialogueSequence GetDialogueSequence(const FString& SequenceID);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    TArray<FNarr_StoryBeat> GetAvailableStoryBeats();
+    bool HasDialogueSequence(const FString& SequenceID);
 
-    // Narrative context functions
+    // Character voice management
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void SetNarrativeContext(const FString& ContextKey, const FString& ContextValue);
-
-    UFUNCTION(BlueprintCallable, Category = "Narrative")
-    FString GetNarrativeContext(const FString& ContextKey);
+    FString GetCharacterVoiceURL(ENarr_CharacterType CharacterType, const FString& DialogueKey);
 
     UFUNCTION(BlueprintCallable, Category = "Narrative")
-    void InitializeDefaultDialogues();
+    void RegisterCharacterVoice(ENarr_CharacterType CharacterType, const FString& DialogueKey, const FString& AudioURL);
+
+    // State queries
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    bool IsDialogueActive() const { return bIsDialogueActive; }
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    FNarr_DialogueLine GetCurrentDialogueLine() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Narrative")
+    int32 GetCurrentDialogueIndex() const { return CurrentDialogueIndex; }
 
 protected:
+    // Dialogue state
     UPROPERTY(BlueprintReadOnly, Category = "Narrative")
-    TArray<FNarr_DialogueLine> DialogueDatabase;
+    bool bIsDialogueActive;
 
     UPROPERTY(BlueprintReadOnly, Category = "Narrative")
-    TArray<FNarr_StoryBeat> StoryBeats;
+    FString CurrentSequenceID;
 
     UPROPERTY(BlueprintReadOnly, Category = "Narrative")
-    TMap<FString, FString> NarrativeContext;
+    int32 CurrentDialogueIndex;
 
     UPROPERTY(BlueprintReadOnly, Category = "Narrative")
-    FString CurrentDialogueCharacter;
+    AActor* CurrentNPCActor;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Narrative")
-    ENarr_DialogueContext CurrentContext;
+    // Dialogue data storage
+    UPROPERTY()
+    TMap<FString, FNarr_DialogueSequence> DialogueSequences;
+
+    UPROPERTY()
+    TMap<FString, FString> CharacterVoiceMap;
 
 private:
-    void CreateTribalElderDialogues();
-    void CreateTribalScoutDialogues();
-    void CreateTribalShamanDialogues();
-    void CreateTribalGuideDialogues();
-    void CreateSurvivalStoryBeats();
+    void InitializeDefaultDialogues();
+    void InitializeCharacterVoices();
+    FString GenerateVoiceKey(ENarr_CharacterType CharacterType, const FString& DialogueKey);
 };
