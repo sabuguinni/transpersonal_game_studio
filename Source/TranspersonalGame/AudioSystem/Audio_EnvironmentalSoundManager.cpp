@@ -1,344 +1,451 @@
 #include "Audio_EnvironmentalSoundManager.h"
-#include "Engine/Engine.h"
-#include "Engine/World.h"
 #include "Components/AudioComponent.h"
 #include "Sound/SoundCue.h"
+#include "Engine/World.h"
+#include "GameFramework/PlayerController.h"
+#include "GameFramework/Pawn.h"
 #include "Kismet/GameplayStatics.h"
-#include "Engine/GameInstance.h"
+#include "Engine/Engine.h"
+#include "TimerManager.h"
 
-void UAudio_EnvironmentalSoundManager::Initialize(FSubsystemCollectionBase& Collection)
+AAudio_EnvironmentalSoundManager::AAudio_EnvironmentalSoundManager()
 {
-    Super::Initialize(Collection);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Audio_EnvironmentalSoundManager: Initializing environmental sound system"));
-    
-    // Initialize default biome settings
-    InitializeBiomeSettings();
-    
-    // Set default values
+    PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.TickInterval = 0.1f; // Update 10 times per second
+
+    // Create audio components
+    BiomeAmbientComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("BiomeAmbientComponent"));
+    RootComponent = BiomeAmbientComponent;
+    BiomeAmbientComponent->bAutoActivate = false;
+    BiomeAmbientComponent->SetVolumeMultiplier(0.7f);
+
+    WindAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("WindAudioComponent"));
+    WindAudioComponent->SetupAttachment(RootComponent);
+    WindAudioComponent->bAutoActivate = false;
+    WindAudioComponent->SetVolumeMultiplier(0.5f);
+
+    WeatherAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("WeatherAudioComponent"));
+    WeatherAudioComponent->SetupAttachment(RootComponent);
+    WeatherAudioComponent->bAutoActivate = false;
+    WeatherAudioComponent->SetVolumeMultiplier(0.6f);
+
+    DinosaurAmbienceComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("DinosaurAmbienceComponent"));
+    DinosaurAmbienceComponent->SetupAttachment(RootComponent);
+    DinosaurAmbienceComponent->bAutoActivate = false;
+    DinosaurAmbienceComponent->SetVolumeMultiplier(0.4f);
+
+    // Initialize default values
     CurrentBiome = EBiomeType::Forest;
-    MasterEnvironmentalVolume = 1.0f;
-    CurrentTimeOfDay = 0.5f; // Noon
-    CurrentWeatherIntensity = 0.0f; // Clear weather
+    CurrentWeather = EWeatherType::Clear;
+    AudioFadeDuration = 2.0f;
+    EnvironmentalVolumeMultiplier = 1.0f;
+    DinosaurAudioMaxDistance = 2000.0f;
+    AudioUpdateDistance = 100.0f;
     
-    // Create audio components when world is available
-    if (UWorld* World = GetWorld())
+    LastPlayerLocation = FVector::ZeroVector;
+    CurrentFadeTime = 0.0f;
+    TargetVolume = 1.0f;
+    bIsFading = false;
+
+    // Set default sound assets to nullptr - will be set in Blueprint or via code
+    ForestAmbienceSound = nullptr;
+    SwampAmbienceSound = nullptr;
+    SavannaAmbienceSound = nullptr;
+    DesertAmbienceSound = nullptr;
+    MountainAmbienceSound = nullptr;
+    WindThroughTreesSound = nullptr;
+    HeavyWindSound = nullptr;
+    RainSound = nullptr;
+    ThunderSound = nullptr;
+    DistantDinosaurRoars = nullptr;
+    TRexFootstepsSound = nullptr;
+}
+
+void AAudio_EnvironmentalSoundManager::BeginPlay()
+{
+    Super::BeginPlay();
+
+    // Start with forest ambience by default
+    SetBiomeAmbience(EBiomeType::Forest);
+
+    // Set up timer for periodic audio updates
+    GetWorldTimerManager().SetTimer(AudioUpdateTimer, this, &AAudio_EnvironmentalSoundManager::UpdateDistanceBasedAudio, 1.0f, true);
+
+    UE_LOG(LogTemp, Log, TEXT("Environmental Sound Manager initialized"));
+}
+
+void AAudio_EnvironmentalSoundManager::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+    // Clean up timer
+    GetWorldTimerManager().ClearTimer(AudioUpdateTimer);
+    
+    // Stop all audio
+    StopAllEnvironmentalAudio();
+
+    Super::EndPlay(EndPlayReason);
+}
+
+void AAudio_EnvironmentalSoundManager::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+
+    // Handle audio fading
+    if (bIsFading)
     {
-        AmbientAudioComponent = CreateAudioComponent(TEXT("AmbientAudio"));
-        WindAudioComponent = CreateAudioComponent(TEXT("WindAudio"));
-        WeatherAudioComponent = CreateAudioComponent(TEXT("WeatherAudio"));
+        HandleAudioFade(DeltaTime);
+    }
+
+    // Update environmental audio based on player position
+    APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
+    if (PC && PC->GetPawn())
+    {
+        FVector CurrentPlayerLocation = PC->GetPawn()->GetActorLocation();
+        float DistanceMoved = FVector::Dist(CurrentPlayerLocation, LastPlayerLocation);
         
-        // Start random nature sound timer
-        World->GetTimerManager().SetTimer(RandomSoundTimer, this, &UAudio_EnvironmentalSoundManager::PlayRandomNatureSound, 15.0f, true);
+        if (DistanceMoved > AudioUpdateDistance)
+        {
+            UpdateEnvironmentalAudio(CurrentPlayerLocation);
+            LastPlayerLocation = CurrentPlayerLocation;
+        }
     }
 }
 
-void UAudio_EnvironmentalSoundManager::Deinitialize()
+void AAudio_EnvironmentalSoundManager::SetBiomeAmbience(EBiomeType NewBiome)
 {
-    if (UWorld* World = GetWorld())
+    if (NewBiome == CurrentBiome)
     {
-        World->GetTimerManager().ClearTimer(RandomSoundTimer);
+        return; // No change needed
     }
-    
-    if (AmbientAudioComponent)
+
+    CurrentBiome = NewBiome;
+    USoundCue* NewAmbienceSound = nullptr;
+
+    // Select appropriate ambience sound
+    switch (NewBiome)
     {
-        AmbientAudioComponent->Stop();
-        AmbientAudioComponent = nullptr;
+        case EBiomeType::Forest:
+            NewAmbienceSound = ForestAmbienceSound;
+            break;
+        case EBiomeType::Swamp:
+            NewAmbienceSound = SwampAmbienceSound;
+            break;
+        case EBiomeType::Savanna:
+            NewAmbienceSound = SavannaAmbienceSound;
+            break;
+        case EBiomeType::Desert:
+            NewAmbienceSound = DesertAmbienceSound;
+            break;
+        case EBiomeType::Mountain:
+            NewAmbienceSound = MountainAmbienceSound;
+            break;
+        default:
+            NewAmbienceSound = ForestAmbienceSound;
+            break;
     }
-    
-    if (WindAudioComponent)
+
+    // Crossfade to new ambience
+    if (NewAmbienceSound && BiomeAmbientComponent)
     {
-        WindAudioComponent->Stop();
-        WindAudioComponent = nullptr;
+        if (BiomeAmbientComponent->IsPlaying())
+        {
+            // Start fade out current sound
+            bIsFading = true;
+            CurrentFadeTime = 0.0f;
+            TargetVolume = 0.0f;
+        }
+        else
+        {
+            // No current sound, start new one immediately
+            BiomeAmbientComponent->SetSound(NewAmbienceSound);
+            BiomeAmbientComponent->Play();
+            BiomeAmbientComponent->SetVolumeMultiplier(0.7f * EnvironmentalVolumeMultiplier);
+        }
     }
-    
-    if (WeatherAudioComponent)
-    {
-        WeatherAudioComponent->Stop();
-        WeatherAudioComponent = nullptr;
-    }
-    
-    Super::Deinitialize();
+
+    UE_LOG(LogTemp, Log, TEXT("Biome ambience changed to: %d"), (int32)NewBiome);
 }
 
-void UAudio_EnvironmentalSoundManager::SetCurrentBiome(EBiomeType NewBiome)
+void AAudio_EnvironmentalSoundManager::SetWeatherAudio(EWeatherType NewWeather, float Intensity)
 {
-    if (CurrentBiome == NewBiome)
+    CurrentWeather = NewWeather;
+    
+    if (!WeatherAudioComponent)
     {
         return;
     }
-    
-    CurrentBiome = NewBiome;
-    
-    UE_LOG(LogTemp, Warning, TEXT("Audio_EnvironmentalSoundManager: Switching to biome: %d"), (int32)NewBiome);
-    
-    // Update ambient audio based on new biome
-    if (BiomeAudioSettings.Contains(NewBiome))
+
+    // Stop current weather audio
+    if (WeatherAudioComponent->IsPlaying())
     {
-        const FAudio_BiomeAudioSettings& Settings = BiomeAudioSettings[NewBiome];
-        
-        // Load and play ambient sound
-        if (AmbientAudioComponent && Settings.AmbientLoop.IsValid())
+        WeatherAudioComponent->Stop();
+    }
+
+    USoundCue* WeatherSound = nullptr;
+    float WeatherVolume = Intensity * EnvironmentalVolumeMultiplier;
+
+    switch (NewWeather)
+    {
+        case EWeatherType::Rain:
+            WeatherSound = RainSound;
+            WeatherVolume *= 0.6f;
+            break;
+        case EWeatherType::Storm:
+            WeatherSound = ThunderSound;
+            WeatherVolume *= 0.8f;
+            break;
+        case EWeatherType::Windy:
+            WeatherSound = HeavyWindSound;
+            WeatherVolume *= 0.5f;
+            break;
+        case EWeatherType::Clear:
+        default:
+            // No weather audio for clear weather
+            break;
+    }
+
+    if (WeatherSound)
+    {
+        WeatherAudioComponent->SetSound(WeatherSound);
+        WeatherAudioComponent->SetVolumeMultiplier(WeatherVolume);
+        WeatherAudioComponent->Play();
+    }
+
+    // Also update wind audio
+    if (WindAudioComponent && WindThroughTreesSound)
+    {
+        if (NewWeather == EWeatherType::Windy || NewWeather == EWeatherType::Storm)
         {
-            if (USoundBase* AmbientSound = Settings.AmbientLoop.LoadSynchronous())
+            if (!WindAudioComponent->IsPlaying())
             {
-                AmbientAudioComponent->SetSound(AmbientSound);
-                AmbientAudioComponent->SetVolumeMultiplier(Settings.AmbientVolume * MasterEnvironmentalVolume);
-                AmbientAudioComponent->Play();
-            }
-        }
-        
-        // Update wind sound
-        if (WindAudioComponent && Settings.WindSound.IsValid())
-        {
-            if (USoundBase* WindSound = Settings.WindSound.LoadSynchronous())
-            {
-                WindAudioComponent->SetSound(WindSound);
-                WindAudioComponent->SetVolumeMultiplier(0.5f * MasterEnvironmentalVolume);
+                WindAudioComponent->SetSound(WindThroughTreesSound);
+                WindAudioComponent->SetVolumeMultiplier(0.5f * Intensity * EnvironmentalVolumeMultiplier);
                 WindAudioComponent->Play();
             }
         }
-        
-        // Update random sound timer interval
-        if (UWorld* World = GetWorld())
+        else
         {
-            World->GetTimerManager().ClearTimer(RandomSoundTimer);
-            World->GetTimerManager().SetTimer(RandomSoundTimer, this, &UAudio_EnvironmentalSoundManager::PlayRandomNatureSound, Settings.RandomSoundInterval, true);
-        }
-    }
-}
-
-void UAudio_EnvironmentalSoundManager::UpdatePlayerLocation(const FVector& PlayerLocation)
-{
-    LastPlayerLocation = PlayerLocation;
-    UpdateProximityTriggers(PlayerLocation);
-}
-
-void UAudio_EnvironmentalSoundManager::PlayProximitySound(const FString& TriggerName, const FVector& Location)
-{
-    if (ProximityTriggers.Contains(TriggerName))
-    {
-        const FAudio_ProximityAudioTrigger& Trigger = ProximityTriggers[TriggerName];
-        
-        // Check cooldown
-        if (TriggerCooldowns.Contains(TriggerName))
-        {
-            float LastTriggerTime = TriggerCooldowns[TriggerName];
-            if (UWorld* World = GetWorld())
+            if (WindAudioComponent->IsPlaying())
             {
-                float CurrentTime = World->GetTimeSeconds();
-                if (CurrentTime - LastTriggerTime < Trigger.Cooldown)
-                {
-                    return; // Still on cooldown
-                }
-            }
-        }
-        
-        // Play proximity sound
-        if (Trigger.ProximitySound.IsValid())
-        {
-            if (USoundBase* Sound = Trigger.ProximitySound.LoadSynchronous())
-            {
-                UGameplayStatics::PlaySoundAtLocation(GetWorld(), Sound, Location, Trigger.Volume * MasterEnvironmentalVolume);
-                
-                // Update cooldown
-                if (UWorld* World = GetWorld())
-                {
-                    TriggerCooldowns.Add(TriggerName, World->GetTimeSeconds());
-                }
+                WindAudioComponent->Stop();
             }
         }
     }
+
+    UE_LOG(LogTemp, Log, TEXT("Weather audio set to: %d with intensity: %f"), (int32)NewWeather, Intensity);
 }
 
-void UAudio_EnvironmentalSoundManager::SetMasterEnvironmentalVolume(float Volume)
+void AAudio_EnvironmentalSoundManager::PlayDistantDinosaurRoar(FVector Location, float VolumeMultiplier)
 {
-    MasterEnvironmentalVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
-    
-    // Update all active audio components
-    if (AmbientAudioComponent)
-    {
-        float BiomeVolume = BiomeAudioSettings.Contains(CurrentBiome) ? BiomeAudioSettings[CurrentBiome].AmbientVolume : 0.7f;
-        AmbientAudioComponent->SetVolumeMultiplier(BiomeVolume * MasterEnvironmentalVolume);
-    }
-    
-    if (WindAudioComponent)
-    {
-        WindAudioComponent->SetVolumeMultiplier(0.5f * MasterEnvironmentalVolume);
-    }
-    
-    if (WeatherAudioComponent)
-    {
-        WeatherAudioComponent->SetVolumeMultiplier(CurrentWeatherIntensity * MasterEnvironmentalVolume);
-    }
-}
-
-void UAudio_EnvironmentalSoundManager::AddProximityTrigger(const FString& TriggerName, const FAudio_ProximityAudioTrigger& Trigger)
-{
-    ProximityTriggers.Add(TriggerName, Trigger);
-    UE_LOG(LogTemp, Warning, TEXT("Audio_EnvironmentalSoundManager: Added proximity trigger: %s"), *TriggerName);
-}
-
-void UAudio_EnvironmentalSoundManager::RemoveProximityTrigger(const FString& TriggerName)
-{
-    ProximityTriggers.Remove(TriggerName);
-    TriggerCooldowns.Remove(TriggerName);
-}
-
-void UAudio_EnvironmentalSoundManager::SetTimeOfDay(float TimeOfDay)
-{
-    CurrentTimeOfDay = FMath::Clamp(TimeOfDay, 0.0f, 1.0f);
-    UpdateTimeBasedAudio();
-}
-
-void UAudio_EnvironmentalSoundManager::SetWeatherIntensity(float Intensity)
-{
-    CurrentWeatherIntensity = FMath::Clamp(Intensity, 0.0f, 1.0f);
-    UpdateWeatherAudio();
-}
-
-void UAudio_EnvironmentalSoundManager::InitializeBiomeSettings()
-{
-    // Forest biome settings
-    FAudio_BiomeAudioSettings ForestSettings;
-    ForestSettings.AmbientVolume = 0.7f;
-    ForestSettings.RandomSoundInterval = 12.0f;
-    BiomeAudioSettings.Add(EBiomeType::Forest, ForestSettings);
-    
-    // Swamp biome settings
-    FAudio_BiomeAudioSettings SwampSettings;
-    SwampSettings.AmbientVolume = 0.8f;
-    SwampSettings.RandomSoundInterval = 18.0f;
-    BiomeAudioSettings.Add(EBiomeType::Swamp, SwampSettings);
-    
-    // Savanna biome settings
-    FAudio_BiomeAudioSettings SavannaSettings;
-    SavannaSettings.AmbientVolume = 0.6f;
-    SavannaSettings.RandomSoundInterval = 20.0f;
-    BiomeAudioSettings.Add(EBiomeType::Savanna, SavannaSettings);
-    
-    // Desert biome settings
-    FAudio_BiomeAudioSettings DesertSettings;
-    DesertSettings.AmbientVolume = 0.4f;
-    DesertSettings.RandomSoundInterval = 30.0f;
-    BiomeAudioSettings.Add(EBiomeType::Desert, DesertSettings);
-    
-    // Mountain biome settings
-    FAudio_BiomeAudioSettings MountainSettings;
-    MountainSettings.AmbientVolume = 0.5f;
-    MountainSettings.RandomSoundInterval = 25.0f;
-    BiomeAudioSettings.Add(EBiomeType::Mountain, MountainSettings);
-}
-
-void UAudio_EnvironmentalSoundManager::PlayRandomNatureSound()
-{
-    if (!BiomeAudioSettings.Contains(CurrentBiome))
+    if (!DistantDinosaurRoars)
     {
         return;
     }
-    
-    const FAudio_BiomeAudioSettings& Settings = BiomeAudioSettings[CurrentBiome];
-    
-    if (Settings.RandomNatureSounds.Num() > 0)
+
+    // Calculate distance from player
+    APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
+    if (!PC || !PC->GetPawn())
     {
-        int32 RandomIndex = FMath::RandRange(0, Settings.RandomNatureSounds.Num() - 1);
-        TSoftObjectPtr<USoundBase> RandomSound = Settings.RandomNatureSounds[RandomIndex];
+        return;
+    }
+
+    FVector PlayerLocation = PC->GetPawn()->GetActorLocation();
+    float Distance = FVector::Dist(PlayerLocation, Location);
+
+    // Only play if within audible range
+    if (Distance <= DinosaurAudioMaxDistance)
+    {
+        float DistanceVolume = CalculateVolumeByDistance(Distance, DinosaurAudioMaxDistance);
+        float FinalVolume = DistanceVolume * VolumeMultiplier * EnvironmentalVolumeMultiplier;
+
+        // Play at world location
+        UGameplayStatics::PlaySoundAtLocation(this, DistantDinosaurRoars, Location, FinalVolume);
         
-        if (RandomSound.IsValid())
+        UE_LOG(LogTemp, Log, TEXT("Distant dinosaur roar played at distance: %f, volume: %f"), Distance, FinalVolume);
+    }
+}
+
+void AAudio_EnvironmentalSoundManager::PlayTRexFootsteps(FVector TRexLocation, float Distance)
+{
+    if (!TRexFootstepsSound)
+    {
+        return;
+    }
+
+    // T-Rex footsteps should be audible from much further away
+    float TRexMaxDistance = DinosaurAudioMaxDistance * 2.0f;
+    
+    if (Distance <= TRexMaxDistance)
+    {
+        float DistanceVolume = CalculateVolumeByDistance(Distance, TRexMaxDistance);
+        float FinalVolume = DistanceVolume * 0.8f * EnvironmentalVolumeMultiplier;
+
+        // Play earthquake footsteps
+        UGameplayStatics::PlaySoundAtLocation(this, TRexFootstepsSound, TRexLocation, FinalVolume);
+        
+        UE_LOG(LogTemp, Log, TEXT("T-Rex footsteps played at distance: %f, volume: %f"), Distance, FinalVolume);
+    }
+}
+
+void AAudio_EnvironmentalSoundManager::UpdateEnvironmentalAudio(FVector PlayerLocation)
+{
+    // Determine current biome based on player location
+    EBiomeType NewBiome = GetBiomeAtLocation(PlayerLocation);
+    
+    // Update biome ambience if changed
+    if (NewBiome != CurrentBiome)
+    {
+        SetBiomeAmbience(NewBiome);
+    }
+
+    // Update distance-based audio
+    UpdateDistanceBasedAudio();
+}
+
+void AAudio_EnvironmentalSoundManager::StopAllEnvironmentalAudio()
+{
+    if (BiomeAmbientComponent && BiomeAmbientComponent->IsPlaying())
+    {
+        BiomeAmbientComponent->Stop();
+    }
+    
+    if (WindAudioComponent && WindAudioComponent->IsPlaying())
+    {
+        WindAudioComponent->Stop();
+    }
+    
+    if (WeatherAudioComponent && WeatherAudioComponent->IsPlaying())
+    {
+        WeatherAudioComponent->Stop();
+    }
+    
+    if (DinosaurAmbienceComponent && DinosaurAmbienceComponent->IsPlaying())
+    {
+        DinosaurAmbienceComponent->Stop();
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("All environmental audio stopped"));
+}
+
+EBiomeType AAudio_EnvironmentalSoundManager::GetBiomeAtLocation(FVector WorldLocation)
+{
+    // Simple biome determination based on world coordinates
+    // This should eventually interface with the actual biome system
+    
+    float X = WorldLocation.X;
+    float Y = WorldLocation.Y;
+    
+    // Basic biome mapping (placeholder logic)
+    if (X < -2000.0f && Y < -2000.0f)
+    {
+        return EBiomeType::Swamp; // Southwest
+    }
+    else if (X < -2000.0f && Y > 2000.0f)
+    {
+        return EBiomeType::Forest; // Northwest
+    }
+    else if (X > 2000.0f)
+    {
+        if (Y > 0.0f)
         {
-            if (USoundBase* Sound = RandomSound.LoadSynchronous())
+            return EBiomeType::Mountain; // Northeast
+        }
+        else
+        {
+            return EBiomeType::Desert; // Southeast
+        }
+    }
+    else
+    {
+        return EBiomeType::Savanna; // Center
+    }
+}
+
+void AAudio_EnvironmentalSoundManager::HandleAudioFade(float DeltaTime)
+{
+    if (!bIsFading)
+    {
+        return;
+    }
+
+    CurrentFadeTime += DeltaTime;
+    float FadeProgress = FMath::Clamp(CurrentFadeTime / AudioFadeDuration, 0.0f, 1.0f);
+    
+    if (TargetVolume == 0.0f)
+    {
+        // Fading out
+        float CurrentVolume = FMath::Lerp(0.7f, 0.0f, FadeProgress);
+        BiomeAmbientComponent->SetVolumeMultiplier(CurrentVolume * EnvironmentalVolumeMultiplier);
+        
+        if (FadeProgress >= 1.0f)
+        {
+            // Fade out complete, stop current sound and start new one
+            BiomeAmbientComponent->Stop();
+            
+            // Start new sound based on current biome
+            USoundCue* NewSound = nullptr;
+            switch (CurrentBiome)
             {
-                // Play at player location with some random offset
-                FVector PlayLocation = LastPlayerLocation + FVector(
-                    FMath::RandRange(-500.0f, 500.0f),
-                    FMath::RandRange(-500.0f, 500.0f),
-                    FMath::RandRange(-100.0f, 100.0f)
-                );
+                case EBiomeType::Forest: NewSound = ForestAmbienceSound; break;
+                case EBiomeType::Swamp: NewSound = SwampAmbienceSound; break;
+                case EBiomeType::Savanna: NewSound = SavannaAmbienceSound; break;
+                case EBiomeType::Desert: NewSound = DesertAmbienceSound; break;
+                case EBiomeType::Mountain: NewSound = MountainAmbienceSound; break;
+            }
+            
+            if (NewSound)
+            {
+                BiomeAmbientComponent->SetSound(NewSound);
+                BiomeAmbientComponent->Play();
                 
-                UGameplayStatics::PlaySoundAtLocation(GetWorld(), Sound, PlayLocation, 0.6f * MasterEnvironmentalVolume);
+                // Start fade in
+                TargetVolume = 0.7f;
+                CurrentFadeTime = 0.0f;
+            }
+            else
+            {
+                bIsFading = false;
             }
         }
     }
-}
-
-void UAudio_EnvironmentalSoundManager::UpdateProximityTriggers(const FVector& PlayerLocation)
-{
-    for (auto& TriggerPair : ProximityTriggers)
+    else
     {
-        const FString& TriggerName = TriggerPair.Key;
-        const FAudio_ProximityAudioTrigger& Trigger = TriggerPair.Value;
+        // Fading in
+        float CurrentVolume = FMath::Lerp(0.0f, 0.7f, FadeProgress);
+        BiomeAmbientComponent->SetVolumeMultiplier(CurrentVolume * EnvironmentalVolumeMultiplier);
         
-        if (!Trigger.bIsActive)
+        if (FadeProgress >= 1.0f)
         {
-            continue;
-        }
-        
-        float Distance = FVector::Dist(PlayerLocation, Trigger.TriggerLocation);
-        
-        if (Distance <= Trigger.TriggerRadius)
-        {
-            PlayProximitySound(TriggerName, Trigger.TriggerLocation);
+            bIsFading = false;
         }
     }
 }
 
-void UAudio_EnvironmentalSoundManager::UpdateTimeBasedAudio()
+void AAudio_EnvironmentalSoundManager::UpdateDistanceBasedAudio()
 {
-    // Adjust ambient volume based on time of day
-    // Night time (0.0-0.2 and 0.8-1.0) should be quieter
-    float TimeVolumeMultiplier = 1.0f;
+    // This function would update audio based on nearby dinosaurs and other distance-based effects
+    // For now, it's a placeholder for future implementation
     
-    if (CurrentTimeOfDay < 0.2f || CurrentTimeOfDay > 0.8f)
+    APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
+    if (!PC || !PC->GetPawn())
     {
-        // Night time - reduce ambient volume
-        TimeVolumeMultiplier = 0.6f;
+        return;
     }
-    else if (CurrentTimeOfDay < 0.3f || CurrentTimeOfDay > 0.7f)
-    {
-        // Dawn/dusk - moderate volume
-        TimeVolumeMultiplier = 0.8f;
-    }
+
+    FVector PlayerLocation = PC->GetPawn()->GetActorLocation();
     
-    if (AmbientAudioComponent)
-    {
-        float BiomeVolume = BiomeAudioSettings.Contains(CurrentBiome) ? BiomeAudioSettings[CurrentBiome].AmbientVolume : 0.7f;
-        AmbientAudioComponent->SetVolumeMultiplier(BiomeVolume * MasterEnvironmentalVolume * TimeVolumeMultiplier);
-    }
+    // TODO: Query nearby dinosaurs and update dinosaur ambience component
+    // TODO: Update volume based on distance to various sound sources
+    
+    UE_LOG(LogTemp, VeryVerbose, TEXT("Distance-based audio updated for player at: %s"), *PlayerLocation.ToString());
 }
 
-void UAudio_EnvironmentalSoundManager::UpdateWeatherAudio()
+float AAudio_EnvironmentalSoundManager::CalculateVolumeByDistance(float Distance, float MaxDistance)
 {
-    if (WeatherAudioComponent)
+    if (Distance >= MaxDistance)
     {
-        WeatherAudioComponent->SetVolumeMultiplier(CurrentWeatherIntensity * MasterEnvironmentalVolume);
-        
-        if (CurrentWeatherIntensity > 0.1f && !WeatherAudioComponent->IsPlaying())
-        {
-            // Start weather audio if intensity is significant
-            WeatherAudioComponent->Play();
-        }
-        else if (CurrentWeatherIntensity <= 0.1f && WeatherAudioComponent->IsPlaying())
-        {
-            // Stop weather audio if intensity is too low
-            WeatherAudioComponent->Stop();
-        }
-    }
-}
-
-UAudioComponent* UAudio_EnvironmentalSoundManager::CreateAudioComponent(const FString& ComponentName)
-{
-    if (UWorld* World = GetWorld())
-    {
-        UAudioComponent* AudioComp = NewObject<UAudioComponent>(this, *ComponentName);
-        if (AudioComp)
-        {
-            AudioComp->bAutoActivate = false;
-            AudioComp->bIsUISound = false;
-            AudioComp->bAllowSpatialization = false; // Environmental sounds are non-spatial
-            AudioComp->RegisterComponent();
-            return AudioComp;
-        }
+        return 0.0f;
     }
     
-    return nullptr;
+    // Linear falloff for now, could be improved with curves
+    return 1.0f - (Distance / MaxDistance);
 }
