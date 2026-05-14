@@ -1,265 +1,260 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/GameInstanceSubsystem.h"
 #include "Engine/World.h"
-#include "GameFramework/GameModeBase.h"
+#include "GameFramework/Actor.h"
 #include "Components/ActorComponent.h"
-#include "Engine/Engine.h"
 #include "Eng_ArchitecturalFramework.generated.h"
 
-/**
- * ENGINE ARCHITECT FRAMEWORK - CYCLE 004
- * Defines the core architectural rules and standards for all 19 agents
- * Establishes module dependencies, communication protocols, and performance budgets
- */
+// ============================================================================
+// ENGINE ARCHITECTURE FRAMEWORK - AGENT #2
+// Defines the core architectural rules and systems that ALL agents must follow
+// ============================================================================
 
 UENUM(BlueprintType)
-enum class EEng_ModulePriority : uint8
+enum class EEng_SystemType : uint8
 {
-    Critical    UMETA(DisplayName = "Critical"),      // Core systems that must load first
-    High        UMETA(DisplayName = "High"),         // Essential gameplay systems
-    Medium      UMETA(DisplayName = "Medium"),       // Standard features
-    Low         UMETA(DisplayName = "Low"),          // Optional enhancements
-    Debug       UMETA(DisplayName = "Debug")         // Development tools only
-};
-
-UENUM(BlueprintType)
-enum class EEng_AgentType : uint8
-{
-    Technical       UMETA(DisplayName = "Technical"),      // Agents #2-4: Architecture, Core, Performance
-    WorldBuilding   UMETA(DisplayName = "WorldBuilding"), // Agents #5-8: World, Environment, Architecture, Lighting
-    Character       UMETA(DisplayName = "Character"),      // Agents #9-10: Character, Animation
-    AI              UMETA(DisplayName = "AI"),             // Agents #11-13: NPC, Combat, Crowd
-    Content         UMETA(DisplayName = "Content"),        // Agents #14-16: Quest, Narrative, Audio
-    Production      UMETA(DisplayName = "Production"),     // Agents #17-19: VFX, QA, Integration
-    Management      UMETA(DisplayName = "Management")      // Agent #1: Studio Director
+    Core,           // Essential systems (Physics, Rendering, Input)
+    World,          // World generation, environment, terrain
+    Character,      // Player and NPC character systems
+    AI,             // Dinosaur AI, behavior trees, crowd simulation
+    Gameplay,       // Combat, quests, survival mechanics
+    Audio,          // Sound, music, voice systems
+    VFX,            // Visual effects, particles, shaders
+    Performance,    // Optimization, LOD, streaming
+    Integration     // Build, QA, testing systems
 };
 
 UENUM(BlueprintType)
 enum class EEng_PerformanceTier : uint8
 {
-    Ultra       UMETA(DisplayName = "Ultra"),       // 60fps+ guaranteed
-    High        UMETA(DisplayName = "High"),        // 45-60fps target
-    Medium      UMETA(DisplayName = "Medium"),      // 30-45fps acceptable
-    Low         UMETA(DisplayName = "Low"),         // 30fps minimum
-    Emergency   UMETA(DisplayName = "Emergency")    // Performance critical fallback
+    Critical,       // 60fps PC / 30fps Console - MANDATORY
+    High,           // 45fps PC / 25fps Console - ACCEPTABLE
+    Medium,         // 30fps PC / 20fps Console - WARNING
+    Low             // <30fps PC / <20fps Console - BLOCKED
+};
+
+UENUM(BlueprintType)
+enum class EEng_CompilationStatus : uint8
+{
+    Clean,          // Compiles with 0 errors, 0 warnings
+    Warnings,       // Compiles with warnings only
+    Errors,         // Has compilation errors
+    Blocked         // Cannot compile - missing dependencies
 };
 
 USTRUCT(BlueprintType)
-struct FEng_ModuleSpec
+struct FEng_SystemRequirements
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Module")
+    UPROPERTY(BlueprintReadOnly, Category = "Requirements")
+    EEng_SystemType SystemType;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Requirements")
+    TArray<FString> RequiredModules;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Requirements")
+    TArray<FString> RequiredClasses;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Requirements")
+    EEng_PerformanceTier MinPerformanceTier;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Requirements")
+    int32 MaxActorCount;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Requirements")
+    float MaxMemoryMB;
+
+    FEng_SystemRequirements()
+    {
+        SystemType = EEng_SystemType::Core;
+        RequiredModules.Empty();
+        RequiredClasses.Empty();
+        MinPerformanceTier = EEng_PerformanceTier::Critical;
+        MaxActorCount = 1000;
+        MaxMemoryMB = 512.0f;
+    }
+};
+
+USTRUCT(BlueprintType)
+struct FEng_ModuleStatus
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Module")
     FString ModuleName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Module")
-    EEng_ModulePriority Priority;
+    UPROPERTY(BlueprintReadOnly, Category = "Module")
+    EEng_CompilationStatus CompilationStatus;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Module")
-    EEng_AgentType OwnerAgent;
+    UPROPERTY(BlueprintReadOnly, Category = "Module")
+    int32 HeaderCount;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Module")
-    TArray<FString> Dependencies;
+    UPROPERTY(BlueprintReadOnly, Category = "Module")
+    int32 SourceCount;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Module")
-    float MemoryBudgetMB;
+    UPROPERTY(BlueprintReadOnly, Category = "Module")
+    int32 OrphanedHeaders;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Module")
-    float CPUBudgetMS;
+    UPROPERTY(BlueprintReadOnly, Category = "Module")
+    TArray<FString> MissingImplementations;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Module")
-    bool bRequiresUE5Compilation;
+    UPROPERTY(BlueprintReadOnly, Category = "Module")
+    TArray<FString> CompilationErrors;
 
-    FEng_ModuleSpec()
+    FEng_ModuleStatus()
     {
         ModuleName = TEXT("");
-        Priority = EEng_ModulePriority::Medium;
-        OwnerAgent = EEng_AgentType::Technical;
-        MemoryBudgetMB = 10.0f;
-        CPUBudgetMS = 1.0f;
-        bRequiresUE5Compilation = true;
+        CompilationStatus = EEng_CompilationStatus::Blocked;
+        HeaderCount = 0;
+        SourceCount = 0;
+        OrphanedHeaders = 0;
+        MissingImplementations.Empty();
+        CompilationErrors.Empty();
     }
 };
 
 USTRUCT(BlueprintType)
-struct FEng_PerformanceBudget
+struct FEng_ArchitecturalRules
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    EEng_PerformanceTier TargetTier;
+    UPROPERTY(BlueprintReadOnly, Category = "Rules")
+    bool bEnforceHeaderCppPairs;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxActorsPerFrame;
+    UPROPERTY(BlueprintReadOnly, Category = "Rules")
+    bool bEnforcePerformanceLimits;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxTrianglesPerFrame;
+    UPROPERTY(BlueprintReadOnly, Category = "Rules")
+    bool bEnforceModuleDependencies;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float MaxMemoryUsageMB;
+    UPROPERTY(BlueprintReadOnly, Category = "Rules")
+    bool bEnforceNamingConventions;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float MaxCPUTimeMS;
+    UPROPERTY(BlueprintReadOnly, Category = "Rules")
+    int32 MaxActorsPerSystem;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxDrawCalls;
+    UPROPERTY(BlueprintReadOnly, Category = "Rules")
+    float MaxFrameTimeMS;
 
-    FEng_PerformanceBudget()
+    FEng_ArchitecturalRules()
     {
-        TargetTier = EEng_PerformanceTier::High;
-        MaxActorsPerFrame = 1000;
-        MaxTrianglesPerFrame = 2000000;
-        MaxMemoryUsageMB = 512.0f;
-        MaxCPUTimeMS = 16.67f; // 60fps target
-        MaxDrawCalls = 500;
+        bEnforceHeaderCppPairs = true;
+        bEnforcePerformanceLimits = true;
+        bEnforceModuleDependencies = true;
+        bEnforceNamingConventions = true;
+        MaxActorsPerSystem = 1000;
+        MaxFrameTimeMS = 16.67f; // 60fps target
     }
 };
 
-USTRUCT(BlueprintType)
-struct FEng_AssetPipelineRule
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Assets")
-    FString AssetType;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Assets")
-    FString RequiredPath;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Assets")
-    FString NamingConvention;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Assets")
-    int32 MaxTextureSizeX;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Assets")
-    int32 MaxTextureSizeY;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Assets")
-    bool bRequiresLODChain;
-
-    FEng_AssetPipelineRule()
-    {
-        AssetType = TEXT("StaticMesh");
-        RequiredPath = TEXT("/Game/Assets/");
-        NamingConvention = TEXT("SM_");
-        MaxTextureSizeX = 2048;
-        MaxTextureSizeY = 2048;
-        bRequiresLODChain = true;
-    }
-};
-
-/**
- * Engine Architectural Framework Component
- * Enforces architectural standards across all 19 agents
- * Manages module dependencies and performance budgets
- */
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UEng_ArchitecturalFramework : public UActorComponent
+class TRANSPERSONALGAME_API UEng_ArchitecturalFramework : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
     UEng_ArchitecturalFramework();
 
-protected:
-    virtual void BeginPlay() override;
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
 
-public:
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    // ========================================================================
+    // ARCHITECTURAL VALIDATION
+    // ========================================================================
 
-    // Module Management
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    TArray<FEng_ModuleSpec> RegisteredModules;
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    void ValidateModuleStructure();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
-    TMap<FString, bool> ModuleLoadStatus;
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    FEng_ModuleStatus GetModuleStatus(const FString& ModuleName) const;
 
-    // Performance Budgets
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    FEng_PerformanceBudget GlobalBudget;
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    TArray<FEng_ModuleStatus> GetAllModuleStatuses() const;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    TMap<EEng_AgentType, FEng_PerformanceBudget> AgentBudgets;
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    bool ValidateSystemRequirements(EEng_SystemType SystemType) const;
 
-    // Asset Pipeline Rules
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Assets")
-    TArray<FEng_AssetPipelineRule> AssetRules;
+    // ========================================================================
+    // COMPILATION MANAGEMENT
+    // ========================================================================
 
-    // Compilation Rules
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Compilation")
-    bool bEnforceStrictCompilation;
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    void ScanForOrphanedHeaders();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Compilation")
-    TArray<FString> RequiredHeaderIncludes;
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    void GenerateMissingImplementations();
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Compilation")
-    TArray<FString> ForbiddenAPIs;
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    bool CheckCompilationStatus();
 
-    // Module Registration Functions
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void RegisterModule(const FEng_ModuleSpec& ModuleSpec);
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Engine Architecture")
+    void RunArchitecturalAudit();
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool ValidateModuleDependencies(const FString& ModuleName);
+    // ========================================================================
+    // PERFORMANCE MONITORING
+    // ========================================================================
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void InitializeCoreModules();
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    void MonitorSystemPerformance();
 
-    // Performance Monitoring
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void SetPerformanceBudget(EEng_AgentType AgentType, const FEng_PerformanceBudget& Budget);
+    UFUNCTION(BlueprintPure, Category = "Engine Architecture")
+    EEng_PerformanceTier GetCurrentPerformanceTier() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    bool CheckPerformanceCompliance(EEng_AgentType AgentType);
-
-    UFUNCTION(BlueprintCallable, Category = "Performance")
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
     void EnforcePerformanceLimits();
 
-    // Asset Pipeline Functions
-    UFUNCTION(BlueprintCallable, Category = "Assets")
-    void AddAssetRule(const FEng_AssetPipelineRule& Rule);
+    // ========================================================================
+    // SYSTEM INTEGRATION
+    // ========================================================================
 
-    UFUNCTION(BlueprintCallable, Category = "Assets")
-    bool ValidateAssetCompliance(const FString& AssetPath);
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    void RegisterSystemRequirements(EEng_SystemType SystemType, const FEng_SystemRequirements& Requirements);
 
-    UFUNCTION(BlueprintCallable, Category = "Assets")
-    void PrepareCommercialAssetIntegration();
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    bool ValidateSystemIntegration(EEng_SystemType SystemA, EEng_SystemType SystemB) const;
 
-    // Compilation Enforcement
-    UFUNCTION(BlueprintCallable, Category = "Compilation")
-    void EnforceCompilationRules();
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    void InitializeSystemDependencies();
 
-    UFUNCTION(BlueprintCallable, Category = "Compilation")
-    bool ValidateHeaderStructure(const FString& HeaderPath);
+    // ========================================================================
+    // AGENT COORDINATION
+    // ========================================================================
 
-    UFUNCTION(BlueprintCallable, Category = "Compilation")
-    void GenerateModuleBuildFiles();
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    void SetArchitecturalRules(const FEng_ArchitecturalRules& Rules);
 
-    // Query Functions
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Architecture")
-    bool IsModuleLoaded(const FString& ModuleName) const;
+    UFUNCTION(BlueprintPure, Category = "Engine Architecture")
+    FEng_ArchitecturalRules GetArchitecturalRules() const;
 
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Architecture")
-    TArray<FString> GetLoadedModules() const;
+    UFUNCTION(BlueprintCallable, Category = "Engine Architecture")
+    bool ValidateAgentOutput(int32 AgentID, const TArray<FString>& CreatedFiles) const;
 
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Performance")
-    float GetCurrentPerformanceScore() const;
+protected:
+    UPROPERTY(BlueprintReadOnly, Category = "Engine Architecture")
+    TMap<EEng_SystemType, FEng_SystemRequirements> SystemRequirements;
 
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Assets")
-    int32 GetTotalAssetsRegistered() const;
+    UPROPERTY(BlueprintReadOnly, Category = "Engine Architecture")
+    TMap<FString, FEng_ModuleStatus> ModuleStatuses;
 
-    // Emergency Functions
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void EmergencyModuleShutdown(const FString& ModuleName);
+    UPROPERTY(BlueprintReadOnly, Category = "Engine Architecture")
+    FEng_ArchitecturalRules CurrentRules;
 
-    UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void ResetArchitecturalFramework();
+    UPROPERTY(BlueprintReadOnly, Category = "Engine Architecture")
+    EEng_PerformanceTier CurrentPerformanceTier;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Engine Architecture")
+    bool bFrameworkInitialized;
 
 private:
-    void LogArchitecturalEvent(const FString& Message);
-    void ValidateSystemIntegrity();
+    void InitializeSystemRequirements();
+    void ScanModuleDirectory(const FString& ModulePath);
+    void ValidateHeaderCppPairs(const FString& ModulePath);
+    void CheckSystemDependencies();
     void UpdatePerformanceMetrics();
-    void CheckModuleHealth();
 };
+
+#include "Eng_ArchitecturalFramework.generated.h"
