@@ -2,12 +2,11 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "Engine/DamageEvents.h"
+#include "Engine/Engine.h"
+#include "GameFramework/Actor.h"
+#include "GameFramework/Pawn.h"
 #include "../SharedTypes.h"
 #include "Combat_DamageSystem.generated.h"
-
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnDamageTaken, float, DamageAmount, AActor*, DamageSource, FVector, HitLocation);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDeath, AActor*, DeadActor);
 
 USTRUCT(BlueprintType)
 struct FCombat_DamageInfo
@@ -15,39 +14,70 @@ struct FCombat_DamageInfo
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage")
-    float BaseDamage;
+    float BaseDamage = 10.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage")
-    EDamageType DamageType;
+    EDamageType DamageType = EDamageType::Physical;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage")
-    FVector HitLocation;
+    AActor* DamageSource = nullptr;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage")
-    FVector HitDirection;
+    FVector HitLocation = FVector::ZeroVector;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage")
-    AActor* DamageSource;
+    FVector HitDirection = FVector::ZeroVector;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage")
-    bool bCanCauseKnockback;
+    bool bIsCriticalHit = false;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage")
-    float KnockbackForce;
+    float CriticalMultiplier = 2.0f;
 
     FCombat_DamageInfo()
     {
-        BaseDamage = 0.0f;
+        BaseDamage = 10.0f;
         DamageType = EDamageType::Physical;
+        DamageSource = nullptr;
         HitLocation = FVector::ZeroVector;
         HitDirection = FVector::ZeroVector;
-        DamageSource = nullptr;
-        bCanCauseKnockback = false;
-        KnockbackForce = 0.0f;
+        bIsCriticalHit = false;
+        CriticalMultiplier = 2.0f;
     }
 };
 
-UCLASS(ClassGroup=(Combat), meta=(BlueprintSpawnableComponent))
+USTRUCT(BlueprintType)
+struct FCombat_ResistanceData
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Resistance")
+    float PhysicalResistance = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Resistance")
+    float FireResistance = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Resistance")
+    float PoisonResistance = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Resistance")
+    float BleedingResistance = 0.0f;
+
+    FCombat_ResistanceData()
+    {
+        PhysicalResistance = 0.0f;
+        FireResistance = 0.0f;
+        PoisonResistance = 0.0f;
+        BleedingResistance = 0.0f;
+    }
+};
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnDamageTaken, float, Damage, const FCombat_DamageInfo&, DamageInfo);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnDamageDealt, AActor*, Target, const FCombat_DamageInfo&, DamageInfo);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnHealthChanged, float, NewHealth);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnDeath);
+
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent), BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UCombat_DamageSystem : public UActorComponent
 {
     GENERATED_BODY()
@@ -61,93 +91,102 @@ protected:
 public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // Propriedades de saúde
+    // Health Management
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Health")
-    float MaxHealth;
+    float MaxHealth = 100.0f;
 
     UPROPERTY(BlueprintReadOnly, Category = "Health")
-    float CurrentHealth;
+    float CurrentHealth = 100.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Health")
-    float HealthRegenerationRate;
+    float HealthRegenRate = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Health")
-    float RegenerationDelay;
+    float HealthRegenDelay = 5.0f;
 
-    // Resistências
+    // Resistance System
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Resistance")
-    TMap<EDamageType, float> DamageResistances;
+    FCombat_ResistanceData ResistanceData;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Resistance")
-    float ArmorValue;
+    // Status Effects
+    UPROPERTY(BlueprintReadOnly, Category = "Status")
+    bool bIsBleeding = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Resistance")
-    bool bIsInvulnerable;
+    UPROPERTY(BlueprintReadOnly, Category = "Status")
+    bool bIsPoisoned = false;
 
-    // Estado
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    bool bIsDead;
+    UPROPERTY(BlueprintReadOnly, Category = "Status")
+    bool bIsOnFire = false;
 
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    float TimeSinceLastDamage;
+    UPROPERTY(BlueprintReadOnly, Category = "Status")
+    bool bIsDead = false;
 
-    UPROPERTY(BlueprintReadOnly, Category = "State")
-    AActor* LastDamageSource;
-
-    // Delegates
+    // Damage Events
     UPROPERTY(BlueprintAssignable, Category = "Events")
     FOnDamageTaken OnDamageTaken;
 
     UPROPERTY(BlueprintAssignable, Category = "Events")
+    FOnDamageDealt OnDamageDealt;
+
+    UPROPERTY(BlueprintAssignable, Category = "Events")
+    FOnHealthChanged OnHealthChanged;
+
+    UPROPERTY(BlueprintAssignable, Category = "Events")
     FOnDeath OnDeath;
 
-public:
-    // Funções principais
+    // Core Functions
     UFUNCTION(BlueprintCallable, Category = "Damage")
     float TakeDamage(const FCombat_DamageInfo& DamageInfo);
 
     UFUNCTION(BlueprintCallable, Category = "Damage")
+    void DealDamageToTarget(AActor* Target, const FCombat_DamageInfo& DamageInfo);
+
+    UFUNCTION(BlueprintCallable, Category = "Health")
     void Heal(float HealAmount);
 
     UFUNCTION(BlueprintCallable, Category = "Health")
     void SetMaxHealth(float NewMaxHealth);
 
-    UFUNCTION(BlueprintCallable, Category = "Health")
-    void SetCurrentHealth(float NewHealth);
-
-    UFUNCTION(BlueprintCallable, Category = "Health")
+    UFUNCTION(BlueprintPure, Category = "Health")
     float GetHealthPercentage() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Health")
+    UFUNCTION(BlueprintPure, Category = "Health")
     bool IsAlive() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Health")
-    bool IsAtFullHealth() const;
+    // Status Effects
+    UFUNCTION(BlueprintCallable, Category = "Status")
+    void ApplyBleeding(float Duration, float DamagePerSecond);
+
+    UFUNCTION(BlueprintCallable, Category = "Status")
+    void ApplyPoison(float Duration, float DamagePerSecond);
+
+    UFUNCTION(BlueprintCallable, Category = "Status")
+    void ApplyBurning(float Duration, float DamagePerSecond);
+
+    UFUNCTION(BlueprintCallable, Category = "Status")
+    void ClearAllStatusEffects();
+
+    // Resistance
+    UFUNCTION(BlueprintPure, Category = "Resistance")
+    float CalculateDamageReduction(EDamageType DamageType) const;
 
     UFUNCTION(BlueprintCallable, Category = "Resistance")
-    void SetDamageResistance(EDamageType DamageType, float Resistance);
-
-    UFUNCTION(BlueprintCallable, Category = "Resistance")
-    float GetDamageResistance(EDamageType DamageType) const;
-
-    UFUNCTION(BlueprintCallable, Category = "State")
-    void SetInvulnerable(bool bNewInvulnerable);
-
-    UFUNCTION(BlueprintCallable, Category = "State")
-    void Kill();
-
-    UFUNCTION(BlueprintCallable, Category = "State")
-    void Revive(float NewHealth = -1.0f);
-
-protected:
-    // Funções internas
-    float CalculateFinalDamage(const FCombat_DamageInfo& DamageInfo) const;
-    void ApplyKnockback(const FCombat_DamageInfo& DamageInfo);
-    void HandleDeath();
-    void UpdateHealthRegeneration(float DeltaTime);
+    void ModifyResistance(EDamageType DamageType, float ResistanceChange);
 
 private:
-    // Estado interno
-    bool bCanRegenerate;
-    float RegenerationTimer;
+    // Internal tracking
+    float LastDamageTime = 0.0f;
+    float BleedingTimer = 0.0f;
+    float BleedingDPS = 0.0f;
+    float PoisonTimer = 0.0f;
+    float PoisonDPS = 0.0f;
+    float BurningTimer = 0.0f;
+    float BurningDPS = 0.0f;
+
+    // Internal functions
+    void ProcessStatusEffects(float DeltaTime);
+    void ProcessHealthRegeneration(float DeltaTime);
+    void Die();
+    float CalculateFinalDamage(const FCombat_DamageInfo& DamageInfo) const;
+    bool ShouldBeCriticalHit(const FCombat_DamageInfo& DamageInfo) const;
 };
