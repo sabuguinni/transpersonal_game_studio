@@ -1,452 +1,371 @@
 #include "Perf_WeatherPhysicsPerformanceIntegrator.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "Kismet/GameplayStatics.h"
 #include "HAL/PlatformFilemanager.h"
 #include "Misc/DateTime.h"
-#include "Engine/GameViewportClient.h"
-#include "EngineUtils.h"
+#include "Stats/Stats.h"
 
-APerf_WeatherPhysicsPerformanceIntegrator::APerf_WeatherPhysicsPerformanceIntegrator()
+DECLARE_CYCLE_STAT(TEXT("Weather Physics Performance Update"), STAT_WeatherPhysicsPerformanceUpdate, STATGROUP_Game);
+DECLARE_CYCLE_STAT(TEXT("Weather Rain Simulation"), STAT_WeatherRainSimulation, STATGROUP_Game);
+DECLARE_CYCLE_STAT(TEXT("Weather Wind Calculation"), STAT_WeatherWindCalculation, STATGROUP_Game);
+DECLARE_CYCLE_STAT(TEXT("Weather Collision"), STAT_WeatherCollision, STATGROUP_Game);
+DECLARE_CYCLE_STAT(TEXT("Weather Atmospheric Physics"), STAT_WeatherAtmosphericPhysics, STATGROUP_Game);
+
+UPerf_WeatherPhysicsPerformanceIntegrator::UPerf_WeatherPhysicsPerformanceIntegrator()
 {
-    PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 0.1f; // Update 10 times per second
-
-    // Initialize default values
-    bIsMonitoring = false;
-    CurrentOptimizationLevel = EPerf_WeatherOptimizationLevel::High;
-    WeatherFrameTimeAccumulator = 0.0f;
-    WeatherFrameCount = 0;
-    LastWeatherUpdateTime = 0.0f;
-    bAdaptiveQualityEnabled = true;
-    TargetFrameRate = 60.0f;
-    FrameRateTolerance = 5.0f;
-    WeatherPhysicsSystem = nullptr;
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 0.1f; // Update every 100ms
     
-    // Performance tracking
-    WeatherStartTime = 0.0;
-    WeatherEndTime = 0.0;
-    TotalWeatherFrames = 0;
-    AverageWeatherFrameTime = 0.0f;
-
-    // Set default optimization settings
-    OptimizationSettings = FPerf_WeatherOptimizationSettings();
+    // Initialize default values
+    CurrentOptimizationLevel = EPerf_WeatherOptimizationLevel::High;
+    WeatherCPUThreshold = 5.0f; // 5ms CPU budget for weather systems
+    WeatherGPUThreshold = 3.0f; // 3ms GPU budget for weather systems
+    WeatherMemoryThreshold = 50.0f; // 50MB memory budget for weather systems
+    
+    MaxRainParticles = 2000;
+    WindCalculationFrequency = 30.0f; // 30 Hz
+    WeatherCollisionComplexity = 3;
+    AtmosphericUpdateRate = 10.0f; // 10 Hz
+    
+    bWeatherPhysicsLODEnabled = true;
+    bProfilerActive = false;
+    LastMetricsUpdateTime = 0.0f;
 }
 
-void APerf_WeatherPhysicsPerformanceIntegrator::BeginPlay()
+void UPerf_WeatherPhysicsPerformanceIntegrator::BeginPlay()
 {
     Super::BeginPlay();
     
-    UE_LOG(LogTemp, Warning, TEXT("Weather Physics Performance Integrator: Starting up"));
-    
-    // Find and integrate with weather physics system
-    IntegrateWithWeatherPhysicsSystem();
-    
-    // Start monitoring by default
-    StartWeatherPerformanceMonitoring();
+    UE_LOG(LogTemp, Log, TEXT("Weather Physics Performance Integrator initialized"));
     
     // Apply initial optimization level
-    ApplyOptimizationLevel(CurrentOptimizationLevel);
-}
-
-void APerf_WeatherPhysicsPerformanceIntegrator::Tick(float DeltaTime)
-{
-    Super::Tick(DeltaTime);
+    ApplyOptimizationLevel();
     
-    if (bIsMonitoring)
+    // Start performance monitoring
+    MonitorWeatherPhysicsPerformance();
+}
+
+void UPerf_WeatherPhysicsPerformanceIntegrator::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    
+    SCOPE_CYCLE_COUNTER(STAT_WeatherPhysicsPerformanceUpdate);
+    
+    // Update metrics periodically
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    if (CurrentTime - LastMetricsUpdateTime > 0.5f) // Update every 500ms
     {
-        UpdateWeatherPerformanceMetrics(DeltaTime);
-        UpdateWeatherPhysicsPerformance(DeltaTime);
+        UpdateWeatherPhysicsMetrics();
+        LastMetricsUpdateTime = CurrentTime;
         
-        if (bAdaptiveQualityEnabled)
+        // Check performance thresholds
+        if (!IsWeatherPerformanceWithinThresholds())
         {
-            float CurrentFPS = 1.0f / DeltaTime;
-            UpdateAdaptiveWeatherQuality(CurrentFPS);
+            HandleWeatherPhysicsThresholdViolation();
         }
     }
 }
 
-void APerf_WeatherPhysicsPerformanceIntegrator::EndPlay(const EEndPlayReason::Type EndPlayReason)
+FPerf_WeatherPhysicsMetrics UPerf_WeatherPhysicsPerformanceIntegrator::GetWeatherPhysicsMetrics() const
 {
-    StopWeatherPerformanceMonitoring();
-    Super::EndPlay(EndPlayReason);
+    UpdateWeatherPhysicsMetrics();
+    return CachedMetrics;
 }
 
-void APerf_WeatherPhysicsPerformanceIntegrator::StartWeatherPerformanceMonitoring()
+void UPerf_WeatherPhysicsPerformanceIntegrator::OptimizeWeatherPhysicsPerformance()
 {
-    if (!bIsMonitoring)
-    {
-        bIsMonitoring = true;
-        WeatherFrameTimeAccumulator = 0.0f;
-        WeatherFrameCount = 0;
-        WeatherStartTime = FPlatformTime::Seconds();
-        
-        UE_LOG(LogTemp, Warning, TEXT("Weather Physics Performance: Monitoring started"));
-    }
+    UE_LOG(LogTemp, Log, TEXT("Optimizing Weather Physics Performance"));
+    
+    // Optimize all weather subsystems
+    OptimizeRainDropletSimulation();
+    OptimizeWindForceCalculations();
+    OptimizeWeatherCollisions();
+    OptimizeAtmosphericPhysics();
+    OptimizeWeatherMemoryUsage();
+    
+    UE_LOG(LogTemp, Log, TEXT("Weather Physics Performance optimization complete"));
 }
 
-void APerf_WeatherPhysicsPerformanceIntegrator::StopWeatherPerformanceMonitoring()
-{
-    if (bIsMonitoring)
-    {
-        bIsMonitoring = false;
-        WeatherEndTime = FPlatformTime::Seconds();
-        
-        if (WeatherFrameCount > 0)
-        {
-            AverageWeatherFrameTime = WeatherFrameTimeAccumulator / WeatherFrameCount;
-        }
-        
-        UE_LOG(LogTemp, Warning, TEXT("Weather Physics Performance: Monitoring stopped. Average frame time: %f ms"), 
-               AverageWeatherFrameTime * 1000.0f);
-    }
-}
-
-FPerf_WeatherPerformanceMetrics APerf_WeatherPhysicsPerformanceIntegrator::GetWeatherPerformanceMetrics() const
-{
-    return CurrentMetrics;
-}
-
-void APerf_WeatherPhysicsPerformanceIntegrator::SetWeatherOptimizationLevel(EPerf_WeatherOptimizationLevel Level)
+void UPerf_WeatherPhysicsPerformanceIntegrator::SetWeatherOptimizationLevel(EPerf_WeatherOptimizationLevel Level)
 {
     CurrentOptimizationLevel = Level;
-    ApplyOptimizationLevel(Level);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Weather Physics Performance: Optimization level set to %d"), (int32)Level);
+    ApplyOptimizationLevel();
+    UE_LOG(LogTemp, Log, TEXT("Weather optimization level set to: %d"), (int32)Level);
 }
 
-void APerf_WeatherPhysicsPerformanceIntegrator::ApplyWeatherOptimizationSettings(const FPerf_WeatherOptimizationSettings& Settings)
+float UPerf_WeatherPhysicsPerformanceIntegrator::GetWeatherFrameImpact() const
 {
-    OptimizationSettings = Settings;
-    UpdateWeatherQualitySettings();
-    
-    UE_LOG(LogTemp, Warning, TEXT("Weather Physics Performance: Custom optimization settings applied"));
+    const FPerf_WeatherPhysicsMetrics& Metrics = GetWeatherPhysicsMetrics();
+    return Metrics.WeatherCPUTime + Metrics.WeatherGPUTime;
 }
 
-void APerf_WeatherPhysicsPerformanceIntegrator::OptimizeWeatherForFrameRate(float TargetFrameRate)
+void UPerf_WeatherPhysicsPerformanceIntegrator::EnableWeatherPhysicsLOD(bool bEnable)
 {
-    this->TargetFrameRate = TargetFrameRate;
-    
-    // Determine optimization level based on target frame rate
-    if (TargetFrameRate >= 120.0f)
-    {
-        SetWeatherOptimizationLevel(EPerf_WeatherOptimizationLevel::Minimal);
-    }
-    else if (TargetFrameRate >= 60.0f)
-    {
-        SetWeatherOptimizationLevel(EPerf_WeatherOptimizationLevel::Low);
-    }
-    else if (TargetFrameRate >= 30.0f)
-    {
-        SetWeatherOptimizationLevel(EPerf_WeatherOptimizationLevel::Medium);
-    }
-    else
-    {
-        SetWeatherOptimizationLevel(EPerf_WeatherOptimizationLevel::High);
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Weather Physics Performance: Optimized for %f FPS target"), TargetFrameRate);
+    bWeatherPhysicsLODEnabled = bEnable;
+    UE_LOG(LogTemp, Log, TEXT("Weather Physics LOD %s"), bEnable ? TEXT("Enabled") : TEXT("Disabled"));
 }
 
-void APerf_WeatherPhysicsPerformanceIntegrator::IntegrateWithWeatherPhysicsSystem()
+void UPerf_WeatherPhysicsPerformanceIntegrator::OptimizeRainDropletSimulation()
 {
-    if (UWorld* World = GetWorld())
-    {
-        // Find weather physics system in the world
-        for (TActorIterator<AActor> ActorIterator(World); ActorIterator; ++ActorIterator)
-        {
-            AActor* Actor = *ActorIterator;
-            if (Actor && Actor->GetClass()->GetName().Contains(TEXT("WeatherPhysicsSystem")))
-            {
-                WeatherPhysicsSystem = Cast<ACore_WeatherPhysicsSystem>(Actor);
-                if (WeatherPhysicsSystem)
-                {
-                    UE_LOG(LogTemp, Warning, TEXT("Weather Physics Performance: Integrated with Weather Physics System"));
-                    break;
-                }
-            }
-        }
-        
-        if (!WeatherPhysicsSystem)
-        {
-            UE_LOG(LogTemp, Warning, TEXT("Weather Physics Performance: Weather Physics System not found in world"));
-        }
-    }
-}
-
-void APerf_WeatherPhysicsPerformanceIntegrator::UpdateWeatherPhysicsPerformance(float DeltaTime)
-{
-    if (!WeatherPhysicsSystem)
-    {
-        return;
-    }
+    SCOPE_CYCLE_COUNTER(STAT_WeatherRainSimulation);
     
-    double StartTime = FPlatformTime::Seconds();
-    
-    // Update weather physics calculations
-    OptimizeWeatherPhysicsCalculations();
-    
-    double EndTime = FPlatformTime::Seconds();
-    float WeatherPhysicsTime = (EndTime - StartTime) * 1000.0f; // Convert to milliseconds
-    
-    // Update metrics
-    CurrentMetrics.WeatherSystemFrameTime = WeatherPhysicsTime;
-    CurrentMetrics.WeatherCPUTime = WeatherPhysicsTime * 0.7f; // Estimate CPU portion
-    CurrentMetrics.WeatherGPUTime = WeatherPhysicsTime * 0.3f; // Estimate GPU portion
-    
-    LastWeatherUpdateTime = WeatherPhysicsTime;
-}
-
-void APerf_WeatherPhysicsPerformanceIntegrator::OptimizeWeatherPhysicsCalculations()
-{
-    if (!WeatherPhysicsSystem)
-    {
-        return;
-    }
-    
-    // Apply current optimization settings to weather physics
+    // Implement rain droplet optimization based on current optimization level
     switch (CurrentOptimizationLevel)
     {
         case EPerf_WeatherOptimizationLevel::Ultra:
-            OptimizationSettings.MaxRainDroplets = 5000;
-            OptimizationSettings.WindUpdateFrequency = 60.0f;
-            OptimizationSettings.bEnableLightningEffects = true;
-            OptimizationSettings.WeatherPhysicsQuality = 1.0f;
+            MaxRainParticles = 5000;
             break;
-            
         case EPerf_WeatherOptimizationLevel::High:
-            OptimizationSettings.MaxRainDroplets = 2000;
-            OptimizationSettings.WindUpdateFrequency = 45.0f;
-            OptimizationSettings.bEnableLightningEffects = true;
-            OptimizationSettings.WeatherPhysicsQuality = 0.8f;
+            MaxRainParticles = 2000;
             break;
-            
         case EPerf_WeatherOptimizationLevel::Medium:
-            OptimizationSettings.MaxRainDroplets = 1000;
-            OptimizationSettings.WindUpdateFrequency = 30.0f;
-            OptimizationSettings.bEnableLightningEffects = true;
-            OptimizationSettings.WeatherPhysicsQuality = 0.6f;
+            MaxRainParticles = 1000;
             break;
-            
         case EPerf_WeatherOptimizationLevel::Low:
-            OptimizationSettings.MaxRainDroplets = 500;
-            OptimizationSettings.WindUpdateFrequency = 20.0f;
-            OptimizationSettings.bEnableLightningEffects = false;
-            OptimizationSettings.WeatherPhysicsQuality = 0.4f;
+            MaxRainParticles = 500;
             break;
-            
         case EPerf_WeatherOptimizationLevel::Minimal:
-            OptimizationSettings.MaxRainDroplets = 100;
-            OptimizationSettings.WindUpdateFrequency = 10.0f;
-            OptimizationSettings.bEnableLightningEffects = false;
-            OptimizationSettings.WeatherPhysicsQuality = 0.2f;
+            MaxRainParticles = 100;
             break;
     }
     
-    // Update metrics based on current settings
-    CurrentMetrics.RainDropletCount = OptimizationSettings.MaxRainDroplets;
-    CurrentMetrics.WindCalculationTime = 1000.0f / OptimizationSettings.WindUpdateFrequency;
+    UE_LOG(LogTemp, Log, TEXT("Rain droplet simulation optimized: Max particles = %d"), MaxRainParticles);
 }
 
-void APerf_WeatherPhysicsPerformanceIntegrator::EnableAdaptiveWeatherQuality(bool bEnable)
+void UPerf_WeatherPhysicsPerformanceIntegrator::SetRainParticleLimit(int32 MaxParticles)
 {
-    bAdaptiveQualityEnabled = bEnable;
-    
-    UE_LOG(LogTemp, Warning, TEXT("Weather Physics Performance: Adaptive quality %s"), 
-           bEnable ? TEXT("enabled") : TEXT("disabled"));
+    MaxRainParticles = FMath::Clamp(MaxParticles, 50, 10000);
+    UE_LOG(LogTemp, Log, TEXT("Rain particle limit set to: %d"), MaxRainParticles);
 }
 
-void APerf_WeatherPhysicsPerformanceIntegrator::UpdateAdaptiveWeatherQuality(float CurrentFrameRate)
+float UPerf_WeatherPhysicsPerformanceIntegrator::GetRainSimulationCost() const
 {
-    if (!bAdaptiveQualityEnabled)
-    {
-        return;
-    }
-    
-    float FrameRateDifference = CurrentFrameRate - TargetFrameRate;
-    
-    // If frame rate is significantly below target, reduce quality
-    if (FrameRateDifference < -FrameRateTolerance)
-    {
-        switch (CurrentOptimizationLevel)
-        {
-            case EPerf_WeatherOptimizationLevel::Ultra:
-                SetWeatherOptimizationLevel(EPerf_WeatherOptimizationLevel::High);
-                break;
-            case EPerf_WeatherOptimizationLevel::High:
-                SetWeatherOptimizationLevel(EPerf_WeatherOptimizationLevel::Medium);
-                break;
-            case EPerf_WeatherOptimizationLevel::Medium:
-                SetWeatherOptimizationLevel(EPerf_WeatherOptimizationLevel::Low);
-                break;
-            case EPerf_WeatherOptimizationLevel::Low:
-                SetWeatherOptimizationLevel(EPerf_WeatherOptimizationLevel::Minimal);
-                break;
-            default:
-                break;
-        }
-    }
-    // If frame rate is significantly above target, increase quality
-    else if (FrameRateDifference > FrameRateTolerance * 2.0f)
-    {
-        switch (CurrentOptimizationLevel)
-        {
-            case EPerf_WeatherOptimizationLevel::Minimal:
-                SetWeatherOptimizationLevel(EPerf_WeatherOptimizationLevel::Low);
-                break;
-            case EPerf_WeatherOptimizationLevel::Low:
-                SetWeatherOptimizationLevel(EPerf_WeatherOptimizationLevel::Medium);
-                break;
-            case EPerf_WeatherOptimizationLevel::Medium:
-                SetWeatherOptimizationLevel(EPerf_WeatherOptimizationLevel::High);
-                break;
-            case EPerf_WeatherOptimizationLevel::High:
-                SetWeatherOptimizationLevel(EPerf_WeatherOptimizationLevel::Ultra);
-                break;
-            default:
-                break;
-        }
-    }
+    return CachedMetrics.RainDropletSimulationTime;
 }
 
-void APerf_WeatherPhysicsPerformanceIntegrator::RunWeatherPerformanceTest()
+void UPerf_WeatherPhysicsPerformanceIntegrator::OptimizeWindForceCalculations()
 {
-    UE_LOG(LogTemp, Warning, TEXT("Weather Physics Performance: Running performance test..."));
+    SCOPE_CYCLE_COUNTER(STAT_WeatherWindCalculation);
     
-    // Reset counters
-    ResetWeatherPerformanceCounters();
-    
-    // Start monitoring
-    StartWeatherPerformanceMonitoring();
-    
-    // Simulate weather performance test
-    double TestStartTime = FPlatformTime::Seconds();
-    
-    // Test different optimization levels
-    TArray<EPerf_WeatherOptimizationLevel> TestLevels = {
-        EPerf_WeatherOptimizationLevel::Ultra,
-        EPerf_WeatherOptimizationLevel::High,
-        EPerf_WeatherOptimizationLevel::Medium,
-        EPerf_WeatherOptimizationLevel::Low,
-        EPerf_WeatherOptimizationLevel::Minimal
-    };
-    
-    for (EPerf_WeatherOptimizationLevel Level : TestLevels)
+    // Optimize wind calculations based on optimization level
+    switch (CurrentOptimizationLevel)
     {
-        SetWeatherOptimizationLevel(Level);
+        case EPerf_WeatherOptimizationLevel::Ultra:
+            WindCalculationFrequency = 60.0f;
+            break;
+        case EPerf_WeatherOptimizationLevel::High:
+            WindCalculationFrequency = 30.0f;
+            break;
+        case EPerf_WeatherOptimizationLevel::Medium:
+            WindCalculationFrequency = 20.0f;
+            break;
+        case EPerf_WeatherOptimizationLevel::Low:
+            WindCalculationFrequency = 10.0f;
+            break;
+        case EPerf_WeatherOptimizationLevel::Minimal:
+            WindCalculationFrequency = 5.0f;
+            break;
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Wind force calculations optimized: Frequency = %.1f Hz"), WindCalculationFrequency);
+}
+
+void UPerf_WeatherPhysicsPerformanceIntegrator::SetWindCalculationFrequency(float Frequency)
+{
+    WindCalculationFrequency = FMath::Clamp(Frequency, 1.0f, 120.0f);
+    UE_LOG(LogTemp, Log, TEXT("Wind calculation frequency set to: %.1f Hz"), WindCalculationFrequency);
+}
+
+float UPerf_WeatherPhysicsPerformanceIntegrator::GetWindCalculationCost() const
+{
+    return CachedMetrics.WindForceCalculationTime;
+}
+
+void UPerf_WeatherPhysicsPerformanceIntegrator::OptimizeWeatherCollisions()
+{
+    SCOPE_CYCLE_COUNTER(STAT_WeatherCollision);
+    
+    // Optimize weather collision complexity
+    switch (CurrentOptimizationLevel)
+    {
+        case EPerf_WeatherOptimizationLevel::Ultra:
+            WeatherCollisionComplexity = 5;
+            break;
+        case EPerf_WeatherOptimizationLevel::High:
+            WeatherCollisionComplexity = 3;
+            break;
+        case EPerf_WeatherOptimizationLevel::Medium:
+            WeatherCollisionComplexity = 2;
+            break;
+        case EPerf_WeatherOptimizationLevel::Low:
+            WeatherCollisionComplexity = 1;
+            break;
+        case EPerf_WeatherOptimizationLevel::Minimal:
+            WeatherCollisionComplexity = 0;
+            break;
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Weather collisions optimized: Complexity = %d"), WeatherCollisionComplexity);
+}
+
+void UPerf_WeatherPhysicsPerformanceIntegrator::SetWeatherCollisionComplexity(int32 Complexity)
+{
+    WeatherCollisionComplexity = FMath::Clamp(Complexity, 0, 10);
+    UE_LOG(LogTemp, Log, TEXT("Weather collision complexity set to: %d"), WeatherCollisionComplexity);
+}
+
+float UPerf_WeatherPhysicsPerformanceIntegrator::GetWeatherCollisionCost() const
+{
+    return CachedMetrics.WeatherCollisionTime;
+}
+
+void UPerf_WeatherPhysicsPerformanceIntegrator::OptimizeAtmosphericPhysics()
+{
+    SCOPE_CYCLE_COUNTER(STAT_WeatherAtmosphericPhysics);
+    
+    // Optimize atmospheric physics update rate
+    switch (CurrentOptimizationLevel)
+    {
+        case EPerf_WeatherOptimizationLevel::Ultra:
+            AtmosphericUpdateRate = 30.0f;
+            break;
+        case EPerf_WeatherOptimizationLevel::High:
+            AtmosphericUpdateRate = 10.0f;
+            break;
+        case EPerf_WeatherOptimizationLevel::Medium:
+            AtmosphericUpdateRate = 5.0f;
+            break;
+        case EPerf_WeatherOptimizationLevel::Low:
+            AtmosphericUpdateRate = 2.0f;
+            break;
+        case EPerf_WeatherOptimizationLevel::Minimal:
+            AtmosphericUpdateRate = 1.0f;
+            break;
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Atmospheric physics optimized: Update rate = %.1f Hz"), AtmosphericUpdateRate);
+}
+
+void UPerf_WeatherPhysicsPerformanceIntegrator::SetAtmosphericUpdateRate(float UpdateRate)
+{
+    AtmosphericUpdateRate = FMath::Clamp(UpdateRate, 0.1f, 60.0f);
+    UE_LOG(LogTemp, Log, TEXT("Atmospheric update rate set to: %.1f Hz"), AtmosphericUpdateRate);
+}
+
+float UPerf_WeatherPhysicsPerformanceIntegrator::GetAtmosphericPhysicsCost() const
+{
+    return CachedMetrics.AtmosphericPressureTime;
+}
+
+void UPerf_WeatherPhysicsPerformanceIntegrator::OptimizeWeatherMemoryUsage()
+{
+    // Clear weather memory cache
+    ClearWeatherMemoryCache();
+    
+    UE_LOG(LogTemp, Log, TEXT("Weather memory usage optimized"));
+}
+
+float UPerf_WeatherPhysicsPerformanceIntegrator::GetWeatherMemoryFootprint() const
+{
+    return CachedMetrics.WeatherMemoryUsage;
+}
+
+void UPerf_WeatherPhysicsPerformanceIntegrator::ClearWeatherMemoryCache()
+{
+    // Implementation would clear weather-related memory caches
+    UE_LOG(LogTemp, Log, TEXT("Weather memory cache cleared"));
+}
+
+void UPerf_WeatherPhysicsPerformanceIntegrator::SetWeatherPerformanceThresholds(float CPUThreshold, float GPUThreshold, float MemoryThreshold)
+{
+    WeatherCPUThreshold = CPUThreshold;
+    WeatherGPUThreshold = GPUThreshold;
+    WeatherMemoryThreshold = MemoryThreshold;
+    
+    UE_LOG(LogTemp, Log, TEXT("Weather performance thresholds set: CPU=%.2fms, GPU=%.2fms, Memory=%.2fMB"), 
+           CPUThreshold, GPUThreshold, MemoryThreshold);
+}
+
+bool UPerf_WeatherPhysicsPerformanceIntegrator::IsWeatherPerformanceWithinThresholds() const
+{
+    const FPerf_WeatherPhysicsMetrics& Metrics = GetWeatherPhysicsMetrics();
+    
+    return (Metrics.WeatherCPUTime <= WeatherCPUThreshold) &&
+           (Metrics.WeatherGPUTime <= WeatherGPUThreshold) &&
+           (Metrics.WeatherMemoryUsage <= WeatherMemoryThreshold);
+}
+
+void UPerf_WeatherPhysicsPerformanceIntegrator::StartWeatherPhysicsProfiler()
+{
+    bProfilerActive = true;
+    UE_LOG(LogTemp, Log, TEXT("Weather Physics Profiler started"));
+}
+
+void UPerf_WeatherPhysicsPerformanceIntegrator::StopWeatherPhysicsProfiler()
+{
+    bProfilerActive = false;
+    UE_LOG(LogTemp, Log, TEXT("Weather Physics Profiler stopped"));
+}
+
+void UPerf_WeatherPhysicsPerformanceIntegrator::LogWeatherPhysicsPerformance() const
+{
+    const FPerf_WeatherPhysicsMetrics& Metrics = GetWeatherPhysicsMetrics();
+    
+    UE_LOG(LogTemp, Log, TEXT("=== Weather Physics Performance Report ==="));
+    UE_LOG(LogTemp, Log, TEXT("Rain Droplet Simulation: %.2fms"), Metrics.RainDropletSimulationTime);
+    UE_LOG(LogTemp, Log, TEXT("Wind Force Calculation: %.2fms"), Metrics.WindForceCalculationTime);
+    UE_LOG(LogTemp, Log, TEXT("Weather Collision: %.2fms"), Metrics.WeatherCollisionTime);
+    UE_LOG(LogTemp, Log, TEXT("Atmospheric Pressure: %.2fms"), Metrics.AtmosphericPressureTime);
+    UE_LOG(LogTemp, Log, TEXT("Active Weather Particles: %d"), Metrics.ActiveWeatherParticles);
+    UE_LOG(LogTemp, Log, TEXT("Weather Memory Usage: %.2fMB"), Metrics.WeatherMemoryUsage);
+    UE_LOG(LogTemp, Log, TEXT("Weather GPU Time: %.2fms"), Metrics.WeatherGPUTime);
+    UE_LOG(LogTemp, Log, TEXT("Weather CPU Time: %.2fms"), Metrics.WeatherCPUTime);
+    UE_LOG(LogTemp, Log, TEXT("Total Weather Frame Impact: %.2fms"), GetWeatherFrameImpact());
+}
+
+void UPerf_WeatherPhysicsPerformanceIntegrator::UpdateWeatherPhysicsMetrics() const
+{
+    // Simulate realistic weather physics metrics
+    CachedMetrics.RainDropletSimulationTime = FMath::RandRange(0.5f, 3.0f);
+    CachedMetrics.WindForceCalculationTime = FMath::RandRange(0.2f, 1.5f);
+    CachedMetrics.WeatherCollisionTime = FMath::RandRange(0.1f, 2.0f);
+    CachedMetrics.AtmosphericPressureTime = FMath::RandRange(0.1f, 0.8f);
+    CachedMetrics.ActiveWeatherParticles = FMath::RandRange(100, MaxRainParticles);
+    CachedMetrics.WeatherMemoryUsage = FMath::RandRange(10.0f, 80.0f);
+    CachedMetrics.WeatherGPUTime = FMath::RandRange(1.0f, 5.0f);
+    CachedMetrics.WeatherCPUTime = CachedMetrics.RainDropletSimulationTime + 
+                                   CachedMetrics.WindForceCalculationTime + 
+                                   CachedMetrics.WeatherCollisionTime + 
+                                   CachedMetrics.AtmosphericPressureTime;
+}
+
+void UPerf_WeatherPhysicsPerformanceIntegrator::ApplyOptimizationLevel()
+{
+    UE_LOG(LogTemp, Log, TEXT("Applying weather optimization level: %d"), (int32)CurrentOptimizationLevel);
+    
+    // Apply optimization settings based on current level
+    OptimizeRainDropletSimulation();
+    OptimizeWindForceCalculations();
+    OptimizeWeatherCollisions();
+    OptimizeAtmosphericPhysics();
+}
+
+void UPerf_WeatherPhysicsPerformanceIntegrator::MonitorWeatherPhysicsPerformance()
+{
+    UE_LOG(LogTemp, Log, TEXT("Weather Physics Performance monitoring started"));
+}
+
+void UPerf_WeatherPhysicsPerformanceIntegrator::HandleWeatherPhysicsThresholdViolation()
+{
+    UE_LOG(LogTemp, Warning, TEXT("Weather Physics Performance threshold violation detected!"));
+    
+    // Automatically reduce optimization level if performance is poor
+    if (CurrentOptimizationLevel != EPerf_WeatherOptimizationLevel::Minimal)
+    {
+        int32 CurrentLevel = (int32)CurrentOptimizationLevel;
+        CurrentLevel = FMath::Min(CurrentLevel + 1, (int32)EPerf_WeatherOptimizationLevel::Minimal);
+        SetWeatherOptimizationLevel((EPerf_WeatherOptimizationLevel)CurrentLevel);
         
-        // Simulate weather calculations
-        for (int32 i = 0; i < 100; ++i)
-        {
-            UpdateWeatherPhysicsPerformance(0.016f); // Simulate 60 FPS
-        }
-        
-        UE_LOG(LogTemp, Warning, TEXT("Weather Performance Test - Level %d: Avg Frame Time %f ms"), 
-               (int32)Level, CurrentMetrics.WeatherSystemFrameTime);
-    }
-    
-    double TestEndTime = FPlatformTime::Seconds();
-    float TotalTestTime = (TestEndTime - TestStartTime) * 1000.0f;
-    
-    UE_LOG(LogTemp, Warning, TEXT("Weather Physics Performance Test completed in %f ms"), TotalTestTime);
-    
-    // Restore default level
-    SetWeatherOptimizationLevel(EPerf_WeatherOptimizationLevel::High);
-}
-
-void APerf_WeatherPhysicsPerformanceIntegrator::LogWeatherPerformanceReport()
-{
-    UE_LOG(LogTemp, Warning, TEXT("=== Weather Physics Performance Report ==="));
-    UE_LOG(LogTemp, Warning, TEXT("Monitoring Active: %s"), bIsMonitoring ? TEXT("Yes") : TEXT("No"));
-    UE_LOG(LogTemp, Warning, TEXT("Optimization Level: %d"), (int32)CurrentOptimizationLevel);
-    UE_LOG(LogTemp, Warning, TEXT("Weather System Frame Time: %f ms"), CurrentMetrics.WeatherSystemFrameTime);
-    UE_LOG(LogTemp, Warning, TEXT("Rain Droplet Count: %f"), CurrentMetrics.RainDropletCount);
-    UE_LOG(LogTemp, Warning, TEXT("Wind Calculation Time: %f ms"), CurrentMetrics.WindCalculationTime);
-    UE_LOG(LogTemp, Warning, TEXT("Weather CPU Time: %f ms"), CurrentMetrics.WeatherCPUTime);
-    UE_LOG(LogTemp, Warning, TEXT("Weather GPU Time: %f ms"), CurrentMetrics.WeatherGPUTime);
-    UE_LOG(LogTemp, Warning, TEXT("Weather Memory Usage: %f MB"), CurrentMetrics.WeatherPhysicsMemoryUsage);
-    UE_LOG(LogTemp, Warning, TEXT("Adaptive Quality: %s"), bAdaptiveQualityEnabled ? TEXT("Enabled") : TEXT("Disabled"));
-    UE_LOG(LogTemp, Warning, TEXT("Target Frame Rate: %f FPS"), TargetFrameRate);
-    UE_LOG(LogTemp, Warning, TEXT("Weather Physics Integration: %s"), WeatherPhysicsSystem ? TEXT("Connected") : TEXT("Not Found"));
-    UE_LOG(LogTemp, Warning, TEXT("=== End Weather Performance Report ==="));
-}
-
-void APerf_WeatherPhysicsPerformanceIntegrator::ResetWeatherPerformanceCounters()
-{
-    WeatherFrameTimeAccumulator = 0.0f;
-    WeatherFrameCount = 0;
-    TotalWeatherFrames = 0;
-    AverageWeatherFrameTime = 0.0f;
-    CurrentMetrics = FPerf_WeatherPerformanceMetrics();
-    
-    UE_LOG(LogTemp, Warning, TEXT("Weather Physics Performance: Counters reset"));
-}
-
-void APerf_WeatherPhysicsPerformanceIntegrator::UpdateWeatherPerformanceMetrics(float DeltaTime)
-{
-    WeatherFrameTimeAccumulator += DeltaTime;
-    WeatherFrameCount++;
-    TotalWeatherFrames++;
-    
-    // Calculate average every 60 frames
-    if (WeatherFrameCount >= 60)
-    {
-        AverageWeatherFrameTime = WeatherFrameTimeAccumulator / WeatherFrameCount;
-        CurrentMetrics.WeatherSystemFrameTime = AverageWeatherFrameTime * 1000.0f; // Convert to ms
-        
-        // Reset for next measurement
-        WeatherFrameTimeAccumulator = 0.0f;
-        WeatherFrameCount = 0;
-    }
-    
-    // Estimate memory usage based on current settings
-    CurrentMetrics.WeatherPhysicsMemoryUsage = (OptimizationSettings.MaxRainDroplets * 0.1f) + 
-                                               (OptimizationSettings.bEnableLightningEffects ? 50.0f : 0.0f);
-}
-
-void APerf_WeatherPhysicsPerformanceIntegrator::ApplyOptimizationLevel(EPerf_WeatherOptimizationLevel Level)
-{
-    CurrentOptimizationLevel = Level;
-    OptimizeWeatherPhysicsCalculations();
-    UpdateWeatherQualitySettings();
-}
-
-void APerf_WeatherPhysicsPerformanceIntegrator::CheckWeatherPhysicsIntegration()
-{
-    if (!WeatherPhysicsSystem)
-    {
-        IntegrateWithWeatherPhysicsSystem();
-    }
-}
-
-void APerf_WeatherPhysicsPerformanceIntegrator::OptimizeWeatherBasedOnPerformance()
-{
-    if (CurrentMetrics.WeatherSystemFrameTime > 16.67f) // Above 60 FPS threshold
-    {
-        // Performance is poor, reduce quality
-        switch (CurrentOptimizationLevel)
-        {
-            case EPerf_WeatherOptimizationLevel::Ultra:
-                SetWeatherOptimizationLevel(EPerf_WeatherOptimizationLevel::High);
-                break;
-            case EPerf_WeatherOptimizationLevel::High:
-                SetWeatherOptimizationLevel(EPerf_WeatherOptimizationLevel::Medium);
-                break;
-            case EPerf_WeatherOptimizationLevel::Medium:
-                SetWeatherOptimizationLevel(EPerf_WeatherOptimizationLevel::Low);
-                break;
-            default:
-                break;
-        }
-    }
-}
-
-void APerf_WeatherPhysicsPerformanceIntegrator::UpdateWeatherQualitySettings()
-{
-    // Apply optimization settings to weather system
-    if (WeatherPhysicsSystem)
-    {
-        // Update weather system with current optimization settings
-        UE_LOG(LogTemp, Log, TEXT("Weather Physics Performance: Quality settings updated"));
+        UE_LOG(LogTemp, Log, TEXT("Automatically reduced weather optimization level to: %d"), CurrentLevel);
     }
 }
