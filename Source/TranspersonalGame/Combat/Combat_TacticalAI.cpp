@@ -1,92 +1,50 @@
 #include "Combat_TacticalAI.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "GameFramework/PlayerController.h"
+#include "Kismet/GameplayStatics.h"
+#include "NavigationSystem.h"
+#include "Components/CapsuleComponent.h"
 #include "DrawDebugHelpers.h"
-#include "Kismet/KismetMathLibrary.h"
-#include "GameFramework/Pawn.h"
-#include "Components/PrimitiveComponent.h"
 
 UCombat_TacticalAI::UCombat_TacticalAI()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f;
-
-    CurrentTacticalState = ECombat_TacticalState::Idle;
-    PrimaryTarget = nullptr;
-    AssignedPosition = FVector::ZeroVector;
-    FormationIndex = -1;
-
-    // Default tactical parameters
-    FlankingRange = 800.0f;
-    RetreatHealthThreshold = 0.3f;
-    CommunicationRange = 1500.0f;
-    TacticalUpdateInterval = 1.0f;
-
-    LastTacticalUpdate = 0.0f;
-    StateChangeTimer = 0.0f;
+    PrimaryComponentTick.TickInterval = 0.1f; // Update 10 times per second
 }
 
 void UCombat_TacticalAI::BeginPlay()
 {
     Super::BeginPlay();
     
-    UE_LOG(LogTemp, Log, TEXT("Combat_TacticalAI: Component initialized for %s"), 
+    CurrentTacticalState = ECombat_TacticalState::Idle;
+    StateChangeTime = GetWorld()->GetTimeSeconds();
+    LastTargetUpdateTime = 0.0f;
+    
+    // Initialize flanking positions around the owner
+    UpdateFlankingPositions();
+    
+    UE_LOG(LogTemp, Log, TEXT("Combat_TacticalAI initialized for %s"), 
            GetOwner() ? *GetOwner()->GetName() : TEXT("Unknown"));
 }
 
 void UCombat_TacticalAI::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
-    if (!GetOwner() || !PrimaryTarget)
+    
+    if (!GetOwner() || !GetWorld())
     {
         return;
     }
-
-    StateChangeTimer += DeltaTime;
     
-    // Update tactical situation periodically
-    if (StateChangeTimer >= TacticalUpdateInterval)
-    {
-        EvaluateTacticalSituation();
-        UpdateFormationPositions();
-        StateChangeTimer = 0.0f;
-    }
-
-    // Execute current tactical behavior
-    switch (CurrentTacticalState)
-    {
-        case ECombat_TacticalState::Scouting:
-            // Move to assigned scouting position
-            break;
-        case ECombat_TacticalState::Stalking:
-            // Maintain distance and track target
-            break;
-        case ECombat_TacticalState::Flanking:
-            // Move to flanking position
-            break;
-        case ECombat_TacticalState::Attacking:
-            // Execute attack behavior
-            break;
-        case ECombat_TacticalState::Retreating:
-            // Move away from danger
-            break;
-        case ECombat_TacticalState::Regrouping:
-            // Return to formation
-            break;
-    }
-}
-
-void UCombat_TacticalAI::InitializeTacticalAI(AActor* InTarget, TArray<AActor*> InAllies)
-{
-    PrimaryTarget = InTarget;
-    AlliedActors = InAllies;
+    // Update targets and tactical state
+    UpdateTargets(DeltaTime);
+    UpdateTacticalState(DeltaTime);
     
-    if (PrimaryTarget)
+    // Update flanking positions periodically
+    if (GetWorld()->GetTimeSeconds() - LastTargetUpdateTime > 2.0f)
     {
-        SetTacticalState(ECombat_TacticalState::Scouting);
-        UE_LOG(LogTemp, Log, TEXT("Combat_TacticalAI: Initialized with target %s and %d allies"), 
-               *PrimaryTarget->GetName(), AlliedActors.Num());
+        UpdateFlankingPositions();
+        LastTargetUpdateTime = GetWorld()->GetTimeSeconds();
     }
 }
 
@@ -96,457 +54,639 @@ void UCombat_TacticalAI::SetTacticalState(ECombat_TacticalState NewState)
     {
         ECombat_TacticalState PreviousState = CurrentTacticalState;
         CurrentTacticalState = NewState;
-        StateChangeTimer = 0.0f;
-
-        UE_LOG(LogTemp, Log, TEXT("Combat_TacticalAI: State changed from %d to %d"), 
-               (int32)PreviousState, (int32)NewState);
-
-        // Broadcast state change to allies
-        BroadcastTacticalOrder(NewState);
+        StateChangeTime = GetWorld()->GetTimeSeconds();
+        
+        UE_LOG(LogTemp, Log, TEXT("%s tactical state changed from %d to %d"), 
+               *GetOwner()->GetName(), (int32)PreviousState, (int32)NewState);
     }
 }
 
-void UCombat_TacticalAI::CreateFormation(ECombat_FormationType FormationType, AActor* Target)
+void UCombat_TacticalAI::AddTarget(AActor* Target, float ThreatLevel)
 {
-    if (!Target || AlliedActors.Num() == 0)
+    if (!Target)
     {
         return;
     }
-
-    CurrentFormation.FormationType = FormationType;
-    CurrentFormation.Target = Target;
-    CurrentFormation.CenterPoint = Target->GetActorLocation();
-    CurrentFormation.Positions.Empty();
-
-    TArray<FVector> FormationPositions;
-    FVector TargetLocation = Target->GetActorLocation();
-    FVector Direction = (GetOwner()->GetActorLocation() - TargetLocation).GetSafeNormal();
-
-    switch (FormationType)
+    
+    // Check if target already exists
+    FCombat_TacticalTarget* ExistingTarget = FindTarget(Target);
+    if (ExistingTarget)
     {
-        case ECombat_FormationType::Line:
-            FormationPositions = GenerateLineFormation(TargetLocation, Direction, AlliedActors.Num());
-            break;
-        case ECombat_FormationType::Circle:
-            FormationPositions = GenerateCircleFormation(TargetLocation, CurrentFormation.FormationRadius, AlliedActors.Num());
-            break;
-        case ECombat_FormationType::Wedge:
-            FormationPositions = GenerateWedgeFormation(TargetLocation, Direction, AlliedActors.Num());
-            break;
-        case ECombat_FormationType::Pincer:
-            FormationPositions = GeneratePincerFormation(TargetLocation, Direction, AlliedActors.Num());
-            break;
-        case ECombat_FormationType::Ambush:
-            FormationPositions = GenerateAmbushFormation(TargetLocation, Direction, AlliedActors.Num());
-            break;
+        ExistingTarget->ThreatLevel = ThreatLevel;
+        ExistingTarget->LastSeenTime = GetWorld()->GetTimeSeconds();
+        ExistingTarget->LastKnownPosition = Target->GetActorLocation();
+        ExistingTarget->bIsVisible = true;
+        return;
     }
-
-    // Convert positions to tactical positions
-    for (const FVector& Position : FormationPositions)
-    {
-        FCombat_TacticalPosition TacticalPos;
-        TacticalPos.Position = Position;
-        TacticalPos.Priority = FMath::RandRange(0.5f, 1.0f);
-        TacticalPos.bIsOccupied = false;
-        TacticalPos.OccupyingActor = nullptr;
-        CurrentFormation.Positions.Add(TacticalPos);
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("Combat_TacticalAI: Created %s formation with %d positions"), 
-           *UEnum::GetValueAsString(FormationType), FormationPositions.Num());
+    
+    // Add new target
+    FCombat_TacticalTarget NewTarget;
+    NewTarget.TargetActor = Target;
+    NewTarget.LastKnownPosition = Target->GetActorLocation();
+    NewTarget.ThreatLevel = ThreatLevel;
+    NewTarget.LastSeenTime = GetWorld()->GetTimeSeconds();
+    NewTarget.bIsVisible = true;
+    
+    KnownTargets.Add(NewTarget);
+    
+    UE_LOG(LogTemp, Log, TEXT("%s added target %s with threat level %.2f"), 
+           *GetOwner()->GetName(), *Target->GetName(), ThreatLevel);
 }
 
-FVector UCombat_TacticalAI::GetAssignedPosition() const
+void UCombat_TacticalAI::RemoveTarget(AActor* Target)
 {
-    if (FormationIndex >= 0 && FormationIndex < CurrentFormation.Positions.Num())
+    KnownTargets.RemoveAll([Target](const FCombat_TacticalTarget& TargetData)
     {
-        return CurrentFormation.Positions[FormationIndex].Position;
-    }
-    return AssignedPosition;
+        return TargetData.TargetActor == Target;
+    });
 }
 
-bool UCombat_TacticalAI::AssignPositionInFormation(AActor* Actor)
+AActor* UCombat_TacticalAI::GetPrimaryTarget() const
 {
-    if (!Actor)
+    if (KnownTargets.Num() == 0)
     {
-        return false;
+        return nullptr;
     }
-
-    // Find best available position
-    int32 BestIndex = -1;
-    float BestDistance = FLT_MAX;
-
-    for (int32 i = 0; i < CurrentFormation.Positions.Num(); i++)
+    
+    // Find target with highest threat level that's still valid
+    const FCombat_TacticalTarget* BestTarget = nullptr;
+    float HighestThreat = 0.0f;
+    
+    for (const FCombat_TacticalTarget& Target : KnownTargets)
     {
-        if (!CurrentFormation.Positions[i].bIsOccupied)
+        if (Target.TargetActor && Target.ThreatLevel > HighestThreat)
         {
-            float Distance = FVector::Dist(Actor->GetActorLocation(), CurrentFormation.Positions[i].Position);
-            if (Distance < BestDistance)
+            BestTarget = &Target;
+            HighestThreat = Target.ThreatLevel;
+        }
+    }
+    
+    return BestTarget ? BestTarget->TargetActor : nullptr;
+}
+
+FVector UCombat_TacticalAI::GetTargetLastKnownPosition(AActor* Target) const
+{
+    const FCombat_TacticalTarget* TargetData = FindTarget(Target);
+    return TargetData ? TargetData->LastKnownPosition : FVector::ZeroVector;
+}
+
+FVector UCombat_TacticalAI::FindBestFlankingPosition(AActor* Target, float MinDistance, float MaxDistance)
+{
+    if (!Target || !GetOwner())
+    {
+        return FVector::ZeroVector;
+    }
+    
+    FVector TargetLocation = Target->GetActorLocation();
+    FVector OwnerLocation = GetOwner()->GetActorLocation();
+    
+    // Generate potential flanking positions in a circle around the target
+    TArray<FVector> CandidatePositions;
+    int32 NumPositions = 8; // Check 8 positions around the target
+    
+    for (int32 i = 0; i < NumPositions; i++)
+    {
+        float Angle = (2.0f * PI * i) / NumPositions;
+        float Distance = FMath::RandRange(MinDistance, MaxDistance);
+        
+        FVector Offset = FVector(
+            FMath::Cos(Angle) * Distance,
+            FMath::Sin(Angle) * Distance,
+            0.0f
+        );
+        
+        FVector CandidatePos = TargetLocation + Offset;
+        CandidatePositions.Add(CandidatePos);
+    }
+    
+    // Evaluate each position and find the best one
+    FVector BestPosition = FVector::ZeroVector;
+    float BestScore = -1.0f;
+    
+    for (const FVector& Position : CandidatePositions)
+    {
+        if (IsValidFlankingPosition(Position, Target))
+        {
+            float Score = CalculateFlankingScore(Position, Target);
+            if (Score > BestScore)
             {
-                BestDistance = Distance;
-                BestIndex = i;
+                BestScore = Score;
+                BestPosition = Position;
             }
         }
     }
+    
+    return BestPosition;
+}
 
-    if (BestIndex >= 0)
+bool UCombat_TacticalAI::CanFlankTarget(AActor* Target) const
+{
+    if (!bCanFlank || !Target || !GetOwner())
     {
-        CurrentFormation.Positions[BestIndex].bIsOccupied = true;
-        CurrentFormation.Positions[BestIndex].OccupyingActor = Actor;
-        
-        if (Actor == GetOwner())
-        {
-            FormationIndex = BestIndex;
-            AssignedPosition = CurrentFormation.Positions[BestIndex].Position;
-        }
-        
+        return false;
+    }
+    
+    // Check if we have group members to coordinate with
+    if (bIsGroupLeader && GroupMembers.Num() > 0)
+    {
         return true;
     }
-
-    return false;
-}
-
-void UCombat_TacticalAI::UpdateFormationPositions()
-{
-    if (CurrentFormation.FormationType == ECombat_FormationType::None || !CurrentFormation.Target)
-    {
-        return;
-    }
-
-    // Update formation center based on target movement
-    FVector NewCenter = CurrentFormation.Target->GetActorLocation();
-    FVector Offset = NewCenter - CurrentFormation.CenterPoint;
     
-    if (Offset.Size() > 50.0f) // Only update if target moved significantly
+    // Check if target is distracted or engaged with another threat
+    FVector TargetLocation = Target->GetActorLocation();
+    FVector OwnerLocation = GetOwner()->GetActorLocation();
+    float DistanceToTarget = FVector::Dist(TargetLocation, OwnerLocation);
+    
+    return DistanceToTarget > AttackRange * 1.5f; // Need some distance to flank effectively
+}
+
+void UCombat_TacticalAI::RegisterWithGroup(UCombat_TacticalAI* GroupLeader)
+{
+    if (GroupLeader && GroupLeader != this)
     {
-        CurrentFormation.CenterPoint = NewCenter;
+        this->GroupLeader = GroupLeader;
+        GroupLeader->AddGroupMember(this);
+        bIsGroupLeader = false;
         
-        // Update all position offsets
-        for (FCombat_TacticalPosition& Position : CurrentFormation.Positions)
-        {
-            Position.Position += Offset;
-        }
-        
-        AssignedPosition += Offset;
+        UE_LOG(LogTemp, Log, TEXT("%s registered with group leader %s"), 
+               *GetOwner()->GetName(), *GroupLeader->GetOwner()->GetName());
     }
 }
 
-void UCombat_TacticalAI::EvaluateTacticalSituation()
+void UCombat_TacticalAI::AddGroupMember(UCombat_TacticalAI* Member)
 {
-    if (!PrimaryTarget || !GetOwner())
+    if (Member && Member != this && !GroupMembers.Contains(Member))
+    {
+        GroupMembers.Add(Member);
+        bIsGroupLeader = true;
+        
+        UE_LOG(LogTemp, Log, TEXT("%s added group member %s"), 
+               *GetOwner()->GetName(), *Member->GetOwner()->GetName());
+    }
+}
+
+void UCombat_TacticalAI::CoordinateGroupAttack(AActor* Target)
+{
+    if (!bIsGroupLeader || !Target || GroupMembers.Num() == 0)
     {
         return;
     }
-
-    float ThreatLevel = CalculateThreatLevel();
-    float DistanceToTarget = FVector::Dist(GetOwner()->GetActorLocation(), PrimaryTarget->GetActorLocation());
-
-    // Decision making based on threat level and situation
-    if (ThreatLevel > 0.8f)
+    
+    // Assign different roles to group members
+    for (int32 i = 0; i < GroupMembers.Num(); i++)
     {
-        if (ShouldRetreat())
+        UCombat_TacticalAI* Member = GroupMembers[i];
+        if (!Member || !Member->GetOwner())
         {
-            SetTacticalState(ECombat_TacticalState::Retreating);
+            continue;
         }
-        else if (CurrentTacticalState != ECombat_TacticalState::Attacking)
+        
+        // Assign tactics based on position in group
+        if (i % 2 == 0)
         {
-            SetTacticalState(ECombat_TacticalState::Attacking);
+            // Even members: direct attack
+            Member->SetTacticalState(ECombat_TacticalState::Attacking);
         }
+        else
+        {
+            // Odd members: flanking maneuver
+            Member->SetTacticalState(ECombat_TacticalState::Flanking);
+        }
+        
+        Member->AddTarget(Target, CalculateThreatLevel(Target));
     }
-    else if (ThreatLevel > 0.5f)
-    {
-        if (ShouldFlank() && CurrentTacticalState != ECombat_TacticalState::Flanking)
-        {
-            SetTacticalState(ECombat_TacticalState::Flanking);
-            CreateFormation(ECombat_FormationType::Pincer, PrimaryTarget);
-        }
-        else if (CurrentTacticalState == ECombat_TacticalState::Idle)
-        {
-            SetTacticalState(ECombat_TacticalState::Stalking);
-        }
-    }
-    else if (DistanceToTarget > 1000.0f)
-    {
-        SetTacticalState(ECombat_TacticalState::Scouting);
-    }
+    
+    UE_LOG(LogTemp, Log, TEXT("%s coordinating group attack on %s with %d members"), 
+           *GetOwner()->GetName(), *Target->GetName(), GroupMembers.Num());
 }
 
-bool UCombat_TacticalAI::ShouldFlank() const
+float UCombat_TacticalAI::CalculateThreatLevel(AActor* Target) const
 {
-    if (!PrimaryTarget || !GetOwner())
+    if (!Target || !GetOwner())
+    {
+        return 0.0f;
+    }
+    
+    float ThreatLevel = 0.0f;
+    FVector TargetLocation = Target->GetActorLocation();
+    FVector OwnerLocation = GetOwner()->GetActorLocation();
+    float Distance = FVector::Dist(TargetLocation, OwnerLocation);
+    
+    // Base threat based on distance (closer = more threatening)
+    if (Distance < AttackRange)
+    {
+        ThreatLevel += 1.0f;
+    }
+    else if (Distance < SightRange)
+    {
+        ThreatLevel += 0.5f * (1.0f - (Distance / SightRange));
+    }
+    
+    // Check if target is player
+    if (Cast<APawn>(Target) && Cast<APawn>(Target)->IsPlayerControlled())
+    {
+        ThreatLevel += 0.5f; // Players are inherently more threatening
+    }
+    
+    // Factor in target's current activity/state
+    if (Target->GetVelocity().Size() > 100.0f)
+    {
+        ThreatLevel += 0.2f; // Moving targets are more concerning
+    }
+    
+    return FMath::Clamp(ThreatLevel, 0.0f, 1.0f);
+}
+
+ECombat_ThreatLevel UCombat_TacticalAI::GetOverallThreatLevel() const
+{
+    float TotalThreat = 0.0f;
+    int32 ValidTargets = 0;
+    
+    for (const FCombat_TacticalTarget& Target : KnownTargets)
+    {
+        if (Target.TargetActor)
+        {
+            TotalThreat += Target.ThreatLevel;
+            ValidTargets++;
+        }
+    }
+    
+    if (ValidTargets == 0)
+    {
+        return ECombat_ThreatLevel::None;
+    }
+    
+    float AverageThreat = TotalThreat / ValidTargets;
+    
+    if (AverageThreat >= 0.8f)
+    {
+        return ECombat_ThreatLevel::Critical;
+    }
+    else if (AverageThreat >= 0.6f)
+    {
+        return ECombat_ThreatLevel::High;
+    }
+    else if (AverageThreat >= 0.3f)
+    {
+        return ECombat_ThreatLevel::Medium;
+    }
+    else if (AverageThreat > 0.0f)
+    {
+        return ECombat_ThreatLevel::Low;
+    }
+    
+    return ECombat_ThreatLevel::None;
+}
+
+bool UCombat_TacticalAI::ShouldEngageTarget(AActor* Target) const
+{
+    if (!Target || !GetOwner())
     {
         return false;
     }
-
-    // Check if we have enough allies for flanking
-    if (AlliedActors.Num() < 2)
+    
+    float ThreatLevel = CalculateThreatLevel(Target);
+    float Distance = FVector::Dist(Target->GetActorLocation(), GetOwner()->GetActorLocation());
+    
+    // Engage if target is close and threatening enough
+    bool bShouldEngage = (ThreatLevel >= AggressionLevel * 0.5f) && (Distance <= SightRange);
+    
+    // Consider group support
+    if (bIsGroupLeader && GroupMembers.Num() > 0)
     {
-        return false;
+        bShouldEngage = bShouldEngage || (ThreatLevel >= AggressionLevel * 0.3f);
     }
-
-    // Check if target is in a position that can be flanked
-    FVector FlankPosition = FindFlankingPosition();
-    return IsPositionSafe(FlankPosition);
+    
+    return bShouldEngage;
 }
 
 bool UCombat_TacticalAI::ShouldRetreat() const
 {
-    if (!GetOwner())
+    if (!bCanRetreat)
     {
         return false;
     }
-
-    // Check health threshold (assuming pawn has health component)
-    if (APawn* OwnerPawn = Cast<APawn>(GetOwner()))
+    
+    ECombat_ThreatLevel ThreatLevel = GetOverallThreatLevel();
+    
+    // Retreat if threat is too high
+    if (ThreatLevel == ECombat_ThreatLevel::Critical)
     {
-        // Simplified health check - in real implementation would check actual health component
-        float HealthRatio = 1.0f; // Placeholder
-        if (HealthRatio < RetreatHealthThreshold)
+        return true;
+    }
+    
+    // Retreat if outnumbered significantly
+    if (KnownTargets.Num() > 3 && !bIsGroupLeader)
+    {
+        return true;
+    }
+    
+    // Retreat if isolated from group
+    if (GroupLeader && GroupMembers.Num() == 0)
+    {
+        float DistanceToLeader = FVector::Dist(
+            GetOwner()->GetActorLocation(),
+            GroupLeader->GetOwner()->GetActorLocation()
+        );
+        
+        if (DistanceToLeader > FlankingRadius * 2.0f)
         {
             return true;
         }
     }
-
-    // Check if outnumbered significantly
-    float ThreatLevel = CalculateThreatLevel();
-    return ThreatLevel > 1.5f;
+    
+    return false;
 }
 
-FVector UCombat_TacticalAI::FindFlankingPosition() const
+FVector UCombat_TacticalAI::GetRetreatPosition() const
 {
-    if (!PrimaryTarget || !GetOwner())
+    if (!GetOwner())
     {
-        return GetOwner()->GetActorLocation();
+        return FVector::ZeroVector;
     }
-
-    FVector TargetLocation = PrimaryTarget->GetActorLocation();
-    FVector CurrentLocation = GetOwner()->GetActorLocation();
-    FVector ToTarget = (TargetLocation - CurrentLocation).GetSafeNormal();
     
-    // Calculate flanking position 90 degrees to the side
-    FVector RightVector = FVector::CrossProduct(ToTarget, FVector::UpVector);
-    FVector FlankPosition = TargetLocation + (RightVector * FlankingRange);
+    FVector OwnerLocation = GetOwner()->GetActorLocation();
     
-    return FlankPosition;
+    // If we have a group leader, retreat towards them
+    if (GroupLeader && GroupLeader->GetOwner())
+    {
+        FVector LeaderLocation = GroupLeader->GetOwner()->GetActorLocation();
+        FVector Direction = (LeaderLocation - OwnerLocation).GetSafeNormal();
+        return OwnerLocation + (Direction * FlankingRadius);
+    }
+    
+    // Otherwise, retreat away from primary target
+    AActor* PrimaryTarget = GetPrimaryTarget();
+    if (PrimaryTarget)
+    {
+        FVector TargetLocation = PrimaryTarget->GetActorLocation();
+        FVector Direction = (OwnerLocation - TargetLocation).GetSafeNormal();
+        return OwnerLocation + (Direction * FlankingRadius * 1.5f);
+    }
+    
+    // Fallback: retreat to a random safe position
+    FVector RandomDirection = FVector(
+        FMath::RandRange(-1.0f, 1.0f),
+        FMath::RandRange(-1.0f, 1.0f),
+        0.0f
+    ).GetSafeNormal();
+    
+    return OwnerLocation + (RandomDirection * FlankingRadius);
 }
 
-void UCombat_TacticalAI::BroadcastTacticalOrder(ECombat_TacticalState OrderType)
+void UCombat_TacticalAI::UpdateTargets(float DeltaTime)
+{
+    if (!GetWorld())
+    {
+        return;
+    }
+    
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    
+    // Update existing targets
+    for (FCombat_TacticalTarget& Target : KnownTargets)
+    {
+        if (Target.TargetActor)
+        {
+            Target.LastKnownPosition = Target.TargetActor->GetActorLocation();
+            Target.ThreatLevel = CalculateThreatLevel(Target.TargetActor);
+            
+            // Check if target is still visible (simplified check)
+            float Distance = FVector::Dist(Target.LastKnownPosition, GetOwner()->GetActorLocation());
+            Target.bIsVisible = Distance <= SightRange;
+            
+            if (Target.bIsVisible)
+            {
+                Target.LastSeenTime = CurrentTime;
+            }
+        }
+    }
+    
+    // Remove old or invalid targets
+    CleanupInvalidTargets();
+}
+
+void UCombat_TacticalAI::UpdateTacticalState(float DeltaTime)
+{
+    if (!GetWorld())
+    {
+        return;
+    }
+    
+    float TimeSinceStateChange = GetWorld()->GetTimeSeconds() - StateChangeTime;
+    ECombat_TacticalState NewState = CurrentTacticalState;
+    
+    // State transition logic
+    switch (CurrentTacticalState)
+    {
+        case ECombat_TacticalState::Idle:
+        {
+            if (KnownTargets.Num() > 0)
+            {
+                NewState = ECombat_TacticalState::Investigating;
+            }
+            break;
+        }
+        
+        case ECombat_TacticalState::Investigating:
+        {
+            AActor* PrimaryTarget = GetPrimaryTarget();
+            if (PrimaryTarget && ShouldEngageTarget(PrimaryTarget))
+            {
+                if (CanFlankTarget(PrimaryTarget))
+                {
+                    NewState = ECombat_TacticalState::Flanking;
+                }
+                else
+                {
+                    NewState = ECombat_TacticalState::Attacking;
+                }
+            }
+            else if (KnownTargets.Num() == 0)
+            {
+                NewState = ECombat_TacticalState::Idle;
+            }
+            break;
+        }
+        
+        case ECombat_TacticalState::Flanking:
+        case ECombat_TacticalState::Attacking:
+        {
+            if (ShouldRetreat())
+            {
+                NewState = ECombat_TacticalState::Retreating;
+            }
+            else if (KnownTargets.Num() == 0)
+            {
+                NewState = ECombat_TacticalState::Idle;
+            }
+            break;
+        }
+        
+        case ECombat_TacticalState::Retreating:
+        {
+            if (TimeSinceStateChange > 3.0f && !ShouldRetreat())
+            {
+                if (bIsGroupLeader && GroupMembers.Num() > 0)
+                {
+                    NewState = ECombat_TacticalState::Regrouping;
+                }
+                else
+                {
+                    NewState = ECombat_TacticalState::Idle;
+                }
+            }
+            break;
+        }
+        
+        case ECombat_TacticalState::Regrouping:
+        {
+            if (TimeSinceStateChange > 5.0f)
+            {
+                NewState = ECombat_TacticalState::Patrolling;
+            }
+            break;
+        }
+        
+        case ECombat_TacticalState::Patrolling:
+        {
+            if (KnownTargets.Num() > 0)
+            {
+                NewState = ECombat_TacticalState::Investigating;
+            }
+            break;
+        }
+    }
+    
+    if (NewState != CurrentTacticalState)
+    {
+        SetTacticalState(NewState);
+    }
+}
+
+void UCombat_TacticalAI::UpdateFlankingPositions()
 {
     if (!GetOwner())
     {
         return;
     }
-
-    for (AActor* Ally : AlliedActors)
+    
+    FlankingPositions.Empty();
+    FVector OwnerLocation = GetOwner()->GetActorLocation();
+    
+    // Generate flanking positions in a circle around the owner
+    int32 NumPositions = 6;
+    for (int32 i = 0; i < NumPositions; i++)
     {
-        if (Ally && FVector::Dist(GetOwner()->GetActorLocation(), Ally->GetActorLocation()) <= CommunicationRange)
-        {
-            if (UCombat_TacticalAI* AllyTacticalAI = Ally->FindComponentByClass<UCombat_TacticalAI>())
-            {
-                AllyTacticalAI->ReceiveTacticalOrder(OrderType, GetOwner());
-            }
-        }
+        float Angle = (2.0f * PI * i) / NumPositions;
+        FVector Position = OwnerLocation + FVector(
+            FMath::Cos(Angle) * FlankingRadius,
+            FMath::Sin(Angle) * FlankingRadius,
+            0.0f
+        );
+        
+        FCombat_FlankingPosition FlankPos;
+        FlankPos.Position = Position;
+        FlankPos.Score = 0.5f; // Base score
+        FlankPos.bIsOccupied = false;
+        
+        FlankingPositions.Add(FlankPos);
     }
 }
 
-void UCombat_TacticalAI::ReceiveTacticalOrder(ECombat_TacticalState OrderType, AActor* Sender)
+FCombat_TacticalTarget* UCombat_TacticalAI::FindTarget(AActor* Target)
 {
-    if (!Sender)
+    for (FCombat_TacticalTarget& TargetData : KnownTargets)
+    {
+        if (TargetData.TargetActor == Target)
+        {
+            return &TargetData;
+        }
+    }
+    return nullptr;
+}
+
+void UCombat_TacticalAI::CleanupInvalidTargets()
+{
+    if (!GetWorld())
     {
         return;
     }
-
-    // Process received order based on current state and sender authority
-    switch (OrderType)
+    
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    
+    KnownTargets.RemoveAll([CurrentTime](const FCombat_TacticalTarget& Target)
     {
-        case ECombat_TacticalState::Retreating:
-            // Always respond to retreat orders
-            SetTacticalState(ECombat_TacticalState::Retreating);
-            break;
-        case ECombat_TacticalState::Attacking:
-            // Join attack if not already retreating
-            if (CurrentTacticalState != ECombat_TacticalState::Retreating)
-            {
-                SetTacticalState(ECombat_TacticalState::Attacking);
-            }
-            break;
-        case ECombat_TacticalState::Regrouping:
-            SetTacticalState(ECombat_TacticalState::Regrouping);
-            break;
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("Combat_TacticalAI: Received tactical order %d from %s"), 
-           (int32)OrderType, *Sender->GetName());
+        // Remove if actor is null or hasn't been seen for too long
+        return !Target.TargetActor || 
+               !IsValid(Target.TargetActor) ||
+               (CurrentTime - Target.LastSeenTime) > 10.0f;
+    });
 }
 
-// Private helper functions
-TArray<FVector> UCombat_TacticalAI::GenerateLineFormation(const FVector& Center, const FVector& Direction, int32 NumPositions)
+bool UCombat_TacticalAI::IsValidFlankingPosition(const FVector& Position, AActor* Target) const
 {
-    TArray<FVector> Positions;
-    FVector RightVector = FVector::CrossProduct(Direction, FVector::UpVector);
-    float Spacing = 200.0f;
-    float StartOffset = -(NumPositions - 1) * Spacing * 0.5f;
-
-    for (int32 i = 0; i < NumPositions; i++)
+    if (!GetWorld() || !Target)
     {
-        FVector Position = Center + (RightVector * (StartOffset + i * Spacing)) + (Direction * -300.0f);
-        Positions.Add(Position);
+        return false;
     }
-    return Positions;
+    
+    // Check if position is navigable (simplified check)
+    UNavigationSystemV1* NavSys = UNavigationSystemV1::GetCurrent(GetWorld());
+    if (NavSys)
+    {
+        FNavLocation NavLoc;
+        if (!NavSys->ProjectPointToNavigation(Position, NavLoc, FVector(100.0f, 100.0f, 100.0f)))
+        {
+            return false;
+        }
+    }
+    
+    // Check if position provides tactical advantage
+    FVector TargetLocation = Target->GetActorLocation();
+    float DistanceToTarget = FVector::Dist(Position, TargetLocation);
+    
+    return DistanceToTarget >= AttackRange * 0.8f && DistanceToTarget <= FlankingRadius * 1.5f;
 }
 
-TArray<FVector> UCombat_TacticalAI::GenerateCircleFormation(const FVector& Center, float Radius, int32 NumPositions)
+float UCombat_TacticalAI::CalculateFlankingScore(const FVector& Position, AActor* Target) const
 {
-    TArray<FVector> Positions;
-    float AngleStep = 360.0f / NumPositions;
-
-    for (int32 i = 0; i < NumPositions; i++)
-    {
-        float Angle = i * AngleStep;
-        FVector Offset = FVector(
-            FMath::Cos(FMath::DegreesToRadians(Angle)) * Radius,
-            FMath::Sin(FMath::DegreesToRadians(Angle)) * Radius,
-            0.0f
-        );
-        Positions.Add(Center + Offset);
-    }
-    return Positions;
-}
-
-TArray<FVector> UCombat_TacticalAI::GenerateWedgeFormation(const FVector& Center, const FVector& Direction, int32 NumPositions)
-{
-    TArray<FVector> Positions;
-    FVector RightVector = FVector::CrossProduct(Direction, FVector::UpVector);
-    
-    // Leader at the front
-    Positions.Add(Center + Direction * 300.0f);
-    
-    // Wings spreading back
-    for (int32 i = 1; i < NumPositions; i++)
-    {
-        float Side = (i % 2 == 0) ? 1.0f : -1.0f;
-        float Row = (i + 1) / 2;
-        FVector Position = Center + (RightVector * Side * Row * 150.0f) + (Direction * -Row * 100.0f);
-        Positions.Add(Position);
-    }
-    return Positions;
-}
-
-TArray<FVector> UCombat_TacticalAI::GeneratePincerFormation(const FVector& Center, const FVector& Direction, int32 NumPositions)
-{
-    TArray<FVector> Positions;
-    FVector RightVector = FVector::CrossProduct(Direction, FVector::UpVector);
-    
-    int32 LeftWing = NumPositions / 2;
-    int32 RightWing = NumPositions - LeftWing;
-    
-    // Left wing
-    for (int32 i = 0; i < LeftWing; i++)
-    {
-        FVector Position = Center + (RightVector * -400.0f) + (Direction * (i * 200.0f - 200.0f));
-        Positions.Add(Position);
-    }
-    
-    // Right wing
-    for (int32 i = 0; i < RightWing; i++)
-    {
-        FVector Position = Center + (RightVector * 400.0f) + (Direction * (i * 200.0f - 200.0f));
-        Positions.Add(Position);
-    }
-    
-    return Positions;
-}
-
-TArray<FVector> UCombat_TacticalAI::GenerateAmbushFormation(const FVector& Center, const FVector& Direction, int32 NumPositions)
-{
-    TArray<FVector> Positions;
-    
-    // Scatter positions around target for ambush
-    for (int32 i = 0; i < NumPositions; i++)
-    {
-        float Angle = FMath::RandRange(0.0f, 360.0f);
-        float Distance = FMath::RandRange(300.0f, 600.0f);
-        FVector Offset = FVector(
-            FMath::Cos(FMath::DegreesToRadians(Angle)) * Distance,
-            FMath::Sin(FMath::DegreesToRadians(Angle)) * Distance,
-            0.0f
-        );
-        Positions.Add(Center + Offset);
-    }
-    
-    return Positions;
-}
-
-float UCombat_TacticalAI::CalculateThreatLevel() const
-{
-    if (!PrimaryTarget || !GetOwner())
+    if (!Target || !GetOwner())
     {
         return 0.0f;
     }
-
-    float Distance = FVector::Dist(GetOwner()->GetActorLocation(), PrimaryTarget->GetActorLocation());
-    float ThreatLevel = FMath::Clamp(1000.0f / Distance, 0.0f, 2.0f);
     
-    // Modify based on ally count
-    float AllyModifier = FMath::Clamp(AlliedActors.Num() / 3.0f, 0.5f, 1.5f);
-    ThreatLevel /= AllyModifier;
+    float Score = 0.0f;
+    FVector TargetLocation = Target->GetActorLocation();
+    FVector OwnerLocation = GetOwner()->GetActorLocation();
     
-    return ThreatLevel;
-}
-
-bool UCombat_TacticalAI::HasClearLineOfSight(const FVector& From, const FVector& To) const
-{
-    if (!GetWorld())
+    // Distance score (prefer optimal attack range)
+    float DistanceToTarget = FVector::Dist(Position, TargetLocation);
+    float OptimalDistance = AttackRange * 1.2f;
+    float DistanceScore = 1.0f - FMath::Abs(DistanceToTarget - OptimalDistance) / OptimalDistance;
+    Score += DistanceScore * 0.4f;
+    
+    // Angle score (prefer flanking from sides/behind)
+    FVector TargetForward = Target->GetActorForwardVector();
+    FVector ToFlankPosition = (Position - TargetLocation).GetSafeNormal();
+    float DotProduct = FVector::DotProduct(TargetForward, ToFlankPosition);
+    float AngleScore = 1.0f - ((DotProduct + 1.0f) * 0.5f); // Prefer positions behind target
+    Score += AngleScore * 0.4f;
+    
+    // Safety score (avoid positions too close to other threats)
+    float SafetyScore = 1.0f;
+    for (const FCombat_TacticalTarget& OtherTarget : KnownTargets)
     {
-        return false;
+        if (OtherTarget.TargetActor && OtherTarget.TargetActor != Target)
+        {
+            float DistanceToOther = FVector::Dist(Position, OtherTarget.LastKnownPosition);
+            if (DistanceToOther < AttackRange * 2.0f)
+            {
+                SafetyScore *= 0.5f;
+            }
+        }
     }
-
-    FHitResult HitResult;
-    FCollisionQueryParams QueryParams;
-    QueryParams.AddIgnoredActor(GetOwner());
+    Score += SafetyScore * 0.2f;
     
-    bool bHit = GetWorld()->LineTraceSingleByChannel(
-        HitResult,
-        From,
-        To,
-        ECollisionChannel::ECC_Visibility,
-        QueryParams
-    );
-    
-    return !bHit;
-}
-
-bool UCombat_TacticalAI::IsPositionSafe(const FVector& Position) const
-{
-    if (!GetWorld())
-    {
-        return false;
-    }
-
-    // Check for ground
-    FHitResult GroundHit;
-    FVector TraceStart = Position + FVector(0, 0, 100);
-    FVector TraceEnd = Position - FVector(0, 0, 1000);
-    
-    bool bHasGround = GetWorld()->LineTraceSingleByChannel(
-        GroundHit,
-        TraceStart,
-        TraceEnd,
-        ECollisionChannel::ECC_WorldStatic
-    );
-    
-    return bHasGround && GroundHit.Distance < 1000.0f;
-}
-
-FVector UCombat_TacticalAI::GetOptimalAttackVector() const
-{
-    if (!PrimaryTarget || !GetOwner())
-    {
-        return FVector::ZeroVector;
-    }
-
-    FVector TargetLocation = PrimaryTarget->GetActorLocation();
-    FVector CurrentLocation = GetOwner()->GetActorLocation();
-    
-    return (TargetLocation - CurrentLocation).GetSafeNormal();
+    return FMath::Clamp(Score, 0.0f, 1.0f);
 }
