@@ -1,127 +1,200 @@
 #include "Anim_CharacterAnimInstance.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
-#include "Components/CapsuleComponent.h"
-#include "Engine/World.h"
-#include "DrawDebugHelpers.h"
 #include "Kismet/KismetMathLibrary.h"
+#include "Engine/World.h"
 
 UAnim_CharacterAnimInstance::UAnim_CharacterAnimInstance()
 {
-    // Set default values
-    WalkThreshold = 50.0f;
-    RunThreshold = 300.0f;
-    JumpThreshold = 200.0f;
-    bEnableFootIK = true;
-    FootIKTraceDistance = 50.0f;
-    
+    // Initialize default values
     CurrentMovementState = EAnim_MovementState::Idle;
-    CurrentCombatState = EAnim_CombatState::None;
+    CurrentCombatState = EAnim_CombatState::Unarmed;
+    
+    WalkRunBlend = 0.0f;
+    TurnInPlaceAngle = 0.0f;
+    bShouldTurnInPlace = false;
+    LeanAmount = 0.0f;
+    AimPitch = 0.0f;
+    AimYaw = 0.0f;
+    
+    // Animation thresholds
+    WalkSpeedThreshold = 150.0f;
+    RunSpeedThreshold = 375.0f;
+    TurnInPlaceThreshold = 45.0f;
+    IdleTimeBeforeTurnInPlace = 2.0f;
+    
+    // Survival states
+    bIsHungry = false;
+    bIsThirsty = false;
+    bIsTired = false;
+    bIsAfraid = false;
+    FearLevel = 0.0f;
+    
+    // Internal state
+    IdleTime = 0.0f;
+    LastMovementTime = 0.0f;
+    LastFrameRotation = FRotator::ZeroRotator;
+    
+    OwnerCharacter = nullptr;
+    CharacterMovement = nullptr;
 }
 
 void UAnim_CharacterAnimInstance::NativeInitializeAnimation()
 {
     Super::NativeInitializeAnimation();
-
-    // Get character reference
+    
+    // Get character references
     OwnerCharacter = Cast<ACharacter>(GetOwningActor());
     if (OwnerCharacter)
     {
-        MovementComponent = OwnerCharacter->GetCharacterMovement();
-        UE_LOG(LogTemp, Log, TEXT("Animation Instance initialized for character: %s"), *OwnerCharacter->GetName());
-    }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Animation Instance failed to get character reference"));
+        CharacterMovement = OwnerCharacter->GetCharacterMovement();
+        LastFrameRotation = OwnerCharacter->GetActorRotation();
     }
 }
 
 void UAnim_CharacterAnimInstance::NativeUpdateAnimation(float DeltaTimeX)
 {
     Super::NativeUpdateAnimation(DeltaTimeX);
-
-    if (!OwnerCharacter || !MovementComponent)
+    
+    if (!OwnerCharacter || !CharacterMovement)
     {
         return;
     }
-
+    
     // Update all animation data
     UpdateMovementData();
     UpdateMovementState();
-    
-    if (bEnableFootIK)
-    {
-        UpdateFootIK();
-    }
+    UpdateCombatState();
+    UpdateAnimationParameters();
+    UpdateSurvivalStates();
+    UpdateTurnInPlace(DeltaTimeX);
 }
 
 void UAnim_CharacterAnimInstance::UpdateMovementData()
 {
-    if (!OwnerCharacter || !MovementComponent)
+    if (!OwnerCharacter || !CharacterMovement)
     {
         return;
     }
-
+    
     // Get basic movement data
-    MovementData.Velocity = MovementComponent->Velocity;
-    MovementData.Speed = MovementData.Velocity.Size();
-    MovementData.bIsInAir = MovementComponent->IsFalling();
-    MovementData.bIsCrouching = MovementComponent->IsCrouching();
-
-    // Calculate movement direction relative to character rotation
-    if (MovementData.Speed > 0.0f)
-    {
-        FVector ForwardVector = OwnerCharacter->GetActorForwardVector();
-        FVector VelocityNormalized = MovementData.Velocity.GetSafeNormal();
-        MovementData.Direction = FMath::RadiansToDegrees(FMath::Acos(FVector::DotProduct(ForwardVector, VelocityNormalized)));
-        
-        // Determine if moving left or right
-        FVector RightVector = OwnerCharacter->GetActorRightVector();
-        float RightDot = FVector::DotProduct(RightVector, VelocityNormalized);
-        if (RightDot < 0.0f)
-        {
-            MovementData.Direction *= -1.0f;
-        }
-    }
-    else
-    {
-        MovementData.Direction = 0.0f;
-    }
-
-    // Calculate ground distance for landing prediction
-    FVector StartLocation = OwnerCharacter->GetActorLocation();
-    FVector EndLocation = StartLocation - FVector(0.0f, 0.0f, 200.0f);
+    MovementData.Velocity = CharacterMovement->Velocity;
+    MovementData.GroundSpeed = MovementData.Velocity.Size2D();
+    MovementData.Speed = MovementData.GroundSpeed;
+    MovementData.Direction = CalculateDirection();
     
-    FHitResult HitResult;
-    FCollisionQueryParams QueryParams;
-    QueryParams.AddIgnoredActor(OwnerCharacter);
-    
-    if (GetWorld()->LineTraceSingleByChannel(HitResult, StartLocation, EndLocation, ECC_Visibility, QueryParams))
-    {
-        MovementData.GroundDistance = HitResult.Distance;
-    }
-    else
-    {
-        MovementData.GroundDistance = 200.0f;
-    }
+    // Movement state flags
+    MovementData.bIsInAir = CharacterMovement->IsFalling();
+    MovementData.bIsCrouching = CharacterMovement->IsCrouching();
+    MovementData.bIsAccelerating = CharacterMovement->GetCurrentAcceleration().SizeSquared() > 0.0f;
 }
 
 void UAnim_CharacterAnimInstance::UpdateMovementState()
 {
-    CurrentMovementState = DetermineMovementState();
+    CurrentMovementState = CalculateMovementState();
 }
 
-EAnim_MovementState UAnim_CharacterAnimInstance::DetermineMovementState() const
+void UAnim_CharacterAnimInstance::UpdateCombatState()
 {
-    if (!MovementComponent)
+    // For now, default to unarmed
+    // This will be expanded when weapon system is implemented
+    CurrentCombatState = EAnim_CombatState::Unarmed;
+}
+
+void UAnim_CharacterAnimInstance::UpdateAnimationParameters()
+{
+    // Calculate walk/run blend
+    WalkRunBlend = CalculateWalkRunBlend();
+    
+    // Calculate lean amount based on acceleration
+    if (CharacterMovement && MovementData.bIsAccelerating)
+    {
+        FVector Acceleration = CharacterMovement->GetCurrentAcceleration();
+        FVector LocalAcceleration = OwnerCharacter->GetActorTransform().InverseTransformVectorNoScale(Acceleration);
+        LeanAmount = FMath::Clamp(LocalAcceleration.Y / CharacterMovement->GetMaxAcceleration(), -1.0f, 1.0f);
+    }
+    else
+    {
+        LeanAmount = FMath::FInterpTo(LeanAmount, 0.0f, GetWorld()->GetDeltaSeconds(), 5.0f);
+    }
+    
+    // Update aim offsets (placeholder for now)
+    AimPitch = 0.0f;
+    AimYaw = 0.0f;
+}
+
+void UAnim_CharacterAnimInstance::UpdateSurvivalStates()
+{
+    // This will be connected to the survival system later
+    // For now, use placeholder logic based on movement
+    
+    // Simulate fatigue based on movement
+    if (MovementData.Speed > RunSpeedThreshold)
+    {
+        bIsTired = true;
+    }
+    else if (MovementData.Speed < WalkSpeedThreshold)
+    {
+        bIsTired = false;
+    }
+    
+    // Placeholder fear system
+    FearLevel = FMath::Clamp(FearLevel - GetWorld()->GetDeltaSeconds() * 0.1f, 0.0f, 1.0f);
+    bIsAfraid = FearLevel > 0.3f;
+}
+
+void UAnim_CharacterAnimInstance::UpdateTurnInPlace(float DeltaTime)
+{
+    if (!OwnerCharacter)
+    {
+        return;
+    }
+    
+    // Track idle time
+    if (MovementData.Speed < 1.0f)
+    {
+        IdleTime += DeltaTime;
+    }
+    else
+    {
+        IdleTime = 0.0f;
+        LastMovementTime = GetWorld()->GetTimeSeconds();
+    }
+    
+    // Calculate turn in place angle
+    FRotator CurrentRotation = OwnerCharacter->GetActorRotation();
+    float DeltaYaw = FMath::FindDeltaAngleDegrees(LastFrameRotation.Yaw, CurrentRotation.Yaw);
+    
+    if (FMath::Abs(DeltaYaw) > 0.1f)
+    {
+        TurnInPlaceAngle += DeltaYaw;
+        TurnInPlaceAngle = FMath::ClampAngle(TurnInPlaceAngle, -180.0f, 180.0f);
+    }
+    
+    // Determine if we should turn in place
+    bShouldTurnInPlace = ShouldTurnInPlace();
+    
+    // Reset turn angle if we've completed the turn
+    if (bShouldTurnInPlace && FMath::Abs(TurnInPlaceAngle) < 5.0f)
+    {
+        TurnInPlaceAngle = 0.0f;
+        bShouldTurnInPlace = false;
+    }
+    
+    LastFrameRotation = CurrentRotation;
+}
+
+EAnim_MovementState UAnim_CharacterAnimInstance::CalculateMovementState() const
+{
+    if (!CharacterMovement)
     {
         return EAnim_MovementState::Idle;
     }
-
-    // Check if in air first
+    
+    // Check for air states first
     if (MovementData.bIsInAir)
     {
-        if (MovementData.Velocity.Z > JumpThreshold)
+        if (MovementData.Velocity.Z > 0.0f)
         {
             return EAnim_MovementState::Jumping;
         }
@@ -130,107 +203,69 @@ EAnim_MovementState UAnim_CharacterAnimInstance::DetermineMovementState() const
             return EAnim_MovementState::Falling;
         }
     }
-
-    // Check if crouching
+    
+    // Check for swimming
+    if (CharacterMovement->IsSwimming())
+    {
+        return EAnim_MovementState::Swimming;
+    }
+    
+    // Check for crouching
     if (MovementData.bIsCrouching)
     {
         return EAnim_MovementState::Crouching;
     }
-
-    // Check movement speed
-    if (MovementData.Speed < WalkThreshold)
-    {
-        return EAnim_MovementState::Idle;
-    }
-    else if (MovementData.Speed < RunThreshold)
-    {
-        return EAnim_MovementState::Walking;
-    }
-    else
+    
+    // Ground movement states
+    if (MovementData.Speed > RunSpeedThreshold)
     {
         return EAnim_MovementState::Running;
     }
+    else if (MovementData.Speed > WalkSpeedThreshold)
+    {
+        return EAnim_MovementState::Walking;
+    }
+    
+    return EAnim_MovementState::Idle;
 }
 
-void UAnim_CharacterAnimInstance::UpdateFootIK()
+float UAnim_CharacterAnimInstance::CalculateDirection() const
 {
-    if (!OwnerCharacter)
+    if (!OwnerCharacter || MovementData.Speed < 1.0f)
     {
-        return;
+        return 0.0f;
     }
-
-    // Update foot IK for both feet
-    PerformFootTrace(TEXT("foot_l"), LeftFootOffset, LeftFootRotation);
-    PerformFootTrace(TEXT("foot_r"), RightFootOffset, RightFootRotation);
+    
+    // Calculate direction relative to actor's forward vector
+    FVector ForwardVector = OwnerCharacter->GetActorForwardVector();
+    FVector VelocityNormalized = MovementData.Velocity.GetSafeNormal2D();
+    
+    float DotProduct = FVector::DotProduct(ForwardVector, VelocityNormalized);
+    float CrossProduct = FVector::CrossProduct(ForwardVector, VelocityNormalized).Z;
+    
+    return FMath::RadiansToDegrees(FMath::Atan2(CrossProduct, DotProduct));
 }
 
-void UAnim_CharacterAnimInstance::PerformFootTrace(const FName& SocketName, FVector& OutOffset, FRotator& OutRotation)
+float UAnim_CharacterAnimInstance::CalculateWalkRunBlend() const
 {
-    if (!OwnerCharacter)
+    if (MovementData.Speed <= WalkSpeedThreshold)
     {
-        OutOffset = FVector::ZeroVector;
-        OutRotation = FRotator::ZeroRotator;
-        return;
+        return 0.0f; // Pure walk
     }
-
-    USkeletalMeshComponent* MeshComp = OwnerCharacter->GetMesh();
-    if (!MeshComp)
+    else if (MovementData.Speed >= RunSpeedThreshold)
     {
-        OutOffset = FVector::ZeroVector;
-        OutRotation = FRotator::ZeroRotator;
-        return;
+        return 1.0f; // Pure run
     }
-
-    // Get foot socket location
-    FVector SocketLocation = MeshComp->GetSocketLocation(SocketName);
-    FVector StartLocation = SocketLocation + FVector(0.0f, 0.0f, 20.0f);
-    FVector EndLocation = SocketLocation - FVector(0.0f, 0.0f, FootIKTraceDistance + 20.0f);
-
-    // Perform trace
-    FHitResult HitResult;
-    FCollisionQueryParams QueryParams;
-    QueryParams.AddIgnoredActor(OwnerCharacter);
-
-    bool bHit = GetWorld()->LineTraceSingleByChannel(
-        HitResult, 
-        StartLocation, 
-        EndLocation, 
-        ECC_Visibility, 
-        QueryParams
-    );
-
-    if (bHit)
-    {
-        // Calculate offset
-        float TargetZ = HitResult.Location.Z;
-        float CurrentZ = SocketLocation.Z;
-        float Offset = TargetZ - CurrentZ;
-        
-        // Clamp offset to reasonable range
-        Offset = FMath::Clamp(Offset, -FootIKTraceDistance, FootIKTraceDistance);
-        OutOffset = FVector(0.0f, 0.0f, Offset);
-
-        // Calculate rotation based on surface normal
-        FVector SurfaceNormal = HitResult.Normal;
-        FVector ForwardVector = OwnerCharacter->GetActorForwardVector();
-        FVector RightVector = FVector::CrossProduct(SurfaceNormal, ForwardVector).GetSafeNormal();
-        ForwardVector = FVector::CrossProduct(RightVector, SurfaceNormal).GetSafeNormal();
-        
-        OutRotation = UKismetMathLibrary::MakeRotationFromAxes(ForwardVector, RightVector, SurfaceNormal);
-    }
-    else
-    {
-        // No ground found, reset to default
-        OutOffset = FVector::ZeroVector;
-        OutRotation = FRotator::ZeroRotator;
-    }
+    
+    // Blend between walk and run
+    float BlendRange = RunSpeedThreshold - WalkSpeedThreshold;
+    float SpeedInRange = MovementData.Speed - WalkSpeedThreshold;
+    return FMath::Clamp(SpeedInRange / BlendRange, 0.0f, 1.0f);
 }
 
-void UAnim_CharacterAnimInstance::SetCombatState(EAnim_CombatState NewState)
+bool UAnim_CharacterAnimInstance::ShouldTurnInPlace() const
 {
-    if (CurrentCombatState != NewState)
-    {
-        CurrentCombatState = NewState;
-        UE_LOG(LogTemp, Log, TEXT("Combat state changed to: %d"), (int32)NewState);
-    }
+    // Turn in place if we've been idle long enough and have significant rotation
+    return (IdleTime >= IdleTimeBeforeTurnInPlace && 
+            FMath::Abs(TurnInPlaceAngle) >= TurnInPlaceThreshold);
 }
