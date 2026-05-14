@@ -1,456 +1,458 @@
 #include "Quest_CrowdMissionManager.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "GameFramework/PlayerController.h"
-#include "GameFramework/Pawn.h"
-#include "DrawDebugHelpers.h"
-#include "Components/PrimitiveComponent.h"
+#include "Kismet/GameplayStatics.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMeshActor.h"
+#include "../Crowd/Crowd_MassSimulationManager.h"
+#include "../TranspersonalCharacter.h"
 
-UQuest_CrowdMissionManager::UQuest_CrowdMissionManager()
+AQuest_CrowdMissionManager::AQuest_CrowdMissionManager()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f;
+    PrimaryActorTick.bCanEverTick = true;
     
-    NextMissionID = 1;
-    UpdateTimer = 0.0f;
-    UpdateFrequency = 0.5f;
-    PlayerInfluenceStrength = 1000.0f;
-    bEnableDebugVisualization = false;
+    MaxActiveMissions = 5;
+    CrowdManager = nullptr;
+    PlayerCharacter = nullptr;
+    
+    bEnableEvacuationMissions = true;
+    bEnableHuntingMissions = true;
+    bEnableGatheringMissions = true;
+    bEnableDefenseMissions = true;
+    
+    MissionSpawnRadius = 2000.0f;
+    LastMissionSpawnTime = 0.0f;
+    MissionSpawnCooldown = 60.0f;
+    
+    // Initialize default mission spawn locations
+    MissionSpawnLocations.Add(FVector(2000.0f, 2000.0f, 100.0f));
+    MissionSpawnLocations.Add(FVector(-2000.0f, 2000.0f, 100.0f));
+    MissionSpawnLocations.Add(FVector(2000.0f, -2000.0f, 100.0f));
+    MissionSpawnLocations.Add(FVector(-2000.0f, -2000.0f, 100.0f));
+    MissionSpawnLocations.Add(FVector(0.0f, 3000.0f, 100.0f));
 }
 
-void UQuest_CrowdMissionManager::BeginPlay()
+void AQuest_CrowdMissionManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    UE_LOG(LogTemp, Log, TEXT("Quest_CrowdMissionManager: Component initialized"));
+    // Find crowd simulation manager
+    if (!CrowdManager)
+    {
+        CrowdManager = Cast<ACrowdSimulationManager>(UGameplayStatics::GetActorOfClass(GetWorld(), ACrowdSimulationManager::StaticClass()));
+        if (CrowdManager)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Quest_CrowdMissionManager: Found CrowdSimulationManager"));
+        }
+        else
+        {
+            UE_LOG(LogTemp, Error, TEXT("Quest_CrowdMissionManager: CrowdSimulationManager not found!"));
+        }
+    }
+    
+    // Find player character
+    if (!PlayerCharacter)
+    {
+        PlayerCharacter = Cast<ATranspersonalCharacter>(UGameplayStatics::GetPlayerCharacter(GetWorld(), 0));
+        if (PlayerCharacter)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Quest_CrowdMissionManager: Found PlayerCharacter"));
+        }
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Quest_CrowdMissionManager: BeginPlay completed"));
 }
 
-void UQuest_CrowdMissionManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void AQuest_CrowdMissionManager::Tick(float DeltaTime)
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    Super::Tick(DeltaTime);
     
-    UpdateTimer += DeltaTime;
-    if (UpdateTimer >= UpdateFrequency)
+    UpdateMissionProgress(DeltaTime);
+    
+    // Auto-spawn missions if conditions are met
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    if (CurrentTime - LastMissionSpawnTime > MissionSpawnCooldown && ActiveMissions.Num() < MaxActiveMissions)
     {
-        UpdateMissionProgress(DeltaTime);
-        UpdateTimer = 0.0f;
+        // Create a random mission type
+        int32 MissionTypeRoll = FMath::RandRange(0, 3);
+        FQuest_CrowdMission NewMission;
+        
+        switch (MissionTypeRoll)
+        {
+            case 0:
+                if (bEnableEvacuationMissions)
+                {
+                    FVector DangerLoc = MissionSpawnLocations[FMath::RandRange(0, MissionSpawnLocations.Num() - 1)];
+                    FVector SafeLoc = MissionSpawnLocations[FMath::RandRange(0, MissionSpawnLocations.Num() - 1)];
+                    NewMission = CreateEvacuationMission(DangerLoc, SafeLoc);
+                }
+                break;
+            case 1:
+                if (bEnableHuntingMissions)
+                {
+                    FVector HuntLoc = MissionSpawnLocations[FMath::RandRange(0, MissionSpawnLocations.Num() - 1)];
+                    NewMission = CreateHuntingMission(HuntLoc, FMath::RandRange(5, 15));
+                }
+                break;
+            case 2:
+                if (bEnableGatheringMissions)
+                {
+                    FVector ResourceLoc = MissionSpawnLocations[FMath::RandRange(0, MissionSpawnLocations.Num() - 1)];
+                    NewMission = CreateGatheringMission(ResourceLoc, FMath::RandRange(10, 25));
+                }
+                break;
+            case 3:
+                if (bEnableDefenseMissions)
+                {
+                    FVector DefenseLoc = MissionSpawnLocations[FMath::RandRange(0, MissionSpawnLocations.Num() - 1)];
+                    NewMission = CreateDefenseMission(DefenseLoc, 1000.0f);
+                }
+                break;
+        }
+        
+        if (!NewMission.MissionName.IsEmpty())
+        {
+            StartMission(NewMission);
+            LastMissionSpawnTime = CurrentTime;
+        }
     }
 }
 
-int32 UQuest_CrowdMissionManager::CreateCrowdMission(const FQuest_CrowdMissionData& MissionData)
+bool AQuest_CrowdMissionManager::StartMission(const FQuest_CrowdMission& Mission)
 {
-    int32 MissionID = NextMissionID++;
-    
-    ActiveMissions.Add(MissionID, MissionData);
-    MissionStatuses.Add(MissionID, EQuest_CrowdMissionStatus::NotStarted);
-    MissionCrowdActors.Add(MissionID, TArray<AActor*>());
-    MissionTimers.Add(MissionID, 0.0f);
-    
-    UE_LOG(LogTemp, Log, TEXT("Quest_CrowdMissionManager: Created mission %d - %s"), MissionID, *MissionData.MissionName);
-    
-    return MissionID;
-}
-
-bool UQuest_CrowdMissionManager::StartCrowdMission(int32 MissionID)
-{
-    if (!ActiveMissions.Contains(MissionID))
+    if (ActiveMissions.Num() >= MaxActiveMissions)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Quest_CrowdMissionManager: Cannot start mission %d - does not exist"), MissionID);
+        UE_LOG(LogTemp, Warning, TEXT("Quest_CrowdMissionManager: Cannot start mission - max active missions reached"));
         return false;
     }
     
-    if (MissionStatuses[MissionID] != EQuest_CrowdMissionStatus::NotStarted)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Quest_CrowdMissionManager: Mission %d already started or completed"), MissionID);
-        return false;
-    }
+    FQuest_CrowdMission NewMission = Mission;
+    NewMission.MissionStatus = EQuest_MissionStatus::Active;
+    NewMission.MissionStartTime = GetWorld()->GetTimeSeconds();
+    NewMission.CompletedObjectives = 0;
     
-    MissionStatuses[MissionID] = EQuest_CrowdMissionStatus::InProgress;
-    MissionTimers[MissionID] = 0.0f;
+    ActiveMissions.Add(NewMission);
+    SpawnMissionMarkers(NewMission);
     
-    OnMissionStatusChanged.Broadcast(MissionID, EQuest_CrowdMissionStatus::InProgress);
+    FString NotificationMessage = FString::Printf(TEXT("New Mission: %s"), *NewMission.MissionName);
+    NotifyPlayerMissionUpdate(NotificationMessage);
     
-    UE_LOG(LogTemp, Log, TEXT("Quest_CrowdMissionManager: Started mission %d"), MissionID);
+    UE_LOG(LogTemp, Warning, TEXT("Quest_CrowdMissionManager: Started mission '%s'"), *NewMission.MissionName);
     return true;
 }
 
-bool UQuest_CrowdMissionManager::CompleteCrowdMission(int32 MissionID)
+bool AQuest_CrowdMissionManager::CompleteMission(int32 MissionIndex)
 {
-    if (!ActiveMissions.Contains(MissionID))
+    if (!ActiveMissions.IsValidIndex(MissionIndex))
     {
         return false;
     }
     
-    MissionStatuses[MissionID] = EQuest_CrowdMissionStatus::Completed;
-    OnMissionStatusChanged.Broadcast(MissionID, EQuest_CrowdMissionStatus::Completed);
+    FQuest_CrowdMission CompletedMission = ActiveMissions[MissionIndex];
+    CompletedMission.MissionStatus = EQuest_MissionStatus::Completed;
     
-    UE_LOG(LogTemp, Log, TEXT("Quest_CrowdMissionManager: Completed mission %d"), MissionID);
+    CompletedMissions.Add(CompletedMission);
+    CleanupMissionMarkers(MissionIndex);
+    ActiveMissions.RemoveAt(MissionIndex);
     
-    CleanupMission(MissionID);
+    FString NotificationMessage = FString::Printf(TEXT("Mission Completed: %s (+%d XP)"), 
+        *CompletedMission.MissionName, CompletedMission.RewardExperience);
+    NotifyPlayerMissionUpdate(NotificationMessage);
+    
+    UE_LOG(LogTemp, Warning, TEXT("Quest_CrowdMissionManager: Completed mission '%s'"), *CompletedMission.MissionName);
     return true;
 }
 
-bool UQuest_CrowdMissionManager::FailCrowdMission(int32 MissionID)
+void AQuest_CrowdMissionManager::UpdateMissionProgress(float DeltaTime)
 {
-    if (!ActiveMissions.Contains(MissionID))
+    for (int32 i = ActiveMissions.Num() - 1; i >= 0; i--)
     {
-        return false;
-    }
-    
-    MissionStatuses[MissionID] = EQuest_CrowdMissionStatus::Failed;
-    OnMissionStatusChanged.Broadcast(MissionID, EQuest_CrowdMissionStatus::Failed);
-    
-    UE_LOG(LogTemp, Log, TEXT("Quest_CrowdMissionManager: Failed mission %d"), MissionID);
-    
-    CleanupMission(MissionID);
-    return true;
-}
-
-void UQuest_CrowdMissionManager::AbandonCrowdMission(int32 MissionID)
-{
-    if (!ActiveMissions.Contains(MissionID))
-    {
-        return;
-    }
-    
-    MissionStatuses[MissionID] = EQuest_CrowdMissionStatus::Abandoned;
-    OnMissionStatusChanged.Broadcast(MissionID, EQuest_CrowdMissionStatus::Abandoned);
-    
-    UE_LOG(LogTemp, Log, TEXT("Quest_CrowdMissionManager: Abandoned mission %d"), MissionID);
-    
-    CleanupMission(MissionID);
-}
-
-void UQuest_CrowdMissionManager::RegisterCrowdActor(AActor* CrowdActor, int32 MissionID)
-{
-    if (!CrowdActor || !ActiveMissions.Contains(MissionID))
-    {
-        return;
-    }
-    
-    TArray<AActor*>& CrowdActors = MissionCrowdActors[MissionID];
-    if (!CrowdActors.Contains(CrowdActor))
-    {
-        CrowdActors.Add(CrowdActor);
-        UE_LOG(LogTemp, Log, TEXT("Quest_CrowdMissionManager: Registered crowd actor for mission %d"), MissionID);
+        FQuest_CrowdMission& Mission = ActiveMissions[i];
+        bool bMissionComplete = true;
+        
+        for (FQuest_CrowdMissionObjective& Objective : Mission.Objectives)
+        {
+            if (!Objective.bIsCompleted)
+            {
+                Objective.ElapsedTime += DeltaTime;
+                CheckObjectiveCompletion(Objective);
+                
+                if (!Objective.bIsCompleted)
+                {
+                    bMissionComplete = false;
+                    
+                    // Check time limit
+                    if (Objective.TimeLimit > 0.0f && Objective.ElapsedTime >= Objective.TimeLimit)
+                    {
+                        UE_LOG(LogTemp, Warning, TEXT("Quest_CrowdMissionManager: Objective timed out"));
+                        Mission.MissionStatus = EQuest_MissionStatus::Failed;
+                        CleanupMissionMarkers(i);
+                        ActiveMissions.RemoveAt(i);
+                        return;
+                    }
+                }
+                else
+                {
+                    Mission.CompletedObjectives++;
+                }
+            }
+        }
+        
+        if (bMissionComplete && Mission.MissionStatus == EQuest_MissionStatus::Active)
+        {
+            CompleteMission(i);
+        }
     }
 }
 
-void UQuest_CrowdMissionManager::UnregisterCrowdActor(AActor* CrowdActor, int32 MissionID)
+FQuest_CrowdMission AQuest_CrowdMissionManager::CreateEvacuationMission(FVector DangerLocation, FVector SafeLocation)
 {
-    if (!CrowdActor || !ActiveMissions.Contains(MissionID))
-    {
-        return;
-    }
+    FQuest_CrowdMission Mission;
+    Mission.MissionName = TEXT("Emergency Evacuation");
+    Mission.MissionDescription = TEXT("Guide the tribe away from danger to safety");
+    Mission.MissionType = EQuest_MissionType::Escort;
+    Mission.RewardExperience = 200;
+    Mission.RewardItems.Add(TEXT("Survival Knowledge"));
     
-    TArray<AActor*>& CrowdActors = MissionCrowdActors[MissionID];
-    CrowdActors.Remove(CrowdActor);
+    FQuest_CrowdMissionObjective Objective;
+    Objective.ObjectiveDescription = TEXT("Lead 20 tribe members to safety");
+    Objective.ObjectiveType = EQuest_ObjectiveType::Escort;
+    Objective.RequiredCrowdCount = 20;
+    Objective.TargetLocation = SafeLocation;
+    Objective.CompletionRadius = 300.0f;
+    Objective.TimeLimit = 180.0f;
     
-    UE_LOG(LogTemp, Log, TEXT("Quest_CrowdMissionManager: Unregistered crowd actor for mission %d"), MissionID);
+    Mission.Objectives.Add(Objective);
+    return Mission;
 }
 
-int32 UQuest_CrowdMissionManager::GetActiveCrowdCount(int32 MissionID) const
+FQuest_CrowdMission AQuest_CrowdMissionManager::CreateHuntingMission(FVector HuntLocation, int32 RequiredHunters)
 {
-    if (!MissionCrowdActors.Contains(MissionID))
+    FQuest_CrowdMission Mission;
+    Mission.MissionName = TEXT("Coordinated Hunt");
+    Mission.MissionDescription = TEXT("Organize hunters to take down large prey");
+    Mission.MissionType = EQuest_MissionType::Hunt;
+    Mission.RewardExperience = 150;
+    Mission.RewardItems.Add(TEXT("Fresh Meat"));
+    Mission.RewardItems.Add(TEXT("Animal Hide"));
+    
+    FQuest_CrowdMissionObjective Objective;
+    Objective.ObjectiveDescription = FString::Printf(TEXT("Gather %d hunters at the hunting ground"), RequiredHunters);
+    Objective.ObjectiveType = EQuest_ObjectiveType::Gather;
+    Objective.RequiredCrowdCount = RequiredHunters;
+    Objective.TargetLocation = HuntLocation;
+    Objective.CompletionRadius = 400.0f;
+    Objective.TimeLimit = 240.0f;
+    
+    Mission.Objectives.Add(Objective);
+    return Mission;
+}
+
+FQuest_CrowdMission AQuest_CrowdMissionManager::CreateGatheringMission(FVector ResourceLocation, int32 RequiredGatherers)
+{
+    FQuest_CrowdMission Mission;
+    Mission.MissionName = TEXT("Resource Gathering");
+    Mission.MissionDescription = TEXT("Organize the tribe to collect essential resources");
+    Mission.MissionType = EQuest_MissionType::Gather;
+    Mission.RewardExperience = 100;
+    Mission.RewardItems.Add(TEXT("Berries"));
+    Mission.RewardItems.Add(TEXT("Medicinal Herbs"));
+    
+    FQuest_CrowdMissionObjective Objective;
+    Objective.ObjectiveDescription = FString::Printf(TEXT("Send %d gatherers to collect resources"), RequiredGatherers);
+    Objective.ObjectiveType = EQuest_ObjectiveType::Gather;
+    Objective.RequiredCrowdCount = RequiredGatherers;
+    Objective.TargetLocation = ResourceLocation;
+    Objective.CompletionRadius = 250.0f;
+    Objective.TimeLimit = 300.0f;
+    
+    Mission.Objectives.Add(Objective);
+    return Mission;
+}
+
+FQuest_CrowdMission AQuest_CrowdMissionManager::CreateDefenseMission(FVector DefenseLocation, float DefenseRadius)
+{
+    FQuest_CrowdMission Mission;
+    Mission.MissionName = TEXT("Defend the Camp");
+    Mission.MissionDescription = TEXT("Rally defenders to protect the settlement");
+    Mission.MissionType = EQuest_MissionType::Defense;
+    Mission.RewardExperience = 250;
+    Mission.RewardItems.Add(TEXT("Stone Weapons"));
+    Mission.RewardItems.Add(TEXT("Defensive Knowledge"));
+    
+    FQuest_CrowdMissionObjective Objective;
+    Objective.ObjectiveDescription = TEXT("Position 15 defenders around the camp");
+    Objective.ObjectiveType = EQuest_ObjectiveType::Defend;
+    Objective.RequiredCrowdCount = 15;
+    Objective.TargetLocation = DefenseLocation;
+    Objective.CompletionRadius = DefenseRadius;
+    Objective.TimeLimit = 120.0f;
+    
+    Mission.Objectives.Add(Objective);
+    return Mission;
+}
+
+int32 AQuest_CrowdMissionManager::GetCrowdCountAtLocation(FVector Location, float Radius)
+{
+    if (!CrowdManager)
     {
         return 0;
     }
     
-    const TArray<AActor*>& CrowdActors = MissionCrowdActors[MissionID];
-    int32 ActiveCount = 0;
-    
-    for (AActor* Actor : CrowdActors)
+    // This would integrate with the crowd simulation system
+    // For now, return a simulated count based on distance from spawn points
+    int32 CrowdCount = 0;
+    for (const FVector& SpawnLoc : MissionSpawnLocations)
     {
-        if (IsValid(Actor))
+        float Distance = FVector::Dist(Location, SpawnLoc);
+        if (Distance <= Radius)
         {
-            ActiveCount++;
+            CrowdCount += FMath::RandRange(5, 20);
         }
     }
     
-    return ActiveCount;
+    return FMath::Min(CrowdCount, 50); // Cap at reasonable number
 }
 
-float UQuest_CrowdMissionManager::GetMissionProgress(int32 MissionID) const
+bool AQuest_CrowdMissionManager::DirectCrowdToLocation(FVector SourceLocation, FVector TargetLocation, int32 CrowdCount)
 {
-    if (!ActiveMissions.Contains(MissionID))
+    if (!CrowdManager)
     {
-        return 0.0f;
+        UE_LOG(LogTemp, Warning, TEXT("Quest_CrowdMissionManager: Cannot direct crowd - no CrowdManager"));
+        return false;
     }
     
-    const FQuest_CrowdMissionData& MissionData = ActiveMissions[MissionID];
-    int32 CurrentCrowdSize = GetActiveCrowdCount(MissionID);
+    // This would call methods on the crowd simulation manager
+    // For now, just log the action
+    UE_LOG(LogTemp, Warning, TEXT("Quest_CrowdMissionManager: Directing %d crowd members from %s to %s"), 
+        CrowdCount, *SourceLocation.ToString(), *TargetLocation.ToString());
     
-    if (MissionData.bIsEvacuationMission)
+    return true;
+}
+
+TArray<FQuest_CrowdMission> AQuest_CrowdMissionManager::GetActiveMissions() const
+{
+    return ActiveMissions;
+}
+
+int32 AQuest_CrowdMissionManager::GetActiveMissionCount() const
+{
+    return ActiveMissions.Num();
+}
+
+bool AQuest_CrowdMissionManager::HasActiveMissionOfType(EQuest_MissionType MissionType) const
+{
+    for (const FQuest_CrowdMission& Mission : ActiveMissions)
     {
-        // For evacuation missions, progress is based on how many NPCs reached the target
-        int32 NPCsAtTarget = 0;
-        const TArray<AActor*>& CrowdActors = MissionCrowdActors[MissionID];
-        
-        for (AActor* Actor : CrowdActors)
+        if (Mission.MissionType == MissionType)
         {
-            if (IsValid(Actor) && IsLocationInRadius(Actor->GetActorLocation(), MissionData.TargetLocation, MissionData.CompletionRadius))
+            return true;
+        }
+    }
+    return false;
+}
+
+void AQuest_CrowdMissionManager::OnPlayerNearMissionArea(FVector PlayerLocation)
+{
+    for (const FQuest_CrowdMission& Mission : ActiveMissions)
+    {
+        for (const FQuest_CrowdMissionObjective& Objective : Mission.Objectives)
+        {
+            float Distance = FVector::Dist(PlayerLocation, Objective.TargetLocation);
+            if (Distance <= Objective.CompletionRadius + 200.0f)
             {
-                NPCsAtTarget++;
-            }
-        }
-        
-        return MissionData.RequiredCrowdSize > 0 ? (float)NPCsAtTarget / (float)MissionData.RequiredCrowdSize : 0.0f;
-    }
-    else
-    {
-        // For gathering missions, progress is based on crowd size
-        return MissionData.RequiredCrowdSize > 0 ? (float)CurrentCrowdSize / (float)MissionData.RequiredCrowdSize : 0.0f;
-    }
-}
-
-void UQuest_CrowdMissionManager::SetPlayerGuidanceTarget(int32 MissionID, const FVector& TargetLocation)
-{
-    if (!ActiveMissions.Contains(MissionID))
-    {
-        return;
-    }
-    
-    ActiveMissions[MissionID].TargetLocation = TargetLocation;
-    UE_LOG(LogTemp, Log, TEXT("Quest_CrowdMissionManager: Set guidance target for mission %d"), MissionID);
-}
-
-void UQuest_CrowdMissionManager::EnablePlayerInfluence(int32 MissionID, float InfluenceRadius)
-{
-    if (!ActiveMissions.Contains(MissionID))
-    {
-        return;
-    }
-    
-    ActiveMissions[MissionID].bRequiresPlayerGuidance = true;
-    ActiveMissions[MissionID].CompletionRadius = InfluenceRadius;
-    
-    UE_LOG(LogTemp, Log, TEXT("Quest_CrowdMissionManager: Enabled player influence for mission %d"), MissionID);
-}
-
-void UQuest_CrowdMissionManager::DisablePlayerInfluence(int32 MissionID)
-{
-    if (!ActiveMissions.Contains(MissionID))
-    {
-        return;
-    }
-    
-    ActiveMissions[MissionID].bRequiresPlayerGuidance = false;
-    UE_LOG(LogTemp, Log, TEXT("Quest_CrowdMissionManager: Disabled player influence for mission %d"), MissionID);
-}
-
-EQuest_CrowdMissionStatus UQuest_CrowdMissionManager::GetMissionStatus(int32 MissionID) const
-{
-    if (!MissionStatuses.Contains(MissionID))
-    {
-        return EQuest_CrowdMissionStatus::NotStarted;
-    }
-    
-    return MissionStatuses[MissionID];
-}
-
-bool UQuest_CrowdMissionManager::IsMissionActive(int32 MissionID) const
-{
-    EQuest_CrowdMissionStatus Status = GetMissionStatus(MissionID);
-    return Status == EQuest_CrowdMissionStatus::InProgress;
-}
-
-FQuest_CrowdMissionData UQuest_CrowdMissionManager::GetMissionData(int32 MissionID) const
-{
-    if (!ActiveMissions.Contains(MissionID))
-    {
-        return FQuest_CrowdMissionData();
-    }
-    
-    return ActiveMissions[MissionID];
-}
-
-TArray<int32> UQuest_CrowdMissionManager::GetActiveMissionIDs() const
-{
-    TArray<int32> ActiveIDs;
-    
-    for (const auto& Pair : MissionStatuses)
-    {
-        if (Pair.Value == EQuest_CrowdMissionStatus::InProgress)
-        {
-            ActiveIDs.Add(Pair.Key);
-        }
-    }
-    
-    return ActiveIDs;
-}
-
-void UQuest_CrowdMissionManager::UpdateMissionProgress(float DeltaTime)
-{
-    TArray<int32> MissionsToUpdate = GetActiveMissionIDs();
-    
-    for (int32 MissionID : MissionsToUpdate)
-    {
-        // Update mission timer
-        MissionTimers[MissionID] += UpdateFrequency;
-        
-        // Check for completion
-        CheckMissionCompletion(MissionID);
-        
-        // Check for failure
-        CheckMissionFailure(MissionID);
-        
-        // Update player influence if enabled
-        UpdatePlayerInfluence(MissionID);
-        
-        // Draw debug info if enabled
-        if (bEnableDebugVisualization)
-        {
-            DrawDebugInfo(MissionID);
-        }
-        
-        // Broadcast progress update
-        float Progress = GetMissionProgress(MissionID);
-        int32 CrowdSize = GetActiveCrowdCount(MissionID);
-        OnCrowdProgress.Broadcast(MissionID, CrowdSize, Progress);
-    }
-}
-
-void UQuest_CrowdMissionManager::CheckMissionCompletion(int32 MissionID)
-{
-    if (!ActiveMissions.Contains(MissionID) || !IsMissionActive(MissionID))
-    {
-        return;
-    }
-    
-    float Progress = GetMissionProgress(MissionID);
-    if (Progress >= 1.0f)
-    {
-        CompleteCrowdMission(MissionID);
-    }
-}
-
-void UQuest_CrowdMissionManager::CheckMissionFailure(int32 MissionID)
-{
-    if (!ActiveMissions.Contains(MissionID) || !IsMissionActive(MissionID))
-    {
-        return;
-    }
-    
-    const FQuest_CrowdMissionData& MissionData = ActiveMissions[MissionID];
-    
-    // Check time limit
-    if (MissionData.TimeLimit > 0.0f && MissionTimers[MissionID] >= MissionData.TimeLimit)
-    {
-        FailCrowdMission(MissionID);
-        return;
-    }
-    
-    // Check if all crowd actors are destroyed/invalid
-    int32 ActiveCrowdCount = GetActiveCrowdCount(MissionID);
-    if (ActiveCrowdCount == 0 && MissionCrowdActors[MissionID].Num() > 0)
-    {
-        FailCrowdMission(MissionID);
-        return;
-    }
-}
-
-void UQuest_CrowdMissionManager::UpdatePlayerInfluence(int32 MissionID)
-{
-    if (!ActiveMissions.Contains(MissionID))
-    {
-        return;
-    }
-    
-    const FQuest_CrowdMissionData& MissionData = ActiveMissions[MissionID];
-    if (!MissionData.bRequiresPlayerGuidance)
-    {
-        return;
-    }
-    
-    // Get player location
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return;
-    }
-    
-    APlayerController* PlayerController = World->GetFirstPlayerController();
-    if (!PlayerController || !PlayerController->GetPawn())
-    {
-        return;
-    }
-    
-    FVector PlayerLocation = PlayerController->GetPawn()->GetActorLocation();
-    
-    // Apply influence to crowd actors
-    const TArray<AActor*>& CrowdActors = MissionCrowdActors[MissionID];
-    for (AActor* Actor : CrowdActors)
-    {
-        if (!IsValid(Actor))
-        {
-            continue;
-        }
-        
-        // Find flocking behavior component
-        UCrowd_FlockingBehavior* FlockingComponent = Actor->FindComponentByClass<UCrowd_FlockingBehavior>();
-        if (FlockingComponent)
-        {
-            float DistanceToPlayer = FVector::Dist(Actor->GetActorLocation(), PlayerLocation);
-            if (DistanceToPlayer <= MissionData.CompletionRadius)
-            {
-                // Apply player influence to guide crowd toward target
-                FVector DirectionToTarget = (MissionData.TargetLocation - Actor->GetActorLocation()).GetSafeNormal();
-                FVector InfluenceForce = DirectionToTarget * PlayerInfluenceStrength;
-                
-                // This would require extending the flocking component to accept external forces
-                // For now, we log the influence application
-                UE_LOG(LogTemp, VeryVerbose, TEXT("Quest_CrowdMissionManager: Applying player influence to crowd actor"));
+                FString Message = FString::Printf(TEXT("Mission Area Nearby: %s"), *Mission.MissionName);
+                NotifyPlayerMissionUpdate(Message);
+                break;
             }
         }
     }
 }
 
-void UQuest_CrowdMissionManager::DrawDebugInfo(int32 MissionID)
+void AQuest_CrowdMissionManager::OnPlayerInfluenceCrowd(FVector InfluenceLocation, float InfluenceRadius)
 {
-    if (!ActiveMissions.Contains(MissionID))
+    // Check if player influence affects any active mission objectives
+    for (FQuest_CrowdMission& Mission : ActiveMissions)
     {
-        return;
-    }
-    
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return;
-    }
-    
-    const FQuest_CrowdMissionData& MissionData = ActiveMissions[MissionID];
-    
-    // Draw target location
-    DrawDebugSphere(World, MissionData.TargetLocation, MissionData.CompletionRadius, 12, FColor::Green, false, UpdateFrequency + 0.1f);
-    
-    // Draw mission progress text
-    FString ProgressText = FString::Printf(TEXT("Mission %d: %.1f%%"), MissionID, GetMissionProgress(MissionID) * 100.0f);
-    DrawDebugString(World, MissionData.TargetLocation + FVector(0, 0, 200), ProgressText, nullptr, FColor::White, UpdateFrequency + 0.1f);
-    
-    // Draw lines from crowd actors to target
-    const TArray<AActor*>& CrowdActors = MissionCrowdActors[MissionID];
-    for (AActor* Actor : CrowdActors)
-    {
-        if (IsValid(Actor))
+        for (FQuest_CrowdMissionObjective& Objective : Mission.Objectives)
         {
-            FColor LineColor = IsLocationInRadius(Actor->GetActorLocation(), MissionData.TargetLocation, MissionData.CompletionRadius) ? FColor::Green : FColor::Red;
-            DrawDebugLine(World, Actor->GetActorLocation(), MissionData.TargetLocation, LineColor, false, UpdateFrequency + 0.1f);
+            if (!Objective.bIsCompleted)
+            {
+                float Distance = FVector::Dist(InfluenceLocation, Objective.TargetLocation);
+                if (Distance <= InfluenceRadius + Objective.CompletionRadius)
+                {
+                    UE_LOG(LogTemp, Warning, TEXT("Quest_CrowdMissionManager: Player influence detected near mission objective"));
+                    // Could trigger crowd movement or objective progress here
+                }
+            }
         }
     }
 }
 
-bool UQuest_CrowdMissionManager::IsLocationInRadius(const FVector& Location, const FVector& Target, float Radius) const
+void AQuest_CrowdMissionManager::CheckObjectiveCompletion(FQuest_CrowdMissionObjective& Objective)
 {
-    return FVector::Dist(Location, Target) <= Radius;
-}
-
-void UQuest_CrowdMissionManager::CleanupMission(int32 MissionID)
-{
-    // Remove from active tracking but keep data for historical purposes
-    if (MissionCrowdActors.Contains(MissionID))
+    if (Objective.bIsCompleted)
     {
-        MissionCrowdActors[MissionID].Empty();
+        return;
     }
     
-    UE_LOG(LogTemp, Log, TEXT("Quest_CrowdMissionManager: Cleaned up mission %d"), MissionID);
+    // Check crowd count at target location
+    int32 CurrentCrowdCount = GetCrowdCountAtLocation(Objective.TargetLocation, Objective.CompletionRadius);
+    
+    if (CurrentCrowdCount >= Objective.RequiredCrowdCount)
+    {
+        Objective.bIsCompleted = true;
+        UE_LOG(LogTemp, Warning, TEXT("Quest_CrowdMissionManager: Objective completed - %s"), *Objective.ObjectiveDescription);
+    }
+}
+
+void AQuest_CrowdMissionManager::SpawnMissionMarkers(const FQuest_CrowdMission& Mission)
+{
+    for (const FQuest_CrowdMissionObjective& Objective : Mission.Objectives)
+    {
+        // Spawn a visual marker at the objective location
+        FActorSpawnParameters SpawnParams;
+        SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+        
+        AStaticMeshActor* Marker = GetWorld()->SpawnActor<AStaticMeshActor>(
+            AStaticMeshActor::StaticClass(),
+            Objective.TargetLocation + FVector(0, 0, 100),
+            FRotator::ZeroRotator,
+            SpawnParams
+        );
+        
+        if (Marker)
+        {
+            MissionMarkers.Add(Marker);
+            UE_LOG(LogTemp, Warning, TEXT("Quest_CrowdMissionManager: Spawned mission marker at %s"), *Objective.TargetLocation.ToString());
+        }
+    }
+}
+
+void AQuest_CrowdMissionManager::CleanupMissionMarkers(int32 MissionIndex)
+{
+    // Remove markers associated with this mission
+    // For simplicity, remove the last few markers (should be improved with proper tracking)
+    if (MissionMarkers.Num() > 0)
+    {
+        for (int32 i = MissionMarkers.Num() - 1; i >= FMath::Max(0, MissionMarkers.Num() - 3); i--)
+        {
+            if (MissionMarkers[i] && IsValid(MissionMarkers[i]))
+            {
+                MissionMarkers[i]->Destroy();
+                MissionMarkers.RemoveAt(i);
+            }
+        }
+    }
+}
+
+void AQuest_CrowdMissionManager::NotifyPlayerMissionUpdate(const FString& Message)
+{
+    UE_LOG(LogTemp, Warning, TEXT("MISSION UPDATE: %s"), *Message);
+    
+    // In a full implementation, this would show UI notifications
+    if (GEngine)
+    {
+        GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow, Message);
+    }
 }
