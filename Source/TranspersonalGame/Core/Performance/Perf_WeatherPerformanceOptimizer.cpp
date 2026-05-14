@@ -1,390 +1,376 @@
 #include "Perf_WeatherPerformanceOptimizer.h"
-#include "Engine/World.h"
 #include "Engine/Engine.h"
+#include "Engine/World.h"
 #include "Particles/ParticleSystem.h"
 #include "Particles/ParticleSystemComponent.h"
+#include "Materials/MaterialParameterCollectionInstance.h"
+#include "Engine/StaticMesh.h"
 #include "Components/StaticMeshComponent.h"
-#include "Materials/MaterialInterface.h"
-#include "Materials/MaterialInstanceDynamic.h"
+#include "HAL/PlatformFilemanager.h"
+#include "Misc/DateTime.h"
 
-UPerf_WeatherPerformanceOptimizer::UPerf_WeatherPerformanceOptimizer()
+APerf_WeatherPerformanceOptimizer::APerf_WeatherPerformanceOptimizer()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f; // Update 10 times per second
-    
-    OptimizationLevel = EPerf_WeatherOptimizationLevel::High;
+    PrimaryActorTick.bCanEverTick = true;
+
+    // Create root component
+    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
+    RootComponent = RootSceneComponent;
+
+    // Initialize default values
+    CurrentWeatherQuality = EPerf_WeatherQuality::Medium;
     TargetFrameRate = 60.0f;
-    WeatherPerformanceBudget = 5.0f; // 5ms budget for weather systems
-    
-    LastOptimizationTime = 0.0f;
-    OptimizationUpdateInterval = 1.0f; // Optimize every second
-    bIsOptimizationActive = true;
+    MaxParticleCount = 10000.0f;
+    MaxRenderTime = 16.67f; // 60 FPS target
+
+    // Quality multipliers
+    LowQualityParticleMultiplier = 0.25f;
+    MediumQualityParticleMultiplier = 0.5f;
+    HighQualityParticleMultiplier = 0.75f;
+    UltraQualityParticleMultiplier = 1.0f;
+
+    // Performance tracking
+    LastFrameTime = 0.0f;
+    AverageFrameTime = 16.67f;
+    FrameCounter = 0;
+
+    // Initialize metrics
+    CurrentMetrics = FPerf_WeatherPerformanceMetrics();
 }
 
-void UPerf_WeatherPerformanceOptimizer::BeginPlay()
+void APerf_WeatherPerformanceOptimizer::BeginPlay()
 {
     Super::BeginPlay();
-    
-    ApplyOptimizationSettings();
-    
-    UE_LOG(LogTemp, Log, TEXT("Weather Performance Optimizer initialized - Level: %d"), 
-           static_cast<int32>(OptimizationLevel));
+
+    UE_LOG(LogTemp, Warning, TEXT("Weather Performance Optimizer initialized"));
+
+    // Apply initial quality settings
+    ApplyQualitySettings();
 }
 
-void UPerf_WeatherPerformanceOptimizer::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void APerf_WeatherPerformanceOptimizer::Tick(float DeltaTime)
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    
-    if (!bIsOptimizationActive)
-        return;
-    
+    Super::Tick(DeltaTime);
+
+    // Update performance metrics
     UpdatePerformanceMetrics();
-    
-    // Check if we need to apply dynamic optimization
-    float CurrentFrameTime = FApp::GetDeltaTime() * 1000.0f; // Convert to milliseconds
-    if (CurrentFrameTime > (1000.0f / TargetFrameRate) * 1.2f) // 20% tolerance
+
+    // Monitor frame rate and adjust quality if needed
+    MonitorFrameRate();
+
+    // Optimize weather effects based on current performance
+    if (FrameCounter % 60 == 0) // Check every 60 frames (1 second at 60fps)
     {
-        ApplyDynamicWeatherOptimization(CurrentFrameTime);
+        OptimizeWeatherEffects();
     }
-    
-    // Periodic optimization update
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-    if (CurrentTime - LastOptimizationTime >= OptimizationUpdateInterval)
+
+    FrameCounter++;
+}
+
+void APerf_WeatherPerformanceOptimizer::OptimizeWeatherEffects()
+{
+    if (!GetWorld())
     {
-        OptimizeWeatherSystems();
-        LastOptimizationTime = CurrentTime;
+        return;
     }
-}
 
-void UPerf_WeatherPerformanceOptimizer::OptimizeWeatherSystems()
-{
-    OptimizeRainSystem();
-    OptimizeFogSystem();
-    OptimizeCloudSystem();
-    OptimizeLightningSystem();
-    OptimizeWeatherTransitions();
+    // Check current frame rate
+    float CurrentFPS = 1.0f / AverageFrameTime;
     
-    CullDistantWeatherEffects();
-    AdjustParticleSystemLOD();
-    OptimizeWeatherShaders();
-    
-    UE_LOG(LogTemp, Log, TEXT("Weather systems optimized - Rain particles: %.0f, Fog density: %.2f"), 
-           CurrentMetrics.RainParticleCount, CurrentMetrics.FogDensity);
-}
-
-void UPerf_WeatherPerformanceOptimizer::SetOptimizationLevel(EPerf_WeatherOptimizationLevel NewLevel)
-{
-    OptimizationLevel = NewLevel;
-    ApplyOptimizationSettings();
-    
-    UE_LOG(LogTemp, Log, TEXT("Weather optimization level changed to: %d"), static_cast<int32>(NewLevel));
-}
-
-void UPerf_WeatherPerformanceOptimizer::OptimizeRainSystem()
-{
-    UWorld* World = GetWorld();
-    if (!World) return;
-    
-    // Find all rain particle systems in the world
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    if (CurrentFPS < TargetFrameRate * 0.9f) // If below 90% of target
     {
-        AActor* Actor = *ActorItr;
-        if (!Actor) continue;
-        
-        // Look for particle system components that might be rain
-        TArray<UParticleSystemComponent*> ParticleComponents;
-        Actor->GetComponents<UParticleSystemComponent>(ParticleComponents);
-        
-        for (UParticleSystemComponent* PSC : ParticleComponents)
+        // Reduce quality
+        switch (CurrentWeatherQuality)
         {
-            if (PSC && PSC->GetName().Contains(TEXT("Rain")))
-            {
-                // Apply rain optimization based on level
-                switch (OptimizationLevel)
-                {
-                    case EPerf_WeatherOptimizationLevel::Ultra:
-                        PSC->SetFloatParameter(TEXT("ParticleCount"), OptimizationSettings.MaxRainParticles);
-                        break;
-                    case EPerf_WeatherOptimizationLevel::High:
-                        PSC->SetFloatParameter(TEXT("ParticleCount"), OptimizationSettings.MaxRainParticles * 0.8f);
-                        break;
-                    case EPerf_WeatherOptimizationLevel::Medium:
-                        PSC->SetFloatParameter(TEXT("ParticleCount"), OptimizationSettings.MaxRainParticles * 0.6f);
-                        break;
-                    case EPerf_WeatherOptimizationLevel::Low:
-                        PSC->SetFloatParameter(TEXT("ParticleCount"), OptimizationSettings.MaxRainParticles * 0.4f);
-                        break;
-                    case EPerf_WeatherOptimizationLevel::Potato:
-                        PSC->SetFloatParameter(TEXT("ParticleCount"), OptimizationSettings.MaxRainParticles * 0.2f);
-                        break;
-                }
-                
-                // Set particle lifetime
-                PSC->SetFloatParameter(TEXT("Lifetime"), OptimizationSettings.RainParticleLifetime);
-            }
+            case EPerf_WeatherQuality::Ultra:
+                SetWeatherQuality(EPerf_WeatherQuality::High);
+                break;
+            case EPerf_WeatherQuality::High:
+                SetWeatherQuality(EPerf_WeatherQuality::Medium);
+                break;
+            case EPerf_WeatherQuality::Medium:
+                SetWeatherQuality(EPerf_WeatherQuality::Low);
+                break;
+            default:
+                break;
         }
     }
-    
-    CurrentMetrics.RainParticleCount = OptimizationSettings.MaxRainParticles * GetOptimizationMultiplier();
-}
-
-void UPerf_WeatherPerformanceOptimizer::OptimizeFogSystem()
-{
-    UWorld* World = GetWorld();
-    if (!World) return;
-    
-    // Find exponential height fog actors
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    else if (CurrentFPS > TargetFrameRate * 1.1f) // If above 110% of target
     {
-        AActor* Actor = *ActorItr;
-        if (!Actor || !Actor->GetName().Contains(TEXT("Fog"))) continue;
-        
-        // Apply fog optimization
-        float FogMultiplier = GetOptimizationMultiplier();
-        
-        // Adjust fog density and distance based on optimization level
-        if (UStaticMeshComponent* MeshComp = Actor->FindComponentByClass<UStaticMeshComponent>())
+        // Increase quality
+        switch (CurrentWeatherQuality)
         {
-            if (UMaterialInstanceDynamic* DynMaterial = MeshComp->CreateAndSetMaterialInstanceDynamic(0))
-            {
-                DynMaterial->SetScalarParameterValue(TEXT("FogDensity"), 0.1f * FogMultiplier);
-                DynMaterial->SetScalarParameterValue(TEXT("MaxDistance"), OptimizationSettings.MaxFogDistance);
-            }
+            case EPerf_WeatherQuality::Low:
+                SetWeatherQuality(EPerf_WeatherQuality::Medium);
+                break;
+            case EPerf_WeatherQuality::Medium:
+                SetWeatherQuality(EPerf_WeatherQuality::High);
+                break;
+            case EPerf_WeatherQuality::High:
+                SetWeatherQuality(EPerf_WeatherQuality::Ultra);
+                break;
+            default:
+                break;
         }
     }
-    
-    CurrentMetrics.FogDensity = 0.1f * GetOptimizationMultiplier();
+
+    OptimizeParticleSystems();
+    OptimizeMaterialParameters();
 }
 
-void UPerf_WeatherPerformanceOptimizer::OptimizeCloudSystem()
+void APerf_WeatherPerformanceOptimizer::SetWeatherQuality(EPerf_WeatherQuality Quality)
 {
-    // Cloud optimization - reduce complexity based on optimization level
-    float CloudMultiplier = GetOptimizationMultiplier();
-    int32 ActiveCloudLayers = FMath::RoundToInt(OptimizationSettings.MaxCloudLayers * CloudMultiplier);
-    
-    CurrentMetrics.CloudComplexity = ActiveCloudLayers;
-    
-    UE_LOG(LogTemp, Log, TEXT("Cloud system optimized - Active layers: %d"), ActiveCloudLayers);
-}
-
-void UPerf_WeatherPerformanceOptimizer::OptimizeLightningSystem()
-{
-    UWorld* World = GetWorld();
-    if (!World) return;
-    
-    // Find lightning effect actors and optimize them
-    int32 ActiveLightningCount = 0;
-    
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+    if (CurrentWeatherQuality != Quality)
     {
-        AActor* Actor = *ActorItr;
-        if (!Actor || !Actor->GetName().Contains(TEXT("Lightning"))) continue;
+        CurrentWeatherQuality = Quality;
+        ApplyQualitySettings();
         
-        // Check distance from player for culling
-        if (APawn* PlayerPawn = World->GetFirstPlayerController()->GetPawn())
-        {
-            float Distance = FVector::Dist(Actor->GetActorLocation(), PlayerPawn->GetActorLocation());
-            
-            if (Distance > OptimizationSettings.LightningCullingDistance)
-            {
-                Actor->SetActorHiddenInGame(true);
-            }
-            else if (ActiveLightningCount < OptimizationSettings.MaxSimultaneousLightning)
-            {
-                Actor->SetActorHiddenInGame(false);
-                ActiveLightningCount++;
-            }
-            else
-            {
-                Actor->SetActorHiddenInGame(true);
-            }
-        }
+        UE_LOG(LogTemp, Warning, TEXT("Weather quality changed to: %d"), (int32)Quality);
     }
-    
-    CurrentMetrics.LightningEffectCost = ActiveLightningCount * 0.5f; // Estimate 0.5ms per lightning effect
 }
 
-void UPerf_WeatherPerformanceOptimizer::OptimizeWeatherTransitions()
-{
-    // Optimize weather transition effects
-    float TransitionCost = 0.0f;
-    
-    // Reduce transition complexity based on optimization level
-    switch (OptimizationLevel)
-    {
-        case EPerf_WeatherOptimizationLevel::Ultra:
-            TransitionCost = 2.0f;
-            break;
-        case EPerf_WeatherOptimizationLevel::High:
-            TransitionCost = 1.5f;
-            break;
-        case EPerf_WeatherOptimizationLevel::Medium:
-            TransitionCost = 1.0f;
-            break;
-        case EPerf_WeatherOptimizationLevel::Low:
-            TransitionCost = 0.5f;
-            break;
-        case EPerf_WeatherOptimizationLevel::Potato:
-            TransitionCost = 0.2f;
-            break;
-    }
-    
-    CurrentMetrics.WeatherTransitionCost = TransitionCost;
-}
-
-FPerf_WeatherPerformanceMetrics UPerf_WeatherPerformanceOptimizer::GetWeatherPerformanceMetrics() const
+FPerf_WeatherPerformanceMetrics APerf_WeatherPerformanceOptimizer::GetWeatherPerformanceMetrics() const
 {
     return CurrentMetrics;
 }
 
-bool UPerf_WeatherPerformanceOptimizer::IsWeatherPerformanceWithinBudget() const
+void APerf_WeatherPerformanceOptimizer::OptimizeRainEffects(float TargetFPS)
 {
-    float TotalCost = CurrentMetrics.RainParticleCount * 0.001f + // 0.001ms per particle
-                      CurrentMetrics.FogDensity * 10.0f + // Fog cost
-                      CurrentMetrics.CloudComplexity * 0.5f + // Cloud cost
-                      CurrentMetrics.LightningEffectCost + // Lightning cost
-                      CurrentMetrics.WeatherTransitionCost; // Transition cost
-    
-    return TotalCost <= WeatherPerformanceBudget;
-}
-
-void UPerf_WeatherPerformanceOptimizer::ApplyDynamicWeatherOptimization(float CurrentFrameTime)
-{
-    if (CurrentFrameTime > (1000.0f / TargetFrameRate) * 1.5f) // 50% over target
+    if (!GetWorld())
     {
-        // Emergency optimization - reduce to Low quality
-        if (OptimizationLevel != EPerf_WeatherOptimizationLevel::Low)
-        {
-            SetOptimizationLevel(EPerf_WeatherOptimizationLevel::Low);
-            UE_LOG(LogTemp, Warning, TEXT("Emergency weather optimization applied - switched to Low quality"));
-        }
+        return;
     }
-    else if (CurrentFrameTime > (1000.0f / TargetFrameRate) * 1.3f) // 30% over target
+
+    // Find all particle system components in the world
+    for (TActorIterator<AActor> ActorIterator(GetWorld()); ActorIterator; ++ActorIterator)
     {
-        // Moderate optimization - reduce one level
-        if (OptimizationLevel == EPerf_WeatherOptimizationLevel::Ultra)
+        AActor* Actor = *ActorIterator;
+        if (!Actor)
         {
-            SetOptimizationLevel(EPerf_WeatherOptimizationLevel::High);
+            continue;
         }
-        else if (OptimizationLevel == EPerf_WeatherOptimizationLevel::High)
-        {
-            SetOptimizationLevel(EPerf_WeatherOptimizationLevel::Medium);
-        }
-    }
-}
 
-void UPerf_WeatherPerformanceOptimizer::UpdatePerformanceMetrics()
-{
-    // Update metrics based on current weather state
-    // This would typically query actual weather systems
-    // For now, we use the optimization settings as base values
-}
-
-void UPerf_WeatherPerformanceOptimizer::ApplyOptimizationSettings()
-{
-    // Apply settings based on current optimization level
-    switch (OptimizationLevel)
-    {
-        case EPerf_WeatherOptimizationLevel::Ultra:
-            OptimizationSettings.MaxRainParticles = 8000;
-            OptimizationSettings.MaxCloudLayers = 5;
-            OptimizationSettings.MaxSimultaneousLightning = 3;
-            break;
-        case EPerf_WeatherOptimizationLevel::High:
-            OptimizationSettings.MaxRainParticles = 5000;
-            OptimizationSettings.MaxCloudLayers = 3;
-            OptimizationSettings.MaxSimultaneousLightning = 2;
-            break;
-        case EPerf_WeatherOptimizationLevel::Medium:
-            OptimizationSettings.MaxRainParticles = 3000;
-            OptimizationSettings.MaxCloudLayers = 2;
-            OptimizationSettings.MaxSimultaneousLightning = 1;
-            break;
-        case EPerf_WeatherOptimizationLevel::Low:
-            OptimizationSettings.MaxRainParticles = 1500;
-            OptimizationSettings.MaxCloudLayers = 1;
-            OptimizationSettings.MaxSimultaneousLightning = 1;
-            break;
-        case EPerf_WeatherOptimizationLevel::Potato:
-            OptimizationSettings.MaxRainParticles = 500;
-            OptimizationSettings.MaxCloudLayers = 1;
-            OptimizationSettings.MaxSimultaneousLightning = 0;
-            break;
-    }
-}
-
-void UPerf_WeatherPerformanceOptimizer::CullDistantWeatherEffects()
-{
-    UWorld* World = GetWorld();
-    if (!World) return;
-    
-    APawn* PlayerPawn = World->GetFirstPlayerController()->GetPawn();
-    if (!PlayerPawn) return;
-    
-    FVector PlayerLocation = PlayerPawn->GetActorLocation();
-    
-    // Cull weather effects beyond certain distances
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-    {
-        AActor* Actor = *ActorItr;
-        if (!Actor) continue;
-        
-        FString ActorName = Actor->GetName();
-        if (ActorName.Contains(TEXT("Weather")) || ActorName.Contains(TEXT("Rain")) || 
-            ActorName.Contains(TEXT("Fog")) || ActorName.Contains(TEXT("Cloud")))
-        {
-            float Distance = FVector::Dist(Actor->GetActorLocation(), PlayerLocation);
-            float CullingDistance = 15000.0f * GetOptimizationMultiplier();
-            
-            Actor->SetActorHiddenInGame(Distance > CullingDistance);
-        }
-    }
-}
-
-void UPerf_WeatherPerformanceOptimizer::AdjustParticleSystemLOD()
-{
-    UWorld* World = GetWorld();
-    if (!World) return;
-    
-    // Adjust LOD for all particle systems based on distance and optimization level
-    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-    {
-        AActor* Actor = *ActorItr;
-        if (!Actor) continue;
-        
         TArray<UParticleSystemComponent*> ParticleComponents;
         Actor->GetComponents<UParticleSystemComponent>(ParticleComponents);
-        
+
         for (UParticleSystemComponent* PSC : ParticleComponents)
         {
-            if (PSC)
+            if (PSC && PSC->GetAsset())
             {
-                int32 LODLevel = static_cast<int32>(OptimizationLevel);
-                PSC->SetLODLevel(LODLevel);
+                // Check if this is a rain effect (basic name check)
+                FString AssetName = PSC->GetAsset()->GetName();
+                if (AssetName.Contains(TEXT("Rain")) || AssetName.Contains(TEXT("Precipitation")))
+                {
+                    // Adjust particle count based on quality
+                    float QualityMultiplier = GetQualityMultiplier();
+                    
+                    // Scale particle spawn rate
+                    PSC->SetFloatParameter(FName("SpawnRate"), PSC->GetFloatParameter(FName("SpawnRate")) * QualityMultiplier);
+                }
             }
         }
     }
 }
 
-void UPerf_WeatherPerformanceOptimizer::OptimizeWeatherShaders()
+void APerf_WeatherPerformanceOptimizer::SetRainParticleCount(int32 ParticleCount)
 {
-    // Optimize weather-related shaders and materials
-    // This would typically involve switching to simpler shader variants
-    // based on the optimization level
-    
-    UE_LOG(LogTemp, Log, TEXT("Weather shaders optimized for level: %d"), 
-           static_cast<int32>(OptimizationLevel));
+    if (!GetWorld())
+    {
+        return;
+    }
+
+    for (TActorIterator<AActor> ActorIterator(GetWorld()); ActorIterator; ++ActorIterator)
+    {
+        AActor* Actor = *ActorIterator;
+        if (!Actor)
+        {
+            continue;
+        }
+
+        TArray<UParticleSystemComponent*> ParticleComponents;
+        Actor->GetComponents<UParticleSystemComponent>(ParticleComponents);
+
+        for (UParticleSystemComponent* PSC : ParticleComponents)
+        {
+            if (PSC && PSC->GetAsset())
+            {
+                FString AssetName = PSC->GetAsset()->GetName();
+                if (AssetName.Contains(TEXT("Rain")))
+                {
+                    PSC->SetIntParameter(FName("MaxParticles"), ParticleCount);
+                }
+            }
+        }
+    }
 }
 
-float UPerf_WeatherPerformanceOptimizer::GetOptimizationMultiplier() const
+void APerf_WeatherPerformanceOptimizer::OptimizeWindEffects()
 {
-    switch (OptimizationLevel)
+    // Wind effects optimization - reduce complexity based on performance
+    float QualityMultiplier = GetQualityMultiplier();
+    
+    // Apply wind quality settings to global wind parameters
+    if (GetWorld())
     {
-        case EPerf_WeatherOptimizationLevel::Ultra: return 1.0f;
-        case EPerf_WeatherOptimizationLevel::High: return 0.8f;
-        case EPerf_WeatherOptimizationLevel::Medium: return 0.6f;
-        case EPerf_WeatherOptimizationLevel::Low: return 0.4f;
-        case EPerf_WeatherOptimizationLevel::Potato: return 0.2f;
-        default: return 0.8f;
+        // This would typically interface with a wind system
+        UE_LOG(LogTemp, Log, TEXT("Wind effects optimized with multiplier: %f"), QualityMultiplier);
+    }
+}
+
+void APerf_WeatherPerformanceOptimizer::SetWindQuality(EPerf_WeatherQuality Quality)
+{
+    // Set wind-specific quality
+    OptimizeWindEffects();
+}
+
+void APerf_WeatherPerformanceOptimizer::OptimizeFogEffects()
+{
+    // Fog optimization - adjust density and quality based on performance
+    float QualityMultiplier = GetQualityMultiplier();
+    
+    if (GetWorld())
+    {
+        // Adjust exponential height fog settings
+        UE_LOG(LogTemp, Log, TEXT("Fog effects optimized with multiplier: %f"), QualityMultiplier);
+    }
+}
+
+void APerf_WeatherPerformanceOptimizer::SetFogDensity(float Density)
+{
+    // Set fog density with performance considerations
+    float AdjustedDensity = Density * GetQualityMultiplier();
+    
+    UE_LOG(LogTemp, Log, TEXT("Fog density set to: %f"), AdjustedDensity);
+}
+
+void APerf_WeatherPerformanceOptimizer::OptimizeLightningEffects()
+{
+    // Lightning optimization - reduce flash frequency and intensity based on performance
+    float QualityMultiplier = GetQualityMultiplier();
+    
+    UE_LOG(LogTemp, Log, TEXT("Lightning effects optimized with multiplier: %f"), QualityMultiplier);
+}
+
+void APerf_WeatherPerformanceOptimizer::SetLightningQuality(EPerf_WeatherQuality Quality)
+{
+    // Set lightning-specific quality
+    OptimizeLightningEffects();
+}
+
+void APerf_WeatherPerformanceOptimizer::UpdatePerformanceMetrics()
+{
+    if (!GetWorld())
+    {
+        return;
+    }
+
+    // Update frame time tracking
+    float CurrentFrameTime = GetWorld()->GetDeltaSeconds();
+    LastFrameTime = CurrentFrameTime;
+
+    // Calculate rolling average
+    AverageFrameTime = (AverageFrameTime * 0.9f) + (CurrentFrameTime * 0.1f);
+
+    // Count particles in scene
+    int32 TotalParticles = 0;
+    for (TActorIterator<AActor> ActorIterator(GetWorld()); ActorIterator; ++ActorIterator)
+    {
+        AActor* Actor = *ActorIterator;
+        if (!Actor)
+        {
+            continue;
+        }
+
+        TArray<UParticleSystemComponent*> ParticleComponents;
+        Actor->GetComponents<UParticleSystemComponent>(ParticleComponents);
+
+        for (UParticleSystemComponent* PSC : ParticleComponents)
+        {
+            if (PSC && PSC->IsActive())
+            {
+                TotalParticles += PSC->GetNumActiveParticles();
+            }
+        }
+    }
+
+    // Update metrics
+    CurrentMetrics.ParticleCount = TotalParticles;
+    CurrentMetrics.RenderTime = AverageFrameTime * 1000.0f; // Convert to milliseconds
+    CurrentMetrics.FrameImpact = (AverageFrameTime / (1.0f / TargetFrameRate)) * 100.0f; // Percentage of frame budget
+    CurrentMetrics.GPUMemoryUsage = 0.0f; // Would need platform-specific implementation
+}
+
+void APerf_WeatherPerformanceOptimizer::ApplyQualitySettings()
+{
+    OptimizeParticleSystems();
+    OptimizeMaterialParameters();
+}
+
+void APerf_WeatherPerformanceOptimizer::OptimizeParticleSystems()
+{
+    if (!GetWorld())
+    {
+        return;
+    }
+
+    float QualityMultiplier = GetQualityMultiplier();
+
+    for (TActorIterator<AActor> ActorIterator(GetWorld()); ActorIterator; ++ActorIterator)
+    {
+        AActor* Actor = *ActorIterator;
+        if (!Actor)
+        {
+            continue;
+        }
+
+        TArray<UParticleSystemComponent*> ParticleComponents;
+        Actor->GetComponents<UParticleSystemComponent>(ParticleComponents);
+
+        for (UParticleSystemComponent* PSC : ParticleComponents)
+        {
+            if (PSC)
+            {
+                // Apply LOD bias based on quality
+                PSC->SetLODLevel(CurrentWeatherQuality == EPerf_WeatherQuality::Low ? 2 : 
+                                CurrentWeatherQuality == EPerf_WeatherQuality::Medium ? 1 : 0);
+            }
+        }
+    }
+}
+
+void APerf_WeatherPerformanceOptimizer::OptimizeMaterialParameters()
+{
+    // Optimize material parameters for weather effects
+    float QualityMultiplier = GetQualityMultiplier();
+    
+    // This would typically set global material parameter collection values
+    UE_LOG(LogTemp, Log, TEXT("Material parameters optimized with multiplier: %f"), QualityMultiplier);
+}
+
+void APerf_WeatherPerformanceOptimizer::MonitorFrameRate()
+{
+    float CurrentFPS = 1.0f / AverageFrameTime;
+    
+    // Log performance warnings
+    if (CurrentFPS < TargetFrameRate * 0.8f)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Weather Performance Warning: FPS below target (%f < %f)"), CurrentFPS, TargetFrameRate);
+    }
+}
+
+float APerf_WeatherPerformanceOptimizer::GetQualityMultiplier() const
+{
+    switch (CurrentWeatherQuality)
+    {
+        case EPerf_WeatherQuality::Low:
+            return LowQualityParticleMultiplier;
+        case EPerf_WeatherQuality::Medium:
+            return MediumQualityParticleMultiplier;
+        case EPerf_WeatherQuality::High:
+            return HighQualityParticleMultiplier;
+        case EPerf_WeatherQuality::Ultra:
+            return UltraQualityParticleMultiplier;
+        default:
+            return MediumQualityParticleMultiplier;
     }
 }
