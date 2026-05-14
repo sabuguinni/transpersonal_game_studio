@@ -1,385 +1,336 @@
 #include "StudioDirectorSystem.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "Engine/GameInstance.h"
 #include "Kismet/GameplayStatics.h"
 
-void UStudioDirectorSubsystem::Initialize(FSubsystemCollectionBase& Collection)
+UStudioDirectorSystem::UStudioDirectorSystem()
+{
+    // Initialize default values
+}
+
+void UStudioDirectorSystem::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Warning, TEXT("Studio Director Subsystem Initialized"));
+    UE_LOG(LogTemp, Warning, TEXT("Studio Director System Initialized"));
     
-    CurrentCycle = 30; // Starting from cycle 030
+    // Initialize agent tasks for the production pipeline
+    InitializeAgentTasks();
     
-    // Initialize default milestones and agent registry
-    InitializeDefaultMilestones();
-    InitializeAgentRegistry();
+    // Set up initial milestones
+    Milestones.Add(TEXT("Milestone_1_Walk_Around"), false);
+    Milestones.Add(TEXT("Milestone_2_Basic_Survival"), false);
+    Milestones.Add(TEXT("Milestone_3_Dinosaur_Encounters"), false);
+    Milestones.Add(TEXT("Milestone_4_World_Populated"), false);
+    Milestones.Add(TEXT("Milestone_5_Full_Gameplay"), false);
 }
 
-void UStudioDirectorSubsystem::Deinitialize()
+void UStudioDirectorSystem::Deinitialize()
 {
-    UE_LOG(LogTemp, Warning, TEXT("Studio Director Subsystem Deinitialized"));
-    
-    // Clear all data
-    ActiveTasks.Empty();
-    ProductionMilestones.Empty();
-    AgentStatusMap.Empty();
-    BlockedAgents.Empty();
-    
+    UE_LOG(LogTemp, Warning, TEXT("Studio Director System Deinitialized"));
     Super::Deinitialize();
 }
 
-void UStudioDirectorSubsystem::RegisterAgent(const FString& AgentName, EDir_AgentPriority DefaultPriority)
+void UStudioDirectorSystem::StartProductionCycle(const FString& CycleID)
 {
-    AgentStatusMap.Add(AgentName, EDir_AgentStatus::IDLE);
-    
-    UE_LOG(LogTemp, Log, TEXT("Registered Agent: %s with Priority: %d"), *AgentName, (int32)DefaultPriority);
-}
-
-void UStudioDirectorSubsystem::AssignTask(const FString& AgentName, const FString& TaskDescription, EDir_AgentPriority Priority, const TArray<FString>& Dependencies)
-{
-    FDir_AgentTask NewTask;
-    NewTask.AgentName = AgentName;
-    NewTask.TaskDescription = TaskDescription;
-    NewTask.Priority = Priority;
-    NewTask.Status = EDir_AgentStatus::WAITING;
-    NewTask.CycleAssigned = CurrentCycle;
-    NewTask.Dependencies = Dependencies;
-    
-    // Check if dependencies are met
-    if (CheckTaskDependencies(NewTask))
+    if (IsProductionCycleActive())
     {
-        NewTask.Status = EDir_AgentStatus::WORKING;
-        UpdateTaskStatus(AgentName, EDir_AgentStatus::WORKING);
+        UE_LOG(LogTemp, Warning, TEXT("Production cycle already active: %s"), *CurrentCycle.CycleID);
+        return;
+    }
+
+    CurrentCycle.CycleID = CycleID;
+    CurrentCycle.StartTime = UGameplayStatics::GetRealTimeSeconds(GetWorld());
+    CurrentCycle.bCycleCompleted = false;
+    
+    // Reset all agent statuses to Idle
+    for (FDir_AgentTask& Task : CurrentCycle.AgentTasks)
+    {
+        Task.Status = EDir_AgentStatus::Idle;
     }
     
-    ActiveTasks.Add(NewTask);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Assigned Task to %s: %s (Priority: %d)"), *AgentName, *TaskDescription, (int32)Priority);
+    UE_LOG(LogTemp, Warning, TEXT("Started production cycle: %s"), *CycleID);
 }
 
-void UStudioDirectorSubsystem::CompleteTask(const FString& AgentName, const TArray<FString>& Deliverables)
+void UStudioDirectorSystem::CompleteProductionCycle()
 {
-    for (FDir_AgentTask& Task : ActiveTasks)
+    if (!IsProductionCycleActive())
     {
-        if (Task.AgentName == AgentName && Task.Status == EDir_AgentStatus::WORKING)
-        {
-            Task.Status = EDir_AgentStatus::COMPLETED;
-            Task.CycleCompleted = CurrentCycle;
-            Task.Deliverables = Deliverables;
-            
-            UpdateTaskStatus(AgentName, EDir_AgentStatus::COMPLETED);
-            
-            UE_LOG(LogTemp, Warning, TEXT("Task Completed by %s with %d deliverables"), *AgentName, Deliverables.Num());
-            
-            // Check if this completion unlocks other tasks
-            for (FDir_AgentTask& WaitingTask : ActiveTasks)
-            {
-                if (WaitingTask.Status == EDir_AgentStatus::WAITING && CheckTaskDependencies(WaitingTask))
-                {
-                    WaitingTask.Status = EDir_AgentStatus::WORKING;
-                    UpdateTaskStatus(WaitingTask.AgentName, EDir_AgentStatus::WORKING);
-                }
-            }
-            
-            // Update milestone progress
-            UpdateMilestoneCompletion();
-            break;
-        }
+        UE_LOG(LogTemp, Warning, TEXT("No active production cycle to complete"));
+        return;
     }
+
+    CurrentCycle.EndTime = UGameplayStatics::GetRealTimeSeconds(GetWorld());
+    CurrentCycle.bCycleCompleted = true;
+    
+    // Archive the completed cycle
+    CycleHistory.Add(CurrentCycle);
+    
+    UE_LOG(LogTemp, Warning, TEXT("Completed production cycle: %s (Duration: %.2f seconds)"), 
+           *CurrentCycle.CycleID, CurrentCycle.EndTime - CurrentCycle.StartTime);
+    
+    // Reset current cycle
+    CurrentCycle = FDir_ProductionCycle();
 }
 
-void UStudioDirectorSubsystem::UpdateTaskStatus(const FString& AgentName, EDir_AgentStatus NewStatus)
+bool UStudioDirectorSystem::IsProductionCycleActive() const
 {
-    if (AgentStatusMap.Contains(AgentName))
+    return !CurrentCycle.CycleID.IsEmpty() && !CurrentCycle.bCycleCompleted;
+}
+
+void UStudioDirectorSystem::AssignTaskToAgent(const FString& AgentName, const FString& TaskDescription, float Priority)
+{
+    FDir_AgentTask* ExistingTask = FindAgentTask(AgentName);
+    if (ExistingTask)
     {
-        AgentStatusMap[AgentName] = NewStatus;
-        UE_LOG(LogTemp, Log, TEXT("Agent %s status updated to: %d"), *AgentName, (int32)NewStatus);
+        ExistingTask->TaskDescription = TaskDescription;
+        ExistingTask->Priority = Priority;
+        ExistingTask->Status = EDir_AgentStatus::Idle;
+        UE_LOG(LogTemp, Log, TEXT("Updated task for agent %s: %s"), *AgentName, *TaskDescription);
     }
-}
-
-void UStudioDirectorSubsystem::CreateMilestone(const FString& MilestoneName, const FString& Description, int32 TargetCycle, const TArray<FString>& RequiredDeliverables)
-{
-    FDir_ProductionMilestone NewMilestone;
-    NewMilestone.MilestoneName = MilestoneName;
-    NewMilestone.Description = Description;
-    NewMilestone.TargetCycle = TargetCycle;
-    NewMilestone.RequiredDeliverables = RequiredDeliverables;
-    NewMilestone.bIsCompleted = false;
-    NewMilestone.CompletionPercentage = 0.0f;
-    
-    ProductionMilestones.Add(NewMilestone);
-    
-    UE_LOG(LogTemp, Warning, TEXT("Created Milestone: %s (Target Cycle: %d)"), *MilestoneName, TargetCycle);
-}
-
-void UStudioDirectorSubsystem::UpdateMilestoneProgress(const FString& MilestoneName, float ProgressPercentage)
-{
-    for (FDir_ProductionMilestone& Milestone : ProductionMilestones)
+    else
     {
-        if (Milestone.MilestoneName == MilestoneName)
-        {
-            Milestone.CompletionPercentage = FMath::Clamp(ProgressPercentage, 0.0f, 100.0f);
-            
-            if (Milestone.CompletionPercentage >= 100.0f)
-            {
-                Milestone.bIsCompleted = true;
-                UE_LOG(LogTemp, Warning, TEXT("Milestone COMPLETED: %s"), *MilestoneName);
-            }
-            break;
-        }
+        FDir_AgentTask NewTask;
+        NewTask.AgentName = AgentName;
+        NewTask.TaskDescription = TaskDescription;
+        NewTask.Priority = Priority;
+        NewTask.Status = EDir_AgentStatus::Idle;
+        CurrentCycle.AgentTasks.Add(NewTask);
+        UE_LOG(LogTemp, Log, TEXT("Assigned new task to agent %s: %s"), *AgentName, *TaskDescription);
     }
 }
 
-bool UStudioDirectorSubsystem::IsMilestoneCompleted(const FString& MilestoneName)
+void UStudioDirectorSystem::UpdateAgentStatus(const FString& AgentName, EDir_AgentStatus NewStatus)
 {
-    for (const FDir_ProductionMilestone& Milestone : ProductionMilestones)
+    FDir_AgentTask* Task = FindAgentTask(AgentName);
+    if (Task)
     {
-        if (Milestone.MilestoneName == MilestoneName)
-        {
-            return Milestone.bIsCompleted;
-        }
-    }
-    return false;
-}
-
-void UStudioDirectorSubsystem::StartProductionCycle(int32 CycleNumber)
-{
-    CurrentCycle = CycleNumber;
-    
-    UE_LOG(LogTemp, Warning, TEXT("=== STARTING PRODUCTION CYCLE %d ==="), CurrentCycle);
-    
-    // Reset agent statuses for new cycle
-    for (auto& AgentPair : AgentStatusMap)
-    {
-        if (AgentPair.Value == EDir_AgentStatus::COMPLETED)
-        {
-            AgentPair.Value = EDir_AgentStatus::IDLE;
-        }
+        Task->Status = NewStatus;
+        UE_LOG(LogTemp, Log, TEXT("Updated agent %s status to %d"), *AgentName, (int32)NewStatus);
     }
 }
 
-void UStudioDirectorSubsystem::EndProductionCycle()
+EDir_AgentStatus UStudioDirectorSystem::GetAgentStatus(const FString& AgentName) const
 {
-    UE_LOG(LogTemp, Warning, TEXT("=== ENDING PRODUCTION CYCLE %d ==="), CurrentCycle);
-    
-    // Generate cycle report
-    FString Report = GenerateProductionReport();
-    UE_LOG(LogTemp, Warning, TEXT("Cycle Report:\n%s"), *Report);
+    const FDir_AgentTask* Task = FindAgentTask(AgentName);
+    return Task ? Task->Status : EDir_AgentStatus::Idle;
 }
 
-TArray<FDir_AgentTask> UStudioDirectorSubsystem::GetPendingTasks()
+TArray<FDir_AgentTask> UStudioDirectorSystem::GetAllAgentTasks() const
 {
-    TArray<FDir_AgentTask> PendingTasks;
-    
-    for (const FDir_AgentTask& Task : ActiveTasks)
-    {
-        if (Task.Status == EDir_AgentStatus::WORKING || Task.Status == EDir_AgentStatus::WAITING)
-        {
-            PendingTasks.Add(Task);
-        }
-    }
-    
-    return PendingTasks;
+    return CurrentCycle.AgentTasks;
 }
 
-TArray<FDir_AgentTask> UStudioDirectorSubsystem::GetTasksByPriority(EDir_AgentPriority Priority)
+void UStudioDirectorSystem::AddTaskDependency(const FString& AgentName, const FString& DependencyAgent)
 {
-    TArray<FDir_AgentTask> FilteredTasks;
-    
-    for (const FDir_AgentTask& Task : ActiveTasks)
+    FDir_AgentTask* Task = FindAgentTask(AgentName);
+    if (Task)
     {
-        if (Task.Priority == Priority)
-        {
-            FilteredTasks.Add(Task);
-        }
-    }
-    
-    return FilteredTasks;
-}
-
-bool UStudioDirectorSubsystem::ValidateAgentDeliverables(const FString& AgentName)
-{
-    for (const FDir_AgentTask& Task : ActiveTasks)
-    {
-        if (Task.AgentName == AgentName && Task.Status == EDir_AgentStatus::COMPLETED)
-        {
-            // Basic validation - check if deliverables exist
-            return Task.Deliverables.Num() > 0;
-        }
-    }
-    return false;
-}
-
-void UStudioDirectorSubsystem::BlockAgent(const FString& AgentName, const FString& Reason)
-{
-    if (!BlockedAgents.Contains(AgentName))
-    {
-        BlockedAgents.Add(AgentName);
-        UpdateTaskStatus(AgentName, EDir_AgentStatus::BLOCKED);
-        
-        UE_LOG(LogTemp, Error, TEXT("BLOCKED Agent %s: %s"), *AgentName, *Reason);
+        Task->Dependencies.AddUnique(DependencyAgent);
+        UE_LOG(LogTemp, Log, TEXT("Added dependency: %s depends on %s"), *AgentName, *DependencyAgent);
     }
 }
 
-void UStudioDirectorSubsystem::UnblockAgent(const FString& AgentName)
+bool UStudioDirectorSystem::CanAgentStart(const FString& AgentName) const
 {
-    BlockedAgents.Remove(AgentName);
-    UpdateTaskStatus(AgentName, EDir_AgentStatus::IDLE);
-    
-    UE_LOG(LogTemp, Warning, TEXT("UNBLOCKED Agent %s"), *AgentName);
-}
-
-FString UStudioDirectorSubsystem::GenerateProductionReport()
-{
-    FString Report = FString::Printf(TEXT("=== PRODUCTION REPORT - CYCLE %d ===\n"), CurrentCycle);
-    
-    int32 CompletedTasks = 0;
-    int32 WorkingTasks = 0;
-    int32 WaitingTasks = 0;
-    int32 FailedTasks = 0;
-    
-    for (const FDir_AgentTask& Task : ActiveTasks)
+    const FDir_AgentTask* Task = FindAgentTask(AgentName);
+    if (!Task)
     {
-        switch (Task.Status)
-        {
-            case EDir_AgentStatus::COMPLETED: CompletedTasks++; break;
-            case EDir_AgentStatus::WORKING: WorkingTasks++; break;
-            case EDir_AgentStatus::WAITING: WaitingTasks++; break;
-            case EDir_AgentStatus::FAILED: FailedTasks++; break;
-        }
+        return false;
     }
-    
-    Report += FString::Printf(TEXT("Tasks - Completed: %d, Working: %d, Waiting: %d, Failed: %d\n"), 
-        CompletedTasks, WorkingTasks, WaitingTasks, FailedTasks);
-    
-    Report += FString::Printf(TEXT("Blocked Agents: %d\n"), BlockedAgents.Num());
-    
-    return Report;
-}
 
-FString UStudioDirectorSubsystem::GenerateMilestoneReport()
-{
-    FString Report = TEXT("=== MILESTONE REPORT ===\n");
-    
-    for (const FDir_ProductionMilestone& Milestone : ProductionMilestones)
-    {
-        FString Status = Milestone.bIsCompleted ? TEXT("COMPLETED") : TEXT("IN PROGRESS");
-        Report += FString::Printf(TEXT("%s: %s (%.1f%%)\n"), 
-            *Milestone.MilestoneName, *Status, Milestone.CompletionPercentage);
-    }
-    
-    return Report;
-}
-
-void UStudioDirectorSubsystem::InitializeDefaultMilestones()
-{
-    // Milestone 1: Walk Around
-    TArray<FString> Milestone1Deliverables;
-    Milestone1Deliverables.Add(TEXT("ThirdPersonCharacter with WASD movement"));
-    Milestone1Deliverables.Add(TEXT("Camera boom + follow camera"));
-    Milestone1Deliverables.Add(TEXT("Landscape with basic terrain"));
-    Milestone1Deliverables.Add(TEXT("3-5 static dinosaur meshes"));
-    Milestone1Deliverables.Add(TEXT("Directional light + sky atmosphere"));
-    
-    CreateMilestone(TEXT("Walk Around"), TEXT("Player can walk around world with visible dinosaurs"), 32, Milestone1Deliverables);
-    
-    // Milestone 2: Basic Survival
-    TArray<FString> Milestone2Deliverables;
-    Milestone2Deliverables.Add(TEXT("Health/Hunger/Thirst/Stamina UI"));
-    Milestone2Deliverables.Add(TEXT("Basic crafting system"));
-    Milestone2Deliverables.Add(TEXT("Dinosaur AI behavior"));
-    
-    CreateMilestone(TEXT("Basic Survival"), TEXT("Core survival mechanics functional"), 40, Milestone2Deliverables);
-}
-
-void UStudioDirectorSubsystem::InitializeAgentRegistry()
-{
-    // Register all 20 agents
-    RegisterAgent(TEXT("Agent01_StudioDirector"), EDir_AgentPriority::CRITICAL);
-    RegisterAgent(TEXT("Agent02_EngineArchitect"), EDir_AgentPriority::CRITICAL);
-    RegisterAgent(TEXT("Agent03_CoreSystems"), EDir_AgentPriority::HIGH);
-    RegisterAgent(TEXT("Agent04_Performance"), EDir_AgentPriority::HIGH);
-    RegisterAgent(TEXT("Agent05_WorldGenerator"), EDir_AgentPriority::HIGH);
-    RegisterAgent(TEXT("Agent06_Environment"), EDir_AgentPriority::MEDIUM);
-    RegisterAgent(TEXT("Agent07_Architecture"), EDir_AgentPriority::MEDIUM);
-    RegisterAgent(TEXT("Agent08_Lighting"), EDir_AgentPriority::MEDIUM);
-    RegisterAgent(TEXT("Agent09_CharacterArtist"), EDir_AgentPriority::HIGH);
-    RegisterAgent(TEXT("Agent10_Animation"), EDir_AgentPriority::HIGH);
-    RegisterAgent(TEXT("Agent11_NPCBehavior"), EDir_AgentPriority::MEDIUM);
-    RegisterAgent(TEXT("Agent12_CombatAI"), EDir_AgentPriority::HIGH);
-    RegisterAgent(TEXT("Agent13_CrowdSimulation"), EDir_AgentPriority::LOW);
-    RegisterAgent(TEXT("Agent14_QuestDesigner"), EDir_AgentPriority::MEDIUM);
-    RegisterAgent(TEXT("Agent15_Narrative"), EDir_AgentPriority::LOW);
-    RegisterAgent(TEXT("Agent16_Audio"), EDir_AgentPriority::MEDIUM);
-    RegisterAgent(TEXT("Agent17_VFX"), EDir_AgentPriority::MEDIUM);
-    RegisterAgent(TEXT("Agent18_QA"), EDir_AgentPriority::CRITICAL);
-    RegisterAgent(TEXT("Agent19_Integration"), EDir_AgentPriority::CRITICAL);
-    RegisterAgent(TEXT("Agent20_BuildDaemon"), EDir_AgentPriority::CRITICAL);
-}
-
-bool UStudioDirectorSubsystem::CheckTaskDependencies(const FDir_AgentTask& Task)
-{
-    // If no dependencies, task can proceed
-    if (Task.Dependencies.Num() == 0)
-    {
-        return true;
-    }
-    
     // Check if all dependencies are completed
-    for (const FString& Dependency : Task.Dependencies)
+    for (const FString& Dependency : Task->Dependencies)
     {
-        bool DependencyMet = false;
-        
-        for (const FDir_AgentTask& CompletedTask : ActiveTasks)
-        {
-            if (CompletedTask.AgentName == Dependency && CompletedTask.Status == EDir_AgentStatus::COMPLETED)
-            {
-                DependencyMet = true;
-                break;
-            }
-        }
-        
-        if (!DependencyMet)
+        EDir_AgentStatus DepStatus = GetAgentStatus(Dependency);
+        if (DepStatus != EDir_AgentStatus::Completed)
         {
             return false;
         }
     }
-    
+
     return true;
 }
 
-void UStudioDirectorSubsystem::UpdateMilestoneCompletion()
+TArray<FString> UStudioDirectorSystem::GetBlockedAgents() const
 {
-    for (FDir_ProductionMilestone& Milestone : ProductionMilestones)
+    TArray<FString> BlockedAgents;
+    
+    for (const FDir_AgentTask& Task : CurrentCycle.AgentTasks)
     {
-        if (Milestone.bIsCompleted)
+        if (Task.Status == EDir_AgentStatus::Blocked || !CanAgentStart(Task.AgentName))
         {
-            continue;
+            BlockedAgents.Add(Task.AgentName);
         }
-        
-        int32 CompletedDeliverables = 0;
-        
-        // Check how many required deliverables are completed
-        for (const FString& Deliverable : Milestone.RequiredDeliverables)
+    }
+    
+    return BlockedAgents;
+}
+
+float UStudioDirectorSystem::GetCycleProgress() const
+{
+    if (CurrentCycle.AgentTasks.Num() == 0)
+    {
+        return 0.0f;
+    }
+
+    int32 CompletedCount = GetCompletedTaskCount();
+    return (float)CompletedCount / (float)CurrentCycle.AgentTasks.Num();
+}
+
+int32 UStudioDirectorSystem::GetCompletedTaskCount() const
+{
+    int32 Count = 0;
+    for (const FDir_AgentTask& Task : CurrentCycle.AgentTasks)
+    {
+        if (Task.Status == EDir_AgentStatus::Completed)
         {
-            for (const FDir_AgentTask& Task : ActiveTasks)
+            Count++;
+        }
+    }
+    return Count;
+}
+
+int32 UStudioDirectorSystem::GetTotalTaskCount() const
+{
+    return CurrentCycle.AgentTasks.Num();
+}
+
+void UStudioDirectorSystem::SetMilestone(const FString& MilestoneName, bool bCompleted)
+{
+    Milestones.Add(MilestoneName, bCompleted);
+    UE_LOG(LogTemp, Warning, TEXT("Milestone %s set to %s"), *MilestoneName, bCompleted ? TEXT("COMPLETED") : TEXT("INCOMPLETE"));
+}
+
+bool UStudioDirectorSystem::IsMilestoneCompleted(const FString& MilestoneName) const
+{
+    const bool* bCompleted = Milestones.Find(MilestoneName);
+    return bCompleted ? *bCompleted : false;
+}
+
+TArray<FString> UStudioDirectorSystem::GetCompletedMilestones() const
+{
+    TArray<FString> CompletedMilestones;
+    
+    for (const auto& Milestone : Milestones)
+    {
+        if (Milestone.Value)
+        {
+            CompletedMilestones.Add(Milestone.Key);
+        }
+    }
+    
+    return CompletedMilestones;
+}
+
+void UStudioDirectorSystem::InitializeAgentTasks()
+{
+    // Initialize all 19 agent tasks with their core responsibilities
+    TArray<FString> AgentNames = {
+        TEXT("Agent_02_Engine_Architect"),
+        TEXT("Agent_03_Core_Systems"),
+        TEXT("Agent_04_Performance"),
+        TEXT("Agent_05_World_Generator"),
+        TEXT("Agent_06_Environment"),
+        TEXT("Agent_07_Architecture"),
+        TEXT("Agent_08_Lighting"),
+        TEXT("Agent_09_Character"),
+        TEXT("Agent_10_Animation"),
+        TEXT("Agent_11_NPC_Behavior"),
+        TEXT("Agent_12_Combat_AI"),
+        TEXT("Agent_13_Crowd_Simulation"),
+        TEXT("Agent_14_Quest_Designer"),
+        TEXT("Agent_15_Narrative"),
+        TEXT("Agent_16_Audio"),
+        TEXT("Agent_17_VFX"),
+        TEXT("Agent_18_QA"),
+        TEXT("Agent_19_Integration")
+    };
+
+    TArray<FString> TaskDescriptions = {
+        TEXT("Define UE5.5 architecture standards and compilation rules"),
+        TEXT("Implement physics, collision, ragdoll systems"),
+        TEXT("Ensure 60fps PC / 30fps console targets"),
+        TEXT("Expand landscape to 10km2 with 5 biomes"),
+        TEXT("Populate biomes with vegetation and props"),
+        TEXT("Build prehistoric structures and shelters"),
+        TEXT("Establish Cretaceous atmosphere and day/night cycle"),
+        TEXT("Create human primitive character with MetaHuman"),
+        TEXT("Implement Motion Matching and IK systems"),
+        TEXT("Define dinosaur behavior trees and routines"),
+        TEXT("Implement tactical combat AI for dinosaurs"),
+        TEXT("Setup Mass AI for large dinosaur herds"),
+        TEXT("Convert narrative into playable missions"),
+        TEXT("Write Game Bible and prehistoric lore"),
+        TEXT("Create adaptive music and prehistoric soundscape"),
+        TEXT("Implement Niagara effects for environment"),
+        TEXT("Test all systems and maintain build stability"),
+        TEXT("Integrate all agent outputs into cohesive build")
+    };
+
+    // Create tasks for each agent
+    for (int32 i = 0; i < AgentNames.Num(); i++)
+    {
+        FDir_AgentTask NewTask;
+        NewTask.AgentName = AgentNames[i];
+        NewTask.TaskDescription = TaskDescriptions[i];
+        NewTask.Status = EDir_AgentStatus::Idle;
+        NewTask.Priority = 1.0f + (i * 0.1f); // Sequential priority
+        CurrentCycle.AgentTasks.Add(NewTask);
+    }
+
+    // Set up critical dependencies
+    AddTaskDependency(TEXT("Agent_03_Core_Systems"), TEXT("Agent_02_Engine_Architect"));
+    AddTaskDependency(TEXT("Agent_05_World_Generator"), TEXT("Agent_02_Engine_Architect"));
+    AddTaskDependency(TEXT("Agent_06_Environment"), TEXT("Agent_05_World_Generator"));
+    AddTaskDependency(TEXT("Agent_08_Lighting"), TEXT("Agent_06_Environment"));
+    AddTaskDependency(TEXT("Agent_10_Animation"), TEXT("Agent_09_Character"));
+    AddTaskDependency(TEXT("Agent_11_NPC_Behavior"), TEXT("Agent_09_Character"));
+    AddTaskDependency(TEXT("Agent_12_Combat_AI"), TEXT("Agent_11_NPC_Behavior"));
+    AddTaskDependency(TEXT("Agent_14_Quest_Designer"), TEXT("Agent_15_Narrative"));
+    AddTaskDependency(TEXT("Agent_18_QA"), TEXT("Agent_17_VFX"));
+    AddTaskDependency(TEXT("Agent_19_Integration"), TEXT("Agent_18_QA"));
+
+    UE_LOG(LogTemp, Warning, TEXT("Initialized %d agent tasks with dependencies"), CurrentCycle.AgentTasks.Num());
+}
+
+void UStudioDirectorSystem::ValidateTaskDependencies()
+{
+    // Check for circular dependencies and invalid references
+    for (const FDir_AgentTask& Task : CurrentCycle.AgentTasks)
+    {
+        for (const FString& Dependency : Task.Dependencies)
+        {
+            const FDir_AgentTask* DepTask = FindAgentTask(Dependency);
+            if (!DepTask)
             {
-                if (Task.Status == EDir_AgentStatus::COMPLETED)
-                {
-                    for (const FString& TaskDeliverable : Task.Deliverables)
-                    {
-                        if (TaskDeliverable.Contains(Deliverable))
-                        {
-                            CompletedDeliverables++;
-                            break;
-                        }
-                    }
-                }
+                UE_LOG(LogTemp, Error, TEXT("Invalid dependency: %s depends on non-existent agent %s"), 
+                       *Task.AgentName, *Dependency);
             }
         }
-        
-        float Progress = (float)CompletedDeliverables / (float)Milestone.RequiredDeliverables.Num() * 100.0f;
-        UpdateMilestoneProgress(Milestone.MilestoneName, Progress);
     }
+}
+
+FDir_AgentTask* UStudioDirectorSystem::FindAgentTask(const FString& AgentName)
+{
+    for (FDir_AgentTask& Task : CurrentCycle.AgentTasks)
+    {
+        if (Task.AgentName == AgentName)
+        {
+            return &Task;
+        }
+    }
+    return nullptr;
+}
+
+const FDir_AgentTask* UStudioDirectorSystem::FindAgentTask(const FString& AgentName) const
+{
+    for (const FDir_AgentTask& Task : CurrentCycle.AgentTasks)
+    {
+        if (Task.AgentName == AgentName)
+        {
+            return &Task;
+        }
+    }
+    return nullptr;
 }
