@@ -1,11 +1,12 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "UObject/NoExportTypes.h"
+#include "Components/ActorComponent.h"
 #include "Engine/Engine.h"
 #include "Animation/AnimInstance.h"
-#include "GameFramework/Character.h"
-#include "GameFramework/CharacterMovementComponent.h"
+#include "Animation/AnimMontage.h"
+#include "Animation/BlendSpace.h"
+#include "SharedTypes.h"
 #include "Anim_StateManager.generated.h"
 
 UENUM(BlueprintType)
@@ -17,141 +18,147 @@ enum class EAnim_MovementState : uint8
     Jumping     UMETA(DisplayName = "Jumping"),
     Falling     UMETA(DisplayName = "Falling"),
     Crouching   UMETA(DisplayName = "Crouching"),
-    Combat      UMETA(DisplayName = "Combat"),
-    Crafting    UMETA(DisplayName = "Crafting"),
-    Climbing    UMETA(DisplayName = "Climbing"),
-    Swimming    UMETA(DisplayName = "Swimming")
+    Swimming    UMETA(DisplayName = "Swimming"),
+    Climbing    UMETA(DisplayName = "Climbing")
 };
 
 UENUM(BlueprintType)
-enum class EAnim_EmotionalState : uint8
+enum class EAnim_ActionState : uint8
 {
-    Calm        UMETA(DisplayName = "Calm"),
-    Alert       UMETA(DisplayName = "Alert"),
-    Fearful     UMETA(DisplayName = "Fearful"),
-    Aggressive  UMETA(DisplayName = "Aggressive"),
-    Exhausted   UMETA(DisplayName = "Exhausted"),
-    Injured     UMETA(DisplayName = "Injured"),
-    Focused     UMETA(DisplayName = "Focused"),
-    Relaxed     UMETA(DisplayName = "Relaxed")
+    None            UMETA(DisplayName = "None"),
+    Attacking       UMETA(DisplayName = "Attacking"),
+    Blocking        UMETA(DisplayName = "Blocking"),
+    Crafting        UMETA(DisplayName = "Crafting"),
+    Gathering       UMETA(DisplayName = "Gathering"),
+    Interacting     UMETA(DisplayName = "Interacting"),
+    Eating          UMETA(DisplayName = "Eating"),
+    Drinking        UMETA(DisplayName = "Drinking"),
+    Resting         UMETA(DisplayName = "Resting")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAnim_StateTransition
+struct TRANSPERSONALGAME_API FAnim_StateData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
-    EAnim_MovementState FromState;
+    UPROPERTY(BlueprintReadWrite, Category = "Animation State")
+    EAnim_MovementState MovementState = EAnim_MovementState::Idle;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
-    EAnim_MovementState ToState;
+    UPROPERTY(BlueprintReadWrite, Category = "Animation State")
+    EAnim_ActionState ActionState = EAnim_ActionState::None;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
-    float BlendTime;
+    UPROPERTY(BlueprintReadWrite, Category = "Animation State")
+    float Speed = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
-    bool bRequiresGrounded;
+    UPROPERTY(BlueprintReadWrite, Category = "Animation State")
+    float Direction = 0.0f;
 
-    FAnim_StateTransition()
+    UPROPERTY(BlueprintReadWrite, Category = "Animation State")
+    bool bIsInAir = false;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Animation State")
+    bool bIsCrouching = false;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Animation State")
+    float StaminaRatio = 1.0f;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Animation State")
+    float HealthRatio = 1.0f;
+
+    FAnim_StateData()
     {
-        FromState = EAnim_MovementState::Idle;
-        ToState = EAnim_MovementState::Walking;
-        BlendTime = 0.2f;
-        bRequiresGrounded = true;
+        MovementState = EAnim_MovementState::Idle;
+        ActionState = EAnim_ActionState::None;
+        Speed = 0.0f;
+        Direction = 0.0f;
+        bIsInAir = false;
+        bIsCrouching = false;
+        StaminaRatio = 1.0f;
+        HealthRatio = 1.0f;
     }
 };
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UAnim_StateManager : public UAnimInstance
+UCLASS(ClassGroup=(Animation), meta=(BlueprintSpawnableComponent))
+class TRANSPERSONALGAME_API UAnim_StateManager : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
     UAnim_StateManager();
 
-    virtual void NativeInitializeAnimation() override;
-    virtual void NativeUpdateAnimation(float DeltaTime) override;
+protected:
+    virtual void BeginPlay() override;
 
-    // Current animation states
-    UPROPERTY(BlueprintReadOnly, Category = "Animation State")
-    EAnim_MovementState CurrentMovementState;
+public:
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Animation State")
-    EAnim_EmotionalState CurrentEmotionalState;
+    // State Management
+    UFUNCTION(BlueprintCallable, Category = "Animation State")
+    void UpdateMovementState(float CurrentSpeed, bool bIsMoving, bool bIsInAir, bool bIsCrouching);
 
-    // Movement parameters
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    float Speed;
+    UFUNCTION(BlueprintCallable, Category = "Animation State")
+    void SetActionState(EAnim_ActionState NewActionState);
 
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    float Direction;
+    UFUNCTION(BlueprintCallable, Category = "Animation State")
+    EAnim_MovementState GetCurrentMovementState() const { return CurrentStateData.MovementState; }
 
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    bool bIsInAir;
+    UFUNCTION(BlueprintCallable, Category = "Animation State")
+    EAnim_ActionState GetCurrentActionState() const { return CurrentStateData.ActionState; }
 
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    bool bIsCrouching;
+    UFUNCTION(BlueprintCallable, Category = "Animation State")
+    FAnim_StateData GetCurrentStateData() const { return CurrentStateData; }
 
-    UPROPERTY(BlueprintReadOnly, Category = "Movement")
-    bool bIsAccelerating;
-
-    // Character reference
-    UPROPERTY(BlueprintReadOnly, Category = "Character")
-    class ACharacter* OwnerCharacter;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Character")
-    class UCharacterMovementComponent* MovementComponent;
-
-    // State transition settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
-    TArray<FAnim_StateTransition> StateTransitions;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
-    float IdleThreshold;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
-    float WalkThreshold;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
-    float RunThreshold;
-
-    // Animation blending
-    UPROPERTY(BlueprintReadOnly, Category = "Blending")
-    float IdlePlayRate;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Blending")
-    float WalkPlayRate;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Blending")
-    float RunPlayRate;
-
-    // State management functions
+    // Animation Triggers
     UFUNCTION(BlueprintCallable, Category = "Animation")
-    void UpdateMovementState(float DeltaTime);
+    void PlayActionMontage(UAnimMontage* Montage, float PlayRate = 1.0f);
 
     UFUNCTION(BlueprintCallable, Category = "Animation")
-    void UpdateEmotionalState(float DeltaTime);
+    void StopActionMontage();
 
     UFUNCTION(BlueprintCallable, Category = "Animation")
-    bool CanTransitionTo(EAnim_MovementState NewState);
+    bool IsPlayingActionMontage() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Animation")
-    void ForceStateTransition(EAnim_MovementState NewState);
+    // State Queries
+    UFUNCTION(BlueprintPure, Category = "Animation State")
+    bool IsIdle() const { return CurrentStateData.MovementState == EAnim_MovementState::Idle; }
 
-    UFUNCTION(BlueprintPure, Category = "Animation")
-    float GetStateBlendWeight(EAnim_MovementState State) const;
+    UFUNCTION(BlueprintPure, Category = "Animation State")
+    bool IsMoving() const { return CurrentStateData.Speed > 0.1f; }
+
+    UFUNCTION(BlueprintPure, Category = "Animation State")
+    bool IsRunning() const { return CurrentStateData.MovementState == EAnim_MovementState::Running; }
+
+    UFUNCTION(BlueprintPure, Category = "Animation State")
+    bool IsInAction() const { return CurrentStateData.ActionState != EAnim_ActionState::None; }
 
 protected:
-    // Internal state tracking
-    float StateTimer;
-    EAnim_MovementState PreviousMovementState;
-    float TransitionTimer;
-    bool bIsTransitioning;
+    UPROPERTY(BlueprintReadOnly, Category = "Animation State")
+    FAnim_StateData CurrentStateData;
 
-    // Helper functions
-    void CalculateMovementParameters();
-    void UpdateStateTimer(float DeltaTime);
-    EAnim_MovementState DetermineMovementState();
-    void HandleStateTransition(EAnim_MovementState NewState);
+    UPROPERTY(BlueprintReadOnly, Category = "Animation State")
+    FAnim_StateData PreviousStateData;
+
+    // Thresholds
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
+    float WalkSpeedThreshold = 150.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation Settings")
+    float RunSpeedThreshold = 400.0f;
+
+    // Component References
+    UPROPERTY()
+    class USkeletalMeshComponent* OwnerMeshComponent;
+
+    UPROPERTY()
+    class UCharacterMovementComponent* OwnerMovementComponent;
+
+    // State Transition
+    void UpdateStateTransitions(float DeltaTime);
+    void OnMovementStateChanged(EAnim_MovementState OldState, EAnim_MovementState NewState);
+    void OnActionStateChanged(EAnim_ActionState OldState, EAnim_ActionState NewState);
+
+    // Internal Updates
+    void UpdateMovementData();
+    void UpdateHealthAndStamina();
+    void CacheComponentReferences();
 };
