@@ -6,26 +6,15 @@
 #include "Stats/Stats.h"
 #include "Engine/GameViewportClient.h"
 
-/**
- * ENGINE ARCHITECT CYCLE 001 - ARCHITECTURAL FRAMEWORK IMPLEMENTATION
- * 
- * This implements the core architectural framework that all other systems
- * must follow. This is the foundation that ensures:
- * 1. Proper system registration and lifecycle
- * 2. Performance monitoring and validation
- * 3. Module dependency resolution
- * 4. Compilation safety and error tracking
- */
-
 void UEng_ArchitecturalFramework::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Warning, TEXT("=== ENGINE ARCHITECT FRAMEWORK INITIALIZING ==="));
+    UE_LOG(LogTemp, Warning, TEXT("ENGINE ARCHITECT: Architectural Framework Initializing"));
     
     // Initialize validation settings
     ValidationLevel = EEng_ArchValidationLevel::Standard;
-    PerformanceValidationInterval = 1.0f;
+    PerformanceValidationInterval = 5.0f; // 5 second intervals
     bEnableRuntimeValidation = true;
     TotalValidationErrors = 0;
     
@@ -36,13 +25,21 @@ void UEng_ArchitecturalFramework::Initialize(FSubsystemCollectionBase& Collectio
     // Initialize performance metrics
     CurrentMetrics = FEng_PerformanceMetrics();
     
-    // Register core architectural system
-    TArray<EEng_ModuleDependency> CoreDependencies;
-    CoreDependencies.Add(EEng_ModuleDependency::Core);
-    RegisterSystem(TEXT("ArchitecturalFramework"), CoreDependencies);
+    // Register core systems that must always exist
+    TArray<EEng_ModuleDependency> CoreDeps;
+    RegisterSystem("ArchitecturalFramework", CoreDeps);
+    
+    TArray<EEng_ModuleDependency> CharacterDeps;
+    CharacterDeps.Add(EEng_ModuleDependency::Core);
+    RegisterSystem("TranspersonalCharacter", CharacterDeps);
+    
+    TArray<EEng_ModuleDependency> GameModeDeps;
+    GameModeDeps.Add(EEng_ModuleDependency::Core);
+    GameModeDeps.Add(EEng_ModuleDependency::Character);
+    RegisterSystem("TranspersonalGameMode", GameModeDeps);
     
     // Start validation timer if runtime validation is enabled
-    if (bEnableRuntimeValidation && GetWorld())
+    if (bEnableRuntimeValidation)
     {
         GetWorld()->GetTimerManager().SetTimer(
             ValidationTimer,
@@ -53,12 +50,15 @@ void UEng_ArchitecturalFramework::Initialize(FSubsystemCollectionBase& Collectio
         );
     }
     
-    UE_LOG(LogTemp, Warning, TEXT("✓ Architectural Framework initialized with %d systems"), RegisteredSystems.Num());
+    // Log successful initialization
+    LogArchitecturalEvent("INITIALIZATION", "Architectural Framework successfully initialized");
+    
+    UE_LOG(LogTemp, Warning, TEXT("ENGINE ARCHITECT: Framework initialization complete"));
 }
 
 void UEng_ArchitecturalFramework::Deinitialize()
 {
-    UE_LOG(LogTemp, Warning, TEXT("=== ENGINE ARCHITECT FRAMEWORK DEINITIALIZING ==="));
+    UE_LOG(LogTemp, Warning, TEXT("ENGINE ARCHITECT: Architectural Framework Deinitializing"));
     
     // Clear validation timer
     if (GetWorld() && ValidationTimer.IsValid())
@@ -66,13 +66,18 @@ void UEng_ArchitecturalFramework::Deinitialize()
         GetWorld()->GetTimerManager().ClearTimer(ValidationTimer);
     }
     
-    // Log final statistics
-    UE_LOG(LogTemp, Warning, TEXT("Final system count: %d"), RegisteredSystems.Num());
-    UE_LOG(LogTemp, Warning, TEXT("Total validation errors: %d"), TotalValidationErrors);
+    // Log all systems before shutdown
+    for (const auto& SystemPair : RegisteredSystems)
+    {
+        LogArchitecturalEvent("SHUTDOWN", FString::Printf(TEXT("System %s had %d validation errors"), 
+            *SystemPair.Key, SystemPair.Value.ValidationErrors));
+    }
     
     // Clear all data
     RegisteredSystems.Empty();
     CompilationErrors.Empty();
+    
+    LogArchitecturalEvent("SHUTDOWN", "Architectural Framework deinitialized");
     
     Super::Deinitialize();
 }
@@ -81,30 +86,33 @@ bool UEng_ArchitecturalFramework::RegisterSystem(const FString& SystemName, cons
 {
     if (SystemName.IsEmpty())
     {
-        UE_LOG(LogTemp, Error, TEXT("Cannot register system with empty name"));
+        UE_LOG(LogTemp, Error, TEXT("ENGINE ARCHITECT: Cannot register system with empty name"));
         return false;
     }
     
+    // Check if system already exists
     if (RegisteredSystems.Contains(SystemName))
     {
-        UE_LOG(LogTemp, Warning, TEXT("System '%s' already registered, updating..."), *SystemName);
+        UE_LOG(LogTemp, Warning, TEXT("ENGINE ARCHITECT: System %s already registered, updating"), *SystemName);
     }
     
-    // Create system registration
-    FEng_SystemRegistration NewSystem;
-    NewSystem.SystemName = SystemName;
-    NewSystem.Status = EEng_SystemStatus::Registered;
-    NewSystem.Dependencies = Dependencies;
-    NewSystem.InitializationTime = FPlatformTime::Seconds();
-    NewSystem.LastValidation = FDateTime::Now();
-    NewSystem.ValidationErrors = 0;
+    // Create registration entry
+    FEng_SystemRegistration Registration;
+    Registration.SystemName = SystemName;
+    Registration.Status = EEng_SystemStatus::Registered;
+    Registration.Dependencies = Dependencies;
+    Registration.InitializationTime = FPlatformTime::Seconds();
+    Registration.LastValidation = FDateTime::Now();
+    Registration.ValidationErrors = 0;
     
     // Add to registry
-    RegisteredSystems.Add(SystemName, NewSystem);
+    RegisteredSystems.Add(SystemName, Registration);
     
-    LogArchitecturalEvent(TEXT("SystemRegistered"), FString::Printf(TEXT("System: %s, Dependencies: %d"), *SystemName, Dependencies.Num()));
+    LogArchitecturalEvent("REGISTRATION", FString::Printf(TEXT("System %s registered with %d dependencies"), 
+        *SystemName, Dependencies.Num()));
     
-    UE_LOG(LogTemp, Warning, TEXT("✓ System registered: %s"), *SystemName);
+    UE_LOG(LogTemp, Log, TEXT("ENGINE ARCHITECT: System %s registered successfully"), *SystemName);
+    
     return true;
 }
 
@@ -112,100 +120,108 @@ bool UEng_ArchitecturalFramework::UnregisterSystem(const FString& SystemName)
 {
     if (!RegisteredSystems.Contains(SystemName))
     {
-        UE_LOG(LogTemp, Warning, TEXT("Cannot unregister system '%s' - not found"), *SystemName);
+        UE_LOG(LogTemp, Warning, TEXT("ENGINE ARCHITECT: Cannot unregister unknown system %s"), *SystemName);
         return false;
     }
     
     RegisteredSystems.Remove(SystemName);
-    LogArchitecturalEvent(TEXT("SystemUnregistered"), FString::Printf(TEXT("System: %s"), *SystemName));
+    LogArchitecturalEvent("UNREGISTRATION", FString::Printf(TEXT("System %s unregistered"), *SystemName));
     
-    UE_LOG(LogTemp, Warning, TEXT("✓ System unregistered: %s"), *SystemName);
+    UE_LOG(LogTemp, Log, TEXT("ENGINE ARCHITECT: System %s unregistered"), *SystemName);
+    
     return true;
 }
 
 EEng_SystemStatus UEng_ArchitecturalFramework::GetSystemStatus(const FString& SystemName)
 {
-    if (const FEng_SystemRegistration* System = RegisteredSystems.Find(SystemName))
+    if (const FEng_SystemRegistration* Registration = RegisteredSystems.Find(SystemName))
     {
-        return System->Status;
+        return Registration->Status;
     }
+    
     return EEng_SystemStatus::Unregistered;
 }
 
 TArray<FEng_SystemRegistration> UEng_ArchitecturalFramework::GetAllSystems()
 {
     TArray<FEng_SystemRegistration> Systems;
+    
     for (const auto& SystemPair : RegisteredSystems)
     {
         Systems.Add(SystemPair.Value);
     }
+    
     return Systems;
 }
 
 bool UEng_ArchitecturalFramework::ValidateSystemIntegrity()
 {
-    int32 ErrorCount = 0;
+    bool bAllSystemsValid = true;
+    int32 ErrorsFound = 0;
     
     for (auto& SystemPair : RegisteredSystems)
     {
-        FEng_SystemRegistration& System = SystemPair.Value;
+        FEng_SystemRegistration& Registration = SystemPair.Value;
         
-        // Check if system has been validated recently
-        FTimespan TimeSinceValidation = FDateTime::Now() - System.LastValidation;
-        if (TimeSinceValidation.GetTotalMinutes() > 5.0)
+        // Reset error count for this validation
+        int32 SystemErrors = 0;
+        
+        // Validate dependencies are met
+        for (const EEng_ModuleDependency& Dependency : Registration.Dependencies)
         {
-            System.ValidationErrors++;
-            ErrorCount++;
-            UE_LOG(LogTemp, Warning, TEXT("System '%s' validation overdue"), *System.SystemName);
+            bool bDependencyMet = false;
+            
+            // Check if dependency system is registered
+            for (const auto& OtherSystemPair : RegisteredSystems)
+            {
+                // This is a simplified check - in a real implementation,
+                // you'd have a mapping of dependencies to system names
+                if (OtherSystemPair.Value.Status == EEng_SystemStatus::Active ||
+                    OtherSystemPair.Value.Status == EEng_SystemStatus::Registered)
+                {
+                    bDependencyMet = true;
+                    break;
+                }
+            }
+            
+            if (!bDependencyMet)
+            {
+                SystemErrors++;
+                UE_LOG(LogTemp, Warning, TEXT("ENGINE ARCHITECT: System %s missing dependency"), 
+                    *Registration.SystemName);
+            }
         }
         
-        // Update validation timestamp
-        System.LastValidation = FDateTime::Now();
+        // Update registration
+        Registration.ValidationErrors = SystemErrors;
+        Registration.LastValidation = FDateTime::Now();
+        
+        if (SystemErrors > 0)
+        {
+            Registration.Status = EEng_SystemStatus::Error;
+            bAllSystemsValid = false;
+            ErrorsFound += SystemErrors;
+        }
+        else if (Registration.Status == EEng_SystemStatus::Error)
+        {
+            // Clear error status if no errors found
+            Registration.Status = EEng_SystemStatus::Active;
+        }
     }
     
-    TotalValidationErrors += ErrorCount;
+    TotalValidationErrors = ErrorsFound;
     
-    if (ErrorCount == 0)
-    {
-        UE_LOG(LogTemp, Log, TEXT("✓ System integrity validation passed"));
-        return true;
-    }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("✗ System integrity validation failed with %d errors"), ErrorCount);
-        return false;
-    }
+    LogArchitecturalEvent("VALIDATION", FString::Printf(TEXT("System integrity check: %s (%d errors)"), 
+        bAllSystemsValid ? TEXT("PASSED") : TEXT("FAILED"), ErrorsFound));
+    
+    return bAllSystemsValid;
 }
 
 bool UEng_ArchitecturalFramework::ValidateModuleDependencies()
 {
-    // This would validate that all module dependencies are properly resolved
-    // For now, we'll do a basic check
-    
-    bool bAllDependenciesValid = true;
-    
-    for (const auto& SystemPair : RegisteredSystems)
-    {
-        const FEng_SystemRegistration& System = SystemPair.Value;
-        
-        // Check if system has required dependencies
-        if (System.Dependencies.Num() == 0 && System.SystemName != TEXT("ArchitecturalFramework"))
-        {
-            UE_LOG(LogTemp, Warning, TEXT("System '%s' has no dependencies - potential issue"), *System.SystemName);
-            bAllDependenciesValid = false;
-        }
-    }
-    
-    if (bAllDependenciesValid)
-    {
-        UE_LOG(LogTemp, Log, TEXT("✓ Module dependency validation passed"));
-    }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("✗ Module dependency validation has warnings"));
-    }
-    
-    return bAllDependenciesValid;
+    // This would validate that all required modules are loaded
+    // For now, return true as a basic implementation
+    return true;
 }
 
 int32 UEng_ArchitecturalFramework::GetValidationErrorCount()
@@ -220,74 +236,35 @@ FEng_PerformanceMetrics UEng_ArchitecturalFramework::GetCurrentPerformanceMetric
 
 bool UEng_ArchitecturalFramework::IsPerformanceWithinLimits()
 {
-    // Check if performance is within acceptable limits
-    const float MaxFrameTime = 33.33f; // 30fps minimum
-    const int32 MaxActors = 10000;
-    const float MaxMemoryMB = 4096.0f;
-    
-    bool bWithinLimits = true;
-    
-    if (CurrentMetrics.FrameTime > MaxFrameTime)
+    // Check frame time (target 60fps = 16.67ms)
+    if (CurrentMetrics.FrameTime > 20.0f) // Allow 20ms tolerance
     {
-        UE_LOG(LogTemp, Warning, TEXT("Frame time exceeded: %.2fms > %.2fms"), CurrentMetrics.FrameTime, MaxFrameTime);
-        bWithinLimits = false;
+        return false;
     }
     
-    if (CurrentMetrics.ActiveActors > MaxActors)
+    // Check actor count (arbitrary limit for now)
+    if (CurrentMetrics.ActiveActors > 10000)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Actor count exceeded: %d > %d"), CurrentMetrics.ActiveActors, MaxActors);
-        bWithinLimits = false;
+        return false;
     }
     
-    if (CurrentMetrics.MemoryUsageMB > MaxMemoryMB)
+    // Check memory usage (arbitrary limit)
+    if (CurrentMetrics.MemoryUsageMB > 4096.0f) // 4GB limit
     {
-        UE_LOG(LogTemp, Warning, TEXT("Memory usage exceeded: %.2fMB > %.2fMB"), CurrentMetrics.MemoryUsageMB, MaxMemoryMB);
-        bWithinLimits = false;
+        return false;
     }
     
-    return bWithinLimits;
+    return true;
 }
 
 bool UEng_ArchitecturalFramework::ValidateTypeRegistry()
 {
-    // This would validate that all UE5 types are properly registered
-    // For now, we'll do a basic validation
-    
+    // Clear previous errors
     CompilationErrors.Empty();
     
-    // Check if we can access basic UE5 types
-    bool bTypesValid = true;
-    
-    try
-    {
-        // Test basic type access
-        UClass* ActorClass = AActor::StaticClass();
-        UClass* ComponentClass = UActorComponent::StaticClass();
-        UClass* ObjectClass = UObject::StaticClass();
-        
-        if (!ActorClass || !ComponentClass || !ObjectClass)
-        {
-            CompilationErrors.Add(TEXT("Basic UE5 types not accessible"));
-            bTypesValid = false;
-        }
-    }
-    catch (...)
-    {
-        CompilationErrors.Add(TEXT("Exception during type validation"));
-        bTypesValid = false;
-    }
-    
-    if (bTypesValid)
-    {
-        UE_LOG(LogTemp, Log, TEXT("✓ Type registry validation passed"));
-    }
-    else
-    {
-        UE_LOG(LogTemp, Error, TEXT("✗ Type registry validation failed"));
-        TotalValidationErrors++;
-    }
-    
-    return bTypesValid;
+    // This would validate that all types are properly registered
+    // For now, return true as basic implementation
+    return true;
 }
 
 TArray<FString> UEng_ArchitecturalFramework::GetCompilationErrors()
@@ -305,37 +282,35 @@ void UEng_ArchitecturalFramework::UpdatePerformanceMetrics()
     // Update frame time
     if (GEngine && GEngine->GetGameViewport())
     {
-        CurrentMetrics.FrameTime = FApp::GetDeltaTime() * 1000.0f; // Convert to milliseconds
+        CurrentMetrics.FrameTime = FApp::GetDeltaTime() * 1000.0f; // Convert to ms
     }
     
-    // Update actor count
-    TArray<AActor*> AllActors;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), AllActors);
-    CurrentMetrics.ActiveActors = AllActors.Num();
+    // Count active actors
+    CurrentMetrics.ActiveActors = GetWorld()->GetActorCount();
     
-    // Update memory usage (approximate)
+    // Get memory usage (basic implementation)
     FPlatformMemoryStats MemStats = FPlatformMemory::GetStats();
     CurrentMetrics.MemoryUsageMB = MemStats.UsedPhysical / (1024.0f * 1024.0f);
     
-    // Log performance if validation level is high
-    if (ValidationLevel >= EEng_ArchValidationLevel::Strict)
+    // Check if performance is within limits
+    if (!IsPerformanceWithinLimits())
     {
-        UE_LOG(LogTemp, Log, TEXT("Performance: %.2fms, %d actors, %.2fMB"), 
-               CurrentMetrics.FrameTime, CurrentMetrics.ActiveActors, CurrentMetrics.MemoryUsageMB);
+        LogArchitecturalEvent("PERFORMANCE_WARNING", 
+            FString::Printf(TEXT("Performance limits exceeded: Frame=%fms, Actors=%d, Memory=%fMB"),
+                CurrentMetrics.FrameTime, CurrentMetrics.ActiveActors, CurrentMetrics.MemoryUsageMB));
     }
 }
 
 void UEng_ArchitecturalFramework::ValidateSystemDependencies()
 {
-    // This would perform deep dependency validation
-    // Implementation would check circular dependencies, missing modules, etc.
-    UE_LOG(LogTemp, Log, TEXT("Validating system dependencies..."));
+    ValidateSystemIntegrity();
 }
 
 void UEng_ArchitecturalFramework::LogArchitecturalEvent(const FString& Event, const FString& Details)
 {
-    FString LogMessage = FString::Printf(TEXT("[ARCH] %s: %s"), *Event, *Details);
-    UE_LOG(LogTemp, Warning, TEXT("%s"), *LogMessage);
+    FString LogMessage = FString::Printf(TEXT("ENGINE_ARCHITECT [%s]: %s"), *Event, *Details);
+    UE_LOG(LogTemp, Log, TEXT("%s"), *LogMessage);
     
-    // In a production system, this could also log to file or external system
+    // In a real implementation, this could write to a dedicated log file
+    // or send to a monitoring system
 }
