@@ -1,525 +1,464 @@
 #include "Audio_MetaSoundManager.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "GameFramework/Pawn.h"
 #include "Kismet/GameplayStatics.h"
 #include "Components/AudioComponent.h"
 #include "Sound/SoundCue.h"
 #include "MetasoundSource.h"
-#include "../TranspersonalGameState.h"
-#include "../TranspersonalCharacter.h"
 
-UAudio_MetaSoundManager::UAudio_MetaSoundManager()
+void UAudio_MetaSoundManager::Initialize(FSubsystemCollectionBase& Collection)
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.TickInterval = 0.1f; // 10 FPS for audio updates
-
-    // Initialize default values
-    MasterVolume = 1.0f;
-    EnvironmentalVolume = 0.8f;
-    MusicVolume = 0.6f;
-    CurrentGameplayState = EGameplayState::Exploration;
-    CurrentTimeOfDay = ETimeOfDay::Dawn;
-
-    // Performance optimization settings
-    LastProximityCheck = 0.0f;
-    ProximityCheckInterval = 0.5f; // Check proximity twice per second
-    LastAudioUpdate = 0.0f;
-    AudioUpdateInterval = 0.1f; // Update audio 10 times per second
-
-    // Initialize audio components
-    EnvironmentalAudioComponent = nullptr;
-    MusicAudioComponent = nullptr;
-    ProximityAudioComponent = nullptr;
-
-    // Setup default environmental layers
-    FAudio_SoundLayer BaseLayer;
-    BaseLayer.LayerName = TEXT("BaseAmbient");
-    BaseLayer.Volume = 0.7f;
-    BaseLayer.bIsActive = true;
-    EnvironmentalLayers.Add(BaseLayer);
-
-    FAudio_SoundLayer WindLayer;
-    WindLayer.LayerName = TEXT("Wind");
-    WindLayer.Volume = 0.5f;
-    WindLayer.bIsActive = false;
-    EnvironmentalLayers.Add(WindLayer);
-
-    FAudio_SoundLayer InsectLayer;
-    InsectLayer.LayerName = TEXT("Insects");
-    InsectLayer.Volume = 0.6f;
-    InsectLayer.bIsActive = true;
-    EnvironmentalLayers.Add(InsectLayer);
-
-    FAudio_SoundLayer BirdLayer;
-    BirdLayer.LayerName = TEXT("Birds");
-    BirdLayer.Volume = 0.4f;
-    BirdLayer.bIsActive = true;
-    EnvironmentalLayers.Add(BirdLayer);
-
-    // Setup default proximity triggers
-    FAudio_ProximityTrigger TRexTrigger;
-    TRexTrigger.TriggerSpecies = EDinosaurSpecies::TRex;
-    TRexTrigger.TriggerDistance = 3000.0f;
-    TRexTrigger.CooldownTime = 45.0f;
-    ProximityTriggers.Add(TRexTrigger);
-
-    FAudio_ProximityTrigger RaptorTrigger;
-    RaptorTrigger.TriggerSpecies = EDinosaurSpecies::Velociraptor;
-    RaptorTrigger.TriggerDistance = 1500.0f;
-    RaptorTrigger.CooldownTime = 25.0f;
-    ProximityTriggers.Add(RaptorTrigger);
-
-    FAudio_ProximityTrigger BrachiosaurusTrigger;
-    BrachiosaurusTrigger.TriggerSpecies = EDinosaurSpecies::Brachiosaurus;
-    BrachiosaurusTrigger.TriggerDistance = 2500.0f;
-    BrachiosaurusTrigger.CooldownTime = 60.0f;
-    ProximityTriggers.Add(BrachiosaurusTrigger);
-}
-
-void UAudio_MetaSoundManager::BeginPlay()
-{
-    Super::BeginPlay();
+    Super::Initialize(Collection);
     
-    InitializeAudioComponents();
+    UE_LOG(LogTemp, Warning, TEXT("Audio_MetaSoundManager: Initializing MetaSound-based audio system"));
     
-    // Start with exploration music
-    TransitionToGameplayState(EGameplayState::Exploration, 0.0f);
+    // Initialize default environment settings
+    CurrentEnvironment.AmbientVolume = 0.7f;
+    CurrentEnvironment.MusicVolume = 0.5f;
+    CurrentEnvironment.EffectsVolume = 0.8f;
+    CurrentEnvironment.CurrentBiome = EBiomeType::Forest;
+    CurrentEnvironment.TimeOfDay = 12.0f;
+    CurrentEnvironment.ThreatLevel = 0.0f;
     
-    UE_LOG(LogTemp, Warning, TEXT("Audio_MetaSoundManager: Initialized with %d environmental layers and %d proximity triggers"), 
-           EnvironmentalLayers.Num(), ProximityTriggers.Num());
-}
-
-void UAudio_MetaSoundManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
-{
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-
-    // Update audio systems at different intervals for performance
-    if (CurrentTime - LastAudioUpdate >= AudioUpdateInterval)
+    // Load MetaSound assets
+    LoadMetaSoundAssets();
+    
+    // Create audio components when world is available
+    if (UWorld* World = GetWorld())
     {
-        UpdateEnvironmentalAudio(DeltaTime);
-        UpdateDynamicMusic(DeltaTime);
-        ProcessAudioFades(DeltaTime);
-        LastAudioUpdate = CurrentTime;
-    }
-
-    // Check proximity triggers less frequently
-    if (CurrentTime - LastProximityCheck >= ProximityCheckInterval)
-    {
-        CheckProximityTriggers();
-        LastProximityCheck = CurrentTime;
-    }
-}
-
-void UAudio_MetaSoundManager::InitializeAudioComponents()
-{
-    AActor* Owner = GetOwner();
-    if (!Owner)
-    {
-        UE_LOG(LogTemp, Error, TEXT("Audio_MetaSoundManager: No owner actor found"));
-        return;
-    }
-
-    // Create environmental audio component
-    EnvironmentalAudioComponent = NewObject<UAudioComponent>(Owner);
-    if (EnvironmentalAudioComponent)
-    {
-        EnvironmentalAudioComponent->AttachToComponent(Owner->GetRootComponent(), 
-                                                     FAttachmentTransformRules::KeepWorldTransform);
-        EnvironmentalAudioComponent->SetVolumeMultiplier(EnvironmentalVolume);
-        EnvironmentalAudioComponent->bAutoActivate = true;
-    }
-
-    // Create music audio component
-    MusicAudioComponent = NewObject<UAudioComponent>(Owner);
-    if (MusicAudioComponent)
-    {
-        MusicAudioComponent->AttachToComponent(Owner->GetRootComponent(), 
-                                             FAttachmentTransformRules::KeepWorldTransform);
-        MusicAudioComponent->SetVolumeMultiplier(MusicVolume);
-        MusicAudioComponent->bAutoActivate = true;
-    }
-
-    // Create proximity warning audio component
-    ProximityAudioComponent = NewObject<UAudioComponent>(Owner);
-    if (ProximityAudioComponent)
-    {
-        ProximityAudioComponent->AttachToComponent(Owner->GetRootComponent(), 
-                                                 FAttachmentTransformRules::KeepWorldTransform);
-        ProximityAudioComponent->SetVolumeMultiplier(1.0f);
-        ProximityAudioComponent->bAutoActivate = false;
-    }
-
-    // Create layer-specific audio components
-    for (int32 i = 0; i < EnvironmentalLayers.Num(); i++)
-    {
-        UAudioComponent* LayerComponent = NewObject<UAudioComponent>(Owner);
-        if (LayerComponent)
+        // Create ambient audio component
+        AmbientAudioComponent = UGameplayStatics::SpawnSound2D(World, nullptr, CurrentEnvironment.AmbientVolume, 1.0f, 0.0f, nullptr, false, false);
+        if (AmbientAudioComponent)
         {
-            LayerComponent->AttachToComponent(Owner->GetRootComponent(), 
-                                            FAttachmentTransformRules::KeepWorldTransform);
-            LayerComponent->SetVolumeMultiplier(EnvironmentalLayers[i].Volume);
-            LayerComponent->bAutoActivate = EnvironmentalLayers[i].bIsActive;
-            LayerAudioComponents.Add(LayerComponent);
+            AmbientAudioComponent->bAutoDestroy = false;
+        }
+        
+        // Create music audio component
+        MusicAudioComponent = UGameplayStatics::SpawnSound2D(World, nullptr, CurrentEnvironment.MusicVolume, 1.0f, 0.0f, nullptr, false, false);
+        if (MusicAudioComponent)
+        {
+            MusicAudioComponent->bAutoDestroy = false;
+        }
+        
+        // Create effects audio component
+        EffectsAudioComponent = UGameplayStatics::SpawnSound2D(World, nullptr, CurrentEnvironment.EffectsVolume, 1.0f, 0.0f, nullptr, false, false);
+        if (EffectsAudioComponent)
+        {
+            EffectsAudioComponent->bAutoDestroy = false;
+        }
+        
+        // Create narration audio component
+        NarrationAudioComponent = UGameplayStatics::SpawnSound2D(World, nullptr, 1.0f, 1.0f, 0.0f, nullptr, false, false);
+        if (NarrationAudioComponent)
+        {
+            NarrationAudioComponent->bAutoDestroy = false;
+        }
+        
+        UE_LOG(LogTemp, Warning, TEXT("Audio_MetaSoundManager: Audio components created successfully"));
+    }
+}
+
+void UAudio_MetaSoundManager::Deinitialize()
+{
+    // Clean up audio components
+    if (AmbientAudioComponent && IsValid(AmbientAudioComponent))
+    {
+        AmbientAudioComponent->Stop();
+        AmbientAudioComponent = nullptr;
+    }
+    
+    if (MusicAudioComponent && IsValid(MusicAudioComponent))
+    {
+        MusicAudioComponent->Stop();
+        MusicAudioComponent = nullptr;
+    }
+    
+    if (EffectsAudioComponent && IsValid(EffectsAudioComponent))
+    {
+        EffectsAudioComponent->Stop();
+        EffectsAudioComponent = nullptr;
+    }
+    
+    if (NarrationAudioComponent && IsValid(NarrationAudioComponent))
+    {
+        NarrationAudioComponent->Stop();
+        NarrationAudioComponent = nullptr;
+    }
+    
+    // Clear proximity triggers
+    ProximityTriggers.Empty();
+    
+    // Clear MetaSound assets
+    MetaSoundAssets.Empty();
+    
+    UE_LOG(LogTemp, Warning, TEXT("Audio_MetaSoundManager: Deinitialized"));
+    
+    Super::Deinitialize();
+}
+
+void UAudio_MetaSoundManager::SetEnvironmentSettings(const FAudio_EnvironmentSettings& Settings)
+{
+    CurrentEnvironment = Settings;
+    
+    // Update audio component volumes
+    if (AmbientAudioComponent && IsValid(AmbientAudioComponent))
+    {
+        AmbientAudioComponent->SetVolumeMultiplier(Settings.AmbientVolume);
+    }
+    
+    if (MusicAudioComponent && IsValid(MusicAudioComponent))
+    {
+        MusicAudioComponent->SetVolumeMultiplier(Settings.MusicVolume);
+    }
+    
+    if (EffectsAudioComponent && IsValid(EffectsAudioComponent))
+    {
+        EffectsAudioComponent->SetVolumeMultiplier(Settings.EffectsVolume);
+    }
+    
+    // Update ambient and music based on new settings
+    UpdateAmbientAudio();
+    UpdateMusicIntensity();
+    
+    UE_LOG(LogTemp, Warning, TEXT("Audio_MetaSoundManager: Environment settings updated - Biome: %d, Time: %.1f, Threat: %.2f"), 
+           (int32)Settings.CurrentBiome, Settings.TimeOfDay, Settings.ThreatLevel);
+}
+
+void UAudio_MetaSoundManager::UpdateBiomeAudio(EBiomeType NewBiome)
+{
+    if (CurrentEnvironment.CurrentBiome != NewBiome)
+    {
+        CurrentEnvironment.CurrentBiome = NewBiome;
+        UpdateAmbientAudio();
+        
+        UE_LOG(LogTemp, Warning, TEXT("Audio_MetaSoundManager: Biome changed to %d"), (int32)NewBiome);
+    }
+}
+
+void UAudio_MetaSoundManager::UpdateTimeOfDay(float Hours)
+{
+    CurrentEnvironment.TimeOfDay = FMath::Fmod(Hours, 24.0f);
+    UpdateAmbientAudio();
+    UpdateMusicIntensity();
+    
+    UE_LOG(LogTemp, Log, TEXT("Audio_MetaSoundManager: Time of day updated to %.1f hours"), Hours);
+}
+
+void UAudio_MetaSoundManager::SetThreatLevel(float Level)
+{
+    CurrentEnvironment.ThreatLevel = FMath::Clamp(Level, 0.0f, 1.0f);
+    UpdateMusicIntensity();
+    
+    UE_LOG(LogTemp, Warning, TEXT("Audio_MetaSoundManager: Threat level set to %.2f"), Level);
+}
+
+void UAudio_MetaSoundManager::RegisterProximityTrigger(AActor* TriggerActor, const FAudio_ProximityTrigger& TriggerData)
+{
+    if (TriggerActor && IsValid(TriggerActor))
+    {
+        ProximityTriggers.Add(TriggerActor, TriggerData);
+        UE_LOG(LogTemp, Warning, TEXT("Audio_MetaSoundManager: Proximity trigger registered for %s"), *TriggerActor->GetName());
+    }
+}
+
+void UAudio_MetaSoundManager::UnregisterProximityTrigger(AActor* TriggerActor)
+{
+    if (ProximityTriggers.Remove(TriggerActor) > 0)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Audio_MetaSoundManager: Proximity trigger unregistered"));
+    }
+}
+
+void UAudio_MetaSoundManager::UpdateProximityAudio(const FVector& PlayerLocation)
+{
+    for (auto& TriggerPair : ProximityTriggers)
+    {
+        AActor* TriggerActor = TriggerPair.Key;
+        FAudio_ProximityTrigger& TriggerData = TriggerPair.Value;
+        
+        if (!TriggerActor || !IsValid(TriggerActor) || !TriggerData.bIsActive)
+        {
+            continue;
+        }
+        
+        float Distance = FVector::Dist(PlayerLocation, TriggerActor->GetActorLocation());
+        
+        if (Distance <= TriggerData.TriggerDistance)
+        {
+            float Volume = CalculateProximityVolume(Distance, TriggerData);
+            PlayEnvironmentalEffect(TriggerData.AudioEventName, TriggerActor->GetActorLocation(), Volume);
         }
     }
-
-    UE_LOG(LogTemp, Warning, TEXT("Audio_MetaSoundManager: Initialized %d audio components"), 
-           LayerAudioComponents.Num() + 3);
 }
 
-void UAudio_MetaSoundManager::SetEnvironmentalLayer(const FString& LayerName, bool bActive, float FadeTime)
+void UAudio_MetaSoundManager::PlayAdaptiveMusic(const FString& MusicLayer)
 {
-    for (int32 i = 0; i < EnvironmentalLayers.Num(); i++)
+    UMetaSoundSource* MetaSound = GetMetaSoundAsset(MusicLayer);
+    if (MetaSound && MusicAudioComponent && IsValid(MusicAudioComponent))
     {
-        if (EnvironmentalLayers[i].LayerName == LayerName)
+        MusicAudioComponent->SetSound(MetaSound);
+        MusicAudioComponent->Play();
+        
+        UE_LOG(LogTemp, Warning, TEXT("Audio_MetaSoundManager: Playing adaptive music layer: %s"), *MusicLayer);
+    }
+}
+
+void UAudio_MetaSoundManager::StopAdaptiveMusic()
+{
+    if (MusicAudioComponent && IsValid(MusicAudioComponent))
+    {
+        MusicAudioComponent->Stop();
+        UE_LOG(LogTemp, Warning, TEXT("Audio_MetaSoundManager: Adaptive music stopped"));
+    }
+}
+
+void UAudio_MetaSoundManager::CrossfadeToLayer(const FString& NewLayer, float FadeTime)
+{
+    // For now, implement as simple transition
+    // TODO: Implement proper crossfading with MetaSound parameters
+    StopAdaptiveMusic();
+    
+    // Delay before starting new layer
+    if (UWorld* World = GetWorld())
+    {
+        FTimerHandle TimerHandle;
+        World->GetTimerManager().SetTimer(TimerHandle, [this, NewLayer]()
         {
-            EnvironmentalLayers[i].bIsActive = bActive;
-            EnvironmentalLayers[i].FadeTime = FadeTime;
-            
-            // Set fade target and speed
-            float TargetVolume = bActive ? EnvironmentalLayers[i].Volume : 0.0f;
-            LayerFadeTargets.Add(LayerName, TargetVolume);
-            LayerFadeSpeeds.Add(LayerName, FMath::Abs(TargetVolume) / FadeTime);
-            
-            UE_LOG(LogTemp, Log, TEXT("Audio_MetaSoundManager: Set layer '%s' to %s with fade time %.2f"), 
-                   *LayerName, bActive ? TEXT("active") : TEXT("inactive"), FadeTime);
-            return;
-        }
+            PlayAdaptiveMusic(NewLayer);
+        }, FadeTime * 0.5f, false);
     }
     
-    UE_LOG(LogTemp, Warning, TEXT("Audio_MetaSoundManager: Layer '%s' not found"), *LayerName);
+    UE_LOG(LogTemp, Warning, TEXT("Audio_MetaSoundManager: Crossfading to layer: %s over %.1fs"), *NewLayer, FadeTime);
 }
 
-void UAudio_MetaSoundManager::UpdateTimeOfDayAudio(ETimeOfDay NewTimeOfDay)
+void UAudio_MetaSoundManager::PlayEnvironmentalEffect(const FString& EffectName, const FVector& Location, float Volume)
 {
-    if (CurrentTimeOfDay == NewTimeOfDay)
-        return;
-
-    CurrentTimeOfDay = NewTimeOfDay;
-
-    // Adjust environmental layers based on time of day
-    switch (NewTimeOfDay)
+    UMetaSoundSource* MetaSound = GetMetaSoundAsset(EffectName);
+    if (MetaSound && EffectsAudioComponent && IsValid(EffectsAudioComponent))
     {
-        case ETimeOfDay::Dawn:
-            SetEnvironmentalLayer(TEXT("Birds"), true, 3.0f);
-            SetEnvironmentalLayer(TEXT("Insects"), false, 2.0f);
-            SetEnvironmentalLayer(TEXT("Wind"), false, 2.0f);
-            break;
-            
-        case ETimeOfDay::Day:
-            SetEnvironmentalLayer(TEXT("Birds"), true, 2.0f);
-            SetEnvironmentalLayer(TEXT("Insects"), true, 3.0f);
-            SetEnvironmentalLayer(TEXT("Wind"), true, 2.0f);
-            break;
-            
-        case ETimeOfDay::Dusk:
-            SetEnvironmentalLayer(TEXT("Birds"), false, 3.0f);
-            SetEnvironmentalLayer(TEXT("Insects"), true, 2.0f);
-            SetEnvironmentalLayer(TEXT("Wind"), true, 1.0f);
-            break;
-            
-        case ETimeOfDay::Night:
-            SetEnvironmentalLayer(TEXT("Birds"), false, 1.0f);
-            SetEnvironmentalLayer(TEXT("Insects"), true, 2.0f);
-            SetEnvironmentalLayer(TEXT("Wind"), true, 3.0f);
-            break;
+        EffectsAudioComponent->SetSound(MetaSound);
+        EffectsAudioComponent->SetVolumeMultiplier(Volume * CurrentEnvironment.EffectsVolume);
+        EffectsAudioComponent->Play();
+        
+        UE_LOG(LogTemp, Log, TEXT("Audio_MetaSoundManager: Playing environmental effect: %s at volume %.2f"), *EffectName, Volume);
     }
-
-    UE_LOG(LogTemp, Log, TEXT("Audio_MetaSoundManager: Updated audio for time of day: %d"), (int32)NewTimeOfDay);
 }
 
-void UAudio_MetaSoundManager::UpdateWeatherAudio(EWeatherType WeatherType, float Intensity)
+void UAudio_MetaSoundManager::StartWeatherAudio(EWeatherType WeatherType)
 {
+    FString WeatherSoundName;
+    
     switch (WeatherType)
     {
         case EWeatherType::Clear:
-            SetEnvironmentalLayer(TEXT("Wind"), false, 2.0f);
+            WeatherSoundName = TEXT("Weather_Clear");
             break;
-            
-        case EWeatherType::Cloudy:
-            SetEnvironmentalLayer(TEXT("Wind"), true, 3.0f);
+        case EWeatherType::Rain:
+            WeatherSoundName = TEXT("Weather_Rain");
             break;
-            
-        case EWeatherType::Rainy:
-            SetEnvironmentalLayer(TEXT("Wind"), true, 1.0f);
-            // Would add rain layer here if available
+        case EWeatherType::Storm:
+            WeatherSoundName = TEXT("Weather_Storm");
             break;
-            
-        case EWeatherType::Stormy:
-            SetEnvironmentalLayer(TEXT("Wind"), true, 0.5f);
-            SetEnvironmentalLayer(TEXT("Birds"), false, 1.0f);
+        case EWeatherType::Fog:
+            WeatherSoundName = TEXT("Weather_Fog");
+            break;
+        default:
+            WeatherSoundName = TEXT("Weather_Clear");
             break;
     }
-
-    UE_LOG(LogTemp, Log, TEXT("Audio_MetaSoundManager: Updated weather audio: %d, Intensity: %.2f"), 
-           (int32)WeatherType, Intensity);
+    
+    PlayEnvironmentalEffect(WeatherSoundName, FVector::ZeroVector, 1.0f);
+    
+    UE_LOG(LogTemp, Warning, TEXT("Audio_MetaSoundManager: Started weather audio: %s"), *WeatherSoundName);
 }
 
-void UAudio_MetaSoundManager::CheckProximityTriggers()
+void UAudio_MetaSoundManager::StopWeatherAudio()
 {
-    TArray<AActor*> NearbyDinosaurs = GetNearbyDinosaurs(5000.0f); // Check within 5km
-    float CurrentTime = GetWorld()->GetTimeSeconds();
-
-    for (const FAudio_ProximityTrigger& Trigger : ProximityTriggers)
+    if (EffectsAudioComponent && IsValid(EffectsAudioComponent))
     {
-        // Check cooldown
-        if (CurrentTime - Trigger.LastTriggered < Trigger.CooldownTime)
-            continue;
+        EffectsAudioComponent->Stop();
+        UE_LOG(LogTemp, Warning, TEXT("Audio_MetaSoundManager: Weather audio stopped"));
+    }
+}
 
-        // Find closest dinosaur of this species
-        float ClosestDistance = FLT_MAX;
-        AActor* ClosestDinosaur = nullptr;
-
-        for (AActor* Dinosaur : NearbyDinosaurs)
+void UAudio_MetaSoundManager::PlayNarration(const FString& NarrationKey, bool bInterruptCurrent)
+{
+    if (NarrationAudioComponent && IsValid(NarrationAudioComponent))
+    {
+        if (bInterruptCurrent || !NarrationAudioComponent->IsPlaying())
         {
-            // Would check dinosaur species here - simplified for now
-            float Distance = FVector::Dist(GetOwner()->GetActorLocation(), Dinosaur->GetActorLocation());
-            if (Distance < ClosestDistance && Distance <= Trigger.TriggerDistance)
+            UMetaSoundSource* NarrationSound = GetMetaSoundAsset(NarrationKey);
+            if (NarrationSound)
             {
-                ClosestDistance = Distance;
-                ClosestDinosaur = Dinosaur;
+                NarrationAudioComponent->SetSound(NarrationSound);
+                NarrationAudioComponent->Play();
+                
+                UE_LOG(LogTemp, Warning, TEXT("Audio_MetaSoundManager: Playing narration: %s"), *NarrationKey);
             }
-        }
-
-        if (ClosestDinosaur)
-        {
-            TriggerProximityWarning(Trigger.TriggerSpecies, ClosestDistance);
         }
     }
 }
 
-void UAudio_MetaSoundManager::TriggerProximityWarning(EDinosaurSpecies Species, float Distance)
+void UAudio_MetaSoundManager::StopNarration()
 {
-    // Update last triggered time
-    for (FAudio_ProximityTrigger& Trigger : ProximityTriggers)
+    if (NarrationAudioComponent && IsValid(NarrationAudioComponent))
     {
-        if (Trigger.TriggerSpecies == Species)
-        {
-            Trigger.LastTriggered = GetWorld()->GetTimeSeconds();
-            
-            // Play proximity sound
-            if (Trigger.ProximitySound && ProximityAudioComponent)
-            {
-                ProximityAudioComponent->SetSound(Trigger.ProximitySound);
-                ProximityAudioComponent->Play();
-            }
-            
-            // Play voice warning
-            if (Trigger.VoiceWarning && ProximityAudioComponent)
-            {
-                // Could queue voice warning after proximity sound
-                UGameplayStatics::PlaySoundAtLocation(GetWorld(), Trigger.VoiceWarning, 
-                                                    GetOwner()->GetActorLocation());
-            }
-            
-            UE_LOG(LogTemp, Warning, TEXT("Audio_MetaSoundManager: Triggered proximity warning for species %d at distance %.2f"), 
-                   (int32)Species, Distance);
-            break;
-        }
+        NarrationAudioComponent->Stop();
+        UE_LOG(LogTemp, Warning, TEXT("Audio_MetaSoundManager: Narration stopped"));
     }
 }
 
-void UAudio_MetaSoundManager::TransitionToGameplayState(EGameplayState NewState, float TransitionTime)
+bool UAudio_MetaSoundManager::IsNarrationPlaying() const
 {
-    if (CurrentGameplayState == NewState)
-        return;
+    return NarrationAudioComponent && IsValid(NarrationAudioComponent) && NarrationAudioComponent->IsPlaying();
+}
 
-    CurrentGameplayState = NewState;
+void UAudio_MetaSoundManager::LoadMetaSoundAssets()
+{
+    // Load MetaSound assets from content directory
+    // For now, create placeholder entries
+    MetaSoundAssets.Add(TEXT("Forest_Ambient"), nullptr);
+    MetaSoundAssets.Add(TEXT("Swamp_Ambient"), nullptr);
+    MetaSoundAssets.Add(TEXT("Savanna_Ambient"), nullptr);
+    MetaSoundAssets.Add(TEXT("Desert_Ambient"), nullptr);
+    MetaSoundAssets.Add(TEXT("Mountain_Ambient"), nullptr);
+    
+    MetaSoundAssets.Add(TEXT("Music_Peaceful"), nullptr);
+    MetaSoundAssets.Add(TEXT("Music_Tense"), nullptr);
+    MetaSoundAssets.Add(TEXT("Music_Combat"), nullptr);
+    
+    MetaSoundAssets.Add(TEXT("TRex_Footsteps"), nullptr);
+    MetaSoundAssets.Add(TEXT("Raptor_Calls"), nullptr);
+    MetaSoundAssets.Add(TEXT("Thunder_Lizard_Roar"), nullptr);
+    
+    MetaSoundAssets.Add(TEXT("Weather_Clear"), nullptr);
+    MetaSoundAssets.Add(TEXT("Weather_Rain"), nullptr);
+    MetaSoundAssets.Add(TEXT("Weather_Storm"), nullptr);
+    MetaSoundAssets.Add(TEXT("Weather_Fog"), nullptr);
+    
+    UE_LOG(LogTemp, Warning, TEXT("Audio_MetaSoundManager: MetaSound asset placeholders loaded"));
+}
 
-    // Transition music based on gameplay state
-    if (MusicAudioComponent)
+void UAudio_MetaSoundManager::UpdateAmbientAudio()
+{
+    FString AmbientSoundName;
+    
+    // Select ambient sound based on biome and time of day
+    switch (CurrentEnvironment.CurrentBiome)
     {
-        UMetaSoundSource* TargetMusic = nullptr;
-        
-        switch (NewState)
+        case EBiomeType::Forest:
+            AmbientSoundName = TEXT("Forest_Ambient");
+            break;
+        case EBiomeType::Swamp:
+            AmbientSoundName = TEXT("Swamp_Ambient");
+            break;
+        case EBiomeType::Savanna:
+            AmbientSoundName = TEXT("Savanna_Ambient");
+            break;
+        case EBiomeType::Desert:
+            AmbientSoundName = TEXT("Desert_Ambient");
+            break;
+        case EBiomeType::Mountain:
+            AmbientSoundName = TEXT("Mountain_Ambient");
+            break;
+        default:
+            AmbientSoundName = TEXT("Forest_Ambient");
+            break;
+    }
+    
+    // Modify volume based on time of day
+    float TimeVolume = 1.0f;
+    if (CurrentEnvironment.TimeOfDay < 6.0f || CurrentEnvironment.TimeOfDay > 20.0f)
+    {
+        TimeVolume = 0.7f; // Quieter at night
+    }
+    
+    if (AmbientAudioComponent && IsValid(AmbientAudioComponent))
+    {
+        UMetaSoundSource* AmbientSound = GetMetaSoundAsset(AmbientSoundName);
+        if (AmbientSound)
         {
-            case EGameplayState::Exploration:
-                TargetMusic = ExplorationMusicMetaSound;
-                break;
-                
-            case EGameplayState::Combat:
-                TargetMusic = CombatMusicMetaSound;
-                break;
-                
-            case EGameplayState::Tension:
-                TargetMusic = TensionMusicMetaSound;
-                break;
-                
-            case EGameplayState::Rest:
-                // Fade out music for rest state
-                break;
+            AmbientAudioComponent->SetSound(AmbientSound);
+            AmbientAudioComponent->SetVolumeMultiplier(CurrentEnvironment.AmbientVolume * TimeVolume);
+            
+            if (!AmbientAudioComponent->IsPlaying())
+            {
+                AmbientAudioComponent->Play();
+            }
         }
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Audio_MetaSoundManager: Updated ambient audio: %s (Volume: %.2f)"), *AmbientSoundName, TimeVolume);
+}
 
-        if (TargetMusic)
+void UAudio_MetaSoundManager::UpdateMusicIntensity()
+{
+    FString MusicLayer;
+    
+    // Select music based on threat level
+    if (CurrentEnvironment.ThreatLevel > 0.7f)
+    {
+        MusicLayer = TEXT("Music_Combat");
+    }
+    else if (CurrentEnvironment.ThreatLevel > 0.3f)
+    {
+        MusicLayer = TEXT("Music_Tense");
+    }
+    else
+    {
+        MusicLayer = TEXT("Music_Peaceful");
+    }
+    
+    // Adjust volume based on time of day
+    float TimeMultiplier = 1.0f;
+    if (CurrentEnvironment.TimeOfDay < 6.0f || CurrentEnvironment.TimeOfDay > 20.0f)
+    {
+        TimeMultiplier = 0.8f; // Slightly quieter music at night
+    }
+    
+    if (MusicAudioComponent && IsValid(MusicAudioComponent))
+    {
+        UMetaSoundSource* MusicSound = GetMetaSoundAsset(MusicLayer);
+        if (MusicSound)
         {
-            MusicAudioComponent->SetSound(TargetMusic);
+            MusicAudioComponent->SetSound(MusicSound);
+            MusicAudioComponent->SetVolumeMultiplier(CurrentEnvironment.MusicVolume * TimeMultiplier);
+            
             if (!MusicAudioComponent->IsPlaying())
             {
                 MusicAudioComponent->Play();
             }
         }
     }
-
-    UE_LOG(LogTemp, Log, TEXT("Audio_MetaSoundManager: Transitioned to gameplay state: %d"), (int32)NewState);
+    
+    UE_LOG(LogTemp, Log, TEXT("Audio_MetaSoundManager: Updated music intensity: %s"), *MusicLayer);
 }
 
-void UAudio_MetaSoundManager::SetMusicIntensity(float Intensity)
+float UAudio_MetaSoundManager::CalculateProximityVolume(float Distance, const FAudio_ProximityTrigger& Trigger) const
 {
-    Intensity = FMath::Clamp(Intensity, 0.0f, 1.0f);
-    
-    if (MusicAudioComponent)
+    if (Distance <= Trigger.TriggerDistance)
     {
-        float VolumeMultiplier = MusicVolume * Intensity;
-        MusicAudioComponent->SetVolumeMultiplier(VolumeMultiplier);
+        return 1.0f;
     }
-    
-    UE_LOG(LogTemp, Log, TEXT("Audio_MetaSoundManager: Set music intensity to %.2f"), Intensity);
-}
-
-void UAudio_MetaSoundManager::PlayStinger(USoundCue* StingerSound)
-{
-    if (StingerSound)
+    else if (Distance >= Trigger.MaxDistance)
     {
-        UGameplayStatics::PlaySoundAtLocation(GetWorld(), StingerSound, 
-                                            GetOwner()->GetActorLocation());
-        UE_LOG(LogTemp, Log, TEXT("Audio_MetaSoundManager: Played audio stinger"));
-    }
-}
-
-void UAudio_MetaSoundManager::SetMasterVolume(float Volume)
-{
-    MasterVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
-    
-    // Update all audio components
-    if (EnvironmentalAudioComponent)
-        EnvironmentalAudioComponent->SetVolumeMultiplier(EnvironmentalVolume * MasterVolume);
-    
-    if (MusicAudioComponent)
-        MusicAudioComponent->SetVolumeMultiplier(MusicVolume * MasterVolume);
-    
-    for (int32 i = 0; i < LayerAudioComponents.Num(); i++)
-    {
-        if (LayerAudioComponents[i] && i < EnvironmentalLayers.Num())
-        {
-            LayerAudioComponents[i]->SetVolumeMultiplier(EnvironmentalLayers[i].Volume * MasterVolume);
-        }
-    }
-}
-
-void UAudio_MetaSoundManager::SetEnvironmentalVolume(float Volume)
-{
-    EnvironmentalVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
-    
-    if (EnvironmentalAudioComponent)
-        EnvironmentalAudioComponent->SetVolumeMultiplier(EnvironmentalVolume * MasterVolume);
-}
-
-void UAudio_MetaSoundManager::SetMusicVolume(float Volume)
-{
-    MusicVolume = FMath::Clamp(Volume, 0.0f, 1.0f);
-    
-    if (MusicAudioComponent)
-        MusicAudioComponent->SetVolumeMultiplier(MusicVolume * MasterVolume);
-}
-
-void UAudio_MetaSoundManager::PlayDinosaurCall(EDinosaurSpecies Species, FVector Location, float VolumeMultiplier)
-{
-    // Would implement species-specific calls here
-    UE_LOG(LogTemp, Log, TEXT("Audio_MetaSoundManager: Playing dinosaur call for species %d at location %s"), 
-           (int32)Species, *Location.ToString());
-}
-
-void UAudio_MetaSoundManager::PlayFootstepAudio(EDinosaurSpecies Species, FVector Location, float Intensity)
-{
-    // Would implement species-specific footstep audio here
-    UE_LOG(LogTemp, Log, TEXT("Audio_MetaSoundManager: Playing footstep audio for species %d, intensity %.2f"), 
-           (int32)Species, Intensity);
-}
-
-void UAudio_MetaSoundManager::PlayEnvironmentalEvent(const FString& EventName, FVector Location)
-{
-    UE_LOG(LogTemp, Log, TEXT("Audio_MetaSoundManager: Playing environmental event '%s' at %s"), 
-           *EventName, *Location.ToString());
-}
-
-void UAudio_MetaSoundManager::UpdateEnvironmentalAudio(float DeltaTime)
-{
-    // Update environmental layers based on game state
-    // This would be more sophisticated in a full implementation
-}
-
-void UAudio_MetaSoundManager::UpdateDynamicMusic(float DeltaTime)
-{
-    // Update music parameters based on game state
-    // This would interface with MetaSound parameters
-}
-
-void UAudio_MetaSoundManager::ProcessAudioFades(float DeltaTime)
-{
-    // Process layer fades
-    for (int32 i = 0; i < EnvironmentalLayers.Num(); i++)
-    {
-        const FString& LayerName = EnvironmentalLayers[i].LayerName;
-        
-        if (LayerFadeTargets.Contains(LayerName) && LayerFadeSpeeds.Contains(LayerName))
-        {
-            float TargetVolume = LayerFadeTargets[LayerName];
-            float FadeSpeed = LayerFadeSpeeds[LayerName];
-            
-            if (i < LayerAudioComponents.Num() && LayerAudioComponents[i])
-            {
-                float CurrentVolume = LayerAudioComponents[i]->VolumeMultiplier;
-                float NewVolume = FMath::FInterpTo(CurrentVolume, TargetVolume, DeltaTime, FadeSpeed);
-                
-                LayerAudioComponents[i]->SetVolumeMultiplier(NewVolume * MasterVolume);
-                
-                // Remove from fade maps when target reached
-                if (FMath::IsNearlyEqual(NewVolume, TargetVolume, 0.01f))
-                {
-                    LayerFadeTargets.Remove(LayerName);
-                    LayerFadeSpeeds.Remove(LayerName);
-                }
-            }
-        }
-    }
-}
-
-TArray<AActor*> UAudio_MetaSoundManager::GetNearbyDinosaurs(float SearchRadius)
-{
-    TArray<AActor*> FoundDinosaurs;
-    
-    if (UWorld* World = GetWorld())
-    {
-        FVector SearchLocation = GetOwner()->GetActorLocation();
-        
-        // Get all actors in range - would filter for dinosaur actors in full implementation
-        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
-        {
-            AActor* Actor = *ActorItr;
-            if (Actor && Actor != GetOwner())
-            {
-                float Distance = FVector::Dist(SearchLocation, Actor->GetActorLocation());
-                if (Distance <= SearchRadius)
-                {
-                    // Would check if actor is a dinosaur here
-                    FoundDinosaurs.Add(Actor);
-                }
-            }
-        }
-    }
-    
-    return FoundDinosaurs;
-}
-
-float UAudio_MetaSoundManager::CalculateProximityIntensity(float Distance, float MaxDistance)
-{
-    if (Distance >= MaxDistance)
         return 0.0f;
+    }
+    else
+    {
+        // Linear falloff between trigger and max distance
+        float FalloffRange = Trigger.MaxDistance - Trigger.TriggerDistance;
+        float FalloffDistance = Distance - Trigger.TriggerDistance;
+        return 1.0f - (FalloffDistance / FalloffRange);
+    }
+}
+
+UMetaSoundSource* UAudio_MetaSoundManager::GetMetaSoundAsset(const FString& AssetName) const
+{
+    if (const UMetaSoundSource* const* FoundAsset = MetaSoundAssets.Find(AssetName))
+    {
+        return *FoundAsset;
+    }
     
-    // Inverse square falloff for realistic audio attenuation
-    float NormalizedDistance = Distance / MaxDistance;
-    return 1.0f - (NormalizedDistance * NormalizedDistance);
+    return nullptr;
 }
