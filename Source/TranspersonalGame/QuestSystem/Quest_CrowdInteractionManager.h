@@ -1,214 +1,171 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/ActorComponent.h"
-#include "Engine/World.h"
-#include "GameFramework/Actor.h"
-#include "Subsystems/WorldSubsystem.h"
-#include "../SharedTypes.h"
+#include "Engine/GameInstanceSubsystem.h"
+#include "SharedTypes.h"
 #include "Quest_CrowdInteractionManager.generated.h"
 
 // Forward declarations
-class UCrowd_PathfindingManager;
+class ACrowd_MassSimulationManager;
 class ATranspersonalCharacter;
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FQuest_CrowdMissionObjective
+struct TRANSPERSONALGAME_API FQuest_CrowdInteraction
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    FString ObjectiveID;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Interaction")
+    FString InteractionID;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    FString Description;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Interaction")
+    ECrowdZoneType ZoneType;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    EQuestObjectiveType ObjectiveType;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Interaction")
+    int32 RequiredAgentCount;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    FVector TargetLocation;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Interaction")
+    float InteractionRadius;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    int32 RequiredCrowdCount;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    float CompletionRadius;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    float TimeLimit;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Interaction")
     bool bIsCompleted;
 
-    FQuest_CrowdMissionObjective()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd Interaction")
+    float CompletionTime;
+
+    FQuest_CrowdInteraction()
     {
-        ObjectiveID = TEXT("");
-        Description = TEXT("");
-        ObjectiveType = EQuestObjectiveType::Gather;
-        TargetLocation = FVector::ZeroVector;
-        RequiredCrowdCount = 5;
-        CompletionRadius = 500.0f;
-        TimeLimit = 300.0f;
+        InteractionID = TEXT("");
+        ZoneType = ECrowdZoneType::TribalCamp;
+        RequiredAgentCount = 1;
+        InteractionRadius = 500.0f;
         bIsCompleted = false;
+        CompletionTime = 0.0f;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FQuest_CrowdInfluenceData
+struct TRANSPERSONALGAME_API FQuest_TribalMission
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    float InfluenceRadius;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Mission")
+    FString MissionID;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    float InfluenceStrength;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Mission")
+    FString MissionName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    ECrowdBehaviorType TargetBehavior;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Mission")
+    FString MissionDescription;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
-    FVector InfluenceDirection;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Mission")
+    ECrowdZoneType TargetZone;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crowd")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Mission")
+    TArray<FQuest_CrowdInteraction> RequiredInteractions;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Mission")
     bool bIsActive;
 
-    FQuest_CrowdInfluenceData()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Mission")
+    bool bIsCompleted;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Mission")
+    float MissionStartTime;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tribal Mission")
+    float MissionTimeLimit;
+
+    FQuest_TribalMission()
     {
-        InfluenceRadius = 1000.0f;
-        InfluenceStrength = 0.7f;
-        TargetBehavior = ECrowdBehaviorType::Following;
-        InfluenceDirection = FVector::ForwardVector;
-        bIsActive = true;
+        MissionID = TEXT("");
+        MissionName = TEXT("");
+        MissionDescription = TEXT("");
+        TargetZone = ECrowdZoneType::TribalCamp;
+        bIsActive = false;
+        bIsCompleted = false;
+        MissionStartTime = 0.0f;
+        MissionTimeLimit = 300.0f; // 5 minutes default
     }
 };
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnCrowdObjectiveProgress, const FString&, ObjectiveID, float, Progress);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnCrowdObjectiveCompleted, const FString&, ObjectiveID);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnCrowdInfluenceChanged, FVector, Location, float, Radius, float, Strength);
-
-/**
- * Quest_CrowdInteractionManager
- * 
- * Manages quest objectives that involve crowd interaction and manipulation.
- * Handles evacuation missions, crowd guidance, and large-scale NPC coordination.
- * Integrates with the crowd pathfinding system for realistic group behavior.
- */
-UCLASS(ClassGroup=(Quest), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UQuest_CrowdInteractionManager : public UActorComponent
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UQuest_CrowdInteractionManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
     UQuest_CrowdInteractionManager();
 
-protected:
-    virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    // Subsystem overrides
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
 
-public:
-    // Core crowd mission management
-    UFUNCTION(BlueprintCallable, Category = "Quest Crowd")
-    void StartCrowdMission(const FString& MissionID, const TArray<FQuest_CrowdMissionObjective>& Objectives);
+    // Mission Management
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    bool StartTribalMission(const FString& MissionID);
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Crowd")
-    void EndCrowdMission(const FString& MissionID, bool bSuccess);
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    bool CompleteTribalMission(const FString& MissionID);
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Crowd")
-    bool IsCrowdMissionActive(const FString& MissionID) const;
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    void UpdateMissionProgress(const FString& MissionID, float DeltaTime);
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Crowd")
-    float GetCrowdMissionProgress(const FString& MissionID) const;
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    TArray<FQuest_TribalMission> GetActiveMissions() const;
 
-    // Player crowd influence
-    UFUNCTION(BlueprintCallable, Category = "Quest Crowd")
-    void SetPlayerCrowdInfluence(const FQuest_CrowdInfluenceData& InfluenceData);
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    FQuest_TribalMission GetMissionByID(const FString& MissionID) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Crowd")
-    void UpdatePlayerInfluenceLocation(FVector NewLocation);
+    // Crowd Interaction
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    bool CheckCrowdInteraction(ATranspersonalCharacter* Player, ECrowdZoneType ZoneType, float InteractionRadius);
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Crowd")
-    void DisablePlayerCrowdInfluence();
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    void RegisterCrowdManager(ACrowd_MassSimulationManager* CrowdManager);
 
-    // Objective management
-    UFUNCTION(BlueprintCallable, Category = "Quest Crowd")
-    void AddCrowdObjective(const FString& MissionID, const FQuest_CrowdMissionObjective& Objective);
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    ACrowd_MassSimulationManager* GetCrowdManagerForZone(ECrowdZoneType ZoneType) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Crowd")
-    void RemoveCrowdObjective(const FString& MissionID, const FString& ObjectiveID);
+    // Mission Creation
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    FQuest_TribalMission CreateTribalCampMission();
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Crowd")
-    bool IsObjectiveCompleted(const FString& MissionID, const FString& ObjectiveID) const;
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    FQuest_TribalMission CreateHuntingPartyMission();
 
-    // Crowd monitoring
-    UFUNCTION(BlueprintCallable, Category = "Quest Crowd")
-    int32 GetCrowdCountInArea(FVector Center, float Radius) const;
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    FQuest_TribalMission CreateGatheringMission();
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Crowd")
-    TArray<FVector> GetCrowdPositionsInArea(FVector Center, float Radius) const;
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    FQuest_TribalMission CreateWatchtowerMission();
 
-    UFUNCTION(BlueprintCallable, Category = "Quest Crowd")
-    void GuideCrowdToLocation(FVector TargetLocation, float InfluenceRadius);
+    // Debug and Testing
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Quest System")
+    void InitializeDefaultMissions();
 
-    // Emergency scenarios
-    UFUNCTION(BlueprintCallable, Category = "Quest Crowd")
-    void TriggerCrowdEvacuation(FVector DangerZone, float DangerRadius, FVector SafeZone);
-
-    UFUNCTION(BlueprintCallable, Category = "Quest Crowd")
-    void CreateCrowdGatheringPoint(FVector Location, float Radius, int32 TargetCount);
-
-    UFUNCTION(BlueprintCallable, Category = "Quest Crowd")
-    void DisperseCrowdFromArea(FVector Center, float Radius);
-
-    // Events
-    UPROPERTY(BlueprintAssignable, Category = "Quest Events")
-    FOnCrowdObjectiveProgress OnCrowdObjectiveProgress;
-
-    UPROPERTY(BlueprintAssignable, Category = "Quest Events")
-    FOnCrowdObjectiveCompleted OnCrowdObjectiveCompleted;
-
-    UPROPERTY(BlueprintAssignable, Category = "Quest Events")
-    FOnCrowdInfluenceChanged OnCrowdInfluenceChanged;
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Quest System")
+    void DebugPrintActiveMissions();
 
 protected:
-    // Mission data
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Quest State")
-    TMap<FString, TArray<FQuest_CrowdMissionObjective>> ActiveCrowdMissions;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest System")
+    TArray<FQuest_TribalMission> ActiveMissions;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Quest State")
-    TMap<FString, float> MissionStartTimes;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest System")
+    TArray<FQuest_TribalMission> CompletedMissions;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Quest State")
-    FQuest_CrowdInfluenceData CurrentPlayerInfluence;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest System")
+    TMap<ECrowdZoneType, ACrowd_MassSimulationManager*> CrowdManagers;
 
-    // Configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Config")
-    float ObjectiveCheckInterval;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest System")
+    float MissionUpdateInterval;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Config")
-    float MaxInfluenceDistance;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Config")
-    int32 MaxSimultaneousMissions;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest Config")
-    bool bEnableDebugVisualization;
-
-    // References
-    UPROPERTY()
-    UCrowd_PathfindingManager* CrowdPathfindingManager;
-
-    UPROPERTY()
-    ATranspersonalCharacter* PlayerCharacter;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest System")
+    int32 MaxActiveMissions;
 
 private:
-    // Internal methods
-    void UpdateCrowdObjectives(float DeltaTime);
-    void CheckObjectiveCompletion(const FString& MissionID, FQuest_CrowdMissionObjective& Objective);
-    void UpdatePlayerInfluence(float DeltaTime);
-    void DrawDebugInfo() const;
-    
-    float LastObjectiveCheck;
-    float LastInfluenceUpdate;
+    void CleanupExpiredMissions();
+    bool ValidateMissionRequirements(const FQuest_TribalMission& Mission) const;
+    void NotifyMissionCompletion(const FQuest_TribalMission& Mission);
 };
+
+#include "Quest_CrowdInteractionManager.generated.h"
