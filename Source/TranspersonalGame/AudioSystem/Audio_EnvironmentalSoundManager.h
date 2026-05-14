@@ -1,85 +1,150 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
+#include "Engine/GameInstanceSubsystem.h"
 #include "Components/AudioComponent.h"
 #include "Sound/SoundCue.h"
+#include "Sound/SoundBase.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
+#include "SharedTypes.h"
 #include "Audio_EnvironmentalSoundManager.generated.h"
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FAudio_BiomeAudioData
+struct TRANSPERSONALGAME_API FAudio_BiomeAudioSettings
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Audio")
-    USoundCue* AmbientLoop;
+    TSoftObjectPtr<USoundBase> AmbientLoop;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Audio")
-    TArray<USoundCue*> RandomSounds;
+    TSoftObjectPtr<USoundBase> WindSound;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Audio")
-    float RandomSoundInterval;
+    TArray<TSoftObjectPtr<USoundBase>> RandomNatureSounds;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Audio")
-    float RandomSoundVariance;
+    float AmbientVolume = 0.7f;
 
-    FAudio_BiomeAudioData()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Audio")
+    float RandomSoundInterval = 15.0f;
+
+    FAudio_BiomeAudioSettings()
     {
-        AmbientLoop = nullptr;
+        AmbientVolume = 0.7f;
         RandomSoundInterval = 15.0f;
-        RandomSoundVariance = 5.0f;
     }
 };
 
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AAudio_EnvironmentalSoundManager : public AActor
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FAudio_ProximityAudioTrigger
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Proximity Audio")
+    FVector TriggerLocation;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Proximity Audio")
+    float TriggerRadius = 500.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Proximity Audio")
+    TSoftObjectPtr<USoundBase> ProximitySound;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Proximity Audio")
+    float Volume = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Proximity Audio")
+    bool bIsActive = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Proximity Audio")
+    float Cooldown = 30.0f;
+
+    FAudio_ProximityAudioTrigger()
+    {
+        TriggerLocation = FVector::ZeroVector;
+        TriggerRadius = 500.0f;
+        Volume = 1.0f;
+        bIsActive = true;
+        Cooldown = 30.0f;
+    }
+};
+
+UCLASS(BlueprintType)
+class TRANSPERSONALGAME_API UAudio_EnvironmentalSoundManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
-    AAudio_EnvironmentalSoundManager();
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+
+    UFUNCTION(BlueprintCallable, Category = "Environmental Audio")
+    void SetCurrentBiome(EBiomeType NewBiome);
+
+    UFUNCTION(BlueprintCallable, Category = "Environmental Audio")
+    void UpdatePlayerLocation(const FVector& PlayerLocation);
+
+    UFUNCTION(BlueprintCallable, Category = "Environmental Audio")
+    void PlayProximitySound(const FString& TriggerName, const FVector& Location);
+
+    UFUNCTION(BlueprintCallable, Category = "Environmental Audio")
+    void SetMasterEnvironmentalVolume(float Volume);
+
+    UFUNCTION(BlueprintCallable, Category = "Environmental Audio")
+    void AddProximityTrigger(const FString& TriggerName, const FAudio_ProximityAudioTrigger& Trigger);
+
+    UFUNCTION(BlueprintCallable, Category = "Environmental Audio")
+    void RemoveProximityTrigger(const FString& TriggerName);
+
+    UFUNCTION(BlueprintCallable, Category = "Environmental Audio")
+    void SetTimeOfDay(float TimeOfDay); // 0.0 = midnight, 0.5 = noon
+
+    UFUNCTION(BlueprintCallable, Category = "Environmental Audio")
+    void SetWeatherIntensity(float Intensity); // 0.0 = clear, 1.0 = storm
 
 protected:
-    virtual void BeginPlay() override;
-    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Biome Settings")
+    TMap<EBiomeType, FAudio_BiomeAudioSettings> BiomeAudioSettings;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Proximity Triggers")
+    TMap<FString, FAudio_ProximityAudioTrigger> ProximityTriggers;
+
+    UPROPERTY()
+    TMap<FString, float> TriggerCooldowns;
+
+    UPROPERTY()
     UAudioComponent* AmbientAudioComponent;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UAudioComponent* RandomSoundComponent;
+    UPROPERTY()
+    UAudioComponent* WindAudioComponent;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Audio")
-    TMap<FString, FAudio_BiomeAudioData> BiomeAudioMap;
+    UPROPERTY()
+    UAudioComponent* WeatherAudioComponent;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
-    float MaxAudibleDistance;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Audio Settings")
+    float MasterEnvironmentalVolume = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Audio Settings")
-    float VolumeMultiplier;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Audio Settings")
+    float CurrentTimeOfDay = 0.5f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Current State")
-    FString CurrentBiome;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Audio Settings")
+    float CurrentWeatherIntensity = 0.0f;
 
+    UPROPERTY()
+    EBiomeType CurrentBiome = EBiomeType::Forest;
+
+    UPROPERTY()
+    FVector LastPlayerLocation = FVector::ZeroVector;
+
+    UPROPERTY()
     FTimerHandle RandomSoundTimer;
 
-public:
-    UFUNCTION(BlueprintCallable, Category = "Environmental Audio")
-    void SetBiome(const FString& BiomeName);
-
-    UFUNCTION(BlueprintCallable, Category = "Environmental Audio")
-    void PlayRandomBiomeSound();
-
-    UFUNCTION(BlueprintCallable, Category = "Environmental Audio")
-    void SetMasterVolume(float Volume);
-
-    UFUNCTION(BlueprintCallable, Category = "Environmental Audio")
-    void StopAllAmbientSounds();
-
-protected:
-    void StartRandomSoundTimer();
-    void StopRandomSoundTimer();
-    void InitializeBiomeAudioData();
+private:
+    void InitializeBiomeSettings();
+    void PlayRandomNatureSound();
+    void UpdateProximityTriggers(const FVector& PlayerLocation);
+    void UpdateTimeBasedAudio();
+    void UpdateWeatherAudio();
+    UAudioComponent* CreateAudioComponent(const FString& ComponentName);
 };
