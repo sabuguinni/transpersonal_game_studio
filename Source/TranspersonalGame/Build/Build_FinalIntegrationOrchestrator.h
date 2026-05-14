@@ -7,91 +7,89 @@
 #include "Build_FinalIntegrationOrchestrator.generated.h"
 
 UENUM(BlueprintType)
-enum class EBuild_IntegrationPhase : uint8
+enum class EBuild_IntegrationStatus : uint8
 {
-    PreIntegration      UMETA(DisplayName = "Pre-Integration"),
-    CoreSystemsCheck    UMETA(DisplayName = "Core Systems Check"),
-    VFXIntegration      UMETA(DisplayName = "VFX Integration"),
-    QAValidation        UMETA(DisplayName = "QA Validation"),
-    FinalOrchestration  UMETA(DisplayName = "Final Orchestration"),
-    BuildComplete       UMETA(DisplayName = "Build Complete"),
-    IntegrationFailed   UMETA(DisplayName = "Integration Failed")
+    Pending UMETA(DisplayName = "Pending"),
+    InProgress UMETA(DisplayName = "In Progress"),
+    Completed UMETA(DisplayName = "Completed"),
+    Failed UMETA(DisplayName = "Failed"),
+    Validated UMETA(DisplayName = "Validated")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_SystemIntegrationMetrics
+struct FBuild_SystemValidationResult
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration Metrics")
-    int32 TotalActorsInScene;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation")
+    FString SystemName;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration Metrics")
-    int32 CoreSystemsLoaded;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation")
+    bool bIsValid;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration Metrics")
-    int32 VFXSystemsIntegrated;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation")
+    FString ValidationMessage;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration Metrics")
-    int32 QAValidationsPassed;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation")
+    float PerformanceScore;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration Metrics")
-    float IntegrationCompletionPercentage;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation")
+    int32 ActorCount;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration Metrics")
-    bool bBuildReadyForDeployment;
-
-    FBuild_SystemIntegrationMetrics()
+    FBuild_SystemValidationResult()
     {
-        TotalActorsInScene = 0;
-        CoreSystemsLoaded = 0;
-        VFXSystemsIntegrated = 0;
-        QAValidationsPassed = 0;
-        IntegrationCompletionPercentage = 0.0f;
-        bBuildReadyForDeployment = false;
+        SystemName = TEXT("");
+        bIsValid = false;
+        ValidationMessage = TEXT("");
+        PerformanceScore = 0.0f;
+        ActorCount = 0;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FBuild_CrossSystemValidation
+struct FBuild_IntegrationReport
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Cross-System Validation")
-    bool bCoreGameSystemsValid;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
+    EBuild_IntegrationStatus Status;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Cross-System Validation")
-    bool bVFXSystemsOperational;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
+    TArray<FBuild_SystemValidationResult> SystemResults;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Cross-System Validation")
-    bool bQAFrameworkActive;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
+    float OverallScore;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Cross-System Validation")
-    bool bPerformanceWithinLimits;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
+    FString BuildVersion;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Cross-System Validation")
-    bool bMemoryUsageAcceptable;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
+    FDateTime CompletionTime;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Cross-System Validation")
-    TArray<FString> ValidationErrors;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
+    int32 TotalActorCount;
 
-    FBuild_CrossSystemValidation()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
+    float MemoryUsageMB;
+
+    FBuild_IntegrationReport()
     {
-        bCoreGameSystemsValid = false;
-        bVFXSystemsOperational = false;
-        bQAFrameworkActive = false;
-        bPerformanceWithinLimits = false;
-        bMemoryUsageAcceptable = false;
+        Status = EBuild_IntegrationStatus::Pending;
+        OverallScore = 0.0f;
+        BuildVersion = TEXT("1.0.0");
+        CompletionTime = FDateTime::Now();
+        TotalActorCount = 0;
+        MemoryUsageMB = 0.0f;
     }
 };
 
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UBuild_FinalIntegrationComponent : public UActorComponent
+class TRANSPERSONALGAME_API UBuild_IntegrationOrchestratorComponent : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    UBuild_FinalIntegrationComponent();
+    UBuild_IntegrationOrchestratorComponent();
 
 protected:
     virtual void BeginPlay() override;
@@ -99,63 +97,69 @@ protected:
 public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration Status")
-    EBuild_IntegrationPhase CurrentIntegrationPhase;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
+    FBuild_IntegrationReport CurrentReport;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Integration Metrics")
-    FBuild_SystemIntegrationMetrics IntegrationMetrics;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
+    bool bAutoValidateOnStart;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Cross-System Validation")
-    FBuild_CrossSystemValidation CrossSystemValidation;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
+    float ValidationInterval;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Integration Settings")
-    float IntegrationUpdateInterval;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
+    TArray<FString> CriticalSystems;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Integration Settings")
-    bool bAutoProgressPhases;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
+    float MinimumPerformanceThreshold;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Integration Settings")
-    bool bDetailedLogging;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Integration")
+    int32 MaxAllowedActors;
 
-    UFUNCTION(BlueprintCallable, Category = "Integration Control")
-    void StartFinalIntegration();
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void StartIntegrationValidation();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration Control")
-    void AdvanceIntegrationPhase();
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void ValidateSystem(const FString& SystemName);
 
-    UFUNCTION(BlueprintCallable, Category = "Integration Validation")
-    bool ValidateCoreGameSystems();
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void GenerateFinalReport();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration Validation")
-    bool ValidateVFXSystems();
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    bool IsIntegrationComplete() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Integration Validation")
-    bool ValidateQAFramework();
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    float GetOverallHealthScore() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Integration Validation")
-    bool ValidatePerformanceMetrics();
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void OptimizePerformance();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration Validation")
-    void RunCrossSystemValidation();
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void CleanupRedundantActors();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration Metrics")
-    void UpdateIntegrationMetrics();
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void ValidateMemoryUsage();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration Control")
-    void CompleteFinalIntegration();
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void CheckSystemDependencies();
 
-    UFUNCTION(BlueprintCallable, Category = "Integration Control")
-    void HandleIntegrationFailure(const FString& FailureReason);
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void PerformStressTest();
 
 private:
-    float LastIntegrationUpdate;
-    int32 IntegrationStepCounter;
-    TArray<FString> IntegrationLog;
+    float LastValidationTime;
+    bool bValidationInProgress;
+    int32 ValidationStepIndex;
 
-    void LogIntegrationStep(const FString& StepDescription);
-    void ValidateSystemDependencies();
-    void CheckMemoryAndPerformance();
-    void FinalizeIntegrationProcess();
+    void ValidateCharacterSystem();
+    void ValidateVFXSystem();
+    void ValidateQASystem();
+    void ValidateWorldGeneration();
+    void ValidateLightingSystem();
+    void ValidateAudioSystem();
+    void ValidatePhysicsSystem();
+    void CalculatePerformanceMetrics();
+    void UpdateIntegrationStatus();
+    void LogValidationResults();
 };
 
 UCLASS(BlueprintType, Blueprintable)
@@ -173,26 +177,38 @@ public:
     virtual void Tick(float DeltaTime) override;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UBuild_FinalIntegrationComponent* IntegrationComponent;
+    UBuild_IntegrationOrchestratorComponent* IntegrationComponent;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Orchestration Status")
-    bool bOrchestrationActive;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Build")
+    bool bEnableContinuousValidation;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Orchestration Status")
-    float OrchestrationProgress;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Build")
+    bool bAutoOptimizeOnCompletion;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Orchestration Settings")
-    bool bAutoStartOrchestration;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Build")
+    FString BuildTargetVersion;
 
-    UFUNCTION(BlueprintCallable, Category = "Orchestration Control")
-    void StartFinalOrchestration();
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Build")
+    bool bGenerateDetailedLogs;
 
-    UFUNCTION(BlueprintCallable, Category = "Orchestration Control")
-    void StopOrchestration();
+    UFUNCTION(BlueprintCallable, Category = "Build")
+    void InitializeBuildProcess();
 
-    UFUNCTION(BlueprintCallable, Category = "Orchestration Status")
-    bool IsIntegrationComplete() const;
+    UFUNCTION(BlueprintCallable, Category = "Build")
+    void FinalizeBuild();
 
-    UFUNCTION(BlueprintCallable, Category = "Orchestration Status")
-    FString GetOrchestrationStatusReport() const;
+    UFUNCTION(BlueprintCallable, Category = "Build")
+    void ExportBuildReport();
+
+    UFUNCTION(BlueprintCallable, Category = "Build")
+    void ResetIntegrationState();
+
+    UFUNCTION(BlueprintImplementableEvent, Category = "Build")
+    void OnIntegrationComplete();
+
+    UFUNCTION(BlueprintImplementableEvent, Category = "Build")
+    void OnValidationFailed(const FString& ErrorMessage);
+
+    UFUNCTION(BlueprintImplementableEvent, Category = "Build")
+    void OnPerformanceOptimized();
 };
