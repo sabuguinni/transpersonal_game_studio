@@ -2,237 +2,310 @@
 
 #include "CoreMinimal.h"
 #include "Engine/World.h"
-#include "Components/ActorComponent.h"
-#include "Engine/StaticMeshActor.h"
+#include "GameFramework/Actor.h"
 #include "Components/StaticMeshComponent.h"
-#include "PhysicsEngine/PhysicsSettings.h"
-#include "Kismet/GameplayStatics.h"
-#include "SharedTypes.h"
+#include "Components/SceneComponent.h"
+#include "Subsystems/WorldSubsystem.h"
+#include "Engine/DirectionalLight.h"
+#include "Components/DirectionalLightComponent.h"
+#include "Engine/ExponentialHeightFog.h"
+#include "Components/ExponentialHeightFogComponent.h"
+#include "Engine/SkyAtmosphere.h"
+#include "Components/SkyAtmosphereComponent.h"
+#include "Particles/ParticleSystemComponent.h"
+#include "NiagaraComponent.h"
+#include "NiagaraSystem.h"
+#include "Sound/SoundCue.h"
+#include "Components/AudioComponent.h"
+#include "Eng_BiomeArchitecture.h"
 #include "Core_WeatherPhysicsSystem.generated.h"
-
-/**
- * Core Weather Physics System
- * Handles realistic weather effects on physics simulation:
- * - Rain impact on surfaces and character movement
- * - Wind forces affecting objects and projectiles
- * - Storm dynamics with lightning physics
- * - Temperature effects on material properties
- * - Atmospheric pressure simulation
- */
 
 UENUM(BlueprintType)
 enum class ECore_WeatherType : uint8
 {
-    Clear           UMETA(DisplayName = "Clear Sky"),
-    LightRain       UMETA(DisplayName = "Light Rain"),
-    HeavyRain       UMETA(DisplayName = "Heavy Rain"),
-    Storm           UMETA(DisplayName = "Thunderstorm"),
-    Fog             UMETA(DisplayName = "Dense Fog"),
-    Wind            UMETA(DisplayName = "High Wind"),
-    Hail            UMETA(DisplayName = "Hailstorm")
+    Clear UMETA(DisplayName = "Clear Sky"),
+    Cloudy UMETA(DisplayName = "Cloudy"),
+    LightRain UMETA(DisplayName = "Light Rain"),
+    HeavyRain UMETA(DisplayName = "Heavy Rain"),
+    Thunderstorm UMETA(DisplayName = "Thunderstorm"),
+    Fog UMETA(DisplayName = "Fog"),
+    Sandstorm UMETA(DisplayName = "Sandstorm"),
+    VolcanicAsh UMETA(DisplayName = "Volcanic Ash")
+};
+
+UENUM(BlueprintType)
+enum class ECore_WindIntensity : uint8
+{
+    Calm UMETA(DisplayName = "Calm"),
+    Light UMETA(DisplayName = "Light Breeze"),
+    Moderate UMETA(DisplayName = "Moderate Wind"),
+    Strong UMETA(DisplayName = "Strong Wind"),
+    Gale UMETA(DisplayName = "Gale Force")
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCore_WeatherPhysicsData
+struct FCore_WeatherSettings
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather Physics")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
     ECore_WeatherType WeatherType = ECore_WeatherType::Clear;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather Physics", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
     float Intensity = 0.5f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather Physics")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
+    float Duration = 300.0f; // 5 minutes default
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
+    float TransitionTime = 30.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
+    ECore_WindIntensity WindIntensity = ECore_WindIntensity::Light;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
     FVector WindDirection = FVector(1.0f, 0.0f, 0.0f);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather Physics", meta = (ClampMin = "0.0", ClampMax = "100.0"))
-    float WindSpeed = 10.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
+    float Temperature = 25.0f; // Celsius
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather Physics", meta = (ClampMin = "-50.0", ClampMax = "50.0"))
-    float Temperature = 20.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
+    float Humidity = 60.0f; // Percentage
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather Physics", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float Humidity = 0.6f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
+    float Visibility = 10000.0f; // Meters
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather Physics", meta = (ClampMin = "900.0", ClampMax = "1100.0"))
-    float AtmosphericPressure = 1013.25f;
-
-    FCore_WeatherPhysicsData()
+    FCore_WeatherSettings()
     {
         WeatherType = ECore_WeatherType::Clear;
         Intensity = 0.5f;
+        Duration = 300.0f;
+        TransitionTime = 30.0f;
+        WindIntensity = ECore_WindIntensity::Light;
         WindDirection = FVector(1.0f, 0.0f, 0.0f);
-        WindSpeed = 10.0f;
-        Temperature = 20.0f;
-        Humidity = 0.6f;
-        AtmosphericPressure = 1013.25f;
+        Temperature = 25.0f;
+        Humidity = 60.0f;
+        Visibility = 10000.0f;
     }
 };
 
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCore_PrecipitationPhysics
+struct FCore_WeatherEffects
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Precipitation")
-    float DropletMass = 0.001f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Effects")
+    float FogDensity = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Precipitation")
-    float TerminalVelocity = 9.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Effects")
+    FLinearColor FogColor = FLinearColor::White;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Precipitation")
-    float ImpactForce = 0.1f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Effects")
+    float CloudCoverage = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Precipitation")
-    float SurfaceWetness = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Effects")
+    float SunIntensity = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Precipitation")
-    float AccumulationRate = 0.01f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Effects")
+    FLinearColor SunColor = FLinearColor::White;
 
-    FCore_PrecipitationPhysics()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Effects")
+    float RainIntensity = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Effects")
+    float WindStrength = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Effects")
+    float LightningFrequency = 0.0f;
+
+    FCore_WeatherEffects()
     {
-        DropletMass = 0.001f;
-        TerminalVelocity = 9.0f;
-        ImpactForce = 0.1f;
-        SurfaceWetness = 0.0f;
-        AccumulationRate = 0.01f;
+        FogDensity = 0.0f;
+        FogColor = FLinearColor::White;
+        CloudCoverage = 0.0f;
+        SunIntensity = 1.0f;
+        SunColor = FLinearColor::White;
+        RainIntensity = 0.0f;
+        WindStrength = 0.0f;
+        LightningFrequency = 0.0f;
     }
 };
 
-UCLASS(ClassGroup=(TranspersonalGame), meta=(BlueprintSpawnableComponent))
-class TRANSPERSONALGAME_API UCore_WeatherPhysicsSystem : public UActorComponent
+/**
+ * Core Weather Physics System - Realistic weather simulation for prehistoric world
+ * Handles atmospheric effects, precipitation, wind physics, and environmental impact
+ */
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UCore_WeatherPhysicsSystem : public UWorldSubsystem
 {
     GENERATED_BODY()
 
 public:
     UCore_WeatherPhysicsSystem();
 
+    // Subsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+    virtual void Tick(float DeltaTime) override;
+    virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
+
+    // Weather control functions
+    UFUNCTION(BlueprintCallable, Category = "Weather Physics")
+    void SetWeather(const FCore_WeatherSettings& NewWeatherSettings);
+
+    UFUNCTION(BlueprintCallable, Category = "Weather Physics")
+    void TransitionToWeather(const FCore_WeatherSettings& TargetWeather, float TransitionDuration = 30.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Weather Physics")
+    void SetBiomeSpecificWeather(EBiomeType BiomeType, const FCore_WeatherSettings& WeatherSettings);
+
+    UFUNCTION(BlueprintCallable, Category = "Weather Physics")
+    FCore_WeatherSettings GetCurrentWeather() const { return CurrentWeatherSettings; }
+
+    // Environmental effects
+    UFUNCTION(BlueprintCallable, Category = "Weather Physics")
+    void UpdateFogSettings(float Density, const FLinearColor& Color, float Height = 0.0f);
+
+    UFUNCTION(BlueprintCallable, Category = "Weather Physics")
+    void UpdateSunLighting(float Intensity, const FLinearColor& Color, const FRotator& Direction);
+
+    UFUNCTION(BlueprintCallable, Category = "Weather Physics")
+    void CreateRainEffect(float Intensity, const FVector& WindDirection);
+
+    UFUNCTION(BlueprintCallable, Category = "Weather Physics")
+    void CreateThunderstormEffect(float LightningFrequency, float RainIntensity);
+
+    // Wind physics
+    UFUNCTION(BlueprintCallable, Category = "Weather Physics")
+    void SetGlobalWind(const FVector& Direction, float Strength);
+
+    UFUNCTION(BlueprintCallable, Category = "Weather Physics")
+    FVector GetWindAtLocation(const FVector& Location) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Weather Physics")
+    void ApplyWindToActor(AActor* Actor, float WindSensitivity = 1.0f);
+
+    // Weather simulation
+    UFUNCTION(BlueprintCallable, Category = "Weather Physics")
+    void StartWeatherSimulation();
+
+    UFUNCTION(BlueprintCallable, Category = "Weather Physics")
+    void StopWeatherSimulation();
+
+    UFUNCTION(BlueprintCallable, Category = "Weather Physics")
+    void SetWeatherCycle(const TArray<FCore_WeatherSettings>& WeatherCycle, float CycleDuration = 1200.0f);
+
+    // Biome integration
+    UFUNCTION(BlueprintCallable, Category = "Weather Physics")
+    void UpdateWeatherForBiomes();
+
+    UFUNCTION(BlueprintCallable, Category = "Weather Physics")
+    FCore_WeatherSettings GenerateWeatherForBiome(EBiomeType BiomeType) const;
+
+    // Testing and validation
+    UFUNCTION(BlueprintCallable, Category = "Weather Physics", CallInEditor)
+    void CreateWeatherTestScenario();
+
+    UFUNCTION(BlueprintCallable, Category = "Weather Physics", CallInEditor)
+    void ValidateWeatherSystems();
+
 protected:
-    virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    // Current weather state
+    UPROPERTY(BlueprintReadOnly, Category = "Weather State")
+    FCore_WeatherSettings CurrentWeatherSettings;
 
-public:
-    // Weather System Control
-    UFUNCTION(BlueprintCallable, Category = "Weather Physics")
-    void SetWeatherType(ECore_WeatherType NewWeatherType, float NewIntensity = 0.5f);
+    UPROPERTY(BlueprintReadOnly, Category = "Weather State")
+    FCore_WeatherSettings TargetWeatherSettings;
 
-    UFUNCTION(BlueprintCallable, Category = "Weather Physics")
-    void SetWindParameters(FVector Direction, float Speed);
+    UPROPERTY(BlueprintReadOnly, Category = "Weather State")
+    FCore_WeatherEffects CurrentEffects;
 
-    UFUNCTION(BlueprintCallable, Category = "Weather Physics")
-    void SetAtmosphericConditions(float Temperature, float Humidity, float Pressure);
+    UPROPERTY(BlueprintReadOnly, Category = "Weather State")
+    bool bIsTransitioning = false;
 
-    // Physics Effects
-    UFUNCTION(BlueprintCallable, Category = "Weather Physics")
-    void ApplyWindForceToActor(AActor* TargetActor, float ForceMultiplier = 1.0f);
+    UPROPERTY(BlueprintReadOnly, Category = "Weather State")
+    float TransitionProgress = 0.0f;
 
-    UFUNCTION(BlueprintCallable, Category = "Weather Physics")
-    void ApplyPrecipitationEffects(AActor* TargetActor);
+    UPROPERTY(BlueprintReadOnly, Category = "Weather State")
+    float TransitionDuration = 30.0f;
 
-    UFUNCTION(BlueprintCallable, Category = "Weather Physics")
-    void SimulateStormLightning(FVector StrikeLocation);
+    // Weather simulation
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather Simulation")
+    bool bWeatherSimulationActive = false;
 
-    // Environmental Impact
-    UFUNCTION(BlueprintCallable, Category = "Weather Physics")
-    float CalculateMovementModifier(AActor* Actor) const;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather Simulation")
+    TArray<FCore_WeatherSettings> WeatherCycle;
 
-    UFUNCTION(BlueprintCallable, Category = "Weather Physics")
-    float CalculateVisibilityModifier() const;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather Simulation")
+    float CycleDuration = 1200.0f; // 20 minutes
 
-    UFUNCTION(BlueprintCallable, Category = "Weather Physics")
-    float CalculateFrictionModifier(const FVector& SurfaceNormal) const;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather Simulation")
+    int32 CurrentCycleIndex = 0;
 
-    // Weather Transition
-    UFUNCTION(BlueprintCallable, Category = "Weather Physics")
-    void TransitionToWeather(ECore_WeatherType TargetWeather, float TransitionDuration = 5.0f);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather Simulation")
+    float CycleTimer = 0.0f;
 
-    UFUNCTION(BlueprintCallable, Category = "Weather Physics")
-    bool IsWeatherTransitioning() const { return bIsTransitioning; }
+    // Biome-specific weather settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome Weather")
+    TMap<EBiomeType, FCore_WeatherSettings> BiomeWeatherSettings;
 
-    // Data Access
-    UFUNCTION(BlueprintPure, Category = "Weather Physics")
-    FCore_WeatherPhysicsData GetCurrentWeatherData() const { return CurrentWeatherData; }
+    // Environmental actors
+    UPROPERTY()
+    TWeakObjectPtr<ADirectionalLight> SunLight;
 
-    UFUNCTION(BlueprintPure, Category = "Weather Physics")
-    FCore_PrecipitationPhysics GetPrecipitationData() const { return PrecipitationData; }
+    UPROPERTY()
+    TWeakObjectPtr<AExponentialHeightFog> FogActor;
 
-    // Debug Functions
-    UFUNCTION(CallInEditor, Category = "Weather Physics")
-    void DebugWeatherEffects();
+    UPROPERTY()
+    TWeakObjectPtr<ASkyAtmosphere> SkyAtmosphere;
 
-    UFUNCTION(CallInEditor, Category = "Weather Physics")
-    void TestStormSimulation();
+    // Weather effects
+    UPROPERTY()
+    TArray<TWeakObjectPtr<UNiagaraComponent>> RainEffects;
 
-protected:
-    // Core Weather Data
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather Configuration")
-    FCore_WeatherPhysicsData CurrentWeatherData;
+    UPROPERTY()
+    TArray<TWeakObjectPtr<UAudioComponent>> WeatherSounds;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather Configuration")
-    FCore_PrecipitationPhysics PrecipitationData;
-
-    // Wind Physics
+    // Wind system
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wind Physics")
-    float WindForceMultiplier = 1.0f;
+    FVector GlobalWindDirection = FVector(1.0f, 0.0f, 0.0f);
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wind Physics")
-    float WindTurbulenceScale = 0.1f;
+    float GlobalWindStrength = 0.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wind Physics")
-    float MaxWindForce = 1000.0f;
-
-    // Precipitation Physics
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Precipitation Physics")
-    float RainDropDensity = 100.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Precipitation Physics")
-    float HailImpactForce = 50.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Precipitation Physics")
-    float WetnessDecayRate = 0.1f;
-
-    // Lightning Physics
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lightning Physics")
-    float LightningStrikeForce = 10000.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lightning Physics")
-    float LightningRadius = 500.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lightning Physics")
-    float ElectromagneticPulseStrength = 100.0f;
-
-    // Performance Settings
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float UpdateFrequency = 0.1f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float MaxAffectedActors = 100.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    bool bEnableAdvancedPhysics = true;
+    TArray<TWeakObjectPtr<AActor>> WindAffectedActors;
 
 private:
-    // Internal State
-    bool bIsTransitioning = false;
-    float TransitionProgress = 0.0f;
-    float TransitionDuration = 5.0f;
-    FCore_WeatherPhysicsData TargetWeatherData;
-
-    // Cached References
-    UPROPERTY()
-    UWorld* CachedWorld = nullptr;
-
-    // Performance Tracking
-    float LastUpdateTime = 0.0f;
-    int32 ProcessedActorsThisFrame = 0;
-
-    // Internal Methods
+    // Internal update functions
     void UpdateWeatherTransition(float DeltaTime);
-    void ProcessWeatherEffects(float DeltaTime);
-    void ApplyWindTurbulence(AActor* Actor, float DeltaTime);
-    void UpdateSurfaceWetness(float DeltaTime);
-    FVector CalculateWindForce(const FVector& ActorLocation, float ActorMass) const;
-    float CalculateAtmosphericDensity() const;
-    void SpawnLightningEffects(const FVector& Location);
+    void UpdateWeatherCycle(float DeltaTime);
+    void ApplyWeatherEffects();
+    void UpdateEnvironmentalActors();
+    void UpdateWindPhysics(float DeltaTime);
+
+    // Effect creation helpers
+    void CreateWeatherEffects(ECore_WeatherType WeatherType);
+    void CleanupWeatherEffects();
+    UNiagaraComponent* CreateRainParticles(float Intensity);
+    UAudioComponent* CreateWeatherAudio(ECore_WeatherType WeatherType);
+
+    // Biome integration
+    void InitializeBiomeWeatherSettings();
+    FCore_WeatherSettings GetDefaultWeatherForBiome(EBiomeType BiomeType) const;
+
+    // Performance optimization
+    void OptimizeWeatherEffects();
+    bool ShouldUpdateWeatherForDistance(const FVector& Location) const;
+
+    // Biome architecture reference
+    UPROPERTY()
+    TWeakObjectPtr<UEng_BiomeArchitecture> BiomeArchitecture;
+
+    // Performance monitoring
+    UPROPERTY()
+    float LastWeatherUpdateTime;
+
+    UPROPERTY()
+    int32 ActiveWeatherEffects;
 };
