@@ -2,481 +2,327 @@
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "Components/AudioComponent.h"
-#include "Sound/SoundBase.h"
+#include "Sound/SoundCue.h"
+#include "Engine/DataTable.h"
 #include "Kismet/GameplayStatics.h"
-
-UNarr_DialogueManager::UNarr_DialogueManager()
-{
-    bIsDialogueActive = false;
-    bIsConversationActive = false;
-    CurrentDialogueID = "";
-    CurrentConversationID = "";
-    CurrentNodeID = "";
-    DialogueAudioComponent = nullptr;
-    CurrentSpeaker = nullptr;
-    CurrentListener = nullptr;
-}
 
 void UNarr_DialogueManager::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Log, TEXT("Narrative Dialogue Manager initialized"));
+    UE_LOG(LogTemp, Log, TEXT("Narrative DialogueManager initialized"));
     
-    // Initialize default dialogues and conversations
-    InitializeDefaultDialogues();
-    InitializeDefaultConversations();
+    // Initialize narrative state
+    NarrativeState = FNarr_NarrativeState();
+    
+    // Load dialogue database
+    LoadDialogueDatabase();
+    
+    // Setup default unlocked dialogues for new players
+    UnlockDialogue("INTRO_SURVIVAL_001");
+    UnlockDialogue("HUNT_BASICS_001");
+    UnlockDialogue("DANGER_GENERAL_001");
 }
 
 void UNarr_DialogueManager::Deinitialize()
 {
-    EndDialogue();
-    
-    if (DialogueAudioComponent && IsValid(DialogueAudioComponent))
+    if (CurrentDialogueAudio && IsValid(CurrentDialogueAudio))
     {
-        DialogueAudioComponent->Stop();
-        DialogueAudioComponent = nullptr;
+        CurrentDialogueAudio->Stop();
+        CurrentDialogueAudio = nullptr;
     }
+    
+    DialogueDatabase.Empty();
     
     Super::Deinitialize();
 }
 
-bool UNarr_DialogueManager::StartDialogue(const FString& DialogueID, AActor* Speaker, AActor* Listener)
+void UNarr_DialogueManager::LoadDialogueDatabase()
 {
-    if (DialogueID.IsEmpty())
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Cannot start dialogue with empty ID"));
-        return false;
-    }
+    // Create default dialogue entries for prehistoric survival game
+    FNarr_DialogueEntry HuntEntry;
+    HuntEntry.DialogueID = "HUNT_BASICS_001";
+    HuntEntry.SpeakerRole = ENarr_CharacterRole::HuntMaster;
+    HuntEntry.DialogueType = ENarr_DialogueType::HuntInstruction;
+    HuntEntry.DialogueText = FText::FromString("The great hunt begins at dawn. Position yourself on the ridge and strike when the sun touches the peaks.");
+    HuntEntry.Duration = 8.0f;
+    DialogueDatabase.Add(HuntEntry.DialogueID, HuntEntry);
+    
+    FNarr_DialogueEntry SurvivalEntry;
+    SurvivalEntry.DialogueID = "SURVIVAL_RAPTORS_001";
+    SurvivalEntry.SpeakerRole = ENarr_CharacterRole::SurvivalGuide;
+    SurvivalEntry.DialogueType = ENarr_DialogueType::SurvivalWarning;
+    SurvivalEntry.DialogueText = FText::FromString("Velociraptors hunt in packs. They flank from both sides while one distracts. Keep your spear ready.");
+    SurvivalEntry.Duration = 10.0f;
+    DialogueDatabase.Add(SurvivalEntry.DialogueID, SurvivalEntry);
+    
+    FNarr_DialogueEntry DangerEntry;
+    DangerEntry.DialogueID = "DANGER_TREX_001";
+    DangerEntry.SpeakerRole = ENarr_CharacterRole::Scout;
+    DangerEntry.DialogueType = ENarr_DialogueType::ThreatAlert;
+    DangerEntry.DialogueText = FText::FromString("Thunder Lizard approaches! Retreat to higher ground immediately. Do not engage!");
+    DangerEntry.Duration = 6.0f;
+    DialogueDatabase.Add(DangerEntry.DialogueID, DangerEntry);
+    
+    FNarr_DialogueEntry WisdomEntry;
+    WisdomEntry.DialogueID = "WISDOM_CAVES_001";
+    WisdomEntry.SpeakerRole = ENarr_CharacterRole::Elder;
+    WisdomEntry.DialogueType = ENarr_DialogueType::TribeWisdom;
+    WisdomEntry.DialogueText = FText::FromString("Ancient caves hold secrets. Study the markings - they guide to water, shelter, or warn of danger.");
+    WisdomEntry.Duration = 9.0f;
+    DialogueDatabase.Add(WisdomEntry.DialogueID, WisdomEntry);
+    
+    UE_LOG(LogTemp, Log, TEXT("Dialogue database loaded with %d entries"), DialogueDatabase.Num());
+}
 
-    FNarr_DialogueEntry* DialogueEntry = DialogueDatabase.Find(DialogueID);
+void UNarr_DialogueManager::TriggerDialogue(const FString& DialogueID, AActor* Speaker)
+{
+    if (!IsDialogueUnlocked(DialogueID))
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Dialogue %s is not unlocked"), *DialogueID);
+        return;
+    }
+    
+    const FNarr_DialogueEntry* DialogueEntry = DialogueDatabase.Find(DialogueID);
     if (!DialogueEntry)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Dialogue not found: %s"), *DialogueID);
-        return false;
-    }
-
-    // End current dialogue if active
-    if (bIsDialogueActive)
-    {
-        EndDialogue();
-    }
-
-    CurrentDialogueID = DialogueID;
-    CurrentSpeaker = Speaker;
-    CurrentListener = Listener;
-    bIsDialogueActive = true;
-
-    // Process dialogue conditions
-    ProcessDialogueConditions(*DialogueEntry);
-
-    // Broadcast dialogue started event
-    OnDialogueStarted.Broadcast(DialogueID, DialogueEntry->Speaker);
-    OnDialogueLineSpoken.Broadcast(DialogueID, DialogueEntry->DialogueText, DialogueEntry->Duration);
-
-    // Play audio if available
-    PlayDialogueAudio(DialogueID);
-
-    UE_LOG(LogTemp, Log, TEXT("Started dialogue: %s"), *DialogueID);
-    return true;
-}
-
-void UNarr_DialogueManager::EndDialogue()
-{
-    if (!bIsDialogueActive)
-    {
+        UE_LOG(LogTemp, Error, TEXT("Dialogue %s not found in database"), *DialogueID);
         return;
     }
-
-    FString EndedDialogueID = CurrentDialogueID;
     
-    StopDialogueAudio();
+    if (!CheckDialogueConditions(*DialogueEntry))
+    {
+        UE_LOG(LogTemp, Log, TEXT("Dialogue %s conditions not met"), *DialogueID);
+        return;
+    }
     
-    CurrentDialogueID = "";
-    CurrentSpeaker = nullptr;
-    CurrentListener = nullptr;
-    bIsDialogueActive = false;
-
-    OnDialogueEnded.Broadcast(EndedDialogueID);
+    // Play the dialogue
+    PlayDialogueAudio(*DialogueEntry);
     
-    UE_LOG(LogTemp, Log, TEXT("Ended dialogue: %s"), *EndedDialogueID);
+    // Log the event
+    LogDialogueEvent(DialogueID, Speaker ? Speaker->GetName() : "System");
+    
+    UE_LOG(LogTemp, Log, TEXT("Playing dialogue: %s"), *DialogueEntry->DialogueText.ToString());
 }
 
-bool UNarr_DialogueManager::IsDialogueActive() const
+void UNarr_DialogueManager::PlayDialogueByType(ENarr_DialogueType DialogueType, ENarr_CharacterRole SpeakerRole)
 {
-    return bIsDialogueActive;
-}
-
-FString UNarr_DialogueManager::GetCurrentDialogueID() const
-{
-    return CurrentDialogueID;
-}
-
-bool UNarr_DialogueManager::StartConversation(const FString& ConversationID, AActor* Speaker, AActor* Listener)
-{
-    if (ConversationID.IsEmpty())
+    for (const auto& DialoguePair : DialogueDatabase)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Cannot start conversation with empty ID"));
-        return false;
-    }
-
-    TArray<FNarr_ConversationNode>* ConversationNodes = ConversationDatabase.Find(ConversationID);
-    if (!ConversationNodes || ConversationNodes->Num() == 0)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Conversation not found: %s"), *ConversationID);
-        return false;
-    }
-
-    // End current dialogue/conversation if active
-    if (bIsDialogueActive || bIsConversationActive)
-    {
-        EndDialogue();
-    }
-
-    CurrentConversationID = ConversationID;
-    CurrentNodeID = (*ConversationNodes)[0].NodeID; // Start with first node
-    CurrentSpeaker = Speaker;
-    CurrentListener = Listener;
-    bIsConversationActive = true;
-
-    // Start the first dialogue node
-    FNarr_ConversationNode* FirstNode = GetConversationNode(ConversationID, CurrentNodeID);
-    if (FirstNode)
-    {
-        CurrentDialogueID = FirstNode->DialogueEntry.DialogueID;
-        bIsDialogueActive = true;
-        
-        OnDialogueStarted.Broadcast(CurrentDialogueID, FirstNode->DialogueEntry.Speaker);
-        OnDialogueLineSpoken.Broadcast(CurrentDialogueID, FirstNode->DialogueEntry.DialogueText, FirstNode->DialogueEntry.Duration);
-        
-        PlayDialogueAudio(CurrentDialogueID);
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("Started conversation: %s"), *ConversationID);
-    return true;
-}
-
-bool UNarr_DialogueManager::AdvanceConversation(const FString& ChoiceID)
-{
-    if (!bIsConversationActive)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("No active conversation to advance"));
-        return false;
-    }
-
-    FNarr_ConversationNode* CurrentNode = GetConversationNode(CurrentConversationID, CurrentNodeID);
-    if (!CurrentNode)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Current conversation node not found"));
-        return false;
-    }
-
-    // Check if this is an end node
-    if (CurrentNode->bIsEndNode)
-    {
-        EndDialogue();
-        bIsConversationActive = false;
-        return true;
-    }
-
-    // Find next node
-    FString NextNodeID = "";
-    if (CurrentNode->NextNodeIDs.Num() > 0)
-    {
-        if (CurrentNode->bRequiresPlayerChoice && !ChoiceID.IsEmpty())
+        const FNarr_DialogueEntry& Entry = DialoguePair.Value;
+        if (Entry.DialogueType == DialogueType && Entry.SpeakerRole == SpeakerRole)
         {
-            // Find the node corresponding to the choice
-            for (const FString& NodeID : CurrentNode->NextNodeIDs)
+            if (IsDialogueUnlocked(Entry.DialogueID))
             {
-                if (NodeID.Contains(ChoiceID))
-                {
-                    NextNodeID = NodeID;
-                    break;
-                }
+                TriggerDialogue(Entry.DialogueID);
+                return;
             }
         }
-        else
-        {
-            // Take the first available next node
-            NextNodeID = CurrentNode->NextNodeIDs[0];
-        }
     }
+    
+    UE_LOG(LogTemp, Warning, TEXT("No unlocked dialogue found for type %d, role %d"), 
+           (int32)DialogueType, (int32)SpeakerRole);
+}
 
-    if (NextNodeID.IsEmpty())
+bool UNarr_DialogueManager::IsDialogueUnlocked(const FString& DialogueID) const
+{
+    return NarrativeState.UnlockedDialogues.Contains(DialogueID);
+}
+
+void UNarr_DialogueManager::UnlockDialogue(const FString& DialogueID)
+{
+    if (!NarrativeState.UnlockedDialogues.Contains(DialogueID))
     {
-        UE_LOG(LogTemp, Warning, TEXT("No valid next node found"));
-        EndDialogue();
-        bIsConversationActive = false;
-        return false;
+        NarrativeState.UnlockedDialogues.Add(DialogueID);
+        UE_LOG(LogTemp, Log, TEXT("Unlocked dialogue: %s"), *DialogueID);
     }
+}
 
-    // Advance to next node
-    CurrentNodeID = NextNodeID;
-    FNarr_ConversationNode* NextNode = GetConversationNode(CurrentConversationID, CurrentNodeID);
-    if (NextNode)
+void UNarr_DialogueManager::AdvanceChapter(int32 NewChapter)
+{
+    if (NewChapter > NarrativeState.CurrentChapter)
     {
-        CurrentDialogueID = NextNode->DialogueEntry.DialogueID;
+        NarrativeState.CurrentChapter = NewChapter;
+        UE_LOG(LogTemp, Log, TEXT("Advanced to chapter %d"), NewChapter);
         
-        OnDialogueLineSpoken.Broadcast(CurrentDialogueID, NextNode->DialogueEntry.DialogueText, NextNode->DialogueEntry.Duration);
-        PlayDialogueAudio(CurrentDialogueID);
-    }
-
-    return true;
-}
-
-TArray<FString> UNarr_DialogueManager::GetCurrentChoices() const
-{
-    TArray<FString> Choices;
-    
-    if (!bIsConversationActive)
-    {
-        return Choices;
-    }
-
-    FNarr_ConversationNode* CurrentNode = const_cast<UNarr_DialogueManager*>(this)->GetConversationNode(CurrentConversationID, CurrentNodeID);
-    if (CurrentNode && CurrentNode->bRequiresPlayerChoice)
-    {
-        for (const FString& ResponseOption : CurrentNode->DialogueEntry.ResponseOptions)
+        // Unlock chapter-specific dialogues
+        switch (NewChapter)
         {
-            Choices.Add(ResponseOption);
+        case 2:
+            UnlockDialogue("HUNT_ADVANCED_001");
+            UnlockDialogue("TRIBE_MEETING_001");
+            break;
+        case 3:
+            UnlockDialogue("ELDER_WISDOM_001");
+            UnlockDialogue("DANGEROUS_TERRITORY_001");
+            break;
         }
     }
-
-    return Choices;
 }
 
-void UNarr_DialogueManager::RegisterDialogue(const FNarr_DialogueEntry& DialogueEntry)
+void UNarr_DialogueManager::RegisterQuestCompletion(const FString& QuestID)
 {
-    if (DialogueEntry.DialogueID.IsEmpty())
+    if (!NarrativeState.CompletedQuests.Contains(QuestID))
     {
-        UE_LOG(LogTemp, Warning, TEXT("Cannot register dialogue with empty ID"));
-        return;
-    }
-
-    DialogueDatabase.Add(DialogueEntry.DialogueID, DialogueEntry);
-    UE_LOG(LogTemp, Log, TEXT("Registered dialogue: %s"), *DialogueEntry.DialogueID);
-}
-
-void UNarr_DialogueManager::RegisterConversation(const FString& ConversationID, const TArray<FNarr_ConversationNode>& Nodes)
-{
-    if (ConversationID.IsEmpty() || Nodes.Num() == 0)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Cannot register conversation with empty ID or no nodes"));
-        return;
-    }
-
-    ConversationDatabase.Add(ConversationID, Nodes);
-    
-    // Also register individual dialogue entries
-    for (const FNarr_ConversationNode& Node : Nodes)
-    {
-        RegisterDialogue(Node.DialogueEntry);
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("Registered conversation: %s with %d nodes"), *ConversationID, Nodes.Num());
-}
-
-bool UNarr_DialogueManager::GetDialogueEntry(const FString& DialogueID, FNarr_DialogueEntry& OutEntry) const
-{
-    const FNarr_DialogueEntry* Entry = DialogueDatabase.Find(DialogueID);
-    if (Entry)
-    {
-        OutEntry = *Entry;
-        return true;
-    }
-    return false;
-}
-
-TArray<FString> UNarr_DialogueManager::GetDialoguesByType(ENarr_DialogueType Type) const
-{
-    TArray<FString> Results;
-    
-    for (const auto& Pair : DialogueDatabase)
-    {
-        if (Pair.Value.Type == Type)
+        NarrativeState.CompletedQuests.Add(QuestID);
+        UE_LOG(LogTemp, Log, TEXT("Quest completed: %s"), *QuestID);
+        
+        // Unlock related dialogues based on quest completion
+        if (QuestID.Contains("HUNT"))
         {
-            Results.Add(Pair.Key);
+            NarrativeState.SuccessfulHunts++;
+            UnlockDialogue("HUNT_SUCCESS_001");
+        }
+        else if (QuestID.Contains("SURVIVAL"))
+        {
+            UnlockDialogue("SURVIVAL_MASTERY_001");
         }
     }
-    
-    return Results;
 }
 
-TArray<FString> UNarr_DialogueManager::GetDialoguesByCharacter(ENarr_CharacterRole Character) const
+void UNarr_DialogueManager::UpdateSurvivalExperience(float ExperienceGained)
 {
-    TArray<FString> Results;
+    NarrativeState.SurvivalExperience += ExperienceGained;
     
-    for (const auto& Pair : DialogueDatabase)
+    // Unlock dialogues based on experience milestones
+    if (NarrativeState.SurvivalExperience >= 100.0f && !IsDialogueUnlocked("EXPERIENCED_SURVIVOR_001"))
     {
-        if (Pair.Value.Speaker == Character)
-        {
-            Results.Add(Pair.Key);
-        }
+        UnlockDialogue("EXPERIENCED_SURVIVOR_001");
     }
     
-    return Results;
+    if (NarrativeState.SurvivalExperience >= 500.0f && !IsDialogueUnlocked("MASTER_SURVIVOR_001"))
+    {
+        UnlockDialogue("MASTER_SURVIVOR_001");
+    }
 }
 
-void UNarr_DialogueManager::PlayDialogueAudio(const FString& DialogueID)
+void UNarr_DialogueManager::TriggerHuntDialogue(const FString& DinosaurType, int32 PackSize)
 {
-    FNarr_DialogueEntry* Entry = DialogueDatabase.Find(DialogueID);
-    if (!Entry || Entry->VoiceClip.IsNull())
+    FString DialogueContext = FString::Printf(TEXT("Hunt_%s_Pack%d"), *DinosaurType, PackSize);
+    
+    if (DinosaurType.Contains("Raptor") && PackSize > 1)
     {
-        return;
+        TriggerDialogue("SURVIVAL_RAPTORS_001");
     }
-
-    USoundBase* SoundToPlay = Entry->VoiceClip.LoadSynchronous();
-    if (!SoundToPlay)
+    else if (DinosaurType.Contains("TRex"))
     {
-        return;
-    }
-
-    // Stop current audio if playing
-    StopDialogueAudio();
-
-    // Create audio component if needed
-    if (!DialogueAudioComponent)
-    {
-        UWorld* World = GetWorld();
-        if (World)
-        {
-            DialogueAudioComponent = UGameplayStatics::SpawnSound2D(World, SoundToPlay, 1.0f, 1.0f, 0.0f);
-        }
+        TriggerDialogue("DANGER_TREX_001");
     }
     else
     {
-        DialogueAudioComponent->SetSound(SoundToPlay);
-        DialogueAudioComponent->Play();
-    }
-}
-
-void UNarr_DialogueManager::StopDialogueAudio()
-{
-    if (DialogueAudioComponent && IsValid(DialogueAudioComponent))
-    {
-        DialogueAudioComponent->Stop();
-    }
-}
-
-bool UNarr_DialogueManager::IsDialogueAudioPlaying() const
-{
-    return DialogueAudioComponent && IsValid(DialogueAudioComponent) && DialogueAudioComponent->IsPlaying();
-}
-
-void UNarr_DialogueManager::InitializeDefaultDialogues()
-{
-    // Hunt Master dialogues
-    FNarr_DialogueEntry HuntMasterGreeting;
-    HuntMasterGreeting.DialogueID = "hunt_master_greeting";
-    HuntMasterGreeting.Speaker = ENarr_CharacterRole::HuntMaster;
-    HuntMasterGreeting.Type = ENarr_DialogueType::Greeting;
-    HuntMasterGreeting.DialogueText = FText::FromString("The great hunt begins at dawn. Our scouts have spotted a massive herd of long-necks moving through the valley below.");
-    HuntMasterGreeting.Duration = 21.0f;
-    RegisterDialogue(HuntMasterGreeting);
-
-    // Tribal Scout warning
-    FNarr_DialogueEntry ScoutWarning;
-    ScoutWarning.DialogueID = "scout_predator_warning";
-    ScoutWarning.Speaker = ENarr_CharacterRole::Scout;
-    ScoutWarning.Type = ENarr_DialogueType::Warning;
-    ScoutWarning.DialogueText = FText::FromString("Beware the shadow of the thunder-foot! The ground shakes with each step as the great predator stalks through our territory.");
-    ScoutWarning.Duration = 22.0f;
-    RegisterDialogue(ScoutWarning);
-
-    // Water Seeker survival advice
-    FNarr_DialogueEntry WaterSeekerAdvice;
-    WaterSeekerAdvice.DialogueID = "water_seeker_survival";
-    WaterSeekerAdvice.Speaker = ENarr_CharacterRole::WaterSeeker;
-    WaterSeekerAdvice.Type = ENarr_DialogueType::Survival;
-    WaterSeekerAdvice.DialogueText = FText::FromString("The water runs low and the dry season approaches. Our scouts report fresh springs beyond the bone valley, but the path is treacherous.");
-    WaterSeekerAdvice.Duration = 24.0f;
-    RegisterDialogue(WaterSeekerAdvice);
-
-    // Tribal Elder lore
-    FNarr_DialogueEntry ElderLore;
-    ElderLore.DialogueID = "elder_ancient_wisdom";
-    ElderLore.Speaker = ENarr_CharacterRole::TribalElder;
-    ElderLore.Type = ENarr_DialogueType::Lore;
-    ElderLore.DialogueText = FText::FromString("The elders speak of the old ways, when our ancestors first learned to read the signs in stone and sky. Watch the flight of the leather-wings at sunset.");
-    ElderLore.Duration = 25.0f;
-    RegisterDialogue(ElderLore);
-
-    UE_LOG(LogTemp, Log, TEXT("Initialized %d default dialogues"), DialogueDatabase.Num());
-}
-
-void UNarr_DialogueManager::InitializeDefaultConversations()
-{
-    // Create a sample hunt preparation conversation
-    TArray<FNarr_ConversationNode> HuntConversation;
-    
-    // Node 1: Hunt Master introduction
-    FNarr_ConversationNode Node1;
-    Node1.NodeID = "hunt_intro";
-    Node1.DialogueEntry.DialogueID = "hunt_master_greeting";
-    Node1.DialogueEntry.Speaker = ENarr_CharacterRole::HuntMaster;
-    Node1.DialogueEntry.Type = ENarr_DialogueType::Quest;
-    Node1.DialogueEntry.DialogueText = FText::FromString("The great hunt begins at dawn. Are you ready to join us?");
-    Node1.DialogueEntry.Duration = 8.0f;
-    Node1.DialogueEntry.ResponseOptions.Add("Yes, I'm ready");
-    Node1.DialogueEntry.ResponseOptions.Add("I need more preparation");
-    Node1.NextNodeIDs.Add("hunt_ready");
-    Node1.NextNodeIDs.Add("hunt_prepare");
-    Node1.bRequiresPlayerChoice = true;
-    HuntConversation.Add(Node1);
-    
-    // Node 2: Ready response
-    FNarr_ConversationNode Node2;
-    Node2.NodeID = "hunt_ready";
-    Node2.DialogueEntry.DialogueID = "hunt_ready_response";
-    Node2.DialogueEntry.Speaker = ENarr_CharacterRole::HuntMaster;
-    Node2.DialogueEntry.Type = ENarr_DialogueType::Instruction;
-    Node2.DialogueEntry.DialogueText = FText::FromString("Excellent! Take position on the eastern ridge. Strike when the sun touches the peaks.");
-    Node2.DialogueEntry.Duration = 10.0f;
-    Node2.bIsEndNode = true;
-    HuntConversation.Add(Node2);
-    
-    // Node 3: Preparation response
-    FNarr_ConversationNode Node3;
-    Node3.NodeID = "hunt_prepare";
-    Node3.DialogueEntry.DialogueID = "hunt_prepare_response";
-    Node3.DialogueEntry.Speaker = ENarr_CharacterRole::HuntMaster;
-    Node3.DialogueEntry.Type = ENarr_DialogueType::Instruction;
-    Node3.DialogueEntry.DialogueText = FText::FromString("Wise choice. Gather your spears and check your gear. The hunt waits for no one.");
-    Node3.DialogueEntry.Duration = 12.0f;
-    Node3.bIsEndNode = true;
-    HuntConversation.Add(Node3);
-    
-    RegisterConversation("hunt_preparation", HuntConversation);
-    
-    UE_LOG(LogTemp, Log, TEXT("Initialized %d default conversations"), ConversationDatabase.Num());
-}
-
-FNarr_ConversationNode* UNarr_DialogueManager::GetConversationNode(const FString& ConversationID, const FString& NodeID)
-{
-    TArray<FNarr_ConversationNode>* Nodes = ConversationDatabase.Find(ConversationID);
-    if (!Nodes)
-    {
-        return nullptr;
+        PlayDialogueByType(ENarr_DialogueType::HuntInstruction, ENarr_CharacterRole::HuntMaster);
     }
     
-    for (FNarr_ConversationNode& Node : *Nodes)
+    LogDialogueEvent("HUNT_TRIGGERED", DialogueContext);
+}
+
+void UNarr_DialogueManager::TriggerDangerWarning(const FString& ThreatType, float Distance)
+{
+    FString DialogueContext = FString::Printf(TEXT("Danger_%s_Dist%.0f"), *ThreatType, Distance);
+    
+    if (ThreatType.Contains("TRex") || ThreatType.Contains("Thunder"))
     {
-        if (Node.NodeID == NodeID)
+        TriggerDialogue("DANGER_TREX_001");
+    }
+    else
+    {
+        PlayDialogueByType(ENarr_DialogueType::ThreatAlert, ENarr_CharacterRole::Scout);
+    }
+    
+    LogDialogueEvent("DANGER_WARNING", DialogueContext);
+}
+
+void UNarr_DialogueManager::TriggerResourceGuidance(const FString& ResourceType, bool bFound)
+{
+    FString DialogueContext = FString::Printf(TEXT("Resource_%s_%s"), *ResourceType, bFound ? TEXT("Found") : TEXT("Seeking"));
+    
+    if (ResourceType.Contains("Water") || ResourceType.Contains("Shelter"))
+    {
+        TriggerDialogue("WISDOM_CAVES_001");
+    }
+    else
+    {
+        PlayDialogueByType(ENarr_DialogueType::ResourceGuidance, ENarr_CharacterRole::Elder);
+    }
+    
+    LogDialogueEvent("RESOURCE_GUIDANCE", DialogueContext);
+}
+
+TArray<FNarr_DialogueEntry> UNarr_DialogueManager::GetAvailableDialogues() const
+{
+    TArray<FNarr_DialogueEntry> AvailableDialogues;
+    
+    for (const auto& DialoguePair : DialogueDatabase)
+    {
+        if (IsDialogueUnlocked(DialoguePair.Key))
         {
-            return &Node;
+            AvailableDialogues.Add(DialoguePair.Value);
         }
     }
     
-    return nullptr;
+    return AvailableDialogues;
 }
 
-void UNarr_DialogueManager::ProcessDialogueConditions(const FNarr_DialogueEntry& Entry)
+void UNarr_DialogueManager::PlayDialogueAudio(const FNarr_DialogueEntry& DialogueEntry)
 {
-    // Process any required conditions for the dialogue
-    // This could check player stats, quest progress, time of day, etc.
-    for (const FString& Condition : Entry.RequiredConditions)
+    // Stop current dialogue if playing
+    if (CurrentDialogueAudio && IsValid(CurrentDialogueAudio))
     {
-        UE_LOG(LogTemp, Log, TEXT("Processing dialogue condition: %s"), *Condition);
-        // Add condition logic here as needed
+        CurrentDialogueAudio->Stop();
     }
+    
+    // For now, just log the dialogue text
+    // In a full implementation, this would load and play the audio asset
+    UE_LOG(LogTemp, Log, TEXT("DIALOGUE [%s]: %s"), 
+           *UEnum::GetValueAsString(DialogueEntry.SpeakerRole),
+           *DialogueEntry.DialogueText.ToString());
+    
+    // Display dialogue text on screen for debugging
+    if (GEngine)
+    {
+        FString DisplayText = FString::Printf(TEXT("[%s]: %s"), 
+                                            *UEnum::GetValueAsString(DialogueEntry.SpeakerRole),
+                                            *DialogueEntry.DialogueText.ToString());
+        GEngine->AddOnScreenDebugMessage(-1, DialogueEntry.Duration, FColor::Yellow, DisplayText);
+    }
+}
+
+bool UNarr_DialogueManager::CheckDialogueConditions(const FNarr_DialogueEntry& DialogueEntry) const
+{
+    // Check basic narrative state conditions
+    for (const FString& Condition : DialogueEntry.TriggerConditions)
+    {
+        if (Condition.Contains("Chapter") && !Condition.Contains(FString::FromInt(NarrativeState.CurrentChapter)))
+        {
+            return false;
+        }
+        
+        if (Condition.Contains("Quest") && !NarrativeState.CompletedQuests.ContainsByPredicate([&Condition](const FString& Quest)
+        {
+            return Condition.Contains(Quest);
+        }))
+        {
+            return false;
+        }
+        
+        if (Condition.Contains("Experience"))
+        {
+            FString ExpString = Condition.RightChop(Condition.Find("Experience") + 10);
+            float RequiredExp = FCString::Atof(*ExpString);
+            if (NarrativeState.SurvivalExperience < RequiredExp)
+            {
+                return false;
+            }
+        }
+    }
+    
+    return true;
+}
+
+void UNarr_DialogueManager::LogDialogueEvent(const FString& DialogueID, const FString& Context)
+{
+    FString LogEntry = FString::Printf(TEXT("NARRATIVE_EVENT: %s | Context: %s | Chapter: %d | Experience: %.1f"), 
+                                     *DialogueID, *Context, NarrativeState.CurrentChapter, NarrativeState.SurvivalExperience);
+    
+    UE_LOG(LogTemp, Log, TEXT("%s"), *LogEntry);
 }
