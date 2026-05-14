@@ -2,8 +2,10 @@
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Engine/World.h"
+#include "DrawDebugHelpers.h"
 #include "Kismet/KismetMathLibrary.h"
-#include "Engine/Engine.h"
+#include "Kismet/KismetSystemLibrary.h"
 
 UAnim_CharacterAnimInstance::UAnim_CharacterAnimInstance()
 {
@@ -11,26 +13,16 @@ UAnim_CharacterAnimInstance::UAnim_CharacterAnimInstance()
     WalkSpeed = 150.0f;
     RunSpeed = 400.0f;
     CrouchSpeed = 100.0f;
+    TurnRate = 90.0f;
     
-    // Initialize state
-    CurrentMovementState = EAnim_MovementState::Idle;
-    CurrentCombatState = EAnim_CombatState::Unarmed;
+    // Enable foot IK by default
+    bEnableFootIK = true;
     
-    // Initialize blend values
+    // Initialize blend weights
     IdleToWalkBlend = 0.0f;
     WalkToRunBlend = 0.0f;
-    DirectionalBlend = 0.0f;
-    
-    // Initialize transition flags
-    bShouldEnterJump = false;
-    bShouldEnterFalling = false;
-    bShouldEnterLanding = false;
-    
-    // Initialize internal state
-    LastGroundSpeed = 0.0f;
-    StateChangeTimer = 0.0f;
-    bWasInAir = false;
-    bJustLanded = false;
+    CombatBlend = 0.0f;
+    InjuryBlend = 0.0f;
 }
 
 void UAnim_CharacterAnimInstance::NativeInitializeAnimation()
@@ -42,21 +34,11 @@ void UAnim_CharacterAnimInstance::NativeInitializeAnimation()
     if (OwnerCharacter)
     {
         CharacterMovement = OwnerCharacter->GetCharacterMovement();
-        
-        if (GEngine)
-        {
-            GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green, 
-                FString::Printf(TEXT("Animation Instance initialized for: %s"), 
-                *OwnerCharacter->GetName()));
-        }
+        UE_LOG(LogTemp, Log, TEXT("Animation Instance initialized for character: %s"), *OwnerCharacter->GetName());
     }
     else
     {
-        if (GEngine)
-        {
-            GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, 
-                TEXT("Failed to get character reference in AnimInstance"));
-        }
+        UE_LOG(LogTemp, Warning, TEXT("Animation Instance could not find owner character"));
     }
 }
 
@@ -69,20 +51,17 @@ void UAnim_CharacterAnimInstance::NativeUpdateAnimation(float DeltaTimeX)
         return;
     }
     
-    // Update state change timer
-    StateChangeTimer += DeltaTimeX;
-    
-    // Update movement data
+    // Update all animation data
     UpdateMovementData();
-    
-    // Update movement state
     UpdateMovementState();
+    UpdateCombatState();
+    UpdateSurvivalData();
+    UpdateBlendWeights();
     
-    // Update blend values
-    UpdateBlendValues();
-    
-    // Update transition flags
-    UpdateTransitionFlags();
+    if (bEnableFootIK)
+    {
+        UpdateFootIK();
+    }
 }
 
 void UAnim_CharacterAnimInstance::UpdateMovementData()
@@ -92,49 +71,25 @@ void UAnim_CharacterAnimInstance::UpdateMovementData()
         return;
     }
     
-    // Get velocity and calculate speed
+    // Get movement data
     MovementData.Velocity = CharacterMovement->Velocity;
     MovementData.Speed = MovementData.Velocity.Size();
-    MovementData.GroundSpeed = MovementData.Velocity.Size2D();
-    
-    // Calculate direction relative to character forward
-    if (MovementData.GroundSpeed > 1.0f)
-    {
-        FVector ForwardVector = OwnerCharacter->GetActorForwardVector();
-        FVector VelocityDirection = MovementData.Velocity.GetSafeNormal2D();
-        MovementData.Direction = FMath::RadiansToDegrees(FMath::Acos(FVector::DotProduct(ForwardVector, VelocityDirection)));
-        
-        // Determine if moving left or right
-        FVector RightVector = OwnerCharacter->GetActorRightVector();
-        float RightDot = FVector::DotProduct(RightVector, VelocityDirection);
-        if (RightDot < 0.0f)
-        {
-            MovementData.Direction *= -1.0f;
-        }
-    }
-    else
-    {
-        MovementData.Direction = 0.0f;
-    }
-    
-    // Update air state
+    MovementData.Direction = CalculateDirection(MovementData.Velocity, OwnerCharacter->GetActorRotation());
     MovementData.bIsInAir = CharacterMovement->IsFalling();
     MovementData.bIsCrouching = CharacterMovement->IsCrouching();
+    MovementData.Acceleration = CharacterMovement->GetCurrentAcceleration().Size();
     
-    // Calculate jump height (distance from ground)
+    // Calculate jump height if in air
     if (MovementData.bIsInAir)
     {
+        FVector Location = OwnerCharacter->GetActorLocation();
         FHitResult HitResult;
-        FVector StartLocation = OwnerCharacter->GetActorLocation();
-        FVector EndLocation = StartLocation - FVector(0, 0, 2000.0f);
+        FVector Start = Location;
+        FVector End = Location - FVector(0, 0, 2000.0f); // Trace down 20m
         
-        if (GetWorld()->LineTraceSingleByChannel(HitResult, StartLocation, EndLocation, ECC_WorldStatic))
+        if (GetWorld()->LineTraceSingleByChannel(HitResult, Start, End, ECC_WorldStatic))
         {
-            MovementData.JumpHeight = HitResult.Distance;
-        }
-        else
-        {
-            MovementData.JumpHeight = 2000.0f;
+            MovementData.JumpHeight = FMath::Abs(HitResult.Location.Z - Location.Z);
         }
     }
     else
@@ -145,33 +100,202 @@ void UAnim_CharacterAnimInstance::UpdateMovementData()
 
 void UAnim_CharacterAnimInstance::UpdateMovementState()
 {
-    EAnim_MovementState NewState = CalculateMovementState();
-    
-    if (NewState != CurrentMovementState)
-    {
-        CurrentMovementState = NewState;
-        StateChangeTimer = 0.0f;
-        
-        if (GEngine)
-        {
-            FString StateName = UEnum::GetValueAsString(CurrentMovementState);
-            GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Yellow, 
-                FString::Printf(TEXT("Movement State Changed: %s"), *StateName));
-        }
-    }
+    MovementState = DetermineMovementState();
 }
 
-EAnim_MovementState UAnim_CharacterAnimInstance::CalculateMovementState() const
+void UAnim_CharacterAnimInstance::UpdateCombatState()
+{
+    CombatState = DetermineCombatState();
+}
+
+void UAnim_CharacterAnimInstance::UpdateSurvivalData()
+{
+    // This would typically get data from a survival component
+    // For now, use placeholder values
+    SurvivalData.HealthPercent = 1.0f;
+    SurvivalData.StaminaPercent = FMath::Clamp(1.0f - (MovementData.Speed / RunSpeed) * 0.5f, 0.0f, 1.0f);
+    SurvivalData.FearLevel = 0.0f;
+    SurvivalData.bIsInjured = SurvivalData.HealthPercent < 0.5f;
+    SurvivalData.bIsExhausted = SurvivalData.StaminaPercent < 0.2f;
+}
+
+void UAnim_CharacterAnimInstance::UpdateBlendWeights()
+{
+    // Calculate blend weights based on speed
+    float SpeedRatio = MovementData.Speed / RunSpeed;
+    
+    // Idle to walk blend
+    IdleToWalkBlend = FMath::Clamp(MovementData.Speed / WalkSpeed, 0.0f, 1.0f);
+    
+    // Walk to run blend
+    if (MovementData.Speed > WalkSpeed)
+    {
+        WalkToRunBlend = FMath::Clamp((MovementData.Speed - WalkSpeed) / (RunSpeed - WalkSpeed), 0.0f, 1.0f);
+    }
+    else
+    {
+        WalkToRunBlend = 0.0f;
+    }
+    
+    // Combat blend
+    CombatBlend = (CombatState == EAnim_CombatState::Combat) ? 1.0f : 0.0f;
+    
+    // Injury blend
+    InjuryBlend = SurvivalData.bIsInjured ? (1.0f - SurvivalData.HealthPercent) : 0.0f;
+}
+
+void UAnim_CharacterAnimInstance::UpdateFootIK()
+{
+    CalculateFootIK();
+}
+
+void UAnim_CharacterAnimInstance::CalculateFootIK()
+{
+    if (!OwnerCharacter || !bEnableFootIK)
+    {
+        LeftFootIKOffset = 0.0f;
+        RightFootIKOffset = 0.0f;
+        LeftFootIKRotation = FRotator::ZeroRotator;
+        RightFootIKRotation = FRotator::ZeroRotator;
+        return;
+    }
+    
+    USkeletalMeshComponent* MeshComp = OwnerCharacter->GetMesh();
+    if (!MeshComp)
+    {
+        return;
+    }
+    
+    // Get foot bone locations
+    FVector LeftFootLocation = MeshComp->GetBoneLocation(TEXT("foot_l"));
+    FVector RightFootLocation = MeshComp->GetBoneLocation(TEXT("foot_r"));
+    
+    // Trace down from each foot to find ground
+    FHitResult LeftHit, RightHit;
+    FVector TraceStart, TraceEnd;
+    float TraceDistance = 50.0f;
+    
+    // Left foot trace
+    TraceStart = LeftFootLocation + FVector(0, 0, 20.0f);
+    TraceEnd = LeftFootLocation - FVector(0, 0, TraceDistance);
+    
+    if (GetWorld()->LineTraceSingleByChannel(LeftHit, TraceStart, TraceEnd, ECC_WorldStatic))
+    {
+        LeftFootIKOffset = LeftHit.Location.Z - LeftFootLocation.Z;
+        LeftFootIKRotation = UKismetMathLibrary::MakeRotFromZ(LeftHit.Normal);
+    }
+    else
+    {
+        LeftFootIKOffset = 0.0f;
+        LeftFootIKRotation = FRotator::ZeroRotator;
+    }
+    
+    // Right foot trace
+    TraceStart = RightFootLocation + FVector(0, 0, 20.0f);
+    TraceEnd = RightFootLocation - FVector(0, 0, TraceDistance);
+    
+    if (GetWorld()->LineTraceSingleByChannel(RightHit, TraceStart, TraceEnd, ECC_WorldStatic))
+    {
+        RightFootIKOffset = RightHit.Location.Z - RightFootLocation.Z;
+        RightFootIKRotation = UKismetMathLibrary::MakeRotFromZ(RightHit.Normal);
+    }
+    else
+    {
+        RightFootIKOffset = 0.0f;
+        RightFootIKRotation = FRotator::ZeroRotator;
+    }
+    
+    // Clamp IK offsets to reasonable values
+    LeftFootIKOffset = FMath::Clamp(LeftFootIKOffset, -20.0f, 20.0f);
+    RightFootIKOffset = FMath::Clamp(RightFootIKOffset, -20.0f, 20.0f);
+}
+
+void UAnim_CharacterAnimInstance::TriggerJumpAnimation()
+{
+    // This would trigger a jump montage or set animation state
+    UE_LOG(LogTemp, Log, TEXT("Jump animation triggered"));
+}
+
+void UAnim_CharacterAnimInstance::TriggerCombatAnimation(bool bEnterCombat)
+{
+    if (bEnterCombat)
+    {
+        CombatState = EAnim_CombatState::Combat;
+    }
+    else
+    {
+        CombatState = EAnim_CombatState::Peaceful;
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Combat animation triggered: %s"), bEnterCombat ? TEXT("Enter") : TEXT("Exit"));
+}
+
+void UAnim_CharacterAnimInstance::TriggerInjuryAnimation(float InjurySeverity)
+{
+    SurvivalData.bIsInjured = InjurySeverity > 0.0f;
+    SurvivalData.HealthPercent = FMath::Clamp(1.0f - InjurySeverity, 0.0f, 1.0f);
+    
+    UE_LOG(LogTemp, Log, TEXT("Injury animation triggered with severity: %f"), InjurySeverity);
+}
+
+void UAnim_CharacterAnimInstance::TriggerFearAnimation(float FearIntensity)
+{
+    SurvivalData.FearLevel = FMath::Clamp(FearIntensity, 0.0f, 1.0f);
+    
+    if (FearIntensity > 0.5f)
+    {
+        CombatState = EAnim_CombatState::Alert;
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Fear animation triggered with intensity: %f"), FearIntensity);
+}
+
+bool UAnim_CharacterAnimInstance::IsMoving() const
+{
+    return MovementData.Speed > 5.0f;
+}
+
+bool UAnim_CharacterAnimInstance::IsRunning() const
+{
+    return MovementData.Speed > WalkSpeed;
+}
+
+bool UAnim_CharacterAnimInstance::IsInCombat() const
+{
+    return CombatState == EAnim_CombatState::Combat || CombatState == EAnim_CombatState::Alert;
+}
+
+float UAnim_CharacterAnimInstance::GetMovementDirection() const
+{
+    return MovementData.Direction;
+}
+
+float UAnim_CharacterAnimInstance::CalculateDirection(const FVector& Velocity, const FRotator& Rotation) const
+{
+    if (Velocity.SizeSquared() < 0.1f)
+    {
+        return 0.0f;
+    }
+    
+    FVector ForwardVector = Rotation.Vector();
+    FVector NormalizedVelocity = Velocity.GetSafeNormal();
+    
+    float DotProduct = FVector::DotProduct(ForwardVector, NormalizedVelocity);
+    float CrossProduct = FVector::CrossProduct(ForwardVector, NormalizedVelocity).Z;
+    
+    return FMath::Atan2(CrossProduct, DotProduct) * (180.0f / PI);
+}
+
+EAnim_MovementState UAnim_CharacterAnimInstance::DetermineMovementState() const
 {
     if (!OwnerCharacter || !CharacterMovement)
     {
         return EAnim_MovementState::Idle;
     }
     
-    // Check if in air
     if (MovementData.bIsInAir)
     {
-        if (CharacterMovement->Velocity.Z > 100.0f)
+        if (MovementData.Velocity.Z > 0)
         {
             return EAnim_MovementState::Jumping;
         }
@@ -181,24 +305,21 @@ EAnim_MovementState UAnim_CharacterAnimInstance::CalculateMovementState() const
         }
     }
     
-    // Check if just landed
-    if (bJustLanded && StateChangeTimer < 0.5f)
-    {
-        return EAnim_MovementState::Landing;
-    }
-    
-    // Check if crouching
     if (MovementData.bIsCrouching)
     {
         return EAnim_MovementState::Crouching;
     }
     
-    // Check movement speed
-    if (MovementData.GroundSpeed < 10.0f)
+    if (CharacterMovement->IsSwimming())
+    {
+        return EAnim_MovementState::Swimming;
+    }
+    
+    if (MovementData.Speed < 5.0f)
     {
         return EAnim_MovementState::Idle;
     }
-    else if (MovementData.GroundSpeed < WalkSpeed + 50.0f)
+    else if (MovementData.Speed < RunSpeed * 0.7f)
     {
         return EAnim_MovementState::Walking;
     }
@@ -208,139 +329,22 @@ EAnim_MovementState UAnim_CharacterAnimInstance::CalculateMovementState() const
     }
 }
 
-void UAnim_CharacterAnimInstance::UpdateBlendValues()
+EAnim_CombatState UAnim_CharacterAnimInstance::DetermineCombatState() const
 {
-    // Calculate idle to walk blend
-    float IdleToWalkThreshold = 50.0f;
-    IdleToWalkBlend = FMath::Clamp(MovementData.GroundSpeed / IdleToWalkThreshold, 0.0f, 1.0f);
-    
-    // Calculate walk to run blend
-    float WalkToRunRange = RunSpeed - WalkSpeed;
-    if (WalkToRunRange > 0.0f)
+    // This would typically check for nearby threats, player input, etc.
+    // For now, return current state or peaceful
+    if (SurvivalData.FearLevel > 0.7f)
     {
-        float ExcessSpeed = FMath::Max(0.0f, MovementData.GroundSpeed - WalkSpeed);
-        WalkToRunBlend = FMath::Clamp(ExcessSpeed / WalkToRunRange, 0.0f, 1.0f);
+        return EAnim_CombatState::Alert;
     }
-    else
+    else if (SurvivalData.HealthPercent <= 0.0f)
     {
-        WalkToRunBlend = 0.0f;
+        return EAnim_CombatState::Dead;
     }
-    
-    // Calculate directional blend
-    DirectionalBlend = CalculateDirectionalBlend();
-}
-
-float UAnim_CharacterAnimInstance::CalculateDirectionalBlend() const
-{
-    // Convert direction angle to blend value for animation
-    // -180 to 180 degrees mapped to -1 to 1
-    return FMath::Clamp(MovementData.Direction / 180.0f, -1.0f, 1.0f);
-}
-
-float UAnim_CharacterAnimInstance::CalculateSpeedBlend() const
-{
-    // Normalize speed for blend spaces
-    float MaxSpeed = FMath::Max(RunSpeed, 1.0f);
-    return FMath::Clamp(MovementData.GroundSpeed / MaxSpeed, 0.0f, 1.0f);
-}
-
-void UAnim_CharacterAnimInstance::UpdateTransitionFlags()
-{
-    // Update jump transition
-    bool bCurrentlyInAir = MovementData.bIsInAir;
-    if (!bWasInAir && bCurrentlyInAir)
+    else if (SurvivalData.bIsInjured)
     {
-        bShouldEnterJump = true;
-        bShouldEnterFalling = false;
-        bJustLanded = false;
-    }
-    else if (bWasInAir && !bCurrentlyInAir)
-    {
-        bShouldEnterJump = false;
-        bShouldEnterFalling = false;
-        bShouldEnterLanding = true;
-        bJustLanded = true;
-        StateChangeTimer = 0.0f;
-    }
-    else if (bCurrentlyInAir && CharacterMovement->Velocity.Z < -100.0f)
-    {
-        bShouldEnterJump = false;
-        bShouldEnterFalling = true;
+        return EAnim_CombatState::Wounded;
     }
     
-    bWasInAir = bCurrentlyInAir;
-    
-    // Reset landing flag after animation time
-    if (bJustLanded && StateChangeTimer > 0.5f)
-    {
-        bJustLanded = false;
-        bShouldEnterLanding = false;
-    }
-}
-
-void UAnim_CharacterAnimInstance::SetMovementState(EAnim_MovementState NewState)
-{
-    if (CurrentMovementState != NewState)
-    {
-        CurrentMovementState = NewState;
-        StateChangeTimer = 0.0f;
-    }
-}
-
-void UAnim_CharacterAnimInstance::SetCombatState(EAnim_CombatState NewState)
-{
-    if (CurrentCombatState != NewState)
-    {
-        CurrentCombatState = NewState;
-        StateChangeTimer = 0.0f;
-    }
-}
-
-void UAnim_CharacterAnimInstance::TriggerJumpAnimation()
-{
-    bShouldEnterJump = true;
-    SetMovementState(EAnim_MovementState::Jumping);
-}
-
-void UAnim_CharacterAnimInstance::TriggerAttackAnimation()
-{
-    // This would trigger attack montage in Animation Blueprint
-    if (GEngine)
-    {
-        GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Red, TEXT("Attack Animation Triggered"));
-    }
-}
-
-void UAnim_CharacterAnimInstance::TriggerBlockAnimation()
-{
-    SetCombatState(EAnim_CombatState::Blocking);
-    
-    if (GEngine)
-    {
-        GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Blue, TEXT("Block Animation Triggered"));
-    }
-}
-
-void UAnim_CharacterAnimInstance::OnJumpAnimationFinished()
-{
-    bShouldEnterJump = false;
-    if (MovementData.bIsInAir)
-    {
-        SetMovementState(EAnim_MovementState::Falling);
-    }
-}
-
-void UAnim_CharacterAnimInstance::OnAttackAnimationFinished()
-{
-    // Reset to unarmed state after attack
-    SetCombatState(EAnim_CombatState::Unarmed);
-}
-
-void UAnim_CharacterAnimInstance::OnLandingAnimationFinished()
-{
-    bShouldEnterLanding = false;
-    bJustLanded = false;
-    
-    // Transition to appropriate movement state
-    SetMovementState(CalculateMovementState());
+    return EAnim_CombatState::Peaceful;
 }
