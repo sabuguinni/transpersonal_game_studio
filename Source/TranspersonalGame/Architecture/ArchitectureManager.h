@@ -8,62 +8,65 @@
 #include "ArchitectureManager.generated.h"
 
 UENUM(BlueprintType)
-enum class EArch_ShelterType : uint8
+enum class EArch_StructureType : uint8
 {
-    None = 0,
-    RockOverhang,
-    Cave,
-    ElevatedPlatform,
+    CaveDwelling,
+    WoodenShelter,
+    StoneSite,
     CliffDwelling,
-    TemporaryLean
+    DefensiveOutpost,
+    StorageCache
 };
 
 UENUM(BlueprintType)
 enum class EArch_ConstructionMaterial : uint8
 {
-    Stone = 0,
+    Stone,
     Wood,
-    AnimalHide,
-    Mud,
+    Bone,
+    Hide,
     Vine,
-    Bone
+    Mud
 };
 
 USTRUCT(BlueprintType)
-struct FArch_ShelterData
+struct FArch_StructureData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
-    EArch_ShelterType ShelterType = EArch_ShelterType::None;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
+    EArch_StructureType StructureType;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
-    FVector Location = FVector::ZeroVector;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
+    FVector Location;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
-    float SafetyRating = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
+    FRotator Rotation;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
-    float CapacityPersons = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
+    float StructuralIntegrity;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
-    bool bHasFirePit = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
-    bool bHasWaterAccess = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shelter")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
     TArray<EArch_ConstructionMaterial> Materials;
 
-    FArch_ShelterData()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
+    bool bIsHabitable;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
+    int32 MaxOccupants;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
+    float DefenseRating;
+
+    FArch_StructureData()
     {
-        ShelterType = EArch_ShelterType::None;
+        StructureType = EArch_StructureType::CaveDwelling;
         Location = FVector::ZeroVector;
-        SafetyRating = 0.0f;
-        CapacityPersons = 1.0f;
-        bHasFirePit = false;
-        bHasWaterAccess = false;
-        Materials.Empty();
+        Rotation = FRotator::ZeroRotator;
+        StructuralIntegrity = 100.0f;
+        bIsHabitable = true;
+        MaxOccupants = 1;
+        DefenseRating = 0.0f;
     }
 };
 
@@ -78,39 +81,54 @@ public:
 protected:
     virtual void BeginPlay() override;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture", meta = (AllowPrivateAccess = "true"))
+    TArray<FArch_StructureData> RegisteredStructures;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture", meta = (AllowPrivateAccess = "true"))
+    float StructureSpawnRadius;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture", meta = (AllowPrivateAccess = "true"))
+    int32 MaxStructuresPerBiome;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture", meta = (AllowPrivateAccess = "true"))
+    bool bAutoGenerateStructures;
+
 public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void RegisterShelter(const FArch_ShelterData& ShelterData);
+    void RegisterStructure(const FArch_StructureData& StructureData);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    TArray<FArch_ShelterData> FindNearbyShelters(FVector PlayerLocation, float SearchRadius = 1000.0f);
+    void RemoveStructure(const FVector& Location, float Radius = 100.0f);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    FArch_ShelterData GetBestShelterForLocation(FVector Location, float SearchRadius = 2000.0f);
+    TArray<FArch_StructureData> GetStructuresInRadius(const FVector& Center, float Radius) const;
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    bool CanBuildShelterAt(FVector Location, EArch_ShelterType ShelterType);
+    void GenerateCaveDwelling(const FVector& Location, const FRotator& Rotation = FRotator::ZeroRotator);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    void SpawnShelterActor(const FArch_ShelterData& ShelterData);
+    void GenerateWoodenShelter(const FVector& Location, const FRotator& Rotation = FRotator::ZeroRotator);
 
     UFUNCTION(BlueprintCallable, Category = "Architecture")
-    float CalculateShelterSafety(const FArch_ShelterData& ShelterData, FVector ThreatLocation);
+    void GenerateStoneSite(const FVector& Location, const FRotator& Rotation = FRotator::ZeroRotator);
 
-protected:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture", meta = (AllowPrivateAccess = "true"))
-    TArray<FArch_ShelterData> RegisteredShelters;
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    void GenerateCliffDwelling(const FVector& Location, const FRotator& Rotation = FRotator::ZeroRotator);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture", meta = (AllowPrivateAccess = "true"))
-    float MaxShelterDistance = 5000.0f;
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    bool ValidateStructurePlacement(const FVector& Location, EArch_StructureType StructureType) const;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture", meta = (AllowPrivateAccess = "true"))
-    int32 MaxSheltersPerArea = 3;
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    void UpdateStructuralIntegrity(const FVector& Location, float IntegrityChange);
 
-private:
-    void InitializeDefaultShelters();
-    bool IsLocationSuitable(FVector Location, EArch_ShelterType ShelterType);
-    float CalculateTerrainSuitability(FVector Location, EArch_ShelterType ShelterType);
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "Architecture")
+    void GenerateTestStructures();
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    int32 GetStructureCount() const { return RegisteredStructures.Num(); }
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    void ClearAllStructures();
 };
