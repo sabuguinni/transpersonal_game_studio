@@ -1,420 +1,495 @@
 #include "Audio_ProximityAudioManager.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "GameFramework/Pawn.h"
-#include "GameFramework/PlayerController.h"
+#include "TimerManager.h"
 #include "Kismet/GameplayStatics.h"
 #include "Components/AudioComponent.h"
 #include "Sound/SoundCue.h"
-#include "Engine/Engine.h"
+#include "MetasoundSource.h"
+#include "../TranspersonalCharacter.h"
 
-AAudio_ProximityAudioManager::AAudio_ProximityAudioManager()
+UAudio_ProximityAudioManager::UAudio_ProximityAudioManager()
 {
-    PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickInterval = 0.1f; // Update 10 times per second
-
-    // Initialize audio components
-    InitializeAudioComponents();
-
-    // Set default proximity distances
-    TRexProximityDistance = 2000.0f;
-    RaptorPackDistance = 800.0f;
-    TRexFootstepInterval = 3.0f;
-    MinRaptorPackSize = 3;
-
-    // Initialize state
-    bTRexNearby = false;
-    bRaptorPackNearby = false;
-    LastFootstepTime = 0.0f;
-    PlayerPawn = nullptr;
+    LastPlayerLocation = FVector::ZeroVector;
+    CurrentAudioMood = EAudioMood::Neutral;
+    GlobalVolumeMultiplier = 1.0f;
+    ProximityUpdateInterval = 0.1f;
+    MaxPooledComponents = 20;
 }
 
-void AAudio_ProximityAudioManager::BeginPlay()
+void UAudio_ProximityAudioManager::Initialize(FSubsystemCollectionBase& Collection)
 {
-    Super::BeginPlay();
-
-    // Get player pawn reference
+    Super::Initialize(Collection);
+    
+    UE_LOG(LogTemp, Log, TEXT("UAudio_ProximityAudioManager: Initializing proximity audio system"));
+    
+    // Initialize audio component pool
+    PooledAudioComponents.Reserve(MaxPooledComponents);
+    
+    // Set up proximity update timer
     if (UWorld* World = GetWorld())
     {
-        if (APlayerController* PC = World->GetFirstPlayerController())
-        {
-            PlayerPawn = PC->GetPawn();
-        }
-    }
-
-    // Initialize default proximity triggers
-    if (ProximityTriggers.Num() == 0)
-    {
-        FAudio_ProximityTrigger TRexTrigger;
-        TRexTrigger.TriggerDistance = TRexProximityDistance;
-        TRexTrigger.TriggerTag = TEXT("TRex");
-        TRexTrigger.VolumeMultiplier = 1.0f;
-        TRexTrigger.bLooping = true;
-        ProximityTriggers.Add(TRexTrigger);
-
-        FAudio_ProximityTrigger RaptorTrigger;
-        RaptorTrigger.TriggerDistance = RaptorPackDistance;
-        RaptorTrigger.TriggerTag = TEXT("RaptorPack");
-        RaptorTrigger.VolumeMultiplier = 0.8f;
-        RaptorTrigger.bLooping = true;
-        ProximityTriggers.Add(RaptorTrigger);
-
-        FAudio_ProximityTrigger AmbientTrigger;
-        AmbientTrigger.TriggerDistance = 5000.0f;
-        AmbientTrigger.TriggerTag = TEXT("Ambient");
-        AmbientTrigger.VolumeMultiplier = 0.6f;
-        AmbientTrigger.bLooping = true;
-        ProximityTriggers.Add(AmbientTrigger);
-    }
-
-    UE_LOG(LogTemp, Warning, TEXT("Audio_ProximityAudioManager: BeginPlay completed"));
-}
-
-void AAudio_ProximityAudioManager::Tick(float DeltaTime)
-{
-    Super::Tick(DeltaTime);
-
-    if (!PlayerPawn)
-    {
-        // Try to get player pawn again
-        if (UWorld* World = GetWorld())
-        {
-            if (APlayerController* PC = World->GetFirstPlayerController())
+        World->GetTimerManager().SetTimer(
+            ProximityUpdateTimer,
+            [this]()
             {
-                PlayerPawn = PC->GetPawn();
-            }
-        }
-        return;
-    }
-
-    // Update proximity audio based on nearby dinosaurs
-    UpdateProximityAudio();
-}
-
-void AAudio_ProximityAudioManager::InitializeAudioComponents()
-{
-    // Create T-Rex proximity audio component
-    TRexProximityAudio = CreateDefaultSubobject<UAudioComponent>(TEXT("TRexProximityAudio"));
-    if (TRexProximityAudio)
-    {
-        TRexProximityAudio->bAutoActivate = false;
-        TRexProximityAudio->SetVolumeMultiplier(0.0f);
-    }
-
-    // Create Raptor pack audio component
-    RaptorPackAudio = CreateDefaultSubobject<UAudioComponent>(TEXT("RaptorPackAudio"));
-    if (RaptorPackAudio)
-    {
-        RaptorPackAudio->bAutoActivate = false;
-        RaptorPackAudio->SetVolumeMultiplier(0.0f);
-    }
-
-    // Create ambient forest audio component
-    AmbientForestAudio = CreateDefaultSubobject<UAudioComponent>(TEXT("AmbientForestAudio"));
-    if (AmbientForestAudio)
-    {
-        AmbientForestAudio->bAutoActivate = true;
-        AmbientForestAudio->SetVolumeMultiplier(0.3f);
-    }
-
-    // Create footstep audio component
-    FootstepAudio = CreateDefaultSubobject<UAudioComponent>(TEXT("FootstepAudio"));
-    if (FootstepAudio)
-    {
-        FootstepAudio->bAutoActivate = false;
-        FootstepAudio->SetVolumeMultiplier(0.8f);
+                if (ATranspersonalCharacter* Player = Cast<ATranspersonalCharacter>(UGameplayStatics::GetPlayerCharacter(GetWorld(), 0)))
+                {
+                    UpdatePlayerProximity(Player->GetActorLocation());
+                }
+            },
+            ProximityUpdateInterval,
+            true
+        );
+        
+        // Set up dinosaur audio update timer
+        World->GetTimerManager().SetTimer(
+            DinosaurAudioTimer,
+            this,
+            &UAudio_ProximityAudioManager::UpdateDinosaurProximity,
+            0.5f, // Update dinosaur audio every 0.5 seconds
+            true
+        );
     }
 }
 
-void AAudio_ProximityAudioManager::UpdateProximityAudio()
+void UAudio_ProximityAudioManager::Deinitialize()
 {
-    if (!PlayerPawn)
-        return;
-
-    // Check for T-Rex proximity
-    float TRexDistance;
-    bool bTRexCurrentlyNearby = IsTRexNearby(TRexDistance);
+    UE_LOG(LogTemp, Log, TEXT("UAudio_ProximityAudioManager: Deinitializing proximity audio system"));
     
-    if (bTRexCurrentlyNearby != bTRexNearby)
+    // Clear timers
+    if (UWorld* World = GetWorld())
     {
-        bTRexNearby = bTRexCurrentlyNearby;
-        TriggerTRexProximityAudio(bTRexNearby, TRexDistance);
+        World->GetTimerManager().ClearTimer(ProximityUpdateTimer);
+        World->GetTimerManager().ClearTimer(DinosaurAudioTimer);
     }
-
-    // Check for Raptor pack proximity
-    int32 RaptorPackSize;
-    float RaptorDistance;
-    bool bRaptorCurrentlyNearby = IsRaptorPackNearby(RaptorPackSize, RaptorDistance);
     
-    if (bRaptorCurrentlyNearby != bRaptorPackNearby)
+    // Stop all audio
+    StopAllProximityAudio();
+    
+    // Clean up pooled components
+    for (UAudioComponent* Component : PooledAudioComponents)
     {
-        bRaptorPackNearby = bRaptorCurrentlyNearby;
-        TriggerRaptorPackAudio(bRaptorPackNearby, RaptorPackSize);
-    }
-
-    // Update T-Rex footstep audio timing
-    if (bTRexNearby)
-    {
-        float CurrentTime = GetWorld()->GetTimeSeconds();
-        if (CurrentTime - LastFootstepTime >= TRexFootstepInterval)
+        if (IsValid(Component))
         {
-            PlayFootstepAudio(PlayerPawn->GetActorLocation(), true);
-            LastFootstepTime = CurrentTime;
+            Component->Stop();
+            Component->DestroyComponent();
         }
     }
+    PooledAudioComponents.Empty();
+    
+    Super::Deinitialize();
 }
 
-void AAudio_ProximityAudioManager::TriggerTRexProximityAudio(bool bEnable, float Distance)
+void UAudio_ProximityAudioManager::RegisterAudioZone(const FAudio_ProximityAudioZone& AudioZone)
 {
-    if (!TRexProximityAudio)
-        return;
-
-    if (bEnable)
+    if (!AudioZone.bIsActive)
     {
-        // Calculate volume based on distance
-        float VolumeMultiplier = FMath::Clamp(1.0f - (Distance / TRexProximityDistance), 0.1f, 1.0f);
-        
-        if (!TRexProximityAudio->IsPlaying())
+        return;
+    }
+    
+    // Check if zone already exists at this location
+    for (const FAudio_ProximityAudioZone& ExistingZone : RegisteredAudioZones)
+    {
+        if (FVector::Dist(ExistingZone.ZoneCenter, AudioZone.ZoneCenter) < 100.0f)
         {
-            TRexProximityAudio->Play();
+            UE_LOG(LogTemp, Warning, TEXT("Audio zone already exists near location: %s"), *AudioZone.ZoneCenter.ToString());
+            return;
         }
-        
-        FadeAudioComponent(TRexProximityAudio, VolumeMultiplier, 2.0f);
-        
-        UE_LOG(LogTemp, Warning, TEXT("T-Rex proximity audio ENABLED - Distance: %f, Volume: %f"), Distance, VolumeMultiplier);
     }
-    else
+    
+    RegisteredAudioZones.Add(AudioZone);
+    
+    // Create audio component for this zone
+    UAudioComponent* AudioComp = CreateAudioComponentForZone(AudioZone);
+    if (AudioComp)
     {
-        FadeAudioComponent(TRexProximityAudio, 0.0f, 1.0f);
-        UE_LOG(LogTemp, Warning, TEXT("T-Rex proximity audio DISABLED"));
+        ActiveAudioComponents.Add(AudioComp);
     }
+    
+    UE_LOG(LogTemp, Log, TEXT("Registered audio zone at %s with %d total zones"), 
+           *AudioZone.ZoneCenter.ToString(), RegisteredAudioZones.Num());
 }
 
-void AAudio_ProximityAudioManager::TriggerRaptorPackAudio(bool bEnable, int32 PackSize)
+void UAudio_ProximityAudioManager::UnregisterAudioZone(FVector ZoneCenter, float Tolerance)
 {
-    if (!RaptorPackAudio)
-        return;
-
-    if (bEnable && PackSize >= MinRaptorPackSize)
+    for (int32 i = RegisteredAudioZones.Num() - 1; i >= 0; i--)
     {
-        // Volume increases with pack size
-        float VolumeMultiplier = FMath::Clamp(0.3f + (PackSize * 0.2f), 0.3f, 1.0f);
-        
-        if (!RaptorPackAudio->IsPlaying())
+        if (FVector::Dist(RegisteredAudioZones[i].ZoneCenter, ZoneCenter) <= Tolerance)
         {
-            RaptorPackAudio->Play();
+            RegisteredAudioZones.RemoveAt(i);
+            UE_LOG(LogTemp, Log, TEXT("Unregistered audio zone at %s"), *ZoneCenter.ToString());
+            break;
         }
-        
-        FadeAudioComponent(RaptorPackAudio, VolumeMultiplier, 1.5f);
-        
-        UE_LOG(LogTemp, Warning, TEXT("Raptor pack audio ENABLED - Pack Size: %d, Volume: %f"), PackSize, VolumeMultiplier);
     }
-    else
-    {
-        FadeAudioComponent(RaptorPackAudio, 0.0f, 1.0f);
-        UE_LOG(LogTemp, Warning, TEXT("Raptor pack audio DISABLED"));
-    }
+    
+    // Clean up associated audio components
+    CleanupInactiveAudioComponents();
 }
 
-void AAudio_ProximityAudioManager::PlayFootstepAudio(FVector Location, bool bIsLarge)
+void UAudio_ProximityAudioManager::UpdatePlayerProximity(FVector PlayerLocation)
 {
-    if (!FootstepAudio)
+    if (FVector::Dist(PlayerLocation, LastPlayerLocation) < 50.0f)
+    {
+        return; // Player hasn't moved significantly
+    }
+    
+    LastPlayerLocation = PlayerLocation;
+    UpdateAudioZoneVolumes(PlayerLocation);
+}
+
+void UAudio_ProximityAudioManager::RegisterDinosaurActor(AActor* DinosaurActor, EDinosaurSpecies Species)
+{
+    if (!IsValid(DinosaurActor))
+    {
         return;
-
-    // Set footstep audio location
-    FootstepAudio->SetWorldLocation(Location);
-    
-    // Adjust volume and pitch based on size
-    float VolumeMultiplier = bIsLarge ? 1.0f : 0.5f;
-    float PitchMultiplier = bIsLarge ? 0.8f : 1.2f;
-    
-    FootstepAudio->SetVolumeMultiplier(VolumeMultiplier);
-    FootstepAudio->SetPitchMultiplier(PitchMultiplier);
-    
-    // Play the footstep sound
-    FootstepAudio->Play();
-    
-    UE_LOG(LogTemp, Log, TEXT("Footstep audio played - Large: %s, Volume: %f"), 
-           bIsLarge ? TEXT("Yes") : TEXT("No"), VolumeMultiplier);
-}
-
-void AAudio_ProximityAudioManager::UpdateAmbientAudio(const FString& BiomeType)
-{
-    if (!AmbientForestAudio)
-        return;
-
-    // Adjust ambient audio based on biome
-    float TargetVolume = 0.3f;
-    
-    if (BiomeType == TEXT("Forest"))
-    {
-        TargetVolume = 0.5f;
-    }
-    else if (BiomeType == TEXT("Swamp"))
-    {
-        TargetVolume = 0.4f;
-    }
-    else if (BiomeType == TEXT("Plains"))
-    {
-        TargetVolume = 0.2f;
-    }
-    else if (BiomeType == TEXT("Desert"))
-    {
-        TargetVolume = 0.1f;
     }
     
-    FadeAudioComponent(AmbientForestAudio, TargetVolume, 3.0f);
+    FAudio_DinosaurAudioProfile AudioProfile;
+    AudioProfile.Species = Species;
     
-    UE_LOG(LogTemp, Log, TEXT("Ambient audio updated for biome: %s, Target Volume: %f"), *BiomeType, TargetVolume);
-}
-
-TArray<AActor*> AAudio_ProximityAudioManager::GetNearbyDinosaurs(float SearchRadius)
-{
-    TArray<AActor*> NearbyDinosaurs;
-    
-    if (!PlayerPawn)
-        return NearbyDinosaurs;
-
-    FVector PlayerLocation = PlayerPawn->GetActorLocation();
-    
-    // Get all actors in the world
-    TArray<AActor*> AllActors;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), AllActors);
-    
-    for (AActor* Actor : AllActors)
+    // Set species-specific audio parameters
+    switch (Species)
     {
-        if (!Actor || Actor == this || Actor == PlayerPawn)
-            continue;
+        case EDinosaurSpecies::TRex:
+            AudioProfile.FootstepInterval = 3.0f;
+            AudioProfile.ProximityThreatDistance = 3000.0f;
+            AudioProfile.VolumeMultiplier = 1.5f;
+            break;
             
-        // Check if actor has "Dinosaur" or specific dinosaur names in its name
-        FString ActorName = Actor->GetName();
-        if (ActorName.Contains(TEXT("TRex")) || 
-            ActorName.Contains(TEXT("Raptor")) || 
-            ActorName.Contains(TEXT("Dinosaur")) ||
-            ActorName.Contains(TEXT("Triceratops")) ||
-            ActorName.Contains(TEXT("Brachiosaurus")))
-        {
-            float Distance = FVector::Dist(PlayerLocation, Actor->GetActorLocation());
-            if (Distance <= SearchRadius)
-            {
-                NearbyDinosaurs.Add(Actor);
-            }
-        }
+        case EDinosaurSpecies::Raptor:
+            AudioProfile.FootstepInterval = 1.0f;
+            AudioProfile.ProximityThreatDistance = 1500.0f;
+            AudioProfile.VolumeMultiplier = 0.8f;
+            break;
+            
+        case EDinosaurSpecies::Brachiosaurus:
+            AudioProfile.FootstepInterval = 4.0f;
+            AudioProfile.ProximityThreatDistance = 2500.0f;
+            AudioProfile.VolumeMultiplier = 1.2f;
+            break;
+            
+        default:
+            AudioProfile.FootstepInterval = 2.0f;
+            AudioProfile.ProximityThreatDistance = 2000.0f;
+            AudioProfile.VolumeMultiplier = 1.0f;
+            break;
     }
     
-    return NearbyDinosaurs;
+    DinosaurAudioMap.Add(DinosaurActor, AudioProfile);
+    
+    UE_LOG(LogTemp, Log, TEXT("Registered dinosaur audio for %s species"), 
+           *UEnum::GetValueAsString(Species));
 }
 
-bool AAudio_ProximityAudioManager::IsTRexNearby(float& OutDistance)
+void UAudio_ProximityAudioManager::UpdateDinosaurProximity()
 {
-    if (!PlayerPawn)
+    if (!IsValid(GetWorld()))
     {
-        OutDistance = 0.0f;
-        return false;
-    }
-
-    TArray<AActor*> NearbyDinosaurs = GetNearbyDinosaurs(TRexProximityDistance);
-    
-    for (AActor* Dinosaur : NearbyDinosaurs)
-    {
-        FString DinosaurName = Dinosaur->GetName();
-        if (DinosaurName.Contains(TEXT("TRex")) || DinosaurName.Contains(TEXT("T_Rex")))
-        {
-            OutDistance = FVector::Dist(PlayerPawn->GetActorLocation(), Dinosaur->GetActorLocation());
-            return true;
-        }
-    }
-    
-    OutDistance = 0.0f;
-    return false;
-}
-
-bool AAudio_ProximityAudioManager::IsRaptorPackNearby(int32& OutPackSize, float& OutDistance)
-{
-    if (!PlayerPawn)
-    {
-        OutPackSize = 0;
-        OutDistance = 0.0f;
-        return false;
-    }
-
-    TArray<AActor*> NearbyDinosaurs = GetNearbyDinosaurs(RaptorPackDistance);
-    TArray<AActor*> NearbyRaptors;
-    
-    for (AActor* Dinosaur : NearbyDinosaurs)
-    {
-        FString DinosaurName = Dinosaur->GetName();
-        if (DinosaurName.Contains(TEXT("Raptor")) || DinosaurName.Contains(TEXT("Velociraptor")))
-        {
-            NearbyRaptors.Add(Dinosaur);
-        }
-    }
-    
-    OutPackSize = NearbyRaptors.Num();
-    
-    if (OutPackSize >= MinRaptorPackSize)
-    {
-        // Find closest raptor for distance calculation
-        float ClosestDistance = TRexProximityDistance;
-        for (AActor* Raptor : NearbyRaptors)
-        {
-            float Distance = FVector::Dist(PlayerPawn->GetActorLocation(), Raptor->GetActorLocation());
-            if (Distance < ClosestDistance)
-            {
-                ClosestDistance = Distance;
-            }
-        }
-        OutDistance = ClosestDistance;
-        return true;
-    }
-    
-    OutDistance = 0.0f;
-    return false;
-}
-
-float AAudio_ProximityAudioManager::GetDistanceToPlayer(const FVector& Location)
-{
-    if (!PlayerPawn)
-        return 0.0f;
-        
-    return FVector::Dist(PlayerPawn->GetActorLocation(), Location);
-}
-
-bool AAudio_ProximityAudioManager::IsActorInRange(AActor* Actor, float Range)
-{
-    if (!Actor || !PlayerPawn)
-        return false;
-        
-    return GetDistanceToPlayer(Actor->GetActorLocation()) <= Range;
-}
-
-void AAudio_ProximityAudioManager::FadeAudioComponent(UAudioComponent* AudioComp, float TargetVolume, float FadeTime)
-{
-    if (!AudioComp)
         return;
-        
-    // Simple immediate volume set (could be enhanced with timeline/curve-based fading)
-    AudioComp->SetVolumeMultiplier(TargetVolume);
-    
-    if (TargetVolume <= 0.01f && AudioComp->IsPlaying())
-    {
-        AudioComp->Stop();
     }
-    else if (TargetVolume > 0.01f && !AudioComp->IsPlaying())
+    
+    ATranspersonalCharacter* Player = Cast<ATranspersonalCharacter>(UGameplayStatics::GetPlayerCharacter(GetWorld(), 0));
+    if (!IsValid(Player))
     {
-        AudioComp->Play();
+        return;
+    }
+    
+    FVector PlayerLocation = Player->GetActorLocation();
+    
+    // Clean up invalid dinosaur references
+    TArray<AActor*> InvalidActors;
+    for (auto& DinosaurPair : DinosaurAudioMap)
+    {
+        if (!IsValid(DinosaurPair.Key))
+        {
+            InvalidActors.Add(DinosaurPair.Key);
+        }
+        else
+        {
+            ProcessDinosaurProximityAudio(DinosaurPair.Key, DinosaurPair.Value);
+        }
+    }
+    
+    // Remove invalid actors
+    for (AActor* InvalidActor : InvalidActors)
+    {
+        DinosaurAudioMap.Remove(InvalidActor);
     }
 }
 
-void AAudio_ProximityAudioManager::CrossfadeAudio(UAudioComponent* FromComp, UAudioComponent* ToComp, float FadeTime)
+void UAudio_ProximityAudioManager::SetGlobalAudioMood(EAudioMood NewMood)
 {
-    if (FromComp)
+    if (CurrentAudioMood == NewMood)
     {
-        FadeAudioComponent(FromComp, 0.0f, FadeTime);
+        return;
     }
     
-    if (ToComp)
+    EAudioMood PreviousMood = CurrentAudioMood;
+    CurrentAudioMood = NewMood;
+    
+    // Adjust global volume based on mood
+    switch (NewMood)
     {
-        FadeAudioComponent(ToComp, 1.0f, FadeTime);
+        case EAudioMood::Tense:
+            GlobalVolumeMultiplier = 1.2f;
+            break;
+        case EAudioMood::Calm:
+            GlobalVolumeMultiplier = 0.8f;
+            break;
+        case EAudioMood::Dangerous:
+            GlobalVolumeMultiplier = 1.5f;
+            break;
+        default:
+            GlobalVolumeMultiplier = 1.0f;
+            break;
     }
+    
+    UE_LOG(LogTemp, Log, TEXT("Audio mood changed from %s to %s"), 
+           *UEnum::GetValueAsString(PreviousMood), 
+           *UEnum::GetValueAsString(NewMood));
+}
+
+void UAudio_ProximityAudioManager::PlayNarrativeAudio(const FString& AudioURL, FVector WorldLocation)
+{
+    if (AudioURL.IsEmpty())
+    {
+        UE_LOG(LogTemp, Warning, TEXT("PlayNarrativeAudio: Empty audio URL provided"));
+        return;
+    }
+    
+    // For now, log the narrative audio request
+    // In a full implementation, this would stream audio from the URL
+    UE_LOG(LogTemp, Log, TEXT("Playing narrative audio from URL: %s at location: %s"), 
+           *AudioURL, *WorldLocation.ToString());
+    
+    // TODO: Implement actual audio streaming from URL
+    // This would require additional audio streaming components
+}
+
+void UAudio_ProximityAudioManager::StopAllProximityAudio()
+{
+    for (UAudioComponent* AudioComp : ActiveAudioComponents)
+    {
+        if (IsValid(AudioComp))
+        {
+            AudioComp->Stop();
+        }
+    }
+    
+    ActiveAudioComponents.Empty();
+    UE_LOG(LogTemp, Log, TEXT("Stopped all proximity audio"));
+}
+
+void UAudio_ProximityAudioManager::TriggerDinosaurFootstep(AActor* DinosaurActor, float IntensityMultiplier)
+{
+    if (!IsValid(DinosaurActor))
+    {
+        return;
+    }
+    
+    FAudio_DinosaurAudioProfile* AudioProfile = DinosaurAudioMap.Find(DinosaurActor);
+    if (!AudioProfile)
+    {
+        return;
+    }
+    
+    // Calculate screen shake intensity based on dinosaur size and proximity
+    ATranspersonalCharacter* Player = Cast<ATranspersonalCharacter>(UGameplayStatics::GetPlayerCharacter(GetWorld(), 0));
+    if (IsValid(Player))
+    {
+        float Distance = FVector::Dist(Player->GetActorLocation(), DinosaurActor->GetActorLocation());
+        float ShakeIntensity = FMath::Clamp(IntensityMultiplier * AudioProfile->VolumeMultiplier * (2000.0f / FMath::Max(Distance, 100.0f)), 0.0f, 2.0f);
+        
+        if (ShakeIntensity > 0.1f)
+        {
+            // TODO: Trigger camera shake
+            UE_LOG(LogTemp, Log, TEXT("Dinosaur footstep shake intensity: %f"), ShakeIntensity);
+        }
+    }
+}
+
+void UAudio_ProximityAudioManager::PlayDinosaurThreatSound(EDinosaurSpecies Species, FVector Location)
+{
+    // TODO: Load and play species-specific threat sounds
+    UE_LOG(LogTemp, Log, TEXT("Playing %s threat sound at %s"), 
+           *UEnum::GetValueAsString(Species), *Location.ToString());
+}
+
+void UAudio_ProximityAudioManager::DebugPrintAudioZones()
+{
+    UE_LOG(LogTemp, Log, TEXT("=== Audio Zone Debug Info ==="));
+    UE_LOG(LogTemp, Log, TEXT("Total registered zones: %d"), RegisteredAudioZones.Num());
+    UE_LOG(LogTemp, Log, TEXT("Active audio components: %d"), ActiveAudioComponents.Num());
+    UE_LOG(LogTemp, Log, TEXT("Current audio mood: %s"), *UEnum::GetValueAsString(CurrentAudioMood));
+    UE_LOG(LogTemp, Log, TEXT("Global volume multiplier: %f"), GlobalVolumeMultiplier);
+    
+    for (int32 i = 0; i < RegisteredAudioZones.Num(); i++)
+    {
+        const FAudio_ProximityAudioZone& Zone = RegisteredAudioZones[i];
+        UE_LOG(LogTemp, Log, TEXT("Zone %d: Center=%s, InnerRadius=%f, OuterRadius=%f, Biome=%s"), 
+               i, *Zone.ZoneCenter.ToString(), Zone.InnerRadius, Zone.OuterRadius, 
+               *UEnum::GetValueAsString(Zone.BiomeType));
+    }
+}
+
+int32 UAudio_ProximityAudioManager::GetActiveAudioZoneCount() const
+{
+    return RegisteredAudioZones.Num();
+}
+
+void UAudio_ProximityAudioManager::UpdateAudioZoneVolumes(FVector PlayerLocation)
+{
+    for (int32 i = 0; i < RegisteredAudioZones.Num(); i++)
+    {
+        const FAudio_ProximityAudioZone& Zone = RegisteredAudioZones[i];
+        if (!Zone.bIsActive)
+        {
+            continue;
+        }
+        
+        float ProximityVolume = CalculateProximityVolume(PlayerLocation, Zone);
+        
+        // Update corresponding audio component volume
+        if (i < ActiveAudioComponents.Num() && IsValid(ActiveAudioComponents[i]))
+        {
+            float FinalVolume = ProximityVolume * Zone.BaseVolume * GlobalVolumeMultiplier;
+            ActiveAudioComponents[i]->SetVolumeMultiplier(FinalVolume);
+        }
+    }
+}
+
+void UAudio_ProximityAudioManager::CleanupInactiveAudioComponents()
+{
+    for (int32 i = ActiveAudioComponents.Num() - 1; i >= 0; i--)
+    {
+        if (!IsValid(ActiveAudioComponents[i]))
+        {
+            ActiveAudioComponents.RemoveAt(i);
+        }
+    }
+}
+
+UAudioComponent* UAudio_ProximityAudioManager::CreateAudioComponentForZone(const FAudio_ProximityAudioZone& AudioZone)
+{
+    if (!IsValid(GetWorld()))
+    {
+        return nullptr;
+    }
+    
+    // Try to get a pooled component first
+    UAudioComponent* AudioComp = nullptr;
+    for (UAudioComponent* PooledComp : PooledAudioComponents)
+    {
+        if (IsValid(PooledComp) && !PooledComp->IsPlaying())
+        {
+            AudioComp = PooledComp;
+            break;
+        }
+    }
+    
+    // Create new component if none available
+    if (!AudioComp)
+    {
+        AudioComp = NewObject<UAudioComponent>(GetWorld());
+        if (PooledAudioComponents.Num() < MaxPooledComponents)
+        {
+            PooledAudioComponents.Add(AudioComp);
+        }
+    }
+    
+    if (AudioComp)
+    {
+        // Configure audio component
+        AudioComp->SetWorldLocation(AudioZone.ZoneCenter);
+        AudioComp->SetVolumeMultiplier(0.0f); // Start silent, proximity will adjust
+        AudioComp->bAutoActivate = false;
+        
+        // Set sound asset if available
+        if (AudioZone.AmbientSound.IsValid())
+        {
+            AudioComp->SetSound(AudioZone.AmbientSound.Get());
+        }
+        
+        UE_LOG(LogTemp, Log, TEXT("Created audio component for zone at %s"), *AudioZone.ZoneCenter.ToString());
+    }
+    
+    return AudioComp;
+}
+
+float UAudio_ProximityAudioManager::CalculateProximityVolume(FVector PlayerLocation, const FAudio_ProximityAudioZone& AudioZone)
+{
+    float Distance = FVector::Dist(PlayerLocation, AudioZone.ZoneCenter);
+    
+    if (Distance <= AudioZone.InnerRadius)
+    {
+        return 1.0f; // Full volume
+    }
+    else if (Distance >= AudioZone.OuterRadius)
+    {
+        return 0.0f; // Silent
+    }
+    else
+    {
+        // Linear interpolation between inner and outer radius
+        float Alpha = (AudioZone.OuterRadius - Distance) / (AudioZone.OuterRadius - AudioZone.InnerRadius);
+        return FMath::Clamp(Alpha, 0.0f, 1.0f);
+    }
+}
+
+void UAudio_ProximityAudioManager::ProcessDinosaurProximityAudio(AActor* DinosaurActor, const FAudio_DinosaurAudioProfile& AudioProfile)
+{
+    if (!IsValid(DinosaurActor) || !IsValid(GetWorld()))
+    {
+        return;
+    }
+    
+    ATranspersonalCharacter* Player = Cast<ATranspersonalCharacter>(UGameplayStatics::GetPlayerCharacter(GetWorld(), 0));
+    if (!IsValid(Player))
+    {
+        return;
+    }
+    
+    FVector PlayerLocation = Player->GetActorLocation();
+    FVector DinosaurLocation = DinosaurActor->GetActorLocation();
+    
+    float ThreatLevel = CalculateDinosaurThreatLevel(PlayerLocation, DinosaurLocation, AudioProfile.ProximityThreatDistance);
+    
+    if (ThreatLevel > 0.1f)
+    {
+        // Trigger appropriate audio based on threat level
+        if (ThreatLevel > 0.8f)
+        {
+            // High threat - play aggressive sounds
+            PlayDinosaurThreatSound(AudioProfile.Species, DinosaurLocation);
+        }
+        else if (ThreatLevel > 0.4f)
+        {
+            // Medium threat - play movement sounds
+            // TODO: Play movement audio
+        }
+        
+        // Update audio mood based on highest threat level
+        if (ThreatLevel > 0.8f && CurrentAudioMood != EAudioMood::Dangerous)
+        {
+            SetGlobalAudioMood(EAudioMood::Dangerous);
+        }
+        else if (ThreatLevel > 0.4f && CurrentAudioMood == EAudioMood::Neutral)
+        {
+            SetGlobalAudioMood(EAudioMood::Tense);
+        }
+    }
+}
+
+float UAudio_ProximityAudioManager::CalculateDinosaurThreatLevel(FVector PlayerLocation, FVector DinosaurLocation, float ThreatDistance)
+{
+    float Distance = FVector::Dist(PlayerLocation, DinosaurLocation);
+    
+    if (Distance >= ThreatDistance)
+    {
+        return 0.0f;
+    }
+    
+    float ThreatLevel = 1.0f - (Distance / ThreatDistance);
+    return FMath::Clamp(ThreatLevel, 0.0f, 1.0f);
 }
