@@ -1,453 +1,587 @@
 #include "Core_VehiclePhysics.h"
+#include "Core_TerrainPhysicsIntegrator.h"
 #include "Engine/World.h"
+#include "GameFramework/PlayerController.h"
+#include "Components/InputComponent.h"
 #include "Components/PrimitiveComponent.h"
 #include "Engine/Engine.h"
 #include "DrawDebugHelpers.h"
 #include "Kismet/GameplayStatics.h"
-#include "PhysicsEngine/PhysicsSettings.h"
+#include "Kismet/KismetMathLibrary.h"
 
 ACore_VehiclePhysics::ACore_VehiclePhysics()
 {
     PrimaryActorTick.bCanEverTick = true;
-
-    // Create vehicle body mesh component
-    VehicleBodyMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("VehicleBodyMesh"));
-    RootComponent = VehicleBodyMesh;
-
-    // Configure physics
-    VehicleBodyMesh->SetSimulatePhysics(true);
-    VehicleBodyMesh->SetMassOverrideInKg(NAME_None, VehicleMass);
-    VehicleBodyMesh->SetCenterOfMass(CenterOfMassOffset);
-    VehicleBodyMesh->SetLinearDamping(0.1f);
-    VehicleBodyMesh->SetAngularDamping(0.3f);
-
-    // Initialize wheel configurations (default 4-wheel setup)
-    WheelConfigurations.SetNum(4);
-    for (int32 i = 0; i < 4; i++)
-    {
-        WheelConfigurations[i] = FCore_WheelConfiguration();
-    }
-
-    // Initialize arrays
-    WheelContactPoints.SetNum(4);
-    WheelContactNormals.SetNum(4);
-    WheelCompressionRatios.SetNum(4);
-
-    // Reset input states
-    CurrentThrottle = 0.0f;
-    CurrentBrake = 0.0f;
-    CurrentSteering = 0.0f;
+    
+    // Create vehicle mesh component
+    VehicleMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("VehicleMesh"));
+    RootComponent = VehicleMesh;
+    
+    // Enable physics simulation
+    VehicleMesh->SetSimulatePhysics(true);
+    VehicleMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+    VehicleMesh->SetCollisionObjectType(ECollisionChannel::ECC_Vehicle);
+    VehicleMesh->SetCollisionResponseToAllChannels(ECollisionResponse::ECR_Block);
+    
+    // Create terrain physics integrator
+    TerrainPhysicsIntegrator = CreateDefaultSubobject<UCore_TerrainPhysicsIntegrator>(TEXT("TerrainPhysicsIntegrator"));
+    
+    // Set default physics properties
+    PhysicsProperties = FCore_VehiclePhysicsProperties();
+    ConfigureVehiclePhysics();
+    
+    // Initialize state
+    CurrentState = ECore_VehicleState::Idle;
+    TerrainResponse = FCore_VehicleTerrainResponse();
+    
+    // Set default vehicle type
+    VehicleType = ECore_VehicleType::WoodenCart;
 }
 
 void ACore_VehiclePhysics::BeginPlay()
 {
     Super::BeginPlay();
-
-    // Apply initial vehicle mass
-    if (VehicleBodyMesh)
-    {
-        VehicleBodyMesh->SetMassOverrideInKg(NAME_None, VehicleMass);
-        VehicleBodyMesh->SetCenterOfMass(CenterOfMassOffset);
-    }
-
-    UE_LOG(LogTemp, Warning, TEXT("Core Vehicle Physics initialized with mass: %f kg"), VehicleMass);
+    
+    // Configure initial physics properties
+    ConfigureVehiclePhysics();
+    
+    // Initialize terrain response
+    UpdateTerrainResponse();
+    
+    // Store initial position and rotation
+    LastPosition = GetActorLocation();
+    LastRotation = GetActorRotation();
+    LastUpdateTime = GetWorld()->GetTimeSeconds();
 }
 
 void ACore_VehiclePhysics::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
-
-    if (!VehicleBodyMesh || !VehicleBodyMesh->IsSimulatingPhysics())
-    {
-        return;
-    }
-
-    // Calculate wheel contacts with ground
-    CalculateWheelContacts();
-
-    // Calculate and apply suspension forces
-    CalculateSuspensionForces();
-
-    // Apply engine force based on throttle input
-    ApplyEngineForce(DeltaTime);
-
-    // Apply aerodynamic drag
-    ApplyAerodynamicDrag(DeltaTime);
-
-    // Apply wheel forces (traction, braking)
-    ApplyWheelForces(DeltaTime);
-
-    // Update vehicle statistics
-    UpdateVehicleStats(DeltaTime);
+    
+    // Update vehicle state
+    UpdateVehicleState(DeltaTime);
+    
+    // Update terrain response
+    UpdateTerrainResponse();
+    
+    // Apply terrain effects
+    ApplyTerrainEffects(DeltaTime);
+    
+    // Check vehicle stability
+    CheckVehicleStability();
+    
+    // Apply physics forces
+    ApplyPhysicsForces(DeltaTime);
+    
+    // Update timers
+    StateTimer += DeltaTime;
+    LastUpdateTime = GetWorld()->GetTimeSeconds();
 }
 
 void ACore_VehiclePhysics::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 {
     Super::SetupPlayerInputComponent(PlayerInputComponent);
-
-    // Bind input actions
-    PlayerInputComponent->BindAction("Throttle", IE_Pressed, this, &ACore_VehiclePhysics::ThrottlePressed);
-    PlayerInputComponent->BindAction("Throttle", IE_Released, this, &ACore_VehiclePhysics::ThrottleReleased);
-    PlayerInputComponent->BindAction("Brake", IE_Pressed, this, &ACore_VehiclePhysics::BrakePressed);
-    PlayerInputComponent->BindAction("Brake", IE_Released, this, &ACore_VehiclePhysics::BrakeReleased);
-
-    // Bind input axes
-    PlayerInputComponent->BindAxis("Steering", this, &ACore_VehiclePhysics::ApplySteering);
+    
+    // Bind movement inputs
+    PlayerInputComponent->BindAxis("MoveForward", this, &ACore_VehiclePhysics::MoveForward);
+    PlayerInputComponent->BindAxis("MoveRight", this, &ACore_VehiclePhysics::MoveRight);
+    PlayerInputComponent->BindAction("Brake", IE_Pressed, this, &ACore_VehiclePhysics::ApplyBrakes, true);
+    PlayerInputComponent->BindAction("Brake", IE_Released, this, &ACore_VehiclePhysics::ApplyBrakes, false);
 }
 
-void ACore_VehiclePhysics::ApplyThrottle(float ThrottleValue)
+void ACore_VehiclePhysics::MoveForward(float Value)
 {
-    CurrentThrottle = FMath::Clamp(ThrottleValue, 0.0f, 1.0f);
+    CurrentForwardInput = Value;
+    HandleVehicleInput(Value, CurrentRightInput);
 }
 
-void ACore_VehiclePhysics::ApplyBrake(float BrakeValue)
+void ACore_VehiclePhysics::MoveRight(float Value)
 {
-    CurrentBrake = FMath::Clamp(BrakeValue, 0.0f, 1.0f);
+    CurrentRightInput = Value;
+    HandleVehicleInput(CurrentForwardInput, Value);
 }
 
-void ACore_VehiclePhysics::ApplySteering(float SteeringValue)
+void ACore_VehiclePhysics::ApplyBrakes(bool bBraking)
 {
-    CurrentSteering = FMath::Clamp(SteeringValue, -1.0f, 1.0f);
-}
-
-bool ACore_VehiclePhysics::IsOnGround() const
-{
-    // Check if any wheel is in contact with ground
-    for (float CompressionRatio : WheelCompressionRatios)
+    bIsBraking = bBraking;
+    
+    if (bBraking)
     {
-        if (CompressionRatio > 0.0f)
+        CurrentState = ECore_VehicleState::Braking;
+    }
+    else if (CurrentState == ECore_VehicleState::Braking)
+    {
+        CurrentState = ECore_VehicleState::Idle;
+    }
+}
+
+void ACore_VehiclePhysics::UpdateTerrainResponse()
+{
+    if (!TerrainPhysicsIntegrator)
+        return;
+    
+    // Get current terrain type
+    FVector CurrentLocation = GetActorLocation();
+    ETerrainType NewTerrainType = TerrainPhysicsIntegrator->GetTerrainTypeAtLocation(CurrentLocation);
+    
+    if (NewTerrainType != TerrainResponse.CurrentTerrain)
+    {
+        TerrainResponse.CurrentTerrain = NewTerrainType;
+        CalculateTerrainEffects();
+    }
+    
+    // Check if vehicle should get stuck
+    TerrainResponse.bIsStuck = ShouldVehicleGetStuck();
+    
+    if (TerrainResponse.bIsStuck)
+    {
+        TerrainResponse.StuckTimer += GetWorld()->GetDeltaSeconds();
+        CurrentState = ECore_VehicleState::Stuck;
+    }
+    else
+    {
+        TerrainResponse.StuckTimer = 0.0f;
+        if (CurrentState == ECore_VehicleState::Stuck)
         {
-            return true;
+            CurrentState = ECore_VehicleState::Idle;
         }
     }
-    return false;
 }
 
-float ACore_VehiclePhysics::GetTerrainTraction() const
+void ACore_VehiclePhysics::ApplyTerrainEffects(float DeltaTime)
 {
-    if (!IsOnGround())
+    if (!VehicleMesh || TerrainResponse.bIsStuck)
+        return;
+    
+    // Apply terrain-based force modifications
+    FVector TerrainForce = CalculateTerrainForce();
+    VehicleMesh->AddForce(TerrainForce);
+    
+    // Apply terrain friction
+    FVector CurrentVelocity = VehicleMesh->GetPhysicsLinearVelocity();
+    float FrictionForce = TerrainResponse.TerrainSpeedModifier * PhysicsProperties.TerrainFrictionMultiplier;
+    FVector FrictionVector = -CurrentVelocity * FrictionForce * DeltaTime;
+    VehicleMesh->AddForce(FrictionVector);
+    
+    // Apply water resistance for rafts
+    if (VehicleType == ECore_VehicleType::WoodenRaft && TerrainResponse.CurrentTerrain == ETerrainType::Water)
     {
+        FVector WaterResistance = -CurrentVelocity * PhysicsProperties.WaterResistance * DeltaTime;
+        VehicleMesh->AddForce(WaterResistance);
+    }
+}
+
+void ACore_VehiclePhysics::CheckVehicleStability()
+{
+    if (!VehicleMesh)
+        return;
+    
+    // Calculate stability based on vehicle properties and terrain
+    float StabilityThreshold = PhysicsProperties.StabilityFactor * TerrainResponse.TerrainStabilityModifier;
+    
+    // Check angular velocity for instability
+    FVector AngularVelocity = VehicleMesh->GetPhysicsAngularVelocityInRadians();
+    float AngularSpeed = AngularVelocity.Size();
+    
+    if (AngularSpeed > StabilityThreshold)
+    {
+        // Apply stabilizing force
+        FVector StabilizingTorque = -AngularVelocity * PhysicsProperties.StabilityFactor;
+        VehicleMesh->AddTorqueInRadians(StabilizingTorque);
+    }
+    
+    // Check for vehicle rollover
+    FRotator CurrentRotation = GetActorRotation();
+    float RollAngle = FMath::Abs(CurrentRotation.Roll);
+    float PitchAngle = FMath::Abs(CurrentRotation.Pitch);
+    
+    if (RollAngle > 45.0f || PitchAngle > 45.0f)
+    {
+        CurrentState = ECore_VehicleState::Damaged;
+    }
+}
+
+void ACore_VehiclePhysics::HandleVehicleDamage(float DamageAmount)
+{
+    // Reduce vehicle performance based on damage
+    PhysicsProperties.MaxSpeed *= (1.0f - DamageAmount * 0.1f);
+    PhysicsProperties.Acceleration *= (1.0f - DamageAmount * 0.15f);
+    PhysicsProperties.StabilityFactor *= (1.0f - DamageAmount * 0.2f);
+    
+    // Clamp values to prevent negative performance
+    PhysicsProperties.MaxSpeed = FMath::Max(PhysicsProperties.MaxSpeed, 100.0f);
+    PhysicsProperties.Acceleration = FMath::Max(PhysicsProperties.Acceleration, 50.0f);
+    PhysicsProperties.StabilityFactor = FMath::Max(PhysicsProperties.StabilityFactor, 0.1f);
+    
+    CurrentState = ECore_VehicleState::Damaged;
+}
+
+void ACore_VehiclePhysics::SetVehicleType(ECore_VehicleType NewType)
+{
+    VehicleType = NewType;
+    ConfigureVehiclePhysics();
+}
+
+void ACore_VehiclePhysics::ConfigureVehiclePhysics()
+{
+    if (!VehicleMesh)
+        return;
+    
+    // Configure physics properties based on vehicle type
+    switch (VehicleType)
+    {
+        case ECore_VehicleType::WoodenRaft:
+            PhysicsProperties.Mass = 300.0f;
+            PhysicsProperties.MaxSpeed = 400.0f;
+            PhysicsProperties.Acceleration = 200.0f;
+            PhysicsProperties.TurningRadius = 500.0f;
+            PhysicsProperties.WaterResistance = 0.5f;
+            PhysicsProperties.StabilityFactor = 0.8f;
+            break;
+            
+        case ECore_VehicleType::StoneSled:
+            PhysicsProperties.Mass = 800.0f;
+            PhysicsProperties.MaxSpeed = 300.0f;
+            PhysicsProperties.Acceleration = 150.0f;
+            PhysicsProperties.TurningRadius = 200.0f;
+            PhysicsProperties.TerrainFrictionMultiplier = 1.5f;
+            PhysicsProperties.StabilityFactor = 0.9f;
+            break;
+            
+        case ECore_VehicleType::WoodenCart:
+            PhysicsProperties.Mass = 500.0f;
+            PhysicsProperties.MaxSpeed = 600.0f;
+            PhysicsProperties.Acceleration = 400.0f;
+            PhysicsProperties.TurningRadius = 300.0f;
+            PhysicsProperties.StabilityFactor = 0.7f;
+            break;
+            
+        case ECore_VehicleType::AnimalMount:
+            PhysicsProperties.Mass = 400.0f;
+            PhysicsProperties.MaxSpeed = 1000.0f;
+            PhysicsProperties.Acceleration = 800.0f;
+            PhysicsProperties.TurningRadius = 150.0f;
+            PhysicsProperties.StabilityFactor = 0.6f;
+            break;
+            
+        default:
+            // Use default properties
+            break;
+    }
+    
+    // Apply mass to physics component
+    VehicleMesh->SetMassOverrideInKg(NAME_None, PhysicsProperties.Mass, true);
+}
+
+void ACore_VehiclePhysics::SetPhysicsProperties(const FCore_VehiclePhysicsProperties& NewProperties)
+{
+    PhysicsProperties = NewProperties;
+    ConfigureVehiclePhysics();
+}
+
+float ACore_VehiclePhysics::GetCurrentSpeed() const
+{
+    if (!VehicleMesh)
         return 0.0f;
-    }
+    
+    FVector Velocity = VehicleMesh->GetPhysicsLinearVelocity();
+    return Velocity.Size();
+}
 
-    // Perform line trace to determine surface material
-    FVector StartLocation = GetActorLocation();
-    FVector EndLocation = StartLocation - FVector(0, 0, 200.0f);
-
-    FHitResult HitResult;
-    FCollisionQueryParams QueryParams;
-    QueryParams.AddIgnoredActor(this);
-
-    bool bHit = GetWorld()->LineTraceSingleByChannel(
-        HitResult,
-        StartLocation,
-        EndLocation,
-        ECollisionChannel::ECC_WorldStatic,
-        QueryParams
+void ACore_VehiclePhysics::DebugVehiclePhysics()
+{
+    if (!GEngine)
+        return;
+    
+    FString DebugText = FString::Printf(TEXT("Vehicle Type: %s\nState: %s\nSpeed: %.1f\nTerrain: %s\nStuck: %s"),
+        *UEnum::GetValueAsString(VehicleType),
+        *UEnum::GetValueAsString(CurrentState),
+        GetCurrentSpeed(),
+        *UEnum::GetValueAsString(TerrainResponse.CurrentTerrain),
+        TerrainResponse.bIsStuck ? TEXT("Yes") : TEXT("No")
     );
-
-    if (bHit)
-    {
-        // Determine traction based on surface material
-        if (HitResult.GetComponent())
-        {
-            FString SurfaceName = HitResult.GetComponent()->GetName();
-            
-            // Basic surface traction mapping
-            if (SurfaceName.Contains("Grass") || SurfaceName.Contains("Dirt"))
-            {
-                return 0.7f;
-            }
-            else if (SurfaceName.Contains("Rock") || SurfaceName.Contains("Stone"))
-            {
-                return 0.9f;
-            }
-            else if (SurfaceName.Contains("Mud") || SurfaceName.Contains("Swamp"))
-            {
-                return 0.3f;
-            }
-            else if (SurfaceName.Contains("Ice") || SurfaceName.Contains("Snow"))
-            {
-                return 0.2f;
-            }
-        }
-    }
-
-    // Default traction for unknown surfaces
-    return 0.6f;
+    
+    GEngine->AddOnScreenDebugMessage(-1, 0.0f, FColor::Yellow, DebugText);
 }
 
-void ACore_VehiclePhysics::CalculateSuspensionForces()
+void ACore_VehiclePhysics::DrawVehicleDebugInfo()
 {
-    if (!VehicleBodyMesh)
-    {
+    if (!GetWorld())
         return;
-    }
-
-    for (int32 WheelIndex = 0; WheelIndex < WheelConfigurations.Num(); WheelIndex++)
+    
+    FVector Location = GetActorLocation();
+    FVector Velocity = VehicleMesh ? VehicleMesh->GetPhysicsLinearVelocity() : FVector::ZeroVector;
+    
+    // Draw velocity vector
+    DrawDebugLine(GetWorld(), Location, Location + Velocity * 0.1f, FColor::Green, false, 0.1f, 0, 2.0f);
+    
+    // Draw turning radius
+    float Radius = PhysicsProperties.TurningRadius;
+    DrawDebugCircle(GetWorld(), Location, Radius, 32, FColor::Blue, false, 0.1f, 0, 2.0f, FVector::ForwardVector, FVector::RightVector);
+    
+    // Draw terrain type indicator
+    FColor TerrainColor = FColor::White;
+    switch (TerrainResponse.CurrentTerrain)
     {
-        if (WheelIndex >= WheelCompressionRatios.Num())
-        {
-            continue;
-        }
-
-        float CompressionRatio = WheelCompressionRatios[WheelIndex];
-        if (CompressionRatio <= 0.0f)
-        {
-            continue;
-        }
-
-        const FCore_WheelConfiguration& WheelConfig = WheelConfigurations[WheelIndex];
-        
-        // Calculate spring force
-        float SpringForce = WheelConfig.SpringStiffness * CompressionRatio * WheelConfig.SuspensionTravel;
-        
-        // Calculate damping force
-        FVector WheelVelocity = VehicleBodyMesh->GetPhysicsLinearVelocityAtPoint(WheelContactPoints[WheelIndex]);
-        float DampingForce = WheelConfig.DampingCoefficient * FVector::DotProduct(WheelVelocity, WheelContactNormals[WheelIndex]);
-        
-        // Total suspension force
-        float TotalForce = SpringForce - DampingForce;
-        FVector SuspensionForce = WheelContactNormals[WheelIndex] * TotalForce;
-        
-        // Apply force at wheel contact point
-        VehicleBodyMesh->AddForceAtLocation(SuspensionForce, WheelContactPoints[WheelIndex]);
+        case ETerrainType::Grass: TerrainColor = FColor::Green; break;
+        case ETerrainType::Dirt: TerrainColor = FColor::Orange; break;
+        case ETerrainType::Rock: TerrainColor = FColor::Red; break;
+        case ETerrainType::Sand: TerrainColor = FColor::Yellow; break;
+        case ETerrainType::Mud: TerrainColor = FColor::Magenta; break;
+        case ETerrainType::Water: TerrainColor = FColor::Blue; break;
+        default: break;
     }
+    
+    DrawDebugSphere(GetWorld(), Location + FVector(0, 0, 100), 50.0f, 12, TerrainColor, false, 0.1f, 0, 2.0f);
 }
 
-void ACore_VehiclePhysics::ApplyEngineForce(float DeltaTime)
+void ACore_VehiclePhysics::UpdateVehicleState(float DeltaTime)
 {
-    if (!VehicleBodyMesh || CurrentThrottle <= 0.0f)
+    // Update state based on input and movement
+    float CurrentSpeed = GetCurrentSpeed();
+    
+    if (TerrainResponse.bIsStuck)
     {
+        CurrentState = ECore_VehicleState::Stuck;
         return;
     }
-
-    // Calculate engine output based on current RPM
-    float EngineOutput = CalculateEngineOutput(VehicleStats.EngineRPM);
     
-    // Apply throttle modifier
-    float TotalForce = EngineOutput * CurrentThrottle * MaxEnginePower * 100.0f; // Convert to Newtons
-    
-    // Apply force in forward direction
-    FVector ForwardDirection = GetActorForwardVector();
-    FVector EngineForce = ForwardDirection * TotalForce;
-    
-    VehicleBodyMesh->AddForce(EngineForce);
-}
-
-void ACore_VehiclePhysics::ApplyAerodynamicDrag(float DeltaTime)
-{
-    if (!VehicleBodyMesh)
+    if (bIsBraking)
     {
-        return;
+        CurrentState = ECore_VehicleState::Braking;
     }
-
-    FVector Velocity = VehicleBodyMesh->GetPhysicsLinearVelocity();
-    float Speed = Velocity.Size();
-    
-    if (Speed > 0.1f)
+    else if (FMath::Abs(CurrentRightInput) > 0.1f)
     {
-        // Calculate drag force: F = 0.5 * ρ * Cd * A * v²
-        float AirDensity = 1.225f; // kg/m³ at sea level
-        float DragForce = 0.5f * AirDensity * DragCoefficient * FrontalArea * Speed * Speed;
-        
-        // Apply drag in opposite direction of velocity
-        FVector DragDirection = -Velocity.GetSafeNormal();
-        FVector TotalDrag = DragDirection * DragForce;
-        
-        VehicleBodyMesh->AddForce(TotalDrag);
+        CurrentState = ECore_VehicleState::Turning;
     }
-}
-
-void ACore_VehiclePhysics::UpdateVehicleStats(float DeltaTime)
-{
-    if (!VehicleBodyMesh)
+    else if (FMath::Abs(CurrentForwardInput) > 0.1f || CurrentSpeed > 50.0f)
     {
-        return;
-    }
-
-    // Update speed (convert cm/s to km/h)
-    FVector Velocity = VehicleBodyMesh->GetPhysicsLinearVelocity();
-    VehicleStats.CurrentSpeed = Velocity.Size() * 0.036f;
-    
-    // Update engine RPM based on speed and throttle
-    float TargetRPM = 800.0f + (VehicleStats.CurrentSpeed * 50.0f) + (CurrentThrottle * 2000.0f);
-    VehicleStats.EngineRPM = FMath::FInterpTo(VehicleStats.EngineRPM, TargetRPM, DeltaTime, 5.0f);
-    
-    // Consume fuel based on throttle input
-    if (CurrentThrottle > 0.0f)
-    {
-        float FuelConsumption = CurrentThrottle * 2.0f * DeltaTime; // 2% per second at full throttle
-        VehicleStats.FuelLevel = FMath::Max(0.0f, VehicleStats.FuelLevel - FuelConsumption);
-    }
-    
-    // Update gear based on speed (simple automatic transmission)
-    if (VehicleStats.CurrentSpeed < 20.0f)
-    {
-        VehicleStats.CurrentGear = 1;
-    }
-    else if (VehicleStats.CurrentSpeed < 40.0f)
-    {
-        VehicleStats.CurrentGear = 2;
-    }
-    else if (VehicleStats.CurrentSpeed < 60.0f)
-    {
-        VehicleStats.CurrentGear = 3;
+        CurrentState = ECore_VehicleState::Moving;
     }
     else
     {
-        VehicleStats.CurrentGear = 4;
+        CurrentState = ECore_VehicleState::Idle;
     }
+    
+    // Update position tracking
+    LastPosition = GetActorLocation();
+    LastRotation = GetActorRotation();
 }
 
-void ACore_VehiclePhysics::CalculateWheelContacts()
+void ACore_VehiclePhysics::CalculateTerrainEffects()
 {
-    if (!VehicleBodyMesh)
+    // Calculate speed and stability modifiers based on terrain
+    switch (TerrainResponse.CurrentTerrain)
     {
-        return;
-    }
-
-    // Define wheel positions relative to vehicle center
-    TArray<FVector> WheelOffsets = {
-        FVector(120.0f, -80.0f, -50.0f),   // Front Left
-        FVector(120.0f, 80.0f, -50.0f),    // Front Right
-        FVector(-120.0f, -80.0f, -50.0f),  // Rear Left
-        FVector(-120.0f, 80.0f, -50.0f)    // Rear Right
-    };
-
-    for (int32 WheelIndex = 0; WheelIndex < WheelOffsets.Num() && WheelIndex < WheelConfigurations.Num(); WheelIndex++)
-    {
-        FVector WheelWorldPosition = GetActorLocation() + GetActorRotation().RotateVector(WheelOffsets[WheelIndex]);
-        FVector TraceStart = WheelWorldPosition + FVector(0, 0, WheelConfigurations[WheelIndex].WheelRadius);
-        FVector TraceEnd = WheelWorldPosition - FVector(0, 0, WheelConfigurations[WheelIndex].SuspensionTravel + WheelConfigurations[WheelIndex].WheelRadius);
-
-        FHitResult HitResult;
-        FCollisionQueryParams QueryParams;
-        QueryParams.AddIgnoredActor(this);
-
-        bool bHit = GetWorld()->LineTraceSingleByChannel(
-            HitResult,
-            TraceStart,
-            TraceEnd,
-            ECollisionChannel::ECC_WorldStatic,
-            QueryParams
-        );
-
-        if (bHit)
-        {
-            WheelContactPoints[WheelIndex] = HitResult.ImpactPoint;
-            WheelContactNormals[WheelIndex] = HitResult.ImpactNormal;
+        case ETerrainType::Grass:
+            TerrainResponse.TerrainSpeedModifier = 1.0f;
+            TerrainResponse.TerrainStabilityModifier = 1.0f;
+            break;
             
-            float ContactDistance = FVector::Dist(TraceStart, HitResult.ImpactPoint);
-            float MaxDistance = WheelConfigurations[WheelIndex].SuspensionTravel + WheelConfigurations[WheelIndex].WheelRadius;
-            WheelCompressionRatios[WheelIndex] = FMath::Clamp((MaxDistance - ContactDistance) / WheelConfigurations[WheelIndex].SuspensionTravel, 0.0f, 1.0f);
-        }
-        else
-        {
-            WheelContactPoints[WheelIndex] = TraceEnd;
-            WheelContactNormals[WheelIndex] = FVector::UpVector;
-            WheelCompressionRatios[WheelIndex] = 0.0f;
-        }
+        case ETerrainType::Dirt:
+            TerrainResponse.TerrainSpeedModifier = 0.9f;
+            TerrainResponse.TerrainStabilityModifier = 0.9f;
+            break;
+            
+        case ETerrainType::Rock:
+            TerrainResponse.TerrainSpeedModifier = 0.7f;
+            TerrainResponse.TerrainStabilityModifier = 0.6f;
+            break;
+            
+        case ETerrainType::Sand:
+            TerrainResponse.TerrainSpeedModifier = 0.6f;
+            TerrainResponse.TerrainStabilityModifier = 0.7f;
+            break;
+            
+        case ETerrainType::Mud:
+            TerrainResponse.TerrainSpeedModifier = 0.4f;
+            TerrainResponse.TerrainStabilityModifier = 0.5f;
+            break;
+            
+        case ETerrainType::Water:
+            if (VehicleType == ECore_VehicleType::WoodenRaft)
+            {
+                TerrainResponse.TerrainSpeedModifier = 0.8f;
+                TerrainResponse.TerrainStabilityModifier = 0.9f;
+            }
+            else
+            {
+                TerrainResponse.TerrainSpeedModifier = 0.2f;
+                TerrainResponse.TerrainStabilityModifier = 0.3f;
+            }
+            break;
+            
+        default:
+            TerrainResponse.TerrainSpeedModifier = 1.0f;
+            TerrainResponse.TerrainStabilityModifier = 1.0f;
+            break;
     }
 }
 
-void ACore_VehiclePhysics::ApplyWheelForces(float DeltaTime)
+void ACore_VehiclePhysics::ApplyPhysicsForces(float DeltaTime)
 {
-    if (!VehicleBodyMesh)
-    {
+    if (!VehicleMesh || TerrainResponse.bIsStuck)
         return;
-    }
-
-    float TerrainTraction = GetTerrainTraction();
     
-    for (int32 WheelIndex = 0; WheelIndex < WheelConfigurations.Num(); WheelIndex++)
+    // Apply movement forces
+    if (FMath::Abs(CurrentForwardInput) > 0.1f)
     {
-        if (WheelCompressionRatios[WheelIndex] <= 0.0f)
-        {
-            continue;
-        }
-
-        const FCore_WheelConfiguration& WheelConfig = WheelConfigurations[WheelIndex];
-        FVector WheelPosition = WheelContactPoints[WheelIndex];
-        
-        // Calculate wheel velocity
-        FVector WheelVelocity = VehicleBodyMesh->GetPhysicsLinearVelocityAtPoint(WheelPosition);
-        
-        // Apply braking force
-        if (CurrentBrake > 0.0f)
-        {
-            FVector BrakeForce = -WheelVelocity.GetSafeNormal() * CurrentBrake * 5000.0f * TerrainTraction;
-            VehicleBodyMesh->AddForceAtLocation(BrakeForce, WheelPosition);
-        }
-        
-        // Apply steering force (front wheels only)
-        if (WheelIndex < 2 && FMath::Abs(CurrentSteering) > 0.01f)
-        {
-            FVector RightVector = GetActorRightVector();
-            FVector SteeringForce = RightVector * CurrentSteering * 2000.0f * TerrainTraction;
-            VehicleBodyMesh->AddForceAtLocation(SteeringForce, WheelPosition);
-        }
-        
-        // Apply lateral friction
-        FVector LateralVelocity = FVector::VectorPlaneProject(WheelVelocity, WheelContactNormals[WheelIndex]);
-        FVector RightVector = GetActorRightVector();
-        float LateralSpeed = FVector::DotProduct(LateralVelocity, RightVector);
-        
-        if (FMath::Abs(LateralSpeed) > 0.1f)
-        {
-            FVector LateralFriction = -RightVector * LateralSpeed * WheelConfig.FrictionCoefficient * 3000.0f * TerrainTraction;
-            VehicleBodyMesh->AddForceAtLocation(LateralFriction, WheelPosition);
-        }
+        FVector ForwardForce = GetActorForwardVector() * CurrentForwardInput * PhysicsProperties.Acceleration * TerrainResponse.TerrainSpeedModifier;
+        VehicleMesh->AddForce(ForwardForce);
     }
-}
-
-float ACore_VehiclePhysics::CalculateEngineOutput(float RPM) const
-{
-    // Simple torque curve simulation
-    float OptimalRPM = 3000.0f;
-    float MaxRPM = 6000.0f;
     
-    if (RPM <= OptimalRPM)
+    // Apply turning forces
+    if (FMath::Abs(CurrentRightInput) > 0.1f)
     {
-        return FMath::Lerp(0.5f, 1.0f, RPM / OptimalRPM);
+        FVector TorqueForce = GetActorUpVector() * CurrentRightInput * PhysicsProperties.Acceleration * 0.5f;
+        VehicleMesh->AddTorqueInRadians(TorqueForce);
     }
-    else
+    
+    // Apply braking forces
+    if (bIsBraking)
     {
-        return FMath::Lerp(1.0f, 0.3f, (RPM - OptimalRPM) / (MaxRPM - OptimalRPM));
+        FVector CurrentVelocity = VehicleMesh->GetPhysicsLinearVelocity();
+        FVector BrakingForce = -CurrentVelocity.GetSafeNormal() * PhysicsProperties.BrakingForce;
+        VehicleMesh->AddForce(BrakingForce);
+    }
+    
+    // Limit maximum speed
+    FVector CurrentVelocity = VehicleMesh->GetPhysicsLinearVelocity();
+    float MaxAllowedSpeed = PhysicsProperties.MaxSpeed * TerrainResponse.TerrainSpeedModifier;
+    
+    if (CurrentVelocity.Size() > MaxAllowedSpeed)
+    {
+        FVector LimitedVelocity = CurrentVelocity.GetSafeNormal() * MaxAllowedSpeed;
+        VehicleMesh->SetPhysicsLinearVelocity(LimitedVelocity);
     }
 }
 
-void ACore_VehiclePhysics::ThrottlePressed()
+void ACore_VehiclePhysics::HandleVehicleInput(float ForwardInput, float RightInput)
 {
-    ApplyThrottle(1.0f);
+    CurrentForwardInput = ForwardInput;
+    CurrentRightInput = RightInput;
 }
 
-void ACore_VehiclePhysics::ThrottleReleased()
+void ACore_VehiclePhysics::ProcessTerrainInteraction()
 {
-    ApplyThrottle(0.0f);
+    // Additional terrain-specific interactions can be implemented here
+    // For example, special effects when transitioning between terrain types
 }
 
-void ACore_VehiclePhysics::BrakePressed()
+float ACore_VehiclePhysics::CalculateSpeedModifier() const
 {
-    ApplyBrake(1.0f);
+    return TerrainResponse.TerrainSpeedModifier;
 }
 
-void ACore_VehiclePhysics::BrakeReleased()
+float ACore_VehiclePhysics::CalculateStabilityModifier() const
 {
-    ApplyBrake(0.0f);
+    return TerrainResponse.TerrainStabilityModifier;
 }
 
-void ACore_VehiclePhysics::SteerLeft()
+FVector ACore_VehiclePhysics::CalculateTerrainForce() const
 {
-    ApplySteering(-1.0f);
+    // Calculate additional forces based on terrain type
+    FVector TerrainForce = FVector::ZeroVector;
+    
+    switch (TerrainResponse.CurrentTerrain)
+    {
+        case ETerrainType::Mud:
+            // Mud creates additional drag
+            if (VehicleMesh)
+            {
+                FVector Velocity = VehicleMesh->GetPhysicsLinearVelocity();
+                TerrainForce = -Velocity * 0.5f;
+            }
+            break;
+            
+        case ETerrainType::Water:
+            // Water creates buoyancy for rafts
+            if (VehicleType == ECore_VehicleType::WoodenRaft)
+            {
+                TerrainForce = FVector(0, 0, 500.0f); // Upward buoyancy force
+            }
+            break;
+            
+        default:
+            break;
+    }
+    
+    return TerrainForce;
 }
 
-void ACore_VehiclePhysics::SteerRight()
+bool ACore_VehiclePhysics::ShouldVehicleGetStuck() const
 {
-    ApplySteering(1.0f);
+    // Determine if vehicle should get stuck based on terrain and vehicle type
+    switch (TerrainResponse.CurrentTerrain)
+    {
+        case ETerrainType::Mud:
+            return VehicleType != ECore_VehicleType::AnimalMount && GetCurrentSpeed() < 100.0f;
+            
+        case ETerrainType::Sand:
+            return VehicleType == ECore_VehicleType::StoneSled && GetCurrentSpeed() < 50.0f;
+            
+        case ETerrainType::Water:
+            return VehicleType != ECore_VehicleType::WoodenRaft;
+            
+        default:
+            return false;
+    }
 }
 
-void ACore_VehiclePhysics::SteerStop()
+// Component Implementation
+UCore_VehiclePhysicsComponent::UCore_VehiclePhysicsComponent()
 {
-    ApplySteering(0.0f);
+    PrimaryComponentTick.bCanEverTick = true;
+    
+    VehicleType = ECore_VehicleType::WoodenCart;
+    PhysicsProperties = FCore_VehiclePhysicsProperties();
+    TerrainResponse = FCore_VehicleTerrainResponse();
+}
+
+void UCore_VehiclePhysicsComponent::BeginPlay()
+{
+    Super::BeginPlay();
+}
+
+void UCore_VehiclePhysicsComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    
+    // Update terrain response for component
+    AActor* Owner = GetOwner();
+    if (Owner)
+    {
+        // Basic terrain detection for component version
+        FVector Location = Owner->GetActorLocation();
+        // Simplified terrain detection - can be expanded with proper terrain system integration
+    }
+}
+
+void UCore_VehiclePhysicsComponent::ApplyVehicleForce(const FVector& Force)
+{
+    AActor* Owner = GetOwner();
+    if (Owner)
+    {
+        UPrimitiveComponent* PrimComp = Owner->FindComponentByClass<UPrimitiveComponent>();
+        if (PrimComp && PrimComp->IsSimulatingPhysics())
+        {
+            PrimComp->AddForce(Force);
+        }
+    }
+}
+
+void UCore_VehiclePhysicsComponent::SetVehiclePhysicsProperties(const FCore_VehiclePhysicsProperties& NewProperties)
+{
+    PhysicsProperties = NewProperties;
+    
+    // Apply mass to owner's primitive component
+    AActor* Owner = GetOwner();
+    if (Owner)
+    {
+        UPrimitiveComponent* PrimComp = Owner->FindComponentByClass<UPrimitiveComponent>();
+        if (PrimComp)
+        {
+            PrimComp->SetMassOverrideInKg(NAME_None, PhysicsProperties.Mass, true);
+        }
+    }
 }
