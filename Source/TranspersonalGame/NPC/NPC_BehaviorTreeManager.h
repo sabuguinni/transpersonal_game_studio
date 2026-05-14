@@ -1,257 +1,206 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/ActorComponent.h"
+#include "Engine/World.h"
+#include "BehaviorTree/BehaviorTree.h"
 #include "BehaviorTree/BehaviorTreeComponent.h"
 #include "BehaviorTree/BlackboardComponent.h"
-#include "BehaviorTree/BehaviorTree.h"
-#include "Engine/World.h"
-#include "GameFramework/Character.h"
-#include "NPCBehaviorTypes.h"
+#include "AIController.h"
+#include "SharedTypes.h"
 #include "NPC_BehaviorTreeManager.generated.h"
 
-UENUM(BlueprintType)
-enum class ENPC_BehaviorState : uint8
-{
-    Idle = 0,
-    Patrolling = 1,
-    Hunting = 2,
-    Feeding = 3,
-    Fleeing = 4,
-    Territorial = 5,
-    Socializing = 6,
-    Resting = 7,
-    Migrating = 8
-};
-
-UENUM(BlueprintType)
-enum class ENPC_BehaviorPriority : uint8
-{
-    VeryLow = 0,
-    Low = 1,
-    Normal = 2,
-    High = 3,
-    Critical = 4
-};
-
 USTRUCT(BlueprintType)
-struct FNPC_BehaviorTreeConfig
+struct TRANSPERSONALGAME_API FNPC_BehaviorContext
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior Tree")
-    TSoftObjectPtr<UBehaviorTree> BehaviorTreeAsset;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
+    ENPC_DinosaurSpecies Species = ENPC_DinosaurSpecies::TRex;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior Tree")
-    ENPC_BehaviorPriority Priority = ENPC_BehaviorPriority::Normal;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
+    ENPC_DinosaurState CurrentState = ENPC_DinosaurState::Idle;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior Tree")
-    float ActivationRange = 1000.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
+    float AggressionLevel = 0.5f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior Tree")
-    float DeactivationRange = 1500.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
+    float FearLevel = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior Tree")
-    bool bRequiresLineOfSight = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
+    float HungerLevel = 0.3f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior Tree")
-    TArray<FString> RequiredBlackboardKeys;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
+    FVector TerritoryCenter = FVector::ZeroVector;
 
-    FNPC_BehaviorTreeConfig()
-    {
-        BehaviorTreeAsset = nullptr;
-        Priority = ENPC_BehaviorPriority::Normal;
-        ActivationRange = 1000.0f;
-        DeactivationRange = 1500.0f;
-        bRequiresLineOfSight = false;
-    }
-};
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
+    float TerritoryRadius = 5000.0f;
 
-USTRUCT(BlueprintType)
-struct FNPC_BehaviorContext
-{
-    GENERATED_BODY()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
+    AActor* CurrentTarget = nullptr;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Context")
-    AActor* TargetActor = nullptr;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
+    TArray<AActor*> PackMembers;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Context")
-    FVector TargetLocation = FVector::ZeroVector;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
+    float LastPlayerInteractionTime = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Context")
-    ENPC_BehaviorState CurrentState = ENPC_BehaviorState::Idle;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Context")
-    float StateTimer = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Context")
-    float LastStateChangeTime = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Context")
-    TMap<FString, float> BlackboardFloats;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Context")
-    TMap<FString, bool> BlackboardBools;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Context")
-    TMap<FString, FVector> BlackboardVectors;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
+    bool bIsPackLeader = false;
 
     FNPC_BehaviorContext()
     {
-        TargetActor = nullptr;
-        TargetLocation = FVector::ZeroVector;
-        CurrentState = ENPC_BehaviorState::Idle;
-        StateTimer = 0.0f;
-        LastStateChangeTime = 0.0f;
+        Species = ENPC_DinosaurSpecies::TRex;
+        CurrentState = ENPC_DinosaurState::Idle;
+        AggressionLevel = 0.5f;
+        FearLevel = 0.0f;
+        HungerLevel = 0.3f;
+        TerritoryCenter = FVector::ZeroVector;
+        TerritoryRadius = 5000.0f;
+        CurrentTarget = nullptr;
+        PackMembers.Empty();
+        LastPlayerInteractionTime = 0.0f;
+        bIsPackLeader = false;
     }
 };
 
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent), BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UNPC_BehaviorTreeManager : public UActorComponent
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FNPC_BehaviorRule
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rule")
+    ENPC_DinosaurState TriggerState = ENPC_DinosaurState::Idle;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rule")
+    ENPC_DinosaurState TargetState = ENPC_DinosaurState::Patrolling;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rule")
+    float MinAggressionLevel = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rule")
+    float MaxAggressionLevel = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rule")
+    float PlayerDistanceThreshold = 3000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rule")
+    float Priority = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rule")
+    bool bRequiresLineOfSight = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rule")
+    float CooldownTime = 5.0f;
+
+    FNPC_BehaviorRule()
+    {
+        TriggerState = ENPC_DinosaurState::Idle;
+        TargetState = ENPC_DinosaurState::Patrolling;
+        MinAggressionLevel = 0.0f;
+        MaxAggressionLevel = 1.0f;
+        PlayerDistanceThreshold = 3000.0f;
+        Priority = 1.0f;
+        bRequiresLineOfSight = true;
+        CooldownTime = 5.0f;
+    }
+};
+
+/**
+ * Manages behavior trees and AI decision making for NPCs
+ * Handles state transitions, pack behavior, and territorial AI
+ */
+UCLASS(BlueprintType, Blueprintable)
+class TRANSPERSONALGAME_API UNPC_BehaviorTreeManager : public UObject
 {
     GENERATED_BODY()
 
 public:
     UNPC_BehaviorTreeManager();
 
-protected:
-    virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    // Core behavior management
+    UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
+    void InitializeBehaviorTree(AAIController* AIController, ENPC_DinosaurSpecies Species);
 
-public:
-    // Core behavior tree management
-    UFUNCTION(BlueprintCallable, Category = "Behavior Tree")
-    bool StartBehaviorTree(UBehaviorTree* BehaviorTree);
+    UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
+    void UpdateBehaviorContext(AAIController* AIController, const FNPC_BehaviorContext& NewContext);
 
-    UFUNCTION(BlueprintCallable, Category = "Behavior Tree")
-    void StopBehaviorTree();
+    UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
+    ENPC_DinosaurState EvaluateStateTransition(const FNPC_BehaviorContext& Context);
 
-    UFUNCTION(BlueprintCallable, Category = "Behavior Tree")
-    void PauseBehaviorTree();
+    UFUNCTION(BlueprintCallable, Category = "NPC Behavior")
+    void ExecuteStateChange(AAIController* AIController, ENPC_DinosaurState NewState);
 
-    UFUNCTION(BlueprintCallable, Category = "Behavior Tree")
-    void ResumeBehaviorTree();
+    // Pack behavior
+    UFUNCTION(BlueprintCallable, Category = "Pack Behavior")
+    void RegisterPackMember(AActor* PackLeader, AActor* PackMember);
 
-    UFUNCTION(BlueprintCallable, Category = "Behavior Tree")
-    bool SwitchBehaviorTree(UBehaviorTree* NewBehaviorTree, ENPC_BehaviorPriority Priority = ENPC_BehaviorPriority::Normal);
+    UFUNCTION(BlueprintCallable, Category = "Pack Behavior")
+    void RemovePackMember(AActor* PackLeader, AActor* PackMember);
 
-    // Behavior state management
-    UFUNCTION(BlueprintCallable, Category = "Behavior State")
-    void SetBehaviorState(ENPC_BehaviorState NewState);
+    UFUNCTION(BlueprintCallable, Category = "Pack Behavior")
+    TArray<AActor*> GetPackMembers(AActor* PackLeader);
 
-    UFUNCTION(BlueprintPure, Category = "Behavior State")
-    ENPC_BehaviorState GetBehaviorState() const { return BehaviorContext.CurrentState; }
+    UFUNCTION(BlueprintCallable, Category = "Pack Behavior")
+    void CoordinatePackBehavior(AActor* PackLeader, ENPC_DinosaurState TargetState);
 
-    UFUNCTION(BlueprintCallable, Category = "Behavior State")
-    bool CanTransitionToState(ENPC_BehaviorState NewState) const;
+    // Territory management
+    UFUNCTION(BlueprintCallable, Category = "Territory")
+    bool IsWithinTerritory(const FVector& Position, const FVector& TerritoryCenter, float TerritoryRadius);
 
-    UFUNCTION(BlueprintPure, Category = "Behavior State")
-    float GetTimeInCurrentState() const;
+    UFUNCTION(BlueprintCallable, Category = "Territory")
+    FVector GetRandomPatrolPoint(const FVector& TerritoryCenter, float TerritoryRadius);
 
-    // Blackboard management
-    UFUNCTION(BlueprintCallable, Category = "Blackboard")
-    void SetBlackboardValueAsFloat(const FString& KeyName, float Value);
+    UFUNCTION(BlueprintCallable, Category = "Territory")
+    void DefendTerritory(AAIController* AIController, AActor* Intruder);
 
-    UFUNCTION(BlueprintCallable, Category = "Blackboard")
-    void SetBlackboardValueAsBool(const FString& KeyName, bool Value);
+    // Player interaction
+    UFUNCTION(BlueprintCallable, Category = "Player Interaction")
+    void OnPlayerDetected(AAIController* AIController, AActor* Player, float Distance);
 
-    UFUNCTION(BlueprintCallable, Category = "Blackboard")
-    void SetBlackboardValueAsVector(const FString& KeyName, FVector Value);
+    UFUNCTION(BlueprintCallable, Category = "Player Interaction")
+    void OnPlayerLost(AAIController* AIController, AActor* Player);
 
-    UFUNCTION(BlueprintCallable, Category = "Blackboard")
-    void SetBlackboardValueAsObject(const FString& KeyName, UObject* Value);
+    UFUNCTION(BlueprintCallable, Category = "Player Interaction")
+    bool ShouldAttackPlayer(const FNPC_BehaviorContext& Context, float PlayerDistance);
 
-    UFUNCTION(BlueprintPure, Category = "Blackboard")
-    float GetBlackboardValueAsFloat(const FString& KeyName) const;
+    // Behavior rules
+    UFUNCTION(BlueprintCallable, Category = "Behavior Rules")
+    void AddBehaviorRule(const FNPC_BehaviorRule& Rule);
 
-    UFUNCTION(BlueprintPure, Category = "Blackboard")
-    bool GetBlackboardValueAsBool(const FString& KeyName) const;
+    UFUNCTION(BlueprintCallable, Category = "Behavior Rules")
+    void RemoveBehaviorRule(ENPC_DinosaurState TriggerState, ENPC_DinosaurState TargetState);
 
-    UFUNCTION(BlueprintPure, Category = "Blackboard")
-    FVector GetBlackboardValueAsVector(const FString& KeyName) const;
+    UFUNCTION(BlueprintCallable, Category = "Behavior Rules")
+    FNPC_BehaviorRule GetBestMatchingRule(const FNPC_BehaviorContext& Context);
 
-    // Behavior tree configuration
-    UFUNCTION(BlueprintCallable, Category = "Configuration")
-    void RegisterBehaviorTree(const FString& BehaviorName, const FNPC_BehaviorTreeConfig& Config);
-
-    UFUNCTION(BlueprintCallable, Category = "Configuration")
-    bool ActivateBehaviorByName(const FString& BehaviorName);
-
-    UFUNCTION(BlueprintCallable, Category = "Configuration")
-    void SetBehaviorPriority(const FString& BehaviorName, ENPC_BehaviorPriority Priority);
-
-    // Context and environment awareness
-    UFUNCTION(BlueprintCallable, Category = "Context")
-    void UpdateBehaviorContext(const FNPC_BehaviorContext& NewContext);
-
-    UFUNCTION(BlueprintPure, Category = "Context")
-    FNPC_BehaviorContext GetBehaviorContext() const { return BehaviorContext; }
-
-    UFUNCTION(BlueprintCallable, Category = "Context")
-    void SetTargetActor(AActor* Target);
-
-    UFUNCTION(BlueprintCallable, Category = "Context")
-    void SetTargetLocation(FVector Location);
-
-    // Utility functions
-    UFUNCTION(BlueprintPure, Category = "Utility")
-    bool IsValidBehaviorTree(UBehaviorTree* BehaviorTree) const;
-
-    UFUNCTION(BlueprintPure, Category = "Utility")
-    bool IsBehaviorTreeRunning() const;
-
-    UFUNCTION(BlueprintPure, Category = "Utility")
-    UBehaviorTree* GetCurrentBehaviorTree() const;
+    // Debug and utilities
+    UFUNCTION(BlueprintCallable, Category = "Debug")
+    void DebugDrawBehaviorInfo(AActor* DinosaurActor, const FNPC_BehaviorContext& Context);
 
     UFUNCTION(BlueprintCallable, Category = "Debug")
-    void LogBehaviorState() const;
+    FString GetBehaviorStateString(ENPC_DinosaurState State);
 
 protected:
-    // Core components
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UBehaviorTreeComponent* BehaviorTreeComponent;
+    // Behavior trees for different species
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior Trees")
+    TMap<ENPC_DinosaurSpecies, UBehaviorTree*> SpeciesBehaviorTrees;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UBlackboardComponent* BlackboardComponent;
+    // Behavior rules
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior Rules")
+    TArray<FNPC_BehaviorRule> BehaviorRules;
 
-    // Behavior configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior Configuration")
-    TMap<FString, FNPC_BehaviorTreeConfig> RegisteredBehaviors;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior Configuration")
-    FString DefaultBehaviorName = TEXT("Idle");
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior Configuration")
-    float StateTransitionCooldown = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior Configuration")
-    bool bAutoStartDefaultBehavior = true;
-
-    // Current behavior state
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Current State")
-    FNPC_BehaviorContext BehaviorContext;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Current State")
-    FString CurrentBehaviorName;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Current State")
-    ENPC_BehaviorPriority CurrentPriority;
-
-    // Internal state
+    // Pack tracking
     UPROPERTY()
-    UBehaviorTree* CurrentBehaviorTree;
+    TMap<AActor*, TArray<AActor*>> PackMemberships;
 
+    // Context tracking
     UPROPERTY()
-    bool bIsPaused;
+    TMap<AAIController*, FNPC_BehaviorContext> BehaviorContexts;
 
-    UPROPERTY()
-    float LastTransitionTime;
-
-private:
-    // Internal helper functions
-    void InitializeBehaviorTreeComponent();
-    void InitializeBlackboardComponent();
-    void UpdateBehaviorContext(float DeltaTime);
-    bool ValidateStateTransition(ENPC_BehaviorState FromState, ENPC_BehaviorState ToState) const;
-    void OnBehaviorTreeFinished();
+    // Helper functions
+    void SetupDefaultBehaviorRules();
+    void InitializeSpeciesBehaviorTrees();
+    bool CheckLineOfSight(AActor* Observer, AActor* Target);
+    float CalculateAggressionModifier(ENPC_DinosaurSpecies Species, const FNPC_BehaviorContext& Context);
+    void UpdatePackCoordination(AActor* PackLeader);
 };
