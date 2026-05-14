@@ -1,179 +1,188 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/DataTable.h"
+#include "Engine/Engine.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Materials/MaterialInterface.h"
 #include "CharacterTypes.generated.h"
 
 /**
- * Character archetypes for prehistoric tribal survivors
+ * Prehistoric character archetypes for tribal NPCs and player customization
  */
 UENUM(BlueprintType)
-enum class EChar_TribalRole : uint8
+enum class EChar_TribalArchetype : uint8
 {
     Hunter      UMETA(DisplayName = "Hunter"),
-    Gatherer    UMETA(DisplayName = "Gatherer"),
-    Warrior     UMETA(DisplayName = "Warrior"),
+    Warrior     UMETA(DisplayName = "Warrior"), 
     Elder       UMETA(DisplayName = "Elder"),
-    Crafter     UMETA(DisplayName = "Crafter"),
+    Child       UMETA(DisplayName = "Child"),
     Scout       UMETA(DisplayName = "Scout"),
-    Child       UMETA(DisplayName = "Child")
+    Gatherer    UMETA(DisplayName = "Gatherer"),
+    Crafter     UMETA(DisplayName = "Crafter")
 };
 
 /**
- * Physical build types for character variation
- */
-UENUM(BlueprintType)
-enum class EChar_BuildType : uint8
-{
-    Lean        UMETA(DisplayName = "Lean"),
-    Athletic    UMETA(DisplayName = "Athletic"),
-    Muscular    UMETA(DisplayName = "Muscular"),
-    Stocky      UMETA(DisplayName = "Stocky"),
-    Tall        UMETA(DisplayName = "Tall"),
-    Short       UMETA(DisplayName = "Short")
-};
-
-/**
- * Clothing styles based on available materials
- */
-UENUM(BlueprintType)
-enum class EChar_ClothingStyle : uint8
-{
-    BasicHide       UMETA(DisplayName = "Basic Hide"),
-    WovenFiber      UMETA(DisplayName = "Woven Fiber"),
-    CeremonialRobe  UMETA(DisplayName = "Ceremonial Robe"),
-    HunterGear      UMETA(DisplayName = "Hunter Gear"),
-    WarriorArmor    UMETA(DisplayName = "Warrior Armor"),
-    ChildClothing   UMETA(DisplayName = "Child Clothing")
-};
-
-/**
- * Weapon specializations for different roles
- */
-UENUM(BlueprintType)
-enum class EChar_WeaponType : uint8
-{
-    Spear       UMETA(DisplayName = "Spear"),
-    Bow         UMETA(DisplayName = "Bow"),
-    Club        UMETA(DisplayName = "Club"),
-    Knife       UMETA(DisplayName = "Stone Knife"),
-    Sling       UMETA(DisplayName = "Sling"),
-    Staff       UMETA(DisplayName = "Staff"),
-    None        UMETA(DisplayName = "None")
-};
-
-/**
- * Data structure for character appearance customization
+ * Character physical attributes for procedural generation
  */
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FChar_AppearanceData : public FTableRowBase
+struct TRANSPERSONALGAME_API FChar_PhysicalTraits
 {
     GENERATED_BODY()
 
-    /** Character's tribal role */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
-    EChar_TribalRole TribalRole = EChar_TribalRole::Hunter;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical Traits")
+    float Height = 1.75f;
 
-    /** Physical build type */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
-    EChar_BuildType BuildType = EChar_BuildType::Athletic;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical Traits")
+    float Weight = 70.0f;
 
-    /** Clothing style */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
-    EChar_ClothingStyle ClothingStyle = EChar_ClothingStyle::BasicHide;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical Traits")
+    float MuscleDefinition = 0.5f;
 
-    /** Primary weapon type */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
-    EChar_WeaponType PrimaryWeapon = EChar_WeaponType::Spear;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical Traits")
+    float ScarIntensity = 0.3f;
 
-    /** Secondary weapon type */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
-    EChar_WeaponType SecondaryWeapon = EChar_WeaponType::Knife;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical Traits")
+    FLinearColor SkinTone = FLinearColor(0.8f, 0.6f, 0.4f, 1.0f);
 
-    /** Skin tone variation (0.0 = lightest, 1.0 = darkest) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float SkinTone = 0.5f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physical Traits")
+    FLinearColor HairColor = FLinearColor(0.2f, 0.1f, 0.05f, 1.0f);
 
-    /** Hair color variation */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    FLinearColor HairColor = FLinearColor(0.3f, 0.2f, 0.1f, 1.0f);
-
-    /** Has tribal face paint */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    bool bHasFacePaint = false;
-
-    /** Face paint color */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    FLinearColor FacePaintColor = FLinearColor::Red;
-
-    /** Has scars from encounters */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
-    bool bHasScars = false;
-
-    /** Age category (affects appearance) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character", meta = (ClampMin = "12", ClampMax = "70"))
-    int32 Age = 25;
-
-    /** Character name for identification */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
-    FString CharacterName = TEXT("Tribal Survivor");
-
-    FChar_AppearanceData()
+    FChar_PhysicalTraits()
     {
-        TribalRole = EChar_TribalRole::Hunter;
-        BuildType = EChar_BuildType::Athletic;
-        ClothingStyle = EChar_ClothingStyle::BasicHide;
-        PrimaryWeapon = EChar_WeaponType::Spear;
-        SecondaryWeapon = EChar_WeaponType::Knife;
-        SkinTone = 0.5f;
-        HairColor = FLinearColor(0.3f, 0.2f, 0.1f, 1.0f);
-        bHasFacePaint = false;
-        FacePaintColor = FLinearColor::Red;
-        bHasScars = false;
-        Age = 25;
-        CharacterName = TEXT("Tribal Survivor");
+        Height = 1.75f;
+        Weight = 70.0f;
+        MuscleDefinition = 0.5f;
+        ScarIntensity = 0.3f;
+        SkinTone = FLinearColor(0.8f, 0.6f, 0.4f, 1.0f);
+        HairColor = FLinearColor(0.2f, 0.1f, 0.05f, 1.0f);
     }
 };
 
 /**
- * Character stats based on role and build
+ * Clothing and equipment configuration for tribal characters
  */
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FChar_StatsData
+struct TRANSPERSONALGAME_API FChar_TribalOutfit
 {
     GENERATED_BODY()
 
-    /** Base health points */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
-    float BaseHealth = 100.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Outfit")
+    TSoftObjectPtr<UStaticMesh> HeadgearMesh;
 
-    /** Base stamina points */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
-    float BaseStamina = 100.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Outfit")
+    TSoftObjectPtr<UStaticMesh> TorsoClothingMesh;
 
-    /** Movement speed multiplier */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
-    float SpeedMultiplier = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Outfit")
+    TSoftObjectPtr<UStaticMesh> LegClothingMesh;
 
-    /** Strength for melee combat */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
-    float Strength = 50.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Outfit")
+    TSoftObjectPtr<UStaticMesh> FootwearMesh;
 
-    /** Agility for ranged combat and stealth */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
-    float Agility = 50.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Outfit")
+    TSoftObjectPtr<UStaticMesh> WeaponMesh;
 
-    /** Survival skills for crafting and resource gathering */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
-    float Survival = 50.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Outfit")
+    TSoftObjectPtr<UStaticMesh> AccessoryMesh;
 
-    FChar_StatsData()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Outfit")
+    TSoftObjectPtr<UMaterialInterface> ClothingMaterial;
+
+    FChar_TribalOutfit()
     {
-        BaseHealth = 100.0f;
-        BaseStamina = 100.0f;
-        SpeedMultiplier = 1.0f;
-        Strength = 50.0f;
-        Agility = 50.0f;
-        Survival = 50.0f;
+        HeadgearMesh = nullptr;
+        TorsoClothingMesh = nullptr;
+        LegClothingMesh = nullptr;
+        FootwearMesh = nullptr;
+        WeaponMesh = nullptr;
+        AccessoryMesh = nullptr;
+        ClothingMaterial = nullptr;
+    }
+};
+
+/**
+ * Complete character configuration for spawning tribal NPCs
+ */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FChar_TribalCharacterConfig
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Config")
+    EChar_TribalArchetype Archetype = EChar_TribalArchetype::Hunter;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Config")
+    FChar_PhysicalTraits PhysicalTraits;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Config")
+    FChar_TribalOutfit Outfit;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Config")
+    FString CharacterName = TEXT("Tribal Member");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Config")
+    int32 Age = 25;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Config")
+    bool bIsMale = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Config")
+    float AggressionLevel = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Config")
+    float SurvivalSkill = 0.7f;
+
+    FChar_TribalCharacterConfig()
+    {
+        Archetype = EChar_TribalArchetype::Hunter;
+        CharacterName = TEXT("Tribal Member");
+        Age = 25;
+        bIsMale = true;
+        AggressionLevel = 0.5f;
+        SurvivalSkill = 0.7f;
+    }
+};
+
+/**
+ * Character appearance variations for diversity
+ */
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FChar_AppearanceVariation
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
+    TArray<FLinearColor> SkinToneVariations;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
+    TArray<FLinearColor> HairColorVariations;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
+    TArray<float> HeightVariations;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
+    TArray<float> BuildVariations;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
+    TArray<TSoftObjectPtr<UTexture2D>> FacialTextureVariations;
+
+    FChar_AppearanceVariation()
+    {
+        // Initialize with default variations
+        SkinToneVariations.Add(FLinearColor(0.8f, 0.6f, 0.4f, 1.0f));
+        SkinToneVariations.Add(FLinearColor(0.6f, 0.4f, 0.3f, 1.0f));
+        SkinToneVariations.Add(FLinearColor(0.9f, 0.7f, 0.5f, 1.0f));
+        
+        HairColorVariations.Add(FLinearColor(0.2f, 0.1f, 0.05f, 1.0f));
+        HairColorVariations.Add(FLinearColor(0.4f, 0.3f, 0.2f, 1.0f));
+        HairColorVariations.Add(FLinearColor(0.1f, 0.1f, 0.1f, 1.0f));
+        
+        HeightVariations.Add(1.6f);
+        HeightVariations.Add(1.75f);
+        HeightVariations.Add(1.9f);
+        
+        BuildVariations.Add(0.8f);
+        BuildVariations.Add(1.0f);
+        BuildVariations.Add(1.2f);
     }
 };
