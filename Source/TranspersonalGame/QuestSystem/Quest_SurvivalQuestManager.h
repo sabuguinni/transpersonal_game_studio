@@ -2,101 +2,11 @@
 
 #include "CoreMinimal.h"
 #include "Engine/GameInstanceSubsystem.h"
-#include "Engine/DataTable.h"
-#include "Components/ActorComponent.h"
-#include "Subsystems/WorldSubsystem.h"
-#include "../SharedTypes.h"
+#include "SharedTypes.h"
 #include "Quest_SurvivalQuestManager.generated.h"
 
-// Quest objective types for survival gameplay
-UENUM(BlueprintType)
-enum class EQuest_ObjectiveType : uint8
-{
-    Hunt_Dinosaur       UMETA(DisplayName = "Hunt Specific Dinosaur"),
-    Gather_Resources    UMETA(DisplayName = "Gather Resources"),
-    Explore_Area        UMETA(DisplayName = "Explore Territory"),
-    Craft_Tool          UMETA(DisplayName = "Craft Tool/Weapon"),
-    Survive_Duration    UMETA(DisplayName = "Survive Time Period"),
-    Defend_Location     UMETA(DisplayName = "Defend Camp/Area"),
-    Rescue_NPC          UMETA(DisplayName = "Rescue Tribe Member"),
-    Track_Migration     UMETA(DisplayName = "Follow Herd Migration"),
-    Build_Shelter       UMETA(DisplayName = "Construct Shelter"),
-    Tame_Creature       UMETA(DisplayName = "Domesticate Animal")
-};
+class ATranspersonalCharacter;
 
-// Quest difficulty and reward tiers
-UENUM(BlueprintType)
-enum class EQuest_Difficulty : uint8
-{
-    Novice      UMETA(DisplayName = "Novice Hunter"),
-    Experienced UMETA(DisplayName = "Experienced Survivor"),
-    Expert      UMETA(DisplayName = "Master Tracker"),
-    Legendary   UMETA(DisplayName = "Apex Predator")
-};
-
-// Quest status tracking
-UENUM(BlueprintType)
-enum class EQuest_Status : uint8
-{
-    Available   UMETA(DisplayName = "Available"),
-    Active      UMETA(DisplayName = "In Progress"),
-    Completed   UMETA(DisplayName = "Completed"),
-    Failed      UMETA(DisplayName = "Failed"),
-    Abandoned   UMETA(DisplayName = "Abandoned")
-};
-
-// Individual quest objective data
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FQuest_ObjectiveData
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
-    FString ObjectiveID;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
-    EQuest_ObjectiveType ObjectiveType;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
-    FString Description;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
-    FString TargetName;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
-    int32 RequiredQuantity;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
-    int32 CurrentProgress;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
-    FVector TargetLocation;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
-    float SearchRadius;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
-    bool bIsCompleted;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
-    bool bIsOptional;
-
-    FQuest_ObjectiveData()
-    {
-        ObjectiveID = TEXT("");
-        ObjectiveType = EQuest_ObjectiveType::Hunt_Dinosaur;
-        Description = TEXT("");
-        TargetName = TEXT("");
-        RequiredQuantity = 1;
-        CurrentProgress = 0;
-        TargetLocation = FVector::ZeroVector;
-        SearchRadius = 1000.0f;
-        bIsCompleted = false;
-        bIsOptional = false;
-    }
-};
-
-// Complete quest definition
 USTRUCT(BlueprintType)
 struct TRANSPERSONALGAME_API FQuest_SurvivalQuest
 {
@@ -112,249 +22,125 @@ struct TRANSPERSONALGAME_API FQuest_SurvivalQuest
     FString QuestDescription;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    EQuest_Difficulty Difficulty;
+    bool bIsActive;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    EQuest_Status Status;
+    bool bIsCompleted;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    TArray<FQuest_ObjectiveData> Objectives;
+    float RequiredSurvivalTime;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    FString QuestGiver;
+    float MinHealthThreshold;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    float TimeLimit;
+    float MinHungerThreshold;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    float ElapsedTime;
+    float MinThirstThreshold;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    TArray<FString> Prerequisites;
+    int32 RequiredDinosaurKills;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    TArray<FString> RewardItems;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    int32 ExperienceReward;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    FVector QuestLocation;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    bool bIsMainQuest;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
-    bool bIsRepeatable;
+    TArray<FString> RequiredResources;
 
     FQuest_SurvivalQuest()
     {
-        QuestID = TEXT("");
-        QuestName = TEXT("");
-        QuestDescription = TEXT("");
-        Difficulty = EQuest_Difficulty::Novice;
-        Status = EQuest_Status::Available;
-        QuestGiver = TEXT("");
-        TimeLimit = 0.0f;
-        ElapsedTime = 0.0f;
-        ExperienceReward = 100;
-        QuestLocation = FVector::ZeroVector;
-        bIsMainQuest = false;
-        bIsRepeatable = false;
+        QuestID = "";
+        QuestName = "";
+        QuestDescription = "";
+        bIsActive = false;
+        bIsCompleted = false;
+        RequiredSurvivalTime = 300.0f; // 5 minutes
+        MinHealthThreshold = 50.0f;
+        MinHungerThreshold = 30.0f;
+        MinThirstThreshold = 30.0f;
+        RequiredDinosaurKills = 0;
     }
 };
 
-// Quest reward data
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FQuest_RewardData
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reward")
-    TArray<FString> Items;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reward")
-    int32 Experience;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reward")
-    FString UnlockedRecipe;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reward")
-    FString UnlockedArea;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reward")
-    bool bUnlocksNewQuests;
-
-    FQuest_RewardData()
-    {
-        Experience = 0;
-        UnlockedRecipe = TEXT("");
-        UnlockedArea = TEXT("");
-        bUnlocksNewQuests = false;
-    }
-};
-
-/**
- * Main quest management system for prehistoric survival gameplay
- * Handles quest creation, tracking, completion, and integration with survival mechanics
- */
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UQuest_SurvivalQuestManager : public UWorldSubsystem
+UCLASS(BlueprintType)
+class TRANSPERSONALGAME_API UQuest_SurvivalQuestManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
     UQuest_SurvivalQuestManager();
 
-    // Subsystem lifecycle
+    // Subsystem interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
-    virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
 
     // Quest management
     UFUNCTION(BlueprintCallable, Category = "Quest System")
-    bool CreateQuest(const FQuest_SurvivalQuest& QuestData);
+    void StartQuest(const FString& QuestID);
 
     UFUNCTION(BlueprintCallable, Category = "Quest System")
-    bool StartQuest(const FString& QuestID);
+    void CompleteQuest(const FString& QuestID);
 
     UFUNCTION(BlueprintCallable, Category = "Quest System")
-    bool CompleteQuest(const FString& QuestID);
+    void FailQuest(const FString& QuestID);
 
     UFUNCTION(BlueprintCallable, Category = "Quest System")
-    bool FailQuest(const FString& QuestID);
+    bool IsQuestActive(const FString& QuestID) const;
 
     UFUNCTION(BlueprintCallable, Category = "Quest System")
-    bool AbandonQuest(const FString& QuestID);
-
-    // Objective tracking
-    UFUNCTION(BlueprintCallable, Category = "Quest System")
-    bool UpdateObjectiveProgress(const FString& QuestID, const FString& ObjectiveID, int32 Progress);
-
-    UFUNCTION(BlueprintCallable, Category = "Quest System")
-    bool CompleteObjective(const FString& QuestID, const FString& ObjectiveID);
-
-    UFUNCTION(BlueprintCallable, Category = "Quest System")
-    bool IsObjectiveCompleted(const FString& QuestID, const FString& ObjectiveID) const;
-
-    // Quest queries
-    UFUNCTION(BlueprintCallable, Category = "Quest System")
-    TArray<FQuest_SurvivalQuest> GetActiveQuests() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Quest System")
-    TArray<FQuest_SurvivalQuest> GetAvailableQuests() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Quest System")
-    TArray<FQuest_SurvivalQuest> GetCompletedQuests() const;
+    bool IsQuestCompleted(const FString& QuestID) const;
 
     UFUNCTION(BlueprintCallable, Category = "Quest System")
     FQuest_SurvivalQuest GetQuest(const FString& QuestID) const;
 
     UFUNCTION(BlueprintCallable, Category = "Quest System")
-    bool HasQuest(const FString& QuestID) const;
+    TArray<FQuest_SurvivalQuest> GetActiveQuests() const;
+
+    // Survival tracking
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    void UpdateSurvivalProgress(float DeltaTime);
 
     UFUNCTION(BlueprintCallable, Category = "Quest System")
-    bool IsQuestActive(const FString& QuestID) const;
-
-    // Survival integration
-    UFUNCTION(BlueprintCallable, Category = "Quest System")
-    void OnDinosaurKilled(const FString& DinosaurType, const FVector& Location);
+    void OnDinosaurKilled(const FString& DinosaurType);
 
     UFUNCTION(BlueprintCallable, Category = "Quest System")
-    void OnResourceGathered(const FString& ResourceType, int32 Quantity);
+    void OnResourceGathered(const FString& ResourceType);
 
     UFUNCTION(BlueprintCallable, Category = "Quest System")
-    void OnAreaExplored(const FVector& Location, float Radius);
+    void CheckQuestCompletion();
+
+    // Quest creation
+    UFUNCTION(BlueprintCallable, Category = "Quest System")
+    void CreateSurvivalQuest(const FString& QuestID, const FString& Name, const FString& Description, float SurvivalTime);
 
     UFUNCTION(BlueprintCallable, Category = "Quest System")
-    void OnItemCrafted(const FString& ItemType);
+    void CreateHuntingQuest(const FString& QuestID, const FString& Name, const FString& Description, const FString& DinosaurType, int32 KillCount);
 
     UFUNCTION(BlueprintCallable, Category = "Quest System")
-    void OnShelterBuilt(const FVector& Location);
-
-    // Quest generation
-    UFUNCTION(BlueprintCallable, Category = "Quest System")
-    FQuest_SurvivalQuest GenerateHuntQuest(const FString& DinosaurType, const FVector& HuntingGrounds);
-
-    UFUNCTION(BlueprintCallable, Category = "Quest System")
-    FQuest_SurvivalQuest GenerateGatherQuest(const FString& ResourceType, int32 Quantity);
-
-    UFUNCTION(BlueprintCallable, Category = "Quest System")
-    FQuest_SurvivalQuest GenerateExplorationQuest(const FVector& TargetArea, float SearchRadius);
-
-    UFUNCTION(BlueprintCallable, Category = "Quest System")
-    FQuest_SurvivalQuest GenerateCraftingQuest(const FString& ItemToCraft);
-
-    UFUNCTION(BlueprintCallable, Category = "Quest System")
-    FQuest_SurvivalQuest GenerateSurvivalQuest(float Duration);
-
-    // Time management
-    UFUNCTION(BlueprintCallable, Category = "Quest System")
-    void UpdateQuestTimers(float DeltaTime);
-
-    UFUNCTION(BlueprintCallable, Category = "Quest System")
-    void CheckQuestTimeouts();
-
-    // Reward system
-    UFUNCTION(BlueprintCallable, Category = "Quest System")
-    FQuest_RewardData CalculateQuestRewards(const FQuest_SurvivalQuest& Quest) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Quest System")
-    void GrantQuestRewards(const FQuest_RewardData& Rewards);
-
-    // Debug and testing
-    UFUNCTION(BlueprintCallable, Category = "Quest System", CallInEditor)
-    void CreateTestQuests();
-
-    UFUNCTION(BlueprintCallable, Category = "Quest System", CallInEditor)
-    void LogQuestStatus() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Quest System", CallInEditor)
-    void ClearAllQuests();
+    void CreateGatheringQuest(const FString& QuestID, const FString& Name, const FString& Description, const TArray<FString>& Resources);
 
 protected:
-    // Quest storage
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Quest Data")
-    TMap<FString, FQuest_SurvivalQuest> AllQuests;
+    UPROPERTY(BlueprintReadOnly, Category = "Quest System")
+    TArray<FQuest_SurvivalQuest> ActiveQuests;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Quest Data")
-    TArray<FString> ActiveQuestIDs;
+    UPROPERTY(BlueprintReadOnly, Category = "Quest System")
+    TArray<FQuest_SurvivalQuest> CompletedQuests;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Quest Data")
-    TArray<FString> CompletedQuestIDs;
+    UPROPERTY(BlueprintReadOnly, Category = "Quest System")
+    TMap<FString, int32> DinosaurKillCounts;
 
-    // Configuration
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    int32 MaxActiveQuests;
+    UPROPERTY(BlueprintReadOnly, Category = "Quest System")
+    TMap<FString, int32> ResourceCounts;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    float DefaultQuestTimeout;
+    UPROPERTY(BlueprintReadOnly, Category = "Quest System")
+    float TotalSurvivalTime;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    bool bAutoGenerateQuests;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    float QuestGenerationInterval;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    TArray<FString> AvailableDinosaurTypes;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configuration")
-    TArray<FString> AvailableResourceTypes;
-
-    // Internal tracking
+    // Player reference
     UPROPERTY()
-    float LastQuestGenerationTime;
-
-    UPROPERTY()
-    int32 NextQuestID;
+    ATranspersonalCharacter* PlayerCharacter;
 
 private:
-    // Helper functions
-    FString GenerateUniqueQuestID();
-    bool ValidateQuestData(const FQuest_SurvivalQuest& Quest) const;
-    void NotifyQuestStatusChange(const FString& QuestID, EQuest_Status NewStatus);
-    float CalculateQuestDifficulty(const FQuest_SurvivalQuest& Quest) const;
-    void UpdateQuestObjectives(FQuest_SurvivalQuest& Quest);
-    bool CheckQuestPrerequisites(const FQuest_SurvivalQuest& Quest) const;
+    void InitializeDefaultQuests();
+    bool CheckSurvivalRequirements(const FQuest_SurvivalQuest& Quest) const;
+    bool CheckKillRequirements(const FQuest_SurvivalQuest& Quest) const;
+    bool CheckResourceRequirements(const FQuest_SurvivalQuest& Quest) const;
+    void BroadcastQuestCompletion(const FString& QuestID);
 };
