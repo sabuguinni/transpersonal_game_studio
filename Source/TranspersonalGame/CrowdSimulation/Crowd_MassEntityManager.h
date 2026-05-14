@@ -1,109 +1,58 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/World.h"
 #include "GameFramework/Actor.h"
+#include "MassEntitySubsystem.h"
+#include "MassProcessingTypes.h"
+#include "MassEntityTemplate.h"
+#include "MassSpawnerSubsystem.h"
+#include "Engine/World.h"
 #include "Components/StaticMeshComponent.h"
-#include "Components/SceneComponent.h"
-#include "Engine/StaticMesh.h"
-#include "Materials/MaterialInterface.h"
-#include "SharedTypes.h"
 #include "Crowd_MassEntityManager.generated.h"
 
+// Mass Entity configuration for crowd simulation
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCrowd_EntityCluster
+struct TRANSPERSONALGAME_API FCrowd_MassEntityConfig
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mass Entity")
-    FVector ClusterCenter;
+    int32 MaxEntities = 10000;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mass Entity")
-    float ClusterRadius;
+    float SpawnRadius = 5000.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mass Entity")
-    int32 EntityCount;
+    float MovementSpeed = 300.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mass Entity")
-    float MovementSpeed;
+    float LODDistance = 2000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mass Entity")
-    FVector MovementDirection;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mass Entity")
-    bool bIsActive;
-
-    FCrowd_EntityCluster()
+    FCrowd_MassEntityConfig()
     {
-        ClusterCenter = FVector::ZeroVector;
-        ClusterRadius = 500.0f;
-        EntityCount = 100;
-        MovementSpeed = 200.0f;
-        MovementDirection = FVector::ForwardVector;
-        bIsActive = true;
+        MaxEntities = 10000;
+        SpawnRadius = 5000.0f;
+        MovementSpeed = 300.0f;
+        LODDistance = 2000.0f;
     }
 };
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCrowd_LODSettings
+// Mass Entity crowd behavior states
+UENUM(BlueprintType)
+enum class ECrowd_MassBehaviorState : uint8
 {
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    float HighDetailDistance;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    float MediumDetailDistance;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    float LowDetailDistance;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    int32 MaxHighDetailEntities;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD")
-    int32 MaxMediumDetailEntities;
-
-    FCrowd_LODSettings()
-    {
-        HighDetailDistance = 1000.0f;
-        MediumDetailDistance = 3000.0f;
-        LowDetailDistance = 8000.0f;
-        MaxHighDetailEntities = 50;
-        MaxMediumDetailEntities = 200;
-    }
+    Idle,
+    Wandering,
+    Fleeing,
+    Gathering,
+    Following,
+    Panicking
 };
 
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCrowd_EntityBehavior
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    float WanderRadius;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    float FlockingStrength;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    float SeparationDistance;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    float CohesionStrength;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Behavior")
-    bool bAvoidObstacles;
-
-    FCrowd_EntityBehavior()
-    {
-        WanderRadius = 300.0f;
-        FlockingStrength = 0.5f;
-        SeparationDistance = 100.0f;
-        CohesionStrength = 0.3f;
-        bAvoidObstacles = true;
-    }
-};
-
+/**
+ * Mass Entity Manager for large-scale crowd simulation
+ * Handles 10,000+ entities using UE5 Mass Entity framework
+ */
 UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API ACrowd_MassEntityManager : public AActor
 {
@@ -114,92 +63,82 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    USceneComponent* RootSceneComponent;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mass Entity Settings")
-    TArray<FCrowd_EntityCluster> EntityClusters;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mass Entity Settings")
-    FCrowd_LODSettings LODSettings;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mass Entity Settings")
-    FCrowd_EntityBehavior DefaultBehavior;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxTotalEntities;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float UpdateFrequency;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    bool bEnableCulling;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float CullingDistance;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 public:
     virtual void Tick(float DeltaTime) override;
 
+    // Mass Entity configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mass Entity")
+    FCrowd_MassEntityConfig EntityConfig;
+
+    // Current behavior state
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mass Entity")
+    ECrowd_MassBehaviorState CurrentBehaviorState;
+
+    // Entity template for crowd members
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mass Entity")
+    class UMassEntityTemplate* CrowdEntityTemplate;
+
+    // Spawner subsystem reference
+    UPROPERTY(BlueprintReadOnly, Category = "Mass Entity")
+    class UMassSpawnerSubsystem* SpawnerSubsystem;
+
+    // Entity subsystem reference
+    UPROPERTY(BlueprintReadOnly, Category = "Mass Entity")
+    class UMassEntitySubsystem* EntitySubsystem;
+
+    // Core Mass Entity functions
     UFUNCTION(BlueprintCallable, Category = "Mass Entity")
-    void CreateEntityCluster(FVector Location, int32 EntityCount, float Radius);
+    void InitializeMassEntitySystem();
 
     UFUNCTION(BlueprintCallable, Category = "Mass Entity")
-    void DestroyEntityCluster(int32 ClusterIndex);
+    void SpawnCrowdEntities(int32 EntityCount, FVector SpawnCenter, float SpawnRadius);
 
     UFUNCTION(BlueprintCallable, Category = "Mass Entity")
-    void UpdateClusterMovement(FCrowd_EntityCluster& Cluster, float DeltaTime);
+    void DespawnAllEntities();
 
     UFUNCTION(BlueprintCallable, Category = "Mass Entity")
-    void ApplyLODOptimization();
+    void UpdateCrowdBehavior(ECrowd_MassBehaviorState NewBehaviorState);
 
     UFUNCTION(BlueprintCallable, Category = "Mass Entity")
+    void SetCrowdTarget(FVector TargetLocation);
+
+    UFUNCTION(BlueprintCallable, Category = "Mass Entity")
+    void TriggerCrowdPanic(FVector PanicSource, float PanicRadius);
+
+    // Performance and LOD management
+    UFUNCTION(BlueprintCallable, Category = "Mass Entity")
+    void UpdateLODLevels();
+
+    UFUNCTION(BlueprintCallable, Category = "Mass Entity")
+    int32 GetActiveEntityCount() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Mass Entity")
+    float GetCurrentPerformanceMetric() const;
+
+protected:
+    // Internal Mass Entity management
+    void CreateEntityTemplate();
+    void RegisterMassProcessors();
     void UpdateEntityBehaviors(float DeltaTime);
+    void HandleEntityCulling();
 
-    UFUNCTION(BlueprintCallable, Category = "Mass Entity")
-    FVector CalculateFlockingForce(const FCrowd_EntityCluster& Cluster, FVector EntityPosition);
+    // Performance tracking
+    float LastPerformanceCheck;
+    int32 ActiveEntityCount;
+    float AverageFrameTime;
 
-    UFUNCTION(BlueprintCallable, Category = "Mass Entity")
-    FVector CalculateSeparationForce(const FCrowd_EntityCluster& Cluster, FVector EntityPosition);
-
-    UFUNCTION(BlueprintCallable, Category = "Mass Entity")
-    FVector CalculateCohesionForce(const FCrowd_EntityCluster& Cluster, FVector EntityPosition);
-
-    UFUNCTION(BlueprintCallable, Category = "Mass Entity")
-    bool IsEntityVisible(FVector EntityPosition);
-
-    UFUNCTION(BlueprintCallable, Category = "Mass Entity")
-    void CullDistantEntities();
-
-    UFUNCTION(BlueprintCallable, Category = "Mass Entity")
-    int32 GetActiveEntityCount();
-
-    UFUNCTION(BlueprintCallable, Category = "Mass Entity")
-    void SetClusterBehavior(int32 ClusterIndex, const FCrowd_EntityBehavior& NewBehavior);
-
-    UFUNCTION(BlueprintCallable, Category = "Mass Entity")
-    void MergeClusters(int32 ClusterA, int32 ClusterB);
-
-    UFUNCTION(BlueprintCallable, Category = "Mass Entity")
-    void SplitCluster(int32 ClusterIndex, int32 NewClusterSize);
-
-    UFUNCTION(BlueprintCallable, Category = "Mass Entity")
-    void HandleClusterCollision(FCrowd_EntityCluster& ClusterA, FCrowd_EntityCluster& ClusterB);
-
-    UFUNCTION(BlueprintCallable, Category = "Mass Entity")
-    void OptimizePerformance();
-
-private:
-    float LastUpdateTime;
-    int32 CurrentActiveEntities;
-    TArray<FVector> EntityPositions;
-    TArray<FVector> EntityVelocities;
-
-    void InitializeEntityData();
-    void UpdateEntityPositions(float DeltaTime);
-    void ProcessEntityInteractions();
-    FVector GetPlayerLocation();
-    float CalculateDistanceToPlayer(FVector EntityPosition);
-    void UpdateClusterLOD(FCrowd_EntityCluster& Cluster);
+    // Mass Entity handles
+    TArray<FMassEntityHandle> SpawnedEntities;
+    
+    // Behavior targets
+    FVector CrowdTargetLocation;
+    bool bHasCrowdTarget;
+    
+    // Panic system
+    FVector PanicSourceLocation;
+    float PanicRadius;
+    bool bInPanicMode;
+    float PanicStartTime;
 };
