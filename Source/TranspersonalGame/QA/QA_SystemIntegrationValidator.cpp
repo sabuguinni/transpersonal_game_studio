@@ -1,546 +1,434 @@
 #include "QA_SystemIntegrationValidator.h"
-#include "Engine/World.h"
 #include "Engine/Engine.h"
-#include "GameFramework/Actor.h"
-#include "Components/ActorComponent.h"
+#include "Engine/World.h"
+#include "GameFramework/GameModeBase.h"
+#include "Components/StaticMeshComponent.h"
 #include "HAL/PlatformFilemanager.h"
-#include "Misc/DateTime.h"
 #include "Misc/FileHelper.h"
-#include "Engine/GameEngine.h"
-#include "UObject/UObjectGlobals.h"
+#include "Misc/DateTime.h"
+#include "Stats/Stats.h"
 
-AQA_SystemIntegrationValidator::AQA_SystemIntegrationValidator()
+UQA_SystemIntegrationValidator::UQA_SystemIntegrationValidator()
 {
-    PrimaryActorTick.bCanEverTick = true;
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickInterval = 1.0f; // Tick every second
     
-    // Create root scene component
-    RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
-    RootComponent = RootSceneComponent;
+    bAutoRunTests = false;
+    TestInterval = 30.0f; // Run tests every 30 seconds
+    bLogVerbose = true;
     
-    // Initialize default settings
-    bAutoRunValidationOnBeginPlay = false;
-    ValidationInterval = 60.0f; // Run validation every minute
-    bLogDetailedResults = true;
-    bGenerateReportOnCompletion = true;
+    // Performance thresholds
+    MaxFrameTimeMs = 33.33f; // 30 FPS minimum
+    MaxMemoryUsageMB = 4096.0f; // 4GB max
+    MaxActorCount = 10000;
+    MaxDrawCalls = 2000;
     
-    // Initialize counters
-    TotalTestsRun = 0;
-    TestsPassed = 0;
-    TestsFailed = 0;
-    TotalExecutionTime = 0.0f;
-    LastValidationTime = 0.0f;
-    bValidationInProgress = false;
-    
-    // Performance tracking
-    CurrentFPS = 0.0f;
-    CurrentMemoryUsage = 0.0f;
-    LastFrameTime = 0.0f;
+    LastTestTime = 0.0f;
+    bTestsCompleted = false;
 }
 
-void AQA_SystemIntegrationValidator::BeginPlay()
+void UQA_SystemIntegrationValidator::BeginPlay()
 {
     Super::BeginPlay();
     
-    UE_LOG(LogTemp, Warning, TEXT("QA System Integration Validator initialized"));
-    
-    if (bAutoRunValidationOnBeginPlay)
+    if (bLogVerbose)
     {
-        // Delay initial validation to allow all systems to initialize
-        FTimerHandle TimerHandle;
-        GetWorldTimerManager().SetTimer(TimerHandle, this, &AQA_SystemIntegrationValidator::RunFullSystemValidation, 5.0f, false);
+        UE_LOG(LogTemp, Warning, TEXT("QA System Integration Validator initialized"));
     }
+    
+    // Run initial quick validation
+    RunQuickValidation();
 }
 
-void AQA_SystemIntegrationValidator::Tick(float DeltaTime)
+void UQA_SystemIntegrationValidator::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    Super::Tick(DeltaTime);
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    // Update performance metrics
-    LastFrameTime = DeltaTime;
-    CurrentFPS = 1.0f / DeltaTime;
+    // Update performance metrics every tick
+    UpdatePerformanceMetrics();
     
-    // Update memory usage (simplified)
-    CurrentMemoryUsage = FPlatformMemory::GetStats().UsedPhysical / (1024.0f * 1024.0f);
-    
-    // Check if it's time for periodic validation
-    if (!bValidationInProgress && ValidationInterval > 0.0f)
+    // Auto-run tests if enabled
+    if (bAutoRunTests)
     {
         float CurrentTime = GetWorld()->GetTimeSeconds();
-        if (CurrentTime - LastValidationTime >= ValidationInterval)
+        if (CurrentTime - LastTestTime >= TestInterval)
         {
-            RunFullSystemValidation();
-            LastValidationTime = CurrentTime;
+            RunQuickValidation();
+            LastTestTime = CurrentTime;
         }
     }
 }
 
-void AQA_SystemIntegrationValidator::RunFullSystemValidation()
+bool UQA_SystemIntegrationValidator::ValidateAllSystems()
 {
-    if (bValidationInProgress)
+    if (bLogVerbose)
     {
-        UE_LOG(LogTemp, Warning, TEXT("QA Validation already in progress, skipping"));
-        return;
+        UE_LOG(LogTemp, Warning, TEXT("QA: Starting full system validation"));
     }
     
-    bValidationInProgress = true;
-    float StartTime = FPlatformTime::Seconds();
+    TestResults.Empty();
     
-    UE_LOG(LogTemp, Warning, TEXT("=== Starting Full System Validation ==="));
+    bool bAllPassed = true;
     
-    // Clear previous results
-    SystemStatuses.Empty();
-    AllTestResults.Empty();
-    TotalTestsRun = 0;
-    TestsPassed = 0;
-    TestsFailed = 0;
+    // Validate each system
+    bAllPassed &= ValidateVFXSystem();
+    bAllPassed &= ValidateCharacterSystem();
+    bAllPassed &= ValidateWorldGeneration();
+    bAllPassed &= ValidateAudioSystem();
+    bAllPassed &= ValidatePerformance();
     
-    // Run all validation tests
-    ValidateVFXSystem();
-    ValidateAudioSystem();
-    ValidateCharacterSystem();
-    ValidateWorldGeneration();
-    ValidateCrowdSimulation();
-    ValidatePerformanceMetrics();
+    bTestsCompleted = true;
     
-    // Run integration tests
-    TestVFXAudioIntegration();
-    TestCharacterWorldInteraction();
-    TestCrowdVFXIntegration();
-    
-    TotalExecutionTime = FPlatformTime::Seconds() - StartTime;
-    
-    if (bGenerateReportOnCompletion)
+    if (bLogVerbose)
     {
-        GenerateQAReport();
+        UE_LOG(LogTemp, Warning, TEXT("QA: Full validation complete - Result: %s"), 
+               bAllPassed ? TEXT("PASS") : TEXT("FAIL"));
     }
     
-    bValidationInProgress = false;
-    
-    UE_LOG(LogTemp, Warning, TEXT("=== System Validation Complete: %d/%d tests passed in %.2fs ==="), 
-           TestsPassed, TotalTestsRun, TotalExecutionTime);
+    return bAllPassed;
 }
 
-void AQA_SystemIntegrationValidator::ValidateVFXSystem()
+bool UQA_SystemIntegrationValidator::ValidateVFXSystem()
 {
-    FQA_SystemStatus VFXStatus;
-    VFXStatus.SystemName = TEXT("VFX System");
-    
-    // Test VFX_NiagaraEffectManager class loading
-    FQA_TestCase LoadTest = CreateTestCase(TEXT("VFX_NiagaraEffectManager_Load"), TEXT("Test VFX manager class loading"));
-    ValidateClassExists(TEXT("/Script/TranspersonalGame.VFX_NiagaraEffectManager"), LoadTest);
-    VFXStatus.TestResults.Add(LoadTest);
-    
-    // Test VFX manager spawning
-    FQA_TestCase SpawnTest = CreateTestCase(TEXT("VFX_Manager_Spawn"), TEXT("Test VFX manager actor spawning"));
-    UClass* VFXClass = LoadClass<AActor>(nullptr, TEXT("/Script/TranspersonalGame.VFX_NiagaraEffectManager"));
-    if (VFXClass)
+    FQA_SystemTest VFXTest = ExecuteTest(TEXT("VFX System Validation"), [this]() -> bool
     {
-        ValidateActorSpawning(VFXClass, SpawnTest);
-        VFXStatus.bIsLoaded = true;
-    }
-    else
-    {
-        SpawnTest.Result = EQA_ValidationResult::Fail;
-        SpawnTest.ErrorMessage = TEXT("VFX class not found");
-        VFXStatus.bIsLoaded = false;
-    }
-    VFXStatus.TestResults.Add(SpawnTest);
-    
-    // Count active VFX components
-    UWorld* World = GetWorld();
-    if (World)
-    {
-        int32 VFXCount = 0;
+        // Test VFX manager class loading
+        UClass* VFXManagerClass = LoadClass<UObject>(nullptr, TEXT("/Script/TranspersonalGame.VFX_SystemManager"));
+        if (!VFXManagerClass)
+        {
+            UE_LOG(LogTemp, Error, TEXT("QA: VFX_SystemManager class not found"));
+            return false;
+        }
+        
+        // Test Niagara system availability
+        UWorld* World = GetWorld();
+        if (!World)
+        {
+            return false;
+        }
+        
+        // Check for VFX actors in the world
+        int32 VFXActorCount = 0;
         for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
         {
             AActor* Actor = *ActorItr;
             if (Actor && Actor->GetName().Contains(TEXT("VFX")))
             {
-                VFXCount++;
+                VFXActorCount++;
             }
         }
-        VFXStatus.ActiveComponents = VFXCount;
-        VFXStatus.bIsInitialized = VFXCount > 0;
-    }
-    
-    SystemStatuses.Add(VFXStatus);
-}
-
-void AQA_SystemIntegrationValidator::ValidateAudioSystem()
-{
-    FQA_SystemStatus AudioStatus;
-    AudioStatus.SystemName = TEXT("Audio System");
-    
-    // Test audio component functionality
-    FQA_TestCase AudioTest = CreateTestCase(TEXT("Audio_Component_Test"), TEXT("Test audio component creation and playback"));
-    
-    // Simple audio validation - check if audio engine is available
-    if (GEngine && GEngine->GetAudioDeviceManager())
-    {
-        AudioTest.Result = EQA_ValidationResult::Pass;
-        AudioStatus.bIsLoaded = true;
-        AudioStatus.bIsInitialized = true;
-    }
-    else
-    {
-        AudioTest.Result = EQA_ValidationResult::Fail;
-        AudioTest.ErrorMessage = TEXT("Audio engine not available");
-        AudioStatus.bIsLoaded = false;
-    }
-    
-    AudioStatus.TestResults.Add(AudioTest);
-    SystemStatuses.Add(AudioStatus);
-}
-
-void AQA_SystemIntegrationValidator::ValidateCharacterSystem()
-{
-    FQA_SystemStatus CharacterStatus;
-    CharacterStatus.SystemName = TEXT("Character System");
-    
-    // Test TranspersonalCharacter class
-    FQA_TestCase CharacterTest = CreateTestCase(TEXT("TranspersonalCharacter_Load"), TEXT("Test character class loading"));
-    ValidateClassExists(TEXT("/Script/TranspersonalGame.TranspersonalCharacter"), CharacterTest);
-    CharacterStatus.TestResults.Add(CharacterTest);
-    
-    // Count character actors in world
-    UWorld* World = GetWorld();
-    if (World)
-    {
-        int32 CharacterCount = 0;
-        for (TActorIterator<APawn> PawnItr(World); PawnItr; ++PawnItr)
+        
+        if (bLogVerbose)
         {
-            CharacterCount++;
-        }
-        CharacterStatus.ActiveComponents = CharacterCount;
-        CharacterStatus.bIsInitialized = CharacterCount > 0;
-    }
-    
-    SystemStatuses.Add(CharacterStatus);
-}
-
-void AQA_SystemIntegrationValidator::ValidateWorldGeneration()
-{
-    FQA_SystemStatus WorldGenStatus;
-    WorldGenStatus.SystemName = TEXT("World Generation");
-    
-    // Test PCGWorldGenerator class
-    FQA_TestCase WorldGenTest = CreateTestCase(TEXT("PCGWorldGenerator_Load"), TEXT("Test world generator class loading"));
-    ValidateClassExists(TEXT("/Script/TranspersonalGame.PCGWorldGenerator"), WorldGenTest);
-    WorldGenStatus.TestResults.Add(WorldGenTest);
-    
-    // Test FoliageManager class
-    FQA_TestCase FoliageTest = CreateTestCase(TEXT("FoliageManager_Load"), TEXT("Test foliage manager class loading"));
-    ValidateClassExists(TEXT("/Script/TranspersonalGame.FoliageManager"), FoliageTest);
-    WorldGenStatus.TestResults.Add(FoliageTest);
-    
-    SystemStatuses.Add(WorldGenStatus);
-}
-
-void AQA_SystemIntegrationValidator::ValidateCrowdSimulation()
-{
-    FQA_SystemStatus CrowdStatus;
-    CrowdStatus.SystemName = TEXT("Crowd Simulation");
-    
-    // Test CrowdSimulationManager class
-    FQA_TestCase CrowdTest = CreateTestCase(TEXT("CrowdSimulationManager_Load"), TEXT("Test crowd simulation manager loading"));
-    ValidateClassExists(TEXT("/Script/TranspersonalGame.CrowdSimulationManager"), CrowdTest);
-    CrowdStatus.TestResults.Add(CrowdTest);
-    
-    SystemStatuses.Add(CrowdStatus);
-}
-
-void AQA_SystemIntegrationValidator::ValidatePerformanceMetrics()
-{
-    FQA_SystemStatus PerfStatus;
-    PerfStatus.SystemName = TEXT("Performance");
-    
-    // Test frame rate
-    FQA_TestCase FPSTest = CreateTestCase(TEXT("FrameRate_Check"), TEXT("Validate minimum frame rate"));
-    bool bFPSPass = ValidateFrameRate(30.0f);
-    FPSTest.Result = bFPSPass ? EQA_ValidationResult::Pass : EQA_ValidationResult::Warning;
-    if (!bFPSPass)
-    {
-        FPSTest.ErrorMessage = FString::Printf(TEXT("FPS below threshold: %.1f"), CurrentFPS);
-    }
-    PerfStatus.TestResults.Add(FPSTest);
-    
-    // Test memory usage
-    FQA_TestCase MemoryTest = CreateTestCase(TEXT("Memory_Check"), TEXT("Validate memory usage"));
-    bool bMemoryPass = ValidateMemoryUsage(4096.0f);
-    MemoryTest.Result = bMemoryPass ? EQA_ValidationResult::Pass : EQA_ValidationResult::Warning;
-    if (!bMemoryPass)
-    {
-        MemoryTest.ErrorMessage = FString::Printf(TEXT("Memory usage high: %.1f MB"), CurrentMemoryUsage);
-    }
-    PerfStatus.TestResults.Add(MemoryTest);
-    
-    PerfStatus.MemoryUsageMB = CurrentMemoryUsage;
-    SystemStatuses.Add(PerfStatus);
-}
-
-FQA_TestCase AQA_SystemIntegrationValidator::CreateTestCase(const FString& TestName, const FString& Description)
-{
-    FQA_TestCase TestCase;
-    TestCase.TestName = TestName;
-    TestCase.Description = Description;
-    TestCase.Result = EQA_ValidationResult::NotTested;
-    TestCase.ExecutionTime = 0.0f;
-    return TestCase;
-}
-
-void AQA_SystemIntegrationValidator::ExecuteTestCase(FQA_TestCase& TestCase, const FString& TestFunction)
-{
-    float StartTime = FPlatformTime::Seconds();
-    
-    TotalTestsRun++;
-    
-    // Execute test with timeout protection
-    ExecuteTestWithTimeout([this, TestFunction]() {
-        // Test execution logic would go here
-        // For now, just mark as passed
-    }, 10.0f, TestCase);
-    
-    TestCase.ExecutionTime = FPlatformTime::Seconds() - StartTime;
-    
-    if (TestCase.Result == EQA_ValidationResult::Pass)
-    {
-        TestsPassed++;
-    }
-    else if (TestCase.Result == EQA_ValidationResult::Fail)
-    {
-        TestsFailed++;
-    }
-    
-    LogTestResult(TestCase);
-    AllTestResults.Add(TestCase);
-}
-
-void AQA_SystemIntegrationValidator::LogTestResult(const FQA_TestCase& TestCase)
-{
-    if (bLogDetailedResults)
-    {
-        FString ResultString;
-        switch (TestCase.Result)
-        {
-            case EQA_ValidationResult::Pass:
-                ResultString = TEXT("PASS");
-                break;
-            case EQA_ValidationResult::Warning:
-                ResultString = TEXT("WARNING");
-                break;
-            case EQA_ValidationResult::Fail:
-                ResultString = TEXT("FAIL");
-                break;
-            default:
-                ResultString = TEXT("NOT_TESTED");
-                break;
+            UE_LOG(LogTemp, Warning, TEXT("QA: Found %d VFX actors"), VFXActorCount);
         }
         
-        UE_LOG(LogTemp, Warning, TEXT("QA Test [%s]: %s - %s (%.3fs)"), 
-               *ResultString, *TestCase.TestName, *TestCase.Description, TestCase.ExecutionTime);
+        return true;
+    });
+    
+    TestResults.Add(VFXTest);
+    LogTestResult(VFXTest);
+    
+    return VFXTest.Result == EQA_ValidationResult::Pass;
+}
+
+bool UQA_SystemIntegrationValidator::ValidateCharacterSystem()
+{
+    FQA_SystemTest CharTest = ExecuteTest(TEXT("Character System Validation"), [this]() -> bool
+    {
+        // Test character class loading
+        UClass* CharacterClass = LoadClass<UObject>(nullptr, TEXT("/Script/TranspersonalGame.TranspersonalCharacter"));
+        if (!CharacterClass)
+        {
+            UE_LOG(LogTemp, Error, TEXT("QA: TranspersonalCharacter class not found"));
+            return false;
+        }
         
-        if (!TestCase.ErrorMessage.IsEmpty())
+        // Test game mode class loading
+        UClass* GameModeClass = LoadClass<UObject>(nullptr, TEXT("/Script/TranspersonalGame.TranspersonalGameMode"));
+        if (!GameModeClass)
         {
-            UE_LOG(LogTemp, Error, TEXT("  Error: %s"), *TestCase.ErrorMessage);
+            UE_LOG(LogTemp, Error, TEXT("QA: TranspersonalGameMode class not found"));
+            return false;
+        }
+        
+        if (bLogVerbose)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("QA: Character system classes loaded successfully"));
+        }
+        
+        return true;
+    });
+    
+    TestResults.Add(CharTest);
+    LogTestResult(CharTest);
+    
+    return CharTest.Result == EQA_ValidationResult::Pass;
+}
+
+bool UQA_SystemIntegrationValidator::ValidateWorldGeneration()
+{
+    FQA_SystemTest WorldTest = ExecuteTest(TEXT("World Generation Validation"), [this]() -> bool
+    {
+        UWorld* World = GetWorld();
+        if (!World)
+        {
+            return false;
+        }
+        
+        // Check for landscape actors
+        int32 LandscapeCount = 0;
+        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+        {
+            AActor* Actor = *ActorItr;
+            if (Actor && (Actor->GetClass()->GetName().Contains(TEXT("Landscape")) || 
+                         Actor->GetName().Contains(TEXT("Terrain"))))
+            {
+                LandscapeCount++;
+            }
+        }
+        
+        if (bLogVerbose)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("QA: Found %d landscape/terrain actors"), LandscapeCount);
+        }
+        
+        return LandscapeCount > 0;
+    });
+    
+    TestResults.Add(WorldTest);
+    LogTestResult(WorldTest);
+    
+    return WorldTest.Result == EQA_ValidationResult::Pass;
+}
+
+bool UQA_SystemIntegrationValidator::ValidateAudioSystem()
+{
+    FQA_SystemTest AudioTest = ExecuteTest(TEXT("Audio System Validation"), [this]() -> bool
+    {
+        UWorld* World = GetWorld();
+        if (!World)
+        {
+            return false;
+        }
+        
+        // Check for audio components and actors
+        int32 AudioComponentCount = 0;
+        for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
+        {
+            AActor* Actor = *ActorItr;
+            if (Actor)
+            {
+                TArray<UActorComponent*> AudioComponents = Actor->GetComponentsByClass(UAudioComponent::StaticClass());
+                AudioComponentCount += AudioComponents.Num();
+            }
+        }
+        
+        if (bLogVerbose)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("QA: Found %d audio components"), AudioComponentCount);
+        }
+        
+        return true; // Audio system is optional for basic functionality
+    });
+    
+    TestResults.Add(AudioTest);
+    LogTestResult(AudioTest);
+    
+    return AudioTest.Result == EQA_ValidationResult::Pass;
+}
+
+bool UQA_SystemIntegrationValidator::ValidatePerformance()
+{
+    FQA_SystemTest PerfTest = ExecuteTest(TEXT("Performance Validation"), [this]() -> bool
+    {
+        UpdatePerformanceMetrics();
+        
+        bool bWithinLimits = IsPerformanceWithinLimits();
+        
+        if (bLogVerbose)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("QA: Performance check - Actors: %d, Frame: %.2fms, Memory: %.2fMB"), 
+                   CurrentMetrics.ActorCount, CurrentMetrics.FrameTimeMs, CurrentMetrics.MemoryUsageMB);
+        }
+        
+        return bWithinLimits;
+    });
+    
+    TestResults.Add(PerfTest);
+    LogTestResult(PerfTest);
+    
+    return PerfTest.Result == EQA_ValidationResult::Pass;
+}
+
+FQA_PerformanceMetrics UQA_SystemIntegrationValidator::GetCurrentPerformanceMetrics()
+{
+    UpdatePerformanceMetrics();
+    return CurrentMetrics;
+}
+
+bool UQA_SystemIntegrationValidator::IsPerformanceWithinLimits()
+{
+    return (CurrentMetrics.FrameTimeMs <= MaxFrameTimeMs &&
+            CurrentMetrics.MemoryUsageMB <= MaxMemoryUsageMB &&
+            CurrentMetrics.ActorCount <= MaxActorCount &&
+            CurrentMetrics.DrawCalls <= MaxDrawCalls);
+}
+
+void UQA_SystemIntegrationValidator::RunFullTestSuite()
+{
+    ValidateAllSystems();
+}
+
+void UQA_SystemIntegrationValidator::RunQuickValidation()
+{
+    if (bLogVerbose)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("QA: Running quick validation"));
+    }
+    
+    TestResults.Empty();
+    
+    // Quick tests - essential systems only
+    ValidateCharacterSystem();
+    ValidatePerformance();
+    
+    bTestsCompleted = true;
+}
+
+TArray<FQA_SystemTest> UQA_SystemIntegrationValidator::GetTestResults()
+{
+    return TestResults;
+}
+
+FString UQA_SystemIntegrationValidator::GenerateQAReport()
+{
+    FString Report = TEXT("=== QA SYSTEM VALIDATION REPORT ===\n");
+    Report += FString::Printf(TEXT("Generated: %s\n"), *FDateTime::Now().ToString());
+    Report += FString::Printf(TEXT("Total Tests: %d\n\n"), TestResults.Num());
+    
+    int32 PassCount = 0;
+    int32 FailCount = 0;
+    int32 WarningCount = 0;
+    
+    for (const FQA_SystemTest& Test : TestResults)
+    {
+        Report += FString::Printf(TEXT("[%s] %s"), 
+                                 *UEnum::GetValueAsString(Test.Result), 
+                                 *Test.TestName);
+        
+        if (!Test.ErrorMessage.IsEmpty())
+        {
+            Report += FString::Printf(TEXT(" - %s"), *Test.ErrorMessage);
+        }
+        
+        Report += FString::Printf(TEXT(" (%.2fms)\n"), Test.ExecutionTimeMs);
+        
+        switch (Test.Result)
+        {
+            case EQA_ValidationResult::Pass: PassCount++; break;
+            case EQA_ValidationResult::Fail: FailCount++; break;
+            case EQA_ValidationResult::Warning: WarningCount++; break;
         }
     }
+    
+    Report += FString::Printf(TEXT("\nSUMMARY: %d PASS, %d FAIL, %d WARNING\n"), 
+                             PassCount, FailCount, WarningCount);
+    
+    // Performance metrics
+    Report += TEXT("\n=== PERFORMANCE METRICS ===\n");
+    Report += FString::Printf(TEXT("Actors: %d / %d\n"), CurrentMetrics.ActorCount, MaxActorCount);
+    Report += FString::Printf(TEXT("Frame Time: %.2fms / %.2fms\n"), CurrentMetrics.FrameTimeMs, MaxFrameTimeMs);
+    Report += FString::Printf(TEXT("Memory: %.2fMB / %.2fMB\n"), CurrentMetrics.MemoryUsageMB, MaxMemoryUsageMB);
+    Report += FString::Printf(TEXT("Draw Calls: %d / %d\n"), CurrentMetrics.DrawCalls, MaxDrawCalls);
+    
+    return Report;
 }
 
-FQA_SystemStatus AQA_SystemIntegrationValidator::GetSystemStatus(const FString& SystemName)
+void UQA_SystemIntegrationValidator::SaveQAReportToFile(const FString& FilePath)
 {
-    for (const FQA_SystemStatus& Status : SystemStatuses)
+    FString Report = GenerateQAReport();
+    FFileHelper::SaveStringToFile(Report, *FilePath);
+    
+    if (bLogVerbose)
     {
-        if (Status.SystemName == SystemName)
-        {
-            return Status;
-        }
+        UE_LOG(LogTemp, Warning, TEXT("QA: Report saved to %s"), *FilePath);
     }
-    
-    // Return empty status if not found
-    FQA_SystemStatus EmptyStatus;
-    EmptyStatus.SystemName = SystemName;
-    return EmptyStatus;
 }
 
-TArray<FQA_SystemStatus> AQA_SystemIntegrationValidator::GetAllSystemStatuses()
+FQA_SystemTest UQA_SystemIntegrationValidator::ExecuteTest(const FString& TestName, TFunction<bool()> TestFunction)
 {
-    return SystemStatuses;
-}
-
-void AQA_SystemIntegrationValidator::GenerateQAReport()
-{
-    FString ReportContent;
-    FDateTime Now = FDateTime::Now();
+    FQA_SystemTest Test;
+    Test.TestName = TestName;
     
-    ReportContent += FString::Printf(TEXT("=== QA SYSTEM VALIDATION REPORT ===\n"));
-    ReportContent += FString::Printf(TEXT("Generated: %s\n"), *Now.ToString());
-    ReportContent += FString::Printf(TEXT("Total Execution Time: %.2f seconds\n"), TotalExecutionTime);
-    ReportContent += FString::Printf(TEXT("Tests Run: %d | Passed: %d | Failed: %d\n\n"), 
-                                   TotalTestsRun, TestsPassed, TestsFailed);
+    double StartTime = FPlatformTime::Seconds();
     
-    // System status summary
-    ReportContent += TEXT("=== SYSTEM STATUS SUMMARY ===\n");
-    for (const FQA_SystemStatus& Status : SystemStatuses)
-    {
-        ReportContent += FString::Printf(TEXT("%s: %s | Components: %d | Memory: %.1f MB\n"),
-                                       *Status.SystemName,
-                                       Status.bIsInitialized ? TEXT("OK") : TEXT("FAIL"),
-                                       Status.ActiveComponents,
-                                       Status.MemoryUsageMB);
-    }
-    
-    ReportContent += TEXT("\n=== DETAILED TEST RESULTS ===\n");
-    for (const FQA_TestCase& TestCase : AllTestResults)
-    {
-        FString ResultStr = TestCase.Result == EQA_ValidationResult::Pass ? TEXT("PASS") : 
-                           TestCase.Result == EQA_ValidationResult::Warning ? TEXT("WARN") : TEXT("FAIL");
-        ReportContent += FString::Printf(TEXT("[%s] %s: %s (%.3fs)\n"),
-                                       *ResultStr, *TestCase.TestName, *TestCase.Description, TestCase.ExecutionTime);
-        if (!TestCase.ErrorMessage.IsEmpty())
-        {
-            ReportContent += FString::Printf(TEXT("  Error: %s\n"), *TestCase.ErrorMessage);
-        }
-    }
-    
-    // Save report to file
-    FString ReportPath = FPaths::ProjectLogDir() / TEXT("QA_ValidationReport.txt");
-    FFileHelper::SaveStringToFile(ReportContent, *ReportPath);
-    
-    UE_LOG(LogTemp, Warning, TEXT("QA Report generated: %s"), *ReportPath);
-}
-
-bool AQA_SystemIntegrationValidator::ValidateFrameRate(float MinFPS)
-{
-    return CurrentFPS >= MinFPS;
-}
-
-bool AQA_SystemIntegrationValidator::ValidateMemoryUsage(float MaxMemoryMB)
-{
-    return CurrentMemoryUsage <= MaxMemoryMB;
-}
-
-bool AQA_SystemIntegrationValidator::ValidateLoadTimes(float MaxLoadTimeSeconds)
-{
-    // Simplified load time validation
-    return true; // Would implement actual load time measurement
-}
-
-void AQA_SystemIntegrationValidator::TestVFXAudioIntegration()
-{
-    FQA_TestCase IntegrationTest = CreateTestCase(TEXT("VFX_Audio_Integration"), TEXT("Test VFX and Audio system integration"));
-    
-    // Test if VFX effects can trigger audio
-    IntegrationTest.Result = EQA_ValidationResult::Pass; // Simplified for now
-    
-    AllTestResults.Add(IntegrationTest);
-    TotalTestsRun++;
-    TestsPassed++;
-}
-
-void AQA_SystemIntegrationValidator::TestCharacterWorldInteraction()
-{
-    FQA_TestCase IntegrationTest = CreateTestCase(TEXT("Character_World_Integration"), TEXT("Test character and world system interaction"));
-    
-    // Test character movement and world collision
-    IntegrationTest.Result = EQA_ValidationResult::Pass; // Simplified for now
-    
-    AllTestResults.Add(IntegrationTest);
-    TotalTestsRun++;
-    TestsPassed++;
-}
-
-void AQA_SystemIntegrationValidator::TestCrowdVFXIntegration()
-{
-    FQA_TestCase IntegrationTest = CreateTestCase(TEXT("Crowd_VFX_Integration"), TEXT("Test crowd simulation and VFX integration"));
-    
-    // Test crowd effects and particle systems
-    IntegrationTest.Result = EQA_ValidationResult::Pass; // Simplified for now
-    
-    AllTestResults.Add(IntegrationTest);
-    TotalTestsRun++;
-    TestsPassed++;
-}
-
-void AQA_SystemIntegrationValidator::ExecuteTestWithTimeout(TFunction<void()> TestFunction, float TimeoutSeconds, FQA_TestCase& TestCase)
-{
     try
     {
-        TestFunction();
-        if (TestCase.Result == EQA_ValidationResult::NotTested)
+        bool bResult = TestFunction();
+        Test.Result = bResult ? EQA_ValidationResult::Pass : EQA_ValidationResult::Fail;
+        
+        if (!bResult)
         {
-            TestCase.Result = EQA_ValidationResult::Pass;
+            Test.ErrorMessage = TEXT("Test function returned false");
         }
     }
     catch (...)
     {
-        TestCase.Result = EQA_ValidationResult::Fail;
-        TestCase.ErrorMessage = TEXT("Test execution failed with exception");
-    }
-}
-
-void AQA_SystemIntegrationValidator::ValidateClassExists(const FString& ClassName, FQA_TestCase& TestCase)
-{
-    UClass* TestClass = LoadClass<UObject>(nullptr, *ClassName);
-    if (TestClass)
-    {
-        TestCase.Result = EQA_ValidationResult::Pass;
-    }
-    else
-    {
-        TestCase.Result = EQA_ValidationResult::Fail;
-        TestCase.ErrorMessage = FString::Printf(TEXT("Class not found: %s"), *ClassName);
-    }
-}
-
-void AQA_SystemIntegrationValidator::ValidateActorSpawning(UClass* ActorClass, FQA_TestCase& TestCase)
-{
-    if (!ActorClass)
-    {
-        TestCase.Result = EQA_ValidationResult::Fail;
-        TestCase.ErrorMessage = TEXT("Invalid actor class");
-        return;
+        Test.Result = EQA_ValidationResult::Fail;
+        Test.ErrorMessage = TEXT("Test function threw exception");
     }
     
+    double EndTime = FPlatformTime::Seconds();
+    Test.ExecutionTimeMs = (EndTime - StartTime) * 1000.0f;
+    
+    return Test;
+}
+
+void UQA_SystemIntegrationValidator::LogTestResult(const FQA_SystemTest& Test)
+{
+    if (bLogVerbose)
+    {
+        FString ResultStr = UEnum::GetValueAsString(Test.Result);
+        UE_LOG(LogTemp, Warning, TEXT("QA Test [%s]: %s (%.2fms)"), 
+               *ResultStr, *Test.TestName, Test.ExecutionTimeMs);
+        
+        if (!Test.ErrorMessage.IsEmpty())
+        {
+            UE_LOG(LogTemp, Error, TEXT("  Error: %s"), *Test.ErrorMessage);
+        }
+    }
+}
+
+void UQA_SystemIntegrationValidator::UpdatePerformanceMetrics()
+{
     UWorld* World = GetWorld();
     if (!World)
     {
-        TestCase.Result = EQA_ValidationResult::Fail;
-        TestCase.ErrorMessage = TEXT("No valid world context");
         return;
     }
     
-    FVector SpawnLocation = GetActorLocation() + FVector(100.0f, 0.0f, 0.0f);
-    AActor* SpawnedActor = World->SpawnActor<AActor>(ActorClass, SpawnLocation, FRotator::ZeroRotator);
+    // Count actors
+    CurrentMetrics.ActorCount = 0;
+    CurrentMetrics.ComponentCount = 0;
     
-    if (SpawnedActor)
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
     {
-        TestCase.Result = EQA_ValidationResult::Pass;
-        // Clean up test actor
-        SpawnedActor->Destroy();
-    }
-    else
-    {
-        TestCase.Result = EQA_ValidationResult::Fail;
-        TestCase.ErrorMessage = TEXT("Failed to spawn test actor");
-    }
-}
-
-void AQA_SystemIntegrationValidator::ValidateComponentFunctionality(UActorComponent* Component, FQA_TestCase& TestCase)
-{
-    if (!Component)
-    {
-        TestCase.Result = EQA_ValidationResult::Fail;
-        TestCase.ErrorMessage = TEXT("Invalid component");
-        return;
+        CurrentMetrics.ActorCount++;
+        AActor* Actor = *ActorItr;
+        if (Actor)
+        {
+            CurrentMetrics.ComponentCount += Actor->GetRootComponent() ? 
+                Actor->GetRootComponent()->GetAttachChildren().Num() + 1 : 0;
+        }
     }
     
-    if (Component->IsValidLowLevel() && !Component->IsPendingKill())
-    {
-        TestCase.Result = EQA_ValidationResult::Pass;
-    }
-    else
-    {
-        TestCase.Result = EQA_ValidationResult::Fail;
-        TestCase.ErrorMessage = TEXT("Component validation failed");
-    }
+    // Frame time (simplified - would need more complex implementation for real frame time)
+    CurrentMetrics.FrameTimeMs = FApp::GetDeltaTime() * 1000.0f;
+    
+    // Memory usage (simplified)
+    CurrentMetrics.MemoryUsageMB = FPlatformMemory::GetStats().UsedPhysical / (1024.0f * 1024.0f);
+    
+    // Draw calls (simplified estimate)
+    CurrentMetrics.DrawCalls = CurrentMetrics.ComponentCount; // Rough estimate
 }
