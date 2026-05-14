@@ -1,53 +1,41 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/GameInstanceSubsystem.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "Components/ActorComponent.h"
-#include "Engine/StaticMeshActor.h"
-#include "Landscape/Landscape.h"
-#include "SharedTypes.h"
+#include "TranspersonalGame/SharedTypes.h"
 #include "Eng_BiomeArchitecture.generated.h"
 
 // ============================================================================
 // BIOME ARCHITECTURE SYSTEM - AGENT #2
-// Defines the core biome structure and management for the prehistoric world
+// Defines the technical architecture for the 5 biomes required for asset purchase
+// Supports the 10km² landscape expansion and biome separation criteria
 // ============================================================================
 
 UENUM(BlueprintType)
 enum class EEng_BiomeType : uint8
 {
-    Swamp,          // SW - Wetlands with dense vegetation and water
-    Forest,         // NW - Dense prehistoric forest with tall trees
-    Savanna,        // Center - Open grasslands with scattered trees
-    Desert,         // E - Arid landscape with sparse vegetation
-    Mountains       // NE - Rocky terrain with elevation changes
+    Swamp,          // Southwest - Wetlands with dinosaur nesting areas
+    Forest,         // Northwest - Dense prehistoric forest
+    Savanna,        // Center - Open grasslands with herds
+    Desert,         // East - Arid badlands with fossils
+    Mountains       // Northeast - Rocky highlands with caves
 };
 
 UENUM(BlueprintType)
-enum class EEng_BiomeWeather : uint8
+enum class EEng_BiomeStatus : uint8
 {
-    Clear,          // Sunny, clear skies
-    Overcast,       // Cloudy but no precipitation
-    LightRain,      // Light precipitation
-    HeavyRain,      // Heavy precipitation with reduced visibility
-    Storm,          // Thunderstorm with lightning and heavy rain
-    Fog             // Dense fog with very low visibility
-};
-
-UENUM(BlueprintType)
-enum class EEng_BiomeTimeOfDay : uint8
-{
-    Dawn,           // Early morning light
-    Morning,        // Full daylight
-    Midday,         // Peak sun intensity
-    Afternoon,      // Late day light
-    Dusk,           // Evening twilight
-    Night           // Dark with moonlight
+    NotGenerated,   // Biome not yet created
+    Generated,      // Basic terrain generated
+    Populated,      // Flora/fauna added
+    Optimized,      // LOD and performance optimized
+    Complete        // Ready for asset integration
 };
 
 USTRUCT(BlueprintType)
-struct FEng_BiomeProperties
+struct FEng_BiomeRequirements
 {
     GENERATED_BODY()
 
@@ -55,307 +43,258 @@ struct FEng_BiomeProperties
     EEng_BiomeType BiomeType;
 
     UPROPERTY(BlueprintReadOnly, Category = "Biome")
-    FString BiomeName;
+    FVector2D WorldPosition;
 
     UPROPERTY(BlueprintReadOnly, Category = "Biome")
-    FVector WorldPosition;
+    FVector2D BiomeSize;
 
     UPROPERTY(BlueprintReadOnly, Category = "Biome")
-    FVector2D BiomeBounds;
+    float MinElevation;
 
     UPROPERTY(BlueprintReadOnly, Category = "Biome")
-    float TemperatureRange;
+    float MaxElevation;
 
     UPROPERTY(BlueprintReadOnly, Category = "Biome")
-    float HumidityLevel;
+    TArray<FString> RequiredFoliageTypes;
 
     UPROPERTY(BlueprintReadOnly, Category = "Biome")
-    float VegetationDensity;
+    TArray<FString> RequiredDinosaurTypes;
 
     UPROPERTY(BlueprintReadOnly, Category = "Biome")
-    TArray<FString> NativeSpecies;
+    int32 MaxActorCount;
 
     UPROPERTY(BlueprintReadOnly, Category = "Biome")
-    TArray<FString> VegetationTypes;
+    float PerformanceWeight;
 
-    FEng_BiomeProperties()
+    FEng_BiomeRequirements()
     {
         BiomeType = EEng_BiomeType::Savanna;
-        BiomeName = TEXT("Unknown Biome");
-        WorldPosition = FVector::ZeroVector;
-        BiomeBounds = FVector2D(2000.0f, 2000.0f);
-        TemperatureRange = 25.0f;
-        HumidityLevel = 0.5f;
-        VegetationDensity = 0.3f;
-        NativeSpecies.Empty();
-        VegetationTypes.Empty();
+        WorldPosition = FVector2D::ZeroVector;
+        BiomeSize = FVector2D(2000.0f, 2000.0f);
+        MinElevation = 0.0f;
+        MaxElevation = 500.0f;
+        RequiredFoliageTypes.Empty();
+        RequiredDinosaurTypes.Empty();
+        MaxActorCount = 1000;
+        PerformanceWeight = 1.0f;
     }
 };
 
 USTRUCT(BlueprintType)
-struct FEng_BiomeWeatherState
+struct FEng_BiomeMetrics
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Weather")
-    EEng_BiomeWeather CurrentWeather;
+    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
+    EEng_BiomeType BiomeType;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Weather")
-    float WeatherIntensity;
+    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
+    EEng_BiomeStatus Status;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Weather")
-    float WindSpeed;
+    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
+    int32 CurrentActorCount;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Weather")
-    FVector WindDirection;
+    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
+    float MemoryUsageMB;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Weather")
-    float Visibility;
+    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
+    float AverageFrameTimeMS;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Weather")
-    float Temperature;
+    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
+    bool bReadyForAssets;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Weather")
-    float Humidity;
+    UPROPERTY(BlueprintReadOnly, Category = "Metrics")
+    TArray<FString> MissingRequirements;
 
-    FEng_BiomeWeatherState()
+    FEng_BiomeMetrics()
     {
-        CurrentWeather = EEng_BiomeWeather::Clear;
-        WeatherIntensity = 0.0f;
-        WindSpeed = 5.0f;
-        WindDirection = FVector(1.0f, 0.0f, 0.0f);
-        Visibility = 1.0f;
-        Temperature = 25.0f;
-        Humidity = 0.5f;
+        BiomeType = EEng_BiomeType::Savanna;
+        Status = EEng_BiomeStatus::NotGenerated;
+        CurrentActorCount = 0;
+        MemoryUsageMB = 0.0f;
+        AverageFrameTimeMS = 0.0f;
+        bReadyForAssets = false;
+        MissingRequirements.Empty();
     }
 };
 
 USTRUCT(BlueprintType)
-struct FEng_BiomeLighting
+struct FEng_LandscapeSpecs
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Lighting")
-    EEng_BiomeTimeOfDay TimeOfDay;
+    UPROPERTY(BlueprintReadOnly, Category = "Landscape")
+    FVector2D TotalSize;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Lighting")
-    float SunIntensity;
+    UPROPERTY(BlueprintReadOnly, Category = "Landscape")
+    int32 ComponentSizeQuads;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Lighting")
-    FLinearColor SunColor;
+    UPROPERTY(BlueprintReadOnly, Category = "Landscape")
+    int32 SectionsPerComponent;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Lighting")
-    FRotator SunRotation;
+    UPROPERTY(BlueprintReadOnly, Category = "Landscape")
+    int32 QuadsPerSection;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Lighting")
-    float SkyIntensity;
+    UPROPERTY(BlueprintReadOnly, Category = "Landscape")
+    bool bUseWorldPartition;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Lighting")
-    FLinearColor SkyColor;
+    UPROPERTY(BlueprintReadOnly, Category = "Landscape")
+    int32 StreamingLODLevels;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Lighting")
-    float FogDensity;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Lighting")
-    FLinearColor FogColor;
-
-    FEng_BiomeLighting()
+    FEng_LandscapeSpecs()
     {
-        TimeOfDay = EEng_BiomeTimeOfDay::Midday;
-        SunIntensity = 3.0f;
-        SunColor = FLinearColor(1.0f, 0.95f, 0.8f, 1.0f);
-        SunRotation = FRotator(-45.0f, 45.0f, 0.0f);
-        SkyIntensity = 1.0f;
-        SkyColor = FLinearColor(0.3f, 0.7f, 1.0f, 1.0f);
-        FogDensity = 0.02f;
-        FogColor = FLinearColor(0.8f, 0.9f, 1.0f, 1.0f);
+        TotalSize = FVector2D(10240.0f, 10240.0f); // 10km²
+        ComponentSizeQuads = 255;
+        SectionsPerComponent = 2;
+        QuadsPerSection = 63;
+        bUseWorldPartition = true;
+        StreamingLODLevels = 4;
     }
 };
 
 UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API AEng_BiomeManager : public AActor
+class TRANSPERSONALGAME_API UEng_BiomeArchitecture : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
-    AEng_BiomeManager();
+    UEng_BiomeArchitecture();
 
-protected:
-    virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
+    // USubsystem interface
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
 
-public:
     // ========================================================================
-    // BIOME MANAGEMENT
+    // BIOME ARCHITECTURE MANAGEMENT
     // ========================================================================
 
     UFUNCTION(BlueprintCallable, Category = "Biome Architecture")
-    void InitializeBiomes();
+    void InitializeBiomeRequirements();
 
     UFUNCTION(BlueprintCallable, Category = "Biome Architecture")
-    void CreateBiome(EEng_BiomeType BiomeType, const FVector& Position, const FVector2D& Bounds);
+    FEng_BiomeRequirements GetBiomeRequirements(EEng_BiomeType BiomeType) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Biome Architecture")
+    void SetBiomeRequirements(EEng_BiomeType BiomeType, const FEng_BiomeRequirements& Requirements);
 
     UFUNCTION(BlueprintPure, Category = "Biome Architecture")
-    EEng_BiomeType GetBiomeAtLocation(const FVector& WorldLocation) const;
+    TArray<EEng_BiomeType> GetAllBiomeTypes() const;
+
+    // ========================================================================
+    // LANDSCAPE ARCHITECTURE
+    // ========================================================================
+
+    UFUNCTION(BlueprintCallable, Category = "Biome Architecture")
+    void ValidateLandscapeSpecs();
 
     UFUNCTION(BlueprintPure, Category = "Biome Architecture")
-    FEng_BiomeProperties GetBiomeProperties(EEng_BiomeType BiomeType) const;
+    FEng_LandscapeSpecs GetLandscapeSpecs() const;
 
     UFUNCTION(BlueprintCallable, Category = "Biome Architecture")
-    void SetBiomeProperties(EEng_BiomeType BiomeType, const FEng_BiomeProperties& Properties);
+    void SetLandscapeSpecs(const FEng_LandscapeSpecs& Specs);
+
+    UFUNCTION(BlueprintCallable, Category = "Biome Architecture")
+    bool ValidateWorldPartitionSetup() const;
 
     // ========================================================================
-    // WEATHER SYSTEM
+    // BIOME STATUS MONITORING
     // ========================================================================
 
     UFUNCTION(BlueprintCallable, Category = "Biome Architecture")
-    void UpdateWeatherSystem(float DeltaTime);
-
-    UFUNCTION(BlueprintCallable, Category = "Biome Architecture")
-    void SetWeatherForBiome(EEng_BiomeType BiomeType, EEng_BiomeWeather WeatherType, float Intensity);
+    void UpdateBiomeMetrics();
 
     UFUNCTION(BlueprintPure, Category = "Biome Architecture")
-    FEng_BiomeWeatherState GetCurrentWeather(EEng_BiomeType BiomeType) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Biome Architecture")
-    void TransitionWeather(EEng_BiomeType BiomeType, EEng_BiomeWeather NewWeather, float TransitionTime);
-
-    // ========================================================================
-    // DAY/NIGHT CYCLE
-    // ========================================================================
-
-    UFUNCTION(BlueprintCallable, Category = "Biome Architecture")
-    void UpdateDayNightCycle(float DeltaTime);
-
-    UFUNCTION(BlueprintCallable, Category = "Biome Architecture")
-    void SetTimeOfDay(EEng_BiomeTimeOfDay NewTimeOfDay);
+    FEng_BiomeMetrics GetBiomeMetrics(EEng_BiomeType BiomeType) const;
 
     UFUNCTION(BlueprintPure, Category = "Biome Architecture")
-    EEng_BiomeTimeOfDay GetCurrentTimeOfDay() const;
-
-    UFUNCTION(BlueprintPure, Category = "Biome Architecture")
-    float GetDayProgress() const;
-
-    // ========================================================================
-    // LIGHTING MANAGEMENT
-    // ========================================================================
+    TArray<FEng_BiomeMetrics> GetAllBiomeMetrics() const;
 
     UFUNCTION(BlueprintCallable, Category = "Biome Architecture")
-    void UpdateLightingForBiome(EEng_BiomeType BiomeType);
-
-    UFUNCTION(BlueprintCallable, Category = "Biome Architecture")
-    void SetBiomeLighting(EEng_BiomeType BiomeType, const FEng_BiomeLighting& Lighting);
-
-    UFUNCTION(BlueprintPure, Category = "Biome Architecture")
-    FEng_BiomeLighting GetBiomeLighting(EEng_BiomeType BiomeType) const;
+    bool IsBiomeReadyForAssets(EEng_BiomeType BiomeType) const;
 
     // ========================================================================
-    // ENVIRONMENTAL EFFECTS
+    // ASSET PURCHASE CRITERIA VALIDATION
     // ========================================================================
-
-    UFUNCTION(BlueprintCallable, Category = "Biome Architecture")
-    void SpawnEnvironmentalEffects(EEng_BiomeType BiomeType, const FVector& Location);
-
-    UFUNCTION(BlueprintCallable, Category = "Biome Architecture")
-    void UpdateEnvironmentalAmbience(EEng_BiomeType BiomeType);
 
     UFUNCTION(BlueprintCallable, CallInEditor, Category = "Biome Architecture")
-    void ValidateBiomeSetup();
+    void ValidateAssetPurchaseCriteria();
+
+    UFUNCTION(BlueprintPure, Category = "Biome Architecture")
+    bool CheckCriterion1_LandscapeExpansion() const;
+
+    UFUNCTION(BlueprintPure, Category = "Biome Architecture")
+    bool CheckCriterion2_AtmosphereStability() const;
+
+    UFUNCTION(BlueprintPure, Category = "Biome Architecture")
+    bool CheckCriterion3_FBXPipeline() const;
+
+    UFUNCTION(BlueprintPure, Category = "Biome Architecture")
+    bool AreAllCriteriaMet() const;
+
+    // ========================================================================
+    // PERFORMANCE ARCHITECTURE
+    // ========================================================================
+
+    UFUNCTION(BlueprintCallable, Category = "Biome Architecture")
+    void OptimizeBiomePerformance(EEng_BiomeType BiomeType);
+
+    UFUNCTION(BlueprintCallable, Category = "Biome Architecture")
+    void SetupLODChains();
+
+    UFUNCTION(BlueprintCallable, Category = "Biome Architecture")
+    void ConfigureStreamingLevels();
+
+    // ========================================================================
+    // AGENT COORDINATION
+    // ========================================================================
+
+    UFUNCTION(BlueprintCallable, Category = "Biome Architecture")
+    void RegisterBiomeAgent(int32 AgentID, EEng_BiomeType ResponsibleBiome);
+
+    UFUNCTION(BlueprintCallable, Category = "Biome Architecture")
+    void ValidateAgentBiomeOutput(int32 AgentID, const TArray<FString>& CreatedAssets);
+
+    UFUNCTION(BlueprintPure, Category = "Biome Architecture")
+    EEng_BiomeType GetAgentResponsibleBiome(int32 AgentID) const;
 
 protected:
-    // ========================================================================
-    // BIOME DATA
-    // ========================================================================
+    UPROPERTY(BlueprintReadOnly, Category = "Biome Architecture")
+    TMap<EEng_BiomeType, FEng_BiomeRequirements> BiomeRequirements;
 
     UPROPERTY(BlueprintReadOnly, Category = "Biome Architecture")
-    TMap<EEng_BiomeType, FEng_BiomeProperties> BiomeProperties;
+    TMap<EEng_BiomeType, FEng_BiomeMetrics> BiomeMetrics;
 
     UPROPERTY(BlueprintReadOnly, Category = "Biome Architecture")
-    TMap<EEng_BiomeType, FEng_BiomeWeatherState> BiomeWeatherStates;
+    FEng_LandscapeSpecs LandscapeSpecs;
 
     UPROPERTY(BlueprintReadOnly, Category = "Biome Architecture")
-    TMap<EEng_BiomeType, FEng_BiomeLighting> BiomeLightingStates;
-
-    // ========================================================================
-    // TIME MANAGEMENT
-    // ========================================================================
+    TMap<int32, EEng_BiomeType> AgentBiomeAssignments;
 
     UPROPERTY(BlueprintReadOnly, Category = "Biome Architecture")
-    EEng_BiomeTimeOfDay CurrentTimeOfDay;
+    bool bCriterion1_LandscapeExpanded;
 
     UPROPERTY(BlueprintReadOnly, Category = "Biome Architecture")
-    float DayProgress;
+    bool bCriterion2_AtmosphereStable;
 
     UPROPERTY(BlueprintReadOnly, Category = "Biome Architecture")
-    float DayDurationMinutes;
+    bool bCriterion3_FBXPipelineReady;
 
     UPROPERTY(BlueprintReadOnly, Category = "Biome Architecture")
-    bool bDayNightCycleEnabled;
-
-    // ========================================================================
-    // WEATHER MANAGEMENT
-    // ========================================================================
-
-    UPROPERTY(BlueprintReadOnly, Category = "Biome Architecture")
-    float WeatherUpdateInterval;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Biome Architecture")
-    float WeatherTransitionSpeed;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Biome Architecture")
-    bool bDynamicWeatherEnabled;
+    bool bBiomeArchitectureInitialized;
 
 private:
-    void InitializeDefaultBiomes();
-    void SetupSwampBiome();
-    void SetupForestBiome();
-    void SetupSavannaBiome();
-    void SetupDesertBiome();
-    void SetupMountainBiome();
+    void InitializeSwampRequirements();
+    void InitializeForestRequirements();
+    void InitializeSavannaRequirements();
+    void InitializeDesertRequirements();
+    void InitializeMountainRequirements();
     
-    void UpdateSunPosition();
-    void UpdateSkyLighting();
-    void UpdateFogSettings();
+    void UpdateBiomeStatus(EEng_BiomeType BiomeType);
+    void CalculateBiomePerformance(EEng_BiomeType BiomeType);
+    void ValidateBiomeActorCounts();
     
-    bool IsLocationInBiome(const FVector& Location, EEng_BiomeType BiomeType) const;
-    float CalculateDistanceToBiomeCenter(const FVector& Location, EEng_BiomeType BiomeType) const;
-};
-
-UCLASS(BlueprintType, Blueprintable)
-class TRANSPERSONALGAME_API UEng_BiomeComponent : public UActorComponent
-{
-    GENERATED_BODY()
-
-public:
-    UEng_BiomeComponent();
-
-protected:
-    virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
-
-public:
-    UFUNCTION(BlueprintCallable, Category = "Biome Component")
-    void RegisterWithBiomeManager();
-
-    UFUNCTION(BlueprintPure, Category = "Biome Component")
-    EEng_BiomeType GetOwnerBiome() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Biome Component")
-    void UpdateBiomeInfluence(float DeltaTime);
-
-protected:
-    UPROPERTY(BlueprintReadOnly, Category = "Biome Component")
-    EEng_BiomeType AssignedBiome;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Biome Component")
-    float BiomeInfluenceRadius;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Biome Component")
-    bool bAutoRegisterWithManager;
-
-private:
-    UPROPERTY()
-    AEng_BiomeManager* BiomeManager;
+    FVector2D CalculateBiomeWorldPosition(EEng_BiomeType BiomeType) const;
+    bool ValidateBiomeSeparation() const;
 };
 
 #include "Eng_BiomeArchitecture.generated.h"
