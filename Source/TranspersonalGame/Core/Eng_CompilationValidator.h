@@ -7,13 +7,17 @@
 #include "Eng_CompilationValidator.generated.h"
 
 /**
- * ENGINE ARCHITECT CYCLE 009 - COMPILATION VALIDATOR
+ * ENGINE ARCHITECT CYCLE 001 - COMPILATION VALIDATOR
  * 
- * Critical system for ensuring all C++ code compiles correctly and
- * all UCLASS/USTRUCT/UENUM types are properly registered.
+ * This system ensures that all C++ code written by agents follows
+ * UE5 compilation rules and architectural standards. It validates:
+ * 1. Header/implementation file pairing
+ * 2. UE5 macro usage (UCLASS, USTRUCT, UENUM)
+ * 3. Include dependencies and module references
+ * 4. Type naming conventions and conflicts
+ * 5. Blueprint exposure and editor integration
  * 
- * This validator runs automatically and reports compilation issues
- * to prevent broken builds from propagating through the agent chain.
+ * CRITICAL: This runs automatically after each agent cycle
  */
 
 // Compilation Issue Severity
@@ -30,13 +34,14 @@ enum class EEng_CompilationSeverity : uint8
 UENUM(BlueprintType)
 enum class EEng_CompilationIssueType : uint8
 {
-    MissingHeader       UMETA(DisplayName = "Missing Header"),
-    MissingImplementation UMETA(DisplayName = "Missing Implementation"),
-    TypeConflict        UMETA(DisplayName = "Type Conflict"),
-    DependencyError     UMETA(DisplayName = "Dependency Error"),
-    LinkageError        UMETA(DisplayName = "Linkage Error"),
-    GeneratedCodeError  UMETA(DisplayName = "Generated Code Error"),
-    BlueprintError      UMETA(DisplayName = "Blueprint Error")
+    MissingImplementation   UMETA(DisplayName = "Missing Implementation"),
+    InvalidMacroUsage       UMETA(DisplayName = "Invalid Macro Usage"),
+    IncludeDependency       UMETA(DisplayName = "Include Dependency"),
+    TypeNamingConflict      UMETA(DisplayName = "Type Naming Conflict"),
+    ModuleDependency        UMETA(DisplayName = "Module Dependency"),
+    BlueprintExposure       UMETA(DisplayName = "Blueprint Exposure"),
+    PerformanceIssue        UMETA(DisplayName = "Performance Issue"),
+    ArchitecturalViolation  UMETA(DisplayName = "Architectural Violation")
 };
 
 // Compilation Issue Data
@@ -45,42 +50,42 @@ struct TRANSPERSONALGAME_API FEng_CompilationIssue
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Compilation")
-    FString FileName;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Issue")
+    FString FilePath;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Compilation")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Issue")
     int32 LineNumber;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Compilation")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Issue")
     EEng_CompilationSeverity Severity;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Compilation")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Issue")
     EEng_CompilationIssueType IssueType;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Compilation")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Issue")
     FString Description;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Compilation")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Issue")
     FString SuggestedFix;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Compilation")
-    FDateTime DetectedTime;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Issue")
+    FString AgentResponsible;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Issue")
+    FDateTime DetectedAt;
 
     FEng_CompilationIssue()
     {
-        FileName = TEXT("Unknown");
         LineNumber = 0;
         Severity = EEng_CompilationSeverity::Info;
-        IssueType = EEng_CompilationIssueType::MissingHeader;
-        Description = TEXT("No description");
-        SuggestedFix = TEXT("No suggestion");
-        DetectedTime = FDateTime::Now();
+        IssueType = EEng_CompilationIssueType::MissingImplementation;
+        DetectedAt = FDateTime::Now();
     }
 };
 
-// File Validation Status
+// File Validation Result
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_FileValidationStatus
+struct TRANSPERSONALGAME_API FEng_FileValidationResult
 {
     GENERATED_BODY()
 
@@ -88,13 +93,16 @@ struct TRANSPERSONALGAME_API FEng_FileValidationStatus
     FString FilePath;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation")
-    bool bHasHeader;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation")
     bool bHasImplementation;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation")
-    bool bCompilesClean;
+    bool bValidMacroUsage;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation")
+    bool bValidIncludes;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation")
+    bool bValidTypeNames;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation")
     TArray<FEng_CompilationIssue> Issues;
@@ -102,12 +110,12 @@ struct TRANSPERSONALGAME_API FEng_FileValidationStatus
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Validation")
     FDateTime LastValidated;
 
-    FEng_FileValidationStatus()
+    FEng_FileValidationResult()
     {
-        FilePath = TEXT("Unknown");
-        bHasHeader = false;
         bHasImplementation = false;
-        bCompilesClean = false;
+        bValidMacroUsage = false;
+        bValidIncludes = false;
+        bValidTypeNames = false;
         LastValidated = FDateTime::Now();
     }
 };
@@ -115,8 +123,8 @@ struct TRANSPERSONALGAME_API FEng_FileValidationStatus
 /**
  * COMPILATION VALIDATOR SUBSYSTEM
  * 
- * Monitors the codebase for compilation issues and provides
- * real-time feedback to agents about code quality.
+ * This subsystem validates all C++ code for compilation safety
+ * and architectural compliance. It runs after each agent cycle.
  */
 UCLASS(BlueprintType)
 class TRANSPERSONALGAME_API UEng_CompilationValidator : public UWorldSubsystem
@@ -130,16 +138,22 @@ public:
 
     // Validation Methods
     UFUNCTION(BlueprintCallable, Category = "Compilation")
-    bool ValidateAllFiles();
+    bool ValidateAllSourceFiles();
 
     UFUNCTION(BlueprintCallable, Category = "Compilation")
-    bool ValidateFile(const FString& FilePath);
+    FEng_FileValidationResult ValidateSourceFile(const FString& FilePath);
 
     UFUNCTION(BlueprintCallable, Category = "Compilation")
-    TArray<FEng_FileValidationStatus> GetAllFileStatuses();
+    bool ValidateHeaderImplementationPairing();
 
     UFUNCTION(BlueprintCallable, Category = "Compilation")
-    FEng_FileValidationStatus GetFileStatus(const FString& FilePath);
+    bool ValidateUE5MacroUsage();
+
+    UFUNCTION(BlueprintCallable, Category = "Compilation")
+    bool ValidateIncludeDependencies();
+
+    UFUNCTION(BlueprintCallable, Category = "Compilation")
+    bool ValidateTypeNamingConventions();
 
     // Issue Management
     UFUNCTION(BlueprintCallable, Category = "Compilation")
@@ -149,89 +163,77 @@ public:
     TArray<FEng_CompilationIssue> GetIssuesBySeverity(EEng_CompilationSeverity Severity);
 
     UFUNCTION(BlueprintCallable, Category = "Compilation")
-    int32 GetTotalIssueCount();
+    TArray<FEng_CompilationIssue> GetIssuesByAgent(const FString& AgentName);
+
+    UFUNCTION(BlueprintCallable, Category = "Compilation")
+    int32 GetIssueCount();
 
     UFUNCTION(BlueprintCallable, Category = "Compilation")
     int32 GetCriticalIssueCount();
 
-    // Compilation Status
+    // Reporting
     UFUNCTION(BlueprintCallable, Category = "Compilation")
-    bool IsCodebaseHealthy();
+    FString GenerateValidationReport();
 
     UFUNCTION(BlueprintCallable, Category = "Compilation")
-    float GetCodeHealthScore();
+    bool SaveValidationReport(const FString& FilePath);
+
+    // Auto-Fix Capabilities
+    UFUNCTION(BlueprintCallable, Category = "Compilation")
+    bool AttemptAutoFix(const FEng_CompilationIssue& Issue);
 
     UFUNCTION(BlueprintCallable, Category = "Compilation")
-    FString GetCompilationSummary();
+    int32 AttemptAutoFixAll();
 
-    // Type Registry Validation
+    // Agent Integration
     UFUNCTION(BlueprintCallable, Category = "Compilation")
-    bool ValidateUClassRegistry();
-
-    UFUNCTION(BlueprintCallable, Category = "Compilation")
-    bool ValidateUStructRegistry();
+    bool ValidateAgentOutput(const FString& AgentName, const TArray<FString>& FilePaths);
 
     UFUNCTION(BlueprintCallable, Category = "Compilation")
-    bool ValidateUEnumRegistry();
-
-    // Header/Implementation Pairing
-    UFUNCTION(BlueprintCallable, Category = "Compilation")
-    TArray<FString> GetOrphanedHeaders();
-
-    UFUNCTION(BlueprintCallable, Category = "Compilation")
-    TArray<FString> GetMissingImplementations();
-
-    UFUNCTION(BlueprintCallable, Category = "Compilation")
-    bool ValidateHeaderImplementationPairs();
-
-    // Automated Fixes
-    UFUNCTION(BlueprintCallable, Category = "Compilation")
-    bool AttemptAutomaticFixes();
-
-    UFUNCTION(BlueprintCallable, Category = "Compilation")
-    bool FixMissingIncludes();
-
-    UFUNCTION(BlueprintCallable, Category = "Compilation")
-    bool FixGeneratedIncludes();
+    bool BlockAgentIfCriticalIssues(const FString& AgentName);
 
 protected:
-    // File tracking
+    // Internal validation data
     UPROPERTY()
-    TMap<FString, FEng_FileValidationStatus> FileStatuses;
+    TArray<FEng_CompilationIssue> DetectedIssues;
 
-    // Issue tracking
     UPROPERTY()
-    TArray<FEng_CompilationIssue> AllIssues;
+    TMap<FString, FEng_FileValidationResult> FileValidationCache;
+
+    UPROPERTY()
+    TArray<FString> KnownTypeNames;
+
+    UPROPERTY()
+    TArray<FString> RequiredIncludes;
 
     // Validation settings
     UPROPERTY(EditAnywhere, Category = "Validation")
-    bool bAutoValidateOnChange;
+    bool bEnableAutoValidation;
+
+    UPROPERTY(EditAnywhere, Category = "Validation")
+    bool bEnableAutoFix;
 
     UPROPERTY(EditAnywhere, Category = "Validation")
     float ValidationInterval;
 
     UPROPERTY(EditAnywhere, Category = "Validation")
-    bool bAttemptAutoFix;
-
-    UPROPERTY(EditAnywhere, Category = "Validation")
-    TArray<FString> ExcludedDirectories;
+    bool bBlockOnCriticalIssues;
 
     // Internal methods
     void ScanSourceDirectory();
-    void ValidateHeaderFile(const FString& HeaderPath);
-    void ValidateImplementationFile(const FString& CppPath);
-    void CheckHeaderImplementationPair(const FString& BaseName);
-    void AddCompilationIssue(const FEng_CompilationIssue& Issue);
-    void ClearIssuesForFile(const FString& FilePath);
-    bool IsFileExcluded(const FString& FilePath);
-    FString GetBaseName(const FString& FilePath);
+    void ValidateFileContent(const FString& FilePath, const FString& Content);
+    void CheckHeaderImplementationPair(const FString& HeaderPath);
+    void CheckUE5MacroSyntax(const FString& FilePath, const FString& Content);
+    void CheckIncludeStatements(const FString& FilePath, const FString& Content);
+    void CheckTypeNaming(const FString& FilePath, const FString& Content);
+    void AddIssue(const FEng_CompilationIssue& Issue);
+    void LogValidationEvent(const FString& Event, const FString& Details);
 
 private:
     // Validation timer
     FTimerHandle ValidationTimer;
     
-    // Statistics
-    int32 TotalFilesScanned;
-    int32 TotalIssuesFound;
-    FDateTime LastFullValidation;
+    // File system monitoring
+    TArray<FString> MonitoredDirectories;
+    TMap<FString, FDateTime> FileModificationTimes;
 };
