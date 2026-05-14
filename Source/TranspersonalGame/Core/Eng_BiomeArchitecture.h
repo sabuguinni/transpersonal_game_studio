@@ -1,290 +1,255 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/GameInstanceSubsystem.h"
+#include "Engine/World.h"
 #include "Subsystems/WorldSubsystem.h"
 #include "SharedTypes.h"
+#include "Eng_ArchitecturalFramework.h"
 #include "Eng_BiomeArchitecture.generated.h"
 
 /**
- * ENGINE ARCHITECT CYCLE 008 - BIOME ARCHITECTURE FOUNDATION
+ * ENGINE ARCHITECT CYCLE 002 - BIOME ARCHITECTURE SYSTEM
  * 
- * Core architectural system for biome management and environmental systems.
- * Defines the foundational rules and interfaces that all biome-related
- * systems must follow across the entire game.
+ * Defines the architectural framework for biome management that Agent #5 (World Generator)
+ * must follow. This establishes the rules for biome creation, boundaries, transitions,
+ * and performance optimization across the 10km² world.
  * 
- * ARCHITECTURAL PRINCIPLES:
- * - Biomes are data-driven and configurable
- * - Weather systems integrate seamlessly with biomes
- * - Performance is maintained through LOD and streaming
- * - All biome changes are event-driven for system coordination
- * - Biome transitions are smooth and predictable
+ * MANDATORY BIOME LAYOUT (as per Hugo's criteria):
+ * - Pantano (Swamp) SW: Coordinates (-5000, -5000) to (-1000, -1000)
+ * - Floresta (Forest) NW: Coordinates (-5000, 1000) to (-1000, 5000)  
+ * - Savana (Savanna) Center: Coordinates (-1000, -1000) to (1000, 1000)
+ * - Deserto (Desert) E: Coordinates (1000, -5000) to (5000, 5000)
+ * - Montanha (Mountain) NE: Coordinates (1000, 1000) to (5000, 5000)
  */
 
-// Biome Performance Profile
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_BiomePerformanceProfile
+// Biome Types (matches SharedTypes.h)
+UENUM(BlueprintType)
+enum class EEng_BiomeType : uint8
 {
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxVegetationActors;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    int32 MaxDinosaurActors;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float LODDistanceMultiplier;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    bool bUseInstancedFoliage;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    float WeatherUpdateFrequency;
-
-    FEng_BiomePerformanceProfile()
-    {
-        MaxVegetationActors = 1000;
-        MaxDinosaurActors = 50;
-        LODDistanceMultiplier = 1.0f;
-        bUseInstancedFoliage = true;
-        WeatherUpdateFrequency = 1.0f;
-    }
+    Swamp           UMETA(DisplayName = "Swamp"),
+    Forest          UMETA(DisplayName = "Forest"), 
+    Savanna         UMETA(DisplayName = "Savanna"),
+    Desert          UMETA(DisplayName = "Desert"),
+    Mountain        UMETA(DisplayName = "Mountain"),
+    Transition      UMETA(DisplayName = "Transition")
 };
 
-// Biome Transition Configuration
-USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_BiomeTransitionConfig
+// Biome Performance Levels
+UENUM(BlueprintType)
+enum class EEng_BiomePerformance : uint8
 {
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transition")
-    float TransitionDistance;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transition")
-    float BlendRadius;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transition")
-    bool bSmoothWeatherTransition;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transition")
-    float WeatherTransitionTime;
-
-    FEng_BiomeTransitionConfig()
-    {
-        TransitionDistance = 500.0f;
-        BlendRadius = 200.0f;
-        bSmoothWeatherTransition = true;
-        WeatherTransitionTime = 30.0f;
-    }
+    High            UMETA(DisplayName = "High Detail"),
+    Medium          UMETA(DisplayName = "Medium Detail"),
+    Low             UMETA(DisplayName = "Low Detail"),
+    Culled          UMETA(DisplayName = "Culled")
 };
 
-// Extended Biome Configuration
+// Biome Validation Status
+UENUM(BlueprintType)
+enum class EEng_BiomeValidation : uint8
+{
+    NotValidated    UMETA(DisplayName = "Not Validated"),
+    Valid           UMETA(DisplayName = "Valid"),
+    Invalid         UMETA(DisplayName = "Invalid"),
+    NeedsUpdate     UMETA(DisplayName = "Needs Update")
+};
+
+// Biome Definition Structure
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FEng_ExtendedBiomeConfig
+struct TRANSPERSONALGAME_API FEng_BiomeDefinition
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
-    FEng_BiomeData BaseData;
+    EEng_BiomeType BiomeType;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
-    FEng_BiomePerformanceProfile PerformanceProfile;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    FVector2D MinBounds;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transition")
-    FEng_BiomeTransitionConfig TransitionConfig;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    FVector2D MaxBounds;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
-    TArray<EEng_WeatherType> AllowedWeatherTypes;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    float TransitionZoneWidth;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawning")
-    TMap<EEng_DinosaurSpecies, float> DinosaurSpawnProbabilities;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    EEng_BiomePerformance PerformanceLevel;
 
-    FEng_ExtendedBiomeConfig()
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    EEng_BiomeValidation ValidationStatus;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    int32 MaxVegetationDensity;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    int32 MaxActorCount;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    float LODDistanceMultiplier;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome")
+    FDateTime LastValidation;
+
+    FEng_BiomeDefinition()
     {
-        // Default allowed weather for all biomes
-        AllowedWeatherTypes = {EEng_WeatherType::Clear, EEng_WeatherType::Cloudy};
+        BiomeType = EEng_BiomeType::Savanna;
+        MinBounds = FVector2D::ZeroVector;
+        MaxBounds = FVector2D(1000.0f, 1000.0f);
+        TransitionZoneWidth = 500.0f;
+        PerformanceLevel = EEng_BiomePerformance::Medium;
+        ValidationStatus = EEng_BiomeValidation::NotValidated;
+        MaxVegetationDensity = 100;
+        MaxActorCount = 1000;
+        LODDistanceMultiplier = 1.0f;
+        LastValidation = FDateTime::Now();
+    }
+};
+
+// Biome Performance Metrics
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FEng_BiomeMetrics
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Metrics")
+    EEng_BiomeType BiomeType;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Metrics")
+    int32 CurrentActorCount;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Metrics")
+    int32 CurrentVegetationCount;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Metrics")
+    float AverageFrameTime;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Metrics")
+    float MemoryUsageMB;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Metrics")
+    bool bIsPlayerInBiome;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Metrics")
+    float DistanceToPlayer;
+
+    FEng_BiomeMetrics()
+    {
+        BiomeType = EEng_BiomeType::Savanna;
+        CurrentActorCount = 0;
+        CurrentVegetationCount = 0;
+        AverageFrameTime = 16.67f;
+        MemoryUsageMB = 0.0f;
+        bIsPlayerInBiome = false;
+        DistanceToPlayer = 0.0f;
     }
 };
 
 /**
- * Biome Architecture Subsystem - Game Instance Level
- * Manages global biome configuration and architectural rules
+ * BIOME ARCHITECTURE SUBSYSTEM
+ * 
+ * This subsystem enforces architectural rules for biome management.
+ * Agent #5 (World Generator) MUST use this system to register biomes
+ * and validate their implementation meets performance requirements.
  */
-UCLASS()
-class TRANSPERSONALGAME_API UEng_BiomeArchitectureSubsystem : public UGameInstanceSubsystem
+UCLASS(BlueprintType)
+class TRANSPERSONALGAME_API UEng_BiomeArchitecture : public UWorldSubsystem
 {
     GENERATED_BODY()
 
 public:
+    // Subsystem Interface
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
+    virtual void Tick(float DeltaTime) override;
 
-    // Core Architecture Interface
+    // Biome Registration (MANDATORY for Agent #5)
     UFUNCTION(BlueprintCallable, Category = "Biome Architecture")
-    bool RegisterBiomeConfiguration(EEng_BiomeType BiomeType, const FEng_ExtendedBiomeConfig& Config);
-
-    UFUNCTION(BlueprintCallable, Category = "Biome Architecture")
-    FEng_ExtendedBiomeConfig GetBiomeConfiguration(EEng_BiomeType BiomeType) const;
+    bool RegisterBiome(const FEng_BiomeDefinition& BiomeDefinition);
 
     UFUNCTION(BlueprintCallable, Category = "Biome Architecture")
-    TArray<EEng_BiomeType> GetAllRegisteredBiomes() const;
+    bool UnregisterBiome(EEng_BiomeType BiomeType);
 
-    // Performance Management
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    void SetGlobalPerformanceProfile(const FEng_BiomePerformanceProfile& Profile);
+    UFUNCTION(BlueprintCallable, Category = "Biome Architecture")
+    FEng_BiomeDefinition GetBiomeDefinition(EEng_BiomeType BiomeType);
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    FEng_BiomePerformanceProfile GetGlobalPerformanceProfile() const;
+    UFUNCTION(BlueprintCallable, Category = "Biome Architecture")
+    TArray<FEng_BiomeDefinition> GetAllBiomes();
 
-    // Validation
-    UFUNCTION(BlueprintCallable, Category = "Validation")
-    bool ValidateBiomeConfiguration(const FEng_ExtendedBiomeConfig& Config) const;
+    // Biome Validation (ENFORCED by Architecture)
+    UFUNCTION(BlueprintCallable, Category = "Biome Architecture")
+    bool ValidateBiomeLayout();
 
-    UFUNCTION(BlueprintCallable, Category = "Validation")
-    TArray<FString> GetConfigurationErrors(const FEng_ExtendedBiomeConfig& Config) const;
+    UFUNCTION(BlueprintCallable, Category = "Biome Architecture")
+    bool ValidateBiomePerformance();
 
-protected:
-    // Biome Configuration Registry
-    UPROPERTY()
-    TMap<EEng_BiomeType, FEng_ExtendedBiomeConfig> BiomeConfigurations;
+    UFUNCTION(BlueprintCallable, Category = "Biome Architecture")
+    EEng_BiomeValidation GetBiomeValidationStatus(EEng_BiomeType BiomeType);
 
-    // Global Performance Settings
-    UPROPERTY()
-    FEng_BiomePerformanceProfile GlobalPerformanceProfile;
+    // Biome Queries
+    UFUNCTION(BlueprintCallable, Category = "Biome Architecture")
+    EEng_BiomeType GetBiomeAtLocation(const FVector& WorldLocation);
 
-    // Architectural Rules
-    void InitializeDefaultConfigurations();
-    bool ValidatePerformanceProfile(const FEng_BiomePerformanceProfile& Profile) const;
-    bool ValidateTransitionConfig(const FEng_BiomeTransitionConfig& Config) const;
-};
+    UFUNCTION(BlueprintCallable, Category = "Biome Architecture")
+    bool IsLocationInTransitionZone(const FVector& WorldLocation);
 
-/**
- * World Biome Manager - World Level
- * Manages active biomes in the current world/level
- */
-UCLASS()
-class TRANSPERSONALGAME_API UEng_WorldBiomeManager : public UWorldSubsystem
-{
-    GENERATED_BODY()
-
-public:
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
-    virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
-
-    // Active Biome Management
-    UFUNCTION(BlueprintCallable, Category = "World Biomes")
-    void RegisterActiveBiome(FVector Location, EEng_BiomeType BiomeType, float Radius);
-
-    UFUNCTION(BlueprintCallable, Category = "World Biomes")
-    EEng_BiomeType GetBiomeAtLocation(FVector Location) const;
-
-    UFUNCTION(BlueprintCallable, Category = "World Biomes")
-    TArray<EEng_BiomeType> GetNearbyBiomes(FVector Location, float SearchRadius) const;
-
-    UFUNCTION(BlueprintCallable, Category = "World Biomes")
-    bool IsInBiomeTransitionZone(FVector Location) const;
-
-    // Weather Integration
-    UFUNCTION(BlueprintCallable, Category = "Weather")
-    EEng_WeatherType GetCurrentWeather(FVector Location) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Weather")
-    void SetWeatherForBiome(EEng_BiomeType BiomeType, EEng_WeatherType WeatherType);
+    UFUNCTION(BlueprintCallable, Category = "Biome Architecture")
+    float GetTransitionBlendFactor(const FVector& WorldLocation, EEng_BiomeType BiomeA, EEng_BiomeType BiomeB);
 
     // Performance Monitoring
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    int32 GetActiveBiomeCount() const;
+    UFUNCTION(BlueprintCallable, Category = "Biome Architecture")
+    FEng_BiomeMetrics GetBiomeMetrics(EEng_BiomeType BiomeType);
 
-    UFUNCTION(BlueprintCallable, Category = "Performance")
-    float GetBiomeSystemPerformanceMetric() const;
+    UFUNCTION(BlueprintCallable, Category = "Biome Architecture")
+    bool IsBiomePerformanceAcceptable(EEng_BiomeType BiomeType);
+
+    UFUNCTION(BlueprintCallable, Category = "Biome Architecture")
+    void UpdateBiomePerformanceLevel(EEng_BiomeType BiomeType, EEng_BiomePerformance NewLevel);
+
+    // World Partition Integration
+    UFUNCTION(BlueprintCallable, Category = "Biome Architecture")
+    bool ValidateWorldPartitionSetup();
+
+    UFUNCTION(BlueprintCallable, Category = "Biome Architecture")
+    TArray<FString> GetWorldPartitionErrors();
 
 protected:
-    // Active Biome Data
-    USTRUCT()
-    struct FActiveBiomeData
-    {
-        GENERATED_BODY()
-
-        UPROPERTY()
-        FVector Location;
-
-        UPROPERTY()
-        EEng_BiomeType BiomeType;
-
-        UPROPERTY()
-        float Radius;
-
-        UPROPERTY()
-        EEng_WeatherType CurrentWeather;
-
-        FActiveBiomeData()
-        {
-            Location = FVector::ZeroVector;
-            BiomeType = EEng_BiomeType::Forest;
-            Radius = 1000.0f;
-            CurrentWeather = EEng_WeatherType::Clear;
-        }
-    };
-
+    // Biome Registry
     UPROPERTY()
-    TArray<FActiveBiomeData> ActiveBiomes;
+    TMap<EEng_BiomeType, FEng_BiomeDefinition> RegisteredBiomes;
 
+    // Performance Tracking
     UPROPERTY()
-    UEng_BiomeArchitectureSubsystem* ArchitectureSubsystem;
+    TMap<EEng_BiomeType, FEng_BiomeMetrics> BiomeMetrics;
+
+    // Validation Settings
+    UPROPERTY(EditAnywhere, Category = "Architecture")
+    float ValidationInterval;
+
+    UPROPERTY(EditAnywhere, Category = "Architecture")
+    bool bEnablePerformanceMonitoring;
+
+    UPROPERTY(EditAnywhere, Category = "Architecture")
+    float MaxAllowedFrameTime;
+
+    UPROPERTY(EditAnywhere, Category = "Architecture")
+    int32 MaxActorsPerBiome;
 
     // Internal Methods
-    void InitializeWorldBiomes();
-    FActiveBiomeData* FindClosestBiome(FVector Location);
-    bool IsLocationInBiome(FVector Location, const FActiveBiomeData& BiomeData) const;
-};
+    void InitializeDefaultBiomes();
+    void UpdateBiomeMetrics();
+    void ValidateIndividualBiome(EEng_BiomeType BiomeType);
+    bool CheckBiomeBoundaries();
+    void LogBiomeEvent(const FString& Event, EEng_BiomeType BiomeType, const FString& Details);
 
-/**
- * Biome Event Dispatcher
- * Handles all biome-related events for system coordination
- */
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnBiomeChanged, EEng_BiomeType, OldBiome, EEng_BiomeType, NewBiome);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnWeatherChanged, EEng_WeatherType, OldWeather, EEng_WeatherType, NewWeather);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBiomeTransitionStarted, EEng_BiomeType, TargetBiome);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnBiomeTransitionCompleted);
-
-UCLASS(BlueprintType)
-class TRANSPERSONALGAME_API UEng_BiomeEventDispatcher : public UObject
-{
-    GENERATED_BODY()
-
-public:
-    // Event Delegates
-    UPROPERTY(BlueprintAssignable, Category = "Biome Events")
-    FOnBiomeChanged OnBiomeChanged;
-
-    UPROPERTY(BlueprintAssignable, Category = "Weather Events")
-    FOnWeatherChanged OnWeatherChanged;
-
-    UPROPERTY(BlueprintAssignable, Category = "Transition Events")
-    FOnBiomeTransitionStarted OnBiomeTransitionStarted;
-
-    UPROPERTY(BlueprintAssignable, Category = "Transition Events")
-    FOnBiomeTransitionCompleted OnBiomeTransitionCompleted;
-
-    // Event Broadcasting
-    UFUNCTION(BlueprintCallable, Category = "Events")
-    void BroadcastBiomeChanged(EEng_BiomeType OldBiome, EEng_BiomeType NewBiome);
-
-    UFUNCTION(BlueprintCallable, Category = "Events")
-    void BroadcastWeatherChanged(EEng_WeatherType OldWeather, EEng_WeatherType NewWeather);
-
-    UFUNCTION(BlueprintCallable, Category = "Events")
-    void BroadcastTransitionStarted(EEng_BiomeType TargetBiome);
-
-    UFUNCTION(BlueprintCallable, Category = "Events")
-    void BroadcastTransitionCompleted();
-
-    // Static Access
-    UFUNCTION(BlueprintCallable, Category = "Events", meta = (CallInEditor = "true"))
-    static UEng_BiomeEventDispatcher* GetBiomeEventDispatcher(const UObject* WorldContext);
-
-protected:
-    static UEng_BiomeEventDispatcher* Instance;
+private:
+    // Validation timer
+    FTimerHandle ValidationTimer;
+    
+    // Performance tracking
+    float LastValidationTime;
+    TArray<FString> ValidationErrors;
+    
+    // Reference to architectural framework
+    UPROPERTY()
+    UEng_ArchitecturalFramework* ArchFramework;
 };
