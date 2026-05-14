@@ -4,7 +4,6 @@
 #include "Components/ActorComponent.h"
 #include "Engine/Engine.h"
 #include "PhysicsEngine/PhysicsSettings.h"
-#include "Chaos/ChaosEngineInterface.h"
 #include "Vehicles/WheeledVehicle.h"
 #include "Vehicles/WheeledVehicleMovementComponent.h"
 #include "SharedTypes.h"
@@ -13,110 +12,121 @@
 class AWheeledVehicle;
 class UWheeledVehicleMovementComponent;
 
+/**
+ * Vehicle Physics Configuration for different vehicle types
+ */
 USTRUCT(BlueprintType)
 struct TRANSPERSONALGAME_API FCore_VehiclePhysicsConfig
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicle Physics")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
     float Mass = 1500.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicle Physics")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
     float MaxEngineForce = 3000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicle Physics")
-    float MaxBrakingForce = 1500.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    float MaxBrakeForce = 1500.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicle Physics")
-    float MaxSteeringAngle = 50.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    float MaxSteerAngle = 50.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicle Physics")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    float TireGrip = 2.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
     float SuspensionStiffness = 5.88f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicle Physics")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
     float SuspensionDamping = 0.88f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicle Physics")
-    float SuspensionMaxRaise = 0.3f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    float SuspensionMaxRaise = 0.2f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicle Physics")
-    float SuspensionMaxDrop = 0.3f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    float SuspensionMaxDrop = 0.2f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicle Physics")
-    float WheelRadius = 35.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicle Physics")
-    float WheelWidth = 20.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicle Physics")
-    float TireFriction = 3.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicle Physics")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
     float RollResistance = 0.015f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    float AirResistance = 0.3f;
 
     FCore_VehiclePhysicsConfig()
     {
         Mass = 1500.0f;
         MaxEngineForce = 3000.0f;
-        MaxBrakingForce = 1500.0f;
-        MaxSteeringAngle = 50.0f;
+        MaxBrakeForce = 1500.0f;
+        MaxSteerAngle = 50.0f;
+        TireGrip = 2.0f;
         SuspensionStiffness = 5.88f;
         SuspensionDamping = 0.88f;
-        SuspensionMaxRaise = 0.3f;
-        SuspensionMaxDrop = 0.3f;
-        WheelRadius = 35.0f;
-        WheelWidth = 20.0f;
-        TireFriction = 3.0f;
+        SuspensionMaxRaise = 0.2f;
+        SuspensionMaxDrop = 0.2f;
         RollResistance = 0.015f;
+        AirResistance = 0.3f;
     }
 };
 
+/**
+ * Vehicle Surface Type for terrain interaction
+ */
+UENUM(BlueprintType)
+enum class ECore_VehicleSurfaceType : uint8
+{
+    Road        UMETA(DisplayName = "Road"),
+    Dirt        UMETA(DisplayName = "Dirt"),
+    Grass       UMETA(DisplayName = "Grass"),
+    Sand        UMETA(DisplayName = "Sand"),
+    Mud         UMETA(DisplayName = "Mud"),
+    Snow        UMETA(DisplayName = "Snow"),
+    Ice         UMETA(DisplayName = "Ice"),
+    Water       UMETA(DisplayName = "Water"),
+    Rock        UMETA(DisplayName = "Rock")
+};
+
+/**
+ * Vehicle Damage Information
+ */
 USTRUCT(BlueprintType)
-struct TRANSPERSONALGAME_API FCore_VehiclePhysicsState
+struct TRANSPERSONALGAME_API FCore_VehicleDamageInfo
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Vehicle State")
-    float CurrentSpeed = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage")
+    float EngineHealth = 100.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Vehicle State")
-    float EngineRPM = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage")
+    float TransmissionHealth = 100.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Vehicle State")
-    float SteeringAngle = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage")
+    float SuspensionHealth = 100.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Vehicle State")
-    float ThrottleInput = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage")
+    float TireCondition = 100.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Vehicle State")
-    float BrakeInput = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage")
+    bool bIsEngineDestroyed = false;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Vehicle State")
-    bool bIsOnGround = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage")
+    bool bIsImmobilized = false;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Vehicle State")
-    bool bIsSkidding = false;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Vehicle State")
-    FVector Velocity = FVector::ZeroVector;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Vehicle State")
-    FVector AngularVelocity = FVector::ZeroVector;
-
-    FCore_VehiclePhysicsState()
+    FCore_VehicleDamageInfo()
     {
-        CurrentSpeed = 0.0f;
-        EngineRPM = 0.0f;
-        SteeringAngle = 0.0f;
-        ThrottleInput = 0.0f;
-        BrakeInput = 0.0f;
-        bIsOnGround = true;
-        bIsSkidding = false;
-        Velocity = FVector::ZeroVector;
-        AngularVelocity = FVector::ZeroVector;
+        EngineHealth = 100.0f;
+        TransmissionHealth = 100.0f;
+        SuspensionHealth = 100.0f;
+        TireCondition = 100.0f;
+        bIsEngineDestroyed = false;
+        bIsImmobilized = false;
     }
 };
 
+/**
+ * Core Vehicle Physics System
+ * Manages realistic vehicle physics for prehistoric transportation
+ */
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
 class TRANSPERSONALGAME_API UCore_VehiclePhysicsSystem : public UActorComponent
 {
@@ -130,91 +140,123 @@ protected:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 public:
-    // Configuration
+    // Vehicle Configuration
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicle Physics")
-    FCore_VehiclePhysicsConfig PhysicsConfig;
+    FCore_VehiclePhysicsConfig VehicleConfig;
 
-    // Current state
-    UPROPERTY(BlueprintReadOnly, Category = "Vehicle Physics")
-    FCore_VehiclePhysicsState CurrentState;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicle Physics")
+    FCore_VehicleDamageInfo DamageInfo;
 
-    // Vehicle reference
-    UPROPERTY(BlueprintReadOnly, Category = "Vehicle Physics")
-    TObjectPtr<AWheeledVehicle> OwnerVehicle;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicle Physics")
+    ECore_VehicleSurfaceType CurrentSurfaceType = ECore_VehicleSurfaceType::Dirt;
 
-    // Movement component reference
-    UPROPERTY(BlueprintReadOnly, Category = "Vehicle Physics")
-    TObjectPtr<UWheeledVehicleMovementComponent> MovementComponent;
+    // Physics Settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    float GravityScale = 1.0f;
 
-    // Core vehicle physics functions
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    float LinearDamping = 0.01f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    float AngularDamping = 0.05f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    bool bEnableAdvancedPhysics = true;
+
+    // Performance Settings
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    float PhysicsUpdateRate = 60.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    bool bUseAsyncPhysics = true;
+
+    // Vehicle Physics Functions
     UFUNCTION(BlueprintCallable, Category = "Vehicle Physics")
-    void InitializeVehiclePhysics();
+    void InitializeVehiclePhysics(AWheeledVehicle* Vehicle);
 
     UFUNCTION(BlueprintCallable, Category = "Vehicle Physics")
     void UpdateVehiclePhysics(float DeltaTime);
 
     UFUNCTION(BlueprintCallable, Category = "Vehicle Physics")
-    void ApplyEngineForce(float Force);
+    void ApplyEngineForce(float ForceAmount);
 
     UFUNCTION(BlueprintCallable, Category = "Vehicle Physics")
-    void ApplyBrakingForce(float Force);
+    void ApplyBrakeForce(float BrakeAmount);
 
     UFUNCTION(BlueprintCallable, Category = "Vehicle Physics")
-    void ApplySteeringInput(float SteeringInput);
+    void ApplySteeringInput(float SteerAmount);
 
-    UFUNCTION(BlueprintCallable, Category = "Vehicle Physics")
-    void SetVehiclePhysicsConfig(const FCore_VehiclePhysicsConfig& NewConfig);
+    // Surface Interaction
+    UFUNCTION(BlueprintCallable, Category = "Surface")
+    void SetSurfaceType(ECore_VehicleSurfaceType SurfaceType);
 
-    UFUNCTION(BlueprintCallable, Category = "Vehicle Physics")
-    FCore_VehiclePhysicsState GetVehiclePhysicsState() const;
+    UFUNCTION(BlueprintCallable, Category = "Surface")
+    float GetSurfaceGripMultiplier() const;
 
-    // Suspension system
-    UFUNCTION(BlueprintCallable, Category = "Vehicle Physics")
-    void UpdateSuspensionSystem(float DeltaTime);
+    UFUNCTION(BlueprintCallable, Category = "Surface")
+    float GetSurfaceResistanceMultiplier() const;
 
-    UFUNCTION(BlueprintCallable, Category = "Vehicle Physics")
-    void AdjustSuspensionStiffness(float NewStiffness);
+    // Damage System
+    UFUNCTION(BlueprintCallable, Category = "Damage")
+    void ApplyDamage(float DamageAmount, const FString& DamageType);
 
-    UFUNCTION(BlueprintCallable, Category = "Vehicle Physics")
-    void AdjustSuspensionDamping(float NewDamping);
+    UFUNCTION(BlueprintCallable, Category = "Damage")
+    void RepairVehicle(float RepairAmount);
 
-    // Tire physics
-    UFUNCTION(BlueprintCallable, Category = "Vehicle Physics")
+    UFUNCTION(BlueprintCallable, Category = "Damage")
+    bool IsVehicleOperational() const;
+
+    // Physics Debugging
+    UFUNCTION(BlueprintCallable, Category = "Debug")
+    void EnablePhysicsDebug(bool bEnable);
+
+    UFUNCTION(BlueprintCallable, Category = "Debug")
+    FString GetVehiclePhysicsStatus() const;
+
+    // Performance Monitoring
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    float GetPhysicsPerformanceMetric() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void OptimizePhysicsSettings();
+
+protected:
+    // Internal Physics Management
+    void UpdateSuspensionPhysics(float DeltaTime);
     void UpdateTirePhysics(float DeltaTime);
+    void UpdateEnginePhysics(float DeltaTime);
+    void UpdateAerodynamics(float DeltaTime);
+    void UpdateDamageEffects(float DeltaTime);
 
-    UFUNCTION(BlueprintCallable, Category = "Vehicle Physics")
-    void SetTireFriction(float NewFriction);
+    // Surface Detection
+    void DetectSurfaceType();
+    void ApplySurfaceEffects();
 
-    UFUNCTION(BlueprintCallable, Category = "Vehicle Physics")
-    bool IsVehicleSkidding() const;
-
-    // Terrain interaction
-    UFUNCTION(BlueprintCallable, Category = "Vehicle Physics")
-    void HandleTerrainInteraction();
-
-    UFUNCTION(BlueprintCallable, Category = "Vehicle Physics")
-    float GetTerrainFrictionMultiplier() const;
-
-    // Performance monitoring
-    UFUNCTION(BlueprintCallable, Category = "Vehicle Physics")
-    void LogVehiclePhysicsPerformance() const;
-
-    UFUNCTION(BlueprintCallable, Category = "Vehicle Physics")
-    void ResetVehiclePhysics();
+    // Performance Optimization
+    void OptimizePhysicsLOD();
+    void UpdatePhysicsLOD(float DistanceToPlayer);
 
 private:
-    // Internal physics calculations
-    void CalculateEngineForces(float DeltaTime);
-    void CalculateSuspensionForces(float DeltaTime);
-    void CalculateTireForces(float DeltaTime);
-    void UpdateVehicleState(float DeltaTime);
+    // Cached Components
+    UPROPERTY()
+    AWheeledVehicle* OwnerVehicle;
 
-    // Performance tracking
+    UPROPERTY()
+    UWheeledVehicleMovementComponent* VehicleMovement;
+
+    // Physics State
+    FVector LastVelocity;
+    FVector LastAngularVelocity;
     float LastUpdateTime;
-    int32 PhysicsUpdateCount;
-    float AverageUpdateTime;
+    float AccumulatedDeltaTime;
 
-    // Cached references
-    UPrimitiveComponent* VehicleRootComponent;
-    TArray<UPrimitiveComponent*> WheelComponents;
+    // Performance Metrics
+    float PhysicsUpdateTimer;
+    int32 PhysicsCalculationsThisFrame;
+    float AveragePhysicsTime;
+
+    // Debug State
+    bool bDebugPhysics;
+    float DebugUpdateInterval;
+    float LastDebugUpdate;
 };
