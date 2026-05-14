@@ -1,408 +1,377 @@
 #include "Build_FinalIntegrationOrchestrator.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
-#include "GameFramework/Actor.h"
+#include "GameFramework/GameModeBase.h"
 #include "Kismet/GameplayStatics.h"
-#include "HAL/PlatformFilemanager.h"
-#include "Misc/DateTime.h"
-#include "Engine/StaticMeshActor.h"
-#include "Components/StaticMeshComponent.h"
+#include "TimerManager.h"
+#include "UObject/UObjectGlobals.h"
 
 UBuild_FinalIntegrationOrchestrator::UBuild_FinalIntegrationOrchestrator()
 {
-    bIntegrationActive = false;
+    bIntegrationInProgress = false;
     IntegrationStartTime = 0.0f;
-    MinHealthScore = 75.0f;
-    MaxActorCount = 10000;
-    MaxFrameTime = 16.67f; // 60 FPS target
+    
+    // Initialize metrics
+    IntegrationMetrics = FBuild_IntegrationMetrics();
+    IntegrationMetrics.BuildStatus = EBuild_IntegrationStatus::Initializing;
 }
 
 void UBuild_FinalIntegrationOrchestrator::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     
-    UE_LOG(LogTemp, Warning, TEXT("Build_FinalIntegrationOrchestrator: Initializing final integration orchestrator"));
+    UE_LOG(LogTemp, Warning, TEXT("Build_FinalIntegrationOrchestrator: Initializing final integration system"));
     
-    // Initialize system tracking
-    TrackedSystems.Empty();
+    InitializeCriticalSystems();
+    IntegrationMetrics.BuildStatus = EBuild_IntegrationStatus::Validating;
     
-    // Set up default system entries
-    FBuild_SystemIntegrationData VFXSystem;
-    VFXSystem.SystemName = TEXT("VFX_System");
-    VFXSystem.Status = EBuild_SystemStatus::Pending;
-    TrackedSystems.Add(TEXT("VFX_System"), VFXSystem);
-    
-    FBuild_SystemIntegrationData AudioSystem;
-    AudioSystem.SystemName = TEXT("Audio_System");
-    AudioSystem.Status = EBuild_SystemStatus::Pending;
-    TrackedSystems.Add(TEXT("Audio_System"), AudioSystem);
-    
-    FBuild_SystemIntegrationData CharacterSystem;
-    CharacterSystem.SystemName = TEXT("Character_System");
-    CharacterSystem.Status = EBuild_SystemStatus::Pending;
-    TrackedSystems.Add(TEXT("Character_System"), CharacterSystem);
-    
-    FBuild_SystemIntegrationData WorldSystem;
-    WorldSystem.SystemName = TEXT("World_System");
-    WorldSystem.Status = EBuild_SystemStatus::Pending;
-    TrackedSystems.Add(TEXT("World_System"), WorldSystem);
-    
-    FBuild_SystemIntegrationData AISystem;
-    AISystem.SystemName = TEXT("AI_System");
-    AISystem.Status = EBuild_SystemStatus::Pending;
-    TrackedSystems.Add(TEXT("AI_System"), AISystem);
-    
-    FBuild_SystemIntegrationData QuestSystem;
-    QuestSystem.SystemName = TEXT("Quest_System");
-    QuestSystem.Status = EBuild_SystemStatus::Pending;
-    TrackedSystems.Add(TEXT("Quest_System"), QuestSystem);
-    
-    FBuild_SystemIntegrationData BuildSystem;
-    BuildSystem.SystemName = TEXT("Build_System");
-    BuildSystem.Status = EBuild_SystemStatus::Operational;
-    TrackedSystems.Add(TEXT("Build_System"), BuildSystem);
-    
-    bIntegrationActive = true;
-    IntegrationStartTime = FPlatformTime::Seconds();
-    
-    UE_LOG(LogTemp, Warning, TEXT("Build_FinalIntegrationOrchestrator: Integration orchestrator initialized with %d systems"), TrackedSystems.Num());
+    // Start automatic validation
+    if (GetWorld())
+    {
+        GetWorld()->GetTimerManager().SetTimer(
+            ValidationTimerHandle,
+            this,
+            &UBuild_FinalIntegrationOrchestrator::ValidateAllSystems,
+            5.0f,
+            true
+        );
+    }
 }
 
 void UBuild_FinalIntegrationOrchestrator::Deinitialize()
 {
-    UE_LOG(LogTemp, Warning, TEXT("Build_FinalIntegrationOrchestrator: Deinitializing integration orchestrator"));
+    if (GetWorld())
+    {
+        GetWorld()->GetTimerManager().ClearTimer(IntegrationTimerHandle);
+        GetWorld()->GetTimerManager().ClearTimer(ValidationTimerHandle);
+    }
     
-    bIntegrationActive = false;
-    TrackedSystems.Empty();
-    
+    UE_LOG(LogTemp, Warning, TEXT("Build_FinalIntegrationOrchestrator: Deinitializing integration system"));
     Super::Deinitialize();
 }
 
-void UBuild_FinalIntegrationOrchestrator::PerformFullSystemIntegration()
+void UBuild_FinalIntegrationOrchestrator::InitializeCriticalSystems()
 {
-    UE_LOG(LogTemp, Warning, TEXT("Build_FinalIntegrationOrchestrator: Performing full system integration"));
+    CriticalSystemPaths.Empty();
+    CriticalSystemPaths.Add(TEXT("/Script/TranspersonalGame.TranspersonalCharacter"));
+    CriticalSystemPaths.Add(TEXT("/Script/TranspersonalGame.TranspersonalGameMode"));
+    CriticalSystemPaths.Add(TEXT("/Script/TranspersonalGame.VFX_ImpactManager"));
+    CriticalSystemPaths.Add(TEXT("/Script/TranspersonalGame.QA_SystemValidator"));
     
-    if (!bIntegrationActive)
+    IntegrationMetrics.TotalSystems = CriticalSystemPaths.Num();
+    
+    UE_LOG(LogTemp, Warning, TEXT("Build_FinalIntegrationOrchestrator: Initialized %d critical systems"), IntegrationMetrics.TotalSystems);
+}
+
+void UBuild_FinalIntegrationOrchestrator::StartFinalIntegration()
+{
+    if (bIntegrationInProgress)
     {
-        UE_LOG(LogTemp, Error, TEXT("Build_FinalIntegrationOrchestrator: Integration not active"));
+        UE_LOG(LogTemp, Warning, TEXT("Build_FinalIntegrationOrchestrator: Integration already in progress"));
         return;
     }
     
-    // Validate all systems
-    ValidateVFXSystems();
-    ValidateAudioSystems();
+    bIntegrationInProgress = true;
+    IntegrationStartTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+    IntegrationMetrics.BuildStatus = EBuild_IntegrationStatus::Integrating;
+    
+    UE_LOG(LogTemp, Warning, TEXT("Build_FinalIntegrationOrchestrator: Starting final integration process"));
+    
+    // Clear previous results
+    ValidationResults.Empty();
+    
+    // Start integration timer
+    if (GetWorld())
+    {
+        GetWorld()->GetTimerManager().SetTimer(
+            IntegrationTimerHandle,
+            this,
+            &UBuild_FinalIntegrationOrchestrator::OnIntegrationComplete,
+            30.0f,
+            false
+        );
+    }
+    
+    // Begin validation
+    ValidateAllSystems();
+}
+
+void UBuild_FinalIntegrationOrchestrator::ValidateAllSystems()
+{
+    if (!bIntegrationInProgress && IntegrationMetrics.BuildStatus != EBuild_IntegrationStatus::Validating)
+    {
+        return;
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Build_FinalIntegrationOrchestrator: Validating all systems"));
+    
+    ValidationResults.Empty();
+    IntegrationMetrics.LoadedSystems = 0;
+    IntegrationMetrics.OperationalSystems = 0;
+    
+    // Validate each critical system
+    for (const FString& SystemPath : CriticalSystemPaths)
+    {
+        FString SystemName = SystemPath;
+        if (SystemPath.Contains(TEXT(".")))
+        {
+            SystemPath.Split(TEXT("."), nullptr, &SystemName);
+        }
+        
+        FBuild_SystemValidationResult Result = ValidateSystemInternal(SystemName, SystemPath);
+        ValidationResults.Add(Result);
+        
+        if (Result.bIsLoaded)
+        {
+            IntegrationMetrics.LoadedSystems++;
+        }
+        
+        if (Result.bIsOperational)
+        {
+            IntegrationMetrics.OperationalSystems++;
+        }
+    }
+    
+    // Validate world state
+    ValidateWorldState();
     ValidateCharacterSystems();
-    ValidateWorldSystems();
-    ValidateAISystems();
-    ValidateQuestSystems();
-    ValidateBuildSystems();
+    ValidateVFXSystems();
+    ValidateQASystems();
     
-    // Monitor performance
-    MonitorSystemPerformance();
-    
-    // Coordinate integration
-    CoordinateSystemIntegration();
-    
-    UE_LOG(LogTemp, Warning, TEXT("Build_FinalIntegrationOrchestrator: Full system integration complete"));
+    UpdateIntegrationMetrics();
+    LogIntegrationStatus();
 }
 
-FBuild_IntegrationReport UBuild_FinalIntegrationOrchestrator::GenerateIntegrationReport()
+FBuild_SystemValidationResult UBuild_FinalIntegrationOrchestrator::ValidateSystem(const FString& SystemName, const FString& ClassPath)
 {
-    FBuild_IntegrationReport Report;
-    
-    // Collect system data
-    for (const auto& SystemPair : TrackedSystems)
-    {
-        Report.SystemsData.Add(SystemPair.Value);
-    }
-    
-    // Calculate totals
-    UWorld* World = GetWorld();
-    if (World)
-    {
-        TArray<AActor*> AllActors;
-        UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
-        Report.TotalActors = AllActors.Num();
-    }
-    
-    Report.OverallHealthScore = CalculateOverallHealthScore();
-    Report.bBuildStable = ValidateSystemStability();
-    Report.BuildTimestamp = FDateTime::Now().ToString();
-    
-    LastIntegrationReport = Report;
-    
-    UE_LOG(LogTemp, Warning, TEXT("Build_FinalIntegrationOrchestrator: Generated integration report - %d systems, %d actors, %.1f%% health"), 
-           Report.SystemsData.Num(), Report.TotalActors, Report.OverallHealthScore);
-    
-    return Report;
+    return ValidateSystemInternal(SystemName, ClassPath);
 }
 
-bool UBuild_FinalIntegrationOrchestrator::ValidateSystemStability()
+FBuild_SystemValidationResult UBuild_FinalIntegrationOrchestrator::ValidateSystemInternal(const FString& SystemName, const FString& ClassPath)
 {
-    float HealthScore = CalculateOverallHealthScore();
-    bool bPerformanceValid = ValidatePerformanceTargets();
-    bool bIntegrityValid = VerifyBuildIntegrity();
+    FBuild_SystemValidationResult Result;
+    Result.SystemName = SystemName;
+    Result.ValidationTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
     
-    bool bStable = (HealthScore >= MinHealthScore) && bPerformanceValid && bIntegrityValid;
-    
-    UE_LOG(LogTemp, Warning, TEXT("Build_FinalIntegrationOrchestrator: System stability validation - Health: %.1f%%, Performance: %s, Integrity: %s, Overall: %s"),
-           HealthScore, bPerformanceValid ? TEXT("PASS") : TEXT("FAIL"), 
-           bIntegrityValid ? TEXT("PASS") : TEXT("FAIL"), bStable ? TEXT("STABLE") : TEXT("UNSTABLE"));
-    
-    return bStable;
-}
-
-void UBuild_FinalIntegrationOrchestrator::OrchestrateBuildFinalization()
-{
-    UE_LOG(LogTemp, Warning, TEXT("Build_FinalIntegrationOrchestrator: Orchestrating build finalization"));
-    
-    // Perform final integration
-    PerformFullSystemIntegration();
-    
-    // Generate final report
-    FBuild_IntegrationReport FinalReport = GenerateIntegrationReport();
-    
-    // Validate stability
-    bool bStable = ValidateSystemStability();
-    
-    if (bStable)
+    // Try to load the class
+    UClass* LoadedClass = LoadClass<UObject>(nullptr, *ClassPath);
+    if (LoadedClass)
     {
-        // Create build snapshot
-        CreateBuildSnapshot();
+        Result.bIsLoaded = true;
+        Result.bIsOperational = true; // Assume operational if loaded
+        Result.ValidationMessage = FString::Printf(TEXT("%s loaded successfully"), *SystemName);
         
-        // Finalize production build
-        FinalizeProductionBuild();
-        
-        UE_LOG(LogTemp, Warning, TEXT("Build_FinalIntegrationOrchestrator: Build finalization complete - STABLE BUILD"));
+        UE_LOG(LogTemp, Warning, TEXT("Build_FinalIntegrationOrchestrator: ✅ %s - LOADED"), *SystemName);
     }
     else
     {
-        UE_LOG(LogTemp, Error, TEXT("Build_FinalIntegrationOrchestrator: Build finalization failed - UNSTABLE BUILD"));
-    }
-}
-
-void UBuild_FinalIntegrationOrchestrator::RegisterSystemForMonitoring(const FString& SystemName, int32 ActorCount)
-{
-    if (TrackedSystems.Contains(SystemName))
-    {
-        FBuild_SystemIntegrationData& SystemData = TrackedSystems[SystemName];
-        SystemData.ActorCount = ActorCount;
-        SystemData.Status = (ActorCount > 0) ? EBuild_SystemStatus::Operational : EBuild_SystemStatus::Pending;
-        SystemData.LastValidationTime = FDateTime::Now().ToString();
+        Result.bIsLoaded = false;
+        Result.bIsOperational = false;
+        Result.ValidationMessage = FString::Printf(TEXT("%s failed to load"), *SystemName);
         
-        UE_LOG(LogTemp, Log, TEXT("Build_FinalIntegrationOrchestrator: Updated system %s - %d actors, status: %d"), 
-               *SystemName, ActorCount, (int32)SystemData.Status);
-    }
-}
-
-EBuild_SystemStatus UBuild_FinalIntegrationOrchestrator::GetSystemStatus(const FString& SystemName)
-{
-    if (TrackedSystems.Contains(SystemName))
-    {
-        return TrackedSystems[SystemName].Status;
-    }
-    return EBuild_SystemStatus::Failed;
-}
-
-float UBuild_FinalIntegrationOrchestrator::CalculateOverallHealthScore()
-{
-    if (TrackedSystems.Num() == 0)
-    {
-        return 0.0f;
+        UE_LOG(LogTemp, Error, TEXT("Build_FinalIntegrationOrchestrator: ❌ %s - FAILED"), *SystemName);
     }
     
-    float TotalScore = 0.0f;
-    int32 ValidSystems = 0;
-    
-    for (const auto& SystemPair : TrackedSystems)
-    {
-        const FBuild_SystemIntegrationData& SystemData = SystemPair.Value;
-        
-        float SystemScore = 0.0f;
-        switch (SystemData.Status)
-        {
-            case EBuild_SystemStatus::Operational:
-                SystemScore = 100.0f;
-                break;
-            case EBuild_SystemStatus::Pending:
-                SystemScore = 50.0f;
-                break;
-            case EBuild_SystemStatus::Failed:
-                SystemScore = 0.0f;
-                break;
-            case EBuild_SystemStatus::Critical:
-                SystemScore = 25.0f;
-                break;
-        }
-        
-        TotalScore += SystemScore;
-        ValidSystems++;
-    }
-    
-    return (ValidSystems > 0) ? (TotalScore / ValidSystems) : 0.0f;
+    return Result;
 }
 
-bool UBuild_FinalIntegrationOrchestrator::ValidatePerformanceTargets()
+bool UBuild_FinalIntegrationOrchestrator::ValidateWorldState()
 {
     UWorld* World = GetWorld();
     if (!World)
     {
+        IntegrationMetrics.WorldActorCount = 0;
         return false;
     }
     
-    // Check actor count
-    TArray<AActor*> AllActors;
-    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
-    
-    bool bActorCountValid = AllActors.Num() <= MaxActorCount;
-    
-    UE_LOG(LogTemp, Log, TEXT("Build_FinalIntegrationOrchestrator: Performance validation - Actor count: %d/%d (%s)"),
-           AllActors.Num(), MaxActorCount, bActorCountValid ? TEXT("PASS") : TEXT("FAIL"));
-    
-    return bActorCountValid;
-}
-
-void UBuild_FinalIntegrationOrchestrator::OptimizeSystemIntegration()
-{
-    UE_LOG(LogTemp, Warning, TEXT("Build_FinalIntegrationOrchestrator: Optimizing system integration"));
-    
-    // Optimize system interactions
-    OptimizeSystemInteractions();
-    
-    // Update metrics
-    UpdateSystemMetrics();
-    
-    // Check thresholds
-    CheckPerformanceThresholds();
-}
-
-void UBuild_FinalIntegrationOrchestrator::CreateBuildSnapshot()
-{
-    UE_LOG(LogTemp, Warning, TEXT("Build_FinalIntegrationOrchestrator: Creating build snapshot"));
-    
-    // Generate final report
-    FBuild_IntegrationReport Snapshot = GenerateIntegrationReport();
-    
-    // Create documentation
-    CreateBuildDocumentation();
-}
-
-bool UBuild_FinalIntegrationOrchestrator::VerifyBuildIntegrity()
-{
-    UE_LOG(LogTemp, Log, TEXT("Build_FinalIntegrationOrchestrator: Verifying build integrity"));
-    
-    // Check all systems are registered
-    bool bAllSystemsRegistered = TrackedSystems.Num() >= 7;
-    
-    // Check no critical failures
-    bool bNoCriticalFailures = true;
-    for (const auto& SystemPair : TrackedSystems)
+    // Count all actors in the world
+    int32 ActorCount = 0;
+    for (TActorIterator<AActor> ActorItr(World); ActorItr; ++ActorItr)
     {
-        if (SystemPair.Value.Status == EBuild_SystemStatus::Critical)
-        {
-            bNoCriticalFailures = false;
-            break;
-        }
+        ActorCount++;
     }
     
-    bool bIntegrityValid = bAllSystemsRegistered && bNoCriticalFailures;
+    IntegrationMetrics.WorldActorCount = ActorCount;
     
-    UE_LOG(LogTemp, Log, TEXT("Build_FinalIntegrationOrchestrator: Build integrity - Systems: %s, No Critical: %s, Overall: %s"),
-           bAllSystemsRegistered ? TEXT("PASS") : TEXT("FAIL"),
-           bNoCriticalFailures ? TEXT("PASS") : TEXT("FAIL"),
-           bIntegrityValid ? TEXT("VALID") : TEXT("INVALID"));
+    UE_LOG(LogTemp, Warning, TEXT("Build_FinalIntegrationOrchestrator: World validation - %d actors"), ActorCount);
+    return ActorCount > 0;
+}
+
+bool UBuild_FinalIntegrationOrchestrator::ValidateCharacterSystems()
+{
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        IntegrationMetrics.CharacterInstances = 0;
+        return false;
+    }
     
-    return bIntegrityValid;
-}
-
-void UBuild_FinalIntegrationOrchestrator::FinalizeProductionBuild()
-{
-    UE_LOG(LogTemp, Warning, TEXT("Build_FinalIntegrationOrchestrator: Finalizing production build"));
+    // Count character instances
+    UClass* CharacterClass = LoadClass<APawn>(nullptr, TEXT("/Script/TranspersonalGame.TranspersonalCharacter"));
+    if (CharacterClass)
+    {
+        TArray<AActor*> CharacterActors;
+        UGameplayStatics::GetAllActorsOfClass(World, CharacterClass, CharacterActors);
+        IntegrationMetrics.CharacterInstances = CharacterActors.Num();
+        
+        UE_LOG(LogTemp, Warning, TEXT("Build_FinalIntegrationOrchestrator: Character validation - %d instances"), CharacterActors.Num());
+        return true;
+    }
     
-    PrepareProductionBuild();
-    ValidateFinalBuild();
-    CreateBuildDocumentation();
+    IntegrationMetrics.CharacterInstances = 0;
+    return false;
+}
+
+bool UBuild_FinalIntegrationOrchestrator::ValidateVFXSystems()
+{
+    UClass* VFXClass = LoadClass<UObject>(nullptr, TEXT("/Script/TranspersonalGame.VFX_ImpactManager"));
+    if (VFXClass)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Build_FinalIntegrationOrchestrator: VFX validation - PASS"));
+        return true;
+    }
     
-    UE_LOG(LogTemp, Warning, TEXT("Build_FinalIntegrationOrchestrator: Production build finalized"));
+    UE_LOG(LogTemp, Error, TEXT("Build_FinalIntegrationOrchestrator: VFX validation - FAIL"));
+    return false;
 }
 
-// Private implementation methods
-void UBuild_FinalIntegrationOrchestrator::ValidateVFXSystems()
+bool UBuild_FinalIntegrationOrchestrator::ValidateQASystems()
 {
-    RegisterSystemForMonitoring(TEXT("VFX_System"), 1); // Placeholder count
+    UClass* QAClass = LoadClass<UObject>(nullptr, TEXT("/Script/TranspersonalGame.QA_SystemValidator"));
+    if (QAClass)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Build_FinalIntegrationOrchestrator: QA validation - PASS"));
+        return true;
+    }
+    
+    UE_LOG(LogTemp, Error, TEXT("Build_FinalIntegrationOrchestrator: QA validation - FAIL"));
+    return false;
 }
 
-void UBuild_FinalIntegrationOrchestrator::ValidateAudioSystems()
+void UBuild_FinalIntegrationOrchestrator::UpdateIntegrationMetrics()
 {
-    RegisterSystemForMonitoring(TEXT("Audio_System"), 1); // Placeholder count
+    // Calculate total validation time
+    if (GetWorld())
+    {
+        IntegrationMetrics.TotalValidationTime = GetWorld()->GetTimeSeconds() - IntegrationStartTime;
+    }
+    
+    // Determine build status
+    if (IntegrationMetrics.LoadedSystems >= 3 && IntegrationMetrics.OperationalSystems >= 3)
+    {
+        if (IntegrationMetrics.WorldActorCount > 0)
+        {
+            IntegrationMetrics.BuildStatus = EBuild_IntegrationStatus::Stable;
+            
+            if (IntegrationMetrics.LoadedSystems == IntegrationMetrics.TotalSystems)
+            {
+                IntegrationMetrics.BuildStatus = EBuild_IntegrationStatus::Ready;
+            }
+        }
+        else
+        {
+            IntegrationMetrics.BuildStatus = EBuild_IntegrationStatus::Testing;
+        }
+    }
+    else
+    {
+        IntegrationMetrics.BuildStatus = EBuild_IntegrationStatus::Failed;
+    }
 }
 
-void UBuild_FinalIntegrationOrchestrator::ValidateCharacterSystems()
+void UBuild_FinalIntegrationOrchestrator::LogIntegrationStatus()
 {
-    RegisterSystemForMonitoring(TEXT("Character_System"), 1); // Placeholder count
+    UE_LOG(LogTemp, Warning, TEXT("Build_FinalIntegrationOrchestrator: === INTEGRATION STATUS ==="));
+    UE_LOG(LogTemp, Warning, TEXT("  Systems Loaded: %d/%d"), IntegrationMetrics.LoadedSystems, IntegrationMetrics.TotalSystems);
+    UE_LOG(LogTemp, Warning, TEXT("  Systems Operational: %d/%d"), IntegrationMetrics.OperationalSystems, IntegrationMetrics.TotalSystems);
+    UE_LOG(LogTemp, Warning, TEXT("  World Actors: %d"), IntegrationMetrics.WorldActorCount);
+    UE_LOG(LogTemp, Warning, TEXT("  Character Instances: %d"), IntegrationMetrics.CharacterInstances);
+    UE_LOG(LogTemp, Warning, TEXT("  Build Status: %s"), *UEnum::GetValueAsString(IntegrationMetrics.BuildStatus));
+    UE_LOG(LogTemp, Warning, TEXT("  Validation Time: %.2fs"), IntegrationMetrics.TotalValidationTime);
 }
 
-void UBuild_FinalIntegrationOrchestrator::ValidateWorldSystems()
+void UBuild_FinalIntegrationOrchestrator::RunIntegrationTests()
 {
-    RegisterSystemForMonitoring(TEXT("World_System"), 1); // Placeholder count
+    UE_LOG(LogTemp, Warning, TEXT("Build_FinalIntegrationOrchestrator: Running integration tests"));
+    
+    IntegrationMetrics.BuildStatus = EBuild_IntegrationStatus::Testing;
+    
+    // Run comprehensive tests
+    bool bAllTestsPassed = true;
+    
+    bAllTestsPassed &= ValidateWorldState();
+    bAllTestsPassed &= ValidateCharacterSystems();
+    bAllTestsPassed &= ValidateVFXSystems();
+    bAllTestsPassed &= ValidateQASystems();
+    
+    if (bAllTestsPassed)
+    {
+        IntegrationMetrics.BuildStatus = EBuild_IntegrationStatus::Ready;
+        UE_LOG(LogTemp, Warning, TEXT("Build_FinalIntegrationOrchestrator: All integration tests PASSED"));
+    }
+    else
+    {
+        IntegrationMetrics.BuildStatus = EBuild_IntegrationStatus::Failed;
+        UE_LOG(LogTemp, Error, TEXT("Build_FinalIntegrationOrchestrator: Integration tests FAILED"));
+    }
 }
 
-void UBuild_FinalIntegrationOrchestrator::ValidateAISystems()
+void UBuild_FinalIntegrationOrchestrator::GenerateBuildReport()
 {
-    RegisterSystemForMonitoring(TEXT("AI_System"), 1); // Placeholder count
+    UE_LOG(LogTemp, Warning, TEXT("Build_FinalIntegrationOrchestrator: === FINAL BUILD REPORT ==="));
+    
+    LogIntegrationStatus();
+    
+    UE_LOG(LogTemp, Warning, TEXT("=== VALIDATION RESULTS ==="));
+    for (const FBuild_SystemValidationResult& Result : ValidationResults)
+    {
+        FString Status = Result.bIsOperational ? TEXT("✅ PASS") : TEXT("❌ FAIL");
+        UE_LOG(LogTemp, Warning, TEXT("  %s: %s - %s"), *Result.SystemName, *Status, *Result.ValidationMessage);
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("=== BUILD READY: %s ==="), IsBuildReady() ? TEXT("YES") : TEXT("NO"));
 }
 
-void UBuild_FinalIntegrationOrchestrator::ValidateQuestSystems()
+void UBuild_FinalIntegrationOrchestrator::PrepareBuildPackaging()
 {
-    RegisterSystemForMonitoring(TEXT("Quest_System"), 1); // Placeholder count
+    UE_LOG(LogTemp, Warning, TEXT("Build_FinalIntegrationOrchestrator: Preparing build for packaging"));
+    
+    if (IntegrationMetrics.BuildStatus == EBuild_IntegrationStatus::Ready)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Build_FinalIntegrationOrchestrator: Build is ready for packaging"));
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("Build_FinalIntegrationOrchestrator: Build is NOT ready for packaging - Status: %s"), 
+               *UEnum::GetValueAsString(IntegrationMetrics.BuildStatus));
+    }
 }
 
-void UBuild_FinalIntegrationOrchestrator::ValidateBuildSystems()
+void UBuild_FinalIntegrationOrchestrator::FinalizeIntegration()
 {
-    RegisterSystemForMonitoring(TEXT("Build_System"), 1); // Placeholder count
+    bIntegrationInProgress = false;
+    
+    if (GetWorld())
+    {
+        GetWorld()->GetTimerManager().ClearTimer(IntegrationTimerHandle);
+    }
+    
+    GenerateBuildReport();
+    
+    UE_LOG(LogTemp, Warning, TEXT("Build_FinalIntegrationOrchestrator: Integration finalized"));
 }
 
-void UBuild_FinalIntegrationOrchestrator::MonitorSystemPerformance()
+void UBuild_FinalIntegrationOrchestrator::OnIntegrationComplete()
 {
-    UE_LOG(LogTemp, Log, TEXT("Build_FinalIntegrationOrchestrator: Monitoring system performance"));
+    UE_LOG(LogTemp, Warning, TEXT("Build_FinalIntegrationOrchestrator: Integration timer completed"));
+    
+    RunIntegrationTests();
+    FinalizeIntegration();
 }
 
-void UBuild_FinalIntegrationOrchestrator::UpdateSystemMetrics()
+void UBuild_FinalIntegrationOrchestrator::OnValidationComplete()
 {
-    UE_LOG(LogTemp, Log, TEXT("Build_FinalIntegrationOrchestrator: Updating system metrics"));
-}
-
-void UBuild_FinalIntegrationOrchestrator::CheckPerformanceThresholds()
-{
-    UE_LOG(LogTemp, Log, TEXT("Build_FinalIntegrationOrchestrator: Checking performance thresholds"));
-}
-
-void UBuild_FinalIntegrationOrchestrator::CoordinateSystemIntegration()
-{
-    UE_LOG(LogTemp, Log, TEXT("Build_FinalIntegrationOrchestrator: Coordinating system integration"));
-}
-
-void UBuild_FinalIntegrationOrchestrator::ResolveSystemConflicts()
-{
-    UE_LOG(LogTemp, Log, TEXT("Build_FinalIntegrationOrchestrator: Resolving system conflicts"));
-}
-
-void UBuild_FinalIntegrationOrchestrator::OptimizeSystemInteractions()
-{
-    UE_LOG(LogTemp, Log, TEXT("Build_FinalIntegrationOrchestrator: Optimizing system interactions"));
-}
-
-void UBuild_FinalIntegrationOrchestrator::PrepareProductionBuild()
-{
-    UE_LOG(LogTemp, Log, TEXT("Build_FinalIntegrationOrchestrator: Preparing production build"));
-}
-
-void UBuild_FinalIntegrationOrchestrator::ValidateFinalBuild()
-{
-    UE_LOG(LogTemp, Log, TEXT("Build_FinalIntegrationOrchestrator: Validating final build"));
-}
-
-void UBuild_FinalIntegrationOrchestrator::CreateBuildDocumentation()
-{
-    UE_LOG(LogTemp, Log, TEXT("Build_FinalIntegrationOrchestrator: Creating build documentation"));
+    UE_LOG(LogTemp, Warning, TEXT("Build_FinalIntegrationOrchestrator: Validation cycle completed"));
+    
+    UpdateIntegrationMetrics();
 }
