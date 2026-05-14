@@ -4,36 +4,35 @@
 #include "GameFramework/Actor.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/SceneComponent.h"
-#include "Engine/TriggerVolume.h"
+#include "Components/BoxComponent.h"
+#include "Engine/StaticMesh.h"
+#include "Materials/MaterialInterface.h"
 #include "../SharedTypes.h"
 #include "ArchitecturalStructureManager.generated.h"
 
 UENUM(BlueprintType)
 enum class EArch_StructureType : uint8
 {
-    CaveDwelling        UMETA(DisplayName = "Cave Dwelling"),
-    WoodenShelter       UMETA(DisplayName = "Wooden Shelter"),
-    StoneMonument       UMETA(DisplayName = "Stone Monument"),
-    UndergroundTunnel   UMETA(DisplayName = "Underground Tunnel"),
-    DefensiveBarrier    UMETA(DisplayName = "Defensive Barrier"),
-    StorageCache        UMETA(DisplayName = "Storage Cache"),
-    RitualSite          UMETA(DisplayName = "Ritual Site"),
-    WaterSource         UMETA(DisplayName = "Water Source")
+    CaveDwelling    UMETA(DisplayName = "Cave Dwelling"),
+    WoodenShelter   UMETA(DisplayName = "Wooden Shelter"),
+    StoneCircle     UMETA(DisplayName = "Stone Circle"),
+    Fortification   UMETA(DisplayName = "Fortification"),
+    StorageHut      UMETA(DisplayName = "Storage Hut"),
+    Watchtower      UMETA(DisplayName = "Watchtower")
 };
 
 UENUM(BlueprintType)
-enum class EArch_StructureCondition : uint8
+enum class EArch_StructureState : uint8
 {
-    Pristine            UMETA(DisplayName = "Pristine"),
-    WellMaintained      UMETA(DisplayName = "Well Maintained"),
-    Weathered           UMETA(DisplayName = "Weathered"),
-    Damaged             UMETA(DisplayName = "Damaged"),
-    Ruined              UMETA(DisplayName = "Ruined"),
-    Collapsed           UMETA(DisplayName = "Collapsed")
+    Intact          UMETA(DisplayName = "Intact"),
+    Weathered       UMETA(DisplayName = "Weathered"),
+    Damaged         UMETA(DisplayName = "Damaged"),
+    Ruins           UMETA(DisplayName = "Ruins"),
+    Abandoned       UMETA(DisplayName = "Abandoned")
 };
 
 USTRUCT(BlueprintType)
-struct FArch_StructureData
+struct FArch_StructureConfig
 {
     GENERATED_BODY()
 
@@ -41,40 +40,32 @@ struct FArch_StructureData
     EArch_StructureType StructureType = EArch_StructureType::CaveDwelling;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    EArch_StructureCondition Condition = EArch_StructureCondition::Weathered;
+    EArch_StructureState CurrentState = EArch_StructureState::Intact;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    float AgeInYears = 50.0f;
+    float StructuralIntegrity = 100.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
     int32 MaxOccupants = 4;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    bool bIsHabitable = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    bool bHasFirePit = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    bool bHasWaterAccess = false;
+    bool bHasInteriorSpace = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
     bool bIsDefensive = false;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure")
-    float StructuralIntegrity = 100.0f;
+    float DefenseRating = 0.0f;
 
-    FArch_StructureData()
+    FArch_StructureConfig()
     {
         StructureType = EArch_StructureType::CaveDwelling;
-        Condition = EArch_StructureCondition::Weathered;
-        AgeInYears = 50.0f;
-        MaxOccupants = 4;
-        bIsHabitable = true;
-        bHasFirePit = false;
-        bHasWaterAccess = false;
-        bIsDefensive = false;
+        CurrentState = EArch_StructureState::Intact;
         StructuralIntegrity = 100.0f;
+        MaxOccupants = 4;
+        bHasInteriorSpace = true;
+        bIsDefensive = false;
+        DefenseRating = 0.0f;
     }
 };
 
@@ -89,6 +80,10 @@ public:
 protected:
     virtual void BeginPlay() override;
 
+public:
+    virtual void Tick(float DeltaTime) override;
+
+    // Core Components
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     USceneComponent* RootSceneComponent;
 
@@ -96,77 +91,121 @@ protected:
     UStaticMeshComponent* MainStructureMesh;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UStaticMeshComponent* InteriorMesh;
+    UBoxComponent* InteriorBounds;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UStaticMeshComponent* PropsMesh;
+    UBoxComponent* InteractionBounds;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structure Data")
-    FArch_StructureData StructureData;
+    // Structure Configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    FArch_StructureConfig StructureConfig;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
-    TArray<FVector> InteriorSpawnPoints;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    TArray<UStaticMeshComponent*> InteriorProps;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interior")
-    TArray<FString> InteriorPropNames;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Architecture")
+    TArray<UStaticMeshComponent*> ExteriorDetails;
+
+    // Materials and Appearance
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
+    UMaterialInterface* IntactMaterial;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
+    UMaterialInterface* WeatheredMaterial;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
+    UMaterialInterface* DamagedMaterial;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Materials")
+    UMaterialInterface* RuinsMaterial;
+
+    // Lighting
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
+    TArray<class UPointLightComponent*> InteriorLights;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
-    bool bHasNaturalLighting = true;
+    bool bHasFirePit = false;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
-    bool bHasArtificialLighting = false;
+    class UPointLightComponent* FirePitLight;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lighting")
-    float AmbientLightIntensity = 0.3f;
+    // Interaction System
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction")
+    bool bCanEnter = true;
 
-public:
-    virtual void Tick(float DeltaTime) override;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction")
+    bool bCanRest = true;
 
-    UFUNCTION(BlueprintCallable, Category = "Structure Management")
-    void InitializeStructure(EArch_StructureType Type, EArch_StructureCondition InitialCondition);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction")
+    bool bCanStore = false;
 
-    UFUNCTION(BlueprintCallable, Category = "Structure Management")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction")
+    float RestEffectiveness = 1.0f;
+
+    // Structure Management Functions
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    void InitializeStructure(EArch_StructureType InStructureType);
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
+    void SetStructureState(EArch_StructureState NewState);
+
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
     void UpdateStructuralIntegrity(float DamageAmount);
 
-    UFUNCTION(BlueprintCallable, Category = "Structure Management")
+    UFUNCTION(BlueprintCallable, Category = "Architecture")
     bool CanAccommodateOccupants(int32 RequestedOccupants) const;
 
-    UFUNCTION(BlueprintCallable, Category = "Interior Management")
-    void SpawnInteriorProps();
+    // Interior Management
+    UFUNCTION(BlueprintCallable, Category = "Interior")
+    void SetupInteriorProps();
 
-    UFUNCTION(BlueprintCallable, Category = "Interior Management")
-    void ClearInteriorProps();
+    UFUNCTION(BlueprintCallable, Category = "Interior")
+    void UpdateInteriorLighting();
 
-    UFUNCTION(BlueprintCallable, Category = "Interior Management")
-    FVector GetRandomInteriorSpawnPoint() const;
+    UFUNCTION(BlueprintCallable, Category = "Interior")
+    void ToggleFirePit(bool bEnable);
 
-    UFUNCTION(BlueprintCallable, Category = "Lighting")
-    void UpdateLightingConditions(bool bDayTime, float WeatherIntensity);
+    // Interaction Functions
+    UFUNCTION(BlueprintCallable, Category = "Interaction")
+    bool AttemptEntry(class APawn* InteractingPawn);
 
-    UFUNCTION(BlueprintCallable, Category = "Structure Management")
-    void ApplyWeatherDamage(float WeatherSeverity, float DeltaTime);
+    UFUNCTION(BlueprintCallable, Category = "Interaction")
+    bool AttemptRest(class APawn* InteractingPawn);
 
-    UFUNCTION(BlueprintPure, Category = "Structure Management")
-    FString GetStructureDescription() const;
+    UFUNCTION(BlueprintCallable, Category = "Interaction")
+    bool AttemptStorage(class APawn* InteractingPawn);
 
-    UFUNCTION(BlueprintPure, Category = "Structure Management")
+    // Visual Updates
+    UFUNCTION(BlueprintCallable, Category = "Visuals")
+    void UpdateMaterialBasedOnState();
+
+    UFUNCTION(BlueprintCallable, Category = "Visuals")
+    void AddWeatheringEffects();
+
+    UFUNCTION(BlueprintCallable, Category = "Visuals")
+    void AddVegetationOvergrowth();
+
+    // Utility Functions
+    UFUNCTION(BlueprintCallable, Category = "Utility")
+    FVector GetInteriorCenter() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Utility")
+    float GetDefenseValue() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Utility")
     bool IsStructureUsable() const;
 
 protected:
-    UFUNCTION()
-    void OnStructureEntered(AActor* OverlappedActor, AActor* OtherActor);
+    // Internal state tracking
+    float WeatheringAccumulation;
+    float LastMaintenanceTime;
+    int32 CurrentOccupants;
+    bool bIsInitialized;
 
-    UFUNCTION()
-    void OnStructureExited(AActor* OverlappedActor, AActor* OtherActor);
-
-private:
-    void SetupStructureMeshes();
-    void ConfigureInteriorLayout();
-    void UpdateVisualCondition();
-
-    UPROPERTY()
-    TArray<AActor*> SpawnedProps;
-
-    float LastWeatherDamageTime = 0.0f;
-    float WeatherDamageInterval = 60.0f; // Apply weather damage every minute
+    // Helper functions
+    void LoadStructureMesh();
+    void SetupCollisionBounds();
+    void CreateInteriorProps();
+    void ConfigureLighting();
+    void ApplyWeatheringEffects();
 };
