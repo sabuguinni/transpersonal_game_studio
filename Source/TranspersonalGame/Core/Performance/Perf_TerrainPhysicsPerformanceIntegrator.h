@@ -1,80 +1,100 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/World.h"
-#include "Components/ActorComponent.h"
-#include "GameFramework/Actor.h"
-#include "Landscape/Landscape.h"
-#include "PhysicsEngine/PhysicsSettings.h"
 #include "Engine/Engine.h"
-#include "SharedTypes.h"
+#include "GameFramework/Actor.h"
+#include "Components/ActorComponent.h"
+#include "Engine/World.h"
+#include "TimerManager.h"
+#include "HAL/PlatformFilemanager.h"
+#include "Misc/DateTime.h"
 #include "Perf_TerrainPhysicsPerformanceIntegrator.generated.h"
 
 // Forward declarations
-class UCore_TerrainPhysicsSystem;
-class ALandscapeProxy;
+class UCore_TerrainDeformationSystem;
+class UCore_PhysicsManager;
 
-/**
- * Performance metrics for terrain physics operations
- */
 USTRUCT(BlueprintType)
 struct TRANSPERSONALGAME_API FPerf_TerrainPhysicsMetrics
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float TerrainDeformationTime;
+    UPROPERTY(BlueprintReadOnly, Category = "Terrain Performance")
+    float DeformationProcessingTime;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    float SurfaceMaterialDetectionTime;
+    UPROPERTY(BlueprintReadOnly, Category = "Terrain Performance")
+    float MaterialDetectionTime;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    UPROPERTY(BlueprintReadOnly, Category = "Terrain Performance")
     float CollisionCalculationTime;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 ActiveDeformationPoints;
+    UPROPERTY(BlueprintReadOnly, Category = "Terrain Performance")
+    float HeightmapUpdateTime;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 MaterialCacheHits;
+    UPROPERTY(BlueprintReadOnly, Category = "Terrain Performance")
+    int32 ActiveDeformations;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
-    int32 MaterialCacheMisses;
+    UPROPERTY(BlueprintReadOnly, Category = "Terrain Performance")
+    int32 QueuedDeformations;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Performance")
+    UPROPERTY(BlueprintReadOnly, Category = "Terrain Performance")
     float MemoryUsageMB;
 
+    UPROPERTY(BlueprintReadOnly, Category = "Terrain Performance")
+    float AverageFrameTime;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Terrain Performance")
+    bool bPerformanceThresholdExceeded;
+
     FPerf_TerrainPhysicsMetrics()
+        : DeformationProcessingTime(0.0f)
+        , MaterialDetectionTime(0.0f)
+        , CollisionCalculationTime(0.0f)
+        , HeightmapUpdateTime(0.0f)
+        , ActiveDeformations(0)
+        , QueuedDeformations(0)
+        , MemoryUsageMB(0.0f)
+        , AverageFrameTime(0.0f)
+        , bPerformanceThresholdExceeded(false)
     {
-        TerrainDeformationTime = 0.0f;
-        SurfaceMaterialDetectionTime = 0.0f;
-        CollisionCalculationTime = 0.0f;
-        ActiveDeformationPoints = 0;
-        MaterialCacheHits = 0;
-        MaterialCacheMisses = 0;
-        MemoryUsageMB = 0.0f;
     }
 };
 
-/**
- * Optimization levels for terrain physics performance
- */
-UENUM(BlueprintType)
-enum class EPerf_TerrainOptimizationLevel : uint8
+USTRUCT(BlueprintType)
+struct TRANSPERSONALGAME_API FPerf_TerrainOptimizationSettings
 {
-    Ultra       UMETA(DisplayName = "Ultra Quality"),
-    High        UMETA(DisplayName = "High Quality"),
-    Medium      UMETA(DisplayName = "Medium Quality"),
-    Low         UMETA(DisplayName = "Low Quality"),
-    Minimal     UMETA(DisplayName = "Minimal Quality")
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Optimization")
+    float MaxDeformationProcessingTime;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Optimization")
+    int32 MaxConcurrentDeformations;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Optimization")
+    float DeformationCullingDistance;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Optimization")
+    bool bEnableAdaptiveQuality;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Optimization")
+    float PerformanceThreshold;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Optimization")
+    bool bEnableSpatialPartitioning;
+
+    FPerf_TerrainOptimizationSettings()
+        : MaxDeformationProcessingTime(2.0f)
+        , MaxConcurrentDeformations(10)
+        , DeformationCullingDistance(5000.0f)
+        , bEnableAdaptiveQuality(true)
+        , PerformanceThreshold(16.67f)
+        , bEnableSpatialPartitioning(true)
+    {
+    }
 };
 
-/**
- * Advanced Terrain Physics Performance Integration System
- * 
- * Monitors and optimizes terrain physics performance in real-time,
- * providing adaptive quality scaling and comprehensive metrics tracking.
- */
-UCLASS(BlueprintType, Blueprintable, Category = "Performance|Terrain Physics")
+UCLASS(BlueprintType, Blueprintable)
 class TRANSPERSONALGAME_API UPerf_TerrainPhysicsPerformanceIntegrator : public UActorComponent
 {
     GENERATED_BODY()
@@ -84,202 +104,107 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 public:
-    // === PERFORMANCE MONITORING ===
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    /**
-     * Get current terrain physics performance metrics
-     */
-    UFUNCTION(BlueprintCallable, Category = "Performance|Terrain Physics")
-    FPerf_TerrainPhysicsMetrics GetTerrainPhysicsMetrics() const;
+    // Performance monitoring
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void StartPerformanceMonitoring();
 
-    /**
-     * Start performance profiling for terrain physics systems
-     */
-    UFUNCTION(BlueprintCallable, Category = "Performance|Terrain Physics")
-    void StartTerrainPhysicsProfiler();
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void StopPerformanceMonitoring();
 
-    /**
-     * Stop performance profiling and generate report
-     */
-    UFUNCTION(BlueprintCallable, Category = "Performance|Terrain Physics")
-    void StopTerrainPhysicsProfiler();
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    FPerf_TerrainPhysicsMetrics GetCurrentMetrics() const;
 
-    /**
-     * Check if terrain physics performance is within acceptable limits
-     */
-    UFUNCTION(BlueprintCallable, Category = "Performance|Terrain Physics")
-    bool IsTerrainPhysicsPerformanceOptimal() const;
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void OptimizeTerrainPerformance();
 
-    // === OPTIMIZATION CONTROL ===
+    UFUNCTION(BlueprintCallable, Category = "Performance")
+    void ResetPerformanceCounters();
 
-    /**
-     * Set terrain physics optimization level
-     */
-    UFUNCTION(BlueprintCallable, Category = "Performance|Terrain Physics")
-    void SetTerrainOptimizationLevel(EPerf_TerrainOptimizationLevel Level);
+    // Terrain system integration
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void RegisterTerrainDeformationSystem(UCore_TerrainDeformationSystem* TerrainSystem);
 
-    /**
-     * Get current terrain physics optimization level
-     */
-    UFUNCTION(BlueprintCallable, Category = "Performance|Terrain Physics")
-    EPerf_TerrainOptimizationLevel GetTerrainOptimizationLevel() const;
+    UFUNCTION(BlueprintCallable, Category = "Integration")
+    void RegisterPhysicsManager(UCore_PhysicsManager* PhysicsManager);
 
-    /**
-     * Enable or disable adaptive terrain physics optimization
-     */
-    UFUNCTION(BlueprintCallable, Category = "Performance|Terrain Physics")
-    void SetAdaptiveTerrainOptimization(bool bEnabled);
+    // Optimization controls
+    UFUNCTION(BlueprintCallable, Category = "Optimization")
+    void SetOptimizationSettings(const FPerf_TerrainOptimizationSettings& NewSettings);
 
-    /**
-     * Optimize terrain physics for current performance conditions
-     */
-    UFUNCTION(BlueprintCallable, Category = "Performance|Terrain Physics")
-    void OptimizeTerrainPhysicsPerformance();
+    UFUNCTION(BlueprintCallable, Category = "Optimization")
+    FPerf_TerrainOptimizationSettings GetOptimizationSettings() const;
 
-    // === DEFORMATION OPTIMIZATION ===
+    // Performance analysis
+    UFUNCTION(BlueprintCallable, Category = "Analysis")
+    void AnalyzeDeformationPerformance();
 
-    /**
-     * Set maximum number of active terrain deformation points
-     */
-    UFUNCTION(BlueprintCallable, Category = "Performance|Terrain Physics")
-    void SetMaxDeformationPoints(int32 MaxPoints);
+    UFUNCTION(BlueprintCallable, Category = "Analysis")
+    void GeneratePerformanceReport();
 
-    /**
-     * Set terrain deformation quality level
-     */
-    UFUNCTION(BlueprintCallable, Category = "Performance|Terrain Physics")
-    void SetDeformationQuality(float QualityLevel);
+    UFUNCTION(BlueprintCallable, Category = "Analysis")
+    bool IsPerformanceOptimal() const;
 
-    /**
-     * Enable or disable terrain deformation culling based on distance
-     */
-    UFUNCTION(BlueprintCallable, Category = "Performance|Terrain Physics")
-    void SetDeformationCulling(bool bEnabled, float CullingDistance = 5000.0f);
+    // Debug and visualization
+    UFUNCTION(BlueprintCallable, Category = "Debug", CallInEditor = true)
+    void DebugTerrainPerformance();
 
-    // === MATERIAL CACHE OPTIMIZATION ===
-
-    /**
-     * Optimize surface material cache for better performance
-     */
-    UFUNCTION(BlueprintCallable, Category = "Performance|Terrain Physics")
-    void OptimizeMaterialCache();
-
-    /**
-     * Clear and rebuild surface material cache
-     */
-    UFUNCTION(BlueprintCallable, Category = "Performance|Terrain Physics")
-    void RebuildMaterialCache();
-
-    /**
-     * Set material cache size limit
-     */
-    UFUNCTION(BlueprintCallable, Category = "Performance|Terrain Physics")
-    void SetMaterialCacheSize(int32 CacheSize);
-
-    // === COLLISION OPTIMIZATION ===
-
-    /**
-     * Set terrain collision LOD level based on distance
-     */
-    UFUNCTION(BlueprintCallable, Category = "Performance|Terrain Physics")
-    void SetTerrainCollisionLOD(int32 LODLevel);
-
-    /**
-     * Enable or disable terrain collision optimization
-     */
-    UFUNCTION(BlueprintCallable, Category = "Performance|Terrain Physics")
-    void SetCollisionOptimization(bool bEnabled);
-
-    /**
-     * Optimize terrain collision meshes for performance
-     */
-    UFUNCTION(BlueprintCallable, Category = "Performance|Terrain Physics")
-    void OptimizeTerrainCollision();
+    UFUNCTION(BlueprintCallable, Category = "Debug")
+    void LogPerformanceMetrics();
 
 protected:
-    // === PERFORMANCE METRICS ===
-
-    UPROPERTY(BlueprintReadOnly, Category = "Performance", meta = (AllowPrivateAccess = "true"))
+    // Performance tracking
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Performance")
     FPerf_TerrainPhysicsMetrics CurrentMetrics;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance", meta = (AllowPrivateAccess = "true"))
-    EPerf_TerrainOptimizationLevel OptimizationLevel;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+    FPerf_TerrainOptimizationSettings OptimizationSettings;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance", meta = (AllowPrivateAccess = "true"))
-    bool bAdaptiveOptimization;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Performance")
+    bool bIsMonitoring;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance", meta = (AllowPrivateAccess = "true"))
-    bool bProfilingEnabled;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Performance")
+    float MonitoringStartTime;
 
-    // === DEFORMATION SETTINGS ===
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Deformation", meta = (AllowPrivateAccess = "true"))
-    int32 MaxDeformationPoints;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Deformation", meta = (AllowPrivateAccess = "true"))
-    float DeformationQuality;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Deformation", meta = (AllowPrivateAccess = "true"))
-    bool bDeformationCulling;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Deformation", meta = (AllowPrivateAccess = "true"))
-    float DeformationCullingDistance;
-
-    // === MATERIAL CACHE SETTINGS ===
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Material Cache", meta = (AllowPrivateAccess = "true"))
-    int32 MaterialCacheSize;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Material Cache", meta = (AllowPrivateAccess = "true"))
-    bool bMaterialCacheOptimization;
-
-    // === COLLISION SETTINGS ===
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision", meta = (AllowPrivateAccess = "true"))
-    int32 TerrainCollisionLOD;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision", meta = (AllowPrivateAccess = "true"))
-    bool bCollisionOptimization;
-
-    // === PERFORMANCE THRESHOLDS ===
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Thresholds", meta = (AllowPrivateAccess = "true"))
-    float MaxDeformationTime;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Thresholds", meta = (AllowPrivateAccess = "true"))
-    float MaxMaterialDetectionTime;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Thresholds", meta = (AllowPrivateAccess = "true"))
-    float MaxCollisionTime;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Thresholds", meta = (AllowPrivateAccess = "true"))
-    float MaxMemoryUsage;
-
-    // === INTERNAL STATE ===
+    // System references
+    UPROPERTY()
+    UCore_TerrainDeformationSystem* TerrainDeformationSystem;
 
     UPROPERTY()
-    TArray<TWeakObjectPtr<ALandscapeProxy>> TrackedLandscapes;
+    UCore_PhysicsManager* PhysicsManager;
+
+    // Performance data
+    UPROPERTY()
+    TArray<float> FrameTimeHistory;
 
     UPROPERTY()
-    TArray<TWeakObjectPtr<UCore_TerrainPhysicsSystem>> TrackedTerrainSystems;
+    TArray<float> DeformationTimeHistory;
 
-    float LastProfilerUpdate;
-    float ProfilerStartTime;
-    bool bProfilerActive;
+    UPROPERTY()
+    int32 PerformanceFrameCounter;
+
+    UPROPERTY()
+    float TotalDeformationTime;
+
+    UPROPERTY()
+    float TotalFrameTime;
+
+    // Timer handles
+    FTimerHandle PerformanceAnalysisTimer;
+    FTimerHandle OptimizationTimer;
 
 private:
-    // Internal optimization methods
-    void UpdatePerformanceMetrics();
-    void ApplyOptimizationLevel();
-    void CheckAdaptiveOptimization();
-    void OptimizeBasedOnMetrics();
-    void UpdateTerrainSystemReferences();
-    void CollectTerrainPhysicsData();
-    float CalculateOptimalQualityLevel() const;
-    void ApplyDeformationOptimizations();
-    void ApplyMaterialCacheOptimizations();
-    void ApplyCollisionOptimizations();
+    // Internal performance tracking
+    void UpdatePerformanceMetrics(float DeltaTime);
+    void AnalyzeFramePerformance();
+    void ApplyPerformanceOptimizations();
+    void CullDistantDeformations();
+    void OptimizeSpatialPartitioning();
+    float CalculateAverageFrameTime() const;
+    float CalculateMemoryUsage() const;
+    void WritePerformanceLog() const;
 };
