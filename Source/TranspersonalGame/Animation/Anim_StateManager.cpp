@@ -1,348 +1,335 @@
 #include "Anim_StateManager.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
-#include "Components/CapsuleComponent.h"
-#include "Kismet/KismetMathLibrary.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Animation/AnimInstance.h"
+#include "Engine/Engine.h"
 
 UAnim_StateManager::UAnim_StateManager()
 {
-    // Initialize default values
-    CurrentMovementState = EAnim_MovementState::Idle;
-    CurrentEmotionalState = EAnim_EmotionalState::Calm;
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.TickGroup = TG_PrePhysics;
     
-    Speed = 0.0f;
-    Direction = 0.0f;
-    bIsInAir = false;
-    bIsCrouching = false;
-    bIsAccelerating = false;
+    // Initialize state data
+    CurrentStateData = FAnim_StateData();
+    PreviousStateData = FAnim_StateData();
     
-    OwnerCharacter = nullptr;
-    MovementComponent = nullptr;
+    // Set default thresholds
+    WalkSpeedThreshold = 150.0f;
+    RunSpeedThreshold = 400.0f;
     
-    // Animation thresholds
-    IdleThreshold = 10.0f;
-    WalkThreshold = 150.0f;
-    RunThreshold = 300.0f;
-    
-    // Play rates
-    IdlePlayRate = 1.0f;
-    WalkPlayRate = 1.0f;
-    RunPlayRate = 1.0f;
-    
-    // State tracking
-    StateTimer = 0.0f;
-    PreviousMovementState = EAnim_MovementState::Idle;
-    TransitionTimer = 0.0f;
-    bIsTransitioning = false;
-    
-    // Setup default transitions
-    StateTransitions.Empty();
-    
-    // Idle transitions
-    FAnim_StateTransition IdleToWalk;
-    IdleToWalk.FromState = EAnim_MovementState::Idle;
-    IdleToWalk.ToState = EAnim_MovementState::Walking;
-    IdleToWalk.BlendTime = 0.2f;
-    IdleToWalk.bRequiresGrounded = true;
-    StateTransitions.Add(IdleToWalk);
-    
-    // Walk transitions
-    FAnim_StateTransition WalkToRun;
-    WalkToRun.FromState = EAnim_MovementState::Walking;
-    WalkToRun.ToState = EAnim_MovementState::Running;
-    WalkToRun.BlendTime = 0.3f;
-    WalkToRun.bRequiresGrounded = true;
-    StateTransitions.Add(WalkToRun);
-    
-    FAnim_StateTransition WalkToIdle;
-    WalkToIdle.FromState = EAnim_MovementState::Walking;
-    WalkToIdle.ToState = EAnim_MovementState::Idle;
-    WalkToIdle.BlendTime = 0.2f;
-    WalkToIdle.bRequiresGrounded = true;
-    StateTransitions.Add(WalkToIdle);
-    
-    // Run transitions
-    FAnim_StateTransition RunToWalk;
-    RunToWalk.FromState = EAnim_MovementState::Running;
-    RunToWalk.ToState = EAnim_MovementState::Walking;
-    RunToWalk.BlendTime = 0.2f;
-    RunToWalk.bRequiresGrounded = true;
-    StateTransitions.Add(RunToWalk);
-    
-    // Jump transitions
-    FAnim_StateTransition GroundToJump;
-    GroundToJump.FromState = EAnim_MovementState::Idle;
-    GroundToJump.ToState = EAnim_MovementState::Jumping;
-    GroundToJump.BlendTime = 0.1f;
-    GroundToJump.bRequiresGrounded = false;
-    StateTransitions.Add(GroundToJump);
-    
-    FAnim_StateTransition JumpToFall;
-    JumpToFall.FromState = EAnim_MovementState::Jumping;
-    JumpToFall.ToState = EAnim_MovementState::Falling;
-    JumpToFall.BlendTime = 0.1f;
-    JumpToFall.bRequiresGrounded = false;
-    StateTransitions.Add(JumpToFall);
+    // Initialize component references
+    OwnerMeshComponent = nullptr;
+    OwnerMovementComponent = nullptr;
 }
 
-void UAnim_StateManager::NativeInitializeAnimation()
+void UAnim_StateManager::BeginPlay()
 {
-    Super::NativeInitializeAnimation();
+    Super::BeginPlay();
     
-    // Get character reference
-    OwnerCharacter = Cast<ACharacter>(GetOwningActor());
-    if (OwnerCharacter)
+    // Cache component references
+    CacheComponentReferences();
+    
+    // Initialize state
+    if (OwnerMovementComponent)
     {
-        MovementComponent = OwnerCharacter->GetCharacterMovement();
+        UpdateMovementData();
+        UpdateHealthAndStamina();
     }
 }
 
-void UAnim_StateManager::NativeUpdateAnimation(float DeltaTime)
+void UAnim_StateManager::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    Super::NativeUpdateAnimation(DeltaTime);
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-    if (!OwnerCharacter || !MovementComponent)
+    if (!OwnerMovementComponent || !OwnerMeshComponent)
     {
         return;
     }
     
-    // Calculate movement parameters
-    CalculateMovementParameters();
+    // Store previous state for transition detection
+    PreviousStateData = CurrentStateData;
     
-    // Update animation states
-    UpdateMovementState(DeltaTime);
-    UpdateEmotionalState(DeltaTime);
+    // Update current state data
+    UpdateMovementData();
+    UpdateHealthAndStamina();
     
-    // Update timers
-    UpdateStateTimer(DeltaTime);
+    // Handle state transitions
+    UpdateStateTransitions(DeltaTime);
 }
 
-void UAnim_StateManager::CalculateMovementParameters()
+void UAnim_StateManager::UpdateMovementState(float CurrentSpeed, bool bIsMoving, bool bIsInAir, bool bIsCrouching)
 {
-    if (!OwnerCharacter || !MovementComponent)
-    {
-        return;
-    }
+    EAnim_MovementState NewMovementState = CurrentStateData.MovementState;
     
-    // Get velocity and calculate speed
-    FVector Velocity = MovementComponent->Velocity;
-    Speed = Velocity.Size2D();
+    // Update basic state data
+    CurrentStateData.Speed = CurrentSpeed;
+    CurrentStateData.bIsInAir = bIsInAir;
+    CurrentStateData.bIsCrouching = bIsCrouching;
     
-    // Calculate direction relative to actor forward
-    FVector ForwardVector = OwnerCharacter->GetActorForwardVector();
-    FVector RightVector = OwnerCharacter->GetActorRightVector();
-    
-    FVector NormalizedVelocity = Velocity.GetSafeNormal2D();
-    
-    float ForwardDot = FVector::DotProduct(ForwardVector, NormalizedVelocity);
-    float RightDot = FVector::DotProduct(RightVector, NormalizedVelocity);
-    
-    Direction = FMath::Atan2(RightDot, ForwardDot) * (180.0f / PI);
-    
-    // Update movement flags
-    bIsInAir = MovementComponent->IsFalling();
-    bIsCrouching = MovementComponent->IsCrouching();
-    bIsAccelerating = MovementComponent->GetCurrentAcceleration().SizeSquared() > 0.0f;
-    
-    // Calculate play rates based on speed
-    if (Speed > 0.1f)
-    {
-        WalkPlayRate = FMath::Clamp(Speed / WalkThreshold, 0.5f, 2.0f);
-        RunPlayRate = FMath::Clamp(Speed / RunThreshold, 0.5f, 2.0f);
-    }
-    else
-    {
-        WalkPlayRate = 1.0f;
-        RunPlayRate = 1.0f;
-    }
-}
-
-void UAnim_StateManager::UpdateMovementState(float DeltaTime)
-{
-    EAnim_MovementState NewState = DetermineMovementState();
-    
-    if (NewState != CurrentMovementState && CanTransitionTo(NewState))
-    {
-        HandleStateTransition(NewState);
-    }
-}
-
-EAnim_MovementState UAnim_StateManager::DetermineMovementState()
-{
-    // Handle airborne states first
+    // Determine movement state based on conditions
     if (bIsInAir)
     {
-        if (MovementComponent && MovementComponent->Velocity.Z > 0.0f)
+        if (OwnerMovementComponent && OwnerMovementComponent->IsFalling())
         {
-            return EAnim_MovementState::Jumping;
+            NewMovementState = EAnim_MovementState::Falling;
         }
         else
         {
-            return EAnim_MovementState::Falling;
+            NewMovementState = EAnim_MovementState::Jumping;
         }
     }
-    
-    // Handle crouching
-    if (bIsCrouching)
+    else if (bIsCrouching)
     {
-        return EAnim_MovementState::Crouching;
+        NewMovementState = EAnim_MovementState::Crouching;
     }
-    
-    // Handle ground movement based on speed
-    if (Speed < IdleThreshold)
+    else if (bIsMoving && CurrentSpeed > 0.1f)
     {
-        return EAnim_MovementState::Idle;
-    }
-    else if (Speed < RunThreshold)
-    {
-        return EAnim_MovementState::Walking;
-    }
-    else
-    {
-        return EAnim_MovementState::Running;
-    }
-}
-
-bool UAnim_StateManager::CanTransitionTo(EAnim_MovementState NewState)
-{
-    // Find transition rule
-    for (const FAnim_StateTransition& Transition : StateTransitions)
-    {
-        if (Transition.FromState == CurrentMovementState && Transition.ToState == NewState)
+        if (CurrentSpeed >= RunSpeedThreshold)
         {
-            // Check if grounded requirement is met
-            if (Transition.bRequiresGrounded && bIsInAir)
-            {
-                return false;
-            }
-            return true;
+            NewMovementState = EAnim_MovementState::Running;
         }
-    }
-    
-    // Allow any transition if no specific rule found (fallback)
-    return true;
-}
-
-void UAnim_StateManager::HandleStateTransition(EAnim_MovementState NewState)
-{
-    PreviousMovementState = CurrentMovementState;
-    CurrentMovementState = NewState;
-    StateTimer = 0.0f;
-    bIsTransitioning = true;
-    TransitionTimer = 0.0f;
-    
-    // Log state change for debugging
-    UE_LOG(LogTemp, Log, TEXT("Animation State Changed: %d -> %d"), 
-           (int32)PreviousMovementState, (int32)CurrentMovementState);
-}
-
-void UAnim_StateManager::UpdateEmotionalState(float DeltaTime)
-{
-    // Basic emotional state logic based on movement and environment
-    // This can be expanded with more complex AI and survival mechanics
-    
-    if (Speed > RunThreshold && bIsAccelerating)
-    {
-        // Running fast might indicate urgency or fear
-        if (CurrentEmotionalState != EAnim_EmotionalState::Alert)
+        else if (CurrentSpeed >= WalkSpeedThreshold)
         {
-            CurrentEmotionalState = EAnim_EmotionalState::Alert;
+            NewMovementState = EAnim_MovementState::Walking;
         }
-    }
-    else if (Speed < IdleThreshold && StateTimer > 5.0f)
-    {
-        // Standing still for a while - relaxed
-        if (CurrentEmotionalState != EAnim_EmotionalState::Relaxed)
+        else
         {
-            CurrentEmotionalState = EAnim_EmotionalState::Relaxed;
+            NewMovementState = EAnim_MovementState::Idle;
         }
     }
     else
     {
-        // Default calm state
-        if (CurrentEmotionalState != EAnim_EmotionalState::Calm)
-        {
-            CurrentEmotionalState = EAnim_EmotionalState::Calm;
-        }
+        NewMovementState = EAnim_MovementState::Idle;
     }
-}
-
-void UAnim_StateManager::UpdateStateTimer(float DeltaTime)
-{
-    StateTimer += DeltaTime;
     
-    if (bIsTransitioning)
+    // Apply state change if different
+    if (NewMovementState != CurrentStateData.MovementState)
     {
-        TransitionTimer += DeltaTime;
-        
-        // Find transition blend time
-        float BlendTime = 0.2f; // Default
-        for (const FAnim_StateTransition& Transition : StateTransitions)
-        {
-            if (Transition.FromState == PreviousMovementState && 
-                Transition.ToState == CurrentMovementState)
-            {
-                BlendTime = Transition.BlendTime;
-                break;
-            }
-        }
-        
-        if (TransitionTimer >= BlendTime)
-        {
-            bIsTransitioning = false;
-            TransitionTimer = 0.0f;
-        }
+        EAnim_MovementState OldState = CurrentStateData.MovementState;
+        CurrentStateData.MovementState = NewMovementState;
+        OnMovementStateChanged(OldState, NewMovementState);
     }
 }
 
-void UAnim_StateManager::ForceStateTransition(EAnim_MovementState NewState)
+void UAnim_StateManager::SetActionState(EAnim_ActionState NewActionState)
 {
-    HandleStateTransition(NewState);
+    if (NewActionState != CurrentStateData.ActionState)
+    {
+        EAnim_ActionState OldState = CurrentStateData.ActionState;
+        CurrentStateData.ActionState = NewActionState;
+        OnActionStateChanged(OldState, NewActionState);
+    }
 }
 
-float UAnim_StateManager::GetStateBlendWeight(EAnim_MovementState State) const
+void UAnim_StateManager::PlayActionMontage(UAnimMontage* Montage, float PlayRate)
 {
-    if (State == CurrentMovementState)
+    if (!Montage || !OwnerMeshComponent)
     {
-        if (bIsTransitioning)
+        return;
+    }
+    
+    UAnimInstance* AnimInstance = OwnerMeshComponent->GetAnimInstance();
+    if (AnimInstance)
+    {
+        AnimInstance->Montage_Play(Montage, PlayRate);
+        
+        // Set action state based on montage
+        SetActionState(EAnim_ActionState::Attacking); // Default to attacking, can be customized
+    }
+}
+
+void UAnim_StateManager::StopActionMontage()
+{
+    if (!OwnerMeshComponent)
+    {
+        return;
+    }
+    
+    UAnimInstance* AnimInstance = OwnerMeshComponent->GetAnimInstance();
+    if (AnimInstance)
+    {
+        AnimInstance->Montage_Stop(0.2f);
+        SetActionState(EAnim_ActionState::None);
+    }
+}
+
+bool UAnim_StateManager::IsPlayingActionMontage() const
+{
+    if (!OwnerMeshComponent)
+    {
+        return false;
+    }
+    
+    UAnimInstance* AnimInstance = OwnerMeshComponent->GetAnimInstance();
+    if (AnimInstance)
+    {
+        return AnimInstance->IsAnyMontagePlaying();
+    }
+    
+    return false;
+}
+
+void UAnim_StateManager::UpdateStateTransitions(float DeltaTime)
+{
+    // Check for automatic state transitions
+    if (CurrentStateData.ActionState != EAnim_ActionState::None && !IsPlayingActionMontage())
+    {
+        // Action finished, return to none
+        SetActionState(EAnim_ActionState::None);
+    }
+    
+    // Update direction for blend spaces
+    if (OwnerMovementComponent)
+    {
+        FVector Velocity = OwnerMovementComponent->Velocity;
+        FVector Forward = GetOwner()->GetActorForwardVector();
+        
+        // Calculate direction relative to forward vector
+        if (Velocity.SizeSquared() > 0.1f)
         {
-            // Calculate blend weight during transition
-            float BlendTime = 0.2f;
-            for (const FAnim_StateTransition& Transition : StateTransitions)
-            {
-                if (Transition.FromState == PreviousMovementState && 
-                    Transition.ToState == CurrentMovementState)
-                {
-                    BlendTime = Transition.BlendTime;
-                    break;
-                }
-            }
+            FVector NormalizedVelocity = Velocity.GetSafeNormal();
+            float DotProduct = FVector::DotProduct(Forward, NormalizedVelocity);
+            CurrentStateData.Direction = FMath::RadiansToDegrees(FMath::Acos(DotProduct));
             
-            float Alpha = FMath::Clamp(TransitionTimer / BlendTime, 0.0f, 1.0f);
-            return Alpha;
+            // Determine if moving left or right
+            FVector Right = GetOwner()->GetActorRightVector();
+            float RightDot = FVector::DotProduct(Right, NormalizedVelocity);
+            if (RightDot < 0.0f)
+            {
+                CurrentStateData.Direction *= -1.0f;
+            }
         }
         else
         {
-            return 1.0f;
+            CurrentStateData.Direction = 0.0f;
         }
     }
-    else if (State == PreviousMovementState && bIsTransitioning)
+}
+
+void UAnim_StateManager::OnMovementStateChanged(EAnim_MovementState OldState, EAnim_MovementState NewState)
+{
+    // Log state transitions for debugging
+    if (GEngine)
     {
-        // Calculate inverse blend weight for previous state
-        float BlendTime = 0.2f;
-        for (const FAnim_StateTransition& Transition : StateTransitions)
-        {
-            if (Transition.FromState == PreviousMovementState && 
-                Transition.ToState == CurrentMovementState)
-            {
-                BlendTime = Transition.BlendTime;
-                break;
-            }
-        }
-        
-        float Alpha = FMath::Clamp(TransitionTimer / BlendTime, 0.0f, 1.0f);
-        return 1.0f - Alpha;
+        FString OldStateName = UEnum::GetValueAsString(OldState);
+        FString NewStateName = UEnum::GetValueAsString(NewState);
+        GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Yellow, 
+            FString::Printf(TEXT("Movement State: %s -> %s"), *OldStateName, *NewStateName));
     }
     
-    return 0.0f;
+    // Handle specific state transitions
+    switch (NewState)
+    {
+        case EAnim_MovementState::Jumping:
+            // Could trigger jump sound or effect here
+            break;
+        case EAnim_MovementState::Running:
+            // Could trigger running sound or breathing effect
+            break;
+        case EAnim_MovementState::Idle:
+            // Could trigger idle animations or sounds
+            break;
+        default:
+            break;
+    }
+}
+
+void UAnim_StateManager::OnActionStateChanged(EAnim_ActionState OldState, EAnim_ActionState NewState)
+{
+    // Log action state transitions
+    if (GEngine)
+    {
+        FString OldStateName = UEnum::GetValueAsString(OldState);
+        FString NewStateName = UEnum::GetValueAsString(NewState);
+        GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Orange, 
+            FString::Printf(TEXT("Action State: %s -> %s"), *OldStateName, *NewStateName));
+    }
+    
+    // Handle specific action transitions
+    switch (NewState)
+    {
+        case EAnim_ActionState::Attacking:
+            // Could trigger combat stance or weapon draw
+            break;
+        case EAnim_ActionState::Crafting:
+            // Could trigger crafting stance or tool selection
+            break;
+        case EAnim_ActionState::None:
+            // Return to normal stance
+            break;
+        default:
+            break;
+    }
+}
+
+void UAnim_StateManager::UpdateMovementData()
+{
+    if (!OwnerMovementComponent)
+    {
+        return;
+    }
+    
+    // Update speed
+    FVector Velocity = OwnerMovementComponent->Velocity;
+    CurrentStateData.Speed = Velocity.Size();
+    
+    // Update air state
+    CurrentStateData.bIsInAir = OwnerMovementComponent->IsFalling() || OwnerMovementComponent->IsFlying();
+    
+    // Update crouching state
+    CurrentStateData.bIsCrouching = OwnerMovementComponent->IsCrouching();
+    
+    // Auto-update movement state based on current conditions
+    bool bIsMoving = CurrentStateData.Speed > 0.1f;
+    UpdateMovementState(CurrentStateData.Speed, bIsMoving, CurrentStateData.bIsInAir, CurrentStateData.bIsCrouching);
+}
+
+void UAnim_StateManager::UpdateHealthAndStamina()
+{
+    // Try to get health and stamina from character
+    ACharacter* OwnerCharacter = Cast<ACharacter>(GetOwner());
+    if (OwnerCharacter)
+    {
+        // For now, use placeholder values
+        // In a real implementation, these would come from a health/stamina component
+        CurrentStateData.HealthRatio = 1.0f; // Placeholder
+        CurrentStateData.StaminaRatio = 1.0f; // Placeholder
+        
+        // Could implement actual health/stamina reading here:
+        // if (UHealthComponent* HealthComp = OwnerCharacter->FindComponentByClass<UHealthComponent>())
+        // {
+        //     CurrentStateData.HealthRatio = HealthComp->GetHealthRatio();
+        // }
+    }
+}
+
+void UAnim_StateManager::CacheComponentReferences()
+{
+    AActor* Owner = GetOwner();
+    if (!Owner)
+    {
+        return;
+    }
+    
+    // Cache skeletal mesh component
+    OwnerMeshComponent = Owner->FindComponentByClass<USkeletalMeshComponent>();
+    
+    // Cache character movement component
+    ACharacter* OwnerCharacter = Cast<ACharacter>(Owner);
+    if (OwnerCharacter)
+    {
+        OwnerMovementComponent = OwnerCharacter->GetCharacterMovement();
+    }
+    
+    // Log component status
+    if (GEngine)
+    {
+        bool bHasMesh = OwnerMeshComponent != nullptr;
+        bool bHasMovement = OwnerMovementComponent != nullptr;
+        GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green, 
+            FString::Printf(TEXT("Anim_StateManager: Mesh=%s Movement=%s"), 
+                bHasMesh ? TEXT("OK") : TEXT("MISSING"),
+                bHasMovement ? TEXT("OK") : TEXT("MISSING")));
+    }
 }
